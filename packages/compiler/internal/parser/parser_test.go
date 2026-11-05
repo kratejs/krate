@@ -576,3 +576,15 @@ func containsStr(s, substr string) bool {
 	}
 	return false
 }
+
+func TestMinifiedStringAfterIdentifierAndBrace(t *testing.T) {
+	for _, src := range []string{
+		`import{a}from"./b.js";export const z=a+1;`,
+		`export{a as b}from"x";`,
+		`var a,c,d;if(a){b=1}"x"==c&&d();`,
+	} {
+		if _, errs := parse(t, src); len(errs) > 0 {
+			t.Errorf("%s: %v", src, errs)
+		}
+	}
+}
