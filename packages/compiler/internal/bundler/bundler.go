@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
@@ -206,6 +207,7 @@ func (b *Bundler) SetPathAliases(prefixes []string, targets [][]string, tsBaseDi
 			b.pathAliases = append(b.pathAliases, pathAlias{prefix: prefix, targets: targets[i]})
 		}
 	}
+	registerPathAliases(b.pathAliases, tsBaseDir)
 }
 
 // SetBaseURL sets tsconfig compilerOptions.baseUrl (absolute). A bare import
@@ -862,15 +864,42 @@ func memoizedExists(path string) bool {
 
 func ResolveImport(importer, imp string) string {
 	if !resolverCacheEnabled {
-		return resolveImport(importer, imp, resolver.Exists, nil)
+		return resolveImportAliased(importer, imp, resolver.Exists)
 	}
 	key := filepath.Dir(importer) + "\x00" + imp
 	if v, ok := resolveMemo.importResult(key); ok {
 		return v
 	}
-	v := resolveImport(importer, imp, memoizedExists, nil)
+	v := resolveImportAliased(importer, imp, memoizedExists)
 	resolveMemo.putImport(key, v)
 	return v
+}
+
+// aliasRegistry holds the tsconfig path aliases of the build in progress, for
+// callers of ResolveImport that hold no Bundler (the annotator follows imports
+// to the module that declares a component, and `@/components` is one).
+var aliasRegistry struct {
+	sync.RWMutex
+	aliases []pathAlias
+	baseDir string
+}
+
+func registerPathAliases(aliases []pathAlias, baseDir string) {
+	aliasRegistry.Lock()
+	aliasRegistry.aliases, aliasRegistry.baseDir = aliases, baseDir
+	aliasRegistry.Unlock()
+}
+
+func resolveImportAliased(importer, imp string, exists func(string) bool) string {
+	aliasRegistry.RLock()
+	aliases, base := aliasRegistry.aliases, aliasRegistry.baseDir
+	aliasRegistry.RUnlock()
+	if len(aliases) > 0 && base != "" && !strings.HasPrefix(imp, ".") {
+		if resolved := resolvePathAlias(imp, aliases, base, exists); resolved != "" {
+			return resolved
+		}
+	}
+	return resolveImport(importer, imp, exists, nil)
 }
 
 // resolveImport resolves an import path to an absolute file path. exists is the

@@ -163,3 +163,40 @@ func TestRuntimeLinkStillBuiltIn(t *testing.T) {
 		t.Errorf("the built-in <Link> was lost:\n%s", html)
 	}
 }
+
+func TestAliasBarrelAndRenamedDefaultResolve(t *testing.T) {
+	root := t.TempDir()
+	files := map[string]string{
+		"tsconfig.json":           `{"compilerOptions":{"baseUrl":".","paths":{"@/*":["./src/*"]}}}`,
+		"src/assets/p.png":        "PNG",
+		"src/components/Card.tsx": "export function Card() { return <b>CARD</b>; }\nexport default function D() { return <i>DEF</i>; }\n",
+		"src/components/index.ts": "export { Card } from './Card';\nexport { default as Dflt } from './Card';\n",
+		"src/pages/index.tsx": "import Foo from '@/components/Card';\nimport { Card, Dflt } from '@/components';\nimport logo from '@/assets/p.png';\n" +
+			"export default function Home() { return <main><Foo /><Card /><Dflt /><img src={logo} alt=\"\" /></main>; }\n",
+	}
+	for p, c := range files {
+		full := filepath.Join(root, p)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(c), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg := config.Default()
+	cfg.PagesDir = filepath.Join(root, "src", "pages")
+	cfg.OutDir = filepath.Join(root, "dist")
+	cfg.Tailwind.Enabled = false
+	cfg.LoadTSConfigPaths(root)
+	if err := New(root, cfg).BuildAll(); err != nil {
+		t.Fatal(err)
+	}
+	out, err := os.ReadFile(filepath.Join(cfg.OutDir, "index.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(out)
+	if !strings.Contains(html, "<main><i>DEF</i><b>CARD</b><i>DEF</i><img src=/assets/p-") {
+		t.Errorf("aliased imports did not resolve:\n%s", html)
+	}
+}
