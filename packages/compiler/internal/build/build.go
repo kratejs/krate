@@ -114,6 +114,9 @@ type PageResult struct {
 	// page that renders server components. The page server bundle wraps their
 	// exports in client boundaries (clientboundary.go).
 	ClientBoundaries []ClientBoundary
+	// IslandStubs replaces the islands of a page rendered per request in its
+	// server bundle (nil for static pages and pages without islands).
+	IslandStubs *islandServerStubs
 }
 
 type Builder struct {
@@ -2671,6 +2674,9 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 		ServerPage:        serverPage,
 		ServerExports:     serverExportsOf(regions),
 		ClientBoundaries:  clientBoundaries,
+	}
+	if renderMode != RenderSSG {
+		result.IslandStubs = newIslandServerStubs(entryModule.Program, tree.ExternalComponents, islandSSR)
 	}
 	b.maybeStoreDiskPage(page, result, deps, bundle, jsBytes)
 	return result, bundle.CSS, nil

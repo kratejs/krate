@@ -4256,7 +4256,7 @@ func (b *builder) buildExternalComponentSlot(name string, el *ast.JSXElement) (S
 		Namespace: imp.Namespace, Props: props, Subtree: subtree, PropsJS: propsJS,
 		SSRPropsJS: ssrPropsJS, SSRPropsKnown: ssrKnown,
 		ReactIsland: imp.ReactIsland, ClientOnly: imp.ClientOnly, Hydrate: hydrate,
-		File: b.ann.SourceFile, Line: el.Position.Line, Col: el.Position.Col,
+		File: b.ann.SourceFile, Line: el.Position.Line, Col: el.Position.Col, Offset: el.Position.Offset,
 	})
 	html := `<div data-krate-island="` + id + `" style="display:contents"></div>`
 	return &StaticHTML{HTML: html}, true

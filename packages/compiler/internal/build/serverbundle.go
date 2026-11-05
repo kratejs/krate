@@ -81,6 +81,9 @@ func compileServerBundles(res *bundler.ImportResolver, results []*PageResult, ro
 			// Inject Head/Suspense/Script/Style imports at the top of the file
 			// so pages can use them as globals (matching krate compiler behavior)
 			pageSrc := string(sourceData)
+			if page.IslandStubs != nil {
+				pageSrc = page.IslandStubs.applyAttrs(pageSrc)
+			}
 			// Annotate Go-component call sites with __krateGoId so the shim can
 			// inline a server-tier component's build-time HTML (page.GoBaked).
 			if locals := goComponentLocals(absSource, pageSrc, root); len(locals) > 0 {
@@ -121,7 +124,7 @@ func compileServerBundles(res *bundler.ImportResolver, results []*PageResult, ro
 					"@krate/runtime",
 					"@krate/runtime/*",
 				},
-				Plugins: []api.Plugin{reactServerShimPlugin(), serverCSSPlugin(root), cbPlugin, serverExportPlugin(page.ServerExports, absSource), goServerBundlePlugin(page.GoBaked, root), actionServerBundlePlugin(res, actionModules, actionBasePath)},
+				Plugins: serverBundlePlugins(page, absSource, reactServerShimPlugin(), serverCSSPlugin(root), cbPlugin, serverExportPlugin(page.ServerExports, absSource), goServerBundlePlugin(page.GoBaked, root), actionServerBundlePlugin(res, actionModules, actionBasePath)),
 				Stdin: &api.StdinOptions{
 					Loader:     api.LoaderTSX,
 					Contents:   injectedSource,
@@ -238,4 +241,13 @@ func reactServerShimPlugin() api.Plugin {
 			})
 		},
 	}
+}
+
+// serverBundlePlugins adds the island stubs of the page, first, so they see
+// the page's imports before any other plugin.
+func serverBundlePlugins(page *PageResult, absSource string, plugins ...api.Plugin) []api.Plugin {
+	if page.IslandStubs == nil {
+		return plugins
+	}
+	return append([]api.Plugin{islandServerStubPlugin(page.IslandStubs, absSource)}, plugins...)
 }

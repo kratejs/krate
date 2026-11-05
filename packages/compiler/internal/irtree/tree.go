@@ -736,8 +736,10 @@ type ExternalComponent struct {
 	// Hydrate is the client directive that defers mounting: "" (at load),
 	// "visible" or "idle".
 	Hydrate string
-	// File/Line/Col locate the usage for diagnostics.
-	File string
-	Line int
-	Col  int
+	// File/Line/Col locate the usage for diagnostics; Offset is the byte offset
+	// of the island's opening `<` in File.
+	File   string
+	Line   int
+	Col    int
+	Offset int
 }
