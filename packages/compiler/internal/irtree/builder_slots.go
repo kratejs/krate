@@ -2109,8 +2109,16 @@ func (b *builder) buildConditionalSlot(expr ast.Expr, parentID string) *Conditio
 		// Build branches under branch-scoped parents so nested slots in the
 		// consequent and alternate branches never share slot IDs.
 		b.branchDepth++
+		mark := b.markRowBindings()
 		slot.Consequent = b.buildSlotNodes(cond.Consequent, string(id)+".c")
+		if testJS != "" {
+			b.tagBranchAttrs(mark, testJS)
+		}
+		mark = b.markRowBindings()
 		slot.Alternate = b.buildSlotNodes(cond.Alternate, string(id)+".a")
+		if testJS != "" {
+			b.tagBranchAttrs(mark, "!("+testJS+")")
+		}
 		b.branchDepth--
 	}
 	return slot

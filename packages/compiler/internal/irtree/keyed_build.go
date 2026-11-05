@@ -138,6 +138,24 @@ func (b *builder) tagRowBindings(m rowMark, list SlotID) {
 	}
 }
 
+// tagBranchAttrs guards the attribute bindings created since m so they run
+// only while guard holds (the branch of a conditional they belong to). A
+// binding inside nested conditionals ends up guarded by every test, outermost
+// first.
+func (b *builder) tagBranchAttrs(m rowMark, guard string) {
+	if guard == "" {
+		return
+	}
+	for i := m.attrs; i < len(b.pendingAttrs); i++ {
+		a := &b.pendingAttrs[i]
+		if a.Guard == "" {
+			a.Guard = "(" + guard + ")"
+		} else {
+			a.Guard = "(" + guard + ")&&" + a.Guard
+		}
+	}
+}
+
 // listBindingSources returns the JS of the runtime list bindings among slots
 // (including lists inside conditional branches), for scope analysis.
 func listBindingSources(slots []SlotNode) []string {

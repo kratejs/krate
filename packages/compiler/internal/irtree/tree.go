@@ -329,6 +329,11 @@ type AttrBinding struct {
 	// statically (a constant controlled value); only the hydration call is
 	// emitted.
 	HydrateOnly bool
+	// Guard is a JS condition the binding's expression may run under. An
+	// element inside a conditional's branch is bound while that branch is
+	// hidden (it sits in a template), and `user.url` under `{user && <a/>}`
+	// must not be evaluated while user is null. Empty means always.
+	Guard string
 }
 
 // HandlerDecl - event handler: onClick={() => fn()}
