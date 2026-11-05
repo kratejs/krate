@@ -50,3 +50,30 @@ func TestAliasedHelperImportHydrates(t *testing.T) {
 		t.Errorf("hydration script does not declare the aliased helper pp:\n%s", js)
 	}
 }
+
+// A compiled dependency may declare a class inside a function (immer's
+// enableMapSet does); the page does not emit that code, so the build must not
+// reject it.
+func TestCompiledDependencyClassInFunctionDoesNotFailBuild(t *testing.T) {
+	html, _, err := buildKrateProject(t, map[string]string{
+		"node_modules/fakelib/package.json": `{"name":"fakelib","version":"1.0.0","main":"index.js","module":"index.js"}`,
+		"node_modules/fakelib/index.js": `export function enableMapSet() {
+  class DraftMap extends Map { get(k) { return super.get(k); } }
+  return DraftMap;
+}
+export const registry = enableMapSet();
+export function configure() { return 1; }`,
+		"src/pages/index.tsx": `
+			import { registry } from "fakelib";
+			export default function Page() {
+				return <h1>{typeof registry}</h1>;
+			}
+		`,
+	})
+	if err != nil {
+		t.Fatalf("build must not fail on library code: %v", err)
+	}
+	if !strings.Contains(html, "<h1>") {
+		t.Errorf("page did not render:\n%s", html)
+	}
+}

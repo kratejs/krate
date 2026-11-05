@@ -2,6 +2,7 @@ package irtree
 
 import (
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/csssignals"
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
+	"github.com/kratejs/krate/packages/compiler/internal/resolver"
 	"github.com/kratejs/krate/packages/compiler/internal/syntaxhighlight"
 )
 
@@ -196,6 +198,13 @@ func (b *builder) finishTree(root *ComponentNode) *ComponentTree {
 			continue
 		}
 		checked[fn] = true
+		// Compiled dependencies (node_modules) are bundled into islands by
+		// esbuild and never re-emitted by this generator, so constructs it
+		// cannot emit (immer's `class DraftMap` inside enableMapSet) are
+		// harmless there.
+		if resolver.IsCompiledDependency(filepath.ToSlash(ann.ComponentSources[name])) {
+			continue
+		}
 		b.srcFn = name
 		b.codegenErrs = append(b.codegenErrs, codegenIssues(fn, func(pos ast.Pos, msg, hint string) error {
 			return b.diagAt(pos, diag.SeverityError, msg, hint)
