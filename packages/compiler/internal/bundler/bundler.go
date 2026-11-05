@@ -754,8 +754,9 @@ func (b *Bundler) collectImports(prog *ast.Program, mod *Module) {
 			}
 		}
 		if exp, ok := stmt.(*ast.ExportStmt); ok {
-			// A star or namespace re-export depends on its source module.
-			if (exp.StarReexport || exp.Namespace != "") && exp.ReexportSource != "" {
+			// Any re-export (`export *`, `export * as`, `export { X } from`)
+			// depends on its source module.
+			if exp.ReexportSource != "" {
 				src := strings.Trim(exp.ReexportSource, "\"'")
 				mod.Imports = append(mod.Imports, src)
 			}
