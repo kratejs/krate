@@ -122,40 +122,42 @@ func AvailableThemes() []string {
 	return append([]string(nil), styles.Names()...)
 }
 
+// languageAliases maps common language names to chroma lexer names.
+var languageAliases = map[string]string{
+	"js":           "javascript",
+	"ts":           "typescript",
+	"jsx":          "jsx",
+	"tsx":          "tsx",
+	"py":           "python",
+	"rb":           "ruby",
+	"sh":           "bash",
+	"shell":        "bash",
+	"zsh":          "bash",
+	"yml":          "yaml",
+	"md":           "markdown",
+	"rs":           "rust",
+	"go":           "go",
+	"golang":       "go",
+	"cs":           "csharp",
+	"c#":           "csharp",
+	"cpp":          "cpp",
+	"c++":          "cpp",
+	"objc":         "objectivec",
+	"tex":          "latex",
+	"vim":          "viml",
+	"dockerfile":   "docker",
+	"docker":       "docker",
+	"mdx":          "markdown",
+	"astro":        "html",
+	"prisma":       "graphql",
+	"dotenv":       "env",
+	"shellsession": "console",
+}
+
 // NormalizeLanguage normalizes common language aliases to chroma lexer names.
 func NormalizeLanguage(lang string) string {
 	lang = strings.ToLower(strings.TrimSpace(lang))
-	aliases := map[string]string{
-		"js":           "javascript",
-		"ts":           "typescript",
-		"jsx":          "jsx",
-		"tsx":          "tsx",
-		"py":           "python",
-		"rb":           "ruby",
-		"sh":           "bash",
-		"shell":        "bash",
-		"zsh":          "bash",
-		"yml":          "yaml",
-		"md":           "markdown",
-		"rs":           "rust",
-		"go":           "go",
-		"golang":       "go",
-		"cs":           "csharp",
-		"c#":           "csharp",
-		"cpp":          "cpp",
-		"c++":          "cpp",
-		"objc":         "objectivec",
-		"tex":          "latex",
-		"vim":          "viml",
-		"dockerfile":   "docker",
-		"docker":       "docker",
-		"mdx":          "markdown",
-		"astro":        "html",
-		"prisma":       "graphql",
-		"dotenv":       "env",
-		"shellsession": "console",
-	}
-	if normalized, ok := aliases[lang]; ok {
+	if normalized, ok := languageAliases[lang]; ok {
 		return normalized
 	}
 	return lang
