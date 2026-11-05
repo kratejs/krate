@@ -427,6 +427,17 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     return mwMatchers;
   }
 
+  /**
+   * A matcher-less middleware is skipped only for a path that is a real file in
+   * the static layer. The extension alone is not enough: /api/files/x.pdf is a
+   * dynamic route that merely looks like a file.
+   */
+  async function skipsMiddleware(p: string): Promise<boolean> {
+    if (!staticLayer || !isStaticAssetPath(p)) return false;
+    if (p === "/api" || p.startsWith("/api/") || p.startsWith("/__krate/")) return false;
+    return !!(await staticLayer.exists(p));
+  }
+
   /** Runs middleware; a Response ends the request, null continues (headers/rewrite already applied). */
   async function runMiddleware(rs: ReqState): Promise<Response | null> {
     const p = rs.path;
@@ -439,7 +450,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     } catch (e: any) {
       return middlewareFailed(rs, e);
     }
-    if (!matchers && isStaticAssetPath(p)) return null;
+    if (!matchers && (await skipsMiddleware(p))) return null;
     if (matchers && !matchers.some((re) => re.test(p))) return null;
     let result: any;
     try {

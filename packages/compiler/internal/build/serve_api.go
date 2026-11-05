@@ -307,6 +307,20 @@ func isStaticAssetPath(p string) bool {
 	return staticAssetExts[strings.ToLower(path.Ext(p))]
 }
 
+// skipsMiddleware reports whether a matcher-less middleware may be skipped for
+// p. The extension alone is not enough: /api/files/x.pdf is a dynamic route
+// that merely looks like a file, so the path must also resolve to a real file
+// in the static layer and must not be an API route or server action.
+func (g *middlewareGate) skipsMiddleware(p string) bool {
+	if g.staticExists == nil || !isStaticAssetPath(p) {
+		return false
+	}
+	if p == "/api" || strings.HasPrefix(p, "/api/") || strings.HasPrefix(p, "/__krate/") {
+		return false
+	}
+	return g.staticExists(p)
+}
+
 // middlewareGate runs the user middleware in front of next. api selects the
 // request kinds it applies to: pages always; /api and server actions too.
 type middlewareGate struct {
@@ -318,6 +332,9 @@ type middlewareGate struct {
 	// sidecarMatcher is what the sidecar last reported about the module's
 	// matcher: 0 unknown, 1 none declared, 2 declared.
 	sidecarMatcher atomic.Int32
+	// staticExists reports whether a URL path is a file served by the static
+	// layer. Nil means nothing is: middleware then runs for every request.
+	staticExists func(urlPath string) bool
 }
 
 func (g *middlewareGate) wrap(next http.Handler) http.Handler {
@@ -328,7 +345,7 @@ func (g *middlewareGate) wrap(next http.Handler) http.Handler {
 			return
 		}
 		if g.rt != nil {
-			if !g.rt.HasMatcher() && isStaticAssetPath(p) {
+			if !g.rt.HasMatcher() && g.skipsMiddleware(p) {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -349,7 +366,7 @@ func (g *middlewareGate) wrap(next http.Handler) http.Handler {
 		// Until the sidecar reports a matcher, forward everything; once it says
 		// there is none, static assets skip the round trip like the embedded
 		// runtime does.
-		if g.sidecarMatcher.Load() == 1 && isStaticAssetPath(p) {
+		if g.sidecarMatcher.Load() == 1 && g.skipsMiddleware(p) {
 			next.ServeHTTP(w, r)
 			return
 		}

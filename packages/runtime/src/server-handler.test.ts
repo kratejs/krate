@@ -121,3 +121,45 @@ describe("createKrateHandler", () => {
     expect(seen.revalidation.paths).toEqual([{ path: "/live", type: "page" }]);
   });
 });
+
+describe("middleware without a matcher", () => {
+  const seen: string[] = [];
+  const mw = {
+    middleware: (req: Request) => {
+      const p = new URL(req.url).pathname;
+      seen.push(p);
+      if (req.headers.get("x-auth") !== "yes") return new Response("denied", { status: 401 });
+      return new Response(null, { headers: { "x-middleware-next": "1" } });
+    },
+  };
+  const staticLayer = {
+    exists: (p: string) => p === "/doc.pdf",
+    isAsset: (p: string) => p === "/doc.pdf",
+    serve: async (_r: Request, p: string) => (p === "/doc.pdf" ? new Response("pdf") : null),
+  };
+  const h = createKrateHandler({
+    target: "node",
+    data: data({ apiRoutes: ["files/[name]"] }),
+    modules: { ...modules, api: { "files/[name]": { GET: () => Response.json({ secret: "TOP" }) } }, middleware: mw },
+    static: staticLayer,
+  });
+  const get = (path: string) => h(new Request("http://localhost" + path));
+
+  it("does not skip dynamic API routes that end in a static extension", async () => {
+    for (const ext of ["pdf", "txt", "xml", "zip", "js", "css"]) {
+      const r = await get("/api/files/report." + ext);
+      expect(r.status, ext).toBe(401);
+    }
+  });
+
+  it("still skips a real static file", async () => {
+    seen.length = 0;
+    const r = await get("/doc.pdf");
+    expect(r.status).toBe(200);
+    expect(seen).not.toContain("/doc.pdf");
+  });
+
+  it("runs middleware for a static-looking page path that is not a file", async () => {
+    expect((await get("/missing.pdf")).status).toBe(401);
+  });
+});

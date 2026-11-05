@@ -41,6 +41,7 @@ export function middleware(request) {
   if (p === "/cookies") { const h = new Headers({ "x-middleware-next": "1" }); h.append("set-cookie", "a=1"); h.append("set-cookie", "b=2"); return new Response(null, { headers: h }); }
   if (p === "/assets.css") throw new Error("must not run for static assets");
 }`, false)
+	g.staticExists = func(p string) bool { return p == "/assets.css" }
 	h := g.wrap(next)
 
 	do := func(path string) *httptest.ResponseRecorder {
@@ -192,5 +193,31 @@ func TestWriteGoMethodResponse(t *testing.T) {
 	}
 	if writeGoMethodResponse(httptest.NewRecorder(), httptest.NewRequest("DELETE", "/api/x", nil), []string{"*"}) {
 		t.Error("an any-method route must not be answered here")
+	}
+}
+
+// A matcher-less middleware must not be skipped just because the URL ends in a
+// static extension: API routes and missing files still go through it.
+func TestMiddlewareGateStaticExtensionBypass(t *testing.T) {
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, "secret") })
+	g := newGate(t, `export function middleware(request) { return new Response("denied", { status: 401 }); }`, false)
+	g.staticExists = func(p string) bool { return p == "/real.pdf" }
+	h := g.wrap(next)
+	do := func(path string) int {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest("GET", "http://example.com"+path, nil))
+		return rec.Code
+	}
+	for _, p := range []string{"/api/files/report.pdf", "/api/files/a.txt", "/api/x.js", "/__krate/action/id.css", "/missing.pdf"} {
+		if code := do(p); code != 401 {
+			t.Errorf("%s: middleware skipped (status %d), want 401", p, code)
+		}
+	}
+	if code := do("/real.pdf"); code != 200 {
+		t.Errorf("real static file should skip middleware, got %d", code)
+	}
+	g.staticExists = nil
+	if code := do("/real.pdf"); code != 401 {
+		t.Errorf("with no static layer middleware must always run, got %d", code)
 	}
 }

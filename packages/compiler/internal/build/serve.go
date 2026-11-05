@@ -1472,6 +1472,15 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		dev:        hub != nil,
 		sidecarURL: fmt.Sprintf("http://localhost:%d/__krate/middleware", apiPort),
 		file:       middlewarePath,
+		staticExists: func(urlPath string) bool {
+			f, err := hardenedDir{http.Dir(absOut)}.Open(urlPath)
+			if err != nil {
+				return false
+			}
+			defer f.Close()
+			fi, err := f.Stat()
+			return err == nil && !fi.IsDir()
+		},
 	}
 
 	if hasActions {
