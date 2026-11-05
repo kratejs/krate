@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"runtime"
 	"sort"
 	"strconv"
@@ -1227,6 +1228,43 @@ func guardedJS(guard, expr, inactive string) string {
 	return "(" + guard + ")?(" + expr + "):" + inactive
 }
 
+// attrInactiveValue is what an attribute binding yields while its guard is
+// false: nothing for an attribute (it is removed), an empty string for a
+// control property, text or markup, and an empty object for a spread.
+func attrInactiveValue(a irtree.AttrBinding) string {
+	switch {
+	case a.AttrName == irtree.SpreadAttr:
+		return "{}"
+	case a.AttrName == irtree.TextContentAttr || a.AttrName == irtree.InnerHTMLAttr || isFormPropertyAttr(a.AttrName):
+		return "''"
+	}
+	return "undefined"
+}
+
+var (
+	jsStringRe   = regexp.MustCompile(`"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'`)
+	jsMemberRe   = regexp.MustCompile(`[\w$)\]]\s*\??\.\s*[A-Za-z_$#]|\[|\bnew\b`)
+	jsCallArgsRe = regexp.MustCompile(`[\w$]\s*\(\s*[^)\s]`)
+)
+
+// jsMayThrow reports whether evaluating code can plausibly throw on a value
+// that is not there yet: a property read, an index, `new`, or a call with
+// arguments. A bare getter read or comparison (`mode() === 1`) cannot, so
+// it needs no guard.
+func jsMayThrow(code string) bool {
+	code = jsStringRe.ReplaceAllString(code, `""`)
+	return jsMemberRe.MatchString(code) || jsCallArgsRe.MatchString(code)
+}
+
+// guardedIfRisky is guardedJS for expressions that only need the guard when
+// they can throw.
+func guardedIfRisky(guard, expr, inactive string) string {
+	if !jsMayThrow(expr) {
+		return expr
+	}
+	return guardedJS(guard, expr, inactive)
+}
+
 func andJS(a, b string) string {
 	if a == "" {
 		return "(" + b + ")"
@@ -1257,13 +1295,14 @@ func collectGuardedSlotBindings(children []irtree.SlotNode, guard string) []irtr
 				Pos:     s.Pos,
 			})
 		case *irtree.ConditionalSlot:
-			// The test itself is not guarded: a nested test that throws in an
-			// inactive branch is logged by __krateFx and runs again when the
-			// signals it read change.
+			// A nested test is guarded like any other slot expression: while
+			// the outer branch is hidden it reads `false` instead of
+			// evaluating (`user.admin` with user null) and runs again once
+			// the guard's signals change.
 			bindings = append(bindings, irtree.SlotBinding{
 				SlotID:  s.ID,
 				Type:    "conditional",
-				ExprJS:  s.TestJS,
+				ExprJS:  guardedIfRisky(guard, s.TestJS, "false"),
 				Signals: s.Signals,
 			})
 			// Recurse into both branches so nested slots (text slots, nested

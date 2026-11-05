@@ -711,7 +711,7 @@ export function SocialLinks(props: SocialLinksProps) {
   if (!links || links.length === 0) return <span />;
 
   return (
-    <span>
+    <span class="social-links-list">
       {links.map((link) => (
         <a class="social-link" href={link.url} aria-label={link.name} title={link.name}>
           <Icon name={link.icon} width="20" height="20" />

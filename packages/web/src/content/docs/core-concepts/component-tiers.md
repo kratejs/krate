@@ -84,10 +84,11 @@ export default function Dashboard() {
   because a runtime component is bundled per file.
 - On an `async` component only `@runtime` is accepted.
 
-Misplaced decorators fail the build with
-[KR7115](/docs/reference/diagnostics/#kr7115). A decorator goes on a declaration,
-so `@client` above `export default () => <div />` or `export default memo(...)` is
-an error; name the component (`@client` above `const View = ...;`, then
+A decorator above `export default () => <div />` or `export default memo(...)`
+(also `forwardRef(...)`) applies to the file's default component, like one above
+`export default function`. Other misplaced decorators fail the build with
+[KR7115](/docs/reference/diagnostics/#kr7115); for a default export of any other
+expression, name the component (`@client` above `const View = ...;`, then
 `export default View;`). If your project already imports its own decorator named
 `server` or `client` and applies it to a class, that one is used instead.
 

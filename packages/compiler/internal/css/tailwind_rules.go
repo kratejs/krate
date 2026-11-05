@@ -42,6 +42,9 @@ type TailwindTheme struct {
 	Important string `json:"important"`
 	// CustomUtilities maps a static `@utility name { ... }` to its declarations.
 	CustomUtilities map[string]string `json:"customUtilities"`
+	// FunctionalUtilities maps the prefix of a `@utility name-* { ... }` to its
+	// declarations, whose --value()/--spacing() calls resolve per class.
+	FunctionalUtilities map[string]string `json:"functionalUtilities,omitempty"`
 	// CustomVariants maps `@custom-variant name (...)` to a selector template
 	// containing "&" (e.g. "&:where([data-t=x] *)") or an at-rule such as
 	// "@media (print)".

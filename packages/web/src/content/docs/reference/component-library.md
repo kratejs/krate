@@ -42,7 +42,7 @@ import { Button, Card, CardGrid, Badge, Aside, Steps, Tabs, Tooltip } from '@kra
 | `Checkbox` | Checkbox input | `name`, `value`, `defaultChecked`, `disabled`, `required`, `id`, `class`, `className`, `label` |
 | `RadioGroup` | Grouped radio inputs | `defaultValue`, `label`, `class`, `className`, `id` |
 | `Switch` | Toggle switch | `label`, `name`, `value`, `defaultChecked`, `disabled`, `required`, `id`, `class`, `className` |
-| `Slider` | Range slider | `min`, `max`, `step`, `defaultValue`, `label`, `name`, `disabled`, `id`, `class`, `className` |
+| `Slider` | Range slider | `min`, `max`, `step`, `defaultValue`, `label`, `name`, `disabled`, `id`, `class`, `className`, `onChange`, `onInput` (optional: only a slider that passes a handler hydrates) |
 | `Select` / `NativeSelect` | Searchable select / native `<select>` | Select: `options`, `placeholder`, `name`, `label`, `defaultValue`, `disabled`, `id`, `class`, `className`; NativeSelect: `name`, `label`, `placeholder`, `options`, `defaultValue`, `disabled`, `id`, `required`, `class`, `className` |
 | `Input` | Text input | `type`, `value`, `placeholder`, `name`, `id`, `disabled`, `required`, `readonly`, `autocomplete`, `class`, `onInput` |
 | `Textarea` | Multi-line text input | `value`, `placeholder`, `name`, `id`, `rows`, `disabled`, `required`, `readonly`, `class`, `onInput` |

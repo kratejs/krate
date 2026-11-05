@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
@@ -81,6 +80,9 @@ type Bundle struct {
 	DynImportFiles map[string]string // dynamic-import source path -> hashed site URL (/chunks/...)
 	Frontmatter    map[string]any    // .mdx frontmatter, if any
 	ActionImports  map[string]string // local binding -> server-action URL
+	// Resolver resolves imports with the build's tsconfig path aliases, for
+	// code that walks the module graph after bundling.
+	Resolver *ImportResolver
 }
 
 type Bundler struct {
@@ -226,13 +228,7 @@ func (b *Bundler) SetVirtualModules(mods map[string]string) {
 // prefixes and targets are parallel slices: prefixes[i] maps to targets[i].
 func (b *Bundler) SetPathAliases(prefixes []string, targets [][]string, tsBaseDir string) {
 	b.tsBaseDir = tsBaseDir
-	b.pathAliases = nil
-	for i, prefix := range prefixes {
-		if i < len(targets) {
-			b.pathAliases = append(b.pathAliases, pathAlias{prefix: prefix, targets: targets[i]})
-		}
-	}
-	registerPathAliases(b.pathAliases, tsBaseDir)
+	b.pathAliases = buildPathAliases(prefixes, targets)
 }
 
 // SetBaseURL sets tsconfig compilerOptions.baseUrl (absolute). A bare import
@@ -479,6 +475,7 @@ func (b *Bundler) Bundle(entry string) (*Bundle, error) {
 		DynImportFiles: b.dynImports,
 		Frontmatter:    b.frontmatter,
 		ActionImports:  b.actionImports,
+		Resolver:       b.ImportResolver(),
 	}, nil
 }
 
@@ -670,8 +667,14 @@ func (b *Bundler) resolveMarkdownModule(path, abs string, mtime time.Time, size 
 	p.Filename = path
 	prog := p.ParseProgram()
 	if errs := p.Errors(); len(errs) > 0 {
-		// The parser saw generated code, so its line:col do not match the
-		// markdown file. Say so, and point at the usual cause.
+		// The parser saw generated code. Positions that fall on a tag or
+		// expression of the document are mapped back to the .mdx source.
+		if mapped, exact := mapMDXDiagnostics(path, src, tsxSource, compiled.Uses, errs); mapped != "" {
+			if exact {
+				return fmt.Errorf("the compiled markdown is not valid JSX (check that every JSX tag is closed and nested properly, and put a blank line between a JSX tag and a block it wraps):\n%s", mapped)
+			}
+			return fmt.Errorf("the compiled markdown is not valid JSX (positions are near the tag or expression named, not exact; check that every JSX tag is closed and nested properly, and put a blank line between a JSX tag and a block it wraps):\n%s", mapped)
+		}
 		return fmt.Errorf("%s: the compiled markdown is not valid JSX (line:col below refer to the generated code, not this file; check that every JSX tag is closed and nested properly, and put a blank line between a JSX tag and a block it wraps): %s", path, parser.FormatDiagnostics(errs))
 	}
 	RewriteReact(prog)
@@ -750,6 +753,7 @@ func (b *Bundler) resolveTSXModule(path, abs string, mtime time.Time, size int64
 	if err != nil {
 		return err
 	}
+	lowerDefaultExpressionExport(prog, path)
 	if strings.Contains(filepath.ToSlash(abs), "/node_modules/") {
 		// Third-party packages cannot act on these hints; keep builds quiet.
 		reactDiags = nil
@@ -896,44 +900,64 @@ func memoizedExists(path string) bool {
 	return v
 }
 
+// ResolveImport resolves an import without tsconfig path aliases; see
+// ImportResolver for callers that need them.
 func ResolveImport(importer, imp string) string {
+	return (*ImportResolver)(nil).Resolve(importer, imp)
+}
+
+// ImportResolver resolves import specifiers for callers that hold no Bundler
+// (the annotator follows imports to the module that declares a component, and
+// `@/components` is one). It carries one build's tsconfig path aliases, so
+// builds of different projects in one process never see each other's aliases.
+// The zero value and nil resolve without aliases.
+type ImportResolver struct {
+	aliases []pathAlias
+	baseDir string
+}
+
+// ImportResolver returns a resolver for this bundler's path aliases.
+func (b *Bundler) ImportResolver() *ImportResolver {
+	return &ImportResolver{aliases: b.pathAliases, baseDir: b.tsBaseDir}
+}
+
+// NewImportResolver builds a resolver from parallel prefix and target slices
+// (the shape SetPathAliases takes) and the aliases' base directory.
+func NewImportResolver(prefixes []string, targets [][]string, tsBaseDir string) *ImportResolver {
+	return &ImportResolver{aliases: buildPathAliases(prefixes, targets), baseDir: tsBaseDir}
+}
+
+// Resolve resolves imp as imported from importer, or returns "".
+func (r *ImportResolver) Resolve(importer, imp string) string {
+	exists := resolver.Exists
+	if resolverCacheEnabled {
+		exists = memoizedExists
+	}
+	if r != nil && len(r.aliases) > 0 && r.baseDir != "" && !strings.HasPrefix(imp, ".") {
+		if resolved := resolvePathAlias(imp, r.aliases, r.baseDir, exists); resolved != "" {
+			return resolved
+		}
+	}
 	if !resolverCacheEnabled {
-		return resolveImportAliased(importer, imp, resolver.Exists)
+		return resolveImport(importer, imp, exists, nil)
 	}
 	key := filepath.Dir(importer) + "\x00" + imp
 	if v, ok := resolveMemo.importResult(key); ok {
 		return v
 	}
-	v := resolveImportAliased(importer, imp, memoizedExists)
+	v := resolveImport(importer, imp, exists, nil)
 	resolveMemo.putImport(key, v)
 	return v
 }
 
-// aliasRegistry holds the tsconfig path aliases of the build in progress, for
-// callers of ResolveImport that hold no Bundler (the annotator follows imports
-// to the module that declares a component, and `@/components` is one).
-var aliasRegistry struct {
-	sync.RWMutex
-	aliases []pathAlias
-	baseDir string
-}
-
-func registerPathAliases(aliases []pathAlias, baseDir string) {
-	aliasRegistry.Lock()
-	aliasRegistry.aliases, aliasRegistry.baseDir = aliases, baseDir
-	aliasRegistry.Unlock()
-}
-
-func resolveImportAliased(importer, imp string, exists func(string) bool) string {
-	aliasRegistry.RLock()
-	aliases, base := aliasRegistry.aliases, aliasRegistry.baseDir
-	aliasRegistry.RUnlock()
-	if len(aliases) > 0 && base != "" && !strings.HasPrefix(imp, ".") {
-		if resolved := resolvePathAlias(imp, aliases, base, exists); resolved != "" {
-			return resolved
+func buildPathAliases(prefixes []string, targets [][]string) []pathAlias {
+	var out []pathAlias
+	for i, prefix := range prefixes {
+		if i < len(targets) {
+			out = append(out, pathAlias{prefix: prefix, targets: targets[i]})
 		}
 	}
-	return resolveImport(importer, imp, exists, nil)
+	return out
 }
 
 // resolveImport resolves an import path to an absolute file path. exists is the
@@ -1455,42 +1479,73 @@ func rewriteCSSModuleJSXChild(child ast.JSXChild, locals map[string]map[string]s
 // the irtree builder and hydration codegen emit the real URL instead of a
 // reference to a runtime import that never exists.
 func (b *Bundler) rewriteAssetImportRefs() {
+	byPath := make(map[string]*Module, len(b.order))
+	for _, mod := range b.order {
+		if mod != nil && mod.Program != nil {
+			byPath[filepath.Clean(mod.Path)] = mod
+		}
+	}
 	for _, mod := range b.order {
 		if mod.Program == nil || !mod.Rewritable {
 			continue
 		}
-		localVars := map[string]string{}
+		locals := map[string]string{}
+		namespaces := map[string]string{}
 		for _, stmt := range mod.Program.Body {
 			imp, ok := stmt.(*ast.ImportStmt)
-			if !ok || imp.Default == "" {
+			if !ok {
 				continue
 			}
-			src := strings.Trim(imp.Source, "\"'")
-			// Resolve the way the import itself was resolved, so a tsconfig
-			// alias (`@/assets/logo.png`) finds the same file as a relative path.
-			resolved := b.resolveImportForModule(mod.Path, src)
-			if resolved == "" {
-				resolved = src
-				if !filepath.IsAbs(resolved) {
-					resolved = filepath.Join(b.root, resolved)
-				}
-				if strings.HasPrefix(src, ".") {
-					resolved = filepath.Join(filepath.Dir(mod.Path), src)
-					if !filepath.IsAbs(resolved) {
-						resolved = filepath.Join(b.root, resolved)
-					}
+			url, ok := b.importedAssetURL(mod.Path, imp)
+			if !ok {
+				continue
+			}
+			if imp.Default != "" {
+				locals[imp.Default] = url
+			}
+			for _, n := range imp.Named {
+				if n.Remote == "default" && n.Local != "" {
+					locals[n.Local] = url
 				}
 			}
-			resolved = filepath.Clean(resolved)
-			if url, ok := b.assets[resolved]; ok {
-				localVars[imp.Default] = url
+			if imp.Namespace != "" {
+				namespaces[imp.Namespace] = url
 			}
 		}
-		if len(localVars) == 0 {
+		if len(locals) == 0 && len(namespaces) == 0 {
 			continue
 		}
-		rewriteAssetRefsStmts(mod.Program.Body, localVars)
+		rewriteAssetRefsStmts(mod.Program.Body, locals)
+		rewriteAssetNamespaceRefs(mod.Program.Body, namespaces)
+		b.reportUnresolvedAssetRefs(mod, locals, namespaces)
 	}
+	b.reportReexportedAssetImports(byPath)
+}
+
+// importedAssetURL returns the hashed URL of the asset an import statement
+// loads, when its source is a bundled asset file.
+func (b *Bundler) importedAssetURL(importer string, imp *ast.ImportStmt) (string, bool) {
+	if imp.Source == "" {
+		return "", false
+	}
+	src := strings.Trim(imp.Source, "\"'")
+	// Resolve the way the import itself was resolved, so a tsconfig alias
+	// (`@/assets/logo.png`) finds the same file as a relative path.
+	resolved := b.resolveImportForModule(importer, src)
+	if resolved == "" {
+		resolved = src
+		if !filepath.IsAbs(resolved) {
+			resolved = filepath.Join(b.root, resolved)
+		}
+		if strings.HasPrefix(src, ".") {
+			resolved = filepath.Join(filepath.Dir(importer), src)
+			if !filepath.IsAbs(resolved) {
+				resolved = filepath.Join(b.root, resolved)
+			}
+		}
+	}
+	url, ok := b.assets[filepath.Clean(resolved)]
+	return url, ok
 }
 
 func rewriteAssetRefsStmts(stmts []ast.Stmt, locals map[string]string) {
@@ -1554,6 +1609,38 @@ func rewriteAssetRefsStmt(stmt ast.Stmt, locals map[string]string) {
 			rewriteAssetRefsStmts(s.Catch.Body, locals)
 		}
 		rewriteAssetRefsStmts(s.Finally, locals)
+	case *ast.ForInStmt:
+		s.Right = rewriteAssetRefsExpr(s.Right, locals)
+		rewriteAssetRefsStmts(s.Body, locals)
+	case *ast.BlockStmt:
+		rewriteAssetRefsStmts(s.Body, locals)
+	case *ast.LabeledStmt:
+		rewriteAssetRefsStmt(s.Body, locals)
+	case *ast.ThrowStmt:
+		s.Value = rewriteAssetRefsExpr(s.Value, locals)
+	case *ast.ClassDecl:
+		rewriteAssetRefsClass(s, locals)
+	}
+}
+
+func rewriteAssetRefsClass(c *ast.ClassDecl, locals map[string]string) {
+	if c == nil {
+		return
+	}
+	c.SuperClass = rewriteAssetRefsExpr(c.SuperClass, locals)
+	for _, m := range c.Members {
+		if m == nil {
+			continue
+		}
+		if m.Init != nil {
+			m.Init = rewriteAssetRefsExpr(m.Init, locals)
+		}
+		for _, p := range m.Params {
+			if p != nil && p.Default != nil {
+				p.Default = rewriteAssetRefsExpr(p.Default, locals)
+			}
+		}
+		rewriteAssetRefsStmts(m.Body, locals)
 	}
 }
 
@@ -1636,6 +1723,18 @@ func rewriteAssetRefsExpr(expr ast.Expr, locals map[string]string) ast.Expr {
 		for i, p := range e.Parts {
 			e.Parts[i] = rewriteAssetRefsExpr(p, locals)
 		}
+		return e
+	case *ast.TaggedTemplateExpr:
+		e.Tag = rewriteAssetRefsExpr(e.Tag, locals)
+		if q, ok := rewriteAssetRefsExpr(e.Quasi, locals).(*ast.TemplateExpr); ok {
+			e.Quasi = q
+		}
+		return e
+	case *ast.ParenExpr:
+		e.Expr = rewriteAssetRefsExpr(e.Expr, locals)
+		return e
+	case *ast.ClassExpr:
+		rewriteAssetRefsClass(e.Class, locals)
 		return e
 	case *ast.JSXElement:
 		if e.Opening != nil {

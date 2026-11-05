@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/evanw/esbuild/pkg/api"
+	"github.com/kratejs/krate/packages/compiler/internal/bundler"
 	"github.com/kratejs/krate/packages/compiler/internal/safe"
 )
 
@@ -16,15 +17,15 @@ import (
 //   - JSX automatic transform using @krate/runtime/jsx-runtime
 //   - Head, Suspense, Script, Style imported from @krate/runtime/server
 //   - All dependencies bundled (except node_modules externals)
-func CompileServerBundles(results []*PageResult, root, outDir string, sourcemap bool, actionModules map[string]map[string]string, actionBasePath string) map[string]string {
-	bundles, _ := compileServerBundles(results, root, outDir, sourcemap, actionModules, actionBasePath)
+func CompileServerBundles(res *bundler.ImportResolver, results []*PageResult, root, outDir string, sourcemap bool, actionModules map[string]map[string]string, actionBasePath string) map[string]string {
+	bundles, _ := compileServerBundles(res, results, root, outDir, sourcemap, actionModules, actionBasePath)
 	return bundles
 }
 
 // compileServerBundles is CompileServerBundles that also returns the bundle
 // failures of pages that render server components. Those pages have no baked
 // body to fall back to, so a missing bundle must fail the build.
-func compileServerBundles(results []*PageResult, root, outDir string, sourcemap bool, actionModules map[string]map[string]string, actionBasePath string) (map[string]string, []error) {
+func compileServerBundles(res *bundler.ImportResolver, results []*PageResult, root, outDir string, sourcemap bool, actionModules map[string]map[string]string, actionBasePath string) (map[string]string, []error) {
 	// Collect non-SSG pages that actually need the Node renderer. A streaming
 	// page whose regions are all Go (or that has no dynamic regions at all) is
 	// rendered by the Go server + Go host alone, so its page bundle is never
@@ -43,7 +44,7 @@ func compileServerBundles(results []*PageResult, root, outDir string, sourcemap 
 	_ = os.MkdirAll(bundleDir, 0755)
 
 	bundles := make(map[string]string, len(ssrPages))
-	impls := &clientSSRImpls{root: root, bundleDir: bundleDir, actions: actionModules, basePath: actionBasePath}
+	impls := &clientSSRImpls{res: res, root: root, bundleDir: bundleDir, actions: actionModules, basePath: actionBasePath}
 	var fatal []error
 	var mu sync.Mutex
 	fail := func(page *PageResult, err error) {
@@ -120,7 +121,7 @@ func compileServerBundles(results []*PageResult, root, outDir string, sourcemap 
 					"@krate/runtime",
 					"@krate/runtime/*",
 				},
-				Plugins: []api.Plugin{reactServerShimPlugin(), serverCSSPlugin(root), cbPlugin, serverExportPlugin(page.ServerExports, absSource), goServerBundlePlugin(page.GoBaked, root), actionServerBundlePlugin(actionModules, actionBasePath)},
+				Plugins: []api.Plugin{reactServerShimPlugin(), serverCSSPlugin(root), cbPlugin, serverExportPlugin(page.ServerExports, absSource), goServerBundlePlugin(page.GoBaked, root), actionServerBundlePlugin(res, actionModules, actionBasePath)},
 				Stdin: &api.StdinOptions{
 					Loader:     api.LoaderTSX,
 					Contents:   injectedSource,

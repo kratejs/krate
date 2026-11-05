@@ -84,6 +84,7 @@ configure the generator, and **removes them from the shipped CSS**:
 @source inline("underline p-{1,2}");  /* always generate these */
 
 @utility tab-4 { tab-size: 4; }       /* static custom utility, works with variants */
+@utility pad-* { padding: --spacing(--value(integer)); }  /* functional: pad-3 */
 @custom-variant theme-mid (&:where([data-theme=mid] *));
 @custom-variant dark (&:where(.dark, .dark *));
 ```
@@ -103,8 +104,12 @@ configure the generator, and **removes them from the shipped CSS**:
   emits every user-defined `@theme` variable (v4 emits only the used ones unless
   `static`) plus any built-in theme variable you reference as `var(--color-red-500)`,
   `var(--spacing)`, etc. in your CSS or scanned files.
-- `@utility` supports static declaration blocks only; functional utilities
-  (`name-*` with `--value()`) and nested rules are reported and skipped.
+- `@utility` supports declaration blocks. A functional utility (`name-*`) takes
+  its value from the rest of the class through `--value()` and `--spacing()`.
+  `--value()` accepts `integer`, `number`, `percentage`, `ratio`, `[type]` (an
+  arbitrary `[...]` value), `"literal"` keywords and theme namespaces such as
+  `--color-*`, tried in order; a class whose value fits none of them generates
+  nothing. `--modifier()` and nested rules are reported and skipped.
   `@custom-variant` supports the `(selector)` form, `@media`/`@supports`, and the
   single `selector { @slot; }` block form.
 - `@config` and `@plugin` are **not supported**: they are removed and reported
@@ -140,10 +145,13 @@ padding: 0 }` written as plain unlayered CSS now beats every utility (`p-3`,
 
 `@apply` is supported anywhere inside a rule body (`.btn { @apply px-4 py-2; }`,
 including on one line). Plain utilities are expanded in place in utility sort
-order; animation utilities also emit their `@keyframes`. Variant,
-descendant-selector (`space-x-*`) and unknown utilities cannot be represented as
-plain declarations and are reported as build warnings. `@tailwind` directives are
-stripped, and `@layer` blocks are left as authored.
+order; animation utilities also emit their `@keyframes`. Variant utilities
+(`@apply hover:underline md:flex;`) and descendant-selector ones (`space-x-*`)
+become CSS nesting inside the rule (`@media (hover: hover) { &:hover { ... } }`),
+after the rule's own declarations, so they need a browser with native CSS
+nesting. Unknown utilities cannot be expressed and are reported as build
+warnings. `@tailwind` directives are stripped, and `@layer` blocks are left as
+authored.
 
 - A **candidate scanner** extracts Tailwind tokens from the whole file, in the
   spirit of Tailwind's own extractor: it does not depend on string tokenization,

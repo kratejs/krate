@@ -194,8 +194,9 @@ func TestTierDecoratorWithBoundNameOnFunction(t *testing.T) {
 
 func TestTierDecoratorOnDefaultExpressionExplainsHowToName(t *testing.T) {
 	for name, src := range map[string]string{
-		"arrow": "@client\nexport default () => <div/>;\n",
-		"call":  "@client\nexport default memo(function V() { return <div/>; });\n",
+		"call":           "@client\nexport default withTheme(View);\n",
+		"object":         "@client\nexport default { title: 'x' };\n",
+		"memo of a name": "@client\nexport default memo(View);\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, errs := Parse("a.tsx", src, Options{})
@@ -211,4 +212,33 @@ func TestTierDecoratorOnDefaultExpressionExplainsHowToName(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The inline default forms take the decorator as the file's tier.
+func TestTierDecoratorOnInlineDefaultComponent(t *testing.T) {
+	for name, src := range map[string]string{
+		"arrow":        "@static\nexport default () => <div/>;\n",
+		"arrow block":  "@static\nexport default (props: { a: number }) => { return <div>{props.a}</div>; };\n",
+		"function":     "@static\nexport default (function () { return <div/>; });\n",
+		"memo":         "@static\nexport default memo(function V() { return <div/>; });\n",
+		"forwardRef":   "@static\nexport default forwardRef((props, ref) => <div ref={ref}/>);\n",
+		"memo forward": "@static\nexport default memo(forwardRef((props, ref) => <div ref={ref}/>));\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			prog := parseOK(t, "a.tsx", src)
+			if prog.Tier != "static" {
+				t.Errorf("file tier %q, want static", prog.Tier)
+			}
+		})
+	}
+	t.Run("async needs runtime", func(t *testing.T) {
+		_, errs := Parse("a.tsx", "@static\nexport default async () => <div/>;\n", Options{})
+		if len(errs) != 1 || !strings.Contains(errs[0].Error(), "async") {
+			t.Fatalf("got %v", errs)
+		}
+		prog := parseOK(t, "a.tsx", "@runtime\nexport default async () => <div/>;\n")
+		if prog.Tier != "runtime" {
+			t.Errorf("file tier %q", prog.Tier)
+		}
+	})
 }

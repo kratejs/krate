@@ -17,6 +17,8 @@ type TailwindDirectives struct {
 	Theme AtTheme
 	// Utilities maps a static @utility name to its declaration block.
 	Utilities map[string]string
+	// Functional maps the prefix of an `@utility name-*` to its declarations.
+	Functional map[string]string
 	// Variants maps @custom-variant names to a selector template or at-rule.
 	Variants map[string]string
 	// Sources are extra directories to scan (absolute); Excludes are skipped.
@@ -39,7 +41,7 @@ type TailwindDirectives struct {
 
 // NewTailwindDirectives creates an empty collection rooted at root.
 func NewTailwindDirectives(root string) *TailwindDirectives {
-	return &TailwindDirectives{Root: root, Utilities: map[string]string{}, Variants: map[string]string{}, VarRefs: map[string]bool{},
+	return &TailwindDirectives{Root: root, Utilities: map[string]string{}, Functional: map[string]string{}, Variants: map[string]string{}, VarRefs: map[string]bool{},
 		warnings: map[string]bool{}, seenSrc: map[string]bool{}}
 }
 
@@ -189,17 +191,18 @@ func (d *TailwindDirectives) handleSource(prelude, baseDir string) {
 	d.warn("@source %s: unrecognized form; use @source \"path\", @source not \"path\" or @source inline(\"classes\")", prelude)
 }
 
-// handleUtility supports static `@utility name { decl; }`. Functional
-// utilities (`name-*`) and nested rules need Tailwind's value resolver and are
-// reported.
+// handleUtility supports static `@utility name { decl; }` and functional
+// `@utility name-* { decl: --value(...); }` (see functionalUtilityCSS). Nested
+// rules and --modifier() need more of Tailwind's resolver and are reported.
 func (d *TailwindDirectives) handleUtility(r cssAtRule) {
 	name := strings.TrimSpace(r.Prelude)
 	if !r.HasBody || name == "" {
 		d.warn("@utility %q: expected a name and a { } block", name)
 		return
 	}
-	if strings.Contains(name, "*") {
-		d.warn("@utility %s: functional utilities (--value()/--spacing()) are not supported; only static @utility blocks work", name)
+	functional := strings.HasSuffix(name, "-*")
+	if strings.Contains(name, "*") && !functional {
+		d.warn("@utility %s: the wildcard must end the name (`name-*`); the utility was skipped", name)
 		return
 	}
 	decls, nested := splitCSSBody(r.Body)
@@ -209,9 +212,17 @@ func (d *TailwindDirectives) handleUtility(r cssAtRule) {
 	}
 	var parts []string
 	for _, dd := range decls {
+		if functional && strings.Contains(dd.Value, "--modifier(") {
+			d.warn("@utility %s: --modifier() is not supported; the utility was skipped", name)
+			return
+		}
 		parts = append(parts, dd.Name+": "+dd.Value+";")
 	}
 	if len(parts) == 0 {
+		return
+	}
+	if functional {
+		d.Functional[strings.TrimSuffix(name, "-*")] = strings.Join(parts, " ")
 		return
 	}
 	d.Utilities[name] = strings.Join(parts, " ")
@@ -312,6 +323,14 @@ func (d *TailwindDirectives) ApplyTo(theme *TailwindTheme) {
 		}
 		for k, v := range d.Utilities {
 			theme.CustomUtilities[k] = v
+		}
+	}
+	if len(d.Functional) > 0 {
+		if theme.FunctionalUtilities == nil {
+			theme.FunctionalUtilities = map[string]string{}
+		}
+		for k, v := range d.Functional {
+			theme.FunctionalUtilities[k] = v
 		}
 	}
 	if len(d.Variants) > 0 {

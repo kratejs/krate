@@ -272,7 +272,9 @@ swapped with the page), and leaves the requested URL in the address bar.
 
 ## The SPA router
 
-Internal links (via `<Link>` or anchors) trigger client-side navigation:
+Internal links written as `<Link>` (or an anchor carrying `data-krate-link`)
+trigger client-side navigation; a plain `<a href>` is an ordinary full-page
+load:
 
 ```tsx
 import { Link } from '@krate/runtime';
@@ -282,7 +284,10 @@ import { Link } from '@krate/runtime';
 
 SPA navigation is enabled by default. Set `spa: false` in the config to omit
 the router from the shared runtime and use normal full-page navigation; links
-and `navigate()` keep working.
+and `navigate()` keep working. The router is part of the shared runtime, which
+a page loads only when it has something to hydrate: a page with no state or
+handlers ships no JavaScript, so a link on it is a full-page load (the next page
+then starts the router if it needs one).
 
 The router handles:
 

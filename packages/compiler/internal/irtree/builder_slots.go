@@ -55,6 +55,13 @@ func (b *builder) collectReferencedFunctions(node *ComponentNode, body []ast.Stm
 		if src := filepath.ToSlash(b.ann.ComponentSources[name]); resolver.IsCompiledDependency(src) {
 			continue
 		}
+		if fn.Name != name {
+			// An import alias (`import { plain as pp }`): emit the helper under
+			// the name the hydration code calls it by.
+			renamed := *fn
+			renamed.Name = name
+			fn = &renamed
+		}
 		candidates[name] = fn
 	}
 	if len(candidates) == 0 {
@@ -2093,8 +2100,16 @@ func (b *builder) buildConditionalSlot(expr ast.Expr, parentID string) *Conditio
 		// Build branches under branch-scoped parents so nested slots in the
 		// consequent and alternate branches never share slot IDs.
 		b.branchDepth++
+		mark := b.markRowBindings()
 		slot.Consequent = b.buildSlotNodes(cond.Consequent, string(id)+".c")
+		if testJS != "" {
+			b.tagBranchAttrs(mark, testJS)
+		}
+		mark = b.markRowBindings()
 		slot.Alternate = b.buildSlotNodes(cond.Alternate, string(id)+".a")
+		if testJS != "" {
+			b.tagBranchAttrs(mark, "!("+testJS+")")
+		}
 		b.branchDepth--
 	}
 	return slot
@@ -2792,9 +2807,38 @@ func (b *builder) buildFragmentSlots(frag *ast.JSXFragment, parentID string) []S
 	return result
 }
 
+// handlerPropAbsent reports a handler that reads an optional prop its call
+// site did not pass (`onChange={props.onChange}`, or a destructured
+// `onChange`). It binds nothing, so a component that needs no script without
+// the handler stays script-free: Slider takes onChange, and only the sliders
+// that pass one hydrate.
+func (b *builder) handlerPropAbsent(e ast.Expr) bool {
+	switch x := e.(type) {
+	case *ast.Identifier:
+		if !b.localParamNames[x.Name] || (b.localFuncProps != nil && b.localFuncProps[x.Name]) {
+			return false
+		}
+	case *ast.MemberExpr:
+		obj, ok := x.Object.(*ast.Identifier)
+		if x.Computed || !ok || obj.Name != "props" {
+			return false
+		}
+		if prop, ok := x.Property.(*ast.Identifier); !ok || (b.localFuncProps != nil && b.localFuncProps[prop.Name]) {
+			return false
+		}
+	default:
+		return false
+	}
+	k := b.evalValue(e).Kind()
+	return k == jsvalue.KindUndefined || k == jsvalue.KindNull
+}
+
 // buildHandlerDecl - extract event handler
 
 func (b *builder) buildHandlerDecl(attr *ast.JSXAttr, elementID string) *HandlerDecl {
+	if b.handlerPropAbsent(attr.Value) {
+		return nil
+	}
 	eventName, capture, direct := reactEventName(attr.Name)
 	// A handler forwarded as a prop must invoke the function from the child's
 	// props registry (created in the parent scope), not an inlined parent-local

@@ -372,6 +372,11 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 				// An object literal (a style object) is an expression body.
 				exprJS = "(" + exprJS + ")"
 			}
+			if a.Guard != "" {
+				// The element sits in a hidden conditional branch: leave the
+				// expression unevaluated until the branch is shown.
+				exprJS = guardedIfRisky(a.Guard, exprJS, attrInactiveValue(a))
+			}
 			// value/checked/selected are DOM properties, not attributes: setting
 			// the attribute after interaction has no effect.
 			name := a.AttrName

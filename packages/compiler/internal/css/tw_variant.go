@@ -888,6 +888,9 @@ func classToRule(cls string, theme TailwindTheme) (text, key string) {
 
 	css := customUtilityCSS(base, theme)
 	if css == "" {
+		css = functionalUtilityCSS(base, theme)
+	}
+	if css == "" {
 		css = generateCSS(base, theme)
 	}
 	if css == "" && strings.HasPrefix(base, "-") && negatableRoot(base[1:]) {

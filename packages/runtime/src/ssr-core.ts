@@ -378,6 +378,40 @@ export interface SSRCore {
   devInvalidate(route: string): void;
 }
 
+/**
+ * Splits the document <title> out of rendered page html. The last <title> that
+ * is not inside an <svg> wins (as with static <Head> hoisting, where a nested
+ * Head overrides its parent); every such element is removed from the html.
+ */
+export function takeHeadTitle(html: string): { title: string; html: string } {
+  if (html.indexOf("<title") === -1 && html.indexOf("<TITLE") === -1) return { title: "", html };
+  const re = /<title(?:\s[^>]*)?>([\s\S]*?)<\/title>/gi;
+  const found: { index: number; length: number; text: string }[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html))) {
+    if (insideSVG(html, m.index)) continue;
+    found.push({ index: m.index, length: m[0].length, text: m[1].trim() });
+  }
+  if (found.length === 0) return { title: "", html };
+  let out = "";
+  let last = 0;
+  for (const f of found) {
+    out += html.slice(last, f.index);
+    last = f.index + f.length;
+  }
+  out += html.slice(last);
+  return { title: found[found.length - 1].text, html: out };
+}
+
+function insideSVG(html: string, pos: number): boolean {
+  const before = html.slice(0, pos).toLowerCase();
+  let depth = 0;
+  const re = /<(\/?)svg[\s>\/]/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(before))) depth += m[1] ? -1 : 1;
+  return depth > 0;
+}
+
 export function createSSRCore(opts: SSRCoreOptions): SSRCore {
   const sha256Hex = opts.sha256Hex || portableSha256Hex;
 
@@ -807,8 +841,43 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
     }
   }
 
-  function regionCacheKey(page: ManifestPage, regionId: string, req: RenderRequest): string {
-    return variantKey({ route: page.route + "::" + regionId, params: req.params, query: req.query });
+  // regionQueryReads is pageQueryReads for regions: which query keys renders of
+  // a server component region have read. Only those regions are tracked: a
+  // runtime-bundle region receives the whole query serialized into its props,
+  // so what it reads cannot be observed and it stays keyed by the full query.
+  const regionQueryReads = new Map<string, Set<string> | "all">();
+
+  function regionBaseKey(page: ManifestPage, regionId: string, req: RenderRequest): string {
+    return variantKey({ route: page.route + "::" + regionId, params: req.params });
+  }
+
+  function regionCacheKey(page: ManifestPage, region: RegionMeta, req: RenderRequest): string {
+    if (!region.serverExport) {
+      return variantKey({ route: page.route + "::" + region.id, params: req.params, query: req.query });
+    }
+    const reads = regionQueryReads.get(regionBaseKey(page, region.id, req));
+    if (!reads) return regionBaseKey(page, region.id, req);
+    if (reads === "all") return variantKey({ route: page.route + "::" + region.id, params: req.params, query: req.query });
+    const picked: Record<string, string> = {};
+    for (const k of [...reads].sort()) {
+      if (req.query && Object.prototype.hasOwnProperty.call(req.query, k)) picked[k] = req.query[k];
+    }
+    return variantKey({ route: page.route + "::" + region.id, params: req.params, query: picked });
+  }
+
+  function recordRegionQueryReads(page: ManifestPage, regionId: string, req: RenderRequest, t: QueryTracker): void {
+    const base = regionBaseKey(page, regionId, req);
+    let cur = regionQueryReads.get(base);
+    if (t.all) cur = "all";
+    else if (t.keys.size > 0 && cur !== "all") cur = new Set([...(cur || []), ...t.keys]);
+    if (cur) {
+      regionQueryReads.delete(base);
+      regionQueryReads.set(base, cur);
+      if (regionQueryReads.size > PAGE_QUERY_READS_MAX) {
+        const oldest = regionQueryReads.keys().next().value;
+        if (oldest !== undefined) regionQueryReads.delete(oldest);
+      }
+    }
   }
 
   // regionInterval resolves a region's cache window: its own revalidate directive
@@ -824,10 +893,11 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
     page: ManifestPage,
     region: RegionMeta,
     req: RenderRequest,
+    tracker?: QueryTracker,
   ): Promise<{ html: string; scope: CacheScope; invalidated: boolean }> {
     if (region.serverExport) {
       const out = await withRenderTimeout(
-        withCacheScope(page.route, () => withRequest(req, () => renderServerExport(page, region, req))),
+        withCacheScope(page.route, () => withRequest(req, () => renderServerExport(page, region, req, tracker), tracker)),
       );
       return { html: out.result, scope: out.scope, invalidated: out.invalidated };
     }
@@ -844,7 +914,7 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
 
   // renderServerExport renders an async server component region with the page's
   // own server bundle, which exports the component under region.serverExport.
-  async function renderServerExport(page: ManifestPage, region: RegionMeta, req: RenderRequest): Promise<string> {
+  async function renderServerExport(page: ManifestPage, region: RegionMeta, req: RenderRequest, tracker?: QueryTracker): Promise<string> {
     const mod = await opts.loadPageModule(page);
     const Comp = mod[region.serverExport!];
     if (typeof Comp !== "function") {
@@ -852,6 +922,7 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
     }
     const props = regionProps(region, req);
     if (props.params && typeof props.params === "object") props.params = thenableRecord(props.params);
+    if (tracker && props.query) props.query = trackedQuery(req.query, tracker);
     return renderToStringAsync(jsx(Comp, props));
   }
 
@@ -859,8 +930,12 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
     if (inFlightRegionRevalidations.has(key)) return;
     const p = (async () => {
       try {
-        const r = await renderRegionFresh(page, region, req);
-        if (regionCacheable(r)) regionCacheSet(key, r.html, page, req, r.scope);
+        const tracker = region.serverExport ? newQueryTracker() : undefined;
+        const r = await renderRegionFresh(page, region, req, tracker);
+        if (regionCacheable(r)) {
+          if (tracker) recordRegionQueryReads(page, region.id, req, tracker);
+          regionCacheSet(regionCacheKey(page, region, req), r.html, page, req, r.scope);
+        }
         console.log(`[krate-ssr] Revalidated region ${key} (SWR)`);
       } catch (err: any) {
         console.error(`[krate-ssr] Region SWR revalidation failed ${key}:`, err.message);
@@ -879,7 +954,7 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
       return { type: "error", id: region.id, status: 400, error: "region has no runtime bundle", fatal: !!page.serverComponents };
     }
 
-    const key = regionCacheKey(page, region.id, req);
+    const key = regionCacheKey(page, region, req);
     const interval = regionInterval(page, region);
     const cacheable = interval > 0;
 
@@ -896,10 +971,14 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
     }
 
     try {
-      const r = await renderRegionFresh(page, region, req);
+      const tracker = region.serverExport ? newQueryTracker() : undefined;
+      const r = await renderRegionFresh(page, region, req, tracker);
       const html = r.html;
       if (cacheable && regionCacheable(r)) {
-        regionCacheSet(key, html, page, req, r.scope);
+        // The key is computed again: this render may have shown which query
+        // keys the region reads.
+        if (tracker) recordRegionQueryReads(page, region.id, req, tracker);
+        regionCacheSet(tracker ? regionCacheKey(page, region, req) : key, html, page, req, r.scope);
       }
       const frame: Record<string, any> = { type: "region", id: region.id, status: 200, html };
       if (cacheable) frame.cacheStatus = "miss";
@@ -945,14 +1024,14 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
     if (page.serverComponents && frame.status >= 500) frame.fatal = true;
     // Title swap: the Go server replaces the baked <title> with the freshly
     // rendered one so params-driven pages update the browser tab.
-    const title = extractTitle(result.html);
-    if (title !== "") frame.title = title;
+    // The page's <title> (a <Head> child renders in place) moves to the head,
+    // so it is taken out of the body html rather than shown twice.
+    const split = takeHeadTitle(result.html || "");
+    if (split.title !== "") {
+      frame.title = split.title;
+      frame.html = split.html;
+    }
     return frame;
-  }
-
-  function extractTitle(html: string): string {
-    const match = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-    return match ? match[1].trim() : "";
   }
 
   interface InvalidateTarget {

@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createSSRCore, ISRCache, type ManifestPage } from "./ssr-core.js";
+import { createSSRCore, ISRCache, takeHeadTitle, type ManifestPage } from "./ssr-core.js";
 import { jsx } from "./server.js";
 
 function makeCore(maxCacheSize: number, revalidate = 30) {
@@ -55,5 +55,79 @@ describe("ISR background refresh", () => {
     const stale = await core.applyInternalOp("refresh-route", { route: "/plain/[id]" });
     expect(stale.refreshed).toBe(2);
     expect(renders()).toBe(4);
+  });
+});
+
+describe("page region title", () => {
+  it("moves the <title> out of the region html", async () => {
+    const page: ManifestPage = { route: "/t", source: "t.tsx", mode: "ssr", bundlePath: "t" } as any;
+    const core = createSSRCore({
+      manifest: { pages: [page], regions: {} } as any,
+      maxCacheSize: 4,
+      loadPageModule: async () => ({
+        default: () => jsx("div", { children: [jsx("title", { children: "Async Title" }), jsx("h1", { children: "hello" })] }),
+      }),
+      loadRuntimeRenderer: () => () => "",
+    });
+    const frame = await core.renderPageRegion(page, "page", { route: "/t", url: "/t", method: "GET", headers: {}, params: {} });
+    expect(frame.title).toBe("Async Title");
+    expect(frame.html).toContain("<h1>hello</h1>");
+    expect(frame.html).not.toContain("<title");
+  });
+
+  it("keeps svg <title> elements and prefers the last document title", () => {
+    const out = takeHeadTitle('<svg><title>Icon</title></svg><title>One</title><p>x</p><title>Two</title>');
+    expect(out.title).toBe("Two");
+    expect(out.html).toBe("<svg><title>Icon</title></svg><p>x</p>");
+    expect(takeHeadTitle("<svg><title>Only</title></svg>")).toEqual({ title: "", html: "<svg><title>Only</title></svg>" });
+  });
+});
+
+describe("server component region cache keys", () => {
+  function regionCore() {
+    let renders = 0;
+    const page: ManifestPage = { route: "/feed", source: "feed.tsx", mode: "isr", revalidate: 60, bundlePath: "feed" } as any;
+    const region = { id: "list", serverExport: "List", revalidate: 60 } as any;
+    const core = createSSRCore({
+      manifest: { pages: [page], regions: {} } as any,
+      maxCacheSize: 8,
+      loadPageModule: async () => ({
+        List: (props: any) => jsx("p", { children: `page-${props.query?.page ?? "none"}-${++renders}` }),
+        Whole: (props: any) => jsx("p", { children: Object.keys(props.query || {}).join(",") + "-" + ++renders }),
+      }),
+      loadRuntimeRenderer: () => () => "",
+    });
+    const render = (query: Record<string, string>, r = region) =>
+      core.renderRegion(page, r, { route: "/feed", url: "/feed", method: "GET", headers: {}, params: {}, query });
+    return { render, renders: () => renders, region };
+  }
+
+  it("shares one entry across query keys the region never reads", async () => {
+    const { render, renders } = regionCore();
+    expect((await render({ page: "1" })).cacheStatus).toBe("miss");
+    expect(renders()).toBe(1);
+    for (let i = 0; i < 20; i++) {
+      const f = await render({ page: "1", utm: "junk" + i });
+      expect(f.cacheStatus, "junk " + i).toBe("hit");
+    }
+    expect(renders()).toBe(1);
+    expect((await render({ page: "2" })).cacheStatus).toBe("miss");
+    expect((await render({ page: "1" })).html).toContain("page-1-1");
+  });
+
+  it("keeps a hot region when a client sweeps random query values", async () => {
+    const { render } = regionCore();
+    await render({ page: "1" });
+    for (let i = 0; i < 40; i++) await render({ page: "1", sweep: String(i) });
+    expect((await render({ page: "1" })).cacheStatus).toBe("hit");
+  });
+
+  it("falls back to the whole query when the region enumerates it", async () => {
+    const { render, renders, region } = regionCore();
+    const whole = { ...region, id: "whole", serverExport: "Whole" };
+    await render({ a: "1" }, whole);
+    expect((await render({ a: "1", b: "2" }, whole)).cacheStatus).toBe("miss");
+    expect((await render({ a: "1", b: "2" }, whole)).cacheStatus).toBe("hit");
+    expect(renders()).toBe(2);
   });
 });

@@ -160,12 +160,11 @@ func (t *tokenTable) protect(text string, mdx bool, report reportFn) string {
 			for j < n && text[j] == '`' {
 				j++
 			}
-			run := text[i:j]
-			if end := strings.Index(text[j:], run); end >= 0 && !strings.HasPrefix(text[j+end:], run+"`") {
-				out.WriteString(text[i : j+end+len(run)])
-				i = j + end + len(run)
+			if end, ok := codeSpanEnd(text, i, j); ok {
+				out.WriteString(text[i:end])
+				i = end
 			} else {
-				out.WriteString(run)
+				out.WriteString(text[i:j])
 				i = j
 			}
 		case c == '<':
@@ -228,6 +227,42 @@ func (t *tokenTable) protect(text string, mdx bool, report reportFn) string {
 		}
 	}
 	return out.String()
+}
+
+// codeSpanEnd finds the end of the code span opened by the backtick run
+// text[open:runEnd]. Per CommonMark the span closes at the next backtick run of
+// exactly the same length (a longer or shorter run inside it is content, so a
+// single-backtick span can hold a triple-backtick fence), and it never crosses a
+// blank line.
+func codeSpanEnd(text string, open, runEnd int) (int, bool) {
+	want := runEnd - open
+	n := len(text)
+	for k := runEnd; k < n; {
+		switch text[k] {
+		case '\n':
+			// A blank line ends the paragraph, so the opener is literal.
+			m := k + 1
+			for m < n && (text[m] == ' ' || text[m] == '\t') {
+				m++
+			}
+			if m >= n || text[m] == '\n' {
+				return 0, false
+			}
+			k++
+		case '`':
+			e := k
+			for e < n && text[e] == '`' {
+				e++
+			}
+			if e-k == want {
+				return e, true
+			}
+			k = e
+		default:
+			k++
+		}
+	}
+	return 0, false
 }
 
 func restOfLine(text string, from int) string {

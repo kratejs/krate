@@ -295,6 +295,46 @@ detailed changelog. This file records the release train at a glance.
 - A tier decorator on a function or const wins over a same-named binding in the
   file (it used to leave an esbuild "Decorators are not valid here" error), and
   `@client export default <expression>` now explains how to name the component.
+- Fixed: an aliased import of a helper (`import { plain as pp } from "./x"` then
+  `{pp()}`) rendered nothing and threw `pp is not defined` in the browser. The
+  compiler no longer keeps path aliases in process-wide state, so builds of
+  different projects in one process cannot see each other's tsconfig aliases.
+- Fixed: a code span that holds a longer backtick run (`` ` ```ts {1,3-5} ` ``) in
+  an MDX page evaluated its `{1,3-5}` as an expression (it showed `-2`).
+- Fixed: the docs theme header put the GitHub and Twitter buttons edge to edge.
+- Fixed: an async page that sets `<title>` in `<Head>` served the title twice, and
+  when the title's length differed from the baked one, the page body was spliced
+  into the wrong place (inside a comment). Both the Go host and the portable
+  handler are fixed; other `<Head>` children (`<meta>`) still render in place.
+- Fixed: a page that imports a module whose top-level code runs Redux Toolkit's
+  `createSlice` or `configureStore` failed to build with "class declaration
+  DraftMap inside a component or helper function" from immer. Library code under
+  `node_modules` is no longer checked for client code generation.
+- Fixed: attribute bindings and nested conditional tests in a hidden branch
+  (`{user && <a href={user.url}>x</a>}`) no longer run while the branch is hidden.
+- Fixed: `import { default as logo }`, `import * as ns` (`ns.default`) and reads
+  of an asset binding inside a class or parentheses did not resolve to the file's
+  URL. An asset binding that stays unresolved, including one re-exported by a barrel
+  module (`export { logo }`), now warns with KR7125 instead of failing silently
+  in the browser.
+- Added: `export default () => <div />`, `export default memo(...)` and
+  `forwardRef(...)` are components (they built to an empty page), and a tier
+  decorator above them applies to the file's default component.
+- Fixed: the Go host component render is cancelled with its request.
+- Added: server component regions are cached by the query keys they read, not the
+  whole query string, so random query values no longer fill the region cache.
+- Added: `@apply` takes variants (`@apply hover:underline md:flex`) and
+  descendant utilities (`space-x-2`), expanded as CSS nested rules, and
+  functional `@utility name-* { ... --value(...) / --spacing(...) }` is supported.
+- Fixed: an MDX parse error now points at the line and column of the offending tag
+  or expression in the `.mdx` file instead of a position in generated code.
+- Added: `Slider` takes `onChange` and `onInput`. A handler on an optional prop the
+  call site does not pass binds nothing, so only the sliders that pass one
+  hydrate.
+- Fixed: a SPA navigation to a prefetched page dropped the link's `#fragment`
+  (`<Link href="/docs/page#section">` landed at the top).
+- Fixed: `krate start` refused a site that has no root page (no top-level
+  `index.html`) with "no build output found".
 
 ## 0.5.0-alpha.4
 

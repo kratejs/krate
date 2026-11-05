@@ -48,3 +48,31 @@ func TestOverwriteCount(t *testing.T) {
 		t.Errorf("overwriteCount = %d, want 2", got)
 	}
 }
+
+// A site without a root page still has build output: `krate start` must not
+// refuse it for lacking a top-level index.html.
+func TestHasBuildOutputWithoutRootPage(t *testing.T) {
+	dir := t.TempDir()
+	if hasBuildOutput(dir) {
+		t.Fatal("an empty directory is not build output")
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "docs", "intro"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if hasBuildOutput(dir) {
+		t.Fatal("a directory without any page is not build output")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "docs", "intro", "index.html"), []byte("<p>x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !hasBuildOutput(dir) {
+		t.Fatal("a site whose only page is /docs/intro/ has build output")
+	}
+	ssrOnly := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(ssrOnly, ".krate"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if !hasBuildOutput(ssrOnly) {
+		t.Fatal("the .krate server directory marks build output")
+	}
+}

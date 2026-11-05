@@ -37,7 +37,7 @@ func TestExpandApplyAnimationAndOrder(t *testing.T) {
 
 func TestExpandApplyUnresolvedReported(t *testing.T) {
 	out, un := ExpandApply(".a { @apply hover:underline flex nope-nope-zz; }", DefaultTailwindTheme())
-	if len(un) != 2 || !strings.Contains(out, "display") {
+	if len(un) != 1 || un[0] != "nope-nope-zz" || !strings.Contains(out, "display") || !strings.Contains(out, "&:hover") {
 		t.Fatalf("out=%q un=%v", out, un)
 	}
 }
@@ -225,7 +225,10 @@ func TestDirectivesImportPrefixSourceUtilityVariant(t *testing.T) {
 		t.Errorf("variants = %v", d.Variants)
 	}
 	w := strings.Join(d.Warnings(), "\n")
-	for _, want := range []string{"@config", "@plugin", "tab-*"} {
+	if d.Functional["tab"] != "tab-size: --value(integer);" {
+		t.Errorf("functional utilities = %v", d.Functional)
+	}
+	for _, want := range []string{"@config", "@plugin"} {
 		if !strings.Contains(w, want) {
 			t.Errorf("no warning mentioning %q:\n%s", want, w)
 		}

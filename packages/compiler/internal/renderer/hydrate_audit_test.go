@@ -228,3 +228,44 @@ func TestUnknownStaticTextBecomesClientSlot(t *testing.T) {
 		t.Errorf("an expression with no build-time value has no client binding:\n%s\n%s", res.HTML, js)
 	}
 }
+
+// Attribute bindings and nested conditional tests of a hidden branch must not
+// run while the branch is inactive (`user.url` with user null).
+func TestInactiveBranchAttrAndNestedTestAreGuarded(t *testing.T) {
+	src := `import { useState } from "react";
+export default function Page() {
+  const [user, setUser] = useState(null);
+  return <main><button onClick={() => setUser({ url: "/x", admin: true })}>in</button>
+    {user && <a href={user.url} title={user.name}>x</a>}
+    {user && (user.admin ? <b>admin</b> : <i>no</i>)}
+  </main>;
+}`
+	_, js := fullPipeline(t, src)
+	for _, bare := range []string{"()=>user.url", "()=>user.name", "()=>user.admin", "()=>(user.admin)"} {
+		if strings.Contains(js, bare) {
+			t.Errorf("binding %q runs while its branch is inactive:\n%s", bare, js)
+		}
+	}
+	for _, guarded := range []string{"?(user.url):undefined", "?(user.name):undefined", "?(user.admin):false"} {
+		if !strings.Contains(js, guarded) {
+			t.Errorf("no guarded read %q:\n%s", guarded, js)
+		}
+	}
+}
+
+func TestJSMayThrow(t *testing.T) {
+	for code, want := range map[string]bool{
+		"mode() === 1":      false,
+		"count() > 2 && on": false,
+		`label() === "a.b"`: false,
+		"user().name":       true,
+		"user.url":          true,
+		"items()[0]":        true,
+		"f(x)":              true,
+		"a?.b":              true,
+	} {
+		if got := jsMayThrow(code); got != want {
+			t.Errorf("jsMayThrow(%q) = %v, want %v", code, got, want)
+		}
+	}
+}

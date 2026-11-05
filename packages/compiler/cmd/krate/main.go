@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"os"
 	"path/filepath"
@@ -701,12 +702,25 @@ func runServe(flags cliFlags, args []string) {
 
 // hasBuildOutput reports whether outDir looks like a finished krate build.
 func hasBuildOutput(outDir string) bool {
-	for _, name := range []string{"manifest.json", "index.html"} {
+	for _, name := range []string{"manifest.json", "index.html", ".krate"} {
 		if _, err := os.Stat(filepath.Join(outDir, name)); err == nil {
 			return true
 		}
 	}
-	return false
+	// A site with no root page (only /docs/..., or SSR pages and an API) has no
+	// top-level index.html: any built page counts.
+	found := false
+	_ = filepath.WalkDir(outDir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || found {
+			return filepath.SkipDir
+		}
+		if !d.IsDir() && strings.HasSuffix(d.Name(), ".html") {
+			found = true
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	return found
 }
 
 // runDeploy builds the site and writes host-specific adapter files so the

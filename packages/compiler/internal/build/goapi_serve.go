@@ -243,6 +243,13 @@ func (g *goAPISupervisor) SetSocket(path string) {
 // Render renders runtime Go-component regions via the host's /__krate/gorender
 // endpoint, returning marker id -> HTML.
 func (g *goAPISupervisor) Render(regions []goRenderRegion) (map[string]string, error) {
+	return g.RenderContext(context.Background(), regions)
+}
+
+// RenderContext is Render bound to ctx: when the visitor's request goes away
+// the call to the Go host is cancelled instead of running to the client
+// timeout.
+func (g *goAPISupervisor) RenderContext(ctx context.Context, regions []goRenderRegion) (map[string]string, error) {
 	if len(regions) == 0 {
 		return nil, nil
 	}
@@ -269,7 +276,7 @@ func (g *goAPISupervisor) Render(regions []goRenderRegion) (map[string]string, e
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequest("POST", g.renderURL, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", g.renderURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}

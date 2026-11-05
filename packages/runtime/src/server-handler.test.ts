@@ -267,3 +267,29 @@ describe("rewrites to a slashless page path", () => {
     expect(await r.text()).toContain("feedback form");
   });
 });
+
+describe("page region title swap", () => {
+  it("keeps the page markers intact when the title length changes", async () => {
+    const h = createKrateHandler({
+      target: "node",
+      data: data({
+        pages: [{ route: "/titled", mode: "ssr", bundlePath: "titled" }],
+        allPages: [{ route: "/titled", mode: "ssr" }],
+        shells: { "/titled": "<html><head><title>t</title></head><body><!--suspense:page-->baked<!--/suspense:page--></body></html>" },
+        hasMiddleware: false,
+      }),
+      modules: {
+        ...modules,
+        pages: {
+          titled: {
+            default: () => jsx("div", { children: [jsx("title", { children: "A much longer title" }), jsx("h1", { children: "hello" })] }),
+          },
+        },
+      },
+    });
+    const r = await h(new Request("http://localhost/titled/"));
+    const body = await r.text();
+    expect(body).toContain("<title>A much longer title</title></head><body><!--suspense:page--><div><h1>hello</h1></div><!--/suspense:page--></body>");
+    expect(body.match(/<title/g)?.length).toBe(1);
+  });
+});
