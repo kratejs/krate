@@ -430,6 +430,24 @@ The island has no build-time props, uses a browser-only API, or could not be ren
 
 Krate could not bundle the island's external package, local module, Preact dependency, or generated chunk. Check the reported resolver error and install the missing package (Preact 10.20 or newer) in the project.
 
+### KR8010
+
+**React library hook used where no island can run it**
+
+A component calls a hook of an npm React library (zustand, react-hook-form, swr, @tanstack/react-query, ...). Those hooks need React's render model, which Krate's lowered components do not have, so Krate runs the module that calls them as a Preact island. That is not possible for a layout or template, or for a server or runtime tier component. Move the component into its own module and render it from a page or client component, or replace the library with createSignal / createResource.
+
+### KR8011
+
+**css prop is emotion's, not a DOM attribute**
+
+A `css={...}` prop on a DOM element is understood only by emotion's JSX runtime. In a module that does not use it Krate renders `css` as a plain attribute, so the styles are lost. Add `/** @jsxImportSource @emotion/react */` to the top of the file so the module runs as a Preact island with emotion, or use CSS modules, Tailwind or a stylesheet.
+
+### KR8012
+
+**Client directive on a component that is not an island**
+
+`client:visible`, `client:idle` and `client:load` choose when an island mounts, and only apply to the root tag of a compiled package component (or a module that uses a React library) rendered as an island. On a Krate component or an HTML element they do nothing; Krate hydrates those with the page. Remove the directive, or put it on the package component itself.
+
 ### KR8301
 
 **Render value keeps its first value**

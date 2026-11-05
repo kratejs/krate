@@ -1,5 +1,5 @@
 {
-  "updated": "2026-11-04",
+  "updated": "2026-11-05",
   "rows": [
     {
       "id": "hooks-state",
@@ -426,6 +426,75 @@
       "roadmap": false,
       "diagnostics": [
         "KR8007"
+      ]
+    },
+    {
+      "id": "react-hook-libraries",
+      "area": "npm React hook libraries (zustand, react-hook-form, SWR, TanStack Query)",
+      "source": "n/a",
+      "islands": "partial",
+      "ssr": "beta",
+      "target": "Run as Preact islands",
+      "summary": "A user module that calls a hook of an npm package built on React (or a store hook made by its factory, or a custom hook wrapping one) is bundled for Preact (react resolves to preact/compat, CommonJS require of react is bridged), rendered on the server and hydrated in place. Islands of one page share one chunk, so a store module is one store. Checked by hand in Chromium against zustand 5, react-hook-form 7, SWR 2 and TanStack Query 5; the repository tests use stand-in packages with the same import shapes.",
+      "tests": [
+        "TestReactHookLibraryPageIsland",
+        "TestReactHookLibraryComponentIslands",
+        "TestReactHookLibraryInLayoutDiagnostic",
+        "TestPreactCompatChunkHasDefaultExport",
+        "TestBrowserReactLibraryIslands"
+      ],
+      "roadmap": false,
+      "knownLimits": [
+        "A layout, template or server-rendered page cannot host these hooks; the build fails with KR8010.",
+        "Providers wrapped around children in a layout do not reach islands in pages; put the provider in the island module.",
+        "Store state is per page: it does not survive client-side navigation.",
+        "A page that is itself such an island receives no route props and cannot use Krate-only APIs in the same module.",
+        "Pages rendered per request (dynamic, ISR, SSR) were not verified with these islands.",
+        "Only Chromium was run for the browser check."
+      ],
+      "diagnostics": [
+        "KR8010"
+      ]
+    },
+    {
+      "id": "css-in-js",
+      "area": "CSS-in-JS (styled-components, emotion, MUI)",
+      "source": "n/a",
+      "islands": "partial",
+      "ssr": "partial",
+      "target": "Client-only islands",
+      "summary": "Components built with styled-components, @emotion/styled, the emotion css prop (with the jsxImportSource pragma) or MUI run as Preact islands and are styled in the browser. They are client-only because the styles are created while rendering, so the server HTML holds an empty placeholder (KR8008 notice). A css prop without emotion's runtime is reported (KR8011). Checked by hand in Chromium against styled-components 6, @emotion/styled and @emotion/react 11 and MUI 9.",
+      "tests": [
+        "TestReactCSSInJSIsland",
+        "TestBrowserReactLibraryIslands"
+      ],
+      "roadmap": false,
+      "knownLimits": [
+        "No server-rendered markup or styles: content appears when the island mounts.",
+        "A project-wide jsxImportSource for emotion in tsconfig is not supported; use the per-file pragma.",
+        "A ThemeProvider around the whole app in a layout does not reach islands."
+      ],
+      "diagnostics": [
+        "KR8008",
+        "KR8011"
+      ]
+    },
+    {
+      "id": "island-client-directives",
+      "area": "Island hydration control (client:visible, client:idle)",
+      "source": "n/a",
+      "islands": "beta",
+      "ssr": "n/a",
+      "target": "Astro-style directives",
+      "summary": "client:visible and client:idle on an island's root tag defer mounting until the island is near the viewport or the browser is idle. The server markup stays; the chunk is neither preloaded nor fetched before then, and the directive never reaches the component. client:load is the default.",
+      "tests": [
+        "TestIslandClientDirectives",
+        "TestClientDirectiveOnNonIslandWarns",
+        "TestBrowserReactLibraryIslands"
+      ],
+      "roadmap": false,
+      "diagnostics": [
+        "KR8012"
       ]
     },
     {
