@@ -40,7 +40,7 @@ In order, with the one that bites first at the top:
 | 2 | Tailwind output follows v4 | Rings, shadows, blurs, outlines and colours look different; a reset appears | [Rename classes](#tailwind-output-follows-v4), or `tailwind.preflight: false` |
 | 3 | `krate dev` binds `127.0.0.1` | Connection refused from a container, WSL or another machine | `krate dev --host 0.0.0.0` |
 | 4 | `krate start` no longer builds | `no build output found in dist` | Run `krate build` first, or use `krate serve` |
-| 5 | `krate.config.ts` runs in a sandbox | Config error naming a Node module | [Check the API subset](#the-config-file-runs-in-a-sandbox) |
+| 5 | `tailwind.config.*` runs in the config sandbox, not under `npx tsx` | A Tailwind config that used a Node API fails to load | [Check the API subset](#config-files-run-in-a-sandbox) |
 | 6 | Output layout | A deploy script cannot find `dist/manifest.json` | Read `dist/.krate/manifest.json` |
 | 7 | New hard errors | A build that passed on 0.4 fails | [Per-code table](#new-build-errors) |
 | 8 | `bin/krate` is gone from `@krate/core` | `krate: command not found`, or a script runs `node_modules/@krate/core/bin/krate` | Use `krate`, `npx krate` or `node_modules/.bin/krate` |
@@ -154,19 +154,24 @@ builds and serves, and `krate start` only serves an existing `dist/`. A
 output found`. Run `krate build` before it (the usual Dockerfile does), or
 change the script to `krate serve`.
 
-### The config file runs in a sandbox
+### Config files run in a sandbox
 
-0.4 ran `krate.config.ts` through `tsx` when it had imports. 0.5 evaluates it
-inside the `krate` binary (esbuild plus an embedded JavaScript engine): no
-`tsx`, no Node process, and a faster start, but only a subset of the Node API.
-`path`, `url`, `os`, read-only `fs`, `process.env`, `process.cwd()`,
-`process.argv`, `process.platform`, `Buffer`, `URL` and `crypto.randomUUID()`
-work; `child_process`, `net`, `zlib`, `fs/promises` and similar do not and fail
-with an error that names the module. The full list is in
-[Configuration](/docs/configuration/#what-a-config-file-can-use). Move such
-logic into a script that writes a file or an environment variable, or into a
-plugin. `generateStaticParams` and route evaluation no longer need `tsx` either;
-they run on plain Node.
+`krate.config.ts` has been evaluated inside the `krate` binary (esbuild plus an
+embedded JavaScript engine, not Node) since 0.4. In 0.4 that engine had no Node
+modules at all, so `import path from "node:path"` failed; 0.5 adds `path`,
+`url`, `os`, read-only `fs`, `process.env`, `process.cwd()`, `process.argv`,
+`process.platform`, `Buffer`, `URL` and `crypto.randomUUID()`. A config that
+loaded on 0.4 loads on 0.5. `child_process`, `net`, `zlib`, `fs/promises` and
+similar still do not exist and fail with an error that names the module. The full
+list is in [Configuration](/docs/configuration/#what-a-config-file-can-use).
+
+What does change is where `npx tsx` was used. With `tailwind.executeConfig`,
+0.4 ran `tailwind.config.*` under `npx --yes tsx`, a full Node, so it could use
+any Node API; 0.5 runs it in the same sandbox. And `generateStaticParams`,
+API routes on a Node sidecar and the SSR renderer no longer start `tsx` at all:
+they run on plain Node 20+, so they no longer need `npx` or a download. If a Tailwind config or plugin needs more than the sandbox offers,
+compute the value in a script and read it from the environment, or move the
+logic into a plugin.
 
 ### Build output
 
