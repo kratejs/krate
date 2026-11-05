@@ -1890,7 +1890,8 @@ a.docs-tag:hover {
     pointer-events: none;
 }
 
-.krate-docs-search-kbd:empty {
+.krate-docs-search-kbd:empty,
+.krate-docs-search-kbd:has(.krate-kbd-mac:empty):has(.krate-kbd-other:empty) {
     display: none;
 }
 
