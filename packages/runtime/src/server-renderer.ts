@@ -190,11 +190,11 @@ async function loadPageModule(page: ManifestPage): Promise<any> {
   }
 }
 
-const runtimeBundleCache = new Map<string, (propsJSON: string) => string>();
+const runtimeBundleCache = new Map<string, (props: string | Record<string, any>) => string>();
 
 // loadRuntimeRenderer loads a compiled runtime component bundle and returns its
-// __krate_render(propsJSON) function. Bundles are cached by bundle path.
-function loadRuntimeRenderer(relPath: string): (propsJSON: string) => string {
+// __krate_render(props) function (props as an object or JSON). Bundles are cached by bundle path.
+function loadRuntimeRenderer(relPath: string): (props: string | Record<string, any>) => string {
   const cached = runtimeBundleCache.get(relPath);
   if (cached) return cached;
 

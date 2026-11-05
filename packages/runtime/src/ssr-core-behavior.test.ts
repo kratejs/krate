@@ -27,7 +27,7 @@ interface Setup {
   pages?: ManifestPage[];
   regions?: Record<string, RegionMeta[]>;
   modules?: Record<string, any>;
-  runtime?: Record<string, (propsJSON: string) => string | Promise<string>>;
+  runtime?: Record<string, (props: string | Record<string, any>) => string | Promise<string>>;
   opts?: Partial<SSRCoreOptions>;
 }
 
@@ -403,7 +403,7 @@ describe("regions", () => {
       pages: [page("/p")],
       runtime: {
         "r/a": (json) => {
-          seen.push(JSON.parse(json));
+          seen.push(JSON.parse(typeof json === "string" ? json : JSON.stringify(json)));
           return "<i>A</i>";
         },
       },

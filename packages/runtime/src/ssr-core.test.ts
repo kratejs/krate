@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createSSRCore, ISRCache, takeHeadTitle, type ManifestPage } from "./ssr-core.js";
+import { createSSRCore, ISRCache, MemoryIsrStore, takeHeadTitle, type ManifestPage } from "./ssr-core.js";
 import { Head, jsx } from "./server.js";
 
 function makeCore(maxCacheSize: number, revalidate = 30) {
@@ -156,6 +156,17 @@ describe("server component region cache keys", () => {
     expect((await render({ page: "1" })).html).toContain("page-1-1");
   });
 
+  it("a bare first request does not make the region look query-independent", async () => {
+    const { render } = regionCore();
+    expect((await render({})).html).toContain("page-none-1");
+    const f = await render({ page: "7" });
+    expect(f.cacheStatus).toBe("miss");
+    expect(f.html).toContain("page-7-");
+    expect((await render({ page: "7", utm: "x" })).cacheStatus).toBe("hit");
+    expect((await render({ page: "8" })).html).toContain("page-8-");
+    expect((await render({})).html).toContain("page-none-1");
+  });
+
   it("keeps a hot region when a client sweeps random query values", async () => {
     const { render } = regionCore();
     await render({ page: "1" });
@@ -170,5 +181,171 @@ describe("server component region cache keys", () => {
     expect((await render({ a: "1", b: "2" }, whole)).cacheStatus).toBe("miss");
     expect((await render({ a: "1", b: "2" }, whole)).cacheStatus).toBe("hit");
     expect(renders()).toBe(2);
+  });
+});
+
+describe("runtime bundle region cache keys", () => {
+  // A runtime component bundle (an IIFE with __krate_render) gets its props as
+  // an object whose query records the keys it reads.
+  function bundleCore(render: (props: any) => string, maxCacheSize = 8) {
+    let renders = 0;
+    const page: ManifestPage = { route: "/feed", source: "feed.tsx", mode: "isr", revalidate: 60, bundlePath: "feed" } as any;
+    const region = { id: "list", bundlePath: "r/list", revalidate: 60, props: { nested: { n: 1 } } } as any;
+    const core = createSSRCore({
+      manifest: { pages: [page], regions: {} } as any,
+      maxCacheSize,
+      loadPageModule: async () => ({}),
+      loadRuntimeRenderer: () => (props) => {
+        renders++;
+        return render(typeof props === "string" ? JSON.parse(props) : props);
+      },
+    });
+    const run = (query: Record<string, string>) =>
+      core.renderRegion(page, region, { route: "/feed", url: "/feed", method: "GET", headers: {}, params: {}, query });
+    return { run, renders: () => renders, region };
+  }
+
+  it("keys a region on the query keys it reads, so random values share one entry", async () => {
+    const { run, renders } = bundleCore((p) => `<p>page-${p.query?.page ?? "none"}</p>`);
+    expect((await run({ page: "1" })).cacheStatus).toBe("miss");
+    for (let i = 0; i < 50; i++) {
+      const f = await run({ page: "1", utm: "junk" + i, [`k${i}`]: "v" });
+      expect(f.cacheStatus, "junk " + i).toBe("hit");
+    }
+    expect(renders()).toBe(1);
+    const other = await run({ page: "2" });
+    expect(other.cacheStatus).toBe("miss");
+    expect(other.html).toBe("<p>page-2</p>");
+    expect((await run({ page: "1" })).html).toBe("<p>page-1</p>");
+  });
+
+  it("a region that never reads the query shares one entry for every query", async () => {
+    const { run, renders } = bundleCore(() => "<p>static</p>");
+    await run({ a: "1" });
+    for (let i = 0; i < 20; i++) expect((await run({ ["x" + i]: "y" })).cacheStatus).toBe("hit");
+    expect((await run({})).cacheStatus).toBe("hit");
+    expect(renders()).toBe(1);
+  });
+
+  it("keys on the whole query when the region enumerates it", async () => {
+    const { run, renders } = bundleCore((p) => `<p>${Object.keys(p.query || {}).join(",")}</p>`);
+    await run({ a: "1" });
+    expect((await run({ a: "1", b: "2" })).cacheStatus).toBe("miss");
+    expect((await run({ a: "1", b: "2" })).cacheStatus).toBe("hit");
+    expect(renders()).toBe(2);
+  });
+
+  it("serializing the props reads everything too", async () => {
+    const { run } = bundleCore((p) => `<p>${JSON.stringify(p)}</p>`);
+    await run({ a: "1" });
+    expect((await run({ a: "1", b: "2" })).cacheStatus).toBe("miss");
+  });
+
+  it("does not let a bundle change the manifest's baked props", async () => {
+    const { run, region } = bundleCore((p) => {
+      p.nested.n++;
+      return `<p>${p.nested.n}</p>`;
+    });
+    expect((await run({})).html).toBe("<p>2</p>");
+    expect(region.props.nested.n).toBe(1);
+  });
+
+  it("renders instead of guessing when it does not know what a region reads", async () => {
+    // An entry cached by a request without a query must not answer a request
+    // with one when the reads are unknown (a fresh process after a restart).
+    const page: ManifestPage = { route: "/feed", source: "feed.tsx", mode: "isr", revalidate: 60, bundlePath: "feed" } as any;
+    const region = { id: "list", bundlePath: "r/list", revalidate: 60 } as any;
+    const mk = () =>
+      createSSRCore({
+        manifest: { pages: [page], regions: {} } as any,
+        maxCacheSize: 8,
+        loadPageModule: async () => ({}),
+        loadRuntimeRenderer: () => (props: any) => `<p>page-${props.query?.page ?? "none"}</p>`,
+      });
+    const first = mk();
+    const r = (core: ReturnType<typeof mk>, query: Record<string, string>) =>
+      core.renderRegion(page, region, { route: "/feed", url: "/feed", method: "GET", headers: {}, params: {}, query });
+    expect((await r(first, {})).html).toBe("<p>page-none</p>");
+    expect((await r(first, { page: "2" })).html).toBe("<p>page-2</p>");
+  });
+});
+
+describe("page cache never answers a query it cannot match", () => {
+  it("after a restart the persisted entry of the bare page does not answer ?page=2", async () => {
+    const page: ManifestPage = { route: "/list", source: "list.tsx", mode: "isr", revalidate: 60, bundlePath: "list" } as any;
+    const store = new MemoryIsrStore(8);
+    const mk = () =>
+      createSSRCore({
+        manifest: { pages: [page], regions: {} } as any,
+        isrStore: store,
+        loadPageModule: async () => ({
+          default: async (props: any) => {
+            const { page: n } = await props.searchParams;
+            return jsx("p", { children: `page-${n ?? "none"}` });
+          },
+        }),
+        loadRuntimeRenderer: () => () => "",
+      });
+    const req = (query: Record<string, string>) => ({ route: "/list", url: "/list", method: "GET", headers: {}, params: {}, query });
+    const before = mk();
+    expect((await before.renderPage(req({}))).html).toBe("<p>page-none</p>");
+    // A new process shares the persisted entries but has not learned what the page reads.
+    const after = mk();
+    const hit = await after.renderPage(req({}));
+    expect(hit.cacheStatus).toBe("hit");
+    const second = await after.renderPage(req({ page: "2" }));
+    expect(second.html).toBe("<p>page-2</p>");
+    expect(second.cacheStatus).toBe("miss");
+    expect((await after.renderPage(req({ page: "2" }))).cacheStatus).toBe("hit");
+    expect((await after.renderPage(req({ page: "3" }))).html).toBe("<p>page-3</p>");
+  });
+
+  it("a page that reads no query key is cached once for every query string", async () => {
+    const page: ManifestPage = { route: "/plain", source: "p.tsx", mode: "isr", revalidate: 60, bundlePath: "p" } as any;
+    let renders = 0;
+    const core = createSSRCore({
+      manifest: { pages: [page], regions: {} } as any,
+      maxCacheSize: 8,
+      loadPageModule: async () => ({ default: () => jsx("p", { children: "n" + ++renders }) }),
+      loadRuntimeRenderer: () => () => "",
+    });
+    const req = (query: Record<string, string>) => ({ route: "/plain", url: "/plain", method: "GET", headers: {}, params: {}, query });
+    await core.renderPage(req({ a: "1" }));
+    for (let i = 0; i < 30; i++) expect((await core.renderPage(req({ ["q" + i]: "v" }))).cacheStatus).toBe("hit");
+    expect(renders).toBe(1);
+  });
+});
+
+describe("one client cannot flush the page and region caches", () => {
+  it("keeps a page that was hit when 520 one-off variants follow it", async () => {
+    const { render } = makeCore(512);
+    expect((await render("hot")).cacheStatus).toBe("miss");
+    expect((await render("hot")).cacheStatus).toBe("hit");
+    expect((await render("hot")).cacheStatus).toBe("hit");
+    for (let i = 1; i <= 520; i++) await render("x" + i);
+    expect((await render("hot")).cacheStatus).toBe("hit");
+  });
+
+  it("keeps a hot region when a client mints 520 params variants", async () => {
+    const page: ManifestPage = { route: "/p/[id]", source: "p.tsx", mode: "isr", revalidate: 60, bundlePath: "p" } as any;
+    const region = { id: "r", bundlePath: "r/r", revalidate: 60 } as any;
+    const core = createSSRCore({
+      manifest: { pages: [page], regions: {} } as any,
+      maxCacheSize: 512,
+      loadPageModule: async () => ({}),
+      loadRuntimeRenderer: () => (props: any) => `<p>${props.params.id}</p>`,
+    });
+    const run = (id: string) => core.renderRegion(page, region, { route: "/p/[id]", url: "/p/" + id, method: "GET", headers: {}, params: { id }, query: {} });
+    await run("hot");
+    expect((await run("hot")).cacheStatus).toBe("hit");
+    for (let i = 1; i <= 520; i++) await run("x" + i);
+    expect((await run("hot")).cacheStatus).toBe("hit");
+  });
+
+  it("still evicts one-off entries and bounds the cache", () => {
+    const c = new ISRCache(4);
+    const entry = (html: string) => ({ html, timestamp: Date.now() });
+    for (let i = 0; i < 100; i++) c.set("k" + i, entry("v"));
+    expect(c.size).toBe(4);
   });
 });

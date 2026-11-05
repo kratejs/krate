@@ -140,7 +140,7 @@ export interface KrateServerModules {
   /** Page server bundles keyed by their manifest bundlePath. */
   pages?: Record<string, any>;
   /** Runtime component renderers keyed by region bundlePath. */
-  runtime?: Record<string, (propsJSON: string) => string | Promise<string>>;
+  runtime?: Record<string, (props: string | Record<string, any>) => string | Promise<string>>;
   /** API route modules keyed by route key. */
   api?: Record<string, any>;
   /** Server action modules keyed by manifest file. */
