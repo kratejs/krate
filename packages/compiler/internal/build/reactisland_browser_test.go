@@ -139,9 +139,6 @@ func TestBrowserReactLibraryIslands(t *testing.T) {
 	if _, err := captureOutput(func() error { return New(root, cfg).BuildAll() }); err != nil {
 		t.Fatalf("BuildAll: %v", err)
 	}
-	if keep := os.Getenv("KRATE_TEST_KEEP"); keep != "" {
-		_ = exec.Command("cp", "-r", root+"/.", keep).Run()
-	}
 	// Pages rendered per request need the real server (Node renderer).
 	serverBase := ""
 	if canStopInProcessServer {

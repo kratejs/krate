@@ -527,10 +527,6 @@ func (b *Builder) planLayoutProviders(layoutPath string, layout *bundler.Module,
 	}
 
 	// Resolve every name against the layout's imports and declarations.
-	type localDecl struct {
-		stmt ast.Stmt
-		text string // replacement text for hoisted hook calls
-	}
 	moduleDecls := map[string]ast.Stmt{}
 	moduleOrder := map[ast.Stmt]int{}
 	for i, st := range prog.Body {
@@ -827,8 +823,7 @@ func liftWrappers(layout *bundler.Module, shape *layoutShape, wrappers []*ast.JS
 	}
 	replaced := 0
 	var rewriteChildren func(cs []ast.JSXChild) []ast.JSXChild
-	var rewriteElement func(el *ast.JSXElement) ast.JSXChild
-	rewriteElement = func(el *ast.JSXElement) ast.JSXChild {
+	rewriteElement := func(el *ast.JSXElement) ast.JSXChild {
 		if name, ok := targets[el.Position.Offset]; ok && el.Opening != nil && el.Opening.Name == name {
 			replaced++
 			kids := rewriteChildren(el.Children)
