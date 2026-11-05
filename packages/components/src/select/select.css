@@ -112,8 +112,16 @@
   cursor: pointer;
 }
 .krate-select-item:hover,
-.krate-select-item-selected {
+.krate-select-item-selected,
+.krate-select-item-active {
   background: var(--krate-surface, #f4f4f5);
+}
+.krate-select-item-active {
+  outline: 2px solid var(--krate-primary, #3b82f6);
+  outline-offset: -2px;
+}
+.krate-select-item-disabled .krate-select-item-text {
+  cursor: not-allowed;
 }
 .krate-select-item-disabled {
   opacity: 0.4;
