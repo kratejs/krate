@@ -199,11 +199,13 @@ function requestIsHTTPS(headers) {
 }
 
 // signFlash ties the flash cookie to this server with an HMAC, so a page on a
-// sibling subdomain cannot plant a notice. Without a secret (the script run on
-// its own) the value stays unsigned.
+// sibling subdomain cannot plant a notice. The key is KRATE_FLASH_SECRET when
+// set (servers behind a load balancer share it), else the per-process internal
+// secret. Without either (the script run on its own) the value stays unsigned.
+const KRATE_FLASH_KEY = process.env.KRATE_FLASH_SECRET || KRATE_INTERNAL_SECRET;
 function signFlash(payload) {
-  if (!KRATE_INTERNAL_SECRET) return payload;
-  return payload + '.' + createHmac('sha256', KRATE_INTERNAL_SECRET).update('krate-flash\0' + payload).digest('base64url');
+  if (!KRATE_FLASH_KEY) return payload;
+  return payload + '.' + createHmac('sha256', KRATE_FLASH_KEY).update('krate-flash\0' + payload).digest('base64url');
 }
 
 function makeActionContext(req, id, urlPath) {

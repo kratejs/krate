@@ -9,6 +9,9 @@ import {
   regionReplaceScript,
   replaceTitle,
   requestFlash,
+  signFlash,
+  verifyFlash,
+  flashPayloadOf,
   splitBodyScripts,
   spliceShell,
 } from "./handler-html.js";
@@ -192,40 +195,68 @@ describe("spliceShell", () => {
   });
 });
 
-function flashCookie(payload: unknown, sig = ""): string {
+const SECRET = "krate-test-flash-secret-0123456789";
+
+// The same vector is pinned in internal/build/serve_flash_test.go: what the Go
+// host signs verifies here, and what is signed here verifies there.
+const VECTOR_PAYLOAD = "eyJhIjoiYWN0MSIsInIiOnsiZXJyb3IiOiJOYW1lIGlzIHJlcXVpcmVkIn19";
+const VECTOR_COOKIE = VECTOR_PAYLOAD + ".zLQd73rhp1HN8J0vNvSeLqvlCqquygUX-mXuuN24dlY";
+
+async function flashCookie(payload: unknown, secret: string | null = SECRET): Promise<string> {
   const b64 = Buffer.from(JSON.stringify(payload), "utf-8").toString("base64url");
-  return sig ? `${b64}.${sig}` : b64;
+  return secret === null ? b64 : signFlash(secret, b64);
 }
 
 describe("requestFlash", () => {
   const payload = { a: "act1", r: { error: "Name is required" } };
 
-  it("reads the flash cookie among other cookies", () => {
-    const got = requestFlash(`theme=dark; krate_flash=${flashCookie(payload)}; x=1`);
+  it("reads the signed flash cookie among other cookies", async () => {
+    const got = await requestFlash(`theme=dark; krate_flash=${await flashCookie(payload)}; x=1`, SECRET);
     expect(got?.payload).toEqual(payload);
   });
 
-  it("accepts a quoted value and ignores the signature part", () => {
-    const got = requestFlash(`krate_flash="${flashCookie(payload, "deadbeef")}"`);
+  it("accepts a quoted value and returns the payload part as raw", async () => {
+    const got = await requestFlash(`krate_flash="${await flashCookie(payload)}"`, SECRET);
     expect(got?.payload).toEqual(payload);
-    expect(got?.raw).toBe(flashCookie(payload));
+    expect(got?.raw).toBe(VECTOR_PAYLOAD);
   });
 
-  it("does not match a cookie that merely ends with the name", () => {
-    expect(requestFlash(`other_krate_flash=${flashCookie(payload)}`)).toBeNull();
+  it("signs and verifies the same bytes as the Go host", async () => {
+    expect(await signFlash(SECRET, VECTOR_PAYLOAD)).toBe(VECTOR_COOKIE);
+    expect(await verifyFlash(SECRET, VECTOR_COOKIE)).toBe(VECTOR_PAYLOAD);
+    expect(flashPayloadOf("act1", { error: "Name is required" })).toBe(VECTOR_PAYLOAD);
   });
 
-  it("returns null for no header, an empty value, bad base64, bad JSON or no action id", () => {
-    expect(requestFlash(null)).toBeNull();
-    expect(requestFlash("krate_flash=")).toBeNull();
-    expect(requestFlash("krate_flash=%%%")).toBeNull();
-    expect(requestFlash(`krate_flash=${Buffer.from("not json").toString("base64url")}`)).toBeNull();
-    expect(requestFlash(`krate_flash=${flashCookie({ a: "", r: "x" })}`)).toBeNull();
-    expect(requestFlash(`krate_flash=${flashCookie({ r: "x" })}`)).toBeNull();
+  it("never trusts an unsigned, forged or foreign-signed cookie", async () => {
+    const unsigned = await flashCookie(payload, null);
+    expect(await requestFlash(`krate_flash=${unsigned}`, SECRET)).toBeNull();
+    expect(await requestFlash(`krate_flash=${unsigned}.`, SECRET)).toBeNull();
+    expect(await requestFlash(`krate_flash=${unsigned}.deadbeef`, SECRET)).toBeNull();
+    expect(await requestFlash(`krate_flash=${await flashCookie(payload, "another-secret-another-secret")}`, SECRET)).toBeNull();
+    // A valid signature does not carry over to a different payload.
+    const sig = VECTOR_COOKIE.slice(VECTOR_COOKIE.indexOf(".") + 1);
+    const other = Buffer.from(JSON.stringify({ a: "act1", r: { error: "Injected notice" } })).toString("base64url");
+    expect(await requestFlash(`krate_flash=${other}.${sig}`, SECRET)).toBeNull();
+    // Without a secret nothing is trusted, signed or not.
+    expect(await requestFlash(`krate_flash=${VECTOR_COOKIE}`, null)).toBeNull();
+    expect(await requestFlash(`krate_flash=${VECTOR_COOKIE}`, "")).toBeNull();
   });
 
-  it("decodes multi-byte text", () => {
-    const got = requestFlash(`krate_flash=${flashCookie({ a: "a", r: "café €" })}`);
+  it("does not match a cookie that merely ends with the name", async () => {
+    expect(await requestFlash(`other_krate_flash=${await flashCookie(payload)}`, SECRET)).toBeNull();
+  });
+
+  it("returns null for no header, an empty value, bad base64, bad JSON or no action id", async () => {
+    expect(await requestFlash(null, SECRET)).toBeNull();
+    expect(await requestFlash("krate_flash=", SECRET)).toBeNull();
+    expect(await requestFlash("krate_flash=%%%", SECRET)).toBeNull();
+    expect(await requestFlash(`krate_flash=${await signFlash(SECRET, Buffer.from("not json").toString("base64url"))}`, SECRET)).toBeNull();
+    expect(await requestFlash(`krate_flash=${await flashCookie({ a: "", r: "x" })}`, SECRET)).toBeNull();
+    expect(await requestFlash(`krate_flash=${await flashCookie({ r: "x" })}`, SECRET)).toBeNull();
+  });
+
+  it("decodes multi-byte text", async () => {
+    const got = await requestFlash(`krate_flash=${await flashCookie({ a: "a", r: "café €" })}`, SECRET);
     expect(got?.payload.r).toBe("café €");
   });
 });

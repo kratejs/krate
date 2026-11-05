@@ -25,10 +25,12 @@ import {
   allSuspense,
   canStreamOutOfOrder,
   FLASH_COOKIE,
+  flashPayloadOf,
   injectFlashNotice,
   parseRegionShell,
   regionReplaceScript,
   requestFlash,
+  signFlash,
   spliceShell,
   splitBodyScripts,
   type RegionBoundary,
@@ -174,6 +176,13 @@ export interface HandlerOptions {
   trustProxy?: boolean;
   /** Hex sha256 for error digests; defaults to the portable implementation. */
   sha256Hex?(input: string): string;
+  /**
+   * Key the no-JS flash cookie is signed with. Defaults to the
+   * KRATE_FLASH_SECRET environment variable. Without a key the node target
+   * signs with a random per-process key and the serverless targets carry no
+   * flash state at all; an unsigned flash cookie is never trusted.
+   */
+  flashSecret?: string;
 }
 
 export type KrateHandler = (request: Request, ctx?: HandlerContext) => Promise<Response>;
@@ -319,6 +328,35 @@ function attachCookies(request: Request): Request {
 
 const sleepMicrotask = () => Promise.resolve();
 
+const MIN_FLASH_SECRET = 16;
+let warnedFlashSecret = false;
+
+/**
+ * The key flash cookies are signed with, or null when this deployment cannot
+ * sign them reliably. A configured key (option or KRATE_FLASH_SECRET) is shared
+ * by every instance. The node target is one long-lived process, so a random
+ * key per process is enough (replicas behind a load balancer need the shared
+ * key). A serverless instance has no memory the next one shares: without a key
+ * the flash is not carried at all rather than failing on a random instance.
+ */
+function resolveFlashSecret(option: string | undefined, target: DeployTarget): string | null {
+  const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
+  const configured = option || (env && env.KRATE_FLASH_SECRET) || "";
+  if (configured) {
+    if (configured.length < MIN_FLASH_SECRET && !warnedFlashSecret) {
+      warnedFlashSecret = true;
+      console.warn(`[krate] KRATE_FLASH_SECRET is shorter than ${MIN_FLASH_SECRET} characters: use a random value of at least 32 bytes.`);
+    }
+    return configured;
+  }
+  if (target !== "node") return null;
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  let hex = "";
+  for (const b of bytes) hex += b.toString(16).padStart(2, "0");
+  return hex;
+}
+
 // Handler factory
 
 export function createKrateHandler(options: HandlerOptions): KrateHandler {
@@ -332,6 +370,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
   const hashed = new Set(data.hashedAssets);
   const staticOnly = new Set(data.staticOnlyRoutes.map(normalizeRoutePattern));
   const sha256Hex = options.sha256Hex || portableSha256Hex;
+  const flashSecret = resolveFlashSecret(options.flashSecret, target);
   const segEntries = data.segments || [];
   const segPages = data.segmentPages || {};
   const segDirByRoute = new Map<string, string>();
@@ -1541,18 +1580,27 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     if (fetchMode) return withHeaders(rs, new Response(body, { status: 200, headers: actionHeaders("application/json", ctx.setCookies) }));
     const headers = actionHeaders("text/plain; charset=utf-8", ctx.setCookies);
     headers.set("location", redirect || reqHeaders.get("x-krate-return") || "/");
-    // The returned state would be lost across the 303; carry it in a short-lived cookie.
+    // The returned state would be lost across the 303; carry it in a short-lived
+    // signed cookie. A page can set cookies for sibling hosts, so an unsigned one
+    // is never read back (see resolveFlashSecret for the deployments without a key).
     if (!redirect && result !== undefined) {
-      try {
-        const json = JSON.stringify({ a: id, r: result });
-        const bytes = new TextEncoder().encode(json);
-        let bin = "";
-        for (const b of bytes) bin += String.fromCharCode(b);
-        const flash = btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-        if (flash.length <= 3000) headers.append("set-cookie", FLASH_COOKIE + "=" + flash + "; Path=/; Max-Age=60; SameSite=Lax" + (isHTTPSRequest(reqHeaders) ? "; Secure" : ""));
-        else console.warn(`[krate] action ${entry.export} returned state too large to carry across the redirect; it is not shown after a no-JS submit`);
-      } catch {
-        // unserializable state is not carried
+      if (flashSecret === null) {
+        if (!warnedFlashSecret) {
+          warnedFlashSecret = true;
+          console.warn(
+            "[krate] action state is not shown after a no-JS form submit on this target: set KRATE_FLASH_SECRET (a random string of at least 32 bytes, the same on every instance) to enable it",
+          );
+        }
+      } else {
+        try {
+          const payload = flashPayloadOf(id, result);
+          if (payload.length <= 2800) {
+            const flash = await signFlash(flashSecret, payload);
+            headers.append("set-cookie", FLASH_COOKIE + "=" + flash + "; Path=/; Max-Age=60; SameSite=Lax" + (isHTTPSRequest(reqHeaders) ? "; Secure" : ""));
+          } else console.warn(`[krate] action ${entry.export} returned state too large to carry across the redirect; it is not shown after a no-JS submit`);
+        } catch {
+          // unserializable state is not carried
+        }
       }
     }
     return withHeaders(rs, new Response(null, { status: 303, headers }));
@@ -1585,7 +1633,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
   /** flashNoticeMiddleware: render pending no-JS form feedback into a page. */
   async function flashNotice(rs: ReqState, next: (rs: ReqState) => Promise<Response>): Promise<Response> {
     if (rs.method !== "GET" || (extName(rs.path) !== "" && !isHTMLDocRequest(rs.path))) return next(rs);
-    const flash = requestFlash(rs.headers.get("cookie"));
+    const flash = await requestFlash(rs.headers.get("cookie"), flashSecret);
     if (!flash) return next(rs);
     // The page is rendered fresh with the notice: drop conditional and range headers.
     const headers = new Headers(rs.headers);

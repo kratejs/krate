@@ -2211,7 +2211,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		devMux = devErrorShell(hub, root, absOut, mux)
 	}
 	proxyTrust.Store(cfg.Server.TrustProxy)
-	flashSecret.Store(revalHost.secret)
+	flashSecret.Store(flashSecretFor(revalHost.secret))
 	proxyHops.Store(int32(cfg.Server.TrustedProxies))
 	var rootHandler http.Handler = requestIDMiddleware(forwardedHeadersMiddleware(cfg.Server.TrustProxy, basePathMiddleware(cfg.BaseURLPath(), securityHeadersMiddleware(cfg, customHeadersMiddleware(cfg.Headers, corsMiddleware(cfg, panicRecoveryMiddleware(Logger, devMux)))))))
 
