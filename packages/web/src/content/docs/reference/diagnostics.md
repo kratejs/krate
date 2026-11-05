@@ -414,7 +414,7 @@ A named import from `@krate/runtime` (or one of its subpaths) asks for something
 
 **Imported asset is used where its URL cannot be inlined**
 
-`import logo from "./logo.png"` binds the file's hashed URL. The compiler replaces reads of the binding in the module that imports the file, so a binding that another module re-exports (`export { logo }`), or a read the rewrite cannot reach, has no value in the browser script: it is a ReferenceError there, or renders as the bare name. Import the asset directly where it is used, or export the URL as a string constant. This is a warning.
+`import logo from "./logo.png"` binds the file's hashed URL. The compiler replaces reads of the binding with that URL, in the module that imports the file and in every module that imports it through `export { logo }`, `export default logo`, `export { default as logo } from "./logo.png"`, `export *` or `export * as ns` and `ns.logo`. A read it cannot reach, such as a computed property key (`{ [logo]: 1 }`) or `ns.default` of a namespace that is passed on whole, has no value in the browser script: it is a ReferenceError there, or renders as the bare name. Use the binding as a plain value in JSX or a component, or import the file with a `?url` suffix. This is a warning.
 
 ## KR8xxx: islands, compiled packages and general React compatibility
 

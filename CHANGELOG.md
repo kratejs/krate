@@ -150,6 +150,11 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Fixed
 
+- An imported asset (`import logo from "./logo.png"`) now resolves to its URL through any
+  chain of re-exports: `export { logo }`, `export default logo`,
+  `export { default as logo } from "./logo.png"`, `export *`, `export * as ns` with `ns.logo`,
+  and aliases. They used to render as the bare name (`src=logo`) and fail in the browser.
+  KR7126 is kept for reads the rewrite cannot reach.
 - Tailwind: functional `@utility name-*` blocks were dropped when the build merged the
   directives found in project CSS, so they never generated anything outside unit tests.
   A hyphen-free `@utility card` is no longer discarded by the class scanner as prose, and a
