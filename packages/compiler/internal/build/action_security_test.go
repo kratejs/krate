@@ -1,6 +1,8 @@
 package build
 
 import (
+	"io"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
@@ -84,5 +86,23 @@ func TestActionSidecarHandlesActions(t *testing.T) {
 				t.Errorf("sidecar script missing %q", marker)
 			}
 		}
+	}
+}
+
+// The host and the sidecar both mark action responses no-store; the client
+// must see the header once.
+func TestActionHandlerSendsSingleCacheControl(t *testing.T) {
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Add("Cache-Control", "no-store")
+		_, _ = io.WriteString(w, "{}")
+	})
+	h := actionHandler(next, 1<<20)
+	req := httptest.NewRequest("POST", "http://example.com/__krate/action/x", strings.NewReader("{}"))
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	req.Header.Set("X-Krate-Action", "fetch")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if got := rec.Header().Values("Cache-Control"); len(got) != 1 || got[0] != "no-store" {
+		t.Errorf("Cache-Control = %v, want a single no-store", got)
 	}
 }

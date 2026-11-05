@@ -77,3 +77,21 @@ func TestFlashNoticeLeavesOtherRequestsAlone(t *testing.T) {
 		}
 	}
 }
+
+// An action id that merely starts with the flashed id must not receive the
+// notice, and the pattern must work for ids that need regexp escaping.
+func TestInjectFlashNoticeMatchesWholeActionID(t *testing.T) {
+	page := []byte(`<form action="/__krate/action/a10"></form><form action="/__krate/action/a1?x=1"></form>`)
+	out, ok := injectFlashNotice(page, "raw", flashPayload{A: "a1", R: []byte(`{"error":"bad"}`)})
+	if !ok {
+		t.Fatal("notice not injected")
+	}
+	s := string(out)
+	i := strings.Index(s, `class="krate-flash"`)
+	if i < strings.Index(s, "a1?x=1") {
+		t.Errorf("notice went into the a10 form:\n%s", s)
+	}
+	if _, ok := injectFlashNotice(page, "raw", flashPayload{A: ".*", R: []byte(`{"error":"bad"}`)}); ok {
+		t.Error("an id with regexp metacharacters must not match other forms")
+	}
+}

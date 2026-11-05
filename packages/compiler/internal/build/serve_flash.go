@@ -157,6 +157,10 @@ func flashNoticeMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// flashFormRe matches an opening <form> whose action posts to a Krate server
+// action; group 1 is the action id.
+var flashFormRe = regexp.MustCompile(`(?is)<form\b[^>]*?\baction\s*=\s*["']?[^"'\s>]*/__krate/action/([^"'\s>?#&/]*)[^>]*>`)
+
 // injectFlashNotice inserts the notice after the opening tag of the form whose
 // action is the one that produced the flash. It reports false when the page has
 // no such form or the state has nothing to show.
@@ -165,8 +169,15 @@ func injectFlashNotice(page []byte, cookieValue string, p flashPayload) ([]byte,
 	if len(msgs) == 0 {
 		return nil, false
 	}
-	re := regexp.MustCompile(`(?is)<form\b[^>]*?\baction\s*=\s*["']?[^"'\s>]*/__krate/action/` + regexp.QuoteMeta(p.A) + `[^>]*>`)
-	loc := re.FindIndex(page)
+	// One compiled pattern for every action id (the id comes from a cookie, so
+	// it must not be compiled into a pattern per request).
+	var loc []int
+	for _, m := range flashFormRe.FindAllSubmatchIndex(page, -1) {
+		if string(page[m[2]:m[3]]) == p.A {
+			loc = m[:2]
+			break
+		}
+	}
 	if loc == nil {
 		return nil, false
 	}

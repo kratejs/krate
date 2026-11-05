@@ -910,7 +910,7 @@ func streamRegionPage(w http.ResponseWriter, flusher http.Flusher, shells *regio
 }
 
 func streamRegionPageMode(w http.ResponseWriter, flusher http.Flusher, shells *regionShellCache, absOut, route string, ssrPort int, params, query, headers map[string]string, goRenders map[string]goRenderRegion, renderGo func([]goRenderRegion) (map[string]string, error), isISR bool, revalidate int, internalSecret string, outOfOrder bool) regionPageResult {
-	return streamRegionPageModeSC(w, flusher, shells, absOut, route, ssrPort, params, query, headers, goRenders, renderGo, isISR, revalidate, internalSecret, outOfOrder, false, false)
+	return streamRegionPageModeSC(context.Background(), w, flusher, shells, absOut, route, ssrPort, params, query, headers, goRenders, renderGo, isISR, revalidate, internalSecret, outOfOrder, false, false)
 }
 
 // streamRegionPageModeSC is streamRegionPageMode with serverComponents set for
@@ -921,7 +921,7 @@ func streamRegionPageMode(w http.ResponseWriter, flusher http.Flusher, shells *r
 // failOnRenderErr turns a failed page render into a fatal result (nothing is
 // written) so the caller can answer with the route's error page instead of
 // the baked body.
-func streamRegionPageModeSC(w http.ResponseWriter, flusher http.Flusher, shells *regionShellCache, absOut, route string, ssrPort int, params, query, headers map[string]string, goRenders map[string]goRenderRegion, renderGo func([]goRenderRegion) (map[string]string, error), isISR bool, revalidate int, internalSecret string, outOfOrder, serverComponents, failOnRenderErr bool) regionPageResult {
+func streamRegionPageModeSC(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, shells *regionShellCache, absOut, route string, ssrPort int, params, query, headers map[string]string, goRenders map[string]goRenderRegion, renderGo func([]goRenderRegion) (map[string]string, error), isISR bool, revalidate int, internalSecret string, outOfOrder, serverComponents, failOnRenderErr bool) regionPageResult {
 	res := regionPageResult{}
 	relPath := strings.TrimPrefix(route, "/")
 	if relPath == "" {
@@ -971,14 +971,14 @@ func streamRegionPageModeSC(w http.ResponseWriter, flusher http.Flusher, shells 
 	// never holds up the rest of the page. Page/ISR and nested regions keep the
 	// ordered assembly path because they carry status or contain child markers.
 	if outOfOrder && !isISR && canStreamOutOfOrder(all) && (!serverComponents || allSuspense(all)) {
-		return streamSiblingRegions(w, flusher, shell, regionList, goReq, renderGo, string(reqCtx), ssrPort, route, params, query, headers, internalSecret)
+		return streamSiblingRegions(ctx, w, flusher, shell, regionList, goReq, renderGo, string(reqCtx), ssrPort, route, params, query, headers, internalSecret)
 	}
 
 	// Only involve the Node SSR sidecar when it has something to render. A page
 	// whose regions are all Go (or static) is served by the Go server + Go host
 	// alone - no node/bun process, no extra hop.
 	if len(regionList) > 0 {
-		if err := fetchNodeRegions(ssrPort, route, params, query, headers, regionList, regionHTML, &res, internalSecret); err != nil {
+		if err := fetchNodeRegions(ctx, ssrPort, route, params, query, headers, regionList, regionHTML, &res, internalSecret); err != nil {
 			res.unavailable = err.Error()
 			return res
 		}
@@ -1102,7 +1102,7 @@ func streamRegionPageModeSC(w http.ResponseWriter, flusher http.Flusher, shells 
 // for a Node hop. It reuses the pooled keep-alive sidecar client (no per-request
 // TCP handshake) and bounds the whole exchange so a stalled sidecar can't pin the
 // request goroutine forever.
-func fetchNodeRegions(ssrPort int, route string, params, query, headers map[string]string, regionList []map[string]string, regionHTML map[string]string, res *regionPageResult, internalSecret string) error {
+func fetchNodeRegions(ctx context.Context, ssrPort int, route string, params, query, headers map[string]string, regionList []map[string]string, regionHTML map[string]string, res *regionPageResult, internalSecret string) error {
 	reqBody, _ := json.Marshal(map[string]interface{}{
 		"route":   route,
 		"url":     route,
@@ -1112,7 +1112,7 @@ func fetchNodeRegions(ssrPort int, route string, params, query, headers map[stri
 		"query":   query,
 		"regions": regionList,
 	})
-	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("http://127.0.0.1:%d/__krate/regions", ssrPort), bytes.NewReader(reqBody))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("http://127.0.0.1:%d/__krate/regions", ssrPort), bytes.NewReader(reqBody))
 	if err != nil {
 		return err
 	}
@@ -1219,12 +1219,13 @@ func fetchNodeRegions(ssrPort int, route string, params, query, headers map[stri
 	return nil
 }
 
+var titleElementRe = regexp.MustCompile(`(?i)<title[^>]*>[\s\S]*?</title>`)
+
 // replaceTitle swaps the baked <title> content in a shell for a freshly
 // rendered one. Minified shells may have unquoted/empty titles; a simple
 // scan/replace on the first <title>...</title> span is sufficient.
 func replaceTitle(shell, title string) string {
-	re := regexp.MustCompile(`(?i)<title[^>]*>[\s\S]*?</title>`)
-	loc := re.FindStringIndex(shell)
+	loc := titleElementRe.FindStringIndex(shell)
 	if loc == nil {
 		return shell
 	}
@@ -1999,10 +2000,13 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		}
 		outOfOrder := page != nil && page.Mode == RenderStreaming.String()
 		errMatch, hasErrPage := segs.forRoute(SegmentError, r.URL.Path, page.SegDir)
-		rr := streamRegionPageModeSC(w, flusher, regionShells, absOut, route, regionPort, params, query, headers, routeGo, renderGo, isISR, reval, ssr.InternalSecret(), outOfOrder, page.ServerComponents, hasErrPage)
+		rr := streamRegionPageModeSC(r.Context(), w, flusher, regionShells, absOut, route, regionPort, params, query, headers, routeGo, renderGo, isISR, reval, ssr.InternalSecret(), outOfOrder, page.ServerComponents, hasErrPage)
 		if rr.served && rr.unavailable != "" {
 			// The renderer is down or unreachable. Serving the baked shell with a
 			// 200 would hide the outage (and let a CDN cache the empty page).
+			if r.Context().Err() != nil {
+				return // the client went away; there is nobody to answer
+			}
 			fmt.Fprintf(os.Stderr, "  %sSSR renderer unavailable (%s):%s %s\n", cRed, route, cReset, rr.unavailable)
 			h := w.Header()
 			h.Set("X-Krate-Error", "renderer-unavailable")
@@ -2402,7 +2406,7 @@ func loggingMiddleware(next http.Handler) http.Handler {
 		emitAccessLog(accessRecord{
 			id:       requestIDFrom(r.Context()),
 			method:   r.Method,
-			path:     r.URL.Path,
+			path:     r.URL.EscapedPath(),
 			status:   lrw.statusCode,
 			duration: time.Since(start),
 		})
