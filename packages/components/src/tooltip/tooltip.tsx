@@ -3,6 +3,9 @@ import './tooltip.css';
 
 export interface TooltipProps {
   children?: any;
+  class?: string;
+  /** Alias of `class`. */
+  className?: string;
 }
 
 /**
@@ -17,17 +20,20 @@ export interface TooltipProps {
  * ```
  */
 export function Tooltip(props: TooltipProps) {
-  return <span class="krate-tooltip">{props.children}</span>;
+  return <span class={"krate-tooltip" + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")}>{props.children}</span>;
 }
 
 export interface TooltipTriggerProps {
   children?: any;
+  class?: string;
+  /** Alias of `class`. */
+  className?: string;
 }
 
 /** @deprecated Use `Tooltip.Trigger` instead. */
 export function TooltipTrigger(props: TooltipTriggerProps) {
   return (
-    <span class="krate-tooltip-trigger" tabIndex={0}>
+    <span class={"krate-tooltip-trigger" + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")} tabIndex={0}>
       {props.children}
     </span>
   );
@@ -35,12 +41,15 @@ export function TooltipTrigger(props: TooltipTriggerProps) {
 
 export interface TooltipContentProps {
   children?: any;
+  class?: string;
+  /** Alias of `class`. */
+  className?: string;
 }
 
 /** @deprecated Use `Tooltip.Content` instead. */
 export function TooltipContent(props: TooltipContentProps) {
   return (
-    <span class="krate-tooltip-content" role="tooltip">
+    <span class={"krate-tooltip-content" + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")} role="tooltip">
       {props.children}
     </span>
   );

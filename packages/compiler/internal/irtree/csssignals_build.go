@@ -92,7 +92,7 @@ func (b *builder) buildCSSTriggerAt(el *ast.JSXElement, t csssignals.Trigger, no
 	if t.Scope.Kind == csssignals.KindGroup && t.Option == t.Scope.Sentinel {
 		mark = markClose
 	}
-	appendClass(clone, t.Scope.TriggerClass(t.Option))
+	appendClassAny(clone, t.Scope.TriggerClass(t.Option))
 	// A null/closed group option has no controller input; clicking it cannot
 	// point at one, so close via the sentinel's hidden radio.
 	clone.Opening.Attributes = append(clone.Opening.Attributes, &ast.JSXAttr{
@@ -109,13 +109,13 @@ func (b *builder) buildCSSTriggerAt(el *ast.JSXElement, t csssignals.Trigger, no
 func (b *builder) buildGroupTrigger(base *ast.JSXElement, t csssignals.Trigger) ast.Expr {
 	s := t.Scope
 	selectLabel := shallowCloneJSX(base)
-	appendClass(selectLabel, s.TriggerClass(t.Option))
+	appendClassAny(selectLabel, s.TriggerClass(t.Option))
 	selectLabel.Opening.Attributes = append(selectLabel.Opening.Attributes, strJSXAttr("for", s.ControlID(b.cssToken, t.Option)))
 	b.applyTriggerARIA(selectLabel, t, markOpen)
 
 	closeLabel := shallowCloneJSX(base)
-	appendClass(closeLabel, s.TriggerClass(t.Option))
-	appendClass(closeLabel, s.TriggerAltClass(t.Option))
+	appendClassAny(closeLabel, s.TriggerClass(t.Option))
+	appendClassAny(closeLabel, s.TriggerAltClass(t.Option))
 	closeLabel.Opening.Attributes = append(closeLabel.Opening.Attributes, strJSXAttr("for", s.ControlID(b.cssToken, s.Sentinel)))
 	b.applyTriggerARIA(closeLabel, t, markAlt)
 
@@ -145,7 +145,7 @@ func (b *builder) buildRangeStepper(clone *ast.JSXElement, t csssignals.Trigger)
 			j = i
 		}
 		lbl := shallowCloneJSX(clone)
-		appendClass(lbl, s.TriggerClass(s.Options[i]))
+		appendClassAny(lbl, s.TriggerClass(s.Options[i]))
 		lbl.Opening.Attributes = append(lbl.Opening.Attributes, &ast.JSXAttr{
 			Name:  "for",
 			Value: &ast.Literal{Kind: ast.StringLit, Value: s.ControlID(b.cssToken, s.Options[j])},
@@ -166,7 +166,7 @@ func (b *builder) buildStackPopTrigger(clone *ast.JSXElement, t csssignals.Trigg
 			target = parent
 		}
 	}
-	appendClass(clone, s.TriggerClass(target))
+	appendClassAny(clone, s.TriggerClass(target))
 	clone.Opening.Attributes = append(clone.Opening.Attributes, &ast.JSXAttr{
 		Name:  "for",
 		Value: &ast.Literal{Kind: ast.StringLit, Value: s.ControlID(b.cssToken, target)},
@@ -601,6 +601,30 @@ func appendClass(el *ast.JSXElement, cls string) bool {
 		Value: &ast.Literal{Kind: ast.StringLit, Value: cls},
 	})
 	return true
+}
+
+// appendClassAny is appendClass that also accepts a dynamic class expression,
+// which it extends by string concatenation. Triggers become <label>s whose
+// class the author may compute (a forwarded `class` prop, for example).
+func appendClassAny(el *ast.JSXElement, cls string) {
+	if appendClass(el, cls) {
+		return
+	}
+	for _, attr := range el.Opening.Attributes {
+		if attr == nil || (attr.Name != "class" && attr.Name != "className") || attr.Value == nil {
+			continue
+		}
+		attr.Value = &ast.BinaryExpr{
+			Op: "+",
+			Left: &ast.BinaryExpr{
+				Op:    "+",
+				Left:  &ast.ParenExpr{Expr: attr.Value},
+				Right: &ast.Literal{Kind: ast.StringLit, Value: " "},
+			},
+			Right: &ast.Literal{Kind: ast.StringLit, Value: cls},
+		}
+		return
+	}
 }
 
 // initialFor returns the initially selected option of a scope for one instance:

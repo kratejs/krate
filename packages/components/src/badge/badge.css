@@ -15,7 +15,7 @@
   padding: 2px 8px;
 }
 .krate-badge-default {
-  background: var(--krate-primary, #3b82f6);
+  background: var(--krate-primary, #c2410c);
   color: var(--krate-primary-fg, #fff);
 }
 .krate-badge-secondary {

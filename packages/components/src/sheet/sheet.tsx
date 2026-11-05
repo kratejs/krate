@@ -17,6 +17,9 @@ export interface SheetProps {
   /** Element id: a handle for `openOverlay('#id')` / `closeOverlay('#id')`. */
   id?: string;
   children?: any;
+  class?: string;
+  /** Alias of `class`. */
+  className?: string;
 }
 
 /** Edge-anchored dialog (drawer). Zero JS via a context-provided CSS scope. */
@@ -24,7 +27,7 @@ export function Sheet(props: SheetProps) {
   const open = createCSSGroup<string>(null, { as: 'dialog', label: props.label });
   return (
     <SheetCtx.Provider value={open}>
-      <div class="krate-sheet" id={props.id}>
+      <div class={"krate-sheet" + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")} id={props.id}>
         {props.open !== undefined || props.onOpenChange ? <OverlayBridge open={props.open} onOpenChange={props.onOpenChange} /> : null}
         {props.children}
       </div>
@@ -35,13 +38,16 @@ export function Sheet(props: SheetProps) {
 export interface SheetTriggerProps {
   value?: string;
   children?: any;
+  class?: string;
+  /** Alias of `class`. */
+  className?: string;
 }
 
 /** @deprecated Use `Sheet.Trigger` instead. */
 export function SheetTrigger(props: SheetTriggerProps) {
   const open = SheetCtx.use();
   return (
-    <button class="krate-sheet-trigger" type="button" {...open.trigger(props.value)}>
+    <button class={"krate-sheet-trigger" + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")} type="button" {...open.trigger(props.value)}>
       {props.children}
     </button>
   );
@@ -51,13 +57,16 @@ export interface SheetContentProps {
   value?: string;
   side?: 'top' | 'right' | 'bottom' | 'left';
   children?: any;
+  class?: string;
+  /** Alias of `class`. */
+  className?: string;
 }
 
 /** @deprecated Use `Sheet.Content` instead. */
 export function SheetContent(props: SheetContentProps) {
   const open = SheetCtx.use();
   return (
-    <div class="krate-sheet-content" role="dialog" data-side={props.side || 'right'} {...open.panel(props.value)}>
+    <div class={"krate-sheet-content" + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")} role="dialog" data-side={props.side || 'right'} {...open.panel(props.value)}>
       {props.children}
     </div>
   );
@@ -65,31 +74,40 @@ export function SheetContent(props: SheetContentProps) {
 
 export interface SheetTitleProps {
   children?: any;
+  class?: string;
+  /** Alias of `class`. */
+  className?: string;
 }
 
 /** @deprecated Use `Sheet.Title` instead. */
 export function SheetTitle(props: SheetTitleProps) {
-  return <h2 class="krate-sheet-title" data-ka="title">{props.children}</h2>;
+  return <h2 class={"krate-sheet-title" + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")} data-ka="title">{props.children}</h2>;
 }
 
 export interface SheetDescriptionProps {
   children?: any;
+  class?: string;
+  /** Alias of `class`. */
+  className?: string;
 }
 
 /** @deprecated Use `Sheet.Description` instead. */
 export function SheetDescription(props: SheetDescriptionProps) {
-  return <p class="krate-sheet-description" data-ka="desc">{props.children}</p>;
+  return <p class={"krate-sheet-description" + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")} data-ka="desc">{props.children}</p>;
 }
 
 export interface SheetCloseProps {
   children?: any;
+  class?: string;
+  /** Alias of `class`. */
+  className?: string;
 }
 
 /** @deprecated Use `Sheet.Close` instead. */
 export function SheetClose(props: SheetCloseProps) {
   const open = SheetCtx.use();
   return (
-    <button class="krate-sheet-close" type="button" aria-label="Close" {...open.close()}>
+    <button class={"krate-sheet-close" + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")} type="button" aria-label="Close" {...open.close()}>
       {props.children}
     </button>
   );

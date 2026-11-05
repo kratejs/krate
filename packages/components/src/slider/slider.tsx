@@ -7,6 +7,11 @@ export interface SliderProps {
   defaultValue?: number;
   label?: string;
   name?: string;
+  disabled?: boolean;
+  /** Pair with `<Label htmlFor>`. */
+  id?: string;
+  class?: string;
+  className?: string;
 }
 
 /**
@@ -17,7 +22,9 @@ export function Slider(props: SliderProps) {
   return (
     <input
       type="range"
-      class="krate-slider"
+      class={"krate-slider" + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")}
+      id={props.id}
+      disabled={props.disabled}
       min={props.min === undefined ? 0 : props.min}
       max={props.max === undefined ? 100 : props.max}
       step={props.step === undefined ? 1 : props.step}

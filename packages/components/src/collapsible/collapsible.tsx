@@ -8,6 +8,9 @@ export interface CollapsibleProps {
   defaultValue?: string;
   label?: string;
   children?: any;
+  class?: string;
+  /** Alias of `class`. */
+  className?: string;
 }
 
 /**
@@ -25,7 +28,7 @@ export function Collapsible(props: CollapsibleProps) {
   const open = createCSSGroup<string>(null, { as: 'disclosure', label: props.label });
   return (
     <CollapsibleCtx.Provider value={open}>
-      <div class="krate-collapsible">{props.children}</div>
+      <div class={"krate-collapsible" + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")}>{props.children}</div>
     </CollapsibleCtx.Provider>
   );
 }
@@ -33,13 +36,16 @@ export function Collapsible(props: CollapsibleProps) {
 export interface CollapsibleTriggerProps {
   value?: string;
   children?: any;
+  class?: string;
+  /** Alias of `class`. */
+  className?: string;
 }
 
 /** @deprecated Use `Collapsible.Trigger` instead. */
 export function CollapsibleTrigger(props: CollapsibleTriggerProps) {
   const open = CollapsibleCtx.use();
   return (
-    <button class="krate-collapsible-trigger" type="button" {...open.trigger(props.value)}>
+    <button class={"krate-collapsible-trigger" + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")} type="button" {...open.trigger(props.value)}>
       {props.children}
     </button>
   );
@@ -48,13 +54,16 @@ export function CollapsibleTrigger(props: CollapsibleTriggerProps) {
 export interface CollapsibleContentProps {
   value?: string;
   children?: any;
+  class?: string;
+  /** Alias of `class`. */
+  className?: string;
 }
 
 /** @deprecated Use `Collapsible.Content` instead. */
 export function CollapsibleContent(props: CollapsibleContentProps) {
   const open = CollapsibleCtx.use();
   return (
-    <div class="krate-collapsible-content" {...open.panel(props.value)}>
+    <div class={"krate-collapsible-content" + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")} {...open.panel(props.value)}>
       {props.children}
     </div>
   );

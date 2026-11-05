@@ -2,12 +2,15 @@ import './steps.css';
 
 export interface StepsProps {
   children?: any;
+  class?: string;
+  /** Alias of `class`. */
+  className?: string;
 }
 
 export function Steps(props: StepsProps) {
   var children = props.children || "";
   return (
-    <div class="krate-steps">
+    <div class={"krate-steps" + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")}>
       {children}
     </div>
   );
@@ -16,6 +19,9 @@ export function Steps(props: StepsProps) {
 export interface StepProps {
   children?: any;
   title?: string;
+  class?: string;
+  /** Alias of `class`. */
+  className?: string;
 }
 
 /** @deprecated Use `Steps.Step` instead. */
@@ -23,7 +29,7 @@ export function Step(props: StepProps) {
   var children = props.children || "";
   var title = props.title || "";
   return (
-    <div class="krate-step">
+    <div class={"krate-step" + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")}>
       <div class="krate-step-header">
         <div class="krate-step-number"></div>
       </div>

@@ -53,7 +53,7 @@
   color: var(--krate-text, #09090b);
 }
 .krate-dialog-close:focus-visible {
-  outline: 2px solid var(--krate-focus-ring, #3b82f6);
+  outline: 2px solid var(--krate-focus-ring, #c2410c);
   outline-offset: 2px;
 }
 @keyframes krate-dialog-scale-in {

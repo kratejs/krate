@@ -5,6 +5,12 @@ export interface ToggleProps {
   variant?: 'default' | 'outline';
   size?: 'sm' | 'md' | 'lg';
   children?: any;
+  /** Accessible name when the children are only an icon. */
+  label?: string;
+  id?: string;
+  class?: string;
+  /** Alias of `class`. */
+  className?: string;
 }
 
 /**
@@ -15,7 +21,9 @@ export function Toggle(props: ToggleProps) {
   const [pressed, setPressed] = createCSSToggle(false);
   return (
     <button
-      class="krate-toggle"
+      class={"krate-toggle" + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")}
+      id={props.id}
+      aria-label={props.label}
       data-variant={props.variant || 'default'}
       data-size={props.size || 'md'}
       type="button"

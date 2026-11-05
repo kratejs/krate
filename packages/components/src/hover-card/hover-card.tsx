@@ -3,6 +3,9 @@ import './hover-card.css';
 
 export interface HoverCardProps {
   children?: any;
+  class?: string;
+  /** Alias of `class`. */
+  className?: string;
 }
 
 /**
@@ -16,17 +19,20 @@ export interface HoverCardProps {
  * ```
  */
 export function HoverCard(props: HoverCardProps) {
-  return <span class="krate-hover-card">{props.children}</span>;
+  return <span class={"krate-hover-card" + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")}>{props.children}</span>;
 }
 
 export interface HoverCardTriggerProps {
   children?: any;
+  class?: string;
+  /** Alias of `class`. */
+  className?: string;
 }
 
 /** @deprecated Use `HoverCard.Trigger` instead. */
 export function HoverCardTrigger(props: HoverCardTriggerProps) {
   return (
-    <span class="krate-hover-card-trigger" tabIndex={0}>
+    <span class={"krate-hover-card-trigger" + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")} tabIndex={0}>
       {props.children}
     </span>
   );
@@ -34,11 +40,14 @@ export function HoverCardTrigger(props: HoverCardTriggerProps) {
 
 export interface HoverCardContentProps {
   children?: any;
+  class?: string;
+  /** Alias of `class`. */
+  className?: string;
 }
 
 /** @deprecated Use `HoverCard.Content` instead. */
 export function HoverCardContent(props: HoverCardContentProps) {
-  return <span class="krate-hover-card-content">{props.children}</span>;
+  return <span class={"krate-hover-card-content" + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")}>{props.children}</span>;
 }
 
 export interface HoverCard {

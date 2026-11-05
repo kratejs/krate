@@ -8,6 +8,11 @@ export interface RadioGroupProps {
   defaultValue?: string;
   label?: string;
   children?: any;
+  /** Extra classes for the root element. */
+  class?: string;
+  /** Alias of `class`. */
+  className?: string;
+  id?: string;
 }
 
 /**
@@ -18,7 +23,7 @@ export function RadioGroup(props: RadioGroupProps) {
   const value = createCSSChoice<string>('', { as: 'radiogroup', label: props.label });
   return (
     <RadioGroupCtx.Provider value={value}>
-      <div class="krate-radio-group">{props.children}</div>
+      <div class={"krate-radio-group" + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")} id={props.id}>{props.children}</div>
     </RadioGroupCtx.Provider>
   );
 }
@@ -26,13 +31,15 @@ export function RadioGroup(props: RadioGroupProps) {
 export interface RadioGroupItemProps {
   value?: string;
   children?: any;
+  class?: string;
+  className?: string;
 }
 
 /** @deprecated Use `RadioGroup.Item` instead. */
 export function RadioGroupItem(props: RadioGroupItemProps) {
   const scope = RadioGroupCtx.use();
   return (
-    <label class="krate-radio-item" {...scope.trigger(props.value)}>
+    <label class={"krate-radio-item" + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")} {...scope.trigger(props.value)}>
       <span class="krate-radio-indicator" aria-hidden="true" />
       <span class="krate-radio-label">{props.children}</span>
     </label>

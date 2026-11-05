@@ -14,11 +14,11 @@
   border-radius: 9999px;
 }
 .krate-progress::-webkit-progress-value {
-  background: var(--krate-primary, #3b82f6);
+  background: var(--krate-primary, #c2410c);
   border-radius: 9999px;
   transition: width 0.3s ease;
 }
 .krate-progress::-moz-progress-bar {
-  background: var(--krate-primary, #3b82f6);
+  background: var(--krate-primary, #c2410c);
   border-radius: 9999px;
 }

@@ -4,6 +4,11 @@ export interface AlertProps {
   children?: any;
   variant?: 'default' | 'info' | 'success' | 'warning' | 'destructive';
   title?: string;
+  /** Extra classes for the root element. */
+  class?: string;
+  /** Alias of `class`. */
+  className?: string;
+  id?: string;
 }
 
 function AlertIcon(props: { variant: string }) {
@@ -20,7 +25,7 @@ function AlertIcon(props: { variant: string }) {
 export function Alert(props: AlertProps) {
   var variant = props.variant || "default";
   return (
-    <div class={"krate-alert krate-alert-" + variant} role={variant === "destructive" ? "alert" : "status"}>
+    <div class={"krate-alert krate-alert-" + variant + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")} id={props.id} role={variant === "destructive" ? "alert" : "status"}>
       <span class="krate-alert-icon"><AlertIcon variant={variant} /></span>
       <div class="krate-alert-body">
         {props.title ? <div class="krate-alert-title">{props.title}</div> : null}

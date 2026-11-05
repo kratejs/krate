@@ -569,7 +569,7 @@ export function Icon(_props: { name?: string; [key: string]: any }): JSXNode {
 }
 
 // SyntaxHighlight - renders a <pre><code> block (Go compiler handles chroma highlighting at build time).
-export function SyntaxHighlight(props: { lang?: string; children?: any }): JSXNode {
+export function SyntaxHighlight(props: { lang?: string; highlight?: string; children?: any }): JSXNode {
   const lang = props.lang || "";
   const code = props.children != null ? String(props.children) : "";
   const cls = lang ? `chroma language-${lang}` : "chroma";

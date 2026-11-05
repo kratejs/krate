@@ -49,7 +49,7 @@
   cursor: pointer;
 }
 .krate-alert-dialog-action {
-  background: var(--krate-primary, #3b82f6);
+  background: var(--krate-primary, #c2410c);
   color: var(--krate-primary-fg, #ffffff);
 }
 .krate-alert-dialog-action:hover {
@@ -65,7 +65,7 @@
 }
 .krate-alert-dialog-action:focus-visible,
 .krate-alert-dialog-cancel:focus-visible {
-  outline: 2px solid var(--krate-focus-ring, #3b82f6);
+  outline: 2px solid var(--krate-focus-ring, #c2410c);
   outline-offset: 2px;
 }
 

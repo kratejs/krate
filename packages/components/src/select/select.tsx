@@ -210,13 +210,14 @@ export function Select(props: SelectProps) {
     }
   }
 
+  // onBlur is focusout in Krate, so it also sees focus leaving a descendant.
   function onFocusOut(e: FocusEvent) {
     var next = e.relatedTarget as Node | null;
     if (next && root && !root.contains(next)) setOpen(false);
   }
 
   return (
-    <div class="krate-select" ref={function (el: Element) { root = el as HTMLElement; }} onFocusOut={onFocusOut}>
+    <div class="krate-select" ref={function (el: Element) { root = el as HTMLElement; }} onBlur={onFocusOut}>
       <input type="hidden" name={props.name} value={value()} />
       <button
         class="krate-select-trigger"

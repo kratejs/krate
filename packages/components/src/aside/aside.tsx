@@ -6,6 +6,9 @@ export interface AsideProps {
   title?: string;
   /** Text or emoji shown instead of the built-in icon for the type. */
   icon?: string;
+  class?: string;
+  /** Alias of `class`. */
+  className?: string;
 }
 
 function AsideIcon(props: { type: string }) {
@@ -41,7 +44,7 @@ export function Aside(props: AsideProps) {
   }
   return (
     <div class={"krate-aside krate-aside-" + type}>
-      <div class="krate-aside-title">
+      <div class={"krate-aside-title" + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")}>
         {props.icon ? <span class="krate-aside-icon" aria-hidden="true">{props.icon}</span> : <AsideIcon type={type} />} {title}
       </div>
       <div class="krate-aside-content">{children}</div>
