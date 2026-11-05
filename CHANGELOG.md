@@ -294,6 +294,14 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Fixed
 
+- Tailwind `@theme` variables stay live like Tailwind v4: utilities, `@apply` and
+  `--value()` read them through `var()`, so `.dark { --color-primary: ... }` re-themes
+  `bg-primary` instead of doing nothing. A default such as `--color-blue-600` or
+  `--spacing` goes live once the project sets it; other defaults stay inlined.
+  `@theme inline` and `@theme reference` are inlined.
+- Tailwind `bg-(--color-blue-500)` defines the theme variable it reads, `max-w-*`
+  honours `--container-*` (`var(--container-md)` is defined too), and `fill-*`,
+  `stroke-*` and `placeholder-*` accept opacity modifiers (`fill-red-500/50`).
 - Pages built per `generateStaticParams` entry (and dynamic-route templates) now host islands: a
   React-library or package component on such a page used to fail the build with "unknown component"
   or ship a missing island chunk, and `generateStaticParams` failed to evaluate a page whose

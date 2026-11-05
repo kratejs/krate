@@ -28,6 +28,9 @@ type TailwindTheme struct {
 	// Keyframes maps a keyframes name to its block body without the
 	// @keyframes wrapper, e.g. "to{transform:rotate(360deg)}".
 	Keyframes map[string]string `json:"keyframes"`
+	// LiveVars names the theme variables (no leading "--") that utilities read
+	// through var() instead of inlining, so a runtime override takes effect.
+	LiveVars map[string]bool `json:"-"`
 	// Tracking maps tracking-<name> to a letter-spacing value.
 	Tracking map[string]string `json:"tracking"`
 	// Containers maps a container size name (@sm, max-w-sm in v4) to a width.

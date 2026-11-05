@@ -34,6 +34,8 @@ type TailwindDirectives struct {
 	Imported bool
 	// VarRefs are theme variables referenced via var(--name) in project CSS.
 	VarRefs map[string]bool
+	// VarDecls are custom properties set in project CSS.
+	VarDecls map[string]bool
 
 	warnings map[string]bool
 	seenSrc  map[string]bool
@@ -41,7 +43,7 @@ type TailwindDirectives struct {
 
 // NewTailwindDirectives creates an empty collection rooted at root.
 func NewTailwindDirectives(root string) *TailwindDirectives {
-	return &TailwindDirectives{Root: root, Utilities: map[string]string{}, Functional: map[string]string{}, Variants: map[string]string{}, VarRefs: map[string]bool{},
+	return &TailwindDirectives{Root: root, Utilities: map[string]string{}, Functional: map[string]string{}, Variants: map[string]string{}, VarRefs: map[string]bool{}, VarDecls: map[string]bool{},
 		warnings: map[string]bool{}, seenSrc: map[string]bool{}}
 }
 
@@ -72,11 +74,7 @@ var modifierRe = regexp.MustCompile(`([A-Za-z-]+)(?:\(([^)]*)\))?`)
 
 // Add parses one CSS text. baseDir resolves relative @source paths.
 func (d *TailwindDirectives) Add(cssText, baseDir string) {
-	if strings.Contains(cssText, "var(") {
-		for _, m := range varRefRe.FindAllStringSubmatch(cssText, -1) {
-			d.VarRefs[m[1]] = true
-		}
-	}
+	collectVars(cssText, d.VarRefs, d.VarDecls)
 	if !strings.Contains(cssText, "@") {
 		return
 	}
@@ -465,6 +463,9 @@ func (d *TailwindDirectives) MergeFrom(o *TailwindDirectives) {
 	}
 	for k := range o.VarRefs {
 		d.VarRefs[k] = true
+	}
+	for k := range o.VarDecls {
+		d.VarDecls[k] = true
 	}
 	for w := range o.warnings {
 		d.warnings[w] = true

@@ -103,7 +103,18 @@ configure the generator, and **removes them from the shipped CSS**:
 - Theme variables are emitted in `@layer theme { :root, :host { ... } }`. Krate
   emits every user-defined `@theme` variable (v4 emits only the used ones unless
   `static`) plus any built-in theme variable you reference as `var(--color-red-500)`,
-  `var(--spacing)`, etc. in your CSS or scanned files.
+  `var(--spacing)`, etc. in your CSS or scanned files, including the
+  `bg-(--color-blue-500)` class shorthand.
+- `@theme` variables stay live, as in Tailwind v4. Utilities read them through
+  `var()`, so overriding one re-themes every utility that uses it:
+
+  ```css
+  @theme { --color-primary: #123456; }
+  .dark { --color-primary: #fedcba; }
+  ```
+
+  `@theme inline` copies the value into the utility instead, so an override has
+  no effect there. `@theme reference` variables are inlined too.
 - `@utility` follows Tailwind v4. A functional utility (`name-*`) takes its
   value from the rest of the class (`name-VALUE`) through `--value()` and its
   modifier (`name-VALUE/MODIFIER`) through `--modifier()`; `--spacing()` wraps
@@ -133,8 +144,7 @@ configure the generator, and **removes them from the shipped CSS**:
   Nested rules (`&:hover`, `.parent &`, `& > *`), at-rules (`@media`,
   `@supports`, `@layer`), `@variant name { ... }` and `@apply` work inside the
   body, in static and functional utilities alike; they are written as CSS
-  nesting inside the class rule. Theme values are inlined rather than
-  referenced as `var(--name)`, and only `@theme` variables count for
+  nesting inside the class rule. Only `@theme` variables count for
   `--value(--spacing-*)` (Tailwind v3's numeric spacing scale is not a v4 theme
   variable). Output is checked against Tailwind v4 in
   `internal/css/testdata/tailwind_utility_golden.json`.
@@ -295,8 +305,7 @@ Supported features:
 - Class-mode dark mode uses `:where(.dark, .dark *)`; `darkMode:
   ["class", "[data-mode=dark]"]` uses that selector instead of `.dark`.
 - `prefix: "tw"` makes utilities `tw:flex` / `tw:hover:flex`; unprefixed
-  utilities are then unknown. CSS variables are not prefixed (Krate resolves
-  theme values at build time).
+  utilities are then unknown. CSS variables are not prefixed.
 - `important: true` marks every utility `!important`; a selector string
   (`important: "#app"`) scopes every utility under it (the Tailwind v3 form).
   The per-class `!` works as a prefix (`!p-4`) or suffix (`p-4!`).
@@ -314,10 +323,16 @@ deliberate differences:
 
 - `rounded-full` (and its side variants) is `9999px`, not
   `calc(infinity * 1px)`. The rendering is identical for any real element.
-- Theme values are inlined at build time rather than referenced through
-  `var(--color-*)`/`var(--spacing)`, so opacity modifiers are emitted as
-  `color-mix(in oklab, ...)` without a separate `srgb` fallback and no
-  `@supports` guard.
+- Default theme values are inlined at build time, so the sheet carries no
+  `:root` block of variables. A default goes live, through `var()`, once the
+  project sets it in a scanned file: `.x { --color-blue-600: red }`,
+  `style={{ "--spacing": "2px" }}`, `setProperty("--spacing", ...)` or
+  `[--spacing:2px]`. A default set only from CSS outside `scanDirs` (such as
+  `public/`) or from a computed name is not detected; declare it in `@theme`
+  and it stays live.
+- Opacity modifiers are emitted as `color-mix(in oklab, ...)` without a separate
+  `srgb` fallback and no `@supports` guard, so browsers without `color-mix()`
+  get no colour for those utilities.
 - Nothing is wrapped in `@layer properties`; the `--tw-*` composition
   variables get plain `@property` registrations plus inline `var()` fallbacks.
 

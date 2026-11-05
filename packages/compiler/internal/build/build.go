@@ -1467,9 +1467,10 @@ func (b *Builder) processCSSDirectives(cssText string) (string, twPageInfo) {
 	opts := b.tailwindOptions()
 	gen := css.NewTailwindGenerator()
 	gen.MergeConfig(css.LoadTailwindConfigWithOptions(b.Root, opts))
-	if info.dirs != nil {
-		info.dirs.ApplyTo(&gen.Theme)
-	}
+	dirs := css.ScanTailwindDirectives(b.Root, opts)
+	dirs.MergeFrom(info.dirs)
+	dirs.ApplyTo(&gen.Theme)
+	gen.Theme.LiveVars = dirs.LiveVars(&gen.Theme)
 	out, unresolved := gen.ExpandApply(cssText)
 	if len(unresolved) > 0 {
 		b.warnOnce("Tailwind @apply: could not expand " + strings.Join(unresolved, ", ") + " (not a known utility; check the spelling, or define it with @utility)")

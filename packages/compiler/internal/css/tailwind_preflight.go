@@ -53,7 +53,7 @@ func TailwindPreflight(theme TailwindTheme) string {
 // to Tailwind's default.
 func fontOrDefault(theme TailwindTheme, key string) string {
 	if v, ok := theme.FontFamily[key]; ok && v != "" {
-		return v
+		return theme.themeRef("font-"+key, v)
 	}
 	if d, ok := defaultFontFamily()[key]; ok {
 		return d

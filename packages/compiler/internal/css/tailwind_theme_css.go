@@ -15,6 +15,9 @@ type ThemeVar struct {
 	Value string
 	// Reference vars are visible to utilities but never emitted (@theme reference).
 	Reference bool
+	// Inline vars are copied into utilities rather than read through var()
+	// (@theme inline).
+	Inline bool
 }
 
 // AtTheme is the parsed content of all `@theme` blocks (Tailwind v4 CSS-first
@@ -40,12 +43,14 @@ func ParseAtTheme(cssText string) *AtTheme {
 }
 
 func (at *AtTheme) addBlock(r cssAtRule) {
-	reference := false
+	reference, inline := false, false
 	for _, mod := range strings.Fields(r.Prelude) {
 		switch mod {
 		case "reference":
 			reference = true
-		case "inline", "static", "default":
+		case "inline":
+			inline = true
+		case "static", "default":
 		default:
 			at.Warnings = append(at.Warnings, "@theme: unsupported modifier \""+mod+"\" (supported: inline, static, reference, default)")
 		}
@@ -56,7 +61,7 @@ func (at *AtTheme) addBlock(r cssAtRule) {
 			at.Warnings = append(at.Warnings, "@theme: ignored non-variable declaration \""+d.Name+"\"")
 			continue
 		}
-		at.Vars = append(at.Vars, ThemeVar{Name: d.Name[2:], Value: d.Value, Reference: reference})
+		at.Vars = append(at.Vars, ThemeVar{Name: d.Name[2:], Value: d.Value, Reference: reference, Inline: inline})
 	}
 	for _, n := range nested {
 		if sub, ok := parseNestedAtRule(n); ok && sub.Name == "keyframes" {
@@ -331,7 +336,27 @@ func isNumericShade(s string) bool {
 	return true
 }
 
-var varRefRe = regexp.MustCompile(`var\(\s*--([A-Za-z0-9_-]+)`)
+// varRefRe matches a custom property read as var(--name) or as the v4 class
+// shorthand bg-(--name).
+var varRefRe = regexp.MustCompile(`(?:var\(\s*|\()--([A-Za-z0-9_-]+)`)
+
+// varDeclRe matches a custom property being set: `--name:` in CSS or a style
+// string, `[--name:value]` in a class, `"--name":` in a style object, and
+// `"--name",` or `"--name")` in a setProperty call.
+var varDeclRe = regexp.MustCompile("(?:^|[\\s\"'`\\[;{])--([A-Za-z0-9_-]+)(?:\\s*:|[\"'`]\\s*[:,)])")
+
+// collectVars records the custom properties text reads and sets.
+func collectVars(text string, refs, decls map[string]bool) {
+	if !strings.Contains(text, "--") {
+		return
+	}
+	for _, m := range varRefRe.FindAllStringSubmatch(text, -1) {
+		refs[m[1]] = true
+	}
+	for _, m := range varDeclRe.FindAllStringSubmatch(text, -1) {
+		decls[m[1]] = true
+	}
+}
 
 // themeSkipDirs are never walked for project CSS.
 var themeSkipDirs = map[string]bool{".git": true, "node_modules": true, "dist": true, "out": true, ".krate": true}
@@ -415,6 +440,40 @@ func themeLayerVars(theme *TailwindTheme, at *AtTheme, refs map[string]bool) []T
 	return out
 }
 
+// LiveVars returns the theme variables utilities must read through var(): every
+// @theme variable, plus any default variable the project sets outside @theme,
+// since Tailwind v4 utilities react to both at runtime. Other defaults stay
+// inlined, which keeps the sheet free of a :root variable block. `@theme inline`
+// and `@theme reference` variables are never live.
+func (d *TailwindDirectives) LiveVars(theme *TailwindTheme) map[string]bool {
+	live := map[string]bool{}
+	for n := range d.VarDecls {
+		// v4 inlines these, and --spacing-<n> is not a default v4 variable.
+		if strings.HasPrefix(n, "shadow-") || strings.HasPrefix(n, "breakpoint-") || strings.HasPrefix(n, "spacing-") {
+			continue
+		}
+		if _, ok := themeVarValue(theme, n); ok {
+			live[n] = true
+		}
+	}
+	for _, v := range d.Theme.Vars {
+		if v.Inline || v.Reference || v.Value == "initial" {
+			delete(live, v.Name)
+		} else {
+			live[v.Name] = true
+		}
+	}
+	return live
+}
+
+// themeRef returns var(--name) for a live theme variable, otherwise inlined.
+func (t TailwindTheme) themeRef(name, inlined string) string {
+	if t.LiveVars[name] {
+		return "var(--" + name + ")"
+	}
+	return inlined
+}
+
 // themeVarValue resolves a v4 theme variable name (no leading "--") against
 // the theme maps, then against the raw `@theme` variables.
 func themeVarValue(theme *TailwindTheme, name string) (string, bool) {
@@ -456,13 +515,16 @@ func mappedThemeVar(theme *TailwindTheme, name string) (string, bool) {
 	case strings.HasPrefix(name, "leading-"):
 		return get(theme.LineHeight, name[len("leading-"):])
 	case strings.HasPrefix(name, "tracking-"):
-		return get(theme.Tracking, name[len("tracking-"):])
+		if v, ok := get(theme.Tracking, name[len("tracking-"):]); ok {
+			return v, true
+		}
+		return get(defaultTracking, name[len("tracking-"):])
 	case strings.HasPrefix(name, "breakpoint-"):
 		return get(theme.Screens, name[len("breakpoint-"):])
 	case strings.HasPrefix(name, "container-"):
-		return get(theme.Containers, name[len("container-"):])
+		return containerSize(name[len("container-"):], *theme)
 	case strings.HasPrefix(name, "animate-"):
-		return get(theme.Animation, name[len("animate-"):])
+		return animationValue(name[len("animate-"):], *theme)
 	case strings.HasPrefix(name, "font-weight-"):
 		return get(theme.FontWeights, name[len("font-weight-"):])
 	case strings.HasPrefix(name, "font-"):

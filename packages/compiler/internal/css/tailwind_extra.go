@@ -54,7 +54,7 @@ func miscUtility(cls string, theme TailwindTheme) (string, bool) {
 		if v, isArb := unwrapArbitrary(rest); isArb {
 			return "fill: " + v + ";", true
 		}
-		if v, ok := colorValue(rest, "", theme); ok {
+		if v, ok := colorOf(rest, theme); ok {
 			return "fill: " + v + ";", true
 		}
 	}
@@ -74,7 +74,7 @@ func miscUtility(cls string, theme TailwindTheme) (string, bool) {
 		if n, err := strconv.Atoi(rest); err == nil {
 			return "stroke-width: " + strconv.Itoa(n) + ";", true
 		}
-		if v, ok := colorValue(rest, "", theme); ok {
+		if v, ok := colorOf(rest, theme); ok {
 			return "stroke: " + v + ";", true
 		}
 	}
@@ -82,7 +82,7 @@ func miscUtility(cls string, theme TailwindTheme) (string, bool) {
 		if v, isArb := unwrapArbitrary(rest); isArb {
 			return "color: " + v + ";", true
 		}
-		if v, ok := colorValue(rest, "", theme); ok {
+		if v, ok := colorOf(rest, theme); ok {
 			return "color: " + v + ";", true
 		}
 	}

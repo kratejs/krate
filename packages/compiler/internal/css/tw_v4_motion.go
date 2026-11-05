@@ -37,7 +37,7 @@ func animationUtility(cls string, theme TailwindTheme) (string, bool) {
 		return "animation: " + v + ";", true
 	}
 	if v, ok := animationValue(rest, theme); ok {
-		return "animation: " + v + ";", true
+		return "animation: " + theme.themeRef("animate-"+rest, v) + ";", true
 	}
 	return "", false
 }

@@ -123,7 +123,14 @@ func (u *twUsage) reset() {
 func (u *twUsage) record(rule string, theme TailwindTheme) {
 	if strings.Contains(rule, "animation") {
 		for _, m := range animationDecl.FindAllStringSubmatch(rule, -1) {
-			for _, id := range animationIdent.FindAllString(m[1], -1) {
+			value := m[1]
+			// A live theme animation names its keyframes in the variable.
+			if name, ok := strings.CutPrefix(strings.TrimSpace(value), "var(--animate-"); ok {
+				if v, ok := animationValue(strings.TrimSuffix(name, ")"), theme); ok {
+					value = v
+				}
+			}
+			for _, id := range animationIdent.FindAllString(value, -1) {
 				if _, ok := keyframesBody(id, theme); ok {
 					u.keyframes[id] = true
 				}

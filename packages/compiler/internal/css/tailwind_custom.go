@@ -513,6 +513,9 @@ func (c *utilityCtx) pick(args string, e *utilArg, isValue bool) (res string, ra
 // keeps Tailwind v3's numeric spacing scale and a few radius keys in its theme
 // maps; those are not v4 theme variables, so only an `@theme` entry counts.
 func utilityThemeVar(theme *TailwindTheme, name string) (string, bool) {
+	if theme.LiveVars[name] {
+		return theme.themeRef(name, ""), true
+	}
 	switch name {
 	case "radius-full", "radius-none", "radius-DEFAULT":
 		v, ok := theme.ThemeVars[name]

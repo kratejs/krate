@@ -326,6 +326,11 @@ func GenerateTailwindDirectives(root string, cfg *TailwindConfig, opts TailwindO
 		return res, nil
 	}
 
+	for k := range scanner.VarDecls {
+		d.VarDecls[k] = true
+	}
+	generator.Theme.LiveVars = d.LiveVars(&generator.Theme)
+
 	utilities := generator.Generate(classes)
 	res.Unknown = append(res.Unknown, generator.Unknown...)
 	sort.Strings(res.Unknown)
@@ -335,6 +340,9 @@ func GenerateTailwindDirectives(root string, cfg *TailwindConfig, opts TailwindO
 		refs[k] = true
 	}
 	for k := range d.VarRefs {
+		refs[k] = true
+	}
+	for k := range generator.Theme.LiveVars {
 		refs[k] = true
 	}
 	res.CSS = assembleTailwindSheet(&generator.Theme, &d.Theme, refs, utilities, generator.KeyframesCSS(), opts.Preflight)
