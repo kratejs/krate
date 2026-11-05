@@ -34,6 +34,15 @@ func (b *builder) warnUnrenderedComponent(name string, el *ast.JSXElement) {
 		b.warnings = append(b.warnings, d.WithCode(diag.CodeClassNotLowered))
 		return
 	}
+	if b.ann != nil {
+		if d, ok := b.ann.UnresolvedHOCs[name]; ok {
+			use := b.diagAt(el.Position, diag.SeverityError, "", "")
+			d.Message += " (rendered at " + diagLocation(use) + ", where it would render nothing)"
+			d.Severity = diag.SeverityError
+			b.buildErrs = append(b.buildErrs, d)
+			return
+		}
+	}
 	b.warnAt(el.Position, "component <"+name+"> could not be resolved and will not render",
 		"import <"+name+"> (or check its spelling); a component must be a function declaration or a const bound to an arrow or function expression")
 }

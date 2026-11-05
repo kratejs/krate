@@ -93,6 +93,11 @@ type Annotations struct {
 	// (lowered by esbuild into a reassignment of the class binding), the
 	// warning reported where the class is used as a component.
 	DecoratedClasses map[string]diag.Diagnostic
+	// UnresolvedHOCs holds, per `const Name = withX(...)` binding that looks
+	// like a higher-order component application but could not be turned into
+	// a component function, why. Rendering one fails the build: it would
+	// otherwise render nothing.
+	UnresolvedHOCs map[string]diag.Diagnostic
 	// LazyComponents maps a component binding declared with React.lazy() to
 	// its declaration. Its hydration code goes into a separate chunk.
 	LazyComponents map[string]LazyComponent
@@ -201,6 +206,10 @@ type ConditionalSlot struct {
 	Consequent []SlotNode
 	Alternate  []SlotNode
 	Signals    []string
+	// Activity marks a React <Activity>: the Consequent is always in the page
+	// (inside a wrapper element) and TestJS only shows or hides it, keeping
+	// state while hidden.
+	Activity bool
 }
 
 func (s *ConditionalSlot) slotNode()     {}
@@ -476,6 +485,10 @@ type ComponentNode struct {
 	// The emitter uses SSREval to render these at build time.
 	IsSSREval       bool
 	SSREvalBindings map[string]jsvalue.Value
+	// UseIDs are the useId() values of the component's own body, in call
+	// order, as the local fold resolved them. SSREval hands out the same
+	// values so the HTML and the hydration code agree.
+	UseIDs []string
 	// SSREvalAttrs holds the call-site attribute expressions of an SSREval
 	// component, so props the IR folder cannot represent (JSX values) are
 	// evaluated by the SSR evaluator itself.

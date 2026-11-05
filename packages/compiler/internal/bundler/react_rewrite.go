@@ -24,6 +24,7 @@ var reactNames = map[string]string{
 	"useReducer":         "createReducer",
 	"useRef":             "useRef",
 	"useCallback":        "useCallback",
+	"useEffectEvent":     "createEffectEvent",
 	"forwardRef":         "forwardRef",
 	"createContext":      "createContext",
 	"createElement":      "h",
@@ -32,6 +33,13 @@ var reactNames = map[string]string{
 	"useId": "__krate_useId",
 	// React DOM's requestFormReset is a runtime global (runtime/src/actions.ts).
 	"requestFormReset": "requestFormReset",
+	// React DOM's resource hints are runtime globals (runtime/src/hints.ts).
+	"preload":       "krateHintPreload",
+	"preinit":       "krateHintPreinit",
+	"preconnect":    "krateHintPreconnect",
+	"prefetchDNS":   "krateHintPrefetchDNS",
+	"preloadModule": "krateHintPreloadModule",
+	"preinitModule": "krateHintPreinitModule",
 }
 
 // structuralReactAPIs are React APIs lowered structurally (identity/passthrough
@@ -39,6 +47,7 @@ var reactNames = map[string]string{
 var structuralReactAPIs = map[string]bool{
 	"memo":       true,
 	"lazy":       true,
+	"cache":      true,
 	"useContext": true,
 }
 
@@ -70,6 +79,11 @@ var compatReactNames = map[string]bool{
 	"PureComponent":        true,
 	"StrictMode":           true,
 	"Profiler":             true,
+	"Activity":             true,
+	"ViewTransition":       true,
+	"SuspenseList":         true,
+	"version":              true,
+	"captureOwnerStack":    true,
 }
 
 // reactiveFactories are React APIs whose first destructured binding is a value
@@ -82,6 +96,28 @@ var reactiveFactories = map[string]bool{
 	"useOptimistic":  true,
 	// The compat useSyncExternalStore returns a getter of the snapshot.
 	"useSyncExternalStore": true,
+}
+
+// reactVersion is the React release whose API Krate follows.
+const reactVersion = "19.2.0"
+
+// reactAliases maps the canary and experimental names of React APIs, and the
+// renamed react-dom form hook, to the API they are today.
+var reactAliases = map[string]string{
+	"unstable_Activity":           "Activity",
+	"unstable_ViewTransition":     "ViewTransition",
+	"unstable_SuspenseList":       "SuspenseList",
+	"unstable_useEffectEvent":     "useEffectEvent",
+	"experimental_useEffectEvent": "useEffectEvent",
+	"useFormState":                "useActionState",
+}
+
+// canonicalReactAPI returns the API an exported name stands for.
+func canonicalReactAPI(name string) string {
+	if canon, ok := reactAliases[name]; ok {
+		return canon
+	}
+	return name
 }
 
 // reactAPI reports whether name is a known React API (rename, structural, or
@@ -204,6 +240,8 @@ type reactCtx struct {
 	// formStatusPos records their positions for diagnostics.
 	formStatusSeq int
 	formStatusPos []ast.Pos
+	// vtSeq numbers the auto-named <ViewTransition> elements of the module.
+	vtSeq int
 
 	// Render-scope lowering state (react_derived.go). react is set for a
 	// module that imports React; reads counts reactive reads seen while
@@ -242,6 +280,9 @@ func (c *reactCtx) compatMember(mem *ast.MemberExpr) (ast.Expr, bool) {
 	if !isReactMember && !isDOMMember {
 		return nil, false
 	}
+	if isReactMember && propID.Name == "version" {
+		return &ast.Literal{Position: mem.Position, Kind: ast.StringLit, Value: reactVersion}, true
+	}
 	c.compat[propID.Name] = true
 	return &ast.Identifier{Position: mem.Position, Name: propID.Name}, true
 }
@@ -259,11 +300,11 @@ func (c *reactCtx) memberAPI(mem *ast.MemberExpr) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	if c.alias != "" && objID.Name == c.alias && reactAPI(propID.Name) {
-		return propID.Name, true
+	if canon := canonicalReactAPI(propID.Name); c.alias != "" && objID.Name == c.alias && reactAPI(canon) {
+		return canon, true
 	}
-	if c.domAlias != "" && objID.Name == c.domAlias && reactDOMAPI(propID.Name) {
-		return propID.Name, true
+	if canon := canonicalReactAPI(propID.Name); c.domAlias != "" && objID.Name == c.domAlias && reactDOMAPI(canon) {
+		return canon, true
 	}
 	return "", false
 }
@@ -327,8 +368,8 @@ func RewriteReactDiag(prog *ast.Program, file, src string) []diag.Diagnostic {
 					ctx.alias = local
 					continue
 				}
-				if reactAPI(named.Remote) {
-					ctx.imports[local] = named.Remote
+				if canon := canonicalReactAPI(named.Remote); reactAPI(canon) {
+					ctx.imports[local] = canon
 				}
 				if named.Remote == "Fragment" {
 					ctx.fragmentNames[local] = true
@@ -356,8 +397,8 @@ func RewriteReactDiag(prog *ast.Program, file, src string) []diag.Diagnostic {
 					ctx.domAlias = local
 					continue
 				}
-				if reactDOMAPI(named.Remote) {
-					ctx.imports[local] = named.Remote
+				if canon := canonicalReactAPI(named.Remote); reactDOMAPI(canon) {
+					ctx.imports[local] = canon
 				}
 			}
 		case "react/jsx-runtime", "react/jsx-dev-runtime":
@@ -449,7 +490,8 @@ func RewriteReactDiag(prog *ast.Program, file, src string) []diag.Diagnostic {
 // reactDOMAPI reports the react-dom exports Krate lowers or provides.
 func reactDOMAPI(name string) bool {
 	switch name {
-	case "createPortal", "flushSync", "useFormStatus", "requestFormReset":
+	case "createPortal", "flushSync", "useFormStatus", "requestFormReset", "useActionState",
+		"preload", "preinit", "preconnect", "prefetchDNS", "preloadModule", "preinitModule":
 		return true
 	}
 	return false
@@ -830,6 +872,9 @@ func (c *reactCtx) rewriteIdentifier(e *ast.Identifier, sc *scope, valuePos bool
 			e.Name = target
 			return e
 		}
+		if api == "version" {
+			return &ast.Literal{Position: e.Position, Kind: ast.StringLit, Value: reactVersion}
+		}
 		if compatReactNames[api] {
 			c.compat[api] = true
 			e.Name = api
@@ -892,15 +937,26 @@ func (c *reactCtx) rewriteCall(e *ast.CallExpr, sc *scope) ast.Expr {
 		}
 	}
 
-	// `memo`/`lazy` are identity wrappers.
+	// `memo`/`lazy` are identity wrappers, and so is `cache`: React's cache()
+	// only memoizes on the server, where Krate renders each page once.
 	switch api {
-	case "memo", "lazy":
+	case "memo", "lazy", "cache":
 		if isReactAPI && api == "lazy" {
 			// Valid lazy() declarations were lowered at module level.
 			c.reportStrayLazy(e)
 		}
 		if isReactAPI && len(e.Args) >= 1 {
 			return c.rewriteExpr(e.Args[0], sc)
+		}
+	case "captureOwnerStack":
+		// Production React returns null; the owner stack is a development aid.
+		if isReactAPI {
+			return &ast.Literal{Position: e.Position, Kind: ast.NullLit, Value: "null"}
+		}
+	case "flushSync":
+		// Krate applies state changes synchronously, so flushSync(fn) is fn().
+		if isReactAPI && len(e.Args) >= 1 {
+			return &ast.CallExpr{Position: e.Position, Callee: &ast.ParenExpr{Expr: c.rewriteExpr(e.Args[0], sc)}}
 		}
 	case "use":
 		if isReactAPI {

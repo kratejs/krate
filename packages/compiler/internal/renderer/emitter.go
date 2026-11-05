@@ -451,6 +451,8 @@ func (e *Emitter) emitSSREvaluated(node *irtree.ComponentNode) SlotOutput {
 		return SlotOutput{}
 	}
 	eval := NewSSREval(e.functions)
+	eval.SetUseIDBase("krate-" + strings.ReplaceAll(string(node.ID), ".", "-"))
+	eval.SetUseIDs(node.UseIDs)
 	if e.EvalJS != nil {
 		eval.SetEvalJS(e.EvalJS)
 	}
@@ -936,7 +938,7 @@ func collectChildrenOrphans(children []irtree.SlotNode, owner irtree.SlotID) []o
 				owner: owner,
 				bind: irtree.SlotBinding{
 					SlotID:  cs.ID,
-					Type:    "conditional",
+					Type:    bindingTypeOf(cs),
 					ExprJS:  cs.TestJS,
 					Signals: cs.Signals,
 				},
@@ -1041,6 +1043,9 @@ func slotEndMarker(id string) string { return "<!--/k:" + escape.Comment(id) + "
 // swaps the branch nodes between the markers and a detached fragment, so
 // handlers and nested bindings of both branches survive toggling.
 func (e *Emitter) emitConditionalSlot(s *irtree.ConditionalSlot) SlotOutput {
+	if s.Activity {
+		return e.emitActivitySlot(s)
+	}
 	id := string(s.ID)
 	var cons, alt SlotOutput
 	for _, child := range s.Consequent {
@@ -1075,6 +1080,38 @@ func (e *Emitter) emitConditionalSlot(s *irtree.ConditionalSlot) SlotOutput {
 	}
 	out.Templates = tpl + out.Templates
 	return out
+}
+
+// emitActivitySlot renders a React <Activity>: the children are always in the
+// page, inside a wrapper that is hidden while the mode is "hidden". The
+// components inside are tagged as living in a boundary-style branch, so the
+// runtime cleans their effects up when the wrapper hides and sets them up
+// again (without remounting) when it shows.
+func (e *Emitter) emitActivitySlot(s *irtree.ConditionalSlot) SlotOutput {
+	id := string(s.ID)
+	var cons SlotOutput
+	for _, child := range s.Consequent {
+		mergeSlotOutput(&cons, e.emitSlotNode(child))
+	}
+	display := "contents"
+	if !s.InitialActive {
+		display = "none"
+	}
+	html := cons.HTML
+	cons.HTML = ""
+	tagBoundaryBranch(cons.Signatures, s.ID, "c", s.InitialActive)
+	var out SlotOutput
+	mergeSlotOutput(&out, cons)
+	out.HTML = slotMarker(id) + `<krate-activity style="display:` + display + `">` + html + `</krate-activity>` + slotEndMarker(id)
+	return out
+}
+
+// bindingTypeOf is the hydration binding type of a conditional slot.
+func bindingTypeOf(s *irtree.ConditionalSlot) string {
+	if s.Activity {
+		return "activity"
+	}
+	return "conditional"
 }
 
 // emitListSlot renders a list as comment markers around its rows:
@@ -1301,7 +1338,7 @@ func collectGuardedSlotBindings(children []irtree.SlotNode, guard string) []irtr
 			// the guard's signals change.
 			bindings = append(bindings, irtree.SlotBinding{
 				SlotID:  s.ID,
-				Type:    "conditional",
+				Type:    bindingTypeOf(s),
 				ExprJS:  guardedIfRisky(guard, s.TestJS, "false"),
 				Signals: s.Signals,
 			})
@@ -1311,7 +1348,11 @@ func collectGuardedSlotBindings(children []irtree.SlotNode, guard string) []irtr
 			// the bootstrap also binds, so both branches' nodes exist to bind
 			// against. Each branch's bindings run only while it is the one
 			// shown.
-			if s.TestJS != "" {
+			if s.Activity {
+				// Hidden Activity content stays bound: its state keeps
+				// updating the DOM it keeps.
+				bindings = append(bindings, collectGuardedSlotBindings(s.Consequent, guard)...)
+			} else if s.TestJS != "" {
 				bindings = append(bindings, collectGuardedSlotBindings(s.Consequent, andJS(guard, s.TestJS))...)
 				bindings = append(bindings, collectGuardedSlotBindings(s.Alternate, andJS(guard, "!("+s.TestJS+")"))...)
 			} else {

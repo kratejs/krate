@@ -308,6 +308,69 @@
       ]
     },
     {
+      "id": "react-19-hooks",
+      "area": "React 19.2: useId, useEffectEvent, Activity, ViewTransition",
+      "source": "beta",
+      "islands": "n/a",
+      "ssr": "n/a",
+      "target": "Source semantics",
+      "summary": "useId gives every component instance (children, nested children, lists, repeated components, conditional branches, layouts, rows added at runtime) an id that is the same in the static HTML and the hydration code, so htmlFor and id pairs match. useEffectEvent lowers to a stable function that reads the latest props and state and does not subscribe the effect that calls it. <Activity mode> renders its children in a wrapper that hides them while keeping state, cleans their effects up while hidden and runs them again when visible. <ViewTransition> names its element child for the router's view transition support (name and default class). The experimental names (unstable_Activity, unstable_ViewTransition, unstable_useEffectEvent, SuspenseList) are accepted; props with no effect warn (KR8031).",
+      "tests": [
+        "TestUseIdInChildComponents",
+        "TestUseIdInHydratedChildMatchesHTML",
+        "TestUseIdInDynamicListRowsIsNumberedPerRow",
+        "TestUseEffectEventIsLowered",
+        "TestActivityRendersChildrenAndHidesThem",
+        "TestActivityUnsupportedPropWarns",
+        "TestViewTransitionNamesItsChild",
+        "TestExperimentalReactNamesRenderTheirChildren",
+        "TestRewriteReact19Aliases",
+        "TestReact19Browser"
+      ],
+      "roadmap": true,
+      "diagnostics": [
+        "KR8031"
+      ]
+    },
+    {
+      "id": "custom-elements",
+      "area": "Custom elements",
+      "source": "beta",
+      "islands": "n/a",
+      "ssr": "n/a",
+      "target": "React 19 semantics",
+      "summary": "Strings and numbers render as attributes, true as an empty attribute and false is omitted. Objects, arrays and functions render no attribute on the server and are set as properties on the client, also when the element class is defined after the page loads. Components that render such props hydrate so the property is set.",
+      "tests": [
+        "TestCustomElementPropsFollowReact19",
+        "TestCustomElementAttrs",
+        "TestReact19Browser"
+      ],
+      "roadmap": true
+    },
+    {
+      "id": "tier-decorators",
+      "area": "Component tiers: client APIs, conflicts and higher-order components",
+      "source": "beta",
+      "islands": "n/a",
+      "ssr": "n/a",
+      "target": "Krate semantics",
+      "summary": "A server, static or runtime component that uses state, effects or event handlers fails the build (KR7110) with the fix, instead of shipping a dead page. Two tier sources that disagree for one component fail (KR7115). A tier decorator on an HOC-wrapped default export classifies the component and the HOC is applied, also when it is declared in another module; an HOC that cannot be inlined fails (KR8030).",
+      "tests": [
+        "TestBuildTimeTierRejectsClientAPIs",
+        "TestConflictingTiersFail",
+        "TestTierConflictRule",
+        "TestTierDecoratorOnHOCDefaultExport",
+        "TestHOCFromAnotherModuleIsApplied",
+        "TestUnresolvableHOCFailsTheBuild"
+      ],
+      "roadmap": true,
+      "diagnostics": [
+        "KR7110",
+        "KR7115",
+        "KR8030"
+      ]
+    },
+    {
       "id": "server-actions",
       "area": "Server actions",
       "source": "beta",

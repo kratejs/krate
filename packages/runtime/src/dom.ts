@@ -210,7 +210,33 @@ export function krateApplyStyle(el: Element, style: Record<string, unknown>): vo
   appliedStyles.set(el, next);
 }
 
+/**
+ * Sets a prop of a custom element the way React 19 does: objects, arrays and
+ * functions are properties, as is any value for a property the element
+ * already defines. Returns false when the prop is an attribute. An element
+ * that is not defined yet gets the property again once it is, so a class
+ * accessor is not shadowed by the early own property.
+ */
+export function krateCustomProp(el: Element, key: string, value: unknown): boolean {
+  if (el.localName.indexOf('-') < 1 || key.indexOf('-') >= 0) return false;
+  const complex = (typeof value === 'object' && value !== null) || typeof value === 'function';
+  if (!complex && !(key in el)) return false;
+  (el as unknown as Record<string, unknown>)[key] = value;
+  const reg = typeof customElements !== 'undefined' ? customElements : null;
+  if (complex && reg && !reg.get(el.localName) && typeof reg.whenDefined === 'function') {
+    void reg.whenDefined(el.localName).then(() => {
+      const rec = el as unknown as Record<string, unknown>;
+      delete rec[key];
+      rec[key] = value;
+    });
+  }
+  return true;
+}
+
 function setAttr(el: Element, key: string, value: unknown): void {
+  if (el.localName.indexOf('-') > 0 && key !== 'class' && key !== 'className' && key !== 'style' && key !== 'ref' && key !== 'key' && key !== 'children' && !key.startsWith('on')) {
+    if (krateCustomProp(el, key, value)) return;
+  }
   if (key === 'class' || key === 'className') {
     // Guard against false/null/undefined before String() conversion.
     const next = value === false || value === null || value === undefined ? '' : String(value);

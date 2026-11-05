@@ -180,3 +180,46 @@ func TestSelectValues(t *testing.T) {
 		}
 	}
 }
+
+func TestCustomElementAttrs(t *testing.T) {
+	cases := []struct {
+		name string
+		v    Value
+		want string
+	}{
+		{"string", StrVal("a b"), ` s="a b"`},
+		{"number", Value{Kind: Number, Str: "3"}, ` s="3"`},
+		{"true is an empty attribute", BoolVal(true), ` s=""`},
+		{"false is omitted", BoolVal(false), ``},
+		{"bare", Value{Kind: Bare}, ` s=""`},
+		{"object is not an attribute", Value{Kind: Complex, Str: "[object Object]"}, ``},
+		{"array is not an attribute", Value{Kind: Complex, Str: "1,2", Items: []string{"1", "2"}}, ``},
+		{"function is not an attribute", Value{Kind: Complex, Func: true}, ``},
+		{"null is omitted", Value{Kind: Null}, ``},
+	}
+	for _, c := range cases {
+		if got := Attr("my-el", "s", c.v); got != c.want {
+			t.Errorf("%s: Attr(my-el) = %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+func TestComplexValuesOnOrdinaryElementsKeepTheirOldRendering(t *testing.T) {
+	if got := Attr("div", "title", Value{Kind: Complex, Str: "[object Object]"}); got != ` title="[object Object]"` {
+		t.Errorf("object on div = %q", got)
+	}
+	if got := Attr("div", "title", Value{Kind: Complex, Str: "1,2"}); got != ` title="1,2"` {
+		t.Errorf("array on div = %q", got)
+	}
+	if got := Attr("div", "title", Value{Kind: Complex, Func: true}); got != `` {
+		t.Errorf("function on div = %q", got)
+	}
+}
+
+func TestIsCustomElement(t *testing.T) {
+	for tag, want := range map[string]bool{"my-el": true, "x-y-z": true, "div": false, "Foo.Bar": false, "svg:rect": false, "a-b.c": false} {
+		if got := IsCustomElement(tag); got != want {
+			t.Errorf("IsCustomElement(%q) = %v", tag, got)
+		}
+	}
+}

@@ -42,6 +42,8 @@ export * from './src/storage';
 export * from './src/boundary';
 export * from './src/class-component';
 export * from './src/actions';
+export * from './src/use-id';
+export * from './src/hints';
 `;
 
 const HYDRATE_ENTRY = `
@@ -59,6 +61,8 @@ export * from './src/storage';
 export * from './src/boundary';
 export * from './src/class-component';
 export * from './src/actions';
+export * from './src/use-id';
+export * from './src/hints';
 `;
 
 // Lite hydration bundle for sites with the SPA router disabled. It keeps the
@@ -78,6 +82,8 @@ export * from './src/storage';
 export * from './src/boundary';
 export * from './src/class-component';
 export * from './src/actions';
+export * from './src/use-id';
+export * from './src/hints';
 `;
 
 const SUSPENSE_ENTRY = `export * from './src/suspense';`;
@@ -110,7 +116,7 @@ const sharedGlobalsPlugin = {
 // from the shared window globals.
 // hook-args holds krateParam, which the compiler emits into every custom hook
 // that takes an argument.
-const CORE_MODULES = ['signal', 'effects', 'dom', 'slots', 'resource', 'context', 'storage', 'hook-args', 'refs', 'events', 'portal'];
+const CORE_MODULES = ['signal', 'effects', 'dom', 'slots', 'resource', 'context', 'storage', 'hook-args', 'use-id', 'hints', 'refs', 'events', 'portal'];
 const CORE_ENTRY = CORE_MODULES.map((m) => `export * from './src/${m}';`).join('\n');
 
 // Optional features. A feature bundle imports core modules through window

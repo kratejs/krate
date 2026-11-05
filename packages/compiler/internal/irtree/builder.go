@@ -365,6 +365,10 @@ type builder struct {
 	// client components and are never emitted (a build-time evaluated
 	// component's own return JSX); warnings about rendered output are skipped.
 	locateOnly int
+	// useIDRow is the keyed list row being built. Components inside it take
+	// useId() values from one per-row sequence the runtime reproduces when it
+	// renders or adopts the row, so server and client ids agree.
+	useIDRow *useIDRow
 	// runtimeReach memoizes reachesRuntimeComponent per function.
 	runtimeReach   map[*ast.FnDecl]bool
 	functions      map[string]*ast.FnDecl

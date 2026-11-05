@@ -761,6 +761,9 @@ func (b *Bundler) resolveTSXModule(path, abs string, mtime time.Time, size int64
 	b.checkInlineUseServer(prog, path, src)
 	_, actionChanged := b.rewriteActionImports(prog, abs)
 
+	if err := checkTierConflicts(prog, path, src, b.serverComponents, b.runtimeComponents, b.serverDirs, b.runtimeDirs); err != nil {
+		return err
+	}
 	mod := &Module{Path: path, Program: prog, IsEntry: isEntry, SourceCode: src, Diagnostics: reactDiags}
 	mod.ComponentClass = ClassifyComponent(src, path, b.serverComponents, b.runtimeComponents, b.serverDirs, b.runtimeDirs)
 	if class, ok := classFromTier(prog.Tier); ok {

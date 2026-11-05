@@ -21,9 +21,17 @@ import { h, krateTrackNode, type Component as FnComponent } from './dom.js';
 import type { KratePortalNode } from './portal.js';
 import { getOwner, handleError, type Owner } from './boundary.js';
 import { createSignal, createEffect, createReducer, isSignalGetter } from './signal.js';
-import { createEffectDeps, type EffectPhase } from './effects.js';
+import { createEffectDeps, createEffectEvent, type EffectPhase } from './effects.js';
 import { krateSetRef, type KrateRef } from './refs.js';
 import { krateEventRoot } from './events.js';
+import {
+  krateHintPreload,
+  krateHintPreinit,
+  krateHintPreconnect,
+  krateHintPrefetchDNS,
+  krateHintPreloadModule,
+  krateHintPreinitModule,
+} from './hints.js';
 import { createContext as krateCreateContext } from './context.js';
 import { cloneElement as krateCloneElement } from './class-helpers.js';
 import { jsx as krateJsx } from './jsx-runtime.js';
@@ -282,6 +290,39 @@ export function Profiler(props: { id?: string; onRender?: unknown; children?: un
 }
 
 /**
+ * React 19.2's Activity for code the compiler did not lower: the children are
+ * always rendered inside a `display:contents` wrapper that hides them when
+ * `mode` is "hidden", so their state is kept. (Source components get the full
+ * semantics, including effect cleanup while hidden, from the compiler.)
+ */
+export function Activity(props: { mode?: 'visible' | 'hidden'; children?: unknown }): Node {
+  const wrapper = h(
+    'krate-activity',
+    { style: () => 'display:' + (props.mode === 'hidden' ? 'none' : 'contents') },
+    ...toArray(props.children),
+  );
+  return wrapper;
+}
+
+/**
+ * ViewTransition names its element child for the View Transitions API.
+ * Children that are not a host element render unchanged.
+ */
+export function ViewTransition(props: { name?: string; default?: string; children?: unknown }): Node {
+  const frag = fragmentChildren(toArray(props.children));
+  const first = Array.from(frag.childNodes).find((n) => n.nodeType === 1) as HTMLElement | undefined;
+  if (first) {
+    first.setAttribute('data-view-transition', props.name || 'krate-vt-' + ++viewTransitionSeq);
+    if (props.default && props.default !== 'auto' && props.default !== 'none') {
+      first.setAttribute('data-view-transition-class', props.default);
+    }
+  }
+  return frag;
+}
+let viewTransitionSeq = 0;
+export const unstable_ViewTransition = ViewTransition;
+
+/**
  * A Suspense boundary. Children that suspend render as placeholders; while
  * any placeholder under this boundary is pending the fallback is shown, and
  * the content is revealed once all of them resolved (siblings together).
@@ -393,6 +434,34 @@ export function useCallback<T extends (...args: never[]) => unknown>(fn: T, _dep
   return fn;
 }
 
+/**
+ * React's cache() memoizes per request on the server; Krate renders a page
+ * once, so it returns the function. (The compiler lowers calls to it.)
+ */
+export function cache<T extends (...args: never[]) => unknown>(fn: T): T {
+  return fn;
+}
+
+/** The React version whose API this runtime follows. */
+export const version = '19.2.0';
+
+/** React's owner stack is a development aid; production builds return null. */
+export function captureOwnerStack(): string | null {
+  return null;
+}
+
+/**
+ * SuspenseList orders the reveal of the boundaries inside it. Krate reveals
+ * each boundary on its own, so it renders its children.
+ */
+export function SuspenseList(props: { children?: unknown }): Node {
+  return fragmentChildren(toArray(props.children));
+}
+export const unstable_SuspenseList = SuspenseList;
+
+/** React 19.2's useEffectEvent: a function that always runs the latest closure. */
+export const useEffectEvent: <T extends (...args: never[]) => unknown>(fn: T) => T = createEffectEvent;
+
 export function useRef<T = unknown>(initial?: T): RefObject<T> {
   return { current: initial ?? null };
 }
@@ -493,6 +562,14 @@ export function useActionState<State, Payload>(
 export function useFormStatus(): FormStatus {
   return { pending: false, data: null, method: null, action: null };
 }
+
+/** React DOM resource hints. */
+export const preload = krateHintPreload;
+export const preinit = krateHintPreinit;
+export const preconnect = krateHintPreconnect;
+export const prefetchDNS = krateHintPrefetchDNS;
+export const preloadModule = krateHintPreloadModule;
+export const preinitModule = krateHintPreinitModule;
 
 /** React DOM `requestFormReset(form)`. */
 export const requestFormReset = krateRequestFormReset;

@@ -10,6 +10,7 @@ const (
 	DirectiveServer  = "@server"
 	DirectiveRuntime = "@runtime"
 	DirectiveStatic  = "@static"
+	DirectiveClient  = "@client"
 )
 
 // HasDirective checks if source code starts with a server/runtime directive.
@@ -243,6 +244,14 @@ func isPathInDirs(filePath string, dirs []string) bool {
 		if strings.HasPrefix(normalized, d) {
 			return true
 		}
+		// A relative directory is relative to the project root, while the
+		// path being classified is absolute.
+		if !strings.HasPrefix(d, "/") && !(len(d) > 1 && d[1] == ':') {
+			d = strings.TrimPrefix(d, "./")
+			if !strings.Contains(normalized, "/node_modules/") && strings.Contains(normalized, "/"+d) {
+				return true
+			}
+		}
 		// Also check if the file's directory (not file itself) is the dir
 		parent := normalized
 		if idx := strings.LastIndex(parent, "/"); idx >= 0 {
@@ -254,6 +263,9 @@ func isPathInDirs(filePath string, dirs []string) bool {
 	}
 	return false
 }
+
+// PathInDirs reports whether filePath lies in one of dirs (see isPathInDirs).
+func PathInDirs(filePath string, dirs []string) bool { return isPathInDirs(filePath, dirs) }
 
 // toForwardSlash converts backslashes to forward slashes for cross-platform path comparison.
 func toForwardSlash(s string) string {

@@ -116,6 +116,30 @@ type SSREval struct {
 	// selectStack holds the selected option values of enclosing <select>
 	// elements (nil when the select has no value/defaultValue).
 	selectStack [][]string
+
+	// useIDBase and useIDSeq generate useId() values: every call in this
+	// evaluation, including those of nested components, gets the next
+	// "<base>-s<n>", so instances never share an id and a rebuild repeats them.
+	useIDBase string
+	useIDSeq  int
+	useIDs    []string
+}
+
+// SetUseIDBase sets the prefix of the ids useId() returns.
+func (e *SSREval) SetUseIDBase(base string) { e.useIDBase = base }
+
+// SetUseIDs sets the ids the first useId() calls return, in call order.
+func (e *SSREval) SetUseIDs(ids []string) { e.useIDs = ids }
+
+func (e *SSREval) nextUseID() string {
+	if e.useIDSeq < len(e.useIDs) {
+		id := e.useIDs[e.useIDSeq]
+		e.useIDSeq++
+		return id
+	}
+	id := fmt.Sprintf("%s-s%d", e.useIDBase, e.useIDSeq)
+	e.useIDSeq++
+	return id
 }
 
 // maxEvalDepth bounds nested component evaluation (a recursion guard, not a
@@ -451,6 +475,9 @@ func (e *SSREval) interceptCall(call *ast.CallExpr) (jsvalue.Value, bool) {
 	case *ast.Identifier:
 		if e.isBound(callee.Name) {
 			break
+		}
+		if callee.Name == "__krate_useId" {
+			return jsvalue.String(e.nextUseID()), true
 		}
 		if callee.Name == "cn" || callee.Name == "clsx" {
 			if v, ok := e.foldClassCall(call.Args); ok {

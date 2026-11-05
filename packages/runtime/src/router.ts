@@ -566,7 +566,8 @@ function endTransition(): void {
 }
 
 /**
- * Apply `data-view-transition="name"` to `view-transition-name`. Persistent
+ * Apply `data-view-transition="name"` to `view-transition-name` (and
+ * `data-view-transition-class` to `view-transition-class`). Persistent
  * chrome (navbar/sidebar) keeps its name across mutations so it morphs
  * instead of cross-fading.
  */
@@ -574,6 +575,9 @@ function applyViewTransitionNames(root: ParentNode): void {
   root.querySelectorAll('[data-view-transition]').forEach((el) => {
     const name = (el as HTMLElement).getAttribute('data-view-transition');
     if (name) (el as HTMLElement).style.viewTransitionName = name;
+    // `<ViewTransition default="slow-fade">` selects ::view-transition-*(*.slow-fade).
+    const cls = (el as HTMLElement).getAttribute('data-view-transition-class');
+    if (cls) (el as HTMLElement).style.setProperty('view-transition-class', cls);
   });
 }
 

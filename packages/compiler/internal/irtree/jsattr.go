@@ -11,8 +11,10 @@ import (
 // counterpart). Unknown values map to Loose with the given fallback text.
 func JSAttrValue(v jsvalue.Value, unknownText string) htmlspec.Value {
 	switch v.Kind() {
-	case jsvalue.KindUndefined, jsvalue.KindNull, jsvalue.KindFunction:
+	case jsvalue.KindUndefined, jsvalue.KindNull:
 		return htmlspec.Value{Kind: htmlspec.Null}
+	case jsvalue.KindFunction:
+		return htmlspec.Value{Kind: htmlspec.Complex, Func: true}
 	case jsvalue.KindBool:
 		return htmlspec.BoolVal(v.BoolValue())
 	case jsvalue.KindNumber:
@@ -26,10 +28,11 @@ func JSAttrValue(v jsvalue.Value, unknownText string) htmlspec.Value {
 		for _, el := range v.Elems() {
 			items = append(items, el.ToString())
 		}
-		return htmlspec.Value{Kind: htmlspec.String, Str: v.ToString(), Items: items}
+		return htmlspec.Value{Kind: htmlspec.Complex, Str: v.ToString(), Items: items}
 	case jsvalue.KindUnknown:
 		return htmlspec.LooseVal(unknownText)
 	}
-	// Plain objects and JSX elements stringify like any JS object.
-	return htmlspec.StrVal(v.ToString())
+	// Plain objects and JSX elements stringify like any JS object (and are
+	// not attributes at all on a custom element).
+	return htmlspec.Value{Kind: htmlspec.Complex, Str: v.ToString()}
 }

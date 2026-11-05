@@ -706,6 +706,20 @@ export function createMemoDeps<T>(fn: () => T, deps: () => unknown): () => T {
 }
 
 /**
+ * React 19.2's useEffectEvent: a function that always runs the latest closure
+ * and never subscribes its caller. Components run once and read props and
+ * state through live getters, so `fn` already sees the latest values; the
+ * wrapper only keeps the reads it makes from tracking, so calling the event
+ * from an effect does not make the effect depend on them.
+ */
+export function createEffectEvent<T extends (...args: never[]) => unknown>(fn: T): T {
+  const event = function (this: unknown, ...args: unknown[]) {
+    return untrack(() => (fn as unknown as (...a: unknown[]) => unknown).apply(this, args));
+  };
+  return event as unknown as T;
+}
+
+/**
  * React's useCallback with a dependency array: a getter for the callback
  * whose identity only changes when the dependency array changes.
  */

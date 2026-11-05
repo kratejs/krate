@@ -388,7 +388,7 @@ func isPureInit(e ast.Expr) bool {
 		switch callee := v.Callee.(type) {
 		case *ast.Identifier:
 			name := callee.Name
-			if strings.HasPrefix(name, "use") || strings.HasPrefix(name, "create") {
+			if strings.HasPrefix(name, "use") || strings.HasPrefix(name, "create") || name == "__krate_useId" {
 				return false
 			}
 			switch name {
