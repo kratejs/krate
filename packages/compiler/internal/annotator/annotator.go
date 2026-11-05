@@ -820,7 +820,7 @@ func BuildImportAliases(modules []ModuleSource) map[string]string {
 			if exp, ok := stmt.(*ast.ExportStmt); ok && exp.Namespace != "" && exp.ReexportSource != "" {
 				target := res.Resolve(m.Path, strings.Trim(exp.ReexportSource, "\"'"))
 				if tprog := byPath[target]; tprog != nil {
-					addNamespaceAliases(aliases, exp.Namespace, tprog.Body)
+					addNamespaceExports(aliases, exp.Namespace, res, target, byPath, map[string]bool{})
 				}
 				continue
 			}
@@ -855,8 +855,8 @@ func BuildImportAliases(modules []ModuleSource) map[string]string {
 				// `<Card.Root>` resolves to the deeper module's `Root`. Expand
 				// the named import into namespace aliases keyed by the LOCAL
 				// binding so the import site's dotted tag resolves.
-				if nsBody, ok := namespaceReexportBody(res, tprog.Body, n.Remote, m.Path, byPath); ok {
-					addNamespaceAliases(aliases, n.Local, nsBody)
+				if nsPath, ok := namespaceReexportPath(res, tprog.Body, n.Remote, target, byPath); ok {
+					addNamespaceExports(aliases, n.Local, res, nsPath, byPath, map[string]bool{})
 				}
 			}
 			// Namespace import (`import * as Card from './card'`): every
@@ -864,7 +864,7 @@ func BuildImportAliases(modules []ModuleSource) map[string]string {
 			// `Card.<Name>`, so dotted JSX tags like `<Card.Root>` resolve to
 			// the declared `Root` function.
 			if imp.Namespace != "" {
-				addNamespaceAliases(aliases, imp.Namespace, tprog.Body)
+				addNamespaceExports(aliases, imp.Namespace, res, target, byPath, map[string]bool{})
 			}
 		}
 	}
@@ -938,21 +938,57 @@ func resolveExportedName(res *bundler.ImportResolver, path, exportName string, b
 	return ""
 }
 
-// namespaceReexportBody returns the target module's body when `exportName` in
-// the given module is a namespace re-export (`export * as exportName from '...'`).
-// This lets a named import of that binding expand into dotted aliases.
-func namespaceReexportBody(res *bundler.ImportResolver, body []ast.Stmt, exportName, modulePath string, byPath map[string]*ast.Program) ([]ast.Stmt, bool) {
+// namespaceReexportPath returns the path of the module that `exportName` in
+// the module at modulePath re-exports as a namespace (`export * as exportName
+// from '...'`). This lets a named import of that binding expand into dotted
+// aliases.
+func namespaceReexportPath(res *bundler.ImportResolver, body []ast.Stmt, exportName, modulePath string, byPath map[string]*ast.Program) (string, bool) {
 	for _, stmt := range body {
 		exp, ok := stmt.(*ast.ExportStmt)
 		if !ok || exp.Namespace != exportName || exp.ReexportSource == "" {
 			continue
 		}
 		target := res.Resolve(modulePath, strings.Trim(exp.ReexportSource, "\"'"))
-		if tprog := byPath[target]; tprog != nil {
-			return tprog.Body, true
+		if byPath[target] != nil {
+			return target, true
 		}
 	}
-	return nil, false
+	return "", false
+}
+
+// addNamespaceExports maps `ns.<Export>` to the declared function for every
+// export of the module at path: its own declarations and renames, then the
+// named and star re-exports of barrel files, followed to the modules that
+// declare them. `export * as sub from` adds `ns.sub.<Export>`.
+func addNamespaceExports(aliases map[string]string, ns string, res *bundler.ImportResolver, path string, byPath map[string]*ast.Program, seen map[string]bool) {
+	prog := byPath[path]
+	if prog == nil || seen[path] {
+		return
+	}
+	seen[path] = true
+	addNamespaceAliases(aliases, ns, prog.Body)
+	for _, stmt := range prog.Body {
+		exp, ok := stmt.(*ast.ExportStmt)
+		if !ok || exp.ReexportSource == "" {
+			continue
+		}
+		target := res.Resolve(path, strings.Trim(exp.ReexportSource, "\"'"))
+		switch {
+		case exp.Namespace != "":
+			addNamespaceExports(aliases, ns+"."+exp.Namespace, res, target, byPath, map[string]bool{})
+		case exp.StarReexport:
+			addNamespaceExports(aliases, ns, res, target, byPath, seen)
+		default:
+			for _, n := range exp.ReexportNamed {
+				if n.Remote == "" || n.Remote == "default" {
+					continue
+				}
+				if name := resolveExportedName(res, path, n.Remote, byPath, 0); name != "" {
+					aliases[ns+"."+n.Remote] = name
+				}
+			}
+		}
+	}
 }
 
 // addNamespaceAliases maps `ns.<Fn>` to the declared function name for every

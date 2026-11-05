@@ -586,6 +586,12 @@ Client code and statically rendered pages cannot read process.env or import.meta
 
 `<Tag>` where `Tag` is a variable (`const Tag = as || "div"`, a prop, a value read from state) is rendered as the element it names. The build resolves it when the variable folds to one tag name: a string constant, a prop the caller passes or its default, or a condition on those. This one does not, for example because it depends on a signal or on a value only known at request time, and the page would otherwise contain an empty placeholder instead of the element and its children, so the build fails. Pass the tag as a string the build can see, render each case as its own element (`{wide ? <section>...</section> : <div>...</div>}`), or move the component to a `*.runtime.tsx` file to choose the tag per request.
 
+### KR8321
+
+**Member tag does not resolve to a component**
+
+`<ui.Button>` names the export `Button` of a namespace import (`import * as ui from "./ui"`), of a re-exported namespace (`export * as ui from "./ui"`), or a member of an object. The build follows namespace imports through barrel files (`export { Button } from "./Button"`, `export * from "./Button"`) to the function component the member names. This tag matched none: the module exports no such member, the member is not a function component (a string, a class that is not lowered, a value built at run time), or the object it reads from is not a namespace of project modules. Rendering nothing would drop the element and its children, so the build fails. Check the member's spelling and export, import the component by name, or declare it as a function.
+
 ### KR8601
 
 **Unsupported page segment export value**

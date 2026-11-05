@@ -1405,6 +1405,14 @@ func (e *SSREval) evalJSX(el *ast.JSXElement) string {
 		if v, ok := e.in.Scope.Lookup(name); ok && v.IsFunction() {
 			return e.evalComponentValue(v, el)
 		}
+		if strings.Contains(name, ".") {
+			shown := irtree.TagDisplayName(name)
+			e.errs = append(e.errs, diag.Diagnostic{Line: el.Position.Line, Col: el.Position.Col,
+				Message: "<" + shown + "> does not resolve to a component",
+				Hint:    "check that the module exports `" + shown[strings.LastIndexByte(shown, '.')+1:] + "` as a function component (a namespace import follows `export { X } from` and `export *` barrels), or import it by name",
+				Code:    diag.CodeUnresolvedMemberTag})
+			return ""
+		}
 		if _, bound := e.in.Scope.Lookup(name); bound || e.moduleInits[name] != nil {
 			e.errs = append(e.errs, diag.Diagnostic{Line: el.Position.Line, Col: el.Position.Col,
 				Message: "<" + name + "> is an element type held in a variable the build cannot resolve to one tag",

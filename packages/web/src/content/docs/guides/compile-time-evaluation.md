@@ -79,6 +79,25 @@ emitting an empty placeholder. Pass the tag as a string, render each case as
 its own element, or put the component in a `*.runtime.tsx` file, where the tag
 is an ordinary JavaScript value at request time.
 
+## Namespace members as tags
+
+A member tag of a namespace import renders the component the member names,
+whatever the case of the namespace and however many barrel files sit between:
+
+```tsx
+import * as ui from "./ui"; // ui/index.ts: export { Button } from "./Button"
+
+<ui.Button>Save</ui.Button>
+```
+
+The build follows `export { X } from`, `export { default as X } from`,
+`export *` and `export * as group from` to the function that declares the
+component, and `<ui.group.Input />` resolves the same way. A member that
+does not exist, or is not a function component, stops the build with a
+[KR8321](/docs/reference/diagnostics/#kr8321) error that names the tag, instead
+of emitting an unknown element. Members of an npm React library are mounted as
+islands, as named imports are.
+
 ## Reactive values
 
 A known initial value is not the same as a static value. If an expression reads

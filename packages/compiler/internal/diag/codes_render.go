@@ -14,6 +14,9 @@ const (
 	// CodeDynamicTag: an element type held in a variable that the build
 	// cannot resolve to one tag.
 	CodeDynamicTag Code = "KR8320"
+	// CodeUnresolvedMemberTag: a member tag (<ns.Button>) that names no
+	// component the build can find.
+	CodeUnresolvedMemberTag Code = "KR8321"
 )
 
 func init() {
@@ -60,6 +63,18 @@ func init() {
 				"children, so the build fails. Pass the tag as a string the build can see, render each case as " +
 				"its own element (`{wide ? <section>...</section> : <div>...</div>}`), or move the component to a " +
 				"`*.runtime.tsx` file to choose the tag per request.",
+		},
+		CodeInfo{
+			Code:  CodeUnresolvedMemberTag,
+			Title: "Member tag does not resolve to a component",
+			Explanation: "`<ui.Button>` names the export `Button` of a namespace import (`import * as ui from " +
+				"\"./ui\"`), of a re-exported namespace (`export * as ui from \"./ui\"`), or a member of an object. " +
+				"The build follows namespace imports through barrel files (`export { Button } from \"./Button\"`, " +
+				"`export * from \"./Button\"`) to the function component the member names. This tag matched none: " +
+				"the module exports no such member, the member is not a function component (a string, a class that " +
+				"is not lowered, a value built at run time), or the object it reads from is not a namespace of " +
+				"project modules. Rendering nothing would drop the element and its children, so the build fails. " +
+				"Check the member's spelling and export, import the component by name, or declare it as a function.",
 		},
 	)
 }
