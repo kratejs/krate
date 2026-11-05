@@ -34,6 +34,10 @@
       "types": "./dist/server.d.ts",
       "default": "./dist/server.js"
     },
+    "./highlight": {
+      "types": "./dist/highlight.d.ts",
+      "default": "./dist/highlight.js"
+    },
     "./cache": {
       "types": "./dist/cache.d.ts",
       "default": "./dist/cache.js"

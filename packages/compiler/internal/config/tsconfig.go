@@ -778,9 +778,7 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 					cfg.Markdown.CodeHighlight = b
 				}
 			case "codeTheme":
-				if s, ok := v.(string); ok {
-					cfg.Markdown.CodeTheme = s
-				}
+				cfg.Markdown.SetCodeTheme(v)
 			case "math":
 				if b, ok := v.(bool); ok {
 					cfg.Markdown.Math = b
@@ -1047,6 +1045,21 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 			case "executeConfig":
 				if b, ok := v.(bool); ok {
 					cfg.Tailwind.ExecuteConfig = b
+				}
+			}
+		}
+	case "highlight":
+		m, ok := val.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("expected object, got %T", val)
+		}
+		for k, v := range m {
+			if k == "languages" {
+				switch l := v.(type) {
+				case string:
+					cfg.Highlight.Languages = StringList{l}
+				case []interface{}:
+					cfg.Highlight.Languages = StringList(interfaceStrings(l))
 				}
 			}
 		}

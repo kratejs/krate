@@ -26,6 +26,7 @@ Practical, end-to-end walkthroughs.
 | [Version Matrix](/docs/guides/version-matrix/) | Package/runtime version compatibility |
 | [Safe Fixes](/docs/guides/safe-fixes/) | Review and apply the compiler's safe codemods |
 | [Theming Components](/docs/guides/theming/) | Theme the component library with design tokens |
+| [Code Highlighting](/docs/guides/code-highlighting/) | Highlight code at build time, request time and in the browser, in light and dark |
 | [CSS Signals Cookbook](/docs/guides/css-signals-cookbook/) | Practical CSS Signals patterns |
 | [CSS Signals Errors](/docs/guides/css-signals-errors/) | Diagnose CSS Signals compiler errors |
 | [Server Actions](/docs/guides/server-actions/) | Run server code from forms and handlers |

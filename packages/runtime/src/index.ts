@@ -22,6 +22,7 @@ export { clearPersisted, readPersisted, writePersisted } from './storage.js';
 export type { PersistOptions, PersistSpec, PersistStore, StorageLike } from './storage.js';
 export { h, mount, hydrate, insert, clearNodes, disposeNode, krateApplyStyle } from './dom.js';
 export { krateList, krateBindList } from './list.js';
+export { krateHighlightInit, krateHighlight } from './highlight-bind.js';
 export { krateCondSwap, krateCondDetached, krateCondReset, krateSanitizeAttr, BLOCKED_URL } from './slots.js';
 export { Fragment, jsx, jsxs } from './jsx-runtime.js';
 export {

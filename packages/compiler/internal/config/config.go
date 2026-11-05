@@ -146,6 +146,16 @@ type TailwindCfg struct {
 	ExecuteConfig bool `json:"executeConfig,omitempty"`
 }
 
+// HighlightConfig configures code highlighting that happens after the build:
+// in the browser, for code that changes at run time, and at request time.
+// Code known at build time is always highlighted by the compiler.
+type HighlightConfig struct {
+	// Languages are loaded for highlighting when the language of a snippet is
+	// not known at build time (a variable lang, or a highlight() call). A
+	// literal lang on a dynamic <Code> is found automatically.
+	Languages StringList `json:"languages,omitempty"`
+}
+
 type CSPConfig struct {
 	Enabled   bool   `json:"enabled,omitempty"`
 	Directive string `json:"directive,omitempty"` // custom CSP directive string; empty = auto-generate
@@ -595,6 +605,7 @@ type Config struct {
 	API         APIConfig       `json:"api,omitempty"`
 	Plugins     []PluginConfig  `json:"plugins,omitempty"`
 	Markdown    markdown.Config `json:"markdown,omitempty"`
+	Highlight   HighlightConfig `json:"highlight,omitempty"`
 	Tailwind    TailwindCfg     `json:"tailwind,omitempty"`
 	CSP         CSPConfig       `json:"csp,omitempty"`
 	Runtime     string          `json:"runtime,omitempty"`

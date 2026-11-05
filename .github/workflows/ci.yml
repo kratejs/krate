@@ -330,10 +330,11 @@ jobs:
 
       # App-level browser tests: SPA router (layouts, templates, parallel and
       # intercepting routes), per-segment not-found and error pages, client
-      # components inside server components, and a migrated Next.js app (async
-      # server components, revalidation).
+      # components inside server components, a migrated Next.js app (async
+      # server components, revalidation), and code highlighting (light/dark
+      # switching, code highlighted in the browser as it changes).
       - name: App browser tests
-        run: go test -run 'TestRouterBrowserE2E|TestSegmentPagesBrowser|TestServerlessNodeBrowser|TestUseClientIslandBrowser|TestMigratedNextAppBrowser|TestTailwindLayeringInBrowser|TestComponentsA11yBrowser|TestServerActionRedirectInBrowser|TestNoJSActionStateFeedbackInBrowser|TestCSPSpeculationRulesInBrowser' -count=1 -v ./internal/build
+        run: go test -run 'TestRouterBrowserE2E|TestSegmentPagesBrowser|TestServerlessNodeBrowser|TestUseClientIslandBrowser|TestMigratedNextAppBrowser|TestTailwindLayeringInBrowser|TestComponentsA11yBrowser|TestServerActionRedirectInBrowser|TestNoJSActionStateFeedbackInBrowser|TestCSPSpeculationRulesInBrowser|TestCodeThemeBrowser|TestDynamicCodeBrowser' -count=1 -v ./internal/build
         working-directory: packages/compiler
         env:
           KRATE_BROWSER: ${{ matrix.browser }}

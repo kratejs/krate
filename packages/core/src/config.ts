@@ -135,8 +135,12 @@ export interface MarkdownConfig {
   headingAnchors?: boolean;
   admonitions?: boolean;
   codeHighlight?: boolean;
-  /** chroma theme for syntax highlighting (default "github-dark"). */
-  codeTheme?: string;
+  /**
+   * chroma theme for syntax highlighting. A name applies to both colour modes;
+   * `{ light, dark }` picks one per mode. Defaults to
+   * `{ light: "github", dark: "github-dark" }`.
+   */
+  codeTheme?: string | { light?: string; dark?: string };
   math?: boolean;
   /** Render ```` ```mermaid ```` code blocks as diagrams (loads Mermaid from a CDN). */
   mermaid?: boolean;
@@ -145,6 +149,16 @@ export interface MarkdownConfig {
    * in `@krate/plugin`). Each runs on the AfterMarkdownParse hook.
    */
   plugins?: string[];
+}
+
+export interface HighlightConfig {
+  /**
+   * Languages to load for code highlighted in the browser or at request time when
+   * the language is not known at build time (a variable `lang`, or a
+   * `krateHighlight()` call). A literal `lang` on a dynamic `<Code>` is found
+   * automatically.
+   */
+  languages?: string[];
 }
 
 export type RuntimeName = "quickjs" | "node" | "bun" | "deno";
@@ -534,6 +548,8 @@ export interface KrateConfig {
   tailwind?: TailwindConfig;
   csp?: CSPConfig;
   markdown?: MarkdownConfig;
+  /** Code highlighted after the build: in the browser and at request time. */
+  highlight?: HighlightConfig;
   runtime?: "node" | "bun" | "deno";
   ssr?: SSRConfig;
   redirects?: RedirectConfig[];

@@ -132,6 +132,8 @@ type Builder struct {
 	// convention files produced in this build.
 	metaImages *metaImages
 
+	// hl holds the highlighter chunks written for code highlighted in the browser.
+	hl      highlightChunks
 	Root    string
 	Cfg     *config.Config
 	DevMode bool
@@ -1228,6 +1230,7 @@ func (b *Builder) BuildAll() error {
 
 	// Compile server bundles for SSR/ISR/streaming pages
 	serverBundles, serverBundleErrs := compileServerBundles(b.importResolver(), results, b.Root, b.Cfg.OutDir, b.Cfg.Sourcemap, b.actionModules(), b.Cfg.BaseURLPath())
+	b.writeHighlightTables(serverBundles)
 	for _, err := range serverBundleErrs {
 		failureMessages = append(failureMessages, "  "+err.Error())
 		failureErrs = append(failureErrs, err)
@@ -1657,6 +1660,12 @@ func (b *Builder) writePageCSS(results []*PageResult) map[string]bool {
 	memo := make(map[string]processed)
 	var chromaCSS string
 	chromaLoaded := false
+	var codeTheme syntaxhighlight.Theme
+	if b.Cfg.Markdown.CodeHighlight {
+		// Resolve up front so an unknown theme name is reported even on a
+		// build that renders no code.
+		codeTheme = b.codeTheme()
+	}
 
 	// Per-variant stylesheets: in hybrid+userAgent mode the UA sibling should
 	// download only the legacy signal rules (and the default document only the
@@ -1692,14 +1701,14 @@ func (b *Builder) writePageCSS(results []*PageResult) map[string]bool {
 	}
 
 	for _, r := range results {
-		if r.CSS == "" && !pageRendersCode(r.HTML) {
+		if r.CSS == "" && !pageRendersCode(r) {
 			b.setTailwindPage(r.Page, twPageInfo{})
 			continue
 		}
 		pageCss := r.CSS
-		if b.Cfg.Markdown.CodeHighlight && pageRendersCode(r.HTML) {
+		if b.Cfg.Markdown.CodeHighlight && pageRendersCode(r) {
 			if !chromaLoaded {
-				chromaCSS = syntaxhighlight.CSSForTheme(b.Cfg.Markdown.CodeTheme)
+				chromaCSS = syntaxhighlight.ThemeCSS(codeTheme)
 				chromaLoaded = true
 			}
 			if chromaCSS != "" {
@@ -1741,10 +1750,32 @@ func (b *Builder) writePageCSS(results []*PageResult) map[string]bool {
 	return written
 }
 
-// pageRendersCode reports whether a page's markup contains syntax-highlighted
-// code, in which case the chroma stylesheet is needed on that page.
-func pageRendersCode(html string) bool {
-	return strings.Contains(html, "chroma")
+// codeTheme resolves the configured light and dark code themes. An unknown
+// name is reported once (KR7150) and replaced by the default for its mode.
+func (b *Builder) codeTheme() syntaxhighlight.Theme {
+	th, unknown := syntaxhighlight.ResolveTheme(b.Cfg.Markdown.CodeTheme, b.Cfg.Markdown.CodeThemeDark)
+	var ds []diag.Diagnostic
+	for _, name := range unknown {
+		ds = append(ds, diag.Diagnostic{
+			File:     "krate.config.ts",
+			Severity: diag.SeverityWarning,
+			Code:     diag.CodeUnknownCodeTheme,
+			Message:  fmt.Sprintf("unknown code theme %q; using the default for that mode", name),
+			Hint:     "use a chroma theme name such as " + strings.Join(syntaxhighlight.SimilarThemes(name, 3), ", ") + ", or { light, dark } to pick one per mode",
+		})
+	}
+	if len(ds) > 0 {
+		printWarningsOnce(os.Stderr, ds)
+	}
+	return th
+}
+
+// pageRendersCode reports whether a page shows syntax-highlighted code, in
+// which case the chroma stylesheet is needed on that page: its markup has a
+// highlighted block, or its script highlights code itself (the browser
+// highlighter writes into blocks the markup does not mark).
+func pageRendersCode(r *PageResult) bool {
+	return strings.Contains(r.HTML, "chroma") || strings.Contains(r.HydrationJS, highlightAPI)
 }
 
 // writeHTMLPages builds the layout wrapper, applies placeholders, minifies,
@@ -2590,13 +2621,19 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 		emitResult.HTML = injectIslandSSR(emitResult.HTML, islandSSR)
 	}
 	emitResult.IslandBootJS = islandBoot
-	needsHydrate := len(emitResult.Signatures) > 0 || islandJS != "" || islandBoot != "" || strings.Contains(emitResult.HTML, "data-krate-portal")
+	// Request-time pages are rendered by the server, which highlights their
+	// code itself; only static pages highlight in the browser.
+	browserHighlight := renderMode == RenderSSG && strings.Contains(emitResult.HTML, highlightMarkup)
+	needsHydrate := len(emitResult.Signatures) > 0 || islandJS != "" || islandBoot != "" || strings.Contains(emitResult.HTML, "data-krate-portal") || browserHighlight
 	// Client-side JS scanned by CSS DCE for classes applied after hydration.
 	dceJS := append(lazyChunkSources(emitResult.LazyChunks), islandJS)
 	dceJS = append(dceJS, b.clientChunkSources(clientBoundaries)...)
 	if needsHydrate {
 		emitResult.TrackSources = b.Cfg.Sourcemap
 		rawJS := strings.TrimSpace(renderer.GenerateNewHydrationJS(emitResult))
+		if renderMode == RenderSSG {
+			rawJS = b.attachHighlight(rawJS, emitResult.HTML)
+		}
 		b.warnShippedCollections(page, entryModule.Program, rawJS)
 		dceJS = append(dceJS, rawJS)
 		rawJS = b.writeLazyChunks(rawJS, emitResult.LazyChunks, pageDir, outName)

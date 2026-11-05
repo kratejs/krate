@@ -47,8 +47,8 @@ type BuildOptions struct {
 	// hooks (usePathname, useParams, ...) fold to it. Empty for a layout.
 	RoutePath string
 	// CodeTheme is the chroma theme used to highlight <Code>/<SyntaxHighlight>
-	// at build time. It must match the stylesheet generated for the same theme
-	// (syntaxhighlight.CSSForTheme). Empty selects the default theme.
+	// at build time. The markup is the same for every theme; the colours come
+	// from syntaxhighlight.ThemeCSS. Empty selects the default theme.
 	CodeTheme string
 	// IDPrefix namespaces the compact slot IDs emitted into data-k markers and
 	// hydration JS. It must be set when a build is merged with another build

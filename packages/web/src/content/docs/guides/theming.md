@@ -88,7 +88,9 @@ text on the page.
 |-------|---------|
 | `--krate-font` | `Inter, system-ui, ...` |
 | `--krate-radius` / `--krate-radius-lg` | `8px` / `12px` |
-| `--krate-code-bg` / `--krate-code-text` | `#18181b` / `#fafafa` |
+| `--krate-code-bg` / `--krate-code-text` | unset: taken from the code theme |
+| `--krate-code-title-bg` / `--krate-code-title-text` | unset: derived from the code colours |
+| `--krate-code-bg-base` / `--krate-code-text-base` | `#f7f7f7` / `#1f2328` light, `#0d1117` / `#e6edf3` dark |
 
 ## Light and dark
 
@@ -101,6 +103,28 @@ The defaults follow the OS via `prefers-color-scheme`, and can be forced with a
 
 `[data-theme="dark"]` / `[data-theme="light"]` win over the media query. Your own
 overrides (zero-superseding) still win over both.
+
+## Code blocks
+
+`<Code>` and fenced blocks take their colours from the code theme
+(`markdown.codeTheme`, `github` in light and `github-dark` in dark by default), so
+a block is light on a light page and dark on a dark one, including when the
+page's mode is switched with `data-theme`. A block with no language has no theme
+stylesheet and uses the `--krate-code-bg-base` and `--krate-code-text-base`
+tokens, which match the default theme.
+
+Set `--krate-code-bg` and `--krate-code-text` to retint every block; they
+override the theme, and the title bar and copy button follow them:
+
+```css
+:root {
+  --krate-code-bg: #fdf6e3;
+  --krate-code-text: #586e75;
+}
+```
+
+Keep the text above 4.5:1 on the background in both modes. Token colours
+come from the theme, so override them only if you also pick the surface.
 
 ## Per-component tweaks
 

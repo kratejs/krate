@@ -89,6 +89,29 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
   up and run again), `<ViewTransition name default>` (names its element child for the
   router's view transitions) and `useEffectEvent`, with `unstable_` names accepted. Props
   with no effect warn (`KR8031`). New diagnostics: `KR8030`, `KR8031`.
+- Code follows the colour mode. `markdown.codeTheme` takes `{ light, dark }` (a plain
+  name still means one theme for both modes) and defaults to `github` in light and
+  `github-dark` in dark; one stylesheet serves system preference and `data-theme`,
+  switching needs no JavaScript, and the HTML keeps one span per token. `<Code>` and
+  fenced blocks no longer assume a dark surface: with a light theme the text was
+  near-invisible (`#fafafa` on `#f7f7f7`), and the copy button hover was white on any
+  background. An unknown theme name warns (`KR7150`). `@krate/base-docs-theme` code
+  blocks now follow the page's mode (light blocks in light mode) with AA colours.
+  Override the surface with `--krate-code-bg` / `--krate-code-text`.
+- Code that changes at run time is highlighted. `<Code lang="ts">{signal()}</Code>`
+  rendered plain text; it now shows the new text at once and highlights it after
+  120 ms (unchanged text is left alone), and an SSR or ISR page highlights code that
+  only exists per request. Both run chroma's own lexers, exported from the binary's
+  chroma as small tables and run token for token (identical markup to the build, in
+  light and dark): the tokenizer (2.3 KB gzip) and the language's tables (0.4 to 8.6
+  KB for the 16 shipped languages) are separate chunks written only for the
+  languages a page uses and loaded on first use, and a page without such code ships
+  none of it. `highlight: { languages }` lists languages for a variable `lang`;
+  `krateHighlight(code, lang)` highlights on demand; `highlight(code, lang)` is in
+  `@krate/runtime/highlight`. Text over 64 KB, a line over 2,000 characters or more
+  than 400 ms of work stays plain. A direct `<SyntaxHighlight>{signal()}</SyntaxHighlight>`
+  no longer freezes the signal's first value. A language outside the shipped list
+  warns (`KR7151`).
 - `krate fix` repairs the 0.4 template's `tsconfig.json`: `"baseUrl": "./src"` with
   `"@/*": ["./src/*"]` can only mean the project root, so it sets `baseUrl` to `"."`
   (`KR7125`). The edited file also builds on 0.4. The build error for an alias that

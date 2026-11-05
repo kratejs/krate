@@ -240,6 +240,16 @@ bound nodes between the markers and a detached fragment when the condition
 changes, so state in either branch survives toggling. Marker ids and list keys
 are percent-encoded (`%`, `<`, `>`) so user data cannot close a comment.
 
+### `krateHighlight`
+
+```ts
+import { krateHighlight } from '@krate/runtime'
+
+const html = await krateHighlight(code, 'ts') // inner HTML of a highlighted block, or null
+```
+
+Highlights code with the same lexers the build uses, loading the language's tables on first use. It resolves to `null` when the language is not available on the page (list it in `highlight.languages`, or use a literal `lang` on a `<Code>`) or the text is over the limits, and the markup is identical to what `<Code>` writes at build time, so it takes the same stylesheet. See [Code Highlighting](/docs/guides/code-highlighting/). `krateHighlightInit(root?)` is what the compiler calls for `<Code>` whose text changes at run time.
+
 ## JSX runtime
 
 ```typescript

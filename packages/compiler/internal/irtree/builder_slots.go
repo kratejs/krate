@@ -1037,6 +1037,12 @@ func (b *builder) buildSyntaxHighlightSlots(el *ast.JSXElement, parentID string)
 					continue
 				}
 			}
+			if b.referencesSignal(c.Expression) {
+				// A signal's current value is not the code: it changes at run
+				// time, so the text is highlighted in the browser.
+				canHighlight = false
+				break
+			}
 			val, ok := childText(b.evalValue(c.Expression))
 			if !ok {
 				// Not known at build time - can't highlight at compile time.
@@ -1060,11 +1066,16 @@ func (b *builder) buildSyntaxHighlightSlots(el *ast.JSXElement, parentID string)
 		return []SlotNode{&StaticHTML{HTML: html.String()}}
 	}
 
-	// Children are dynamic (e.g. {children} in a component body). Emit the
-	// <pre><code> wrapper as static HTML, build children as normal slot nodes,
-	// then close the tags. Chroma highlighting is skipped - the server stub
-	// applies plain escaping.
-	openTag := "<pre class=\"chroma\"><code class=\"language-" + escape.HTML(lang) + "\">"
+	// Children are dynamic (e.g. {children} in a component body, or a signal).
+	// Emit the <pre><code> wrapper as static HTML, build children as normal
+	// slot nodes, then close the tags. The text is written as is and, when
+	// the language is known, data-krate-hl tells the runtime to highlight it
+	// in the browser whenever it changes.
+	openTag := "<pre class=\"chroma\"><code class=\"language-" + escape.HTML(lang) + "\""
+	if lang != "" {
+		openTag += " data-krate-hl=\"" + escape.HTMLAttr(lang) + "\""
+	}
+	openTag += ">"
 	closeTag := "</code></pre>"
 
 	var result []SlotNode

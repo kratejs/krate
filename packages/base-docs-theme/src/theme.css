@@ -34,8 +34,8 @@
 
     --color-text-main: #27272a;
     --color-text-link: #52525b;
-    --color-pre-bg: #18181b;
-    --color-pre-fg: #f4f4f5;
+    --color-pre-bg: #f4f4f5;
+    --color-pre-fg: #18181b;
 
     --blur-intensity: 12px;
     --navbar-bg: rgba(255, 255, 255, 0.82);
@@ -53,19 +53,22 @@
     --color-link: #c2410c;
     --color-focus: #c2410c;
 
-    /* Syntax colours. Code surfaces stay dark in both modes; every token is at
-       least 5:1 on --color-pre-bg. */
-    --code-border: rgba(255, 255, 255, 0.08);
-    --tok-comment: #8d8d98;
-    --tok-keyword: #ff9d7a;
-    --tok-string: #9ad7a6;
-    --tok-number: #f2c572;
-    --tok-function: #8fb8ff;
-    --tok-type: #6fd6d0;
-    --tok-punct: #a1a1aa;
-    --tok-operator: #c9c9d1;
-    --tok-delete: #ff8a8a;
-    --tok-insert: #7ee0a0;
+    /* Syntax colours. Code surfaces follow the page: a light block in light
+       mode, a dark one in dark mode. Every token is at least 4.9:1 on
+       --color-pre-bg in its own mode (the dark palette is 5:1 or better).
+       Override --color-pre-bg / --color-pre-fg to retint the surface. */
+    --code-border: var(--color-border);
+    --code-hl: rgba(0, 0, 0, 0.06);
+    --tok-comment: #52525b;
+    --tok-keyword: #9f1239;
+    --tok-string: #166534;
+    --tok-number: #92400e;
+    --tok-function: #1d4ed8;
+    --tok-type: #0f766e;
+    --tok-punct: #3f3f46;
+    --tok-operator: #3f3f46;
+    --tok-delete: #b91c1c;
+    --tok-insert: #166534;
 
     /* Bridge for @krate/components (Aside, Card, Steps, Tabs, Code, Avatar).
        They read `--krate-*` tokens; mapping them here makes every library
@@ -81,8 +84,8 @@
     --krate-danger: #dc2626;
     --krate-code-bg: var(--color-pre-bg);
     --krate-code-text: var(--color-pre-fg);
-    --krate-code-title-bg: color-mix(in srgb, var(--color-pre-bg) 82%, #ffffff 6%);
-    --krate-code-title-text: #9ca3af;
+    --krate-code-title-bg: color-mix(in srgb, var(--color-pre-bg) 94%, var(--color-pre-fg));
+    --krate-code-title-text: color-mix(in srgb, var(--color-pre-fg) 70%, var(--color-pre-bg));
 }
 
 :root[data-theme="dark"] {
@@ -109,6 +112,17 @@
     --color-link: #fb923c;
     --color-focus: #fb923c;
     --code-border: rgba(255, 255, 255, 0.07);
+    --code-hl: rgba(255, 255, 255, 0.07);
+    --tok-comment: #8d8d98;
+    --tok-keyword: #ff9d7a;
+    --tok-string: #9ad7a6;
+    --tok-number: #f2c572;
+    --tok-function: #8fb8ff;
+    --tok-type: #6fd6d0;
+    --tok-punct: #a1a1aa;
+    --tok-operator: #c9c9d1;
+    --tok-delete: #ff8a8a;
+    --tok-insert: #7ee0a0;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -136,6 +150,17 @@
         --color-link: #fb923c;
         --color-focus: #fb923c;
         --code-border: rgba(255, 255, 255, 0.07);
+        --code-hl: rgba(255, 255, 255, 0.07);
+        --tok-comment: #8d8d98;
+        --tok-keyword: #ff9d7a;
+        --tok-string: #9ad7a6;
+        --tok-number: #f2c572;
+        --tok-function: #8fb8ff;
+        --tok-type: #6fd6d0;
+        --tok-punct: #a1a1aa;
+        --tok-operator: #c9c9d1;
+        --tok-delete: #ff8a8a;
+        --tok-insert: #7ee0a0;
     }
 }
 
@@ -1272,7 +1297,7 @@ a:hover {
 .docs-content .krate-code-header {
     min-height: 2.25rem;
     padding: 0 0.5rem 0 1rem;
-    background: color-mix(in srgb, var(--color-pre-bg) 90%, #ffffff);
+    background: var(--krate-code-title-bg);
     border-bottom: 1px solid var(--code-border);
 }
 
@@ -1319,9 +1344,9 @@ a:hover {
     color: var(--krate-code-title-text);
 }
 
-.docs-content .krate-code-copy:hover {
-    background: color-mix(in srgb, var(--color-pre-bg) 85%, #ffffff);
-    color: #ffffff;
+.krate-code-block .krate-code-copy:hover {
+    background: color-mix(in srgb, var(--color-pre-fg) 12%, var(--color-pre-bg));
+    color: var(--color-pre-fg);
 }
 
 .docs-content .krate-code-copy:focus-visible {
@@ -1331,7 +1356,7 @@ a:hover {
 
 /* Syntax tokens. Selectors are scoped to .chroma so they win over the
    per-theme stylesheet the compiler prepends. */
-.docs-content .chroma {
+:is(.docs-content, .krate-code-block) .chroma {
     background: var(--color-pre-bg);
     color: var(--color-pre-fg);
 }
@@ -1340,60 +1365,60 @@ a:hover {
     background: transparent;
 }
 
-.docs-content .chroma :is(.c, .ch, .cm, .c1, .cs, .cp, .cpf) {
+:is(.docs-content, .krate-code-block) .chroma :is(.c, .ch, .cm, .c1, .cs, .cp, .cpf) {
     color: var(--tok-comment);
     font-style: normal;
     font-weight: 400;
 }
 
-.docs-content .chroma :is(.k, .kc, .kd, .kn, .kp, .kr, .nt, .ow) {
+:is(.docs-content, .krate-code-block) .chroma :is(.k, .kc, .kd, .kn, .kp, .kr, .nt, .ow) {
     color: var(--tok-keyword);
     font-weight: 400;
 }
 
-.docs-content .chroma :is(.kt, .nc, .nn, .ne, .no, .bp, .nb) {
+:is(.docs-content, .krate-code-block) .chroma :is(.kt, .nc, .nn, .ne, .no, .bp, .nb) {
     color: var(--tok-type);
     font-weight: 400;
 }
 
-.docs-content .chroma :is(.nf, .fm, .nd, .nl) {
+:is(.docs-content, .krate-code-block) .chroma :is(.nf, .fm, .nd, .nl) {
     color: var(--tok-function);
     font-weight: 400;
 }
 
-.docs-content .chroma :is(.s, .sa, .sb, .sc, .dl, .sd, .s2, .se, .sh, .si, .sx, .sr, .s1, .ss, .l, .ld) {
+:is(.docs-content, .krate-code-block) .chroma :is(.s, .sa, .sb, .sc, .dl, .sd, .s2, .se, .sh, .si, .sx, .sr, .s1, .ss, .l, .ld) {
     color: var(--tok-string);
 }
 
-.docs-content .chroma :is(.m, .mb, .mf, .mh, .mi, .il, .mo, .na, .py, .nv, .vc, .vg, .vi, .vm) {
+:is(.docs-content, .krate-code-block) .chroma :is(.m, .mb, .mf, .mh, .mi, .il, .mo, .na, .py, .nv, .vc, .vg, .vi, .vm) {
     color: var(--tok-number);
 }
 
-.docs-content .chroma :is(.o, .or) {
+:is(.docs-content, .krate-code-block) .chroma :is(.o, .or) {
     color: var(--tok-operator);
     font-weight: 400;
 }
 
-.docs-content .chroma .p {
+:is(.docs-content, .krate-code-block) .chroma .p {
     color: var(--tok-punct);
 }
 
-.docs-content .chroma .nx,
-.docs-content .chroma .n {
+:is(.docs-content, .krate-code-block) .chroma .nx,
+:is(.docs-content, .krate-code-block) .chroma .n {
     color: var(--color-pre-fg);
 }
 
-.docs-content .chroma .gd,
-.docs-content .chroma .err {
+:is(.docs-content, .krate-code-block) .chroma .gd,
+:is(.docs-content, .krate-code-block) .chroma .err {
     color: var(--tok-delete);
 }
 
-.docs-content .chroma .gi {
+:is(.docs-content, .krate-code-block) .chroma .gi {
     color: var(--tok-insert);
 }
 
-.docs-content .chroma .hl {
-    background: rgba(255, 255, 255, 0.07);
+:is(.docs-content, .krate-code-block) .chroma .hl {
+    background: var(--code-hl);
 }
 
 /* Tables */

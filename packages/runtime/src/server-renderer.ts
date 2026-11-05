@@ -20,6 +20,7 @@ import {
 import { installRenderStore, patchFetch, type CacheScope } from "./cache-scope.js";
 import { cacheSpecFromEnv } from "./cache-adapter.js";
 import { isrStoreFor } from "./shared-isr.js";
+import { registerLanguage, setFenceResolver, type HighlightTable } from "./highlight.js";
 
 // Render cache scopes (tags / revalidate windows read during a render) and the
 // Next-style fetch data cache. Installed once per process; page bundles share
@@ -157,6 +158,30 @@ if (manifestPath && fs.existsSync(manifestPath)) {
   }
 }
 
+
+// Request-time syntax highlighting: the build writes the lexer tables of the
+// languages the server pages use, and <SyntaxHighlight> highlights with them.
+(function loadHighlightTables() {
+  const file = path.join(OUT_DIR, ".krate", "highlight.json");
+  if (!fs.existsSync(file)) return;
+  try {
+    const bundle = JSON.parse(fs.readFileSync(file, "utf-8")) as {
+      tables: HighlightTable[];
+      keys: Record<string, string>;
+      fences?: Record<string, string>;
+    };
+    const names = new Map<string, string[]>();
+    for (const [k, v] of Object.entries(bundle.keys)) {
+      if (!names.has(v)) names.set(v, []);
+      names.get(v)!.push(k);
+    }
+    for (const t of bundle.tables) registerLanguage(t, names.get(t.n.toLowerCase()));
+    const fences = bundle.fences;
+    if (fences) setFenceResolver((n) => Object.prototype.hasOwnProperty.call(fences, n.trim().toLowerCase()));
+  } catch (e) {
+    console.error("[krate-ssr] Could not load highlight tables; code is rendered as plain text:", e);
+  }
+})();
 
 // Module loaders (node:fs / node:vm live here, not in the render core)
 

@@ -41,6 +41,7 @@ func (b *Builder) refreshPageServerArtifacts(results []*PageResult, runtimeJS st
 	var serverBundles map[string]string
 	if len(ssrPages) > 0 {
 		serverBundles = CompileServerBundles(b.importResolver(), ssrPages, b.Root, b.Cfg.OutDir, b.Cfg.Sourcemap, b.actionModules(), b.Cfg.BaseURLPath())
+		b.writeHighlightTables(serverBundles)
 	}
 
 	// Collect runtime component sources referenced by this rebuild's regions

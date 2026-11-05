@@ -56,6 +56,7 @@ for usage.
 | React 19 reference app | Beta | n/a | n/a | Same browser suite as React 18 |
 | Serverless and Node deployment | n/a | n/a | Beta | Vercel, Netlify, Cloudflare and Node hosting |
 | Metadata routes and ImageResponse | Beta | n/a | Beta | Next.js sitemap.ts, robots.ts, manifest.ts, opengraph-image and twitter-image |
+| Code highlighting (build, request time, browser) | Beta | Beta | Beta | chroma parity |
 
 ## Details
 
@@ -397,6 +398,22 @@ Evidence: `TestServerlessNodeParity`, `TestVercelServerOutput`, `TestNetlifyServ
 sitemap.ts, robots.ts and manifest.ts build sitemap.xml, robots.txt and manifest.webmanifest; opengraph-image and twitter-image files (including per-segment and per-generateStaticParams ones) build real PNGs from ImageResponse JSX with a pure Go renderer (flex layout, text and fonts, colours, gradients, images), and feed og:image and twitter:image. Anything the renderer cannot draw is a build error (KR7131). A file wins over a plugin (KR7133). Per-request ImageResponse works in Node API routes under krate start only; Workers and serverless functions have no renderer. krate migrate nextjs maps these files natively. Not supported: CSS grid, transform, filter, SVG, icon and apple-icon files, opengraph-image.alt.txt.
 
 Evidence: `TestMetadataRouteFilesBuild`, `TestImageResponseUnsupportedFailsTheBuild`, `TestMetadataRoutePluginOverrideIsSaid`, `TestImageResponsePerRequestOnTheHost`, `TestMetadataRoutesMigrateNatively`
+
+### Code highlighting (build, request time, browser)
+
+**Source:** Beta - **Islands:** Beta - **SSR:** Beta
+
+Code is highlighted by chroma at build time, by the same lexers in the Node renderer for request-time code, and by the same lexers loaded on demand for code that changes in the browser. The lexers are exported from the binary's own chroma and run token for token (the markup is identical), in light and dark from one stylesheet, with a size, line and time limit that leaves text plain instead of stalling.
+
+Known limits:
+
+- Request-time highlighting runs in the Node renderer; serverless deploy targets write plain text.
+- The browser and request-time highlighters ship 16 languages; other languages are highlighted at build time only.
+- A Markdown fence that names a language outside the shipped set leaves the snippet plain.
+
+Diagnostics: `KR7150`, `KR7151`
+
+Evidence: `TestParityCorpus`, `TestTranspiledRegexesMatchRegexp2`, `TestPatternOverrides`, `TestAdversarialInputs`, `TestRuleProfile`, `TestThemeCSSMatchesChromaPerMode`, `TestCodeThemeBrowser`, `TestDynamicCodeBrowser`, `TestSSRCodeHighlightingE2E`, `TestDynamicCodeShipsHighlighterOnlyWhereUsed`, `ci:code highlighting size budget`
 
 ## How claims are verified
 
