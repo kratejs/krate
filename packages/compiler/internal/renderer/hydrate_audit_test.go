@@ -107,3 +107,25 @@ export default function Page() {
 		t.Errorf("slots that call a function prop have no client binding:\n%s", js)
 	}
 }
+
+func TestPortalInsideConditionalIsLowered(t *testing.T) {
+	src := `import { useState } from "react";
+import { createPortal } from "react-dom";
+export default function Page() {
+  const [open, setOpen] = useState(false);
+  return <main><button onClick={() => setOpen(!open)}>t</button>
+    {open && createPortal(<div id="modal">hello</div>, document.body)}
+    {open ? createPortal(<i id="m2">two</i>, document.body) : null}
+  </main>;
+}`
+	res, js := fullPipeline(t, src)
+	if strings.Contains(js, "createPortal(") {
+		t.Errorf("createPortal reached the hydration script:\n%s", js)
+	}
+	if got := strings.Count(res.HTML, "data-krate-portal="); got != 2 {
+		t.Errorf("expected two portal anchors, got %d:\n%s", got, res.HTML)
+	}
+	if !strings.Contains(js, "kbindCond(") {
+		t.Errorf("portal branches are not toggled by a conditional binding:\n%s", js)
+	}
+}

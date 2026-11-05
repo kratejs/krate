@@ -1611,6 +1611,14 @@ func (b *builder) buildExprSlot(expr ast.Expr, parentID string) *ExprSlot {
 	id := b.assignSlotID(b.nextDynamicSlot(parentID, "expr"))
 	signals := b.collectSignalReads(expr)
 	exprSource := b.bindLoopVars(generateExprJS(expr, b.sigMap()))
+	if strings.Contains(exprSource, "createPortal(") {
+		// Only a portal that is a child, or a branch of a conditional child,
+		// is lowered; anywhere else the call would reach the browser as is,
+		// where createPortal does not exist.
+		b.warnCompat(expr.Pos(), diag.Code("KR8006"),
+			"createPortal is only supported as a child or as a branch of a conditional child; here it is left as a runtime call that fails with \"createPortal is not defined\"",
+			"render the portal as {createPortal(...)}, {open && createPortal(...)} or {open ? createPortal(...) : null}, or use <Portal container={...}>")
+	}
 	// The SSR initial is the value rendered as child text (React semantics:
 	// false/null/undefined render nothing); the emitter escapes it.
 	value := b.evalValue(expr)
@@ -3029,6 +3037,12 @@ func hasJSXInExpr(expr ast.Expr) bool {
 	switch e := expr.(type) {
 	case *ast.JSXElement, *ast.JSXFragment:
 		return true
+	case *ast.CallExpr:
+		// A portal is a branch of JSX content in `{open && createPortal(...)}`.
+		_, _, ok := portalCall(e)
+		return ok
+	case *ast.ParenExpr:
+		return hasJSXInExpr(e.Expr)
 	case *ast.BinaryExpr:
 		return hasJSXInExpr(e.Left) || hasJSXInExpr(e.Right)
 	case *ast.ConditionalExpr:
