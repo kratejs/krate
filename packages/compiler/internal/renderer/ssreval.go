@@ -30,6 +30,7 @@ type SSREval struct {
 	// of module, so a component never sees its caller's locals.
 	module      *jsvalue.Scope
 	moduleInits map[string]ast.Expr
+	moduleRun   *irtree.ModuleRun
 	evaluating  map[string]bool
 	// frame is the scope of the root component being evaluated.
 	frame *jsvalue.Scope
@@ -292,6 +293,13 @@ func (e *SSREval) SetModuleConsts(inits map[string]ast.Expr) {
 	e.moduleInits = inits
 }
 
+// SetModuleRun installs what module-level statements that change bindings left
+// behind: the final value of a binding they change replaces its initializer,
+// and a binding they leave unknown stays unknown.
+func (e *SSREval) SetModuleRun(run *irtree.ModuleRun) {
+	e.moduleRun = run
+}
+
 // SetEvalJS installs the expression-evaluation hook backed by the embedded
 // QuickJS runtime. See the evalJS field docs.
 func (e *SSREval) SetEvalJS(fn func(code string) (string, error)) {
@@ -394,6 +402,13 @@ func (e *SSREval) reportUnknown(expr ast.Expr, v jsvalue.Value, context string) 
 			"this component is rendered at build time; rewrite the expression with supported constructs or move it into a component with client state")
 		return
 	}
+	if strings.HasPrefix(v.Reason(), irtree.ModuleBlockedPrefix) {
+		e.errs = append(e.errs, diag.Diagnostic{Line: pos.Line, Col: pos.Col,
+			Message: "cannot evaluate `" + src + "` at build time: " + v.Reason() + " (in " + context + ")",
+			Hint:    "top-level code changes this value in a way the build cannot run, and this component is rendered at build time; make the code plain (an assignment, a loop or a call to a function of this module), compute the value in one expression, or render it in a component with client state",
+			Code:    diag.CodeModuleValueUnknown})
+		return
+	}
 	e.addDiag(pos, "cannot evaluate `"+src+"` at build time: "+v.Reason()+" (in "+context+")",
 		"signal-less components are rendered to static HTML at build time, so every value they render must be a prop, a local, or a module constant")
 }
@@ -449,6 +464,20 @@ func (e *SSREval) renderValue(expr ast.Expr, v jsvalue.Value) string {
 func (e *SSREval) resolveIdent(name string) (jsvalue.Value, bool) {
 	if v, ok := e.module.Lookup(name); ok {
 		return v, true
+	}
+	if run := e.moduleRun; run != nil {
+		if reason, ok := run.Blocked[name]; ok {
+			return jsvalue.Dynamic(irtree.ModuleBlockedPrefix + reason), true
+		}
+		if v, ok := run.Values[name]; ok {
+			// Each evaluator gets its own copy: components render in parallel
+			// and one that changes a module array must not change another's.
+			if lit := jsvalue.ToAST(v); lit != nil {
+				v = e.in.EvalIn(jsvalue.NewScope(nil), lit)
+			}
+			e.module.Define(name, v)
+			return v, true
+		}
 	}
 	if init, ok := e.moduleInits[name]; ok && init != nil && !e.evaluating[name] {
 		e.evaluating[name] = true
@@ -833,11 +862,26 @@ func (e *SSREval) resolveTagAlias(name string) string {
 	if len(name) == 0 || name[0] < 'A' || name[0] > 'Z' {
 		return ""
 	}
-	expr, ok := e.tagAliases[name]
-	if !ok {
+	if expr, ok := e.tagAliases[name]; ok {
+		if tag := e.foldTagExpr(expr); tag != "" {
+			return tag
+		}
+	}
+	return e.tagFromScope(name)
+}
+
+// tagFromScope returns the HTML tag a variable holds when its value is known:
+// a module constant, a prop passed by the caller, a parameter default or a
+// local computed from them.
+func (e *SSREval) tagFromScope(name string) string {
+	v := e.value(&ast.Identifier{Name: name})
+	if v.ContainsUnknown() || v.Kind() != jsvalue.KindString {
 		return ""
 	}
-	return e.foldTagExpr(expr)
+	if tag := v.StringValue(); irtree.IsHTMLTagName(tag) {
+		return tag
+	}
+	return ""
 }
 
 func (e *SSREval) foldTagExpr(expr ast.Expr) string {
@@ -848,7 +892,13 @@ func (e *SSREval) foldTagExpr(expr ast.Expr) string {
 		}
 		return ""
 	case *ast.Identifier:
-		return t.Name
+		if tag := e.tagFromScope(t.Name); tag != "" {
+			return tag
+		}
+		if t.Name != "" && t.Name[0] >= 'A' && t.Name[0] <= 'Z' {
+			return t.Name
+		}
+		return ""
 	case *ast.ConditionalExpr:
 		test := e.value(t.Test)
 		truthy, known := test.Truthy()
@@ -861,6 +911,11 @@ func (e *SSREval) foldTagExpr(expr ast.Expr) string {
 		return e.foldTagExpr(t.Alternate)
 	case *ast.TypeAssertion:
 		return e.foldTagExpr(t.Expr)
+	case *ast.ParenExpr:
+		return e.foldTagExpr(t.Expr)
+	}
+	if v := e.value(expr); !v.ContainsUnknown() && v.Kind() == jsvalue.KindString && irtree.IsHTMLTagName(v.StringValue()) {
+		return v.StringValue()
 	}
 	return ""
 }
@@ -1380,6 +1435,21 @@ func (e *SSREval) evalJSX(el *ast.JSXElement) string {
 		// A component held in a local or prop (e.g. `const Comp = props.as`).
 		if v, ok := e.in.Scope.Lookup(name); ok && v.IsFunction() {
 			return e.evalComponentValue(v, el)
+		}
+		if strings.Contains(name, ".") {
+			shown := irtree.TagDisplayName(name)
+			e.errs = append(e.errs, diag.Diagnostic{Line: el.Position.Line, Col: el.Position.Col,
+				Message: "<" + shown + "> does not resolve to a component",
+				Hint:    "check that the module exports `" + shown[strings.LastIndexByte(shown, '.')+1:] + "` as a function component (a namespace import follows `export { X } from` and `export *` barrels), or import it by name",
+				Code:    diag.CodeUnresolvedMemberTag})
+			return ""
+		}
+		if _, bound := e.in.Scope.Lookup(name); bound || e.moduleInits[name] != nil {
+			e.errs = append(e.errs, diag.Diagnostic{Line: el.Position.Line, Col: el.Position.Col,
+				Message: "<" + name + "> is an element type held in a variable the build cannot resolve to one tag",
+				Hint:    "pass the tag as a string the build can see (a const, a prop or its default), or render each case as its own element",
+				Code:    diag.CodeDynamicTag})
+			return ""
 		}
 		e.addDiag(el.Position, "unknown component <"+name+"> in a build-time rendered component",
 			"import or define "+name+" so it can be rendered; an unresolved component is not silently dropped")

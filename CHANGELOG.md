@@ -9,6 +9,21 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Breaking
 
+- More builds that used to ship broken output now fail, each with a file and a fix:
+  an element type that cannot be resolved (`KR8320`), a member tag that names no
+  component (`KR8321`), a `@static`/`@server` page reading a module value that top-level
+  code changes in a way the build cannot run (`KR8322`), an `<Icon>` that cannot be
+  resolved (`KR8840`, so offline builds need `.krate/cache/icons`), a `generateStaticParams`
+  entry with a missing or unsafe param or a duplicate path (`KR7142`), malformed
+  frontmatter, and a CSS, JS, runtime, chunk, manifest or image file that cannot be written.
+- A syntax error in `krate.config.*` fails with `file:line:col`, including in `extends`
+  bases; text after `export default { ... }` used to be ignored. The static config
+  fallback rejects wrongly typed nested values. `checks.failOn` accepts only `"error"` or
+  `"warning"`, non-string `checks.ignore` and `checks.custom` entries are errors, and
+  `--config <path>` fails when the file does not exist on every command that takes it.
+- `krate serve` and `krate start` refuse to start when the build recorded middleware and
+  `.krate/middleware.js` is missing, or when `server-manifest.json` is corrupt. Rebuild
+  older `dist` folders to get the middleware record; without it the server only warns.
 - Importing `.scss`, `.sass`, `.less` or `.styl` is a build error (`KR7123`, Krate
   has no compiler for them); the styles used to be dropped silently. Importing a name
   `@krate/runtime` does not export is a build error too (`KR7124`); it used to fail
@@ -294,6 +309,31 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Fixed
 
+- Security: middleware fails closed. A middleware module that disappears after startup
+  answers 500 instead of skipping auth, and the Node, Bun and Deno sidecar no longer lets
+  requests through when the module fails to import.
+- A corrupt server manifest no longer serves frozen build HTML with a 200. A dev rebuild
+  that leaves one unreadable logs the error and keeps the last good manifest.
+- An effect that throws no longer stops the effects queued behind it. They run, the flush
+  completes, and the first error is rethrown.
+- Top-level statements that change a module value (`for (...) list.push(...)`, assignments,
+  property writes, `Object.assign`, calls to module functions that do so) run at build
+  time, so static HTML shows the final value. A statement the build cannot run leaves the
+  value unknown, and hydrating components read it in the browser.
+- A function prop replaces a function default (`onX = () => "dflt"`); the default used to win.
+- `<Tag>` renders the element when `Tag` is a module const, a prop, a prop default or a
+  folded condition, and `{ as: Tag = "div" }` receives the caller's `as`.
+- `<ui.Button>` from `import * as ui` resolves through barrel re-exports.
+- Computed object keys (`{ [K]: v }`) fold in object literals, destructuring, style
+  objects, component props and `jsx()` calls.
+- `@font-face` rules whose last declaration has no `;` no longer break when `font-display`
+  is injected.
+- A missing `<Icon>` no longer puts its error text and a local path in the page.
+- Krate warns once (`KR7140`) when a Tailwind config, `@tailwind` or `@import "tailwindcss"`
+  is present but `tailwind.enabled` is off, and warns (`KR7141`) about unbalanced braces and
+  unclosed comments or strings. Each stylesheet is balanced, so one file cannot swallow the next.
+- `generateStaticParams` no longer duplicates or empties entries when a value is a number,
+  and the logged count matches the pages written.
 - Tailwind `@theme` variables stay live like Tailwind v4: utilities, `@apply` and
   `--value()` read them through `var()`, so `.dark { --color-primary: ... }` re-themes
   `bg-primary` instead of doing nothing. A default such as `--color-blue-600` or

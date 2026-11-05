@@ -178,6 +178,9 @@ type Emitter struct {
 	// moduleConsts holds module-level `const X = <expr>` initializers so
 	// SSREval resolves module constants referenced by signal-less components.
 	moduleConsts map[string]ast.Expr
+	// moduleRun holds what module-level statements that change bindings left
+	// behind (see irtree.ModuleRun).
+	moduleRun *irtree.ModuleRun
 
 	// CodeTheme is the chroma theme used to highlight <Code>/<SyntaxHighlight>
 	// during SSREval. The markup is the same for every theme; the colours come
@@ -239,6 +242,7 @@ func (e *Emitter) Emit(tree *irtree.ComponentTree) *EmitResult {
 	e.cvaFactories = tree.CVAFactories
 	e.contextDefaults = tree.ContextDefaults
 	e.moduleConsts = tree.ModuleConstInits
+	e.moduleRun = tree.ModuleRun
 	e.externalIslands = map[string]string{}
 	for _, x := range tree.ExternalComponents {
 		e.externalIslands[externalIslandKey(x.Local, x.Offset)] = x.ID
@@ -493,6 +497,7 @@ func (e *Emitter) emitSSREvaluated(node *irtree.ComponentNode) SlotOutput {
 	eval.SetContextValues(node.ContextValues)
 	eval.SetCodeTheme(e.CodeTheme)
 	eval.SetModuleConsts(e.moduleConsts)
+	eval.SetModuleRun(e.moduleRun)
 	if node.RestProps != nil && node.RestPropsName != "" {
 		eval.SetRestProps(map[string]map[string]ast.Expr{node.RestPropsName: node.RestProps})
 	}
@@ -917,6 +922,7 @@ func (e *Emitter) emitSlotsParallel(slots []irtree.SlotNode) SlotOutput {
 		sub.cvaFactories = e.cvaFactories
 		sub.contextDefaults = e.contextDefaults
 		sub.moduleConsts = e.moduleConsts
+		sub.moduleRun = e.moduleRun
 		sub.CodeTheme = e.CodeTheme
 		sub.clientStack = append([]irtree.SlotID{}, base...)
 		outputs[idx] = sub.emitSlotNode(slots[idx])
@@ -1034,6 +1040,15 @@ func (e *Emitter) unboundSlotWarnings(sigs []irtree.ComponentSignature) []diag.D
 			continue
 		}
 		seen[key] = true
+		if name := e.blockedModuleRead(s.ExprSource); name != "" {
+			// A module value that top-level code changes, which the build could
+			// not compute: a build-time page has nowhere to get it at run time.
+			d := diag.New(s.File, s.Pos.Line, s.Pos.Col,
+				"`{"+s.ExprSource+"}` reads `"+name+"`, "+e.moduleRun.Blocked[name]+"; the page renders it as empty text",
+				"make the top-level code plain (an assignment, a loop, or a call to a function of this module), compute the value in one expression, or read it in a component with client state", "")
+			e.errs = append(e.errs, d.WithCode(diag.CodeModuleValueUnknown))
+			continue
+		}
 		d := diag.New(s.File, s.Pos.Line, s.Pos.Col,
 			"`{"+s.ExprSource+"}` has no value at build time and no client code fills it in: it renders as empty text",
 			"compute it from values the build can see, keep it in state or an effect, or make the component interactive", "")
@@ -1041,6 +1056,22 @@ func (e *Emitter) unboundSlotWarnings(sigs []irtree.ComponentSignature) []diag.D
 		out = append(out, d.WithCode(diag.CodeSlotUnresolved))
 	}
 	return out
+}
+
+// blockedModuleRead returns a module binding that top-level code leaves unknown
+// and that the expression source reads, or "".
+func (e *Emitter) blockedModuleRead(src string) string {
+	if e.moduleRun == nil || len(e.moduleRun.Blocked) == 0 {
+		return ""
+	}
+	refs := irtree.JSIdentRefs(src)
+	best := ""
+	for name := range e.moduleRun.Blocked {
+		if refs[name] && (best == "" || name < best) {
+			best = name
+		}
+	}
+	return best
 }
 
 // slotMarker and slotEndMarker render the comment markers that delimit a

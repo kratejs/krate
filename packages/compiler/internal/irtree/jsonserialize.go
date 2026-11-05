@@ -37,10 +37,23 @@ func SerializeJSON(expr ast.Expr, resolve func(ast.Expr) (string, bool)) string 
 	case *ast.ObjectExpr:
 		parts := make([]string, 0, len(e.Properties))
 		for _, p := range e.Properties {
-			if p == nil || p.Spread || p.Key == "" || p.Value == nil {
+			if p == nil || p.Spread || (p.Key == "" && !p.Computed) || p.Value == nil {
 				continue
 			}
-			key, _ := json.Marshal(p.Key)
+			name := p.Key
+			if p.Computed {
+				// The key is an expression: resolve it, or the object is not a
+				// value that can be written out.
+				k, ok := "", false
+				if resolve != nil && p.KeyExpr != nil {
+					k, ok = resolve(p.KeyExpr)
+				}
+				if !ok {
+					return "null"
+				}
+				name = k
+			}
+			key, _ := json.Marshal(name)
 			parts = append(parts, string(key)+":"+SerializeJSON(p.Value, resolve))
 		}
 		return "{" + strings.Join(parts, ",") + "}"

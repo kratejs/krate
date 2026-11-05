@@ -413,14 +413,16 @@ func applyRenames(prog *ast.Program, names map[string]string) {
 }
 
 // renameJSXTag renames the binding a tag refers to: `Row` or the `Row` of
-// `Row.Cell`. A lowercase tag is an HTML element, not a reference.
+// `Row.Cell`. A lowercase tag without a member is an HTML element, not a
+// reference.
 func renameJSXTag(tag string, rn func(string) string) string {
-	if tag == "" || tag[0] < 'A' || tag[0] > 'Z' {
-		return tag
-	}
 	head, rest, dotted := strings.Cut(tag, ".")
 	if dotted {
+		// A member tag names a component whatever its case.
 		return rn(head) + "." + rest
+	}
+	if tag == "" || tag[0] < 'A' || tag[0] > 'Z' {
+		return tag
 	}
 	return rn(head)
 }
