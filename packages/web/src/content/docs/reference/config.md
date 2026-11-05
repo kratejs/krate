@@ -779,9 +779,9 @@ See [API Routes](/docs/features/api-routes/#custom-api-sidecar).
 ## Tailwind `@apply`
 
 Plain utility `@apply` is expanded in your CSS (`p-4`, `font-bold`, ...).
-Variant (`hover:*`, `md:*`), descendant-selector (`space-x-*`) and unknown
-utilities cannot be expressed as plain declarations; they are reported as build
-warnings and left unexpanded.
+Variant (`hover:*`, `md:*`) and descendant-selector (`space-x-*`) utilities
+become nested rules inside the rule that applies them (native CSS nesting).
+Unknown utilities are reported as build warnings and left unexpanded.
 
 ## Validation
 

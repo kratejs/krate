@@ -1412,7 +1412,7 @@ func (b *Builder) processCSSDirectives(cssText string) (string, twPageInfo) {
 	}
 	out, unresolved := gen.ExpandApply(cssText)
 	if len(unresolved) > 0 {
-		b.warnOnce("Tailwind @apply: could not expand " + strings.Join(unresolved, ", ") + " (variants and multi-rule utilities are not supported in @apply)")
+		b.warnOnce("Tailwind @apply: could not expand " + strings.Join(unresolved, ", ") + " (not a known utility; check the spelling, or define it with @utility)")
 	}
 	if strings.Contains(out, "@variant") {
 		b.warnOnce("Tailwind @variant inside rules is not supported and was left in the CSS; use the variant:utility class form instead")
