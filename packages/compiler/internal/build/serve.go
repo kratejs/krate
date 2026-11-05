@@ -58,6 +58,19 @@ const LOOPBACK = '127.0.0.1';
 // Cluster across cores so the Node API sidecar uses more than one thread.
 const WORKERS = Math.max(1, parseInt(process.env.KRATE_API_WORKERS || '1', 10) || 1);
 
+// Exit when the Krate host dies: a SIGKILL or OOM kill gives it no chance to stop its sidecars.
+const PARENT_PID = parseInt(process.env.KRATE_PARENT_PID || '', 10);
+if (PARENT_PID > 0) {
+  const parentWatch = setInterval(() => {
+    try {
+      process.kill(PARENT_PID, 0);
+    } catch (e) {
+      if (!e || e.code !== 'EPERM') process.exit(0);
+    }
+  }, 2000);
+  if (parentWatch.unref) parentWatch.unref();
+}
+
 // Per-process caches so a request does no filesystem probing and no module
 // re-import: URL path -> resolved route file, and file -> imported namespace.
 // The module cache is bypassed in dev (HOT) so edits are picked up.
@@ -437,6 +450,19 @@ const MIDDLEWARE_PATH = process.argv[4] ? path.resolve(process.argv[4]) : '';
 const ACTION_DIR = process.argv[5] ? path.resolve(process.argv[5]) : path.resolve('./.krate/actions');
 const HOT = process.env.KRATE_API_HOT === '1';
 
+// Exit when the Krate host dies: a SIGKILL or OOM kill gives it no chance to stop its sidecars.
+const PARENT_PID = parseInt(process.env.KRATE_PARENT_PID || '', 10);
+if (PARENT_PID > 0) {
+  const parentWatch = setInterval(() => {
+    try {
+      process.kill(PARENT_PID, 0);
+    } catch (e) {
+      if (!e || e.code !== 'EPERM') process.exit(0);
+    }
+  }, 2000);
+  if (parentWatch.unref) parentWatch.unref();
+}
+
 const fileCache = new Map();
 const moduleCache = new Map();
 
@@ -738,6 +764,10 @@ type regionPageResult struct {
 	// errStack and errDigest describe the failed render behind renderErr.
 	errStack  string
 	errDigest string
+	// unavailable is non-empty when the renderer could not be reached at all.
+	// Nothing was written; the caller answers 503 rather than serving the baked
+	// shell as if the page had rendered.
+	unavailable string
 }
 
 // regionBoundary is one splice marker and its nested markers.
@@ -939,7 +969,7 @@ func streamRegionPageModeSC(w http.ResponseWriter, flusher http.Flusher, shells 
 	// alone - no node/bun process, no extra hop.
 	if len(regionList) > 0 {
 		if err := fetchNodeRegions(ssrPort, route, params, query, headers, regionList, regionHTML, &res, internalSecret); err != nil {
-			res.served = false
+			res.unavailable = err.Error()
 			return res
 		}
 	}
@@ -1096,6 +1126,12 @@ func fetchNodeRegions(ssrPort int, route string, params, query, headers map[stri
 	for framesLeft > 0 {
 		line, err := tcpBuf.ReadBytes('\n')
 		if err != nil {
+			// The renderer died or the stream was cut mid-way: the regions that
+			// never arrived keep their baked content, which must not pass as a
+			// successful (and cacheable) render.
+			if res.renderErr == "" {
+				res.renderErr = fmt.Sprintf("ssr regions: stream ended with %d of %d regions missing", framesLeft, len(regionList))
+			}
 			break
 		}
 		var frame regionFrame
@@ -1326,6 +1362,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 					fmt.Sprintf("KRATE_API_HOT=%d", boolToInt(hub != nil)),
 					fmt.Sprintf("KRATE_API_DEV=%d", boolToInt(hub != nil)),
 					fmt.Sprintf("KRATE_ACTION_MAX_BODY=%d", apiBodyLimit),
+					fmt.Sprintf("KRATE_PARENT_PID=%d", os.Getpid()),
 				)
 				cmd.Env = append(cmd.Env, revalHost.EnvList()...)
 				if cacheRuntime != "" {
@@ -1546,6 +1583,8 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	ssr.SetPPR(cfg.PPR, cfg.PPRRevalidate)
 	ssr.SetRendererWorkers(cfg.SSR.RendererWorkers)
 	ssrStarted := false
+	ssrStop := make(chan struct{})
+	var ssrStopOnce sync.Once
 	if err := ssr.LoadManifest(); err != nil {
 		// No request-time pages: nothing routes through the renderer.
 	} else if !ssr.NeedsNodeRenderer() {
@@ -1555,6 +1594,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	} else {
 		ssrStarted = true
 		revalHost.SetSSR(ssr, ssrPort)
+		go ssr.Supervise(ssrStop)
 		printf("  %s*%s SSR renderer -> %shttp://localhost:%d%s\n", cCyan, cReset, cCyan, ssrPort, cReset)
 	}
 
@@ -1941,6 +1981,19 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		outOfOrder := page != nil && page.Mode == RenderStreaming.String()
 		errMatch, hasErrPage := segs.forRoute(SegmentError, r.URL.Path, page.SegDir)
 		rr := streamRegionPageModeSC(w, flusher, regionShells, absOut, route, regionPort, params, query, headers, routeGo, renderGo, isISR, reval, ssr.InternalSecret(), outOfOrder, page.ServerComponents, hasErrPage)
+		if rr.served && rr.unavailable != "" {
+			// The renderer is down or unreachable. Serving the baked shell with a
+			// 200 would hide the outage (and let a CDN cache the empty page).
+			fmt.Fprintf(os.Stderr, "  %sSSR renderer unavailable (%s):%s %s\n", cRed, route, cReset, rr.unavailable)
+			h := w.Header()
+			h.Set("X-Krate-Error", "renderer-unavailable")
+			h.Set("Cache-Control", "no-store")
+			h.Set("Retry-After", "1")
+			h.Del("X-Krate-Cache")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte("<!doctype html><title>503</title><h1>Service Unavailable</h1>"))
+			return
+		}
 		if rr.served && rr.fatalErr != "" {
 			// The render failed: answer 500 with the route's nearest error page
 			// (the full error stays in the log, the page gets a sanitized one).
@@ -2138,17 +2191,22 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 					}
 					ticker := time.NewTicker(interval)
 					defer ticker.Stop()
+					// The first refresh waits a full interval: the entries a
+					// request just rendered are fresh, and refreshing at t=0
+					// would re-render them (and change their body) right away.
+					// A tick that lands while the renderer is restarting is
+					// skipped; the supervisor brings it back.
 					for {
-						if !ssr.IsRunning() {
-							return
-						}
-						if err := ssr.RefreshPage(page.Route); err != nil {
-							fmt.Fprintf(os.Stderr, "  %sISR revalidation failed (%s):%s %v\n", cYellow, page.Route, cReset, err)
-						}
 						select {
 						case <-ticker.C:
 						case <-isrDone:
 							return
+						}
+						if !ssr.IsRunning() {
+							continue
+						}
+						if err := ssr.RefreshPage(page.Route); err != nil {
+							fmt.Fprintf(os.Stderr, "  %sISR revalidation failed (%s):%s %v\n", cYellow, page.Route, cReset, err)
 						}
 					}
 				}()
@@ -2183,7 +2241,8 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		isrDoneOnce.Do(func() { close(isrDone) })
 		nodeAPIStopOnce.Do(func() { close(nodeAPIStop) })
 		if ssrStarted {
-			ssr.Stop()
+			ssrStopOnce.Do(func() { close(ssrStop) })
+			ssr.Shutdown()
 			printf("  %s+%s SSR renderer stopped\n", cGreen, cReset)
 		}
 		if goAPI != nil {
