@@ -27,10 +27,41 @@ const (
 	CodeTierDecorator Code = "KR7115"
 	// CodeExportCollision: a page imports one name from two modules.
 	CodeExportCollision Code = "KR7116"
+	// CodeAPIRouteInPages: a .ts or .js file under src/pages/api is not served.
+	CodeAPIRouteInPages Code = "KR7120"
+	// CodePagesEndpoint: a prerendered endpoint (src/pages/data.json.ts) failed.
+	CodePagesEndpoint Code = "KR7121"
+	// CodeMetadataNotStatic: a page's metadata export has no build-time value.
+	CodeMetadataNotStatic Code = "KR7122"
 )
 
 func init() {
 	Register(
+		CodeInfo{
+			Code:  CodeAPIRouteInPages,
+			Title: "API route file in the pages directory",
+			Explanation: "API routes are served from src/api, not from the pages directory. A `.ts` or `.js` " +
+				"file under src/pages/api used to build into an empty page while /api/... answered 502. Move " +
+				"the file to src/api/. This is a warning.",
+		},
+		CodeInfo{
+			Code:  CodeMetadataNotStatic,
+			Title: "Page metadata could not be read at build time",
+			Explanation: "A page's `export const metadata` (or a `generateMetadata` that returns an object literal) " +
+				"becomes the document <title>, description, canonical link, Open Graph and Twitter tags when " +
+				"its values are literals. When none can be resolved (the values are computed, or " +
+				"`generateMetadata` reads params), no tags are emitted. Write literal values, or render " +
+				"`<Head>` from the component for values that depend on props. This is a warning.",
+		},
+		CodeInfo{
+			Code:  CodePagesEndpoint,
+			Title: "Prerendered endpoint failed",
+			Explanation: "A file such as src/pages/data.json.ts is a prerendered endpoint: its GET export runs " +
+				"once at build time and the response body is written to the output as a file (data.json). " +
+				"The build fails when the module has no GET export, GET throws, answers a non-2xx status, or the " +
+				"name has a dynamic segment. Endpoints run on Node (or the configured runtime) with the " +
+				"project's environment. For a response that depends on the request, use an API route in src/api.",
+		},
 		CodeInfo{
 			Code:  CodeExportCollision,
 			Title: "One name imported from two modules",
