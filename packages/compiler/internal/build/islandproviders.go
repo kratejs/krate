@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -33,8 +32,7 @@ type layoutProviders struct {
 	Module islandVirtualModule
 	Layout string
 	Tags   []string
-	// Notes are warnings about wrappers that could not be lifted; they are
-	// printed for pages that have islands.
+	// Notes are warnings about wrappers that could not be lifted.
 	Notes []diag.Diagnostic
 }
 
@@ -42,21 +40,9 @@ type layoutProviders struct {
 // outermost first. A nil value is no chain.
 type islandProviders struct {
 	chain []*layoutProviders
-	// declined are warnings about wrappers of the page's layouts that could
-	// not be lifted.
-	declined []diag.Diagnostic
 }
 
 func (p *islandProviders) empty() bool { return p == nil || len(p.chain) == 0 }
-
-// printProviderNotes prints the warnings about layout providers that could not
-// reach the islands of a page (once per build).
-func printProviderNotes(p *islandProviders) {
-	if p == nil || len(p.declined) == 0 {
-		return
-	}
-	printWarningsOnce(os.Stderr, p.declined)
-}
 
 func (p *islandProviders) virtualModules() map[string]islandVirtualModule {
 	if p.empty() {
@@ -118,11 +104,10 @@ func (b *Builder) pageProviders(page string) *islandProviders {
 				if lp.Spec != "" {
 					out.chain = append(out.chain, lp)
 				}
-				out.declined = append(out.declined, lp.Notes...)
 			}
 		}
 	}
-	if len(out.chain) == 0 && len(out.declined) == 0 {
+	if len(out.chain) == 0 {
 		return nil
 	}
 	return &out
@@ -623,7 +608,7 @@ func (b *Builder) planLayoutProviders(layoutPath string, layout *bundler.Module,
 				return
 			}
 			hoistedSeen[d] = true
-			text, why := hoistBodyDecl(d, bodyStmt[name].Kind, prog, shape, needed)
+			text, why := hoistBodyDecl(d, bodyStmt[name], prog, shape)
 			if why != "" {
 				failure = why
 				return
@@ -755,11 +740,29 @@ func filterImport(imp *ast.ImportStmt, used map[string]bool) *ast.ImportStmt {
 	return &out
 }
 
+// layoutReads reports whether the layout component reads name outside the given
+// statement.
+func layoutReads(shape *layoutShape, except ast.Stmt, name string) bool {
+	hit := false
+	for _, st := range shape.body {
+		if st == except {
+			continue
+		}
+		irtree.WalkAST(st, func(n any) bool {
+			if id, ok := n.(*ast.Identifier); ok && id.Name == name {
+				hit = true
+			}
+			return !hit
+		})
+	}
+	return hit
+}
+
 // hoistBodyDecl turns a declaration inside the layout component into a
 // module-level one. Only values that do not change per render can move: the
 // `useState(() => new Client())` idiom with no setter in use, `useMemo` with
 // no dependencies, and plain expressions.
-func hoistBodyDecl(d *ast.VarDecl, kind ast.VarKind, prog *ast.Program, shape *layoutShape, used map[string]bool) (string, string) {
+func hoistBodyDecl(d *ast.VarDecl, stmt *ast.VarStmt, prog *ast.Program, shape *layoutShape) (string, string) {
 	names := declNames(d)
 	if d.Init == nil {
 		return "", "`" + strings.Join(names, ", ") + "` is declared without a value"
@@ -776,7 +779,7 @@ func hoistBodyDecl(d *ast.VarDecl, kind ast.VarKind, prog *ast.Program, shape *l
 				if !d.IsDestructuring || len(d.Names) == 0 {
 					return "", "`useState` in the layout is not destructured"
 				}
-				if len(d.Names) > 1 && used[d.Names[1]] {
+				if len(d.Names) > 1 && d.Names[1] != "" && layoutReads(shape, stmt, d.Names[1]) {
 					return "", "the layout changes `" + d.Names[0] + "` with `" + d.Names[1] + "`, so it is not a constant"
 				}
 				if len(call.Args) == 0 {
@@ -803,7 +806,7 @@ func hoistBodyDecl(d *ast.VarDecl, kind ast.VarKind, prog *ast.Program, shape *l
 		return "", "`" + strings.Join(names, ", ") + "` is destructured in the layout"
 	}
 	kw := "const"
-	if kind == ast.VarLet {
+	if stmt.Kind == ast.VarLet {
 		kw = "let"
 	}
 	return kw + " " + d.Name + " = " + astprint.PrintExpr(d.Init) + ";", ""
@@ -889,10 +892,13 @@ func liftWrappers(layout *bundler.Module, shape *layoutShape, wrappers []*ast.JS
 	}
 	// Names only the lifted code read: drop their declarations when nothing
 	// that stays refers to them.
-	stay := func(body []ast.Stmt) map[string]bool {
+	refsOf := func(body []ast.Stmt, skip ast.Stmt) map[string]bool {
 		refs := map[string]bool{}
-		note := func(node any) {
-			irtree.WalkAST(node, func(n any) bool {
+		for _, st := range body {
+			if st == skip {
+				continue
+			}
+			irtree.WalkAST(st, func(n any) bool {
 				switch x := n.(type) {
 				case *ast.Identifier:
 					refs[x.Name] = true
@@ -904,9 +910,6 @@ func liftWrappers(layout *bundler.Module, shape *layoutShape, wrappers []*ast.JS
 				return true
 			})
 		}
-		for _, st := range body {
-			note(st)
-		}
 		return refs
 	}
 	liftedSet := map[string]bool{}
@@ -915,16 +918,13 @@ func liftWrappers(layout *bundler.Module, shape *layoutShape, wrappers []*ast.JS
 	}
 	for changed := true; changed; {
 		changed = false
-		refs := stay(bodyKeep)
-		next := bodyKeep[:0:0]
-		for _, st := range bodyKeep {
-			if vs, ok := st.(*ast.VarStmt); ok && allLifted(vs, liftedSet, refs, hoisted) {
+		for i, st := range bodyKeep {
+			if vs, ok := st.(*ast.VarStmt); ok && removableLifted(vs, liftedSet, refsOf(bodyKeep, st)) {
+				bodyKeep = append(append([]ast.Stmt(nil), bodyKeep[:i]...), bodyKeep[i+1:]...)
 				changed = true
-				continue
+				break
 			}
-			next = append(next, st)
 		}
-		bodyKeep = next
 	}
 
 	np := *layout.Program
@@ -980,23 +980,23 @@ func liftWrappers(layout *bundler.Module, shape *layoutShape, wrappers []*ast.JS
 	return &nm, ""
 }
 
-// allLifted reports whether every name a layout-body declaration binds was
-// lifted and nothing that stays reads it.
-func allLifted(vs *ast.VarStmt, lifted, refs map[string]bool, hoisted map[*ast.VarDecl]bool) bool {
-	if len(vs.Decls) == 0 {
-		return false
-	}
+// removableLifted reports whether a layout-body declaration only held values
+// that were lifted: it binds a lifted name and nothing that stays reads any of
+// its names. Matching is by name because the layout's own program may have been
+// rewritten by the React transforms (a useState pair becomes signal names).
+func removableLifted(vs *ast.VarStmt, lifted, refs map[string]bool) bool {
+	hit := false
 	for _, d := range vs.Decls {
-		if !hoisted[d] {
-			return false
-		}
 		for _, n := range declNames(d) {
-			if !lifted[n] || refs[n] {
+			if refs[n] {
 				return false
+			}
+			if lifted[n] {
+				hit = true
 			}
 		}
 	}
-	return true
+	return hit
 }
 
 // pruneLiftedModuleLevel drops the module-level declarations and import

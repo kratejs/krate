@@ -2516,7 +2516,6 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 	var pageProviders *islandProviders
 	if len(tree.ExternalComponents) > 0 {
 		pageProviders = b.pageProviders(page)
-		printProviderNotes(pageProviders)
 	}
 	islandBoot, islandJS, islandSSR, islandStyles, islandErr := b.buildIslands(
 		page,
@@ -3076,6 +3075,9 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 			if lifted == nil && len(notes) > 0 {
 				lifted = &layoutProviders{Layout: layoutPath, Notes: notes}
 			}
+			// Said now: when the wrapper then fails to compile as part of the
+			// layout, this is the explanation that matters.
+			printWarningsOnce(os.Stderr, notes)
 		}
 	}
 	layoutProviderCache.Store(layoutPath, lifted)

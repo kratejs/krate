@@ -128,7 +128,7 @@ func (c *buildDiskCache) setContentHash(contentHash string) {
 // diskCacheSchema is bumped whenever the shape or the semantics of cached page
 // output change (e.g. new emit passes such as DCE or source maps) so entries
 // written by an older pipeline can never be replayed.
-var diskCacheSchema = "5"
+var diskCacheSchema = "6"
 
 var (
 	buildStampOnce  sync.Once

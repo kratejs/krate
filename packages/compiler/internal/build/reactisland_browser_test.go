@@ -10,8 +10,11 @@ import (
 
 // TestBrowserReactLibraryIslands runs React-library islands in a real browser:
 // store hooks shared across islands, a form hook, a CommonJS hook library,
-// client:visible deferral and a CSS-in-JS island. It needs KRATE_BROWSER like
-// the other browser gates.
+// client:visible deferral and a CSS-in-JS island, providers a layout wraps
+// around its children (one query client for every island, nested layouts),
+// store and client state kept across client-side navigation, and islands in
+// pages rendered per request. It needs KRATE_BROWSER like the other browser
+// gates.
 func TestBrowserReactLibraryIslands(t *testing.T) {
 	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
 	if browser == "" {
@@ -110,6 +113,24 @@ func TestBrowserReactLibraryIslands(t *testing.T) {
 		const Box = styled.div`+"`color: rgb(255, 0, 0);`"+`;
 		export default function Page() { return <Box id="o">styled</Box>; }
 	`)
+	// Providers in layouts, state across client-side navigation, and pages
+	// rendered per request.
+	islandProviderFixture(t, root)
+	providerPages(t, root)
+	writeProjectFile(t, root, "src/pages/app/ssr.tsx", `
+		import { Counter } from '../../components/Counter';
+		import Queried from '../../components/Queried';
+		import Themed from '../../components/Themed';
+		export const dynamic = 'force-dynamic';
+		export default function Page() { return <main><h1>ssr</h1><p id="stamp">{String(Date.now())}</p><Counter label="count" /><Queried /><Themed /></main>; }
+	`)
+	writeProjectFile(t, root, "src/pages/app/isr.tsx", `
+		import { Counter } from '../../components/Counter';
+		import Queried from '../../components/Queried';
+		import Themed from '../../components/Themed';
+		export const revalidate = 60;
+		export default function Page() { return <main><h1>isr</h1><Counter label="count" /><Queried /><Themed /></main>; }
+	`)
 	// The fake Badge renders <span class="badge">; give the deferred one an id.
 	writeProjectFile(t, root, "node_modules/fake-lib/index.js", `
 		import { jsx } from 'react/jsx-runtime';
@@ -118,7 +139,19 @@ func TestBrowserReactLibraryIslands(t *testing.T) {
 	if _, err := captureOutput(func() error { return New(root, cfg).BuildAll() }); err != nil {
 		t.Fatalf("BuildAll: %v", err)
 	}
-	cmd := exec.Command("node", script, cfg.OutDir, browser)
+	if keep := os.Getenv("KRATE_TEST_KEEP"); keep != "" {
+		_ = exec.Command("cp", "-r", root+"/.", keep).Run()
+	}
+	// Pages rendered per request need the real server (Node renderer).
+	serverBase := ""
+	if canStopInProcessServer {
+		base, err := startKrateServer(t, root, cfg)
+		if err != nil {
+			t.Fatalf("serve: %v", err)
+		}
+		serverBase = base
+	}
+	cmd := exec.Command("node", script, cfg.OutDir, browser, serverBase)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		if strings.Contains(string(out), "Executable doesn't exist") || strings.Contains(string(out), "browserType.launch") {
