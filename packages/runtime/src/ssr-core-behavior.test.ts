@@ -3,7 +3,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createSSRCore, variantKey, type ManifestPage, type RegionMeta, type SSRCoreOptions } from "./ssr-core.js";
-import { installRenderStore, markNoStore, recordCacheRead, type CacheScope } from "./cache-scope.js";
+import { cacheRuntime, installRenderStore, markNoStore, patchFetch, recordCacheRead, type CacheScope } from "./cache-scope.js";
 import { forbidden, notFound, unauthorized } from "./request-context.js";
 import { jsx } from "./server.js";
 
@@ -67,6 +67,113 @@ describe("variantKey", () => {
 
   it("gives two dynamic params two keys", () => {
     expect(variantKey({ route: "/v/[id]", params: { id: "a" } })).not.toBe(variantKey({ route: "/v/[id]", params: { id: "b" } }));
+  });
+});
+
+describe("generateMetadata in a page render", () => {
+  const body = (s: string): Component => () => jsx("p", { children: s });
+
+  it("puts the tags in front of the html as a head block, merged with the layouts the build bundled", async () => {
+    const { core } = make({
+      pages: [page("/m/[id]")],
+      modules: {
+        "/m/[id]": {
+          default: body("hi"),
+          async generateMetadata({ params }: any, parent: Promise<any>) {
+            const { id } = await params;
+            return { title: "Item " + id, description: String((await parent).description) };
+          },
+          __krateMetadata: [{ file: "_layout.tsx", mod: { metadata: { title: { default: "Site", template: "%s | Site" }, description: "layout" } } }],
+        },
+      },
+    });
+    const r = await core.renderPage(req("/m/[id]", { params: { id: "7" } }));
+    expect(r.status).toBe(200);
+    expect(r.html).toBe(
+      "<!--krate-head--><title>Item 7 | Site</title>\n<meta name=\"description\" content=\"layout\"><!--/krate-head--><p>hi</p>",
+    );
+  });
+
+  it("is skipped when only literal metadata exists (the build bakes it)", async () => {
+    const { core } = make({ pages: [page("/m")], modules: { "/m": { default: body("hi"), metadata: { title: "T" } } } });
+    expect((await core.renderPage(req("/m"))).html).toBe("<p>hi</p>");
+  });
+
+  it("still renders the page when generateMetadata throws, and logs it", async () => {
+    const { core } = make({
+      pages: [page("/m")],
+      modules: { "/m": { default: body("hi"), generateMetadata: () => { throw new Error("boom"); } } },
+    });
+    const r = await core.renderPage(req("/m"));
+    expect(r).toMatchObject({ status: 200, html: "<p>hi</p>" });
+    expect(errors.some((e) => String(e[0]).includes("generateMetadata"))).toBe(true);
+  });
+
+  it("answers 404 for notFound() in generateMetadata and caches nothing", async () => {
+    const { core } = make({
+      pages: [page("/m", "isr", { revalidate: 60 } as any)],
+      modules: { "/m": { default: body("hi"), generateMetadata: () => notFound() } },
+    });
+    expect(await core.renderPage(req("/m"))).toMatchObject({ status: 404, notFound: true });
+    expect(await core.renderPage(req("/m"))).toMatchObject({ status: 404, notFound: true });
+  });
+
+  it("caches the head block with the ISR entry and serves it on a hit", async () => {
+    let calls = 0;
+    const { core } = make({
+      pages: [page("/m", "isr", { revalidate: 60 } as any)],
+      modules: { "/m": { default: body("hi"), generateMetadata: () => { calls++; return { title: "C" + calls }; } } },
+    });
+    const first = await core.renderPage(req("/m"));
+    const second = await core.renderPage(req("/m"));
+    expect(first.cacheStatus).toBe("miss");
+    expect(second.cacheStatus).toBe("hit");
+    expect(second.html).toBe(first.html);
+    expect(second.html).toContain("<title>C1</title>");
+    expect(calls).toBe(1);
+  });
+
+  it("shares the data cache with the page: one request for a URL both read", async () => {
+    let upstream = 0;
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ title: "From API", n: ++upstream }), { headers: { "content-type": "application/json" } })));
+    cacheRuntime().fetchPatched = false;
+    patchFetch();
+    const read = async () => (await fetch("http://data/post/1", { next: { tags: ["post:1"], revalidate: 60 } } as RequestInit)).json();
+    const { core } = make({
+      pages: [page("/d")],
+      modules: {
+        "/d": {
+          default: async () => jsx("p", { children: (await read()).title }),
+          generateMetadata: async () => ({ title: (await read()).title }),
+        },
+      },
+    });
+    const r = await core.renderPage(req("/d"));
+    expect(r.html).toContain("<title>From API</title>");
+    expect(r.html).toContain("<p>From API</p>");
+    expect(upstream).toBe(1);
+    vi.unstubAllGlobals();
+    cacheRuntime().fetchPatched = false;
+  });
+
+  it("records the cache reads of generateMetadata on the same render, so the entry is tagged and no-store holds", async () => {
+    const { core } = make({
+      pages: [page("/t", "isr", { revalidate: 60 } as any)],
+      modules: {
+        "/t": {
+          default: body("hi"),
+          generateMetadata: () => {
+            recordCacheRead(["posts"], undefined);
+            return { title: "Tagged" };
+          },
+        },
+      },
+    });
+    expect((await core.renderPage(req("/t"))).cacheStatus).toBe("miss");
+    expect((await core.renderPage(req("/t"))).cacheStatus).toBe("hit");
+    // revalidateTag("posts") purges the entry: generateMetadata read the tag.
+    expect(await core.isrStore.deleteTags(["posts"])).toBe(1);
+    expect((await core.renderPage(req("/t"))).cacheStatus).toBe("miss");
   });
 });
 

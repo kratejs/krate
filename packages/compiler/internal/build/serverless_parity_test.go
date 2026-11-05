@@ -196,6 +196,14 @@ func TestServerlessNodeParity(t *testing.T) {
 		{name: "action forbidden() fetch", method: "POST", path: "/__krate/action/" + ids["secret"], status: 403, headers: same, body: `{"args":[]}`},
 		{name: "action unauthorized() fetch", method: "POST", path: "/__krate/action/" + ids["signin"], status: 401, headers: same, body: `{"args":[]}`},
 		{name: "action forbidden() form", method: "POST", path: "/__krate/action/" + ids["secret"], status: 403, headers: map[string]string{"Sec-Fetch-Site": "same-origin", "Content-Type": "application/x-www-form-urlencoded", "Referer": "/blog/post/a/"}, body: "x=1", contains: []string{"blog-403"}},
+		// generateMetadata: real tags in the first bytes of the head.
+		{name: "generateMetadata per request", method: "GET", path: "/meta/hello/", status: 200, inHead: []string{"<title>Hello | Krate</title>", `<meta name="description" content="first post">`, `<link rel="canonical" href="https://example.com/meta/hello">`, `<meta property="og:title" content="Hello">`, `<meta property="og:image" content="/og/hello.png">`, `content="layout description"`}, notInHead: []string{"og:site_name"}, contains: []string{"meta-page"}},
+		{name: "generateMetadata sees searchParams", method: "GET", path: "/meta/hello/?draft=1", status: 200, inHead: []string{`<meta name="robots" content="noindex, nofollow">`}},
+		{name: "generateMetadata without search", method: "GET", path: "/meta/hello/", notInHead: []string{`name="robots"`}},
+		{name: "generateMetadata that throws keeps the page", method: "GET", path: "/meta/boom/", status: 200, inHead: []string{"<title>Meta</title>", `content="layout description"`}, notInHead: []string{"secret detail"}, contains: []string{"post boom"}, absent: []string{"secret detail"}},
+		{name: "notFound() in generateMetadata", method: "GET", path: "/meta/gone/", status: 404},
+		{name: "generateMetadata baked per generateStaticParams entry", method: "GET", path: "/smeta/one/", status: 200, inHead: []string{"<title>Entry one - Static</title>", `<meta name="description" content="about one">`, `<meta property="og:title" content="OG one">`, `<meta property="og:image" content="https://static.example.com/img/one.png">`}, notInHead: []string{"og:site_name", "__KRATE_PARAM"}},
+		{name: "generateMetadata of the next entry", method: "GET", path: "/smeta/two/", status: 200, inHead: []string{"<title>Entry two - Static</title>", `content="about two"`, `https://static.example.com/img/two.png`}},
 		{name: "global 404 outside", method: "GET", path: "/elsewhere/deep/", contains: []string{"custom-404"}, absent: []string{"blog-404"}},
 	}
 	for _, c := range cases {
@@ -233,13 +241,15 @@ func TestServerlessNodeParity(t *testing.T) {
 				if i := strings.Index(strings.ToLower(body), "</head>"); i >= 0 {
 					head, rest = body[:i], body[i:]
 				}
+				// The build minifies static heads (unquoted attributes); compare without quotes.
+				unquoted := func(s string) string { return strings.ReplaceAll(s, `"`, "") }
 				for _, want := range c.inHead {
-					if !strings.Contains(head, want) {
+					if !strings.Contains(unquoted(head), unquoted(want)) {
 						t.Errorf("%s: <head> lacks %q:\n%.1500s", host, want, head)
 					}
 				}
 				for _, bad := range c.notInHead {
-					if strings.Contains(head, bad) {
+					if strings.Contains(unquoted(head), unquoted(bad)) {
 						t.Errorf("%s: <head> must not contain %q:\n%.1500s", host, bad, head)
 					}
 				}

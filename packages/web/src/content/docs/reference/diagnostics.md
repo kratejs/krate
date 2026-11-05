@@ -388,9 +388,9 @@ A file such as `src/pages/data.json.ts` is a prerendered endpoint: its `GET` exp
 
 ### KR7122
 
-**Page metadata could not be read at build time**
+**Page metadata could not be evaluated at build time**
 
-A page's `export const metadata` (or a `generateMetadata` that returns an object literal) becomes the document `<title>`, description, canonical link, Open Graph and Twitter tags when its values are literals. When none can be resolved (the values are computed, or `generateMetadata` reads params), no tags are emitted. Write literal values, or render `<Head>` from the component for values that depend on props. This is a warning.
+A static page's `export const metadata` and `generateMetadata` (and those of the layouts above it) run at build time, once per `generateStaticParams` entry, and become the document `<title>`, description, canonical link, Open Graph and Twitter tags. This one could not run: it threw, it needs something the build does not have (a browser global, a service that is down), or the module could not be loaded. The segment's tags were left out and the page still builds. Fix the error, or render the page per request (`export const dynamic = "force-dynamic"`, or `revalidate = N`) so `generateMetadata` runs with the request. This is a warning.
 
 ### KR7123
 

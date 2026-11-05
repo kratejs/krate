@@ -16,6 +16,7 @@ A tour of the features that ship with Krate beyond the core compiler.
 | Feature | Description |
 |---------|-------------|
 | [Built-in Components](/docs/features/built-in-components/) | `<Head>`, `<Script>`, `<Style>`, `<Link>`, `<Icon>`, `<Image>` |
+| [Metadata](/docs/features/metadata/) | `metadata` and `generateMetadata` in pages and layouts, merged in Next.js order, real tags in the initial head |
 | [Image Optimization](/docs/features/image-optimization/) | Compile-time WebP-first `<picture>` pipeline |
 | [Data Fetching](/docs/features/data-fetching/) | Component tiers, ISR/SSR page data, `generateStaticParams`, `createResource`, API routes |
 | [Async Server Components](/docs/features/server-components/) | `async` components that fetch per request, request APIs, `"use client"` boundaries |

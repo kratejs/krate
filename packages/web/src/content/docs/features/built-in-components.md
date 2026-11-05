@@ -58,11 +58,8 @@ export default function Pricing() {
 The build turns it into the document `<title>`, `description`, `keywords`,
 `robots`, `theme-color`, canonical and icon links, and the `og:*` and
 `twitter:*` tags. An explicit `<Head>` on the page wins over `metadata` for the
-same tag, and `metadata` wins over a layout's head. A `generateMetadata` that
-returns an object literal works the same way. Values the build cannot read
-(computed values, anything that depends on `params`) emit nothing and warn with
-`KR7122`; render `<Head>` from the component for those. `metadata` is read on
-pages, not on layouts.
+same tag, and `metadata` wins over a layout's head. `generateMetadata`, computed
+values, and `metadata` in layouts work too: see [Metadata](/docs/features/metadata/).
 
 ## `<Script>`
 

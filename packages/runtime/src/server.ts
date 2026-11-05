@@ -19,6 +19,8 @@ export {
 } from './navigation-server.js';
 export type { AppRouterInstance } from './navigation-server.js';
 export type { RequestContext, RequestCookies } from './request-context.js';
+export { resolveMetadata, renderMetadataTags, metadataHeadTags } from './metadata.js';
+export type { Metadata, ResolvingMetadata, ResolvingViewport, Viewport, MetadataSegment, MetadataModule, MetadataProps } from './metadata.js';
 
 // Signal (server: returns initial value, no reactivity)
 

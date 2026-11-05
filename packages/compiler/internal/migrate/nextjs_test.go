@@ -114,11 +114,11 @@ export async function GET(req: NextRequest) { return NextResponse.json({ ok: tru
 	if !hasWarning(rep, "translated static next.config") {
 		t.Errorf("next.config translation warning missing: %+v", rep.Warnings)
 	}
-	if !hasWarning(rep, "mapped static root metadata") {
-		t.Errorf("metadata warning missing: %+v", rep.Warnings)
+	if hasManual(rep, "app/layout.tsx", "metadata") {
+		t.Errorf("layout metadata runs natively, it is not manual work: %+v", rep.Manual)
 	}
-	if hasManual(rep, "app/layout.tsx", "metadata export is not translated") {
-		t.Errorf("metadata should be mapped, not manual: %+v", rep.Manual)
+	if layoutPlan := findPlan(rep, "src/pages/_layout.tsx"); layoutPlan == nil || !strings.Contains(string(layoutPlan.Content), "export const metadata") {
+		t.Errorf("the layout keeps its metadata export: %+v", layoutPlan)
 	}
 	cfg := findPlan(rep, "krate.config.ts")
 	if cfg == nil || !strings.Contains(string(cfg.Content), `"entry": "src/pages/index.tsx"`) {
@@ -130,8 +130,6 @@ export async function GET(req: NextRequest) { return NextResponse.json({ ok: tru
 		`"destination": "/new"`,
 		`"Cache-Control": "public, max-age=60"`,
 		`"rewrites":`,
-		`"site": {`,
-		`"name": "Example"`,
 	} {
 		if !strings.Contains(string(cfg.Content), want) {
 			t.Errorf("config missing %s:\n%s", want, cfg.Content)
@@ -508,137 +506,84 @@ func TestUnresolvedRelativeImportIsManual(t *testing.T) {
 	}
 }
 
-func TestStaticPageMetadataBecomesHead(t *testing.T) {
-	root := t.TempDir()
-	writeNextFile(t, root, "app/page.tsx", `export const metadata = {
-  title: "About",
-  description: "About page",
-  openGraph: { images: ["/og.png"] },
-};
-export default function Page(props: { params: any }) { return <h1>About</h1>; }`)
-	rep, err := ScanNext(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	page := findPlan(rep, "src/pages/index.tsx")
-	if page == nil {
-		t.Fatal("page missing")
-	}
-	body := string(page.Content)
-	for _, want := range []string{
-		"function Page(props: { params: any })",
-		"<Head>",
-		"<title>About</title>",
-		`<meta name="description" content="About page" />`,
-		`<meta property="og:image" content="/og.png" />`,
-		"export default function PageWithHead(props: any)",
-		"<Page {...props} />",
-	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("page missing %q:\n%s", want, body)
-		}
-	}
-	p := parser.New(lexer.New(body).Tokenize())
-	if prog := p.ParseProgram(); prog == nil || len(p.Errors()) > 0 {
-		t.Fatalf("transformed page does not parse: %v\n%s", p.Errors(), body)
-	}
-	if hasManual(rep, "app/page.tsx", "metadata export is not translated") {
-		t.Errorf("metadata should be wrapped, not manual: %+v", rep.Manual)
-	}
+// metadata and generateMetadata run natively (pages and layouts export them as
+// in Next.js), so the migrator leaves the exports alone: no <Head> wrapper, no
+// helper component, no manual item.
+func TestMetadataExportsMigrateUntouched(t *testing.T) {
+	cases := map[string]string{
+		"static": `export const metadata = { title: "About", description: "About page", openGraph: { images: ["/og.png"] } };
+export default function Page() { return <h1>About</h1>; }`,
+		"async generateMetadata": `export async function generateMetadata({ params }: any) {
+  const { slug } = await params;
+  return { title: slug };
 }
-
-func TestStaticGenerateMetadataBecomesHead(t *testing.T) {
-	root := t.TempDir()
-	writeNextFile(t, root, "app/page.tsx", `export async function generateMetadata({ params }: any) {
-  return { title: "About", description: "About page" };
-}
-export default function Page() { return <h1>About</h1>; }
-`)
-	rep, err := ScanNext(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	page := findPlan(rep, "src/pages/index.tsx")
-	if page == nil {
-		t.Fatal("page missing")
-	}
-	body := string(page.Content)
-	if !strings.Contains(body, "<title>About</title>") || !strings.Contains(body, `content="About page"`) {
-		t.Fatalf("static generateMetadata not wrapped:\n%s", body)
-	}
-	if hasManual(rep, "app/page.tsx", "generateMetadata") {
-		t.Errorf("static generateMetadata should be handled: %+v", rep.Manual)
-	}
-}
-
-func TestDynamicSyncGenerateMetadataBecomesHead(t *testing.T) {
-	root := t.TempDir()
-	writeNextFile(t, root, "app/page.tsx", `export function generateMetadata({ params }: any) {
-  return { title: params.slug, description: "Dynamic" };
-}
-export default function Page() { return <h1>About</h1>; }
-`)
-	rep, err := ScanNext(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	page := findPlan(rep, "src/pages/index.tsx")
-	if page == nil {
-		t.Fatal("page missing")
-	}
-	body := string(page.Content)
-	for _, want := range []string{"<KrateMetadata {...props} />", "function KrateMetadata", "generateMetadata(props)"} {
-		if !strings.Contains(body, want) {
-			t.Errorf("dynamic metadata wrapper missing %q:\n%s", want, body)
-		}
-	}
-	if hasManual(rep, "app/page.tsx", "generateMetadata") {
-		t.Errorf("sync generateMetadata should be handled: %+v", rep.Manual)
-	}
-}
-
-func TestAsyncGenerateMetadataBecomesHead(t *testing.T) {
-	root := t.TempDir()
-	writeNextFile(t, root, "app/page.tsx", `export async function generateMetadata({ params }: any) {
-  return { title: params.slug };
-}
-export default function Page() { return <h1>About</h1>; }
-`)
-	rep, err := ScanNext(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	page := findPlan(rep, "src/pages/index.tsx")
-	if page == nil || !strings.Contains(string(page.Content), "async function KrateMetadata") || !strings.Contains(string(page.Content), "await generateMetadata(props)") {
-		t.Fatalf("async generateMetadata not wrapped: %+v", page)
-	}
-	if strings.Contains(string(page.Content), `from "react"`) {
-		t.Fatalf("the async wrapper must not depend on react imports:\n%s", page.Content)
-	}
-	if hasManual(rep, "app/page.tsx", "generateMetadata") {
-		t.Fatalf("async generateMetadata should be handled: %+v", rep.Manual)
-	}
-}
-
-func TestArrowPageMetadataBecomesHead(t *testing.T) {
-	root := t.TempDir()
-	writeNextFile(t, root, "app/page.tsx", `export const metadata = { title: "About" };
+export default function Page() { return <h1>About</h1>; }`,
+		"sync generateMetadata": `export function generateMetadata({ params }: any) { return { title: params.slug, description: "Dynamic" }; }
+export default function Page() { return <h1>About</h1>; }`,
+		"arrow page": `export const metadata = { title: "About" };
 const Page = () => <h1>About</h1>;
-export default Page;`)
+export default Page;`,
+		"async page": `export const metadata = { title: "Post" };
+export default async function Post({ params }: any) { return <h1>{(await params).slug}</h1>; }`,
+	}
+	for name, src := range cases {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			writeNextFile(t, root, "app/blog/[slug]/page.tsx", src)
+			rep, err := ScanNext(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			page := findPlan(rep, "src/pages/blog/[slug].tsx")
+			if page == nil {
+				t.Fatal("page missing")
+			}
+			body := string(page.Content)
+			for _, gone := range []string{"PageWithHead", "KrateMetadata", "Page__krateBody", "<Head>"} {
+				if strings.Contains(body, gone) {
+					t.Errorf("the page must not be wrapped (%s):\n%s", gone, body)
+				}
+			}
+			if !strings.Contains(body, "metadata") && !strings.Contains(body, "generateMetadata") {
+				t.Errorf("the metadata export is kept:\n%s", body)
+			}
+			if hasManual(rep, "app/blog/[slug]/page.tsx", "etadata") {
+				t.Errorf("metadata is native: %+v", rep.Manual)
+			}
+			p := parser.New(lexer.New(body).Tokenize())
+			if prog := p.ParseProgram(); prog == nil || len(p.Errors()) > 0 {
+				t.Fatalf("the page does not parse: %v\n%s", p.Errors(), body)
+			}
+		})
+	}
+}
+
+func TestMetadataTypesComeFromTheRuntime(t *testing.T) {
+	root := t.TempDir()
+	writeNextFile(t, root, "app/layout.tsx", `import type { Metadata } from "next";
+export const metadata: Metadata = { title: { default: "Site", template: "%s | Site" } };
+export default function Layout({ children }: any) { return <html><body>{children}</body></html>; }`)
+	writeNextFile(t, root, "app/blog/[slug]/page.tsx", `import type { Metadata, ResolvingMetadata } from "next";
+import { type Viewport } from 'next';
+export async function generateMetadata({ params }: any, parent: ResolvingMetadata): Promise<Metadata> { return { title: (await params).slug }; }
+export default function Page() { return <h1>x</h1>; }`)
+	writeNextFile(t, root, "app/other/page.tsx", `import { NextPage, Metadata } from "next";
+export default function Page() { return <h1>x</h1>; }`)
 	rep, err := ScanNext(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	page := findPlan(rep, "src/pages/index.tsx")
-	if page == nil {
-		t.Fatal("page missing")
+	layout := findPlan(rep, "src/pages/_layout.tsx")
+	if layout == nil || !strings.Contains(string(layout.Content), `import type { Metadata } from "@krate/runtime/server";`) {
+		t.Errorf("the layout's type import moves to the runtime: %+v", layout)
 	}
-	body := string(page.Content)
-	if !strings.Contains(body, "export default function PageWithHead") || !strings.Contains(body, "<Page {...props} />") {
-		t.Fatalf("arrow page not wrapped:\n%s", body)
+	page := findPlan(rep, "src/pages/blog/[slug].tsx")
+	if page == nil || !strings.Contains(string(page.Content), `import type { Metadata, ResolvingMetadata } from "@krate/runtime/server";`) || !strings.Contains(string(page.Content), `import { type Viewport } from '@krate/runtime/server';`) {
+		t.Errorf("Metadata and Viewport types move to the runtime: %+v", page)
 	}
-	if hasManual(rep, "app/page.tsx", "metadata export is not translated") {
-		t.Fatalf("arrow metadata should be wrapped: %+v", rep.Manual)
+	other := findPlan(rep, "src/pages/other.tsx")
+	if other == nil || !strings.Contains(string(other.Content), `from "next"`) {
+		t.Errorf("an import with other names is left alone: %+v", other)
 	}
 }
 
@@ -1342,55 +1287,6 @@ export default async function P() { return <p>x</p>; }`)
 	}
 	if hasManual(rep, "app/page.tsx", "route segment config revalidate") {
 		t.Errorf("revalidate is native and must not be reported")
-	}
-}
-
-func TestAsyncDefaultPageWithMetadataKeepsAsync(t *testing.T) {
-	cases := []struct {
-		name string
-		page string
-		want []string
-	}{
-		{"named async", `export const metadata = { title: "Post" };
-export default async function Post({ params }: any) { return <h1>{params.slug}</h1>; }`,
-			[]string{"async function Post(", "export default async function PageWithHead(props: any)", "<Post {...props} />"}},
-		{"anonymous async", `export const metadata = { title: "Post" };
-export default async function ({ params }: any) { return <h1>{params.slug}</h1>; }`,
-			[]string{"async function Page__krateBody(", "<Page__krateBody {...props} />"}},
-		{"async dynamic metadata", `export async function generateMetadata({ params }: any) { return { title: params.slug }; }
-export default function Post({ params }: any) { return <h1>{params.slug}</h1>; }`,
-			[]string{"export default async function PageWithHead(props: any)", "<KrateMetadata {...props} />", "async function KrateMetadata(props: any)"}},
-		{"named reference to async arrow", `export const metadata = { title: "Post" };
-const Post = async ({ params }: any) => <h1>{params.slug}</h1>;
-export default Post;
-`, []string{"export default async function PageWithHead(props: any)", "<Post {...props} />"}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			root := t.TempDir()
-			writeNextFile(t, root, "app/blog/[slug]/page.tsx", tc.page)
-			rep, err := ScanNext(root)
-			if err != nil {
-				t.Fatal(err)
-			}
-			page := findPlan(rep, "src/pages/blog/[slug].tsx")
-			if page == nil {
-				t.Fatal("page missing")
-			}
-			body := string(page.Content)
-			for _, want := range tc.want {
-				if !strings.Contains(body, want) {
-					t.Errorf("missing %q:\n%s", want, body)
-				}
-			}
-			if strings.Contains(body, "<async") || strings.Contains(body, "__KrateMetadata") {
-				t.Errorf("corrupted wrapper:\n%s", body)
-			}
-			p := parser.New(lexer.New(body).Tokenize())
-			if prog := p.ParseProgram(); prog == nil || len(p.Errors()) > 0 {
-				t.Fatalf("page does not parse: %v\n%s", p.Errors(), body)
-			}
-		})
 	}
 }
 

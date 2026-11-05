@@ -110,6 +110,10 @@ type PageResult struct {
 	// ServerExports lists the async server components rendered as regions of
 	// this page; the page server bundle exports each one (serverbundle.go).
 	ServerExports []ServerExport
+	// MetadataLayouts are the layouts above the page that export metadata or
+	// generateMetadata (absolute paths, outermost first); the page server bundle
+	// exports their modules so the renderer can merge the chain per request.
+	MetadataLayouts []string
 	// ClientBoundaries lists the "use client" modules in the module graph of a
 	// page that renders server components. The page server bundle wraps their
 	// exports in client boundaries (clientboundary.go).
@@ -2170,19 +2174,6 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 		}
 	}
 
-	if renderMode == RenderSSG {
-		for _, mod := range bundle.Modules {
-			if strings.Contains(filepath.ToSlash(mod.Path), "/node_modules/") {
-				continue
-			}
-			if d := warnStaticAccessDenied(mod.Path, mod.Program, mod.SourceCode, "page"); d != nil {
-				printAccessDeniedWarning(d)
-				pageWarnings = append(pageWarnings, *d)
-				break
-			}
-		}
-	}
-
 	pageBase := strings.TrimSuffix(filepath.Base(page), filepath.Ext(page))
 	isSegment := isSegmentPageBase(pageBase)
 	if isSegment && renderMode != RenderSSG {
@@ -2220,6 +2211,19 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 	}
 	if serverErr != nil {
 		return nil, "", serverErr
+	}
+	// forbidden() and unauthorized() only run when the page renders per request.
+	if renderMode == RenderSSG && !serverPage {
+		for _, mod := range bundle.Modules {
+			if strings.Contains(filepath.ToSlash(mod.Path), "/node_modules/") {
+				continue
+			}
+			if d := warnStaticAccessDenied(mod.Path, mod.Program, mod.SourceCode, "page"); d != nil {
+				printAccessDeniedWarning(d)
+				pageWarnings = append(pageWarnings, *d)
+				break
+			}
+		}
 	}
 	if serverPage && len(reactIslands) > 0 {
 		return nil, "", reactIslandDiag(firstReactIsland(reactIslands), "a server-rendered page")
@@ -2370,7 +2374,14 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 	emitResult.HTML = renderCtx.HTML
 	emitResult.HeadHTML = renderCtx.HeadHTML
 	bundle.CSS = renderCtx.RawCSS
-	emitResult.HeadHTML += b.pageMetadataHead(page, entryModule.SourceCode)
+	{
+		var metaParams map[string]string
+		if isDynRoute {
+			metaParams = dynamicRouteSentinels(extractParamNames(page, b.Cfg.PagesDir))
+		}
+		requestTime := renderMode == RenderSSR || renderMode == RenderISR
+		emitResult.HeadHTML += b.pageMetadataHeadFor(page, entryModule.SourceCode, requestTime, metaParams, bnd)
+	}
 
 	// Run AfterMarkdownParse hooks for markdown pages (plugins can modify the
 	// rendered HTML). Markdown pages flow through the normal bundler/emitter
@@ -2490,6 +2501,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 			GoBaked:           goBaked,
 			ServerPage:        serverPage,
 			ServerExports:     serverExportsOf(regions),
+			MetadataLayouts:   b.metadataLayouts(page),
 			ClientBoundaries:  clientBoundaries,
 		}, bundle.CSS, nil
 	}
@@ -2657,6 +2669,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 		GoBaked:           goBaked,
 		ServerPage:        serverPage,
 		ServerExports:     serverExportsOf(regions),
+		MetadataLayouts:   b.metadataLayouts(page),
 		ClientBoundaries:  clientBoundaries,
 	}
 	b.maybeStoreDiskPage(page, result, deps, bundle, jsBytes)

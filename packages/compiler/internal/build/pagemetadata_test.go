@@ -60,20 +60,44 @@ export default function P() { return <main><Head><title>From Head</title></Head>
 	}
 }
 
-func TestPageMetadataWithoutStaticValuesWarns(t *testing.T) {
-	b, _ := scProject(t, map[string]string{
+// A metadata value the literal reader cannot see (a module constant, a call)
+// is evaluated at build time instead of dropped.
+func TestPageMetadataWithComputedValuesIsEvaluated(t *testing.T) {
+	b, root := hooksProject(t, map[string]string{
 		"src/pages/index.tsx": `const name = "computed";
-export const metadata = { title: name };
+export const metadata = { title: name.toUpperCase(), description: ["a", "b"].join("+") };
 export default function Home() { return <main><h1>Home</h1></main>; }`,
 	})
-	// A warning, not an error: the page still builds.
 	got := captureStderr(t, func() {
 		if err := b.BuildAll(); err != nil {
 			t.Fatalf("BuildAll: %v", err)
 		}
 	})
-	if !strings.Contains(got, "KR7122") || !strings.Contains(got, "<Head>") {
+	if strings.Contains(got, "KR7122") {
+		t.Errorf("a computable metadata value must not warn:\n%s", got)
+	}
+	head := headOf(readMetaDist(t, root, "index.html"))
+	if !strings.Contains(head, "<title>COMPUTED</title>") || !strings.Contains(head, "content=a+b") {
+		t.Errorf("computed metadata belongs in the head:\n%s", head)
+	}
+}
+
+// What truly cannot be evaluated still warns (KR7122) and the page builds.
+func TestPageMetadataThatCannotBeEvaluatedWarns(t *testing.T) {
+	b, root := hooksProject(t, map[string]string{
+		"src/pages/index.tsx": `export const metadata = { title: window.document.title };
+export default function Home() { return <main><h1>Home</h1></main>; }`,
+	})
+	got := captureStderr(t, func() {
+		if err := b.BuildAll(); err != nil {
+			t.Fatalf("BuildAll: %v", err)
+		}
+	})
+	if !strings.Contains(got, "KR7122") || !strings.Contains(got, "force-dynamic") {
 		t.Errorf("expected a KR7122 warning with a hint, got:\n%s", got)
+	}
+	if html := readMetaDist(t, root, "index.html"); !strings.Contains(html, "<h1>Home</h1>") {
+		t.Errorf("the page still builds:\n%s", html)
 	}
 }
 

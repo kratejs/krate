@@ -447,6 +447,9 @@ func (b *Builder) resolveStaticParamsPage(page string) staticParamsResolution {
 		return res
 	}
 
+	// The metadata of every entry resolves in one run (see metadataeval.go).
+	b.prefetchMetadata(page, paramSets, bnd)
+
 	for _, params := range paramSets {
 		rel, _ := filepath.Rel(b.Cfg.PagesDir, page)
 		rel = filepath.ToSlash(rel)
@@ -605,6 +608,9 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	// dead signals / circular effects are caught before hydration ships.
 	b.printReactiveDiags(reactive.Build(emitResult.Signatures).Validate())
 
+	requestTime := renderMode == RenderSSR || renderMode == RenderISR
+	emitResult.HeadHTML += b.pageMetadataHeadFor(spp.PagePath, entryModule.SourceCode, requestTime, spp.Params, bnd)
+
 	// Run AfterRender hooks (pre-layout) so plugins can modify HTML/head/CSS for
 	// statically generated dynamic-param pages, matching buildPage.
 	renderCtx := &plugin.RenderHookCtx{
@@ -724,6 +730,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 
 		ServerPage:       serverPage,
 		ServerExports:    serverExportsOf(regions),
+		MetadataLayouts:  b.metadataLayouts(spp.PagePath),
 		ClientBoundaries: clientBoundaries,
 	}, bundle.CSS, nil
 }

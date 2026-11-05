@@ -157,6 +157,20 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
   and the portable handler. A statically built page or a layout that calls one
   warns (`KR8604`). The migrator maps both pages and the `authInterrupts` flag.
   API routes that call `notFound()` now answer 404 instead of 500.
+- `generateMetadata({ params, searchParams }, parent)` runs for real: at build time
+  for static pages (once per `generateStaticParams` entry), per request for SSR and
+  ISR pages (next to the render, sharing its fetch cache, tags and `searchParams`
+  keys). Layouts export `metadata` and `generateMetadata` too; the chain merges root
+  to page in Next.js order (`title.template`, `metadataBase`, wholesale field
+  replacement, `parent`), and an explicit `<Head>` still wins. The tags are in the
+  first bytes of the head, not patched in by script. A `generateMetadata` that throws
+  keeps the page and logs; `notFound()` from it answers 404. `export const viewport`
+  is read, and a page's viewport meta replaces the default one. `KR7122` now means
+  the metadata could not be evaluated at all (it used to mean "not a literal").
+  The migrator keeps `metadata` and `generateMetadata` as written and imports the
+  `Metadata` types from the runtime instead of wrapping pages in `<Head>`.
+- Concurrent identical cached `fetch` calls in one process share one upstream
+  request, so a page and its `generateMetadata` reading the same URL ask it once.
 
 ### Fixed
 

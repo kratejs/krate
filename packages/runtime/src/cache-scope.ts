@@ -321,12 +321,21 @@ function fetchCacheKey(method: string, url: string, init: RequestInit | undefine
  * `next.revalidate: 0` bypass the cache and make the render uncacheable.
  * Requests without these options are passed through untouched.
  */
+function responseOf(c: CachedResponse, method: string): Response {
+  return new Response(method === 'HEAD' ? null : (fromBase64(c.body) as BodyInit), {
+    status: c.status,
+    statusText: c.statusText,
+    headers: c.headers,
+  });
+}
+
 export function patchFetch(): void {
   const rt = cacheRuntime();
   const g = globalThis as { fetch?: typeof fetch };
   if (rt.fetchPatched || typeof g.fetch !== 'function') return;
   const original = g.fetch.bind(globalThis);
   rt.fetchPatched = true;
+  const inflight = new Map<string, Promise<{ res: Response; entry: CachedResponse | null }>>();
   const wrapped = async (input: RequestInfo | URL, init?: NextFetchInit): Promise<Response> => {
     const next = init && init.next;
     const mode = init && init.cache;
@@ -348,17 +357,18 @@ export function patchFetch(): void {
 
     const key = fetchCacheKey(method, requestURL(input), plainInit);
     const hit = dataCacheGetJSON(key);
-    if (hit !== undefined) {
-      const c = JSON.parse(hit) as CachedResponse;
-      return new Response(method === 'HEAD' ? null : (fromBase64(c.body) as BodyInit), {
-        status: c.status,
-        statusText: c.statusText,
-        headers: c.headers,
-      });
+    if (hit !== undefined) return responseOf(JSON.parse(hit) as CachedResponse, method);
+    // Concurrent misses for one request share a single upstream call, so a
+    // page and its generateMetadata that read the same URL ask it once.
+    const pending = inflight.get(key);
+    if (pending) {
+      const shared = await pending;
+      return shared.entry ? responseOf(shared.entry, method) : original(input, plainInit);
     }
     const epoch = rt.epoch;
-    const res = await original(input, plainInit);
-    if (res.ok) {
+    const fetching = (async (): Promise<{ res: Response; entry: CachedResponse | null }> => {
+      const res = await original(input, plainInit);
+      if (!res.ok) return { res, entry: null };
       const bytes = new Uint8Array(await res.clone().arrayBuffer());
       const headers: Array<[string, string]> = [];
       res.headers.forEach((v, k) => {
@@ -366,8 +376,14 @@ export function patchFetch(): void {
       });
       const entry: CachedResponse = { status: res.status, statusText: res.statusText, headers, body: toBase64(bytes) };
       dataCacheSetJSON(key, JSON.stringify(entry), ttl, tags, epoch);
+      return { res, entry };
+    })();
+    inflight.set(key, fetching);
+    try {
+      return (await fetching).res;
+    } finally {
+      inflight.delete(key);
     }
-    return res;
   };
   g.fetch = wrapped as typeof fetch;
 }

@@ -251,11 +251,7 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 		publicEnv[k] = v
 	}
 	rewritePublicEnv(rep, publicEnv)
-	if site := rootMetadataSite(rep); len(site) > 0 {
-		nextCfg.Site = site
-		rep.Warnings = append(rep.Warnings, "mapped static root metadata to site config; the metadata export is left in place for review, as are icons, alternates, and per-page metadata")
-	}
-	convertPageMetadata(rep)
+	rewriteMetadataTypes(rep)
 
 	hasKrateConfig := fileExists(filepath.Join(abs, "krate.config.ts")) || fileExists(filepath.Join(abs, "krate.config.js")) || fileExists(filepath.Join(abs, "krate.config.mjs")) || fileExists(filepath.Join(abs, "krate.config.json"))
 	if !hasKrateConfig {
@@ -556,9 +552,8 @@ func applyManual(src string, kind FileKind) []string {
 		needle string
 		reason string
 	}{
-		{"export const metadata", "Next.js metadata export is not translated; use <Head> or krate site config"},
-		{"export async function generateMetadata", "generateMetadata is not translated; render <Head> or use site config"},
-		{"export function generateMetadata", "generateMetadata is not translated; render <Head> or use site config"},
+		{"export function generateViewport", "generateViewport is not supported; export a static `viewport` object or set the viewport meta in <Head>"},
+		{"export async function generateViewport", "generateViewport is not supported; export a static `viewport` object or set the viewport meta in <Head>"},
 		{"getStaticProps", "getStaticProps is not supported; use build-time data or createResource"},
 		{"getServerSideProps", "getServerSideProps is not supported; use a server render mode or createResource"},
 		{"from 'next/server'", "next/server request/response helpers need a Request/Response migration"},
@@ -1076,37 +1071,6 @@ func Rollback(backupDir string) error {
 		}
 	}
 	return os.RemoveAll(backupDir)
-}
-
-// rootMetadataSite extracts static metadata from the root app layout and maps
-// the common fields to site config. The export remains in the layout because
-// Krate ignores it; the warning tells the user what was mapped.
-func rootMetadataSite(rep *Report) map[string]any {
-	for i := range rep.Files {
-		f := &rep.Files[i]
-		if f.Kind != KindLayout || !strings.HasPrefix(f.Target, "src/pages/_layout.") {
-			continue
-		}
-		obj, ok := staticMetadata(f.Content)
-		if !ok {
-			return nil
-		}
-		site := metadataSite(obj)
-		if len(site) == 0 {
-			return nil
-		}
-		// The generic "metadata is not translated" note no longer applies.
-		var kept []ManualItem
-		for _, m := range rep.Manual {
-			if m.Source == f.Source && strings.Contains(m.Reason, "metadata export is not translated") {
-				continue
-			}
-			kept = append(kept, m)
-		}
-		rep.Manual = kept
-		return site
-	}
-	return nil
 }
 
 func isNextMetadataRoute(base string) bool {
