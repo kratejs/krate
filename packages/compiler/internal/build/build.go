@@ -1170,7 +1170,7 @@ func (b *Builder) BuildAll() error {
 	printWarningsOnce(os.Stderr, staticRevalidateTargetWarnings(filepath.Dir(b.Cfg.PagesDir), b.Root, manifest.Pages))
 
 	// Compile server bundles for SSR/ISR/streaming pages
-	serverBundles, serverBundleErrs := compileServerBundles(results, b.Root, b.Cfg.OutDir, b.Cfg.Sourcemap, b.actionModules(), b.Cfg.BaseURLPath())
+	serverBundles, serverBundleErrs := compileServerBundles(b.importResolver(), results, b.Root, b.Cfg.OutDir, b.Cfg.Sourcemap, b.actionModules(), b.Cfg.BaseURLPath())
 	for _, err := range serverBundleErrs {
 		failureMessages = append(failureMessages, "  "+err.Error())
 		failureErrs = append(failureErrs, err)
@@ -1924,6 +1924,12 @@ func (b *Builder) cfgPathAliasTargets() [][]string {
 	return targets
 }
 
+// importResolver resolves imports with this build's tsconfig path aliases, for
+// code that has no Bundler or Bundle in hand.
+func (b *Builder) importResolver() *bundler.ImportResolver {
+	return bundler.NewImportResolver(b.cfgPathAliasPrefixes(), b.cfgPathAliasTargets(), b.Cfg.TSBaseDir)
+}
+
 // newBundler creates a bundler configured with this build's path aliases,
 // component tiers, and virtual modules (codegen'd `krate/content`).
 func (b *Builder) newBundler() *bundler.Bundler {
@@ -2178,9 +2184,9 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 
 	// New pipeline: Annotate -> Build IR -> Emit
 	ann := annotator.Annotate(entryModule.Program, b.Cfg, page, entryModule.SourceCode)
-	extraPrograms := moduleSources(bundle.Modules, entryModule)
+	extraPrograms := moduleSources(bundle, entryModule)
 	annotator.MergeModuleFunctions(ann, extraPrograms)
-	annotator.MergeImportAliases(ann, extraPrograms, annotator.ModuleSource{Program: entryModule.Program, Path: entryModule.Path, RawSource: entryModule.SourceCode})
+	annotator.MergeImportAliases(ann, extraPrograms, annotator.ModuleSource{Program: entryModule.Program, Path: entryModule.Path, RawSource: entryModule.SourceCode, Resolver: bundle.Resolver})
 	// Re-classify tiers for any newly discovered components
 	annotator.ReclassifyTiers(ann, b.Cfg)
 	serverPage, serverErr := b.applyServerComponentMode(page, entryModule, ann, staticMode, &renderMode, &revalidate)
@@ -2504,7 +2510,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 		if rawJS != "" {
 			rawJS = neutralizeClientEnv(rawJS)
 			// npm functions called by client code are bundled into the script.
-			vendor := collectVendorImports(bundle.Modules)
+			vendor := collectVendorImports(bundle)
 			for _, rb := range b.routeStack(page) {
 				if lv, ok := layoutVendorImports.Load(rb.Path); ok {
 					vendor = append(vendor, lv.([]vendorImport)...)
@@ -2991,7 +2997,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	if islands := detectReactIslandModules(layoutBundle.Modules, bnd.Resolve); len(islands) > 0 {
 		return nil, "", nil, false, reactIslandDiag(firstReactIsland(islands), "a layout")
 	}
-	layoutVendorImports.Store(layoutPath, collectVendorImports(layoutBundle.Modules))
+	layoutVendorImports.Store(layoutPath, collectVendorImports(layoutBundle))
 	printModuleWarnings(os.Stderr, layoutBundle.Modules)
 
 	b.modCSS.store(layoutPath, layoutBundle.CSSModules)
@@ -3031,14 +3037,14 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	}
 
 	ann := annotator.Annotate(layoutModule.Program, b.Cfg, layoutPath, layoutModule.SourceCode)
-	extraLayoutPrograms := moduleSources(layoutBundle.Modules, layoutModule)
+	extraLayoutPrograms := moduleSources(layoutBundle, layoutModule)
 	for _, mp := range extraLayoutPrograms {
 		if err := b.ensureTransformed(mp.Program, mp.Path); err != nil {
 			return nil, "", nil, false, err
 		}
 	}
 	annotator.MergeModuleFunctions(ann, extraLayoutPrograms)
-	annotator.MergeImportAliases(ann, extraLayoutPrograms, annotator.ModuleSource{Program: layoutModule.Program, Path: layoutModule.Path, RawSource: layoutModule.SourceCode})
+	annotator.MergeImportAliases(ann, extraLayoutPrograms, annotator.ModuleSource{Program: layoutModule.Program, Path: layoutModule.Path, RawSource: layoutModule.SourceCode, Resolver: layoutBundle.Resolver})
 	annotator.ReclassifyTiers(ann, b.Cfg)
 	if err := asyncLayoutError(layoutPath, ann, layoutModule.SourceCode); err != nil {
 		return nil, "", nil, false, err
@@ -3296,9 +3302,9 @@ func (b *Builder) renderLoadingComponent(pagePath string) string {
 	}
 	deps := layoutDepPaths(loadingPath, bundle)
 	ann := annotator.Annotate(entryModule.Program, b.Cfg, loadingPath, entryModule.SourceCode)
-	extraPrograms := moduleSources(bundle.Modules, entryModule)
+	extraPrograms := moduleSources(bundle, entryModule)
 	annotator.MergeModuleFunctions(ann, extraPrograms)
-	annotator.MergeImportAliases(ann, extraPrograms, annotator.ModuleSource{Program: entryModule.Program, Path: entryModule.Path, RawSource: entryModule.SourceCode})
+	annotator.MergeImportAliases(ann, extraPrograms, annotator.ModuleSource{Program: entryModule.Program, Path: entryModule.Path, RawSource: entryModule.SourceCode, Resolver: bundle.Resolver})
 	opts := b.irBuildOptions()
 	opts.ModuleConsts, opts.ModuleConstInits = mergeModuleConstants(entryModule.Program, extraPrograms)
 	tree := irtree.BuildWithOptions(entryModule.Program, ann, opts)
@@ -3773,9 +3779,9 @@ func findEntryModule(modules []*bundler.Module) *bundler.Module {
 // moduleSources converts a bundle's non-entry, non-CSS module programs (plus
 // their source paths and raw text) into annotator.ModuleSource values so the
 // annotator can classify imported components against their own files.
-func moduleSources(modules []*bundler.Module, entry *bundler.Module) []annotator.ModuleSource {
+func moduleSources(bundle *bundler.Bundle, entry *bundler.Module) []annotator.ModuleSource {
 	var out []annotator.ModuleSource
-	for _, mod := range modules {
+	for _, mod := range bundle.Modules {
 		if mod == nil || mod.Program == nil || mod.IsCSS || mod.IsExternal || mod == entry || mod.Path == entry.Path {
 			continue
 		}
@@ -3783,6 +3789,7 @@ func moduleSources(modules []*bundler.Module, entry *bundler.Module) []annotator
 			Program:   mod.Program,
 			Path:      mod.Path,
 			RawSource: mod.SourceCode,
+			Resolver:  bundle.Resolver,
 		})
 	}
 	return out

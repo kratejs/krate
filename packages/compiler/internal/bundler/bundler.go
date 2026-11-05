@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
@@ -81,6 +80,9 @@ type Bundle struct {
 	DynImportFiles map[string]string // dynamic-import source path -> hashed site URL (/chunks/...)
 	Frontmatter    map[string]any    // .mdx frontmatter, if any
 	ActionImports  map[string]string // local binding -> server-action URL
+	// Resolver resolves imports with the build's tsconfig path aliases, for
+	// code that walks the module graph after bundling.
+	Resolver *ImportResolver
 }
 
 type Bundler struct {
@@ -226,13 +228,7 @@ func (b *Bundler) SetVirtualModules(mods map[string]string) {
 // prefixes and targets are parallel slices: prefixes[i] maps to targets[i].
 func (b *Bundler) SetPathAliases(prefixes []string, targets [][]string, tsBaseDir string) {
 	b.tsBaseDir = tsBaseDir
-	b.pathAliases = nil
-	for i, prefix := range prefixes {
-		if i < len(targets) {
-			b.pathAliases = append(b.pathAliases, pathAlias{prefix: prefix, targets: targets[i]})
-		}
-	}
-	registerPathAliases(b.pathAliases, tsBaseDir)
+	b.pathAliases = buildPathAliases(prefixes, targets)
 }
 
 // SetBaseURL sets tsconfig compilerOptions.baseUrl (absolute). A bare import
@@ -479,6 +475,7 @@ func (b *Bundler) Bundle(entry string) (*Bundle, error) {
 		DynImportFiles: b.dynImports,
 		Frontmatter:    b.frontmatter,
 		ActionImports:  b.actionImports,
+		Resolver:       b.ImportResolver(),
 	}, nil
 }
 
@@ -896,44 +893,64 @@ func memoizedExists(path string) bool {
 	return v
 }
 
+// ResolveImport resolves an import without tsconfig path aliases; see
+// ImportResolver for callers that need them.
 func ResolveImport(importer, imp string) string {
+	return (*ImportResolver)(nil).Resolve(importer, imp)
+}
+
+// ImportResolver resolves import specifiers for callers that hold no Bundler
+// (the annotator follows imports to the module that declares a component, and
+// `@/components` is one). It carries one build's tsconfig path aliases, so
+// builds of different projects in one process never see each other's aliases.
+// The zero value and nil resolve without aliases.
+type ImportResolver struct {
+	aliases []pathAlias
+	baseDir string
+}
+
+// ImportResolver returns a resolver for this bundler's path aliases.
+func (b *Bundler) ImportResolver() *ImportResolver {
+	return &ImportResolver{aliases: b.pathAliases, baseDir: b.tsBaseDir}
+}
+
+// NewImportResolver builds a resolver from parallel prefix and target slices
+// (the shape SetPathAliases takes) and the aliases' base directory.
+func NewImportResolver(prefixes []string, targets [][]string, tsBaseDir string) *ImportResolver {
+	return &ImportResolver{aliases: buildPathAliases(prefixes, targets), baseDir: tsBaseDir}
+}
+
+// Resolve resolves imp as imported from importer, or returns "".
+func (r *ImportResolver) Resolve(importer, imp string) string {
+	exists := resolver.Exists
+	if resolverCacheEnabled {
+		exists = memoizedExists
+	}
+	if r != nil && len(r.aliases) > 0 && r.baseDir != "" && !strings.HasPrefix(imp, ".") {
+		if resolved := resolvePathAlias(imp, r.aliases, r.baseDir, exists); resolved != "" {
+			return resolved
+		}
+	}
 	if !resolverCacheEnabled {
-		return resolveImportAliased(importer, imp, resolver.Exists)
+		return resolveImport(importer, imp, exists, nil)
 	}
 	key := filepath.Dir(importer) + "\x00" + imp
 	if v, ok := resolveMemo.importResult(key); ok {
 		return v
 	}
-	v := resolveImportAliased(importer, imp, memoizedExists)
+	v := resolveImport(importer, imp, exists, nil)
 	resolveMemo.putImport(key, v)
 	return v
 }
 
-// aliasRegistry holds the tsconfig path aliases of the build in progress, for
-// callers of ResolveImport that hold no Bundler (the annotator follows imports
-// to the module that declares a component, and `@/components` is one).
-var aliasRegistry struct {
-	sync.RWMutex
-	aliases []pathAlias
-	baseDir string
-}
-
-func registerPathAliases(aliases []pathAlias, baseDir string) {
-	aliasRegistry.Lock()
-	aliasRegistry.aliases, aliasRegistry.baseDir = aliases, baseDir
-	aliasRegistry.Unlock()
-}
-
-func resolveImportAliased(importer, imp string, exists func(string) bool) string {
-	aliasRegistry.RLock()
-	aliases, base := aliasRegistry.aliases, aliasRegistry.baseDir
-	aliasRegistry.RUnlock()
-	if len(aliases) > 0 && base != "" && !strings.HasPrefix(imp, ".") {
-		if resolved := resolvePathAlias(imp, aliases, base, exists); resolved != "" {
-			return resolved
+func buildPathAliases(prefixes []string, targets [][]string) []pathAlias {
+	var out []pathAlias
+	for i, prefix := range prefixes {
+		if i < len(targets) {
+			out = append(out, pathAlias{prefix: prefix, targets: targets[i]})
 		}
 	}
-	return resolveImport(importer, imp, exists, nil)
+	return out
 }
 
 // resolveImport resolves an import path to an absolute file path. exists is the

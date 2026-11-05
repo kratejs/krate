@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
+	"github.com/kratejs/krate/packages/compiler/internal/bundler"
 	"github.com/kratejs/krate/packages/compiler/internal/config"
 	"github.com/kratejs/krate/packages/compiler/internal/irtree"
 	"github.com/kratejs/krate/packages/compiler/internal/lexer"
@@ -396,5 +397,28 @@ func TestFileDirectiveIgnoresCode(t *testing.T) {
 		if got := detectDirectiveTierFromSource(src); got != want {
 			t.Errorf("%q = %v, want %v", src, got, want)
 		}
+	}
+}
+
+// Two builds in one process, each with its own tsconfig alias for the same
+// specifier, must each resolve to their own project's module.
+func TestBuildImportAliasesUseTheModulesOwnResolver(t *testing.T) {
+	run := func(t *testing.T, declared string) map[string]string {
+		dir := t.TempDir()
+		_ = os.MkdirAll(filepath.Join(dir, "src", "ui"), 0755)
+		layout := filepath.Join(dir, "src", "ui", "layout.tsx")
+		_ = os.WriteFile(layout, []byte("export default function "+declared+"() { return <div/>; }"), 0644)
+		entry := filepath.Join(dir, "src", "page.tsx")
+		res := bundler.NewImportResolver([]string{"@/*"}, [][]string{{"./*"}}, filepath.Join(dir, "src"))
+		src := `import Page from "@/ui/layout"; export default function P() { return <Page/>; }`
+		return BuildImportAliases([]ModuleSource{
+			{Program: parseProg(t, src), Path: entry, Resolver: res},
+			{Program: parseProg(t, "export default function "+declared+"() { return <div/>; }"), Path: layout, Resolver: res},
+		})
+	}
+	a := run(t, "Alpha")
+	b := run(t, "Beta")
+	if a["Page"] != "Alpha" || b["Page"] != "Beta" {
+		t.Errorf("aliases leaked between builds: a=%v b=%v", a, b)
 	}
 }

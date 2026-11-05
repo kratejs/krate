@@ -535,9 +535,9 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 
 	// New pipeline: Annotate -> Build IR -> Emit
 	ann := annotator.Annotate(entryModule.Program, b.Cfg, spp.PagePath, entryModule.SourceCode)
-	extraPrograms := moduleSources(bundle.Modules, entryModule)
+	extraPrograms := moduleSources(bundle, entryModule)
 	annotator.MergeModuleFunctions(ann, extraPrograms)
-	annotator.MergeImportAliases(ann, extraPrograms, annotator.ModuleSource{Program: entryModule.Program, Path: entryModule.Path, RawSource: entryModule.SourceCode})
+	annotator.MergeImportAliases(ann, extraPrograms, annotator.ModuleSource{Program: entryModule.Program, Path: entryModule.Path, RawSource: entryModule.SourceCode, Resolver: bundle.Resolver})
 	annotator.ReclassifyTiers(ann, b.Cfg)
 	serverPage, serverErr := b.applyServerComponentMode(spp.PagePath, entryModule, ann, strings.EqualFold(b.Cfg.Output, "static"), &renderMode, &revalidate)
 	if serverErr == nil && !serverPage {

@@ -682,7 +682,24 @@ type ModuleSource struct {
 	Program   *ast.Program
 	Path      string
 	RawSource string
+	// Resolver resolves this module's imports with the build's tsconfig path
+	// aliases. Nil resolves without aliases.
+	Resolver *bundler.ImportResolver
 }
+
+// resolverOf returns the first import resolver the modules carry; all modules
+// of one build share it.
+func resolverOf(modules []ModuleSource) *bundler.ImportResolver {
+	for _, m := range modules {
+		if m.Resolver != nil {
+			return m.Resolver
+		}
+	}
+	return nil
+}
+
+// ResolverOf is resolverOf for callers outside the package.
+func ResolverOf(modules []ModuleSource) *bundler.ImportResolver { return resolverOf(modules) }
 
 // MergeModuleFunctions collects function declarations from additional bundled modules
 // and merges them into the annotations. Imported components (e.g. DocsLayout, SidebarNav)
@@ -787,6 +804,7 @@ func BuildImportAliases(modules []ModuleSource) map[string]string {
 			byPath[m.Path] = m.Program
 		}
 	}
+	res := resolverOf(modules)
 	aliases := make(map[string]string)
 	for _, m := range modules {
 		if m.Program == nil || m.Path == "" {
@@ -796,7 +814,7 @@ func BuildImportAliases(modules []ModuleSource) map[string]string {
 			// Namespace re-export (`export * as Card from './card'`): address
 			// every function of the target module as `Card.<Name>`.
 			if exp, ok := stmt.(*ast.ExportStmt); ok && exp.Namespace != "" && exp.ReexportSource != "" {
-				target := bundler.ResolveImport(m.Path, strings.Trim(exp.ReexportSource, "\"'"))
+				target := res.Resolve(m.Path, strings.Trim(exp.ReexportSource, "\"'"))
 				if tprog := byPath[target]; tprog != nil {
 					addNamespaceAliases(aliases, exp.Namespace, tprog.Body)
 				}
@@ -806,13 +824,13 @@ func BuildImportAliases(modules []ModuleSource) map[string]string {
 			if !ok || imp.Source == "" {
 				continue
 			}
-			target := bundler.ResolveImport(m.Path, strings.Trim(imp.Source, "\"'"))
+			target := res.Resolve(m.Path, strings.Trim(imp.Source, "\"'"))
 			tprog := byPath[target]
 			if tprog == nil {
 				continue
 			}
 			if imp.Default != "" {
-				if name := resolveExportedName(target, "default", byPath, 0); name != "" {
+				if name := resolveExportedName(res, target, "default", byPath, 0); name != "" {
 					aliases[imp.Default] = name
 				}
 			}
@@ -820,7 +838,7 @@ func BuildImportAliases(modules []ModuleSource) map[string]string {
 				if n.Local != "" && n.Remote != "" {
 					// Follow `export { X } from` / `export { default as X }
 					// from` barrels to the module that declares the function.
-					if name := resolveExportedName(target, n.Remote, byPath, 0); name != "" {
+					if name := resolveExportedName(res, target, n.Remote, byPath, 0); name != "" {
 						if name != n.Local {
 							aliases[n.Local] = name
 						}
@@ -833,7 +851,7 @@ func BuildImportAliases(modules []ModuleSource) map[string]string {
 				// `<Card.Root>` resolves to the deeper module's `Root`. Expand
 				// the named import into namespace aliases keyed by the LOCAL
 				// binding so the import site's dotted tag resolves.
-				if nsBody, ok := namespaceReexportBody(tprog.Body, n.Remote, m.Path, byPath); ok {
+				if nsBody, ok := namespaceReexportBody(res, tprog.Body, n.Remote, m.Path, byPath); ok {
 					addNamespaceAliases(aliases, n.Local, nsBody)
 				}
 			}
@@ -852,7 +870,7 @@ func BuildImportAliases(modules []ModuleSource) map[string]string {
 // resolveExportedName returns the declared name that exportName of the module
 // at path refers to, following named and star re-exports through barrel files.
 // Empty when it cannot be determined statically.
-func resolveExportedName(path, exportName string, byPath map[string]*ast.Program, depth int) string {
+func resolveExportedName(res *bundler.ImportResolver, path, exportName string, byPath map[string]*ast.Program, depth int) string {
 	prog := byPath[path]
 	if prog == nil || depth > 16 {
 		return ""
@@ -863,7 +881,7 @@ func resolveExportedName(path, exportName string, byPath map[string]*ast.Program
 		}
 	}
 	resolveSource := func(src string) string {
-		return bundler.ResolveImport(path, strings.Trim(src, "\"'"))
+		return res.Resolve(path, strings.Trim(src, "\"'"))
 	}
 	for _, stmt := range prog.Body {
 		exp, ok := stmt.(*ast.ExportStmt)
@@ -873,7 +891,7 @@ func resolveExportedName(path, exportName string, byPath map[string]*ast.Program
 		if exp.ReexportSource != "" {
 			for _, n := range exp.ReexportNamed {
 				if n.Remote == exportName {
-					return resolveExportedName(resolveSource(exp.ReexportSource), n.Local, byPath, depth+1)
+					return resolveExportedName(res, resolveSource(exp.ReexportSource), n.Local, byPath, depth+1)
 				}
 			}
 			continue
@@ -908,7 +926,7 @@ func resolveExportedName(path, exportName string, byPath map[string]*ast.Program
 	}
 	for _, stmt := range prog.Body {
 		if exp, ok := stmt.(*ast.ExportStmt); ok && exp.StarReexport && exp.ReexportSource != "" {
-			if name := resolveExportedName(resolveSource(exp.ReexportSource), exportName, byPath, depth+1); name != "" {
+			if name := resolveExportedName(res, resolveSource(exp.ReexportSource), exportName, byPath, depth+1); name != "" {
 				return name
 			}
 		}
@@ -919,13 +937,13 @@ func resolveExportedName(path, exportName string, byPath map[string]*ast.Program
 // namespaceReexportBody returns the target module's body when `exportName` in
 // the given module is a namespace re-export (`export * as exportName from '...'`).
 // This lets a named import of that binding expand into dotted aliases.
-func namespaceReexportBody(body []ast.Stmt, exportName, modulePath string, byPath map[string]*ast.Program) ([]ast.Stmt, bool) {
+func namespaceReexportBody(res *bundler.ImportResolver, body []ast.Stmt, exportName, modulePath string, byPath map[string]*ast.Program) ([]ast.Stmt, bool) {
 	for _, stmt := range body {
 		exp, ok := stmt.(*ast.ExportStmt)
 		if !ok || exp.Namespace != exportName || exp.ReexportSource == "" {
 			continue
 		}
-		target := bundler.ResolveImport(modulePath, strings.Trim(exp.ReexportSource, "\"'"))
+		target := res.Resolve(modulePath, strings.Trim(exp.ReexportSource, "\"'"))
 		if tprog := byPath[target]; tprog != nil {
 			return tprog.Body, true
 		}
