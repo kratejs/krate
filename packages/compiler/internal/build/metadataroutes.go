@@ -236,7 +236,7 @@ func (b *Builder) buildDataRoute(f metaRouteFile, bnd *bundler.Bundler) error {
 	}
 	out, err := b.runBootstrapBundle(abs, dataRouteBootstrap(abs, f.Kind), "metaroute", bnd)
 	if err != nil {
-		return b.routeErr(f, "running "+filepath.Base(f.Path)+" failed: "+err.Error(), "the file runs once at build time on Node with the project's environment; it must default-export a function (or a value) shaped like Next.js's MetadataRoute."+strings.Title(string(f.Kind)))
+		return b.routeErr(f, "running "+filepath.Base(f.Path)+" failed: "+err.Error(), "the file runs once at build time on Node with the project's environment; it must default-export a function (or a value) shaped like Next.js's MetadataRoute."+titleCase(string(f.Kind)))
 	}
 	var files []struct {
 		Path string `json:"path"`
@@ -418,4 +418,12 @@ func (b *Builder) copyStaticImageRoute(f metaRouteFile) error {
 	}
 	b.metaImages.add(f.URLDir, f.Kind, ref)
 	return nil
+}
+
+// titleCase upper-cases the first letter of an ASCII word.
+func titleCase(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
 }

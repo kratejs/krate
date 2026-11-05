@@ -260,7 +260,6 @@ type flexItem struct {
 	minMain, maxMain  float64
 	crossDefinite     bool
 	grow, shrink      float64
-	frozen            bool
 }
 
 // layoutNode places the children of n, whose border box is already w by h.
@@ -285,10 +284,8 @@ func (l *layouter) layoutNode(n *node) {
 	}
 
 	var items []*flexItem
-	var abs []*node
 	for _, c := range n.children {
 		if c.st.position == "absolute" {
-			abs = append(abs, c)
 			continue
 		}
 		mt, mr, mb, ml := c.outerSides(&c.st.margin, innerW)
@@ -307,12 +304,12 @@ func (l *layouter) layoutNode(n *node) {
 		if v, ok := basis.resolve(mainAvail); ok {
 			it.base = v
 		} else {
-			mw, mh := l.measure(c, innerW)
 			if horizontal {
 				// Natural width: measure unconstrained for rows.
-				mw, _ = l.measure(c, -1)
+				mw, _ := l.measure(c, -1)
 				it.base = mw
 			} else {
+				_, mh := l.measure(c, innerW)
 				it.base = mh
 			}
 		}
@@ -588,7 +585,7 @@ func (l *layouter) placeAbsolute(parent, c *node, ox, oy, innerW, innerH float64
 	h, hasH := st.height.resolve(innerH)
 	if !hasW {
 		if hasL && hasR {
-			w, hasW = innerW-left-right, true
+			w = innerW - left - right
 		} else {
 			mw, _ := l.measure(c, -1)
 			w = mw
@@ -596,7 +593,7 @@ func (l *layouter) placeAbsolute(parent, c *node, ox, oy, innerW, innerH float64
 	}
 	if !hasH {
 		if hasT && hasB {
-			h, hasH = innerH-top-bottom, true
+			h = innerH - top - bottom
 		} else {
 			_, mh := l.measure(c, w)
 			h = mh

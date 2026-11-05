@@ -146,8 +146,6 @@ func splitArgs(s string) []string {
 	return append(out, strings.TrimSpace(s[start:]))
 }
 
-func (c rgba) withAlpha(a float64) rgba { c.a *= a; return c }
-
 func (c rgba) mix(o rgba, t float64) rgba {
 	return rgba{c.r + (o.r-c.r)*t, c.g + (o.g-c.g)*t, c.b + (o.b-c.b)*t, c.a + (o.a-c.a)*t}
 }

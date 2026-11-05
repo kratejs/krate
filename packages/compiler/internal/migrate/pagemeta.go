@@ -169,7 +169,6 @@ func jsxAttr(s string) string {
 }
 
 var (
-	defaultFunction = regexp.MustCompile(`export\s+default\s+(async\s+)?function\s*([A-Za-z_$][\w$]*)?`)
 	// namedDefault matches `export default Name;` as a whole statement, so
 	// `export default async function Name` or `export default Name(...)` never
 	// match. The trailing line break is part of the match.
