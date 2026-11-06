@@ -6,7 +6,12 @@
  * tarballs made by the publishing pnpm, installed by npm in a clean folder, and
  * a scaffolded project built by the installed `krate`.
  *
+ * The version must not be on the registry yet, as at release time. npm would
+ * otherwise install the published platform packages next to these tarballs, so
+ * the result would say nothing about this release.
+ *
  * Needs built JS packages and dist-platform/ for this machine:
+ *   node scripts/set-version.mjs 0.0.0-smoke.0
  *   KRATE_ONLY_PLATFORM=core-linux-x64 node scripts/build-platform-packages.mjs
  *   node scripts/smoke-install.mjs
  */
@@ -55,6 +60,13 @@ if (!existsSync(join(platformDir, 'bin', `krate${target.ext}`))) {
   fail(`${platformDir} has no binary; run scripts/build-platform-packages.mjs first`);
 }
 
+const version = JSON.parse(readFileSync(join(platformDir, 'package.json'), 'utf8')).version;
+const other = platforms.find((t) => t.pkg !== target.pkg);
+const published = spawnSync('npm', ['view', `@krate/${other.pkg}@${version}`, 'version'], { encoding: 'utf8', shell: isWindows });
+if (published.status === 0 && published.stdout.trim() !== '') {
+  fail(`@krate/${other.pkg}@${version} is already on npm, so it would be installed instead of this build; run scripts/set-version.mjs with an unpublished version`);
+}
+
 const work = mkdtempSync(join(tmpdir(), 'krate-smoke-'));
 try {
   const tarballDir = join(work, 'tarballs');
@@ -90,9 +102,8 @@ try {
         fail(`${binary} was installed without the executable bit`);
       }
     }
-    const shipped = JSON.parse(readFileSync(join(platformDir, 'package.json'), 'utf8')).version;
     const direct = run(binary, ['version'], app);
-    if (!direct.includes(shipped)) fail(`the binary reports ${direct.trim()}, expected ${shipped}`);
+    if (!direct.includes(version)) fail(`the binary reports ${direct.trim()}, expected ${version}`);
 
     run('npx', ['--no-install', 'krate', 'version'], app);
     run('npx', ['--no-install', 'krate', 'build'], app);

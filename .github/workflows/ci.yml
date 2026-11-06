@@ -148,6 +148,10 @@ jobs:
           node-version: "22"
           cache: pnpm
 
+      # A version nothing on npm has, as at release time.
+      - name: Sync package versions
+        run: node scripts/set-version.mjs 0.0.0-smoke.0
+
       - name: Install JS dependencies
         run: pnpm install --no-frozen-lockfile
 
