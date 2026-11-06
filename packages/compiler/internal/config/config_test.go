@@ -1305,3 +1305,30 @@ func TestMarkdownCodeThemeForms(t *testing.T) {
 		})
 	}
 }
+
+// viewTransitions and ppr are json:"-" fields, so the evaluated config path has
+// to apply them itself.
+func TestEvaluatedConfigAppliesNormalizedKeys(t *testing.T) {
+	root := t.TempDir()
+	src := "const on = true;\nexport default { viewTransitions: \"off\", ppr: { revalidate: 30 }, spa: on };\n"
+	if err := os.WriteFile(filepath.Join(root, "krate.config.ts"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ViewTransitions != "off" {
+		t.Errorf("ViewTransitions = %q, want off", cfg.ViewTransitions)
+	}
+	if !cfg.PPR || cfg.PPRRevalidate != 30 {
+		t.Errorf("PPR = %v, %d, want true, 30", cfg.PPR, cfg.PPRRevalidate)
+	}
+
+	if err := os.WriteFile(filepath.Join(root, "krate.config.ts"), []byte(`export default { viewTransitions: "sometimes" };`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(root); err == nil || !strings.Contains(err.Error(), "viewTransitions") {
+		t.Errorf("bad value: err = %v, want a viewTransitions error", err)
+	}
+}

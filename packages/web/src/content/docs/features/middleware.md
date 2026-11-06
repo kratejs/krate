@@ -26,6 +26,10 @@ export function middleware(request: Request) {
 }
 ```
 
+The handler can be the default export instead. A file with neither is a build
+error (`KR7143`), and a server running such a module answers `503` rather than
+letting requests through.
+
 | Return value | Behavior |
 |--------------|----------|
 | `Response` | Short-circuits - the response is served instead of the page (any status, including `200`) |

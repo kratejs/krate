@@ -458,6 +458,12 @@ A stylesheet with a `{` that is never closed, a `}` with no `{`, or a comment th
 
 Each object returned by `generateStaticParams` becomes one page, so it needs a value for every dynamic segment of the route (`{ slug: "a" }` for `[slug].tsx`), and each value becomes a directory name: it must be non-empty and contain no `..`, backslash or, outside a catch-all route, `/`. An entry that misses a param would have been written to the literal path `[slug]/index.html`; two different entries that produce the same path would overwrite each other. Both are build errors that name the entry. An exact duplicate entry is dropped. Fix the function, or remove the entry.
 
+### KR7143
+
+**Middleware file has no handler**
+
+`middleware.ts` must export the function that runs for each request, as `export function middleware(request)` or as the default export. Without one, requests could not be checked, so this is a build error, and a server running such a module answers 503 instead of letting requests through. Export the handler, or delete the file.
+
 ### KR7150
 
 **Unknown code theme**

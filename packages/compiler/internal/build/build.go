@@ -4063,6 +4063,7 @@ func (b *Builder) BuildMiddleware() error {
 		Format:      api.FormatESModule,
 		Write:       false,
 		LogLevel:    api.LogLevelError,
+		Metafile:    true,
 	})
 
 	if len(result.Errors) > 0 {
@@ -4074,6 +4075,13 @@ func (b *Builder) BuildMiddleware() error {
 
 	if len(result.OutputFiles) == 0 {
 		return fmt.Errorf("middleware build produced no output")
+	}
+	if !exportsMiddleware(result.Metafile) {
+		return diag.Diagnostic{
+			File: middlewarePath, Line: 1, Col: 1,
+			Message: "middleware file does not export a middleware function, so requests could not be checked",
+			Hint:    "add `export function middleware(request) { ... }`, or `export default`",
+		}.WithCode(diag.CodeMiddlewareExport)
 	}
 	if err := fsutil.WriteFileAtomic(outPath, result.OutputFiles[0].Contents, 0644); err != nil {
 		return fmt.Errorf("writing middleware: %w", err)

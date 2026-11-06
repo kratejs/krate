@@ -874,6 +874,9 @@ func LoadWith(root string, opts LoadOptions) (*Config, error) {
 			if uerr := json.Unmarshal(merged, cfg); uerr != nil {
 				return nil, describeUnmarshalError(filepath.Base(tsPath), uerr)
 			}
+			if err := applyNormalizedKeys(merged, cfg); err != nil {
+				return nil, fmt.Errorf("config %s: %w", filepath.Base(tsPath), err)
+			}
 			Warnings = append(Warnings, UnknownKeyWarnings(merged)...)
 		case errors.Is(loadErr, errStaticFallback):
 			// Simple literal configs the embedded runtime cannot run are parsed

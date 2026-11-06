@@ -1375,3 +1375,20 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 	}
 	return nil
 }
+
+// applyNormalizedKeys applies the keys whose Config fields are json:"-" because
+// each accepts several forms. Decoding JSON alone would drop them.
+func applyNormalizedKeys(data []byte, cfg *Config) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	for _, key := range []string{"viewTransitions", "ppr"} {
+		if val, ok := raw[key]; ok {
+			if err := applyConfigProp(cfg, key, val); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}

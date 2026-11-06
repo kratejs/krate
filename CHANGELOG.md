@@ -9,6 +9,32 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Breaking
 
+- A middleware file with no handler is a build error (`KR7143`), and a server running such a
+  module answers 503.
+- `krate serve` and `krate start` refuse to start when `manifest.json` or
+  `.krate/api-routes.json` is corrupt, as they already do for `server-manifest.json`.
+- `viewTransitions` and `ppr` take effect. They were ignored on the normal config path, so a
+  setting left in a config can change output.
+
+### Fixed
+
+- Security: middleware exported as a default function runs in every runtime. The Node, Bun and
+  Deno sidecars and the serverless adapters skipped it, and any auth check with it.
+- A corrupt `manifest.json` no longer reads as "no middleware recorded" or "no closed routes".
+  A later rebuild that leaves it unreadable logs the error and keeps the last good segment index.
+- `@krate/core-<platform>` packages are published with an executable compiler again. In
+  `0.5.0-beta.2`, `krate` failed with `spawn .../bin/krate EACCES` on every Linux and macOS
+  install, because pnpm packs a file outside `bin` as `0644`. The release gate now packs each
+  package and checks the mode, and the wrapper restores a lost exec bit on an installed
+  binary. Until you upgrade, run `chmod +x node_modules/@krate/core-*/bin/krate`.
+- `@krate/core` has no `postinstall` script any more, so npm's script gating has nothing to
+  warn about. It only printed a message; a missing or unusable compiler now gets a hint when
+  `krate` runs.
+
+## 0.5.0-beta.2 (2026-11-05)
+
+### Breaking
+
 - More builds that used to ship broken output now fail, each with a file and a fix:
   an element type that cannot be resolved (`KR8320`), a member tag that names no
   component (`KR8321`), a `@static`/`@server` page reading a module value that top-level
@@ -309,14 +335,6 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Fixed
 
-- `@krate/core-<platform>` packages are published with an executable compiler again. In
-  `0.5.0-beta.2`, `krate` failed with `spawn .../bin/krate EACCES` on every Linux and macOS
-  install, because pnpm packs a file outside `bin` as `0644`. The release gate now packs each
-  package and checks the mode, and the wrapper restores a lost exec bit on an installed
-  binary. Until you upgrade, run `chmod +x node_modules/@krate/core-*/bin/krate`.
-- `@krate/core` has no `postinstall` script any more, so npm's script gating has nothing to
-  warn about. It only printed a message; a missing or unusable compiler now gets a hint when
-  `krate` runs.
 - The YAML number rule no longer takes quadratic time on a long run of digits in the runtime
   highlighter.
 - A data race between island detection and the universal AST transforms on modules shared

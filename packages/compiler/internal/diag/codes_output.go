@@ -8,6 +8,8 @@ const (
 	CodeCSSSyntax Code = "KR7141"
 	// CodeStaticParamsEntry: a generateStaticParams entry that cannot produce a page.
 	CodeStaticParamsEntry Code = "KR7142"
+	// CodeMiddlewareExport: a middleware file with no handler to run.
+	CodeMiddlewareExport Code = "KR7143"
 )
 
 func init() {
@@ -40,6 +42,14 @@ func init() {
 				"that misses a param would have been written to the literal path `[slug]/index.html`; two different " +
 				"entries that produce the same path would overwrite each other. Both are build errors that name the " +
 				"entry. An exact duplicate entry is dropped. Fix the function, or remove the entry.",
+		},
+		CodeInfo{
+			Code:  CodeMiddlewareExport,
+			Title: "Middleware file has no handler",
+			Explanation: "`middleware.ts` must export the function that runs for each request, as " +
+				"`export function middleware(request)` or as the default export. Without one, requests could not be " +
+				"checked, so this is a build error, and a server running such a module answers 503 instead of letting " +
+				"requests through. Export the handler, or delete the file.",
 		},
 	)
 }

@@ -549,8 +549,14 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
   async function runMiddleware(rs: ReqState): Promise<Response | null> {
     const p = rs.path;
     if (p.startsWith("/__krate/") && !p.startsWith("/__krate/action/")) return null;
+    if (!data.hasMiddleware) return null;
     const mod = modules.middleware;
-    if (!data.hasMiddleware || !mod || typeof mod.middleware !== "function") return null;
+    // The named export, then the default one, as the other runtimes do. The app
+    // has middleware, so a module with no handler must not let requests through.
+    const handler = typeof mod?.middleware === "function" ? mod.middleware : mod?.default;
+    if (typeof handler !== "function") {
+      return middlewareFailed(rs, new Error("the middleware module does not export a middleware function"));
+    }
     let matchers: RegExp[] | null;
     try {
       matchers = middlewareMatchers();
@@ -562,7 +568,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     let result: any;
     try {
       const request = attachCookies(new Request(fullURL(rs), { method: rs.method, headers: new Headers(rs.request.headers) }));
-      result = await mod.middleware(request);
+      result = await handler(request);
     } catch (e) {
       return middlewareFailed(rs, e);
     }

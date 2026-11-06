@@ -568,3 +568,20 @@ describe("createKrateHandler with a shared cache adapter", () => {
     expect(renders).toBe(2);
   });
 });
+
+describe("middleware exports", () => {
+  const deny = () => new Response("no", { status: 403 });
+  const run = (middleware: any) =>
+    createKrateHandler({ target: "node", data: data(), modules: { ...modules, middleware } })(new Request("http://localhost/live"));
+
+  it("runs a default export", async () => {
+    expect((await run({ default: deny })).status).toBe(403);
+  });
+
+  it("fails closed when the module has no handler", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect((await run({ other: 1 })).status).toBe(503);
+    expect((await run(undefined)).status).toBe(503);
+    error.mockRestore();
+  });
+});
