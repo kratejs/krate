@@ -171,6 +171,10 @@ if (!release.includes("smoke-install")) fail("release workflow does not run the 
 if (release.indexOf("smoke-install") > release.indexOf("Publish platform packages")) {
   fail("release workflow runs the install smoke test after publishing");
 }
+const smokeJob = ci.slice(ci.indexOf("  install-smoke:"), ci.indexOf("  go-matrix:"));
+for (const needle of ["macos-latest", "windows-latest", "core-darwin-arm64", "core-win32-x64", "-alpine", "core-linux-x64-musl"]) {
+  if (!smokeJob.includes(needle)) fail(`the CI install smoke test does not cover ${needle}`);
+}
 if (!ci.includes("check:release")) fail("CI does not run check:release");
 if (!release.includes("check:release")) fail("release workflow does not run check:release");
 

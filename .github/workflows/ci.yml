@@ -124,9 +124,26 @@ jobs:
           KRATE_CONFORMANCE_MARKDOWN: ${{ runner.temp }}/conformance.md
           KRATE_CONFORMANCE_SUMMARY: ${{ runner.temp }}/conformance.json
 
+  # Installs the packed packages with npm and runs the installed compiler. It
+  # needs a version nothing on npm has, as at release time. macOS and Windows
+  # matter here: the exec bit, the .exe path, .cmd shims and spaces in paths
+  # only fail there.
   install-smoke:
-    name: Install smoke test
-    runs-on: ubuntu-latest
+    name: Install smoke test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: core-linux-x64
+          - os: macos-latest
+            platform: core-darwin-arm64
+          - os: windows-latest
+            platform: core-win32-x64
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
 
@@ -161,10 +178,58 @@ jobs:
       - name: Build the platform package
         run: node scripts/build-platform-packages.mjs
         env:
-          KRATE_ONLY_PLATFORM: core-linux-x64
+          KRATE_ONLY_PLATFORM: ${{ matrix.platform }}
+
+      - name: Test the smoke test helpers
+        run: node --test scripts/smoke-helpers.test.mjs
 
       - name: Install and run the packages
         run: node scripts/smoke-install.mjs
+
+  # The musl binary is the one Alpine users get. The packages are built here and
+  # installed inside node:alpine, where @krate/core picks core-linux-x64-musl.
+  install-smoke-musl:
+    name: Install smoke test (Alpine, musl)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: packages/compiler/go.mod
+          cache: true
+
+      - name: Enable pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+          run_install: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Sync package versions
+        run: node scripts/set-version.mjs 0.0.0-smoke.0
+
+      - name: Install JS dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Build JS packages
+        run: pnpm -r --filter "!@krate/web" --filter "!@krate/benchmark" build
+
+      - name: Build the platform package
+        run: node scripts/build-platform-packages.mjs
+        env:
+          KRATE_ONLY_PLATFORM: core-linux-x64-musl
+
+      - name: Install and run the packages on Alpine
+        run: |
+          docker run --rm -v "$PWD:/repo" -w /repo node:22-alpine sh -c \
+            'npm install --global pnpm@11.9.0 >/dev/null && node scripts/smoke-install.mjs'
 
   go-matrix:
     name: Go (${{ matrix.os }})
