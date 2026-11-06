@@ -218,6 +218,17 @@ non-ISO `date`. `krate build ./typo` fails instead of creating the directory.
 `KR7120` (a file in `src/pages/api`) and `KR7125` (above) are not build errors
 by themselves; the first warns, the second only appears in `krate fix`.
 
+### `spawn .../bin/krate EACCES` on `0.5.0-beta.2`
+
+The `0.5.0-beta.2` platform packages were published without the executable bit,
+so `krate` fails with `EACCES` on every Linux and macOS install, including Docker.
+Windows is not affected. Upgrade to a later release, where the wrapper also
+restores the bit itself, or stay on `beta.2` and run this after installing:
+
+```sh
+chmod +x node_modules/@krate/core-*/bin/krate
+```
+
 ### `bin/krate` is gone from `@krate/core`
 
 The `@krate/core` package no longer contains a compiler binary. In

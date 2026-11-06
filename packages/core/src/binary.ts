@@ -1,4 +1,4 @@
-import { existsSync } from 'fs';
+import { accessSync, chmodSync, constants, existsSync, statSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { spawn, spawnSync } from 'child_process';
@@ -96,9 +96,42 @@ function warnOnVersionMismatch(bin: string, packageVersion: string): void {
   }
 }
 
+/**
+ * Restore the exec bit on an installed compiler. A tarball, mirror or Docker
+ * layer can lose it, and that should not stop the CLI. Only binaries under
+ * node_modules are touched: a KRATE_BINARY or a source build is the user's own.
+ */
+export function ensureExecutable(bin: string, platform: NodeJS.Platform = process.platform): void {
+  if (platform === 'win32' || !isInstalledPackage(bin)) return;
+  try {
+    accessSync(bin, constants.X_OK);
+    return;
+  } catch {
+    // Not executable, or missing, which spawn reports.
+  }
+  try {
+    chmodSync(bin, statSync(bin).mode | 0o111);
+  } catch {
+    // Someone else owns the file. spawn fails next, with a hint.
+  }
+}
+
+/** The error for a compiler that could not be started, with the way out. */
+export function spawnFailure(err: NodeJS.ErrnoException, bin: string, pkg: string = platformPackage()): string {
+  const message = `Failed to run krate binary: ${err.message}`;
+  if (err.code === 'EACCES') {
+    return `${message}\n  hint: the binary is not executable and krate could not fix it. Run \`chmod +x ${bin}\`, reinstall as the user who owns node_modules, or check that the volume is not mounted noexec.`;
+  }
+  if (err.code === 'ENOENT') {
+    return `${message}\n  hint: ${pkg} is not installed. Reinstall without --no-optional or --omit=optional, or set KRATE_BINARY to a compiler you built.`;
+  }
+  return message;
+}
+
 export function execBinary(args: string[], cwd?: string, packageVersion?: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const bin = resolveBinary();
+    ensureExecutable(bin);
     if (packageVersion) warnOnVersionMismatch(bin, packageVersion);
     const proc = spawn(bin, args, {
       stdio: 'inherit',
@@ -113,7 +146,7 @@ export function execBinary(args: string[], cwd?: string, packageVersion?: string
       }
     });
     proc.on('error', (err) => {
-      reject(new Error(`Failed to run krate binary: ${err.message}`));
+      reject(new Error(spawnFailure(err, bin)));
     });
   });
 }

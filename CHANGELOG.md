@@ -309,6 +309,14 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Fixed
 
+- `@krate/core-<platform>` packages are published with an executable compiler again. In
+  `0.5.0-beta.2`, `krate` failed with `spawn .../bin/krate EACCES` on every Linux and macOS
+  install, because pnpm packs a file outside `bin` as `0644`. The release gate now packs each
+  package and checks the mode, and the wrapper restores a lost exec bit on an installed
+  binary. Until you upgrade, run `chmod +x node_modules/@krate/core-*/bin/krate`.
+- `@krate/core` has no `postinstall` script any more, so npm's script gating has nothing to
+  warn about. It only printed a message; a missing or unusable compiler now gets a hint when
+  `krate` runs.
 - The YAML number rule no longer takes quadratic time on a long run of digits in the runtime
   highlighter.
 - A data race between island detection and the universal AST transforms on modules shared
