@@ -98,7 +98,7 @@ pnpm --filter @krate/web build
 ```
 
 Repeat browser conformance for Firefox and WebKit, and run the Preact matrix
-(10.20.0, 10.24.0, 10.29.8) plus the Node 20/22 and Bun/Deno jobs. Check the
+(10.20.0, 10.24.0, 10.29.8) plus the Node 20/22/24/26 and Bun/Deno jobs. Check the
 generated `dist` for a scaffolded app and the docs site before promotion.
 
 ## Release notes
