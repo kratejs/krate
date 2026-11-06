@@ -279,7 +279,7 @@ Promise.resolve(fn()).then(function (r) { globalThis.%s = r; }, function () {});
 	return jseval.Eval(jseval.Options{
 		Source:        entry,
 		ResolveDir:    filepath.Dir(abs),
-		Env:           b.Env,
+		Env:           b.scriptEnv(),
 		Await:         true,
 		ResolveImport: resolve,
 	})

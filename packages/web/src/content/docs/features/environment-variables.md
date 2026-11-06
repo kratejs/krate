@@ -74,8 +74,14 @@ See the `krate-examples` project for a working setup: `examples/.env` and
 - **`generateStaticParams`** - the embedded or bundled-runtime evaluation that
   computes statically generated params.
 
-In every case the embedded/child process sees the merged map: shell env
-overridden only where files define a variable the shell does not.
+In every case, on every runtime (embedded QuickJS, Node, Bun, Deno) and in both
+`krate dev` and `krate serve`, `process.env` holds the shell environment plus the
+`.env` files, with the shell winning, and `NODE_ENV` set to `"development"` or
+`"production"` when the shell does not set it. This also covers middleware and
+the embedded `generateStaticParams` and metadata evaluation at build time.
+`FOO=bar krate serve` therefore makes `process.env.FOO` readable in an API route
+whichever runtime serves it. Shell variables never reach client output; only the
+`KRATE_PUBLIC_` rule below inlines values.
 
 ## Client-side variables
 

@@ -85,3 +85,9 @@ func neutralizeClientEnv(js string) string {
 	}
 	return js
 }
+
+// scriptEnv is the process.env an embedded build-time VM sees: the shell
+// environment overlaid with the project's .env values, the shell winning.
+func (b *Builder) scriptEnv() map[string]string {
+	return environ.Merge(b.Env)
+}

@@ -271,3 +271,42 @@ func TestScriptEnvOverlaysProjectOnShell(t *testing.T) {
 		t.Errorf("a shell NODE_ENV must win, got %q", got)
 	}
 }
+
+func TestMergeShellWinsAndAddsNodeEnv(t *testing.T) {
+	setEnv(t, "KRATE_TEST_MERGE_SHELL", "shell")
+	setEnv(t, "KRATE_TEST_MERGE_BOTH", "shell")
+	unsetEnv(t, "NODE_ENV")
+	unsetEnv(t, "KRATE_ENV")
+	files := map[string]string{"KRATE_TEST_MERGE_FILE": "file", "KRATE_TEST_MERGE_BOTH": "file"}
+	got := Merge(files)
+	if got["KRATE_TEST_MERGE_SHELL"] != "shell" || got["KRATE_TEST_MERGE_FILE"] != "file" {
+		t.Errorf("Merge dropped a shell or file value: %v", got)
+	}
+	if got["KRATE_TEST_MERGE_BOTH"] != "shell" {
+		t.Errorf("shell must win over a file value, got %q", got["KRATE_TEST_MERGE_BOTH"])
+	}
+	if got["NODE_ENV"] != "production" {
+		t.Errorf("NODE_ENV = %q, want production", got["NODE_ENV"])
+	}
+	if got["PATH"] == "" {
+		t.Error("Merge must carry the rest of the shell environment")
+	}
+}
+
+func TestOverlayHoldsOnlyWhatTheShellLacks(t *testing.T) {
+	setEnv(t, "KRATE_TEST_OVERLAY_SHELL", "shell")
+	unsetEnv(t, "NODE_ENV")
+	unsetEnv(t, "KRATE_ENV")
+	got := map[string]bool{}
+	for _, kv := range Overlay(map[string]string{"KRATE_TEST_OVERLAY_FILE": "f"}) {
+		got[kv] = true
+	}
+	if !got["KRATE_TEST_OVERLAY_FILE=f"] || !got["NODE_ENV=production"] {
+		t.Errorf("Overlay = %v, want the file value and NODE_ENV", got)
+	}
+	for kv := range got {
+		if len(kv) > 24 && kv[:24] == "KRATE_TEST_OVERLAY_SHELL" {
+			t.Errorf("Overlay must not repeat shell variables: %s", kv)
+		}
+	}
+}

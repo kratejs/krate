@@ -1365,7 +1365,9 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	if err := revalHost.SetCache(cfg.Cache, hub == nil); err != nil {
 		return err
 	}
-	serverEnv := withEnv(environ.Current, revalHost.Env())
+	// QuickJS routes and middleware have no process of their own, so they get
+	// the merged shell + .env environment a child process would inherit.
+	serverEnv := withEnv(environ.ScriptEnv(), revalHost.Env())
 
 	// Load embedded middleware runtime if configured (default: quickjs)
 	var middlewareRT *jsruntime.MiddlewareRuntime
@@ -1450,7 +1452,8 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 					cmd = exec.Command("node", scriptPath, nodeAPIDir, portStr, middlewarePath, actionDir)
 				}
 				execx.ConfigureTree(cmd)
-				cmd.Env = append(os.Environ(),
+				cmd.Env = append(os.Environ(), environ.Overlay(environ.Current)...)
+				cmd.Env = append(cmd.Env,
 					fmt.Sprintf("KRATE_API_WORKERS=%d", nodeWorkers),
 					fmt.Sprintf("KRATE_API_HOT=%d", boolToInt(hub != nil)),
 					fmt.Sprintf("KRATE_API_DEV=%d", boolToInt(hub != nil)),
