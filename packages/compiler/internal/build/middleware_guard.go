@@ -2,12 +2,59 @@ package build
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 )
+
+// exportsMiddleware reports whether a bundled middleware module has a handler,
+// from esbuild's metafile. An unreadable metafile is not proof of a bad module.
+func exportsMiddleware(metafile string) bool {
+	var meta struct {
+		Outputs map[string]struct {
+			Exports []string `json:"exports"`
+		} `json:"outputs"`
+	}
+	if json.Unmarshal([]byte(metafile), &meta) != nil || len(meta.Outputs) == 0 {
+		return true
+	}
+	for _, out := range meta.Outputs {
+		for _, name := range out.Exports {
+			if name == "middleware" || name == "default" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// checkBuildRecords fails when a record the server depends on is unreadable or
+// corrupt. A missing one is fine: an app can have no request-time pages, and a
+// dist folder can predate a record.
+func checkBuildRecords(root, outDir string) error {
+	if _, err := readServerManifest(outDir); err != nil && !errors.Is(err, errServerManifestMissing) {
+		return err
+	}
+	for _, path := range []string{
+		ResolveManifestPath(outDir, "manifest.json"),
+		filepath.Join(root, ".krate", "api-routes.json"),
+	} {
+		data, err := os.ReadFile(path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("reading %s: %w", path, err)
+		}
+		if !json.Valid(data) {
+			return fmt.Errorf("%s is corrupt\n  hint: run `krate build` again, and deploy the whole output", path)
+		}
+	}
+	return nil
+}
 
 // recordedMiddleware reads the build's record of whether the app has a
 // middleware module. known is false for a dist folder built before the record

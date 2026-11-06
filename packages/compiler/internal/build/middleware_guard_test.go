@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
+	"github.com/kratejs/krate/packages/compiler/internal/diag"
 )
 
 // guardProject lays out root/.krate (optionally with middleware.js) and
@@ -191,5 +192,139 @@ func TestNodeSidecarMiddlewareLoadErrorFailsClosed(t *testing.T) {
 	}
 	if out.Action != "error" || out.Error == "" {
 		t.Errorf("load failure answered %s, want an error envelope", raw)
+	}
+}
+
+// sidecarMiddlewareAnswer posts one request to a Node sidecar running source.
+func sidecarMiddlewareAnswer(t *testing.T, source string) (action, errText string) {
+	t.Helper()
+	dir := t.TempDir()
+	mwPath := filepath.Join(dir, "middleware.js")
+	if err := os.WriteFile(mwPath, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte(`{"type":"module"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	apiDir := filepath.Join(dir, "api")
+	_ = os.MkdirAll(apiDir, 0o755)
+	base := startNodeConformance(t, apiDir, mwPath)
+	resp, err := http.Post(base+"/__krate/middleware", "application/json", strings.NewReader(`{"url":"http://x/admin","method":"GET","path":"/admin","headers":{}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	var out struct {
+		Action string `json:"action"`
+		Error  string `json:"error"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("%v (%s)", err, raw)
+	}
+	return out.Action, out.Error
+}
+
+func TestNodeSidecarMiddlewareExports(t *testing.T) {
+	const deny = `(req) => new Response("no", { status: 403 })`
+	for name, source := range map[string]string{
+		"named":   "export const middleware = " + deny + ";\n",
+		"default": "export default " + deny + ";\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if action, _ := sidecarMiddlewareAnswer(t, source); action != "response" {
+				t.Errorf("action = %q, want the handler's response", action)
+			}
+		})
+	}
+	t.Run("none", func(t *testing.T) {
+		action, errText := sidecarMiddlewareAnswer(t, "export const other = 1;\n")
+		if action != "error" || !strings.Contains(errText, "does not export") {
+			t.Errorf("answered %q %q, want an error envelope", action, errText)
+		}
+	})
+}
+
+func TestBuildRejectsMiddlewareWithoutHandler(t *testing.T) {
+	build := func(source string) error {
+		root := t.TempDir()
+		if err := os.WriteFile(filepath.Join(root, "middleware.ts"), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cfg := config.Default()
+		cfg.OutDir = filepath.Join(root, "dist")
+		return New(root, cfg).BuildMiddleware()
+	}
+	if err := build("export const other = 1;\n"); err == nil || !strings.Contains(err.Error(), string(diag.CodeMiddlewareExport)) {
+		t.Errorf("no handler: err = %v, want %s", err, diag.CodeMiddlewareExport)
+	}
+	for _, source := range []string{
+		"export function middleware(r: Request) { return r; }\n",
+		"export default function (r: Request) { return r; }\n",
+		"const m = (r: Request) => r;\nexport { m as middleware };\n",
+	} {
+		if err := build(source); err != nil {
+			t.Errorf("%q: %v", source, err)
+		}
+	}
+}
+
+// A corrupt build record must stop the server, and comes before the middleware
+// check because a corrupt manifest would otherwise read as "no record".
+func TestServeRefusesCorruptBuildRecords(t *testing.T) {
+	for name, rel := range map[string]string{
+		"manifest":   "dist/.krate/manifest.json",
+		"api routes": ".krate/api-routes.json",
+	} {
+		t.Run(name, func(t *testing.T) {
+			root, out := guardProject(t, false, "true")
+			if err := os.MkdirAll(filepath.Join(root, ".krate"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(root, filepath.FromSlash(rel))
+			if rel == "dist/.krate/manifest.json" {
+				path = ResolveManifestPath(out, "manifest.json")
+			}
+			if err := os.WriteFile(path, []byte("{broken"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			cfg := config.Default()
+			cfg.OutDir = out
+			done := make(chan error, 1)
+			go func() { done <- Serve(root, cfg, time.Now()) }()
+			select {
+			case err := <-done:
+				if err == nil || !strings.Contains(err.Error(), "corrupt") || !strings.Contains(err.Error(), filepath.Base(path)) {
+					t.Fatalf("err = %v, want a corrupt-file error naming %s", err, path)
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatal("Serve started instead of refusing")
+			}
+		})
+	}
+	root := t.TempDir()
+	if err := checkBuildRecords(root, filepath.Join(root, "dist")); err != nil {
+		t.Errorf("missing records must stay valid: %v", err)
+	}
+}
+
+func TestSegmentIndexKeepsLastGoodManifest(t *testing.T) {
+	out := t.TempDir()
+	path := ResolveManifestPath(out, "manifest.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{"pages":[{"route":"/a","segDir":"seg"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := newSegmentIndex(out)
+	if _, dirs := s.load(); dirs[normalizeRoutePattern("/a")] != "seg" {
+		t.Fatalf("first load = %v", dirs)
+	}
+	if err := os.WriteFile(path, []byte("{broken, and a different size"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, dirs := s.load(); dirs[normalizeRoutePattern("/a")] != "seg" {
+		t.Errorf("load after corruption = %v, want the last good index", dirs)
 	}
 }

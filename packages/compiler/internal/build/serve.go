@@ -190,9 +190,14 @@ const server = http.createServer(async (req, res) => {
         res.setHeader('Content-Type', 'application/json');
         return res.end(JSON.stringify({ action: 'error', error: 'middleware failed to load: ' + krateMwError }));
       }
-      if (!middlewareModule || !middlewareModule.middleware) {
+      if (!middlewareModule) {
         res.setHeader('Content-Type', 'application/json');
         return res.end(JSON.stringify({ action: 'continue' }));
+      }
+      const krateMwFn = krateMiddlewareFn(middlewareModule);
+      if (!krateMwFn) {
+        res.setHeader('Content-Type', 'application/json');
+        return res.end(JSON.stringify({ action: 'error', error: krateNoMiddlewareFn }));
       }
 
       const bodyChunks = [];
@@ -211,7 +216,7 @@ const server = http.createServer(async (req, res) => {
         if (!krateMiddlewareMatches(middlewareModule, body.path || urlObj.pathname)) {
           return res.end(JSON.stringify({ action: 'continue', headers: [], matcher: hasMatcher }));
         }
-        const result = await middlewareModule.middleware(request);
+        const result = await krateMwFn(request);
         return res.end(JSON.stringify({ ...(await krateMiddlewareJSON(result)), matcher: hasMatcher }));
       } catch (e) {
         console.error('[krate] middleware error: ' + ((e && e.stack) || e));
@@ -525,14 +530,16 @@ async function loadModule(file) {
 async function handleMiddleware(req) {
   if (HOT) await krateLoadMiddleware();
   if (!middlewareModule && krateMwError) return json({ action: 'error', error: 'middleware failed to load: ' + krateMwError });
-  if (!middlewareModule || !middlewareModule.middleware) return json({ action: 'continue', headers: [] });
+  if (!middlewareModule) return json({ action: 'continue', headers: [] });
+  const krateMwFn = krateMiddlewareFn(middlewareModule);
+  if (!krateMwFn) return json({ action: 'error', error: krateNoMiddlewareFn });
   let body = {};
   try { body = await req.json(); } catch {}
   try {
     const hasMatcher = !!krateMatchersFor(middlewareModule);
     if (!krateMiddlewareMatches(middlewareModule, body.path || new URL(req.url).pathname)) return json({ action: 'continue', headers: [], matcher: hasMatcher });
     const request = krateAttach(new Request(body.url || req.url, { method: body.method || 'GET', headers: krateRequestHeaders(body.headers) }));
-    const result = await middlewareModule.middleware(request);
+    const result = await krateMwFn(request);
     return json({ ...(await krateMiddlewareJSON(result)), matcher: hasMatcher });
   } catch (e) {
     console.error('[krate] middleware error: ' + ((e && e.stack) || e));
@@ -1306,13 +1313,13 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	if err != nil {
 		return fmt.Errorf("resolving out dir: %w", err)
 	}
-	middlewareRequired, err := checkMiddlewareDeployed(root, absOutDir, hub != nil, os.Stderr)
-	if err != nil {
+	// Corrupt build records must stop startup. Each reader below treats a bad
+	// file as "nothing recorded": no SSR pages, no middleware, no closed routes.
+	if err := checkBuildRecords(root, absOutDir); err != nil {
 		return err
 	}
-	// A corrupt server manifest must stop startup: treating it as "no SSR
-	// pages" would serve the frozen build HTML for request-time pages.
-	if _, err := readServerManifest(absOutDir); err != nil && !errors.Is(err, errServerManifestMissing) {
+	middlewareRequired, err := checkMiddlewareDeployed(root, absOutDir, hub != nil, os.Stderr)
+	if err != nil {
 		return err
 	}
 	port := cfg.ServerPort()

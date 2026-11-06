@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"html"
 	"net/http"
 	"os"
@@ -46,16 +47,21 @@ func (s *segmentIndex) load() ([]SegmentEntry, map[string]string) {
 		return s.entries, s.segDirs
 	}
 	s.modTime, s.size = fi.ModTime(), fi.Size()
-	s.entries, s.segDirs = nil, map[string]string{}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, s.segDirs
-	}
 	var m Manifest
-	if err := json.Unmarshal(data, &m); err != nil {
-		return nil, s.segDirs
+	data, err := os.ReadFile(path)
+	if err == nil {
+		err = json.Unmarshal(data, &m)
 	}
-	s.entries = m.Segments
+	if err != nil {
+		// Serving keeps the last good index, as a dev rebuild keeps the last good
+		// server manifest. Startup has already refused a corrupt file.
+		fmt.Fprintf(os.Stderr, "  %sManifest error:%s %s: %v\n", cRed, cReset, path, err)
+		if s.segDirs == nil {
+			s.segDirs = map[string]string{}
+		}
+		return s.entries, s.segDirs
+	}
+	s.entries, s.segDirs = m.Segments, map[string]string{}
 	for _, p := range m.Pages {
 		s.segDirs[normalizeRoutePattern(p.Route)] = p.SegDir
 	}

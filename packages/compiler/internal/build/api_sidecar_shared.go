@@ -67,6 +67,14 @@ function krateRequestHeaders(map) {
   }
   return h;
 }
+// krateMiddlewareFn picks the handler the way the embedded runtime does: the
+// named export, then the default one. A module with neither has no handler, which
+// the caller must answer with an error: skipping it would skip an auth check.
+function krateMiddlewareFn(mod) {
+  if (typeof mod.middleware === 'function') return mod.middleware;
+  return typeof mod.default === 'function' ? mod.default : null;
+}
+const krateNoMiddlewareFn = 'middleware.js does not export a middleware function';
 // krateLoadMiddleware imports the middleware module, and in dev (HOT)
 // re-imports it whenever the file changes so edits apply without restarting the
 // sidecar. A failed reload keeps the previous module and logs the error.
