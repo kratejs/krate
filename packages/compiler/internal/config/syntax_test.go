@@ -291,3 +291,53 @@ func TestLoadWithoutConfigFileUsesDefaults(t *testing.T) {
 		t.Errorf("outDir = %q, want the default", cfg.OutDir)
 	}
 }
+
+// A syntax error in a local file the config imports is the user's bug in that
+// file. It must not read as a missing dependency or dump bundler text.
+func TestConfigSyntaxErrorInImportedFile(t *testing.T) {
+	cases := map[string]struct{ file, src string }{
+		"ts helper":     {"helper.ts", "export const title = 'a';\nexport const broken = ;\n"},
+		"js helper":     {"helper.js", "export const title = 'a'\nexport const broken = );\n"},
+		"nested helper": {"lib/helper.ts", "export const title = 'a';\nconst x = (1 + ;\n"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, tc.file)), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, tc.file), []byte(tc.src), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			cfg := "import { title } from './" + tc.file + "';\nexport default { outDir: title };\n"
+			if err := os.WriteFile(filepath.Join(dir, "krate.config.ts"), []byte(cfg), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Load(dir)
+			d := wantSyntaxDiag(t, err, filepath.Base(tc.file))
+			if d.Line != 2 {
+				t.Errorf("line = %d, want 2", d.Line)
+			}
+			if strings.TrimSpace(d.Source) == "" {
+				t.Errorf("want the source line, got %q", d.Source)
+			}
+			msg := err.Error()
+			for _, bad := range []string{"isn't installed", "bundling entry", "Underlying error"} {
+				if strings.Contains(msg, bad) {
+					t.Errorf("message contains %q:\n%s", bad, msg)
+				}
+			}
+			if !strings.Contains(d.Message, "imported by") {
+				t.Errorf("message should say the file is imported by the config: %q", d.Message)
+			}
+		})
+	}
+}
+
+// A missing package keeps the install hint; only syntax errors change.
+func TestConfigMissingPackageKeepsInstallHint(t *testing.T) {
+	_, err := Load(writeCfg(t, "krate.config.ts", "import x from 'no-such-package-krate';\nexport default { outDir: String(x) };\n"))
+	if err == nil || !strings.Contains(err.Error(), "isn't installed") {
+		t.Fatalf("err = %v", err)
+	}
+}

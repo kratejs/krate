@@ -9,6 +9,8 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+
+	"github.com/kratejs/krate/packages/compiler/internal/check"
 )
 
 // knownNestedKeys maps a known top-level object key to the nested keys we
@@ -281,6 +283,19 @@ func UnknownKeyWarnings(raw []byte) []string {
 	var out []string
 	for _, k := range unknown {
 		out = append(out, fmt.Sprintf("unknown config key %q (ignored)", k))
+	}
+	// `checks` is a free-form map, so the struct walk above cannot see into it.
+	if rawChecks, ok := m["checks"]; ok {
+		var checks map[string]any
+		if json.Unmarshal(rawChecks, &checks) == nil {
+			for _, u := range check.UnknownKeys(checks) {
+				msg := fmt.Sprintf("unknown config key %q (ignored)", u.Path)
+				if u.Suggestion != "" {
+					msg = fmt.Sprintf("unknown config key %q (ignored; did you mean %q?)", u.Path, u.Suggestion)
+				}
+				out = append(out, msg)
+			}
+		}
 	}
 	return out
 }

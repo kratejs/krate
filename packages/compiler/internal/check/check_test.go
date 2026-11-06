@@ -302,3 +302,50 @@ func TestFromMapRejectsNonStringListEntries(t *testing.T) {
 		t.Errorf("custom: err = %v", err)
 	}
 }
+
+func TestUnknownKeys(t *testing.T) {
+	m := map[string]any{
+		"failon": "warning",
+		"a11y":   "error",
+		"budget": map[string]any{"js": 100.0, "islandjs": 5.0},
+		"rules": map[string]any{
+			"a11y/img-atl":    "off",
+			"perf/js-budget":  "error",
+			"custom/no-lorem": "error",
+		},
+		"ignore": []any{"seo/canonical", "seo/cannonical", "my-own-rule"},
+	}
+	got := map[string]string{}
+	for _, u := range UnknownKeys(m) {
+		got[u.Path] = u.Suggestion
+	}
+	want := map[string]string{
+		"checks.failon":                "failOn",
+		"checks.budget.islandjs":       "islandJS",
+		"checks.rules.a11y/img-atl":    "a11y/img-alt",
+		"checks.ignore.seo/cannonical": "seo/canonical",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("UnknownKeys = %v, want %v", got, want)
+	}
+	for path, sug := range want {
+		if g, ok := got[path]; !ok || g != sug {
+			t.Errorf("UnknownKeys[%s] = %q (present %v), want %q", path, g, ok, sug)
+		}
+	}
+}
+
+func TestUnknownKeysAcceptsEveryDocumentedKey(t *testing.T) {
+	m := map[string]any{
+		"enabled": true, "a11y": true, "seo": "warning", "perf": false,
+		"rules": map[string]any{}, "ignore": []any{}, "custom": []any{"./x.ts"},
+		"budget": map[string]any{"js": 1.0, "hydration": 1.0, "islandJS": 1.0, "route": 1.0},
+		"failOn": "error",
+	}
+	if got := UnknownKeys(m); len(got) != 0 {
+		t.Fatalf("documented keys flagged: %v", got)
+	}
+	if got := UnknownKeys(nil); len(got) != 0 {
+		t.Fatalf("nil map flagged: %v", got)
+	}
+}

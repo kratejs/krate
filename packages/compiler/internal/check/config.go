@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -236,6 +237,100 @@ func FromMap(m map[string]any, root string, env map[string]string) (Config, erro
 	}
 
 	return cfg, nil
+}
+
+// knownChecksKeys and knownBudgetKeys are the keys FromMap reads. Anything else
+// in `checks` is a typo, since FromMap drops it without a word.
+var (
+	knownChecksKeys = map[string]bool{
+		"enabled": true, CategoryA11y: true, CategorySEO: true, CategoryPerf: true,
+		"rules": true, "ignore": true, "budget": true, "failOn": true, "custom": true,
+	}
+	knownBudgetKeys = map[string]bool{"js": true, "hydration": true, "islandJS": true, "route": true}
+)
+
+// UnknownKey is an entry in `checks` that nothing reads.
+type UnknownKey struct {
+	// Path is the dotted config path, for example "checks.failon".
+	Path string
+	// Suggestion is the closest valid name, or empty.
+	Suggestion string
+}
+
+// UnknownKeys lists the keys of a raw `checks` object that FromMap ignores:
+// unknown top-level or budget keys, and built-in-looking rule IDs (a11y/, seo/,
+// perf/) in `rules` and `ignore` that match no built-in rule. IDs with another
+// prefix are left alone because custom rules choose their own.
+func UnknownKeys(m map[string]any) []UnknownKey {
+	var out []UnknownKey
+	for k := range m {
+		if !knownChecksKeys[k] {
+			out = append(out, UnknownKey{"checks." + k, closest(k, knownChecksKeys)})
+		}
+	}
+	if budget, ok := m["budget"].(map[string]any); ok {
+		for k := range budget {
+			if !knownBudgetKeys[k] {
+				out = append(out, UnknownKey{"checks.budget." + k, closest(k, knownBudgetKeys)})
+			}
+		}
+	}
+	builtin := map[string]bool{}
+	for _, id := range KnownRuleIDs() {
+		builtin[id] = true
+	}
+	checkID := func(path, id string) {
+		prefix, _, _ := strings.Cut(id, "/")
+		if (prefix == CategoryA11y || prefix == CategorySEO || prefix == CategoryPerf) && !builtin[id] {
+			out = append(out, UnknownKey{path + "." + id, closest(id, builtin)})
+		}
+	}
+	if rules, ok := m["rules"].(map[string]any); ok {
+		for id := range rules {
+			checkID("checks.rules", id)
+		}
+	}
+	if ignore, ok := m["ignore"].([]any); ok {
+		for _, item := range ignore {
+			if id, ok := item.(string); ok {
+				checkID("checks.ignore", id)
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
+	return out
+}
+
+// closest returns the member of set nearest to name by edit distance (ignoring
+// case), or "" when nothing is within two edits.
+func closest(name string, set map[string]bool) string {
+	best, bestDist := "", 3
+	for cand := range set {
+		if d := editDistance(strings.ToLower(name), strings.ToLower(cand)); d < bestDist || (d == bestDist && cand < best) {
+			best, bestDist = cand, d
+		}
+	}
+	return best
+}
+
+func editDistance(a, b string) int {
+	prev := make([]int, len(b)+1)
+	cur := make([]int, len(b)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		cur[0] = i
+		for j := 1; j <= len(b); j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			cur[j] = min(prev[j]+1, cur[j-1]+1, prev[j-1]+cost)
+		}
+		prev, cur = cur, prev
+	}
+	return prev[len(b)]
 }
 
 // parseFailOn parses a failOn threshold. Only "error" and "warning" are valid
