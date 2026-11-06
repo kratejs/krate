@@ -7,6 +7,8 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ## Unreleased
 
+## 0.5.0-beta.3 (2026-11-06)
+
 ### Breaking
 
 - A middleware file with no handler is a build error (`KR7143`), and a server running such a
