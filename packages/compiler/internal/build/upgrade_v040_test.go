@@ -56,10 +56,11 @@ func installKrateCoreStub(t *testing.T, root string) {
 // is the create-krate-app template exactly as v0.4.0 shipped it (git archive of
 // packages/create-krate-app/templates/app at the tag, minus README, AGENTS.md
 // and .gitignore). An existing 0.4 project looks like this, so it has to keep
-// building with the current compiler. The one known break is tsconfig baseUrl,
-// and it has to be fixable with `krate fix`. A new failure here means a 0.4
-// project would stop building on upgrade: fix the compiler, or document the
-// break in guides/upgrading.md and CHANGELOG.md and update this test.
+// building with the current compiler. The one known difference is tsconfig
+// baseUrl: the build works and warns once (KR7125), and `krate fix` repairs it.
+// A new failure here means a 0.4 project would stop building on upgrade: fix
+// the compiler, or document the break in guides/upgrading.md and CHANGELOG.md
+// and update this test.
 func TestUpgradeV040AppTemplate(t *testing.T) {
 	root := t.TempDir()
 	copyFixtureTree(t, filepath.Join("testdata", "upgrade-v040-app"), root)
@@ -71,7 +72,7 @@ func TestUpgradeV040AppTemplate(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	load := func() *config.Config {
+	load := func(wantKR7125 int) *config.Config {
 		t.Helper()
 		config.Warnings = nil
 		cfg, err := config.Load(root)
@@ -79,21 +80,27 @@ func TestUpgradeV040AppTemplate(t *testing.T) {
 			t.Fatalf("config.Load: %v", err)
 		}
 		cfg.Resolve(root)
+		got := 0
 		for _, w := range config.Warnings {
+			if strings.Contains(w, "KR7125") && strings.Contains(w, "krate fix --apply") {
+				got++
+				continue
+			}
 			t.Errorf("config warning on an unchanged 0.4 config: %s", w)
+		}
+		if got != wantKR7125 {
+			t.Errorf("KR7125 warnings = %d, want %d (%q)", got, wantKR7125, config.Warnings)
 		}
 		return cfg
 	}
 
-	// 1. As shipped, the alias fails and the error names the way out.
-	err := New(root, load()).BuildAll()
-	if err == nil {
-		t.Fatal("0.4 tsconfig (baseUrl ./src with @/* -> ./src/*) built; the baseUrl break is no longer documented behaviour, update upgrading.md and this test")
+	// 1. As shipped, the alias is read from the project root and warns once.
+	cfg0 := load(1)
+	if err := New(root, cfg0).BuildAll(); err != nil {
+		t.Fatalf("0.4 tsconfig (baseUrl ./src with @/* -> ./src/*) must still build: %v", err)
 	}
-	for _, want := range []string{`cannot resolve import "@/components/Counter"`, "baseUrl", "krate fix"} {
-		if !strings.Contains(BuildErrorSummary(err)+err.Error(), want) {
-			t.Errorf("error should mention %q:\n%s", want, BuildErrorSummary(err))
-		}
+	if home, _ := os.ReadFile(filepath.Join(cfg0.OutDir, "index.html")); !strings.Contains(string(home), "demo-count") {
+		t.Errorf("the unfixed 0.4 project built a wrong index.html:\n%s", home)
 	}
 
 	// 2. krate fix repairs it, once, and only tsconfig.json changes.
@@ -106,7 +113,7 @@ func TestUpgradeV040AppTemplate(t *testing.T) {
 	}
 
 	// 3. The fixed project builds, with the 0.5 output layout.
-	cfg := load()
+	cfg := load(0)
 	if err := New(root, cfg).BuildAll(); err != nil {
 		t.Fatalf("build after krate fix: %v", err)
 	}
