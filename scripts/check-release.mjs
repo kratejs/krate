@@ -166,6 +166,11 @@ for (const target of platforms.filter((t) => t.os !== "win32")) {
 }
 fs.rmSync(packRoot, { recursive: true, force: true });
 
+if (!ci.includes("smoke-install")) fail("CI does not run the install smoke test");
+if (!release.includes("smoke-install")) fail("release workflow does not run the install smoke test");
+if (release.indexOf("smoke-install") > release.indexOf("Publish platform packages")) {
+  fail("release workflow runs the install smoke test after publishing");
+}
 if (!ci.includes("check:release")) fail("CI does not run check:release");
 if (!release.includes("check:release")) fail("release workflow does not run check:release");
 

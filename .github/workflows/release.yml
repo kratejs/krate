@@ -127,6 +127,9 @@ jobs:
             exit 1
           fi
 
+      - name: Install the release from its tarballs
+        run: node scripts/smoke-install.mjs
+
       - name: Publish platform packages
         run: |
           set -e

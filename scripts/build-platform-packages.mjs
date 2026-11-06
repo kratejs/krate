@@ -12,6 +12,8 @@
  *
  * Environment:
  *   SKIP_GO=1    Skip rebuilding the compiler (still regenerates package.json)
+ *   KRATE_ONLY_PLATFORM=core-linux-x64
+ *                Build one package, for checks that do not need all seven
  */
 
 import { spawnSync } from 'node:child_process';
@@ -96,7 +98,8 @@ if (!process.env.SKIP_GO) {
   });
   if (sync.status !== 0) process.exit(sync.status ?? 1);
 }
-for (const target of platforms) {
+const only = process.env.KRATE_ONLY_PLATFORM;
+for (const target of platforms.filter((t) => !only || t.pkg === only)) {
   const dir = join(outBase, target.pkg);
   rmSync(dir, { recursive: true, force: true });
   console.log(`  Building ${target.pkg} (${target.goos}/${target.goarch})...`);
