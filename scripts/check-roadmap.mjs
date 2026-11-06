@@ -30,8 +30,8 @@ const planned = matrix.rows.filter((row) =>
 if (planned.length > 0) {
   fail(`roadmap rows still planned: ${planned.map((row) => row.id).join(", ")}`);
 }
-if (!matrix.rows.some((row) => row.id === "ssr-islands" && row.ssr === "beta")) {
-  fail("ssr-islands must be beta for the v1 gate");
+if (!matrix.rows.some((row) => row.id === "ssr-islands" && row.ssr === "supported")) {
+  fail("ssr-islands must be supported for the v1 gate");
 }
 
 for (const id of ["N1", "N2"]) {

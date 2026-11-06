@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const matrixPath = path.join(root, "packages/web/src/data/compat-matrix.json");
-const statuses = new Set(["stable", "beta", "partial", "planned", "n/a"]);
+const statuses = new Set(["stable", "supported", "partial", "planned", "n/a"]);
 
 function walk(dir, out = []) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -65,7 +65,8 @@ for (const row of matrix.rows) {
   if (seen.has(row.id)) fail(`${label}: duplicate id`);
   seen.add(row.id);
   for (const key of ["source", "islands", "ssr"]) {
-    if (!statuses.has(row[key])) fail(`${label}: invalid ${key} status ${row[key]}`);
+    if (row[key] === "beta") fail(`${label}: ${key} status "beta" was renamed to "supported"`);
+    else if (!statuses.has(row[key])) fail(`${label}: invalid ${key} status ${row[key]}`);
   }
   if (!Array.isArray(row.tests)) fail(`${label}: tests must be an array`);
   if (row.roadmap && (row.source === "planned" || row.islands === "planned" || row.ssr === "planned")) {
