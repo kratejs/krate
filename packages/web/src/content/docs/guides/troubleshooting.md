@@ -17,6 +17,14 @@ A construct is unterminated. Common causes:
 The diagnostic points at `file:line:col`; check the line it names and just
 before it.
 
+## `spawn .../bin/krate EACCES`
+
+The compiler binary is not executable. Krate restores the bit on an installed
+binary when it can, so this means it could not: `node_modules` belongs to another
+user, or the volume is mounted `noexec`. Reinstall as the user who runs `krate`,
+or run `chmod +x` on the path in the error. `0.5.0-beta.2` shipped without the bit
+and has no automatic repair; see [Upgrading](/docs/guides/upgrading/).
+
 ## `config uses imports/requires but could not be executed`
 
 The compiler could not evaluate `krate.config.ts` in-process (esbuild plus the

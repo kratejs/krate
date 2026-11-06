@@ -33,13 +33,11 @@
   "types": "./dist/index.d.ts",
   "files": [
     "bin/krate.js",
-    "dist",
-    "install.js"
+    "dist"
   ],
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "postinstall": "node ./install.js",
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {

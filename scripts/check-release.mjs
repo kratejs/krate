@@ -5,10 +5,12 @@
  * performance budgets are configured, diagnostic docs and codemods are
  * present, and the migration verification suite still exists.
  */
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { gunzipSync } from "node:zlib";
 import { platformManifest, platforms } from "./platform-package.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -130,6 +132,39 @@ for (const target of platforms) {
     fail(`dist-platform/${target.pkg}/package.json declares bin (breaks node_modules/.bin/krate on npm 10)`);
   }
 }
+
+// 8. The compiler must arrive executable. The mode comes from the packer, not
+// from the file on disk, so this packs each package with the pnpm that publishes
+// it. It runs under the repo root to pick up the pinned packageManager.
+function tarMode(tgz, name) {
+  const tar = gunzipSync(fs.readFileSync(tgz));
+  for (let at = 0; at + 512 <= tar.length && tar[at] !== 0; ) {
+    const entry = tar.toString("utf8", at, at + 100).replace(/\0.*$/, "");
+    const size = parseInt(tar.toString("utf8", at + 124, at + 136), 8);
+    if (entry === name) return parseInt(tar.toString("utf8", at + 100, at + 108), 8);
+    at += 512 + Math.ceil(size / 512) * 512;
+  }
+  return undefined;
+}
+const packRoot = path.join(root, "node_modules", ".cache", "krate-check-release");
+for (const target of platforms.filter((t) => t.os !== "win32")) {
+  const dir = path.join(packRoot, target.pkg);
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(path.join(dir, "bin"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "bin", "krate"), "binary");
+  fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify(platformManifest(target, coreVersion)));
+  const packed = spawnSync("pnpm", ["pack"], { cwd: dir, encoding: "utf8", shell: process.platform === "win32" });
+  const tgz = fs.readdirSync(dir).find((f) => f.endsWith(".tgz"));
+  if (packed.status !== 0 || !tgz) {
+    fail(`${target.pkg}: pnpm pack failed: ${packed.stderr || packed.stdout}`);
+    continue;
+  }
+  const mode = tarMode(path.join(dir, tgz), "package/bin/krate");
+  if (mode === undefined || (mode & 0o111) !== 0o111) {
+    fail(`${target.pkg}: bin/krate would be published as ${mode?.toString(8)}, so every install fails with EACCES`);
+  }
+}
+fs.rmSync(packRoot, { recursive: true, force: true });
 
 if (!ci.includes("check:release")) fail("CI does not run check:release");
 if (!release.includes("check:release")) fail("release workflow does not run check:release");

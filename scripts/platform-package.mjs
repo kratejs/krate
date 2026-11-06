@@ -30,6 +30,10 @@ export const platforms = [
  * node_modules/.bin/krate, the same path @krate/core links its own bin to, so
  * the install ends with no krate command at all. @krate/core finds the binary
  * by path (<pkg>/bin/krate), so nothing needs the link.
+ *
+ * Without `bin`, the binary needs publishConfig.executableFiles: pnpm packs every
+ * other file as 0644 whatever its mode on disk, and a binary with no exec bit
+ * fails with EACCES on every install outside Windows.
  */
 export function platformManifest(target, version) {
   return {
@@ -44,5 +48,6 @@ export function platformManifest(target, version) {
     bugs: { url: repo.bugs },
     keywords: ['krate', 'ssg', 'compiler', target.os, target.cpu],
     files: ['bin'],
+    publishConfig: { executableFiles: [`./bin/krate${target.ext}`] },
   };
 }
