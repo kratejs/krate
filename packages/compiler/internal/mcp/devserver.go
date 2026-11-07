@@ -420,11 +420,13 @@ func (s *Service) toolGetLogs(ctx context.Context, args map[string]any) (ToolRes
 	}
 	var since time.Time
 	if v := argString(args, "since"); v != "" {
-		t, err := time.Parse(time.RFC3339, v)
-		if err != nil {
-			return ErrorResult("since must be an RFC 3339 time, e.g. 2026-11-07T10:00:00Z"), nil
+		if d, err := time.ParseDuration(v); err == nil {
+			since = time.Now().Add(-d)
+		} else if t, err := time.Parse(time.RFC3339, v); err == nil {
+			since = t
+		} else {
+			return ErrorResult("since must be a duration such as 10m or 1h, or an RFC 3339 time such as 2026-11-07T10:00:00Z"), nil
 		}
-		since = t
 	}
 	lines, err := s.tailDevLog(2000)
 	if err != nil {
@@ -468,8 +470,16 @@ func (s *Service) toolGetLogs(ctx context.Context, args map[string]any) (ToolRes
 		"file":      ".krate/dev.log",
 		"returned":  len(kept),
 		"truncated": truncated || cut,
-		"lines":     strings.Split(text, "\n"),
+		"lines":     logLines(text),
 	})
+}
+
+// logLines splits text into lines; empty text has none.
+func logLines(text string) []string {
+	if text == "" {
+		return []string{}
+	}
+	return strings.Split(text, "\n")
 }
 
 func (s *Service) toolDevServer(ctx context.Context, args map[string]any) (ToolResult, *rpcError) {
@@ -592,14 +602,23 @@ func stopManaged(m *devManager) {
 	if m.cmd == nil || m.cmd.Process == nil {
 		return
 	}
-	execx.KillTree(m.cmd)
 	done := m.done
 	m.mu.Unlock()
+	defer m.mu.Lock()
+	// Ask first: the server stops its sidecars and removes its discovery record
+	// on a signal. Windows has no interrupt to send, so it goes straight to kill.
+	if m.cmd.Process.Signal(os.Interrupt) == nil {
+		select {
+		case <-done:
+			return
+		case <-time.After(3 * time.Second):
+		}
+	}
+	execx.KillTree(m.cmd)
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
 	}
-	m.mu.Lock()
 }
 
 // Close stops a dev server started by this service. Called when the MCP

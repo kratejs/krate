@@ -161,14 +161,14 @@ input schema, a description written for model tool selection, and bounded output
 | `apply_patch` | Apply a unified diff to one or many files atomically; returns a diff |
 | `batch_edit` | Apply structured create/replace/delete/move operations atomically |
 | `undo` | Undo the most recent transaction (or one by ID) |
-| `format_file` | Format a TypeScript/JavaScript source file; returns a diff |
+| `format_file` | Format a file with the project's prettier or biome; returns a diff |
 | `apply_fix` | Apply an explicit find/replace repair to a diagnostic finding |
 | `apply_safe_fixes` | Preview or apply conservative codemods, optionally filtered by codes and paths |
 | `list_files` | List project files (skips `node_modules`/`.git`/`dist`), with an optional `glob` |
 | `read_file` | Read any project file by path (text + language, or a binary marker) |
 | `create_file` | Create a new file (refuses to overwrite; parse-gated); returns a diff |
-| `delete_file` | Delete a file (files only); preview unless `apply` |
-| `move_file` | Move/rename a file; preview unless `apply` |
+| `delete_file` | Delete a file (files only) and warn about remaining importers; preview unless `apply` |
+| `move_file` | Move/rename a file and update the imports that point at it; preview unless `apply` |
 | `create_component` | Scaffold a component (`client`/`static`/`server`, optional CSS); returns a diff |
 | `create_content` | Create an entry in a content collection, validated against its schema; returns a diff |
 | `edit_content` | Edit a content entry (full replace, frontmatter rewrite, or find+replace); schema-checked |
@@ -192,7 +192,7 @@ at, not from a second build.
   and API sidecar failures from the last 15 minutes, `sinceMinutes` changes the
   window). Without a running dev server it runs a fresh build and reports build
   errors only, and says so. Use `kind` to pick one source.
-- **`get_logs`** reads `.krate/dev.log` with `lines`, `grep`, `level` and `since`.
+- **`get_logs`** reads `.krate/dev.log` with `lines`, `grep`, `level` and `since` (a duration such as `10m`, or an RFC 3339 time).
   Environment secrets and the absolute project path are removed.
 - **`dev_server`** starts, stops or restarts `krate dev` as a child of the MCP
   server. It is a dry-run until `apply: true`, it needs `"dev"` in `allowTasks`
@@ -483,8 +483,7 @@ Hosted health and metrics endpoints are available alongside `/mcp`:
   committed as one transaction.
 - **`undo`** restores the most recent applied transaction, or a transaction by
   ID. It refuses if affected files changed afterward unless `force: true`.
-- **`format_file`** formats TypeScript/JavaScript using the compiler printer.
-  Files containing TypeScript syntax the AST would drop are refused.
+- **`format_file`** runs the project's own prettier or biome. Krate has no formatter of its own. It loads project config, so it needs `"format"` in `allowTasks`.
 - **`edit_file`** edits the actual file. It takes a `route` (a page route like
   `/about`, or a project-relative path) plus one of two modes:
   - `content` - replace the entire file (creates the file when it does not

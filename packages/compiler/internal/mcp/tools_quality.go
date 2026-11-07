@@ -40,8 +40,10 @@ type auditFinding struct {
 	File     string `json:"file,omitempty"`
 	Line     int    `json:"line,omitempty"`
 	Col      int    `json:"col,omitempty"`
-	Message  string `json:"message"`
-	Hint     string `json:"hint,omitempty"`
+	// Approximate marks a position found by searching the source.
+	Approximate bool   `json:"approximate,omitempty"`
+	Message     string `json:"message"`
+	Hint        string `json:"hint,omitempty"`
 }
 
 // runChecks evaluates the quality gates, building first when there is no
@@ -80,6 +82,11 @@ func (s *Service) toolAuditPage(ctx context.Context, args map[string]any) (ToolR
 		return ErrorResult("severity must be one of: all, error, warning"), nil
 	}
 	route := argString(args, "route")
+	if route != "" {
+		if _, err := s.findPage(route); err != nil {
+			return ErrorResult(err.Error()), nil
+		}
+	}
 	reportProgress(ctx, 0, 1, "running quality checks")
 	findings, cfg, err := s.runChecks(ctx)
 	if err != nil {
@@ -88,6 +95,8 @@ func (s *Service) toolAuditPage(ctx context.Context, args map[string]any) (ToolR
 	reportProgress(ctx, 1, 1, "checks complete")
 
 	var kept []auditFinding
+	var matched []check.Finding
+	locate := s.newFindingLocator()
 	byCat := map[string]int{}
 	byRule := map[string]int{}
 	for _, f := range findings {
@@ -109,10 +118,17 @@ func (s *Service) toolAuditPage(ctx context.Context, args map[string]any) (ToolR
 		}
 		byCat[f.Category]++
 		byRule[f.Rule]++
+		matched = append(matched, f)
+		line, col, approx := f.Line, f.Col, false
+		file := filepath.ToSlash(f.File)
+		if line == 0 {
+			line, col, approx = locate.next(f.Rule, file)
+		}
 		kept = append(kept, auditFinding{Rule: f.Rule, Category: f.Category, Severity: sev, Route: f.Route,
-			File: filepath.ToSlash(f.File), Line: f.Line, Col: f.Col, Message: f.Message, Hint: f.Hint})
+			File: file, Line: line, Col: col, Approximate: approx, Message: f.Message, Hint: f.Hint})
 	}
-	errs, warns := check.Counts(findings)
+	// Counts follow the filters, so a page's audit reports that page.
+	errs, warns := check.Counts(matched)
 	page, next, rerr := paginate(kept, args, 30, 300)
 	if rerr != nil {
 		return ToolResult{}, rerr
@@ -170,6 +186,9 @@ func (s *Service) toolExplainDiagnostic(ctx context.Context, args map[string]any
 			if strings.HasPrefix(string(i.Code), code[:min(len(code), 4)]) && len(near) < 8 {
 				near = append(near, string(i.Code)+" "+i.Title)
 			}
+		}
+		if len(near) == 0 {
+			return ErrorResult("no registered diagnostic " + code + "; search with query, or see krate://docs/reference/diagnostics"), nil
 		}
 		return ErrorResult(fmt.Sprintf("no registered diagnostic %s. Codes in the same range: %s", code, strings.Join(near, "; "))), nil
 	}

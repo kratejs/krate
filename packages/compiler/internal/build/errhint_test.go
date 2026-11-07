@@ -96,3 +96,23 @@ export default function Page() { return null; }
 		}
 	}
 }
+
+// krate/content is virtual: with no collections the fix is config, not install.
+func TestContentImportWithoutCollectionsNamesTheConfig(t *testing.T) {
+	root := t.TempDir()
+	page := filepath.Join(root, "src", "pages", "index.tsx")
+	if err := os.MkdirAll(filepath.Dir(page), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	src := "import { getCollection } from \"krate/content\";\nexport default function P() { return <p>{getCollection(\"blog\").length}</p>; }\n"
+	if err := os.WriteFile(page, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.PagesDir = filepath.Dir(page)
+	cfg.OutDir = filepath.Join(root, "dist")
+	err := New(root, cfg).BuildAll()
+	if err == nil || !strings.Contains(err.Error(), "no content collections are configured") || strings.Contains(err.Error(), "pnpm add") {
+		t.Fatalf("err = %v", err)
+	}
+}

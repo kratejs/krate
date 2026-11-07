@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -59,10 +58,29 @@ func (s *Service) readPackageJSON(rel string) (*packageJSON, bool) {
 }
 
 func (s *Service) installedVersion(pkg string) string {
-	if p, ok := s.readPackageJSON(path.Join("node_modules", pkg, "package.json")); ok {
+	if p, ok := s.installedPackage(pkg); ok {
 		return p.Version
 	}
 	return ""
+}
+
+// installedPackage reads a dependency's manifest the way Node finds it, walking
+// up from the project: a workspace keeps packages in a parent node_modules, or
+// links them from outside the project. Only this manifest is read, so that does
+// not widen what the file tools can reach.
+func (s *Service) installedPackage(pkg string) (*packageJSON, bool) {
+	for dir := s.root; ; dir = filepath.Dir(dir) {
+		data, err := os.ReadFile(filepath.Join(dir, "node_modules", filepath.FromSlash(pkg), "package.json"))
+		if err == nil {
+			var p packageJSON
+			if json.Unmarshal(data, &p) == nil {
+				return &p, true
+			}
+		}
+		if filepath.Dir(dir) == dir {
+			return nil, false
+		}
+	}
 }
 
 func (s *Service) configFileName() string {
@@ -1037,7 +1055,7 @@ func (s *Service) toolCompatCheck(ctx context.Context, args map[string]any) (Too
 	var evidence []string
 	verdict, confidence := "unknown", "low"
 
-	pj, installed := s.readPackageJSON(path.Join("node_modules", pkg, "package.json"))
+	pj, installed := s.installedPackage(pkg)
 	if installed {
 		out["installed"] = pj.Version
 		info := map[string]any{"module": pj.Type == "module" || pj.Module != "", "hasExports": pj.Exports != nil}

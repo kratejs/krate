@@ -591,26 +591,38 @@ class KrateDev {
   }
 
   private captureRuntimeErrors(): void {
-    window.addEventListener('error', (e: ErrorEvent) => {
-      const stack = e.error?.stack || '';
-      const message = e.message || 'Unknown error';
-      this.report({
-        message,
-        stack,
-        url: e.filename,
-        line: e.lineno,
-        col: e.colno,
-        kind: 'error',
-      });
-      this.addRuntime('Runtime Error', message, stack);
+    window.addEventListener('error', (e) => this.onError(e));
+    window.addEventListener('unhandledrejection', (e) => this.onRejection(e));
+    // This bundle loads after the page script, so the page's first render ran
+    // before these listeners existed. The head buffers what happened until now.
+    const early = (window as any).__KRATE_EARLY_ERRORS__ as Event[] | undefined;
+    (window as any).__KRATE_EARLY_ERRORS__ = undefined;
+    for (const e of early ?? []) {
+      if (e.type === 'error') this.onError(e as ErrorEvent);
+      else this.onRejection(e as PromiseRejectionEvent);
+    }
+  }
+
+  private onError(e: ErrorEvent): void {
+    const stack = e.error?.stack || '';
+    const message = e.message || 'Unknown error';
+    this.report({
+      message,
+      stack,
+      url: e.filename,
+      line: e.lineno,
+      col: e.colno,
+      kind: 'error',
     });
-    window.addEventListener('unhandledrejection', (e: PromiseRejectionEvent) => {
-      const reason = e.reason;
-      const message = reason instanceof Error ? reason.message : String(reason);
-      const stack = reason instanceof Error ? reason.stack : '';
-      this.report({ message, stack, url: location.href, kind: 'unhandledrejection' });
-      this.addRuntime('Unhandled Promise Rejection', message, stack);
-    });
+    this.addRuntime('Runtime Error', message, stack);
+  }
+
+  private onRejection(e: PromiseRejectionEvent): void {
+    const reason = e.reason;
+    const message = reason instanceof Error ? reason.message : String(reason);
+    const stack = reason instanceof Error ? reason.stack : '';
+    this.report({ message, stack, url: location.href, kind: 'unhandledrejection' });
+    this.addRuntime('Unhandled Promise Rejection', message, stack);
   }
 
   private report(payload: DevClientError): void {

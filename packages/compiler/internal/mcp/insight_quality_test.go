@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -327,6 +328,11 @@ func TestBrowserToolsDriveARealBrowserWhenPlaywrightIsPresent(t *testing.T) {
 	m := mustOK(t, svc, "browser_eval", map[string]any{"route": "/", "expression": "document.querySelector('h1').textContent", "screenshot": true, "aria": true})
 	if m["evalResult"] != `"Hi"` || m["status"] != float64(200) {
 		t.Fatalf("browser_eval = %v", m)
+	}
+	// timeoutMs covers the expression, not only the navigation.
+	hung := mustOK(t, svc, "browser_eval", map[string]any{"route": "/", "expression": "new Promise(() => {})", "timeoutMs": 1500})
+	if !strings.Contains(fmt.Sprint(hung["evalError"]), "did not finish within 1500 ms") {
+		t.Errorf("hung expression = %v", hung)
 	}
 	if !strings.Contains(m["ariaSnapshot"].(string), "heading") {
 		t.Errorf("aria = %v", m["ariaSnapshot"])

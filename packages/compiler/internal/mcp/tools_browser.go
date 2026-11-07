@@ -68,7 +68,10 @@ if (!pw || !pw.chromium) { console.log('KRATE_RESULT ' + JSON.stringify({ missin
     });
     if (opts.expression) {
       try {
-        const v = await page.evaluate(opts.expression);
+        // A promise that never settles must not outlive timeoutMs.
+        let timer;
+        const expired = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('the expression did not finish within ' + opts.timeout + ' ms')), opts.timeout); });
+        const v = await Promise.race([page.evaluate(opts.expression), expired]).finally(() => clearTimeout(timer));
         let s = JSON.stringify(v === undefined ? null : v);
         if (s && s.length > 32768) { out.evalTruncated = true; s = s.slice(0, 32768); }
         out.evalResult = s;

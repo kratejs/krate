@@ -19,13 +19,21 @@ class FakeEventSource {
 }
 
 let overlay: typeof import('./dev-overlay');
+const beacons: Blob[] = [];
 
 // File-level setup: globals must exist BEFORE the overlay module auto-inits on
 // import, and the export is captured from the same module instance.
 beforeAll(async () => {
   (globalThis as any).EventSource = FakeEventSource;
   // Error reports must not reach the (absent) dev server from the test.
-  (navigator as any).sendBeacon = () => true;
+  (navigator as any).sendBeacon = (_url: string, body: Blob) => {
+    beacons.push(body);
+    return true;
+  };
+  // What the inline head script buffers before this bundle loads.
+  (window as any).__KRATE_EARLY_ERRORS__ = [
+    new ErrorEvent('error', { message: 'thrown during first render', error: new Error('thrown during first render') }),
+  ];
   (window as any).__KRATE_DEV__ = {
     sse: '/__krate/hotreload',
     errors: '/__krate/client-error',
@@ -42,6 +50,12 @@ function devRoot(): ShadowRoot | null {
 }
 
 describe('dev-overlay', () => {
+  it('reports errors thrown before the bundle loaded', async () => {
+    const sent = await Promise.all(beacons.map((b) => b.text()));
+    expect(sent.some((t) => t.includes('thrown during first render'))).toBe(true);
+    expect((window as any).__KRATE_EARLY_ERRORS__).toBeUndefined();
+  });
+
   it('mounts a shadow-root host with a toolbar', () => {
     const shadow = devRoot();
     expect(shadow).toBeTruthy();

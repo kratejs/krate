@@ -26,6 +26,17 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 - `KR8360` warns when a conditional renders the same component in both branches but the build
   cannot keep one instance: render-prop children, a differing `ref` or spread, a side-effecting
   test, a lazy component, or a wrapper element built by each branch.
+- MCP: `move_file` updates the imports that point at the file, and its own, in one undoable
+  transaction. `delete_file` warns about remaining importers.
+- MCP: `format_file` runs the project's prettier or biome, opted in with `"format"` in
+  `allowTasks`. It used the compiler's printer, which put a whole JSX page on one line.
+- MCP: checks that name an element report a source line, marked `approximate`, and diagnostic IDs
+  are unique. `get_diagnostics` and `audit_page` refuse an unknown route, and `audit_page` counts
+  follow its filters.
+- MCP: every tool scrubs the project path from its output, on Windows too.
+- MCP: `create_page` accepts catch-all routes, reports project-relative paths, and its templates
+  build. `browser_eval` honours `timeoutMs` for the expression. `dev_server` stops the server
+  gracefully. `get_logs` accepts `since: "10m"`. Installed versions are found in workspaces.
 - MCP: 28 new tools and 5 new prompts, for 60 tools and 13 prompts: live dev server state and
   errors, page and bundle explanations, project metadata, `env_check` (names only), audits,
   guided upgrades, and browser checks. `dev_server`, `typecheck`, `page_check` and
@@ -39,6 +50,11 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Fixed
 
+- Errors thrown during a page's first render reach the dev overlay and `/__krate/state`. The
+  overlay loads after the page script, so it missed them; the page head now buffers them.
+- Importing `krate/content` with no collections configured says so, instead of telling you to
+  install a package called `krate`.
+- Scaffolded projects include `@types/node`, so `process.env` in an API route typechecks.
 - `cond ? <A x /> : <A y />`, ternary chains and early returns of one type keep one instance of a
   stateful component and switch its props, so state, typed input, refs and mount effects survive
   the flip, as in React. Different `key`s still remount.
