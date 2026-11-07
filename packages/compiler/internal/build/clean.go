@@ -34,6 +34,9 @@ func Clean(root string, cfg *config.Config) (*CleanResult, error) {
 		cfg.OutDir,
 		filepath.Join(absRoot, ".krate", "cache"),
 	}
+	// Directories holding the user's work. An outDir that is, or contains, one
+	// of them (outDir "." or "src") would delete the project.
+	protected := []string{absRoot, cfg.PagesDir, cfg.PublicDir}
 
 	result := &CleanResult{}
 	for _, target := range targets {
@@ -48,6 +51,17 @@ func Clean(root string, cfg *config.Config) (*CleanResult, error) {
 
 		if !withinRoot(absRoot, abs) {
 			return nil, fmt.Errorf("refusing to clean %s: outside project root %s", abs, absRoot)
+		}
+		for _, keep := range protected {
+			if keep == "" {
+				continue
+			}
+			if !filepath.IsAbs(keep) {
+				keep = filepath.Join(absRoot, keep)
+			}
+			if withinRoot(abs, filepath.Clean(keep)) {
+				return nil, fmt.Errorf("refusing to clean %s: it is or contains %s, which holds your sources (check outDir and --out-dir)", abs, keep)
+			}
 		}
 
 		info, err := os.Stat(abs)
