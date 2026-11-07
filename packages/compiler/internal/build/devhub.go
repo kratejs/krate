@@ -2,6 +2,7 @@ package build
 
 import (
 	"sync"
+	"time"
 
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
 )
@@ -51,6 +52,12 @@ type DevHub struct {
 
 	restartOnce sync.Once
 	restart     chan struct{}
+
+	// clientErrs keeps the most recent browser errors and lastEventAt the time
+	// of the latest build event, for the /__krate/state endpoint (MCP).
+	clientErrs  []ClientErrorEntry
+	lastEventAt time.Time
+	rebuilds    int
 }
 
 // NewDevHub creates an empty hub.
@@ -106,8 +113,23 @@ func (h *DevHub) Publish(ev DevEvent) {
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if ev.Type == "client-error" && ev.ClientError != nil {
+		h.clientErrs = append(h.clientErrs, ClientErrorEntry{ClientError: *ev.ClientError, Time: time.Now()})
+		if len(h.clientErrs) > maxClientErrors {
+			h.clientErrs = append([]ClientErrorEntry(nil), h.clientErrs[len(h.clientErrs)-maxClientErrors:]...)
+		}
+		for ch := range h.subs {
+			select {
+			case ch <- ev:
+			default:
+			}
+		}
+		return
+	}
 	ev.BuildOK = len(ev.Diagnostics) == 0
 	h.last = &ev
+	h.lastEventAt = time.Now()
+	h.rebuilds++
 	for ch := range h.subs {
 		select {
 		case ch <- ev:

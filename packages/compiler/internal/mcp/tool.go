@@ -39,6 +39,9 @@ type Content struct {
 	Type     string `json:"type"`
 	Text     string `json:"text,omitempty"`
 	Resource any    `json:"resource,omitempty"`
+	// Data and MIMEType carry base64 media for image blocks.
+	Data     string `json:"data,omitempty"`
+	MIMEType string `json:"mimeType,omitempty"`
 }
 
 // TextContent builds a text content block.
