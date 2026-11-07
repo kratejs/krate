@@ -35,21 +35,12 @@ jobs:
           version: 11.9.0
           run_install: false
 
+      # Fails here, before any build, for a version npm cannot tag (1.0.0-1),
+      # and keeps latest from moving backwards for a patch on an older line.
       - name: Determine npm dist-tag
         id: tag
         shell: bash
-        run: |
-            VERSION="${GITHUB_REF_NAME#v}"
-            if [[ "$VERSION" == *"-"* ]]; then
-            # Takes everything after the first '-' and strips trailing dots/numbers
-            PRERELEASE_STR="${VERSION#*-}"
-            TAG_NAME="${PRERELEASE_STR%%.*}"
-            echo "dist_tag=${TAG_NAME:-beta}" >> $GITHUB_OUTPUT
-            echo "prerelease=true" >> $GITHUB_OUTPUT
-            else
-            echo "dist_tag=latest" >> $GITHUB_OUTPUT
-            echo "prerelease=false" >> $GITHUB_OUTPUT
-            fi
+        run: node scripts/release-tag.mjs "${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
       - name: Sync package versions
         run: node scripts/set-version.mjs "${GITHUB_REF_NAME#v}"
@@ -130,23 +121,26 @@ jobs:
       - name: Install the release from its tarballs
         run: node scripts/smoke-install.mjs
 
+      # Both steps skip a version that is already on npm, so a failed release
+      # can be fixed and the job re-run instead of needing a new version.
       - name: Publish platform packages
-        run: |
-          set -e
-          for pkg in core-win32-x64 core-win32-arm64 core-linux-x64 core-linux-x64-musl core-linux-arm64 core-darwin-x64 core-darwin-arm64; do
-            echo "Publishing @krate/$pkg with tag ${{ steps.tag.outputs.dist_tag }}..."
-            (cd "dist-platform/$pkg" && pnpm publish --access public --no-git-checks --tag "${{ steps.tag.outputs.dist_tag }}")
-          done
+        run: >-
+          node scripts/publish-packages.mjs "${{ steps.tag.outputs.dist_tag }}"
+          dist-platform/core-win32-x64 dist-platform/core-win32-arm64
+          dist-platform/core-linux-x64 dist-platform/core-linux-x64-musl
+          dist-platform/core-linux-arm64 dist-platform/core-darwin-x64
+          dist-platform/core-darwin-arm64
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
+      # @krate/core goes last: its optional dependencies and @krate/plugin must
+      # already exist when it is installable.
       - name: Publish npm packages
-        run: |
-          set -e
-          for dir in packages/runtime packages/components packages/plugin packages/ts-plugin packages/base-docs-theme packages/simple-docs-theme packages/create-krate-app packages/create-krate-docs packages/core; do
-            echo "Publishing $(basename "$dir") with tag ${{ steps.tag.outputs.dist_tag }}..."
-            (cd "$dir" && pnpm publish --access public --no-git-checks --tag "${{ steps.tag.outputs.dist_tag }}")
-          done
+        run: >-
+          node scripts/publish-packages.mjs "${{ steps.tag.outputs.dist_tag }}"
+          packages/runtime packages/components packages/plugin packages/ts-plugin
+          packages/base-docs-theme packages/simple-docs-theme
+          packages/create-krate-app packages/create-krate-docs packages/core
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 

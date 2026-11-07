@@ -180,8 +180,8 @@ jobs:
         env:
           KRATE_ONLY_PLATFORM: ${{ matrix.platform }}
 
-      - name: Test the smoke test helpers
-        run: node --test scripts/smoke-helpers.test.mjs
+      - name: Test the release scripts
+        run: node --test scripts/smoke-helpers.test.mjs scripts/release-scripts.test.mjs
 
       - name: Install and run the packages
         run: node scripts/smoke-install.mjs
