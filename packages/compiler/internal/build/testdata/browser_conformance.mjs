@@ -710,6 +710,23 @@ try {
   await page.click("#sx-switch");
   if ((await page.getAttribute("#sx-switch", "aria-checked")) !== "true") fail("shadcn switch did not toggle");
 
+  // Overlay triggers and contents written without a `value` open each other.
+  await go("/overlay-novalue/", "main");
+  for (const [trigger, probe] of [
+    ["Open dialog", "Dialog title"],
+    ["Open sheet", "Sheet title"],
+    ["Open popover", "Popover body"],
+    ["Open menu", "Menu item"],
+  ]) {
+    const target = page.getByText(probe, { exact: true }).first();
+    if (await target.isVisible()) fail(`${trigger}: content visible before opening`);
+    await page.getByText(trigger, { exact: true }).first().click();
+    await page.waitForTimeout(250);
+    if (!(await target.isVisible())) fail(`${trigger}: the overlay did not open without a value`);
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(250);
+  }
+
   // Decorators lowered by esbuild run in client code, with each module's
   // temporaries kept apart, and a tier decorator is gone from the output.
   await page.goto(baseURL + "/decorators/", { waitUntil: "networkidle" });

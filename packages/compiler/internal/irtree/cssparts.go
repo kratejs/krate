@@ -7,6 +7,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/csssignals"
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
+	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
 	"github.com/kratejs/krate/packages/compiler/internal/sigutil"
 )
 
@@ -400,6 +401,9 @@ func (b *builder) rewriteScopeSpread(el *ast.JSXElement) ast.Expr {
 				return wrapWithClassOnly([]ast.JSXChild{&ast.JSXElementChild{Element: clone}}, ref.scope.PanelWrapperClass("on", negated))
 			}
 			opt := b.scopeOption(arg, "")
+			if opt == "" && isUnsetPropValue(arg, b.localProps) {
+				opt = defaultPartOption
+			}
 			b.decoratePanel(clone, ref.scope, opt)
 			return wrapWithClassOnly([]ast.JSXChild{&ast.JSXElementChild{Element: clone}}, ref.scope.PanelWrapperClass(opt, false))
 		case "current":
@@ -439,6 +443,60 @@ func (b *builder) scopeOption(arg ast.Expr, fallback string) string {
 		}
 	}
 	return fallback
+}
+
+// defaultPartOption is the option a trigger and a panel share when the call
+// site gives neither a `value`: `<Dialog.Trigger>` and `<Dialog.Content>`
+// without values still open each other, as the single toggle of a Dialog
+// would. Before, the trigger fell back to "on" while the panel fell back to
+// the empty (closed) option, so the widget never opened.
+const defaultPartOption = "on"
+
+// isUnsetPropValue reports whether arg is `props.<name>` and the call site
+// binds no value for that prop.
+func isUnsetPropValue(arg ast.Expr, localProps map[string]jsvalue.Value) bool {
+	if ta, ok := arg.(*ast.TypeAssertion); ok {
+		return isUnsetPropValue(ta.Expr, localProps)
+	}
+	mem, ok := arg.(*ast.MemberExpr)
+	if !ok || mem.Computed {
+		return false
+	}
+	obj, ok1 := mem.Object.(*ast.Identifier)
+	prop, ok2 := mem.Property.(*ast.Identifier)
+	if !ok1 || !ok2 || obj.Name != "props" {
+		return false
+	}
+	v, bound := localProps[prop.Name]
+	return !bound || v.Kind() == jsvalue.KindUndefined
+}
+
+// partHelpers reports which scope helpers a compound part's body feeds its
+// `value` prop to: "trigger" (`scope.trigger(props.value)`) and/or "panel".
+func partHelpers(fn *ast.FnDecl) (trigger, panel bool) {
+	if fn == nil {
+		return false, false
+	}
+	WalkAST(fn.Body, func(n any) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		mem, ok := call.Callee.(*ast.MemberExpr)
+		if !ok || mem.Computed || len(call.Args) != 1 || !isUnsetPropValue(call.Args[0], nil) {
+			return true
+		}
+		if prop, ok := mem.Property.(*ast.Identifier); ok {
+			switch prop.Name {
+			case "trigger":
+				trigger = true
+			case "panel":
+				panel = true
+			}
+		}
+		return true
+	})
+	return trigger, panel
 }
 
 // literalBoolIsFalse reports whether an expression is the literal `false`.
@@ -564,6 +622,8 @@ func (b *builder) collectPartValues(root *ast.JSXElement) []string {
 		}
 	}
 	reported := make(map[*ast.JSXElement]bool)
+	var defaulted []defaultedPart
+	var explicit partCounts
 	var walkChildren func([]ast.JSXChild, int)
 	var walkExpr func(ast.Expr, int)
 	walkEl := func(el *ast.JSXElement, depth int) {
@@ -572,10 +632,25 @@ func (b *builder) collectPartValues(root *ast.JSXElement) []string {
 		}
 		name := el.Opening.Name
 		if len(name) > 0 && name[0] >= 'A' && name[0] <= 'Z' {
+			if hasAttr(el, "value") && name != rootName && strings.HasPrefix(name, rootName) {
+				if trig, pan := partHelpers(b.functions[name]); trig || pan {
+					if trig {
+						explicit.trigger++
+					}
+					if pan {
+						explicit.panel++
+					}
+				}
+			}
 			if v, ok := literalAttr(el, "value"); ok {
 				add(v)
 			} else if v, ok := numberAttr(el, "value"); ok && depth > 0 {
 				add(v)
+			} else if trig, pan := partHelpers(b.functions[name]); !hasAttr(el, "value") && name != rootName && strings.HasPrefix(name, rootName) && (trig || pan) {
+				// A trigger or panel written without a value (see
+				// defaultPartOption).
+				add(defaultPartOption)
+				defaulted = append(defaulted, defaultedPart{el: el, name: name, trigger: trig, panel: pan})
 			} else if hasAttr(el, "value") && strings.HasPrefix(name, rootName) && name != rootName && !reported[el] {
 				reported[el] = true
 				d := b.diagAt(el.Position, diag.SeverityWarning,
@@ -644,7 +719,51 @@ func (b *builder) collectPartValues(root *ast.JSXElement) []string {
 		}
 	}
 	walkChildren(root.Children, 0)
+	b.warnUnpairedDefaultParts(rootName, defaulted, explicit)
 	return options
+}
+
+// defaultedPart is a trigger or panel part written without a `value`.
+type defaultedPart struct {
+	el      *ast.JSXElement
+	name    string
+	trigger bool
+	panel   bool
+}
+
+// partCounts counts the triggers and panels written with a value.
+type partCounts struct{ trigger, panel int }
+
+// warnUnpairedDefaultParts reports value-less parts that nothing answers: a
+// trigger without a value only opens panels without one, so when the same
+// root has no value-less panel the trigger never opens anything. A value-less
+// panel with no value-less trigger is only unreachable when the root has
+// triggers at all (a controlled dialog with no trigger is opened from code).
+func (b *builder) warnUnpairedDefaultParts(rootName string, parts []defaultedPart, explicit partCounts) {
+	var triggers, panels int
+	for _, p := range parts {
+		if p.trigger {
+			triggers++
+		}
+		if p.panel {
+			panels++
+		}
+	}
+	for _, p := range parts {
+		var missing string
+		switch {
+		case p.trigger && panels == 0:
+			missing = "content without a value"
+		case p.panel && triggers == 0 && explicit.trigger > 0:
+			missing = "trigger without a value"
+		default:
+			continue
+		}
+		d := b.diagAt(p.el.Position, diag.SeverityWarning,
+			"<"+p.name+"> has no value, and <"+rootName+"> has no "+missing+" to pair it with, so it will never open or show anything",
+			"give the trigger and its content the same value, for example `value=\"main\"` on both, or leave the value off both")
+		b.warnings = append(b.warnings, d.WithCode(diag.CodeScopePartUnpaired))
+	}
 }
 
 // numberAttr returns the text of a numeric-literal attribute.

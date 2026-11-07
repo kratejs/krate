@@ -640,6 +640,12 @@ The state of a CSS signal lives in the page (hidden inputs and :has() selectors)
 
 The build empties outDir before it writes the site, and `krate clean` deletes it. An outDir that is, or contains, the project root, the pages directory or the public directory (`outDir: ".."`, `"."`, `"src"`) would delete the project's own files, so the build stops before anything is removed. Point outDir at a dedicated directory such as `dist`; a directory outside the project that holds none of your sources, such as `../site-dist`, is fine. Setting KRATE_ALLOW_UNSAFE_OUTDIR=1 skips this check.
 
+### KR8351
+
+**Trigger and content do not share a value**
+
+`Dialog`, `Sheet`, `Popover`, `DropdownMenu` and the other widgets built on a CSS-signal scope connect a trigger to its content by `value`: `<Dialog.Trigger value="a">` opens `<Dialog.Content value="a">`. A trigger and a content that both leave `value` off are paired with each other (the value is `on`). This one has no value, but the widget has no part without a value to answer it (every content has a value, or every trigger does), so it would never open or show anything. Give the trigger and the content the same `value`, or remove it from both.
+
 ### KR8601
 
 **Unsupported page segment export value**

@@ -2,6 +2,7 @@ package build
 
 import (
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -32,6 +33,80 @@ func TestDynamicRoutePageWithHydratingChild(t *testing.T) {
 			}
 			if strings.Contains(logged, "cannot evaluate") {
 				t.Errorf("unexpected build-time evaluation error:\n%s", logged)
+			}
+		})
+	}
+}
+
+// A compound widget in the shape of @krate/components' Dialog: a CSS group
+// scope provided through context, with Trigger and Content parts that hand
+// their `value` prop to the scope.
+const compoundWidgetSrc = `import { createScope, createCSSGroup } from '@krate/runtime';
+const Ctx = createScope<string | null>();
+export function Dialog(props) {
+  const open = createCSSGroup<string>(null, { as: 'dialog' });
+  return <Ctx.Provider value={open}><div class="dlg">{props.children}</div></Ctx.Provider>;
+}
+export function DialogTrigger(props) {
+  const open = Ctx.use();
+  return <button type="button" {...open.trigger(props.value)}>{props.children}</button>;
+}
+export function DialogContent(props) {
+  const open = Ctx.use();
+  return <div role="dialog" {...open.panel(props.value)}>{props.children}</div>;
+}
+Dialog.Trigger = DialogTrigger;
+Dialog.Content = DialogContent;
+`
+
+func buildWidgetPage(t *testing.T, body string) (html, logged string) {
+	t.Helper()
+	return buildPlain(t, map[string]string{
+		"src/ui/dialog.tsx":   compoundWidgetSrc,
+		"src/pages/index.tsx": "import { Dialog } from '../ui/dialog';\nexport default function P() { return <main>" + body + "</main>; }\n",
+	})
+}
+
+// A trigger and a content written without `value` open each other. Before,
+// the trigger pointed at option "on" and the content at the empty (closed)
+// option, so nothing ever opened and nothing said so.
+func TestScopePartsWithoutValueArePaired(t *testing.T) {
+	html, logged := buildWidgetPage(t, `<Dialog><Dialog.Trigger>Open</Dialog.Trigger><Dialog.Content>Body</Dialog.Content></Dialog>`)
+	trigger := regexp.MustCompile(`<label[^>]*for=([^ >]+)[^>]*>Open</label>`).FindStringSubmatch(html)
+	if trigger == nil {
+		t.Fatalf("no trigger label in:\n%s", rootOf(t, html))
+	}
+	if !strings.Contains(html, `id=`+trigger[1]) || !strings.HasSuffix(trigger[1], "-on") {
+		t.Errorf("the trigger does not point at an option input of its own: for=%s\n%s", trigger[1], rootOf(t, html))
+	}
+	if !regexp.MustCompile(`class=krc\d+-p-on><div role=dialog`).MatchString(html) {
+		t.Errorf("the content is not wrapped for option on:\n%s", rootOf(t, html))
+	}
+	if strings.Contains(logged, "KR8351") {
+		t.Errorf("a matched pair must not warn:\n%s", logged)
+	}
+}
+
+// Parts with explicit values and a controlled content with no trigger keep
+// working without a warning; a trigger nothing answers is reported.
+func TestScopePartPairingDiagnostics(t *testing.T) {
+	cases := []struct {
+		name, body string
+		wantWarn   bool
+	}{
+		{"explicit values", `<Dialog><Dialog.Trigger value="a">Open</Dialog.Trigger><Dialog.Content value="a">Body</Dialog.Content></Dialog>`, false},
+		{"content only (opened from code)", `<Dialog><Dialog.Content>Body</Dialog.Content></Dialog>`, false},
+		{"trigger without value, content with value", `<Dialog><Dialog.Trigger>Open</Dialog.Trigger><Dialog.Content value="c">Body</Dialog.Content></Dialog>`, true},
+		{"content without value, trigger with value", `<Dialog><Dialog.Trigger value="c">Open</Dialog.Trigger><Dialog.Content>Body</Dialog.Content></Dialog>`, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, logged := buildWidgetPage(t, c.body)
+			if got := strings.Contains(logged, "KR8351"); got != c.wantWarn {
+				t.Errorf("KR8351 reported = %v, want %v:\n%s", got, c.wantWarn, logged)
+			}
+			if c.wantWarn && !strings.Contains(logged, "give the trigger and its content the same value") {
+				t.Errorf("the warning has no fix hint:\n%s", logged)
 			}
 		})
 	}
