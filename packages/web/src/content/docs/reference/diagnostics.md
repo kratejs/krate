@@ -674,7 +674,7 @@ An `<Image>` without an alt attribute is announced by screen readers by its file
 
 **Content collection is shipped to the browser**
 
-A `getCollection("name")` chain is normally evaluated while the site is built and only its result is rendered. When the chain depends on a value that only exists in the browser (a signal, an event), the collection has to be evaluated there, so its entries are copied into the page script. Krate ships only the fields the page mentions (the body and rendered html only when referenced), but every entry in the collection, drafts included, is still included. Filter with build-time values, or compute the list on the server. This is a warning.
+A `getCollection("name")` chain is normally evaluated while the site is built and only its result is rendered. When the chain depends on a value that only exists in the browser (a signal, an event), the collection has to be evaluated there, so its entries are copied into the page script. The warning names how many entries and about how many bytes are shipped. Krate ships only the fields the page mentions (the body and rendered html only when referenced), but every entry in the collection, drafts included, is still included. Filter with build-time values, or compute the list on the server. A lookup keyed by the route param of a `[slug]` page folds to that page's entry, whether it is written inline, through a `const posts = getCollection(...)`, with the params destructured, or in a module-level helper that only returns the chain; the fallback page of the route carries only the entries that have no generated page. This is a warning.
 
 ### KR8820
 

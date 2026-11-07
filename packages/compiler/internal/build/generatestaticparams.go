@@ -420,7 +420,7 @@ func (b *Builder) resolveStaticParamsPages(pages []string) ([]staticParamsPage, 
 		go func(i int) {
 			defer wg.Done()
 			defer pool.release()
-			results[i] = b.resolveStaticParamsPage(dynamic[i])
+			results[i] = b.resolveStaticParamsPageOnce(dynamic[i])
 		}(i)
 	}
 	wg.Wait()
@@ -440,6 +440,21 @@ func (b *Builder) resolveStaticParamsPages(pages []string) ([]staticParamsPage, 
 	}
 
 	return expanded, nil
+}
+
+type gspOnce struct {
+	once sync.Once
+	res  staticParamsResolution
+}
+
+// resolveStaticParamsPageOnce is resolveStaticParamsPage memoized for the
+// current build, so the template pass and the expansion pass of one route agree
+// on the params and generateStaticParams runs once.
+func (b *Builder) resolveStaticParamsPageOnce(page string) staticParamsResolution {
+	v, _ := b.gspMemo.LoadOrStore(page, &gspOnce{})
+	m := v.(*gspOnce)
+	m.once.Do(func() { m.res = b.resolveStaticParamsPage(page) })
+	return m.res
 }
 
 // resolveStaticParamsPage bundles one dynamic route and expands its concrete
@@ -680,6 +695,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	// getCollection so `[slug].tsx` pages can look up the matching entry at
 	// build time.
 	substituteParamBindings(entryModule.Program, spp.Params)
+	b.paramBindings.Store(entryModule.Program, paramPatternBindings(entryModule.Program, spp.Params))
 	b.InlineContent(entryModule.Program)
 	pageLang := detectPageLang(entryModule.Program)
 
@@ -870,6 +886,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	dceJS = append(dceJS, b.clientChunkSources(clientBoundaries)...)
 	if needsHydrate {
 		hydrationJS = renderer.GenerateNewHydrationJS(emitResult)
+		b.warnShippedCollections(spp.PagePath, entryModule.Program, hydrationJS, 2)
 		dceJS = append(dceJS, hydrationJS)
 		var lazyErr error
 		if hydrationJS, lazyErr = b.writeLazyChunks(hydrationJS, emitResult.LazyChunks, pageDir, spp.OutPath); lazyErr != nil {
