@@ -61,7 +61,11 @@ For a documentation site, use `create-krate-docs` instead.
 
 ## `krate build`
 
-Builds the site into `outDir` (default `dist`).
+Builds the site into `outDir` (default `dist`). The build empties `outDir` first,
+so it stops with `KR8350`, before deleting anything, when `outDir` is, or
+contains, the project root, `pagesDir` or `publicDir` (for example `outDir: ".."`
+or `"."`). A directory outside the project that holds none of those, such as
+`../site-dist`, is fine.
 
 ```sh
 krate build
@@ -355,7 +359,7 @@ krate clean
 
 `krate clean` refuses to run when `outDir` is, or contains, the project root,
 `pagesDir` or `publicDir` (for example `outDir: "."`), so a misconfigured
-output directory cannot delete your sources.
+output directory cannot delete your sources. `krate build` applies the same check.
 
 ## `krate go:init`
 

@@ -674,6 +674,59 @@ try {
     if (nojsFeedback.status() !== 303 || !nojsFeedbackURL.endsWith("/react-actions/")) fail(`no-JS server action post: ${JSON.stringify(actions.nojs)}`);
   }
 
+  // shadcn-style Radix components (`import { Dialog as DialogPrimitive } from
+  // "radix-ui"` wrapped in `function Dialog`): several on one page, server
+  // rendered, then live in the browser.
+  await page.goto(baseURL + "/shadcn-radix/", { waitUntil: "domcontentloaded" });
+  const shadcnSSR = await page.evaluate(() => ({
+    islands: document.querySelectorAll("[data-krate-island-ssr]").length,
+    trigger: !!document.querySelector("#sx-dialog"),
+    switch: !!document.querySelector("#sx-switch[role=switch]"),
+    checkbox: !!document.querySelector("#sx-checkbox[role=checkbox]"),
+  }));
+  if (!shadcnSSR.islands || !shadcnSSR.trigger || !shadcnSSR.switch || !shadcnSSR.checkbox) {
+    fail(`shadcn page was not server rendered: ${JSON.stringify(shadcnSSR)}`);
+  }
+  await page.waitForFunction(
+    () => Object.keys(globalThis.__krate_island_hydration || {}).length >= 4,
+    { timeout: 8000 },
+  );
+  await page.waitForTimeout(500);
+  await page.click("#sx-dialog");
+  await page.waitForSelector("[role=dialog]", { timeout: 4000 }).catch(() => {});
+  const dialogOpen = (await page.locator("[role=dialog]").count()) > 0;
+  if (!dialogOpen) fail("shadcn dialog did not open");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+  if ((await page.locator("[role=dialog]").count()) !== 0) fail("shadcn dialog did not close");
+  await page.click("#sx-tab-b");
+  const panel = await page.locator("[role=tabpanel]:visible").first().innerText();
+  if (panel.trim() !== "Panel B") fail(`shadcn tabs did not switch: ${panel}`);
+  await page.click("#sx-accordion");
+  await page.waitForTimeout(300);
+  if (!(await page.locator("text=Answer text").first().isVisible().catch(() => false))) fail("shadcn accordion did not open");
+  await page.click("#sx-checkbox");
+  if ((await page.getAttribute("#sx-checkbox", "aria-checked")) !== "true") fail("shadcn checkbox did not check");
+  await page.click("#sx-switch");
+  if ((await page.getAttribute("#sx-switch", "aria-checked")) !== "true") fail("shadcn switch did not toggle");
+
+  // Overlay triggers and contents written without a `value` open each other.
+  await go("/overlay-novalue/", "main");
+  for (const [trigger, probe] of [
+    ["Open dialog", "Dialog title"],
+    ["Open sheet", "Sheet title"],
+    ["Open popover", "Popover body"],
+    ["Open menu", "Menu item"],
+  ]) {
+    const target = page.getByText(probe, { exact: true }).first();
+    if (await target.isVisible()) fail(`${trigger}: content visible before opening`);
+    await page.getByText(trigger, { exact: true }).first().click();
+    await page.waitForTimeout(250);
+    if (!(await target.isVisible())) fail(`${trigger}: the overlay did not open without a value`);
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(250);
+  }
+
   // Decorators lowered by esbuild run in client code, with each module's
   // temporaries kept apart, and a tier decorator is gone from the output.
   await page.goto(baseURL + "/decorators/", { waitUntil: "networkidle" });

@@ -362,7 +362,7 @@ func (b *builder) buildJSXSlot(el *ast.JSXElement, parentID string) []SlotNode {
 	}
 	// Built-in <Slot> (shadcn `asChild`): merge the Slot's props onto its single
 	// child element.
-	if el.Opening != nil && el.Opening.Name == "Slot" {
+	if el.Opening != nil && (el.Opening.Name == "Slot" || el.Opening.Name == "Slot.Root" || el.Opening.Name == "Slot.Slot") {
 		return b.buildSlotSlots(el, parentID)
 	}
 	// CSS interception. When the component currently being walked declares a

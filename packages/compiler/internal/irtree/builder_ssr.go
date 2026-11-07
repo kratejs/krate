@@ -565,6 +565,18 @@ func IsHTMLTagName(s string) bool {
 	return true
 }
 
+// SlotMemberTag returns "Slot" for `Slot.Root` or `Slot.Slot`, the umbrella
+// radix-ui spelling of the asChild primitive (the compiler binds it to Krate's
+// Slot, see bundler.rewriteRadixSlotImport), and "" for any other member.
+func SlotMemberTag(e *ast.MemberExpr) string {
+	obj, ok1 := e.Object.(*ast.Identifier)
+	prop, ok2 := e.Property.(*ast.Identifier)
+	if ok1 && ok2 && !e.Computed && obj.Name == "Slot" && (prop.Name == "Root" || prop.Name == "Slot") {
+		return "Slot"
+	}
+	return ""
+}
+
 // foldTagExpr resolves a tag expression to a concrete tag name when it is a
 // literal tag string, a conditional whose test folds, or any expression whose
 // value folds to a tag string. Slot/forwardRef-style wrappers fold to
@@ -599,6 +611,10 @@ func (b *builder) foldTagExpr(expr ast.Expr) string {
 			return b.foldTagExpr(e.Consequent)
 		}
 		return b.foldTagExpr(e.Alternate)
+	case *ast.MemberExpr:
+		if tag := SlotMemberTag(e); tag != "" {
+			return tag
+		}
 	case *ast.TypeAssertion:
 		return b.foldTagExpr(e.Expr)
 	case *ast.ParenExpr:

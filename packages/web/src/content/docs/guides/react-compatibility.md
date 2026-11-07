@@ -824,8 +824,9 @@ time) cannot reorder, so they render statically and are never warned about.
 ## shadcn/ui
 
 shadcn/ui copies component source into your project, so its components compile
-like any other Krate source -- no config, no islands. The patterns shadcn relies
-on are handled by the compiler:
+like any other Krate source -- no config. Components that wrap a Radix primitive
+run as Preact islands (see [Using shadcn/ui with Krate](#using-shadcnui-with-krate)).
+The patterns shadcn relies on are handled by the compiler:
 
 - **`cva` (class-variance-authority)** -- a literal `const x = cva(base, config)`
   and calls like `x({ variant, size })` fold to a static class string at build
@@ -839,6 +840,117 @@ on are handled by the compiler:
 - **`asChild` / `Slot`** -- a `<Slot>` (or a tag aliased to it) renders its single
   child element with the Slot's props (including `className`) merged onto it.
 - **Attributes** -- `data-*`, `aria-*`, and camelCase aliases pass through.
+
+### Using shadcn/ui with Krate
+
+`npx shadcn@latest init` does not detect Krate, so set the project up by hand
+once, then `npx shadcn@latest add button dialog tabs ...` works as usual: it
+only writes files into `src/components/ui` and installs packages.
+
+1. **Install the dependencies** the generated components import:
+
+   ```sh
+   pnpm add class-variance-authority clsx tailwind-merge lucide-react radix-ui preact
+   ```
+
+   `preact` is required as soon as one component is built on Radix (see below),
+   and it must be Preact 11 or newer: current shadcn components pass `ref` as an
+   ordinary prop, as React 19 does, and Preact 10 does not deliver it to function
+   components (a Dialog fails when it opens). You do not need
+   `preact-render-to-string`; Krate bundles its own.
+
+2. **Write `components.json`** in the project root (the `new-york` style, no RSC,
+   Tailwind CSS variables, and aliases that match your `tsconfig.json` paths):
+
+   ```json
+   {
+     "$schema": "https://ui.shadcn.com/schema.json",
+     "style": "new-york",
+     "rsc": false,
+     "tsx": true,
+     "tailwind": { "config": "", "css": "src/styles/globals.css", "baseColor": "neutral", "cssVariables": true, "prefix": "" },
+     "iconLibrary": "lucide",
+     "aliases": { "components": "@/components", "utils": "@/lib/utils", "ui": "@/components/ui", "lib": "@/lib", "hooks": "@/hooks" }
+   }
+   ```
+
+   `tsconfig.json` needs `"paths": { "@/*": ["./src/*"] }`, which the app
+   template already has.
+
+3. **Create the stylesheet** `src/styles/globals.css`: Tailwind, the theme
+   variables, and an `@theme inline` block that maps them to Tailwind colors, so
+   utilities such as `bg-primary` and `text-muted-foreground` exist:
+
+   ```css
+   @import "tailwindcss";
+
+   :root {
+     --background: oklch(1 0 0);
+     --foreground: oklch(0.145 0 0);
+     --primary: oklch(0.205 0 0);
+     --primary-foreground: oklch(0.985 0 0);
+     --muted-foreground: oklch(0.556 0 0);
+     --border: oklch(0.922 0 0);
+     --ring: oklch(0.708 0 0);
+     --radius: 0.625rem;
+   }
+
+   @theme inline {
+     --color-background: var(--background);
+     --color-foreground: var(--foreground);
+     --color-primary: var(--primary);
+     --color-primary-foreground: var(--primary-foreground);
+     --color-muted-foreground: var(--muted-foreground);
+     --color-border: var(--border);
+     --color-ring: var(--ring);
+     --radius-md: calc(var(--radius) - 2px);
+     --radius-lg: var(--radius);
+   }
+   ```
+
+   Copy the full variable list (accent, popover, card, destructive, ...) from
+   the shadcn theming page for the components you add, and import the file once
+   from your layout or page: `import "../styles/globals.css"`.
+
+4. **Create `src/lib/utils.ts`**, the `cn` helper every component imports:
+
+   ```ts
+   import { clsx, type ClassValue } from "clsx";
+   import { twMerge } from "tailwind-merge";
+
+   export function cn(...inputs: ClassValue[]) {
+     return twMerge(clsx(inputs));
+   }
+   ```
+
+**What runs where.** Components with no Radix primitive (`Button`, `Card`,
+`Badge`, `Input`, `Textarea`, `Table`, ...) compile like any other Krate source
+and ship no JavaScript. `asChild` works for them too: `import { Slot } from
+"radix-ui"` (and `@radix-ui/react-slot`) is Krate's own Slot.
+
+Components built on a Radix primitive (`Dialog`, `DropdownMenu`, `Tabs`,
+`Accordion`, `Select`, `Tooltip`, `Checkbox`, `Switch`, `Popover`, ...) run as
+**Preact islands**. A file that renders a component of a React package such as
+`radix-ui` or `lucide-react` as a tag is bundled for Preact, and each outermost
+use on a page, for example one `<Dialog>...</Dialog>` with everything inside it,
+becomes one island. Krate renders the island on the server when it can, so the
+trigger button is in the HTML before the island loads, and the island hydrates
+in the browser. A page that has islands loads Preact once for all of them; a
+page without any loads none. Two or more Radix-based components can share a page.
+
+- A name like `Dialog` can be both your wrapper and a Radix export
+  (`import { Dialog as DialogPrimitive } from "radix-ui"` inside `function
+  Dialog`). That is how the generated files are written, and it is fine.
+- Provider components such as `TooltipProvider` must contain the components that
+  need them in the same page tree: put `<TooltipProvider>` around the
+  `<Tooltip>` elements you render. A Radix component rendered without its
+  provider reports it in the build output (`KR8008`, the island stays
+  client-only) and fails in the browser.
+- If the build prints `KR8008` for an island, the message names the cause; it
+  says Preact is missing only when it is.
+- Known issue: with `radix-ui` 1.8 on Preact 11.2, a `Tooltip` closes again right
+  after it opens. Dialog, DropdownMenu, Tabs, Accordion, Select, Checkbox and
+  Switch work.
 
 ## Compiled React packages (islands)
 

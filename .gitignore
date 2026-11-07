@@ -66,3 +66,5 @@ Thumbs.db
 .fingerprint/
 packages/compiler/third_party/*/target/
 .opencode/
+# Preact 11 fixture for the island tests
+!packages/compiler/internal/build/testdata/preact11/**/dist/

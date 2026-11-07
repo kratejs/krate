@@ -154,6 +154,25 @@ describe('hydration bootstrap', () => {
     expect(tbody.textContent).toBe('off7');
   });
 
+  it('renders bigint, and primitives inside arrays, as text in a content slot', async () => {
+    document.body.innerHTML = '<div id="root"><p><!--k:v-->0<!--/k:v--></p></div>';
+    new Function(loadBootstrap())();
+    const w = window as any;
+    const [val, setVal] = createSignal<unknown>(5n / 2n);
+    w.kbindContent('v', () => val());
+    const p = document.querySelector('p')!;
+    expect(w.__krateErrs).toEqual([]);
+    await tick();
+    expect(p.textContent).toBe('2');
+    setVal(['a', 3, 7n, null, false]);
+    await tick();
+    expect(w.__krateErrs).toEqual([]);
+    expect(p.textContent).toBe('a37');
+    setVal(12345678901234567890n);
+    await tick();
+    expect(p.textContent).toBe('12345678901234567890');
+  });
+
   it('finds nodes of a branch swapped out before its binding ran', async () => {
     document.body.innerHTML =
       '<div id="root"><p><!--k:c--><button data-k="k:b">ssr</button><!--/k:c--></p>' +

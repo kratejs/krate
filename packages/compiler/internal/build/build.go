@@ -804,11 +804,13 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 	return results, nil
 }
 
-// guardOutDir refuses truly destructive output directories so the build's output
-// wipe can never delete the user's sources: a filesystem root or an outDir equal
-// to the project root are hard errors. An outDir that merely *contains* the
-// project root (e.g. a monorepo parent) is allowed but warned about. Set
-// KRATE_ALLOW_UNSAFE_OUTDIR=1 to bypass the check entirely.
+// guardOutDir refuses output directories the build's output wipe would turn
+// into data loss: a filesystem root, or any directory that is or contains the
+// project root, the pages directory or the public directory (outDir ".." or
+// "src"). It runs before anything is deleted, and shares its check with
+// `krate clean`. An outDir outside the project that holds none of those, such
+// as "../site-dist", is allowed. Set KRATE_ALLOW_UNSAFE_OUTDIR=1 to bypass the
+// check entirely.
 func (b *Builder) guardOutDir() error {
 	if os.Getenv("KRATE_ALLOW_UNSAFE_OUTDIR") != "" {
 		return nil
@@ -821,11 +823,8 @@ func (b *Builder) guardOutDir() error {
 	if filepath.Dir(outAbs) == outAbs {
 		return fmt.Errorf("refusing to build: outDir %s is a filesystem root (set KRATE_ALLOW_UNSAFE_OUTDIR=1 to override)", outAbs)
 	}
-	if outAbs == rootAbs {
-		return fmt.Errorf("refusing to build: outDir equals the project root (%s)", outAbs)
-	}
-	if fsutil.WithinDir(outAbs, rootAbs) {
-		fmt.Fprintf(os.Stderr, "  %s! outDir %s contains the project root; the build will wipe it%s\n", cYellow, outAbs, cReset)
+	if keep := outDirHoldsSources(rootAbs, filepath.Clean(outAbs), b.Cfg); keep != "" {
+		return fmt.Errorf("[%s] refusing to build: outDir %s is or contains %s, which holds your sources, and the build empties outDir first\n  hint: set outDir to a dedicated directory such as \"dist\" (or one outside the project, such as \"../site-dist\"); KRATE_ALLOW_UNSAFE_OUTDIR=1 overrides this check", diag.CodeUnsafeOutDir, outAbs, keep)
 	}
 	return nil
 }
