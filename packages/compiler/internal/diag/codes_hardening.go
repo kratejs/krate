@@ -7,6 +7,9 @@ const (
 	// CodeScopePartUnpaired: a trigger or content of a CSS-signal widget
 	// whose value no counterpart answers.
 	CodeScopePartUnpaired Code = "KR8351"
+	// CodeBuildTimeUnknown: a value a build-time rendered component needs but
+	// the build cannot determine.
+	CodeBuildTimeUnknown Code = "KR8352"
 )
 
 func init() {
@@ -30,6 +33,18 @@ func init() {
 				"with each other (the value is `on`). This one has no value, but the widget has no part without a " +
 				"value to answer it (every content has a value, or every trigger does), so it would never open or " +
 				"show anything. Give the trigger and the content the same `value`, or remove it from both.",
+		},
+		CodeInfo{
+			Code:  CodeBuildTimeUnknown,
+			Title: "Value needed at build time is unknown",
+			Explanation: "A component without state (no createSignal, useState or other hook that holds state) is " +
+				"rendered to static HTML while the site is built, so every value it renders has to be known " +
+				"then: a prop, a local variable, or a module constant. This expression is none of those, for " +
+				"example it names an identifier that is not defined where the component renders (`unresolved " +
+				"identifier x`), reads the clock or the browser, or calls a function the build cannot run. There " +
+				"is no run time to fall back on, so the build fails instead of printing a guess. Define or import " +
+				"the name, pass the value as a prop, or give the component state so it hydrates in the browser. " +
+				"A value that differs per request belongs in a `*.runtime.tsx` component.",
 		},
 	)
 }

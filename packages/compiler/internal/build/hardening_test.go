@@ -111,3 +111,23 @@ func TestScopePartPairingDiagnostics(t *testing.T) {
 		})
 	}
 }
+
+// A value a signal-less component needs at build time but cannot get fails
+// the build with KR8352 and a hint naming the identifier.
+func TestBuildTimeUnknownValueHasCodeAndHint(t *testing.T) {
+	cases := map[string]string{
+		"identifier": "function C() { return <p>{missingVar}</p>; }\nexport default function P() { return <main><C /></main>; }\n",
+		"call":       "function C() { return <p>{missingFn(1)}</p>; }\nexport default function P() { return <main><C /></main>; }\n",
+	}
+	for name, src := range cases {
+		t.Run(name, func(t *testing.T) {
+			got := buildErrText(t, map[string]string{"src/pages/index.tsx": src})
+			if !strings.Contains(got, "[KR8352]") || !strings.Contains(got, "unresolved identifier missing") {
+				t.Fatalf("want a KR8352 error naming the identifier, got %q", got)
+			}
+			if !strings.Contains(got, "is not a prop, a local or a module constant") || !strings.Contains(got, "pass it as a prop") {
+				t.Errorf("the hint does not say how to fix it: %q", got)
+			}
+		})
+	}
+}

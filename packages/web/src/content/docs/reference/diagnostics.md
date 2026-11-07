@@ -646,6 +646,12 @@ The build empties outDir before it writes the site, and `krate clean` deletes it
 
 `Dialog`, `Sheet`, `Popover`, `DropdownMenu` and the other widgets built on a CSS-signal scope connect a trigger to its content by `value`: `<Dialog.Trigger value="a">` opens `<Dialog.Content value="a">`. A trigger and a content that both leave `value` off are paired with each other (the value is `on`). This one has no value, but the widget has no part without a value to answer it (every content has a value, or every trigger does), so it would never open or show anything. Give the trigger and the content the same `value`, or remove it from both.
 
+### KR8352
+
+**Value needed at build time is unknown**
+
+A component without state (no createSignal, useState or other hook that holds state) is rendered to static HTML while the site is built, so every value it renders has to be known then: a prop, a local variable, or a module constant. This expression is none of those, for example it names an identifier that is not defined where the component renders (`unresolved identifier x`), reads the clock or the browser, or calls a function the build cannot run. There is no run time to fall back on, so the build fails instead of printing a guess. Define or import the name, pass the value as a prop, or give the component state so it hydrates in the browser. A value that differs per request belongs in a `*.runtime.tsx` component.
+
 ### KR8601
 
 **Unsupported page segment export value**
