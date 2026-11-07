@@ -1274,6 +1274,12 @@ observed in a browser. The browser conformance suite (`/react-events/` in
   client-only islands; their styles do not exist in the server HTML.
 - **React 19-only semantics** in compiled packages. Preact's compatibility layer
   is close to React 18 behavior; version-specific APIs may differ.
+- **State reuse across conditional branches.** `cond ? <Panel a/> : <Panel b/>`
+  (or `cond && <Panel/>` next to `!cond && <Panel/>`) puts one component type in
+  two places. React keeps the instance when the branch flips; Krate mounts the
+  branch it shows, so flipping unmounts the other and the component restarts
+  with fresh state. Render one `<Panel>` and pass the differing props, or lift
+  the state up.
 - **Hook ordering and rules-of-hooks** for transpiled source. Components run
   once per mount, so there is no hook order to preserve.
 - **`Activity` DOM structure, `SuspenseList` ordering, `ViewTransition` events.**

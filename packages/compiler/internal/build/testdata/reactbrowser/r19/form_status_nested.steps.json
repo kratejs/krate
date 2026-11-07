@@ -1,0 +1,5 @@
+{ "steps": [
+  { "op": "fill", "sel": "#name", "text": "abc" },
+  { "op": "click", "sel": "#submit", "then": "#status:has-text('pending')" },
+  { "op": "eval", "js": "window.__g.open()", "then": "#saved:has-text('abc')" }
+] }

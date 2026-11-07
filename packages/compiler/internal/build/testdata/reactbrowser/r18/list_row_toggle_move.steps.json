@@ -1,0 +1,9 @@
+{ "steps": [
+  { "op": "click", "sel": "li[data-id=\"a\"] .t" },
+  { "op": "click", "sel": "li[data-id=\"c\"] .t" },
+  { "op": "click", "sel": "#rev" },
+  { "op": "click", "sel": "li[data-id=\"a\"] .t" },
+  { "op": "click", "sel": "li[data-id=\"a\"] .t" },
+  { "op": "click", "sel": "#drop" },
+  { "op": "click", "sel": "#rev" }
+] }

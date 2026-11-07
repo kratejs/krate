@@ -98,7 +98,7 @@ const SUSPENSE_ENTRY = `export * from './src/suspense';`;
 // to the window globals the hydration bundle installed, so there is a single
 // signal graph.
 const SHARED_GLOBALS = {
-  signal: ['createSignal', 'createEffect', 'onCleanup', 'krateGetOwner', 'krateSetOwner'],
+  signal: ['createSignal', 'createEffect', 'onCleanup', 'krateGetOwner', 'krateSetOwner', 'krateOnDispose', 'krateCurrentScope'],
 };
 
 const sharedGlobalsPlugin = {

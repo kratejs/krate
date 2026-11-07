@@ -192,7 +192,7 @@ export function krateDisposeOwner(owner: unknown): void {
   ownerEffects.delete(owner);
   if (effects) {
     for (const effect of effects) {
-      disposeEffect(effect);
+      disposeEffectQuietly(effect);
       allEffects.delete(effect);
     }
   }
@@ -453,6 +453,29 @@ export function sameValue(a: unknown, b: unknown): boolean {
   return Object.is(a, b);
 }
 
+/**
+ * Runs every cleanup in order even when one throws, so a failing cleanup
+ * cannot strand the listeners and timers registered after it; the first error
+ * is rethrown once all have run, the others are logged.
+ */
+function runCleanups(list: Array<() => void>): void {
+  let failed = false;
+  let first: unknown;
+  for (const cleanup of list.splice(0)) {
+    try {
+      cleanup();
+    } catch (err) {
+      if (!failed) {
+        failed = true;
+        first = err;
+      } else if (typeof console !== 'undefined') {
+        console.error(err);
+      }
+    }
+  }
+  if (failed) throw first;
+}
+
 function disposeEffect(effect: EffectState): void {
   if (!effect.disposed) {
     effect.disposed = true;
@@ -463,10 +486,16 @@ function disposeEffect(effect: EffectState): void {
       set.delete(effect);
     }
     effect.sources.clear();
-    for (const cleanup of effect.cleanups) {
-      cleanup();
-    }
-    effect.cleanups.length = 0;
+    runCleanups(effect.cleanups);
+  }
+}
+
+/** Teardown disposal: a failing cleanup is logged and never stops the sweep. */
+function disposeEffectQuietly(effect: EffectState): void {
+  try {
+    disposeEffect(effect);
+  } catch (err) {
+    if (typeof console !== 'undefined') console.error(err);
   }
 }
 
@@ -505,13 +534,14 @@ function disposeMatching(gone: (scope: string | null) => boolean, pageTeardown: 
   for (const hook of disposeHooks) {
     try {
       hook(gone);
-    } catch {
+    } catch (err) {
       // Unmount errors must not prevent the rest of the teardown.
+      if (typeof console !== 'undefined') console.error(err);
     }
   }
   for (const effect of Array.from(allEffects)) {
     if (gone(effect.scope)) {
-      disposeEffect(effect);
+      disposeEffectQuietly(effect);
       allEffects.delete(effect);
     }
   }
@@ -555,12 +585,13 @@ export function disposeAll(): void {
   for (const hook of disposeHooks) {
     try {
       hook(null);
-    } catch {
+    } catch (err) {
       // Unmount errors must not prevent the rest of the teardown.
+      if (typeof console !== 'undefined') console.error(err);
     }
   }
   for (const effect of allEffects) {
-    disposeEffect(effect);
+    disposeEffectQuietly(effect);
   }
   allEffects.clear();
   for (const cleanup of rootCleanups) {
@@ -1279,9 +1310,7 @@ function runEffect(effect: EffectState): void {
   snapshotEpoch = null;
   try {
     // Run cleanups from previous execution
-    for (const cleanup of effect.cleanups.splice(0)) {
-      cleanup();
-    }
+    runCleanups(effect.cleanups);
     // Re-track from scratch so a dependency the last run did not read stops
     // re-running the effect.
     for (const set of effect.sources) {
@@ -1452,7 +1481,7 @@ export function createMemo<T>(fn: () => T): () => T {
   const node = newEffectState(() => {});
   allEffects.add(node);
   const recompute = (): void => {
-    for (const cleanup of node.cleanups.splice(0)) cleanup();
+    runCleanups(node.cleanups);
     for (const source of node.sources) source.delete(node);
     node.sources.clear();
     stale = false;

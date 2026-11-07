@@ -23,7 +23,7 @@
  *   content keeps showing it when a transition update suspends it, and the
  *   transition stays pending until that work and any async action settle.
  */
-import { createSignal, createEffect, onCleanup, krateGetOwner, krateSetOwner } from './signal.js';
+import { createSignal, createEffect, onCleanup, krateGetOwner, krateSetOwner, krateOnDispose, krateCurrentScope } from './signal.js';
 
 // Thenables
 
@@ -471,6 +471,9 @@ class BoundaryController implements Boundary {
   private content: boolean;
   private scheduled = false;
   private apply: (content: boolean) => void;
+  /** Route scope the boundary belongs to, and whether its page is gone. */
+  readonly route: string | null = krateCurrentScope();
+  dead = false;
 
   constructor(id: string, anchor: Node | null, initialContent: boolean, apply: (content: boolean) => void) {
     this.id = id;
@@ -529,6 +532,9 @@ class BoundaryController implements Boundary {
   private throttle: ReturnType<typeof setTimeout> | null = null;
 
   private update(): void {
+    // A boundary of a page that was navigated away from must not touch the DOM
+    // or the slot state of the page that replaced it.
+    if (this.dead) return;
     const want = this.pending.size === 0 && this.holds === 0;
     if (want === this.content) return;
     if (want) {
@@ -712,6 +718,24 @@ export function resetBoundaries(): void {
   boundaries.clear();
 }
 
+// Suspended component runs and compiled boundaries are retried when their
+// promise settles, which can be after the user left the page: a retry would
+// mount the effects of a page that is gone. A page teardown (soft navigation)
+// marks the ones it removed dead.
+const liveRuns = new Set<RunState>();
+
+krateOnDispose((gone) => {
+  for (const run of liveRuns) {
+    if (gone === null || gone(run.route)) run.dead = true;
+  }
+  for (const [id, b] of Array.from(boundaries)) {
+    if (b instanceof BoundaryController && (gone === null || gone(b.route))) {
+      b.dead = true;
+      boundaries.delete(id);
+    }
+  }
+});
+
 /**
  * Suspends `boundary` on `t`. Inside a transition an already revealed
  * boundary keeps its content and the transition waits instead; with no
@@ -729,6 +753,9 @@ interface RunState {
   boundary: Boundary | null;
   scope: ReadScope;
   disposers: Array<() => void>;
+  /** Route scope the run started in, and whether its page was torn down. */
+  route: string | null;
+  dead: boolean;
 }
 
 let currentRun: RunState | null = null;
@@ -746,10 +773,15 @@ export function currentBoundary(): Boundary | null {
  */
 export function __krateBoundary(id: string | null, fn: () => void): void {
   const boundary = id ? getBoundary(id) : null;
-  const state: RunState = { boundary, scope: { list: [], i: 0 }, disposers: [] };
+  const state: RunState = { boundary, scope: { list: [], i: 0 }, disposers: [], route: krateCurrentScope(), dead: false };
   const errOwner = errorOwner();
   boundary?.hold();
   const attempt = (): void => {
+    // The page was left while the promise was pending: do not mount it now.
+    if (state.dead) {
+      liveRuns.delete(state);
+      return;
+    }
     state.scope.i = 0;
     const prev = currentRun;
     currentRun = state;
@@ -761,15 +793,18 @@ export function __krateBoundary(id: string | null, fn: () => void): void {
       withReadScope(state.scope, fn);
       currentRun = prev;
       krateSetOwner(owner);
+      liveRuns.delete(state);
       boundary?.release();
     } catch (error) {
       currentRun = prev;
       krateSetOwner(owner);
       for (const dispose of state.disposers.splice(0)) dispose();
       if (isSuspenseSignal(error)) {
+        liveRuns.add(state);
         error.thenable.then(attempt, attempt);
         return;
       }
+      liveRuns.delete(state);
       boundary?.release();
       reportSuspenseError(error, boundary, errOwner);
     }

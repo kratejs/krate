@@ -1,0 +1,8 @@
+{ "steps": [
+  { "op": "select", "sel": "label[data-id=\"1\"] select", "value": "a" },
+  { "op": "check", "sel": "label[data-id=\"1\"] input" },
+  { "op": "click", "sel": "#rev" },
+  { "op": "uncheck", "sel": "label[data-id=\"2\"] input" },
+  { "op": "click", "sel": "#add" },
+  { "op": "check", "sel": "label[data-id=\"3\"] input" }
+] }

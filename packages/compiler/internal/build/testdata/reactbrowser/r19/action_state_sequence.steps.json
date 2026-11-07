@@ -1,0 +1,7 @@
+{ "steps": [
+  { "op": "click", "sel": "#a1", "then": "#pending:has-text('pending')" },
+  { "op": "click", "sel": "#a10" },
+  { "op": "eval", "js": "window.__g[0].open()" },
+  { "op": "wait", "ms": 60 },
+  { "op": "eval", "js": "window.__g[1].open()", "then": "#out:has-text('11')" }
+] }

@@ -1,0 +1,11 @@
+{ "steps": [
+  { "op": "click", "sel": "#child" },
+  { "op": "click", "sel": "#flip-flip" },
+  { "op": "click", "sel": "#child" },
+  { "op": "click", "sel": "#hide" },
+  { "op": "click", "sel": "#flip-flip" },
+  { "op": "click", "sel": "#show" },
+  { "op": "click", "sel": "#child" },
+  { "op": "click", "sel": "#hide-tick" },
+  { "op": "click", "sel": "#hide-tick" }
+] }

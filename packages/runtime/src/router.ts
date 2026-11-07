@@ -342,11 +342,16 @@ function cacheTake(key: string): CachedDoc | undefined {
  * `krate:revalidate` event.
  */
 export function invalidatePrefetchCache(url?: string): void {
+  // A prefetch still in flight started before the data changed: forgetting it
+  // keeps its (stale) response out of the cache.
   if (url === undefined) {
     prefetchCache.clear();
+    prefetchInflight.clear();
     return;
   }
-  prefetchCache.delete(cacheKey(url));
+  const key = cacheKey(url);
+  prefetchCache.delete(key);
+  prefetchInflight.delete(key);
 }
 
 function isHTMLType(ct: string): boolean {
@@ -373,7 +378,7 @@ function prefetchPage(url: string): Promise<void> {
   if (cached && now() - cached.at <= prefetchTTL()) return Promise.resolve();
   const inflight = prefetchInflight.get(key);
   if (inflight) return inflight;
-  const p = fetch(key, { headers: { Accept: 'text/html' }, credentials: 'same-origin' })
+  const p: Promise<void> = fetch(key, { headers: { Accept: 'text/html' }, credentials: 'same-origin' })
     .then(async (res) => {
       // Only cache successful, same-origin HTML documents.
       if (!res.ok) return;
@@ -382,6 +387,8 @@ function prefetchPage(url: string): Promise<void> {
       if (new URL(finalUrl, location.href).origin !== location.origin) return;
       const html = await res.text();
       if (!(isHTMLType(ct) || (ct === '' && looksLikeHTML(html)))) return;
+      // Invalidated while in flight: the response is stale.
+      if (prefetchInflight.get(key) !== p) return;
       cachePut(key, { html, url: finalUrl, status: res.status, at: now() });
       const loaded = new Set<string>();
       document.querySelectorAll('script[src]').forEach((s) => loaded.add((s as HTMLScriptElement).src));
@@ -392,7 +399,7 @@ function prefetchPage(url: string): Promise<void> {
       // errors through krate:navigate-error.
     })
     .finally(() => {
-      prefetchInflight.delete(key);
+      if (prefetchInflight.get(key) === p) prefetchInflight.delete(key);
     });
   prefetchInflight.set(key, p);
   return p;
@@ -724,6 +731,23 @@ function loadScript(script: PendingScript): Promise<boolean> {
   });
 }
 
+// Inline boot scripts (data-krate-boot: the CSS ARIA enhancer and the :has()
+// shim) are emitted into the page that needs them. A soft navigation parses
+// but never runs inline scripts, so each distinct one runs here, once.
+const bootRan = new Set<string>();
+
+function runBootScripts(root: ParentNode): void {
+  root.querySelectorAll('script[data-krate-boot]').forEach((s) => {
+    const code = s.textContent || '';
+    if (!code || bootRan.has(code)) return;
+    bootRan.add(code);
+    const el = document.createElement('script');
+    el.text = code;
+    document.head.appendChild(el);
+    el.remove();
+  });
+}
+
 // Scroll, focus, announcements
 
 function hashTarget(hash: string): Element | null {
@@ -1045,6 +1069,7 @@ async function commitDocument(loaded: LoadedDoc, req: NavRequest, seq: number): 
   // Page scripts re-run against the new DOM; the hydration code of kept
   // layouts is skipped (krateEnterScope) because their bindings are live.
   document.querySelectorAll('script[data-krate-spa]').forEach((s) => s.remove());
+  runBootScripts(doc);
   const srcs = scriptsToLoad(doc, url);
   keepScopes(plan.skip);
   const results = await Promise.all(srcs.map(loadScript));
@@ -1508,6 +1533,7 @@ async function runIntercept(req: NavRequest, hit: InterceptHit): Promise<void> {
     document.head.appendChild(link);
   });
   setSlotInfo(hit.slot.key, { ...hit.slot, scope: frag.scope, src: 'intercept' });
+  runBootScripts(doc);
 
   const state = { __krate: '', state: req.state === undefined ? null : req.state, __kint: { key: hit.slot.key, base: docPath } };
   if (req.kind === 'push') {
@@ -1565,8 +1591,21 @@ function sameDocument(url: string): boolean {
   return pathOf(url) === renderedPath;
 }
 
+// A newer in-document step (a hash link, or back/forward over a hash entry)
+// supersedes a page navigation still loading: it must not swap the page in
+// afterwards.
+function cancelPending(): void {
+  if (status !== 'loading') return;
+  navSeq++;
+  if (pendingAbort) pendingAbort.abort();
+  pendingAbort = undefined;
+  endTransition();
+  setStatus('idle');
+}
+
 /** In-document navigation: only the hash (or nothing) changes. */
 function hashNavigate(url: string, req: NavRequest): void {
+  cancelPending();
   saveScroll(currentKey);
   if (url !== location.href || req.state !== undefined) {
     if (req.kind === 'replace') {
@@ -1667,6 +1706,7 @@ function popstateHandler(e: PopStateEvent): void {
   const url = location.href;
   if (pathOf(url) === renderedPath) {
     // Hash-only history step within the rendered document.
+    cancelPending();
     currentKey = key || currentKey;
     const saved = key ? scrollPositions.get(key) : undefined;
     if (saved !== undefined) window.scrollTo(0, saved);
@@ -1819,6 +1859,8 @@ export function initRouter(): void {
   }
   initialized = true;
 
+  // The first document ran its own boot scripts.
+  document.querySelectorAll('script[data-krate-boot]').forEach((s) => bootRan.add(s.textContent || ''));
   renderedPath = pathOf(location.href);
   currentChain = readRouteChain(document);
   docPath = renderedPath;
@@ -1880,6 +1922,7 @@ export function destroyRouter(): void {
   prefetchInflight.clear();
   scrollPositions.clear();
   errorPageCache.clear();
+  bootRan.clear();
   listeners.clear();
   status = 'idle';
   loadingOverlay = [];

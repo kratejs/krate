@@ -38,6 +38,9 @@
         "TestHookInLoopOrConditionWarns",
         "browser:/react-effects/"
       ],
+      "knownLimits": [
+        "One component type in both branches of a ternary is two instances: flipping the condition remounts it with fresh state, where React keeps the instance."
+      ],
       "roadmap": true
     },
     {

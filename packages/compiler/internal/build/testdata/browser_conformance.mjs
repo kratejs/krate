@@ -275,6 +275,26 @@ try {
   await page.locator("[data-testid=store-bump]").click();
   await page.locator("[data-testid=store-bump]").click();
   await waitText("store-value", "2");
+  // Leaving a page while a boundary is suspended: the component must not be
+  // mounted later, on the page that replaced it.
+  await page.goto(baseURL + "/react-suspense/", { waitUntil: "domcontentloaded" });
+  await page.waitForFunction(() => document.querySelector("[data-testid=store-bump]") !== null);
+  await page.waitForTimeout(150);
+  await page.evaluate(() => {
+    window.__softMarker = 1;
+    const a = document.createElement("a");
+    a.href = "/react-keys/";
+    a.textContent = "leave";
+    a.id = "leave-link";
+    a.setAttribute("data-krate-link", "");
+    document.body.appendChild(a);
+  });
+  await page.click("#leave-link");
+  await page.waitForFunction(() => location.pathname === "/react-keys/");
+  if (!(await page.evaluate(() => window.__softMarker === 1))) fail("suspense leave: the link must be a soft navigation");
+  await page.waitForTimeout(1800);
+  const leaveLog = await page.evaluate(() => window.__leaveLog || []);
+  if (leaveLog.length) fail(`suspense leave: a component of the left page mounted later: ${JSON.stringify(leaveLog)}`);
   // Keys and list reconciliation: state follows keys across reorder, insert,
   // update and removal; effects mount/unmount per key; keyed remount resets.
   await go("/react-keys/", "[data-testid=todo-row]");

@@ -253,7 +253,7 @@ function disposeTree(owner: Owner, active: boolean, passive: Array<() => void>):
       continue;
     }
     if (hook.phase === 'passive') {
-      const c = takeCleanup(hook);
+      const c = takePassiveCleanup(hook);
       if (c) passive.push(c);
     } else {
       runCleanup(hook);
@@ -397,7 +397,7 @@ function hideTree(owner: Owner, passive: Array<() => void>): void {
   for (const hook of owner.hooks) {
     dirty.delete(hook);
     if (hook.phase === 'passive') {
-      const c = takeCleanup(hook);
+      const c = takePassiveCleanup(hook);
       if (c) passive.push(c);
     } else {
       runCleanup(hook);
@@ -560,6 +560,13 @@ function runCleanup(hook: HookEffect): void {
   if (c) runGuarded(c, hook.owner);
 }
 
+// A passive cleanup detached for the passive phase; its errors go to the
+// owner's error boundary like a layout cleanup's.
+function takePassiveCleanup(hook: HookEffect): Cleanup {
+  const c = takeCleanup(hook);
+  return c ? () => runGuarded(c, hook.owner) : null;
+}
+
 function pruneSnapshots(): void {
   let min = krateEpoch();
   for (const e of liveEpochs.keys()) if (e < min) min = e;
@@ -640,7 +647,7 @@ function commit(): void {
     let queued = false;
     for (const h of hooks) {
       if (h.phase !== 'passive') continue;
-      const c = takeCleanup(h);
+      const c = takePassiveCleanup(h);
       if (c) passiveCleanups.push(c);
       passiveSetups.push([h, at]);
       queued = true;
@@ -666,6 +673,16 @@ export function flushPassive(): void {
     clearTimeout(passiveTimer);
     passiveTimer = null;
   }
+  let failed = false;
+  let first: unknown;
+  const remember = (err: unknown): void => {
+    if (!failed) {
+      failed = true;
+      first = err;
+    } else if (typeof console !== 'undefined') {
+      console.error(err);
+    }
+  };
   // Loop: a passive cleanup or setup may unmount components, queueing more.
   while (passiveCleanups.length || passiveSetups.length) {
     const cleanups = passiveCleanups;
@@ -673,15 +690,29 @@ export function flushPassive(): void {
     passiveCleanups = [];
     passiveSetups = [];
     krateCommitting(true);
+    // An error with no boundary to take it must not drop the cleanups and
+    // setups queued behind it: run them all, then rethrow the first.
     try {
-      for (const c of cleanups) c();
+      for (const c of cleanups) {
+        try {
+          c();
+        } catch (err) {
+          remember(err);
+        }
+      }
       for (const [h, at] of setups) {
-        if (isActive(h.owner)) runSetup(h, at);
+        if (!isActive(h.owner)) continue;
+        try {
+          runSetup(h, at);
+        } catch (err) {
+          remember(err);
+        }
       }
     } finally {
       krateCommitting(false);
     }
   }
+  if (failed) throw first;
 }
 
 /**
@@ -777,7 +808,7 @@ function unmountExcept(gone: (scope: string | null) => boolean): void {
     hook.stop();
     dirty.delete(hook);
     if (hook.phase === 'passive') {
-      const c = takeCleanup(hook);
+      const c = takePassiveCleanup(hook);
       if (c) passive.push(c);
     } else {
       runCleanup(hook);
@@ -819,7 +850,7 @@ function unmountAll(gone: ((scope: string | null) => boolean) | null): void {
   for (const hook of root.hooks) {
     hook.stop();
     if (hook.phase === 'passive') {
-      const c = takeCleanup(hook);
+      const c = takePassiveCleanup(hook);
       if (c) passive.push(c);
     } else {
       runCleanup(hook);
