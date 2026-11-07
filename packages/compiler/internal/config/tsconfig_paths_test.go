@@ -141,3 +141,92 @@ func TestTSBaseURLOnlySetWhenTsconfigDeclaresIt(t *testing.T) {
 		t.Errorf("TSBaseURL = %q without a baseUrl", cfg.TSBaseURL)
 	}
 }
+
+func shimWarnings(t *testing.T) []string {
+	t.Helper()
+	var out []string
+	for _, w := range Warnings {
+		if strings.Contains(w, "KR7125") {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+// The 0.4 scaffold ("baseUrl": "./src" with "./src/*" targets) names directories
+// that only exist under the project root: resolve them there and warn once.
+func TestTSConfigRootRelativeTargetsResolveWithOneWarning(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "src", "components"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeTS(t, filepath.Join(dir, "tsconfig.json"), `{
+  "compilerOptions": {
+    "baseUrl": "./src",
+    "paths": { "@/*": ["./src/*"], "@c/*": ["./src/components/*"] }
+  }
+}`)
+	Warnings = nil
+	c := &Config{}
+	c.LoadTSConfigPaths(dir)
+	if want := filepath.Join(dir, "src"); c.TSBaseDir != want {
+		t.Fatalf("TSBaseDir = %q, want %q", c.TSBaseDir, want)
+	}
+	got := map[string]string{}
+	for _, a := range c.PathAliases {
+		got[a.Prefix] = strings.Join(a.Targets, ",")
+	}
+	if want := filepath.ToSlash(filepath.Join(dir, "src")) + "/*"; got["@/*"] != want {
+		t.Errorf("@/* targets = %q, want the root path %q", got["@/*"], want)
+	}
+	ws := shimWarnings(t)
+	if len(ws) != 1 || !strings.Contains(ws[0], "krate fix --apply") {
+		t.Fatalf("warnings = %q, want exactly one KR7125 naming `krate fix --apply`", ws)
+	}
+}
+
+// Targets that exist under baseUrl, or nowhere, are left exactly as written.
+func TestTSConfigAliasTargetsThatAreNotRootRelativeAreUntouched(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "src", "lib"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeTS(t, filepath.Join(dir, "tsconfig.json"), `{
+  "compilerOptions": {
+    "baseUrl": "./src",
+    "paths": { "@/*": ["./*"], "~/*": ["./missing/*"] }
+  }
+}`)
+	Warnings = nil
+	c := &Config{}
+	c.LoadTSConfigPaths(dir)
+	got := map[string]string{}
+	for _, a := range c.PathAliases {
+		got[a.Prefix] = strings.Join(a.Targets, ",")
+	}
+	if got["@/*"] != "./*" || got["~/*"] != "./missing/*" {
+		t.Errorf("targets were rewritten: %v", got)
+	}
+	if ws := shimWarnings(t); len(ws) != 0 {
+		t.Errorf("unexpected warnings: %q", ws)
+	}
+}
+
+// A root-relative target that krate fix cannot rewrite is still resolved, but
+// the warning must not promise a fix that will not happen.
+func TestTSConfigRootRelativeWarningOnlyNamesFixWhenItApplies(t *testing.T) {
+	dir := t.TempDir()
+	for _, d := range []string{"src", "lib"} {
+		if err := os.MkdirAll(filepath.Join(dir, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeTS(t, filepath.Join(dir, "tsconfig.json"), `{"compilerOptions":{"baseUrl":"./src","paths":{"@lib/*":["./lib/*"]}}}`)
+	Warnings = nil
+	c := &Config{}
+	c.LoadTSConfigPaths(dir)
+	ws := shimWarnings(t)
+	if len(ws) != 1 || strings.Contains(ws[0], "krate fix") {
+		t.Fatalf("warnings = %q, want one KR7125 without a krate fix promise", ws)
+	}
+}

@@ -30,6 +30,8 @@ type buildDiskCache struct {
 	dir         string
 	pagesDir    string
 	cfgHash     string
+	contentHash string
+	envHash     string
 	fingerprint string
 	enabled     bool
 
@@ -123,7 +125,19 @@ func newBuildDiskCache(root, cfgHash string, enabled bool) *buildDiskCache {
 // fingerprint so content edits invalidate cached pages.
 func (c *buildDiskCache) setContentHash(contentHash string) {
 	c.mu.Lock()
+	c.contentHash = contentHash
 	c.fingerprint = c.fingerprintFor(contentHash)
+	c.mu.Unlock()
+}
+
+// setEnvHash folds the environment values that are baked into pages (the
+// KRATE_PUBLIC_ values, the mode and the .env files) into the fingerprint, so
+// changing one rebuilds the pages instead of replaying output built with the
+// old value.
+func (c *buildDiskCache) setEnvHash(envHash string) {
+	c.mu.Lock()
+	c.envHash = envHash
+	c.fingerprint = c.fingerprintFor(c.contentHash)
 	c.mu.Unlock()
 }
 
@@ -168,7 +182,7 @@ func (c *buildDiskCache) fingerprintFor(contentHash string) string {
 	if t, ok := jsvalue.SourceDateEpoch(); ok {
 		epoch = strconv.FormatInt(t.Unix(), 10)
 	}
-	sum := sha256.Sum256([]byte(compilerBuildStamp() + "\x00" + diskCacheSchema + "\x00" + c.cfgHash + "\x00" + contentHash + "\x00" + epoch))
+	sum := sha256.Sum256([]byte(compilerBuildStamp() + "\x00" + diskCacheSchema + "\x00" + c.cfgHash + "\x00" + contentHash + "\x00" + epoch + "\x00" + c.envHash))
 	return hex.EncodeToString(sum[:])
 }
 

@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
+	"github.com/kratejs/krate/packages/compiler/internal/bundler"
 	"github.com/kratejs/krate/packages/compiler/internal/content"
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/irtree"
@@ -59,7 +60,10 @@ func (b *Builder) InlineContent(prog *ast.Program) {
 	if prog == nil || len(b.contentCollections) == 0 {
 		return
 	}
-	ic := &inlineCtx{collections: b.contentCollections, use: collectFieldUse(prog)}
+	ic := &inlineCtx{collections: b.contentCollections, use: collectFieldUse(prog), deferred: map[*ast.VarDecl]bool{}}
+	if v, ok := b.templateCovered.Load(prog); ok {
+		ic.covered = v.(map[string]bool)
+	}
 	defer func() {
 		if len(ic.sites) > 0 {
 			b.collectionSites.Store(prog, ic.sites)
@@ -69,9 +73,18 @@ func (b *Builder) InlineContent(prog *ast.Program) {
 	// route-param substitution) so collection chains that reference them can be
 	// evaluated. Without this, `find((p) => p.slug === slug)` can't fold.
 	bindings := collectLiteralBindings(prog)
+	if v, ok := b.paramBindings.Load(prog); ok {
+		for k, js := range v.(map[string]string) {
+			bindings[k] = js
+		}
+	}
+	ic.helpers = collectHelpers(prog)
+	scope := ic.pushAliasScope(nil, prog.Body)
 	for _, stmt := range prog.Body {
 		inlineContentStmt(stmt, ic, bindings)
 	}
+	ic.popAliasScope(scope, prog.Body, bindings)
+	ic.settleHelpers(prog)
 }
 
 // inlineCtx carries the state of one program's content inlining.
@@ -83,6 +96,31 @@ type inlineCtx struct {
 	// that could not be folded at build time and bare collection reads.
 	sites []ast.Pos
 	depth int
+	// covered holds the route-param values that have a generated page of their
+	// own. A collection read that stays in the browser (depth > 0) in a
+	// dynamic-route template only needs the entries without one.
+	covered map[string]bool
+	// scopes and deferred drive alias folding (see contentalias.go).
+	scopes   []aliasScope
+	deferred map[*ast.VarDecl]bool
+	helpers  map[string]*helperEntry
+}
+
+// browserEntries returns the entries of a collection read that cannot be
+// folded: all of them, minus those already covered by a generated page when
+// this is the fallback template of a generateStaticParams route.
+func (ic *inlineCtx) browserEntries(name string) []content.Entry {
+	entries := ic.collections[name]
+	if ic.depth == 0 || len(ic.covered) == 0 {
+		return entries
+	}
+	kept := make([]content.Entry, 0, len(entries))
+	for _, e := range entries {
+		if !ic.covered[e.Slug] {
+			kept = append(kept, e)
+		}
+	}
+	return kept
 }
 
 // collectFieldUse gathers every identifier and string the program mentions, so
@@ -222,12 +260,14 @@ func inlineContentStmt(stmt ast.Stmt, ic *inlineCtx, bindings map[string]string)
 			inlineContentStmt(s.Declaration, ic, bindings)
 		}
 	case *ast.FnDecl:
+		scope := ic.pushAliasScope(s.Params, s.Body)
 		for _, inner := range s.Body {
 			inlineContentStmt(inner, ic, bindings)
 		}
+		ic.popAliasScope(scope, s.Body, bindings)
 	case *ast.VarStmt:
 		for _, d := range s.Decls {
-			if d.Init != nil {
+			if d.Init != nil && !ic.deferred[d] {
 				d.Init = inlineContentExpr(d.Init, ic, bindings)
 			}
 		}
@@ -270,12 +310,18 @@ func inlineContentExpr(expr ast.Expr, ic *inlineCtx, bindings map[string]string)
 	}
 	switch e := expr.(type) {
 	case *ast.CallExpr:
+		if rep := ic.foldAliased(e, bindings); rep != nil {
+			return rep
+		}
+		if rep := ic.foldHelperCall(e, bindings); rep != nil {
+			return rep
+		}
 		// getCollection("name")
 		if lit := getCollectionName(e); lit != "" {
 			if ic.depth == 0 {
 				ic.sites = append(ic.sites, e.Position)
 			}
-			return literalArrayExpr(ic.collections[lit], ic.use)
+			return literalArrayExpr(ic.browserEntries(lit), ic.use)
 		}
 		// `...map(fn)` rooted at getCollection: fold the receiver chain
 		// (filter/sort/etc.) to a literal array so the existing `.map()` list
@@ -305,6 +351,9 @@ func inlineContentExpr(expr ast.Expr, ic *inlineCtx, bindings map[string]string)
 		}
 		return e
 	case *ast.MemberExpr:
+		if rep := ic.foldAliased(e, bindings); rep != nil {
+			return rep
+		}
 		if arr := foldCollectionChain(e, ic.collections, bindings); arr != nil {
 			return arr
 		}
@@ -347,8 +396,14 @@ func inlineContentExpr(expr ast.Expr, ic *inlineCtx, bindings map[string]string)
 		}
 		return e
 	case *ast.ArrowFn:
-		// Do not descend into nested function bodies for argument rewriting;
-		// the map callback contains an element binding, not getCollection.
+		// A function body is its own alias scope; a collection read inside it
+		// (a component written as an arrow, a helper, a handler) is inlined
+		// like one in a declared function.
+		scope := ic.pushAliasScope(e.Params, e.Body)
+		for _, inner := range e.Body {
+			inlineContentStmt(inner, ic, bindings)
+		}
+		ic.popAliasScope(scope, e.Body, bindings)
 		return e
 	case *ast.JSXElement:
 		inlineContentJSX(e, ic, bindings)
@@ -792,37 +847,39 @@ func parseInlineSource(src string) *ast.Program {
 
 // warnShippedCollections reports a content collection whose entries ended up
 // in the page's hydration script because a getCollection chain could not be
-// folded at build time.
-func (b *Builder) warnShippedCollections(page string, prog *ast.Program, js string) {
+// folded at build time. A collection counts once at least minEntries of its
+// entries are in the script: a generated page legitimately carries its own
+// entry (handed to a client component), a lookup that failed carries them all.
+func (b *Builder) warnShippedCollections(page string, prog *ast.Program, js string, minEntries int) {
 	if len(b.contentCollections) == 0 || js == "" {
 		return
 	}
 	// An inlined entry is an object literal starting `slug: ..., path: ...`;
 	// a path that only appears on its own (an edit link) is not the collection.
 	compact := stripSpace(js)
+	use := collectFieldUse(prog)
 	var shipped []string
-	drafts := 0
+	drafts, total, bytes := 0, 0, 0
 	for name, entries := range b.contentCollections {
-		hit := false
+		var hits []content.Entry
 		for _, e := range entries {
 			if e.Path == "" {
 				continue
 			}
 			for _, q := range []string{`"`, `'`, "`"} {
 				if strings.Contains(compact, stripSpace("slug:"+q+e.Slug+q+",path:"+q+e.Path+q)) {
-					hit = true
+					hits = append(hits, e)
 					break
 				}
 			}
-			if hit {
-				break
-			}
 		}
-		if !hit {
+		if len(hits) == 0 || len(hits) < minEntries {
 			continue
 		}
 		shipped = append(shipped, name)
-		for _, e := range entries {
+		total += len(hits)
+		bytes += len(content.CollectionJSFields(hits, use))
+		for _, e := range hits {
 			if d, _ := e.Data["draft"].(bool); d {
 				drafts++
 			}
@@ -838,16 +895,37 @@ func (b *Builder) warnShippedCollections(page string, prog *ast.Program, js stri
 			pos = sites[0]
 		}
 	}
-	msg := "collection " + strings.Join(shipped, ", ") + " is evaluated in the browser: its entries are copied into the page script"
+	msg := fmt.Sprintf("collection %s is evaluated in the browser: %d %s (about %s) copied into the page script",
+		strings.Join(shipped, ", "), total, plural(total, "entry", "entries"), humanBytes(bytes))
 	if drafts > 0 {
 		msg += fmt.Sprintf(" (draft entries included: %d)", drafts)
 	}
-	d := diag.New(b.relPath(page), pos.Line, pos.Col, msg,
-		"fold the chain at build time (use literal or const values in filter/sort/find), or compute the list in generateStaticParams or a server-rendered page; only the fields this page mentions are shipped",
-		"")
+	hint := "fold the chain at build time (use literal or const values in filter/sort/find), or compute the list in generateStaticParams or a server-rendered page; only the fields this page mentions are shipped"
+	if minEntries == 1 && isDynamicRoute(page, b.Cfg.PagesDir) {
+		hint = "this is the fallback page of a dynamic route, built for params generateStaticParams did not list: add `export const dynamicParams = false` to close the route so it is not built, or " + hint
+	}
+	d := diag.New(b.relPath(page), pos.Line, pos.Col, msg, hint, "")
 	d.Code = diag.CodeCollectionShipped
 	d.Severity = diag.SeverityWarning
+	if _, dup := b.shippedWarned.LoadOrStore(d.Error(), true); dup {
+		return
+	}
 	fmt.Fprintf(os.Stderr, "  %sWarning:%s %s\n      hint: %s\n", cYellow, cReset, d.Error(), d.Hint)
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
+}
+
+// humanBytes formats a size as B or KB.
+func humanBytes(n int) string {
+	if n < 1024 {
+		return fmt.Sprintf("%d B", n)
+	}
+	return fmt.Sprintf("%.1f KB", float64(n)/1024)
 }
 
 // stripSpace removes ASCII whitespace.
@@ -859,4 +937,34 @@ func stripSpace(s string) string {
 		}
 		return r
 	}, s)
+}
+
+// markTemplateCoverage records, for the fallback template of a dynamic route
+// that has generateStaticParams, which param values already have a generated
+// page. The template only answers the other URLs, so a lookup it must run in
+// the browser (the route param is unknown at build time) needs only the
+// collection entries without a page. Without this, every post body of a blog
+// would ship in the [slug] template's script.
+func (b *Builder) markTemplateCoverage(page string, mods []*bundler.Module) {
+	if len(b.contentCollections) == 0 || !isDynamicRoute(page, b.Cfg.PagesDir) {
+		return
+	}
+	if cachedInterceptForPage(page, b.Cfg.PagesDir) != nil {
+		return
+	}
+	res := b.resolveStaticParamsPageOnce(page)
+	if !res.note || len(res.errs) > 0 || len(res.expanded) == 0 {
+		return
+	}
+	covered := map[string]bool{}
+	for _, p := range res.expanded {
+		for _, v := range p.Params {
+			covered[v] = true
+		}
+	}
+	for _, mod := range mods {
+		if mod != nil && mod.Path == page && mod.Program != nil {
+			b.templateCovered.Store(mod.Program, covered)
+		}
+	}
 }

@@ -408,7 +408,7 @@ A named import from `@krate/runtime` (or one of its subpaths) asks for something
 
 **tsconfig baseUrl and paths disagree**
 
-`compilerOptions.paths` targets resolve against `baseUrl`, in tsc and in Krate. A `baseUrl` of `./src` together with `"@/*": ["./src/*"]` points at `src/src`, so every `@/` import fails with "cannot resolve import ... (matched tsconfig path alias)". Krate 0.4 ignored `baseUrl` for aliases, so a project scaffolded then still has it. `krate fix --apply` sets `baseUrl` to `"."` when every target repeats the baseUrl directory, exists under the project root and does not exist under `baseUrl`. Otherwise edit `tsconfig.json` by hand. This is not a build diagnostic: it is reported by `krate fix`.
+`compilerOptions.paths` targets resolve against `baseUrl`, in tsc and in Krate. A `baseUrl` of `./src` together with `"@/*": ["./src/*"]` points at `src/src`, which tsc cannot find. Krate 0.4 ignored `baseUrl` for aliases, so a project scaffolded then still has this shape. Krate reads such a target relative to the project root when it exists there and not under `baseUrl`, so the build works, and reports this warning once. `krate fix --apply` sets `baseUrl` to `"."` when every target repeats the baseUrl directory, which also makes `tsc` and your editor agree. A target that exists in neither place is still an error ("cannot resolve import ... matched tsconfig path alias"). This is a warning.
 
 ### KR7126
 
@@ -674,7 +674,7 @@ An `<Image>` without an alt attribute is announced by screen readers by its file
 
 **Content collection is shipped to the browser**
 
-A `getCollection("name")` chain is normally evaluated while the site is built and only its result is rendered. When the chain depends on a value that only exists in the browser (a signal, an event), the collection has to be evaluated there, so its entries are copied into the page script. Krate ships only the fields the page mentions (the body and rendered html only when referenced), but every entry in the collection, drafts included, is still included. Filter with build-time values, or compute the list on the server. This is a warning.
+A `getCollection("name")` chain is normally evaluated while the site is built and only its result is rendered. When the chain depends on a value that only exists in the browser (a signal, an event), the collection has to be evaluated there, so its entries are copied into the page script. The warning names how many entries and about how many bytes are shipped. Krate ships only the fields the page mentions (the body and rendered html only when referenced), but every entry in the collection, drafts included, is still included. Filter with build-time values, or compute the list on the server. A lookup keyed by the route param of a `[slug]` page folds to that page's entry, whether it is written inline, through a `const posts = getCollection(...)`, with the params destructured, or in a module-level helper that only returns the chain; the fallback page of the route carries only the entries that have no generated page. This is a warning.
 
 ### KR8820
 

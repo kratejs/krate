@@ -240,6 +240,17 @@ type Builder struct {
 	// until route params are bound (static-params pages), so lookups like
 	// `find((p) => p.slug === props.params.slug)` fold to a single entry.
 	deferInline sync.Map
+	// templateCovered maps the page program of a dynamic-route template to the
+	// route-param values that generateStaticParams already bakes into pages of
+	// their own (see markTemplateCoverage).
+	templateCovered sync.Map
+	// paramBindings holds, per generated page program, the locals it binds to
+	// route params by destructuring (see paramPatternBindings).
+	paramBindings sync.Map
+	// shippedWarned dedupes KR8810 across the pages generated from one route.
+	shippedWarned sync.Map
+	// gspMemo caches one resolveStaticParamsPage result per page per build.
+	gspMemo sync.Map
 	// progIconDiags holds the unresolved <Icon> diagnostics of each program.
 	progIconDiags sync.Map
 	// progImageDiags holds the <Image> diagnostics of each transformed program.
@@ -976,6 +987,7 @@ func (b *Builder) BuildAll() error {
 	}
 	if b.diskCache != nil {
 		b.diskCache.setContentHash(ch)
+		b.diskCache.setEnvHash(b.envFingerprint())
 	}
 	for _, w := range cres.Warnings {
 		fmt.Fprintf(os.Stderr, "  %sWarning: content:%s %v\n", cYellow, cReset, w)
@@ -2268,6 +2280,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 	// Universal transforms mutate shared cached ASTs. Run them for the whole
 	// module graph before any pass reads those ASTs, so concurrent page builds
 	// serialize on each module's sync.Once instead of racing a reader.
+	b.markTemplateCoverage(page, bundle.Modules)
 	if err := b.ensureTransformedModules(bundle.Modules); err != nil {
 		return nil, "", err
 	}
@@ -2720,7 +2733,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 				return nil, "", hlErr
 			}
 		}
-		b.warnShippedCollections(page, entryModule.Program, rawJS)
+		b.warnShippedCollections(page, entryModule.Program, rawJS, 1)
 		dceJS = append(dceJS, rawJS)
 		var lazyErr error
 		if rawJS, lazyErr = b.writeLazyChunks(rawJS, emitResult.LazyChunks, pageDir, outName); lazyErr != nil {
@@ -3148,6 +3161,10 @@ func (b *Builder) resetBuildCaches() {
 	// already-transformed ASTs is a no-op, and the guard keeps it race-free.
 	b.transformOnce = sync.Map{}
 	b.collectionSites = sync.Map{}
+	b.templateCovered = sync.Map{}
+	b.gspMemo = sync.Map{}
+	b.paramBindings = sync.Map{}
+	b.shippedWarned = sync.Map{}
 	// Go component parses are per-build.
 	b.goParseCache = nil
 	// Client boundary chunks are per-build: a dev rebuild must pick up edits
