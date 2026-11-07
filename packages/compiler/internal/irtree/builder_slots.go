@@ -296,6 +296,9 @@ func (b *builder) buildSlotNodes(expr ast.Expr, parentID string) []SlotNode {
 		if nodes := b.tryResolveConditional(e, parentID); len(nodes) > 0 {
 			return nodes
 		}
+		if merged, ok := b.mergeSameTypeBranches(e); ok {
+			return b.buildSlotNodes(merged, parentID)
+		}
 		return []SlotNode{b.buildConditionalSlot(e, parentID)}
 	case *ast.BinaryExpr:
 		if e.Op == "&&" || e.Op == "||" || e.Op == "??" {
