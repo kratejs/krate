@@ -60,6 +60,9 @@ func TestCompatLegacyEmitsShimAndClassCSS(t *testing.T) {
 	if !strings.Contains(html, shimMarker) {
 		t.Errorf("legacy mode should inject the shim:\n%.1200s", html)
 	}
+	if !bootScriptHolds(html, shimMarker) {
+		t.Errorf("the shim must carry data-krate-boot so soft navigations run it:\n%.1200s", html)
+	}
 	css := readAllCSS(t, outDir)
 	if strings.Contains(css, ":has(") {
 		t.Errorf("legacy CSS must not use :has():\n%s", css)
@@ -73,6 +76,9 @@ func TestCompatHybridGatesShim(t *testing.T) {
 	html, outDir := buildCompatSrc(t, compatSrc, func(c *config.Config) { c.Compat.Mode = "hybrid" })
 	if !strings.Contains(html, "CSS.supports") {
 		t.Errorf("hybrid should feature-gate the shim:\n%.1200s", html)
+	}
+	if !bootScriptHolds(html, shimMarker) {
+		t.Errorf("the gated shim must carry data-krate-boot:\n%.1200s", html)
 	}
 	css := readAllCSS(t, outDir)
 	if !strings.Contains(css, "@supports selector(:has(*)){") {

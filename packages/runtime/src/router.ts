@@ -724,6 +724,23 @@ function loadScript(script: PendingScript): Promise<boolean> {
   });
 }
 
+// Inline boot scripts (data-krate-boot: the CSS ARIA enhancer and the :has()
+// shim) are emitted into the page that needs them. A soft navigation parses
+// but never runs inline scripts, so each distinct one runs here, once.
+const bootRan = new Set<string>();
+
+function runBootScripts(root: ParentNode): void {
+  root.querySelectorAll('script[data-krate-boot]').forEach((s) => {
+    const code = s.textContent || '';
+    if (!code || bootRan.has(code)) return;
+    bootRan.add(code);
+    const el = document.createElement('script');
+    el.text = code;
+    document.head.appendChild(el);
+    el.remove();
+  });
+}
+
 // Scroll, focus, announcements
 
 function hashTarget(hash: string): Element | null {
@@ -1045,6 +1062,7 @@ async function commitDocument(loaded: LoadedDoc, req: NavRequest, seq: number): 
   // Page scripts re-run against the new DOM; the hydration code of kept
   // layouts is skipped (krateEnterScope) because their bindings are live.
   document.querySelectorAll('script[data-krate-spa]').forEach((s) => s.remove());
+  runBootScripts(doc);
   const srcs = scriptsToLoad(doc, url);
   keepScopes(plan.skip);
   const results = await Promise.all(srcs.map(loadScript));
@@ -1508,6 +1526,7 @@ async function runIntercept(req: NavRequest, hit: InterceptHit): Promise<void> {
     document.head.appendChild(link);
   });
   setSlotInfo(hit.slot.key, { ...hit.slot, scope: frag.scope, src: 'intercept' });
+  runBootScripts(doc);
 
   const state = { __krate: '', state: req.state === undefined ? null : req.state, __kint: { key: hit.slot.key, base: docPath } };
   if (req.kind === 'push') {
@@ -1819,6 +1838,8 @@ export function initRouter(): void {
   }
   initialized = true;
 
+  // The first document ran its own boot scripts.
+  document.querySelectorAll('script[data-krate-boot]').forEach((s) => bootRan.add(s.textContent || ''));
   renderedPath = pathOf(location.href);
   currentChain = readRouteChain(document);
   docPath = renderedPath;
@@ -1880,6 +1901,7 @@ export function destroyRouter(): void {
   prefetchInflight.clear();
   scrollPositions.clear();
   errorPageCache.clear();
+  bootRan.clear();
   listeners.clear();
   status = 'idle';
   loadingOverlay = [];

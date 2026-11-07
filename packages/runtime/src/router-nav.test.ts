@@ -528,3 +528,51 @@ describe('fallback fade and reduced motion', () => {
     expect(document.querySelector('#root h1')!.textContent).toBe('About');
   });
 });
+
+describe('inline boot scripts', () => {
+  const bootPage = (title: string) =>
+    page(title, `<h1>${title}</h1>${link('/', 'Home')}<script data-krate-boot>window.__boots=1;</script>`);
+  // happy-dom does not execute inline scripts: count the ones handed to the document.
+  let ran: string[];
+
+  beforeEach(() => {
+    ran = [];
+    const append = document.head.appendChild.bind(document.head);
+    vi.spyOn(document.head, 'appendChild').mockImplementation(((node: Node) => {
+      if (node instanceof HTMLScriptElement && !node.src) ran.push(node.text);
+      return append(node);
+    }) as typeof document.head.appendChild);
+  });
+
+  afterEach(() => vi.restoreAllMocks());
+
+  it('runs a boot script of the new page once, not on every visit', async () => {
+    routes['/aria'] = { body: bootPage('Aria') };
+    routes['/aria2'] = { body: bootPage('Aria2') };
+    await krateRouter.push('/aria');
+    await settle();
+    expect(ran).toEqual(['window.__boots=1;']);
+    await krateRouter.push('/aria2');
+    await krateRouter.push('/about');
+    await krateRouter.push('/aria');
+    await settle();
+    expect(ran).toEqual(['window.__boots=1;']);
+  });
+
+  it('does not rerun the boot script the first document already ran', async () => {
+    destroyRouter();
+    document.body.innerHTML += '<script data-krate-boot>window.__boots=1;</script>';
+    initRouter();
+    routes['/aria'] = { body: bootPage('Aria') };
+    await krateRouter.push('/aria');
+    await settle();
+    expect(ran).toEqual([]);
+  });
+
+  it('leaves ordinary inline scripts alone', async () => {
+    routes['/plain'] = { body: page('Plain', '<h1>Plain</h1><script>window.__boots=99;</script>') };
+    await krateRouter.push('/plain');
+    await settle();
+    expect(ran).toEqual([]);
+  });
+});

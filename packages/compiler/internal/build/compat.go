@@ -83,6 +83,11 @@ func (b *Builder) legacyDocEnabled() bool {
 	return b.Cfg.Compat.ModeOrDefault() == "hybrid" && b.Cfg.Compat.UserAgent
 }
 
+// bootScriptOpen opens an inline script the client router must also run after a
+// soft navigation to a page that carries it (the page is parsed, not loaded).
+// The scripts are idempotent, so the router runs each distinct one once.
+const bootScriptOpen = "<script data-krate-boot>"
+
 // compatShimHTML returns the inline script that drives class-based CSS signals
 // for the configured compat mode:
 //   - modern: none (zero JS).
@@ -91,7 +96,7 @@ func (b *Builder) legacyDocEnabled() bool {
 func (b *Builder) compatShimHTML() string {
 	switch b.Cfg.Compat.ModeOrDefault() {
 	case "legacy":
-		return "<script>" + renderer.LegacyHasJS + "</script>"
+		return bootScriptOpen + renderer.LegacyHasJS + "</script>"
 	case "hybrid":
 		return hybridShimScriptTag()
 	}
@@ -102,10 +107,10 @@ func (b *Builder) compatShimHTML() string {
 // document. The UA siblings swap it for the unconditional shim (legacy) or drop
 // it (modern).
 func hybridShimScriptTag() string {
-	return "<script>if(!(window.CSS&&CSS.supports&&CSS.supports('selector(:has(*))'))){" + renderer.LegacyHasJS + "}</script>"
+	return bootScriptOpen + "if(!(window.CSS&&CSS.supports&&CSS.supports('selector(:has(*))'))){" + renderer.LegacyHasJS + "}</script>"
 }
 
 // legacyShimScriptTag is the unconditional shim script for the legacy sibling.
 func legacyShimScriptTag() string {
-	return "<script>" + renderer.LegacyHasJS + "</script>"
+	return bootScriptOpen + renderer.LegacyHasJS + "</script>"
 }

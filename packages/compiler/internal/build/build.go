@@ -2609,7 +2609,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 	// ARIA roles that need synthesized state (tabs/listbox/disclosure) inject a
 	// tiny inline synchroniser. Every other CSS-signal page stays zero-JS.
 	if tree.NeedsCSSARIA {
-		emitResult.ScriptHTML += "<script>" + renderer.CSSARIAJS + "</script>"
+		emitResult.ScriptHTML += bootScriptOpen + renderer.CSSARIAJS + "</script>"
 	}
 
 	// Layouts wrap the page and are not part of its module graph, so record
@@ -3380,7 +3380,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 		}
 	}
 	if tree.NeedsCSSARIA {
-		emitResult.ScriptHTML += "<script>" + renderer.CSSARIAJS + "</script>"
+		emitResult.ScriptHTML += bootScriptOpen + renderer.CSSARIAJS + "</script>"
 	}
 
 	boundaryLink := renderer.FindBoundaryLink(tree)
