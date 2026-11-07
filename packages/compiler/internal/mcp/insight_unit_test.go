@@ -196,3 +196,19 @@ func TestCompatCheckReportsThePreactVersionForReactPackages(t *testing.T) {
 		t.Errorf("evidence = %v", m["evidence"])
 	}
 }
+
+// Results are scrubbed after JSON encoding, which doubles Windows backslashes.
+func TestScrubRootHandlesWindowsPaths(t *testing.T) {
+	svc := &Service{root: `C:\Users\me\app`}
+	for in, want := range map[string]string{
+		`C:\Users\me\app\src\a.tsx`:              `src\a.tsx`,
+		`C:/Users/me/app/src/a.tsx`:              `src/a.tsx`,
+		`{"m":"C:\\Users\\me\\app\\src\\a.tsx"}`: `{"m":"src\\a.tsx"}`,
+		`{"root":"C:\\Users\\me\\app"}`:          `{"root":"."}`,
+		`in C:\Users\me\app`:                     `in .`,
+	} {
+		if got := svc.scrubRoot(in); got != want {
+			t.Errorf("scrubRoot(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

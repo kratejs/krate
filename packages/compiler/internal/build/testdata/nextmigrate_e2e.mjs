@@ -25,7 +25,12 @@ const browser = await browserType.launch();
 try {
   const page = await browser.newPage();
   const errors = (globalThis.__pageErrors = []);
-  page.on("pageerror", (e) => errors.push(String(e)));
+  // WebKit logs a fetch cancelled by a navigation as an access-control error, and
+  // Playwright reports that as a page error even though the router caught it.
+  const cancelled = (e) => String(e).includes(`:${new URL(base).port}/ due to access control checks`);
+  page.on("pageerror", (e) => {
+    if (!cancelled(e)) errors.push(String(e));
+  });
   // WebKit refuses <link rel=prefetch> on plain-http origins and says so on the
   // console; that is the browser declining a hint, not an app error.
   const benign = /Prefetch request denied/;

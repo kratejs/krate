@@ -170,9 +170,15 @@ func (s *Service) scrubRoot(text string) string {
 	if s.root == "" || s.root == "/" {
 		return text
 	}
-	root := filepath.ToSlash(s.root)
-	text = strings.ReplaceAll(text, s.root+string(filepath.Separator), "")
+	root := strings.ReplaceAll(s.root, `\`, "/")
+	// Results are scrubbed as JSON too, where a Windows path has its backslashes
+	// doubled. Off Windows the root has none, so escaped equals s.root.
+	escaped := strings.ReplaceAll(s.root, `\`, `\\`)
+	text = strings.ReplaceAll(text, escaped+`\\`, "")
+	text = strings.ReplaceAll(text, s.root+`\`, "")
+	text = strings.ReplaceAll(text, s.root+"/", "")
 	text = strings.ReplaceAll(text, root+"/", "")
+	text = strings.ReplaceAll(text, escaped, ".")
 	text = strings.ReplaceAll(text, s.root, ".")
 	if root != s.root {
 		text = strings.ReplaceAll(text, root, ".")
