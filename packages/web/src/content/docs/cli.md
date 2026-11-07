@@ -135,6 +135,10 @@ krate dev
 - Shows compilation errors inline via the dev error overlay. If the first build
   fails, the browser shows an error page with the overlay and recovers on the
   next successful build.
+- Writes `.krate/dev-server.json` (URL and pid, removed on exit) and mirrors the
+  console output, one timestamped line per line, to `.krate/dev.log`. The
+  [MCP server](/docs/features/mcp/) uses them, and the loopback-only
+  `/__krate/state` endpoint, to report build and browser errors to agents.
 
 ## `krate serve`
 
