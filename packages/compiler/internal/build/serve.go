@@ -1958,6 +1958,14 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 			_ = json.NewEncoder(w).Encode(DevEvent{Type: "status", BuildOK: true})
 		})
 
+		// Full dev state (build diagnostics, recent browser errors) for tools
+		// such as the MCP server.
+		guard("/__krate/state", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Cache-Control", "no-store")
+			_ = json.NewEncoder(w).Encode(hub.Snapshot())
+		})
+
 		// Open a file in the developer's editor. The path is validated against
 		// the project root so the endpoint cannot be used to launch arbitrary
 		// files.
@@ -2281,6 +2289,14 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		displayHost = "localhost"
 	}
 	printf("%s  %s server -> %shttp://%s:%d%s %s(started in %s)%s\n", cGreen, label, cCyan, displayHost, addr.Port, cReset, cGray, time.Since(startTime).Round(time.Millisecond), cReset)
+	if hub != nil {
+		defer writeDevServerRecord(root, DevServerRecord{
+			Host:      displayHost,
+			Port:      addr.Port,
+			URL:       fmt.Sprintf("http://%s:%d", displayHost, addr.Port),
+			StartedAt: time.Now(),
+		})()
+	}
 
 	// Start ISR background revalidation - one timer per page, each route
 	// revalidating on its own cadence (previously every ISR page was revalidated

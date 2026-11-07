@@ -622,6 +622,10 @@ func writeHeapProfile(path string) {
 }
 
 func runDev(flags cliFlags, args []string) {
+	if root, _, err := loadConfig(flags, args); err == nil && root != "" {
+		// Mirror console output into .krate/dev.log for agents (MCP get_logs).
+		defer build.TeeDevLog(root)()
+	}
 	first := true
 	for {
 		if !runDevOnce(flags, args, first) {
