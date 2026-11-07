@@ -2,6 +2,7 @@ import {
   Suspense,
   lazy,
   use,
+  useEffect,
   useState,
   useTransition,
   useDeferredValue,
@@ -21,6 +22,21 @@ const greeting = later('Hello from use()', 700);
 const fast = later('fast', 300);
 const slow = later('slow', 900);
 const nested = later('nested content', 900);
+
+// Resolves after the browser test left the page: its effect must not mount.
+const probe = later('probe', 1200);
+
+function LeaveProbe() {
+  const text = use(probe);
+  useEffect(() => {
+    const w = window as unknown as { __leaveLog?: string[] };
+    (w.__leaveLog = w.__leaveLog || []).push('mounted at ' + location.pathname);
+    return () => {
+      w.__leaveLog!.push('unmounted');
+    };
+  }, []);
+  return <span data-testid="leave-probe">{text}</span>;
+}
 
 function Message(props: { source: Promise<string>; testid: string }) {
   const text = use(props.source);
@@ -84,6 +100,13 @@ export default function Page() {
         <h2>use(promise)</h2>
         <Suspense fallback={<span data-testid="use-fallback">Loading greeting...</span>}>
           <Message source={greeting} testid="use-content" />
+        </Suspense>
+      </section>
+
+      <section class="space-y-2">
+        <h2>Leaving while suspended</h2>
+        <Suspense fallback={<span data-testid="leave-fallback">Loading probe...</span>}>
+          <LeaveProbe />
         </Suspense>
       </section>
 
