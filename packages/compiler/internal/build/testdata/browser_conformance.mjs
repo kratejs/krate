@@ -70,6 +70,8 @@ try {
     if (msg.type() !== "error") return;
     // Resource 404s are reported with their URL by the response listener below.
     if (msg.text().startsWith("Failed to load resource")) return;
+    // WebKit refuses <link rel="prefetch"> over http; this server has no https.
+    if (msg.text() === "Prefetch request denied: URL must be secure (HTTPS)") return;
     const i = errors.push(msg.text()) - 1;
     const arg = msg.args()[0];
     if (arg && /^[A-Za-z]*Error$/.test(msg.text())) {
@@ -254,18 +256,41 @@ try {
   await waitText("lazy-panel", "Lazy panel: 0");
   await page.locator("[data-testid=lazy-panel]").click();
   await waitText("lazy-panel", "Lazy panel: 1");
+  // These record every committed state inside the page. A sample some time
+  // after the click reads the page before a loaded browser has handled it.
+  const recordSource = () =>
+    page.evaluate(() => {
+      const read = (id) => document.querySelector(`#root [data-testid="${id}"]`)?.textContent ?? null;
+      const states = (window.__sourceStates = []);
+      const note = () => {
+        const state = { content: read("source-content"), fallback: read("source-fallback"), pending: read("transition-pending") };
+        if (JSON.stringify(state) !== JSON.stringify(states[states.length - 1])) states.push(state);
+      };
+      note();
+      window.__sourceRecorder = new MutationObserver(note);
+      window.__sourceRecorder.observe(document.querySelector("#root"), { subtree: true, childList: true, characterData: true, attributes: true });
+    });
+  const sourceStates = () =>
+    page.evaluate(() => {
+      window.__sourceRecorder.disconnect();
+      return window.__sourceStates;
+    });
+  await recordSource();
   await page.locator("[data-testid=source-urgent]").click();
-  await page.waitForTimeout(30);
-  if ((await text("source-fallback")) !== "Loading source...") fail("suspense: urgent update must show the fallback again");
   await waitText("source-content", "urgent");
-  await page.locator("[data-testid=source-transition]").click();
-  await page.waitForTimeout(30);
-  const during = { content: await text("source-content"), fallback: await text("source-fallback"), pending: await text("transition-pending") };
-  if (during.content !== "urgent" || during.fallback !== null || during.pending !== "pending") {
-    fail(`suspense: a transition must keep the revealed content: ${JSON.stringify(during)}`);
+  if (!(await sourceStates()).some((s) => s.fallback === "Loading source...")) {
+    fail("suspense: urgent update must show the fallback again");
   }
+  await page.waitForFunction(() => document.querySelector('#root [data-testid="source-fallback"]') === null, null, { timeout: 8000 });
+  await recordSource();
+  await page.locator("[data-testid=source-transition]").click();
   await waitText("source-content", "transition");
   await waitText("transition-pending", "idle");
+  const transition = await sourceStates();
+  const lost = transition.filter((s) => s.fallback !== null || s.content === null);
+  if (!transition.some((s) => s.pending === "pending" && s.content === "urgent") || lost.length > 0) {
+    fail(`suspense: a transition must keep the revealed content: ${JSON.stringify(transition)}`);
+  }
   await page.locator("[data-testid=action-start]").click();
   if ((await text("action-pending")) !== "pending") fail("suspense: async action must keep isPending true");
   await waitText("action-result", "saved");

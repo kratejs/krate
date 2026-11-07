@@ -311,8 +311,8 @@ func TestBrowserToolsAreGatedAndExplainMissingPlaywright(t *testing.T) {
 }
 
 func TestBrowserToolsDriveARealBrowserWhenPlaywrightIsPresent(t *testing.T) {
-	if testing.Short() {
-		t.Skip("launches Chromium")
+	if testing.Short() || os.Getenv("KRATE_BROWSER") == "" {
+		t.Skip("launches Chromium, so it runs with the browser conformance jobs")
 	}
 	pwRoot := findPlaywrightNodeModules()
 	if pwRoot == "" {

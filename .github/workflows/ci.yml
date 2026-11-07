@@ -424,6 +424,13 @@ jobs:
           KRATE_REQUIRE_E2E: "1"
           KRATE_HYDRATION_BUDGET_MS: "2500"
 
+      - name: MCP browser tools
+        if: matrix.browser == 'chromium'
+        run: go test -run TestBrowserToolsDriveARealBrowser -count=1 ./internal/mcp
+        working-directory: packages/compiler
+        env:
+          KRATE_BROWSER: ${{ matrix.browser }}
+
       # React 19 vs Krate differential over the R2/R3 corpus. Fails on any
       # divergence not listed in testdata/reactbrowser/divergences.json.
       - name: React browser differential

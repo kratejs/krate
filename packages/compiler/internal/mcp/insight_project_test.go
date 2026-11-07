@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/kratejs/krate/packages/compiler/internal/kratedocs"
 )
 
 func TestCompileMiddlewareMatcherMatchesRuntimeSemantics(t *testing.T) {
@@ -390,7 +392,8 @@ func TestCompatCheckUsesPackageMetadataAndDocs(t *testing.T) {
 		t.Errorf("plain = %v", p)
 	}
 	z := mustOK(t, svc, "compat_check", map[string]any{"package": "zustand"})
-	if len(list(t, z, "docs")) == 0 || z["verdict"] != "documented" {
+	// The docs are generated, so a test run without `pnpm sync:docs` has none.
+	if len(kratedocs.Docs()) > 0 && (len(list(t, z, "docs")) == 0 || z["verdict"] != "documented") {
 		t.Errorf("zustand is documented in the compatibility docs: %v", z)
 	}
 	if msg := mustFail(t, svc, "compat_check", map[string]any{"package": "../../etc"}); !strings.Contains(msg, "npm package name") {

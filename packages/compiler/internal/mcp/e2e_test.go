@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -36,6 +37,9 @@ func buildKrateBinary(t *testing.T) string {
 			return
 		}
 		krateBinPath = filepath.Join(dir, "krate")
+		if runtime.GOOS == "windows" {
+			krateBinPath += ".exe"
+		}
 		cmd := exec.Command("go", "build", "-o", krateBinPath, "../../cmd/krate")
 		if out, err := cmd.CombinedOutput(); err != nil {
 			krateBinErr = fmt.Errorf("go build: %v\n%s", err, out)
