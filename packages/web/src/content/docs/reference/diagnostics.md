@@ -634,6 +634,12 @@ A CSS scope handle (`const tab = createCSSChoice(...)`) is a build-time value: t
 
 The state of a CSS signal lives in the page (hidden inputs and :has() selectors), so no value exists at build time. A component without client state is rendered to static HTML during the build, which makes a CSS signal getter or setter passed to it unreadable: `props.tab()` has nothing to return. Pass the scope handle instead (`const tab = createCSSChoice(...)`, `<Child scope={tab} />`) and use `props.scope.current()`, `props.scope.panel()` or `props.scope.trigger()` in the child, or give the child its own state with createSignal.
 
+### KR8350
+
+**outDir would delete project sources**
+
+The build empties outDir before it writes the site, and `krate clean` deletes it. An outDir that is, or contains, the project root, the pages directory or the public directory (`outDir: ".."`, `"."`, `"src"`) would delete the project's own files, so the build stops before anything is removed. Point outDir at a dedicated directory such as `dist`; a directory outside the project that holds none of your sources, such as `../site-dist`, is fine. Setting KRATE_ALLOW_UNSAFE_OUTDIR=1 skips this check.
+
 ### KR8601
 
 **Unsupported page segment export value**
