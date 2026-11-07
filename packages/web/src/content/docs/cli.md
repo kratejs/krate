@@ -61,7 +61,11 @@ For a documentation site, use `create-krate-docs` instead.
 
 ## `krate build`
 
-Builds the site into `outDir` (default `dist`).
+Builds the site into `outDir` (default `dist`). The build empties `outDir` first,
+so it stops with `KR8350`, before deleting anything, when `outDir` is, or
+contains, the project root, `pagesDir` or `publicDir` (for example `outDir: ".."`
+or `"."`). A directory outside the project that holds none of those, such as
+`../site-dist`, is fine.
 
 ```sh
 krate build
@@ -135,6 +139,10 @@ krate dev
 - Shows compilation errors inline via the dev error overlay. If the first build
   fails, the browser shows an error page with the overlay and recovers on the
   next successful build.
+- Writes `.krate/dev-server.json` (URL and pid, removed on exit) and mirrors the
+  console output, one timestamped line per line, to `.krate/dev.log`. The
+  [MCP server](/docs/features/mcp/) uses them, and the loopback-only
+  `/__krate/state` endpoint, to report build and browser errors to agents.
 
 ## `krate serve`
 
@@ -329,7 +337,17 @@ serverless targets: `krate deploy` fails naming them (use `--target docker`).
 Static-only hosts (`gh-pages`) fail for projects with server features unless you
 pass `--static-only`, which publishes only the static pages.
 
+An unknown `--target` fails before the build starts, listing the valid targets.
+
 See [Deployment](/docs/guides/deployment/) for details.
+
+## `krate doctor`
+
+Prints the krate and toolchain versions, the resolved config, runtimes, and the
+cache directory. It exits with status 1 when the config does not load or the
+cache directory cannot be written, so it can gate a CI step; missing optional
+tools only print. It also warns when the installed `@krate/core` and the running
+binary are different versions.
 
 ## `krate clean`
 
@@ -338,6 +356,10 @@ Removes the output directory (`dist`) and the compiler cache (`.krate/cache`):
 ```sh
 krate clean
 ```
+
+`krate clean` refuses to run when `outDir` is, or contains, the project root,
+`pagesDir` or `publicDir` (for example `outDir: "."`), so a misconfigured
+output directory cannot delete your sources. `krate build` applies the same check.
 
 ## `krate go:init`
 

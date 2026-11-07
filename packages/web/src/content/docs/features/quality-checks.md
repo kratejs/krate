@@ -110,6 +110,12 @@ lists the valid values, so a mistyped CI gate cannot pass silently. Use
 (categories and `rules`) accept `"error"`, `"warning"` or `"off"`, and
 `ignore`/`custom` entries must be strings.
 
+Keys the compiler does not read are not silently dropped: an unknown key in
+`checks` or `checks.budget` (`failon` instead of `failOn`), or a rule ID in
+`rules` or `ignore` that starts with `a11y/`, `seo/` or `perf/` but names no
+built-in rule (`a11y/img-atl`), prints a config warning with the nearest valid
+name. IDs with any other prefix, such as `custom/...`, are not checked.
+
 ### Perf budgets
 
 Budget values are per-route **kilobytes**. Four independent budgets are

@@ -228,7 +228,23 @@ function onRootBubble(this: Node, native: Event): void {
   dispatchRoot(native, false);
 }
 
+// React turns its event system off while it commits: the blur and focus a
+// browser fires when a focused node is moved or removed must not reach
+// handlers. Keyed list updates run their DOM moves inside this.
+let muted = 0;
+
+/** Runs fn with delegated and direct handlers silenced (internal). */
+export function krateMuteEvents<T>(fn: () => T): T {
+  muted++;
+  try {
+    return fn();
+  } finally {
+    muted--;
+  }
+}
+
 function dispatchRoot(native: Event, capture: boolean): void {
+  if (muted > 0) return;
   // Several roots can be on the path (a portal inside the root); the first
   // listener to see the event handles the whole path.
   const flag = capture ? '__kdc' : '__kdb';
@@ -260,6 +276,7 @@ function onDirectCapture(this: Node, native: Event): void {
 }
 
 function directDispatch(el: Node, native: Event, capture: boolean): void {
+  if (muted > 0) return;
   const m = (el as KNode).__kh;
   const h = m && m[native.type + (capture ? '$' : '')];
   if (!h) return;

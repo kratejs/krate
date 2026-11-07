@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -202,5 +204,47 @@ func TestValidateServerAndSidecar(t *testing.T) {
 	c.API.Sidecar = &SidecarConfig{Command: "node", Port: 8080}
 	if _, err := c.Validate(); err != nil {
 		t.Errorf("valid supervised sidecar should pass: %v", err)
+	}
+}
+
+// TestUnknownKeyWarningsInsideChecks verifies typos in the free-form `checks`
+// map are reported, with the nearest valid name.
+func TestUnknownKeyWarningsInsideChecks(t *testing.T) {
+	raw := []byte(`{"checks":{"failon":"warning","budget":{"jss":1},"rules":{"a11y/img-atl":"off"},"ignore":["seo/cannonical","custom/mine"]}}`)
+	joined := strings.Join(UnknownKeyWarnings(raw), "\n")
+	for _, want := range []string{
+		`"checks.failon" (ignored; did you mean "failOn"?)`,
+		`"checks.budget.jss" (ignored; did you mean "js"?)`,
+		`"checks.rules.a11y/img-atl" (ignored; did you mean "a11y/img-alt"?)`,
+		`"checks.ignore.seo/cannonical" (ignored; did you mean "seo/canonical"?)`,
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("missing warning %s in:\n%s", want, joined)
+		}
+	}
+	if strings.Contains(joined, "custom/mine") {
+		t.Errorf("custom rule IDs must not warn:\n%s", joined)
+	}
+	ok := []byte(`{"checks":{"a11y":"error","budget":{"js":100},"failOn":"error","rules":{"perf/js-budget":"off"}}}`)
+	if w := UnknownKeyWarnings(ok); len(w) != 0 {
+		t.Errorf("valid checks warned: %v", w)
+	}
+}
+
+// TestLoadWarnsOnUnknownChecksKey runs the real loader so both the static and
+// the evaluated config paths reach the warning.
+func TestLoadWarnsOnUnknownChecksKey(t *testing.T) {
+	dir := t.TempDir()
+	src := "export default {\n  entry: 'src/index.tsx',\n  checks: { failon: 'warning', a11y: 'error' },\n}\n"
+	if err := os.WriteFile(filepath.Join(dir, "krate.config.ts"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	Warnings = nil
+	t.Cleanup(func() { Warnings = nil })
+	if _, err := Load(dir); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(Warnings, "\n"), `"checks.failon" (ignored; did you mean "failOn"?)`) {
+		t.Fatalf("Load did not warn about checks.failon; warnings: %v", Warnings)
 	}
 }

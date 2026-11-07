@@ -48,6 +48,8 @@ try {
     const b = await live.newPage();
     const errors = [];
     b.on("pageerror", (e) => errors.push(String(e)));
+    // The runtime reports a failed hydration scope through console.error.
+    b.on("console", (m) => { if (m.type() === "error") errors.push("console: " + m.text()); });
     await b.goto(base + c.path);
     await b.waitForLoadState("networkidle");
     if (c.click) {

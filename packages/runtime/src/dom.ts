@@ -1,4 +1,4 @@
-import { createEffect, onCleanup } from './signal.js';
+import { createEffect, onCleanup, krateGetOwner, krateSetOwner } from './signal.js';
 import { krateWithOwner, krateUnmount } from './effects.js';
 import { krateSanitizeAttr } from './slots.js';
 import { krateOn, krateControl, krateSetControl } from './events.js';
@@ -56,7 +56,15 @@ function trackOwner(value: unknown, owner: unknown): void {
     trackEffect(value, unmount);
   } else if (Array.isArray(value)) {
     for (const v of value) trackOwner(v, owner);
+  } else if (isVNode(value)) {
+    // Not mounted yet: the unmount is registered on the element it becomes.
+    (value.u || (value.u = [])).push(owner);
   }
+}
+
+// Registers the unmounts of the components a vnode is the root of.
+function trackVNodeOwners(v: KrateVNode, el: Node): void {
+  if (v.u) for (const o of v.u) trackEffect(el, () => krateUnmount(o));
 }
 
 /**
@@ -148,7 +156,7 @@ export function insert(parent: Node, value: unknown, startMarker: Node): void {
 /** Insert a value (or array of values) before a reference node. */
 function insertBefore(parent: Node, value: unknown, before: Node | null): void {
   if (value == null || value === false || value === true) return;
-  if (typeof value === 'string' || typeof value === 'number') {
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'bigint') {
     parent.insertBefore(document.createTextNode(String(value)), before);
   } else if (value instanceof Node) {
     parent.insertBefore(value, before);
@@ -274,7 +282,9 @@ function setAttr(el: Element, key: string, value: unknown): void {
     // aria-* and data-* stringify booleans (aria-selected={false} renders
     // "false"), as in React.
     const stringly = /^(aria|data)-/.test(name);
-    if (value === null || value === undefined || (value === false && !stringly)) {
+    // A function (or symbol) is not an attribute value: React drops it rather
+    // than writing its source, e.g. a signal getter inside a spread object.
+    if (value === null || value === undefined || typeof value === 'function' || typeof value === 'symbol' || (value === false && !stringly)) {
       if (el.hasAttribute(name)) el.removeAttribute(name);
     } else {
       const next = value === true && !stringly ? '' : krateSanitizeAttr(name, String(value));
@@ -344,6 +354,23 @@ export interface KrateVNode {
   tag: string;
   props: Record<string, unknown> | null;
   children: unknown[];
+  /** Effect owner current when h() ran: the component the element belongs to. */
+  o?: unknown;
+  /** Components this element is the root of; unmounted with the element. */
+  u?: unknown[];
+}
+
+// Runs fn with the vnode's component as the current effect owner, so the
+// effects and components created when the vnode is adopted or materialized
+// (later, outside the component's own call) are its children.
+function withOwner<T>(owner: unknown, fn: () => T): T {
+  if (owner === undefined) return fn();
+  const prev = krateSetOwner(owner);
+  try {
+    return fn();
+  } finally {
+    krateSetOwner(prev);
+  }
 }
 
 /** A value that knows how to mount itself or adopt server-rendered DOM. */
@@ -438,7 +465,9 @@ function buildElement(tag: string, props: Record<string, unknown> | null, childr
 }
 
 function materialize(v: KrateVNode): Node {
-  return withDOM(() => buildElement(v.tag, v.props, v.children));
+  const el = withOwner(v.o, () => withDOM(() => buildElement(v.tag, v.props, v.children)));
+  trackVNodeOwners(v, el);
+  return el;
 }
 
 function isTextLike(v: unknown): boolean {
@@ -614,12 +643,15 @@ function adoptElement(v: KrateVNode, c: AdoptCursor): void {
   if (n && n.nodeType === 1 && (n as Element).localName.toLowerCase() === v.tag.toLowerCase()) {
     c.next = n.nextSibling;
     const el = n as Element;
-    if (v.props) applyProps(el, v.props);
-    if (!v.props || !v.props.dangerouslySetInnerHTML) {
-      const inner: AdoptCursor = { parent: el, next: el.firstChild };
-      for (const child of v.children) adoptValue(child, inner);
-      removeRest(inner, null);
-    }
+    trackVNodeOwners(v, el);
+    withOwner(v.o, () => {
+      if (v.props) applyProps(el, v.props);
+      if (!v.props || !v.props.dangerouslySetInnerHTML) {
+        const inner: AdoptCursor = { parent: el, next: el.firstChild };
+        for (const child of v.children) adoptValue(child, inner);
+        removeRest(inner, null);
+      }
+    });
     return;
   }
   insertAt(c, materialize(v));
@@ -692,7 +724,7 @@ export function h(
   }
 
   if (vnodeDepth > 0) {
-    return { __kv: 1, tag, props, children } as unknown as Node;
+    return { __kv: 1, tag, props, children, o: krateGetOwner() } as unknown as Node;
   }
   return buildElement(tag, props, children);
 }

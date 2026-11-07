@@ -59,7 +59,8 @@ func TestFixTSConfigBaseURLResolvesAliasAfterwards(t *testing.T) {
 	root := writeProject(t, tsconfig040, "src/components")
 	cfg := &config.Config{}
 	cfg.LoadTSConfigPaths(root)
-	if got := cfg.PathAliases[0].Targets[0]; got != "./src/*" || filepath.ToSlash(cfg.TSBaseDir) != filepath.ToSlash(filepath.Join(root, "src")) {
+	// Before the fix the compiler reads the target from the project root.
+	if got := cfg.PathAliases[0].Targets[0]; got != filepath.ToSlash(filepath.Join(root, "src"))+"/*" || filepath.ToSlash(cfg.TSBaseDir) != filepath.ToSlash(filepath.Join(root, "src")) {
 		t.Fatalf("precondition: baseDir=%s target=%s", cfg.TSBaseDir, got)
 	}
 	if _, err := Run(root, true); err != nil {
@@ -69,6 +70,9 @@ func TestFixTSConfigBaseURLResolvesAliasAfterwards(t *testing.T) {
 	cfg.LoadTSConfigPaths(root)
 	if filepath.Clean(cfg.TSBaseDir) != filepath.Clean(root) {
 		t.Fatalf("TSBaseDir = %s, want %s", cfg.TSBaseDir, root)
+	}
+	if got := cfg.PathAliases[0].Targets[0]; got != "./src/*" {
+		t.Fatalf("target after the fix = %s, want it untouched", got)
 	}
 }
 

@@ -72,8 +72,8 @@ func TestLegacyConstString(t *testing.T) {
 			t.Errorf("legacyConstString(%#v) = %q, want %q", c.v, got, c.want)
 		}
 	}
-	if got := legacyConstString(&ast.Identifier{Name: "x"}, jsvalue.Dynamic("x")); got != "x" {
-		t.Errorf("unresolved identifier keeps its name, got %q", got)
+	if got := legacyConstString(&ast.Identifier{Name: "x"}, jsvalue.Dynamic("x")); got != "" {
+		t.Errorf("an unresolved identifier must not render as its name, got %q", got)
 	}
 }
 

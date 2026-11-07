@@ -61,6 +61,8 @@ type Service struct {
 	policyLiteralRedactions []string
 	roots                   []workspaceRoot
 	index                   *workspaceIndex
+	dev                     devManager
+	ins                     insightState
 
 	// runMu serializes write operations and build/check (which swap os.Stdout
 	// during stdout capture) so concurrent requests never race.
@@ -553,6 +555,8 @@ func (s *Service) Register(srv *Server) {
 		Handler:     s.toolEditContent,
 	})
 
+	s.registerInsightTools(srv)
+
 	// resources
 	srv.RegisterResource(Resource{
 		URI:         "krate://routes",
@@ -621,6 +625,7 @@ func (s *Service) Register(srv *Server) {
 	srv.RegisterPrompt(s.promptAuditDependencies())
 	srv.RegisterPrompt(s.promptScaffoldComponent())
 	srv.RegisterPrompt(s.promptExplore())
+	s.registerInsightPrompts(srv)
 
 	// completions
 	srv.RegisterCompletion("ref/resource", "krate://page/{route}", "route", s.completeRoutes)

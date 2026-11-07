@@ -409,8 +409,16 @@ func (e *SSREval) reportUnknown(expr ast.Expr, v jsvalue.Value, context string) 
 			Code:    diag.CodeModuleValueUnknown})
 		return
 	}
-	e.addDiag(pos, "cannot evaluate `"+src+"` at build time: "+v.Reason()+" (in "+context+")",
-		"signal-less components are rendered to static HTML at build time, so every value they render must be a prop, a local, or a module constant")
+	hint := "signal-less components are rendered to static HTML at build time, so every value they render must be a prop, a local, or a module constant; " +
+		"if it changes after load, give the component state (createSignal or useState) so it hydrates, or use a *.runtime.tsx component for a per-request value"
+	if name, ok := strings.CutPrefix(v.Reason(), "unresolved identifier "); ok {
+		hint = "`" + name + "` is not a prop, a local or a module constant where this component is rendered at build time. " +
+			"Import it, declare it in the component or the module, or pass it as a prop; " +
+			"a component that holds state (createSignal or useState) is not rendered this way, so check that `" + name + "` is not a signal or hook of another component"
+	}
+	e.errs = append(e.errs, diag.Diagnostic{Line: pos.Line, Col: pos.Col,
+		Message: "cannot evaluate `" + src + "` at build time: " + v.Reason() + " (in " + context + ")",
+		Hint:    hint, Code: diag.CodeBuildTimeUnknown})
 }
 
 // Value evaluation
@@ -909,6 +917,10 @@ func (e *SSREval) foldTagExpr(expr ast.Expr) string {
 			return e.foldTagExpr(t.Consequent)
 		}
 		return e.foldTagExpr(t.Alternate)
+	case *ast.MemberExpr:
+		if tag := irtree.SlotMemberTag(t); tag != "" {
+			return tag
+		}
 	case *ast.TypeAssertion:
 		return e.foldTagExpr(t.Expr)
 	case *ast.ParenExpr:
@@ -1403,7 +1415,7 @@ func (e *SSREval) evalJSX(el *ast.JSXElement) string {
 
 	// <Slot> (the `asChild` primitive): render its single child element with
 	// the Slot's own attributes merged onto it, instead of wrapping.
-	if name == "Slot" {
+	if name == "Slot" || name == "Slot.Root" || name == "Slot.Slot" {
 		if html, ok := e.evalSlot(el); ok {
 			return html
 		}

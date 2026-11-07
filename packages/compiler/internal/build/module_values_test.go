@@ -342,6 +342,22 @@ export default function Page() {
 	}
 }
 
+// An async page is a server component: its process.env reads are real, so the
+// client/static KR8310 warning must not fire for it.
+func TestAsyncServerPageEnvReadIsNotWarned(t *testing.T) {
+	html, js, out := envProject(t, map[string]string{"SECRET_TOKEN": "do-not-leak-1234"}, `
+export const revalidate = 60;
+export default async function Page() {
+  return <main><p>{process.env.SECRET_TOKEN ?? "none"}</p></main>;
+}`)
+	if strings.Contains(out, "KR8310") {
+		t.Errorf("KR8310 fired for a server component:\n%s", out)
+	}
+	if strings.Contains(html+js, "do-not-leak-1234") {
+		t.Errorf("secret reached client output")
+	}
+}
+
 // A static page reading a module-level factory value built with `new Set`
 // must not render an empty slot with no code and no diagnostic.
 func TestStaticReadOfFactoryModuleValueIsNotSilentlyEmpty(t *testing.T) {

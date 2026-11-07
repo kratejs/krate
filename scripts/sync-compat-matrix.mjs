@@ -11,7 +11,7 @@ const check = process.argv.includes("--check");
 const matrix = JSON.parse(fs.readFileSync(source, "utf8"));
 const labels = {
   stable: "Stable",
-  beta: "Beta",
+  supported: "Supported",
   partial: "Partial",
   planned: "Planned",
   "n/a": "n/a",
@@ -40,7 +40,7 @@ const lines = [
   "# Compatibility Matrix",
   "",
   "This is the support contract for React compatibility. A surface is only marked",
-  "stable when the referenced corpus and browser tests pass. Known divergences are",
+  "supported or stable when the referenced tests pass. Known divergences are",
   "listed instead of silently hidden.",
   "",
   `Last verified: **${matrix.updated}**. See the [roadmap](/roadmap/) for phase`,
@@ -50,7 +50,7 @@ const lines = [
   "## Status key",
   "",
   "- **Stable** - covered by the corpus and the cross-browser gate.",
-  "- **Beta** - implemented and tested; edge cases may still change before v1.",
+  "- **Supported** - implemented and backed by the tests listed under Evidence, which run in CI; edge cases may still change before v1.",
   "- **Partial** - a documented subset works; unsupported patterns must produce a diagnostic.",
   "- **Planned** - not part of the supported surface yet.",
   "",

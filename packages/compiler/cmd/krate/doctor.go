@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -38,9 +39,14 @@ func runDoctor(flags cliFlags, args []string) {
 	fmt.Printf("  os/arch      %s/%s\n", runtime.GOOS, runtime.GOARCH)
 	fmt.Printf("  project      %s\n", root)
 
+	// problems are failed checks (not warnings). They decide the exit status, so
+	// `krate doctor` can gate a CI step.
+	problems := 0
+
 	// Config.
 	cfg, err := config.Load(root, flags.ConfigPath)
 	if err != nil {
+		problems++
 		fmt.Printf("  %sx config%s     %v\n", cRed, cReset, err)
 	} else {
 		for _, w := range config.Warnings {
@@ -99,8 +105,11 @@ func runDoctor(flags cliFlags, args []string) {
 	}
 
 	// Dependencies: the config imports @krate/core.
-	if _, err := os.Stat(filepath.Join(root, "node_modules", "@krate", "core", "package.json")); err == nil {
+	if data, err := os.ReadFile(filepath.Join(root, "node_modules", "@krate", "core", "package.json")); err == nil {
 		fmt.Printf("  %s+ deps%s       @krate/core present\n", cGreen, cReset)
+		if note := coreVersionNote(string(data), version); note != "" {
+			fmt.Printf("  %s! deps%s       %s\n", cYellow, cReset, note)
+		}
 	} else {
 		fmt.Printf("  %s- deps%s       @krate/core not found (run your package manager install)\n", cGray, cReset)
 	}
@@ -108,20 +117,41 @@ func runDoctor(flags cliFlags, args []string) {
 	// Cache directory writability.
 	cacheDir := filepath.Join(root, ".krate", "cache")
 	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
-		fmt.Printf("  %s! cache%s      cannot create %s: %v\n", cYellow, cReset, cacheDir, err)
+		problems++
+		fmt.Printf("  %sx cache%s      cannot create %s: %v\n", cRed, cReset, cacheDir, err)
 	} else {
 		probe := filepath.Join(cacheDir, ".doctor-write-test")
 		if err := os.WriteFile(probe, []byte("ok"), 0o644); err == nil {
 			_ = os.Remove(probe)
 			fmt.Printf("  %s+ cache%s      writable (%s)\n", cGreen, cReset, cacheDir)
 		} else {
-			fmt.Printf("  %s! cache%s      not writable: %v\n", cYellow, cReset, err)
+			problems++
+			fmt.Printf("  %sx cache%s      not writable: %v\n", cRed, cReset, err)
 		}
 	}
 
 	// Key files.
 	reportFile(root, "tsconfig.json")
 	reportFile(root, "krate.state.json")
+
+	if problems > 0 {
+		fmt.Fprintf(os.Stderr, "\n%sDoctor found %d problem(s).%s\n", cRed, problems, cReset)
+		os.Exit(1)
+	}
+}
+
+// coreVersionNote compares the installed @krate/core with this binary. They are
+// published together, so a difference means a stale platform package or a
+// binary on PATH from another install. It returns "" when they match, the
+// binary is an unversioned dev build, or the manifest cannot be read.
+func coreVersionNote(manifest, binary string) string {
+	var pkg struct {
+		Version string `json:"version"`
+	}
+	if json.Unmarshal([]byte(manifest), &pkg) != nil || pkg.Version == "" || binary == "dev" || pkg.Version == binary {
+		return ""
+	}
+	return fmt.Sprintf("@krate/core is v%s but this krate binary is v%s; reinstall, or run the binary from node_modules/.bin", pkg.Version, binary)
 }
 
 // nodeVersionAtLeast reports whether a `node --version` string (e.g. "v20.11.1")

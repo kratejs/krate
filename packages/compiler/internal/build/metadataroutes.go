@@ -303,7 +303,7 @@ func (b *Builder) paramSetsFor(f metaRouteFile, pages []string) ([]map[string]st
 		if out == "" || out != f.URLDir {
 			continue
 		}
-		res := b.resolveStaticParamsPage(p)
+		res := b.resolveStaticParamsPageOnce(p)
 		if len(res.expanded) == 0 {
 			continue
 		}

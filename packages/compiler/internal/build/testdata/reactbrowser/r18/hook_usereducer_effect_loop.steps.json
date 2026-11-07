@@ -1,0 +1,5 @@
+{ "steps": [
+  { "op": "click", "sel": "#t5" },
+  { "op": "click", "sel": "#reset" },
+  { "op": "wait", "ms": 50 }
+] }

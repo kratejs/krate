@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writ
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { commandSpec, quoteWindowsArg } from '../src/spawn.js';
-import { ensureExecutable, isInstalledPackage, printVersion, resolveBinary, spawnFailure, versionMismatchWarning } from '../src/binary.js';
+import { ensureExecutable, isInstalledPackage, printVersion, resolveBinary, scaffoldTag, spawnFailure, versionMismatchWarning } from '../src/binary.js';
 
 describe('commandSpec', () => {
   it('spawns directly without a shell on POSIX', () => {
@@ -186,5 +186,20 @@ describe('spawnFailure', () => {
 
   it('passes other errors through', () => {
     expect(spawnFailure(failure('EBUSY'), '/x')).toBe('Failed to run krate binary: spawn x EBUSY');
+  });
+});
+
+describe('scaffoldTag', () => {
+  it('follows the pre-release channel the release publishes', () => {
+    expect(scaffoldTag('0.5.0-beta.3')).toBe('beta');
+    expect(scaffoldTag('0.5.0-alpha.4')).toBe('alpha');
+    expect(scaffoldTag('1.0.0-rc.1')).toBe('rc');
+    expect(scaffoldTag('1.0.0-rc1')).toBe('rc1');
+  });
+
+  it('asks for latest on a stable version', () => {
+    expect(scaffoldTag('0.5.0')).toBe('latest');
+    expect(scaffoldTag('1.2.3+build.5')).toBe('latest');
+    expect(scaffoldTag('dev')).toBe('latest');
   });
 });

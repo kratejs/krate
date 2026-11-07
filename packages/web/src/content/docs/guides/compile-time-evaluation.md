@@ -134,6 +134,41 @@ statement. A component rendered at build time (`@static`, `@server`) has no run
 time, so the build fails with [KR8322](/docs/reference/diagnostics/#kr8322).
 Make the top-level code plain, or compute the value in one expression.
 
+## Values the build cannot know
+
+A value that is not known at build time never renders as its own spelling. An
+unresolved identifier, `window.innerWidth`, or a signal seeded from one renders
+empty in the static HTML and is filled in when the page hydrates:
+
+```tsx
+const initial = window.innerWidth;
+const [width] = createSignal(initial);
+
+<p>{width()}</p> // empty before hydration, the width after
+```
+
+A signal seeded from a constant (`const initial = 5`) renders that value in
+every component, including components the page renders as children.
+
+## Props
+
+`props.label` is the value the caller passed. A prop the caller left out is
+`undefined`, or its default (`{ label = "x" }`), even when the module or the
+component has a constant or local with the same name:
+
+```tsx
+const label = "module";
+
+function Card({ label = "dflt" }) { return <p>{label}</p>; }
+
+<Card /> // <p>dflt</p>
+```
+
+Parameters that rename or nest (`{ item: { id, tags: [first, ...rest] = [] } }`)
+bind their names by destructuring the passed props, at build time and in the
+hydration code. A signal passed to a parameter the build keeps destructured is
+read once; the build warns and suggests reading `props.<name>` to keep it live.
+
 ## Reactive values
 
 A known initial value is not the same as a static value. If an expression reads

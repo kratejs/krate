@@ -504,3 +504,35 @@ func TestInjectDynamicRoutePlaceholdersSkipsClientRoot(t *testing.T) {
 		t.Error("client dynamic-route root must not be frozen to a sentinel")
 	}
 }
+
+// The embedded evaluator must see the shell environment plus the .env files,
+// the shell winning, like the Node runtime does.
+func TestEmbeddedGenerateStaticParamsSeesShellEnv(t *testing.T) {
+	t.Setenv("KRATE_TEST_GSP_SHELL", "from-shell")
+	t.Setenv("KRATE_TEST_GSP_BOTH", "shell-wins")
+	tmpDir := t.TempDir()
+	pagePath := filepath.Join(tmpDir, "src", "pages", "p", "[id].tsx")
+	if err := os.MkdirAll(filepath.Dir(pagePath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	src := `export default function P() { return <div/>; }
+export function generateStaticParams() {
+  return [{ id: [process.env.KRATE_TEST_GSP_SHELL, process.env.KRATE_TEST_GSP_FILE, process.env.KRATE_TEST_GSP_BOTH].join("_") }];
+}
+`
+	if err := os.WriteFile(pagePath, []byte(src), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.PagesDir = filepath.Join(tmpDir, "src", "pages")
+	cfg.OutDir = filepath.Join(tmpDir, "dist")
+	b := New(tmpDir, cfg)
+	b.Env = map[string]string{"KRATE_TEST_GSP_FILE": "from-file"}
+	got, err := b.executeGenerateStaticParams(pagePath, b.newBundler())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0]["id"] != "from-shell_from-file_shell-wins" {
+		t.Fatalf("params = %v, want the shell and file values joined", got)
+	}
+}

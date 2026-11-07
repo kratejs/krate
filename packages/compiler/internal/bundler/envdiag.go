@@ -44,7 +44,7 @@ func (b *Bundler) envReadDiags(path, src string, prog *ast.Program, class Compon
 	if !strings.Contains(src, "import.meta.env") && !strings.Contains(src, "process.env") {
 		return nil
 	}
-	if strings.Contains(src, "use server") {
+	if strings.Contains(src, "use server") || exportsAsyncFunction(prog) {
 		return nil
 	}
 	lines := strings.Split(src, "\n")
@@ -88,4 +88,29 @@ func (b *Bundler) envReadDiags(path, src string, prog *ast.Program, class Compon
 		return true
 	})
 	return out
+}
+
+// exportsAsyncFunction reports whether the module exports an async function.
+// An async component is a server component: it renders per request on the
+// server, where process.env is the real environment.
+func exportsAsyncFunction(prog *ast.Program) bool {
+	for _, stmt := range prog.Body {
+		ex, ok := stmt.(*ast.ExportStmt)
+		if !ok {
+			continue
+		}
+		switch d := ex.Declaration.(type) {
+		case *ast.FnDecl:
+			if d.Async {
+				return true
+			}
+		case *ast.VarStmt:
+			for _, decl := range d.Decls {
+				if fn, ok := decl.Init.(*ast.ArrowFn); ok && fn.Async {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }

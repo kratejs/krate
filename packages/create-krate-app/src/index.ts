@@ -5,13 +5,15 @@ import {
   readdirSync,
   readFileSync,
   copyFileSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { basename, dirname, extname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { createInterface } from 'node:readline/promises';
 import { escapeDisplayName } from './escape.js';
+import { projectNames } from './names.js';
+import { ask } from './prompt.js';
 import { commandSpec } from './spawn.js';
 import { krateRange } from './version.js';
 import { stdin as input, stdout as output } from 'node:process';
@@ -75,26 +77,6 @@ function fail(message: string): never {
   process.exit(1);
 }
 
-function toValidPackageName(name: string): string {
-  const cleaned = name
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, '-')
-    .replace(/[^a-z0-9-_]/g, '')
-    .replace(/^[^a-z]+/, '');
-  return cleaned || 'krate-app';
-}
-
-function toDisplayName(name: string): string {
-  return (
-    name
-      .split(/[-_ ]+/)
-      .filter(Boolean)
-      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-      .join(' ') || 'Krate App'
-  );
-}
-
 function detectPackageManager(): PackageManager {
   const userAgent = process.env.npm_config_user_agent ?? '';
   if (userAgent.startsWith('pnpm')) return 'pnpm';
@@ -149,16 +131,8 @@ function parseArgs(argv: string[]): Partial<Options> & { positional: string[] } 
   return opts;
 }
 
-async function promptProjectName(): Promise<string> {
-  const rl = createInterface({ input, output });
-  try {
-    const answer = await rl.question(
-      `${c.bold}What is your project named?${c.reset} `,
-    );
-    return answer.trim();
-  } finally {
-    rl.close();
-  }
+function promptProjectName(): Promise<string> {
+  return ask(`${c.bold}What is your project named?${c.reset} `, input, output);
 }
 
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.krate']);
@@ -220,10 +194,10 @@ function installDependencies(pm: PackageManager, dir: string): void {
   const spec = commandSpec(pm, ['install']);
   const result = spawnSync(spec.command, spec.args, { stdio: 'inherit', cwd: dir, shell: spec.shell });
   if (result.error) {
-    fail(`Could not run \`${pm} install\` (${result.error.message}). Run it manually.`);
+    fail(`Could not run \`${pm} install\` (${result.error.message}). The project was created in ${dir}; run the install there yourself.`);
   }
   if (result.status !== 0) {
-    fail(`Dependency installation failed. Run \`${pm} install\` manually.`);
+    fail(`Dependency installation failed. The project was created in ${dir}; fix the problem above and run \`${pm} install\` there.`);
   }
 }
 
@@ -244,7 +218,7 @@ async function main(): Promise<void> {
   let projectName = parsed.positional[0];
   if (!projectName) {
     projectName = await promptProjectName();
-    if (!projectName) fail('A project name is required.');
+    if (!projectName) fail('A project name is required. Pass one as an argument, for example `create-krate-app my-project`.');
   }
 
   const packageManager: PackageManager =
@@ -253,8 +227,11 @@ async function main(): Promise<void> {
   const git = parsed.git ?? true;
 
   const targetDir = resolve(process.cwd(), projectName);
-  const validName = toValidPackageName(basename(projectName));
+  const names = projectNames(targetDir, { pkg: 'krate-app', display: 'Krate App' });
 
+  if (existsSync(targetDir) && !statSync(targetDir).isDirectory()) {
+    fail(`${targetDir} already exists and is a file. Choose a different name.`);
+  }
   if (existsSync(targetDir) && !isEmptyDir(targetDir)) {
     fail(
       `Directory ${targetDir} is not empty. Choose a different name or empty the directory first.`,
@@ -268,8 +245,8 @@ async function main(): Promise<void> {
   );
 
   copyTemplate(templateDir, targetDir, {
-    __PROJECT_NAME__: validName,
-    __PROJECT_DISPLAY_NAME__: toDisplayName(projectName),
+    __PROJECT_NAME__: names.pkg,
+    __PROJECT_DISPLAY_NAME__: names.display,
     __KRATE_VERSION__: krateRange(pkg.version),
   });
 
@@ -282,7 +259,7 @@ async function main(): Promise<void> {
 
   process.stdout.write(`\n${c.bold}${c.green}Success!${c.reset} Created ${cdDir}\n\n`);
   process.stdout.write(`${c.bold}Next steps:${c.reset}\n`);
-  process.stdout.write(`  cd ${cdDir}\n`);
+  process.stdout.write(`  cd ${/\s/.test(cdDir) ? JSON.stringify(cdDir) : cdDir}\n`);
   if (!installed) process.stdout.write(`  ${packageManager} install\n`);
   process.stdout.write(`  ${run} dev\n\n`);
 }

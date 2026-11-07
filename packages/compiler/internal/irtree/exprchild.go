@@ -194,6 +194,9 @@ func (b *builder) controlFlowChild(expr ast.Expr, parentID string, doEscape bool
 		if nodes := b.tryResolveConditional(cond, parentID); len(nodes) > 0 {
 			return nodes, true
 		}
+		if merged, ok := b.mergeSameTypeBranches(cond); ok {
+			return b.buildSlotNodes(merged, parentID), true
+		}
 		if isTernaryWithJSX(expr) {
 			return []SlotNode{b.buildConditionalSlot(expr, parentID)}, true
 		}

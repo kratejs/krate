@@ -159,8 +159,12 @@ func TestHydrationIncludesEscSanitizer(t *testing.T) {
 // inserts list items in source order (a single moving insertBefore reference
 // would reverse them).
 func TestKbindContentPreservesArrayOrder(t *testing.T) {
-	if !strings.Contains(HydrationBootstrapJS, "var ref=n.nextSibling;for(var i=0;i<v.length;i++)n.parentNode.insertBefore(v[i],ref)") {
+	if !strings.Contains(HydrationBootstrapJS, "var ref=n.nextSibling;for(var i=0;i<v.length;i++){var _e=__t(v[i]);if(_e!=='')n.parentNode.insertBefore(_e,ref);}") {
 		t.Error("kbindContent should insert array items before a captured reference to keep order")
+	}
+	// Strings, numbers and bigints are text nodes, in arrays too.
+	if !strings.Contains(HydrationBootstrapJS, "typeof x==='bigint')?document.createTextNode(String(x))") {
+		t.Error("kbindContent should turn a bigint into a text node")
 	}
 }
 

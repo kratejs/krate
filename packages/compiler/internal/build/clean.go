@@ -49,6 +49,9 @@ func Clean(root string, cfg *config.Config) (*CleanResult, error) {
 		if !withinRoot(absRoot, abs) {
 			return nil, fmt.Errorf("refusing to clean %s: outside project root %s", abs, absRoot)
 		}
+		if keep := outDirHoldsSources(absRoot, abs, cfg); keep != "" {
+			return nil, fmt.Errorf("refusing to clean %s: it is or contains %s, which holds your sources (check outDir and --out-dir)", abs, keep)
+		}
 
 		info, err := os.Stat(abs)
 		if err != nil {
@@ -80,4 +83,25 @@ func withinRoot(root, path string) bool {
 		return false
 	}
 	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
+}
+
+// outDirHoldsSources returns the first directory holding the user's work that
+// dir (an absolute, clean output or cache directory) is or contains: the
+// project root, the pages directory or the public directory. An outDir of ".",
+// ".." or "src" would otherwise have the build or clean delete the project.
+// Empty when dir is safe. Clean and the build's output wipe share this check.
+func outDirHoldsSources(absRoot, dir string, cfg *config.Config) string {
+	for _, keep := range []string{absRoot, cfg.PagesDir, cfg.PublicDir} {
+		if keep == "" {
+			continue
+		}
+		if !filepath.IsAbs(keep) {
+			keep = filepath.Join(absRoot, keep)
+		}
+		keep = filepath.Clean(keep)
+		if withinRoot(dir, keep) {
+			return keep
+		}
+	}
+	return ""
 }

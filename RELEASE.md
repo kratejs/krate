@@ -31,6 +31,17 @@ release claims; do not publish a release that leaves a roadmap row `planned`.
   `@krate/base-docs-theme`, `create-krate-app`, `create-krate-docs`, and
   `@krate/core`.
 
+The workflow derives the tag with `scripts/release-tag.mjs` before it builds
+anything. A pre-release identifier must start with a letter (`1.0.0-1` is
+rejected: npm cannot use `1` as a tag). A stable version lower than the version
+npm serves as `latest` (a patch for an older line) is published as
+`latest-<major>.<minor>` so `latest` never moves backwards.
+
+If a release fails part way, fix the cause and re-run the job for the same tag.
+`scripts/publish-packages.mjs` skips every package version already on npm and
+publishes the rest. A skipped package is whatever the earlier run uploaded; if
+that upload was wrong, publish a new version instead.
+
 Scaffolded projects (`create-krate-app`, `create-krate-docs`) pin every `@krate/*`
 dependency to the scaffolder's own version: `^x.y.z` for a stable release, the
 exact version for a prerelease. The templates carry a `__KRATE_VERSION__`
@@ -98,7 +109,7 @@ pnpm --filter @krate/web build
 ```
 
 Repeat browser conformance for Firefox and WebKit, and run the Preact matrix
-(10.20.0, 10.24.0, 10.29.8) plus the Node 20/22 and Bun/Deno jobs. Check the
+(10.20.0, 10.24.0, 10.29.8) plus the Node 20/22/24/26 and Bun/Deno jobs. Check the
 generated `dist` for a scaffolded app and the docs site before promotion.
 
 ## Release notes

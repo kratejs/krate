@@ -86,6 +86,9 @@ func loadConfigMerged(path string, opts LoadOptions, seen map[string]bool) ([]by
 		if serr := configSyntaxError(path, src); serr != nil {
 			return nil, serr
 		}
+		if serr := importedSyntaxError(path, err); serr != nil {
+			return nil, serr
+		}
 		if configUsesModules(string(src)) {
 			return nil, configNotExecutableError(path, err)
 		}

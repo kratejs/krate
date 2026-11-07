@@ -2,7 +2,7 @@ import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { spawn } from 'child_process';
-import { execBinary, printVersion } from './binary.js';
+import { execBinary, printVersion, scaffoldTag } from './binary.js';
 import { commandSpec } from './spawn.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -15,8 +15,7 @@ const version = JSON.parse(
 // works on every platform and follows the core package's release channel.
 function scaffold(args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
-    const channel = /^[^-]+-([A-Za-z]+)/.exec(version);
-    const npxArgs = ['--yes', 'create-krate-app@' + (channel ? channel[1] : 'latest'), ...args.slice(1)];
+    const npxArgs = ['--yes', 'create-krate-app@' + scaffoldTag(version), ...args.slice(1)];
 
     const spec = commandSpec('npx', npxArgs);
     const proc = spawn(spec.command, spec.args, { stdio: 'inherit', shell: spec.shell });

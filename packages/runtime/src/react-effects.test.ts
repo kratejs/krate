@@ -11,6 +11,7 @@ import {
   createElement,
 } from './react';
 import { disposeAll } from './signal';
+import { flushPassive } from './effects';
 import { disposeNode } from './dom';
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
@@ -109,5 +110,42 @@ describe('React compat hooks (unlowered code paths)', () => {
     expect(ref.current?.focus()).toBe('focused');
     disposeNode(node);
     expect(ref.current).toBe(null);
+  });
+
+  it('a passive cleanup that throws does not drop the effects queued behind it', async () => {
+    const log: string[] = [];
+    let set!: (v: number) => void;
+    const A = () => {
+      const [n, s] = useState(0);
+      set = s;
+      useEffect(() => {
+        log.push('A setup ' + n());
+        return () => {
+          log.push('A cleanup');
+          throw new Error('cleanup boom');
+        };
+      }, [n]);
+      return createElement('i', null);
+    };
+    const B = () => {
+      const [m] = useState(0);
+      useEffect(() => {
+        log.push('B setup');
+        return () => void log.push('B cleanup');
+      }, [m]);
+      return createElement('b', null);
+    };
+    createElement('div', null, createElement(A, null), createElement(B, null));
+    await settle();
+    set(1);
+    // The passive phase reports the error after running everything queued.
+    let failure: unknown;
+    const onError = (e: unknown) => (failure = e);
+    process.once('uncaughtException', onError);
+    await settle();
+    process.off('uncaughtException', onError);
+    expect(String(failure)).toContain('cleanup boom');
+    expect(log).toEqual(['A setup 0', 'B setup', 'A cleanup', 'A setup 1']);
+    flushPassive();
   });
 });

@@ -296,6 +296,9 @@ func (b *builder) buildSlotNodes(expr ast.Expr, parentID string) []SlotNode {
 		if nodes := b.tryResolveConditional(e, parentID); len(nodes) > 0 {
 			return nodes
 		}
+		if merged, ok := b.mergeSameTypeBranches(e); ok {
+			return b.buildSlotNodes(merged, parentID)
+		}
 		return []SlotNode{b.buildConditionalSlot(e, parentID)}
 	case *ast.BinaryExpr:
 		if e.Op == "&&" || e.Op == "||" || e.Op == "??" {
@@ -362,7 +365,7 @@ func (b *builder) buildJSXSlot(el *ast.JSXElement, parentID string) []SlotNode {
 	}
 	// Built-in <Slot> (shadcn `asChild`): merge the Slot's props onto its single
 	// child element.
-	if el.Opening != nil && el.Opening.Name == "Slot" {
+	if el.Opening != nil && (el.Opening.Name == "Slot" || el.Opening.Name == "Slot.Root" || el.Opening.Name == "Slot.Slot") {
 		return b.buildSlotSlots(el, parentID)
 	}
 	// CSS interception. When the component currently being walked declares a
@@ -2994,7 +2997,7 @@ func (b *builder) resolveSignal(name string) SignalDecl {
 		return SignalDecl{
 			Name:        name,
 			SetterName:  setterNameFor(name),
-			Initial:     evalConst(initial),
+			Initial:     legacyConstString(initial, b.evalValue(initial)),
 			IsString:    isStringType(initial, b.sigMap()),
 			InitialExpr: initial,
 		}
@@ -4187,6 +4190,7 @@ func (b *builder) buildExternalComponentSlot(name string, el *ast.JSXElement) (S
 	// They are directives for Krate, never props of the component.
 	hydrate := ""
 	el, hydrate = splitClientDirective(el)
+	b.checkIslandScopeProps(el, root)
 	// Replace page-scope signal reads with island props and collect their value
 	// expressions for the page hydration boot.
 	usedSignals := map[string]bool{}
@@ -4235,7 +4239,7 @@ func (b *builder) buildExternalComponentSlot(name string, el *ast.JSXElement) (S
 	// are bundled; inline functions need an explicit diagnostic, never a
 	// silently blank island.
 	for name, fn := range b.functions {
-		if fn == nil || name == root || !strings.Contains(subtree, "<"+name) {
+		if fn == nil || name == root || !rendersTag(subtree, name) {
 			continue
 		}
 		if _, external := b.externalImports[name]; external {
@@ -4585,8 +4589,9 @@ func (b *builder) bridgeScopeStmts(stmts []ast.Stmt, used map[string]bool) {
 // foldLocalConsts folds a component's local constants using the cva/cn-aware
 // attribute evaluator, returning name -> value and extending props with them.
 func (b *builder) foldLocalConsts(fn *ast.FnDecl, props valueMap, nextUseId func() string) valueMap {
-	saved := b.localProps
-	b.localProps = props
+	saved, savedKeys := b.localProps, b.propKeys
+	b.localProps, b.propKeys = props, keySet(props)
+	defer func() { b.propKeys = savedKeys }()
 	fold := collectLocalVars(fn.Body, b.sigMap(), props, nextUseId)
 	locals, inits := fold.locals, fold.inits
 	destructured := destructNames(fold.destructs)
@@ -4641,4 +4646,34 @@ func isNonClientBuiltinTag(name string) bool {
 		return true
 	}
 	return false
+}
+
+// keySet returns the keys of m as a set.
+func keySet(m valueMap) map[string]bool {
+	out := make(map[string]bool, len(m))
+	for k := range m {
+		out[k] = true
+	}
+	return out
+}
+
+// rendersTag reports whether source opens a <name> element. A longer tag that
+// only starts with name, such as <Popover for P, does not count.
+func rendersTag(source, name string) bool {
+	tag := "<" + name
+	for i := 0; ; {
+		at := strings.Index(source[i:], tag)
+		if at < 0 {
+			return false
+		}
+		i += at + len(tag)
+		if i == len(source) {
+			return true
+		}
+		switch c := source[i]; {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '_', c == '$':
+		default:
+			return true
+		}
+	}
 }

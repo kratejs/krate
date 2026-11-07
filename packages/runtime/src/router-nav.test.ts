@@ -364,6 +364,38 @@ describe('races', () => {
   });
 });
 
+describe('in-document steps while a page loads', () => {
+  it('a hash link cancels the navigation still loading', async () => {
+    let open!: () => void;
+    routes['/slow'] = { body: page('Slow', '<h1>Slow</h1>'), gate: new Promise<void>((r) => (open = r)) };
+    const loading = krateRouter.push('/slow');
+    await settle();
+    await krateRouter.push('/#top');
+    open();
+    await loading;
+    await settle();
+    expect(location.pathname + location.hash).toBe('/#top');
+    expect(document.querySelector('#root h1')!.textContent).toBe('Home');
+    expect(krateRouter.getState().status).toBe('idle');
+  });
+
+  it('going back over a hash entry cancels the navigation still loading', async () => {
+    await krateRouter.push('/#a');
+    await krateRouter.push('/#b');
+    let open!: () => void;
+    routes['/slow'] = { body: page('Slow', '<h1>Slow</h1>'), gate: new Promise<void>((r) => (open = r)) };
+    const loading = krateRouter.push('/slow');
+    await settle();
+    history.back();
+    await settle();
+    open();
+    await loading;
+    await settle();
+    expect(location.pathname + location.hash).toBe('/#a');
+    expect(document.querySelector('#root h1')!.textContent).toBe('Home');
+  });
+});
+
 describe('prefetch cache', () => {
   it('serves a prefetched document once, then refetches', async () => {
     await krateRouter.prefetch('/about');
@@ -404,6 +436,31 @@ describe('prefetch cache', () => {
   it('invalidatePrefetchCache drops entries', async () => {
     await krateRouter.prefetch('/about');
     invalidatePrefetchCache('/about');
+    await krateRouter.push('/about');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('a prefetch in flight when the cache is invalidated does not repopulate it', async () => {
+    let release!: () => void;
+    routes['/about'].gate = new Promise<void>((r) => (release = r));
+    const inflight = krateRouter.prefetch('/about');
+    await settle();
+    invalidatePrefetchCache();
+    release();
+    await inflight;
+    await krateRouter.push('/about');
+    // The stale response was dropped, so navigating fetched again.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('invalidating one URL also drops its prefetch in flight', async () => {
+    let release!: () => void;
+    routes['/about'].gate = new Promise<void>((r) => (release = r));
+    const inflight = krateRouter.prefetch('/about');
+    await settle();
+    invalidatePrefetchCache('/about');
+    release();
+    await inflight;
     await krateRouter.push('/about');
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
@@ -526,5 +583,53 @@ describe('fallback fade and reduced motion', () => {
     expect(seen.opacity).toBe('');
     expect(seen.transition).toBe('');
     expect(document.querySelector('#root h1')!.textContent).toBe('About');
+  });
+});
+
+describe('inline boot scripts', () => {
+  const bootPage = (title: string) =>
+    page(title, `<h1>${title}</h1>${link('/', 'Home')}<script data-krate-boot>window.__boots=1;</script>`);
+  // happy-dom does not execute inline scripts: count the ones handed to the document.
+  let ran: string[];
+
+  beforeEach(() => {
+    ran = [];
+    const append = document.head.appendChild.bind(document.head);
+    vi.spyOn(document.head, 'appendChild').mockImplementation(((node: Node) => {
+      if (node instanceof HTMLScriptElement && !node.src) ran.push(node.text);
+      return append(node);
+    }) as typeof document.head.appendChild);
+  });
+
+  afterEach(() => vi.restoreAllMocks());
+
+  it('runs a boot script of the new page once, not on every visit', async () => {
+    routes['/aria'] = { body: bootPage('Aria') };
+    routes['/aria2'] = { body: bootPage('Aria2') };
+    await krateRouter.push('/aria');
+    await settle();
+    expect(ran).toEqual(['window.__boots=1;']);
+    await krateRouter.push('/aria2');
+    await krateRouter.push('/about');
+    await krateRouter.push('/aria');
+    await settle();
+    expect(ran).toEqual(['window.__boots=1;']);
+  });
+
+  it('does not rerun the boot script the first document already ran', async () => {
+    destroyRouter();
+    document.body.innerHTML += '<script data-krate-boot>window.__boots=1;</script>';
+    initRouter();
+    routes['/aria'] = { body: bootPage('Aria') };
+    await krateRouter.push('/aria');
+    await settle();
+    expect(ran).toEqual([]);
+  });
+
+  it('leaves ordinary inline scripts alone', async () => {
+    routes['/plain'] = { body: page('Plain', '<h1>Plain</h1><script>window.__boots=99;</script>') };
+    await krateRouter.push('/plain');
+    await settle();
+    expect(ran).toEqual([]);
   });
 });

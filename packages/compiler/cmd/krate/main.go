@@ -279,22 +279,59 @@ func parseFlags(args []string) (cliFlags, []string) {
 	return flags, remaining
 }
 
+// valuedFlags take a value, as `--flag value` or `--flag=value`.
+var valuedFlags = map[string]bool{
+	"--config": true, "--out-dir": true, "--target": true, "--mode": true,
+	"--report": true, "--token": true, "--root": true, "--cpuprofile": true,
+	"--memprofile": true, "--host": true, "--port": true,
+}
+
 // parseFlagsChecked parses CLI flags, returning an error for malformed values
 // (a non-numeric --port, a flag missing its value).
 func parseFlagsChecked(args []string) (cliFlags, []string, error) {
 	var flags cliFlags
 	var remaining []string
 	for i := 0; i < len(args); i++ {
+		if name, inline, hasInline := strings.Cut(args[i], "="); valuedFlags[name] {
+			val := inline
+			if !hasInline {
+				if i+1 >= len(args) {
+					return flags, nil, fmt.Errorf("%s requires a value", name)
+				}
+				i++
+				val = args[i]
+			}
+			switch name {
+			case "--config":
+				flags.ConfigPath = val
+			case "--out-dir":
+				flags.OutDir = val
+			case "--target":
+				flags.Target = val
+			case "--mode":
+				flags.Mode = val
+			case "--report":
+				flags.Report = val
+			case "--token":
+				flags.Token = val
+			case "--root":
+				flags.Roots = append(flags.Roots, val)
+			case "--cpuprofile":
+				flags.CPUProfile = val
+			case "--memprofile":
+				flags.MemProfile = val
+			case "--host":
+				flags.Host = val
+			case "--port":
+				n, err := parsePortValue("--port", val)
+				if err != nil {
+					return flags, nil, err
+				}
+				flags.Port, flags.PortSet = n, true
+			}
+			continue
+		}
 		switch {
-		case args[i] == "--config" && i+1 < len(args):
-			flags.ConfigPath = args[i+1]
-			i++
-		case args[i] == "--out-dir" && i+1 < len(args):
-			flags.OutDir = args[i+1]
-			i++
-		case args[i] == "--target" && i+1 < len(args):
-			flags.Target = args[i+1]
-			i++
 		case args[i] == "--static-only":
 			flags.StaticOnly = true
 		case args[i] == "--watch":
@@ -303,21 +340,12 @@ func parseFlagsChecked(args []string) (cliFlags, []string, error) {
 			flags.Verbose = true
 		case args[i] == "--profile":
 			flags.Profile = true
-		case args[i] == "--cpuprofile" && i+1 < len(args):
-			flags.CPUProfile = args[i+1]
-			i++
-		case args[i] == "--memprofile" && i+1 < len(args):
-			flags.MemProfile = args[i+1]
-			i++
 		case args[i] == "--sourcemap":
 			flags.Sourcemap = true
 		case args[i] == "--no-dce":
 			flags.NoDCE = true
 		case args[i] == "--precompress":
 			flags.Precompress = true
-		case args[i] == "--mode" && i+1 < len(args):
-			flags.Mode = args[i+1]
-			i++
 		case args[i] == "--schema":
 			flags.Schema = true
 		case args[i] == "--json":
@@ -332,39 +360,8 @@ func parseFlagsChecked(args []string) (cliFlags, []string, error) {
 			flags.Force = true
 		case args[i] == "--update-package":
 			flags.UpdatePackage = true
-		case args[i] == "--report" && i+1 < len(args):
-			flags.Report = args[i+1]
-			i++
-		case args[i] == "--host" || args[i] == "--port":
-			if i+1 >= len(args) {
-				return flags, nil, fmt.Errorf("%s requires a value", args[i])
-			}
-			if args[i] == "--host" {
-				flags.Host = args[i+1]
-			} else {
-				n, err := parsePortValue("--port", args[i+1])
-				if err != nil {
-					return flags, nil, err
-				}
-				flags.Port, flags.PortSet = n, true
-			}
-			i++
-		case strings.HasPrefix(args[i], "--host="):
-			flags.Host = strings.TrimPrefix(args[i], "--host=")
-		case strings.HasPrefix(args[i], "--port="):
-			n, err := parsePortValue("--port", strings.TrimPrefix(args[i], "--port="))
-			if err != nil {
-				return flags, nil, err
-			}
-			flags.Port, flags.PortSet = n, true
 		case args[i] == "--no-build":
 			flags.NoBuild = true
-		case args[i] == "--token" && i+1 < len(args):
-			flags.Token = args[i+1]
-			i++
-		case args[i] == "--root" && i+1 < len(args):
-			flags.Roots = append(flags.Roots, args[i+1])
-			i++
 		case args[i] == "--help" || args[i] == "-h" || args[i] == "--version":
 			// Handled as commands in main(); keep them in the arg list rather
 			// than rejecting them as unknown flags.
@@ -622,6 +619,10 @@ func writeHeapProfile(path string) {
 }
 
 func runDev(flags cliFlags, args []string) {
+	if root, _, err := loadConfig(flags, args); err == nil && root != "" {
+		// Mirror console output into .krate/dev.log for agents (MCP get_logs).
+		defer build.TeeDevLog(root)()
+	}
 	first := true
 	for {
 		if !runDevOnce(flags, args, first) {
@@ -765,6 +766,12 @@ func runDeploy(flags cliFlags, args []string) {
 	if target == "" {
 		target = "netlify"
 	}
+	// Fail before the build: an unknown target used to run the whole build
+	// first, and with server features it was reported as a feature mismatch.
+	if err := checkDeployTarget(target); err != nil {
+		fmt.Fprintf(os.Stderr, "%sDeploy error:%s %v\n", cRed, cReset, err)
+		os.Exit(1)
+	}
 
 	fmt.Printf("%s%s  Building %s -> %s%s\n", cBold, cCyan, root, cfg.OutDir, cReset)
 	builder := build.New(root, cfg)
@@ -806,6 +813,16 @@ func runDeploy(flags cliFlags, args []string) {
 			fmt.Printf("    %s%s%s\n", cGray, filepath.ToSlash(rel), cReset)
 		}
 	}
+}
+
+// checkDeployTarget rejects a deploy target no adapter handles.
+func checkDeployTarget(target string) error {
+	for _, t := range deploy.Targets {
+		if t == target {
+			return nil
+		}
+	}
+	return fmt.Errorf("unknown deploy target %q (want one of: %s; set it with --target or deploy.target in the config)", target, strings.Join(deploy.Targets, ", "))
 }
 
 // runInspect builds the site and emits its machine-readable model (routes,
@@ -1100,6 +1117,7 @@ func runMCP(flags cliFlags, args []string) {
 		Env:        env,
 		Verbose:    flags.Verbose,
 	})
+	defer svc.Close()
 	if flags.HTTP {
 		port := flags.Port
 		if port == 0 {

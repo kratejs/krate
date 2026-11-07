@@ -81,6 +81,16 @@ export function versionMismatchWarning(binaryOutput: string, packageVersion: str
   );
 }
 
+/**
+ * The dist-tag `krate init` asks npm for: the first pre-release identifier of
+ * this package's version (0.5.0-beta.3 -> beta), as scripts/release-tag.mjs
+ * publishes it, and latest for a stable version.
+ */
+export function scaffoldTag(packageVersion: string): string {
+  const m = /^\d+\.\d+\.\d+-([A-Za-z][A-Za-z0-9-]*)/.exec(packageVersion);
+  return m ? m[1] : 'latest';
+}
+
 let versionChecked = false;
 
 function warnOnVersionMismatch(bin: string, packageVersion: string): void {

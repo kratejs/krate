@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   createSignal,
   createEffect,
+  onCleanup,
   disposeAll,
   krateFlushSync,
   krateOnSettle,
@@ -169,5 +170,44 @@ describe('a throwing effect does not strand the others', () => {
     setC(5);
     krateFlushSync();
     expect(seen).toEqual([0, 5]);
+  });
+});
+
+describe('a throwing cleanup does not strand the others', () => {
+  beforeEach(() => disposeAll());
+  afterEach(() => vi.restoreAllMocks());
+
+  it('runs the remaining cleanups of an effect that re-runs', () => {
+    const [a, setA] = createSignal(0);
+    const log: string[] = [];
+    createEffect(() => {
+      a();
+      onCleanup(() => {
+        log.push('first');
+        throw new Error('cleanup boom');
+      });
+      onCleanup(() => log.push('second'));
+    });
+    setA(1);
+    expect(() => krateFlushSync()).toThrow('cleanup boom');
+    expect(log).toEqual(['first', 'second']);
+  });
+
+  it('keeps tearing down the page when a cleanup throws', () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const log: string[] = [];
+    createEffect(() => {
+      onCleanup(() => {
+        log.push('a');
+        throw new Error('teardown boom');
+      });
+      onCleanup(() => log.push('a2'));
+    });
+    createEffect(() => {
+      onCleanup(() => log.push('b'));
+    });
+    expect(() => disposeAll()).not.toThrow();
+    expect(log).toEqual(['a', 'a2', 'b']);
+    expect(logged).toHaveBeenCalledTimes(1);
   });
 });

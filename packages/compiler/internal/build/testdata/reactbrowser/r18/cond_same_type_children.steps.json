@@ -1,0 +1,7 @@
+{ "steps": [
+  { "op": "click", "sel": "section:nth-of-type(1) .t" },
+  { "op": "click", "sel": "section:nth-of-type(2) .t" },
+  { "op": "click", "sel": "#flip" },
+  { "op": "click", "sel": "#flip" },
+  { "op": "click", "sel": "#flip" }
+] }

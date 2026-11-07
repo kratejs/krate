@@ -6,7 +6,10 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+
+	"github.com/kratejs/krate/packages/compiler/internal/diag"
 )
 
 // tsOpts is the subset of a tsconfig that Krate honours, merged across the
@@ -278,6 +281,7 @@ func (c *Config) LoadTSConfigPaths(root string) {
 		}
 		return prefixes[i] < prefixes[j]
 	})
+	var shim rootShim
 	for _, prefix := range prefixes {
 		targets := o.paths[prefix]
 		if !o.hasBaseURL && o.pathsDir != "" && o.pathsDir != root {
@@ -293,8 +297,86 @@ func (c *Config) LoadTSConfigPaths(root string) {
 			}
 			targets = abs
 		}
+		if o.hasBaseURL {
+			targets = rootRelativeTargets(root, baseDir, targets, &shim)
+		}
 		c.PathAliases = append(c.PathAliases, PathAlias{Prefix: prefix, Targets: targets})
 	}
+	if shim.count > 0 {
+		warn(shim.message(root, baseDir))
+	}
+}
+
+// rootShim tallies the alias targets read relative to the project root.
+type rootShim struct {
+	count     int
+	repeating int // targets that start with the baseUrl directory
+	example   string
+}
+
+// rootRelativeTargets keeps a target that exists under baseUrl. One that does
+// not, but exists when read relative to the project root, is the 0.4 template
+// ("baseUrl": "./src" with "./src/*" targets): it is returned as an absolute
+// root path so it resolves, and recorded for one KR7125 warning. A target that
+// exists nowhere is left alone and fails as a normal unresolved import.
+func rootRelativeTargets(root, baseDir string, targets []string, shim *rootShim) []string {
+	rel, err := filepath.Rel(root, baseDir)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return targets
+	}
+	rel = filepath.ToSlash(rel)
+	out := make([]string, len(targets))
+	for i, t := range targets {
+		out[i] = t
+		if filepath.IsAbs(t) || aliasTargetExists(baseDir, t) || !aliasTargetExists(root, t) {
+			continue
+		}
+		out[i] = filepath.ToSlash(filepath.Join(root, filepath.FromSlash(t)))
+		shim.count++
+		clean := strings.TrimPrefix(t, "./")
+		if clean == rel || strings.HasPrefix(clean, rel+"/") {
+			shim.repeating++
+		}
+		if shim.example == "" {
+			shim.example = t
+		}
+	}
+	return out
+}
+
+func (s rootShim) message(root, baseDir string) string {
+	rel, _ := filepath.Rel(root, baseDir)
+	msg := "[" + string(diag.CodeTSConfigBaseURL) + "] tsconfig.json: paths target " + strconv.Quote(s.example) +
+		" does not exist under baseUrl " + strconv.Quote("./"+filepath.ToSlash(rel)) +
+		" but does under the project root; Krate resolves it there, tsc does not. "
+	if s.repeating == s.count {
+		return msg + "Run `krate fix --apply` to set baseUrl to \".\""
+	}
+	return msg + "Set baseUrl to \".\" or write the targets relative to baseUrl"
+}
+
+// aliasTargetExists reports whether the literal part of a paths target (the
+// text before any "*") names a file or directory under dir, with or without a
+// source extension.
+func aliasTargetExists(dir, target string) bool {
+	lit := target
+	if i := strings.IndexByte(lit, '*'); i >= 0 {
+		lit = lit[:i]
+	}
+	lit = strings.TrimRight(lit, "/")
+	if lit == "" || lit == "." {
+		return true
+	}
+	p := filepath.Join(dir, filepath.FromSlash(lit))
+	if _, err := os.Stat(p); err == nil {
+		return true
+	}
+	for _, ext := range []string{".ts", ".tsx", ".mts", ".js", ".jsx", ".mjs", ".cjs", ".json", ".css", ".md", ".mdx"} {
+		if fi, err := os.Stat(p + ext); err == nil && !fi.IsDir() {
+			return true
+		}
+	}
+	return false
 }
 
 func literalPrefixLen(p string) int {

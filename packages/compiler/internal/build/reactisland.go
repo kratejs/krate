@@ -168,6 +168,12 @@ type reactHookInfo struct {
 	instances map[string]string // value name -> package that built it
 	libPkgs   map[string]bool   // every React-bound package the module imports
 	pragma    string            // package named by @jsxImportSource
+	// tagLibs maps each binding imported from a React-bound package to that
+	// package; islandTags maps each binding imported from a React island
+	// module to its package. A module that renders either as a JSX tag needs
+	// React's render model just as a module calling a hook does.
+	tagLibs    map[string]string
+	islandTags map[string]string
 }
 
 var jsxImportSourceRe = regexp.MustCompile(`@jsxImportSource\s+([^\s*]+)`)
@@ -253,12 +259,15 @@ func (b *Builder) detectReactIslandModules(mods []*bundler.Module, resolve func(
 			continue
 		}
 		libs, nsLibs := reactLibBindings(m, resolve)
-		in := &reactHookInfo{m: m, nsLibs: nsLibs, hooks: map[string]string{}, factories: map[string]string{}, instances: map[string]string{}, libPkgs: map[string]bool{}}
-		for _, pkg := range libs {
+		in := &reactHookInfo{m: m, nsLibs: nsLibs, hooks: map[string]string{}, factories: map[string]string{}, instances: map[string]string{}, libPkgs: map[string]bool{},
+			tagLibs: map[string]string{}, islandTags: map[string]string{}}
+		for local, pkg := range libs {
 			in.libPkgs[pkg] = true
+			in.tagLibs[local] = pkg
 		}
-		for _, pkg := range nsLibs {
+		for local, pkg := range nsLibs {
 			in.libPkgs[pkg] = true
+			in.tagLibs[local] = pkg
 		}
 		for local, pkg := range libs {
 			if hookNameRe.MatchString(local) {
@@ -286,7 +295,8 @@ func (b *Builder) detectReactIslandModules(mods []*bundler.Module, resolve func(
 		if _, done := out[in.m.Path]; done {
 			return false
 		}
-		if len(in.hooks) == 0 && len(in.nsLibs) == 0 && len(in.factories) == 0 && len(in.instances) == 0 && in.pragma == "" {
+		if len(in.hooks) == 0 && len(in.nsLibs) == 0 && len(in.factories) == 0 && len(in.instances) == 0 && in.pragma == "" &&
+			len(in.tagLibs) == 0 && len(in.islandTags) == 0 {
 			return false
 		}
 		defer b.readProgram(in.m.Program)()
@@ -312,6 +322,22 @@ func (b *Builder) detectReactIslandModules(mods []*bundler.Module, resolve func(
 		irtree.WalkAST(in.m.Program.Body, func(n any) bool {
 			if hit != nil {
 				return false
+			}
+			// A component of a React library (a Radix primitive, an icon) or of
+			// another island module, rendered as a tag: it only works under
+			// React's render model, so the module runs as an island. The entry
+			// module is left out: a page or layout renders such tags as islands
+			// inside its own static markup (see reactIslandImports).
+			if el, ok := n.(*ast.JSXElement); ok && el.Opening != nil && !in.m.IsEntry {
+				root, _, _ := strings.Cut(el.Opening.Name, ".")
+				if pkg, ok := in.tagLibs[root]; ok && root != "" {
+					hit = &reactIslandModule{Path: in.m.Path, Pkg: pkg, Name: "<" + el.Opening.Name + ">", Pos: el.Position}
+					return false
+				}
+				if pkg, ok := in.islandTags[root]; ok && root != "" {
+					hit = &reactIslandModule{Path: in.m.Path, Pkg: pkg, Name: "<" + el.Opening.Name + ">", Pos: el.Position}
+					return false
+				}
 			}
 			// A library-built value handed to a JSX attribute (client={qc},
 			// theme={theme}) cannot reach a component rendered in an island
@@ -376,6 +402,20 @@ func (b *Builder) detectReactIslandModules(mods []*bundler.Module, resolve func(
 				island, isIsland := out[target]
 				if !isInfo && !isIsland {
 					continue
+				}
+				if isIsland {
+					for _, local := range []string{imp.Default, imp.Namespace} {
+						if local != "" {
+							in.islandTags[local] = island.Pkg
+						}
+					}
+					for _, n := range imp.Named {
+						local := n.Local
+						if local == "" {
+							local = n.Remote
+						}
+						in.islandTags[local] = island.Pkg
+					}
 				}
 				if imp.Default != "" && isIsland && hookNameRe.MatchString(imp.Default) {
 					in.hooks[imp.Default] = island.Pkg
