@@ -342,11 +342,16 @@ function cacheTake(key: string): CachedDoc | undefined {
  * `krate:revalidate` event.
  */
 export function invalidatePrefetchCache(url?: string): void {
+  // A prefetch still in flight started before the data changed: forgetting it
+  // keeps its (stale) response out of the cache.
   if (url === undefined) {
     prefetchCache.clear();
+    prefetchInflight.clear();
     return;
   }
-  prefetchCache.delete(cacheKey(url));
+  const key = cacheKey(url);
+  prefetchCache.delete(key);
+  prefetchInflight.delete(key);
 }
 
 function isHTMLType(ct: string): boolean {
@@ -373,7 +378,7 @@ function prefetchPage(url: string): Promise<void> {
   if (cached && now() - cached.at <= prefetchTTL()) return Promise.resolve();
   const inflight = prefetchInflight.get(key);
   if (inflight) return inflight;
-  const p = fetch(key, { headers: { Accept: 'text/html' }, credentials: 'same-origin' })
+  const p: Promise<void> = fetch(key, { headers: { Accept: 'text/html' }, credentials: 'same-origin' })
     .then(async (res) => {
       // Only cache successful, same-origin HTML documents.
       if (!res.ok) return;
@@ -382,6 +387,8 @@ function prefetchPage(url: string): Promise<void> {
       if (new URL(finalUrl, location.href).origin !== location.origin) return;
       const html = await res.text();
       if (!(isHTMLType(ct) || (ct === '' && looksLikeHTML(html)))) return;
+      // Invalidated while in flight: the response is stale.
+      if (prefetchInflight.get(key) !== p) return;
       cachePut(key, { html, url: finalUrl, status: res.status, at: now() });
       const loaded = new Set<string>();
       document.querySelectorAll('script[src]').forEach((s) => loaded.add((s as HTMLScriptElement).src));
@@ -392,7 +399,7 @@ function prefetchPage(url: string): Promise<void> {
       // errors through krate:navigate-error.
     })
     .finally(() => {
-      prefetchInflight.delete(key);
+      if (prefetchInflight.get(key) === p) prefetchInflight.delete(key);
     });
   prefetchInflight.set(key, p);
   return p;

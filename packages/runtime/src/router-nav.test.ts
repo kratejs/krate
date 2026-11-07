@@ -408,6 +408,31 @@ describe('prefetch cache', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it('a prefetch in flight when the cache is invalidated does not repopulate it', async () => {
+    let release!: () => void;
+    routes['/about'].gate = new Promise<void>((r) => (release = r));
+    const inflight = krateRouter.prefetch('/about');
+    await settle();
+    invalidatePrefetchCache();
+    release();
+    await inflight;
+    await krateRouter.push('/about');
+    // The stale response was dropped, so navigating fetched again.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('invalidating one URL also drops its prefetch in flight', async () => {
+    let release!: () => void;
+    routes['/about'].gate = new Promise<void>((r) => (release = r));
+    const inflight = krateRouter.prefetch('/about');
+    await settle();
+    invalidatePrefetchCache('/about');
+    release();
+    await inflight;
+    await krateRouter.push('/about');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('does not cache error responses', async () => {
     routes['/missing'] = { status: 404, body: page('Not found', '') };
     await krateRouter.prefetch('/missing');
