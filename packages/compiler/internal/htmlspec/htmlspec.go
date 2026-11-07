@@ -145,6 +145,10 @@ func IsBoolean(name string) bool {
 	return booleanAttrs[strings.ToLower(AttrName(name))]
 }
 
+// overloadedBooleanAttrs are attributes that take a string value or act as a
+// flag when set to true (React's "overloaded boolean" props).
+var overloadedBooleanAttrs = map[string]bool{"download": true, "capture": true}
+
 // booleanishAttrs are enumerated attributes whose JS boolean values serialize
 // as the strings "true"/"false" (React's "booleanish string" props).
 var booleanishAttrs = map[string]bool{
@@ -368,6 +372,13 @@ func Attr(tag, jsxName string, v Value) string {
 		if v.Kind == Bare {
 			return " " + name
 		}
+	case overloadedBooleanAttrs[lower] && v.Kind == Bool:
+		// `download` and `capture` take a value or act as flags: true is an
+		// empty attribute, false is omitted.
+		if !v.Truthy() {
+			return ""
+		}
+		return " " + name + `=""`
 	case v.Kind == Bool:
 		// React drops JS booleans on non-boolean attributes.
 		return ""
