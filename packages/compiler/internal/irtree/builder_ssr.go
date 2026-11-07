@@ -1022,7 +1022,7 @@ func destructuredParamNames(pattern string) []string {
 		if colon := indexTopLevel(part, ":"); colon >= 0 {
 			value := strings.TrimSpace(part[colon+1:])
 			if strings.HasPrefix(value, "{") || strings.HasPrefix(value, "[") {
-				names = append(names, destructuredParamNames(value)...)
+				names = append(names, destructuredParamNames(patternOnly(value))...)
 			} else if eq := strings.Index(value, "="); eq >= 0 {
 				names = append(names, strings.TrimSpace(value[:eq]))
 			} else {
@@ -1032,7 +1032,7 @@ func destructuredParamNames(pattern string) []string {
 		}
 		// Nested pattern without rename.
 		if strings.HasPrefix(part, "{") || strings.HasPrefix(part, "[") {
-			names = append(names, destructuredParamNames(part)...)
+			names = append(names, destructuredParamNames(patternOnly(part))...)
 			continue
 		}
 		// Default value (`x = 1`).
@@ -1125,6 +1125,15 @@ func (b *builder) buildPropBindings(paramNames []string, attrs map[string]ast.Ex
 		if fn != nil {
 			bindings[name] = b.paramDefaultValue(fn, name)
 		}
+	}
+	// Names inside a renamed or nested pattern come from destructuring the
+	// props, not from attributes of the same name.
+	propsObj := jsvalue.NewObject()
+	for name, expr := range attrs {
+		propsObj.Set(name, b.resolveBindingValue(expr, props))
+	}
+	for name, v := range b.nestedPatternValues(fn, propsObj) {
+		bindings[name] = v
 	}
 	return bindings
 }
@@ -1523,4 +1532,22 @@ func staticMemberName(m *ast.MemberExpr) (string, bool) {
 // sameValueMap reports whether a and b are the same map.
 func sameValueMap(a, b valueMap) bool {
 	return a != nil && b != nil && reflect.ValueOf(a).Pointer() == reflect.ValueOf(b).Pointer()
+}
+
+// patternOnly returns the nested pattern at the start of s without the
+// default value that follows it (`[a, ...rest] = []` gives `[a, ...rest]`).
+func patternOnly(s string) string {
+	depth := 0
+	for i, r := range s {
+		switch r {
+		case '{', '[', '(':
+			depth++
+		case '}', ']', ')':
+			depth--
+			if depth == 0 {
+				return s[:i+1]
+			}
+		}
+	}
+	return s
 }
