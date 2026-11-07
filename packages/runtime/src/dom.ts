@@ -156,7 +156,7 @@ export function insert(parent: Node, value: unknown, startMarker: Node): void {
 /** Insert a value (or array of values) before a reference node. */
 function insertBefore(parent: Node, value: unknown, before: Node | null): void {
   if (value == null || value === false || value === true) return;
-  if (typeof value === 'string' || typeof value === 'number') {
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'bigint') {
     parent.insertBefore(document.createTextNode(String(value)), before);
   } else if (value instanceof Node) {
     parent.insertBefore(value, before);

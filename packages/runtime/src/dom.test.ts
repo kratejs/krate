@@ -34,4 +34,15 @@ describe('insert', () => {
     expect(parent.textContent).toBe('new');
     expect((parent.textContent as string).includes('old')).toBe(false);
   });
+
+  it('inserts a bigint as text', () => {
+    const parent = document.createElement('div');
+    const start = document.createComment('k');
+    const end = document.createComment('k');
+    parent.append(start, document.createTextNode('old'), end);
+
+    insert(parent, [1n, 'a', 20n], start);
+
+    expect(parent.textContent).toBe('1a20');
+  });
 });
