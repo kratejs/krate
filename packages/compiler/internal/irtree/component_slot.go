@@ -334,6 +334,10 @@ func (b *builder) discoverReturnSlots(childFn *ast.FnDecl, childID SlotID, attrs
 	b.pushComponentCtx()
 	b.pendingHandlers, b.pendingAttrs, b.pendingRefs = nil, nil, nil
 	b.localProps = b.propBindingsToLocalProps(childFn, attrs, b.localProps)
+	b.propKeys = make(map[string]bool, len(attrs))
+	for name := range attrs {
+		b.propKeys[name] = true
+	}
 	b.restProps = b.restPropsFor(fnRestParamName(childFn), childFn, attrs)
 	b.liveProps, b.livePropsParam = nil, ""
 	b.localFnBody = childFn.Body
@@ -453,6 +457,10 @@ func (b *builder) installCallSiteInputs(el *ast.JSXElement, childFn *ast.FnDecl,
 		}
 	}
 	b.localFuncProps = funcProps
+	b.propKeys = make(map[string]bool, len(attrs))
+	for name := range attrs {
+		b.propKeys[name] = true
+	}
 
 	switch {
 	case fnRestParamName(childFn) != "":

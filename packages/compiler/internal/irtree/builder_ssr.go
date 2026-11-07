@@ -3,6 +3,7 @@ package irtree
 import (
 	"hash/fnv"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -203,6 +204,19 @@ func (b *builder) constInterp(props valueMap) *jsvalue.Interp {
 	}
 	member := in.Hooks.Member
 	in.Hooks.Member = func(m *ast.MemberExpr) (jsvalue.Value, bool) {
+		// props.X reads what the call site passed, never a local or module
+		// constant that happens to share the name.
+		if b.propKeys != nil && sameValueMap(props, b.localProps) {
+			if id, ok := m.Object.(*ast.Identifier); ok && id.Name == "props" {
+				if name, ok := staticMemberName(m); ok && !b.propKeys[name] && name != "children" && !strings.HasPrefix(name, "__krate") && !b.localFuncProps[name] {
+					if _, shadowed := in.Scope.Lookup(id.Name); !shadowed {
+						if obj, isObj := props["props"]; !isObj || !obj.IsObject() {
+							return jsvalue.Undefined(), true
+						}
+					}
+				}
+			}
+		}
 		// A function prop passed by the caller has no const value; reading it
 		// as props.X must not look like an omitted prop (undefined), or a
 		// destructuring default would replace it.
@@ -1489,4 +1503,24 @@ func cloneObjectProp(p *ast.ObjectProp, sub func(ast.Expr) ast.Expr) *ast.Object
 		cp.KeyExpr = sub(p.KeyExpr)
 	}
 	return &cp
+}
+
+// staticMemberName returns the property name of `x.name` or `x["name"]`.
+func staticMemberName(m *ast.MemberExpr) (string, bool) {
+	switch p := m.Property.(type) {
+	case *ast.Identifier:
+		if !m.Computed {
+			return p.Name, true
+		}
+	case *ast.Literal:
+		if m.Computed && p.Kind == ast.StringLit {
+			return p.Value, true
+		}
+	}
+	return "", false
+}
+
+// sameValueMap reports whether a and b are the same map.
+func sameValueMap(a, b valueMap) bool {
+	return a != nil && b != nil && reflect.ValueOf(a).Pointer() == reflect.ValueOf(b).Pointer()
 }
