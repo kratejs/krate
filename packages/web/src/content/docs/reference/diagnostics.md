@@ -652,6 +652,12 @@ The build empties outDir before it writes the site, and `krate clean` deletes it
 
 A component without state (no createSignal, useState or other hook that holds state) is rendered to static HTML while the site is built, so every value it renders has to be known then: a prop, a local variable, or a module constant. This expression is none of those, for example it names an identifier that is not defined where the component renders (`unresolved identifier x`), reads the clock or the browser, or calls a function the build cannot run. There is no run time to fall back on, so the build fails instead of printing a guess. Define or import the name, pass the value as a prop, or give the component state so it hydrates in the browser. A value that differs per request belongs in a `*.runtime.tsx` component.
 
+### KR8360
+
+**Component state resets when the condition flips**
+
+`cond ? <Form mode="edit" /> : <Form mode="new" />` renders the same component type at the same position. React keeps that instance when `cond` flips, so its state, effects and refs survive, and Krate does the same by lowering the pair to one element with conditional props (`<Form mode={cond ? "edit" : "new"} />`). A few shapes cannot be lowered that way: a render-prop function as children, a spread whose position differs between the branches, a `ref` that differs, a condition with side effects, a lazy component, or an external island. For those the branch that is shown is mounted and the other is unmounted, so flipping the condition restarts the component with fresh state and runs its cleanups and mount effects again. Render one element and pass the differing values as props, make both branches the same shape, or give the branches different `key` props when the restart is what you want (different keys never warn).
+
 ### KR8601
 
 **Unsupported page segment export value**
