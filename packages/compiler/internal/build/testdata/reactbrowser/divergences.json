@@ -22,5 +22,13 @@
   "r18/ref_callback_inline_list_reorder": {
     "severity": "P2",
     "reason": "[ref-callback] React detaches and re-attaches the inline callback refs of every list row on each re-render; Krate keeps the refs attached when rows move, and still detaches the ref of a removed row"
+  },
+  "r19/action_state_sequence": {
+    "severity": "P2",
+    "reason": "[entanglement] React holds the result of the first of two queued useActionState dispatches until the whole queue settles; Krate commits each result when its action finishes (the final state and pending flag match)"
+  },
+  "r19/optimistic_overlapping_actions": {
+    "severity": "P2",
+    "reason": "[entanglement] a second form action that finishes while an earlier one is pending: React keeps both optimistic items until all overlapping actions settle, Krate commits the finished action's update at once (the rollback of the failed one and the final list match)"
   }
 }
