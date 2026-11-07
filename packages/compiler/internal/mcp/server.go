@@ -473,7 +473,11 @@ func (s *Server) initializeResult(raw json.RawMessage) map[string]any {
 			"Write tools (create_page, edit_file, apply_patch, batch_edit, create_content, edit_content) default to a dry-run unified diff; pass apply:true to write. " +
 			"create_content validates frontmatter against a collection's schema and refuses existing entries; edit_content re-parses the result and refuses schema violations. " +
 			"Krate conventions: pages under <pagesDir>, root layout in _layout.tsx, directed content via getCollection from 'krate/content'. " +
-			"Content collections come from content: in krate.config.ts plus plugin-contributed ones (e.g. the docs collection).",
+			"Content collections come from content: in krate.config.ts plus plugin-contributed ones (e.g. the docs collection). " +
+			"Debug the running app with dev_server_status, get_errors (build, browser and server errors from the live dev server, with KR codes), get_logs and dev_server (start/stop, needs allowTasks dev); explain a KR code with explain_diagnostic. " +
+			"Understand a page with explain_page (mode, tiers, islands, exact bytes), why_hydrated, why_in_bundle, list_islands, get_page_metadata, get_rendered_html and render_preview. " +
+			"Understand the project with get_project_metadata, get_config (with sources), list_api_routes, list_middleware, list_actions, get_server_action_by_id, list_collections, env_check (names only, never values), bundle_report and compat_check. " +
+			"Check quality with audit_page, typecheck and, with Playwright installed, page_check and browser_eval. Move versions with upgrade and migrate_nextjs. Tools that run project code (dev_server, typecheck, page_check, browser_eval) need an allowTasks entry in .krate/mcp.json.",
 	}
 }
 

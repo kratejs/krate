@@ -1104,6 +1104,7 @@ func runMCP(flags cliFlags, args []string) {
 		Env:        env,
 		Verbose:    flags.Verbose,
 	})
+	defer svc.Close()
 	if flags.HTTP {
 		port := flags.Port
 		if port == 0 {
