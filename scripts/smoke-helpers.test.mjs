@@ -38,7 +38,12 @@ test('platformFor picks the package for each CI machine', () => {
 });
 
 test('isMusl reads the glibc field of the process report', () => {
-  assert.equal(isMusl({ getReport: () => ({ header: { glibcVersionRuntime: '2.39' } }) }), false);
-  assert.equal(isMusl({ getReport: () => ({ header: {} }) }), true);
-  assert.equal(isMusl(undefined), false);
+  assert.equal(isMusl({ getReport: () => ({ header: { glibcVersionRuntime: '2.39' } }) }, 'linux'), false);
+  assert.equal(isMusl({ getReport: () => ({ header: {} }) }, 'linux'), true);
+  assert.equal(isMusl(null, 'linux'), false);
+});
+
+test('isMusl is false off Linux, whose reports have no glibc field', () => {
+  assert.equal(isMusl({ getReport: () => ({ header: {} }) }, 'darwin'), false);
+  assert.equal(isMusl({ getReport: () => ({ header: {} }) }, 'win32'), false);
 });

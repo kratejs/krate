@@ -32,7 +32,8 @@ export function spawnPlan(command, args, platform = process.platform) {
 }
 
 /** True on a Linux without glibc (Alpine). Mirrors isMusl() in packages/core/src/binary.ts. */
-export function isMusl(report = process.report) {
+export function isMusl(report = process.report, platform = process.platform) {
+  if (platform !== 'linux') return false;
   try {
     const header = report?.getReport?.().header;
     return !!header && !header.glibcVersionRuntime;
