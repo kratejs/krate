@@ -45,76 +45,6 @@ func isUseIdCall(expr ast.Expr) bool {
 	return ok && id.Name == "__krate_useId"
 }
 
-// evalBinaryValue computes the value of a binary operation between two resolved
-// const operands. Arithmetic/comparison ops use numeric evaluation when both
-// operands are numeric; string concat uses raw concatenation.
-func evalBinaryValue(op, left, right string) string {
-	lNum, lOk := parseNumeric(left)
-	rNum, rOk := parseNumeric(right)
-	switch op {
-	case "+":
-		if lOk && rOk {
-			return trimFloat(lNum + rNum)
-		}
-		return left + right
-	case "-":
-		if lOk && rOk {
-			return trimFloat(lNum - rNum)
-		}
-	case "*":
-		if lOk && rOk {
-			return trimFloat(lNum * rNum)
-		}
-	case "/":
-		if lOk && rOk && rNum != 0 {
-			return trimFloat(lNum / rNum)
-		}
-	case "%":
-		if lOk && rOk && rNum != 0 {
-			return trimFloat(float64(int(lNum) % int(rNum)))
-		}
-	case "<":
-		if lOk && rOk {
-			return strconv.FormatBool(lNum < rNum)
-		}
-		return strconv.FormatBool(left < right)
-	case "<=":
-		if lOk && rOk {
-			return strconv.FormatBool(lNum <= rNum)
-		}
-		return strconv.FormatBool(left <= right)
-	case ">":
-		if lOk && rOk {
-			return strconv.FormatBool(lNum > rNum)
-		}
-		return strconv.FormatBool(left > right)
-	case ">=":
-		if lOk && rOk {
-			return strconv.FormatBool(lNum >= rNum)
-		}
-		return strconv.FormatBool(left >= right)
-	}
-	return ""
-}
-
-func parseNumeric(s string) (float64, bool) {
-	if s == "" || !isNumericLiteral(s) {
-		return 0, false
-	}
-	f, err := strconv.ParseFloat(s, 64)
-	if err != nil {
-		return 0, false
-	}
-	return f, true
-}
-
-func trimFloat(f float64) string {
-	if f == float64(int64(f)) {
-		return strconv.FormatInt(int64(f), 10)
-	}
-	return strconv.FormatFloat(f, 'f', -1, 64)
-}
-
 // jsLiteralFor renders a resolved const value as a JS literal. A genuine JS
 // numeric literal or keyword is emitted bare; array/object source produced by
 // evalConst is emitted verbatim; everything else is quoted as a string so
@@ -152,18 +82,6 @@ func isReferenceInit(expr ast.Expr) bool {
 		return true
 	}
 	return false
-}
-
-func isNumericLiteral(s string) bool {
-	if s == "" {
-		return false
-	}
-	for _, r := range s {
-		if (r < '0' || r > '9') && r != '.' && r != '-' && r != 'e' && r != 'E' && r != '+' {
-			return false
-		}
-	}
-	return true
 }
 
 func sortedKeys(m map[string]string) []string {
