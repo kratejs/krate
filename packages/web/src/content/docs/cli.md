@@ -329,7 +329,17 @@ serverless targets: `krate deploy` fails naming them (use `--target docker`).
 Static-only hosts (`gh-pages`) fail for projects with server features unless you
 pass `--static-only`, which publishes only the static pages.
 
+An unknown `--target` fails before the build starts, listing the valid targets.
+
 See [Deployment](/docs/guides/deployment/) for details.
+
+## `krate doctor`
+
+Prints the krate and toolchain versions, the resolved config, runtimes, and the
+cache directory. It exits with status 1 when the config does not load or the
+cache directory cannot be written, so it can gate a CI step; missing optional
+tools only print. It also warns when the installed `@krate/core` and the running
+binary are different versions.
 
 ## `krate clean`
 
@@ -338,6 +348,10 @@ Removes the output directory (`dist`) and the compiler cache (`.krate/cache`):
 ```sh
 krate clean
 ```
+
+`krate clean` refuses to run when `outDir` is, or contains, the project root,
+`pagesDir` or `publicDir` (for example `outDir: "."`), so a misconfigured
+output directory cannot delete your sources.
 
 ## `krate go:init`
 
