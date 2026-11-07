@@ -4239,7 +4239,7 @@ func (b *builder) buildExternalComponentSlot(name string, el *ast.JSXElement) (S
 	// are bundled; inline functions need an explicit diagnostic, never a
 	// silently blank island.
 	for name, fn := range b.functions {
-		if fn == nil || name == root || !strings.Contains(subtree, "<"+name) {
+		if fn == nil || name == root || !rendersTag(subtree, name) {
 			continue
 		}
 		if _, external := b.externalImports[name]; external {
@@ -4655,4 +4655,25 @@ func keySet(m valueMap) map[string]bool {
 		out[k] = true
 	}
 	return out
+}
+
+// rendersTag reports whether source opens a <name> element. A longer tag that
+// only starts with name, such as <Popover for P, does not count.
+func rendersTag(source, name string) bool {
+	tag := "<" + name
+	for i := 0; ; {
+		at := strings.Index(source[i:], tag)
+		if at < 0 {
+			return false
+		}
+		i += at + len(tag)
+		if i == len(source) {
+			return true
+		}
+		switch c := source[i]; {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '_', c == '$':
+		default:
+			return true
+		}
+	}
 }

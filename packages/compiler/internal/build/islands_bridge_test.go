@@ -648,3 +648,24 @@ export function Badge({ label }) { return jsx('span', { className: 'badge', chil
 		t.Fatalf("asset not copied: %v", err)
 	}
 }
+
+// KR8007 names a same-file component the island renders, not one whose name
+// only starts the island's own tag: `Bad` is not rendered by <Badge>.
+func TestIslandTagPrefixIsNotASameFileLocal(t *testing.T) {
+	root := t.TempDir()
+	cfg := setupIslandProject(t, root, true)
+	page := `
+		import { Badge } from 'fake-lib';
+		export default function Bad() { return <Badge label="x">y</Badge>; }
+	`
+	if err := os.WriteFile(filepath.Join(root, "src", "pages", "index.tsx"), []byte(page), 0644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := captureOutput(func() error { return New(root, cfg).BuildAll() })
+	if err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	if strings.Contains(out, "[KR8007]") {
+		t.Fatalf("unexpected KR8007 warning:\n%s", out)
+	}
+}

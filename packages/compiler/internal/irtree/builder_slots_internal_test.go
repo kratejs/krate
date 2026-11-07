@@ -59,3 +59,24 @@ func TestIdSafeMatchesTheRuntimeRule(t *testing.T) {
 		}
 	}
 }
+
+func TestRendersTagMatchesWholeNames(t *testing.T) {
+	for _, c := range []struct {
+		source, name string
+		want         bool
+	}{
+		{"<Popover><P /></Popover>", "P", true},
+		{"<P>", "P", true},
+		{"<P\n  a={1}>", "P", true},
+		{"<P.Item />", "P", true},
+		{"<P", "P", true},
+		{"<Popover><PopoverTrigger /></Popover>", "P", false},
+		{"<P2 /><P_x /><P$ />", "P", false},
+		{"<Popover><P>", "P", true},
+		{"no tags", "P", false},
+	} {
+		if got := rendersTag(c.source, c.name); got != c.want {
+			t.Errorf("rendersTag(%q, %q) = %v, want %v", c.source, c.name, got, c.want)
+		}
+	}
+}

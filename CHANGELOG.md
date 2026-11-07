@@ -23,6 +23,9 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Added
 
+- `KR8360` warns when a conditional renders the same component in both branches but the build
+  cannot keep one instance: render-prop children, a differing `ref` or spread, a side-effecting
+  test, a lazy component, or a wrapper element built by each branch.
 - MCP: 28 new tools and 5 new prompts, for 60 tools and 13 prompts: live dev server state and
   errors, page and bundle explanations, project metadata, `env_check` (names only), audits,
   guided upgrades, and browser checks. `dev_server`, `typecheck`, `page_check` and
@@ -36,6 +39,9 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Fixed
 
+- `cond ? <A x /> : <A y />`, ternary chains and early returns of one type keep one instance of a
+  stateful component and switch its props, so state, typed input, refs and mount effects survive
+  the flip, as in React. Different `key`s still remount.
 - A value in a child component's signal could print its own identifier name into the HTML, as
   in `createSignal(initial)` rendering `initial`. A value the build cannot know now renders
   empty until hydration.
@@ -59,7 +65,8 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
   warning. `krate fix --apply` clears it.
 - The Node API sidecar receives `.env` values, and API routes and middleware see `NODE_ENV`.
 - The page build cache no longer replays HTML after `.env` or `KRATE_PUBLIC_*` changes.
-- `KR8310` no longer fires for async server components.
+- `KR8310` no longer fires for async server components, and `KR8007` no longer fires for a
+  tag that only starts with a same-file component's name, such as `<Popover>` beside `P`.
 - BigInt children render as text instead of throwing, and function values in a runtime spread
   are no longer written as attributes.
 - `Dialog`, `Sheet`, `Popover` and `DropdownMenu` parts without a `value` open each other.
@@ -87,8 +94,10 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Known issues
 
-- Radix Tooltip opens and closes at once under Preact 11.
-- `cond ? <A x /> : <A y />` remounts `A` and resets its state, where React keeps the instance.
+- Under Preact, an uncontrolled Radix Tooltip closes right after it opens, and a Dialog opened
+  from inside a Popover dismisses the Popover. Both come from how Preact orders effects and
+  handles portals, and reproduce without Krate. The React compatibility guide has the affected
+  components and tested workarounds.
 
 ## 0.5.0-beta.3 (2026-11-06)
 
