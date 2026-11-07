@@ -142,7 +142,8 @@ follow React 18:
   mounts when the branch is shown and unmounts (`componentWillUnmount`,
   parent first) when it is hidden; showing it again creates a fresh instance
   with fresh state. Components in an initially hidden branch do not mount
-  until it is shown.
+  until it is shown. `cond ? <Child a/> : <Child b/>` is one instance whose
+  props switch (see [Effects](#effects)).
 - **Also supported:** `static defaultProps`, `static contextType` with
   `this.context`, getters and setters, private `#members`, class fields and
   arrow handlers, instance fields assigned in any method (`this.timer = ...`),
@@ -689,6 +690,23 @@ instance, so state starts from its initial value and every effect runs
 again, as in React. The branch's DOM nodes are reused and re-bound, so
 uncontrolled DOM state inside them (typed text in an uncontrolled input,
 scroll position) survives the toggle, which React would reset.
+
+**Same type in both branches.** `isEdit ? <Form mode="edit" /> : <Form
+mode="new" />` keeps one `Form` instance, as React does: the compiler lowers the
+pair to `<Form mode={isEdit ? "edit" : "new"} />`, so flipping the condition
+changes the props and leaves state, typed input, refs and mount effects alone.
+Props set in one branch only switch to `undefined` in the other, differing
+children switch with the condition, and chains (`a ? <X/> : b ? <X/> : <X/>`)
+and early returns of one type (`if (alt) return <X/>; return <X/>;`) work the
+same way. Only components that hold state are lowered; a stateless component
+keeps its two branches, so its output does not change. Branches with different
+`key` props (or a key on one side only) remount, as in React. When a pair
+cannot be lowered, the build warns with `KR8360` instead of resetting state
+silently: render-prop function children, a `ref` or spread that differs between
+the branches, a condition with side effects, a lazy component, or the same
+component inside a wrapper element that each branch builds
+(`cond ? <div><X/></div> : <div><X/></div>`). Render one element and pass the
+differing values as props, or move the condition inside the wrapper.
 
 **Closures.** Krate reads state through live getters, so a timer or promise
 callback created inside an effect reads the latest committed value when it
@@ -1386,12 +1404,15 @@ observed in a browser. The browser conformance suite (`/react-events/` in
   client-only islands; their styles do not exist in the server HTML.
 - **React 19-only semantics** in compiled packages. Preact's compatibility layer
   is close to React 18 behavior; version-specific APIs may differ.
-- **State reuse across conditional branches.** `cond ? <Panel a/> : <Panel b/>`
-  (or `cond && <Panel/>` next to `!cond && <Panel/>`) puts one component type in
-  two places. React keeps the instance when the branch flips; Krate mounts the
-  branch it shows, so flipping unmounts the other and the component restarts
-  with fresh state. Render one `<Panel>` and pass the differing props, or lift
-  the state up.
+- **State reuse across conditional branches, the uncommon shapes.** One
+  stateful component type in both branches of a ternary keeps its instance (see
+  [Effects](#effects)). Shapes the compiler cannot lower restart the component
+  and warn with `KR8360`: the same component inside a wrapper element each
+  branch builds, a differing `ref` or spread, render-prop children. `{c &&
+  <Panel/>}` next to `{!c && <Panel/>}` are two positions, so they remount in
+  React as well. A stateless component, or an external island, in both branches
+  is not merged: uncontrolled DOM state inside it (typed text) is reset on the
+  flip.
 - **Hook ordering and rules-of-hooks** for transpiled source. Components run
   once per mount, so there is no hook order to preserve.
 - **`Activity` DOM structure, `SuspenseList` ordering, `ViewTransition` events.**

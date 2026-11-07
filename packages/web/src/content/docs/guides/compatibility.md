@@ -72,13 +72,16 @@ Evidence: `TestReactUseReducerBuild`, `TestRewriteReactUseReducer`, `TestRewrite
 
 **Source:** Supported - **Islands:** Supported - **SSR:** n/a
 
-Effects run in React's commit order (insertion, layout before paint, passive after paint or synchronously after discrete events; children before parents; cleanups before re-runs; parent-first unmount) with Object.is deps, and setups/cleanups read the state and props of their own commit. useMemo/useCallback honour deps synchronously. Conditional branches unmount and remount components with fresh state. Effects without deps re-run on the component's own state/props changes only; each divergence has a KR2xxx diagnostic.
+Effects run in React's commit order (insertion, layout before paint, passive after paint or synchronously after discrete events; children before parents; cleanups before re-runs; parent-first unmount) with Object.is deps, and setups/cleanups read the state and props of their own commit. useMemo/useCallback honour deps synchronously. A component in one conditional branch unmounts and remounts with fresh state; one stateful component type in both branches of a ternary (or chain, or early returns) keeps its instance and switches its props. Effects without deps re-run on the component's own state/props changes only; each divergence has a KR2xxx diagnostic.
 
 Known limits:
 
-- One component type in both branches of a ternary is two instances: flipping the condition remounts it with fresh state, where React keeps the instance.
+- A same-type pair that cannot be lowered to one element (render-prop children, a differing ref or spread, a wrapper element built by each branch) restarts the component on the flip and warns with KR8360.
+- A stateless component or an external island in both branches is not merged: uncontrolled DOM state inside it resets on the flip.
 
-Evidence: `TestRewriteReactEffectDepsAndMemo`, `TestRewriteReactEffectEmptyDepsMountOnce`, `TestEffectPhasesLowerToCreateEffectDeps`, `TestEffectWithoutDepsSynthesizesStateAndProps`, `TestHydrationDeclaresEffectOwners`, `TestFreshDepsReRunEveryRender`, `TestHookInLoopOrConditionWarns`, `browser:/react-effects/`
+Diagnostics: `KR8360`
+
+Evidence: `TestRewriteReactEffectDepsAndMemo`, `TestRewriteReactEffectEmptyDepsMountOnce`, `TestEffectPhasesLowerToCreateEffectDeps`, `TestEffectWithoutDepsSynthesizesStateAndProps`, `TestHydrationDeclaresEffectOwners`, `TestFreshDepsReRunEveryRender`, `TestHookInLoopOrConditionWarns`, `TestSameTypeBranchesBuildOneInstance`, `TestBuildSameTypeBranchesOneInstance`, `browser:/react-effects/`, `browser:/react-branches/`
 
 ### Context and refs
 
