@@ -7,6 +7,89 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ## Unreleased
 
+### Breaking
+
+- `outDir` values that are or contain the project root, pages directory or public directory
+  (such as `".."`) fail with `KR8350` before anything is deleted. `krate build` and
+  `krate clean` share the check; with `outDir: "."`, `krate clean` used to delete the project.
+- CSS scope handles read by browser code or passed to an npm island fail with `KR8330`, and a
+  CSS getter or setter read by a build-time component fails with `KR8331`. Both used to crash
+  at runtime.
+- `krate doctor` exits 1 when the config does not load or the cache is unwritable.
+- `process.env` in API routes, middleware and build-time evaluators is now the shell plus
+  `.env` files with the shell winning, on every runtime. Code that relied on a shell variable
+  being absent will see it.
+- Shadcn components built on `radix-ui` need Preact 11; current shadcn passes `ref` as a prop.
+
+### Added
+
+- MCP: 28 new tools and 5 new prompts, for 60 tools and 13 prompts: live dev server state and
+  errors, page and bundle explanations, project metadata, `env_check` (names only), audits,
+  guided upgrades, and browser checks. `dev_server`, `typecheck`, `page_check` and
+  `browser_eval` need `dev`, `typecheck` or `browser` in `allowTasks`. See the MCP docs for the
+  comparison with Next.js.
+- `krate dev` writes `.krate/dev-server.json` and `.krate/dev.log`, and serves `/__krate/state`.
+- `KR8351` for a CSS-signal trigger or content that has no partner, and `KR8352` with a specific
+  hint for build-time "cannot evaluate" errors.
+- A guide to using shadcn/ui with Krate.
+- CI covers Node 24 and 26, and runs the install smoke test on Linux, macOS, Windows and Alpine.
+
+### Fixed
+
+- A value in a child component's signal could print its own identifier name into the HTML, as
+  in `createSignal(initial)` rendering `initial`. A value the build cannot know now renders
+  empty until hydration.
+- CSS scope handles passed as props threw a `ReferenceError` on page load. Handles now reach
+  their triggers and panels at any depth and through `{...props}`.
+- An omitted prop rendered a same-named module constant instead of its default or undefined.
+- Renamed and nested destructured parameters failed to build, rendered empty values, or threw
+  in the browser. A signal passed through a pattern the build keeps destructured now warns.
+- `<a download>`, `download={true}` and `capture={true}` were dropped from the HTML.
+- Pages with two or more shadcn components built on `radix-ui` failed with `KR8321` or a false
+  "recursive component" error. Aliased imports from compiled packages are no longer confused
+  with same-named local components, and `import { Slot } from "radix-ui"` is Krate's native Slot.
+- React islands build and server-render under Preact 11. The "Preact is not installed" message
+  no longer appears when it is installed.
+- `[param]` pages that render a component with a signal no longer fail with "unresolved
+  identifier createSignal".
+- A blog `[slug]` page no longer puts other posts in client JS, in the fallback page or in
+  common shapes such as `const posts = getCollection(...)`, helpers, destructured params and
+  arrow components. `KR8810` reports entry count and size, including for generated pages.
+- 0.4 projects with `baseUrl: "./src"` and `./src/*` path targets build with one `KR7125`
+  warning. `krate fix --apply` clears it.
+- The Node API sidecar receives `.env` values, and API routes and middleware see `NODE_ENV`.
+- The page build cache no longer replays HTML after `.env` or `KRATE_PUBLIC_*` changes.
+- `KR8310` no longer fires for async server components.
+- BigInt children render as text instead of throwing, and function values in a runtime spread
+  are no longer written as attributes.
+- `Dialog`, `Sheet`, `Popover` and `DropdownMenu` parts without a `value` open each other.
+- A throwing effect cleanup no longer stops later cleanups or queued effects, and teardown
+  errors are logged.
+- CSS-signal widgets keep their keyboard and ARIA enhancer after a client navigation.
+- Invalidating the prefetch cache drops prefetches in flight, and a hash step cancels a loading
+  navigation.
+- Components suspended on `use()` no longer mount after you navigate away.
+- Effect order for components in server-rendered rows matches React, and keyed moves no longer
+  fire `onBlur` or `onFocus`.
+- In `krate dev`, a browser error no longer hides a failing build from `/__krate/status` or from
+  tabs that connect later.
+- Stopping the server as the Node sidecar starts no longer races, and cannot leave it running.
+- `krate deploy --target <unknown>` fails before building, flags accept `--flag=value`, and a
+  flag missing its value is named. `krate doctor` warns when `@krate/core` and the binary differ.
+- Unknown keys in `checks` and unknown built-in rule IDs print a config warning with the nearest
+  name. A syntax error in a file imported by `krate.config.*` reports `file:line:col`.
+- `create-krate-app` and `create-krate-docs` exit 1 when no project name is given, and name the
+  project after its directory for `.`.
+- A failed release can be re-run, since versions already on npm are skipped. A pre-release
+  identifier npm cannot use as a tag fails at the start, and a stable patch lower than `latest`
+  no longer moves `latest`.
+- Compatibility matrix rows backed by CI tests read "Supported" instead of "Beta".
+
+### Known issues
+
+- Radix Tooltip opens and closes at once under Preact 11.
+- `cond ? <A x /> : <A y />` remounts `A` and resets its state, where React keeps the instance.
+
 ## 0.5.0-beta.3 (2026-11-06)
 
 ### Breaking
