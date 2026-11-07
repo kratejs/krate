@@ -290,10 +290,14 @@ func (b *builder) cssStylesheets() (stylesheet, noJSFallback string) {
 // child's body is processed.
 type componentCtx struct {
 	// Call-site inputs.
-	localProps       valueMap        // resolved props, params, locals and module consts (name -> value)
-	loopBindings     valueMap        // unrolled for-loop variables of the iteration being built
-	localFuncProps   map[string]bool // prop names whose values are function references
-	callSiteChildren []ast.JSXChild  // call-site children of the current component
+	localProps     valueMap        // resolved props, params, locals and module consts (name -> value)
+	loopBindings   valueMap        // unrolled for-loop variables of the iteration being built
+	localFuncProps map[string]bool // prop names whose values are function references
+	// propKeys holds the names the call site passed (nil outside a call
+	// site). localProps also holds locals and module constants, so a
+	// `props.X` read must not find an entry that is not one of these.
+	propKeys         map[string]bool
+	callSiteChildren []ast.JSXChild // call-site children of the current component
 	// restProps maps a rest (or whole-props) parameter name to the call-site
 	// attributes it collects (attr name -> expression). Used to expand
 	// `{...props}` spreads on intrinsic elements.

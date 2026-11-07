@@ -182,6 +182,46 @@ try {
 
   check(pageErrors.length === 0, `page errors: ${pageErrors.join("; ")}`);
 
+  // Entered by a soft navigation from a page without the enhancer: the router
+  // must still run the page's boot script, or the modal has no scroll lock,
+  // inert background or focus restore.
+  await page.goto(`${base}/`);
+  check(await page.evaluate(() => !window.__krateAria), "/ must not already carry the ARIA enhancer");
+  await page.evaluate(() => {
+    const a = document.createElement("a");
+    a.href = "/zerojs-demo/";
+    a.textContent = "to demo";
+    a.setAttribute("data-krate-link", "");
+    a.id = "to-demo";
+    document.body.appendChild(a);
+  });
+  await page.evaluate(() => (window.__softMarker = 1));
+  await page.click("#to-demo");
+  await page.waitForFunction(() => location.pathname === "/zerojs-demo/");
+  check(await page.evaluate(() => window.__softMarker === 1), "the link must be followed by the client router, not a document load");
+  await page.waitForFunction(() => !!window.__krateAria);
+  // A closed dialog can look visible while the page's CSS is applying, which
+  // must not lock the page: everything would stay inert, and the trigger dead.
+  const softIdle = await page.evaluate(() => ({
+    scroll: document.documentElement.style.overflow,
+    inert: document.querySelectorAll("[data-kinert]").length,
+  }));
+  check(softIdle.scroll !== "hidden" && softIdle.inert === 0, `a closed modal must not lock a soft-navigated page: ${JSON.stringify(softIdle)}`);
+  check(await focusTrigger("Open dialog"), "the soft-navigated page must show the Dialog trigger");
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(250);
+  const softModal = await page.evaluate(() => ({
+    scroll: document.documentElement.style.overflow,
+    inert: document.querySelectorAll("[data-kinert]").length,
+  }));
+  check(softModal.scroll === "hidden" && softModal.inert > 0, `a soft-navigated modal must lock scroll and inert the page: ${JSON.stringify(softModal)}`);
+  await page.keyboard.press("Escape");
+  // The enhancer restores focus after the close has committed, so wait for it.
+  await page
+    .waitForFunction(() => (document.activeElement?.textContent ?? "").endsWith("Open dialog"), null, { timeout: 2000 })
+    .catch(() => {});
+  check((await active()).endsWith("Open dialog"), `Escape must restore focus to the trigger after a soft navigation (got ${await active()})`);
+
   // Controlled and imperative open state.
   const errs2 = [];
   page.on("pageerror", (e) => errs2.push(e.message));

@@ -1,0 +1,8 @@
+{ "steps": [
+  { "op": "click", "sel": "li[data-k=\"g12\"] .b" },
+  { "op": "click", "sel": "#swap-groups" },
+  { "op": "click", "sel": "#rev-items" },
+  { "op": "click", "sel": "li[data-k=\"g21\"] .b" },
+  { "op": "click", "sel": "#move-item" },
+  { "op": "click", "sel": "#both" }
+] }

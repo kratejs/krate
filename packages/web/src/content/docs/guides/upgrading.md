@@ -36,7 +36,7 @@ In order, with the one that bites first at the top:
 
 | # | What changed | How you notice | What to do |
 |---|--------------|----------------|------------|
-| 1 | tsconfig `baseUrl` is honoured | `cannot resolve import "@/..." (matched tsconfig path alias)` | `krate fix --apply` |
+| 1 | tsconfig `baseUrl` is honoured | A `KR7125` warning on every build (a target that exists nowhere is an error: `cannot resolve import "@/..."`) | `krate fix --apply` |
 | 2 | Tailwind output follows v4 | Rings, shadows, blurs, outlines and colours look different; a reset appears | [Rename classes](#tailwind-output-follows-v4), or `tailwind.preflight: false` |
 | 3 | `krate dev` binds `127.0.0.1` | Connection refused from a container, WSL or another machine | `krate dev --host 0.0.0.0` |
 | 4 | `krate start` no longer builds | `no build output found in dist` | Run `krate build` first, or use `krate serve` |
@@ -48,8 +48,6 @@ In order, with the one that bites first at the top:
 
 ### `tsconfig.json`: `baseUrl` is strict
 
-This is the change that cost people hours, so it comes first.
-
 0.4 ignored `baseUrl` when it resolved `paths` aliases such as `@/*`. The 0.4
 project template shipped with
 
@@ -60,14 +58,24 @@ project template shipped with
 
 which `tsc` reads as `src/src/*` and the 0.4 compiler read as `src/*`. From 0.5
 Krate resolves `paths` exactly as `tsc` does: **targets are relative to
-`baseUrl`**. With the template above every `@/` import fails:
+`baseUrl`**. When a target does not exist there but does exist relative to the
+project root, as it does in the template above, Krate still reads it from the
+root so the build works, and prints one warning on every build:
+
+```text
+! config: [KR7125] tsconfig.json: paths target "./src/*" does not exist under baseUrl "./src" but does under the project root; Krate resolves it there, tsc does not. Run `krate fix --apply` to set baseUrl to "."
+```
+
+`tsc` and your editor still read the file the strict way, so type-checking and
+go-to-definition on `@/` imports stay broken until you fix the file. A target
+that exists in neither place is a real mismatch and fails the build:
 
 ```text
 Error (src/pages/index.tsx): bundling page src/pages/index.tsx:1:1: cannot resolve import "@/components/Counter" (matched tsconfig path alias "@/*")
     hint: no file exists at the alias target; targets resolve relative to compilerOptions.baseUrl (/app/src). If baseUrl is "./src" and the targets also start with ./src/, run `krate fix --apply` to set baseUrl to "."
 ```
 
-The fix is to make `baseUrl` the project root:
+To silence the warning and make `tsc` agree, make `baseUrl` the project root:
 
 ```json
 "baseUrl": ".",

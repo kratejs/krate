@@ -57,7 +57,8 @@ for (const file of manifests) {
 // manually so the docs site can track a published release independently of the
 // workspace version being prepared.
 
-// Refresh the supply-chain exclusions for the current release train.
+// Add this release to the supply-chain exclusions. Existing entries stay: the
+// docs site pins an earlier release, which can still be younger than the policy.
 const workspacePath = join(root, 'pnpm-workspace.yaml');
 let workspace = readFileSync(workspacePath, 'utf-8');
 const kratePackages = [
@@ -73,7 +74,15 @@ const kratePackages = [
   '@krate/plugin',
   '@krate/runtime',
 ];
-const exclusions = kratePackages.map((name) => `  - '${name}@${version}'`).join('\n');
+const excluded = new Map();
+const block = workspace.match(/minimumReleaseAgeExclude:\n(?:  - .*\n?)*/)?.[0] ?? '';
+for (const [, name, versions] of block.matchAll(/^ {2}- '(@[^@]+)@(.*)'$/gm)) {
+  excluded.set(name, versions.split(' || '));
+}
+const exclusions = kratePackages.map((name) => {
+  const versions = excluded.get(name) ?? [];
+  return `  - '${name}@${(versions.includes(version) ? versions : [...versions, version]).join(' || ')}'`;
+}).join('\n');
 workspace = workspace.replace(/minimumReleaseAgeExclude:\n(?:  - .*\n?)*/, `minimumReleaseAgeExclude:\n${exclusions}\n`);
 writeFileSync(workspacePath, workspace);
 console.log(`pnpm release exclusions -> ${version}`);

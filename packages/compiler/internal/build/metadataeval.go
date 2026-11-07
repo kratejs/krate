@@ -143,7 +143,7 @@ func (b *Builder) evalMetadata(page string, segs []metaSegment, pageFiles string
 		ResolveDir:    filepath.Dir(abs),
 		Sourcefile:    "krate-metadata-entry.ts",
 		Loader:        api.LoaderTSX,
-		Env:           b.Env,
+		Env:           b.scriptEnv(),
 		Await:         true,
 		ResolveImport: resolve,
 	})

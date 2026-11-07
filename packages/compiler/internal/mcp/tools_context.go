@@ -357,16 +357,19 @@ func (s *Service) toolReadFiles(ctx context.Context, args map[string]any) (ToolR
 }
 
 type diagnosticView struct {
-	ID       string       `json:"id"`
-	Code     string       `json:"code"`
-	Severity string       `json:"severity"`
-	File     string       `json:"file,omitempty"`
-	Line     int          `json:"line,omitempty"`
-	Col      int          `json:"col,omitempty"`
-	Route    string       `json:"route,omitempty"`
-	Message  string       `json:"message"`
-	Hint     string       `json:"hint,omitempty"`
-	Fix      *codemodView `json:"fix,omitempty"`
+	ID       string `json:"id"`
+	Code     string `json:"code"`
+	Severity string `json:"severity"`
+	File     string `json:"file,omitempty"`
+	Line     int    `json:"line,omitempty"`
+	Col      int    `json:"col,omitempty"`
+	// Approximate marks a position found by searching the source: checks run on
+	// the built HTML, so the compiler has no position for them.
+	Approximate bool         `json:"approximate,omitempty"`
+	Route       string       `json:"route,omitempty"`
+	Message     string       `json:"message"`
+	Hint        string       `json:"hint,omitempty"`
+	Fix         *codemodView `json:"fix,omitempty"`
 }
 
 type codemodView struct {
@@ -410,6 +413,11 @@ func (s *Service) toolGetDiagnostics(ctx context.Context, args map[string]any) (
 
 	checkEnabled := argBool(args, "check", true)
 	routeFilter := argString(args, "route")
+	if routeFilter != "" {
+		if _, err := s.findPage(routeFilter); err != nil {
+			return ErrorResult(err.Error()), nil
+		}
+	}
 	if checkEnabled && buildErr == nil {
 		var findings []check.Finding
 		var cfg check.Config
@@ -426,16 +434,28 @@ func (s *Service) toolGetDiagnostics(ctx context.Context, args map[string]any) (
 			add(diagnosticView{ID: "check:error", Code: "check", Severity: "error", Message: "running checks: " + err.Error()})
 		}
 		_ = cfg
+		locate := s.newFindingLocator()
 		for _, f := range findings {
 			if routeFilter != "" && f.Route != routeFilter {
 				continue
 			}
 			file := filepath.ToSlash(f.File)
+			line, col, approx := f.Line, f.Col, false
+			if line == 0 {
+				line, col, approx = locate.next(f.Rule, file)
+			}
 			add(diagnosticView{
-				ID:   f.Rule + ":" + file + ":" + fmt.Sprint(f.Line) + ":" + fmt.Sprint(f.Col),
-				Code: f.Rule, Severity: f.Severity.String(), File: file, Line: f.Line, Col: f.Col, Route: f.Route,
-				Message: f.Message, Hint: f.Hint,
+				ID:   f.Rule + ":" + file + ":" + fmt.Sprint(line) + ":" + fmt.Sprint(col),
+				Code: f.Rule, Severity: f.Severity.String(), File: file, Line: line, Col: col, Approximate: approx,
+				Route: f.Route, Message: f.Message, Hint: f.Hint,
 			})
+		}
+	}
+	seenIDs := map[string]int{}
+	for i := range views {
+		seenIDs[views[i].ID]++
+		if n := seenIDs[views[i].ID]; n > 1 {
+			views[i].ID += "#" + fmt.Sprint(n)
 		}
 	}
 	codemods := []codemodView{}

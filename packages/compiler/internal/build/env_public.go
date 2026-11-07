@@ -1,8 +1,11 @@
 package build
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/internal/bundler"
@@ -84,4 +87,33 @@ func neutralizeClientEnv(js string) string {
 		js = strings.ReplaceAll(js, "process.env", "({})")
 	}
 	return js
+}
+
+// scriptEnv is the process.env an embedded build-time VM sees: the shell
+// environment overlaid with the project's .env values, the shell winning.
+func (b *Builder) scriptEnv() map[string]string {
+	return environ.Merge(b.Env)
+}
+
+// envFingerprint hashes the environment a page can be built from: the inlined
+// public values and build constants, plus the .env file values that
+// build-time code (generateStaticParams, server components) can read. Shell
+// variables that are not public are left out so unrelated ones (PWD, SHLVL) do
+// not defeat the build cache.
+func (b *Builder) envFingerprint() string {
+	h := sha256.New()
+	defs := b.publicEnvDefines()
+	keys := make([]string, 0, len(defs))
+	for k := range defs {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		h.Write([]byte(k + "\x00" + defs[k] + "\x00"))
+	}
+	h.Write([]byte{1})
+	for _, kv := range environ.KVList(b.Env) {
+		h.Write([]byte(kv + "\x00"))
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }

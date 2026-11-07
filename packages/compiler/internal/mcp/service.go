@@ -61,6 +61,8 @@ type Service struct {
 	policyLiteralRedactions []string
 	roots                   []workspaceRoot
 	index                   *workspaceIndex
+	dev                     devManager
+	ins                     insightState
 
 	// runMu serializes write operations and build/check (which swap os.Stdout
 	// during stdout capture) so concurrent requests never race.
@@ -178,14 +180,14 @@ func (s *Service) Register(srv *Server) {
 	srv.SetRedactor(s.redact)
 	srv.SetAuditHook(s.recordAudit)
 	// read tools
-	srv.RegisterTool(Tool{
+	s.reg(srv, Tool{
 		Name:        "list_routes",
 		Description: "List every route in the project with its source file, render mode, and dynamic params.",
 		InputSchema: objSchema(nil),
 		Annotations: readOnlyAnnotations("List Routes"),
 		Handler:     s.toolListRoutes,
 	})
-	srv.RegisterTool(Tool{
+	s.reg(srv, Tool{
 		Name:        "read_page",
 		Description: "Read a page by route (e.g. /about) or source path. Returns the requested format(s): source (raw file text), ast (kind-tagged document), or html (rendered output when built).",
 		InputSchema: objSchema(map[string]any{
@@ -196,7 +198,7 @@ func (s *Service) Register(srv *Server) {
 		Annotations: readOnlyAnnotations("Read Page"),
 		Handler:     s.toolReadPage,
 	})
-	srv.RegisterTool(Tool{
+	s.reg(srv, Tool{
 		Name:        "search_docs",
 		Description: "Search Krate's own framework documentation (embedded in the compiler) for a query, returning ranked pages with short excerpts. Searches Krate usage - not the current project's content. Read the full page with the krate://docs/{slug} resource, or pass full:true to include each hit's cleaned full text.",
 		InputSchema: objSchema(map[string]any{
@@ -208,21 +210,21 @@ func (s *Service) Register(srv *Server) {
 		Annotations: readOnlyAnnotations("Search Docs"),
 		Handler:     s.toolSearchDocs,
 	})
-	srv.RegisterTool(Tool{
+	s.reg(srv, Tool{
 		Name:        "build",
 		Description: "Build the site and return diagnostics plus a per-route summary. Read-only with respect to source files.",
 		InputSchema: objSchema(nil),
 		Annotations: rebuildToolAnnotations("Build Site"),
 		Handler:     s.toolBuild,
 	})
-	srv.RegisterTool(Tool{
+	s.reg(srv, Tool{
 		Name:        "check",
 		Description: "Run the compiler-enforced quality gates (a11y/SEO/perf) against the site, building first when needed.",
 		InputSchema: objSchema(nil),
 		Annotations: rebuildToolAnnotations("Run Quality Checks"),
 		Handler:     s.toolCheck,
 	})
-	srv.RegisterTool(Tool{
+	s.reg(srv, Tool{
 		Name:        "run_task",
 		Description: "Run an allowlisted project task: build, check, test, or typecheck. build/check run in-process; test/typecheck run the project's npm script without a shell.",
 		InputSchema: objSchema(map[string]any{
@@ -231,7 +233,7 @@ func (s *Service) Register(srv *Server) {
 		Annotations: rebuildToolAnnotations("Run Task"),
 		Handler:     s.toolRunTask,
 	})
-	srv.RegisterTool(Tool{
+	s.reg(srv, Tool{
 		Name:        "explain",
 		Description: "Explain a route from the compiled site graph: render mode, source, dependencies, dependents, and emitted output files. Builds the site to populate the graph.",
 		InputSchema: objSchema(map[string]any{
@@ -241,7 +243,7 @@ func (s *Service) Register(srv *Server) {
 		Handler:     s.toolExplain,
 	})
 
-	srv.RegisterTool(Tool{
+	s.reg(srv, Tool{
 		Name:        "search_project",
 		Description: "Search project source and content files (literal or regex) with optional glob, context lines, and pagination.",
 		InputSchema: objSchema(map[string]any{
@@ -257,7 +259,7 @@ func (s *Service) Register(srv *Server) {
 		Annotations: readOnlyAnnotations("Search Project"),
 		Handler:     s.toolSearchProject,
 	})
-	srv.RegisterTool(Tool{
+	s.reg(srv, Tool{
 		Name:        "read_files",
 		Description: "Read several project files in one call, with per-file byte caps and policy checks.",
 		InputSchema: objSchema(map[string]any{
@@ -268,7 +270,7 @@ func (s *Service) Register(srv *Server) {
 		Annotations: readOnlyAnnotations("Read Files"),
 		Handler:     s.toolReadFiles,
 	})
-	srv.RegisterTool(Tool{
+	s.reg(srv, Tool{
 		Name:        "get_diagnostics",
 		Description: "Run a build and quality checks, returning structured diagnostics with file, line/column, code, severity, and hint.",
 		InputSchema: objSchema(map[string]any{
@@ -278,7 +280,7 @@ func (s *Service) Register(srv *Server) {
 		Annotations: rebuildToolAnnotations("Get Diagnostics"),
 		Handler:     s.toolGetDiagnostics,
 	})
-	srv.RegisterTool(Tool{
+	s.reg(srv, Tool{
 		Name:        "find_references",
 		Description: "Find source references to a symbol across project files. Returns file, line, column, and surrounding context.",
 		InputSchema: objSchema(map[string]any{
@@ -292,7 +294,7 @@ func (s *Service) Register(srv *Server) {
 		Annotations: readOnlyAnnotations("Find References"),
 		Handler:     s.toolFindReferences,
 	})
-	srv.RegisterTool(Tool{
+	s.reg(srv, Tool{
 		Name:        "workspace_symbols",
 		Description: "Search the incremental semantic symbol index across the primary root and configured multi-root workspaces. Returns declarations with kind, exported state, root, path, and location.",
 		InputSchema: objSchema(map[string]any{
@@ -306,7 +308,7 @@ func (s *Service) Register(srv *Server) {
 		Annotations: readOnlyAnnotations("Workspace Symbols"),
 		Handler:     s.toolWorkspaceSymbols,
 	})
-	srv.RegisterTool(Tool{
+	s.reg(srv, Tool{
 		Name:        "impact",
 		Description: "Show routes affected by a source file, or the dependencies and dependents of a route, using the compiled site graph.",
 		InputSchema: objSchema(map[string]any{
@@ -316,7 +318,7 @@ func (s *Service) Register(srv *Server) {
 		Annotations: readOnlyAnnotations("Impact Analysis"),
 		Handler:     s.toolImpact,
 	})
-	srv.RegisterTool(Tool{
+	s.reg(srv, Tool{
 		Name:        "list_changes",
 		Description: "List recent MCP transactions, including their IDs, files, timestamps, and undone state.",
 		InputSchema: objSchema(map[string]any{
@@ -326,7 +328,7 @@ func (s *Service) Register(srv *Server) {
 		Annotations: readOnlyAnnotations("List Changes"),
 		Handler:     s.toolListChanges,
 	})
-	srv.RegisterTool(Tool{
+	s.reg(srv, Tool{
 		Name:        "get_history",
 		Description: "Alias for list_changes: recent transaction history for undo and audit.",
 		InputSchema: objSchema(map[string]any{
@@ -338,7 +340,7 @@ func (s *Service) Register(srv *Server) {
 	})
 
 	// write tools (dry-run by default)
-	srv.RegisterTool(Tool{
+	s.reg(srv, Tool{
 		Name:        "create_page",
 		Description: "Create a new page from a template (static, content-list, detail) + optional content entry and layout. Returns a unified diff unless apply=true.",
 		InputSchema: objSchema(map[string]any{
@@ -354,7 +356,7 @@ func (s *Service) Register(srv *Server) {
 		Annotations: additiveToolAnnotations("Create Page"),
 		Handler:     s.toolCreatePage,
 	})
-	srv.RegisterTool(Tool{
+	s.reg(srv, Tool{
 		Name:        "edit_file",
 		Description: "Edit any project file directly (pages, components, CSS, API routes, content, docs): provide content for a full-file replace, or find+replace for a targeted edit. Returns a unified diff unless apply=true. Editable JS/TS source is re-parsed and the edit is refused if it would not parse.",
 		InputSchema: objSchema(map[string]any{
@@ -370,7 +372,7 @@ func (s *Service) Register(srv *Server) {
 		Annotations: destructiveToolAnnotations("Edit Page Source"),
 		Handler:     s.toolEditFile,
 	})
-	srv.RegisterTool(Tool{
+	s.reg(srv, Tool{
 		Name:        "apply_patch",
 		Description: "Apply a unified diff to one or many files as one atomic transaction. Context must match exactly. Supports create, modify, delete, and rename. Returns a dry-run diff unless apply=true.",
 		InputSchema: objSchema(map[string]any{
@@ -381,7 +383,7 @@ func (s *Service) Register(srv *Server) {
 		Annotations: destructiveToolAnnotations("Apply Patch"),
 		Handler:     s.toolApplyPatch,
 	})
-	srv.RegisterTool(Tool{
+	s.reg(srv, Tool{
 		Name:        "batch_edit",
 		Description: "Apply a list of source operations (create/replace/delete/move) as one atomic transaction. Each operation may include expectedSha256. Returns a combined diff unless apply=true.",
 		InputSchema: objSchema(map[string]any{
@@ -395,7 +397,7 @@ func (s *Service) Register(srv *Server) {
 		Annotations: destructiveToolAnnotations("Batch Edit"),
 		Handler:     s.toolBatchEdit,
 	})
-	srv.RegisterTool(Tool{
+	s.reg(srv, Tool{
 		Name:        "undo",
 		Description: "Undo the most recent applied MCP transaction. Refuses if the affected files changed afterward unless force=true.",
 		InputSchema: objSchema(map[string]any{
@@ -405,7 +407,7 @@ func (s *Service) Register(srv *Server) {
 		Annotations: destructiveToolAnnotations("Undo Last Edit"),
 		Handler:     s.toolUndo,
 	})
-	srv.RegisterTool(Tool{
+	s.reg(srv, Tool{
 		Name:        "apply_fix",
 		Description: "Apply an explicit repair to a source file (find/replace) with expected-hash protection. Use the diagnostic data from get_diagnostics to choose the edit.",
 		InputSchema: objSchema(map[string]any{
@@ -419,7 +421,7 @@ func (s *Service) Register(srv *Server) {
 		Annotations: destructiveToolAnnotations("Apply Fix"),
 		Handler:     s.toolApplyFix,
 	})
-	srv.RegisterTool(Tool{
+	s.reg(srv, Tool{
 		Name:        "apply_safe_fixes",
 		Description: "Apply the compiler's conservative codemods through a policy-checked transaction: lowercase events (KR5002), ignored form defaults (KR5005), and contentEditable onChange (KR5007). Dry-run by default; filter by codes and paths.",
 		InputSchema: objSchema(map[string]any{
@@ -430,9 +432,9 @@ func (s *Service) Register(srv *Server) {
 		Annotations: destructiveToolAnnotations("Apply Safe Fixes"),
 		Handler:     s.toolApplySafeFixes,
 	})
-	srv.RegisterTool(Tool{
+	s.reg(srv, Tool{
 		Name:        "format_file",
-		Description: "Format a TypeScript/JavaScript source file with the compiler's printer. Returns a diff unless apply=true.",
+		Description: "Format a TypeScript/JavaScript source file with the project's own prettier or biome. Needs \"format\" in allowTasks. Returns a diff unless apply=true.",
 		InputSchema: objSchema(map[string]any{
 			"path":           strSchema("Project-relative path"),
 			"route":          strSchema("Route path (alternative to path)"),
@@ -442,7 +444,7 @@ func (s *Service) Register(srv *Server) {
 		Annotations: destructiveToolAnnotations("Format File"),
 		Handler:     s.toolFormatFile,
 	})
-	srv.RegisterTool(Tool{
+	s.reg(srv, Tool{
 		Name:        "list_files",
 		Description: "List project files (project-relative paths), skipping node_modules/.git/dist by default. Filter with glob (supports * and **). Use this to discover components, styles, and assets before reading or editing.",
 		InputSchema: objSchema(map[string]any{
@@ -457,7 +459,7 @@ func (s *Service) Register(srv *Server) {
 		Annotations: readOnlyAnnotations("List Files"),
 		Handler:     s.toolListFiles,
 	})
-	srv.RegisterTool(Tool{
+	s.reg(srv, Tool{
 		Name:        "read_file",
 		Description: "Read any project file by project-relative path. Returns text content (with a language hint) or a binary marker. Sensitive paths (environment files, keys) are refused unless allowed in .krate/mcp.json.",
 		InputSchema: objSchema(map[string]any{
@@ -467,7 +469,7 @@ func (s *Service) Register(srv *Server) {
 		Annotations: readOnlyAnnotations("Read File"),
 		Handler:     s.toolReadFile,
 	})
-	srv.RegisterTool(Tool{
+	s.reg(srv, Tool{
 		Name:        "create_file",
 		Description: "Create a new project file. Refuses to overwrite an existing file (use edit_file to modify), respects the write policy, and parse-gates editable source. Returns a unified diff unless apply=true.",
 		InputSchema: objSchema(map[string]any{
@@ -478,7 +480,7 @@ func (s *Service) Register(srv *Server) {
 		Annotations: additiveToolAnnotations("Create File"),
 		Handler:     s.toolCreateFile,
 	})
-	srv.RegisterTool(Tool{
+	s.reg(srv, Tool{
 		Name:        "delete_file",
 		Description: "Delete a project file (files only). Respects the write policy. Returns a preview unless apply=true.",
 		InputSchema: objSchema(map[string]any{
@@ -488,7 +490,7 @@ func (s *Service) Register(srv *Server) {
 		Annotations: destructiveToolAnnotations("Delete File"),
 		Handler:     s.toolDeleteFile,
 	})
-	srv.RegisterTool(Tool{
+	s.reg(srv, Tool{
 		Name:        "move_file",
 		Description: "Move or rename a project file. Respects the write policy for both endpoints. Returns a preview unless apply=true.",
 		InputSchema: objSchema(map[string]any{
@@ -499,7 +501,7 @@ func (s *Service) Register(srv *Server) {
 		Annotations: destructiveToolAnnotations("Move File"),
 		Handler:     s.toolMoveFile,
 	})
-	srv.RegisterTool(Tool{
+	s.reg(srv, Tool{
 		Name:        "create_component",
 		Description: "Scaffold a Krate component (client, static, or server) under src/components/<kebab-name>/, optionally with a companion .css file. Returns a unified diff unless apply=true. Use read_file/edit_file for further changes.",
 		InputSchema: objSchema(map[string]any{
@@ -512,7 +514,7 @@ func (s *Service) Register(srv *Server) {
 		Annotations: additiveToolAnnotations("Create Component"),
 		Handler:     s.toolCreateComponent,
 	})
-	srv.RegisterTool(Tool{
+	s.reg(srv, Tool{
 		Name:        "read_content",
 		Description: "Read content-collection entries. With only a collection, lists its entries (slug + path + frontmatter). With a slug, returns the full entry: raw content, parsed frontmatter, and markdown body.",
 		InputSchema: objSchema(map[string]any{
@@ -522,7 +524,7 @@ func (s *Service) Register(srv *Server) {
 		Annotations: readOnlyAnnotations("Read Content"),
 		Handler:     s.toolReadContent,
 	})
-	srv.RegisterTool(Tool{
+	s.reg(srv, Tool{
 		Name:        "create_content",
 		Description: "Create a new entry in a content collection (configured under content: in krate.config.ts or contributed by a plugin, e.g. the docs collection). Validates the frontmatter against the collection schema, refuses existing entries, and returns a unified diff unless apply=true.",
 		InputSchema: objSchema(map[string]any{
@@ -535,7 +537,7 @@ func (s *Service) Register(srv *Server) {
 		Annotations: additiveToolAnnotations("Create Content Entry"),
 		Handler:     s.toolCreateContent,
 	})
-	srv.RegisterTool(Tool{
+	s.reg(srv, Tool{
 		Name:        "edit_content",
 		Description: "Edit an existing content entry. Modes: full-file replace via content, frontmatter rewrite via data (body kept unless body is given), or a targeted find+replace. Re-parses the result and refuses edits whose frontmatter violates the collection schema. Returns a unified diff unless apply=true.",
 		InputSchema: objSchema(map[string]any{
@@ -552,6 +554,8 @@ func (s *Service) Register(srv *Server) {
 		Annotations: destructiveToolAnnotations("Edit Content Entry"),
 		Handler:     s.toolEditContent,
 	})
+
+	s.registerInsightTools(srv)
 
 	// resources
 	srv.RegisterResource(Resource{
@@ -621,6 +625,7 @@ func (s *Service) Register(srv *Server) {
 	srv.RegisterPrompt(s.promptAuditDependencies())
 	srv.RegisterPrompt(s.promptScaffoldComponent())
 	srv.RegisterPrompt(s.promptExplore())
+	s.registerInsightPrompts(srv)
 
 	// completions
 	srv.RegisterCompletion("ref/resource", "krate://page/{route}", "route", s.completeRoutes)
@@ -963,8 +968,8 @@ func (s *Service) toolCreatePage(ctx context.Context, args map[string]any) (Tool
 		return ErrorResult("a non-root route is required"), nil
 	}
 	clean := strings.TrimPrefix(route, "/")
-	if strings.Contains(clean, "..") || filepath.IsAbs(clean) {
-		return ErrorResult("invalid route"), nil
+	if filepath.IsAbs(clean) {
+		return ErrorResult("invalid route: " + routeArg), nil
 	}
 
 	rel, err := routeToPageFile(clean)
@@ -972,6 +977,7 @@ func (s *Service) toolCreatePage(ctx context.Context, args map[string]any) (Tool
 		return ErrorResult(err.Error()), nil
 	}
 	abs := filepath.Join(s.cfg.PagesDir, filepath.FromSlash(rel))
+	displayRel := s.relToRoot(abs)
 
 	// Scaffold the source. A raw content override wins.
 	content := argString(args, "content")
@@ -1016,8 +1022,8 @@ func (s *Service) toolCreatePage(ctx context.Context, args map[string]any) (Tool
 
 	// Compose the full diff for dry-run; report what would happen.
 	var reports []string
-	reports = append(reports, "diff --git a/"+filepath.ToSlash(rel)+" b/"+filepath.ToSlash(rel))
-	reports = append(reports, unifiedDiff(filepath.ToSlash(rel), "", content))
+	reports = append(reports, "diff --git a/"+displayRel+" b/"+displayRel)
+	reports = append(reports, unifiedDiff(displayRel, "", content))
 	if entryRel != "" {
 		reports = append(reports, "diff --git "+filepath.ToSlash(entryRel))
 		reports = append(reports, unifiedDiff(filepath.ToSlash(entryRel), "", entryContent))
@@ -1042,7 +1048,7 @@ func (s *Service) toolCreatePage(ctx context.Context, args map[string]any) (Tool
 		return ErrorResult(err.Error()), nil
 	}
 	if _, err := os.Stat(abs); err == nil {
-		return ErrorResult("page already exists: " + rel), nil
+		return ErrorResult("page already exists: " + displayRel), nil
 	}
 	tx := newFileTransaction(s)
 	if err := validateGoSource(pageRel, content); err != nil {
@@ -1051,7 +1057,7 @@ func (s *Service) toolCreatePage(ctx context.Context, args map[string]any) (Tool
 	if err := tx.stageWrite(abs, pageRel, content, ""); err != nil {
 		return ErrorResult(err.Error()), nil
 	}
-	created := []string{rel}
+	created := []string{displayRel}
 	if entryRel != "" {
 		eabs, eRel, err := s.resolveEditTarget(entryRel)
 		if err != nil {
@@ -1145,7 +1151,7 @@ func (s *Service) renderPageTemplate(tmpl pageTemplate, rel string, args map[str
 			b.WriteString("        {posts.map((post) => (\n")
 			b.WriteString("          <li>\n")
 			b.WriteString("            <Link href={")
-			fmt.Fprintf(&b, "`/%s/${post.slug}`", strings.Trim(routeFromRel(rel), "/"))
+			fmt.Fprintf(&b, "`/%s/${post.slug}`", strings.TrimSuffix(strings.TrimSuffix(rel, ".tsx"), "/index"))
 			b.WriteString("}>{post.data.title}</Link>\n")
 			b.WriteString("          </li>\n")
 			b.WriteString("        ))}\n")
@@ -1155,10 +1161,10 @@ func (s *Service) renderPageTemplate(tmpl pageTemplate, rel string, args map[str
 			b.WriteString("}\n")
 		} else {
 			b.WriteString("import { getCollection } from 'krate/content';\n\n")
-			fmt.Fprintf(&b, "export function generateStaticParams() {\n  return getCollection(%q).map((p) => ({ params: { id: p.slug } }));\n}\n\n", col)
-			b.WriteString("export default function " + component + "(props) {\n")
-			b.WriteString("  const id = props.params?.id;\n")
-			fmt.Fprintf(&b, "  const item = getCollection(%q).find((p) => p.slug === id);\n", col)
+			param := dynamicParamOf(rel)
+			fmt.Fprintf(&b, "export function generateStaticParams() {\n  return getCollection(%q).map((p) => ({ %s: p.slug }));\n}\n\n", col, param)
+			fmt.Fprintf(&b, "export default function %s({ params }) {\n", component)
+			fmt.Fprintf(&b, "  const item = getCollection(%q).find((p) => p.slug === params.%s);\n", col, param)
 			b.WriteString("\n  if (!item) return <main><h1>Not found</h1></main>;\n\n")
 			b.WriteString("  return (\n    <main>\n      <Head>\n        <title>{item.data.title}</title>\n      </Head>\n      <h1>{item.data.title}</h1>\n      <div class=\"body\" dangerouslySetInnerHTML={{ __html: item.html }}></div>\n    </main>\n  );\n}\n")
 		}
@@ -1588,7 +1594,8 @@ func (s *Service) toolEditContent(ctx context.Context, args map[string]any) (Too
 		if body != "" {
 			exBody = body
 		}
-		out = renderMarkdownEntry(exData, exBody)
+		// The renderer adds the blank line after the frontmatter itself.
+		out = renderMarkdownEntry(exData, strings.TrimLeft(exBody, "\r\n"))
 	}
 
 	// Re-parse and validate the resulting frontmatter against the schema.
@@ -2052,7 +2059,9 @@ func routeToPageFile(route string) (string, error) {
 	}
 	segs := strings.Split(route, "/")
 	for _, seg := range segs {
-		if seg == "" || seg == "." || seg == ".." {
+		// A catch-all such as [...slug] has dots too; only a whole segment or a
+		// path outside brackets can climb out of the pages directory.
+		if seg == "" || seg == "." || seg == ".." || (strings.Contains(seg, "..") && !strings.HasPrefix(seg, "[")) {
 			return "", fmt.Errorf("invalid route segment %q", seg)
 		}
 	}
@@ -2064,6 +2073,17 @@ func defaultLayoutTemplate() string {
 		"  return (\n    <div class=\"layout\">\n" +
 		"      <nav>\n        <Link href=\"/\" prefetch={false}>Home</Link>\n      </nav>\n" +
 		"      <main>{children}</main>\n      <footer>Krate</footer>\n    </div>\n  );\n}\n"
+}
+
+// dynamicParamOf returns the name of a page's last dynamic segment, or "slug".
+func dynamicParamOf(rel string) string {
+	name := "slug"
+	for _, seg := range strings.Split(strings.TrimSuffix(rel, ".tsx"), "/") {
+		if strings.HasPrefix(seg, "[") {
+			name = strings.Trim(seg, "[].")
+		}
+	}
+	return name
 }
 
 // pageComponentName converts a page file path into a PascalCase component name.
@@ -2104,16 +2124,6 @@ func humanizeRoute(p string) string {
 		parts = append(parts, strings.ToUpper(seg[:1])+seg[1:])
 	}
 	return strings.Join(parts, " ")
-}
-
-// routeFromRel converts a page rel path into its route prefix (e.g. blog/[slug].tsx -> /blog).
-func routeFromRel(rel string) string {
-	rel = strings.TrimPrefix(rel, "/")
-	dir := filepath.Dir(filepath.FromSlash(rel))
-	if dir == "." || dir == "" {
-		return ""
-	}
-	return "/" + filepath.ToSlash(dir)
 }
 
 // inferCollectionFromPage guesses the content collection that backs a route by

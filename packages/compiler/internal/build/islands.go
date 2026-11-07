@@ -20,7 +20,7 @@ import (
 )
 
 // assets/preact-render-to-string.js is vendored from preact-render-to-string
-// 6.8.1 (MIT); see assets/preact-render-to-string.LICENSE.
+// 6.8.2 (MIT; 6.8.1 renders nothing under Preact 11); see assets/preact-render-to-string.LICENSE.
 //
 //go:embed assets/preact-render-to-string.js
 var islandRenderToStringJS string
@@ -496,12 +496,14 @@ func islandAlias(root string, ssr bool) map[string]string {
 			"react/jsx-dev-runtime": "preact/jsx-runtime",
 		}
 	}
-	preact := filepath.Join(root, "node_modules", "preact")
-	abs := func(rel string) string { return filepath.ToSlash(filepath.Join(preact, rel)) }
-	compat := abs("compat/dist/compat.module.js")
-	jsx := abs("jsx-runtime/dist/jsxRuntime.module.js")
-	hooks := abs("hooks/dist/hooks.module.js")
-	core := abs("dist/preact.module.js")
+	preact := findPreactDir(root)
+	if preact == "" {
+		preact = filepath.Join(root, "node_modules", "preact")
+	}
+	compat := preactEntry(preact, "./compat", "compat/dist/compat.module.js")
+	jsx := preactEntry(preact, "./jsx-runtime", "jsx-runtime/dist/jsxRuntime.module.js")
+	hooks := preactEntry(preact, "./hooks", "hooks/dist/hooks.module.js")
+	core := preactEntry(preact, ".", "dist/preact.module.js")
 	return map[string]string{
 		"react":                 compat,
 		"react-dom":             compat,
@@ -513,6 +515,66 @@ func islandAlias(root string, ssr bool) map[string]string {
 		"preact/jsx-runtime":    jsx,
 		"preact/hooks":          hooks,
 	}
+}
+
+// findPreactDir returns the installed preact package directory: the project's
+// node_modules first, then those of its ancestors (a hoisted workspace
+// install). Empty when preact is not installed.
+func findPreactDir(root string) string {
+	dir := root
+	for {
+		cand := filepath.Join(dir, "node_modules", "preact")
+		if _, err := os.Stat(filepath.Join(cand, "package.json")); err == nil {
+			return cand
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
+}
+
+// preactEntry returns the absolute file a preact subpath ("." , "./compat",
+// "./hooks", "./jsx-runtime") resolves to. Preact 10 ships dist/*.module.js
+// and Preact 11 ships *.mjs, so the file comes from the package's own
+// "exports" map; legacy is the Preact 10 path, used when the map is absent.
+func preactEntry(preactDir, subpath, legacy string) string {
+	file := legacy
+	if data, err := os.ReadFile(filepath.Join(preactDir, "package.json")); err == nil {
+		var pkg struct {
+			Exports map[string]json.RawMessage `json:"exports"`
+		}
+		if json.Unmarshal(data, &pkg) == nil {
+			if raw, ok := pkg.Exports[subpath]; ok {
+				if target := exportTarget(raw); target != "" {
+					file = strings.TrimPrefix(target, "./")
+				}
+			}
+		}
+	}
+	return filepath.ToSlash(filepath.Join(preactDir, filepath.FromSlash(file)))
+}
+
+// exportTarget picks the plain-file target of one "exports" entry: a string,
+// or the "import"/"default" condition of an object.
+func exportTarget(raw json.RawMessage) string {
+	var str string
+	if json.Unmarshal(raw, &str) == nil {
+		return str
+	}
+	var cond map[string]json.RawMessage
+	if json.Unmarshal(raw, &cond) != nil {
+		return ""
+	}
+	for _, key := range []string{"browser", "import", "default"} {
+		if v, ok := cond[key]; ok {
+			if t := exportTarget(v); t != "" {
+				return t
+			}
+		}
+	}
+	return ""
 }
 
 // bundleLocation is a source position reported by esbuild inside a package or
@@ -605,7 +667,7 @@ func (b *Builder) buildIslandBundle(src, resolveDir string, ssr bool, plugin *ap
 			}
 		}
 		joined := strings.Join(msgs, "\n")
-		if strings.Contains(joined, "preact") {
+		if findPreactDir(b.Root) == "" && strings.Contains(joined, "preact") {
 			return nil, &bundleError{Loc: loc, Msg: fmt.Sprintf("external React components require Preact, which is not installed in this project\n  hint: install it with `pnpm add preact` (or `npm install preact`)\n  detail: %s", joined)}
 		}
 		return nil, &bundleError{Loc: loc, Msg: "bundling external React island:\n" + joined}
@@ -860,7 +922,11 @@ func (b *Builder) islandImportMapHTML() string {
 // diagnostic only: an older release still builds, but is called out because
 // islands rely on compat behavior added in later 10.x releases.
 func installedPreactVersion(root string) string {
-	data, err := os.ReadFile(filepath.Join(root, "node_modules", "preact", "package.json"))
+	dir := findPreactDir(root)
+	if dir == "" {
+		return ""
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "package.json"))
 	if err != nil {
 		return ""
 	}

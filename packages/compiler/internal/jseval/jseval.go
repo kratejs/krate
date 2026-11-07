@@ -103,6 +103,26 @@ func Eval(opts Options) (out json.RawMessage, err error) {
 	return json.RawMessage(s), nil
 }
 
+// BundleMessage is one esbuild error. File is absolute and Col is 1-based; both
+// are zero when the error has no source location.
+type BundleMessage struct {
+	File     string
+	Line     int
+	Col      int
+	Text     string
+	LineText string
+}
+
+// BundleError is returned when the entry or a module it imports cannot be
+// bundled. Callers use Messages to tell a syntax error in a file from a missing
+// package.
+type BundleError struct {
+	Messages []BundleMessage
+	text     string
+}
+
+func (e *BundleError) Error() string { return "bundling entry:\n" + e.text }
+
 // Bundle compiles the entry module and returns plain ESM JavaScript without
 // executing it. Node built-ins remain external so the selected runtime can
 // resolve them.
@@ -150,14 +170,25 @@ func bundle(opts Options) (string, error) {
 	result := api.Build(buildOpts)
 	if len(result.Errors) > 0 {
 		var sb strings.Builder
+		be := &BundleError{}
 		for _, e := range result.Errors {
 			if e.Location != nil {
 				fmt.Fprintf(&sb, "%s:%d:%d: %s\n", e.Location.File, e.Location.Line, e.Location.Column, e.Text)
+				file := e.Location.File
+				if abs, err := filepath.Abs(file); err == nil {
+					file = abs
+				}
+				be.Messages = append(be.Messages, BundleMessage{
+					File: file, Line: e.Location.Line, Col: e.Location.Column + 1,
+					Text: e.Text, LineText: strings.TrimRight(e.Location.LineText, "\r\n"),
+				})
 			} else {
 				sb.WriteString(e.Text + "\n")
+				be.Messages = append(be.Messages, BundleMessage{Text: e.Text})
 			}
 		}
-		return "", fmt.Errorf("bundling entry:\n%s", sb.String())
+		be.text = sb.String()
+		return "", be
 	}
 	if len(result.OutputFiles) == 0 {
 		return "", fmt.Errorf("bundle produced no output")

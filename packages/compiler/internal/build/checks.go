@@ -17,7 +17,7 @@ import (
 // strictly opt-in; `krate check` uses check.DefaultConfig() instead when the
 // key is absent (explicit invocation should run the built-ins).
 func (b *Builder) checksConfig() (check.Config, error) {
-	cfg, err := check.FromMap(b.Cfg.Checks, b.Root, b.Env)
+	cfg, err := check.FromMap(b.Cfg.Checks, b.Root, b.scriptEnv())
 	if err != nil {
 		return check.Config{}, err
 	}
@@ -121,7 +121,7 @@ func (b *Builder) CheckSite(useDefaults bool) ([]check.Finding, check.Config, er
 	if useDefaults && b.Cfg.Checks == nil {
 		cfg = check.DefaultConfig()
 		cfg.Root = b.Root
-		cfg.Env = b.Env
+		cfg.Env = b.scriptEnv()
 	}
 	if !cfg.Active {
 		return nil, cfg, nil

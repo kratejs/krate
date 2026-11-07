@@ -146,8 +146,12 @@ func TestGenerateHTMLInjectsDevBundle(t *testing.T) {
 	if !strings.Contains(dev, "chunks/krate-dev.js") {
 		t.Errorf("dev HTML missing dev bundle script:\n%s", dev)
 	}
+	// The buffer must run before any page script, or startup errors are lost.
+	if early, body := strings.Index(dev, "__KRATE_EARLY_ERRORS__"), strings.Index(dev, "<body"); early < 0 || early > body {
+		t.Errorf("dev HTML must buffer early errors in <head>:\n%s", dev)
+	}
 	prod := generateHTML("<div></div>", "", "", "", nil, "", "", "/", false, "", "", "")
-	if strings.Contains(prod, "krate-dev.js") || strings.Contains(prod, "__KRATE_DEV__") {
+	if strings.Contains(prod, "krate-dev.js") || strings.Contains(prod, "__KRATE_DEV__") || strings.Contains(prod, "__KRATE_EARLY_ERRORS__") {
 		t.Errorf("production HTML must not include dev tooling:\n%s", prod)
 	}
 }

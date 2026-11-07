@@ -53,6 +53,11 @@ func TestBuildOverlayARIAAndEnhancer(t *testing.T) {
 	if !strings.Contains(html, "__krateAria") {
 		t.Errorf("expected the keyboard enhancer to be inlined")
 	}
+	// The router runs boot scripts after a soft navigation, so the tag must be
+	// marked or the enhancer never reaches pages entered client-side.
+	if !bootScriptHolds(html, "__krateAria") {
+		t.Errorf("the keyboard enhancer script must carry data-krate-boot:\n%.600s", html)
+	}
 	idRefsResolve(t, html)
 	for _, want := range []string{
 		`aria-haspopup=dialog`, `aria-haspopup=menu`,
@@ -109,4 +114,15 @@ func TestBuildSwitchRoleOnNativeCheckbox(t *testing.T) {
 	if strings.Contains(html, "__krateAria") {
 		t.Errorf("a native switch needs no enhancer script")
 	}
+}
+
+// bootScriptHolds reports whether an inline <script data-krate-boot> in html
+// contains marker.
+func bootScriptHolds(html, marker string) bool {
+	for _, m := range regexp.MustCompile(`(?s)<script[^>]*data-krate-boot[^>]*>(.*?)</script>`).FindAllStringSubmatch(html, -1) {
+		if strings.Contains(m[1], marker) {
+			return true
+		}
+	}
+	return false
 }

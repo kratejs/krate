@@ -267,6 +267,7 @@ func TestToolAnnotations(t *testing.T) {
 		"create_file": false, "delete_file": true, "move_file": true, "create_component": false,
 		"create_content": false, "edit_content": true,
 		"build": false, "check": false, "run_task": false,
+		"upgrade": true,
 	}
 	for _, tool := range resp["tools"].([]any) {
 		m := tool.(map[string]any)

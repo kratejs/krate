@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createSignal, createEffect } from './signal.js';
+import { createSignal, createEffect, disposeAll, krateDisposeExcept, krateEnterScope, krateLeaveScope } from './signal.js';
 import { createContext } from './context.js';
 import { createResource } from './resource.js';
 import {
@@ -578,3 +578,43 @@ function installFindSlot(html: string): void {
     return null;
   };
 }
+
+describe('a page left while a boundary is suspended', () => {
+  it('does not retry the suspended component when its promise settles', async () => {
+    const { b, shown } = testBoundary('gone', false);
+    const d = deferred<string>();
+    let runs = 0;
+    let effects = 0;
+    runIn(b, () => {
+      runs++;
+      __krateUse(() => __krateRead<string>(d.promise));
+      createEffect(() => void effects++);
+    });
+    expect(runs).toBe(1);
+    disposeAll();
+    d.resolve('late');
+    await flush();
+    // Neither the component body (with its effects) nor the reveal ran.
+    expect(runs).toBe(1);
+    expect(effects).toBe(0);
+    expect(shown).toEqual([]);
+  });
+
+  it('still retries after a soft navigation that kept the layout owning the run', async () => {
+    krateEnterScope('_lkeep_');
+    const { b, shown } = testBoundary('kept', false);
+    const d = deferred<string>();
+    let runs = 0;
+    runIn(b, () => {
+      runs++;
+      __krateUse(() => __krateRead<string>(d.promise));
+    });
+    krateLeaveScope();
+    krateDisposeExcept(['_lkeep_']);
+    d.resolve('ok');
+    await flush();
+    expect(runs).toBe(2);
+    expect(shown).toEqual(['content']);
+    disposeAll();
+  });
+});

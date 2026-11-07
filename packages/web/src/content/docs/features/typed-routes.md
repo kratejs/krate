@@ -209,9 +209,31 @@ export default function BlogPost(props: { params?: { slug: string } }) {
 ```
 
 `generateStaticParams` bakes one static page per entry (`/blog/hello-collections`,
-...). The route parameter (`props.params.slug`) is substituted before rendering, so
-the `find(...)` lookup folds to the matching entry at build time - no runtime
-data access.
+...). The route parameter is substituted before rendering, so the `find(...)`
+lookup folds to the matching entry at build time - no runtime data access, and a
+page's script carries at most its own post. This holds however the page reads
+the param and the collection:
+
+- `props.params.slug`, `({ params })`, `({ params: { slug } })` and
+  `const { slug } = props.params`;
+- the lookup inline, through `const posts = getCollection("blog")` (in the
+  component or at module level), or in a module-level function or arrow function
+  that only returns the chain (`function getPost(slug) { return
+  getCollection("blog").find(...) }`);
+- a component written as an arrow function;
+- a client component that receives the post (`<Meta post={post} />`) gets that
+  one post only.
+
+The `[slug]` fallback page (see below) is built without a slug, so it carries
+only the entries that have no generated page of their own; when
+`generateStaticParams` returns every entry, it carries none.
+
+A lookup that really runs in the browser (a search box filtering
+`getCollection("blog")` by a signal) ships the entries it needs. Build output then
+says how much, for example `KR8810 collection blog is evaluated in the browser: 40
+entries (about 212.4 KB) copied into the page script`, and only the fields
+the page mentions are included. Shrink it by mentioning fewer fields, or compute
+the list in `generateStaticParams`.
 
 :::note
 Both places that run user TypeScript at build time resolve `krate/content`: the
@@ -223,7 +245,9 @@ The bootstrap is emitted as ESM and run on the configured runtime.
 ## Static output & dynamic params
 
 By default a dynamic route (`[slug].tsx`) keeps a **fallback template**, so any
-URL matching the pattern is answered at request time. When the set of valid
+URL matching the pattern is answered at request time. That answer has status
+200: a slug with no entry renders the page's own not-found branch
+(`if (!post) return <h1>Not found</h1>`), not an HTTP 404. When the set of valid
 params is closed, turn that off with `dynamicParams`:
 
 ```tsx

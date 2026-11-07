@@ -1,0 +1,6 @@
+{ "steps": [
+  { "op": "click", "sel": "li[data-id=\"2\"] .rm" },
+  { "op": "wait", "ms": 60 },
+  { "op": "click", "sel": "li[data-id=\"1\"] .rm" },
+  { "op": "wait", "ms": 60 }
+] }

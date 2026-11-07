@@ -52,6 +52,22 @@ func TestPromptEvaluation(t *testing.T) {
 			args:     map[string]any{"name": "StatusBadge"},
 			required: []string{"create_component", "read a nearby component", "build", "check", "client"},
 		},
+		"debug-running-app": {
+			required: []string{"dev_server_status", "dev_server", "get_errors", "explain_diagnostic", "get_logs", "page_check", "dry-run", "the whole app"},
+		},
+		"diagnose-page": {
+			args:     map[string]any{"route": "/pricing"},
+			required: []string{"explain_page", "why_hydrated", "why_in_bundle", "get_page_metadata", "audit_page", "dry-run", "/pricing"},
+		},
+		"upgrade-krate": {
+			required: []string{"upgrade", "apply: true", "edit_file", "typecheck", "explain_diagnostic", "never change dependency versions"},
+		},
+		"migrate-from-nextjs": {
+			required: []string{"migrate_nextjs", "compat_check", "krate migrate nextjs --apply", "get_diagnostics", "changes no files"},
+		},
+		"performance-review": {
+			required: []string{"bundle_report", "list_islands", "explain_page", "why_in_bundle", "Do not modify files"},
+		},
 		"explore": {
 			required: []string{"list_routes", "krate://routes", "krate://config", "check", "read_page", "no specific route"},
 		},

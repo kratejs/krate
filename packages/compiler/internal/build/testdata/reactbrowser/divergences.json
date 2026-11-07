@@ -7,6 +7,10 @@
     "severity": "P2",
     "reason": "[render-count] the context value is plain and the text updates like React; only the memo child's render log differs, because Krate does not re-run component bodies (same as class_pure_component and hook_usecallback_identity)"
   },
+  "r18/effect_cleanup_throws_boundary": {
+    "severity": "P2",
+    "reason": "[order] after a cleanup throws, React still runs the failed effect's next setup before the boundary unmounts it; Krate hands the error to the boundary at once, so that setup and its cleanup never run. Sibling effects and the boundary fallback match"
+  },
   "r18/hook_usecallback_identity": {
     "severity": "P2",
     "reason": "[render-count] render counters kept in refs differ because Krate does not re-run component bodies; handlers and logs match"
@@ -14,5 +18,17 @@
   "r18/hook_useid": {
     "severity": "P2",
     "reason": "[id-format] useId strings differ (krate-1-Field-Field_c0 vs _r_0_); ids are unique and label/aria links work on both sides"
+  },
+  "r18/ref_callback_inline_list_reorder": {
+    "severity": "P2",
+    "reason": "[ref-callback] React detaches and re-attaches the inline callback refs of every list row on each re-render; Krate keeps the refs attached when rows move, and still detaches the ref of a removed row"
+  },
+  "r19/action_state_sequence": {
+    "severity": "P2",
+    "reason": "[entanglement] React holds the result of the first of two queued useActionState dispatches until the whole queue settles; Krate commits each result when its action finishes (the final state and pending flag match)"
+  },
+  "r19/optimistic_overlapping_actions": {
+    "severity": "P2",
+    "reason": "[entanglement] a second form action that finishes while an earlier one is pending: React keeps both optimistic items until all overlapping actions settle, Krate commits the finished action's update at once (the rollback of the failed one and the final list match)"
   }
 }

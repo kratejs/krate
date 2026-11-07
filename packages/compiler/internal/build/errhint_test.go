@@ -14,12 +14,13 @@ import (
 )
 
 // TestBuildFailurePrintsAliasHint checks that the summary of a failed build
-// carries the hint naming the alias base directory. A baseUrl that does not
-// match the alias targets is otherwise impossible to see from the error.
+// carries the hint naming the alias base directory. A target that exists
+// neither under baseUrl nor under the project root is otherwise impossible to
+// see from the error.
 func TestBuildFailurePrintsAliasHint(t *testing.T) {
 	root := t.TempDir()
 	files := map[string]string{
-		"tsconfig.json":                  `{"compilerOptions":{"baseUrl":"./src","paths":{"@/*":["./src/*"]}}}`,
+		"tsconfig.json":                  `{"compilerOptions":{"baseUrl":"./src","paths":{"@/*":["./lib/*"]}}}`,
 		"src/components/ui/PageHead.tsx": `export function PageHead() { return <title>t</title>; }`,
 		"src/pages/index.tsx": `import { PageHead } from "@/components/ui/PageHead";
 export default function Page() { return <main><PageHead /></main>; }`,
@@ -39,7 +40,7 @@ export default function Page() { return <main><PageHead /></main>; }`,
 	cfg.LoadTSConfigPaths(root)
 	err := New(root, cfg).BuildAll()
 	if err == nil {
-		t.Fatal("expected the build to fail: ./src/* is not under baseUrl ./src")
+		t.Fatal("expected the build to fail: ./lib/* exists nowhere")
 	}
 	msg := err.Error()
 	if !strings.Contains(msg, "hint: no file exists at the alias target") {
@@ -93,5 +94,25 @@ export default function Page() { return null; }
 		if !strings.Contains(got, want) {
 			t.Errorf("stub lacks %q:\n%s", want, got)
 		}
+	}
+}
+
+// krate/content is virtual: with no collections the fix is config, not install.
+func TestContentImportWithoutCollectionsNamesTheConfig(t *testing.T) {
+	root := t.TempDir()
+	page := filepath.Join(root, "src", "pages", "index.tsx")
+	if err := os.MkdirAll(filepath.Dir(page), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	src := "import { getCollection } from \"krate/content\";\nexport default function P() { return <p>{getCollection(\"blog\").length}</p>; }\n"
+	if err := os.WriteFile(page, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.PagesDir = filepath.Dir(page)
+	cfg.OutDir = filepath.Join(root, "dist")
+	err := New(root, cfg).BuildAll()
+	if err == nil || !strings.Contains(err.Error(), "no content collections are configured") || strings.Contains(err.Error(), "pnpm add") {
+		t.Fatalf("err = %v", err)
 	}
 }

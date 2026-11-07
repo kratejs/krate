@@ -76,6 +76,30 @@ const tab = TabsCtx.use();
 
 or pass it explicitly: `<Part scope={tab} />` then use `props.scope.trigger(...)`.
 
+**`reads the CSS scope handle passed as <name> in code that runs in the browser`** ([KR8330](/docs/reference/diagnostics/#kr8330))
+
+A scope handle (`const tab = createCSSChoice(...)`) exists only at build time.
+Passing it as a prop is fine when the child only uses `trigger`, `panel`,
+`close` or `current` in its JSX. Reading it in a handler, effect or computed
+value, or passing it to an npm island, fails the build:
+
+```tsx
+function Child(props) {
+  return <button {...props.scope.trigger('b')}>B</button>;   // ok
+}
+// onClick={() => log(props.scope.current())}                 // KR8330
+```
+
+Use the helpers in JSX, or pass `const [tab, setTab] = ...` values to a
+component with `createSignal` state.
+
+**`renders at build time but reads <name>, the CSS signal`** ([KR8331](/docs/reference/diagnostics/#kr8331))
+
+A component with no client state is rendered to HTML during the build, when a
+CSS signal has no value. Pass the scope handle (`<Child scope={tab} />`) and
+read `props.scope.current()` / `.panel()` in the child, or give the child its
+own `createSignal` state.
+
 ## Choosing the right tool
 
 If a fix above says "use `createSignal`", the state isn't enumerable/CSS-expressible:

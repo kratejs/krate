@@ -70,6 +70,8 @@ try {
     if (msg.type() !== "error") return;
     // Resource 404s are reported with their URL by the response listener below.
     if (msg.text().startsWith("Failed to load resource")) return;
+    // WebKit refuses <link rel="prefetch"> over http; this server has no https.
+    if (msg.text() === "Prefetch request denied: URL must be secure (HTTPS)") return;
     const i = errors.push(msg.text()) - 1;
     const arg = msg.args()[0];
     if (arg && /^[A-Za-z]*Error$/.test(msg.text())) {
@@ -254,18 +256,41 @@ try {
   await waitText("lazy-panel", "Lazy panel: 0");
   await page.locator("[data-testid=lazy-panel]").click();
   await waitText("lazy-panel", "Lazy panel: 1");
+  // These record every committed state inside the page. A sample some time
+  // after the click reads the page before a loaded browser has handled it.
+  const recordSource = () =>
+    page.evaluate(() => {
+      const read = (id) => document.querySelector(`#root [data-testid="${id}"]`)?.textContent ?? null;
+      const states = (window.__sourceStates = []);
+      const note = () => {
+        const state = { content: read("source-content"), fallback: read("source-fallback"), pending: read("transition-pending") };
+        if (JSON.stringify(state) !== JSON.stringify(states[states.length - 1])) states.push(state);
+      };
+      note();
+      window.__sourceRecorder = new MutationObserver(note);
+      window.__sourceRecorder.observe(document.querySelector("#root"), { subtree: true, childList: true, characterData: true, attributes: true });
+    });
+  const sourceStates = () =>
+    page.evaluate(() => {
+      window.__sourceRecorder.disconnect();
+      return window.__sourceStates;
+    });
+  await recordSource();
   await page.locator("[data-testid=source-urgent]").click();
-  await page.waitForTimeout(30);
-  if ((await text("source-fallback")) !== "Loading source...") fail("suspense: urgent update must show the fallback again");
   await waitText("source-content", "urgent");
-  await page.locator("[data-testid=source-transition]").click();
-  await page.waitForTimeout(30);
-  const during = { content: await text("source-content"), fallback: await text("source-fallback"), pending: await text("transition-pending") };
-  if (during.content !== "urgent" || during.fallback !== null || during.pending !== "pending") {
-    fail(`suspense: a transition must keep the revealed content: ${JSON.stringify(during)}`);
+  if (!(await sourceStates()).some((s) => s.fallback === "Loading source...")) {
+    fail("suspense: urgent update must show the fallback again");
   }
+  await page.waitForFunction(() => document.querySelector('#root [data-testid="source-fallback"]') === null, null, { timeout: 8000 });
+  await recordSource();
+  await page.locator("[data-testid=source-transition]").click();
   await waitText("source-content", "transition");
   await waitText("transition-pending", "idle");
+  const transition = await sourceStates();
+  const lost = transition.filter((s) => s.fallback !== null || s.content === null);
+  if (!transition.some((s) => s.pending === "pending" && s.content === "urgent") || lost.length > 0) {
+    fail(`suspense: a transition must keep the revealed content: ${JSON.stringify(transition)}`);
+  }
   await page.locator("[data-testid=action-start]").click();
   if ((await text("action-pending")) !== "pending") fail("suspense: async action must keep isPending true");
   await waitText("action-result", "saved");
@@ -275,6 +300,69 @@ try {
   await page.locator("[data-testid=store-bump]").click();
   await page.locator("[data-testid=store-bump]").click();
   await waitText("store-value", "2");
+  // Leaving a page while a boundary is suspended: the component must not be
+  // mounted later, on the page that replaced it.
+  await page.goto(baseURL + "/react-suspense/", { waitUntil: "domcontentloaded" });
+  await page.waitForFunction(() => document.querySelector("[data-testid=store-bump]") !== null);
+  await page.waitForTimeout(150);
+  await page.evaluate(() => {
+    window.__softMarker = 1;
+    const a = document.createElement("a");
+    a.href = "/react-keys/";
+    a.textContent = "leave";
+    a.id = "leave-link";
+    a.setAttribute("data-krate-link", "");
+    document.body.appendChild(a);
+  });
+  await page.click("#leave-link");
+  await page.waitForFunction(() => location.pathname === "/react-keys/");
+  if (!(await page.evaluate(() => window.__softMarker === 1))) fail("suspense leave: the link must be a soft navigation");
+  await page.waitForTimeout(1800);
+  const leaveLog = await page.evaluate(() => window.__leaveLog || []);
+  if (leaveLog.length) fail(`suspense leave: a component of the left page mounted later: ${JSON.stringify(leaveLog)}`);
+  // One component type in both branches of a conditional keeps its instance
+  // (state, typed input, ref, effects, native signals) and only its props
+  // switch; different keys remount.
+  await go("/react-branches/", "[data-testid=form]");
+  await page.waitForTimeout(100);
+  const branchSnap = () =>
+    page.evaluate(() => ({
+      forms: document.querySelectorAll("[data-testid=ternary] form").length,
+      templates: document.querySelectorAll("[data-testid=ternary] template").length,
+      mode: document.querySelector("[data-testid=mode]")?.textContent,
+      hint: document.querySelector("[data-testid=hint]")?.textContent,
+      input: document.querySelector("[data-testid=input]")?.value,
+      clicks: document.querySelector("[data-testid=clicks]")?.textContent,
+      native: document.querySelector("[data-testid=native]")?.textContent,
+      early: document.querySelector("[data-testid=early-section] [data-testid=early]")?.textContent,
+      keyed: document.querySelector("[data-testid=keyed] [data-testid=early]")?.textContent,
+      log: Array.from(document.querySelectorAll("[data-testid=log] li")).map((li) => li.textContent),
+      nativeLog: window.__branchLog || [],
+    }));
+  const branch0 = await branchSnap();
+  if (branch0.forms !== 1 || branch0.mode !== "new" || branch0.hint !== "none") fail(`branches initial: ${JSON.stringify(branch0)}`);
+  if (branch0.log.join() !== "mount new ref") fail(`branches initial log: ${branch0.log}`);
+  await page.locator("[data-testid=input]").fill("typed");
+  await page.locator("[data-testid=clicks]").click();
+  await page.locator("[data-testid=native]").click();
+  await page.locator("[data-testid=early]").first().click();
+  await page.locator("[data-testid=keyed] [data-testid=early]").click();
+  await page.locator("[data-testid=flip]").click();
+  await page.waitForTimeout(50);
+  const branch1 = await branchSnap();
+  if (branch1.mode !== "edit" || branch1.hint !== "h") fail(`branches props after flip: ${JSON.stringify(branch1)}`);
+  if (branch1.input !== "typed" || branch1.clicks !== "1") fail(`branches state after flip: ${JSON.stringify(branch1)}`);
+  if (branch1.native !== "native-edit:1") fail(`branches native signal state after flip: ${branch1.native}`);
+  if (branch1.early !== "alt:1") fail(`branches early return state after flip: ${branch1.early}`);
+  if (branch1.keyed !== "alt:0") fail(`branches different keys must remount: ${branch1.keyed}`);
+  if (branch1.log.join() !== "mount new ref") fail(`branches effects must not rerun on the flip: ${branch1.log}`);
+  if (branch1.nativeLog.join() !== "native mount native-new") fail(`branches native lifecycle must not rerun on the flip: ${branch1.nativeLog}`);
+  await page.locator("[data-testid=flip]").click();
+  await page.waitForTimeout(50);
+  const branch2 = await branchSnap();
+  if (branch2.mode !== "new" || branch2.hint !== "none" || branch2.input !== "typed" || branch2.clicks !== "1" || branch2.native !== "native-new:1") {
+    fail(`branches flip back: ${JSON.stringify(branch2)}`);
+  }
   // Keys and list reconciliation: state follows keys across reorder, insert,
   // update and removal; effects mount/unmount per key; keyed remount resets.
   await go("/react-keys/", "[data-testid=todo-row]");
@@ -652,6 +740,59 @@ try {
     if (!noReload) fail("a form action reloaded the page");
     if (nojsTodo.status() !== 303 || !nojsTodoURL.endsWith("/react-actions/")) fail(`no-JS useActionState post: ${JSON.stringify(actions.nojs)}`);
     if (nojsFeedback.status() !== 303 || !nojsFeedbackURL.endsWith("/react-actions/")) fail(`no-JS server action post: ${JSON.stringify(actions.nojs)}`);
+  }
+
+  // shadcn-style Radix components (`import { Dialog as DialogPrimitive } from
+  // "radix-ui"` wrapped in `function Dialog`): several on one page, server
+  // rendered, then live in the browser.
+  await page.goto(baseURL + "/shadcn-radix/", { waitUntil: "domcontentloaded" });
+  const shadcnSSR = await page.evaluate(() => ({
+    islands: document.querySelectorAll("[data-krate-island-ssr]").length,
+    trigger: !!document.querySelector("#sx-dialog"),
+    switch: !!document.querySelector("#sx-switch[role=switch]"),
+    checkbox: !!document.querySelector("#sx-checkbox[role=checkbox]"),
+  }));
+  if (!shadcnSSR.islands || !shadcnSSR.trigger || !shadcnSSR.switch || !shadcnSSR.checkbox) {
+    fail(`shadcn page was not server rendered: ${JSON.stringify(shadcnSSR)}`);
+  }
+  await page.waitForFunction(
+    () => Object.keys(globalThis.__krate_island_hydration || {}).length >= 4,
+    { timeout: 8000 },
+  );
+  await page.waitForTimeout(500);
+  await page.click("#sx-dialog");
+  await page.waitForSelector("[role=dialog]", { timeout: 4000 }).catch(() => {});
+  const dialogOpen = (await page.locator("[role=dialog]").count()) > 0;
+  if (!dialogOpen) fail("shadcn dialog did not open");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+  if ((await page.locator("[role=dialog]").count()) !== 0) fail("shadcn dialog did not close");
+  await page.click("#sx-tab-b");
+  const panel = await page.locator("[role=tabpanel]:visible").first().innerText();
+  if (panel.trim() !== "Panel B") fail(`shadcn tabs did not switch: ${panel}`);
+  await page.click("#sx-accordion");
+  await page.waitForTimeout(300);
+  if (!(await page.locator("text=Answer text").first().isVisible().catch(() => false))) fail("shadcn accordion did not open");
+  await page.click("#sx-checkbox");
+  if ((await page.getAttribute("#sx-checkbox", "aria-checked")) !== "true") fail("shadcn checkbox did not check");
+  await page.click("#sx-switch");
+  if ((await page.getAttribute("#sx-switch", "aria-checked")) !== "true") fail("shadcn switch did not toggle");
+
+  // Overlay triggers and contents written without a `value` open each other.
+  await go("/overlay-novalue/", "main");
+  for (const [trigger, probe] of [
+    ["Open dialog", "Dialog title"],
+    ["Open sheet", "Sheet title"],
+    ["Open popover", "Popover body"],
+    ["Open menu", "Menu item"],
+  ]) {
+    const target = page.getByText(probe, { exact: true }).first();
+    if (await target.isVisible()) fail(`${trigger}: content visible before opening`);
+    await page.getByText(trigger, { exact: true }).first().click();
+    await page.waitForTimeout(250);
+    if (!(await target.isVisible())) fail(`${trigger}: the overlay did not open without a value`);
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(250);
   }
 
   // Decorators lowered by esbuild run in client code, with each module's

@@ -1,0 +1,8 @@
+{ "steps": [
+  { "op": "fill", "sel": "#t", "text": "bad1" },
+  { "op": "click", "sel": "#go", "then": "#list li:nth-child(2)" },
+  { "op": "fill", "sel": "#t", "text": "ok2" },
+  { "op": "click", "sel": "#go", "then": "#list li:nth-child(3)" },
+  { "op": "eval", "js": "window.__gates['ok2'].open()", "then": "#list li:nth-child(2)" },
+  { "op": "eval", "js": "window.__gates['bad1'].open()", "then": "#err:not(:empty)" }
+] }

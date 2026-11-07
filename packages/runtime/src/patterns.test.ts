@@ -66,6 +66,34 @@ describe('krateSpread', () => {
   });
 });
 
+describe('krateSpread with function values', () => {
+  it('writes no attribute for a function and binds on* handlers as events', async () => {
+    const [n, setN] = createSignal(1);
+    const el = document.createElement('div');
+    document.body.appendChild(el);
+    let clicks = 0;
+    const props = { id: 'd', title: n, 'data-count': () => 1, onClick: () => clicks++, onclick2: () => 0 };
+    krateSpread(el, () => props);
+    expect(el.id).toBe('d');
+    expect(el.hasAttribute('title')).toBe(false);
+    expect(el.hasAttribute('data-count')).toBe(false);
+    expect(el.hasAttribute('onclick2')).toBe(false);
+    expect(el.outerHTML).not.toContain('=>');
+    el.dispatchEvent(new Event('click', { bubbles: true }));
+    expect(clicks).toBe(1);
+    // A string that later becomes a function drops the attribute.
+    const [v, setV] = createSignal<unknown>('t');
+    const el2 = document.createElement('div');
+    document.body.appendChild(el2);
+    krateSpread(el2, () => ({ title: v() }));
+    expect(el2.getAttribute('title')).toBe('t');
+    setV(() => () => 5);
+    await tick();
+    expect(el2.hasAttribute('title')).toBe(false);
+    setN(2);
+  });
+});
+
 describe('krateContextRows', () => {
   it('shows live provider values to rows created under it', async () => {
     const Sel = createContext('');

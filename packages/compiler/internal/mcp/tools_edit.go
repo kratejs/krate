@@ -1,12 +1,15 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
-
-	"github.com/kratejs/krate/packages/compiler/internal/astprint"
+	"time"
 )
 
 // toolApplyPatch applies a unified diff as one atomic transaction.
@@ -274,16 +277,9 @@ func (s *Service) toolFormatFile(ctx context.Context, args map[string]any) (Tool
 	if !isEditableSourceExt(rel) {
 		return ErrorResult("no formatter for " + rel + " (supported: .tsx, .ts, .jsx, .js)"), nil
 	}
-	prog, perrs, dropped := astprint.Parse(string(data))
-	if dropped > 0 {
-		return ErrorResult("refusing to format " + rel + ": it contains TypeScript syntax the AST would drop"), nil
-	}
-	if len(perrs) > 0 {
-		return ErrorResult(fmt.Sprintf("refusing to format %s: it does not parse", rel)), nil
-	}
-	out := astprint.Print(prog)
-	if strings.Contains(string(data), "\r\n") {
-		out = strings.ReplaceAll(out, "\n", "\r\n")
+	out, ferr := s.runProjectFormatter(ctx, rel, string(data))
+	if ferr != "" {
+		return ErrorResult(ferr), nil
 	}
 	if out == string(data) {
 		return TextResult(rel + " is already formatted"), nil
@@ -293,4 +289,50 @@ func (s *Service) toolFormatFile(ctx context.Context, args map[string]any) (Tool
 		return ErrorResult(err.Error()), nil
 	}
 	return s.finishTransaction(tx, apply, "format")
+}
+
+// projectFormatter finds the formatter the project has installed, with the
+// arguments that format one file from stdin. Krate has no formatter of its own:
+// the compiler's printer normalizes the AST and throws layout away.
+func (s *Service) projectFormatter(rel string) (bin string, args []string) {
+	for _, f := range []struct {
+		name string
+		args []string
+	}{
+		{"prettier", []string{"--stdin-filepath", rel}},
+		{"biome", []string{"format", "--stdin-file-path=" + rel}},
+	} {
+		name := f.name
+		if runtime.GOOS == "windows" {
+			name += ".cmd"
+		}
+		candidate := filepath.Join(s.root, "node_modules", ".bin", name)
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate, f.args
+		}
+	}
+	return "", nil
+}
+
+// runProjectFormatter formats text with the project's formatter. The second
+// result is a message for the caller when it cannot.
+func (s *Service) runProjectFormatter(ctx context.Context, rel, text string) (string, string) {
+	bin, args := s.projectFormatter(rel)
+	if bin == "" {
+		return "", "no formatter found for this project: install prettier or @biomejs/biome, then retry. Krate does not format source itself."
+	}
+	if !s.allowedTasks()["format"] {
+		return "", `format_file runs the project's formatter, which loads project config; add "format" to allowTasks in .krate/mcp.json to enable it`
+	}
+	runCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(runCtx, bin, args...)
+	cmd.Dir = s.root
+	cmd.Stdin = strings.NewReader(text)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		return "", "formatting " + rel + " failed: " + err.Error() + "\n" + strings.TrimSpace(stderr.String())
+	}
+	return stdout.String(), ""
 }

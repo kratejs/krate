@@ -32,19 +32,26 @@ var Current map[string]string
 var loadedMode atomic.Value // string
 
 // ScriptEnv returns the environment an in-process JavaScript VM (krate.config.ts,
-// plugin hooks) sees as process.env: the shell environment overlaid with the
-// project's .env values (which never override the shell), plus NODE_ENV when
-// the shell does not set it: "development" in development mode, otherwise
-// "production".
+// plugin hooks, API routes, middleware) sees as process.env. See Merge.
 func ScriptEnv() map[string]string {
+	return Merge(Current)
+}
+
+// Merge returns the shell environment overlaid with the project's .env values,
+// the shell winning, plus NODE_ENV when the shell does not set it:
+// "development" in development mode, otherwise "production". Embedded VMs have
+// no process of their own, so they get exactly what a child process would.
+func Merge(files map[string]string) map[string]string {
 	out := map[string]string{}
 	for _, kv := range os.Environ() {
 		if i := strings.IndexByte(kv, '='); i > 0 {
 			out[kv[:i]] = kv[i+1:]
 		}
 	}
-	for k, v := range Current {
-		out[k] = v
+	for k, v := range files {
+		if _, shell := out[k]; !shell {
+			out[k] = v
+		}
 	}
 	if out["NODE_ENV"] == "" {
 		mode, _ := loadedMode.Load().(string)
@@ -58,6 +65,20 @@ func ScriptEnv() map[string]string {
 		}
 	}
 	return out
+}
+
+// Overlay returns what a child process needs on top of the shell environment it
+// already inherits: the project's .env values and NODE_ENV when the shell does
+// not set it, as sorted KEY=VALUE entries.
+func Overlay(files map[string]string) []string {
+	merged := Merge(files)
+	extra := map[string]string{}
+	for k, v := range merged {
+		if _, shell := os.LookupEnv(k); !shell {
+			extra[k] = v
+		}
+	}
+	return KVList(extra)
 }
 
 // Mode resolves the environment mode: KRATE_ENV wins, then NODE_ENV, then the

@@ -1,0 +1,8 @@
+{ "steps": [
+  { "op": "focus", "sel": ".row[data-id=\"2\"] input" },
+  { "op": "type", "sel": ".row[data-id=\"2\"] input", "text": "zz" },
+  { "op": "press", "key": "Enter" },
+  { "op": "type", "sel": ".row[data-id=\"2\"] input", "text": "q" },
+  { "op": "click", "sel": "#sort" },
+  { "op": "type", "sel": ".row[data-id=\"3\"] input", "text": "!" }
+] }

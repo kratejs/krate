@@ -171,8 +171,19 @@ if (!release.includes("smoke-install")) fail("release workflow does not run the 
 if (release.indexOf("smoke-install") > release.indexOf("Publish platform packages")) {
   fail("release workflow runs the install smoke test after publishing");
 }
+const smokeJob = ci.slice(ci.indexOf("  install-smoke:"), ci.indexOf("  go-matrix:"));
+for (const needle of ["macos-latest", "windows-latest", "core-darwin-arm64", "core-win32-x64", "-alpine", "core-linux-x64-musl"]) {
+  if (!smokeJob.includes(needle)) fail(`the CI install smoke test does not cover ${needle}`);
+}
 if (!ci.includes("check:release")) fail("CI does not run check:release");
 if (!release.includes("check:release")) fail("release workflow does not run check:release");
+// A re-run after a partial publish must skip what is already on npm, and a bad
+// pre-release identifier must fail before anything is built or published.
+if (!release.includes("scripts/release-tag.mjs")) fail("release workflow does not derive the dist-tag with scripts/release-tag.mjs");
+if (!/pnpm publish/.test(read("scripts/publish-packages.mjs"))) fail("scripts/publish-packages.mjs does not publish");
+if (/pnpm publish/.test(release)) fail("release workflow publishes with pnpm publish directly; use scripts/publish-packages.mjs so a re-run skips published versions");
+if ((release.match(/scripts\/publish-packages\.mjs/g) ?? []).length < 2) fail("release workflow must publish the platform and npm packages with scripts/publish-packages.mjs");
+if (!ci.includes("release-scripts.test.mjs")) fail("CI does not run the release script tests");
 
 if (failures.length > 0) {
   console.error("check-release: the v1 release contract is not satisfied");

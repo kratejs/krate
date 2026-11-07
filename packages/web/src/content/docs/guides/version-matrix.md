@@ -27,12 +27,16 @@ documented island limit (for example `useFormStatus` is idle).
 
 | Runtime | Versions | Scope |
 | --- | --- | --- |
-| Node.js | 20, 22 | API routes, server actions, SSR, `generateStaticParams` |
+| Node.js | 20, 22, 24, 26 | API routes, server actions, SSR, `generateStaticParams` |
 | Bun | latest (2.x setup action) | Bun-native API sidecar, server actions, `generateStaticParams` |
 | Deno | 2.x | Bundled `generateStaticParams` only; the action sidecar is not supported |
 
 The Node and Bun/Deno jobs run the sidecar transport and
-`generateStaticParams` tests. Node 20 and 22 are separate matrix jobs.
+`generateStaticParams` tests. Node 20, 22, 24, and 26 are separate matrix jobs.
+
+Node 20 reached end of life on 2026-04-30 and no longer gets security fixes.
+Krate still declares `engines.node >= 20` and CI still runs it, but new
+projects should use an active or maintenance LTS line (22, 24, or 26).
 
 ## Toolchain and browsers
 

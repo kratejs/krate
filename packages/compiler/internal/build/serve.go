@@ -1365,7 +1365,9 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	if err := revalHost.SetCache(cfg.Cache, hub == nil); err != nil {
 		return err
 	}
-	serverEnv := withEnv(environ.Current, revalHost.Env())
+	// QuickJS routes and middleware have no process of their own, so they get
+	// the merged shell + .env environment a child process would inherit.
+	serverEnv := withEnv(environ.ScriptEnv(), revalHost.Env())
 
 	// Load embedded middleware runtime if configured (default: quickjs)
 	var middlewareRT *jsruntime.MiddlewareRuntime
@@ -1450,7 +1452,8 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 					cmd = exec.Command("node", scriptPath, nodeAPIDir, portStr, middlewarePath, actionDir)
 				}
 				execx.ConfigureTree(cmd)
-				cmd.Env = append(os.Environ(),
+				cmd.Env = append(os.Environ(), environ.Overlay(environ.Current)...)
+				cmd.Env = append(cmd.Env,
 					fmt.Sprintf("KRATE_API_WORKERS=%d", nodeWorkers),
 					fmt.Sprintf("KRATE_API_HOT=%d", boolToInt(hub != nil)),
 					fmt.Sprintf("KRATE_API_DEV=%d", boolToInt(hub != nil)),
@@ -1474,11 +1477,25 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 				default:
 				}
 				cmd := makeCmd()
-				nodeAPICmdMu.Lock()
-				nodeAPICmd = cmd
-				nodeAPICmdMu.Unlock()
 				started := time.Now()
-				err := cmd.Run()
+				// Start under the lock and publish only a started command:
+				// shutdown reads cmd.Process, and must either see this process
+				// or stop it from starting.
+				nodeAPICmdMu.Lock()
+				select {
+				case <-nodeAPIStop:
+					nodeAPICmdMu.Unlock()
+					return
+				default:
+				}
+				err := cmd.Start()
+				if err == nil {
+					nodeAPICmd = cmd
+				}
+				nodeAPICmdMu.Unlock()
+				if err == nil {
+					err = cmd.Wait()
+				}
 				select {
 				case <-nodeAPIStop:
 					return
@@ -1958,6 +1975,14 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 			_ = json.NewEncoder(w).Encode(DevEvent{Type: "status", BuildOK: true})
 		})
 
+		// Full dev state (build diagnostics, recent browser errors) for tools
+		// such as the MCP server.
+		guard("/__krate/state", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Cache-Control", "no-store")
+			_ = json.NewEncoder(w).Encode(hub.Snapshot())
+		})
+
 		// Open a file in the developer's editor. The path is validated against
 		// the project root so the endpoint cannot be used to launch arbitrary
 		// files.
@@ -2281,6 +2306,14 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		displayHost = "localhost"
 	}
 	printf("%s  %s server -> %shttp://%s:%d%s %s(started in %s)%s\n", cGreen, label, cCyan, displayHost, addr.Port, cReset, cGray, time.Since(startTime).Round(time.Millisecond), cReset)
+	if hub != nil {
+		defer writeDevServerRecord(root, DevServerRecord{
+			Host:      displayHost,
+			Port:      addr.Port,
+			URL:       fmt.Sprintf("http://%s:%d", displayHost, addr.Port),
+			StartedAt: time.Now(),
+		})()
+	}
 
 	// Start ISR background revalidation - one timer per page, each route
 	// revalidating on its own cadence (previously every ISR page was revalidated

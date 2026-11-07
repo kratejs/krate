@@ -226,8 +226,12 @@ func (s *Service) toolDeleteFile(ctx context.Context, args map[string]any) (Tool
 	if info.IsDir() {
 		return ErrorResult("refusing to delete a directory: " + rel + " (files only)"), nil
 	}
+	warning := ""
+	if importers := s.importersOf(rel); len(importers) > 0 {
+		warning = "\n\nWarning: still imported by " + strings.Join(importers, ", ") + "; those imports will break."
+	}
 	if !apply {
-		return TextResult("Dry run (would delete " + rel + "; apply: true to delete)."), nil
+		return TextResult("Dry run (would delete " + rel + "; apply: true to delete)." + warning), nil
 	}
 	tx := newFileTransaction(s)
 	if err := tx.stageDelete(abs, rel, ""); err != nil {
@@ -261,24 +265,53 @@ func (s *Service) toolMoveFile(ctx context.Context, args map[string]any) (ToolRe
 	if _, statErr := os.Stat(toAbs); statErr == nil {
 		return ErrorResult("destination already exists: " + toRel), nil
 	}
-	if !apply {
-		return TextResult("Dry run (would move " + fromRel + " -> " + toRel + "; apply: true to move)."), nil
-	}
 	data, readErr := os.ReadFile(fromAbs)
 	if readErr != nil {
 		return ErrorResult("reading " + fromRel + ": " + readErr.Error()), nil
 	}
+	rewrites := s.rewritesForMove(fromRel, toRel, string(data))
+	var updated []string
+	for file := range rewrites {
+		if file != toRel {
+			updated = append(updated, file)
+		}
+	}
+	sort.Strings(updated)
+	summary := ""
+	if len(updated) > 0 {
+		summary = "\n\nImports updated in: " + strings.Join(updated, ", ")
+	}
+	if !apply {
+		preview := "Dry run (would move " + fromRel + " -> " + toRel + "; apply: true to move)."
+		if len(updated) > 0 {
+			preview += "\n\nWould update imports in: " + strings.Join(updated, ", ")
+		}
+		return TextResult(preview), nil
+	}
 	tx := newFileTransaction(s)
-	if err := tx.stageWrite(toAbs, toRel, string(data), ""); err != nil {
+	moved := string(data)
+	if v, ok := rewrites[toRel]; ok {
+		moved = v
+	}
+	if err := tx.stageWrite(toAbs, toRel, moved, ""); err != nil {
 		return ErrorResult(err.Error()), nil
 	}
 	if err := tx.stageDelete(fromAbs, fromRel, hashString(string(data))); err != nil {
 		return ErrorResult(err.Error()), nil
 	}
+	for _, file := range updated {
+		abs, rel, err := s.resolveEditTarget(file)
+		if err != nil {
+			return ErrorResult("cannot update imports in " + file + ": " + err.Error()), nil
+		}
+		if err := tx.stageWrite(abs, rel, rewrites[file], ""); err != nil {
+			return ErrorResult(err.Error()), nil
+		}
+	}
 	if err := tx.commit(); err != nil {
 		return ErrorResult(err.Error()), nil
 	}
-	return TextResult("Moved " + fromRel + " -> " + toRel), nil
+	return TextResult("Moved " + fromRel + " -> " + toRel + summary), nil
 }
 
 // createComponentKinds are the accepted component tiers for create_component.
@@ -414,7 +447,8 @@ func languageForPath(p string) string {
 
 // isComponentName reports whether name is a valid PascalCase component name.
 func isComponentName(name string) bool {
-	if name == "" {
+	// JSX treats a lowercase tag as an HTML element, not a component.
+	if name == "" || name[0] < 'A' || name[0] > 'Z' {
 		return false
 	}
 	for i, r := range name {

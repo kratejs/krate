@@ -408,7 +408,7 @@ A named import from `@krate/runtime` (or one of its subpaths) asks for something
 
 **tsconfig baseUrl and paths disagree**
 
-`compilerOptions.paths` targets resolve against `baseUrl`, in tsc and in Krate. A `baseUrl` of `./src` together with `"@/*": ["./src/*"]` points at `src/src`, so every `@/` import fails with "cannot resolve import ... (matched tsconfig path alias)". Krate 0.4 ignored `baseUrl` for aliases, so a project scaffolded then still has it. `krate fix --apply` sets `baseUrl` to `"."` when every target repeats the baseUrl directory, exists under the project root and does not exist under `baseUrl`. Otherwise edit `tsconfig.json` by hand. This is not a build diagnostic: it is reported by `krate fix`.
+`compilerOptions.paths` targets resolve against `baseUrl`, in tsc and in Krate. A `baseUrl` of `./src` together with `"@/*": ["./src/*"]` points at `src/src`, which tsc cannot find. Krate 0.4 ignored `baseUrl` for aliases, so a project scaffolded then still has this shape. Krate reads such a target relative to the project root when it exists there and not under `baseUrl`, so the build works, and reports this warning once. `krate fix --apply` sets `baseUrl` to `"."` when every target repeats the baseUrl directory, which also makes `tsc` and your editor agree. A target that exists in neither place is still an error ("cannot resolve import ... matched tsconfig path alias"). This is a warning.
 
 ### KR7126
 
@@ -622,6 +622,42 @@ Client code and statically rendered pages cannot read process.env or import.meta
 
 A module-level value that later top-level code changes (`const items = []` followed by `for (...) items.push(x)`, an assignment, a property write, `Object.assign`, or a call to a function of the module that does one of these) is evaluated at build time by running that code in order. When a statement cannot be run there (it reads the browser, the clock, an imported function or anything else unknown), the value stays unknown rather than keeping its initial value. A component that hydrates reads it at run time. A component rendered at build time has no run time, so the build fails. Make the top-level code plain, compute the value in one expression, or move the reading component to one with client state.
 
+### KR8330
+
+**CSS scope handle is read by code that runs in the browser**
+
+A CSS scope handle (`const tab = createCSSChoice(...)`) is a build-time value: the compiler turns `tab.trigger()`, `tab.panel()`, `tab.close()` and `tab.current()` spreads into labels, panel classes and CSS, and nothing of the handle exists in the browser. Passing it as a prop works when the receiving component only uses those helpers in its JSX, at any depth. This component reads the handle some other way (in an event handler, an effect, a computed value or a call to another function), or it was passed to an external island, so the read would fail in the browser. Use the helpers in the JSX of the component that receives the handle, or pass the getter and setter values (`const [tab, setTab] = createCSSChoice(...)`) to a component with its own client state, or use createSignal.
+
+### KR8331
+
+**CSS signal value passed to a component that renders at build time**
+
+The state of a CSS signal lives in the page (hidden inputs and :has() selectors), so no value exists at build time. A component without client state is rendered to static HTML during the build, which makes a CSS signal getter or setter passed to it unreadable: `props.tab()` has nothing to return. Pass the scope handle instead (`const tab = createCSSChoice(...)`, `<Child scope={tab} />`) and use `props.scope.current()`, `props.scope.panel()` or `props.scope.trigger()` in the child, or give the child its own state with createSignal.
+
+### KR8350
+
+**outDir would delete project sources**
+
+The build empties outDir before it writes the site, and `krate clean` deletes it. An outDir that is, or contains, the project root, the pages directory or the public directory (`outDir: ".."`, `"."`, `"src"`) would delete the project's own files, so the build stops before anything is removed. Point outDir at a dedicated directory such as `dist`; a directory outside the project that holds none of your sources, such as `../site-dist`, is fine. Setting KRATE_ALLOW_UNSAFE_OUTDIR=1 skips this check.
+
+### KR8351
+
+**Trigger and content do not share a value**
+
+`Dialog`, `Sheet`, `Popover`, `DropdownMenu` and the other widgets built on a CSS-signal scope connect a trigger to its content by `value`: `<Dialog.Trigger value="a">` opens `<Dialog.Content value="a">`. A trigger and a content that both leave `value` off are paired with each other (the value is `on`). This one has no value, but the widget has no part without a value to answer it (every content has a value, or every trigger does), so it would never open or show anything. Give the trigger and the content the same `value`, or remove it from both.
+
+### KR8352
+
+**Value needed at build time is unknown**
+
+A component without state (no createSignal, useState or other hook that holds state) is rendered to static HTML while the site is built, so every value it renders has to be known then: a prop, a local variable, or a module constant. This expression is none of those, for example it names an identifier that is not defined where the component renders (`unresolved identifier x`), reads the clock or the browser, or calls a function the build cannot run. There is no run time to fall back on, so the build fails instead of printing a guess. Define or import the name, pass the value as a prop, or give the component state so it hydrates in the browser. A value that differs per request belongs in a `*.runtime.tsx` component.
+
+### KR8360
+
+**Component state resets when the condition flips**
+
+`cond ? <Form mode="edit" /> : <Form mode="new" />` renders the same component type at the same position. React keeps that instance when `cond` flips, so its state, effects and refs survive, and Krate does the same by lowering the pair to one element with conditional props (`<Form mode={cond ? "edit" : "new"} />`). A few shapes cannot be lowered that way: a render-prop function as children, a spread whose position differs between the branches, a `ref` that differs, a condition with side effects, a lazy component, or an external island. For those the branch that is shown is mounted and the other is unmounted, so flipping the condition restarts the component with fresh state and runs its cleanups and mount effects again. Render one element and pass the differing values as props, make both branches the same shape, or give the branches different `key` props when the restart is what you want (different keys never warn).
+
 ### KR8601
 
 **Unsupported page segment export value**
@@ -674,7 +710,7 @@ An `<Image>` without an alt attribute is announced by screen readers by its file
 
 **Content collection is shipped to the browser**
 
-A `getCollection("name")` chain is normally evaluated while the site is built and only its result is rendered. When the chain depends on a value that only exists in the browser (a signal, an event), the collection has to be evaluated there, so its entries are copied into the page script. Krate ships only the fields the page mentions (the body and rendered html only when referenced), but every entry in the collection, drafts included, is still included. Filter with build-time values, or compute the list on the server. This is a warning.
+A `getCollection("name")` chain is normally evaluated while the site is built and only its result is rendered. When the chain depends on a value that only exists in the browser (a signal, an event), the collection has to be evaluated there, so its entries are copied into the page script. The warning names how many entries and about how many bytes are shipped. Krate ships only the fields the page mentions (the body and rendered html only when referenced), but every entry in the collection, drafts included, is still included. Filter with build-time values, or compute the list on the server. A lookup keyed by the route param of a `[slug]` page folds to that page's entry, whether it is written inline, through a `const posts = getCollection(...)`, with the params destructured, or in a module-level helper that only returns the chain; the fallback page of the route carries only the entries that have no generated page. This is a warning.
 
 ### KR8820
 
