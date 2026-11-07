@@ -1,0 +1,8 @@
+{ "steps": [
+  { "op": "click", "sel": "section:first-of-type .c" },
+  { "op": "click", "sel": "#next" },
+  { "op": "click", "sel": "#next" },
+  { "op": "click", "sel": "#next" },
+  { "op": "click", "sel": "#next" },
+  { "op": "click", "sel": "#next" }
+] }
