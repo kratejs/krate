@@ -47,6 +47,12 @@ func injectStaticParams(tree *irtree.ComponentTree, params map[string]string) {
 		// script; injecting static bindings here would conflict with hydration.
 		return
 	}
+	if irtree.HasClientComponent(root.Children) {
+		// Evaluating the root at build time cannot hydrate the interactive
+		// components it renders (their createSignal has no build-time value);
+		// the tree path emits them with their hydration markers instead.
+		return
+	}
 	bindings := make(map[string]jsvalue.Value, len(params)+1)
 	keys := make([]string, 0, len(params))
 	for k := range params {
@@ -106,6 +112,9 @@ func injectDynamicRoutePlaceholders(tree *irtree.ComponentTree, paramNames []str
 		return
 	}
 	if root.Tier != irtree.TierStatic && root.Tier != irtree.TierServer {
+		return
+	}
+	if irtree.HasClientComponent(root.Children) {
 		return
 	}
 	bindings := make(map[string]jsvalue.Value, len(paramNames)+1)
