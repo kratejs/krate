@@ -12,6 +12,9 @@ import (
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
+	"io"
+	"slices"
+	"sort"
 )
 
 func TestDevHubSnapshotReportsBuildAndBrowserState(t *testing.T) {
@@ -258,5 +261,42 @@ func TestDevServerPublishesStateAndDiscoveryRecord(t *testing.T) {
 	req.Header.Set("Sec-Fetch-Site", "cross-site")
 	if r, err := http.DefaultClient.Do(req); err != nil || r.StatusCode != http.StatusForbidden {
 		t.Errorf("cross-site /__krate/state = %v %v, want 403", r, err)
+	}
+}
+
+// A line left open on one stream must not swallow a line from the other.
+func TestTeeDevLogKeepsStreamLinesApart(t *testing.T) {
+	root := t.TempDir()
+	origOut, origErr := os.Stdout, os.Stderr
+	rOut, wOut, _ := os.Pipe()
+	_, wErr, _ := os.Pipe()
+	os.Stdout, os.Stderr = wOut, wErr
+	defer func() { os.Stdout, os.Stderr = origOut, origErr }()
+
+	stop := TeeDevLog(root)
+	fmt.Fprint(os.Stdout, "partial ")
+	// The tee has read it once it reaches the original stream. The pause only
+	// lets the tee finish recording it, so a shared buffer shows up every time.
+	if _, err := io.ReadFull(rOut, make([]byte, len("partial "))); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	fmt.Fprint(os.Stderr, "err line\n")
+	time.Sleep(50 * time.Millisecond)
+	fmt.Fprint(os.Stdout, "rest\nunfinished")
+	stop()
+
+	data, err := os.ReadFile(DevLogPath(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var text []string
+	for _, l := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		_, line, _ := strings.Cut(l, " ")
+		text = append(text, line)
+	}
+	sort.Strings(text)
+	if want := []string{"err line", "partial rest", "unfinished"}; !slices.Equal(text, want) {
+		t.Errorf("log lines = %q, want %q", text, want)
 	}
 }

@@ -142,7 +142,6 @@ func TeeDevLog(root string) func() {
 	}
 	var mu sync.Mutex
 	written := 0
-	var partial []byte
 	emit := func(line []byte) {
 		if written > devLogMax {
 			_ = f.Truncate(0)
@@ -153,13 +152,14 @@ func TeeDevLog(root string) func() {
 		n, _ := f.WriteString(time.Now().UTC().Format(DevLogTimeFormat) + " " + string(line) + "\n")
 		written += n
 	}
-	// write splits the stream into lines and stamps each with its time, so
-	// readers can ask for "errors since the last rebuild".
-	write := func(p []byte) {
+	// write splits one stream into lines and stamps each with its time, so
+	// readers can ask for "errors since the last rebuild". Each stream keeps its
+	// own unfinished line: stdout and stderr interleave at any point.
+	write := func(partial *[]byte, p []byte) {
 		mu.Lock()
 		defer mu.Unlock()
-		data := append(partial, p...)
-		partial = nil
+		data := append(*partial, p...)
+		*partial = nil
 		for {
 			i := bytes.IndexByte(data, '\n')
 			if i < 0 {
@@ -168,7 +168,7 @@ func TeeDevLog(root string) func() {
 			emit(devLogANSI.ReplaceAll(bytes.TrimRight(data[:i], "\r"), nil))
 			data = data[i+1:]
 		}
-		partial = append([]byte(nil), data...)
+		*partial = append([]byte(nil), data...)
 	}
 
 	origOut, origErr := os.Stdout, os.Stderr
@@ -184,13 +184,17 @@ func TeeDevLog(root string) func() {
 		go func() {
 			defer wg.Done()
 			buf := make([]byte, 8192)
+			var partial []byte
 			for {
 				n, err := r.Read(buf)
 				if n > 0 {
 					_, _ = orig.Write(buf[:n])
-					write(buf[:n])
+					write(&partial, buf[:n])
 				}
 				if err != nil {
+					if len(partial) > 0 {
+						write(&partial, []byte("\n"))
+					}
 					return
 				}
 			}
