@@ -1,0 +1,8 @@
+{ "steps": [
+  { "op": "type", "sel": "#in", "text": "typed" },
+  { "op": "click", "sel": ".inc" },
+  { "op": "click", "sel": "#flip" },
+  { "op": "click", "sel": ".inc" },
+  { "op": "click", "sel": "#flip" },
+  { "op": "click", "sel": "#flip" }
+] }

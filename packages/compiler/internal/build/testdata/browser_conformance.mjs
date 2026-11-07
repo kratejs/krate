@@ -320,6 +320,49 @@ try {
   await page.waitForTimeout(1800);
   const leaveLog = await page.evaluate(() => window.__leaveLog || []);
   if (leaveLog.length) fail(`suspense leave: a component of the left page mounted later: ${JSON.stringify(leaveLog)}`);
+  // One component type in both branches of a conditional keeps its instance
+  // (state, typed input, ref, effects, native signals) and only its props
+  // switch; different keys remount.
+  await go("/react-branches/", "[data-testid=form]");
+  await page.waitForTimeout(100);
+  const branchSnap = () =>
+    page.evaluate(() => ({
+      forms: document.querySelectorAll("[data-testid=ternary] form").length,
+      templates: document.querySelectorAll("[data-testid=ternary] template").length,
+      mode: document.querySelector("[data-testid=mode]")?.textContent,
+      hint: document.querySelector("[data-testid=hint]")?.textContent,
+      input: document.querySelector("[data-testid=input]")?.value,
+      clicks: document.querySelector("[data-testid=clicks]")?.textContent,
+      native: document.querySelector("[data-testid=native]")?.textContent,
+      early: document.querySelector("[data-testid=early-section] [data-testid=early]")?.textContent,
+      keyed: document.querySelector("[data-testid=keyed] [data-testid=early]")?.textContent,
+      log: Array.from(document.querySelectorAll("[data-testid=log] li")).map((li) => li.textContent),
+      nativeLog: window.__branchLog || [],
+    }));
+  const branch0 = await branchSnap();
+  if (branch0.forms !== 1 || branch0.mode !== "new" || branch0.hint !== "none") fail(`branches initial: ${JSON.stringify(branch0)}`);
+  if (branch0.log.join() !== "mount new ref") fail(`branches initial log: ${branch0.log}`);
+  await page.locator("[data-testid=input]").fill("typed");
+  await page.locator("[data-testid=clicks]").click();
+  await page.locator("[data-testid=native]").click();
+  await page.locator("[data-testid=early]").first().click();
+  await page.locator("[data-testid=keyed] [data-testid=early]").click();
+  await page.locator("[data-testid=flip]").click();
+  await page.waitForTimeout(50);
+  const branch1 = await branchSnap();
+  if (branch1.mode !== "edit" || branch1.hint !== "h") fail(`branches props after flip: ${JSON.stringify(branch1)}`);
+  if (branch1.input !== "typed" || branch1.clicks !== "1") fail(`branches state after flip: ${JSON.stringify(branch1)}`);
+  if (branch1.native !== "native-edit:1") fail(`branches native signal state after flip: ${branch1.native}`);
+  if (branch1.early !== "alt:1") fail(`branches early return state after flip: ${branch1.early}`);
+  if (branch1.keyed !== "alt:0") fail(`branches different keys must remount: ${branch1.keyed}`);
+  if (branch1.log.join() !== "mount new ref") fail(`branches effects must not rerun on the flip: ${branch1.log}`);
+  if (branch1.nativeLog.join() !== "native mount native-new") fail(`branches native lifecycle must not rerun on the flip: ${branch1.nativeLog}`);
+  await page.locator("[data-testid=flip]").click();
+  await page.waitForTimeout(50);
+  const branch2 = await branchSnap();
+  if (branch2.mode !== "new" || branch2.hint !== "none" || branch2.input !== "typed" || branch2.clicks !== "1" || branch2.native !== "native-new:1") {
+    fail(`branches flip back: ${JSON.stringify(branch2)}`);
+  }
   // Keys and list reconciliation: state follows keys across reorder, insert,
   // update and removal; effects mount/unmount per key; keyed remount resets.
   await go("/react-keys/", "[data-testid=todo-row]");
