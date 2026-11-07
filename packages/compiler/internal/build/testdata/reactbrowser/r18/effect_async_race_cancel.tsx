@@ -1,8 +1,13 @@
 import { useEffect, useState } from "react";
-import { log } from "../lib/log";
+import { createGate, log } from "../lib/log";
 
-function wait(ms: number, v: string): Promise<string> {
-  return new Promise((r) => setTimeout(() => r(v), ms));
+// Each request is held until a step releases it, so the stale response
+// arrives at a known moment instead of racing a timer.
+function request(v: string): Promise<string> {
+  const g = createGate();
+  const w = window as unknown as { __gates?: Record<string, () => void> };
+  (w.__gates = w.__gates || {})[v] = g.open;
+  return g.promise.then(() => v);
 }
 
 function Loader(props: { q: string }) {
@@ -10,7 +15,7 @@ function Loader(props: { q: string }) {
   useEffect(() => {
     let live = true;
     log("start", props.q);
-    wait(props.q === "slow" ? 60 : 10, props.q).then((v) => {
+    request(props.q).then((v) => {
       if (live) {
         log("apply", v);
         setRes(v);

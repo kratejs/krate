@@ -1,7 +1,8 @@
 { "steps": [
   { "op": "click", "sel": "#fast" },
-  { "op": "wait", "ms": 120 },
+  { "op": "eval", "js": "window.__gates.fast()", "then": "#res:has-text('fast')" },
   { "op": "click", "sel": "#slow" },
   { "op": "click", "sel": "#hide" },
-  { "op": "wait", "ms": 120 }
+  { "op": "eval", "js": "window.__gates.slow()" },
+  { "op": "wait", "ms": 50 }
 ] }
