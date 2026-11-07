@@ -1477,11 +1477,25 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 				default:
 				}
 				cmd := makeCmd()
-				nodeAPICmdMu.Lock()
-				nodeAPICmd = cmd
-				nodeAPICmdMu.Unlock()
 				started := time.Now()
-				err := cmd.Run()
+				// Start under the lock and publish only a started command:
+				// shutdown reads cmd.Process, and must either see this process
+				// or stop it from starting.
+				nodeAPICmdMu.Lock()
+				select {
+				case <-nodeAPIStop:
+					nodeAPICmdMu.Unlock()
+					return
+				default:
+				}
+				err := cmd.Start()
+				if err == nil {
+					nodeAPICmd = cmd
+				}
+				nodeAPICmdMu.Unlock()
+				if err == nil {
+					err = cmd.Wait()
+				}
 				select {
 				case <-nodeAPIStop:
 					return
