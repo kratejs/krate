@@ -2994,7 +2994,7 @@ func (b *builder) resolveSignal(name string) SignalDecl {
 		return SignalDecl{
 			Name:        name,
 			SetterName:  setterNameFor(name),
-			Initial:     evalConst(initial),
+			Initial:     legacyConstString(initial, b.evalValue(initial)),
 			IsString:    isStringType(initial, b.sigMap()),
 			InitialExpr: initial,
 		}

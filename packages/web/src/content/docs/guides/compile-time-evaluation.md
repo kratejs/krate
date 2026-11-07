@@ -134,6 +134,22 @@ statement. A component rendered at build time (`@static`, `@server`) has no run
 time, so the build fails with [KR8322](/docs/reference/diagnostics/#kr8322).
 Make the top-level code plain, or compute the value in one expression.
 
+## Values the build cannot know
+
+A value that is not known at build time never renders as its own spelling. An
+unresolved identifier, `window.innerWidth`, or a signal seeded from one renders
+empty in the static HTML and is filled in when the page hydrates:
+
+```tsx
+const initial = window.innerWidth;
+const [width] = createSignal(initial);
+
+<p>{width()}</p> // empty before hydration, the width after
+```
+
+A signal seeded from a constant (`const initial = 5`) renders that value in
+every component, including components the page renders as children.
+
 ## Reactive values
 
 A known initial value is not the same as a static value. If an expression reads

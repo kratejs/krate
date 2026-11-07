@@ -194,13 +194,11 @@ func appendClassTokens(tokens []string, v jsvalue.Value) []string {
 
 // legacyConstString renders a folded value in the historical string form the
 // string-typed IR consumers expect (attribute values, slot initials, JS
-// literal emission). Unknown values are "" except a bare unresolved identifier,
-// which keeps its name (callers detect that case with operandLeaks).
-func legacyConstString(expr ast.Expr, v jsvalue.Value) string {
+// literal emission). A value that is not known at build time is "" - never the
+// spelling of the expression, which would print a variable's name as text.
+// Callers that need the source (hydration code) use generateExprJS.
+func legacyConstString(_ ast.Expr, v jsvalue.Value) string {
 	if v.IsUnknown() {
-		if id, ok := expr.(*ast.Identifier); ok {
-			return id.Name
-		}
 		return ""
 	}
 	if v.Kind() == jsvalue.KindNull {
