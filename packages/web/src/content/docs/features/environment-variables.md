@@ -95,7 +95,8 @@ const base = process.env.KRATE_PUBLIC_API_URL;
 ```
 
 Values come from the `.env` files described above and from the shell
-environment (the shell wins). These build constants are always available, with
+environment (the shell wins). Changing one of them (or the mode) rebuilds the pages that
+were built with the old value; the build cache does not replay them. These build constants are always available, with
 no prefix: `import.meta.env.MODE` (the environment mode), `DEV`, `PROD`,
 `BASE_URL` (the base path with a trailing slash) and `SSR` (always `false` in
 client and static code); `process.env.NODE_ENV` is `"development"` or

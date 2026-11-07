@@ -987,6 +987,7 @@ func (b *Builder) BuildAll() error {
 	}
 	if b.diskCache != nil {
 		b.diskCache.setContentHash(ch)
+		b.diskCache.setEnvHash(b.envFingerprint())
 	}
 	for _, w := range cres.Warnings {
 		fmt.Fprintf(os.Stderr, "  %sWarning: content:%s %v\n", cYellow, cReset, w)
