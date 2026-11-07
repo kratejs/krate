@@ -388,6 +388,56 @@ describe('hydration adoption', () => {
   });
 });
 
+describe('nested components in adopted rows', () => {
+  it('orders effects children-first on mount and parent-first on removal, as for fresh rows', async () => {
+    const settle = async () => {
+      for (let i = 0; i < 3; i++) await tick();
+    };
+    const log: string[] = [];
+    function Leaf(props: any) {
+      createEffectDeps(() => {
+        log.push('leaf ' + props.id);
+        return () => log.push('leaf cleanup ' + props.id);
+      }, () => []);
+      return h('i', null, () => props.id);
+    }
+    function Row(props: any) {
+      createEffectDeps(() => {
+        log.push('row ' + props.id);
+        return () => log.push('row cleanup ' + props.id);
+      }, () => []);
+      return h('li', null, krateList(() => [1], (n: any) => props.id + n, () => h(Leaf, { get id() { return props.id; } }), 1));
+    }
+    const render = (n: any) => h(Row, { get id() { return n(); } });
+
+    // A fresh list is the reference.
+    const [fresh, setFresh] = createSignal(['a', 'b']);
+    mountList(krateList(() => fresh(), (n: any) => n, render, 1).mount());
+    await settle();
+    const freshMount = log.splice(0);
+    setFresh(['b']);
+    await settle();
+    const freshRemove = log.splice(0);
+    expect(freshMount).toEqual(['leaf a', 'row a', 'leaf b', 'row b']);
+    expect(freshRemove).toEqual(['row cleanup a', 'leaf cleanup a']);
+
+    // The same list adopted from server-rendered HTML must behave alike.
+    document.body.innerHTML = '';
+    const root = document.createElement('ul');
+    root.innerHTML =
+      '<!--k:Q--><!--k:Q:$a--><li><!--k:R--><!--k:R:$a1--><i>a</i><!--/k:R:$a1--><!--/k:R--></li><!--/k:Q:$a-->' +
+      '<!--k:Q:$b--><li><!--k:S--><!--k:S:$b1--><i>b</i><!--/k:S:$b1--><!--/k:S--></li><!--/k:Q:$b--><!--/k:Q-->';
+    document.body.appendChild(root);
+    const [adopted, setAdopted] = createSignal(['a', 'b']);
+    krateBindList(root.firstChild as Comment, () => adopted(), (n: any) => n, render, 1);
+    await settle();
+    expect(log.splice(0)).toEqual(freshMount);
+    setAdopted(['b']);
+    await settle();
+    expect(log.splice(0)).toEqual(freshRemove);
+  });
+});
+
 describe('list performance', () => {
   it('reorders, inserts and removes 1000 rows in roughly linear time', async () => {
     const make = (n: number) => Array.from({ length: n }, (_, i) => ({ id: i, label: 'row ' + i }));

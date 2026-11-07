@@ -1,0 +1,10 @@
+{ "steps": [
+  { "op": "click", "sel": "li[data-id=c] .inc" },
+  { "op": "click", "sel": "#rev" },
+  { "op": "click", "sel": "li[data-id=a] .inc" },
+  { "op": "click", "sel": "#del" },
+  { "op": "click", "sel": "#ins" },
+  { "op": "click", "sel": "li[data-id=z] .inc" },
+  { "op": "click", "sel": "#mix" },
+  { "op": "click", "sel": "li[data-id=x] .inc" }
+] }
