@@ -200,6 +200,13 @@ try {
   await page.waitForFunction(() => location.pathname === "/zerojs-demo/");
   check(await page.evaluate(() => window.__softMarker === 1), "the link must be followed by the client router, not a document load");
   await page.waitForFunction(() => !!window.__krateAria);
+  // A closed dialog can look visible while the page's CSS is applying, which
+  // must not lock the page: everything would stay inert, and the trigger dead.
+  const softIdle = await page.evaluate(() => ({
+    scroll: document.documentElement.style.overflow,
+    inert: document.querySelectorAll("[data-kinert]").length,
+  }));
+  check(softIdle.scroll !== "hidden" && softIdle.inert === 0, `a closed modal must not lock a soft-navigated page: ${JSON.stringify(softIdle)}`);
   check(await focusTrigger("Open dialog"), "the soft-navigated page must show the Dialog trigger");
   await page.keyboard.press("Enter");
   await page.waitForTimeout(250);
@@ -209,6 +216,10 @@ try {
   }));
   check(softModal.scroll === "hidden" && softModal.inert > 0, `a soft-navigated modal must lock scroll and inert the page: ${JSON.stringify(softModal)}`);
   await page.keyboard.press("Escape");
+  // The enhancer restores focus after the close has committed, so wait for it.
+  await page
+    .waitForFunction(() => (document.activeElement?.textContent ?? "").endsWith("Open dialog"), null, { timeout: 2000 })
+    .catch(() => {});
   check((await active()).endsWith("Open dialog"), `Escape must restore focus to the trigger after a soft navigation (got ${await active()})`);
 
   // Controlled and imperative open state.
