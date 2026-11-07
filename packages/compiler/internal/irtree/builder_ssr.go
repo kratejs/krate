@@ -1231,11 +1231,18 @@ func (b *builder) buildChildPropsRegDecl(id string, props map[string]ast.Expr) s
 	}
 	// Keys are emitted in sorted order so the registration (and the hashed
 	// hydration bundle) is byte-identical across builds.
-	for i, name := range sortedKeysExpr(props) {
+	first := true
+	for _, name := range sortedKeysExpr(props) {
 		expr := props[name]
-		if i > 0 {
+		// A CSS scope handle exists only at build time; the child's helper
+		// spreads were expanded against it, so it has no run-time value.
+		if _, isScope := b.buildTimeScope(expr); isScope {
+			continue
+		}
+		if !first {
 			sb.WriteByte(',')
 		}
+		first = false
 		val := b.renderChildPropValue(expr)
 		if b.livePropsParam == "props" && b.readsLiveProp(expr) {
 			// Forwarding a live prop (`n={props.n}`) must stay a read of the

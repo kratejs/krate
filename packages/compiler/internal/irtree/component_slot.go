@@ -76,8 +76,9 @@ func (b *builder) buildComponentSlot(el *ast.JSXElement, parentID string) []Slot
 	// analyzer is installed and triggers/panels are rewritten. A panels-only
 	// component has no signals/handlers and would otherwise take the SSREval
 	// shortcut, which bypasses the interception and breaks the panels. The same
-	// applies to components using first-class scope-handle spreads.
-	if len(childSignals) == 0 && !b.cssSignalsOK(childFn) && !hasScopeHelperSpread(childFn) && !hasComponentChildren(el.Children) && !b.isLazyComponent(childName) {
+	// applies to components using first-class scope-handle spreads, and to
+	// components handed a scope handle, which they may pass further down.
+	if len(childSignals) == 0 && !b.cssSignalsOK(childFn) && !hasScopeHelperSpread(childFn) && !b.passesScopeHandle(attrs) && !hasComponentChildren(el.Children) && !b.isLazyComponent(childName) {
 		if !b.componentNeedsClient(childFn, attrs) {
 			// A signal-less component that renders a parent's signal value
 			// (e.g. <Display value={display()}/>) must stay reactive, so its
@@ -90,6 +91,17 @@ func (b *builder) buildComponentSlot(el *ast.JSXElement, parentID string) []Slot
 		}
 	}
 	return b.buildClientComponentSlot(el, childFn, childID, attrs, provider)
+}
+
+// passesScopeHandle reports whether a call-site attribute is a CSS scope
+// handle (or `props.<name>` holding one).
+func (b *builder) passesScopeHandle(attrs map[string]ast.Expr) bool {
+	for _, expr := range attrs {
+		if _, ok := b.buildTimeScope(expr); ok {
+			return true
+		}
+	}
+	return false
 }
 
 // expandComponentSpreads resolves the spread attributes of a component call
@@ -210,6 +222,7 @@ func (b *builder) buildSSREvalComponentSlot(el *ast.JSXElement, childFn *ast.FnD
 	b.instanceCounts[childName]++
 	childID = SlotID(string(childID) + "_c" + itoa(instanceIdx))
 
+	b.checkCSSSignalPropReads(el, childFn, attrs)
 	bindings := b.buildPropBindings(extractParamNames(childFn), attrs, childFn)
 	var useIDs []string
 	nextID := b.useIDSequence(childID)
@@ -378,6 +391,7 @@ func (b *builder) buildClientComponentSlot(el *ast.JSXElement, childFn *ast.FnDe
 	childNode.CallSiteSlots = b.buildComponentCallSiteSlots(el, childFn, childID, provider, childNode.childrenContext)
 	b.completeSSREvalBindings(childNode, childFn, attrs)
 	b.registerChildProps(childNode, childFn)
+	b.checkScopePropReads(el, childFn, childNode, attrs)
 
 	// buildTextSlot resolves signals only, so TextSlot initials that read
 	// props.X are updated from the resolved values here.
@@ -653,7 +667,7 @@ func hydrationReadsAny(node *ComponentNode, names []string) bool {
 	for _, n := range names {
 		want[n] = true
 	}
-	reads := func(code string) bool {
+	return hydrationCodeReads(node, func(code string) bool {
 		if code == "" {
 			return false
 		}
@@ -664,7 +678,12 @@ func hydrationReadsAny(node *ComponentNode, names []string) bool {
 			}
 		})
 		return found
-	}
+	})
+}
+
+// hydrationCodeReads reports whether reads holds for any JS fragment the
+// component emits into its own hydration scope.
+func hydrationCodeReads(node *ComponentNode, reads func(code string) bool) bool {
 	var codes []string
 	for _, h := range node.Handlers {
 		codes = append(codes, h.Body)

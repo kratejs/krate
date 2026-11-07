@@ -125,6 +125,21 @@ The compiler resolves `TabsCtx.use()` to the nearest
 `<TabsCtx.Provider value={scope}>` and rewrites the spreads. You can also pass a
 handle directly: `<Tab scope={tab} value="overview"/>`.
 
+A handle passed as a prop reaches any depth, through components with or without
+client state, and through `{...props}` spreads. The handle only exists at build
+time: the receiving components use `scope.trigger()`, `.panel()`, `.close()`
+and `.current()` in their JSX, and the compiler expands them against the
+declaring component. A component that reads the handle in code that runs in the
+browser (an event handler, an effect, a computed value), or an island from an
+npm package that receives one, fails the build with
+[KR8330](/docs/reference/diagnostics/#kr8330).
+
+The getter and setter of the destructured form (`const [tab, setTab] = ...`)
+are run-time functions and can be passed to components with client state. A
+component without client state is rendered at build time, so it cannot read
+them; the build fails with [KR8331](/docs/reference/diagnostics/#kr8331). Pass
+the scope handle instead.
+
 ## Compound conditions
 
 Panels accept arbitrary boolean logic over CSS state - `&&`, `||`, `!`,

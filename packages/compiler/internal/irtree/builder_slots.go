@@ -4187,6 +4187,7 @@ func (b *builder) buildExternalComponentSlot(name string, el *ast.JSXElement) (S
 	// They are directives for Krate, never props of the component.
 	hydrate := ""
 	el, hydrate = splitClientDirective(el)
+	b.checkIslandScopeProps(el, root)
 	// Replace page-scope signal reads with island props and collect their value
 	// expressions for the page hydration boot.
 	usedSignals := map[string]bool{}
