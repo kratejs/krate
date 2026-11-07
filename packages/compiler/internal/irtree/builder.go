@@ -99,6 +99,9 @@ type BuildOptions struct {
 	// BoundaryThrows renders the listed error boundary instances in their
 	// fallback state (see boundary_build.go).
 	BoundaryThrows map[SlotID]BoundaryThrow
+	// BasePath is the site base path ("" or "/prefix") that <Link> adds to a
+	// root-relative href.
+	BasePath string
 	// EvalJS evaluates a self-contained pure JS expression with the host JS
 	// engine. It is used only as a fallback for known, side-effect-free
 	// expressions that the Go const interpreter cannot model.
@@ -164,6 +167,7 @@ func newBuilder(prog *ast.Program, ann *Annotations, opts BuildOptions) *builder
 		contextDefaults:  mergeContextDefaults(ann.ContextDefaults, prog),
 		codeTheme:        codeTheme,
 		idPrefix:         opts.IDPrefix,
+		basePath:         opts.BasePath,
 		aggressiveDCE:    opts.AggressiveDCE,
 		compat:           opts.Compat,
 		goComponents:     opts.GoComponents,
@@ -375,6 +379,9 @@ func (b *builder) popComponentCtx() {
 type builder struct {
 	componentCtx
 	ctxStack []componentCtx
+
+	// basePath is the site base path <Link> adds to a root-relative href.
+	basePath string
 
 	// locateOnly is non-zero while building slots that only locate nested
 	// client components and are never emitted (a build-time evaluated

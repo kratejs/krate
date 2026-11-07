@@ -73,7 +73,7 @@ function Head(p){return jsx('head',p);}
 function Suspense(p){return p.children;}
 function Script(){return'';}
 function Style(){return'';}
-function Link(p){p=p||{};var attrs={};for(var k in p)attrs[k]=p[k];var href=p.href||'';var ext=/^(https?:|mailto:|tel:|#|javascript:|\/\/)/.test(href)||p.target==='_blank'||p.download!==undefined;if(ext){attrs['data-krate-external']='';}else{attrs['data-krate-link']='';if(p.prefetch!==false)attrs['data-prefetch']='';if(p.replace)attrs['data-krate-replace']='';if(p.scroll===false)attrs['data-krate-scroll']='false';}if(p.target==='_blank'&&!p.rel)attrs.rel='noopener noreferrer';return jsx('a',attrs);}
+function Link(p){p=p||{};var attrs={};for(var k in p)attrs[k]=p[k];var href=p.href||'';var base=(globalThis.__KRATE_CFG__||{}).basePath||'';if(base&&/^\/(?!\/)/.test(href))attrs.href=base+href;var ext=/^(https?:|mailto:|tel:|#|javascript:|\/\/)/.test(href)||p.target==='_blank'||p.download!==undefined;if(ext){attrs['data-krate-external']='';}else{attrs['data-krate-link']='';if(p.prefetch!==false)attrs['data-prefetch']='';if(p.replace)attrs['data-krate-replace']='';if(p.scroll===false)attrs['data-krate-scroll']='false';}if(p.target==='_blank'&&!p.rel)attrs.rel='noopener noreferrer';return jsx('a',attrs);}
 function Image(p){return jsx('img',p);}
 function Icon(){return'';}
 function useRef(initial){return{current:initial===undefined?null:initial};}
@@ -92,7 +92,7 @@ export default jsx;
 // CompileRuntimeComponents finds and compiles all runtime component files
 // (by *.runtime.tsx convention, // @runtime directive, or runtimeDirs config)
 // into standalone JS bundles executable via quickjs at serve time.
-func CompileRuntimeComponents(root, outDir string, serverComponents, runtimeComponents []string, runtimeDirs []string) []RuntimeComponentBundle {
+func CompileRuntimeComponents(root, outDir, basePath string, serverComponents, runtimeComponents []string, runtimeDirs []string) []RuntimeComponentBundle {
 	files := findRuntimeComponentFiles(root, serverComponents, runtimeComponents, runtimeDirs)
 	if len(files) == 0 {
 		return nil
@@ -108,7 +108,7 @@ func CompileRuntimeComponents(root, outDir string, serverComponents, runtimeComp
 	for _, file := range files {
 		name := extractBuildComponentName(file)
 		printf("  %s> Runtime%s %s\n", cCyan, cReset, filepath.Base(file))
-		bundle, err := compileSingleRuntimeComponent(root, outDir, file)
+		bundle, err := compileSingleRuntimeComponent(root, outDir, basePath, file)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "  %sx Runtime component error (%s):%s %v\n", cRed, name, cReset, err)
 			continue
@@ -212,7 +212,7 @@ func isPathInDirs(filePath string, dirs []string) bool {
 
 // compileSingleRuntimeComponent compiles one runtime component source file into
 // a self-contained IIFE bundle that defines globalThis.__krate_render(propsJSON).
-func compileSingleRuntimeComponent(root, outDir, sourcePath string) (*RuntimeComponentBundle, error) {
+func compileSingleRuntimeComponent(root, outDir, basePath, sourcePath string) (*RuntimeComponentBundle, error) {
 	bundleDir := ServerOutPath(outDir, "server-components")
 	componentName := extractBuildComponentName(sourcePath)
 	outPath := filepath.Join(bundleDir, componentName+".runtime.js")
@@ -271,6 +271,7 @@ globalThis.__krate_render = function(__propsJSON) {
 		Bundle:            true,
 		Format:            api.FormatIIFE,
 		Platform:          api.PlatformBrowser,
+		Banner:            basePathBanner(basePath),
 		Outfile:           outPath,
 		Write:             true,
 		LogLevel:          api.LogLevelError,

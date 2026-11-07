@@ -411,6 +411,8 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
   const trustProxy: boolean | null = options.trustProxy !== undefined ? options.trustProxy : cfg.trustProxy === undefined ? null : cfg.trustProxy;
   const platform = PLATFORMS[target];
   const basePath = cfg.basePath || "";
+  // Server-rendered <Link>s read the base path from here, as in the browser.
+  if (basePath) (globalThis as { __KRATE_CFG__?: unknown }).__KRATE_CFG__ = { basePath };
   const hashed = new Set(data.hashedAssets);
   const staticOnly = new Set(data.staticOnlyRoutes.map(normalizeRoutePattern));
   const sha256Hex = options.sha256Hex || portableSha256Hex;

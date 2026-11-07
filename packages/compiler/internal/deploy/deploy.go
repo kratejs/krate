@@ -13,6 +13,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/config"
 	"github.com/kratejs/krate/packages/compiler/internal/fsutil"
 	"github.com/kratejs/krate/packages/compiler/internal/gohost"
+	"github.com/kratejs/krate/packages/compiler/internal/sitepath"
 )
 
 // Targets lists the supported deploy adapters.
@@ -143,6 +144,7 @@ func emitRedirects(cfg *config.Config, outDir string) ([]string, error) {
 	if len(cfg.Redirects) == 0 && len(cfg.Rewrites) == 0 {
 		return nil, nil
 	}
+	base := cfg.BaseURLPath()
 	var b strings.Builder
 	for _, r := range cfg.Redirects {
 		status := "302"
@@ -150,11 +152,11 @@ func emitRedirects(cfg *config.Config, outDir string) ([]string, error) {
 			status = "301"
 		}
 		src, dst := translateRule(r.Source, r.Destination, false)
-		fmt.Fprintf(&b, "%s\t%s\t%s\n", src, dst, status)
+		fmt.Fprintf(&b, "%s\t%s\t%s\n", sitepath.Join(base, src), sitepath.Join(base, dst), status)
 	}
 	for _, r := range cfg.Rewrites {
 		src, dst := translateRule(r.Source, r.Destination, false)
-		fmt.Fprintf(&b, "%s\t%s\t200\n", src, dst)
+		fmt.Fprintf(&b, "%s\t%s\t200\n", sitepath.Join(base, src), sitepath.Join(base, dst))
 	}
 	p := filepath.Join(outDir, "_redirects")
 	if err := fsutil.WriteFileAtomic(p, []byte(b.String()), 0644); err != nil {
@@ -171,12 +173,13 @@ func emitHeaders(cfg *config.Config, outDir string) ([]string, error) {
 	if len(cfg.Headers) == 0 {
 		return nil, nil
 	}
+	base := cfg.BaseURLPath()
 	var b strings.Builder
 	for _, rule := range cfg.Headers {
 		if rule.Source == "" || len(rule.Headers) == 0 {
 			continue
 		}
-		b.WriteString(rule.Source)
+		b.WriteString(sitepath.Join(base, rule.Source))
 		b.WriteByte('\n')
 		keys := make([]string, 0, len(rule.Headers))
 		for k := range rule.Headers {
@@ -250,6 +253,7 @@ func emitVercel(cfg *config.Config, root, outDir string) ([]string, error) {
 		Source      string `json:"source"`
 		Destination string `json:"destination"`
 	}
+	base := cfg.BaseURLPath()
 	doc := map[string]interface{}{"$schema": vercelSchema}
 	if rel, err := filepath.Rel(root, outDir); err == nil && !strings.HasPrefix(rel, "..") {
 		doc["outputDirectory"] = filepath.ToSlash(rel)
@@ -258,7 +262,7 @@ func emitVercel(cfg *config.Config, root, outDir string) ([]string, error) {
 		rs := make([]vRedirect, 0, len(cfg.Redirects))
 		for _, r := range cfg.Redirects {
 			src, dst := translateRule(r.Source, r.Destination, true)
-			rs = append(rs, vRedirect{Source: src, Destination: dst, Permanent: r.Permanent})
+			rs = append(rs, vRedirect{Source: sitepath.Join(base, src), Destination: sitepath.Join(base, dst), Permanent: r.Permanent})
 		}
 		doc["redirects"] = rs
 	}
@@ -266,7 +270,7 @@ func emitVercel(cfg *config.Config, root, outDir string) ([]string, error) {
 		rw := make([]vRewrite, 0, len(cfg.Rewrites))
 		for _, r := range cfg.Rewrites {
 			src, dst := translateRule(r.Source, r.Destination, true)
-			rw = append(rw, vRewrite{Source: src, Destination: dst})
+			rw = append(rw, vRewrite{Source: sitepath.Join(base, src), Destination: sitepath.Join(base, dst)})
 		}
 		doc["rewrites"] = rw
 	}
@@ -305,7 +309,7 @@ func emitVercel(cfg *config.Config, root, outDir string) ([]string, error) {
 				hh = append(hh, vHeader{Key: k, Value: r.Headers[k]})
 			}
 			src, _ := translateRule(r.Source, "", true)
-			rules = append(rules, vHeaderRule{Source: src, Headers: hh})
+			rules = append(rules, vHeaderRule{Source: sitepath.Join(base, src), Headers: hh})
 		}
 		if len(rules) > 0 {
 			doc["headers"] = rules
@@ -333,6 +337,20 @@ func emitVercel(cfg *config.Config, root, outDir string) ([]string, error) {
 		_ = os.Remove(filepath.Join(outDir, "vercel.json"))
 	}
 	return []string{p}, nil
+}
+
+// GitHubPagesWarnings flags a base path on a site with a custom domain. GitHub
+// Pages serves a repository with a CNAME at the domain root, so every prefixed
+// URL would miss.
+func GitHubPagesWarnings(cfg *config.Config, outDir string) []string {
+	base := cfg.BaseURLPath()
+	if base == "" {
+		return nil
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "CNAME")); err != nil {
+		return nil
+	}
+	return []string{fmt.Sprintf("this site has a CNAME file and the base path %q, but GitHub Pages serves a custom domain at its root, so its URLs will 404: remove basePath and any path in site.url", base)}
 }
 
 // emitGitHubPages writes `.nojekyll` and a root `404.html`, which GitHub Pages

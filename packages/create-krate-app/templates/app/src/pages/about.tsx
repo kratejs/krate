@@ -12,7 +12,7 @@ export default function About() {
         URLs automatically.
       </p>
       <div class="hero-actions">
-        <a class="btn btn-primary" href="/">Back home</a>
+        <Link class="btn btn-primary" href="/">Back home</Link>
       </div>
     </section>
   );

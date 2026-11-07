@@ -67,3 +67,35 @@ func writePluginFile(t *testing.T, root, rel, body string) {
 		t.Fatal(err)
 	}
 }
+
+func TestGenerateLLMsBasePath(t *testing.T) {
+	cases := []struct {
+		name, opt, seo, basePath, want string
+	}{
+		{"explicit basePath", "https://example.com", "", "/sub", "https://example.com/sub/docs/"},
+		{"site url carries the path", "", "https://example.com/sub", "", "https://example.com/sub/docs/"},
+		{"no origin", "", "", "/sub", "/sub/docs/"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			writePluginFile(t, root, "docs/index.md", "---\ntitle: Intro\n---\n\nHi.\n")
+			out := t.TempDir()
+			cfg := config.Default()
+			cfg.SEO.BaseURL = tc.seo
+			cfg.BasePath = tc.basePath
+			cfg.Plugins = []config.PluginConfig{{Name: "llms", Options: map[string]interface{}{
+				"contentDir": "docs", "baseUrl": tc.opt,
+			}}}
+			if err := generateLLMs(&BuildResultHookCtx{Root: root, OutDir: out, Config: cfg}); err != nil {
+				t.Fatal(err)
+			}
+			for _, n := range []string{"llms.txt", "llms-full.txt"} {
+				b, _ := os.ReadFile(filepath.Join(out, n))
+				if !strings.Contains(string(b), tc.want) || strings.Contains(string(b), "/sub/sub") {
+					t.Errorf("%s: want %q, got:\n%s", n, tc.want, b)
+				}
+			}
+		})
+	}
+}

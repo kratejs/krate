@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -634,8 +635,8 @@ type Config struct {
 	Deploy      DeployConfig    `json:"deploy,omitempty"`      // deploy adapter + options
 
 	// BasePath is the URL path prefix the whole site is served under (e.g.
-	// "/docs"). Empty means root. Used for emitted asset URLs and the SPA
-	// router so the site works when hosted under a sub-path.
+	// "/docs"). Empty takes the path of site.url; "/" forces the root. Read it
+	// through BaseURLPath, which applies both rules.
 	BasePath string `json:"basePath,omitempty"`
 
 	// SPA enables the client-side router (link interception, prefetch, and
@@ -749,10 +750,14 @@ func (c *Config) SPAEnabled() bool {
 	return c.SPA == nil || *c.SPA
 }
 
-// BaseURLPath returns BasePath normalized to either "" or "/prefix" (no trailing
-// slash). Used for asset URLs and the SPA router base.
+// BaseURLPath returns the path the site is served under, normalized to either
+// "" or "/prefix" (no trailing slash). An explicit basePath wins; otherwise it
+// is the path of site.url, so one setting says where the site lives.
 func (c *Config) BaseURLPath() string {
 	p := strings.TrimSpace(c.BasePath)
+	if p == "" {
+		p = c.siteURLPath()
+	}
 	if p == "" || p == "/" {
 		return ""
 	}
@@ -760,6 +765,23 @@ func (c *Config) BaseURLPath() string {
 		p = "/" + p
 	}
 	return strings.TrimRight(p, "/")
+}
+
+// siteURLPath returns the escaped path of the configured site URL, or "" when
+// there is none or it does not parse.
+func (c *Config) siteURLPath() string {
+	raw := strings.TrimSpace(c.Site.URL)
+	if raw == "" {
+		raw = strings.TrimSpace(c.SEO.BaseURL)
+	}
+	if raw == "" {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	return u.EscapedPath()
 }
 
 func Default() *Config {

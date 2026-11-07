@@ -342,6 +342,26 @@ A project component named like a built-in (`Link`, `Head`, `Script`, `Style`, `I
 `Image`, `Suspense`, `Slot`) used to be replaced by it without warning. Your component
 is now used. If you relied on the built-in, import it from `@krate/runtime`.
 
+### Links add the base path
+
+If your site has a `basePath`, `<Link>`, `navigate()`, `krateRouter` and
+`redirect()` now add it themselves, so remove the prefix you wrote by hand:
+
+```tsx
+<Link href="/docs/about">About</Link>   // 0.4, with basePath: "/docs"
+<Link href="/about">About</Link>        // 0.5
+```
+
+They add it even to a path that already starts with it, because `/docs/intro`
+can be a real route under `basePath: "/docs"`. Do not pass `location.pathname`;
+`usePathname()` returns the path without the prefix.
+
+A path in `site.url` now sets the base path. If your `site.url` has a path and a
+proxy strips it before Krate, set `basePath: "/"` to keep the site at the root.
+
+Plain `<a href="/x">` and `<img src="/x">` are not rewritten. They now give a
+`KR7144` warning under a base path.
+
 ### New in 0.5
 
 - **`@krate/ts-plugin`** is a new package: a TypeScript language-service plugin

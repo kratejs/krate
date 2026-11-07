@@ -34,6 +34,41 @@ skipped at build time with a warning.
 Any static host works. The output has no server runtime dependency - pages are
 pre-rendered HTML with hashed JS/CSS assets.
 
+### Sub-paths and custom domains
+
+Tell Krate where the site lives with `site.url`. A path in the URL becomes the
+[base path](/docs/reference/config/#base-path):
+
+```typescript
+// https://example.com/ (the domain root)
+site: { url: "https://example.com" }
+
+// https://example.com/example/a/
+site: { url: "https://example.com/example/a" }
+```
+
+GitHub Pages decides the path by how the repository is set up:
+
+| Setup | Site lives at | `site.url` |
+| --- | --- | --- |
+| Project site, no custom domain | `user.github.io/repo/` | `https://user.github.io/repo` |
+| Project site with its own custom domain | `example.com/` | `https://example.com` |
+| Project site, custom domain only on the account's user site | `example.com/repo/` | `https://example.com/repo` |
+| User site (`user.github.io` repository) | `user.github.io/` | `https://user.github.io` |
+
+A repository with its own custom domain is served from the domain root, and
+GitHub redirects `user.github.io/repo/` there. Do not keep the repository name
+in `basePath`: stylesheets would load from `example.com/repo/...` and 404.
+`krate deploy --target gh-pages` warns when it finds a `CNAME` file together
+with a base path.
+
+To build one project for two locations, such as previews on a sub-path and
+production at the root, read the URL from the environment:
+
+```typescript
+site: { url: process.env.SITE_URL ?? "https://example.com" }
+```
+
 ### Host adapters (`krate deploy`)
 
 `krate deploy` builds the site and writes the small host-specific config files

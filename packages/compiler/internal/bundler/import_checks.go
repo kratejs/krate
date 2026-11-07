@@ -94,6 +94,10 @@ func (b *Bundler) checkRuntimeImports(mod *Module) error {
 			if n.Remote == "" || n.Remote == "default" || exports[n.Remote] {
 				continue
 			}
+			// The compiler provides these tags, so no module exports them.
+			if spec == "@krate/runtime" && builtinComponentName(n.Remote) {
+				continue
+			}
 			hint := runtimeExportHint(n.Remote, spec, exports)
 			return importDiag(mod, spec, strconv.Quote(n.Remote)+" is not exported by "+strconv.Quote(spec), hint, diag.CodeRuntimeExportMissing)
 		}

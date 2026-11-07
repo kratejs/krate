@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
+	"github.com/kratejs/krate/packages/compiler/internal/docs"
 )
 
 func TestFeedPluginGeneratesAllFormats(t *testing.T) {
@@ -80,5 +81,70 @@ func TestToRFC3339(t *testing.T) {
 		if got := toRFC3339(in); got != want {
 			t.Errorf("toRFC3339(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestFeedBasePath(t *testing.T) {
+	cases := []struct {
+		name, seoBase, basePath string
+	}{
+		{"explicit basePath", "https://example.com", "/sub"},
+		{"site url carries the path", "https://example.com/sub", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			docsDir := filepath.Join(root, "src", "content", "docs")
+			if err := os.MkdirAll(docsDir, 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(docsDir, "post.md"), []byte("---\ntitle: My Post\ndate: 2024-03-01\n---\n# Post\n"), 0644); err != nil {
+				t.Fatal(err)
+			}
+			out := filepath.Join(root, "dist")
+			if err := os.MkdirAll(out, 0755); err != nil {
+				t.Fatal(err)
+			}
+			cfg := config.Default()
+			cfg.SEO.BaseURL = tc.seoBase
+			cfg.BasePath = tc.basePath
+			cfg.Plugins = []config.PluginConfig{{Name: "feed", Options: map[string]interface{}{"title": "T"}}}
+			if err := generateFeeds(&BuildResultHookCtx{Root: root, OutDir: out, Config: cfg}); err != nil {
+				t.Fatal(err)
+			}
+			read := func(n string) string {
+				b, err := os.ReadFile(filepath.Join(out, n))
+				if err != nil {
+					t.Fatal(err)
+				}
+				return string(b)
+			}
+			rss, atom, js := read("feed.xml"), read("atom.xml"), read("feed.json")
+			for name, want := range map[string][]string{
+				"rss":  {"<link>https://example.com/sub/</link>", `href="https://example.com/sub/feed.xml"`, "https://example.com/sub/docs/post/"},
+				"atom": {`href="https://example.com/sub/atom.xml"`, `href="https://example.com/sub/"`, "<id>https://example.com/sub/</id>"},
+				"json": {`"home_page_url": "https://example.com/sub/"`, `"feed_url": "https://example.com/sub/feed.json"`},
+			} {
+				got := map[string]string{"rss": rss, "atom": atom, "json": js}[name]
+				for _, w := range want {
+					if !strings.Contains(got, w) {
+						t.Errorf("%s missing %q:\n%s", name, w, got)
+					}
+				}
+				if strings.Contains(got, "/sub/sub") {
+					t.Errorf("%s doubles the base path:\n%s", name, got)
+				}
+			}
+
+			head := docsHeadExtras(cfg, docs.Page{}, "")
+			for _, w := range []string{`https://example.com/sub/feed.xml`, `https://example.com/sub/atom.xml`, `https://example.com/sub/feed.json`} {
+				if !strings.Contains(head, w) {
+					t.Errorf("head missing %q:\n%s", w, head)
+				}
+			}
+			if strings.Contains(head, "/sub/sub") {
+				t.Errorf("head doubles the base path:\n%s", head)
+			}
+		})
 	}
 }

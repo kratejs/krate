@@ -793,6 +793,11 @@ func runDeploy(flags cliFlags, args []string) {
 		dopts.Server = plan
 	}
 	files, err := deploy.Emit(target, cfg, root, cfg.OutDir, dopts)
+	if target == "gh-pages" {
+		for _, w := range deploy.GitHubPagesWarnings(cfg, cfg.OutDir) {
+			fmt.Fprintf(os.Stderr, "%s! warning:%s %s\n", cYellow, cReset, w)
+		}
+	}
 	if dopts.Server != nil {
 		for _, w := range dopts.Server.Warnings {
 			fmt.Fprintf(os.Stderr, "%s! warning:%s %s\n", cYellow, cReset, w)

@@ -12,6 +12,7 @@ import (
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
 	"github.com/kratejs/krate/packages/compiler/internal/fsutil"
+	"github.com/kratejs/krate/packages/compiler/internal/sitepath"
 )
 
 // ServerPlan describes a bundled portable server (build.BuildServerBundle) for
@@ -169,6 +170,15 @@ func ruleRegex(source, dest string) (string, string) {
 	return sb.String(), dest
 }
 
+// scopeRegex mounts an anchored route regex under the site base path. A source
+// that is not a root-relative path (a bare glob) is left as it was.
+func scopeRegex(base, source, re string) string {
+	if base == "" || !sitepath.IsRootRelative(source) {
+		return re
+	}
+	return "^" + regexp.QuoteMeta(base) + strings.TrimPrefix(re, "^")
+}
+
 func headerSourceRegex(pattern string) string {
 	pattern = strings.TrimSpace(pattern)
 	if !strings.Contains(pattern, "*") {
@@ -195,7 +205,9 @@ func emitVercelServer(cfg *config.Config, root, outDir string, plan *ServerPlan,
 			return nil, err
 		}
 	}
-	staticDir := filepath.Join(out, "static")
+	base := cfg.BaseURLPath()
+	// Static files sit under the base path, where the platform looks for them.
+	staticDir := filepath.Join(out, "static", filepath.FromSlash(strings.TrimPrefix(base, "/")))
 	if err := copyTree(outDir, staticDir); err != nil {
 		return nil, fmt.Errorf("copying static files: %w", err)
 	}
@@ -236,7 +248,7 @@ func emitVercelServer(cfg *config.Config, root, outDir string, plan *ServerPlan,
 		if r.Source == "" || len(r.Headers) == 0 {
 			continue
 		}
-		routes = append(routes, vcRoute{"src": headerSourceRegex(r.Source), "headers": r.Headers, "continue": true})
+		routes = append(routes, vcRoute{"src": scopeRegex(base, r.Source, headerSourceRegex(r.Source)), "headers": r.Headers, "continue": true})
 	}
 	if plan.HasMiddleware {
 		// Page requests reach the function before the filesystem so the
@@ -247,6 +259,7 @@ func emitVercelServer(cfg *config.Config, root, outDir string, plan *ServerPlan,
 	}
 	for _, r := range cfg.Redirects {
 		src, dst := ruleRegex(r.Source, r.Destination)
+		src, dst = scopeRegex(base, r.Source, src), sitepath.Join(base, dst)
 		status := 302
 		if r.Permanent {
 			status = 301
@@ -255,12 +268,15 @@ func emitVercelServer(cfg *config.Config, root, outDir string, plan *ServerPlan,
 	}
 	for _, r := range cfg.Rewrites {
 		src, dst := ruleRegex(r.Source, r.Destination)
+		src, dst = scopeRegex(base, r.Source, src), sitepath.Join(base, dst)
 		routes = append(routes, vcRoute{"src": src, "dest": dst, "check": true})
 	}
-	routes = append(routes, vcRoute{"src": "^/(?:api|__krate)(?:/.*)?$", "dest": "/__krate"})
+	// The internal /__krate endpoints stay at the root; the API sits under the base.
+	routes = append(routes, vcRoute{"src": "^/__krate(?:/.*)?$", "dest": "/__krate"})
+	routes = append(routes, vcRoute{"src": scopeRegex(base, "/api", "^/api(?:/.*)?$"), "dest": "/__krate"})
 	for _, g := range plan.ServerPaths {
 		if re := globRegex(g); re != "" && g != "/api/*" && g != "/__krate/action/*" {
-			routes = append(routes, vcRoute{"src": re, "dest": "/__krate"})
+			routes = append(routes, vcRoute{"src": scopeRegex(base, g, re), "dest": "/__krate"})
 		}
 	}
 	routes = append(routes, vcRoute{"handle": "filesystem"}, vcRoute{"src": "^/(.*)$", "dest": "/__krate"})
@@ -365,7 +381,7 @@ func emitCloudflareServer(cfg *config.Config, root, outDir string, plan *ServerP
 	if !plan.HasMiddleware {
 		var pats []string
 		for _, g := range plan.ServerPaths {
-			g = strings.ReplaceAll(g, "{,/}", "")
+			g = sitepath.Join(cfg.BaseURLPath(), strings.ReplaceAll(g, "{,/}", ""))
 			pats = append(pats, g)
 			if !strings.HasSuffix(g, "*") {
 				pats = append(pats, g+"/")

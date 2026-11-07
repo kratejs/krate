@@ -20,7 +20,7 @@ export default function Home() {
           no bundler subprocess.
         </p>
         <div class="hero-actions">
-          <a class="btn btn-primary" href="/about">Learn more</a>
+          <Link class="btn btn-primary" href="/about">Learn more</Link>
           <a
             class="btn btn-secondary"
             href="https://krate.js.org/docs/getting-started/"

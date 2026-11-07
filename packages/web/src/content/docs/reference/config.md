@@ -38,7 +38,7 @@ plugins inherit these values.
 
 ```typescript
 site: {
-  url: "https://example.com",   // canonical origin (sitemap, canonical, OG)
+  url: "https://example.com",   // where the site lives; a path here is the base path
   name: "My Site",
   description: "Default meta description",
   image: "https://example.com/og.png",
@@ -732,15 +732,45 @@ their real paths (`github.com/kratejs/krate/packages/compiler/goext/...`). See
 
 ## Base path
 
+Set where the site lives in `site.url`. A path there is the base path, so this
+is all a site under a sub-path needs:
+
 ```typescript
-basePath: "/docs",   // serve the whole site under a sub-path (default: "")
+site: { url: "https://example.com/example/a" },  // served under /example/a
 ```
 
-When set, the build prefixes emitted asset URLs (page hydration scripts,
-runtime chunks, stylesheets) with the base path, and `krate serve` mounts the
-site under it (requests outside the prefix are redirected into it). Relative
-dynamic imports resolve against the prefixed script URL. Author your own links
-with the prefix (or use relative URLs).
+`basePath` sets the path directly and wins over `site.url`. Use it when the URL
+path and the serving path differ, for example behind a proxy that strips the
+prefix (`basePath: "/"` forces the root):
+
+```typescript
+basePath: "/docs",   // serve the whole site under a sub-path (default: path of site.url)
+```
+
+With a base path, the build prefixes:
+
+- hydration scripts, runtime chunks, stylesheets, dynamic `import()` chunks and
+  workers;
+- imported assets, `<Image>` output, and generated URLs in CSS;
+- `url(/x.png)` in CSS and `<link>` and `<script>` URLs in `<head>`, when the
+  file exists in `public/`. Other root-relative URLs may belong to another app
+  on the host, so they stay as written;
+- `<Link href>`, `navigate()`, `krateRouter` and `redirect()` in the browser,
+  and root-relative links and images in Markdown;
+- canonical URLs, sitemaps, feeds and `llms.txt`.
+
+Write every one of these as a path from the site root, without the base path:
+`<Link href="/about">`. Relative, `#hash`, `?query` and absolute URLs are never
+changed.
+
+Plain `<a href="/about">` and `<img src="/logo.png">` stay exactly as written, so
+they point outside the site. A literal value gives a
+[`KR7144`](/docs/reference/diagnostics/#kr7144) build warning: use `<Link>`, or
+`<Image>` or an import. A value computed at run time gets no warning.
+
+`krate serve` and `krate dev` mount the site under the base path, and requests
+outside it are redirected in. Static hosts serve `dist/` as uploaded, so mount
+it at the same path. See [Deployment](/docs/guides/deployment/#sub-paths-and-custom-domains).
 
 ## Server
 

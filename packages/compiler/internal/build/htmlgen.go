@@ -15,12 +15,13 @@ import (
 )
 
 // dynChunkURLRe matches the chunk URLs a page's hydration JS dynamically imports
-// (the bundler rewrites `import("./X.tsx")` to `import("/chunks/X-<hash>.js")`).
-var dynChunkURLRe = regexp.MustCompile(`["'](/chunks/[^"']+\.js)["']`)
+// (the bundler rewrites `import("./X.tsx")` to `import("<base>/chunks/X-<hash>.js")`).
+var dynChunkURLRe = regexp.MustCompile(`["']((?:/[^"'/]+)*/chunks/[^"']+\.js)["']`)
 
 // dynamicChunkURLs returns the unique dynamic-import chunk URLs referenced by a
-// page's hydration JS, so their module fetches can start during HTML parse.
-func dynamicChunkURLs(hydrationJS string) []string {
+// page's hydration JS, relative to the base path, so their module fetches can
+// start during HTML parse.
+func dynamicChunkURLs(hydrationJS, basePath string) []string {
 	if !strings.Contains(hydrationJS, "/chunks/") {
 		return nil
 	}
@@ -31,8 +32,8 @@ func dynamicChunkURLs(hydrationJS string) []string {
 	seen := make(map[string]bool, len(matches))
 	var out []string
 	for _, m := range matches {
-		url := m[1]
-		if seen[url] {
+		url := strings.TrimPrefix(m[1], basePath)
+		if seen[url] || !strings.HasPrefix(url, "/chunks/") {
 			continue
 		}
 		seen[url] = true

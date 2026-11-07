@@ -23,6 +23,9 @@ type Config struct {
 	// reports false to leave the destination as written. Not part of the
 	// user-facing config.
 	ImageURL func(dest string) (string, bool) `json:"-"`
+	// LinkURL, when set, may replace a link destination. It returns false to
+	// leave the destination as written.
+	LinkURL func(dest string) (string, bool) `json:"-"`
 }
 
 func DefaultConfig() Config {

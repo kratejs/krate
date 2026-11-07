@@ -11,6 +11,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/escape"
 	"github.com/kratejs/krate/packages/compiler/internal/irtree"
 	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
+	"github.com/kratejs/krate/packages/compiler/internal/sitepath"
 	"github.com/kratejs/krate/packages/compiler/internal/syntaxhighlight"
 )
 
@@ -34,6 +35,9 @@ type SSREval struct {
 	evaluating  map[string]bool
 	// frame is the scope of the root component being evaluated.
 	frame *jsvalue.Scope
+
+	// basePath is the site base path <Link> adds to a root-relative href.
+	basePath string
 
 	// Meta content captured from <Head>/<Script>/<Style> elements encountered
 	// during evaluation. Signal-less components that go through the SSREval
@@ -1302,6 +1306,9 @@ func (e *SSREval) evalLink(el *ast.JSXElement) string {
 			out = append(out, &ast.JSXAttr{Name: "data-krate-scroll", Value: &ast.Literal{Kind: ast.StringLit, Value: "false"}})
 		}
 	}
+	if h, ok := e.linkHrefWithBase(el); ok {
+		out = irtree.SetHrefAttr(out, h)
+	}
 	clone := &ast.JSXElement{
 		Position: el.Position,
 		Opening:  &ast.JSXOpening{Name: "a", Attributes: out, SelfClosing: el.Opening.SelfClosing},
@@ -1309,6 +1316,24 @@ func (e *SSREval) evalLink(el *ast.JSXElement) string {
 		Closing:  &ast.JSXClosing{Name: "a"},
 	}
 	return e.evalJSX(clone)
+}
+
+// linkHrefWithBase resolves a <Link>'s href, including one forwarded through a
+// spread, and adds the base path. ok is false when there is nothing to prefix.
+func (e *SSREval) linkHrefWithBase(el *ast.JSXElement) (string, bool) {
+	if e.basePath == "" {
+		return "", false
+	}
+	attrs, _ := e.expandSSRSpreadAttrs(el.Opening.Attributes)
+	for i := len(attrs) - 1; i >= 0; i-- {
+		if a := attrs[i]; !a.Spread && a.Name == "href" && a.Value != nil {
+			if v := e.value(a.Value); v.Kind() == jsvalue.KindString && sitepath.IsRootRelative(v.StringValue()) {
+				return e.basePath + v.StringValue(), true
+			}
+			return "", false
+		}
+	}
+	return "", false
 }
 
 // attrValue evaluates an attribute expression for the htmlspec serializer.
