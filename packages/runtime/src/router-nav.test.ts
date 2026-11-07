@@ -364,6 +364,38 @@ describe('races', () => {
   });
 });
 
+describe('in-document steps while a page loads', () => {
+  it('a hash link cancels the navigation still loading', async () => {
+    let open!: () => void;
+    routes['/slow'] = { body: page('Slow', '<h1>Slow</h1>'), gate: new Promise<void>((r) => (open = r)) };
+    const loading = krateRouter.push('/slow');
+    await settle();
+    await krateRouter.push('/#top');
+    open();
+    await loading;
+    await settle();
+    expect(location.pathname + location.hash).toBe('/#top');
+    expect(document.querySelector('#root h1')!.textContent).toBe('Home');
+    expect(krateRouter.getState().status).toBe('idle');
+  });
+
+  it('going back over a hash entry cancels the navigation still loading', async () => {
+    await krateRouter.push('/#a');
+    await krateRouter.push('/#b');
+    let open!: () => void;
+    routes['/slow'] = { body: page('Slow', '<h1>Slow</h1>'), gate: new Promise<void>((r) => (open = r)) };
+    const loading = krateRouter.push('/slow');
+    await settle();
+    history.back();
+    await settle();
+    open();
+    await loading;
+    await settle();
+    expect(location.pathname + location.hash).toBe('/#a');
+    expect(document.querySelector('#root h1')!.textContent).toBe('Home');
+  });
+});
+
 describe('prefetch cache', () => {
   it('serves a prefetched document once, then refetches', async () => {
     await krateRouter.prefetch('/about');

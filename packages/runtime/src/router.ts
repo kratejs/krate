@@ -1591,8 +1591,21 @@ function sameDocument(url: string): boolean {
   return pathOf(url) === renderedPath;
 }
 
+// A newer in-document step (a hash link, or back/forward over a hash entry)
+// supersedes a page navigation still loading: it must not swap the page in
+// afterwards.
+function cancelPending(): void {
+  if (status !== 'loading') return;
+  navSeq++;
+  if (pendingAbort) pendingAbort.abort();
+  pendingAbort = undefined;
+  endTransition();
+  setStatus('idle');
+}
+
 /** In-document navigation: only the hash (or nothing) changes. */
 function hashNavigate(url: string, req: NavRequest): void {
+  cancelPending();
   saveScroll(currentKey);
   if (url !== location.href || req.state !== undefined) {
     if (req.kind === 'replace') {
@@ -1693,6 +1706,7 @@ function popstateHandler(e: PopStateEvent): void {
   const url = location.href;
   if (pathOf(url) === renderedPath) {
     // Hash-only history step within the rendered document.
+    cancelPending();
     currentKey = key || currentKey;
     const saved = key ? scrollPositions.get(key) : undefined;
     if (saved !== undefined) window.scrollTo(0, saved);
