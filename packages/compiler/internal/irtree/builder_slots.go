@@ -2994,7 +2994,7 @@ func (b *builder) resolveSignal(name string) SignalDecl {
 		return SignalDecl{
 			Name:        name,
 			SetterName:  setterNameFor(name),
-			Initial:     evalConst(initial),
+			Initial:     legacyConstString(initial, b.evalValue(initial)),
 			IsString:    isStringType(initial, b.sigMap()),
 			InitialExpr: initial,
 		}
@@ -4187,6 +4187,7 @@ func (b *builder) buildExternalComponentSlot(name string, el *ast.JSXElement) (S
 	// They are directives for Krate, never props of the component.
 	hydrate := ""
 	el, hydrate = splitClientDirective(el)
+	b.checkIslandScopeProps(el, root)
 	// Replace page-scope signal reads with island props and collect their value
 	// expressions for the page hydration boot.
 	usedSignals := map[string]bool{}
@@ -4585,8 +4586,9 @@ func (b *builder) bridgeScopeStmts(stmts []ast.Stmt, used map[string]bool) {
 // foldLocalConsts folds a component's local constants using the cva/cn-aware
 // attribute evaluator, returning name -> value and extending props with them.
 func (b *builder) foldLocalConsts(fn *ast.FnDecl, props valueMap, nextUseId func() string) valueMap {
-	saved := b.localProps
-	b.localProps = props
+	saved, savedKeys := b.localProps, b.propKeys
+	b.localProps, b.propKeys = props, keySet(props)
+	defer func() { b.propKeys = savedKeys }()
 	fold := collectLocalVars(fn.Body, b.sigMap(), props, nextUseId)
 	locals, inits := fold.locals, fold.inits
 	destructured := destructNames(fold.destructs)
@@ -4641,4 +4643,13 @@ func isNonClientBuiltinTag(name string) bool {
 		return true
 	}
 	return false
+}
+
+// keySet returns the keys of m as a set.
+func keySet(m valueMap) map[string]bool {
+	out := make(map[string]bool, len(m))
+	for k := range m {
+		out[k] = true
+	}
+	return out
 }

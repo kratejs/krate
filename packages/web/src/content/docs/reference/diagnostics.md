@@ -622,6 +622,18 @@ Client code and statically rendered pages cannot read process.env or import.meta
 
 A module-level value that later top-level code changes (`const items = []` followed by `for (...) items.push(x)`, an assignment, a property write, `Object.assign`, or a call to a function of the module that does one of these) is evaluated at build time by running that code in order. When a statement cannot be run there (it reads the browser, the clock, an imported function or anything else unknown), the value stays unknown rather than keeping its initial value. A component that hydrates reads it at run time. A component rendered at build time has no run time, so the build fails. Make the top-level code plain, compute the value in one expression, or move the reading component to one with client state.
 
+### KR8330
+
+**CSS scope handle is read by code that runs in the browser**
+
+A CSS scope handle (`const tab = createCSSChoice(...)`) is a build-time value: the compiler turns `tab.trigger()`, `tab.panel()`, `tab.close()` and `tab.current()` spreads into labels, panel classes and CSS, and nothing of the handle exists in the browser. Passing it as a prop works when the receiving component only uses those helpers in its JSX, at any depth. This component reads the handle some other way (in an event handler, an effect, a computed value or a call to another function), or it was passed to an external island, so the read would fail in the browser. Use the helpers in the JSX of the component that receives the handle, or pass the getter and setter values (`const [tab, setTab] = createCSSChoice(...)`) to a component with its own client state, or use createSignal.
+
+### KR8331
+
+**CSS signal value passed to a component that renders at build time**
+
+The state of a CSS signal lives in the page (hidden inputs and :has() selectors), so no value exists at build time. A component without client state is rendered to static HTML during the build, which makes a CSS signal getter or setter passed to it unreadable: `props.tab()` has nothing to return. Pass the scope handle instead (`const tab = createCSSChoice(...)`, `<Child scope={tab} />`) and use `props.scope.current()`, `props.scope.panel()` or `props.scope.trigger()` in the child, or give the child its own state with createSignal.
+
 ### KR8601
 
 **Unsupported page segment export value**

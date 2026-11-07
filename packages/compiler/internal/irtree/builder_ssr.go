@@ -3,6 +3,7 @@ package irtree
 import (
 	"hash/fnv"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -203,6 +204,19 @@ func (b *builder) constInterp(props valueMap) *jsvalue.Interp {
 	}
 	member := in.Hooks.Member
 	in.Hooks.Member = func(m *ast.MemberExpr) (jsvalue.Value, bool) {
+		// props.X reads what the call site passed, never a local or module
+		// constant that happens to share the name.
+		if b.propKeys != nil && sameValueMap(props, b.localProps) {
+			if id, ok := m.Object.(*ast.Identifier); ok && id.Name == "props" {
+				if name, ok := staticMemberName(m); ok && !b.propKeys[name] && name != "children" && !strings.HasPrefix(name, "__krate") && !b.localFuncProps[name] {
+					if _, shadowed := in.Scope.Lookup(id.Name); !shadowed {
+						if obj, isObj := props["props"]; !isObj || !obj.IsObject() {
+							return jsvalue.Undefined(), true
+						}
+					}
+				}
+			}
+		}
 		// A function prop passed by the caller has no const value; reading it
 		// as props.X must not look like an omitted prop (undefined), or a
 		// destructuring default would replace it.
@@ -290,170 +304,6 @@ func (b *builder) evalAttrInitialString(expr ast.Expr) string {
 // consistently across render paths.
 func (b *builder) evalAttrValue(expr ast.Expr) string {
 	return legacyConstString(expr, b.evalAttrConst(expr))
-}
-
-func evalConst(expr ast.Expr) string {
-	if expr == nil {
-		return ""
-	}
-	// Context-free folding uses JS semantics when the value is fully known;
-	// otherwise the structural fallback below keeps identifier names and
-	// expression text for JS emission.
-	if v := evalConstValue(expr, nil, nil); !v.ContainsUnknown() && !v.IsFunction() {
-		return jsvalue.LegacyString(v)
-	}
-	switch e := expr.(type) {
-	case *ast.Literal:
-		switch e.Kind {
-		case ast.StringLit:
-			return e.Value
-		case ast.NumberLit:
-			return e.Value
-		case ast.BoolLit:
-			return e.Value
-		case ast.NullLit:
-			return "null"
-		default:
-			return e.Value
-		}
-	case *ast.Identifier:
-		return e.Name
-	case *ast.UnaryExpr:
-		arg := evalConst(e.Arg)
-		if arg == "" {
-			return ""
-		}
-		return unaryPrefixJS(e.Op, arg)
-	case *ast.BinaryExpr:
-		left := evalConst(e.Left)
-		right := evalConst(e.Right)
-		// If either side can't be const-evaluated, return empty -
-		// partial stringification produces broken JS like " || false".
-		if left == "" || right == "" {
-			return ""
-		}
-		// Numeric binary expressions (16 / 9, width * 2) must be computed
-		// numerically, not string-concatenated. Otherwise a prop like
-		// ratio={16/9} resolves to the literal "16 / 9", and downstream
-		// arithmetic concatenates it into garbage ("116 / 9100").
-		if _, lOk := parseNumeric(left); lOk {
-			if _, rOk := parseNumeric(right); rOk {
-				if v := evalBinaryValue(e.Op, left, right); v != "" {
-					return v
-				}
-			}
-		}
-		return left + " " + e.Op + " " + right
-	case *ast.ArrayExpr:
-		var parts []string
-		for _, el := range e.Elements {
-			parts = append(parts, constExprToJS(el))
-		}
-		return "[" + strings.Join(parts, ",") + "]"
-	case *ast.ObjectExpr:
-		var parts []string
-		for _, prop := range e.Properties {
-			if prop.Spread {
-				continue
-			}
-			parts = append(parts, objectPropKeyJS(prop, false)+`:`+constExprToJS(prop.Value))
-		}
-		return "{" + strings.Join(parts, ",") + "}"
-	case *ast.ConditionalExpr:
-		// Ternary: evaluate test, return appropriate branch
-		test := evalConst(e.Test)
-		if test == "" {
-			// Can't evaluate test - variables or props not resolvable.
-			// Return empty instead of falling through to alternate (which
-			// could be null literal, producing "null" text in output).
-			return ""
-		}
-		if test != "false" && test != "null" && test != "undefined" && test != "0" {
-			return evalConst(e.Consequent)
-		}
-		return evalConst(e.Alternate)
-	case *ast.TemplateExpr:
-		var b strings.Builder
-		for i, raw := range e.Raw {
-			b.WriteString(escape.TemplateRaw(raw))
-			if i < len(e.Parts) {
-				b.WriteString(evalConst(e.Parts[i]))
-			}
-		}
-		return b.String()
-	default:
-		return ""
-	}
-}
-
-// constExprToJS renders a constant expression as valid JavaScript source for
-// embedding in object/array literals. Unlike evalConst (which returns bare
-// values - unquoted strings, raw identifiers), this re-quotes string literals
-// at any nesting depth so the produced text is executable JS (e.g. a nested
-// object prop like {title:"Docs"} survives as a real object, not the invalid
-// {title:Docs}).
-func constExprToJS(expr ast.Expr) string {
-	if expr == nil {
-		return "null"
-	}
-	switch e := expr.(type) {
-	case *ast.Literal:
-		switch e.Kind {
-		case ast.StringLit:
-			return "'" + escape.JSString(e.Value) + "'"
-		case ast.NullLit:
-			return "null"
-		default:
-			// numbers, booleans
-			return e.Value
-		}
-	case *ast.ArrayExpr:
-		var parts []string
-		for _, el := range e.Elements {
-			parts = append(parts, constExprToJS(el))
-		}
-		return "[" + strings.Join(parts, ",") + "]"
-	case *ast.ObjectExpr:
-		var parts []string
-		for _, prop := range e.Properties {
-			if prop.Spread {
-				continue
-			}
-			parts = append(parts, objectPropKeyJS(prop, true)+":"+constExprToJS(prop.Value))
-		}
-		return "{" + strings.Join(parts, ",") + "}"
-	case *ast.UnaryExpr:
-		return unaryPrefixJS(e.Op, constExprToJS(e.Arg))
-	case *ast.TemplateExpr:
-		// Preserve the template literal as valid JS with interpolated parts.
-		var b strings.Builder
-		b.WriteByte('`')
-		for i, raw := range e.Raw {
-			b.WriteString(raw)
-			if i < len(e.Parts) {
-				b.WriteString("${")
-				b.WriteString(constExprToJS(e.Parts[i]))
-				b.WriteByte('}')
-			}
-		}
-		b.WriteByte('`')
-		return b.String()
-	case *ast.Identifier:
-		// Identifier references can't be const-folded into a literal; fall
-		// back to evalConst so a bare reference (e.g. a hoisted const name)
-		// resolves if possible, otherwise the name itself.
-		if v := evalConst(expr); v != "" {
-			return v
-		}
-		return e.Name
-	default:
-		// Preserve any other expression as valid JS source rather than dropping
-		// it (which previously produced `[]`/`{}` with missing elements).
-		if js := generateExprJS(expr, nil); js != "" {
-			return js
-		}
-		return evalConst(expr)
-	}
 }
 
 // evalConstWithSignals evaluates a constant expression, resolving signal reads
@@ -1008,7 +858,7 @@ func destructuredParamNames(pattern string) []string {
 		if colon := indexTopLevel(part, ":"); colon >= 0 {
 			value := strings.TrimSpace(part[colon+1:])
 			if strings.HasPrefix(value, "{") || strings.HasPrefix(value, "[") {
-				names = append(names, destructuredParamNames(value)...)
+				names = append(names, destructuredParamNames(patternOnly(value))...)
 			} else if eq := strings.Index(value, "="); eq >= 0 {
 				names = append(names, strings.TrimSpace(value[:eq]))
 			} else {
@@ -1018,7 +868,7 @@ func destructuredParamNames(pattern string) []string {
 		}
 		// Nested pattern without rename.
 		if strings.HasPrefix(part, "{") || strings.HasPrefix(part, "[") {
-			names = append(names, destructuredParamNames(part)...)
+			names = append(names, destructuredParamNames(patternOnly(part))...)
 			continue
 		}
 		// Default value (`x = 1`).
@@ -1111,6 +961,15 @@ func (b *builder) buildPropBindings(paramNames []string, attrs map[string]ast.Ex
 		if fn != nil {
 			bindings[name] = b.paramDefaultValue(fn, name)
 		}
+	}
+	// Names inside a renamed or nested pattern come from destructuring the
+	// props, not from attributes of the same name.
+	propsObj := jsvalue.NewObject()
+	for name, expr := range attrs {
+		propsObj.Set(name, b.resolveBindingValue(expr, props))
+	}
+	for name, v := range b.nestedPatternValues(fn, propsObj) {
+		bindings[name] = v
 	}
 	return bindings
 }
@@ -1231,11 +1090,18 @@ func (b *builder) buildChildPropsRegDecl(id string, props map[string]ast.Expr) s
 	}
 	// Keys are emitted in sorted order so the registration (and the hashed
 	// hydration bundle) is byte-identical across builds.
-	for i, name := range sortedKeysExpr(props) {
+	first := true
+	for _, name := range sortedKeysExpr(props) {
 		expr := props[name]
-		if i > 0 {
+		// A CSS scope handle exists only at build time; the child's helper
+		// spreads were expanded against it, so it has no run-time value.
+		if _, isScope := b.buildTimeScope(expr); isScope {
+			continue
+		}
+		if !first {
 			sb.WriteByte(',')
 		}
+		first = false
 		val := b.renderChildPropValue(expr)
 		if b.livePropsParam == "props" && b.readsLiveProp(expr) {
 			// Forwarding a live prop (`n={props.n}`) must stay a read of the
@@ -1458,18 +1324,6 @@ func (b *builder) moduleCallable(in *jsvalue.Interp, name string, cache map[stri
 	return v, true
 }
 
-// objectPropKeyJS renders a property key as JS source. A computed key keeps its
-// expression (`[K]`); quote selects quoting of names that are not identifiers.
-func objectPropKeyJS(p *ast.ObjectProp, quote bool) string {
-	if p.Computed && p.KeyExpr != nil {
-		return "[" + generateExprJS(p.KeyExpr, nil) + "]"
-	}
-	if quote {
-		return jsObjectKey(p.Key)
-	}
-	return p.Key
-}
-
 // cloneObjectProp copies an object property, keeping every flag (computed,
 // getter, quoted key, ...) and mapping its value, and for a computed key its
 // key expression, through sub.
@@ -1482,4 +1336,42 @@ func cloneObjectProp(p *ast.ObjectProp, sub func(ast.Expr) ast.Expr) *ast.Object
 		cp.KeyExpr = sub(p.KeyExpr)
 	}
 	return &cp
+}
+
+// staticMemberName returns the property name of `x.name` or `x["name"]`.
+func staticMemberName(m *ast.MemberExpr) (string, bool) {
+	switch p := m.Property.(type) {
+	case *ast.Identifier:
+		if !m.Computed {
+			return p.Name, true
+		}
+	case *ast.Literal:
+		if m.Computed && p.Kind == ast.StringLit {
+			return p.Value, true
+		}
+	}
+	return "", false
+}
+
+// sameValueMap reports whether a and b are the same map.
+func sameValueMap(a, b valueMap) bool {
+	return a != nil && b != nil && reflect.ValueOf(a).Pointer() == reflect.ValueOf(b).Pointer()
+}
+
+// patternOnly returns the nested pattern at the start of s without the
+// default value that follows it (`[a, ...rest] = []` gives `[a, ...rest]`).
+func patternOnly(s string) string {
+	depth := 0
+	for i, r := range s {
+		switch r {
+		case '{', '[', '(':
+			depth++
+		case '}', ']', ')':
+			depth--
+			if depth == 0 {
+				return s[:i+1]
+			}
+		}
+	}
+	return s
 }

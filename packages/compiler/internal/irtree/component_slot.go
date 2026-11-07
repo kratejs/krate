@@ -76,20 +76,38 @@ func (b *builder) buildComponentSlot(el *ast.JSXElement, parentID string) []Slot
 	// analyzer is installed and triggers/panels are rewritten. A panels-only
 	// component has no signals/handlers and would otherwise take the SSREval
 	// shortcut, which bypasses the interception and breaks the panels. The same
-	// applies to components using first-class scope-handle spreads.
-	if len(childSignals) == 0 && !b.cssSignalsOK(childFn) && !hasScopeHelperSpread(childFn) && !hasComponentChildren(el.Children) && !b.isLazyComponent(childName) {
+	// applies to components using first-class scope-handle spreads, and to
+	// components handed a scope handle, which they may pass further down.
+	if len(childSignals) == 0 && !b.cssSignalsOK(childFn) && !hasScopeHelperSpread(childFn) && !b.passesScopeHandle(attrs) && !hasComponentChildren(el.Children) && !b.isLazyComponent(childName) {
 		if !b.componentNeedsClient(childFn, attrs) {
 			// A signal-less component that renders a parent's signal value
 			// (e.g. <Display value={display()}/>) must stay reactive, so its
 			// return JSX is inlined with the props substituted by their
 			// call-site expressions.
 			if b.componentHasSignalProps(attrs) {
-				return b.inlineSignalPropsComponent(el, childFn, childID, attrs)
+				// Inlining substitutes `props.X` reads only. A parameter that
+				// stays destructured would keep the first value, so the
+				// component takes the client path, which warns about it.
+				if len(childFn.Params) == 0 || childFn.Params[0] == nil || childFn.Params[0].Pattern == "" {
+					return b.inlineSignalPropsComponent(el, childFn, childID, attrs)
+				}
+			} else {
+				return b.buildSSREvalComponentSlot(el, childFn, childID, attrs)
 			}
-			return b.buildSSREvalComponentSlot(el, childFn, childID, attrs)
 		}
 	}
 	return b.buildClientComponentSlot(el, childFn, childID, attrs, provider)
+}
+
+// passesScopeHandle reports whether a call-site attribute is a CSS scope
+// handle (or `props.<name>` holding one).
+func (b *builder) passesScopeHandle(attrs map[string]ast.Expr) bool {
+	for _, expr := range attrs {
+		if _, ok := b.buildTimeScope(expr); ok {
+			return true
+		}
+	}
+	return false
 }
 
 // expandComponentSpreads resolves the spread attributes of a component call
@@ -210,6 +228,7 @@ func (b *builder) buildSSREvalComponentSlot(el *ast.JSXElement, childFn *ast.FnD
 	b.instanceCounts[childName]++
 	childID = SlotID(string(childID) + "_c" + itoa(instanceIdx))
 
+	b.checkCSSSignalPropReads(el, childFn, attrs)
 	bindings := b.buildPropBindings(extractParamNames(childFn), attrs, childFn)
 	var useIDs []string
 	nextID := b.useIDSequence(childID)
@@ -321,6 +340,10 @@ func (b *builder) discoverReturnSlots(childFn *ast.FnDecl, childID SlotID, attrs
 	b.pushComponentCtx()
 	b.pendingHandlers, b.pendingAttrs, b.pendingRefs = nil, nil, nil
 	b.localProps = b.propBindingsToLocalProps(childFn, attrs, b.localProps)
+	b.propKeys = make(map[string]bool, len(attrs))
+	for name := range attrs {
+		b.propKeys[name] = true
+	}
 	b.restProps = b.restPropsFor(fnRestParamName(childFn), childFn, attrs)
 	b.liveProps, b.livePropsParam = nil, ""
 	b.localFnBody = childFn.Body
@@ -378,6 +401,7 @@ func (b *builder) buildClientComponentSlot(el *ast.JSXElement, childFn *ast.FnDe
 	childNode.CallSiteSlots = b.buildComponentCallSiteSlots(el, childFn, childID, provider, childNode.childrenContext)
 	b.completeSSREvalBindings(childNode, childFn, attrs)
 	b.registerChildProps(childNode, childFn)
+	b.checkScopePropReads(el, childFn, childNode, attrs)
 
 	// buildTextSlot resolves signals only, so TextSlot initials that read
 	// props.X are updated from the resolved values here.
@@ -437,8 +461,13 @@ func (b *builder) installCallSiteInputs(el *ast.JSXElement, childFn *ast.FnDecl,
 			}
 			b.localProps[name] = b.paramDefaultValue(childFn, name)
 		}
+		b.bindNestedParamPattern(childFn, attrs, funcProps)
 	}
 	b.localFuncProps = funcProps
+	b.propKeys = make(map[string]bool, len(attrs))
+	for name := range attrs {
+		b.propKeys[name] = true
+	}
 
 	switch {
 	case fnRestParamName(childFn) != "":
@@ -598,7 +627,7 @@ func propsParamBindingJS(fn *ast.FnDecl) (string, []string) {
 // once, so the child never sees later values. Only `props.<name>` reads of a
 // plain props parameter go through the live getter.
 func (b *builder) warnSnapshotProps(el *ast.JSXElement, childFn *ast.FnDecl, childNode *ComponentNode, live map[string]bool) {
-	if len(live) == 0 || b.locateOnly > 0 || childNode == nil || childNode.Tier != TierClient {
+	if len(live) == 0 || b.locateOnly > 0 || childNode == nil {
 		return
 	}
 	if len(childFn.Params) == 0 || childFn.Params[0] == nil || childFn.Params[0].Pattern == "" {
@@ -653,7 +682,7 @@ func hydrationReadsAny(node *ComponentNode, names []string) bool {
 	for _, n := range names {
 		want[n] = true
 	}
-	reads := func(code string) bool {
+	return hydrationCodeReads(node, func(code string) bool {
 		if code == "" {
 			return false
 		}
@@ -664,7 +693,12 @@ func hydrationReadsAny(node *ComponentNode, names []string) bool {
 			}
 		})
 		return found
-	}
+	})
+}
+
+// hydrationCodeReads reports whether reads holds for any JS fragment the
+// component emits into its own hydration scope.
+func hydrationCodeReads(node *ComponentNode, reads func(code string) bool) bool {
 	var codes []string
 	for _, h := range node.Handlers {
 		codes = append(codes, h.Body)
@@ -734,4 +768,50 @@ func (b *builder) enterCSSChildren(fn *ast.FnDecl) func() {
 	}
 	b.cssActive[fn]++
 	return func() { b.cssActive[fn]-- }
+}
+
+// bindNestedParamPattern binds the names of a destructured parameter whose
+// pattern renames or nests (`{ item: { id, tags: [first] }, idx }`) from the
+// call-site values. A name inside such a pattern is not a prop key, so it is
+// bound by destructuring the props object, not looked up as an attribute.
+func (b *builder) bindNestedParamPattern(fn *ast.FnDecl, attrs map[string]ast.Expr, funcProps map[string]bool) {
+	props := jsvalue.NewObject()
+	for name := range attrs {
+		if funcProps[name] {
+			props.Set(name, jsvalue.Dynamic("function prop "+name))
+		} else if v, ok := b.localProps[name]; ok {
+			props.Set(name, v)
+		}
+	}
+	for name, v := range b.nestedPatternValues(fn, props) {
+		b.localProps[name] = v
+	}
+}
+
+// nestedPatternValues destructures props with the first parameter's pattern
+// and returns the value of every name it binds. It returns nil for a flat
+// pattern (its names are prop keys) and for one the build cannot evaluate.
+func (b *builder) nestedPatternValues(fn *ast.FnDecl, props jsvalue.Value) map[string]jsvalue.Value {
+	if fn == nil || len(fn.Params) == 0 || fn.Params[0] == nil {
+		return nil
+	}
+	pattern := strings.TrimSpace(fn.Params[0].Pattern)
+	if len(pattern) < 2 || pattern[0] != '{' || !strings.ContainsAny(pattern[1:len(pattern)-1], ":[{") {
+		return nil
+	}
+	scope := jsvalue.NewScope(nil)
+	if r := b.constInterp(b.localProps).BindPattern(scope, fn.Params[0].Name, pattern, props); r.IsUnsupported() {
+		return nil
+	}
+	rest := fnRestParamName(fn)
+	out := map[string]jsvalue.Value{}
+	for _, name := range destructuredParamNames(pattern) {
+		if name == rest {
+			continue
+		}
+		if v, ok := scope.Lookup(name); ok {
+			out[name] = v
+		}
+	}
+	return out
 }
