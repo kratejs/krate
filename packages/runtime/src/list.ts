@@ -36,6 +36,7 @@ import {
   type AdoptCursor,
   type KrateAdoptable,
 } from './dom.js';
+import { krateMuteEvents } from './events.js';
 import { krateWithIdScope } from './use-id.js';
 
 type KeyFn = ((item: unknown, index: number) => unknown) | null;
@@ -315,9 +316,13 @@ function update(state: ListState, items: unknown[]): void {
   }
 
   // Unmount removed rows first, so their cleanups run before new rows mount.
-  for (let i = 0; i < oldRows.length; i++) {
-    if (!kept[i]) removeRow(oldRows[i]);
-  }
+  // A browser blurs a focused node it removes; React's commit hides that from
+  // handlers, and so does this.
+  krateMuteEvents(() => {
+    for (let i = 0; i < oldRows.length; i++) {
+      if (!kept[i]) removeRow(oldRows[i]);
+    }
+  });
 
   // Update or adopt the rows that stay.
   for (let i = 0; i < n; i++) {
@@ -361,19 +366,22 @@ function update(state: ListState, items: unknown[]): void {
   // Place rows from the end, keeping the longest run of rows already in order.
   const stay = new Uint8Array(n);
   for (const i of longestIncreasingSubsequence(sources)) stay[i] = 1;
-  let anchor: Node = end;
-  for (let i = n - 1; i >= 0; i--) {
-    const row = next[i] as Row;
-    const pending = runs[i];
-    if (pending) {
-      parent.insertBefore(pending, anchor);
-    } else if (sources[i] >= 0 && !stay[i]) {
-      moveRow(row, anchor);
+  // The blur and focus a move causes are not user events (see above).
+  krateMuteEvents(() => {
+    let anchor: Node = end;
+    for (let i = n - 1; i >= 0; i--) {
+      const row = next[i] as Row;
+      const pending = runs[i];
+      if (pending) {
+        parent.insertBefore(pending, anchor);
+      } else if (sources[i] >= 0 && !stay[i]) {
+        moveRow(row, anchor);
+      }
+      anchor = row.start;
     }
-    anchor = row.start;
-  }
-  state.rows = next as Row[];
-  if (restoreFocus) restoreFocus();
+    state.rows = next as Row[];
+    if (restoreFocus) restoreFocus();
+  });
 }
 
 // Collect the server-rendered rows between the list markers. Anything else

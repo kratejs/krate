@@ -388,6 +388,58 @@ describe('hydration adoption', () => {
   });
 });
 
+describe('focus events during list updates', () => {
+  // Chromium blurs a focused node it moves or removes; emulate that, since
+  // happy-dom does not.
+  function blurOnMove(): () => void {
+    const orig = Node.prototype.insertBefore;
+    Node.prototype.insertBefore = function (this: Node, node: Node, ref: Node | null) {
+      const active = document.activeElement;
+      const moving = active && active !== document.body && node.nodeType === 1 && node.contains(active) ? active : null;
+      const out = orig.call(this, node, ref) as Node;
+      if (moving) {
+        (moving as HTMLElement).blur();
+        moving.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+      }
+      return out;
+    } as typeof Node.prototype.insertBefore;
+    return () => {
+      Node.prototype.insertBefore = orig;
+    };
+  }
+
+  it('does not fire onBlur/onFocus when a reorder moves the focused row', async () => {
+    const events: string[] = [];
+    const [items, setItems] = createSignal([1, 2, 3]);
+    const root = mountList(
+      krateList(
+        () => items(),
+        (n: any) => n,
+        (n: any) =>
+          h('div', { class: 'row' }, h('input', { onFocus: () => events.push('focus ' + n()), onBlur: () => events.push('blur ' + n()) })),
+        1,
+      ).mount(),
+    );
+    const input = root.querySelectorAll('input')[1] as HTMLInputElement;
+    input.focus();
+    events.length = 0;
+    const restore = blurOnMove();
+    try {
+      setItems([3, 2, 1]);
+      await tick();
+    } finally {
+      restore();
+    }
+    expect(Array.from(root.querySelectorAll('input'))[1]).toBe(input);
+    expect(document.activeElement).toBe(input);
+    expect(events).toEqual([]);
+    // A real blur afterwards still reaches the handler.
+    input.blur();
+    await tick();
+    expect(events).toEqual(['blur 2']);
+  });
+});
+
 describe('nested components in adopted rows', () => {
   it('orders effects children-first on mount and parent-first on removal, as for fresh rows', async () => {
     const settle = async () => {
