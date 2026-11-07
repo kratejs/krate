@@ -11,6 +11,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	irtree "github.com/kratejs/krate/packages/compiler/internal/irtree"
 	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
+	"github.com/kratejs/krate/packages/compiler/internal/resolver"
 	"github.com/kratejs/krate/packages/compiler/internal/sigutil"
 )
 
@@ -814,6 +815,13 @@ func BuildImportAliases(modules []ModuleSource) map[string]string {
 		if m.Program == nil || m.Path == "" {
 			continue
 		}
+		// Bindings inside a compiled package are private to its module, and
+		// the aliases are keyed by bare name for the whole build: a package
+		// that does `import * as Dialog from "./dialog"` must not make
+		// `Dialog.Root` resolve to the project's own `function Dialog`.
+		if resolver.IsCompiledDependency(m.Path) {
+			continue
+		}
 		for _, stmt := range m.Program.Body {
 			// Namespace re-export (`export * as Card from './card'`): address
 			// every function of the target module as `Card.<Name>`.
@@ -831,6 +839,13 @@ func BuildImportAliases(modules []ModuleSource) map[string]string {
 			target := res.Resolve(m.Path, strings.Trim(imp.Source, "\"'"))
 			tprog := byPath[target]
 			if tprog == nil {
+				continue
+			}
+			// An import from a compiled package is that package's component,
+			// never the same-named function of the project (`Dialog as
+			// DialogPrimitive` from "radix-ui" next to `function Dialog`).
+			// Such components render as islands, not through this table.
+			if resolver.IsCompiledDependency(target) {
 				continue
 			}
 			if imp.Default != "" {

@@ -909,6 +909,10 @@ func (e *SSREval) foldTagExpr(expr ast.Expr) string {
 			return e.foldTagExpr(t.Consequent)
 		}
 		return e.foldTagExpr(t.Alternate)
+	case *ast.MemberExpr:
+		if tag := irtree.SlotMemberTag(t); tag != "" {
+			return tag
+		}
 	case *ast.TypeAssertion:
 		return e.foldTagExpr(t.Expr)
 	case *ast.ParenExpr:
@@ -1403,7 +1407,7 @@ func (e *SSREval) evalJSX(el *ast.JSXElement) string {
 
 	// <Slot> (the `asChild` primitive): render its single child element with
 	// the Slot's own attributes merged onto it, instead of wrapping.
-	if name == "Slot" {
+	if name == "Slot" || name == "Slot.Root" || name == "Slot.Slot" {
 		if html, ok := e.evalSlot(el); ok {
 			return html
 		}

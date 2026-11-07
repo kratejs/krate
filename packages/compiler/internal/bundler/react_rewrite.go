@@ -346,6 +346,9 @@ func RewriteReact(prog *ast.Program) {
 // codes_effects.go). file and src position the diagnostics.
 func RewriteReactDiag(prog *ast.Program, file, src string) []diag.Diagnostic {
 	renameReservedBindings(prog)
+	if !inNodeModules(file) {
+		rewriteRadixSlotImport(prog)
+	}
 	renameMemberTagImports(prog)
 	if !inNodeModules(file) {
 		normalizePropsParam(prog)

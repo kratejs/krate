@@ -422,3 +422,41 @@ func TestBuildImportAliasesUseTheModulesOwnResolver(t *testing.T) {
 		t.Errorf("aliases leaked between builds: a=%v b=%v", a, b)
 	}
 }
+
+// An import aliased from a compiled package is never the local component of
+// the same declared name: `import { Dialog as DialogPrimitive } from "radix-ui"`
+// next to `function Dialog` must leave Dialog alone, whether the package
+// re-exports a namespace (`export { Dialog }` of `import * as Dialog`) or
+// exports a component called Dialog.
+func TestBuildImportAliasesNeverPointAtALocalOfTheSameName(t *testing.T) {
+	dir := t.TempDir()
+	write := func(rel, src string) ModuleSource {
+		p := filepath.Join(dir, filepath.FromSlash(rel))
+		_ = os.MkdirAll(filepath.Dir(p), 0755)
+		_ = os.WriteFile(p, []byte(src), 0644)
+		return ModuleSource{Program: parseProg(t, src), Path: p, RawSource: src}
+	}
+	pkg := func(name string) {
+		_ = os.MkdirAll(filepath.Join(dir, "node_modules", filepath.FromSlash(name)), 0755)
+		_ = os.WriteFile(filepath.Join(dir, "node_modules", filepath.FromSlash(name), "package.json"), []byte(`{"name":"`+name+`","main":"index.js"}`), 0644)
+	}
+	pkg("radix-ui")
+	pkg("@radix-ui/react-dialog")
+	umbrella := write("node_modules/radix-ui/index.js", `import * as Dialog from "@radix-ui/react-dialog"; export { Dialog };`)
+	primitive := write("node_modules/@radix-ui/react-dialog/index.js", `function Dialog(props) { return null; } function DialogTrigger(props) { return null; } export { Dialog, Dialog as Root, DialogTrigger as Trigger };`)
+	local := write("src/ui/dialog.tsx", `import { Dialog as DialogPrimitive } from "radix-ui";
+function Dialog(props) { return <DialogPrimitive.Root {...props} />; }
+export { Dialog };`)
+	page := write("src/pages/index.tsx", `import { Dialog } from "../ui/dialog";
+export default function P() { return <Dialog />; }`)
+
+	aliases := BuildImportAliases([]ModuleSource{umbrella, primitive, local, page})
+	for from, to := range aliases {
+		if to == "Dialog" && from != "Dialog" {
+			t.Errorf("alias %q -> %q points at the local Dialog wrapper", from, to)
+		}
+	}
+	if _, ok := aliases["DialogPrimitive"]; ok {
+		t.Errorf("DialogPrimitive is an external namespace, not a component: %v", aliases)
+	}
+}
