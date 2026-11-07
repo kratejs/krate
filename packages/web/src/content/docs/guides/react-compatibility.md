@@ -966,9 +966,78 @@ page without any loads none. Two or more Radix-based components can share a page
   client-only) and fails in the browser.
 - If the build prints `KR8008` for an island, the message names the cause; it
   says Preact is missing only when it is.
-- Known issue: with `radix-ui` 1.8 on Preact 11.2, a `Tooltip` closes again right
-  after it opens. Dialog, DropdownMenu, Tabs, Accordion, Select, Checkbox and
-  Switch work.
+
+### Known limits of Radix on Preact
+
+Two differences between Preact and React change how a few Radix components
+behave. They are in Preact, not in Krate: the same failures appear with a
+plain Preact build and no Krate at all. They were checked in Chromium against
+real React 19 running the same shadcn source, with `radix-ui` 1.6.7 and 1.8.1
+and Preact 10.29 and 11.2 (11.2 is the newest release). Switching Radix or
+Preact version does not help.
+
+**Tooltip closes about 10 ms after it opens.** This affects the `Tooltip` that
+shadcn generates (no `open` prop), on every Radix and Preact version above,
+with hover and with keyboard focus. Radix announces an opening tooltip with a
+`tooltip.open` event from a passive effect, and every other tooltip closes when
+it hears it. React runs that effect before the tooltip content mounts. Preact
+runs the content's own effect first, so the tooltip hears its own event and
+closes. Make the tooltip controlled, which sends the event before the content
+exists. Replace `Tooltip` in `components/ui/tooltip.tsx`:
+
+```tsx
+function Tooltip({
+  open: openProp,
+  defaultOpen = false,
+  onOpenChange,
+  ...props
+}: React.ComponentProps<typeof TooltipPrimitive.Root>) {
+  const [openState, setOpenState] = React.useState(defaultOpen)
+  return (
+    <TooltipPrimitive.Root
+      data-slot="tooltip"
+      open={openProp ?? openState}
+      onOpenChange={(next) => {
+        setOpenState(next)
+        onOpenChange?.(next)
+      }}
+      {...props}
+    />
+  )
+}
+```
+
+With this wrapper, hover, focus, Escape and a tooltip inside a `Dialog` all stay
+open and close correctly. Re-apply it after `npx shadcn add tooltip --overwrite`.
+
+**A layer opened inside another layer's content dismisses the outer layer.**
+Radix decides whether focus is still "inside" a popover by letting React
+bubble the focus event up through portals. Preact does not, so opening a
+`Dialog` from inside `PopoverContent` closes the popover and the dialog never
+appears. Keep the `Dialog` outside the popover and open it with state:
+
+```tsx
+const [popover, setPopover] = React.useState(false)
+const [dialog, setDialog] = React.useState(false)
+
+<Popover open={popover} onOpenChange={setPopover}>
+  <PopoverTrigger asChild><Button>Open</Button></PopoverTrigger>
+  <PopoverContent>
+    <Button onClick={() => { setPopover(false); setDialog(true) }}>Edit</Button>
+  </PopoverContent>
+</Popover>
+<Dialog open={dialog} onOpenChange={setDialog}>...</Dialog>
+```
+
+Only Dialog inside Popover was tested. A menu, popover or similar layer opened
+from inside another layer's content relies on the same mechanism, so use the
+same state-driven pattern. A `Select` inside a `Dialog` and a `Tooltip` inside
+a `Dialog` (with the controlled wrapper) work.
+
+Tested and working: Dialog, Sheet, DropdownMenu, ContextMenu, Menubar,
+NavigationMenu, Popover, HoverCard, Select, Tabs, Accordion, Collapsible,
+Checkbox and Switch. In a project on Preact 10, shadcn's own components fail
+because they pass `ref` as a prop, which is why Preact 11 is required.
 
 ## Compiled React packages (islands)
 

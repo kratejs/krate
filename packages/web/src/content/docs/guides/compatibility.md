@@ -271,7 +271,7 @@ Evidence: `TestSegmentExportsRenderMode`, `TestDataCacheUsageInference`, `TestRe
 
 **Source:** n/a - **Islands:** Supported - **SSR:** Supported
 
-Radix and other compiled packages run as Preact islands with live props, callbacks, portals, controlled primitives, per-island entries bundled with shared modules, server-rendered initial markup, hydration, and an island error boundary.
+Radix and other compiled packages run as Preact islands with live props, callbacks, portals, controlled primitives, per-island entries bundled with shared modules, server-rendered initial markup, hydration, and an island error boundary. Known Preact limits: an uncontrolled Radix Tooltip closes right after it opens, and a layer opened inside another layer's portal content dismisses the outer layer; both have documented workarounds.
 
 Evidence: `TestIslandSignalPropBridge`, `TestIslandLocalComponent`, `TestIslandSSRWithHooks`, `TestIslandSSREscapesTextProps`, `TestIslandSSRUnknownPropFallsBackClientOnly`, `TestIslandSSRModuleFailureFallsBackClientOnly`, `TestIslandSharedSignalAcrossIslands`, `TestIslandSSRArrayObjectProps`, `TestIslandLocalNamedImport`, `TestIslandPerIslandChunks`, `TestIslandChunksMinified`, `browser:/react-demo/`
 

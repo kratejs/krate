@@ -439,7 +439,7 @@
       "islands": "supported",
       "ssr": "supported",
       "target": "Documented compat",
-      "summary": "Radix and other compiled packages run as Preact islands with live props, callbacks, portals, controlled primitives, per-island entries bundled with shared modules, server-rendered initial markup, hydration, and an island error boundary.",
+      "summary": "Radix and other compiled packages run as Preact islands with live props, callbacks, portals, controlled primitives, per-island entries bundled with shared modules, server-rendered initial markup, hydration, and an island error boundary. Known Preact limits: an uncontrolled Radix Tooltip closes right after it opens, and a layer opened inside another layer's portal content dismisses the outer layer; both have documented workarounds.",
       "tests": [
         "TestIslandSignalPropBridge",
         "TestIslandLocalComponent",
