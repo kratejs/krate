@@ -25,6 +25,7 @@ The `krate` CLI is the single entry point for building and serving Krate sites.
 | `krate deploy [dir]` | Build, then write host adapter files (`--target`, `--static-only`) |
 | `krate clean [dir]` | Remove build output and the compiler cache |
 | `krate doctor [dir]` | Print a diagnostic summary of the project and toolchain |
+| `krate info [dir]` | Print a paste-ready environment report for bug reports (`--json`) |
 | `krate explain <code>` | Print the cause, the fix and a docs link for a diagnostic code |
 | `krate config [dir]` | Print the fully resolved configuration (`--schema` for the JSON Schema) |
 | `krate plugin add <pkg>` | Install a plugin and register it in the config |
@@ -349,6 +350,22 @@ cache directory. It exits with status 1 when the config does not load or the
 cache directory cannot be written, so it can gate a CI step; missing optional
 tools only print. It also warns when the installed `@krate/core` and the running
 binary are different versions.
+
+## `krate info`
+
+Prints a Markdown report to paste into a bug report: the krate version, OS and
+architecture, Go and Node versions, the package manager and its version, the
+installed `@krate/*` package versions, and a short config summary (output mode,
+runtime, directories, base path, plugin names).
+
+```sh
+krate info
+krate info --json
+```
+
+The report holds no environment variables and no config values beyond those
+structural settings, and the home directory is shown as `~`. A config that fails
+to load is reported instead of failing the command.
 
 ## `krate explain`
 

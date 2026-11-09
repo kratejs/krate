@@ -155,6 +155,8 @@ func main() {
 		runDoctor(flags, args)
 	case "explain":
 		runExplain(flags, args)
+	case "info":
+		runInfo(flags, args)
 	case "config":
 		runConfig(flags, args)
 	case "plugin":
@@ -231,6 +233,9 @@ func printCommandUsage(w io.Writer, cmd string) {
 	case "clean":
 		fmt.Fprintf(w, "Usage: krate clean [dir]\n\n")
 		fmt.Fprintf(w, "Remove build output (dist) and the compiler cache (.krate/cache).\n")
+	case "info":
+		fmt.Fprintf(w, "Usage: krate info [dir] [--config <path>] [--json]\n\n")
+		fmt.Fprintf(w, "Print a paste-ready environment report (OS, Go, Node, package manager, @krate versions, config summary) for bug reports.\n")
 	case "explain":
 		fmt.Fprintf(w, "Usage: krate explain <code> [--json]\n\n")
 		fmt.Fprintf(w, "Print the cause, the fix and a docs link for a diagnostic code, e.g. krate explain KR7110.\n")
@@ -280,6 +285,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  deploy    Build and write host adapter files (netlify/vercel/...)\n")
 	fmt.Fprintf(w, "  clean     Remove build output (dist) and the compiler cache (.krate/cache)\n")
 	fmt.Fprintf(w, "  doctor    Print a diagnostic summary of the project and toolchain\n")
+	fmt.Fprintf(w, "  info      Print a paste-ready environment report for bug reports\n")
 	fmt.Fprintf(w, "  explain   Explain a diagnostic code (krate explain KR7110)\n")
 	fmt.Fprintf(w, "  config    Print the fully resolved configuration\n")
 	fmt.Fprintf(w, "  plugin    Manage plugins (add <pkg>)\n")
