@@ -2322,7 +2322,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 			URL:       fmt.Sprintf("http://%s:%d", displayHost, addr.Port),
 			StartedAt: time.Now(),
 		})()
-		printDevNetwork(bindHost, addr.Port)
+		printDevNetwork(bindHost, addr.Port, cfg.DevServer.QR)
 		defer registerDevShortcuts(hub, fmt.Sprintf("http://localhost:%d", addr.Port))()
 		defer setDevCrashHub(hub, root)()
 	}

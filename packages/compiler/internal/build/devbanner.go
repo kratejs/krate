@@ -62,9 +62,10 @@ func devNetworkURLs(bindHost string, port int, lan []string) []string {
 	return []string{"http://" + net.JoinHostPort(host, p)}
 }
 
-// printDevNetwork prints the LAN URL, with a QR code on a terminal so a phone
-// can open it, or a hint when the server is not reachable from the network.
-func printDevNetwork(bindHost string, port int) {
+// printDevNetwork prints the LAN URL, with a QR code (showQR, `krate dev --qr`)
+// on a terminal so a phone can open it, or a hint when the server is not
+// reachable from the network.
+func printDevNetwork(bindHost string, port int, showQR bool) {
 	urls := devNetworkURLs(bindHost, port, lanAddresses())
 	if len(urls) == 0 {
 		if isWildcardHost(bindHost) {
@@ -75,6 +76,10 @@ func printDevNetwork(bindHost string, port int) {
 	}
 	for _, u := range urls {
 		printf("  %snetwork%s    -> %s%s%s\n", cGreen, cReset, cCyan, u, cReset)
+	}
+	if !showQR {
+		printf("  %sadd --qr to show a QR code for your phone%s\n", cGray, cReset)
+		return
 	}
 	if !startedOnTerminal {
 		return

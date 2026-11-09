@@ -75,6 +75,7 @@ type cliFlags struct {
 	Fix           bool
 	Open          bool
 	NoSummary     bool
+	QR            bool
 	Host          string
 	Token         string
 	Roots         []string
@@ -201,10 +202,11 @@ func printCommandUsage(w io.Writer, cmd string) {
 		fmt.Fprintf(w, "Compile the project to static output (and SSR/server bundles when needed).\n")
 		fmt.Fprintf(w, "Prints a per-route size table (gzip) with the change since the last build; --no-summary hides it.\n")
 	case "dev":
-		fmt.Fprintf(w, "Usage: krate dev [dir] [--config <path>] [--port <n>] [--host <addr>] [--open] [--verbose]\n\n")
+		fmt.Fprintf(w, "Usage: krate dev [dir] [--config <path>] [--port <n>] [--host <addr>] [--open] [--qr] [--verbose]\n\n")
 		fmt.Fprintf(w, "Start the dev server with file watching and live reload.\n")
 		fmt.Fprintf(w, "  --open        Open the browser once the server is up\n")
-		fmt.Fprintf(w, "  --host 0.0.0.0  Listen on the network; the LAN URL and a QR code are printed for phone testing\n")
+		fmt.Fprintf(w, "  --host 0.0.0.0  Listen on the network; the LAN URL is printed for phone testing\n")
+		fmt.Fprintf(w, "  --qr          Print a QR code for the network URL (with --host)\n")
 		fmt.Fprintf(w, "A busy port moves to the next free one. In a terminal: r + enter restarts, o opens the browser, c clears, h helps.\n")
 	case "serve", "preview", "start":
 		noBuildFlag := " [--no-build]"
@@ -450,6 +452,8 @@ func parseFlagsChecked(args []string) (cliFlags, []string, error) {
 			flags.Open = true
 		case args[i] == "--no-summary":
 			flags.NoSummary = true
+		case args[i] == "--qr":
+			flags.QR = true
 		case args[i] == "--help" || args[i] == "-h" || args[i] == "--version":
 			// Handled as commands in main(); keep them in the arg list rather
 			// than rejecting them as unknown flags.
@@ -581,6 +585,7 @@ func loadConfig(flags cliFlags, args []string) (string, *config.Config, error) {
 	if flags.Open {
 		cfg.DevServer.Open = true
 	}
+	cfg.DevServer.QR = flags.QR
 	if flags.Sourcemap {
 		cfg.Sourcemap = true
 	}

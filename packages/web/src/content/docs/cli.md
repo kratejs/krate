@@ -136,13 +136,14 @@ Starts a build + HTTP dev server with hot reload.
 ```sh
 krate dev
 krate dev --open                # open the browser once the server is up
-krate dev --host 0.0.0.0        # listen on the network and print a LAN URL with a QR code
+krate dev --host 0.0.0.0        # listen on the network and print a LAN URL
+krate dev --host 0.0.0.0 --qr   # ...and a QR code a phone can scan
 krate dev --port 4000           # a busy port moves to the next free one
 ```
 
-- Prints the network URL when the server listens beyond loopback, and in a
-  terminal a QR code for it so a phone on the same network can scan it. With the
-  default loopback bind it prints a hint instead. `--open` (or
+- Prints the network URL when the server listens beyond loopback; with `--qr`, in
+  a terminal, also a QR code for it so a phone on the same network can scan it.
+  With the default loopback bind it prints a hint instead. `--open` (or
   `devServer.open`) opens the browser once; a restart does not open another tab.
 - In a terminal, type a letter and press Enter: `r` restarts the server (reloading
   the config), `o` opens the browser, `c` clears the screen and `h` prints the list.

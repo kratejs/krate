@@ -32,9 +32,9 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 - `krate doctor --fix` aligns an older `@krate/core` with the binary, adds `.krate` and the output
   directory to `.gitignore` and removes a `.krate` cache left by another version.
 - `krate explain <code>` prints the cause, fix and docs link of a diagnostic code (`--json`).
-- `krate dev --open`, a LAN URL with a QR code when the server listens on the network, and
-  `r`, `o`, `c` and `h` terminal shortcuts (followed by Enter). A restart no longer opens
-  another browser tab.
+- `krate dev --open`, a LAN URL when the server listens on the network, `--qr` to add a QR
+  code for it, and `r`, `o`, `c` and `h` terminal shortcuts (followed by Enter). A restart no
+  longer opens another browser tab.
 - `krate build` prints a per-route gzip size table with the change since the last build
   (`--no-summary` hides it).
 - `krate info` prints a paste-ready environment report for bug reports (`--json`).

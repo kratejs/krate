@@ -22,6 +22,9 @@ const (
 type DevServer struct {
 	Port int  `json:"port"`
 	Open bool `json:"open"`
+	// QR prints a QR code for the network URL (`krate dev --qr`). It is a
+	// command line option only, not a config key.
+	QR bool `json:"-"`
 	// Overlay toggles the dev error overlay (default true). A pointer so an
 	// explicit `false` is distinguishable from "unset".
 	Overlay *bool `json:"overlay,omitempty"`
