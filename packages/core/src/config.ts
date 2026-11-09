@@ -552,6 +552,11 @@ export interface KrateConfig {
   devServer?: DevServerConfig;
   /** Save console output of each run to <dir>/<timestamp>.log. */
   logs?: LogsConfig;
+  /**
+   * Show a one-line "new krate version available" notice, checked at most once
+   * a day (default: true). Always off when CI is set or stderr is not a terminal.
+   */
+  updateNotifier?: boolean;
   server?: ServerConfig;
   cors?: CORSConfig;
   api?: APIConfig;

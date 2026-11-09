@@ -89,6 +89,7 @@ func exit(code int) {
 	for i := len(exitHooks) - 1; i >= 0; i-- {
 		exitHooks[i]()
 	}
+	finishUpdateCheck()
 	os.Exit(code)
 }
 
@@ -117,6 +118,7 @@ func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
 	// Publish the build-time version to internal packages (plugins read it).
 	krateversion.Value = version
+	defer finishUpdateCheck()
 	flags, args := parseFlags(os.Args[1:])
 	plugin.SetVerbose(flags.Verbose)
 	build.SetVerboseLogging(flags.Verbose)
@@ -457,6 +459,9 @@ func resolveConfig(flags cliFlags, args []string) (string, *config.Config) {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%sConfig error:%s %s\n", cRed, cReset, formatConfigError(err))
 		exit(1)
+	}
+	if len(args) > 0 {
+		startUpdateCheck(cfg, args[0], flags.JSON)
 	}
 	return root, cfg
 }

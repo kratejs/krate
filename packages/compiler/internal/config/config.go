@@ -88,6 +88,9 @@ func (l LogsConfig) LogsPath(root string) (string, error) {
 	return abs, nil
 }
 
+// UpdateNotifierEnabled reports whether the update notifier may run (default on).
+func (c *Config) UpdateNotifierEnabled() bool { return c.UpdateCheck == nil || *c.UpdateCheck }
+
 // OverlayEnabled reports whether the dev error overlay is enabled (default on).
 func (d DevServer) OverlayEnabled() bool { return d.Overlay == nil || *d.Overlay }
 
@@ -650,6 +653,7 @@ type Config struct {
 	Sourcemap   bool            `json:"sourcemap"`
 	DevServer   DevServer       `json:"devServer"`
 	Logs        LogsConfig      `json:"logs,omitempty"`
+	UpdateCheck *bool           `json:"updateNotifier,omitempty"` // once-a-day update line (default true)
 	Server      ServerConfig    `json:"server,omitempty"`
 	CORS        CORSConfig      `json:"cors,omitempty"`
 	API         APIConfig       `json:"api,omitempty"`

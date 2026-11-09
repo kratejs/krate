@@ -57,6 +57,7 @@ func runDoctor(flags cliFlags, args []string) {
 		problems++
 		fmt.Printf("  %sx config%s     %v\n", cRed, cReset, err)
 	} else {
+		startUpdateCheck(cfg, "doctor", flags.JSON)
 		for _, w := range config.Warnings {
 			fmt.Printf("  %s! config%s     %s\n", cYellow, cReset, w)
 		}
