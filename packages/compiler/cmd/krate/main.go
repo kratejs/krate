@@ -153,6 +153,8 @@ func main() {
 		runClean(flags, args)
 	case "doctor":
 		runDoctor(flags, args)
+	case "explain":
+		runExplain(flags, args)
 	case "config":
 		runConfig(flags, args)
 	case "plugin":
@@ -229,6 +231,9 @@ func printCommandUsage(w io.Writer, cmd string) {
 	case "clean":
 		fmt.Fprintf(w, "Usage: krate clean [dir]\n\n")
 		fmt.Fprintf(w, "Remove build output (dist) and the compiler cache (.krate/cache).\n")
+	case "explain":
+		fmt.Fprintf(w, "Usage: krate explain <code> [--json]\n\n")
+		fmt.Fprintf(w, "Print the cause, the fix and a docs link for a diagnostic code, e.g. krate explain KR7110.\n")
 	case "doctor":
 		fmt.Fprintf(w, "Usage: krate doctor [dir]\n\n")
 		fmt.Fprintf(w, "Print a diagnostic summary of the project and toolchain.\n")
@@ -275,6 +280,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  deploy    Build and write host adapter files (netlify/vercel/...)\n")
 	fmt.Fprintf(w, "  clean     Remove build output (dist) and the compiler cache (.krate/cache)\n")
 	fmt.Fprintf(w, "  doctor    Print a diagnostic summary of the project and toolchain\n")
+	fmt.Fprintf(w, "  explain   Explain a diagnostic code (krate explain KR7110)\n")
 	fmt.Fprintf(w, "  config    Print the fully resolved configuration\n")
 	fmt.Fprintf(w, "  plugin    Manage plugins (add <pkg>)\n")
 	fmt.Fprintf(w, "  init      Scaffold a new project (alias: create; via the npm wrapper)\n")

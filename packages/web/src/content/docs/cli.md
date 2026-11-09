@@ -25,6 +25,7 @@ The `krate` CLI is the single entry point for building and serving Krate sites.
 | `krate deploy [dir]` | Build, then write host adapter files (`--target`, `--static-only`) |
 | `krate clean [dir]` | Remove build output and the compiler cache |
 | `krate doctor [dir]` | Print a diagnostic summary of the project and toolchain |
+| `krate explain <code>` | Print the cause, the fix and a docs link for a diagnostic code |
 | `krate config [dir]` | Print the fully resolved configuration (`--schema` for the JSON Schema) |
 | `krate plugin add <pkg>` | Install a plugin and register it in the config |
 | `krate mcp [dir]` | Start the MCP (Model Context Protocol) server (stdio, or `--http`) |
@@ -348,6 +349,20 @@ cache directory. It exits with status 1 when the config does not load or the
 cache directory cannot be written, so it can gate a CI step; missing optional
 tools only print. It also warns when the installed `@krate/core` and the running
 binary are different versions.
+
+## `krate explain`
+
+Prints what a diagnostic code means and how to fix it, with a link to its entry in
+the [diagnostics reference](/docs/reference/diagnostics/):
+
+```sh
+krate explain KR7110
+krate explain 7110 --json
+```
+
+The code is case-insensitive and the `KR` prefix is optional. An unknown code
+fails and lists the nearest registered codes. `--json` prints the code, title,
+explanation and docs URL as JSON.
 
 ## `krate clean`
 
