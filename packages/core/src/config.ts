@@ -25,6 +25,15 @@ import type {
   DocsThemeOptions,
 } from "@krate/plugin";
 
+export interface LogsConfig {
+  /** Save each run's console output to a timestamped log file (default: false). */
+  enabled?: boolean;
+  /** Log directory, relative to the project root (default: ".krate/logs"). */
+  dir?: string;
+  /** Log files to keep, oldest removed first (default: 20; negative keeps all). */
+  keep?: number;
+}
+
 export interface DevServerConfig {
   /** Dev server port (default: 3000). */
   port?: number;
@@ -541,6 +550,8 @@ export interface KrateConfig {
     banner?: boolean;
   };
   devServer?: DevServerConfig;
+  /** Save console output of each run to <dir>/<timestamp>.log. */
+  logs?: LogsConfig;
   server?: ServerConfig;
   cors?: CORSConfig;
   api?: APIConfig;

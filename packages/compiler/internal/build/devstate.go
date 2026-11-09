@@ -1,13 +1,11 @@
 package build
 
 import (
-	"bytes"
 	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
 	"regexp"
-	"sync"
 	"time"
 
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
@@ -140,9 +138,8 @@ func TeeDevLog(root string) func() {
 	if err != nil {
 		return func() {}
 	}
-	var mu sync.Mutex
 	written := 0
-	emit := func(line []byte) {
+	stop := teeStdio(func(line []byte) {
 		if written > devLogMax {
 			_ = f.Truncate(0)
 			_, _ = f.Seek(0, io.SeekStart)
@@ -151,68 +148,9 @@ func TeeDevLog(root string) func() {
 		}
 		n, _ := f.WriteString(time.Now().UTC().Format(DevLogTimeFormat) + " " + string(line) + "\n")
 		written += n
-	}
-	// write splits one stream into lines and stamps each with its time, so
-	// readers can ask for "errors since the last rebuild". Each stream keeps its
-	// own unfinished line: stdout and stderr interleave at any point.
-	write := func(partial *[]byte, p []byte) {
-		mu.Lock()
-		defer mu.Unlock()
-		data := append(*partial, p...)
-		*partial = nil
-		for {
-			i := bytes.IndexByte(data, '\n')
-			if i < 0 {
-				break
-			}
-			emit(devLogANSI.ReplaceAll(bytes.TrimRight(data[:i], "\r"), nil))
-			data = data[i+1:]
-		}
-		*partial = append([]byte(nil), data...)
-	}
-
-	origOut, origErr := os.Stdout, os.Stderr
-	var restores []func()
-	var wg sync.WaitGroup
-	tee := func(orig *os.File, set func(*os.File)) {
-		r, w, err := os.Pipe()
-		if err != nil {
-			return
-		}
-		set(w)
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			buf := make([]byte, 8192)
-			var partial []byte
-			for {
-				n, err := r.Read(buf)
-				if n > 0 {
-					_, _ = orig.Write(buf[:n])
-					write(&partial, buf[:n])
-				}
-				if err != nil {
-					if len(partial) > 0 {
-						write(&partial, []byte("\n"))
-					}
-					return
-				}
-			}
-		}()
-		restores = append(restores, func() {
-			set(orig)
-			_ = w.Close()
-		})
-	}
-	tee(origOut, func(f *os.File) { os.Stdout = f })
-	tee(origErr, func(f *os.File) { os.Stderr = f })
-	SetOutput(os.Stdout)
+	})
 	return func() {
-		for _, r := range restores {
-			r()
-		}
-		wg.Wait()
-		SetOutput(origOut)
+		stop()
 		_ = f.Close()
 	}
 }

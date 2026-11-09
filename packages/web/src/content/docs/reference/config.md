@@ -226,6 +226,21 @@ page is unminified (with component comments) so devtools are readable; the share
 `@krate/runtime` chunk is the prebuilt, already minified runtime in both modes.
 Production output minifies the page scripts too.
 
+## Logs
+
+```ts
+logs: {
+  enabled: true,      // save each run's console output (default false)
+  dir: ".krate/logs", // relative to the project, must stay inside it
+  keep: 20,           // log files to keep, oldest removed first (negative keeps all)
+}
+```
+
+With `logs.enabled`, `krate dev`, `build`, `serve`, `start`, `check` and `deploy`
+write everything they print to `<dir>/<timestamp>.log` (colors removed, each line
+stamped in UTC) and print the path when they finish. Add the directory to
+`.gitignore`; the default `.krate/logs` is already inside `.krate`.
+
 ## Tailwind CSS
 
 ```typescript
