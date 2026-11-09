@@ -412,6 +412,9 @@ func (g *middlewareGate) apply(w http.ResponseWriter, r *http.Request, next http
 		if g.dev && res.Stack != "" {
 			fmt.Fprint(os.Stderr, indentStack(res.Stack))
 		}
+		if g.dev {
+			reportServerCrash("Middleware", fmt.Sprintf("%s %s: %s", r.Method, r.URL.Path, msg), res.Stack)
+		}
 		// Fail closed: continuing would turn a broken auth check into an
 		// unauthenticated request.
 		w.Header().Set("Cache-Control", "no-store")
@@ -421,6 +424,9 @@ func (g *middlewareGate) apply(w http.ResponseWriter, r *http.Request, next http
 			http.Error(w, "middleware failed", http.StatusServiceUnavailable)
 		}
 	case jsruntime.MiddlewareResponse:
+		if g.dev {
+			clearServerCrash("Middleware")
+		}
 		writeHeaderPairs(w.Header(), res.Headers)
 		status := res.Status
 		if status < 100 || status > 999 {
@@ -431,6 +437,9 @@ func (g *middlewareGate) apply(w http.ResponseWriter, r *http.Request, next http
 			_, _ = w.Write(res.Body)
 		}
 	case jsruntime.MiddlewareContinue:
+		if g.dev {
+			clearServerCrash("Middleware")
+		}
 		writeHeaderPairs(w.Header(), res.Headers)
 		if res.Rewrite != "" {
 			applyRewrite(r, res.Rewrite)

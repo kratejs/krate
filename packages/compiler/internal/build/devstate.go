@@ -139,7 +139,7 @@ func TeeDevLog(root string) func() {
 		return func() {}
 	}
 	written := 0
-	stop := teeStdio(func(line []byte) {
+	stop := teeStdio(recordRecentLine, func(line []byte) {
 		if written > devLogMax {
 			_ = f.Truncate(0)
 			_, _ = f.Seek(0, io.SeekStart)

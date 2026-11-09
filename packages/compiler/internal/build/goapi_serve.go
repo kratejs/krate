@@ -631,6 +631,7 @@ func (g *goAPISupervisor) spawn() error {
 		g.mu.Unlock()
 		if current && err != nil {
 			fmt.Fprintf(os.Stderr, "  %sGo API sidecar exited unexpectedly:%s %v\n", cRed, cReset, err)
+			reportServerCrash("Go API sidecar", fmt.Sprintf("exited unexpectedly: %v", err), "")
 		}
 	}(cmd)
 	// Wait for the host to accept connections so the first proxied request does
@@ -647,6 +648,7 @@ func (g *goAPISupervisor) spawn() error {
 		}
 		return fmt.Errorf("Go API host did not accept connections on %s within %s (check its output above)", where, g.readyTimeout)
 	}
+	clearServerCrash("Go API sidecar")
 	return nil
 }
 

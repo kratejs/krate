@@ -159,6 +159,13 @@ krate dev --port 4000           # a busy port moves to the next free one
   shows the error in the overlay.
 - Uses SSE hot reload to push updates to open tabs after a short (75 ms)
   debounce; stylesheet-only edits swap the CSS without reloading the page.
+- When the SSR renderer, a Node or Go API sidecar or the middleware fails, the
+  overlay shows what failed with its stack (for middleware) and the last 40
+  console lines, and names the file with the full output: `.krate/dev.log`, or
+  the run log when [`logs`](/docs/reference/config/#logs) is enabled. A sidecar
+  that is still down is shown again after a page reload, and the entry goes away
+  once it restarts. The same entries are listed as `kind: "server"` errors in
+  `/__krate/state`.
 - Shows compilation errors inline via the dev error overlay. If the first build
   fails, the browser shows an error page with the overlay and recovers on the
   next successful build.

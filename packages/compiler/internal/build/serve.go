@@ -1494,6 +1494,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 				}
 				nodeAPICmdMu.Unlock()
 				if err == nil {
+					clearServerCrash("Node API sidecar")
 					err = cmd.Wait()
 				}
 				select {
@@ -1505,6 +1506,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 					delay = 100 * time.Millisecond
 				}
 				fmt.Fprintf(os.Stderr, "  %s! Node API sidecar exited (%v); restarting in %s%s\n", cYellow, err, delay, cReset)
+				reportServerCrash("Node API sidecar", fmt.Sprintf("exited (%v)", err), "")
 				select {
 				case <-nodeAPIStop:
 					return
@@ -1896,6 +1898,13 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 			// opened after a failed initial build still shows the error.
 			if cur, ok := hub.Current(); ok && len(cur.Diagnostics) > 0 {
 				writeBuildError(w, cur)
+				flusher.Flush()
+			}
+			// A sidecar or the middleware that is still down stays on screen
+			// for a tab that connects after it failed.
+			for _, ce := range hub.ServerErrors() {
+				data, _ := json.Marshal(DevEvent{Type: "client-error", ClientError: &ce})
+				fmt.Fprintf(w, "event: client-error\ndata: %s\n\n", data)
 				flusher.Flush()
 			}
 
@@ -2315,6 +2324,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		})()
 		printDevNetwork(bindHost, addr.Port)
 		defer registerDevShortcuts(hub, fmt.Sprintf("http://localhost:%d", addr.Port))()
+		defer setDevCrashHub(hub, root)()
 	}
 
 	// Start ISR background revalidation - one timer per page, each route

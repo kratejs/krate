@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
@@ -14,6 +15,14 @@ import (
 // RunLogTimeFormat names run log files. It has no colons so it is a valid file
 // name on Windows.
 const RunLogTimeFormat = "2006-01-02T15-04-05"
+
+var runLogPath atomic.Value // string: the file of the active run log
+
+// currentRunLogPath is the file the active run log writes to, "" when off.
+func currentRunLogPath() string {
+	p, _ := runLogPath.Load().(string)
+	return p
+}
 
 // StartRunLog saves this run's console output to <logs.dir>/<timestamp>.log
 // when logs.enabled is set, and removes the oldest logs beyond logs.keep. It
@@ -40,6 +49,7 @@ func StartRunLog(root string, cfg *config.Config, command string) func() string 
 		return none
 	}
 	pruneRunLogs(dir, cfg.Logs.KeepCount(), path)
+	runLogPath.Store(path)
 	_, _ = fmt.Fprintf(f, "%s krate %s\n", time.Now().UTC().Format(DevLogTimeFormat), command)
 	stop := teeStdio(func(line []byte) {
 		_, _ = f.WriteString(time.Now().UTC().Format(DevLogTimeFormat) + " " + string(line) + "\n")
@@ -47,6 +57,7 @@ func StartRunLog(root string, cfg *config.Config, command string) func() string 
 	return func() string {
 		stop()
 		_ = f.Close()
+		runLogPath.Store("")
 		return path
 	}
 }
