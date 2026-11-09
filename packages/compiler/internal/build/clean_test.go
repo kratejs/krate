@@ -124,3 +124,60 @@ func TestCleanStillRemovesOrdinaryOutDirs(t *testing.T) {
 		t.Errorf("outDir should be removed: %v", err)
 	}
 }
+
+func TestCleanWithOptionsAndFreedSpace(t *testing.T) {
+	setup := func(t *testing.T) (string, *config.Config) {
+		root := t.TempDir()
+		touchDir(t, filepath.Join(root, "dist"))
+		touchDir(t, filepath.Join(root, ".krate", "cache"))
+		touchDir(t, filepath.Join(root, ".krate", "types"))
+		cfg := config.Default()
+		cfg.OutDir = filepath.Join(root, "dist")
+		return root, cfg
+	}
+	exists := func(p string) bool { _, err := os.Stat(p); return err == nil }
+
+	t.Run("dist only", func(t *testing.T) {
+		root, cfg := setup(t)
+		res, err := CleanWith(root, cfg, CleanOptions{Dist: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if exists(filepath.Join(root, "dist")) || !exists(filepath.Join(root, ".krate", "cache")) {
+			t.Error("--dist must remove dist and keep the cache")
+		}
+		if len(res.Removed) != 1 || res.Freed != 1 {
+			t.Errorf("removed %v, freed %d; want one dir and 1 byte", res.Removed, res.Freed)
+		}
+	})
+	t.Run("cache only", func(t *testing.T) {
+		root, cfg := setup(t)
+		if _, err := CleanWith(root, cfg, CleanOptions{Cache: true}); err != nil {
+			t.Fatal(err)
+		}
+		if !exists(filepath.Join(root, "dist")) || exists(filepath.Join(root, ".krate", "cache")) {
+			t.Error("--cache must remove the cache and keep dist")
+		}
+	})
+	t.Run("all", func(t *testing.T) {
+		root, cfg := setup(t)
+		res, err := CleanWith(root, cfg, CleanOptions{All: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if exists(filepath.Join(root, "dist")) || exists(filepath.Join(root, ".krate")) {
+			t.Error("--all must remove dist and all of .krate")
+		}
+		if res.Freed != 3 {
+			t.Errorf("freed %d bytes, want 3", res.Freed)
+		}
+	})
+}
+
+func TestFormatBytes(t *testing.T) {
+	for in, want := range map[int64]string{0: "0 B", 999: "999 B", 1500: "1.5 kB", 2_500_000: "2.50 MB", 3_100_000_000: "3.10 GB", -1500: "-1.5 kB"} {
+		if got := FormatBytes(in); got != want {
+			t.Errorf("FormatBytes(%d) = %q, want %q", in, got, want)
+		}
+	}
+}

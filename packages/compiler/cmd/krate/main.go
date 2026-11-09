@@ -67,6 +67,9 @@ type cliFlags struct {
 	Port          int
 	PortSet       bool
 	NoBuild       bool
+	CleanDist     bool
+	CleanCache    bool
+	CleanAll      bool
 	Host          string
 	Token         string
 	Roots         []string
@@ -231,8 +234,11 @@ func printCommandUsage(w io.Writer, cmd string) {
 		fmt.Fprintf(w, "Usage: krate inspect [dir] [--json]\n\n")
 		fmt.Fprintf(w, "Build the site and print its model (routes, sources, modes, deps, outputs).\n")
 	case "clean":
-		fmt.Fprintf(w, "Usage: krate clean [dir]\n\n")
-		fmt.Fprintf(w, "Remove build output (dist) and the compiler cache (.krate/cache).\n")
+		fmt.Fprintf(w, "Usage: krate clean [dir] [--dist | --cache | --all]\n\n")
+		fmt.Fprintf(w, "Remove build output (dist) and the compiler cache (.krate/cache), and print the space freed.\n")
+		fmt.Fprintf(w, "  --dist    Remove only the build output directory\n")
+		fmt.Fprintf(w, "  --cache   Remove only the compiler cache (.krate/cache)\n")
+		fmt.Fprintf(w, "  --all     Remove the build output and the whole .krate directory (types, logs, cache)\n")
 	case "info":
 		fmt.Fprintf(w, "Usage: krate info [dir] [--config <path>] [--json]\n\n")
 		fmt.Fprintf(w, "Print a paste-ready environment report (OS, Go, Node, package manager, @krate versions, config summary) for bug reports.\n")
@@ -408,6 +414,12 @@ func parseFlagsChecked(args []string) (cliFlags, []string, error) {
 			flags.UpdatePackage = true
 		case args[i] == "--no-build":
 			flags.NoBuild = true
+		case args[i] == "--dist":
+			flags.CleanDist = true
+		case args[i] == "--cache":
+			flags.CleanCache = true
+		case args[i] == "--all":
+			flags.CleanAll = true
 		case args[i] == "--help" || args[i] == "-h" || args[i] == "--version":
 			// Handled as commands in main(); keep them in the arg list rather
 			// than rejecting them as unknown flags.
@@ -1112,15 +1124,20 @@ func runCheck(flags cliFlags, args []string) {
 	fmt.Printf("\n%s%s  ! Passed with warnings (failOn=%s).%s\n", cBold, cYellow, checkCfg.FailOn, cReset)
 }
 
-// runClean removes generated output (the build output directory and the
-// compiler cache) so the next build starts from scratch. Only those paths are
-// touched - generated types and sidecar manifests under .krate are left in
-// place, since they are regenerated on demand.
+// runClean removes generated output so the next build starts from scratch. By
+// default that is the build output directory and the compiler cache; --dist,
+// --cache and --all pick narrower or wider sets. Without --all, generated
+// types and sidecar manifests under .krate are left in place, since they are
+// regenerated on demand.
 func runClean(flags cliFlags, args []string) {
 	root, cfg := resolveConfig(flags, args)
 	fmt.Printf("%s%s  Cleaning %s%s\n", cBold, cCyan, root, cReset)
 
-	result, err := build.Clean(root, cfg)
+	result, err := build.CleanWith(root, cfg, build.CleanOptions{
+		Dist:  flags.CleanDist,
+		Cache: flags.CleanCache,
+		All:   flags.CleanAll,
+	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%sClean error:%s %v\n", cRed, cReset, err)
 		exit(1)
@@ -1135,8 +1152,9 @@ func runClean(flags cliFlags, args []string) {
 		if relErr != nil {
 			rel = dir
 		}
-		fmt.Printf("  %s+%s Removed %s\n", cGreen, cReset, filepath.ToSlash(rel))
+		fmt.Printf("  %s+%s Removed %s %s(%s)%s\n", cGreen, cReset, filepath.ToSlash(rel), cGray, build.FormatBytes(result.Sizes[dir]), cReset)
 	}
+	fmt.Printf("%s%s  Freed %s%s\n", cBold, cGreen, build.FormatBytes(result.Freed), cReset)
 }
 
 // runMCP starts the agent-native MCP server. It speaks JSON-RPC 2.0 over

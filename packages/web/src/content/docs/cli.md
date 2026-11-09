@@ -383,11 +383,19 @@ explanation and docs URL as JSON.
 
 ## `krate clean`
 
-Removes the output directory (`dist`) and the compiler cache (`.krate/cache`):
+Removes the output directory (`dist`) and the compiler cache (`.krate/cache`),
+and prints how much space each removal freed:
 
 ```sh
-krate clean
+krate clean           # dist and .krate/cache
+krate clean --dist    # only the build output
+krate clean --cache   # only the compiler cache
+krate clean --all     # dist and the whole .krate directory
 ```
+
+`--all` also removes the generated types, sidecar manifests and run logs under
+`.krate`; the next `krate dev`, `build` or `types` writes the types again. Do not
+run it while `krate dev` is running.
 
 `krate clean` refuses to run when `outDir` is, or contains, the project root,
 `pagesDir` or `publicDir` (for example `outDir: "."`), so a misconfigured
