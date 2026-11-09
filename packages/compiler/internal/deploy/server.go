@@ -259,7 +259,8 @@ func emitVercelServer(cfg *config.Config, root, outDir string, plan *ServerPlan,
 	}
 	for _, r := range cfg.Redirects {
 		src, dst := ruleRegex(r.Source, r.Destination)
-		src, dst = scopeRegex(base, r.Source, src), sitepath.Join(base, dst)
+		rb := ruleBase(base, r)
+		src, dst = scopeRegex(rb, r.Source, src), sitepath.Join(rb, dst)
 		status := 302
 		if r.Permanent {
 			status = 301

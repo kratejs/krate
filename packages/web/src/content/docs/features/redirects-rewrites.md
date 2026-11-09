@@ -23,6 +23,7 @@ redirects: [
 | `source` | The path to match (supports `*` splats and `:param`, `:param*`, `:param+`, `:param?` segments) |
 | `destination` | Where to send the visitor |
 | `permanent` | `true` -> `301`, `false` (default) -> `302` |
+| `basePath` | `false` matches `source` and sends `destination` exactly as written, outside the [base path](/docs/reference/config/#base-path). Default `true` |
 
 `:param*` matches zero or more segments, `:param+` one or more, `:param?` one
 optional segment; reuse the name (with or without the modifier) in the
@@ -30,6 +31,26 @@ destination. Matched values are percent-encoded when they are put in the
 destination, and a path destination can never become an off-site URL: values
 like `/\evil.com` or an encoded `//evil.com` are escaped or collapsed so the
 `Location` always starts with a single `/`.
+
+### Under a base path
+
+With a base path such as `/docs`, write `source` and `destination` without it.
+`{ source: "/old", destination: "/new" }` redirects `/docs/old` to `/docs/new`,
+in `krate serve`, `krate dev` and every deploy target.
+
+The same goes for redirects from code. A root-relative `Location` from an API
+route, middleware, `redirect()` in a page or a server action gets the base path
+on its way out, so `Location: /login` reaches the browser as `/docs/login`.
+Absolute URLs are sent as written.
+
+To match a path outside the base, or redirect to one, set `basePath: false` and
+write both paths in full:
+
+```typescript
+redirects: [
+  { source: "/old-docs/:path*", destination: "/docs/:path*", basePath: false },
+]
+```
 
 ## Rewrites
 

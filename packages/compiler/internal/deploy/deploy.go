@@ -139,6 +139,15 @@ func Emit(target string, cfg *config.Config, root, outDir string, opts ...Option
 	}
 }
 
+// ruleBase is the base path a redirect rule lives under: none for a
+// basePath: false rule, which is written exactly as configured.
+func ruleBase(base string, r config.Redirect) string {
+	if !r.InBasePath() {
+		return ""
+	}
+	return base
+}
+
 // emitRedirects writes a `_redirects` file (Netlify + Cloudflare Pages format).
 func emitRedirects(cfg *config.Config, outDir string) ([]string, error) {
 	if len(cfg.Redirects) == 0 && len(cfg.Rewrites) == 0 {
@@ -152,7 +161,10 @@ func emitRedirects(cfg *config.Config, outDir string) ([]string, error) {
 			status = "301"
 		}
 		src, dst := translateRule(r.Source, r.Destination, false)
-		fmt.Fprintf(&b, "%s\t%s\t%s\n", sitepath.Join(base, src), sitepath.Join(base, dst), status)
+		if rb := ruleBase(base, r); rb != "" {
+			src, dst = sitepath.Join(rb, src), sitepath.Join(rb, dst)
+		}
+		fmt.Fprintf(&b, "%s\t%s\t%s\n", src, dst, status)
 	}
 	for _, r := range cfg.Rewrites {
 		src, dst := translateRule(r.Source, r.Destination, false)
@@ -262,7 +274,8 @@ func emitVercel(cfg *config.Config, root, outDir string) ([]string, error) {
 		rs := make([]vRedirect, 0, len(cfg.Redirects))
 		for _, r := range cfg.Redirects {
 			src, dst := translateRule(r.Source, r.Destination, true)
-			rs = append(rs, vRedirect{Source: sitepath.Join(base, src), Destination: sitepath.Join(base, dst), Permanent: r.Permanent})
+			rb := ruleBase(base, r)
+			rs = append(rs, vRedirect{Source: sitepath.Join(rb, src), Destination: sitepath.Join(rb, dst), Permanent: r.Permanent})
 		}
 		doc["redirects"] = rs
 	}

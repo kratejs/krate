@@ -300,7 +300,13 @@ type Redirect struct {
 	Source      string `json:"source"`      // e.g. "/old-page"
 	Destination string `json:"destination"` // e.g. "/new-page"
 	Permanent   bool   `json:"permanent"`   // true = 301, false = 302
+	// BasePath false matches Source and sends Destination as written, outside
+	// the base path. Unset or true puts both under the base path.
+	BasePath *bool `json:"basePath,omitempty"`
 }
+
+// InBasePath reports whether the base path applies to this rule.
+func (r Redirect) InBasePath() bool { return r.BasePath == nil || *r.BasePath }
 
 type Rewrite struct {
 	Source      string `json:"source"`      // e.g. "/legacy/*"

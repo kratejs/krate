@@ -2207,21 +2207,24 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		handlerWith404.ServeHTTP(w, r)
 	})
 
+	insideRedirects := cfg.Redirects
+	if cfg.BaseURLPath() != "" {
+		insideRedirects = nil
+		for _, rd := range cfg.Redirects {
+			if rd.InBasePath() {
+				insideRedirects = append(insideRedirects, rd)
+			}
+		}
+	}
+
 	// Redirect/rewrite middleware - applies config-based URL transformations
 	var redirectRewriteHandler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 
-		// Check redirects first
-		for _, rd := range cfg.Redirects {
-			if matchRedirect(path, rd.Source) {
-				dest := rewriteDestination(path, rd.Source, rd.Destination)
-				status := http.StatusFound
-				if rd.Permanent {
-					status = http.StatusMovedPermanently
-				}
-				http.Redirect(w, r, dest, status)
-				return
-			}
+		// Check redirects first. Under a base path, basePath: false rules were
+		// already matched against the full path by basePathMiddleware.
+		if serveConfigRedirect(w, r, path, insideRedirects) {
+			return
 		}
 
 		// Check rewrites (internal path mapping, no redirect)
@@ -2293,7 +2296,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	proxyTrust.Store(cfg.Server.TrustProxy)
 	flashSecret.Store(flashSecretFor(revalHost.secret))
 	proxyHops.Store(int32(cfg.Server.TrustedProxies))
-	var rootHandler http.Handler = requestIDMiddleware(forwardedHeadersMiddleware(cfg.Server.TrustProxy, basePathMiddleware(cfg.BaseURLPath(), securityHeadersMiddleware(cfg, customHeadersMiddleware(cfg.Headers, corsMiddleware(cfg, panicRecoveryMiddleware(Logger, devMux)))))))
+	var rootHandler http.Handler = requestIDMiddleware(forwardedHeadersMiddleware(cfg.Server.TrustProxy, basePathMiddleware(cfg.BaseURLPath(), cfg.Redirects, securityHeadersMiddleware(cfg, customHeadersMiddleware(cfg.Headers, corsMiddleware(cfg, panicRecoveryMiddleware(Logger, devMux)))))))
 
 	listenerOwned = true
 	addr := listener.Addr().(*net.TCPAddr)

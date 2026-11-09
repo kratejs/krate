@@ -359,6 +359,17 @@ can be a real route under `basePath: "/docs"`. Do not pass `location.pathname`;
 A path in `site.url` now sets the base path. If your `site.url` has a path and a
 proxy strips it before Krate, set `basePath: "/"` to keep the site at the root.
 
+Redirects add it too. Config `redirects` match and send paths under the base
+path, and a root-relative `Location` from an API route, middleware or server code
+gets the prefix. Drop the prefix there as well:
+
+```typescript
+{ source: "/old", destination: "/docs/new" }   // 0.4, with basePath: "/docs"
+{ source: "/old", destination: "/new" }        // 0.5
+```
+
+A rule that should point outside the base path takes `basePath: false`.
+
 Plain `<a href="/x">` and `<img src="/x">` are not rewritten. They now give a
 `KR7144` warning under a base path.
 

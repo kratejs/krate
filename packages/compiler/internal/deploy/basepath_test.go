@@ -11,12 +11,14 @@ import (
 )
 
 func baseCfg() *config.Config {
+	off := false
 	cfg := config.Default()
 	cfg.BasePath = "/repo"
 	cfg.Redirects = []config.Redirect{
 		{Source: "/old", Destination: "/new", Permanent: true},
 		{Source: "/ext", Destination: "https://example.com/x"},
 		{Source: "/legacy/*", Destination: "/docs/:splat"},
+		{Source: "/outside", Destination: "/elsewhere", BasePath: &off},
 	}
 	cfg.Rewrites = []config.Rewrite{{Source: "/api/v1/*", Destination: "/api/:splat"}}
 	cfg.Headers = []config.HeaderRule{{Source: "/chunks/*", Headers: map[string]string{"Cache-Control": "public, max-age=31536000, immutable"}}}
@@ -38,6 +40,7 @@ func TestNetlifyRulesUnderBasePath(t *testing.T) {
 		"/repo/ext\thttps://example.com/x\t302\n",
 		"/repo/legacy/*\t/repo/docs/:splat\t302\n",
 		"/repo/api/v1/*\t/repo/api/:splat\t200\n",
+		"\n/outside\t/elsewhere\t302\n",
 	} {
 		if !strings.Contains(string(red), want) {
 			t.Errorf("_redirects lacks %q:\n%s", want, red)
@@ -70,7 +73,8 @@ func TestVercelStaticRulesUnderBasePath(t *testing.T) {
 	}
 	if doc.Redirects[0].Source != "/repo/old" || doc.Redirects[0].Destination != "/repo/new" ||
 		doc.Redirects[1].Destination != "https://example.com/x" ||
-		doc.Redirects[2].Source != "/repo/legacy/:path*" || doc.Redirects[2].Destination != "/repo/docs/:path*" {
+		doc.Redirects[2].Source != "/repo/legacy/:path*" || doc.Redirects[2].Destination != "/repo/docs/:path*" ||
+		doc.Redirects[3].Source != "/outside" || doc.Redirects[3].Destination != "/elsewhere" {
 		t.Errorf("redirects: %+v", doc.Redirects)
 	}
 	if doc.Rewrites[0].Source != "/repo/api/v1/:path*" || doc.Rewrites[0].Destination != "/repo/api/:path*" {
@@ -112,7 +116,7 @@ func TestVercelServerRoutesUnderBasePath(t *testing.T) {
 		}
 	}
 	all := strings.Join(srcs, "\n")
-	for _, want := range []string{"^/repo/chunks/.*$", "^/repo/old$", "^/repo/blog/.*$", "^/repo/api(?:/.*)?$", "^/__krate(?:/.*)?$"} {
+	for _, want := range []string{"^/repo/chunks/.*$", "^/repo/old$", "^/repo/blog/.*$", "^/repo/api(?:/.*)?$", "^/__krate(?:/.*)?$", "^/outside$"} {
 		if !strings.Contains(all, want) {
 			t.Errorf("routes lack %q:\n%s", want, all)
 		}
@@ -122,6 +126,11 @@ func TestVercelServerRoutesUnderBasePath(t *testing.T) {
 			loc := r["headers"].(map[string]any)["Location"]
 			if loc != "/repo/new" {
 				t.Errorf("redirect target %v", loc)
+			}
+		}
+		if r["src"] == "^/outside$" {
+			if loc := r["headers"].(map[string]any)["Location"]; loc != "/elsewhere" {
+				t.Errorf("basePath: false redirect target %v", loc)
 			}
 		}
 	}

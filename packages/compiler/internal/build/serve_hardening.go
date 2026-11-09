@@ -1,6 +1,7 @@
 package build
 
 import (
+	"bufio"
 	"compress/gzip"
 	"context"
 	"encoding/json"
@@ -24,6 +25,7 @@ import (
 	"time"
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
+	"github.com/kratejs/krate/packages/compiler/internal/sitepath"
 )
 
 // Logger is the process-wide structured logger for the serving layer. Default
@@ -95,14 +97,28 @@ func newSidecarTransport() *http.Transport {
 // Requests under the prefix are stripped before routing; requests outside it are
 // redirected (GET/HEAD) or 404'd. Internal endpoints and health probes stay at
 // the root so orchestration is unaffected.
-func basePathMiddleware(basePath string, next http.Handler) http.Handler {
+//
+// Everything behind the prefix sees base-less paths, so a root-relative
+// Location it answers with ("/login") is in that same space and gets the
+// prefix on the way out. Redirect rules with basePath: false are matched here,
+// against the full path, and their destination is sent as written.
+func basePathMiddleware(basePath string, redirects []config.Redirect, next http.Handler) http.Handler {
 	if basePath == "" {
 		return next
+	}
+	var outside []config.Redirect
+	for _, rd := range redirects {
+		if !rd.InBasePath() {
+			outside = append(outside, rd)
+		}
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := r.URL.Path
 		if strings.HasPrefix(p, "/__krate/") || p == "/healthz" || p == "/readyz" {
 			next.ServeHTTP(w, r)
+			return
+		}
+		if serveConfigRedirect(w, r, p, outside) {
 			return
 		}
 		switch {
@@ -123,9 +139,76 @@ func basePathMiddleware(basePath string, next http.Handler) http.Handler {
 			return
 		}
 		r.URL.RawPath = ""
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(&baseLocationWriter{ResponseWriter: w, base: basePath}, r)
 	})
 }
+
+// serveConfigRedirect answers the first rule whose source matches p and
+// reports whether it did.
+func serveConfigRedirect(w http.ResponseWriter, r *http.Request, p string, rules []config.Redirect) bool {
+	for _, rd := range rules {
+		if !matchRedirect(p, rd.Source) {
+			continue
+		}
+		status := http.StatusFound
+		if rd.Permanent {
+			status = http.StatusMovedPermanently
+		}
+		http.Redirect(w, r, rewriteDestination(p, rd.Source, rd.Destination), status)
+		return true
+	}
+	return false
+}
+
+// baseLocationWriter adds the base path to a root-relative Location header
+// before it is sent.
+type baseLocationWriter struct {
+	http.ResponseWriter
+	base        string
+	wroteHeader bool
+}
+
+func (bw *baseLocationWriter) prefixLocation() {
+	if bw.wroteHeader {
+		return
+	}
+	bw.wroteHeader = true
+	h := bw.ResponseWriter.Header()
+	if loc := h.Get("Location"); sitepath.IsRootRelative(loc) {
+		h.Set("Location", sitepath.Join(bw.base, loc))
+	}
+}
+
+func (bw *baseLocationWriter) WriteHeader(code int) {
+	// 1xx responses (103 Early Hints) are not final; the Location check waits
+	// for the real status.
+	if code >= 200 {
+		bw.prefixLocation()
+	}
+	bw.ResponseWriter.WriteHeader(code)
+}
+
+func (bw *baseLocationWriter) Write(b []byte) (int, error) {
+	bw.prefixLocation()
+	return bw.ResponseWriter.Write(b)
+}
+
+func (bw *baseLocationWriter) Flush() {
+	bw.prefixLocation()
+	if f, ok := bw.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (bw *baseLocationWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if hj, ok := bw.ResponseWriter.(http.Hijacker); ok {
+		return hj.Hijack()
+	}
+	return nil, nil, http.ErrNotSupported
+}
+
+// Unwrap lets http.ResponseController reach the underlying writer.
+func (bw *baseLocationWriter) Unwrap() http.ResponseWriter { return bw.ResponseWriter }
 
 // bodyLimitMiddleware caps the request body via http.MaxBytesReader, which also
 // makes over-limit reads fail (a handler can return 413) instead of silently

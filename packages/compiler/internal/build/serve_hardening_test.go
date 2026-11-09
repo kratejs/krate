@@ -135,7 +135,7 @@ func TestCORSMiddlewareExplicitOrigins(t *testing.T) {
 
 func TestBasePathMiddleware(t *testing.T) {
 	var gotPath string
-	h := basePathMiddleware("/docs", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h := basePathMiddleware("/docs", nil, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		w.WriteHeader(http.StatusOK)
 	}))

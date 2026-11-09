@@ -769,7 +769,10 @@ they point outside the site. A literal value gives a
 `<Image>` or an import. A value computed at run time gets no warning.
 
 `krate serve` and `krate dev` mount the site under the base path, and requests
-outside it are redirected in. Static hosts serve `dist/` as uploaded, so mount
+outside it are redirected in. Code behind the base path sees paths without it, and
+a root-relative `Location` it answers with gets the prefix on the way out. Config
+`redirects` work the same way unless a rule sets `basePath: false`; see
+[Redirects & Rewrites](/docs/features/redirects-rewrites/#under-a-base-path). Static hosts serve `dist/` as uploaded, so mount
 it at the same path. See [Deployment](/docs/guides/deployment/#sub-paths-and-custom-domains).
 
 ## Server
