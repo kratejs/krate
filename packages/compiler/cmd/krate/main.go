@@ -72,6 +72,7 @@ type cliFlags struct {
 	CleanAll      bool
 	Global        bool
 	DryRun        bool
+	Fix           bool
 	Host          string
 	Token         string
 	Roots         []string
@@ -255,8 +256,9 @@ func printCommandUsage(w io.Writer, cmd string) {
 		fmt.Fprintf(w, "Usage: krate explain <code> [--json]\n\n")
 		fmt.Fprintf(w, "Print the cause, the fix and a docs link for a diagnostic code, e.g. krate explain KR7110.\n")
 	case "doctor":
-		fmt.Fprintf(w, "Usage: krate doctor [dir]\n\n")
+		fmt.Fprintf(w, "Usage: krate doctor [dir] [--fix]\n\n")
 		fmt.Fprintf(w, "Print a diagnostic summary of the project and toolchain.\n")
+		fmt.Fprintf(w, "  --fix   Repair what it can: an older @krate/core than this binary, a missing .gitignore entry, a stale .krate cache\n")
 	case "config":
 		fmt.Fprintf(w, "Usage: krate config [dir] [--mode <mode>] [--config <path>] [--schema]\n\n")
 		fmt.Fprintf(w, "Print the fully resolved configuration as JSON (--schema prints a JSON Schema).\n")
@@ -434,6 +436,8 @@ func parseFlagsChecked(args []string) (cliFlags, []string, error) {
 			flags.Global = true
 		case args[i] == "--dry-run":
 			flags.DryRun = true
+		case args[i] == "--fix":
+			flags.Fix = true
 		case args[i] == "--help" || args[i] == "-h" || args[i] == "--version":
 			// Handled as commands in main(); keep them in the arg list rather
 			// than rejecting them as unknown flags.

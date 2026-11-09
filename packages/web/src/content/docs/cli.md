@@ -352,6 +352,17 @@ cache directory cannot be written, so it can gate a CI step; missing optional
 tools only print. It also warns when the installed `@krate/core` and the running
 binary are different versions.
 
+`krate doctor --fix` repairs what it can and says what it did:
+
+| Problem | Fix |
+|---------|-----|
+| Installed `@krate/core` is older than the running binary | Runs [`krate upgrade`](#krate-upgrade) to the binary's version. A newer package is not downgraded; use `krate upgrade --global` to update the binary |
+| `.krate` or the output directory is missing from `.gitignore` | Appends the missing entries (only inside a git repository) |
+| The `.krate` page cache was filled by another krate version, or has unreadable entries | Removes `.krate/cache` |
+
+Without `--fix`, doctor lists the issues it could fix. A fix that fails makes the
+command exit with status 1.
+
 ## `krate upgrade`
 
 Moves every `@krate/*` package your `package.json` declares to one version, so
