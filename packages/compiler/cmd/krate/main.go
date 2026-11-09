@@ -74,6 +74,7 @@ type cliFlags struct {
 	DryRun        bool
 	Fix           bool
 	Open          bool
+	NoSummary     bool
 	Host          string
 	Token         string
 	Roots         []string
@@ -196,8 +197,9 @@ func main() {
 func printCommandUsage(w io.Writer, cmd string) {
 	switch cmd {
 	case "build":
-		writeHelp(w, "Usage: krate build [dir] [--config <path>] [--out-dir <path>] [--mode <name>] [--watch] [--profile] [--cpuprofile <path>] [--memprofile <path>] [--precompress]\n\n")
+		writeHelp(w, "Usage: krate build [dir] [--config <path>] [--out-dir <path>] [--mode <name>] [--watch] [--profile] [--cpuprofile <path>] [--memprofile <path>] [--precompress] [--no-summary]\n\n")
 		fmt.Fprintf(w, "Compile the project to static output (and SSR/server bundles when needed).\n")
+		fmt.Fprintf(w, "Prints a per-route size table (gzip) with the change since the last build; --no-summary hides it.\n")
 	case "dev":
 		fmt.Fprintf(w, "Usage: krate dev [dir] [--config <path>] [--port <n>] [--host <addr>] [--open] [--verbose]\n\n")
 		fmt.Fprintf(w, "Start the dev server with file watching and live reload.\n")
@@ -446,6 +448,8 @@ func parseFlagsChecked(args []string) (cliFlags, []string, error) {
 			flags.Fix = true
 		case args[i] == "--open":
 			flags.Open = true
+		case args[i] == "--no-summary":
+			flags.NoSummary = true
 		case args[i] == "--help" || args[i] == "-h" || args[i] == "--version":
 			// Handled as commands in main(); keep them in the arg list rather
 			// than rejecting them as unknown flags.
@@ -642,7 +646,11 @@ func runBuild(flags cliFlags, args []string) {
 		exit(1)
 	}
 
-	fmt.Printf("%s%s  Done! (built in %s)%s\n", cBold, cGreen, time.Since(start).Round(time.Millisecond), cReset)
+	elapsed := time.Since(start).Round(time.Millisecond)
+	if !flags.NoSummary {
+		printBuildSummary(root, builder)
+	}
+	fmt.Printf("%s%s  Done! (built in %s)%s\n", cBold, cGreen, elapsed, cReset)
 
 	if flags.Watch {
 		hub := build.NewDevHub()
@@ -670,6 +678,24 @@ func runBuild(flags cliFlags, args []string) {
 		err := <-errc
 		fmt.Fprintf(os.Stderr, "%sError:%s %v\n", cRed, cReset, err)
 		exit(1)
+	}
+}
+
+// printBuildSummary prints the per-route size table, compares it with the last
+// build and stores it for the next one. A failure only skips the table.
+func printBuildSummary(root string, builder *build.Builder) {
+	s, err := builder.Summarize()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "  %s! build summary skipped:%s %v\n", cYellow, cReset, err)
+		return
+	}
+	table := build.FormatSummary(s, build.LoadSummary(root))
+	if table == "" {
+		return
+	}
+	fmt.Printf("\n%s\n", table)
+	if err := build.SaveSummary(root, s); err != nil && builder.Verbose {
+		fmt.Fprintf(os.Stderr, "  %s! could not save the build summary:%s %v\n", cYellow, cReset, err)
 	}
 }
 

@@ -85,6 +85,17 @@ krate build ./my-site
 | `--sourcemap` | Emit source maps for generated JS (also disables the build cache) |
 | `--no-dce` | Disable CSS/JS dead-code elimination |
 | `--precompress` | Write `.br` + `.gz` siblings for compressible assets (same as `compress: { brotli: true, gzip: true }`) |
+| `--no-summary` | Do not print the per-route size table |
+
+After a successful build, `krate build` prints a table with one row per built
+page: its mode, and the gzipped size of the HTML, of the scripts it loads and of
+the stylesheets it loads. A `vs last` column shows how each route's total changed
+since the previous build (`new` for a route that was not there), and a footer
+lists routes that disappeared and the change in everything shipped, with shared
+files counted once. The previous build's sizes are kept in
+`.krate/build-summary.json`, which `krate clean --all` removes. Sites with more
+than 25 routes show the 25 heaviest. SSR pages with no emitted document appear
+with zero size.
 | `--mode <name>` | Set the environment mode (like `KRATE_ENV`); loads `.env.<name>` and is passed to a function-form `defineConfig` |
 
 During the build the compiler:
