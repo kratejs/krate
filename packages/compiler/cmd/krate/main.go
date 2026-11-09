@@ -70,6 +70,8 @@ type cliFlags struct {
 	CleanDist     bool
 	CleanCache    bool
 	CleanAll      bool
+	Global        bool
+	DryRun        bool
 	Host          string
 	Token         string
 	Roots         []string
@@ -160,6 +162,8 @@ func main() {
 		runExplain(flags, args)
 	case "info":
 		runInfo(flags, args)
+	case "upgrade":
+		runUpgrade(flags, args)
 	case "config":
 		runConfig(flags, args)
 	case "plugin":
@@ -239,6 +243,11 @@ func printCommandUsage(w io.Writer, cmd string) {
 		fmt.Fprintf(w, "  --dist    Remove only the build output directory\n")
 		fmt.Fprintf(w, "  --cache   Remove only the compiler cache (.krate/cache)\n")
 		fmt.Fprintf(w, "  --all     Remove the build output and the whole .krate directory (types, logs, cache)\n")
+	case "upgrade":
+		fmt.Fprintf(w, "Usage: krate upgrade [version|tag] [dir] [--global] [--dry-run]\n\n")
+		fmt.Fprintf(w, "Move the project's @krate/* packages to the latest version, or to a version or dist-tag you give.\n")
+		fmt.Fprintf(w, "  --global, -g   Upgrade the globally installed krate CLI instead of the project\n")
+		fmt.Fprintf(w, "  --dry-run      Print the plan and the commands without running them\n")
 	case "info":
 		fmt.Fprintf(w, "Usage: krate info [dir] [--config <path>] [--json]\n\n")
 		fmt.Fprintf(w, "Print a paste-ready environment report (OS, Go, Node, package manager, @krate versions, config summary) for bug reports.\n")
@@ -291,6 +300,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  deploy    Build and write host adapter files (netlify/vercel/...)\n")
 	fmt.Fprintf(w, "  clean     Remove build output (dist) and the compiler cache (.krate/cache)\n")
 	fmt.Fprintf(w, "  doctor    Print a diagnostic summary of the project and toolchain\n")
+	fmt.Fprintf(w, "  upgrade   Upgrade @krate/* packages to latest or a given version\n")
 	fmt.Fprintf(w, "  info      Print a paste-ready environment report for bug reports\n")
 	fmt.Fprintf(w, "  explain   Explain a diagnostic code (krate explain KR7110)\n")
 	fmt.Fprintf(w, "  config    Print the fully resolved configuration\n")
@@ -420,6 +430,10 @@ func parseFlagsChecked(args []string) (cliFlags, []string, error) {
 			flags.CleanCache = true
 		case args[i] == "--all":
 			flags.CleanAll = true
+		case args[i] == "--global" || args[i] == "-g":
+			flags.Global = true
+		case args[i] == "--dry-run":
+			flags.DryRun = true
 		case args[i] == "--help" || args[i] == "-h" || args[i] == "--version":
 			// Handled as commands in main(); keep them in the arg list rather
 			// than rejecting them as unknown flags.

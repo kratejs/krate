@@ -25,6 +25,7 @@ The `krate` CLI is the single entry point for building and serving Krate sites.
 | `krate deploy [dir]` | Build, then write host adapter files (`--target`, `--static-only`) |
 | `krate clean [dir]` | Remove build output and the compiler cache |
 | `krate doctor [dir]` | Print a diagnostic summary of the project and toolchain |
+| `krate upgrade [version]` | Upgrade the project's `@krate/*` packages to the latest or a given version (`--global`, `--dry-run`) |
 | `krate info [dir]` | Print a paste-ready environment report for bug reports (`--json`) |
 | `krate explain <code>` | Print the cause, the fix and a docs link for a diagnostic code |
 | `krate config [dir]` | Print the fully resolved configuration (`--schema` for the JSON Schema) |
@@ -350,6 +351,30 @@ cache directory. It exits with status 1 when the config does not load or the
 cache directory cannot be written, so it can gate a CI step; missing optional
 tools only print. It also warns when the installed `@krate/core` and the running
 binary are different versions.
+
+## `krate upgrade`
+
+Moves every `@krate/*` package your `package.json` declares to one version, so
+the packages never drift apart:
+
+```sh
+krate upgrade                 # latest
+krate upgrade 0.5.1           # a specific version
+krate upgrade next            # a dist-tag
+krate upgrade --dry-run       # show the plan and the commands, change nothing
+krate upgrade --global        # upgrade the globally installed CLI instead
+```
+
+It resolves a dist-tag such as `latest` with the npm registry (the one in
+`npm_config_registry`, else the public registry), prints each package's installed
+version next to the target, and runs your package manager (found from the
+`packageManager` field or the lockfile): `npm install`, `pnpm add`, `yarn add` or
+`bun add`, once for dependencies and once for dev dependencies. In a pnpm
+workspace root it adds `-w`. Packages already at the target are left alone. A
+project that declares no `@krate/*` package is pointed to `--global`.
+
+Passing a directory (`krate upgrade ./site`) targets another project. See
+[Upgrading](/docs/guides/upgrading/) for what changes between versions.
 
 ## `krate info`
 
