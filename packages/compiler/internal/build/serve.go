@@ -2313,6 +2313,8 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 			URL:       fmt.Sprintf("http://%s:%d", displayHost, addr.Port),
 			StartedAt: time.Now(),
 		})()
+		printDevNetwork(bindHost, addr.Port)
+		defer registerDevShortcuts(hub, fmt.Sprintf("http://localhost:%d", addr.Port))()
 	}
 
 	// Start ISR background revalidation - one timer per page, each route
@@ -2380,7 +2382,9 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- httpServer.Serve(listener) }()
 
-	if cfg.DevServer.Open {
+	// Open the browser once: a dev restart (config change, `r`) must not open
+	// another tab.
+	if cfg.DevServer.Open && browserOpened.CompareAndSwap(false, true) {
 		openBrowser(fmt.Sprintf("http://localhost:%d", addr.Port))
 	}
 

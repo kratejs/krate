@@ -73,6 +73,7 @@ type cliFlags struct {
 	Global        bool
 	DryRun        bool
 	Fix           bool
+	Open          bool
 	Host          string
 	Token         string
 	Roots         []string
@@ -198,8 +199,11 @@ func printCommandUsage(w io.Writer, cmd string) {
 		writeHelp(w, "Usage: krate build [dir] [--config <path>] [--out-dir <path>] [--mode <name>] [--watch] [--profile] [--cpuprofile <path>] [--memprofile <path>] [--precompress]\n\n")
 		fmt.Fprintf(w, "Compile the project to static output (and SSR/server bundles when needed).\n")
 	case "dev":
-		fmt.Fprintf(w, "Usage: krate dev [dir] [--config <path>] [--verbose]\n\n")
+		fmt.Fprintf(w, "Usage: krate dev [dir] [--config <path>] [--port <n>] [--host <addr>] [--open] [--verbose]\n\n")
 		fmt.Fprintf(w, "Start the dev server with file watching and live reload.\n")
+		fmt.Fprintf(w, "  --open        Open the browser once the server is up\n")
+		fmt.Fprintf(w, "  --host 0.0.0.0  Listen on the network; the LAN URL and a QR code are printed for phone testing\n")
+		fmt.Fprintf(w, "A busy port moves to the next free one. In a terminal: r + enter restarts, o opens the browser, c clears, h helps.\n")
 	case "serve", "preview", "start":
 		noBuildFlag := " [--no-build]"
 		if cmd == "start" {
@@ -440,6 +444,8 @@ func parseFlagsChecked(args []string) (cliFlags, []string, error) {
 			flags.DryRun = true
 		case args[i] == "--fix":
 			flags.Fix = true
+		case args[i] == "--open":
+			flags.Open = true
 		case args[i] == "--help" || args[i] == "-h" || args[i] == "--version":
 			// Handled as commands in main(); keep them in the arg list rather
 			// than rejecting them as unknown flags.
@@ -567,6 +573,9 @@ func loadConfig(flags cliFlags, args []string) (string, *config.Config, error) {
 		} else {
 			cfg.OutDir = filepath.Join(root, flags.OutDir)
 		}
+	}
+	if flags.Open {
+		cfg.DevServer.Open = true
 	}
 	if flags.Sourcemap {
 		cfg.Sourcemap = true
