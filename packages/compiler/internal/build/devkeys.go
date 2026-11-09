@@ -55,9 +55,14 @@ var (
 // registerDevShortcuts makes the running dev server the target of the stdin
 // shortcuts and returns the function that detaches it. One reader goroutine
 // serves every server, because a restart starts a new one while the old reader
-// is still blocked on stdin. It does nothing unless stdin is a terminal.
-func registerDevShortcuts(hub *DevHub, url string) func() {
+// is still blocked on stdin. It does nothing unless enabled (`krate dev
+// --repl`) and stdin is a terminal; without the flag it only prints a hint.
+func registerDevShortcuts(hub *DevHub, url string, enabled bool) func() {
 	if !stdinIsTTY {
+		return func() {}
+	}
+	if !enabled {
+		printf("  %sadd --repl for terminal shortcuts (restart, open, clear)%s\n", cGray, cReset)
 		return func() {}
 	}
 	me := &devShortcuts{hub: hub, url: url}

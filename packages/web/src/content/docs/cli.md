@@ -138,6 +138,7 @@ krate dev
 krate dev --open                # open the browser once the server is up
 krate dev --host 0.0.0.0        # listen on the network and print a LAN URL
 krate dev --host 0.0.0.0 --qr   # ...and a QR code a phone can scan
+krate dev --repl                # terminal shortcuts: r restart, o open, c clear, h help
 krate dev --port 4000           # a busy port moves to the next free one
 ```
 
@@ -145,8 +146,10 @@ krate dev --port 4000           # a busy port moves to the next free one
   a terminal, also a QR code for it so a phone on the same network can scan it.
   With the default loopback bind it prints a hint instead. `--open` (or
   `devServer.open`) opens the browser once; a restart does not open another tab.
-- In a terminal, type a letter and press Enter: `r` restarts the server (reloading
-  the config), `o` opens the browser, `c` clears the screen and `h` prints the list.
+- With `--repl`, in a terminal, type a letter and press Enter: `r` restarts the
+  server (reloading the config), `o` opens the browser, `c` clears the screen and
+  `h` prints the list. Without the flag the dev server does not read the terminal
+  and prints a one-line hint.
 - Serves the site on port 3000 (configurable via `devServer.port`, which wins
   over `server.port` in dev), bound to `127.0.0.1` only. Use `devServer.host` to
   expose it on the network. If the port is taken, the next free one is used and
