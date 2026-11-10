@@ -132,7 +132,7 @@ limits. All are optional.
 | `KRATE_GIT_TIMEOUT` | `60s` | Timeout for `git` reads used by `lastUpdated`/sitemap. |
 | `KRATE_INSTALL_TIMEOUT` | `30m` | Timeout for `krate plugin add` package installs. |
 | `KRATE_JS_MEMORY_MB` | `32` | Embedded QuickJS heap limit. |
-| `KRATE_JS_STACK_KB` | `256` | Embedded QuickJS stack limit. |
+| `KRATE_JS_STACK_KB` | `16` | Embedded QuickJS stack limit, at most `32`. The default allows about 16,000 nested calls; past the limit a call throws a catchable error. |
 | `KRATE_JS_TIMEOUT` | `30s` | Embedded QuickJS eval timeout. |
 | `KRATE_PLUGIN_MAX_FILES` | `10000` | Max files a single plugin hook may emit. |
 | `KRATE_PLUGIN_MAX_FILE_BYTES` | `67108864` | Max size of a single plugin-emitted file. |

@@ -125,11 +125,11 @@ func newRuntime() (*Runtime, error) {
 	}
 
 	// Resource limits are configurable so an unusual project can raise them:
-	// KRATE_JS_MEMORY_MB (default 32), KRATE_JS_STACK_KB (default 256),
-	// KRATE_JS_TIMEOUT (Go duration, default 30s).
+	// KRATE_JS_MEMORY_MB (default 32), KRATE_JS_STACK_KB (default 16, at most
+	// 32), KRATE_JS_TIMEOUT (Go duration, default 30s).
 	memLimit := envUnits("KRATE_JS_MEMORY_MB", 32, 1<<20)
 	vm.SetMemoryLimit(memLimit)
-	vm.SetMaxStackSize(envUnits("KRATE_JS_STACK_KB", 256, 1024))
+	vm.SetMaxStackSize(stackLimit())
 
 	timeout := envDuration("KRATE_JS_TIMEOUT", 30*time.Second)
 	if err := vm.SetEvalTimeout(timeout); err != nil {
@@ -154,6 +154,19 @@ func envUnits(key string, def int, unit int) uintptr {
 		}
 	}
 	return uintptr(def * unit)
+}
+
+// maxStackKB caps KRATE_JS_STACK_KB. The transpiled engine counts about one
+// byte of its stack limit per JS call while each call costs several KB of Go
+// stack, so a limit much above this lets runaway recursion exhaust the 1 GB Go
+// stack and kill the process instead of throwing a catchable error.
+const maxStackKB = 32
+
+// stackLimit is the engine stack limit in bytes: KRATE_JS_STACK_KB (default
+// 16, which allows about 16k plain calls, more than Node's default) capped at
+// maxStackKB.
+func stackLimit() uintptr {
+	return min(envUnits("KRATE_JS_STACK_KB", 16, 1024), maxStackKB*1024)
 }
 
 // envDuration reads a positive Go duration from key, falling back to def.

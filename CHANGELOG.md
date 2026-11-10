@@ -113,6 +113,9 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
   1.2 s. The VM memory limit grows only when a handler reads the body, by what that read needs,
   and a pooled worker collects the body's garbage before serving the next request.
 - `Response.error()` in the embedded API runtime threw a `TypeError`.
+- Runaway recursion in the embedded QuickJS runtime (an API route, middleware, `krate.config.ts`)
+  exhausted the Go stack and killed the process instead of throwing. `KRATE_JS_STACK_KB` now
+  defaults to 16 (about 16,000 nested calls) and is capped at 32.
 - Timers in the embedded API runtime ran every due callback in one batch, so promise callbacks
   queued by one `setTimeout` ran after the next timer instead of before it, unlike Node.
 - `basePath` now reaches every URL the compiler emits. Imported assets, generated CSS `url()`s,
