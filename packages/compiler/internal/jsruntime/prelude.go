@@ -214,6 +214,12 @@ func (r *Runtime) installLazy(s *preludeSet) error {
 // as a Go error, and core.js throws it: modernc QuickJS aborts under checkptr
 // (go test -race) when a host function returns an error. The module runs as a
 // nested evaluation, within what is left of the enclosing one's timeout.
+//
+// A failed load is not retried until the outermost evaluation ends: a script
+// catching the error in a loop would otherwise pay for a module evaluation per
+// iteration, and QuickJS polls its deadline by operation count, so such a loop
+// could run far past its timeout. The next evaluation tries again, so a
+// transient failure (memory, the deadline) does not stick to a pooled VM.
 func (r *Runtime) loadFeatureHost(args []any) (res any, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
@@ -221,7 +227,14 @@ func (r *Runtime) loadFeatureHost(args []any) (res any, err error) {
 		}
 	}()
 	name, _ := firstArg(args).(string)
+	if msg, ok := r.failedLoads[name]; ok {
+		return msg, nil
+	}
 	if e := r.loadFeature(name); e != nil {
+		if r.failedLoads == nil {
+			r.failedLoads = map[string]string{}
+		}
+		r.failedLoads[name] = e.Error()
 		return e.Error(), nil
 	}
 	return "", nil

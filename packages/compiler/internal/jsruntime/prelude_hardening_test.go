@@ -19,15 +19,18 @@ func TestModuleCompileIsolatedFromRequestVM(t *testing.T) {
 	m.bc.bc = nil
 	m.bc.mu.Unlock()
 
+	// Starve the VM from Go: an out-of-memory failure inside a host function
+	// call aborts modernc QuickJS under checkptr, so this skips the JS loader.
 	rt := mustRuntime(t, Options{})
-	// The load may still fail to evaluate here; only the compile must not.
-	_, _ = rt.Execute(`(function(){
-	  var hog = [];
-	  try { for (;;) hog.push(new Array(4096).fill(1.5)); } catch (e) {}
-	  try { for (;;) hog.push(new Array(64).fill(1.5)); } catch (e) {}
-	  hog.length = hog.length - 4;
-	  try { void TextEncoder; } catch (e) {}
-	})()`)
+	rt.vm.SetMemoryLimit(1)
+	_ = rt.loadFeature("encoding")
+	rt.vm.SetMemoryLimit(rt.memLimit)
+	m.bc.mu.Lock()
+	compiled := m.bc.bc != nil
+	m.bc.mu.Unlock()
+	if !compiled {
+		t.Error("the starved VM's load did not compile the module")
+	}
 
 	fresh := mustRuntime(t, Options{})
 	if got := execString(t, fresh, `typeof TextEncoder`); got != "function" {
@@ -120,7 +123,8 @@ func TestLazyGlobalsOnFrozenGlobal(t *testing.T) {
 }
 
 // TestFeatureModuleRollsBack checks that a module failing partway leaves no
-// globals behind, so a retry installs one consistent set.
+// globals behind, so the retry in the next evaluation installs one consistent
+// set. Within the failing evaluation the error is rethrown without a retry.
 func TestFeatureModuleRollsBack(t *testing.T) {
 	rt := mustRuntime(t, Options{})
 	got := execString(t, rt, `(function(){
@@ -129,17 +133,23 @@ func TestFeatureModuleRollsBack(t *testing.T) {
 	    if (armed && o === globalThis && n === "AbortController") { armed = false; throw new Error("injected"); }
 	    return gopd(o, n);
 	  };
-	  var first;
+	  var first, again;
 	  try { void Event; first = "loaded"; } catch (e) { first = e.message; }
 	  Object.getOwnPropertyDescriptor = gopd;
+	  try { void Event; again = "loaded"; } catch (e) { again = e.message; }
 	  var rolledBack = ["DOMException", "Event", "EventTarget", "AbortSignal"].every(function (n) {
 	    var d = gopd(globalThis, n); return !!d && typeof d.get === "function";
 	  });
-	  var s = new AbortController().signal;
-	  return [first.indexOf("injected") >= 0, rolledBack, s instanceof EventTarget, s instanceof AbortSignal,
-	    Object.getPrototypeOf(AbortSignal) === EventTarget].join();
+	  return [first.indexOf("injected") >= 0, again === first, rolledBack].join();
 	})()`)
-	if got != "true,true,true,true,true" {
-		t.Errorf("got %s", got)
+	if got != "true,true,true" {
+		t.Errorf("failing evaluation: %s", got)
+	}
+	got = execString(t, rt, `(function(){
+	  var s = new AbortController().signal;
+	  return [s instanceof EventTarget, s instanceof AbortSignal, Object.getPrototypeOf(AbortSignal) === EventTarget].join();
+	})()`)
+	if got != "true,true,true" {
+		t.Errorf("next evaluation: %s", got)
 	}
 }

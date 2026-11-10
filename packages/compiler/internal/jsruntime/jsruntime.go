@@ -46,6 +46,9 @@ type Runtime struct {
 	timeout  time.Duration
 	deadline time.Time
 	depth    int
+	// failedLoads maps the features whose lazy load failed during the
+	// outermost evaluation in progress to the failure; see loadFeatureHost.
+	failedLoads map[string]string
 }
 
 // SetLogPrefix sets a prefix prepended to every console line. Plugin hosts set
@@ -218,6 +221,8 @@ func (r *Runtime) leave(nested bool) {
 	r.depth--
 	if nested {
 		_ = r.vm.SetEvalTimeout(r.timeout)
+	} else if r.failedLoads != nil {
+		clear(r.failedLoads)
 	}
 }
 
