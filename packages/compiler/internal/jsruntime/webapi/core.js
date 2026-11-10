@@ -22,8 +22,12 @@
     var m = K.mods[name];
     if (m) return m;
     if (!loadFeature) throw new Error('[krate] the ' + name + ' web APIs are not available here');
-    var msg = loadFeature(name);
-    if (msg) throw new Error('[krate] loading the ' + name + ' web APIs failed: ' + msg);
+    var outer = undo, log = undo = [], msg;
+    try { msg = loadFeature(name); } finally { undo = outer; }
+    if (msg) {
+      rollback(log);
+      throw new Error('[krate] loading the ' + name + ' web APIs failed: ' + msg);
+    }
     return K.mods[name];
   }
   // loaded returns a feature's exports only when it is already installed, for
@@ -31,30 +35,27 @@
   function loaded(name) { return K.mods[name]; }
 
   var hasOwn = Object.prototype.hasOwnProperty;
-  var lazyGetters = {};
-  // vals holds the value each lazily loaded global was given, for when its
-  // accessor cannot be replaced (a frozen or sealed global object).
+  var lazyGetters = {}, lazyFeature = {};
+  // vals holds the values of lazy globals, returned by their accessors when
+  // those cannot be replaced (a frozen global object).
   var vals = {};
   function isLazy(name) {
     var d = Object.getOwnPropertyDescriptor(G, name);
     return !!d && d.get !== undefined && d.get === lazyGetters[name];
   }
-  // A feature module runs between begin and commit (see featureSource in
-  // prelude.go). def records what each global was before, so rollback can
-  // restore it when the module throws partway.
-  var txns = [];
-  function begin() { txns.push([]); }
-  function commit() { txns.pop(); }
-  function rollback(feature) {
-    var undo = txns.pop() || [];
-    for (var i = undo.length - 1; i >= 0; i--) {
-      var u = undo[i];
-      if (u.hadVal) vals[u.name] = u.val; else delete vals[u.name];
-      try {
-        if (u.d) Object.defineProperty(G, u.name, u.d); else delete G[u.name];
-      } catch (_) {}
+  // undo logs the lazy globals def replaces during need. A module sets
+  // K.mods last, so on failure rollback restores the accessors of the
+  // features missing from K.mods: a retry starts from a clean state.
+  var undo = null;
+  function rollback(log) {
+    for (var i = log.length - 1; i >= 0; i--) {
+      var name = log[i], feature = lazyFeature[name];
+      if (K.mods[feature]) continue;
+      delete vals[name];
+      if (!isLazy(name)) {
+        try { lazyGlobal(feature, name); } catch (_) {}
+      }
     }
-    delete K.mods[feature];
   }
   // def installs a global with the attributes of a built-in. A lazily loaded
   // module only replaces its own accessor, so a value user code assigned (or
@@ -62,14 +63,13 @@
   function def(name, value) {
     var managed = hasOwn.call(lazyGetters, name);
     if (managed && !isLazy(name)) return;
-    if (txns.length) {
-      txns[txns.length - 1].push({ name: name, d: Object.getOwnPropertyDescriptor(G, name), hadVal: hasOwn.call(vals, name), val: vals[name] });
+    if (managed) {
+      vals[name] = value;
+      if (undo) undo.push(name);
     }
-    if (managed) vals[name] = value;
     try {
       Object.defineProperty(G, name, { value: value, writable: true, configurable: true, enumerable: false });
     } catch (e) {
-      // The accessor stays and keeps returning vals[name].
       if (!managed) throw e;
     }
   }
@@ -92,11 +92,12 @@
       }
       return G[name];
     };
-    lazyGetters[name] = get;
     Object.defineProperty(G, name, {
       configurable: true, enumerable: false, get: get,
       set: function (v) { Object.defineProperty(G, name, { value: v, writable: true, configurable: true, enumerable: false }); }
     });
+    lazyGetters[name] = get;
+    lazyFeature[name] = feature;
   }
 
   // KR7160 is the diagnostic builds report for the same APIs, so build-time
@@ -283,7 +284,6 @@
   timerHook('__krate_timers_clear', undefined);
 
   K.need = need; K.loaded = loaded; K.def = def; K.lazy = lazy;
-  K.begin = begin; K.commit = commit; K.rollback = rollback;
   K.KR_UNSUPPORTED = KR_UNSUPPORTED; K.markUnsupported = markUnsupported; K.unsupported = unsupported; K.stubClass = stubClass;
   K.DOMException = DOMException;
   K.bytesToB64 = bytesToB64; K.b64ToBytes = b64ToBytes; K.toBytes = toBytes; K.concatBytes = concatBytes;

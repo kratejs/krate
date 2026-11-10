@@ -40,15 +40,6 @@ func (m *preludeModule) bytecode() ([]byte, error) {
 	return bc, nil
 }
 
-// featureSource wraps a feature module so that its globals are installed all
-// or nothing: core.js undoes the ones it defined if it throws partway, and a
-// later load runs it again from a clean state.
-func featureSource(name, src string) string {
-	q, _ := json.Marshal(name)
-	return "(function (K) { K.begin(" + string(q) + "); try {\n" + src +
-		"\n} catch (e) { K.rollback(" + string(q) + "); throw e; } K.commit(); })(globalThis[Symbol.for('krate.web')]);"
-}
-
 // preludeHosts maps each feature to the host functions its module calls.
 var preludeHosts = map[string]func(r *Runtime) error{
 	"console":  (*Runtime).registerConsoleHost,
@@ -96,7 +87,7 @@ var prelude = sync.OnceValues(func() (*preludeSet, error) {
 			}
 			continue
 		}
-		s.mods[name] = &preludeModule{name: name, source: featureSource(name, src), requires: f.Requires, globals: f.Globals, host: preludeHosts[name]}
+		s.mods[name] = &preludeModule{name: name, source: src, requires: f.Requires, globals: f.Globals, host: preludeHosts[name]}
 	}
 	names := make([]string, 0, len(s.mods))
 	for name := range s.mods {
