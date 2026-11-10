@@ -464,6 +464,12 @@ Each object returned by `generateStaticParams` becomes one page, so it needs a v
 
 `middleware.ts` must export the function that runs for each request, as `export function middleware(request)` or as the default export. Without one, requests could not be checked, so this is a build error, and a server running such a module answers 503 instead of letting requests through. Export the handler, or delete the file.
 
+### KR7144
+
+**Root-relative URL on a plain tag ignores the base path**
+
+The site is served under a base path, but a plain `<a href="/x">` or `<img src="/x">` is emitted exactly as written, so the browser requests it from the domain root and misses the site. Use `<Link href="/x">` for pages, and `<Image>` or an import for images: both add the base path. Write the full path only when the URL really does belong outside the site.
+
 ### KR7150
 
 **Unknown code theme**

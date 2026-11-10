@@ -119,6 +119,7 @@ func compileServerBundles(res *bundler.ImportResolver, results []*PageResult, ro
 				JSXSideEffects:  false,
 				JSXImportSource: "@krate/runtime/server",
 				TsconfigRaw:     `{ "compilerOptions": { "jsx": "react-jsx", "jsxImportSource": "@krate/runtime/server" } }`,
+				Banner:          basePathBanner(actionBasePath),
 				Packages:        api.PackagesExternal,
 				External: []string{
 					"@krate/runtime",

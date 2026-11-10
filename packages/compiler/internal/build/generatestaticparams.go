@@ -767,6 +767,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		emitter := renderer.NewEmitter()
 		emitter.IconResolver = b.iconResolver
 		emitter.EvalJS = b.jsExprEvaluator()
+		emitter.BasePath = b.Cfg.BaseURLPath()
 		emitter.CodeTheme = b.Cfg.Markdown.CodeTheme
 		emitResult = emitter.Emit(tree)
 		renderer.EmitMeta(tree, emitResult)

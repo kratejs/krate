@@ -3,6 +3,7 @@ import { krateWithOwner, krateUnmount } from './effects.js';
 import { krateSanitizeAttr } from './slots.js';
 import { krateOn, krateControl, krateSetControl } from './events.js';
 import { krateAttachRef, type KrateRef } from './refs.js';
+import { withBase } from './base-path.js';
 
 export {
   krateOn,
@@ -293,9 +294,20 @@ function setAttr(el: Element, key: string, value: unknown): void {
   }
 }
 
+/** A built-in <Link> lowers to these props; plain anchors are left as written. */
+function isLinkProps(props: Record<string, unknown>): boolean {
+  return 'data-krate-link' in props || 'data-krate-external' in props;
+}
+
+function linkHref(href: unknown): unknown {
+  if (typeof href === 'string') return withBase(href);
+  if (typeof href === 'function') return () => linkHref((href as () => unknown)());
+  return href;
+}
+
 function applyProps(el: Element, props: Record<string, unknown>): void {
   for (const key in props) {
-    const value = props[key];
+    const value = key === 'href' && isLinkProps(props) ? linkHref(props[key]) : props[key];
     if (typeof value === 'function' && (key === 'value' || key === 'checked')) {
       trackEffect(el, krateControl(el, key, value as () => unknown));
     } else if (typeof value === 'function' && !key.startsWith('on') && key !== 'ref') {
@@ -328,7 +340,8 @@ export function krateSpread(el: Element, get: () => Record<string, unknown> | nu
       for (const key of Object.keys(props)) {
         if (key === 'children' || key === 'key' || key === 'dangerouslySetInnerHTML') continue;
         next.add(key);
-        setAttr(el, key, props[key]);
+        const isLink = key === 'href' && (isLinkProps(props) || el.hasAttribute('data-krate-link'));
+        setAttr(el, key, isLink ? linkHref(props[key]) : props[key]);
       }
       const prev = spreadKeys.get(el);
       if (prev) {

@@ -188,6 +188,11 @@ export interface RedirectConfig {
   destination: string;
   /** true = 301, false = 302 (default). */
   permanent?: boolean;
+  /**
+   * false matches `source` and sends `destination` exactly as written, outside
+   * the base path. Default true: both live under the base path.
+   */
+  basePath?: boolean;
 }
 
 export interface RewriteConfig {

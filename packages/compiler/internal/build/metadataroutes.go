@@ -16,6 +16,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/fsutil"
 	"github.com/kratejs/krate/packages/compiler/internal/ogimage"
+	"github.com/kratejs/krate/packages/compiler/internal/sitepath"
 )
 
 // Metadata routes: sitemap.ts, robots.ts and manifest.ts return data that is
@@ -387,7 +388,7 @@ func (b *Builder) buildImageRoute(f metaRouteFile, pages []string, bnd *bundler.
 		if err := b.writeOut(joinURLDir(fillPattern(f.URLDir, e.Params), file+".png"), png); err != nil {
 			return err
 		}
-		url := "/" + joinURLDir(f.URLDir, file+".png")
+		url := sitepath.Join(b.Cfg.BaseURLPath(), "/"+joinURLDir(f.URLDir, file+".png"))
 		if !seenURL[url] {
 			seenURL[url] = true
 			b.metaImages.add(f.URLDir, f.Kind, imageRef{URL: url, Width: e.Width, Height: e.Height, Alt: e.Alt, Type: "image/png"})
@@ -409,7 +410,7 @@ func (b *Builder) copyStaticImageRoute(f metaRouteFile) error {
 	if err := b.writeOut(rel, data); err != nil {
 		return err
 	}
-	ref := imageRef{URL: "/" + rel, Type: map[string]string{".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp"}[ext]}
+	ref := imageRef{URL: sitepath.Join(b.Cfg.BaseURLPath(), "/"+rel), Type: map[string]string{".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp"}[ext]}
 	if cfg, _, err := image.DecodeConfig(strings.NewReader(string(data))); err == nil {
 		ref.Width, ref.Height = cfg.Width, cfg.Height
 	}

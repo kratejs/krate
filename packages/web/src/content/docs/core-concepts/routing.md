@@ -342,10 +342,14 @@ trigger client-side navigation; a plain `<a href>` is an ordinary full-page
 load:
 
 ```tsx
-import { Link } from '@krate/runtime';
-
 <Link href="/about">About</Link>
 ```
+
+`Link` is built in, so it needs no import. Under a
+[base path](/docs/reference/config/#base-path), `<Link>`, `navigate()` and
+`krateRouter` add the prefix, so write hrefs from the site root. A path read from
+`usePathname()` already has the prefix removed; `location.pathname` does not, so
+do not pass it to them.
 
 SPA navigation is enabled by default. Set `spa: false` in the config to omit
 the router from the shared runtime and use normal full-page navigation; links

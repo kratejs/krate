@@ -82,7 +82,9 @@ func TestLocaleSwitchFallbackAndHreflang(t *testing.T) {
 	}
 }
 
-func TestDocsLinksCarryBasePath(t *testing.T) {
+// The theme renders these through <Link>, which adds the base path, so the
+// generated page must carry them unprefixed or they would be prefixed twice.
+func TestDocsLinksLeaveBasePathToLink(t *testing.T) {
 	cfg := &config.Config{BasePath: "/sub"}
 	page := docs.Page{Path: "start", Title: "Start", URL: "/docs/start/"}
 	sections := []docs.SidebarItem{{Title: "Start", URL: "/docs/start/"}, {Title: "G", URL: "/docs/g/", Children: []docs.SidebarItem{{Title: "C", URL: "/docs/g/c/"}}}}
@@ -90,15 +92,15 @@ func TestDocsLinksCarryBasePath(t *testing.T) {
 	tsx := (&DocsPlugin{}).generateTSX(&BuildHookCtx{}, cfg, page, "", true, sections, nil, crumbs, "P", "/docs/p/", "N", "/docs/n/",
 		docsLocaleInfo{}, &DocsPluginOptions{}, nil, markdown.Config{}, "/docs")
 	for _, want := range []string{
-		`src="/sub/docs/search/search.js"`, `"url":"/sub/docs/start/"`, `"url":"/sub/docs/g/c/"`,
-		`/sub/docs/p/`, `/sub/docs/n/`, `routeBase: "/sub/docs"`,
+		`src="/sub/docs/search/search.js"`, `"url":"/docs/start/"`, `"url":"/docs/g/c/"`,
+		`prevLink: "/docs/p/"`, `nextLink: "/docs/n/"`, `routeBase: "/docs"`,
 	} {
 		if !strings.Contains(tsx, want) {
 			t.Errorf("missing %q in generated page:\n%s", want, tsx)
 		}
 	}
-	if strings.Contains(tsx, `"/docs/`) {
-		t.Errorf("an unprefixed /docs/ URL remains:\n%s", tsx)
+	if strings.Contains(tsx, `"/sub/docs/start`) {
+		t.Errorf("a link carries the base path itself:\n%s", tsx)
 	}
 }
 

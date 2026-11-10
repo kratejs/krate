@@ -25,7 +25,7 @@ func TestCompileRuntimeComponents(t *testing.T) {
 	}
 
 	// Compile it
-	bundles := CompileRuntimeComponents(tmpDir, outDir, nil, nil, nil)
+	bundles := CompileRuntimeComponents(tmpDir, outDir, "", nil, nil, nil)
 	if len(bundles) != 1 {
 		t.Fatalf("expected 1 bundle, got %d", len(bundles))
 	}
@@ -77,7 +77,7 @@ export default function Badge(props) {
 		t.Fatal(err)
 	}
 
-	bundles := CompileRuntimeComponents(tmpDir, outDir, nil, nil, nil)
+	bundles := CompileRuntimeComponents(tmpDir, outDir, "", nil, nil, nil)
 	if len(bundles) != 1 {
 		t.Fatalf("expected 1 bundle, got %d", len(bundles))
 	}
@@ -91,7 +91,7 @@ func TestCompileRuntimeComponentsEmpty(t *testing.T) {
 	_ = os.MkdirAll(filepath.Join(tmpDir, "src"), 0755)
 	outDir := filepath.Join(tmpDir, "dist")
 
-	bundles := CompileRuntimeComponents(tmpDir, outDir, nil, nil, nil)
+	bundles := CompileRuntimeComponents(tmpDir, outDir, "", nil, nil, nil)
 	if len(bundles) != 0 {
 		t.Errorf("expected 0 bundles for empty src/, got %d", len(bundles))
 	}
@@ -112,7 +112,7 @@ func TestCompileRuntimeComponentsSkipsNonRuntime(t *testing.T) {
 export default function Server() { return '<div>'; }`
 	_ = os.WriteFile(filepath.Join(srcDir, "Server.tsx"), []byte(serverSrc), 0644)
 
-	bundles := CompileRuntimeComponents(tmpDir, outDir, nil, nil, nil)
+	bundles := CompileRuntimeComponents(tmpDir, outDir, "", nil, nil, nil)
 	if len(bundles) != 0 {
 		t.Errorf("expected 0 runtime bundles, got %d", len(bundles))
 	}
@@ -134,7 +134,7 @@ func TestCompileRuntimeComponentWithJSX(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	bundles := CompileRuntimeComponents(tmpDir, outDir, nil, nil, nil)
+	bundles := CompileRuntimeComponents(tmpDir, outDir, "", nil, nil, nil)
 	if len(bundles) != 1 {
 		t.Fatalf("expected 1 bundle, got %d", len(bundles))
 	}
@@ -167,7 +167,7 @@ func TestCompileRuntimeComponentsMultiple(t *testing.T) {
 		_ = os.WriteFile(filepath.Join(compDir, name), []byte(src), 0644)
 	}
 
-	bundles := CompileRuntimeComponents(tmpDir, outDir, nil, nil, nil)
+	bundles := CompileRuntimeComponents(tmpDir, outDir, "", nil, nil, nil)
 	if len(bundles) != 2 {
 		t.Fatalf("expected 2 runtime bundles, got %d", len(bundles))
 	}

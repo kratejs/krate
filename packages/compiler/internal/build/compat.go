@@ -48,6 +48,7 @@ func (b *Builder) irBuildOptions() irtree.BuildOptions {
 		AggressiveDCE:  b.aggressiveDCE(),
 		Compat:         b.compatStyleMode(),
 		EvalJS:         b.jsExprEvaluator(),
+		BasePath:       b.Cfg.BaseURLPath(),
 		TransformImage: b.lowerImageLate,
 	}
 }

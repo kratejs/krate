@@ -339,6 +339,8 @@ function resolveBaseJoin(value: string | URL | null | undefined, base: string | 
     // metadataBase's path is a prefix: "/docs" + "/a" = "/docs/a".
     const prefix = b.pathname.replace(/\/$/, '');
     const path = s.startsWith('/') ? s : '/' + s;
+    // A convention image URL already carries the site base path.
+    if (prefix && (path === prefix || path.startsWith(prefix + '/'))) return b.origin + path;
     return b.origin + prefix + path;
   } catch {
     return s;

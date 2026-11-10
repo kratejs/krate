@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/kratejs/krate/packages/compiler/internal/sitepath"
 )
 
 // splitRelativeImage reports whether dest is a relative file reference, and
@@ -34,10 +36,14 @@ func splitRelativeImage(dest string) (path, suffix string, ok bool) {
 // LocalImageResolver returns a Config.ImageURL function for one markdown
 // file. A relative destination that names an existing file inside root is
 // registered through register (source path and its hashed /assets/ URL) and
-// replaced by that URL under base. Anything else is left alone.
+// replaced by that URL under base. A root-relative destination is a file in
+// public/ and gets base. Anything else is left alone.
 func LocalImageResolver(root, mdFile, base string, register func(abs, siteURL string)) func(string) (string, bool) {
 	dir := filepath.Dir(mdFile)
 	return func(dest string) (string, bool) {
+		if base != "" && sitepath.IsRootRelative(strings.TrimSpace(dest)) {
+			return RootLinkResolver(base)(strings.TrimSpace(dest))
+		}
 		p, suffix, ok := splitRelativeImage(dest)
 		if !ok {
 			return "", false
@@ -59,6 +65,20 @@ func LocalImageResolver(root, mdFile, base string, register func(abs, siteURL st
 		siteURL := "/assets/" + name + "-" + hex.EncodeToString(sum[:4]) + ext
 		register(abs, siteURL)
 		return strings.TrimRight(base, "/") + siteURL + suffix, true
+	}
+}
+
+// RootLinkResolver returns a Config.LinkURL function that adds base to a
+// root-relative destination. It returns nil for a site at the root.
+func RootLinkResolver(base string) func(string) (string, bool) {
+	if base == "" {
+		return nil
+	}
+	return func(dest string) (string, bool) {
+		if !sitepath.IsRootRelative(dest) {
+			return "", false
+		}
+		return sitepath.Join(base, dest), true
 	}
 }
 

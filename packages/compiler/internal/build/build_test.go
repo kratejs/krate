@@ -15,7 +15,7 @@ import (
 func TestSubstituteImportMetaURL(t *testing.T) {
 	js := "const base = new URL('../models/', import.meta.url);"
 	got := substituteImportMetaURL(js, "demo", "index.ab12cd.js", "")
-	want := "const base = new URL('../models/', \"/demo/index.ab12cd.js\");"
+	want := "const base = new URL('../models/', (location.origin+\"/demo/index.ab12cd.js\"));"
 	if got != want {
 		t.Fatalf("got %q want %q", got, want)
 	}

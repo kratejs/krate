@@ -351,12 +351,12 @@ func TestGenerateHTMLPreloadsHydrationScripts(t *testing.T) {
 
 func TestDynamicChunkURLs(t *testing.T) {
 	js := `var a=import("/chunks/Search-abc123.js");var b=import('/chunks/Chart-def456.js');var c=import("/chunks/Search-abc123.js");`
-	got := dynamicChunkURLs(js)
+	got := dynamicChunkURLs(js, "")
 	want := []string{"/chunks/Search-abc123.js", "/chunks/Chart-def456.js"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("dynamicChunkURLs = %v, want %v", got, want)
 	}
-	if dynamicChunkURLs("var x = 1;") != nil {
+	if dynamicChunkURLs("var x = 1;", "") != nil {
 		t.Fatal("expected nil for JS without chunks")
 	}
 }

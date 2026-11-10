@@ -6,6 +6,8 @@
 // by every page's hydration script) only refreshes per-page bindings and never
 // loses the prefetch cache, saved scroll positions or the in-flight navigation.
 
+import { basePath, withBase } from './base-path.js';
+
 /**
  * The shared runtime chunk is loaded once and must persist across SPA
  * navigations. Page-specific hydration scripts, in contrast, must be
@@ -26,13 +28,6 @@ interface KrateRuntimeConfig {
 
 function runtimeConfig(): KrateRuntimeConfig {
   return ((globalThis as any).__KRATE_CFG__ as KrateRuntimeConfig) || {};
-}
-
-/** Normalizes the configured base path to "" or "/prefix" (no trailing slash). */
-function basePath(): string {
-  const bp = runtimeConfig().basePath || '';
-  if (!bp || bp === '/') return '';
-  return '/' + bp.replace(/^\/+|\/+$/g, '');
 }
 
 /** Strips the base path from a pathname so route comparisons are consistent. */
@@ -499,14 +494,15 @@ function setupSpeculationRules(): void {
   try {
     const script = document.createElement('script');
     script.type = 'speculationrules';
+    const bp = basePath();
     script.textContent = JSON.stringify({
       prefetch: [
         {
           where: {
             and: [
-              { href_matches: '/*' },
-              { not: { href_matches: '/__krate/*' } },
-              { not: { href_matches: '/api/*' } },
+              { href_matches: bp + '/*' },
+              { not: { href_matches: bp + '/__krate/*' } },
+              { not: { href_matches: bp + '/api/*' } },
             ],
           },
           eagerness: 'moderate',
@@ -1784,18 +1780,18 @@ function refresh(): Promise<void> {
 
 function push(url: string, opts: NavigateOptions = {}): Promise<void> {
   if (!initialized) {
-    if (typeof location !== 'undefined') location.assign(url);
+    if (typeof location !== 'undefined') location.assign(withBase(url));
     return Promise.resolve();
   }
-  return start({ url, kind: 'push', scroll: opts.scroll !== false, state: opts.state });
+  return start({ url: withBase(url), kind: 'push', scroll: opts.scroll !== false, state: opts.state });
 }
 
 function replace(url: string, opts: NavigateOptions = {}): Promise<void> {
   if (!initialized) {
-    if (typeof location !== 'undefined') location.replace(url);
+    if (typeof location !== 'undefined') location.replace(withBase(url));
     return Promise.resolve();
   }
-  return start({ url, kind: 'replace', scroll: opts.scroll !== false, state: opts.state });
+  return start({ url: withBase(url), kind: 'replace', scroll: opts.scroll !== false, state: opts.state });
 }
 
 /**
@@ -1822,7 +1818,7 @@ export const krateRouter = {
     if (!initialized || typeof location === 'undefined') return Promise.resolve();
     let u: URL;
     try {
-      u = new URL(url, location.href);
+      u = new URL(withBase(url), location.href);
     } catch {
       return Promise.resolve();
     }
@@ -1845,8 +1841,8 @@ export function navigate(url: string, opts: NavigateOptions = {}): boolean {
     return false;
   }
   if (typeof location !== 'undefined') {
-    if (opts.replace) location.replace(url);
-    else location.assign(url);
+    if (opts.replace) location.replace(withBase(url));
+    else location.assign(withBase(url));
   }
   return true;
 }

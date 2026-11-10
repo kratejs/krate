@@ -2,6 +2,8 @@
 // navigation is a full document load; the API surface matches router.ts so
 // application code (and the Next.js migration shim) works unchanged.
 
+import { basePath, withBase } from './base-path.js';
+
 export interface NavigateOptions {
   replace?: boolean;
   scroll?: boolean;
@@ -14,13 +16,6 @@ export interface NavigationState {
   search: string;
   hash: string;
   status: 'idle' | 'loading';
-}
-
-function basePath(): string {
-  const cfg = (globalThis as any).__KRATE_CFG__ as { basePath?: string } | undefined;
-  const bp = (cfg && cfg.basePath) || '';
-  if (!bp || bp === '/') return '';
-  return '/' + bp.replace(/^\/+|\/+$/g, '');
 }
 
 export function getNavigationState(): NavigationState {
@@ -56,8 +51,8 @@ export function destroyRouter(): void {}
 
 export function navigate(url: string, opts: NavigateOptions = {}): boolean {
   if (typeof location === 'undefined') return true;
-  if (opts.replace) location.replace(url);
-  else location.assign(url);
+  if (opts.replace) location.replace(withBase(url));
+  else location.assign(withBase(url));
   return true;
 }
 

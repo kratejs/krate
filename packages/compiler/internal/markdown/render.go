@@ -228,6 +228,10 @@ func (t *transformer) Transform(root *ast.Document, reader text.Reader, pc parse
 		case *ast.Link:
 			if !safeURL(string(v.Destination)) {
 				unsafe = append(unsafe, n)
+			} else if t.d.cfg.LinkURL != nil {
+				if u, ok := t.d.cfg.LinkURL(string(v.Destination)); ok {
+					v.Destination = []byte(u)
+				}
 			}
 		case *ast.Image:
 			if !safeURL(string(v.Destination)) {

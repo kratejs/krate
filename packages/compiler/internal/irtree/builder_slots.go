@@ -18,6 +18,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/parser"
 	"github.com/kratejs/krate/packages/compiler/internal/resolver"
 	"github.com/kratejs/krate/packages/compiler/internal/sigutil"
+	"github.com/kratejs/krate/packages/compiler/internal/sitepath"
 	"github.com/kratejs/krate/packages/compiler/internal/syntaxhighlight"
 )
 
@@ -936,6 +937,9 @@ func (b *builder) buildLinkSlots(el *ast.JSXElement, parentID string) []SlotNode
 		aAttrs = append(aAttrs, &ast.JSXAttr{Name: "id", Value: &ast.Literal{Kind: ast.StringLit, Value: id}})
 	}
 	aAttrs = append(aAttrs, forwarded...)
+	if h, ok := b.linkHrefWithBase(el); ok {
+		aAttrs = SetHrefAttr(aAttrs, h)
+	}
 
 	a := &ast.JSXElement{
 		Opening:  &ast.JSXOpening{Name: "a", Attributes: aAttrs, SelfClosing: el.Opening.SelfClosing},
@@ -943,6 +947,36 @@ func (b *builder) buildLinkSlots(el *ast.JSXElement, parentID string) []SlotNode
 		Closing:  &ast.JSXClosing{Name: "a"},
 	}
 	return b.buildStaticElementSlots(a, parentID)
+}
+
+// SetHrefAttr replaces an element's href. The new attribute goes last, so it
+// also wins over a spread that carries one.
+func SetHrefAttr(attrs []*ast.JSXAttr, href string) []*ast.JSXAttr {
+	out := make([]*ast.JSXAttr, 0, len(attrs)+1)
+	for _, a := range attrs {
+		if a.Spread || a.Name != "href" {
+			out = append(out, a)
+		}
+	}
+	return append(out, &ast.JSXAttr{Name: "href", Value: &ast.Literal{Kind: ast.StringLit, Value: href}})
+}
+
+// linkHrefWithBase resolves a <Link>'s href, including one forwarded through a
+// spread, and adds the base path. ok is false when there is nothing to prefix.
+func (b *builder) linkHrefWithBase(el *ast.JSXElement) (string, bool) {
+	if b.basePath == "" {
+		return "", false
+	}
+	attrs, _ := b.expandForwardedSpreadAttrs(el.Opening.Attributes)
+	for i := len(attrs) - 1; i >= 0; i-- {
+		if a := attrs[i]; !a.Spread && a.Name == "href" && a.Value != nil {
+			if h := b.evalAttrValue(a.Value); sitepath.IsRootRelative(h) {
+				return b.basePath + h, true
+			}
+			return "", false
+		}
+	}
+	return "", false
 }
 
 // isLocalHref reports whether an href should be treated as an internal SPA link.

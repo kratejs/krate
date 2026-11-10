@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
-	_ "image/png"
+	"image/png"
 	"net/http"
 	"os"
 	"os/exec"
@@ -225,5 +225,35 @@ try { await bad.arrayBuffer(); console.log("no error"); } catch (e) { console.lo
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusForbidden {
 		t.Errorf("unauthenticated image request: %d", resp.StatusCode)
+	}
+}
+
+func TestStaticImageRouteHonoursBasePath(t *testing.T) {
+	for _, tc := range []struct{ basePath, want string }{
+		{"", `"url":"/blog/opengraph-image.png"`},
+		{"/sub", `"url":"/sub/blog/opengraph-image.png"`},
+	} {
+		dir := t.TempDir()
+		src := filepath.Join(dir, "opengraph-image.png")
+		var buf bytes.Buffer
+		if err := png.Encode(&buf, image.NewNRGBA(image.Rect(0, 0, 4, 2))); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(src, buf.Bytes(), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cfg := config.Default()
+		cfg.OutDir = filepath.Join(dir, "dist")
+		cfg.BasePath = tc.basePath
+		b := &Builder{Cfg: cfg, metaImages: &metaImages{}}
+		if err := b.copyStaticImageRoute(metaRouteFile{Kind: mrOG, Path: src, URLDir: "blog", Static: true}); err != nil {
+			t.Fatal(err)
+		}
+		if got := b.metaImages.filesJSON("blog"); !strings.Contains(got, tc.want) {
+			t.Errorf("basePath %q: want %s in %s", tc.basePath, tc.want, got)
+		}
+		if _, err := os.Stat(filepath.Join(cfg.OutDir, "blog", "opengraph-image.png")); err != nil {
+			t.Errorf("the file stays at its unprefixed path in dist: %v", err)
+		}
 	}
 }

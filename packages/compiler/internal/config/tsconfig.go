@@ -1288,6 +1288,9 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 			if b, ok := m["permanent"].(bool); ok {
 				rd.Permanent = b
 			}
+			if b, ok := m["basePath"].(bool); ok {
+				rd.BasePath = &b
+			}
 			cfg.Redirects = append(cfg.Redirects, rd)
 		}
 	case "rewrites":

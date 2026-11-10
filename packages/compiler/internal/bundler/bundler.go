@@ -17,6 +17,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/markdown"
 	"github.com/kratejs/krate/packages/compiler/internal/parser"
 	"github.com/kratejs/krate/packages/compiler/internal/resolver"
+	"github.com/kratejs/krate/packages/compiler/internal/sitepath"
 	"github.com/kratejs/krate/packages/compiler/internal/tsstrip"
 )
 
@@ -134,11 +135,20 @@ type Bundler struct {
 	mdSet bool
 	// mdBase is the site base path prefixed to image URLs found in markdown.
 	mdBase string
+	// urlBase is the site base path prefixed to the URLs written into code:
+	// imported assets, workers and dynamic import chunks. b.assets, b.workers
+	// and b.dynImports keep the unprefixed form, which is also the path of the
+	// file under the output directory.
+	urlBase string
 }
 
 // SetMarkdownBasePath sets the site base path prepended to relative images
 // that markdown files reference.
 func (b *Bundler) SetMarkdownBasePath(base string) { b.mdBase = base }
+
+// SetURLBasePath sets the site base path prepended to asset, worker and chunk
+// URLs emitted into code.
+func (b *Bundler) SetURLBasePath(base string) { b.urlBase = base }
 
 // SetMarkdownConfig sets the markdown options used when compiling .md and
 // .mdx modules (page-level and imported).
@@ -653,6 +663,7 @@ func (b *Bundler) resolveMarkdownModule(path, abs string, mtime time.Time, size 
 		b.assets[imgAbs] = siteURL
 		mdImages++
 	})
+	mcfg.LinkURL = markdown.RootLinkResolver(b.mdBase)
 	compiled := markdown.Compile(src, mcfg, markdown.Options{MDX: strings.HasSuffix(abs, ".mdx")})
 	for _, d := range compiled.Diags {
 		if !d.Warning {
@@ -1543,7 +1554,7 @@ func (b *Bundler) assetURLForSource(importer, source string) (string, bool) {
 		}
 	}
 	url, ok := b.assets[filepath.Clean(resolved)]
-	return url, ok
+	return sitepath.Join(b.urlBase, url), ok
 }
 
 func rewriteAssetRefsStmts(stmts []ast.Stmt, locals map[string]string) {
@@ -2040,7 +2051,7 @@ func rewriteWorkerCallee(args *[]ast.Expr, original []ast.Expr, b *Bundler, impo
 	if workerOptionsModuleStyle(original) {
 		b.workerEsm[abs] = true
 	}
-	(*args)[0] = &ast.Literal{Kind: ast.StringLit, Value: url}
+	(*args)[0] = &ast.Literal{Kind: ast.StringLit, Value: sitepath.Join(b.urlBase, url)}
 }
 
 // workerOptionsModuleStyle reports whether the Worker options object opts into
@@ -2337,7 +2348,7 @@ func rewriteDynamicImportCallee(arg *ast.Expr, b *Bundler, importer string) {
 	// Keep the argument literal for single-expression imports so
 	// `import(...)` still reads as a module specifier; a plain string literal
 	// is what we produce for worker/asset rewrites as well.
-	*arg = &ast.Literal{Kind: ast.StringLit, Value: url}
+	*arg = &ast.Literal{Kind: ast.StringLit, Value: sitepath.Join(b.urlBase, url)}
 }
 
 // resolveDynamicImportPath resolves a dynamic import specifier to an absolute

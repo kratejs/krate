@@ -62,3 +62,10 @@ func TestStylesheetImportsOfUnsupportedLanguagesAreErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestRuntimeImportOfBuiltinTagIsAllowed(t *testing.T) {
+	page := "import { Link, Head } from '@krate/runtime';\nexport default function P() { return <Link href=\"/a\">a</Link>; }\n"
+	if err := bundleWith(t, page, nil); err != nil {
+		t.Fatalf("a built-in tag should be importable: %v", err)
+	}
+}

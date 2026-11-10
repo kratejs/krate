@@ -318,7 +318,7 @@ func (p *DocsPlugin) beforeBuild(ctx *BuildHookCtx) error {
 			ps, err := docs.Scan(docs.Config{
 				ContentDir:     dir,
 				Root:           ctx.Root,
-				MDConfig:       cfg.Markdown,
+				MDConfig:       siteMarkdown(cfg, cfg.Markdown),
 				GitLastUpdated: gitLast,
 			})
 			if err != nil {
@@ -729,7 +729,7 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page doc
 	var mdxFrontmatter string
 	if data, err := os.ReadFile(page.SourcePath); err == nil {
 		rawSrc = string(data)
-		res := markdown.Compile(rawSrc, mdConfig, markdown.Options{MDX: strings.HasSuffix(page.SourcePath, ".mdx")})
+		res := markdown.Compile(rawSrc, siteMarkdown(cfg, mdConfig), markdown.Options{MDX: strings.HasSuffix(page.SourcePath, ".mdx")})
 		mdxImports = res.ESM
 		segments = res.Segments
 		mdxFrontmatter = markdown.FrontmatterDecl(res.Frontmatter, res.ESM)
@@ -776,10 +776,8 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page doc
 		sidebarItems = page.CustomSidebar
 	}
 	bp := cfg.BaseURLPath()
-	enriched := prefixSidebarURLs(docs.EnrichSidebarItemsURL(sidebarItems, page.URL), bp)
-	breadcrumbs = prefixBreadcrumbURLs(breadcrumbs, bp)
-	prevLink, nextLink = prefixURL(bp, prevLink), prefixURL(bp, nextLink)
-	li.Locales, li.Versions = prefixAltLinks(li.Locales, bp), prefixAltLinks(li.Versions, bp)
+	// The theme renders these through <Link>, which adds the base path.
+	enriched := docs.EnrichSidebarItemsURL(sidebarItems, page.URL)
 	sidebarJSON := marshalJSONArray(enriched)
 	tocJSON := marshalJSONArray(tocItems)
 	breadcrumbsJSON := marshalJSONArray(breadcrumbs)
@@ -788,7 +786,7 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page doc
 	siteTitleJSON, _ := json.Marshal(siteTitle)
 	currentPathJSON, _ := json.Marshal(page.Path)
 	templateJSON, _ := json.Marshal(page.Template)
-	routeBaseJSON, _ := json.Marshal(bp + strings.TrimRight(routeBase, "/"))
+	routeBaseJSON, _ := json.Marshal(strings.TrimRight(routeBase, "/"))
 
 	// Per-page document language (the shell ships lang="en"; the build applies
 	// this override server-side so crawlers/no-JS see the right language).
@@ -919,7 +917,7 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page doc
 		sb.WriteString(string(tagsJSON))
 		sb.WriteString(",\n")
 		sb.WriteString("    tagLinks: ")
-		sb.WriteString(string(marshalJSONArray(taxonomyLinks(bp+routeBase, "tags", page.Tags))))
+		sb.WriteString(string(marshalJSONArray(taxonomyLinks(routeBase, "tags", page.Tags))))
 		sb.WriteString(",\n")
 	}
 	if len(page.Categories) > 0 {
@@ -928,7 +926,7 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page doc
 		sb.WriteString(string(catsJSON))
 		sb.WriteString(",\n")
 		sb.WriteString("    categoryLinks: ")
-		sb.WriteString(string(marshalJSONArray(taxonomyLinks(bp+routeBase, "categories", page.Categories))))
+		sb.WriteString(string(marshalJSONArray(taxonomyLinks(routeBase, "categories", page.Categories))))
 		sb.WriteString(",\n")
 	}
 	if page.Date != "" {
@@ -1222,50 +1220,16 @@ func absoluteDocsURL(cfg *config.Config, urlPath string) string {
 	return bp + urlPath
 }
 
-// prefixURL prepends the site base path to a root-relative URL.
-func prefixURL(bp, u string) string {
-	if bp == "" || !strings.HasPrefix(u, "/") || strings.HasPrefix(u, "//") {
-		return u
+// siteMarkdown adds the site base path to root-relative links and images in
+// rendered markdown.
+func siteMarkdown(cfg *config.Config, m markdown.Config) markdown.Config {
+	if r := markdown.RootLinkResolver(cfg.BaseURLPath()); r != nil {
+		m.LinkURL = r
+		if m.ImageURL == nil {
+			m.ImageURL = r
+		}
 	}
-	return bp + u
-}
-
-func prefixSidebarURLs(items []docs.SidebarItem, bp string) []docs.SidebarItem {
-	if bp == "" || len(items) == 0 {
-		return items
-	}
-	out := make([]docs.SidebarItem, len(items))
-	for i, it := range items {
-		it.URL = prefixURL(bp, it.URL)
-		it.IndexURL = prefixURL(bp, it.IndexURL)
-		it.Children = prefixSidebarURLs(it.Children, bp)
-		out[i] = it
-	}
-	return out
-}
-
-func prefixBreadcrumbURLs(items []docs.Breadcrumb, bp string) []docs.Breadcrumb {
-	if bp == "" || len(items) == 0 {
-		return items
-	}
-	out := make([]docs.Breadcrumb, len(items))
-	for i, it := range items {
-		it.URL = prefixURL(bp, it.URL)
-		out[i] = it
-	}
-	return out
-}
-
-func prefixAltLinks(links []altLink, bp string) []altLink {
-	if bp == "" || len(links) == 0 {
-		return links
-	}
-	out := make([]altLink, len(links))
-	for i, l := range links {
-		l.URL = prefixURL(bp, l.URL)
-		out[i] = l
-	}
-	return out
+	return m
 }
 
 // localeRoots maps each locale to its landing URL for a version.

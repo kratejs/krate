@@ -585,3 +585,55 @@ describe("middleware exports", () => {
     error.mockRestore();
   });
 });
+
+describe("redirects under a base path", () => {
+  const based: HandlerConfig = {
+    ...config,
+    basePath: "/docs",
+    redirects: [
+      { source: "/old", destination: "/new", permanent: true },
+      { source: "/outside", destination: "/elsewhere", basePath: false },
+      { source: "/docs/gone", destination: "https://other.example/", basePath: false },
+    ],
+  };
+  const handler = createKrateHandler({
+    target: "node",
+    data: data({ config: based, apiRoutes: ["hello", "items/[id]", "go"] }),
+    modules: {
+      ...modules,
+      api: { ...modules.api, go: { GET: () => new Response(null, { status: 302, headers: { location: "/login?next=1" } }) } },
+    },
+  });
+  const get = (path: string) => handler(new Request("http://localhost" + path, { redirect: "manual" }));
+
+  it("puts config redirect source and destination under the base", async () => {
+    const r = await get("/docs/old");
+    expect(r.status).toBe(301);
+    expect(r.headers.get("location")).toBe("/docs/new");
+  });
+
+  it("adds the base to a root-relative Location from a route handler", async () => {
+    const r = await get("/docs/api/go");
+    expect(r.status).toBe(302);
+    expect(r.headers.get("location")).toBe("/docs/login?next=1");
+  });
+
+  it("matches basePath: false rules on the full path and sends them as written", async () => {
+    const out = await get("/outside");
+    expect(out.status).toBe(302);
+    expect(out.headers.get("location")).toBe("/elsewhere");
+    const gone = await get("/docs/gone");
+    expect(gone.headers.get("location")).toBe("https://other.example/");
+  });
+
+  it("does not double the base on the path-cleaning redirect", async () => {
+    const r = await get("/docs//new");
+    expect(r.headers.get("location")).toBe("/docs/new");
+  });
+
+  it("keeps the canonical slash redirect relative", async () => {
+    const r = await get("/docs/live");
+    expect(r.status).toBe(301);
+    expect(r.headers.get("location")).toBe("./live/");
+  });
+});

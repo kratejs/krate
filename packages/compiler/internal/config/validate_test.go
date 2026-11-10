@@ -248,3 +248,55 @@ func TestLoadWarnsOnUnknownChecksKey(t *testing.T) {
 		t.Fatalf("Load did not warn about checks.failon; warnings: %v", Warnings)
 	}
 }
+
+func TestBaseURLPathComesFromSiteURL(t *testing.T) {
+	cases := []struct {
+		name, base, site, seo, want string
+	}{
+		{"nothing set", "", "", "", ""},
+		{"origin only", "", "https://example.com", "", ""},
+		{"origin with slash", "", "https://example.com/", "", ""},
+		{"site.url path", "", "https://example.com/example/a", "", "/example/a"},
+		{"site.url trailing slash", "", "https://example.com/example/a/", "", "/example/a"},
+		{"seo.baseUrl path", "", "", "https://example.com/docs", "/docs"},
+		{"site wins over seo", "", "https://example.com/a", "https://example.com/b", "/a"},
+		{"explicit basePath wins", "/x", "https://example.com/y", "", "/x"},
+		{"explicit root wins", "/", "https://example.com/y", "", ""},
+		{"escaped path stays escaped", "", "https://example.com/a%20b", "", "/a%20b"},
+		{"no scheme is not a site URL", "", "example.com/a", "", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cfg := &Config{BasePath: c.base, Site: SiteConfig{URL: c.site}, SEO: SEOConfig{BaseURL: c.seo}}
+			if got := cfg.BaseURLPath(); got != c.want {
+				t.Errorf("BaseURLPath() = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+func TestBasePathSiteURLMismatchWarns(t *testing.T) {
+	warnsOf := func(base, site string) []string {
+		c := Default()
+		c.BasePath, c.Site.URL = base, site
+		w, err := c.Validate()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, s := range w {
+			if strings.Contains(s, "basePath") {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	if w := warnsOf("/a", "https://example.com/b"); len(w) != 1 {
+		t.Errorf("mismatch should warn once, got %v", w)
+	}
+	for _, c := range [][2]string{{"/a", "https://example.com/a/"}, {"/a", "https://example.com"}, {"/", "https://example.com/proxy"}} {
+		if w := warnsOf(c[0], c[1]); len(w) != 0 {
+			t.Errorf("%v should not warn, got %v", c, w)
+		}
+	}
+}

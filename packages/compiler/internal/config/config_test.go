@@ -656,14 +656,18 @@ func TestParseTSConfigRedirects(t *testing.T) {
 		redirects: [
 			{ source: "/old", destination: "/new", permanent: true },
 			{ source: "/temp", destination: "/other", permanent: false },
+			{ source: "/out", destination: "/away", basePath: false },
 		],
 	}`
 	cfg := &Config{}
 	if err := parseTSConfig(src, cfg); err != nil {
 		t.Fatalf("parseTSConfig: %v", err)
 	}
-	if len(cfg.Redirects) != 2 {
-		t.Fatalf("expected 2 redirects, got %d", len(cfg.Redirects))
+	if len(cfg.Redirects) != 3 {
+		t.Fatalf("expected 3 redirects, got %d", len(cfg.Redirects))
+	}
+	if !cfg.Redirects[0].InBasePath() || cfg.Redirects[2].InBasePath() {
+		t.Errorf("basePath: %v %v, want true then false", cfg.Redirects[0].InBasePath(), cfg.Redirects[2].InBasePath())
 	}
 	if cfg.Redirects[0].Source != "/old" || cfg.Redirects[0].Destination != "/new" || !cfg.Redirects[0].Permanent {
 		t.Errorf("redirect[0] = %+v", cfg.Redirects[0])
@@ -1206,7 +1210,7 @@ func TestUnknownKeyWarningsInsideArrays(t *testing.T) {
 			t.Errorf("missing warning for %s in: %s", want, joined)
 		}
 	}
-	if w := UnknownKeyWarnings([]byte(`{"redirects":[{"source":"/a","destination":"/b","permanent":true}]}`)); len(w) != 0 {
+	if w := UnknownKeyWarnings([]byte(`{"redirects":[{"source":"/a","destination":"/b","permanent":true,"basePath":false}]}`)); len(w) != 0 {
 		t.Errorf("valid redirect warned: %v", w)
 	}
 }
