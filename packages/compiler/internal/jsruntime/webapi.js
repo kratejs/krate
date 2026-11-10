@@ -1042,7 +1042,7 @@
       var headers = new Headers(init.headers);
       if (body !== undefined && body !== null && NULL_BODY.indexOf(status) >= 0) throw new TypeError('Response constructor: Invalid response status code ' + status);
       Object.defineProperty(this, '_h', { value: headers, enumerable: false });
-      Object.defineProperty(this, '_st', { value: status, enumerable: false });
+      Object.defineProperty(this, '_st', { value: status, writable: true, enumerable: false });
       Object.defineProperty(this, '_stt', { value: init.statusText === undefined ? '' : String(init.statusText), enumerable: false });
       Object.defineProperty(this, '_t', { value: 'default', writable: true, enumerable: false });
       initBody(this, body, headers);
@@ -1077,7 +1077,7 @@
     }
     static error() {
       var r = new Response(null, { status: 200 });
-      Object.defineProperty(r, '_st', { value: 0 });
+      r._st = 0;
       r._t = 'error';
       return r;
     }
