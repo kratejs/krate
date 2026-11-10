@@ -33,7 +33,8 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
   `crypto`, timers, `process` or `require`. There `localeCompare`, `toLocale*String` and
   `Date.prototype.toString` (`String(date)`, template literals) throw, so an expression or a
   collection sorted with them stays a run-time value instead of being folded with the build
-  machine's locale and time zone.
+  machine's locale and time zone. An expression that reads `globalThis` stays a run-time value
+  too.
 
 ### Added
 
