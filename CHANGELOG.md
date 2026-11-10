@@ -31,6 +31,12 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Added
 
+- API routes and middleware built for the embedded QuickJS runtime are checked against its
+  Web API surface: a global it lacks (`TransformStream`, `WebSocket`, `Buffer`,
+  `crypto.subtle.encrypt`, ...) is a `KR7160` warning at the first use, once per file or
+  dependency. Run-time `NotSupportedError` messages carry the same code. The supported surface
+  is listed in the new API runtime compatibility reference, generated from the ledger the
+  compiler checks against.
 - `logs: { enabled: true }` saves each `dev`, `build`, `serve`, `start`, `check` and `deploy`
   run's console output to `.krate/logs/<timestamp>.log` (`logs.dir`, `logs.keep`, default 20).
 - `krate upgrade [version|tag]` moves the project's `@krate/*` packages to the latest or a given
@@ -84,6 +90,7 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Fixed
 
+- `Response.error()` in the embedded API runtime threw a `TypeError`.
 - `basePath` now reaches every URL the compiler emits. Imported assets, generated CSS `url()`s,
   dynamic `import()` chunks and workers used to 404 on static hosts, as did Markdown links,
   convention OG images, `llms.txt` and feed links. Deploy adapters write rules for the prefixed
