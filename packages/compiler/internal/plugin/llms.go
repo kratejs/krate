@@ -10,6 +10,7 @@ import (
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
 	"github.com/kratejs/krate/packages/compiler/internal/docs"
+	"github.com/kratejs/krate/packages/compiler/internal/sitepath"
 )
 
 // LLMsPluginOptions holds typed configuration for the llms.txt plugin.
@@ -107,9 +108,9 @@ func generateLLMs(ctx *BuildResultHookCtx) error {
 	pageURL := func(p docs.Page) string {
 		u := docsPageURL(prefix, p.Path)
 		if baseURL == "" {
-			return u
+			return sitepath.Join(cfg.BaseURLPath(), u)
 		}
-		return baseURL + u
+		return CanonicalURL(baseURL, cfg.BaseURLPath(), u)
 	}
 
 	if err := os.WriteFile(path.Join(ctx.OutDir, "llms.txt"), []byte(renderLLMsIndex(title, description, visible, pageURL)), 0644); err != nil {

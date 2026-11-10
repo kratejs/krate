@@ -63,4 +63,12 @@ export type { ResourceReturn, ResourceActions } from './resource.js';
 export type { Component, PropsWithChildren, ComponentProps, RefCallback } from './dom.js';
 export type { RefObject, Ref, UseRefResult } from './signal.js';
 import './jsx-types.js';
+
+// The compiler provides these tags. Importing them is optional, and these
+// declarations let an import typecheck; they emit nothing.
+export declare const Link: typeof globalThis.Link;
+export declare const Head: typeof globalThis.Head;
+export declare const Icon: typeof globalThis.Icon;
+export declare const Suspense: typeof globalThis.Suspense;
+export declare const SyntaxHighlight: typeof globalThis.SyntaxHighlight;
 import './css-modules.js';

@@ -106,7 +106,7 @@ func generateFeeds(ctx *BuildResultHookCtx) error {
 	pages, err := docs.Scan(docs.Config{
 		ContentDir:     contentDir,
 		Root:           ctx.Root,
-		MDConfig:       cfg.Markdown,
+		MDConfig:       siteMarkdown(cfg, cfg.Markdown),
 		GitLastUpdated: true,
 	})
 	if err != nil {
@@ -143,6 +143,7 @@ func generateFeeds(ctx *BuildResultHookCtx) error {
 		items = items[:count]
 	}
 
+	siteBase := feedSiteBase(baseURL, cfg.BaseURLPath())
 	kind := strings.ToLower(strings.TrimSpace(opts.Type))
 	if kind == "" {
 		kind = "all"
@@ -154,17 +155,17 @@ func generateFeeds(ctx *BuildResultHookCtx) error {
 		return nil
 	}
 	if kind == "rss" || kind == "all" {
-		if err := write("feed.xml", renderRSS(baseURL, title, description, language, items)); err != nil {
+		if err := write("feed.xml", renderRSS(siteBase, title, description, language, items)); err != nil {
 			return err
 		}
 	}
 	if kind == "atom" || kind == "all" {
-		if err := write("atom.xml", renderAtom(baseURL, title, description, items)); err != nil {
+		if err := write("atom.xml", renderAtom(siteBase, title, description, items)); err != nil {
 			return err
 		}
 	}
 	if kind == "json" || kind == "all" {
-		if err := write("feed.json", renderJSONFeed(baseURL, title, description, items)); err != nil {
+		if err := write("feed.json", renderJSONFeed(siteBase, title, description, items)); err != nil {
 			return err
 		}
 	}
@@ -213,7 +214,7 @@ func toRFC3339(s string) string {
 	return s
 }
 
-func renderRSS(baseURL, title, description, language string, items []feedItem) string {
+func renderRSS(siteBase, title, description, language string, items []feedItem) string {
 	var b strings.Builder
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n")
 	b.WriteString(`<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">` + "\n")
@@ -225,10 +226,10 @@ func renderRSS(baseURL, title, description, language string, items []feedItem) s
 		b.WriteString("    <" + tag + ">" + escape.HTML(val) + "</" + tag + ">\n")
 	}
 	el("title", title)
-	el("link", baseURL+"/")
+	el("link", siteBase+"/")
 	el("description", description)
 	el("language", language)
-	b.WriteString(fmt.Sprintf("    <atom:link href=%q rel=\"self\" type=\"application/rss+xml\"/>\n", escape.HTMLAttr(baseURL+"/feed.xml")))
+	b.WriteString(fmt.Sprintf("    <atom:link href=%q rel=\"self\" type=\"application/rss+xml\"/>\n", escape.HTMLAttr(siteBase+"/feed.xml")))
 	for _, it := range items {
 		b.WriteString("    <item>\n")
 		b.WriteString("      <title>" + escape.HTML(it.Title) + "</title>\n")
@@ -248,14 +249,14 @@ func renderRSS(baseURL, title, description, language string, items []feedItem) s
 	return b.String()
 }
 
-func renderAtom(baseURL, title, description string, items []feedItem) string {
+func renderAtom(siteBase, title, description string, items []feedItem) string {
 	var b strings.Builder
 	b.WriteString(`<?xml version="1.0" encoding="utf-8"?>` + "\n")
 	b.WriteString(`<feed xmlns="http://www.w3.org/2005/Atom">` + "\n")
 	b.WriteString("  <title>" + escape.HTML(title) + "</title>\n")
-	b.WriteString(fmt.Sprintf("  <link href=%q rel=\"self\"/>\n", escape.HTMLAttr(baseURL+"/atom.xml")))
-	b.WriteString(fmt.Sprintf("  <link href=%q/>\n", escape.HTMLAttr(baseURL+"/")))
-	b.WriteString("  <id>" + escape.HTML(baseURL+"/") + "</id>\n")
+	b.WriteString(fmt.Sprintf("  <link href=%q rel=\"self\"/>\n", escape.HTMLAttr(siteBase+"/atom.xml")))
+	b.WriteString(fmt.Sprintf("  <link href=%q/>\n", escape.HTMLAttr(siteBase+"/")))
+	b.WriteString("  <id>" + escape.HTML(siteBase+"/") + "</id>\n")
 	if description != "" {
 		b.WriteString("  <subtitle>" + escape.HTML(description) + "</subtitle>\n")
 	}
@@ -331,7 +332,7 @@ func docsHeadExtras(cfg *config.Config, page docs.Page, siteTitle string) string
 			}
 			add := func(href, typ, title string) {
 				sb.WriteString("        <link rel=\"alternate\" href=")
-				sb.WriteString(jsxAttrExpr(feedBase + href))
+				sb.WriteString(jsxAttrExpr(feedSiteBase(feedBase, cfg.BaseURLPath()) + href))
 				sb.WriteString(" type=")
 				sb.WriteString(jsxAttrExpr(typ))
 				sb.WriteString(" title=")
@@ -405,12 +406,12 @@ type jsonFeedItem struct {
 	DateModified  string `json:"date_modified,omitempty"`
 }
 
-func renderJSONFeed(baseURL, title, description string, items []feedItem) string {
+func renderJSONFeed(siteBase, title, description string, items []feedItem) string {
 	feed := jsonFeed{
 		Version:     "https://jsonfeed.org/version/1.1",
 		Title:       title,
-		HomePageURL: baseURL + "/",
-		FeedURL:     baseURL + "/feed.json",
+		HomePageURL: siteBase + "/",
+		FeedURL:     siteBase + "/feed.json",
 		Description: description,
 	}
 	for _, it := range items {
@@ -425,6 +426,12 @@ func renderJSONFeed(baseURL, title, description string, items []feedItem) string
 	}
 	data, _ := json.MarshalIndent(feed, "", "  ")
 	return string(data) + "\n"
+}
+
+// feedSiteBase is the absolute URL of the site root without a trailing slash:
+// origin plus base path, not doubled when the origin already ends with it.
+func feedSiteBase(origin, basePath string) string {
+	return strings.TrimRight(CanonicalURL(origin, basePath, "/"), "/")
 }
 
 // docsJSONLDURL is the absolute URL of a docs page for structured data. It uses

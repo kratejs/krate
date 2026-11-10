@@ -1325,7 +1325,7 @@ func (b *Builder) BuildAll() error {
 	}
 
 	// Compile runtime server components (*.runtime.tsx, // @runtime, runtimeDirs)
-	runtimeCompBundles := CompileRuntimeComponents(b.Root, b.Cfg.OutDir, b.Cfg.ServerComponents, b.Cfg.RuntimeComponents, b.Cfg.RuntimeDirs)
+	runtimeCompBundles := CompileRuntimeComponents(b.Root, b.Cfg.OutDir, b.Cfg.BaseURLPath(), b.Cfg.ServerComponents, b.Cfg.RuntimeComponents, b.Cfg.RuntimeDirs)
 	if len(runtimeCompBundles) > 0 {
 		printf("  %s*%s Compiled %d runtime components\n", cCyan, cReset, len(runtimeCompBundles))
 	}
@@ -1705,6 +1705,7 @@ func (b *Builder) writeGlobalCSS(mergedCSS string) (string, error) {
 		processedCSS = b.inlineImports(processedCSS)
 		processedCSS, _ = b.processCSSDirectives(processedCSS)
 		processedCSS = injectFontDisplay(processedCSS, b.Cfg.Fonts.DisplayValue())
+		processedCSS = b.prefixCSSURLs(processedCSS)
 		if b.Cfg.Fonts.PreloadEnabled() {
 			b.globalFonts = collectFontPreloads(processedCSS, b.Cfg.Fonts.PreloadLimit)
 			b.fontPreloadHTML = fontPreloadHTML(b.globalFonts, b.Cfg.BaseURLPath())
@@ -1778,6 +1779,7 @@ func (b *Builder) writePageCSS(results []*PageResult) (map[string]bool, error) {
 		processedCSS := b.inlineImports(pageCss)
 		processedCSS, info := b.processCSSDirectives(processedCSS)
 		processedCSS = injectFontDisplay(processedCSS, b.Cfg.Fonts.DisplayValue())
+		processedCSS = b.prefixCSSURLs(processedCSS)
 		lastFonts = nil
 		if b.Cfg.Fonts.PreloadEnabled() {
 			lastFonts = collectFontPreloads(processedCSS, b.Cfg.Fonts.PreloadLimit)
@@ -1976,7 +1978,7 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 			if !pageNeedsRuntime(r) {
 				runtimeJSFile = ""
 			}
-			chunkPreloads := dynamicChunkURLs(r.HydrationJS)
+			chunkPreloads := dynamicChunkURLs(r.HydrationJS, b.Cfg.BaseURLPath())
 			chunkPreloads = append(chunkPreloads, lazyChunkPreloads(r.HydrationJS, b.Cfg.BaseURLPath())...)
 			var html string
 			if r.LoadingHTML != "" {
@@ -2040,6 +2042,7 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 						h = strings.Replace(h, "</head>", seoTags+"</head>", 1)
 					}
 				}
+				h = b.prefixHeadURLs(h)
 				// 3. Minify code in memory
 				if b.Cfg.ShouldMinifyHTML() {
 					h = minifyHTMLWith(h, b.linkedWhiteSpaceRules(h))
@@ -2136,6 +2139,7 @@ func (b *Builder) newBundler() *bundler.Bundler {
 	bnd.SetTailwindImports(b.tailwindImportMode())
 	bnd.SetMarkdownConfig(b.Cfg.Markdown)
 	bnd.SetMarkdownBasePath(b.Cfg.BaseURLPath())
+	bnd.SetURLBasePath(b.Cfg.BaseURLPath())
 	return bnd
 }
 
@@ -2475,6 +2479,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 		emitter.CodeTheme = b.Cfg.Markdown.CodeTheme
 		emitter.IconResolver = b.iconResolver
 		emitter.EvalJS = b.jsExprEvaluator()
+		emitter.BasePath = b.Cfg.BaseURLPath()
 		emitter.GoComponents = pageOpts.GoComponents
 		emitResult = emitter.Emit(tree)
 		tree, emitResult = applyBoundaryFallbacks(page, tree, emitResult, pageOpts, func(opts irtree.BuildOptions) (*irtree.ComponentTree, *renderer.EmitResult) {
@@ -2486,6 +2491,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 			em.CodeTheme = b.Cfg.Markdown.CodeTheme
 			em.IconResolver = b.iconResolver
 			em.EvalJS = b.jsExprEvaluator()
+			em.BasePath = b.Cfg.BaseURLPath()
 			em.GoComponents = opts.GoComponents
 			return t, em.Emit(t)
 		})
@@ -3366,6 +3372,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	emitter.CodeTheme = b.Cfg.Markdown.CodeTheme
 	emitter.IconResolver = b.iconResolver
 	emitter.EvalJS = b.jsExprEvaluator()
+	emitter.BasePath = b.Cfg.BaseURLPath()
 	emitter.GoComponents = opts.GoComponents
 	emitResult := emitter.Emit(tree)
 	renderer.EmitMeta(tree, emitResult)
@@ -3484,6 +3491,7 @@ func (b *Builder) NewRenderPipeline(entryModule *bundler.Module, page string) (*
 	}
 	emitter := renderer.NewEmitter()
 	emitter.CodeTheme = b.Cfg.Markdown.CodeTheme
+	emitter.BasePath = b.Cfg.BaseURLPath()
 	result := emitter.Emit(tree)
 
 	if len(result.Errors) > 0 {
@@ -3625,6 +3633,7 @@ func (b *Builder) renderLoadingComponent(pagePath string) string {
 	emitter := renderer.NewEmitter()
 	emitter.CodeTheme = b.Cfg.Markdown.CodeTheme
 	emitter.EvalJS = b.jsExprEvaluator()
+	emitter.BasePath = b.Cfg.BaseURLPath()
 	emitResult := emitter.Emit(tree)
 
 	loadingEmitCache.Store(loadingPath, &layoutEmitCacheEntry{
@@ -4439,7 +4448,9 @@ func substituteImportMetaURL(hydrationJS, outName, jsFile, basePath string) stri
 	if !strings.Contains(hydrationJS, "import.meta.url") {
 		return hydrationJS
 	}
-	return strings.ReplaceAll(hydrationJS, "import.meta.url", strconv.Quote(pageScriptSrc(outName, jsFile, basePath)))
+	// new URL() requires an absolute base, so a bare root-relative path would
+	// throw for the very idiom this exists to support.
+	return strings.ReplaceAll(hydrationJS, "import.meta.url", "(location.origin+"+strconv.Quote(pageScriptSrc(outName, jsFile, basePath))+")")
 }
 
 // writeAssetFiles copies every registered asset into the output directory at

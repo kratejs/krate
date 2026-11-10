@@ -932,7 +932,11 @@ func provideRuntime(t *testing.T, work string) {
 // cleanup; see stopInProcessServers.
 func startKrateServer(t *testing.T, root string, cfg *config.Config) (string, error) {
 	t.Helper()
-	port := freePort(t)
+	return startKrateServerOn(t, root, cfg, freePort(t))
+}
+
+func startKrateServerOn(t *testing.T, root string, cfg *config.Config, port int) (string, error) {
+	t.Helper()
 	cfg.Server.Port = port
 	errCh := make(chan error, 1)
 	go func() {
@@ -959,16 +963,20 @@ func startKrateServer(t *testing.T, root string, cfg *config.Config) (string, er
 		time.Sleep(100 * time.Millisecond)
 	}
 	if hasActionManifest(root) {
-		// The action sidecar listens on port+1.
+		// The action sidecar takes port+1 unless that port was busy.
+		apiPort := port + 1
+		if v, ok := sidecarPorts.Load(port); ok {
+			apiPort = v.(int)
+		}
 		for time.Now().Before(deadline) {
-			c, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port+1), 200*time.Millisecond)
+			c, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", apiPort), 200*time.Millisecond)
 			if err == nil {
 				c.Close()
 				return base, nil
 			}
 			time.Sleep(100 * time.Millisecond)
 		}
-		return "", fmt.Errorf("action sidecar on port %d did not start", port+1)
+		return "", fmt.Errorf("action sidecar on port %d did not start", apiPort)
 	}
 	return base, nil
 }

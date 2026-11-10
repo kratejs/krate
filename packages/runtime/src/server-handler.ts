@@ -92,7 +92,7 @@ export interface HandlerConfig {
   maxBodyBytes: number;
   /** Request body cap for API routes and actions, bytes. */
   maxAPIBodyBytes: number;
-  redirects: Array<{ source: string; destination: string; permanent?: boolean }>;
+  redirects: Array<{ source: string; destination: string; permanent?: boolean; basePath?: boolean }>;
   rewrites: Array<{ source: string; destination: string }>;
   headers: Array<{ source: string; headers: Record<string, string> }>;
   /** Resolved security headers; an empty string means "do not send". */
@@ -411,6 +411,8 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
   const trustProxy: boolean | null = options.trustProxy !== undefined ? options.trustProxy : cfg.trustProxy === undefined ? null : cfg.trustProxy;
   const platform = PLATFORMS[target];
   const basePath = cfg.basePath || "";
+  // Server-rendered <Link>s read the base path from here, as in the browser.
+  if (basePath) (globalThis as { __KRATE_CFG__?: unknown }).__KRATE_CFG__ = { basePath };
   const hashed = new Set(data.hashedAssets);
   const staticOnly = new Set(data.staticOnlyRoutes.map(normalizeRoutePattern));
   const sha256Hex = options.sha256Hex || portableSha256Hex;
@@ -1110,14 +1112,34 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
 
   // Redirects and rewrites
 
-  async function redirectRewriteHandler(rs: ReqState): Promise<Response> {
-    const p = rs.path;
-    for (const rd of cfg.redirects) {
+  // Under a base path, basePath: false rules match the full path before the
+  // base is stripped (see handle) and stay out of this list.
+  const insideRedirects = basePath ? cfg.redirects.filter((rd) => rd.basePath !== false) : cfg.redirects;
+  const outsideRedirects = basePath ? cfg.redirects.filter((rd) => rd.basePath === false) : [];
+
+  function configRedirect(rs: ReqState, p: string, rules: HandlerConfig["redirects"]): Response | null {
+    for (const rd of rules) {
       if (matchRedirect(p, rd.source)) {
         const dest = rewriteDestination(p, rd.source, rd.destination);
         return goRedirect(dest, p, rs.method, rd.permanent ? 301 : 302, rs.res);
       }
     }
+    return null;
+  }
+
+  /** Prefixes a root-relative Location from inside the base path. */
+  function withBaseLocation(res: Response): Response {
+    const loc = res.headers.get("location");
+    if (!loc || !loc.startsWith("/") || loc.startsWith("//")) return res;
+    const headers = new Headers(res.headers);
+    headers.set("location", basePath + loc);
+    return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
+  }
+
+  async function redirectRewriteHandler(rs: ReqState): Promise<Response> {
+    const p = rs.path;
+    const redirected = configRedirect(rs, p, insideRedirects);
+    if (redirected) return redirected;
     for (const rw of cfg.rewrites) {
       if (matchRedirect(p, rw.source)) {
         const rewritten = rewriteDestination(p, rw.source, rw.destination);
@@ -1928,9 +1950,17 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     };
     try {
       // Mount under the base path: requests outside it redirect (GET/HEAD) or 404.
+      // The app then sees base-less paths, so a root-relative Location it
+      // answers with gets the base on the way out.
+      let mounted = false;
       if (basePath) {
         const p = rs.path;
         if (!(p.startsWith("/__krate/") || p === "/healthz" || p === "/readyz")) {
+          const outside = configRedirect(rs, p, outsideRedirects);
+          if (outside) {
+            applySecurityAndHeaders(rs);
+            return outside;
+          }
           if (p === basePath || p === basePath + "/") rs.path = "/";
           else if (p.startsWith(basePath + "/")) rs.path = p.slice(basePath.length);
           else {
@@ -1938,13 +1968,16 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
             if (rs.method === "GET" || rs.method === "HEAD") return goRedirect(basePath + (p.startsWith("/") ? p : "/" + p), p, rs.method, 307, rs.res);
             return notFoundText(rs);
           }
+          mounted = true;
+          if (rs.rawPath.startsWith(basePath)) rs.rawPath = rs.rawPath.slice(basePath.length) || "/";
         }
       }
       applySecurityAndHeaders(rs);
       const preflight = applyCORS(rs);
-      if (preflight) return preflight;
+      if (preflight) return mounted ? withBaseLocation(preflight) : preflight;
       await sleepMicrotask();
-      return await mux(rs);
+      const res = await mux(rs);
+      return mounted ? withBaseLocation(res) : res;
     } catch (err) {
       console.error(`[krate] panic recovered: ${rs.method} ${rs.path}: ${(err && (err as any).stack) || err}`);
       if (rs.path.startsWith("/api/")) {

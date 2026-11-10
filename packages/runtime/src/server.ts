@@ -2,6 +2,7 @@
 // Provides the same API as the client runtime but renders to HTML strings.
 
 import { ATTR_ALIASES } from './htmlspec-attributes.js';
+import { withBase } from './base-path.js';
 import { highlight as highlightCode, trimSpace } from './highlight.js';
 
 export { getActionContext, headers, cookies, redirect } from './action-context.js';
@@ -560,7 +561,7 @@ export function Link(props: {
 }): JSXNode {
   const { href = "", prefetch, replace, scroll, children, ...rest } = props;
   const attrs: string[] = [];
-  if (href) attrs.push(`href="${escapeHTML(href)}"`);
+  if (href) attrs.push(`href="${escapeHTML(withBase(href))}"`);
 
   const external =
     /^(https?:|mailto:|tel:|#|javascript:)/.test(href) ||

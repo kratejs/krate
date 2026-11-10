@@ -2,11 +2,14 @@ package build
 
 import (
 	"encoding/json"
+	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
 )
@@ -165,5 +168,47 @@ func TestNoJSActionStateFeedbackInBrowser(t *testing.T) {
 	}
 	if strings.TrimSuffix(res.AfterValid.Path, "/") != "/done" || res.AfterValid.Page != "done" {
 		t.Errorf("a valid post still redirects: %s", last)
+	}
+}
+
+// The action sidecar falls back to another port when port+1 is taken; the
+// test harness has to follow it there instead of waiting on port+1.
+func TestActionSidecarPortFallback(t *testing.T) {
+	e2eEnv(t)
+	root := t.TempDir()
+	if err := copyTree(t, filepath.Join("testdata", "action_redirect"), root); err != nil {
+		t.Fatal(err)
+	}
+	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.PagesDir = filepath.Join(root, "src", "pages")
+	cfg.OutDir = filepath.Join(root, "dist")
+	if err := New(root, cfg).BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	port := freePort(t)
+	busy, err := net.Listen("tcp", fmt.Sprintf(":%d", port+1))
+	if err != nil {
+		t.Skipf("cannot hold port %d: %v", port+1, err)
+	}
+	// Hold port+1 only until the server has picked its sidecar port, so a
+	// harness still dialing port+1 finds nothing there.
+	go func() {
+		for i := 0; i < 300; i++ {
+			if _, ok := sidecarPorts.Load(port); ok {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		_ = busy.Close()
+	}()
+	if _, err := startKrateServerOn(t, root, cfg, port); err != nil {
+		t.Fatalf("serve with port+1 taken: %v", err)
+	}
+	v, ok := sidecarPorts.Load(port)
+	if !ok || v.(int) == port+1 {
+		t.Fatalf("sidecar port = %v, want a port other than %d", v, port+1)
 	}
 }

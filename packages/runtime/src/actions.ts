@@ -21,6 +21,7 @@
  *             "revalidated":true?,"revalidation":{"paths":[...],"tags":[...]}?}
  *            {"ok":false,"error":{"message":M,"digest":D}}
  */
+import { basePath, withBase } from './base-path.js';
 import { createEffect, onCleanup, krateRunEvent, krateTransitionWrites } from './signal.js';
 
 /** Field and query parameter carrying the JSON leading arguments of a form call. */
@@ -60,11 +61,6 @@ interface Envelope {
   details?: string;
 }
 
-function basePath(): string {
-  const cfg = (globalThis as { __KRATE_CFG__?: { basePath?: string } }).__KRATE_CFG__;
-  return cfg && cfg.basePath ? cfg.basePath : '';
-}
-
 /** True for a server action proxy created by `__krateAction`. */
 export function isServerAction(value: unknown): value is ServerActionProxy {
   return typeof value === 'function' && typeof (value as Partial<ServerActionProxy>).$$krateAction === 'string';
@@ -79,7 +75,7 @@ function navigateTo(url: string): void {
   if (!safe) return;
   const nav = (globalThis as { navigate?: (u: string) => unknown }).navigate;
   if (typeof nav === 'function') nav(safe);
-  else if (typeof location !== 'undefined') location.assign(safe);
+  else if (typeof location !== 'undefined') location.assign(withBase(safe));
 }
 
 /** Only same-origin absolute paths are followed after an action. */

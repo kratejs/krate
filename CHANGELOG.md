@@ -20,8 +20,24 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
   `.env` files with the shell winning, on every runtime. Code that relied on a shell variable
   being absent will see it.
 - Shadcn components built on `radix-ui` need Preact 11; current shadcn passes `ref` as a prop.
+- Under a base path, `<Link>`, `navigate()`, `krateRouter` and `redirect()` add the prefix
+  themselves, including when the path already starts with it. Remove a prefix you wrote by hand,
+  and stop passing `location.pathname` to them.
+- Under a base path, config `redirects` match and send paths under it, and a root-relative
+  `Location` from an API route, middleware, `redirect()` or a server action gets the prefix.
+  Remove a prefix you wrote into a destination or `Location` by hand.
+- A path in `site.url` now sets the base path. To keep a site at the root behind a proxy that
+  strips the prefix, set `basePath: "/"`.
 
 ### Added
+
+- `site.url` says where the site lives: `https://example.com/example/a` serves it under
+  `/example/a` with no `basePath`.
+- `basePath: false` on a redirect rule matches and sends paths outside the base path, as in
+  Next.js.
+- `KR7144` warns about a plain `<a href="/x">` or `<img src="/x">` under a base path.
+- `krate deploy --target gh-pages` warns about a `CNAME` file together with a base path, because
+  GitHub Pages serves a custom domain at its root.
 
 - `KR8360` warns when a conditional renders the same component in both branches but the build
   cannot keep one instance: render-prop children, a differing `ref` or spread, a side-effecting
@@ -50,6 +66,15 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Fixed
 
+- `basePath` now reaches every URL the compiler emits. Imported assets, generated CSS `url()`s,
+  dynamic `import()` chunks and workers used to 404 on static hosts, as did Markdown links,
+  convention OG images, `llms.txt` and feed links. Deploy adapters write rules for the prefixed
+  paths, and speculation rules exclude the prefixed `/api` and `/__krate`.
+- Redirects under a base path no longer leave the site. Config redirects, `redirect()` and route
+  handler `Location` headers used to drop the prefix, costing an extra hop for GET and failing
+  for POST.
+- `new URL(rel, import.meta.url)` threw in page scripts, because the substituted URL was not
+  absolute.
 - Errors thrown during a page's first render reach the dev overlay and `/__krate/state`. The
   overlay loads after the page script, so it missed them; the page head now buffers them.
 - Importing `krate/content` with no collections configured says so, instead of telling you to

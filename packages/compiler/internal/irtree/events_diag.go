@@ -1,11 +1,13 @@
 package irtree
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/csssignals"
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
+	"github.com/kratejs/krate/packages/compiler/internal/sitepath"
 )
 
 // reactDOMEvents lists React DOM event props (without the on prefix and the
@@ -260,7 +262,7 @@ func (b *builder) warnEventsAndForms(el *ast.JSXElement) {
 	if b.locateOnly != 0 {
 		return
 	}
-	checkEventsAndForms(el, func(code diag.Code, pos ast.Pos, msg, hint string) {
+	report := func(code diag.Code, pos ast.Pos, msg, hint string) {
 		key := string(code) + "@" + b.srcFnName() + ":" + itoa(pos.Line) + ":" + itoa(pos.Col)
 		if b.eventDiagSeen == nil {
 			b.eventDiagSeen = map[string]bool{}
@@ -270,5 +272,47 @@ func (b *builder) warnEventsAndForms(el *ast.JSXElement) {
 		}
 		b.eventDiagSeen[key] = true
 		b.warnings = append(b.warnings, b.diagAt(pos, diag.SeverityWarning, msg, hint).WithCode(code))
-	})
+	}
+	checkEventsAndForms(el, report)
+	checkBasePathURL(el, b.basePath, report)
+}
+
+// checkBasePathURL reports a plain <a href> or <img src> whose literal
+// root-relative URL would miss a site served under a base path. Links lowered
+// from <Link> and URLs that already carry the base path are fine.
+func checkBasePathURL(el *ast.JSXElement, base string, report eventFormReporter) {
+	if base == "" || el == nil || el.Opening == nil {
+		return
+	}
+	var name, hint string
+	switch el.Opening.Name {
+	case "a":
+		name, hint = "href", "use <Link> for a page on this site: it adds the base path"
+	case "img":
+		name, hint = "src", "use <Image> or import the file: both add the base path"
+	default:
+		return
+	}
+	var target *ast.JSXAttr
+	for _, attr := range el.Opening.Attributes {
+		switch {
+		case attr.Spread:
+		case attr.Name == "data-krate-link", attr.Name == "data-krate-external":
+			return
+		case attr.Name == name:
+			target = attr
+		}
+	}
+	if target == nil {
+		return
+	}
+	lit, ok := target.Value.(*ast.Literal)
+	if !ok || lit.Kind != ast.StringLit || !sitepath.IsRootRelative(lit.Value) {
+		return
+	}
+	if lit.Value == base || strings.HasPrefix(lit.Value, base+"/") {
+		return
+	}
+	report(diag.CodeBasePathURL, el.Position,
+		fmt.Sprintf("<%s %s=%q> ignores the site base path %q, so it points outside the site", el.Opening.Name, name, lit.Value, base), hint)
 }

@@ -7,13 +7,13 @@ export default function SiteLayout({ children }: { children: any }) {
       </Head>
 
       <header class="site-navbar">
-        <a class="site-navbar-brand" href="/">
+        <Link class="site-navbar-brand" href="/">
           <span class="site-logo">k</span>
           <span>__PROJECT_DISPLAY_NAME__</span>
-        </a>
+        </Link>
         <nav class="site-nav">
-          <a href="/">Home</a>
-          <a href="/about">About</a>
+          <Link href="/">Home</Link>
+          <Link href="/about">About</Link>
         </nav>
       </header>
 

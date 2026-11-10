@@ -13,6 +13,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/resolver"
+	"github.com/kratejs/krate/packages/compiler/internal/sitepath"
 )
 
 // splitImportQuery splits "./a.txt?raw" into ("./a.txt", "raw").
@@ -149,7 +150,7 @@ func (b *Bundler) dataImportDecl(mod *Module, imp *ast.ImportStmt, spec string) 
 			return nil, b.importDiag(mod, spec, "asset "+base+" was not registered", "")
 		}
 		return bindDefault(imp, func() ast.Expr {
-			return &ast.Literal{Position: imp.Position, Kind: ast.StringLit, Value: url}
+			return &ast.Literal{Position: imp.Position, Kind: ast.StringLit, Value: sitepath.Join(b.urlBase, url)}
 		}), nil
 	case !hasQuery && strings.EqualFold(filepath.Ext(base), ".json"):
 		data, err := os.ReadFile(abs)

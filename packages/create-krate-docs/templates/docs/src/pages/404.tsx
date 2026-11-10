@@ -7,7 +7,7 @@ export default function NotFound() {
       <div class="not-found-code">404</div>
       <h1>Page not found</h1>
       <p>That page doesn't exist. Try the docs home page instead.</p>
-      <a class="btn btn-primary" href="/docs/">Go to docs</a>
+      <Link class="btn btn-primary" href="/docs/">Go to docs</Link>
     </div>
   );
 }

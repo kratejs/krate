@@ -12,12 +12,12 @@ export default function SiteLayout({ children }: { children: any }) {
       <a class="skip-link" href="#main">Skip to content</a>
 
       <header class="site-navbar">
-        <a class="site-navbar-brand" href="/">
+        <Link class="site-navbar-brand" href="/">
           <span class="site-logo">k</span>
           <span class="site-navbar-name">__PROJECT_DISPLAY_NAME__</span>
-        </a>
+        </Link>
         <nav class="site-nav">
-          <a href="/docs/">Docs</a>
+          <Link href="/docs/">Docs</Link>
           <a href="https://github.com/">GitHub</a>
         </nav>
         <div class="site-navbar-actions">

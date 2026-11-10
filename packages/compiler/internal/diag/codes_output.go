@@ -10,10 +10,20 @@ const (
 	CodeStaticParamsEntry Code = "KR7142"
 	// CodeMiddlewareExport: a middleware file with no handler to run.
 	CodeMiddlewareExport Code = "KR7143"
+	// CodeBasePathURL: a plain tag with a root-relative URL under a base path.
+	CodeBasePathURL Code = "KR7144"
 )
 
 func init() {
 	Register(
+		CodeInfo{
+			Code:  CodeBasePathURL,
+			Title: "Root-relative URL on a plain tag ignores the base path",
+			Explanation: "The site is served under a base path, but a plain `<a href=\"/x\">` or `<img src=\"/x\">` " +
+				"is emitted exactly as written, so the browser requests it from the domain root and misses the " +
+				"site. Use `<Link href=\"/x\">` for pages, and `<Image>` or an import for images: both add the base " +
+				"path. Write the full path only when the URL really does belong outside the site.",
+		},
 		CodeInfo{
 			Code:  CodeTailwindDisabled,
 			Title: "Tailwind input found but Tailwind is not enabled",

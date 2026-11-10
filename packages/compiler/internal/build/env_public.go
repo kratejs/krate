@@ -115,5 +115,8 @@ func (b *Builder) envFingerprint() string {
 	for _, kv := range environ.KVList(b.Env) {
 		h.Write([]byte(kv + "\x00"))
 	}
+	// Pages carry the base path in asset and link URLs.
+	h.Write([]byte{1})
+	h.Write([]byte(b.Cfg.BaseURLPath()))
 	return hex.EncodeToString(h.Sum(nil))
 }

@@ -131,8 +131,11 @@ func (c *Config) Validate() (warnings []string, err error) {
 		if strings.Contains(bp, "://") || !strings.HasPrefix(bp, "/") {
 			return nil, fmt.Errorf("basePath must be a path starting with / (e.g. \"/docs\"), got %q", bp)
 		}
-		if strings.HasSuffix(bp, "/") {
+		if bp != "/" && strings.HasSuffix(bp, "/") {
 			warnings = append(warnings, fmt.Sprintf("basePath %q should not end with /", bp))
+		}
+		if sp := strings.TrimRight(c.siteURLPath(), "/"); sp != "" && bp != "/" && sp != strings.TrimRight(bp, "/") {
+			warnings = append(warnings, fmt.Sprintf("basePath %q differs from the path of the site URL (%q); basePath wins for routing and assets, so canonical URLs may not match where the site is served", bp, sp))
 		}
 	}
 	switch c.Compat.ModeOrDefault() {

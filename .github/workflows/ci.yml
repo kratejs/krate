@@ -448,7 +448,7 @@ jobs:
       # server components, revalidation), and code highlighting (light/dark
       # switching, code highlighted in the browser as it changes).
       - name: App browser tests
-        run: go test -run 'TestRouterBrowserE2E|TestSegmentPagesBrowser|TestServerlessNodeBrowser|TestUseClientIslandBrowser|TestMigratedNextAppBrowser|TestTailwindLayeringInBrowser|TestComponentsA11yBrowser|TestServerActionRedirectInBrowser|TestNoJSActionStateFeedbackInBrowser|TestCSPSpeculationRulesInBrowser|TestCodeThemeBrowser|TestDynamicCodeBrowser' -count=1 -v ./internal/build
+        run: go test -run 'TestRouterBrowserE2E|TestBasePathBrowser|TestSegmentPagesBrowser|TestServerlessNodeBrowser|TestUseClientIslandBrowser|TestMigratedNextAppBrowser|TestTailwindLayeringInBrowser|TestComponentsA11yBrowser|TestServerActionRedirectInBrowser|TestNoJSActionStateFeedbackInBrowser|TestCSPSpeculationRulesInBrowser|TestCodeThemeBrowser|TestDynamicCodeBrowser' -count=1 -v ./internal/build
         working-directory: packages/compiler
         env:
           KRATE_BROWSER: ${{ matrix.browser }}

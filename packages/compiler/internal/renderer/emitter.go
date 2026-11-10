@@ -162,6 +162,8 @@ type Emitter struct {
 	// Number, ...) so server-component SSR computes globals like Date.now()
 	// with real JS semantics instead of Go approximations.
 	EvalJS func(code string) (string, error)
+	// BasePath is the site base path <Link> adds to a root-relative href.
+	BasePath string
 
 	// GoComponents maps imported Go component names to their refs. Wired by the
 	// build pipeline; SSREval renders them via the shared goCollector.
@@ -466,6 +468,7 @@ func (e *Emitter) emitSSREvaluated(node *irtree.ComponentNode) SlotOutput {
 	if e.EvalJS != nil {
 		eval.SetEvalJS(e.EvalJS)
 	}
+	eval.basePath = e.BasePath
 	if len(e.GoComponents) > 0 {
 		collector := e.goCollector
 		eval.SetGoComponents(e.GoComponents, func(callID, name, propsJSON string) string {
@@ -915,6 +918,7 @@ func (e *Emitter) emitSlotsParallel(slots []irtree.SlotNode) SlotOutput {
 		sub.functions = e.functions
 		sub.IconResolver = e.IconResolver
 		sub.EvalJS = e.EvalJS
+		sub.BasePath = e.BasePath
 		sub.GoComponents = e.GoComponents
 		sub.goCollector = e.goCollector
 		// Propagate build-wide tables so SSREval in this branch folds cva

@@ -7,7 +7,7 @@ export default function NotFound() {
       <div class="not-found-code">404</div>
       <h1>Page not found</h1>
       <p>That page doesn't exist. Head back home and try again.</p>
-      <a class="btn btn-primary" href="/">Go home</a>
+      <Link class="btn btn-primary" href="/">Go home</Link>
     </div>
   );
 }

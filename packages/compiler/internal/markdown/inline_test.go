@@ -123,12 +123,29 @@ func TestRelativeImagesResolveThroughImageURL(t *testing.T) {
 	if !strings.Contains(got, `.png?x=1`) {
 		t.Errorf("query lost:\n%s", got)
 	}
-	for _, keep := range []string{`src="img/missing.png"`, `src="https://e.test/c.png"`, `src="/abs.png"`, `src="../secret.png"`} {
+	if !strings.Contains(got, `src="/base/abs.png"`) {
+		t.Errorf("root-relative image did not get the base path:\n%s", got)
+	}
+	for _, keep := range []string{`src="img/missing.png"`, `src="https://e.test/c.png"`, `src="../secret.png"`} {
 		if !strings.Contains(got, keep) {
 			t.Errorf("expected %s untouched:\n%s", keep, got)
 		}
 	}
 	if len(registered) != 1 {
 		t.Errorf("want exactly one registered asset, got %v", registered)
+	}
+}
+
+func TestRootLinkResolver(t *testing.T) {
+	if RootLinkResolver("") != nil {
+		t.Error("a root site needs no resolver")
+	}
+	cfg := DefaultConfig()
+	cfg.LinkURL = RootLinkResolver("/base")
+	got := RenderToHTML("[a](/docs/x/) [b](other/) [c](https://e.test/) [d](#top) [e](//e.test/x)\n", cfg)
+	for _, want := range []string{`href="/base/docs/x/"`, `href="other/"`, `href="https://e.test/"`, `href="#top"`, `href="//e.test/x"`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %s:\n%s", want, got)
+		}
 	}
 }
