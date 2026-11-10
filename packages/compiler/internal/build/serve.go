@@ -1374,7 +1374,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	// Load embedded middleware runtime if configured (default: quickjs)
 	var middlewareRT *jsruntime.MiddlewareRuntime
 	middlewareRTOption := strings.ToLower(cfg.SSR.MiddlewareRuntime)
-	if middlewareRTOption == "" || middlewareRTOption == "quickjs" {
+	if embeddedRuntime(middlewareRTOption) {
 		if hub != nil {
 			// Dev reloads the module whenever .krate/middleware.js changes (and
 			// picks it up if it is added after startup).
@@ -1564,7 +1564,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 
 	// Load embedded API route runtime if configured (default: quickjs)
 	var apiRT *jsruntime.APIRouteRuntime
-	if apiRTOption == "" || apiRTOption == "quickjs" {
+	if embeddedRuntime(apiRTOption) {
 		if _, err := os.Stat(apiDir); err == nil {
 			apiRT = jsruntime.NewAPIRouteRuntime(apiDir)
 			apiRT.SetEnv(serverEnv)

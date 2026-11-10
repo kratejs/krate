@@ -184,3 +184,55 @@ func TestLoadAPIRouteFeatures(t *testing.T) {
 		})
 	}
 }
+
+// TestRuntimeCompatWarningsPerBuild checks that rebuilding a route replaces its
+// warnings instead of adding to them, and that a fixed or deleted route drops
+// its warnings.
+func TestRuntimeCompatWarningsPerBuild(t *testing.T) {
+	b, root := compatProject(t, map[string]string{
+		"src/api/t.ts": "export const GET = () => new Response(new TransformStream().readable);\n",
+	}, nil)
+	route := filepath.Join(root, "src", "api", "t.ts")
+	for i := 0; i < 3; i++ {
+		if err := b.CompileAPIRoutes([]string{route}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if ws := b.RuntimeCompatWarnings(); len(ws) != 1 {
+		t.Fatalf("after three builds: %d warnings, want 1: %v", len(ws), ws)
+	}
+	if err := os.WriteFile(route, []byte("export const GET = () => new Response(\"ok\");\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.CompileAPIRoutes([]string{route}); err != nil {
+		t.Fatal(err)
+	}
+	if ws := b.RuntimeCompatWarnings(); len(ws) != 0 {
+		t.Fatalf("after the fix: %v", ws)
+	}
+	if err := os.WriteFile(route, []byte("export const GET = () => new Response(new TransformStream().readable);\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.CompileAPIRoutes([]string{route}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(route); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.BuildAllAPI(); err != nil {
+		t.Fatal(err)
+	}
+	if ws := b.RuntimeCompatWarnings(); len(ws) != 0 {
+		t.Fatalf("after deleting the route: %v", ws)
+	}
+}
+
+// TestEmbeddedRuntimeOption checks the runtime option values that select the
+// embedded runtime; serve and the build both use embeddedRuntime.
+func TestEmbeddedRuntimeOption(t *testing.T) {
+	for opt, want := range map[string]bool{"": true, "quickjs": true, "QuickJS": true, "node": false, "Bun": false, "deno": false} {
+		if got := embeddedRuntime(opt); got != want {
+			t.Errorf("embeddedRuntime(%q) = %v, want %v", opt, got, want)
+		}
+	}
+}

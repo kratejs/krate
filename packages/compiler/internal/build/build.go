@@ -128,10 +128,11 @@ type PageResult struct {
 }
 
 type Builder struct {
-	// runtimeCompatWarnings collects the KR7160 warnings of API routes and
-	// middleware built for the embedded runtime.
+	// runtimeCompatWarnings holds the KR7160 warnings of the latest build of
+	// each API route and the middleware built for the embedded runtime, keyed
+	// by route source file ("middleware" for the middleware).
 	runtimeCompatMu       sync.Mutex
-	runtimeCompatWarnings []diag.Diagnostic
+	runtimeCompatWarnings map[string][]diag.Diagnostic
 
 	// metaImages indexes the images the opengraph-image and twitter-image
 	// convention files produced in this build.
@@ -4118,10 +4119,11 @@ func (b *Builder) BuildMiddleware() error {
 		return fmt.Errorf("writing middleware: %w", err)
 	}
 	if !embeddedRuntime(b.Cfg.SSR.MiddlewareRuntime) {
+		b.setRuntimeCompatWarnings("middleware", nil)
 		_ = os.Remove(middlewareMetaPath(b.Root))
 		return nil
 	}
-	features := b.scanRuntimeCompat(result.Metafile, jsruntime.CompatMiddlewareRuntime)
+	features := b.scanRuntimeCompat("middleware", result.Metafile, jsruntime.CompatMiddlewareRuntime)
 	if err := writeMiddlewareMeta(b.Root, features); err != nil {
 		return fmt.Errorf("writing middleware metadata: %w", err)
 	}
@@ -4898,6 +4900,7 @@ func (b *Builder) BuildAllAPI() error {
 	if err != nil {
 		return fmt.Errorf("scanning api routes: %w", err)
 	}
+	b.pruneRuntimeCompatWarnings(jsRoutes)
 
 	if len(jsRoutes) > 0 {
 		if err := b.CompileAPIRoutes(jsRoutes); err != nil {
@@ -5074,7 +5077,9 @@ func (b *Builder) compileSingleRoute(file string, apiSrcDir string) (apiRouteMet
 	// Node-only routes are served by the sidecar, so only embedded-runtime
 	// routes are checked against the embedded runtime's API surface.
 	if !meta.NodeOnly && embeddedRuntime(b.Cfg.SSR.APIRuntime) {
-		meta.Features = b.scanRuntimeCompat(quickjsResult.Metafile, jsruntime.CompatAPIRuntime)
+		meta.Features = b.scanRuntimeCompat(file, quickjsResult.Metafile, jsruntime.CompatAPIRuntime)
+	} else {
+		b.setRuntimeCompatWarnings(file, nil)
 	}
 
 	return meta, nil

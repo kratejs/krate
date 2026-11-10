@@ -78,12 +78,13 @@ func esbuildNamespaced(in string) bool {
 // runtime, reports KR7160 for the unsupported APIs they use, and returns the
 // ledger features they reference (nil when the scan could not see everything).
 // option is jsruntime.CompatAPIRuntime or jsruntime.CompatMiddlewareRuntime.
-func (b *Builder) scanRuntimeCompat(metafile, option string) *[]string {
+// unit names the route or middleware bundled; its warnings replace the ones
+// its last build reported, so dev rebuilds do not accumulate them.
+func (b *Builder) scanRuntimeCompat(unit, metafile, option string) *[]string {
 	scan := jsruntime.ScanCompatFiles(esbuildBundledInputs(metafile))
-	if ds := jsruntime.CompatDiagnostics(scan, b.Root, option); len(ds) > 0 {
-		b.runtimeCompatMu.Lock()
-		b.runtimeCompatWarnings = append(b.runtimeCompatWarnings, ds...)
-		b.runtimeCompatMu.Unlock()
+	ds := jsruntime.CompatDiagnostics(scan, b.Root, option)
+	b.setRuntimeCompatWarnings(unit, ds)
+	if len(ds) > 0 {
 		printWarningsOnce(os.Stderr, ds)
 	}
 	if !scan.Complete {
@@ -93,11 +94,50 @@ func (b *Builder) scanRuntimeCompat(metafile, option string) *[]string {
 	return &features
 }
 
-// RuntimeCompatWarnings returns the KR7160 warnings reported so far.
+func (b *Builder) setRuntimeCompatWarnings(unit string, ds []diag.Diagnostic) {
+	b.runtimeCompatMu.Lock()
+	defer b.runtimeCompatMu.Unlock()
+	if len(ds) == 0 {
+		delete(b.runtimeCompatWarnings, unit)
+		return
+	}
+	if b.runtimeCompatWarnings == nil {
+		b.runtimeCompatWarnings = map[string][]diag.Diagnostic{}
+	}
+	b.runtimeCompatWarnings[unit] = ds
+}
+
+// pruneRuntimeCompatWarnings drops the warnings of API routes that no longer
+// exist; routes lists the current ones.
+func (b *Builder) pruneRuntimeCompatWarnings(routes []string) {
+	keep := map[string]bool{"middleware": true}
+	for _, r := range routes {
+		keep[r] = true
+	}
+	b.runtimeCompatMu.Lock()
+	defer b.runtimeCompatMu.Unlock()
+	for u := range b.runtimeCompatWarnings {
+		if !keep[u] {
+			delete(b.runtimeCompatWarnings, u)
+		}
+	}
+}
+
+// RuntimeCompatWarnings returns the KR7160 warnings of the latest build of
+// each API route and the middleware.
 func (b *Builder) RuntimeCompatWarnings() []diag.Diagnostic {
 	b.runtimeCompatMu.Lock()
 	defer b.runtimeCompatMu.Unlock()
-	return append([]diag.Diagnostic(nil), b.runtimeCompatWarnings...)
+	units := make([]string, 0, len(b.runtimeCompatWarnings))
+	for u := range b.runtimeCompatWarnings {
+		units = append(units, u)
+	}
+	sort.Strings(units)
+	var out []diag.Diagnostic
+	for _, u := range units {
+		out = append(out, b.runtimeCompatWarnings[u]...)
+	}
+	return out
 }
 
 // middlewareMeta is .krate/middleware.json, written next to middleware.js.
