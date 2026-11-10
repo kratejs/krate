@@ -1336,3 +1336,22 @@ func TestEvaluatedConfigAppliesNormalizedKeys(t *testing.T) {
 		t.Errorf("bad value: err = %v, want a viewTransitions error", err)
 	}
 }
+
+func TestLogsConfigPathAndKeep(t *testing.T) {
+	root := t.TempDir()
+	got, err := LogsConfig{}.LogsPath(root)
+	if err != nil || got != filepath.Join(root, ".krate", "logs") {
+		t.Fatalf("default LogsPath = %q, %v", got, err)
+	}
+	if _, err := (LogsConfig{Dir: "../elsewhere"}).LogsPath(root); err == nil {
+		t.Fatal("logs.dir outside the project must be rejected")
+	}
+	if _, err := (LogsConfig{Dir: "."}).LogsPath(root); err == nil {
+		t.Fatal("logs.dir equal to the project root must be rejected")
+	}
+	for in, want := range map[int]int{0: DefaultLogsKeep, 5: 5, -3: -1} {
+		if k := (LogsConfig{Keep: in}).KeepCount(); k != want {
+			t.Errorf("Keep %d -> %d, want %d", in, k, want)
+		}
+	}
+}

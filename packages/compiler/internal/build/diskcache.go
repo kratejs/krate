@@ -268,7 +268,10 @@ func (c *buildDiskCache) save(page string, e *diskPageEntry) {
 		return
 	}
 	p := c.entryPath(page)
-	c.dirOnce.Do(func() { _ = os.MkdirAll(c.pagesDir, 0755) })
+	c.dirOnce.Do(func() {
+		_ = os.MkdirAll(c.pagesDir, 0755)
+		writeCacheStamp(c.dir)
+	})
 	data, err := json.Marshal(e)
 	if err != nil {
 		return

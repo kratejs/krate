@@ -453,6 +453,7 @@ func (s *SSRServer) Supervise(stop <-chan struct{}) {
 			delay = 100 * time.Millisecond
 		}
 		fmt.Fprintf(os.Stderr, "  %s! SSR renderer exited unexpectedly; restarting in %s%s\n", cYellow, delay, cReset)
+		reportServerCrash("SSR renderer", "exited unexpectedly", "")
 		for {
 			select {
 			case <-stop:
@@ -470,9 +471,11 @@ func (s *SSRServer) Supervise(stop <-chan struct{}) {
 			}
 			if err == nil {
 				fmt.Fprintf(os.Stderr, "  %s+%s SSR renderer restarted\n", cGreen, cReset)
+				clearServerCrash("SSR renderer")
 				break
 			}
 			fmt.Fprintf(os.Stderr, "  %s! SSR renderer restart failed:%s %v\n", cYellow, cReset, err)
+			reportServerCrash("SSR renderer", "restart failed: "+err.Error(), "")
 		}
 	}
 }

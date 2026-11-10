@@ -13,6 +13,7 @@ import (
 	"runtime/pprof"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kratejs/krate/packages/compiler/internal/build"
@@ -66,6 +67,16 @@ type cliFlags struct {
 	Port          int
 	PortSet       bool
 	NoBuild       bool
+	CleanDist     bool
+	CleanCache    bool
+	CleanAll      bool
+	Global        bool
+	DryRun        bool
+	Fix           bool
+	Open          bool
+	NoSummary     bool
+	QR            bool
+	REPL          bool
 	Host          string
 	Token         string
 	Roots         []string
@@ -73,17 +84,52 @@ type cliFlags struct {
 	MemProfile    string
 }
 
+// exitHooks run, last registered first, before the process exits, so the run
+// log is flushed on the error paths that call exit.
+var exitHooks []func()
+
+// exit runs the exit hooks and then ends the process.
+func exit(code int) {
+	for i := len(exitHooks) - 1; i >= 0; i-- {
+		exitHooks[i]()
+	}
+	finishUpdateCheck()
+	os.Exit(code)
+}
+
+// startRunLog saves the run's console output to the configured logs
+// directory (logs.enabled) and returns the function that finishes the log.
+// The returned function is safe to call more than once.
+func startRunLog(root string, cfg *config.Config, command string) func() {
+	stop := build.StartRunLog(root, cfg, command)
+	var once sync.Once
+	finish := func() {
+		once.Do(func() {
+			if path := stop(); path != "" {
+				rel, err := filepath.Rel(root, path)
+				if err != nil {
+					rel = path
+				}
+				fmt.Printf("  %s-%s log saved to %s\n", cGray, cReset, filepath.ToSlash(rel))
+			}
+		})
+	}
+	exitHooks = append(exitHooks, finish)
+	return finish
+}
+
 func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
 	// Publish the build-time version to internal packages (plugins read it).
 	krateversion.Value = version
+	defer finishUpdateCheck()
 	flags, args := parseFlags(os.Args[1:])
 	plugin.SetVerbose(flags.Verbose)
 	build.SetVerboseLogging(flags.Verbose)
 
 	if len(args) == 0 {
 		printUsage(os.Stderr)
-		os.Exit(1)
+		exit(1)
 	}
 
 	// `krate <command> --help` prints command-specific usage.
@@ -119,6 +165,12 @@ func main() {
 		runClean(flags, args)
 	case "doctor":
 		runDoctor(flags, args)
+	case "explain":
+		runExplain(flags, args)
+	case "info":
+		runInfo(flags, args)
+	case "upgrade":
+		runUpgrade(flags, args)
 	case "config":
 		runConfig(flags, args)
 	case "plugin":
@@ -129,7 +181,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "%s`krate %s` is provided by the @krate/core npm wrapper.%s\n", cYellow, args[0], cReset)
 		fmt.Fprintf(os.Stderr, "Run `npx create-krate-app@latest <dir>` or install @krate/core.\n")
 		printCommandUsage(os.Stdout, "init")
-		os.Exit(1)
+		exit(1)
 	case "mcp":
 		runMCP(flags, args)
 	case "version", "--version", "-v":
@@ -139,7 +191,7 @@ func main() {
 	default:
 		fmt.Fprintf(os.Stderr, "%sUnknown command:%s %s\n", cRed, cReset, args[0])
 		fmt.Fprintf(os.Stderr, "Run %skrate help%s for usage.\n", cCyan, cReset)
-		os.Exit(1)
+		exit(1)
 	}
 }
 
@@ -147,11 +199,16 @@ func main() {
 func printCommandUsage(w io.Writer, cmd string) {
 	switch cmd {
 	case "build":
-		writeHelp(w, "Usage: krate build [dir] [--config <path>] [--out-dir <path>] [--mode <name>] [--watch] [--profile] [--cpuprofile <path>] [--memprofile <path>] [--precompress]\n\n")
+		writeHelp(w, "Usage: krate build [dir] [--config <path>] [--out-dir <path>] [--mode <name>] [--watch] [--profile] [--cpuprofile <path>] [--memprofile <path>] [--precompress] [--no-summary]\n\n")
 		fmt.Fprintf(w, "Compile the project to static output (and SSR/server bundles when needed).\n")
+		fmt.Fprintf(w, "Prints a per-route size table (gzip) with the change since the last build; --no-summary hides it.\n")
 	case "dev":
-		fmt.Fprintf(w, "Usage: krate dev [dir] [--config <path>] [--verbose]\n\n")
+		fmt.Fprintf(w, "Usage: krate dev [dir] [--config <path>] [--port <n>] [--host <addr>] [--open] [--qr] [--repl] [--verbose]\n\n")
 		fmt.Fprintf(w, "Start the dev server with file watching and live reload.\n")
+		fmt.Fprintf(w, "  --open        Open the browser once the server is up\n")
+		fmt.Fprintf(w, "  --host 0.0.0.0  Listen on the network; the LAN URL is printed for phone testing\n")
+		fmt.Fprintf(w, "  --qr          Print a QR code for the network URL (with --host)\n")
+		fmt.Fprintf(w, "  --repl        Terminal shortcuts: r + enter restarts, o opens the browser, c clears, h helps\nA busy port moves to the next free one.\n")
 	case "serve", "preview", "start":
 		noBuildFlag := " [--no-build]"
 		if cmd == "start" {
@@ -193,11 +250,26 @@ func printCommandUsage(w io.Writer, cmd string) {
 		fmt.Fprintf(w, "Usage: krate inspect [dir] [--json]\n\n")
 		fmt.Fprintf(w, "Build the site and print its model (routes, sources, modes, deps, outputs).\n")
 	case "clean":
-		fmt.Fprintf(w, "Usage: krate clean [dir]\n\n")
-		fmt.Fprintf(w, "Remove build output (dist) and the compiler cache (.krate/cache).\n")
+		fmt.Fprintf(w, "Usage: krate clean [dir] [--dist | --cache | --all]\n\n")
+		fmt.Fprintf(w, "Remove build output (dist) and the compiler cache (.krate/cache), and print the space freed.\n")
+		fmt.Fprintf(w, "  --dist    Remove only the build output directory\n")
+		fmt.Fprintf(w, "  --cache   Remove only the compiler cache (.krate/cache)\n")
+		fmt.Fprintf(w, "  --all     Remove the build output and the whole .krate directory (types, logs, cache)\n")
+	case "upgrade":
+		fmt.Fprintf(w, "Usage: krate upgrade [version|tag] [dir] [--global] [--dry-run]\n\n")
+		fmt.Fprintf(w, "Move the project's @krate/* packages to the latest version, or to a version or dist-tag you give.\n")
+		fmt.Fprintf(w, "  --global, -g   Upgrade the globally installed krate CLI instead of the project\n")
+		fmt.Fprintf(w, "  --dry-run      Print the plan and the commands without running them\n")
+	case "info":
+		fmt.Fprintf(w, "Usage: krate info [dir] [--config <path>] [--json]\n\n")
+		fmt.Fprintf(w, "Print a paste-ready environment report (OS, Go, Node, package manager, @krate versions, config summary) for bug reports.\n")
+	case "explain":
+		fmt.Fprintf(w, "Usage: krate explain <code> [--json]\n\n")
+		fmt.Fprintf(w, "Print the cause, the fix and a docs link for a diagnostic code, e.g. krate explain KR7110.\n")
 	case "doctor":
-		fmt.Fprintf(w, "Usage: krate doctor [dir]\n\n")
+		fmt.Fprintf(w, "Usage: krate doctor [dir] [--fix]\n\n")
 		fmt.Fprintf(w, "Print a diagnostic summary of the project and toolchain.\n")
+		fmt.Fprintf(w, "  --fix   Repair what it can: an older @krate/core than this binary, a missing .gitignore entry, a stale .krate cache\n")
 	case "config":
 		fmt.Fprintf(w, "Usage: krate config [dir] [--mode <mode>] [--config <path>] [--schema]\n\n")
 		fmt.Fprintf(w, "Print the fully resolved configuration as JSON (--schema prints a JSON Schema).\n")
@@ -241,6 +313,9 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  deploy    Build and write host adapter files (netlify/vercel/...)\n")
 	fmt.Fprintf(w, "  clean     Remove build output (dist) and the compiler cache (.krate/cache)\n")
 	fmt.Fprintf(w, "  doctor    Print a diagnostic summary of the project and toolchain\n")
+	fmt.Fprintf(w, "  upgrade   Upgrade @krate/* packages to latest or a given version\n")
+	fmt.Fprintf(w, "  info      Print a paste-ready environment report for bug reports\n")
+	fmt.Fprintf(w, "  explain   Explain a diagnostic code (krate explain KR7110)\n")
 	fmt.Fprintf(w, "  config    Print the fully resolved configuration\n")
 	fmt.Fprintf(w, "  plugin    Manage plugins (add <pkg>)\n")
 	fmt.Fprintf(w, "  init      Scaffold a new project (alias: create; via the npm wrapper)\n")
@@ -274,7 +349,7 @@ func parseFlags(args []string) (cliFlags, []string) {
 	flags, remaining, err := parseFlagsChecked(args)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%sError:%s %v\n", cRed, cReset, err)
-		os.Exit(1)
+		exit(1)
 	}
 	return flags, remaining
 }
@@ -362,13 +437,33 @@ func parseFlagsChecked(args []string) (cliFlags, []string, error) {
 			flags.UpdatePackage = true
 		case args[i] == "--no-build":
 			flags.NoBuild = true
+		case args[i] == "--dist":
+			flags.CleanDist = true
+		case args[i] == "--cache":
+			flags.CleanCache = true
+		case args[i] == "--all":
+			flags.CleanAll = true
+		case args[i] == "--global" || args[i] == "-g":
+			flags.Global = true
+		case args[i] == "--dry-run":
+			flags.DryRun = true
+		case args[i] == "--fix":
+			flags.Fix = true
+		case args[i] == "--open":
+			flags.Open = true
+		case args[i] == "--no-summary":
+			flags.NoSummary = true
+		case args[i] == "--qr":
+			flags.QR = true
+		case args[i] == "--repl":
+			flags.REPL = true
 		case args[i] == "--help" || args[i] == "-h" || args[i] == "--version":
 			// Handled as commands in main(); keep them in the arg list rather
 			// than rejecting them as unknown flags.
 			remaining = append(remaining, args[i])
 		case strings.HasPrefix(args[i], "-"):
 			fmt.Fprintf(os.Stderr, "%sUnknown flag:%s %s\n", cRed, cReset, args[i])
-			os.Exit(1)
+			exit(1)
 		default:
 			remaining = append(remaining, args[i])
 		}
@@ -380,7 +475,10 @@ func resolveConfig(flags cliFlags, args []string) (string, *config.Config) {
 	root, cfg, err := loadConfig(flags, args)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%sConfig error:%s %s\n", cRed, cReset, formatConfigError(err))
-		os.Exit(1)
+		exit(1)
+	}
+	if len(args) > 0 {
+		startUpdateCheck(cfg, args[0], flags.JSON)
 	}
 	return root, cfg
 }
@@ -403,7 +501,7 @@ func formatConfigError(err error) string {
 func requireConfigFlag(root string, flags cliFlags) {
 	if err := config.CheckExplicitConfig(root, flags.ConfigPath); err != nil {
 		fmt.Fprintf(os.Stderr, "%sConfig error:%s %v\n", cRed, cReset, err)
-		os.Exit(1)
+		exit(1)
 	}
 }
 
@@ -487,6 +585,11 @@ func loadConfig(flags cliFlags, args []string) (string, *config.Config, error) {
 			cfg.OutDir = filepath.Join(root, flags.OutDir)
 		}
 	}
+	if flags.Open {
+		cfg.DevServer.Open = true
+	}
+	cfg.DevServer.QR = flags.QR
+	cfg.DevServer.REPL = flags.REPL
 	if flags.Sourcemap {
 		cfg.Sourcemap = true
 	}
@@ -501,7 +604,7 @@ func loadConfig(flags cliFlags, args []string) (string, *config.Config, error) {
 	}
 	if err := applyServerFlags(command, flags, cfg, os.Getenv); err != nil {
 		fmt.Fprintf(os.Stderr, "%sError:%s %v\n", cRed, cReset, err)
-		os.Exit(1)
+		exit(1)
 	}
 
 	return root, cfg, nil
@@ -518,7 +621,7 @@ func loadProjectEnv(root, defaultMode string, verbose bool) map[string]string {
 	env, err := environ.Load(root, mode)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%sEnv error:%s %v\n", cRed, cReset, err)
-		os.Exit(1)
+		exit(1)
 	}
 	environ.Current = env
 	return env
@@ -526,6 +629,7 @@ func loadProjectEnv(root, defaultMode string, verbose bool) map[string]string {
 
 func runBuild(flags cliFlags, args []string) {
 	root, cfg := resolveConfig(flags, args)
+	defer startRunLog(root, cfg, "build")()
 	env := loadProjectEnv(root, "production", flags.Verbose)
 
 	fmt.Printf("%s%s  Building %s -> %s%s\n", cBold, cCyan, root, cfg.OutDir, cReset)
@@ -548,10 +652,14 @@ func runBuild(flags cliFlags, args []string) {
 	}
 	if buildErr != nil {
 		fmt.Fprintf(os.Stderr, "%sBuild error:%s %s\n", cRed, cReset, build.BuildErrorSummary(buildErr))
-		os.Exit(1)
+		exit(1)
 	}
 
-	fmt.Printf("%s%s  Done! (built in %s)%s\n", cBold, cGreen, time.Since(start).Round(time.Millisecond), cReset)
+	elapsed := time.Since(start).Round(time.Millisecond)
+	if !flags.NoSummary {
+		printBuildSummary(root, builder)
+	}
+	fmt.Printf("%s%s  Done! (built in %s)%s\n", cBold, cGreen, elapsed, cReset)
 
 	if flags.Watch {
 		hub := build.NewDevHub()
@@ -578,7 +686,25 @@ func runBuild(flags cliFlags, args []string) {
 		}()
 		err := <-errc
 		fmt.Fprintf(os.Stderr, "%sError:%s %v\n", cRed, cReset, err)
-		os.Exit(1)
+		exit(1)
+	}
+}
+
+// printBuildSummary prints the per-route size table, compares it with the last
+// build and stores it for the next one. A failure only skips the table.
+func printBuildSummary(root string, builder *build.Builder) {
+	s, err := builder.Summarize()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "  %s! build summary skipped:%s %v\n", cYellow, cReset, err)
+		return
+	}
+	table := build.FormatSummary(s, build.LoadSummary(root))
+	if table == "" {
+		return
+	}
+	fmt.Printf("\n%s\n", table)
+	if err := build.SaveSummary(root, s); err != nil && builder.Verbose {
+		fmt.Fprintf(os.Stderr, "  %s! could not save the build summary:%s %v\n", cYellow, cReset, err)
 	}
 }
 
@@ -619,9 +745,10 @@ func writeHeapProfile(path string) {
 }
 
 func runDev(flags cliFlags, args []string) {
-	if root, _, err := loadConfig(flags, args); err == nil && root != "" {
+	if root, cfg, err := loadConfig(flags, args); err == nil && root != "" {
 		// Mirror console output into .krate/dev.log for agents (MCP get_logs).
 		defer build.TeeDevLog(root)()
+		defer startRunLog(root, cfg, "dev")()
 	}
 	first := true
 	for {
@@ -693,12 +820,13 @@ func runDevOnce(flags cliFlags, args []string, first bool) bool {
 		return false
 	}
 	fmt.Fprintf(os.Stderr, "%sError:%s %v\n", cRed, cReset, err)
-	os.Exit(1)
+	exit(1)
 	return false
 }
 
 func runServe(flags cliFlags, args []string) {
 	root, cfg := resolveConfig(flags, args)
+	defer startRunLog(root, cfg, args[0])()
 	env := loadProjectEnv(root, "production", flags.Verbose)
 
 	// `krate start` (and `serve --no-build`) serves the existing build output
@@ -709,7 +837,7 @@ func runServe(flags cliFlags, args []string) {
 		if !hasBuildOutput(cfg.OutDir) {
 			fmt.Fprintf(os.Stderr, "%sError:%s no build output found in %s\n", cRed, cReset, cfg.OutDir)
 			fmt.Fprintf(os.Stderr, "  Run `krate build` first, or use `krate serve` to build and serve in one step.\n")
-			os.Exit(1)
+			exit(1)
 		}
 		fmt.Printf("%s%s  Serving existing build in %s...%s\n", cBold, cCyan, cfg.OutDir, cReset)
 	} else {
@@ -719,14 +847,14 @@ func runServe(flags cliFlags, args []string) {
 		builder.Env = env
 		if err := builder.BuildAll(); err != nil {
 			fmt.Fprintf(os.Stderr, "%sBuild error:%s %s\n", cRed, cReset, build.BuildErrorSummary(err))
-			os.Exit(1)
+			exit(1)
 		}
 		fmt.Printf("%s%s  Build complete. Starting server...%s\n", cBold, cGreen, cReset)
 	}
 
 	if err := build.Serve(root, cfg, start); err != nil {
 		fmt.Fprintf(os.Stderr, "%sServe error:%s %v\n", cRed, cReset, err)
-		os.Exit(1)
+		exit(1)
 	}
 }
 
@@ -757,6 +885,7 @@ func hasBuildOutput(outDir string) bool {
 // output can be uploaded to a static host as-is.
 func runDeploy(flags cliFlags, args []string) {
 	root, cfg := resolveConfig(flags, args)
+	defer startRunLog(root, cfg, "deploy")()
 	env := loadProjectEnv(root, "production", flags.Verbose)
 
 	target := flags.Target
@@ -770,7 +899,7 @@ func runDeploy(flags cliFlags, args []string) {
 	// first, and with server features it was reported as a feature mismatch.
 	if err := checkDeployTarget(target); err != nil {
 		fmt.Fprintf(os.Stderr, "%sDeploy error:%s %v\n", cRed, cReset, err)
-		os.Exit(1)
+		exit(1)
 	}
 
 	fmt.Printf("%s%s  Building %s -> %s%s\n", cBold, cCyan, root, cfg.OutDir, cReset)
@@ -779,7 +908,7 @@ func runDeploy(flags cliFlags, args []string) {
 	builder.Env = env
 	if err := builder.BuildAll(); err != nil {
 		fmt.Fprintf(os.Stderr, "%sBuild error:%s %s\n", cRed, cReset, build.BuildErrorSummary(err))
-		os.Exit(1)
+		exit(1)
 	}
 
 	dopts := deploy.Options{StaticOnly: flags.StaticOnly}
@@ -788,7 +917,7 @@ func runDeploy(flags cliFlags, args []string) {
 		plan, err := build.BuildServerBundle(root, cfg, target)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "%sDeploy error:%s %v\n", cRed, cReset, err)
-			os.Exit(1)
+			exit(1)
 		}
 		dopts.Server = plan
 	}
@@ -805,7 +934,7 @@ func runDeploy(flags cliFlags, args []string) {
 	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%sDeploy error:%s %v\n", cRed, cReset, err)
-		os.Exit(1)
+		exit(1)
 	}
 	if flags.StaticOnly {
 		if features := deploy.ServerFeatures(root, cfg.OutDir); len(features) > 0 {
@@ -845,13 +974,13 @@ func runFix(flags cliFlags, args []string) {
 	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%sError:%s %v\n", cRed, cReset, err)
-		os.Exit(1)
+		exit(1)
 	}
 	requireConfigFlag(abs, flags)
 	res, err := fix.Run(abs, flags.Apply)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%sFix error:%s %v\n", cRed, cReset, err)
-		os.Exit(1)
+		exit(1)
 	}
 	if len(res.Changes) == 0 {
 		fmt.Printf("fix: no safe fixes found (%d file(s) skipped as unparseable)\n", len(res.Skipped))
@@ -891,19 +1020,19 @@ func runInspect(flags cliFlags, args []string) {
 	withSuppressedStdout(func() { buildErr = builder.BuildAll() })
 	if buildErr != nil {
 		fmt.Fprintf(os.Stderr, "%sBuild error:%s %s\n", cRed, cReset, build.BuildErrorSummary(buildErr))
-		os.Exit(1)
+		exit(1)
 	}
 	graph, err := builder.SiteGraph()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%sInspect error:%s %v\n", cRed, cReset, err)
-		os.Exit(1)
+		exit(1)
 	}
 
 	if flags.JSON {
 		data, err := json.MarshalIndent(graph, "", "  ")
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "%sInspect error:%s %v\n", cRed, cReset, err)
-			os.Exit(1)
+			exit(1)
 		}
 		fmt.Println(string(data))
 		return
@@ -972,7 +1101,7 @@ func runTypes(flags cliFlags, args []string) {
 		for _, e := range errs {
 			fmt.Fprintf(os.Stderr, "%s  Type error:%s %v\n", cRed, cReset, e)
 		}
-		os.Exit(1)
+		exit(1)
 	}
 
 	fmt.Printf("%s%s  Types written to %s%s\n", cBold, cGreen, filepath.Join(root, ".krate", "types"), cReset)
@@ -985,20 +1114,20 @@ func runTypecheck(flags cliFlags, args []string) {
 		for _, e := range errs {
 			fmt.Fprintf(os.Stderr, "%s  Type error:%s %v\n", cRed, cReset, e)
 		}
-		os.Exit(1)
+		exit(1)
 	}
 	out, ok, err := typecheck.Run(root)
 	if errors.Is(err, typecheck.ErrNoTSC) {
 		fmt.Fprintf(os.Stderr, "%sType check error:%s %v; add it with `pnpm add -D typescript`\n", cRed, cReset, err)
-		os.Exit(1)
+		exit(1)
 	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%sType check error:%s %v\n", cRed, cReset, err)
-		os.Exit(1)
+		exit(1)
 	}
 	fmt.Print(out)
 	if !ok {
-		os.Exit(1)
+		exit(1)
 	}
 	fmt.Printf("%s%s  No type errors%s\n", cBold, cGreen, cReset)
 }
@@ -1010,7 +1139,7 @@ func runGoInit(flags cliFlags, args []string) {
 	notes, err := gohost.Init(root)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%sGo workspace error:%s %v\n", cRed, cReset, err)
-		os.Exit(1)
+		exit(1)
 	}
 	fmt.Printf("%s%s  Go workspace ready for %s%s\n", cBold, cGreen, root, cReset)
 	for _, n := range notes {
@@ -1024,6 +1153,7 @@ func runGoInit(flags cliFlags, args []string) {
 // severity. Backs CI (`krate check`) and the future MCP `check` primitive.
 func runCheck(flags cliFlags, args []string) {
 	root, cfg := resolveConfig(flags, args)
+	defer startRunLog(root, cfg, "check")()
 	env := loadProjectEnv(root, "production", flags.Verbose)
 
 	fmt.Printf("%s%s  Building for checks %s -> %s%s\n", cBold, cCyan, root, cfg.OutDir, cReset)
@@ -1037,13 +1167,13 @@ func runCheck(flags cliFlags, args []string) {
 	builder.SkipQualityChecks = true
 	if err := builder.BuildAll(); err != nil {
 		fmt.Fprintf(os.Stderr, "%sBuild error:%s %s\n", cRed, cReset, build.BuildErrorSummary(err))
-		os.Exit(1)
+		exit(1)
 	}
 
 	findings, checkCfg, err := builder.CheckSite(true)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%sCheck error:%s %v\n", cRed, cReset, err)
-		os.Exit(1)
+		exit(1)
 	}
 
 	fopts := check.DefaultFormatOptions()
@@ -1060,24 +1190,29 @@ func runCheck(flags cliFlags, args []string) {
 
 	if check.Failing(findings, checkCfg.FailOn) {
 		fmt.Fprintf(os.Stderr, "\n%s%s  x Quality checks failed.%s\n", cBold, cRed, cReset)
-		os.Exit(1)
+		exit(1)
 	}
 
 	fmt.Printf("\n%s%s  ! Passed with warnings (failOn=%s).%s\n", cBold, cYellow, checkCfg.FailOn, cReset)
 }
 
-// runClean removes generated output (the build output directory and the
-// compiler cache) so the next build starts from scratch. Only those paths are
-// touched - generated types and sidecar manifests under .krate are left in
-// place, since they are regenerated on demand.
+// runClean removes generated output so the next build starts from scratch. By
+// default that is the build output directory and the compiler cache; --dist,
+// --cache and --all pick narrower or wider sets. Without --all, generated
+// types and sidecar manifests under .krate are left in place, since they are
+// regenerated on demand.
 func runClean(flags cliFlags, args []string) {
 	root, cfg := resolveConfig(flags, args)
 	fmt.Printf("%s%s  Cleaning %s%s\n", cBold, cCyan, root, cReset)
 
-	result, err := build.Clean(root, cfg)
+	result, err := build.CleanWith(root, cfg, build.CleanOptions{
+		Dist:  flags.CleanDist,
+		Cache: flags.CleanCache,
+		All:   flags.CleanAll,
+	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%sClean error:%s %v\n", cRed, cReset, err)
-		os.Exit(1)
+		exit(1)
 	}
 
 	if len(result.Removed) == 0 {
@@ -1089,8 +1224,9 @@ func runClean(flags cliFlags, args []string) {
 		if relErr != nil {
 			rel = dir
 		}
-		fmt.Printf("  %s+%s Removed %s\n", cGreen, cReset, filepath.ToSlash(rel))
+		fmt.Printf("  %s+%s Removed %s %s(%s)%s\n", cGreen, cReset, filepath.ToSlash(rel), cGray, build.FormatBytes(result.Sizes[dir]), cReset)
 	}
+	fmt.Printf("%s%s  Freed %s%s\n", cBold, cGreen, build.FormatBytes(result.Freed), cReset)
 }
 
 // runMCP starts the agent-native MCP server. It speaks JSON-RPC 2.0 over
@@ -1140,7 +1276,7 @@ func runMCP(flags cliFlags, args []string) {
 		fmt.Fprintf(os.Stderr, "  MCP HTTP server -> http://%s/mcp (POST; GET for SSE)\n", addr)
 		if err := mcp.ServeHTTP(svc, addr, token); err != nil {
 			fmt.Fprintf(os.Stderr, "%sMCP HTTP error:%s %v\n", cRed, cReset, err)
-			os.Exit(1)
+			exit(1)
 		}
 		return
 	}
@@ -1151,6 +1287,6 @@ func runMCP(flags cliFlags, args []string) {
 
 	if err := srv.Serve(os.Stdin); err != nil {
 		fmt.Fprintf(os.Stderr, "%sMCP error:%s %v\n", cRed, cReset, err)
-		os.Exit(1)
+		exit(1)
 	}
 }

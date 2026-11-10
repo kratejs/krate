@@ -15,27 +15,57 @@ type CleanResult struct {
 	Removed []string
 	// Missing are the target directories that did not exist (nothing to do).
 	Missing []string
+	// Sizes maps each removed directory to the bytes it held.
+	Sizes map[string]int64
+	// Freed is the total of Sizes.
+	Freed int64
+}
+
+// CleanOptions picks what Clean removes. The zero value removes the build
+// output and the compiler cache.
+type CleanOptions struct {
+	// Dist removes the build output directory.
+	Dist bool
+	// Cache removes the compiler cache (.krate/cache).
+	Cache bool
+	// All removes the build output and the whole .krate directory (types,
+	// generated pages, sidecar manifests, logs and the cache).
+	All bool
 }
 
 // Clean removes the project's generated output: the build output directory
-// (dist) and the compiler cache (.krate/cache). It is deliberately scoped to
-// those two paths - the rest of .krate (types, generated pages, sidecar
-// manifests) is regenerated on demand by build/dev and is left in place so a
-// clean does not invalidate editor types unnecessarily.
+// (dist) and the compiler cache (.krate/cache). See CleanWith to pick.
+func Clean(root string, cfg *config.Config) (*CleanResult, error) {
+	return CleanWith(root, cfg, CleanOptions{})
+}
+
+// CleanWith removes the generated paths chosen by opts. By default (no option
+// set) that is dist and .krate/cache; the rest of .krate (types, generated
+// pages, sidecar manifests) is regenerated on demand and left in place so a
+// clean does not invalidate editor types unnecessarily, unless opts.All is set.
 // A path is only removed when it resolves to within the project root, so a
 // misconfigured outDir can never delete an unrelated directory.
-func Clean(root string, cfg *config.Config) (*CleanResult, error) {
+func CleanWith(root string, cfg *config.Config, opts CleanOptions) (*CleanResult, error) {
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
 		return nil, fmt.Errorf("resolving project root: %w", err)
 	}
 
-	targets := []string{
-		cfg.OutDir,
-		filepath.Join(absRoot, ".krate", "cache"),
+	if !opts.Dist && !opts.Cache && !opts.All {
+		opts.Dist, opts.Cache = true, true
+	}
+	var targets []string
+	if opts.Dist || opts.All {
+		targets = append(targets, cfg.OutDir)
+	}
+	switch {
+	case opts.All:
+		targets = append(targets, filepath.Join(absRoot, ".krate"))
+	case opts.Cache:
+		targets = append(targets, filepath.Join(absRoot, ".krate", "cache"))
 	}
 
-	result := &CleanResult{}
+	result := &CleanResult{Sizes: map[string]int64{}}
 	for _, target := range targets {
 		if target == "" {
 			continue
@@ -66,12 +96,31 @@ func Clean(root string, cfg *config.Config) (*CleanResult, error) {
 			continue
 		}
 
+		size := dirSize(abs)
 		if err := os.RemoveAll(abs); err != nil {
 			return nil, fmt.Errorf("removing %s: %w", abs, err)
 		}
 		result.Removed = append(result.Removed, abs)
+		result.Sizes[abs] = size
+		result.Freed += size
 	}
 	return result, nil
+}
+
+// dirSize adds up the sizes of the regular files under dir. Unreadable entries
+// count as zero.
+func dirSize(dir string) int64 {
+	var total int64
+	_ = filepath.WalkDir(dir, func(_ string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		if info, err := d.Info(); err == nil && info.Mode().IsRegular() {
+			total += info.Size()
+		}
+		return nil
+	})
+	return total
 }
 
 // withinRoot reports whether path is root or a descendant of it. It rejects any

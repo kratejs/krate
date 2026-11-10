@@ -31,6 +31,24 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Added
 
+- `logs: { enabled: true }` saves each `dev`, `build`, `serve`, `start`, `check` and `deploy`
+  run's console output to `.krate/logs/<timestamp>.log` (`logs.dir`, `logs.keep`, default 20).
+- `krate upgrade [version|tag]` moves the project's `@krate/*` packages to the latest or a given
+  version with the project's package manager (`--dry-run`, `--global` for the installed CLI).
+- A once-a-day "new version available" line, from a cached registry lookup. Off with
+  `updateNotifier: false`, `CI`, `KRATE_NO_UPDATE_NOTIFIER`, a non-terminal stderr or `--json`.
+- `krate doctor --fix` aligns an older `@krate/core` with the binary, adds `.krate` and the output
+  directory to `.gitignore` and removes a `.krate` cache left by another version.
+- `krate explain <code>` prints the cause, fix and docs link of a diagnostic code (`--json`).
+- `krate dev --open`, a LAN URL when the server listens on the network, `--qr` to add a QR
+  code for it, and `--repl` for `r`, `o`, `c` and `h` terminal shortcuts (followed by Enter). A
+  restart no longer opens another browser tab.
+- `krate build` prints a per-route gzip size table with the change since the last build
+  (`--no-summary` hides it).
+- `krate info` prints a paste-ready environment report for bug reports (`--json`).
+- `krate clean --dist`, `--cache` and `--all`, and the space each removal freed.
+- The dev overlay shows a failing SSR renderer, API sidecar or middleware with the last 40
+  console lines, and keeps showing it to tabs that connect before it recovers.
 - `site.url` says where the site lives: `https://example.com/example/a` serves it under
   `/example/a` with no `basePath`.
 - `basePath: false` on a redirect rule matches and sends paths outside the base path, as in

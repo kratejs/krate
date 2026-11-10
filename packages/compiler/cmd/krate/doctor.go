@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kratejs/krate/packages/compiler/internal/build"
 	"github.com/kratejs/krate/packages/compiler/internal/config"
 	"github.com/kratejs/krate/packages/compiler/internal/execx"
 	"github.com/kratejs/krate/packages/compiler/internal/gohost"
@@ -42,6 +43,13 @@ func runDoctor(flags cliFlags, args []string) {
 	// problems are failed checks (not warnings). They decide the exit status, so
 	// `krate doctor` can gate a CI step.
 	problems := 0
+	// fixes are the problems `--fix` can repair.
+	var fixes []doctorFix
+	addFix := func(f *doctorFix) {
+		if f != nil {
+			fixes = append(fixes, *f)
+		}
+	}
 
 	// Config.
 	cfg, err := config.Load(root, flags.ConfigPath)
@@ -49,6 +57,7 @@ func runDoctor(flags cliFlags, args []string) {
 		problems++
 		fmt.Printf("  %sx config%s     %v\n", cRed, cReset, err)
 	} else {
+		startUpdateCheck(cfg, "doctor", flags.JSON)
 		for _, w := range config.Warnings {
 			fmt.Printf("  %s! config%s     %s\n", cYellow, cReset, w)
 		}
@@ -109,6 +118,7 @@ func runDoctor(flags cliFlags, args []string) {
 		fmt.Printf("  %s+ deps%s       @krate/core present\n", cGreen, cReset)
 		if note := coreVersionNote(string(data), version); note != "" {
 			fmt.Printf("  %s! deps%s       %s\n", cYellow, cReset, note)
+			addFix(versionMismatchFix(root, installedKratePackages(root), version, runUpgradeCommand))
 		}
 	} else {
 		fmt.Printf("  %s- deps%s       @krate/core not found (run your package manager install)\n", cGray, cReset)
@@ -133,6 +143,26 @@ func runDoctor(flags cliFlags, args []string) {
 	// Key files.
 	reportFile(root, "tsconfig.json")
 	reportFile(root, "krate.state.json")
+
+	// Generated directories belong in .gitignore.
+	ignoreDirs := []string{".krate"}
+	if cfg != nil {
+		if out := outDirIgnoreName(root, cfg.OutDir); out != "" {
+			ignoreDirs = append(ignoreDirs, out)
+		}
+	}
+	if missing := gitignoreMissing(root, ignoreDirs); len(missing) > 0 {
+		fmt.Printf("  %s! gitignore%s  %s not listed in .gitignore\n", cYellow, cReset, strings.Join(missing, ", "))
+		addFix(gitignoreFix(root, ignoreDirs))
+	}
+	if stale, why := build.CacheStale(root); stale {
+		fmt.Printf("  %s! cache%s      stale: %s\n", cYellow, cReset, why)
+		addFix(staleCacheFix(root))
+	}
+
+	if failed := runDoctorFixes(os.Stdout, fixes, flags.Fix); failed > 0 {
+		problems += failed
+	}
 
 	if problems > 0 {
 		fmt.Fprintf(os.Stderr, "\n%sDoctor found %d problem(s).%s\n", cRed, problems, cReset)

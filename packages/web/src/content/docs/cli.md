@@ -25,6 +25,9 @@ The `krate` CLI is the single entry point for building and serving Krate sites.
 | `krate deploy [dir]` | Build, then write host adapter files (`--target`, `--static-only`) |
 | `krate clean [dir]` | Remove build output and the compiler cache |
 | `krate doctor [dir]` | Print a diagnostic summary of the project and toolchain |
+| `krate upgrade [version]` | Upgrade the project's `@krate/*` packages to the latest or a given version (`--global`, `--dry-run`) |
+| `krate info [dir]` | Print a paste-ready environment report for bug reports (`--json`) |
+| `krate explain <code>` | Print the cause, the fix and a docs link for a diagnostic code |
 | `krate config [dir]` | Print the fully resolved configuration (`--schema` for the JSON Schema) |
 | `krate plugin add <pkg>` | Install a plugin and register it in the config |
 | `krate mcp [dir]` | Start the MCP (Model Context Protocol) server (stdio, or `--http`) |
@@ -82,6 +85,17 @@ krate build ./my-site
 | `--sourcemap` | Emit source maps for generated JS (also disables the build cache) |
 | `--no-dce` | Disable CSS/JS dead-code elimination |
 | `--precompress` | Write `.br` + `.gz` siblings for compressible assets (same as `compress: { brotli: true, gzip: true }`) |
+| `--no-summary` | Do not print the per-route size table |
+
+After a successful build, `krate build` prints a table with one row per built
+page: its mode, and the gzipped size of the HTML, of the scripts it loads and of
+the stylesheets it loads. A `vs last` column shows how each route's total changed
+since the previous build (`new` for a route that was not there), and a footer
+lists routes that disappeared and the change in everything shipped, with shared
+files counted once. The previous build's sizes are kept in
+`.krate/build-summary.json`, which `krate clean --all` removes. Sites with more
+than 25 routes show the 25 heaviest. SSR pages with no emitted document appear
+with zero size.
 | `--mode <name>` | Set the environment mode (like `KRATE_ENV`); loads `.env.<name>` and is passed to a function-form `defineConfig` |
 
 During the build the compiler:
@@ -121,8 +135,21 @@ Starts a build + HTTP dev server with hot reload.
 
 ```sh
 krate dev
+krate dev --open                # open the browser once the server is up
+krate dev --host 0.0.0.0        # listen on the network and print a LAN URL
+krate dev --host 0.0.0.0 --qr   # ...and a QR code a phone can scan
+krate dev --repl                # terminal shortcuts: r restart, o open, c clear, h help
+krate dev --port 4000           # a busy port moves to the next free one
 ```
 
+- Prints the network URL when the server listens beyond loopback; with `--qr`, in
+  a terminal, also a QR code for it so a phone on the same network can scan it.
+  With the default loopback bind it prints a hint instead. `--open` (or
+  `devServer.open`) opens the browser once; a restart does not open another tab.
+- With `--repl`, in a terminal, type a letter and press Enter: `r` restarts the
+  server (reloading the config), `o` opens the browser, `c` clears the screen and
+  `h` prints the list. Without the flag the dev server does not read the terminal
+  and prints a one-line hint.
 - Serves the site on port 3000 (configurable via `devServer.port`, which wins
   over `server.port` in dev), bound to `127.0.0.1` only. Use `devServer.host` to
   expose it on the network. If the port is taken, the next free one is used and
@@ -136,6 +163,13 @@ krate dev
   shows the error in the overlay.
 - Uses SSE hot reload to push updates to open tabs after a short (75 ms)
   debounce; stylesheet-only edits swap the CSS without reloading the page.
+- When the SSR renderer, a Node or Go API sidecar or the middleware fails, the
+  overlay shows what failed with its stack (for middleware) and the last 40
+  console lines, and names the file with the full output: `.krate/dev.log`, or
+  the run log when [`logs`](/docs/reference/config/#logs) is enabled. A sidecar
+  that is still down is shown again after a page reload, and the entry goes away
+  once it restarts. The same entries are listed as `kind: "server"` errors in
+  `/__krate/state`.
 - Shows compilation errors inline via the dev error overlay. If the first build
   fails, the browser shows an error page with the overlay and recovers on the
   next successful build.
@@ -349,13 +383,86 @@ cache directory cannot be written, so it can gate a CI step; missing optional
 tools only print. It also warns when the installed `@krate/core` and the running
 binary are different versions.
 
-## `krate clean`
+`krate doctor --fix` repairs what it can and says what it did:
 
-Removes the output directory (`dist`) and the compiler cache (`.krate/cache`):
+| Problem | Fix |
+|---------|-----|
+| Installed `@krate/core` is older than the running binary | Runs [`krate upgrade`](#krate-upgrade) to the binary's version. A newer package is not downgraded; use `krate upgrade --global` to update the binary |
+| `.krate` or the output directory is missing from `.gitignore` | Appends the missing entries (only inside a git repository) |
+| The `.krate` page cache was filled by another krate version, or has unreadable entries | Removes `.krate/cache` |
+
+Without `--fix`, doctor lists the issues it could fix. A fix that fails makes the
+command exit with status 1.
+
+## `krate upgrade`
+
+Moves every `@krate/*` package your `package.json` declares to one version, so
+the packages never drift apart:
 
 ```sh
-krate clean
+krate upgrade                 # latest
+krate upgrade 0.5.1           # a specific version
+krate upgrade next            # a dist-tag
+krate upgrade --dry-run       # show the plan and the commands, change nothing
+krate upgrade --global        # upgrade the globally installed CLI instead
 ```
+
+It resolves a dist-tag such as `latest` with the npm registry (the one in
+`npm_config_registry`, else the public registry), prints each package's installed
+version next to the target, and runs your package manager (found from the
+`packageManager` field or the lockfile): `npm install`, `pnpm add`, `yarn add` or
+`bun add`, once for dependencies and once for dev dependencies. In a pnpm
+workspace root it adds `-w`. Packages already at the target are left alone. A
+project that declares no `@krate/*` package is pointed to `--global`.
+
+Passing a directory (`krate upgrade ./site`) targets another project. See
+[Upgrading](/docs/guides/upgrading/) for what changes between versions.
+
+## `krate info`
+
+Prints a Markdown report to paste into a bug report: the krate version, OS and
+architecture, Go and Node versions, the package manager and its version, the
+installed `@krate/*` package versions, and a short config summary (output mode,
+runtime, directories, base path, plugin names).
+
+```sh
+krate info
+krate info --json
+```
+
+The report holds no environment variables and no config values beyond those
+structural settings, and the home directory is shown as `~`. A config that fails
+to load is reported instead of failing the command.
+
+## `krate explain`
+
+Prints what a diagnostic code means and how to fix it, with a link to its entry in
+the [diagnostics reference](/docs/reference/diagnostics/):
+
+```sh
+krate explain KR7110
+krate explain 7110 --json
+```
+
+The code is case-insensitive and the `KR` prefix is optional. An unknown code
+fails and lists the nearest registered codes. `--json` prints the code, title,
+explanation and docs URL as JSON.
+
+## `krate clean`
+
+Removes the output directory (`dist`) and the compiler cache (`.krate/cache`),
+and prints how much space each removal freed:
+
+```sh
+krate clean           # dist and .krate/cache
+krate clean --dist    # only the build output
+krate clean --cache   # only the compiler cache
+krate clean --all     # dist and the whole .krate directory
+```
+
+`--all` also removes the generated types, sidecar manifests and run logs under
+`.krate`; the next `krate dev`, `build` or `types` writes the types again. Do not
+run it while `krate dev` is running.
 
 `krate clean` refuses to run when `outDir` is, or contains, the project root,
 `pagesDir` or `publicDir` (for example `outDir: "."`), so a misconfigured

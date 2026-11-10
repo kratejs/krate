@@ -23,6 +23,12 @@ const (
 type DevServer struct {
 	Port int  `json:"port"`
 	Open bool `json:"open"`
+	// QR prints a QR code for the network URL (`krate dev --qr`). It is a
+	// command line option only, not a config key.
+	QR bool `json:"-"`
+	// REPL turns on the terminal shortcuts (`krate dev --repl`). Command line
+	// only, not a config key.
+	REPL bool `json:"-"`
 	// Overlay toggles the dev error overlay (default true). A pointer so an
 	// explicit `false` is distinguishable from "unset".
 	Overlay *bool `json:"overlay,omitempty"`
@@ -39,6 +45,58 @@ type DevServer struct {
 	// { "/api": "http://localhost:8080" }.
 	Proxy map[string]string `json:"proxy,omitempty"`
 }
+
+// DefaultLogsDir is where run logs go when logs.dir is unset, relative to the
+// project root.
+const DefaultLogsDir = ".krate/logs"
+
+// DefaultLogsKeep is how many run logs are kept when logs.keep is unset.
+const DefaultLogsKeep = 20
+
+// LogsConfig saves a copy of each `krate` run's console output to
+// <dir>/<timestamp>.log. It is off unless enabled.
+type LogsConfig struct {
+	Enabled bool `json:"enabled,omitempty"`
+	// Dir is the log directory, relative to the project root (default
+	// ".krate/logs"). It must stay inside the project.
+	Dir string `json:"dir,omitempty"`
+	// Keep is how many log files to keep, oldest removed first (default 20).
+	// A negative value keeps every file.
+	Keep int `json:"keep,omitempty"`
+}
+
+// KeepCount returns the number of log files to keep; -1 means all of them.
+func (l LogsConfig) KeepCount() int {
+	switch {
+	case l.Keep < 0:
+		return -1
+	case l.Keep == 0:
+		return DefaultLogsKeep
+	}
+	return l.Keep
+}
+
+// LogsPath returns the absolute log directory for a project root, or an error
+// when logs.dir points outside the project.
+func (l LogsConfig) LogsPath(root string) (string, error) {
+	dir := l.Dir
+	if dir == "" {
+		dir = DefaultLogsDir
+	}
+	abs := dir
+	if !filepath.IsAbs(abs) {
+		abs = filepath.Join(root, abs)
+	}
+	abs = filepath.Clean(abs)
+	rel, err := filepath.Rel(root, abs)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("logs.dir %q must be a directory inside the project", l.Dir)
+	}
+	return abs, nil
+}
+
+// UpdateNotifierEnabled reports whether the update notifier may run (default on).
+func (c *Config) UpdateNotifierEnabled() bool { return c.UpdateCheck == nil || *c.UpdateCheck }
 
 // OverlayEnabled reports whether the dev error overlay is enabled (default on).
 func (d DevServer) OverlayEnabled() bool { return d.Overlay == nil || *d.Overlay }
@@ -607,6 +665,8 @@ type Config struct {
 	MinifyJS    bool            `json:"minifyJS,omitempty"`
 	Sourcemap   bool            `json:"sourcemap"`
 	DevServer   DevServer       `json:"devServer"`
+	Logs        LogsConfig      `json:"logs,omitempty"`
+	UpdateCheck *bool           `json:"updateNotifier,omitempty"` // once-a-day update line (default true)
 	Server      ServerConfig    `json:"server,omitempty"`
 	CORS        CORSConfig      `json:"cors,omitempty"`
 	API         APIConfig       `json:"api,omitempty"`

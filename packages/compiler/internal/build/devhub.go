@@ -1,6 +1,7 @@
 package build
 
 import (
+	"sort"
 	"sync"
 	"time"
 
@@ -58,6 +59,11 @@ type DevHub struct {
 	clientErrs  []ClientErrorEntry
 	lastEventAt time.Time
 	rebuilds    int
+
+	// serverErrs are failed server-side parts (sidecars, middleware) that have
+	// not recovered yet, by source, so a tab opened later still shows them.
+	serverErrs    map[string]ClientError
+	lastServerErr map[string]time.Time
 }
 
 // NewDevHub creates an empty hub.
@@ -147,4 +153,48 @@ func (h *DevHub) Current() (DevEvent, bool) {
 		return DevEvent{}, false
 	}
 	return *h.last, true
+}
+
+// PublishServerError shows a failed server-side part in every tab and keeps it
+// until ClearServerError(source). The same report within a few seconds is
+// ignored, so a request that fails over and over does not flood the overlay.
+func (h *DevHub) PublishServerError(source string, ce ClientError) {
+	h.mu.Lock()
+	if h.serverErrs == nil {
+		h.serverErrs = map[string]ClientError{}
+		h.lastServerErr = map[string]time.Time{}
+	}
+	prev, seen := h.serverErrs[source]
+	repeat := seen && prev.Message == ce.Message && time.Since(h.lastServerErr[source]) < crashRepeatWindow
+	h.serverErrs[source] = ce
+	h.lastServerErr[source] = time.Now()
+	h.mu.Unlock()
+	if !repeat {
+		h.Publish(DevEvent{Type: "client-error", ClientError: &ce})
+	}
+}
+
+// ClearServerError forgets the error a source reported.
+func (h *DevHub) ClearServerError(source string) {
+	h.mu.Lock()
+	delete(h.serverErrs, source)
+	delete(h.lastServerErr, source)
+	h.mu.Unlock()
+}
+
+// ServerErrors returns the server-side failures that have not recovered, in a
+// stable order.
+func (h *DevHub) ServerErrors() []ClientError {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	keys := make([]string, 0, len(h.serverErrs))
+	for k := range h.serverErrs {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	out := make([]ClientError, 0, len(keys))
+	for _, k := range keys {
+		out = append(out, h.serverErrs[k])
+	}
+	return out
 }

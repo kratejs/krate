@@ -226,6 +226,43 @@ page is unminified (with component comments) so devtools are readable; the share
 `@krate/runtime` chunk is the prebuilt, already minified runtime in both modes.
 Production output minifies the page scripts too.
 
+## Logs
+
+```ts
+logs: {
+  enabled: true,      // save each run's console output (default false)
+  dir: ".krate/logs", // relative to the project, must stay inside it
+  keep: 20,           // log files to keep, oldest removed first (negative keeps all)
+}
+```
+
+With `logs.enabled`, `krate dev`, `build`, `serve`, `start`, `check` and `deploy`
+write everything they print to `<dir>/<timestamp>.log` (colors removed, each line
+stamped in UTC) and print the path when they finish. Add the directory to
+`.gitignore`; the default `.krate/logs` is already inside `.krate`.
+
+## Update notifier
+
+```ts
+updateNotifier: false, // default true
+```
+
+`krate dev`, `build`, `serve`, `start`, `check`, `deploy` and `doctor` print one
+line on stderr when a newer krate version exists:
+
+```
+Update available: krate v0.5.0 -> v0.5.1. Run `krate upgrade` to update ...
+```
+
+The line comes from a cached lookup, so it never slows a command down. The cache
+(`update-check.json` in your user cache directory) is refreshed from the npm
+registry in the background at most once a day; a command that finishes first waits
+up to half a second for the answer. Nothing is sent but the registry request.
+
+The notifier is off when `updateNotifier` is `false`, when `CI` is set (for
+example `CI=1`), when `KRATE_NO_UPDATE_NOTIFIER` or `NO_UPDATE_NOTIFIER` is set,
+when stderr is not a terminal, with `--json`, and for development builds.
+
 ## Tailwind CSS
 
 ```typescript
