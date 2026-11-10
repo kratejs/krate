@@ -1346,6 +1346,8 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	}()
 	port = listener.Addr().(*net.TCPAddr).Port
 	apiPort := internalPort(port + 1)
+	sidecarPorts.Store(port, apiPort)
+	defer sidecarPorts.Delete(port)
 
 	// On-demand revalidation (revalidatePath/revalidateTag) reaches this
 	// process through a loopback-only internal endpoint authenticated by a
@@ -3114,6 +3116,11 @@ func hasControlChar(s string) bool {
 	}
 	return false
 }
+
+// sidecarPorts maps a running server's port to its API/action sidecar port.
+// The sidecar takes port+1 when it is free and another port otherwise, so
+// anything waiting on the sidecar reads the port here instead of guessing.
+var sidecarPorts sync.Map
 
 // handedOutPorts remembers the sidecar ports internalPort returned in this
 // process, so servers starting at the same time never share one. Entries
