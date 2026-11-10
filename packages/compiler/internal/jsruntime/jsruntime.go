@@ -269,9 +269,8 @@ func ToNative(v any) any {
 	}
 }
 
-// exprVMPool holds idle expression-eval VMs. Creating a QuickJS VM and injecting
-// the polyfill bundle is the dominant cost of EvaluateExpr, so VMs are pooled and
-// reused across calls. A VM is handed to one goroutine at a time (QuickJS VMs are
+// exprVMPool holds idle expression-eval VMs (NewBare). Creating a QuickJS VM is
+// the dominant cost of EvaluateExpr, so VMs are pooled and reused across calls. A VM is handed to one goroutine at a time (QuickJS VMs are
 // not concurrency-safe) and the pool is bounded to GOMAXPROCS idle VMs; under
 // bursty concurrency extra calls simply create a fresh VM as before.
 var exprVMPool = make(chan *Runtime, max(1, runtime.GOMAXPROCS(0)))
@@ -282,13 +281,13 @@ func exprVMPoolEnabled() bool { return os.Getenv("KRATE_NO_EXPR_VM_POOL") == "" 
 
 func acquireExprVM() (*Runtime, error) {
 	if !exprVMPoolEnabled() {
-		return New()
+		return NewBare()
 	}
 	select {
 	case rt := <-exprVMPool:
 		return rt, nil
 	default:
-		return New()
+		return NewBare()
 	}
 }
 
@@ -304,12 +303,13 @@ func releaseExprVM(rt *Runtime) {
 	}
 }
 
-// EvaluateExpr evaluates a self-contained JS expression and returns its String()
-// representation. Because QuickJS is a full ECMAScript engine, every built-in
-// (Date, Math, String, Number, Array, Object, ...) is available - so SSR
-// evaluation of globals like Date.now() produces a genuine JS-engine value
-// rather than a Go approximation. Returns an error when the expression throws
-// (e.g. it references an identifier that isn't defined).
+// EvaluateExpr evaluates a self-contained JS expression for compile-time
+// folding and returns its String() representation. It runs in a bare VM
+// (NewBare): the ECMAScript built-ins (Math, String, Array, Object, JSON, ...)
+// plus structuredClone and console, with no network, filesystem, randomness or
+// request state, and with the locale- and time-zone-dependent built-ins
+// throwing. Returns an error when the expression throws (e.g. it references an
+// identifier that isn't defined).
 //
 // The expression is evaluated inside a strict IIFE so it cannot leak implicit
 // globals into the pooled VM (a fresh VM previously discarded any such state).

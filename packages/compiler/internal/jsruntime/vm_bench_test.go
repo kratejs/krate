@@ -88,3 +88,15 @@ func BenchmarkNewVMPreloadAll(b *testing.B) {
 		_ = rt.Close()
 	}
 }
+
+// BenchmarkNewBare creates a build-time expression VM.
+func BenchmarkNewBare(b *testing.B) {
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		rt, err := NewBare()
+		if err != nil {
+			b.Fatal(err)
+		}
+		_ = rt.Close()
+	}
+}

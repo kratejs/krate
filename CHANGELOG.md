@@ -28,6 +28,12 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
   Remove a prefix you wrote into a destination or `Location` by hand.
 - A path in `site.url` now sets the base path. To keep a site at the root behind a proxy that
   strips the prefix, set `basePath: "/"`.
+- Build-time expression folding (the JS-engine fallback and `getCollection()` chains) runs in a
+  QuickJS VM with only the ECMAScript built-ins, `structuredClone` and `console`: no `fetch`,
+  `crypto`, timers, `process` or `require`. There `localeCompare`, `toLocale*String` and
+  `Date.prototype.toString` (`String(date)`, template literals) throw, so an expression or a
+  collection sorted with them stays a run-time value instead of being folded with the build
+  machine's locale and time zone.
 
 ### Added
 
