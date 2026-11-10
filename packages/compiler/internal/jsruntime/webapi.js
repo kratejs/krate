@@ -9,8 +9,17 @@
   function def(name, value) {
     Object.defineProperty(G, name, { value: value, writable: true, configurable: true, enumerable: false });
   }
+  // KR7160 is the diagnostic builds report for the same APIs, so build-time
+  // and run-time messages agree.
+  var KR_UNSUPPORTED = '[KR7160] ';
+  // Stubs carry this marker so tools can tell them from real implementations.
+  var kUnsupported = Symbol.for('krate.unsupported');
+  function markUnsupported(fn) {
+    Object.defineProperty(fn, kUnsupported, { value: true });
+    return fn;
+  }
   function unsupported(api) {
-    var e = new Error(api + ' is not supported by the embedded API runtime; set ssr.apiRuntime to "node" in krate.config.ts to use it');
+    var e = new Error(KR_UNSUPPORTED + api + ' is not supported by the embedded API runtime; set ssr.apiRuntime to "node" in krate.config.ts to use it');
     e.name = 'NotSupportedError';
     try { console.error('[krate] ' + e.message); } catch (_) {}
     throw e;
@@ -18,7 +27,7 @@
   function stubClass(name) {
     var C = function () { unsupported(name); };
     Object.defineProperty(C, 'name', { value: name });
-    def(name, C);
+    def(name, markUnsupported(C));
   }
 
   // ---- DOMException / events / abort ------------------------------------
@@ -326,7 +335,7 @@
   class TextDecoder {
     constructor(label, options) {
       var enc = LABELS[String(label === undefined ? 'utf-8' : label).trim().toLowerCase()];
-      if (!enc) throw new RangeError('The "' + label + '" encoding is not supported by the embedded API runtime; set ssr.apiRuntime to "node" to use it');
+      if (!enc) throw new RangeError(KR_UNSUPPORTED + 'The "' + label + '" encoding is not supported by the embedded API runtime; set ssr.apiRuntime to "node" to use it');
       this._enc = enc;
       this.fatal = !!(options && options.fatal);
       this.ignoreBOM = !!(options && options.ignoreBOM);
@@ -729,6 +738,9 @@
       });
     }
   }
+  markUnsupported(ReadableStream.prototype.tee);
+  markUnsupported(ReadableStream.prototype.pipeTo);
+  markUnsupported(ReadableStream.prototype.pipeThrough);
   def('ReadableStream', ReadableStream);
   def('ReadableStreamDefaultReader', ReadableStreamDefaultReader);
   stubClass('WritableStream');
@@ -1090,7 +1102,7 @@
   function hashName(alg) {
     var n = typeof alg === 'string' ? alg : alg && alg.name;
     n = String(n || '').toUpperCase();
-    if (!HASHES[n]) throw new DOMException('Unrecognized algorithm name: ' + n + ' (the embedded API runtime supports SHA-1, SHA-256, SHA-384, SHA-512; set ssr.apiRuntime to "node" for more)', 'NotSupportedError');
+    if (!HASHES[n]) throw new DOMException(KR_UNSUPPORTED + 'Unrecognized algorithm name: ' + n + ' (the embedded API runtime supports SHA-1, SHA-256, SHA-384, SHA-512; set ssr.apiRuntime to "node" for more)', 'NotSupportedError');
     return HASHES[n];
   }
   function needBytes(data) {
@@ -1108,9 +1120,9 @@
     },
     importKey: function (format, keyData, algorithm, extractable, usages) {
       return new Promise(function (resolve) {
-        if (format !== 'raw') throw new DOMException('importKey format "' + format + '" is not supported by the embedded API runtime; set ssr.apiRuntime to "node"', 'NotSupportedError');
+        if (format !== 'raw') throw new DOMException(KR_UNSUPPORTED + 'importKey format "' + format + '" is not supported by the embedded API runtime; set ssr.apiRuntime to "node"', 'NotSupportedError');
         var name = String(typeof algorithm === 'string' ? algorithm : algorithm && algorithm.name).toUpperCase();
-        if (name !== 'HMAC') throw new DOMException('Algorithm ' + name + ' is not supported by the embedded API runtime (HMAC only); set ssr.apiRuntime to "node"', 'NotSupportedError');
+        if (name !== 'HMAC') throw new DOMException(KR_UNSUPPORTED + 'Algorithm ' + name + ' is not supported by the embedded API runtime (HMAC only); set ssr.apiRuntime to "node"', 'NotSupportedError');
         var key = new CryptoKey();
         Object.defineProperty(key, '_k', { value: needBytes(keyData).slice() });
         Object.defineProperty(key, '_h', { value: hashName(algorithm.hash) });
@@ -1136,7 +1148,7 @@
     }
   };
   ['encrypt', 'decrypt', 'generateKey', 'deriveKey', 'deriveBits', 'exportKey', 'wrapKey', 'unwrapKey'].forEach(function (m) {
-    subtle[m] = function () { return Promise.reject(new DOMException('crypto.subtle.' + m + ' is not supported by the embedded API runtime; set ssr.apiRuntime to "node" to use it', 'NotSupportedError')); };
+    subtle[m] = markUnsupported(function () { return Promise.reject(new DOMException(KR_UNSUPPORTED + 'crypto.subtle.' + m + ' is not supported by the embedded API runtime; set ssr.apiRuntime to "node" to use it', 'NotSupportedError')); });
   });
   def('CryptoKey', CryptoKey);
   def('crypto', {
