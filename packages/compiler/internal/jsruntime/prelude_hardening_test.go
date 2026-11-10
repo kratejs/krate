@@ -1,7 +1,9 @@
 package jsruntime
 
 import (
+	"strings"
 	"testing"
+	"time"
 )
 
 // TestModuleCompileIsolatedFromRequestVM checks that a request VM at its
@@ -47,5 +49,54 @@ func TestSharedBytecodeDoesNotCacheFailure(t *testing.T) {
 	}
 	if bc, err := c.get("1"); err != nil || len(bc) == 0 {
 		t.Fatalf("retry: %v", err)
+	}
+}
+
+// TestLazyLoadsKeepDeadline checks that loading features from a script does not
+// push its timeout back: each load used to re-arm the deadline to now+timeout.
+func TestLazyLoadsKeepDeadline(t *testing.T) {
+	t.Setenv("KRATE_JS_TIMEOUT", "300ms")
+	rt := mustRuntime(t, Options{})
+	start := time.Now()
+	_, err := rt.Execute(`(function(){
+	  function spin(ms){ var e = Date.now()+ms; while(Date.now()<e){} }
+	  var names = ['URL','TextEncoder','Headers','ReadableStream','Blob','crypto','structuredClone','setTimeout','console','Event'];
+	  for (var i=0;i<names.length;i++){ spin(200); void globalThis[names[i]]; }
+	})()`)
+	elapsed := time.Since(start)
+	if err == nil || !strings.Contains(err.Error(), "interrupted") {
+		t.Fatalf("err = %v, want an interrupt", err)
+	}
+	if elapsed > 1200*time.Millisecond {
+		t.Errorf("interrupted after %v with a 300ms timeout", elapsed)
+	}
+	// The configured timeout is back for the next evaluation.
+	if _, err := rt.Execute(`(function(){ var e = Date.now()+100; while(Date.now()<e){} })()`); err != nil {
+		t.Errorf("next evaluation: %v", err)
+	}
+}
+
+// TestFailedLazyLoadStaysBounded checks that a load that keeps failing, retried
+// in a loop, cannot keep the script alive past its timeout.
+func TestFailedLazyLoadStaysBounded(t *testing.T) {
+	t.Setenv("KRATE_JS_TIMEOUT", "300ms")
+	rt := mustRuntime(t, Options{})
+	// Breaking Symbol.for makes every evaluation of a feature module throw.
+	got := execString(t, rt, `Symbol.for = function () { return "broken"; };
+	  (function(){ try { void AbortController; return "loaded"; } catch (e) { return e.message; } })()`)
+	if !strings.Contains(got, "loading the events web APIs failed") {
+		t.Fatalf("load did not fail: %s", got)
+	}
+	start := time.Now()
+	_, err := rt.Execute(`(function(){
+	  var end = Date.now() + 3000;
+	  while (Date.now() < end) { try { void AbortController; } catch (e) {} }
+	})()`)
+	elapsed := time.Since(start)
+	if err == nil || !strings.Contains(err.Error(), "interrupted") {
+		t.Fatalf("err = %v, want an interrupt", err)
+	}
+	if elapsed > 1200*time.Millisecond {
+		t.Errorf("interrupted after %v with a 300ms timeout", elapsed)
 	}
 }

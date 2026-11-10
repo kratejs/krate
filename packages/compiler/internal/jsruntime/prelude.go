@@ -194,7 +194,7 @@ func (r *Runtime) installLazy(s *preludeSet) error {
 		s.lazyBC[key] = bc
 		s.lazyMu.Unlock()
 	}
-	if _, err := r.vm.EvalBytecode(bc); err != nil {
+	if _, err := r.EvalBytecode(bc); err != nil {
 		return fmt.Errorf("installing web API loaders: %w", err)
 	}
 	return nil
@@ -203,9 +203,8 @@ func (r *Runtime) installLazy(s *preludeSet) error {
 // loadFeatureHost is the __krate_load_feature host function core.js calls on
 // first use of a lazily loaded feature. It reports failure as a message, never
 // as a Go error, and core.js throws it: modernc QuickJS aborts under checkptr
-// (go test -race) when a host function returns an error. Evaluating a module
-// re-arms the VM's eval deadline, so each feature a script loads grants it at
-// most one more timeout budget.
+// (go test -race) when a host function returns an error. The module runs as a
+// nested evaluation, within what is left of the enclosing one's timeout.
 func (r *Runtime) loadFeatureHost(args []any) (res any, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
@@ -265,7 +264,7 @@ func (r *Runtime) evalModule(m *preludeModule) error {
 	if err != nil {
 		return err
 	}
-	if _, err := r.vm.EvalBytecode(bc); err != nil {
+	if _, err := r.EvalBytecode(bc); err != nil {
 		return fmt.Errorf("evaluating web API module %s: %w", m.name, err)
 	}
 	return nil

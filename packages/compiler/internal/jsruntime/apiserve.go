@@ -133,7 +133,7 @@ func (r *Runtime) outBytes(bin bool, b64 string) ([]byte, bool) {
 		d, err := base64.StdEncoding.DecodeString(b64)
 		return d, err == nil
 	}
-	v, err := r.vm.CallValue("__krate_out")
+	v, err := r.CallValue("__krate_out")
 	if err != nil {
 		return nil, false
 	}

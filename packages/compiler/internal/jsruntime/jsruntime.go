@@ -41,6 +41,11 @@ type Runtime struct {
 	take    []byte
 	// headroom is the current allowance above memLimit.
 	headroom uintptr
+	// timeout is the configured eval timeout. deadline is when the outermost
+	// evaluation in progress (depth > 0) times out; see enter.
+	timeout  time.Duration
+	deadline time.Time
+	depth    int
 }
 
 // SetLogPrefix sets a prefix prepended to every console line. Plugin hosts set
@@ -123,11 +128,12 @@ func newRuntime() (*Runtime, error) {
 	vm.SetMemoryLimit(memLimit)
 	vm.SetMaxStackSize(envUnits("KRATE_JS_STACK_KB", 256, 1024))
 
-	if err := vm.SetEvalTimeout(envDuration("KRATE_JS_TIMEOUT", 30*time.Second)); err != nil {
+	timeout := envDuration("KRATE_JS_TIMEOUT", 30*time.Second)
+	if err := vm.SetEvalTimeout(timeout); err != nil {
 		vm.Close()
 		return nil, fmt.Errorf("failed to set eval timeout: %w", err)
 	}
-	r := &Runtime{vm: vm, memLimit: memLimit, loaded: map[string]bool{}, hosts: map[string]bool{}, bin: binaryTransfer && !forceBase64}
+	r := &Runtime{vm: vm, memLimit: memLimit, timeout: timeout, loaded: map[string]bool{}, hosts: map[string]bool{}, bin: binaryTransfer && !forceBase64}
 	// core.js reads (and deletes) the flag to choose how bytes cross.
 	if err := r.SetGlobal("__krate_bin", r.bin); err != nil {
 		vm.Close()
@@ -188,8 +194,36 @@ func (r *Runtime) growBodyHeadroom(factor uintptr) {
 	}
 }
 
+// enter brackets every evaluation; use it as defer r.leave(r.enter()). The
+// bindings re-arm the VM deadline to now+timeout on each evaluation. That is
+// right for an outermost one, but an evaluation nested inside another (a web
+// API module loaded from a host function) must not extend the enclosing
+// deadline, so it is given only the time the outermost one has left.
+func (r *Runtime) enter() (nested bool) {
+	r.depth++
+	if r.depth == 1 {
+		r.deadline = time.Now().Add(r.timeout)
+		return false
+	}
+	rem := time.Until(r.deadline)
+	if rem <= 0 {
+		// Zero would disable the timeout.
+		rem = time.Nanosecond
+	}
+	_ = r.vm.SetEvalTimeout(rem)
+	return true
+}
+
+func (r *Runtime) leave(nested bool) {
+	r.depth--
+	if nested {
+		_ = r.vm.SetEvalTimeout(r.timeout)
+	}
+}
+
 // Execute evaluates JavaScript code and returns the result
 func (r *Runtime) Execute(code string) (any, error) {
+	defer r.leave(r.enter())
 	return r.vm.Eval(code, EvalGlobal)
 }
 
@@ -202,31 +236,40 @@ func (r *Runtime) Compile(code string, flags int) ([]byte, error) {
 
 // EvalBytecode evaluates previously compiled quickjs bytecode.
 func (r *Runtime) EvalBytecode(bytecode []byte) (any, error) {
+	defer r.leave(r.enter())
 	return r.vm.EvalBytecode(bytecode)
 }
 
 // DrainJobs executes pending promise jobs (microtasks). Call after Execute to resolve promises.
 func (r *Runtime) DrainJobs() {
 	for {
-		n, err := r.vm.ExecutePendingJobs()
+		n, err := r.executePendingJobs()
 		if n == 0 || err != nil {
 			break
 		}
 	}
 }
 
+func (r *Runtime) executePendingJobs() (int, error) {
+	defer r.leave(r.enter())
+	return r.vm.ExecutePendingJobs()
+}
+
 // ExecuteModule evaluates JavaScript code as an ES module
 func (r *Runtime) ExecuteModule(code string) (any, error) {
+	defer r.leave(r.enter())
 	return r.vm.Eval(code, EvalModule)
 }
 
 // Call calls a global function with the given arguments
 func (r *Runtime) Call(function string, args ...any) (any, error) {
+	defer r.leave(r.enter())
 	return r.vm.Call(function, args...)
 }
 
 // CallValue calls a global function and returns a Value
 func (r *Runtime) CallValue(function string, args ...any) (quickjs.Value, error) {
+	defer r.leave(r.enter())
 	return r.vm.CallValue(function, args...)
 }
 
