@@ -168,15 +168,18 @@
     for (var i = 0; i < timers.length; i++) if (timers[i].at < min) min = timers[i].at;
     return Math.max(0, min - Date.now());
   });
+  // Runs the earliest due timer only. The Go loop drains microtasks before the
+  // next call, so a timer's promise callbacks run before the next timer, as in
+  // Node and browsers.
   def('__krate_timers_run', function () {
     var now = Date.now();
-    var due = timers.filter(function (t) { return t.at <= now; });
-    due.sort(function (a, b) { return a.at - b.at || a.order - b.order; });
-    for (var i = 0; i < due.length; i++) {
-      var t = due[i];
-      var idx = timers.indexOf(t);
-      if (idx < 0) continue;
-      if (t.repeat) { t.at = Date.now() + t.repeat; } else { timers.splice(idx, 1); }
+    var t = null, idx = -1;
+    for (var i = 0; i < timers.length; i++) {
+      var c = timers[i];
+      if (c.at <= now && (t === null || c.at < t.at || (c.at === t.at && c.order < t.order))) { t = c; idx = i; }
+    }
+    if (t !== null) {
+      if (t.repeat) { t.at = now + t.repeat; t.order = ++timerSeq; } else { timers.splice(idx, 1); }
       try { t.fn.apply(G, t.args); } catch (e) { try { console.error('Uncaught timer error: ' + (e && e.stack ? e.stack : String(e))); } catch (_) {} }
     }
     return timers.length;

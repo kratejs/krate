@@ -91,6 +91,8 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 ### Fixed
 
 - `Response.error()` in the embedded API runtime threw a `TypeError`.
+- Timers in the embedded API runtime ran every due callback in one batch, so promise callbacks
+  queued by one `setTimeout` ran after the next timer instead of before it, unlike Node.
 - `basePath` now reaches every URL the compiler emits. Imported assets, generated CSS `url()`s,
   dynamic `import()` chunks and workers used to 404 on static hosts, as did Markdown links,
   convention OG images, `llms.txt` and feed links. Deploy adapters write rules for the prefixed
