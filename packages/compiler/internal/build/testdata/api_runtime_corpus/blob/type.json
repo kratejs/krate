@@ -1,0 +1,11 @@
+{
+  "description": "Blob type is lowercased and otherwise kept as given.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ],
+  "skipRuntimes": {
+    "bun": "Bun appends ;charset=utf-8 to text/plain Blob types"
+  }
+}

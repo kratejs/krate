@@ -1,0 +1,24 @@
+{
+  "description": "Microtasks queued by a timer callback run before the next timer.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ],
+  "divergence": {
+    "reason": "The embedded timer loop runs every due timer callback in one batch and only then drains microtasks.",
+    "nodeVersion": "v24.22.2",
+    "quickjs": [
+      {
+        "status": 200,
+        "body": "[\"t1\",\"t2\",\"t1-micro\",\"t1-qm\"]"
+      }
+    ],
+    "node": [
+      {
+        "status": 200,
+        "body": "[\"t1\",\"t1-micro\",\"t1-qm\",\"t2\"]"
+      }
+    ]
+  }
+}

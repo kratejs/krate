@@ -1,0 +1,8 @@
+{
+  "description": "Invalid header names and values throw TypeError.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

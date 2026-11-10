@@ -1,0 +1,15 @@
+{
+  "description": "Repeated fields, a unicode filename, CRLF inside a file and an empty filename in a multipart request.",
+  "requests": [
+    {
+      "method": "POST",
+      "body": "--corpusboundaryXYZ\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n1\r\n--corpusboundaryXYZ\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n2\r\n--corpusboundaryXYZ\r\nContent-Disposition: form-data; name=\"up\"; filename=\"résumé.txt\"\r\nContent-Type: text/plain\r\n\r\nline1\r\nline2\r\n--corpusboundaryXYZ\r\nContent-Disposition: form-data; name=\"nofile\"; filename=\"\"\r\nContent-Type: application/octet-stream\r\n\r\n\r\n--corpusboundaryXYZ--\r\n",
+      "headers": {
+        "Content-Type": "multipart/form-data; boundary=corpusboundaryXYZ"
+      }
+    }
+  ],
+  "skipRuntimes": {
+    "bun": "Bun adds ;charset=utf-8 to text part types and reports an empty filename as null"
+  }
+}

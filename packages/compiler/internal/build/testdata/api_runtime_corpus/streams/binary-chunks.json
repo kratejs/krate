@@ -1,0 +1,8 @@
+{
+  "description": "A streamed response of binary chunks covering all byte values.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

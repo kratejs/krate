@@ -1,0 +1,8 @@
+{
+  "description": "btoa padding for each input length mod 3, binary strings and non-string arguments.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

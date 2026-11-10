@@ -1,0 +1,8 @@
+{
+  "description": "encodeInto read/written counts when the destination is too small to fit a character.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

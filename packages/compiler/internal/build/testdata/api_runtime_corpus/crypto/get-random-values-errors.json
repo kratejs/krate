@@ -1,0 +1,24 @@
+{
+  "description": "getRandomValues errors: TypeMismatchError for float arrays, DataView and plain arrays.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ],
+  "divergence": {
+    "reason": "The embedded getRandomValues throws a plain TypeError for non-integer arrays (and accepts a DataView) where Node throws a TypeMismatchError DOMException.",
+    "nodeVersion": "v24.22.2",
+    "quickjs": [
+      {
+        "status": 200,
+        "body": "{\"float32\":\"TypeError\",\"float64\":\"TypeError\",\"dataView\":\"ok\",\"plain\":\"TypeError\",\"u16TooBig\":\"DOMException:QuotaExceededError\"}"
+      }
+    ],
+    "node": [
+      {
+        "status": 200,
+        "body": "{\"float32\":\"DOMException:TypeMismatchError\",\"float64\":\"DOMException:TypeMismatchError\",\"dataView\":\"DOMException:TypeMismatchError\",\"plain\":\"DOMException:TypeMismatchError\",\"u16TooBig\":\"DOMException:QuotaExceededError\"}"
+      }
+    ]
+  }
+}

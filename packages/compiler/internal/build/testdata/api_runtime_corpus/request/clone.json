@@ -1,0 +1,12 @@
+{
+  "description": "request.clone() gives an independently readable body.",
+  "requests": [
+    {
+      "method": "POST",
+      "body": "clone me",
+      "headers": {
+        "X-Test": "h"
+      }
+    }
+  ]
+}

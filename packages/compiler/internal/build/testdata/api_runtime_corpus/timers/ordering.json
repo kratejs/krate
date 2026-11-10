@@ -1,0 +1,8 @@
+{
+  "description": "Sync code, then microtasks in FIFO order, then timers ordered by delay and insertion.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

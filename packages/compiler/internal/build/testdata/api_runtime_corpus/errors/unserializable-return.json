@@ -1,0 +1,37 @@
+{
+  "description": "Returning a value JSON.stringify cannot serialize (function, symbol).",
+  "requests": [
+    {
+      "method": "GET",
+      "query": "?k=fn"
+    },
+    {
+      "method": "GET",
+      "query": "?k=symbol"
+    }
+  ],
+  "divergence": {
+    "reason": "The Node sidecar answers 200 with Content-Type application/json and an empty body; the embedded runtime answers 204 with no Content-Type.",
+    "nodeVersion": "v24.22.2",
+    "quickjs": [
+      {
+        "status": 204,
+        "body": ""
+      },
+      {
+        "status": 204,
+        "body": ""
+      }
+    ],
+    "node": [
+      {
+        "status": 200,
+        "body": ""
+      },
+      {
+        "status": 200,
+        "body": ""
+      }
+    ]
+  }
+}

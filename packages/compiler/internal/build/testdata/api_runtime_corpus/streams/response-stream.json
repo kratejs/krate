@@ -1,0 +1,8 @@
+{
+  "description": "A ReadableStream response body is streamed to the client.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

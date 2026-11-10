@@ -1,0 +1,24 @@
+{
+  "description": "A read() result is an object created as { value, done } in that property order (Node creates { done, value }).",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ],
+  "divergence": {
+    "reason": "Node read results have the property order { done, value }; the embedded runtime creates { value, done }, and its final { done: true } result has no value key.",
+    "nodeVersion": "v24.22.2",
+    "quickjs": [
+      {
+        "status": 200,
+        "body": "[{\"value\":\"a\",\"done\":false},{\"done\":true},[\"value\",\"done\"],[\"value\",\"done\"],true]"
+      }
+    ],
+    "node": [
+      {
+        "status": 200,
+        "body": "[{\"done\":false,\"value\":\"a\"},{\"done\":true},[\"done\",\"value\"],[\"value\",\"done\"],true]"
+      }
+    ]
+  }
+}

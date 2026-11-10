@@ -1,0 +1,25 @@
+{
+  "description": "Malformed UTF-8 in a request body becomes U+FFFD in text(), one per maximal subpart.",
+  "requests": [
+    {
+      "method": "POST",
+      "bodyBase64": "Yf/DKOKC7aCAYg=="
+    }
+  ],
+  "divergence": {
+    "reason": "The incoming request text() is decoded by Go, which emits one U+FFFD per invalid sequence instead of one per WHATWG maximal subpart (TextDecoder itself matches Node).",
+    "nodeVersion": "v24.22.2",
+    "quickjs": [
+      {
+        "status": 200,
+        "body": "{\"cps\":[\"61\",\"fffd\",\"28\",\"fffd\",\"62\"]}"
+      }
+    ],
+    "node": [
+      {
+        "status": 200,
+        "body": "{\"cps\":[\"61\",\"fffd\",\"fffd\",\"28\",\"fffd\",\"fffd\",\"fffd\",\"fffd\",\"62\"]}"
+      }
+    ]
+  }
+}

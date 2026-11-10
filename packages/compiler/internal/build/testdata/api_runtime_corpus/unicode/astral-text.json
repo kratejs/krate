@@ -1,0 +1,9 @@
+{
+  "description": "Astral characters round trip through text() and a string response.",
+  "requests": [
+    {
+      "method": "POST",
+      "body": "a😀𝄞é中"
+    }
+  ]
+}

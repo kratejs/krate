@@ -1,0 +1,11 @@
+{
+  "description": "status/statusText/ok and the RangeError/TypeError for invalid init.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ],
+  "skipRuntimes": {
+    "bun": "Bun allows a body with status 204 and 304"
+  }
+}

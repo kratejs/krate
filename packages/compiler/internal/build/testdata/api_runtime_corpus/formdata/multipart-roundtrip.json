@@ -1,0 +1,11 @@
+{
+  "description": "A FormData serialized by Response and parsed back with formData() keeps names, values and files.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ],
+  "skipRuntimes": {
+    "bun": "Bun does not keep part Content-Types through a FormData round trip"
+  }
+}

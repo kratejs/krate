@@ -1,0 +1,8 @@
+{
+  "description": "Primitives, wrapper objects, -0, NaN, BigInt and sparse arrays.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

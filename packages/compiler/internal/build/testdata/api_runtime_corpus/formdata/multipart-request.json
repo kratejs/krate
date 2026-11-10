@@ -1,0 +1,15 @@
+{
+  "description": "request.formData() on a multipart body with a text field and a file.",
+  "requests": [
+    {
+      "method": "POST",
+      "body": "--corpusboundary0123\r\nContent-Disposition: form-data; name=\"title\"\r\n\r\ncafé\r\n--corpusboundary0123\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.txt\"\r\nContent-Type: application/octet-stream\r\n\r\nfile-bytes\r\n--corpusboundary0123--\r\n",
+      "headers": {
+        "Content-Type": "multipart/form-data; boundary=corpusboundary0123"
+      }
+    }
+  ],
+  "skipRuntimes": {
+    "bun": "Bun infers the part type from the file name (text/plain) instead of keeping the declared Content-Type"
+  }
+}

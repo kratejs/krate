@@ -1,0 +1,8 @@
+{
+  "description": "getSetCookie returns every Set-Cookie value, including ones containing commas.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

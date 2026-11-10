@@ -1,0 +1,8 @@
+{
+  "description": "A pull-based source with highWaterMark delivers every chunk in order.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

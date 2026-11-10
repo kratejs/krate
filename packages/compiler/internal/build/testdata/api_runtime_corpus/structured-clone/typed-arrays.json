@@ -1,0 +1,8 @@
+{
+  "description": "Typed arrays, DataView and ArrayBuffer keep offsets and shared backing buffers.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

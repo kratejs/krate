@@ -1,0 +1,11 @@
+{
+  "description": "Iteration is sorted by lowercase name, combines duplicates with \", \" and keeps each Set-Cookie separate.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ],
+  "skipRuntimes": {
+    "bun": "Bun iterates Set-Cookie after all other headers instead of in sorted position"
+  }
+}

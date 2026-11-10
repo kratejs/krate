@@ -1,0 +1,39 @@
+{
+  "description": "json(), arrayBuffer(), blob(), bytes() and text() on the incoming request.",
+  "requests": [
+    {
+      "method": "POST",
+      "query": "?as=json",
+      "body": "{\"n\":[1,\"two\",null]}",
+      "headers": {
+        "Content-Type": "application/json"
+      }
+    },
+    {
+      "method": "POST",
+      "query": "?as=ab",
+      "body": "abcdef"
+    },
+    {
+      "method": "POST",
+      "query": "?as=blob",
+      "body": "blob body",
+      "headers": {
+        "Content-Type": "Text/Plain"
+      }
+    },
+    {
+      "method": "POST",
+      "query": "?as=bytes",
+      "body": "xyz"
+    },
+    {
+      "method": "POST",
+      "query": "?as=text",
+      "body": ""
+    }
+  ],
+  "skipRuntimes": {
+    "bun": "Bun appends ;charset=utf-8 to the Blob type from request.blob()"
+  }
+}

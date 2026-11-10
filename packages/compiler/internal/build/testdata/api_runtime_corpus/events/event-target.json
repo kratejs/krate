@@ -1,0 +1,8 @@
+{
+  "description": "Duplicate listeners are ignored; handleEvent objects, once and removal.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

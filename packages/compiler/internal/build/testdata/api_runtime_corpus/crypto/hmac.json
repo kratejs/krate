@@ -1,0 +1,8 @@
+{
+  "description": "HMAC importKey/sign/verify for each SHA variant and the CryptoKey shape.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

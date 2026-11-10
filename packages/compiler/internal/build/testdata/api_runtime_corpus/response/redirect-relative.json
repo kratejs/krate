@@ -1,0 +1,8 @@
+{
+  "description": "Response.redirect with a URL object resolved against request.url.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

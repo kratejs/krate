@@ -1,0 +1,8 @@
+{
+  "description": "atob with and without padding, ASCII whitespace and non-zero trailing bits.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

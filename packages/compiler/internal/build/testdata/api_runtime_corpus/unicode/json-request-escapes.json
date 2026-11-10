@@ -1,0 +1,12 @@
+{
+  "description": "JSON request bodies with surrogate escapes, including a lone surrogate.",
+  "requests": [
+    {
+      "method": "POST",
+      "body": "{\"pair\":\"\\ud83d\\ude00\",\"lone\":\"\\udc00x\",\"raw\":\"é😀\"}",
+      "headers": {
+        "Content-Type": "application/json"
+      }
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "description": "abort() default AbortError reason, custom reasons, idempotence and throwIfAborted.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

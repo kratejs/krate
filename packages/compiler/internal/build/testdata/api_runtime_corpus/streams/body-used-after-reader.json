@@ -1,0 +1,25 @@
+{
+  "description": "Reading a body stream marks the Request/Response bodyUsed.",
+  "requests": [
+    {
+      "method": "POST",
+      "body": "abc"
+    }
+  ],
+  "divergence": {
+    "reason": "The embedded runtime only sets bodyUsed from the consumer methods (text(), json(), ...); reading body directly leaves it false.",
+    "nodeVersion": "v24.22.2",
+    "quickjs": [
+      {
+        "status": 200,
+        "body": "{\"used\":[false,false]}"
+      }
+    ],
+    "node": [
+      {
+        "status": 200,
+        "body": "{\"used\":[true,true]}"
+      }
+    ]
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "description": "Setters for protocol, port, hostname, host, pathname, hash and search.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

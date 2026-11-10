@@ -1,0 +1,8 @@
+{
+  "description": "origin for special, non-special, file, blob and opaque URLs; default ports are dropped.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

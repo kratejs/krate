@@ -1,0 +1,8 @@
+{
+  "description": "onabort and abort listeners fire exactly once, in registration order.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

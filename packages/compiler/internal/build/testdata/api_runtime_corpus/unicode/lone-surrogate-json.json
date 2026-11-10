@@ -1,0 +1,8 @@
+{
+  "description": "JSON.stringify escapes lone surrogates (well-formed JSON.stringify).",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

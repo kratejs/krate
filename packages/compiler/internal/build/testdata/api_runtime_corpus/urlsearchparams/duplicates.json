@@ -1,0 +1,8 @@
+{
+  "description": "Duplicate names with get/getAll/has/delete/set, including the value arguments.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "description": "text(), arrayBuffer(), bytes() and stream() on a Blob.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

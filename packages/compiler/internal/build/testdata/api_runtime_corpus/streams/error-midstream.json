@@ -1,0 +1,11 @@
+{
+  "description": "A stream that errors after the head was sent; only the status and headers are compared.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ],
+  "compare": {
+    "body": "none"
+  }
+}

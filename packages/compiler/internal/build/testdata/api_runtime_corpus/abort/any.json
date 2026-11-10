@@ -1,0 +1,8 @@
+{
+  "description": "AbortSignal.any follows the first source signal to abort.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

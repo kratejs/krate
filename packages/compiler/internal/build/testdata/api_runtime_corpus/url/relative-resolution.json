@@ -1,0 +1,8 @@
+{
+  "description": "RFC 3986 section 5.4 reference resolution examples plus URL objects as base.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

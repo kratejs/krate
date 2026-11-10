@@ -1,0 +1,8 @@
+{
+  "description": "randomUUID returns distinct lowercase version 4 UUIDs (compared by shape).",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

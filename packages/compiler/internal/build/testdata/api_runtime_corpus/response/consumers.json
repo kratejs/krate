@@ -1,0 +1,8 @@
+{
+  "description": "json(), text(), formData(), blob() and arrayBuffer() on constructed Responses.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "description": "application/x-www-form-urlencoded serialization of spaces, plus signs and unicode, and lenient parsing.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

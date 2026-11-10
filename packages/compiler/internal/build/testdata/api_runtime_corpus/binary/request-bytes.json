@@ -1,0 +1,12 @@
+{
+  "description": "request.arrayBuffer() returns the raw request bytes.",
+  "requests": [
+    {
+      "method": "POST",
+      "bodyBase64": "AP/+gEE=",
+      "headers": {
+        "Content-Type": "application/octet-stream"
+      }
+    }
+  ]
+}

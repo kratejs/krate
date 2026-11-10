@@ -1,0 +1,8 @@
+{
+  "description": "IPv6 literals already in canonical form, with ports, and malformed brackets.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

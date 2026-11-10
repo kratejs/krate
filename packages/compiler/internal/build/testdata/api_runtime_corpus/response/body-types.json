@@ -1,0 +1,11 @@
+{
+  "description": "Implied Content-Type and text for each BodyInit type.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ],
+  "skipRuntimes": {
+    "bun": "Bun does not expose the implied text/plain content-type for string bodies on response.headers"
+  }
+}

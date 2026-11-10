@@ -1,0 +1,24 @@
+{
+  "description": "new Event() without a type throws TypeError.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ],
+  "divergence": {
+    "reason": "The embedded Event constructor accepts a missing type and uses \"undefined\".",
+    "nodeVersion": "v24.22.2",
+    "quickjs": [
+      {
+        "status": 200,
+        "body": "{\"noType\":\"ok\"}"
+      }
+    ],
+    "node": [
+      {
+        "status": 200,
+        "body": "{\"noType\":\"TypeError\"}"
+      }
+    ]
+  }
+}

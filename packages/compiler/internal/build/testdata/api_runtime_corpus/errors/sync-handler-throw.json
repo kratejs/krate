@@ -1,0 +1,9 @@
+{
+  "description": "A non-async handler that throws synchronously becomes a generic 500.",
+  "requests": [
+    {
+      "method": "GET",
+      "status": 500
+    }
+  ]
+}

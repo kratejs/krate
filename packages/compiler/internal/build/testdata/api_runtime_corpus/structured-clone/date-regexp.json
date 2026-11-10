@@ -1,0 +1,8 @@
+{
+  "description": "Date (including invalid) and RegExp cloning; lastIndex is not preserved.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}
