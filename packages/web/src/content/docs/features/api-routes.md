@@ -72,8 +72,15 @@ in the test suite):
   `subtle.importKey`, `sign` and `verify`.
 
 Anything the embedded runtime does not implement (for example `TransformStream`,
-`WritableStream`, `WebSocket`, AES in `crypto.subtle`) throws a clear error
-naming the API and suggesting `ssr.apiRuntime: "node"`, and the error is logged.
+`WritableStream`, `WebSocket`, `Buffer`, AES in `crypto.subtle`) throws a
+`NotSupportedError` naming the API and suggesting `ssr.apiRuntime: "node"`, and
+the error is logged. The build reports the same APIs ahead of time: when a route
+is built for the embedded runtime, each unsupported global it (or a dependency
+it bundles) uses is a [`KR7160`](/docs/reference/diagnostics/#kr7160) warning
+with the file, line, column and an alternative. The full list, with what is
+partial and the tests behind each entry, is in the
+[API runtime compatibility](/docs/reference/api-runtime-compat/) reference,
+generated from the ledger the compiler checks against.
 A handler that stays pending longer than 30 seconds (`KRATE_API_TIMEOUT`) is
 failed. Reading a very large *binary* request body with `arrayBuffer()` inside
 the VM is slow (text, JSON and form bodies are fast); use the Node runtime for

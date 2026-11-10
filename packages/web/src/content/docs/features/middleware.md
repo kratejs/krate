@@ -94,7 +94,10 @@ fail the middleware with an explanatory error.
 - `middleware.ts` is compiled to `.krate/middleware.js` during the build.
 - By default it runs in the **embedded QuickJS runtime**, from a pool of VMs
   (one request does not wait for another). Set `ssr.middlewareRuntime: "node"`
-  (or `"bun"` / `"deno"`) to run it in the sidecar instead.
+  (or `"bun"` / `"deno"`) to run it in the sidecar instead. The embedded
+  runtime has the same Web APIs as [API routes](/docs/reference/api-runtime-compat/),
+  and the build warns with [`KR7160`](/docs/reference/diagnostics/#kr7160) when
+  middleware uses one it lacks.
 - In `krate dev`, the module is reloaded whenever `.krate/middleware.js`
   changes (and picked up if you add it while the server runs).
 - Combined with [redirects & rewrites](/docs/features/redirects-rewrites/),

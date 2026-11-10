@@ -19,6 +19,7 @@ import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { runtimeCompatInSync } from './sync-runtime-compat.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const src = join(root, 'packages', 'web', 'src', 'content', 'docs');
@@ -82,6 +83,15 @@ function hashMarkdown(dir) {
 }
 
 if (check) {
+  // The API runtime compatibility page is generated into the docs source from
+  // the compiler ledger; a stale page would be embedded as is.
+  if (!runtimeCompatInSync()) {
+    console.error(
+      'sync-krate-docs: reference/api-runtime-compat.md is stale against ' +
+        'packages/compiler/internal/jsruntime/compat.json. Run `pnpm sync:docs`.',
+    );
+    process.exit(1);
+  }
   const want = listMarkdown(src);
   const got = existsSync(dest) ? listMarkdown(dest) : [];
 
