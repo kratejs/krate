@@ -119,10 +119,26 @@ type jsHead struct {
 	Headers    [][2]string `json:"headers"`
 	Body       string      `json:"body"`
 	Text       *string     `json:"text"`
+	Bin        bool        `json:"bin"`
 	Stream     bool        `json:"stream"`
 	Error      string      `json:"error"`
 	Stack      string      `json:"stack"`
 	Allow      []string    `json:"allow"`
+}
+
+// outBytes returns the response bytes the runner left for Go: through
+// __krate_out when bin is set (binary transfer), else decoded from b64.
+func (r *Runtime) outBytes(bin bool, b64 string) ([]byte, bool) {
+	if !bin {
+		d, err := base64.StdEncoding.DecodeString(b64)
+		return d, err == nil
+	}
+	v, err := r.vm.CallValue("__krate_out")
+	if err != nil {
+		return nil, false
+	}
+	defer v.Free()
+	return valueBytes(r.vm, v)
 }
 
 func (r *Runtime) evalString(code string) (string, error) {
@@ -137,13 +153,19 @@ func (r *Runtime) evalString(code string) (string, error) {
 // run executes one request on this worker and streams the result into sink.
 func (w *apiWorker) run(ctx context.Context, routeID string, req APIRequest, sink APISink) *APIFailure {
 	rt := w.rt
-	defer func() { _, _ = rt.Execute("__krate_finish()") }()
-
-	// Large bodies need headroom: the body as a string plus decoded bytes.
-	rt.setMemoryHeadroom(uintptr(len(req.Body)) * 4)
-	defer rt.setMemoryHeadroom(0)
 	rt.curBody = req.Body
-	defer func() { rt.curBody = nil }()
+	defer func() {
+		_, _ = rt.Execute("__krate_finish()")
+		rt.curBody, rt.take = nil, nil
+		if rt.headroom > 0 {
+			// The body's garbage can sit in reference cycles (promise
+			// chains) that QuickJS only frees in a cycle collection, which
+			// may not come before the limit drops back to the base and the
+			// next request fails out of memory.
+			runGC(rt.vm)
+			rt.setMemoryHeadroom(0)
+		}
+	}()
 
 	if req.URL == "" {
 		req.URL = "http://localhost" + req.Path
@@ -182,9 +204,12 @@ func (w *apiWorker) run(ctx context.Context, routeID string, req APIRequest, sin
 		return &APIFailure{Status: h.Status, Message: h.Error, Allow: h.Allow}
 	}
 
-	// Reading a large binary body inside the VM is slow; give such requests
-	// proportionally more time before the budget trips.
-	budget := apiTimeout() + time.Duration(len(req.Body)>>20)*4*time.Second
+	// Decoding a large base64 body inside the VM is slow; without binary
+	// transfer give such requests proportionally more time.
+	budget := apiTimeout()
+	if !rt.bin {
+		budget += time.Duration(len(req.Body)>>20) * 4 * time.Second
+	}
 	phase := func() bool {
 		s, _ := rt.evalString("__krate_phase()")
 		return s != "pending"
@@ -213,13 +238,13 @@ func (w *apiWorker) run(ctx context.Context, routeID string, req APIRequest, sin
 	if head.Stream {
 		return w.pumpStream(ctx, budget, sink)
 	}
-	if head.Text != nil || head.Body != "" {
+	if head.Text != nil || head.Body != "" || head.Bin {
 		var data []byte
 		if head.Text != nil {
 			data = []byte(*head.Text)
 		} else {
-			d, err := base64.StdEncoding.DecodeString(head.Body)
-			if err != nil {
+			d, ok := rt.outBytes(head.Bin, head.Body)
+			if !ok {
 				return &APIFailure{Status: 500, Message: "invalid response body", Started: true}
 			}
 			data = d
@@ -254,7 +279,8 @@ func (w *apiWorker) pumpStream(ctx context.Context, budget time.Duration, sink A
 		raw, _ := rt.evalString("__krate_chunk()")
 		var c struct {
 			Done  bool   `json:"done"`
-			Data  string `json:"data"`
+			Body  string `json:"body"`
+			Bin   bool   `json:"bin"`
 			Error string `json:"error"`
 		}
 		if err := json.Unmarshal([]byte(raw), &c); err != nil {
@@ -266,8 +292,8 @@ func (w *apiWorker) pumpStream(ctx context.Context, budget time.Duration, sink A
 		if c.Done {
 			return nil
 		}
-		data, err := base64.StdEncoding.DecodeString(c.Data)
-		if err != nil {
+		data, ok := rt.outBytes(c.Bin, c.Body)
+		if !ok {
 			return &APIFailure{Status: 500, Message: "invalid stream chunk", Started: true}
 		}
 		if len(data) == 0 {

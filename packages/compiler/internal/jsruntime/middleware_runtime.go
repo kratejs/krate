@@ -2,7 +2,6 @@ package jsruntime
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -271,6 +270,7 @@ func (m *MiddlewareRuntime) ExecuteContext(ctx context.Context, req MiddlewareRe
 		StatusText string      `json:"statusText"`
 		Headers    [][2]string `json:"headers"`
 		Body       string      `json:"body"`
+		Bin        bool        `json:"bin"`
 		Text       string      `json:"text"`
 		Rewrite    string      `json:"rewrite"`
 		Error      string      `json:"error"`
@@ -285,9 +285,15 @@ func (m *MiddlewareRuntime) ExecuteContext(ctx context.Context, req MiddlewareRe
 	case "continue":
 		return MiddlewareResult{Action: MiddlewareContinue, Headers: h.Headers, Rewrite: h.Rewrite}
 	}
-	body, _ := base64.StdEncoding.DecodeString(h.Body)
+	var body []byte
 	if h.Text != "" {
 		body = []byte(h.Text)
+	} else if h.Body != "" || h.Bin {
+		b, ok := rt.outBytes(h.Bin, h.Body)
+		if !ok {
+			return MiddlewareResult{Action: MiddlewareError, Error: "invalid middleware response body"}
+		}
+		body = b
 	}
 	return MiddlewareResult{Action: MiddlewareResponse, Status: h.Status, StatusText: h.StatusText, Headers: h.Headers, Body: body}
 }

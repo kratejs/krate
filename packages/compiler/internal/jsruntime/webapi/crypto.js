@@ -4,7 +4,7 @@
 (function (G, K) {
   'use strict';
   var def = K.def, markUnsupported = K.markUnsupported, DOMException = K.DOMException, KR_UNSUPPORTED = K.KR_UNSUPPORTED;
-  var toBytes = K.toBytes, bytesToB64 = K.bytesToB64, b64ToBytes = K.b64ToBytes, fillRandom = K.fillRandom;
+  var toBytes = K.toBytes, toHost = K.toHost, fromHost = K.fromHost, host = K.host, fillRandom = K.fillRandom;
   var goDigest = G.__go_digest, goHMAC = G.__go_hmac;
 
   var HASHES = { 'SHA-1': 'sha1', 'SHA-256': 'sha256', 'SHA-384': 'sha384', 'SHA-512': 'sha512' };
@@ -24,7 +24,7 @@
     digest: function (alg, data) {
       return new Promise(function (resolve) {
         var h = hashName(alg);
-        resolve(b64ToBytes(goDigest(h, bytesToB64(needBytes(data)))).buffer);
+        resolve(fromHost(host(goDigest, h, toHost(needBytes(data)))).buffer);
       });
     },
     importKey: function (format, keyData, algorithm, extractable, usages) {
@@ -43,7 +43,7 @@
     sign: function (alg, key, data) {
       return new Promise(function (resolve) {
         if (!(key instanceof CryptoKey) || !key._k) throw new DOMException('Unsupported key', 'InvalidAccessError');
-        resolve(b64ToBytes(goHMAC(key._h, bytesToB64(key._k), bytesToB64(needBytes(data)))).buffer);
+        resolve(fromHost(host(goHMAC, key._h, toHost(key._k), toHost(needBytes(data)))).buffer);
       });
     },
     verify: function (alg, key, signature, data) {

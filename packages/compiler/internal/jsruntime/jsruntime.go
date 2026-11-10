@@ -33,6 +33,14 @@ type Runtime struct {
 	// functions registered (both per VM).
 	loaded map[string]bool
 	hosts  map[string]bool
+	// bin is set when bytes cross the boundary as ArrayBuffers (qjsbytes.go)
+	// rather than base64. hostErr is the failure of the last binary host
+	// call, take the bytes it left for __go_take.
+	bin     bool
+	hostErr string
+	take    []byte
+	// headroom is the current allowance above memLimit.
+	headroom uintptr
 }
 
 // SetLogPrefix sets a prefix prepended to every console line. Plugin hosts set
@@ -119,7 +127,13 @@ func newRuntime() (*Runtime, error) {
 		vm.Close()
 		return nil, fmt.Errorf("failed to set eval timeout: %w", err)
 	}
-	return &Runtime{vm: vm, memLimit: memLimit, loaded: map[string]bool{}, hosts: map[string]bool{}}, nil
+	r := &Runtime{vm: vm, memLimit: memLimit, loaded: map[string]bool{}, hosts: map[string]bool{}, bin: binaryTransfer && !forceBase64}
+	// core.js reads (and deletes) the flag to choose how bytes cross.
+	if err := r.SetGlobal("__krate_bin", r.bin); err != nil {
+		vm.Close()
+		return nil, fmt.Errorf("failed to set up the JS VM: %w", err)
+	}
+	return r, nil
 }
 
 // envUnits reads a positive integer from key and multiplies it by unit, falling
@@ -146,7 +160,32 @@ func envDuration(key string, def time.Duration) time.Duration {
 // setMemoryHeadroom raises (or restores, with 0) the VM memory limit so a
 // request with a large body fits beside the configured base limit.
 func (r *Runtime) setMemoryHeadroom(extra uintptr) {
+	r.headroom = extra
 	r.vm.SetMemoryLimit(r.memLimit + extra)
+}
+
+// Request body headroom, as multiples of the body length, granted when the
+// handler first reads the body in that form. Measured with 8 MiB bodies.
+const (
+	// Bytes: the body as an ArrayBuffer (1x) plus the copy a handler that
+	// echoes it makes (new Response(buffer) copies).
+	headroomBytes = 2
+	// Text, and everything in the base64 fallback: echoing non-Latin-1 text
+	// back peaks at about 4.2x (a UTF-16 string of up to 2x, the JSON head
+	// that carries it to Go and its UTF-8 copy); base64 text plus the decoded
+	// bytes and their copy stays under 2.5x.
+	headroomText = 5
+)
+
+// growBodyHeadroom makes room for the in-flight request body read in a form
+// needing factor times its length.
+func (r *Runtime) growBodyHeadroom(factor uintptr) {
+	if !r.bin {
+		factor = headroomText
+	}
+	if h := uintptr(len(r.curBody)) * factor; h > r.headroom {
+		r.setMemoryHeadroom(h)
+	}
 }
 
 // Execute evaluates JavaScript code and returns the result

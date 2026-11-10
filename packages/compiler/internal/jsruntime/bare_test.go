@@ -11,7 +11,7 @@ import (
 func TestEvaluateExprBareGlobals(t *testing.T) {
 	for _, name := range []string{
 		"fetch", "__go_fetch", "crypto", "__go_random", "__go_digest", "__go_hmac", "__go_url_parse",
-		"__go_body_text", "__go_body_b64", "__go_body_multipart", "__go_parse_multipart", "_go_readFile",
+		"__go_body_text", "__go_body_bytes", "__go_body_multipart", "__go_take", "__go_host_error", "__go_parse_multipart", "_go_readFile",
 		"__krate_load_feature", "process", "require", "setTimeout", "queueMicrotask", "performance",
 		"URL", "Request", "Response", "Headers", "TextEncoder", "atob", "Blob", "ReadableStream",
 		"AbortController", "DOMException", "Intl",

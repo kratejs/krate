@@ -4,7 +4,7 @@
   'use strict';
   var def = K.def, unsupported = K.unsupported, randomHex = K.randomHex;
   var toBytes = K.toBytes, concatBytes = K.concatBytes, utf8Encode = K.utf8Encode, utf8Decode = K.utf8Decode;
-  var bytesToB64 = K.bytesToB64, b64ToBytes = K.b64ToBytes;
+  var toHost = K.toHost, fromHost = K.fromHost, host = K.host;
   var goParseMultipart = G.__go_parse_multipart;
 
   class Blob {
@@ -91,13 +91,16 @@
     parts.push(utf8Encode('--' + boundary + '--\r\n'));
     return { bytes: concatBytes(parts), type: 'multipart/form-data; boundary=' + boundary };
   }
+  // multipartFromParsed builds a FormData from the host's description of a
+  // multipart body; the part bytes follow from __go_take.
   function multipartFromParsed(parsed) {
     var res = JSON.parse(parsed), fd = new FormData();
     if (res.error) throw new TypeError('Could not parse content as FormData: ' + res.error);
+    var data = fromHost(host(G.__go_take));
     for (var j = 0; j < res.parts.length; j++) {
-      var p = res.parts[j];
-      if (p.filename !== undefined) fd._list.push([p.name, new File([b64ToBytes(p.data)], p.filename, { type: p.type || '' })]);
-      else fd._list.push([p.name, utf8Decode(b64ToBytes(p.data))]);
+      var p = res.parts[j], b = data.subarray(p.off, p.off + p.len);
+      if (p.filename !== undefined) fd._list.push([p.name, new File([b], p.filename, { type: p.type || '' })]);
+      else fd._list.push([p.name, utf8Decode(b)]);
     }
     return fd;
   }
@@ -109,17 +112,7 @@
       for (var i = 0; i < list.length; i++) fd.append(list[i][0], list[i][1]);
       return fd;
     }
-    if (ct.indexOf('multipart/form-data') === 0) {
-      var parsed = goParseMultipart(String(contentType), bytesToB64(bytes));
-      var res = JSON.parse(parsed);
-      if (res.error) throw new TypeError('Could not parse content as FormData: ' + res.error);
-      for (var j = 0; j < res.parts.length; j++) {
-        var p = res.parts[j];
-        if (p.filename !== undefined) fd._list.push([p.name, new File([b64ToBytes(p.data)], p.filename, { type: p.type || '' })]);
-        else fd._list.push([p.name, utf8Decode(b64ToBytes(p.data))]);
-      }
-      return fd;
-    }
+    if (ct.indexOf('multipart/form-data') === 0) return multipartFromParsed(host(goParseMultipart, String(contentType), toHost(bytes)));
     throw new TypeError('Could not parse content as FormData: unsupported content-type');
   }
 

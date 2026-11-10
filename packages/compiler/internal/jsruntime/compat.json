@@ -545,6 +545,7 @@
       "notes": "Response.json, Response.redirect, Response.error and stream bodies; clone() of a response with a stream body throws NotSupportedError. Response.error() and Response.redirect() return mutable headers; the status must be an integer (200.5 throws RangeError) and statusText is not validated.",
       "tests": [
         "TestCompatLedgerBehavior/Response",
+        "TestBinaryAPIBodies",
         "TestWebAPIMatrix/response json",
         "TestWebAPIMatrix/response redirect",
         "TestWebAPIMatrix/stream body",
@@ -575,7 +576,8 @@
       "tests": [
         "TestCompatLedgerBehavior/fetch",
         "TestFetchExists",
-        "TestQuickJSFetchOptions"
+        "TestQuickJSFetchOptions",
+        "TestBinaryFetch"
       ]
     },
     {
@@ -825,6 +827,7 @@
       "notes": "SHA-1, SHA-256, SHA-384 and SHA-512.",
       "tests": [
         "TestCompatLedgerBehavior/crypto.subtle.digest",
+        "TestBinaryHostFunctions",
         "TestWebAPIMatrix/digest",
         "corpus:crypto/digest",
         "corpus:crypto/digest-errors"

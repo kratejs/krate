@@ -49,7 +49,7 @@ type APIRequest struct {
 	Path   string
 	// Headers are the request headers as received (multi-valued).
 	Headers map[string][]string
-	// Body is the raw request body; it crosses into the VM as base64.
+	// Body is the raw request body; the VM copies it in on first read.
 	Body []byte
 	// Params are the dynamic route segments ([id], [...slug]), matching the
 	// second argument Next.js route handlers receive.

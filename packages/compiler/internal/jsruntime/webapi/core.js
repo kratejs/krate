@@ -2,13 +2,16 @@
 // defines no Web API globals itself: it publishes the helpers the feature
 // modules share on a non-enumerable, symbol-keyed object (K), and installs the
 // accessors that load a feature the first time one of its globals is read.
-// Go-backed helpers are named __go_*; everything binary crosses the boundary
-// as base64 text because host strings are NUL-terminated.
+// Go-backed helpers are named __go_*. Bytes cross the boundary as
+// ArrayBuffers copied by the host, or as base64 text when the host cannot
+// (toHost, fromHost).
 (function () {
   'use strict';
   var G = globalThis;
   var K = { mods: {} };
   Object.defineProperty(G, Symbol.for('krate.web'), { value: K });
+  var BIN = G.__krate_bin === true;
+  delete G.__krate_bin;
 
   // The loader is a Go host function; the bare build-time VM has none.
   var loadFeature = typeof G.__krate_load_feature === 'function' ? G.__krate_load_feature : null;
@@ -129,6 +132,17 @@
     }
     return o === out.length ? out : out.subarray(0, o);
   }
+  // toHost prepares bytes for a binary host argument; fromHost turns a binary
+  // host result (an ArrayBuffer, or base64 text) into a Uint8Array.
+  function toHost(u8) { return BIN ? u8 : bytesToB64(u8); }
+  function fromHost(v) { return typeof v === 'string' ? b64ToBytes(v) : new Uint8Array(v); }
+  // host calls a binary host function. Those report failure by returning
+  // undefined, never by throwing from Go.
+  function host(fn) {
+    var r = fn.apply(undefined, Array.prototype.slice.call(arguments, 1));
+    if (r === undefined) throw new Error(G.__go_host_error());
+    return r;
+  }
   function toBytes(src) {
     if (src instanceof Uint8Array) return src;
     if (src instanceof ArrayBuffer || (typeof SharedArrayBuffer !== 'undefined' && src instanceof SharedArrayBuffer)) return new Uint8Array(src);
@@ -211,7 +225,7 @@
   // features register __go_random before they load.
   function fillRandom(u8) {
     if (u8.length > 65536) throw new DOMException('The ArrayBufferView\'s byte length (' + u8.length + ') exceeds the number of bytes of entropy available via this API (65536)', 'QuotaExceededError');
-    u8.set(b64ToBytes(G.__go_random(u8.length)));
+    u8.set(fromHost(host(G.__go_random, u8.length)));
   }
   function randomHex(n) {
     var b = new Uint8Array(n);
@@ -237,6 +251,7 @@
   K.KR_UNSUPPORTED = KR_UNSUPPORTED; K.markUnsupported = markUnsupported; K.unsupported = unsupported; K.stubClass = stubClass;
   K.DOMException = DOMException;
   K.bytesToB64 = bytesToB64; K.b64ToBytes = b64ToBytes; K.toBytes = toBytes; K.concatBytes = concatBytes;
+  K.bin = BIN; K.toHost = toHost; K.fromHost = fromHost; K.host = host;
   K.utf8Encode = utf8Encode; K.utf8Decode = utf8Decode;
   K.fillRandom = fillRandom; K.randomHex = randomHex;
 })();

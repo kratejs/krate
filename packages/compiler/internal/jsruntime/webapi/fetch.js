@@ -4,7 +4,7 @@
 (function (G, K) {
   'use strict';
   var def = K.def, unsupported = K.unsupported, stubClass = K.stubClass;
-  var toBytes = K.toBytes, utf8Encode = K.utf8Encode, utf8Decode = K.utf8Decode, bytesToB64 = K.bytesToB64, b64ToBytes = K.b64ToBytes;
+  var toBytes = K.toBytes, utf8Encode = K.utf8Encode, utf8Decode = K.utf8Decode, toHost = K.toHost, fromHost = K.fromHost, host = K.host;
   var urlMod = K.need('url'), URL = urlMod.URL, URLSearchParams = urlMod.URLSearchParams, parseForm = urlMod.parseForm;
   var AbortController = K.need('events').AbortController;
   var goFetch = G.__go_fetch;
@@ -101,7 +101,7 @@
     return Promise.resolve(utf8Decode(bodyBytes(st) || new Uint8Array(0)));
   }
   function bodyBytes(st) {
-    if (st.lazy) { st.bytes = b64ToBytes(st.lazy()); st.lazy = null; st.lazyText = null; }
+    if (st.lazy) { st.bytes = st.lazy(); st.lazy = null; st.lazyText = null; }
     else if (st.bytes == null && st.str !== undefined) st.bytes = utf8Encode(st.str);
     return st.bytes;
   }
@@ -276,13 +276,15 @@
     req.headers.forEach(function (v, k) { hdrs.push([k, v]); });
     var opts = init || {};
     var payload = JSON.stringify({
-      url: req.url, method: req.method, headers: hdrs, body: bytes ? bytesToB64(bytes) : '',
+      url: req.url, method: req.method, headers: hdrs,
       cache: opts.cache || '', next: opts.next || null, redirect: req.redirect
     });
     var raw;
-    try { raw = goFetch(payload); } catch (e) { var te = new TypeError('fetch failed'); te.cause = e; throw te; }
+    try { raw = host(goFetch, payload, toHost(bytes || new Uint8Array(0))); } catch (e) { var te = new TypeError('fetch failed'); te.cause = e; throw te; }
     var res = JSON.parse(raw);
-    var body = NULL_BODY.indexOf(res.status) >= 0 || req.method === 'HEAD' ? null : b64ToBytes(res.body);
+    // The body follows the head through __go_take.
+    var data = fromHost(host(G.__go_take));
+    var body = NULL_BODY.indexOf(res.status) >= 0 || req.method === 'HEAD' ? null : data;
     var out = new Response(body, { status: res.status, statusText: res.statusText, headers: new Headers(res.headers) });
     Object.defineProperty(out, 'url', { value: res.url || req.url });
     Object.defineProperty(out, 'redirected', { value: !!res.redirected });
