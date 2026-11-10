@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"runtime"
 	"slices"
-	"sync"
 )
 
 // preparedRoute is the export-stripped source of one route plus the content
@@ -17,19 +16,10 @@ type preparedRoute struct {
 
 // apiRunnerBytecode is the route runner (apiruntime.js), compiled once and
 // shared by all workers.
-var (
-	apiRunnerMu  sync.Mutex
-	apiRunnerBC  []byte
-	apiRunnerErr error
-)
+var apiRunnerBC sharedBytecode
 
-func apiRunnerBytecode(rt *Runtime) ([]byte, error) {
-	apiRunnerMu.Lock()
-	defer apiRunnerMu.Unlock()
-	if apiRunnerBC == nil && apiRunnerErr == nil {
-		apiRunnerBC, apiRunnerErr = rt.Compile(apiRunnerSource, EvalGlobal)
-	}
-	return apiRunnerBC, apiRunnerErr
+func apiRunnerBytecode() ([]byte, error) {
+	return apiRunnerBC.get(apiRunnerSource)
 }
 
 // apiWorker is one long-lived VM in the pool. It caches which routes it has
@@ -85,7 +75,7 @@ func newAPIWorker(opts Options, env map[string]string, hooks *CacheHooks) (*apiW
 		_ = rt.Close()
 		return nil, err
 	}
-	bc, err := apiRunnerBytecode(rt)
+	bc, err := apiRunnerBytecode()
 	if err != nil {
 		_ = rt.Close()
 		return nil, err

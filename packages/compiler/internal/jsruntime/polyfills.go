@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"sync"
 )
 
 // nodeGlobalsSource defines process (env only; SetEnv fills it) and a minimal
@@ -43,10 +42,7 @@ var nodeGlobalsSource = `
 		}
 	`
 
-var nodeGlobalsBC = struct {
-	sync.Mutex
-	bc []byte
-}{}
+var nodeGlobalsBC sharedBytecode
 
 // injectNodeGlobals installs process.env and the fs/path require() shim; the
 // fs shim reads files through the _go_readFile host function.
@@ -78,18 +74,11 @@ func (r *Runtime) injectNodeGlobals() error {
 	}); err != nil {
 		return fmt.Errorf("fs.readFile: %w", err)
 	}
-	nodeGlobalsBC.Lock()
-	if nodeGlobalsBC.bc == nil {
-		bc, err := r.Compile(nodeGlobalsSource, EvalGlobal)
-		if err != nil {
-			nodeGlobalsBC.Unlock()
-			return err
-		}
-		nodeGlobalsBC.bc = bc
+	bc, err := nodeGlobalsBC.get(nodeGlobalsSource)
+	if err != nil {
+		return err
 	}
-	bc := nodeGlobalsBC.bc
-	nodeGlobalsBC.Unlock()
-	_, err := r.vm.EvalBytecode(bc)
+	_, err = r.EvalBytecode(bc)
 	return err
 }
 

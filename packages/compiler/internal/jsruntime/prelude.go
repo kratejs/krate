@@ -15,7 +15,7 @@ import (
 // installs first. A VM installs the features it is asked to preload; for every
 // other feature it installs accessors on the feature's globals that load the
 // module the first time one of them is read. Each module is compiled to
-// bytecode once per process.
+// bytecode once per process, in a VM of its own (compileIsolated).
 
 //go:embed webapi/*.js
 var preludeFS embed.FS
@@ -29,23 +29,15 @@ type preludeModule struct {
 	// host registers the Go host functions the module calls.
 	host func(r *Runtime) error
 
-	mu  sync.Mutex
-	bc  []byte
-	err error
+	bc sharedBytecode
 }
 
-// bytecode compiles the module once per process; QuickJS bytecode is portable
-// across VMs of the same library version.
-func (m *preludeModule) bytecode(r *Runtime) ([]byte, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.bc == nil && m.err == nil {
-		m.bc, m.err = r.Compile(m.source, EvalGlobal)
-		if m.err != nil {
-			m.err = fmt.Errorf("compiling web API module %s: %w", m.name, m.err)
-		}
+func (m *preludeModule) bytecode() ([]byte, error) {
+	bc, err := m.bc.get(m.source)
+	if err != nil {
+		return nil, fmt.Errorf("compiling web API module %s: %w", m.name, err)
 	}
-	return m.bc, m.err
+	return bc, nil
 }
 
 // preludeHosts maps each feature to the host functions its module calls.
@@ -194,7 +186,7 @@ func (r *Runtime) installLazy(s *preludeSet) error {
 		}
 		js, _ := json.Marshal(spec)
 		var err error
-		bc, err = r.Compile("globalThis[Symbol.for('krate.web')].lazy("+string(js)+");", EvalGlobal)
+		bc, err = compileIsolated("globalThis[Symbol.for('krate.web')].lazy(" + string(js) + ");")
 		if err != nil {
 			return fmt.Errorf("compiling web API loaders: %w", err)
 		}
@@ -269,7 +261,7 @@ func (r *Runtime) loadFeature(name string) error {
 }
 
 func (r *Runtime) evalModule(m *preludeModule) error {
-	bc, err := m.bytecode(r)
+	bc, err := m.bytecode()
 	if err != nil {
 		return err
 	}

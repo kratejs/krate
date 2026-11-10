@@ -147,7 +147,7 @@ func (m *MiddlewareRuntime) newWorker() (*mwWorker, error) {
 			return fail(err)
 		}
 	}
-	bc, err := apiRunnerBytecode(rt)
+	bc, err := apiRunnerBytecode()
 	if err != nil {
 		return fail(err)
 	}
