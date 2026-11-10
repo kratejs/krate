@@ -104,6 +104,13 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Fixed
 
+- Binary data crosses between Go and the embedded QuickJS runtime as raw ArrayBuffer copies
+  instead of base64 text encoded and decoded in JavaScript: request and response bodies
+  (buffered and streamed), middleware responses, `fetch` request and response bodies,
+  `crypto.subtle.digest`/`sign`, `crypto.getRandomValues` and multipart parsing. A 1 MiB binary
+  request body now takes about 1.4 ms instead of 1.8 s, a 1 MiB response about 3 ms instead of
+  1.2 s. The VM memory limit grows only when a handler reads the body, by what that read needs,
+  and a pooled worker collects the body's garbage before serving the next request.
 - `Response.error()` in the embedded API runtime threw a `TypeError`.
 - Timers in the embedded API runtime ran every due callback in one batch, so promise callbacks
   queued by one `setTimeout` ran after the next timer instead of before it, unlike Node.

@@ -82,9 +82,12 @@ partial and the tests behind each entry, is in the
 [API runtime compatibility](/docs/reference/api-runtime-compat/) reference,
 generated from the ledger the compiler checks against.
 A handler that stays pending longer than 30 seconds (`KRATE_API_TIMEOUT`) is
-failed. Reading a very large *binary* request body with `arrayBuffer()` inside
-the VM is slow (text, JSON and form bodies are fast); use the Node runtime for
-big uploads.
+failed. Request and response bodies, binary included, are copied into and out
+of the VM as raw bytes, so a megabyte body costs about a millisecond each way.
+While a handler holds a body, the VM's memory limit (`KRATE_JS_MEMORY_MB`,
+default 32) grows by twice the body length when it is read as bytes or form
+data and five times when it is read as text or JSON; a handler that loops over
+a large body byte by byte in JavaScript is still much slower than on Node.
 
 ### Methods, errors and streaming
 
