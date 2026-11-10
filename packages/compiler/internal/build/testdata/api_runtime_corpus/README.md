@@ -84,9 +84,10 @@ Request fields:
 skipped there because that runtime differs from Node (Node is the reference for
 conformance).
 
-`heavy: true` marks megabyte-sized cases. The Go driver skips them in `-race`
-builds, where the embedded runtime is too slow for them; other harnesses may
-ignore the flag.
+`heavy: true` marks cases whose handlers loop over megabytes in JavaScript.
+The Go driver skips them in `-race` builds, where the embedded runtime runs
+such loops too slowly; other harnesses may ignore the flag. Moving a large body
+in or out of the VM is not heavy work by itself (`binary/large-echo`).
 
 ## Divergences
 
