@@ -100,3 +100,46 @@ func TestFailedLazyLoadStaysBounded(t *testing.T) {
 		t.Errorf("interrupted after %v with a 300ms timeout", elapsed)
 	}
 }
+
+// TestLazyGlobalsOnFrozenGlobal checks that features still load when user code
+// froze or sealed the global object before using them, as with PreloadAll.
+func TestLazyGlobalsOnFrozenGlobal(t *testing.T) {
+	probe := `(function(){ try {
+	  return [typeof fetch, typeof URL, new URL("http://a/b?c").pathname, fetch === fetch,
+	    typeof console.log, new Response("x").status, typeof AbortController].join();
+	} catch (e) { return "threw: " + e.message; } })()`
+	want := "function,function,/b,true,function,200,function"
+	for _, lock := range []string{"Object.freeze", "Object.seal", "Object.preventExtensions"} {
+		for _, o := range []Options{{}, {PreloadAll: true}} {
+			rt := mustRuntime(t, o)
+			if got := execString(t, rt, lock+"(globalThis); "+probe); got != want {
+				t.Errorf("%s, PreloadAll=%v: %s, want %s", lock, o.PreloadAll, got, want)
+			}
+		}
+	}
+}
+
+// TestFeatureModuleRollsBack checks that a module failing partway leaves no
+// globals behind, so a retry installs one consistent set.
+func TestFeatureModuleRollsBack(t *testing.T) {
+	rt := mustRuntime(t, Options{})
+	got := execString(t, rt, `(function(){
+	  var gopd = Object.getOwnPropertyDescriptor, armed = true;
+	  Object.getOwnPropertyDescriptor = function (o, n) {
+	    if (armed && o === globalThis && n === "AbortController") { armed = false; throw new Error("injected"); }
+	    return gopd(o, n);
+	  };
+	  var first;
+	  try { void Event; first = "loaded"; } catch (e) { first = e.message; }
+	  Object.getOwnPropertyDescriptor = gopd;
+	  var rolledBack = ["DOMException", "Event", "EventTarget", "AbortSignal"].every(function (n) {
+	    var d = gopd(globalThis, n); return !!d && typeof d.get === "function";
+	  });
+	  var s = new AbortController().signal;
+	  return [first.indexOf("injected") >= 0, rolledBack, s instanceof EventTarget, s instanceof AbortSignal,
+	    Object.getPrototypeOf(AbortSignal) === EventTarget].join();
+	})()`)
+	if got != "true,true,true,true,true" {
+		t.Errorf("got %s", got)
+	}
+}

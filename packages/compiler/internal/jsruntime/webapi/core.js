@@ -30,17 +30,48 @@
   // instanceof checks: nothing can be an instance of a class not yet defined.
   function loaded(name) { return K.mods[name]; }
 
+  var hasOwn = Object.prototype.hasOwnProperty;
   var lazyGetters = {};
+  // vals holds the value each lazily loaded global was given, for when its
+  // accessor cannot be replaced (a frozen or sealed global object).
+  var vals = {};
   function isLazy(name) {
     var d = Object.getOwnPropertyDescriptor(G, name);
     return !!d && d.get !== undefined && d.get === lazyGetters[name];
+  }
+  // A feature module runs between begin and commit (see featureSource in
+  // prelude.go). def records what each global was before, so rollback can
+  // restore it when the module throws partway.
+  var txns = [];
+  function begin() { txns.push([]); }
+  function commit() { txns.pop(); }
+  function rollback(feature) {
+    var undo = txns.pop() || [];
+    for (var i = undo.length - 1; i >= 0; i--) {
+      var u = undo[i];
+      if (u.hadVal) vals[u.name] = u.val; else delete vals[u.name];
+      try {
+        if (u.d) Object.defineProperty(G, u.name, u.d); else delete G[u.name];
+      } catch (_) {}
+    }
+    delete K.mods[feature];
   }
   // def installs a global with the attributes of a built-in. A lazily loaded
   // module only replaces its own accessor, so a value user code assigned (or
   // a global it deleted) before the feature loaded is left alone.
   function def(name, value) {
-    if (Object.prototype.hasOwnProperty.call(lazyGetters, name) && !isLazy(name)) return;
-    Object.defineProperty(G, name, { value: value, writable: true, configurable: true, enumerable: false });
+    var managed = hasOwn.call(lazyGetters, name);
+    if (managed && !isLazy(name)) return;
+    if (txns.length) {
+      txns[txns.length - 1].push({ name: name, d: Object.getOwnPropertyDescriptor(G, name), hadVal: hasOwn.call(vals, name), val: vals[name] });
+    }
+    if (managed) vals[name] = value;
+    try {
+      Object.defineProperty(G, name, { value: value, writable: true, configurable: true, enumerable: false });
+    } catch (e) {
+      // The accessor stays and keeps returning vals[name].
+      if (!managed) throw e;
+    }
   }
   // lazy installs a loading accessor for each global of each feature in spec
   // ({ feature: [names] }).
@@ -54,7 +85,11 @@
   function lazyGlobal(feature, name) {
     var get = function () {
       need(feature);
-      if (isLazy(name)) { delete G[name]; return undefined; }
+      if (isLazy(name)) {
+        if (hasOwn.call(vals, name)) return vals[name];
+        try { delete G[name]; } catch (_) {}
+        return undefined;
+      }
       return G[name];
     };
     lazyGetters[name] = get;
@@ -248,6 +283,7 @@
   timerHook('__krate_timers_clear', undefined);
 
   K.need = need; K.loaded = loaded; K.def = def; K.lazy = lazy;
+  K.begin = begin; K.commit = commit; K.rollback = rollback;
   K.KR_UNSUPPORTED = KR_UNSUPPORTED; K.markUnsupported = markUnsupported; K.unsupported = unsupported; K.stubClass = stubClass;
   K.DOMException = DOMException;
   K.bytesToB64 = bytesToB64; K.b64ToBytes = b64ToBytes; K.toBytes = toBytes; K.concatBytes = concatBytes;
