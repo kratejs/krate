@@ -14,7 +14,10 @@ API routes and middleware run in Krate's embedded QuickJS runtime unless
 `ssr.apiRuntime` (or `ssr.middlewareRuntime`) selects `"node"`, `"bun"` or
 `"deno"`. This page lists what that runtime provides. It is generated from the
 ledger the compiler embeds, and every supported row names the Go tests that
-verify it.
+verify it. Tests named `corpus:<case>` are cases of the differential corpus
+(`packages/compiler/internal/build/testdata/api_runtime_corpus`), which runs
+each route under QuickJS and under Node and compares the responses; a row that
+cites a case with a recorded difference from Node is at most partial.
 
 Each feature group below is installed the first time code reads one of its
 globals, so a route pays only for the APIs it uses. Pooled API and middleware
@@ -47,8 +50,8 @@ scanned.
 
 | Status | APIs |
 |---|---|
-| Supported | 29 |
-| Partial | 14 |
+| Supported | 23 |
+| Partial | 20 |
 | Not supported | 68 |
 | By design | 1 |
 
@@ -58,14 +61,14 @@ DOMException, Event, EventTarget, AbortController and AbortSignal. Feature group
 
 | API | Status | Notes | Instead | Tests |
 |---|---|---|---|---|
-| `DOMException` | Supported | name and legacy code are set from the error name. |  | `TestCompatLedgerBehavior/DOMException`, `TestWebAPIMatrix/atob invalid` |
-| `Event` | Supported | No DOM, so there is no propagation path: bubbles is recorded but stopPropagation() has no effect. |  | `TestCompatLedgerBehavior/Event` |
-| `EventTarget` | Supported | addEventListener (with once), removeEventListener and dispatchEvent. |  | `TestCompatLedgerBehavior/EventTarget` |
-| `CustomEvent` | Not supported |  | Extend Event and attach the payload as a property, or set ssr.apiRuntime to "node" in krate.config.ts. |  |
+| `DOMException` | Supported | name and legacy code are set from the error name. |  | `TestCompatLedgerBehavior/DOMException`, `TestWebAPIMatrix/atob invalid`, `corpus:errors/error-properties`, `corpus:abort/controller-reason` |
+| `Event` | Partial | No DOM, so there is no propagation path: bubbles is recorded but stopPropagation() has no effect. new Event() without a type uses "undefined" instead of throwing TypeError. |  | `TestCompatLedgerBehavior/Event`, `corpus:events/event-props`, `corpus:events/event-requires-type`, `corpus:events/event-target`, `corpus:events/stop-immediate` |
+| `EventTarget` | Supported | addEventListener (with once), removeEventListener and dispatchEvent. |  | `TestCompatLedgerBehavior/EventTarget`, `corpus:events/event-props`, `corpus:events/event-target`, `corpus:events/stop-immediate` |
+| `CustomEvent` | Not supported |  | Extend Event and attach the payload as a property, or set ssr.apiRuntime to "node" in krate.config.ts. | `corpus:events/custom-event` |
 | `ErrorEvent` | Not supported |  | Dispatch a plain Event carrying the error, or set ssr.apiRuntime to "node" in krate.config.ts. |  |
 | `PromiseRejectionEvent` | Not supported |  | Handle the rejection with .catch() where the promise is created. |  |
-| `AbortController` | Supported |  |  | `TestCompatLedgerBehavior/AbortController`, `TestWebAPIMatrix/abort` |
-| `AbortSignal` | Supported | abort(), timeout(), any() and throwIfAborted(). |  | `TestCompatLedgerBehavior/AbortSignal`, `TestWebAPIMatrix/abort timeout` |
+| `AbortController` | Supported |  |  | `TestCompatLedgerBehavior/AbortController`, `TestWebAPIMatrix/abort`, `corpus:abort/any`, `corpus:abort/controller-reason`, `corpus:abort/events`, `corpus:abort/request-signal` |
+| `AbortSignal` | Supported | abort(), timeout(), any() and throwIfAborted(). |  | `TestCompatLedgerBehavior/AbortSignal`, `TestWebAPIMatrix/abort timeout`, `corpus:abort/any`, `corpus:abort/controller-reason`, `corpus:abort/events`, `corpus:abort/request-signal`, `corpus:abort/signal-abort-static`, `corpus:abort/timeout` |
 | `reportError` | Not supported |  | Log the error with console.error instead. |  |
 | `onerror` | Not supported | There is no global error event; an uncaught error fails the request and is logged. | Wrap the handler body in try/catch. |  |
 | `onunhandledrejection` | Not supported | There is no global unhandledrejection event. | Attach .catch() to the promise, or await it inside try/catch. |  |
@@ -76,14 +79,14 @@ setTimeout and friends, queueMicrotask and performance, driven by the Go job loo
 
 | API | Status | Notes | Instead | Tests |
 |---|---|---|---|---|
-| `setTimeout` | Supported | Timers run on the request's event loop; a handler can await a timeout. |  | `TestCompatLedgerBehavior/setTimeout`, `TestWebAPIMatrix/settimeout fires`, `TestWebAPIMatrix/timer order` |
-| `clearTimeout` | Supported |  |  | `TestCompatLedgerBehavior/clearTimeout`, `TestWebAPIMatrix/clearTimeout` |
-| `setInterval` | Supported |  |  | `TestCompatLedgerBehavior/setInterval`, `TestWebAPIMatrix/setInterval` |
-| `clearInterval` | Supported |  |  | `TestCompatLedgerBehavior/clearInterval` |
-| `setImmediate` | Supported | Node global; scheduled as a zero-delay timer. |  | `TestCompatLedgerBehavior/setImmediate` |
-| `clearImmediate` | Supported | Node global. |  | `TestCompatLedgerBehavior/clearImmediate` |
-| `queueMicrotask` | Supported |  |  | `TestCompatLedgerBehavior/queueMicrotask`, `TestWebAPIMatrix/queueMicrotask` |
-| `performance` | Partial | performance.now(), performance.timeOrigin and toJSON() only. |  | `TestCompatLedgerBehavior/performance`, `TestWebAPIMatrix/performance` |
+| `setTimeout` | Supported | Timers run on the request's event loop; a handler can await a timeout. |  | `TestCompatLedgerBehavior/setTimeout`, `TestWebAPIMatrix/settimeout fires`, `TestWebAPIMatrix/timer order`, `corpus:timers/set-timeout-wait`, `corpus:timers/ordering`, `corpus:timers/args-and-handles`, `corpus:timers/microtasks-between-timers` |
+| `clearTimeout` | Supported |  |  | `TestCompatLedgerBehavior/clearTimeout`, `TestWebAPIMatrix/clearTimeout`, `corpus:timers/clear-timeout`, `corpus:timers/args-and-handles` |
+| `setInterval` | Supported |  |  | `TestCompatLedgerBehavior/setInterval`, `TestWebAPIMatrix/setInterval`, `corpus:timers/set-interval` |
+| `clearInterval` | Supported |  |  | `TestCompatLedgerBehavior/clearInterval`, `corpus:timers/set-interval`, `corpus:timers/clear-timeout` |
+| `setImmediate` | Supported | Node global; scheduled as a zero-delay timer. |  | `TestCompatLedgerBehavior/setImmediate`, `corpus:timers/set-immediate` |
+| `clearImmediate` | Supported | Node global. |  | `TestCompatLedgerBehavior/clearImmediate`, `corpus:timers/set-immediate` |
+| `queueMicrotask` | Supported |  |  | `TestCompatLedgerBehavior/queueMicrotask`, `TestWebAPIMatrix/queueMicrotask`, `corpus:timers/ordering`, `corpus:timers/microtasks-between-timers` |
+| `performance` | Partial | performance.now(), performance.timeOrigin and toJSON() only. |  | `TestCompatLedgerBehavior/performance`, `TestWebAPIMatrix/performance`, `corpus:performance/now` |
 | `performance.mark` | Not supported |  | Record performance.now() before and after and subtract. |  |
 | `performance.measure` | Not supported |  | Record performance.now() before and after and subtract. |  |
 
@@ -93,10 +96,10 @@ atob, btoa, TextEncoder and TextDecoder. Feature group: `encoding`.
 
 | API | Status | Notes | Instead | Tests |
 |---|---|---|---|---|
-| `atob` | Supported |  |  | `TestCompatLedgerBehavior/atob`, `TestWebAPIMatrix/btoa atob`, `TestWebAPIMatrix/atob invalid` |
-| `btoa` | Supported |  |  | `TestCompatLedgerBehavior/btoa`, `TestWebAPIMatrix/btoa atob` |
-| `TextEncoder` | Supported | encode() and encodeInto(). |  | `TestCompatLedgerBehavior/TextEncoder`, `TestWebAPIMatrix/textencoder`, `TestTextEncoder` |
-| `TextDecoder` | Partial | utf-8, utf-16le and windows-1252 (latin1, ascii) labels, with fatal, ignoreBOM and stream; any other label throws RangeError. |  | `TestCompatLedgerBehavior/TextDecoder`, `TestWebAPIMatrix/textdecoder`, `TestWebAPIMatrix/textdecoder fatal`, `TestWebAPIMatrix/textdecoder stream` |
+| `atob` | Partial | Accepts some invalid padding that Node rejects ("Zg=", "Z==="). |  | `TestCompatLedgerBehavior/atob`, `TestWebAPIMatrix/btoa atob`, `TestWebAPIMatrix/atob invalid`, `corpus:base64/atob`, `corpus:base64/atob-invalid`, `corpus:base64/atob-invalid-padding`, `corpus:base64/binary-roundtrip` |
+| `btoa` | Supported |  |  | `TestCompatLedgerBehavior/btoa`, `TestWebAPIMatrix/btoa atob`, `corpus:base64/btoa`, `corpus:base64/btoa-invalid`, `corpus:base64/binary-roundtrip` |
+| `TextEncoder` | Supported | encode() and encodeInto(). |  | `TestCompatLedgerBehavior/TextEncoder`, `TestWebAPIMatrix/textencoder`, `TestTextEncoder`, `corpus:encoding/text-encoder`, `corpus:encoding/encode-into` |
+| `TextDecoder` | Partial | utf-8, utf-16le and windows-1252 (latin1, ascii) labels, with fatal, ignoreBOM and stream; any other label throws RangeError. The windows-1252 labels map bytes 0x80-0x9f to U+0080-U+009F instead of the windows-1252 table (0x80 is U+20AC in Node). |  | `TestCompatLedgerBehavior/TextDecoder`, `TestWebAPIMatrix/textdecoder`, `TestWebAPIMatrix/textdecoder fatal`, `TestWebAPIMatrix/textdecoder stream`, `corpus:encoding/decoder-bom`, `corpus:encoding/decoder-fatal`, `corpus:encoding/decoder-stream`, `corpus:encoding/decoder-labels`, `corpus:encoding/decoder-inputs`, `corpus:encoding/decoder-windows-1252` |
 
 ## structuredClone
 
@@ -104,7 +107,7 @@ structuredClone. Feature group: `clone`.
 
 | API | Status | Notes | Instead | Tests |
 |---|---|---|---|---|
-| `structuredClone` | Partial | Plain data, Date, RegExp, Map, Set, ArrayBuffer and typed arrays, Blob and errors, with cycles; the transfer option throws NotSupportedError. |  | `TestCompatLedgerBehavior/structuredClone`, `TestWebAPIMatrix/structuredClone`, `TestWebAPIMatrix/structuredClone fn throws` |
+| `structuredClone` | Partial | Plain data, Date, RegExp, Map, Set, ArrayBuffer and typed arrays, Blob and errors, with cycles; the transfer option throws NotSupportedError. Arrays are copied by index only, so extra own properties on an array are dropped. |  | `TestCompatLedgerBehavior/structuredClone`, `TestWebAPIMatrix/structuredClone`, `TestWebAPIMatrix/structuredClone fn throws`, `corpus:structured-clone/array-extra-props`, `corpus:structured-clone/cycles`, `corpus:structured-clone/date-regexp`, `corpus:structured-clone/errors`, `corpus:structured-clone/map-set`, `corpus:structured-clone/objects`, `corpus:structured-clone/primitives`, `corpus:structured-clone/typed-arrays`, `corpus:structured-clone/uncloneable` |
 
 ## URL
 
@@ -112,8 +115,8 @@ URL (parsed by the Go host) and URLSearchParams. Feature group: `url`.
 
 | API | Status | Notes | Instead | Tests |
 |---|---|---|---|---|
-| `URL` | Supported | WHATWG parsing (Go host); URL.canParse and URL.parse. |  | `TestCompatLedgerBehavior/URL`, `TestWebAPIMatrix/url parts`, `TestWebAPIMatrix/url relative`, `TestWebAPIMatrix/url invalid throws`, `TestURLRelativeResolution` |
-| `URLSearchParams` | Supported |  |  | `TestCompatLedgerBehavior/URLSearchParams`, `TestWebAPIMatrix/urlsearchparams eq`, `TestWebAPIMatrix/urlsearchparams toString`, `TestWebAPIMatrix/url searchParams sync` |
+| `URL` | Partial | WHATWG parsing (Go host); URL.canParse and URL.parse. Host parsing differs from Node: IPv6 literals are kept as written (no zero compression), numeric IPv4 forms (hex, octal, shortened) are not normalized, file://localhost keeps localhost and every blob: URL has origin "null". The username and password setters re-encode existing percent escapes, and the protocol setter applies special/non-special scheme switches that Node ignores. |  | `TestCompatLedgerBehavior/URL`, `TestWebAPIMatrix/url parts`, `TestWebAPIMatrix/url relative`, `TestWebAPIMatrix/url invalid throws`, `TestURLRelativeResolution`, `corpus:url/blob-origin`, `corpus:url/credential-setters`, `corpus:url/credentials`, `corpus:url/file-localhost`, `corpus:url/idna-host`, `corpus:url/invalid-inputs`, `corpus:url/ipv4-number-forms`, `corpus:url/ipv6-literals`, `corpus:url/ipv6-serialization`, `corpus:url/normalization`, `corpus:url/origin`, `corpus:url/percent-encoding`, `corpus:url/protocol-setter-special`, `corpus:url/relative-resolution`, `corpus:url/request-url`, `corpus:url/search-params-mutation`, `corpus:url/serialization`, `corpus:url/setters`, `corpus:url/static-methods` |
+| `URLSearchParams` | Supported |  |  | `TestCompatLedgerBehavior/URLSearchParams`, `TestWebAPIMatrix/urlsearchparams eq`, `TestWebAPIMatrix/urlsearchparams toString`, `TestWebAPIMatrix/url searchParams sync`, `corpus:urlsearchparams/constructors`, `corpus:urlsearchparams/duplicates`, `corpus:urlsearchparams/encoding`, `corpus:urlsearchparams/iteration`, `corpus:urlsearchparams/sort`, `corpus:url/search-params-mutation` |
 | `URLPattern` | Not supported |  | Match with a RegExp, or read the route params passed to the handler. |  |
 
 ## Fetch, Request and Response
@@ -122,9 +125,9 @@ Headers, Request, Response and fetch (performed by the Go host). The API and mid
 
 | API | Status | Notes | Instead | Tests |
 |---|---|---|---|---|
-| `Headers` | Supported | Case-insensitive, iterable in sorted order, getSetCookie(). |  | `TestCompatLedgerBehavior/Headers`, `TestWebAPIMatrix/headers case-insensitive`, `TestWebAPIMatrix/headers iterable sorted`, `TestWebAPIMatrix/getSetCookie` |
-| `Request` | Partial | Bodies are promise-based (json, text, formData, arrayBuffer, blob, bytes); clone() of a request with a stream body throws NotSupportedError. |  | `TestCompatLedgerBehavior/Request`, `TestWebAPIMatrix/req json async`, `TestWebAPIMatrix/body used`, `TestWebAPIMatrix/formData urlencoded` |
-| `Response` | Partial | Response.json, Response.redirect, Response.error and stream bodies; clone() of a response with a stream body throws NotSupportedError. |  | `TestCompatLedgerBehavior/Response`, `TestWebAPIMatrix/response json`, `TestWebAPIMatrix/response redirect`, `TestWebAPIMatrix/stream body` |
+| `Headers` | Partial | Case-insensitive, iterable in sorted order, getSetCookie(). Values are only checked for NUL, CR and LF, so characters Node rejects (outside Latin-1) are accepted. |  | `TestCompatLedgerBehavior/Headers`, `TestWebAPIMatrix/headers case-insensitive`, `TestWebAPIMatrix/headers iterable sorted`, `TestWebAPIMatrix/getSetCookie`, `corpus:headers/append-vs-set`, `corpus:headers/case-insensitive`, `corpus:headers/constructors`, `corpus:headers/get-set-cookie`, `corpus:headers/iteration-order`, `corpus:headers/non-latin1-value`, `corpus:headers/response-headers`, `corpus:headers/set-cookie-multiple`, `corpus:headers/validation` |
+| `Request` | Partial | Bodies are promise-based (json, text, formData, arrayBuffer, blob, bytes); clone() of a request with a stream body throws NotSupportedError. A leading BOM is kept by text() (and makes json() throw SyntaxError) where Node strips it, and invalid UTF-8 in the incoming body becomes one U+FFFD per invalid sequence rather than per WHATWG maximal subpart. |  | `TestCompatLedgerBehavior/Request`, `TestWebAPIMatrix/req json async`, `TestWebAPIMatrix/body used`, `TestWebAPIMatrix/formData urlencoded`, `corpus:request/body-used`, `corpus:request/clone`, `corpus:request/constructed`, `corpus:request/consumers`, `corpus:request/headers`, `corpus:request/json-body`, `corpus:request/properties`, `corpus:request/text-body`, `corpus:unicode/bom-body-json`, `corpus:unicode/invalid-utf8-request` |
+| `Response` | Partial | Response.json, Response.redirect, Response.error and stream bodies; clone() of a response with a stream body throws NotSupportedError. Response.error() and Response.redirect() return mutable headers; the status must be an integer (200.5 throws RangeError) and statusText is not validated. |  | `TestCompatLedgerBehavior/Response`, `TestWebAPIMatrix/response json`, `TestWebAPIMatrix/response redirect`, `TestWebAPIMatrix/stream body`, `corpus:response/body-types`, `corpus:response/body-used`, `corpus:response/clone`, `corpus:response/consumers`, `corpus:response/custom-status`, `corpus:response/error-static`, `corpus:response/headers-immutable-request`, `corpus:response/implicit-empty`, `corpus:response/json-returned`, `corpus:response/json-static`, `corpus:response/plain-object`, `corpus:response/redirect-headers-immutable`, `corpus:response/redirect-relative`, `corpus:response/redirect-returned`, `corpus:response/redirect-static`, `corpus:response/status-init-coercion`, `corpus:response/status-text` |
 | `fetch` | Supported | Performed by the Go host and buffered; honours cache and next.revalidate/tags options. |  | `TestCompatLedgerBehavior/fetch`, `TestFetchExists`, `TestQuickJSFetchOptions` |
 | `WebSocket` | Not supported | Defined as a stub that throws NotSupportedError. | Open sockets from a Go API route, or set ssr.apiRuntime to "node" in krate.config.ts. |  |
 | `EventSource` | Not supported | Defined as a stub that throws NotSupportedError. Serving Server-Sent Events from a route works (return a ReadableStream body). | Read the event stream with fetch() and response.body, or set ssr.apiRuntime to "node" in krate.config.ts. |  |
@@ -137,7 +140,7 @@ ReadableStream and its default reader, plus the unsupported stream stubs. Featur
 |---|---|---|---|---|
 | `TextEncoderStream` | Not supported |  | Encode chunks with TextEncoder inside a ReadableStream source, or set ssr.apiRuntime to "node" in krate.config.ts. |  |
 | `TextDecoderStream` | Not supported |  | Read the stream and decode chunks with new TextDecoder().decode(chunk, { stream: true }), or set ssr.apiRuntime to "node" in krate.config.ts. |  |
-| `ReadableStream` | Partial | Default readers, async iteration and ReadableStream.from; tee(), pipeTo(), pipeThrough() and BYOB readers throw NotSupportedError. |  | `TestCompatLedgerBehavior/ReadableStream`, `TestWebAPIMatrix/stream body`, `TestWebAPIMatrix/stream async iter` |
+| `ReadableStream` | Partial | Default readers, async iteration and ReadableStream.from; tee(), pipeTo(), pipeThrough() and BYOB readers throw NotSupportedError. There is no values() method (use for await or getReader()), read results are { value, done } with no value key on the final one, and reading a body directly through body does not set bodyUsed. |  | `TestCompatLedgerBehavior/ReadableStream`, `TestWebAPIMatrix/stream body`, `TestWebAPIMatrix/stream async iter`, `corpus:streams/async-iteration`, `corpus:streams/binary-chunks`, `corpus:streams/body-stream`, `corpus:streams/body-used-after-reader`, `corpus:streams/cancel`, `corpus:streams/enqueue-close-error`, `corpus:streams/error-midstream`, `corpus:streams/from`, `corpus:streams/pull-source`, `corpus:streams/read-result-shape`, `corpus:streams/reader`, `corpus:streams/response-stream`, `corpus:streams/string-chunks`, `corpus:streams/tee`, `corpus:streams/unsupported-helpers`, `corpus:streams/values-method` |
 | `ReadableStream.prototype.tee` | Not supported | Instance method, so builds cannot see calls to it. | Read the stream once and buffer the chunks, or set ssr.apiRuntime to "node" in krate.config.ts. |  |
 | `ReadableStream.prototype.pipeTo` | Not supported | Instance method, so builds cannot see calls to it. | Read with getReader() and write each chunk yourself, or set ssr.apiRuntime to "node" in krate.config.ts. |  |
 | `ReadableStream.prototype.pipeThrough` | Not supported | Instance method, so builds cannot see calls to it. | Transform chunks inside a new ReadableStream's pull(), or set ssr.apiRuntime to "node" in krate.config.ts. |  |
@@ -162,9 +165,9 @@ Blob, File and FormData, with multipart parsing in the Go host. Feature group: `
 
 | API | Status | Notes | Instead | Tests |
 |---|---|---|---|---|
-| `Blob` | Supported | slice, text, arrayBuffer, bytes and stream. |  | `TestCompatLedgerBehavior/Blob`, `TestWebAPIMatrix/blob` |
-| `File` | Supported |  |  | `TestCompatLedgerBehavior/File`, `TestWebAPIMatrix/formData multipart roundtrip` |
-| `FormData` | Supported | Parses and serializes urlencoded and multipart bodies; constructing from an HTML form element throws (there is no DOM). |  | `TestCompatLedgerBehavior/FormData`, `TestWebAPIMatrix/formData urlencoded`, `TestWebAPIMatrix/formData multipart roundtrip` |
+| `Blob` | Partial | slice, text, arrayBuffer, bytes and stream. The type is only lowercased: non-ASCII and control characters are kept where Node replaces the type with an empty string. |  | `TestCompatLedgerBehavior/Blob`, `TestWebAPIMatrix/blob`, `corpus:blob/parts`, `corpus:blob/readers`, `corpus:blob/slice`, `corpus:blob/type`, `corpus:blob/type-invalid-chars` |
+| `File` | Supported |  |  | `TestCompatLedgerBehavior/File`, `TestWebAPIMatrix/formData multipart roundtrip`, `corpus:file/basics`, `corpus:formdata/files` |
+| `FormData` | Supported | Parses and serializes urlencoded and multipart bodies; constructing from an HTML form element throws (there is no DOM). |  | `TestCompatLedgerBehavior/FormData`, `TestWebAPIMatrix/formData urlencoded`, `TestWebAPIMatrix/formData multipart roundtrip`, `corpus:formdata/append-get`, `corpus:formdata/files`, `corpus:formdata/invalid-body`, `corpus:formdata/multipart-request`, `corpus:formdata/multipart-request-files`, `corpus:formdata/multipart-roundtrip`, `corpus:formdata/urlencoded-request` |
 
 ## Crypto
 
@@ -173,13 +176,13 @@ crypto.getRandomValues, randomUUID and crypto.subtle (digest and HMAC in the Go 
 | API | Status | Notes | Instead | Tests |
 |---|---|---|---|---|
 | `crypto` | Partial | getRandomValues, randomUUID and a subset of crypto.subtle. |  | `TestCompatLedgerBehavior/crypto` |
-| `crypto.getRandomValues` | Supported |  |  | `TestCompatLedgerBehavior/crypto.getRandomValues`, `TestWebAPIMatrix/getRandomValues` |
-| `crypto.randomUUID` | Supported |  |  | `TestCompatLedgerBehavior/crypto.randomUUID`, `TestWebAPIMatrix/crypto uuid` |
-| `crypto.subtle` | Partial | digest, and HMAC importKey/sign/verify with raw keys. |  | `TestCompatLedgerBehavior/crypto.subtle`, `TestWebAPIMatrix/subtle unsupported` |
-| `crypto.subtle.digest` | Supported | SHA-1, SHA-256, SHA-384 and SHA-512. |  | `TestCompatLedgerBehavior/crypto.subtle.digest`, `TestWebAPIMatrix/digest` |
-| `crypto.subtle.importKey` | Partial | Only the raw format with the HMAC algorithm; anything else rejects with NotSupportedError. |  | `TestCompatLedgerBehavior/crypto.subtle.importKey`, `TestWebAPIMatrix/hmac` |
-| `crypto.subtle.sign` | Partial | HMAC keys only. |  | `TestCompatLedgerBehavior/crypto.subtle.sign`, `TestWebAPIMatrix/hmac` |
-| `crypto.subtle.verify` | Partial | HMAC keys only (constant-time compare). |  | `TestCompatLedgerBehavior/crypto.subtle.verify` |
+| `crypto.getRandomValues` | Partial | A float array throws a plain TypeError (Node throws a TypeMismatchError DOMException), and a DataView is accepted. |  | `TestCompatLedgerBehavior/crypto.getRandomValues`, `TestWebAPIMatrix/getRandomValues`, `corpus:crypto/get-random-values`, `corpus:crypto/get-random-values-errors`, `corpus:crypto/get-random-values-quota` |
+| `crypto.randomUUID` | Supported |  |  | `TestCompatLedgerBehavior/crypto.randomUUID`, `TestWebAPIMatrix/crypto uuid`, `corpus:crypto/random-uuid` |
+| `crypto.subtle` | Partial | digest, and HMAC importKey/sign/verify with raw keys. |  | `TestCompatLedgerBehavior/crypto.subtle`, `TestWebAPIMatrix/subtle unsupported`, `corpus:crypto/unsupported-subtle` |
+| `crypto.subtle.digest` | Supported | SHA-1, SHA-256, SHA-384 and SHA-512. |  | `TestCompatLedgerBehavior/crypto.subtle.digest`, `TestWebAPIMatrix/digest`, `corpus:crypto/digest`, `corpus:crypto/digest-errors` |
+| `crypto.subtle.importKey` | Partial | Only the raw format with the HMAC algorithm; anything else rejects with NotSupportedError. |  | `TestCompatLedgerBehavior/crypto.subtle.importKey`, `TestWebAPIMatrix/hmac`, `corpus:crypto/hmac` |
+| `crypto.subtle.sign` | Partial | HMAC keys only. |  | `TestCompatLedgerBehavior/crypto.subtle.sign`, `TestWebAPIMatrix/hmac`, `corpus:crypto/hmac` |
+| `crypto.subtle.verify` | Partial | HMAC keys only (constant-time compare). |  | `TestCompatLedgerBehavior/crypto.subtle.verify`, `corpus:crypto/hmac` |
 | `crypto.subtle.encrypt` | Not supported | Rejects with NotSupportedError. | Do this in a Go API route, or set ssr.apiRuntime to "node" in krate.config.ts. |  |
 | `crypto.subtle.decrypt` | Not supported | Rejects with NotSupportedError. | Do this in a Go API route, or set ssr.apiRuntime to "node" in krate.config.ts. |  |
 | `crypto.subtle.generateKey` | Not supported | Rejects with NotSupportedError. | Do this in a Go API route, or set ssr.apiRuntime to "node" in krate.config.ts. |  |
@@ -198,7 +201,7 @@ console methods backed by the Go host. Feature group: `console`.
 
 | API | Status | Notes | Instead | Tests |
 |---|---|---|---|---|
-| `console` | Partial | log, info, debug, warn, error and trace; arguments are formatted to one line. |  | `TestCompatLedgerBehavior/console`, `TestConsole` |
+| `console` | Partial | log, info, debug, warn, error and trace; arguments are formatted to one line. |  | `TestCompatLedgerBehavior/console`, `TestConsole`, `corpus:console/no-output-effect` |
 | `console.assert` | Not supported | Not defined, so calling it throws TypeError. | Use console.log or console.error. |  |
 | `console.count` | Not supported | Not defined, so calling it throws TypeError. | Use console.log or console.error. |  |
 | `console.dir` | Not supported | Not defined, so calling it throws TypeError. | Use console.log or console.error. |  |
@@ -215,7 +218,7 @@ The Node globals the embedded runtime provides outside the prelude (process.env,
 | API | Status | Notes | Instead | Tests |
 |---|---|---|---|---|
 | `process` | Partial | Only process.env (the server environment). |  | `TestCompatLedgerBehavior/process`, `TestAPIRouteProcessEnv`, `TestSetEnv` |
-| `process.env` | Supported |  |  | `TestCompatLedgerBehavior/process.env`, `TestAPIRouteProcessEnv`, `TestSetEnv` |
+| `process.env` | Supported |  |  | `TestCompatLedgerBehavior/process.env`, `TestAPIRouteProcessEnv`, `TestSetEnv`, `corpus:process/env` |
 | `process.nextTick` | Not supported | Not defined on the embedded process object. | Use queueMicrotask(fn). |  |
 | `process.cwd` | Not supported | Not defined on the embedded process object. | Set ssr.apiRuntime to "node" in krate.config.ts. |  |
 | `process.argv` | Not supported | Not defined on the embedded process object. | Set ssr.apiRuntime to "node" in krate.config.ts. |  |

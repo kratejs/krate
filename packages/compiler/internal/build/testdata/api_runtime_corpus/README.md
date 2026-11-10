@@ -9,6 +9,11 @@ The Go driver answers each QuickJS request from a fresh VM that installs Web
 API features on first use, and checks that a pooled VM with every feature
 preloaded answers the same.
 
+Rows of the API runtime compatibility ledger
+(`internal/jsruntime/compat.json`) cite cases as `corpus:<case name>` in their
+`tests`; `TestCompatLedger` checks the files exist and that a row citing a case
+with a `divergence` record is not marked supported.
+
 ## Layout
 
 ```

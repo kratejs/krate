@@ -42,6 +42,9 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
   Tailwind evaluation, `generateStaticParams`, metadata and isolation-mode API requests get
   faster. Pooled API and middleware workers preload the groups the build found in their
   sources (all of them for builds without that list).
+- The API runtime compatibility reference cites the QuickJS vs Node differential corpus case
+  by case. Rows whose cases record a difference from Node are partial and name it: `URL`,
+  `Headers`, `Blob`, `atob`, `Event` and `crypto.getRandomValues` moved from supported.
 - API routes and middleware built for the embedded QuickJS runtime are checked against its
   Web API surface: a global it lacks (`TransformStream`, `WebSocket`, `Buffer`,
   `crypto.subtle.encrypt`, ...) is a `KR7160` warning at the first use, once per file or

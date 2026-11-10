@@ -2,6 +2,7 @@ package jsruntime
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -109,6 +110,17 @@ func TestCompatLedger(t *testing.T) {
 			t.Errorf("%s: partial rows must say what is missing in notes", r.API)
 		}
 		for _, name := range r.Tests {
+			if c, ok := strings.CutPrefix(name, "corpus:"); ok {
+				spec, err := readCorpusSpec(c)
+				if err != nil {
+					t.Errorf("%s: %v", r.API, err)
+					continue
+				}
+				if spec.Divergence != nil && r.Status == CompatSupported {
+					t.Errorf("%s: cites %s, which records a divergence from Node (%s), so the row must be partial", r.API, name, spec.Divergence.Reason)
+				}
+				continue
+			}
 			fn, sub, _ := strings.Cut(name, "/")
 			if !funcs[fn] {
 				t.Errorf("%s: test %s does not exist", r.API, fn)
@@ -136,6 +148,35 @@ func TestCompatLedger(t *testing.T) {
 			t.Errorf("feature %s lists global %s, which has no row in that feature", f, g)
 		}
 	}
+}
+
+// corpusDir holds the QuickJS vs Node differential corpus that ledger rows
+// cite as corpus:<case>.
+var corpusDir = filepath.Join("..", "build", "testdata", "api_runtime_corpus")
+
+type corpusSpec struct {
+	Divergence *struct {
+		Reason string `json:"reason"`
+	} `json:"divergence"`
+}
+
+func readCorpusSpec(name string) (*corpusSpec, error) {
+	if name == "" || strings.Contains(name, "..") || strings.ContainsAny(name, "*?") {
+		return nil, fmt.Errorf("corpus:%s must name one case", name)
+	}
+	base := filepath.Join(corpusDir, filepath.FromSlash(name))
+	if _, err := os.Stat(base + ".ts"); err != nil {
+		return nil, fmt.Errorf("corpus case %s has no route module: %w", name, err)
+	}
+	data, err := os.ReadFile(base + ".json")
+	if err != nil {
+		return nil, fmt.Errorf("corpus case %s has no request spec: %w", name, err)
+	}
+	var spec corpusSpec
+	if err := json.Unmarshal(data, &spec); err != nil {
+		return nil, fmt.Errorf("corpus case %s: %w", name, err)
+	}
+	return &spec, nil
 }
 
 // TestCompatLedgerMatchesPrelude checks the ledger against a real VM:
