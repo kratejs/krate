@@ -1,0 +1,8 @@
+{
+  "description": "An ArrayBuffer response carrying all 256 byte values.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "description": "setInterval repeats until cleared.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

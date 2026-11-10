@@ -1,0 +1,11 @@
+{
+  "description": "new Request: method normalization, inherited init, invalid constructions.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ],
+  "skipRuntimes": {
+    "bun": "Bun uppercases every method, skips Request validation (GET body, credentials, forbidden methods) and does not mark the source body used"
+  }
+}

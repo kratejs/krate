@@ -1,0 +1,8 @@
+{
+  "description": "Several Set-Cookie headers stay separate on the wire.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

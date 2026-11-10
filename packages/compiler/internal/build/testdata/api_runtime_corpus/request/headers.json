@@ -1,0 +1,12 @@
+{
+  "description": "Incoming request headers are case-insensitive and request.cookies parses the Cookie header.",
+  "requests": [
+    {
+      "method": "GET",
+      "headers": {
+        "Authorization": "Bearer t",
+        "Cookie": "sid=9; x=1"
+      }
+    }
+  ]
+}

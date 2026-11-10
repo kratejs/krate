@@ -1,0 +1,11 @@
+{
+  "description": "Response.json status, headers, content-type and non-serializable values.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ],
+  "skipRuntimes": {
+    "bun": "Bun reports Response.json content-type as application/json;charset=utf-8"
+  }
+}

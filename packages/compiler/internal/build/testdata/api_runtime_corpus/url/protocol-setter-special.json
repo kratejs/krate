@@ -1,0 +1,24 @@
+{
+  "description": "Switching between special and non-special schemes through the protocol setter is ignored.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ],
+  "divergence": {
+    "reason": "The embedded protocol setter reparses the whole URL with the new scheme, so special/non-special switches are applied instead of ignored.",
+    "nodeVersion": "v24.22.2",
+    "quickjs": [
+      {
+        "status": 200,
+        "body": "{\"a\":\"foo://h.example/a\",\"b\":\"http://h.example/a\"}"
+      }
+    ],
+    "node": [
+      {
+        "status": 200,
+        "body": "{\"a\":\"https://h.example/a\",\"b\":\"foo://h.example/a\"}"
+      }
+    ]
+  }
+}

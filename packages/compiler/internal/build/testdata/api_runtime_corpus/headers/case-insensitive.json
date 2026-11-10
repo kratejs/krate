@@ -1,0 +1,8 @@
+{
+  "description": "Header names are case-insensitive and stored lowercased.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "description": "for await over a stream, and breaking out cancels it.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

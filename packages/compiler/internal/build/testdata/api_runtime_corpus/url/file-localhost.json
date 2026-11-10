@@ -1,0 +1,24 @@
+{
+  "description": "A file URL host of localhost is serialized as the empty host.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ],
+  "divergence": {
+    "reason": "The embedded URL parser keeps localhost as the host of file URLs.",
+    "nodeVersion": "v24.22.2",
+    "quickjs": [
+      {
+        "status": 200,
+        "body": "[\"file://localhost/a\",\"localhost\"]"
+      }
+    ],
+    "node": [
+      {
+        "status": 200,
+        "body": "[\"file:///a\",\"\"]"
+      }
+    ]
+  }
+}

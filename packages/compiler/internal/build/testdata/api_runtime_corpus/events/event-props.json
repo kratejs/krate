@@ -1,0 +1,8 @@
+{
+  "description": "Event init flags, preventDefault and the dispatchEvent return value.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

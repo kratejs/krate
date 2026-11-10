@@ -1,0 +1,8 @@
+{
+  "description": "TextEncoder.encode for each UTF-8 length, lone surrogates and non-string input.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "description": "response.clone() copies status, headers and body; cloning a used body throws.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

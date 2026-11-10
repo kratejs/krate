@@ -1,0 +1,8 @@
+{
+  "description": "BOM stripping, ignoreBOM, BOMs not at the start, and decoder reuse.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

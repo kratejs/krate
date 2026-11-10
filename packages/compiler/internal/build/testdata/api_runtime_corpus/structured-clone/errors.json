@@ -1,0 +1,11 @@
+{
+  "description": "Error subclasses keep their type and message; unknown names fall back to Error.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ],
+  "skipRuntimes": {
+    "bun": "Bun drops Error.cause when cloning"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "description": "Cyclic and shared references are preserved in the clone.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "description": "A static route receives an empty params object.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

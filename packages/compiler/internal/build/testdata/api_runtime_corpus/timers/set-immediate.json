@@ -1,0 +1,8 @@
+{
+  "description": "setImmediate with an argument and clearImmediate.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

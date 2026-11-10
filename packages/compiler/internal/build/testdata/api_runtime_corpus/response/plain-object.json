@@ -1,0 +1,8 @@
+{
+  "description": "A plain object return value is serialized as JSON.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

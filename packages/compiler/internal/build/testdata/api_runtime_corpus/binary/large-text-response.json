@@ -1,0 +1,9 @@
+{
+  "description": "A multi-megabyte text response with multi-byte characters.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ],
+  "heavy": true
+}

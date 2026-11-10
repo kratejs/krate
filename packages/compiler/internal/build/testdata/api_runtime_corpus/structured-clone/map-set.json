@@ -1,0 +1,8 @@
+{
+  "description": "Map and Set cloning, including object keys shared between Map and Set.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "description": "A blob: URL takes its origin from the URL in its path when that URL is http(s).",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ],
+  "divergence": {
+    "reason": "The embedded URL parser reports \"null\" as the origin of every blob: URL.",
+    "nodeVersion": "v24.22.2",
+    "quickjs": [
+      {
+        "status": 200,
+        "body": "[\"null\",\"null\"]"
+      }
+    ],
+    "node": [
+      {
+        "status": 200,
+        "body": "[\"https://a.example\",\"null\"]"
+      }
+    ]
+  }
+}

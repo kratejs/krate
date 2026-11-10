@@ -1,0 +1,8 @@
+{
+  "description": "cancel() runs the source cancel hook, empties the queue and rejects on a locked stream.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

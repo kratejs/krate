@@ -1,0 +1,9 @@
+{
+  "description": "Reading a body twice rejects with TypeError, and so does cloning a used Request.",
+  "requests": [
+    {
+      "method": "POST",
+      "body": "{\"x\":1}"
+    }
+  ]
+}

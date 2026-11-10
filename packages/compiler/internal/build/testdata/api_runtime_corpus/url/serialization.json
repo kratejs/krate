@@ -1,0 +1,8 @@
+{
+  "description": "toString, toJSON and own enumerable keys of URL.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

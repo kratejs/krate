@@ -1,0 +1,8 @@
+{
+  "description": "Inputs that fail to parse throw a TypeError; borderline hosts that do parse.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

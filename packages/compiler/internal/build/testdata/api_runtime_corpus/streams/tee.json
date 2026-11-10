@@ -1,0 +1,24 @@
+{
+  "description": "ReadableStream.tee() gives two readable branches.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ],
+  "divergence": {
+    "reason": "ReadableStream.tee is documented as unsupported by the embedded runtime and throws NotSupportedError.",
+    "nodeVersion": "v24.22.2",
+    "quickjs": [
+      {
+        "status": 500,
+        "body": "{\"error\":\"Internal Server Error\"}"
+      }
+    ],
+    "node": [
+      {
+        "status": 200,
+        "body": "{\"a\":\"x\",\"b\":\"x\"}"
+      }
+    ]
+  }
+}

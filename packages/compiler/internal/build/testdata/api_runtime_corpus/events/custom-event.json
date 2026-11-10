@@ -1,0 +1,24 @@
+{
+  "description": "CustomEvent with a detail payload.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ],
+  "divergence": {
+    "reason": "The embedded runtime has no CustomEvent global.",
+    "nodeVersion": "v24.22.2",
+    "quickjs": [
+      {
+        "status": 200,
+        "body": "{\"missing\":true}"
+      }
+    ],
+    "node": [
+      {
+        "status": 200,
+        "body": "{\"detail\":{\"a\":1}}"
+      }
+    ]
+  }
+}

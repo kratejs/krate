@@ -1,0 +1,8 @@
+{
+  "description": "All 256 byte values round-trip through btoa/atob.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

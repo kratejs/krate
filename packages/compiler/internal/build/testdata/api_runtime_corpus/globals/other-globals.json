@@ -1,0 +1,24 @@
+{
+  "description": "typeof of globals Node provides beyond the documented Web API surface.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ],
+  "divergence": {
+    "reason": "The embedded runtime does not provide CustomEvent, MessageChannel, BroadcastChannel, TextEncoderStream, Intl, WebAssembly, navigator, Buffer or global.",
+    "nodeVersion": "v24.22.2",
+    "quickjs": [
+      {
+        "status": 200,
+        "body": "{\"CustomEvent\":\"undefined\",\"MessageChannel\":\"undefined\",\"BroadcastChannel\":\"undefined\",\"WritableStream\":\"function\",\"TransformStream\":\"function\",\"TextEncoderStream\":\"undefined\",\"CompressionStream\":\"function\",\"WebSocket\":\"function\",\"Intl\":\"undefined\",\"WebAssembly\":\"undefined\",\"navigator\":\"undefined\",\"Buffer\":\"undefined\",\"global\":\"undefined\",\"setImmediate\":\"function\",\"SharedArrayBuffer\":\"function\",\"WeakRef\":\"function\",\"FinalizationRegistry\":\"function\"}"
+      }
+    ],
+    "node": [
+      {
+        "status": 200,
+        "body": "{\"CustomEvent\":\"function\",\"MessageChannel\":\"function\",\"BroadcastChannel\":\"function\",\"WritableStream\":\"function\",\"TransformStream\":\"function\",\"TextEncoderStream\":\"function\",\"CompressionStream\":\"function\",\"WebSocket\":\"function\",\"Intl\":\"object\",\"WebAssembly\":\"object\",\"navigator\":\"object\",\"Buffer\":\"function\",\"global\":\"object\",\"setImmediate\":\"function\",\"SharedArrayBuffer\":\"function\",\"WeakRef\":\"function\",\"FinalizationRegistry\":\"function\"}"
+      }
+    ]
+  }
+}

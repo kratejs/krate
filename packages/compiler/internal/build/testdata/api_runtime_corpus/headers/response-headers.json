@@ -1,0 +1,14 @@
+{
+  "description": "Duplicate response headers from an init array are combined.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ],
+  "compare": {
+    "headers": [
+      "content-type",
+      "x-custom"
+    ]
+  }
+}

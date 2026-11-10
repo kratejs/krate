@@ -1,0 +1,24 @@
+{
+  "description": "Response.error() is a network error with status 0 and immutable headers.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ],
+  "divergence": {
+    "reason": "The embedded Response.error() throws a TypeError (it redefines a non-configurable status property), so the handler fails with 500.",
+    "nodeVersion": "v24.22.2",
+    "quickjs": [
+      {
+        "status": 500,
+        "body": "{\"error\":\"Internal Server Error\"}"
+      }
+    ],
+    "node": [
+      {
+        "status": 200,
+        "body": "{\"type\":\"error\",\"status\":0,\"ok\":false,\"body\":true,\"immutable\":\"TypeError\"}"
+      }
+    ]
+  }
+}

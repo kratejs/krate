@@ -1,0 +1,8 @@
+{
+  "description": "Whether the incoming request headers can be mutated.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

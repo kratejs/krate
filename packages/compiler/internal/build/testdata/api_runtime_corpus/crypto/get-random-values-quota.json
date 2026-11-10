@@ -1,0 +1,11 @@
+{
+  "description": "getRandomValues throws QuotaExceededError above 65536 bytes, counted in bytes not elements.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ],
+  "skipRuntimes": {
+    "bun": "Bun does not enforce the 65536-byte getRandomValues quota"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "description": "Percent-encoding sets for path, query and fragment, and decoding in searchParams.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

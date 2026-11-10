@@ -1,0 +1,8 @@
+{
+  "description": "typeof of each Web API global the embedded runtime documents as supported.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

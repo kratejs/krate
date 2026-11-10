@@ -1,0 +1,8 @@
+{
+  "description": "A returned Response.redirect reaches the client with Location.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

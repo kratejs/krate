@@ -1,0 +1,8 @@
+{
+  "description": "bodyUsed and the TypeError on a second read.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

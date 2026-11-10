@@ -1,0 +1,8 @@
+{
+  "description": "Blob parts of every kind, including a lone surrogate encoded as U+FFFD.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

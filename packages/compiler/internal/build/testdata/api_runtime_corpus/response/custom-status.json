@@ -1,0 +1,14 @@
+{
+  "description": "Non-200 statuses reach the client unchanged.",
+  "requests": [
+    {
+      "method": "GET"
+    },
+    {
+      "method": "POST"
+    },
+    {
+      "method": "PUT"
+    }
+  ]
+}

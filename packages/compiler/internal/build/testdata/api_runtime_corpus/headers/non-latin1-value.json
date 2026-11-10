@@ -1,0 +1,24 @@
+{
+  "description": "Header values must be ByteStrings: characters above U+00FF throw TypeError.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ],
+  "divergence": {
+    "reason": "The embedded Headers accepts any character that is not NUL, CR or LF.",
+    "nodeVersion": "v24.22.2",
+    "quickjs": [
+      {
+        "status": 200,
+        "body": "{\"euro\":\"ok\",\"latin1\":\"ok\"}"
+      }
+    ],
+    "node": [
+      {
+        "status": 200,
+        "body": "{\"euro\":\"TypeError\",\"latin1\":\"ok\"}"
+      }
+    ]
+  }
+}

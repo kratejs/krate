@@ -1,0 +1,8 @@
+{
+  "description": "append combines values, set replaces them, and values are trimmed of surrounding whitespace.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

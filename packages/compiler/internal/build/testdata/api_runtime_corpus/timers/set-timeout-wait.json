@@ -1,0 +1,8 @@
+{
+  "description": "setTimeout delays at least roughly the requested time.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "description": "Scheme and host case folding, backslashes, stripped tabs/newlines, dot segments and empty paths.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

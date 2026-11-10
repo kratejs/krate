@@ -1,0 +1,9 @@
+{
+  "description": "new URL(request.url) and its searchParams.",
+  "requests": [
+    {
+      "method": "GET",
+      "query": "?e=x=y&p=a+b&k=1&k=2"
+    }
+  ]
+}

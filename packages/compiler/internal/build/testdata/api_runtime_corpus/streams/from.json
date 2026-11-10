@@ -1,0 +1,8 @@
+{
+  "description": "ReadableStream.from over async and sync iterables.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

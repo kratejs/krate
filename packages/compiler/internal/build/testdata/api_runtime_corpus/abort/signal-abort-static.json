@@ -1,0 +1,8 @@
+{
+  "description": "AbortSignal.abort() returns an already-aborted signal.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

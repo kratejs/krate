@@ -1,0 +1,8 @@
+{
+  "description": "sort() is stable and orders by UTF-16 code units.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

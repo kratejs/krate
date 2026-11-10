@@ -1,0 +1,8 @@
+{
+  "description": "Functions, symbols, WeakMaps and promises throw DataCloneError.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

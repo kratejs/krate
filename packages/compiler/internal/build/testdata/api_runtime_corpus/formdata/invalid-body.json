@@ -1,0 +1,19 @@
+{
+  "description": "formData() rejects with TypeError for malformed multipart or an unsupported content type.",
+  "requests": [
+    {
+      "method": "POST",
+      "body": "garbage",
+      "headers": {
+        "Content-Type": "multipart/form-data; boundary=nope"
+      }
+    },
+    {
+      "method": "POST",
+      "body": "x=1",
+      "headers": {
+        "Content-Type": "text/plain"
+      }
+    }
+  ]
+}

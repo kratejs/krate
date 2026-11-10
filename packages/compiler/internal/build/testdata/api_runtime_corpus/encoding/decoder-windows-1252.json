@@ -1,0 +1,24 @@
+{
+  "description": "latin1/windows-1252 decoding of the 0x80-0x9f range.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ],
+  "divergence": {
+    "reason": "The embedded TextDecoder maps latin1/windows-1252 bytes 0x80-0x9f straight to U+0080-U+009F instead of the windows-1252 table (0x80 is U+20AC).",
+    "nodeVersion": "v24.22.2",
+    "quickjs": [
+      {
+        "status": 200,
+        "body": "[\"41\",\"80\",\"8a\",\"9f\",\"a0\",\"e9\",\"ff\"]"
+      }
+    ],
+    "node": [
+      {
+        "status": 200,
+        "body": "[\"41\",\"20ac\",\"160\",\"178\",\"a0\",\"e9\",\"ff\"]"
+      }
+    ]
+  }
+}

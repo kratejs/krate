@@ -2,17 +2,20 @@ package build
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
-	"mime/multipart"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -20,17 +23,57 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/jsruntime"
 )
 
-type confReq struct {
-	method  string
-	query   string
-	headers map[string]string
-	body    []byte
+// corpusDir holds the differential API runtime corpus. See its README.md for
+// the spec format.
+const corpusDir = "testdata/api_runtime_corpus"
+
+// defaultCompareHeaders are compared when a spec does not list its own.
+var defaultCompareHeaders = []string{"content-type", "location", "allow", "x-custom"}
+
+type corpusRequest struct {
+	Method     string            `json:"method"`
+	Path       string            `json:"path"`
+	Query      string            `json:"query"`
+	Headers    map[string]string `json:"headers"`
+	Body       *string           `json:"body"`
+	BodyBase64 *string           `json:"bodyBase64"`
+	BodyRepeat int               `json:"bodyRepeat"`
+	Status     int               `json:"status"`
 }
 
-type confCase struct {
-	name  string
-	route string
-	reqs  []confReq
+type corpusCompare struct {
+	Status  *bool    `json:"status"`
+	Headers []string `json:"headers"`
+	Cookies *bool    `json:"cookies"`
+	Body    string   `json:"body"`
+}
+
+type corpusExpect struct {
+	Status     int     `json:"status"`
+	Body       *string `json:"body"`
+	BodyBase64 *string `json:"bodyBase64"`
+}
+
+type corpusDivergence struct {
+	Reason      string         `json:"reason"`
+	QuickJS     []corpusExpect `json:"quickjs"`
+	Node        []corpusExpect `json:"node"`
+	NodeVersion string         `json:"nodeVersion"`
+}
+
+type corpusSpec struct {
+	Description  string            `json:"description"`
+	Requests     []corpusRequest   `json:"requests"`
+	Compare      corpusCompare     `json:"compare"`
+	Divergence   *corpusDivergence `json:"divergence"`
+	SkipRuntimes map[string]string `json:"skipRuntimes"`
+	Heavy        bool              `json:"heavy"`
+}
+
+type corpusCase struct {
+	name   string // slash-separated, e.g. "url/relative-resolution"
+	module string // absolute path of the .ts route module
+	spec   corpusSpec
 }
 
 type confResp struct {
@@ -40,44 +83,108 @@ type confResp struct {
 	body    []byte
 }
 
-func doConf(t *testing.T, base, name string, rq confReq) confResp {
+func loadCorpus(t *testing.T) []corpusCase {
 	t.Helper()
-	method := rq.method
+	var cases []corpusCase
+	err := filepath.WalkDir(corpusDir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || filepath.Ext(p) != ".json" {
+			return err
+		}
+		raw, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		var c corpusCase
+		dec := json.NewDecoder(bytes.NewReader(raw))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&c.spec); err != nil {
+			return fmt.Errorf("%s: %w", p, err)
+		}
+		rel, _ := filepath.Rel(corpusDir, strings.TrimSuffix(p, ".json"))
+		c.name = filepath.ToSlash(rel)
+		c.module, _ = filepath.Abs(strings.TrimSuffix(p, ".json") + ".ts")
+		if _, err := os.Stat(c.module); err != nil {
+			return fmt.Errorf("%s: missing route module: %w", p, err)
+		}
+		if len(c.spec.Requests) == 0 {
+			return fmt.Errorf("%s: no requests", p)
+		}
+		if dv := c.spec.Divergence; dv != nil && (dv.Reason == "" || len(dv.QuickJS) != len(c.spec.Requests)) {
+			return fmt.Errorf("%s: a divergence needs a reason and one quickjs entry per request", p)
+		}
+		cases = append(cases, c)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sort.Slice(cases, func(i, j int) bool { return cases[i].name < cases[j].name })
+	if len(cases) == 0 {
+		t.Fatal("empty API runtime corpus")
+	}
+	return cases
+}
+
+func (rq corpusRequest) payload(t *testing.T) []byte {
+	var b []byte
+	switch {
+	case rq.BodyBase64 != nil:
+		var err error
+		if b, err = base64.StdEncoding.DecodeString(*rq.BodyBase64); err != nil {
+			t.Fatalf("bodyBase64: %v", err)
+		}
+	case rq.Body != nil:
+		b = []byte(*rq.Body)
+	default:
+		return nil
+	}
+	if rq.BodyRepeat > 1 {
+		b = bytes.Repeat(b, rq.BodyRepeat)
+	}
+	return b
+}
+
+func doCorpusRequest(t *testing.T, base, route string, rq corpusRequest) confResp {
+	t.Helper()
+	method := rq.Method
 	if method == "" {
 		method = "GET"
 	}
-	var rd io.Reader
-	if rq.body != nil {
-		rd = bytes.NewReader(rq.body)
+	p := "/api/" + route
+	if rq.Path != "" {
+		p = rq.Path
 	}
-	req, err := http.NewRequest(method, base+"/api/"+name+rq.query, rd)
+	var rd io.Reader
+	if b := rq.payload(t); b != nil {
+		rd = bytes.NewReader(b)
+	}
+	req, err := http.NewRequest(method, base+p+rq.Query, rd)
 	if err != nil {
 		t.Fatal(err)
 	}
 	req.Host = "blog.example.com"
-	for k, v := range rq.headers {
+	for k, v := range rq.Headers {
 		req.Header.Set(k, v)
 	}
 	client := &http.Client{
-		Timeout:       10 * time.Second,
+		Timeout:       60 * time.Second,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 		Transport:     &http.Transport{DisableCompression: true},
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		t.Fatalf("%s %s: %v", method, name, err)
+		t.Fatalf("%s %s: %v", method, p, err)
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 	out := confResp{status: resp.StatusCode, headers: map[string]string{}, cookies: resp.Header.Values("Set-Cookie"), body: body}
-	for _, h := range []string{"Content-Type", "Location", "Allow", "X-Custom"} {
-		if v := resp.Header.Get(h); v != "" {
-			if h == "Content-Type" {
-				// Runtimes differ in charset spelling/casing; compare the type.
-				v = strings.ToLower(strings.ReplaceAll(strings.TrimSuffix(strings.ToLower(v), ";charset=utf-8"), " ", ""))
-			}
-			out.headers[h] = v
+	for k := range resp.Header {
+		v := resp.Header.Get(k)
+		if strings.EqualFold(k, "Content-Type") {
+			// Runtimes differ in charset spelling/casing; compare the type.
+			v = strings.TrimSuffix(strings.ReplaceAll(strings.ToLower(v), " ", ""), ";charset=utf-8")
 		}
+		out.headers[strings.ToLower(k)] = v
 	}
 	return out
 }
@@ -145,180 +252,227 @@ func startSidecarConformanceEnv(t *testing.T, runtime, apiDir, middlewarePath st
 	return "http://" + addr
 }
 
-func multipartBody(t *testing.T) ([]byte, string) {
-	var buf bytes.Buffer
-	mw := multipart.NewWriter(&buf)
-	_ = mw.WriteField("title", "café")
-	fw, err := mw.CreateFormFile("file", "a.txt")
-	if err != nil {
+// buildCorpus compiles every route module twice: ESM for the sidecars and the
+// IIFE bundle shape the real build emits for the embedded runtime.
+func buildCorpus(t *testing.T, cases []corpusCase) (esmDir, iifeDir string) {
+	t.Helper()
+	dir := t.TempDir()
+	esmDir, iifeDir = filepath.Join(dir, "api"), filepath.Join(dir, "qjs-api")
+	if err := os.MkdirAll(esmDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	_, _ = fw.Write([]byte("file-bytes"))
-	_ = mw.Close()
-	return buf.Bytes(), mw.FormDataContentType()
+	if err := os.WriteFile(filepath.Join(esmDir, "package.json"), []byte(`{"type":"module"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	root, _ := filepath.Abs(corpusDir)
+	entries := make([]string, len(cases))
+	for i, c := range cases {
+		entries[i] = c.module
+	}
+	for _, out := range []struct {
+		dir    string
+		format api.Format
+	}{{esmDir, api.FormatESModule}, {iifeDir, api.FormatIIFE}} {
+		opts := api.BuildOptions{
+			EntryPoints: entries,
+			Outbase:     root,
+			Outdir:      out.dir,
+			Bundle:      true,
+			Platform:    api.PlatformNode,
+			Format:      out.format,
+			Write:       true,
+			LogLevel:    api.LogLevelSilent,
+		}
+		if out.format == api.FormatIIFE {
+			opts.GlobalName = "__krate_route"
+		}
+		if res := api.Build(opts); len(res.Errors) > 0 {
+			e := res.Errors[0]
+			loc := ""
+			if e.Location != nil {
+				loc = fmt.Sprintf("%s:%d: ", e.Location.File, e.Location.Line)
+			}
+			t.Fatalf("bundling corpus: %s%s", loc, e.Text)
+		}
+	}
+	return esmDir, iifeDir
 }
 
-// TestAPIRuntimeConformance runs the same route code under the embedded
-// QuickJS runtime and the Node sidecar and requires identical responses.
+func checkCorpusExpect(t *testing.T, label, who string, want corpusExpect, got confResp) {
+	t.Helper()
+	if want.Status != 0 && want.Status != got.status {
+		t.Errorf("%s: documented %s status %d, got %d", label, who, want.Status, got.status)
+	}
+	if want.Body != nil && *want.Body != string(got.body) {
+		t.Errorf("%s: documented %s body\n want: %s\n got:  %s", label, who, *want.Body, got.body)
+	}
+	if want.BodyBase64 != nil && *want.BodyBase64 != base64.StdEncoding.EncodeToString(got.body) {
+		t.Errorf("%s: documented %s body (base64) differs, got %q", label, who, got.body)
+	}
+}
+
+// diffCorpus returns the differences between two responses on the parts the
+// spec selects.
+func diffCorpus(cmp corpusCompare, q, n confResp) []string {
+	var out []string
+	if cmp.Status == nil || *cmp.Status {
+		if q.status != n.status {
+			out = append(out, fmt.Sprintf("status quickjs=%d node=%d", q.status, n.status))
+		}
+	}
+	hs := cmp.Headers
+	if hs == nil {
+		hs = defaultCompareHeaders
+	}
+	for _, h := range hs {
+		h = strings.ToLower(h)
+		if q.headers[h] != n.headers[h] {
+			out = append(out, fmt.Sprintf("header %s quickjs=%q node=%q", h, q.headers[h], n.headers[h]))
+		}
+	}
+	if cmp.Cookies == nil || *cmp.Cookies {
+		if strings.Join(q.cookies, "\n") != strings.Join(n.cookies, "\n") {
+			out = append(out, fmt.Sprintf("set-cookie quickjs=%q node=%q", q.cookies, n.cookies))
+		}
+	}
+	switch cmp.Body {
+	case "", "bytes":
+		if !bytes.Equal(q.body, n.body) {
+			out = append(out, fmt.Sprintf("body differs\n quickjs: %s\n node:    %s", clip(q.body), clip(n.body)))
+		}
+	case "none":
+	default:
+		out = append(out, "unknown compare.body mode "+cmp.Body)
+	}
+	return out
+}
+
+// dumpCorpusBodies writes both full bodies of a differing response under dir
+// (set KRATE_CORPUS_DUMP=dir), since failure messages clip long bodies.
+func dumpCorpusBodies(t *testing.T, dir, runtime, name string, i int, q, n confResp) {
+	base := filepath.Join(dir, runtime, filepath.FromSlash(name))
+	if err := os.MkdirAll(filepath.Dir(base), 0o755); err != nil {
+		t.Logf("dump: %v", err)
+		return
+	}
+	_ = os.WriteFile(fmt.Sprintf("%s.%d.quickjs", base, i), q.body, 0o644)
+	_ = os.WriteFile(fmt.Sprintf("%s.%d.%s", base, i, runtime), n.body, 0o644)
+	_ = os.WriteFile(fmt.Sprintf("%s.%d.status", base, i), fmt.Appendf(nil, "%d %d\n", q.status, n.status), 0o644)
+}
+
+// majorVersion turns "v24.1.0" into "24".
+func majorVersion(v string) string {
+	v = strings.TrimPrefix(strings.TrimSpace(v), "v")
+	if i := strings.IndexByte(v, '.'); i >= 0 {
+		v = v[:i]
+	}
+	return v
+}
+
+func clip(b []byte) string {
+	if len(b) > 600 {
+		return fmt.Sprintf("%q... (%d bytes)", b[:600], len(b))
+	}
+	return fmt.Sprintf("%q", b)
+}
+
+// TestAPIRuntimeConformance runs every route in the differential corpus under
+// the embedded QuickJS runtime and under the real Node (and Bun) sidecar and
+// requires identical responses on the parts each spec selects. Cases with a
+// documented divergence assert the recorded QuickJS output instead.
 func TestAPIRuntimeConformance(t *testing.T) {
-	mpBody, mpType := multipartBody(t)
-	cases := []confCase{
-		{name: "headers", route: `export async function GET(request) {
-  return Response.json({ auth: request.headers.get("authorization"), host: request.headers.get("host"), has: request.headers.has("AUTHORIZATION"), cookie: request.cookies.get("sid")?.value ?? null });
-}`, reqs: []confReq{{headers: map[string]string{"Authorization": "Bearer t", "Cookie": "sid=9; x=1"}}}},
-		{name: "jsonbody", route: `export async function POST(request) {
-  const body = await request.json().catch(() => null);
-  if (!body) return new Response(JSON.stringify({ error: "bad json" }), { status: 400, headers: { "content-type": "application/json" } });
-  return Response.json({ got: body });
-}`, reqs: []confReq{
-			{method: "POST", body: []byte(`{"a":[1,2]}`), headers: map[string]string{"Content-Type": "application/json"}},
-			{method: "POST", body: []byte(`not json`)},
-		}},
-		{name: "text", route: `export async function POST(request) { return new Response((await request.text()).toUpperCase(), { headers: { "x-custom": "yes" } }); }`,
-			reqs: []confReq{{method: "POST", body: []byte("héllo \U0001F600")}}},
-		{name: "formurl", route: `export async function POST(request) {
-  const f = await request.formData();
-  return Response.json({ a: f.getAll("a"), b: f.get("b") });
-}`, reqs: []confReq{{method: "POST", body: []byte("a=1&b=x+y&a=%E2%82%AC"), headers: map[string]string{"Content-Type": "application/x-www-form-urlencoded"}}}},
-		{name: "formmulti", route: `export async function POST(request) {
-  const f = await request.formData();
-  const file = f.get("file");
-  return Response.json({ title: f.get("title"), name: file.name, text: await file.text(), size: file.size });
-}`, reqs: []confReq{{method: "POST", body: mpBody, headers: map[string]string{"Content-Type": mpType}}}},
-		{name: "bytes", route: `export async function POST(request) {
-  const buf = new Uint8Array(await request.arrayBuffer());
-  return Response.json({ len: buf.length, hex: Array.from(buf).map((b) => b.toString(16).padStart(2, "0")).join("") });
-}`, reqs: []confReq{{method: "POST", body: []byte{0x00, 0xff, 0xfe, 0x80, 0x41}, headers: map[string]string{"Content-Type": "application/octet-stream"}}}},
-		{name: "binaryresp", route: `export async function GET() { return new Response(new Uint8Array([0, 255, 254, 128, 65]), { headers: { "content-type": "application/octet-stream" } }); }`,
-			reqs: []confReq{{}}},
-		{name: "url", route: `export async function GET(request) {
-  const u = new URL(request.url);
-  let bad = "no";
-  try { new URL("not a url"); } catch (e) { bad = e.name; }
-  return Response.json({ origin: u.origin, host: u.host, path: u.pathname, e: u.searchParams.get("e"), p: u.searchParams.get("p"), all: u.searchParams.getAll("k"), bad });
-}`, reqs: []confReq{{query: "?e=x=y&p=a+b&k=1&k=2"}}},
-		{name: "timer", route: `export async function GET() {
-  const t0 = Date.now();
-  await new Promise((r) => setTimeout(r, 25));
-  return Response.json({ waited: Date.now() - t0 >= 20 });
-}`, reqs: []confReq{{}}},
-		{name: "stream", route: `export async function GET() {
-  const enc = new TextEncoder();
-  const stream = new ReadableStream({
-    async start(c) { for (let i = 0; i < 3; i++) { c.enqueue(enc.encode("chunk" + i + ";")); await new Promise((r) => setTimeout(r, 5)); } c.close(); },
-  });
-  return new Response(stream, { headers: { "content-type": "text/plain" } });
-}`, reqs: []confReq{{}}},
-		{name: "methods", route: `export async function GET() { return Response.json({ ok: true }); }
-export async function POST() { return new Response(null, { status: 201 }); }`,
-			reqs: []confReq{{method: "PUT"}, {method: "DELETE"}, {method: "HEAD"}, {method: "OPTIONS"}, {method: "POST"}}},
-		{name: "cookies", route: `export async function GET() {
-  const h = new Headers();
-  h.append("Set-Cookie", "a=1; Path=/; HttpOnly");
-  h.append("Set-Cookie", "b=2; Path=/");
-  h.set("X-Custom", "v");
-  return new Response("ok", { headers: h });
-}`, reqs: []confReq{{}}},
-		{name: "throws", route: `export async function GET() { throw new Error("secret internal detail"); }`, reqs: []confReq{{}}},
-		{name: "nothing", route: `export async function GET() {}`, reqs: []confReq{{}}},
-		{name: "plainobj", route: `export async function GET() { return { a: 1, b: [true, null] }; }`, reqs: []confReq{{}}},
-		{name: "redirect", route: `export async function GET(request) { return Response.redirect(new URL("/login", request.url), 307); }`, reqs: []confReq{{}}},
-		{name: "webapis", route: `export async function GET() {
-  const d = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode("abc")));
-  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode("k"), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  const sig = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode("m")));
-  let order = "";
-  queueMicrotask(() => { order += "m"; });
-  order += "s";
-  await Promise.resolve();
-  const ac = new AbortController(); ac.abort();
-  return Response.json({
-    b64: btoa("hello") + atob("aGk="),
-    uuid: /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(crypto.randomUUID()),
-    rnd: crypto.getRandomValues(new Uint8Array(8)).some((x) => x !== 0),
-    digest: Array.from(d).map((b) => b.toString(16).padStart(2, "0")).join(""),
-    hmac: Array.from(sig).map((b) => b.toString(16).padStart(2, "0")).join(""),
-    clone: structuredClone({ d: new Date(5), m: new Map([[1, 2]]) }).m.get(1),
-    order, aborted: ac.signal.aborted, perf: typeof performance.now(),
-    dec: new TextDecoder().decode(new Uint8Array([104, 195, 169])),
-    hdrs: [...new Headers({ B: "2", a: "1" })],
-    sp: new URLSearchParams({ q: "a b&c" }).toString(),
-    blob: await new Blob(["ab", "cd"]).text(),
-  });
-}`, reqs: []confReq{{}}},
-		{name: "params", route: `export async function GET(request, ctx) { return Response.json({ id: ctx.params.id }); }`, reqs: []confReq{{}}},
-	}
+	cases := loadCorpus(t)
+	esmDir, iifeDir := buildCorpus(t, cases)
 
-	dir := t.TempDir()
-	apiDir := filepath.Join(dir, "api")
-	if err := os.MkdirAll(apiDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(apiDir, "package.json"), []byte(`{"type":"module"}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	for _, c := range cases {
-		if err := os.WriteFile(filepath.Join(apiDir, c.name+".js"), []byte(c.route), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	// The embedded runtime serves the IIFE bundles the real build emits; the
-	// sidecars import the ESM source directly.
-	qjsDir := filepath.Join(dir, "qjs-api")
-	if err := os.MkdirAll(qjsDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	for _, c := range cases {
-		res := api.Build(api.BuildOptions{
-			Stdin:      &api.StdinOptions{Contents: c.route, Loader: api.LoaderJS, ResolveDir: dir, Sourcefile: c.name + ".js"},
-			Bundle:     true,
-			Platform:   api.PlatformNode,
-			Format:     api.FormatIIFE,
-			GlobalName: "__krate_route",
-			Outfile:    filepath.Join(qjsDir, c.name+".js"),
-			Write:      true,
-			LogLevel:   api.LogLevelSilent,
-		})
-		if len(res.Errors) > 0 {
-			t.Fatalf("bundling %s: %s", c.name, res.Errors[0].Text)
-		}
-	}
-	apiRT := jsruntime.NewAPIRouteRuntime(qjsDir)
+	apiRT := jsruntime.NewAPIRouteRuntime(iifeDir)
+	apiRT.SetEnv(map[string]string{"KRATE_CORPUS_VAR": "corpus-value"})
 	t.Cleanup(apiRT.Close)
 	qjs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		serveQuickJSAPI(w, r, apiRT, false)
 	}))
 	t.Cleanup(qjs.Close)
-	for _, runtime := range []string{"node", "bun"} {
-		runtime := runtime
-		t.Run(runtime, func(t *testing.T) {
-			nodeBase := startSidecarConformance(t, runtime, apiDir, "")
+	t.Setenv("KRATE_CORPUS_VAR", "corpus-value")
 
+	// The embedded runtime's answer does not depend on the reference runtime,
+	// so each request runs in QuickJS once and is reused for Bun.
+	var qmu sync.Mutex
+	qcache := map[string]confResp{}
+	quickjs := func(t *testing.T, name string, i int, rq corpusRequest) confResp {
+		key := fmt.Sprintf("%s#%d", name, i)
+		qmu.Lock()
+		r, ok := qcache[key]
+		qmu.Unlock()
+		if !ok {
+			r = doCorpusRequest(t, qjs.URL, name, rq)
+			qmu.Lock()
+			qcache[key] = r
+			qmu.Unlock()
+		}
+		return r
+	}
+
+	// Node-side divergence records are only asserted on the Node major they
+	// were captured with; other majors may legitimately differ.
+	nodeMajor := ""
+	if out, err := exec.Command("node", "--version").Output(); err == nil {
+		nodeMajor = majorVersion(string(out))
+	}
+
+	for _, runtime := range []string{"node", "bun"} {
+		t.Run(runtime, func(t *testing.T) {
+			ref := startSidecarConformance(t, runtime, esmDir, "")
 			for _, c := range cases {
-				for i, rq := range c.reqs {
-					q := doConf(t, qjs.URL, c.name, rq)
-					n := doConf(t, nodeBase, c.name, rq)
-					label := fmt.Sprintf("%s[%d] %s", c.name, i, rq.method)
-					if q.status != n.status {
-						t.Errorf("%s: status quickjs=%d node=%d (qjs body %q, node body %q)", label, q.status, n.status, q.body, n.body)
-						continue
+				t.Run(c.name, func(t *testing.T) {
+					t.Parallel()
+					if c.spec.Heavy && raceEnabled {
+						t.Skip("megabyte-sized work in the embedded runtime is too slow under the race detector")
 					}
-					if !bytes.Equal(q.body, n.body) {
-						t.Errorf("%s: body differs\n quickjs: %q\n node:    %q", label, q.body, n.body)
+					if why, ok := c.spec.SkipRuntimes[runtime]; ok {
+						t.Skipf("%s differs from Node here: %s", runtime, why)
 					}
-					for k, v := range n.headers {
-						if q.headers[k] != v {
-							t.Errorf("%s: header %s quickjs=%q node=%q", label, k, q.headers[k], v)
+					dv := c.spec.Divergence
+					if dv != nil && runtime != "node" {
+						t.Skipf("known QuickJS divergence: %s", dv.Reason)
+					}
+					same := true
+					for i, rq := range c.spec.Requests {
+						label := fmt.Sprintf("%s[%d] %s", c.name, i, rq.Method)
+						q := quickjs(t, c.name, i, rq)
+						n := doCorpusRequest(t, ref, c.name, rq)
+						// A failing handler on both sides would compare equal, so a
+						// 5xx is only accepted when the spec expects that status.
+						if rq.Status != 0 && n.status != rq.Status {
+							t.Errorf("%s: %s status %d, spec expects %d", label, runtime, n.status, rq.Status)
+						}
+						if rq.Status == 0 && n.status >= 500 {
+							t.Errorf("%s: %s answered %d (%s); fix the case or declare the status", label, runtime, n.status, clip(n.body))
+						}
+						diffs := diffCorpus(c.spec.Compare, q, n)
+						if dump := os.Getenv("KRATE_CORPUS_DUMP"); dump != "" && len(diffs) > 0 {
+							dumpCorpusBodies(t, dump, runtime, c.name, i, q, n)
+						}
+						if dv == nil {
+							for _, d := range diffs {
+								t.Errorf("%s: %s", label, d)
+							}
+							continue
+						}
+						if len(diffs) > 0 {
+							same = false
+						}
+						checkCorpusExpect(t, label, "quickjs", dv.QuickJS[i], q)
+						if i < len(dv.Node) && majorVersion(dv.NodeVersion) == nodeMajor {
+							checkCorpusExpect(t, label, "node", dv.Node[i], n)
 						}
 					}
-					if c.name == "cookies" && (len(n.cookies) != 2 || len(q.cookies) != 2) {
-						t.Errorf("%s: want two Set-Cookie headers, quickjs=%v node=%v", label, q.cookies, n.cookies)
+					if dv != nil && same {
+						if majorVersion(dv.NodeVersion) == nodeMajor {
+							t.Errorf("%s: QuickJS now matches Node; remove the documented divergence (%s)", c.name, dv.Reason)
+						} else {
+							t.Logf("%s: QuickJS matches this Node version (divergence recorded on %s)", c.name, dv.NodeVersion)
+						}
 					}
-					if strings.Join(q.cookies, "|") != strings.Join(n.cookies, "|") {
-						t.Errorf("%s: set-cookie quickjs=%v node=%v", label, q.cookies, n.cookies)
-					}
-				}
+				})
 			}
 		})
 	}
