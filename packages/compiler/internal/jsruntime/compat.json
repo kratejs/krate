@@ -4,86 +4,124 @@
   "features": {
     "events": {
       "title": "Events and abort",
-      "section": "DOMException / events / abort",
+      "section": "webapi/events.js",
       "description": "DOMException, Event, EventTarget, AbortController and AbortSignal.",
-      "requires": [
-        "timers"
+      "requires": [],
+      "globals": [
+        "DOMException",
+        "Event",
+        "EventTarget",
+        "AbortSignal",
+        "AbortController"
       ]
     },
     "timers": {
       "title": "Timers",
-      "section": "timers",
+      "section": "webapi/timers.js",
       "description": "setTimeout and friends, queueMicrotask and performance, driven by the Go job loop.",
-      "requires": []
+      "requires": [],
+      "globals": [
+        "setTimeout",
+        "setInterval",
+        "setImmediate",
+        "clearTimeout",
+        "clearInterval",
+        "clearImmediate",
+        "queueMicrotask",
+        "performance"
+      ]
     },
     "encoding": {
       "title": "Encoding",
-      "section": "base64 / bytes, UTF-8",
-      "description": "atob, btoa, TextEncoder and TextDecoder, plus the byte helpers other features use.",
-      "requires": [
-        "events"
+      "section": "webapi/encoding.js",
+      "description": "atob, btoa, TextEncoder and TextDecoder.",
+      "requires": [],
+      "globals": [
+        "btoa",
+        "atob",
+        "TextEncoder",
+        "TextDecoder"
       ]
     },
     "clone": {
       "title": "structuredClone",
-      "section": "structuredClone",
+      "section": "webapi/clone.js",
       "description": "structuredClone.",
-      "requires": [
-        "events",
-        "formdata"
+      "requires": [],
+      "globals": [
+        "structuredClone"
       ]
     },
     "url": {
       "title": "URL",
-      "section": "URLSearchParams, URL",
+      "section": "webapi/url.js",
       "description": "URL (parsed by the Go host) and URLSearchParams.",
-      "requires": [
-        "encoding"
+      "requires": [],
+      "globals": [
+        "URLSearchParams",
+        "URL"
       ]
     },
     "fetch": {
       "title": "Fetch, Request and Response",
-      "section": "Headers, Body mixin / Request / Response, fetch",
+      "section": "webapi/fetch.js",
       "description": "Headers, Request, Response and fetch (performed by the Go host). The API and middleware runners always use this feature.",
       "requires": [
         "events",
-        "encoding",
-        "url",
-        "streams",
-        "formdata"
+        "url"
+      ],
+      "globals": [
+        "Headers",
+        "Request",
+        "Response",
+        "fetch",
+        "WebSocket",
+        "EventSource"
       ]
     },
     "streams": {
       "title": "Streams",
-      "section": "ReadableStream",
+      "section": "webapi/streams.js",
       "description": "ReadableStream and its default reader, plus the unsupported stream stubs.",
-      "requires": [
-        "encoding"
+      "requires": [],
+      "globals": [
+        "ReadableStream",
+        "ReadableStreamDefaultReader",
+        "WritableStream",
+        "TransformStream",
+        "CompressionStream",
+        "DecompressionStream"
       ]
     },
     "formdata": {
       "title": "Blob, File and FormData",
-      "section": "Blob / File / FormData",
+      "section": "webapi/formdata.js",
       "description": "Blob, File and FormData, with multipart parsing in the Go host.",
-      "requires": [
-        "encoding",
-        "streams"
+      "requires": [],
+      "globals": [
+        "Blob",
+        "File",
+        "FormData"
       ]
     },
     "crypto": {
       "title": "Crypto",
-      "section": "crypto",
+      "section": "webapi/crypto.js",
       "description": "crypto.getRandomValues, randomUUID and crypto.subtle (digest and HMAC in the Go host).",
-      "requires": [
-        "encoding",
-        "events"
+      "requires": [],
+      "globals": [
+        "CryptoKey",
+        "crypto"
       ]
     },
     "console": {
       "title": "Console",
-      "section": "console",
+      "section": "webapi/console.js",
       "description": "console methods backed by the Go host.",
-      "requires": []
+      "requires": [],
+      "globals": [
+        "console"
+      ]
     },
     "node": {
       "title": "Node globals",

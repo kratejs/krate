@@ -151,3 +151,36 @@ func TestMiddlewareUnsupportedAPIWarning(t *testing.T) {
 		t.Errorf("features = %v, want %v", *meta.Features, want)
 	}
 }
+
+// TestLoadAPIRouteFeatures checks the union the server preloads into pooled
+// API workers, and that any route without a complete scan makes it unknown.
+func TestLoadAPIRouteFeatures(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		manifest string
+		want     []string
+		known    bool
+	}{
+		{"missing", "", nil, false},
+		{"union", `[{"file":"a.js","nodeOnly":false,"features":["url","crypto"]},{"file":"b.js","nodeOnly":false,"features":["crypto","fetch"]}]`, []string{"crypto", "fetch", "url"}, true},
+		{"node-only routes do not count", `[{"file":"a.js","nodeOnly":false,"features":[]},{"file":"n.js","nodeOnly":true}]`, nil, true},
+		{"incomplete scan", `[{"file":"a.js","nodeOnly":false,"features":["url"]},{"file":"b.js","nodeOnly":false}]`, nil, false},
+		{"invalid", `{`, nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			if tc.manifest != "" {
+				if err := os.MkdirAll(filepath.Join(root, ".krate"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(root, ".krate", "api-routes.json"), []byte(tc.manifest), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			got, known := loadAPIRouteFeatures(root)
+			if known != tc.known || strings.Join(got, ",") != strings.Join(tc.want, ",") {
+				t.Errorf("got %v known=%v, want %v known=%v", got, known, tc.want, tc.known)
+			}
+		})
+	}
+}

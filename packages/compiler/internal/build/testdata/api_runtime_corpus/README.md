@@ -5,6 +5,9 @@ QuickJS runtime and under a reference runtime (Node, and Bun when installed).
 The responses must match on the parts the case selects. The Go driver is
 `TestAPIRuntimeConformance` in `../../api_runtime_conformance_test.go`, but the
 format below is engine-neutral so another harness can replay the same files.
+The Go driver answers each QuickJS request from a fresh VM that installs Web
+API features on first use, and checks that a pooled VM with every feature
+preloaded answers the same.
 
 ## Layout
 

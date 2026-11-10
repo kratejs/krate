@@ -386,11 +386,23 @@ func TestAPIRuntimeConformance(t *testing.T) {
 
 	apiRT := jsruntime.NewAPIRouteRuntime(iifeDir)
 	apiRT.SetEnv(map[string]string{"KRATE_CORPUS_VAR": "corpus-value"})
+	// Every request gets a fresh VM that installs only what the runner needs,
+	// so each case also exercises loading web API features on first use.
+	apiRT.SetPool(jsruntime.DefaultAPIWorkers(), true)
 	t.Cleanup(apiRT.Close)
 	qjs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		serveQuickJSAPI(w, r, apiRT, false)
 	}))
 	t.Cleanup(qjs.Close)
+	// Pooled workers of a build without feature lists preload everything;
+	// they must answer exactly like the lazily set up VMs.
+	eagerRT := jsruntime.NewAPIRouteRuntime(iifeDir)
+	eagerRT.SetEnv(map[string]string{"KRATE_CORPUS_VAR": "corpus-value"})
+	t.Cleanup(eagerRT.Close)
+	eager := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		serveQuickJSAPI(w, r, eagerRT, false)
+	}))
+	t.Cleanup(eager.Close)
 	t.Setenv("KRATE_CORPUS_VAR", "corpus-value")
 
 	// The embedded runtime's answer does not depend on the reference runtime,
@@ -404,6 +416,9 @@ func TestAPIRuntimeConformance(t *testing.T) {
 		qmu.Unlock()
 		if !ok {
 			r = doCorpusRequest(t, qjs.URL, name, rq)
+			if e := doCorpusRequest(t, eager.URL, name, rq); e.status != r.status || !bytes.Equal(e.body, r.body) {
+				t.Errorf("%s[%d]: preloaded VM answered %d %s, lazily set up VM %d %s", name, i, e.status, clip(e.body), r.status, clip(r.body))
+			}
 			qmu.Lock()
 			qcache[key] = r
 			qmu.Unlock()

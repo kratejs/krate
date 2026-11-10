@@ -4,55 +4,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sync"
 )
 
-// injectPolyfills injects the Web API surface (console, timers, URL, Headers,
-// Request/Response, streams, crypto, fetch, ...) plus process.env and a
-// minimal fs/path require().
-func (r *Runtime) injectPolyfills() error {
-	if err := r.injectWebAPIs(); err != nil {
-		return fmt.Errorf("web APIs: %w", err)
-	}
-	if err := r.injectProcessEnv(); err != nil {
-		return fmt.Errorf("process.env: %w", err)
-	}
-	if err := r.injectFsReadFile(); err != nil {
-		return fmt.Errorf("fs.readFile: %w", err)
-	}
-	return nil
-}
+// nodeGlobalsSource defines process (env only; SetEnv fills it) and a minimal
+// require() for "fs" and "path".
+var nodeGlobalsSource = `
+		var process = {
+			env: {}
+		};
 
-// injectFsReadFile adds a fs.readFile polyfill that reads files from the filesystem.
-func (r *Runtime) injectFsReadFile() error {
-	if err := r.RegisterFunc("_go_readFile", func(args []any) (any, error) {
-		if len(args) < 1 {
-			return nil, fmt.Errorf("fs.readFile requires a path")
-		}
-		path, ok := args[0].(string)
-		if !ok {
-			return nil, fmt.Errorf("fs.readFile path must be a string")
-		}
-		encoding := "utf-8"
-		if len(args) > 1 {
-			if opts, ok := args[1].(map[string]any); ok {
-				if enc, ok := opts["encoding"].(string); ok {
-					encoding = enc
-				}
-			}
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read %s: %w", path, err)
-		}
-		if encoding == "utf-8" || encoding == "utf8" || encoding == "" {
-			return string(data), nil
-		}
-		return nil, fmt.Errorf("unsupported encoding: %s", encoding)
-	}); err != nil {
-		return err
-	}
-
-	_, err := r.Execute(`
 		function __require_fs() {
 			return {
 				readFileSync: function(p, opts) { return _go_readFile(p, typeof opts === 'object' ? opts : {encoding: 'utf-8'}); },
@@ -80,18 +41,55 @@ func (r *Runtime) injectFsReadFile() error {
 				throw new Error('Module not found: ' + m);
 			};
 		}
-	`)
-	return err
-}
+	`
 
-// injectProcessEnv adds process.env support
-func (r *Runtime) injectProcessEnv() error {
-	// This will be overridden by the caller with actual env vars
-	_, err := r.Execute(`
-		var process = {
-			env: {}
-		};
-	`)
+var nodeGlobalsBC = struct {
+	sync.Mutex
+	bc []byte
+}{}
+
+// injectNodeGlobals installs process.env and the fs/path require() shim; the
+// fs shim reads files through the _go_readFile host function.
+func (r *Runtime) injectNodeGlobals() error {
+	if err := r.registerHost("_go_readFile", func(args []any) (any, error) {
+		if len(args) < 1 {
+			return nil, fmt.Errorf("fs.readFile requires a path")
+		}
+		path, ok := args[0].(string)
+		if !ok {
+			return nil, fmt.Errorf("fs.readFile path must be a string")
+		}
+		encoding := "utf-8"
+		if len(args) > 1 {
+			if opts, ok := args[1].(map[string]any); ok {
+				if enc, ok := opts["encoding"].(string); ok {
+					encoding = enc
+				}
+			}
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read %s: %w", path, err)
+		}
+		if encoding == "utf-8" || encoding == "utf8" || encoding == "" {
+			return string(data), nil
+		}
+		return nil, fmt.Errorf("unsupported encoding: %s", encoding)
+	}); err != nil {
+		return fmt.Errorf("fs.readFile: %w", err)
+	}
+	nodeGlobalsBC.Lock()
+	if nodeGlobalsBC.bc == nil {
+		bc, err := r.Compile(nodeGlobalsSource, EvalGlobal)
+		if err != nil {
+			nodeGlobalsBC.Unlock()
+			return err
+		}
+		nodeGlobalsBC.bc = bc
+	}
+	bc := nodeGlobalsBC.bc
+	nodeGlobalsBC.Unlock()
+	_, err := r.vm.EvalBytecode(bc)
 	return err
 }
 

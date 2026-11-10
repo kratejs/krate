@@ -41,13 +41,15 @@ type CompatRow struct {
 	Tests []string `json:"tests,omitempty"`
 }
 
-// CompatFeature describes one feature group: the prelude section that provides
-// its APIs and the groups that section depends on.
+// CompatFeature describes one feature group: the prelude module that provides
+// its APIs, the groups that module needs installed before it, and the globals
+// it defines (each loads the module on first use in a lazily set up VM).
 type CompatFeature struct {
 	Title       string   `json:"title"`
 	Section     string   `json:"section"`
 	Description string   `json:"description"`
 	Requires    []string `json:"requires"`
+	Globals     []string `json:"globals,omitempty"`
 }
 
 // CompatLedger is the parsed compat.json.

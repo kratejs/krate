@@ -31,6 +31,11 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Added
 
+- The embedded QuickJS runtime installs each group of Web APIs the first time code reads one of
+  its globals, so creating a VM costs about 1.4 ms instead of 3.2 ms. Config and
+  Tailwind evaluation, `generateStaticParams`, metadata and isolation-mode API requests get
+  faster. Pooled API and middleware workers preload the groups the build found in their
+  sources (all of them for builds without that list).
 - API routes and middleware built for the embedded QuickJS runtime are checked against its
   Web API surface: a global it lacks (`TransformStream`, `WebSocket`, `Buffer`,
   `crypto.subtle.encrypt`, ...) is a `KR7160` warning at the first use, once per file or

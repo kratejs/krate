@@ -1573,6 +1573,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 			// production reuses stateful workers for throughput.
 			isolation := cfg.SSR.APIIsolation || hub != nil
 			apiRT.SetPool(cfg.SSR.APIWorkers, isolation)
+			apiRT.SetFeatures(loadAPIRouteFeatures(root))
 		}
 	}
 
@@ -2973,6 +2974,38 @@ func loadNodeOnlyAPIRoutes(root string) map[string]bool {
 		}
 	}
 	return out
+}
+
+// loadAPIRouteFeatures reads .krate/api-routes.json and returns the web API
+// prelude features the embedded-runtime routes reference, so pooled workers
+// can install just those. known is false when the manifest is missing or any
+// such route has no complete scan; workers then install everything.
+func loadAPIRouteFeatures(root string) (features []string, known bool) {
+	data, err := os.ReadFile(filepath.Join(root, ".krate", "api-routes.json"))
+	if err != nil {
+		return nil, false
+	}
+	var list []apiRouteMeta
+	if json.Unmarshal(data, &list) != nil {
+		return nil, false
+	}
+	seen := map[string]bool{}
+	for _, m := range list {
+		if m.NodeOnly {
+			continue
+		}
+		if m.Features == nil {
+			return nil, false
+		}
+		for _, f := range *m.Features {
+			if !seen[f] {
+				seen[f] = true
+				features = append(features, f)
+			}
+		}
+	}
+	sort.Strings(features)
+	return features, true
 }
 
 // sidecarNeedsNode reports whether the Node API sidecar must be started: the

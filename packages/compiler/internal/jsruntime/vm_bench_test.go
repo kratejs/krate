@@ -75,3 +75,16 @@ func BenchmarkEvaluateExprFresh(b *testing.B) {
 		}
 	}
 }
+
+// BenchmarkNewVMPreloadAll creates a runtime that installs every prelude
+// feature up front, as API workers do when a build has no feature lists.
+func BenchmarkNewVMPreloadAll(b *testing.B) {
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		rt, err := NewWithOptions(Options{PreloadAll: true})
+		if err != nil {
+			b.Fatal(err)
+		}
+		_ = rt.Close()
+	}
+}

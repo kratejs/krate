@@ -60,9 +60,16 @@ func TestCompatLedger(t *testing.T) {
 	if l.Denominator == "" || len(l.Rows) == 0 || len(l.Features) == 0 {
 		t.Fatal("compat.json: denominator, features and rows are required")
 	}
+	globalFeature := map[string]string{}
 	for name, f := range l.Features {
 		if f.Title == "" || f.Section == "" || f.Description == "" {
 			t.Errorf("feature %s: title, section and description are required", name)
+		}
+		for _, g := range f.Globals {
+			if other, dup := globalFeature[g]; dup {
+				t.Errorf("global %s is listed by features %s and %s", g, other, name)
+			}
+			globalFeature[g] = name
 		}
 		for _, req := range f.Requires {
 			if _, ok := l.Features[req]; !ok || req == name {
@@ -80,6 +87,12 @@ func TestCompatLedger(t *testing.T) {
 			t.Errorf("%s: unknown feature %q", r.API, r.Feature)
 		}
 		used[r.Feature] = true
+		if !strings.Contains(r.API, ".") && len(l.Features[r.Feature].Globals) > 0 {
+			listed := globalFeature[r.API] == r.Feature
+			if r.Status != CompatNotSupported && !listed {
+				t.Errorf("%s: %s row, but feature %s does not list it in globals", r.API, r.Status, r.Feature)
+			}
+		}
 		switch r.Status {
 		case CompatSupported, CompatPartial:
 			if len(r.Tests) == 0 {
@@ -118,17 +131,30 @@ func TestCompatLedger(t *testing.T) {
 			t.Errorf("feature %s has no rows", name)
 		}
 	}
+	for g, f := range globalFeature {
+		if r, ok := l.Lookup(g); !ok || r.Feature != f {
+			t.Errorf("feature %s lists global %s, which has no row in that feature", f, g)
+		}
+	}
 }
 
 // TestCompatLedgerMatchesPrelude checks the ledger against a real VM:
 // supported and partial APIs are defined and are not stubs, and not-supported
 // ones are undefined or stubs that throw NotSupportedError with KR7160.
 func TestCompatLedgerMatchesPrelude(t *testing.T) {
-	rt, err := New()
-	if err != nil {
-		t.Fatal(err)
+	for _, mode := range []string{"lazy", "preloaded"} {
+		t.Run(mode, func(t *testing.T) {
+			rt, err := NewWithOptions(Options{PreloadAll: mode == "preloaded"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer rt.Close()
+			checkLedgerAgainstVM(t, rt)
+		})
 	}
-	defer rt.Close()
+}
+
+func checkLedgerAgainstVM(t *testing.T, rt *Runtime) {
 	for _, r := range Compat().Rows {
 		if !compatAPIPath.MatchString(r.API) {
 			continue
@@ -233,8 +259,11 @@ return good && !bad ? "ok" : "bad"`,
 	"require":     `const p = require("path"); let t = ""; try { require("os") } catch (e) { t = e.message } return p.basename("/a/b.txt", ".txt") === "b" && typeof require("fs").readFileSync === "function" && t.includes("os") ? "ok" : "bad"`,
 }
 
+// TestCompatLedgerBehavior runs each check in a VM that preloads every
+// feature, and again in a fresh VM that loads only what the check uses (so a
+// feature that misses one it depends on fails here).
 func TestCompatLedgerBehavior(t *testing.T) {
-	rt, err := New()
+	rt, err := NewWithOptions(Options{PreloadAll: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -253,6 +282,14 @@ func TestCompatLedgerBehavior(t *testing.T) {
 		t.Run(r.API, func(t *testing.T) {
 			if got := evalAsync(t, rt, body); got != "ok" {
 				t.Errorf("got %q", got)
+			}
+			fresh, err := New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer fresh.Close()
+			if got := evalAsync(t, fresh, body); got != "ok" {
+				t.Errorf("in a lazily set up VM: got %q", got)
 			}
 		})
 	}

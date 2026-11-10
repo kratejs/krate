@@ -1,9 +1,14 @@
 // Request/response orchestration shared by the embedded API and middleware
-// runners. Evaluated once per VM after webapi.js.
+// runners. Evaluated once per VM after the web API prelude (webapi/).
 (function () {
   'use strict';
   var G = globalThis;
-  var W = G.__krate_web;
+  // The runner always needs the fetch feature (Request, Response, Headers).
+  var K = G[Symbol.for('krate.web')], F = K.need('fetch'), E = K.need('events');
+  var W = {
+    kBody: F.kBody, bodyState: F.bodyState, bodyBytes: F.bodyBytes, abortSignal: E.abortSignal,
+    bytesToB64: K.bytesToB64, utf8Encode: K.utf8Encode, toBytes: K.toBytes, concatBytes: K.concatBytes
+  };
   var METHODS = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'];
 
   function parseCookies(header) {

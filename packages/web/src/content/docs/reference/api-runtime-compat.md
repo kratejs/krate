@@ -16,6 +16,10 @@ API routes and middleware run in Krate's embedded QuickJS runtime unless
 ledger the compiler embeds, and every supported row names the Go tests that
 verify it.
 
+Each feature group below is installed the first time code reads one of its
+globals, so a route pays only for the APIs it uses. Pooled API and middleware
+workers install the groups the build found in their sources when they start.
+
 Coverage: The WinterTC Minimum Common Web Platform API globals, plus the Node globals route handlers commonly reach for (Buffer, process, setImmediate, require, node: modules as one class).
 
 ## Status key
@@ -85,7 +89,7 @@ setTimeout and friends, queueMicrotask and performance, driven by the Go job loo
 
 ## Encoding
 
-atob, btoa, TextEncoder and TextDecoder, plus the byte helpers other features use. Feature group: `encoding`.
+atob, btoa, TextEncoder and TextDecoder. Feature group: `encoding`.
 
 | API | Status | Notes | Instead | Tests |
 |---|---|---|---|---|

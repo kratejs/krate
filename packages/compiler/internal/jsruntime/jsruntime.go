@@ -29,6 +29,10 @@ type Runtime struct {
 	// dataCache, when set, caches fetch responses requested with Next-style
 	// options ({ next: { revalidate, tags } } / cache: "force-cache").
 	dataCache *DataCache
+	// loaded records the prelude features installed so far, hosts the host
+	// functions registered (both per VM).
+	loaded map[string]bool
+	hosts  map[string]bool
 }
 
 // SetLogPrefix sets a prefix prepended to every console line. Plugin hosts set
@@ -56,8 +60,49 @@ func (r *Runtime) Warn(args []any) { r.writeLog(os.Stderr, "WARN: ", args) }
 // Error writes an error line to stderr.
 func (r *Runtime) Error(args []any) { r.writeLog(os.Stderr, "ERROR: ", args) }
 
-// New creates a new JS runtime with Web API polyfills
+// Options configures a runtime created by NewWithOptions.
+type Options struct {
+	// Preload lists the web API prelude features (compat.json feature names)
+	// installed when the VM is created; names outside the prelude are ignored.
+	// Every other feature loads the first time one of its globals is read.
+	Preload []string
+	// PreloadAll installs every prelude feature up front.
+	PreloadAll bool
+}
+
+// New creates a JS runtime with the web API prelude, Node's process.env and a
+// minimal require. Prelude features load on first use.
 func New() (*Runtime, error) {
+	return NewWithOptions(Options{})
+}
+
+// NewWithOptions is New with control over which prelude features are
+// installed up front.
+func NewWithOptions(o Options) (*Runtime, error) {
+	r, err := newRuntime()
+	if err != nil {
+		return nil, err
+	}
+	preload := o.Preload
+	if o.PreloadAll {
+		preload = nil
+	} else if preload == nil {
+		preload = []string{}
+	}
+	if err := r.installPrelude(preload); err != nil {
+		r.vm.Close()
+		return nil, fmt.Errorf("failed to install web APIs: %w", err)
+	}
+	if err := r.injectNodeGlobals(); err != nil {
+		r.vm.Close()
+		return nil, fmt.Errorf("failed to inject Node globals: %w", err)
+	}
+	return r, nil
+}
+
+// newRuntime creates a VM with the configured resource limits and no globals
+// beyond the engine's.
+func newRuntime() (*Runtime, error) {
 	vm, err := quickjs.NewVM()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create JS VM: %w", err)
@@ -74,16 +119,7 @@ func New() (*Runtime, error) {
 		vm.Close()
 		return nil, fmt.Errorf("failed to set eval timeout: %w", err)
 	}
-
-	r := &Runtime{vm: vm, memLimit: memLimit}
-
-	// Inject Web API polyfills
-	if err := r.injectPolyfills(); err != nil {
-		vm.Close()
-		return nil, fmt.Errorf("failed to inject polyfills: %w", err)
-	}
-
-	return r, nil
+	return &Runtime{vm: vm, memLimit: memLimit, loaded: map[string]bool{}, hosts: map[string]bool{}}, nil
 }
 
 // envUnits reads a positive integer from key and multiplies it by unit, falling
