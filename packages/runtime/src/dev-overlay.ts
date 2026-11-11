@@ -39,6 +39,8 @@ interface DevConfig {
   frames?: string;
   /** Path of the host inspector feed (Krate Native). Enables the Host panel. */
   events?: string;
+  /** Path of the per-process memory sample (Krate Native). Enables the Memory panel. */
+  memory?: string;
   errors?: string;
   open?: string;
   overlay?: boolean;
@@ -63,6 +65,7 @@ function devConfig(): Required<DevConfig> {
     sse: raw?.sse ?? '/__krate/hotreload',
     frames: raw?.frames ?? (native ? '/__krate/hmr' : ''),
     events: raw?.events ?? (native ? '/__krate/dev/events' : ''),
+    memory: raw?.memory ?? (native ? '/__krate/dev/memory' : ''),
     errors: raw?.errors ?? (native ? '/__krate/dev/client-error' : '/__krate/client-error'),
     open: raw?.open ?? '/__krate/open',
     overlay: raw?.overlay ?? true,
@@ -320,6 +323,56 @@ export function hostEventLine(ev: HostEvent): string {
   return [t, ev.kind, ev.fn, dur].filter(Boolean).join(' ') + err;
 }
 
+/** The memstat report the shell serves at /__krate/dev/memory (bytes). */
+export interface MemoryReport {
+  os?: string;
+  source?: string;
+  procs?: { pid: number; name?: string; role: string; rss?: number; pss: number; privateDirty: number }[];
+  total?: { pss: number; privateDirty: number; rss?: number };
+  notes?: string[];
+}
+
+/** Format a byte count for the Memory panel. Exported (pure) for testing. */
+export function formatBytes(n: number): string {
+  if (!Number.isFinite(n) || n < 0) return 'n/a';
+  if (n >= 1 << 30) return (n / (1 << 30)).toFixed(2) + ' GiB';
+  if (n >= 1 << 20) return (n / (1 << 20)).toFixed(1) + ' MiB';
+  if (n >= 1 << 10) return Math.round(n / (1 << 10)) + ' KiB';
+  return Math.round(n) + ' B';
+}
+
+/**
+ * The JS heap of this page, or null where the engine does not expose it.
+ * Chromium has performance.memory; WebKit (the engine of the Linux and macOS
+ * webviews) has no heap size API, so the panel shows the web process row
+ * (PSS and private dirty, which include the JS heap) instead.
+ */
+export function jsHeapBytes(): number | null {
+  const m = (typeof performance !== 'undefined' ? (performance as any).memory : undefined) as { usedJSHeapSize?: number } | undefined;
+  return m && typeof m.usedJSHeapSize === 'number' ? m.usedJSHeapSize : null;
+}
+
+/** The rows of the Memory panel as [label, value] pairs. Exported (pure) for testing. */
+export function memoryRows(rep: MemoryReport | null, domNodes: number, heap: number | null): [string, string][] {
+  const rows: [string, string][] = [];
+  if (rep && rep.procs) {
+    for (const p of rep.procs) {
+      rows.push([p.role + ' (' + p.pid + ')', 'PSS ' + formatBytes(p.pss) + ' / private dirty ' + formatBytes(p.privateDirty)]);
+    }
+    if (rep.total) rows.push(['total', 'PSS ' + formatBytes(rep.total.pss) + ' / private dirty ' + formatBytes(rep.total.privateDirty)]);
+  } else {
+    rows.push(['processes', 'unavailable']);
+  }
+  rows.push(['DOM nodes', String(domNodes)]);
+  rows.push(['JS heap', heap === null ? 'unavailable in this engine (see the web process row)' : formatBytes(heap)]);
+  return rows;
+}
+
+const ICON_MEM =
+  '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+  'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+  '<rect x="4" y="6" width="16" height="12" rx="1"/><path d="M8 10v4M12 10v4M16 10v4"/><path d="M7 18v2M12 18v2M17 18v2"/></svg>';
+
 const ICON_RELOAD =
   '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
   'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
@@ -451,6 +504,18 @@ const STYLE = `
 .hostrow { padding: 2px 12px; white-space: pre-wrap; word-break: break-word; }
 .hostrow.err { color: var(--red); }
 .hostrow.sig { color: var(--muted); }
+.mempanel {
+  position: fixed; right: 12px; bottom: 12px; z-index: 2147483002;
+  width: min(460px, calc(100vw - 24px));
+  background: var(--bg); border: 1px solid var(--line); border-radius: 12px;
+  box-shadow: 0 16px 48px rgba(0,0,0,.5); overflow: hidden;
+  font: 12px/1.45 "SF Mono", Menlo, Monaco, Consolas, "Courier New", monospace; color: var(--fg);
+}
+.mempanel[hidden] { display: none; }
+.mempanel .card-head { padding: 8px 12px; }
+.memrow { display: flex; gap: 12px; justify-content: space-between; padding: 2px 12px; }
+.memrow .k { color: var(--muted); }
+.memrow .v { text-align: right; }
 .stack {
   margin-top: 10px; color: var(--muted); white-space: pre-wrap; word-break: break-word;
   max-height: 320px; overflow: auto;
@@ -471,6 +536,9 @@ class KrateDev {
   private hostRows?: HTMLElement;
   private hostSeq = 0;
   private hostTimer?: number;
+  private memPanel?: HTMLElement;
+  private memRows?: HTMLElement;
+  private memTimer?: number;
   private seen = new Set<string>();
 
   init(): void {
@@ -506,6 +574,9 @@ class KrateDev {
         '<span class="tb-label">Errors</span></button>' +
         (this.cfg.events
           ? '<button class="tb-btn host" type="button" title="Host calls">' + ICON_HOST + '<span class="tb-label">Host</span></button>'
+          : '') +
+        (this.cfg.memory
+          ? '<button class="tb-btn mem" type="button" title="Memory">' + ICON_MEM + '<span class="tb-label">Memory</span></button>'
           : '') +
         '<div class="tb-center"><span class="brand">krate</span>' +
         '<span class="route"></span></div>' +
@@ -546,6 +617,14 @@ class KrateDev {
     }
     if (t.classList.contains('host')) {
       this.toggleHost();
+      return;
+    }
+    if (t.classList.contains('mem')) {
+      this.toggleMemory();
+      return;
+    }
+    if (t.classList.contains('memclose')) {
+      this.toggleMemory(false);
       return;
     }
     if (t.classList.contains('hostclose')) {
@@ -720,6 +799,45 @@ class KrateDev {
       void this.pollHost();
       this.hostTimer = setInterval(() => void this.pollHost(), 1000) as unknown as number;
     }
+  }
+
+  /** The Memory panel samples only while it is open (every 2 seconds). */
+  private toggleMemory(force?: boolean): void {
+    if (!this.cfg.memory) return;
+    if (!this.memPanel) {
+      const el = document.createElement('div');
+      el.className = 'mempanel';
+      el.hidden = true;
+      el.innerHTML =
+        '<div class="card-head"><span class="title" style="color:inherit">Memory</span>' +
+        '<span class="spacer"></span><button class="btn memclose" type="button">Close</button></div>' +
+        '<div class="memrows"></div>';
+      this.shadow.appendChild(el);
+      this.memPanel = el;
+      this.memRows = el.querySelector('.memrows') as HTMLElement;
+    }
+    const open = force ?? this.memPanel.hidden;
+    this.memPanel.hidden = !open;
+    if (this.memTimer) clearInterval(this.memTimer);
+    this.memTimer = undefined;
+    if (open) {
+      void this.pollMemory();
+      this.memTimer = setInterval(() => void this.pollMemory(), 2000) as unknown as number;
+    }
+  }
+
+  private async pollMemory(): Promise<void> {
+    let rep: MemoryReport | null = null;
+    try {
+      const res = await fetch(this.cfg.memory, { cache: 'no-store' });
+      if (res.ok) rep = (await res.json()) as MemoryReport;
+    } catch {
+      /* the panel is best-effort */
+    }
+    const rows = memoryRows(rep, document.getElementsByTagName('*').length, jsHeapBytes());
+    this.memRows!.innerHTML = rows
+      .map(([k, v]) => '<div class="memrow"><span class="k">' + esc(k) + '</span><span class="v">' + esc(v) + '</span></div>')
+      .join('');
   }
 
   private async pollHost(): Promise<void> {

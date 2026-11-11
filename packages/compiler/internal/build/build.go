@@ -10,6 +10,7 @@ import (
 	"hash/fnv"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -329,6 +330,8 @@ func (b *Builder) viewTransitionsOff() bool {
 	return b.Cfg.ViewTransitions == "off" || (b.NativeTarget && b.Cfg.ViewTransitions == "")
 }
 
+var nativeCfgScriptRe = regexp.MustCompile(`<script>window\.__KRATE_CFG__=[^<]*;</script>\n?`)
+
 // runtimeCommonHead returns the per-page <head> extras: the site runtime config
 // (window.__KRATE_CFG__) for the SPA router, and the View Transitions CSS when
 // enabled. Emitted on every page (production and dev).
@@ -376,6 +379,7 @@ func (b *Builder) devBootstrapJSON() string {
 		// The native shell serves HMR as a frame stream on the app origin.
 		cfg["frames"] = "/__krate/hmr"
 		cfg["events"] = "/__krate/dev/events"
+		cfg["memory"] = "/__krate/dev/memory"
 		cfg["errors"] = "/__krate/dev/client-error"
 		delete(cfg, "open")
 	}
@@ -2035,6 +2039,16 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 			}
 			chunkPreloads := dynamicChunkURLs(r.HydrationJS, b.Cfg.BaseURLPath())
 			chunkPreloads = append(chunkPreloads, lazyChunkPreloads(r.HydrationJS, b.Cfg.BaseURLPath())...)
+			if b.NativeTarget && !b.DevMode {
+				// Chunks are read from disk on demand: preloading would
+				// compile code for a component or branch that may never show.
+				chunkPreloads = nil
+				if r.JSFile == "" && !pageNeedsRuntime(r) && !strings.Contains(r.OutName, "[") {
+					// A page without client code has nothing to configure
+					// (a dynamic route shell keeps its boot script and config).
+					runtimeHead = nativeCfgScriptRe.ReplaceAllString(runtimeHead, "")
+				}
+			}
 			var html string
 			if r.LoadingHTML != "" {
 				html = generateHTMLWithLoading(r.HTML, r.HeadHTML, r.ScriptHTML, r.StyleHTML, r.LoadingHTML, pageCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath(), chunkPreloads...)

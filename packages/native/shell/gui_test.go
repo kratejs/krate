@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -297,3 +298,71 @@ function bump() { return call("t.Bump"); }
   }
 })();
 </script></body></html>`
+
+// TestGUIZMemoryPanel runs the real dev overlay bundle in the window, opens
+// its Memory panel and reads the numbers it renders from the live
+// /__krate/dev/memory endpoint. It runs last because it leaves the overlay in
+// the page. The bundle comes from packages/runtime/dist (pnpm build).
+func TestGUIZMemoryPanel(t *testing.T) {
+	if guiCtl == nil {
+		t.Skip("set KRATE_NATIVE_GUI=1 to run GUI tests")
+	}
+	skipNoMemstat(t)
+	bundle, err := os.ReadFile(filepath.Join("..", "..", "runtime", "dist", "krate-dev.js"))
+	if err != nil {
+		if os.Getenv("KRATE_REQUIRE_E2E") == "1" {
+			t.Fatalf("the dev overlay bundle is not built: %v", err)
+		}
+		t.Skipf("the dev overlay bundle is not built: %v", err)
+	}
+	if !strings.Contains(string(bundle), "mempanel") {
+		t.Fatal("the dev overlay bundle predates the Memory panel: rebuild @krate/runtime")
+	}
+	src, _ := json.Marshal(string(bundle))
+	// Install the overlay, open the panel, wait for the first sample.
+	expr := fmt.Sprintf(`(async () => {
+  (0, eval)(%s);
+  const root = document.getElementById("krate-dev-root").shadowRoot;
+  root.querySelector(".tb-btn.mem").click();
+  for (let i = 0; i < 50; i++) {
+    const t = root.querySelector(".mempanel").textContent;
+    if (/PSS/.test(t)) break;
+    await new Promise(r => setTimeout(r, 100));
+  }
+  const panel = root.querySelector(".mempanel");
+  const rows = Array.from(panel.querySelectorAll(".memrow")).map(r => r.textContent);
+  return {hidden: panel.hidden, rows, heap: typeof (performance.memory || {}).usedJSHeapSize};
+})()`, src)
+	out, err := guiCtl.Query(expr)
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	var got struct {
+		Hidden bool     `json:"hidden"`
+		Rows   []string `json:"rows"`
+		Heap   string   `json:"heap"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if got.Hidden {
+		t.Fatal("the Memory panel did not open")
+	}
+	joined := strings.Join(got.Rows, "\n")
+	t.Logf("panel rows:\n%s", joined)
+	for _, want := range []string{"shell (", "PSS ", "private dirty ", "total", "DOM nodes"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("panel lacks %q:\n%s", want, joined)
+		}
+	}
+	if runtime.GOOS == "linux" && !strings.Contains(joined, "webview:web (") {
+		t.Errorf("panel lacks the web process row:\n%s", joined)
+	}
+	if got.Heap == "number" {
+		if !strings.Contains(joined, "JS heap") || strings.Contains(joined, "unavailable in this engine") {
+			t.Errorf("the engine exposes the heap but the panel does not show it:\n%s", joined)
+		}
+	} else if !strings.Contains(joined, "unavailable in this engine") {
+		t.Errorf("without performance.memory the panel must say the JS heap is unavailable:\n%s", joined)
+	}
+}

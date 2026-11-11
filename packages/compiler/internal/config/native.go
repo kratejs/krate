@@ -48,6 +48,25 @@ type NativeConfig struct {
 	// Features overrides the detected engine features. A feature the UI code
 	// uses is switched on under "balanced" and "minimal" unless set false.
 	Features NativeFeatures `json:"features,omitempty"`
+	// Lean tunes the memory-hygiene checks of `krate native check` and
+	// native builds.
+	Lean NativeLean `json:"lean,omitempty"`
+}
+
+// NativeLean tunes the lean-page checks (KR7270 to KR7275). Zero values keep
+// the defaults.
+type NativeLean struct {
+	// DataURIKB is the size in KiB above which an inlined data: URL is
+	// reported. Default 16.
+	DataURIKB int `json:"dataUriKb,omitempty"`
+	// ImageRatio is how many times larger (in pixels per side) an image file
+	// may be than its rendered size before it is reported. Default 2.
+	ImageRatio float64 `json:"imageRatio,omitempty"`
+	// ListItems is the number of items a statically visible list may render
+	// without a windowing component. Default 100.
+	ListItems int `json:"listItems,omitempty"`
+	// Ignore lists diagnostic codes (for example "KR7272") to silence.
+	Ignore []string `json:"ignore,omitempty"`
 }
 
 // NativeFeatures are explicit overrides for the webview features that the

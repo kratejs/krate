@@ -38,6 +38,7 @@ beforeAll(async () => {
     sse: '/__krate/hotreload',
     errors: '/__krate/client-error',
     open: '/__krate/open',
+    memory: '/__krate/dev/memory',
     overlay: true,
     toolbar: true,
   };
@@ -240,5 +241,54 @@ describe('dev-overlay native transport', () => {
   it('formats host events', () => {
     expect(overlay.hostEventLine({ seq: 1, kind: 'call', fn: 'tasks.Add', durNs: 3200000 })).toContain('call tasks.Add 3.2ms');
     expect(overlay.hostEventLine({ seq: 2, kind: 'call', fn: 'tasks.Add', code: 'not_found', message: 'nope' })).toContain('not_found: nope');
+  });
+
+  it('formats memory rows, with the JS heap unavailable on WebKit', () => {
+    expect(overlay.formatBytes(1536)).toBe('2 KiB');
+    expect(overlay.formatBytes(5 * 1048576)).toBe('5.0 MiB');
+    expect(overlay.formatBytes(-1)).toBe('n/a');
+    const rep = {
+      procs: [{ pid: 7, role: 'webview:web', pss: 40 * 1048576, privateDirty: 25 * 1048576 }],
+      total: { pss: 40 * 1048576, privateDirty: 25 * 1048576 },
+    };
+    const rows = overlay.memoryRows(rep, 321, null);
+    expect(rows[0]).toEqual(['webview:web (7)', 'PSS 40.0 MiB / private dirty 25.0 MiB']);
+    expect(rows).toContainEqual(['DOM nodes', '321']);
+    expect(rows[rows.length - 1][1]).toContain('unavailable');
+    expect(overlay.memoryRows(rep, 1, 2 * 1048576).pop()).toEqual(['JS heap', '2.0 MiB']);
+    expect(overlay.memoryRows(null, 1, null)[0]).toEqual(['processes', 'unavailable']);
+  });
+
+  it('shows live numbers in the Memory panel and polls only while it is open', async () => {
+    const shadow = devRoot()!;
+    const calls: string[] = [];
+    (globalThis as any).fetch = async (url: string) => {
+      calls.push(String(url));
+      return {
+        ok: true,
+        json: async () => ({
+          procs: [{ pid: 11, role: 'shell', pss: 12 * 1048576, privateDirty: 9 * 1048576 }],
+          total: { pss: 12 * 1048576, privateDirty: 9 * 1048576 },
+        }),
+      };
+    };
+    const btn = shadow.querySelector('.tb-btn.mem') as HTMLElement;
+    expect(btn).toBeTruthy();
+    expect(calls.length).toBe(0);
+    btn.click();
+    await new Promise((r) => setTimeout(r, 20));
+    const panel = shadow.querySelector('.mempanel') as HTMLElement;
+    expect(panel.hidden).toBe(false);
+    expect(calls).toEqual(['/__krate/dev/memory']);
+    expect(panel.textContent).toContain('shell (11)');
+    expect(panel.textContent).toContain('PSS 12.0 MiB');
+    expect(panel.textContent).toMatch(/DOM nodes\d+/);
+    expect(panel.textContent).toContain('JS heap');
+
+    (shadow.querySelector('.memclose') as HTMLElement).click();
+    expect(panel.hidden).toBe(true);
+    const n = calls.length;
+    await new Promise((r) => setTimeout(r, 2300));
+    expect(calls.length).toBe(n);
   });
 });

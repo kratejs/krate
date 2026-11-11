@@ -231,6 +231,9 @@ func (b *Builder) BuildNativeApp(opts NativeAppOptions) (*NativeAppResult, error
 		return nil, nativeDiagError([]diag.Diagnostic{*derr}, "native target error(s)")
 	}
 	b.NativeTarget = true
+	// The shell serves the files from the app bundle: .br and .gz siblings
+	// would only add to its size.
+	b.Cfg.Compress = config.CompressConfig{}
 
 	ds, err := native.CheckTarget(b.Root, b.Cfg)
 	if err != nil {
@@ -238,6 +241,13 @@ func (b *Builder) BuildNativeApp(opts NativeAppOptions) (*NativeAppResult, error
 	}
 	if len(ds) > 0 {
 		return nil, nativeDiagError(ds, "native target error(s)")
+	}
+
+	if !opts.Dev {
+		pl, _ := native.Analyze(b.Root, b.Cfg)
+		if lean, err := native.CheckLean(b.Root, b.Cfg, pl); err == nil {
+			printWarningsOnce(os.Stderr, lean)
+		}
 	}
 
 	outDir := opts.OutDir

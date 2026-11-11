@@ -117,4 +117,31 @@ func TestMemoryBrowserMode(t *testing.T) {
 	if r := memRoles(&got); r[memstat.RoleShell].PSS == 0 || r[memstat.RoleGoHost].PSS == 0 || len(r) != 2 {
 		t.Errorf("endpoint roles: %+v", got.ByRole())
 	}
+
+	// The dev overlay's Memory panel reads these field names.
+	var raw struct {
+		Procs []map[string]any `json:"procs"`
+		Total map[string]any   `json:"total"`
+	}
+	if err := json.Unmarshal([]byte(body), &raw); err != nil {
+		t.Fatal(err)
+	}
+	if len(raw.Procs) != 2 {
+		t.Fatalf("payload procs: %s", body)
+	}
+	for _, p := range raw.Procs {
+		for _, k := range []string{"pid", "role", "pss", "privateDirty"} {
+			if _, ok := p[k]; !ok {
+				t.Errorf("proc lacks %q: %v", k, p)
+			}
+		}
+		if pss, _ := p["pss"].(float64); pss <= 0 {
+			t.Errorf("pss of %v is not a positive number", p["role"])
+		}
+	}
+	for _, k := range []string{"pss", "privateDirty"} {
+		if v, _ := raw.Total[k].(float64); v <= 0 {
+			t.Errorf("total.%s = %v", k, raw.Total[k])
+		}
+	}
 }

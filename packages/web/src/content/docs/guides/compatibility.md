@@ -81,6 +81,7 @@ green run there is what moves a cell.
 | Native: SDK data areas (kv, db, fs, net, os) | Supported | Untested | Untested | Krate Native v1 |
 | Native: SDK windows | Partial | Untested | Untested | Krate Native v1 |
 | Native: shared web process, release and background mode | Supported | Untested | Untested | Krate Native v1 |
+| Native: lean pages and the dev Memory panel | Supported | Untested | Untested | Krate Native v1 |
 | Native: SDK dialogs, clipboard and menus | Supported | Untested | Untested | Krate Native v1 |
 | Native: SDK notifications | Supported | n/a | n/a | Krate Native v1 |
 | Native: SDK tray and global shortcuts | Partial | n/a | n/a | Krate Native v1 |
@@ -575,6 +576,20 @@ Known limits:
 - The network process of WebKitGTK stays alive while the app runs, so a released Linux app still holds it.
 
 Evidence: `TestGUISharedWebProcess`, `TestGUIReleaseRestore`, `TestGUIKeepAlive`, `TestGUINavigateReleased`, `TestGUIMemoryPressureOnHide`, `TestGUIWindowsBackground`, `TestParseViewState`, `TestParkOnClose`, `TestQuitWhenEmpty`
+
+### Native: lean pages and the dev Memory panel
+
+**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+
+Native builds ship no script on a page without client code and do not preload lazy chunks; krate native check and native builds warn (KR7270 to KR7274) about oversized images, large inlined data: URLs, web fonts, compositing CSS effects and long lists without windowing; krate native dev has a Memory panel with PSS, private dirty, DOM nodes and the JS heap where the engine exposes it.
+
+Known limits:
+
+- The checks are static: sizes set from CSS classes, values chosen at run time and data fetched later are not seen. The web font check is a heuristic.
+- WebKit has no JS heap size API, so the Memory panel shows the heap as unavailable on Linux and macOS and points at the web process row.
+- macOS and Windows: the panel and the checks are platform independent, but only the Linux webview has run them.
+
+Evidence: `TestNativePagesLoadOnlyWhatTheyUse`, `TestLeanOversizedImage`, `TestLeanDataURIThreshold`, `TestLeanWebFonts`, `TestLeanCompositing`, `TestLeanWillChangeEverywhere`, `TestLeanLongLists`, `TestMemoryBrowserMode`, `TestGUIZMemoryPanel`
 
 ### Native: SDK dialogs, clipboard and menus
 
