@@ -4,6 +4,10 @@
 // implemented in pure Go over the session bus. It needs a StatusNotifier host
 // (KDE Plasma, most panels, GNOME with the AppIndicator extension); without
 // one New returns krate.ErrUnsupported. One tray icon per app.
+//
+// Windows: Shell_NotifyIconW (version 4) owned by a hidden window, with the
+// menu shown on right click. The icon returns when explorer restarts. The
+// Windows backend is compile-only in this release.
 package tray
 
 import (

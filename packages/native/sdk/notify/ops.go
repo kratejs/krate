@@ -82,5 +82,8 @@ type platformBackend struct{ n caps.Notifier }
 
 func (p platformBackend) send(n caps.Notification) error { return p.n.Notify(n) }
 func (p platformBackend) close(id string) error {
+	if c, ok := p.n.(caps.NotificationCloser); ok {
+		return c.CloseNotification(id)
+	}
 	return fmt.Errorf("%w: closing notifications is not supported on this platform", krate.ErrUnsupported)
 }

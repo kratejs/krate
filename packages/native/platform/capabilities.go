@@ -31,6 +31,7 @@ type (
 	NotificationAction   = caps.NotificationAction
 	NotifyEvent          = caps.NotifyEvent
 	Notifier             = caps.Notifier
+	NotificationCloser   = caps.NotificationCloser
 	Accelerator          = caps.Accelerator
 	Shortcuts            = caps.Shortcuts
 	ProcessRef           = caps.ProcessRef

@@ -12,6 +12,12 @@ import "net/http"
 type Options struct {
 	// AppID is the reverse-DNS application id, e.g. "com.acme.app".
 	AppID string
+	// AppName is the display name of the app (the product name). The Windows
+	// backend shows it on toast notifications. Empty means AppID.
+	AppName string
+	// IconPath is an optional PNG or ICO file the Windows backend uses as the
+	// default toast icon.
+	IconPath string
 	// Handler serves every request on the app origin. Responses must be
 	// streamed to the webview as they are written (Flush is honored).
 	Handler http.Handler

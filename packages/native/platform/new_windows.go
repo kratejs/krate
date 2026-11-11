@@ -12,6 +12,8 @@ func New(opts Options) (App, error) {
 	mem, feat := opts.Memory.Backend()
 	a, err := winplat.New(winplat.Config{
 		AppID:     opts.AppID,
+		AppName:   opts.AppName,
+		IconPath:  opts.IconPath,
 		Handler:   opts.Handler,
 		Debug:     opts.Debug,
 		KeepAlive: opts.KeepAlive,

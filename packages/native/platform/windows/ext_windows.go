@@ -14,9 +14,9 @@ package windows
 //     to OK / OK+Cancel / Yes+No / Yes+No+Cancel by count and the labels are
 //     ignored.
 //   - Menu accelerators are shown as text only; there is no accelerator table.
-//   - Toasts need an AppUserModelID and Shell_NotifyIcon needs a hidden
-//     window with a callback message; neither is implemented, so Notifier,
-//     Tray and Shortcuts are absent and the SDK answers ErrUnsupported.
+//   - Tray, global shortcuts and toast notifications are in tray_windows.go,
+//     hotkey_windows.go and toast_windows.go; they share the hidden utility
+//     window created in New.
 
 import (
 	"errors"

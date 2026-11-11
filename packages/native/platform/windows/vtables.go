@@ -470,4 +470,47 @@ var ifaceMethods = map[string][]string{
 		"Seek", "SetSize", "CopyTo", "Commit", "Revert",
 		"LockRegion", "UnlockRegion", "Stat", "Clone",
 	},
+	// Windows.UI.Notifications.h and Windows.Data.Xml.Dom.h (Windows SDK).
+	// WinRT interfaces derive from IInspectable: slots 3..5 are GetIids,
+	// GetRuntimeClassName and GetTrustLevel, and the interface's own methods
+	// start at slot 6 in metadata order.
+	"IActivationFactory": {
+		"QueryInterface", "AddRef", "Release", "GetIids", "GetRuntimeClassName", "GetTrustLevel",
+		"ActivateInstance",
+	},
+	"IToastNotificationManagerStatics": {
+		"QueryInterface", "AddRef", "Release", "GetIids", "GetRuntimeClassName", "GetTrustLevel",
+		"CreateToastNotifier", "CreateToastNotifierWithId", "GetTemplateContent",
+	},
+	"IToastNotificationFactory": {
+		"QueryInterface", "AddRef", "Release", "GetIids", "GetRuntimeClassName", "GetTrustLevel",
+		"CreateToastNotification",
+	},
+	"IToastNotifier": {
+		"QueryInterface", "AddRef", "Release", "GetIids", "GetRuntimeClassName", "GetTrustLevel",
+		"Show", "Hide", "get_Setting", "AddToSchedule", "RemoveFromSchedule", "GetScheduledToastNotifications",
+	},
+	"IToastNotification": {
+		"QueryInterface", "AddRef", "Release", "GetIids", "GetRuntimeClassName", "GetTrustLevel",
+		"put_Content", "get_Content", "put_ExpirationTime", "get_ExpirationTime",
+		"add_Dismissed", "remove_Dismissed", "add_Activated", "remove_Activated", "add_Failed", "remove_Failed",
+	},
+	"IToastActivatedEventArgs": {
+		"QueryInterface", "AddRef", "Release", "GetIids", "GetRuntimeClassName", "GetTrustLevel",
+		"get_Arguments",
+	},
+	"IToastDismissedEventArgs": {
+		"QueryInterface", "AddRef", "Release", "GetIids", "GetRuntimeClassName", "GetTrustLevel",
+		"get_Reason",
+	},
+	"IToastFailedEventArgs": {
+		"QueryInterface", "AddRef", "Release", "GetIids", "GetRuntimeClassName", "GetTrustLevel",
+		"get_ErrorCode",
+	},
+	"IXmlDocumentIO": {
+		"QueryInterface", "AddRef", "Release", "GetIids", "GetRuntimeClassName", "GetTrustLevel",
+		"LoadXml", "LoadXmlWithSettings", "SaveToFileAsync",
+	},
+	// Typed event handler delegates have the IUnknown slots and Invoke.
+	"TypedEventHandler": {"QueryInterface", "AddRef", "Release", "Invoke"},
 }

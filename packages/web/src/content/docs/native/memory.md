@@ -260,10 +260,10 @@ the arguments.
 | `--renderer-process-limit=1` | `balanced`, `minimal` | One origin, trusted content. A limit, not a guarantee: site isolation can still add processes for cross-origin frames. |
 | `--disable-features=SpareRendererForSitePerProcess` | `balanced`, `minimal` | Chromium feature that keeps an idle renderer process warm. |
 | `...,BackForwardCache` | `balanced`, `minimal` | Keeps whole previous pages alive. |
-| `...,msWebOOUI,msPdfOOUI` | `balanced`, `minimal` | Edge out-of-process UI surfaces. Not documented by Microsoft; Tauri ships the same two names by default. Effect unmeasured. |
+| `...,msWebOOUI,msPdfOOUI` | `balanced`, `minimal` | Edge out-of-process UI surfaces. Not in Microsoft's flag list; Tauri ships the same two names by default, and Chromium ignores a feature name it does not know. Effect unmeasured. |
 | `--js-flags=--max-old-space-size=512` | `minimal` | Caps the V8 heap. A page that really needs more crashes its renderer. |
 | `--disable-gpu-shader-disk-cache` | `minimal` | No on-disk shader cache. |
-| `--disable-webgl` | `balanced`, `minimal`, when `webgl` is unused | No WebGL contexts. |
+| `--disable-webgl --disable-webgl2` | `balanced`, `minimal`, when `webgl` is unused | No WebGL contexts. Both are defined in Chromium `content_switches.cc`. |
 
 Not used on purpose: `msSmartScreenProtection` stays on because it is a
 security feature; `--disable-background-networking` is left out because it also

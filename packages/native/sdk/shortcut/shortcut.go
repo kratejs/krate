@@ -5,9 +5,11 @@
 // already grabbed is an error. Linux/Wayland: there is no way to grab keys
 // from a client; the xdg-desktop-portal GlobalShortcuts interface is used when
 // the desktop offers it (the user may be asked to confirm), otherwise
-// Register returns krate.ErrUnsupported. macOS and Windows implementations
-// (RegisterEventHotKey, RegisterHotKey) are not part of this release and
-// return krate.ErrUnsupported.
+// Register returns krate.ErrUnsupported. Windows: RegisterHotKey on the app's
+// hidden window; a combination another app or Windows holds is an error
+// ("already registered by another app"). The Windows backend is compile-only
+// in this release. The macOS implementation (RegisterEventHotKey) is not part
+// of this release and returns krate.ErrUnsupported.
 package shortcut
 
 import (

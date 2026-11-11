@@ -115,6 +115,7 @@ const (
 	wsMaximizeBox      = 0x00010000
 	wsClipChildren     = 0x02000000
 	wsClipSiblings     = 0x04000000
+	wsPopup            = 0x80000000
 
 	cwUseDefault = 0x80000000
 
