@@ -20,6 +20,16 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
   something the config needs is missing.
 - Krate Native rows in the compatibility matrix (Linux verified, macOS and Windows untested) and
   size, cold-start and memory budgets in `packages/native/budgets.json`.
+- `krate native check` and native builds warn about oversized images, large inlined `data:` URLs,
+  web fonts, compositing CSS effects and long lists without windowing (KR7270 to KR7274; thresholds
+  and a silence list in `native.lean`). Native builds no longer preload lazy chunks, ship no
+  script or config block on pages without client code, and write no `.br`/`.gz` siblings.
+  `krate native dev` has a Memory panel (PSS, private dirty, DOM nodes, JS heap where available).
+- A top-level `viewTransitions` no longer reaches the desktop app (it hung the docs site's window on
+  WebKitGTK); `native.viewTransitions: "auto"` opts in.
+- Linux: request body streams are only touched on the main thread. WebKit shares their FormData
+  with the UI-side request and it is not thread safe; the old code crashed the process (SIGSEGV in
+  `gtk_main`) about once in a few hundred requests under load.
 
 ### Breaking
 
