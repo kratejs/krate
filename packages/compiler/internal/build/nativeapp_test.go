@@ -178,7 +178,7 @@ func TestNativeAppBuildsExample(t *testing.T) {
 	if gh["binary"] != "gohost/krate-gohost" {
 		t.Errorf("gohost binary = %v", gh["binary"])
 	}
-	if got := strings.Join(nativeStrings(gh["funcs"]), ","); got != "src/lib/tasks.Add,src/lib/tasks.List,src/lib/tasks.Toggle" {
+	if got := strings.Join(nativeStrings(gh["funcs"]), ","); got != "src/lib/tasks.Add,src/lib/tasks.Get,src/lib/tasks.List,src/lib/tasks.Toggle" {
 		t.Errorf("funcs = %s", got)
 	}
 	if got := strings.Join(nativeStrings(gh["streams"]), ","); got != "src/lib/tasks.Watch" {
@@ -254,6 +254,12 @@ func TestNativeAppBuildsExample(t *testing.T) {
 	cmd.Env = append(os.Environ(), "KRATE_GOHOST_SOCKET="+sock)
 	var buf bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &buf, &buf
+	// The child quits when its stdin closes, so hold a pipe open.
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stdin.Close()
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -680,4 +686,21 @@ export default function P() {
 		t.Fatal(err)
 	}
 	nodeCheckSyntax(t, "page script", clientJS(t, root))
+}
+
+func TestNativeTargetDisablesViewTransitionsByDefault(t *testing.T) {
+	root := t.TempDir()
+	b := newNativeBuilder(t, root)
+	if head := b.runtimeCommonHead(); !strings.Contains(head, "@view-transition") {
+		t.Fatalf("a web build keeps view transitions on: %s", head)
+	}
+	b.NativeTarget = true
+	head := b.runtimeCommonHead()
+	if strings.Contains(head, "@view-transition") || !strings.Contains(head, `"viewTransitions":false`) {
+		t.Errorf("a native build must not emit cross-document view transitions: %s", head)
+	}
+	b.Cfg.ViewTransitions = "auto"
+	if head := b.runtimeCommonHead(); !strings.Contains(head, "@view-transition") {
+		t.Errorf("an explicit viewTransitions: \"auto\" must still be honored: %s", head)
+	}
 }

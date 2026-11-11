@@ -40,6 +40,18 @@ func List() []Task {
 	return append([]Task(nil), tasks...)
 }
 
+// Get returns one task, or a not_found error the UI sees as a KrateError.
+func Get(id int) (Task, error) {
+	mu.Lock()
+	defer mu.Unlock()
+	for _, t := range tasks {
+		if t.ID == id {
+			return t, nil
+		}
+	}
+	return Task{}, krate.Errorf("not_found", "no task %d", id)
+}
+
 // Add appends a task.
 func Add(title string) (Task, error) {
 	if title == "" {
