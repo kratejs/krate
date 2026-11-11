@@ -320,7 +320,7 @@ func (s *Scope) ReadText(path string) (string, error) {
 	if utf8.Valid(b) {
 		return string(b), nil
 	}
-	return strings.ToValidUTF8(string(b), "�"), nil
+	return strings.ToValidUTF8(string(b), "\uFFFD"), nil
 }
 
 // WriteFile writes data to path, creating or truncating it. The parent
