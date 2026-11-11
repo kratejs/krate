@@ -35,6 +35,9 @@ func e2eRequireDeps(t *testing.T) string {
 	t.Helper()
 	root := repoRoot(t)
 	ex := filepath.Join(root, "examples", "native-tasks")
+	// examples/ may hold a generated go.work (other tests write one) that
+	// does not list this module; the example stands on its own go.mod.
+	t.Setenv("GOWORK", "off")
 	for _, p := range []string{
 		filepath.Join(ex, "node_modules", "@krate", "app", "dist", "index.js"),
 		filepath.Join(ex, "node_modules", "@krate", "core", "dist", "index.js"),
