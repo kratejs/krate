@@ -101,11 +101,12 @@ func packageMac(o *Options, ic *Icon, want map[string]bool, stage string, res *R
 			res.note("%s has no code signature; Apple silicon refuses to run unsigned code. Build it with the Go linker for darwin/arm64 (it signs ad hoc) or run krate native sign", filepath.Base(p.Executable))
 		}
 	}
-	res.note("the .app has an ad hoc signature on its executable only; sign the bundle with `krate native sign` on macOS (codesign) for Gatekeeper")
 	if o.Signer != nil {
 		if err := o.Signer.SignStage(stage); err != nil {
 			return err
 		}
+	} else {
+		res.note("the .app has an ad hoc signature on its executable only; sign the bundle with `krate native sign` on macOS (codesign) for Gatekeeper")
 	}
 	res.add(Artifact{Path: filepath.Join(stage, app), Format: "app"})
 	return macArchives(o, want, stage, app, res)

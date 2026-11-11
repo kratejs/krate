@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -241,15 +242,35 @@ func TestBuildReleaseNodeSEA(t *testing.T) {
 	if b, _ := os.ReadFile(exe); string(b) != "node-binary" {
 		t.Errorf("executable is not a copy of node")
 	}
-	if len(*calls) != 2 {
+	// On a macOS host the executable is also (un)signed with codesign around
+	// the postject step; those calls are checked separately.
+	var steps, signs []call
+	for _, c := range *calls {
+		if c.name == "codesign" {
+			signs = append(signs, c)
+		} else {
+			steps = append(steps, c)
+		}
+	}
+	if len(steps) != 2 {
 		t.Fatalf("calls %+v", *calls)
 	}
-	if (*calls)[0].args[0] != "--experimental-sea-config" {
-		t.Errorf("first call %+v", (*calls)[0])
+	if steps[0].args[0] != "--experimental-sea-config" {
+		t.Errorf("first call %+v", steps[0])
 	}
-	pj := (*calls)[1]
-	if pj.name != "/usr/bin/postject" || pj.args[1] != "NODE_SEA_BLOB" || pj.args[len(pj.args)-1] != SEAFuse {
+	pj := steps[1]
+	if pj.name != "/usr/bin/postject" || pj.args[1] != "NODE_SEA_BLOB" || !strings.Contains(strings.Join(pj.args, " "), "--sentinel-fuse "+SEAFuse) {
 		t.Errorf("postject call %+v", pj)
+	}
+	if runtime.GOOS == "darwin" {
+		if !strings.Contains(strings.Join(pj.args, " "), "--macho-segment-name NODE_SEA") {
+			t.Errorf("postject call lacks the Mach-O segment name: %+v", pj)
+		}
+		if len(signs) != 2 || signs[0].args[0] != "--remove-signature" || signs[1].args[0] != "--sign" {
+			t.Errorf("codesign calls %+v", signs)
+		}
+	} else if len(signs) != 0 {
+		t.Errorf("unexpected codesign calls %+v", signs)
 	}
 	if _, err := os.Stat(filepath.Join(out, ".sea-krate-host-node")); !os.IsNotExist(err) {
 		t.Errorf("scratch directory left behind")
