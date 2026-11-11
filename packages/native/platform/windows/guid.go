@@ -1,0 +1,68 @@
+package windows
+
+import (
+	"fmt"
+	"strconv"
+	"strings"
+)
+
+// Interface ids. The WebView2 ids come from the MIDL_INTERFACE lines of
+// WebView2.h; the rest are the standard COM ids.
+const (
+	iidIUnknown          = "00000000-0000-0000-C000-000000000046"
+	iidISequentialStream = "0C733A30-2A1C-11CE-ADE5-00AA0044773D"
+	iidIStream           = "0000000C-0000-0000-C000-000000000046"
+
+	// WebView2.h line 44351
+	iidEnvCompletedHandler = "4e8a3389-c9d8-4bd2-b6b5-124fee6cc14d"
+	// WebView2.h line 44663
+	iidControllerCompletedHandler = "6c4819f3-c9b7-4260-8127-c9f5bde7f68c"
+	// WebView2.h line 4820
+	iidWebResourceRequestedHandler = "ab00b74c-15f1-4646-80e8-e76341d25d71"
+	// WebView2.h line 4218
+	iidNavigationStartingHandler = "9adbe429-f36d-432b-9ddc-f8881fbd76e3"
+	// WebView2.h line 5078
+	iidExecuteScriptHandler = "49511172-cc67-4bca-9923-137112f4c4cc"
+)
+
+// guid is a GUID in its in-memory (Windows GUID struct) layout: Data1, Data2
+// and Data3 little endian, Data4 as is.
+type guid [16]byte
+
+// parseGUID parses the textual form xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.
+func parseGUID(s string) (guid, error) {
+	var g guid
+	parts := strings.Split(s, "-")
+	if len(parts) != 5 || len(parts[0]) != 8 || len(parts[1]) != 4 ||
+		len(parts[2]) != 4 || len(parts[3]) != 4 || len(parts[4]) != 12 {
+		return g, fmt.Errorf("bad guid %q", s)
+	}
+	d1, err1 := strconv.ParseUint(parts[0], 16, 32)
+	d2, err2 := strconv.ParseUint(parts[1], 16, 16)
+	d3, err3 := strconv.ParseUint(parts[2], 16, 16)
+	if err1 != nil || err2 != nil || err3 != nil {
+		return g, fmt.Errorf("bad guid %q", s)
+	}
+	for i := 0; i < 4; i++ {
+		g[i] = byte(d1 >> (8 * i))
+	}
+	g[4], g[5] = byte(d2), byte(d2>>8)
+	g[6], g[7] = byte(d3), byte(d3>>8)
+	tail := parts[3] + parts[4]
+	for i := 0; i < 8; i++ {
+		b, err := strconv.ParseUint(tail[2*i:2*i+2], 16, 8)
+		if err != nil {
+			return g, fmt.Errorf("bad guid %q", s)
+		}
+		g[8+i] = byte(b)
+	}
+	return g, nil
+}
+
+func mustGUID(s string) guid {
+	g, err := parseGUID(s)
+	if err != nil {
+		panic(err)
+	}
+	return g
+}
