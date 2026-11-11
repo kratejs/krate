@@ -86,26 +86,50 @@ func (t *Table) IDs() map[string]string {
 // registered as a stub that fails with denied(permission), so the UI can tell
 // a missing permission from a mistyped id.
 func (t *Table) RegisterUI(reg *scheme.Registry, allowed func(permission string) bool, denied func(permission string) error) {
+	var af func(window, permission string) bool
+	if allowed != nil {
+		af = func(_, p string) bool { return allowed(p) }
+	}
+	t.RegisterUIFor(reg, af, denied)
+}
+
+// RegisterUIFor is RegisterUI with a per-window check. allowed("", p) decides
+// whether the app grants p at all (stub or not); for a granted id the check
+// runs again on every call with the window that made it, so a window with a
+// narrower scope is denied.
+func (t *Table) RegisterUIFor(reg *scheme.Registry, allowed func(window, permission string) bool, denied func(permission string) error) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	for id, e := range t.m {
 		if !e.ui {
 			continue
 		}
-		if allowed != nil && allowed(e.perm) {
-			t.registerOne(reg, id, e)
+		perm := e.perm
+		if allowed == nil || !allowed("", perm) {
+			if e.f != nil {
+				reg.Func(id, func(krate.Ctx, *wire.Decoder, *wire.Encoder) error { return denied(perm) })
+			} else {
+				reg.Stream(id, func(krate.Ctx, *wire.Decoder, func(func(*wire.Encoder)) error) error { return denied(perm) })
+			}
 			continue
 		}
-		perm := e.perm
 		if e.f != nil {
 			reg.Trusted(id, e.f)
+			f := e.f
+			reg.Func(id, func(ctx krate.Ctx, a *wire.Decoder, out *wire.Encoder) error {
+				if !allowed(ctx.Window(), perm) {
+					return denied(perm)
+				}
+				return f(ctx, a, out)
+			})
 		} else {
-			reg.TrustedStream(id, e.s)
-		}
-		if e.f != nil {
-			reg.Func(id, func(krate.Ctx, *wire.Decoder, *wire.Encoder) error { return denied(perm) })
-		} else {
-			reg.Stream(id, func(krate.Ctx, *wire.Decoder, func(func(*wire.Encoder)) error) error { return denied(perm) })
+			s := e.s
+			reg.Stream(id, func(ctx krate.Ctx, a *wire.Decoder, emit func(func(*wire.Encoder)) error) error {
+				if !allowed(ctx.Window(), perm) {
+					return denied(perm)
+				}
+				return s(ctx, a, emit)
+			})
 		}
 	}
 }

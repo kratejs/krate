@@ -117,6 +117,18 @@ func TestValidateNative(t *testing.T) {
 		{"installer", func(n *NativeConfig) { n.Bundle.Windows.Installer = "exe" }, "installer"},
 		{"linux format", func(n *NativeConfig) { n.Bundle.Linux.Formats = []string{"snap"} }, "format"},
 		{"updater needs key", func(n *NativeConfig) { n.Updater = &NativeUpdater{URL: "https://a.b/u.json"} }, "url and publicKey"},
+		{"window permission unknown", func(n *NativeConfig) { w := []string{"camera"}; n.Window.Permissions = &w }, "window.permissions"},
+		{"window permission outside the allowlist", func(n *NativeConfig) {
+			n.Permissions = []string{"kv"}
+			w := []string{"kv", "fs"}
+			n.Window.Permissions = &w
+		}, "does not allow"},
+		{"window permission inside the allowlist", func(n *NativeConfig) {
+			n.Permissions = []string{"kv", "fs"}
+			w := []string{"fs:read"}
+			n.Window.Permissions = &w
+		}, ""},
+		{"empty window scope", func(n *NativeConfig) { w := []string{}; n.Window.Permissions = &w }, ""},
 		{"updater https", func(n *NativeConfig) { n.Updater = &NativeUpdater{URL: "http://a.b/u.json", PublicKey: "k"} }, "https"},
 	}
 	for _, tc := range cases {
@@ -201,5 +213,25 @@ func TestNativePermissionsAcceptSDKNames(t *testing.T) {
 	c.Native = &NativeConfig{AppID: "com.acme.app", Permissions: []string{"camera"}}
 	if _, err := c.Validate(); err == nil || !strings.Contains(err.Error(), "known permissions: app, clipboard") {
 		t.Errorf("camera: %v", err)
+	}
+}
+
+func TestNativeReleaseDefaultsAndWindowScope(t *testing.T) {
+	c := Default()
+	c.Native = &NativeConfig{AppID: "com.acme.app"}
+	if n := c.EffectiveNative(); n.Release.PGO != "native.pgo" || n.Release.Compile != "auto" {
+		t.Errorf("release defaults = %+v", n.Release)
+	}
+	cfg := nativeCfg(t, `{"native":{"appId":"com.acme.app","permissions":["kv","window"],"window":{"permissions":["kv"]},"release":{"pgo":"p/app.pgo"}}}`)
+	n := cfg.EffectiveNative()
+	if n.Window.Permissions == nil || len(*n.Window.Permissions) != 1 || n.Release.PGO != "p/app.pgo" {
+		t.Errorf("native = %+v", n)
+	}
+	cfg = nativeCfg(t, `{"native":{"appId":"com.acme.app","window":{"permissions":[]}}}`)
+	if wp := cfg.EffectiveNative().Window.Permissions; wp == nil || len(*wp) != 0 {
+		t.Errorf("an empty list must stay a scope that grants nothing: %v", wp)
+	}
+	if got := strings.Join(UnknownKeyWarnings([]byte(`{"native":{"appId":"com.a.b","window":{"permissions":[]}}}`)), "\n"); got != "" {
+		t.Errorf("window.permissions warned: %s", got)
 	}
 }

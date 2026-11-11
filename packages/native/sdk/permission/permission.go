@@ -39,6 +39,7 @@
 package permission
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -116,13 +117,25 @@ func All() []Info {
 // Set is a parsed permission list. The zero Set allows nothing.
 type Set struct {
 	names map[string]bool
+	sc    *scopes
+}
+
+// scopes narrows the permissions of single windows. It is shared by every
+// copy of a Set.
+type scopes struct {
+	mu    sync.RWMutex
+	byWin map[string]map[string]bool
+}
+
+func newSet() Set {
+	return Set{names: map[string]bool{}, sc: &scopes{byWin: map[string]map[string]bool{}}}
 }
 
 // Defaults returns the permissions of an app that declares none.
 func Defaults() Set {
 	mu.RLock()
 	defer mu.RUnlock()
-	s := Set{names: map[string]bool{}}
+	s := newSet()
 	for _, i := range table {
 		if i.Default {
 			s.add(i)
@@ -146,12 +159,16 @@ func (s Set) add(i Info) {
 func AllowAll() Set {
 	mu.RLock()
 	defer mu.RUnlock()
-	s := Set{names: map[string]bool{}}
+	s := newSet()
 	for _, i := range table {
 		s.add(i)
 	}
 	return s
 }
+
+// None returns a Set that allows nothing (apart from the empty name). An
+// app.json with "strictPermissions" and no "permissions" gets it.
+func None() Set { return newSet() }
 
 // Parse builds a Set from an app.json list. An empty list gives Defaults.
 // An unknown name is an error that lists the valid ones.
@@ -161,7 +178,7 @@ func Parse(list []string) (Set, error) {
 	}
 	mu.RLock()
 	defer mu.RUnlock()
-	s := Set{names: map[string]bool{}}
+	s := newSet()
 	for _, n := range list {
 		i, ok := table[n]
 		if !ok {
@@ -177,8 +194,110 @@ func Parse(list []string) (Set, error) {
 	return s, nil
 }
 
-// Allows reports whether name is granted. The empty name is always allowed.
+// Allows reports whether name is granted to the app. The empty name is always
+// allowed. Per-window scopes are not consulted; see AllowsFor.
 func (s Set) Allows(name string) bool { return name == "" || s.names[name] }
+
+// AllowsFor reports whether a call made by the given window may use name: the
+// app grants it and the window's scope, when it has one, does too.
+func (s Set) AllowsFor(window, name string) bool {
+	if !s.Allows(name) {
+		return false
+	}
+	if name == "" || s.sc == nil || window == "" {
+		return true
+	}
+	s.sc.mu.RLock()
+	defer s.sc.mu.RUnlock()
+	sc, ok := s.sc.byWin[window]
+	return !ok || sc[name]
+}
+
+// Scope narrows the permissions of calls made by window to list (names and
+// what they imply). A list may only name permissions the app grants; the
+// first one it does not is returned as a Denied error. An empty, non-nil list
+// leaves the window with nothing.
+func (s Set) Scope(window string, list []string) error {
+	if s.sc == nil {
+		return errors.New("permission: the zero Set cannot scope windows")
+	}
+	narrow, err := Parse(list)
+	if err != nil {
+		return err
+	}
+	if len(list) == 0 {
+		narrow = None()
+	}
+	for n := range narrow.names {
+		if !s.Allows(n) {
+			return Denied(n)
+		}
+	}
+	s.sc.mu.Lock()
+	s.sc.byWin[window] = narrow.names
+	s.sc.mu.Unlock()
+	return nil
+}
+
+// ScopeChild scopes a window that the window caller is opening. With a list
+// (has) the new window gets exactly those permissions, which the caller must
+// itself have; without one it inherits the caller's scope. It reports whether
+// the new window ended up scoped.
+func (s Set) ScopeChild(caller, window string, list []string, has bool) (bool, error) {
+	if s.sc == nil {
+		return false, nil
+	}
+	if !has {
+		names, ok := s.ScopeOf(caller)
+		if !ok {
+			return false, nil
+		}
+		return true, s.Scope(window, names)
+	}
+	narrow, err := Parse(list)
+	if err != nil {
+		return false, err
+	}
+	if len(list) == 0 {
+		narrow = None()
+	}
+	for n := range narrow.names {
+		if !s.AllowsFor(caller, n) {
+			return false, Denied(n)
+		}
+	}
+	return true, s.Scope(window, list)
+}
+
+// Unscope removes the scope of a window (it closed).
+func (s Set) Unscope(window string) {
+	if s.sc == nil {
+		return
+	}
+	s.sc.mu.Lock()
+	delete(s.sc.byWin, window)
+	s.sc.mu.Unlock()
+}
+
+// ScopeOf returns the granted names of a scoped window, sorted, and whether
+// the window has a scope.
+func (s Set) ScopeOf(window string) ([]string, bool) {
+	if s.sc == nil {
+		return nil, false
+	}
+	s.sc.mu.RLock()
+	defer s.sc.mu.RUnlock()
+	sc, ok := s.sc.byWin[window]
+	if !ok {
+		return nil, false
+	}
+	out := make([]string, 0, len(sc))
+	for n := range sc {
+		out = append(out, n)
+	}
+	sort.Strings(out)
+	return out, true
+}
 
 // List returns the granted names, sorted.
 func (s Set) List() []string {
@@ -207,7 +326,13 @@ func Register(r *scheme.Registry, s Set, id string, f scheme.Func) {
 	}
 	r.Trusted(id, f)
 	if s.Allows(row.Permission) {
-		r.Func(id, f)
+		perm := row.Permission
+		r.Func(id, func(ctx krate.Ctx, args *wire.Decoder, out *wire.Encoder) error {
+			if !s.AllowsFor(ctx.Window(), perm) {
+				return Denied(perm)
+			}
+			return f(ctx, args, out)
+		})
 		return
 	}
 	perm := row.Permission

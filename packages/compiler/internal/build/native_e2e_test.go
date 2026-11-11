@@ -139,7 +139,11 @@ type e2eShell struct {
 
 func e2eStartShell(t *testing.T, bin, appDir string, args ...string) *e2eShell {
 	t.Helper()
-	cmd := exec.Command(bin, append(append([]string{"--dev"}, args...), appDir)...)
+	argv := append([]string{"--dev"}, args...)
+	if appDir != "" {
+		argv = append(argv, appDir)
+	}
+	cmd := exec.Command(bin, argv...)
 	cmd.Stderr = &testLogWriter{t: t}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -357,60 +361,8 @@ func TestNativeE2EGUI(t *testing.T) {
 
 	s := e2eStartShell(t, bin, appDir)
 	s.waitReady(60 * time.Second)
-	ready := time.Since(s.start)
 
-	// First page load: the Go host's task list is on screen.
-	for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(50 * time.Millisecond) {
-		var n int
-		err := s.query(`document.querySelectorAll("#list li").length`, &n)
-		if err == nil && n == 1 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("the task list never rendered (n=%d, last query error: %v)", n, err)
-		}
-	}
-	// Process start to the first document's load event, from the page's own
-	// clock (the query polling above would add up to its retry interval).
-	var loadedAt float64
-	if err := s.query(`performance.timeOrigin + performance.getEntriesByType("navigation")[0].loadEventEnd`, &loadedAt); err != nil {
-		t.Fatal(err)
-	}
-	firstLoad := time.Duration((loadedAt - float64(s.start.UnixMilli())) * float64(time.Millisecond))
-	t.Logf("cold start: window ready %s, first page load event %s", ready.Round(time.Millisecond), firstLoad.Round(time.Millisecond))
-
-	var steps []e2eStep
-	if err := s.query(e2eReadFlow(t, "flow_main.js"), &steps); err != nil {
-		t.Fatalf("main flow: %v", err)
-	}
-	e2eCheckSteps(t, steps, 17)
-	e2eFootprint(t, s.cmd.Process.Pid)
-
-	for _, path := range []string{"/tasks/2", "/tasks/77"} {
-		// Navigate from a timer so the query that starts it still answers,
-		// then give the new document time to load before the next query:
-		// a query that races the unload may never be answered.
-		var started bool
-		if err := s.query(fmt.Sprintf(`(setTimeout(() => location.assign(%q), 50), true)`, path), &started); err != nil {
-			t.Fatal(err)
-		}
-		time.Sleep(2 * time.Second)
-		for deadline := time.Now().Add(20 * time.Second); ; time.Sleep(100 * time.Millisecond) {
-			var p string
-			err := s.query(`location.pathname`, &p)
-			if err == nil && p == path {
-				break
-			}
-			if time.Now().After(deadline) {
-				t.Fatalf("never reached %s (path %q, last query error: %v)", path, p, err)
-			}
-		}
-		var task []e2eStep
-		if err := s.query(e2eReadFlow(t, "flow_task.js"), &task); err != nil {
-			t.Fatalf("task flow %s: %v", path, err)
-		}
-		e2eCheckSteps(t, task, 1)
-	}
+	e2eGUIFlows(t, s)
 	if _, err := s.send("quit", 10*time.Second); err != nil {
 		t.Errorf("quit: %v", err)
 	}
@@ -478,5 +430,64 @@ func TestNativeE2EBrowser(t *testing.T) {
 	}
 	if _, err := s.send("quit", 10*time.Second); err != nil {
 		t.Errorf("quit: %v", err)
+	}
+}
+
+// e2eGUIFlows drives the example in a running window through the dev control
+// channel: the first page, the main flow and the dynamic task pages.
+func e2eGUIFlows(t *testing.T, s *e2eShell) {
+	t.Helper()
+	ready := time.Since(s.start)
+	// First page load: the Go host's task list is on screen.
+	for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+		var n int
+		err := s.query(`document.querySelectorAll("#list li").length`, &n)
+		if err == nil && n == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the task list never rendered (n=%d, last query error: %v)", n, err)
+		}
+	}
+	// Process start to the first document's load event, from the page's own
+	// clock (the query polling above would add up to its retry interval).
+	var loadedAt float64
+	if err := s.query(`performance.timeOrigin + performance.getEntriesByType("navigation")[0].loadEventEnd`, &loadedAt); err != nil {
+		t.Fatal(err)
+	}
+	firstLoad := time.Duration((loadedAt - float64(s.start.UnixMilli())) * float64(time.Millisecond))
+	t.Logf("cold start: window ready %s, first page load event %s", ready.Round(time.Millisecond), firstLoad.Round(time.Millisecond))
+
+	var steps []e2eStep
+	if err := s.query(e2eReadFlow(t, "flow_main.js"), &steps); err != nil {
+		t.Fatalf("main flow: %v", err)
+	}
+	e2eCheckSteps(t, steps, 17)
+	e2eFootprint(t, s.cmd.Process.Pid)
+
+	for _, path := range []string{"/tasks/2", "/tasks/77"} {
+		// Navigate from a timer so the query that starts it still answers,
+		// then give the new document time to load before the next query:
+		// a query that races the unload may never be answered.
+		var started bool
+		if err := s.query(fmt.Sprintf(`(setTimeout(() => location.assign(%q), 50), true)`, path), &started); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(2 * time.Second)
+		for deadline := time.Now().Add(20 * time.Second); ; time.Sleep(100 * time.Millisecond) {
+			var p string
+			err := s.query(`location.pathname`, &p)
+			if err == nil && p == path {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("never reached %s (path %q, last query error: %v)", path, p, err)
+			}
+		}
+		var task []e2eStep
+		if err := s.query(e2eReadFlow(t, "flow_task.js"), &task); err != nil {
+			t.Fatalf("task flow %s: %v", path, err)
+		}
+		e2eCheckSteps(t, task, 1)
 	}
 }

@@ -12,13 +12,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
 	"sync"
 
 	"github.com/kratejs/krate/packages/native/gohost"
-	"github.com/kratejs/krate/packages/native/hostjs"
+	"github.com/kratejs/krate/packages/native/krate"
 	"github.com/kratejs/krate/packages/native/platform"
 	"github.com/kratejs/krate/packages/native/scheme"
 	"github.com/kratejs/krate/packages/native/sdk"
@@ -49,6 +50,9 @@ type RunOptions struct {
 	Out io.Writer
 	// Context, when done, quits the app.
 	Context context.Context
+	// GoGlue registers Go host code linked into the process (a release build)
+	// on the app registry, instead of starting a Go host child.
+	GoGlue func(r *scheme.Registry)
 	// Allowed, when set, replaces the manifest's permission set for the UI
 	// half of the SDK (window, dialog, clipboard, ...); the data areas
 	// always follow the manifest. Meant for tests. Default: the manifest's
@@ -80,7 +84,8 @@ func Run(appDir string, opts RunOptions) error {
 
 // app is a loaded app directory.
 type app struct {
-	dir  string
+	dir  string // "" for an embedded app
+	fsys fs.FS  // the app directory
 	opts RunOptions
 	logf func(string, ...any)
 
@@ -89,7 +94,7 @@ type app struct {
 
 	mu    sync.Mutex // guards man, host, child
 	man   *Manifest
-	host  *hostjs.Host
+	host  jsHost
 	child *gohost.Child
 
 	ctl  *Control
@@ -99,6 +104,7 @@ type app struct {
 	dev     *devTools
 	sdk     *sdk.Host
 	perms   permission.Set // from the manifest; read once at load
+	glued   bool           // opts.GoGlue was registered
 }
 
 func load(appDir string, opts RunOptions) (*app, error) {
@@ -106,11 +112,17 @@ func load(appDir string, opts RunOptions) (*app, error) {
 	if err != nil {
 		return nil, err
 	}
-	man, err := ReadManifest(dir)
+	return loadApp(dir, os.DirFS(dir), opts)
+}
+
+// loadApp loads the app held in fsys; dir is its directory on disk, or "" for
+// an embedded app.
+func loadApp(dir string, fsys fs.FS, opts RunOptions) (*app, error) {
+	man, err := ReadManifestFS(fsys)
 	if err != nil {
 		return nil, err
 	}
-	a := &app{dir: dir, opts: opts, logf: opts.Logf, man: man, reg: scheme.NewRegistry()}
+	a := &app{dir: dir, fsys: fsys, opts: opts, logf: opts.Logf, man: man, reg: scheme.NewRegistry()}
 	a.ctl = &Control{a: a}
 	// The data SDK is registered first so that host code cannot shadow its
 	// ids. The permission set is parsed once, here; changing app.json needs a
@@ -118,6 +130,7 @@ func load(appDir string, opts RunOptions) (*app, error) {
 	// attachSDK, and filtered by the same set.
 	set, err := sdkall.Register(a.reg, sdkall.Options{
 		AppID: man.AppID, Name: man.ProductName, Version: man.Version, Permissions: man.Permissions,
+		Strict: man.StrictPermissions,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("shell: registering the SDK: %w", err)
@@ -140,17 +153,22 @@ func load(appDir string, opts RunOptions) (*app, error) {
 		a.close()
 		return nil, err
 	}
-	assets := man.AssetsDir(dir)
-	if st, err := os.Stat(assets); err != nil || !st.IsDir() {
+	assetsFS, err := fs.Sub(fsys, filepath.ToSlash(filepath.Clean(man.Assets)))
+	if err == nil {
+		if st, serr := fs.Stat(assetsFS, "."); serr != nil || !st.IsDir() {
+			err = fmt.Errorf("not a directory")
+		}
+	}
+	if err != nil {
 		a.close()
-		return nil, fmt.Errorf("shell: assets directory %s not found (app.json assets=%q)", assets, man.Assets)
+		return nil, fmt.Errorf("shell: assets directory %q not found in the app (app.json assets=%q)", man.Assets, man.Assets)
 	}
 	var fallback func(string) (string, bool)
 	if len(man.Fallbacks) > 0 {
 		fallback = matcher.Match
 	}
 	so := scheme.Options{
-		Assets:   os.DirFS(assets),
+		Assets:   assetsFS,
 		Registry: a.reg,
 		Dev:      opts.Dev,
 		Fallback: fallback,
@@ -160,7 +178,7 @@ func load(appDir string, opts RunOptions) (*app, error) {
 		so.HMR = a.dev.hmr.serve
 		so.Observe = a.dev.ring.add
 	}
-	app := scheme.New(so)
+	app := windowIDHandler(scheme.New(so))
 	extra := opts.ExtraHandler
 	a.handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if opts.Dev && a.results.serve(w, r) {
@@ -215,7 +233,7 @@ func guard(what string, f func()) (err error) {
 func (a *app) reloadHostJS() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	man, err := ReadManifest(a.dir)
+	man, err := ReadManifestFS(a.fsys)
 	if err != nil {
 		return err
 	}
@@ -224,14 +242,13 @@ func (a *app) reloadHostJS() error {
 	if spec == nil {
 		return nil
 	}
-	bundlePath := filepath.Join(a.dir, filepath.FromSlash(spec.Bundle))
-	bundle, err := os.ReadFile(bundlePath)
+	bundle, err := fs.ReadFile(a.fsys, spec.Bundle)
 	if err != nil {
 		return fmt.Errorf("shell: reading the host bundle: %w", err)
 	}
 	var srcMap []byte
 	if spec.Map != "" {
-		srcMap, err = os.ReadFile(filepath.Join(a.dir, filepath.FromSlash(spec.Map)))
+		srcMap, err = fs.ReadFile(a.fsys, spec.Map)
 		if err != nil {
 			return fmt.Errorf("shell: reading the host source map: %w", err)
 		}
@@ -241,12 +258,7 @@ func (a *app) reloadHostJS() error {
 		if a.opts.Dev {
 			env["NODE_ENV"] = "development"
 		}
-		h, err := hostjs.New(hostjs.Options{
-			Dev:       a.opts.Dev,
-			Env:       env,
-			LogPrefix: "[host] ",
-			Log:       func(msg string) { a.logf("%s", msg) },
-		})
+		h, err := newJSHost(a.opts.Dev, env, a.logf)
 		if err != nil {
 			return err
 		}
@@ -272,14 +284,24 @@ func (a *app) reloadHostJS() error {
 func (a *app) restartGoHost() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	man, err := ReadManifest(a.dir)
+	man, err := ReadManifestFS(a.fsys)
 	if err != nil {
 		return err
 	}
 	a.man = man
+	if g := a.opts.GoGlue; g != nil {
+		if a.glued {
+			return nil
+		}
+		a.glued = true
+		return guard("registering Go host functions", func() { g(a.reg) })
+	}
 	spec := man.GoHost
 	if spec == nil {
 		return nil
+	}
+	if a.dir == "" {
+		return fmt.Errorf("shell: an embedded app cannot start a Go host child; link the Go host code with RunOptions.GoGlue")
 	}
 	binary := filepath.Join(a.dir, filepath.FromSlash(spec.Binary))
 	if _, err := os.Stat(binary); err != nil {
@@ -362,12 +384,21 @@ func (a *app) runNative() error {
 	}
 	var openErr error
 	runErr := platApp.Run(func() {
+		path := man.Window.Path
+		if wp := man.Window.Permissions; wp != nil {
+			if err := a.perms.Scope("main", *wp); err != nil {
+				openErr = fmt.Errorf("shell: window.permissions: %w", err)
+				platApp.Quit()
+				return
+			}
+			path = krate.ScopedPath(path, "main")
+		}
 		win, err := platApp.NewWindow(platform.WindowOptions{
 			Title:     man.Window.Title,
 			Width:     man.Window.Width,
 			Height:    man.Window.Height,
 			Resizable: man.Window.IsResizable(),
-			Path:      man.Window.Path,
+			Path:      path,
 		})
 		if err != nil {
 			openErr = fmt.Errorf("shell: opening the window: %w", err)

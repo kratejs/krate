@@ -57,10 +57,11 @@ permissions decide which ids the UI and TypeScript host code may call.
 | `shortcut` | no | Global keyboard shortcuts |
 
 An empty or missing list means the defaults: the non-sensitive set marked
-"yes" above. The compiler will later derive the list from the SDK calls an app
-can reach and `native.permissions` in the config will narrow it; until then
-list what a sensitive feature needs (`tray`, `shortcut`, `clipboard:read`,
-`fs`, secrets, `shell:openExternal`). A
+"yes" above. `krate native build` writes the list for you: it
+[derives](/docs/native/release/#derived-permissions) the permissions from the
+`@krate/app/<area>` imports and `krate/<area>.<op>` ids the UI and TypeScript
+host code use, and `native.permissions` in the config is an allowlist that fails
+the build (KR7210) when the code needs something it does not list. A
 non-empty list grants exactly what it names (plus what a name implies), so an
 app that lists only `fs` loses `kv` and `db` unless it lists them too. Unknown
 names are an error when the app loads. Permissions are read once at start;

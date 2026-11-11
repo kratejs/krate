@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime/pprof"
 	"syscall"
 	"time"
 
@@ -22,13 +23,20 @@ import (
 // It never returns normally: it exits the process when the parent goes away
 // (stdin EOF), on SIGTERM or interrupt, and with status 1 on a startup error.
 func Serve(register func(*scheme.Registry)) {
+	// The shell passes its own profile path down; the child writes next to it.
+	stopProfile := func() {}
+	if p := os.Getenv(ProfileEnv); p != "" {
+		stopProfile = StartCPUProfileAt(p+".gohost", os.Stderr)
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	err := Run(ctx, register, Config{Socket: os.Getenv(SocketEnv), Stdin: os.Stdin, Ready: os.Stdout})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "krate gohost:", err)
+		stopProfile()
 		os.Exit(1)
 	}
+	stopProfile()
 	os.Exit(0)
 }
 
@@ -93,4 +101,31 @@ func Run(ctx context.Context, register func(*scheme.Registry), cfg Config) error
 	_ = srv.Shutdown(cctx)
 	_ = srv.Close()
 	return nil
+}
+
+// ProfileEnv names the environment variable that asks a Krate process to write
+// a CPU profile to that path when it exits (see shell.ProfileEnv).
+const ProfileEnv = "KRATE_CPUPROFILE"
+
+// StartCPUProfileAt starts a CPU profile written to path and returns the
+// function that stops it. An empty path does nothing; a failure is reported
+// on logw and leaves the process running without a profile.
+func StartCPUProfileAt(path string, logw io.Writer) (stop func()) {
+	if path == "" {
+		return func() {}
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		fmt.Fprintf(logw, "krate: %s: %v\n", ProfileEnv, err)
+		return func() {}
+	}
+	if err := pprof.StartCPUProfile(f); err != nil {
+		f.Close()
+		fmt.Fprintf(logw, "krate: %s: %v\n", ProfileEnv, err)
+		return func() {}
+	}
+	return func() {
+		pprof.StopCPUProfile()
+		f.Close()
+	}
 }

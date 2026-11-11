@@ -87,6 +87,10 @@ type cliFlags struct {
 	WantShell     bool
 	GoHost        bool
 	Browser       bool
+	// Release asks `krate native build` for compiled executables. Targets
+	// holds every --target value (comma-separated lists allowed).
+	Release bool
+	Targets []string
 }
 
 // exitHooks run, last registered first, before the process exits, so the run
@@ -393,6 +397,11 @@ func parseFlagsChecked(args []string) (cliFlags, []string, error) {
 				flags.OutDir = val
 			case "--target":
 				flags.Target = val
+				for _, t := range strings.Split(val, ",") {
+					if t = strings.TrimSpace(t); t != "" {
+						flags.Targets = append(flags.Targets, t)
+					}
+				}
 			case "--out":
 				flags.NativeOut = val
 			case "--shell":
@@ -423,6 +432,8 @@ func parseFlagsChecked(args []string) (cliFlags, []string, error) {
 		switch {
 		case args[i] == "--browser":
 			flags.Browser = true
+		case args[i] == "--release":
+			flags.Release = true
 		case args[i] == "--go":
 			flags.GoHost = true
 		case args[i] == "--static-only":
@@ -1192,6 +1203,20 @@ func runCheck(flags cliFlags, args []string) {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%sCheck error:%s %v\n", cRed, cReset, err)
 		exit(1)
+	}
+
+	if cfg.Native != nil {
+		if res, pd := nativeCapabilities(root, cfg, flags); res != nil {
+			fmt.Printf("\n%s%s  Native capabilities%s\n%s", cBold, cCyan, cReset, indentLines(build.FormatNativeCapabilities(res, nativeAllow(cfg)), "  "))
+			if len(pd) > 0 {
+				errs := make([]error, len(pd))
+				for i, d := range pd {
+					errs[i] = d
+				}
+				fmt.Fprintf(os.Stderr, "%s\n\n%s%s  x Native permission check failed: %d error(s).%s\n", diag.FormatDiagnostics(errs), cBold, cRed, len(pd), cReset)
+				exit(1)
+			}
+		}
 	}
 
 	fopts := check.DefaultFormatOptions()

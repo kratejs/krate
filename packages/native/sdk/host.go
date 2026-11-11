@@ -21,7 +21,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"sync"
 	"time"
@@ -30,15 +29,7 @@ import (
 	"github.com/kratejs/krate/packages/native/platform"
 	"github.com/kratejs/krate/packages/native/platform/caps"
 	"github.com/kratejs/krate/packages/native/scheme"
-	appmod "github.com/kratejs/krate/packages/native/sdk/app"
-	"github.com/kratejs/krate/packages/native/sdk/clipboard"
-	"github.com/kratejs/krate/packages/native/sdk/dialog"
 	"github.com/kratejs/krate/packages/native/sdk/internal/bridge"
-	"github.com/kratejs/krate/packages/native/sdk/menu"
-	"github.com/kratejs/krate/packages/native/sdk/notify"
-	"github.com/kratejs/krate/packages/native/sdk/shortcut"
-	"github.com/kratejs/krate/packages/native/sdk/tray"
-	"github.com/kratejs/krate/packages/native/sdk/window"
 )
 
 // ParentEnv is the environment variable that tells a Go host child where to
@@ -111,14 +102,9 @@ func (h *Host) Attach(app platform.App) {
 	h.attached = true
 	h.env = bridge.NewEnv(app)
 	h.table = bridge.NewTable()
-	dialog.Register(h.table, h.env)
-	clipboard.Register(h.table, h.env)
-	menu.Register(h.table, h.env)
-	tray.Register(h.table, h.env)
-	notify.Register(h.table, h.env)
-	shortcut.RegisterOps(h.table, h.env)
-	window.Register(h.table, h.env)
-	appmod.Register(h.table, h.env, h.supports)
+	for _, a := range areas {
+		a.attach(h)
+	}
 	h.table.RegisterAll(h.parentReg)
 	bridge.SetLocal(h.table)
 }
@@ -132,6 +118,30 @@ func (h *Host) RegisterUI(reg *scheme.Registry, allowed func(permission string) 
 	defer h.mu.Unlock()
 	if h.table != nil {
 		h.table.RegisterUI(reg, allowed, denied)
+	}
+}
+
+// RegisterUIFor is RegisterUI with a per-window check: allowed("", p) says
+// whether the app grants p, and every call is checked again with the id of the
+// calling window (see permission.Set.AllowsFor).
+func (h *Host) RegisterUIFor(reg *scheme.Registry, allowed func(window, permission string) bool, denied func(permission string) error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.table != nil {
+		h.table.RegisterUIFor(reg, allowed, denied)
+	}
+}
+
+// SetWindowScope installs the function the window area calls for every window
+// it opens, to narrow that window's permissions (window.Options.Permissions,
+// or the caller's scope, which a new window inherits). It reports whether the
+// window is scoped, or an error when the list names something the caller does
+// not have. sdk/all sets it from the permission Set.
+func (h *Host) SetWindowScope(f func(caller, window string, permissions []string, has bool) (bool, error)) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.env != nil {
+		h.env.Scope = f
 	}
 }
 
@@ -182,31 +192,13 @@ func (h *Host) supports(c string) bool {
 	if env == nil {
 		return false
 	}
-	_, _, _, cerr := env.Controls("")
-	controls := cerr == nil
-	wayland := runtime.GOOS == "linux" && os.Getenv("WAYLAND_DISPLAY") != ""
-	switch c {
-	case "dialog":
-		_, ok := env.App.(caps.Dialogs)
-		return ok
-	case "clipboard", "clipboard:image", "clipboard:files":
-		_, ok := env.App.(caps.Clipboard)
-		return ok
-	case "menu":
-		_, ok := env.App.(caps.Menus)
-		return ok
-	case "tray":
-		return tray.Available(env)
-	case "notify":
-		return notify.Available(env)
-	case "shortcut":
-		return shortcut.Available(env)
-	case "window":
-		return true
-	case "window:fullscreen", "window:frameless":
-		return controls
-	case "window:alwaysOnTop", "window:position":
-		return controls && !wayland
+	for _, a := range areas {
+		if a.supports == nil {
+			continue
+		}
+		if ok, handled := a.supports(env, c); handled {
+			return ok
+		}
 	}
 	return false
 }

@@ -12,7 +12,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
-	"unsafe"
+
+	"golang.org/x/sys/unix"
 )
 
 // responder receives a handler's response. respond takes ownership of readFD
@@ -157,18 +158,11 @@ func (w *pipeWriter) watch() {
 }
 
 func pollHup(fd int) bool {
-	var pfd struct {
-		fd      int32
-		events  int16
-		revents int16
-	}
-	pfd.fd = int32(fd)
-	_, _, e := syscall.Syscall(syscall.SYS_POLL, uintptr(unsafe.Pointer(&pfd)), 1, 0)
-	if e != 0 {
+	pfd := []unix.PollFd{{Fd: int32(fd)}}
+	if _, err := unix.Poll(pfd, 0); err != nil {
 		return false
 	}
-	const pollErr, pollHupBit = 0x8, 0x10
-	return pfd.revents&(pollErr|pollHupBit) != 0
+	return pfd[0].Revents&(unix.POLLERR|unix.POLLHUP) != 0
 }
 
 // finish runs when the handler returns: it sends headers if the handler

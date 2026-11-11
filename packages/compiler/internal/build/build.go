@@ -198,6 +198,9 @@ type Builder struct {
 	// nativeBaked holds the results of the build functions (`@build`,
 	// `//krate:build`) of a native build; the app module embeds them.
 	nativeBaked bake.Table
+	// nativeGoFiles are the .go files the UI imports (absolute), for the
+	// capability analysis of Go host code.
+	nativeGoFiles []string
 	// nativeOverlays are the source overlays of every host stub (TypeScript
 	// and Go), keyed by absolute module path.
 	nativeOverlays map[string]string

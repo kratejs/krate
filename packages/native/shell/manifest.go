@@ -3,6 +3,7 @@ package shell
 import (
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -37,13 +38,25 @@ type Manifest struct {
 	// app, menu, dialog, notify, clipboard). Unknown names fail at load.
 	Permissions []string `json:"permissions,omitempty"`
 
+	// StrictPermissions makes an empty (or missing) Permissions list mean
+	// "nothing" instead of the defaults. A derived release build sets it.
+	StrictPermissions bool `json:"strictPermissions,omitempty"`
+
 	Debug bool `json:"debug"`
+}
+
+// PermissionSet parses the manifest's permission list.
+func (m *Manifest) PermissionSet() (permission.Set, error) {
+	if m.StrictPermissions && len(m.Permissions) == 0 {
+		return permission.None(), nil
+	}
+	return permission.Parse(m.Permissions)
 }
 
 // HasPermission reports whether the manifest grants a permission, with the
 // defaults for an empty list and implied names resolved.
 func (m *Manifest) HasPermission(name string) bool {
-	set, err := permission.Parse(m.Permissions)
+	set, err := m.PermissionSet()
 	return err == nil && set.Allows(name)
 }
 
@@ -56,6 +69,10 @@ type WindowSpec struct {
 	Resizable *bool `json:"resizable,omitempty"`
 	// Path is the route to open. Default "/".
 	Path string `json:"path"`
+	// Permissions, when present, narrows the SDK permissions the page of the
+	// main window may use to this list (a subset of the app's). An empty
+	// list leaves the page nothing.
+	Permissions *[]string `json:"permissions,omitempty"`
 }
 
 // Fallback maps a route pattern in Krate's segment syntax to the file that
@@ -95,6 +112,16 @@ func ReadManifest(dir string) (*Manifest, error) {
 	return ParseManifest(b, path)
 }
 
+// ReadManifestFS is ReadManifest for an app directory held in a file system
+// (a release build embeds it).
+func ReadManifestFS(fsys fs.FS) (*Manifest, error) {
+	b, err := fs.ReadFile(fsys, ManifestFile)
+	if err != nil {
+		return nil, fmt.Errorf("shell: reading the app manifest: %w", err)
+	}
+	return ParseManifest(b, ManifestFile)
+}
+
 // ParseManifest parses and validates manifest JSON; name is used in errors.
 func ParseManifest(b []byte, name string) (*Manifest, error) {
 	var m Manifest
@@ -129,8 +156,19 @@ func (m *Manifest) normalize() error {
 	if !strings.HasPrefix(m.Window.Path, "/") {
 		return fmt.Errorf("window.path %q must start with /", m.Window.Path)
 	}
-	if _, err := permission.Parse(m.Permissions); err != nil {
+	set, err := m.PermissionSet()
+	if err != nil {
 		return fmt.Errorf("permissions: %w", err)
+	}
+	if wp := m.Window.Permissions; wp != nil {
+		if _, err := permission.Parse(*wp); err != nil {
+			return fmt.Errorf("window.permissions: %w", err)
+		}
+		for _, n := range *wp {
+			if !set.Allows(n) {
+				return fmt.Errorf("window.permissions: %q is not in the app's permissions", n)
+			}
+		}
 	}
 	if m.Assets == "" {
 		m.Assets = "dist"

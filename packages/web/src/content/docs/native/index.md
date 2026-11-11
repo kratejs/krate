@@ -10,9 +10,10 @@ sidebar:
 
 # Krate Native (Preview)
 
-> **Preview.** Krate Native is under construction. `krate native init`, `check`
-> and `build` work today; `dev`, `profile`, `sign`, `notarize` and `doctor` print
-> "not implemented yet". Names and options may change before release.
+> **Preview.** Krate Native is under construction. `krate native init`, `check`,
+> `dev`, `build` (also `--release`) and `profile` work today; `sign`, `notarize`
+> and `doctor` print "not implemented yet". Names and options may change before
+> release.
 
 Krate Native compiles a Krate app into a desktop app. The UI is TSX shown in the
 system webview. Code that must run in the native process, such as file access,
@@ -33,6 +34,8 @@ prerendered at build time.
   build and the manifest the shell reads.
 - [Native SDK: data and system](/docs/native/sdk/) - app directories, files,
   SQLite, key-value storage, secrets and permissions.
+- [Release builds](/docs/native/release/) - one executable per platform, SDK
+  shaking, derived permissions, per-window scopes and profile-guided builds.
 
 ## Quick start
 
@@ -65,11 +68,11 @@ modules it found.
 | `productName`, `version` | none | `version` is semver |
 | `platforms` | `windows`, `macos`, `linux` | |
 | `icons` | none | Path of the source icon |
-| `window` | 1280 x 800, `resizable: true`, `titleBar: "native"` | `titleBar` is `native`, `hidden` or `none` |
-| `permissions` | the SDK defaults | Any of the [SDK permission names](/docs/native/sdk/#permissions); written to `app.json`. Unknown names fail the config check |
+| `window` | 1280 x 800, `resizable: true`, `titleBar: "native"` | `titleBar` is `native`, `hidden` or `none`; `permissions` [narrows](/docs/native/release/#per-window-scopes) the main window's page |
+| `permissions` | no restriction | An optional allowlist of [SDK permission names](/docs/native/sdk/#permissions). A build [derives](/docs/native/release/#derived-permissions) the permissions the code needs, writes them to `app.json`, and fails (KR7210) if one is not listed. Unknown names fail the config check |
 | `deepLinks` | none | URL schemes without `://` |
 | `host` | `runtime: "quickjs"` | `runtime` is `quickjs`, `node`, `bun`, `deno` or `scriptc`; `scriptc` needs `experimental.scriptc: true`; `islands` maps a package to `node`, `bun`, `deno` or `quickjs` |
-| `release` | `compile: "auto"` | `compile` is `auto`, `always` or `never`; `pgo` is a profile path |
+| `release` | `compile: "auto"`, `pgo: "native.pgo"` | `compile` is `auto`, `always` or `never` ([release builds](/docs/native/release/#compile-modes)); `pgo` is the CPU profile `krate native profile` writes and `--release` uses |
 | `bundle` | none | `macos.category`, `windows.publisher`, `windows.installer` (`msix` or `nsis`), `linux.formats` (`deb`, `rpm`, `appimage`) |
 | `updater` | none | `url` (https, may contain `{target}`) and `publicKey`, both required |
 

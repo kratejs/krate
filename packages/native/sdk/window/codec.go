@@ -33,6 +33,10 @@ func encodeOptions(e *wire.Encoder, o Options) {
 	e.Bool(o.HasPosition)
 	e.Key("preventClose")
 	e.Bool(o.PreventClose)
+	if o.HasPermissions {
+		e.Key("permissions")
+		codec.WriteStrings(e, o.Permissions)
+	}
 	e.EndObject()
 }
 
@@ -65,6 +69,9 @@ func decodeOptions(r *codec.R) (o Options) {
 			o.HasPosition = r.Bool()
 		case "preventClose":
 			o.PreventClose = r.Bool()
+		case "permissions":
+			o.Permissions = r.Strings()
+			o.HasPermissions = true
 		default:
 			return false
 		}

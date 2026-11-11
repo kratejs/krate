@@ -31,7 +31,7 @@ func (b *Builder) nativeOutDir() string { return filepath.Join(b.Root, ".krate",
 // code goes to a host bundle, Go host code gets generated glue, and the UI
 // bundlers are armed with stub overlays for both. A web build is untouched.
 func (b *Builder) prepareNativeHost() error {
-	b.nativeHost, b.nativeGo, b.nativeOverlays, b.nativeBaked = nil, nil, nil, nil
+	b.nativeHost, b.nativeGo, b.nativeOverlays, b.nativeBaked, b.nativeGoFiles = nil, nil, nil, nil, nil
 	if !b.NativeTarget {
 		return nil
 	}
@@ -261,6 +261,13 @@ func (b *Builder) prepareNativeGo(p *native.Placement) (*gobind.Result, map[stri
 	if len(imps) == 0 {
 		return nil, nil, nil, nil, nil, nil
 	}
+	seenGo := map[string]bool{}
+	for _, imp := range imps {
+		if !seenGo[imp.File] {
+			seenGo[imp.File] = true
+			b.nativeGoFiles = append(b.nativeGoFiles, imp.File)
+		}
+	}
 	var ds []diag.Diagnostic
 	var in []gobind.Import
 	for _, imp := range imps {
@@ -275,6 +282,9 @@ func (b *Builder) prepareNativeGo(p *native.Placement) (*gobind.Result, map[stri
 		return nil, nil, nil, nil, ds, nil
 	}
 	if !b.onlyGoComponents(imps) {
+		if !goOnPath() {
+			return nil, nil, nil, nil, []diag.Diagnostic{needGoDiag("the UI imports Go host code, which is type-checked and compiled with the Go toolchain")}, nil
+		}
 		if d := checkNativeGoModule(b.Root); d != nil {
 			return nil, nil, nil, nil, []diag.Diagnostic{*d}, nil
 		}

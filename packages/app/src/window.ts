@@ -19,6 +19,10 @@ export interface WindowOptions {
   position?: { x: number; y: number };
   // Deliver "close-requested" instead of closing; call close() to close.
   preventClose?: boolean;
+  // Narrow the SDK permissions the page of this window may use to these
+  // names (a subset of the opening window's). An empty list leaves the page
+  // nothing. Without it the window gets the opening window's permissions.
+  permissions?: string[];
 }
 
 export interface WindowState {

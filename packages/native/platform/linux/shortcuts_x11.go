@@ -13,6 +13,7 @@ import (
 	"github.com/ebitengine/purego"
 	"github.com/kratejs/krate/packages/native/krate"
 	"github.com/kratejs/krate/packages/native/platform/caps"
+	"golang.org/x/sys/unix"
 )
 
 var _ caps.Shortcuts = (*App)(nil)
@@ -256,12 +257,11 @@ func (x *x11) startLoop() error {
 		defer close(x.finished)
 		ev := make([]byte, 192)
 		for {
-			fds := []pollFd{{fd: int32(fd), events: 1}, {fd: int32(x.stopR), events: 1}}
-			_, _, e := syscall.Syscall(syscall.SYS_POLL, uintptr(unsafe.Pointer(&fds[0])), 2, ^uintptr(0))
-			if e != 0 && e != syscall.EINTR {
+			fds := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}, {Fd: int32(x.stopR), Events: unix.POLLIN}}
+			if _, e := unix.Poll(fds, -1); e != nil && e != syscall.EINTR {
 				return
 			}
-			if fds[1].revents != 0 {
+			if fds[1].Revents != 0 {
 				return
 			}
 			x.mu.Lock()
@@ -284,12 +284,6 @@ func (x *x11) startLoop() error {
 		}
 	}()
 	return nil
-}
-
-type pollFd struct {
-	fd      int32
-	events  int16
-	revents int16
 }
 
 // StopShortcuts releases every grab and ends the event loop.

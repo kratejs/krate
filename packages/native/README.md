@@ -11,7 +11,7 @@ The Go module behind Krate's desktop target.
 | `hostjs` | A persistent QuickJS VM that runs an app's TypeScript host code and registers it with `scheme` |
 | `platform` | Windows, macOS and Linux windows and webviews, no cgo |
 | `gohost` | The Go host child: `Serve` for the generated child main, `Child` for the parent that runs and restarts it |
-| `shell` | The shell as a library: app manifest, `Run`, browser mode, dev control. See `shell/README.md` |
+| `shell` | The shell as a library: app manifest, `Run`, `RunEmbedded` and `Main` (release builds), browser mode, dev control. See `shell/README.md` |
 | `sdk/{window,dialog,clipboard,menu,tray,shortcut,notify,app}` | The UI half of the SDK: plain Go functions for host code, forwarded to the shell in dev. `sdk` assembles them for the shell. See the SDK page in the docs |
 | `cmd/krate-shell` | The prebuilt shell binary |
 
@@ -48,6 +48,22 @@ restarts it on demand; signals reconnect with backoff, so the page sees the
 new child's current values without reloading. The child protocol (unix socket
 in `KRATE_GOHOST_SOCKET`, `ready` line, exit on stdin EOF) is in the
 `gohost` package comment.
+
+## Release builds
+
+`krate native build --release` generates a main package that links the shell
+into one executable: `shell.Main(shell.MustZipFS(appZip), glue.Register)`. The app
+directory is embedded as a zip, Go host code is registered in process through
+`RunOptions.GoGlue` (no child), and `--browser`, `--addr` and `--version` are
+the only flags (`--dev` exists only with the `krate_devcontrol` build tag, which
+the end-to-end tests use). Build tags leave code out:
+`krate_no_<area>` for `fs`, `db`, `kv`, `net`, `window`, `dialog`, `clipboard`,
+`menu`, `tray`, `shortcut`, `notify` and `app` (each area registers itself from
+`area_<name>.go`, `sdk/area_<name>.go` and `sdk/all/area_<name>.go`), and
+`krate_no_hostjs` for QuickJS and the TypeScript host. `KRATE_CPUPROFILE=<file>`
+writes a CPU profile on exit. `sdk/ids.json` is the id table the compiler reads
+(`go test ./sdk -run IDsJSON -update-ids` rewrites it; copy it to
+`packages/compiler/internal/native/capability/ids.json`).
 
 ## UI half of the SDK
 
