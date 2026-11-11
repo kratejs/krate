@@ -116,6 +116,33 @@ function main() {
       const direct = run(binary, ['version'], app);
       if (!direct.includes(version)) fail(`the binary reports ${direct.trim()}, expected ${version}`);
 
+      // The shell sits next to the compiler, and the compiler finds it there.
+      const shell = join(app, 'node_modules', '@krate', target.pkg, 'bin', `krate-shell${target.ext}`);
+      if (!existsSync(shell)) fail(`${shell} is missing from the platform package`);
+      if (!isWindows) {
+        try {
+          accessSync(shell, constants.X_OK);
+        } catch {
+          fail(`${shell} was installed without the executable bit`);
+        }
+      }
+      let shellReport;
+      try {
+        shellReport = JSON.parse(run(shell, ['--doctor'], app));
+      } catch (err) {
+        fail(`krate-shell --doctor did not print JSON: ${err.message}`);
+      }
+      if (shellReport.schema !== 1) fail(`krate-shell --doctor reported schema ${shellReport.schema}`);
+      const doctor = spawnSync(binary, ['native', 'doctor', '--json'], { cwd: app, encoding: 'utf8' });
+      let found;
+      try {
+        found = JSON.parse(doctor.stdout).items.find((i) => i.name === 'krate-shell');
+      } catch (err) {
+        fail(`krate native doctor --json did not print JSON: ${err.message}`);
+      }
+      // The webview may be absent on a CI runner; the shell lookup must not be.
+      if (found?.status !== 'ok') fail(`krate native doctor did not find the shell next to krate: ${JSON.stringify(found)}`);
+
       const viaNpx = run('npx', ['--no', 'krate', 'version'], app);
       if (!viaNpx.includes(version)) fail(`npx krate version printed ${viaNpx.trim()}, expected ${version}`);
       run('npx', ['--no', 'krate', 'build'], app);

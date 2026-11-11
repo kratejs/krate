@@ -133,6 +133,17 @@ for (const target of platforms) {
   }
 }
 
+// The compiler finds the Krate Native shell next to itself, so every generated
+// package (when dist-platform/ exists) must hold it beside krate.
+for (const target of platforms) {
+  const binDir = path.join(root, "dist-platform", target.pkg, "bin");
+  if (fs.existsSync(path.join(binDir, `krate${target.ext}`)) && !fs.existsSync(path.join(binDir, `krate-shell${target.ext}`))) {
+    fail(`dist-platform/${target.pkg}/bin has krate${target.ext} but no krate-shell${target.ext}`);
+  }
+  const exec = platformManifest(target, coreVersion).publishConfig?.executableFiles ?? [];
+  if (!exec.includes(`./bin/krate-shell${target.ext}`)) fail(`${target.pkg}: krate-shell${target.ext} is not in executableFiles`);
+}
+
 // 8. The compiler must arrive executable. The mode comes from the packer, not
 // from the file on disk, so this packs each package with the pnpm that publishes
 // it. It runs under the repo root to pick up the pinned packageManager.
@@ -152,6 +163,7 @@ for (const target of platforms.filter((t) => t.os !== "win32")) {
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(path.join(dir, "bin"), { recursive: true });
   fs.writeFileSync(path.join(dir, "bin", "krate"), "binary");
+  fs.writeFileSync(path.join(dir, "bin", "krate-shell"), "binary");
   fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify(platformManifest(target, coreVersion)));
   const packed = spawnSync("pnpm", ["pack"], { cwd: dir, encoding: "utf8", shell: process.platform === "win32" });
   const tgz = fs.readdirSync(dir).find((f) => f.endsWith(".tgz"));
@@ -159,9 +171,11 @@ for (const target of platforms.filter((t) => t.os !== "win32")) {
     fail(`${target.pkg}: pnpm pack failed: ${packed.stderr || packed.stdout}`);
     continue;
   }
-  const mode = tarMode(path.join(dir, tgz), "package/bin/krate");
-  if (mode === undefined || (mode & 0o111) !== 0o111) {
-    fail(`${target.pkg}: bin/krate would be published as ${mode?.toString(8)}, so every install fails with EACCES`);
+  for (const file of ["krate", "krate-shell"]) {
+    const mode = tarMode(path.join(dir, tgz), `package/bin/${file}`);
+    if (mode === undefined || (mode & 0o111) !== 0o111) {
+      fail(`${target.pkg}: bin/${file} would be published as ${mode?.toString(8)}, so every install fails with EACCES`);
+    }
   }
 }
 fs.rmSync(packRoot, { recursive: true, force: true });
