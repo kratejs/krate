@@ -209,3 +209,5 @@ func recv[T any](t testing.TB, ch <-chan T, what string) T {
 		panic("unreachable")
 	}
 }
+
+func bytesReader(b []byte) io.Reader { return bytes.NewReader(b) }
