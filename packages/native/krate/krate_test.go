@@ -193,3 +193,28 @@ func TestConcurrentUpdate(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 }
+
+func TestCapabilities(t *testing.T) {
+	if Supports("test.cap") {
+		t.Fatal("unregistered capability supported")
+	}
+	on := false
+	RegisterCapability("test.cap", func() bool { return on })
+	if Supports("test.cap") {
+		t.Fatal("probe said no")
+	}
+	on = true
+	if !Supports("test.cap") {
+		t.Fatal("probe said yes")
+	}
+	found := false
+	for _, n := range Capabilities() {
+		found = found || n == "test.cap"
+	}
+	if !found {
+		t.Fatal("Capabilities misses it")
+	}
+	if !errors.Is(ErrUnsupported, errors.ErrUnsupported) {
+		t.Fatal("ErrUnsupported is not errors.ErrUnsupported")
+	}
+}

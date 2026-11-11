@@ -7,6 +7,7 @@ import (
 	"net/http/cookiejar"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -414,5 +415,63 @@ func TestRunErrors(t *testing.T) {
 	os.WriteFile(dir+"/app.json", []byte(`{"appId":"a.b","hostjs":{"bundle":"host.js"},"gohost":{"binary":"nope","funcs":["h.add"]}}`), 0o644)
 	if err := Run(dir, RunOptions{Browser: true, Logf: t.Logf}); err == nil {
 		t.Error("missing go host binary: no error")
+	}
+}
+
+func TestParseManifestPermissions(t *testing.T) {
+	m, err := ParseManifest([]byte(`{"appId":"a.b","permissions":["fs","kv","os:secrets"]}`), "app.json")
+	if err != nil || len(m.Permissions) != 3 {
+		t.Fatalf("%+v %v", m, err)
+	}
+	if _, err := ParseManifest([]byte(`{"appId":"a.b","permissions":["fs","root"]}`), "app.json"); err == nil || !strings.Contains(err.Error(), `"root"`) {
+		t.Fatalf("unknown permission: %v", err)
+	}
+	if m, err := ParseManifest([]byte(`{"appId":"a.b"}`), "app.json"); err != nil || len(m.Permissions) != 0 {
+		t.Fatalf("%+v %v", m, err)
+	}
+}
+
+// The SDK is registered for every app: defaults are open, the rest answers
+// permission_denied.
+func TestSDKRegisteredByShell(t *testing.T) {
+	root, cleanup, err := gohosttest.TempDir("shell-sdk-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	app, err := buildTestApp(root, "<!doctype html>hello", false, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, "data"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(root, "cache"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(root, "state"))
+	t.Setenv("APPDATA", filepath.Join(root, "roaming"))
+	t.Setenv("LOCALAPPDATA", filepath.Join(root, "local"))
+	t.Setenv("HOME", root)
+
+	ctl, _ := runBrowser(t, app.dir, newReportSink())
+	jar, _ := cookiejar.New(nil)
+	c := &http.Client{Jar: jar}
+	get(t, c, ctl.URL(), nil)
+	u, _ := url.Parse(ctl.URL())
+	base := "http://" + u.Host
+
+	str := func(s string) func(*wire.Encoder) { return func(e *wire.Encoder) { e.String(s) } }
+	if got := callVia(t, c, base, "krate/os.info", nil); !strings.Contains(got, `"appId":"dev.krate.shelltest"`) || !strings.Contains(got, `"appVersion":"1.0.0"`) {
+		t.Errorf("os.info: %s", got)
+	}
+	if got := callVia(t, c, base, "krate/kv.keys", nil); !strings.Contains(got, `"ok":[]`) {
+		t.Errorf("kv.keys: %s", got)
+	}
+	if got := callVia(t, c, base, "krate/fs.readText", str("x")); !strings.Contains(got, `"code":"permission_denied"`) || !strings.Contains(got, `"permission":"fs:read"`) {
+		t.Errorf("fs.readText: %s", got)
+	}
+	if got := callVia(t, c, base, "krate/permission.query", str("db")); !strings.Contains(got, `"ok":true`) {
+		t.Errorf("permission.query: %s", got)
+	}
+	if got := callVia(t, c, base, "h.tag", nil); !strings.Contains(got, "host-v1") {
+		t.Errorf("host code still works: %s", got)
 	}
 }

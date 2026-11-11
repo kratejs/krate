@@ -1,0 +1,51 @@
+// Package all wires the whole Krate Native SDK into a scheme.Registry. The
+// shell calls Register once per app.
+package all
+
+import (
+	"github.com/kratejs/krate/packages/native/scheme"
+	"github.com/kratejs/krate/packages/native/sdk/db"
+	"github.com/kratejs/krate/packages/native/sdk/fs"
+	"github.com/kratejs/krate/packages/native/sdk/kv"
+	sdknet "github.com/kratejs/krate/packages/native/sdk/net"
+	sdkos "github.com/kratejs/krate/packages/native/sdk/os"
+	"github.com/kratejs/krate/packages/native/sdk/permission"
+)
+
+// Options identify the app and its permissions.
+type Options struct {
+	// AppID, Name and Version come from the manifest. AppID is required and
+	// names every per-app directory and credential.
+	AppID   string
+	Name    string
+	Version string
+	// Permissions is the app.json "permissions" list; empty means defaults.
+	Permissions []string
+}
+
+// Register configures the SDK for the app and registers every UI id on r.
+// An id whose permission is not granted is still registered, as a stub that
+// fails with code "permission_denied", so the UI can tell a missing
+// permission from a typo. It returns the parsed permission set.
+func Register(r *scheme.Registry, o Options) (permission.Set, error) {
+	set, err := permission.Parse(o.Permissions)
+	if err != nil {
+		return permission.Set{}, err
+	}
+	if err := sdkos.Configure(sdkos.App{ID: o.AppID, Name: o.Name, Version: o.Version}); err != nil {
+		return permission.Set{}, err
+	}
+	RegisterAreas(r, set)
+	return set, nil
+}
+
+// RegisterAreas registers every area on r without configuring the app
+// identity (Register does that). Tests use it with a Set of their choice.
+func RegisterAreas(r *scheme.Registry, set permission.Set) {
+	permission.RegisterIn(r, set)
+	sdkos.Register(r, set)
+	fs.Register(r, set)
+	db.Register(r, set)
+	kv.Register(r, set)
+	sdknet.Register(r, set)
+}

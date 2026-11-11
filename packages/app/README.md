@@ -35,8 +35,20 @@ codec and run by `test/shared-vectors.test.ts`. A Go `map` arrives as a plain
 object, not a `Map`; a `Map` or `Set` argument is accepted by Go as an object
 (string keys) / array. Calls with binary arguments are never deduplicated.
 
-## Preliminary modules
+## SDK modules
 
-`@krate/app/os`, `/db` and `/kv` are placeholders that call host functions named
-`krate/os.<Name>`, `krate/db.<Name>` and `krate/kv.<Name>`. Their names and
-signatures will change when the Go SDK backs them.
+These wrap the Go SDK (`packages/native/sdk`). Each call is a host id
+`krate/<area>.<name>`; `packages/native/sdk/ids.go` lists every id with its
+permission and types, and a Go test checks these files against it. The app's
+`permissions` list in `app.json` decides which ids work; a call without its
+permission rejects with `KrateError` code `permission_denied` and
+`data.permission`. See the docs page "Native SDK: data" for the tables.
+
+- `@krate/app/os`: `appDataDir`, `cacheDir`, `configDir`, `logDir`, `tempDir`,
+  `info`, `openExternal`, `secretSet`, `secretGet`, `secretDelete`.
+- `@krate/app/fs`: `readFile`, `readText`, `readDir`, `stat`, `exists`,
+  `writeFile`, `writeText`, `mkdir`, `remove`, `rename` (scoped to the app
+  directories and paths the user granted in a dialog).
+- `@krate/app/db`: `query`, `exec`, `transaction` on the app's SQLite database.
+- `@krate/app/kv`: `get`, `set`, `delete`, `keys`.
+- `@krate/app/permission`: `query`, `isPermissionDenied`, `deniedPermission`.

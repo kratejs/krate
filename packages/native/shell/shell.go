@@ -21,6 +21,7 @@ import (
 	"github.com/kratejs/krate/packages/native/hostjs"
 	"github.com/kratejs/krate/packages/native/platform"
 	"github.com/kratejs/krate/packages/native/scheme"
+	sdkall "github.com/kratejs/krate/packages/native/sdk/all"
 )
 
 // RunOptions configures Run.
@@ -102,6 +103,13 @@ func load(appDir string, opts RunOptions) (*app, error) {
 	}
 	a := &app{dir: dir, opts: opts, logf: opts.Logf, man: man, reg: scheme.NewRegistry()}
 	a.ctl = &Control{a: a}
+	// The SDK is registered first so that host code cannot shadow its ids.
+	// Permissions are read once, here; changing them needs a restart.
+	if _, err := sdkall.Register(a.reg, sdkall.Options{
+		AppID: man.AppID, Name: man.ProductName, Version: man.Version, Permissions: man.Permissions,
+	}); err != nil {
+		return nil, fmt.Errorf("shell: registering the SDK: %w", err)
+	}
 	if err := a.reloadHostJS(); err != nil {
 		a.close()
 		return nil, err
@@ -256,7 +264,12 @@ func (a *app) restartGoHost() error {
 			Logf:   func(format string, args ...any) { a.logf(format, args...) },
 			Prefix: "[gohost] ",
 		})
-		env := []string{"KRATE_APP_DIR=" + a.dir}
+		env := []string{
+			"KRATE_APP_DIR=" + a.dir,
+			"KRATE_APP_ID=" + man.AppID,
+			"KRATE_APP_NAME=" + man.ProductName,
+			"KRATE_APP_VERSION=" + man.Version,
+		}
 		if a.opts.Dev {
 			env = append(env, "KRATE_DEV=1")
 		}

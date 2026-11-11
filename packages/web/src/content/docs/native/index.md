@@ -31,6 +31,8 @@ prerendered at build time.
   and signals from the UI.
 - [The app directory and app.json](/docs/native/app-json/) - the output of a
   build and the manifest the shell reads.
+- [Native SDK: data and system](/docs/native/sdk/) - app directories, files,
+  SQLite, key-value storage, secrets and permissions.
 
 ## Quick start
 
