@@ -5,6 +5,8 @@ package darwin
 import (
 	"errors"
 
+	"github.com/kratejs/krate/packages/native/platform/caps"
+
 	"github.com/ebitengine/purego/objc"
 )
 
@@ -27,6 +29,9 @@ type Window struct {
 	win    objc.ID
 	web    objc.ID
 	closed bool
+
+	ref          uint64
+	preventClose bool
 }
 
 // NewWindow creates a window and returns once it exists. On the main thread
@@ -100,7 +105,7 @@ func (a *App) newWindow(o WindowOptions) (*Window, error) {
 	win.Send(sel("setDelegate:"), a.winDelegate)
 	win.Send(sel("center"))
 
-	w := &Window{app: a, win: win, web: web}
+	w := &Window{app: a, win: win, web: web, ref: nextRef.Add(1)}
 	a.windows[win] = w
 
 	w.load(o.Path)
@@ -127,6 +132,7 @@ func (a *App) windowWillClose(nsWin objc.ID) {
 	}
 	delete(a.windows, nsWin)
 	w.closed = true
+	emitWindow(w, caps.WindowClosed)
 	w.web.Send(sel("stopLoading"))
 	w.web.Send(sel("setNavigationDelegate:"), objc.ID(0))
 	// Release on a later turn: AppKit is still using the window right now.

@@ -20,15 +20,12 @@ func New(opts Options) (App, error) {
 	return winApp{a}, nil
 }
 
-type winApp struct{ a *winplat.App }
-
-func (w winApp) Run(onReady func()) error { return w.a.Run(onReady) }
-func (w winApp) Dispatch(fn func())       { w.a.Dispatch(fn) }
-func (w winApp) Origin() string           { return w.a.Origin() }
-func (w winApp) Quit()                    { w.a.Quit() }
+// winApp embeds the implementation so that its optional capability methods
+// (dialogs, clipboard, menus, window events) are promoted.
+type winApp struct{ *winplat.App }
 
 func (w winApp) NewWindow(o WindowOptions) (Window, error) {
-	win, err := w.a.NewWindow(winplat.WindowConfig{
+	win, err := w.App.NewWindow(winplat.WindowConfig{
 		Title:     o.Title,
 		Width:     o.Width,
 		Height:    o.Height,
