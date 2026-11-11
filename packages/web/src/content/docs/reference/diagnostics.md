@@ -542,6 +542,42 @@ A native app has no HTTP server, so routes under `src/api` have nothing to serve
 
 `"use server"` actions are POSTed to a server. A native app has no server; call an `@host` function (or a Go function) from the UI instead.
 
+### KR7180
+
+**Go function signature cannot be a host call**
+
+A UI file imports an exported Go function and calls it as an async function. The bridge supports an optional first parameter `ctx krate.Ctx`, then the arguments, and one of these result shapes: nothing, `error`, `T`, `(T, error)`, `<-chan T` or `(<-chan T, error)`. A channel result makes the call a stream. Variadic functions, generic functions, a first parameter of `context.Context` (use `krate.Ctx`), `krate.Ctx` anywhere but first, send-only channels, and more than one non-error result are rejected. Change the signature, or wrap the function in one that has a supported shape.
+
+### KR7181
+
+**Go type has no wire mapping**
+
+Values cross the host boundary through generated encoders without reflection, so every parameter, result and field type must map to a wire type. Supported: bool, string, all int, uint and float kinds, `time.Time` (a `Date`), `[]byte` (a `Uint8Array`), structs, slices and arrays, `map[string]T` (also string-kinded named keys), pointers (`T | null`) and named types of these. Rejected: `any` and other interfaces, channels and funcs inside values, complex numbers, `uintptr`, unsafe pointers, maps with non-string keys, embedded pointers, and unexported named types (the generated glue lives in another package and cannot name them). The message gives the path to the offending parameter or field. Replace the type with a concrete one.
+
+### KR7182
+
+**Go package could not be loaded**
+
+The compiler type-checks the Go package behind a `.go` import with the Go toolchain (`go list -export`) and the standard `go/types` package. It failed: the `go` command is missing, the project has no `go.mod`, the package has compile errors, or it is `package main`. Fix the error shown, and check that `go build ./...` works in the project.
+
+### KR7183
+
+**Import from a .go file is not host code**
+
+In a native build a UI import from a `.go` file must name either a Go component (a function in a `*.server.go` / `*.runtime.go` file or marked `//krate:component`) or exported host code: a function with a supported signature, or a package-level variable created with `krate.NewSignal`. Types, constants, other variables, methods and unexported or missing names cannot be imported. Export a function that returns the value instead.
+
+### KR7184
+
+**Go type has a custom marshaler**
+
+A type with `MarshalJSON`, `UnmarshalJSON`, `MarshalText` or `UnmarshalText` encodes itself in a way the generated encoders cannot know, and they do not call encoding/json. Types such as `big.Int`, `netip.Addr` or `uuid.UUID` fall in this group. Convert the value to a plain type (a string, a number or a struct) in the exported function.
+
+### KR7185
+
+**Go import has no valid module id or output location**
+
+Each `.go` file imported by the UI gets a module id: its path relative to the project root without the extension (`src/lib/tasks.go` becomes `src/lib/tasks`), and host calls are named `<module id>.<Name>`. The file must exist inside the project, be a non-test `.go` file, and belong to the project's Go module, and the generated output directory must be inside that module so the glue can import the package.
+
 ### KR7190
 
 **Host function parameter cannot cross the boundary**
