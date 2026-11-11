@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
@@ -21,8 +23,10 @@ import (
 	"github.com/kratejs/krate/packages/native/sdk/app"
 	"github.com/kratejs/krate/packages/native/sdk/clipboard"
 	"github.com/kratejs/krate/packages/native/sdk/dialog"
+	sdkfs "github.com/kratejs/krate/packages/native/sdk/fs"
 	"github.com/kratejs/krate/packages/native/sdk/internal/fakeplat"
 	"github.com/kratejs/krate/packages/native/sdk/menu"
+	sdkos "github.com/kratejs/krate/packages/native/sdk/os"
 	"github.com/kratejs/krate/packages/native/sdk/permission"
 	"github.com/kratejs/krate/packages/native/sdk/shortcut"
 	"github.com/kratejs/krate/packages/native/sdk/window"
@@ -135,6 +139,50 @@ func TestDialogRoundTrip(t *testing.T) {
 	}
 	if m := r.app.MessageOpts[0]; m.Kind != caps.MessageQuestion || m.Title != "Sure?" || !reflect.DeepEqual(m.Buttons, []string{"No", "Yes"}) || m.Default != 1 {
 		t.Fatalf("message options %+v", m)
+	}
+}
+
+func TestDialogPicksAreGrantedToFS(t *testing.T) {
+	r := newRig(t)
+	home := t.TempDir()
+	for _, k := range []string{"XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR"} {
+		t.Setenv(k, "")
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("APPDATA", filepath.Join(home, "r"))
+	t.Setenv("LOCALAPPDATA", filepath.Join(home, "l"))
+	if err := sdkos.Configure(sdkos.App{ID: "com.acme.picked", Version: "1.0.0"}); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	f := filepath.Join(dir, "picked.txt")
+	if err := os.WriteFile(f, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	real, err := filepath.EvalSymlinks(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { sdkfs.Revoke(f); sdkfs.Revoke(filepath.Join(dir, "saved.txt")) })
+	if _, err := sdkfs.Default.Check(f); err == nil {
+		t.Fatal("a file outside the app directories was readable before the user picked it")
+	}
+	r.app.FileResult = []string{f}
+	if _, err := dialog.OpenFile(krate.Background(), dialog.OpenOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := sdkfs.Default.Check(f); err != nil || got != real {
+		t.Fatalf("picked file: %q, %v", got, err)
+	}
+	if _, err := sdkfs.Default.Check(filepath.Join(dir, "other.txt")); err == nil {
+		t.Fatal("a grant for one file must not cover its siblings")
+	}
+	r.app.FileResult = []string{filepath.Join(dir, "saved.txt")}
+	if _, err := dialog.SaveFile(krate.Background(), dialog.SaveOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sdkfs.Default.Check(filepath.Join(dir, "saved.txt")); err != nil {
+		t.Fatalf("save target: %v", err)
 	}
 }
 

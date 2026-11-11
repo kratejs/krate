@@ -32,8 +32,14 @@ import (
 	"unicode/utf8"
 
 	"github.com/kratejs/krate/packages/native/krate"
+	"github.com/kratejs/krate/packages/native/sdk/internal/picked"
 	sdkos "github.com/kratejs/krate/packages/native/sdk/os"
 )
+
+func init() {
+	// What the user picks in a file dialog is theirs to hand to the app.
+	picked.OnPick(func(p string) { _ = Grant(p) })
+}
 
 // MaxReadSize is the largest file ReadFile and ReadText return.
 const MaxReadSize = 64 << 20
