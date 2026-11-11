@@ -32,6 +32,9 @@ func buildNativeFixture(t *testing.T, files map[string]string, native bool) (str
 	cfg := config.Default()
 	cfg.PagesDir = filepath.Join(root, "src", "pages")
 	cfg.OutDir = filepath.Join(root, "dist")
+	// A native build turns view transitions off by default; pin both so the
+	// two outputs differ only by the host overlay.
+	cfg.ViewTransitions = "off"
 	cfg.Resolve(root)
 	b := New(root, cfg)
 	b.NativeTarget = native

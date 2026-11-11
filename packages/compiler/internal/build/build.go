@@ -310,6 +310,14 @@ func (b *Builder) shouldMinifyJS() bool {
 	return b.Cfg.ShouldMinifyJS() && !b.DevMode
 }
 
+// viewTransitionsOff reports whether View Transitions are disabled. A native
+// app is a single window, not a set of documents: unless the config asks for
+// them, they stay off (a cross-document transition aborts the WebKitGTK web
+// process in software-rendered setups).
+func (b *Builder) viewTransitionsOff() bool {
+	return b.Cfg.ViewTransitions == "off" || (b.NativeTarget && b.Cfg.ViewTransitions == "")
+}
+
 // runtimeCommonHead returns the per-page <head> extras: the site runtime config
 // (window.__KRATE_CFG__) for the SPA router, and the View Transitions CSS when
 // enabled. Emitted on every page (production and dev).
@@ -320,7 +328,8 @@ func (b *Builder) runtimeCommonHead() string {
 		// Enables the SPA router's dev warnings (e.g. a layout it could not keep mounted).
 		cfg["dev"] = true
 	}
-	if b.Cfg.ViewTransitions == "off" {
+	off := b.viewTransitionsOff()
+	if off {
 		cfg["viewTransitions"] = false
 	} else {
 		cfg["viewTransitions"] = "auto"
@@ -330,7 +339,7 @@ func (b *Builder) runtimeCommonHead() string {
 		sb.Write(data)
 		sb.WriteString(";</script>\n")
 	}
-	if b.Cfg.ViewTransitions != "off" {
+	if !off {
 		sb.WriteString("<style>@view-transition{navigation:auto}")
 		sb.WriteString("@media (prefers-reduced-motion: reduce){")
 		sb.WriteString("::view-transition-group(*),::view-transition-old(*),::view-transition-new(*){animation:none!important}}")
