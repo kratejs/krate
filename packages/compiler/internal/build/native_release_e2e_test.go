@@ -106,7 +106,9 @@ func TestNativeReleaseExample(t *testing.T) {
 	requireRelease(t)
 	ex := e2eRequireDeps(t)
 	bin, res := e2eBuildRelease(t, ex, filepath.Join(t.TempDir(), "dist-native"))
-	if !res.Manifest.StrictPermissions || len(res.Manifest.Permissions) != 0 {
+	// The example reads its theme from @krate/app/kv, so kv is the only
+	// permission the build derives.
+	if !res.Manifest.StrictPermissions || strings.Join(res.Manifest.Permissions, ",") != "kv" {
 		t.Fatalf("permissions = %v", res.Manifest.Permissions)
 	}
 	app := runReleaseBinary(t, bin)

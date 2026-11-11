@@ -5,6 +5,7 @@ package scheme
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/kratejs/krate/packages/native/krate"
@@ -90,6 +91,53 @@ func (r *Registry) lookupTrusted(name string) (Func, StreamFunc) {
 		s = r.streams[name]
 	}
 	return f, s
+}
+
+// CopyTrusted registers on dst the trusted form (the Trusted twin, else the
+// function itself) of every function and stream of r whose name starts with
+// prefix, skipping names dst already has. It serves a private socket for trusted
+// child processes: they get the ungated implementations, as in-process callers do.
+func (r *Registry) CopyTrusted(dst *Registry, prefix string) {
+	r.mu.RLock()
+	fns := map[string]Func{}
+	sts := map[string]StreamFunc{}
+	for name, f := range r.funcs {
+		if strings.HasPrefix(name, prefix) {
+			if t := r.trusted[name]; t != nil {
+				f = t
+			}
+			fns[name] = f
+		}
+	}
+	for name, s := range r.streams {
+		if strings.HasPrefix(name, prefix) {
+			if t := r.trustedStream[name]; t != nil {
+				s = t
+			}
+			sts[name] = s
+		}
+	}
+	r.mu.RUnlock()
+	dst.mu.Lock()
+	defer dst.mu.Unlock()
+	for name, f := range fns {
+		if _, ok := dst.funcs[name]; ok {
+			continue
+		}
+		if _, ok := dst.streams[name]; ok {
+			continue
+		}
+		dst.funcs[name] = f
+	}
+	for name, s := range sts {
+		if _, ok := dst.funcs[name]; ok {
+			continue
+		}
+		if _, ok := dst.streams[name]; ok {
+			continue
+		}
+		dst.streams[name] = s
+	}
 }
 
 // Func registers a request/response function. It panics on a duplicate name.

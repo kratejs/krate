@@ -87,6 +87,13 @@ func (h *Host) ServeParent() (string, error) {
 	return "unix:" + sock, nil
 }
 
+// ShareWithParent adds the trusted form of the "krate/" ids registered on src
+// (the data areas: fs, db, kv, net, updater) to the private socket, so a
+// JavaScript host child can call them. The UI half is added by Attach.
+func (h *Host) ShareWithParent(src *scheme.Registry) {
+	src.CopyTrusted(h.parentReg, "krate/")
+}
+
 // Attach connects the SDK to the platform app and makes it the process's
 // local dispatch target. Pass nil for a process without a platform (browser
 // mode): every operation then answers krate.ErrUnsupported.

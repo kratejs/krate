@@ -121,3 +121,29 @@ func TestInvokeStreamAndSubscribe(t *testing.T) {
 		t.Fatal("unknown signal")
 	}
 }
+
+// CopyTrusted hands the ungated twins of a prefix to another registry.
+func TestCopyTrusted(t *testing.T) {
+	src := NewRegistry()
+	src.Func("krate/x.gated", func(krate.Ctx, *wire.Decoder, *wire.Encoder) error { return krate.Errorf("permission_denied", "no") })
+	src.Trusted("krate/x.gated", func(ctx krate.Ctx, a *wire.Decoder, out *wire.Encoder) error { out.String("ok"); return nil })
+	src.Func("krate/x.plain", func(ctx krate.Ctx, a *wire.Decoder, out *wire.Encoder) error { out.String("plain"); return nil })
+	src.Func("app.host", func(ctx krate.Ctx, a *wire.Decoder, out *wire.Encoder) error { out.String("host"); return nil })
+	dst := NewRegistry()
+	dst.Func("krate/x.plain", func(ctx krate.Ctx, a *wire.Decoder, out *wire.Encoder) error { out.String("kept"); return nil })
+	src.CopyTrusted(dst, "krate/")
+	fr, err := dst.Invoke(krate.Background(), "krate/x.gated", jsonFrame(t, `[]`))
+	if err != nil || resultJSON(t, fr) != `"ok"` {
+		t.Fatalf("gated: %v %s", err, fr)
+	}
+	if fr, err := dst.Invoke(krate.Background(), "krate/x.plain", jsonFrame(t, `[]`)); err != nil || resultJSON(t, fr) != `"kept"` {
+		t.Fatalf("an existing id was replaced: %v %s", err, fr)
+	}
+	if _, err := dst.Invoke(krate.Background(), "app.host", jsonFrame(t, `[]`)); err == nil {
+		t.Fatal("an id outside the prefix was copied")
+	}
+	// dst serves the trusted form to the UI-less socket too.
+	if f, _ := dst.lookup("krate/x.gated"); f == nil {
+		t.Fatal("not registered as a plain function")
+	}
+}

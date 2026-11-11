@@ -144,6 +144,8 @@ func loadApp(dir string, fsys fs.FS, opts RunOptions) (*app, error) {
 	}
 	a.perms = set
 	a.sdk = sdk.NewHost()
+	// Host children (JavaScript) reach the data SDK through the private socket.
+	a.sdk.ShareWithParent(a.reg)
 	if os.Getenv("KRATE_APP_ID") == "" {
 		os.Setenv("KRATE_APP_ID", man.AppID)
 	}

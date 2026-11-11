@@ -313,6 +313,135 @@ jobs:
         env:
           KRATE_REQUIRE_E2E: "1"
 
+  # Krate Native: vet, tests and the real-window (GUI) tests on each OS. The
+  # macOS and Windows GUI steps have never been run in CI yet, so they are
+  # continue-on-error: they report without blocking until they have proven
+  # stable. Linux runs the GUI under Xvfb and is blocking.
+  native:
+    name: Native (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            gui: ./platform/linux ./sdk/... ./shell
+          - os: macos-latest
+            gui: ./platform/darwin ./sdk/... ./shell
+          - os: windows-latest
+            gui: ./platform/windows ./sdk/... ./shell
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: packages/compiler/go.mod
+          cache: true
+
+      - name: Enable pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+          run_install: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install JS dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Sync framework docs
+        run: node scripts/sync-krate-docs.mjs
+
+      - name: Build JS packages
+        run: pnpm -r --filter '!@krate/web' --filter '!@krate/benchmark' build
+
+      - name: Go vet (native)
+        run: go vet ./...
+        working-directory: packages/native
+
+      - name: Cross-compile the platform layers
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          for t in windows/amd64 windows/arm64 darwin/amd64 darwin/arm64 linux/arm64; do
+            echo "== $t"
+            GOOS=${t%/*} GOARCH=${t#*/} go vet ./...
+            GOOS=${t%/*} GOARCH=${t#*/} go build ./...
+          done
+        working-directory: packages/native
+
+      - name: Go test (race, native)
+        if: matrix.os == 'ubuntu-latest'
+        run: go test -race -gcflags=all=-d=checkptr=0 -p 2 -timeout 20m ./...
+        working-directory: packages/native
+        env:
+          KRATE_REQUIRE_E2E: "1"
+
+      - name: Go test (native)
+        if: matrix.os != 'ubuntu-latest'
+        run: go test -timeout 20m ./...
+        working-directory: packages/native
+        env:
+          KRATE_REQUIRE_E2E: "1"
+
+      - name: Install the Linux webview and Xvfb
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-0 xvfb
+
+      # -p 1: GUI packages share one display and one webview at a time.
+      - name: GUI tests (Linux, Xvfb)
+        if: matrix.os == 'ubuntu-latest'
+        run: xvfb-run -a go test -p 1 -count=1 -timeout 20m ${{ matrix.gui }}
+        working-directory: packages/native
+        env:
+          KRATE_NATIVE_GUI: "1"
+
+      # Never run on a hosted runner before: report, do not block.
+      - name: GUI tests (macOS, Windows)
+        if: matrix.os != 'ubuntu-latest'
+        continue-on-error: true
+        run: go test -p 1 -count=1 -timeout 20m ${{ matrix.gui }}
+        working-directory: packages/native
+        env:
+          KRATE_NATIVE_GUI: "1"
+
+      # The compiler's native tests build the example app and drive the shell.
+      - name: Compiler native tests (Linux, GUI under Xvfb)
+        if: matrix.os == 'ubuntu-latest'
+        run: xvfb-run -a go test -p 1 -count=1 -timeout 20m -run 'TestNativeE2EGUI|GUI' ./internal/build
+        working-directory: packages/compiler
+        env:
+          KRATE_NATIVE_GUI: "1"
+          KRATE_REQUIRE_E2E: "1"
+
+      - name: Cache Playwright browsers
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-chromium-${{ hashFiles('pnpm-lock.yaml') }}
+
+      - name: Install chromium
+        if: matrix.os == 'ubuntu-latest'
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Native end-to-end in the browser (chromium)
+        if: matrix.os == 'ubuntu-latest'
+        run: go test -p 1 -count=1 -timeout 20m -run 'TestNativeE2E|TestNativeDevSession|TestNativeRelease' -v ./internal/build
+        working-directory: packages/compiler
+        env:
+          KRATE_BROWSER: chromium
+          KRATE_REQUIRE_E2E: "1"
+
   node-versions:
     name: Node ${{ matrix.node }}
     runs-on: ubuntu-latest
