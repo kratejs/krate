@@ -14,6 +14,7 @@ const labels = {
   supported: "Supported",
   partial: "Partial",
   planned: "Planned",
+  untested: "Untested",
   "n/a": "n/a",
 };
 
@@ -34,7 +35,7 @@ const lines = [
   "---",
   "title: Compatibility Matrix",
   "order: 6",
-  "description: The public Krate compatibility matrix for React source components, Preact islands, SSR, and the browser conformance corpus.",
+  "description: The public Krate compatibility matrix for React source components, Preact islands, SSR, the browser conformance corpus, and Krate Native per operating system.",
   "---",
   "",
   "# Compatibility Matrix",
@@ -53,6 +54,8 @@ const lines = [
   "- **Supported** - implemented and backed by the tests listed under Evidence, which run in CI; edge cases may still change before v1.",
   "- **Partial** - a documented subset works; unsupported patterns must produce a diagnostic.",
   "- **Planned** - not part of the supported surface yet.",
+  "- **Untested** - Krate Native only: the code exists and builds for that OS, but no test has run there. The row's known limits say what has and has not been checked.",
+  "- **n/a** - not applicable; for Krate Native it can mean the API answers `ErrUnsupported` on that OS.",
   "",
   "## Surfaces",
   "",
@@ -60,20 +63,53 @@ const lines = [
   "|---|---|---|---|---|",
 ];
 
-for (const row of matrix.rows) {
+const webRows = matrix.rows.filter((row) => row.native === undefined);
+const nativeRows = matrix.rows.filter((row) => row.native !== undefined);
+
+for (const row of webRows) {
   lines.push(
     `| ${cell(row.area)} | ${status(row.source)} | ${status(row.islands)} | ${status(row.ssr)} | ${cell(row.target)} |`,
   );
+}
+
+if (nativeRows.length > 0) {
+  lines.push(
+    "",
+    "## Krate Native",
+    "",
+    "Krate Native is verified on Linux (GTK 3 and WebKitGTK 4.1 through purego, under",
+    "Xvfb, with a private D-Bus session and fake desktop services). The macOS and",
+    "Windows platform layers compile for their targets and have unit tests for the",
+    "parts that do not need a window, but no test has driven a real WKWebView or",
+    "WebView2 window yet, so those columns say Untested rather than Supported. The",
+    "CI `native` job runs the GUI tests on macOS and Windows without blocking; a",
+    "green run there is what moves a cell.",
+    "",
+    "| Surface | Linux | macOS | Windows | v1 target |",
+    "|---|---|---|---|---|",
+  );
+  for (const row of nativeRows) {
+    lines.push(
+      `| ${cell(row.area)} | ${status(row.native.linux)} | ${status(row.native.macos)} | ${status(row.native.windows)} | ${cell(row.target)} |`,
+    );
+  }
 }
 
 lines.push("", "## Details", "");
 
 for (const row of matrix.rows) {
   lines.push(`### ${row.area}`, "");
-  lines.push(
-    `**Source:** ${status(row.source)} - **Islands:** ${status(row.islands)} - **SSR:** ${status(row.ssr)}`,
-    "",
-  );
+  if (row.native !== undefined) {
+    lines.push(
+      `**Linux:** ${status(row.native.linux)} - **macOS:** ${status(row.native.macos)} - **Windows:** ${status(row.native.windows)}`,
+      "",
+    );
+  } else {
+    lines.push(
+      `**Source:** ${status(row.source)} - **Islands:** ${status(row.islands)} - **SSR:** ${status(row.ssr)}`,
+      "",
+    );
+  }
   lines.push(row.summary, "");
   if (Array.isArray(row.knownLimits) && row.knownLimits.length > 0) {
     lines.push("Known limits:", "");

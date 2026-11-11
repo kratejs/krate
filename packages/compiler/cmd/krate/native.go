@@ -24,7 +24,7 @@ import (
 
 // nativeStubs are the `krate native` subcommands that exist in the command
 // surface but are not built yet.
-var nativeStubs = []string{"doctor"}
+var nativeStubs = []string{}
 
 func printNativeUsage(w io.Writer) {
 	fmt.Fprintf(w, "Usage: krate native <command> [dir] [flags]\n\n")
@@ -33,19 +33,20 @@ func printNativeUsage(w io.Writer) {
 	fmt.Fprintf(w, "  check      Check host code placement and native target restrictions\n")
 	fmt.Fprintf(w, "  init       Create a native app in a directory (--go adds Go host code)\n")
 	fmt.Fprintf(w, "  dev        Run the app with hot reload (--browser serves it on a loopback port)\n")
-	fmt.Fprintf(w, "  build      Build the app directory (dist-native/app) the shell runs, or with --release\n")
+	fmt.Fprintf(w, "  build      Build the app directory (dist-native/app) the shell runs, plus a runnable\n")
+	fmt.Fprintf(w, "             dist-native/<os>-<arch>/<name> + app/ when a prebuilt shell is found; with --release\n")
 	fmt.Fprintf(w, "             one executable per target (dist-native/<os>-<arch>/<name>)\n")
 	fmt.Fprintf(w, "  profile    Run the app, collect a CPU profile and save it for optimized builds\n")
 	fmt.Fprintf(w, "  package    Make installers and update files: .app/.zip/.dmg, .zip/NSIS/MSIX, .tar.gz/.deb/.rpm/AppImage\n")
 	fmt.Fprintf(w, "  sign       Sign the packaged app (codesign, signtool/osslsigncode, gpg) and rebuild the archives\n")
 	fmt.Fprintf(w, "  notarize   Notarize and staple the signed macOS app\n")
 	fmt.Fprintf(w, "  keygen     Create the Ed25519 key pair that signs update files\n")
-	fmt.Fprintf(w, "  doctor     Check the native toolchain (not implemented yet)\n\n")
+	fmt.Fprintf(w, "  doctor     Check the Go toolchain, shell binary, system webview, packaging tools and host runtime (--json)\n\n")
 	fmt.Fprintf(w, "Build flags:\n")
 	fmt.Fprintf(w, "  --out <dir>      Output directory (default dist-native); the app is <dir>/app\n")
 	fmt.Fprintf(w, "  --target <o/a>   Platform of the Go host, for example linux/arm64\n")
-	fmt.Fprintf(w, "  --shell <path>   Copy a shell binary next to the app (\"auto\" builds the monorepo shell\n")
-	fmt.Fprintf(w, "                   or uses $KRATE_SHELL)\n")
+	fmt.Fprintf(w, "  --shell <path>   Copy a shell binary next to the app. Without it the shell is $KRATE_SHELL or the\n")
+	fmt.Fprintf(w, "                   krate-shell next to the krate executable (\"auto\" also builds the checkout's shell)\n")
 	fmt.Fprintf(w, "  --release        Link one executable per target (needs Go); --target takes several,\n")
 	fmt.Fprintf(w, "                   comma-separated or repeated\n")
 	fmt.Fprintf(w, "  --package        Package the build for --target; with --release, each of the targets (see: krate native package)\n")
@@ -60,7 +61,7 @@ func printNativeUsage(w io.Writer) {
 	fmt.Fprintf(w, "\nDev flags:\n")
 	fmt.Fprintf(w, "  --browser        No window: print a tokenized http://127.0.0.1 URL instead\n")
 	fmt.Fprintf(w, "  --port <n>       Browser-mode port (default: any free port)\n")
-	fmt.Fprintf(w, "  --shell <path>   Shell binary (default: $KRATE_SHELL, or a build of the monorepo shell)\n")
+	fmt.Fprintf(w, "  --shell <path>   Shell binary (default: $KRATE_SHELL, the krate-shell next to krate, or a build of the checkout shell)\n")
 }
 
 func runNative(flags cliFlags, args []string) {
@@ -96,6 +97,9 @@ func runNative(flags cliFlags, args []string) {
 		return
 	case "keygen":
 		runNativeKeygen(flags)
+		return
+	case "doctor":
+		runNativeDoctor(flags, append([]string{"native"}, args[2:]...))
 		return
 	}
 	for _, s := range nativeStubs {
@@ -289,7 +293,7 @@ func runNativeBuild(flags cliFlags, args []string) {
 		return
 	}
 	res, err := builder.BuildNativeApp(build.NativeAppOptions{
-		OutDir: outDir, Target: flags.Target, Shell: flags.Shell, WantShell: flags.WantShell, Derive: true,
+		OutDir: outDir, Target: flags.Target, Shell: flags.Shell, WantShell: flags.WantShell, Derive: true, Distribute: true,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%sBuild error:%s %s\n", cRed, cReset, build.BuildErrorSummary(err))
@@ -321,7 +325,10 @@ func runNativeBuild(flags cliFlags, args []string) {
 		fmt.Printf("    dynamic      %d route(s)\n", len(m.Fallbacks))
 	}
 	fmt.Printf("\n%s%s  Done! (built in %s)%s\n", cBold, cGreen, time.Since(start).Round(time.Millisecond), cReset)
-	if res.ShellPath != "" {
+	if res.DistExe != "" {
+		fmt.Printf("  distributable: %s (the shell as %s, with app/ next to it)\n", rel(filepath.Dir(res.DistExe)), filepath.Base(res.DistExe))
+		fmt.Printf("  run it with: %s\n", rel(res.DistExe))
+	} else if res.ShellPath != "" {
 		fmt.Printf("  run it with: %s %s\n", rel(res.ShellPath), rel(res.AppDir))
 	} else {
 		fmt.Printf("  run it with: krate-shell %s\n", rel(res.AppDir))
@@ -375,6 +382,8 @@ func runNativeRelease(builder *build.Builder, root, outDir string, flags cliFlag
 		for _, b := range res.Binaries {
 			fmt.Printf("    %-12s %s (%s)\n", b.Target, rel(b.Path), build.FormatBytes(b.Size))
 		}
+	} else if res.Distribution != "" {
+		fmt.Printf("    app          %s (prebuilt-shell layout; run %s)\n", rel(res.Distribution), rel(res.Binaries[0].Path))
 	} else {
 		fmt.Printf("    app          %s (prebuilt-shell layout; run it with krate-shell)\n", rel(res.AppDir))
 	}

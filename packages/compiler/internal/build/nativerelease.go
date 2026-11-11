@@ -99,8 +99,11 @@ type NativeReleaseResult struct {
 	Compiled bool
 	Binaries []NativeBinary
 	AppDir   string
-	Manifest NativeManifest
-	Report   *NativeReport
+	// Distribution is the runnable <out>/<os>-<arch>/ directory of the
+	// prebuilt-shell layout, "" when there was no shell to build it around.
+	Distribution string
+	Manifest     NativeManifest
+	Report       *NativeReport
 	// Tags are the go build tags of the executables (the shaken SDK areas).
 	Tags []string
 	// PGO is the profile passed to go build, "" when none.
@@ -217,13 +220,27 @@ func (b *Builder) BuildNativeRelease(opts NativeReleaseOptions) (*NativeReleaseR
 		if len(targets) > 1 {
 			res.Notes = append(res.Notes, "the prebuilt-shell layout holds one platform; using "+first[0]+"/"+first[1])
 		}
-		ar, err := b.BuildNativeApp(NativeAppOptions{OutDir: outDir, Target: first[0] + "/" + first[1], Derive: true})
+		ar, err := b.BuildNativeApp(NativeAppOptions{OutDir: outDir, Target: first[0] + "/" + first[1], Derive: true, Distribute: true})
 		if err != nil {
 			return nil, err
 		}
 		res.AppDir, res.Manifest = ar.AppDir, ar.Manifest
 		res.Notes = append(res.Notes, ar.Notes...)
-		res.Report = b.nativeReport(ar, "app-dir", nil, nil, "")
+		var bins []NativeBinary
+		if ar.DistExe != "" {
+			// The runnable distributable <out>/<os>-<arch>/: the prebuilt
+			// shell under the product name, app/ next to it.
+			st, err := os.Stat(ar.DistExe)
+			if err != nil {
+				return nil, err
+			}
+			res.Distribution = filepath.Dir(ar.DistExe)
+			bins = append(bins, NativeBinary{Target: first[0] + "/" + first[1], Path: ar.DistExe, Size: st.Size()})
+			res.Binaries = bins
+		} else {
+			res.Notes = append(res.Notes, "no krate-shell binary to build a runnable distributable around ("+errNoShell("").Error()+")")
+		}
+		res.Report = b.nativeReport(ar, "app-dir", bins, nil, "")
 		return res, b.writeNativeReport(outDir, res)
 	}
 

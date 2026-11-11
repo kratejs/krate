@@ -13,7 +13,10 @@ The Go module behind Krate's desktop target.
 | `gohost` | The Go host child: `Serve` for the generated child main, `Child` for the parent that runs and restarts it |
 | `shell` | The shell as a library: app manifest, `Run`, `RunEmbedded` and `Main` (release builds), browser mode, dev control. See `shell/README.md` |
 | `sdk/{window,dialog,clipboard,menu,tray,shortcut,notify,app}` | The UI half of the SDK: plain Go functions for host code, forwarded to the shell in dev. `sdk` assembles them for the shell. See the SDK page in the docs |
-| `cmd/krate-shell` | The prebuilt shell binary |
+| `cmd/krate-shell` | The prebuilt shell binary. `krate-shell --doctor` prints a JSON report of the system webview and display; it ships in the `@krate/core-<platform>` packages next to `krate` |
+| `platform/probe` | The result type of that webview probe, shared by the per-OS platform packages |
+
+Size, start-up and memory budgets are in `budgets.json`; see `BUDGETS.md`.
 
 The module never uses cgo. It cross-compiles from any OS with
 `CGO_ENABLED=0`.

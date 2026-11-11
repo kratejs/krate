@@ -108,27 +108,25 @@ func NativeHMRMessage(ev DevEvent) []byte {
 	return data
 }
 
-// LocateNativeShell finds the shell binary for a project: the explicit path,
-// $KRATE_SHELL, or (inside a Krate checkout) a build of packages/native/cmd/
-// krate-shell kept in <root>/.krate/native/bin and rebuilt when its sources
-// are newer. Released @krate/core packages will ship a prebuilt shell; until
-// then outside a checkout the shell must be given explicitly.
+// LocateNativeShell finds the shell binary for a project, in this order: the
+// explicit path (--shell), $KRATE_SHELL, a krate-shell next to the running
+// krate executable (where the @krate/core-<platform> package puts it), and
+// inside a Krate checkout a build of packages/native/cmd/krate-shell kept in
+// <root>/.krate/native/bin and rebuilt when its sources are newer.
 func LocateNativeShell(root, override string) (string, error) {
-	if override == "" || override == "auto" {
-		override = os.Getenv("KRATE_SHELL")
+	path, _, err := FindPrebuiltShell(override, runtime.GOOS, runtime.GOARCH)
+	if err != nil {
+		return "", err
 	}
-	if override != "" && override != "auto" {
-		if st, err := os.Stat(override); err != nil || st.IsDir() {
-			return "", fmt.Errorf("the shell binary %s does not exist", override)
-		}
-		return override, nil
+	if path != "" {
+		return path, nil
 	}
 	mod := FindMonorepoNative(root)
 	if mod == "" {
-		return "", errors.New("no shell binary: pass --shell <path> or set KRATE_SHELL (the prebuilt shell ships with @krate/core in a later release)")
+		return "", errNoShell("")
 	}
 	if _, err := os.Stat(filepath.Join(mod, "cmd", "krate-shell")); err != nil {
-		return "", errors.New("no shell binary: packages/native/cmd/krate-shell does not exist in this checkout")
+		return "", errNoShell("packages/native/cmd/krate-shell does not exist in this checkout")
 	}
 	exe := "krate-shell"
 	if runtime.GOOS == "windows" {
@@ -150,6 +148,19 @@ func LocateNativeShell(root, override string) (string, error) {
 		return "", fmt.Errorf("building the native shell: %s", trimTail(strings.TrimSpace(buf.String()), 8))
 	}
 	return bin, nil
+}
+
+// CachedMonorepoShell returns the shell built from a Krate checkout into
+// <root>/.krate/native/bin by an earlier krate native dev, or "".
+func CachedMonorepoShell(root string) string {
+	if FindMonorepoNative(root) == "" {
+		return ""
+	}
+	p := filepath.Join(root, ".krate", "native", "bin", ShellFileName(runtime.GOOS))
+	if isFile(p) {
+		return p
+	}
+	return ""
 }
 
 // nativeShellStale reports whether bin is missing or older than any Go source

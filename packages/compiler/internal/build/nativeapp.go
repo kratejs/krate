@@ -114,6 +114,9 @@ type NativeAppOptions struct {
 	// copy, "auto" or "" to use KRATE_SHELL or build the monorepo shell.
 	Shell     string
 	WantShell bool
+	// Distribute is set by `krate native build`: a shell that needs no build
+	// (see FindPrebuiltShell) is then provided without being asked for.
+	Distribute bool
 	// SkipGoCompile writes the Go host program but does not compile it.
 	SkipGoCompile bool
 	// Dev marks a `krate native dev` build: the manifest enables the
@@ -140,6 +143,9 @@ type NativeAppResult struct {
 	HostGroups []hostts.Group
 	// ShellPath is the shell binary copied or built next to the app.
 	ShellPath string
+	// DistExe is the renamed shell of the runnable distributable
+	// <out>/<os>-<arch>/ (with app/ next to it), "" without a shell.
+	DistExe string
 	// Notes are non-fatal remarks (for example a shell that could not be built).
 	Notes []string
 	// Capabilities is the capability analysis of a Derive build.
@@ -368,11 +374,27 @@ func (b *Builder) BuildNativeApp(opts NativeAppOptions) (*NativeAppResult, error
 	}
 	res.Manifest = m
 
-	if opts.WantShell || opts.Shell != "" || os.Getenv("KRATE_SHELL") != "" {
+	// A shell that needs no build (an explicit one, $KRATE_SHELL, or the one
+	// next to the krate executable) is always provided, so the build leaves a
+	// runnable distributable; building one from a checkout needs a request.
+	want := opts.WantShell || opts.Shell != ""
+	if !want && opts.Distribute {
+		if p, _, _ := FindPrebuiltShell("", goos, goarch); p != "" {
+			want = true
+		}
+	}
+	if want {
 		path, note := b.provideShell(outDir, opts.Shell, goos, goarch)
 		res.ShellPath = path
 		if note != "" {
 			res.Notes = append(res.Notes, note)
+		}
+		if path != "" {
+			dist, err := assembleShellDist(outDir, appDir, path, m.ProductName, goos, goarch)
+			if err != nil {
+				return nil, fmt.Errorf("assembling the distributable: %w", err)
+			}
+			res.DistExe = dist
 		}
 	}
 	return res, nil
@@ -488,16 +510,13 @@ func trimTail(s string, n int) string {
 // provideShell copies or builds a shell binary into outDir. A failure is
 // reported as a note, never as a build error.
 func (b *Builder) provideShell(outDir, want, goos, goarch string) (string, string) {
-	exe := ""
-	if goos == "windows" {
-		exe = ".exe"
+	dst := filepath.Join(outDir, ShellFileName(goos))
+	path, _, err := FindPrebuiltShell(want, goos, goarch)
+	if err != nil {
+		return "", err.Error()
 	}
-	if want == "" || want == "auto" {
-		want = os.Getenv("KRATE_SHELL")
-	}
-	if want != "" && want != "auto" {
-		dst := filepath.Join(outDir, "krate-shell"+exe)
-		if err := copyNativeFile(want, dst); err != nil {
+	if path != "" {
+		if err := copyNativeFile(path, dst); err != nil {
 			return "", "could not copy the shell binary: " + err.Error()
 		}
 		_ = os.Chmod(dst, 0o755)
@@ -505,12 +524,11 @@ func (b *Builder) provideShell(outDir, want, goos, goarch string) (string, strin
 	}
 	mod := FindMonorepoNative(b.Root)
 	if mod == "" {
-		return "", "no shell binary: set KRATE_SHELL or pass --shell <path>"
+		return "", errNoShell("").Error()
 	}
 	if _, err := os.Stat(filepath.Join(mod, "cmd", "krate-shell")); err != nil {
-		return "", "no shell binary: packages/native/cmd/krate-shell does not exist in this checkout"
+		return "", errNoShell("packages/native/cmd/krate-shell does not exist in this checkout").Error()
 	}
-	dst := filepath.Join(outDir, "krate-shell"+exe)
 	cmd := exec.Command("go", "build", "-trimpath", "-o", dst, "./cmd/krate-shell")
 	cmd.Dir = mod
 	cmd.Env = append(os.Environ(), "GOOS="+goos, "GOARCH="+goarch)

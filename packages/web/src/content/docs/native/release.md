@@ -115,9 +115,9 @@ Where the main package lives depends on the app:
 
 | Value | Behavior |
 |-------|----------|
-| `auto` (default) | Link executables when `go` is on `PATH`; otherwise build the prebuilt-shell app directory (`dist-native/app`) and say so. |
+| `auto` (default) | Link executables when `go` is on `PATH`; otherwise build the prebuilt-shell layout (`dist-native/<os>-<arch>/<productName>` plus `app/`, or just `dist-native/app` when no shell is found) and say so. |
 | `always` | Link executables; without Go, fail with [KR7212](/docs/reference/diagnostics/#kr7212). |
-| `never` | Always build the prebuilt-shell app directory, as `krate native build` does. |
+| `never` | Always build the prebuilt-shell layout, as `krate native build` does. |
 
 An app with Go host code always needs Go, in every mode (KR7212): the Go host is
 type-checked and compiled with the toolchain. A compile error in the release

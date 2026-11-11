@@ -25,9 +25,14 @@ machine. A few formats need a platform tool; the table says which.
 1. A **release executable**: `dist-native/<os>-<arch>/<productName>[.exe]`, one
    binary with the app embedded (`krate native build --release`). Anything
    else in that directory is shipped next to it.
-2. The **prebuilt shell**: `dist-native/krate-shell[.exe]` next to
-   `dist-native/app/` (`krate native build --shell auto`). The shell finds
-   `app/` next to itself, or in `Contents/Resources/app` inside a macOS bundle.
+2. The **prebuilt shell**: `dist-native/<os>-<arch>/<productName>[.exe]`, the
+   `krate-shell` binary under the product name, with `app/` next to it. `krate
+   native build` writes this when it finds a shell (see
+   [Finding the shell](/docs/native/dev/#finding-the-shell)), and so does
+   `krate native build --release` when it falls back to the prebuilt-shell
+   layout. No Go toolchain is needed. The shell finds `app/` next to itself, or
+   in `Contents/Resources/app` inside a macOS bundle. The older pair
+   `dist-native/krate-shell[.exe]` next to `dist-native/app/` is still packaged.
 
 The executable's header is checked against `--target`, so a Linux binary is
 never packaged as a Windows app. With neither layout present the command stops

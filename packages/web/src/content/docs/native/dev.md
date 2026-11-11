@@ -71,10 +71,19 @@ values are not recorded.
 
 ## Finding the shell
 
-In order: `--shell <path>`, `$KRATE_SHELL`, and, inside a Krate checkout, a
-build of `packages/native/cmd/krate-shell` kept in `.krate/native/bin` and
-rebuilt when its sources are newer. Published `@krate/core` packages will ship
-the shell later; until then outside a checkout pass `--shell`.
+In order:
+
+1. `--shell <path>`;
+2. `$KRATE_SHELL`;
+3. a `krate-shell` (`krate-shell.exe` on Windows) in the directory of the
+   running `krate` executable, with symlinks resolved. The
+   `@krate/core-<platform>` npm packages put the shell there, next to `krate`,
+   so an installed `@krate/core` needs no setup;
+4. inside a Krate checkout, a build of `packages/native/cmd/krate-shell` kept in
+   `.krate/native/bin` and rebuilt when its sources are newer.
+
+With none of these `krate native dev` stops and lists them. `krate native doctor`
+shows which shell was found and whether the webview it needs is installed.
 
 ## Limitations
 

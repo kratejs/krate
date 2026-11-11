@@ -3,6 +3,11 @@
 // UI, runs the app's host code and, in dev, takes commands on stdin.
 //
 //	krate-shell [--browser] [--addr 127.0.0.1:0] [--dev] [appDir]
+//	krate-shell --doctor
+//
+// --doctor prints one line of JSON about the system webview (library
+// versions and paths, display availability) and exits; krate native doctor
+// calls it.
 //
 // Without appDir the app is expected next to the binary: <exe dir>/app, or
 // ../Resources/app inside a macOS .app bundle.
@@ -39,8 +44,10 @@ func run() int {
 	browser := fs.Bool("browser", false, "serve on a loopback port behind a session token instead of opening a window")
 	addr := fs.String("addr", "127.0.0.1:0", "browser-mode listen address")
 	dev := fs.Bool("dev", false, "development mode: developer tools, stack traces, and control commands on stdin")
+	doctor := fs.Bool("doctor", false, "print a JSON report of the system webview and display, then exit")
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: krate-shell [--browser] [--addr 127.0.0.1:0] [--dev] [appDir]")
+		fmt.Fprintln(os.Stderr, "       krate-shell --doctor")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(os.Args[1:]); err != nil {
@@ -48,6 +55,13 @@ func run() int {
 			return 0
 		}
 		return 2
+	}
+	if *doctor {
+		if err := shell.WriteDoctor(ctlOut); err != nil {
+			fmt.Fprintln(os.Stderr, "krate-shell:", err)
+			return 1
+		}
+		return 0
 	}
 	if fs.NArg() > 1 {
 		fs.Usage()
