@@ -112,3 +112,32 @@ With `generateStaticParams`, those parameters are prerendered as their own files
 and the shell is still written for all other values. Set
 `export const dynamicParams = false` to close the set: no shell and no
 fallback, only the listed parameters.
+
+### Navigation and view transitions
+
+Use `<Link>` for navigation inside the app: it is a soft navigation that keeps
+the window and the host connections, as on the web. A plain `<a href>` is a full
+page load. A native build turns View Transitions off unless `krate.config.ts`
+sets `viewTransitions` itself, because a cross-document transition aborts the
+WebKitGTK web process in software-rendered setups.
+
+## Footprint (Linux, measured)
+
+Measured with the `examples/native-tasks` app on Linux x86-64 (WebKitGTK 2.54,
+software rendering under Xvfb, Go 1.26.1, `CGO_ENABLED=0`, no `-ldflags`) by the
+end-to-end test (`KRATE_NATIVE_GUI=1 go test ./internal/build -run TestNativeE2EGUI -v`).
+Treat the numbers as an order of magnitude; they move with the machine and the
+WebKitGTK build.
+
+| What | Size |
+|------|------|
+| Cold start, process start to the window being open | about 0.2 s |
+| Cold start, process start to the first page's load event | about 0.37 s |
+| `krate-shell` binary | 15.6 MB (10.9 MB with `-ldflags="-s -w"`) |
+| `dist-native/app` | 9.0 MB: Go host 8.9 MB, UI 124 KB (42 KB of JS gzipped), host JS 4 KB |
+| Resident memory, `krate-shell` process after the page ran | about 105 MB |
+| Resident memory, all processes | about 315 MB: shell 105, WebKit web process 137, WebKit network process 64, Go host 7 |
+
+The shell's resident memory includes the WebKitGTK libraries it maps. The web and
+network processes belong to the system webview; the Go host is a separate child
+process.
