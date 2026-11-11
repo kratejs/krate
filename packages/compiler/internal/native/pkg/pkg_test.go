@@ -690,3 +690,21 @@ func TestDiscoverPrefersReport(t *testing.T) {
 		t.Errorf("fallback = %+v, %v", p, err)
 	}
 }
+
+func TestProductNameCannotInjectOrEscape(t *testing.T) {
+	for in, want := range map[string]string{"..": "App", ".": "App", " .. ": "App", "../x": "-x", "A\nB": "AB", "My App": "My App", "a.": "a"} {
+		if got := fileSafe(in); got != want {
+			t.Errorf("fileSafe(%q) = %q, want %q", in, got, want)
+		}
+	}
+	m := Metadata{AppID: "com.acme.app", ProductName: "Acme\nDepends: evil-pkg", Version: "1.0.0", Publisher: "P\nPre-Depends: x"}
+	ctrl := string(debControl(m, Payload{Arch: "amd64"}, 1))
+	for _, line := range strings.Split(strings.TrimSpace(ctrl), "\n") {
+		if strings.HasPrefix(line, "Depends: evil") || strings.HasPrefix(line, "Pre-Depends") {
+			t.Errorf("injected control field %q in:\n%s", line, ctrl)
+		}
+	}
+	if !strings.Contains(maintainer(m), "P Pre-Depends: x <") {
+		t.Errorf("maintainer = %q", maintainer(m))
+	}
+}

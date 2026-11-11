@@ -188,7 +188,7 @@ func maintainer(m Metadata) string {
 	if len(parts) >= 2 {
 		domain = parts[1] + "." + parts[0]
 	}
-	return fmt.Sprintf("%s <noreply@%s>", name, domain)
+	return fmt.Sprintf("%s <noreply@%s>", oneLine(name), domain)
 }
 
 // debControl returns the control file.
@@ -201,8 +201,9 @@ func debControl(m Metadata, p Payload, installedKB int64) []byte {
 	fmt.Fprintf(&b, "Installed-Size: %d\n", installedKB)
 	b.WriteString("Depends: libwebkit2gtk-4.1-0, libgtk-3-0\n")
 	b.WriteString("Section: utils\nPriority: optional\n")
-	fmt.Fprintf(&b, "Description: %s desktop application\n", m.ProductName)
-	fmt.Fprintf(&b, " %s is built with Krate Native.\n", m.ProductName)
+	name := oneLine(m.ProductName)
+	fmt.Fprintf(&b, "Description: %s desktop application\n", name)
+	fmt.Fprintf(&b, " %s is built with Krate Native.\n", name)
 	return []byte(b.String())
 }
 
@@ -301,8 +302,8 @@ func writeRPM(out string, m Metadata, p Payload, data *tree) error {
 	v, _ := splitVersion(m.Version)
 	meta := rpmpack.RPMMetaData{
 		Name: m.slug(), Version: v.debian(), Release: "1", Arch: rpmArch(p.Arch),
-		Summary:     m.ProductName + " desktop application",
-		Description: m.ProductName + " is built with Krate Native.",
+		Summary:     oneLine(m.ProductName) + " desktop application",
+		Description: oneLine(m.ProductName) + " is built with Krate Native.",
 		Licence:     "Proprietary", Packager: maintainer(m), Vendor: m.Publisher,
 		Group: "Applications/Productivity", BuildTime: buildTime(),
 	}
