@@ -33,100 +33,100 @@
   "memory": {
     "linux-amd64": {
       "app.shell.privateDirty": {
-        "measured": 50339840,
-        "max": 62924800
+        "measured": 55152640,
+        "max": 68940800
       },
       "app.shell.pss": {
-        "measured": 67885056,
-        "max": 84856320
+        "measured": 103089152,
+        "max": 128861440
       },
       "app.total.privateDirty": {
-        "measured": 113311744,
-        "max": 141639680
+        "measured": 178102272,
+        "max": 222627840
       },
       "app.total.pss": {
-        "measured": 178564096,
-        "max": 223205120
+        "measured": 342124544,
+        "max": 427655680
       },
       "app.webview:network.privateDirty": {
-        "measured": 25997312,
-        "max": 34385920
+        "measured": 7675904,
+        "max": 16064512
       },
       "app.webview:network.pss": {
-        "measured": 36013056,
-        "max": 52790272
+        "measured": 26105856,
+        "max": 42883072
       },
       "app.webview:web.privateDirty": {
-        "measured": 37449728,
-        "max": 46812160
+        "measured": 114593792,
+        "max": 143242240
       },
       "app.webview:web.pss": {
-        "measured": 74665984,
-        "max": 93332480
+        "measured": 212525056,
+        "max": 265656320
       },
       "appMinusFloor.shell.privateDirty": {
-        "measured": 5849088,
-        "max": 14237696
+        "measured": 18239488,
+        "max": 26628096
       },
       "appMinusFloor.shell.pss": {
-        "measured": 4553728,
-        "max": 21330944
+        "measured": 19607552,
+        "max": 36384768
       },
       "appMinusFloor.total.privateDirty": {
-        "measured": 11608064,
-        "max": 19996672
+        "measured": 35491840,
+        "max": 44364800
       },
       "appMinusFloor.total.pss": {
-        "measured": 14083072,
-        "max": 30860288
+        "measured": 50205696,
+        "max": 66982912
       },
       "appMinusFloor.webview:network.privateDirty": {
-        "measured": 4096,
-        "max": 8392704
+        "measured": -4096,
+        "max": 8384512
       },
       "appMinusFloor.webview:network.pss": {
-        "measured": -4096,
-        "max": 16773120
+        "measured": -441344,
+        "max": 16335872
       },
       "appMinusFloor.webview:web.privateDirty": {
-        "measured": 5754880,
-        "max": 14143488
+        "measured": 16510976,
+        "max": 24899584
       },
       "appMinusFloor.webview:web.pss": {
-        "measured": 9416704,
-        "max": 26193920
+        "measured": 30513152,
+        "max": 47290368
       },
       "floor.shell.privateDirty": {
-        "measured": 44064768,
-        "max": 55080960
+        "measured": 36839424,
+        "max": 46049280
       },
       "floor.shell.pss": {
-        "measured": 64083968,
-        "max": 80861184
+        "measured": 83481600,
+        "max": 104352000
       },
       "floor.total.privateDirty": {
-        "measured": 101703680,
-        "max": 127129600
+        "measured": 142610432,
+        "max": 178263040
       },
       "floor.total.pss": {
-        "measured": 165605376,
-        "max": 207006720
+        "measured": 291918848,
+        "max": 364898560
       },
       "floor.webview:network.privateDirty": {
-        "measured": 25993216,
-        "max": 34381824
+        "measured": 7680000,
+        "max": 16068608
       },
       "floor.webview:network.pss": {
-        "measured": 35943424,
-        "max": 52720640
+        "measured": 26443776,
+        "max": 43220992
       },
       "floor.webview:web.privateDirty": {
-        "measured": 31715328,
-        "max": 40103936
+        "measured": 98156544,
+        "max": 122695680
       },
       "floor.webview:web.pss": {
-        "measured": 65577984,
-        "max": 82355200
+        "measured": 182169600,
+        "max": 227712000
       }
     }
   }

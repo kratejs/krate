@@ -57,8 +57,12 @@ KRATE_NATIVE_GUI=1 go test ./internal/build -run TestNativeBudgetGUI -v
 `KRATE_BUDGET_SCALE=2` multiplies the cold-start limit for a slower machine.
 CI sets it to 3 for the hosted runner; the limit was measured on a developer
 machine and the hosted runner has not been measured yet. The memory limits are
-not scaled: app minus floor does not depend on the machine the way an absolute
-number does. The same measurement is available outside the tests as
+not scaled; they are measured where they are enforced. The `linux-amd64` memory
+entries come from CI's GitHub `ubuntu-24.04` runner (WebKitGTK 2.52.6, Mesa
+software GL with compositing on, run 43117981305). App minus floor still
+depends on the rendering stack: on the private WebKitGTK 2.54 sysroot used for
+local runs (compositing off) it is about a third of the runner's, so local runs
+stay well under these limits and only the runner catches growth. The same measurement is available outside the tests as
 `krate native profile --memory` (see the release page of the docs).
 
 ## Updating a budget
