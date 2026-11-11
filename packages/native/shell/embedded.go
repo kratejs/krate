@@ -13,6 +13,7 @@ import (
 	"syscall"
 
 	"github.com/kratejs/krate/packages/native/gohost"
+	"github.com/kratejs/krate/packages/native/plugin"
 	"github.com/kratejs/krate/packages/native/scheme"
 )
 
@@ -88,16 +89,27 @@ func appRoot(fsys fs.FS) fs.FS {
 // It parses the command line (--browser, --addr, --version), runs the app and
 // exits the process. register, when not nil, registers the app's Go host code.
 func Main(embedded fs.FS, register func(*scheme.Registry)) {
+	MainPlugins(embedded, register, nil)
+}
+
+// MainPlugins is Main for an app with native plugins: they are linked into the
+// process and installed when the app's manifest lists them.
+func MainPlugins(embedded fs.FS, register func(*scheme.Registry), plugins []*plugin.Plugin) {
 	// stdout belongs to the control protocol ("url ...", "ready"); anything
 	// else that prints to os.Stdout lands on stderr.
 	ctl := os.Stdout
 	os.Stdout = os.Stderr
-	os.Exit(RunMain(os.Args[1:], embedded, register, ctl))
+	os.Exit(RunMainPlugins(os.Args[1:], embedded, register, plugins, ctl))
 }
 
 // RunMain is Main without the process exit, for tests. ctl receives the
 // protocol lines.
 func RunMain(args []string, embedded fs.FS, register func(*scheme.Registry), ctl io.Writer) int {
+	return RunMainPlugins(args, embedded, register, nil, ctl)
+}
+
+// RunMainPlugins is RunMain with native plugins.
+func RunMainPlugins(args []string, embedded fs.FS, register func(*scheme.Registry), plugins []*plugin.Plugin, ctl io.Writer) int {
 	fl := flag.NewFlagSet("app", flag.ContinueOnError)
 	fl.SetOutput(os.Stderr)
 	browser := fl.Bool("browser", false, "serve on a loopback port behind a session token instead of opening a window")
@@ -134,6 +146,7 @@ func RunMain(args []string, embedded fs.FS, register func(*scheme.Registry), ctl
 		Out:     ctl,
 		Context: ctx,
 		GoGlue:  register,
+		Plugins: plugins,
 		Dev:     dev != nil && *dev,
 		OnReady: func(c *Control) {
 			fmt.Fprintln(ctl, "ready")

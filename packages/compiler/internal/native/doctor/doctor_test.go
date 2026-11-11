@@ -276,3 +276,19 @@ func TestParseShellInfo(t *testing.T) {
 		t.Error("report without a schema accepted")
 	}
 }
+
+func TestGoRequiredForPlugins(t *testing.T) {
+	m := &fakeMachine{goos: "linux", shell: "/s", info: linuxInfo(true), tools: map[string]string{}}
+	in := Inputs{Plugins: []string{"./native-plugins/system-info"}, Compile: "never"}
+	r := Run(in, m.probes())
+	g := find(t, r, "Go")
+	if g.Status != Fail || g.Hint == "" || !strings.Contains(g.Detail, "native plugins") {
+		t.Errorf("plugins without go: %+v", g)
+	}
+	// Plugins win over native.release.compile "never": they cannot be linked without go.
+	m.tools["go"] = "/usr/local/go/bin/go"
+	m.versions = map[string]string{"/usr/local/go/bin/go": "go version go1.26.1 linux/amd64\n"}
+	if g := find(t, Run(in, m.probes()), "Go"); g.Status != OK || !strings.Contains(g.Detail, "plugins") {
+		t.Errorf("plugins with go: %+v", g)
+	}
+}

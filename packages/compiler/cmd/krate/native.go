@@ -42,6 +42,7 @@ func printNativeUsage(w io.Writer) {
 	fmt.Fprintf(w, "  sign       Sign the packaged app (codesign, signtool/osslsigncode, gpg) and rebuild the archives\n")
 	fmt.Fprintf(w, "  notarize   Notarize and staple the signed macOS app\n")
 	fmt.Fprintf(w, "  keygen     Create the Ed25519 key pair that signs update files\n")
+	fmt.Fprintf(w, "  plugin     plugin init <name> [dir]: create a native plugin (default dir native-plugins/<name>)\n")
 	fmt.Fprintf(w, "  doctor     Check the Go toolchain, shell binary, system webview, packaging tools and host runtime (--json)\n\n")
 	fmt.Fprintf(w, "Build flags:\n")
 	fmt.Fprintf(w, "  --out <dir>      Output directory (default dist-native); the app is <dir>/app\n")
@@ -107,6 +108,9 @@ func runNative(flags cliFlags, args []string) {
 		return
 	case "doctor":
 		runNativeDoctor(flags, append([]string{"native"}, args[2:]...))
+		return
+	case "plugin":
+		runNativePlugin(flags, args[2:])
 		return
 	}
 	for _, s := range nativeStubs {
@@ -323,6 +327,9 @@ func runNativeBuild(flags cliFlags, args []string) {
 	fmt.Printf("\n  %s %s %s (%s)\n", cGreen+"+"+cReset, m.ProductName, m.Version, m.AppID)
 	fmt.Printf("    app          %s\n", rel(res.AppDir))
 	fmt.Printf("    permissions  %s\n", joinOrNone(m.Permissions))
+	if len(m.Plugins) > 0 {
+		fmt.Printf("    plugins      %s (the shell is built for them)\n", strings.Join(m.Plugins, ", "))
+	}
 	if m.HostJS != nil {
 		fmt.Printf("    host js      %s\n", m.HostJS.Bundle)
 	}
@@ -363,6 +370,9 @@ func nativeWantsExecutable(flags cliFlags, root string, cfg *config.Config) bool
 	switch {
 	case flags.Layout == "shell", flags.Shell != "":
 	case flags.Layout == "executable":
+		return true
+	case build.HasNativePlugins(cfg):
+		// Plugins are Go code linked into the executable.
 		return true
 	default:
 		if _, err := exec.LookPath("go"); err != nil {
@@ -407,6 +417,9 @@ func runNativeRelease(builder *build.Builder, root, outDir string, flags cliFlag
 	m := res.Manifest
 	fmt.Printf("\n  %s %s %s (%s)\n", cGreen+"+"+cReset, m.ProductName, m.Version, m.AppID)
 	fmt.Printf("    permissions  %s\n", joinOrNone(m.Permissions))
+	if len(m.Plugins) > 0 {
+		fmt.Printf("    plugins      %s\n", strings.Join(m.Plugins, ", "))
+	}
 	if res.Report != nil {
 		fmt.Printf("    sdk areas    %s\n", joinOrNone(append([]string{"os", "permission"}, res.Report.Areas.Linked...)))
 		if len(res.Report.Areas.Shaken) > 0 {
@@ -524,15 +537,25 @@ func runNativeDev(flags cliFlags, args []string) {
 	defer startRunLog(root, cfg, "native dev")()
 	defer build.TeeDevLog(root)()
 
-	shellPath, err := build.LocateNativeShell(root, flags.Shell)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "%sError:%s %v\n", cRed, cReset, err)
-		exit(1)
+	shellPath := ""
+	if build.HasNativePlugins(cfg) {
+		// An app with plugins runs under a shell built for it (see native.plugins).
+		if flags.Shell != "" || os.Getenv(build.ShellEnv) != "" {
+			fmt.Fprintf(os.Stderr, "%sError:%s the app uses native plugins, which are linked into a shell that native dev builds for it; drop --shell and $%s\n", cRed, cReset, build.ShellEnv)
+			exit(1)
+		}
+	} else {
+		var err error
+		shellPath, err = build.LocateNativeShell(root, flags.Shell)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%sError:%s %v\n", cRed, cReset, err)
+			exit(1)
+		}
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	fmt.Printf("%s%s  Starting native dev for %s%s\n", cBold, cCyan, root, cReset)
-	err = build.RunNativeDev(build.NativeDevOptions{
+	err := build.RunNativeDev(build.NativeDevOptions{
 		LoadConfig: func() (string, *config.Config, map[string]string, error) {
 			r, c, err := loadConfig(flags, args)
 			if err != nil {

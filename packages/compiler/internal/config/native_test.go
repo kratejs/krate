@@ -132,6 +132,21 @@ func TestValidateNative(t *testing.T) {
 		{"negative size", func(n *NativeConfig) { n.Window.Width = -1 }, "width and height"},
 		{"permission", func(n *NativeConfig) { n.Permissions = []string{"camera"} }, "unknown permission"},
 		{"deep link", func(n *NativeConfig) { n.DeepLinks = []string{"acme://"} }, "URL scheme"},
+		{"plugins ok", func(n *NativeConfig) {
+			n.Plugins = []string{"./native-plugins/hello", "@acme/krate-sqlite", "go:github.com/acme/p@v1.0.0", "krate-plugin-x", "../shared/p", "/abs/p"}
+		}, ""},
+		{"plugin empty", func(n *NativeConfig) { n.Plugins = []string{""} }, "not a plugin reference"},
+		{"plugin spaces", func(n *NativeConfig) { n.Plugins = []string{"./a b"} }, "not a plugin reference"},
+		{"plugin bare go prefix", func(n *NativeConfig) { n.Plugins = []string{"go:"} }, "not a plugin reference"},
+		{"plugin uppercase package", func(n *NativeConfig) { n.Plugins = []string{"Acme"} }, "not a plugin reference"},
+		{"plugin duplicate", func(n *NativeConfig) { n.Plugins = []string{"./a", "./a"} }, "twice"},
+		{"plugin permission shape", func(n *NativeConfig) { n.Permissions = []string{"plugin:system-info.read", "kv"} }, ""},
+		{"plugin permission bad shape", func(n *NativeConfig) { n.Permissions = []string{"plugin:Bad"} }, "unknown permission"},
+		{"plugin window permission", func(n *NativeConfig) {
+			p := []string{"plugin:system-info.read"}
+			n.Permissions = []string{"plugin:system-info.read"}
+			n.Window.Permissions = &p
+		}, ""},
 		{"runtime enum", func(n *NativeConfig) { n.Host.Runtime = "python" }, "host.runtime"},
 		{"scriptc needs opt in", func(n *NativeConfig) { n.Host.Runtime = "scriptc" }, "experimental"},
 		{"scriptc opted in", func(n *NativeConfig) { n.Host.Runtime = "scriptc"; n.Experimental.Scriptc = true }, ""},
@@ -260,5 +275,40 @@ func TestNativeReleaseDefaultsAndWindowScope(t *testing.T) {
 	}
 	if got := strings.Join(UnknownKeyWarnings([]byte(`{"native":{"appId":"com.a.b","window":{"permissions":[]}}}`)), "\n"); got != "" {
 		t.Errorf("window.permissions warned: %s", got)
+	}
+}
+
+func TestNativePluginsKey(t *testing.T) {
+	cfg := nativeCfg(t, `{"native":{"appId":"com.a.b","plugins":["./native-plugins/hello","@acme/p"]}}`)
+	if got := cfg.EffectiveNative().Plugins; !reflect.DeepEqual(got, []string{"./native-plugins/hello", "@acme/p"}) {
+		t.Errorf("plugins = %v", got)
+	}
+	dir := t.TempDir()
+	src := `export default { native: { appId: "com.acme.app", plugins: ["./native-plugins/hello"] } };`
+	if err := os.WriteFile(filepath.Join(dir, "krate.config.ts"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ts, err := Load(dir)
+	if err != nil || len(ts.Native.Plugins) != 1 {
+		t.Fatalf("krate.config.ts: %v %+v", err, ts.Native)
+	}
+	// plugins is a known key; a misspelling warns.
+	raw := []byte(`{"native":{"appId":"com.a.b","plugins":[],"plugns":[]}}`)
+	got := strings.Join(UnknownKeyWarnings(raw), "\n")
+	if !strings.Contains(got, "native.plugns") || strings.Contains(got, "native.plugins") {
+		t.Errorf("warnings:\n%s", got)
+	}
+}
+
+func TestNativePluginSpecKind(t *testing.T) {
+	for spec, want := range map[string]string{
+		"./a": "path", "../a": "path", "/a/b": "path", ".": "path",
+		"go:example.com/m": "go", "go:example.com/m@v1.2.3": "go",
+		"@acme/krate-x": "npm", "krate-x": "npm", "@acme/krate-x/sub": "npm",
+		"": "", " ./a": "", "go:": "", "go:@v1": "", "Has Space": "", "a\\b": "",
+	} {
+		if got := NativePluginSpecKind(spec); got != want {
+			t.Errorf("NativePluginSpecKind(%q) = %q, want %q", spec, got, want)
+		}
 	}
 }

@@ -90,6 +90,7 @@ green run there is what moves a cell.
 | Native: release as a single executable | Supported | Untested | Untested | Krate Native v1 |
 | Native: prebuilt shell for apps without Go | Supported | Untested | Untested | Krate Native v1 |
 | Native: krate native doctor | Supported | Untested | Untested | Krate Native v1 |
+| Native: plugins | Supported | Untested | Untested | Krate Native v1 |
 | Native: packaging formats | Partial | Untested | Untested | Krate Native v1 |
 | Native: signing and notarization | Partial | Untested | Untested | Krate Native v1 |
 | Native: updater | Supported | Untested | Untested | Krate Native v1 |
@@ -709,6 +710,21 @@ Known limits:
 - The report logic is tested with injected probes for all three OSes; the real probes ran only on Linux. The macOS version and Windows registry probes compile (go vet per GOOS) but have not run.
 
 Evidence: `TestHealthyTypeScriptOnlyLinuxWithoutGo`, `TestGoRequiredForGoHostAndCompileAlways`, `TestWebviewMissingIsRequired`, `TestHostRuntimes`, `TestPackagingToolsPerOS`, `TestNativeDoctorCommand`, `TestBinaryDoctor`, `TestProbeShape`
+
+### Native: plugins
+
+**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+
+A plugin is a Go package plus a krate-plugin.json (name, Go import path, permissions with descriptions, ops, minimum Krate). native.plugins enables local directories, npm packages and Go modules; ops are callable as plugin/<name>.<op> (lowerCamel op names like the SDK ids, bound to Go names by capitalizing or an explicit go field) with generated codecs and a typed krate/plugin/<name> TypeScript module (calls, streams, signals). Plugins run inside the shell process with a context (lifecycle hooks, Dispatch, platform capabilities, data directory), cannot register ids outside their namespace, and their permissions (plugin:<name>.<permission>) are derived from the code, enforced per window, listed by krate native check and shaken per op in release builds. An app with plugins runs under a per-app shell built with go (cached by plugin set, sources and Krate version) in dev and in builds; krate native plugin init scaffolds one.
+
+Known limits:
+
+- The plugin runtime and the build are exercised on Linux (the GUI test runs the shell in a real WebKitGTK window and checks a granted call, a call denied to a window scoped to nothing, and the lifecycle hooks). The macOS and Windows code paths that plugins use (the platform layer, the per-app shell build) compile but have not run; the system-info example's macOS CPU load (ps) and Windows (GetSystemTimes) readings are untested.
+- Plugins are trusted Go code in the shell process; the namespace and permissions limit what a page can reach through them, not what the plugin does.
+- Plugin ops are callable from pages; TypeScript host code reaches them only by id (__krateHost.call). A go: plugin needs network or a populated module cache for the first build.
+- Editing a local plugin's Go code restarts native dev instead of hot-reloading it.
+
+Evidence: `TestInstallEnforcesNamespace`, `TestInstallRegistersGatedOps`, `TestSignalGate`, `TestLifecycle`, `TestParseManifestErrors`, `TestResolveDiagnostics`, `TestNativePluginsKey`, `TestPluginNamedImports`, `TestNativePluginDevBuild`, `TestNativePluginReleaseShakesOps`, `TestNativePluginReleaseWithGoHostCode`, `TestNativePluginScaffoldBuilds`, `TestNativePluginInit`, `TestGoRequiredForPlugins`, `TestGUIPlugins`, `TestNativePluginGUI`
 
 ### Native: packaging formats
 

@@ -11,6 +11,7 @@ import (
 
 	"github.com/kratejs/krate/packages/native/internal/gohosttest"
 	"github.com/kratejs/krate/packages/native/memstat"
+	"github.com/kratejs/krate/packages/native/plugin"
 )
 
 // The GUI test needs a display and the WebKitGTK libraries on Linux. It runs
@@ -40,9 +41,15 @@ func TestMain(m *testing.M) {
 		fmt.Fprintln(os.Stderr, "GUI test setup:", err)
 		os.Exit(1)
 	}
+	if err := enableGUIPlugin(guiApp.dir); err != nil {
+		cleanup()
+		fmt.Fprintln(os.Stderr, "GUI test setup:", err)
+		os.Exit(1)
+	}
 	code := make(chan int, 1)
 	err = Run(guiApp.dir, RunOptions{
 		Dev:          true,
+		Plugins:      []*plugin.Plugin{newGUIPlugin()},
 		ExtraHandler: guiSink.handle,
 		OnReady: func(ctl *Control) {
 			guiCtl = ctl
@@ -281,6 +288,17 @@ async function recall() {
   await report("recall", rep);
 }
 function bump() { return call("t.Bump"); }
+// The plugin flow: call a plugin op from this window, then open a window whose
+// scope is empty (scoped.html) and let it try the same call.
+async function pluginFlow() {
+  const rep = {};
+  try {
+    rep.hello = (await call("plugin/gt.hello")).ok;
+    rep.state = (await call("plugin/gt.state")).ok;
+    rep.opened = (await call("krate/window.open", [{path: "/scoped.html", permissions: []}])).ok;
+  } catch (e) { rep.error = String(e); }
+  await report("plugin", rep);
+}
 (async () => {
   const rep = {errors: []};
   try {

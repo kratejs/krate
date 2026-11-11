@@ -34,6 +34,9 @@ type hostItem struct {
 	// result is the value type; nil for void. For streams it is the element.
 	result *wtype
 	hasErr bool
+	// export, when set, is the name the UI and the registry id use instead of
+	// name (plugin ops are lowerCamel).
+	export string
 	// build marks a //krate:build function: the UI gets its baked values.
 	build bool
 }
@@ -48,6 +51,8 @@ type module struct {
 	items      []*hostItem
 	components []string
 	imp        Import
+	// rename maps a Go name to the op name (Import.Rename).
+	rename map[string]string
 	// build holds the names marked //krate:build in the module's source.
 	build map[string]bool
 }
@@ -193,11 +198,13 @@ func (a *analyzer) classify(m *module, mp *mapper, name string, comps map[string
 			it.build = true
 		}
 		if it != nil {
+			m.applyRename(it)
 			m.items = append(m.items, it)
 		}
 	case *types.Var:
 		it := a.analyzeSignal(m, mp, o)
 		if it != nil {
+			m.applyRename(it)
 			m.items = append(m.items, it)
 		} else if !a.signalType(o.Type()) {
 			importDiag(name+" is a variable of type "+typeName(o.Type())+", which cannot be imported",
@@ -249,6 +256,21 @@ func (a *analyzer) analyzeSignal(m *module, mp *mapper, v *types.Var) *hostItem 
 		return nil
 	}
 	return &hostItem{name: v.Name(), id: m.id + "." + v.Name(), kind: itemSignal, result: w}
+}
+
+func (it *hostItem) exportName() string {
+	if it.export != "" {
+		return it.export
+	}
+	return it.name
+}
+
+// applyRename gives the item the op name an Import renamed it to.
+func (m *module) applyRename(it *hostItem) {
+	if to, ok := m.rename[it.name]; ok && it != nil {
+		it.export = to
+		it.id = m.id + "." + to
+	}
 }
 
 func isErrorType(t types.Type) bool {

@@ -44,6 +44,9 @@ type NativeManifest struct {
 	// shell validates the names.
 	Permissions       []string `json:"permissions,omitempty"`
 	StrictPermissions bool     `json:"strictPermissions,omitempty"`
+	// Plugins are the native plugins the app uses; the shell that runs the app
+	// has to link them (see native.plugins).
+	Plugins []string `json:"plugins,omitempty"`
 	// Updater is native.updater: the feed URL template and the Ed25519
 	// public key that verifies update files.
 	Updater *NativeUpdaterMeta `json:"updater,omitempty"`
@@ -231,6 +234,7 @@ func (b *Builder) BuildNativeApp(opts NativeAppOptions) (*NativeAppResult, error
 		return nil, nativeDiagError([]diag.Diagnostic{*derr}, "native target error(s)")
 	}
 	b.NativeTarget = true
+	b.nativeShake = opts.Derive
 
 	ds, err := native.CheckTarget(b.Root, b.Cfg)
 	if err != nil {
@@ -302,6 +306,10 @@ func (b *Builder) BuildNativeApp(opts NativeAppOptions) (*NativeAppResult, error
 	m.Features = &resolved
 	m.Window.Permissions = eff.Window.Permissions
 	m.Window.KeepAlive = eff.Window.KeepAlive
+	m.Plugins = b.NativePluginNames()
+	if !opts.Derive {
+		m.Permissions = b.pluginDevPermissions(m.Permissions)
+	}
 	if opts.Derive {
 		cap, ds, err := b.deriveNativePermissions(eff)
 		if err != nil {
@@ -405,12 +413,26 @@ func (b *Builder) BuildNativeApp(opts NativeAppOptions) (*NativeAppResult, error
 	// runnable distributable; building one from a checkout needs a request.
 	want := opts.WantShell || opts.Shell != ""
 	if !want && opts.Distribute {
-		if p, _, _ := FindPrebuiltShell("", goos, goarch); p != "" {
+		if p, _, _ := FindPrebuiltShell("", goos, goarch); p != "" || b.nativePlugins != nil {
 			want = true
 		}
 	}
 	if want {
-		path, note := b.provideShell(outDir, opts.Shell, goos, goarch)
+		var path, note string
+		if b.nativePlugins != nil {
+			// The prebuilt shell links no plugins: the app gets its own.
+			built, err := b.PluginShell(goos, goarch)
+			if err != nil {
+				return nil, err
+			}
+			path = filepath.Join(outDir, ShellFileName(goos))
+			if err := copyNativeFile(built, path); err != nil {
+				return nil, err
+			}
+			_ = os.Chmod(path, 0o755)
+		} else {
+			path, note = b.provideShell(outDir, opts.Shell, goos, goarch)
+		}
 		res.ShellPath = path
 		if note != "" {
 			res.Notes = append(res.Notes, note)
@@ -616,9 +638,21 @@ func (b *Builder) deriveNativePermissions(eff *config.NativeConfig) (*capability
 	if err != nil {
 		return nil, nil, err
 	}
-	res, err := capability.Analyze(b.Root, b.Cfg, p, capability.Options{GoFiles: b.nativeGoFiles})
+	opts := capability.Options{GoFiles: b.nativeGoFiles}
+	if st := b.nativePlugins; st != nil {
+		opts.Plugins = PluginInfos(st.list)
+	}
+	res, err := capability.Analyze(b.Root, b.Cfg, p, opts)
 	if err != nil {
 		return nil, nil, err
+	}
+	if st := b.nativePlugins; st != nil {
+		// The SDK areas the plugins' Go code imports have to stay linked.
+		sites, err := capability.GoSDKImportsIn(st.out.Dir, []string{"./registry"}, pluginGoEnv(runtime.GOOS, runtime.GOARCH))
+		if err != nil {
+			return nil, nil, pluginShellError(err.Error(), err)
+		}
+		res.AddGoSites(sites)
 	}
 	ds := permissionDiagnostics(res, eff.Permissions)
 	return res, ds, nil

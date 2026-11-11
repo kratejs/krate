@@ -14,6 +14,7 @@ The Go module behind Krate's desktop target.
 | `shell` | The shell as a library: app manifest, `Run`, `RunEmbedded` and `Main` (release builds), browser mode, dev control. See `shell/README.md` |
 | `sdk/{window,dialog,clipboard,menu,tray,shortcut,notify,app}` | The UI half of the SDK: plain Go functions for host code, forwarded to the shell in dev. `sdk` assembles them for the shell. See the SDK page in the docs |
 | `cmd/krate-shell` | The prebuilt shell binary. `krate-shell --doctor` prints a JSON report of the system webview and display; it ships in the `@krate/core-<platform>` packages next to `krate` |
+| `plugin` | The native plugin runtime: `Plugin`, `Meta`, `Host` (installs a plugin's ops under `plugin/<name>.`, gates them by permission and window scope, runs the lifecycle hooks) and `Context` (what a plugin's `Init` gets). See the Native plugins docs page |
 | `memstat` | Per-process memory (PSS and private dirty on Linux, footprint on macOS, private bytes on Windows) with roles for the shell, host children and webview processes; behind the shell's `memory` dev command |
 | `platform/probe` | The result type of that webview probe, shared by the per-OS platform packages |
 
@@ -80,6 +81,17 @@ nests `NSSplitView`, Windows places several WebView2 controllers from that Go
 layout. Every request on the app scheme carries the webview it came from
 (`caps.ViewOf`), which the shell maps to a window or view scope; the page's
 `x-krate-window` header is ignored in a native window.
+
+## Plugins
+
+A plugin is a Go package plus a `krate-plugin.json`; `krate native dev` and
+`krate native build` generate its glue with the same bindings as Go host code and
+link it into a per-app shell: `shell.CLI(args, plugins)` for dev,
+`shell.MainPlugins(fsys, glue, plugins)` for a release. `RunOptions.Plugins`
+carries the linked plugins; the manifest's `plugins` list says which are
+active. A plugin cannot register an id outside `plugin/<name>.` (`Host.Install`
+refuses it), and its ops are gated by `plugin:<name>.<permission>` and the
+calling window's scope.
 
 ## UI half of the SDK
 

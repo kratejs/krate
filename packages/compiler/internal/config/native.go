@@ -42,6 +42,12 @@ type NativeConfig struct {
 	Bundle NativeBundle `json:"bundle,omitempty"`
 	// Updater configures in-app updates. Nil disables them.
 	Updater *NativeUpdater `json:"updater,omitempty"`
+	// Plugins lists the native plugins the app uses: a directory with a
+	// krate-plugin.json ("./native-plugins/hello"), an npm package that ships
+	// one ("@acme/krate-sqlite") or a Go module ("go:github.com/acme/krate-sqlite@v1.2.0").
+	// An app with plugins runs under a per-app shell built with the Go
+	// toolchain. See docs native/plugins.
+	Plugins []string `json:"plugins,omitempty"`
 	// Memory is the memory profile: "balanced" (default), "minimal" or
 	// "performance" (the engine defaults). See docs native/memory.
 	Memory string `json:"memory,omitempty"`
@@ -182,6 +188,42 @@ var (
 	NativeMemoryProfiles = []string{"balanced", "minimal", "performance"}
 )
 
+// NativeDefaultPermissions are the SDK permissions of an app that lists none.
+func NativeDefaultPermissions() []string { return nativePermissionList().Defaults }
+
+// nativePluginPermRe matches the app.json name of a plugin permission,
+// "plugin:<plugin>.<permission>". Which ones exist depends on the enabled
+// plugins, so the config can only check the shape; the build checks the rest.
+var nativePluginPermRe = regexp.MustCompile(`^plugin:[a-z][a-z0-9]*(-[a-z0-9]+)*\.[a-z][A-Za-z0-9]*$`)
+
+// IsNativePermission reports whether p is an SDK permission or has the shape
+// of a plugin permission.
+func IsNativePermission(p string) bool {
+	return oneOf(p, NativePermissions) || nativePluginPermRe.MatchString(p)
+}
+
+// NativePluginSpecKind classifies an entry of native.plugins: "path" for a
+// directory, "go" for a Go module ("go:<module>[@version]"), "npm" for a
+// package name, "" when it is none of them.
+func NativePluginSpecKind(spec string) string {
+	switch {
+	case spec == "" || strings.TrimSpace(spec) != spec || strings.ContainsAny(spec, " \t\n\\"):
+		return ""
+	case strings.HasPrefix(spec, "./") || strings.HasPrefix(spec, "../") || strings.HasPrefix(spec, "/") || spec == "." || spec == "..":
+		return "path"
+	case strings.HasPrefix(spec, "go:"):
+		if len(spec) > 3 && !strings.HasPrefix(spec[3:], "@") {
+			return "go"
+		}
+		return ""
+	case npmNameRe.MatchString(spec):
+		return "npm"
+	}
+	return ""
+}
+
+var npmNameRe = regexp.MustCompile(`^(@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*(/[A-Za-z0-9._-]+)*$`)
+
 var (
 	nativeAppIDRe  = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9-]*(\.[A-Za-z][A-Za-z0-9-]*)+$`)
 	nativeSemverRe = regexp.MustCompile(`^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$`)
@@ -291,16 +333,16 @@ func (c *Config) validateNative() (warnings []string, err error) {
 			"\"native\" uses the system title bar, \"hidden\" keeps window controls over the page, \"none\" removes the frame")
 	}
 	for _, p := range n.Permissions {
-		if !oneOf(p, NativePermissions) {
+		if !IsNativePermission(p) {
 			return nil, nativeErr("permissions", fmt.Sprintf("has unknown permission %q", p),
-				"known permissions: "+strings.Join(NativePermissions, ", "))
+				"known permissions: "+strings.Join(NativePermissions, ", ")+"; a plugin permission is written plugin:<plugin>.<permission>")
 		}
 	}
 	if wp := n.Window.Permissions; wp != nil {
 		for _, p := range *wp {
-			if !oneOf(p, NativePermissions) {
+			if !IsNativePermission(p) {
 				return nil, nativeErr("window.permissions", fmt.Sprintf("has unknown permission %q", p),
-					"known permissions: "+strings.Join(NativePermissions, ", "))
+					"known permissions: "+strings.Join(NativePermissions, ", ")+"; a plugin permission is written plugin:<plugin>.<permission>")
 			}
 			if len(n.Permissions) > 0 && !nativePermissionCovered(n.Permissions, p) {
 				return nil, nativeErr("window.permissions", fmt.Sprintf("lists %q, which native.permissions does not allow", p),
@@ -346,6 +388,17 @@ func (c *Config) validateNative() (warnings []string, err error) {
 		if !oneOf(f, nativeLinuxFormats) {
 			return nil, nativeErr("bundle.linux.formats", fmt.Sprintf("has unknown format %q", f), "use deb, rpm or appimage")
 		}
+	}
+	seenPlugin := map[string]bool{}
+	for i, spec := range n.Plugins {
+		if NativePluginSpecKind(spec) == "" {
+			return nil, nativeErr("plugins", fmt.Sprintf("entry %d (%q) is not a plugin reference", i, spec),
+				"use a directory (\"./native-plugins/hello\"), an npm package (\"@acme/krate-sqlite\") or a Go module (\"go:github.com/acme/krate-sqlite@v1.2.0\")")
+		}
+		if seenPlugin[spec] {
+			return nil, nativeErr("plugins", fmt.Sprintf("lists %q twice", spec), "remove the duplicate entry")
+		}
+		seenPlugin[spec] = true
 	}
 	if u := n.Updater; u != nil {
 		if u.URL == "" || u.PublicKey == "" {

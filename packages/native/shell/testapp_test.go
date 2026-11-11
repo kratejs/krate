@@ -56,6 +56,7 @@ func buildTestApp(root, page string, withGo bool, start int) (*testApp, error) {
 		"dist/forge/index.html":      forgePageHTML,
 		"host/host.js":               hostJSv1,
 		"host/host.js.map":           `{"version":3,"sources":[],"names":[],"mappings":""}`,
+		"dist/scoped.html":           scopedPage,
 	}
 	for name, content := range files {
 		if err := writeFile(filepath.Join(a.dir, filepath.FromSlash(name)), content); err != nil {

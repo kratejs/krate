@@ -204,6 +204,16 @@ type Builder struct {
 	// nativeOverlays are the source overlays of every host stub (TypeScript
 	// and Go), keyed by absolute module path.
 	nativeOverlays map[string]string
+	// nativePlugins is the state of the native plugins of the last native build
+	// (nil without plugins); nativePluginMods maps their TypeScript module
+	// specifiers ("krate/plugin/<name>") to the generated files.
+	nativePlugins *nativePluginState
+	// nativePluginResolved caches ResolveNativePlugins.
+	nativePluginResolved *pluginResolution
+	nativePluginMods     map[string]string
+	// nativeShake makes a native build link only the plugin ops the code uses
+	// (a release build). It is set by BuildNativeApp from Derive.
+	nativeShake bool
 
 	// fontPreloadHTML holds the `<link rel="preload">` tags for fonts declared
 	// in the global stylesheet; injected into every page head.
@@ -2182,8 +2192,15 @@ func (b *Builder) newBundler() *bundler.Bundler {
 		UseDefineForClassFields: b.Cfg.TSCompilerOptions.UseDefineForClassFields,
 		Define:                  b.publicEnvDefines(),
 	})
-	if b.contentMods != nil {
-		bnd.SetVirtualModules(b.contentMods)
+	if b.contentMods != nil || len(b.nativePluginMods) > 0 {
+		mods := map[string]string{}
+		for k, v := range b.contentMods {
+			mods[k] = v
+		}
+		for k, v := range b.nativePluginMods {
+			mods[k] = v
+		}
+		bnd.SetVirtualModules(mods)
 	}
 	if mods := b.actionModules(); len(mods) > 0 {
 		bnd.SetActionModules(mods)

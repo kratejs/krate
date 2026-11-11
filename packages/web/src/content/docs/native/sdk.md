@@ -32,6 +32,9 @@ console.log(await appDataDir(), (await info()).os);
 
 ## Permissions
 
+(Native plugins define their own permissions, `plugin:<plugin>.<permission>`; see
+[Native plugins](/docs/native/plugins/#permissions).)
+
 `app.json` has a `permissions` list. Go and TypeScript host code are trusted and
 never checked (a TypeScript call through `__krateHost.call` reaches the ungated
 implementation); permissions decide which ids the UI may call.

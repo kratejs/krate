@@ -66,6 +66,9 @@ type Windows struct {
 	changed  chan struct{} // closed (and replaced) when a view is registered
 	held     []caps.ViewEvent
 	onView   func(rec ViewRec, held []caps.ViewEvent)
+	// created and closed are called (outside the lock) after a window is
+	// added or removed.
+	created, closed []func(id string)
 }
 
 // ViewRec is one registered view.
@@ -75,6 +78,18 @@ type ViewRec struct {
 	Window  string
 	Primary bool
 	seq     int
+}
+
+// Subscribe adds callbacks for windows being added and removed. Either may be nil.
+func (w *Windows) Subscribe(created, closed func(id string)) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if created != nil {
+		w.created = append(w.created, created)
+	}
+	if closed != nil {
+		w.closed = append(w.closed, closed)
+	}
 }
 
 // NewWindows returns an empty registry.
@@ -246,6 +261,14 @@ func (w *Windows) Reserve() string {
 // Add registers w under id; an empty id gets "w<N>". The first window added
 // is the main window.
 func (w *Windows) Add(id string, win platform.Window) string {
+	id, hooks := w.add(id, win)
+	for _, f := range hooks {
+		f(id)
+	}
+	return id
+}
+
+func (w *Windows) add(id string, win platform.Window) (string, []func(string)) {
 	w.mu.Lock()
 	if id == "" {
 		w.next++
@@ -264,17 +287,26 @@ func (w *Windows) Add(id string, win platform.Window) string {
 		rec, held, _ = w.addViewLocked(id, id, v.PrimaryView(), true)
 	}
 	fn := w.onView
+	hooks := append([]func(string){}, w.created...)
 	w.mu.Unlock()
 	if rec.ID != "" && fn != nil {
 		fn(rec, held)
 	}
-	return id
+	return id, hooks
 }
 
 // Remove forgets a window.
 func (w *Windows) Remove(id string) {
+	hooks := w.remove(id)
+	for _, f := range hooks {
+		f(id)
+	}
+}
+
+func (w *Windows) remove(id string) []func(string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	_, known := w.byID[id]
 	if win, ok := w.byID[id]; ok {
 		if c, ok := win.(caps.WindowControls); ok {
 			delete(w.byRef, c.Ref())
@@ -294,6 +326,10 @@ func (w *Windows) Remove(id string) {
 			break
 		}
 	}
+	if !known {
+		return nil
+	}
+	return append([]func(string){}, w.closed...)
 }
 
 // Get returns the window for id; "" means the main window.

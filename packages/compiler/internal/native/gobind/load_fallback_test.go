@@ -17,7 +17,7 @@ func listFixture(t *testing.T) (*listedPkg, map[string]*listedPkg) {
 	t.Helper()
 	root := newApp(t, "app")
 	dir := filepath.Join(root, "src", "lib")
-	listed, byDir, goErr, err := goList(root, []string{dir})
+	listed, byDir, goErr, err := goList(root, []string{"./src/lib"}, nil)
 	if err != nil || goErr != "" {
 		t.Fatalf("goList: %v %s", err, goErr)
 	}

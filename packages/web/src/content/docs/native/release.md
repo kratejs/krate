@@ -156,6 +156,17 @@ The tests check that a Go-only app has no QuickJS (`go version -m` lists no
 `modernc.org/quickjs`, `go tool nm` no `jsruntime` symbols) and that an app that
 does not use the tray has no `sdk/tray` symbol.
 
+### Shaking plugin ops
+
+[Native plugins](/docs/native/plugins/) are shaken the same way, one level
+finer: a release links only the plugin ops the code reaches (an import from
+`krate/plugin/<name>`, or a `"plugin/<name>.<op>"` string), generates glue for
+those and defines only the permissions they need. The SDK areas a plugin's Go
+code imports stay linked. A plugin with no used op is still linked (its `Init`
+and hooks run). An app with plugins is always built as one executable and needs
+the Go toolchain. `report.json` has a `plugins` list with the ops each plugin
+kept and left out.
+
 ## Derived permissions
 
 A native build works out the SDK permissions the app needs from its code and
@@ -232,6 +243,9 @@ A window opened without the option inherits the scope of the window that opened
 it, and an explicit list must be a subset of the opener's, so a narrow window
 cannot open a wide one (it fails with `permission_denied`). Go host code is not
 affected.
+
+Plugin ops are checked the same way, against their `plugin:<name>.<permission>`
+(a host signal when the page subscribes).
 
 The check runs on every UI call, against the window or view the call came from.
 The platform layer tags every request with the webview that made it (on Linux

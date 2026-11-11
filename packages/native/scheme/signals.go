@@ -92,6 +92,13 @@ func (s *server) handleSignals(w http.ResponseWriter, r *http.Request) {
 			flush()
 			continue
 		}
+		if gate := s.reg.signalGate(name); gate != nil {
+			if gerr := gate(r.Header.Get(windowHdr)); gerr != nil {
+				w.Write(s.sigErrFrame(name, gerr))
+				flush()
+				continue
+			}
+		}
 		s.observe(Event{Kind: "signal-open", Fn: name})
 		var cancel func()
 		err := protect(func() error {

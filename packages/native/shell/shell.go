@@ -9,6 +9,7 @@ package shell
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -16,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -24,6 +26,7 @@ import (
 	"github.com/kratejs/krate/packages/native/krate"
 	"github.com/kratejs/krate/packages/native/platform"
 	"github.com/kratejs/krate/packages/native/platform/caps"
+	"github.com/kratejs/krate/packages/native/plugin"
 	"github.com/kratejs/krate/packages/native/scheme"
 	"github.com/kratejs/krate/packages/native/sdk"
 	sdkall "github.com/kratejs/krate/packages/native/sdk/all"
@@ -57,6 +60,10 @@ type RunOptions struct {
 	// GoGlue registers Go host code linked into the process (a release build)
 	// on the app registry, instead of starting a Go host child.
 	GoGlue func(r *scheme.Registry)
+	// Plugins are the native plugins linked into this process. Those the
+	// manifest lists under "plugins" are installed; a plugin the manifest
+	// lists and the process lacks is an error.
+	Plugins []*plugin.Plugin
 	// Allowed, when set, replaces the manifest's permission set for the UI
 	// half of the SDK (window, dialog, clipboard, ...); the data areas
 	// always follow the manifest. Meant for tests. Default: the manifest's
@@ -110,6 +117,7 @@ type app struct {
 	results queryResults // dev "query" mailbox
 	dev     *devTools
 	sdk     *sdk.Host
+	plug    *plugin.Host                 // nil without plugins
 	perms   permission.Set               // from the manifest; read once at load
 	glued   bool                         // opts.GoGlue was registered
 	plat    atomic.Pointer[platform.App] // native mode only, set before the loop runs
@@ -127,7 +135,15 @@ func load(appDir string, opts RunOptions) (*app, error) {
 // loadApp loads the app held in fsys; dir is its directory on disk, or "" for
 // an embedded app.
 func loadApp(dir string, fsys fs.FS, opts RunOptions) (*app, error) {
+	// Plugin permissions must be known before the manifest is parsed.
+	if err := plugin.DefinePermissions(opts.Plugins); err != nil {
+		return nil, fmt.Errorf("shell: %w", err)
+	}
 	man, err := ReadManifestFS(fsys)
+	if err != nil {
+		return nil, pluginHint(fsys, opts, err)
+	}
+	active, err := activePlugins(man, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -155,6 +171,20 @@ func loadApp(dir string, fsys fs.FS, opts RunOptions) (*app, error) {
 		return nil, fmt.Errorf("shell: %w", err)
 	}
 	a.sdk = sdk.NewHost()
+	if len(active) > 0 {
+		a.plug = plugin.NewHost(plugin.HostOptions{
+			Registry: a.reg, Perms: set,
+			AppID: man.AppID, AppName: man.ProductName, AppVersion: man.Version,
+			Dev: opts.Dev, Logf: a.logf,
+		})
+		for _, p := range active {
+			if err := a.plug.Install(p); err != nil {
+				a.close()
+				return nil, fmt.Errorf("shell: %w", err)
+			}
+		}
+		a.sdk.OnWindow(a.plug.WindowCreated, a.plug.WindowClosed)
+	}
 	// Host children (JavaScript) reach the data SDK through the private socket.
 	a.sdk.ShareWithParent(a.reg)
 	if os.Getenv("KRATE_APP_ID") == "" {
@@ -268,6 +298,9 @@ func (a *app) startMemory() func() {
 }
 
 func (a *app) close() {
+	if a.plug != nil {
+		a.plug.Quit()
+	}
 	a.sdk.Close()
 	a.mu.Lock()
 	host, child := a.host, a.child
@@ -471,6 +504,9 @@ func (a *app) runNative() error {
 	}
 	var openErr error
 	runErr := platApp.Run(func() {
+		if a.plug != nil {
+			a.plug.Start(platApp, a.sdk)
+		}
 		path := man.Window.Path
 		if wp := man.Window.Permissions; wp != nil {
 			if err := a.perms.Scope("main", *wp); err != nil {
@@ -577,4 +613,42 @@ func platformMemory(m *Manifest) platform.Memory {
 		out.Features = platform.Features{Media: true, WebAudio: true, WebGL: true, WebRTC: true, SpellCheck: true}
 	}
 	return out
+}
+
+// activePlugins returns the linked plugins the manifest lists, in the
+// manifest's order.
+func activePlugins(man *Manifest, opts RunOptions) ([]*plugin.Plugin, error) {
+	var out []*plugin.Plugin
+	for _, name := range man.Plugins {
+		var found *plugin.Plugin
+		for _, p := range opts.Plugins {
+			if p.Meta.Name == name {
+				found = p
+			}
+		}
+		if found == nil {
+			return nil, fmt.Errorf("shell: the app uses the plugin %q, which this shell does not link; run it with the shell that krate native dev or krate native build makes for the app (the prebuilt krate-shell has no plugins)", name)
+		}
+		out = append(out, found)
+	}
+	return out, nil
+}
+
+// pluginHint explains a manifest error that comes from plugin permissions a
+// shell without the plugin cannot know.
+func pluginHint(fsys fs.FS, opts RunOptions, err error) error {
+	if len(opts.Plugins) > 0 {
+		return err
+	}
+	b, rerr := fs.ReadFile(fsys, ManifestFile)
+	if rerr != nil {
+		return err
+	}
+	var m struct {
+		Plugins []string `json:"plugins"`
+	}
+	if json.Unmarshal(b, &m) == nil && len(m.Plugins) > 0 {
+		return fmt.Errorf("%w\n  the app uses the plugins %s, which this shell does not link; run it with the shell that krate native dev or krate native build makes for the app", err, strings.Join(m.Plugins, ", "))
+	}
+	return err
 }

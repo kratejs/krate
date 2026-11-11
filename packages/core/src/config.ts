@@ -377,7 +377,8 @@ export type NativePermission =
   | "clipboard"
   | "clipboard:read"
   | "tray"
-  | "shortcut";
+  | "shortcut"
+  | `plugin:${string}.${string}`;
 
 export interface NativeConfig {
   /** Reverse-DNS id, e.g. "com.acme.app". */
@@ -412,6 +413,13 @@ export interface NativeConfig {
   };
   /** In-app updates; `url` may contain `{target}`. Needs both fields. */
   updater?: { url: string; publicKey: string };
+  /**
+   * Native plugins: a directory with a krate-plugin.json ("./native-plugins/hello"),
+   * an npm package that ships one ("@acme/krate-sqlite") or a Go module
+   * ("go:github.com/acme/krate-sqlite@v1.2.0"). The app then runs under a per-app
+   * shell built with the Go toolchain.
+   */
+  plugins?: string[];
   /**
    * Memory profile of the webview and host. "balanced" (default) trims what
    * the app does not use; "minimal" trims harder and turns the JS JIT off

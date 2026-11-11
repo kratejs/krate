@@ -3,6 +3,7 @@ packages:
   - examples
   - examples/native-tasks
   - examples/native-views
+  - examples/native-plugin
 
 allowBuilds:
   '@krate/core': true

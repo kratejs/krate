@@ -60,6 +60,9 @@ func (r *Report) Failed() []Item {
 type Inputs struct {
 	// GoHost is true when the project has Go host code (compiled with go).
 	GoHost bool
+	// Plugins are the names of the native plugins (native.plugins); they are Go
+	// code linked into a shell built for the app, so they need the Go toolchain.
+	Plugins []string
 	// Compile is native.release.compile: "auto", "always" or "never".
 	Compile string
 	// HostRuntime is native.host.runtime ("quickjs", "node", "bun", "deno",
@@ -192,9 +195,11 @@ func firstLine(s string) string {
 }
 
 func (c *checker) goToolchain() {
-	need := c.in.GoHost || c.in.Compile == "always"
+	need := c.in.GoHost || c.in.Compile == "always" || len(c.in.Plugins) > 0
 	var why string
 	switch {
+	case len(c.in.Plugins) > 0:
+		why = "the app uses native plugins (" + strings.Join(c.in.Plugins, ", ") + "), which are Go code linked into a shell that is built for the app with go"
 	case c.in.GoHost:
 		why = "the app has Go host code, which is compiled with go"
 	case c.in.Compile == "always":

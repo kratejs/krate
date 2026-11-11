@@ -18,13 +18,8 @@
 package main
 
 import (
-	"context"
-	"flag"
-	"fmt"
 	"os"
-	"os/signal"
 	"runtime"
-	"syscall"
 
 	"github.com/kratejs/krate/packages/native/shell"
 )
@@ -32,74 +27,4 @@ import (
 // The platform layer needs the main goroutine on the main OS thread.
 func init() { runtime.LockOSThread() }
 
-func main() { os.Exit(run()) }
-
-func run() int {
-	// Keep stdout for the control protocol; anything else that prints to
-	// os.Stdout (the host's console.log) lands on stderr.
-	ctlOut := os.Stdout
-	os.Stdout = os.Stderr
-
-	fs := flag.NewFlagSet("krate-shell", flag.ContinueOnError)
-	browser := fs.Bool("browser", false, "serve on a loopback port behind a session token instead of opening a window")
-	addr := fs.String("addr", "127.0.0.1:0", "browser-mode listen address")
-	dev := fs.Bool("dev", false, "development mode: developer tools, stack traces, and control commands on stdin")
-	doctor := fs.Bool("doctor", false, "print a JSON report of the system webview and display, then exit")
-	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: krate-shell [--browser] [--addr 127.0.0.1:0] [--dev] [appDir]")
-		fmt.Fprintln(os.Stderr, "       krate-shell --doctor")
-		fs.PrintDefaults()
-	}
-	if err := fs.Parse(os.Args[1:]); err != nil {
-		if err == flag.ErrHelp {
-			return 0
-		}
-		return 2
-	}
-	if *doctor {
-		if err := shell.WriteDoctor(ctlOut); err != nil {
-			fmt.Fprintln(os.Stderr, "krate-shell:", err)
-			return 1
-		}
-		return 0
-	}
-	if fs.NArg() > 1 {
-		fs.Usage()
-		return 2
-	}
-	appDir := fs.Arg(0)
-	if appDir == "" {
-		exe, err := os.Executable()
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "krate-shell:", err)
-			return 1
-		}
-		appDir = shell.DefaultAppDir(exe)
-	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	err := shell.Run(appDir, shell.RunOptions{
-		Browser: *browser,
-		Addr:    *addr,
-		Dev:     *dev,
-		Out:     ctlOut,
-		Context: ctx,
-		OnReady: func(ctl *shell.Control) {
-			fmt.Fprintln(ctlOut, "ready")
-			if !*dev {
-				return
-			}
-			// stdin EOF means the driving process is gone.
-			if !shell.ServeControl(os.Stdin, ctlOut, ctl) {
-				ctl.Quit()
-			}
-		},
-	})
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "krate-shell:", err)
-		return 1
-	}
-	return 0
-}
+func main() { os.Exit(shell.CLI(os.Args[1:], nil)) }

@@ -221,18 +221,26 @@ func TestNativeWantsExecutable(t *testing.T) {
 	tsApp := t.TempDir()
 	cfg := config.Default()
 	cases := []struct {
-		name  string
-		root  string
-		flags cliFlags
-		want  bool
+		name    string
+		root    string
+		flags   cliFlags
+		want    bool
+		plugins bool
 	}{
-		{"go host, default", goApp, cliFlags{}, true},
-		{"go host, layout shell", goApp, cliFlags{Layout: "shell"}, false},
-		{"go host, explicit shell", goApp, cliFlags{Shell: "/x/krate-shell", WantShell: true}, false},
-		{"no go host", tsApp, cliFlags{}, false},
-		{"no go host, layout executable", tsApp, cliFlags{Layout: "executable"}, true},
+		{"go host, default", goApp, cliFlags{}, true, false},
+		{"go host, layout shell", goApp, cliFlags{Layout: "shell"}, false, false},
+		{"go host, explicit shell", goApp, cliFlags{Shell: "/x/krate-shell", WantShell: true}, false, false},
+		{"no go host", tsApp, cliFlags{}, false, false},
+		{"plugins, default", tsApp, cliFlags{}, true, true},
+		{"plugins, layout shell", tsApp, cliFlags{Layout: "shell"}, false, true},
+		{"no go host, layout executable", tsApp, cliFlags{Layout: "executable"}, true, false},
 	}
 	for _, c := range cases {
+		cfg := cfg
+		if c.plugins {
+			cfg = config.Default()
+			cfg.Native = &config.NativeConfig{Plugins: []string{"./native-plugins/x"}}
+		}
 		if got := nativeWantsExecutable(c.flags, c.root, cfg); got != c.want {
 			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
 		}
@@ -267,7 +275,7 @@ func TestNativeProfileMemoryFlags(t *testing.T) {
 func TestNativeUsageListsEveryCommandAndFlag(t *testing.T) {
 	var sb strings.Builder
 	printNativeUsage(&sb)
-	for _, want := range []string{"check", "init", "dev", "build", "profile", "package", "sign", "notarize", "keygen", "doctor",
+	for _, want := range []string{"check", "init", "dev", "build", "profile", "package", "sign", "notarize", "keygen", "doctor", "plugin",
 		"--release", "--target", "--package", "--format", "--scriptc", "--scriptc-fail-on", "--browser", "--port", "--memory", "--idle"} {
 		if !strings.Contains(sb.String(), want) {
 			t.Errorf("usage does not mention %q", want)
@@ -420,5 +428,95 @@ func TestNativeKeygen(t *testing.T) {
 	}
 	if code, _ := runKrate(t, "native", "keygen", "--key-out", key, "--force"); code != 0 {
 		t.Errorf("--force: exit %d", code)
+	}
+}
+
+// pluginProject writes a project that enables the echo test plugin from
+// ./native-plugins/echo and whose page imports from it.
+func pluginCLIProject(t *testing.T, page, extraConfig string) string {
+	t.Helper()
+	src, err := filepath.Abs(filepath.Join("..", "..", "internal", "build", "testdata", "native_plugin", "echo"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"krate.config.json":   `{"native":{"appId":"com.acme.app","plugins":["./native-plugins/echo"]` + extraConfig + `}}`,
+		"src/pages/index.tsx": page,
+	}
+	for _, name := range []string{"krate-plugin.json", "go.mod", "echo.go"} {
+		b, err := os.ReadFile(filepath.Join(src, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		files["native-plugins/echo/"+name] = string(b)
+	}
+	return nativeProject(t, files)
+}
+
+func TestNativeCheckReportsPlugins(t *testing.T) {
+	root := pluginCLIProject(t, `import { echo } from "krate/plugin/echo";
+void echo;
+`+nativePage, "")
+	code, out := runKrate(t, "native", "check", root)
+	if code != 0 {
+		t.Fatalf("exit %d:\n%s", code, out)
+	}
+	for _, want := range []string{"permissions: 1 (derived from the code)", "plugin:echo.use  (plugin echo)", "src/pages/index.tsx:1", "plugin echo: ops used: echo"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "plugin:echo.admin") {
+		t.Errorf("an unused plugin permission is reported:\n%s", out)
+	}
+
+	// The allowlist names a plugin permission that no plugin declares: KR7255.
+	bad := pluginCLIProject(t, nativePage, `,"permissions":["plugin:echo.nope"]`)
+	code, out = runKrate(t, "native", "check", bad)
+	if code != 1 || !strings.Contains(out, "KR7255") || !strings.Contains(out, "plugin:echo.nope") {
+		t.Errorf("unknown plugin permission: exit %d:\n%s", code, out)
+	}
+
+	// A plugin that is not there: KR7250 with a hint.
+	missing := nativeProject(t, map[string]string{
+		"krate.config.json":   `{"native":{"appId":"com.acme.app","plugins":["./native-plugins/nope"]}}`,
+		"src/pages/index.tsx": nativePage,
+	})
+	code, out = runKrate(t, "native", "check", missing)
+	if code != 1 || !strings.Contains(out, "KR7250") || !strings.Contains(out, "hint:") {
+		t.Errorf("missing plugin: exit %d:\n%s", code, out)
+	}
+}
+
+func TestNativeDoctorNeedsGoForPlugins(t *testing.T) {
+	root := pluginCLIProject(t, nativePage, "")
+	_, out := runKrate(t, "native", "doctor", root, "--json")
+	if !strings.Contains(out, "native plugins (./native-plugins/echo)") {
+		t.Errorf("doctor does not say that plugins need Go:\n%s", out)
+	}
+}
+
+func TestNativePluginInit(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "my-tool")
+	code, out := runKrate(t, "native", "plugin", "init", "my-tool", dir)
+	if code != 0 {
+		t.Fatalf("exit %d:\n%s", code, out)
+	}
+	for _, want := range []string{"krate-plugin.json", "mytool.go", "plugins: ['./", "import { hello } from 'krate/plugin/my-tool'"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "krate-plugin.json")); err != nil {
+		t.Error(err)
+	}
+	if code, out := runKrate(t, "native", "plugin", "init", "my-tool", dir); code != 1 || !strings.Contains(out, "already exists") {
+		t.Errorf("second init: exit %d:\n%s", code, out)
+	}
+	if code, out := runKrate(t, "native", "plugin", "init", "Bad Name", filepath.Join(t.TempDir(), "x")); code != 1 || !strings.Contains(out, "not a valid plugin name") {
+		t.Errorf("bad name: exit %d:\n%s", code, out)
+	}
+	if code, _ := runKrate(t, "native", "plugin"); code != 1 {
+		t.Errorf("plugin without a command: exit %d", code)
 	}
 }

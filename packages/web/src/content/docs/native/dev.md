@@ -104,3 +104,12 @@ shows which shell was found and whether the webview it needs is installed.
 - On Windows the Go host binary cannot be replaced while it runs; a Go edit reports that.
 - Page edits reload the page; there is no component-level state-preserving HMR.
 - The "Open in editor" button of the web overlay is not available.
+
+## Plugins
+
+An app with [native plugins](/docs/native/plugins/) runs under a shell that
+`krate native dev` builds for it with the Go toolchain (cached in
+`.krate/native/bin`), instead of the prebuilt `krate-shell`; `--shell` and
+`$KRATE_SHELL` are refused. Every plugin op is linked in dev. Editing the Go code,
+`go.mod` or manifest of a plugin inside the project restarts the session, because
+plugins are linked into the shell and not into the Go host child.

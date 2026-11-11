@@ -48,6 +48,48 @@ type Host struct {
 	srv       *http.Server
 	dir       string
 	attached  bool
+	// winCreated and winClosed are window callbacks given before Attach.
+	winCreated, winClosed []func(id string)
+}
+
+// OnWindow registers callbacks for windows the SDK learns about (AddWindow,
+// window.open) and for windows that closed. Either may be nil. It may be
+// called before or after Attach.
+func (h *Host) OnWindow(created, closed func(id string)) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.env != nil {
+		h.env.Windows.Subscribe(created, closed)
+		return
+	}
+	if created != nil {
+		h.winCreated = append(h.winCreated, created)
+	}
+	if closed != nil {
+		h.winClosed = append(h.winClosed, closed)
+	}
+}
+
+// Window returns the platform window with this SDK id ("" = main).
+func (h *Host) Window(id string) (platform.Window, string, bool) {
+	h.mu.Lock()
+	env := h.env
+	h.mu.Unlock()
+	if env == nil {
+		return nil, "", false
+	}
+	return env.Windows.Get(id)
+}
+
+// WindowIDs lists the SDK ids of the open windows.
+func (h *Host) WindowIDs() []string {
+	h.mu.Lock()
+	env := h.env
+	h.mu.Unlock()
+	if env == nil {
+		return nil
+	}
+	return env.Windows.List()
 }
 
 // NewHost returns a Host that is not attached to a platform yet.
@@ -134,6 +176,13 @@ func (h *Host) Attach(app platform.App) {
 	}
 	h.attached = true
 	h.env = bridge.NewEnv(app)
+	for _, f := range h.winCreated {
+		h.env.Windows.Subscribe(f, nil)
+	}
+	for _, f := range h.winClosed {
+		h.env.Windows.Subscribe(nil, f)
+	}
+	h.winCreated, h.winClosed = nil, nil
 	h.table = bridge.NewTable()
 	for _, a := range areas {
 		a.attach(h)

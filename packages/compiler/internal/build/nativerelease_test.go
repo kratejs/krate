@@ -510,11 +510,11 @@ func TestNativeModCopiesMatch(t *testing.T) {
 }
 
 func TestReleaseMainGeneration(t *testing.T) {
-	ts := releaseMain(nil)
+	ts := releaseMain(nil, false)
 	if !strings.Contains(ts, "shell.Main(shell.MustZipFS(appZip), nil)") || strings.Contains(ts, "scheme") {
 		t.Errorf("TS-only main:\n%s", ts)
 	}
-	g := releaseMain([]string{"example.com/rel/.krate/native/src/lib", "example.com/rel/.krate/native/other"})
+	g := releaseMain([]string{"example.com/rel/.krate/native/src/lib", "example.com/rel/.krate/native/other"}, false)
 	for _, w := range []string{"//go:embed app.zip", "runtime.LockOSThread()", "glue0.Register(r)", "glue1.Register(r)", `"github.com/kratejs/krate/packages/native/scheme"`} {
 		if !strings.Contains(g, w) {
 			t.Errorf("main lacks %q:\n%s", w, g)
@@ -534,7 +534,14 @@ type releaseApp struct {
 // runReleaseBinary starts an executable with --browser and waits for ready.
 func runReleaseBinary(t *testing.T, bin string) *releaseApp {
 	t.Helper()
-	cmd := exec.Command(bin, "--browser")
+	return runBrowserBinary(t, bin)
+}
+
+// runBrowserBinary is runReleaseBinary with more arguments (the app directory
+// of a shell that is not a release executable).
+func runBrowserBinary(t *testing.T, bin string, extra ...string) *releaseApp {
+	t.Helper()
+	cmd := exec.Command(bin, append([]string{"--browser"}, extra...)...)
 	cmd.Stderr = &testLogWriter{t: t}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

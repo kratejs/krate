@@ -23,6 +23,39 @@ type Import struct {
 	// position of the import, for diagnostics. Optional.
 	From      string
 	Line, Col int
+	// ID, when set, is the module id of the import instead of the path
+	// relative to the project root; the import may then be outside the root
+	// (a plugin). File must be a package directory.
+	ID string
+	// ModuleDir is the directory `go list` runs in for this import: the root
+	// of the Go module that holds File. Default: the project root.
+	ModuleDir string
+	// Rename maps Go names to the names the UI and the registry ids use
+	// (plugin ops are lowerCamel: "CPULoad" is "cpuLoad").
+	Rename map[string]string
+	// Pattern and Env, when set, replace the package pattern go list is given
+	// (default "./<directory>" relative to ModuleDir) and its environment.
+	Pattern string
+	Env     []string
+}
+
+// PkgInfo describes a user package for Options.GlueDir.
+type PkgInfo struct {
+	// Dir and ImportPath are the package's; ModulePath is its Go module.
+	Dir, ImportPath, ModulePath string
+	// ModuleDir is the directory of the module.
+	ModuleDir string
+	// ID is the module id of the import the package serves.
+	ID string
+}
+
+// Options tune GenerateWith.
+type Options struct {
+	// GlueDir, when set, decides where the glue package of a user package
+	// goes: its directory and the import path of that directory. Default:
+	// outDir/glue/<package dir relative to the project root>, which must be
+	// inside the package's module.
+	GlueDir func(p PkgInfo) (dir, importPath string, err error)
 }
 
 // Glue is one generated Go package.
@@ -89,6 +122,11 @@ func glueDirName(rel string) string {
 // Generate type-checks the Go code behind the imports and writes glue, stubs
 // and declarations into outDir (see the package comment).
 func Generate(root string, imports []Import, outDir string) (*Result, []diag.Diagnostic, error) {
+	return GenerateWith(root, imports, outDir, Options{})
+}
+
+// GenerateWith is Generate with options.
+func GenerateWith(root string, imports []Import, outDir string, opts Options) (*Result, []diag.Diagnostic, error) {
 	root, err := filepath.Abs(root)
 	if err != nil {
 		return nil, nil, err
@@ -119,7 +157,13 @@ func Generate(root string, imports []Import, outDir string) (*Result, []diag.Dia
 	}
 	sort.Strings(dirs)
 
-	listed, byDir, goErr, lerr := goList(root, dirs)
+	// Directories are listed in the module they belong to: the project root,
+	// or the ModuleDir of the import that names them.
+	listRoot := map[string]listSpec{}
+	for _, m := range mods {
+		listRoot[filepath.Clean(a.pkgDir(m))] = listSpec{root: m.listRoot(root), pattern: m.imp.Pattern, env: m.imp.Env}
+	}
+	listed, byDir, goErr, lerr := goListIn(listRoot, dirs)
 	if lerr != nil {
 		a.add(diag.New("", 0, 0, lerr.Error(), "install Go and make sure the go command is on PATH", "").WithCode(diag.CodeGoBindLoad))
 		return nil, a.diags, nil
@@ -219,6 +263,20 @@ func Generate(root string, imports []Import, outDir string) (*Result, []diag.Dia
 		}
 		rel, _ := filepath.Rel(root, up.dir)
 		gdir := filepath.Join(outDir, "glue", filepath.FromSlash(glueDirName(rel)))
+		customImport := ""
+		if opts.GlueDir != nil {
+			id := ""
+			for _, m := range mods {
+				if filepath.Clean(m.pkg.dir) == key {
+					id = m.id
+				}
+			}
+			d, ip, err := opts.GlueDir(PkgInfo{Dir: up.dir, ImportPath: up.importPath, ModulePath: up.modPath, ModuleDir: up.modDir, ID: id})
+			if err != nil {
+				return nil, nil, err
+			}
+			gdir, customImport = d, ip
+		}
 		if prev, dup := glueDirs[gdir]; dup {
 			a.add(diag.New(a.display(up.dir), 0, 0, "the glue directory for this package collides with the one for "+a.display(prev),
 				"rename one of the directories", "").WithCode(diag.CodeGoBindModule))
@@ -226,7 +284,7 @@ func Generate(root string, imports []Import, outDir string) (*Result, []diag.Dia
 		}
 		glueDirs[gdir] = up.dir
 		grel, err := filepath.Rel(up.modDir, gdir)
-		if err != nil || strings.HasPrefix(grel, "..") {
+		if customImport == "" && (err != nil || strings.HasPrefix(grel, "..")) {
 			a.add(diag.New(a.display(outDir), 0, 0, "the output directory is outside the Go module at "+up.modDir,
 				"generate into a directory inside the module, such as .krate/native", "").WithCode(diag.CodeGoBindModule))
 			continue
@@ -239,7 +297,11 @@ func Generate(root string, imports []Import, outDir string) (*Result, []diag.Dia
 		if err := writeIfChanged(file, src); err != nil {
 			return nil, nil, err
 		}
-		res.Glue = append(res.Glue, Glue{ImportPath: up.modPath + "/" + filepath.ToSlash(grel), Dir: gdir, File: file})
+		importPath := up.modPath + "/" + filepath.ToSlash(grel)
+		if customImport != "" {
+			importPath = customImport
+		}
+		res.Glue = append(res.Glue, Glue{ImportPath: importPath, Dir: gdir, File: file})
 	}
 	if len(a.diags) > 0 {
 		return nil, a.diags, nil
@@ -353,6 +415,14 @@ func (a *analyzer) importPos(imp Import, fallback string) token.Position {
 	return token.Position{}
 }
 
+// listRoot is the directory go list runs in for m.
+func (m *module) listRoot(root string) string {
+	if m.imp.ModuleDir != "" {
+		return m.imp.ModuleDir
+	}
+	return root
+}
+
 func (a *analyzer) pkgDir(m *module) string {
 	if m.isDir {
 		return m.src
@@ -379,7 +449,7 @@ func (a *analyzer) modules(imports []Import) []*module {
 			bad(imp, "", imp.File+" does not exist", "check the path of the .go import")
 			continue
 		}
-		if !a.inRoot(p) {
+		if imp.ID == "" && !a.inRoot(p) {
 			bad(imp, "", a.display(p)+" is outside the project root", "host code must live inside the project")
 			continue
 		}
@@ -392,6 +462,13 @@ func (a *analyzer) modules(imports []Import) []*module {
 		id := filepath.ToSlash(rel)
 		if !isDir {
 			id = strings.TrimSuffix(id, ".go")
+		}
+		if imp.ID != "" {
+			if !isDir {
+				bad(imp, "", a.display(p)+" is not a package directory", "a plugin is a Go package directory")
+				continue
+			}
+			id = imp.ID
 		}
 		if id == "." {
 			bad(imp, "", "the project root cannot be imported as a package", "move the host code into a subdirectory")
@@ -406,7 +483,7 @@ func (a *analyzer) modules(imports []Import) []*module {
 				"rename the directory or the file so the two ids differ")
 			continue
 		}
-		m := &module{id: id, src: p, isDir: isDir, names: append([]string(nil), imp.Names...), imp: imp}
+		m := &module{id: id, src: p, isDir: isDir, names: append([]string(nil), imp.Names...), imp: imp, rename: imp.Rename}
 		byPath[p], byID[id] = m, m
 		out = append(out, m)
 	}

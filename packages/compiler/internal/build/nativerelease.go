@@ -130,14 +130,26 @@ type NativeReport struct {
 	// GoImports are the Go host imports of SDK areas (they decide linking, not
 	// permissions).
 	GoImports []capability.Site `json:"goImports,omitempty"`
-	HostJS    bool              `json:"hostJs"`
-	GoHost    bool              `json:"goHost"`
+	// Plugins are the native plugins linked into the executables, with the ops
+	// the build kept and the ops it left out.
+	Plugins []NativeReportPlugin `json:"plugins,omitempty"`
+	HostJS  bool                 `json:"hostJs"`
+	GoHost  bool                 `json:"goHost"`
 	// Tags are the go build tags of the executables.
 	Tags    []string       `json:"tags,omitempty"`
 	PGO     string         `json:"pgo,omitempty"`
 	Targets []NativeTarget `json:"targets,omitempty"`
 	// Memory is added by `krate native profile --memory`.
 	Memory *NativeMemoryReport `json:"memory,omitempty"`
+}
+
+// NativeReportPlugin is one linked plugin.
+type NativeReportPlugin struct {
+	Name    string   `json:"name"`
+	Version string   `json:"version,omitempty"`
+	Ops     []string `json:"ops"`
+	// Shaken lists the declared ops no code uses; the executable does not link them.
+	Shaken []string `json:"shaken,omitempty"`
 }
 
 // NativeReportPermission is a permission with the code that needs it.
@@ -211,6 +223,9 @@ func (b *Builder) BuildNativeRelease(opts NativeReleaseOptions) (*NativeReleaseR
 	}
 	res := &NativeReleaseResult{OutDir: outDir}
 	compiled := mode != "never" && haveGo
+	if !compiled && HasNativePlugins(b.Cfg) {
+		return nil, nativeDiagError([]diag.Diagnostic{needGoDiag("native plugins are Go code linked into the executable, so the app needs the Go toolchain and native.release.compile other than \"never\"")}, "native release error(s)")
+	}
 	if mode == "auto" && !haveGo {
 		res.Notes = append(res.Notes, "the go command was not found; building the prebuilt-shell layout (dist-native/app) instead of an executable")
 	}
@@ -262,7 +277,7 @@ func (b *Builder) BuildNativeRelease(opts NativeReleaseOptions) (*NativeReleaseR
 	hasTS := ar.Manifest.HostJS != nil
 	res.Tags = append(ar.Capabilities.Tags(hasTS), opts.ExtraTags...)
 
-	buildDir, pkgArg, extra, err := b.writeReleasePackage(ar, hasGo)
+	buildDir, pkgDir, pkgArg, extra, err := b.writeReleasePackage(ar, hasGo)
 	if err != nil {
 		return nil, err
 	}
@@ -271,7 +286,7 @@ func (b *Builder) BuildNativeRelease(opts NativeReleaseOptions) (*NativeReleaseR
 		res.PGO = p
 	}
 	env := os.Environ()
-	if !hasGo {
+	if !hasGo || b.nativePlugins != nil {
 		env = append(env, "GOWORK=off", "GOFLAGS=-mod=mod")
 	}
 	name := fileSafe(ar.Manifest.ProductName)
@@ -286,10 +301,7 @@ func (b *Builder) BuildNativeRelease(opts NativeReleaseOptions) (*NativeReleaseR
 		if goos == "windows" {
 			// The Go linker picks the .syso up from the main package for this
 			// target only (icon, version information, DPI-aware manifest).
-			syso := filepath.Join(buildDir, "rsrc_windows_"+goarch+".syso")
-			if pkgArg != "." {
-				syso = filepath.Join(b.Root, filepath.FromSlash(strings.TrimPrefix(pkgArg, "./")), "rsrc_windows_"+goarch+".syso")
-			}
+			syso := filepath.Join(pkgDir, "rsrc_windows_"+goarch+".syso")
 			if err := pkg.WindowsResources(b.Root, b.Cfg, syso); err != nil {
 				res.Notes = append(res.Notes, "no Windows resources (icon, version information): "+err.Error())
 			}
@@ -395,14 +407,18 @@ func fileSafe(s string) string {
 // writeReleasePackage writes the generated main package and the embedded
 // archive. It returns the package directory, the directory to run go build in
 // and the package argument.
-func (b *Builder) writeReleasePackage(ar *NativeAppResult, hasGo bool) (buildDir, pkgArg string, extra []string, err error) {
-	var pkgDir string
+func (b *Builder) writeReleasePackage(ar *NativeAppResult, hasGo bool) (buildDir, pkgDir, pkgArg string, extra []string, err error) {
 	base := filepath.Join(b.nativeOutDir(), "release")
 	name := "mod"
 	if hasGo {
 		name = "pkg"
 	}
 	pkgDir = filepath.Join(base, name)
+	if st := b.nativePlugins; st != nil && !hasGo {
+		// The executable is built inside the plugin shell module, which
+		// already requires the plugins.
+		pkgDir = filepath.Join(st.out.Dir, "cmd", "release")
+	}
 	if err = os.RemoveAll(pkgDir); err != nil {
 		return
 	}
@@ -418,17 +434,20 @@ func (b *Builder) writeReleasePackage(ar *NativeAppResult, hasGo bool) (buildDir
 			glues = append(glues, g.ImportPath)
 		}
 	}
-	if err = os.WriteFile(filepath.Join(pkgDir, "main.go"), []byte(releaseMain(glues)), 0o644); err != nil {
+	if err = os.WriteFile(filepath.Join(pkgDir, "main.go"), []byte(releaseMain(glues, b.nativePlugins != nil)), 0o644); err != nil {
 		return
 	}
 	if hasGo {
 		extra, err = b.writeReleaseModfile(base)
-		return b.Root, "./" + filepath.ToSlash(mustRel(b.Root, pkgDir)), extra, err
+		return b.Root, pkgDir, "./" + filepath.ToSlash(mustRel(b.Root, pkgDir)), extra, err
+	}
+	if st := b.nativePlugins; st != nil {
+		return st.out.Dir, pkgDir, "./cmd/release", nil, nil
 	}
 	if err = b.writeReleaseModule(pkgDir); err != nil {
 		return
 	}
-	return pkgDir, ".", nil, nil
+	return pkgDir, pkgDir, ".", nil, nil
 }
 
 func mustRel(base, p string) string {
@@ -440,7 +459,7 @@ func mustRel(base, p string) string {
 }
 
 // releaseMain is the generated main package.
-func releaseMain(glues []string) string {
+func releaseMain(glues []string, withPlugins bool) string {
 	var sb strings.Builder
 	sb.WriteString("// Code generated by krate. DO NOT EDIT.\n\npackage main\n\nimport (\n\t_ \"embed\"\n\t\"runtime\"\n\n")
 	for i, g := range glues {
@@ -449,18 +468,34 @@ func releaseMain(glues []string) string {
 	if len(glues) > 0 {
 		fmt.Fprintf(&sb, "\t%q\n", nativeGoModulePath+"/scheme")
 	}
+	if withPlugins {
+		sb.WriteString("\t\"krate.local/pluginshell/registry\"\n")
+	}
 	fmt.Fprintf(&sb, "\t%q\n)\n\n", nativeGoModulePath+"/shell")
 	sb.WriteString("//go:embed app.zip\nvar appZip []byte\n\n")
 	sb.WriteString("// The platform layer needs the main goroutine on the main OS thread.\nfunc init() { runtime.LockOSThread() }\n\n")
+	call := "shell.Main(shell.MustZipFS(appZip), nil)"
+	if withPlugins {
+		call = "shell.MainPlugins(shell.MustZipFS(appZip), nil, registry.All())"
+	}
 	if len(glues) == 0 {
-		sb.WriteString("func main() { shell.Main(shell.MustZipFS(appZip), nil) }\n")
+		sb.WriteString("func main() { " + call + " }\n")
 		return sb.String()
 	}
-	sb.WriteString("func main() {\n\tshell.Main(shell.MustZipFS(appZip), func(r *scheme.Registry) {\n")
+	if withPlugins {
+		call = "shell.MainPlugins(shell.MustZipFS(appZip), func(r *scheme.Registry) {\n"
+	} else {
+		call = "shell.Main(shell.MustZipFS(appZip), func(r *scheme.Registry) {\n"
+	}
+	sb.WriteString("func main() {\n\t" + call)
 	for i := range glues {
 		fmt.Fprintf(&sb, "\t\tglue%d.Register(r)\n", i)
 	}
-	sb.WriteString("\t})\n}\n")
+	if withPlugins {
+		sb.WriteString("\t}, registry.All())\n}\n")
+	} else {
+		sb.WriteString("\t})\n}\n")
+	}
 	return sb.String()
 }
 
@@ -472,7 +507,7 @@ func releaseMain(glues []string) string {
 // workspace owns the module graph.
 func (b *Builder) writeReleaseModfile(dir string) ([]string, error) {
 	out, _ := exec.Command("go", "env", "GOWORK").Output()
-	if w := strings.TrimSpace(string(out)); w != "" && w != "off" {
+	if w := strings.TrimSpace(string(out)); w != "" && w != "off" && b.nativePlugins == nil {
 		return nil, nil
 	}
 	gomod, err := os.ReadFile(filepath.Join(b.Root, "go.mod"))
@@ -487,6 +522,18 @@ func (b *Builder) writeReleaseModfile(dir string) ([]string, error) {
 		}
 	}
 	merged := mergeLines(string(sum), nativeSum)
+	if st := b.nativePlugins; st != nil {
+		lines, err := b.pluginReleaseModLines(st)
+		if err != nil {
+			return nil, err
+		}
+		gomod = append(gomod, []byte(lines)...)
+		for _, p := range st.list {
+			if data, err := os.ReadFile(filepath.Join(p.ModuleDir, "go.sum")); err == nil {
+				merged = mergeLines(merged, string(data))
+			}
+		}
+	}
 	modfile := filepath.Join(dir, "go.release.mod")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
@@ -653,6 +700,22 @@ func (b *Builder) nativeReport(ar *NativeAppResult, layout string, bins []Native
 		r.Areas = NativeReportAreas{Linked: nonNil(c.Linked()), Shaken: nonNil(c.Shaken())}
 		r.GoImports = c.GoSites
 	}
+	if st := b.nativePlugins; st != nil {
+		for _, l := range st.out.Linked {
+			rp := NativeReportPlugin{Name: l.Plugin.Manifest.Name, Version: l.Plugin.Manifest.Version, Ops: []string{}}
+			kept := map[string]bool{}
+			for _, o := range l.Ops {
+				rp.Ops = append(rp.Ops, o.Name)
+				kept[o.Name] = true
+			}
+			for _, o := range l.Plugin.Manifest.Ops {
+				if !kept[o.Name] {
+					rp.Shaken = append(rp.Shaken, o.Name)
+				}
+			}
+			r.Plugins = append(r.Plugins, rp)
+		}
+	}
 	for _, bin := range bins {
 		r.Targets = append(r.Targets, NativeTarget{Target: bin.Target, Binary: bin.Path, Size: bin.Size})
 	}
@@ -711,11 +774,20 @@ func (b *Builder) AnalyzeNativeCapabilities() (*capability.Result, []diag.Diagno
 	if len(goFiles) > 0 && !goOnPath() {
 		goFiles = nil // the Go imports cannot be listed without go
 	}
-	res, err := capability.Analyze(b.Root, b.Cfg, p, capability.Options{GoFiles: goFiles})
+	var pluginDiags []diag.Diagnostic
+	opts := capability.Options{GoFiles: goFiles}
+	if HasNativePlugins(b.Cfg) {
+		list, ds := b.ResolveNativePlugins()
+		pluginDiags = ds
+		opts.Plugins = PluginInfos(list)
+	} else {
+		pluginDiags = checkPluginPermissions(b.Cfg, nil)
+	}
+	res, err := capability.Analyze(b.Root, b.Cfg, p, opts)
 	if err != nil {
 		return nil, nil, err
 	}
-	return res, permissionDiagnostics(res, nativeEffective(b.Cfg).Permissions), nil
+	return res, append(pluginDiags, permissionDiagnostics(res, nativeEffective(b.Cfg).Permissions)...), nil
 }
 
 // permissionDiagnostics reports each permission the code needs that the
@@ -756,7 +828,12 @@ func FormatNativeCapabilities(res *capability.Result, allow []string) string {
 			if p == "fs" {
 				sites = append(sites, res.Needs["fs:read"]...)
 			}
-			fmt.Fprintf(&sb, "  %s\n", p)
+			if strings.HasPrefix(p, "plugin:") {
+				name, _, _ := strings.Cut(strings.TrimPrefix(p, "plugin:"), ".")
+				fmt.Fprintf(&sb, "  %s  (plugin %s)\n", p, name)
+			} else {
+				fmt.Fprintf(&sb, "  %s\n", p)
+			}
 			for i, s := range sites {
 				if i == 3 {
 					fmt.Fprintf(&sb, "    ... and %d more\n", len(sites)-3)
@@ -768,6 +845,16 @@ func FormatNativeCapabilities(res *capability.Result, allow []string) string {
 	}
 	if len(allow) > 0 {
 		fmt.Fprintf(&sb, "allowlist: %s\n", strings.Join(allow, ", "))
+	}
+	if len(res.PluginOps) > 0 {
+		var names []string
+		for n := range res.PluginOps {
+			names = append(names, n)
+		}
+		sort.Strings(names)
+		for _, n := range names {
+			fmt.Fprintf(&sb, "plugin %s: ops used: %s (the others are left out of release builds)\n", n, strings.Join(res.PluginOps[n], ", "))
+		}
 	}
 	linked, shaken := res.Linked(), res.Shaken()
 	fmt.Fprintf(&sb, "sdk areas linked: %s\n", joinOrNone(append([]string{"os", "permission"}, linked...)))

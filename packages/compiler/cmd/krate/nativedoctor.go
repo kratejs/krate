@@ -49,6 +49,9 @@ func doctorInputs(root string, cfg *config.Config) doctor.Inputs {
 	for _, rt := range n.Host.Islands {
 		in.Islands = append(in.Islands, rt)
 	}
+	if build.HasNativePlugins(cfg) {
+		in.Plugins = append(in.Plugins, cfg.Native.Plugins...)
+	}
 	if p, err := native.Analyze(root, cfg); err == nil {
 		for _, m := range p.Modules {
 			if m.Source == native.SourceGo {
