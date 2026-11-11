@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -448,7 +449,7 @@ func TestNativeKeygen(t *testing.T) {
 	if code != 0 || !strings.Contains(out, "publicKey:") {
 		t.Fatalf("exit %d:\n%s", code, out)
 	}
-	if st, err := os.Stat(key); err != nil || st.Mode().Perm() != 0o600 {
+	if st, err := os.Stat(key); err != nil || (runtime.GOOS != "windows" && st.Mode().Perm() != 0o600) {
 		t.Fatalf("key file: %v %v", st, err)
 	}
 	if code, out := runKrate(t, "native", "keygen", "--key-out", key); code != 1 || !strings.Contains(out, "KR7227") {

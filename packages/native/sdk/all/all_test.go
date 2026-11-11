@@ -11,6 +11,7 @@ import (
 	"github.com/kratejs/krate/packages/native/krate"
 	"github.com/kratejs/krate/packages/native/scheme"
 	"github.com/kratejs/krate/packages/native/sdk"
+	"github.com/kratejs/krate/packages/native/sdk/db"
 	"github.com/kratejs/krate/packages/native/sdk/internal/fakeplat"
 	"github.com/kratejs/krate/packages/native/sdk/internal/sdktest"
 	sdkos "github.com/kratejs/krate/packages/native/sdk/os"
@@ -21,6 +22,9 @@ import (
 func isolate(t *testing.T) {
 	t.Helper()
 	home := t.TempDir()
+	// Windows cannot remove an open database file; this runs before the
+	// TempDir cleanup.
+	t.Cleanup(func() { _ = db.CloseDefault() })
 	for _, k := range []string{"XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR"} {
 		t.Setenv(k, "")
 	}

@@ -169,10 +169,12 @@ func TestAssembleShellDist(t *testing.T) {
 	if filepath.Dir(exe) != dir || filepath.Ext(exe) != "" || strings.ContainsAny(filepath.Base(exe), ":") {
 		t.Errorf("exe = %s", exe)
 	}
-	if st, err := os.Stat(exe); err != nil || st.Mode()&0o111 == 0 {
+	// Windows has no exec bit: only the files need to exist there.
+	modes := runtime.GOOS != "windows"
+	if st, err := os.Stat(exe); err != nil || modes && st.Mode()&0o111 == 0 {
 		t.Errorf("shell not executable: %v", err)
 	}
-	if st, err := os.Stat(filepath.Join(dir, "app", "gohost", "krate-gohost")); err != nil || st.Mode()&0o111 == 0 {
+	if st, err := os.Stat(filepath.Join(dir, "app", "gohost", "krate-gohost")); err != nil || modes && st.Mode()&0o111 == 0 {
 		t.Errorf("app copy lost the mode of the Go host: %v", err)
 	}
 	exe, err = assembleShellDist(out, app, shell, "Acme", "windows", "arm64")

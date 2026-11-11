@@ -108,17 +108,26 @@ func packageMac(o *Options, ic *Icon, want map[string]bool, stage string, res *R
 		}
 	}
 	res.add(Artifact{Path: filepath.Join(stage, app), Format: "app"})
-	return macArchives(o, want, stage, app, res)
+	var staged *tree
+	if o.Signer == nil {
+		staged = t
+	}
+	return macArchives(o, want, stage, app, res, staged)
 }
 
-// macArchives builds the update zip and the dmg from the staged .app.
-func macArchives(o *Options, want map[string]bool, stage, app string, res *Result) error {
+// macArchives builds the update zip and the dmg from the staged .app. When
+// nothing signed the stage, built is the tree that was written to it and is
+// archived as is: a Windows host cannot read modes back from disk.
+func macArchives(o *Options, want map[string]bool, stage, app string, res *Result, built *tree) error {
 	m, p := o.Meta, o.Payload
 
-	// Reload so the archives carry what signing wrote.
-	signed := newTree()
-	if err := signed.addDisk("", stage); err != nil {
-		return wrapWrite(stage, err)
+	signed := built
+	if signed == nil {
+		// Reload so the archives carry what signing wrote.
+		signed = newTree()
+		if err := signed.addDisk("", stage); err != nil {
+			return wrapWrite(stage, err)
+		}
 	}
 	zipPath := filepath.Join(o.OutDir, artifactName(m, p, ".zip"))
 	if err := writeZipFile(zipPath, signed, ""); err != nil {

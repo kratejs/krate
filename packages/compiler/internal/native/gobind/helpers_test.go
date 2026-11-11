@@ -1,6 +1,7 @@
 package gobind
 
 import (
+	"bytes"
 	"flag"
 	"os"
 	"os/exec"
@@ -94,6 +95,8 @@ func golden(t *testing.T, name string, got []byte) {
 	if err != nil {
 		t.Fatalf("missing golden %s (run with -update): %v", path, err)
 	}
+	// A checkout with autocrlf may have turned the golden into CRLF.
+	want = bytes.ReplaceAll(want, []byte("\r\n"), []byte("\n"))
 	if string(want) != string(got) {
 		t.Errorf("%s differs from the golden file (run with -update to accept)\n--- got ---\n%s", name, got)
 	}

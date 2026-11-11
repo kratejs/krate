@@ -6,6 +6,7 @@ import (
 	"go/parser"
 	"go/token"
 	"go/types"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -338,7 +339,8 @@ func TestDiagnosticsOnRealPackage(t *testing.T) {
 	if len(diags) != 1 || diags[0].Code != diag.CodeGoBindModule {
 		t.Fatalf("outside: %v", diags)
 	}
-	_, diags, _ = Generate(root, []Import{{File: "src/lib/tasks.go", Names: []string{"List"}}}, "/elsewhere/native")
+	elsewhere := filepath.Join(filepath.VolumeName(root)+string(filepath.Separator), "elsewhere", "native")
+	_, diags, _ = Generate(root, []Import{{File: "src/lib/tasks.go", Names: []string{"List"}}}, elsewhere)
 	if len(diags) != 1 || diags[0].Code != diag.CodeGoBindModule {
 		t.Fatalf("outside module output: %v", diags)
 	}

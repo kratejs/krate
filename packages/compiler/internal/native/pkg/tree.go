@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -117,7 +118,7 @@ func (t *tree) addDisk(dest, src string) error {
 			}
 		}
 	case st.Mode().IsRegular():
-		t.addFile(dest, st.Mode(), src)
+		t.addFile(dest, diskFileMode(st.Mode(), src), src)
 	default:
 		return fmt.Errorf("%s is not a regular file, directory or symlink", src)
 	}
@@ -322,4 +323,49 @@ func createFile(p string) (*os.File, error) {
 		return nil, err
 	}
 	return os.Create(p)
+}
+
+// modesUnreliable is true on hosts whose file systems carry no Unix mode
+// bits: every file reads back as 0666, so a packaged binary would lose its
+// executable bit.
+var modesUnreliable = runtime.GOOS == "windows"
+
+// diskFileMode returns the mode to package for the file at src.
+func diskFileMode(mode fs.FileMode, src string) fs.FileMode {
+	if !modesUnreliable {
+		return mode
+	}
+	var head [4]byte
+	if f, err := os.Open(src); err == nil {
+		n, _ := io.ReadFull(f, head[:])
+		f.Close()
+		return unixModeFor(true, mode, head[:n], filepath.Ext(src))
+	}
+	return unixModeFor(true, mode, nil, filepath.Ext(src))
+}
+
+// unixModeFor maps a mode read on a host without mode bits to one for a Unix
+// package: 0755 for programs (ELF, Mach-O, PE, shebang scripts, .sh), else
+// 0644. A host with real modes keeps the mode it read.
+func unixModeFor(unreliable bool, mode fs.FileMode, head []byte, ext string) fs.FileMode {
+	if !unreliable {
+		return mode
+	}
+	if looksExecutable(head) || ext == ".sh" || ext == ".exe" {
+		return 0o755
+	}
+	return 0o644
+}
+
+func looksExecutable(h []byte) bool {
+	switch {
+	case len(h) >= 4 && h[0] == 0x7f && h[1] == 'E' && h[2] == 'L' && h[3] == 'F':
+		return true
+	case len(h) >= 4 && (string(h) == "\xfe\xed\xfa\xce" || string(h) == "\xfe\xed\xfa\xcf" ||
+		string(h) == "\xce\xfa\xed\xfe" || string(h) == "\xcf\xfa\xed\xfe" || string(h) == "\xca\xfe\xba\xbe"):
+		return true
+	case len(h) >= 2 && (string(h[:2]) == "#!" || string(h[:2]) == "MZ"):
+		return true
+	}
+	return false
 }

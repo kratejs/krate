@@ -18,7 +18,7 @@ Only full updates exist today; delta updates are a planned follow-up.
 krate native keygen --key-out krate-updater.key
 ```
 
-writes the private key (mode 0600; keep it out of git) and prints the public
+writes the private key (mode 0600 on macOS and Linux, where Windows has no mode bits and relies on your profile folder permissions; keep it out of git) and prints the public
 key:
 
 ```ts

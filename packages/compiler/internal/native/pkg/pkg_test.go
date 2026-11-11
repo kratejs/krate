@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -616,7 +617,8 @@ func TestKeygenAndLoadKey(t *testing.T) {
 	if err != nil || pub == "" {
 		t.Fatalf("%v", err)
 	}
-	if st, _ := os.Stat(p); st.Mode().Perm() != 0o600 {
+	// Windows has no mode bits; the key is protected by the profile ACLs.
+	if st, _ := os.Stat(p); runtime.GOOS != "windows" && st.Mode().Perm() != 0o600 {
 		t.Fatalf("key mode %v", st.Mode())
 	}
 	if _, err := GenerateUpdaterKey(p, false); err == nil {

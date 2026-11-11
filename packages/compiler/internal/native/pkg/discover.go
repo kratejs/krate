@@ -227,7 +227,7 @@ func RebuildMacArchives(o Options, stage string) (*Result, error) {
 	}
 	res := &Result{Stage: stage}
 	res.add(Artifact{Path: filepath.Join(stage, app), Format: "app"})
-	if err := macArchives(&o, want, stage, app, res); err != nil {
+	if err := macArchives(&o, want, stage, app, res, nil); err != nil {
 		return nil, err
 	}
 	if err := signUpdates(&o, res); err != nil {
