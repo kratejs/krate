@@ -17,6 +17,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/native"
 	"github.com/kratejs/krate/packages/compiler/internal/native/capability"
+	"github.com/kratejs/krate/packages/compiler/internal/native/features"
 	"github.com/kratejs/krate/packages/compiler/internal/native/gobind"
 	"github.com/kratejs/krate/packages/compiler/internal/native/hostts"
 	"github.com/kratejs/krate/packages/compiler/internal/native/runtimes"
@@ -46,8 +47,17 @@ type NativeManifest struct {
 	// Updater is native.updater: the feed URL template and the Ed25519
 	// public key that verifies update files.
 	Updater *NativeUpdaterMeta `json:"updater,omitempty"`
-	Debug   bool               `json:"debug"`
+	// Memory is the memory profile (native.memory): "balanced", "minimal" or
+	// "performance". Features says which optional webview features the app
+	// uses (detected from the UI, overridden by native.features); the profiles
+	// switch the unused ones off.
+	Memory   string              `json:"memory,omitempty"`
+	Features *NativeFeaturesMeta `json:"features,omitempty"`
+	Debug    bool                `json:"debug"`
 }
+
+// NativeFeaturesMeta is the features block of app.json.
+type NativeFeaturesMeta = features.Set
 
 // NativeUpdaterMeta is the updater block of app.json.
 type NativeUpdaterMeta struct {
@@ -78,6 +88,9 @@ type NativeFallback struct {
 type NativeHostJSMeta struct {
 	Bundle string `json:"bundle"`
 	Map    string `json:"map,omitempty"`
+	// MemoryMB is native.host.memoryMB: the QuickJS heap limit. 0 means the
+	// profile's default.
+	MemoryMB int `json:"memoryMB,omitempty"`
 }
 
 // NativeHostChildMeta locates one JavaScript host child and lists what it
@@ -273,8 +286,18 @@ func (b *Builder) BuildNativeApp(opts NativeAppOptions) (*NativeAppResult, error
 		Assets:      "dist",
 		Fallbacks:   fallbacks,
 		Permissions: append([]string(nil), eff.Permissions...),
+		Memory:      eff.Memory,
 		Debug:       opts.Dev,
 	}
+	detected, err := features.ScanDir(distDir)
+	if err != nil {
+		return nil, fmt.Errorf("scanning the UI for webview features: %w", err)
+	}
+	resolved := detected.Resolve(features.Override{
+		Media: eff.Features.Media, WebAudio: eff.Features.WebAudio, WebGL: eff.Features.WebGL,
+		WebRTC: eff.Features.WebRTC, SpellCheck: eff.Features.SpellCheck,
+	})
+	m.Features = &resolved
 	m.Window.Permissions = eff.Window.Permissions
 	if opts.Derive {
 		cap, ds, err := b.deriveNativePermissions(eff)
@@ -315,7 +338,7 @@ func (b *Builder) BuildNativeApp(opts NativeAppOptions) (*NativeAppResult, error
 		if err := copyNativeFile(h.HostBundle, filepath.Join(appDir, "host", "host.js")); err != nil {
 			return nil, err
 		}
-		m.HostJS = &NativeHostJSMeta{Bundle: "host/host.js"}
+		m.HostJS = &NativeHostJSMeta{Bundle: "host/host.js", MemoryMB: eff.Host.MemoryMB}
 		if h.SourceMap != "" {
 			if _, err := os.Stat(h.SourceMap); err == nil {
 				if err := copyNativeFile(h.SourceMap, filepath.Join(appDir, "host", "host.js.map")); err != nil {

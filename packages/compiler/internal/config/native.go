@@ -42,6 +42,23 @@ type NativeConfig struct {
 	Bundle NativeBundle `json:"bundle,omitempty"`
 	// Updater configures in-app updates. Nil disables them.
 	Updater *NativeUpdater `json:"updater,omitempty"`
+	// Memory is the memory profile: "balanced" (default), "minimal" or
+	// "performance" (the engine defaults). See docs native/memory.
+	Memory string `json:"memory,omitempty"`
+	// Features overrides the detected engine features. A feature the UI code
+	// uses is switched on under "balanced" and "minimal" unless set false.
+	Features NativeFeatures `json:"features,omitempty"`
+}
+
+// NativeFeatures are explicit overrides for the webview features that the
+// memory profiles switch off when the UI does not use them. Nil means
+// "detect from the code".
+type NativeFeatures struct {
+	Media      *bool `json:"media,omitempty"`
+	WebAudio   *bool `json:"webaudio,omitempty"`
+	WebGL      *bool `json:"webgl,omitempty"`
+	WebRTC     *bool `json:"webrtc,omitempty"`
+	SpellCheck *bool `json:"spellcheck,omitempty"`
 }
 
 // NativeWindow configures the main window.
@@ -67,6 +84,9 @@ type NativeHost struct {
 	Version string `json:"version,omitempty"`
 	// Bundle ships the runtime inside the app. Default true.
 	Bundle *bool `json:"bundle,omitempty"`
+	// MemoryMB overrides the QuickJS heap limit of the in-process host
+	// runtime. Default: 64 (balanced), 32 (minimal), 256 (performance).
+	MemoryMB int `json:"memoryMB,omitempty"`
 	// Islands maps a package to the runtime that runs it ("node", "bun",
 	// "deno" or "quickjs") when it cannot run in the main host runtime.
 	Islands map[string]string `json:"islands,omitempty"`
@@ -154,6 +174,7 @@ var (
 	nativeCompileModes   = []string{"auto", "always", "never"}
 	nativeInstallers     = []string{"msix", "nsis"}
 	nativeLinuxFormats   = []string{"deb", "rpm", "appimage"}
+	NativeMemoryProfiles = []string{"balanced", "minimal", "performance"}
 )
 
 var (
@@ -196,6 +217,9 @@ func (c *Config) EffectiveNative() *NativeConfig {
 	}
 	if n.Release.PGO == "" {
 		n.Release.PGO = "native.pgo"
+	}
+	if n.Memory == "" {
+		n.Memory = "balanced"
 	}
 	if len(n.Platforms) == 0 {
 		n.Platforms = append([]string(nil), NativePlatforms...)
@@ -298,6 +322,13 @@ func (c *Config) validateNative() (warnings []string, err error) {
 			return nil, nativeErr("host.islands", fmt.Sprintf("runtime for %q must be node, bun, deno or quickjs, got %q", pkg, rt),
 				"an island runs one package in a different runtime from the main host runtime")
 		}
+	}
+	if n.Memory != "" && !oneOf(n.Memory, NativeMemoryProfiles) {
+		return nil, nativeErr("memory", fmt.Sprintf("must be one of %s, got %q", strings.Join(NativeMemoryProfiles, ", "), n.Memory),
+			"\"balanced\" (default) trims the webview, \"minimal\" trims harder at some CPU cost, \"performance\" keeps the engine defaults")
+	}
+	if n.Host.MemoryMB < 0 {
+		return nil, nativeErr("host.memoryMB", fmt.Sprintf("must be >= 0, got %d", n.Host.MemoryMB), "omit it for the profile default")
 	}
 	if n.Release.Compile != "" && !oneOf(n.Release.Compile, nativeCompileModes) {
 		return nil, nativeErr("release.compile", fmt.Sprintf("must be \"auto\", \"always\" or \"never\", got %q", n.Release.Compile),

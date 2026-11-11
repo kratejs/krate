@@ -89,8 +89,12 @@ type cliFlags struct {
 	Browser       bool
 	// Release asks `krate native build` for compiled executables. Targets
 	// holds every --target value (comma-separated lists allowed).
-	Release       bool
-	Targets       []string
+	Release bool
+	Targets []string
+	// Layout is "shell" (the prebuilt shell with a Go host child) or
+	// "executable" (one process), for `krate native build`; empty picks
+	// the executable for apps with Go host code.
+	Layout        string
 	Scriptc       bool
 	ScriptcFailOn string
 	Pkg           nativePkgFlags
@@ -375,7 +379,7 @@ func parseFlags(args []string) (cliFlags, []string) {
 var valuedFlags = map[string]bool{
 	"--config": true, "--out-dir": true, "--target": true, "--mode": true,
 	"--report": true, "--token": true, "--root": true, "--cpuprofile": true,
-	"--memprofile": true, "--host": true, "--port": true, "--out": true, "--shell": true,
+	"--memprofile": true, "--host": true, "--port": true, "--out": true, "--shell": true, "--layout": true,
 	"--scriptc-fail-on": true,
 }
 
@@ -415,6 +419,11 @@ func parseFlagsChecked(args []string) (cliFlags, []string, error) {
 				flags.NativeOut = val
 			case "--shell":
 				flags.Shell, flags.WantShell = val, true
+			case "--layout":
+				if val != "shell" && val != "executable" {
+					return flags, nil, fmt.Errorf("--layout must be shell or executable, got %q", val)
+				}
+				flags.Layout = val
 			case "--scriptc-fail-on":
 				flags.ScriptcFailOn = val
 			case "--mode":

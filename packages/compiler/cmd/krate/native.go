@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"slices"
@@ -47,6 +48,8 @@ func printNativeUsage(w io.Writer) {
 	fmt.Fprintf(w, "  --target <o/a>   Platform of the Go host, for example linux/arm64\n")
 	fmt.Fprintf(w, "  --shell <path>   Copy a shell binary next to the app. Without it the shell is $KRATE_SHELL or the\n")
 	fmt.Fprintf(w, "                   krate-shell next to the krate executable (\"auto\" also builds the checkout's shell)\n")
+	fmt.Fprintf(w, "  --layout <l>     \"shell\" keeps the prebuilt shell plus a Go host child; \"executable\" links one process.\n")
+	fmt.Fprintf(w, "                   Default: executable when the app has Go host code and Go is installed, shell otherwise\n")
 	fmt.Fprintf(w, "  --release        Link one executable per target (needs Go); --target takes several,\n")
 	fmt.Fprintf(w, "                   comma-separated or repeated\n")
 	fmt.Fprintf(w, "  --package        Package the build for --target; with --release, each of the targets (see: krate native package)\n")
@@ -288,6 +291,10 @@ func runNativeBuild(flags cliFlags, args []string) {
 	builder := build.New(root, cfg)
 	builder.Verbose = flags.Verbose
 	builder.Env = env
+	if !flags.Release && nativeWantsExecutable(flags, root, cfg) {
+		fmt.Printf("  the app has Go host code: linking one executable (--layout shell keeps the shell and a Go host child)\n")
+		flags.Release = true
+	}
 	if flags.Release {
 		runNativeRelease(builder, root, outDir, flags, start)
 		return
@@ -341,6 +348,33 @@ func runNativeBuild(flags cliFlags, args []string) {
 		}
 		packageNative(flags, c)
 	}
+}
+
+// nativeWantsExecutable reports whether a plain `krate native build` should
+// produce the single-process executable: the app has Go host code, Go is
+// installed (it is needed to compile that code anyway) and neither --layout
+// shell nor an explicit --shell asks for the shell layout. One process saves
+// the Go host child's runtime (about 10 MB) and the socket hop.
+func nativeWantsExecutable(flags cliFlags, root string, cfg *config.Config) bool {
+	switch {
+	case flags.Layout == "shell", flags.Shell != "":
+	case flags.Layout == "executable":
+		return true
+	default:
+		if _, err := exec.LookPath("go"); err != nil {
+			return false
+		}
+		p, err := native.Analyze(root, cfg)
+		if err != nil {
+			return false
+		}
+		for _, m := range p.Modules {
+			if m.Source == native.SourceGo {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func joinOrNone(s []string) string {

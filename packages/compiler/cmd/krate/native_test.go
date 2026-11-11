@@ -2,9 +2,12 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kratejs/krate/packages/compiler/internal/config"
 )
 
 func nativeProject(t *testing.T, files map[string]string) string {
@@ -190,6 +193,48 @@ func TestNativeFlagsRelease(t *testing.T) {
 	}
 	if !flags.Release || strings.Join(flags.Targets, " ") != "windows/amd64 darwin/arm64 linux/arm64" || strings.Join(rest, " ") != "native build ." {
 		t.Errorf("flags = %+v rest = %v", flags, rest)
+	}
+}
+
+func TestNativeFlagsLayout(t *testing.T) {
+	flags, _, err := parseFlagsChecked([]string{"native", "build", ".", "--layout", "shell"})
+	if err != nil || flags.Layout != "shell" {
+		t.Fatalf("flags = %+v err = %v", flags, err)
+	}
+	if _, _, err := parseFlagsChecked([]string{"native", "build", ".", "--layout=tiny"}); err == nil {
+		t.Error("an unknown layout was accepted")
+	}
+}
+
+func TestNativeWantsExecutable(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go is not on PATH")
+	}
+	goApp := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(goApp, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(goApp, "src", "tasks.go"), []byte("package src\n\nfunc List() []string { return nil }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tsApp := t.TempDir()
+	cfg := config.Default()
+	cases := []struct {
+		name  string
+		root  string
+		flags cliFlags
+		want  bool
+	}{
+		{"go host, default", goApp, cliFlags{}, true},
+		{"go host, layout shell", goApp, cliFlags{Layout: "shell"}, false},
+		{"go host, explicit shell", goApp, cliFlags{Shell: "/x/krate-shell", WantShell: true}, false},
+		{"no go host", tsApp, cliFlags{}, false},
+		{"no go host, layout executable", tsApp, cliFlags{Layout: "executable"}, true},
+	}
+	for _, c := range cases {
+		if got := nativeWantsExecutable(c.flags, c.root, cfg); got != c.want {
+			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
+		}
 	}
 }
 
