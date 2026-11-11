@@ -194,7 +194,7 @@ func NativeDefaultPermissions() []string { return nativePermissionList().Default
 // nativePluginPermRe matches the app.json name of a plugin permission,
 // "plugin:<plugin>.<permission>". Which ones exist depends on the enabled
 // plugins, so the config can only check the shape; the build checks the rest.
-var nativePluginPermRe = regexp.MustCompile(`^plugin:[a-z][a-z0-9]*(-[a-z0-9]+)*\.[a-z][a-z0-9-]*$`)
+var nativePluginPermRe = regexp.MustCompile(`^plugin:[a-z][a-z0-9]*(-[a-z0-9]+)*\.[a-z][A-Za-z0-9]*$`)
 
 // IsNativePermission reports whether p is an SDK permission or has the shape
 // of a plugin permission.

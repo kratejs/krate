@@ -7,10 +7,10 @@
     { "name": "admin", "description": "reconfigure the echo plugin" }
   ],
   "ops": [
-    { "name": "Echo", "permission": "use" },
-    { "name": "Shout", "permission": "use" },
-    { "name": "Reset", "permission": "admin" },
-    { "name": "Hand", "permission": "use", "manual": true },
-    { "name": "Free" }
+    { "name": "echo", "permission": "use" },
+    { "name": "shout", "permission": "use" },
+    { "name": "reset", "permission": "admin" },
+    { "name": "hand", "permission": "use", "manual": true },
+    { "name": "free" }
   ]
 }

@@ -25,11 +25,11 @@ export default defineConfig({
 ```
 
 ```tsx
-import { Info, CPULoad, Load } from "krate/plugin/system-info";
+import { info, cpuLoad, load } from "krate/plugin/system-info";
 
-const info = await Info();                       // { os, arch, hostname, cpus, goVersion }
-for await (const pct of CPULoad(500)) draw(pct);  // a stream
-<p>CPU {Load()}%</p>                              // a host signal
+const sys = await info();                        // { os, arch, hostname, cpus, goVersion }
+for await (const pct of cpuLoad(500)) draw(pct);  // a stream
+<p>CPU {load()}%</p>                              // a host signal
 ```
 
 There is no glue to write: the ops are generated exactly like
@@ -109,22 +109,22 @@ This writes a Go module with an example op and stream, a test and a manifest:
     { "name": "monitor", "description": "watch the CPU load over time" }
   ],
   "ops": [
-    { "name": "Info", "permission": "read" },
-    { "name": "CPULoad", "permission": "monitor" },
-    { "name": "Load", "permission": "monitor" }
+    { "name": "info", "permission": "read" },
+    { "name": "cpuLoad", "go": "CPULoad", "permission": "monitor" },
+    { "name": "load", "permission": "monitor" }
   ]
 }
 ```
 
 | Field | Meaning |
 |-------|---------|
-| `name` | Lowercase words joined by hyphens, 2 to 40 characters. It is the namespace: the op `Info` is the host id `plugin/system-info.Info`. Two enabled plugins cannot share a name. |
+| `name` | Lowercase words joined by hyphens, 2 to 40 characters. It is the namespace: the op `info` is the host id `plugin/system-info.info`. Two enabled plugins cannot share a name. |
 | `go` | The import path of the Go package, the directory that holds the manifest: the module path of the nearest `go.mod` plus the directory inside it. A mismatch is `KR7253`. |
 | `version`, `description` | Informational. `version` shows in `report.json`. |
 | `krate` | The oldest Krate version the plugin works with (`"0.5.0"` or `">=0.5.0"`). |
 | `ts` | An optional TypeScript entry that the plugin's npm package ships next to the generated module (for helpers built on the ops). |
-| `permissions` | `{name, description}`; names are lowercase letters, digits and hyphens. The description appears in the permission table. |
-| `ops` | `{name, permission, manual}`. An op is an exported Go function or `*krate.Signal[T]` variable (the name is the Go identifier, so ops are `Info`, not `info`). `permission` names one of the declared permissions, or is omitted for an op that is always allowed. Duplicates and unknown permissions are `KR7251` and `KR7252`. |
+| `permissions` | `{name, description}`; names are lowerCamel (`read`, `readAll`), like the SDK ids and permission parts. The description appears in the permission table. |
+| `ops` | `{name, go, permission, manual}`. `name` is lowerCamel like the SDK ops (`info`, `cpuLoad`): it is the id suffix and the export of the generated module. It binds to the exported Go function or `*krate.Signal[T]` variable with the first letter upper-cased (`info` is `Info`); set `go` when the Go name differs (`"go": "CPULoad"` for `cpuLoad`, since an acronym cannot be derived). An id that is not lowerCamel is refused at load. `permission` names one of the declared permissions, or is omitted for an op that is always allowed. Duplicates and unknown permissions are `KR7251` and `KR7252`. |
 
 The manifest is authoritative: an exported Go function that is not listed is not
 reachable from a page. Signatures follow the
@@ -206,7 +206,7 @@ the plugin modules (replaced by directory, or by version for a `go:` plugin).
 - A release (and a derived `krate native build`) leaves out the ops no code
   reaches and the permissions only they need. A namespace import
   (`import * as p from "krate/plugin/x"`) that escapes, a dynamic `import()` and
-  an unknown `"plugin/x.Op"` id count as the whole plugin. Hand-written
+  an unknown `"plugin/x.op"` id count as the whole plugin. Hand-written
   (`manual`) ops register from `Init` and are always linked; their permission
   still has to be derived. `report.json` lists, per plugin, the ops it kept
   and the ones it left out.

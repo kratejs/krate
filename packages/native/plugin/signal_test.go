@@ -8,11 +8,11 @@ import (
 	"time"
 )
 
-// signalStatus subscribes to plugin/sig.Level as the given window and returns
+// signalStatus subscribes to plugin/sig.level as the given window and returns
 // the first frame's text.
 func signalStatus(t *testing.T, h http.Handler, window string) string {
 	t.Helper()
-	req := httptest.NewRequest("GET", "/__krate/signals?names=plugin/sig.Level", nil)
+	req := httptest.NewRequest("GET", "/__krate/signals?names=plugin/sig.level", nil)
 	req.Header.Set("x-krate-window", window)
 	ctx, cancel := contextWithTimeout(time.Second)
 	defer cancel()

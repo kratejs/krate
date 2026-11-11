@@ -106,8 +106,8 @@ const scaffoldManifest = `{
     { "name": "use", "description": "call the {{.Name}} plugin" }
   ],
   "ops": [
-    { "name": "Hello", "permission": "use" },
-    { "name": "Ticks", "permission": "use" }
+    { "name": "hello", "permission": "use" },
+    { "name": "ticks", "permission": "use" }
   ]
 }
 `
@@ -125,7 +125,10 @@ replace github.com/kratejs/krate/packages/native => {{.NativeReplace}}
 const scaffoldGo = `// Package {{.Package}} is a Krate Native plugin. The exported functions and
 // streams that krate-plugin.json lists as ops are callable from pages as
 //
-//	import { Hello, Ticks } from "krate/plugin/{{.Name}}";
+//	import { hello, ticks } from "krate/plugin/{{.Name}}";
+//
+// (the op "hello" is the Go function Hello: an op binds to its name with the
+// first letter upper-cased, or to the "go" field of its manifest entry)
 //
 // with generated codecs and types; there is no glue to write. Init is
 // optional: it receives the plugin context (platform access, lifecycle hooks).
@@ -205,7 +208,7 @@ In an app's krate.config.ts:
 
 and in a page:
 
-    import { Hello } from 'krate/plugin/{{.Name}}';
+    import { hello } from 'krate/plugin/{{.Name}}';
 
 The ops need the permission plugin:{{.Name}}.use; a release build derives it
 from the code that calls them.

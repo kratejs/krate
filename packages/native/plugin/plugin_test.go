@@ -22,7 +22,7 @@ func testMeta() Meta {
 		Name:        "demo",
 		Version:     "1.0.0",
 		Permissions: []PermissionInfo{{Name: "read", Doc: "read things"}},
-		Ops:         []OpInfo{{Name: "Ping", Permission: "read"}, {Name: "Open"}, {Name: "Hand", Permission: "read", Manual: true}},
+		Ops:         []OpInfo{{Name: "ping", Permission: "read"}, {Name: "open"}, {Name: "hand", Permission: "read", Manual: true}},
 	}
 }
 
@@ -59,13 +59,14 @@ func isDenied(err error, perm string) bool {
 
 func TestValidate(t *testing.T) {
 	bad := map[string]func(*Meta){
-		"name":            func(m *Meta) { m.Name = "Bad_Name" },
-		"short name":      func(m *Meta) { m.Name = "a" },
-		"dup op":          func(m *Meta) { m.Ops = append(m.Ops, OpInfo{Name: "Ping"}) },
-		"op case":         func(m *Meta) { m.Ops[0].Name = "ping" },
-		"unknown perm":    func(m *Meta) { m.Ops[0].Permission = "write" },
-		"dup permission":  func(m *Meta) { m.Permissions = append(m.Permissions, PermissionInfo{Name: "read"}) },
-		"permission name": func(m *Meta) { m.Permissions[0].Name = "Read!" },
+		"name":              func(m *Meta) { m.Name = "Bad_Name" },
+		"short name":        func(m *Meta) { m.Name = "a" },
+		"dup op":            func(m *Meta) { m.Ops = append(m.Ops, OpInfo{Name: "ping"}) },
+		"op case":           func(m *Meta) { m.Ops[0].Name = "Ping" },
+		"unknown perm":      func(m *Meta) { m.Ops[0].Permission = "write" },
+		"dup permission":    func(m *Meta) { m.Permissions = append(m.Permissions, PermissionInfo{Name: "read"}) },
+		"permission name":   func(m *Meta) { m.Permissions[0].Name = "Read!" },
+		"hyphen permission": func(m *Meta) { m.Permissions[0].Name = "read-all" },
 	}
 	for name, mut := range bad {
 		m := testMeta()
@@ -82,10 +83,11 @@ func TestValidate(t *testing.T) {
 func TestInstallEnforcesNamespace(t *testing.T) {
 	cases := map[string]string{
 		"sdk id":         "krate/fs.readFile",
-		"other plugin":   "plugin/other.Ping",
+		"other plugin":   "plugin/other.ping",
 		"bare prefix":    "plugin/demo.",
-		"undeclared op":  "plugin/demo.Sneaky",
-		"manual by glue": "plugin/demo.Hand",
+		"undeclared op":  "plugin/demo.sneaky",
+		"manual by glue": "plugin/demo.hand",
+		"not lowerCamel": "plugin/demo.Ping",
 	}
 	for name, id := range cases {
 		id := id
@@ -120,28 +122,28 @@ func TestInstallEnforcesNamespace(t *testing.T) {
 
 func TestInstallRegistersGatedOps(t *testing.T) {
 	p := &Plugin{Meta: testMeta(), Register: func(r *scheme.Registry) {
-		r.Func("plugin/demo.Ping", pong)
-		r.Func("plugin/demo.Open", pong)
+		r.Func("plugin/demo.ping", pong)
+		r.Func("plugin/demo.open", pong)
 	}}
 	h, reg, set := newHost(t, []*Plugin{p}, []string{"plugin:demo.read", "window"})
 	if err := h.Install(p); err != nil {
 		t.Fatal(err)
 	}
-	if err := call(t, reg, "plugin/demo.Ping", "main"); err != nil {
+	if err := call(t, reg, "plugin/demo.ping", "main"); err != nil {
 		t.Errorf("granted call: %v", err)
 	}
 	// A window scoped to nothing is denied the gated op and may use the open one.
 	if err := set.Scope("w2", []string{"window"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := call(t, reg, "plugin/demo.Ping", "w2"); !isDenied(err, "plugin:demo.read") {
+	if err := call(t, reg, "plugin/demo.ping", "w2"); !isDenied(err, "plugin:demo.read") {
 		t.Errorf("scoped window: err = %v, want permission_denied for plugin:demo.read", err)
 	}
-	if err := call(t, reg, "plugin/demo.Open", "w2"); err != nil {
+	if err := call(t, reg, "plugin/demo.open", "w2"); err != nil {
 		t.Errorf("ungated op in a scoped window: %v", err)
 	}
 	// The trusted twin ignores both.
-	out, err := reg.Invoke(krate.Background(), "plugin/demo.Ping", mustArgs(t))
+	out, err := reg.Invoke(krate.Background(), "plugin/demo.ping", mustArgs(t))
 	if err != nil || len(out) == 0 {
 		t.Errorf("Invoke: %v", err)
 	}
@@ -160,20 +162,20 @@ func mustArgs(t *testing.T) []byte {
 }
 
 func TestAppLevelDenied(t *testing.T) {
-	p := &Plugin{Meta: testMeta(), Register: func(r *scheme.Registry) { r.Func("plugin/demo.Ping", pong) }}
+	p := &Plugin{Meta: testMeta(), Register: func(r *scheme.Registry) { r.Func("plugin/demo.ping", pong) }}
 	h, reg, _ := newHost(t, []*Plugin{p}, []string{"window"})
 	if err := h.Install(p); err != nil {
 		t.Fatal(err)
 	}
-	if err := call(t, reg, "plugin/demo.Ping", "main"); !isDenied(err, "plugin:demo.read") {
+	if err := call(t, reg, "plugin/demo.ping", "main"); !isDenied(err, "plugin:demo.read") {
 		t.Errorf("err = %v, want permission_denied", err)
 	}
 }
 
 func TestSignalGate(t *testing.T) {
-	m := Meta{Name: "sig", Permissions: []PermissionInfo{{Name: "watch"}}, Ops: []OpInfo{{Name: "Level", Permission: "watch"}}}
+	m := Meta{Name: "sig", Permissions: []PermissionInfo{{Name: "watch"}}, Ops: []OpInfo{{Name: "level", Permission: "watch"}}}
 	p := &Plugin{Meta: m, Register: func(r *scheme.Registry) {
-		r.Signal("plugin/sig.Level", func(func(func(*wire.Encoder))) func() { return func() {} })
+		r.Signal("plugin/sig.level", func(func(func(*wire.Encoder))) func() { return func() {} })
 	}}
 	h, reg, set := newHost(t, []*Plugin{p}, []string{"plugin:sig.watch", "window"})
 	if err := h.Install(p); err != nil {
@@ -194,19 +196,19 @@ func TestManualOps(t *testing.T) {
 	var ctx *Context
 	p := &Plugin{Meta: testMeta(), Init: func(c *Context) error {
 		ctx = c
-		return c.Func("Hand", pong)
+		return c.Func("hand", pong)
 	}}
 	h, reg, _ := newHost(t, []*Plugin{p}, []string{"plugin:demo.read"})
 	if err := h.Install(p); err != nil {
 		t.Fatal(err)
 	}
-	if err := call(t, reg, "plugin/demo.Hand", ""); err != nil {
+	if err := call(t, reg, "plugin/demo.hand", ""); err != nil {
 		t.Errorf("manual op: %v", err)
 	}
-	for _, op := range []string{"krate/fs.readFile", "../Hand", "plugin/other.Hand", "Ping", "Missing", "Hand"} {
+	for _, op := range []string{"krate/fs.readFile", "../Hand", "plugin/other.hand", "ping", "missing", "hand"} {
 		var ne *NamespaceError
 		err := ctx.Func(op, pong)
-		if op == "Hand" {
+		if op == "hand" {
 			if err == nil {
 				t.Error("registering a manual op twice succeeded")
 			}
@@ -216,7 +218,7 @@ func TestManualOps(t *testing.T) {
 			t.Errorf("Func(%q) = %v, want a NamespaceError", op, err)
 		}
 	}
-	if err := ctx.Stream("Ping", nil); err == nil {
+	if err := ctx.Stream("ping", nil); err == nil {
 		t.Error("Stream accepted a generated op")
 	}
 }

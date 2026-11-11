@@ -834,7 +834,7 @@ Every entry of `native.plugins` names a directory, an npm package or a Go module
 
 **Invalid plugin manifest**
 
-`krate-plugin.json` must be valid JSON with a `name` (lowercase words joined by hyphens, 2 to 40 characters), a `go` import path, optional `version`, `krate` (the minimum Krate version), `ts`, `permissions` (a list of `{name, description}`) and `ops` (a list of `{name, permission, manual}`). Op names are exported Go identifiers; permission names are lowercase letters, digits and hyphens, and an op's `permission` must be one the manifest declares. The message names the field.
+`krate-plugin.json` must be valid JSON with a `name` (lowercase words joined by hyphens, 2 to 40 characters), a `go` import path, optional `version`, `krate` (the minimum Krate version), `ts`, `permissions` (a list of `{name, description}`) and `ops` (a list of `{name, go, permission, manual}`). Op names are lowerCamel like the SDK ops (`info`, `cpuLoad`; the Go function is the name with its first letter upper-cased, or the op's `go` field); permission names are lowerCamel too, and an op's `permission` must be one the manifest declares. The message names the field.
 
 ### KR7252
 

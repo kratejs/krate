@@ -26,7 +26,7 @@ var started bool
 // Init registers the manual op and records the start.
 func Init(c *plugin.Context) error {
 	c.OnStart(func() error { started = true; return nil })
-	return c.Func("Hand", func(_ krate.Ctx, _ *wire.Decoder, out *wire.Encoder) error {
+	return c.Func("hand", func(_ krate.Ctx, _ *wire.Decoder, out *wire.Encoder) error {
 		if started {
 			out.String("started")
 		} else {

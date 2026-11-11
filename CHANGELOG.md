@@ -20,7 +20,8 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
   something the config needs is missing.
 - Native plugins: a Go package plus a `krate-plugin.json` that ships reusable native capabilities.
   `native.plugins` enables local directories, npm packages and Go modules; ops are called as
-  `plugin/<name>.<op>` through a generated, typed `krate/plugin/<name>` module (calls, streams,
+  `plugin/<name>.<op>` (lowerCamel op names like the SDK ids, `info` or `cpuLoad`, bound to the exported Go
+  function by capitalizing the first letter or by the manifest's `go` field) through a generated, typed `krate/plugin/<name>` module (calls, streams,
   signals) and gated by `plugin:<name>.<permission>`, which a build derives from the code, scopes
   per window and shakes per op in release builds. The app runs under a per-app shell built with Go
   (`krate native doctor` reports the toolchain as required). `krate native plugin init <name>`

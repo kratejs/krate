@@ -49,5 +49,5 @@ func runNativePluginInit(args []string) {
 	fmt.Printf("\n  next:\n")
 	fmt.Printf("    cd %s && go mod tidy && go test ./...\n", dir)
 	fmt.Printf("    add it to krate.config.ts:  native: { plugins: ['./%s'] }\n", filepath.ToSlash(dir))
-	fmt.Printf("    use it in a page:           import { Hello } from 'krate/plugin/%s'\n", name)
+	fmt.Printf("    use it in a page:           import { hello } from 'krate/plugin/%s'\n", name)
 }

@@ -30,6 +30,9 @@ type Import struct {
 	// ModuleDir is the directory `go list` runs in for this import: the root
 	// of the Go module that holds File. Default: the project root.
 	ModuleDir string
+	// Rename maps Go names to the names the UI and the registry ids use
+	// (plugin ops are lowerCamel: "CPULoad" is "cpuLoad").
+	Rename map[string]string
 	// Pattern and Env, when set, replace the package pattern go list is given
 	// (default "./<directory>" relative to ModuleDir) and its environment.
 	Pattern string
@@ -480,7 +483,7 @@ func (a *analyzer) modules(imports []Import) []*module {
 				"rename the directory or the file so the two ids differ")
 			continue
 		}
-		m := &module{id: id, src: p, isDir: isDir, names: append([]string(nil), imp.Names...), imp: imp}
+		m := &module{id: id, src: p, isDir: isDir, names: append([]string(nil), imp.Names...), imp: imp, rename: imp.Rename}
 		byPath[p], byID[id] = m, m
 		out = append(out, m)
 	}

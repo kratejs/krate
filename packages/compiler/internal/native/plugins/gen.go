@@ -31,7 +31,7 @@ type Linked struct {
 	// Ops are the ops linked into the shell: the generated ones the code uses
 	// (all of them in a dev build) and every manual op.
 	Ops []Op
-	// Generated names the ops bound by generated glue.
+	// Generated names the Go names of the ops bound by generated glue.
 	Generated []string
 	// Permissions are the declared permissions the linked ops need.
 	Permissions []Permission
@@ -43,6 +43,7 @@ type Linked struct {
 	GlueImport         string
 	HasInit, HasGlue   bool
 	manifestRel, label string
+	rename             map[string]string
 }
 
 // Output is the result of Generate.
@@ -77,6 +78,7 @@ func Generate(root string, ps []*Plugin, used Used, env []string) (*Output, []di
 	for _, p := range sorted {
 		l := &Linked{Plugin: p, Spec: SpecPrefix + p.Manifest.Name, manifestRel: rel(root, filepath.Join(p.Dir, ManifestFile))}
 		l.HasInit = hasInit(p.Dir)
+		l.rename = map[string]string{}
 		needPerm := map[string]bool{}
 		for _, o := range p.Manifest.Ops {
 			if !o.Manual && used != nil && !used[p.Manifest.Name][o.Name] {
@@ -84,7 +86,8 @@ func Generate(root string, ps []*Plugin, used Used, env []string) (*Output, []di
 			}
 			l.Ops = append(l.Ops, o)
 			if !o.Manual {
-				l.Generated = append(l.Generated, o.Name)
+				l.Generated = append(l.Generated, o.GoName())
+				l.rename[o.GoName()] = o.Name
 			}
 			if o.Permission != "" {
 				needPerm[o.Permission] = true
@@ -103,7 +106,7 @@ func Generate(root string, ps []*Plugin, used Used, env []string) (*Output, []di
 				File: p.Dir, Names: l.Generated, ID: id,
 				// The package is type-checked inside the shell module, which
 				// replaces the native module and the plugin modules.
-				ModuleDir: out.Dir, Pattern: p.ImportPath, Env: env,
+				ModuleDir: out.Dir, Pattern: p.ImportPath, Env: env, Rename: l.rename,
 				From: l.manifestRel, Line: 1, Col: 1,
 			})
 		}
@@ -123,7 +126,7 @@ func Generate(root string, ps []*Plugin, used Used, env []string) (*Output, []di
 				case diag.CodeGoBindImport:
 					// A listed op that is not an exported function or signal.
 					ds[i].Code = diag.CodePluginOp
-					ds[i].Hint += " (or mark the op \"manual\" in krate-plugin.json if the plugin registers it from Init)"
+					ds[i].Hint += " (an op \"info\" binds to the Go name Info; set \"go\" for another name, or mark the op \"manual\" if the plugin registers it from Init)"
 				case diag.CodeGoBindSignature, diag.CodeGoBindType:
 					ds[i].Hint += " (plugin ops are the exported functions and signals krate-plugin.json lists)"
 				}

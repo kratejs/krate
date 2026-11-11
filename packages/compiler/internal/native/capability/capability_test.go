@@ -255,12 +255,12 @@ func TestIDsMatchTypeScriptWrappers(t *testing.T) {
 
 var testPlugins = []PluginInfo{
 	{Name: "sys", Ops: []PluginOp{
-		{Name: "Info", Permission: "plugin:sys.read"},
-		{Name: "Memory", Permission: "plugin:sys.read"},
-		{Name: "Watch", Permission: "plugin:sys.monitor"},
-		{Name: "Free"},
+		{Name: "info", Permission: "plugin:sys.read"},
+		{Name: "memory", Permission: "plugin:sys.read"},
+		{Name: "watch", Permission: "plugin:sys.monitor"},
+		{Name: "free"},
 	}},
-	{Name: "other", Ops: []PluginOp{{Name: "Run", Permission: "plugin:other.run"}}},
+	{Name: "other", Ops: []PluginOp{{Name: "run", Permission: "plugin:other.run"}}},
 }
 
 func analyzePlugins(t *testing.T, files map[string]string) *Result {
@@ -274,20 +274,20 @@ func analyzePlugins(t *testing.T, files map[string]string) *Result {
 }
 
 func TestPluginNamedImports(t *testing.T) {
-	res := analyzePlugins(t, map[string]string{"src/pages/index.tsx": `import { Info, Watch as w } from "krate/plugin/sys";
-export default function P() { return <b onClick={() => { Info(); w(); }}>x</b>; }
+	res := analyzePlugins(t, map[string]string{"src/pages/index.tsx": `import { info, watch as w } from "krate/plugin/sys";
+export default function P() { return <b onClick={() => { info(); w(); }}>x</b>; }
 `})
 	if got := strings.Join(res.Permissions, ","); got != "plugin:sys.monitor,plugin:sys.read" {
 		t.Errorf("permissions = %s", got)
 	}
-	if got := strings.Join(res.PluginOps["sys"], ","); got != "Info,Watch" {
+	if got := strings.Join(res.PluginOps["sys"], ","); got != "info,watch" {
 		t.Errorf("ops = %v", res.PluginOps)
 	}
 	if _, ok := res.PluginOps["other"]; ok {
 		t.Error("an unused plugin is reported as used")
 	}
 	site := res.Needs["plugin:sys.read"][0]
-	if site.File != "src/pages/index.tsx" || !strings.Contains(site.Symbol, "Info from krate/plugin/sys") {
+	if site.File != "src/pages/index.tsx" || !strings.Contains(site.Symbol, "info from krate/plugin/sys") {
 		t.Errorf("site = %+v", site)
 	}
 	// Plugin ops are not SDK areas.
@@ -299,13 +299,13 @@ export default function P() { return <b onClick={() => { Info(); w(); }}>x</b>; 
 }
 
 func TestPluginOpWithoutPermissionStillCounts(t *testing.T) {
-	res := analyzePlugins(t, map[string]string{"src/pages/index.tsx": `import { Free } from "krate/plugin/sys";
-export default function P() { return <b onClick={() => Free()}>x</b>; }
+	res := analyzePlugins(t, map[string]string{"src/pages/index.tsx": `import { free } from "krate/plugin/sys";
+export default function P() { return <b onClick={() => free()}>x</b>; }
 `})
 	if len(res.Permissions) != 0 {
 		t.Errorf("permissions = %v", res.Permissions)
 	}
-	if got := strings.Join(res.PluginOps["sys"], ","); got != "Free" {
+	if got := strings.Join(res.PluginOps["sys"], ","); got != "free" {
 		t.Errorf("ops = %v", res.PluginOps)
 	}
 }
@@ -313,16 +313,16 @@ export default function P() { return <b onClick={() => Free()}>x</b>; }
 func TestPluginNamespaceAndDynamicUse(t *testing.T) {
 	res := analyzePlugins(t, map[string]string{
 		"src/pages/index.tsx": `import * as sys from "krate/plugin/sys";
-export default function P() { return <b onClick={() => sys.Memory()}>x</b>; }
+export default function P() { return <b onClick={() => sys.memory()}>x</b>; }
 `,
-		"src/pages/two.tsx": `export default function P() { return <b onClick={async () => (await import("krate/plugin/other")).Run()}>x</b>; }
+		"src/pages/two.tsx": `export default function P() { return <b onClick={async () => (await import("krate/plugin/other")).run()}>x</b>; }
 `,
 	})
-	if got := strings.Join(res.PluginOps["sys"], ","); got != "Memory" {
+	if got := strings.Join(res.PluginOps["sys"], ","); got != "memory" {
 		t.Errorf("namespace member use: %v", res.PluginOps)
 	}
 	// A dynamic import cannot be narrowed: every op of the plugin.
-	if got := strings.Join(res.PluginOps["other"], ","); got != "Run" {
+	if got := strings.Join(res.PluginOps["other"], ","); got != "run" {
 		t.Errorf("dynamic import: %v", res.PluginOps)
 	}
 	if !strings.Contains(strings.Join(res.Permissions, ","), "plugin:other.run") {
@@ -335,21 +335,21 @@ func TestPluginNamespaceEscapeUsesWholePlugin(t *testing.T) {
 const api = sys;
 export default function P() { return <b>{String(api)}</b>; }
 `})
-	if got := strings.Join(res.PluginOps["sys"], ","); got != "Free,Info,Memory,Watch" {
+	if got := strings.Join(res.PluginOps["sys"], ","); got != "free,info,memory,watch" {
 		t.Errorf("whole plugin: %v", res.PluginOps)
 	}
 }
 
 func TestPluginIDLiterals(t *testing.T) {
-	res := analyzePlugins(t, map[string]string{"src/pages/index.tsx": `const a = "plugin/sys.Watch";
-const b = "plugin/other.Unknown";
+	res := analyzePlugins(t, map[string]string{"src/pages/index.tsx": `const a = "plugin/sys.watch";
+const b = "plugin/other.unknown";
 export default function P() { return <b>{a}{b}</b>; }
 `})
-	if got := strings.Join(res.PluginOps["sys"], ","); got != "Watch" {
+	if got := strings.Join(res.PluginOps["sys"], ","); got != "watch" {
 		t.Errorf("literal id: %v", res.PluginOps)
 	}
 	// An unknown op of a known plugin counts as the whole plugin.
-	if got := strings.Join(res.PluginOps["other"], ","); got != "Run" {
+	if got := strings.Join(res.PluginOps["other"], ","); got != "run" {
 		t.Errorf("unknown op: %v", res.PluginOps)
 	}
 }

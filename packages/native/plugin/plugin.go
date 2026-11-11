@@ -19,18 +19,20 @@ func PermissionName(name, local string) string { return "plugin:" + name + "." +
 
 var (
 	nameRe  = regexp.MustCompile(`^[a-z][a-z0-9]*(-[a-z0-9]+)*$`)
-	opRe    = regexp.MustCompile(`^[A-Z][A-Za-z0-9_]*$`)
-	localRe = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+	opRe    = regexp.MustCompile(`^[a-z][A-Za-z0-9]*$`)
+	localRe = regexp.MustCompile(`^[a-z][A-Za-z0-9]*$`)
 )
 
 // ValidName reports whether s can be a plugin name: lowercase words joined by
 // hyphens, 2 to 40 characters.
 func ValidName(s string) bool { return len(s) >= 2 && len(s) <= 40 && nameRe.MatchString(s) }
 
-// ValidOp reports whether s can be an op name (an exported Go identifier).
+// ValidOp reports whether s can be an op name: lowerCamel, like the SDK ids
+// ("info", "cpuLoad").
 func ValidOp(s string) bool { return opRe.MatchString(s) }
 
-// ValidPermission reports whether s can be the local name of a permission.
+// ValidPermission reports whether s can be the local name of a permission
+// (lowerCamel).
 func ValidPermission(s string) bool { return localRe.MatchString(s) }
 
 // PermissionInfo declares one permission of a plugin.
@@ -78,7 +80,7 @@ func (m Meta) Validate() error {
 	perms := map[string]bool{}
 	for _, p := range m.Permissions {
 		if !ValidPermission(p.Name) {
-			return fmt.Errorf("plugin %s: permission name %q is not valid (lowercase letters, digits and hyphens)", m.Name, p.Name)
+			return fmt.Errorf("plugin %s: permission name %q is not valid (lowerCamel, for example read or readAll)", m.Name, p.Name)
 		}
 		if perms[p.Name] {
 			return fmt.Errorf("plugin %s: permission %q is declared twice", m.Name, p.Name)
@@ -88,7 +90,7 @@ func (m Meta) Validate() error {
 	ops := map[string]bool{}
 	for _, o := range m.Ops {
 		if !ValidOp(o.Name) {
-			return fmt.Errorf("plugin %s: op name %q is not valid (an exported Go identifier)", m.Name, o.Name)
+			return fmt.Errorf("plugin %s: op name %q is not valid (lowerCamel, like the SDK ops: info, cpuLoad)", m.Name, o.Name)
 		}
 		if ops[o.Name] {
 			return fmt.Errorf("plugin %s: op %q is declared twice", m.Name, o.Name)
@@ -117,6 +119,9 @@ func (m Meta) opFromID(id string) (string, error) {
 	if !strings.HasPrefix(id, pre) || len(id) == len(pre) {
 		return "", &NamespaceError{Plugin: m.Name, ID: id}
 	}
+	if op := id[len(pre):]; !ValidOp(op) {
+		return "", &NamespaceError{Plugin: m.Name, ID: id, NotCamel: true}
+	}
 	return id[len(pre):], nil
 }
 
@@ -127,9 +132,14 @@ type NamespaceError struct {
 	ID     string
 	// Undeclared is set when the id is in the namespace but not declared.
 	Undeclared bool
+	// NotCamel is set when the id is in the namespace but its op is not lowerCamel.
+	NotCamel bool
 }
 
 func (e *NamespaceError) Error() string {
+	if e.NotCamel {
+		return fmt.Sprintf("plugin %s registers %q, but op names are lowerCamel like the SDK ids (%sinfo, %scpuLoad)", e.Plugin, e.ID, IDPrefix(e.Plugin), IDPrefix(e.Plugin))
+	}
 	if e.Undeclared {
 		return fmt.Sprintf("plugin %s registers %q, which its manifest does not declare as an op", e.Plugin, e.ID)
 	}

@@ -161,7 +161,7 @@ func dts(items []*hostItem) string {
 		switch it.kind {
 		case itemSignal:
 			useSignal = true
-			fmt.Fprintf(&sigs, "export const %s: ReadonlyHostSignal<%s>;\n", it.name, t.ref(it.result))
+			fmt.Fprintf(&sigs, "export const %s: ReadonlyHostSignal<%s>;\n", it.exportName(), t.ref(it.result))
 		default:
 			useOpts = useOpts || !it.build
 			names := tsParamNames(it)
@@ -181,7 +181,7 @@ func dts(items []*hostItem) string {
 			case it.result != nil:
 				ret = "Promise<" + t.ref(it.result) + ">"
 			}
-			fmt.Fprintf(&sigs, "export function %s(%s): %s;\n", it.name, strings.Join(ps, ", "), ret)
+			fmt.Fprintf(&sigs, "export function %s(%s): %s;\n", it.exportName(), strings.Join(ps, ", "), ret)
 		}
 	}
 	// Declarations can reference further named types, so drain by index.
@@ -227,7 +227,7 @@ func stub(items []*hostItem) string {
 		switch it.kind {
 		case itemSignal:
 			used["signal"] = true
-			fmt.Fprintf(&body, "export const %s = __sig(%s);\n", it.name, id)
+			fmt.Fprintf(&body, "export const %s = __sig(%s);\n", it.exportName(), id)
 		default:
 			fn := "call"
 			if it.kind == itemStream {
@@ -243,11 +243,11 @@ func stub(items []*hostItem) string {
 				as = append(as, "a"+strconv.Itoa(i))
 			}
 			if it.build {
-				fmt.Fprintf(&body, "export const %s = (%s) => __baked(%s, [%s]);\n", it.name, strings.Join(ps, ", "), id, strings.Join(as, ", "))
+				fmt.Fprintf(&body, "export const %s = (%s) => __baked(%s, [%s]);\n", it.exportName(), strings.Join(ps, ", "), id, strings.Join(as, ", "))
 				continue
 			}
 			ps = append(ps, "opts")
-			fmt.Fprintf(&body, "export const %s = (%s) => __%s(%s, [%s], opts);\n", it.name, strings.Join(ps, ", "), fn, id, strings.Join(as, ", "))
+			fmt.Fprintf(&body, "export const %s = (%s) => __%s(%s, [%s], opts);\n", it.exportName(), strings.Join(ps, ", "), fn, id, strings.Join(as, ", "))
 		}
 	}
 	var b strings.Builder

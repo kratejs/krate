@@ -9,9 +9,9 @@
     { "name": "monitor", "description": "watch the CPU load over time" }
   ],
   "ops": [
-    { "name": "Info", "permission": "read" },
-    { "name": "Memory", "permission": "read" },
-    { "name": "CPULoad", "permission": "monitor" },
-    { "name": "Load", "permission": "monitor" }
+    { "name": "info", "permission": "read" },
+    { "name": "memory", "permission": "read" },
+    { "name": "cpuLoad", "go": "CPULoad", "permission": "monitor" },
+    { "name": "load", "permission": "monitor" }
   ]
 }

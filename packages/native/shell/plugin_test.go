@@ -63,7 +63,7 @@ func TestPluginBrowserMode(t *testing.T) {
 		t.Fatalf("page: %d %q", resp.StatusCode, body)
 	}
 	base := ctl.URL()[:strings.Index(ctl.URL(), "/?")]
-	if got := callVia(t, c, base, "plugin/gt.Hello", nil); !strings.Contains(got, "hello from gt") {
+	if got := callVia(t, c, base, "plugin/gt.hello", nil); !strings.Contains(got, "hello from gt") {
 		t.Errorf("granted plugin op: %s", got)
 	}
 	if !started {

@@ -454,14 +454,14 @@ func pluginCLIProject(t *testing.T, page, extraConfig string) string {
 }
 
 func TestNativeCheckReportsPlugins(t *testing.T) {
-	root := pluginCLIProject(t, `import { Echo } from "krate/plugin/echo";
-void Echo;
+	root := pluginCLIProject(t, `import { echo } from "krate/plugin/echo";
+void echo;
 `+nativePage, "")
 	code, out := runKrate(t, "native", "check", root)
 	if code != 0 {
 		t.Fatalf("exit %d:\n%s", code, out)
 	}
-	for _, want := range []string{"permissions: 1 (derived from the code)", "plugin:echo.use  (plugin echo)", "src/pages/index.tsx:1", "plugin echo: ops used: Echo"} {
+	for _, want := range []string{"permissions: 1 (derived from the code)", "plugin:echo.use  (plugin echo)", "src/pages/index.tsx:1", "plugin echo: ops used: echo"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q:\n%s", want, out)
 		}
@@ -502,7 +502,7 @@ func TestNativePluginInit(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d:\n%s", code, out)
 	}
-	for _, want := range []string{"krate-plugin.json", "mytool.go", "plugins: ['./", "import { Hello } from 'krate/plugin/my-tool'"} {
+	for _, want := range []string{"krate-plugin.json", "mytool.go", "plugins: ['./", "import { hello } from 'krate/plugin/my-tool'"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q:\n%s", want, out)
 		}

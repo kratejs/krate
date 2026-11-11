@@ -293,8 +293,8 @@ function bump() { return call("t.Bump"); }
 async function pluginFlow() {
   const rep = {};
   try {
-    rep.hello = (await call("plugin/gt.Hello")).ok;
-    rep.state = (await call("plugin/gt.State")).ok;
+    rep.hello = (await call("plugin/gt.hello")).ok;
+    rep.state = (await call("plugin/gt.state")).ok;
     rep.opened = (await call("krate/window.open", [{path: "/scoped.html", permissions: []}])).ok;
   } catch (e) { rep.error = String(e); }
   await report("plugin", rep);

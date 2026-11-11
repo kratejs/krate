@@ -38,8 +38,8 @@ async function call(fn) {
 (async () => {
   const rep = {window: globalThis.__KRATE_WINDOW__ || ""};
   try {
-    rep.plugin = await call("plugin/gt.Hello");
-    rep.open = await call("plugin/gt.Open");
+    rep.plugin = await call("plugin/gt.hello");
+    rep.open = await call("plugin/gt.open");
     rep.sdk = await call("krate/window.list");
   } catch (e) { rep.error = String(e); }
   await fetch("/__test/report", {method: "POST", body: JSON.stringify(Object.assign({kind: "scoped", origin: location.origin}, rep))});
@@ -98,9 +98,9 @@ func newGUIPlugin() *plugin.Plugin {
 				{Name: "read", Doc: "read state"}, {Name: "admin", Doc: "administer"},
 			},
 			Ops: []plugin.OpInfo{
-				{Name: "Hello", Permission: "read", Manual: true},
-				{Name: "State", Permission: "read", Manual: true},
-				{Name: "Open", Manual: true},
+				{Name: "hello", Permission: "read", Manual: true},
+				{Name: "state", Permission: "read", Manual: true},
+				{Name: "open", Manual: true},
 			},
 		},
 		Init: func(c *plugin.Context) error {
@@ -115,9 +115,9 @@ func newGUIPlugin() *plugin.Plugin {
 			c.OnWindowCreated(func(id string) { g.mu.Lock(); g.created = append(g.created, id); g.mu.Unlock() })
 			c.OnWindowClosed(func(id string) { g.mu.Lock(); g.closed = append(g.closed, id); g.mu.Unlock() })
 			for op, f := range map[string]scheme.Func{
-				"Hello": str(func() string { return "hello from gt" }),
-				"State": str(g.state),
-				"Open":  str(func() string { return "open" }),
+				"hello": str(func() string { return "hello from gt" }),
+				"state": str(g.state),
+				"open":  str(func() string { return "open" }),
 			} {
 				if err := c.Func(op, f); err != nil {
 					return err

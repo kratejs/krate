@@ -18,7 +18,7 @@ const goodManifest = `{
   "krate": ">=0.5.0",
   "go": "example.com/demo",
   "permissions": [{"name": "read", "description": "read"}],
-  "ops": [{"name": "Info", "permission": "read"}, {"name": "Free"}]
+  "ops": [{"name": "info", "permission": "read"}, {"name": "free"}]
 }`
 
 func codes(ds []diag.Diagnostic) string {
@@ -37,6 +37,11 @@ func TestParseManifest(t *testing.T) {
 	if m.Name != "demo-plugin" || len(m.Ops) != 2 || m.Ops[0].Permission != "read" {
 		t.Errorf("manifest = %+v", m)
 	}
+	for op, want := range map[Op]string{{Name: "info"}: "Info", {Name: "cpuLoad", Go: "CPULoad"}: "CPULoad", {Name: "x"}: "X"} {
+		if got := op.GoName(); got != want {
+			t.Errorf("GoName(%+v) = %s, want %s", op, got, want)
+		}
+	}
 }
 
 func TestParseManifestErrors(t *testing.T) {
@@ -50,11 +55,15 @@ func TestParseManifestErrors(t *testing.T) {
 		{"no go path", `{"name":"demo","ops":[]}`, "KR7251", "import path"},
 		{"bad go path", `{"name":"demo","go":"has space","ops":[]}`, "KR7251", "import path"},
 		{"bad krate", `{"name":"demo","go":"example.com/d","krate":"soon","ops":[]}`, "KR7251", "not a version"},
-		{"dup op", `{"name":"demo","go":"example.com/d","ops":[{"name":"A"},{"name":"A"}]}`, "KR7252", "declared twice"},
+		{"dup op", `{"name":"demo","go":"example.com/d","ops":[{"name":"a"},{"name":"a"}]}`, "KR7252", "declared twice"},
 		{"dup permission", `{"name":"demo","go":"example.com/d","permissions":[{"name":"a"},{"name":"a"}],"ops":[]}`, "KR7252", "declared twice"},
-		{"lowercase op", `{"name":"demo","go":"example.com/d","ops":[{"name":"info"}]}`, "KR7251", "upper-case"},
-		{"undeclared permission", `{"name":"demo","go":"example.com/d","ops":[{"name":"A","permission":"x"}]}`, "KR7251", "does not declare"},
-		{"bad permission name", `{"name":"demo","go":"example.com/d","permissions":[{"name":"Read"}],"ops":[]}`, "KR7251", "lowercase"},
+		{"capitalized op", `{"name":"demo","go":"example.com/d","ops":[{"name":"Info"}]}`, "KR7251", "lowerCamel"},
+		{"hyphenated op", `{"name":"demo","go":"example.com/d","ops":[{"name":"cpu-load"}]}`, "KR7251", "lowerCamel"},
+		{"hyphenated permission", `{"name":"demo","go":"example.com/d","permissions":[{"name":"read-all"}],"ops":[]}`, "KR7251", "lowerCamel"},
+		{"bad go name", `{"name":"demo","go":"example.com/d","ops":[{"name":"cpuLoad","go":"cpuLoad"}]}`, "KR7251", "exported Go identifier"},
+		{"two ops one go name", `{"name":"demo","go":"example.com/d","ops":[{"name":"info"},{"name":"other","go":"Info"}]}`, "KR7252", "both bind"},
+		{"undeclared permission", `{"name":"demo","go":"example.com/d","ops":[{"name":"a","permission":"x"}]}`, "KR7251", "does not declare"},
+		{"bad permission name", `{"name":"demo","go":"example.com/d","permissions":[{"name":"Read"}],"ops":[]}`, "KR7251", "lowerCamel"},
 		{"absolute ts", `{"name":"demo","go":"example.com/d","ts":"/etc/x","ops":[]}`, "KR7251", "relative"},
 	}
 	for _, c := range cases {
@@ -106,7 +115,7 @@ func write(t *testing.T, root, rel, content string) {
 }
 
 func manifestFor(name, goPath string) string {
-	return `{"name":"` + name + `","go":"` + goPath + `","ops":[{"name":"Run"}]}`
+	return `{"name":"` + name + `","go":"` + goPath + `","ops":[{"name":"run"}]}`
 }
 
 func TestResolveLocalAndNPM(t *testing.T) {
