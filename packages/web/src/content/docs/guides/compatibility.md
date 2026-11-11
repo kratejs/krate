@@ -586,7 +586,7 @@ Evidence: `TestIdentifyOverridesTheWindowHeader`, `TestIdentify`, `TestViewConte
 
 **Linux:** Supported - **macOS:** Untested - **Windows:** Untested
 
-A window can hold several webviews laid out as a tree of horizontal and vertical splits with draggable dividers, minimum pane sizes and ratios that can be read back after a drag. Views are added, removed, focused, navigated and given their own permission scope; they report added, navigated, removed and closed events and can post messages to each other. All views share the app's one web process (about 1 MB of web process memory per extra view on Linux). Layout arithmetic is pure Go and tested on every OS.
+A window can hold several webviews laid out as a tree of horizontal and vertical splits with draggable dividers, minimum pane sizes and ratios that can be read back after a drag. Views are added, removed, focused, navigated and given their own permission scope; they report added, navigated, removed and closed events and can post messages to each other. All views share the app's one web process; an extra view costs about what a page costs (about 1 MB of web process memory on the WebKitGTK 2.54 sysroot, about 40 MB with software-GL compositing on the CI runner). Layout arithmetic is pure Go and tested on every OS.
 
 Known limits:
 
