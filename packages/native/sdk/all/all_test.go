@@ -52,7 +52,7 @@ func TestEveryIDIsRegisteredAndGated(t *testing.T) {
 	c := sdktest.New(t, reg)
 	for _, id := range sdk.IDs {
 		r := c.Call(id.Name, func(e *wire.Encoder) { e.String("x") })
-		if strings.HasSuffix(id.Name, ".events") {
+		if strings.HasSuffix(id.Name, ".events") || strings.Contains(id.Args, "(stream)") {
 			// A stream opens first and fails when read; sdk_test checks that.
 			continue
 		}

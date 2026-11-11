@@ -91,6 +91,10 @@
     "./app": {
       "types": "./dist/lifecycle.d.ts",
       "default": "./dist/lifecycle.js"
+    },
+    "./updater": {
+      "types": "./dist/updater.d.ts",
+      "default": "./dist/updater.js"
     }
   },
   "files": [

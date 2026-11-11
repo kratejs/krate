@@ -11,6 +11,7 @@ import (
 	sdknet "github.com/kratejs/krate/packages/native/sdk/net"
 	sdkos "github.com/kratejs/krate/packages/native/sdk/os"
 	"github.com/kratejs/krate/packages/native/sdk/permission"
+	sdkupdater "github.com/kratejs/krate/packages/native/sdk/updater"
 )
 
 // Options identify the app and its permissions.
@@ -22,6 +23,10 @@ type Options struct {
 	Version string
 	// Permissions is the app.json "permissions" list; empty means defaults.
 	Permissions []string
+	// UpdaterURL and UpdaterPublicKey are native.updater from app.json; both
+	// empty leaves the updater ids answering "unsupported".
+	UpdaterURL       string
+	UpdaterPublicKey string
 }
 
 // Register configures the SDK for the app and registers every UI id on r.
@@ -36,6 +41,7 @@ func Register(r *scheme.Registry, o Options) (permission.Set, error) {
 	if err := sdkos.Configure(sdkos.App{ID: o.AppID, Name: o.Name, Version: o.Version}); err != nil {
 		return permission.Set{}, err
 	}
+	sdkupdater.Configure(sdkupdater.Config{URL: o.UpdaterURL, PublicKey: o.UpdaterPublicKey})
 	RegisterAreas(r, set)
 	return set, nil
 }
@@ -62,4 +68,5 @@ func RegisterAreas(r *scheme.Registry, set permission.Set) {
 	db.Register(r, set)
 	kv.Register(r, set)
 	sdknet.Register(r, set)
+	sdkupdater.Register(r, set)
 }

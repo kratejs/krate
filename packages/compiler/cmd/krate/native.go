@@ -21,7 +21,7 @@ import (
 
 // nativeStubs are the `krate native` subcommands that exist in the command
 // surface but are not built yet.
-var nativeStubs = []string{"profile", "sign", "notarize", "doctor"}
+var nativeStubs = []string{"profile", "doctor"}
 
 func printNativeUsage(w io.Writer) {
 	fmt.Fprintf(w, "Usage: krate native <command> [dir] [flags]\n\n")
@@ -32,14 +32,19 @@ func printNativeUsage(w io.Writer) {
 	fmt.Fprintf(w, "  dev        Run the app with hot reload (--browser serves it on a loopback port)\n")
 	fmt.Fprintf(w, "  build      Build the app directory (dist-native/app) the shell runs\n")
 	fmt.Fprintf(w, "  profile    Collect a profile for optimized builds (not implemented yet)\n")
-	fmt.Fprintf(w, "  sign       Sign a built app (not implemented yet)\n")
-	fmt.Fprintf(w, "  notarize   Notarize a built macOS app (not implemented yet)\n")
+	fmt.Fprintf(w, "  package    Make installers and update files: .app/.zip/.dmg, .zip/NSIS/MSIX, .tar.gz/.deb/.rpm/AppImage\n")
+	fmt.Fprintf(w, "  sign       Sign the packaged app (codesign, signtool/osslsigncode, gpg) and rebuild the archives\n")
+	fmt.Fprintf(w, "  notarize   Notarize and staple the signed macOS app\n")
+	fmt.Fprintf(w, "  keygen     Create the Ed25519 key pair that signs update files\n")
 	fmt.Fprintf(w, "  doctor     Check the native toolchain (not implemented yet)\n\n")
 	fmt.Fprintf(w, "Build flags:\n")
 	fmt.Fprintf(w, "  --out <dir>      Output directory (default dist-native); the app is <dir>/app\n")
 	fmt.Fprintf(w, "  --target <o/a>   Platform of the Go host, for example linux/arm64\n")
 	fmt.Fprintf(w, "  --shell <path>   Copy a shell binary next to the app (\"auto\" builds the monorepo shell\n")
 	fmt.Fprintf(w, "                   or uses $KRATE_SHELL)\n")
+	fmt.Fprintf(w, "  --package        Package the build for --target (see: krate native package)\n")
+	fmt.Fprintf(w, "\nPackage flags: --format, --sign, --notarize, --identity, --keychain-profile, --pfx, --thumbprint,\n")
+	fmt.Fprintf(w, "  --gpg-key, --notes, --update-base-url, --key-out (see docs/native/packaging)\n")
 	fmt.Fprintf(w, "\nDev flags:\n")
 	fmt.Fprintf(w, "  --browser        No window: print a tokenized http://127.0.0.1 URL instead\n")
 	fmt.Fprintf(w, "  --port <n>       Browser-mode port (default: any free port)\n")
@@ -64,6 +69,18 @@ func runNative(flags cliFlags, args []string) {
 		return
 	case "dev":
 		runNativeDev(flags, append([]string{"dev"}, args[2:]...))
+		return
+	case "package":
+		runNativePackage(flags, append([]string{"native"}, args[2:]...))
+		return
+	case "sign":
+		runNativeSign(flags, append([]string{"native"}, args[2:]...))
+		return
+	case "notarize":
+		runNativeNotarize(flags, append([]string{"native"}, args[2:]...))
+		return
+	case "keygen":
+		runNativeKeygen(flags)
 		return
 	}
 	for _, s := range nativeStubs {
@@ -151,6 +168,9 @@ func printPlacementSummary(p *native.Placement) {
 
 // runNativeBuild builds the project into an app directory for the shell.
 func runNativeBuild(flags cliFlags, args []string) {
+	if flags.Pkg.Package && flags.Shell == "" {
+		flags.WantShell = true
+	}
 	root, cfg := resolveConfig(flags, args)
 	defer startRunLog(root, cfg, "native build")()
 	env := loadProjectEnv(root, "production", flags.Verbose)
@@ -198,6 +218,14 @@ func runNativeBuild(flags cliFlags, args []string) {
 		fmt.Printf("  run it with: %s %s\n", rel(res.ShellPath), rel(res.AppDir))
 	} else {
 		fmt.Printf("  run it with: krate-shell %s\n", rel(res.AppDir))
+	}
+	if flags.Pkg.Package {
+		c, err := newPkgContext(flags, root, cfg)
+		if err != nil {
+			reportPkgError(err)
+			exit(1)
+		}
+		packageNative(flags, c)
 	}
 }
 

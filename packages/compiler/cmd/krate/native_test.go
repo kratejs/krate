@@ -182,3 +182,76 @@ func TestNativeBuildFailures(t *testing.T) {
 		t.Error("a failed build wrote app.json")
 	}
 }
+
+func TestNativePackageEndToEnd(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "hello-app")
+	if code, out := runKrate(t, "native", "init", dir); code != 0 {
+		t.Fatalf("init exit %d:\n%s", code, out)
+	}
+	for name, content := range nativeDeps {
+		writeTestFile(t, filepath.Join(dir, filepath.FromSlash(name)), content)
+	}
+	cfgPath := filepath.Join(dir, "krate.config.ts")
+	cfg, _ := os.ReadFile(cfgPath)
+	cfgText := strings.Replace(string(cfg), "native: {", `native: {
+    updater: { url: "https://dl.example.com/updates/latest-{target}.json", publicKey: "`+testUpdaterPub+`" },
+    deepLinks: ["hello"],`, 1)
+	if cfgText == string(cfg) {
+		t.Fatalf("config has no native block to extend:\n%s", cfg)
+	}
+	os.WriteFile(cfgPath, []byte(cfgText), 0o644)
+
+	// Packaging before building says what to do.
+	code, out := runKrate(t, "native", "package", dir, "--target", "linux/amd64")
+	if code != 1 || !strings.Contains(out, "KR7220") {
+		t.Fatalf("package before build: exit %d:\n%s", code, out)
+	}
+	shell := filepath.Join(t.TempDir(), "krate-shell")
+	os.WriteFile(shell, []byte("#!/bin/sh\necho shell\n"), 0o755)
+	if code, out := runKrate(t, "native", "build", dir, "--shell", shell, "--target", "linux/amd64"); code != 0 {
+		t.Fatalf("build exit %d:\n%s", code, out)
+	}
+	manifest, _ := os.ReadFile(filepath.Join(dir, "dist-native", "app", "app.json"))
+	if !strings.Contains(string(manifest), `"updater"`) || !strings.Contains(string(manifest), testUpdaterPub) {
+		t.Errorf("app.json lacks the updater block:\n%s", manifest)
+	}
+	code, out = runKrate(t, "native", "package", dir, "--target", "linux/amd64", "--format", "deb,tar.gz")
+	if code != 0 {
+		t.Fatalf("package exit %d:\n%s", code, out)
+	}
+	for _, f := range []string{"hello-app_0.1.0_amd64.deb", "hello-app-0.1.0-linux-amd64.tar.gz"} {
+		if _, err := os.Stat(filepath.Join(dir, "dist-native", "packages", f)); err != nil {
+			t.Errorf("missing %s:\n%s", f, out)
+		}
+	}
+	if !strings.Contains(out, "KRATE_UPDATER_PRIVATE_KEY") {
+		t.Errorf("no note about the unsigned update file:\n%s", out)
+	}
+	// An unknown format is KR7222.
+	if code, out := runKrate(t, "native", "package", dir, "--target", "linux/amd64", "--format", "msix"); code != 1 || !strings.Contains(out, "KR7222") {
+		t.Errorf("bad format: exit %d:\n%s", code, out)
+	}
+	// Signing a Mac app off macOS is a clear error.
+	if code, out := runKrate(t, "native", "sign", dir, "--target", "darwin/arm64"); code != 1 || !strings.Contains(out, "nothing to sign") {
+		t.Errorf("sign without a package: exit %d:\n%s", code, out)
+	}
+}
+
+const testUpdaterPub = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+
+func TestNativeKeygen(t *testing.T) {
+	key := filepath.Join(t.TempDir(), "up.key")
+	code, out := runKrate(t, "native", "keygen", "--key-out", key)
+	if code != 0 || !strings.Contains(out, "publicKey:") {
+		t.Fatalf("exit %d:\n%s", code, out)
+	}
+	if st, err := os.Stat(key); err != nil || st.Mode().Perm() != 0o600 {
+		t.Fatalf("key file: %v %v", st, err)
+	}
+	if code, out := runKrate(t, "native", "keygen", "--key-out", key); code != 1 || !strings.Contains(out, "KR7227") {
+		t.Errorf("overwrite: exit %d:\n%s", code, out)
+	}
+	if code, _ := runKrate(t, "native", "keygen", "--key-out", key, "--force"); code != 0 {
+		t.Errorf("--force: exit %d", code)
+	}
+}

@@ -55,6 +55,7 @@ permissions decide which ids the UI and TypeScript host code may call.
 | `clipboard:read` | no | Reading the clipboard (sees what the user copied elsewhere) |
 | `tray` | no | A system tray icon |
 | `shortcut` | no | Global keyboard shortcuts |
+| `updater` | no | Checking for, downloading and applying app updates, and relaunching; see [Updates](/docs/native/updater/) |
 
 An empty or missing list means the defaults: the non-sensitive set marked
 "yes" above. The compiler will later derive the list from the SDK calls an app
@@ -109,6 +110,10 @@ permission from a typo. `isPermissionDenied(e)` and `deniedPermission(e)` from
 | `krate/kv.set` | `kv` | `key`, `value` | nothing |
 | `krate/kv.delete` | `kv` | `key` | nothing |
 | `krate/kv.keys` | `kv` | `prefix?` | `string[]` |
+| `krate/updater.check` | `updater` | none | `{ version, notes, pubDate, size }` or `null` |
+| `krate/updater.download` | `updater` | none (stream) | `{ done, total }` progress events |
+| `krate/updater.apply` | `updater` | none | nothing |
+| `krate/updater.relaunch` | `updater` | none | nothing |
 | `krate/permission.query` | none | `name` | `boolean` |
 | `krate/window.Open` | `window` | `options: WindowOptions` | `string` |
 | `krate/window.List` | `window` | none | `string[]` |

@@ -33,7 +33,16 @@ type NativeManifest struct {
 	// Permissions is native.permissions; the shell validates the names and
 	// treats an empty list as the SDK defaults.
 	Permissions []string `json:"permissions,omitempty"`
-	Debug       bool     `json:"debug"`
+	// Updater is native.updater: the feed URL template and the Ed25519
+	// public key that verifies update files.
+	Updater *NativeUpdaterMeta `json:"updater,omitempty"`
+	Debug   bool               `json:"debug"`
+}
+
+// NativeUpdaterMeta is the updater block of app.json.
+type NativeUpdaterMeta struct {
+	URL       string `json:"url"`
+	PublicKey string `json:"publicKey"`
 }
 
 // NativeWindowMeta is the main window of app.json.
@@ -219,6 +228,10 @@ func (b *Builder) BuildNativeApp(opts NativeAppOptions) (*NativeAppResult, error
 		Fallbacks:   fallbacks,
 		Permissions: append([]string(nil), eff.Permissions...),
 		Debug:       opts.Dev,
+	}
+
+	if eff.Updater != nil {
+		m.Updater = &NativeUpdaterMeta{URL: eff.Updater.URL, PublicKey: eff.Updater.PublicKey}
 	}
 
 	if h := b.NativeHost(); h != nil && h.HostBundle != "" {

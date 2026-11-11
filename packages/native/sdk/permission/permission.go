@@ -28,6 +28,7 @@
 //	clipboard:read      no             read the clipboard
 //	tray                no             system tray icon
 //	shortcut            no             global keyboard shortcuts
+//	updater             no             check for, download, apply updates and relaunch
 //
 // The compiler keeps a copy of the names in names.json (a test here keeps the
 // file in step; run "go test ./sdk/permission -update" to rewrite it).
@@ -96,6 +97,7 @@ func init() {
 		{Name: "clipboard:read", Doc: "read the system clipboard (sees what the user copied elsewhere)"},
 		{Name: "tray", Doc: "show a system tray icon"},
 		{Name: "shortcut", Doc: "register global keyboard shortcuts"},
+		{Name: "updater", Doc: "check for, download and apply app updates, and relaunch"},
 	} {
 		Define(i)
 	}

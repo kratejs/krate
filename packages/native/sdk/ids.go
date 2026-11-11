@@ -65,6 +65,11 @@ var IDs = []ID{
 	{"krate/kv.delete", "kv", "[key: string]", "void", "kv"},
 	{"krate/kv.keys", "kv", "[prefix?: string]", "string[]", "kv"},
 
+	{"krate/updater.check", "updater", "[]", "UpdateInfo | null", "updater"},
+	{"krate/updater.download", "updater", "[] (stream)", "DownloadProgress", "updater"},
+	{"krate/updater.apply", "updater", "[]", "void", "updater"},
+	{"krate/updater.relaunch", "updater", "[]", "void", "updater"},
+
 	{"krate/permission.query", "", "[name: string]", "boolean", "permission"},
 
 	{"krate/window.Open", "window", "[options: WindowOptions]", "string", "window"},
