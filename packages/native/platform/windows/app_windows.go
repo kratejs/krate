@@ -35,6 +35,12 @@ type Config struct {
 	Debug bool
 	// KeepAlive stops the app from quitting when its last window closes.
 	KeepAlive bool
+	// Memory is the memory profile from app.json "memory": "balanced"
+	// (default), "minimal" or "performance". UNTESTED, see memory.go.
+	Memory string
+	// Features is app.json "features" (media, webaudio, webgl, webrtc,
+	// spellcheck). Nil means not detected: no feature is switched off.
+	Features map[string]bool
 }
 
 // WindowConfig configures one window. Width and Height are the client area in
@@ -67,6 +73,11 @@ type App struct {
 	hNavigation unsafe.Pointer // shared NavigationStarting handler
 	hFrameNav   unsafe.Pointer // shared FrameNavigationStarting handler
 	hNewWindow  unsafe.Pointer // shared NewWindowRequested handler
+	hPermission unsafe.Pointer // shared PermissionRequested handler (nil: not installed)
+
+	envOpts   unsafe.Pointer // options object while the environment is being created
+	envNoOpts bool           // second attempt: created without options
+	userDir   string
 
 	exited chan struct{}
 	once   sync.Once
@@ -126,6 +137,9 @@ func New(cfg Config) (*App, error) {
 	a.hNavigation = newHandler(iidNavigationStartingHandler, false, a.onNavigationStarting)
 	a.hFrameNav = newHandler(iidNavigationStartingHandler, false, a.onFrameNavigationStarting)
 	a.hNewWindow = newHandler(iidNewWindowRequestedHandler, false, a.onNewWindowRequested)
+	if denyMediaCapture(cfg.Memory, cfg.Features) {
+		a.hPermission = newHandler(iidPermissionRequestedHandler, false, a.onPermissionRequested)
+	}
 	theApp = a
 	return a, nil
 }
@@ -257,15 +271,54 @@ func (a *App) startEnvironment() error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("windows: creating user data folder: %w", err)
 	}
+	return a.createEnv(dir)
+}
+
+// createEnv starts environment creation, with the memory options unless a
+// previous attempt with them failed.
+func (a *App) createEnv(dir string) error {
+	a.userDir = dir
+	var opts unsafe.Pointer
+	if !a.envNoOpts {
+		opts = newEnvironmentOptions(browserArgumentString(a.cfg.Memory, a.cfg.Features))
+	}
+	a.envOpts = opts
 	handler := newHandler(iidEnvCompletedHandler, true, a.environmentCompleted)
-	if err := createEnvironment(dir, handler); err != nil {
+	err := createEnvironment(dir, opts, handler)
+	if err != nil && opts != nil {
+		// Never let the tuning stop the app: retry without options.
+		logf("WebView2 memory options rejected (%v); starting without them", err)
+		a.releaseEnvOpts()
+		a.envNoOpts = true
+		return a.createEnv(dir)
+	}
+	if err != nil {
 		a.envStarted = false
+		a.releaseEnvOpts()
 		return err
 	}
 	return nil
 }
 
+func (a *App) releaseEnvOpts() {
+	if a.envOpts != nil {
+		comRelease(a.envOpts)
+		a.envOpts = nil
+	}
+}
+
 func (a *App) environmentCompleted(hr, env uintptr) uintptr {
+	a.releaseEnvOpts()
+	if (failed(hr) || env == 0) && !a.envNoOpts && a.userDir != "" && browserArgumentString(a.cfg.Memory, a.cfg.Features) != "" {
+		// The runtime may refuse the memory arguments (for example when
+		// another instance holds the same user data folder with other
+		// arguments). Retry once without them.
+		a.envNoOpts = true
+		logf("WebView2 environment failed with memory options (0x%08x); retrying without them", uint32(hr))
+		if err := a.createEnv(a.userDir); err == nil {
+			return sOK
+		}
+	}
 	if failed(hr) || env == 0 {
 		a.runErr = fmt.Errorf("windows: creating the WebView2 environment failed: 0x%08x", uint32(hr))
 		pPostQuitMessage.Call(1)

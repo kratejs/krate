@@ -104,14 +104,15 @@ func internalLoaderCandidates() []string {
 
 // createEnvironment starts creating the WebView2 environment; handler's
 // Invoke is called later from the message loop.
-func createEnvironment(userDataDir string, handler unsafe.Pointer) error {
+// opts is an optional ICoreWebView2EnvironmentOptions (nil for none).
+func createEnvironment(userDataDir string, opts, handler unsafe.Pointer) error {
 	var tried []string
 
 	for _, dll := range internalLoaderCandidates() {
 		if _, err := os.Stat(dll); err != nil {
 			continue
 		}
-		hr, err := callInternal(dll, userDataDir, handler)
+		hr, err := callInternal(dll, userDataDir, opts, handler)
 		if err == nil && !failed(hr) {
 			return nil
 		}
@@ -124,7 +125,7 @@ func createEnvironment(userDataDir string, handler unsafe.Pointer) error {
 	if exe, err := os.Executable(); err == nil {
 		dll := filepath.Join(filepath.Dir(exe), "WebView2Loader.dll")
 		if _, err := os.Stat(dll); err == nil {
-			hr, err := callPublic(dll, userDataDir, handler)
+			hr, err := callPublic(dll, userDataDir, opts, handler)
 			if err == nil && !failed(hr) {
 				return nil
 			}
@@ -144,7 +145,7 @@ func createEnvironment(userDataDir string, handler unsafe.Pointer) error {
 	return errors.New(msg)
 }
 
-func callInternal(dll, userDataDir string, handler unsafe.Pointer) (uintptr, error) {
+func callInternal(dll, userDataDir string, opts, handler unsafe.Pointer) (uintptr, error) {
 	h, err := xw.LoadLibraryEx(dll, 0, xw.LOAD_WITH_ALTERED_SEARCH_PATH)
 	if err != nil {
 		return 0, err
@@ -157,12 +158,12 @@ func callInternal(dll, userDataDir string, handler unsafe.Pointer) (uintptr, err
 		1,                    // checkRunningInstance
 		runtimeTypeInstalled, // runtime type
 		uintptr(unsafe.Pointer(wstr(userDataDir))),
-		0, // environment options: none
+		uintptr(opts), // environment options (0: none)
 		uintptr(handler))
 	return r, nil
 }
 
-func callPublic(dll, userDataDir string, handler unsafe.Pointer) (uintptr, error) {
+func callPublic(dll, userDataDir string, opts, handler unsafe.Pointer) (uintptr, error) {
 	h, err := xw.LoadLibraryEx(dll, 0, xw.LOAD_WITH_ALTERED_SEARCH_PATH)
 	if err != nil {
 		return 0, err
@@ -174,7 +175,7 @@ func callPublic(dll, userDataDir string, handler unsafe.Pointer) (uintptr, error
 	r, _, _ := syscall.SyscallN(proc,
 		0, // browser executable folder: installed runtime
 		uintptr(unsafe.Pointer(wstr(userDataDir))),
-		0, // options
+		uintptr(opts), // options (0: none)
 		uintptr(handler))
 	return r, nil
 }

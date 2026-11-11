@@ -4,23 +4,17 @@ package windows
 
 import (
 	"encoding/json"
-	"runtime/debug"
 	"sync/atomic"
 	"time"
 	"unsafe"
 
 	xw "golang.org/x/sys/windows"
 
+	"github.com/kratejs/krate/packages/native/internal/memory"
 	"github.com/kratejs/krate/packages/native/platform/caps"
 )
 
 var _ caps.WindowRelease = (*Window)(nil)
-
-// COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL, WebView2.h line 2631.
-const (
-	memoryTargetNormal = 0 // COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_NORMAL
-	memoryTargetLow    = 1 // COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW
-)
 
 const releaseWait = 1500 * time.Millisecond
 
@@ -140,7 +134,7 @@ func (a *App) parkable(w *Window) bool {
 
 // setViewHidden makes the controller invisible (hidden or minimized window) or
 // visible again, and sets the browser's memory target for the page: LOW while
-// hidden, NORMAL otherwise. A page that becomes hidden also gets the
+// hidden, the profile's visible level otherwise. A page that becomes hidden also gets the
 // krate:memory-pressure event. Main thread.
 func (w *Window) setViewHidden(hidden bool) {
 	if w.controller == nil || w.viewHid == hidden {
@@ -149,49 +143,21 @@ func (w *Window) setViewHidden(hidden bool) {
 	w.viewHid = hidden
 	if hidden {
 		vcall(w.controller, ctlPutIsVisible, 0)
-		w.setMemoryTarget(memoryTargetLow)
+		setMemoryTarget(w.webview, memTargetLow)
 		if w.webview != nil {
 			vcall(w.webview, wvExecuteScript, uintptr(unsafe.Pointer(wstr(caps.MemoryPressureScript))), 0)
 		}
 		shrinkHeapSoon()
 		return
 	}
-	w.setMemoryTarget(memoryTargetNormal)
+	// Back to the level a visible view has in this profile (LOW for minimal).
+	setMemoryTarget(w.webview, visibleMemoryTarget(w.app.cfg.Memory))
 	vcall(w.controller, ctlPutIsVisible, 1)
-}
-
-// setMemoryTarget calls ICoreWebView2_19::put_MemoryUsageTargetLevel. A
-// runtime older than the interface (SDK 1.0.2210) lacks it and nothing
-// happens.
-func (w *Window) setMemoryTarget(level uintptr) {
-	if w.webview == nil {
-		return
-	}
-	v19 := comQuery(w.webview, iidWebView19)
-	if v19 == nil {
-		return
-	}
-	vcall(v19, wv19PutMemoryTarget, level)
-	comRelease(v19)
-}
-
-// comQuery calls QueryInterface and returns the owned interface pointer, or
-// nil when the object does not implement it.
-func comQuery(obj unsafe.Pointer, iid string) unsafe.Pointer {
-	g, err := parseGUID(iid)
-	if err != nil {
-		return nil
-	}
-	var out uintptr
-	if failed(vcall(obj, 0, uintptr(unsafe.Pointer(&g)), uintptr(unsafe.Pointer(&out)))) || out == 0 {
-		return nil
-	}
-	return ptr(out)
 }
 
 var trimPending atomic.Bool
 
-// shrinkHeapSoon returns free Go heap of this process to the system once,
+// shrinkHeapSoon returns free memory of this process to the system once,
 // shortly after a window was hidden.
 func shrinkHeapSoon() {
 	if !trimPending.CompareAndSwap(false, true) {
@@ -199,6 +165,6 @@ func shrinkHeapSoon() {
 	}
 	time.AfterFunc(400*time.Millisecond, func() {
 		trimPending.Store(false)
-		debug.FreeOSMemory()
+		memory.Trim()
 	})
 }

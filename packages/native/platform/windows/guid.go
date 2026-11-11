@@ -28,8 +28,12 @@ const (
 	iidNewWindowRequestedHandler = "d4c185fe-c81c-4989-97af-2d3fa7ab5651"
 	// WebView2.h line 5078
 	iidExecuteScriptHandler = "49511172-cc67-4bca-9923-137112f4c4cc"
-	// WebView2.h line 21808 (ICoreWebView2_19, for MemoryUsageTargetLevel)
-	iidWebView19 = "6921f954-79b0-437f-a997-c85811897c68"
+	// WebView2.h line 48591
+	iidEnvironmentOptions = "2fde08a8-1e9a-4766-8c05-95a9ceb9d1c5"
+	// WebView2.h line 4386
+	iidPermissionRequestedHandler = "15e1c6a3-c72a-4df3-91d7-d097fbec6bfd"
+	// WebView2.h line 21808 (ICoreWebView2_19, MemoryUsageTargetLevel)
+	iidWebView2_19 = "6921f954-79b0-437f-a997-c85811897c68"
 )
 
 // guid is a GUID in its in-memory (Windows GUID struct) layout: Data1, Data2

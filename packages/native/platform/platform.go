@@ -18,7 +18,7 @@ type Options struct {
 	// Debug enables the webview's developer tools.
 	Debug bool
 	// Memory selects the memory profile of the webview. The zero value is
-	// the engine defaults. Only the Linux layer applies it today.
+	// the engine defaults.
 	Memory Memory
 	// KeepAlive keeps the app running when its last window closes. The last
 	// live window is then released (hidden, webview destroyed) rather than
@@ -39,6 +39,21 @@ type Memory struct {
 // Features are the optional webview features an app uses.
 type Features struct {
 	Media, WebAudio, WebGL, WebRTC, SpellCheck bool
+}
+
+// Backend returns the profile name and feature map in the form the macOS and
+// Windows backends take. An empty profile means "performance" (no levers),
+// and the map is never nil, so a feature is switched off only when Features
+// says so.
+func (m Memory) Backend() (string, map[string]bool) {
+	p := m.Profile
+	if p == "" {
+		p = "performance"
+	}
+	return p, map[string]bool{
+		"media": m.Features.Media, "webaudio": m.Features.WebAudio, "webgl": m.Features.WebGL,
+		"webrtc": m.Features.WebRTC, "spellcheck": m.Features.SpellCheck,
+	}
 }
 
 // WindowOptions configures one window.

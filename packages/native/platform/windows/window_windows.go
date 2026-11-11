@@ -153,6 +153,8 @@ func (w *Window) controllerCompleted(hr, controller uintptr) {
 	vcall(w.webview, wvAddFrameNavigationStarting, uintptr(a.hFrameNav), uintptr(unsafe.Pointer(&token)))
 	vcall(w.webview, wvAddNewWindowRequested, uintptr(a.hNewWindow), uintptr(unsafe.Pointer(&token)))
 
+	a.tuneMemory(w)
+
 	w.resize()
 	vcall(w.controller, ctlPutIsVisible, 1)
 	w.viewHid = false

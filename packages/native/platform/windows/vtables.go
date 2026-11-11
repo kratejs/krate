@@ -430,6 +430,39 @@ var ifaceMethods = map[string][]string{
 		"get_ReasonPhrase",
 		"put_ReasonPhrase",
 	},
+	// WebView2.h line 48628
+	"ICoreWebView2EnvironmentOptions": {
+		"QueryInterface",
+		"AddRef",
+		"Release",
+		"get_AdditionalBrowserArguments",
+		"put_AdditionalBrowserArguments",
+		"get_Language",
+		"put_Language",
+		"get_TargetCompatibleBrowserVersion",
+		"put_TargetCompatibleBrowserVersion",
+		"get_AllowSingleSignOnUsingOSPrimaryAccount",
+		"put_AllowSingleSignOnUsingOSPrimaryAccount",
+	},
+	// WebView2.h line 4403
+	"ICoreWebView2PermissionRequestedEventHandler": {
+		"QueryInterface",
+		"AddRef",
+		"Release",
+		"Invoke",
+	},
+	// WebView2.h line 56731
+	"ICoreWebView2PermissionRequestedEventArgs": {
+		"QueryInterface",
+		"AddRef",
+		"Release",
+		"get_Uri",
+		"get_PermissionKind",
+		"get_IsUserInitiated",
+		"get_State",
+		"put_State",
+		"GetDeferral",
+	},
 	// objidl.h: ISequentialStream (Read, Write) then IStream.
 	"IStream": {
 		"QueryInterface", "AddRef", "Release",

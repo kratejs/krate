@@ -38,7 +38,6 @@ var (
 	newWinArgsPutHandled         = vtIndex("ICoreWebView2NewWindowRequestedEventArgs", "put_Handled")
 	wvExecuteScript              = vtIndex("ICoreWebView2", "ExecuteScript")
 	wvAddScriptOnDocCreated      = vtIndex("ICoreWebView2", "AddScriptToExecuteOnDocumentCreated")
-	wv19PutMemoryTarget          = vtIndex("ICoreWebView2_19", "put_MemoryUsageTargetLevel")
 	wvAddWebResourceRequested    = vtIndex("ICoreWebView2", "add_WebResourceRequested")
 	wvAddWebResourceFilter       = vtIndex("ICoreWebView2", "AddWebResourceRequestedFilter")
 	setPutAreDevToolsEnabled     = vtIndex("ICoreWebView2Settings", "put_AreDevToolsEnabled")
@@ -58,4 +57,11 @@ var (
 	navArgsPutCancel             = vtIndex("ICoreWebView2NavigationStartingEventArgs", "put_Cancel")
 	streamReadSlot               = vtIndex("IStream", "Read")
 	handlerInvoke                = vtIndex("ICoreWebView2WebResourceRequestedEventHandler", "Invoke")
+
+	// Memory tuning (see memory.go).
+	wvAddPermissionRequested  = vtIndex("ICoreWebView2", "add_PermissionRequested")
+	permArgsGetPermissionKind = vtIndex("ICoreWebView2PermissionRequestedEventArgs", "get_PermissionKind")
+	permArgsPutState          = vtIndex("ICoreWebView2PermissionRequestedEventArgs", "put_State")
+	wv19PutMemoryTargetLevel  = vtIndex("ICoreWebView2_19", "put_MemoryUsageTargetLevel")
+	optGetArguments           = vtIndex("ICoreWebView2EnvironmentOptions", "get_AdditionalBrowserArguments")
 )

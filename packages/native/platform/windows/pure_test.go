@@ -30,7 +30,7 @@ func TestParseGUID(t *testing.T) {
 	}
 	for _, s := range []string{
 		iidISequentialStream, iidEnvCompletedHandler, iidControllerCompletedHandler,
-		iidWebResourceRequestedHandler, iidNavigationStartingHandler, iidNewWindowRequestedHandler, iidExecuteScriptHandler, iidWebView19,
+		iidWebResourceRequestedHandler, iidNavigationStartingHandler, iidNewWindowRequestedHandler, iidExecuteScriptHandler, iidWebView2_19,
 	} {
 		if _, err := parseGUID(s); err != nil {
 			t.Errorf("%s: %v", s, err)
@@ -85,7 +85,7 @@ func TestVtableLayout(t *testing.T) {
 		{wvAddNavigationStarting, 7, "add_NavigationStarting"},
 		{wvExecuteScript, 29, "ExecuteScript"},
 		{wvAddScriptOnDocCreated, 27, "AddScriptToExecuteOnDocumentCreated"},
-		{wv19PutMemoryTarget, 120, "put_MemoryUsageTargetLevel"},
+		{wv19PutMemoryTargetLevel, 120, "put_MemoryUsageTargetLevel"},
 		{wvAddWebResourceRequested, 55, "add_WebResourceRequested"},
 		{wvAddWebResourceFilter, 57, "AddWebResourceRequestedFilter"},
 		{wvGetSettings, 3, "get_Settings"},

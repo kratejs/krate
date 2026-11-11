@@ -6,11 +6,14 @@ import "github.com/kratejs/krate/packages/native/platform/darwin"
 
 // New creates the macOS application (AppKit + WKWebView via purego).
 func New(opts Options) (App, error) {
+	mem, feat := opts.Memory.Backend()
 	a, err := darwin.New(darwin.Options{
 		AppID:     opts.AppID,
 		Handler:   opts.Handler,
 		Debug:     opts.Debug,
 		KeepAlive: opts.KeepAlive,
+		Memory:    mem,
+		Features:  feat,
 	})
 	if err != nil {
 		return nil, err

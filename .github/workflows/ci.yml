@@ -439,6 +439,49 @@ jobs:
         env:
           KRATE_REQUIRE_E2E: "1"
 
+      # Memory of the system webview on real macOS and Windows machines. The
+      # WKWebView and WebView2 memory levers were written without being able to
+      # run them, and this step has NEVER RUN: it only exists so the first CI
+      # run produces numbers. It is continue-on-error and may fail on flag
+      # names or paths; fix it from the first log. `krate native profile
+      # --memory --idle <duration> <dir>` is the interface documented for the
+      # memory measurement command (writes dist-native/report.json); the
+      # profile is chosen through native.memory in krate.config.ts, which this
+      # step sets for the run and restores afterwards.
+      - name: Native memory report (macOS, Windows; never run)
+        if: matrix.os != 'ubuntu-latest'
+        continue-on-error: true
+        env:
+          GOWORK: "off"
+        run: |
+          set -x
+          EXE=""
+          if [ "$RUNNER_OS" = "Windows" ]; then EXE=".exe"; fi
+          (cd packages/compiler && go build -o "$RUNNER_TEMP/krate$EXE" ./cmd/krate)
+          app=examples/native-tasks
+          cfg="$app/krate.config.ts"
+          mkdir -p native-memory
+          status=0
+          for profile in balanced performance; do
+            cp "$cfg" "$RUNNER_TEMP/krate.config.ts.orig"
+            sed "s/native: {/native: { memory: '$profile',/" "$RUNNER_TEMP/krate.config.ts.orig" > "$cfg"
+            "$RUNNER_TEMP/krate$EXE" native build "$app" || status=1
+            "$RUNNER_TEMP/krate$EXE" native profile --memory --idle 10s "$app" || status=1
+            mkdir -p "native-memory/$profile"
+            cp "$app/dist-native/report.json" "native-memory/$profile/report.json" || status=1
+            cp "$RUNNER_TEMP/krate.config.ts.orig" "$cfg"
+          done
+          exit $status
+
+      - name: Upload native memory reports
+        if: always() && matrix.os != 'ubuntu-latest'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-memory-${{ matrix.os }}
+          path: native-memory
+          if-no-files-found: warn
+
       - name: Cache Playwright browsers
         if: matrix.os == 'ubuntu-latest'
         uses: actions/cache@v4
