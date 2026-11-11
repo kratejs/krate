@@ -40,11 +40,22 @@ func Register(t *bridge.Table, env *bridge.Env) {
 		if o.Height <= 0 {
 			o.Height = 768
 		}
+		id := ""
+		if env.Scope != nil {
+			id = env.Windows.Reserve()
+			scoped, err := env.Scope(ctx.Window(), id, o.Permissions, o.HasPermissions)
+			if err != nil {
+				return err
+			}
+			if scoped {
+				o.Path = krate.ScopedPath(o.Path, id)
+			}
+		}
 		w, err := env.App.NewWindow(platform.WindowOptions{Title: o.Title, Width: o.Width, Height: o.Height, Resizable: !o.Fixed, Path: o.Path})
 		if err != nil {
 			return err
 		}
-		id := env.Windows.Add("", w)
+		id = env.Windows.Add(id, w)
 		if c, ok := w.(caps.WindowControls); ok {
 			if o.Frameless {
 				c.SetDecorated(false)

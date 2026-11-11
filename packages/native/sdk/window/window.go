@@ -69,6 +69,12 @@ type Options struct {
 	HasPosition bool
 	// PreventClose delivers a close-requested event instead of closing.
 	PreventClose bool
+	// Permissions, when HasPermissions is set, narrows the SDK permissions
+	// the page of this window may use to this list (it must be a subset of
+	// the opening window's). An empty list leaves the page nothing. Without
+	// it the window gets the opening window's permissions.
+	Permissions    []string
+	HasPermissions bool
 }
 
 // State is a snapshot of a window.

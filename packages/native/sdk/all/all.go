@@ -5,10 +5,6 @@ package all
 import (
 	"github.com/kratejs/krate/packages/native/scheme"
 	"github.com/kratejs/krate/packages/native/sdk"
-	"github.com/kratejs/krate/packages/native/sdk/db"
-	"github.com/kratejs/krate/packages/native/sdk/fs"
-	"github.com/kratejs/krate/packages/native/sdk/kv"
-	sdknet "github.com/kratejs/krate/packages/native/sdk/net"
 	sdkos "github.com/kratejs/krate/packages/native/sdk/os"
 	"github.com/kratejs/krate/packages/native/sdk/permission"
 )
@@ -22,6 +18,8 @@ type Options struct {
 	Version string
 	// Permissions is the app.json "permissions" list; empty means defaults.
 	Permissions []string
+	// Strict makes an empty Permissions list mean "nothing".
+	Strict bool
 }
 
 // Register configures the SDK for the app and registers every UI id on r.
@@ -29,7 +27,13 @@ type Options struct {
 // fails with code "permission_denied", so the UI can tell a missing
 // permission from a typo. It returns the parsed permission set.
 func Register(r *scheme.Registry, o Options) (permission.Set, error) {
-	set, err := permission.Parse(o.Permissions)
+	var set permission.Set
+	var err error
+	if o.Strict && len(o.Permissions) == 0 {
+		set = permission.None()
+	} else {
+		set, err = permission.Parse(o.Permissions)
+	}
 	if err != nil {
 		return permission.Set{}, err
 	}
@@ -46,11 +50,12 @@ func Register(r *scheme.Registry, o Options) (permission.Set, error) {
 // missing fails with "permission_denied" naming it. override, when non-nil,
 // replaces set.Allows (tests of the shell use it).
 func RegisterUI(r *scheme.Registry, h *sdk.Host, set permission.Set, override func(permission string) bool) {
-	allowed := set.Allows
+	allowed := set.AllowsFor
 	if override != nil {
-		allowed = override
+		allowed = func(_, p string) bool { return override(p) }
 	}
-	h.RegisterUI(r, allowed, permission.Denied)
+	h.SetWindowScope(set.ScopeChild)
+	h.RegisterUIFor(r, allowed, permission.Denied)
 }
 
 // RegisterAreas registers every area on r without configuring the app
@@ -58,8 +63,11 @@ func RegisterUI(r *scheme.Registry, h *sdk.Host, set permission.Set, override fu
 func RegisterAreas(r *scheme.Registry, set permission.Set) {
 	permission.RegisterIn(r, set)
 	sdkos.Register(r, set)
-	fs.Register(r, set)
-	db.Register(r, set)
-	kv.Register(r, set)
-	sdknet.Register(r, set)
+	for _, a := range dataAreas {
+		a(r, set)
+	}
 }
+
+// dataAreas are the optional data areas (fs, db, kv, net). Each registers
+// itself from init in area_<name>.go behind the build tag !krate_no_<name>.
+var dataAreas []func(*scheme.Registry, permission.Set)

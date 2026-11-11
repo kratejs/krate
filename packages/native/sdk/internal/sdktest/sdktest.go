@@ -38,6 +38,12 @@ func New(t testing.TB, reg *scheme.Registry) *Caller {
 // arguments array; may be nil).
 func (c *Caller) Call(fn string, args func(*wire.Encoder)) Result {
 	c.t.Helper()
+	return c.CallFrom("test", fn, args)
+}
+
+// CallFrom is Call made by the window with this id (the x-krate-window header).
+func (c *Caller) CallFrom(window, fn string, args func(*wire.Encoder)) Result {
+	c.t.Helper()
 	req := wire.NewEncoder()
 	req.BeginObject()
 	req.Key("calls")
@@ -62,7 +68,7 @@ func (c *Caller) Call(fn string, args func(*wire.Encoder)) Result {
 	}
 	rec := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/__krate/call", bytes.NewReader(frame))
-	r.Header.Set("x-krate-window", "test")
+	r.Header.Set("x-krate-window", window)
 	c.h.ServeHTTP(rec, r)
 	d, err := wire.ReadFrame(rec.Body)
 	if err != nil {

@@ -20,6 +20,11 @@ type Env struct {
 	// D-Bus notification and tray backends on Linux. Keys: "notify", "tray",
 	// "shortcut".
 	Providers map[string]any
+	// Scope, when set, is called by window.Open for every window it opens,
+	// with the calling window, the new window id and the requested
+	// permission list (has reports whether one was given). It reports whether
+	// the new window is scoped; an error refuses the window.
+	Scope func(caller, window string, perms []string, has bool) (bool, error)
 }
 
 // NewEnv returns an Env for app.
@@ -51,6 +56,14 @@ type Windows struct {
 // NewWindows returns an empty registry.
 func NewWindows() *Windows {
 	return &Windows{byID: map[string]platform.Window{}, byRef: map[caps.WindowRef]string{}}
+}
+
+// Reserve returns the id the next window with an empty id would get.
+func (w *Windows) Reserve() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.next++
+	return fmt.Sprintf("w%d", w.next)
 }
 
 // Add registers w under id; an empty id gets "w<N>". The first window added
