@@ -12,6 +12,7 @@ func consume(d *Decoder, depth int) {
 	if depth > 40 || d.Err() != nil {
 		return
 	}
+	before := d.Offset()
 	switch d.Kind() {
 	case KindObject:
 		if d.BeginObject() != nil {
@@ -46,12 +47,18 @@ func consume(d *Decoder, depth int) {
 	case KindBool:
 		d.Bool()
 	case KindNull:
-		d.IsNull()
+		if !d.IsNull() {
+			d.Skip()
+		}
 	case KindBytes:
 		d.Bytes()
 	case KindTime:
 		d.Time()
 	default:
+		d.Skip()
+	}
+	if d.Err() == nil && d.Offset() == before {
+		// A value that consumed nothing would loop forever in the callers.
 		d.Skip()
 	}
 }
