@@ -525,6 +525,18 @@ jobs:
           KRATE_REQUIRE_E2E: "1"
           KRATE_BUDGET_SCALE: "3"
 
+      # The views example (a sidebar and a log view split off the main page)
+      # must keep compiling; TestGUIViews in the module-wide GUI step covers
+      # the runtime side on every OS.
+      - name: Build examples/native-views
+        env:
+          GOWORK: "off"
+        run: |
+          EXE=""
+          if [ "$RUNNER_OS" = "Windows" ]; then EXE=".exe"; fi
+          (cd packages/compiler && go build -o "$RUNNER_TEMP/krate-views$EXE" ./cmd/krate)
+          (cd examples/native-views && "$RUNNER_TEMP/krate-views$EXE" build)
+
       # The same on macOS and Windows. There are no budgets for them yet
       # (planned), so the budget tests only report what they measure there.
       - name: Compiler native tests (macOS, Windows)
