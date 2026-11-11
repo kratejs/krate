@@ -2,7 +2,9 @@ package sdkupdater
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -10,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kratejs/krate/packages/native/krate"
 	"github.com/kratejs/krate/packages/native/scheme"
 	"github.com/kratejs/krate/packages/native/sdk/internal/sdktest"
 	sdkos "github.com/kratejs/krate/packages/native/sdk/os"
@@ -183,5 +186,33 @@ func TestDownloadStream(t *testing.T) {
 	})
 	if found == "" {
 		t.Fatal("verified file not staged under the cache dir")
+	}
+}
+
+func TestDownloadStreamHonorsWindowScope(t *testing.T) {
+	isolate(t)
+	srv, pub := feed(t, "1.1.0")
+	Configure(Config{URL: srv.URL + "/feed", PublicKey: pub})
+	set, err := permission.Parse([]string{"updater", "kv"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := scheme.NewRegistry()
+	Register(reg, set)
+	if err := set.Scope("narrow", []string{"kv"}); err != nil {
+		t.Fatal(err)
+	}
+	e := wire.NewEncoder()
+	e.BeginArray()
+	e.EndArray()
+	args, err := e.Finish()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := krate.WithWindow(context.Background(), "narrow")
+	err = reg.InvokeStream(ctx, "krate/updater.download", args, func([]byte) error { return nil })
+	var ke *krate.Error
+	if !errors.As(err, &ke) || ke.Code != "permission_denied" {
+		t.Fatalf("a window scoped without updater reached the download stream: %v", err)
 	}
 }

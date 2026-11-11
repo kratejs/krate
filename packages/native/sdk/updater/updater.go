@@ -175,6 +175,9 @@ func Register(r *scheme.Registry, set permission.Set) {
 		})
 	} else {
 		r.Stream(idDownload, func(ctx krate.Ctx, args *wire.Decoder, emit func(write func(*wire.Encoder)) error) error {
+			if !set.AllowsFor(ctx.Window(), "updater") {
+				return permission.Denied("updater")
+			}
 			if err := noArgs(idDownload, args); err != nil {
 				return err
 			}
