@@ -106,7 +106,14 @@ func (a *testApp) buildGoHost(start int) (string, error) {
 		return "", err
 	}
 	if err := os.Rename(tmp, out); err != nil {
-		return "", err
+		// Windows cannot overwrite a running executable but can rename it.
+		_ = os.Remove(out + ".old")
+		if err := os.Rename(out, out+".old"); err != nil {
+			return "", err
+		}
+		if err := os.Rename(tmp, out); err != nil {
+			return "", err
+		}
 	}
 	return out, nil
 }

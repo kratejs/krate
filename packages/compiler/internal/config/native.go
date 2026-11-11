@@ -231,7 +231,11 @@ func IsNativePermission(p string) bool {
 // package name, "" when it is none of them.
 func NativePluginSpecKind(spec string) string {
 	switch {
-	case spec == "" || strings.TrimSpace(spec) != spec || strings.ContainsAny(spec, " \t\n\\"):
+	case spec == "" || strings.TrimSpace(spec) != spec || strings.ContainsAny(spec, " \t\n"):
+		return ""
+	case winDrivePathRe.MatchString(spec):
+		return "path"
+	case strings.Contains(spec, "\\"):
 		return ""
 	case strings.HasPrefix(spec, "./") || strings.HasPrefix(spec, "../") || strings.HasPrefix(spec, "/") || spec == "." || spec == "..":
 		return "path"
@@ -245,6 +249,9 @@ func NativePluginSpecKind(spec string) string {
 	}
 	return ""
 }
+
+// winDrivePathRe matches an absolute Windows path such as C:\dir or C:/dir.
+var winDrivePathRe = regexp.MustCompile(`^[A-Za-z]:[\\/]`)
 
 var npmNameRe = regexp.MustCompile(`^(@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*(/[A-Za-z0-9._-]+)*$`)
 

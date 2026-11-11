@@ -150,6 +150,15 @@ func NSISScript(m Metadata, p Payload, srcDir, outFile string) string {
 	w("!insertmacro MUI_UNPAGE_INSTFILES")
 	w("!insertmacro MUI_LANGUAGE \"English\"")
 	w("")
+	// The registry keys live in the 64-bit view; without this the uninstaller
+	// (a 32-bit process) would look in WOW6432Node and leave them behind.
+	w("Function .onInit")
+	w("  SetRegView 64")
+	w("FunctionEnd")
+	w("Function un.onInit")
+	w("  SetRegView 64")
+	w("FunctionEnd")
+	w("")
 	w("Function EnsureWebView2")
 	w("  ; Evergreen runtime client GUID. Present per machine or per user when installed.")
 	w("  SetRegView 32")

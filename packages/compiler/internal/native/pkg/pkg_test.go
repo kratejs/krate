@@ -254,6 +254,9 @@ func TestMSIXStructure(t *testing.T) {
 		if f.Method != zip.Store {
 			t.Errorf("%s is compressed", f.Name)
 		}
+		if f.ReaderVersion != 10 {
+			t.Errorf("%s: version needed %d, Windows accepts only 10", f.Name, f.ReaderVersion)
+		}
 	}
 	read := func(f *zip.File) []byte {
 		rc, _ := f.Open()

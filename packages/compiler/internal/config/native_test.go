@@ -304,7 +304,7 @@ func TestNativePluginsKey(t *testing.T) {
 
 func TestNativePluginSpecKind(t *testing.T) {
 	for spec, want := range map[string]string{
-		"./a": "path", "../a": "path", "/a/b": "path", ".": "path",
+		"./a": "path", "../a": "path", "/a/b": "path", ".": "path", `C:\a\b`: "path", "D:/a/b": "path",
 		"go:example.com/m": "go", "go:example.com/m@v1.2.3": "go",
 		"@acme/krate-x": "npm", "krate-x": "npm", "@acme/krate-x/sub": "npm",
 		"": "", " ./a": "", "go:": "", "go:@v1": "", "Has Space": "", "a\\b": "",

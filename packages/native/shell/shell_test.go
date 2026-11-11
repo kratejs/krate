@@ -112,10 +112,11 @@ func TestMatcher(t *testing.T) {
 }
 
 func TestDefaultAppDir(t *testing.T) {
-	if got := DefaultAppDir("/opt/acme/acme"); got != "/opt/acme/app" {
+	ff := filepath.FromSlash
+	if got := DefaultAppDir(ff("/opt/acme/acme")); got != ff("/opt/acme/app") {
 		t.Errorf("plain: %q", got)
 	}
-	if got := DefaultAppDir("/Apps/Acme.app/Contents/MacOS/acme"); got != "/Apps/Acme.app/Contents/Resources/app" {
+	if got := DefaultAppDir(ff("/Apps/Acme.app/Contents/MacOS/acme")); got != ff("/Apps/Acme.app/Contents/Resources/app") {
 		t.Errorf("bundle: %q", got)
 	}
 }

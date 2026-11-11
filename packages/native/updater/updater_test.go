@@ -18,6 +18,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -399,7 +400,8 @@ func TestApplyLinuxReplacesExecutableAndAppDir(t *testing.T) {
 	if readFile(t, filepath.Join(dir, "keep.txt")) != "user file" {
 		t.Fatal("unrelated file touched")
 	}
-	if st, _ := os.Stat(filepath.Join(dir, "acme")); st.Mode().Perm()&0o100 == 0 {
+	// Windows has no execute permission bit.
+	if st, _ := os.Stat(filepath.Join(dir, "acme")); runtime.GOOS != "windows" && st.Mode().Perm()&0o100 == 0 {
 		t.Fatal("new executable is not executable")
 	}
 	left, _ := filepath.Glob(filepath.Join(dir, ".krate-*"))
@@ -594,7 +596,7 @@ func TestApplyAppImage(t *testing.T) {
 	if readFile(t, target) != "new-image" {
 		t.Fatal("not replaced")
 	}
-	if st, _ := os.Stat(target); st.Mode().Perm()&0o100 == 0 {
+	if st, _ := os.Stat(target); runtime.GOOS != "windows" && st.Mode().Perm()&0o100 == 0 {
 		t.Fatal("not executable")
 	}
 	if _, err := os.Stat(target + ".new"); err == nil {

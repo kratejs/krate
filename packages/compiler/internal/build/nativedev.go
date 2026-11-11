@@ -787,7 +787,7 @@ func (nd *nativeDev) syncHost(goEdited bool) error {
 			if err := b.compileGoHost(next, nd.goos, nd.goarch, false); err != nil {
 				return err
 			}
-			if err := os.Rename(next, bin); err != nil {
+			if err := replaceRunningBinary(next, bin); err != nil {
 				_ = os.Remove(next)
 				return fmt.Errorf("replacing the Go host binary (it may still be running): %w", err)
 			}
@@ -818,6 +818,25 @@ func (nd *nativeDev) syncHost(goEdited bool) error {
 		} else {
 			nd.hub.ClearServerError("gohost")
 		}
+	}
+	return nil
+}
+
+// replaceRunningBinary moves next over bin. Windows refuses to overwrite a
+// running executable but allows renaming it, so the old file is moved aside
+// (to bin+".old", removed on the next rebuild) and next takes its name.
+func replaceRunningBinary(next, bin string) error {
+	if err := os.Rename(next, bin); err == nil {
+		return nil
+	}
+	old := bin + ".old"
+	_ = os.Remove(old)
+	if err := os.Rename(bin, old); err != nil {
+		return err
+	}
+	if err := os.Rename(next, bin); err != nil {
+		_ = os.Rename(old, bin)
+		return err
 	}
 	return nil
 }
