@@ -1,0 +1,9 @@
+{
+  "description": "text() on the incoming request strips a leading UTF-8 BOM.",
+  "requests": [
+    {
+      "method": "POST",
+      "bodyBase64": "77u/aGk="
+    }
+  ]
+}

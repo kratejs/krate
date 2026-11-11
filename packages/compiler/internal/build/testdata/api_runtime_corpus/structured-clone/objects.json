@@ -1,0 +1,8 @@
+{
+  "description": "Class instances become plain objects, getters are read, symbol and non-enumerable keys are dropped.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

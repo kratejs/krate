@@ -1,0 +1,8 @@
+{
+  "description": "Smoke test touching most Web APIs in one handler.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

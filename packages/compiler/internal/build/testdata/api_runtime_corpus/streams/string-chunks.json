@@ -1,0 +1,8 @@
+{
+  "description": "A streamed response of UTF-8 encoded chunks.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

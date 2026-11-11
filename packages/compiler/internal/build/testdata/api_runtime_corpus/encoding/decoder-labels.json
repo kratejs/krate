@@ -1,0 +1,8 @@
+{
+  "description": "Encoding label normalization and RangeError for unknown labels.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

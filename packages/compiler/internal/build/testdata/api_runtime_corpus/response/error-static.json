@@ -1,0 +1,24 @@
+{
+  "description": "Response.error() is a network error with status 0 and immutable headers.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ],
+  "divergence": {
+    "reason": "Response.error() works, but its headers stay mutable in the embedded runtime (see response/redirect-headers-immutable).",
+    "nodeVersion": "v24.22.2",
+    "quickjs": [
+      {
+        "status": 200,
+        "body": "{\"type\":\"error\",\"status\":0,\"ok\":false,\"body\":true,\"immutable\":\"ok\"}"
+      }
+    ],
+    "node": [
+      {
+        "status": 200,
+        "body": "{\"type\":\"error\",\"status\":0,\"ok\":false,\"body\":true,\"immutable\":\"TypeError\"}"
+      }
+    ]
+  }
+}

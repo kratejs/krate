@@ -1,0 +1,1211 @@
+{
+  "$comment": "Embedded API runtime compatibility ledger. Edit here, then run pnpm sync:docs; TestCompatLedger validates it.",
+  "denominator": "The WinterTC Minimum Common Web Platform API globals, plus the Node globals route handlers commonly reach for (Buffer, process, setImmediate, require, node: modules as one class).",
+  "features": {
+    "events": {
+      "title": "Events and abort",
+      "section": "webapi/events.js",
+      "description": "DOMException, Event, EventTarget, AbortController and AbortSignal.",
+      "requires": [],
+      "globals": [
+        "DOMException",
+        "Event",
+        "EventTarget",
+        "AbortSignal",
+        "AbortController"
+      ]
+    },
+    "timers": {
+      "title": "Timers",
+      "section": "webapi/timers.js",
+      "description": "setTimeout and friends, queueMicrotask and performance, driven by the Go job loop.",
+      "requires": [],
+      "globals": [
+        "setTimeout",
+        "setInterval",
+        "setImmediate",
+        "clearTimeout",
+        "clearInterval",
+        "clearImmediate",
+        "queueMicrotask",
+        "performance"
+      ]
+    },
+    "encoding": {
+      "title": "Encoding",
+      "section": "webapi/encoding.js",
+      "description": "atob, btoa, TextEncoder and TextDecoder.",
+      "requires": [],
+      "globals": [
+        "btoa",
+        "atob",
+        "TextEncoder",
+        "TextDecoder"
+      ]
+    },
+    "clone": {
+      "title": "structuredClone",
+      "section": "webapi/clone.js",
+      "description": "structuredClone.",
+      "requires": [],
+      "globals": [
+        "structuredClone"
+      ]
+    },
+    "url": {
+      "title": "URL",
+      "section": "webapi/url.js",
+      "description": "URL (parsed by the Go host) and URLSearchParams.",
+      "requires": [],
+      "globals": [
+        "URLSearchParams",
+        "URL"
+      ]
+    },
+    "fetch": {
+      "title": "Fetch, Request and Response",
+      "section": "webapi/fetch.js",
+      "description": "Headers, Request, Response and fetch (performed by the Go host). The API and middleware runners always use this feature.",
+      "requires": [
+        "events",
+        "url"
+      ],
+      "globals": [
+        "Headers",
+        "Request",
+        "Response",
+        "fetch",
+        "WebSocket",
+        "EventSource"
+      ]
+    },
+    "streams": {
+      "title": "Streams",
+      "section": "webapi/streams.js",
+      "description": "ReadableStream and its default reader, plus the unsupported stream stubs.",
+      "requires": [],
+      "globals": [
+        "ReadableStream",
+        "ReadableStreamDefaultReader",
+        "WritableStream",
+        "TransformStream",
+        "CompressionStream",
+        "DecompressionStream"
+      ]
+    },
+    "formdata": {
+      "title": "Blob, File and FormData",
+      "section": "webapi/formdata.js",
+      "description": "Blob, File and FormData, with multipart parsing in the Go host.",
+      "requires": [],
+      "globals": [
+        "Blob",
+        "File",
+        "FormData"
+      ]
+    },
+    "crypto": {
+      "title": "Crypto",
+      "section": "webapi/crypto.js",
+      "description": "crypto.getRandomValues, randomUUID and crypto.subtle (digest and HMAC in the Go host).",
+      "requires": [],
+      "globals": [
+        "CryptoKey",
+        "crypto"
+      ]
+    },
+    "console": {
+      "title": "Console",
+      "section": "webapi/console.js",
+      "description": "console methods backed by the Go host.",
+      "requires": [],
+      "globals": [
+        "console"
+      ]
+    },
+    "node": {
+      "title": "Node globals",
+      "section": "polyfills.go",
+      "description": "The Node globals the embedded runtime provides outside the prelude (process.env, a minimal require) and the ones it lacks.",
+      "requires": []
+    },
+    "engine": {
+      "title": "Engine built-ins",
+      "section": "QuickJS",
+      "description": "Globals that come from the QuickJS engine itself, not the prelude.",
+      "requires": []
+    },
+    "global": {
+      "title": "Global object",
+      "section": "none",
+      "description": "Global object aliases and properties that no prelude section provides yet.",
+      "requires": []
+    }
+  },
+  "rows": [
+    {
+      "api": "DOMException",
+      "status": "supported",
+      "feature": "events",
+      "notes": "name and legacy code are set from the error name.",
+      "tests": [
+        "TestCompatLedgerBehavior/DOMException",
+        "TestWebAPIMatrix/atob invalid",
+        "corpus:errors/error-properties",
+        "corpus:abort/controller-reason"
+      ]
+    },
+    {
+      "api": "Event",
+      "status": "partial",
+      "feature": "events",
+      "notes": "No DOM, so there is no propagation path: bubbles is recorded but stopPropagation() has no effect. new Event() without a type uses \"undefined\" instead of throwing TypeError.",
+      "tests": [
+        "TestCompatLedgerBehavior/Event",
+        "corpus:events/event-props",
+        "corpus:events/event-requires-type",
+        "corpus:events/event-target",
+        "corpus:events/stop-immediate"
+      ]
+    },
+    {
+      "api": "EventTarget",
+      "status": "supported",
+      "feature": "events",
+      "notes": "addEventListener (with once), removeEventListener and dispatchEvent.",
+      "tests": [
+        "TestCompatLedgerBehavior/EventTarget",
+        "corpus:events/event-props",
+        "corpus:events/event-target",
+        "corpus:events/stop-immediate"
+      ]
+    },
+    {
+      "api": "CustomEvent",
+      "status": "not-supported",
+      "feature": "events",
+      "hint": "Extend Event and attach the payload as a property, or set ssr.apiRuntime to \"node\" in krate.config.ts.",
+      "tests": [
+        "corpus:events/custom-event"
+      ]
+    },
+    {
+      "api": "ErrorEvent",
+      "status": "not-supported",
+      "feature": "events",
+      "hint": "Dispatch a plain Event carrying the error, or set ssr.apiRuntime to \"node\" in krate.config.ts."
+    },
+    {
+      "api": "PromiseRejectionEvent",
+      "status": "not-supported",
+      "feature": "events",
+      "hint": "Handle the rejection with .catch() where the promise is created."
+    },
+    {
+      "api": "AbortController",
+      "status": "supported",
+      "feature": "events",
+      "tests": [
+        "TestCompatLedgerBehavior/AbortController",
+        "TestWebAPIMatrix/abort",
+        "corpus:abort/any",
+        "corpus:abort/controller-reason",
+        "corpus:abort/events",
+        "corpus:abort/request-signal"
+      ]
+    },
+    {
+      "api": "AbortSignal",
+      "status": "supported",
+      "feature": "events",
+      "notes": "abort(), timeout(), any() and throwIfAborted().",
+      "tests": [
+        "TestCompatLedgerBehavior/AbortSignal",
+        "TestWebAPIMatrix/abort timeout",
+        "corpus:abort/any",
+        "corpus:abort/controller-reason",
+        "corpus:abort/events",
+        "corpus:abort/request-signal",
+        "corpus:abort/signal-abort-static",
+        "corpus:abort/timeout"
+      ]
+    },
+    {
+      "api": "reportError",
+      "status": "not-supported",
+      "feature": "events",
+      "hint": "Log the error with console.error instead."
+    },
+    {
+      "api": "onerror",
+      "status": "not-supported",
+      "feature": "events",
+      "notes": "There is no global error event; an uncaught error fails the request and is logged.",
+      "hint": "Wrap the handler body in try/catch."
+    },
+    {
+      "api": "onunhandledrejection",
+      "status": "not-supported",
+      "feature": "events",
+      "notes": "There is no global unhandledrejection event.",
+      "hint": "Attach .catch() to the promise, or await it inside try/catch."
+    },
+    {
+      "api": "setTimeout",
+      "status": "supported",
+      "feature": "timers",
+      "notes": "Timers run on the request's event loop; a handler can await a timeout.",
+      "tests": [
+        "TestCompatLedgerBehavior/setTimeout",
+        "TestWebAPIMatrix/settimeout fires",
+        "TestWebAPIMatrix/timer order",
+        "corpus:timers/set-timeout-wait",
+        "corpus:timers/ordering",
+        "corpus:timers/args-and-handles",
+        "corpus:timers/microtasks-between-timers"
+      ]
+    },
+    {
+      "api": "clearTimeout",
+      "status": "supported",
+      "feature": "timers",
+      "tests": [
+        "TestCompatLedgerBehavior/clearTimeout",
+        "TestWebAPIMatrix/clearTimeout",
+        "corpus:timers/clear-timeout",
+        "corpus:timers/args-and-handles"
+      ]
+    },
+    {
+      "api": "setInterval",
+      "status": "supported",
+      "feature": "timers",
+      "tests": [
+        "TestCompatLedgerBehavior/setInterval",
+        "TestWebAPIMatrix/setInterval",
+        "corpus:timers/set-interval"
+      ]
+    },
+    {
+      "api": "clearInterval",
+      "status": "supported",
+      "feature": "timers",
+      "tests": [
+        "TestCompatLedgerBehavior/clearInterval",
+        "corpus:timers/set-interval",
+        "corpus:timers/clear-timeout"
+      ]
+    },
+    {
+      "api": "setImmediate",
+      "status": "supported",
+      "feature": "timers",
+      "notes": "Node global; scheduled as a zero-delay timer.",
+      "tests": [
+        "TestCompatLedgerBehavior/setImmediate",
+        "corpus:timers/set-immediate"
+      ]
+    },
+    {
+      "api": "clearImmediate",
+      "status": "supported",
+      "feature": "timers",
+      "notes": "Node global.",
+      "tests": [
+        "TestCompatLedgerBehavior/clearImmediate",
+        "corpus:timers/set-immediate"
+      ]
+    },
+    {
+      "api": "queueMicrotask",
+      "status": "supported",
+      "feature": "timers",
+      "tests": [
+        "TestCompatLedgerBehavior/queueMicrotask",
+        "TestWebAPIMatrix/queueMicrotask",
+        "corpus:timers/ordering",
+        "corpus:timers/microtasks-between-timers"
+      ]
+    },
+    {
+      "api": "performance",
+      "status": "partial",
+      "feature": "timers",
+      "notes": "performance.now(), performance.timeOrigin and toJSON() only.",
+      "tests": [
+        "TestCompatLedgerBehavior/performance",
+        "TestWebAPIMatrix/performance",
+        "corpus:performance/now"
+      ]
+    },
+    {
+      "api": "performance.mark",
+      "status": "not-supported",
+      "feature": "timers",
+      "hint": "Record performance.now() before and after and subtract."
+    },
+    {
+      "api": "performance.measure",
+      "status": "not-supported",
+      "feature": "timers",
+      "hint": "Record performance.now() before and after and subtract."
+    },
+    {
+      "api": "atob",
+      "status": "partial",
+      "feature": "encoding",
+      "notes": "Accepts some invalid padding that Node rejects (\"Zg=\", \"Z===\").",
+      "tests": [
+        "TestCompatLedgerBehavior/atob",
+        "TestWebAPIMatrix/btoa atob",
+        "TestWebAPIMatrix/atob invalid",
+        "corpus:base64/atob",
+        "corpus:base64/atob-invalid",
+        "corpus:base64/atob-invalid-padding",
+        "corpus:base64/binary-roundtrip"
+      ]
+    },
+    {
+      "api": "btoa",
+      "status": "supported",
+      "feature": "encoding",
+      "tests": [
+        "TestCompatLedgerBehavior/btoa",
+        "TestWebAPIMatrix/btoa atob",
+        "corpus:base64/btoa",
+        "corpus:base64/btoa-invalid",
+        "corpus:base64/binary-roundtrip"
+      ]
+    },
+    {
+      "api": "TextEncoder",
+      "status": "supported",
+      "feature": "encoding",
+      "notes": "encode() and encodeInto().",
+      "tests": [
+        "TestCompatLedgerBehavior/TextEncoder",
+        "TestWebAPIMatrix/textencoder",
+        "TestTextEncoder",
+        "corpus:encoding/text-encoder",
+        "corpus:encoding/encode-into"
+      ]
+    },
+    {
+      "api": "TextDecoder",
+      "status": "partial",
+      "feature": "encoding",
+      "notes": "utf-8, utf-16le and windows-1252 (latin1, ascii) labels, with fatal, ignoreBOM and stream; any other label throws RangeError. The windows-1252 labels map bytes 0x80-0x9f to U+0080-U+009F instead of the windows-1252 table (0x80 is U+20AC in Node).",
+      "tests": [
+        "TestCompatLedgerBehavior/TextDecoder",
+        "TestWebAPIMatrix/textdecoder",
+        "TestWebAPIMatrix/textdecoder fatal",
+        "TestWebAPIMatrix/textdecoder stream",
+        "corpus:encoding/decoder-bom",
+        "corpus:encoding/decoder-fatal",
+        "corpus:encoding/decoder-stream",
+        "corpus:encoding/decoder-labels",
+        "corpus:encoding/decoder-inputs",
+        "corpus:encoding/decoder-windows-1252"
+      ]
+    },
+    {
+      "api": "TextEncoderStream",
+      "status": "not-supported",
+      "feature": "streams",
+      "hint": "Encode chunks with TextEncoder inside a ReadableStream source, or set ssr.apiRuntime to \"node\" in krate.config.ts."
+    },
+    {
+      "api": "TextDecoderStream",
+      "status": "not-supported",
+      "feature": "streams",
+      "hint": "Read the stream and decode chunks with new TextDecoder().decode(chunk, { stream: true }), or set ssr.apiRuntime to \"node\" in krate.config.ts."
+    },
+    {
+      "api": "structuredClone",
+      "status": "partial",
+      "feature": "clone",
+      "notes": "Plain data, Date, RegExp, Map, Set, ArrayBuffer and typed arrays, Blob and errors, with cycles; the transfer option throws NotSupportedError. Arrays are copied by index only, so extra own properties on an array are dropped.",
+      "tests": [
+        "TestCompatLedgerBehavior/structuredClone",
+        "TestWebAPIMatrix/structuredClone",
+        "TestWebAPIMatrix/structuredClone fn throws",
+        "corpus:structured-clone/array-extra-props",
+        "corpus:structured-clone/cycles",
+        "corpus:structured-clone/date-regexp",
+        "corpus:structured-clone/errors",
+        "corpus:structured-clone/map-set",
+        "corpus:structured-clone/objects",
+        "corpus:structured-clone/primitives",
+        "corpus:structured-clone/typed-arrays",
+        "corpus:structured-clone/uncloneable"
+      ]
+    },
+    {
+      "api": "URL",
+      "status": "partial",
+      "feature": "url",
+      "notes": "WHATWG parsing (Go host); URL.canParse and URL.parse. Host parsing differs from Node: IPv6 literals are kept as written (no zero compression), numeric IPv4 forms (hex, octal, shortened) are not normalized, file://localhost keeps localhost and every blob: URL has origin \"null\". The username and password setters re-encode existing percent escapes, and the protocol setter applies special/non-special scheme switches that Node ignores.",
+      "tests": [
+        "TestCompatLedgerBehavior/URL",
+        "TestWebAPIMatrix/url parts",
+        "TestWebAPIMatrix/url relative",
+        "TestWebAPIMatrix/url invalid throws",
+        "TestURLRelativeResolution",
+        "corpus:url/blob-origin",
+        "corpus:url/credential-setters",
+        "corpus:url/credentials",
+        "corpus:url/file-localhost",
+        "corpus:url/idna-host",
+        "corpus:url/invalid-inputs",
+        "corpus:url/ipv4-number-forms",
+        "corpus:url/ipv6-literals",
+        "corpus:url/ipv6-serialization",
+        "corpus:url/normalization",
+        "corpus:url/origin",
+        "corpus:url/percent-encoding",
+        "corpus:url/protocol-setter-special",
+        "corpus:url/relative-resolution",
+        "corpus:url/request-url",
+        "corpus:url/search-params-mutation",
+        "corpus:url/serialization",
+        "corpus:url/setters",
+        "corpus:url/static-methods"
+      ]
+    },
+    {
+      "api": "URLSearchParams",
+      "status": "supported",
+      "feature": "url",
+      "tests": [
+        "TestCompatLedgerBehavior/URLSearchParams",
+        "TestWebAPIMatrix/urlsearchparams eq",
+        "TestWebAPIMatrix/urlsearchparams toString",
+        "TestWebAPIMatrix/url searchParams sync",
+        "corpus:urlsearchparams/constructors",
+        "corpus:urlsearchparams/duplicates",
+        "corpus:urlsearchparams/encoding",
+        "corpus:urlsearchparams/iteration",
+        "corpus:urlsearchparams/sort",
+        "corpus:url/search-params-mutation"
+      ]
+    },
+    {
+      "api": "URLPattern",
+      "status": "not-supported",
+      "feature": "url",
+      "hint": "Match with a RegExp, or read the route params passed to the handler."
+    },
+    {
+      "api": "Headers",
+      "status": "partial",
+      "feature": "fetch",
+      "notes": "Case-insensitive, iterable in sorted order, getSetCookie(). Values are only checked for NUL, CR and LF, so characters Node rejects (outside Latin-1) are accepted.",
+      "tests": [
+        "TestCompatLedgerBehavior/Headers",
+        "TestWebAPIMatrix/headers case-insensitive",
+        "TestWebAPIMatrix/headers iterable sorted",
+        "TestWebAPIMatrix/getSetCookie",
+        "corpus:headers/append-vs-set",
+        "corpus:headers/case-insensitive",
+        "corpus:headers/constructors",
+        "corpus:headers/get-set-cookie",
+        "corpus:headers/iteration-order",
+        "corpus:headers/non-latin1-value",
+        "corpus:headers/response-headers",
+        "corpus:headers/set-cookie-multiple",
+        "corpus:headers/validation"
+      ]
+    },
+    {
+      "api": "Request",
+      "status": "partial",
+      "feature": "fetch",
+      "notes": "Bodies are promise-based (json, text, formData, arrayBuffer, blob, bytes); clone() of a request with a stream body throws NotSupportedError. A leading BOM is kept by text() (and makes json() throw SyntaxError) where Node strips it, and invalid UTF-8 in the incoming body becomes one U+FFFD per invalid sequence rather than per WHATWG maximal subpart.",
+      "tests": [
+        "TestCompatLedgerBehavior/Request",
+        "TestWebAPIMatrix/req json async",
+        "TestWebAPIMatrix/body used",
+        "TestWebAPIMatrix/formData urlencoded",
+        "corpus:request/body-used",
+        "corpus:request/clone",
+        "corpus:request/constructed",
+        "corpus:request/consumers",
+        "corpus:request/headers",
+        "corpus:request/json-body",
+        "corpus:request/properties",
+        "corpus:request/text-body",
+        "corpus:unicode/bom-body-json",
+        "corpus:unicode/invalid-utf8-request"
+      ]
+    },
+    {
+      "api": "Response",
+      "status": "partial",
+      "feature": "fetch",
+      "notes": "Response.json, Response.redirect, Response.error and stream bodies; clone() of a response with a stream body throws NotSupportedError. Response.error() and Response.redirect() return mutable headers; the status must be an integer (200.5 throws RangeError) and statusText is not validated.",
+      "tests": [
+        "TestCompatLedgerBehavior/Response",
+        "TestBinaryAPIBodies",
+        "TestWebAPIMatrix/response json",
+        "TestWebAPIMatrix/response redirect",
+        "TestWebAPIMatrix/stream body",
+        "corpus:response/body-types",
+        "corpus:response/body-used",
+        "corpus:response/clone",
+        "corpus:response/consumers",
+        "corpus:response/custom-status",
+        "corpus:response/error-static",
+        "corpus:response/headers-immutable-request",
+        "corpus:response/implicit-empty",
+        "corpus:response/json-returned",
+        "corpus:response/json-static",
+        "corpus:response/plain-object",
+        "corpus:response/redirect-headers-immutable",
+        "corpus:response/redirect-relative",
+        "corpus:response/redirect-returned",
+        "corpus:response/redirect-static",
+        "corpus:response/status-init-coercion",
+        "corpus:response/status-text"
+      ]
+    },
+    {
+      "api": "fetch",
+      "status": "supported",
+      "feature": "fetch",
+      "notes": "Performed by the Go host and buffered; honours cache and next.revalidate/tags options.",
+      "tests": [
+        "TestCompatLedgerBehavior/fetch",
+        "TestFetchExists",
+        "TestQuickJSFetchOptions",
+        "TestBinaryFetch"
+      ]
+    },
+    {
+      "api": "WebSocket",
+      "status": "not-supported",
+      "feature": "fetch",
+      "notes": "Defined as a stub that throws NotSupportedError.",
+      "hint": "Open sockets from a Go API route, or set ssr.apiRuntime to \"node\" in krate.config.ts."
+    },
+    {
+      "api": "EventSource",
+      "status": "not-supported",
+      "feature": "fetch",
+      "notes": "Defined as a stub that throws NotSupportedError. Serving Server-Sent Events from a route works (return a ReadableStream body).",
+      "hint": "Read the event stream with fetch() and response.body, or set ssr.apiRuntime to \"node\" in krate.config.ts."
+    },
+    {
+      "api": "Blob",
+      "status": "partial",
+      "feature": "formdata",
+      "notes": "slice, text, arrayBuffer, bytes and stream. The type is only lowercased: non-ASCII and control characters are kept where Node replaces the type with an empty string.",
+      "tests": [
+        "TestCompatLedgerBehavior/Blob",
+        "TestWebAPIMatrix/blob",
+        "corpus:blob/parts",
+        "corpus:blob/readers",
+        "corpus:blob/slice",
+        "corpus:blob/type",
+        "corpus:blob/type-invalid-chars"
+      ]
+    },
+    {
+      "api": "File",
+      "status": "supported",
+      "feature": "formdata",
+      "tests": [
+        "TestCompatLedgerBehavior/File",
+        "TestWebAPIMatrix/formData multipart roundtrip",
+        "corpus:file/basics",
+        "corpus:formdata/files"
+      ]
+    },
+    {
+      "api": "FormData",
+      "status": "supported",
+      "feature": "formdata",
+      "notes": "Parses and serializes urlencoded and multipart bodies; constructing from an HTML form element throws (there is no DOM).",
+      "tests": [
+        "TestCompatLedgerBehavior/FormData",
+        "TestWebAPIMatrix/formData urlencoded",
+        "TestWebAPIMatrix/formData multipart roundtrip",
+        "corpus:formdata/append-get",
+        "corpus:formdata/files",
+        "corpus:formdata/invalid-body",
+        "corpus:formdata/multipart-request",
+        "corpus:formdata/multipart-request-files",
+        "corpus:formdata/multipart-roundtrip",
+        "corpus:formdata/urlencoded-request"
+      ]
+    },
+    {
+      "api": "ReadableStream",
+      "status": "partial",
+      "feature": "streams",
+      "notes": "Default readers, async iteration and ReadableStream.from; tee(), pipeTo(), pipeThrough() and BYOB readers throw NotSupportedError. There is no values() method (use for await or getReader()), read results are { value, done } with no value key on the final one, and reading a body directly through body does not set bodyUsed.",
+      "tests": [
+        "TestCompatLedgerBehavior/ReadableStream",
+        "TestWebAPIMatrix/stream body",
+        "TestWebAPIMatrix/stream async iter",
+        "corpus:streams/async-iteration",
+        "corpus:streams/binary-chunks",
+        "corpus:streams/body-stream",
+        "corpus:streams/body-used-after-reader",
+        "corpus:streams/cancel",
+        "corpus:streams/enqueue-close-error",
+        "corpus:streams/error-midstream",
+        "corpus:streams/from",
+        "corpus:streams/pull-source",
+        "corpus:streams/read-result-shape",
+        "corpus:streams/reader",
+        "corpus:streams/response-stream",
+        "corpus:streams/string-chunks",
+        "corpus:streams/tee",
+        "corpus:streams/unsupported-helpers",
+        "corpus:streams/values-method"
+      ]
+    },
+    {
+      "api": "ReadableStream.prototype.tee",
+      "status": "not-supported",
+      "feature": "streams",
+      "notes": "Instance method, so builds cannot see calls to it.",
+      "hint": "Read the stream once and buffer the chunks, or set ssr.apiRuntime to \"node\" in krate.config.ts."
+    },
+    {
+      "api": "ReadableStream.prototype.pipeTo",
+      "status": "not-supported",
+      "feature": "streams",
+      "notes": "Instance method, so builds cannot see calls to it.",
+      "hint": "Read with getReader() and write each chunk yourself, or set ssr.apiRuntime to \"node\" in krate.config.ts."
+    },
+    {
+      "api": "ReadableStream.prototype.pipeThrough",
+      "status": "not-supported",
+      "feature": "streams",
+      "notes": "Instance method, so builds cannot see calls to it.",
+      "hint": "Transform chunks inside a new ReadableStream's pull(), or set ssr.apiRuntime to \"node\" in krate.config.ts."
+    },
+    {
+      "api": "ReadableStreamDefaultReader",
+      "status": "supported",
+      "feature": "streams",
+      "tests": [
+        "TestCompatLedgerBehavior/ReadableStreamDefaultReader"
+      ]
+    },
+    {
+      "api": "ReadableStreamDefaultController",
+      "status": "not-supported",
+      "feature": "streams",
+      "notes": "Not exposed as a global; the controller passed to start() and pull() works.",
+      "hint": "Use the controller argument of the underlying source instead of the class."
+    },
+    {
+      "api": "ReadableByteStreamController",
+      "status": "not-supported",
+      "feature": "streams",
+      "hint": "Use a default ReadableStream that enqueues Uint8Array chunks."
+    },
+    {
+      "api": "ReadableStreamBYOBReader",
+      "status": "not-supported",
+      "feature": "streams",
+      "hint": "Use stream.getReader() (a default reader)."
+    },
+    {
+      "api": "ReadableStreamBYOBRequest",
+      "status": "not-supported",
+      "feature": "streams",
+      "hint": "Use stream.getReader() (a default reader)."
+    },
+    {
+      "api": "WritableStream",
+      "status": "not-supported",
+      "feature": "streams",
+      "notes": "Defined as a stub that throws NotSupportedError.",
+      "hint": "Collect chunks in an array or push them into a ReadableStream controller, or set ssr.apiRuntime to \"node\" in krate.config.ts."
+    },
+    {
+      "api": "WritableStreamDefaultController",
+      "status": "not-supported",
+      "feature": "streams",
+      "hint": "Set ssr.apiRuntime to \"node\" in krate.config.ts."
+    },
+    {
+      "api": "WritableStreamDefaultWriter",
+      "status": "not-supported",
+      "feature": "streams",
+      "hint": "Set ssr.apiRuntime to \"node\" in krate.config.ts."
+    },
+    {
+      "api": "TransformStream",
+      "status": "not-supported",
+      "feature": "streams",
+      "notes": "Defined as a stub that throws NotSupportedError.",
+      "hint": "Transform chunks inside a ReadableStream's pull() or start(), or set ssr.apiRuntime to \"node\" in krate.config.ts."
+    },
+    {
+      "api": "TransformStreamDefaultController",
+      "status": "not-supported",
+      "feature": "streams",
+      "hint": "Set ssr.apiRuntime to \"node\" in krate.config.ts."
+    },
+    {
+      "api": "ByteLengthQueuingStrategy",
+      "status": "not-supported",
+      "feature": "streams",
+      "hint": "Pass { highWaterMark: n } as the stream strategy."
+    },
+    {
+      "api": "CountQueuingStrategy",
+      "status": "not-supported",
+      "feature": "streams",
+      "hint": "Pass { highWaterMark: n } as the stream strategy."
+    },
+    {
+      "api": "CompressionStream",
+      "status": "not-supported",
+      "feature": "streams",
+      "notes": "Defined as a stub that throws NotSupportedError.",
+      "hint": "Let the server or CDN compress responses, or set ssr.apiRuntime to \"node\" in krate.config.ts."
+    },
+    {
+      "api": "DecompressionStream",
+      "status": "not-supported",
+      "feature": "streams",
+      "notes": "Defined as a stub that throws NotSupportedError.",
+      "hint": "Set ssr.apiRuntime to \"node\" in krate.config.ts."
+    },
+    {
+      "api": "crypto",
+      "status": "partial",
+      "feature": "crypto",
+      "notes": "getRandomValues, randomUUID and a subset of crypto.subtle.",
+      "tests": [
+        "TestCompatLedgerBehavior/crypto"
+      ]
+    },
+    {
+      "api": "crypto.getRandomValues",
+      "status": "partial",
+      "feature": "crypto",
+      "notes": "A float array throws a plain TypeError (Node throws a TypeMismatchError DOMException), and a DataView is accepted.",
+      "tests": [
+        "TestCompatLedgerBehavior/crypto.getRandomValues",
+        "TestWebAPIMatrix/getRandomValues",
+        "corpus:crypto/get-random-values",
+        "corpus:crypto/get-random-values-errors",
+        "corpus:crypto/get-random-values-quota"
+      ]
+    },
+    {
+      "api": "crypto.randomUUID",
+      "status": "supported",
+      "feature": "crypto",
+      "tests": [
+        "TestCompatLedgerBehavior/crypto.randomUUID",
+        "TestWebAPIMatrix/crypto uuid",
+        "corpus:crypto/random-uuid"
+      ]
+    },
+    {
+      "api": "crypto.subtle",
+      "status": "partial",
+      "feature": "crypto",
+      "notes": "digest, and HMAC importKey/sign/verify with raw keys.",
+      "tests": [
+        "TestCompatLedgerBehavior/crypto.subtle",
+        "TestWebAPIMatrix/subtle unsupported",
+        "corpus:crypto/unsupported-subtle"
+      ]
+    },
+    {
+      "api": "crypto.subtle.digest",
+      "status": "supported",
+      "feature": "crypto",
+      "notes": "SHA-1, SHA-256, SHA-384 and SHA-512.",
+      "tests": [
+        "TestCompatLedgerBehavior/crypto.subtle.digest",
+        "TestBinaryHostFunctions",
+        "TestWebAPIMatrix/digest",
+        "corpus:crypto/digest",
+        "corpus:crypto/digest-errors"
+      ]
+    },
+    {
+      "api": "crypto.subtle.importKey",
+      "status": "partial",
+      "feature": "crypto",
+      "notes": "Only the raw format with the HMAC algorithm; anything else rejects with NotSupportedError.",
+      "tests": [
+        "TestCompatLedgerBehavior/crypto.subtle.importKey",
+        "TestWebAPIMatrix/hmac",
+        "corpus:crypto/hmac"
+      ]
+    },
+    {
+      "api": "crypto.subtle.sign",
+      "status": "partial",
+      "feature": "crypto",
+      "notes": "HMAC keys only.",
+      "tests": [
+        "TestCompatLedgerBehavior/crypto.subtle.sign",
+        "TestWebAPIMatrix/hmac",
+        "corpus:crypto/hmac"
+      ]
+    },
+    {
+      "api": "crypto.subtle.verify",
+      "status": "partial",
+      "feature": "crypto",
+      "notes": "HMAC keys only (constant-time compare).",
+      "tests": [
+        "TestCompatLedgerBehavior/crypto.subtle.verify",
+        "corpus:crypto/hmac"
+      ]
+    },
+    {
+      "api": "crypto.subtle.encrypt",
+      "status": "not-supported",
+      "feature": "crypto",
+      "notes": "Rejects with NotSupportedError.",
+      "hint": "Do this in a Go API route, or set ssr.apiRuntime to \"node\" in krate.config.ts."
+    },
+    {
+      "api": "crypto.subtle.decrypt",
+      "status": "not-supported",
+      "feature": "crypto",
+      "notes": "Rejects with NotSupportedError.",
+      "hint": "Do this in a Go API route, or set ssr.apiRuntime to \"node\" in krate.config.ts."
+    },
+    {
+      "api": "crypto.subtle.generateKey",
+      "status": "not-supported",
+      "feature": "crypto",
+      "notes": "Rejects with NotSupportedError.",
+      "hint": "Do this in a Go API route, or set ssr.apiRuntime to \"node\" in krate.config.ts."
+    },
+    {
+      "api": "crypto.subtle.deriveKey",
+      "status": "not-supported",
+      "feature": "crypto",
+      "notes": "Rejects with NotSupportedError.",
+      "hint": "Do this in a Go API route, or set ssr.apiRuntime to \"node\" in krate.config.ts."
+    },
+    {
+      "api": "crypto.subtle.deriveBits",
+      "status": "not-supported",
+      "feature": "crypto",
+      "notes": "Rejects with NotSupportedError.",
+      "hint": "Do this in a Go API route, or set ssr.apiRuntime to \"node\" in krate.config.ts."
+    },
+    {
+      "api": "crypto.subtle.exportKey",
+      "status": "not-supported",
+      "feature": "crypto",
+      "notes": "Rejects with NotSupportedError.",
+      "hint": "Do this in a Go API route, or set ssr.apiRuntime to \"node\" in krate.config.ts."
+    },
+    {
+      "api": "crypto.subtle.wrapKey",
+      "status": "not-supported",
+      "feature": "crypto",
+      "notes": "Rejects with NotSupportedError.",
+      "hint": "Do this in a Go API route, or set ssr.apiRuntime to \"node\" in krate.config.ts."
+    },
+    {
+      "api": "crypto.subtle.unwrapKey",
+      "status": "not-supported",
+      "feature": "crypto",
+      "notes": "Rejects with NotSupportedError.",
+      "hint": "Do this in a Go API route, or set ssr.apiRuntime to \"node\" in krate.config.ts."
+    },
+    {
+      "api": "CryptoKey",
+      "status": "supported",
+      "feature": "crypto",
+      "notes": "Instances come from crypto.subtle.importKey.",
+      "tests": [
+        "TestCompatLedgerBehavior/CryptoKey"
+      ]
+    },
+    {
+      "api": "Crypto",
+      "status": "not-supported",
+      "feature": "crypto",
+      "notes": "The interface object is not exposed; the crypto global works.",
+      "hint": "Use the crypto global directly instead of the Crypto class."
+    },
+    {
+      "api": "SubtleCrypto",
+      "status": "not-supported",
+      "feature": "crypto",
+      "notes": "The interface object is not exposed; crypto.subtle works.",
+      "hint": "Use crypto.subtle directly instead of the SubtleCrypto class."
+    },
+    {
+      "api": "console",
+      "status": "partial",
+      "feature": "console",
+      "notes": "log, info, debug, warn, error and trace; arguments are formatted to one line.",
+      "tests": [
+        "TestCompatLedgerBehavior/console",
+        "TestConsole",
+        "corpus:console/no-output-effect"
+      ]
+    },
+    {
+      "api": "console.assert",
+      "status": "not-supported",
+      "feature": "console",
+      "notes": "Not defined, so calling it throws TypeError.",
+      "hint": "Use console.log or console.error."
+    },
+    {
+      "api": "console.count",
+      "status": "not-supported",
+      "feature": "console",
+      "notes": "Not defined, so calling it throws TypeError.",
+      "hint": "Use console.log or console.error."
+    },
+    {
+      "api": "console.dir",
+      "status": "not-supported",
+      "feature": "console",
+      "notes": "Not defined, so calling it throws TypeError.",
+      "hint": "Use console.log or console.error."
+    },
+    {
+      "api": "console.group",
+      "status": "not-supported",
+      "feature": "console",
+      "notes": "Not defined, so calling it throws TypeError.",
+      "hint": "Use console.log or console.error."
+    },
+    {
+      "api": "console.groupEnd",
+      "status": "not-supported",
+      "feature": "console",
+      "notes": "Not defined, so calling it throws TypeError.",
+      "hint": "Use console.log or console.error."
+    },
+    {
+      "api": "console.table",
+      "status": "not-supported",
+      "feature": "console",
+      "notes": "Not defined, so calling it throws TypeError.",
+      "hint": "Use console.log or console.error."
+    },
+    {
+      "api": "console.time",
+      "status": "not-supported",
+      "feature": "console",
+      "notes": "Not defined, so calling it throws TypeError.",
+      "hint": "Use console.log or console.error."
+    },
+    {
+      "api": "console.timeEnd",
+      "status": "not-supported",
+      "feature": "console",
+      "notes": "Not defined, so calling it throws TypeError.",
+      "hint": "Use console.log or console.error."
+    },
+    {
+      "api": "globalThis",
+      "status": "supported",
+      "feature": "engine",
+      "notes": "Provided by QuickJS.",
+      "tests": [
+        "TestCompatLedgerBehavior/globalThis"
+      ]
+    },
+    {
+      "api": "self",
+      "status": "not-supported",
+      "feature": "global",
+      "hint": "Use globalThis."
+    },
+    {
+      "api": "navigator",
+      "status": "not-supported",
+      "feature": "global",
+      "notes": "There is no navigator, so navigator.userAgent is unavailable.",
+      "hint": "Read the user agent from request.headers.get(\"user-agent\")."
+    },
+    {
+      "api": "WebAssembly",
+      "status": "not-supported",
+      "feature": "engine",
+      "notes": "QuickJS has no WebAssembly engine.",
+      "hint": "Set ssr.apiRuntime to \"node\" in krate.config.ts."
+    },
+    {
+      "api": "Intl",
+      "status": "not-supported",
+      "feature": "engine",
+      "notes": "QuickJS is built without Intl, so Intl.DateTimeFormat, Intl.NumberFormat and friends are undefined.",
+      "hint": "Format dates and numbers by hand, or set ssr.apiRuntime to \"node\" in krate.config.ts."
+    },
+    {
+      "api": "process",
+      "status": "partial",
+      "feature": "node",
+      "notes": "Only process.env (the server environment).",
+      "tests": [
+        "TestCompatLedgerBehavior/process",
+        "TestAPIRouteProcessEnv",
+        "TestSetEnv"
+      ]
+    },
+    {
+      "api": "process.env",
+      "status": "supported",
+      "feature": "node",
+      "tests": [
+        "TestCompatLedgerBehavior/process.env",
+        "TestAPIRouteProcessEnv",
+        "TestSetEnv",
+        "corpus:process/env"
+      ]
+    },
+    {
+      "api": "process.nextTick",
+      "status": "not-supported",
+      "feature": "node",
+      "notes": "Not defined on the embedded process object.",
+      "hint": "Use queueMicrotask(fn)."
+    },
+    {
+      "api": "process.cwd",
+      "status": "not-supported",
+      "feature": "node",
+      "notes": "Not defined on the embedded process object.",
+      "hint": "Set ssr.apiRuntime to \"node\" in krate.config.ts."
+    },
+    {
+      "api": "process.argv",
+      "status": "not-supported",
+      "feature": "node",
+      "notes": "Not defined on the embedded process object.",
+      "hint": "Set ssr.apiRuntime to \"node\" in krate.config.ts."
+    },
+    {
+      "api": "process.exit",
+      "status": "not-supported",
+      "feature": "node",
+      "notes": "Not defined on the embedded process object.",
+      "hint": "Return an error Response instead."
+    },
+    {
+      "api": "process.platform",
+      "status": "not-supported",
+      "feature": "node",
+      "notes": "Not defined on the embedded process object.",
+      "hint": "Set ssr.apiRuntime to \"node\" in krate.config.ts."
+    },
+    {
+      "api": "process.version",
+      "status": "not-supported",
+      "feature": "node",
+      "notes": "Not defined on the embedded process object.",
+      "hint": "Set ssr.apiRuntime to \"node\" in krate.config.ts."
+    },
+    {
+      "api": "process.versions",
+      "status": "not-supported",
+      "feature": "node",
+      "notes": "Not defined on the embedded process object.",
+      "hint": "Set ssr.apiRuntime to \"node\" in krate.config.ts."
+    },
+    {
+      "api": "process.hrtime",
+      "status": "not-supported",
+      "feature": "node",
+      "notes": "Not defined on the embedded process object.",
+      "hint": "Use performance.now()."
+    },
+    {
+      "api": "process.memoryUsage",
+      "status": "not-supported",
+      "feature": "node",
+      "notes": "Not defined on the embedded process object.",
+      "hint": "Set ssr.apiRuntime to \"node\" in krate.config.ts."
+    },
+    {
+      "api": "process.uptime",
+      "status": "not-supported",
+      "feature": "node",
+      "notes": "Not defined on the embedded process object.",
+      "hint": "Use performance.now()."
+    },
+    {
+      "api": "process.on",
+      "status": "not-supported",
+      "feature": "node",
+      "notes": "Not defined on the embedded process object.",
+      "hint": "Set ssr.apiRuntime to \"node\" in krate.config.ts."
+    },
+    {
+      "api": "process.stdout",
+      "status": "not-supported",
+      "feature": "node",
+      "notes": "Not defined on the embedded process object.",
+      "hint": "Use console.log."
+    },
+    {
+      "api": "process.stderr",
+      "status": "not-supported",
+      "feature": "node",
+      "notes": "Not defined on the embedded process object.",
+      "hint": "Use console.error."
+    },
+    {
+      "api": "Buffer",
+      "status": "not-supported",
+      "feature": "node",
+      "notes": "The Node Buffer global is not defined.",
+      "hint": "Use Uint8Array with TextEncoder/TextDecoder and atob/btoa, or set ssr.apiRuntime to \"node\" in krate.config.ts (an API route that imports { Buffer } from \"node:buffer\" is served by Node automatically)."
+    },
+    {
+      "api": "global",
+      "status": "not-supported",
+      "feature": "node",
+      "notes": "Node's alias for the global object is not defined.",
+      "hint": "Use globalThis."
+    },
+    {
+      "api": "__dirname",
+      "status": "not-supported",
+      "feature": "node",
+      "notes": "Bundled routes have no module file path.",
+      "hint": "Set ssr.apiRuntime to \"node\" in krate.config.ts."
+    },
+    {
+      "api": "__filename",
+      "status": "not-supported",
+      "feature": "node",
+      "notes": "Bundled routes have no module file path.",
+      "hint": "Set ssr.apiRuntime to \"node\" in krate.config.ts."
+    },
+    {
+      "api": "require",
+      "status": "partial",
+      "feature": "node",
+      "notes": "A run-time require() resolves only \"fs\" (readFileSync and readFile, utf-8) and \"path\" (join, resolve, basename, dirname, extname); static requires are bundled at build time.",
+      "tests": [
+        "TestCompatLedgerBehavior/require"
+      ]
+    },
+    {
+      "api": "node:*",
+      "status": "by-design",
+      "feature": "node",
+      "notes": "An API route that imports a node: builtin (or anything else esbuild leaves external) is marked nodeOnly in .krate/api-routes.json and served by the Node sidecar, so it is not scanned for this ledger.",
+      "hint": "Nothing to do: the route runs on Node automatically. Middleware has no such fallback; set ssr.middlewareRuntime to \"node\" if it needs Node modules.",
+      "tests": [
+        "TestAPIRouteNodeBuiltinIsNodeOnly"
+      ]
+    }
+  ]
+}

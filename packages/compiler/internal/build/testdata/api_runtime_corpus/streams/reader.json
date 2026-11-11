@@ -1,0 +1,8 @@
+{
+  "description": "getReader/read/releaseLock and the TypeError for a second reader.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

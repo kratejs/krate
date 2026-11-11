@@ -1,0 +1,9 @@
+{
+  "description": "A throw after awaiting a timer becomes a generic 500.",
+  "requests": [
+    {
+      "method": "GET",
+      "status": 500
+    }
+  ]
+}

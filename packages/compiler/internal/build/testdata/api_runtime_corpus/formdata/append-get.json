@@ -1,0 +1,8 @@
+{
+  "description": "append/get/getAll/has/set/delete and iteration order.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -28,6 +29,10 @@ type APIRouteRuntime struct {
 	hooks     *CacheHooks
 	workers   int
 	isolation bool
+	// features are the prelude features the routes reference (SetFeatures);
+	// pooled workers preload them.
+	features      []string
+	featuresKnown bool
 
 	mu      sync.Mutex
 	created int
@@ -44,7 +49,7 @@ type APIRequest struct {
 	Path   string
 	// Headers are the request headers as received (multi-valued).
 	Headers map[string][]string
-	// Body is the raw request body; it crosses into the VM as base64.
+	// Body is the raw request body; the VM copies it in on first read.
 	Body []byte
 	// Params are the dynamic route segments ([id], [...slug]), matching the
 	// second argument Next.js route handlers receive.
@@ -194,6 +199,14 @@ func (a *APIRouteRuntime) SetEnv(env map[string]string) {
 // before serving.
 func (a *APIRouteRuntime) SetCacheHooks(h *CacheHooks) {
 	a.hooks = h
+}
+
+// SetFeatures sets the web API prelude features the routes reference, as
+// scanned at build time (.krate/api-routes.json), so pooled workers install
+// them when they start. known false (the default) means the scan is missing or
+// incomplete, and workers install every feature. Call before serving.
+func (a *APIRouteRuntime) SetFeatures(features []string, known bool) {
+	a.features, a.featuresKnown = slices.Clone(features), known
 }
 
 // SetPool configures the pool size and whether each request runs in a fresh VM

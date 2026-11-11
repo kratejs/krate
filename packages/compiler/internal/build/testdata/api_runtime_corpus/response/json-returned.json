@@ -1,0 +1,8 @@
+{
+  "description": "A Response.json return value with custom status and headers.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

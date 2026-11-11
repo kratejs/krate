@@ -1,0 +1,8 @@
+{
+  "description": "A Uint8Array response body is sent unchanged.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

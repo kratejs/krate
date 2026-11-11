@@ -1,0 +1,8 @@
+{
+  "description": "Host lowercasing and IDNA (punycode) conversion.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

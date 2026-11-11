@@ -1,0 +1,8 @@
+{
+  "description": "A handler that returns nothing answers 204.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

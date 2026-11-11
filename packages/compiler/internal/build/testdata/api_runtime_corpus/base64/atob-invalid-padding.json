@@ -1,0 +1,24 @@
+{
+  "description": "atob rejects input whose \"=\" padding does not bring the length to a multiple of 4.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ],
+  "divergence": {
+    "reason": "The embedded atob accepts \"Zg=\" and \"Z===\" (it only checks for \"=\" followed by a non-\"=\" and for length mod 4 == 1).",
+    "nodeVersion": "v24.22.2",
+    "quickjs": [
+      {
+        "status": 200,
+        "body": "{\"Zg=\":[102],\"Z===\":[],\"Zm9v=\":\"InvalidCharacterError\",\"Zg=a\":\"InvalidCharacterError\"}"
+      }
+    ],
+    "node": [
+      {
+        "status": 200,
+        "body": "{\"Zg=\":\"InvalidCharacterError\",\"Z===\":\"InvalidCharacterError\",\"Zm9v=\":\"InvalidCharacterError\",\"Zg=a\":\"InvalidCharacterError\"}"
+      }
+    ]
+  }
+}

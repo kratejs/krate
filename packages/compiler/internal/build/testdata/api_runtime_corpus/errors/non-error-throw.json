@@ -1,0 +1,30 @@
+{
+  "description": "Throwing non-Error values becomes a generic 500.",
+  "requests": [
+    {
+      "method": "GET",
+      "query": "?k=string",
+      "status": 500
+    },
+    {
+      "method": "GET",
+      "query": "?k=object",
+      "status": 500
+    },
+    {
+      "method": "GET",
+      "query": "?k=null",
+      "status": 500
+    },
+    {
+      "method": "GET",
+      "query": "?k=undefined",
+      "status": 500
+    },
+    {
+      "method": "GET",
+      "query": "?k=number",
+      "status": 500
+    }
+  ]
+}

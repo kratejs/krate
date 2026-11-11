@@ -1,0 +1,9 @@
+{
+  "description": "request.text() decodes UTF-8 including astral characters.",
+  "requests": [
+    {
+      "method": "POST",
+      "body": "héllo 😀"
+    }
+  ]
+}

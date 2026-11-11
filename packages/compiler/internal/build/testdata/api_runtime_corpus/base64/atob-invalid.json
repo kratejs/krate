@@ -1,0 +1,8 @@
+{
+  "description": "atob rejects malformed input with an InvalidCharacterError DOMException.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

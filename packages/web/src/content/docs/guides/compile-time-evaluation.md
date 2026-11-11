@@ -196,6 +196,14 @@ constant interpreter does not model, such as `new Array(...)`. The fallback only
 runs after a purity check and only when every identifier in the expression is a
 known local value or an allowed global.
 
+The fallback, and the evaluation of `getCollection()` chains, run in a
+stripped-down QuickJS VM: the ECMAScript built-ins plus `structuredClone` and
+`console`, with no `fetch`, `crypto`, timers, `process` or `require`. In that
+VM `localeCompare`, the `toLocale*String` methods and `Date.prototype.toString`
+(which `String(date)` and template literals call) throw, so an expression that
+reaches them, such as a collection sorted with `localeCompare`, stays a run-time
+value instead of being folded with the build machine's locale and time zone.
+
 ## Notes
 
 - A local helper is folded only when its body is evaluable without side effects.

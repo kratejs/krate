@@ -1,0 +1,8 @@
+{
+  "description": "keys/values/entries/forEach and iteration order.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

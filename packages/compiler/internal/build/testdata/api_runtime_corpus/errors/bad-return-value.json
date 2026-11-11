@@ -1,0 +1,17 @@
+{
+  "description": "Returning strings, numbers and arrays instead of a Response serializes them as JSON.",
+  "requests": [
+    {
+      "method": "GET",
+      "query": "?k=string"
+    },
+    {
+      "method": "GET",
+      "query": "?k=number"
+    },
+    {
+      "method": "GET",
+      "query": "?k=array"
+    }
+  ]
+}

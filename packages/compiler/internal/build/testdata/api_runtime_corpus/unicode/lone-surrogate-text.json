@@ -1,0 +1,8 @@
+{
+  "description": "A string response body with lone surrogates is encoded with U+FFFD.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "description": "A Blob type containing characters outside U+0020-U+007E becomes the empty string.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ],
+  "divergence": {
+    "reason": "The embedded Blob only lowercases the type and keeps non-ASCII and control characters.",
+    "nodeVersion": "v24.22.2",
+    "quickjs": [
+      {
+        "status": 200,
+        "body": "[\"téxt/plain\",\"text/\\u0001\",\"text/\"]"
+      }
+    ],
+    "node": [
+      {
+        "status": 200,
+        "body": "[\"\",\"\",\"\"]"
+      }
+    ]
+  }
+}

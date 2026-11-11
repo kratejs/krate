@@ -1,0 +1,9 @@
+{
+  "description": "A deterministic pseudo-random 1 MiB + 3 byte response.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ],
+  "heavy": true
+}

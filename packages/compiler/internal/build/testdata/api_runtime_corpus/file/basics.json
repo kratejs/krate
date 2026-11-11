@@ -1,0 +1,11 @@
+{
+  "description": "File name, type, size and lastModified; slice() returns a Blob.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ],
+  "skipRuntimes": {
+    "bun": "Bun returns a File from File.prototype.slice"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "description": "stopImmediatePropagation prevents later listeners.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

@@ -128,6 +128,12 @@ type PageResult struct {
 }
 
 type Builder struct {
+	// runtimeCompatWarnings holds the KR7160 warnings of the latest build of
+	// each API route and the middleware built for the embedded runtime, keyed
+	// by route source file ("middleware" for the middleware).
+	runtimeCompatMu       sync.Mutex
+	runtimeCompatWarnings map[string][]diag.Diagnostic
+
 	// metaImages indexes the images the opengraph-image and twitter-image
 	// convention files produced in this build.
 	metaImages *metaImages
@@ -4071,6 +4077,7 @@ func (b *Builder) BuildMiddleware() error {
 	}
 	if middlewarePath == "" {
 		_ = os.Remove(filepath.Join(b.Root, ".krate", "middleware.js"))
+		_ = os.Remove(middlewareMetaPath(b.Root))
 		return nil
 	}
 
@@ -4110,6 +4117,15 @@ func (b *Builder) BuildMiddleware() error {
 	}
 	if err := fsutil.WriteFileAtomic(outPath, result.OutputFiles[0].Contents, 0644); err != nil {
 		return fmt.Errorf("writing middleware: %w", err)
+	}
+	if !embeddedRuntime(b.Cfg.SSR.MiddlewareRuntime) {
+		b.setRuntimeCompatWarnings("middleware", nil)
+		_ = os.Remove(middlewareMetaPath(b.Root))
+		return nil
+	}
+	features := b.scanRuntimeCompat("middleware", result.Metafile, jsruntime.CompatMiddlewareRuntime)
+	if err := writeMiddlewareMeta(b.Root, features); err != nil {
+		return fmt.Errorf("writing middleware metadata: %w", err)
 	}
 	return nil
 }
@@ -4884,6 +4900,7 @@ func (b *Builder) BuildAllAPI() error {
 	if err != nil {
 		return fmt.Errorf("scanning api routes: %w", err)
 	}
+	b.pruneRuntimeCompatWarnings(jsRoutes)
 
 	if len(jsRoutes) > 0 {
 		if err := b.CompileAPIRoutes(jsRoutes); err != nil {
@@ -4954,6 +4971,10 @@ type apiRouteMeta struct {
 	File string `json:"file"`
 	// NodeOnly is true when the bundle still has external imports.
 	NodeOnly bool `json:"nodeOnly"`
+	// Features lists the compat ledger features (internal/jsruntime/compat.json)
+	// the route's sources reference, for an embedded-runtime route. Absent
+	// means unknown, so the runtime must load everything.
+	Features *[]string `json:"features,omitempty"`
 }
 
 func (b *Builder) compileSingleRoute(file string, apiSrcDir string) (apiRouteMeta, error) {
@@ -5052,6 +5073,13 @@ func (b *Builder) compileSingleRoute(file string, apiSrcDir string) (apiRouteMet
 				}
 			}
 		}
+	}
+	// Node-only routes are served by the sidecar, so only embedded-runtime
+	// routes are checked against the embedded runtime's API surface.
+	if !meta.NodeOnly && embeddedRuntime(b.Cfg.SSR.APIRuntime) {
+		meta.Features = b.scanRuntimeCompat(file, quickjsResult.Metafile, jsruntime.CompatAPIRuntime)
+	} else {
+		b.setRuntimeCompatWarnings(file, nil)
 	}
 
 	return meta, nil

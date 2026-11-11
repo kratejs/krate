@@ -28,9 +28,30 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
   Remove a prefix you wrote into a destination or `Location` by hand.
 - A path in `site.url` now sets the base path. To keep a site at the root behind a proxy that
   strips the prefix, set `basePath: "/"`.
+- Build-time expression folding (the JS-engine fallback and `getCollection()` chains) runs in a
+  QuickJS VM with only the ECMAScript built-ins, `structuredClone` and `console`: no `fetch`,
+  `crypto`, timers, `process` or `require`. There `localeCompare`, `toLocale*String` and
+  `Date.prototype.toString` (`String(date)`, template literals) throw, so an expression or a
+  collection sorted with them stays a run-time value instead of being folded with the build
+  machine's locale and time zone. An expression that reads `globalThis` stays a run-time value
+  too.
 
 ### Added
 
+- The embedded QuickJS runtime installs each group of Web APIs the first time code reads one of
+  its globals, so creating a VM costs about 1.4 ms instead of 3.2 ms. Config and
+  Tailwind evaluation, `generateStaticParams`, metadata and isolation-mode API requests get
+  faster. Pooled API and middleware workers preload the groups the build found in their
+  sources (all of them for builds without that list).
+- The API runtime compatibility reference cites the QuickJS vs Node differential corpus case
+  by case. Rows whose cases record a difference from Node are partial and name it: `URL`,
+  `Headers`, `Blob`, `atob`, `Event` and `crypto.getRandomValues` moved from supported.
+- API routes and middleware built for the embedded QuickJS runtime are checked against its
+  Web API surface: a global it lacks (`TransformStream`, `WebSocket`, `Buffer`,
+  `crypto.subtle.encrypt`, ...) is a `KR7160` warning at the first use, once per file or
+  dependency. Run-time `NotSupportedError` messages carry the same code. The supported surface
+  is listed in the new API runtime compatibility reference, generated from the ledger the
+  compiler checks against.
 - `logs: { enabled: true }` saves each `dev`, `build`, `serve`, `start`, `check` and `deploy`
   run's console output to `.krate/logs/<timestamp>.log` (`logs.dir`, `logs.keep`, default 20).
 - `krate upgrade [version|tag]` moves the project's `@krate/*` packages to the latest or a given
@@ -84,6 +105,19 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Fixed
 
+- Binary data crosses between Go and the embedded QuickJS runtime as raw ArrayBuffer copies
+  instead of base64 text encoded and decoded in JavaScript: request and response bodies
+  (buffered and streamed), middleware responses, `fetch` request and response bodies,
+  `crypto.subtle.digest`/`sign`, `crypto.getRandomValues` and multipart parsing. A 1 MiB binary
+  request body now takes about 1.4 ms instead of 1.8 s, a 1 MiB response about 3 ms instead of
+  1.2 s. The VM memory limit grows only when a handler reads the body, by what that read needs,
+  and a pooled worker collects the body's garbage before serving the next request.
+- `Response.error()` in the embedded API runtime threw a `TypeError`.
+- Runaway recursion in the embedded QuickJS runtime (an API route, middleware, `krate.config.ts`)
+  exhausted the Go stack and killed the process instead of throwing. `KRATE_JS_STACK_KB` now
+  defaults to 16 (about 16,000 nested calls) and is capped at 32.
+- Timers in the embedded API runtime ran every due callback in one batch, so promise callbacks
+  queued by one `setTimeout` ran after the next timer instead of before it, unlike Node.
 - `basePath` now reaches every URL the compiler emits. Imported assets, generated CSS `url()`s,
   dynamic `import()` chunks and workers used to 404 on static hosts, as did Markdown links,
   convention OG images, `llms.txt` and feed links. Deploy adapters write rules for the prefixed

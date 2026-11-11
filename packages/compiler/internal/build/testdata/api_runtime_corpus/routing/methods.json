@@ -1,0 +1,23 @@
+{
+  "description": "Unexported methods get 405 with Allow, HEAD falls back to GET, OPTIONS is answered automatically.",
+  "requests": [
+    {
+      "method": "PUT"
+    },
+    {
+      "method": "DELETE"
+    },
+    {
+      "method": "HEAD"
+    },
+    {
+      "method": "OPTIONS"
+    },
+    {
+      "method": "POST"
+    },
+    {
+      "method": "GET"
+    }
+  ]
+}

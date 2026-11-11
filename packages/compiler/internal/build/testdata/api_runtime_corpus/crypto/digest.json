@@ -1,0 +1,8 @@
+{
+  "description": "subtle.digest for SHA-1/256/384/512 on empty, short and 64 KiB inputs and on every BufferSource kind (binary/large-request digests 1 MiB).",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "description": "String.prototype.normalize and case mapping.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

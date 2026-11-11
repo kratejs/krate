@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"runtime"
-	"sync"
+	"slices"
 )
 
 // preparedRoute is the export-stripped source of one route plus the content
@@ -16,19 +16,10 @@ type preparedRoute struct {
 
 // apiRunnerBytecode is the route runner (apiruntime.js), compiled once and
 // shared by all workers.
-var (
-	apiRunnerMu  sync.Mutex
-	apiRunnerBC  []byte
-	apiRunnerErr error
-)
+var apiRunnerBC sharedBytecode
 
-func apiRunnerBytecode(rt *Runtime) ([]byte, error) {
-	apiRunnerMu.Lock()
-	defer apiRunnerMu.Unlock()
-	if apiRunnerBC == nil && apiRunnerErr == nil {
-		apiRunnerBC, apiRunnerErr = rt.Compile(apiRunnerSource, EvalGlobal)
-	}
-	return apiRunnerBC, apiRunnerErr
+func apiRunnerBytecode() ([]byte, error) {
+	return apiRunnerBC.get(apiRunnerSource)
 }
 
 // apiWorker is one long-lived VM in the pool. It caches which routes it has
@@ -51,11 +42,29 @@ func DefaultAPIWorkers() int {
 	return n
 }
 
+// runnerFeatures are the prelude features apiruntime.js itself uses.
+var runnerFeatures = []string{"fetch"}
+
+// runnerOptions returns the VM options for an API or middleware runner VM: the
+// runner's own features plus the ones the code it serves references, as
+// scanned at build time. Unknown (an older build, or a scan that could not
+// see everything) installs every feature.
+func runnerOptions(features []string, known bool) Options {
+	if !known {
+		return Options{PreloadAll: true}
+	}
+	return Options{Preload: append(slices.Clone(runnerFeatures), features...)}
+}
+
 // newAPIWorker creates a VM, injects env + the shared handler helpers, and
 // returns a ready worker.
-func newAPIWorker(env map[string]string, hooks *CacheHooks) (*apiWorker, error) {
-	rt, err := New()
+func newAPIWorker(opts Options, env map[string]string, hooks *CacheHooks) (*apiWorker, error) {
+	rt, err := NewWithOptions(opts)
 	if err != nil {
+		return nil, err
+	}
+	if err := rt.registerBodyHost(); err != nil {
+		_ = rt.Close()
 		return nil, err
 	}
 	if err := rt.registerCacheHooks(hooks); err != nil {
@@ -66,7 +75,7 @@ func newAPIWorker(env map[string]string, hooks *CacheHooks) (*apiWorker, error) 
 		_ = rt.Close()
 		return nil, err
 	}
-	bc, err := apiRunnerBytecode(rt)
+	bc, err := apiRunnerBytecode()
 	if err != nil {
 		_ = rt.Close()
 		return nil, err
@@ -113,7 +122,8 @@ func (w *apiWorker) ensure(routeID, code string, version int64) error {
 // isolation mode) creates a fresh one for the single request.
 func (a *APIRouteRuntime) acquireWorker() (*apiWorker, error) {
 	if a.isolation {
-		return newAPIWorker(a.env, a.hooks)
+		// A fresh VM serves one request, so features load as it uses them.
+		return newAPIWorker(Options{Preload: runnerFeatures}, a.env, a.hooks)
 	}
 
 	select {
@@ -126,7 +136,7 @@ func (a *APIRouteRuntime) acquireWorker() (*apiWorker, error) {
 	if a.created < a.workers {
 		a.created++
 		a.mu.Unlock()
-		w, err := newAPIWorker(a.env, a.hooks)
+		w, err := newAPIWorker(runnerOptions(a.features, a.featuresKnown), a.env, a.hooks)
 		if err != nil {
 			a.mu.Lock()
 			a.created--

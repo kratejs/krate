@@ -1,0 +1,8 @@
+{
+  "description": "Microtasks queued by a timer callback run before the next timer.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

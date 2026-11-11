@@ -1,0 +1,8 @@
+{
+  "description": "Presence of stream helpers and other stream classes (the embedded ones exist but throw NotSupportedError when used).",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

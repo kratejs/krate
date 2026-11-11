@@ -1,0 +1,8 @@
+{
+  "description": "subtle.digest rejects unknown algorithms with NotSupportedError and non-buffer data with TypeError.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

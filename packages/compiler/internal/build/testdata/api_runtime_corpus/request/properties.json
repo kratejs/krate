@@ -1,0 +1,19 @@
+{
+  "description": "Basic properties of the incoming Request.",
+  "requests": [
+    {
+      "method": "GET",
+      "query": "?a=1",
+      "headers": {
+        "User-Agent": "corpus-agent"
+      }
+    },
+    {
+      "method": "POST",
+      "body": "x",
+      "headers": {
+        "Content-Type": "text/plain"
+      }
+    }
+  ]
+}

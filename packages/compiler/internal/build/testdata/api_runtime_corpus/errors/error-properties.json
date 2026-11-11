@@ -1,0 +1,8 @@
+{
+  "description": "Error, subclasses, cause, DOMException name/code and AggregateError.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

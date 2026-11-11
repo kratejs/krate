@@ -29,7 +29,7 @@
   "scripts": {
     "build": "pnpm sync:docs && pnpm -r build",
     "build:platforms": "node scripts/build-platform-packages.mjs",
-    "sync:docs": "node scripts/sync-compat-matrix.mjs && node scripts/sync-krate-docs.mjs",
+    "sync:docs": "node scripts/sync-compat-matrix.mjs && node scripts/sync-runtime-compat.mjs && node scripts/sync-krate-docs.mjs",
     "check:docs": "node scripts/sync-krate-docs.mjs --check",
     "check:matrix": "node scripts/check-compat-matrix.mjs && node scripts/sync-compat-matrix.mjs --check",
     "check:roadmap": "node scripts/check-roadmap.mjs",

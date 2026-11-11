@@ -1,0 +1,24 @@
+{
+  "description": "Body text()/json() and Blob.text() strip a leading UTF-8 BOM.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ],
+  "divergence": {
+    "reason": "The embedded body readers keep a leading BOM, so text() returns it and json() throws SyntaxError (Node strips it).",
+    "nodeVersion": "v24.22.2",
+    "quickjs": [
+      {
+        "status": 200,
+        "body": "{\"json\":\"throws:SyntaxError\",\"text\":2,\"blob\":2}"
+      }
+    ],
+    "node": [
+      {
+        "status": 200,
+        "body": "{\"json\":{},\"text\":1,\"blob\":1}"
+      }
+    ]
+  }
+}

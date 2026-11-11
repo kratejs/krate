@@ -1,0 +1,8 @@
+{
+  "description": "btoa rejects characters above U+00FF.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

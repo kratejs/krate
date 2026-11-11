@@ -1,0 +1,8 @@
+{
+  "description": "console methods exist, accept any values and do not change the response.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

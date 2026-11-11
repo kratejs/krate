@@ -1,0 +1,11 @@
+{
+  "description": "A large UTF-8 request body decoded by text().",
+  "requests": [
+    {
+      "method": "POST",
+      "body": "hé😀€ ",
+      "bodyRepeat": 80000
+    }
+  ],
+  "heavy": true
+}

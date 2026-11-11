@@ -1,0 +1,24 @@
+{
+  "description": "Headers of a Response.redirect() result are immutable.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ],
+  "divergence": {
+    "reason": "The embedded Response.redirect returns mutable headers.",
+    "nodeVersion": "v24.22.2",
+    "quickjs": [
+      {
+        "status": 200,
+        "body": "{\"immutable\":\"ok\"}"
+      }
+    ],
+    "node": [
+      {
+        "status": 200,
+        "body": "{\"immutable\":\"TypeError\"}"
+      }
+    ]
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "description": "Blobs become Files named \"blob\" unless a filename is given.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ],
+  "skipRuntimes": {
+    "bun": "Bun leaves Blob entries unnamed, keeps the original File name and adds ;charset=utf-8 to text types"
+  }
+}

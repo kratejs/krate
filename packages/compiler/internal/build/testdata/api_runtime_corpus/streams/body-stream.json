@@ -1,0 +1,10 @@
+{
+  "description": "Reading request.body and response.body as streams; the body cannot be read again afterwards.",
+  "requests": [
+    {
+      "method": "POST",
+      "body": "abcdefghij",
+      "bodyRepeat": 100
+    }
+  ]
+}

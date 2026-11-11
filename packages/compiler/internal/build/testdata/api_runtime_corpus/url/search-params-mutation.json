@@ -1,0 +1,8 @@
+{
+  "description": "searchParams mutations write back to the owning URL and vice versa.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

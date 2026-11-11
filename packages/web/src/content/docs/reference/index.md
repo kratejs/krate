@@ -23,3 +23,4 @@ Deep reference material for the Krate APIs.
 | [CSS Signals API](/docs/reference/css-signals/) | The CSS Signals authoring and runtime API |
 | [Config Reference](/docs/reference/config/) | Every `krate.config.ts` key, with types and defaults |
 | [Diagnostic Codes](/docs/reference/diagnostics/) | Every stable `KRxxxx` compiler diagnostic |
+| [API Runtime Compatibility](/docs/reference/api-runtime-compat/) | The Web APIs and Node globals the embedded API runtime supports |

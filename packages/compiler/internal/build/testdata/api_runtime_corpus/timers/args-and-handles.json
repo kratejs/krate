@@ -1,0 +1,8 @@
+{
+  "description": "Extra setTimeout arguments, Node-style Timeout handles and clearing by numeric id.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

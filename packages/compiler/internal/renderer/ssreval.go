@@ -629,6 +629,12 @@ func (e *SSREval) delegateJS(expr ast.Expr) jsvalue.Value {
 	}
 	var params, args []string
 	for _, name := range freeIdentifiers(expr) {
+		// The engine is a bare VM without the run-time globals (fetch, URL,
+		// ...), so an expression that inspects the global object would fold
+		// to what the bare VM has. It stays a run-time value.
+		if name == "globalThis" {
+			return jsvalue.Dynamic("`" + irtree.GenerateExprJS(expr, nil) + "` reads the global object, which is only known at run time")
+		}
 		if globalBuiltins[name] {
 			continue
 		}

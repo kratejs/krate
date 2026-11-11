@@ -1,0 +1,8 @@
+{
+  "description": "URL.canParse, URL.parse and the error thrown for invalid input.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

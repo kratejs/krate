@@ -1,0 +1,16 @@
+{
+  "description": "request.json() parses a JSON body and rejects on invalid JSON.",
+  "requests": [
+    {
+      "method": "POST",
+      "body": "{\"a\":[1,2]}",
+      "headers": {
+        "Content-Type": "application/json"
+      }
+    },
+    {
+      "method": "POST",
+      "body": "not json"
+    }
+  ]
+}

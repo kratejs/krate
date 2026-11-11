@@ -1,0 +1,24 @@
+{
+  "description": "status is converted like a WebIDL unsigned short (200.5 becomes 200) and statusText must be a reason phrase.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ],
+  "divergence": {
+    "reason": "The embedded Response requires an integer status (RangeError for 200.5) and accepts any statusText.",
+    "nodeVersion": "v24.22.2",
+    "quickjs": [
+      {
+        "status": 200,
+        "body": "{\"frac\":\"RangeError\",\"str\":\"ok\",\"badText\":\"ok\"}"
+      }
+    ],
+    "node": [
+      {
+        "status": 200,
+        "body": "{\"frac\":\"ok\",\"str\":\"ok\",\"badText\":\"TypeError\"}"
+      }
+    ]
+  }
+}

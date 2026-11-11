@@ -29,6 +29,26 @@ type Runtime struct {
 	// dataCache, when set, caches fetch responses requested with Next-style
 	// options ({ next: { revalidate, tags } } / cache: "force-cache").
 	dataCache *DataCache
+	// loaded records the prelude features installed so far, hosts the host
+	// functions registered (both per VM).
+	loaded map[string]bool
+	hosts  map[string]bool
+	// bin is set when bytes cross the boundary as ArrayBuffers (qjsbytes.go)
+	// rather than base64. hostErr is the failure of the last binary host
+	// call, take the bytes it left for __go_take.
+	bin     bool
+	hostErr string
+	take    []byte
+	// headroom is the current allowance above memLimit.
+	headroom uintptr
+	// timeout is the configured eval timeout. deadline is when the outermost
+	// evaluation in progress (depth > 0) times out; see enter.
+	timeout  time.Duration
+	deadline time.Time
+	depth    int
+	// failedLoads maps the features whose lazy load failed during the
+	// outermost evaluation in progress to the failure; see loadFeatureHost.
+	failedLoads map[string]string
 }
 
 // SetLogPrefix sets a prefix prepended to every console line. Plugin hosts set
@@ -56,33 +76,72 @@ func (r *Runtime) Warn(args []any) { r.writeLog(os.Stderr, "WARN: ", args) }
 // Error writes an error line to stderr.
 func (r *Runtime) Error(args []any) { r.writeLog(os.Stderr, "ERROR: ", args) }
 
-// New creates a new JS runtime with Web API polyfills
+// Options configures a runtime created by NewWithOptions.
+type Options struct {
+	// Preload lists the web API prelude features (compat.json feature names)
+	// installed when the VM is created; names outside the prelude are ignored.
+	// Every other feature loads the first time one of its globals is read.
+	Preload []string
+	// PreloadAll installs every prelude feature up front.
+	PreloadAll bool
+}
+
+// New creates a JS runtime with the web API prelude, Node's process.env and a
+// minimal require. Prelude features load on first use.
 func New() (*Runtime, error) {
+	return NewWithOptions(Options{})
+}
+
+// NewWithOptions is New with control over which prelude features are
+// installed up front.
+func NewWithOptions(o Options) (*Runtime, error) {
+	r, err := newRuntime()
+	if err != nil {
+		return nil, err
+	}
+	preload := o.Preload
+	if o.PreloadAll {
+		preload = nil
+	} else if preload == nil {
+		preload = []string{}
+	}
+	if err := r.installPrelude(preload); err != nil {
+		r.vm.Close()
+		return nil, fmt.Errorf("failed to install web APIs: %w", err)
+	}
+	if err := r.injectNodeGlobals(); err != nil {
+		r.vm.Close()
+		return nil, fmt.Errorf("failed to inject Node globals: %w", err)
+	}
+	return r, nil
+}
+
+// newRuntime creates a VM with the configured resource limits and no globals
+// beyond the engine's.
+func newRuntime() (*Runtime, error) {
 	vm, err := quickjs.NewVM()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create JS VM: %w", err)
 	}
 
 	// Resource limits are configurable so an unusual project can raise them:
-	// KRATE_JS_MEMORY_MB (default 32), KRATE_JS_STACK_KB (default 256),
-	// KRATE_JS_TIMEOUT (Go duration, default 30s).
+	// KRATE_JS_MEMORY_MB (default 32), KRATE_JS_STACK_KB (default 16, at most
+	// 32), KRATE_JS_TIMEOUT (Go duration, default 30s).
 	memLimit := envUnits("KRATE_JS_MEMORY_MB", 32, 1<<20)
 	vm.SetMemoryLimit(memLimit)
-	vm.SetMaxStackSize(envUnits("KRATE_JS_STACK_KB", 256, 1024))
+	vm.SetMaxStackSize(stackLimit())
 
-	if err := vm.SetEvalTimeout(envDuration("KRATE_JS_TIMEOUT", 30*time.Second)); err != nil {
+	timeout := envDuration("KRATE_JS_TIMEOUT", 30*time.Second)
+	if err := vm.SetEvalTimeout(timeout); err != nil {
 		vm.Close()
 		return nil, fmt.Errorf("failed to set eval timeout: %w", err)
 	}
-
-	r := &Runtime{vm: vm, memLimit: memLimit}
-
-	// Inject Web API polyfills
-	if err := r.injectPolyfills(); err != nil {
+	r := &Runtime{vm: vm, memLimit: memLimit, timeout: timeout, loaded: map[string]bool{}, hosts: map[string]bool{}, bin: binaryTransfer && !forceBase64}
+	// core.js reads (and deletes) the flag to choose how bytes cross.
+	if err := r.SetGlobal("__krate_bin", r.bin); err != nil {
 		vm.Close()
-		return nil, fmt.Errorf("failed to inject polyfills: %w", err)
+		return nil, fmt.Errorf("failed to set up the JS VM: %w", err)
 	}
-
 	return r, nil
 }
 
@@ -95,6 +154,19 @@ func envUnits(key string, def int, unit int) uintptr {
 		}
 	}
 	return uintptr(def * unit)
+}
+
+// maxStackKB caps KRATE_JS_STACK_KB. The transpiled engine counts about one
+// byte of its stack limit per JS call while each call costs several KB of Go
+// stack, so a limit much above this lets runaway recursion exhaust the 1 GB Go
+// stack and kill the process instead of throwing a catchable error.
+const maxStackKB = 32
+
+// stackLimit is the engine stack limit in bytes: KRATE_JS_STACK_KB (default
+// 16, which allows about 16k plain calls, more than Node's default) capped at
+// maxStackKB.
+func stackLimit() uintptr {
+	return min(envUnits("KRATE_JS_STACK_KB", 16, 1024), maxStackKB*1024)
 }
 
 // envDuration reads a positive Go duration from key, falling back to def.
@@ -110,11 +182,66 @@ func envDuration(key string, def time.Duration) time.Duration {
 // setMemoryHeadroom raises (or restores, with 0) the VM memory limit so a
 // request with a large body fits beside the configured base limit.
 func (r *Runtime) setMemoryHeadroom(extra uintptr) {
+	r.headroom = extra
 	r.vm.SetMemoryLimit(r.memLimit + extra)
+}
+
+// Request body headroom, as multiples of the body length, granted when the
+// handler first reads the body in that form. Measured with 8 MiB bodies.
+const (
+	// Bytes: the body as an ArrayBuffer (1x) plus the copy a handler that
+	// echoes it makes (new Response(buffer) copies).
+	headroomBytes = 2
+	// Text, and everything in the base64 fallback: echoing non-Latin-1 text
+	// back peaks at about 4.2x (a UTF-16 string of up to 2x, the JSON head
+	// that carries it to Go and its UTF-8 copy); base64 text plus the decoded
+	// bytes and their copy stays under 2.5x.
+	headroomText = 5
+)
+
+// growBodyHeadroom makes room for the in-flight request body read in a form
+// needing factor times its length.
+func (r *Runtime) growBodyHeadroom(factor uintptr) {
+	if !r.bin {
+		factor = headroomText
+	}
+	if h := uintptr(len(r.curBody)) * factor; h > r.headroom {
+		r.setMemoryHeadroom(h)
+	}
+}
+
+// enter brackets every evaluation; use it as defer r.leave(r.enter()). The
+// bindings re-arm the VM deadline to now+timeout on each evaluation. That is
+// right for an outermost one, but an evaluation nested inside another (a web
+// API module loaded from a host function) must not extend the enclosing
+// deadline, so it is given only the time the outermost one has left.
+func (r *Runtime) enter() (nested bool) {
+	r.depth++
+	if r.depth == 1 {
+		r.deadline = time.Now().Add(r.timeout)
+		return false
+	}
+	rem := time.Until(r.deadline)
+	if rem <= 0 {
+		// Zero would disable the timeout.
+		rem = time.Nanosecond
+	}
+	_ = r.vm.SetEvalTimeout(rem)
+	return true
+}
+
+func (r *Runtime) leave(nested bool) {
+	r.depth--
+	if nested {
+		_ = r.vm.SetEvalTimeout(r.timeout)
+	} else if r.failedLoads != nil {
+		clear(r.failedLoads)
+	}
 }
 
 // Execute evaluates JavaScript code and returns the result
 func (r *Runtime) Execute(code string) (any, error) {
+	defer r.leave(r.enter())
 	return r.vm.Eval(code, EvalGlobal)
 }
 
@@ -127,31 +254,40 @@ func (r *Runtime) Compile(code string, flags int) ([]byte, error) {
 
 // EvalBytecode evaluates previously compiled quickjs bytecode.
 func (r *Runtime) EvalBytecode(bytecode []byte) (any, error) {
+	defer r.leave(r.enter())
 	return r.vm.EvalBytecode(bytecode)
 }
 
 // DrainJobs executes pending promise jobs (microtasks). Call after Execute to resolve promises.
 func (r *Runtime) DrainJobs() {
 	for {
-		n, err := r.vm.ExecutePendingJobs()
+		n, err := r.executePendingJobs()
 		if n == 0 || err != nil {
 			break
 		}
 	}
 }
 
+func (r *Runtime) executePendingJobs() (int, error) {
+	defer r.leave(r.enter())
+	return r.vm.ExecutePendingJobs()
+}
+
 // ExecuteModule evaluates JavaScript code as an ES module
 func (r *Runtime) ExecuteModule(code string) (any, error) {
+	defer r.leave(r.enter())
 	return r.vm.Eval(code, EvalModule)
 }
 
 // Call calls a global function with the given arguments
 func (r *Runtime) Call(function string, args ...any) (any, error) {
+	defer r.leave(r.enter())
 	return r.vm.Call(function, args...)
 }
 
 // CallValue calls a global function and returns a Value
 func (r *Runtime) CallValue(function string, args ...any) (quickjs.Value, error) {
+	defer r.leave(r.enter())
 	return r.vm.CallValue(function, args...)
 }
 
@@ -233,9 +369,8 @@ func ToNative(v any) any {
 	}
 }
 
-// exprVMPool holds idle expression-eval VMs. Creating a QuickJS VM and injecting
-// the polyfill bundle is the dominant cost of EvaluateExpr, so VMs are pooled and
-// reused across calls. A VM is handed to one goroutine at a time (QuickJS VMs are
+// exprVMPool holds idle expression-eval VMs (NewBare). Creating a QuickJS VM is
+// the dominant cost of EvaluateExpr, so VMs are pooled and reused across calls. A VM is handed to one goroutine at a time (QuickJS VMs are
 // not concurrency-safe) and the pool is bounded to GOMAXPROCS idle VMs; under
 // bursty concurrency extra calls simply create a fresh VM as before.
 var exprVMPool = make(chan *Runtime, max(1, runtime.GOMAXPROCS(0)))
@@ -246,13 +381,13 @@ func exprVMPoolEnabled() bool { return os.Getenv("KRATE_NO_EXPR_VM_POOL") == "" 
 
 func acquireExprVM() (*Runtime, error) {
 	if !exprVMPoolEnabled() {
-		return New()
+		return NewBare()
 	}
 	select {
 	case rt := <-exprVMPool:
 		return rt, nil
 	default:
-		return New()
+		return NewBare()
 	}
 }
 
@@ -268,12 +403,13 @@ func releaseExprVM(rt *Runtime) {
 	}
 }
 
-// EvaluateExpr evaluates a self-contained JS expression and returns its String()
-// representation. Because QuickJS is a full ECMAScript engine, every built-in
-// (Date, Math, String, Number, Array, Object, ...) is available - so SSR
-// evaluation of globals like Date.now() produces a genuine JS-engine value
-// rather than a Go approximation. Returns an error when the expression throws
-// (e.g. it references an identifier that isn't defined).
+// EvaluateExpr evaluates a self-contained JS expression for compile-time
+// folding and returns its String() representation. It runs in a bare VM
+// (NewBare): the ECMAScript built-ins (Math, String, Array, Object, JSON, ...)
+// plus structuredClone and console, with no network, filesystem, randomness or
+// request state, and with the locale- and time-zone-dependent built-ins
+// throwing. Returns an error when the expression throws (e.g. it references an
+// identifier that isn't defined).
 //
 // The expression is evaluated inside a strict IIFE so it cannot leak implicit
 // globals into the pooled VM (a fresh VM previously discarded any such state).

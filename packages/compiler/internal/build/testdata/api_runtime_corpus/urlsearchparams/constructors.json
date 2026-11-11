@@ -1,0 +1,8 @@
+{
+  "description": "Construction from objects, pair arrays, strings, Maps and other params.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

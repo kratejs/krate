@@ -1,0 +1,8 @@
+{
+  "description": "performance.now is monotonic and relative to timeOrigin (compared by shape).",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "description": "A thrown Error becomes a generic 500 without leaking the message.",
+  "requests": [
+    {
+      "method": "GET",
+      "status": 500
+    }
+  ]
+}

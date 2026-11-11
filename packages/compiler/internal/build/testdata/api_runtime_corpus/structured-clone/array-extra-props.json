@@ -1,0 +1,24 @@
+{
+  "description": "Non-index own properties of arrays are cloned.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ],
+  "divergence": {
+    "reason": "The embedded structuredClone copies only array indices and drops extra own properties.",
+    "nodeVersion": "v24.22.2",
+    "quickjs": [
+      {
+        "status": 200,
+        "body": "{\"len\":2,\"extra\":null}"
+      }
+    ],
+    "node": [
+      {
+        "status": 200,
+        "body": "{\"len\":2,\"extra\":\"x\"}"
+      }
+    ]
+  }
+}

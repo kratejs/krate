@@ -1,0 +1,8 @@
+{
+  "description": "enqueue/close/error on the controller and how pending reads settle.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

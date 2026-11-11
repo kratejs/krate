@@ -1,9 +1,15 @@
 // Request/response orchestration shared by the embedded API and middleware
-// runners. Evaluated once per VM after webapi.js.
+// runners. Evaluated once per VM after the web API prelude (webapi/).
 (function () {
   'use strict';
   var G = globalThis;
-  var W = G.__krate_web;
+  // The runner always needs the fetch feature (Request, Response, Headers).
+  var K = G[Symbol.for('krate.web')], F = K.need('fetch'), E = K.need('events');
+  var W = {
+    kBody: F.kBody, bodyState: F.bodyState, bodyBytes: F.bodyBytes, abortSignal: E.abortSignal,
+    bytesToB64: K.bytesToB64, utf8Encode: K.utf8Encode, toBytes: K.toBytes, concatBytes: K.concatBytes,
+    bin: K.bin, fromHost: K.fromHost, host: K.host
+  };
   var METHODS = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'];
 
   function parseCookies(header) {
@@ -31,17 +37,17 @@
     };
   }
 
-  // makeRequest builds a web Request from the Go envelope. The body arrives in
-  // the __krate_body global (base64) and is decoded lazily on first read.
+  // makeRequest builds a web Request from the Go envelope. The body is read
+  // from the host on first use.
   G.__krate_make_request = function (raw) {
     var hasBody = raw.method !== 'GET' && raw.method !== 'HEAD';
     var req = new Request(raw.url, { method: raw.method, headers: raw.headers });
     if (hasBody && raw.hasBody) {
       req[W.kBody] = {
         empty: false, bytes: null, stream: null, used: false,
-        lazy: function () { return __go_body_b64(); },
+        lazy: function () { return W.fromHost(W.host(__go_body_bytes)); },
         lazyText: function () { return __go_body_text(); },
-        lazyMultipart: function (ct) { return __go_body_multipart(ct); }
+        lazyMultipart: function (ct) { return W.host(__go_body_multipart, ct); }
       };
     }
     Object.defineProperty(req, 'cookies', { value: cookieApi(req.headers), enumerable: false });
@@ -85,8 +91,14 @@
     S.head = { status: status, statusText: statusText || '', headers: headers };
     if (body && body.stream) { S.reader = body.stream.getReader(); S.head.stream = true; }
     else if (body && body.str !== undefined) S.head.text = body.str;
-    else if (body && body.bytes && body.bytes.length) S.head.body = W.bytesToB64(body.bytes);
+    else if (body && body.bytes && body.bytes.length) setOut(S.head, body.bytes);
   }
+  // setOut hands bytes to Go: with binary transfer Go collects them through
+  // __krate_out (o.bin), else they travel in the JSON as base64 (o.body).
+  function setOut(o, bytes) {
+    if (W.bin) { S.out = bytes; o.bin = true; } else o.body = W.bytesToB64(bytes);
+  }
+  G.__krate_out = function () { var b = S.out; S.out = null; return b || new Uint8Array(0); };
 
   function fromResponse(res) {
     var st = W.bodyState(res);
@@ -271,7 +283,8 @@
       if (r.done) { S.chunk = { done: true }; return; }
       var b = typeof r.value === 'string' ? W.utf8Encode(r.value) : W.toBytes(r.value);
       if (!b) { S.chunk = { error: 'response stream yielded a non-binary chunk' }; return; }
-      S.chunk = { data: W.bytesToB64(b) };
+      S.chunk = {};
+      setOut(S.chunk, b);
     }, function (e) { S.chunk = { error: errMsg(e) }; });
   };
   G.__krate_chunk = function () { return S.chunk ? JSON.stringify(S.chunk) : ''; };
@@ -333,7 +346,7 @@
       else hdrs.push(h.headers[i]);
     }
     if (next || rewrite) return JSON.stringify({ kind: 'continue', headers: hdrs, rewrite: rewrite });
-    if (h.status === 204 && !h.body && !hdrs.length && S.implicit) return JSON.stringify({ kind: 'continue', headers: [] });
-    return JSON.stringify({ kind: 'response', status: h.status, statusText: h.statusText, headers: hdrs, body: h.body || '', text: h.text || '' });
+    if (h.status === 204 && !h.body && !h.bin && !hdrs.length && S.implicit) return JSON.stringify({ kind: 'continue', headers: [] });
+    return JSON.stringify({ kind: 'response', status: h.status, statusText: h.statusText, headers: hdrs, body: h.body || '', bin: !!h.bin, text: h.text || '' });
   };
 })();

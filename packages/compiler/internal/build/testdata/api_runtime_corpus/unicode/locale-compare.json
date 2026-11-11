@@ -1,0 +1,24 @@
+{
+  "description": "localeCompare and toLocaleString use locale-aware collation and formatting.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ],
+  "divergence": {
+    "reason": "The embedded QuickJS build has no Intl: localeCompare compares code units and toLocaleString ignores the locale.",
+    "nodeVersion": "v24.22.2",
+    "quickjs": [
+      {
+        "status": 200,
+        "body": "{\"sorted\":[\"B\",\"a\",\"b\",\"ä\"],\"intl\":\"undefined\",\"num\":\"1234.5\"}"
+      }
+    ],
+    "node": [
+      {
+        "status": 200,
+        "body": "{\"sorted\":[\"a\",\"ä\",\"b\",\"B\"],\"intl\":\"object\",\"num\":\"1,234.5\"}"
+      }
+    ]
+  }
+}

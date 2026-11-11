@@ -1,0 +1,8 @@
+{
+  "description": "decode() accepts ArrayBuffer and any view, honoring offsets.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

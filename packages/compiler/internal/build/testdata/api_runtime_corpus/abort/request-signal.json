@@ -1,0 +1,8 @@
+{
+  "description": "A Request built with a signal follows that signal.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

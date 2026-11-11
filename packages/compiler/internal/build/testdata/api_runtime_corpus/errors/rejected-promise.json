@@ -1,0 +1,9 @@
+{
+  "description": "A rejected promise from the handler becomes a generic 500.",
+  "requests": [
+    {
+      "method": "GET",
+      "status": 500
+    }
+  ]
+}

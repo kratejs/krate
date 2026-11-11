@@ -1,0 +1,8 @@
+{
+  "description": "AbortSignal.timeout aborts with a TimeoutError DOMException.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

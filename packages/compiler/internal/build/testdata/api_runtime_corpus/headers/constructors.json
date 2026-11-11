@@ -1,0 +1,8 @@
+{
+  "description": "Headers from objects, pair arrays, Maps and other Headers; copies are independent.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

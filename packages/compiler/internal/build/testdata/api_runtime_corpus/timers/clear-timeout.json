@@ -1,0 +1,8 @@
+{
+  "description": "clearTimeout before and from another callback; clearInterval clears a timeout; bogus ids are ignored.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}

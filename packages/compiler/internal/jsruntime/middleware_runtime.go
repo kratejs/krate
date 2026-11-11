@@ -2,7 +2,6 @@ package jsruntime
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -128,13 +127,17 @@ func (m *MiddlewareRuntime) newWorker() (*mwWorker, error) {
 		return nil, fmt.Errorf("failed to read middleware.js: %w", err)
 	}
 	version := fileVersion(m.path)
-	rt, err := New()
+	features, known := readMiddlewareFeatures(m.path)
+	rt, err := NewWithOptions(runnerOptions(features, known))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create JS runtime: %w", err)
 	}
 	fail := func(err error) (*mwWorker, error) {
 		_ = rt.Close()
 		return nil, err
+	}
+	if err := rt.registerBodyHost(); err != nil {
+		return fail(err)
 	}
 	m.mu.Lock()
 	env := m.env
@@ -144,7 +147,7 @@ func (m *MiddlewareRuntime) newWorker() (*mwWorker, error) {
 			return fail(err)
 		}
 	}
-	bc, err := apiRunnerBytecode(rt)
+	bc, err := apiRunnerBytecode()
 	if err != nil {
 		return fail(err)
 	}
@@ -267,6 +270,7 @@ func (m *MiddlewareRuntime) ExecuteContext(ctx context.Context, req MiddlewareRe
 		StatusText string      `json:"statusText"`
 		Headers    [][2]string `json:"headers"`
 		Body       string      `json:"body"`
+		Bin        bool        `json:"bin"`
 		Text       string      `json:"text"`
 		Rewrite    string      `json:"rewrite"`
 		Error      string      `json:"error"`
@@ -281,11 +285,34 @@ func (m *MiddlewareRuntime) ExecuteContext(ctx context.Context, req MiddlewareRe
 	case "continue":
 		return MiddlewareResult{Action: MiddlewareContinue, Headers: h.Headers, Rewrite: h.Rewrite}
 	}
-	body, _ := base64.StdEncoding.DecodeString(h.Body)
+	var body []byte
 	if h.Text != "" {
 		body = []byte(h.Text)
+	} else if h.Body != "" || h.Bin {
+		b, ok := rt.outBytes(h.Bin, h.Body)
+		if !ok {
+			return MiddlewareResult{Action: MiddlewareError, Error: "invalid middleware response body"}
+		}
+		body = b
 	}
 	return MiddlewareResult{Action: MiddlewareResponse, Status: h.Status, StatusText: h.StatusText, Headers: h.Headers, Body: body}
+}
+
+// readMiddlewareFeatures reads the prelude features the middleware references
+// from middleware.json, which the build writes next to middleware.js. A missing
+// file or features field means unknown.
+func readMiddlewareFeatures(middlewarePath string) ([]string, bool) {
+	data, err := os.ReadFile(filepath.Join(filepath.Dir(middlewarePath), "middleware.json"))
+	if err != nil {
+		return nil, false
+	}
+	var meta struct {
+		Features *[]string `json:"features"`
+	}
+	if json.Unmarshal(data, &meta) != nil || meta.Features == nil {
+		return nil, false
+	}
+	return *meta.Features, true
 }
 
 // Close releases the pooled VMs.

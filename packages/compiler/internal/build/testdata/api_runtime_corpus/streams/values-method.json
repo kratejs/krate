@@ -1,0 +1,24 @@
+{
+  "description": "ReadableStream.prototype.values() async iterator.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ],
+  "divergence": {
+    "reason": "The embedded ReadableStream has no values() method (only Symbol.asyncIterator).",
+    "nodeVersion": "v24.22.2",
+    "quickjs": [
+      {
+        "status": 200,
+        "body": "{\"missing\":true}"
+      }
+    ],
+    "node": [
+      {
+        "status": 200,
+        "body": "{\"got\":[1]}"
+      }
+    ]
+  }
+}

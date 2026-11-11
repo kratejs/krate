@@ -482,6 +482,12 @@ The site is served under a base path, but a plain `<a href="/x">` or `<img src="
 
 Code that is highlighted in the browser (a `<Code>` whose text changes at run time) or at request time is coloured by a small tokenizer that runs chroma's lexers exactly, and it ships only for a fixed list of languages. The language used here is not on it, so the code is shown as plain text. Build-time highlighting is unaffected and supports every chroma language. Use one of the listed languages (`markdown.codeHighlight` docs), or make the code known at build time. This is a warning.
 
+### KR7160
+
+**API not supported by the embedded API runtime**
+
+API routes and middleware run in Krate's embedded QuickJS runtime unless `ssr.apiRuntime` (or `ssr.middlewareRuntime`) selects `"node"`, `"bun"` or `"deno"`. The build scans the modules each route or middleware bundles and reports globals that runtime lacks, such as `TransformStream`, `WebSocket`, `Buffer` or `crypto.subtle.encrypt`, with the location of the first use in each file. Calling one throws a `NotSupportedError` carrying the same code at run time. Only global references count: an import or local variable of the same name, a `typeof X` check and code guarded by one are not reported. In a dependency the warning is reported once per package and API, since libraries often detect features before using them. Follow the hint (most APIs have a portable alternative), or select the Node runtime. A route that imports a `node:` builtin is served by Node automatically and is not scanned. The full list is in the [API runtime compatibility](/docs/reference/api-runtime-compat/) reference. This is a warning.
+
 ## KR8xxx: islands, compiled packages and general React compatibility
 
 ### KR8001

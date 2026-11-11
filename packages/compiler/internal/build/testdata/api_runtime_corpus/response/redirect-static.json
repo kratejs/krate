@@ -1,0 +1,11 @@
+{
+  "description": "Response.redirect statuses, Location serialization and errors.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ],
+  "skipRuntimes": {
+    "bun": "Bun gives Response.redirect a non-null body and accepts relative URLs"
+  }
+}

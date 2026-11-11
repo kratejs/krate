@@ -1,0 +1,11 @@
+{
+  "description": "Blob.slice with negative, out-of-range and inverted bounds, and the content type argument.",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ],
+  "skipRuntimes": {
+    "bun": "Bun gives string-only Blobs the type text/plain;charset=utf-8 and keeps it on slices"
+  }
+}

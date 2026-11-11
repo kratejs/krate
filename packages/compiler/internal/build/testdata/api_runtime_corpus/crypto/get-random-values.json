@@ -1,0 +1,8 @@
+{
+  "description": "getRandomValues fills integer typed arrays in place, up to 65536 bytes (compared by shape).",
+  "requests": [
+    {
+      "method": "GET"
+    }
+  ]
+}
