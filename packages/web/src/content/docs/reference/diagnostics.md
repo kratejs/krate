@@ -488,6 +488,60 @@ Code that is highlighted in the browser (a `<Code>` whose text changes at run ti
 
 API routes and middleware run in Krate's embedded QuickJS runtime unless `ssr.apiRuntime` (or `ssr.middlewareRuntime`) selects `"node"`, `"bun"` or `"deno"`. The build scans the modules each route or middleware bundles and reports globals that runtime lacks, such as `TransformStream`, `WebSocket`, `Buffer` or `crypto.subtle.encrypt`, with the location of the first use in each file. Calling one throws a `NotSupportedError` carrying the same code at run time. Only global references count: an import or local variable of the same name, a `typeof X` check and code guarded by one are not reported. In a dependency the warning is reported once per package and API, since libraries often detect features before using them. Follow the hint (most APIs have a portable alternative), or select the Node runtime. A route that imports a `node:` builtin is served by Node automatically and is not scanned. The full list is in the [API runtime compatibility](/docs/reference/api-runtime-compat/) reference. This is a warning.
 
+### KR7170
+
+**Host code markers disagree**
+
+A native app decides what is host code (it runs in the native process, not the webview) from several sources: a `@host` decorator or a `"@host"` string at the top of a function body, a `// @host` comment on the first line of a file, a `.host.ts` / `.host.tsx` file name, the `hostFunctions` and `hostDirs` config entries, and `.go` files, which are always host code. Sources that name host code and something else for the same module conflict: a `.go` file cannot also carry a tier, and a host module cannot carry `// @server`, `// @runtime`, `// @static` or `// @client`, a tier file name, or a `serverComponents`, `runtimeComponents`, `serverDirs` or `runtimeDirs` entry. A function-level marker overrides the file for that function only, so `@client` on one function in a host file is allowed, but a decorator and a body string on one function must name the same thing. Remove one of the conflicting sources.
+
+### KR7171
+
+**`@host` on a component**
+
+Host code runs in the native process and is called from the UI as an async function. A component renders UI, so it cannot be host code. Keep the component in the webview and move the native work into a plain function marked `@host` that the component calls. For work that only needs to happen at build time, use `@server`.
+
+### KR7172
+
+**Inline host function captures component state**
+
+An `@host` function declared inside a component module is moved to the host process, so it cannot see the component's local variables, signals or props. It may use its own parameters, module-level imports, module-level host declarations and globals. Pass the value as an argument instead. The check covers identifiers declared inside an enclosing function; module-level non-host declarations are not checked.
+
+### KR7173
+
+**Host code in a web build**
+
+`@host` markers, `.host.ts` files, `hostFunctions` and `hostDirs` only mean something in a native build, where host code runs in the native process. A web build has no such process, so the marker would be silently ignored and the code would run in the browser or not at all. Remove the marker, or build with `krate native`.
+
+### KR7174
+
+**Request-time rendering in a native build**
+
+A native build has no server: every route is prerendered. `ssr.streaming`, `ppr`, and page exports such as `dynamic = "force-dynamic"`, `revalidate = N` or `config = { ssr / isr / streaming }` ask for rendering per request. Remove them, and load per-request data from host code (`@host` functions) at runtime.
+
+### KR7175
+
+**API route in a native build**
+
+A native app has no HTTP server, so routes under `src/api` have nothing to serve them. Move the logic into host code (a `.go` file or an `@host` function) and call it from the UI.
+
+### KR7176
+
+**Middleware in a native build**
+
+`middleware.ts` runs in front of a server's requests. A native app has no server, so it would never run. Remove it, and do the check in host code or in the UI.
+
+### KR7177
+
+**Runtime component in a native build**
+
+`@runtime` components render per request in a server sidecar. A native build renders every route once, ahead of time. Use `@server` for build-time rendering, or a client component that loads its data from host code. This covers `@runtime`, `// @runtime`, `.runtime` files, and the `runtimeComponents` and `runtimeDirs` config entries.
+
+### KR7178
+
+**Server action in a native build**
+
+`"use server"` actions are POSTed to a server. A native app has no server; call an `@host` function (or a Go function) from the UI instead.
+
 ## KR8xxx: islands, compiled packages and general React compatibility
 
 ### KR8001
