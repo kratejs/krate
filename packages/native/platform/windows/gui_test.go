@@ -81,7 +81,7 @@ func TestMain(m *testing.M) {
 	if !guiEnabled {
 		os.Exit(m.Run())
 	}
-	app, err := New(Config{AppID: "dev.krate.native.guitest", Handler: guiHandler(), Debug: true, KeepAlive: true})
+	app, err := New(Config{AppID: "dev.krate.native.guitest", Handler: withViewPing(guiHandler()), Debug: true, KeepAlive: true})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "New:", err)
 		os.Exit(2)

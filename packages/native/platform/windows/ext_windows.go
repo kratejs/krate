@@ -214,6 +214,11 @@ func winExtMessage(a *App, w *Window, message, wParam, lParam uintptr) (handled 
 			return true, 0
 		}
 	case wmDestroy:
+		// Views first: the SDK forgets a window's views when it hears that the
+		// window closed.
+		for _, v := range w.allViews() {
+			emitView(a, v, caps.ViewClosed, "")
+		}
 		emit(w, caps.WindowClosed)
 		extMu.Lock()
 		delete(extStates, w.hwnd)

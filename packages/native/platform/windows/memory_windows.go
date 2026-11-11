@@ -31,14 +31,14 @@ func queryInterface(obj unsafe.Pointer, iid string) unsafe.Pointer {
 
 // tuneMemory applies the per-webview memory levers at controller creation.
 // It does not touch hide, show or release handling.
-func (a *App) tuneMemory(w *Window) {
+func (a *App) tuneMemory(v *view) {
 	if a.hPermission != nil {
 		var token int64
-		if hr := vcall(w.webview, wvAddPermissionRequested, uintptr(a.hPermission), uintptr(unsafe.Pointer(&token))); failed(hr) {
+		if hr := vcall(v.webview, wvAddPermissionRequested, uintptr(a.hPermission), uintptr(unsafe.Pointer(&token))); failed(hr) {
 			logOnce("permission", "memory: add_PermissionRequested failed: 0x%08x; camera and microphone prompts stay on", uint32(hr))
 		}
 	}
-	setVisibleMemoryTarget(w.webview, a.cfg.Memory)
+	setVisibleMemoryTarget(v.webview, a.cfg.Memory)
 }
 
 // onPermissionRequested denies camera and microphone requests when the

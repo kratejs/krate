@@ -205,9 +205,14 @@ overhead.
 
 | | Linux (tested) | macOS (untested) | Windows (untested) |
 |--|--|--|--|
-| Panes | nested `GtkPaned`; children keep their size request, which carries the minimum sizes | nested `NSSplitView`; a delegate enforces minimums | one WebView2 controller per view in the window, bounds from the Go layout |
+| Panes | nested `GtkPaned`; children keep their size request, which carries the minimum sizes | nested `NSSplitView`; minimum sizes are Auto Layout constraints on each web view | one WebView2 controller per view in the window, bounds from the Go layout |
 | Divider drag | native `GtkPaned` handle | native `NSSplitView` divider | the window procedure hit-tests the divider (6 px, with a 3 px grab margin), shows the resize cursor and drags |
 | Identity | `webkit_uri_scheme_request_get_web_view` | the `webView` argument of `webView:startURLSchemeTask:` | the sender of `WebResourceRequested`, one registration per controller |
 | Web process | related views | one `WKProcessPool` | one `ICoreWebView2Environment` |
 
-A divider drag changes the ratio but fires no event; read it with `layout()`.
+A divider drag changes the ratio but fires no event; read it with `layout()`. On
+macOS a page's `window.close()` does not remove a secondary view yet (Linux and
+Windows remove it and send `closed`).
+
+The `examples/native-views` app uses all of this: a main page with a sidebar view
+and a log view, and a sidebar that posts to the log.

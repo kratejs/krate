@@ -23,23 +23,28 @@ const (
 	defaultHeight = 768
 )
 
-// Window is one NSWindow hosting one WKWebView. Fields are main-thread only.
+// Window is one NSWindow hosting one WKWebView, or several laid out as split
+// panes (see views_darwin.go). Fields are main-thread only.
 type Window struct {
 	app    *App
 	win    objc.ID
-	web    objc.ID
+	web    objc.ID // the primary view's WKWebView; mirrors pv.web
 	closed bool
 
 	ref          uint64
 	preventClose bool
 
+	// Views, see views_darwin.go.
+	pv     *view
+	extra  []*view
+	layout *caps.LayoutNode
+	root   objc.ID // the window's content view: the primary web view or the top split view
+	splits []*splitState
+
 	// Release state, see release_darwin.go.
 	released  bool
 	releasing bool
 	abort     bool // Show arrived while the release waited for the page
-	route     string
-	state     caps.ViewState
-	scrollJS  string
 }
 
 // NewWindow creates a window and returns once it exists. On the main thread
@@ -89,14 +94,15 @@ func (a *App) newWindow(o WindowOptions) (*Window, error) {
 	// We own the window and release it ourselves after it closes.
 	win.Send(sel("setReleasedWhenClosed:"), false)
 	win.Send(sel("setTitle:"), nsString(o.Title))
-	win.Send(sel("setContentView:"), web)
 	win.Send(sel("setDelegate:"), a.winDelegate)
 	win.Send(sel("center"))
 
-	w := &Window{app: a, win: win, web: web, ref: nextRef.Add(1), route: caps.CleanRoute(o.Path)}
+	w := &Window{app: a, win: win, ref: nextRef.Add(1)}
+	w.pv = a.registerView(w, web, true)
 	a.windows[win] = w
+	w.applyLayout()
 
-	w.load(o.Path)
+	w.pv.load(o.Path)
 	win.Send(sel("makeKeyAndOrderFront:"), objc.ID(0))
 	a.startMemoryPurge()
 	return w, nil
@@ -131,20 +137,6 @@ func (a *App) newWebView() objc.ID {
 	return web
 }
 
-// load starts a navigation to path on the app origin (main thread).
-func (w *Window) load(path string) {
-	w.route = caps.CleanRoute(path)
-	if w.web == 0 {
-		return
-	}
-	u := cls("NSURL").Send(sel("URLWithString:"), nsString(appURL(path)))
-	if u == 0 {
-		return
-	}
-	req := cls("NSURLRequest").Send(sel("requestWithURL:"), u)
-	w.web.Send(sel("loadRequest:"), req)
-}
-
 // windowWillClose runs when an NSWindow is about to close, whether by the user
 // or by Close. It detaches the webview and quits after the last window.
 func (a *App) windowWillClose(nsWin objc.ID) {
@@ -154,18 +146,31 @@ func (a *App) windowWillClose(nsWin objc.ID) {
 	}
 	delete(a.windows, nsWin)
 	w.closed = true
-	emitWindow(w, caps.WindowClosed)
-	web := w.web
-	w.web = 0
-	if web != 0 {
-		web.Send(sel("stopLoading"))
-		web.Send(sel("setNavigationDelegate:"), objc.ID(0))
+	views := w.allViews()
+	// Views first: the SDK forgets a window's views when it hears that the
+	// window closed.
+	for _, v := range views {
+		emitView(a, v, caps.ViewClosed, "")
 	}
+	emitWindow(w, caps.WindowClosed)
+	var webs []objc.ID
+	for _, v := range views {
+		if v.web != 0 {
+			webs = append(webs, v.web)
+			v.web.Send(sel("stopLoading"))
+			v.web.Send(sel("setNavigationDelegate:"), objc.ID(0))
+		}
+		a.unregisterView(v)
+		v.web = 0
+	}
+	w.web = 0
+	w.splits = nil
 	// Release on a later turn: AppKit is still using the window right now.
 	dispatch(func() {
 		w.win.Send(sel("setDelegate:"), objc.ID(0))
 		w.win.Send(sel("setContentView:"), objc.ID(0))
-		if web != 0 {
+		for _, web := range webs {
+			web.Send(sel("removeFromSuperview"))
 			release(web)
 		}
 		release(w.win)
@@ -179,7 +184,7 @@ func (a *App) windowWillClose(nsWin objc.ID) {
 func (w *Window) Navigate(path string) {
 	dispatch(func() {
 		if !w.closed {
-			w.load(path)
+			w.pv.load(path)
 		}
 	})
 }

@@ -14,9 +14,12 @@ import (
 type App struct {
 	mu sync.Mutex
 
-	Windows []*Window
-	nextRef caps.WindowRef
-	Quit_   int
+	Windows  []*Window
+	nextRef  caps.WindowRef
+	nextView caps.ViewRef
+	viewRecs map[caps.ViewRef]*viewRec
+	viewFn   func(caps.ViewEvent)
+	Quit_    int
 
 	// Dialogs
 	FileResult   []string
@@ -81,6 +84,14 @@ func (a *App) NewWindow(o platform.WindowOptions) (platform.Window, error) {
 func (a *App) EmitWindow(w *Window, kind caps.WindowEventKind) {
 	a.mu.Lock()
 	fn := a.winFn
+	if kind == caps.WindowClosed {
+		// A closed window's views are gone, as on a real platform.
+		for ref, v := range a.viewRecs {
+			if v.win == w {
+				delete(a.viewRecs, ref)
+			}
+		}
+	}
 	a.mu.Unlock()
 	if fn != nil {
 		fn(caps.WindowEvent{Window: w.ref, Kind: kind})
@@ -186,6 +197,10 @@ type Window struct {
 	Calls    []string
 	released bool
 	Path     string
+
+	pv     *viewRec
+	extra  []*viewRec
+	layout *caps.LayoutNode
 }
 
 func (w *Window) rec(s string) { w.mu.Lock(); w.Calls = append(w.Calls, s); w.mu.Unlock() }

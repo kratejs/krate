@@ -8,6 +8,8 @@ import (
 	"unsafe"
 
 	xw "golang.org/x/sys/windows"
+
+	"github.com/kratejs/krate/packages/native/platform/caps"
 )
 
 // onNavigationStarting cancels top-level navigations away from the app
@@ -37,10 +39,17 @@ func (a *App) onNewWindowRequested(sender, args uintptr) uintptr {
 	return sOK
 }
 
+// resourceHandlerFor returns the WebResourceRequested handler of one view.
+// The request is tagged with that view's ref, so the handler's identity, not
+// anything in the request, says where it came from.
+func (a *App) resourceHandlerFor(ref caps.ViewRef) func(sender, args uintptr) uintptr {
+	return func(sender, args uintptr) uintptr { return a.onResourceRequested(ref, sender, args) }
+}
+
 // onResourceRequested is the WebResourceRequested handler. It runs on the
 // main thread: it copies the request out of COM, takes a deferral and hands
 // the work to a goroutine. The response is installed back on the main thread.
-func (a *App) onResourceRequested(sender, argsU uintptr) uintptr {
+func (a *App) onResourceRequested(view caps.ViewRef, sender, argsU uintptr) uintptr {
 	args := ptr(argsU)
 	var reqU uintptr
 	if failed(vcall(args, argsGetRequest, uintptr(unsafe.Pointer(&reqU)))) || reqU == 0 {
@@ -59,7 +68,7 @@ func (a *App) onResourceRequested(sender, argsU uintptr) uintptr {
 		return sOK
 	}
 	comAddRef(args)
-	go a.serve(args, ptr(defU), method, uri, headers, body)
+	go a.serve(view, args, ptr(defU), method, uri, headers, body)
 	return sOK
 }
 
@@ -116,8 +125,8 @@ func readBody(req unsafe.Pointer) []byte {
 }
 
 // serve runs the http.Handler off the main thread.
-func (a *App) serve(args, def unsafe.Pointer, method, uri string, headers [][2]string, body []byte) {
-	ctx, cancel := context.WithCancel(context.Background())
+func (a *App) serve(view caps.ViewRef, args, def unsafe.Pointer, method, uri string, headers [][2]string, body []byte) {
+	ctx, cancel := context.WithCancel(caps.WithView(context.Background(), view))
 	defer cancel()
 
 	req, err := buildRequest(ctx, method, uri, headers, body)

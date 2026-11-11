@@ -9,6 +9,8 @@ import (
 	"unsafe"
 
 	"github.com/ebitengine/purego/objc"
+
+	"github.com/kratejs/krate/packages/native/platform/caps"
 )
 
 // taskState tracks one WKURLSchemeTask. Every field except writer is touched
@@ -23,7 +25,7 @@ type taskState struct {
 // startTask handles webView:startURLSchemeTask: on the main thread. It copies
 // everything it needs out of the NSURLRequest, then serves the request on a
 // goroutine. The task is retained until it completes or is stopped.
-func (a *App) startTask(task objc.ID) {
+func (a *App) startTask(webView, task objc.ID) {
 	retain(task)
 	st := &taskState{task: task}
 	a.tasks[task] = st
@@ -34,7 +36,13 @@ func (a *App) startTask(task objc.ID) {
 	fields := goStringMap(req.Send(sel("allHTTPHeaderFields")))
 	body := requestBody(req)
 
-	ctx, cancel := context.WithCancel(context.Background())
+	// The webview that made the request, bound natively: page script cannot
+	// change it. A web view the app does not know tags the request with view 0.
+	var view caps.ViewRef
+	if v := a.byWeb[webView]; v != nil {
+		view = v.ref
+	}
+	ctx, cancel := context.WithCancel(caps.WithView(context.Background(), view))
 	w := newTaskWriter(&nsTaskSink{app: a, st: st}, cancel)
 	st.writer = w
 	handler := a.opts.Handler

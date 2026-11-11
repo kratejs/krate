@@ -1,0 +1,11 @@
+{
+  "name": "krate-native-views",
+  "private": true,
+  "type": "module",
+  "description": "Krate Native example: one window with a sidebar view and a log view split off the main page, with draggable dividers and view-to-view messages.",
+  "dependencies": {
+    "@krate/app": "workspace:*",
+    "@krate/core": "workspace:*",
+    "@krate/runtime": "workspace:*"
+  }
+}

@@ -24,6 +24,10 @@ const (
 	iidWebResourceRequestedHandler = "ab00b74c-15f1-4646-80e8-e76341d25d71"
 	// WebView2.h line 4218
 	iidNavigationStartingHandler = "9adbe429-f36d-432b-9ddc-f8881fbd76e3"
+	// ICoreWebView2NavigationCompletedEventHandler
+	iidNavigationCompletedHandler = "d33a35bf-1c49-4f98-93ab-006e0533fe1c"
+	// ICoreWebView2WindowCloseRequestedEventHandler
+	iidWindowCloseRequestedHandler = "5c19e9e0-092f-486b-affa-ca8231913039"
 	// WebView2.h line 4300
 	iidNewWindowRequestedHandler = "d4c185fe-c81c-4989-97af-2d3fa7ab5651"
 	// WebView2.h line 5078

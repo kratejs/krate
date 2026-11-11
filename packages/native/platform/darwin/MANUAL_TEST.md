@@ -50,6 +50,20 @@ Run a small program that uses `platform.New` with `Debug: true`:
   lock); a link to `/other` works.
 - Dragging the window while a stream is in flight does not stall delivery.
 
+## Views (split panes)
+
+`TestGUIViews` adds a second view to a window and checks the request identity,
+the layout and removal. By hand, from a program that calls `AddView`:
+
+- Two views side by side show a draggable divider; dragging it changes the
+  ratio `Layout()` reports, and a pane stops at its `MinWidth`.
+- `SetLayout` rearranges the panes without reloading their pages.
+- `RemoveView` gives the space to the neighbour; `Release` then `Show` brings
+  back every view with its route and divider position.
+- `webView:startURLSchemeTask:` receives the right web view: the view tag in
+  `/viewping` requests matches the view that loaded the page.
+- Known gap: `window.close()` in a secondary view does nothing yet.
+
 ## If something fails
 
 | Symptom | Likely cause |
