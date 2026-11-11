@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -57,7 +58,7 @@ func feed(t *testing.T, version string) (*httptest.Server, string) {
 	}
 	k, _ := updater.PrivateKeyFromSeed(priv)
 	art := bytes.Repeat([]byte("update"), 5000)
-	sig, _ := updater.Sign(k, bytes.NewReader(art))
+	sig, _ := updater.Sign(k, updater.Meta{AppID: "com.acme.upd", Target: runtime.GOOS + "-" + runtime.GOARCH, Version: version}, bytes.NewReader(art))
 	var srv *httptest.Server
 	mux := http.NewServeMux()
 	mux.HandleFunc("/feed", func(w http.ResponseWriter, r *http.Request) {

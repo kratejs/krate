@@ -7,6 +7,8 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/ed25519"
+	"crypto/sha512"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -34,9 +36,16 @@ func mustKeys(t *testing.T) (priv ed25519.PrivateKey, pubB64 string) {
 	return k, pub
 }
 
+var testMeta = Meta{AppID: "com.acme.app", Target: "linux-amd64", Version: "1.2.0"}
+
 func sign(t *testing.T, k ed25519.PrivateKey, data []byte) string {
 	t.Helper()
-	s, err := Sign(k, bytes.NewReader(data))
+	return signAs(t, k, testMeta, data)
+}
+
+func signAs(t *testing.T, k ed25519.PrivateKey, m Meta, data []byte) string {
+	t.Helper()
+	s, err := Sign(k, m, bytes.NewReader(data))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,18 +158,18 @@ func TestSignatureGoodBadWrongKey(t *testing.T) {
 	data := []byte("the update")
 	sig := sign(t, k, data)
 	pk, _ := DecodePublicKey(pub)
-	if err := Verify(pk, bytes.NewReader(data), sig); err != nil {
+	if err := Verify(pk, testMeta, bytes.NewReader(data), sig); err != nil {
 		t.Fatal(err)
 	}
-	if err := Verify(pk, bytes.NewReader([]byte("tampered")), sig); !errors.Is(err, ErrBadSignature) {
+	if err := Verify(pk, testMeta, bytes.NewReader([]byte("tampered")), sig); !errors.Is(err, ErrBadSignature) {
 		t.Fatalf("tampered: %v", err)
 	}
 	_, other := mustKeys(t)
 	opk, _ := DecodePublicKey(other)
-	if err := Verify(opk, bytes.NewReader(data), sig); !errors.Is(err, ErrBadSignature) {
+	if err := Verify(opk, testMeta, bytes.NewReader(data), sig); !errors.Is(err, ErrBadSignature) {
 		t.Fatalf("wrong key: %v", err)
 	}
-	if err := Verify(pk, bytes.NewReader(data), "not base64!"); !errors.Is(err, ErrBadSignature) {
+	if err := Verify(pk, testMeta, bytes.NewReader(data), "not base64!"); !errors.Is(err, ErrBadSignature) {
 		t.Fatalf("garbage: %v", err)
 	}
 	if _, err := DecodePublicKey("AAAA"); err == nil {
@@ -173,7 +182,7 @@ func TestCheck(t *testing.T) {
 	art := tgz(t, map[string]string{"app": "new"})
 	sig := sign(t, k, art)
 	srv := feedServer(t, "1.2.0", art, sig, nil)
-	cfg := Config{URL: srv.URL + "/feed/{target}/{version}", PublicKey: pub, Version: "1.0.0", Target: "linux-amd64", Insecure: true}
+	cfg := Config{URL: srv.URL + "/feed/{target}/{version}", AppID: "com.acme.app", PublicKey: pub, Version: "1.0.0", Target: "linux-amd64", Insecure: true}
 
 	u, err := Check(context.Background(), cfg)
 	if err != nil || u == nil || u.Version != "1.2.0" || u.Notes != "n" || u.Size != int64(len(art)) {
@@ -193,7 +202,7 @@ func TestCheck(t *testing.T) {
 	}
 	empty := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) }))
 	defer empty.Close()
-	if u, err := Check(context.Background(), Config{URL: empty.URL, PublicKey: pub, Version: "1.0.0", Insecure: true}); err != nil || u != nil {
+	if u, err := Check(context.Background(), Config{URL: empty.URL, AppID: "com.acme.app", PublicKey: pub, Version: "1.0.0", Insecure: true}); err != nil || u != nil {
 		t.Fatalf("204: %+v %v", u, err)
 	}
 }
@@ -202,7 +211,7 @@ func checked(t *testing.T, art []byte, sig, pub string) (*Update, *httptest.Serv
 	t.Helper()
 	srv := feedServer(t, "1.2.0", art, sig, nil)
 	cache := t.TempDir()
-	u, err := Check(context.Background(), Config{URL: srv.URL + "/feed/{target}", PublicKey: pub, Version: "1.0.0", CacheDir: cache, Insecure: true})
+	u, err := Check(context.Background(), Config{URL: srv.URL + "/feed/{target}", AppID: "com.acme.app", Target: "linux-amd64", PublicKey: pub, Version: "1.0.0", CacheDir: cache, Insecure: true})
 	if err != nil || u == nil {
 		t.Fatalf("%+v %v", u, err)
 	}
@@ -608,5 +617,98 @@ func TestExtractRejectsWritingThroughSymlinkChain(t *testing.T) {
 	}
 	if _, serr := os.Stat(filepath.Join(dir, "out", "evil")); serr == nil {
 		t.Fatal("file written outside the staging directory")
+	}
+}
+
+func TestSignatureBindsMetadata(t *testing.T) {
+	k, pub := mustKeys(t)
+	pk, _ := DecodePublicKey(pub)
+	data := []byte("the update")
+	sig := sign(t, k, data)
+	for name, m := range map[string]Meta{
+		"version": {AppID: testMeta.AppID, Target: testMeta.Target, Version: "9.9.9"},
+		"target":  {AppID: testMeta.AppID, Target: "windows-amd64", Version: testMeta.Version},
+		"appId":   {AppID: "com.evil.app", Target: testMeta.Target, Version: testMeta.Version},
+	} {
+		if err := Verify(pk, m, bytes.NewReader(data), sig); !errors.Is(err, ErrBadSignature) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	// Size is part of the message: a different length never verifies, even
+	// when the signature was made over a prefix of the data.
+	short := signAs(t, k, testMeta, data[:4])
+	if err := Verify(pk, testMeta, bytes.NewReader(data), short); !errors.Is(err, ErrBadSignature) {
+		t.Errorf("size: %v", err)
+	}
+	if err := Verify(pk, testMeta, bytes.NewReader(data), sig); err != nil {
+		t.Fatalf("happy path: %v", err)
+	}
+	if _, err := Sign(k, Meta{AppID: "a\nb", Target: "t", Version: "1.0.0"}, bytes.NewReader(data)); err == nil {
+		t.Error("multi-line field accepted")
+	}
+}
+
+func TestSignedMessageFormat(t *testing.T) {
+	sum := sha512.Sum512([]byte("abc"))
+	msg, err := Meta{AppID: "com.acme.app", Target: "linux-amd64", Version: "1.2.0"}.message(sum[:], 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "krate-update-v1\ncom.acme.app\nlinux-amd64\n1.2.0\n" + hex.EncodeToString(sum[:]) + "\n3"
+	if string(msg) != want {
+		t.Fatalf("%q", msg)
+	}
+}
+
+func TestRelabeledOlderArtifactRefused(t *testing.T) {
+	k, pub := mustKeys(t)
+	// A genuine, validly signed 1.0.1 artifact; the feed claims 1.2.0.
+	art := tgz(t, map[string]string{"app": "old"})
+	old := testMeta
+	old.Version = "1.0.1"
+	srv := feedServer(t, "1.2.0", art, signAs(t, k, old, art), nil)
+	u, err := Check(context.Background(), Config{URL: srv.URL + "/feed/{target}", AppID: testMeta.AppID, Target: testMeta.Target,
+		PublicKey: pub, Version: "1.1.0", CacheDir: t.TempDir(), Insecure: true})
+	if err != nil || u == nil {
+		t.Fatalf("%+v %v", u, err)
+	}
+	if err := u.Download(context.Background(), nil); !errors.Is(err, ErrBadSignature) {
+		t.Fatalf("relabeled artifact: %v", err)
+	}
+	// Another target's artifact under this target is refused too.
+	other := testMeta
+	other.Target = "windows-amd64"
+	srv2 := feedServer(t, "1.2.0", art, signAs(t, k, other, art), nil)
+	u2, _ := Check(context.Background(), Config{URL: srv2.URL + "/feed/x", AppID: testMeta.AppID, Target: testMeta.Target,
+		PublicKey: pub, Version: "1.1.0", CacheDir: t.TempDir(), Insecure: true})
+	if err := u2.Download(context.Background(), nil); !errors.Is(err, ErrBadSignature) {
+		t.Fatalf("other target: %v", err)
+	}
+}
+
+func TestOlderOrEqualVersionIsNotAnUpdate(t *testing.T) {
+	k, pub := mustKeys(t)
+	art := tgz(t, map[string]string{"app": "x"})
+	for _, feedVer := range []string{"1.0.0", "0.9.0", "1.0.0-rc.1"} {
+		m := testMeta
+		m.Version = feedVer
+		srv := feedServer(t, feedVer, art, signAs(t, k, m, art), nil)
+		u, err := Check(context.Background(), Config{URL: srv.URL + "/feed/x", AppID: testMeta.AppID, Target: testMeta.Target,
+			PublicKey: pub, Version: "1.0.0", Insecure: true})
+		if err != nil || u != nil {
+			t.Errorf("%s: %+v %v", feedVer, u, err)
+		}
+	}
+	// Download itself also refuses a version that is not newer.
+	u := &Update{Version: "1.0.0", cfg: Config{CacheDir: t.TempDir(), Version: "1.0.0", AppID: testMeta.AppID}}
+	if err := u.Download(context.Background(), nil); err == nil {
+		t.Fatal("Download accepted a non-newer version")
+	}
+}
+
+func TestCheckNeedsAppID(t *testing.T) {
+	_, pub := mustKeys(t)
+	if _, err := Check(context.Background(), Config{URL: "https://x.test/f", PublicKey: pub, Version: "1.0.0"}); err == nil {
+		t.Fatal("missing AppID accepted")
 	}
 }

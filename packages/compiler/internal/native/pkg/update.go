@@ -91,7 +91,7 @@ func signUpdates(o *Options, res *Result) error {
 		if err != nil {
 			return wrapWrite(a.Path, err)
 		}
-		sig, err := updater.Sign(o.UpdaterKey, f)
+		sig, err := updater.Sign(o.UpdaterKey, updater.Meta{AppID: o.Meta.AppID, Target: o.Payload.OS + "-" + o.Payload.Arch, Version: o.Meta.Version}, f)
 		st, _ := f.Stat()
 		f.Close()
 		if err != nil {

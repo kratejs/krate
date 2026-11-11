@@ -81,7 +81,7 @@ func current() (updater.Config, error) {
 	if err != nil {
 		return updater.Config{}, err
 	}
-	return updater.Config{URL: c.URL, PublicKey: c.PublicKey, Version: app.Version, CacheDir: cache, Insecure: allowHTTP}, nil
+	return updater.Config{URL: c.URL, PublicKey: c.PublicKey, AppID: app.ID, Version: app.Version, CacheDir: cache, Insecure: allowHTTP}, nil
 }
 
 func wrap(err error) error {

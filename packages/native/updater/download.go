@@ -36,6 +36,11 @@ func (u *Update) Download(ctx context.Context, progress func(done, total int64))
 		return errors.New("updater: no cache directory configured")
 	}
 	dir := filepath.Join(u.cfg.CacheDir, "updates", unsafeName.ReplaceAllString(u.Version, "_"))
+	if cur, ok := parseVersion(u.cfg.Version); ok {
+		if next, ok := parseVersion(u.Version); !ok || compareVersions(next, cur) <= 0 {
+			return fmt.Errorf("updater: refusing version %q: not newer than the running %q", u.Version, u.cfg.Version)
+		}
+	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
@@ -81,7 +86,7 @@ func (u *Update) verifyFile(p string) error {
 			return fmt.Errorf("updater: downloaded file is %d bytes, the feed says %d", st.Size(), u.Size)
 		}
 	}
-	return Verify(u.pub, f, u.signature)
+	return Verify(u.pub, u.meta(), f, u.signature)
 }
 
 func (u *Update) fetchInto(ctx context.Context, part string, progress func(done, total int64)) error {

@@ -12,12 +12,18 @@
 // HTTP 204 or 404 means "no update". A version that is not newer than
 // Config.Version is also "no update".
 //
-// Signature. The signature is Ed25519ph (RFC 8032, SHA-512 prehash, empty
-// context) over the bytes of the file at url, base64 encoded. Prehashing lets
-// the download be verified as a stream instead of held in memory. The public
-// key (base64, 32 bytes) comes from native.updater.publicKey in the app
-// configuration; `krate native keygen` creates the pair and `krate native
-// package` signs update artifacts with it.
+// Signature. The signature is Ed25519 over a canonical message that binds the
+// file to its metadata (see Sign), base64 encoded:
+//
+//	krate-update-v1\n<appId>\n<target>\n<version>\n<sha512 of the file, hex>\n<size>
+//
+// The file digest is computed as a stream, so a download is never held in
+// memory. The expected appId, target and version come from Config and the
+// feed, so a validly signed artifact cannot be relabeled as a newer version
+// or served to another app or target. The public key (base64, 32 bytes) comes
+// from native.updater.publicKey in the app configuration; `krate native
+// keygen` creates the pair and `krate native package` signs update artifacts
+// with it.
 //
 // Artifacts. An update is a .tar.gz or .zip whose entries mirror the install
 // directory (the directory that holds the executable) on Linux and Windows,

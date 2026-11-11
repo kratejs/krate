@@ -569,7 +569,7 @@ func TestUpdateArtifactsAreSignedAndFeedWritten(t *testing.T) {
 	pk, _ := updater.DecodePublicKey(pub)
 	fh, _ := os.Open(tg.Path)
 	defer fh.Close()
-	if err := updater.Verify(pk, fh, f.Signature); err != nil {
+	if err := updater.Verify(pk, updater.Meta{AppID: m.AppID, Target: "linux-amd64", Version: f.Version}, fh, f.Signature); err != nil {
 		t.Fatalf("feed signature does not verify the artifact: %v", err)
 	}
 	if st, _ := os.Stat(tg.Path); f.Size != st.Size() {

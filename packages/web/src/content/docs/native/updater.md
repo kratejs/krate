@@ -64,18 +64,31 @@ HTTP 204 or 404 means no update. A `version` not newer than the running one is
 also "no update" (semantic version order, prereleases before releases). A
 relative `url` resolves against the feed URL.
 
-**Signature.** Ed25519ph (RFC 8032: Ed25519 over the SHA-512 of the file, empty
-context), base64. Hashing first lets the client verify a large file as a
-stream. Artifact URLs must be https.
+**Signature.** Ed25519 (RFC 8032), base64, over this message, with fields
+joined by single `\n` characters and no trailing newline:
 
-> The signature covers the file and nothing else; the feed JSON, including
-> `version`, is not signed. Someone who controls the feed (a compromised server
-> or CDN, not the signing key) can therefore point `url` at an older, validly
-> signed artifact and report a newer `version`, which downgrades users to a
-> release with known bugs. The client cannot tell, because the version is not
-> inside the signed bytes. Serve the feed from a location you trust as much as
-> the key, and keep old artifacts you no longer want installed off the feed's
-> host (or rotate the key when you retire a vulnerable release).
+```
+krate-update-v1
+<appId>
+<target>
+<version>
+<sha512 of the artifact file, lowercase hex>
+<size in bytes>
+```
+
+`appId` is `native.appId`, `target` is `<os>-<arch>` (for example
+`linux-amd64`) and `version` is the feed's `version` string exactly as written.
+The file digest is computed as a stream, so large files are never held in
+memory. `krate native package` produces the signature; the client verifies it
+with the configured public key, the running app's id and target, and the
+feed's version before it keeps a download. Because the metadata is signed, a
+compromised feed cannot relabel an older validly signed artifact as a newer
+version, nor serve another app's or another target's artifact. The client also
+refuses any `version` that is not strictly greater than the running one, both
+when checking and when downloading. Artifact URLs must be https.
+
+The `size` field in the feed is only a hint for progress and early rejection;
+the signed size is the real length of the downloaded file.
 
 ## Update files
 

@@ -2,9 +2,7 @@ package updater
 
 import (
 	"context"
-	"crypto"
 	"crypto/ed25519"
-	"crypto/sha512"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -94,42 +92,14 @@ func PrivateKeyFromSeed(s string) (ed25519.PrivateKey, error) {
 	return ed25519.NewKeyFromSeed(b), nil
 }
 
-var prehash = &ed25519.Options{Hash: crypto.SHA512}
-
-// Sign returns the base64 Ed25519ph signature of the data read from r.
-func Sign(priv ed25519.PrivateKey, r io.Reader) (string, error) {
-	h := sha512.New()
-	if _, err := io.Copy(h, r); err != nil {
-		return "", err
-	}
-	sig, err := priv.Sign(nil, h.Sum(nil), prehash)
-	if err != nil {
-		return "", err
-	}
-	return base64.StdEncoding.EncodeToString(sig), nil
-}
-
-// Verify checks a base64 signature of the data read from r.
-func Verify(pub ed25519.PublicKey, r io.Reader, signature string) error {
-	sig, err := base64.StdEncoding.DecodeString(signature)
-	if err != nil || len(sig) != ed25519.SignatureSize {
-		return ErrBadSignature
-	}
-	h := sha512.New()
-	if _, err := io.Copy(h, r); err != nil {
-		return err
-	}
-	if ed25519.VerifyWithOptions(pub, h.Sum(nil), sig, prehash) != nil {
-		return ErrBadSignature
-	}
-	return nil
-}
-
 // Config describes the app and where its updates come from.
 type Config struct {
 	// URL is the feed URL template; PublicKey verifies artifacts.
 	URL       string
 	PublicKey string
+	// AppID is the running app's identifier (native.appId); it is part of the
+	// signed message, so an artifact built for another app does not verify.
+	AppID string
 	// Version is the running version (semver).
 	Version string
 	// Target defaults to GOOS-GOARCH of the running process.
@@ -198,6 +168,9 @@ func (c *Config) checkScheme(raw string) error {
 func Check(ctx context.Context, cfg Config) (*Update, error) {
 	if cfg.URL == "" || cfg.PublicKey == "" {
 		return nil, ErrNotConfigured
+	}
+	if cfg.AppID == "" {
+		return nil, errors.New("updater: Config.AppID is required (the signature binds the artifact to the app id)")
 	}
 	pub, err := DecodePublicKey(cfg.PublicKey)
 	if err != nil {
