@@ -36,6 +36,10 @@ type Registry struct {
 	funcs   map[string]Func
 	streams map[string]StreamFunc
 	signals map[string]SignalFunc
+	// trusted holds ungated twins of functions registered behind a
+	// permission check; in-process callers (Invoke) prefer them.
+	trusted       map[string]Func
+	trustedStream map[string]StreamFunc
 }
 
 // NewRegistry returns an empty Registry.
@@ -44,7 +48,48 @@ func NewRegistry() *Registry {
 		funcs:   make(map[string]Func),
 		streams: make(map[string]StreamFunc),
 		signals: make(map[string]SignalFunc),
+
+		trusted:       make(map[string]Func),
+		trustedStream: make(map[string]StreamFunc),
 	}
+}
+
+// Trusted registers f as the implementation of name for in-process callers
+// (Invoke), which are trusted app code and not subject to the permission
+// check that the gated registration of name applies to the UI. The UI cannot
+// reach it. It panics on a duplicate.
+func (r *Registry) Trusted(name string, f Func) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, dup := r.trusted[name]; dup {
+		panic(fmt.Sprintf("scheme: trusted func %q registered twice", name))
+	}
+	r.trusted[name] = f
+}
+
+// TrustedStream is Trusted for streams.
+func (r *Registry) TrustedStream(name string, f StreamFunc) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, dup := r.trustedStream[name]; dup {
+		panic(fmt.Sprintf("scheme: trusted stream %q registered twice", name))
+	}
+	r.trustedStream[name] = f
+}
+
+// lookupTrusted is lookup for in-process callers: the trusted twin when there
+// is one.
+func (r *Registry) lookupTrusted(name string) (Func, StreamFunc) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	f, s := r.trusted[name], r.trustedStream[name]
+	if f == nil {
+		f = r.funcs[name]
+	}
+	if s == nil {
+		s = r.streams[name]
+	}
+	return f, s
 }
 
 // Func registers a request/response function. It panics on a duplicate name.

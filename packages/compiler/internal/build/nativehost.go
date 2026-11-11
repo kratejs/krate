@@ -11,6 +11,7 @@ import (
 	"github.com/evanw/esbuild/pkg/api"
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/native"
+	"github.com/kratejs/krate/packages/compiler/internal/native/bake"
 	"github.com/kratejs/krate/packages/compiler/internal/native/gobind"
 	"github.com/kratejs/krate/packages/compiler/internal/native/hostts"
 )
@@ -30,7 +31,7 @@ func (b *Builder) nativeOutDir() string { return filepath.Join(b.Root, ".krate",
 // code goes to a host bundle, Go host code gets generated glue, and the UI
 // bundlers are armed with stub overlays for both. A web build is untouched.
 func (b *Builder) prepareNativeHost() error {
-	b.nativeHost, b.nativeGo, b.nativeOverlays = nil, nil, nil
+	b.nativeHost, b.nativeGo, b.nativeOverlays, b.nativeBaked = nil, nil, nil, nil
 	if !b.NativeTarget {
 		return nil
 	}
@@ -81,12 +82,14 @@ func (b *Builder) prepareNativeHost() error {
 			return fail(errs, "host code error(s)")
 		}
 		b.nativeHost = res
+		b.nativeBaked = bake.Table{}
+		b.nativeBaked.Merge(res.Baked)
 		for path, src := range res.Overlays {
 			overlays[path] = src
 		}
 	}
 
-	goRes, goOverlays, ds, err := b.prepareNativeGo(p)
+	goRes, goOverlays, goBaked, ds, err := b.prepareNativeGo(p)
 	if err != nil {
 		return err
 	}
@@ -94,6 +97,12 @@ func (b *Builder) prepareNativeHost() error {
 		return fail(ds, "Go host code error(s)")
 	}
 	b.nativeGo = goRes
+	if len(goBaked) > 0 {
+		if b.nativeBaked == nil {
+			b.nativeBaked = bake.Table{}
+		}
+		b.nativeBaked.Merge(goBaked)
+	}
 	for path, src := range goOverlays {
 		overlays[path] = src
 	}
@@ -162,7 +171,7 @@ var stubAppImportRe = regexp.MustCompile(`(?m)^(import\s*\{)([^}]*)(\}\s*from\s*
 // wrapper's. The wrapper's names differ from the package's on purpose: the
 // bundler places every module in one scope, where two functions of one name
 // would clash.
-var stubWrapped = map[string]string{"call": "__krateHostCall", "stream": "__krateHostStream", "signal": "__krateHostSignal"}
+var stubWrapped = map[string]string{"call": "__krateHostCall", "stream": "__krateHostStream", "signal": "__krateHostSignal", "baked": "__krateHostBaked"}
 
 // bootStub points the @krate/app import of a generated stub at the wrapper,
 // given as an import specifier relative to the stub.
@@ -218,7 +227,7 @@ func (b *Builder) writeNativeAppModule() (string, error) {
 export function __krateHostCall(fn, args, opts) { return __krateUIClient.call(fn, args, opts); }
 export function __krateHostStream(fn, args, opts) { return __krateUIClient.stream(fn, args, opts); }
 export function __krateHostSignal(name) { return __krateUIClient.signal(name); }
-`
+` + bake.AppModule(b.nativeBaked)
 	path := filepath.Join(b.nativeOutDir(), "app.js")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return "", err
@@ -235,13 +244,13 @@ const nativeAppPkg = "@krate/app"
 // prepareNativeGo finds the .go files the UI imports, generates their glue,
 // stubs and declarations, and returns the overlays that make the UI bundlers
 // read the stub in place of each file.
-func (b *Builder) prepareNativeGo(p *native.Placement) (*gobind.Result, map[string]string, []diag.Diagnostic, error) {
+func (b *Builder) prepareNativeGo(p *native.Placement) (*gobind.Result, map[string]string, bake.Table, []diag.Diagnostic, error) {
 	imps, err := hostts.GoImports(b.Root, b.Cfg, p, hostts.Options{Resolve: b.importResolver().Resolve})
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	if len(imps) == 0 {
-		return nil, nil, nil, nil
+		return nil, nil, nil, nil, nil
 	}
 	var ds []diag.Diagnostic
 	var in []gobind.Import
@@ -254,16 +263,16 @@ func (b *Builder) prepareNativeGo(p *native.Placement) (*gobind.Result, map[stri
 		in = append(in, gobind.Import{File: imp.File, Names: imp.Names, From: imp.From, Line: imp.Line, Col: imp.Col})
 	}
 	if len(ds) > 0 {
-		return nil, nil, ds, nil
+		return nil, nil, nil, ds, nil
 	}
 	if !b.onlyGoComponents(imps) {
 		if d := checkNativeGoModule(b.Root); d != nil {
-			return nil, nil, []diag.Diagnostic{*d}, nil
+			return nil, nil, nil, []diag.Diagnostic{*d}, nil
 		}
 	}
 	res, ds, err := gobind.Generate(b.Root, in, b.nativeOutDir())
 	if err != nil || len(ds) > 0 {
-		return nil, nil, ds, err
+		return nil, nil, nil, ds, err
 	}
 	overlays := map[string]string{}
 	for _, m := range res.Modules {
@@ -272,7 +281,7 @@ func (b *Builder) prepareNativeGo(p *native.Placement) (*gobind.Result, map[stri
 		}
 		data, err := os.ReadFile(m.Stub)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, nil, nil, err
 		}
 		src := string(data)
 		// Go components imported from the same file stay components; the
@@ -282,7 +291,11 @@ func (b *Builder) prepareNativeGo(p *native.Placement) (*gobind.Result, map[stri
 		}
 		overlays[filepath.Clean(m.Source)] = src
 	}
-	return res, overlays, nil, nil
+	baked, ds, err := b.bakeGoBuilds(res, imps)
+	if err != nil || len(ds) > 0 {
+		return nil, nil, nil, ds, err
+	}
+	return res, overlays, baked, nil, nil
 }
 
 // onlyGoComponents reports whether every imported name is a Go component

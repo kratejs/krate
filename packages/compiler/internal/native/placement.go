@@ -5,7 +5,9 @@
 // host code as async functions. Six sources mark host code, in precedence order:
 //
 //  1. a function-level marker: the `@host` decorator on a function, or the
-//     string "@host" as the first statement of its body
+//     string "@host" as the first statement of its body (`@build` and "@build"
+//     also make a function host code, and additionally evaluate it during the
+//     native build)
 //  2. the `// @host` comment on the first line of a file
 //  3. the `.host.ts` / `.host.tsx` file name
 //  4. the hostFunctions config list (function names or file paths)
@@ -60,6 +62,9 @@ type Func struct {
 	Start, End int
 	// Line is the 1-based line of the declaration.
 	Line int
+	// Build is true for a function marked `@build`: it also runs during the
+	// native build and its result is baked into the UI (see hostts).
+	Build bool
 }
 
 // Module is a module that contains host code.
@@ -277,7 +282,7 @@ func analyzeFile(root, path, src string, cfg *config.Config) fileResult {
 			names = append(names, e)
 		}
 	}
-	if len(fileSrcs) == 0 && len(names) == 0 && !strings.Contains(src, "@host") {
+	if len(fileSrcs) == 0 && len(names) == 0 && !strings.Contains(src, "@host") && !strings.Contains(src, "@build") {
 		return res
 	}
 
@@ -309,7 +314,7 @@ func analyzeFile(root, path, src string, cfg *config.Config) fileResult {
 	if prog == nil || len(errs) > 0 {
 		// A syntax error is reported by the build proper; only a file that
 		// asked to be host code has to say so here.
-		if whole || strings.Contains(src, "@host") {
+		if whole || strings.Contains(src, "@host") || strings.Contains(src, "@build") {
 			for _, e := range errs {
 				if d, ok := e.(diag.Diagnostic); ok {
 					res.diags = append(res.diags, d)
@@ -360,7 +365,7 @@ func analyzeFile(root, path, src string, cfg *config.Config) fileResult {
 				switch marker {
 				case "":
 					marker, markSrc = "host", SourceConfigFunc
-				case "host":
+				case "host", "build":
 				default:
 					res.diags = append(res.diags, mkDiag(rel, src, s.pos.Line, s.pos.Col, diag.CodeHostConflict,
 						"conflicting placement on "+s.name+": `hostFunctions` in the config makes it host code, but its @"+marker+" marker makes it a "+marker+" function",
@@ -369,7 +374,7 @@ func analyzeFile(root, path, src string, cfg *config.Config) fileResult {
 			}
 		}
 
-		isHost := marker == "host" || (marker == "" && whole && s.top)
+		isHost := marker == "host" || marker == "build" || (marker == "" && whole && s.top)
 		if !isHost || (whole && !s.top) {
 			continue
 		}
@@ -390,6 +395,7 @@ func analyzeFile(root, path, src string, cfg *config.Config) fileResult {
 		mod.Funcs = append(mod.Funcs, Func{
 			Name: s.name, Source: fsrc, Exported: s.exported,
 			Inline: !whole || !s.top, Start: start, End: end, Line: s.pos.Line,
+			Build: marker == "build",
 		})
 	}
 	if whole || len(mod.Funcs) > 0 {
@@ -397,6 +403,9 @@ func analyzeFile(root, path, src string, cfg *config.Config) fileResult {
 	}
 	return res
 }
+
+// isHostMark reports whether a function-level marker makes host code.
+func isHostMark(m string) bool { return m == "host" || m == "build" }
 
 const conflictHint = "a module or function is host code from one source: remove the marker that disagrees. A function-level marker (`@host`, `@client`, ...) overrides the file for that function only"
 
@@ -427,7 +436,7 @@ func checkCapture(rel, src string, s *site, all []*site) []diag.Diagnostic {
 	// Other host functions declared in the same scopes move to the host with
 	// this one, so calling them is fine.
 	for _, o := range all {
-		if o != s && o.name != "" && (bodyMarker(o.body) == "host" || o.decorator == "host") {
+		if o != s && o.name != "" && (isHostMark(bodyMarker(o.body)) || isHostMark(o.decorator)) {
 			delete(outer, o.name)
 		}
 	}

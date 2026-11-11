@@ -205,6 +205,7 @@ func Register(r *scheme.Registry, s Set, id string, f scheme.Func) {
 	if !ok {
 		panic(fmt.Sprintf("permission: %q is not in the sdk id table", id))
 	}
+	r.Trusted(id, f)
 	if s.Allows(row.Permission) {
 		r.Func(id, f)
 		return

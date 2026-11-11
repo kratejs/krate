@@ -273,13 +273,18 @@ func isPascal(name string) bool {
 }
 
 // bodyMarker reads a leading string directive of a body: "host" for "@host",
+// "build" for "@build",
 // a tier name for "@server" and friends, "" for none.
 func bodyMarker(body []ast.Stmt) string {
 	if len(body) > 0 {
 		if es, ok := body[0].(*ast.ExprStmt); ok {
-			if lit, ok := es.Expression.(*ast.Literal); ok && lit.Kind == ast.StringLit &&
-				strings.Trim(strings.TrimSpace(lit.Value), `"'`) == "@host" {
-				return "host"
+			if lit, ok := es.Expression.(*ast.Literal); ok && lit.Kind == ast.StringLit {
+				switch strings.Trim(strings.TrimSpace(lit.Value), `"'`) {
+				case "@host":
+					return "host"
+				case "@build":
+					return "build"
+				}
 			}
 		}
 	}

@@ -32,6 +32,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/irtree"
 	jscompat "github.com/kratejs/krate/packages/compiler/internal/jsruntime"
 	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
+	"github.com/kratejs/krate/packages/compiler/internal/native/bake"
 	"github.com/kratejs/krate/packages/compiler/internal/native/gobind"
 	"github.com/kratejs/krate/packages/compiler/internal/native/hostts"
 	"github.com/kratejs/krate/packages/compiler/internal/plugin"
@@ -194,6 +195,9 @@ type Builder struct {
 	nativeHost *hostts.Result
 	// nativeGo holds the generated Go host bindings of a native build.
 	nativeGo *gobind.Result
+	// nativeBaked holds the results of the build functions (`@build`,
+	// `//krate:build`) of a native build; the app module embeds them.
+	nativeBaked bake.Table
 	// nativeOverlays are the source overlays of every host stub (TypeScript
 	// and Go), keyed by absolute module path.
 	nativeOverlays map[string]string

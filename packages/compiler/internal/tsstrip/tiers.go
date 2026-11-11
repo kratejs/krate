@@ -14,7 +14,7 @@ import (
 
 // Tier decorators (`@server`, `@static`, `@runtime`, `@client`) classify a
 // component where it is declared. `@host` marks native host code instead of a
-// tier: it is blanked and recorded on the declaration like a tier, but it never
+// tier (`@build` does too, for a host function evaluated during the native build): it is blanked and recorded on the declaration like a tier, but it never
 // sets the module tier and may sit on an async function. They are compile-time syntax: JS has no
 // decorators on functions or consts, and `static` is a reserved word, so they
 // are blanked out before esbuild or the parser sees them. Blanking keeps every
@@ -26,7 +26,7 @@ import (
 // a top-level expression statement.
 
 var (
-	tierRe              = regexp.MustCompile(`(?m)^(?:\x{FEFF})?[ \t]*(@(server|static|runtime|client|host))(?:[ \t]|\r?$)`)
+	tierRe              = regexp.MustCompile(`(?m)^(?:\x{FEFF})?[ \t]*(@(server|static|runtime|client|host|build))(?:[ \t]|\r?$)`)
 	classDeclRe         = regexp.MustCompile(`^(?:export\s+)?(?:default\s+)?(?:abstract\s+)?class\b`)
 	exportDefaultExprRe = regexp.MustCompile(`^export\s+default\b`)
 	declRe              = regexp.MustCompile(`^(export\s+)?(default\s+)?(async\s+)?(?:function\s*\*?\s*([A-Za-z_$][\w$]*)?|class\b\s*([A-Za-z_$][\w$]*)?|(?:const|let|var)\s+([A-Za-z_$][\w$]*))`)
@@ -153,7 +153,7 @@ func scanTiers(path, src string, opts Options) *tierScan {
 					// `export default () => ...` / `export default memo(...)` /
 					// `export default withX(Inner)`: the file's default component.
 					// The bundler names it, so the mark is the file tier only.
-					if fn != nil && fn.Async && m.tier != "runtime" && m.tier != "host" {
+					if fn != nil && fn.Async && m.tier != "runtime" && m.tier != "host" && m.tier != "build" {
 						fail("@"+m.tier+" cannot be used on an async component",
 							"an async component always renders per request; use @runtime or make it synchronous")
 						continue
@@ -175,7 +175,7 @@ func scanTiers(path, src string, opts Options) *tierScan {
 		if m.name == "extends" {
 			m.name = ""
 		}
-		if decl[3] != "" && m.tier != "runtime" && m.tier != "host" {
+		if decl[3] != "" && m.tier != "runtime" && m.tier != "host" && m.tier != "build" {
 			fail("@"+m.tier+" cannot be used on an async component",
 				"an async component always renders per request; use @runtime or make it synchronous")
 			continue
@@ -195,7 +195,7 @@ func scanTiers(path, src string, opts Options) *tierScan {
 	var sole *tierMark
 	for i := range s.marks {
 		m := &s.marks[i]
-		if m.tier == "host" {
+		if m.tier == "host" || m.tier == "build" {
 			continue
 		}
 		isDefault := m.isDefault || (hasDefault && m.name != "" && m.name == defaultName)

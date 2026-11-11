@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"sort"
 	"strings"
@@ -604,13 +605,13 @@ func (nd *nativeDev) handleChanges(changed []string, hub *DevHub) {
 	fullUI := false
 	if needRefresh {
 		oldOverlays := b.nativeOverlays
-		savedHost, savedGo := b.nativeHost, b.nativeGo
+		savedHost, savedGo, oldBaked := b.nativeHost, b.nativeGo, b.nativeBaked
 		if err := b.prepareNativeHost(); err != nil {
-			b.nativeHost, b.nativeGo, b.nativeOverlays = savedHost, savedGo, oldOverlays
+			b.nativeHost, b.nativeGo, b.nativeOverlays, b.nativeBaked = savedHost, savedGo, oldOverlays, oldBaked
 			nd.reportErr("Host code", err)
 			return
 		}
-		if !equalOverlays(oldOverlays, b.nativeOverlays) {
+		if !equalOverlays(oldOverlays, b.nativeOverlays) || !reflect.DeepEqual(oldBaked, b.nativeBaked) {
 			fullUI = true
 		}
 		nd.captureDeps()

@@ -236,7 +236,7 @@ func CheckWebBuild(root string, cfg *config.Config) ([]diag.Diagnostic, error) {
 			continue
 		}
 		data, err := os.ReadFile(f)
-		if err != nil || !strings.Contains(string(data), "@host") {
+		if err != nil || !strings.Contains(string(data), "@host") && !strings.Contains(string(data), "@build") {
 			continue
 		}
 		src := string(data)
@@ -249,11 +249,18 @@ func CheckWebBuild(root string, cfg *config.Config) ([]diag.Diagnostic, error) {
 			continue
 		}
 		for _, s := range collectSites(prog) {
-			if s.decorator == "host" || bodyMarker(s.body) == "host" {
+			if isHostMark(s.decorator) || isHostMark(bodyMarker(s.body)) {
 				out = append(out, mkDiag(rel, src, s.pos.Line, s.pos.Col, diag.CodeHostInWebBuild,
-					s.name+" is marked @host, but this is a web build", hint))
+					s.name+" is marked @"+hostMarkName(s)+", but this is a web build", hint))
 			}
 		}
 	}
 	return out, nil
+}
+
+func hostMarkName(s *site) string {
+	if s.decorator == "build" || bodyMarker(s.body) == "build" {
+		return "build"
+	}
+	return "host"
 }

@@ -214,3 +214,33 @@ func TestTSWrappersAndDocsMatchTable(t *testing.T) {
 		t.Errorf("sdk.md and sdk-ui.md do not mention: %v", missing)
 	}
 }
+
+// Host code is trusted: an in-process call through Invoke reaches an id whose
+// permission the app does not hold, while the UI's call to it is denied.
+func TestInProcessInvokeBypassesPermissionGate(t *testing.T) {
+	isolate(t)
+	reg := scheme.NewRegistry()
+	if _, err := Register(reg, Options{AppID: "com.acme.trusted", Permissions: []string{"net"}}); err != nil {
+		t.Fatal(err)
+	}
+	c := sdktest.New(t, reg)
+	set := func(e *wire.Encoder) { e.String("k"); e.String("v") }
+	if r := c.Call("krate/kv.set", set); r.ErrCode != "permission_denied" {
+		t.Fatalf("the UI call must be denied, got %+v", r)
+	}
+	frame := wire.NewEncoder()
+	frame.Raw([]byte(`["k","v"]`))
+	if _, err := reg.Invoke(krate.Background(), "krate/kv.set", frame.Frame()); err != nil {
+		t.Fatalf("host code call: %v", err)
+	}
+	get := wire.NewEncoder()
+	get.Raw([]byte(`["k"]`))
+	fr, err := reg.Invoke(krate.Background(), "krate/kv.get", get.Frame())
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, _ := wire.NewDecoder(fr)
+	if s, err := d.String(); err != nil || s != "v" {
+		t.Fatalf("%q %v", s, err)
+	}
+}

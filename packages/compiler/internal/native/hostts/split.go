@@ -19,6 +19,8 @@ type inlineFn struct {
 	Name string
 	ID   string
 	Kind Kind
+	// Build marks a `@build` function: the UI gets its baked values.
+	Build bool
 	// Line is the 1-based line of the declaration in the UI module.
 	Line int
 	// Boundary-check input: offset of the declaration in the UI module.
@@ -39,7 +41,7 @@ type splitResult struct {
 	Loader string
 }
 
-var preambleRe = regexp.MustCompile(`^(@host\s+)?(export\s+(default\s+)?)?`)
+var preambleRe = regexp.MustCompile(`^(@(?:host|build)\s+)?(export\s+(default\s+)?)?`)
 
 func moduleID(rel string) string {
 	return strings.TrimSuffix(rel, filepath.Ext(rel))
@@ -195,13 +197,14 @@ func splitInline(rel, path, src string, funcs []native.Func) (*splitResult, []di
 		isDefExp bool
 		kind     Kind
 		isConst  bool
+		build    bool
 	}
 	var pieces []piece
 	for _, f := range fns {
 		raw := src[f.Start:f.End]
 		pre := preambleRe.FindString(raw)
 		body := raw[len(pre):]
-		p := piece{f: f, text: strings.TrimRight(body, " \t\r\n"), export: strings.Contains(pre, "export"), isDefExp: strings.Contains(pre, "default")}
+		p := piece{f: f, text: strings.TrimRight(body, " \t\r\n"), export: strings.Contains(pre, "export"), isDefExp: strings.Contains(pre, "default"), build: f.Build}
 		head := mask(body)
 		switch {
 		case regexp.MustCompile(`^(async\s+)?function\s*\*`).MatchString(head):
@@ -224,6 +227,15 @@ func splitInline(rel, path, src string, funcs []native.Func) (*splitResult, []di
 			fail(f, "cannot split host function "+f.Name+" out of the UI module", "declare it with `function`, or `const name = async () => { ... }`")
 			continue
 		}
+		if p.build && (p.kind != KindFunc || p.isDefExp) {
+			why := "a generator"
+			if p.isDefExp {
+				why = "a default export"
+			}
+			ds = append(ds, diag.New(rel, f.Line, 1, "build function "+f.Name+" is "+why+", which cannot be baked",
+				"a build function is a named function that returns one value", lineText(src, f.Line)).WithCode(diag.CodeBakePlacement))
+			continue
+		}
 		pieces = append(pieces, p)
 	}
 	if len(ds) > 0 {
@@ -241,12 +253,15 @@ func splitInline(rel, path, src string, funcs []native.Func) (*splitResult, []di
 	// UI source: replace each function with a stub, keeping line numbers.
 	var sb strings.Builder
 	pos := 0
-	usesCall, usesStream := false, false
+	usesCall, usesStream, usesBaked := false, false, false
 	for _, p := range pieces {
 		sb.WriteString(src[pos:p.f.Start])
 		id := modID + "#" + p.f.Name
 		fnName := "__krateCall"
-		if p.kind == KindStream {
+		if p.build {
+			fnName = "__krateBaked"
+			usesBaked = true
+		} else if p.kind == KindStream {
 			fnName = "__krateStream"
 			usesStream = true
 		} else {
@@ -276,6 +291,9 @@ func splitInline(rel, path, src string, funcs []native.Func) (*splitResult, []di
 	}
 	if usesStream {
 		imports = append(imports, "stream as __krateStream")
+	}
+	if usesBaked {
+		imports = append(imports, "baked as __krateBaked")
 	}
 	if !strings.HasSuffix(ui, "\n") {
 		ui += "\n"
@@ -310,7 +328,7 @@ func splitInline(rel, path, src string, funcs []native.Func) (*splitResult, []di
 		hb.WriteString("export " + body + "\n")
 		n := 1 + strings.Count(body, "\n")
 		res.Fns = append(res.Fns, &inlineFn{
-			Name: p.f.Name, ID: modID + "#" + p.f.Name, Kind: p.kind,
+			Name: p.f.Name, ID: modID + "#" + p.f.Name, Kind: p.kind, Build: p.build,
 			Line: p.f.Line, Off: p.f.Start, genLine: line, lines: n,
 		})
 		line += n

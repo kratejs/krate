@@ -34,6 +34,8 @@ type hostItem struct {
 	// result is the value type; nil for void. For streams it is the element.
 	result *wtype
 	hasErr bool
+	// build marks a //krate:build function: the UI gets its baked values.
+	build bool
 }
 
 // module is one imported .go file (or package directory).
@@ -46,6 +48,8 @@ type module struct {
 	items      []*hostItem
 	components []string
 	imp        Import
+	// build holds the names marked //krate:build in the module's source.
+	build map[string]bool
 }
 
 // analyzer collects diagnostics and maps positions.
@@ -146,7 +150,11 @@ func (a *analyzer) classify(m *module, mp *mapper, name string, comps map[string
 		if p.Filename == "" {
 			p = token.Position{Filename: m.src}
 		}
-		a.add(a.at(p, diag.CodeGoBindImport, msg, hint))
+		code := diag.CodeGoBindImport
+		if strings.Contains(msg, "//krate:build") {
+			code = diag.CodeBakePlacement
+		}
+		a.add(a.at(p, code, msg, hint))
 	}
 	scope := m.pkg.pkg.Scope()
 	obj := scope.Lookup(name)
@@ -171,6 +179,19 @@ func (a *analyzer) classify(m *module, mp *mapper, name string, comps map[string
 	switch o := obj.(type) {
 	case *types.Func:
 		it := a.analyzeFunc(m, mp, o)
+		if it != nil && m.build[name] {
+			switch {
+			case it.kind != itemFunc:
+				importDiag(name+" is marked //krate:build but returns a channel, which cannot be baked",
+					"a build function returns one value (and optionally an error)")
+				return
+			case it.result == nil:
+				importDiag(name+" is marked //krate:build but returns no value",
+					"a build function has to return the value to bake")
+				return
+			}
+			it.build = true
+		}
 		if it != nil {
 			m.items = append(m.items, it)
 		}

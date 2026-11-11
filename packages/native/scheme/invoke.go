@@ -23,12 +23,12 @@ func asError(err error) error {
 }
 
 // Invoke calls the registered Func id in-process, without HTTP and without any
-// permission gate: it is for trusted code that runs inside the app. args is a
-// wire frame whose value is the argument array; the result is a wire frame
-// holding the single result value. Gating, where it applies, is the
-// registration's own business (the SDK wraps its ids before registering).
+// permission gate: it is for trusted code that runs inside the app. An id that
+// the UI reaches only behind a permission check has a Trusted twin that skips
+// the check. args is a wire frame whose value is the argument array; the
+// result is a wire frame holding the single result value.
 func (r *Registry) Invoke(ctx krate.Ctx, id string, args []byte) ([]byte, error) {
-	fn, _ := r.lookup(id)
+	fn, _ := r.lookupTrusted(id)
 	if fn == nil {
 		return nil, notFound("function", id)
 	}
@@ -51,7 +51,7 @@ func (r *Registry) Invoke(ctx krate.Ctx, id string, args []byte) ([]byte, error)
 // cancelled or emit fails. Each emitted value reaches emit as a wire frame.
 // emit may block; the producer waits for it (backpressure).
 func (r *Registry) InvokeStream(ctx krate.Ctx, id string, args []byte, emit func(frame []byte) error) error {
-	_, sfn := r.lookup(id)
+	_, sfn := r.lookupTrusted(id)
 	if sfn == nil {
 		return notFound("stream", id)
 	}

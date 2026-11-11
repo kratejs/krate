@@ -650,6 +650,42 @@ The Go host binary is built inside the project's own Go module, next to the gene
 
 `krate native init` creates a small app in a directory. It refuses to overwrite an existing file, so run it in an empty directory or remove the files it names.
 
+### KR7240
+
+**Build function called with non-literal arguments**
+
+A function marked `@build` (TypeScript) or `//krate:build` (Go) runs once during the native build and its result is baked into the app, so the compiler has to know every argument tuple while it builds. Only literal arguments are supported: strings, numbers, booleans, null, and arrays and objects of those. Each distinct call with literal arguments gets its own baked value. Pass a literal, or drop `@build` and call the function as an ordinary host function at run time.
+
+### KR7241
+
+**Build function used without being called**
+
+A build function is replaced by its baked values, which are looked up by the literal arguments of each call. Passing the function around, aliasing it, importing it as a namespace or re-exporting it hides the calls from the compiler. Call it directly where its value is needed: `const v = appVersion()`.
+
+### KR7242
+
+**Build function failed**
+
+A build function threw, rejected, never settled or returned an error while the native build ran it. TypeScript build functions run in a bare JavaScript VM without fetch, timers, the file system or locale-dependent methods; imports they use must be plain code. Fix the error shown, or remove the build marker if the function needs those capabilities at run time.
+
+### KR7243
+
+**Build function result cannot be baked**
+
+The value a build function returned is embedded in the app, so it has to be plain data: strings, finite numbers, booleans, null, arrays and plain objects, at most 8 MiB of JSON, nested at most 512 levels, with arrays of at most 1,000,000 elements. NaN, Infinity, cycles, functions, symbols, bigint, Date, Map, Set, binary data, class instances and unsettled promises are refused. Convert the value to plain data inside the function.
+
+### KR7244
+
+**Build marker on something that cannot be baked**
+
+`@build` and `//krate:build` apply to ordinary functions that return one value. They cannot mark components, generators or streams, signals, or functions that return a channel.
+
+### KR7245
+
+**Go build functions could not be evaluated**
+
+`//krate:build` functions are evaluated by compiling and running a small generated Go program in the project's Go module, so the Go toolchain has to be installed and the host packages must compile. The output of the Go command is shown.
+
 ## KR8xxx: islands, compiled packages and general React compatibility
 
 ### KR8001

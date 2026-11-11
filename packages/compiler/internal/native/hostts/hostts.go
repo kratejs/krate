@@ -32,6 +32,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/config"
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/native"
+	"github.com/kratejs/krate/packages/compiler/internal/native/bake"
 	"github.com/kratejs/krate/packages/compiler/internal/tsstrip"
 )
 
@@ -83,6 +84,19 @@ type Result struct {
 	// TypesDir holds the .d.ts files, one per host module the UI imports.
 	TypesDir string
 	Types    []string
+	// Baked holds the results of the build functions (`@build`), by function
+	// id and canonical argument key (see package bake). The UI stubs of those
+	// functions read it through the app module.
+	Baked bake.Table
+}
+
+// Use is a use of an imported host name in a UI module.
+type Use struct {
+	bake.Site
+	// File is the UI module relative to the project root; Text the source
+	// line.
+	File string
+	Text string
 }
 
 // loc is a place in a UI module, for diagnostics.
@@ -93,8 +107,9 @@ type loc struct {
 }
 
 type usage struct {
-	all   bool
-	names map[string]loc
+	all    bool
+	allLoc loc
+	names  map[string]loc
 }
 
 type builder struct {
@@ -112,6 +127,11 @@ type builder struct {
 	// srcs holds the original source of each UI module that was split.
 	srcs   map[string]string
 	goImps []GoImport
+	// uses holds the uses of host names, by host module path or, for the
+	// inline functions of a UI module, "inline:<module id>".
+	uses map[string][]Use
+	// builds lists the build functions the UI uses.
+	builds []buildFn
 }
 
 // genModule is a generated host module for the inline functions of a UI module.
@@ -137,6 +157,7 @@ func Build(root string, cfg *config.Config, p *native.Placement, opts Options) (
 		use:     map[string]*usage{},
 		gen:     map[string]*genModule{},
 		srcs:    map[string]string{},
+		uses:    map[string][]Use{},
 	}
 	resolve := opts.Resolve
 	if resolve == nil {
@@ -163,6 +184,12 @@ func Build(root string, cfg *config.Config, p *native.Placement, opts Options) (
 	if b.hasErrors() {
 		return b.res, b.diags, nil
 	}
+	if err := b.bakeBuilds(); err != nil {
+		return nil, nil, err
+	}
+	if b.hasErrors() {
+		return b.res, b.diags, nil
+	}
 	if err := b.emit(regs); err != nil {
 		return nil, nil, err
 	}
@@ -182,6 +209,8 @@ type GoImport struct {
 	// 1-based position of the import.
 	From      string
 	Line, Col int
+	// Uses are the uses of the imported names in the importing module.
+	Uses []Use
 }
 
 // GoImports finds every import of a .go file in the UI import graph. It
@@ -194,6 +223,7 @@ func GoImports(root string, cfg *config.Config, p *native.Placement, opts Option
 		use:     map[string]*usage{},
 		gen:     map[string]*genModule{},
 		srcs:    map[string]string{},
+		uses:    map[string][]Use{},
 	}
 	if b.opts.Resolve == nil {
 		b.opts.Resolve = bundler.ResolveImport
@@ -318,14 +348,22 @@ func (b *builder) walkUI() error {
 }
 
 // scanImports records the host imports of a UI module and queues the UI
-// modules it imports.
+// modules it imports. It also records how the imported host names are used,
+// which build functions need.
 func (b *builder) scanImports(path, src string, queue *[]string) {
 	prog, errs := tsstrip.Parse(path, src, tsstrip.Options{})
 	if prog == nil || len(errs) > 0 {
 		return
 	}
 	rel := b.rel(path)
-	visit := func(spec string, pos ast.Pos, all bool, names []string) {
+	// binding says where a local name of this module comes from.
+	type binding struct {
+		key    string // b.uses key, or "" for a .go import
+		goImp  int    // index into b.goImps when key == ""
+		remote string
+	}
+	bindings := map[string]binding{}
+	visit := func(spec string, pos ast.Pos, all bool, names []string, locals map[string]string) {
 		target := b.opts.Resolve(path, unquote(spec))
 		if target == "" {
 			return
@@ -339,6 +377,9 @@ func (b *builder) scanImports(path, src string, queue *[]string) {
 				}
 			}
 			b.goImps = append(b.goImps, GoImport{File: target, Names: named, Namespace: all, From: rel, Line: pos.Line, Col: pos.Col})
+			for l, r := range locals {
+				bindings[l] = binding{goImp: len(b.goImps) - 1, remote: r}
+			}
 			return
 		}
 		if b.hostMod[target] == nil {
@@ -351,6 +392,9 @@ func (b *builder) scanImports(path, src string, queue *[]string) {
 			b.use[target] = u
 		}
 		if all {
+			if !u.all {
+				u.allLoc = loc{rel: rel, line: pos.Line, col: pos.Col, src: lineText(src, pos.Line)}
+			}
 			u.all = true
 		}
 		for _, n := range names {
@@ -358,18 +402,31 @@ func (b *builder) scanImports(path, src string, queue *[]string) {
 				u.names[n] = loc{rel: rel, line: pos.Line, col: pos.Col, src: lineText(src, pos.Line)}
 			}
 		}
+		for l, r := range locals {
+			bindings[l] = binding{key: target, remote: r}
+		}
+		if len(locals) == 0 && len(names) > 0 {
+			// A re-export: the name is passed on, which a build function
+			// cannot be.
+			for _, n := range names {
+				b.uses[target] = append(b.uses[target], Use{Site: bake.Site{Name: n, Local: n, Line: pos.Line, Col: pos.Col}, File: rel, Text: lineText(src, pos.Line)})
+			}
+		}
 	}
 	for _, s := range prog.Body {
 		switch d := s.(type) {
 		case *ast.ImportStmt:
 			var names []string
+			locals := map[string]string{}
 			if d.Default != "" {
 				names = append(names, "default")
+				locals[d.Default] = "default"
 			}
 			for _, n := range d.Named {
 				names = append(names, n.Remote)
+				locals[n.Local] = n.Remote
 			}
-			visit(d.Source, d.Position, d.Namespace != "", names)
+			visit(d.Source, d.Position, d.Namespace != "", names, locals)
 		case *ast.ExportStmt:
 			if d.ReexportSource == "" {
 				continue
@@ -378,12 +435,37 @@ func (b *builder) scanImports(path, src string, queue *[]string) {
 			for _, n := range d.ReexportNamed {
 				names = append(names, n.Local)
 			}
-			visit(d.ReexportSource, d.Position, d.StarReexport || d.Namespace != "", names)
+			visit(d.ReexportSource, d.Position, d.StarReexport || d.Namespace != "", names, nil)
 		}
 	}
 	for _, m := range dynImportRe.FindAllStringSubmatch(src, -1) {
 		spec := m[1] + m[2]
-		visit(spec, ast.Pos{Line: 1, Col: 1}, true, nil)
+		visit(spec, ast.Pos{Line: 1, Col: 1}, true, nil, nil)
+	}
+	locals := map[string]string{}
+	for l, bd := range bindings {
+		locals[l] = bd.remote
+	}
+	for _, site := range bake.FindUses(prog, locals) {
+		bd := bindings[site.Local]
+		u := Use{Site: site, File: rel, Text: lineText(src, site.Line)}
+		if bd.key == "" {
+			b.goImps[bd.goImp].Uses = append(b.goImps[bd.goImp].Uses, u)
+		} else {
+			b.uses[bd.key] = append(b.uses[bd.key], u)
+		}
+	}
+	if g := b.gen[moduleID(rel)]; g != nil {
+		own := map[string]string{}
+		for _, f := range g.split.Fns {
+			if f.Build {
+				own[f.Name] = f.Name
+			}
+		}
+		for _, site := range bake.FindUses(prog, own) {
+			k := "inline:" + g.modID
+			b.uses[k] = append(b.uses[k], Use{Site: site, File: rel, Text: lineText(src, site.Line)})
+		}
 	}
 }
 
@@ -451,9 +533,24 @@ func (b *builder) collect() ([]regEntry, error) {
 			ordered = append(ordered, n)
 		}
 		sort.Strings(ordered)
+		bn := b.buildNames(path)
+		if u.all && len(bn) > 0 {
+			b.diags = append(b.diags, diag.New(u.allLoc.rel, u.allLoc.line, u.allLoc.col,
+				modID+" has build functions, which a namespace import or `export *` hides from the compiler",
+				"import the build functions by name and call them directly", u.allLoc.src).WithCode(diag.CodeBakeRef))
+		}
 		for _, n := range ordered {
 			e := mod.export(n)
 			if e == nil {
+				continue
+			}
+			if bn[n] {
+				if e.Kind != KindFunc {
+					b.diags = append(b.diags, diag.New(rel, max(e.Line, 1), 1, "build function "+n+" is a "+string(e.Kind)+", which cannot be baked",
+						"a build function is a plain function that returns one value", "").WithCode(diag.CodeBakePlacement))
+					continue
+				}
+				b.addBuild(&buildFn{ID: modID + "." + n, Name: n, Rel: rel, Line: e.Line, path: path, useKey: path})
 				continue
 			}
 			regs = append(regs, regEntry{
@@ -465,7 +562,7 @@ func (b *builder) collect() ([]regEntry, error) {
 				b.checkParams(rel, mod.Src, mod.Masked, n, e.Off, tc)
 			}
 		}
-		b.res.Overlays[path] = stubSource(modID, mod.Exports)
+		b.res.Overlays[path] = stubSource(modID, mod.Exports, bn)
 	}
 
 	for _, g := range b.genList {
@@ -473,6 +570,10 @@ func (b *builder) collect() ([]regEntry, error) {
 		ast0, _ := tsstrip.Parse(g.path, g.src, tsstrip.Options{})
 		tc.imported = importedFrom(ast0)
 		for _, f := range g.split.Fns {
+			if f.Build {
+				b.addBuild(&buildFn{ID: f.ID, Name: f.Name, Rel: g.rel, Line: f.Line, gen: g, useKey: "inline:" + g.modID})
+				continue
+			}
 			regs = append(regs, regEntry{
 				Registration: Registration{ID: f.ID, Kind: string(f.Kind), File: g.rel, Line: max(f.Line, 1), Module: g.modID, Export: f.Name, Inline: true},
 				importFrom:   "krate-host:inline/" + g.modID,

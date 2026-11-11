@@ -41,15 +41,10 @@ type manifest struct {
 	Externals  []string       `json:"externals"`
 }
 
-// emit writes the host bundle, manifest, types, and fills the result.
-func (b *builder) emit(regs []regEntry) error {
-	entry := entrySource(regs)
-	gens := map[string]*genModule{}
-	for _, g := range b.genList {
-		gens[g.modID] = g
-	}
-
-	plugin := api.Plugin{Name: "krate-host", Setup: func(pb api.PluginBuild) {
+// hostPlugin serves the virtual entry module and the generated inline host
+// modules to esbuild.
+func (b *builder) hostPlugin(entry string, gens map[string]*genModule) api.Plugin {
+	return api.Plugin{Name: "krate-host", Setup: func(pb api.PluginBuild) {
 		pb.OnResolve(api.OnResolveOptions{Filter: `^krate-host:`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
 			return api.OnResolveResult{Path: strings.TrimPrefix(args.Path, "krate-host:"), Namespace: virtualNS}, nil
 		})
@@ -69,6 +64,17 @@ func (b *builder) emit(regs []regEntry) error {
 			return api.OnLoadResult{Contents: &src, ResolveDir: g.absDir, Loader: loader}, nil
 		})
 	}}
+}
+
+// emit writes the host bundle, manifest, types, and fills the result.
+func (b *builder) emit(regs []regEntry) error {
+	entry := entrySource(regs)
+	gens := map[string]*genModule{}
+	for _, g := range b.genList {
+		gens[g.modID] = g
+	}
+
+	plugin := b.hostPlugin(entry, gens)
 
 	external := []string{"node:*"}
 	external = append(external, nodeBuiltins...)
@@ -191,7 +197,7 @@ func (b *builder) writeTypes(outDir string) error {
 		if err := os.MkdirAll(filepath.Dir(dts), 0o755); err != nil {
 			return err
 		}
-		src := typesSource(typesImportPath(dts, path), mod.Exports)
+		src := typesSource(typesImportPath(dts, path), mod.Exports, b.buildNames(path))
 		if err := os.WriteFile(dts, []byte(src), 0o644); err != nil {
 			return err
 		}

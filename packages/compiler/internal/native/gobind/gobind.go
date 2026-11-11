@@ -49,6 +49,9 @@ type Module struct {
 	Funcs, Streams, Signals []string
 	// Components lists the imported names that are Go components.
 	Components []string
+	// Build lists the imported functions marked //krate:build, sorted. They
+	// are in Funcs too, but the UI reads their baked values instead.
+	Build []string
 }
 
 // Result lists what Generate wrote.
@@ -174,6 +177,7 @@ func Generate(root string, imports []Import, outDir string) (*Result, []diag.Dia
 			continue
 		}
 		comps := componentNames(m)
+		m.build = buildNames(m)
 		seen := map[string]bool{}
 		for _, n := range m.names {
 			if seen[n] {
@@ -245,6 +249,9 @@ func Generate(root string, imports []Import, outDir string) (*Result, []diag.Dia
 		out := Module{ID: m.id, Source: m.src, Components: sortedUnique(m.components)}
 		for _, it := range m.items {
 			out.Host = append(out.Host, it.name)
+			if it.build {
+				out.Build = append(out.Build, it.name)
+			}
 			switch it.kind {
 			case itemStream:
 				out.Streams = append(out.Streams, it.id)
@@ -255,6 +262,7 @@ func Generate(root string, imports []Import, outDir string) (*Result, []diag.Dia
 			}
 		}
 		sort.Strings(out.Host)
+		sort.Strings(out.Build)
 		sort.Strings(out.Funcs)
 		sort.Strings(out.Streams)
 		sort.Strings(out.Signals)
@@ -403,6 +411,40 @@ func (a *analyzer) modules(imports []Import) []*module {
 		out = append(out, m)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].id < out[j].id })
+	return out
+}
+
+var buildMarkRe = regexp.MustCompile(`^//\s*krate:build\b`)
+var funcDeclRe = regexp.MustCompile(`^func\s+([A-Za-z_][A-Za-z0-9_]*)\s*[\[(]`)
+
+// buildNames returns the functions of the module marked //krate:build: the
+// directive sits in the doc comment of the function.
+func buildNames(m *module) map[string]bool {
+	out := map[string]bool{}
+	files := []string{m.src}
+	if m.isDir {
+		files = m.pkg.files
+	}
+	for _, f := range files {
+		src, err := os.ReadFile(f)
+		if err != nil {
+			continue
+		}
+		marked := false
+		for _, line := range strings.Split(string(src), "\n") {
+			line = strings.TrimRight(line, "\r")
+			switch {
+			case buildMarkRe.MatchString(line):
+				marked = true
+			case strings.HasPrefix(line, "//"):
+			default:
+				if mm := funcDeclRe.FindStringSubmatch(line); marked && mm != nil {
+					out[mm[1]] = true
+				}
+				marked = false
+			}
+		}
+	}
 	return out
 }
 

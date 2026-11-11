@@ -163,17 +163,21 @@ func dts(items []*hostItem) string {
 			useSignal = true
 			fmt.Fprintf(&sigs, "export const %s: ReadonlyHostSignal<%s>;\n", it.name, t.ref(it.result))
 		default:
-			useOpts = true
+			useOpts = useOpts || !it.build
 			names := tsParamNames(it)
 			var ps []string
 			for i, p := range it.params {
 				ps = append(ps, names[i]+": "+t.ref(p.w))
 			}
-			ps = append(ps, "opts?: CallOptions")
+			if !it.build {
+				ps = append(ps, "opts?: CallOptions")
+			}
 			ret := "Promise<void>"
 			switch {
 			case it.kind == itemStream:
 				ret = "AsyncIterable<" + t.ref(it.result) + ">"
+			case it.build:
+				ret = t.ref(it.result)
 			case it.result != nil:
 				ret = "Promise<" + t.ref(it.result) + ">"
 			}
@@ -229,11 +233,18 @@ func stub(items []*hostItem) string {
 			if it.kind == itemStream {
 				fn = "stream"
 			}
+			if it.build {
+				fn = "baked"
+			}
 			used[fn] = true
 			var ps, as []string
 			for i := range it.params {
 				ps = append(ps, "a"+strconv.Itoa(i))
 				as = append(as, "a"+strconv.Itoa(i))
+			}
+			if it.build {
+				fmt.Fprintf(&body, "export const %s = (%s) => __baked(%s, [%s]);\n", it.name, strings.Join(ps, ", "), id, strings.Join(as, ", "))
+				continue
 			}
 			ps = append(ps, "opts")
 			fmt.Fprintf(&body, "export const %s = (%s) => __%s(%s, [%s], opts);\n", it.name, strings.Join(ps, ", "), fn, id, strings.Join(as, ", "))
@@ -242,7 +253,7 @@ func stub(items []*hostItem) string {
 	var b strings.Builder
 	b.WriteString(tsHeader)
 	var imp []string
-	for _, n := range []string{"call", "stream", "signal"} {
+	for _, n := range []string{"call", "stream", "signal", "baked"} {
 		if used[n] {
 			imp = append(imp, n+" as __"+n)
 		}

@@ -98,6 +98,11 @@ func (t *Table) RegisterUI(reg *scheme.Registry, allowed func(permission string)
 		}
 		perm := e.perm
 		if e.f != nil {
+			reg.Trusted(id, e.f)
+		} else {
+			reg.TrustedStream(id, e.s)
+		}
+		if e.f != nil {
 			reg.Func(id, func(krate.Ctx, *wire.Decoder, *wire.Encoder) error { return denied(perm) })
 		} else {
 			reg.Stream(id, func(krate.Ctx, *wire.Decoder, func(func(*wire.Encoder)) error) error { return denied(perm) })

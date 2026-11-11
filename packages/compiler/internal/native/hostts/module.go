@@ -226,7 +226,7 @@ func (a *analyzer) collectExports(m *modInfo, stack map[string]bool) {
 			if !d.Export {
 				continue
 			}
-			if d.Tier != "" && d.Tier != "host" {
+			if d.Tier != "" && d.Tier != "host" && d.Tier != "build" {
 				continue
 			}
 			name := d.Name
@@ -268,7 +268,7 @@ func (a *analyzer) exportStmt(m *modInfo, exp *ast.ExportStmt, locals map[string
 	case exp.Declaration != nil:
 		switch d := exp.Declaration.(type) {
 		case *ast.FnDecl:
-			if d.Tier != "" && d.Tier != "host" {
+			if d.Tier != "" && d.Tier != "host" && d.Tier != "build" {
 				return
 			}
 			name := d.Name
@@ -281,7 +281,7 @@ func (a *analyzer) exportStmt(m *modInfo, exp *ast.ExportStmt, locals map[string
 				if v == nil || v.Name == "" || v.IsDestructuring {
 					continue
 				}
-				if v.Tier != "" && v.Tier != "host" {
+				if v.Tier != "" && v.Tier != "host" && v.Tier != "build" {
 					continue
 				}
 				l := locals[v.Name]

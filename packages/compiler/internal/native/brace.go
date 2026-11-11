@@ -144,6 +144,7 @@ func siteRange(src string, s *site) (start, end int) {
 	back("default")
 	back("export")
 	back("@host")
+	back("@build")
 	start = cur
 	first, has := 0, len(s.body) > 0
 	if has {

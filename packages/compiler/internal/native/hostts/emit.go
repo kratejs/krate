@@ -8,19 +8,24 @@ import (
 )
 
 // stubSource is the module the UI bundle gets in place of a host module.
-func stubSource(modID string, exps []*export) string {
+// build names the exports that are build functions: their stubs read the
+// baked values instead of calling the host.
+func stubSource(modID string, exps []*export, build map[string]bool) string {
 	var body strings.Builder
-	usesCall, usesStream, usesSignal := false, false, false
+	usesCall, usesStream, usesSignal, usesBaked := false, false, false, false
 	for _, e := range exps {
 		id := quote(modID + "." + e.Name)
 		var expr string
-		switch e.Kind {
-		case kindValue:
+		switch {
+		case e.Kind == kindValue:
 			continue
-		case KindStream:
+		case build[e.Name]:
+			expr = "(...a) => __krateBaked(" + id + ", a)"
+			usesBaked = true
+		case e.Kind == KindStream:
 			expr = "(...a) => __krateStream(" + id + ", a)"
 			usesStream = true
-		case KindSignal:
+		case e.Kind == KindSignal:
 			expr = "__krateSig(" + id + ")"
 			usesSignal = true
 		default:
@@ -42,6 +47,9 @@ func stubSource(modID string, exps []*export) string {
 	}
 	if usesStream {
 		names = append(names, "stream as __krateStream")
+	}
+	if usesBaked {
+		names = append(names, "baked as __krateBaked")
 	}
 	var sb strings.Builder
 	sb.WriteString("// generated: host stub for " + modID + "\n")
@@ -113,7 +121,7 @@ function __auto(id, v) {
 
 // typesSource writes the .d.ts of a host module. importPath is the specifier
 // of the module as seen from the .d.ts file.
-func typesSource(importPath string, exps []*export) string {
+func typesSource(importPath string, exps []*export, build map[string]bool) string {
 	mod := `typeof import(` + quote(importPath) + `)`
 	var body strings.Builder
 	needItem, needRemote := false, false
@@ -123,15 +131,17 @@ func typesSource(importPath string, exps []*export) string {
 			ref = mod + "." + e.Name
 		}
 		var t string
-		switch e.Kind {
-		case kindValue:
+		switch {
+		case e.Kind == kindValue:
 			continue
-		case KindFunc:
+		case build[e.Name]:
+			t = "(...a: Parameters<" + ref + ">) => Awaited<ReturnType<" + ref + ">>"
+		case e.Kind == KindFunc:
 			t = "(...a: Parameters<" + ref + ">) => Promise<Awaited<ReturnType<" + ref + ">>>"
-		case KindStream:
+		case e.Kind == KindStream:
 			t = "(...a: Parameters<" + ref + ">) => AsyncIterable<__Item<ReturnType<" + ref + ">>>"
 			needItem = true
-		case KindSignal:
+		case e.Kind == KindSignal:
 			t = ref + ` extends import("@krate/app").HostSignal<infer T> ? import("@krate/app").ReadonlyHostSignal<T, T | undefined> : never`
 		default:
 			t = "__Remote<" + ref + ">"
