@@ -255,10 +255,11 @@ func TestMSIXStructure(t *testing.T) {
 		if f.Method != zip.Store {
 			t.Errorf("%s is compressed", f.Name)
 		}
-		if f.ReaderVersion != 10 {
-			t.Errorf("%s: version needed %d, Windows accepts only 10", f.Name, f.ReaderVersion)
+		if f.ReaderVersion != 20 || f.CreatorVersion != 45 {
+			t.Errorf("%s: version needed %d, made by %d; Microsoft's MSIX writer uses 20 and 45", f.Name, f.ReaderVersion, f.CreatorVersion)
 		}
 	}
+	checkLocalHeadersMatchCentral(t, p)
 	read := func(f *zip.File) []byte {
 		rc, _ := f.Open()
 		defer rc.Close()
@@ -739,5 +740,48 @@ func TestNSISPathsUseTheFileSafeName(t *testing.T) {
 		if (strings.HasPrefix(line, "InstallDir") || strings.Contains(line, "SMPROGRAMS") || strings.Contains(line, "$DESKTOP")) && strings.Contains(line, "${APPNAME}") {
 			t.Errorf("path built from the display name: %s", line)
 		}
+	}
+}
+
+// checkLocalHeadersMatchCentral compares every local file header of a zip with
+// its central directory entry, field by field, as the Windows OPC reader does
+// (0x80511005 "inconsistent file item" otherwise).
+func checkLocalHeadersMatchCentral(t *testing.T, path string) {
+	t.Helper()
+	d, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eocd := bytes.LastIndex(d, []byte("PK\x05\x06"))
+	if eocd < 0 {
+		t.Fatal("no end of central directory record")
+	}
+	le := binary.LittleEndian
+	n := int(le.Uint16(d[eocd+10:]))
+	p := int(le.Uint32(d[eocd+16:]))
+	for i := 0; i < n; i++ {
+		c := d[p:]
+		nameLen, extraLen, commentLen := int(le.Uint16(c[28:])), int(le.Uint16(c[30:])), int(le.Uint16(c[32:]))
+		name := string(c[46 : 46+nameLen])
+		l := d[le.Uint32(c[42:]):]
+		// Offsets of the same field in the local header and the central entry.
+		pairs := []struct {
+			what   string
+			lo, co int
+			size   int
+		}{
+			{"version needed", 4, 6, 2}, {"flags", 6, 8, 2}, {"method", 8, 10, 2},
+			{"time", 10, 12, 2}, {"date", 12, 14, 2}, {"crc", 14, 16, 4},
+			{"compressed size", 18, 20, 4}, {"size", 22, 24, 4}, {"name length", 26, 28, 2}, {"extra length", 28, 30, 2},
+		}
+		for _, f := range pairs {
+			if !bytes.Equal(l[f.lo:f.lo+f.size], c[f.co:f.co+f.size]) {
+				t.Errorf("%s: local %s % x, central % x", name, f.what, l[f.lo:f.lo+f.size], c[f.co:f.co+f.size])
+			}
+		}
+		if string(l[30:30+nameLen]) != name {
+			t.Errorf("%s: local name %q", name, l[30:30+nameLen])
+		}
+		p += 46 + nameLen + extraLen + commentLen
 	}
 }

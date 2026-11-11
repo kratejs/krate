@@ -292,9 +292,12 @@ func BuildMSIX(m Metadata, p Payload, ic *Icon, inner *tree, out string) error {
 func writeStored(zw *zip.Writer, name string, data []byte) error {
 	h := &zip.FileHeader{
 		Name: name, Method: zip.Store,
-		// Windows accepts only version 10 (or 45 for zip64) here; Go's raw
-		// writer would leave 0, which makeappx rejects as inconsistent.
-		CreatorVersion: 10, ReaderVersion: 10,
+		// The versions Microsoft's MSIX writer uses (msix-packaging
+		// ZipObject: made by 45, needed 20). signtool rewrites the central
+		// directory with these when it adds AppxSignature.p7x, so local
+		// headers with any other value no longer match it and makeappx
+		// fails with 0x80511005 (inconsistent file item).
+		CreatorVersion: 45, ReaderVersion: 20,
 		CRC32:              crc32.ChecksumIEEE(data),
 		CompressedSize64:   uint64(len(data)),
 		UncompressedSize64: uint64(len(data)),
