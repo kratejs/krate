@@ -60,12 +60,7 @@ func CompatDiagnostics(scan CompatScan, root, option string) []diag.Diagnostic {
 		if option == CompatMiddlewareRuntime {
 			hint = strings.ReplaceAll(hint, CompatAPIRuntime, CompatMiddlewareRuntime)
 		}
-		rel := r.File
-		if root != "" {
-			if p, err := filepath.Rel(root, r.File); err == nil && !strings.HasPrefix(p, "..") {
-				rel = p
-			}
-		}
+		rel := relToRoot(root, r.File)
 		if _, ok := lines[r.File]; !ok {
 			if data, err := os.ReadFile(r.File); err == nil {
 				lines[r.File] = strings.Split(string(data), "\n")
@@ -89,6 +84,40 @@ func CompatDiagnostics(scan CompatScan, root, option string) []diag.Diagnostic {
 		})
 	}
 	return out
+}
+
+// relToRoot returns path relative to root, or path unchanged when it is
+// outside root. esbuild reports symlink-resolved paths (macOS /var is
+// /private/var), so when the plain comparison fails it retries with the
+// symlinks of either side resolved.
+func relToRoot(root, path string) string {
+	if root == "" {
+		return path
+	}
+	inside := func(r, p string) (string, bool) {
+		rel, err := filepath.Rel(r, p)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return "", false
+		}
+		return rel, true
+	}
+	if rel, ok := inside(root, path); ok {
+		return rel
+	}
+	realRoot, errR := filepath.EvalSymlinks(root)
+	realPath, errP := filepath.EvalSymlinks(path)
+	if errR != nil {
+		realRoot = root
+	}
+	if errP != nil {
+		realPath = path
+	}
+	for _, c := range [][2]string{{realRoot, path}, {root, realPath}, {realRoot, realPath}} {
+		if rel, ok := inside(c[0], c[1]); ok {
+			return rel
+		}
+	}
+	return path
 }
 
 // NodeModulesPackage returns the package name ("ws", "@scope/pkg") of a file

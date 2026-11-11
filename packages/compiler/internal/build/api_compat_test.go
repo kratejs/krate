@@ -236,3 +236,28 @@ func TestEmbeddedRuntimeOption(t *testing.T) {
 		}
 	}
 }
+
+func TestAPIRouteWarningRelativeThroughSymlinkedRoot(t *testing.T) {
+	real := t.TempDir()
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	src := "export async function GET() {\n  const s = new TransformStream();\n  return new Response(s.readable);\n}\n"
+	if err := os.MkdirAll(filepath.Join(real, "src", "api"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(real, "src", "api", "stream.ts"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.OutDir = filepath.Join(link, "dist")
+	b := New(link, cfg)
+	if err := b.CompileAPIRoutes([]string{filepath.Join(link, "src", "api", "stream.ts")}); err != nil {
+		t.Fatalf("build failed: %v", err)
+	}
+	ws := b.RuntimeCompatWarnings()
+	if len(ws) != 1 || ws[0].File != "src/api/stream.ts" {
+		t.Fatalf("warnings = %v, want one at src/api/stream.ts", ws)
+	}
+}
