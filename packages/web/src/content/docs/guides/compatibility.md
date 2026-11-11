@@ -82,8 +82,8 @@ green run there is what moves a cell.
 | Native: SDK windows | Partial | Untested | Untested | Krate Native v1 |
 | Native: shared web process, release and background mode | Supported | Untested | Untested | Krate Native v1 |
 | Native: SDK dialogs, clipboard and menus | Supported | Untested | Untested | Krate Native v1 |
-| Native: SDK notifications | Supported | n/a | n/a | Krate Native v1 |
-| Native: SDK tray and global shortcuts | Partial | n/a | n/a | Krate Native v1 |
+| Native: SDK notifications | Supported | n/a | Untested | Krate Native v1 |
+| Native: SDK tray and global shortcuts | Partial | n/a | Untested | Krate Native v1 |
 | Native: SDK app lifecycle | Supported | Untested | Untested | Krate Native v1 |
 | Native: release as a single executable | Supported | Untested | Untested | Krate Native v1 |
 | Native: prebuilt shell for apps without Go | Supported | Untested | Untested | Krate Native v1 |
@@ -531,9 +531,10 @@ TypeScript host code can run as a child process of the shell under Node, Bun or 
 Known limits:
 
 - Node children are verified end to end on Linux. Bun and Deno command lines, flags and release builds are unit tested with stand-in executables; a real Deno child has not been run by any test, and the Bun and Node compile tests skip when the tool is missing.
-- macOS and Windows: untested. The same Go code is built for them (cross-compile checks in CI) and the CI native job runs go test on both, but no result of a run against a real WKWebView or WebView2 window has been confirmed.
+- macOS: untested. The same Go code is built for it (cross-compile checks in CI) and the CI native job runs go test on it, but no result of a run against a real WKWebView window has been confirmed.
+- Windows: untested. Node, Bun and Deno cannot use AF_UNIX there, so the shell uses loopback TCP with a random token (tests run that transport on every OS, including Linux with Node and Bun, and the hostchild tests run on the Windows CI job). A real Windows run of the shell with a host child, and of Deno on any OS, has not been confirmed.
 
-Evidence: `TestHostChildNode`, `TestNativeHostChildNodeEndToEnd`, `TestNativeDevReloadsHostChild`, `TestDenoFlags`, `TestCommand`, `TestBuildReleaseNodeSEA`, `TestBuildReleaseBun`, `TestBuildReleaseDeno`, `TestReleaseBunCompiled`, `TestReleaseNodeSEA`
+Evidence: `TestHostChildNode`, `TestNativeHostChildNodeEndToEnd`, `TestNativeDevReloadsHostChild`, `TestDenoFlags`, `TestCommand`, `TestBuildReleaseNodeSEA`, `TestBuildReleaseBun`, `TestBuildReleaseDeno`, `TestReleaseBunCompiled`, `TestReleaseNodeSEA`, `TestTCPHandshake`, `TestParseRoundTrip`, `TestFor`, `TestChildTCPTransport`, `TestRunTCPToken`, `TestServeParentTCP`, `TestRemoteTCPSendsToken`
 
 ### Native: SDK data areas (kv, db, fs, net, os)
 
@@ -592,30 +593,34 @@ Evidence: `TestGUIDialogs`, `TestGUIClipboard`, `TestGUIMenus`, `TestDialogsAreC
 
 ### Native: SDK notifications
 
-**Linux:** Supported - **macOS:** n/a - **Windows:** n/a
+**Linux:** Supported - **macOS:** n/a - **Windows:** Untested
 
-Desktop notifications with actions. On Linux they use org.freedesktop.Notifications over D-Bus.
+Desktop notifications with actions. On Linux they use org.freedesktop.Notifications over D-Bus; on Windows, WinRT toasts.
 
 Known limits:
 
 - Verified against a fake notification service, not a real desktop daemon. Without a service that owns org.freedesktop.Notifications the call returns ErrUnsupported.
-- macOS and Windows return ErrUnsupported: UNUserNotificationCenter needs an app bundle and Windows toasts need an AppUserModelID from a Start menu shortcut.
+- macOS returns ErrUnsupported: UNUserNotificationCenter needs an app bundle.
+- Windows: untested. Toasts use WinRT through hand-written COM bindings; the toast XML, ids and registry values are unit tested on Linux, and a Windows CI job shows a toast, but nothing here has been confirmed on a real desktop. An unpackaged app registers its AppUserModelID under HKCU; a packaged app uses its package identity.
+- Windows: clicking a toast after the app has quit does nothing (COM activation of a closed app is not implemented). Windows has no per-toast timeout or urgency levels, and Show succeeding does not prove a banner was drawn (Focus assist and per-app settings can suppress it).
 
-Evidence: `TestNotifyOverDBus`, `TestNotifyWithoutServiceIsUnsupported`, `TestNotificationAndTrayWithFakeDesktopServices`
+Evidence: `TestNotifyOverDBus`, `TestNotifyWithoutServiceIsUnsupported`, `TestNotificationAndTrayWithFakeDesktopServices`, `TestBuildToastXML`, `TestBuildToastXMLVariants`, `TestPinterfaceIID`, `TestAUMIDFor`, `TestToastXMLAcceptedByWinRT`, `TestToastDelegateInterfaces`, `TestGUIToast`, `TestPlatformBackendClose`
 
 ### Native: SDK tray and global shortcuts
 
-**Linux:** Partial - **macOS:** n/a - **Windows:** n/a
+**Linux:** Partial - **macOS:** n/a - **Windows:** Untested
 
-A tray icon with a menu (StatusNotifierItem and dbusmenu) and global keyboard shortcuts.
+A tray icon with a menu (StatusNotifierItem and dbusmenu on Linux, Shell_NotifyIconW on Windows) and global keyboard shortcuts (XGrabKey or the portal on Linux, RegisterHotKey on Windows).
 
 Known limits:
 
 - Linux tray needs a StatusNotifier host; stock GNOME without the AppIndicator extension returns ErrUnsupported.
 - Linux shortcuts are verified on X11 (XGrabKey). On Wayland they need the org.freedesktop.portal.GlobalShortcuts portal, verified against a fake portal only, and return ErrUnsupported without it.
-- macOS and Windows return ErrUnsupported for both.
+- macOS returns ErrUnsupported for both.
+- Windows: untested. The key table, the NOTIFYICONDATAW layout, event decoding and icon scaling are unit tested on Linux, and a Windows CI job adds, modifies and removes a tray icon and registers hotkeys, but the icon, its menu behavior, the explorer-restart re-add and real key presses have not been confirmed on a real desktop.
+- Windows: a shortcut another app or Windows holds fails with an 'already registered by another app' error; many Win+ combinations are reserved by the system. The tray menu has no accelerators and one icon per app.
 
-Evidence: `TestTrayOverDBus`, `TestTrayWithoutHostIsUnsupported`, `TestShortcutPortal`, `TestShortcutWaylandWithoutPortalIsUnsupported`, `TestGUIGlobalShortcut`, `TestShortcutAndSupports`
+Evidence: `TestTrayOverDBus`, `TestTrayWithoutHostIsUnsupported`, `TestShortcutPortal`, `TestShortcutWaylandWithoutPortalIsUnsupported`, `TestGUIGlobalShortcut`, `TestShortcutAndSupports`, `TestVirtualKey`, `TestHotkeySpec`, `TestHotkeyError`, `TestHotkeyTable`, `TestNotifyIconDataLayout`, `TestTrayEventKind`, `TestPNGToIconBits`, `TestGUITrayLifecycle`, `TestGUIHotkeys`
 
 ### Native: SDK app lifecycle
 

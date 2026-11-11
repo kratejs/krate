@@ -255,6 +255,15 @@ arguments for one user data folder: a second copy of the app started with a
 different `memory` profile while the first runs falls back to starting without
 the arguments.
 
+Every switch and feature name below was checked against the Chromium sources
+(`content_switches.cc`, `gpu_switches.cc`, `content_features.cc`) and
+Microsoft's WebView2 browser flag list, and a unit test lists each emitted name
+with its source, so an argument cannot be added without that check. That a
+name exists does not mean WebView2 honors it or that it saves memory: no
+number has been measured on Windows. Microsoft's own page says browser flags
+are for development and may change; the arguments are also skipped
+automatically if the runtime refuses them.
+
 | Argument | Profiles | Why |
 | --- | --- | --- |
 | `--renderer-process-limit=1` | `balanced`, `minimal` | One origin, trusted content. A limit, not a guarantee: site isolation can still add processes for cross-origin frames. |
