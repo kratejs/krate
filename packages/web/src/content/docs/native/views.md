@@ -198,6 +198,12 @@ Linux x86-64, WebKitGTK 2.54.0, Xvfb, `balanced` profile; PSS after settling
 | per extra view | about 1 MB | about 0.2 MB |
 | per extra window | 3.5 to 8 MB | 1 to 5 MB |
 
+The per-view figure depends on the GL stack, because each page gets its own
+compositing buffers. On GitHub's ubuntu-24.04 runner (WebKitGTK 2.52.6, Mesa
+software GL, compositing on) an extra view costs about 42 MB of web process
+memory and an extra window about 62 MB. A GPU keeps most of that in video
+memory. Views stay cheaper than windows and share one web process either way.
+
 Real pages cost what their DOM and scripts cost; the figure is the per-view
 overhead.
 

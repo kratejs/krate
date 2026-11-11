@@ -553,8 +553,13 @@ func TestGUIViewsMemory(t *testing.T) {
 	t.Logf("web process PSS: 1 view %.1f MB, %d views %.1f MB, +1 window %.1f MB", web1, extra+1, webN, webW)
 	t.Logf("per extra view in a window: shell %+.1f MB, web process %+.1f MB; per extra window: shell %+.1f MB, web process %+.1f MB",
 		(shellN-shell1)/extra, (webN-web1)/extra, shellW-shellN, webW-webN)
-	if per := (webN - web1) / extra; per > 40 {
-		t.Errorf("an extra view costs %.1f MB of web process memory", per)
+	// What a page's compositing buffers cost depends on the GL stack: about
+	// 1 MB per view with compositing off or the sysroot's software GL, about
+	// 40 MB on GitHub's ubuntu-24.04 runner (Mesa software GL, compositing
+	// on). What must hold everywhere is that views share the one web process
+	// (waitProcs above) and that a view costs no more than a whole window.
+	if perView, perWindow := (webN-web1)/extra, webW-webN; perView > 2 && perView > perWindow {
+		t.Errorf("an extra view costs %.1f MB of web process memory, more than an extra window (%.1f MB)", perView, perWindow)
 	}
 	w2.Close()
 	w.Close()
