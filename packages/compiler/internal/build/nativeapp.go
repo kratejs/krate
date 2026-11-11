@@ -16,6 +16,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/config"
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/native"
+	"github.com/kratejs/krate/packages/compiler/internal/native/capability"
 	"github.com/kratejs/krate/packages/compiler/internal/native/gobind"
 )
 
@@ -30,10 +31,14 @@ type NativeManifest struct {
 	Fallbacks   []NativeFallback  `json:"fallbacks"`
 	HostJS      *NativeHostJSMeta `json:"hostjs,omitempty"`
 	GoHost      *NativeGoHostMeta `json:"gohost,omitempty"`
-	// Permissions is native.permissions; the shell validates the names and
-	// treats an empty list as the SDK defaults.
-	Permissions []string `json:"permissions,omitempty"`
-	Debug       bool     `json:"debug"`
+	// Permissions is the SDK permission list. A derived build (see
+	// NativeAppOptions.Derive) writes the permissions the code needs and sets
+	// StrictPermissions so an empty list means nothing; otherwise it is
+	// native.permissions, where an empty list means the SDK defaults. The
+	// shell validates the names.
+	Permissions       []string `json:"permissions,omitempty"`
+	StrictPermissions bool     `json:"strictPermissions,omitempty"`
+	Debug             bool     `json:"debug"`
 }
 
 // NativeWindowMeta is the main window of app.json.
@@ -43,6 +48,9 @@ type NativeWindowMeta struct {
 	Height    int    `json:"height"`
 	Resizable bool   `json:"resizable"`
 	Path      string `json:"path"`
+	// Permissions narrows the SDK permissions of the main window's page
+	// (native.window.permissions).
+	Permissions *[]string `json:"permissions,omitempty"`
 }
 
 // NativeFallback maps a dynamic route to the prerendered shell page the shell
@@ -82,6 +90,11 @@ type NativeAppOptions struct {
 	// Dev marks a `krate native dev` build: the manifest enables the
 	// webview's developer tools.
 	Dev bool
+	// Derive works out the SDK permissions from the code (capability
+	// analysis), checks them against native.permissions and writes the derived
+	// list to app.json. `krate native build` sets it; `krate native dev` does
+	// not, so dev keeps the configured list.
+	Derive bool
 }
 
 // NativeAppResult describes the app directory BuildNativeApp wrote.
@@ -95,6 +108,8 @@ type NativeAppResult struct {
 	ShellPath string
 	// Notes are non-fatal remarks (for example a shell that could not be built).
 	Notes []string
+	// Capabilities is the capability analysis of a Derive build.
+	Capabilities *capability.Result
 }
 
 var slugRe = regexp.MustCompile(`[^a-z0-9]+`)
@@ -220,6 +235,28 @@ func (b *Builder) BuildNativeApp(opts NativeAppOptions) (*NativeAppResult, error
 		Permissions: append([]string(nil), eff.Permissions...),
 		Debug:       opts.Dev,
 	}
+	m.Window.Permissions = eff.Window.Permissions
+	if opts.Derive {
+		cap, ds, err := b.deriveNativePermissions(eff)
+		if err != nil {
+			return nil, err
+		}
+		if len(ds) > 0 {
+			return nil, nativeDiagError(ds, "native permission error(s)")
+		}
+		res.Capabilities = cap
+		m.Permissions = append([]string{}, cap.Permissions...)
+		m.StrictPermissions = true
+		if wp := m.Window.Permissions; wp != nil {
+			kept := []string{}
+			for _, n := range *wp {
+				if capability.Covers(m.Permissions, n) {
+					kept = append(kept, n)
+				}
+			}
+			m.Window.Permissions = &kept
+		}
+	}
 
 	if h := b.NativeHost(); h != nil && h.HostBundle != "" {
 		if err := copyNativeFile(h.HostBundle, filepath.Join(appDir, "host", "host.js")); err != nil {
@@ -257,6 +294,9 @@ func (b *Builder) BuildNativeApp(opts NativeAppOptions) (*NativeAppResult, error
 		sort.Strings(gh.Signals)
 		m.GoHost = gh
 		if !opts.SkipGoCompile {
+			if _, err := exec.LookPath("go"); err != nil {
+				return nil, nativeDiagError([]diag.Diagnostic{needGoDiag("the app has Go host code, which is compiled with the Go toolchain")}, "Go host error(s)")
+			}
 			if err := b.compileGoHost(filepath.Join(appDir, bin), goos, goarch, !opts.Dev); err != nil {
 				return nil, err
 			}
@@ -461,4 +501,25 @@ func copyNativeFile(src, dst string) error {
 		return err
 	}
 	return out.Close()
+}
+
+// needGoDiag is the diagnostic for a build step that needs the go command.
+func needGoDiag(why string) diag.Diagnostic {
+	return diag.New("go.mod", 1, 1, "the go command was not found on PATH: "+why,
+		"install Go (https://go.dev/dl), or remove the Go host code from the app", "").WithCode(diag.CodeNativeNeedGo)
+}
+
+// deriveNativePermissions runs the capability analysis of the last native
+// build and checks it against the native.permissions allowlist (KR7210).
+func (b *Builder) deriveNativePermissions(eff *config.NativeConfig) (*capability.Result, []diag.Diagnostic, error) {
+	p, err := native.Analyze(b.Root, b.Cfg)
+	if err != nil {
+		return nil, nil, err
+	}
+	res, err := capability.Analyze(b.Root, b.Cfg, p, capability.Options{GoFiles: b.nativeGoFiles})
+	if err != nil {
+		return nil, nil, err
+	}
+	ds := permissionDiagnostics(res, eff.Permissions)
+	return res, ds, nil
 }

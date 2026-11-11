@@ -194,6 +194,9 @@ type Builder struct {
 	nativeHost *hostts.Result
 	// nativeGo holds the generated Go host bindings of a native build.
 	nativeGo *gobind.Result
+	// nativeGoFiles are the .go files the UI imports (absolute), for the
+	// capability analysis of Go host code.
+	nativeGoFiles []string
 	// nativeOverlays are the source overlays of every host stub (TypeScript
 	// and Go), keyed by absolute module path.
 	nativeOverlays map[string]string

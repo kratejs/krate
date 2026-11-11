@@ -24,7 +24,11 @@ type NativeConfig struct {
 	Icons string `json:"icons,omitempty"`
 	// Window configures the main window.
 	Window NativeWindow `json:"window,omitempty"`
-	// Permissions lists the host capabilities the app may use.
+	// Permissions is an optional allowlist of the SDK permissions the app may
+	// use. A native build derives the permissions the app needs from the code
+	// (see internal/native/capability), writes that list to app.json, and
+	// fails when the code reaches a permission this list does not grant. Unset
+	// means no restriction. Names: see NativePermissions.
 	Permissions []string `json:"permissions,omitempty"`
 	// DeepLinks lists custom URL schemes the app registers.
 	DeepLinks []string `json:"deepLinks,omitempty"`
@@ -48,6 +52,11 @@ type NativeWindow struct {
 	Resizable *bool `json:"resizable,omitempty"`
 	// TitleBar is "native" (default), "hidden" or "none".
 	TitleBar string `json:"titleBar,omitempty"`
+	// Permissions, when set, narrows the SDK permissions the page of the main
+	// window may use to this list (a subset of the app's). An empty list
+	// leaves the page nothing. Windows opened with window.Open take the same
+	// option and inherit the opener's scope.
+	Permissions *[]string `json:"permissions,omitempty"`
 }
 
 // NativeHost configures where TypeScript host code runs.
@@ -72,7 +81,10 @@ type NativeExperimental struct {
 type NativeRelease struct {
 	// Compile is "auto" (default), "always" or "never".
 	Compile string `json:"compile,omitempty"`
-	// PGO is the path of a profile for profile-guided optimization.
+	// PGO is the path of a CPU profile for profile-guided optimization,
+	// relative to the project root. Default "native.pgo"; `krate native
+	// profile` writes it. A release build passes it to go build when the file
+	// exists.
 	PGO string `json:"pgo,omitempty"`
 }
 
@@ -182,10 +194,24 @@ func (c *Config) EffectiveNative() *NativeConfig {
 	if n.Release.Compile == "" {
 		n.Release.Compile = "auto"
 	}
+	if n.Release.PGO == "" {
+		n.Release.PGO = "native.pgo"
+	}
 	if len(n.Platforms) == 0 {
 		n.Platforms = append([]string(nil), NativePlatforms...)
 	}
 	return &n
+}
+
+// nativePermissionCovered reports whether the allowlist grants p (directly or
+// through an implication: fs grants fs:read).
+func nativePermissionCovered(allow []string, p string) bool {
+	for _, a := range allow {
+		if a == p || (a == "fs" && p == "fs:read") {
+			return true
+		}
+	}
+	return false
 }
 
 func oneOf(v string, set []string) bool {
@@ -233,6 +259,18 @@ func (c *Config) validateNative() (warnings []string, err error) {
 		if !oneOf(p, NativePermissions) {
 			return nil, nativeErr("permissions", fmt.Sprintf("has unknown permission %q", p),
 				"known permissions: "+strings.Join(NativePermissions, ", "))
+		}
+	}
+	if wp := n.Window.Permissions; wp != nil {
+		for _, p := range *wp {
+			if !oneOf(p, NativePermissions) {
+				return nil, nativeErr("window.permissions", fmt.Sprintf("has unknown permission %q", p),
+					"known permissions: "+strings.Join(NativePermissions, ", "))
+			}
+			if len(n.Permissions) > 0 && !nativePermissionCovered(n.Permissions, p) {
+				return nil, nativeErr("window.permissions", fmt.Sprintf("lists %q, which native.permissions does not allow", p),
+					"a window scope narrows the app's permissions; add it to native.permissions or remove it here")
+			}
 		}
 	}
 	for _, s := range n.DeepLinks {

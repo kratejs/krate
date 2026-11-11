@@ -1,6 +1,8 @@
 package shell
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"flag"
 	"fmt"
@@ -45,6 +47,25 @@ func RunEmbedded(fsys fs.FS, opts RunOptions) error {
 	return a.runNative()
 }
 
+// ZipFS opens an embedded zip archive as a file system. A release build packs
+// the app directory into one zip and embeds it with go:embed: go:embed rejects
+// file names such as "tasks/[id]/index.html" that dynamic routes produce, and
+// one archive keeps the executable's assets compressed.
+func ZipFS(data []byte) (fs.FS, error) {
+	return zip.NewReader(bytes.NewReader(data), int64(len(data)))
+}
+
+// MustZipFS is ZipFS for a main function: it exits the process when the
+// archive is damaged.
+func MustZipFS(data []byte) fs.FS {
+	f, err := ZipFS(data)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "krate: the embedded app is damaged:", err)
+		os.Exit(1)
+	}
+	return f
+}
+
 // appRoot returns the app directory inside an embedded file system: its "app"
 // subdirectory when it has one, the file system itself otherwise.
 func appRoot(fsys fs.FS) fs.FS {
@@ -58,11 +79,11 @@ func appRoot(fsys fs.FS) fs.FS {
 
 // Main is the whole main function of a release build:
 //
-//	//go:embed all:app
-//	var appFS embed.FS
+//	//go:embed app.zip
+//	var appZip []byte
 //
 //	func init() { runtime.LockOSThread() }
-//	func main() { shell.Main(appFS, glue.Register) }
+//	func main() { shell.Main(shell.MustZipFS(appZip), glue.Register) }
 //
 // It parses the command line (--browser, --addr, --version), runs the app and
 // exits the process. register, when not nil, registers the app's Go host code.
@@ -82,6 +103,10 @@ func RunMain(args []string, embedded fs.FS, register func(*scheme.Registry), ctl
 	browser := fl.Bool("browser", false, "serve on a loopback port behind a session token instead of opening a window")
 	addr := fl.String("addr", "127.0.0.1:0", "browser-mode listen address")
 	version := fl.Bool("version", false, "print the version and exit")
+	var dev *bool
+	if allowDev {
+		dev = fl.Bool("dev", false, "development mode: developer tools and control commands on stdin")
+	}
 	if err := fl.Parse(args); err != nil {
 		if err == flag.ErrHelp {
 			return 0
@@ -109,7 +134,15 @@ func RunMain(args []string, embedded fs.FS, register func(*scheme.Registry), ctl
 		Out:     ctl,
 		Context: ctx,
 		GoGlue:  register,
-		OnReady: func(*Control) { fmt.Fprintln(ctl, "ready") },
+		Dev:     dev != nil && *dev,
+		OnReady: func(c *Control) {
+			fmt.Fprintln(ctl, "ready")
+			if dev != nil && *dev {
+				if !ServeControl(os.Stdin, ctl, c) {
+					c.Quit()
+				}
+			}
+		},
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "krate:", err)
