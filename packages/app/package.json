@@ -1,0 +1,71 @@
+{
+  "name": "@krate/app",
+  "version": "0.1.0",
+  "description": "Client runtime and host bindings for Krate desktop apps (host calls, streams, signals).",
+  "license": "Apache-2.0",
+  "type": "module",
+  "homepage": "https://krate.js.org",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kratejs/krate.git"
+  },
+  "bugs": {
+    "url": "https://github.com/kratejs/krate/issues"
+  },
+  "keywords": [
+    "krate",
+    "desktop",
+    "native",
+    "webview"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "default": "./dist/client.js"
+    },
+    "./host": {
+      "types": "./dist/host.d.ts",
+      "default": "./dist/host.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "default": "./dist/testing.js"
+    },
+    "./os": {
+      "types": "./dist/os.d.ts",
+      "default": "./dist/os.js"
+    },
+    "./db": {
+      "types": "./dist/db.d.ts",
+      "default": "./dist/db.js"
+    },
+    "./kv": {
+      "types": "./dist/kv.d.ts",
+      "default": "./dist/kv.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "happy-dom": "^20.14.5",
+    "typescript": "^5.5.0",
+    "vitest": "^5.0.3"
+  }
+}
