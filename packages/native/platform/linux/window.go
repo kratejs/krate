@@ -7,6 +7,8 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+
+	"github.com/kratejs/krate/packages/native/platform/caps"
 )
 
 // GTK and WebKit enum values used below.
@@ -25,11 +27,19 @@ type Window struct {
 	id   uintptr
 	win  uintptr // GtkWindow
 	view uintptr // WebKitWebView
+	box  uintptr // GtkBox holding the menu bar and the view
 
 	mu         sync.Mutex
 	alive      bool
 	resizable  bool
 	onLoadDone func()
+
+	// Touched on the main thread only.
+	preventClose bool
+	wantAbove    bool
+	menubar      uintptr
+	accel        uintptr
+	lastState    uint32
 }
 
 func (a *App) newWindow(opts WindowOptions, onLoad func()) (*Window, error) {
@@ -66,13 +76,24 @@ func (a *App) newWindow(opts WindowOptions, onLoad func()) (*Window, error) {
 		api.wkSettingsDevExtras(settings, b2i(a.debug))
 	}
 	api.gSignalConnectData(w.win, "destroy", cbDestroy, w.id, 0, 0)
+	if x := a.x; x.gtkBoxNew != nil && x.gtkWindowPresent != nil {
+		api.gSignalConnectData(w.win, "delete-event", cbDelete, w.id, 0, 0)
+		api.gSignalConnectData(w.win, "window-state-event", cbWinState, w.id, 0, 0)
+	}
 	api.gSignalConnectData(w.view, "decide-policy", cbPolicy, w.id, 0, 0)
 	api.gSignalConnectData(w.view, "load-changed", cbLoad, w.id, 0, 0)
 	api.gSignalConnectData(w.view, "close", cbClose, w.id, 0, 0)
 
-	api.gtkContainerAdd(w.win, w.view)
+	if x := a.x; x.gtkBoxNew != nil {
+		w.box = x.gtkBoxNew(1, 0)
+		x.gtkBoxPackStart(w.box, w.view, 1, 1, 0)
+		api.gtkContainerAdd(w.win, w.box)
+	} else {
+		api.gtkContainerAdd(w.win, w.view)
+	}
 	api.wkViewLoadURI(w.view, Origin+cleanPath(opts.Path))
 	api.gtkWidgetShowAll(w.win)
+	a.applyAppMenu(w)
 	return w, nil
 }
 
@@ -185,6 +206,7 @@ func destroyCallback(widget, id uintptr) uintptr {
 	a.mu.Unlock()
 	if w != nil {
 		w.alive = false
+		a.emitWindow(w, caps.WindowClosed)
 	}
 	if last && w != nil {
 		if hook != nil {
