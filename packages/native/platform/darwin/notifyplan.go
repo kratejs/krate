@@ -19,11 +19,8 @@ const (
 	unDismissActionID = "com.apple.UNNotificationDismissActionIdentifier"
 )
 
-// UNAuthorizationOptions and UNNotificationPresentationOptions.
+// UNNotificationPresentationOptions.
 const (
-	unAuthSound uint = 1 << 1
-	unAuthAlert uint = 1 << 2
-
 	unPresentSound  uint = 1 << 1
 	unPresentList   uint = 1 << 3
 	unPresentBanner uint = 1 << 4

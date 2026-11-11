@@ -132,7 +132,7 @@ func (h *Host) loop() {
 	defer close(h.done)
 	timer := time.NewTimer(time.Hour)
 	defer timer.Stop()
-	var delay time.Duration = -1
+	var delay time.Duration
 	for {
 		h.mu.Lock()
 		jobs := h.jobs

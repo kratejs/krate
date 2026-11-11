@@ -47,7 +47,7 @@ func (w *Window) release() {
 	for _, v := range live {
 		fallback[v] = v.path
 	}
-	pShowWindow.Call(w.hwnd, swHide)
+	_, _, _ = pShowWindow.Call(w.hwnd, swHide)
 	answered := map[*view]bool{}
 	finish := func() {
 		w.releasing = false

@@ -160,7 +160,6 @@ var (
 	nextRef    atomic.Uint64
 	winHandler func(caps.WindowEvent)
 	menuFn     func(caps.MenuEvent)
-	appMenu    []caps.MenuItem
 )
 
 func stateOf(w *Window) *winExtState {
@@ -268,7 +267,7 @@ func (w *Window) SetAlwaysOnTop(on bool) {
 		if on {
 			after = hwndTopmost
 		}
-		pSetWindowPos.Call(w.hwnd, after, 0, 0, 0, 0, swpNoMove|swpNoSize|swpNoActivate)
+		_, _, _ = pSetWindowPos.Call(w.hwnd, after, 0, 0, 0, 0, swpNoMove|swpNoSize|swpNoActivate)
 	})
 }
 
@@ -282,7 +281,7 @@ func (w *Window) SetFullscreen(on bool) {
 		if on {
 			style, _, _ := pGetWindowLongPtrW.Call(w.hwnd, gwlStyle)
 			s.prevStyle = style
-			pGetWindowRect.Call(w.hwnd, uintptr(unsafe.Pointer(&s.prevRect)))
+			_, _, _ = pGetWindowRect.Call(w.hwnd, uintptr(unsafe.Pointer(&s.prevRect)))
 			mon, _, _ := pMonitorFromWindow.Call(w.hwnd, monitorDefaultToNearest)
 			var mi struct {
 				size    uint32
@@ -291,16 +290,16 @@ func (w *Window) SetFullscreen(on bool) {
 				flags   uint32
 			}
 			mi.size = uint32(unsafe.Sizeof(mi))
-			pGetMonitorInfoW.Call(mon, uintptr(unsafe.Pointer(&mi)))
-			pSetWindowLongPtrW.Call(w.hwnd, gwlStyle, style&^wsOverlapped)
-			pSetWindowPos.Call(w.hwnd, 0, uintptr(mi.monitor.left), uintptr(mi.monitor.top),
+			_, _, _ = pGetMonitorInfoW.Call(mon, uintptr(unsafe.Pointer(&mi)))
+			_, _, _ = pSetWindowLongPtrW.Call(w.hwnd, gwlStyle, style&^wsOverlapped)
+			_, _, _ = pSetWindowPos.Call(w.hwnd, 0, uintptr(mi.monitor.left), uintptr(mi.monitor.top),
 				uintptr(mi.monitor.right-mi.monitor.left), uintptr(mi.monitor.bottom-mi.monitor.top), swpNoZOrder|swpFrameChg)
 			s.fullscreen = true
 			return
 		}
-		pSetWindowLongPtrW.Call(w.hwnd, gwlStyle, s.prevStyle)
+		_, _, _ = pSetWindowLongPtrW.Call(w.hwnd, gwlStyle, s.prevStyle)
 		r := s.prevRect
-		pSetWindowPos.Call(w.hwnd, 0, uintptr(r.left), uintptr(r.top), uintptr(r.right-r.left), uintptr(r.bottom-r.top), swpNoZOrder|swpFrameChg)
+		_, _, _ = pSetWindowPos.Call(w.hwnd, 0, uintptr(r.left), uintptr(r.top), uintptr(r.right-r.left), uintptr(r.bottom-r.top), swpNoZOrder|swpFrameChg)
 		s.fullscreen = false
 	})
 }
@@ -314,35 +313,35 @@ func (w *Window) SetDecorated(on bool) {
 		} else {
 			style &^= wsCaption
 		}
-		pSetWindowLongPtrW.Call(w.hwnd, gwlStyle, style)
-		pSetWindowPos.Call(w.hwnd, 0, 0, 0, 0, 0, swpNoMove|swpNoSize|swpNoZOrder|swpNoActivate|swpFrameChg)
+		_, _, _ = pSetWindowLongPtrW.Call(w.hwnd, gwlStyle, style)
+		_, _, _ = pSetWindowPos.Call(w.hwnd, 0, 0, 0, 0, 0, swpNoMove|swpNoSize|swpNoZOrder|swpNoActivate|swpFrameChg)
 	})
 }
 
 // SetPosition moves the window (screen pixels).
 func (w *Window) SetPosition(x, y int) {
 	w.onMain(func() {
-		pSetWindowPos.Call(w.hwnd, 0, uintptr(int32(x)), uintptr(int32(y)), 0, 0, swpNoSize|swpNoZOrder|swpNoActivate)
+		_, _, _ = pSetWindowPos.Call(w.hwnd, 0, uintptr(int32(x)), uintptr(int32(y)), 0, 0, swpNoSize|swpNoZOrder|swpNoActivate)
 	})
 }
 
 // Minimize iconifies the window.
-func (w *Window) Minimize() { w.onMain(func() { pShowWindow.Call(w.hwnd, swMinimize) }) }
+func (w *Window) Minimize() { w.onMain(func() { _, _, _ = pShowWindow.Call(w.hwnd, swMinimize) }) }
 
 // Maximize maximizes the window.
-func (w *Window) Maximize() { w.onMain(func() { pShowWindow.Call(w.hwnd, swMaximize) }) }
+func (w *Window) Maximize() { w.onMain(func() { _, _, _ = pShowWindow.Call(w.hwnd, swMaximize) }) }
 
 // Restore undoes minimize, maximize and fullscreen.
 func (w *Window) Restore() {
 	w.SetFullscreen(false)
-	w.onMain(func() { pShowWindow.Call(w.hwnd, swRestore) })
+	w.onMain(func() { _, _, _ = pShowWindow.Call(w.hwnd, swRestore) })
 }
 
 // Focus brings the window to the foreground.
 func (w *Window) Focus() {
 	w.onMain(func() {
 		w.revive()
-		pSetForegroundWindow.Call(w.hwnd)
+		_, _, _ = pSetForegroundWindow.Call(w.hwnd)
 	})
 }
 
@@ -351,7 +350,7 @@ func (w *Window) Focus() {
 func (w *Window) Show() {
 	w.onMain(func() {
 		w.revive()
-		pShowWindow.Call(w.hwnd, swShow)
+		_, _, _ = pShowWindow.Call(w.hwnd, swShow)
 		w.setViewHidden(false)
 	})
 }
@@ -361,7 +360,7 @@ func (w *Window) Show() {
 // for it. Release also closes the controller.
 func (w *Window) Hide() {
 	w.onMain(func() {
-		pShowWindow.Call(w.hwnd, swHide)
+		_, _, _ = pShowWindow.Call(w.hwnd, swHide)
 		w.setViewHidden(true)
 	})
 }
@@ -376,7 +375,7 @@ func (w *Window) State() (st caps.WindowState) {
 			return
 		}
 		var r rect
-		pGetWindowRect.Call(w.hwnd, uintptr(unsafe.Pointer(&r)))
+		_, _, _ = pGetWindowRect.Call(w.hwnd, uintptr(unsafe.Pointer(&r)))
 		st.X, st.Y = int(r.left), int(r.top)
 		st.Width, st.Height = int(r.right-r.left), int(r.bottom-r.top)
 		z, _, _ := pIsZoomed.Call(w.hwnd)
@@ -601,7 +600,7 @@ func (a *App) withClipboard(fn func() error) (err error) {
 			err = errors.New("windows: the clipboard is busy")
 			return
 		}
-		defer pCloseClipboard.Call()
+		defer func() { _, _, _ = pCloseClipboard.Call() }()
 		err = fn()
 	})
 	return
@@ -614,7 +613,7 @@ func setClip(format uintptr, data []byte) error {
 	}
 	p, _, _ := pGlobalLock.Call(h)
 	copy(unsafe.Slice((*byte)(ptr(p)), len(data)), data)
-	pGlobalUnlock.Call(h)
+	_, _, _ = pGlobalUnlock.Call(h)
 	if r, _, _ := pSetClipboardData.Call(format, h); r == 0 {
 		return errors.New("windows: SetClipboardData failed")
 	}
@@ -631,7 +630,7 @@ func getClip(format uintptr) []byte {
 	if p == 0 {
 		return nil
 	}
-	defer pGlobalUnlock.Call(h)
+	defer func() { _, _, _ = pGlobalUnlock.Call(h) }()
 	return append([]byte(nil), unsafe.Slice((*byte)(ptr(p)), size)...)
 }
 
@@ -658,7 +657,7 @@ func (a *App) WriteText(s string) error {
 	u := utf16.Encode([]rune(s + "\x00"))
 	b := unsafe.Slice((*byte)(unsafe.Pointer(&u[0])), len(u)*2)
 	return a.withClipboard(func() error {
-		pEmptyClipboard.Call()
+		_, _, _ = pEmptyClipboard.Call()
 		return setClip(cfUnicodeText, b)
 	})
 }
@@ -673,7 +672,7 @@ func (a *App) ReadImage() (b []byte, err error) {
 // WriteImage puts PNG bytes on the clipboard under the "PNG" format.
 func (a *App) WriteImage(png []byte) error {
 	return a.withClipboard(func() error {
-		pEmptyClipboard.Call()
+		_, _, _ = pEmptyClipboard.Call()
 		return setClip(pngFormat(), png)
 	})
 }
@@ -710,14 +709,14 @@ func (a *App) WriteFiles(paths []string) error {
 	body = append(body, 0)
 	data := append(hdr, unsafe.Slice((*byte)(unsafe.Pointer(&body[0])), len(body)*2)...)
 	return a.withClipboard(func() error {
-		pEmptyClipboard.Call()
+		_, _, _ = pEmptyClipboard.Call()
 		return setClip(cfHDrop, data)
 	})
 }
 
 // Clear empties the clipboard.
 func (a *App) Clear() error {
-	return a.withClipboard(func() error { pEmptyClipboard.Call(); return nil })
+	return a.withClipboard(func() error { _, _, _ = pEmptyClipboard.Call(); return nil })
 }
 
 // OnMenu sets the handler for menu clicks.
@@ -747,10 +746,10 @@ func buildHMenu(popup bool, items []caps.MenuItem, cmds map[uint16]menuCmd, next
 	for _, it := range items {
 		switch {
 		case it.Kind == caps.MenuItemSeparator:
-			pAppendMenuW.Call(m, mfSeparator, 0, 0)
+			_, _, _ = pAppendMenuW.Call(m, mfSeparator, 0, 0)
 		case len(it.Submenu) > 0 || it.Kind == caps.MenuItemSubmenu:
 			sub := buildHMenu(true, it.Submenu, cmds, next)
-			pAppendMenuW.Call(m, mfPopup, sub, uintptr(unsafe.Pointer(wstr(menuText(it)))))
+			_, _, _ = pAppendMenuW.Call(m, mfPopup, sub, uintptr(unsafe.Pointer(wstr(menuText(it)))))
 		default:
 			*next++
 			flags := uintptr(mfString)
@@ -761,7 +760,7 @@ func buildHMenu(popup bool, items []caps.MenuItem, cmds map[uint16]menuCmd, next
 				flags |= mfChecked
 			}
 			cmds[*next] = menuCmd{id: it.ID, isCheck: it.Kind == caps.MenuItemCheck || it.Kind == caps.MenuItemRadio, checked: it.Checked}
-			pAppendMenuW.Call(m, flags, uintptr(*next), uintptr(unsafe.Pointer(wstr(menuText(it)))))
+			_, _, _ = pAppendMenuW.Call(m, flags, uintptr(*next), uintptr(unsafe.Pointer(wstr(menuText(it)))))
 		}
 	}
 	return m
@@ -775,10 +774,10 @@ func (a *App) applyBar(w *Window, items []caps.MenuItem) {
 	if len(items) > 0 {
 		hm = buildHMenu(false, items, s.menuCmds, &next)
 	}
-	pSetMenu.Call(w.hwnd, hm)
-	pDrawMenuBar.Call(w.hwnd)
+	_, _, _ = pSetMenu.Call(w.hwnd, hm)
+	_, _, _ = pDrawMenuBar.Call(w.hwnd)
 	if s.menu != 0 {
-		pDestroyMenu.Call(s.menu)
+		_, _, _ = pDestroyMenu.Call(s.menu)
 	}
 	s.menu = hm
 }
@@ -786,7 +785,6 @@ func (a *App) applyBar(w *Window, items []caps.MenuItem) {
 // SetAppMenu installs the menu bar on every window.
 func (a *App) SetAppMenu(items []caps.MenuItem) error {
 	a.callMain(func() {
-		appMenu = append([]caps.MenuItem(nil), items...)
 		for _, w := range a.windows {
 			a.applyBar(w, items)
 		}
@@ -807,9 +805,9 @@ func (a *App) PopupMenu(parent caps.WindowRef, items []caps.MenuItem, x, y int) 
 		cmds := map[uint16]menuCmd{}
 		var next uint16 = 100
 		hm := buildHMenu(true, items, cmds, &next)
-		defer pDestroyMenu.Call(hm)
+		defer func() { _, _, _ = pDestroyMenu.Call(hm) }()
 		var pt struct{ x, y int32 }
-		pGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
+		_, _, _ = pGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
 		cmd, _, _ := pTrackPopupMenuEx.Call(hm, tpmReturnCmd, uintptr(pt.x), uintptr(pt.y), hwnd, 0)
 		if mc, ok := cmds[uint16(cmd)]; ok {
 			extMu.Lock()

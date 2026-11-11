@@ -88,13 +88,13 @@ func (s *server) handleSignals(w http.ResponseWriter, r *http.Request) {
 	for _, name := range names {
 		sf := s.reg.signal(name)
 		if sf == nil {
-			w.Write(s.sigErrFrame(name, krate.Errorf("not_found", "no such signal %q", name)))
+			_, _ = w.Write(s.sigErrFrame(name, krate.Errorf("not_found", "no such signal %q", name)))
 			flush()
 			continue
 		}
 		if gate := s.reg.signalGate(name); gate != nil {
 			if gerr := gate(r.Header.Get(windowHdr)); gerr != nil {
-				w.Write(s.sigErrFrame(name, gerr))
+				_, _ = w.Write(s.sigErrFrame(name, gerr))
 				flush()
 				continue
 			}
@@ -106,7 +106,7 @@ func (s *server) handleSignals(w http.ResponseWriter, r *http.Request) {
 			return nil
 		})
 		if err != nil {
-			w.Write(s.sigErrFrame(name, err))
+			_, _ = w.Write(s.sigErrFrame(name, err))
 			flush()
 			continue
 		}

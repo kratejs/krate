@@ -333,7 +333,7 @@ func (d *DB) Transaction(ctx context.Context, f func(tx *Tx) error) (err error) 
 	done := false
 	defer func() {
 		if !done {
-			tx.Rollback()
+			_ = tx.Rollback() // the error being returned is the one that matters
 		}
 	}()
 	if err := f(&Tx{tx: tx}); err != nil {
@@ -341,7 +341,7 @@ func (d *DB) Transaction(ctx context.Context, f func(tx *Tx) error) (err error) 
 	}
 	done = true
 	if err := tx.Commit(); err != nil {
-		tx.Rollback()
+		_ = tx.Rollback()
 		return wrap(err)
 	}
 	return nil

@@ -73,7 +73,7 @@ func Name(pid int) string {
 	if err != nil {
 		return ""
 	}
-	defer xw.CloseHandle(h)
+	defer func() { _ = xw.CloseHandle(h) }()
 	return imageName(h)
 }
 
@@ -83,7 +83,7 @@ func Descendants(pid int) ([]int, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer xw.CloseHandle(snap)
+	defer func() { _ = xw.CloseHandle(snap) }()
 	parent := map[int]int{}
 	e := xw.ProcessEntry32{Size: uint32(unsafe.Sizeof(xw.ProcessEntry32{}))}
 	for err := xw.Process32First(snap, &e); err == nil; err = xw.Process32Next(snap, &e) {

@@ -170,7 +170,7 @@ func registerViews(t *bridge.Table, env *bridge.Env) {
 			return err
 		}
 		if err := env.Windows.AddView(id, winID, ref, false); err != nil {
-			wv.RemoveView(ref)
+			_ = wv.RemoveView(ref) // best effort; the AddView error is returned
 			if env.Unscope != nil {
 				env.Unscope(id)
 			}

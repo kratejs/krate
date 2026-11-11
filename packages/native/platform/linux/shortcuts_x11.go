@@ -305,7 +305,7 @@ func (a *App) StopShortcuts() {
 	x.started = false
 	x.mu.Unlock()
 	if started {
-		syscall.Write(x.stopW, []byte{1})
+		_, _ = syscall.Write(x.stopW, []byte{1})
 		<-x.finished
 		syscall.Close(x.stopR)
 		syscall.Close(x.stopW)

@@ -112,13 +112,14 @@ func sigOfValue(v reflect.Value) (string, error) {
 			return "", err
 		}
 		val := "v"
-		for _, key := range v.MapKeys() {
+		// The signature follows the first value; an empty map stays a{kv}.
+		if keys := v.MapKeys(); len(keys) > 0 {
+			key := keys[0]
 			if _, isVar := v.MapIndex(key).Elem().Interface().(Variant); !isVar {
 				if val, err = sigOfValue(v.MapIndex(key)); err != nil {
 					return "", err
 				}
 			}
-			break
 		}
 		return "a{" + k + val + "}", nil
 	}

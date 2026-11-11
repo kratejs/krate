@@ -87,7 +87,7 @@ func (w *Window) currentLayout() *caps.LayoutNode {
 // placeViews gives every controller its rectangle. Main thread.
 func (w *Window) placeViews() {
 	var r rect
-	pGetClientRect.Call(w.hwnd, uintptr(unsafe.Pointer(&r)))
+	_, _, _ = pGetClientRect.Call(w.hwnd, uintptr(unsafe.Pointer(&r)))
 	w.sp.layout = w.currentLayout()
 	w.sp.bounds = caps.Rect{W: int(r.right - r.left), H: int(r.bottom - r.top)}
 	w.sp.dpi = windowDPI(w.hwnd)
@@ -112,7 +112,7 @@ func (w *Window) mouseDown(lParam uintptr) bool {
 	if !w.sp.press(x, y) {
 		return false
 	}
-	pSetCapture.Call(w.hwnd)
+	_, _, _ = pSetCapture.Call(w.hwnd)
 	return true
 }
 
@@ -129,7 +129,7 @@ func (w *Window) mouseMove(lParam uintptr) {
 func (w *Window) mouseUp() {
 	if w.sp.dragging {
 		w.sp.release()
-		pReleaseCapture.Call()
+		_, _, _ = pReleaseCapture.Call()
 	}
 }
 
@@ -139,8 +139,8 @@ func (w *Window) setCursor() bool {
 		return false
 	}
 	var pt struct{ x, y int32 }
-	pGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
-	pScreenToClient.Call(w.hwnd, uintptr(unsafe.Pointer(&pt)))
+	_, _, _ = pGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
+	_, _, _ = pScreenToClient.Call(w.hwnd, uintptr(unsafe.Pointer(&pt)))
 	w.placeSplitter()
 	var id uintptr
 	switch w.sp.cursor(int(pt.x), int(pt.y)) {
@@ -152,7 +152,7 @@ func (w *Window) setCursor() bool {
 		return false
 	}
 	c, _, _ := pLoadCursorW.Call(0, id)
-	pSetCursor.Call(c)
+	_, _, _ = pSetCursor.Call(c)
 	return true
 }
 
@@ -160,7 +160,7 @@ func (w *Window) setCursor() bool {
 // controllers.
 func (w *Window) placeSplitter() {
 	var r rect
-	pGetClientRect.Call(w.hwnd, uintptr(unsafe.Pointer(&r)))
+	_, _, _ = pGetClientRect.Call(w.hwnd, uintptr(unsafe.Pointer(&r)))
 	w.sp.layout = w.currentLayout()
 	w.sp.bounds = caps.Rect{W: int(r.right - r.left), H: int(r.bottom - r.top)}
 	w.sp.dpi = windowDPI(w.hwnd)

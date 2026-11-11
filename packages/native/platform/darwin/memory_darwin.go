@@ -11,6 +11,10 @@ import (
 	"github.com/ebitengine/purego/objc"
 )
 
+// purgeFirstDelay is how long after the first window opens the first memory
+// cache purge runs: enough for the initial load to settle.
+const purgeFirstDelay = 5 * time.Second
+
 // UNTESTED: compile-checked only, see memory.go. Selector and feature names
 // marked "private" come from WebKit's WKPreferencesPrivate.h as remembered
 // while writing on Linux; they are not public API, may be renamed or removed

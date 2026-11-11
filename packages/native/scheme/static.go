@@ -120,7 +120,7 @@ func (s *server) serveFile(w http.ResponseWriter, r *http.Request, name string, 
 	h.Set("Content-Length", strconv.FormatInt(st.Size(), 10))
 	w.WriteHeader(status)
 	if r.Method != http.MethodHead {
-		io.Copy(w, f)
+		_, _ = io.Copy(w, f) // the client went away
 	}
 	return true
 }

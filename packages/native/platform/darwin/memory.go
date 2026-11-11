@@ -52,10 +52,6 @@ type memoryPlan struct {
 	PurgeEvery       time.Duration
 }
 
-// purgeFirstDelay is how long after the first window opens the first memory
-// cache purge runs: enough for the initial load to settle.
-const purgeFirstDelay = 5 * time.Second
-
 // memoryProfile normalizes a profile name; unknown values mean balanced.
 func memoryProfile(p string) string {
 	switch p {

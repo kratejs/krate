@@ -87,8 +87,8 @@ func (a *App) createWindow(cfg WindowConfig, w *Window) error {
 	w.pv.path = cfg.Path
 	a.windows[hwnd] = w
 	a.everOpened = true
-	pShowWindow.Call(hwnd, swShow)
-	pUpdateWindow.Call(hwnd)
+	_, _, _ = pShowWindow.Call(hwnd, swShow)
+	_, _, _ = pUpdateWindow.Call(hwnd)
 
 	w.pv.createController()
 	return nil
@@ -114,7 +114,7 @@ func (v *view) createController() {
 		if failed(hr) {
 			v.finish(fmt.Errorf("windows: CreateCoreWebView2Controller: 0x%08x", uint32(hr)))
 			if v.primary {
-				pDestroyWindow.Call(w.hwnd)
+				_, _, _ = pDestroyWindow.Call(w.hwnd)
 			}
 		}
 	})
@@ -136,7 +136,7 @@ func (v *view) finish(err error) {
 func (v *view) fail(err error) {
 	v.finish(err)
 	if v.primary {
-		pDestroyWindow.Call(v.w.hwnd)
+		_, _, _ = pDestroyWindow.Call(v.w.hwnd)
 		return
 	}
 	v.w.dropView(v, caps.ViewClosed)
@@ -199,9 +199,9 @@ func (v *view) controllerCompleted(hr, controller uintptr) {
 		// window.close() from the page: closes the window from its primary
 		// view, removes any other view.
 		if v.primary {
-			pPostMessageW.Call(w.hwnd, wmClose, 0, 0)
+			_, _, _ = pPostMessageW.Call(w.hwnd, wmClose, 0, 0)
 		} else {
-			w.removeView(v.ref, caps.ViewClosed)
+			_ = w.removeView(v.ref, caps.ViewClosed)
 		}
 		return sOK
 	})
@@ -318,7 +318,7 @@ func (w *Window) Eval(js string) {
 func (w *Window) SetTitle(title string) {
 	w.app.Dispatch(func() {
 		if !w.destroyed {
-			pSetWindowTextW.Call(w.hwnd, uintptr(unsafe.Pointer(wstr(title))))
+			_, _, _ = pSetWindowTextW.Call(w.hwnd, uintptr(unsafe.Pointer(wstr(title))))
 		}
 	})
 }
@@ -332,7 +332,7 @@ func (w *Window) SetSize(width, height int) {
 		dpi := windowDPI(w.hwnd)
 		style := uint32(wsOverlappedWindow | wsClipChildren | wsClipSiblings)
 		ow, oh := frameSize(style, scaleDPI(width, dpi), scaleDPI(height, dpi), dpi)
-		pSetWindowPos.Call(w.hwnd, 0, 0, 0, uintptr(ow), uintptr(oh), swpNoMove|swpNoZOrder|swpNoActivate)
+		_, _, _ = pSetWindowPos.Call(w.hwnd, 0, 0, 0, uintptr(ow), uintptr(oh), swpNoMove|swpNoZOrder|swpNoActivate)
 	})
 }
 
@@ -347,6 +347,6 @@ func (w *Window) Close() {
 			w.release()
 			return
 		}
-		pDestroyWindow.Call(w.hwnd)
+		_, _, _ = pDestroyWindow.Call(w.hwnd)
 	})
 }

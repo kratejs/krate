@@ -14,6 +14,12 @@ import (
 	"github.com/kratejs/krate/packages/native/platform/caps"
 )
 
+// UNAuthorizationOptions.
+const (
+	unAuthSound uint = 1 << 1
+	unAuthAlert uint = 1 << 2
+)
+
 // Notifications through UNUserNotificationCenter. The framework requires the
 // process to run from an .app bundle with a bundle identifier; otherwise
 // every call returns an error wrapping krate.ErrUnsupported that names the

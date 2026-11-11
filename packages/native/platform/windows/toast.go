@@ -15,24 +15,12 @@ import (
 // WinRT interface ids used by the toast code. The values come from the Windows
 // SDK metadata (Windows.UI.Notifications.h, Windows.Data.Xml.Dom.h).
 const (
-	iidAgileObject = "94ea2b94-e9cc-49e0-c0ff-ee64ca8f5b90"
-	// IActivationFactory
-	iidActivationFactory = "00000035-0000-0000-C000-000000000046"
-	// IToastNotificationManagerStatics
-	iidToastManagerStatics = "50ac103f-d235-4598-bbef-98fe4d1a3ad4"
-	// IToastNotificationManagerStatics2 (the History property)
-	iidToastManagerStatics2 = "7ab93c52-0e48-4750-ba9d-1a4113981847"
-	// IToastNotificationFactory
-	iidToastFactory = "04124b20-82c6-4229-b109-fd9ed4662b53"
 	// IToastNotification, the default interface of ToastNotification
 	iidToastNotification = "997e2675-059e-4e60-8b06-1760917c8b80"
 	// IToastDismissedEventArgs, IToastFailedEventArgs, IToastActivatedEventArgs
 	iidToastDismissedArgs = "3f89d935-d9cb-4538-a0f0-ffe7659938f8"
 	iidToastFailedArgs    = "35176862-cfd4-44f8-ad64-f500fd896c3b"
 	iidToastActivatedArgs = "e3bf92f3-c197-436f-8265-0625824f8dac"
-	// IXmlDocument, IXmlDocumentIO
-	iidXMLDocument   = "f7f3a506-1e87-42d6-bcfb-b8c809fa5494"
-	iidXMLDocumentIO = "6cd0e74e-ee65-4489-9ebf-ca43e87ba637"
 
 	// ITypedEventHandler`2
 	iidTypedEventHandler = "9de1c534-6ae1-11e0-84e1-18a905bcc53f"

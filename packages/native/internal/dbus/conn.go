@@ -157,16 +157,20 @@ func DialAddress(ctx context.Context, addr string) (*Conn, error) {
 // NewConn authenticates over nc, sends Hello and starts the reader. On
 // success the Conn owns nc.
 func NewConn(ctx context.Context, nc net.Conn) (*Conn, error) {
-	if dl, ok := ctx.Deadline(); ok {
-		nc.SetDeadline(dl)
-	} else {
-		nc.SetDeadline(time.Now().Add(15 * time.Second))
+	dl, ok := ctx.Deadline()
+	if !ok {
+		dl = time.Now().Add(15 * time.Second)
+	}
+	if err := nc.SetDeadline(dl); err != nil {
+		return nil, err
 	}
 	br := bufio.NewReader(nc)
 	if err := authExternal(nc, br); err != nil {
 		return nil, err
 	}
-	nc.SetDeadline(time.Time{})
+	if err := nc.SetDeadline(time.Time{}); err != nil {
+		return nil, err
+	}
 	c := &Conn{
 		nc:      nc,
 		br:      br,
@@ -447,7 +451,7 @@ func (c *Conn) Subscribe(ctx context.Context, m Match, fn func(*Message)) (cance
 			c.mu.Unlock()
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
-			c.Call(ctx, BusName, BusPath, BusInterface, "RemoveMatch", "s", m.rule())
+			_, _ = c.Call(ctx, BusName, BusPath, BusInterface, "RemoveMatch", "s", m.rule())
 		})
 	}, nil
 }
@@ -517,7 +521,7 @@ func (c *Conn) reply(call *Message, sig string, body []any, err error) {
 	}
 	if _, serr := c.send(r); serr != nil && r.Type == TypeMethodReturn {
 		// The reply could not be encoded; tell the caller instead of hanging.
-		c.send(&Message{Type: TypeError, ReplySerial: call.Serial, Destination: call.Sender,
+		_, _ = c.send(&Message{Type: TypeError, ReplySerial: call.Serial, Destination: call.Sender,
 			ErrorName: "org.freedesktop.DBus.Error.Failed", Signature: "s", Body: []any{serr.Error()}})
 	}
 }

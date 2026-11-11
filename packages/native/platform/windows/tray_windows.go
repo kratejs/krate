@@ -122,15 +122,15 @@ func createHIcon(png []byte) (h uintptr, owned bool, err error) {
 	if color == 0 || mask == 0 {
 		for _, o := range []uintptr{color, mask} {
 			if o != 0 {
-				pDeleteObject.Call(o)
+				_, _, _ = pDeleteObject.Call(o)
 			}
 		}
 		return 0, false, errors.New("windows: creating the tray icon bitmap failed")
 	}
 	ii := iconInfo{icon: 1, mask: mask, color: color}
 	h, _, _ = pCreateIconIndirect.Call(uintptr(unsafe.Pointer(&ii)))
-	pDeleteObject.Call(color)
-	pDeleteObject.Call(mask)
+	_, _, _ = pDeleteObject.Call(color)
+	_, _, _ = pDeleteObject.Call(mask)
 	if h == 0 {
 		return 0, false, errors.New("windows: CreateIconIndirect failed")
 	}
@@ -164,19 +164,19 @@ func (a *App) setTray(icon *caps.TrayIcon) error {
 	}
 	if r, _, _ := pShellNotifyIconW.Call(msg, uintptr(unsafe.Pointer(&nid))); r == 0 {
 		if owned {
-			pDestroyIcon.Call(h)
+			_, _, _ = pDestroyIcon.Call(h)
 		}
 		return errors.New("windows: Shell_NotifyIcon failed (is the taskbar running?)")
 	}
 	if !t.added {
-		pShellNotifyIconW.Call(nimSetVersion, uintptr(unsafe.Pointer(&nid)))
+		_, _, _ = pShellNotifyIconW.Call(nimSetVersion, uintptr(unsafe.Pointer(&nid)))
 		t.added = true
 	}
 	old := t.hicon
 	oldOwned := t.owned
 	t.nid, t.hicon, t.owned = nid, h, owned
 	if old != 0 && oldOwned {
-		pDestroyIcon.Call(old)
+		_, _, _ = pDestroyIcon.Call(old)
 	}
 	t.menu = append([]caps.MenuItem(nil), icon.Menu...)
 	return nil
@@ -185,11 +185,11 @@ func (a *App) setTray(icon *caps.TrayIcon) error {
 func (a *App) removeTray() {
 	t := a.tray
 	if t.added {
-		pShellNotifyIconW.Call(nimDelete, uintptr(unsafe.Pointer(&t.nid)))
+		_, _, _ = pShellNotifyIconW.Call(nimDelete, uintptr(unsafe.Pointer(&t.nid)))
 		t.added = false
 	}
 	if t.hicon != 0 && t.owned {
-		pDestroyIcon.Call(t.hicon)
+		_, _, _ = pDestroyIcon.Call(t.hicon)
 	}
 	t.hicon, t.owned = 0, false
 	t.menu = nil
@@ -206,7 +206,7 @@ func (a *App) trayReadd() {
 		logf("could not re-add the tray icon after the taskbar restarted")
 		return
 	}
-	pShellNotifyIconW.Call(nimSetVersion, uintptr(unsafe.Pointer(&t.nid)))
+	_, _, _ = pShellNotifyIconW.Call(nimSetVersion, uintptr(unsafe.Pointer(&t.nid)))
 }
 
 // trayMessage handles the callback message of the tray icon.
@@ -231,7 +231,7 @@ func (a *App) trayMessage(wParam, lParam uintptr) {
 func (a *App) trayPopup(x, y int32) {
 	if x == 0 && y == 0 {
 		var pt point
-		pGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
+		_, _, _ = pGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
 		x, y = pt.x, pt.y
 	}
 	cmds := map[uint16]menuCmd{}
@@ -240,10 +240,10 @@ func (a *App) trayPopup(x, y int32) {
 	if hm == 0 {
 		return
 	}
-	defer pDestroyMenu.Call(hm)
-	pSetForegroundWindow.Call(a.utilWnd)
+	defer func() { _, _, _ = pDestroyMenu.Call(hm) }()
+	_, _, _ = pSetForegroundWindow.Call(a.utilWnd)
 	cmd, _, _ := pTrackPopupMenuEx.Call(hm, tpmReturnCmd|tpmNoNotify|tpmRightButton, uintptr(int64(x)), uintptr(int64(y)), a.utilWnd, 0)
-	pPostMessageW.Call(a.utilWnd, wmNull, 0, 0)
+	_, _, _ = pPostMessageW.Call(a.utilWnd, wmNull, 0, 0)
 	if mc, ok := cmds[uint16(cmd)]; ok && cmd != 0 {
 		emitTray(caps.TrayEvent{Kind: "menu", ID: mc.id})
 	}

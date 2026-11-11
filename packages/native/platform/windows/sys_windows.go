@@ -230,7 +230,7 @@ func setDPIAware() {
 		}
 	}
 	if pSetProcessDPIAware.Find() == nil {
-		pSetProcessDPIAware.Call()
+		_, _, _ = pSetProcessDPIAware.Call()
 	}
 }
 
@@ -256,9 +256,9 @@ func windowDPI(hwnd uintptr) int {
 func frameSize(style uint32, cw, ch, dpi int) (int, int) {
 	r := rect{0, 0, int32(cw), int32(ch)}
 	if pAdjustWindowRectExDP.Find() == nil {
-		pAdjustWindowRectExDP.Call(uintptr(unsafe.Pointer(&r)), uintptr(style), 0, 0, uintptr(dpi))
+		_, _, _ = pAdjustWindowRectExDP.Call(uintptr(unsafe.Pointer(&r)), uintptr(style), 0, 0, uintptr(dpi))
 	} else {
-		pAdjustWindowRectEx.Call(uintptr(unsafe.Pointer(&r)), uintptr(style), 0, 0)
+		_, _, _ = pAdjustWindowRectEx.Call(uintptr(unsafe.Pointer(&r)), uintptr(style), 0, 0)
 	}
 	return int(r.right - r.left), int(r.bottom - r.top)
 }

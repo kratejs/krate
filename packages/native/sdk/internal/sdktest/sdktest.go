@@ -106,12 +106,12 @@ func (c *Caller) CallFrom(window, fn string, args func(*wire.Encoder)) Result {
 					raw, _ := d.RawValue()
 					res.ErrData = string(raw)
 				default:
-					d.Skip()
+					_ = d.Skip()
 				}
 			}
-			d.EndObject()
+			_ = d.EndObject()
 		default:
-			d.Skip()
+			_ = d.Skip()
 		}
 	}
 	return res

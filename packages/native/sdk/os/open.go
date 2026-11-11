@@ -85,6 +85,6 @@ func startHandler(raw string) error {
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("sdkos: starting %s: %w", cmd.Args[0], err)
 	}
-	go cmd.Wait()
+	go func() { _ = cmd.Wait() }() // reap the child
 	return nil
 }

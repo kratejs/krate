@@ -216,25 +216,6 @@ func (w *Window) State() (st caps.WindowState) {
 	return
 }
 
-func (a *App) windowByRef(ref caps.WindowRef) *Window {
-	var found *Window
-	runOnMain(func() {
-		for _, w := range a.windows {
-			if w.ref == uint64(ref) {
-				found = w
-			}
-		}
-	})
-	return found
-}
-
-func parentOf(a *App, ref caps.WindowRef) objc.ID {
-	if w := a.windowByRef(ref); w != nil {
-		return w.win
-	}
-	return 0
-}
-
 // FileDialog runs an open or save panel modally.
 func (a *App) FileDialog(parent caps.WindowRef, o caps.FileDialogOptions) (paths []string, err error) {
 	runOnMain(func() {

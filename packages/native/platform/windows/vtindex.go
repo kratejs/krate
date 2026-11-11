@@ -14,14 +14,12 @@ func vtIndex(iface, method string) int {
 
 // Vtable slots used by the implementation.
 var (
-	envCreateController  = vtIndex("ICoreWebView2Environment", "CreateCoreWebView2Controller")
-	envCreateResponse    = vtIndex("ICoreWebView2Environment", "CreateWebResourceResponse")
-	ctlPutBounds         = vtIndex("ICoreWebView2Controller", "put_Bounds")
-	ctlPutIsVisible      = vtIndex("ICoreWebView2Controller", "put_IsVisible")
-	ctlMoveFocus         = vtIndex("ICoreWebView2Controller", "MoveFocus")
-	ctlNotifyParentMoved = vtIndex("ICoreWebView2Controller", "NotifyParentWindowPositionChanged")
-	ctlClose             = vtIndex("ICoreWebView2Controller", "Close")
-	ctlGetCoreWebView2   = vtIndex("ICoreWebView2Controller", "get_CoreWebView2")
+	envCreateController = vtIndex("ICoreWebView2Environment", "CreateCoreWebView2Controller")
+	envCreateResponse   = vtIndex("ICoreWebView2Environment", "CreateWebResourceResponse")
+	ctlPutBounds        = vtIndex("ICoreWebView2Controller", "put_Bounds")
+	ctlMoveFocus        = vtIndex("ICoreWebView2Controller", "MoveFocus")
+	ctlClose            = vtIndex("ICoreWebView2Controller", "Close")
+	ctlGetCoreWebView2  = vtIndex("ICoreWebView2Controller", "get_CoreWebView2")
 
 	wvGetBrowserProcessId  = vtIndex("ICoreWebView2", "get_BrowserProcessId")
 	env8GetProcessInfos    = vtIndex("ICoreWebView2Environment8", "GetProcessInfos")
@@ -32,9 +30,6 @@ var (
 
 	wvGetSettings                = vtIndex("ICoreWebView2", "get_Settings")
 	wvNavigate                   = vtIndex("ICoreWebView2", "Navigate")
-	wvGetSource                  = vtIndex("ICoreWebView2", "get_Source")
-	wvAddNavigationCompleted     = vtIndex("ICoreWebView2", "add_NavigationCompleted")
-	wvAddWindowCloseRequested    = vtIndex("ICoreWebView2", "add_WindowCloseRequested")
 	wvAddNavigationStarting      = vtIndex("ICoreWebView2", "add_NavigationStarting")
 	wvAddFrameNavigationStarting = vtIndex("ICoreWebView2", "add_FrameNavigationStarting")
 	wvAddNewWindowRequested      = vtIndex("ICoreWebView2", "add_NewWindowRequested")
@@ -58,7 +53,6 @@ var (
 	deferralComplete             = vtIndex("ICoreWebView2Deferral", "Complete")
 	navArgsGetUri                = vtIndex("ICoreWebView2NavigationStartingEventArgs", "get_Uri")
 	navArgsPutCancel             = vtIndex("ICoreWebView2NavigationStartingEventArgs", "put_Cancel")
-	streamReadSlot               = vtIndex("IStream", "Read")
 	handlerInvoke                = vtIndex("ICoreWebView2WebResourceRequestedEventHandler", "Invoke")
 
 	// Memory tuning (see memory.go).
@@ -71,16 +65,11 @@ var (
 	// Toast notifications (see toast.go).
 	activationFactoryActivate = vtIndex("IActivationFactory", "ActivateInstance")
 	toastMgrCreateNotifierID  = vtIndex("IToastNotificationManagerStatics", "CreateToastNotifierWithId")
-	toastMgrCreateNotifier    = vtIndex("IToastNotificationManagerStatics", "CreateToastNotifier")
 	toastFactoryCreate        = vtIndex("IToastNotificationFactory", "CreateToastNotification")
 	notifierShow              = vtIndex("IToastNotifier", "Show")
-	notifierHide              = vtIndex("IToastNotifier", "Hide")
 	notifierGetSetting        = vtIndex("IToastNotifier", "get_Setting")
 	toastAddDismissed         = vtIndex("IToastNotification", "add_Dismissed")
 	toastAddActivated         = vtIndex("IToastNotification", "add_Activated")
 	toastAddFailed            = vtIndex("IToastNotification", "add_Failed")
-	activatedArgsGetArguments = vtIndex("IToastActivatedEventArgs", "get_Arguments")
-	dismissedArgsGetReason    = vtIndex("IToastDismissedEventArgs", "get_Reason")
-	failedArgsGetErrorCode    = vtIndex("IToastFailedEventArgs", "get_ErrorCode")
 	xmlIOLoadXML              = vtIndex("IXmlDocumentIO", "LoadXml")
 )

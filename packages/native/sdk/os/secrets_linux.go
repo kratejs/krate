@@ -70,7 +70,7 @@ func (s *secretService) open(ctx context.Context) (*ssConn, error) {
 func (sc *ssConn) close() {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	sc.c.Call(ctx, ssName, sc.session, ssSession, "Close", "")
+	_, _ = sc.c.Call(ctx, ssName, sc.session, ssSession, "Close", "")
 	sc.c.Close()
 }
 

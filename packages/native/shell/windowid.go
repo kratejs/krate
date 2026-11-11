@@ -96,7 +96,7 @@ func (w *injectWriter) finish() {
 	}
 	w.ResponseWriter.WriteHeader(w.status)
 	if !w.head {
-		w.ResponseWriter.Write(out)
+		_, _ = w.ResponseWriter.Write(out) // the client went away; nothing to report
 	}
 }
 

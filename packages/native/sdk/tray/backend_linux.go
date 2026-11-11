@@ -98,7 +98,7 @@ func (s *sni) release() {
 	s.useXE = false
 	s.mu.Unlock()
 	if useXE {
-		xe.SetXEmbedTray(nil)
+		_ = xe.SetXEmbedTray(nil) // going away; nothing to report
 	}
 }
 
@@ -157,7 +157,7 @@ func (s *sni) set(icon *caps.TrayIcon) error {
 		s.active = false
 		s.mu.Unlock()
 		if was {
-			s.conn.Call(dbusNameDest, "/org/freedesktop/DBus", dbusNameDest, "ReleaseName", s.name)
+			_, _ = s.conn.Call(dbusNameDest, "/org/freedesktop/DBus", dbusNameDest, "ReleaseName", s.name)
 		}
 		return nil
 	}
@@ -172,7 +172,7 @@ func (s *sni) set(icon *caps.TrayIcon) error {
 		if _, err := s.conn.Call(watcherName, watcherPath, watcherName, "RegisterStatusNotifierItem", s.name); err != nil {
 			var de *dbusiface.Error
 			if errors.As(err, &de) && (strings.HasSuffix(de.Name, "ServiceUnknown") || strings.HasSuffix(de.Name, "NameHasNoOwner")) {
-				s.conn.Call(dbusNameDest, "/org/freedesktop/DBus", dbusNameDest, "ReleaseName", s.name)
+				_, _ = s.conn.Call(dbusNameDest, "/org/freedesktop/DBus", dbusNameDest, "ReleaseName", s.name)
 				return s.fallbackXEmbed(icon)
 			}
 			return err
@@ -183,13 +183,14 @@ func (s *sni) set(icon *caps.TrayIcon) error {
 		return nil
 	}
 	for _, sig := range []string{"NewIcon", "NewToolTip", "NewTitle"} {
-		s.conn.Emit(itemPath, itemIface, sig)
+		if err := s.conn.Emit(itemPath, itemIface, sig); err != nil {
+			return err
+		}
 	}
 	s.mu.Lock()
 	rev := s.revision
 	s.mu.Unlock()
-	s.conn.Emit(menuPath, menuIface, "LayoutUpdated", rev, int32(0))
-	return nil
+	return s.conn.Emit(menuPath, menuIface, "LayoutUpdated", rev, int32(0))
 }
 
 // fallbackXEmbed shows the icon in an XEmbed tray when there is no

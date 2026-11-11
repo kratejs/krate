@@ -96,12 +96,13 @@ func applyTree(fsys FS, artifact, dir, exeName, version string) error {
 	}
 	stage := filepath.Join(dir, ".krate-new-"+safeVersion(version))
 	trash := filepath.Join(dir, trashName)
-	fsys.RemoveAll(stage)
+	// Leftovers from an earlier run; a real failure shows in the next steps.
+	_ = fsys.RemoveAll(stage)
 	if err := extractArchive(fsys, artifact, stage); err != nil {
-		fsys.RemoveAll(stage)
+		_ = fsys.RemoveAll(stage)
 		return err
 	}
-	defer fsys.RemoveAll(stage)
+	defer func() { _ = fsys.RemoveAll(stage) }()
 
 	entries, err := fsys.ReadDir(stage)
 	if err != nil {
@@ -126,7 +127,7 @@ func applyTree(fsys FS, artifact, dir, exeName, version string) error {
 	if !hasExe {
 		return fmt.Errorf("updater: the update does not contain %s", exeName)
 	}
-	fsys.RemoveAll(trash)
+	_ = fsys.RemoveAll(trash)
 	if err := fsys.MkdirAll(trash, 0o755); err != nil {
 		return fmt.Errorf("updater: %s is not writable: %w (an app installed by a package manager updates through it)", dir, err)
 	}
@@ -134,10 +135,10 @@ func applyTree(fsys FS, artifact, dir, exeName, version string) error {
 	var trashed, placed []move
 	rollback := func() {
 		for i := len(placed) - 1; i >= 0; i-- {
-			fsys.RemoveAll(placed[i].to)
+			_ = fsys.RemoveAll(placed[i].to)
 		}
 		for i := len(trashed) - 1; i >= 0; i-- {
-			fsys.Rename(trashed[i].to, trashed[i].from)
+			_ = fsys.Rename(trashed[i].to, trashed[i].from)
 		}
 	}
 	for _, e := range entries {
@@ -157,7 +158,7 @@ func applyTree(fsys FS, artifact, dir, exeName, version string) error {
 		placed = append(placed, move{to: dst})
 	}
 	// Best effort: a running executable cannot be deleted on Windows.
-	fsys.RemoveAll(trash)
+	_ = fsys.RemoveAll(trash)
 	return nil
 }
 
@@ -170,12 +171,12 @@ func applyBundle(fsys FS, artifact, bundle, version string) error {
 	name := filepath.Base(bundle)
 	stage := filepath.Join(parent, "."+name+".new-"+safeVersion(version))
 	old := filepath.Join(parent, "."+name+".old")
-	fsys.RemoveAll(stage)
+	_ = fsys.RemoveAll(stage)
 	if err := extractArchive(fsys, artifact, stage); err != nil {
-		fsys.RemoveAll(stage)
+		_ = fsys.RemoveAll(stage)
 		return err
 	}
-	defer fsys.RemoveAll(stage)
+	defer func() { _ = fsys.RemoveAll(stage) }()
 	next := filepath.Join(stage, name)
 	if st, err := fsys.Stat(next); err != nil || !st.IsDir() {
 		entries, _ := fsys.ReadDir(stage)
@@ -192,15 +193,15 @@ func applyBundle(fsys FS, artifact, bundle, version string) error {
 			return fmt.Errorf("updater: the update does not contain %s", name)
 		}
 	}
-	fsys.RemoveAll(old)
+	_ = fsys.RemoveAll(old)
 	if err := fsys.Rename(bundle, old); err != nil {
 		return fmt.Errorf("updater: moving %s aside: %w (is %s writable?)", name, err, parent)
 	}
 	if err := fsys.Rename(next, bundle); err != nil {
-		fsys.Rename(old, bundle)
+		_ = fsys.Rename(old, bundle)
 		return fmt.Errorf("updater: installing %s: %w", name, err)
 	}
-	fsys.RemoveAll(old)
+	_ = fsys.RemoveAll(old)
 	return nil
 }
 
@@ -210,12 +211,12 @@ func applyFile(fsys FS, artifact, target, version string) error {
 	src := artifact
 	if isArchive(artifact) {
 		stage := target + ".new-" + safeVersion(version)
-		fsys.RemoveAll(stage)
+		_ = fsys.RemoveAll(stage)
 		if err := extractArchive(fsys, artifact, stage); err != nil {
-			fsys.RemoveAll(stage)
+			_ = fsys.RemoveAll(stage)
 			return err
 		}
-		defer fsys.RemoveAll(stage)
+		defer func() { _ = fsys.RemoveAll(stage) }()
 		entries, err := fsys.ReadDir(stage)
 		if err != nil {
 			return err
@@ -250,7 +251,7 @@ func applyFile(fsys FS, artifact, target, version string) error {
 		err = fsys.Rename(tmp, target)
 	}
 	if err != nil {
-		fsys.RemoveAll(tmp)
+		_ = fsys.RemoveAll(tmp)
 		return fmt.Errorf("updater: replacing %s: %w", target, err)
 	}
 	return nil
@@ -299,6 +300,6 @@ func Relaunch() error {
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("updater: relaunching: %w", err)
 	}
-	go cmd.Wait()
+	go func() { _ = cmd.Wait() }()
 	return nil
 }

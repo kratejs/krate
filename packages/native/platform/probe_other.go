@@ -2,6 +2,15 @@
 
 package platform
 
-import "github.com/kratejs/krate/packages/native/platform/probe"
+import (
+	"runtime"
 
-func probeOS() probe.Info { return unsupportedProbe() }
+	"github.com/kratejs/krate/packages/native/platform/probe"
+)
+
+func probeOS() probe.Info {
+	return probe.Info{
+		OS: runtime.GOOS, Arch: runtime.GOARCH,
+		Webview: probe.Webview{Name: "none", Error: "desktop windows are not supported on " + runtime.GOOS},
+	}
+}

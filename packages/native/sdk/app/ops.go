@@ -39,7 +39,7 @@ func Register(t *bridge.Table, env *bridge.Env, support func(capability string) 
 		if err := cmd.Start(); err != nil {
 			return err
 		}
-		go cmd.Wait()
+		go func() { _ = cmd.Wait() }() // reap the child
 		out.Null()
 		env.App.Quit()
 		return nil

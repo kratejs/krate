@@ -64,7 +64,7 @@ func setProcessAUMID(appID string) {
 	if isPackaged() || pSetCurrentProcessAUMID.Find() != nil {
 		return
 	}
-	pSetCurrentProcessAUMID.Call(uintptr(unsafe.Pointer(wstr(aumidFor(appID)))))
+	_, _, _ = pSetCurrentProcessAUMID.Call(uintptr(unsafe.Pointer(wstr(aumidFor(appID)))))
 }
 
 // newHString creates an HSTRING; the caller frees it with deleteHString.
@@ -84,7 +84,7 @@ func newHString(s string) (uintptr, error) {
 
 func deleteHString(h uintptr) {
 	if h != 0 {
-		pWindowsDeleteString.Call(h)
+		_, _, _ = pWindowsDeleteString.Call(h)
 	}
 }
 

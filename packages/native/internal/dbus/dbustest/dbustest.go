@@ -49,8 +49,8 @@ func Start(t testing.TB) string {
 		t.Skipf("cannot start dbus-daemon: %v", err)
 	}
 	t.Cleanup(func() {
-		cmd.Process.Kill()
-		cmd.Wait()
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait() // reaps the daemon; the kill error is the expected one
 		os.RemoveAll(dir)
 	})
 	line, err := bufio.NewReader(out).ReadString('\n')

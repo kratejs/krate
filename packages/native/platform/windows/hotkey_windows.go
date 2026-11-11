@@ -56,7 +56,7 @@ func (a *App) RegisterShortcut(handle string, acc caps.Accelerator) (err error) 
 func (a *App) UnregisterShortcut(handle string) error {
 	a.callMain(func() {
 		if id := a.hot.remove(handle); id != 0 {
-			pUnregisterHotKey.Call(a.utilWnd, uintptr(id))
+			_, _, _ = pUnregisterHotKey.Call(a.utilWnd, uintptr(id))
 		}
 	})
 	return nil
@@ -79,7 +79,7 @@ func (a *App) hotkeyMessage(id int32) {
 // releaseHotkeys unregisters everything (shutdown).
 func (a *App) releaseHotkeys() {
 	for _, id := range a.hot.ids() {
-		pUnregisterHotKey.Call(a.utilWnd, uintptr(id))
+		_, _, _ = pUnregisterHotKey.Call(a.utilWnd, uintptr(id))
 	}
 	a.hot = newHotkeyTable()
 }

@@ -12,9 +12,6 @@ const Origin = "https://app.localhost"
 // originHost is the host part of Origin.
 const originHost = "app.localhost"
 
-// resourceFilter is the WebResourceRequested filter pattern.
-const resourceFilter = Origin + "/*"
-
 // navURL returns the absolute URL for a route path on the app origin.
 func navURL(path string) string {
 	if path == "" {

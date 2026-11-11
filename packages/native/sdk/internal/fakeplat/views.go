@@ -95,13 +95,6 @@ func (w *Window) lookup(ref caps.ViewRef) *viewRec {
 	return nil
 }
 
-func (w *Window) currentLayout() *caps.LayoutNode {
-	if w.layout == nil {
-		return caps.Leaf(w.primary().ref)
-	}
-	return w.layout
-}
-
 func (w *Window) PrimaryView() caps.ViewRef { return w.primary().ref }
 
 func (w *Window) Views() []caps.ViewInfo {

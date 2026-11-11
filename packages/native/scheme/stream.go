@@ -119,7 +119,7 @@ func (s *server) startStream(window string, c call, f StreamFunc) []byte {
 			s.encodeError(e, err)
 		}
 		e.EndObject()
-		st.send(e.Frame(), true)
+		_ = st.send(e.Frame(), true) // fails only when the call was cancelled
 	}()
 
 	e := wire.NewEncoder()
@@ -173,7 +173,7 @@ func (s *server) handleStream(w http.ResponseWriter, r *http.Request) {
 			e.Key("err")
 			s.encodeError(e, context.Canceled)
 			e.EndObject()
-			e.WriteTo(w)
+			_, _ = e.WriteTo(w)
 			return
 		case <-r.Context().Done():
 			return
@@ -189,5 +189,5 @@ func (s *server) badStream(w http.ResponseWriter) {
 	e.EndObject()
 	w.Header().Set("Content-Type", framesType)
 	w.WriteHeader(http.StatusNotFound)
-	e.WriteTo(w)
+	_, _ = e.WriteTo(w)
 }

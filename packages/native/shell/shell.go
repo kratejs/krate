@@ -309,10 +309,14 @@ func (a *app) close() {
 	a.hostChildren = nil
 	a.mu.Unlock()
 	for _, hc := range hcs {
-		hc.child.Stop()
+		if err := hc.child.Stop(); err != nil {
+			a.logf("stopping a host child: %v", err)
+		}
 	}
 	if child != nil {
-		child.Stop()
+		if err := child.Stop(); err != nil {
+			a.logf("stopping the Go child: %v", err)
+		}
 	}
 	if host != nil {
 		host.Close()
@@ -579,7 +583,9 @@ func (c *Control) Eval(js string) error {
 	for _, w := range list {
 		if wv, ok := w.(platform.WindowViews); ok {
 			for _, v := range wv.Views() {
-				wv.EvalView(v.Ref, js)
+				if err := wv.EvalView(v.Ref, js); err != nil {
+					return err
+				}
 			}
 			continue
 		}

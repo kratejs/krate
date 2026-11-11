@@ -13,30 +13,10 @@ import (
 
 // Shell_NotifyIcon messages, flags and versions (shellapi.h).
 const (
-	nimAdd        = 0
-	nimModify     = 1
-	nimDelete     = 2
-	nimSetVersion = 4
-
-	nifMessage = 0x01
-	nifIcon    = 0x02
-	nifTip     = 0x04
-	nifShowTip = 0x80
-
-	notifyIconVersion4 = 4
-
-	// wmTrayCallback is the callback message of the tray icon.
-	wmTrayCallback = 0x8000 + 0x4C // WM_APP + 0x4C
-
 	wmLButtonDblClk = 0x0203
 	wmContextMenu   = 0x007B
 	ninSelect       = 0x0400
 	ninKeySelect    = 0x0401
-
-	trayIconID = 1
-
-	// szTip holds 128 UTF-16 units including the NUL.
-	trayTipUnits = 128
 )
 
 // notifyIconData is NOTIFYICONDATAW for Windows Vista and later. Its size is

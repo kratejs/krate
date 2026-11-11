@@ -416,8 +416,6 @@ func (d *Decoder) BeginObject() error {
 	return nil
 }
 
-func isWS(c byte) bool { return c == ' ' || c == '\t' || c == '\r' || c == '\n' }
-
 // More reports whether another member follows in the current container.
 func (d *Decoder) More() bool {
 	if d.err != nil || len(d.stack) == 0 {

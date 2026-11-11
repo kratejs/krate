@@ -87,7 +87,7 @@ func (credManager) get(ctx context.Context, service, key string) (string, error)
 		}
 		return "", fmt.Errorf("sdkos: CredReadW: %w", e)
 	}
-	defer procCredFree.Call(uintptr(unsafe.Pointer(out)))
+	defer func() { _, _, _ = procCredFree.Call(uintptr(unsafe.Pointer(out))) }()
 	if out.CredentialBlobSize == 0 || out.CredentialBlob == nil {
 		return "", nil
 	}

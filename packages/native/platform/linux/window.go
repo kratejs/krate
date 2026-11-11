@@ -276,7 +276,7 @@ func closeCallback(_, ref uintptr) uintptr {
 		v.w.Close()
 		return 0
 	}
-	v.w.removeView(v.ref, caps.ViewClosed)
+	_ = v.w.removeView(v.ref, caps.ViewClosed) // already closing; nothing to report to the callback
 	return 0
 }
 

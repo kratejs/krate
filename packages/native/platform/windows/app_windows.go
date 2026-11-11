@@ -226,7 +226,7 @@ func (a *App) Dispatch(fn func()) {
 
 // Quit stops the event loop; Run returns.
 func (a *App) Quit() {
-	a.Dispatch(func() { pPostQuitMessage.Call(0) })
+	a.Dispatch(func() { _, _, _ = pPostQuitMessage.Call(0) })
 }
 
 // Run starts the event loop and blocks until Quit. onReady runs on the main
@@ -252,13 +252,13 @@ func (a *App) Run(onReady func()) error {
 		if int32(r) <= 0 {
 			break
 		}
-		pTranslateMessage.Call(uintptr(unsafe.Pointer(&m)))
-		pDispatchMessageW.Call(uintptr(unsafe.Pointer(&m)))
+		_, _, _ = pTranslateMessage.Call(uintptr(unsafe.Pointer(&m)))
+		_, _, _ = pDispatchMessageW.Call(uintptr(unsafe.Pointer(&m)))
 	}
 
 	for h, w := range a.windows {
 		w.markNoQuit()
-		pDestroyWindow.Call(h)
+		_, _, _ = pDestroyWindow.Call(h)
 	}
 	a.shutdownExt()
 	return a.runErr
@@ -271,7 +271,7 @@ func (a *App) shutdownExt() {
 	a.releaseHotkeys()
 	a.releaseToasts()
 	if a.utilWnd != 0 {
-		pDestroyWindow.Call(a.utilWnd)
+		_, _, _ = pDestroyWindow.Call(a.utilWnd)
 		a.utilWnd = 0
 	}
 }
@@ -280,7 +280,7 @@ func (a *App) shutdownExt() {
 // messages. It reports false if WM_QUIT was seen (and re-posts it), so a
 // caller waiting in a nested loop can give up.
 func (a *App) pumpOnce(ms uint32) bool {
-	pMsgWaitForMultiple.Call(0, 0, uintptr(ms), qsAllInput, mwmoInputAvailable)
+	_, _, _ = pMsgWaitForMultiple.Call(0, 0, uintptr(ms), qsAllInput, mwmoInputAvailable)
 	var m msg
 	for {
 		r, _, _ := pPeekMessageW.Call(uintptr(unsafe.Pointer(&m)), 0, 0, 0, pmRemove)
@@ -288,11 +288,11 @@ func (a *App) pumpOnce(ms uint32) bool {
 			return true
 		}
 		if m.message == wmQuit {
-			pPostQuitMessage.Call(m.wParam)
+			_, _, _ = pPostQuitMessage.Call(m.wParam)
 			return false
 		}
-		pTranslateMessage.Call(uintptr(unsafe.Pointer(&m)))
-		pDispatchMessageW.Call(uintptr(unsafe.Pointer(&m)))
+		_, _, _ = pTranslateMessage.Call(uintptr(unsafe.Pointer(&m)))
+		_, _, _ = pDispatchMessageW.Call(uintptr(unsafe.Pointer(&m)))
 	}
 }
 
@@ -365,7 +365,7 @@ func (a *App) environmentCompleted(hr, env uintptr) uintptr {
 	}
 	if failed(hr) || env == 0 {
 		a.runErr = fmt.Errorf("windows: creating the WebView2 environment failed: 0x%08x", uint32(hr))
-		pPostQuitMessage.Call(1)
+		_, _, _ = pPostQuitMessage.Call(1)
 		return sOK
 	}
 	a.env = ptr(env)
@@ -495,7 +495,7 @@ func wndProc(hwnd, message, wParam, lParam uintptr) (ret uintptr) {
 			}
 		case wmDpiChanged:
 			rc := (*rect)(ptr(lParam))
-			pSetWindowPos.Call(hwnd, 0, uintptr(rc.left), uintptr(rc.top),
+			_, _, _ = pSetWindowPos.Call(hwnd, 0, uintptr(rc.left), uintptr(rc.top),
 				uintptr(rc.right-rc.left), uintptr(rc.bottom-rc.top), swpNoZOrder|swpNoActivate)
 			return 0
 		case wmDestroy:
@@ -510,6 +510,6 @@ func (a *App) windowDestroyed(w *Window) {
 	w.destroy()
 	delete(a.windows, w.hwnd)
 	if len(a.windows) == 0 && a.everOpened && caps.QuitWhenEmpty(a.cfg.KeepAlive, 0) && !w.noQuit {
-		pPostQuitMessage.Call(0)
+		_, _, _ = pPostQuitMessage.Call(0)
 	}
 }

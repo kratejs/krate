@@ -13,9 +13,6 @@ const (
 	iidISequentialStream = "0C733A30-2A1C-11CE-ADE5-00AA0044773D"
 	iidIStream           = "0000000C-0000-0000-C000-000000000046"
 
-	// WebView2.h line 45951
-	iidEnvironment8 = "d6eb91dd-c3d2-45e5-bd29-6dc2bc4de9cf"
-
 	// WebView2.h line 44351
 	iidEnvCompletedHandler = "4e8a3389-c9d8-4bd2-b6b5-124fee6cc14d"
 	// WebView2.h line 44663
@@ -24,10 +21,6 @@ const (
 	iidWebResourceRequestedHandler = "ab00b74c-15f1-4646-80e8-e76341d25d71"
 	// WebView2.h line 4218
 	iidNavigationStartingHandler = "9adbe429-f36d-432b-9ddc-f8881fbd76e3"
-	// ICoreWebView2NavigationCompletedEventHandler
-	iidNavigationCompletedHandler = "d33a35bf-1c49-4f98-93ab-006e0533fe1c"
-	// ICoreWebView2WindowCloseRequestedEventHandler
-	iidWindowCloseRequestedHandler = "5c19e9e0-092f-486b-affa-ca8231913039"
 	// WebView2.h line 4300
 	iidNewWindowRequestedHandler = "d4c185fe-c81c-4989-97af-2d3fa7ab5651"
 	// WebView2.h line 5078

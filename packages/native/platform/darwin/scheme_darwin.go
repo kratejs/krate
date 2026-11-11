@@ -52,7 +52,7 @@ func (a *App) startTask(webView, task objc.ID) {
 		if err != nil {
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte("bad request\n"))
+			_, _ = w.Write([]byte("bad request\n"))
 			w.finish()
 			w.stop()
 			return

@@ -108,7 +108,9 @@ func (a *app) restartHostChildren() error {
 	}
 	for entry, hc := range a.hostChildren {
 		if !keep[entry] {
-			hc.child.Stop()
+			if err := hc.child.Stop(); err != nil {
+				a.logf("stopping the %s host child: %v", entry, err)
+			}
 			delete(a.hostChildren, entry)
 		}
 	}

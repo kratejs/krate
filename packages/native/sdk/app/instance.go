@@ -94,7 +94,11 @@ func Acquire(dir, appID string, args []string, onSecond func(SecondInstance)) (*
 			time.Sleep(20 * time.Millisecond)
 			continue
 		}
-		os.Chmod(path, 0o600)
+		if err := os.Chmod(path, 0o600); err != nil {
+			_ = ln.Close()
+			_ = os.Remove(path)
+			return nil, false, fmt.Errorf("app: securing the single-instance socket %s: %w", path, err)
+		}
 		inst := &Instance{ln: ln, path: path}
 		go inst.serve(onSecond)
 		return inst, true, nil
@@ -110,7 +114,9 @@ func send(path string, args []string) error {
 		return errNoServer
 	}
 	defer c.Close()
-	c.SetDeadline(time.Now().Add(5 * time.Second))
+	if err := c.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		return err
+	}
 	dir, _ := os.Getwd()
 	b, _ := json.Marshal(message{Args: args, Dir: dir})
 	if _, err := c.Write(append(b, '\n')); err != nil {
@@ -131,7 +137,9 @@ func (i *Instance) serve(onSecond func(SecondInstance)) {
 		}
 		go func() {
 			defer c.Close()
-			c.SetDeadline(time.Now().Add(5 * time.Second))
+			if c.SetDeadline(time.Now().Add(5*time.Second)) != nil {
+				return
+			}
 			line, err := bufio.NewReaderSize(c, 1<<20).ReadBytes('\n')
 			if err != nil {
 				return
@@ -140,7 +148,7 @@ func (i *Instance) serve(onSecond func(SecondInstance)) {
 			if json.Unmarshal(line, &m) != nil {
 				return
 			}
-			c.Write([]byte("ok\n"))
+			_, _ = c.Write([]byte("ok\n")) // the second instance exits either way
 			if onSecond != nil {
 				onSecond(SecondInstance{Args: m.Args, Dir: m.Dir, URLs: URLsFromArgs(m.Args)})
 			}

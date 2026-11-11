@@ -4,8 +4,6 @@ package linux
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"net/http"
 	"os"
 	"strings"
@@ -202,7 +200,3 @@ func skipResponseHeader(name string) bool {
 	}
 	return false
 }
-
-var errBadRequest = errors.New("bad request")
-
-func badURI(uri string) error { return fmt.Errorf("%w: %q", errBadRequest, uri) }

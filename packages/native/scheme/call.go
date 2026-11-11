@@ -132,7 +132,7 @@ func (s *server) badRequest(w http.ResponseWriter, err error) {
 	e.EndObject()
 	w.Header().Set("Content-Type", framesType)
 	w.WriteHeader(http.StatusBadRequest)
-	e.WriteTo(w)
+	_, _ = e.WriteTo(w)
 }
 
 func (s *server) handleCall(w http.ResponseWriter, r *http.Request) {
