@@ -27,7 +27,7 @@ func consume(d *Decoder, depth int) {
 				return
 			}
 		}
-		d.EndObject()
+		_ = d.EndObject()
 	case KindArray:
 		if d.BeginArray() != nil {
 			return
@@ -38,7 +38,7 @@ func consume(d *Decoder, depth int) {
 				return
 			}
 		}
-		d.EndArray()
+		_ = d.EndArray()
 	case KindSet, KindMap:
 		var err error
 		if d.Kind() == KindSet {
@@ -55,31 +55,33 @@ func consume(d *Decoder, depth int) {
 				return
 			}
 		}
-		d.EndArray()
+		_ = d.EndArray()
 	case KindString:
-		d.String()
+		_, _ = d.String()
 	case KindNumber:
-		d.RawValue()
-		d.Int()
+		_, _ = d.RawValue()
+		_, _ = d.Int()
 	case KindBool:
-		d.Bool()
+		_, _ = d.Bool()
 	case KindNull:
 		if !d.IsNull() {
-			d.Skip()
+			_ = d.Skip()
 		}
 	case KindBytes:
-		d.Bytes()
+		_, _ = d.Bytes()
 	case KindTime:
-		d.Time()
+		_, _ = d.Time()
 	default:
-		d.Skip()
+		_ = d.Skip()
 	}
 	if d.Err() == nil && d.Offset() == before {
 		// A value that consumed nothing would loop forever in the callers.
-		d.Skip()
+		_ = d.Skip()
 	}
 }
 
+// The fuzz input is arbitrary, so decode errors are expected and ignored here;
+// the targets only check for panics and hangs.
 func FuzzDecoder(f *testing.F) {
 	seeds, _ := filepath.Glob("testdata/*.bin")
 	for _, s := range seeds {
@@ -96,25 +98,25 @@ func FuzzDecoder(f *testing.F) {
 			return
 		}
 		consume(d, 0)
-		d.Finish()
+		_ = d.Finish()
 		for _, fn := range []func(*Decoder){
-			func(d *Decoder) { d.Skip() },
-			func(d *Decoder) { d.RawValue() },
-			func(d *Decoder) { d.SubDecoder() },
-			func(d *Decoder) { d.Time() },
-			func(d *Decoder) { d.Bytes() },
-			func(d *Decoder) { d.Float() },
-			func(d *Decoder) { d.Uint() },
-			func(d *Decoder) { d.BeginObject(); d.Key(); d.Skip(); d.EndObject() },
+			func(d *Decoder) { _ = d.Skip() },
+			func(d *Decoder) { _, _ = d.RawValue() },
+			func(d *Decoder) { _, _ = d.SubDecoder() },
+			func(d *Decoder) { _, _ = d.Time() },
+			func(d *Decoder) { _, _ = d.Bytes() },
+			func(d *Decoder) { _, _ = d.Float() },
+			func(d *Decoder) { _, _ = d.Uint() },
+			func(d *Decoder) { _ = d.BeginObject(); _, _ = d.Key(); _ = d.Skip(); _ = d.EndObject() },
 			func(d *Decoder) {
-				d.BeginMap()
-				d.BeginArray()
-				d.Skip()
-				d.Skip()
-				d.EndArray()
-				d.EndArray()
+				_ = d.BeginMap()
+				_ = d.BeginArray()
+				_ = d.Skip()
+				_ = d.Skip()
+				_ = d.EndArray()
+				_ = d.EndArray()
 			},
-			func(d *Decoder) { d.BeginSet(); d.Skip(); d.EndArray() },
+			func(d *Decoder) { _ = d.BeginSet(); _ = d.Skip(); _ = d.EndArray() },
 		} {
 			d2, _ := NewDecoder(data)
 			fn(d2)

@@ -66,6 +66,8 @@ func TestGUIScopedWindowCannotForgeAWiderScope(t *testing.T) {
 	check("narrowview", "permission_denied")
 
 	// Clean up through the page that opened them.
-	guiCtl.Eval(fmt.Sprintf(`(async function(){ try { await window.__forgeCall("krate/window.close", [%q]); await window.__forgeCall("krate/window.close", [%q]); } catch (e) {} })()`,
-		m["narrow"], m["wide"]))
+	if err := guiCtl.Eval(fmt.Sprintf(`(async function(){ try { await window.__forgeCall("krate/window.close", [%q]); await window.__forgeCall("krate/window.close", [%q]); } catch (e) {} })()`,
+		m["narrow"], m["wide"])); err != nil {
+		t.Fatal(err)
+	}
 }

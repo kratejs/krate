@@ -16,13 +16,6 @@ import (
 	"github.com/kratejs/krate/packages/native/wire"
 )
 
-func intFunc(v int64) Func {
-	return func(ctx krate.Ctx, a *wire.Decoder, out *wire.Encoder) error {
-		out.Int(v)
-		return nil
-	}
-}
-
 func TestBatchFastResultArrivesBeforeSlow(t *testing.T) {
 	reg := NewRegistry()
 	started := make(chan struct{})
@@ -75,8 +68,7 @@ func TestErrorMapping(t *testing.T) {
 	reg.Func("m.Plain", func(krate.Ctx, *wire.Decoder, *wire.Encoder) error { return userErr{} })
 	reg.Func("m.Panic", func(krate.Ctx, *wire.Decoder, *wire.Encoder) error { panic("boom") })
 	reg.Func("m.NilMap", func(krate.Ctx, *wire.Decoder, *wire.Encoder) error {
-		var m map[string]int
-		m["x"] = 1
+		writeNilMap(nil)
 		return nil
 	})
 	reg.Func("m.NoValue", func(krate.Ctx, *wire.Decoder, *wire.Encoder) error { return nil })
@@ -163,8 +155,12 @@ func TestMalformedRequests(t *testing.T) {
 				t.Fatalf("status %d", resp.StatusCode)
 			}
 			d := next(t, resp.Body)
-			d.BeginObject()
-			d.Key()
+			if err := d.BeginObject(); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := d.Key(); err != nil {
+				t.Fatal(err)
+			}
 			e := parseErr(t, d)
 			if e.Code != "bad_request" || e.Message == "" {
 				t.Fatalf("%+v", e)
@@ -321,7 +317,9 @@ func TestArgsDecoding(t *testing.T) {
 func TestBlobsRoundTrip(t *testing.T) {
 	reg := NewRegistry()
 	reg.Func("m.Echo", func(_ krate.Ctx, a *wire.Decoder, out *wire.Encoder) error {
-		a.BeginArray()
+		if err := a.BeginArray(); err != nil {
+			t.Error(err)
+		}
 		out.BeginArray()
 		for a.More() {
 			b, err := a.Bytes()
@@ -345,7 +343,9 @@ func TestBlobsRoundTrip(t *testing.T) {
 	if r.Err != nil {
 		t.Fatal(r.Err)
 	}
-	r.OK.BeginArray()
+	if err := r.OK.BeginArray(); err != nil {
+		t.Fatal(err)
+	}
 	for i, want := range blobs {
 		r.OK.More()
 		got, err := r.OK.Bytes()
@@ -474,3 +474,6 @@ func TestConcurrencyIsBounded(t *testing.T) {
 		t.Fatalf("max concurrency %d, want 2", max.Load())
 	}
 }
+
+// writeNilMap panics with "assignment to entry in nil map" when m is nil.
+func writeNilMap(m map[string]int) { m["x"] = 1 }

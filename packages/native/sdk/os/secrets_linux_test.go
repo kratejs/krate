@@ -121,7 +121,8 @@ func startFakeKeyring(t *testing.T, addr string, locked bool) *fakeKeyring {
 					f.locked = false
 				}
 				f.mu.Unlock()
-				c.Emit(promptPath, ssPrompt, "Completed", "bv", dismissed, dbus.V("s", ""))
+				// The bus may be gone if the test already ended.
+				_ = c.Emit(promptPath, ssPrompt, "Completed", "bv", dismissed, dbus.V("s", ""))
 			}()
 			return "", nil, nil
 		},

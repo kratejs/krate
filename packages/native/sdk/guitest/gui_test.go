@@ -59,7 +59,7 @@ func TestMain(m *testing.M) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		io.WriteString(w, "<!doctype html><title>"+r.URL.Path+"</title><body>"+r.URL.Path)
+		_, _ = io.WriteString(w, "<!doctype html><title>"+r.URL.Path+"</title><body>"+r.URL.Path)
 	})
 	set := permission.AllowAll()
 	// The ids the view tests call: a data id the window scopes can narrow.
@@ -153,35 +153,55 @@ func TestSecondWindowOnARoute(t *testing.T) {
 		st, _ := w.State()
 		return st.AlwaysOnTop && !st.Decorated
 	})
-	w.SetAlwaysOnTop(false)
-	w.SetFrameless(false)
+	if err := w.SetAlwaysOnTop(false); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.SetFrameless(false); err != nil {
+		t.Fatal(err)
+	}
 	eventually(t, "normal", func() bool {
 		st, _ := w.State()
 		return !st.AlwaysOnTop && st.Decorated
 	})
-	w.SetTitle("Renamed")
-	w.SetSize(444, 333)
+	if err := w.SetTitle("Renamed"); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.SetSize(444, 333); err != nil {
+		t.Fatal(err)
+	}
 	eventually(t, "retitled", func() bool {
 		st, _ := w.State()
 		return st.Title == "Renamed" && st.Width == 444 && st.Height == 333
 	})
 	if os.Getenv("KRATE_NATIVE_WM") == "1" {
-		w.SetFullscreen(true)
+		if err := w.SetFullscreen(true); err != nil {
+			t.Fatal(err)
+		}
 		eventually(t, "fullscreen", func() bool { st, _ := w.State(); return st.Fullscreen })
-		w.SetFullscreen(false)
+		if err := w.SetFullscreen(false); err != nil {
+			t.Fatal(err)
+		}
 		eventually(t, "windowed", func() bool { st, _ := w.State(); return !st.Fullscreen })
-		w.Maximize()
+		if err := w.Maximize(); err != nil {
+			t.Fatal(err)
+		}
 		eventually(t, "maximized", func() bool { st, _ := w.State(); return st.Maximized })
-		w.Restore()
+		if err := w.Restore(); err != nil {
+			t.Fatal(err)
+		}
 		eventually(t, "restored", func() bool { st, _ := w.State(); return !st.Maximized })
 	}
 	// Saved state round trip against the real window.
-	w.SetSize(480, 320)
+	if err := w.SetSize(480, 320); err != nil {
+		t.Fatal(err)
+	}
 	eventually(t, "480x320", func() bool { st, _ := w.State(); return st.Width == 480 })
 	if err := window.SaveState(w, "settings"); err != nil {
 		t.Fatal(err)
 	}
-	w.SetSize(300, 300)
+	if err := w.SetSize(300, 300); err != nil {
+		t.Fatal(err)
+	}
 	eventually(t, "300x300", func() bool { st, _ := w.State(); return st.Width == 300 })
 	if ok, err := window.RestoreState(w, "settings"); err != nil || !ok {
 		t.Fatalf("restore %v %v", ok, err)
@@ -242,7 +262,9 @@ func TestClipboardThroughTheSDK(t *testing.T) {
 	img := image.NewRGBA(image.Rect(0, 0, 3, 2))
 	img.Set(2, 1, color.RGBA{10, 20, 30, 255})
 	var b bytes.Buffer
-	png.Encode(&b, img)
+	if err := png.Encode(&b, img); err != nil {
+		t.Fatal(err)
+	}
 	if err := clipboard.WriteImage(b.Bytes()); err != nil {
 		t.Fatal(err)
 	}
@@ -264,7 +286,9 @@ func TestClipboardThroughTheSDK(t *testing.T) {
 	if got, err := clipboard.ReadFiles(); err != nil || !reflect.DeepEqual(got, files) {
 		t.Fatalf("files %v %v", got, err)
 	}
-	clipboard.Clear()
+	if err := clipboard.Clear(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestMenuClickReachesGoAndTheUI(t *testing.T) {
@@ -302,7 +326,9 @@ func TestMenuClickReachesGoAndTheUI(t *testing.T) {
 	if string(raw) != `{"v":{"id":"file.new","window":"main","checked":false}}` {
 		t.Fatalf("page event %s", raw)
 	}
-	menu.SetApp(nil)
+	if err := menu.SetApp(nil); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func linuxActivate(t *testing.T, id string) {
@@ -341,7 +367,9 @@ func openStream(t *testing.T, base, id string) *http.Response {
 	var res struct {
 		Stream string `json:"stream"`
 	}
-	json.Unmarshal(raw, &res)
+	if err := json.Unmarshal(raw, &res); err != nil {
+		t.Fatal(err)
+	}
 	if res.Stream == "" {
 		t.Fatalf("no stream: %s", raw)
 	}

@@ -178,7 +178,9 @@ func TestDevEndpointsBrowserMode(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		io.Copy(io.Discard, resp.Body)
+		if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+			t.Error(err)
+		}
 		resp.Body.Close()
 	}
 	post("h.tag")

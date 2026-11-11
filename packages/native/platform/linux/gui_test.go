@@ -135,7 +135,7 @@ func newTestServer() *testServer {
 	s.bigSum = sha256.Sum256(big)
 	s.mux.HandleFunc("/{$}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		io.WriteString(w, testPage)
+		_, _ = io.WriteString(w, testPage)
 	})
 	s.mux.HandleFunc("/blank", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -144,7 +144,7 @@ func newTestServer() *testServer {
 	s.mux.HandleFunc("/echo", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Echo-Test", r.Header.Get("X-Test"))
 		w.Header().Set("Content-Type", "application/octet-stream")
-		io.Copy(w, r.Body)
+		_, _ = io.Copy(w, r.Body)
 	})
 	s.mux.HandleFunc("/stream", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -162,16 +162,16 @@ func newTestServer() *testServer {
 	})
 	s.mux.HandleFunc("/big", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/octet-stream")
-		w.Write(big)
+		_, _ = w.Write(big)
 	})
 	s.mux.HandleFunc("/ctype", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		io.WriteString(w, "{}")
+		_, _ = io.WriteString(w, "{}")
 	})
 	s.mux.HandleFunc("/nocontent", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) })
 	s.mux.HandleFunc("/hang", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
-		io.WriteString(w, "first")
+		_, _ = io.WriteString(w, "first")
 		w.(http.Flusher).Flush()
 		s.hangStarted <- struct{}{}
 		<-r.Context().Done()

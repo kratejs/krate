@@ -57,9 +57,13 @@ func TestServeStreamsChunks(t *testing.T) {
 		w.Header().Set("X-A", "1")
 		w.WriteHeader(201)
 		w.(http.Flusher).Flush()
-		io.WriteString(w, "one")
+		if _, err := io.WriteString(w, "one"); err != nil {
+			t.Error(err)
+		}
 		<-gate
-		io.WriteString(w, "two")
+		if _, err := io.WriteString(w, "two"); err != nil {
+			t.Error(err)
+		}
 	})
 	f, _, done := runServe(h, "GET")
 	<-f.ready
@@ -85,7 +89,11 @@ func TestServeStreamsChunks(t *testing.T) {
 }
 
 func TestServeDefaultsAndSniff(t *testing.T) {
-	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "<html><body>hi</body></html>") })
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, err := io.WriteString(w, "<html><body>hi</body></html>"); err != nil {
+			t.Error(err)
+		}
+	})
 	f, _, _ := runServe(h, "GET")
 	<-f.ready
 	if f.status != 200 || f.header.Get("Content-Type") != "text/html; charset=utf-8" {
@@ -118,7 +126,9 @@ func TestServePanicBeforeHeadersIs500(t *testing.T) {
 	<-f.ready
 	rf := os.NewFile(uintptr(f.fd), "r")
 	defer rf.Close()
-	io.ReadAll(rf)
+	if _, err := io.ReadAll(rf); err != nil {
+		t.Fatal(err)
+	}
 	<-done
 	if f.status != 500 {
 		t.Fatalf("status %d", f.status)
@@ -126,7 +136,11 @@ func TestServePanicBeforeHeadersIs500(t *testing.T) {
 }
 
 func TestServeHeadDropsBody(t *testing.T) {
-	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "body") })
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, err := io.WriteString(w, "body"); err != nil {
+			t.Error(err)
+		}
+	})
 	f, _, _ := runServe(h, "HEAD")
 	<-f.ready
 	rf := os.NewFile(uintptr(f.fd), "r")
@@ -139,7 +153,9 @@ func TestServeHeadDropsBody(t *testing.T) {
 
 func TestServeCancelsWhenReaderCloses(t *testing.T) {
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		io.WriteString(w, "x")
+		if _, err := io.WriteString(w, "x"); err != nil {
+			t.Error(err)
+		}
 		w.(http.Flusher).Flush()
 		<-r.Context().Done()
 	})
@@ -157,7 +173,9 @@ func TestServeCancelsWhenReaderCloses(t *testing.T) {
 func TestServeWriteAfterReaderClosedFails(t *testing.T) {
 	errc := make(chan error, 1)
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		io.WriteString(w, "x")
+		if _, err := io.WriteString(w, "x"); err != nil {
+			t.Error(err)
+		}
 		w.(http.Flusher).Flush()
 		time.Sleep(300 * time.Millisecond)
 		_, err := io.WriteString(w, "y")

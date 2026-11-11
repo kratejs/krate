@@ -123,7 +123,9 @@ func TestNotifyOverDBus(t *testing.T) {
 	mu.Unlock()
 
 	// ActionInvoked comes back as an event with our ID.
-	svc.Emit("/org/freedesktop/Notifications", "org.freedesktop.Notifications", "ActionInvoked", uint32(7), "open")
+	if err := svc.Emit("/org/freedesktop/Notifications", "org.freedesktop.Notifications", "ActionInvoked", uint32(7), "open"); err != nil {
+		t.Fatal(err)
+	}
 	select {
 	case e := <-events:
 		if e.ID != "n1" || e.Action != "open" {
@@ -133,14 +135,20 @@ func TestNotifyOverDBus(t *testing.T) {
 		t.Fatal("ActionInvoked was not delivered")
 	}
 	// A dismissal after an action is not reported twice; a plain one is.
-	svc.Emit("/org/freedesktop/Notifications", "org.freedesktop.Notifications", "NotificationClosed", uint32(7), uint32(2))
+	if err := svc.Emit("/org/freedesktop/Notifications", "org.freedesktop.Notifications", "NotificationClosed", uint32(7), uint32(2)); err != nil {
+		t.Fatal(err)
+	}
 	select {
 	case e := <-events:
 		t.Fatalf("closed after an action reported: %+v", e)
 	case <-time.After(300 * time.Millisecond):
 	}
-	notify.Send(notify.Notification{ID: "n2", Title: "Two"})
-	svc.Emit("/org/freedesktop/Notifications", "org.freedesktop.Notifications", "NotificationClosed", uint32(7), uint32(2))
+	if err := notify.Send(notify.Notification{ID: "n2", Title: "Two"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Emit("/org/freedesktop/Notifications", "org.freedesktop.Notifications", "NotificationClosed", uint32(7), uint32(2)); err != nil {
+		t.Fatal(err)
+	}
 	select {
 	case e := <-events:
 		if e.ID != "n2" || !e.Closed {
@@ -172,7 +180,9 @@ func testPNG(t *testing.T) []byte {
 	img.Set(1, 0, color.NRGBA{0, 255, 0, 128})
 	img.Set(0, 1, color.NRGBA{0, 0, 255, 255})
 	var b bytes.Buffer
-	png.Encode(&b, img)
+	if err := png.Encode(&b, img); err != nil {
+		t.Fatal(err)
+	}
 	return b.Bytes()
 }
 
@@ -270,7 +280,9 @@ func TestTrayOverDBus(t *testing.T) {
 	if e := recvTray(t, events); e.Kind != "click" {
 		t.Fatalf("tray event %+v", e)
 	}
-	host.Call(service, "/StatusNotifierItem", "org.kde.StatusNotifierItem", "ContextMenu", int32(1), int32(2))
+	if _, err := host.Call(service, "/StatusNotifierItem", "org.kde.StatusNotifierItem", "ContextMenu", int32(1), int32(2)); err != nil {
+		t.Fatal(err)
+	}
 	if e := recvTray(t, events); e.Kind != "right-click" {
 		t.Fatalf("tray event %+v", e)
 	}
@@ -346,7 +358,8 @@ func TestShortcutPortal(t *testing.T) {
 		req := dbusiface.ObjectPath(path + "/request/" + strings.ReplaceAll(strings.TrimPrefix(un, ":"), ".", "_") + "/" + token)
 		go func() {
 			time.Sleep(20 * time.Millisecond)
-			p.Emit(string(req), "org.freedesktop.portal.Request", "Response", uint32(0), results)
+			// The bus may be gone if the test already ended.
+			_ = p.Emit(string(req), "org.freedesktop.portal.Request", "Response", uint32(0), results)
 		}()
 		return req
 	}
@@ -388,7 +401,9 @@ func TestShortcutPortal(t *testing.T) {
 	id := strings.Split(bound[0][0], "=")[0]
 	mu.Unlock()
 	waitSubs(t, r, "shortcut")
-	p.Emit(path, iface, "Activated", dbusiface.ObjectPath(session), id, uint64(1), map[string]dbusiface.Variant{})
+	if err := p.Emit(path, iface, "Activated", dbusiface.ObjectPath(session), id, uint64(1), map[string]dbusiface.Variant{}); err != nil {
+		t.Fatal(err)
+	}
 	select {
 	case <-fired:
 	case <-time.After(3 * time.Second):

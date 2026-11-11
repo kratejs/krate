@@ -27,8 +27,12 @@ func TestNotificationAndTrayWithFakeDesktopServices(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer svc.Close()
-	svc.RequestName("org.freedesktop.Notifications")
-	svc.RequestName("org.kde.StatusNotifierWatcher")
+	if err := svc.RequestName("org.freedesktop.Notifications"); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.RequestName("org.kde.StatusNotifierWatcher"); err != nil {
+		t.Fatal(err)
+	}
 	summaries := make(chan string, 2)
 	svc.Export("/org/freedesktop/Notifications", "org.freedesktop.Notifications", map[string]dbusiface.Method{
 		"Notify": func(a []any) ([]any, error) { summaries <- a[3].(string); return []any{uint32(3)}, nil },
@@ -51,7 +55,9 @@ func TestNotificationAndTrayWithFakeDesktopServices(t *testing.T) {
 	if s := <-summaries; s != "Hello" {
 		t.Fatalf("summary %q", s)
 	}
-	svc.Emit("/org/freedesktop/Notifications", "org.freedesktop.Notifications", "ActionInvoked", uint32(3), "go")
+	if err := svc.Emit("/org/freedesktop/Notifications", "org.freedesktop.Notifications", "ActionInvoked", uint32(3), "go"); err != nil {
+		t.Fatal(err)
+	}
 	select {
 	case e := <-got:
 		if e.ID != "x" || e.Action != "go" {
@@ -70,5 +76,7 @@ func TestNotificationAndTrayWithFakeDesktopServices(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("tray item never registered")
 	}
-	tr.Remove()
+	if err := tr.Remove(); err != nil {
+		t.Fatal(err)
+	}
 }

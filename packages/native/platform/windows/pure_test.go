@@ -180,7 +180,9 @@ func TestBlockBufReadBlocksUntilWrite(t *testing.T) {
 		t.Fatal("Read returned before any write")
 	case <-time.After(50 * time.Millisecond):
 	}
-	b.Write([]byte("hi"))
+	if _, err := b.Write([]byte("hi")); err != nil {
+		t.Fatal(err)
+	}
 	if s := <-res; s != "hi" {
 		t.Fatalf("got %q", s)
 	}
@@ -192,7 +194,9 @@ func TestBlockBufTryRead(t *testing.T) {
 	if _, err := b.TryRead(p); !errors.Is(err, errWouldBlock) {
 		t.Fatalf("want would-block, got %v", err)
 	}
-	b.Write([]byte("abcdef"))
+	if _, err := b.Write([]byte("abcdef")); err != nil {
+		t.Fatal(err)
+	}
 	if n, err := b.TryRead(p); n != 4 || err != nil {
 		t.Fatalf("%d %v", n, err)
 	}
@@ -208,7 +212,9 @@ func TestBlockBufTryRead(t *testing.T) {
 func TestBlockBufCloseWithError(t *testing.T) {
 	b := newBlockBuf(64)
 	boom := errors.New("boom")
-	b.Write([]byte("x"))
+	if _, err := b.Write([]byte("x")); err != nil {
+		t.Fatal(err)
+	}
 	b.CloseWithError(boom)
 	p := make([]byte, 8)
 	if n, err := b.Read(p); n != 1 || err != nil {
@@ -401,7 +407,9 @@ func TestResponseWriterSmallWholeBody(t *testing.T) {
 	w.Header().Set("X-A", "1")
 	w.WriteHeader(201)
 	w.Header().Set("X-Late", "no") // after WriteHeader: not sent
-	io.WriteString(w, "hello")
+	if _, err := io.WriteString(w, "hello"); err != nil {
+		t.Fatal(err)
+	}
 	if c.commits != 0 || c.done != 0 {
 		t.Fatal("small write must not commit")
 	}
@@ -419,7 +427,9 @@ func TestResponseWriterSmallWholeBody(t *testing.T) {
 
 func TestResponseWriterFlushStreams(t *testing.T) {
 	c, w, fin := newCaptured()
-	io.WriteString(w, "one")
+	if _, err := io.WriteString(w, "one"); err != nil {
+		t.Fatal(err)
+	}
 	w.Flush()
 	if c.commits != 1 || c.stream == nil {
 		t.Fatal("Flush must commit")
@@ -428,7 +438,9 @@ func TestResponseWriterFlushStreams(t *testing.T) {
 	if n, _ := c.stream.Read(p); string(p[:n]) != "one" {
 		t.Fatalf("first chunk %q", p[:n])
 	}
-	io.WriteString(w, "two")
+	if _, err := io.WriteString(w, "two"); err != nil {
+		t.Fatal(err)
+	}
 	w.Flush()
 	if n, _ := c.stream.Read(p); string(p[:n]) != "two" {
 		t.Fatalf("second chunk %q", p[:n])
@@ -444,11 +456,15 @@ func TestResponseWriterFlushStreams(t *testing.T) {
 
 func TestResponseWriterThresholdCommit(t *testing.T) {
 	c, w, fin := newCaptured()
-	w.Write(make([]byte, commitThreshold-1))
+	if _, err := w.Write(make([]byte, commitThreshold-1)); err != nil {
+		t.Fatal(err)
+	}
 	if c.commits != 0 {
 		t.Fatal("below threshold")
 	}
-	w.Write([]byte("xx"))
+	if _, err := w.Write([]byte("xx")); err != nil {
+		t.Fatal(err)
+	}
 	if c.commits != 1 {
 		t.Fatal("threshold must commit")
 	}
@@ -465,7 +481,9 @@ func TestResponseWriterEmptyAndHead(t *testing.T) {
 	w := newResponseWriter(true,
 		func(int, http.Header, *blockBuf) { c2.commits++ },
 		func(st int, h http.Header, b []byte) { c2.done++; c2.body = b })
-	w.Write([]byte(strings.Repeat("x", 10000)))
+	if _, err := w.Write([]byte(strings.Repeat("x", 10000))); err != nil {
+		t.Fatal(err)
+	}
 	w.finish()
 	if c2.commits != 0 || c2.done != 1 || len(c2.body) != 0 {
 		t.Fatalf("HEAD: %+v", c2)

@@ -35,7 +35,7 @@ func registerViewHandlers(s *testServer) {
 	html := func(body string) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			io.WriteString(w, body)
+			_, _ = io.WriteString(w, body)
 		}
 	}
 	// The page reports itself and forges the window header on its own call.
@@ -236,7 +236,9 @@ func TestGUIViewsTwoPane(t *testing.T) {
 
 	// The minimum size of the new pane holds: dragging the divider all the
 	// way right leaves the second pane at least 120 px wide.
-	w.SetDividerPosition("", 100000)
+	if err := w.SetDividerPosition("", 100000); err != nil {
+		t.Fatal(err)
+	}
 	waitFor(t, "divider pushed right", func() bool { f2, _ := paneSize(w, ""); return f2 > 250 })
 	if _, s2 := paneSize(w, ""); s2 < 120 {
 		t.Errorf("second pane is %d px wide, below its minimum of 120", s2)

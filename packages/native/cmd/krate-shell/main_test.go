@@ -57,11 +57,21 @@ func TestBinaryDevControl(t *testing.T) {
 	}
 
 	app := filepath.Join(root, "app")
-	os.MkdirAll(filepath.Join(app, "dist"), 0o755)
-	os.MkdirAll(filepath.Join(app, "host"), 0o755)
-	os.WriteFile(filepath.Join(app, "dist", "index.html"), []byte("<!doctype html>bin ok"), 0o644)
-	os.WriteFile(filepath.Join(app, "host", "host.js"), []byte(`(function(){ console.log("host booted"); })();`), 0o644)
-	os.WriteFile(filepath.Join(app, "app.json"), []byte(`{"appId":"dev.krate.bin","hostjs":{"bundle":"host/host.js"}}`), 0o644)
+	if err := os.MkdirAll(filepath.Join(app, "dist"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(app, "host"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(app, "dist", "index.html"), []byte("<!doctype html>bin ok"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(app, "host", "host.js"), []byte(`(function(){ console.log("host booted"); })();`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(app, "app.json"), []byte(`{"appId":"dev.krate.bin","hostjs":{"bundle":"host/host.js"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	cmd := exec.Command(exe, "--browser", "--dev", app)
 	stdin, _ := cmd.StdinPipe()
@@ -75,7 +85,7 @@ func TestBinaryDevControl(t *testing.T) {
 	go func() { exited <- cmd.Wait() }()
 	defer func() {
 		if cmd.ProcessState == nil {
-			cmd.Process.Kill()
+			_ = cmd.Process.Kill() // it may have exited meanwhile
 		}
 	}()
 
@@ -121,7 +131,9 @@ func TestBinaryDevControl(t *testing.T) {
 
 	send := func(cmdline string) string {
 		t.Helper()
-		io.WriteString(stdin, cmdline+"\n")
+		if _, err := io.WriteString(stdin, cmdline+"\n"); err != nil {
+			t.Error(err)
+		}
 		return next("reply to " + cmdline)
 	}
 	if got := send("reload-hostjs"); got != "ok" {
@@ -173,8 +185,12 @@ func TestBinaryExitsOnStdinEOF(t *testing.T) {
 		t.Fatalf("go build: %v\n%s", err, out)
 	}
 	app := filepath.Join(root, "app")
-	os.MkdirAll(filepath.Join(app, "dist"), 0o755)
-	os.WriteFile(filepath.Join(app, "app.json"), []byte(`{"appId":"dev.krate.bin"}`), 0o644)
+	if err := os.MkdirAll(filepath.Join(app, "dist"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(app, "app.json"), []byte(`{"appId":"dev.krate.bin"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	cmd := exec.Command(exe, "--browser", "--dev", app)
 	stdin, _ := cmd.StdinPipe()
@@ -191,7 +207,9 @@ func TestBinaryExitsOnStdinEOF(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(20 * time.Second):
-		cmd.Process.Kill()
+		if err := cmd.Process.Kill(); err != nil {
+			t.Fatal(err)
+		}
 		t.Fatal("process did not exit after stdin EOF")
 	}
 }

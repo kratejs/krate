@@ -379,7 +379,9 @@ func TestBrowserMode(t *testing.T) {
 		t.Errorf("h.extra after reload: %s", got)
 	}
 	// A broken bundle is reported and leaves the old code running.
-	os.WriteFile(app.dir+"/host/host.js", []byte("(function(){ throw new Error('bad bundle'); })();"), 0o644)
+	if err := os.WriteFile(app.dir+"/host/host.js", []byte("(function(){ throw new Error('bad bundle'); })();"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err := ctl.ReloadHostJS(); err == nil || !strings.Contains(err.Error(), "bad bundle") {
 		t.Errorf("broken reload: %v", err)
 	}
@@ -409,18 +411,28 @@ func TestRunErrors(t *testing.T) {
 	if err := Run(dir, RunOptions{Browser: true, Logf: t.Logf}); err == nil || !strings.Contains(err.Error(), "manifest") {
 		t.Errorf("missing manifest: %v", err)
 	}
-	os.WriteFile(dir+"/app.json", []byte(`{"appId":"a.b"}`), 0o644)
+	if err := os.WriteFile(dir+"/app.json", []byte(`{"appId":"a.b"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err := Run(dir, RunOptions{Browser: true, Logf: t.Logf}); err == nil || !strings.Contains(err.Error(), "assets directory") {
 		t.Errorf("missing assets: %v", err)
 	}
-	os.Mkdir(dir+"/dist", 0o755)
-	os.WriteFile(dir+"/app.json", []byte(`{"appId":"a.b","hostjs":{"bundle":"nope.js"}}`), 0o644)
+	if err := os.Mkdir(dir+"/dist", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dir+"/app.json", []byte(`{"appId":"a.b","hostjs":{"bundle":"nope.js"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err := Run(dir, RunOptions{Browser: true, Logf: t.Logf}); err == nil || !strings.Contains(err.Error(), "host bundle") {
 		t.Errorf("missing bundle: %v", err)
 	}
 	// An id registered by both the host JS and the Go host is an error, not a panic.
-	os.WriteFile(dir+"/host.js", []byte(hostJSv1), 0o644)
-	os.WriteFile(dir+"/app.json", []byte(`{"appId":"a.b","hostjs":{"bundle":"host.js"},"gohost":{"binary":"nope","funcs":["h.add"]}}`), 0o644)
+	if err := os.WriteFile(dir+"/host.js", []byte(hostJSv1), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dir+"/app.json", []byte(`{"appId":"a.b","hostjs":{"bundle":"host.js"},"gohost":{"binary":"nope","funcs":["h.add"]}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err := Run(dir, RunOptions{Browser: true, Logf: t.Logf}); err == nil {
 		t.Error("missing go host binary: no error")
 	}

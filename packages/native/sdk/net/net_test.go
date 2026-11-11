@@ -80,8 +80,7 @@ func TestSecretNotForwardedAcrossHosts(t *testing.T) {
 	var otherSaw, sameSaw string
 	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { otherSaw = r.Header.Get("X-Api-Key") }))
 	defer other.Close()
-	var origin *httptest.Server
-	origin = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/to-other":
 			http.Redirect(w, r, other.URL, http.StatusFound)

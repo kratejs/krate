@@ -132,7 +132,7 @@ func TestTrayItemAndMenu(t *testing.T) {
 	requireGUI(t)
 	var rec trayRecorder
 	guiApp.OnTray(rec.add)
-	t.Cleanup(func() { guiApp.SetTray(nil) })
+	t.Cleanup(func() { _ = guiApp.SetTray(nil) })
 
 	if err := guiApp.SetTray(&caps.TrayIcon{Tooltip: "Krate test", Title: "KT", PNG: blackIcon(t, 36), Menu: trayMenu()}); err != nil {
 		t.Fatal(err)
@@ -218,7 +218,7 @@ func TestTrayItemAndMenu(t *testing.T) {
 
 func TestTrayRejectsBadInput(t *testing.T) {
 	requireGUI(t)
-	t.Cleanup(func() { guiApp.SetTray(nil) })
+	t.Cleanup(func() { _ = guiApp.SetTray(nil) })
 	if err := guiApp.SetTray(&caps.TrayIcon{PNG: []byte("nope")}); err == nil || !strings.Contains(err.Error(), "PNG") {
 		t.Errorf("bad PNG: %v", err)
 	}

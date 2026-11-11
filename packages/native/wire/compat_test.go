@@ -21,7 +21,9 @@ func TestDecodeJSNumbers(t *testing.T) {
 	}
 	for tok, want := range floats {
 		d := dec(t, `[`+tok+`]`)
-		d.BeginArray()
+		if err := d.BeginArray(); err != nil {
+			t.Fatal(err)
+		}
 		got, err := d.Float()
 		if err != nil || got != want || math.Signbit(got) != math.Signbit(want) {
 			t.Errorf("%s: got %v, %v want %v", tok, got, err, want)
@@ -31,7 +33,9 @@ func TestDecodeJSNumbers(t *testing.T) {
 		}
 	}
 	d := dec(t, `[9007199254740991,-9223372036854775808,18446744073709551615]`)
-	d.BeginArray()
+	if err := d.BeginArray(); err != nil {
+		t.Fatal(err)
+	}
 	if v, err := d.Int(); err != nil || v != 9007199254740991 {
 		t.Errorf("int: %d %v", v, err)
 	}
@@ -44,7 +48,9 @@ func TestDecodeJSNumbers(t *testing.T) {
 	// JS never sends these; they are not JSON numbers.
 	for _, bad := range []string{"01", "+1", ".5", "1.", "1e", "NaN", "Infinity", "-"} {
 		d := dec(t, `[`+bad+`]`)
-		d.BeginArray()
+		if err := d.BeginArray(); err != nil {
+			t.Fatal(err)
+		}
 		_, err := d.Float()
 		if err == nil {
 			err = d.EndArray()
@@ -178,7 +184,9 @@ func TestEscapeAllTags(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			d.BeginArray()
+			if err := d.BeginArray(); err != nil {
+				t.Fatal(err)
+			}
 			for i := 0; i < 3; i++ {
 				if k := d.Kind(); k != KindObject {
 					t.Fatalf("%s #%d: kind %v", key, i, k)
@@ -191,7 +199,9 @@ func TestEscapeAllTags(t *testing.T) {
 					if k != key && k != "other" {
 						t.Fatalf("%s: key %q", key, k)
 					}
-					d.Skip()
+					if err := d.Skip(); err != nil {
+						t.Fatal(err)
+					}
 				}
 				if err := d.EndObject(); err != nil {
 					t.Fatal(err)
@@ -339,7 +349,9 @@ func TestSetAndMapDecode(t *testing.T) {
 
 	// An empty map is an empty object; a non-string key fails Key.
 	d = dec(t, `{"$m":[]}`)
-	d.BeginObject()
+	if err := d.BeginObject(); err != nil {
+		t.Fatal(err)
+	}
 	if d.More() {
 		t.Error("empty map has members")
 	}
@@ -347,7 +359,9 @@ func TestSetAndMapDecode(t *testing.T) {
 		t.Error(err)
 	}
 	d = dec(t, `{"$m":[[1,"x"]]}`)
-	d.BeginObject()
+	if err := d.BeginObject(); err != nil {
+		t.Fatal(err)
+	}
 	d.More()
 	if _, err := d.Key(); err == nil || !strings.Contains(err.Error(), "BeginMap") {
 		t.Errorf("non-string key: %v", err)
@@ -363,8 +377,12 @@ func TestSetAndMapDecode(t *testing.T) {
 		if err := d.BeginArray(); err != nil {
 			t.Fatal(err)
 		}
-		d.Skip()
-		d.Skip()
+		if err := d.Skip(); err != nil {
+			t.Fatal(err)
+		}
+		if err := d.Skip(); err != nil {
+			t.Fatal(err)
+		}
 		if err := d.EndArray(); err != nil {
 			t.Fatal(err)
 		}
@@ -378,11 +396,21 @@ func TestSetAndMapDecode(t *testing.T) {
 	}
 	// BeginArray also reads a map as its list of pairs.
 	d = dec(t, `{"$m":[["a",1]]}`)
-	d.BeginArray()
-	d.BeginArray()
-	d.Skip()
-	d.Skip()
-	d.EndArray()
+	if err := d.BeginArray(); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.BeginArray(); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Skip(); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Skip(); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.EndArray(); err != nil {
+		t.Fatal(err)
+	}
 	if err := d.EndArray(); err != nil || d.Finish() != nil {
 		t.Fatal(err)
 	}

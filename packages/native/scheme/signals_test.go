@@ -58,7 +58,9 @@ func readSig(t testing.TB, r io.Reader) sigFrame {
 			t.Fatal(err)
 		}
 	}
-	d.EndObject()
+	if err := d.EndObject(); err != nil {
+		t.Fatal(err)
+	}
 	return f
 }
 

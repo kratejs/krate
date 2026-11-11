@@ -62,9 +62,15 @@ func feed(t *testing.T, version string) (*httptest.Server, string) {
 	var srv *httptest.Server
 	mux := http.NewServeMux()
 	mux.HandleFunc("/feed", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(updater.Feed{Version: version, Notes: "hello", URL: srv.URL + "/a.tar.gz", Signature: sig, Size: int64(len(art))})
+		if err := json.NewEncoder(w).Encode(updater.Feed{Version: version, Notes: "hello", URL: srv.URL + "/a.tar.gz", Signature: sig, Size: int64(len(art))}); err != nil {
+			t.Error(err)
+		}
 	})
-	mux.HandleFunc("/a.tar.gz", func(w http.ResponseWriter, r *http.Request) { w.Write(art) })
+	mux.HandleFunc("/a.tar.gz", func(w http.ResponseWriter, r *http.Request) {
+		if _, err := w.Write(art); err != nil {
+			t.Error(err)
+		}
+	})
 	srv = httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	return srv, pub
@@ -151,7 +157,9 @@ func TestDownloadStream(t *testing.T) {
 	raw, _ := d.RawValue()
 	resp.Body.Close()
 	var res struct{ Stream string }
-	json.Unmarshal([]byte(strings.ReplaceAll(string(raw), `"stream"`, `"Stream"`)), &res)
+	if err := json.Unmarshal([]byte(strings.ReplaceAll(string(raw), `"stream"`, `"Stream"`)), &res); err != nil {
+		t.Fatal(err)
+	}
 	if res.Stream == "" {
 		t.Fatalf("no stream: %s", raw)
 	}
@@ -179,12 +187,14 @@ func TestDownloadStream(t *testing.T) {
 		t.Fatalf("last progress frame %s", last)
 	}
 	var found string
-	filepath.Walk(home, func(p string, info os.FileInfo, err error) error {
+	if err := filepath.Walk(home, func(p string, info os.FileInfo, err error) error {
 		if err == nil && strings.HasSuffix(p, "a.tar.gz") {
 			found = p
 		}
 		return nil
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if found == "" {
 		t.Fatal("verified file not staged under the cache dir")
 	}

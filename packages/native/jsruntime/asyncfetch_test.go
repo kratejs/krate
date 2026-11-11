@@ -58,7 +58,9 @@ func TestAsyncFetchDoesNotBlock(t *testing.T) {
 		if r.URL.Path == "/slow" {
 			<-release
 		}
-		io.WriteString(w, r.URL.Path)
+		if _, err := io.WriteString(w, r.URL.Path); err != nil {
+			t.Error(err)
+		}
 	}))
 	defer srv.Close()
 	rt, err := NewWithOptions(Options{Preload: []string{"fetch"}})

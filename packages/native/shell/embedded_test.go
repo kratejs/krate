@@ -79,7 +79,9 @@ func runEmbeddedBrowserFS(t *testing.T, fsys fs.FS, glue ...func(*scheme.Registr
 	if err != nil {
 		t.Fatal(err)
 	}
-	io.Copy(io.Discard, resp.Body)
+	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+		t.Fatal(err)
+	}
 	resp.Body.Close()
 	return ctl, c
 }
@@ -172,7 +174,9 @@ func TestZipFSServesDynamicRouteNames(t *testing.T) {
 		"dist/tasks/[id]/index.html": "<!doctype html><head></head>task page",
 	} {
 		w, _ := zw.Create(name)
-		w.Write([]byte(body))
+		if _, err := w.Write([]byte(body)); err != nil {
+			t.Fatal(err)
+		}
 	}
 	zw.Close()
 	fsys, err := ZipFS(buf.Bytes())

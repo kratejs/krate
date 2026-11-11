@@ -59,11 +59,17 @@ func tgz(t *testing.T, files map[string]string) []byte {
 	tw := tar.NewWriter(gz)
 	for name, body := range files {
 		if strings.HasSuffix(name, "/") {
-			tw.WriteHeader(&tar.Header{Name: name, Typeflag: tar.TypeDir, Mode: 0o755})
+			if err := tw.WriteHeader(&tar.Header{Name: name, Typeflag: tar.TypeDir, Mode: 0o755}); err != nil {
+				t.Fatal(err)
+			}
 			continue
 		}
-		tw.WriteHeader(&tar.Header{Name: name, Typeflag: tar.TypeReg, Mode: 0o755, Size: int64(len(body))})
-		tw.Write([]byte(body))
+		if err := tw.WriteHeader(&tar.Header{Name: name, Typeflag: tar.TypeReg, Mode: 0o755, Size: int64(len(body))}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write([]byte(body)); err != nil {
+			t.Fatal(err)
+		}
 	}
 	tw.Close()
 	gz.Close()
@@ -78,13 +84,17 @@ func zipOf(t *testing.T, files map[string]string, links map[string]string) []byt
 		h := &zip.FileHeader{Name: name, Method: zip.Deflate}
 		h.SetMode(0o755)
 		w, _ := zw.CreateHeader(h)
-		w.Write([]byte(body))
+		if _, err := w.Write([]byte(body)); err != nil {
+			t.Fatal(err)
+		}
 	}
 	for name, target := range links {
 		h := &zip.FileHeader{Name: name}
 		h.SetMode(fs.ModeSymlink | 0o755)
 		w, _ := zw.CreateHeader(h)
-		w.Write([]byte(target))
+		if _, err := w.Write([]byte(target)); err != nil {
+			t.Fatal(err)
+		}
 	}
 	zw.Close()
 	return buf.Bytes()
@@ -98,8 +108,10 @@ func feedServer(t *testing.T, version string, artifact []byte, sig string, hits 
 		if hits != nil {
 			hits.Add(1)
 		}
-		json.NewEncoder(w).Encode(Feed{Version: version, Notes: "n", PubDate: "2026-01-01T00:00:00Z",
-			URL: srv.URL + "/dl/app-" + version + "-linux-amd64.tar.gz", Signature: sig, Size: int64(len(artifact))})
+		if err := json.NewEncoder(w).Encode(Feed{Version: version, Notes: "n", PubDate: "2026-01-01T00:00:00Z",
+			URL: srv.URL + "/dl/app-" + version + "-linux-amd64.tar.gz", Signature: sig, Size: int64(len(artifact))}); err != nil {
+			t.Error(err)
+		}
 	})
 	mux.HandleFunc("/dl/", func(w http.ResponseWriter, r *http.Request) {
 		http.ServeContent(w, r, "a.tar.gz", timeZero, bytes.NewReader(artifact))
@@ -266,9 +278,13 @@ func TestDownloadResumes(t *testing.T) {
 	u, srv, cache := checked(t, art, sign(t, k, art), pub)
 	// Leave a partial file as an interrupted run would.
 	part := filepath.Join(cache, "updates", "1.2.0", stagedName(u.URL)+".part")
-	os.MkdirAll(filepath.Dir(part), 0o700)
+	if err := os.MkdirAll(filepath.Dir(part), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	half := len(art) / 2
-	os.WriteFile(part, art[:half], 0o600)
+	if err := os.WriteFile(part, art[:half], 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	var ranged atomic.Value
 	srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -301,9 +317,17 @@ func TestDownloadRestartsWhenServerIgnoresRange(t *testing.T) {
 	art := tgz(t, map[string]string{"app": strings.Repeat("q", 5000)})
 	u, srv, cache := checked(t, art, sign(t, k, art), pub)
 	part := filepath.Join(cache, "updates", "1.2.0", stagedName(u.URL)+".part")
-	os.MkdirAll(filepath.Dir(part), 0o700)
-	os.WriteFile(part, art[:100], 0o600)
-	srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(art) })
+	if err := os.MkdirAll(filepath.Dir(part), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(part, art[:100], 0o600); err != nil {
+		t.Fatal(err)
+	}
+	srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, err := w.Write(art); err != nil {
+			t.Error(err)
+		}
+	})
 	if err := u.Download(context.Background(), nil); err != nil {
 		t.Fatal(err)
 	}
@@ -337,7 +361,9 @@ func readFile(t *testing.T, p string) string {
 
 func write(t *testing.T, p, body string) {
 	t.Helper()
-	os.MkdirAll(filepath.Dir(p), 0o755)
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(p, []byte(body), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -345,7 +371,9 @@ func write(t *testing.T, p, body string) {
 
 func staged(t *testing.T, name string, data []byte) string {
 	p := filepath.Join(t.TempDir(), name)
-	os.WriteFile(p, data, 0o644)
+	if err := os.WriteFile(p, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	return p
 }
 
@@ -599,13 +627,23 @@ func TestExtractRejectsWritingThroughSymlinkChain(t *testing.T) {
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gz)
-	tw.WriteHeader(&tar.Header{Name: "a/", Typeflag: tar.TypeDir, Mode: 0o755})
+	if err := tw.WriteHeader(&tar.Header{Name: "a/", Typeflag: tar.TypeDir, Mode: 0o755}); err != nil {
+		t.Fatal(err)
+	}
 	// Each link stays inside the root when checked on its own.
-	tw.WriteHeader(&tar.Header{Name: "a/b", Typeflag: tar.TypeSymlink, Linkname: "..", Mode: 0o755})
-	tw.WriteHeader(&tar.Header{Name: "c", Typeflag: tar.TypeSymlink, Linkname: "a/b/..", Mode: 0o755})
+	if err := tw.WriteHeader(&tar.Header{Name: "a/b", Typeflag: tar.TypeSymlink, Linkname: "..", Mode: 0o755}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.WriteHeader(&tar.Header{Name: "c", Typeflag: tar.TypeSymlink, Linkname: "a/b/..", Mode: 0o755}); err != nil {
+		t.Fatal(err)
+	}
 	body := "pwned"
-	tw.WriteHeader(&tar.Header{Name: "c/evil", Typeflag: tar.TypeReg, Mode: 0o644, Size: int64(len(body))})
-	tw.Write([]byte(body))
+	if err := tw.WriteHeader(&tar.Header{Name: "c/evil", Typeflag: tar.TypeReg, Mode: 0o644, Size: int64(len(body))}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write([]byte(body)); err != nil {
+		t.Fatal(err)
+	}
 	tw.Close()
 	gz.Close()
 

@@ -84,13 +84,13 @@ func guiHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/{$}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		io.WriteString(w, guiPage)
+		_, _ = io.WriteString(w, guiPage)
 	})
 	mux.HandleFunc("/echo", func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
 		echoSeen.Store(int64(len(b)))
 		w.Header().Set("Content-Type", "application/octet-stream")
-		w.Write(b)
+		_, _ = w.Write(b)
 	})
 	mux.HandleFunc("/stream", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")

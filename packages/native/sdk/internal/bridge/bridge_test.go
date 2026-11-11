@@ -58,7 +58,7 @@ func TestTopicDropsOldestWhenSlow(t *testing.T) {
 	go func() {
 		args, _ := wire.NewDecoder([]byte("\x00\x00\x00\x02[]\x00\x00"))
 		first := true
-		tp.Stream()(krate.WithWindow(ctx, ""), args, func(write func(*wire.Encoder)) error {
+		_ = tp.Stream()(krate.WithWindow(ctx, ""), args, func(write func(*wire.Encoder)) error {
 			if first {
 				first = false
 				close(started)
@@ -71,7 +71,7 @@ func TestTopicDropsOldestWhenSlow(t *testing.T) {
 			n, _ := d.Int()
 			got <- n
 			return nil
-		})
+		}) // ends with the context error when the test cancels it
 	}()
 	deadline := time.Now().Add(2 * time.Second)
 	for tp.Subscribers() == 0 && time.Now().Before(deadline) {

@@ -66,8 +66,8 @@ func serveParent(t *testing.T, r rt) string {
 		}
 	}
 	srv := &http.Server{Handler: h}
-	go srv.Serve(ln)
-	t.Cleanup(func() { srv.Close() })
+	go func() { _ = srv.Serve(ln) }()
+	t.Cleanup(func() { _ = srv.Close() })
 	return ep.String()
 }
 

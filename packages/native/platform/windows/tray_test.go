@@ -20,6 +20,7 @@ func TestNotifyIconDataLayout(t *testing.T) {
 		want uintptr
 	}{
 		{"sizeof", unsafe.Sizeof(d), 976},
+		{"size", unsafe.Offsetof(d.size), 0},
 		{"hwnd", unsafe.Offsetof(d.hwnd), 8},
 		{"id", unsafe.Offsetof(d.id), 16},
 		{"flags", unsafe.Offsetof(d.flags), 20},

@@ -248,7 +248,9 @@ func TestFetchDoesNotBlockTheLoop(t *testing.T) {
 			case <-release:
 			case <-req.Context().Done():
 			}
-			io.WriteString(w, "done")
+			if _, err := io.WriteString(w, "done"); err != nil {
+				t.Error(err)
+			}
 		case "/hang":
 			hung.Add(1)
 			<-req.Context().Done()
@@ -256,9 +258,13 @@ func TestFetchDoesNotBlockTheLoop(t *testing.T) {
 		case "/echo":
 			b, _ := io.ReadAll(req.Body)
 			w.Header().Set("x-reply", req.Header.Get("x-test"))
-			io.WriteString(w, "got:"+string(b))
+			if _, err := io.WriteString(w, "got:"+string(b)); err != nil {
+				t.Error(err)
+			}
 		case "/bytes":
-			w.Write([]byte{0, 1, 2, 255})
+			if _, err := w.Write([]byte{0, 1, 2, 255}); err != nil {
+				t.Error(err)
+			}
 		}
 	}))
 	defer srv.Close()

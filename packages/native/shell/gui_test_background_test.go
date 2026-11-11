@@ -103,7 +103,9 @@ func TestGUIWindowsBackground(t *testing.T) {
 	}
 	waitWebProcs(t, 1)
 	closeExtras := `(async () => { const l = (await call("krate/window.list")).ok; for (const id of l) if (id !== "main") await call("krate/window.close", [id]); })()`
-	guiCtl.Eval(closeExtras)
+	if err := guiCtl.Eval(closeExtras); err != nil {
+		t.Fatal(err)
+	}
 	time.Sleep(500 * time.Millisecond)
 
 	// Current value of the host signal, as the page sees it.

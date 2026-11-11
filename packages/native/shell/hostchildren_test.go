@@ -78,7 +78,9 @@ func callFn(t *testing.T, c *http.Client, base, fn string) string {
 	if err != nil {
 		t.Fatalf("%s: %v (%q)", fn, err, b)
 	}
-	d.BeginObject()
+	if err := d.BeginObject(); err != nil {
+		t.Fatal(err)
+	}
 	for d.More() {
 		k, _ := d.Key()
 		switch k {
@@ -89,7 +91,9 @@ func callFn(t *testing.T, c *http.Client, base, fn string) string {
 			raw, _ := d.RawValue()
 			return "ERR " + string(raw)
 		default:
-			d.Skip()
+			if err := d.Skip(); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	t.Fatalf("%s: no result in %q", fn, b)

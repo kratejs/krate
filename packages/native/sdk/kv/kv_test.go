@@ -39,20 +39,34 @@ func TestGoAPI(t *testing.T) {
 	if v, ok, err := s.GetString(bg, "a"); v != "one" || !ok || err != nil {
 		t.Fatalf("%q %v %v", v, ok, err)
 	}
-	s.SetString(bg, "a", "two") // overwrite
+	if err := s.SetString(bg, "a", "two"); err != nil {
+		t.Fatal(err)
+	} // overwrite
 	if v, _, _ := s.GetString(bg, "a"); v != "two" {
 		t.Fatalf("%q", v)
 	}
 	blob := []byte{0, 255, 1}
-	s.SetBytes(bg, "b", blob)
+	if err := s.SetBytes(bg, "b", blob); err != nil {
+		t.Fatal(err)
+	}
 	if got, ok, err := s.GetBytes(bg, "b"); !ok || err != nil || !bytes.Equal(got, blob) {
 		t.Fatalf("%v %v %v", got, ok, err)
 	}
-	s.SetWith(bg, "c/1", func(e *wire.Encoder) { e.Int(1) })
-	s.SetWith(bg, "c/2", func(e *wire.Encoder) { e.Int(2) })
-	s.SetString(bg, "cc", "x")
-	s.SetString(bg, "c%", "x") // % must not act as a wildcard
-	s.SetString(bg, "éa", "x")
+	if err := s.SetWith(bg, "c/1", func(e *wire.Encoder) { e.Int(1) }); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetWith(bg, "c/2", func(e *wire.Encoder) { e.Int(2) }); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetString(bg, "cc", "x"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetString(bg, "c%", "x"); err != nil {
+		t.Fatal(err)
+	} // % must not act as a wildcard
+	if err := s.SetString(bg, "éa", "x"); err != nil {
+		t.Fatal(err)
+	}
 	for prefix, want := range map[string][]string{
 		"":          {"a", "b", "c%", "c/1", "c/2", "cc", "éa"},
 		"c/":        {"c/1", "c/2"},
@@ -67,7 +81,9 @@ func TestGoAPI(t *testing.T) {
 			t.Errorf("Keys(%q) = %v, %v; want %v", prefix, got, err, want)
 		}
 	}
-	s.Delete(bg, "a")
+	if err := s.Delete(bg, "a"); err != nil {
+		t.Fatal(err)
+	}
 	if _, ok, _ := s.Get(bg, "a"); ok {
 		t.Fatal("deleted key still there")
 	}
@@ -79,7 +95,9 @@ func TestGoAPI(t *testing.T) {
 func TestSurvivesReopen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "kv.db")
 	d, _ := db.OpenPath(path)
-	New(d).SetString(bg, "k", "v")
+	if err := New(d).SetString(bg, "k", "v"); err != nil {
+		t.Fatal(err)
+	}
 	d.Close()
 	d, _ = db.OpenPath(path)
 	defer d.Close()
@@ -166,11 +184,21 @@ func TestUIRoundTripOfWireValues(t *testing.T) {
 	}
 	// The blobs come back intact.
 	d := r.OKDec
-	d.BeginObject()
-	d.Key()
-	d.Skip()
-	d.Key()
-	d.BeginArray()
+	if err := d.BeginObject(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Key(); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Skip(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Key(); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.BeginArray(); err != nil {
+		t.Fatal(err)
+	}
 	b1, _ := d.Bytes()
 	b2, _ := d.Bytes()
 	if !bytes.Equal(b1, []byte{7}) || !bytes.Equal(b2, []byte{8, 9}) {

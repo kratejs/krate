@@ -30,7 +30,7 @@ func registerMemHandlers(s *testServer) {
 	html := func(body string) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			io.WriteString(w, body)
+			_, _ = io.WriteString(w, body)
 		}
 	}
 	s.mux.HandleFunc("/tall", html(tallPage))

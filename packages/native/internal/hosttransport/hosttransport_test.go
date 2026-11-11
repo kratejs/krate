@@ -105,9 +105,11 @@ func TestTCPHandshake(t *testing.T) {
 		t.Fatal(err)
 	}
 	srv := &http.Server{Handler: Guard(ep, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		io.WriteString(w, "hello")
+		if _, err := io.WriteString(w, "hello"); err != nil {
+			t.Error(err)
+		}
 	}))}
-	go srv.Serve(ln)
+	go func() { _ = srv.Serve(ln) }()
 	defer srv.Close()
 
 	rt, tr := NewTransport(ep)

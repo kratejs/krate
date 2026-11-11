@@ -87,7 +87,7 @@ func newRemoteChild(initial int64) *remoteChild {
 			return err
 		}
 		n, _ := a.Int()
-		a.EndArray()
+		_ = a.EndArray()
 		c.streamUp.Add(1)
 		defer func() { c.streamCx <- struct{}{} }()
 		for i := int64(0); i < n; i++ {
@@ -236,7 +236,7 @@ func TestRemoteCancelPropagates(t *testing.T) {
 	go func() {
 		resp, err := http.DefaultClient.Do(req)
 		if err == nil {
-			io.Copy(io.Discard, resp.Body)
+			_, _ = io.Copy(io.Discard, resp.Body) // the test cancels the request
 			resp.Body.Close()
 		}
 	}()
@@ -257,7 +257,7 @@ func TestRemoteCancelPropagates(t *testing.T) {
 	go func() {
 		resp, err := http.DefaultClient.Do(req2)
 		if err == nil {
-			io.Copy(io.Discard, resp.Body)
+			_, _ = io.Copy(io.Discard, resp.Body) // the test cancels the request
 			resp.Body.Close()
 		}
 	}()
@@ -357,14 +357,18 @@ func readSignals(t *testing.T, ts *httptest.Server) (<-chan int64, func()) {
 			if err != nil {
 				return
 			}
-			d.BeginObject()
+			if d.BeginObject() != nil {
+				return
+			}
 			for d.More() {
 				k, _ := d.Key()
 				if k == "v" {
 					v, _ := d.Int()
 					out <- v
 				} else {
-					d.Skip()
+					if d.Skip() != nil {
+						return
+					}
 				}
 			}
 		}

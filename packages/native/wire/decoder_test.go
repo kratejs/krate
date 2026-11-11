@@ -67,7 +67,9 @@ func TestDecodeStruct(t *testing.T) {
 				t.Fatal(err)
 			}
 		case "tags":
-			d.BeginArray()
+			if err := d.BeginArray(); err != nil {
+				t.Fatal(err)
+			}
 			var got []string
 			for d.More() {
 				s, err := d.String()
@@ -111,7 +113,9 @@ func TestDecodeStruct(t *testing.T) {
 
 func TestIsNullDoesNotConsumeOther(t *testing.T) {
 	d := dec(t, `[1,null,"x"]`)
-	d.BeginArray()
+	if err := d.BeginArray(); err != nil {
+		t.Fatal(err)
+	}
 	d.More()
 	if d.IsNull() {
 		t.Fatal("1 is not null")
@@ -159,7 +163,12 @@ func TestDecodeErrors(t *testing.T) {
 		{"float for int", `1.5`, func(d *Decoder) error { _, err := d.Int(); return err }},
 		{"int overflow", `9223372036854775808`, func(d *Decoder) error { _, err := d.Int(); return err }},
 		{"negative uint", `-1`, func(d *Decoder) error { _, err := d.Uint(); return err }},
-		{"leading zero", `01`, func(d *Decoder) error { d.Int(); return d.Finish() }},
+		{"leading zero", `01`, func(d *Decoder) error {
+			if _, err := d.Int(); err != nil {
+				t.Error(err)
+			}
+			return d.Finish()
+		}},
 		{"bad escape", `"\q"`, func(d *Decoder) error { _, err := d.String(); return err }},
 		{"unterminated", `"abc`, func(d *Decoder) error { _, err := d.String(); return err }},
 		{"ctl in string", "\"a\nb\"", func(d *Decoder) error { _, err := d.String(); return err }},
@@ -167,26 +176,61 @@ func TestDecodeErrors(t *testing.T) {
 		{"blob extra", `{"$b":0,"x":1}`, func(d *Decoder) error { _, err := d.Bytes(); return err }},
 		{"bad time", `{"$d":"yesterday"}`, func(d *Decoder) error { _, err := d.Time(); return err }},
 		{"bad base64", `"!!"`, func(d *Decoder) error { _, err := d.Bytes(); return err }},
-		{"value before key", `{"a":1}`, func(d *Decoder) error { d.BeginObject(); _, err := d.Int(); return err }},
-		{"unread member", `{"a":1}`, func(d *Decoder) error { d.BeginObject(); return d.EndObject() }},
-		{"unread element", `[1]`, func(d *Decoder) error { d.BeginArray(); return d.EndArray() }},
+		{"value before key", `{"a":1}`, func(d *Decoder) error {
+			if err := d.BeginObject(); err != nil {
+				t.Error(err)
+			}
+			_, err := d.Int()
+			return err
+		}},
+		{"unread member", `{"a":1}`, func(d *Decoder) error {
+			if err := d.BeginObject(); err != nil {
+				t.Error(err)
+			}
+			return d.EndObject()
+		}},
+		{"unread element", `[1]`, func(d *Decoder) error {
+			if err := d.BeginArray(); err != nil {
+				t.Error(err)
+			}
+			return d.EndArray()
+		}},
 		{"trailing comma", `[1,]`, func(d *Decoder) error {
-			d.BeginArray()
+			if err := d.BeginArray(); err != nil {
+				t.Error(err)
+			}
 			d.More()
-			d.Int()
+			if _, err := d.Int(); err != nil {
+				t.Error(err)
+			}
 			d.More()
 			return d.Skip()
 		}},
 		{"missing comma", `[1 2]`, func(d *Decoder) error {
-			d.BeginArray()
+			if err := d.BeginArray(); err != nil {
+				t.Error(err)
+			}
 			d.More()
-			d.Int()
+			if _, err := d.Int(); err != nil {
+				t.Error(err)
+			}
 			_, err := d.Int()
 			return err
 		}},
 		{"skip garbage", `{"a":tru}`, func(d *Decoder) error { return d.Skip() }},
-		{"trailing data", `1 2`, func(d *Decoder) error { d.Int(); return d.Finish() }},
-		{"two roots", `1 2`, func(d *Decoder) error { d.Int(); _, err := d.Int(); return err }},
+		{"trailing data", `1 2`, func(d *Decoder) error {
+			if _, err := d.Int(); err != nil {
+				t.Error(err)
+			}
+			return d.Finish()
+		}},
+		{"two roots", `1 2`, func(d *Decoder) error {
+			if _, err := d.Int(); err != nil {
+				t.Error(err)
+			}
+			_, err := d.Int()
+			return err
+		}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -298,16 +342,24 @@ func TestReadFramesStopsOnError(t *testing.T) {
 
 func TestSubDecoder(t *testing.T) {
 	d := dec(t, `{"args":[{"$b":0},"x"],"z":1}`, []byte("blob"))
-	d.BeginObject()
+	if err := d.BeginObject(); err != nil {
+		t.Fatal(err)
+	}
 	d.More()
-	d.Key()
+	if _, err := d.Key(); err != nil {
+		t.Fatal(err)
+	}
 	sub, err := d.SubDecoder()
 	if err != nil {
 		t.Fatal(err)
 	}
 	d.More()
-	d.Key()
-	d.Skip()
+	if _, err := d.Key(); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Skip(); err != nil {
+		t.Fatal(err)
+	}
 	if err := d.EndObject(); err != nil {
 		t.Fatal(err)
 	}
@@ -349,9 +401,13 @@ func TestRoundTripRandomish(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	d.BeginArray()
+	if err := d.BeginArray(); err != nil {
+		t.Fatal(err)
+	}
 	for i := 0; d.More(); i++ {
-		d.BeginObject()
+		if err := d.BeginObject(); err != nil {
+			t.Fatal(err)
+		}
 		for d.More() {
 			k, _ := d.Key()
 			switch k {
@@ -369,9 +425,13 @@ func TestRoundTripRandomish(t *testing.T) {
 				}
 			}
 		}
-		d.EndObject()
+		if err := d.EndObject(); err != nil {
+			t.Fatal(err)
+		}
 	}
-	d.EndArray()
+	if err := d.EndArray(); err != nil {
+		t.Fatal(err)
+	}
 	if err := d.Finish(); err != nil {
 		t.Fatal(err)
 	}

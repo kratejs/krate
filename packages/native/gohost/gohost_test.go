@@ -75,12 +75,6 @@ func (l *logSink) logf(format string, args ...any) {
 	l.mu.Unlock()
 }
 
-func (l *logSink) text() string {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return strings.Join(l.lines, "\n")
-}
-
 // frontend is the window-facing side: a scheme handler whose registry
 // forwards to the child.
 func frontend(t *testing.T, child *gohost.Child) *httptest.Server {
@@ -137,7 +131,9 @@ func call(t *testing.T, ts *httptest.Server, fn string, args func(*wire.Encoder)
 			raw, _ := d.RawValue()
 			t.Fatalf("call %s failed: %s", fn, raw)
 		}
-		d.Skip()
+		if err := d.Skip(); err != nil {
+			t.Fatal(err)
+		}
 	}
 	t.Fatalf("call %s: no result", fn)
 	return nil
@@ -168,14 +164,18 @@ func watch(t *testing.T, ts *httptest.Server) (<-chan int64, func()) {
 			if err != nil {
 				return
 			}
-			d.BeginObject()
+			if d.BeginObject() != nil {
+				return
+			}
 			for d.More() {
 				k, _ := d.Key()
 				if k == "v" {
 					v, _ := d.Int()
 					out <- v
 				} else {
-					d.Skip()
+					if d.Skip() != nil {
+						return
+					}
 				}
 			}
 		}
@@ -201,7 +201,11 @@ func TestChildLifecycle(t *testing.T) {
 	if err := child.Start(context.Background(), b1, []string{"KRATE_TEST=1"}); err != nil {
 		t.Fatal(err)
 	}
-	defer child.Stop()
+	defer func() {
+		if err := child.Stop(); err != nil {
+			t.Error(err)
+		}
+	}()
 	ts := frontend(t, child)
 
 	if v := version(t, ts); v != "v1" {
@@ -281,7 +285,9 @@ func TestChildLifecycle(t *testing.T) {
 	}
 	defer resp.Body.Close()
 	body := new(bytes.Buffer)
-	body.ReadFrom(resp.Body)
+	if _, err := body.ReadFrom(resp.Body); err != nil {
+		t.Fatal(err)
+	}
 	if !strings.Contains(body.String(), `"unavailable"`) {
 		t.Errorf("call after Stop: %q", body.String())
 	}
@@ -306,7 +312,11 @@ func TestChildLogsAndCancel(t *testing.T) {
 	if err := child.Start(context.Background(), b1, nil); err != nil {
 		t.Fatal(err)
 	}
-	defer child.Stop()
+	defer func() {
+		if err := child.Stop(); err != nil {
+			t.Error(err)
+		}
+	}()
 	ts := frontend(t, child)
 
 	// A blocked call is cancelled by the caller dropping the request.
@@ -346,7 +356,11 @@ func TestChildCrashAndRestart(t *testing.T) {
 	if err := child.Start(context.Background(), b1, nil); err != nil {
 		t.Fatal(err)
 	}
-	defer child.Stop()
+	defer func() {
+		if err := child.Stop(); err != nil {
+			t.Error(err)
+		}
+	}()
 	ts := frontend(t, child)
 	vals, stop := watch(t, ts)
 	defer stop()
@@ -389,7 +403,9 @@ func TestChildNotReady(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "before it was ready") {
 		t.Fatalf("err = %v", err)
 	}
-	child.Stop()
+	if err := child.Stop(); err != nil {
+		t.Fatal(err)
+	}
 
 	child = gohost.NewChild(gohost.ChildOptions{Logf: func(string, ...any) {}, ReadyTimeout: 300 * time.Millisecond})
 	sleep, err := exec.LookPath("sleep")
@@ -398,12 +414,16 @@ func TestChildNotReady(t *testing.T) {
 	}
 	// sleep ignores stdin and prints nothing, but needs an argument.
 	script := filepath.Join(t.TempDir(), "slow.sh")
-	os.WriteFile(script, []byte("#!/bin/sh\nexec "+sleep+" 30\n"), 0o755)
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nexec "+sleep+" 30\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	err = child.Start(context.Background(), script, nil)
 	if err == nil || !strings.Contains(err.Error(), "not ready") {
 		t.Fatalf("timeout err = %v", err)
 	}
-	child.Stop()
+	if err := child.Stop(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestRunInProcess(t *testing.T) {
@@ -414,7 +434,9 @@ func TestRunInProcess(t *testing.T) {
 	defer cleanup()
 	sock := filepath.Join(dir, "s.sock")
 	// A stale file must not stop the listener.
-	os.WriteFile(sock, []byte("stale"), 0o600)
+	if err := os.WriteFile(sock, []byte("stale"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	stdinR, stdinW, _ := os.Pipe()
 	var ready bytes.Buffer
@@ -453,7 +475,9 @@ func TestRunInProcess(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := new(bytes.Buffer)
-	body.ReadFrom(resp.Body)
+	if _, err := body.ReadFrom(resp.Body); err != nil {
+		t.Fatal(err)
+	}
 	resp.Body.Close()
 	if !strings.Contains(body.String(), `"ok":"hi"`) {
 		t.Errorf("body %q", body.String())
@@ -551,7 +575,9 @@ func TestRunPanicStacksOnlyInDev(t *testing.T) {
 			t.Fatal(err)
 		}
 		body := new(bytes.Buffer)
-		body.ReadFrom(resp.Body)
+		if _, err := body.ReadFrom(resp.Body); err != nil {
+			t.Fatal(err)
+		}
 		resp.Body.Close()
 		hasStack := strings.Contains(body.String(), "goroutine")
 		if hasStack != dev {
@@ -572,7 +598,11 @@ func TestChildTCPTransport(t *testing.T) {
 	if err := child.Start(context.Background(), b1, []string{"KRATE_TEST=1"}); err != nil {
 		t.Fatal(err)
 	}
-	defer child.Stop()
+	defer func() {
+		if err := child.Stop(); err != nil {
+			t.Error(err)
+		}
+	}()
 	ts := frontend(t, child)
 	if v := version(t, ts); v != "v1" {
 		t.Fatalf("version = %q", v)

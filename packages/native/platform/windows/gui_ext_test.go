@@ -104,7 +104,7 @@ func TestGUITrayLifecycle(t *testing.T) {
 	// the shell would send (version 4 layout).
 	post := func(ev uint32) {
 		guiApp.Dispatch(func() {
-			pPostMessageW.Call(guiApp.utilWnd, wmTrayCallback, 0, uintptr(ev)|uintptr(trayIconID)<<16)
+			_, _, _ = pPostMessageW.Call(guiApp.utilWnd, wmTrayCallback, 0, uintptr(ev)|uintptr(trayIconID)<<16)
 		})
 	}
 	post(ninSelect)
@@ -116,7 +116,7 @@ func TestGUITrayLifecycle(t *testing.T) {
 	}
 
 	// The taskbar being recreated re-adds the icon.
-	guiApp.Dispatch(func() { pPostMessageW.Call(guiApp.utilWnd, uintptr(guiApp.taskbarMsg), 0, 0) })
+	guiApp.Dispatch(func() { _, _, _ = pPostMessageW.Call(guiApp.utilWnd, uintptr(guiApp.taskbarMsg), 0, 0) })
 	time.Sleep(100 * time.Millisecond)
 	if err := guiApp.SetTray(&caps.TrayIcon{Tooltip: "after TaskbarCreated"}); err != nil {
 		t.Errorf("modify after re-add: %v", err)
@@ -133,7 +133,7 @@ func TestGUITrayLifecycle(t *testing.T) {
 	if err := guiApp.SetTray(&caps.TrayIcon{Tooltip: "again"}); err != nil {
 		t.Fatalf("re-add: %v", err)
 	}
-	guiApp.SetTray(nil)
+	_ = guiApp.SetTray(nil)
 }
 
 type hotEvents struct {
@@ -146,10 +146,10 @@ func (e *hotEvents) n() int       { e.mu.Lock(); defer e.mu.Unlock(); return len
 
 func sendKeys(vks ...byte) {
 	for _, vk := range vks {
-		pKeybdEvent.Call(uintptr(vk), 0, 0, 0)
+		_, _, _ = pKeybdEvent.Call(uintptr(vk), 0, 0, 0)
 	}
 	for i := len(vks) - 1; i >= 0; i-- {
-		pKeybdEvent.Call(uintptr(vks[i]), 0, 2, 0) // KEYEVENTF_KEYUP
+		_, _, _ = pKeybdEvent.Call(uintptr(vks[i]), 0, 2, 0) // KEYEVENTF_KEYUP
 	}
 }
 
@@ -162,7 +162,7 @@ func TestGUIHotkeys(t *testing.T) {
 	if err := guiApp.RegisterShortcut("hk1", acc); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	defer guiApp.UnregisterShortcut("hk1")
+	defer func() { _ = guiApp.UnregisterShortcut("hk1") }()
 
 	// The same combination again is refused and the error says why.
 	err := guiApp.RegisterShortcut("hk2", acc)
@@ -181,7 +181,7 @@ func TestGUIHotkeys(t *testing.T) {
 	// A WM_HOTKEY for the registered id reaches the handler by handle.
 	var id int32
 	guiApp.callMain(func() { id = guiApp.hot.byName["hk1"] })
-	guiApp.Dispatch(func() { pPostMessageW.Call(guiApp.utilWnd, wmHotkey, uintptr(id), 0) })
+	guiApp.Dispatch(func() { _, _, _ = pPostMessageW.Call(guiApp.utilWnd, wmHotkey, uintptr(id), 0) })
 	waitFor(t, "WM_HOTKEY", func() bool { return evs.n() >= 1 })
 	if evs.hs[0] != "hk1" {
 		t.Errorf("handle = %q", evs.hs[0])
@@ -215,7 +215,7 @@ func TestGUIHotkeys(t *testing.T) {
 	}
 	// A press for a released id is ignored.
 	n := evs.n()
-	guiApp.Dispatch(func() { pPostMessageW.Call(guiApp.utilWnd, wmHotkey, uintptr(id), 0) })
+	guiApp.Dispatch(func() { _, _, _ = pPostMessageW.Call(guiApp.utilWnd, wmHotkey, uintptr(id), 0) })
 	time.Sleep(100 * time.Millisecond)
 	if evs.n() != n {
 		t.Error("a released hotkey still fired")
@@ -297,7 +297,7 @@ func TestGUIToast(t *testing.T) {
 	if err := guiApp.CloseNotification("nope"); err != nil {
 		t.Errorf("closing an unknown id: %v", err)
 	}
-	guiApp.CloseNotification("t2")
+	_ = guiApp.CloseNotification("t2")
 	guiApp.callMain(func() {
 		if len(guiApp.toast.live) != 0 {
 			// Dismissed handlers remove entries asynchronously.

@@ -49,7 +49,9 @@ func frameKind(t testing.TB, d *wire.Decoder) (string, *wire.Decoder) {
 func TestStreamValuesThenEnd(t *testing.T) {
 	reg := NewRegistry()
 	reg.Stream("m.Count", func(ctx krate.Ctx, a *wire.Decoder, emit func(func(*wire.Encoder)) error) error {
-		a.BeginArray()
+		if err := a.BeginArray(); err != nil {
+			t.Error(err)
+		}
 		n, _ := a.Int()
 		for i := int64(1); i <= n; i++ {
 			if err := emit(func(e *wire.Encoder) { e.Int(i) }); err != nil {
@@ -91,7 +93,9 @@ func TestStreamValuesThenEnd(t *testing.T) {
 func TestStreamError(t *testing.T) {
 	reg := NewRegistry()
 	reg.Stream("m.Fail", func(ctx krate.Ctx, a *wire.Decoder, emit func(func(*wire.Encoder)) error) error {
-		emit(func(e *wire.Encoder) { e.String("first") })
+		if err := emit(func(e *wire.Encoder) { e.String("first") }); err != nil {
+			t.Error(err)
+		}
 		return krate.Errorf("quota", "out of quota")
 	})
 	reg.Stream("m.Panic", func(ctx krate.Ctx, a *wire.Decoder, emit func(func(*wire.Encoder)) error) error {

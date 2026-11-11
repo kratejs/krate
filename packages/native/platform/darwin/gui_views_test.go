@@ -33,7 +33,7 @@ func withViewPing(h http.Handler) http.Handler {
 			v, ok := caps.ViewOf(r)
 			viewPings <- viewPing{tag: r.URL.Query().Get("tag"), view: v, ok: ok}
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			io.WriteString(w, "<!doctype html><title>viewping</title><body>ping")
+			_, _ = io.WriteString(w, "<!doctype html><title>viewping</title><body>ping")
 			return
 		}
 		h.ServeHTTP(w, r)

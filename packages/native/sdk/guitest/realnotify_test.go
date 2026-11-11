@@ -67,7 +67,10 @@ func (e *dunstEnv) watchClosed(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { cmd.Process.Kill(); cmd.Wait() })
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill() // it may have exited already
+		_ = cmd.Wait()
+	})
 	ready := make(chan struct{}, 1)
 	go func() {
 		sc := bufio.NewScanner(out)
@@ -85,7 +88,9 @@ func (e *dunstEnv) watchClosed(t *testing.T) {
 				}
 			case inSig && strings.HasPrefix(strings.TrimSpace(line), "uint32 "):
 				var n uint32
-				fmt.Sscan(strings.TrimPrefix(strings.TrimSpace(line), "uint32 "), &n)
+				if _, err := fmt.Sscan(strings.TrimPrefix(strings.TrimSpace(line), "uint32 "), &n); err != nil {
+					t.Error(err)
+				}
 				nums = append(nums, n)
 				if len(nums) == 2 {
 					e.closed <- [2]uint32{nums[0], nums[1]}
@@ -166,15 +171,6 @@ func waitEvent(t *testing.T, ch chan notify.Event, what string) notify.Event {
 	case <-time.After(5 * time.Second):
 		t.Fatalf("no notification event: %s", what)
 		return notify.Event{}
-	}
-}
-
-func noEvent(t *testing.T, ch chan notify.Event, what string) {
-	t.Helper()
-	select {
-	case ev := <-ch:
-		t.Fatalf("unexpected notification event (%s): %+v", what, ev)
-	case <-time.After(400 * time.Millisecond):
 	}
 }
 
@@ -436,6 +432,8 @@ func mustPNG() []byte {
 		img.Pix[i] = 0xff
 	}
 	var b bytes.Buffer
-	png.Encode(&b, img)
+	if err := png.Encode(&b, img); err != nil {
+		panic(err)
+	}
 	return b.Bytes()
 }

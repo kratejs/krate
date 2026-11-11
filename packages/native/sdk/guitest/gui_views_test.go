@@ -71,11 +71,11 @@ const forgePage = `<!doctype html><title>forge</title><body>forge<script>
 func registerForgeHandlers(mux *http.ServeMux) {
 	mux.HandleFunc("/forge", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		io.WriteString(w, forgePage)
+		_, _ = io.WriteString(w, forgePage)
 	})
 	mux.HandleFunc("/forge-report", func(w http.ResponseWriter, r *http.Request) {
 		var rep forgeReport
-		json.NewDecoder(r.Body).Decode(&rep)
+		_ = json.NewDecoder(r.Body).Decode(&rep)
 		forgeReports <- rep
 		w.WriteHeader(204)
 	})
@@ -227,11 +227,11 @@ const chatPage = `<!doctype html><title>chat</title><body>chat<script>
 func registerChatHandlers(mux *http.ServeMux) {
 	mux.HandleFunc("/chat", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		io.WriteString(w, chatPage)
+		_, _ = io.WriteString(w, chatPage)
 	})
 	mux.HandleFunc("/chat-report", func(w http.ResponseWriter, r *http.Request) {
 		var rep chatReport
-		json.NewDecoder(r.Body).Decode(&rep)
+		_ = json.NewDecoder(r.Body).Decode(&rep)
 		chatReports <- rep
 		w.WriteHeader(204)
 	})

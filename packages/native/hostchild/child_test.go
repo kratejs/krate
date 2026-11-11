@@ -162,7 +162,11 @@ func setupEnv(t *testing.T, r rt, mutate func(src string) string, env, funcs, st
 	if err := f.child.Start(context.Background(), r.bin, env); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { f.child.Stop() })
+	t.Cleanup(func() {
+		if err := f.child.Stop(); err != nil {
+			t.Error(err)
+		}
+	})
 	reg := scheme.NewRegistry()
 	f.child.Remote().RegisterInto(reg,
 		append([]string{"t.Echo", "t.Add", "t.Window", "t.Fail", "t.Plain", "t.Bad", "t.Wait", "t.Fs", "t.Bump", "t.Subs", "t.Missing"}, funcs...),
@@ -226,7 +230,9 @@ func (f *fixture) post(t *testing.T, fn string, window string, args func(*wire.E
 			sub, _ := wire.NewDecoder(append([]byte{}, mustFrame(raw)...))
 			res.err = readErr(t, sub)
 		default:
-			d.Skip()
+			if err := d.Skip(); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	return res
@@ -258,7 +264,9 @@ func readErr(t *testing.T, d *wire.Decoder) *krate.Error {
 				e.Data = string(raw)
 			}
 		default:
-			d.Skip()
+			if err := d.Skip(); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	return e
@@ -398,7 +406,7 @@ func TestCallCancel(t *testing.T) {
 		req.Header.Set("x-krate-window", "wc")
 		go func() {
 			if resp, err := http.DefaultClient.Do(req); err == nil {
-				io.Copy(io.Discard, resp.Body)
+				_, _ = io.Copy(io.Discard, resp.Body) // the test cancels the request
 				resp.Body.Close()
 			}
 		}()
@@ -435,14 +443,18 @@ func streamID(t *testing.T, f *fixture, fn string, n int) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	d.BeginObject()
+	if err := d.BeginObject(); err != nil {
+		t.Fatal(err)
+	}
 	for d.More() {
 		k, _ := d.Key()
 		if k == "stream" {
 			s, _ := d.String()
 			return s
 		}
-		d.Skip()
+		if err := d.Skip(); err != nil {
+			t.Fatal(err)
+		}
 	}
 	t.Fatalf("%s: no stream id", fn)
 	return ""
@@ -463,7 +475,9 @@ func TestStreams(t *testing.T) {
 			if err != nil {
 				break
 			}
-			d.BeginObject()
+			if err := d.BeginObject(); err != nil {
+				t.Fatal(err)
+			}
 			for d.More() {
 				k, _ := d.Key()
 				switch k {
@@ -472,9 +486,13 @@ func TestStreams(t *testing.T) {
 					got = append(got, n)
 				case "end":
 					end = true
-					d.Skip()
+					if err := d.Skip(); err != nil {
+						t.Fatal(err)
+					}
 				default:
-					d.Skip()
+					if err := d.Skip(); err != nil {
+						t.Fatal(err)
+					}
 				}
 			}
 		}
@@ -507,14 +525,18 @@ func TestStreams(t *testing.T) {
 			if err != nil {
 				break
 			}
-			d.BeginObject()
+			if err := d.BeginObject(); err != nil {
+				t.Fatal(err)
+			}
 			for d.More() {
 				k, _ := d.Key()
 				if k == "err" {
 					e := readErr(t, mustDecoder(t, d))
 					sawErr = e.Code == "oops" && e.Message == "mid-stream"
 				} else {
-					d.Skip()
+					if err := d.Skip(); err != nil {
+						t.Fatal(err)
+					}
 				}
 			}
 		}
@@ -549,14 +571,18 @@ func watch(t *testing.T, f *fixture) (<-chan int64, func()) {
 			if err != nil {
 				return
 			}
-			d.BeginObject()
+			if d.BeginObject() != nil {
+				return
+			}
 			for d.More() {
 				k, _ := d.Key()
 				if k == "v" {
 					v, _ := d.Int()
 					out <- v
 				} else {
-					d.Skip()
+					if d.Skip() != nil {
+						return
+					}
 				}
 			}
 		}

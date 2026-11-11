@@ -56,10 +56,14 @@ func TestHeadersSentOnce(t *testing.T) {
 	w.Header().Set("X-A", "1")
 	w.WriteHeader(201)
 	w.WriteHeader(404)
-	w.Write([]byte("a"))
+	if _, err := w.Write([]byte("a")); err != nil {
+		t.Fatal(err)
+	}
 	w.Header().Set("X-Late", "1")
 	w.WriteHeader(500)
-	w.Write([]byte("b"))
+	if _, err := w.Write([]byte("b")); err != nil {
+		t.Fatal(err)
+	}
 	w.finish()
 	if got := s.kinds(); got != "response,data,data,finish" {
 		t.Fatalf("events = %s", got)
@@ -72,7 +76,9 @@ func TestHeadersSentOnce(t *testing.T) {
 
 func TestDefaultStatusAndSniff(t *testing.T) {
 	w, s, _ := newTestWriter()
-	w.Write([]byte("<!doctype html><html></html>"))
+	if _, err := w.Write([]byte("<!doctype html><html></html>")); err != nil {
+		t.Fatal(err)
+	}
 	w.finish()
 	r := s.ev[0]
 	if r.status != 200 || !strings.HasPrefix(r.header.Get("Content-Type"), "text/html") {
@@ -83,7 +89,9 @@ func TestDefaultStatusAndSniff(t *testing.T) {
 func TestExplicitContentTypeKept(t *testing.T) {
 	w, s, _ := newTestWriter()
 	w.Header().Set("Content-Type", "application/x-krate-frames")
-	w.Write([]byte("<html>"))
+	if _, err := w.Write([]byte("<html>")); err != nil {
+		t.Fatal(err)
+	}
 	if got := s.ev[0].header.Get("Content-Type"); got != "application/x-krate-frames" {
 		t.Fatalf("content type = %q", got)
 	}
@@ -96,7 +104,9 @@ func TestFlushSendsHeadOnly(t *testing.T) {
 	if got := s.kinds(); got != "response" {
 		t.Fatalf("events = %s", got)
 	}
-	w.Write([]byte("x"))
+	if _, err := w.Write([]byte("x")); err != nil {
+		t.Fatal(err)
+	}
 	w.finish()
 	if got := s.kinds(); got != "response,data,finish" {
 		t.Fatalf("events = %s", got)
@@ -147,7 +157,9 @@ func TestWriteAfterFinish(t *testing.T) {
 
 func TestStopBeforeFinish(t *testing.T) {
 	w, s, ctx := newTestWriter()
-	w.Write([]byte("a"))
+	if _, err := w.Write([]byte("a")); err != nil {
+		t.Fatal(err)
+	}
 	w.stop()
 	if ctx.Err() == nil {
 		t.Fatal("context not cancelled")
@@ -175,7 +187,9 @@ func TestStopBeforeAnyWrite(t *testing.T) {
 func TestDataIsCopied(t *testing.T) {
 	w, s, _ := newTestWriter()
 	buf := []byte("abc")
-	w.Write(buf)
+	if _, err := w.Write(buf); err != nil {
+		t.Fatal(err)
+	}
 	buf[0] = 'z'
 	if s.ev[1].data != "abc" {
 		t.Fatalf("data = %q", s.ev[1].data)
@@ -202,7 +216,9 @@ func TestServeHandlerPanicBeforeHeader(t *testing.T) {
 func TestServeHandlerPanicAfterHeader(t *testing.T) {
 	w, s, _ := newTestWriter()
 	serve(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Write([]byte("part"))
+		if _, err := w.Write([]byte("part")); err != nil {
+			t.Error(err)
+		}
 		panic("boom")
 	}), req(t), w)
 	if got := s.kinds(); got != "response,data,fail" {
@@ -233,7 +249,9 @@ func TestServeStoppedHandlerSeesCancel(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		serve(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
-			rw.Write([]byte("a"))
+			if _, err := rw.Write([]byte("a")); err != nil {
+				t.Error(err)
+			}
 			close(started)
 			<-r.Context().Done()
 			if _, err := rw.Write([]byte("b")); err == nil {
@@ -258,7 +276,9 @@ func TestWorksWithHTTPTestHandlerStyle(t *testing.T) {
 		}
 		buf := make([]byte, 16)
 		n, _ := r.Body.Read(buf)
-		w.Write(buf[:n])
+		if _, err := w.Write(buf[:n]); err != nil {
+			t.Error(err)
+		}
 	})
 	r, err := newHTTPRequest(context.Background(), "POST", "krate://app/echo?q=1", map[string]string{"x-test": "y"}, []byte("hello"))
 	if err != nil {

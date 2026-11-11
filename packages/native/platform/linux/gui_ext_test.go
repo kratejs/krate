@@ -254,7 +254,9 @@ func TestGUIDialogs(t *testing.T) {
 
 	dir := t.TempDir()
 	file := filepath.Join(dir, "chosen.txt")
-	os.WriteFile(file, []byte("x"), 0o644)
+	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	DialogHook = func(p *DialogProbe) bool {
 		p.Show()
 		go func() {

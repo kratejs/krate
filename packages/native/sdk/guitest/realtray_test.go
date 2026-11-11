@@ -102,12 +102,18 @@ func TestRealXEmbedTray(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tray.New with only an XEmbed tray: %v", err)
 	}
-	defer tr.Remove()
+	defer func() {
+		if err := tr.Remove(); err != nil {
+			t.Error(err)
+		}
+	}()
 	docked := func() bool { return linux.XEmbedTrayEmbedded(plat) }
 	// A tray manager that has only just taken the selection can miss the
 	// first dock request; a real tray has been up for a while.
 	if !waitUntil(3*time.Second, docked) {
-		tr.Remove()
+		if err := tr.Remove(); err != nil {
+			t.Fatal(err)
+		}
 		if tr, err = tray.New(opts); err != nil {
 			t.Fatal(err)
 		}
@@ -249,7 +255,11 @@ func TestRealStatusNotifierHost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer tr.Remove()
+	defer func() {
+		if err := tr.Remove(); err != nil {
+			t.Error(err)
+		}
+	}()
 
 	var entry dbusiface.Struct
 	eventually(t, "the host to list our item", func() bool {

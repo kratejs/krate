@@ -125,11 +125,15 @@ func TestWALAndPragmas(t *testing.T) {
 
 func TestTransactionRollbackAndCommit(t *testing.T) {
 	d := open(t)
-	d.Exec(bg, "CREATE TABLE t(id INTEGER PRIMARY KEY, v TEXT UNIQUE)")
+	if _, err := d.Exec(bg, "CREATE TABLE t(id INTEGER PRIMARY KEY, v TEXT UNIQUE)"); err != nil {
+		t.Fatal(err)
+	}
 
 	boom := errors.New("boom")
 	err := d.Transaction(bg, func(tx *Tx) error {
-		tx.Exec(bg, "INSERT INTO t(v) VALUES('a')")
+		if _, err := tx.Exec(bg, "INSERT INTO t(v) VALUES('a')"); err != nil {
+			t.Error(err)
+		}
 		return boom
 	})
 	if !errors.Is(err, boom) {
@@ -141,11 +145,15 @@ func TestTransactionRollbackAndCommit(t *testing.T) {
 
 	// A panic rolls back too.
 	func() {
-		defer func() { recover() }()
-		d.Transaction(bg, func(tx *Tx) error {
-			tx.Exec(bg, "INSERT INTO t(v) VALUES('p')")
+		defer func() { _ = recover() }()
+		if err := d.Transaction(bg, func(tx *Tx) error {
+			if _, err := tx.Exec(bg, "INSERT INTO t(v) VALUES('p')"); err != nil {
+				return err
+			}
 			panic("x")
-		})
+		}); err != nil {
+			t.Error(err)
+		}
 	}()
 	if rows, _ := d.Query(bg, "SELECT * FROM t"); len(rows) != 0 {
 		t.Fatalf("panic left %v", rows)
@@ -182,7 +190,9 @@ func TestTransactionRollbackAndCommit(t *testing.T) {
 
 func TestConcurrentWritersInOneProcess(t *testing.T) {
 	d := open(t)
-	d.Exec(bg, "CREATE TABLE t(id INTEGER PRIMARY KEY, n INTEGER)")
+	if _, err := d.Exec(bg, "CREATE TABLE t(id INTEGER PRIMARY KEY, n INTEGER)"); err != nil {
+		t.Fatal(err)
+	}
 	var wg sync.WaitGroup
 	errs := make(chan error, 16)
 	for g := 0; g < 8; g++ {
@@ -219,7 +229,9 @@ func TestTwoProcesses(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer d.Close()
-	d.Exec(bg, "CREATE TABLE t(id INTEGER PRIMARY KEY, who TEXT, n INTEGER)")
+	if _, err := d.Exec(bg, "CREATE TABLE t(id INTEGER PRIMARY KEY, who TEXT, n INTEGER)"); err != nil {
+		t.Fatal(err)
+	}
 
 	cmd := exec.Command(os.Args[0], "-test.run=^$")
 	cmd.Env = append(os.Environ(), "KRATE_DB_HELPER="+path)
@@ -274,7 +286,9 @@ func TestOpenNames(t *testing.T) {
 	if def1 != def2 || filepath.Base(def1.Path()) != "app.db" {
 		t.Fatal("Default is not a singleton on app.db")
 	}
-	CloseDefault()
+	if err := CloseDefault(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestMemoryDB(t *testing.T) {
@@ -283,8 +297,12 @@ func TestMemoryDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer d.Close()
-	d.Exec(bg, "CREATE TABLE t(a)")
-	d.Exec(bg, "INSERT INTO t VALUES(1)")
+	if _, err := d.Exec(bg, "CREATE TABLE t(a)"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Exec(bg, "INSERT INTO t VALUES(1)"); err != nil {
+		t.Fatal(err)
+	}
 	if rows, _ := d.Query(bg, "SELECT * FROM t"); len(rows) != 1 {
 		t.Fatalf("%v", rows)
 	}
@@ -398,7 +416,9 @@ func TestUIIds(t *testing.T) {
 func TestUITransaction(t *testing.T) {
 	d := open(t)
 	c := uiCaller(t, d)
-	d.Exec(bg, "CREATE TABLE t(id INTEGER PRIMARY KEY, v TEXT UNIQUE)")
+	if _, err := d.Exec(bg, "CREATE TABLE t(id INTEGER PRIMARY KEY, v TEXT UNIQUE)"); err != nil {
+		t.Fatal(err)
+	}
 	stmts := func(vals ...string) func(*wire.Encoder) {
 		return func(e *wire.Encoder) {
 			e.BeginArray()

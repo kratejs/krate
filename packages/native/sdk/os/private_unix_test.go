@@ -21,7 +21,9 @@ func TestDirsMustBelongToTheUser(t *testing.T) {
 		t.Fatalf("own directory: %v", err)
 	}
 	f := filepath.Join(t.TempDir(), "f")
-	os.WriteFile(f, nil, 0o600)
+	if err := os.WriteFile(f, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	if err := checkPrivate(f); err == nil {
 		t.Fatal("a file was accepted as a directory")
 	}

@@ -18,7 +18,9 @@ func TestAppendStringMatchesJSON(t *testing.T) {
 		var wb bytes.Buffer
 		enc := json.NewEncoder(&wb)
 		enc.SetEscapeHTML(false)
-		enc.Encode(s)
+		if err := enc.Encode(s); err != nil {
+			t.Fatal(err)
+		}
 		want := bytes.TrimSuffix(wb.Bytes(), []byte("\n"))
 		if got := appendString(nil, s); !bytes.Equal(got, want) {
 			t.Errorf("%q: got %s want %s", s, got, want)
@@ -128,8 +130,12 @@ func TestSoleKeyEscape(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		d.BeginArray()
-		d.BeginObject()
+		if err := d.BeginArray(); err != nil {
+			t.Fatal(err)
+		}
+		if err := d.BeginObject(); err != nil {
+			t.Fatal(err)
+		}
 		k, _ := d.Key()
 		v, _ := d.Int()
 		if k != key || v != 1 || d.More() {

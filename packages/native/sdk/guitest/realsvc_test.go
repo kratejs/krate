@@ -65,7 +65,10 @@ func startDaemon(t *testing.T, bin string, args ...string) *daemon {
 	if err := d.cmd.Start(); err != nil {
 		t.Fatalf("start %s: %v", bin, err)
 	}
-	go func() { d.cmd.Wait(); close(d.done) }()
+	go func() {
+		_ = d.cmd.Wait() // stop kills it, so the exit status is not an error
+		close(d.done)
+	}()
 	t.Cleanup(d.stop)
 	return d
 }
@@ -76,7 +79,7 @@ func (d *daemon) stop() {
 		return
 	default:
 	}
-	d.cmd.Process.Kill()
+	_ = d.cmd.Process.Kill()
 	<-d.done
 }
 

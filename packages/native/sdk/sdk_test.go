@@ -202,11 +202,15 @@ func TestClipboardRoundTrip(t *testing.T) {
 		t.Fatalf("image %v", b)
 	}
 	files := []string{"/x y/a.txt", "/b"}
-	clipboard.WriteFiles(files)
+	if err := clipboard.WriteFiles(files); err != nil {
+		t.Fatal(err)
+	}
 	if f, _ := clipboard.ReadFiles(); !reflect.DeepEqual(f, files) {
 		t.Fatalf("files %v", f)
 	}
-	clipboard.Clear()
+	if err := clipboard.Clear(); err != nil {
+		t.Fatal(err)
+	}
 	if s, _ := clipboard.ReadText(); s != "" {
 		t.Fatal("not cleared")
 	}
@@ -375,7 +379,9 @@ func TestMenuEventsReachThePage(t *testing.T) {
 	raw, _ := d.RawValue()
 	resp.Body.Close()
 	var res struct{ Stream string }
-	json.Unmarshal([]byte(strings.ReplaceAll(string(raw), `"stream"`, `"Stream"`)), &res)
+	if err := json.Unmarshal([]byte(strings.ReplaceAll(string(raw), `"stream"`, `"Stream"`)), &res); err != nil {
+		t.Fatal(err)
+	}
 	if res.Stream == "" {
 		t.Fatalf("no stream: %s", raw)
 	}
@@ -428,7 +434,9 @@ func TestDeniedStreamReportsPermission(t *testing.T) {
 		t.Fatalf("denied stream is not_found: %s", raw)
 	}
 	var res struct{ Stream string }
-	json.Unmarshal([]byte(strings.ReplaceAll(string(raw), `"stream"`, `"Stream"`)), &res)
+	if err := json.Unmarshal([]byte(strings.ReplaceAll(string(raw), `"stream"`, `"Stream"`)), &res); err != nil {
+		t.Fatal(err)
+	}
 	if res.Stream == "" {
 		// Denial may also be reported on the call itself.
 		if !strings.Contains(string(raw), "permission_denied") {
@@ -474,13 +482,21 @@ func TestWindowOps(t *testing.T) {
 	if st, _ = w.State(); !st.Fullscreen {
 		t.Fatal("fullscreen not applied")
 	}
-	w.Restore()
+	if err := w.Restore(); err != nil {
+		t.Fatal(err)
+	}
 	if st, _ = w.State(); st.Fullscreen {
 		t.Fatal("restore ignored")
 	}
-	w.SetTitle("T2")
-	w.SetSize(300, 200)
-	w.Navigate("/x")
+	if err := w.SetTitle("T2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.SetSize(300, 200); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Navigate("/x"); err != nil {
+		t.Fatal(err)
+	}
 	if st, _ = w.State(); st.Title != "T2" || st.Width != 300 {
 		t.Fatalf("state %+v", st)
 	}
@@ -529,13 +545,21 @@ func TestWindowOps(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("KRATE_APP_ID", "test.app")
 	main := window.Main()
-	main.SetSize(700, 500)
-	main.SetPosition(30, 40)
+	if err := main.SetSize(700, 500); err != nil {
+		t.Fatal(err)
+	}
+	if err := main.SetPosition(30, 40); err != nil {
+		t.Fatal(err)
+	}
 	if err := window.SaveState(main, "main"); err != nil {
 		t.Fatal(err)
 	}
-	main.SetSize(100, 100)
-	main.SetPosition(0, 0)
+	if err := main.SetSize(100, 100); err != nil {
+		t.Fatal(err)
+	}
+	if err := main.SetPosition(0, 0); err != nil {
+		t.Fatal(err)
+	}
 	if ok, err := window.RestoreState(main, "main"); err != nil || !ok {
 		t.Fatalf("restore %v %v", ok, err)
 	}

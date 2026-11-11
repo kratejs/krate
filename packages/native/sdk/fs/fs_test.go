@@ -110,7 +110,9 @@ func TestReadWriteInsideRoot(t *testing.T) {
 func TestTraversalIsDenied(t *testing.T) {
 	f := newFixture(t)
 	secret := filepath.Join(f.outside, "secret.txt")
-	os.WriteFile(secret, []byte("s"), 0o644)
+	if err := os.WriteFile(secret, []byte("s"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	paths := []string{
 		"../outside/secret.txt",
 		"sub/../../outside/secret.txt",
@@ -138,7 +140,9 @@ func TestTraversalIsDenied(t *testing.T) {
 	}
 	// A sibling whose name merely starts with the root's name is outside.
 	sibling := f.root + "-evil"
-	os.MkdirAll(sibling, 0o755)
+	if err := os.MkdirAll(sibling, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := f.sc.ReadDir(sibling); code(err) != "permission_denied" {
 		t.Errorf("prefix sibling: %v", err)
 	}
@@ -157,12 +161,18 @@ func TestTraversalIsDenied(t *testing.T) {
 func TestSymlinkEscapeIsDenied(t *testing.T) {
 	f := newFixture(t)
 	secret := filepath.Join(f.outside, "secret.txt")
-	os.WriteFile(secret, []byte("s"), 0o644)
+	if err := os.WriteFile(secret, []byte("s"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Symlink(f.outside, filepath.Join(f.root, "dirlink")); err != nil {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
-	os.Symlink(secret, filepath.Join(f.root, "filelink"))
-	os.Symlink(filepath.Join("..", "outside"), filepath.Join(f.root, "rellink"))
+	if err := os.Symlink(secret, filepath.Join(f.root, "filelink")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join("..", "outside"), filepath.Join(f.root, "rellink")); err != nil {
+		t.Fatal(err)
+	}
 
 	for _, p := range []string{"filelink", "dirlink/secret.txt", "rellink/secret.txt", "dirlink/new.txt"} {
 		if _, err := f.sc.ReadFile(p); code(err) != "permission_denied" {
@@ -200,8 +210,12 @@ func TestSymlinkEscapeIsDenied(t *testing.T) {
 	}
 
 	// A link that stays inside is fine.
-	os.WriteFile(filepath.Join(f.root, "real.txt"), []byte("r"), 0o644)
-	os.Symlink(filepath.Join(f.root, "real.txt"), filepath.Join(f.root, "ok"))
+	if err := os.WriteFile(filepath.Join(f.root, "real.txt"), []byte("r"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(f.root, "real.txt"), filepath.Join(f.root, "ok")); err != nil {
+		t.Fatal(err)
+	}
 	if s, err := f.sc.ReadText("ok"); err != nil || s != "r" {
 		t.Fatalf("%q %v", s, err)
 	}
@@ -210,9 +224,13 @@ func TestSymlinkEscapeIsDenied(t *testing.T) {
 func TestGrant(t *testing.T) {
 	f := newFixture(t)
 	picked := filepath.Join(f.outside, "picked.txt")
-	os.WriteFile(picked, []byte("p"), 0o644)
+	if err := os.WriteFile(picked, []byte("p"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	other := filepath.Join(f.outside, "other.txt")
-	os.WriteFile(other, []byte("o"), 0o644)
+	if err := os.WriteFile(other, []byte("o"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	if _, err := f.sc.ReadText(picked); code(err) != "permission_denied" {
 		t.Fatalf("before the grant: %v", err)
@@ -239,8 +257,12 @@ func TestGrant(t *testing.T) {
 
 	// A directory grant covers the subtree, not the parent.
 	dir := filepath.Join(f.outside, "proj")
-	os.MkdirAll(filepath.Join(dir, "src"), 0o755)
-	os.WriteFile(filepath.Join(dir, "src", "a.go"), []byte("a"), 0o644)
+	if err := os.MkdirAll(filepath.Join(dir, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "src", "a.go"), []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err := f.sc.Grant(dir); err != nil {
 		t.Fatal(err)
 	}
@@ -277,12 +299,16 @@ func TestGrant(t *testing.T) {
 func TestGrantThroughSymlinkGrantsTarget(t *testing.T) {
 	f := newFixture(t)
 	target := filepath.Join(f.outside, "t.txt")
-	os.WriteFile(target, []byte("t"), 0o644)
+	if err := os.WriteFile(target, []byte("t"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	link := filepath.Join(f.outside, "link.txt")
 	if err := os.Symlink(target, link); err != nil {
 		t.Skip(err)
 	}
-	f.sc.Grant(link)
+	if err := f.sc.Grant(link); err != nil {
+		t.Fatal(err)
+	}
 	if s, err := f.sc.ReadText(target); err != nil || s != "t" {
 		t.Fatalf("%q %v", s, err)
 	}
@@ -301,7 +327,9 @@ func TestRootsCannotBeRemovedOrMoved(t *testing.T) {
 	if _, err := os.Stat(f.root); err != nil {
 		t.Fatal("root vanished")
 	}
-	f.sc.WriteText("a", "a")
+	if err := f.sc.WriteText("a", "a"); err != nil {
+		t.Fatal(err)
+	}
 	if err := f.sc.Rename("a", "../outside/a"); code(err) != "permission_denied" {
 		t.Errorf("rename out of scope: %v", err)
 	}
@@ -309,11 +337,15 @@ func TestRootsCannotBeRemovedOrMoved(t *testing.T) {
 
 func TestReadLimits(t *testing.T) {
 	f := newFixture(t)
-	f.sc.Mkdir("d")
+	if err := f.sc.Mkdir("d"); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := f.sc.ReadFile("d"); code(err) != "is_directory" {
 		t.Errorf("%v", err)
 	}
-	os.WriteFile(filepath.Join(f.root, "bad.txt"), []byte("a\xffb"), 0o644)
+	if err := os.WriteFile(filepath.Join(f.root, "bad.txt"), []byte("a\xffb"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if s, err := f.sc.ReadText("bad.txt"); err != nil || s != "a�b" {
 		t.Errorf("%q %v", s, err)
 	}
@@ -346,7 +378,9 @@ func TestRegisterThroughCallEndpoint(t *testing.T) {
 	}
 
 	// fs:read can read but not write.
-	os.WriteFile(filepath.Join(f.root, "a"), []byte("hi"), 0o644)
+	if err := os.WriteFile(filepath.Join(f.root, "a"), []byte("hi"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	c = reg("fs:read")
 	if r := c.Call("krate/fs.readText", str("a")); r.OK != `"hi"` {
 		t.Fatalf("%+v", r)

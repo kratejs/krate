@@ -147,7 +147,11 @@ func startChild(t *testing.T, r *rig) *childRig {
 	if err := c.Start(context.Background(), bin, []string{gohost.ParentEnv + "=" + parent, "KRATE_APP_ID=test.child"}); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { c.Stop() })
+	t.Cleanup(func() {
+		if err := c.Stop(); err != nil {
+			t.Error(err)
+		}
+	})
 	return &childRig{c: c, rig: r}
 }
 

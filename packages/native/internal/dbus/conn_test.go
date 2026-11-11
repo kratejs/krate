@@ -100,7 +100,9 @@ func TestSignals(t *testing.T) {
 	got := make(chan *dbus.Message, 4)
 	cancelSub, err := listener.Subscribe(ctx, dbus.Match{Path: "/sig", Interface: "org.krate.Sig", Member: "Ping"}, func(m *dbus.Message) {
 		// Calling back into the connection from a callback must not deadlock.
-		listener.Call(ctx, dbus.BusName, dbus.BusPath, dbus.BusInterface, "GetId", "")
+		if _, err := listener.Call(ctx, dbus.BusName, dbus.BusPath, dbus.BusInterface, "GetId", ""); err != nil {
+			t.Error(err)
+		}
 		got <- m
 	})
 	if err != nil {
@@ -125,7 +127,9 @@ func TestSignals(t *testing.T) {
 		}
 	}
 	cancelSub()
-	emitter.Emit("/sig", "org.krate.Sig", "Ping", "u", uint32(9))
+	if err := emitter.Emit("/sig", "org.krate.Sig", "Ping", "u", uint32(9)); err != nil {
+		t.Fatal(err)
+	}
 	select {
 	case m := <-got:
 		t.Fatalf("signal after cancel: %v", m.Body)
