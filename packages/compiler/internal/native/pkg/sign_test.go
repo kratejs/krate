@@ -11,9 +11,13 @@ func env(m map[string]string) func(string) string { return func(k string) string
 
 func machoFile(t *testing.T, p string) {
 	t.Helper()
-	os.MkdirAll(filepath.Dir(p), 0o755)
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	// A 64-bit little-endian Mach-O magic is enough for isMachO.
-	os.WriteFile(p, []byte{0xcf, 0xfa, 0xed, 0xfe, 0, 0, 0, 0}, 0o755)
+	if err := os.WriteFile(p, []byte{0xcf, 0xfa, 0xed, 0xfe, 0, 0, 0, 0}, 0o755); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func stagedApp(t *testing.T) (stage, app string) {
@@ -23,7 +27,9 @@ func stagedApp(t *testing.T) (stage, app string) {
 	machoFile(t, filepath.Join(app, "Contents/MacOS/Acme Notes"))
 	machoFile(t, filepath.Join(app, "Contents/Resources/app/gohost/krate-gohost"))
 	machoFile(t, filepath.Join(app, "Contents/Frameworks/libx.dylib"))
-	os.WriteFile(filepath.Join(app, "Contents/Resources/app/app.json"), []byte("{}"), 0o644)
+	if err := os.WriteFile(filepath.Join(app, "Contents/Resources/app/app.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	return
 }
 
@@ -73,7 +79,9 @@ func TestSignMacAdHocAndEntitlements(t *testing.T) {
 	}
 	// Identity from the environment.
 	fr = &fakeRunner{goos: "darwin", tools: map[string]bool{"codesign": true}}
-	SignMacApp(SignConfig{Runner: fr, Getenv: env(map[string]string{EnvMacIdentity: "Dev ID X"})}, app)
+	if err := SignMacApp(SignConfig{Runner: fr, Getenv: env(map[string]string{EnvMacIdentity: "Dev ID X"})}, app); err != nil {
+		t.Fatal(err)
+	}
 	if !strings.Contains(fr.calls[0], "--sign Dev ID X ") || !strings.Contains(fr.calls[0], "--timestamp ") {
 		t.Fatalf("%s", fr.calls[0])
 	}
@@ -118,7 +126,9 @@ func TestNotarize(t *testing.T) {
 	}
 	// API key credentials.
 	acc = &acceptRunner{fakeRunner: fakeRunner{goos: "darwin", tools: map[string]bool{"xcrun": true}}}
-	NotarizeApp(NotarizeConfig{Runner: acc, Getenv: env(map[string]string{EnvNotaryKey: "/k/AuthKey.p8", EnvNotaryKeyID: "K1", EnvNotaryIssuer: "I1"})}, app)
+	if err := NotarizeApp(NotarizeConfig{Runner: acc, Getenv: env(map[string]string{EnvNotaryKey: "/k/AuthKey.p8", EnvNotaryKeyID: "K1", EnvNotaryIssuer: "I1"})}, app); err != nil {
+		t.Fatal(err)
+	}
 	if !strings.Contains(strings.Join(acc.calls, "\n"), "--key /k/AuthKey.p8 --key-id K1 --issuer I1") {
 		t.Fatalf("%v", acc.calls)
 	}
@@ -137,7 +147,9 @@ func TestNotarize(t *testing.T) {
 	// Password never reaches a log line.
 	var log strings.Builder
 	acc = &acceptRunner{fakeRunner: fakeRunner{goos: "darwin", tools: map[string]bool{"xcrun": true}}}
-	NotarizeApp(NotarizeConfig{Runner: acc, Log: &log, Getenv: env(map[string]string{EnvNotaryAppleID: "a@b.c", EnvNotaryTeamID: "T", EnvNotaryPassword: "s3cret-pw"})}, app)
+	if err := NotarizeApp(NotarizeConfig{Runner: acc, Log: &log, Getenv: env(map[string]string{EnvNotaryAppleID: "a@b.c", EnvNotaryTeamID: "T", EnvNotaryPassword: "s3cret-pw"})}, app); err != nil {
+		t.Fatal(err)
+	}
 	if strings.Contains(log.String(), "s3cret-pw") || !strings.Contains(log.String(), "--password ****") {
 		t.Fatalf("log leaks the password:\n%s", log.String())
 	}
@@ -149,7 +161,9 @@ type acceptRunner struct {
 }
 
 func (a *acceptRunner) Run(dir string, env []string, name string, args ...string) ([]byte, error) {
-	a.fakeRunner.Run(dir, env, name, args...)
+	if _, err := a.fakeRunner.Run(dir, env, name, args...); err != nil {
+		return nil, err
+	}
 	if name == "xcrun" && len(args) > 1 && args[0] == "notarytool" && args[1] == "submit" {
 		if a.out != "" {
 			return []byte(a.out), nil
@@ -161,10 +175,18 @@ func (a *acceptRunner) Run(dir string, env []string, name string, args ...string
 
 func TestSignWindows(t *testing.T) {
 	stage := t.TempDir()
-	os.MkdirAll(filepath.Join(stage, "Acme Notes", "app", "gohost"), 0o755)
-	os.WriteFile(filepath.Join(stage, "Acme Notes", "Acme Notes.exe"), []byte("MZ"), 0o755)
-	os.WriteFile(filepath.Join(stage, "Acme Notes", "app", "gohost", "krate-gohost.exe"), []byte("MZ"), 0o755)
-	os.WriteFile(filepath.Join(stage, "Acme Notes", "icon.ico"), []byte("x"), 0o644)
+	if err := os.MkdirAll(filepath.Join(stage, "Acme Notes", "app", "gohost"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stage, "Acme Notes", "Acme Notes.exe"), []byte("MZ"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stage, "Acme Notes", "app", "gohost", "krate-gohost.exe"), []byte("MZ"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stage, "Acme Notes", "icon.ico"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	// signtool on Windows with a pfx.
 	fr := &fakeRunner{goos: "windows", tools: map[string]bool{"signtool": true}}
@@ -184,7 +206,9 @@ func TestSignWindows(t *testing.T) {
 	// Thumbprint instead of a file.
 	fr = &fakeRunner{goos: "windows", tools: map[string]bool{"signtool": true}}
 	s = NewSigner(SignConfig{Runner: fr, Getenv: env(map[string]string{EnvWinThumbprint: "ABCD"})}, "windows")
-	s.SignFile("setup.exe", "nsis")
+	if err := s.SignFile("setup.exe", "nsis"); err != nil {
+		t.Fatal(err)
+	}
 	if !strings.Contains(fr.calls[0], "/sha1 ABCD setup.exe") || strings.Contains(fr.calls[0], "/f ") {
 		t.Fatalf("%s", fr.calls[0])
 	}
@@ -195,7 +219,9 @@ func TestSignWindows(t *testing.T) {
 	// osslsigncode on Linux.
 	dir := t.TempDir()
 	target := filepath.Join(dir, "setup.exe")
-	os.WriteFile(target, []byte("MZ"), 0o755)
+	if err := os.WriteFile(target, []byte("MZ"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	osl := &osslRunner{fakeRunner: fakeRunner{goos: "linux", tools: map[string]bool{"osslsigncode": true}}}
 	s = NewSigner(SignConfig{Runner: osl, Getenv: env(map[string]string{EnvWinPFX: "/c.pfx", EnvWinPFXPassword: "pw", EnvWinTimestampURL: "http://ts.example"})}, "windows")
 	if err := s.SignFile(target, "nsis"); err != nil {
@@ -221,10 +247,14 @@ func TestSignWindows(t *testing.T) {
 type osslRunner struct{ fakeRunner }
 
 func (o *osslRunner) Run(dir string, env []string, name string, args ...string) ([]byte, error) {
-	o.fakeRunner.Run(dir, env, name, args...)
+	if _, err := o.fakeRunner.Run(dir, env, name, args...); err != nil {
+		return nil, err
+	}
 	for i, a := range args {
 		if a == "-out" {
-			os.WriteFile(args[i+1], []byte("MZ-signed"), 0o755)
+			if err := os.WriteFile(args[i+1], []byte("MZ-signed"), 0o755); err != nil {
+				return nil, err
+			}
 		}
 	}
 	return nil, nil
@@ -287,17 +317,27 @@ func TestDiscoverAndResign(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 	// Shell layout.
-	os.WriteFile(filepath.Join(out, "krate-shell"), []byte("#!/bin/sh\n"), 0o755)
-	os.MkdirAll(filepath.Join(out, "app"), 0o755)
-	os.WriteFile(filepath.Join(out, "app", "app.json"), []byte("{}"), 0o644)
+	if err := os.WriteFile(filepath.Join(out, "krate-shell"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(out, "app"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(out, "app", "app.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	p, err := Discover(out, "linux", "amd64", "Acme Notes")
 	if err != nil || p.ExtraFiles["app"] != filepath.Join(out, "app") || filepath.Base(p.Executable) != "krate-shell" {
 		t.Fatalf("%+v %v", p, err)
 	}
 	// A release executable wins.
 	rel := filepath.Join(out, "linux-amd64")
-	os.MkdirAll(rel, 0o755)
-	os.WriteFile(filepath.Join(rel, "Acme Notes"), []byte("#!/bin/sh\n"), 0o755)
+	if err := os.MkdirAll(rel, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(rel, "Acme Notes"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	p, err = Discover(out, "linux", "amd64", "Acme Notes")
 	if err != nil || filepath.Base(p.Executable) != "Acme Notes" || len(p.ExtraFiles) != 0 {
 		t.Fatalf("%+v %v", p, err)
@@ -309,7 +349,9 @@ func TestDiscoverAndResign(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	os.WriteFile(filepath.Join(res.Stage, "Acme Notes", "Acme Notes.exe"), []byte("re-signed"), 0o755)
+	if err := os.WriteFile(filepath.Join(res.Stage, "Acme Notes", "Acme Notes.exe"), []byte("re-signed"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	order := &orderSigner{}
 	res2, err := ResignWindows(Options{Meta: m, Payload: Payload{OS: "windows", Arch: "amd64"}, OutDir: po, Runner: &fakeRunner{}, Signer: order}, res.Stage)
 	if err != nil {
@@ -345,7 +387,9 @@ func TestRebuildMacArchives(t *testing.T) {
 		t.Fatal(err)
 	}
 	app := find(t, res, "app").Path
-	os.WriteFile(filepath.Join(app, "Contents", "Stapled"), []byte("ticket"), 0o644)
+	if err := os.WriteFile(filepath.Join(app, "Contents", "Stapled"), []byte("ticket"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	res2, err := RebuildMacArchives(Options{Meta: m, Payload: Payload{Arch: "arm64"}, OutDir: po, Runner: &fakeRunner{}}, res.Stage)
 	if err != nil {
 		t.Fatal(err)

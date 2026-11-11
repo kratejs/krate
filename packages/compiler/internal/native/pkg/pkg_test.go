@@ -34,12 +34,22 @@ func testPayload(t *testing.T, goos, arch string) Payload {
 	t.Helper()
 	d := t.TempDir()
 	exe := filepath.Join(d, "krate-shell")
-	os.WriteFile(exe, []byte("#!/bin/sh\necho hi\n"), 0o755)
+	if err := os.WriteFile(exe, []byte("#!/bin/sh\necho hi\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	app := filepath.Join(d, "app")
-	os.MkdirAll(filepath.Join(app, "dist"), 0o755)
-	os.WriteFile(filepath.Join(app, "app.json"), []byte(`{"appId":"com.acme.notes"}`), 0o644)
-	os.WriteFile(filepath.Join(app, "dist", "index.html"), []byte("<h1>hi</h1>"), 0o644)
-	os.Symlink("index.html", filepath.Join(app, "dist", "home.html"))
+	if err := os.MkdirAll(filepath.Join(app, "dist"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(app, "app.json"), []byte(`{"appId":"com.acme.notes"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(app, "dist", "index.html"), []byte("<h1>hi</h1>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("index.html", filepath.Join(app, "dist", "home.html")); err != nil {
+		t.Fatal(err)
+	}
 	return Payload{OS: goos, Arch: arch, Executable: exe, ExtraFiles: map[string]string{"app": app}}
 }
 
@@ -579,7 +589,9 @@ func TestUpdateArtifactsAreSignedAndFeedWritten(t *testing.T) {
 	res = run(t, Options{Meta: m, Payload: testPayload(t, "linux", "amd64"), UpdaterKey: key, UpdateBaseURL: "https://dl.acme.com/updates/"})
 	var f2 updater.Feed
 	b, _ = os.ReadFile(filepath.Join(filepath.Dir(find(t, res, "tar.gz").Path), "latest-linux-amd64.json"))
-	json.Unmarshal(b, &f2)
+	if err := json.Unmarshal(b, &f2); err != nil {
+		t.Fatal(err)
+	}
 	if f2.URL != "https://dl.acme.com/updates/acme-notes-1.2.0-linux-amd64.tar.gz" {
 		t.Fatal(f2.URL)
 	}

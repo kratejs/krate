@@ -154,9 +154,8 @@ func goList(root string, pats []string, env []string) (map[string]*listedPkg, ma
 // exportImporter reads compiler export data for every dependency go list
 // reported.
 type exportImporter struct {
-	inner   types.Importer
-	mapping map[string]string
-	source  bool
+	inner  types.Importer
+	source bool
 }
 
 func newExportImporter(fset *token.FileSet, pkgs map[string]*listedPkg) *exportImporter {

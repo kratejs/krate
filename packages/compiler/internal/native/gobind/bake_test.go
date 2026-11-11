@@ -78,8 +78,12 @@ func TestBuildFunctionsEvaluate(t *testing.T) {
 func TestBuildFunctionPlacementErrors(t *testing.T) {
 	root := newApp(t, "app")
 	dir := filepath.Join(root, "src", "bk")
-	os.MkdirAll(dir, 0o755)
-	os.WriteFile(filepath.Join(dir, "bk.go"), []byte("package lib\n\n//krate:build\nfunc Nothing() {}\n\n//krate:build\nfunc Ch() <-chan int { return nil }\n"), 0o644)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "bk.go"), []byte("package lib\n\n//krate:build\nfunc Nothing() {}\n\n//krate:build\nfunc Ch() <-chan int { return nil }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	_, ds, err := Generate(root, []Import{{File: "src/bk/bk.go", Names: []string{"Nothing", "Ch"}}}, filepath.Join(root, ".krate", "native"))
 	if err != nil || len(ds) != 2 || ds[0].Code != "KR7244" {
 		t.Fatalf("%v %+v", err, ds)

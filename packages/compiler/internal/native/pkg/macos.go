@@ -17,7 +17,7 @@ const minMacOS = "12.0"
 
 func xmlEscape(s string) string {
 	var b bytes.Buffer
-	xml.EscapeText(&b, []byte(s))
+	_ = xml.EscapeText(&b, []byte(s)) // a bytes.Buffer never fails
 	return b.String()
 }
 

@@ -1,6 +1,7 @@
 package hostts
 
 import (
+	"math"
 	"strings"
 	"testing"
 
@@ -37,12 +38,6 @@ export function loc() { return (1).toLocaleString(); }
 export function undef() { return undefined; }
 export function runtimeOnly() { return 1; }
 `
-
-func uiCalls(body string) string {
-	return `import { version, greet, ctime, nan, cyc, fn, date, boom, never, big, deep, loc, undef } from "../lib/b.host";
-export default function P() { ` + body + ` return null; }
-`
-}
 
 func TestBuildFunctionsBakeLiteralCalls(t *testing.T) {
 	_, res, ds := buildProject(t, map[string]string{
@@ -164,7 +159,7 @@ func TestBuildFunctionPlacement(t *testing.T) {
 
 func TestBuildFunctionKeyMatchesStub(t *testing.T) {
 	// The stub computes the key in JavaScript; it must equal bake.Key.
-	args := []any{"a" + string(rune(0x2028)) + "<b>", 1.0, -0.0, 1e21, 0.1, map[string]any{"z": nil, "a": []any{true, "é"}, "10": 1.0, "2": 2.0}}
+	args := []any{"a" + string(rune(0x2028)) + "<b>", 1.0, math.Copysign(0, -1), 1e21, 0.1, map[string]any{"z": nil, "a": []any{true, "é"}, "10": 1.0, "2": 2.0}}
 	rtKey := evalStubKey(t, bake.ArgsJSON(args))
 	if rtKey != bake.Key(args) {
 		t.Fatalf("js key %q\ngo key %q", rtKey, bake.Key(args))

@@ -35,7 +35,11 @@ func runCompiled(t *testing.T, exe string) string {
 	if err := child.Start(context.Background(), exe, nil); err != nil {
 		t.Fatalf("starting %s: %v", exe, err)
 	}
-	defer child.Stop()
+	defer func() {
+		if err := child.Stop(); err != nil {
+			t.Error(err)
+		}
+	}()
 	body := `{"calls":[{"id":1,"fn":"t.Where","args":[]}]}`
 	frame := make([]byte, 0, len(body)+8)
 	frame = append(frame, byte(len(body)>>24), byte(len(body)>>16), byte(len(body)>>8), byte(len(body)))

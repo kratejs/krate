@@ -168,11 +168,6 @@ func (g *gen) decName(w *wtype) string {
 	return "decode" + c.name
 }
 
-func isBasicKind(t types.Type, k types.BasicKind) bool {
-	b, ok := t.(*types.Basic)
-	return ok && b.Kind() == k
-}
-
 // enc returns a statement that encodes the value x of type w.
 func (g *gen) enc(w *wtype, x string) string {
 	if needsFn(w) {

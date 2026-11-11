@@ -281,7 +281,9 @@ func fakeProxy(t *testing.T, module, version string, files map[string]string) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		w.Write([]byte(body))
+		if _, err := w.Write([]byte(body)); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := zw.Close(); err != nil {
 		t.Fatal(err)

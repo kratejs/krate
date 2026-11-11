@@ -398,7 +398,9 @@ func TestNativePackageEndToEnd(t *testing.T) {
 	if cfgText == string(cfg) {
 		t.Fatalf("config has no native block to extend:\n%s", cfg)
 	}
-	os.WriteFile(cfgPath, []byte(cfgText), 0o644)
+	if err := os.WriteFile(cfgPath, []byte(cfgText), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	// Packaging before building says what to do.
 	code, out := runKrate(t, "native", "package", dir, "--target", "linux/amd64")
@@ -406,7 +408,9 @@ func TestNativePackageEndToEnd(t *testing.T) {
 		t.Fatalf("package before build: exit %d:\n%s", code, out)
 	}
 	shell := filepath.Join(t.TempDir(), "krate-shell")
-	os.WriteFile(shell, []byte("#!/bin/sh\necho shell\n"), 0o755)
+	if err := os.WriteFile(shell, []byte("#!/bin/sh\necho shell\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if code, out := runKrate(t, "native", "build", dir, "--shell", shell, "--target", "linux/amd64"); code != 0 {
 		t.Fatalf("build exit %d:\n%s", code, out)
 	}

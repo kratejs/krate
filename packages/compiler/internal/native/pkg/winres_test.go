@@ -25,15 +25,13 @@ func goBuild(t *testing.T, dir, goos, goarch, out string) {
 
 func tinyProgram(t *testing.T) string {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module tiny\n\ngo 1.22\n"), 0o644)
-	os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644)
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module tiny\n\ngo 1.22\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	return dir
-}
-
-type resNode struct {
-	id       uint32
-	children []resNode
-	data     []byte
 }
 
 // readResources walks the resource directory of a PE file.

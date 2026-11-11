@@ -12,7 +12,6 @@ package runtimes
 import (
 	"fmt"
 	"runtime"
-	"sort"
 	"strings"
 )
 
@@ -173,17 +172,4 @@ func denoTarget(t Target) (string, error) {
 		return "", fmt.Errorf("deno cannot compile for %s", t)
 	}
 	return arch + "-" + rest, nil
-}
-
-func sortedUnique(in []string) []string {
-	m := map[string]bool{}
-	for _, s := range in {
-		m[s] = true
-	}
-	out := make([]string, 0, len(m))
-	for s := range m {
-		out = append(out, s)
-	}
-	sort.Strings(out)
-	return out
 }

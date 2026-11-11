@@ -21,8 +21,12 @@ func writeTestIcon(t *testing.T, w, h int) string {
 	}
 	p := filepath.Join(t.TempDir(), "icon.png")
 	var buf bytes.Buffer
-	png.Encode(&buf, img)
-	os.WriteFile(p, buf.Bytes(), 0o644)
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	return p
 }
 
@@ -105,7 +109,9 @@ func TestPlaceholderAndErrors(t *testing.T) {
 		t.Fatal("missing file accepted")
 	}
 	junk := filepath.Join(t.TempDir(), "j.png")
-	os.WriteFile(junk, []byte("not an image"), 0o644)
+	if err := os.WriteFile(junk, []byte("not an image"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := LoadIcon(junk, ""); err == nil {
 		t.Fatal("junk accepted")
 	}

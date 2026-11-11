@@ -88,7 +88,6 @@ var (
 	reRTC   = regexp.MustCompile(`\bRTCPeerConnection\b|\bgetUserMedia\b|\bgetDisplayMedia\b|\bwebkitRTCPeerConnection\b`)
 	reCE    = regexp.MustCompile(`(?i)\bcontent-?editable\b`)
 	reSpell = regexp.MustCompile(`(?i)\bspell-?check\b`)
-	reFalse = regexp.MustCompile(`^["']?\s*(?:=\s*)?["'{]*\s*(?:false|0|!1|!0\b)`)
 )
 
 // Scan reports the features that one source text uses.

@@ -92,24 +92,6 @@ func parsePkgFlag(f *cliFlags, args []string, i *int) (bool, error) {
 	return true, nil
 }
 
-func printPackagingUsage() {
-	fmt.Println("Packaging flags (krate native package, sign, notarize):")
-	fmt.Println("  --format <list>          Formats, comma separated: app zip dmg | zip nsis msix | tar.gz deb rpm appimage")
-	fmt.Println("  --target <os/arch>       Platform to package (default this machine)")
-	fmt.Println("  --sign                   Sign while packaging (macOS codesign, Windows signtool/osslsigncode, Linux gpg)")
-	fmt.Println("  --notarize               Notarize and staple the macOS app after signing")
-	fmt.Println("  --identity <name>        macOS signing identity (or $KRATE_MACOS_IDENTITY); default ad hoc")
-	fmt.Println("  --entitlements <file>    macOS entitlements plist (default: generated)")
-	fmt.Println("  --keychain-profile <n>   notarytool keychain profile (or $KRATE_NOTARY_PROFILE)")
-	fmt.Println("  --pfx <file>             Windows certificate file (password in $KRATE_WINDOWS_PFX_PASSWORD)")
-	fmt.Println("  --thumbprint <sha1>      Windows certificate in the store (or $KRATE_WINDOWS_CERT_SHA1)")
-	fmt.Println("  --gpg-key <id>           Linux detached signature key")
-	fmt.Println("  --notes <text>           Release notes in latest-<target>.json")
-	fmt.Println("  --update-base-url <url>  Where the update files are hosted (default: next to the feed)")
-	fmt.Println("  --key-out <file>         keygen: private key file (default krate-updater.key)")
-	fmt.Println("  Update signing reads $KRATE_UPDATER_PRIVATE_KEY or $KRATE_UPDATER_PRIVATE_KEY_FILE.")
-}
-
 // nativeHostTarget resolves --target (<os>/<arch>) to GOOS and GOARCH.
 func nativeHostTarget(t string) (goos, goarch string, err error) {
 	if t == "" {

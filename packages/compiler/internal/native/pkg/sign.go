@@ -413,7 +413,7 @@ type winSigner struct{ c SignConfig }
 
 func (s *winSigner) SignStage(stage string) error {
 	var files []string
-	filepath.WalkDir(stage, func(p string, d fs.DirEntry, err error) error {
+	err := filepath.WalkDir(stage, func(p string, d fs.DirEntry, err error) error {
 		if err == nil && !d.IsDir() && d.Type().IsRegular() {
 			ext := strings.ToLower(filepath.Ext(p))
 			if ext == ".exe" || ext == ".dll" {
@@ -422,6 +422,9 @@ func (s *winSigner) SignStage(stage string) error {
 		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
 	sort.Strings(files)
 	for _, f := range files {
 		if err := s.sign(f); err != nil {

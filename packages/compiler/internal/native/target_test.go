@@ -26,10 +26,7 @@ func targetDiags(t *testing.T, files map[string]string, mut func(c *config.Confi
 func hasCode(ds []diag.Diagnostic, code diag.Code, substr string) bool {
 	for _, d := range ds {
 		if d.Code == code && strings.Contains(d.File+" "+d.Message, substr) {
-			if d.Hint == "" {
-				return false
-			}
-			return true
+			return d.Hint != ""
 		}
 	}
 	return false

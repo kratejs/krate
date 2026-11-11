@@ -407,13 +407,6 @@ func (b *builder) emitJob(j job, gens map[string]*genModule, man *manifest) (boo
 	return true, nil
 }
 
-func nonNil(s []string) []string {
-	if s == nil {
-		return []string{}
-	}
-	return s
-}
-
 // writeTypes emits one .d.ts per host module the UI imports.
 func (b *builder) writeTypes(outDir string) error {
 	typesDir := filepath.Join(outDir, "types")

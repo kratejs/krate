@@ -37,13 +37,13 @@ type Linked struct {
 	Permissions []Permission
 	// Spec is the TypeScript import specifier, StubPath and DTSPath the
 	// generated files behind it.
-	Spec               string
-	StubPath, DTSPath  string
-	StubJS, DTS        string
-	GlueImport         string
-	HasInit, HasGlue   bool
-	manifestRel, label string
-	rename             map[string]string
+	Spec              string
+	StubPath, DTSPath string
+	StubJS, DTS       string
+	GlueImport        string
+	HasInit, HasGlue  bool
+	manifestRel       string
+	rename            map[string]string
 }
 
 // Output is the result of Generate.

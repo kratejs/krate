@@ -169,12 +169,12 @@ func (ic *Icon) ICNS() ([]byte, error) {
 			return nil, err
 		}
 		body.WriteString(t.Type)
-		binary.Write(&body, binary.BigEndian, uint32(8+len(data)))
+		putBin(&body, binary.BigEndian, uint32(8+len(data)))
 		body.Write(data)
 	}
 	var out bytes.Buffer
 	out.WriteString("icns")
-	binary.Write(&out, binary.BigEndian, uint32(8+body.Len()))
+	putBin(&out, binary.BigEndian, uint32(8+body.Len()))
 	out.Write(body.Bytes())
 	return out.Bytes(), nil
 }
@@ -203,7 +203,7 @@ func (ic *Icon) ICO() ([]byte, error) {
 		return nil, err
 	}
 	var out bytes.Buffer
-	binary.Write(&out, binary.LittleEndian, [3]uint16{0, 1, uint16(len(sizes))})
+	putBin(&out, binary.LittleEndian, [3]uint16{0, 1, uint16(len(sizes))})
 	offset := 6 + 16*len(sizes)
 	for i, s := range sizes {
 		dim := byte(s)
@@ -211,10 +211,10 @@ func (ic *Icon) ICO() ([]byte, error) {
 			dim = 0
 		}
 		out.Write([]byte{dim, dim, 0, 0})
-		binary.Write(&out, binary.LittleEndian, uint16(1))  // planes
-		binary.Write(&out, binary.LittleEndian, uint16(32)) // bits per pixel
-		binary.Write(&out, binary.LittleEndian, uint32(len(imgs[i])))
-		binary.Write(&out, binary.LittleEndian, uint32(offset))
+		putBin(&out, binary.LittleEndian, uint16(1))  // planes
+		putBin(&out, binary.LittleEndian, uint16(32)) // bits per pixel
+		putBin(&out, binary.LittleEndian, uint32(len(imgs[i])))
+		putBin(&out, binary.LittleEndian, uint32(offset))
 		offset += len(imgs[i])
 	}
 	for _, b := range imgs {
@@ -225,3 +225,11 @@ func (ic *Icon) ICO() ([]byte, error) {
 
 // hicolorSizes are the PNG sizes installed on Linux.
 var hicolorSizes = []int{16, 24, 32, 48, 64, 128, 256, 512}
+
+// putBin appends v in the given byte order. Writing fixed-size values to a
+// bytes.Buffer cannot fail, so an error means a programming mistake.
+func putBin(b *bytes.Buffer, order binary.ByteOrder, v any) {
+	if err := binary.Write(b, order, v); err != nil {
+		panic("pkg: binary write: " + err.Error())
+	}
+}

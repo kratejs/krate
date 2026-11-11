@@ -71,7 +71,7 @@ func buildSyso(m Metadata, ic *Icon, arch string) ([]byte, error) {
 	}
 	var leaves []resLeaf
 	var grp bytes.Buffer
-	binary.Write(&grp, binary.LittleEndian, [3]uint16{0, 1, uint16(len(sizes))})
+	putBin(&grp, binary.LittleEndian, [3]uint16{0, 1, uint16(len(sizes))})
 	for i, s := range sizes {
 		id := uint32(i + 1)
 		leaves = append(leaves, resLeaf{rtIcon, id, langEnUS, imgs[i]})
@@ -80,10 +80,10 @@ func buildSyso(m Metadata, ic *Icon, arch string) ([]byte, error) {
 			dim = 0
 		}
 		grp.Write([]byte{dim, dim, 0, 0})
-		binary.Write(&grp, binary.LittleEndian, uint16(1))
-		binary.Write(&grp, binary.LittleEndian, uint16(32))
-		binary.Write(&grp, binary.LittleEndian, uint32(len(imgs[i])))
-		binary.Write(&grp, binary.LittleEndian, uint16(id))
+		putBin(&grp, binary.LittleEndian, uint16(1))
+		putBin(&grp, binary.LittleEndian, uint16(32))
+		putBin(&grp, binary.LittleEndian, uint32(len(imgs[i])))
+		putBin(&grp, binary.LittleEndian, uint16(id))
 	}
 	leaves = append(leaves,
 		resLeaf{rtGroupIcon, 1, langEnUS, grp.Bytes()},
@@ -205,7 +205,7 @@ func coffObject(arch string, rsrc []byte, relocs []uint32) ([]byte, error) {
 	relocOff := rawOff + uint32(len(rsrc))
 	symOff := relocOff + uint32(10*len(relocs))
 	var b bytes.Buffer
-	w := func(v any) { binary.Write(&b, binary.LittleEndian, v) }
+	w := func(v any) { putBin(&b, binary.LittleEndian, v) }
 	// File header.
 	w(machine)
 	w(uint16(1)) // sections
@@ -261,8 +261,8 @@ func pad4(b *bytes.Buffer) {
 func verBlock(key string, wType uint16, valLen uint16, value []byte, children []byte) []byte {
 	var b bytes.Buffer
 	b.Write([]byte{0, 0}) // wLength, patched below
-	binary.Write(&b, binary.LittleEndian, valLen)
-	binary.Write(&b, binary.LittleEndian, wType)
+	putBin(&b, binary.LittleEndian, valLen)
+	putBin(&b, binary.LittleEndian, wType)
 	b.Write(utf16z(key))
 	pad4(&b)
 	b.Write(value)
@@ -289,7 +289,7 @@ func joinBlocks(blocks ...[]byte) []byte {
 func versionInfo(m Metadata, v semver) []byte {
 	fv := v.fileVersion()
 	var fixed bytes.Buffer
-	w := func(x uint32) { binary.Write(&fixed, binary.LittleEndian, x) }
+	w := func(x uint32) { putBin(&fixed, binary.LittleEndian, x) }
 	ms := uint32(fv[0])<<16 | uint32(fv[1])
 	ls := uint32(fv[2])<<16 | uint32(fv[3])
 	w(0xFEEF04BD)

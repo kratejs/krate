@@ -594,7 +594,9 @@ func runBrowserBinary(t *testing.T, bin string, extra ...string) *releaseApp {
 	if err != nil {
 		t.Fatal(err)
 	}
-	io.Copy(io.Discard, resp.Body)
+	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+		t.Fatal(err)
+	}
 	resp.Body.Close()
 	return &releaseApp{url: url, base: strings.SplitN(url, "/?", 2)[0], c: c, cmd: cmd}
 }
@@ -807,7 +809,9 @@ func TestNativeReleaseCrossCompiles(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		f.Read(head)
+		if _, err := f.Read(head); err != nil {
+			t.Fatal(err)
+		}
 		f.Close()
 		switch bin.Target {
 		case "windows/amd64":

@@ -83,7 +83,9 @@ func tarGzNames(t *testing.T, path string) map[string]string {
 		}
 		var buf bytes.Buffer
 		if h.Typeflag == tar.TypeReg {
-			io.Copy(&buf, tr)
+			if _, err := io.Copy(&buf, tr); err != nil {
+				t.Fatal(err)
+			}
 		}
 		names[h.Name] = buf.String()
 	}
@@ -239,7 +241,9 @@ func TestNativeDoctorCommand(t *testing.T) {
 	shell := filepath.Join(t.TempDir(), "krate-shell")
 	report := `{"schema":1,"shell":"krate-shell","os":"` + runtime.GOOS + `","arch":"` + runtime.GOARCH +
 		`","webview":{"name":"TestView","present":true,"version":"9.9.9","minVersion":"1.0","ok":true},"display":{"available":true,"detail":"test display"}}`
-	os.WriteFile(shell, []byte("#!/bin/sh\n[ \"$1\" = --doctor ] && echo '"+report+"'\n"), 0o755)
+	if err := os.WriteFile(shell, []byte("#!/bin/sh\n[ \"$1\" = --doctor ] && echo '"+report+"'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 
 	t.Setenv("KRATE_SHELL", shell)
 	code, out := runKrate(t, "native", "doctor", dir)

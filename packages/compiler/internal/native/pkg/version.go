@@ -1,8 +1,8 @@
 package pkg
 
 import (
-	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -40,8 +40,7 @@ func (s semver) debian() string {
 func (s semver) fileVersion() [4]uint16 {
 	var out [4]uint16
 	for i, p := range []string{s.Major, s.Minor, s.Patch} {
-		var n int
-		fmt.Sscanf(p, "%d", &n)
+		n, _ := strconv.Atoi(p)
 		if n > 65535 {
 			n = 65535
 		}
