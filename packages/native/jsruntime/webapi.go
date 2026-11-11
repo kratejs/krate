@@ -2,6 +2,7 @@ package jsruntime
 
 import (
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha1"
@@ -381,9 +382,20 @@ type cachedFetch struct {
 
 func (r *Runtime) goFetch(payload string, body []byte) (any, error) {
 	r.take = nil
+	head, respBody, err := r.fetchRound(context.Background(), payload, body)
+	if err != nil {
+		return nil, err
+	}
+	r.take = respBody
+	return head, nil
+}
+
+// fetchRound performs one fetch described by the JSON payload fetch.js builds.
+// It touches no VM state, so the async path runs it off the VM goroutine.
+func (r *Runtime) fetchRound(ctx context.Context, payload string, body []byte) (string, []byte, error) {
 	var fr fetchRequest
 	if err := json.Unmarshal([]byte(payload), &fr); err != nil {
-		return nil, fmt.Errorf("invalid fetch request: %w", err)
+		return "", nil, fmt.Errorf("invalid fetch request: %w", err)
 	}
 	headers := make(map[string]string, len(fr.Headers))
 	for _, h := range fr.Headers {
@@ -405,14 +417,13 @@ func (r *Runtime) goFetch(payload string, body []byte) (any, error) {
 		if hit, ok := r.dataCache.Get(cacheKey); ok {
 			var c cachedFetch
 			if json.Unmarshal([]byte(hit), &c) == nil {
-				r.take = c.Body
-				return c.Head, nil
+				return c.Head, c.Body, nil
 			}
 		}
 	}
-	req, err := http.NewRequest(fr.Method, fr.URL, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, fr.Method, fr.URL, bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return "", nil, fmt.Errorf("failed to create request: %w", err)
 	}
 	for _, h := range fr.Headers {
 		req.Header.Add(h[0], h[1])
@@ -434,12 +445,12 @@ func (r *Runtime) goFetch(payload string, body []byte) (any, error) {
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("fetch failed: %w", err)
+		return "", nil, fmt.Errorf("fetch failed: %w", err)
 	}
 	defer resp.Body.Close()
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
+		return "", nil, fmt.Errorf("failed to read response: %w", err)
 	}
 	var respHeaders [][2]string
 	for k, vs := range resp.Header {
@@ -453,13 +464,12 @@ func (r *Runtime) goFetch(payload string, body []byte) (any, error) {
 		URL: resp.Request.URL.String(), Redirected: redirected,
 	})
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 	if cacheKey != "" && resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		if c, err := json.Marshal(cachedFetch{Head: string(head), Body: respBody}); err == nil {
 			r.dataCache.Set(cacheKey, string(c), ttl, tags)
 		}
 	}
-	r.take = respBody
-	return string(head), nil
+	return string(head), respBody, nil
 }

@@ -267,6 +267,17 @@
   installBody(Response);
   def('Response', Response);
 
+  var fetchSeq = 0, fetchPending = new Map();
+  // Settles a request started through __go_fetch_async (see asyncfetch.go).
+  K.fetchDone = function (id, head, err) {
+    var p = fetchPending.get(id);
+    if (!p) return;
+    fetchPending.delete(id);
+    p.cleanup();
+    if (err) { var te = new TypeError('fetch failed'); te.cause = new Error(err); p.reject(te); return; }
+    p.resolve({ head: head, data: fromHost(host(G.__go_take)) });
+  };
+
   def('fetch', async function fetch(input, init) {
     var req = new Request(input, init);
     if (req.signal.aborted) throw req.signal.reason;
@@ -279,11 +290,31 @@
       url: req.url, method: req.method, headers: hdrs,
       cache: opts.cache || '', next: opts.next || null, redirect: req.redirect
     });
-    var raw;
-    try { raw = host(goFetch, payload, toHost(bytes || new Uint8Array(0))); } catch (e) { var te = new TypeError('fetch failed'); te.cause = e; throw te; }
+    var raw, data;
+    var goFetchAsync = G.__go_fetch_async;
+    if (goFetchAsync) {
+      // A persistent host (hostjs) runs the request off the VM goroutine and
+      // settles it through K.fetchDone.
+      var signal = req.signal;
+      var done = await new Promise(function (resolve, reject) {
+        var id = ++fetchSeq;
+        function onAbort() {
+          if (fetchPending.delete(id)) { G.__go_fetch_cancel(id); reject(signal.reason); }
+        }
+        fetchPending.set(id, { resolve: resolve, reject: reject, cleanup: function () { signal.removeEventListener('abort', onAbort); } });
+        signal.addEventListener('abort', onAbort);
+        try { host(goFetchAsync, id, payload, toHost(bytes || new Uint8Array(0))); } catch (e) {
+          fetchPending.delete(id);
+          var te = new TypeError('fetch failed'); te.cause = e; reject(te);
+        }
+      });
+      raw = done.head; data = done.data;
+    } else {
+      try { raw = host(goFetch, payload, toHost(bytes || new Uint8Array(0))); } catch (e) { var te2 = new TypeError('fetch failed'); te2.cause = e; throw te2; }
+      // The body follows the head through __go_take.
+      data = fromHost(host(G.__go_take));
+    }
     var res = JSON.parse(raw);
-    // The body follows the head through __go_take.
-    var data = fromHost(host(G.__go_take));
     var body = NULL_BODY.indexOf(res.status) >= 0 || req.method === 'HEAD' ? null : data;
     var out = new Response(body, { status: res.status, statusText: res.statusText, headers: new Headers(res.headers) });
     Object.defineProperty(out, 'url', { value: res.url || req.url });

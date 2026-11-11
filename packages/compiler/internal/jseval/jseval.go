@@ -14,9 +14,9 @@ import (
 
 	"github.com/evanw/esbuild/pkg/api"
 
-	"github.com/kratejs/krate/packages/compiler/internal/jsruntime"
 	"github.com/kratejs/krate/packages/compiler/internal/safe"
 	"github.com/kratejs/krate/packages/compiler/internal/tsstrip"
+	"github.com/kratejs/krate/packages/native/jsruntime"
 )
 
 // ResultGlobal is the global the entry assigns its result to. Eval returns its

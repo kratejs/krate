@@ -24,7 +24,7 @@ var bareFeatures = []string{"clone", "console"}
 // time zone (localeCompare, toLocale*String, Date.prototype.toString, ...)
 // throw, so a folded value never depends on the build machine.
 func NewBare() (*Runtime, error) {
-	r, err := newRuntime()
+	r, err := newRuntime(Options{})
 	if err != nil {
 		return nil, err
 	}

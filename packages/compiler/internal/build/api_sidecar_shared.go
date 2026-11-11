@@ -1,6 +1,6 @@
 package build
 
-import "github.com/kratejs/krate/packages/compiler/internal/jsruntime"
+import "github.com/kratejs/krate/packages/native/jsruntime"
 
 // apiSidecarSharedJS holds the API request semantics shared by the Node and
 // Bun sidecars: method dispatch (405/OPTIONS/HEAD), error bodies, the

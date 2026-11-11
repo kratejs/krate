@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
-	"github.com/kratejs/krate/packages/compiler/internal/jsruntime"
+	"github.com/kratejs/krate/packages/native/jsruntime"
 )
 
 func TestEvalPureWithJSBuiltins(t *testing.T) {

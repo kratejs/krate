@@ -148,7 +148,7 @@ func TestFeatureGlobalsMatchLedger(t *testing.T) {
 	}
 	own := `Object.getOwnPropertyNames(globalThis).filter(function (n) { return !/^(__go_|console_|_go_)/.test(n); }).sort().join(" ")`
 	coreOnly := func() *Runtime {
-		r, err := newRuntime()
+		r, err := newRuntime(Options{})
 		if err != nil {
 			t.Fatal(err)
 		}

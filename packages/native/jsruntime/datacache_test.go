@@ -70,7 +70,7 @@ func TestFetchCachePolicy(t *testing.T) {
 // unstable_cache, tagged fetch caching and revalidateTag go through the Go
 // host hooks.
 func TestQuickJSRouteUsesHostCache(t *testing.T) {
-	cacheTS, err := filepath.Abs(filepath.Join("..", "..", "..", "runtime", "src", "cache.ts"))
+	cacheTS, err := filepath.Abs(filepath.Join("..", "..", "runtime", "src", "cache.ts"))
 	if err != nil {
 		t.Fatal(err)
 	}

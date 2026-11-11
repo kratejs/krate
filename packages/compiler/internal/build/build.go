@@ -30,7 +30,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/gotsgen"
 	"github.com/kratejs/krate/packages/compiler/internal/icons"
 	"github.com/kratejs/krate/packages/compiler/internal/irtree"
-	"github.com/kratejs/krate/packages/compiler/internal/jsruntime"
+	jscompat "github.com/kratejs/krate/packages/compiler/internal/jsruntime"
 	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
 	"github.com/kratejs/krate/packages/compiler/internal/plugin"
 	"github.com/kratejs/krate/packages/compiler/internal/reactive"
@@ -39,6 +39,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/safe"
 	"github.com/kratejs/krate/packages/compiler/internal/syntaxhighlight"
 	"github.com/kratejs/krate/packages/compiler/internal/tsstrip"
+	"github.com/kratejs/krate/packages/native/jsruntime"
 )
 
 type PageResult struct {
@@ -4130,7 +4131,7 @@ func (b *Builder) BuildMiddleware() error {
 		_ = os.Remove(middlewareMetaPath(b.Root))
 		return nil
 	}
-	features := b.scanRuntimeCompat("middleware", result.Metafile, jsruntime.CompatMiddlewareRuntime)
+	features := b.scanRuntimeCompat("middleware", result.Metafile, jscompat.CompatMiddlewareRuntime)
 	if err := writeMiddlewareMeta(b.Root, features); err != nil {
 		return fmt.Errorf("writing middleware metadata: %w", err)
 	}
@@ -4978,7 +4979,7 @@ type apiRouteMeta struct {
 	File string `json:"file"`
 	// NodeOnly is true when the bundle still has external imports.
 	NodeOnly bool `json:"nodeOnly"`
-	// Features lists the compat ledger features (internal/jsruntime/compat.json)
+	// Features lists the compat ledger features (packages/native/jsruntime/compat.json)
 	// the route's sources reference, for an embedded-runtime route. Absent
 	// means unknown, so the runtime must load everything.
 	Features *[]string `json:"features,omitempty"`
@@ -5084,7 +5085,7 @@ func (b *Builder) compileSingleRoute(file string, apiSrcDir string) (apiRouteMet
 	// Node-only routes are served by the sidecar, so only embedded-runtime
 	// routes are checked against the embedded runtime's API surface.
 	if !meta.NodeOnly && embeddedRuntime(b.Cfg.SSR.APIRuntime) {
-		meta.Features = b.scanRuntimeCompat(file, quickjsResult.Metafile, jsruntime.CompatAPIRuntime)
+		meta.Features = b.scanRuntimeCompat(file, quickjsResult.Metafile, jscompat.CompatAPIRuntime)
 	} else {
 		b.setRuntimeCompatWarnings(file, nil)
 	}

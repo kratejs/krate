@@ -9,12 +9,13 @@ import (
 
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/tsstrip"
+	native "github.com/kratejs/krate/packages/native/jsruntime"
 )
 
 // CompatRef is one reference from source code to a ledger API.
 type CompatRef struct {
 	API     string
-	Status  CompatStatus
+	Status  native.CompatStatus
 	Feature string
 	File    string
 	Line    int
@@ -118,7 +119,7 @@ func ScanCompatSource(path, src string) CompatScan {
 // free (global) identifiers count: imports, locals and parameters shadow.
 func ScanCompatProgram(path string, prog *ast.Program) CompatScan {
 	w := &compatWalker{
-		ledger: Compat(),
+		ledger: native.Compat(),
 		file:   path,
 		guards: map[string]int{},
 		seen:   map[compatRefKey]bool{},
@@ -160,7 +161,7 @@ func (s CompatScan) Features() []string {
 func (s CompatScan) Unsupported() []CompatRef {
 	var out []CompatRef
 	for _, r := range s.Refs {
-		if r.Status == CompatNotSupported && !r.Guarded {
+		if r.Status == native.CompatNotSupported && !r.Guarded {
 			out = append(out, r)
 		}
 	}
@@ -178,7 +179,7 @@ type compatScope struct {
 }
 
 type compatWalker struct {
-	ledger *CompatLedger
+	ledger *native.CompatLedger
 	file   string
 	scope  *compatScope
 	// guards counts enclosing feature checks per global name.

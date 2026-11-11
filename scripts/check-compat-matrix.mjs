@@ -19,11 +19,12 @@ function walk(dir, out = []) {
 
 function goTests() {
   const names = new Set();
-  const compiler = path.join(root, "packages/compiler");
-  for (const file of walk(compiler)) {
-    if (!file.endsWith("_test.go")) continue;
-    const source = fs.readFileSync(file, "utf8");
-    for (const match of source.matchAll(/^func (Test\w+)\(/gm)) names.add(match[1]);
+  for (const pkg of ["packages/compiler", "packages/native"]) {
+    for (const file of walk(path.join(root, pkg))) {
+      if (!file.endsWith("_test.go")) continue;
+      const source = fs.readFileSync(file, "utf8");
+      for (const match of source.matchAll(/^func (Test\w+)\(/gm)) names.add(match[1]);
+    }
   }
   return names;
 }

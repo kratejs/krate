@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Generates the embedded API runtime compatibility reference page from the
- * ledger the compiler embeds (packages/compiler/internal/jsruntime/compat.json).
+ * ledger the compiler embeds (packages/native/jsruntime/compat.json).
  *
  * Usage:
  *   node scripts/sync-runtime-compat.mjs           # write the page
@@ -16,7 +16,7 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-export const ledgerPath = path.join(root, 'packages/compiler/internal/jsruntime/compat.json');
+export const ledgerPath = path.join(root, 'packages/native/jsruntime/compat.json');
 export const pagePath = path.join(root, 'packages/web/src/content/docs/reference/api-runtime-compat.md');
 
 const labels = {
@@ -43,7 +43,7 @@ export function renderRuntimeCompat(ledger) {
     'description: Which Web APIs and Node globals the embedded QuickJS runtime for API routes and middleware supports, generated from the compiler ledger.',
     '---',
     '',
-    '<!-- Generated from packages/compiler/internal/jsruntime/compat.json by',
+    '<!-- Generated from packages/native/jsruntime/compat.json by',
     '     scripts/sync-runtime-compat.mjs. Do not edit by hand; edit the ledger and',
     '     run pnpm sync:docs. -->',
     '',

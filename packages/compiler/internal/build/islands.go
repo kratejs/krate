@@ -15,8 +15,8 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/fsutil"
 	"github.com/kratejs/krate/packages/compiler/internal/irtree"
-	"github.com/kratejs/krate/packages/compiler/internal/jsruntime"
 	"github.com/kratejs/krate/packages/compiler/internal/tsstrip"
+	"github.com/kratejs/krate/packages/native/jsruntime"
 )
 
 // assets/preact-render-to-string.js is vendored from preact-render-to-string

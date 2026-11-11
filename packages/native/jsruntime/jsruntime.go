@@ -49,6 +49,8 @@ type Runtime struct {
 	// failedLoads maps the features whose lazy load failed during the
 	// outermost evaluation in progress to the failure; see loadFeatureHost.
 	failedLoads map[string]string
+	// async is set by EnableAsyncFetch.
+	async *asyncFetch
 }
 
 // SetLogPrefix sets a prefix prepended to every console line. Plugin hosts set
@@ -84,6 +86,13 @@ type Options struct {
 	Preload []string
 	// PreloadAll installs every prelude feature up front.
 	PreloadAll bool
+	// MemoryLimit is the VM memory limit in bytes. Zero means the default
+	// (KRATE_JS_MEMORY_MB, 32 MiB).
+	MemoryLimit uintptr
+	// EvalTimeout bounds each evaluation (each Execute, Call, EvalBytecode and
+	// DrainJobs step). Zero means the default (KRATE_JS_TIMEOUT, 30s); a
+	// negative value disables the limit.
+	EvalTimeout time.Duration
 }
 
 // New creates a JS runtime with the web API prelude, Node's process.env and a
@@ -95,7 +104,7 @@ func New() (*Runtime, error) {
 // NewWithOptions is New with control over which prelude features are
 // installed up front.
 func NewWithOptions(o Options) (*Runtime, error) {
-	r, err := newRuntime()
+	r, err := newRuntime(o)
 	if err != nil {
 		return nil, err
 	}
@@ -118,7 +127,7 @@ func NewWithOptions(o Options) (*Runtime, error) {
 
 // newRuntime creates a VM with the configured resource limits and no globals
 // beyond the engine's.
-func newRuntime() (*Runtime, error) {
+func newRuntime(o Options) (*Runtime, error) {
 	vm, err := quickjs.NewVM()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create JS VM: %w", err)
@@ -128,10 +137,18 @@ func newRuntime() (*Runtime, error) {
 	// KRATE_JS_MEMORY_MB (default 32), KRATE_JS_STACK_KB (default 16, at most
 	// 32), KRATE_JS_TIMEOUT (Go duration, default 30s).
 	memLimit := envUnits("KRATE_JS_MEMORY_MB", 32, 1<<20)
+	if o.MemoryLimit > 0 {
+		memLimit = o.MemoryLimit
+	}
 	vm.SetMemoryLimit(memLimit)
 	vm.SetMaxStackSize(stackLimit())
 
 	timeout := envDuration("KRATE_JS_TIMEOUT", 30*time.Second)
+	if o.EvalTimeout > 0 {
+		timeout = o.EvalTimeout
+	} else if o.EvalTimeout < 0 {
+		timeout = 0
+	}
 	if err := vm.SetEvalTimeout(timeout); err != nil {
 		vm.Close()
 		return nil, fmt.Errorf("failed to set eval timeout: %w", err)
@@ -219,6 +236,9 @@ func (r *Runtime) enter() (nested bool) {
 	r.depth++
 	if r.depth == 1 {
 		r.deadline = time.Now().Add(r.timeout)
+		return false
+	}
+	if r.timeout == 0 {
 		return false
 	}
 	rem := time.Until(r.deadline)
@@ -351,6 +371,7 @@ func (r *Runtime) VM() *quickjs.VM {
 
 // Close releases all resources
 func (r *Runtime) Close() error {
+	r.cancelAsyncFetches()
 	return r.vm.Close()
 }
 

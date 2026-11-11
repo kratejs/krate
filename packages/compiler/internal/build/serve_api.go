@@ -15,7 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/kratejs/krate/packages/compiler/internal/jsruntime"
+	"github.com/kratejs/krate/packages/native/jsruntime"
 )
 
 // proxyTrust is set once at startup from server.trustProxy. When false the
