@@ -196,6 +196,7 @@ func TestGUIViewsTwoPane(t *testing.T) {
 	waitProcs(t, 0)
 	events := collectViewEvents(t)
 	w := viewWindow(t, "/pane?main")
+	defer w.Close() // a failed assertion must not leave its web process to the next test
 	waitPing(t, "?main")
 	waitProcs(t, 1)
 
@@ -219,7 +220,10 @@ func TestGUIViewsTwoPane(t *testing.T) {
 	if l.Axis != caps.Horizontal || l.First.View != w.PrimaryView() || l.Second.View != ref || l.Second.MinWidth != 120 {
 		t.Fatalf("layout %+v / %+v / %+v", l, l.First, l.Second)
 	}
-	if f, s := paneSize(w, ""); f <= 0 || s < 120 {
+	// A compositor configures the surface asynchronously (Wayland), so the
+	// paned has no real allocation yet when the views are added.
+	waitFor(t, "pane allocated", func() bool { f, s := paneSize(w, ""); return f > 1 && s > 1 })
+	if f, s := paneSize(w, ""); s < 120 {
 		t.Fatalf("pane sizes %d, %d", f, s)
 	}
 
@@ -527,6 +531,7 @@ func TestGUIViewsMemory(t *testing.T) {
 	needGUI(t)
 	waitProcs(t, 0)
 	w := viewWindow(t, "/pane?m0")
+	defer w.Close() // a failed assertion must not leave its web process to the next test
 	waitProcs(t, 1)
 	shell1, web1 := pssSplit()
 	const extra = 6

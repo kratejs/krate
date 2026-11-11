@@ -38,6 +38,7 @@ type ext struct {
 	gtkWindowRemoveAccel  func(w, group uintptr)
 	gtkWidgetShow         func(w uintptr)
 	gtkWidgetHide         func(w uintptr)
+	gtkCheckResize        func(c uintptr)
 	gtkWidgetGetVisible   func(w uintptr) int32
 	gtkWidgetGetWindow    func(w uintptr) uintptr
 	gtkWidgetSensitive    func(w uintptr, on int32)
@@ -205,6 +206,7 @@ func loadExt() *ext {
 	bind(gtk, &e.gtkWindowRemoveAccel, "gtk_window_remove_accel_group")
 	bind(gtk, &e.gtkWidgetShow, "gtk_widget_show")
 	bind(gtk, &e.gtkWidgetHide, "gtk_widget_hide")
+	bind(gtk, &e.gtkCheckResize, "gtk_container_check_resize")
 	bind(gtk, &e.gtkWidgetGetVisible, "gtk_widget_get_visible")
 	bind(gtk, &e.gtkWidgetGetWindow, "gtk_widget_get_window")
 	bind(gtk, &e.gtkWidgetSensitive, "gtk_widget_set_sensitive")
