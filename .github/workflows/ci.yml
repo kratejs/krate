@@ -571,7 +571,7 @@ jobs:
         continue-on-error: ${{ matrix.experimental }}
         run: |
           (cd packages/compiler && GOWORK=off go test -p 1 -count=1 -timeout 20m -run Plugin ./internal/build)
-          (cd examples/native-plugin/native-plugins/system-info && go test -count=1 ./...)
+          (cd examples/native-plugin/native-plugins/system-info && GOWORK=off go test -count=1 ./...)
 
       # The views example (a sidebar and a log view split off the main page)
       # must keep compiling; TestGUIViews in the module-wide GUI step covers
