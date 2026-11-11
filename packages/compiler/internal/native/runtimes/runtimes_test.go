@@ -38,12 +38,12 @@ func TestDenoFlags(t *testing.T) {
 		scoped bool
 		want   string
 	}{
-		{"none, scoped", nil, true, "--no-prompt --allow-env --allow-read={sockdir} --allow-write={sockdir}"},
-		{"none, compiled", nil, false, "--no-prompt --allow-env --allow-read --allow-write"},
-		{"fs", []string{"fs"}, true, "--no-prompt --allow-env --allow-read --allow-write"},
-		{"fs:read keeps write scoped", []string{"fs:read"}, true, "--no-prompt --allow-env --allow-read --allow-write={sockdir}"},
+		{"none, scoped", nil, true, "--no-prompt --allow-env --allow-read={sockdir} --allow-write={sockdir} --allow-net=127.0.0.1"},
+		{"none, compiled", nil, false, "--no-prompt --allow-env --allow-read --allow-write --allow-net=127.0.0.1"},
+		{"fs", []string{"fs"}, true, "--no-prompt --allow-env --allow-read --allow-write --allow-net=127.0.0.1"},
+		{"fs:read keeps write scoped", []string{"fs:read"}, true, "--no-prompt --allow-env --allow-read --allow-write={sockdir} --allow-net=127.0.0.1"},
 		{"net and os", []string{"net", "os:info"}, true, "--no-prompt --allow-env --allow-read={sockdir} --allow-write={sockdir} --allow-net --allow-sys"},
-		{"ui areas add nothing", []string{"window", "dialog", "kv", "db", "clipboard", "shell:openExternal", "os:secrets"}, true, "--no-prompt --allow-env --allow-read={sockdir} --allow-write={sockdir}"},
+		{"ui areas add nothing", []string{"window", "dialog", "kv", "db", "clipboard", "shell:openExternal", "os:secrets"}, true, "--no-prompt --allow-env --allow-read={sockdir} --allow-write={sockdir} --allow-net=127.0.0.1"},
 	}
 	for _, c := range cases {
 		if got := strings.Join(DenoFlags(c.perms, c.scoped), " "); got != c.want {

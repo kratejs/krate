@@ -65,6 +65,10 @@ const EntryPlaceholder = "{entry}"
 // in; Deno needs read and write access to it.
 const SockDirPlaceholder = "{sockdir}"
 
+// LoopbackHost is the only host a Deno child may reach without the net
+// permission: the transport to the shell on Windows is loopback TCP.
+const LoopbackHost = "127.0.0.1"
+
 // Command is the argv that runs a script entry in development, with the entry
 // path written as EntryPlaceholder. perms is native.permissions; only Deno
 // uses it. The first element is looked up on PATH by the shell.
@@ -88,10 +92,10 @@ func Command(rt Runtime, perms []string) []string {
 //
 // The table (also in docs/native/runtimes.md):
 //
-//	always         --no-prompt --allow-env, read and write access to the socket directory
+//	always         --no-prompt --allow-env, --allow-net=127.0.0.1, read and write access to the socket directory
 //	fs             --allow-read --allow-write
 //	fs:read        --allow-read
-//	net            --allow-net
+//	net            --allow-net (without it only --allow-net=127.0.0.1, the Windows transport to the shell)
 //	os:info        --allow-sys
 //
 // Every other permission names an SDK area that is served by the shell, not by
@@ -121,6 +125,10 @@ func DenoFlags(perms []string, scoped bool) []string {
 	}
 	if has["net"] {
 		flags = append(flags, "--allow-net")
+	} else {
+		// The host child talks to the shell over loopback TCP on Windows
+		// (Deno cannot use AF_UNIX there), so loopback is always allowed.
+		flags = append(flags, "--allow-net="+LoopbackHost)
 	}
 	if has["os:info"] {
 		flags = append(flags, "--allow-sys")

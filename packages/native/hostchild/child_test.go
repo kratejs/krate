@@ -56,14 +56,18 @@ console.log("version " + first);
 start();
 `
 
-type rt struct{ name, bin string }
+type rt struct {
+	name, bin string
+	// transport is the child transport under test: "unix" or "tcp".
+	transport string
+}
 
 func runtimes(t *testing.T) []rt {
 	t.Helper()
 	var out []rt
 	for _, n := range []string{"node", "bun", "deno"} {
 		if p, err := exec.LookPath(n); err == nil {
-			out = append(out, rt{n, p})
+			out = append(out, rt{name: n, bin: p})
 		}
 	}
 	if len(out) == 0 {
@@ -153,7 +157,7 @@ func setupEnv(t *testing.T, r rt, mutate func(src string) string, env, funcs, st
 	write("start.txt", "10")
 	f := &fixture{dir: dir, logs: &logSink{}}
 	f.child = gohost.NewChild(gohost.ChildOptions{
-		Logf: f.logs.logf, Prefix: "[js] ", Args: r.args(filepath.Join(dir, "host.mjs")), ReadyAnyLine: true, ReadyTimeout: 60 * time.Second,
+		Logf: f.logs.logf, Prefix: "[js] ", Transport: r.transport, Args: r.args(filepath.Join(dir, "host.mjs")), ReadyAnyLine: true, ReadyTimeout: 60 * time.Second,
 	})
 	if err := f.child.Start(context.Background(), r.bin, env); err != nil {
 		t.Fatal(err)
@@ -260,9 +264,25 @@ func readErr(t *testing.T, d *wire.Decoder) *krate.Error {
 	return e
 }
 
+// each runs fn for every runtime on the transport the shell uses on this OS
+// and, where that is unix sockets, on loopback TCP as well (the Windows
+// transport), so the TCP path is exercised on every CI OS.
 func each(t *testing.T, fn func(t *testing.T, r rt)) {
 	for _, r := range runtimes(t) {
-		t.Run(r.name, func(t *testing.T) { fn(t, r) })
+		native := gohost.TransportFor(runtime.GOOS, true)
+		trs := []string{native}
+		if native != "tcp" {
+			trs = append(trs, "tcp")
+		}
+		for _, tr := range trs {
+			r := r
+			r.transport = tr
+			name := r.name
+			if tr != native {
+				name += "-" + tr
+			}
+			t.Run(name, func(t *testing.T) { fn(t, r) })
+		}
 	}
 }
 
@@ -608,11 +628,9 @@ func TestLifecycle(t *testing.T) {
 		case <-time.After(5 * time.Second):
 			t.Fatal("child did not exit after its stdin closed")
 		}
-		if runtime.GOOS != "windows" {
-			res := f.post(t, "t.Add", "", func(e *wire.Encoder) { e.Int(1); e.Int(2) })
-			if res.err == nil || res.err.Code != "unavailable" {
-				t.Fatalf("call after Stop = %+v", res.err)
-			}
+		res := f.post(t, "t.Add", "", func(e *wire.Encoder) { e.Int(1); e.Int(2) })
+		if res.err == nil || res.err.Code != "unavailable" {
+			t.Fatalf("call after Stop = %+v", res.err)
 		}
 	})
 }

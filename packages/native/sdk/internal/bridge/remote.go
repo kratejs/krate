@@ -2,17 +2,16 @@ package bridge
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync/atomic"
 	"time"
 
+	"github.com/kratejs/krate/packages/native/internal/hosttransport"
 	"github.com/kratejs/krate/packages/native/krate"
 	"github.com/kratejs/krate/packages/native/wire"
 )
@@ -21,6 +20,7 @@ import (
 type remote struct {
 	client *http.Client
 	base   string
+	rt     http.RoundTripper
 	tr     *http.Transport
 	next   atomic.Int64
 }
@@ -28,24 +28,21 @@ type remote struct {
 func newRemote(addr string) (*remote, error) {
 	r := &remote{}
 	switch {
-	case strings.HasPrefix(addr, "unix:"):
-		sock := strings.TrimPrefix(addr, "unix:")
-		r.tr = &http.Transport{
-			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-				var d net.Dialer
-				return d.DialContext(ctx, "unix", sock)
-			},
-			MaxIdleConnsPerHost: 8,
-			IdleConnTimeout:     30 * time.Second,
+	case strings.HasPrefix(addr, "unix:"), strings.HasPrefix(addr, "tcp:"):
+		ep, err := hosttransport.Parse(addr)
+		if err != nil {
+			return nil, fmt.Errorf("bridge: %s: %w", ParentEnv, err)
 		}
+		r.rt, r.tr = hosttransport.NewTransport(ep)
 		r.base = "http://krate-parent"
 	case strings.HasPrefix(addr, "http://"):
 		r.tr = &http.Transport{MaxIdleConnsPerHost: 8, IdleConnTimeout: 30 * time.Second}
+		r.rt = r.tr
 		r.base = strings.TrimRight(addr, "/")
 	default:
-		return nil, fmt.Errorf("bridge: %s=%q must be unix:<path> or http://host:port", ParentEnv, addr)
+		return nil, fmt.Errorf("bridge: %s=%q must be unix:<path>, tcp:127.0.0.1:<port>?token=<token> or http://host:port", ParentEnv, addr)
 	}
-	r.client = &http.Client{Transport: r.tr}
+	r.client = &http.Client{Transport: r.rt}
 	return r, nil
 }
 

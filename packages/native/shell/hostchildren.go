@@ -126,7 +126,9 @@ func (a *app) startHostChild(index int, spec HostChildSpec, man *Manifest) error
 	}
 	if hc == nil {
 		hc = &hostChild{spec: spec, prog: prog, args: args}
+		transport := gohost.TransportFor(runtime.GOOS, true)
 		hc.child = gohost.NewChild(gohost.ChildOptions{
+			Transport:    transport,
 			Logf:         func(format string, args ...any) { a.logf(format, args...) },
 			Prefix:       "[" + spec.Runtime + "] ",
 			Args:         args,
@@ -135,7 +137,13 @@ func (a *app) startHostChild(index int, spec HostChildSpec, man *Manifest) error
 			ReadyAnyLine: true,
 			ReadyTimeout: 60 * time.Second,
 		})
-		parent, err := a.sdk.ServeParent()
+		var parent string
+		var err error
+		if transport == "tcp" {
+			parent, err = a.sdk.ServeParentTCP()
+		} else {
+			parent, err = a.sdk.ServeParent()
+		}
 		if err != nil {
 			return err
 		}

@@ -3,6 +3,7 @@
 // src/runtime.ts
 import { createServer, request as httpRequest } from "node:http";
 import { unlinkSync } from "node:fs";
+import { timingSafeEqual } from "node:crypto";
 import { Readable } from "node:stream";
 
 // ../../app/src/errors.ts
@@ -734,6 +735,8 @@ function createClient(options = {}) {
 
 // src/runtime.ts
 var SOCKET_ENV = "KRATE_GOHOST_SOCKET";
+var TOKEN_ENV = "KRATE_GOHOST_TOKEN";
+var TOKEN_HDR = "x-krate-token";
 var FRAMES = "application/x-krate-frames";
 var WINDOW_HDR = "x-krate-window";
 var STREAM_PREFIX = "/__krate/stream/";
@@ -742,17 +745,55 @@ var MAX_SIGNAL_NAMES = 256;
 var fns = /* @__PURE__ */ new Map();
 var sigs = /* @__PURE__ */ new Map();
 var PARENT_ENV = "KRATE_GOHOST_PARENT";
+function isLoopback(host) {
+  return host === "127.0.0.1" || host === "::1" || host === "[::1]" || /^127\.\d+\.\d+\.\d+$/.test(host);
+}
+function parseEndpoint(addr) {
+  if (addr.startsWith("tcp:")) {
+    let rest = addr.slice("tcp:".length);
+    let token = "";
+    const q = rest.indexOf("?");
+    if (q >= 0) {
+      token = new URLSearchParams(rest.slice(q + 1)).get("token") ?? "";
+      rest = rest.slice(0, q);
+    }
+    const colon = rest.lastIndexOf(":");
+    const host = colon > 0 ? rest.slice(0, colon).replace(/^\[|\]$/g, "") : "";
+    const port = colon > 0 ? Number(rest.slice(colon + 1)) : NaN;
+    if (!host || !isLoopback(host) || !Number.isInteger(port) || port < 0 || port > 65535) {
+      throw new Error(`bad tcp address ${JSON.stringify(addr)}: need a loopback IP and a port`);
+    }
+    return { host, port, token };
+  }
+  const path = addr.startsWith("unix:") ? addr.slice("unix:".length) : addr;
+  if (!path) throw new Error("empty socket address");
+  return { socketPath: path };
+}
+function tokenOk(got, want) {
+  if (!want || typeof got !== "string") return false;
+  const a = Buffer.from(got);
+  const b = Buffer.from(want);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
 function parentFetch(addr) {
-  const socketPath = addr.startsWith("unix:") ? addr.slice("unix:".length) : "";
+  let ep;
+  let epErr;
+  try {
+    ep = parseEndpoint(addr);
+  } catch (e) {
+    epErr = new Error(`${PARENT_ENV}=${JSON.stringify(addr)}: ${e.message}`);
+  }
   return (input, init) => new Promise((resolve, reject) => {
-    if (!socketPath) {
-      reject(new Error(`${PARENT_ENV}=${JSON.stringify(addr)} must be unix:<path>`));
+    if (!ep) {
+      reject(epErr);
       return;
     }
     const url = new URL(input, "http://krate-parent");
     const headers = {};
     new Headers(init?.headers).forEach((v, k) => headers[k] = v);
-    const req = httpRequest({ socketPath, path: url.pathname + url.search, method: init?.method ?? "GET", headers }, (res) => {
+    if (ep.token) headers[TOKEN_HDR] = ep.token;
+    const target = ep.socketPath ? { socketPath: ep.socketPath } : { host: ep.host, port: ep.port };
+    const req = httpRequest({ ...target, path: url.pathname + url.search, method: init?.method ?? "GET", headers }, (res) => {
       const h = new Headers();
       for (const [k, v] of Object.entries(res.headers)) {
         if (Array.isArray(v)) for (const x of v) h.append(k, x);
@@ -1138,7 +1179,13 @@ function handleSignals(req, res, url) {
   }
   if (unsubs.length === 0) res.end();
 }
+var serverToken = "";
 function route(req, res) {
+  if (serverToken && !tokenOk(req.headers[TOKEN_HDR], serverToken)) {
+    res.writeHead(401, { "content-type": "text/plain" });
+    res.end("unauthorized");
+    return;
+  }
   const url = new URL(req.url ?? "/", "http://hostchild");
   const p = url.pathname;
   const method = (want) => {
@@ -1180,30 +1227,58 @@ function shutdown(socket, code) {
     server?.close();
   } catch {
   }
-  try {
-    unlinkSync(socket);
-  } catch {
+  if (socket) {
+    try {
+      unlinkSync(socket);
+    } catch {
+    }
   }
   process.exit(code);
 }
 function start() {
-  const socket = process.env[SOCKET_ENV];
-  if (!socket) {
+  const addr = process.env[SOCKET_ENV];
+  if (!addr) {
     console.error(`krate hostchild: ${SOCKET_ENV} is not set; this program is started by the Krate shell`);
     process.exit(1);
   }
+  let ep;
   try {
-    unlinkSync(socket);
-  } catch {
+    ep = parseEndpoint(addr);
+  } catch (e) {
+    console.error(`krate hostchild: ${SOCKET_ENV}: ${e.message}`);
+    process.exit(1);
+  }
+  const tcp = ep.socketPath === void 0;
+  const socket = ep.socketPath ?? "";
+  if (tcp) {
+    serverToken = process.env[TOKEN_ENV] ?? "";
+    if (!serverToken) {
+      console.error(`krate hostchild: ${TOKEN_ENV} is not set; a tcp transport needs it`);
+      process.exit(1);
+    }
+  } else {
+    try {
+      unlinkSync(socket);
+    } catch {
+    }
   }
   server = createServer(route);
   server.on("error", (e) => {
-    console.error("krate hostchild: listening on " + socket + ":", e);
+    console.error("krate hostchild: listening on " + addr + ":", e);
     process.exit(1);
   });
-  server.listen(socket, () => {
-    process.stdout.write("ready\n");
-  });
+  const onListening = () => {
+    if (tcp) {
+      const a = server?.address();
+      const port = a && typeof a === "object" ? a.port : 0;
+      process.stdout.write(`ready tcp:${ep.host.includes(":") ? "[" + ep.host + "]" : ep.host}:${port}
+`);
+    } else {
+      process.stdout.write("ready\n");
+    }
+  };
+  if (tcp) server.listen(ep.port, ep.host, onListening);
+  else server.listen(socket, onListening);
   const leave = () => shutdown(socket, 0);
   process.stdin.on("end", leave);
   process.stdin.on("close", leave);

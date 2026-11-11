@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kratejs/krate/packages/native/internal/hosttransport"
 	"github.com/kratejs/krate/packages/native/krate"
 	"github.com/kratejs/krate/packages/native/platform"
 	"github.com/kratejs/krate/packages/native/platform/caps"
@@ -39,6 +40,8 @@ const ParentEnv = bridge.ParentEnv
 // Host is the SDK of one process that owns the platform.
 type Host struct {
 	mu        sync.Mutex
+	tcpSrv    *http.Server
+	tcpAddr   string
 	table     *bridge.Table
 	env       *bridge.Env
 	parentReg *scheme.Registry
@@ -85,6 +88,29 @@ func (h *Host) ServeParent() (string, error) {
 	h.srv = &http.Server{Handler: scheme.New(scheme.Options{Registry: h.parentReg}), ReadHeaderTimeout: 10 * time.Second}
 	go h.srv.Serve(ln)
 	return "unix:" + sock, nil
+}
+
+// ServeParentTCP is ServeParent over loopback TCP with a random token, for the
+// JavaScript host children of Windows (Node, Bun and Deno cannot use AF_UNIX
+// there). It returns "tcp:127.0.0.1:<port>?token=<hex>" for ParentEnv. Every
+// request must carry the token in the X-Krate-Token header.
+func (h *Host) ServeParentTCP() (string, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.tcpSrv != nil {
+		return h.tcpAddr, nil
+	}
+	ln, ep, err := hosttransport.ListenTCP()
+	if err != nil {
+		return "", err
+	}
+	h.tcpSrv = &http.Server{
+		Handler:           hosttransport.Guard(ep, scheme.New(scheme.Options{Registry: h.parentReg})),
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+	h.tcpAddr = ep.String()
+	go h.tcpSrv.Serve(ln)
+	return h.tcpAddr, nil
 }
 
 // ShareWithParent adds the trusted form of the "krate/" ids registered on src
@@ -166,8 +192,8 @@ func (h *Host) AddWindow(id string, w platform.Window) string {
 // Close stops the parent socket and detaches local dispatch.
 func (h *Host) Close() {
 	h.mu.Lock()
-	srv, dir := h.srv, h.dir
-	h.srv, h.dir = nil, ""
+	srv, dir, tcp := h.srv, h.dir, h.tcpSrv
+	h.srv, h.dir, h.tcpSrv, h.tcpAddr = nil, "", nil, ""
 	attached := h.attached
 	h.mu.Unlock()
 	if attached && bridge.Local() == h.table {
@@ -175,6 +201,9 @@ func (h *Host) Close() {
 	}
 	if srv != nil {
 		srv.Close()
+	}
+	if tcp != nil {
+		tcp.Close()
 	}
 	if dir != "" {
 		os.RemoveAll(dir)
