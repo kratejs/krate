@@ -19,6 +19,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/native/capability"
 	"github.com/kratejs/krate/packages/compiler/internal/native/features"
 	"github.com/kratejs/krate/packages/compiler/internal/native/gobind"
+	"github.com/kratejs/krate/packages/compiler/internal/native/goenv"
 	"github.com/kratejs/krate/packages/compiler/internal/native/hostts"
 	"github.com/kratejs/krate/packages/compiler/internal/native/runtimes"
 )
@@ -534,7 +535,7 @@ func (b *Builder) compileGoHost(out, goos, goarch string, strip bool) error {
 	args = append(args, "-o", out, "./.krate/native/gohost")
 	cmd := exec.Command("go", args...)
 	cmd.Dir = b.Root
-	cmd.Env = append(os.Environ(), "GOOS="+goos, "GOARCH="+goarch)
+	cmd.Env = append(goenv.Env(b.Root), "GOOS="+goos, "GOARCH="+goarch)
 	if goos != runtime.GOOS || goarch != runtime.GOARCH {
 		cmd.Env = append(cmd.Env, "CGO_ENABLED=0")
 	}

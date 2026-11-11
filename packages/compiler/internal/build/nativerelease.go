@@ -20,6 +20,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/native"
 	"github.com/kratejs/krate/packages/compiler/internal/native/capability"
+	"github.com/kratejs/krate/packages/compiler/internal/native/goenv"
 	"github.com/kratejs/krate/packages/compiler/internal/native/hostts"
 	"github.com/kratejs/krate/packages/compiler/internal/native/pkg"
 	"github.com/kratejs/krate/packages/compiler/internal/version"
@@ -285,7 +286,7 @@ func (b *Builder) BuildNativeRelease(opts NativeReleaseOptions) (*NativeReleaseR
 	if p := b.releasePGO(eff, &res.Notes); p != "" {
 		res.PGO = p
 	}
-	env := os.Environ()
+	env := goenv.Env(b.Root)
 	if !hasGo || b.nativePlugins != nil {
 		env = append(env, "GOWORK=off", "GOFLAGS=-mod=mod")
 	}
@@ -507,7 +508,7 @@ func releaseMain(glues []string, withPlugins bool) string {
 // workspace owns the module graph.
 func (b *Builder) writeReleaseModfile(dir string) ([]string, error) {
 	out, _ := exec.Command("go", "env", "GOWORK").Output()
-	if w := strings.TrimSpace(string(out)); w != "" && w != "off" && b.nativePlugins == nil {
+	if w := strings.TrimSpace(string(out)); w != "" && w != "off" && b.nativePlugins == nil && !goenv.Excluded(b.Root) {
 		return nil, nil
 	}
 	gomod, err := os.ReadFile(filepath.Join(b.Root, "go.mod"))
