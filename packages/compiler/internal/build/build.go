@@ -32,6 +32,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/irtree"
 	jscompat "github.com/kratejs/krate/packages/compiler/internal/jsruntime"
 	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
+	"github.com/kratejs/krate/packages/compiler/internal/native/gobind"
 	"github.com/kratejs/krate/packages/compiler/internal/native/hostts"
 	"github.com/kratejs/krate/packages/compiler/internal/plugin"
 	"github.com/kratejs/krate/packages/compiler/internal/reactive"
@@ -187,6 +188,11 @@ type Builder struct {
 	// prepareNativeHost); its overlays replace host modules and inline host
 	// functions in every UI bundle.
 	nativeHost *hostts.Result
+	// nativeGo holds the generated Go host bindings of a native build.
+	nativeGo *gobind.Result
+	// nativeOverlays are the source overlays of every host stub (TypeScript
+	// and Go), keyed by absolute module path.
+	nativeOverlays map[string]string
 
 	// fontPreloadHTML holds the `<link rel="preload">` tags for fonts declared
 	// in the global stylesheet; injected into every page head.
@@ -2157,8 +2163,8 @@ func (b *Builder) newBundler() *bundler.Bundler {
 		bnd.SetActionBasePath(b.Cfg.BaseURLPath())
 	}
 	bnd.SetModuleCache(b.moduleCache)
-	if b.nativeHost != nil {
-		bnd.SetSourceOverlays(b.nativeHost.Overlays)
+	if b.nativeOverlays != nil {
+		bnd.SetSourceOverlays(b.nativeOverlays)
 	}
 	bnd.SetDevMode(b.DevMode)
 	bnd.SetTailwindImports(b.tailwindImportMode())
@@ -2665,7 +2671,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 
 	b.recordDeps(page, deps)
 
-	emitResult.ScriptHTML += routeInfoScript(routeChain, emitResult.Signatures) + fragmentInfo + pageRouteScript(page, b.Cfg.PagesDir)
+	emitResult.ScriptHTML += routeInfoScript(routeChain, emitResult.Signatures) + fragmentInfo + pageRouteScript(page, b.Cfg.PagesDir) + b.nativeParamScript(page)
 
 	outName := pageToOutput(page, b.Cfg.PagesDir)
 	pageDir := filepath.Join(b.Cfg.OutDir, outName)

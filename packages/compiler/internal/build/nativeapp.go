@@ -1,0 +1,449 @@
+package build
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"runtime"
+	"sort"
+	"strings"
+
+	"github.com/kratejs/krate/packages/compiler/internal/config"
+	"github.com/kratejs/krate/packages/compiler/internal/diag"
+	"github.com/kratejs/krate/packages/compiler/internal/native"
+	"github.com/kratejs/krate/packages/compiler/internal/native/gobind"
+)
+
+// NativeManifest is app.json, the contract between the build and the shell
+// that runs an app directory. Field names are fixed.
+type NativeManifest struct {
+	AppID       string            `json:"appId"`
+	ProductName string            `json:"productName"`
+	Version     string            `json:"version"`
+	Window      NativeWindowMeta  `json:"window"`
+	Assets      string            `json:"assets"`
+	Fallbacks   []NativeFallback  `json:"fallbacks"`
+	HostJS      *NativeHostJSMeta `json:"hostjs,omitempty"`
+	GoHost      *NativeGoHostMeta `json:"gohost,omitempty"`
+	Debug       bool              `json:"debug"`
+}
+
+// NativeWindowMeta is the main window of app.json.
+type NativeWindowMeta struct {
+	Title     string `json:"title"`
+	Width     int    `json:"width"`
+	Height    int    `json:"height"`
+	Resizable bool   `json:"resizable"`
+	Path      string `json:"path"`
+}
+
+// NativeFallback maps a dynamic route to the prerendered shell page the shell
+// serves for every URL that matches the pattern and has no file of its own.
+type NativeFallback struct {
+	Pattern string `json:"pattern"`
+	File    string `json:"file"`
+}
+
+// NativeHostJSMeta locates the TypeScript host bundle.
+type NativeHostJSMeta struct {
+	Bundle string `json:"bundle"`
+	Map    string `json:"map,omitempty"`
+}
+
+// NativeGoHostMeta locates the Go host binary and lists what it serves.
+type NativeGoHostMeta struct {
+	Binary  string   `json:"binary"`
+	Funcs   []string `json:"funcs"`
+	Streams []string `json:"streams"`
+	Signals []string `json:"signals"`
+}
+
+// NativeAppOptions tune BuildNativeApp.
+type NativeAppOptions struct {
+	// OutDir is the native output directory (default <root>/dist-native);
+	// the app directory is OutDir/app.
+	OutDir string
+	// Target is "<os>/<arch>" for the Go host (default: this machine).
+	Target string
+	// Shell asks for a shell binary next to the app directory: a path to
+	// copy, "auto" or "" to use KRATE_SHELL or build the monorepo shell.
+	Shell     string
+	WantShell bool
+	// SkipGoCompile writes the Go host program but does not compile it.
+	SkipGoCompile bool
+}
+
+// NativeAppResult describes the app directory BuildNativeApp wrote.
+type NativeAppResult struct {
+	// OutDir and AppDir are absolute.
+	OutDir, AppDir string
+	Manifest       NativeManifest
+	// GoHostMain is the generated Go host program, "" without Go host code.
+	GoHostMain string
+	// ShellPath is the shell binary copied or built next to the app.
+	ShellPath string
+	// Notes are non-fatal remarks (for example a shell that could not be built).
+	Notes []string
+}
+
+var slugRe = regexp.MustCompile(`[^a-z0-9]+`)
+
+func slugOf(s string) string {
+	s = strings.Trim(slugRe.ReplaceAllString(strings.ToLower(s), "-"), "-")
+	if s == "" {
+		return "app"
+	}
+	return s
+}
+
+// nativeDiagError prints diagnostics the way the host code errors print and
+// returns the aggregate build error.
+func nativeDiagError(ds []diag.Diagnostic, what string) error {
+	errs := make([]error, len(ds))
+	for i, d := range ds {
+		errs[i] = d
+		fmt.Fprintf(os.Stderr, "  %sError:%s %s\n", cRed, cReset, strings.ReplaceAll(diag.FormatDiagnostics([]error{d}), "\n", "\n    "))
+	}
+	return &multiError{summary: fmt.Sprintf("build failed: %d %s", len(ds), what), errs: errs}
+}
+
+// parseNativeTarget validates "<os>/<arch>".
+func parseNativeTarget(t string) (goos, goarch string, d *diag.Diagnostic) {
+	if t == "" {
+		return runtime.GOOS, runtime.GOARCH, nil
+	}
+	bad := func() (string, string, *diag.Diagnostic) {
+		x := diag.New("--target", 1, 1, fmt.Sprintf("unknown native target %q", t), "use <os>/<arch>, for example linux/amd64, darwin/arm64 or windows/amd64", "").WithCode(diag.CodeNativeTarget)
+		return "", "", &x
+	}
+	os_, arch, ok := strings.Cut(t, "/")
+	if !ok {
+		return bad()
+	}
+	switch os_ {
+	case "macos":
+		os_ = "darwin"
+	case "windows", "linux", "darwin":
+	default:
+		return bad()
+	}
+	switch arch {
+	case "amd64", "arm64":
+	default:
+		return bad()
+	}
+	return os_, arch, nil
+}
+
+// BuildNativeApp builds the project as a native app directory:
+//
+//	app/app.json
+//	app/dist/...            the prerendered UI
+//	app/host/host.js(.map)  when the app has TypeScript host code
+//	app/gohost/krate-gohost when the app has Go host code
+//
+// It sets NativeTarget, gates on native.CheckTarget, builds every route as
+// static HTML, then adds the host programs and the manifest.
+func (b *Builder) BuildNativeApp(opts NativeAppOptions) (*NativeAppResult, error) {
+	goos, goarch, derr := parseNativeTarget(opts.Target)
+	if derr != nil {
+		return nil, nativeDiagError([]diag.Diagnostic{*derr}, "native target error(s)")
+	}
+	b.NativeTarget = true
+
+	ds, err := native.CheckTarget(b.Root, b.Cfg)
+	if err != nil {
+		return nil, err
+	}
+	if len(ds) > 0 {
+		return nil, nativeDiagError(ds, "native target error(s)")
+	}
+
+	outDir := opts.OutDir
+	if outDir == "" {
+		outDir = "dist-native"
+	}
+	if !filepath.IsAbs(outDir) {
+		outDir = filepath.Join(b.Root, outDir)
+	}
+	appDir := filepath.Join(outDir, "app")
+	res := &NativeAppResult{OutDir: outDir, AppDir: appDir}
+	if err := os.RemoveAll(appDir); err != nil {
+		return nil, fmt.Errorf("cleaning %s: %w", appDir, err)
+	}
+	distDir := filepath.Join(appDir, "dist")
+	b.Cfg.OutDir = distDir
+
+	if err := b.BuildAll(); err != nil {
+		return nil, err
+	}
+	fallbacks, err := nativeFallbacks(distDir)
+	if err != nil {
+		return nil, err
+	}
+	// The build manifest and other server files are of no use to the shell.
+	_ = os.RemoveAll(filepath.Join(distDir, ".krate"))
+
+	eff := nativeEffective(b.Cfg)
+	productName := eff.ProductName
+	if productName == "" {
+		productName = filepath.Base(b.Root)
+	}
+	appID := eff.AppID
+	if appID == "" {
+		appID = "com.example." + strings.ReplaceAll(slugOf(productName), "-", "")
+		res.Notes = append(res.Notes, "native.appId is not set; using "+appID)
+	}
+	version := eff.Version
+	if version == "" {
+		version = "0.1.0"
+	}
+	m := NativeManifest{
+		AppID: appID, ProductName: productName, Version: version,
+		Window: NativeWindowMeta{
+			Title: productName, Width: eff.Window.Width, Height: eff.Window.Height,
+			Resizable: eff.Window.Resizable != nil && *eff.Window.Resizable, Path: "/",
+		},
+		Assets:    "dist",
+		Fallbacks: fallbacks,
+	}
+
+	if h := b.NativeHost(); h != nil && h.HostBundle != "" {
+		if err := copyNativeFile(h.HostBundle, filepath.Join(appDir, "host", "host.js")); err != nil {
+			return nil, err
+		}
+		m.HostJS = &NativeHostJSMeta{Bundle: "host/host.js"}
+		if h.SourceMap != "" {
+			if _, err := os.Stat(h.SourceMap); err == nil {
+				if err := copyNativeFile(h.SourceMap, filepath.Join(appDir, "host", "host.js.map")); err != nil {
+					return nil, err
+				}
+				m.HostJS.Map = "host/host.js.map"
+			}
+		}
+	}
+
+	if g := b.NativeGo(); g != nil && len(g.Glue) > 0 {
+		mainPath, err := b.writeGoHostMain(g)
+		if err != nil {
+			return nil, err
+		}
+		res.GoHostMain = mainPath
+		bin := filepath.Join("gohost", "krate-gohost")
+		if goos == "windows" {
+			bin += ".exe"
+		}
+		gh := &NativeGoHostMeta{Binary: filepath.ToSlash(bin), Funcs: []string{}, Streams: []string{}, Signals: []string{}}
+		for _, mod := range g.Modules {
+			gh.Funcs = append(gh.Funcs, mod.Funcs...)
+			gh.Streams = append(gh.Streams, mod.Streams...)
+			gh.Signals = append(gh.Signals, mod.Signals...)
+		}
+		sort.Strings(gh.Funcs)
+		sort.Strings(gh.Streams)
+		sort.Strings(gh.Signals)
+		m.GoHost = gh
+		if !opts.SkipGoCompile {
+			if err := b.compileGoHost(filepath.Join(appDir, bin), goos, goarch); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	data, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "app.json"), append(data, '\n'), 0o644); err != nil {
+		return nil, err
+	}
+	res.Manifest = m
+
+	if opts.WantShell || opts.Shell != "" || os.Getenv("KRATE_SHELL") != "" {
+		path, note := b.provideShell(outDir, opts.Shell, goos, goarch)
+		res.ShellPath = path
+		if note != "" {
+			res.Notes = append(res.Notes, note)
+		}
+	}
+	return res, nil
+}
+
+// nativeEffective returns the native config with defaults, or the defaults
+// alone when the project has no native block.
+func nativeEffective(cfg *config.Config) *config.NativeConfig {
+	if e := cfg.EffectiveNative(); e != nil {
+		return e
+	}
+	tmp := config.Config{Native: &config.NativeConfig{}}
+	return tmp.EffectiveNative()
+}
+
+// nativeFallbacks lists the prerendered shell page of every dynamic route that
+// accepts params the build did not enumerate.
+func nativeFallbacks(distDir string) ([]NativeFallback, error) {
+	data, err := os.ReadFile(ManifestPath(distDir))
+	if err != nil {
+		return nil, fmt.Errorf("reading the build manifest: %w", err)
+	}
+	var man Manifest
+	if err := json.Unmarshal(data, &man); err != nil {
+		return nil, fmt.Errorf("reading the build manifest: %w", err)
+	}
+	out := []NativeFallback{}
+	seen := map[string]bool{}
+	for _, p := range man.Pages {
+		if !isDynamicPattern(p.Route) || p.StaticOnly || !p.DynamicParams || seen[p.Route] {
+			continue
+		}
+		file := strings.TrimPrefix(p.Route, "/") + "/index.html"
+		if _, err := os.Stat(filepath.Join(distDir, filepath.FromSlash(file))); err != nil {
+			continue
+		}
+		seen[p.Route] = true
+		out = append(out, NativeFallback{Pattern: p.Route, File: file})
+	}
+	sort.Slice(out, func(i, j int) bool { return compareRouteSpecificity(out[i].Pattern, out[j].Pattern) < 0 })
+	return out, nil
+}
+
+// writeGoHostMain writes the program that serves the generated glue.
+func (b *Builder) writeGoHostMain(g *gobind.Result) (string, error) {
+	var sb strings.Builder
+	sb.WriteString("// Code generated by krate. DO NOT EDIT.\n\npackage main\n\nimport (\n")
+	for i, gl := range g.Glue {
+		fmt.Fprintf(&sb, "\tglue%d %q\n", i, gl.ImportPath)
+	}
+	sb.WriteString("\n\t\"github.com/kratejs/krate/packages/native/gohost\"\n\t\"github.com/kratejs/krate/packages/native/scheme\"\n)\n\n")
+	sb.WriteString("func main() {\n\tgohost.Serve(func(r *scheme.Registry) {\n")
+	for i := range g.Glue {
+		fmt.Fprintf(&sb, "\t\tglue%d.Register(r)\n", i)
+	}
+	sb.WriteString("\t})\n}\n")
+	dir := filepath.Join(b.nativeOutDir(), "gohost")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	path := filepath.Join(dir, "main.go")
+	if old, err := os.ReadFile(path); err == nil && string(old) == sb.String() {
+		return path, nil
+	}
+	return path, os.WriteFile(path, []byte(sb.String()), 0o644)
+}
+
+// compileGoHost builds the Go host program inside the project's Go module.
+func (b *Builder) compileGoHost(out, goos, goarch string) error {
+	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+		return err
+	}
+	cmd := exec.Command("go", "build", "-trimpath", "-o", out, "./.krate/native/gohost")
+	cmd.Dir = b.Root
+	cmd.Env = append(os.Environ(), "GOOS="+goos, "GOARCH="+goarch)
+	if goos != runtime.GOOS || goarch != runtime.GOARCH {
+		cmd.Env = append(cmd.Env, "CGO_ENABLED=0")
+	}
+	var buf bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &buf, &buf
+	printf("  %s>%s Compiling the Go host (%s/%s)\n", cGreen, cReset, goos, goarch)
+	if err := cmd.Run(); err != nil {
+		msg := strings.TrimSpace(buf.String())
+		if msg == "" {
+			msg = err.Error()
+		}
+		hint := "the packages the UI imports must compile for the target; run go build ./... in the project for the full output"
+		if strings.Contains(msg, "no required module provides package") || strings.Contains(msg, "missing go.sum entry") || strings.Contains(msg, "cannot find module providing package") {
+			hint = "run go mod tidy in the project, and go get " + nativeGoModulePath + " if go.mod does not require it"
+		}
+		return nativeDiagError([]diag.Diagnostic{diag.New("go.mod", 1, 1, "go build of the Go host failed:\n"+indent(trimTail(msg, 20)), hint, "").WithCode(diag.CodeNativeGoBuild)}, "Go host error(s)")
+	}
+	return nil
+}
+
+func indent(s string) string { return "    " + strings.ReplaceAll(s, "\n", "\n    ") }
+
+func trimTail(s string, n int) string {
+	lines := strings.Split(s, "\n")
+	if len(lines) <= n {
+		return s
+	}
+	return strings.Join(lines[:n], "\n") + "\n..."
+}
+
+// provideShell copies or builds a shell binary into outDir. A failure is
+// reported as a note, never as a build error.
+func (b *Builder) provideShell(outDir, want, goos, goarch string) (string, string) {
+	exe := ""
+	if goos == "windows" {
+		exe = ".exe"
+	}
+	if want == "" || want == "auto" {
+		want = os.Getenv("KRATE_SHELL")
+	}
+	if want != "" && want != "auto" {
+		dst := filepath.Join(outDir, "krate-shell"+exe)
+		if err := copyNativeFile(want, dst); err != nil {
+			return "", "could not copy the shell binary: " + err.Error()
+		}
+		_ = os.Chmod(dst, 0o755)
+		return dst, ""
+	}
+	mod := FindMonorepoNative(b.Root)
+	if mod == "" {
+		return "", "no shell binary: set KRATE_SHELL or pass --shell <path>"
+	}
+	if _, err := os.Stat(filepath.Join(mod, "cmd", "krate-shell")); err != nil {
+		return "", "no shell binary: packages/native/cmd/krate-shell does not exist in this checkout"
+	}
+	dst := filepath.Join(outDir, "krate-shell"+exe)
+	cmd := exec.Command("go", "build", "-trimpath", "-o", dst, "./cmd/krate-shell")
+	cmd.Dir = mod
+	cmd.Env = append(os.Environ(), "GOOS="+goos, "GOARCH="+goarch)
+	var buf bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &buf, &buf
+	if err := cmd.Run(); err != nil {
+		return "", "could not build the shell: " + trimTail(strings.TrimSpace(buf.String()), 6)
+	}
+	return dst, ""
+}
+
+// FindMonorepoNative returns packages/native of a Krate checkout containing
+// root, or "".
+func FindMonorepoNative(root string) string {
+	dir := root
+	for {
+		cand := filepath.Join(dir, "packages", "native")
+		if data, err := os.ReadFile(filepath.Join(cand, "go.mod")); err == nil && bytes.Contains(data, []byte("module "+nativeGoModulePath)) {
+			return cand
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
+}
+
+func copyNativeFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
+}

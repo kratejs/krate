@@ -95,9 +95,9 @@ export default function P() { return <p>{count()}{String(add)}{String(ticks)}{St
 
 	stub := res.Overlays[filepath.Join(filepath.Dir(res.HostBundle), "../../../src/lib/tasks.host.ts")]
 	for _, w := range []string{
-		`export const count = signal("src/lib/tasks.host.count");`,
-		`export const ticks = (...a) => stream("src/lib/tasks.host.ticks", a);`,
-		`import { call, signal, stream } from "@krate/app";`,
+		`export const count = __krateSig("src/lib/tasks.host.count");`,
+		`export const ticks = (...a) => __krateStream("src/lib/tasks.host.ticks", a);`,
+		`import { call as __krateCall, signal as __krateSignal, stream as __krateStream } from "@krate/app";`,
 	} {
 		if !strings.Contains(stub, w) {
 			t.Errorf("stub lacks %q:\n%s", w, stub)

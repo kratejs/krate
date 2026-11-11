@@ -4162,7 +4162,14 @@ func findLocalConstFn(name string, body []ast.Stmt) *ast.ArrowFn {
 // renderFnAsHandler renders a function declaration as a handler function expression.
 func renderFnAsHandler(fn *ast.FnDecl, signals map[string]ast.Expr) string {
 	var b strings.Builder
-	b.WriteString("function(")
+	if fn.Async {
+		b.WriteString("async ")
+	}
+	b.WriteString("function")
+	if fn.Generator {
+		b.WriteByte('*')
+	}
+	b.WriteByte('(')
 	for i, p := range fn.Params {
 		if i > 0 {
 			b.WriteString(", ")

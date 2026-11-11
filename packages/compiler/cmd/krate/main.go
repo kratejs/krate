@@ -82,6 +82,10 @@ type cliFlags struct {
 	Roots         []string
 	CPUProfile    string
 	MemProfile    string
+	NativeOut     string
+	Shell         string
+	WantShell     bool
+	GoHost        bool
 }
 
 // exitHooks run, last registered first, before the process exits, so the run
@@ -363,7 +367,7 @@ func parseFlags(args []string) (cliFlags, []string) {
 var valuedFlags = map[string]bool{
 	"--config": true, "--out-dir": true, "--target": true, "--mode": true,
 	"--report": true, "--token": true, "--root": true, "--cpuprofile": true,
-	"--memprofile": true, "--host": true, "--port": true,
+	"--memprofile": true, "--host": true, "--port": true, "--out": true, "--shell": true,
 }
 
 // parseFlagsChecked parses CLI flags, returning an error for malformed values
@@ -388,6 +392,10 @@ func parseFlagsChecked(args []string) (cliFlags, []string, error) {
 				flags.OutDir = val
 			case "--target":
 				flags.Target = val
+			case "--out":
+				flags.NativeOut = val
+			case "--shell":
+				flags.Shell, flags.WantShell = val, true
 			case "--mode":
 				flags.Mode = val
 			case "--report":
@@ -412,6 +420,8 @@ func parseFlagsChecked(args []string) (cliFlags, []string, error) {
 			continue
 		}
 		switch {
+		case args[i] == "--go":
+			flags.GoHost = true
 		case args[i] == "--static-only":
 			flags.StaticOnly = true
 		case args[i] == "--watch":

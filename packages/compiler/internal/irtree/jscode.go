@@ -96,6 +96,16 @@ func generateExprJS(expr ast.Expr, signals map[string]ast.Expr) string {
 			left = "(" + left + ")"
 		}
 		right := generateExprJS(e.Right, signals)
+		// An arrow function is an assignment-level expression: as an operand
+		// of any other operator it needs parentheses (`a ?? ((x) => x)`).
+		if !isAssignOp(e.Op) {
+			if isArrowExpr(e.Left) {
+				left = "(" + left + ")"
+			}
+			if isArrowExpr(e.Right) {
+				right = "(" + right + ")"
+			}
+		}
 		// Preserve real JS semantics for `&&` (falsy left operand is returned
 		// unchanged rather than collapsed to ''). The runtime and SSR renderer
 		// both skip false/null/undefined, so conditional JSX still renders
@@ -1267,4 +1277,11 @@ func startsAmbiguously(js string) bool {
 		}
 	}
 	return false
+}
+
+// isArrowExpr reports whether e is an arrow function (not a function
+// expression, which is a primary expression).
+func isArrowExpr(e ast.Expr) bool {
+	a, ok := e.(*ast.ArrowFn)
+	return ok && !a.Function
 }

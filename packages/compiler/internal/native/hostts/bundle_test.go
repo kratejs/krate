@@ -50,7 +50,7 @@ export default function Home() { return <button onClick={() => syncNow()}>sync</
 			t.Fatalf("host-only dependency %s shipped to the UI", p)
 		}
 	}
-	if !strings.Contains(src, `call("src/lib/sync.host.syncNow", a)`) {
+	if !strings.Contains(src, `__krateCall("src/lib/sync.host.syncNow", a)`) {
 		t.Fatalf("stub missing from the UI bundle:\n%s", src)
 	}
 }

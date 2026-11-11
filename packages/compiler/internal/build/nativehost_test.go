@@ -14,7 +14,7 @@ import (
 var nativeHostAppFiles = map[string]string{
 	"package.json":                         `{"name":"t","type":"module"}`,
 	"node_modules/@krate/app/package.json": `{"name":"@krate/app","version":"0.0.0","type":"module","exports":{".":"./index.js","./host":"./host.js"}}`,
-	"node_modules/@krate/app/index.js":     "export function call(fn, args) { return Promise.resolve([fn, args]); }\nexport function stream(fn, args) { return { fn, args }; }\nexport function signal(name) { return () => name; }\n",
+	"node_modules/@krate/app/index.js":     "export function call(fn, args) { return Promise.resolve([fn, args]); }\nexport function stream(fn, args) { return { fn, args }; }\nexport function signal(name) { return () => name; }\nexport function createClient() { return { call, stream, signal }; }\nexport function setClient() {}\nexport function getClient() { return { call, stream, signal }; }\n",
 	"node_modules/@krate/app/host.js":      "export function hostSignal(v) { return { get: () => v }; }\n",
 }
 

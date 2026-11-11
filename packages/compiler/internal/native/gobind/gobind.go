@@ -44,6 +44,9 @@ type Module struct {
 	DTS  string
 	// Host lists the imported host functions, streams and signals.
 	Host []string
+	// Funcs, Streams and Signals are the registry ids ("<module id>.<name>")
+	// of the imported host items by kind, sorted.
+	Funcs, Streams, Signals []string
 	// Components lists the imported names that are Go components.
 	Components []string
 }
@@ -233,8 +236,19 @@ func Generate(root string, imports []Import, outDir string) (*Result, []diag.Dia
 		out := Module{ID: m.id, Source: m.src, Components: sortedUnique(m.components)}
 		for _, it := range m.items {
 			out.Host = append(out.Host, it.name)
+			switch it.kind {
+			case itemStream:
+				out.Streams = append(out.Streams, it.id)
+			case itemSignal:
+				out.Signals = append(out.Signals, it.id)
+			default:
+				out.Funcs = append(out.Funcs, it.id)
+			}
 		}
 		sort.Strings(out.Host)
+		sort.Strings(out.Funcs)
+		sort.Strings(out.Streams)
+		sort.Strings(out.Signals)
 		if len(m.items) > 0 {
 			out.Stub = filepath.Join(outDir, "gostubs", filepath.FromSlash(m.id)+".go.js")
 			out.DTS = filepath.Join(outDir, "types", filepath.FromSlash(m.id)+".go.d.ts")

@@ -735,10 +735,41 @@ func (b *builder) finishClientComponent(node *ComponentNode, fn *ast.FnDecl, res
 		constDecls = decls
 		addFunctions()
 	}
+	dropShadowedFunctions(node, constDecls)
 	b.checkUnbundledImports(node)
 	if needsNoClientJS(node, fn, b.localFuncProps) && !res.forceClient && !b.rendersLiveProps(node) && !node.Lazy {
 		node.Tier = TierStatic
 	}
+}
+
+// dropShadowedFunctions removes a function declaration from the component's
+// extra vars when a module constant of the same name is declared as well. A
+// capitalized arrow constant (`export const Add = (x) => ...`) is known both
+// as a constant and as a function, and `var Add=` next to `function Add` in
+// one block is a syntax error. The constant stays: it is the original code.
+func dropShadowedFunctions(node *ComponentNode, constDecls []string) {
+	if len(constDecls) == 0 || len(node.ExtraVars) == 0 {
+		return
+	}
+	declared := map[string]bool{}
+	for _, d := range constDecls {
+		if rest, ok := strings.CutPrefix(d, "var "); ok {
+			if i := strings.IndexAny(rest, "=;"); i > 0 {
+				declared[strings.TrimSpace(rest[:i])] = true
+			}
+		}
+	}
+	kept := node.ExtraVars[:0:0]
+	for _, v := range node.ExtraVars {
+		if rest, ok := strings.CutPrefix(strings.TrimPrefix(v, "async "), "function"); ok {
+			rest = strings.TrimPrefix(strings.TrimSpace(rest), "*")
+			if i := strings.IndexByte(rest, '('); i > 0 && declared[strings.TrimSpace(rest[:i])] {
+				continue
+			}
+		}
+		kept = append(kept, v)
+	}
+	node.ExtraVars = kept
 }
 
 // needsNoClientJS reports whether a client component has nothing to hydrate
