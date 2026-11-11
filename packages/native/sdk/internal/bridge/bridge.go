@@ -119,11 +119,21 @@ func (t *Table) lookup(id string) (entry, bool) {
 	return e, ok
 }
 
-var local atomic.Pointer[Table]
+var (
+	local atomic.Pointer[Table]
+	epoch atomic.Int64
+)
 
 // SetLocal installs the Table of the process that owns the platform. Pass nil
 // to remove it (tests).
-func SetLocal(t *Table) { local.Store(t) }
+func SetLocal(t *Table) {
+	local.Store(t)
+	epoch.Add(1)
+}
+
+// Epoch changes whenever the dispatch target changes (SetLocal, ResetRemote).
+// Packages that keep one long-lived Subscribe use it to resubscribe.
+func Epoch() int64 { return epoch.Load() }
 
 // Local returns the installed Table, or nil.
 func Local() *Table { return local.Load() }
@@ -243,6 +253,7 @@ func parentRemote() (*remote, error) {
 // ResetRemote forgets the cached parent connection; tests that change
 // ParentEnv call it.
 func ResetRemote() {
+	epoch.Add(1)
 	remoteMu.Lock()
 	defer remoteMu.Unlock()
 	if remoteR != nil {

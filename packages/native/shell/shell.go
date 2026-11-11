@@ -21,6 +21,7 @@ import (
 	"github.com/kratejs/krate/packages/native/hostjs"
 	"github.com/kratejs/krate/packages/native/platform"
 	"github.com/kratejs/krate/packages/native/scheme"
+	"github.com/kratejs/krate/packages/native/sdk"
 )
 
 // RunOptions configures Run.
@@ -46,6 +47,10 @@ type RunOptions struct {
 	Out io.Writer
 	// Context, when done, quits the app.
 	Context context.Context
+	// Allowed decides which SDK permissions the page has ("window",
+	// "dialog", "clipboard:read", ...; see sdk.UIPermissions). Default: the
+	// names listed in the manifest's "permissions".
+	Allowed func(permission string) bool
 }
 
 // Run loads the app in appDir and runs it until the window closes (or, in
@@ -86,6 +91,8 @@ type app struct {
 
 	ctl  *Control
 	quit func() // set by the run mode
+
+	sdk *sdk.Host
 }
 
 func load(appDir string, opts RunOptions) (*app, error) {
@@ -99,6 +106,10 @@ func load(appDir string, opts RunOptions) (*app, error) {
 	}
 	a := &app{dir: dir, opts: opts, logf: opts.Logf, man: man, reg: scheme.NewRegistry()}
 	a.ctl = &Control{a: a}
+	a.sdk = sdk.NewHost()
+	if os.Getenv("KRATE_APP_ID") == "" {
+		os.Setenv("KRATE_APP_ID", man.AppID)
+	}
 	if err := a.reloadHostJS(); err != nil {
 		a.close()
 		return nil, err
@@ -137,7 +148,25 @@ func load(appDir string, opts RunOptions) (*app, error) {
 	return a, nil
 }
 
+// allowed reports whether the page may use an SDK permission.
+func (a *app) allowed(permission string) bool {
+	if a.opts.Allowed != nil {
+		return a.opts.Allowed(permission)
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.man != nil && a.man.HasPermission(permission)
+}
+
+// attachSDK connects the UI half of the SDK to the platform (nil in browser
+// mode) and exposes what the manifest allows to the page.
+func (a *app) attachSDK(p platform.App) {
+	a.sdk.Attach(p)
+	a.sdk.RegisterUI(a.reg, a.allowed)
+}
+
 func (a *app) close() {
+	a.sdk.Close()
 	a.mu.Lock()
 	host, child := a.host, a.child
 	a.host, a.child = nil, nil
@@ -241,7 +270,12 @@ func (a *app) restartGoHost() error {
 			Logf:   func(format string, args ...any) { a.logf(format, args...) },
 			Prefix: "[gohost] ",
 		})
-		env := []string{"KRATE_APP_DIR=" + a.dir}
+		env := []string{"KRATE_APP_DIR=" + a.dir, "KRATE_APP_ID=" + man.AppID}
+		parent, err := a.sdk.ServeParent()
+		if err != nil {
+			return err
+		}
+		env = append(env, gohost.ParentEnv+"="+parent)
 		if a.opts.Dev {
 			env = append(env, "KRATE_DEV=1")
 		}
@@ -285,6 +319,7 @@ func (a *app) runNative() error {
 	if err != nil {
 		return err
 	}
+	a.attachSDK(platApp)
 	wins := &windows{}
 	a.ctl.wins = wins
 	a.ctl.origin = platApp.Origin()
@@ -315,6 +350,7 @@ func (a *app) runNative() error {
 			return
 		}
 		wins.add(win)
+		a.sdk.AddWindow("main", win)
 		if a.opts.OnReady != nil {
 			go a.opts.OnReady(a.ctl)
 		}

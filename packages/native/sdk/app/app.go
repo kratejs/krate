@@ -101,12 +101,18 @@ var (
 	subs  []func(SecondInstance)
 	urls  []func(string)
 	subC  func()
+	subEp int64
 )
 
 func ensureSub() error {
-	if subC != nil {
+	if subC != nil && subEp == bridge.Epoch() {
 		return nil
 	}
+	if subC != nil {
+		subC()
+		subC = nil
+	}
+	subEp = bridge.Epoch()
 	c, err := bridge.Subscribe(context.Background(), IDEvents, func(d *wire.Decoder) {
 		si, err := decodeSecond(d)
 		if err != nil {

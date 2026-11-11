@@ -81,6 +81,7 @@ var (
 	routeMu  sync.Mutex
 	routes   = map[string]func(){}
 	routeSub func()
+	routeEp  int64
 	counter  atomic.Int64
 )
 
@@ -93,7 +94,12 @@ func Register(accel string, fn func()) (unregister func() error, err error) {
 	handle := fmt.Sprintf("go-%d-%d", os.Getpid(), counter.Add(1))
 	routeMu.Lock()
 	routes[handle] = fn
+	if ep := bridge.Epoch(); routeSub != nil && ep != routeEp {
+		routeSub()
+		routeSub = nil
+	}
 	if routeSub == nil {
+		routeEp = bridge.Epoch()
 		cancel, err := bridge.Subscribe(context.Background(), IDEvents, func(d *wire.Decoder) {
 			id, err := decodeEvent(d)
 			if err != nil {

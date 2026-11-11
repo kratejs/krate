@@ -232,3 +232,6 @@ func (h *Host) Subscribers(topic string) int {
 	}
 	return env.Topic(topic).Subscribers()
 }
+
+// SupportsForTest answers the same question as app.Supports for the host.
+func (h *Host) SupportsForTest(capability string) bool { return h.supports(capability) }

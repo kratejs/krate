@@ -30,7 +30,22 @@ type Manifest struct {
 	HostJS *HostJSSpec `json:"hostjs,omitempty"`
 	GoHost *GoHostSpec `json:"gohost,omitempty"`
 
+	// Permissions lists the SDK permissions the page has ("window",
+	// "dialog", "clipboard", "clipboard:read", "notify", "tray", "menu",
+	// "shortcut", "app"). Go host code is not gated.
+	Permissions []string `json:"permissions,omitempty"`
+
 	Debug bool `json:"debug"`
+}
+
+// HasPermission reports whether the manifest grants a permission.
+func (m *Manifest) HasPermission(name string) bool {
+	for _, p := range m.Permissions {
+		if p == name {
+			return true
+		}
+	}
+	return false
 }
 
 // WindowSpec is the first window.

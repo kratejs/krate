@@ -256,3 +256,14 @@ func (w *Window) State() caps.WindowState {
 	defer w.mu.Unlock()
 	return w.St
 }
+
+// ShortcutHandles lists the registered shortcut handles.
+func (a *App) ShortcutHandles() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	var out []string
+	for h := range a.Shortcuts {
+		out = append(out, h)
+	}
+	return out
+}
