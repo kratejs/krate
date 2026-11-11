@@ -148,7 +148,16 @@ func Register(t *bridge.Table, env *bridge.Env) {
 		{IDRestore, false, func(r *codec.R) act { return func(c caps.WindowControls, w platform.Window) { c.Restore() } }},
 		{IDFocus, false, func(r *codec.R) act { return func(c caps.WindowControls, w platform.Window) { c.Focus() } }},
 		{IDShow, false, func(r *codec.R) act { return func(c caps.WindowControls, w platform.Window) { c.Show() } }},
-		{IDHide, false, func(r *codec.R) act { return func(c caps.WindowControls, w platform.Window) { c.Hide() } }},
+		{IDHide, false, func(r *codec.R) act {
+			release := r.More() && r.Bool()
+			return func(c caps.WindowControls, w platform.Window) {
+				if rel, ok := w.(caps.WindowRelease); ok && release {
+					rel.Release()
+					return
+				}
+				c.Hide()
+			}
+		}},
 		{IDPreventClose, false, func(r *codec.R) act {
 			b := r.Bool()
 			return func(c caps.WindowControls, w platform.Window) { c.SetPreventClose(b) }

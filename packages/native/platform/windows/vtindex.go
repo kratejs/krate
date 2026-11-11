@@ -30,6 +30,8 @@ var (
 	wvAddNewWindowRequested      = vtIndex("ICoreWebView2", "add_NewWindowRequested")
 	newWinArgsPutHandled         = vtIndex("ICoreWebView2NewWindowRequestedEventArgs", "put_Handled")
 	wvExecuteScript              = vtIndex("ICoreWebView2", "ExecuteScript")
+	wvAddScriptOnDocCreated      = vtIndex("ICoreWebView2", "AddScriptToExecuteOnDocumentCreated")
+	wv19PutMemoryTarget          = vtIndex("ICoreWebView2_19", "put_MemoryUsageTargetLevel")
 	wvAddWebResourceRequested    = vtIndex("ICoreWebView2", "add_WebResourceRequested")
 	wvAddWebResourceFilter       = vtIndex("ICoreWebView2", "AddWebResourceRequestedFilter")
 	setPutAreDevToolsEnabled     = vtIndex("ICoreWebView2Settings", "put_AreDevToolsEnabled")

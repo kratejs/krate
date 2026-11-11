@@ -181,6 +181,7 @@ func newTestServer() *testServer {
 		s.marks <- r.URL.Query().Get("name")
 		w.WriteHeader(204)
 	})
+	registerMemHandlers(s)
 	s.mux.HandleFunc("/report", func(w http.ResponseWriter, r *http.Request) {
 		var rep map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&rep); err != nil {

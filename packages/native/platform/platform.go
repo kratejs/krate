@@ -17,6 +17,10 @@ type Options struct {
 	Handler http.Handler
 	// Debug enables the webview's developer tools.
 	Debug bool
+	// KeepAlive keeps the app running when its last window closes. The last
+	// live window is then released (hidden, webview destroyed) rather than
+	// destroyed, and Show brings it back; see caps.WindowRelease.
+	KeepAlive bool
 }
 
 // WindowOptions configures one window.

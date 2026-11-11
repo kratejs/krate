@@ -40,6 +40,11 @@ const (
 	WindowClosed         WindowEventKind = "closed"
 	WindowFocused        WindowEventKind = "focus"
 	WindowBlurred        WindowEventKind = "blur"
+	// WindowReleased is delivered when a window gave up its webview (Release,
+	// or the last window closing under KeepAlive); WindowRestored when Show
+	// brought one back.
+	WindowReleased WindowEventKind = "released"
+	WindowRestored WindowEventKind = "restored"
 )
 
 // WindowEvent is delivered to the handler set with WindowControls.OnEvent.

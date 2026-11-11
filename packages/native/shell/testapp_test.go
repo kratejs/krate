@@ -63,7 +63,7 @@ func buildTestApp(root, page string, withGo bool, start int) (*testApp, error) {
 	}
 	man := map[string]any{
 		"appId": "dev.krate.shelltest", "productName": "Shell Test", "version": "1.0.0",
-		"window":    map[string]any{"title": "Shell Test", "width": 640, "height": 480, "resizable": true, "path": "/"},
+		"window":    map[string]any{"title": "Shell Test", "width": 640, "height": 480, "resizable": true, "path": "/", "keepAlive": true},
 		"assets":    "dist",
 		"fallbacks": []map[string]string{{"pattern": "/tasks/[id]", "file": "tasks/[id]/index.html"}},
 		"hostjs":    map[string]any{"bundle": "host/host.js", "map": "host/host.js.map"},

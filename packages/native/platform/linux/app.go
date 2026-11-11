@@ -41,6 +41,9 @@ type Options struct {
 	AppID   string
 	Handler http.Handler
 	Debug   bool
+	// KeepAlive keeps the app running when its last window closes: that
+	// window is released (hidden, webview destroyed) and Show brings it back.
+	KeepAlive bool
 }
 
 // WindowOptions configures one window.
@@ -60,6 +63,11 @@ type App struct {
 	debug   bool
 	ctx     uintptr // WebKitWebContext
 	mainTid int
+
+	keepAlive bool
+	v         *viewAPI
+	evalCbs   map[uintptr]func(string) // main thread only; see evalString
+	nextTok   uintptr
 
 	mu          sync.Mutex
 	windows     map[uintptr]*Window
@@ -84,7 +92,7 @@ var (
 	theApp *App
 
 	cbIdle, cbScheme, cbPolicy, cbLoad, cbDestroy, cbClose, cbHeader uintptr
-	cbDelete, cbWinState                                             uintptr
+	cbDelete, cbWinState, cbEvalDone                                 uintptr
 	curHeader                                                        http.Header
 )
 
@@ -100,7 +108,7 @@ func New(opts Options) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	app := &App{api: a, handler: opts.Handler, debug: opts.Debug, windows: map[uintptr]*Window{}, stopCh: make(chan struct{}), mainTid: syscall.Gettid()}
+	app := &App{api: a, handler: opts.Handler, debug: opts.Debug, keepAlive: opts.KeepAlive, evalCbs: map[uintptr]func(string){}, windows: map[uintptr]*Window{}, stopCh: make(chan struct{}), mainTid: syscall.Gettid()}
 	if syscall.Getpid() != app.mainTid {
 		return nil, errors.New("krate: New must be called on the main thread (call from the main goroutine)")
 	}
@@ -124,7 +132,9 @@ func New(opts Options) (*App, error) {
 	cbHeader = purego.NewCallback(headerCallback)
 	cbDelete = purego.NewCallback(deleteCallback)
 	cbWinState = purego.NewCallback(winStateCallback)
+	cbEvalDone = purego.NewCallback(evalDoneCallback)
 	app.x = loadExt()
+	app.v = loadView()
 	app.initExt()
 
 	mgr := a.wkDataManagerNew("base-data-directory", dataDir("XDG_DATA_HOME", ".local/share", id),

@@ -40,6 +40,8 @@ const (
 	WindowClosed         = caps.WindowClosed
 	WindowFocused        = caps.WindowFocused
 	WindowBlurred        = caps.WindowBlurred
+	WindowReleased       = caps.WindowReleased
+	WindowRestored       = caps.WindowRestored
 	OpenFile             = caps.OpenFile
 	SaveFile             = caps.SaveFile
 	OpenFolder           = caps.OpenFolder

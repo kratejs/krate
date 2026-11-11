@@ -14,6 +14,8 @@ import (
 	"unsafe"
 
 	xw "golang.org/x/sys/windows"
+
+	"github.com/kratejs/krate/packages/native/platform/caps"
 )
 
 func init() {
@@ -361,6 +363,9 @@ func wndProc(hwnd, message, wParam, lParam uintptr) (ret uintptr) {
 		case wmSize:
 			if wParam != sizeMinimized {
 				w.resize()
+				w.setViewHidden(false)
+			} else {
+				w.setViewHidden(true)
 			}
 		case wmSetFocus:
 			w.focus()
@@ -380,7 +385,7 @@ func wndProc(hwnd, message, wParam, lParam uintptr) (ret uintptr) {
 func (a *App) windowDestroyed(w *Window) {
 	w.destroy()
 	delete(a.windows, w.hwnd)
-	if len(a.windows) == 0 && a.everOpened && !a.cfg.KeepAlive && !w.noQuit {
+	if len(a.windows) == 0 && a.everOpened && caps.QuitWhenEmpty(a.cfg.KeepAlive, 0) && !w.noQuit {
 		pPostQuitMessage.Call(0)
 	}
 }

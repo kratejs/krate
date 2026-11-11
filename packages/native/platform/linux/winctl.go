@@ -95,13 +95,31 @@ func (w *Window) Restore() {
 }
 
 // Focus raises and focuses the window.
-func (w *Window) Focus() { w.do(func(x *ext) { x.gtkWindowPresent(w.win) }) }
+func (w *Window) Focus() {
+	w.do(func(x *ext) {
+		w.revive()
+		x.gtkWindowPresent(w.win)
+	})
+}
 
-// Show makes the window visible.
-func (w *Window) Show() { w.do(func(x *ext) { x.gtkWidgetShow(w.win) }) }
+// Show makes the window visible. A released window gets its webview back on
+// the route and scroll position it had.
+func (w *Window) Show() {
+	w.do(func(x *ext) {
+		w.revive()
+		x.gtkWidgetShow(w.win)
+	})
+}
 
-// Hide hides the window without destroying it.
-func (w *Window) Hide() { w.do(func(x *ext) { x.gtkWidgetHide(w.win) }) }
+// Hide hides the window without destroying it. The page gets a
+// krate:memory-pressure event and the shell returns free memory to the
+// system. Use Release to also free the webview.
+func (w *Window) Hide() {
+	w.do(func(x *ext) {
+		x.gtkWidgetHide(w.win)
+		w.memoryPressure()
+	})
+}
 
 // SetPreventClose turns close requests into WindowCloseRequested events.
 func (w *Window) SetPreventClose(on bool) { w.do(func(*ext) { w.preventClose = on }) }
@@ -153,6 +171,10 @@ func deleteCallback(widget, event, id uintptr) uintptr {
 		theApp.emitWindow(w, caps.WindowCloseRequested)
 		return 1
 	}
+	if w != nil && theApp.parkable(w) {
+		w.release()
+		return 1
+	}
 	return 0
 }
 
@@ -166,6 +188,9 @@ func winStateCallback(widget, event, id uintptr) uintptr {
 	changed := *(*uint32)(unsafe.Add(ev, 20))
 	now := *(*uint32)(unsafe.Add(ev, 24))
 	w.lastState = now
+	if changed&winIconified != 0 && now&winIconified != 0 {
+		w.memoryPressure()
+	}
 	if changed&winFocused != 0 {
 		if now&winFocused != 0 {
 			theApp.emitWindow(w, caps.WindowFocused)

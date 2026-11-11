@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"unsafe"
+
+	"github.com/kratejs/krate/packages/native/platform/caps"
 )
 
 // Window is one top-level window with one webview.
@@ -20,6 +22,14 @@ type Window struct {
 	destroyed  bool
 	noQuit     bool
 	path       string
+
+	// Release state, see release_windows.go.
+	released  bool
+	releasing bool
+	abort     bool // Show arrived while the release waited for the page
+	viewHid   bool // the controller is invisible (hidden or minimized)
+	state     caps.ViewState
+	scrollJS  string
 
 	ready chan struct{} // closed when the webview is usable or creation failed
 	err   error
@@ -58,6 +68,16 @@ func (a *App) createWindow(cfg WindowConfig, w *Window) error {
 	pShowWindow.Call(hwnd, swShow)
 	pUpdateWindow.Call(hwnd)
 
+	w.createController()
+	return nil
+}
+
+// createController asks the app's one shared environment for a controller of
+// the window. Every window of the app uses the same environment (same user
+// data folder), so all webviews run under one browser process; a released
+// window gets a new controller here when it is shown again.
+func (w *Window) createController() {
+	a := w.app
 	a.withEnv(func() {
 		if w.destroyed {
 			w.finish(errors.New("windows: window closed before the webview was created"))
@@ -67,13 +87,12 @@ func (a *App) createWindow(cfg WindowConfig, w *Window) error {
 			w.controllerCompleted(hr, controller)
 			return sOK
 		})
-		hr := vcall(a.env, envCreateController, hwnd, uintptr(h))
+		hr := vcall(a.env, envCreateController, w.hwnd, uintptr(h))
 		if failed(hr) {
 			w.finish(fmt.Errorf("windows: CreateCoreWebView2Controller: 0x%08x", uint32(hr)))
-			pDestroyWindow.Call(hwnd)
+			pDestroyWindow.Call(w.hwnd)
 		}
 	})
-	return nil
 }
 
 // finish records the creation result and releases NewWindow waiters.
@@ -136,6 +155,8 @@ func (w *Window) controllerCompleted(hr, controller uintptr) {
 
 	w.resize()
 	vcall(w.controller, ctlPutIsVisible, 1)
+	w.viewHid = false
+	w.addScrollRestore()
 	vcall(w.webview, wvNavigate, uintptr(unsafe.Pointer(wstr(navURL(w.path)))))
 	w.focus()
 
@@ -150,6 +171,14 @@ func (w *Window) controllerCompleted(hr, controller uintptr) {
 // destroy runs on WM_DESTROY.
 func (w *Window) destroy() {
 	w.destroyed = true
+	w.closeController()
+	w.pending = nil
+	w.finish(errors.New("windows: window destroyed"))
+}
+
+// closeController closes the WebView2 controller and drops the references
+// to it and to its CoreWebView2.
+func (w *Window) closeController() {
 	if w.controller != nil {
 		vcall(w.controller, ctlClose)
 		comRelease(w.controller)
@@ -159,8 +188,6 @@ func (w *Window) destroy() {
 		comRelease(w.webview)
 		w.webview = nil
 	}
-	w.pending = nil
-	w.finish(errors.New("windows: window destroyed"))
 }
 
 func (w *Window) resize() {
@@ -229,11 +256,17 @@ func (w *Window) SetSize(width, height int) {
 	})
 }
 
-// Close destroys the window.
+// Close destroys the window. With KeepAlive the last live window is released
+// instead (hidden, controller closed) and Show brings it back.
 func (w *Window) Close() {
 	w.app.Dispatch(func() {
-		if !w.destroyed {
-			pDestroyWindow.Call(w.hwnd)
+		if w.destroyed {
+			return
 		}
+		if w.app.parkable(w) {
+			w.release()
+			return
+		}
+		pDestroyWindow.Call(w.hwnd)
 	})
 }

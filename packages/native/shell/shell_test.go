@@ -36,6 +36,13 @@ func TestParseManifestDefaults(t *testing.T) {
 	if want := "gohost/x"; !strings.HasPrefix(m.GoHost.Binary, want) {
 		t.Errorf("binary = %q", m.GoHost.Binary)
 	}
+	if m.Window.KeepAlive {
+		t.Error("keepAlive must default to false")
+	}
+	m, err = ParseManifest([]byte(`{"appId":"a.b","window":{"keepAlive":true}}`), "app.json")
+	if err != nil || !m.Window.KeepAlive {
+		t.Errorf("keepAlive true lost: %v %+v", err, m.Window)
+	}
 }
 
 func TestParseManifestErrors(t *testing.T) {

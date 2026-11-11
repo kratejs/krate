@@ -62,6 +62,7 @@ Release layout: the app directory sits next to the shell binary
 | `window.title` | Default `productName`. |
 | `window.width`, `window.height` | Default 1024 x 768. |
 | `window.resizable` | Default `true`. |
+| `window.keepAlive` | Default `false`. Keep the app running with no window open (a tray app): closing the last window releases its webview instead of quitting, and `window.Show` (or reopening from a tray click or second instance) brings it back on the same route. See the memory docs page. |
 | `window.path` | Route to open, starting with `/`. Default `/`. |
 | `assets` | Built UI directory. Default `dist`. |
 | `fallbacks` | Optional. Pages that serve URLs with no file; see below. `file` is relative to `assets`. |

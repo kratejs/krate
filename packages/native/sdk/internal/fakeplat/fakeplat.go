@@ -181,10 +181,11 @@ type Window struct {
 	ref  caps.WindowRef
 	Opts platform.WindowOptions
 
-	mu    sync.Mutex
-	St    caps.WindowState
-	Calls []string
-	Path  string
+	mu       sync.Mutex
+	St       caps.WindowState
+	Calls    []string
+	released bool
+	Path     string
 }
 
 func (w *Window) rec(s string) { w.mu.Lock(); w.Calls = append(w.Calls, s); w.mu.Unlock() }
@@ -248,6 +249,15 @@ func (w *Window) Restore() {
 func (w *Window) Focus() { w.rec("focus") }
 func (w *Window) Show()  { w.rec("show") }
 func (w *Window) Hide()  { w.rec("hide") }
+
+// Release and Released implement caps.WindowRelease.
+func (w *Window) Release() {
+	w.rec("release")
+	w.mu.Lock()
+	w.released = true
+	w.mu.Unlock()
+}
+func (w *Window) Released() bool { w.mu.Lock(); defer w.mu.Unlock(); return w.released }
 func (w *Window) SetPreventClose(on bool) {
 	w.rec("preventclose")
 }

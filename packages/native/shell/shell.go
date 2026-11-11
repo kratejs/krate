@@ -387,6 +387,8 @@ func (a *app) runNative() error {
 		AppID:   man.AppID,
 		Handler: a.handler,
 		Debug:   a.opts.Dev || man.Debug,
+		// The manifest is read once, at load, like the permissions.
+		KeepAlive: man.Window.KeepAlive,
 	})
 	if err != nil {
 		return err
