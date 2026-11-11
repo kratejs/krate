@@ -29,7 +29,7 @@ func TestNativeLoadsFullBlock(t *testing.T) {
 		"native": {
 			"appId": "com.acme.app", "productName": "Acme", "version": "1.0.0",
 			"platforms": ["macos"], "icons": "./assets/icon.png",
-			"window": {"width": 900, "height": 600, "resizable": false, "titleBar": "hidden"},
+			"window": {"width": 900, "height": 600, "resizable": false, "titleBar": "hidden", "keepAlive": true},
 			"permissions": ["dialog", "shell:openExternal"],
 			"deepLinks": ["acme"],
 			"host": {"runtime": "node", "version": "22", "bundle": false, "islands": {"sharp": "node"}},
@@ -43,7 +43,7 @@ func TestNativeLoadsFullBlock(t *testing.T) {
 		t.Errorf("host lists: %v %v", cfg.HostFunctions, cfg.HostDirs)
 	}
 	n := cfg.EffectiveNative()
-	if n.AppID != "com.acme.app" || n.Window.Width != 900 || *n.Window.Resizable || n.Window.TitleBar != "hidden" {
+	if n.AppID != "com.acme.app" || n.Window.Width != 900 || *n.Window.Resizable || n.Window.TitleBar != "hidden" || !n.Window.KeepAlive {
 		t.Errorf("native = %+v", n)
 	}
 	if n.Host.Runtime != "node" || *n.Host.Bundle || n.Host.Islands["sharp"] != "node" || n.Release.Compile != "always" {

@@ -25,6 +25,11 @@ export interface WindowOptions {
   permissions?: string[];
 }
 
+export interface HideOptions {
+  // Also destroy the window's webview. Ignored where the platform cannot.
+  release?: boolean;
+}
+
 export interface WindowState {
   x: number;
   y: number;
@@ -40,7 +45,9 @@ export interface WindowState {
   title: string;
 }
 
-export type WindowEventKind = "close-requested" | "closed" | "focus" | "blur";
+// "released": the window gave up its webview (hide({ release: true }), or the
+// last window closing under window.keepAlive); "restored": show() brought it back.
+export type WindowEventKind = "close-requested" | "closed" | "focus" | "blur" | "released" | "restored";
 
 export interface WindowEvent {
   window: string;
@@ -86,11 +93,18 @@ export class Window {
   focus() {
     return this.cmd("focus");
   }
+  // Shows a hidden window. A window hidden with { release: true } gets its
+  // webview back on the route and scroll position it had; the page reloads
+  // and re-subscribes to host signals, which resend their current values.
   show() {
     return this.cmd("show");
   }
-  hide() {
-    return this.cmd("hide");
+  // Hides the window. With { release: true } the webview is destroyed too:
+  // when every window is released the web process exits, which suits a tray
+  // app running in the background. Without it the page stays and gets a
+  // "krate:memory-pressure" event (see onMemoryPressure).
+  hide(opts: HideOptions = {}) {
+    return opts.release ? this.cmd("hide", true) : this.cmd("hide");
   }
   setPreventClose(on: boolean) {
     return this.cmd("setPreventClose", on);
@@ -130,4 +144,18 @@ export function list(): Promise<string[]> {
 
 export function onEvent(fn: (e: WindowEvent) => void, opts?: SubscribeOptions): () => void {
   return subscribe<WindowEvent>("krate/window.events", fn, opts);
+}
+
+// Calls fn when the shell hides or minimizes this window, so the page can drop
+// caches and large buffers. It listens for the "krate:memory-pressure" DOM
+// event, which the shell dispatches before it returns memory to the system.
+// Returns a function that stops listening. Outside a page it does nothing.
+export function onMemoryPressure(fn: () => void): () => void {
+  const target = globalThis as unknown as {
+    addEventListener?: (type: string, fn: () => void) => void;
+    removeEventListener?: (type: string, fn: () => void) => void;
+  };
+  if (typeof target.addEventListener !== "function") return () => {};
+  target.addEventListener("krate:memory-pressure", fn);
+  return () => target.removeEventListener?.("krate:memory-pressure", fn);
 }

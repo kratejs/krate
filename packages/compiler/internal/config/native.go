@@ -57,6 +57,11 @@ type NativeWindow struct {
 	// leaves the page nothing. Windows opened with window.Open take the same
 	// option and inherit the opener's scope.
 	Permissions *[]string `json:"permissions,omitempty"`
+	// KeepAlive keeps the app running with no window open, for tray apps.
+	// Closing the last window then releases its webview instead of quitting,
+	// and window.show() (or reopening from the tray) brings it back on the
+	// same route. Default false.
+	KeepAlive bool `json:"keepAlive,omitempty"`
 }
 
 // NativeHost configures where TypeScript host code runs.

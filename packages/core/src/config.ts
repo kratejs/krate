@@ -335,6 +335,12 @@ export interface NativeWindowConfig {
   resizable?: boolean;
   /** Default "native". */
   titleBar?: "native" | "hidden" | "none";
+  /**
+   * Keep the app running with no window open (tray apps). Closing the last
+   * window then releases its webview instead of quitting; `window.show()` or a
+   * tray click brings it back on the same route. Default false.
+   */
+  keepAlive?: boolean;
 }
 
 /** Runtime for TypeScript host code in the native target. */

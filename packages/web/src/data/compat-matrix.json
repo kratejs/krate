@@ -931,6 +931,33 @@
       ]
     },
     {
+      "id": "native-windows-background",
+      "area": "Native: shared web process, release and background mode",
+      "native": {
+        "linux": "supported",
+        "macos": "untested",
+        "windows": "untested"
+      },
+      "target": "Krate Native v1",
+      "summary": "All windows of an app share one web process (related web views on Linux, one WebView2 environment on Windows). A window can release its webview (hide with release) and get it back on the same route and scroll position; native.window.keepAlive keeps a tray app running with no window; hidden and minimized pages get a krate:memory-pressure event.",
+      "tests": [
+        "TestGUISharedWebProcess",
+        "TestGUIReleaseRestore",
+        "TestGUIKeepAlive",
+        "TestGUINavigateReleased",
+        "TestGUIMemoryPressureOnHide",
+        "TestGUIWindowsBackground",
+        "TestParseViewState",
+        "TestParkOnClose",
+        "TestQuitWhenEmpty"
+      ],
+      "knownLimits": [
+        "macOS and Windows: untested. The code builds for both and the Windows vtable slots are checked against WebView2.h, but no run against a real WKWebView or WebView2 window has been confirmed. On macOS the single-web-process switch is a private WebKit selector guarded by respondsToSelector; on Windows ICoreWebView2_19 memory targets need a recent runtime and are skipped without it.",
+        "A hidden page that is not released keeps its web process memory; only the page's own handlers of krate:memory-pressure and the shell's heap trim run. Release is what returns the web process memory.",
+        "The network process of WebKitGTK stays alive while the app runs, so a released Linux app still holds it."
+      ]
+    },
+    {
       "id": "native-sdk-dialog-clipboard-menu",
       "area": "Native: SDK dialogs, clipboard and menus",
       "native": {

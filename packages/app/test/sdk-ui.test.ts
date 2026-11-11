@@ -82,6 +82,48 @@ describe("clipboard", () => {
 });
 
 describe("window", () => {
+  it("hide sends the release flag only when asked, and show restores", async () => {
+    setup({ "krate/window.hide": () => null, "krate/window.show": () => null });
+    const w = win.get("w2");
+    await w.hide();
+    await w.hide({ release: false });
+    await w.hide({ release: true });
+    await w.show();
+    expect(seen.map((c) => c.args)).toEqual([["w2"], ["w2"], ["w2", true], ["w2"]]);
+  });
+
+  it("onMemoryPressure listens for the shell's DOM event and unsubscribes", () => {
+    const listeners = new Map<string, Set<() => void>>();
+    const g = globalThis as unknown as Record<string, unknown>;
+    const saved = { add: g.addEventListener, rem: g.removeEventListener };
+    g.addEventListener = (t: string, f: () => void) => {
+      (listeners.get(t) ?? listeners.set(t, new Set()).get(t)!).add(f);
+    };
+    g.removeEventListener = (t: string, f: () => void) => listeners.get(t)?.delete(f);
+    try {
+      let n = 0;
+      const stop = win.onMemoryPressure(() => n++);
+      for (const f of listeners.get("krate:memory-pressure") ?? []) f();
+      expect(n).toBe(1);
+      stop();
+      expect(listeners.get("krate:memory-pressure")?.size).toBe(0);
+    } finally {
+      g.addEventListener = saved.add;
+      g.removeEventListener = saved.rem;
+    }
+  });
+
+  it("onMemoryPressure is a no-op outside a page", () => {
+    const g = globalThis as unknown as Record<string, unknown>;
+    const saved = g.addEventListener;
+    g.addEventListener = undefined;
+    try {
+      expect(() => win.onMemoryPressure(() => {})()).not.toThrow();
+    } finally {
+      g.addEventListener = saved;
+    }
+  });
+
   it("open maps options, and handles drive the id-first commands", async () => {
     setup({
       "krate/window.open": () => "w2",
