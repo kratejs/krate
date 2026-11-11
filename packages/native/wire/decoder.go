@@ -56,9 +56,14 @@ func newConfig(opts []Option) config {
 // Kind classifies the next value without consuming it.
 type Kind uint8
 
-// Value kinds. KindBytes and KindTime are the tagged objects {"$b":..} and
-// {"$d":..}; every other object, including {"$m":..} and {"$s":..}, is
-// KindObject.
+// Value kinds. KindBytes, KindTime, KindMap and KindSet are the tagged
+// single-key objects {"$b":..}, {"$d":..}, {"$m":..} and {"$s":..}; every other
+// object, including the escaped forms {"$b$":..} and friends, is KindObject.
+//
+// Go has no Map or Set types, so the decoder reads them as plain containers:
+// BeginArray accepts a set (and a map, as its list of [key, value] pairs),
+// BeginObject accepts a map whose keys are all strings, and BeginSet and
+// BeginMap are the strict forms of BeginArray.
 const (
 	KindInvalid Kind = iota
 	KindObject
@@ -69,6 +74,8 @@ const (
 	KindNull
 	KindBytes
 	KindTime
+	KindMap
+	KindSet
 )
 
 const (
@@ -79,9 +86,11 @@ const (
 )
 
 type decFrame struct {
-	obj     bool
-	state   uint8
-	wrapped bool // object was wrapped as {"$b$": object}
+	obj        bool
+	state      uint8
+	closeBrace bool // a wrapper's '}' follows the container: {"$b$": {..}}, {"$s": [..]}
+	mapForm    bool // object view of {"$m": [[k, v], ..]}; the container ends with ']'
+	pairOpen   bool // mapForm: inside a [k, v] pair whose ']' is unread
 }
 
 // Decoder pulls values out of one frame.
@@ -320,21 +329,57 @@ func (d *Decoder) Kind() Kind {
 	case c == '-' || (c >= '0' && c <= '9'):
 		return KindNumber
 	case c == '{':
-		rest := d.src[d.pos+1:]
-		rest = bytes.TrimLeft(rest, " \t\r\n")
-		switch {
-		case bytes.HasPrefix(rest, []byte(`"$b":`)):
+		switch tag, _ := d.soleTag(); tag {
+		case "$b":
 			return KindBytes
-		case bytes.HasPrefix(rest, []byte(`"$d":`)):
+		case "$d":
 			return KindTime
+		case "$m":
+			return KindMap
+		case "$s":
+			return KindSet
 		}
 		return KindObject
 	}
 	return KindInvalid
 }
 
-// BeginObject consumes '{'. An object wrapped as {"$b$": object} is
-// unwrapped transparently.
+// soleTag reports whether the object at d.pos (a '{') has exactly one member
+// and its key is a reserved tag ("$b", "$d", "$m", "$s") or an escape wrapper
+// ("$b$", "$d$", "$m$", "$s$"). It returns that key and the offset of the
+// member's value. It consumes nothing and records no error.
+func (d *Decoder) soleTag() (string, int) {
+	c := *d
+	c.err = nil
+	c.pos = d.pos + 1
+	if c.peek() != '"' || c.pos+1 >= len(c.src) || (c.src[c.pos+1] != '$' && c.src[c.pos+1] != '\\') {
+		return "", 0
+	}
+	k, err := c.parseString()
+	if err != nil {
+		return "", 0
+	}
+	switch k {
+	case "$b", "$d", "$m", "$s", "$b$", "$d$", "$m$", "$s$":
+	default:
+		return "", 0
+	}
+	if c.peek() != ':' {
+		return "", 0
+	}
+	c.pos++
+	c.skipWS()
+	vp := c.pos
+	if c.skipValue(len(c.stack)+1) != nil || c.peek() != '}' {
+		return "", 0
+	}
+	return k, vp
+}
+
+// BeginObject consumes '{'. An object wrapped as {"<tag>$": object} is
+// unwrapped transparently: the members of object are read literally. A
+// {"$m": [[k, v], ..]} map is read as an object; Key fails if a key is not a
+// string (use BeginMap for such maps).
 func (d *Decoder) BeginObject() error {
 	if err := d.beginValue(); err != nil {
 		return err
@@ -345,28 +390,27 @@ func (d *Decoder) BeginObject() error {
 	if len(d.stack) >= d.maxDepth {
 		return d.fail("nesting deeper than %d", d.maxDepth)
 	}
-	d.pos++
 	f := decFrame{obj: true}
-	// Look for the {"$b$": {...}} escape.
-	p := d.pos
-	for p < len(d.src) && isWS(d.src[p]) {
-		p++
-	}
-	if bytes.HasPrefix(d.src[p:], []byte(`"$b$"`)) {
-		p += 5
-		for p < len(d.src) && isWS(d.src[p]) {
-			p++
+	tag, vp := d.soleTag()
+	switch tag {
+	case "$b$", "$d$", "$m$", "$s$":
+		if vp >= len(d.src) || d.src[vp] != '{' {
+			d.pos = vp
+			return d.fail("%s must wrap an object", tag)
 		}
-		if p < len(d.src) && d.src[p] == ':' {
-			p++
-			for p < len(d.src) && isWS(d.src[p]) {
-				p++
-			}
-			if p < len(d.src) && d.src[p] == '{' {
-				d.pos = p + 1
-				f.wrapped = true
-			}
+		d.pos = vp + 1
+		f.closeBrace = true
+	case "$m":
+		if vp >= len(d.src) || d.src[vp] != '[' {
+			d.pos = vp
+			return d.fail("$m must hold an array of pairs")
 		}
+		d.pos = vp + 1
+		f.closeBrace, f.mapForm = true, true
+	case "$b", "$d", "$s":
+		return d.fail("expected an object, found a %s value", tag)
+	default:
+		d.pos++
 	}
 	d.stack = append(d.stack, f)
 	return nil
@@ -381,8 +425,11 @@ func (d *Decoder) More() bool {
 	}
 	t := &d.stack[len(d.stack)-1]
 	closer := byte(']')
-	if t.obj {
+	if t.obj && !t.mapForm {
 		closer = '}'
+	}
+	if t.pairOpen && t.state == stAfter && d.closePair(t) != nil {
+		return false
 	}
 	c := d.peek()
 	switch t.state {
@@ -413,11 +460,25 @@ func (d *Decoder) Key() (string, error) {
 	if t.state == stKey {
 		return "", d.fail("key read twice; read or skip the value first")
 	}
+	if t.pairOpen {
+		if err := d.closePair(t); err != nil {
+			return "", err
+		}
+	}
 	if t.state == stAfter {
 		if d.peek() != ',' {
 			return "", d.fail("expected ',' or '}'")
 		}
 		d.pos++
+	}
+	if t.mapForm {
+		if d.peek() != '[' {
+			return "", d.fail("expected a [key, value] pair")
+		}
+		d.pos++
+		if d.peek() != '"' {
+			return "", d.fail("$m key is not a string; use BeginMap")
+		}
 	}
 	if d.peek() != '"' {
 		return "", d.fail("expected an object key")
@@ -426,12 +487,27 @@ func (d *Decoder) Key() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if d.peek() != ':' {
+	if t.mapForm {
+		if d.peek() != ',' {
+			return "", d.fail("expected ',' after $m key")
+		}
+		t.pairOpen = true
+	} else if d.peek() != ':' {
 		return "", d.fail("expected ':' after key")
 	}
 	d.pos++
 	t.state = stKey
 	return k, nil
+}
+
+// closePair consumes the ']' ending a [key, value] pair of a $m object view.
+func (d *Decoder) closePair(t *decFrame) error {
+	if d.peek() != ']' {
+		return d.fail("$m pair must hold exactly a key and a value")
+	}
+	d.pos++
+	t.pairOpen = false
+	return nil
 }
 
 // EndObject consumes '}'. All members must have been read or skipped.
@@ -442,17 +518,26 @@ func (d *Decoder) EndObject() error {
 	if len(d.stack) == 0 || !d.stack[len(d.stack)-1].obj {
 		return d.fail("EndObject outside an object")
 	}
-	t := d.stack[len(d.stack)-1]
+	t := &d.stack[len(d.stack)-1]
 	if t.state == stKey || t.state == stComma {
 		return d.fail("object ends where a member was expected")
 	}
-	if d.peek() != '}' {
+	if t.pairOpen {
+		if err := d.closePair(t); err != nil {
+			return err
+		}
+	}
+	closer := byte('}')
+	if t.mapForm {
+		closer = ']'
+	}
+	if d.peek() != closer {
 		return d.fail("unread members; Skip them before EndObject")
 	}
 	d.pos++
-	if t.wrapped {
+	if t.closeBrace {
 		if d.peek() != '}' {
-			return d.fail("expected '}' closing the $b$ escape")
+			return d.fail("expected '}' closing the tagged object")
 		}
 		d.pos++
 	}
@@ -461,19 +546,53 @@ func (d *Decoder) EndObject() error {
 	return nil
 }
 
-// BeginArray consumes '['.
-func (d *Decoder) BeginArray() error {
+// BeginArray consumes '['. It also opens a {"$s": [..]} set, and a
+// {"$m": [[k, v], ..]} map as its list of pairs; the pairs are arrays.
+func (d *Decoder) BeginArray() error { return d.beginList("") }
+
+// BeginSet opens a {"$s": [..]} set and fails on any other value.
+func (d *Decoder) BeginSet() error { return d.beginList("$s") }
+
+// BeginMap opens a {"$m": [[k, v], ..]} map and fails on any other value.
+// Read each entry with BeginArray, two values, EndArray. Keys may be of any
+// kind. Use BeginObject instead when all keys are strings.
+func (d *Decoder) BeginMap() error { return d.beginList("$m") }
+
+// beginList opens an array, or the tagged list named by only ("" accepts a
+// plain array, "$s" or "$m").
+func (d *Decoder) beginList(only string) error {
 	if err := d.beginValue(); err != nil {
 		return err
 	}
-	if d.peek() != '[' {
-		return d.fail("expected an array")
-	}
+	c := d.peek()
 	if len(d.stack) >= d.maxDepth {
 		return d.fail("nesting deeper than %d", d.maxDepth)
 	}
-	d.pos++
-	d.stack = append(d.stack, decFrame{})
+	f := decFrame{}
+	switch {
+	case c == '[' && only == "":
+		d.pos++
+	case c == '{':
+		tag, vp := d.soleTag()
+		if (tag != "$s" && tag != "$m") || (only != "" && tag != only) {
+			if only == "" {
+				return d.fail("expected an array")
+			}
+			return d.fail("expected a %s value", only)
+		}
+		if vp >= len(d.src) || d.src[vp] != '[' {
+			d.pos = vp
+			return d.fail("%s must hold an array", tag)
+		}
+		d.pos = vp + 1
+		f.closeBrace = true
+	default:
+		if only == "" {
+			return d.fail("expected an array")
+		}
+		return d.fail("expected a %s value", only)
+	}
+	d.stack = append(d.stack, f)
 	return nil
 }
 
@@ -485,13 +604,20 @@ func (d *Decoder) EndArray() error {
 	if len(d.stack) == 0 || d.stack[len(d.stack)-1].obj {
 		return d.fail("EndArray outside an array")
 	}
-	if d.stack[len(d.stack)-1].state == stComma {
+	t := d.stack[len(d.stack)-1]
+	if t.state == stComma {
 		return d.fail("array ends where an element was expected")
 	}
 	if d.peek() != ']' {
 		return d.fail("unread elements; Skip them before EndArray")
 	}
 	d.pos++
+	if t.closeBrace {
+		if d.peek() != '}' {
+			return d.fail("expected '}' closing the tagged array")
+		}
+		d.pos++
+	}
 	d.stack = d.stack[:len(d.stack)-1]
 	d.endValue()
 	return nil

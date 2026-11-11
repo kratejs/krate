@@ -14,21 +14,72 @@ Every body below is a sequence of frames. A frame is:
 u32 big-endian length N | N bytes JSON | u16 big-endian blob count K | K x (u32 big-endian length M | M bytes)
 ```
 
-Binary values (`[]byte` in Go, `Uint8Array` in TS) never appear inside the
-JSON. They are written as `{"$b": i}`, where `i` indexes the frame's blob list.
-A JSON object whose only key is `$b` is reserved; a user object with the single
-key `$b` is escaped as `{"$b$": <object>}`.
-
-Other tagged values:
+Binary values never appear inside the JSON; the blob list carries their bytes.
+Plain JSON values (objects, arrays, strings, numbers, booleans, null) are sent
+as is. Everything else is a tagged value: a JSON object whose ONLY key is one of
+four reserved tags.
 
 | JSON | Value |
 | --- | --- |
-| `{"$d": "2026-11-11T07:23:15.123Z"}` | `Date` / `time.Time` (RFC 3339, UTC, millisecond precision) |
-| `{"$m": [[k, v], ...]}` | `Map` (TS only; Go maps are plain objects) |
-| `{"$s": [v, ...]}` | `Set` (TS only) |
+| `{"$b": i}` | binary value (`[]byte` / `Uint8Array`); `i` indexes the frame's blob list |
+| `{"$d": "2026-11-11T07:23:15.123Z"}` | `time.Time` / `Date` |
+| `{"$m": [[k, v], ...]}` | `Map` (entries in order, keys of any kind) |
+| `{"$s": [v, ...]}` | `Set` |
 
-Plain JSON values (objects, arrays, strings, numbers, booleans, null) are sent
-as is.
+### Escapes
+
+The reserved keys are `$b`, `$d`, `$m` and `$s`. For each tag `T` in that set:
+
+- An object with several keys is always a plain object, even if one key is a tag
+  (`{"$b":1,"x":2}` is a plain object).
+- A user object whose only key is `T` is written as `{"T$": <object>}`.
+- A user object whose only key is already `T$` is wrapped under that same key:
+  `{"T$": {"T$": x}}`.
+- A decoder that meets an object whose only key is `T$` yields the wrapped
+  object: its keys are literal (never read as tags) and its values decode as
+  usual. The value must be an object; anything else is a malformed frame.
+- An empty object and an object whose only key is anything else are written as
+  is.
+
+So `{"$d": "x"}` travels as `{"$d$":{"$d":"x"}}` and arrives as `{"$d": "x"}`.
+
+### Binary, dates, maps and sets
+
+- A blob index is a non-negative integer below the frame's blob count.
+- Dates are RFC 3339 in UTC with exactly three fractional digits and a `Z`
+  suffix, years 0000 to 9999 (`toISOString`, Go `2006-01-02T15:04:05.000Z`).
+  Sub-millisecond time is truncated. Decoders (both sides) accept any RFC 3339
+  date-time: any number of fractional digits (or none), `Z` or a numeric
+  offset; the instant is what counts.
+- Go has no Map or Set type and never emits `$m` or `$s`; a Go map is a plain
+  JSON object (the TS decoder returns a plain object for it, not a `Map`). A
+  Go decoder reads `$m` and `$s` as follows, so that a TS `Map` or `Set`
+  argument is accepted:
+  - `$s` is an array: `BeginArray` (or the strict `BeginSet`) opens it.
+  - `$m` is an object when every key is a string: `BeginObject` opens it and
+    `Key` returns each key. A non-string key is an error from `Key`.
+  - `$m` is a list of pairs for any key kind: `BeginMap` (or `BeginArray`)
+    opens it and each entry is a two-element array.
+  - `Kind` reports `KindMap` and `KindSet` so generic readers can choose.
+
+### Numbers and strings
+
+- Both sides emit the shortest decimal that round-trips a double, with no
+  whitespace: integers as digits, a fraction when needed, an exponent form
+  (`1e+21`, `1.5e-7`, `5e-324`) only below 1e-6 or from 1e21 up. Both decoders
+  accept any JSON number, so `1E5` and `-0` are fine.
+- `-0`: JS writes it as `0`; Go writes `-0`; both decode `-0` to negative zero.
+  NaN and infinities cannot be sent.
+- Integers beyond 2^53 are exact in Go and rounded on the TS side; send them as
+  strings if the exact value matters.
+- Strings are UTF-8. Go escapes like `encoding/json` without HTML escaping
+  (including U+2028 and U+2029 as `\u2028`, `\u2029`, and invalid UTF-8 as
+  `\ufffd`). JS leaves U+2028 and U+2029 raw and writes lone surrogates as
+  `\udXXX`. Decoders accept every JSON string form; a lone surrogate decodes to
+  U+FFFD in Go.
+- Objects are written in insertion order with no whitespace. JS orders
+  integer-like keys first and ascending whatever the insertion order; key order
+  carries no meaning, but the shared vectors rely on it for byte equality.
 
 ## POST /__krate/call
 
@@ -100,5 +151,7 @@ Same frame stream carrying the dev hub's messages as `{"hmr": <message>}`.
 ## Golden vectors
 
 `wire/testdata/*.bin` and their `*.json` descriptions are shared by the Go
-(`wire`) and TS (`@krate/app`) codec tests. Both sides must decode every vector
-and re-encode it byte for byte.
+(`wire`) and TS (`@krate/app`) codec tests; `wire/testdata/README.md` defines
+the format. Both sides must decode every vector and re-encode it byte for byte,
+except where a `.flags.json` says one side cannot (Go has no Map/Set encoder; JS
+cannot write `-0`). Forms only one side emits live in that side's own tests.

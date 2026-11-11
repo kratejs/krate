@@ -28,11 +28,12 @@ cycle and no hard dependency.
 
 ## Codec notes
 
-Besides PROTOCOL.md: every tag (`$b`, `$d`, `$m`, `$s`) uses the same escape as
-`$b`. A user object whose only key is a tag is sent as `{"<tag>$": obj}`; one
-whose only key is already `<tag>$` is wrapped under that same key. Decoders
-treat a single-key object `{"<tag>$": obj}` as a literal `obj`. Calls with
-binary arguments are never deduplicated.
+The wire format, including the escape rule for all four tags (`$b`, `$d`, `$m`,
+`$s`), is specified in `packages/native/PROTOCOL.md`; `src/wire.ts` implements
+it. The golden vectors in `packages/native/wire/testdata` are shared with the Go
+codec and run by `test/shared-vectors.test.ts`. A Go `map` arrives as a plain
+object, not a `Map`; a `Map` or `Set` argument is accepted by Go as an object
+(string keys) / array. Calls with binary arguments are never deduplicated.
 
 ## Preliminary modules
 

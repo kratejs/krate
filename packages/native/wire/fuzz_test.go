@@ -39,6 +39,23 @@ func consume(d *Decoder, depth int) {
 			}
 		}
 		d.EndArray()
+	case KindSet, KindMap:
+		var err error
+		if d.Kind() == KindSet {
+			err = d.BeginSet()
+		} else {
+			err = d.BeginMap()
+		}
+		if err != nil {
+			return
+		}
+		for d.More() {
+			consume(d, depth+1)
+			if d.Err() != nil {
+				return
+			}
+		}
+		d.EndArray()
 	case KindString:
 		d.String()
 	case KindNumber:
@@ -70,6 +87,8 @@ func FuzzDecoder(f *testing.F) {
 		f.Add(b)
 	}
 	f.Add([]byte{})
+	f.Add(frameOf(`{"$m":[["a",1],[2,{"$s":[1]}]],"$s":1}`))
+	f.Add(frameOf(`[{"$m":[["a",{"$m$":{"$b":1}}]]},{"$s":[]},{"$d$":{"$d":"x"}}]`))
 	f.Add(frameOf(`[1,2,{"a":"\ud800"}]`))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		d, err := NewDecoder(data, WithMaxFrame(1<<20))
@@ -86,7 +105,16 @@ func FuzzDecoder(f *testing.F) {
 			func(d *Decoder) { d.Bytes() },
 			func(d *Decoder) { d.Float() },
 			func(d *Decoder) { d.Uint() },
-			func(d *Decoder) { d.BeginObject(); d.Key(); d.EndObject() },
+			func(d *Decoder) { d.BeginObject(); d.Key(); d.Skip(); d.EndObject() },
+			func(d *Decoder) {
+				d.BeginMap()
+				d.BeginArray()
+				d.Skip()
+				d.Skip()
+				d.EndArray()
+				d.EndArray()
+			},
+			func(d *Decoder) { d.BeginSet(); d.Skip(); d.EndArray() },
 		} {
 			d2, _ := NewDecoder(data)
 			fn(d2)

@@ -51,8 +51,8 @@ func walk(d *Decoder, e *Encoder) (string, error) {
 		}
 		e.EndObject()
 		sb.WriteByte('}')
-		if n == 1 && (firstKey == "$b" || firstKey == "$b$") {
-			return `{"$b$":` + sb.String() + `}`, nil
+		if w := wrapKey(firstKey); n == 1 && w != "" {
+			return `{"` + w + `":` + sb.String() + `}`, nil
 		}
 		return sb.String(), nil
 	case KindArray:
@@ -91,8 +91,75 @@ func walk(d *Decoder, e *Encoder) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		e.Raw(raw)
+		// Read the token through the typed accessors and write it back through
+		// the typed writers, so integer and float formatting are both covered.
+		sub := &Decoder{src: raw}
+		if i, ierr := strconv.ParseInt(string(raw), 10, 64); ierr == nil && string(raw) != "-0" {
+			v, err := sub.Int()
+			if err != nil || v != i {
+				return "", d.fail("Int(%s) = %d, %v", raw, v, err)
+			}
+			e.Int(v)
+		} else {
+			v, err := sub.Float()
+			if err != nil {
+				return "", err
+			}
+			e.Float(v)
+		}
 		return string(raw), nil
+	case KindMap:
+		if err := d.BeginMap(); err != nil {
+			return "", err
+		}
+		var sb strings.Builder
+		sb.WriteString(`{"$m":[`)
+		for i := 0; d.More(); i++ {
+			if i > 0 {
+				sb.WriteByte(',')
+			}
+			if err := d.BeginArray(); err != nil {
+				return "", err
+			}
+			k, err := walk(d, NewEncoder())
+			if err != nil {
+				return "", err
+			}
+			v, err := walk(d, NewEncoder())
+			if err != nil {
+				return "", err
+			}
+			if err := d.EndArray(); err != nil {
+				return "", err
+			}
+			sb.WriteString("[" + k + "," + v + "]")
+		}
+		if err := d.EndArray(); err != nil {
+			return "", err
+		}
+		e.Null() // Go cannot encode maps; the vector is flagged goEncode:false
+		return sb.String() + "]}", nil
+	case KindSet:
+		if err := d.BeginSet(); err != nil {
+			return "", err
+		}
+		var sb strings.Builder
+		sb.WriteString(`{"$s":[`)
+		for i := 0; d.More(); i++ {
+			if i > 0 {
+				sb.WriteByte(',')
+			}
+			v, err := walk(d, NewEncoder())
+			if err != nil {
+				return "", err
+			}
+			sb.WriteString(v)
+		}
+		if err := d.EndArray(); err != nil {
+			return "", err
+		}
+		e.Null()
+		return sb.String() + "]}", nil
 	case KindBool:
 		v, err := d.Bool()
 		if err != nil {
@@ -122,10 +189,32 @@ func walk(d *Decoder, e *Encoder) (string, error) {
 	return "", d.fail("walk: unexpected input")
 }
 
+type vectorFlags struct {
+	GoEncode *bool  `json:"goEncode"`
+	TSEncode *bool  `json:"tsEncode"`
+	Reason   string `json:"reason"`
+}
+
+func readFlags(t *testing.T, bin string) vectorFlags {
+	t.Helper()
+	var fl vectorFlags
+	b, err := os.ReadFile(strings.TrimSuffix(bin, ".bin") + ".flags.json")
+	if os.IsNotExist(err) {
+		return fl
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(b, &fl); err != nil {
+		t.Fatal(err)
+	}
+	return fl
+}
+
 func vectors(t *testing.T) []string {
 	t.Helper()
 	m, err := filepath.Glob("testdata/*.bin")
-	if err != nil || len(m) < 9 {
+	if err != nil || len(m) < 30 {
 		t.Fatalf("vectors: %v %d", err, len(m))
 	}
 	return m
@@ -157,6 +246,14 @@ func TestGoldenVectors(t *testing.T) {
 			}
 			if !sameJSON(t, logical, string(want)) {
 				t.Errorf("logical value\n got %s\nwant %s", logical, want)
+			}
+			fl := readFlags(t, bin)
+			if fl.GoEncode != nil && !*fl.GoEncode {
+				if fl.Reason == "" {
+					t.Error("goEncode:false needs a reason")
+				}
+				t.Logf("re-encode skipped: %s", fl.Reason)
+				return
 			}
 			got, err := e.Finish()
 			if err != nil {

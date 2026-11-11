@@ -17,10 +17,10 @@ const MaxBlobs = 1<<16 - 1
 
 type encFrame struct {
 	obj        bool
-	n          int  // members written so far
-	keyPending bool // objects: a key was written and awaits its value
-	start      int  // offset of the opening bracket in buf
-	sole       bool // objects: the only key so far is "$b" or "$b$"
+	n          int    // members written so far
+	keyPending bool   // objects: a key was written and awaits its value
+	start      int    // offset of the opening bracket in buf
+	wrap       string // objects: wrapper key if the first key is a reserved tag or escape
 }
 
 // Encoder builds one frame. It is append-only; the first misuse (a value
@@ -102,8 +102,10 @@ func (e *Encoder) BeginObject() {
 	e.buf = append(e.buf, '{')
 }
 
-// EndObject closes the current object. An object whose only key is "$b" or
-// "$b$" is wrapped as {"$b$": object} so it cannot be mistaken for a blob.
+// EndObject closes the current object. An object whose only key is a reserved
+// tag ("$b", "$d", "$m", "$s") is wrapped as {"<tag>$": object} so it cannot be
+// mistaken for a tagged value; one whose only key is already "<tag>$" is
+// wrapped under that same key.
 func (e *Encoder) EndObject() {
 	if e.err != nil {
 		return
@@ -119,8 +121,8 @@ func (e *Encoder) EndObject() {
 	}
 	e.stack = e.stack[:len(e.stack)-1]
 	e.buf = append(e.buf, '}')
-	if t.sole && t.n == 1 {
-		e.buf = slices.Insert(e.buf, t.start, []byte(`{"$b$":`)...)
+	if t.wrap != "" && t.n == 1 {
+		e.buf = slices.Insert(e.buf, t.start, []byte(`{"`+t.wrap+`":`)...)
 		e.buf = append(e.buf, '}')
 	}
 	e.endValue()
@@ -166,11 +168,24 @@ func (e *Encoder) Key(k string) {
 	if t.n > 0 {
 		e.buf = append(e.buf, ',')
 	}
-	t.sole = t.n == 0 && (k == "$b" || k == "$b$")
+	if t.n == 0 {
+		t.wrap = wrapKey(k)
+	}
 	t.n++
 	t.keyPending = true
 	e.buf = appendString(e.buf, k)
 	e.buf = append(e.buf, ':')
+}
+
+// wrapKey returns the wrapper key for an object whose first key is k, or "".
+func wrapKey(k string) string {
+	switch k {
+	case "$b", "$d", "$m", "$s":
+		return k + "$"
+	case "$b$", "$d$", "$m$", "$s$":
+		return k
+	}
+	return ""
 }
 
 // String writes a string value.

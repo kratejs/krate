@@ -2,14 +2,14 @@
 //
 // Frame: u32 BE json length | json | u16 BE blob count | blobs (u32 BE len + bytes).
 //
-// Escape rule (extends PROTOCOL.md, which only defines `$b$`): the reserved tag
+// Escape rule (PROTOCOL.md "Escapes" is the normative text): the reserved tag
 // keys are $b, $d, $m, $s. A user object with exactly one own key that is a tag
-// ($b) is written as {"$b$": <object>}. A user object whose only key is already
-// an escaped form ($b$) is wrapped under that same key: {"$b$": {"$b$": x}}.
-// On decode, an object whose only key is `$b$`, `$d$`, `$m$` or `$s$` is a
-// wrapper: its value is a plain object whose own keys are taken literally
-// (values still decode normally). So {"$b": 1} -> {"$b$": {"$b": 1}} and
-// {"$b$": 1} -> {"$b$": {"$b$": 1}}; same for $d, $m, $s.
+// is written as {"<tag>$": <object>}. A user object whose only key is already
+// an escaped form (<tag>$) is wrapped under that same key:
+// {"$b$": {"$b$": x}}. On decode, an object whose only key is `$b$`, `$d$`,
+// `$m$` or `$s$` is a wrapper: its value is a plain object whose own keys are
+// taken literally (values still decode normally). An object with several keys
+// is always plain, whatever its keys are.
 
 const TAGS = ["$b", "$d", "$m", "$s"];
 const ESCAPED = TAGS.map((t) => t + "$");
@@ -23,6 +23,13 @@ const td = new TextDecoder("utf-8", { fatal: true });
 
 function fail(root: string, path: string, msg: string): never {
   throw new TypeError(`${root}${path ? " at " + path : ""}: ${msg}`);
+}
+
+// setOwn assigns an own data property, also for "__proto__" (a plain
+// assignment would change the prototype instead and drop the key).
+function setOwn(o: Record<string, unknown>, k: string, v: unknown): void {
+  if (k === "__proto__") Object.defineProperty(o, k, { value: v, enumerable: true, writable: true, configurable: true });
+  else o[k] = v;
 }
 
 function addBlob(ctx: EncodeCtx, bytes: Uint8Array): unknown {
@@ -63,6 +70,8 @@ function enc(v: unknown, ctx: EncodeCtx, root: string, path: string, stack: obje
   }
   if (o instanceof Date) {
     if (Number.isNaN(o.getTime())) fail(root, path, "cannot encode an invalid Date");
+    const year = o.getUTCFullYear();
+    if (year < 0 || year > 9999) fail(root, path, `cannot encode a Date in year ${year} (0000 to 9999 only)`);
     return { $d: o.toISOString() };
   }
   if (stack.includes(o)) fail(root, path, "cannot encode a circular structure");
@@ -96,7 +105,7 @@ function enc(v: unknown, ctx: EncodeCtx, root: string, path: string, stack: obje
     for (const k of keys) {
       const val = (o as Record<string, unknown>)[k];
       if (val === undefined) continue;
-      out[k] = enc(val, ctx, root, `${path}.${k}`, stack);
+      setOwn(out, k, enc(val, ctx, root, `${path}.${k}`, stack));
     }
     if (keys.length === 1 && out[keys[0]] !== undefined) {
       const k = keys[0];
@@ -135,6 +144,9 @@ export function encodeFrame(value: unknown, root = "value"): Uint8Array {
   return buildFrame(tree, ctx.blobs);
 }
 
+// RFC 3339 date-time: any fraction length, Z or a numeric offset.
+const RFC3339 = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d+)?(Z|[+-]\d\d:\d\d)$/;
+
 function dec(t: unknown, blobs: Uint8Array[]): unknown {
   if (t === null || typeof t !== "object") return t;
   if (Array.isArray(t)) return t.map((x) => dec(x, blobs));
@@ -151,7 +163,7 @@ function dec(t: unknown, blobs: Uint8Array[]): unknown {
     }
     if (k === "$d") {
       if (typeof v !== "string") throw new Error("bad $d value");
-      const d = new Date(v);
+      const d = RFC3339.test(v) ? new Date(v) : new Date(NaN);
       if (Number.isNaN(d.getTime())) throw new Error(`bad date ${JSON.stringify(v)}`);
       return d;
     }
@@ -169,12 +181,12 @@ function dec(t: unknown, blobs: Uint8Array[]): unknown {
     if (ESCAPED.includes(k)) {
       if (v === null || typeof v !== "object" || Array.isArray(v)) throw new Error(`bad ${k} wrapper`);
       const inner: Record<string, unknown> = {};
-      for (const ik of Object.keys(v)) inner[ik] = dec((v as Record<string, unknown>)[ik], blobs);
+      for (const ik of Object.keys(v)) setOwn(inner, ik, dec((v as Record<string, unknown>)[ik], blobs));
       return inner;
     }
   }
   const out: Record<string, unknown> = {};
-  for (const k of keys) out[k] = dec(o[k], blobs);
+  for (const k of keys) setOwn(out, k, dec(o[k], blobs));
   return out;
 }
 
