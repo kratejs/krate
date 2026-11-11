@@ -48,8 +48,8 @@ async function call(fn, win) {
 })();
 </script></body></html>`
 
-// enableGUIPlugin lists the test plugin gt, and the SDK ids the plugin flow
-// uses, in the manifest of the GUI test app.
+// enableGUIPlugin lists the test plugin gt, and the SDK areas the plugin flow
+// and the scope test (kv) use, in the manifest of the GUI test app.
 func enableGUIPlugin(dir string) error {
 	path := filepath.Join(dir, ManifestFile)
 	data, err := os.ReadFile(path)
@@ -61,7 +61,7 @@ func enableGUIPlugin(dir string) error {
 		return err
 	}
 	m["plugins"] = []string{"gt"}
-	m["permissions"] = []string{"plugin:gt.read", "plugin:gt.admin", "window", "app"}
+	m["permissions"] = []string{"plugin:gt.read", "plugin:gt.admin", "window", "app", "kv"}
 	out, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return err

@@ -515,9 +515,12 @@ jobs:
 
       # The Linux request-body crash (a body stream read off the main thread)
       # showed up in about 1 of 100 runs, so the packages that exercise it run
-      # three times. TestGUIZMemoryPanel reads packages/runtime/dist/krate-dev.js,
-      # which the JS build above produces.
-      - name: GUI tests repeated (Linux, shell, platform/linux, sdk/guitest)
+      # three times. ./shell is not repeated: its GUI tests walk one page load
+      # in order (the first test consumes the page's first report), so a second
+      # pass in the same process cannot work. It runs once in the step above;
+      # TestGUIZMemoryPanel there reads packages/runtime/dist/krate-dev.js,
+      # which the JS build produces.
+      - name: GUI tests repeated (Linux, platform/linux, sdk/guitest)
         if: matrix.os == 'ubuntu-latest'
         run: |
           # shellcheck disable=SC2016
@@ -525,7 +528,7 @@ jobs:
             openbox --sm-disable &
             wm=$!
             sleep 1
-            go test -p 1 -count=3 -timeout 30m ./shell ./platform/linux ./sdk/guitest
+            go test -p 1 -count=3 -timeout 30m ./platform/linux ./sdk/guitest
             status=$?
             kill $wm
             exit $status
