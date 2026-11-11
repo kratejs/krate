@@ -9,7 +9,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/annotator"
 	"github.com/kratejs/krate/packages/compiler/internal/config"
 	"github.com/kratejs/krate/packages/compiler/internal/irtree"
-	"github.com/kratejs/krate/packages/compiler/internal/jsruntime"
+	"github.com/kratejs/krate/packages/native/jsruntime"
 )
 
 func buildStaticTreeWithJS(t *testing.T, src string) *irtree.ComponentTree {

@@ -15,7 +15,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/astjson"
 	"github.com/kratejs/krate/packages/compiler/internal/config"
 	"github.com/kratejs/krate/packages/compiler/internal/environ"
-	"github.com/kratejs/krate/packages/compiler/internal/jsruntime"
+	"github.com/kratejs/krate/packages/native/jsruntime"
 )
 
 // jsPluginBundleCache memoizes the esbuild-bundled IIFE for each plugin module

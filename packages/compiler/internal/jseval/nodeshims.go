@@ -11,7 +11,7 @@ import (
 
 	"github.com/evanw/esbuild/pkg/api"
 
-	"github.com/kratejs/krate/packages/compiler/internal/jsruntime"
+	"github.com/kratejs/krate/packages/native/jsruntime"
 )
 
 // ErrorGlobal is the global a script sets to a message when it catches its own

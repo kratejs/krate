@@ -13,32 +13,35 @@ import (
 
 var compatAPIPath = regexp.MustCompile(`^[A-Za-z_$][\w$]*(\.[A-Za-z_$][\w$]*)*$`)
 
-// compatTestSources indexes every *_test.go file in the compiler module: the
+// compatTestSources indexes every *_test.go file in the native and compiler modules: the
 // Test functions it declares and its full text (for subtest names).
 var compatTestSources = sync.OnceValues(func() (map[string]bool, string) {
 	funcs := map[string]bool{}
 	var all strings.Builder
 	decl := regexp.MustCompile(`(?m)^func (Test\w+)\(t \*testing\.T\)`)
-	_ = filepath.WalkDir(filepath.Join("..", ".."), func(path string, d os.DirEntry, err error) error {
-		if err != nil {
+	// The native module and the compiler module both hold ledger tests.
+	for _, root := range []string{"..", filepath.Join("..", "..", "compiler")} {
+		_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			if d.IsDir() && (d.Name() == "node_modules" || d.Name() == "testdata") {
+				return filepath.SkipDir
+			}
+			if d.IsDir() || !strings.HasSuffix(path, "_test.go") {
+				return nil
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return nil
+			}
+			for _, m := range decl.FindAllStringSubmatch(string(data), -1) {
+				funcs[m[1]] = true
+			}
+			all.Write(data)
 			return nil
-		}
-		if d.IsDir() && (d.Name() == "node_modules" || d.Name() == "testdata") {
-			return filepath.SkipDir
-		}
-		if d.IsDir() || !strings.HasSuffix(path, "_test.go") {
-			return nil
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return nil
-		}
-		for _, m := range decl.FindAllStringSubmatch(string(data), -1) {
-			funcs[m[1]] = true
-		}
-		all.Write(data)
-		return nil
-	})
+		})
+	}
 	return funcs, all.String()
 })
 
@@ -152,7 +155,7 @@ func TestCompatLedger(t *testing.T) {
 
 // corpusDir holds the QuickJS vs Node differential corpus that ledger rows
 // cite as corpus:<case>.
-var corpusDir = filepath.Join("..", "build", "testdata", "api_runtime_corpus")
+var corpusDir = filepath.Join("..", "..", "compiler", "internal", "build", "testdata", "api_runtime_corpus")
 
 type corpusSpec struct {
 	Divergence *struct {

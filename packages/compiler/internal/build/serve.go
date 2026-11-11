@@ -32,9 +32,9 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/environ"
 	"github.com/kratejs/krate/packages/compiler/internal/execx"
 	"github.com/kratejs/krate/packages/compiler/internal/gohost"
-	"github.com/kratejs/krate/packages/compiler/internal/jsruntime"
 	"github.com/kratejs/krate/packages/compiler/internal/plugin"
 	"github.com/kratejs/krate/packages/compiler/internal/safe"
+	"github.com/kratejs/krate/packages/native/jsruntime"
 )
 
 var apiServerScriptContent = `import http from 'node:http';

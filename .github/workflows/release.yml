@@ -74,6 +74,15 @@ jobs:
         env:
           KRATE_REQUIRE_E2E: "1"
 
+      - name: Verify native module
+        working-directory: packages/native
+        run: |
+          go build ./...
+          go vet ./...
+          go test -race -gcflags=all=-d=checkptr=0 -p 2 -timeout 20m ./...
+        env:
+          KRATE_REQUIRE_E2E: "1"
+
       - name: Install Chromium
         run: pnpm exec playwright install --with-deps chromium
 
