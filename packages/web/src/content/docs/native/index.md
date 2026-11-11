@@ -66,7 +66,7 @@ modules it found.
 | `platforms` | `windows`, `macos`, `linux` | |
 | `icons` | none | Path of the source icon |
 | `window` | 1280 x 800, `resizable: true`, `titleBar: "native"` | `titleBar` is `native`, `hidden` or `none` |
-| `permissions` | none | `dialog`, `clipboard`, `notify`, `tray`, `db`, `shell:openExternal` |
+| `permissions` | the SDK defaults | Any of the [SDK permission names](/docs/native/sdk/#permissions); written to `app.json`. Unknown names fail the config check |
 | `deepLinks` | none | URL schemes without `://` |
 | `host` | `runtime: "quickjs"` | `runtime` is `quickjs`, `node`, `bun`, `deno` or `scriptc`; `scriptc` needs `experimental.scriptc: true`; `islands` maps a package to `node`, `bun`, `deno` or `quickjs` |
 | `release` | `compile: "auto"` | `compile` is `auto`, `always` or `never`; `pgo` is a profile path |

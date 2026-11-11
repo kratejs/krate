@@ -1,8 +1,10 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -164,5 +166,40 @@ func TestNativeUnknownKeys(t *testing.T) {
 func TestHostListsMergeOnExtends(t *testing.T) {
 	if !additiveArrayKeys["hostFunctions"] || !additiveArrayKeys["hostDirs"] {
 		t.Error("host lists should concatenate across extends")
+	}
+}
+
+// native_permissions.json must be the SDK's own list. The check reads the
+// original from the sibling packages/native module and is skipped when only
+// the compiler is checked out.
+func TestNativePermissionsMatchSDK(t *testing.T) {
+	want, err := os.ReadFile(filepath.Join("..", "..", "..", "native", "sdk", "permission", "names.json"))
+	if err != nil {
+		t.Skip("packages/native is not checked out: ", err)
+	}
+	var a, b nativePermissionDoc
+	if err := json.Unmarshal(want, &a); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(nativePermissionsJSON, &b); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(a, b) {
+		t.Fatalf("native_permissions.json is stale; copy packages/native/sdk/permission/names.json over it\nsdk:      %v\ncompiler: %v", a, b)
+	}
+}
+
+func TestNativePermissionsAcceptSDKNames(t *testing.T) {
+	for _, p := range []string{"window", "clipboard:read", "fs:read", "os:secrets.read", "shortcut", "shell:openExternal", "db"} {
+		c := Default()
+		c.Native = &NativeConfig{AppID: "com.acme.app", Permissions: []string{p}}
+		if _, err := c.Validate(); err != nil {
+			t.Errorf("%s rejected: %v", p, err)
+		}
+	}
+	c := Default()
+	c.Native = &NativeConfig{AppID: "com.acme.app", Permissions: []string{"camera"}}
+	if _, err := c.Validate(); err == nil || !strings.Contains(err.Error(), "known permissions: app, clipboard") {
+		t.Errorf("camera: %v", err)
 	}
 }

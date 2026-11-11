@@ -1,7 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createClient, setClient, type Client } from "../src/index.js";
+import { beforeEach, describe, expect, it } from "vitest";
 import { KrateError } from "../src/errors.js";
-import { createFakeHost, type FakeHandler, type FakeHost } from "./fakeserver.js";
+import type { FakeHandler, FakeHost } from "../src/fakehost.js";
+import { installFakeHost, type SeenCall } from "./sdkhost.js";
 import * as dialog from "../src/dialog.js";
 import * as clipboard from "../src/clipboard.js";
 import * as menu from "../src/menu.js";
@@ -12,30 +12,17 @@ import * as win from "../src/window.js";
 import * as lifecycle from "../src/lifecycle.js";
 import { flushAll } from "./helpers.js";
 
-let client: Client | undefined;
 let host: FakeHost;
-let seen: { fn: string; args: unknown[] }[];
+let seen: SeenCall[];
 
 // A host whose functions record their arguments and answer from `answers`.
 function setup(answers: Record<string, (args: any[]) => unknown> = {}, extra: Record<string, FakeHandler> = {}) {
-  seen = [];
-  const registry: Record<string, FakeHandler> = { ...extra };
-  for (const [fn, f] of Object.entries(answers)) {
-    registry[fn] = (args) => {
-      seen.push({ fn, args });
-      return f(args);
-    };
-  }
-  host = createFakeHost(registry);
-  client = createClient({ fetch: host.fetch, windowId: "w1" });
-  setClient(client);
+  const handlers: Record<string, FakeHandler> = { ...extra };
+  for (const [fn, f] of Object.entries(answers)) handlers[fn] = (args) => f(args);
+  ({ host, seen } = installFakeHost(handlers, { windowId: "w1" }));
 }
 
 beforeEach(() => setup());
-afterEach(() => {
-  client?.close();
-  client = undefined;
-});
 
 describe("dialog", () => {
   it("openFile sends only the given options and returns the paths", async () => {

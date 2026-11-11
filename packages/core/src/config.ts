@@ -350,6 +350,27 @@ export interface NativeHostConfig {
 }
 
 /** The `native` block: desktop target settings (`krate native`). Preview. */
+/** Permission names of the native SDK (packages/native/sdk/permission). */
+export type NativePermission =
+  | "os:info"
+  | "kv"
+  | "db"
+  | "fs"
+  | "fs:read"
+  | "os:secrets"
+  | "os:secrets.read"
+  | "shell:openExternal"
+  | "net"
+  | "window"
+  | "app"
+  | "menu"
+  | "dialog"
+  | "notify"
+  | "clipboard"
+  | "clipboard:read"
+  | "tray"
+  | "shortcut";
+
 export interface NativeConfig {
   /** Reverse-DNS id, e.g. "com.acme.app". */
   appId?: string;
@@ -361,7 +382,11 @@ export interface NativeConfig {
   /** Path of the source icon image. */
   icons?: string;
   window?: NativeWindowConfig;
-  permissions?: Array<"dialog" | "clipboard" | "notify" | "tray" | "db" | "shell:openExternal">;
+  /**
+   * SDK permissions the app's UI gets. Empty or omitted means os:info, kv, db,
+   * window, app, menu, dialog, notify and clipboard. Written to app.json.
+   */
+  permissions?: NativePermission[];
   /** Custom URL schemes the app registers (without "://"). */
   deepLinks?: string[];
   host?: NativeHostConfig;

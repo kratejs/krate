@@ -41,6 +41,7 @@ Release layout: the app directory sits next to the shell binary
     "streams": ["src/lib/tasks.Watch"],
     "signals": ["src/lib/tasks.Count"]
   },
+  "permissions": ["window", "dialog", "clipboard", "menu", "notify"],
   "debug": false
 }
 ```
@@ -60,11 +61,33 @@ Release layout: the app directory sits next to the shell binary
 | `hostjs.map` | Its source map. Optional. |
 | `gohost.binary` | The Go host child. `.exe` is appended on Windows when missing. Optional section. |
 | `gohost.funcs`, `streams`, `signals` | Ids (`<module id>.<export>`) the child registers. The shell forwards exactly these. |
+| `permissions` | Optional list of SDK permission names (`sdk/permission`: `os:info`, `kv`, `db`, `fs`, `fs:read`, `os:secrets`, `os:secrets.read`, `shell:openExternal`, `net`, `window`, `app`, `menu`, `dialog`, `notify`, `clipboard`, `clipboard:read`, `tray`, `shortcut`). It gates which `krate/*` SDK ids the page and the TypeScript host code may call; Go host code is never gated. Empty or missing means `os:info`, `kv`, `db`, `window`, `app`, `menu`, `dialog`, `notify` and `clipboard`. A non-empty list grants exactly what it names. An unknown name makes the manifest fail to load. Read once at start. |
 | `debug` | Enables the webview's developer tools even without `--dev`. |
 
 Every path is relative to the app directory and must stay inside it (no
 absolute paths, no `..`). Unknown keys are ignored so newer manifests load in
 older shells. An id registered by both the host JS and the Go host is an error.
+
+### The SDK in the shell
+
+`shell.Run` registers the Native SDK once per app, with the identity and the
+permission set of the manifest, before any host code (host code cannot shadow an
+SDK id):
+
+- the data areas (`sdk/all.Register`: `os`, `fs`, `db`, `kv`, `net`,
+  `permission`) are registered on the app registry at load;
+- the UI areas (`sdk.Host`: window, dialog, clipboard, menu, tray, shortcut,
+  notify, app) are attached to the platform when the window system starts (or
+  with no platform in browser mode, where they answer `unsupported`) and
+  registered on the same registry with the same permission set
+  (`sdk/all.RegisterUI`).
+
+An id whose permission is missing fails with the structured error
+`{code: "permission_denied", data: {permission: "..."}}`. The Go host child
+gets `KRATE_APP_DIR`, `KRATE_APP_ID`, `KRATE_APP_NAME`, `KRATE_APP_VERSION`,
+`KRATE_DEV=1` (with `--dev`) and `KRATE_GOHOST_PARENT`, the private socket
+through which the SDK calls it makes reach the shell's platform.
+`RunOptions.Allowed` replaces the manifest's set for the UI areas (tests).
 
 ### Fallback patterns
 
@@ -123,7 +146,7 @@ to stderr.
 
 stdin EOF (the driver died) quits the shell. SIGINT and SIGTERM quit it too.
 The same operations are available in process as `Control` (`ReloadHostJS`,
-`RestartGoHost`, `Eval`, `Query`, `Quit`, `URL`, `Origin`), passed to
+`RestartGoHost`, `Eval`, `Query`, `HMR`, `Quit`, `URL`, `Origin`), passed to
 `RunOptions.OnReady`; `ServeControl` implements the text protocol over any
 reader and writer.
 

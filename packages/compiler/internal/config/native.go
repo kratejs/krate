@@ -1,6 +1,8 @@
 package config
 
 import (
+	_ "embed"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
@@ -107,10 +109,33 @@ type NativeUpdater struct {
 	PublicKey string `json:"publicKey,omitempty"`
 }
 
+// nativePermissionsJSON is a copy of packages/native/sdk/permission/names.json,
+// the names the native SDK defines. TestNativePermissionsMatchSDK compares it
+// with the original; refresh it with
+// "cp packages/native/sdk/permission/names.json packages/compiler/internal/config/native_permissions.json".
+//
+//go:embed native_permissions.json
+var nativePermissionsJSON []byte
+
+type nativePermissionDoc struct {
+	Names    []string `json:"names"`
+	Defaults []string `json:"defaults"`
+}
+
+func nativePermissionList() nativePermissionDoc {
+	var d nativePermissionDoc
+	if err := json.Unmarshal(nativePermissionsJSON, &d); err != nil {
+		panic("config: native_permissions.json: " + err.Error())
+	}
+	return d
+}
+
+func nativePermissionNames() []string { return nativePermissionList().Names }
+
 // Native option values.
 var (
 	NativePlatforms      = []string{"windows", "macos", "linux"}
-	NativePermissions    = []string{"dialog", "clipboard", "notify", "tray", "db", "shell:openExternal"}
+	NativePermissions    = nativePermissionNames()
 	NativeHostRuntimes   = []string{"quickjs", "node", "bun", "deno", "scriptc"}
 	NativeIslandRuntimes = []string{"node", "bun", "deno", "quickjs"}
 	nativeTitleBars      = []string{"native", "hidden", "none"}

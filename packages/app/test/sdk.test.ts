@@ -1,33 +1,14 @@
-import { afterEach, describe, expect, it } from "vitest";
-import { createClient, setClient, KrateError, type Client } from "../src/index.js";
-import { createFakeHost, type FakeHandler } from "../src/fakehost.js";
+import { describe, expect, it } from "vitest";
+import { KrateError } from "../src/index.js";
+import type { FakeHandler } from "../src/fakehost.js";
+import { installFakeHost } from "./sdkhost.js";
 import * as os from "../src/os.js";
 import * as fs from "../src/fs.js";
 import * as db from "../src/db.js";
 import * as kv from "../src/kv.js";
 import * as permission from "../src/permission.js";
 
-let client: Client | undefined;
-afterEach(() => {
-  client?.close();
-  client = undefined;
-});
-
-// install registers handlers on a fake host and makes it the shared client.
-function install(handlers: Record<string, FakeHandler>) {
-  const seen: { id: string; args: unknown[] }[] = [];
-  const registry: Record<string, FakeHandler> = {};
-  for (const [id, h] of Object.entries(handlers)) {
-    registry[id] = (args, ctx) => {
-      seen.push({ id, args });
-      return h(args, ctx);
-    };
-  }
-  const host = createFakeHost(registry);
-  client = createClient({ fetch: host.fetch });
-  setClient(client);
-  return { host, seen };
-}
+const install = (handlers: Record<string, FakeHandler>) => installFakeHost(handlers);
 
 describe("os", () => {
   it("directories and info", async () => {

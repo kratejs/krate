@@ -2,6 +2,7 @@ package build
 
 import (
 	"bytes"
+	"debug/elf"
 	"encoding/json"
 	"errors"
 	"io/fs"
@@ -145,7 +146,7 @@ func TestNativeAppBuildsExample(t *testing.T) {
 	b := newNativeBuilder(t, root)
 	// Cfg from the example's own config is not loaded here; the builder
 	// gets the same native block the example declares.
-	b.Cfg.Native = &config.NativeConfig{AppID: "com.example.tasks", ProductName: "Native Tasks", Version: "1.0.0", Window: config.NativeWindow{Width: 960, Height: 640}}
+	b.Cfg.Native = &config.NativeConfig{AppID: "com.example.tasks", ProductName: "Native Tasks", Version: "1.0.0", Window: config.NativeWindow{Width: 960, Height: 640}, Permissions: []string{"dialog", "tray", "clipboard:read"}}
 	compile := hasGoHostPackage(t)
 	res, err := b.BuildNativeApp(NativeAppOptions{SkipGoCompile: !compile})
 	if err != nil {
@@ -161,6 +162,9 @@ func TestNativeAppBuildsExample(t *testing.T) {
 		if m[k] != want {
 			t.Errorf("app.json %s = %v, want %v", k, m[k], want)
 		}
+	}
+	if got := strings.Join(nativeStrings(m["permissions"]), ","); got != "dialog,tray,clipboard:read" {
+		t.Errorf("app.json permissions = %q", got)
 	}
 	win := m["window"].(map[string]any)
 	if win["title"] != "Native Tasks" || win["width"] != float64(960) || win["height"] != float64(640) || win["resizable"] != true || win["path"] != "/" {
@@ -248,6 +252,17 @@ func TestNativeAppBuildsExample(t *testing.T) {
 	}
 	if _, err := os.Stat(bin); err != nil {
 		t.Fatalf("gohost binary: %v", err)
+	}
+	if runtime.GOOS == "linux" {
+		// Release builds strip the symbol table.
+		f, err := elf.Open(bin)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if f.Section(".symtab") != nil {
+			t.Error("the Go host binary of a release build still has a symbol table")
+		}
+		f.Close()
 	}
 	sock := filepath.Join(t.TempDir(), "gohost.sock")
 	cmd := exec.Command(bin)

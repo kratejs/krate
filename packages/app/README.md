@@ -58,6 +58,8 @@ permission rejects with `KrateError` code `permission_denied` and
 `@krate/app/window`, `/dialog`, `/clipboard`, `/menu`, `/tray`, `/shortcut`,
 `/notify` and `/app` call the host functions `krate/<area>.<Name>` and subscribe
 to the streams `krate/<area>.events` (`onMenu(id, fn)`, `onClick`, `onEvent`,
-`onCloseRequested`, `onAction`, `onSecondInstance`). Each needs its permission
-in `app.json`; see the SDK page in the Native docs.
+`onCloseRequested`, `onAction`, `onSecondInstance`). Each id is gated by the
+same `permissions` list as the data modules (a missing permission rejects with
+`permission_denied`; `tray`, `shortcut` and `clipboard:read` are off unless
+listed); see the SDK pages in the Native docs.
 

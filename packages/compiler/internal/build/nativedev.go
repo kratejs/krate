@@ -685,7 +685,7 @@ func (nd *nativeDev) syncHost(goEdited bool) error {
 				bin += ".exe"
 			}
 			next := bin + ".next"
-			if err := b.compileGoHost(next, nd.goos, nd.goarch); err != nil {
+			if err := b.compileGoHost(next, nd.goos, nd.goarch, false); err != nil {
 				return err
 			}
 			if err := os.Rename(next, bin); err != nil {

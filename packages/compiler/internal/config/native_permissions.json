@@ -1,0 +1,33 @@
+{
+  "names": [
+    "app",
+    "clipboard",
+    "clipboard:read",
+    "db",
+    "dialog",
+    "fs",
+    "fs:read",
+    "kv",
+    "menu",
+    "net",
+    "notify",
+    "os:info",
+    "os:secrets",
+    "os:secrets.read",
+    "shell:openExternal",
+    "shortcut",
+    "tray",
+    "window"
+  ],
+  "defaults": [
+    "app",
+    "clipboard",
+    "db",
+    "dialog",
+    "kv",
+    "menu",
+    "notify",
+    "os:info",
+    "window"
+  ]
+}

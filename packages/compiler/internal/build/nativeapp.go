@@ -30,7 +30,10 @@ type NativeManifest struct {
 	Fallbacks   []NativeFallback  `json:"fallbacks"`
 	HostJS      *NativeHostJSMeta `json:"hostjs,omitempty"`
 	GoHost      *NativeGoHostMeta `json:"gohost,omitempty"`
-	Debug       bool              `json:"debug"`
+	// Permissions is native.permissions; the shell validates the names and
+	// treats an empty list as the SDK defaults.
+	Permissions []string `json:"permissions,omitempty"`
+	Debug       bool     `json:"debug"`
 }
 
 // NativeWindowMeta is the main window of app.json.
@@ -212,9 +215,10 @@ func (b *Builder) BuildNativeApp(opts NativeAppOptions) (*NativeAppResult, error
 			Title: productName, Width: eff.Window.Width, Height: eff.Window.Height,
 			Resizable: eff.Window.Resizable != nil && *eff.Window.Resizable, Path: "/",
 		},
-		Assets:    "dist",
-		Fallbacks: fallbacks,
-		Debug:     opts.Dev,
+		Assets:      "dist",
+		Fallbacks:   fallbacks,
+		Permissions: append([]string(nil), eff.Permissions...),
+		Debug:       opts.Dev,
 	}
 
 	if h := b.NativeHost(); h != nil && h.HostBundle != "" {
@@ -253,7 +257,7 @@ func (b *Builder) BuildNativeApp(opts NativeAppOptions) (*NativeAppResult, error
 		sort.Strings(gh.Signals)
 		m.GoHost = gh
 		if !opts.SkipGoCompile {
-			if err := b.compileGoHost(filepath.Join(appDir, bin), goos, goarch); err != nil {
+			if err := b.compileGoHost(filepath.Join(appDir, bin), goos, goarch, !opts.Dev); err != nil {
 				return nil, err
 			}
 		}
@@ -341,11 +345,18 @@ func (b *Builder) writeGoHostMain(g *gobind.Result) (string, error) {
 }
 
 // compileGoHost builds the Go host program inside the project's Go module.
-func (b *Builder) compileGoHost(out, goos, goarch string) error {
+// strip drops the symbol table and DWARF (release builds); `krate native dev`
+// keeps them for stack traces and debuggers.
+func (b *Builder) compileGoHost(out, goos, goarch string, strip bool) error {
 	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
 		return err
 	}
-	cmd := exec.Command("go", "build", "-trimpath", "-o", out, "./.krate/native/gohost")
+	args := []string{"build", "-trimpath"}
+	if strip {
+		args = append(args, "-ldflags=-s -w")
+	}
+	args = append(args, "-o", out, "./.krate/native/gohost")
+	cmd := exec.Command("go", args...)
 	cmd.Dir = b.Root
 	cmd.Env = append(os.Environ(), "GOOS="+goos, "GOARCH="+goarch)
 	if goos != runtime.GOOS || goarch != runtime.GOARCH {
