@@ -11,7 +11,10 @@ require (
 	modernc.org/quickjs v0.21.1
 )
 
-require golang.org/x/sys v0.48.0
+require (
+	golang.org/x/sys v0.48.0
+	modernc.org/sqlite v1.55.0
+)
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
@@ -22,5 +25,4 @@ require (
 	golang.org/x/text v0.40.0 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
-	modernc.org/sqlite v1.55.0 // indirect
 )

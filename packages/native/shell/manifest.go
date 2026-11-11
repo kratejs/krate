@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+
+	"github.com/kratejs/krate/packages/native/sdk/permission"
 )
 
 // ManifestFile is the name of the manifest inside an app directory.
@@ -29,6 +31,10 @@ type Manifest struct {
 
 	HostJS *HostJSSpec `json:"hostjs,omitempty"`
 	GoHost *GoHostSpec `json:"gohost,omitempty"`
+
+	// Permissions lists what the UI may use of the SDK (see package
+	// sdk/permission). Empty means the defaults: os:info, kv and db.
+	Permissions []string `json:"permissions,omitempty"`
 
 	Debug bool `json:"debug"`
 }
@@ -114,6 +120,9 @@ func (m *Manifest) normalize() error {
 	}
 	if !strings.HasPrefix(m.Window.Path, "/") {
 		return fmt.Errorf("window.path %q must start with /", m.Window.Path)
+	}
+	if _, err := permission.Parse(m.Permissions); err != nil {
+		return fmt.Errorf("permissions: %w", err)
 	}
 	if m.Assets == "" {
 		m.Assets = "dist"

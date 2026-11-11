@@ -51,6 +51,14 @@
     "./kv": {
       "types": "./dist/kv.d.ts",
       "default": "./dist/kv.js"
+    },
+    "./fs": {
+      "types": "./dist/fs.d.ts",
+      "default": "./dist/fs.js"
+    },
+    "./permission": {
+      "types": "./dist/permission.d.ts",
+      "default": "./dist/permission.js"
     }
   },
   "files": [
