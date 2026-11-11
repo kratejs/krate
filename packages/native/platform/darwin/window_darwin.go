@@ -40,6 +40,11 @@ type Window struct {
 	layout *caps.LayoutNode
 	root   objc.ID // the window's content view: the primary web view or the top split view
 	splits []*splitState
+	// layoutGen counts layout rebuilds; ratiosSettled is false from a rebuild
+	// until the deferred divider pass has run, and snapshotRatios skips
+	// meanwhile so a half-laid-out window cannot overwrite the ratios asked for.
+	layoutGen     int
+	ratiosSettled bool
 
 	// Release state, see release_darwin.go.
 	released  bool

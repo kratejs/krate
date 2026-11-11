@@ -87,6 +87,10 @@ func TestGUIShell(t *testing.T) {
 
 	// 1. The page loads, and calls reach host JS and the Go host child.
 	rep := sink.wait(t, "calls", nil)
+	// Left for the later tests that wait for the main page to have loaded. On
+	// Linux the background test restores the window and so produces a fresh
+	// report; where it is skipped (macOS, Windows) this is the only one.
+	sink.pending = append(sink.pending, rep)
 	if errs, _ := rep["errors"].([]any); len(errs) > 0 {
 		t.Fatalf("page errors: %v", errs)
 	}

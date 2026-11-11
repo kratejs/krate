@@ -257,8 +257,8 @@ func (w *Window) addView(o caps.ViewOptions) (caps.ViewRef, error) {
 	w.snapshotRatios()
 	w.extra = append(w.extra, v)
 	w.layout = next
+	v.applyMinSize() // before the dividers are positioned: a later constraint resets them
 	w.applyLayout()
-	v.applyMinSize()
 	v.load(o.Path)
 	emitView(a, v, caps.ViewAdded, v.route)
 	return v.ref, nil
@@ -349,10 +349,10 @@ func (w *Window) setLayout(root *caps.LayoutNode) error {
 	}
 	adopt(root)
 	w.layout = root
-	w.applyLayout()
 	for _, v := range w.liveViews() {
 		v.applyMinSize()
 	}
+	w.applyLayout()
 	return nil
 }
 
@@ -433,6 +433,26 @@ func (w *Window) applyLayout() {
 	}
 	w.applyRatios()
 	w.win.Send(sel("makeFirstResponder:"), w.pv.web)
+	w.deferRatios()
+}
+
+// deferRatios positions the dividers a second time on the next turn of the
+// main queue. A constraint added after the first pass (the minimum sizes) or
+// the window's own first layout can undo a divider position that was set
+// inside the same turn; setting it again once the layout has settled holds.
+func (w *Window) deferRatios() {
+	w.layoutGen++
+	w.ratiosSettled = false
+	gen := w.layoutGen
+	dispatch(func() {
+		if w.layoutGen != gen {
+			return
+		}
+		if !w.closed && !w.released && !w.releasing {
+			w.applyRatios()
+		}
+		w.ratiosSettled = true
+	})
 }
 
 // build makes the NSView for a layout node. A split view is returned with a
@@ -496,7 +516,7 @@ func (w *Window) applyRatios() {
 
 // snapshotRatios copies the live divider positions into w.layout.
 func (w *Window) snapshotRatios() {
-	if w.layout == nil || w.released {
+	if w.layout == nil || w.released || !w.ratiosSettled {
 		return
 	}
 	for _, s := range w.splits {

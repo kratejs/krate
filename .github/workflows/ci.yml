@@ -287,6 +287,18 @@ jobs:
           node-version: "22"
           cache: pnpm
 
+      # The native host-child release tests compile with bun and deno, and
+      # KRATE_REQUIRE_E2E turns a missing runtime into a failure.
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Set up Deno
+        uses: denoland/setup-deno@v1
+        with:
+          deno-version: v2.x
+
       - name: Install JS dependencies
         run: pnpm install --no-frozen-lockfile
 
