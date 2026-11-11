@@ -23,13 +23,13 @@ const (
 
 // Host function ids.
 const (
-	IDReadText   = "krate/clipboard.ReadText"
-	IDWriteText  = "krate/clipboard.WriteText"
-	IDReadImage  = "krate/clipboard.ReadImage"
-	IDWriteImage = "krate/clipboard.WriteImage"
-	IDReadFiles  = "krate/clipboard.ReadFiles"
-	IDWriteFiles = "krate/clipboard.WriteFiles"
-	IDClear      = "krate/clipboard.Clear"
+	IDReadText   = "krate/clipboard.readText"
+	IDWriteText  = "krate/clipboard.writeText"
+	IDReadImage  = "krate/clipboard.readImage"
+	IDWriteImage = "krate/clipboard.writeImage"
+	IDReadFiles  = "krate/clipboard.readFiles"
+	IDWriteFiles = "krate/clipboard.writeFiles"
+	IDClear      = "krate/clipboard.clear"
 )
 
 // ReadText returns the clipboard text.

@@ -31,11 +31,11 @@ const Permission = "app"
 
 // Host function ids.
 const (
-	IDQuit           = "krate/app.Quit"
-	IDRelaunch       = "krate/app.Relaunch"
-	IDSupports       = "krate/app.Supports"
-	IDLaunchArgs     = "krate/app.LaunchArgs"
-	IDSingleInstance = "krate/app.SingleInstance"
+	IDQuit           = "krate/app.quit"
+	IDRelaunch       = "krate/app.relaunch"
+	IDSupports       = "krate/app.supports"
+	IDLaunchArgs     = "krate/app.launchArgs"
+	IDSingleInstance = "krate/app.singleInstance"
 	IDEvents         = "krate/app.events"
 )
 

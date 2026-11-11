@@ -24,13 +24,13 @@ export interface TrayEvent {
 
 // set shows or updates the tray icon.
 export function set(o: TrayOptions): Promise<void> {
-  return call("krate/tray.Set", [
+  return call("krate/tray.set", [
     { tooltip: o.tooltip ?? "", title: o.title ?? "", icon: o.icon ?? new Uint8Array(0), menu: toWire(o.menu ?? []) },
   ]);
 }
 
 export function remove(): Promise<void> {
-  return call("krate/tray.Remove");
+  return call("krate/tray.remove");
 }
 
 export function onEvent(fn: (e: TrayEvent) => void, opts?: SubscribeOptions): () => void {

@@ -102,13 +102,13 @@ func TestCallWithoutAnyTarget(t *testing.T) {
 	SetLocal(nil)
 	t.Setenv(ParentEnv, "")
 	ResetRemote()
-	_, err := Call(context.Background(), "krate/x.Y", nil)
+	_, err := Call(context.Background(), "krate/x.y", nil)
 	if !krate.IsUnsupported(err) {
 		t.Fatalf("err = %v", err)
 	}
 	t.Setenv(ParentEnv, "ftp://nope")
 	ResetRemote()
-	if _, err := Call(context.Background(), "krate/x.Y", nil); err == nil {
+	if _, err := Call(context.Background(), "krate/x.y", nil); err == nil {
 		t.Fatal("bad address accepted")
 	}
 }

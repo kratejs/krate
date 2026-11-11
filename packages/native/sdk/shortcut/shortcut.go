@@ -29,8 +29,8 @@ const Permission = "shortcut"
 
 // Host function ids.
 const (
-	IDRegister   = "krate/shortcut.Register"
-	IDUnregister = "krate/shortcut.Unregister"
+	IDRegister   = "krate/shortcut.register"
+	IDUnregister = "krate/shortcut.unregister"
 	IDEvents     = "krate/shortcut.events"
 )
 

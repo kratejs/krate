@@ -130,14 +130,14 @@ source. By area:
 
 | Area | Functions | Streams |
 |------|-----------|---------|
-| window | `krate/window.Open`, `List`, `State`, `Close`, `SetTitle`, `SetSize`, `SetPosition`, `SetAlwaysOnTop`, `SetFullscreen`, `SetFrameless`, `Minimize`, `Maximize`, `Restore`, `Focus`, `Show`, `Hide`, `SetPreventClose`, `Navigate` | `krate/window.events` |
-| dialog | `krate/dialog.OpenFile`, `OpenFolder`, `SaveFile`, `Message` | |
-| clipboard | `krate/clipboard.ReadText`, `ReadImage`, `ReadFiles` (need `clipboard:read`), `WriteText`, `WriteImage`, `WriteFiles`, `Clear` | |
-| menu | `krate/menu.SetApp`, `Popup` | `krate/menu.events` |
-| tray | `krate/tray.Set`, `Remove` | `krate/tray.events` |
-| shortcut | `krate/shortcut.Register`, `Unregister` | `krate/shortcut.events` |
-| notify | `krate/notify.Send`, `Close` | `krate/notify.events` |
-| app | `krate/app.Quit`, `Relaunch`, `Supports` | `krate/app.events` |
+| window | `krate/window.open`, `List`, `State`, `Close`, `SetTitle`, `SetSize`, `SetPosition`, `SetAlwaysOnTop`, `SetFullscreen`, `SetFrameless`, `Minimize`, `Maximize`, `Restore`, `Focus`, `Show`, `Hide`, `SetPreventClose`, `Navigate` | `krate/window.events` |
+| dialog | `krate/dialog.openFile`, `OpenFolder`, `SaveFile`, `Message` | |
+| clipboard | `krate/clipboard.readText`, `ReadImage`, `ReadFiles` (need `clipboard:read`), `WriteText`, `WriteImage`, `WriteFiles`, `Clear` | |
+| menu | `krate/menu.setApp`, `Popup` | `krate/menu.events` |
+| tray | `krate/tray.set`, `Remove` | `krate/tray.events` |
+| shortcut | `krate/shortcut.register`, `Unregister` | `krate/shortcut.events` |
+| notify | `krate/notify.send`, `Close` | `krate/notify.events` |
+| app | `krate/app.quit`, `Relaunch`, `Supports` | `krate/app.events` |
 
 `SingleInstance` and `LaunchArgs` exist only for Go host code.
 
@@ -202,6 +202,6 @@ entry := app.DesktopEntry(app.DesktopOptions{
 ## Testing
 
 `@krate/app/testing` and `createFakeHost` serve these functions by id, so UI
-code that calls `krate/dialog.OpenFile` or listens on `krate/menu.events` can
+code that calls `krate/dialog.openFile` or listens on `krate/menu.events` can
 be tested without a window. In Go, the `sdk` package test helpers run the
 operations against an in-memory platform.

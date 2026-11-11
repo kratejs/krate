@@ -20,8 +20,8 @@ const Permission = "menu"
 
 // Host function ids.
 const (
-	IDSetApp = "krate/menu.SetApp"
-	IDPopup  = "krate/menu.Popup"
+	IDSetApp = "krate/menu.setApp"
+	IDPopup  = "krate/menu.popup"
 	IDEvents = "krate/menu.events"
 )
 

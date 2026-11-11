@@ -89,6 +89,7 @@ type Host struct {
 
 	// Guarded by mu.
 	listed listing
+	bridge *scheme.Registry
 	regd   map[*scheme.Registry]map[string]bool
 }
 
@@ -135,6 +136,9 @@ func New(opts Options) (*Host, error) {
 		return fail(err)
 	}
 	if err := h.registerHosts(); err != nil {
+		return fail(err)
+	}
+	if err := h.registerBridge(); err != nil {
 		return fail(err)
 	}
 	if _, err := rt.Execute(hostSource); err != nil {

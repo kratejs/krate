@@ -25,8 +25,8 @@ const Permission = "notify"
 
 // Host function ids.
 const (
-	IDSend   = "krate/notify.Send"
-	IDClose  = "krate/notify.Close"
+	IDSend   = "krate/notify.send"
+	IDClose  = "krate/notify.close"
 	IDEvents = "krate/notify.events"
 )
 

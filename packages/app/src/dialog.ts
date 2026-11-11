@@ -48,22 +48,22 @@ const KINDS: Record<MessageKind, number> = { info: 0, warning: 1, error: 2, ques
 
 // openFile resolves to the chosen paths, or [] when the user cancels.
 export function openFile(o: OpenOptions = {}): Promise<string[]> {
-  return call("krate/dialog.OpenFile", [clean({ ...o })]);
+  return call("krate/dialog.openFile", [clean({ ...o })]);
 }
 
 export function openFolder(o: OpenOptions = {}): Promise<string[]> {
-  return call("krate/dialog.OpenFolder", [clean({ ...o })]);
+  return call("krate/dialog.openFolder", [clean({ ...o })]);
 }
 
 // saveFile resolves to the chosen path, or null when the user cancels.
 export function saveFile(o: SaveOptions = {}): Promise<string | null> {
-  return call("krate/dialog.SaveFile", [clean({ ...o })]);
+  return call("krate/dialog.saveFile", [clean({ ...o })]);
 }
 
 // message resolves to the index of the pressed button, or -1.
 export function message(o: MessageOptions): Promise<number> {
   const { kind, ...rest } = o;
-  return call("krate/dialog.Message", [clean({ ...rest, kind: kind ? KINDS[kind] : undefined })]);
+  return call("krate/dialog.message", [clean({ ...rest, kind: kind ? KINDS[kind] : undefined })]);
 }
 
 export async function confirm(title: string, text: string): Promise<boolean> {

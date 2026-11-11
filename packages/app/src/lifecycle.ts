@@ -11,11 +11,11 @@ export interface SecondInstance {
 }
 
 export function quit(): Promise<void> {
-  return call("krate/app.Quit");
+  return call("krate/app.quit");
 }
 
 export function relaunch(): Promise<void> {
-  return call("krate/app.Relaunch");
+  return call("krate/app.relaunch");
 }
 
 // supports reports whether a capability works right now: "dialog",
@@ -23,7 +23,7 @@ export function relaunch(): Promise<void> {
 // "window:alwaysOnTop", "window:fullscreen", "window:frameless",
 // "window:position".
 export function supports(capability: string): Promise<boolean> {
-  return call("krate/app.Supports", [capability], { dedupe: true });
+  return call("krate/app.supports", [capability], { dedupe: true });
 }
 
 export function onSecondInstance(fn: (e: SecondInstance) => void, opts?: SubscribeOptions): () => void {

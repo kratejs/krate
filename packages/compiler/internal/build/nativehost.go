@@ -201,7 +201,7 @@ func (b *Builder) writeNativeAppModule() (string, error) {
 		Stdin:      &api.StdinOptions{Contents: nativeClientEntry, ResolveDir: b.Root, Sourcefile: "krate-native-client.js", Loader: api.LoaderJS},
 		Bundle:     true,
 		Format:     api.FormatIIFE,
-		GlobalName: "__krateHost",
+		GlobalName: "__krateUIClient",
 		Platform:   api.PlatformBrowser,
 		Target:     api.ES2020,
 		Write:      false,
@@ -215,9 +215,9 @@ func (b *Builder) writeNativeAppModule() (string, error) {
 		return "", nativeDiagError([]diag.Diagnostic{diag.New("package.json", 1, 1, msg, "check that "+nativeAppPkg+" is installed and builds", "").WithCode(diag.CodeNativeAppMissing)}, "native setup error(s)")
 	}
 	src := string(res.OutputFiles[0].Contents) + `
-export function __krateHostCall(fn, args, opts) { return __krateHost.call(fn, args, opts); }
-export function __krateHostStream(fn, args, opts) { return __krateHost.stream(fn, args, opts); }
-export function __krateHostSignal(name) { return __krateHost.signal(name); }
+export function __krateHostCall(fn, args, opts) { return __krateUIClient.call(fn, args, opts); }
+export function __krateHostStream(fn, args, opts) { return __krateUIClient.stream(fn, args, opts); }
+export function __krateHostSignal(name) { return __krateUIClient.signal(name); }
 `
 	path := filepath.Join(b.nativeOutDir(), "app.js")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

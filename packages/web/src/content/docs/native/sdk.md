@@ -72,7 +72,7 @@ A call to an id whose permission is missing rejects with a `KrateError`:
 { "code": "permission_denied", "message": "...", "data": { "permission": "os:secrets.read" } }
 ```
 
-This holds for every id, data and UI alike (`krate/window.Open` without
+This holds for every id, data and UI alike (`krate/window.open` without
 `window` is a `permission_denied`, not a `not_found`). An id that does not exist at all is `not_found`, so the UI can tell a missing
 permission from a typo. `isPermissionDenied(e)` and `deniedPermission(e)` from
 `@krate/app/permission` read this, and `query(name)` (host id
@@ -110,51 +110,51 @@ permission from a typo. `isPermissionDenied(e)` and `deniedPermission(e)` from
 | `krate/kv.delete` | `kv` | `key` | nothing |
 | `krate/kv.keys` | `kv` | `prefix?` | `string[]` |
 | `krate/permission.query` | none | `name` | `boolean` |
-| `krate/window.Open` | `window` | `options: WindowOptions` | `string` |
-| `krate/window.List` | `window` | none | `string[]` |
-| `krate/window.State` | `window` | `window: string` | `WindowState` |
-| `krate/window.Close` | `window` | `window: string` | nothing |
-| `krate/window.SetTitle` | `window` | `window: string, title: string` | nothing |
-| `krate/window.SetSize` | `window` | `window: string, width: number, height: number` | nothing |
-| `krate/window.SetPosition` | `window` | `window: string, x: number, y: number` | nothing |
-| `krate/window.SetAlwaysOnTop` | `window` | `window: string, on: boolean` | nothing |
-| `krate/window.SetFullscreen` | `window` | `window: string, on: boolean` | nothing |
-| `krate/window.SetFrameless` | `window` | `window: string, on: boolean` | nothing |
-| `krate/window.Minimize` | `window` | `window: string` | nothing |
-| `krate/window.Maximize` | `window` | `window: string` | nothing |
-| `krate/window.Restore` | `window` | `window: string` | nothing |
-| `krate/window.Focus` | `window` | `window: string` | nothing |
-| `krate/window.Show` | `window` | `window: string` | nothing |
-| `krate/window.Hide` | `window` | `window: string` | nothing |
-| `krate/window.SetPreventClose` | `window` | `window: string, on: boolean` | nothing |
-| `krate/window.Navigate` | `window` | `window: string, path: string` | nothing |
+| `krate/window.open` | `window` | `options: WindowOptions` | `string` |
+| `krate/window.list` | `window` | none | `string[]` |
+| `krate/window.state` | `window` | `window: string` | `WindowState` |
+| `krate/window.close` | `window` | `window: string` | nothing |
+| `krate/window.setTitle` | `window` | `window: string, title: string` | nothing |
+| `krate/window.setSize` | `window` | `window: string, width: number, height: number` | nothing |
+| `krate/window.setPosition` | `window` | `window: string, x: number, y: number` | nothing |
+| `krate/window.setAlwaysOnTop` | `window` | `window: string, on: boolean` | nothing |
+| `krate/window.setFullscreen` | `window` | `window: string, on: boolean` | nothing |
+| `krate/window.setFrameless` | `window` | `window: string, on: boolean` | nothing |
+| `krate/window.minimize` | `window` | `window: string` | nothing |
+| `krate/window.maximize` | `window` | `window: string` | nothing |
+| `krate/window.restore` | `window` | `window: string` | nothing |
+| `krate/window.focus` | `window` | `window: string` | nothing |
+| `krate/window.show` | `window` | `window: string` | nothing |
+| `krate/window.hide` | `window` | `window: string` | nothing |
+| `krate/window.setPreventClose` | `window` | `window: string, on: boolean` | nothing |
+| `krate/window.navigate` | `window` | `window: string, path: string` | nothing |
 | `krate/window.events` | `window` | none (stream) | `WindowEvent` |
-| `krate/dialog.OpenFile` | `dialog` | `options: OpenOptions` | `string[]` |
-| `krate/dialog.OpenFolder` | `dialog` | `options: OpenOptions` | `string[]` |
-| `krate/dialog.SaveFile` | `dialog` | `options: SaveOptions` | `string | null` |
-| `krate/dialog.Message` | `dialog` | `options: MessageOptions` | `number` |
-| `krate/clipboard.WriteText` | `clipboard` | `text: string` | nothing |
-| `krate/clipboard.WriteImage` | `clipboard` | `png: Uint8Array` | nothing |
-| `krate/clipboard.WriteFiles` | `clipboard` | `paths: string[]` | nothing |
-| `krate/clipboard.Clear` | `clipboard` | none | nothing |
-| `krate/clipboard.ReadText` | `clipboard:read` | none | `string` |
-| `krate/clipboard.ReadImage` | `clipboard:read` | none | `Uint8Array | null` |
-| `krate/clipboard.ReadFiles` | `clipboard:read` | none | `string[]` |
-| `krate/menu.SetApp` | `menu` | `items: MenuItem[]` | nothing |
-| `krate/menu.Popup` | `menu` | `window: string, x: number, y: number, items: MenuItem[]` | nothing |
+| `krate/dialog.openFile` | `dialog` | `options: OpenOptions` | `string[]` |
+| `krate/dialog.openFolder` | `dialog` | `options: OpenOptions` | `string[]` |
+| `krate/dialog.saveFile` | `dialog` | `options: SaveOptions` | `string | null` |
+| `krate/dialog.message` | `dialog` | `options: MessageOptions` | `number` |
+| `krate/clipboard.writeText` | `clipboard` | `text: string` | nothing |
+| `krate/clipboard.writeImage` | `clipboard` | `png: Uint8Array` | nothing |
+| `krate/clipboard.writeFiles` | `clipboard` | `paths: string[]` | nothing |
+| `krate/clipboard.clear` | `clipboard` | none | nothing |
+| `krate/clipboard.readText` | `clipboard:read` | none | `string` |
+| `krate/clipboard.readImage` | `clipboard:read` | none | `Uint8Array | null` |
+| `krate/clipboard.readFiles` | `clipboard:read` | none | `string[]` |
+| `krate/menu.setApp` | `menu` | `items: MenuItem[]` | nothing |
+| `krate/menu.popup` | `menu` | `window: string, x: number, y: number, items: MenuItem[]` | nothing |
 | `krate/menu.events` | `menu` | none (stream) | `MenuEvent` |
-| `krate/tray.Set` | `tray` | `options: TrayOptions` | nothing |
-| `krate/tray.Remove` | `tray` | none | nothing |
+| `krate/tray.set` | `tray` | `options: TrayOptions` | nothing |
+| `krate/tray.remove` | `tray` | none | nothing |
 | `krate/tray.events` | `tray` | none (stream) | `TrayEvent` |
-| `krate/shortcut.Register` | `shortcut` | `handle: string, accelerator: string` | nothing |
-| `krate/shortcut.Unregister` | `shortcut` | `handle: string` | nothing |
+| `krate/shortcut.register` | `shortcut` | `handle: string, accelerator: string` | nothing |
+| `krate/shortcut.unregister` | `shortcut` | `handle: string` | nothing |
 | `krate/shortcut.events` | `shortcut` | none (stream) | `{id: string}` |
-| `krate/notify.Send` | `notify` | `notification: Notification` | nothing |
-| `krate/notify.Close` | `notify` | `id: string` | nothing |
+| `krate/notify.send` | `notify` | `notification: Notification` | nothing |
+| `krate/notify.close` | `notify` | `id: string` | nothing |
 | `krate/notify.events` | `notify` | none (stream) | `NotificationEvent` |
-| `krate/app.Quit` | `app` | none | nothing |
-| `krate/app.Relaunch` | `app` | none | nothing |
-| `krate/app.Supports` | `app` | `capability: string` | `boolean` |
+| `krate/app.quit` | `app` | none | nothing |
+| `krate/app.relaunch` | `app` | none | nothing |
+| `krate/app.supports` | `app` | `capability: string` | `boolean` |
 | `krate/app.events` | `app` | none (stream) | `SecondInstance` |
 
 `packages/native/sdk/ids.go` is the source of truth for this table; a Go test

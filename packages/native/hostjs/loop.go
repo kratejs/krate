@@ -35,6 +35,8 @@ type sink struct {
 	onValue func(outcome)
 	// stream sinks stay registered after a value.
 	stream bool
+	// cancel stops an in-process bridge request (see bridge.go).
+	cancel func()
 }
 
 func (h *Host) registerHosts() error {
@@ -229,6 +231,9 @@ func (h *Host) shutdown(jobs []func()) {
 	}
 	for id, s := range h.sinks {
 		delete(h.sinks, id)
+		if s.cancel != nil {
+			s.cancel()
+		}
 		if s.onValue == nil {
 			select {
 			case s.ch <- outcome{kind: kindFail, err: ErrClosed}:

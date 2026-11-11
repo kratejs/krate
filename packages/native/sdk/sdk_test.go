@@ -172,31 +172,31 @@ func TestPermissionGating(t *testing.T) {
 	r.app.Text = "secret"
 	// Write permission without read: ReadText is denied by name.
 	h := r.ui("clipboard")
-	if got := uiCall(t, h, "krate/clipboard.WriteText", func(e *wire.Encoder) { e.String("hi") }); !strings.Contains(got, `"ok":null`) {
+	if got := uiCall(t, h, "krate/clipboard.writeText", func(e *wire.Encoder) { e.String("hi") }); !strings.Contains(got, `"ok":null`) {
 		t.Fatalf("write: %s", got)
 	}
 	if r.app.Text != "hi" {
 		t.Fatal("write did not reach the platform")
 	}
-	if got := uiCall(t, h, "krate/clipboard.ReadText", nil); !strings.Contains(got, "permission_denied") || !strings.Contains(got, `"permission":"clipboard:read"`) {
+	if got := uiCall(t, h, "krate/clipboard.readText", nil); !strings.Contains(got, "permission_denied") || !strings.Contains(got, `"permission":"clipboard:read"`) {
 		t.Fatalf("read without clipboard:read: %s", got)
 	}
-	if got := uiCall(t, h, "krate/dialog.Message", func(e *wire.Encoder) { e.BeginObject(); e.EndObject() }); !strings.Contains(got, "permission_denied") || !strings.Contains(got, `"permission":"dialog"`) {
+	if got := uiCall(t, h, "krate/dialog.message", func(e *wire.Encoder) { e.BeginObject(); e.EndObject() }); !strings.Contains(got, "permission_denied") || !strings.Contains(got, `"permission":"dialog"`) {
 		t.Fatalf("dialog without permission: %s", got)
 	}
 	h = r.ui("clipboard", "clipboard:read")
-	if got := uiCall(t, h, "krate/clipboard.ReadText", nil); !strings.Contains(got, `"ok":"hi"`) {
+	if got := uiCall(t, h, "krate/clipboard.readText", nil); !strings.Contains(got, `"ok":"hi"`) {
 		t.Fatalf("read: %s", got)
 	}
 	// Go-only operations never reach the page.
 	h = r.ui("clipboard", "clipboard:read", "app", "window", "dialog", "menu", "tray", "notify", "shortcut")
-	for _, id := range []string{"krate/app.SingleInstance", "krate/app.LaunchArgs"} {
+	for _, id := range []string{"krate/app.singleInstance", "krate/app.launchArgs"} {
 		if got := uiCall(t, h, id, nil); !strings.Contains(got, "not_found") {
 			t.Fatalf("%s reachable from the page: %s", id, got)
 		}
 	}
 	// Malformed arguments are bad_args, not a crash.
-	if got := uiCall(t, h, "krate/dialog.Message", func(e *wire.Encoder) { e.Int(3) }); !strings.Contains(got, "bad_args") {
+	if got := uiCall(t, h, "krate/dialog.message", func(e *wire.Encoder) { e.Int(3) }); !strings.Contains(got, "bad_args") {
 		t.Fatalf("bad args: %s", got)
 	}
 }
@@ -214,7 +214,7 @@ func TestUIIDsMatchTable(t *testing.T) {
 	for _, p := range permission.All() {
 		known[p.Name] = true
 	}
-	goOnly := map[string]bool{"krate/app.LaunchArgs": true, "krate/app.SingleInstance": true}
+	goOnly := map[string]bool{"krate/app.launchArgs": true, "krate/app.singleInstance": true}
 	var bad []string
 	for id, perm := range ids {
 		if !strings.HasPrefix(id, "krate/") {
@@ -603,12 +603,12 @@ func TestArgumentsAsTheTSWrappersSendThem(t *testing.T) {
 	h := r.ui("dialog", "window", "menu", "notify", "tray", "shortcut", "app", "clipboard")
 	raw := func(js string) func(*wire.Encoder) { return func(e *wire.Encoder) { e.Raw([]byte(js)) } }
 	cases := []struct{ fn, args string }{
-		{"krate/dialog.OpenFile", `{"title":"Pick","multiple":true,"filters":[{"name":"Images","patterns":["*.png"]}]}`},
-		{"krate/dialog.SaveFile", `{"name":"x.txt","overwrite":true}`},
-		{"krate/dialog.Message", `{"message":"boom","buttons":["A","B"],"kind":2}`},
-		{"krate/window.Open", `{"title":"S","path":"/settings","frameless":true,"x":5,"y":6,"hasPosition":true}`},
-		{"krate/menu.SetApp", `[{"id":"","label":"&File","kind":4,"accelerator":"","disabled":false,"checked":false,"submenu":[{"id":"new","label":"New","kind":0,"accelerator":"CmdOrCtrl+N","disabled":false,"checked":false,"submenu":[]}]}]`},
-		{"krate/notify.Send", `{"id":"n","title":"Done","body":"","icon":"","actions":[{"id":"open","label":"Open"}],"urgency":2,"timeoutMs":3000,"silent":false}`},
+		{"krate/dialog.openFile", `{"title":"Pick","multiple":true,"filters":[{"name":"Images","patterns":["*.png"]}]}`},
+		{"krate/dialog.saveFile", `{"name":"x.txt","overwrite":true}`},
+		{"krate/dialog.message", `{"message":"boom","buttons":["A","B"],"kind":2}`},
+		{"krate/window.open", `{"title":"S","path":"/settings","frameless":true,"x":5,"y":6,"hasPosition":true}`},
+		{"krate/menu.setApp", `[{"id":"","label":"&File","kind":4,"accelerator":"","disabled":false,"checked":false,"submenu":[{"id":"new","label":"New","kind":0,"accelerator":"CmdOrCtrl+N","disabled":false,"checked":false,"submenu":[]}]}]`},
+		{"krate/notify.send", `{"id":"n","title":"Done","body":"","icon":"","actions":[{"id":"open","label":"Open"}],"urgency":2,"timeoutMs":3000,"silent":false}`},
 	}
 	for _, c := range cases {
 		got := uiCall(t, h, c.fn, raw(c.args))
@@ -621,24 +621,24 @@ func TestArgumentsAsTheTSWrappersSendThem(t *testing.T) {
 		fn   string
 		args func(*wire.Encoder)
 	}{
-		{"krate/window.SetSize", func(e *wire.Encoder) { e.String("main"); e.Int(500); e.Int(400) }},
-		{"krate/window.SetAlwaysOnTop", func(e *wire.Encoder) { e.String("main"); e.Bool(true) }},
-		{"krate/menu.Popup", func(e *wire.Encoder) {
+		{"krate/window.setSize", func(e *wire.Encoder) { e.String("main"); e.Int(500); e.Int(400) }},
+		{"krate/window.setAlwaysOnTop", func(e *wire.Encoder) { e.String("main"); e.Bool(true) }},
+		{"krate/menu.popup", func(e *wire.Encoder) {
 			e.String("")
 			e.Int(-1)
 			e.Int(-1)
 			e.Raw([]byte(`[{"id":"c","label":"Copy","kind":0,"accelerator":"","disabled":false,"checked":false,"submenu":[]}]`))
 		}},
-		{"krate/shortcut.Register", func(e *wire.Encoder) { e.String("ui-1-abc"); e.String("Ctrl+Shift+K") }},
-		{"krate/shortcut.Unregister", func(e *wire.Encoder) { e.String("ui-1-abc") }},
-		{"krate/app.Supports", func(e *wire.Encoder) { e.String("tray") }},
+		{"krate/shortcut.register", func(e *wire.Encoder) { e.String("ui-1-abc"); e.String("Ctrl+Shift+K") }},
+		{"krate/shortcut.unregister", func(e *wire.Encoder) { e.String("ui-1-abc") }},
+		{"krate/app.supports", func(e *wire.Encoder) { e.String("tray") }},
 	} {
 		if got := uiCall(t, h, c.fn, c.args); strings.Contains(got, "bad_args") {
 			t.Errorf("%s: %s", c.fn, got)
 		}
 	}
 	// And the tray shape, with binary icon bytes.
-	got := uiCall(t, h, "krate/tray.Set", func(e *wire.Encoder) {
+	got := uiCall(t, h, "krate/tray.set", func(e *wire.Encoder) {
 		e.BeginObject()
 		e.Key("tooltip")
 		e.String("T")
@@ -658,5 +658,19 @@ func TestArgumentsAsTheTSWrappersSendThem(t *testing.T) {
 	}
 	if r.main.State().Width != 500 || !r.main.State().AlwaysOnTop {
 		t.Errorf("window ops from TS shape: %+v", r.main.State())
+	}
+}
+
+// Every SDK id has a lowerCamel operation name after the area.
+func TestIDsAreLowerCamel(t *testing.T) {
+	for _, r := range sdk.IDs {
+		i := strings.LastIndex(r.Name, ".")
+		if !strings.HasPrefix(r.Name, "krate/") || i < 0 || i+1 >= len(r.Name) {
+			t.Errorf("malformed id %q", r.Name)
+			continue
+		}
+		if c := r.Name[i+1]; c < 'a' || c > 'z' {
+			t.Errorf("id %q: operation name must start with a lower-case letter", r.Name)
+		}
 	}
 }

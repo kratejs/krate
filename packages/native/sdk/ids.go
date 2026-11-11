@@ -17,8 +17,8 @@ package sdk
 
 // ID describes one host id exposed to the UI.
 type ID struct {
-	// Name is the full host id, for example "krate/os.info". Data ids use a
-	// lower-case operation name, UI ids the Go function name ("krate/window.Open").
+	// Name is the full host id, for example "krate/os.info". All SDK ids use a
+	// lowerCamel operation name ("krate/os.info", "krate/window.open").
 	Name string
 	// Permission is the app.json permission that gates it. Empty means always
 	// allowed.
@@ -67,58 +67,58 @@ var IDs = []ID{
 
 	{"krate/permission.query", "", "[name: string]", "boolean", "permission"},
 
-	{"krate/window.Open", "window", "[options: WindowOptions]", "string", "window"},
-	{"krate/window.List", "window", "[]", "string[]", "window"},
-	{"krate/window.State", "window", "[window: string]", "WindowState", "window"},
-	{"krate/window.Close", "window", "[window: string]", "void", "window"},
-	{"krate/window.SetTitle", "window", "[window: string, title: string]", "void", "window"},
-	{"krate/window.SetSize", "window", "[window: string, width: number, height: number]", "void", "window"},
-	{"krate/window.SetPosition", "window", "[window: string, x: number, y: number]", "void", "window"},
-	{"krate/window.SetAlwaysOnTop", "window", "[window: string, on: boolean]", "void", "window"},
-	{"krate/window.SetFullscreen", "window", "[window: string, on: boolean]", "void", "window"},
-	{"krate/window.SetFrameless", "window", "[window: string, on: boolean]", "void", "window"},
-	{"krate/window.Minimize", "window", "[window: string]", "void", "window"},
-	{"krate/window.Maximize", "window", "[window: string]", "void", "window"},
-	{"krate/window.Restore", "window", "[window: string]", "void", "window"},
-	{"krate/window.Focus", "window", "[window: string]", "void", "window"},
-	{"krate/window.Show", "window", "[window: string]", "void", "window"},
-	{"krate/window.Hide", "window", "[window: string]", "void", "window"},
-	{"krate/window.SetPreventClose", "window", "[window: string, on: boolean]", "void", "window"},
-	{"krate/window.Navigate", "window", "[window: string, path: string]", "void", "window"},
+	{"krate/window.open", "window", "[options: WindowOptions]", "string", "window"},
+	{"krate/window.list", "window", "[]", "string[]", "window"},
+	{"krate/window.state", "window", "[window: string]", "WindowState", "window"},
+	{"krate/window.close", "window", "[window: string]", "void", "window"},
+	{"krate/window.setTitle", "window", "[window: string, title: string]", "void", "window"},
+	{"krate/window.setSize", "window", "[window: string, width: number, height: number]", "void", "window"},
+	{"krate/window.setPosition", "window", "[window: string, x: number, y: number]", "void", "window"},
+	{"krate/window.setAlwaysOnTop", "window", "[window: string, on: boolean]", "void", "window"},
+	{"krate/window.setFullscreen", "window", "[window: string, on: boolean]", "void", "window"},
+	{"krate/window.setFrameless", "window", "[window: string, on: boolean]", "void", "window"},
+	{"krate/window.minimize", "window", "[window: string]", "void", "window"},
+	{"krate/window.maximize", "window", "[window: string]", "void", "window"},
+	{"krate/window.restore", "window", "[window: string]", "void", "window"},
+	{"krate/window.focus", "window", "[window: string]", "void", "window"},
+	{"krate/window.show", "window", "[window: string]", "void", "window"},
+	{"krate/window.hide", "window", "[window: string]", "void", "window"},
+	{"krate/window.setPreventClose", "window", "[window: string, on: boolean]", "void", "window"},
+	{"krate/window.navigate", "window", "[window: string, path: string]", "void", "window"},
 	{"krate/window.events", "window", "[] (stream)", "WindowEvent", "window"},
 
-	{"krate/dialog.OpenFile", "dialog", "[options: OpenOptions]", "string[]", "dialog"},
-	{"krate/dialog.OpenFolder", "dialog", "[options: OpenOptions]", "string[]", "dialog"},
-	{"krate/dialog.SaveFile", "dialog", "[options: SaveOptions]", "string | null", "dialog"},
-	{"krate/dialog.Message", "dialog", "[options: MessageOptions]", "number", "dialog"},
+	{"krate/dialog.openFile", "dialog", "[options: OpenOptions]", "string[]", "dialog"},
+	{"krate/dialog.openFolder", "dialog", "[options: OpenOptions]", "string[]", "dialog"},
+	{"krate/dialog.saveFile", "dialog", "[options: SaveOptions]", "string | null", "dialog"},
+	{"krate/dialog.message", "dialog", "[options: MessageOptions]", "number", "dialog"},
 
-	{"krate/clipboard.WriteText", "clipboard", "[text: string]", "void", "clipboard"},
-	{"krate/clipboard.WriteImage", "clipboard", "[png: Uint8Array]", "void", "clipboard"},
-	{"krate/clipboard.WriteFiles", "clipboard", "[paths: string[]]", "void", "clipboard"},
-	{"krate/clipboard.Clear", "clipboard", "[]", "void", "clipboard"},
-	{"krate/clipboard.ReadText", "clipboard:read", "[]", "string", "clipboard"},
-	{"krate/clipboard.ReadImage", "clipboard:read", "[]", "Uint8Array | null", "clipboard"},
-	{"krate/clipboard.ReadFiles", "clipboard:read", "[]", "string[]", "clipboard"},
+	{"krate/clipboard.writeText", "clipboard", "[text: string]", "void", "clipboard"},
+	{"krate/clipboard.writeImage", "clipboard", "[png: Uint8Array]", "void", "clipboard"},
+	{"krate/clipboard.writeFiles", "clipboard", "[paths: string[]]", "void", "clipboard"},
+	{"krate/clipboard.clear", "clipboard", "[]", "void", "clipboard"},
+	{"krate/clipboard.readText", "clipboard:read", "[]", "string", "clipboard"},
+	{"krate/clipboard.readImage", "clipboard:read", "[]", "Uint8Array | null", "clipboard"},
+	{"krate/clipboard.readFiles", "clipboard:read", "[]", "string[]", "clipboard"},
 
-	{"krate/menu.SetApp", "menu", "[items: MenuItem[]]", "void", "menu"},
-	{"krate/menu.Popup", "menu", "[window: string, x: number, y: number, items: MenuItem[]]", "void", "menu"},
+	{"krate/menu.setApp", "menu", "[items: MenuItem[]]", "void", "menu"},
+	{"krate/menu.popup", "menu", "[window: string, x: number, y: number, items: MenuItem[]]", "void", "menu"},
 	{"krate/menu.events", "menu", "[] (stream)", "MenuEvent", "menu"},
 
-	{"krate/tray.Set", "tray", "[options: TrayOptions]", "void", "tray"},
-	{"krate/tray.Remove", "tray", "[]", "void", "tray"},
+	{"krate/tray.set", "tray", "[options: TrayOptions]", "void", "tray"},
+	{"krate/tray.remove", "tray", "[]", "void", "tray"},
 	{"krate/tray.events", "tray", "[] (stream)", "TrayEvent", "tray"},
 
-	{"krate/shortcut.Register", "shortcut", "[handle: string, accelerator: string]", "void", "shortcut"},
-	{"krate/shortcut.Unregister", "shortcut", "[handle: string]", "void", "shortcut"},
+	{"krate/shortcut.register", "shortcut", "[handle: string, accelerator: string]", "void", "shortcut"},
+	{"krate/shortcut.unregister", "shortcut", "[handle: string]", "void", "shortcut"},
 	{"krate/shortcut.events", "shortcut", "[] (stream)", "{id: string}", "shortcut"},
 
-	{"krate/notify.Send", "notify", "[notification: Notification]", "void", "notify"},
-	{"krate/notify.Close", "notify", "[id: string]", "void", "notify"},
+	{"krate/notify.send", "notify", "[notification: Notification]", "void", "notify"},
+	{"krate/notify.close", "notify", "[id: string]", "void", "notify"},
 	{"krate/notify.events", "notify", "[] (stream)", "NotificationEvent", "notify"},
 
-	{"krate/app.Quit", "app", "[]", "void", "lifecycle"},
-	{"krate/app.Relaunch", "app", "[]", "void", "lifecycle"},
-	{"krate/app.Supports", "app", "[capability: string]", "boolean", "lifecycle"},
+	{"krate/app.quit", "app", "[]", "void", "lifecycle"},
+	{"krate/app.relaunch", "app", "[]", "void", "lifecycle"},
+	{"krate/app.supports", "app", "[capability: string]", "boolean", "lifecycle"},
 	{"krate/app.events", "app", "[] (stream)", "SecondInstance", "lifecycle"},
 }
 

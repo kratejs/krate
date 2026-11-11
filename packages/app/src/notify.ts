@@ -32,7 +32,7 @@ export interface NotificationEvent {
 const URGENCY = { low: 0, normal: 1, critical: 2 } as const;
 
 export function send(n: Notification): Promise<void> {
-  return call("krate/notify.Send", [
+  return call("krate/notify.send", [
     {
       id: n.id ?? "",
       title: n.title,
@@ -47,7 +47,7 @@ export function send(n: Notification): Promise<void> {
 }
 
 export function close(id: string): Promise<void> {
-  return call("krate/notify.Close", [id]);
+  return call("krate/notify.close", [id]);
 }
 
 export function onEvent(fn: (e: NotificationEvent) => void, opts?: SubscribeOptions): () => void {

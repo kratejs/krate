@@ -253,6 +253,113 @@
     if (typeof rec.un === 'function') rec.un();
   });
 
+  // In-process SDK and host calls. __krateHost.call/stream/signal invoke the
+  // shell's scheme registry directly (no HTTP, no permission gate: host code
+  // is trusted). Arguments and results use the same encoding as the wire.
+  var bridge = new Map();
+
+  function bridgeError(text) {
+    var info;
+    try { info = JSON.parse(text); } catch (_) { info = { message: String(text) }; }
+    var e = new Error(info.message || 'host call failed');
+    e.code = info.code || 'internal';
+    if (info.data !== undefined) e.data = info.data;
+    return e;
+  }
+
+  function bridgeOpen(op, id, args, h) {
+    if (typeof id !== 'string') throw new TypeError('__krateHost: id must be a string');
+    if (args === undefined) args = [];
+    if (!Array.isArray(args)) throw new TypeError('__krateHost: arguments must be an array');
+    var st = { blobs: [] };
+    var json = JSON.stringify(enc(args, st, 'arguments', []));
+    var rid = G.__kh_bnew();
+    for (var i = 0; i < st.blobs.length; i++) host(G.__kh_out_blob, rid, toHost(st.blobs[i]));
+    bridge.set(rid, h);
+    G.__kh_bcall(rid, op, id, json);
+    return rid;
+  }
+  function bridgeClose(rid) {
+    if (!bridge.has(rid)) return;
+    bridge.delete(rid);
+    G.__kh_bcall(rid, 3, '', '');
+  }
+
+  def('__kh_bdone', function __kh_bdone (rid, kind, text) {
+    var h = bridge.get(rid);
+    if (!h) return;
+    if (kind === VALUE) {
+      var v;
+      try { v = dec(JSON.parse(text), rid); } catch (e) { bridge.delete(rid); G.__kh_bfree(rid); h.fail(e); return; }
+      if (h.once) { bridge.delete(rid); G.__kh_bfree(rid); }
+      h.value(v);
+    } else if (kind === END) {
+      bridge.delete(rid); G.__kh_bfree(rid);
+      h.end();
+    } else {
+      bridge.delete(rid); G.__kh_bfree(rid);
+      h.fail(bridgeError(text));
+    }
+  });
+
+  registry.call = function (id, args) {
+    return new Promise(function (resolve, reject) {
+      bridgeOpen(0, id, args, { once: true, value: resolve, fail: reject, end: function () {} });
+    });
+  };
+
+  registry.stream = function (id, args) {
+    var queue = [], waiting = [], finished = false, failure = null, rid = null;
+    function pump() {
+      while (waiting.length) {
+        if (queue.length) { waiting.shift().resolve({ value: queue.shift(), done: false }); }
+        else if (failure) { waiting.shift().reject(failure); failure = null; }
+        else if (finished) { waiting.shift().resolve({ value: undefined, done: true }); }
+        else break;
+      }
+    }
+    function open() {
+      if (rid !== null || finished) return;
+      rid = bridgeOpen(1, id, args, {
+        value: function (v) { queue.push(v); pump(); },
+        fail: function (e) { finished = true; failure = e; pump(); },
+        end: function () { finished = true; pump(); }
+      });
+    }
+    var it = {
+      next: function () {
+        return new Promise(function (resolve, reject) {
+          try { open(); } catch (e) { finished = true; reject(e); return; }
+          waiting.push({ resolve: resolve, reject: reject });
+          pump();
+        });
+      },
+      return: function () {
+        finished = true; queue.length = 0;
+        if (rid !== null) bridgeClose(rid);
+        pump();
+        return Promise.resolve({ value: undefined, done: true });
+      }
+    };
+    it[Symbol.asyncIterator] = function () { return it; };
+    return it;
+  };
+
+  registry.signal = function (id) {
+    var last, have = false, subs2 = [], rid = null;
+    function fan(v) { last = v; have = true; subs2.slice().forEach(function (f) { try { f(v); } catch (_) {} }); }
+    rid = bridgeOpen(2, id, [], { value: fan, fail: function () {}, end: function () {} });
+    return {
+      get: function () { return have ? last : undefined; },
+      subscribe: function (fn) {
+        subs2.push(fn);
+        if (have) { try { fn(last); } catch (_) {} }
+        return function () { var i = subs2.indexOf(fn); if (i >= 0) subs2.splice(i, 1); };
+      },
+      close: function () { if (rid !== null) bridgeClose(rid); subs2.length = 0; }
+    };
+  };
+
   // Called by the wrapper Load puts around a bundle; keeps the thrown stack,
   // which the engine's error message lacks.
   def('__kh_load_failed', function __kh_load_failed (e) {

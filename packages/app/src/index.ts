@@ -1,16 +1,20 @@
-import { createClient, type Client } from "./client.js";
+import { createClient, createHostClient, hostBridge, type Client } from "./client.js";
 import type { CallOptions, ReadonlyHostSignal } from "./types.js";
 
 export { KrateError, isKrateError } from "./errors.js";
 export type { CallOptions, HostSignal, ReadonlyHostSignal } from "./types.js";
-export { createClient } from "./client.js";
+export { createClient, createHostClient } from "./client.js";
 export type { Client, ClientOptions } from "./client.js";
 
 let current: Client | undefined;
 
-// getClient returns the page's shared client, creating it on first use.
+// getClient returns the shared client, creating it on first use. In TS host
+// code (QuickJS in the shell, where __krateHost.call exists) it dispatches
+// in-process into the shell's registry; in a page it uses HTTP.
 export function getClient(): Client {
-  return (current ??= createClient());
+  if (current) return current;
+  const b = hostBridge();
+  return (current = b ? createHostClient(b) : createClient());
 }
 
 // setClient replaces the shared client, for example to pass createSignal from

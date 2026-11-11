@@ -33,6 +33,7 @@ func parseListing(s string) (listing, error) {
 func (h *Host) Register(r *scheme.Registry) {
 	h.mu.Lock()
 	l := h.listed
+	h.bridge = r
 	seen := h.regd[r]
 	if seen == nil {
 		seen = map[string]bool{}

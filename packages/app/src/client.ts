@@ -514,3 +514,64 @@ export function createClient(options: ClientOptions = {}): Client {
 
   return { call, stream, signal, close };
 }
+
+// The in-process bridge hostjs installs as __krateHost when TS host code runs
+// in the shell's QuickJS VM.
+export interface HostBridge {
+  call(id: string, args?: unknown[]): Promise<unknown>;
+  stream(id: string, args?: unknown[]): AsyncIterable<unknown>;
+  signal(id: string): { get(): unknown; subscribe(fn: (v: any) => void): () => void };
+}
+
+// hostBridge returns globalThis.__krateHost when it can dispatch calls
+// in-process, else undefined (the webview, Node, tests).
+export function hostBridge(): HostBridge | undefined {
+  const h = (globalThis as any).__krateHost;
+  return h && typeof h.call === "function" && typeof h.stream === "function" && typeof h.signal === "function" ? h : undefined;
+}
+
+// createHostClient is the client for TS host code: calls go straight into the
+// shell's registry, with no HTTP and no permission gate (host code is
+// trusted). Mocks from @krate/app/testing still take precedence.
+export function createHostClient(bridge: HostBridge): Client {
+  const sigs = new Map<string, ReadonlyHostSignal<unknown>>();
+  const mocked = createClient({ fetch: () => Promise.reject(new KrateError("transport", "no HTTP transport in host code")) });
+  const wrapErr = (e: any): never => {
+    throw e instanceof KrateError ? e : toKrateError(e);
+  };
+  return {
+    call<T = unknown>(fn: string, args: unknown[] = [], opts?: CallOptions): Promise<T> {
+      if (findMock(fn)) return mocked.call<T>(fn, args, opts);
+      if (opts?.signal?.aborted) return Promise.reject(abortReason(opts.signal));
+      return bridge.call(fn, args).then((v) => v as T, wrapErr);
+    },
+    stream<T = unknown>(fn: string, args: unknown[] = [], opts?: CallOptions): AsyncIterable<T> & AsyncIterator<T> {
+      if (findMock(fn)) return mocked.stream<T>(fn, args, opts);
+      const inner = bridge.stream(fn, args)[Symbol.asyncIterator]();
+      const it = {
+        [Symbol.asyncIterator]() {
+          return it;
+        },
+        next: () => (opts?.signal?.aborted ? Promise.reject(abortReason(opts.signal)) : inner.next().catch(wrapErr)) as Promise<IteratorResult<T>>,
+        return: async (): Promise<IteratorResult<T>> => {
+          await inner.return?.();
+          return { done: true, value: undefined };
+        },
+      };
+      return it;
+    },
+    signal<T = unknown>(name: string): ReadonlyHostSignal<T, T | undefined> {
+      const m = mockSignal(name);
+      if (m) return m as ReadonlyHostSignal<T, T | undefined>;
+      let r = sigs.get(name);
+      if (!r) {
+        const s = bridge.signal(name);
+        const read = (() => s.get()) as ReadonlyHostSignal<unknown>;
+        read.subscribe = (fn) => s.subscribe(fn);
+        sigs.set(name, (r = read));
+      }
+      return r as ReadonlyHostSignal<T, T | undefined>;
+    },
+    close() {},
+  };
+}

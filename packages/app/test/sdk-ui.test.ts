@@ -26,14 +26,14 @@ beforeEach(() => setup());
 
 describe("dialog", () => {
   it("openFile sends only the given options and returns the paths", async () => {
-    setup({ "krate/dialog.OpenFile": () => ["/a.png", "/b.png"] });
+    setup({ "krate/dialog.openFile": () => ["/a.png", "/b.png"] });
     const r = await dialog.openFile({ title: "Pick", multiple: true, filters: [{ name: "Images", patterns: ["*.png"] }] });
     expect(r).toEqual(["/a.png", "/b.png"]);
     expect(seen[0].args).toEqual([{ title: "Pick", multiple: true, filters: [{ name: "Images", patterns: ["*.png"] }] }]);
   });
 
   it("saveFile resolves to null on cancel; message maps the kind to the wire number", async () => {
-    setup({ "krate/dialog.SaveFile": () => null, "krate/dialog.Message": () => 1 });
+    setup({ "krate/dialog.saveFile": () => null, "krate/dialog.message": () => 1 });
     expect(await dialog.saveFile({ name: "x.txt", overwrite: true })).toBeNull();
     expect(seen[0].args).toEqual([{ name: "x.txt", overwrite: true }]);
     expect(await dialog.message({ kind: "error", message: "boom", buttons: ["A", "B"] })).toBe(1);
@@ -49,7 +49,7 @@ describe("dialog", () => {
 
   it("unsupported platforms reject with the code from the host", async () => {
     setup({
-      "krate/dialog.OpenFile": () => {
+      "krate/dialog.openFile": () => {
         throw new KrateError("unsupported", "dialogs are not available on this platform");
       },
     });
@@ -62,13 +62,13 @@ describe("clipboard", () => {
     let text = "";
     let img: Uint8Array | null = null;
     setup({
-      "krate/clipboard.WriteText": ([t]) => void (text = t),
-      "krate/clipboard.ReadText": () => text,
-      "krate/clipboard.WriteImage": ([b]) => void (img = b),
-      "krate/clipboard.ReadImage": () => img,
-      "krate/clipboard.WriteFiles": () => null,
-      "krate/clipboard.ReadFiles": () => ["/a b", "/c"],
-      "krate/clipboard.Clear": () => null,
+      "krate/clipboard.writeText": ([t]) => void (text = t),
+      "krate/clipboard.readText": () => text,
+      "krate/clipboard.writeImage": ([b]) => void (img = b),
+      "krate/clipboard.readImage": () => img,
+      "krate/clipboard.writeFiles": () => null,
+      "krate/clipboard.readFiles": () => ["/a b", "/c"],
+      "krate/clipboard.clear": () => null,
     });
     await clipboard.writeText("héllo");
     expect(await clipboard.readText()).toBe("héllo");
@@ -84,11 +84,11 @@ describe("clipboard", () => {
 describe("window", () => {
   it("open maps options, and handles drive the id-first commands", async () => {
     setup({
-      "krate/window.Open": () => "w2",
-      "krate/window.SetSize": () => null,
-      "krate/window.SetAlwaysOnTop": () => null,
-      "krate/window.State": () => ({ width: 500, height: 400, fullscreen: false, title: "S" }),
-      "krate/window.List": () => ["main", "w2"],
+      "krate/window.open": () => "w2",
+      "krate/window.setSize": () => null,
+      "krate/window.setAlwaysOnTop": () => null,
+      "krate/window.state": () => ({ width: 500, height: 400, fullscreen: false, title: "S" }),
+      "krate/window.list": () => ["main", "w2"],
     });
     const w = await win.open({ title: "S", path: "/settings", frameless: true, position: { x: 5, y: 6 } });
     expect(w.id).toBe("w2");
@@ -134,7 +134,7 @@ describe("window", () => {
 
 describe("menu", () => {
   it("setApp encodes kinds, submenus and defaults", async () => {
-    setup({ "krate/menu.SetApp": () => null, "krate/menu.Popup": () => null });
+    setup({ "krate/menu.setApp": () => null, "krate/menu.popup": () => null });
     await menu.setApp([
       { label: "&File", submenu: [{ id: "new", label: "New", accelerator: "CmdOrCtrl+N" }, { kind: "separator" }, { id: "auto", label: "Autosave", kind: "check", checked: true }] },
     ]);
@@ -186,7 +186,7 @@ describe("menu", () => {
 
 describe("tray and notify", () => {
   it("tray.set sends icon bytes and menu items", async () => {
-    setup({ "krate/tray.Set": () => null, "krate/tray.Remove": () => null });
+    setup({ "krate/tray.set": () => null, "krate/tray.remove": () => null });
     await tray.set({ tooltip: "T", icon: new Uint8Array([1, 2, 3]), menu: [{ id: "quit", label: "Quit" }] });
     const a = seen[0].args[0] as any;
     expect(a.tooltip).toBe("T");
@@ -196,7 +196,7 @@ describe("tray and notify", () => {
   });
 
   it("notify.send maps urgency and actions", async () => {
-    setup({ "krate/notify.Send": () => null, "krate/notify.Close": () => null });
+    setup({ "krate/notify.send": () => null, "krate/notify.close": () => null });
     await notify.send({ id: "n", title: "Done", actions: [{ id: "open", label: "Open" }], urgency: "critical", timeoutMs: 3000 });
     expect(seen[0].args).toEqual([
       { id: "n", title: "Done", body: "", icon: "", actions: [{ id: "open", label: "Open" }], urgency: 2, timeoutMs: 3000, silent: false },
@@ -233,12 +233,12 @@ describe("shortcut and lifecycle", () => {
       wake?.();
     };
     setup({
-      "krate/shortcut.Register": ([h, accel]) => {
+      "krate/shortcut.register": ([h, accel]) => {
         handle = h;
         expect(accel).toBe("Ctrl+Shift+K");
         return null;
       },
-      "krate/shortcut.Unregister": ([h]) => {
+      "krate/shortcut.unregister": ([h]) => {
         expect(h).toBe(handle);
         return null;
       },
@@ -265,7 +265,7 @@ describe("shortcut and lifecycle", () => {
 
   it("a failed register leaves nothing behind", async () => {
     setup({
-      "krate/shortcut.Register": () => {
+      "krate/shortcut.register": () => {
         throw new KrateError("unsupported", "no portal");
       },
     }, {
@@ -277,7 +277,7 @@ describe("shortcut and lifecycle", () => {
   });
 
   it("supports, quit and second-instance URLs", async () => {
-    setup({ "krate/app.Supports": ([c]) => c === "tray", "krate/app.Quit": () => null, "krate/app.Relaunch": () => null }, {
+    setup({ "krate/app.supports": ([c]) => c === "tray", "krate/app.quit": () => null, "krate/app.relaunch": () => null }, {
       "krate/app.events": async function* () {
         yield { args: ["--x", "acme://open/1"], dir: "/w", urls: ["acme://open/1"] };
         await new Promise(() => {});

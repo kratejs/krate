@@ -29,14 +29,14 @@ export async function register(accelerator: string, fn: () => void): Promise<() 
   handlers.set(handle, fn);
   ensureSubscribed();
   try {
-    await call("krate/shortcut.Register", [handle, accelerator]);
+    await call("krate/shortcut.register", [handle, accelerator]);
   } catch (e) {
     handlers.delete(handle);
     throw e;
   }
   return async () => {
     if (!handlers.delete(handle)) return;
-    await call("krate/shortcut.Unregister", [handle]);
+    await call("krate/shortcut.unregister", [handle]);
     if (handlers.size === 0) {
       stop?.();
       stop = undefined;

@@ -19,10 +19,10 @@ const Permission = "dialog"
 
 // Host function ids.
 const (
-	IDOpenFile   = "krate/dialog.OpenFile"
-	IDOpenFolder = "krate/dialog.OpenFolder"
-	IDSaveFile   = "krate/dialog.SaveFile"
-	IDMessage    = "krate/dialog.Message"
+	IDOpenFile   = "krate/dialog.openFile"
+	IDOpenFolder = "krate/dialog.openFolder"
+	IDSaveFile   = "krate/dialog.saveFile"
+	IDMessage    = "krate/dialog.message"
 )
 
 // Filter limits a file dialog to files matching glob patterns such as "*.png".

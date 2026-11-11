@@ -41,7 +41,7 @@ export function toWire(items: MenuItem[]): unknown[] {
 
 // setApp installs the menu bar on every window; [] removes it.
 export function setApp(items: MenuItem[]): Promise<void> {
-  return call("krate/menu.SetApp", [toWire(items)]);
+  return call("krate/menu.setApp", [toWire(items)]);
 }
 
 export interface PopupOptions {
@@ -52,7 +52,7 @@ export interface PopupOptions {
 }
 
 export function popup(items: MenuItem[], o: PopupOptions = {}): Promise<void> {
-  return call("krate/menu.Popup", [o.window ?? "", o.x ?? -1, o.y ?? -1, toWire(items)]);
+  return call("krate/menu.popup", [o.window ?? "", o.x ?? -1, o.y ?? -1, toWire(items)]);
 }
 
 // onClick calls fn for every menu click; the returned function stops it.

@@ -20,8 +20,8 @@ const Permission = "tray"
 
 // Host function ids.
 const (
-	IDSet    = "krate/tray.Set"
-	IDRemove = "krate/tray.Remove"
+	IDSet    = "krate/tray.set"
+	IDRemove = "krate/tray.remove"
 	IDEvents = "krate/tray.events"
 )
 
