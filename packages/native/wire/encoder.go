@@ -21,6 +21,7 @@ type encFrame struct {
 	keyPending bool   // objects: a key was written and awaits its value
 	start      int    // offset of the opening bracket in buf
 	wrap       string // objects: wrapper key if the first key is a reserved tag or escape
+	tag        string // lists: "$m" or "$s" for a tagged map or set, else ""
 }
 
 // Encoder builds one frame. It is append-only; the first misuse (a value
@@ -142,12 +143,47 @@ func (e *Encoder) EndArray() {
 	if e.err != nil {
 		return
 	}
-	if len(e.stack) == 0 || e.stack[len(e.stack)-1].obj {
+	if len(e.stack) == 0 || e.stack[len(e.stack)-1].obj || e.stack[len(e.stack)-1].tag != "" {
 		e.fail("EndArray without BeginArray")
 		return
 	}
 	e.stack = e.stack[:len(e.stack)-1]
 	e.buf = append(e.buf, ']')
+	e.endValue()
+}
+
+// BeginMap opens a {"$m": [[k, v], ..]} map. Write each entry as BeginArray,
+// key, value, EndArray, then close it with EndMap. The tag is written as is:
+// it is not a user object, so it is never escaped.
+func (e *Encoder) BeginMap() { e.beginTagged("$m") }
+
+// EndMap closes the map opened by BeginMap.
+func (e *Encoder) EndMap() { e.endTagged("$m", "EndMap without BeginMap") }
+
+// BeginSet opens a {"$s": [..]} set; close it with EndSet.
+func (e *Encoder) BeginSet() { e.beginTagged("$s") }
+
+// EndSet closes the set opened by BeginSet.
+func (e *Encoder) EndSet() { e.endTagged("$s", "EndSet without BeginSet") }
+
+func (e *Encoder) beginTagged(tag string) {
+	if !e.beginValue() {
+		return
+	}
+	e.stack = append(e.stack, encFrame{start: len(e.buf), tag: tag})
+	e.buf = append(e.buf, `{"`+tag+`":[`...)
+}
+
+func (e *Encoder) endTagged(tag, msg string) {
+	if e.err != nil {
+		return
+	}
+	if len(e.stack) == 0 || e.stack[len(e.stack)-1].tag != tag {
+		e.fail("%s", msg)
+		return
+	}
+	e.stack = e.stack[:len(e.stack)-1]
+	e.buf = append(e.buf, ']', '}')
 	e.endValue()
 }
 

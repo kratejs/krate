@@ -41,6 +41,30 @@ func copyValue(d *wire.Decoder, e *wire.Encoder) error {
 		}
 		e.EndArray()
 		return d.EndArray()
+	case wire.KindMap:
+		if err := d.BeginMap(); err != nil {
+			return err
+		}
+		e.BeginMap()
+		for d.More() {
+			if err := copyValue(d, e); err != nil {
+				return err
+			}
+		}
+		e.EndMap()
+		return d.EndArray()
+	case wire.KindSet:
+		if err := d.BeginSet(); err != nil {
+			return err
+		}
+		e.BeginSet()
+		for d.More() {
+			if err := copyValue(d, e); err != nil {
+				return err
+			}
+		}
+		e.EndSet()
+		return d.EndArray()
 	case wire.KindBytes:
 		b, err := d.Bytes()
 		if err != nil {

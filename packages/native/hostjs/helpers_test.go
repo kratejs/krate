@@ -186,8 +186,14 @@ func readFrame(t testing.TB, r io.Reader) *wire.Decoder {
 	}
 }
 
-// toAny decodes a value generically: objects become maps ($m and $s stay
-// tagged maps), bytes []byte, dates time.Time, numbers float64.
+// jsMap and jsSet are what toAny returns for $m and $s values.
+type (
+	jsMap [][2]any
+	jsSet []any
+)
+
+// toAny decodes a value generically: objects become maps, $m a jsMap, $s a
+// jsSet, bytes []byte, dates time.Time, numbers float64.
 func toAny(t testing.TB, d *wire.Decoder) any {
 	t.Helper()
 	switch d.Kind() {
@@ -219,6 +225,38 @@ func toAny(t testing.TB, d *wire.Decoder) any {
 			t.Fatal(err)
 		}
 		return arr
+	case wire.KindMap:
+		if err := d.BeginMap(); err != nil {
+			t.Fatal(err)
+		}
+		m := jsMap{}
+		for d.More() {
+			if err := d.BeginArray(); err != nil {
+				t.Fatal(err)
+			}
+			k := toAny(t, d)
+			v := toAny(t, d)
+			if err := d.EndArray(); err != nil {
+				t.Fatal(err)
+			}
+			m = append(m, [2]any{k, v})
+		}
+		if err := d.EndArray(); err != nil {
+			t.Fatal(err)
+		}
+		return m
+	case wire.KindSet:
+		if err := d.BeginSet(); err != nil {
+			t.Fatal(err)
+		}
+		set := jsSet{}
+		for d.More() {
+			set = append(set, toAny(t, d))
+		}
+		if err := d.EndArray(); err != nil {
+			t.Fatal(err)
+		}
+		return set
 	case wire.KindBytes:
 		b, err := d.Bytes()
 		if err != nil {
@@ -258,3 +296,42 @@ func toAny(t testing.TB, d *wire.Decoder) any {
 }
 
 func str(v any) string { return fmt.Sprint(v) }
+
+type rawResult struct {
+	Err   map[string]any
+	OKDec *wire.Decoder // positioned at the ok value
+}
+
+// callRaw performs one call and returns the decoder of the ok value, for tests
+// that need the result's exact wire form. The caller's args write the single
+// argument.
+func (r *rig) callRaw(fn string, args argsFn) rawResult {
+	r.t.Helper()
+	resp := r.post("/__krate/call", r.callFrame(1, fn, args))
+	d := readFrame(r.t, resp.Body)
+	if err := d.BeginObject(); err != nil {
+		r.t.Fatal(err)
+	}
+	var out rawResult
+	for d.More() {
+		k, err := d.Key()
+		if err != nil {
+			r.t.Fatal(err)
+		}
+		switch k {
+		case "ok":
+			sub, err := d.SubDecoder()
+			if err != nil {
+				r.t.Fatal(err)
+			}
+			out.OKDec = sub
+		case "err":
+			out.Err, _ = toAny(r.t, d).(map[string]any)
+		default:
+			if err := d.Skip(); err != nil {
+				r.t.Fatal(err)
+			}
+		}
+	}
+	return out
+}

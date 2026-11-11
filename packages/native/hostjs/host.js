@@ -43,6 +43,12 @@
     e.code = 'bad_result';
     throw e;
   }
+  // put sets an own property, including "__proto__", which a plain
+  // assignment would turn into a prototype change.
+  function put(o, k, v) {
+    if (k === '__proto__') Object.defineProperty(o, k, { value: v, enumerable: true, writable: true, configurable: true });
+    else o[k] = v;
+  }
   function addBlob(st, u8) { st.blobs.push(u8); return { $b: st.blobs.length - 1 }; }
 
   function enc(v, st, path, stack) {
@@ -94,7 +100,7 @@
       for (var j = 0; j < keys.length; j++) {
         var val2 = v[keys[j]];
         if (val2 === undefined) continue;
-        out[keys[j]] = enc(val2, st, path + '.' + keys[j], stack);
+        put(out, keys[j], enc(val2, st, path + '.' + keys[j], stack));
         kept.push(keys[j]);
       }
       if (kept.length === 1) {
@@ -121,7 +127,7 @@
       if (k === '$s') return new Set(v.map(function (x) { return dec(x, cid); }));
       if (ESCAPED.indexOf(k) >= 0) {
         var inner = {}, ik = Object.keys(v);
-        for (var j = 0; j < ik.length; j++) inner[ik[j]] = dec(v[ik[j]], cid);
+        for (var j = 0; j < ik.length; j++) put(inner, ik[j], dec(v[ik[j]], cid));
         return inner;
       }
     }

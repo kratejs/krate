@@ -20,7 +20,7 @@ accepts, belong in that side's own tests (`wire/compat_test.go`,
 - `-0`: Go emits `-0`, `JSON.stringify` emits `0` (see `numbers_neg_zero`).
 - U+2028 and U+2029: Go escapes them as ` `/` `, JS leaves them raw.
 - Lone surrogates: JS emits `\udXXX`, Go has no such string (it writes `�`).
-- Map and Set: TS only (see `goEncode` below).
+- Map and Set: Go decodes them as lists and encodes them with `BeginMap`/`BeginSet`.
 - Integer-like keys: JS orders them first and ascending; vectors that have them
   list them in that order already (`int_keys`).
 - Integers beyond 2^53: exact in Go, rounded by `JSON.parse`; not shared.

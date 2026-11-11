@@ -51,7 +51,7 @@ So `{"$d": "x"}` travels as `{"$d$":{"$d":"x"}}` and arrives as `{"$d": "x"}`.
   Sub-millisecond time is truncated. Decoders (both sides) accept any RFC 3339
   date-time: any number of fractional digits (or none), `Z` or a numeric
   offset; the instant is what counts.
-- Go has no Map or Set type and never emits `$m` or `$s`; a Go map is a plain
+- Go has no Map or Set type; generated codecs never emit `$m` or `$s` (the Encoder can, via `BeginMap` and `BeginSet`, for hosts bridging JS); a Go map is a plain
   JSON object (the TS decoder returns a plain object for it, not a `Map`). A
   Go decoder reads `$m` and `$s` as follows, so that a TS `Map` or `Set`
   argument is accepted:

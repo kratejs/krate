@@ -1,1 +1,0 @@
-{"goEncode":false,"reason":"Go has no Map or Set encoder; $m and $s are decode-only in Go"}

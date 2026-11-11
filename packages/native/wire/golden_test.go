@@ -112,6 +112,7 @@ func walk(d *Decoder, e *Encoder) (string, error) {
 		if err := d.BeginMap(); err != nil {
 			return "", err
 		}
+		e.BeginMap()
 		var sb strings.Builder
 		sb.WriteString(`{"$m":[`)
 		for i := 0; d.More(); i++ {
@@ -121,35 +122,38 @@ func walk(d *Decoder, e *Encoder) (string, error) {
 			if err := d.BeginArray(); err != nil {
 				return "", err
 			}
-			k, err := walk(d, NewEncoder())
+			e.BeginArray()
+			k, err := walk(d, e)
 			if err != nil {
 				return "", err
 			}
-			v, err := walk(d, NewEncoder())
+			v, err := walk(d, e)
 			if err != nil {
 				return "", err
 			}
 			if err := d.EndArray(); err != nil {
 				return "", err
 			}
+			e.EndArray()
 			sb.WriteString("[" + k + "," + v + "]")
 		}
 		if err := d.EndArray(); err != nil {
 			return "", err
 		}
-		e.Null() // Go cannot encode maps; the vector is flagged goEncode:false
+		e.EndMap()
 		return sb.String() + "]}", nil
 	case KindSet:
 		if err := d.BeginSet(); err != nil {
 			return "", err
 		}
+		e.BeginSet()
 		var sb strings.Builder
 		sb.WriteString(`{"$s":[`)
 		for i := 0; d.More(); i++ {
 			if i > 0 {
 				sb.WriteByte(',')
 			}
-			v, err := walk(d, NewEncoder())
+			v, err := walk(d, e)
 			if err != nil {
 				return "", err
 			}
@@ -158,7 +162,7 @@ func walk(d *Decoder, e *Encoder) (string, error) {
 		if err := d.EndArray(); err != nil {
 			return "", err
 		}
-		e.Null()
+		e.EndSet()
 		return sb.String() + "]}", nil
 	case KindBool:
 		v, err := d.Bool()

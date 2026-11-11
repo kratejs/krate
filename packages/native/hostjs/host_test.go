@@ -2,6 +2,9 @@ package hostjs
 
 import (
 	"bytes"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -150,14 +153,14 @@ func TestCalls(t *testing.T) {
 		if tm, ok := arr[0].(time.Time); !ok || !tm.Equal(time.Date(2026, 11, 11, 7, 23, 15, 123e6, time.UTC)) {
 			t.Errorf("date: %v", arr[0])
 		}
-		m := arr[1].(map[string]any)["$m"].([]any)
-		if len(m) != 2 || m[0].([]any)[0] != "a" {
+		m, _ := arr[1].(jsMap)
+		if len(m) != 2 || m[0][0] != "a" {
 			t.Errorf("map: %v", arr[1])
 		}
-		if b, ok := m[1].([]any)[1].([]byte); !ok || !bytes.Equal(b, []byte{1, 2}) {
+		if b, ok := m[1][1].([]byte); !ok || !bytes.Equal(b, []byte{1, 2}) {
 			t.Errorf("map bytes: %v", m[1])
 		}
-		if s := arr[2].(map[string]any)["$s"].([]any); len(s) != 2 || s[1] != "x" {
+		if s, _ := arr[2].(jsSet); len(s) != 2 || s[1] != "x" {
 			t.Errorf("set: %v", arr[2])
 		}
 	})
@@ -302,5 +305,57 @@ __krateHost.register("w.wait", () => new Promise((r) => setTimeout(() => r("late
 	r := newRig(t, src, Options{Watchdog: 100 * time.Millisecond})
 	if res := r.call("w.wait", nil); res.OK != "late" {
 		t.Fatalf("%+v", res)
+	}
+}
+
+// TestSharedVectors sends each shared wire vector through the JS side (frame
+// to JS value to frame) as the argument and result of host.echo. The result
+// must match the vector byte for byte, which covers Map, Set, Date, Uint8Array
+// and the tag escapes in both directions.
+func TestSharedVectors(t *testing.T) {
+	r := newRig(t, callsSrc, Options{})
+	bins, err := filepath.Glob("../wire/testdata/*.bin")
+	if err != nil || len(bins) < 30 {
+		t.Fatalf("vectors: %v %d", err, len(bins))
+	}
+	for _, bin := range bins {
+		name := strings.TrimSuffix(filepath.Base(bin), ".bin")
+		t.Run(name, func(t *testing.T) {
+			frame, err := os.ReadFile(bin)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if b, err := os.ReadFile(strings.TrimSuffix(bin, ".bin") + ".flags.json"); err == nil {
+				var fl struct {
+					TSEncode *bool `json:"tsEncode"`
+				}
+				if json.Unmarshal(b, &fl) == nil && fl.TSEncode != nil && !*fl.TSEncode {
+					t.Skip("the JS side cannot reproduce this vector")
+				}
+			}
+			d, err := wire.NewDecoder(frame)
+			if err != nil {
+				t.Fatal(err)
+			}
+			res := r.callRaw("host.echo", func(e *wire.Encoder) {
+				if err := copyValue(d, e); err != nil {
+					t.Fatal(err)
+				}
+			})
+			if res.Err != nil {
+				t.Fatalf("%+v", res.Err)
+			}
+			got := wire.NewEncoder()
+			if err := copyValue(res.OKDec, got); err != nil {
+				t.Fatal(err)
+			}
+			out, err := got.Finish()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(out, frame) {
+				t.Errorf("round trip differs\n got %q\nwant %q", out, frame)
+			}
+		})
 	}
 }

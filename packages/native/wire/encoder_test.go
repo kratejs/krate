@@ -140,3 +140,69 @@ func TestSoleKeyEscape(t *testing.T) {
 		}
 	}
 }
+
+func TestTaggedMapSet(t *testing.T) {
+	e := NewEncoder()
+	e.BeginObject()
+	e.Key("m")
+	e.BeginMap()
+	e.BeginArray()
+	e.String("k")
+	e.BeginSet()
+	e.Int(1)
+	e.EndSet()
+	e.EndArray()
+	e.EndMap()
+	e.Key("s")
+	e.BeginSet()
+	e.EndSet()
+	// A user object keyed only by a tag is still escaped next to real tags.
+	e.Key("u")
+	e.BeginObject()
+	e.Key("$m")
+	e.Int(1)
+	e.EndObject()
+	e.EndObject()
+	fr, err := e.Finish()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"m":{"$m":[["k",{"$s":[1]}]]},"s":{"$s":[]},"u":{"$m$":{"$m":1}}}`
+	if got := string(fr[4 : 4+len(want)]); got != want {
+		t.Fatalf("got %s want %s", got, want)
+	}
+	d, err := NewDecoder(fr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.BeginObject(); err != nil {
+		t.Fatal(err)
+	}
+	if k, _ := d.Key(); k != "m" || d.Kind() != KindMap {
+		t.Fatalf("key %q kind %v", k, d.Kind())
+	}
+	if err := d.Skip(); err != nil {
+		t.Fatal(err)
+	}
+	if k, _ := d.Key(); k != "s" || d.Kind() != KindSet {
+		t.Fatalf("key %q kind %v", k, d.Kind())
+	}
+}
+
+func TestTaggedMapSetMisuse(t *testing.T) {
+	cases := map[string]func(e *Encoder){
+		"EndArray on map":  func(e *Encoder) { e.BeginMap(); e.EndArray() },
+		"EndMap on set":    func(e *Encoder) { e.BeginSet(); e.EndMap() },
+		"EndSet on array":  func(e *Encoder) { e.BeginArray(); e.EndSet() },
+		"unclosed set":     func(e *Encoder) { e.BeginSet() },
+		"map without root": func(e *Encoder) { e.EndMap() },
+		"key in set":       func(e *Encoder) { e.BeginSet(); e.Key("a") },
+	}
+	for name, f := range cases {
+		e := NewEncoder()
+		f(e)
+		if _, err := e.Finish(); err == nil {
+			t.Errorf("%s: want error", name)
+		}
+	}
+}
