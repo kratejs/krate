@@ -139,7 +139,16 @@ func Generate(root string, imports []Import, outDir string) (*Result, []diag.Dia
 			a.add(diag.New(a.display(d), 0, 0, msg, "host code must be an importable package inside the project's Go module", "").WithCode(diag.CodeGoBindLoad))
 			continue
 		}
-		up, errs := checkPackage(fset, exp.forPackage(lp), lp)
+		up, errs, ok := safeCheckPackage(fset, exp.forPackage(lp), lp)
+		if !ok && !exp.source {
+			exp.useSource(fset)
+			up, errs, ok = safeCheckPackage(fset, exp.forPackage(lp), lp)
+		}
+		if !ok {
+			a.add(diag.New(a.display(d), 0, 0, "cannot read the compiler export data of the Go dependencies",
+				"use the Go toolchain that krate was built with (GOTOOLCHAIN) or a newer krate", "").WithCode(diag.CodeGoBindLoad))
+			continue
+		}
 		for _, e := range errs {
 			a.add(a.at(e.pos, diag.CodeGoBindLoad, e.msg, "fix the Go error; the package must compile before bindings can be generated"))
 		}

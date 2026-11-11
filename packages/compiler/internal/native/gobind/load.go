@@ -88,6 +88,7 @@ func goList(root string, dirs []string) (map[string]*listedPkg, map[string]strin
 type exportImporter struct {
 	inner   types.Importer
 	mapping map[string]string
+	source  bool
 }
 
 func newExportImporter(fset *token.FileSet, pkgs map[string]*listedPkg) *exportImporter {
@@ -103,17 +104,47 @@ func newExportImporter(fset *token.FileSet, pkgs map[string]*listedPkg) *exportI
 
 // forPackage returns an importer that applies the package's vendor mapping.
 func (e *exportImporter) forPackage(p *listedPkg) types.Importer {
-	return mappedImporter{e: e, m: p.ImportMap}
+	return mappedImporter{e: e, m: p.ImportMap, dir: p.Dir}
+}
+
+// useSource switches to type-checking dependencies from source. It is the
+// fallback when the go command writes export data this binary's go/types
+// cannot read (the go command is newer than the Go that built krate).
+func (e *exportImporter) useSource(fset *token.FileSet) {
+	e.inner = importer.ForCompiler(fset, "source", nil)
+	e.source = true
+}
+
+// safeCheckPackage is checkPackage that reports an unreadable export data
+// panic as ok=false instead of crashing.
+func safeCheckPackage(fset *token.FileSet, imp types.Importer, p *listedPkg) (up *userPkg, errs []loadErr, ok bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			if msg := fmt.Sprint(r); strings.Contains(msg, "export data") {
+				up, errs, ok = nil, nil, false
+				return
+			}
+			panic(r)
+		}
+	}()
+	up, errs = checkPackage(fset, imp, p)
+	return up, errs, true
 }
 
 type mappedImporter struct {
-	e *exportImporter
-	m map[string]string
+	e   *exportImporter
+	m   map[string]string
+	dir string
 }
 
 func (mi mappedImporter) Import(path string) (*types.Package, error) {
 	if r, ok := mi.m[path]; ok {
 		path = r
+	}
+	if mi.e.source {
+		if from, ok := mi.e.inner.(types.ImporterFrom); ok {
+			return from.ImportFrom(path, mi.dir, 0)
+		}
 	}
 	return mi.e.inner.Import(path)
 }

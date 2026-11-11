@@ -58,6 +58,18 @@ importers:
         specifier: ^10.24.0
         version: 10.29.8
 
+  examples/native-tasks:
+    dependencies:
+      '@krate/app':
+        specifier: workspace:*
+        version: link:../../packages/app
+      '@krate/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@krate/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
+
   packages/app:
     devDependencies:
       '@types/node':
