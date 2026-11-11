@@ -296,7 +296,7 @@ func TestBrowserMode(t *testing.T) {
 	}
 	// Wrong cookie.
 	if resp, _ := get(t, noFollow, base+"/", func(r *http.Request) {
-		r.AddCookie(&http.Cookie{Name: "krate_token", Value: "nope"})
+		r.AddCookie(&http.Cookie{Name: tokenCookieName(u.Port()), Value: "nope"})
 	}); resp.StatusCode != http.StatusForbidden {
 		t.Errorf("wrong cookie: %d", resp.StatusCode)
 	}
@@ -312,7 +312,7 @@ func TestBrowserMode(t *testing.T) {
 	}
 	var cookie *http.Cookie
 	for _, c := range resp.Cookies() {
-		if c.Name == "krate_token" {
+		if strings.HasPrefix(c.Name, "krate_token_") {
 			cookie = c
 		}
 	}

@@ -123,7 +123,11 @@ Playwright and devtools in dev.
   with `?krate_token=<token>` sets an HttpOnly, SameSite=Strict cookie and
   redirects (302) to the same URL without the token. The cookie, or an
   `X-Krate-Token` header, authorizes everything else; any other request gets
-  403.
+  403. The cookie is named per port (`krate_token_<port>`) so two sessions do
+  not overwrite each other. A cookie-authenticated request that a browser marks
+  cross-origin (`Origin` other than the page's own, or `Sec-Fetch-Site` other
+  than `same-origin`/`none`) gets 403: a page served by another localhost port is
+  same-site, so SameSite alone would not stop it from posting to `/__krate/call`.
 - The `Host` header must be `127.0.0.1`, `localhost` or `[::1]` on the
   listener's port (this stops DNS rebinding); anything else gets 403.
 
