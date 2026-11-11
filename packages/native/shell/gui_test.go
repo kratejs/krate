@@ -1,13 +1,16 @@
 package shell
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/kratejs/krate/packages/native/internal/gohosttest"
+	"github.com/kratejs/krate/packages/native/memstat"
 )
 
 // The GUI test needs a display and the WebKitGTK libraries on Linux. It runs
@@ -160,6 +163,51 @@ func TestGUIShell(t *testing.T) {
 	}
 	if strings.TrimSpace(fmt.Sprint(rc["error"])) != "<nil>" {
 		t.Errorf("page error: %v", rc["error"])
+	}
+}
+
+// TestGUIMemory checks the memory report of the running window: the shell, the
+// Go host child and the WebKit processes, over the control API and over the
+// dev endpoint the page itself can fetch. It reads the app TestGUIShell leaves
+// running (the Go child is restarted there, so only roles are compared).
+func TestGUIMemory(t *testing.T) {
+	if guiCtl == nil {
+		t.Skip("set KRATE_NATIVE_GUI=1 to run GUI tests")
+	}
+	skipNoMemstat(t)
+	rep, err := guiCtl.Memory()
+	if err != nil {
+		t.Fatalf("Memory: %v", err)
+	}
+	roles := memRoles(rep)
+	want := []string{memstat.RoleShell, memstat.RoleGoHost}
+	if runtime.GOOS == "linux" {
+		want = append(want, memstat.RoleWebviewWeb, memstat.RoleWebviewNetwork)
+	}
+	for _, r := range want {
+		if roles[r].PSS == 0 {
+			t.Errorf("role %s missing or empty: %+v", r, rep.ByRole())
+		}
+	}
+	if t.Failed() {
+		t.Logf("notes: %v", rep.Notes)
+		return
+	}
+	t.Logf("roles: %+v", rep.ByRole())
+
+	out, err := guiCtl.Query(`fetch("/__krate/dev/memory").then(r => r.json())`)
+	if err != nil {
+		t.Fatalf("fetching the endpoint from the page: %v", err)
+	}
+	var got memstat.Report
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatal(err)
+	}
+	r := memRoles(&got)
+	for _, role := range want {
+		if r[role].PSS == 0 {
+			t.Errorf("endpoint: role %s missing: %+v", role, got.ByRole())
+		}
 	}
 }
 

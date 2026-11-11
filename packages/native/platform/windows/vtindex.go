@@ -23,6 +23,13 @@ var (
 	ctlClose             = vtIndex("ICoreWebView2Controller", "Close")
 	ctlGetCoreWebView2   = vtIndex("ICoreWebView2Controller", "get_CoreWebView2")
 
+	wvGetBrowserProcessId  = vtIndex("ICoreWebView2", "get_BrowserProcessId")
+	env8GetProcessInfos    = vtIndex("ICoreWebView2Environment8", "GetProcessInfos")
+	procColGetCount        = vtIndex("ICoreWebView2ProcessInfoCollection", "get_Count")
+	procColGetValueAtIndex = vtIndex("ICoreWebView2ProcessInfoCollection", "GetValueAtIndex")
+	procInfoGetProcessId   = vtIndex("ICoreWebView2ProcessInfo", "get_ProcessId")
+	procInfoGetKind        = vtIndex("ICoreWebView2ProcessInfo", "get_Kind")
+
 	wvGetSettings                = vtIndex("ICoreWebView2", "get_Settings")
 	wvNavigate                   = vtIndex("ICoreWebView2", "Navigate")
 	wvAddNavigationStarting      = vtIndex("ICoreWebView2", "add_NavigationStarting")

@@ -416,11 +416,14 @@ jobs:
 
       # The compiler's native tests build the example app and drive the shell.
       # TestNativeBudgetGUI checks cold start and memory against
-      # packages/native/budgets.json; those limits were measured on a developer
-      # machine, so the hosted runner gets 3x on the time and memory limits.
+      # packages/native/budgets.json. The cold-start limit was measured on a
+      # developer machine, so the hosted runner gets 3x on it
+      # (KRATE_BUDGET_SCALE). Memory is PSS and private dirty per process role;
+      # only app minus a blank-page floor (same shell, same runner) fails the
+      # job, the absolute values print a warning. Memory limits are not scaled.
       - name: Compiler native tests (Linux, GUI under Xvfb)
         if: matrix.os == 'ubuntu-latest'
-        run: xvfb-run -a go test -p 1 -count=1 -timeout 20m -run 'TestNativeE2EGUI|TestNativeBudgetGUI|GUI' ./internal/build
+        run: xvfb-run -a go test -p 1 -count=1 -timeout 20m -v -run 'TestNativeE2EGUI|TestNativeBudgetGUI|GUI' ./internal/build
         working-directory: packages/compiler
         env:
           KRATE_NATIVE_GUI: "1"

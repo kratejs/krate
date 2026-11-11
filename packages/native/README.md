@@ -14,6 +14,7 @@ The Go module behind Krate's desktop target.
 | `shell` | The shell as a library: app manifest, `Run`, `RunEmbedded` and `Main` (release builds), browser mode, dev control. See `shell/README.md` |
 | `sdk/{window,dialog,clipboard,menu,tray,shortcut,notify,app}` | The UI half of the SDK: plain Go functions for host code, forwarded to the shell in dev. `sdk` assembles them for the shell. See the SDK page in the docs |
 | `cmd/krate-shell` | The prebuilt shell binary. `krate-shell --doctor` prints a JSON report of the system webview and display; it ships in the `@krate/core-<platform>` packages next to `krate` |
+| `memstat` | Per-process memory (PSS and private dirty on Linux, footprint on macOS, private bytes on Windows) with roles for the shell, host children and webview processes; behind the shell's `memory` dev command |
 | `platform/probe` | The result type of that webview probe, shared by the per-OS platform packages |
 
 Size, start-up and memory budgets are in `budgets.json`; see `BUDGETS.md`.

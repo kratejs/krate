@@ -13,6 +13,9 @@ const (
 	iidISequentialStream = "0C733A30-2A1C-11CE-ADE5-00AA0044773D"
 	iidIStream           = "0000000C-0000-0000-C000-000000000046"
 
+	// WebView2.h line 45951
+	iidEnvironment8 = "d6eb91dd-c3d2-45e5-bd29-6dc2bc4de9cf"
+
 	// WebView2.h line 44351
 	iidEnvCompletedHandler = "4e8a3389-c9d8-4bd2-b6b5-124fee6cc14d"
 	// WebView2.h line 44663

@@ -197,9 +197,31 @@ WebKitGTK build.
 | Cold start, process start to the first page's load event | about 0.37 s |
 | `krate-shell` binary | 15.6 MB (10.9 MB with `-ldflags="-s -w"`) |
 | `dist-native/app` | 9.0 MB: Go host 8.9 MB, UI 124 KB (42 KB of JS gzipped), host JS 4 KB |
-| Resident memory, `krate-shell` process after the page ran | about 105 MB |
-| Resident memory, all processes | about 315 MB: shell 105, WebKit web process 137, WebKit network process 64, Go host 7 |
 
-The shell's resident memory includes the WebKitGTK libraries it maps. The web and
-network processes belong to the system webview; the Go host is a separate child
-process.
+Memory is measured with `krate native profile --memory` (it needs a display and
+the system webview; see the [release page](/docs/native/release/#measuring-memory)).
+Summing the resident size of every process counts the shared WebKit libraries once
+per process, so it overstates the footprint. The table uses two numbers per process:
+**PSS** (private pages plus an equal share of each shared page; PSS values add up to
+the real total) and **private dirty** (written pages only this process holds, the
+memory that cannot be dropped without swapping). The **floor** is a blank one-line
+page in the same shell and window size with no host code: it is what the system
+webview costs before your app does anything, so *app minus floor* is the part
+Krate and your app can change.
+
+Release executable of `examples/native-tasks`, 30 s after the page loaded, MB as
+PSS / private dirty:
+
+| Process | App | Floor | App minus floor |
+|---------|-----|-------|-----------------|
+| `krate-shell` (the Go host is linked into it) | 51 / 25 | 53 / 24 | -3 / +1 |
+| WebKit web process | 54 / 21 | 49 / 17 | +5 / +4 |
+| WebKit network process | 20 / 13 | 21 / 12 | -1 / +2 |
+| **Total** | **124 / 60** | **124 / 53** | **+1 / +7** |
+
+Right after the load the app is a few MB higher (the page's JavaScript and the Go
+heap have not been collected yet): about +15 / +19 for the total. Runs differ by a
+few MB, and the floor moves with the WebKitGTK build, so compare the last column.
+With the Go host as a separate child (the prebuilt-shell layout) add about 10 / 5 for
+that process.
+

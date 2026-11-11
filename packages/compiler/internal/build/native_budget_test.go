@@ -10,20 +10,33 @@ import (
 	"runtime"
 	"sort"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
 
+// A memory limit is never closer than this to what was measured: runs on a
+// busy machine vary by several MB of private dirty memory and by more of PSS,
+// which also depends on how many processes share a page.
+const (
+	memoryMinSlackPrivate = 8 << 20
+	memoryMinSlackPSS     = 16 << 20
+)
+
 // The budgets live in packages/native/budgets.json: for each platform, a
 // limit for the size of the stripped shell and of three release executables
-// (bytes), and for the start-up of the example release executable in a real
-// window (cold start in ms, resident memory in KB). A test fails when a
-// measurement is over its limit. packages/native/BUDGETS.md says how to move
+// (bytes), for the cold start of the example release executable in a real
+// window (ms), and for its memory (PSS and private dirty bytes per process
+// role, for the app, for the blank-page floor and for app minus floor). A
+// test fails when a size, the cold start or an app-minus-floor value is over
+// its limit; absolute memory values only warn, because they move with the
+// WebKit version and the runner. packages/native/BUDGETS.md says how to move
 // a limit.
 //
 //	KRATE_UPDATE_BUDGETS=1   rewrite measured and max (measured plus headroom)
 //	                         of every entry the run measured
-//	KRATE_BUDGET_SCALE=2     multiply the start-up limits (slower machines)
+//	KRATE_BUDGET_SCALE=2     multiply the cold-start limit (slower machines);
+//	                         memory limits are not scaled
 
 type budgetEntry struct {
 	Measured int64 `json:"measured"`
@@ -36,6 +49,10 @@ type budgetFile struct {
 	MeasuredWith string                            `json:"measuredWith"`
 	Sizes        map[string]map[string]budgetEntry `json:"sizes"`
 	Startup      map[string]map[string]budgetEntry `json:"startup"`
+	// Memory entries are named <set>.<role>.<metric> in bytes: set is app,
+	// floor or appMinusFloor, role is total or a memstat role, metric is pss
+	// or privateDirty. appMinusFloor values can be negative.
+	Memory map[string]map[string]budgetEntry `json:"memory"`
 }
 
 func budgetPath(t *testing.T) string {
@@ -175,28 +192,136 @@ func TestNativeBudgetSizes(t *testing.T) {
 	}
 }
 
+// memBudgetMax is the limit for a measured memory value (name is its entry,
+// ending in .pss or .privateDirty): the value plus the headroom, but at least
+// the metric's minimum slack above it, so that a small or negative delta does
+// not get an impossibly tight limit.
+func memBudgetMax(f *budgetFile, name string, v int64) int64 {
+	slack := int64(math.Ceil(math.Abs(float64(v)) * f.Headroom))
+	min := int64(memoryMinSlackPrivate)
+	if strings.HasSuffix(name, ".pss") {
+		min = memoryMinSlackPSS
+	}
+	if slack < min {
+		slack = min
+	}
+	return v + slack
+}
+
+// memoryValues flattens the afterLoad sample of a memory report into the
+// names of budgets.json.
+func memoryValues(s *NativeMemorySample) map[string]int64 {
+	out := map[string]int64{}
+	put := func(set, role string, pss, pd int64) {
+		out[set+"."+role+".pss"] = pss
+		out[set+"."+role+".privateDirty"] = pd
+	}
+	for role, r := range s.App.Roles {
+		put("app", role, int64(r.PSS), int64(r.PrivateDirty))
+	}
+	put("app", "total", int64(s.App.Total.PSS), int64(s.App.Total.PrivateDirty))
+	if s.Floor != nil {
+		for role, r := range s.Floor.Roles {
+			put("floor", role, int64(r.PSS), int64(r.PrivateDirty))
+		}
+		put("floor", "total", int64(s.Floor.Total.PSS), int64(s.Floor.Total.PrivateDirty))
+		for role, r := range s.AppMinusFloor.Roles {
+			put("appMinusFloor", role, r.PSS, r.PrivateDirty)
+		}
+		put("appMinusFloor", "total", s.AppMinusFloor.Total.PSS, s.AppMinusFloor.Total.PrivateDirty)
+	}
+	return out
+}
+
+// medianValues is the per-name median over runs; a name a run lacks counts 0.
+func medianValues(runs []map[string]int64) map[string]int64 {
+	names := map[string]bool{}
+	for _, r := range runs {
+		for n := range r {
+			names[n] = true
+		}
+	}
+	out := map[string]int64{}
+	for n := range names {
+		vs := make([]int64, len(runs))
+		for i, r := range runs {
+			vs[i] = r[n]
+		}
+		sort.Slice(vs, func(i, j int) bool { return vs[i] < vs[j] })
+		out[n] = vs[len(vs)/2]
+	}
+	return out
+}
+
+// checkMemoryBudgets compares measured values with budgets.json (or, in
+// update mode, replaces the platform's memory entries). Only appMinusFloor
+// entries fail the test; the absolute ones warn.
+func checkMemoryBudgets(t *testing.T, f *budgetFile, vals map[string]int64) {
+	t.Helper()
+	plat := budgetPlatform()
+	if os.Getenv("KRATE_UPDATE_BUDGETS") == "1" {
+		if f.Memory == nil {
+			f.Memory = map[string]map[string]budgetEntry{}
+		}
+		f.Memory[plat] = map[string]budgetEntry{}
+		for name, v := range vals {
+			f.Memory[plat][name] = budgetEntry{Measured: v, Max: memBudgetMax(f, name, v)}
+		}
+		t.Logf("recorded %d memory entries for %s", len(vals), plat)
+		return
+	}
+	entries := f.Memory[plat]
+	for _, must := range []string{"appMinusFloor.total.pss", "appMinusFloor.total.privateDirty"} {
+		if _, ok := entries[must]; !ok {
+			t.Fatalf("budgets.json has no memory %s entry for %s. Run with KRATE_UPDATE_BUDGETS=1 to record it", must, plat)
+		}
+	}
+	names := make([]string, 0, len(entries))
+	for n := range entries {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		e := entries[name]
+		v := vals[name] // a role that is absent now counts 0
+		enforced := strings.HasPrefix(name, "appMinusFloor.")
+		t.Logf("%s memory %s: %d bytes (limit %d, measured when set %d)", plat, name, v, e.Max, e.Measured)
+		if v <= e.Max {
+			continue
+		}
+		msg := fmt.Sprintf("memory %s is over its budget: %d bytes > %d (it measured %d when the budget was set)", name, v, e.Max, e.Measured)
+		if enforced {
+			t.Errorf("%s. If the growth is intended, update the budget (KRATE_UPDATE_BUDGETS=1, see packages/native/BUDGETS.md)", msg)
+		} else {
+			t.Logf("WARNING: %s (absolute values move with the WebKit version and the runner, so this only warns)", msg)
+			fmt.Printf("::warning::%s\n", msg)
+		}
+	}
+}
+
 // TestNativeBudgetGUI measures the example release executable in a real
 // window: the time from process start to the first page's load event (the
-// median of three cold runs) and the resident memory of the shell and its
-// helper processes after the page has loaded. It runs under
-// KRATE_NATIVE_GUI=1 on Linux (Xvfb is enough). The executable is built with
-// the krate_devcontrol tag, which the test needs to read the page.
+// median of three cold runs) and its memory after the page has loaded and
+// settled, per process role, next to the floor (a blank page in the same
+// shell and window size). It runs under KRATE_NATIVE_GUI=1 on Linux (Xvfb is
+// enough). The executable is built with the krate_devcontrol tag, which the
+// test needs to read the page and sample memory.
 func TestNativeBudgetGUI(t *testing.T) {
 	if os.Getenv("KRATE_NATIVE_GUI") != "1" {
 		t.Skip("set KRATE_NATIVE_GUI=1 to run the native start-up and memory budget test")
 	}
 	if runtime.GOOS != "linux" {
-		t.Skip("the start-up budgets are recorded for linux-amd64")
+		t.Skip("the start-up and memory budgets are recorded for linux-amd64")
 	}
 	if runtime.GOARCH != "amd64" {
-		t.Skip("the start-up budgets are recorded for linux-amd64")
+		t.Skip("the start-up and memory budgets are recorded for linux-amd64")
 	}
 	f := loadBudgets(t)
 	ex := e2eRequireDeps(t)
-	bin, _ := e2eBuildRelease(t, ex, filepath.Join(t.TempDir(), "dist-native"), "krate_devcontrol")
+	work := t.TempDir()
+	bin, res := e2eBuildRelease(t, ex, filepath.Join(work, "dist-native"), "krate_devcontrol")
 
 	var starts []int64
-	var shellKB, totalKB int
 	for i := 0; i < 3; i++ {
 		s := e2eStartShell(t, bin, "")
 		s.waitReady(60 * time.Second)
@@ -219,9 +344,6 @@ func TestNativeBudgetGUI(t *testing.T) {
 		}
 		starts = append(starts, ms)
 		t.Logf("run %d: first page load event %d ms after process start", i+1, ms)
-		// Let the page and the helper processes settle before reading memory.
-		time.Sleep(1500 * time.Millisecond)
-		shellKB, totalKB = e2eFootprint(t, s.cmd.Process.Pid)
 		if _, err := s.send("quit", 10*time.Second); err != nil {
 			t.Errorf("quit: %v", err)
 		}
@@ -230,13 +352,39 @@ func TestNativeBudgetGUI(t *testing.T) {
 	sort.Slice(starts, func(i, j int) bool { return starts[i] < starts[j] })
 	median := starts[len(starts)/2]
 
+	// Memory: the app and the floor, each sampled after load plus 5 s.
+	floorDir := filepath.Join(work, "floor")
+	if err := WriteNativeFloorApp(floorDir, res.Manifest.Window.Width, res.Manifest.Window.Height); err != nil {
+		t.Fatal(err)
+	}
+	shell := e2eBuildShell(t, work)
+	// A run's numbers move by several MB (page cache, allocator timing), so
+	// the budget uses the median of three runs per value.
+	var runs []map[string]int64
+	for i := 0; i < 3; i++ {
+		rep, err := MeasureNativeMemory(NativeMemoryOptions{
+			App:         NativeMemoryProgram{Path: bin},
+			Floor:       NativeMemoryProgram{Path: shell, Args: []string{floorDir}},
+			WindowWidth: res.Manifest.Window.Width, WindowHeight: res.Manifest.Window.Height,
+			Settle: 5 * time.Second, NoStorm: true,
+			Log: &testLogWriter{t: t}, Stderr: &testLogWriter{t: t},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := rep.Sample(NativeMemAfterLoad)
+		if s == nil || s.Floor == nil {
+			t.Fatalf("no afterLoad sample with a floor: %+v (notes %v)", s, rep.Notes)
+		}
+		t.Logf("run %d\n%s", i+1, FormatNativeMemory(rep))
+		runs = append(runs, memoryValues(s))
+	}
+
 	if f.Startup == nil {
 		f.Startup = map[string]map[string]budgetEntry{}
 	}
-	scale := budgetScale(t)
-	budgetCheck(t, f, f.Startup, "coldStartMs", median, "ms", scale)
-	budgetCheck(t, f, f.Startup, "rssShellKB", int64(shellKB), "KB", scale)
-	budgetCheck(t, f, f.Startup, "rssTotalKB", int64(totalKB), "KB", scale)
+	budgetCheck(t, f, f.Startup, "coldStartMs", median, "ms", budgetScale(t))
+	checkMemoryBudgets(t, f, medianValues(runs))
 	if os.Getenv("KRATE_UPDATE_BUDGETS") == "1" {
 		f.save(t)
 	}

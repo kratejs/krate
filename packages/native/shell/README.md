@@ -156,12 +156,13 @@ to stderr.
 | `restart-gohost` | Re-reads `app.json`, stops the Go host child (stdin close, kill after 2 s) and starts the binary it names now. Windows stay open; open signals reconnect on their own and the page sees the new child's values. Starts the child if none ran. |
 | `eval <js>` | Runs the rest of the line as JavaScript in every open window, without waiting for a result. `error` in browser mode or with no window. |
 | `query <js>` | Evaluates the rest of the line as a JavaScript expression in the open window, awaits a returned promise and answers `ok <json>` with the JSON-encoded value (`ok null` for `undefined`), or `error <message>` if the expression throws, the page unloads before it answers (a navigation), or nothing answers within 45 s. Wrap statements in an async arrow function: `query (async () => { ...; return x })()`. If the page is still loading, the script is sent again until the page runs it. Needs `--dev`; not available in browser mode. Used by the end-to-end tests. |
+| `memory` | Samples the memory of the app's processes and answers `ok <json>`, a `memstat.Report`: `os`, `source` (`smaps_rollup`, `phys_footprint` or `private_usage`), `procs` (`pid`, `name`, `role`, and `rss`, `pss`, `privateDirty`, `privateClean`, `anon`, `swap` in bytes), `total` (the sum) and `notes` (what could not be attributed). Roles: `shell`, `gohost`, `hostchild:<runtime>`, `webview:web`, `webview:network`, `webview:gpu`, `webview:other`. Browser mode reports only the shell and its children (no webview roles). See `../memstat` for what each OS can provide. Needs `--dev`. |
 | `hmr <json>` | Delivers one dev-hub message (a JSON object with a `type`: `reload`, `build-error`, `client-error`) to every open `/__krate/hmr` stream. `error` without `--dev` or when the message is not a JSON object. |
 | `quit` | Answers `ok`, then exits. |
 
 stdin EOF (the driver died) quits the shell. SIGINT and SIGTERM quit it too.
 The same operations are available in process as `Control` (`ReloadHostJS`,
-`RestartGoHost`, `Eval`, `Query`, `HMR`, `Quit`, `URL`, `Origin`), passed to
+`RestartGoHost`, `Eval`, `Query`, `Memory`, `HMR`, `Quit`, `URL`, `Origin`), passed to
 `RunOptions.OnReady`; `ServeControl` implements the text protocol over any
 reader and writer.
 
@@ -179,6 +180,13 @@ With `--dev` the app origin serves, besides the host protocol:
   "message"}}` frame per recorded event (calls, stream open/end, signal
   subscriptions and updates; the newest 500 are kept). `follow=1` keeps the
   stream open. Arguments and values are never recorded.
+- `GET /__krate/dev/memory` is the `memory` report as a JSON document (the same
+  `memstat.Report`), so a page, a script or `curl` (with the browser-mode token) can sample
+  the running app. Webview processes come from the platform's optional
+  `ProcessInfo` capability (`platform/caps`): descendants named `WebKit*Process`
+  on Linux, private `WKWebView` selectors on macOS and WebView2's
+  `GetProcessInfos` on Windows. Where a process cannot be named, `notes` says so
+  and the role is absent. Only macOS and Windows are compile-checked.
 - `POST /__krate/dev/client-error` takes the dev overlay's error reports and logs
   them to stderr as `[webview] ...`.
 

@@ -87,6 +87,10 @@ type cliFlags struct {
 	WantShell     bool
 	GoHost        bool
 	Browser       bool
+	// Memory and Idle belong to `krate native profile --memory`.
+	Memory  bool
+	Idle    time.Duration
+	IdleSet bool
 	// Release asks `krate native build` for compiled executables. Targets
 	// holds every --target value (comma-separated lists allowed).
 	Release       bool
@@ -376,7 +380,7 @@ var valuedFlags = map[string]bool{
 	"--config": true, "--out-dir": true, "--target": true, "--mode": true,
 	"--report": true, "--token": true, "--root": true, "--cpuprofile": true,
 	"--memprofile": true, "--host": true, "--port": true, "--out": true, "--shell": true,
-	"--scriptc-fail-on": true,
+	"--scriptc-fail-on": true, "--idle": true,
 }
 
 // parseFlagsChecked parses CLI flags, returning an error for malformed values
@@ -417,6 +421,12 @@ func parseFlagsChecked(args []string) (cliFlags, []string, error) {
 				flags.Shell, flags.WantShell = val, true
 			case "--scriptc-fail-on":
 				flags.ScriptcFailOn = val
+			case "--idle":
+				d, err := time.ParseDuration(val)
+				if err != nil || d < 0 {
+					return flags, nil, fmt.Errorf("--idle needs a duration such as 30s or 1m, got %q", val)
+				}
+				flags.Idle, flags.IdleSet = d, true
 			case "--mode":
 				flags.Mode = val
 			case "--report":
@@ -443,6 +453,8 @@ func parseFlagsChecked(args []string) (cliFlags, []string, error) {
 		switch {
 		case args[i] == "--browser":
 			flags.Browser = true
+		case args[i] == "--memory":
+			flags.Memory = true
 		case args[i] == "--release":
 			flags.Release = true
 		case args[i] == "--scriptc":

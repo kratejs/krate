@@ -136,6 +136,8 @@ type NativeReport struct {
 	Tags    []string       `json:"tags,omitempty"`
 	PGO     string         `json:"pgo,omitempty"`
 	Targets []NativeTarget `json:"targets,omitempty"`
+	// Memory is added by `krate native profile --memory`.
+	Memory *NativeMemoryReport `json:"memory,omitempty"`
 }
 
 // NativeReportPermission is a permission with the code that needs it.

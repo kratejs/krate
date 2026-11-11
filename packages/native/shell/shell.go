@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 
 	"github.com/kratejs/krate/packages/native/gohost"
 	"github.com/kratejs/krate/packages/native/krate"
@@ -106,8 +107,9 @@ type app struct {
 	results queryResults // dev "query" mailbox
 	dev     *devTools
 	sdk     *sdk.Host
-	perms   permission.Set // from the manifest; read once at load
-	glued   bool           // opts.GoGlue was registered
+	perms   permission.Set               // from the manifest; read once at load
+	glued   bool                         // opts.GoGlue was registered
+	plat    atomic.Pointer[platform.App] // native mode only, set before the loop runs
 }
 
 func load(appDir string, opts RunOptions) (*app, error) {
@@ -186,6 +188,7 @@ func loadApp(dir string, fsys fs.FS, opts RunOptions) (*app, error) {
 		a.dev = newDevTools(a.logf)
 		so.HMR = a.dev.hmr.serve
 		so.Observe = a.dev.ring.add
+		a.dev.memory = a.serveMemory
 	}
 	app := windowIDHandler(scheme.New(so))
 	extra := opts.ExtraHandler
@@ -392,6 +395,7 @@ func (a *app) runNative() error {
 		return err
 	}
 	a.attachSDK(platApp)
+	a.plat.Store(&platApp)
 	wins := &windows{}
 	a.ctl.wins = wins
 	a.ctl.origin = platApp.Origin()
