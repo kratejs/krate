@@ -281,11 +281,12 @@ func e2eCheckSteps(t *testing.T, steps []e2eStep, want int) {
 	}
 }
 
-// e2eFootprint logs resident memory of the shell and its descendants (Linux).
-func e2eFootprint(t *testing.T, pid int) {
+// e2eFootprint logs resident memory of the shell and its direct children
+// (Linux) and returns the shell's and the total in KB.
+func e2eFootprint(t *testing.T, pid int) (shellKB, totalKB int) {
 	t.Helper()
 	if runtime.GOOS != "linux" {
-		return
+		return 0, 0
 	}
 	rss := func(p int) (name string, kb int) {
 		b, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", p))
@@ -302,7 +303,7 @@ func e2eFootprint(t *testing.T, pid int) {
 		}
 		return name, kb
 	}
-	_, shellKB := rss(pid)
+	_, shellKB = rss(pid)
 	total := shellKB
 	t.Logf("footprint: krate-shell RSS %d KB", shellKB)
 	entries, _ := os.ReadDir("/proc")
@@ -332,6 +333,7 @@ func e2eFootprint(t *testing.T, pid int) {
 		t.Logf("footprint: child %s (%d) RSS %d KB", name, p, kb)
 	}
 	t.Logf("footprint: shell and direct children %d KB", total)
+	return shellKB, total
 }
 
 func e2eDirSize(t *testing.T, dir string) int64 {

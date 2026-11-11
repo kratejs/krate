@@ -415,12 +415,25 @@ jobs:
           KRATE_NATIVE_GUI: "1"
 
       # The compiler's native tests build the example app and drive the shell.
+      # TestNativeBudgetGUI checks cold start and memory against
+      # packages/native/budgets.json; those limits were measured on a developer
+      # machine, so the hosted runner gets 3x on the time and memory limits.
       - name: Compiler native tests (Linux, GUI under Xvfb)
         if: matrix.os == 'ubuntu-latest'
-        run: xvfb-run -a go test -p 1 -count=1 -timeout 20m -run 'TestNativeE2EGUI|GUI' ./internal/build
+        run: xvfb-run -a go test -p 1 -count=1 -timeout 20m -run 'TestNativeE2EGUI|TestNativeBudgetGUI|GUI' ./internal/build
         working-directory: packages/compiler
         env:
           KRATE_NATIVE_GUI: "1"
+          KRATE_REQUIRE_E2E: "1"
+          KRATE_BUDGET_SCALE: "3"
+
+      # Binary sizes (the stripped shell, Go-only, TypeScript-only and example
+      # release executables) against packages/native/budgets.json. No display.
+      - name: Native size budgets (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: go test -p 1 -count=1 -timeout 20m -run 'TestNativeBudgetSizes' -v ./internal/build
+        working-directory: packages/compiler
+        env:
           KRATE_REQUIRE_E2E: "1"
 
       - name: Cache Playwright browsers
