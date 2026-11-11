@@ -339,10 +339,12 @@ func (w *Window) FocusView(ref caps.ViewRef) (err error) {
 		switch {
 		case w.destroyed || v == nil:
 			err = fmt.Errorf("windows: view %d is not in this window", ref)
-		case v.controller == nil:
+		case w.released:
 			err = errReleased
 		default:
-			v.focus()
+			// WebView2 creates the controller asynchronously; until then the
+			// call waits in the view's queue.
+			v.do(v.focus)
 		}
 	})
 	return
@@ -371,10 +373,12 @@ func (w *Window) EvalView(ref caps.ViewRef, js string) (err error) {
 		switch {
 		case w.destroyed || v == nil:
 			err = fmt.Errorf("windows: view %d is not in this window", ref)
-		case v.webview == nil:
+		case w.released:
 			err = errReleased
 		default:
-			vcall(v.webview, wvExecuteScript, uintptr(unsafe.Pointer(wstr(js))), 0)
+			// A view whose webview WebView2 is still creating runs the script
+			// once it exists, as Window.Eval does.
+			v.do(func() { vcall(v.webview, wvExecuteScript, uintptr(unsafe.Pointer(wstr(js))), 0) })
 		}
 	})
 	return

@@ -88,7 +88,13 @@ func TestNativeReleaseBunHostChild(t *testing.T) {
 		t.Fatalf("release: %v", err)
 	}
 	bin := res.Binaries[0].Path
-	child := filepath.Join(filepath.Dir(bin), "host", "krate-host-bun")
+	// bun build --compile writes krate-host-bun.exe on Windows; the manifest
+	// keeps the bare name and the shell adds the suffix when it starts it.
+	childName := "krate-host-bun"
+	if runtime.GOOS == "windows" {
+		childName += ".exe"
+	}
+	child := filepath.Join(filepath.Dir(bin), "host", childName)
 	if st, err := os.Stat(child); err != nil || st.Size() < 1<<20 {
 		t.Fatalf("the compiled bun host child is missing or tiny: %v", err)
 	}
