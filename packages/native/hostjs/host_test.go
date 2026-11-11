@@ -338,7 +338,7 @@ func TestSharedVectors(t *testing.T) {
 				t.Fatal(err)
 			}
 			res := r.callRaw("host.echo", func(e *wire.Encoder) {
-				if err := copyValue(d, e); err != nil {
+				if err := wire.Copy(e, d); err != nil {
 					t.Fatal(err)
 				}
 			})
@@ -346,7 +346,7 @@ func TestSharedVectors(t *testing.T) {
 				t.Fatalf("%+v", res.Err)
 			}
 			got := wire.NewEncoder()
-			if err := copyValue(res.OKDec, got); err != nil {
+			if err := wire.Copy(got, res.OKDec); err != nil {
 				t.Fatal(err)
 			}
 			out, err := got.Finish()

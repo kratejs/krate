@@ -119,7 +119,7 @@ func (h *Host) funcOf(id string) scheme.Func {
 		if err != nil {
 			return krate.Errorf("bad_result", "%s: %w", id, err)
 		}
-		if err := copyValue(d, out); err != nil {
+		if err := wire.Copy(out, d); err != nil {
 			return krate.Errorf("bad_result", "%s: %w", id, err)
 		}
 		return nil
@@ -163,12 +163,12 @@ func (h *Host) streamOf(id string) scheme.StreamFunc {
 				return krate.Errorf("bad_result", "%s: %w", id, err)
 			}
 			// Validate now so the write callback cannot fail.
-			if err := copyValue(d, wire.NewEncoder()); err != nil {
+			if err := wire.Copy(wire.NewEncoder(), d); err != nil {
 				return krate.Errorf("bad_result", "%s: %w", id, err)
 			}
 			if err := emit(func(e *wire.Encoder) {
 				d, _ := decodeResult(oc)
-				_ = copyValue(d, e)
+				_ = wire.Copy(e, d)
 			}); err != nil {
 				return err
 			}
@@ -183,7 +183,7 @@ func (h *Host) signalOf(id string) scheme.SignalFunc {
 			onChange(func(e *wire.Encoder) {
 				d, err := decodeResult(oc)
 				if err == nil {
-					err = copyValue(d, e)
+					err = wire.Copy(e, d)
 				}
 				if err != nil {
 					e.Null()

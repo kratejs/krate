@@ -7,92 +7,6 @@ import (
 	"github.com/kratejs/krate/packages/native/wire"
 )
 
-// copyValue reads one value from d and writes it to e, unchanged apart from
-// re-indexing blobs. It walks generically: the shape of a JS value is only
-// known at run time.
-func copyValue(d *wire.Decoder, e *wire.Encoder) error {
-	switch d.Kind() {
-	case wire.KindObject:
-		if err := d.BeginObject(); err != nil {
-			return err
-		}
-		e.BeginObject()
-		for d.More() {
-			k, err := d.Key()
-			if err != nil {
-				return err
-			}
-			e.Key(k)
-			if err := copyValue(d, e); err != nil {
-				return err
-			}
-		}
-		e.EndObject()
-		return d.EndObject()
-	case wire.KindArray:
-		if err := d.BeginArray(); err != nil {
-			return err
-		}
-		e.BeginArray()
-		for d.More() {
-			if err := copyValue(d, e); err != nil {
-				return err
-			}
-		}
-		e.EndArray()
-		return d.EndArray()
-	case wire.KindMap:
-		if err := d.BeginMap(); err != nil {
-			return err
-		}
-		e.BeginMap()
-		for d.More() {
-			if err := copyValue(d, e); err != nil {
-				return err
-			}
-		}
-		e.EndMap()
-		return d.EndArray()
-	case wire.KindSet:
-		if err := d.BeginSet(); err != nil {
-			return err
-		}
-		e.BeginSet()
-		for d.More() {
-			if err := copyValue(d, e); err != nil {
-				return err
-			}
-		}
-		e.EndSet()
-		return d.EndArray()
-	case wire.KindBytes:
-		b, err := d.Bytes()
-		if err != nil {
-			return err
-		}
-		e.Bytes(b)
-		return nil
-	case wire.KindTime:
-		t, err := d.Time()
-		if err != nil {
-			return err
-		}
-		e.Time(t)
-		return nil
-	case wire.KindString, wire.KindNumber, wire.KindBool, wire.KindNull:
-		raw, err := d.RawValue()
-		if err != nil {
-			return err
-		}
-		e.Raw(raw)
-		return nil
-	}
-	if err := d.Err(); err != nil {
-		return err
-	}
-	return fmt.Errorf("hostjs: unexpected value at offset %d", d.Offset())
-}
-
 // splitFrame returns the JSON and blobs of a frame built by an Encoder. The
 // results alias frame.
 func splitFrame(frame []byte) (json []byte, blobs [][]byte, err error) {
@@ -152,7 +66,7 @@ func packArgs(args *wire.Decoder) (string, [][]byte, error) {
 		return string(raw), nil, args.Finish()
 	}
 	e := wire.NewEncoder()
-	if err := copyValue(args, e); err != nil {
+	if err := wire.Copy(e, args); err != nil {
 		return "", nil, err
 	}
 	if err := args.Finish(); err != nil {
