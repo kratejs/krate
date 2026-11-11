@@ -1,6 +1,6 @@
 ---
 title: Development with krate native dev
-order: 6
+order: 8
 description: Run a Krate Native app with hot reload - Go host restarts, TypeScript host reloads, UI HMR, dev overlay and the host inspector.
 ---
 

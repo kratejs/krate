@@ -1,7 +1,7 @@
 ---
 title: Release Builds, Derived Permissions and PGO
-order: 7
-description: krate native build --release links one executable per platform with only the SDK areas the app reaches, derives app.json permissions from the code, scopes permissions per window, and feeds a CPU profile back for profile-guided optimization.
+order: 11
+description: krate native build --release links one executable per platform with only the SDK areas the app uses, derives permissions, and supports PGO and window scopes.
 ---
 
 # Release builds, derived permissions and PGO
@@ -32,8 +32,17 @@ Output:
 dist-native/
   linux-amd64/Acme              one executable per target: <os>-<arch>/<productName>[.exe]
   windows-amd64/Acme.exe        built with -H windowsgui (no console window)
+  linux-amd64/host/             compiled node, bun, deno or scriptc host children, when the app has them
   report.json                   permissions with their sites, linked SDK areas, sizes
 ```
+
+`report.json` lists each target with its `binary` path (relative to the output
+directory) and its `host` children; `krate native package` reads it to find the
+payload. A Windows executable carries the icon, version information and a
+DPI-aware manifest: the build writes `rsrc_windows_<arch>.syso` next to the
+generated main from `native.icons` and the app metadata, and the Go linker
+picks it up for that target only. With `--package`, the build packages every
+`--target` after linking (see [Packaging](/docs/native/packaging/)).
 
 The executables are built with `go build -trimpath -ldflags "-s -w"` (plus
 `-H windowsgui` on Windows), and `-pgo=<file>` when a [profile](#profile-guided-optimization)

@@ -124,7 +124,8 @@ type HostChildSpec struct {
 	Runtime string `json:"runtime"`
 	// Entry is the child's file, relative to the app directory: the script
 	// when Command is set, otherwise an executable (".exe" is appended on
-	// Windows when missing).
+	// Windows when missing). An embedded (release) app has no app directory:
+	// Entry is then relative to the directory of the running executable.
 	Entry string `json:"entry"`
 	// Map is the entry's source map (informational).
 	Map string `json:"map,omitempty"`

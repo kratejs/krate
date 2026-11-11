@@ -4,10 +4,12 @@ import (
 	"debug/elf"
 	"debug/macho"
 	"debug/pe"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
 )
@@ -71,6 +73,20 @@ func exeSuffix(goos string) string {
 // <out>/krate-shell next to <out>/app.
 func Discover(outDir, goos, goarch, productName string) (Payload, error) {
 	p := Payload{OS: goos, Arch: goarch, ExtraFiles: map[string]string{}}
+	if bin := reportBinary(outDir, goos, goarch); bin != "" {
+		// report.json (written by krate native build --release) names the
+		// executable exactly, whatever the product name looks like on disk.
+		dir := filepath.Dir(bin)
+		p.Executable = bin
+		if entries, err := os.ReadDir(dir); err == nil {
+			for _, e := range entries {
+				if e.Name() != filepath.Base(bin) {
+					p.ExtraFiles[e.Name()] = filepath.Join(dir, e.Name())
+				}
+			}
+		}
+		return p, checkTarget(p)
+	}
 	dirs := []string{filepath.Join(outDir, goos+"-"+goarch)}
 	if goos == "darwin" {
 		dirs = append(dirs, filepath.Join(outDir, "macos-"+goarch))
@@ -116,6 +132,38 @@ func Discover(outDir, goos, goarch, productName string) (Payload, error) {
 	return p, fail(diag.CodeNativePkgInput, outDir,
 		fmt.Sprintf("nothing to package for %s/%s: no %s/%s-%s/ release executable and no krate-shell + app/ pair", goos, goarch, outDir, goos, goarch),
 		"build first: krate native build --release --target "+goos+"/"+goarch+" (single executable), or krate native build --shell auto (shell and app directory)")
+}
+
+// reportBinary returns the absolute path of the release executable that
+// <outDir>/report.json lists for goos/goarch, or "" when there is no report,
+// no such target or the file is gone.
+func reportBinary(outDir, goos, goarch string) string {
+	data, err := os.ReadFile(filepath.Join(outDir, "report.json"))
+	if err != nil {
+		return ""
+	}
+	var r struct {
+		Targets []struct {
+			Target string `json:"target"`
+			Binary string `json:"binary"`
+		} `json:"targets"`
+	}
+	if json.Unmarshal(data, &r) != nil {
+		return ""
+	}
+	for _, t := range r.Targets {
+		if t.Target != goos+"/"+goarch {
+			continue
+		}
+		bin := filepath.Join(outDir, filepath.FromSlash(t.Binary))
+		if rel, err := filepath.Rel(outDir, bin); err != nil || strings.HasPrefix(rel, "..") {
+			return ""
+		}
+		if st, err := os.Stat(bin); err == nil && st.Mode().IsRegular() {
+			return bin
+		}
+	}
+	return ""
 }
 
 func checkTarget(p Payload) error {

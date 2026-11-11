@@ -244,6 +244,45 @@
       ]
     },
     {
+      "id": "krate/updater.check",
+      "permission": "updater",
+      "area": "updater",
+      "module": "updater",
+      "exports": [
+        "check",
+        "update"
+      ]
+    },
+    {
+      "id": "krate/updater.download",
+      "permission": "updater",
+      "area": "updater",
+      "module": "updater",
+      "exports": [
+        "download",
+        "update"
+      ]
+    },
+    {
+      "id": "krate/updater.apply",
+      "permission": "updater",
+      "area": "updater",
+      "module": "updater",
+      "exports": [
+        "apply",
+        "update"
+      ]
+    },
+    {
+      "id": "krate/updater.relaunch",
+      "permission": "updater",
+      "area": "updater",
+      "module": "updater",
+      "exports": [
+        "relaunch"
+      ]
+    },
+    {
       "id": "krate/permission.query",
       "area": "permission",
       "module": "permission",
@@ -252,7 +291,7 @@
       ]
     },
     {
-      "id": "krate/window.Open",
+      "id": "krate/window.open",
       "permission": "window",
       "area": "window",
       "module": "window",
@@ -261,7 +300,7 @@
       ]
     },
     {
-      "id": "krate/window.List",
+      "id": "krate/window.list",
       "permission": "window",
       "area": "window",
       "module": "window",
@@ -270,7 +309,7 @@
       ]
     },
     {
-      "id": "krate/window.State",
+      "id": "krate/window.state",
       "permission": "window",
       "area": "window",
       "module": "window",
@@ -282,7 +321,7 @@
       ]
     },
     {
-      "id": "krate/window.Close",
+      "id": "krate/window.close",
       "permission": "window",
       "area": "window",
       "module": "window",
@@ -294,7 +333,7 @@
       ]
     },
     {
-      "id": "krate/window.SetTitle",
+      "id": "krate/window.setTitle",
       "permission": "window",
       "area": "window",
       "module": "window",
@@ -306,7 +345,7 @@
       ]
     },
     {
-      "id": "krate/window.SetSize",
+      "id": "krate/window.setSize",
       "permission": "window",
       "area": "window",
       "module": "window",
@@ -318,7 +357,7 @@
       ]
     },
     {
-      "id": "krate/window.SetPosition",
+      "id": "krate/window.setPosition",
       "permission": "window",
       "area": "window",
       "module": "window",
@@ -330,7 +369,7 @@
       ]
     },
     {
-      "id": "krate/window.SetAlwaysOnTop",
+      "id": "krate/window.setAlwaysOnTop",
       "permission": "window",
       "area": "window",
       "module": "window",
@@ -342,7 +381,7 @@
       ]
     },
     {
-      "id": "krate/window.SetFullscreen",
+      "id": "krate/window.setFullscreen",
       "permission": "window",
       "area": "window",
       "module": "window",
@@ -354,7 +393,7 @@
       ]
     },
     {
-      "id": "krate/window.SetFrameless",
+      "id": "krate/window.setFrameless",
       "permission": "window",
       "area": "window",
       "module": "window",
@@ -366,7 +405,7 @@
       ]
     },
     {
-      "id": "krate/window.Minimize",
+      "id": "krate/window.minimize",
       "permission": "window",
       "area": "window",
       "module": "window",
@@ -378,7 +417,7 @@
       ]
     },
     {
-      "id": "krate/window.Maximize",
+      "id": "krate/window.maximize",
       "permission": "window",
       "area": "window",
       "module": "window",
@@ -390,7 +429,7 @@
       ]
     },
     {
-      "id": "krate/window.Restore",
+      "id": "krate/window.restore",
       "permission": "window",
       "area": "window",
       "module": "window",
@@ -402,7 +441,7 @@
       ]
     },
     {
-      "id": "krate/window.Focus",
+      "id": "krate/window.focus",
       "permission": "window",
       "area": "window",
       "module": "window",
@@ -414,7 +453,7 @@
       ]
     },
     {
-      "id": "krate/window.Show",
+      "id": "krate/window.show",
       "permission": "window",
       "area": "window",
       "module": "window",
@@ -426,7 +465,7 @@
       ]
     },
     {
-      "id": "krate/window.Hide",
+      "id": "krate/window.hide",
       "permission": "window",
       "area": "window",
       "module": "window",
@@ -438,7 +477,7 @@
       ]
     },
     {
-      "id": "krate/window.SetPreventClose",
+      "id": "krate/window.setPreventClose",
       "permission": "window",
       "area": "window",
       "module": "window",
@@ -450,7 +489,7 @@
       ]
     },
     {
-      "id": "krate/window.Navigate",
+      "id": "krate/window.navigate",
       "permission": "window",
       "area": "window",
       "module": "window",
@@ -475,7 +514,7 @@
       ]
     },
     {
-      "id": "krate/dialog.OpenFile",
+      "id": "krate/dialog.openFile",
       "permission": "dialog",
       "area": "dialog",
       "module": "dialog",
@@ -484,7 +523,7 @@
       ]
     },
     {
-      "id": "krate/dialog.OpenFolder",
+      "id": "krate/dialog.openFolder",
       "permission": "dialog",
       "area": "dialog",
       "module": "dialog",
@@ -493,7 +532,7 @@
       ]
     },
     {
-      "id": "krate/dialog.SaveFile",
+      "id": "krate/dialog.saveFile",
       "permission": "dialog",
       "area": "dialog",
       "module": "dialog",
@@ -502,7 +541,7 @@
       ]
     },
     {
-      "id": "krate/dialog.Message",
+      "id": "krate/dialog.message",
       "permission": "dialog",
       "area": "dialog",
       "module": "dialog",
@@ -512,7 +551,7 @@
       ]
     },
     {
-      "id": "krate/clipboard.WriteText",
+      "id": "krate/clipboard.writeText",
       "permission": "clipboard",
       "area": "clipboard",
       "module": "clipboard",
@@ -521,7 +560,7 @@
       ]
     },
     {
-      "id": "krate/clipboard.WriteImage",
+      "id": "krate/clipboard.writeImage",
       "permission": "clipboard",
       "area": "clipboard",
       "module": "clipboard",
@@ -530,7 +569,7 @@
       ]
     },
     {
-      "id": "krate/clipboard.WriteFiles",
+      "id": "krate/clipboard.writeFiles",
       "permission": "clipboard",
       "area": "clipboard",
       "module": "clipboard",
@@ -539,7 +578,7 @@
       ]
     },
     {
-      "id": "krate/clipboard.Clear",
+      "id": "krate/clipboard.clear",
       "permission": "clipboard",
       "area": "clipboard",
       "module": "clipboard",
@@ -548,7 +587,7 @@
       ]
     },
     {
-      "id": "krate/clipboard.ReadText",
+      "id": "krate/clipboard.readText",
       "permission": "clipboard:read",
       "area": "clipboard",
       "module": "clipboard",
@@ -557,7 +596,7 @@
       ]
     },
     {
-      "id": "krate/clipboard.ReadImage",
+      "id": "krate/clipboard.readImage",
       "permission": "clipboard:read",
       "area": "clipboard",
       "module": "clipboard",
@@ -566,7 +605,7 @@
       ]
     },
     {
-      "id": "krate/clipboard.ReadFiles",
+      "id": "krate/clipboard.readFiles",
       "permission": "clipboard:read",
       "area": "clipboard",
       "module": "clipboard",
@@ -575,7 +614,7 @@
       ]
     },
     {
-      "id": "krate/menu.SetApp",
+      "id": "krate/menu.setApp",
       "permission": "menu",
       "area": "menu",
       "module": "menu",
@@ -584,7 +623,7 @@
       ]
     },
     {
-      "id": "krate/menu.Popup",
+      "id": "krate/menu.popup",
       "permission": "menu",
       "area": "menu",
       "module": "menu",
@@ -603,7 +642,7 @@
       ]
     },
     {
-      "id": "krate/tray.Set",
+      "id": "krate/tray.set",
       "permission": "tray",
       "area": "tray",
       "module": "tray",
@@ -612,7 +651,7 @@
       ]
     },
     {
-      "id": "krate/tray.Remove",
+      "id": "krate/tray.remove",
       "permission": "tray",
       "area": "tray",
       "module": "tray",
@@ -631,7 +670,7 @@
       ]
     },
     {
-      "id": "krate/shortcut.Register",
+      "id": "krate/shortcut.register",
       "permission": "shortcut",
       "area": "shortcut",
       "module": "shortcut",
@@ -640,7 +679,7 @@
       ]
     },
     {
-      "id": "krate/shortcut.Unregister",
+      "id": "krate/shortcut.unregister",
       "permission": "shortcut",
       "area": "shortcut",
       "module": "shortcut",
@@ -658,7 +697,7 @@
       ]
     },
     {
-      "id": "krate/notify.Send",
+      "id": "krate/notify.send",
       "permission": "notify",
       "area": "notify",
       "module": "notify",
@@ -667,7 +706,7 @@
       ]
     },
     {
-      "id": "krate/notify.Close",
+      "id": "krate/notify.close",
       "permission": "notify",
       "area": "notify",
       "module": "notify",
@@ -686,7 +725,7 @@
       ]
     },
     {
-      "id": "krate/app.Quit",
+      "id": "krate/app.quit",
       "permission": "app",
       "area": "app",
       "module": "app",
@@ -695,7 +734,7 @@
       ]
     },
     {
-      "id": "krate/app.Relaunch",
+      "id": "krate/app.relaunch",
       "permission": "app",
       "area": "app",
       "module": "app",
@@ -704,7 +743,7 @@
       ]
     },
     {
-      "id": "krate/app.Supports",
+      "id": "krate/app.supports",
       "permission": "app",
       "area": "app",
       "module": "app",

@@ -38,20 +38,6 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Added
 
-- `krate native init` and `krate native build` (preview): `build` writes an app directory
-  (`dist-native/app` with `app.json`, the prerendered UI, a TypeScript host bundle and a compiled
-  Go host binary) for the Krate Native shell; dynamic routes get one shell page and a `fallbacks`
-  entry. New codes `KR7200` to `KR7205`.
-- `krate native build --release [--target os/arch,...]` (preview) links one executable per
-  platform (`dist-native/<os>-<arch>/<productName>`): the platform layer, the SDK areas the app
-  reaches, Go host code registered in process, QuickJS only with TypeScript host code, and the UI in
-  an embedded archive. `native.release.compile` (`auto`, `always`, `never`) and `native.release.pgo`
-  work; `krate native profile` collects a CPU profile for `-pgo`. `krate native build` now derives
-  the app's SDK permissions from `@krate/app/<area>` imports and `krate/<area>.<op>` ids and writes
-  them to `app.json` (`strictPermissions`); `native.permissions` is an allowlist (`KR7210`), and
-  `native.window.permissions` and the `permissions` option of `window.open` scope single windows.
-  `krate native check` and `krate check` print a capability report, and `dist-native/report.json`
-  records permissions with their sites, linked SDK areas and sizes. New codes `KR7210` to `KR7214`.
 - The embedded QuickJS runtime installs each group of Web APIs the first time code reads one of
   its globals, so creating a VM costs about 1.4 ms instead of 3.2 ms. Config and
   Tailwind evaluation, `generateStaticParams`, metadata and isolation-mode API requests get
@@ -116,6 +102,31 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
   hint for build-time "cannot evaluate" errors.
 - A guide to using shadcn/ui with Krate.
 - CI covers Node 24 and 26, and runs the install smoke test on Linux, macOS, Windows and Alpine.
+
+### Krate Native (preview)
+
+Krate Native compiles a Krate app into a desktop app: the TSX UI runs in the system webview and
+host code runs in the native process. Names and options may change before release.
+
+- `krate native init | check | dev | build | profile | package | sign | notarize | keygen`.
+  `build` writes an app directory for the prebuilt shell; `build --release [--target os/arch,...]`
+  links one executable per platform (`dist-native/<os>-<arch>/<productName>`, `report.json`) with
+  only the SDK areas the app reaches, Go host code registered in process and the UI in an embedded
+  archive. `--package` packages every target. `native.release.compile` and `native.release.pgo`
+  work, and `krate native profile` collects a CPU profile.
+- Host code in Go or marked TypeScript (`.host.ts` files, `// @host`, `@host` functions), called from the
+  UI as async functions, streams and signals, on QuickJS in the shell, or in child processes on
+  Node, Bun, Deno or (experimental) scriptc, with per-module islands. A release compiles each child
+  into an executable under `host/` next to the app. `@build` and `//krate:build` functions run
+  once during the build and their results are baked into the prerendered UI.
+- The SDK (`@krate/app/<area>` in the UI and host code, `sdk/<area>` in Go): files, SQLite,
+  key-value storage, secrets, network, windows, dialogs, clipboard, menus, tray, shortcuts,
+  notifications and updates, under permissions that the build derives from the code, checks
+  against the `native.permissions` allowlist (`KR7210`) and narrows per window.
+- Packaging and updates: icons, `.app`, `.zip`, `.dmg`, MSIX, NSIS, `.syso` resources, `.deb`,
+  `.rpm`, AppImage; code signing and notarization; an Ed25519-signed updater (`native.updater`,
+  `@krate/app/updater`, the `updater` permission).
+- New diagnostics `KR7200` to `KR7245`. Documentation under `/docs/native/`.
 
 ### Fixed
 

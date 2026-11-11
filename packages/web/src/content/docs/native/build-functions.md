@@ -1,7 +1,7 @@
 ---
 title: Build Functions
-order: 7
-description: Run host functions during the native build and bake their results into the prerendered UI - the @build marker for TypeScript, //krate:build for Go - plus calling the SDK from host code, testing and resources.
+order: 6
+description: Run a function once during the native build and bake its result into the app with @build or //krate:build. Rules for literal arguments and plain-data results.
 ---
 
 # Build Functions

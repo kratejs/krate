@@ -9,9 +9,12 @@
 //
 // A bundle imports this module first (it installs globalThis.__krateHost),
 // registers its functions, then calls start().
-import { createServer } from "node:http";
+import { createServer, request as httpRequest } from "node:http";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { unlinkSync } from "node:fs";
+import { Readable } from "node:stream";
+import { createClient } from "../../../app/src/client.ts";
+import type { Client } from "../../../app/src/client.ts";
 import { buildFrame, decodeFrame, encodeValue } from "../../../app/src/wire.ts";
 import type { EncodeCtx } from "../../../app/src/wire.ts";
 
@@ -41,7 +44,95 @@ const MAX_SIGNAL_NAMES = 256;
 const fns = new Map<string, Entry>();
 const sigs = new Map<string, HostSignal>();
 
+const PARENT_ENV = "KRATE_GOHOST_PARENT";
+
+// parentFetch is a fetch for the shell's private SDK socket (unix:<path>, the
+// value of KRATE_GOHOST_PARENT). fetch itself cannot reach a unix socket on
+// every runtime, node:http can on Node, Bun and Deno.
+function parentFetch(addr: string): (input: string, init?: RequestInit) => Promise<Response> {
+  const socketPath = addr.startsWith("unix:") ? addr.slice("unix:".length) : "";
+  return (input, init) =>
+    new Promise<Response>((resolve, reject) => {
+      if (!socketPath) {
+        reject(new Error(`${PARENT_ENV}=${JSON.stringify(addr)} must be unix:<path>`));
+        return;
+      }
+      const url = new URL(input, "http://krate-parent");
+      const headers: Record<string, string> = {};
+      new Headers(init?.headers).forEach((v, k) => (headers[k] = v));
+      const req = httpRequest({ socketPath, path: url.pathname + url.search, method: init?.method ?? "GET", headers }, (res) => {
+        const h = new Headers();
+        for (const [k, v] of Object.entries(res.headers)) {
+          if (Array.isArray(v)) for (const x of v) h.append(k, x);
+          else if (v !== undefined) h.set(k, v);
+        }
+        const status = res.statusCode ?? 502;
+        const empty = status === 204 || status === 205 || status === 304;
+        if (empty) res.resume();
+        resolve(new Response(empty ? null : (Readable.toWeb(res) as unknown as ReadableStream<Uint8Array>), { status, headers: h }));
+      });
+      req.on("error", reject);
+      const sig = init?.signal;
+      if (sig) {
+        const abort = () => {
+          req.destroy();
+          reject(sig.reason ?? new Error("aborted"));
+        };
+        if (sig.aborted) return abort();
+        sig.addEventListener("abort", abort, { once: true });
+        req.on("close", () => sig.removeEventListener("abort", abort));
+      }
+      const body = init?.body;
+      if (body === undefined || body === null) req.end();
+      else req.end(typeof body === "string" ? body : Buffer.from(body as Uint8Array));
+    });
+}
+
+let parentClient: Client | undefined;
+
+// parent is the client for the shell's SDK socket, created on first use.
+function parent(): Client {
+  if (parentClient) return parentClient;
+  const addr = process.env[PARENT_ENV];
+  if (!addr) {
+    const e = new Error(`the Krate SDK is not available: ${PARENT_ENV} is not set (this program is started by the Krate shell)`);
+    (e as { code?: string }).code = "unavailable";
+    throw e;
+  }
+  return (parentClient = createClient({ fetch: parentFetch(addr) }));
+}
+
+function localCtx(): Ctx {
+  return { signal: new AbortController().signal, window: "" };
+}
+
 const registry = {
+  // call, stream and signal are the in-process bridge @krate/app uses in host
+  // code (see packages/app/src/client.ts, createHostClient). Ids this program
+  // registered run in place; every other id is forwarded to the shell over the
+  // parent socket, which serves the SDK ("krate/..."). Host code is trusted, so
+  // the shell applies no permission gate on that socket.
+  call(id: string, args: unknown[] = []): Promise<unknown> {
+    if (typeof id !== "string") return Promise.reject(new TypeError("__krateHost: id must be a string"));
+    const ent = fns.get(id);
+    if (ent && ent.kind === "func") return Promise.resolve().then(() => ent.fn.apply(localCtx(), args));
+    try {
+      return parent().call(id, args);
+    } catch (e) {
+      return Promise.reject(e);
+    }
+  },
+  stream(id: string, args: unknown[] = []): AsyncIterable<unknown> {
+    const ent = fns.get(id);
+    if (ent && ent.kind === "stream") return ent.fn.apply(localCtx(), args) as AsyncIterable<unknown>;
+    return parent().stream(id, args);
+  },
+  signal(id: string): HostSignal {
+    const local = sigs.get(id);
+    if (local) return local;
+    const s = parent().signal(id);
+    return { get: () => s(), subscribe: (fn) => s.subscribe(fn) };
+  },
   register(id: string, fn: Entry["fn"], kind?: Kind): void {
     if (typeof id !== "string" || typeof fn !== "function") {
       throw new TypeError("__krateHost.register(id, fn, kind): id must be a string and fn a function");

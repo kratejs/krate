@@ -655,3 +655,38 @@ func TestVersions(t *testing.T) {
 		t.Fatal("category")
 	}
 }
+
+// report.json names the executable of a release build exactly; Discover
+// prefers it to guessing from the product name, and carries the host/
+// directory next to it.
+func TestDiscoverPrefersReport(t *testing.T) {
+	out := t.TempDir()
+	dir := filepath.Join(out, "linux-amd64")
+	if err := os.MkdirAll(filepath.Join(dir, "host"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{"My-App", "host/krate-host-node"} {
+		if err := os.WriteFile(filepath.Join(dir, filepath.FromSlash(f)), []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	report := `{"targets":[{"target":"linux/amd64","binary":"linux-amd64/My-App"}]}`
+	if err := os.WriteFile(filepath.Join(out, "report.json"), []byte(report), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p, err := Discover(out, "linux", "amd64", "My/App")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Executable != filepath.Join(dir, "My-App") || p.ExtraFiles["host"] != filepath.Join(dir, "host") {
+		t.Errorf("payload = %+v", p)
+	}
+	// A report that names a target outside the output directory is ignored.
+	bad := `{"targets":[{"target":"linux/amd64","binary":"../x"}]}`
+	if err := os.WriteFile(filepath.Join(out, "report.json"), []byte(bad), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if p, err := Discover(out, "linux", "amd64", "My-App"); err != nil || p.Executable != filepath.Join(dir, "My-App") {
+		t.Errorf("fallback = %+v, %v", p, err)
+	}
+}

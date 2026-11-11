@@ -1,6 +1,6 @@
 ---
 title: Updates
-order: 9
+order: 14
 description: In-app updates for Krate Native apps - the signed update feed, krate native keygen, the check/download/apply/relaunch flow and how each OS swaps the files.
 ---
 

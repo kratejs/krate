@@ -1,6 +1,6 @@
 ---
 title: The App Directory and app.json
-order: 5
+order: 7
 description: The output of krate native build - the app directory layout and every field of app.json, the manifest the Krate Native shell reads.
 ---
 

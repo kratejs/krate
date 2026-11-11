@@ -1,6 +1,9 @@
 package all
 
 import (
+	"errors"
+
+	"github.com/kratejs/krate/packages/native/krate"
 	"testing"
 
 	"github.com/kratejs/krate/packages/native/scheme"
@@ -43,14 +46,14 @@ func TestWindowScopeNarrowsCalls(t *testing.T) {
 	if r.ErrCode != "permission_denied" || r.ErrData != `{"permission":"db"}` {
 		t.Fatalf("db from the scoped window: %+v", r)
 	}
-	r = c.CallFrom("w1", "krate/clipboard.Clear", nil)
+	r = c.CallFrom("w1", "krate/clipboard.clear", nil)
 	if r.ErrCode != "permission_denied" {
 		t.Fatalf("clipboard from the scoped window: %+v", r)
 	}
 	if r := c.CallFrom("main", "krate/db.query", func(e *wire.Encoder) { e.String("select 1") }); r.ErrCode == "permission_denied" {
 		t.Fatalf("an unscoped window lost db: %+v", r)
 	}
-	if r := c.CallFrom("main", "krate/clipboard.Clear", nil); r.ErrCode == "permission_denied" {
+	if r := c.CallFrom("main", "krate/clipboard.clear", nil); r.ErrCode == "permission_denied" {
 		t.Fatalf("an unscoped window lost clipboard: %+v", r)
 	}
 	// An empty scope leaves nothing.
@@ -81,7 +84,7 @@ func TestWindowOpenScopes(t *testing.T) {
 	c := sdktest.New(t, reg)
 
 	open := func(caller string, perms ...string) sdktest.Result {
-		return c.CallFrom(caller, "krate/window.Open", func(e *wire.Encoder) {
+		return c.CallFrom(caller, "krate/window.open", func(e *wire.Encoder) {
 			e.BeginObject()
 			e.Key("title")
 			e.String("x")
@@ -124,5 +127,73 @@ func TestWindowOpenScopes(t *testing.T) {
 	// A name the app does not grant is refused.
 	if r := open("main", "fs"); r.ErrCode != "permission_denied" {
 		t.Fatalf("ungranted: %+v", r)
+	}
+}
+
+// One gating path for every id: the UI is checked against the app's set,
+// narrowed by the calling window's scope; trusted in-process callers (host
+// code through Registry.Invoke) skip both, for data ids and UI ids alike.
+func TestTrustedCallsSkipAppAndWindowGates(t *testing.T) {
+	isolate(t)
+	set, err := permission.Parse([]string{"kv", "window"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Register(scheme.NewRegistry(), Options{AppID: "com.acme.trusted"}); err != nil {
+		t.Fatal(err)
+	}
+	reg := scheme.NewRegistry()
+	RegisterAreas(reg, set)
+	host := sdk.NewHost()
+	host.Attach(fakeplat.New())
+	t.Cleanup(host.Close)
+	RegisterUI(reg, host, set, nil)
+	if err := set.Scope("w1", []string{}); err != nil {
+		t.Fatal(err)
+	}
+	c := sdktest.New(t, reg)
+	args := func(vals ...string) []byte {
+		e := wire.NewEncoder()
+		e.BeginArray()
+		for _, v := range vals {
+			e.String(v)
+		}
+		e.EndArray()
+		fr, err := e.Finish()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return fr
+	}
+	denied := func(r sdktest.Result) bool { return r.ErrCode == "permission_denied" }
+
+	// The UI: the app does not grant db or clipboard, whatever the window.
+	for _, win := range []string{"main", "w1"} {
+		if r := c.CallFrom(win, "krate/db.query", func(e *wire.Encoder) { e.String("select 1") }); !denied(r) {
+			t.Errorf("db from %s: %+v", win, r)
+		}
+		if r := c.CallFrom(win, "krate/clipboard.clear", nil); !denied(r) {
+			t.Errorf("clipboard from %s: %+v", win, r)
+		}
+	}
+	// The UI: kv is granted to the app but not to a window with an empty scope.
+	if r := c.CallFrom("main", "krate/kv.get", func(e *wire.Encoder) { e.String("k") }); denied(r) {
+		t.Errorf("kv from main: %+v", r)
+	}
+	if r := c.CallFrom("w1", "krate/kv.get", func(e *wire.Encoder) { e.String("k") }); !denied(r) {
+		t.Errorf("kv from the empty-scope window: %+v", r)
+	}
+	// Trusted in-process calls bypass both gates.
+	for _, id := range []string{"krate/db.query", "krate/clipboard.clear", "krate/kv.get"} {
+		a := args("select 1")
+		if id == "krate/clipboard.clear" {
+			a = args()
+		}
+		if _, err := reg.Invoke(krate.Background(), id, a); err != nil {
+			var ke *krate.Error
+			if errors.As(err, &ke) && ke.Code == "permission_denied" {
+				t.Errorf("Invoke(%s) was gated: %v", id, err)
+			}
+		}
 	}
 }

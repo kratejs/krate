@@ -1,7 +1,7 @@
 ---
 title: "Native SDK: Data and System"
-order: 6
-description: The Krate Native SDK data half - app directories and OS info, scoped files, SQLite, key-value storage, secrets, networking and permissions - for Go host code and for the UI.
+order: 9
+description: The Native SDK for files, SQLite, key-value storage, secrets, networking and the permissions that gate them, from Go and from TypeScript with @krate/app.
 ---
 
 # Native SDK: Data and System

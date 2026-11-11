@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -173,5 +174,38 @@ func TestParseManifestHostChildren(t *testing.T) {
 	dup := `{"appId":"com.acme.app","hostchildren":[{"runtime":"node","entry":"a.mjs","command":["node","{entry}"]},{"runtime":"bun","entry":"a.mjs","command":["bun","{entry}"]}]}`
 	if _, err := ParseManifest([]byte(dup), "app.json"); err == nil {
 		t.Error("duplicate entry accepted")
+	}
+}
+
+// An embedded (release) app has no app directory: its host children are
+// executables in host/ next to the running executable.
+func TestCommandOfEmbeddedLooksNextToTheExecutable(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Skip(err)
+	}
+	if p, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = p
+	}
+	dir := filepath.Join(filepath.Dir(exe), "host")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Skip(err)
+	}
+	name := "krate-host-test"
+	file := filepath.Join(dir, name)
+	if runtime.GOOS == "windows" {
+		file += ".exe"
+	}
+	if err := os.WriteFile(file, []byte("x"), 0o755); err != nil {
+		t.Skip(err)
+	}
+	t.Cleanup(func() { os.Remove(file); os.Remove(dir) })
+	a := &app{}
+	prog, args, err := a.commandOf(HostChildSpec{Runtime: "node", Entry: "host/" + name})
+	if err != nil || prog != file || len(args) != 0 {
+		t.Fatalf("commandOf = %q %v %v, want %q", prog, args, err, file)
+	}
+	if _, _, err := a.commandOf(HostChildSpec{Runtime: "node", Entry: "host/missing"}); err == nil {
+		t.Error("a missing executable is not an error")
 	}
 }

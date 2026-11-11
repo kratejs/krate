@@ -1,6 +1,6 @@
 ---
 title: Signing and notarization
-order: 8
+order: 13
 description: krate native sign and notarize - macOS codesign and notarytool, Windows signtool or osslsigncode, Linux gpg signatures, and where secrets come from.
 ---
 

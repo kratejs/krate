@@ -1,7 +1,7 @@
 ---
 title: SDK - Windows, Dialogs and the Desktop
-order: 6
-description: The UI half of the Krate Native SDK - windows, menus, tray, global shortcuts, dialogs, clipboard, notifications and app lifecycle from Go host code and from the UI, with the platform support matrix.
+order: 10
+description: The Native SDK for windows, dialogs, clipboard, menus, tray, shortcuts and notifications, with the permission each call needs and its Go and TypeScript API.
 ---
 
 # SDK: Windows, Dialogs and the Desktop

@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
@@ -208,5 +209,46 @@ export default function Page() { return <div>{Hi}</div>; }`,
 	// Go imports are not permissions: Go host code is trusted.
 	if len(res.Permissions) != 0 {
 		t.Fatalf("permissions = %v", res.Permissions)
+	}
+}
+
+// TestIDsMatchTypeScriptWrappers checks every id row against the @krate/app
+// module that wraps it: the module file calls the id (lowerCamel, as the SDK
+// registers it) and exports every name the row lists, so a UI import maps to
+// the permission of the ids behind it.
+func TestIDsMatchTypeScriptWrappers(t *testing.T) {
+	src := map[string]string{}
+	for _, r := range Rows() {
+		if r.Module == "" {
+			continue
+		}
+		text, ok := src[r.Module]
+		if !ok {
+			file := r.Module
+			if file == "app" {
+				file = "lifecycle" // @krate/app/app is src/lifecycle.ts
+			}
+			b, err := os.ReadFile(filepath.Join(repoRoot(t), "packages", "app", "src", file+".ts"))
+			if err != nil {
+				t.Errorf("%s: module %q has no packages/app/src/%s.ts: %v", r.ID, r.Module, r.Module, err)
+				src[r.Module] = ""
+				continue
+			}
+			text = string(b)
+			src[r.Module] = text
+		}
+		if text == "" {
+			continue
+		}
+		dyn := r.ID[:strings.Index(r.ID, ".")+1] + "${" // `krate/window.${name}`
+		if !strings.Contains(text, `"`+r.ID+`"`) && !strings.Contains(text, "`"+dyn) {
+			t.Errorf("%s is not called by packages/app/src/%s.ts", r.ID, r.Module)
+		}
+		for _, name := range r.Exports {
+			re := regexp.MustCompile(`(?m)^export\s+(?:async\s+)?(?:function\*?|const|class)\s+` + regexp.QuoteMeta(name) + `\b|^export\s*\{[^}]*\b` + regexp.QuoteMeta(name) + `\b`)
+			if !re.MatchString(text) {
+				t.Errorf("%s: packages/app/src/%s.ts does not export %q", r.ID, r.Module, name)
+			}
+		}
 	}
 }

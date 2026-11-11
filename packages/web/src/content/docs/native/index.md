@@ -32,10 +32,16 @@ prerendered at build time.
   and signals from the UI.
 - [Host runtimes](/docs/native/runtimes/) - run TypeScript host code on Node,
   Bun, Deno or scriptc, islands, release bundling.
+- [Build functions](/docs/native/build-functions/) - run a function at build
+  time and bake its result into the app.
 - [The app directory and app.json](/docs/native/app-json/) - the output of a
   build and the manifest the shell reads.
+- [Development](/docs/native/dev/) - `krate native dev`, hot reload and
+  browser mode.
 - [Native SDK: data and system](/docs/native/sdk/) - app directories, files,
   SQLite, key-value storage, secrets and permissions.
+- [Native SDK: windows and desktop](/docs/native/sdk-ui/) - windows, dialogs,
+  clipboard, menus, tray, shortcuts and notifications.
 - [Release builds](/docs/native/release/) - one executable per platform, SDK
   shaking, derived permissions, per-window scopes and profile-guided builds.
 - [Packaging](/docs/native/packaging/) - `krate native package`: installers

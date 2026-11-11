@@ -1,6 +1,6 @@
 ---
 title: Packaging
-order: 7
+order: 12
 description: krate native package - installers and archives for macOS, Windows and Linux, generated icons and Windows resources, and which formats need a platform tool.
 ---
 

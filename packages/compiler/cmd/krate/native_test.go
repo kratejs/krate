@@ -193,6 +193,29 @@ func TestNativeFlagsRelease(t *testing.T) {
 	}
 }
 
+// The flags of the build, package and check paths combine in one command line.
+func TestNativeFlagsCombined(t *testing.T) {
+	flags, rest, err := parseFlagsChecked([]string{"native", "build", ".", "--release", "--package", "--format", "zip,deb", "--target", "linux/amd64", "--out", "dist-x", "--scriptc", "--scriptc-fail-on", "dynamic"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !flags.Release || !flags.Pkg.Package || !flags.Scriptc || flags.ScriptcFailOn != "dynamic" || flags.NativeOut != "dist-x" ||
+		strings.Join(flags.Pkg.Formats, ",") != "zip,deb" || strings.Join(flags.Targets, ",") != "linux/amd64" || strings.Join(rest, " ") != "native build ." {
+		t.Errorf("flags = %+v rest = %v", flags, rest)
+	}
+}
+
+func TestNativeUsageListsEveryCommandAndFlag(t *testing.T) {
+	var sb strings.Builder
+	printNativeUsage(&sb)
+	for _, want := range []string{"check", "init", "dev", "build", "profile", "package", "sign", "notarize", "keygen", "doctor",
+		"--release", "--target", "--package", "--format", "--scriptc", "--scriptc-fail-on", "--browser", "--port"} {
+		if !strings.Contains(sb.String(), want) {
+			t.Errorf("usage does not mention %q", want)
+		}
+	}
+}
+
 func TestNativeCheckPrintsCapabilities(t *testing.T) {
 	root := nativeProject(t, map[string]string{
 		"krate.config.json": `{"native":{"appId":"com.acme.app"}}`,

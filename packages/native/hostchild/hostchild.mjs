@@ -1,8 +1,52 @@
 // Code generated from src/runtime.ts and packages/app/src/wire.ts. DO NOT EDIT.
 // Regenerate: go test ./hostchild -run TestBundleUpToDate -update
 // src/runtime.ts
-import { createServer } from "node:http";
+import { createServer, request as httpRequest } from "node:http";
 import { unlinkSync } from "node:fs";
+import { Readable } from "node:stream";
+
+// ../../app/src/errors.ts
+var KrateError = class extends Error {
+  constructor(code, message, data = null) {
+    super(message);
+    this.name = "KrateError";
+    this.code = code;
+    this.data = data;
+  }
+};
+
+// ../../app/src/mock.ts
+var mocks = /* @__PURE__ */ new Map();
+function split(fn) {
+  const i = fn.lastIndexOf(".");
+  return i < 0 ? ["", fn] : [fn.slice(0, i), fn.slice(i + 1)];
+}
+function findMock(fn) {
+  if (mocks.size === 0) return void 0;
+  const [mod, name] = split(fn);
+  const impl = mocks.get(mod);
+  return impl ? { impl, name } : void 0;
+}
+function mockFn(m, fn) {
+  const f = m.impl[m.name];
+  if (typeof f !== "function") throw new KrateError("not_found", `no mock for ${fn}`);
+  return f;
+}
+function mockSignal(name) {
+  const m = findMock(name);
+  if (!m) return void 0;
+  const v = m.impl[m.name];
+  if (v && typeof v === "object" && typeof v.get === "function" && typeof v.subscribe === "function") {
+    const read2 = (() => v.get());
+    read2.subscribe = (fn) => v.subscribe(fn);
+    return read2;
+  }
+  if (typeof v === "function") throw new KrateError("not_found", `mock ${name} is a function, not a signal`);
+  const read = (() => v);
+  read.subscribe = () => () => {
+  };
+  return read;
+}
 
 // ../../app/src/wire.ts
 var TAGS = ["$b", "$d", "$m", "$s"];
@@ -198,6 +242,495 @@ function decodeFrames(buf) {
   }
   return out;
 }
+var FrameReader = class {
+  constructor(stream) {
+    this.chunks = [];
+    this.len = 0;
+    this.eof = false;
+    this.reader = stream.getReader();
+  }
+  // take returns exactly n bytes, or null on a clean EOF at a frame boundary
+  // (only when allowEof is set and nothing is buffered).
+  async take(n, allowEof = false) {
+    while (this.len < n) {
+      if (this.eof) {
+        if (allowEof && this.len === 0) return null;
+        throw new Error("truncated frame");
+      }
+      const r = await this.reader.read();
+      if (r.done) {
+        this.eof = true;
+        continue;
+      }
+      if (r.value.length) {
+        this.chunks.push(r.value);
+        this.len += r.value.length;
+      }
+    }
+    const out = new Uint8Array(n);
+    let o = 0;
+    while (o < n) {
+      const c = this.chunks[0];
+      const need = n - o;
+      if (c.length <= need) {
+        out.set(c, o);
+        o += c.length;
+        this.chunks.shift();
+      } else {
+        out.set(c.subarray(0, need), o);
+        this.chunks[0] = c.subarray(need);
+        o += need;
+      }
+    }
+    this.len -= n;
+    return out;
+  }
+  // next resolves to the next decoded frame, or undefined at end of stream.
+  async next() {
+    const head = await this.take(4, true);
+    if (head === null) return void 0;
+    const n = new DataView(head.buffer).getUint32(0);
+    const body = await this.take(n + 2);
+    const json = body.subarray(0, n);
+    const k = new DataView(body.buffer, body.byteOffset + n, 2).getUint16(0);
+    const blobs = [];
+    for (let i = 0; i < k; i++) {
+      const lb = await this.take(4);
+      const m = new DataView(lb.buffer).getUint32(0);
+      blobs.push(await this.take(m));
+    }
+    return { value: decodeParts(json, blobs) };
+  }
+  async cancel() {
+    try {
+      await this.reader.cancel();
+    } catch {
+    }
+  }
+};
+
+// ../../app/src/client.ts
+var CT = "application/x-krate-frames";
+var nextId = 1;
+function abortReason(s) {
+  return s.reason !== void 0 ? s.reason : new DOMException("This operation was aborted", "AbortError");
+}
+function transport(e) {
+  if (e instanceof KrateError) return e;
+  return new KrateError("transport", e instanceof Error ? e.message : String(e));
+}
+function toKrateError(err) {
+  return new KrateError(String(err?.code ?? "internal"), String(err?.message ?? ""), err?.data ?? null);
+}
+function randomId() {
+  const c = globalThis.crypto;
+  if (c && typeof c.randomUUID === "function") return c.randomUUID();
+  return Math.random().toString(36).slice(2) + Date.now().toString(36);
+}
+function createClient(options = {}) {
+  const fetchFn = options.fetch ?? ((i, init) => globalThis.fetch(i, init));
+  const origin = options.origin ?? "";
+  const windowId = options.windowId ?? globalThis.__KRATE_WINDOW__ ?? randomId();
+  const hdr = { "x-krate-window": windowId };
+  let closed = false;
+  let queue = [];
+  const byId = /* @__PURE__ */ new Map();
+  const inflight2 = /* @__PURE__ */ new Map();
+  function postCancel(body) {
+    if (closed) return;
+    try {
+      fetchFn(origin + "/__krate/cancel", {
+        method: "POST",
+        headers: { ...hdr, "content-type": CT },
+        body: encodeFrame(body)
+      }).catch(() => {
+      });
+    } catch {
+    }
+  }
+  function detach(w) {
+    if (w.signal && w.onAbort) w.signal.removeEventListener("abort", w.onAbort);
+  }
+  function abandon(rec) {
+    if (rec.key && inflight2.get(rec.key) === rec) inflight2.delete(rec.key);
+    if (rec.sent && !rec.settled) postCancel({ ids: [rec.id] });
+  }
+  function addWaiter(rec, resolve, reject, signal2) {
+    const w = { resolve, reject, signal: signal2, rec };
+    if (signal2) {
+      w.onAbort = () => {
+        const r = w.rec;
+        const i = r.waiters.indexOf(w);
+        if (i < 0) return;
+        r.waiters.splice(i, 1);
+        reject(abortReason(signal2));
+        if (r.waiters.length === 0) abandon(r);
+      };
+      signal2.addEventListener("abort", w.onAbort, { once: true });
+    }
+    rec.waiters.push(w);
+  }
+  function finish(rec, how, v) {
+    if (rec.settled) return;
+    rec.settled = true;
+    byId.delete(rec.id);
+    if (rec.key && inflight2.get(rec.key) === rec) inflight2.delete(rec.key);
+    const ws = rec.waiters;
+    rec.waiters = [];
+    for (const w of ws) {
+      detach(w);
+      w[how](v);
+    }
+  }
+  function enqueue(kind, fn, args, opts, resolve, reject) {
+    const signal2 = opts?.signal;
+    if (signal2?.aborted) {
+      reject(abortReason(signal2));
+      return;
+    }
+    const rec = {
+      id: nextId++,
+      fn,
+      args,
+      kind,
+      dedupe: kind === "call" && !!opts?.dedupe,
+      waiters: [],
+      sent: false,
+      settled: false
+    };
+    addWaiter(rec, resolve, reject, signal2);
+    queue.push(rec);
+    if (queue.length === 1) queueMicrotask(flush);
+  }
+  function flush() {
+    const batch = queue;
+    queue = [];
+    const ctx = { blobs: [] };
+    const calls = [];
+    const recs = [];
+    for (const rec of batch) {
+      if (rec.waiters.length === 0) continue;
+      const mark = ctx.blobs.length;
+      let tree;
+      try {
+        tree = rec.args.map((a, i) => encodeValue(a, ctx, `argument ${i}`));
+      } catch (e) {
+        ctx.blobs.length = mark;
+        finish(rec, "reject", e);
+        continue;
+      }
+      if (rec.dedupe && ctx.blobs.length === mark) {
+        const key = rec.fn + "\0" + JSON.stringify(tree);
+        const ex = inflight2.get(key);
+        if (ex && !ex.settled) {
+          for (const w of rec.waiters) {
+            w.rec = ex;
+            ex.waiters.push(w);
+          }
+          rec.waiters = [];
+          rec.settled = true;
+          continue;
+        }
+        rec.key = key;
+        inflight2.set(key, rec);
+      }
+      rec.sent = true;
+      byId.set(rec.id, rec);
+      calls.push({ id: rec.id, fn: rec.fn, args: tree });
+      recs.push(rec);
+    }
+    if (recs.length === 0) return;
+    let body;
+    try {
+      body = buildFrame({ calls }, ctx.blobs);
+    } catch (e) {
+      for (const r of recs) finish(r, "reject", e);
+      return;
+    }
+    void send(recs, body);
+  }
+  function failAll(recs, e) {
+    for (const r of recs) finish(r, "reject", e);
+  }
+  async function send(recs, body) {
+    try {
+      const res = await fetchFn(origin + "/__krate/call", {
+        method: "POST",
+        headers: { ...hdr, "content-type": CT },
+        body
+      });
+      if (!res.ok || !res.body) {
+        let e = new KrateError("transport", `host returned HTTP ${res.status}`);
+        if (res.body) {
+          try {
+            const f = await new FrameReader(res.body).next();
+            const err = f?.value?.error;
+            if (err) e = toKrateError(err);
+          } catch {
+          }
+        }
+        failAll(recs, e);
+        return;
+      }
+      const reader = new FrameReader(res.body);
+      for (; ; ) {
+        const f = await reader.next();
+        if (!f) break;
+        const m = f.value;
+        if (m && m.error && m.id === void 0) {
+          failAll(recs, toKrateError(m.error));
+          return;
+        }
+        const rec = m && typeof m.id === "number" ? byId.get(m.id) : void 0;
+        if (!rec) continue;
+        if ("err" in m) finish(rec, "reject", toKrateError(m.err));
+        else if ("stream" in m) {
+          const sid = String(m.stream);
+          if (rec.kind === "stream") {
+            if (rec.waiters.length === 0) postCancel({ streams: [sid] });
+            finish(rec, "resolve", sid);
+          } else {
+            postCancel({ streams: [sid] });
+            finish(rec, "reject", new KrateError("protocol", `${rec.fn} returned a stream; use stream()`));
+          }
+        } else if ("ok" in m) {
+          if (rec.kind === "stream") finish(rec, "reject", new KrateError("protocol", `${rec.fn} did not return a stream`));
+          else finish(rec, "resolve", m.ok);
+        }
+      }
+      for (const r of recs) finish(r, "reject", new KrateError("transport", "no result"));
+    } catch (e) {
+      failAll(recs, transport(e));
+    }
+  }
+  function call(fn, args = [], opts) {
+    const m = findMock(fn);
+    if (m) {
+      return new Promise((resolve, reject) => {
+        if (opts?.signal?.aborted) return reject(abortReason(opts.signal));
+        try {
+          const f = mockFn(m, fn);
+          args.forEach((a, i) => encodeValue(a, { blobs: [] }, `argument ${i}`));
+          Promise.resolve(f(...args)).then(resolve, reject);
+        } catch (e) {
+          reject(e);
+        }
+      });
+    }
+    return new Promise((resolve, reject) => enqueue("call", fn, args, opts, resolve, reject));
+  }
+  function stream(fn, args = [], opts) {
+    const m = findMock(fn);
+    if (m) return mockStream(m, fn, args, opts);
+    let sid;
+    let reader;
+    let ctrl;
+    let done = false;
+    let ended = false;
+    let reason;
+    let chain = Promise.resolve();
+    const signal2 = opts?.signal;
+    function close2() {
+      if (done) return;
+      done = true;
+      signal2?.removeEventListener("abort", onAbort);
+      ctrl?.abort();
+      void reader?.cancel();
+      if (sid && !ended) postCancel({ streams: [sid] });
+    }
+    function onAbort() {
+      reason = { v: abortReason(signal2) };
+      close2();
+    }
+    signal2?.addEventListener("abort", onAbort, { once: true });
+    async function open() {
+      sid = await new Promise((resolve, reject) => enqueue("stream", fn, args, { signal: signal2 }, resolve, reject));
+      if (done) {
+        postCancel({ streams: [sid] });
+        return;
+      }
+      ctrl = new AbortController();
+      const res = await fetchFn(origin + "/__krate/stream/" + encodeURIComponent(sid), {
+        method: "GET",
+        headers: hdr,
+        signal: ctrl.signal
+      });
+      if (!res.ok || !res.body) throw new KrateError("transport", `stream returned HTTP ${res.status}`);
+      reader = new FrameReader(res.body);
+    }
+    async function step() {
+      if (done) {
+        if (reason) throw reason.v;
+        return { done: true, value: void 0 };
+      }
+      try {
+        if (!reader) await open();
+        if (done || !reader) {
+          if (reason) throw reason.v;
+          return { done: true, value: void 0 };
+        }
+        const f = await reader.next();
+        if (done) {
+          if (reason) throw reason.v;
+          return { done: true, value: void 0 };
+        }
+        if (!f) throw new KrateError("transport", "stream closed before end");
+        const v = f.value;
+        if (v && "v" in v) return { done: false, value: v.v };
+        if (v && v.end) {
+          ended = true;
+          close2();
+          return { done: true, value: void 0 };
+        }
+        if (v && v.err) {
+          ended = true;
+          close2();
+          throw toKrateError(v.err);
+        }
+        throw new KrateError("protocol", "unexpected stream frame");
+      } catch (e) {
+        if (!reason && signal2?.aborted) reason = { v: abortReason(signal2) };
+        if (reason) {
+          close2();
+          throw reason.v;
+        }
+        if (done && !(e instanceof KrateError)) return { done: true, value: void 0 };
+        ended = e instanceof KrateError && e.code !== "transport";
+        close2();
+        throw transport(e);
+      }
+    }
+    const it = {
+      [Symbol.asyncIterator]() {
+        return it;
+      },
+      next() {
+        const p = chain.then(step);
+        chain = p.catch(() => {
+        });
+        return p;
+      },
+      return() {
+        close2();
+        return Promise.resolve({ done: true, value: void 0 });
+      }
+    };
+    return it;
+  }
+  function mockStream(m, fn, args, opts) {
+    let inner;
+    const open = async () => {
+      const r = await mockFn(m, fn)(...args);
+      if (r && typeof r[Symbol.asyncIterator] === "function") return r[Symbol.asyncIterator]();
+      if (r && typeof r[Symbol.iterator] === "function") {
+        const sync = r[Symbol.iterator]();
+        return { next: async () => sync.next(), return: async () => ({ done: true, value: void 0 }) };
+      }
+      throw new KrateError("protocol", `mock ${fn} did not return an iterable`);
+    };
+    const it = {
+      [Symbol.asyncIterator]() {
+        return it;
+      },
+      async next() {
+        if (opts?.signal?.aborted) throw abortReason(opts.signal);
+        inner ??= await open();
+        return inner.next();
+      },
+      async return() {
+        await inner?.return?.();
+        return { done: true, value: void 0 };
+      }
+    };
+    return it;
+  }
+  const sigs2 = /* @__PURE__ */ new Map();
+  let sigCtrl;
+  let sigGen = 0;
+  let sigTimer;
+  let backoff = 100;
+  let connectPending = false;
+  function signal(name) {
+    const mocked = mockSignal(name);
+    if (mocked) return mocked;
+    let e = sigs2.get(name);
+    if (!e) {
+      const entry = { value: void 0, has: false, subs: /* @__PURE__ */ new Set(), read: void 0 };
+      let read;
+      if (options.createSignal) {
+        const [r, w] = options.createSignal(void 0);
+        read = r;
+        entry.write = w;
+      } else {
+        read = () => entry.value;
+      }
+      const sig = read;
+      sig.subscribe = (fn) => {
+        entry.subs.add(fn);
+        return () => {
+          entry.subs.delete(fn);
+        };
+      };
+      entry.read = sig;
+      sigs2.set(name, entry);
+      e = entry;
+      scheduleConnect();
+    }
+    return e.read;
+  }
+  function scheduleConnect() {
+    if (connectPending || closed) return;
+    connectPending = true;
+    queueMicrotask(() => {
+      connectPending = false;
+      void connect();
+    });
+  }
+  function apply(name, v) {
+    const e = sigs2.get(name);
+    if (!e) return;
+    if (e.has && Object.is(e.value, v)) return;
+    e.has = true;
+    e.value = v;
+    e.write?.(v);
+    for (const fn of [...e.subs]) fn(v);
+  }
+  async function connect() {
+    if (closed || sigs2.size === 0) return;
+    if (sigTimer !== void 0) clearTimeout(sigTimer);
+    sigTimer = void 0;
+    sigCtrl?.abort();
+    const my = ++sigGen;
+    const ctrl = sigCtrl = new AbortController();
+    try {
+      const names = [...sigs2.keys()].map(encodeURIComponent).join(",");
+      const res = await fetchFn(origin + "/__krate/signals?names=" + names, { headers: hdr, signal: ctrl.signal });
+      if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+      const reader = new FrameReader(res.body);
+      for (; ; ) {
+        const f = await reader.next();
+        if (!f) break;
+        if (my !== sigGen) return;
+        const m = f.value;
+        if (m && typeof m.sig === "string") {
+          backoff = 100;
+          apply(m.sig, m.v);
+        }
+      }
+    } catch {
+    }
+    if (my !== sigGen || closed) return;
+    sigTimer = setTimeout(() => void connect(), backoff);
+    backoff = Math.min(backoff * 2, 5e3);
+  }
+  function close() {
+    closed = true;
+    sigGen++;
+    sigCtrl?.abort();
+    if (sigTimer !== void 0) clearTimeout(sigTimer);
+  }
+  return { call, stream, signal, close };
+}
 
 // src/runtime.ts
 var SOCKET_ENV = "KRATE_GOHOST_SOCKET";
@@ -208,7 +741,85 @@ var STREAM_TTL_MS = 3e4;
 var MAX_SIGNAL_NAMES = 256;
 var fns = /* @__PURE__ */ new Map();
 var sigs = /* @__PURE__ */ new Map();
+var PARENT_ENV = "KRATE_GOHOST_PARENT";
+function parentFetch(addr) {
+  const socketPath = addr.startsWith("unix:") ? addr.slice("unix:".length) : "";
+  return (input, init) => new Promise((resolve, reject) => {
+    if (!socketPath) {
+      reject(new Error(`${PARENT_ENV}=${JSON.stringify(addr)} must be unix:<path>`));
+      return;
+    }
+    const url = new URL(input, "http://krate-parent");
+    const headers = {};
+    new Headers(init?.headers).forEach((v, k) => headers[k] = v);
+    const req = httpRequest({ socketPath, path: url.pathname + url.search, method: init?.method ?? "GET", headers }, (res) => {
+      const h = new Headers();
+      for (const [k, v] of Object.entries(res.headers)) {
+        if (Array.isArray(v)) for (const x of v) h.append(k, x);
+        else if (v !== void 0) h.set(k, v);
+      }
+      const status = res.statusCode ?? 502;
+      const empty = status === 204 || status === 205 || status === 304;
+      if (empty) res.resume();
+      resolve(new Response(empty ? null : Readable.toWeb(res), { status, headers: h }));
+    });
+    req.on("error", reject);
+    const sig = init?.signal;
+    if (sig) {
+      const abort = () => {
+        req.destroy();
+        reject(sig.reason ?? new Error("aborted"));
+      };
+      if (sig.aborted) return abort();
+      sig.addEventListener("abort", abort, { once: true });
+      req.on("close", () => sig.removeEventListener("abort", abort));
+    }
+    const body = init?.body;
+    if (body === void 0 || body === null) req.end();
+    else req.end(typeof body === "string" ? body : Buffer.from(body));
+  });
+}
+var parentClient;
+function parent() {
+  if (parentClient) return parentClient;
+  const addr = process.env[PARENT_ENV];
+  if (!addr) {
+    const e = new Error(`the Krate SDK is not available: ${PARENT_ENV} is not set (this program is started by the Krate shell)`);
+    e.code = "unavailable";
+    throw e;
+  }
+  return parentClient = createClient({ fetch: parentFetch(addr) });
+}
+function localCtx() {
+  return { signal: new AbortController().signal, window: "" };
+}
 var registry = {
+  // call, stream and signal are the in-process bridge @krate/app uses in host
+  // code (see packages/app/src/client.ts, createHostClient). Ids this program
+  // registered run in place; every other id is forwarded to the shell over the
+  // parent socket, which serves the SDK ("krate/..."). Host code is trusted, so
+  // the shell applies no permission gate on that socket.
+  call(id, args = []) {
+    if (typeof id !== "string") return Promise.reject(new TypeError("__krateHost: id must be a string"));
+    const ent = fns.get(id);
+    if (ent && ent.kind === "func") return Promise.resolve().then(() => ent.fn.apply(localCtx(), args));
+    try {
+      return parent().call(id, args);
+    } catch (e) {
+      return Promise.reject(e);
+    }
+  },
+  stream(id, args = []) {
+    const ent = fns.get(id);
+    if (ent && ent.kind === "stream") return ent.fn.apply(localCtx(), args);
+    return parent().stream(id, args);
+  },
+  signal(id) {
+    const local = sigs.get(id);
+    if (local) return local;
+    const s = parent().signal(id);
+    return { get: () => s(), subscribe: (fn) => s.subscribe(fn) };
+  },
   register(id, fn, kind) {
     if (typeof id !== "string" || typeof fn !== "function") {
       throw new TypeError("__krateHost.register(id, fn, kind): id must be a string and fn a function");

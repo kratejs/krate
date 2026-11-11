@@ -166,9 +166,38 @@ type ReleaseInput struct {
 }
 ```
 
-The caller then rewrites the child's `app.json` entry: `entry` is the executable
-(relative to the app directory) and `command` is removed. The bundles of a
-build are in `NativeAppResult.HostGroups`.
+`krate native build --release` calls it once per host child and target and
+places the executables **next to the release binary**, not inside it:
+
+```
+dist-native/
+  linux-amd64/Acme                      the release executable
+  linux-amd64/host/krate-host-node      one executable per host child (krate-host-<runtime>)
+  report.json                           targets[].host lists them
+```
+
+The embedded `app.json` names each child as `{"runtime": "node", "entry":
+"host/krate-host-node", ...}` with no `command`; the shell appends `.exe` on
+Windows and resolves `entry` relative to the directory of the running
+executable (an embedded app has no app directory). `shell.Main` starts the
+children from that embedded manifest exactly as `krate-shell` does in
+development, so there is no extra wiring in the generated main. Keep `host/`
+beside the executable when you move or package the app: `krate native package`
+copies every sibling of the executable listed in `report.json`, and the macOS
+`.app`, Linux archive and installer formats carry `host/` along.
+
+Why not embed them: a Node SEA or Bun executable is 60 to 100 MB, and the
+embedded zip would have to be unpacked to disk before every first start.
+A scriptc child replaces the in-process QuickJS stand-in: when the
+QuickJS bundle holds only scriptc ids, a release drops it (`hostjs` is absent
+from `app.json`).
+
+Host code in a child can call the Krate SDK (`@krate/app/db`, `kv`, `fs`, ...):
+the child runtime installs `__krateHost.call`, `stream` and `signal`, which run
+ids it registered in place and forward every other id to the shell over the
+private SDK socket (`KRATE_GOHOST_PARENT`). Host code is trusted, so the shell
+applies no permission gate on that socket. Calls to host functions of other
+runtimes are not routed through it; go through the UI instead.
 
 ## scriptc (experimental)
 

@@ -1,5 +1,5 @@
 ---
-title: Getting Started
+title: Getting Started with Krate Native
 order: 2
 description: Create a Krate Native app with krate native init, build its app directory with krate native build, and know how pages, dynamic routes and host calls behave.
 ---

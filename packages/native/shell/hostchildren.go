@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -28,7 +29,10 @@ type hostChild struct {
 
 // commandOf resolves the program and arguments that start spec.
 func (a *app) commandOf(spec HostChildSpec) (prog string, args []string, err error) {
-	entry := filepath.Join(a.dir, filepath.FromSlash(spec.Entry))
+	entry := filepath.Join(a.childBase(), filepath.FromSlash(spec.Entry))
+	if len(spec.Command) == 0 && runtime.GOOS == "windows" && !strings.HasSuffix(strings.ToLower(entry), ".exe") {
+		entry += ".exe"
+	}
 	if _, err := os.Stat(entry); err != nil {
 		return "", nil, fmt.Errorf("shell: the %s host child: %w", spec.Runtime, err)
 	}
@@ -51,6 +55,23 @@ func (a *app) commandOf(spec HostChildSpec) (prog string, args []string, err err
 	return prog, args, nil
 }
 
+// childBase is the directory the entries of host children are relative to: the
+// app directory, or for an embedded (release) app the directory of the running
+// executable, where a release build places the compiled children (host/).
+func (a *app) childBase() string {
+	if a.dir != "" {
+		return a.dir
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return "."
+	}
+	if p, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = p
+	}
+	return filepath.Dir(exe)
+}
+
 // sockDir is the directory the host child sockets live under, which a Deno
 // child needs to read and write.
 func sockDir() string {
@@ -67,7 +88,13 @@ func sockDir() string {
 func (a *app) restartHostChildren() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	man, err := ReadManifest(a.dir)
+	var man *Manifest
+	var err error
+	if a.dir == "" {
+		man, err = ReadManifestFS(a.fsys)
+	} else {
+		man, err = ReadManifest(a.dir)
+	}
 	if err != nil {
 		return err
 	}
@@ -103,7 +130,7 @@ func (a *app) startHostChild(index int, spec HostChildSpec, man *Manifest) error
 			Logf:         func(format string, args ...any) { a.logf(format, args...) },
 			Prefix:       "[" + spec.Runtime + "] ",
 			Args:         args,
-			Dir:          a.dir,
+			Dir:          a.childBase(),
 			Name:         "js" + strconv.Itoa(index),
 			ReadyAnyLine: true,
 			ReadyTimeout: 60 * time.Second,

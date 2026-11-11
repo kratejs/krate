@@ -105,6 +105,13 @@ func (t *Table) RegisterUIFor(reg *scheme.Registry, allowed func(window, permiss
 			continue
 		}
 		perm := e.perm
+		// Trusted in-process callers (host code) are never gated, so every UI
+		// id has a Trusted twin whether or not the app grants its permission.
+		if e.f != nil {
+			reg.Trusted(id, e.f)
+		} else {
+			reg.TrustedStream(id, e.s)
+		}
 		if allowed == nil || !allowed("", perm) {
 			if e.f != nil {
 				reg.Func(id, func(krate.Ctx, *wire.Decoder, *wire.Encoder) error { return denied(perm) })
@@ -114,7 +121,6 @@ func (t *Table) RegisterUIFor(reg *scheme.Registry, allowed func(window, permiss
 			continue
 		}
 		if e.f != nil {
-			reg.Trusted(id, e.f)
 			f := e.f
 			reg.Func(id, func(ctx krate.Ctx, a *wire.Decoder, out *wire.Encoder) error {
 				if !allowed(ctx.Window(), perm) {

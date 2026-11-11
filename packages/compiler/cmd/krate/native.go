@@ -48,7 +48,7 @@ func printNativeUsage(w io.Writer) {
 	fmt.Fprintf(w, "                   or uses $KRATE_SHELL)\n")
 	fmt.Fprintf(w, "  --release        Link one executable per target (needs Go); --target takes several,\n")
 	fmt.Fprintf(w, "                   comma-separated or repeated\n")
-	fmt.Fprintf(w, "  --package        Package the build for --target (see: krate native package)\n")
+	fmt.Fprintf(w, "  --package        Package the build for --target; with --release, each of the targets (see: krate native package)\n")
 	fmt.Fprintf(w, "\nPackage flags: --format, --sign, --notarize, --identity, --keychain-profile, --pfx, --thumbprint,\n")
 	fmt.Fprintf(w, "  --gpg-key, --notes, --update-base-url, --key-out (see docs/native/packaging)\n")
 	fmt.Fprintf(w, "\nProfile flags:\n")
@@ -267,7 +267,7 @@ func indentLines(s, prefix string) string {
 
 // runNativeBuild builds the project into an app directory for the shell.
 func runNativeBuild(flags cliFlags, args []string) {
-	if flags.Pkg.Package && flags.Shell == "" {
+	if flags.Pkg.Package && flags.Shell == "" && !flags.Release {
 		flags.WantShell = true
 	}
 	root, cfg := resolveConfig(flags, args)
@@ -380,6 +380,23 @@ func runNativeRelease(builder *build.Builder, root, outDir string, flags cliFlag
 	}
 	fmt.Printf("    report       %s\n", rel(filepath.Join(res.OutDir, "report.json")))
 	fmt.Printf("\n%s%s  Done! (built in %s)%s\n", cBold, cGreen, time.Since(start).Round(time.Millisecond), cReset)
+	if flags.Pkg.Package {
+		// Package every executable the release produced (report.json names them).
+		targets := flags.Targets
+		if len(targets) == 0 {
+			targets = []string{""}
+		}
+		for _, t := range targets {
+			f := flags
+			f.Target = t
+			c, err := newPkgContext(f, root, builder.Cfg)
+			if err != nil {
+				reportPkgError(err)
+				exit(1)
+			}
+			packageNative(f, c)
+		}
+	}
 }
 
 // runNativeProfile implements `krate native profile`: it runs the app and

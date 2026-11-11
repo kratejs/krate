@@ -127,6 +127,13 @@ type fixture struct {
 
 func setup(t *testing.T, r rt, mutate func(src string) string) *fixture {
 	t.Helper()
+	return setupEnv(t, r, mutate, nil, nil, nil, nil)
+}
+
+// setupEnv is setup with extra child environment and the ids the shell
+// registers on top of the standard ones.
+func setupEnv(t *testing.T, r rt, mutate func(src string) string, env, funcs, streams, signals []string) *fixture {
+	t.Helper()
 	dir, cleanup, err := gohosttest.TempDir("hostchild-")
 	if err != nil {
 		t.Fatal(err)
@@ -148,14 +155,14 @@ func setup(t *testing.T, r rt, mutate func(src string) string) *fixture {
 	f.child = gohost.NewChild(gohost.ChildOptions{
 		Logf: f.logs.logf, Prefix: "[js] ", Args: r.args(filepath.Join(dir, "host.mjs")), ReadyAnyLine: true, ReadyTimeout: 60 * time.Second,
 	})
-	if err := f.child.Start(context.Background(), r.bin, nil); err != nil {
+	if err := f.child.Start(context.Background(), r.bin, env); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { f.child.Stop() })
 	reg := scheme.NewRegistry()
 	f.child.Remote().RegisterInto(reg,
-		[]string{"t.Echo", "t.Add", "t.Window", "t.Fail", "t.Plain", "t.Bad", "t.Wait", "t.Fs", "t.Bump", "t.Subs", "t.Missing"},
-		[]string{"t.Count", "t.Forever", "t.Throws"}, []string{"t.Count", "t.Nope"})
+		append([]string{"t.Echo", "t.Add", "t.Window", "t.Fail", "t.Plain", "t.Bad", "t.Wait", "t.Fs", "t.Bump", "t.Subs", "t.Missing"}, funcs...),
+		append([]string{"t.Count", "t.Forever", "t.Throws"}, streams...), append([]string{"t.Count", "t.Nope"}, signals...))
 	f.ts = httptest.NewServer(scheme.New(scheme.Options{Registry: reg}))
 	t.Cleanup(f.ts.Close)
 	return f

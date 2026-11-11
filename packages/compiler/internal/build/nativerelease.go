@@ -21,6 +21,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/native"
 	"github.com/kratejs/krate/packages/compiler/internal/native/capability"
 	"github.com/kratejs/krate/packages/compiler/internal/native/hostts"
+	"github.com/kratejs/krate/packages/compiler/internal/native/pkg"
 	"github.com/kratejs/krate/packages/compiler/internal/version"
 )
 
@@ -152,6 +153,9 @@ type NativeTarget struct {
 	// Binary is relative to the output directory.
 	Binary string `json:"binary"`
 	Size   int64  `json:"size"`
+	// Host lists the compiled host children (node, bun, deno, scriptc) that
+	// must stay next to the executable, relative to the output directory.
+	Host []string `json:"host,omitempty"`
 }
 
 // NativeGoRunner runs the go command of a release build; tests replace it.
@@ -230,6 +234,11 @@ func (b *Builder) BuildNativeRelease(opts NativeReleaseOptions) (*NativeReleaseR
 	}
 	res.Manifest = ar.Manifest
 	res.Notes = append(res.Notes, ar.Notes...)
+	hostPlan, err := planReleaseHostChildren(ar)
+	if err != nil {
+		return nil, err
+	}
+	res.Manifest = ar.Manifest
 	hasGo := ar.GoHostMain != ""
 	hasTS := ar.Manifest.HostJS != nil
 	res.Tags = append(ar.Capabilities.Tags(hasTS), opts.ExtraTags...)
@@ -247,8 +256,25 @@ func (b *Builder) BuildNativeRelease(opts NativeReleaseOptions) (*NativeReleaseR
 		env = append(env, "GOWORK=off", "GOFLAGS=-mod=mod")
 	}
 	name := fileSafe(ar.Manifest.ProductName)
+	hostFiles := map[string][]string{}
 	for _, t := range targets {
 		goos, goarch := t[0], t[1]
+		files, err := b.buildReleaseHostChildren(hostPlan, goos, goarch, outDir, ar)
+		if err != nil {
+			return nil, err
+		}
+		hostFiles[goos+"/"+goarch] = files
+		if goos == "windows" {
+			// The Go linker picks the .syso up from the main package for this
+			// target only (icon, version information, DPI-aware manifest).
+			syso := filepath.Join(buildDir, "rsrc_windows_"+goarch+".syso")
+			if pkgArg != "." {
+				syso = filepath.Join(b.Root, filepath.FromSlash(strings.TrimPrefix(pkgArg, "./")), "rsrc_windows_"+goarch+".syso")
+			}
+			if err := pkg.WindowsResources(b.Root, b.Cfg, syso); err != nil {
+				res.Notes = append(res.Notes, "no Windows resources (icon, version information): "+err.Error())
+			}
+		}
 		exe := name
 		if goos == "windows" {
 			exe += ".exe"
@@ -283,6 +309,9 @@ func (b *Builder) BuildNativeRelease(opts NativeReleaseOptions) (*NativeReleaseR
 	}
 	res.Compiled = true
 	res.Report = b.nativeReport(ar, "executable", res.Binaries, res.Tags, res.PGO)
+	for i := range res.Report.Targets {
+		res.Report.Targets[i].Host = hostFiles[res.Report.Targets[i].Target]
+	}
 	return res, b.writeNativeReport(outDir, res)
 }
 
