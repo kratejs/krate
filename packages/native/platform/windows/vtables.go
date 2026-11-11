@@ -492,7 +492,7 @@ var ifaceMethods = map[string][]string{
 	},
 	"IToastNotification": {
 		"QueryInterface", "AddRef", "Release", "GetIids", "GetRuntimeClassName", "GetTrustLevel",
-		"put_Content", "get_Content", "put_ExpirationTime", "get_ExpirationTime",
+		"get_Content", "put_ExpirationTime", "get_ExpirationTime",
 		"add_Dismissed", "remove_Dismissed", "add_Activated", "remove_Activated", "add_Failed", "remove_Failed",
 	},
 	"IToastActivatedEventArgs": {

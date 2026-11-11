@@ -69,7 +69,7 @@ func TestVtableLayout(t *testing.T) {
 		"IStream":                                                    14,
 		"IToastNotificationManagerStatics":                           9,
 		"IToastNotifier":                                             12,
-		"IToastNotification":                                         16,
+		"IToastNotification":                                         15,
 		"IXmlDocumentIO":                                             9,
 	}
 	for name, n := range counts {
@@ -90,9 +90,9 @@ func TestVtableLayout(t *testing.T) {
 		{notifierGetSetting, 8, "IToastNotifier.get_Setting"},
 		{toastMgrCreateNotifierID, 7, "CreateToastNotifierWithId"},
 		{toastFactoryCreate, 6, "CreateToastNotification"},
-		{toastAddDismissed, 10, "add_Dismissed"},
-		{toastAddActivated, 12, "add_Activated"},
-		{toastAddFailed, 14, "add_Failed"},
+		{toastAddDismissed, 9, "add_Dismissed"},
+		{toastAddActivated, 11, "add_Activated"},
+		{toastAddFailed, 13, "add_Failed"},
 		{xmlIOLoadXML, 6, "LoadXml"},
 		{activationFactoryActivate, 6, "ActivateInstance"},
 		{wvAddNavigationStarting, 7, "add_NavigationStarting"},
