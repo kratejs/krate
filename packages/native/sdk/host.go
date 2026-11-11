@@ -129,8 +129,9 @@ func (h *Host) ServeParent() (string, error) {
 		return "", err
 	}
 	h.dir = dir
-	h.srv = &http.Server{Handler: scheme.New(scheme.Options{Registry: h.parentReg}), ReadHeaderTimeout: 10 * time.Second}
-	go func() { _ = h.srv.Serve(ln) }() // ends with ErrServerClosed on shutdown
+	srv := &http.Server{Handler: scheme.New(scheme.Options{Registry: h.parentReg}), ReadHeaderTimeout: 10 * time.Second}
+	h.srv = srv
+	go func() { _ = srv.Serve(ln) }() // ends with ErrServerClosed on shutdown
 	return "unix:" + sock, nil
 }
 
@@ -148,12 +149,13 @@ func (h *Host) ServeParentTCP() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	h.tcpSrv = &http.Server{
+	tcp := &http.Server{
 		Handler:           hosttransport.Guard(ep, scheme.New(scheme.Options{Registry: h.parentReg})),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
+	h.tcpSrv = tcp
 	h.tcpAddr = ep.String()
-	go func() { _ = h.tcpSrv.Serve(ln) }() // ends with ErrServerClosed on shutdown
+	go func() { _ = tcp.Serve(ln) }() // ends with ErrServerClosed on shutdown
 	return h.tcpAddr, nil
 }
 

@@ -153,9 +153,9 @@ func TestServeHeadDropsBody(t *testing.T) {
 
 func TestServeCancelsWhenReaderCloses(t *testing.T) {
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if _, err := io.WriteString(w, "x"); err != nil {
-			t.Error(err)
-		}
+		// The response is announced before the body is written, so the test
+		// may close the reader first; this write is allowed to fail.
+		_, _ = io.WriteString(w, "x")
 		w.(http.Flusher).Flush()
 		<-r.Context().Done()
 	})
@@ -173,9 +173,9 @@ func TestServeCancelsWhenReaderCloses(t *testing.T) {
 func TestServeWriteAfterReaderClosedFails(t *testing.T) {
 	errc := make(chan error, 1)
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if _, err := io.WriteString(w, "x"); err != nil {
-			t.Error(err)
-		}
+		// The response is announced before the body is written, so the test
+		// may close the reader first; this write is allowed to fail.
+		_, _ = io.WriteString(w, "x")
 		w.(http.Flusher).Flush()
 		time.Sleep(300 * time.Millisecond)
 		_, err := io.WriteString(w, "y")

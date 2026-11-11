@@ -40,7 +40,10 @@ func startDunst(t *testing.T) *dunstEnv {
 	// The "dmenu" is a script so tests can choose a context menu entry.
 	writeFile(t, filepath.Join(dir, "pick.sh"), "#!/bin/sh\ncat > \""+dir+"/menu.txt\"\ngrep -m1 -F \"$(cat \""+dir+"/pick\")\" \""+dir+"/menu.txt\"\n", 0o755)
 	writeFile(t, filepath.Join(dir, "pick"), "none", 0o644)
-	writeFile(t, filepath.Join(dir, "dunstrc"), "[global]\n    dmenu = "+filepath.Join(dir, "pick.sh")+"\n    follow = none\n    sticky_history = yes\n", 0o644)
+	// The urgency is not in dunstctl history before dunst 1.10 (Ubuntu 24.04
+	// ships 1.9.2), so a rule script records what dunst parsed from each hint.
+	writeFile(t, filepath.Join(dir, "shown.sh"), "#!/bin/sh\nprintf '%s\\t%s\\n' \"$DUNST_SUMMARY\" \"$DUNST_URGENCY\" >> \""+dir+"/shown.txt\"\n", 0o755)
+	writeFile(t, filepath.Join(dir, "dunstrc"), "[global]\n    dmenu = "+filepath.Join(dir, "pick.sh")+"\n    follow = none\n    sticky_history = yes\n\n[record]\n    summary = \"*\"\n    script = "+filepath.Join(dir, "shown.sh")+"\n", 0o644)
 	e := &dunstEnv{dir: dir, closed: make(chan [2]uint32, 16)}
 	e.daemon = startDaemon(t, "dunst", "-config", filepath.Join(dir, "dunstrc"))
 	waitFor(t, "dunst to own org.freedesktop.Notifications", 8*time.Second, func() bool {
@@ -158,6 +161,22 @@ func (e *dunstEnv) history(t *testing.T) []historyEntry {
 	return out
 }
 
+// shownUrgencies maps each notification summary dunst displayed to the
+// urgency it parsed (LOW, NORMAL or CRITICAL), as the rule script saw it.
+func (e *dunstEnv) shownUrgencies() map[string]string {
+	out := map[string]string{}
+	data, err := os.ReadFile(filepath.Join(e.dir, "shown.txt"))
+	if err != nil {
+		return out
+	}
+	for _, l := range strings.Split(string(data), "\n") {
+		if k, v, ok := strings.Cut(l, "\t"); ok {
+			out[k] = v
+		}
+	}
+	return out
+}
+
 func (e *dunstEnv) setPick(t *testing.T, label string) {
 	t.Helper()
 	writeFile(t, filepath.Join(e.dir, "pick"), label, 0o644)
@@ -223,9 +242,7 @@ func TestRealDunstShowsNotification(t *testing.T) {
 	if n["summary"] != "Build done" || n["body"] != "3 warnings" {
 		t.Fatalf("text: %v", n)
 	}
-	if n["urgency"] != "CRITICAL" {
-		t.Fatalf("urgency %v", n["urgency"])
-	}
+	eventually(t, "dunst to report the urgency", func() bool { return e.shownUrgencies()["Build done"] == "CRITICAL" })
 	// A file path goes out as a file URI and dunst resolves it to the file.
 	if n["icon_path"] != icon {
 		t.Fatalf("icon_path %v, want %s", n["icon_path"], icon)
@@ -243,18 +260,18 @@ func TestRealDunstUrgencyLevels(t *testing.T) {
 		}
 	}
 	eventually(t, "three notifications", func() bool { return e.displayed(t) == 3 })
+	want := map[string]string{"u0": "LOW", "u1": "NORMAL", "u2": "CRITICAL"}
+	eventually(t, "dunst to report all three urgencies", func() bool {
+		got := e.shownUrgencies()
+		for k, v := range want {
+			if got[k] != v {
+				return false
+			}
+		}
+		return true
+	})
 	e.ctl(t, "close-all")
 	eventually(t, "history", func() bool { return len(e.history(t)) == 3 })
-	got := map[string]any{}
-	for _, n := range e.history(t) {
-		got[n["summary"].(string)] = n["urgency"]
-	}
-	want := map[string]any{"u0": "LOW", "u1": "NORMAL", "u2": "CRITICAL"}
-	for k, v := range want {
-		if got[k] != v {
-			t.Fatalf("urgencies %v, want %v", got, want)
-		}
-	}
 }
 
 func TestRealDunstReplaceByID(t *testing.T) {

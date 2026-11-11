@@ -39,15 +39,22 @@ const version = JSON.parse(
  * CGO is off: the window layer loads the system webview at run time, so the
  * shell needs no C toolchain for any target. Windows builds are GUI-subsystem
  * executables (no console window); krate-shell --doctor still prints on a pipe.
+ * Linux binaries are dynamically linked (purego), so the ELF interpreter is
+ * the glibc loader by default and exec fails with ENOENT on Alpine. The musl
+ * package names musl's loader instead; musl resolves the glibc library names
+ * the binary lists by itself.
  */
-export function shellBuildArgs(goos, outFile) {
-  const ld = goos === 'windows' ? '-s -w -H windowsgui' : '-s -w';
+const muslLoaders = { amd64: '/lib/ld-musl-x86_64.so.1', arm64: '/lib/ld-musl-aarch64.so.1' };
+
+export function shellBuildArgs(goos, outFile, { musl = false, goarch = 'amd64' } = {}) {
+  let ld = goos === 'windows' ? '-s -w -H windowsgui' : '-s -w';
+  if (musl && goos === 'linux') ld += ` -I ${muslLoaders[goarch]}`;
   return ['build', '-trimpath', `-ldflags=${ld}`, '-o', outFile, './cmd/krate-shell'];
 }
 
 function buildShell(target, outDir) {
   const outFile = join(outDir, 'krate-shell' + target.ext);
-  const res = spawnSync('go', shellBuildArgs(target.goos, outFile), {
+  const res = spawnSync('go', shellBuildArgs(target.goos, outFile, { musl: !!target.musl, goarch: target.goarch }), {
     cwd: nativeDir,
     env: { ...process.env, GOOS: target.goos, GOARCH: target.goarch, CGO_ENABLED: '0' },
     stdio: 'inherit',

@@ -685,6 +685,7 @@ func errorsIs(err, target error) bool {
 // The JSON below is what @krate/app/{dialog,window,menu,tray,notify} send
 // (see packages/app/test/sdk-ui.test.ts); the Go codecs must accept it.
 func TestArgumentsAsTheTSWrappersSendThem(t *testing.T) {
+	isolateSessionBus(t)
 	r := newRig(t)
 	h := r.ui("dialog", "window", "menu", "notify", "tray", "shortcut", "app", "clipboard")
 	raw := func(js string) func(*wire.Encoder) { return func(e *wire.Encoder) { e.Raw([]byte(js)) } }
