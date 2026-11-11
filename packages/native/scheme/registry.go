@@ -41,6 +41,8 @@ type Registry struct {
 	// permission check; in-process callers (Invoke) prefer them.
 	trusted       map[string]Func
 	trustedStream map[string]StreamFunc
+	// signalGates check, per subscribing window, whether a signal may be read.
+	signalGates map[string]func(window string) error
 }
 
 // NewRegistry returns an empty Registry.
@@ -52,7 +54,49 @@ func NewRegistry() *Registry {
 
 		trusted:       make(map[string]Func),
 		trustedStream: make(map[string]StreamFunc),
+		signalGates:   make(map[string]func(window string) error),
 	}
+}
+
+// Snapshot is the set of registrations of a Registry at one moment.
+type Snapshot struct {
+	Funcs   map[string]Func
+	Streams map[string]StreamFunc
+	Signals map[string]SignalFunc
+}
+
+// Snapshot returns copies of the registered functions, streams and signals
+// (the gated registrations, not the Trusted twins). A plugin host uses it to
+// inspect what generated glue registered before it forwards anything.
+func (r *Registry) Snapshot() Snapshot {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	s := Snapshot{Funcs: map[string]Func{}, Streams: map[string]StreamFunc{}, Signals: map[string]SignalFunc{}}
+	for k, v := range r.funcs {
+		s.Funcs[k] = v
+	}
+	for k, v := range r.streams {
+		s.Streams[k] = v
+	}
+	for k, v := range r.signals {
+		s.Signals[k] = v
+	}
+	return s
+}
+
+// SignalGate makes the UI's subscription to the signal name fail with the
+// error gate returns for the subscribing window (the x-krate-window header of
+// the request, "" when absent). In-process callers (Subscribe) are not gated.
+func (r *Registry) SignalGate(name string, gate func(window string) error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.signalGates[name] = gate
+}
+
+func (r *Registry) signalGate(name string) func(string) error {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.signalGates[name]
 }
 
 // Trusted registers f as the implementation of name for in-process callers

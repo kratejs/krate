@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/kratejs/krate/packages/native/internal/memory"
+	"github.com/kratejs/krate/packages/native/plugin"
 	"github.com/kratejs/krate/packages/native/sdk/permission"
 )
 
@@ -47,6 +48,11 @@ type Manifest struct {
 	// StrictPermissions makes an empty (or missing) Permissions list mean
 	// "nothing" instead of the defaults. A derived release build sets it.
 	StrictPermissions bool `json:"strictPermissions,omitempty"`
+
+	// Plugins are the names of the native plugins the app uses. The shell must
+	// have them linked (RunOptions.Plugins); their permissions are listed in
+	// Permissions as "plugin:<name>.<permission>".
+	Plugins []string `json:"plugins,omitempty"`
 
 	// Updater is native.updater: the feed URL template and the base64
 	// Ed25519 public key that verifies update files.
@@ -224,6 +230,11 @@ func (m *Manifest) normalize() error {
 	}
 	if !strings.HasPrefix(m.Window.Path, "/") {
 		return fmt.Errorf("window.path %q must start with /", m.Window.Path)
+	}
+	for _, n := range m.Plugins {
+		if !plugin.ValidName(n) {
+			return fmt.Errorf("plugins: %q is not a valid plugin name", n)
+		}
 	}
 	set, err := m.PermissionSet()
 	if err != nil {

@@ -103,6 +103,9 @@ func newToken() (string, error) {
 
 func (a *app) runBrowser() error {
 	a.attachSDK(nil)
+	if a.plug != nil {
+		a.plug.Start(nil, a.sdk)
+	}
 	addr := a.opts.Addr
 	if addr == "" {
 		addr = "127.0.0.1:0"

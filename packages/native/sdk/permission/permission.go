@@ -79,6 +79,19 @@ func Define(i Info) {
 	table[i.Name] = i
 }
 
+// DefineOnce adds a permission unless one of that name exists, and reports
+// whether it added it. Plugins use it: a plugin host may be created many times
+// in one process and a plugin permission is defined by its manifest.
+func DefineOnce(i Info) bool {
+	mu.Lock()
+	defer mu.Unlock()
+	if _, dup := table[i.Name]; dup {
+		return false
+	}
+	table[i.Name] = i
+	return true
+}
+
 func init() {
 	for _, i := range []Info{
 		{Name: "os:info", Doc: "app directories and OS information", Default: true},
