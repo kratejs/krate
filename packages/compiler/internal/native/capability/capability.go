@@ -36,6 +36,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/config"
 	"github.com/kratejs/krate/packages/compiler/internal/native"
+	"github.com/kratejs/krate/packages/compiler/internal/native/goenv"
 	"github.com/kratejs/krate/packages/compiler/internal/tsstrip"
 )
 
@@ -497,9 +498,10 @@ func GoSDKImportsIn(dir string, args, env []string) ([]Site, error) {
 func goSDKImportsIn(root string, args, env []string) ([]Site, error) {
 	cmd := exec.Command("go", append([]string{"list", "-e", "-deps", "-json=ImportPath,Dir,GoFiles,Imports,Standard,Module"}, args...)...)
 	cmd.Dir = root
-	if env != nil {
-		cmd.Env = env
+	if env == nil {
+		env = goenv.Env(root)
 	}
+	cmd.Env = env
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	if err := cmd.Run(); err != nil {

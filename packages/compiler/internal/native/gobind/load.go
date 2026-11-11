@@ -16,6 +16,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/kratejs/krate/packages/compiler/internal/native/goenv"
 )
 
 // listedPkg is the part of `go list -json` output that gobind reads.
@@ -120,9 +122,10 @@ func goList(root string, pats []string, env []string) (map[string]*listedPkg, ma
 	args = append(args, pats...)
 	cmd := exec.Command(goBin, args...)
 	cmd.Dir = root
-	if env != nil {
-		cmd.Env = env
+	if env == nil {
+		env = goenv.Env(root)
 	}
+	cmd.Env = env
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	runErr := cmd.Run()

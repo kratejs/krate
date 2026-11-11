@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/kratejs/krate/packages/compiler/internal/native/goenv"
 )
 
 // BakeCall is one call of a //krate:build function: the registry id
@@ -143,6 +145,7 @@ func Evaluate(root, outDir string, res *Result, calls []BakeCall) ([]BakeResult,
 	}
 	cmd := exec.Command("go", "run", "./"+filepath.ToSlash(rel))
 	cmd.Dir = root
+	cmd.Env = goenv.Env(root)
 	cmd.Stdin = bytes.NewReader(input)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
