@@ -76,6 +76,27 @@ var ifaceMethods = map[string][]string{
 		"Release",
 		"Invoke",
 	},
+	// WebView2.h line 4304
+	"ICoreWebView2NewWindowRequestedEventHandler": {
+		"QueryInterface",
+		"AddRef",
+		"Release",
+		"Invoke",
+	},
+	// WebView2.h line 55490
+	"ICoreWebView2NewWindowRequestedEventArgs": {
+		"QueryInterface",
+		"AddRef",
+		"Release",
+		"get_Uri",
+		"put_NewWindow",
+		"get_NewWindow",
+		"put_Handled",
+		"get_Handled",
+		"get_IsUserInitiated",
+		"GetDeferral",
+		"get_WindowFeatures",
+	},
 	// WebView2.h line 4833
 	"ICoreWebView2WebResourceRequestedEventHandler": {
 		"QueryInterface",

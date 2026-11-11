@@ -63,6 +63,8 @@ type App struct {
 	runErr      error
 	hResource   unsafe.Pointer // shared WebResourceRequested handler
 	hNavigation unsafe.Pointer // shared NavigationStarting handler
+	hFrameNav   unsafe.Pointer // shared FrameNavigationStarting handler
+	hNewWindow  unsafe.Pointer // shared NewWindowRequested handler
 
 	exited chan struct{}
 	once   sync.Once
@@ -120,6 +122,8 @@ func New(cfg Config) (*App, error) {
 
 	a.hResource = newHandler(iidWebResourceRequestedHandler, false, a.onResourceRequested)
 	a.hNavigation = newHandler(iidNavigationStartingHandler, false, a.onNavigationStarting)
+	a.hFrameNav = newHandler(iidNavigationStartingHandler, false, a.onFrameNavigationStarting)
+	a.hNewWindow = newHandler(iidNewWindowRequestedHandler, false, a.onNewWindowRequested)
 	theApp = a
 	return a, nil
 }

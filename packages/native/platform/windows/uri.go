@@ -36,6 +36,12 @@ func allowedNavigation(raw string) bool {
 	return u.Scheme == "https" && u.Host == originHost && u.User == nil
 }
 
+// allowedFrameNavigation is allowedNavigation plus the empty documents a page
+// creates for its own iframes (about:blank, about:srcdoc).
+func allowedFrameNavigation(raw string) bool {
+	return raw == "about:blank" || raw == "about:srcdoc" || allowedNavigation(raw)
+}
+
 // userDataDir returns %LOCALAPPDATA%\<AppID>\WebView2 for a stable profile.
 func userDataDir(localAppData, appID string) string {
 	id := strings.Map(func(r rune) rune {
