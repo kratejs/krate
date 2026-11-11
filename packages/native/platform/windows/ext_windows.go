@@ -209,6 +209,10 @@ func winExtMessage(a *App, w *Window, message, wParam, lParam uintptr) (handled 
 			emit(w, caps.WindowCloseRequested)
 			return true, 0
 		}
+		if a.parkable(w) {
+			w.release()
+			return true, 0
+		}
 	case wmDestroy:
 		emit(w, caps.WindowClosed)
 		extMu.Lock()
@@ -330,13 +334,32 @@ func (w *Window) Restore() {
 }
 
 // Focus brings the window to the foreground.
-func (w *Window) Focus() { w.onMain(func() { pSetForegroundWindow.Call(w.hwnd) }) }
+func (w *Window) Focus() {
+	w.onMain(func() {
+		w.revive()
+		pSetForegroundWindow.Call(w.hwnd)
+	})
+}
 
-// Show shows the window.
-func (w *Window) Show() { w.onMain(func() { pShowWindow.Call(w.hwnd, swShow) }) }
+// Show shows the window. A released window gets its webview back on the route
+// and scroll position it had.
+func (w *Window) Show() {
+	w.onMain(func() {
+		w.revive()
+		pShowWindow.Call(w.hwnd, swShow)
+		w.setViewHidden(false)
+	})
+}
 
-// Hide hides the window.
-func (w *Window) Hide() { w.onMain(func() { pShowWindow.Call(w.hwnd, swHide) }) }
+// Hide hides the window. The page gets a krate:memory-pressure event, the
+// controller becomes invisible and the browser is asked to use less memory
+// for it. Release also closes the controller.
+func (w *Window) Hide() {
+	w.onMain(func() {
+		pShowWindow.Call(w.hwnd, swHide)
+		w.setViewHidden(true)
+	})
+}
 
 // SetPreventClose turns WM_CLOSE into a close-requested event.
 func (w *Window) SetPreventClose(on bool) { w.onMain(func() { stateOf(w).preventClose = on }) }

@@ -218,12 +218,12 @@ func (m *memAPI) applyContext(ctx, mgr uintptr, p memory.Profile, f Features) {
 	}
 }
 
-// applyViewSettings applies the profile to the WebKitSettings of one web
-// view. Window code calls it once per view, after creating it. Each
+// applyProfileSettings applies the profile to the WebKitSettings of one web
+// view. applyViewSettings (window.go) calls it once per view. Each
 // switched-off feature stops WebKit from initializing the corresponding
 // subsystem in the web process (GStreamer pipelines, the audio context
 // machinery, the GL context, the WebRTC stack, caches).
-func (a *App) applyViewSettings(settings uintptr) {
+func (a *App) applyProfileSettings(settings uintptr) {
 	if settings == 0 || !a.profile.Enabled() || a.mem == nil {
 		return
 	}

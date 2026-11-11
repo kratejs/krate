@@ -20,6 +20,10 @@ type Options struct {
 	// Memory selects the memory profile of the webview. The zero value is
 	// the engine defaults. Only the Linux layer applies it today.
 	Memory Memory
+	// KeepAlive keeps the app running when its last window closes. The last
+	// live window is then released (hidden, webview destroyed) rather than
+	// destroyed, and Show brings it back; see caps.WindowRelease.
+	KeepAlive bool
 }
 
 // Memory configures the webview's memory use.

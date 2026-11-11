@@ -32,6 +32,14 @@ type Window struct {
 
 	ref          uint64
 	preventClose bool
+
+	// Release state, see release_darwin.go.
+	released  bool
+	releasing bool
+	abort     bool // Show arrived while the release waited for the page
+	route     string
+	state     caps.ViewState
+	scrollJS  string
 }
 
 // NewWindow creates a window and returns once it exists. On the main thread
@@ -66,29 +74,9 @@ func (a *App) newWindow(o WindowOptions) (*Window, error) {
 		style |= nsWindowStyleMaskResizable
 	}
 
-	// Configuration: shared process pool, scheme handler, optional devtools.
-	config := cls("WKWebViewConfiguration").Send(sel("new"))
-	defer release(config)
-	config.Send(sel("setProcessPool:"), a.processPool)
-	config.Send(sel("setURLSchemeHandler:forURLScheme:"), a.schemeHandler, nsString(Scheme))
-	if a.opts.Debug {
-		// macOS 13.3+ uses WKWebView.inspectable (set below); older systems
-		// honor this preference key.
-		prefs := config.Send(sel("preferences"))
-		prefs.Send(sel("setValue:forKey:"),
-			cls("NSNumber").Send(sel("numberWithBool:"), true), nsString("developerExtrasEnabled"))
-	}
-
-	web := cls("WKWebView").Send(sel("alloc")).Send(sel("initWithFrame:configuration:"), nsRect{}, config)
+	web := a.newWebView()
 	if web == 0 {
 		return nil, errors.New("darwin: WKWebView creation failed")
-	}
-	web.Send(sel("setAutoresizingMask:"), nsViewWidthSizable|nsViewHeightSizable)
-	web.Send(sel("setNavigationDelegate:"), a.navDelegate)
-	if a.opts.Debug {
-		if s := sel("setInspectable:"); respondsTo(web, s) {
-			web.Send(s, true)
-		}
 	}
 
 	rect := nsRect{Size: nsSize{Width: float64(width), Height: float64(height)}}
@@ -105,7 +93,7 @@ func (a *App) newWindow(o WindowOptions) (*Window, error) {
 	win.Send(sel("setDelegate:"), a.winDelegate)
 	win.Send(sel("center"))
 
-	w := &Window{app: a, win: win, web: web, ref: nextRef.Add(1)}
+	w := &Window{app: a, win: win, web: web, ref: nextRef.Add(1), route: caps.CleanRoute(o.Path)}
 	a.windows[win] = w
 
 	w.load(o.Path)
@@ -113,8 +101,40 @@ func (a *App) newWindow(o WindowOptions) (*Window, error) {
 	return w, nil
 }
 
+// newWebView creates a WKWebView with the app's configuration: the shared
+// process pool, the scheme handler and the navigation lock. The caller owns it.
+func (a *App) newWebView() objc.ID {
+	config := cls("WKWebViewConfiguration").Send(sel("new"))
+	defer release(config)
+	config.Send(sel("setProcessPool:"), a.processPool)
+	config.Send(sel("setURLSchemeHandler:forURLScheme:"), a.schemeHandler, nsString(Scheme))
+	if a.opts.Debug {
+		// macOS 13.3+ uses WKWebView.inspectable (set below); older systems
+		// honor this preference key.
+		prefs := config.Send(sel("preferences"))
+		prefs.Send(sel("setValue:forKey:"),
+			cls("NSNumber").Send(sel("numberWithBool:"), true), nsString("developerExtrasEnabled"))
+	}
+	web := cls("WKWebView").Send(sel("alloc")).Send(sel("initWithFrame:configuration:"), nsRect{}, config)
+	if web == 0 {
+		return 0
+	}
+	web.Send(sel("setAutoresizingMask:"), nsViewWidthSizable|nsViewHeightSizable)
+	web.Send(sel("setNavigationDelegate:"), a.navDelegate)
+	if a.opts.Debug {
+		if s := sel("setInspectable:"); respondsTo(web, s) {
+			web.Send(s, true)
+		}
+	}
+	return web
+}
+
 // load starts a navigation to path on the app origin (main thread).
 func (w *Window) load(path string) {
+	w.route = caps.CleanRoute(path)
+	if w.web == 0 {
+		return
+	}
 	u := cls("NSURL").Send(sel("URLWithString:"), nsString(appURL(path)))
 	if u == 0 {
 		return
@@ -133,16 +153,22 @@ func (a *App) windowWillClose(nsWin objc.ID) {
 	delete(a.windows, nsWin)
 	w.closed = true
 	emitWindow(w, caps.WindowClosed)
-	w.web.Send(sel("stopLoading"))
-	w.web.Send(sel("setNavigationDelegate:"), objc.ID(0))
+	web := w.web
+	w.web = 0
+	if web != 0 {
+		web.Send(sel("stopLoading"))
+		web.Send(sel("setNavigationDelegate:"), objc.ID(0))
+	}
 	// Release on a later turn: AppKit is still using the window right now.
 	dispatch(func() {
 		w.win.Send(sel("setDelegate:"), objc.ID(0))
 		w.win.Send(sel("setContentView:"), objc.ID(0))
-		release(w.web)
+		if web != 0 {
+			release(web)
+		}
 		release(w.win)
 	})
-	if len(a.windows) == 0 && !a.opts.KeepAlive {
+	if caps.QuitWhenEmpty(a.opts.KeepAlive, len(a.windows)) {
 		a.Quit()
 	}
 }
@@ -159,7 +185,7 @@ func (w *Window) Navigate(path string) {
 // Eval runs JavaScript in the page without waiting for the result.
 func (w *Window) Eval(js string) {
 	dispatch(func() {
-		if !w.closed {
+		if !w.closed && w.web != 0 {
 			w.web.Send(sel("evaluateJavaScript:completionHandler:"), nsString(js), objc.ID(0))
 		}
 	})
@@ -183,11 +209,17 @@ func (w *Window) SetSize(width, height int) {
 	})
 }
 
-// Close closes the window.
+// Close closes the window. With KeepAlive the last live window is released
+// instead (hidden, webview removed) and Show brings it back.
 func (w *Window) Close() {
 	dispatch(func() {
-		if !w.closed {
-			w.win.Send(sel("close"))
+		if w.closed {
+			return
 		}
+		if w.app.parkable(w) {
+			w.release()
+			return
+		}
+		w.win.Send(sel("close"))
 	})
 }

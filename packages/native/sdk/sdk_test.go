@@ -511,6 +511,20 @@ func TestWindowOps(t *testing.T) {
 	if ids, _ = window.List(); len(ids) != 1 {
 		t.Fatalf("closed window still listed: %v", ids)
 	}
+	main0 := window.Main()
+	// Hide, with and without releasing the webview.
+	if err := main0.Hide(); err != nil {
+		t.Fatal(err)
+	}
+	if err := window.Hide("main", window.HideOptions{Release: true}); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(r.main.Called(), ","); !strings.HasSuffix(got, "hide,release") || !r.main.Released() {
+		t.Fatalf("hide calls %s released=%v", got, r.main.Released())
+	}
+	if err := window.Show("main"); err != nil {
+		t.Fatal(err)
+	}
 	// Saved state round trip.
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("KRATE_APP_ID", "test.app")

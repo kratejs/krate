@@ -275,7 +275,7 @@ func (a *App) PopupMenu(parent caps.WindowRef, items []caps.MenuItem, px, py int
 		var hs []uintptr
 		a.buildMenu(menu, items, parent, 0, &hs)
 		a.api.gtkWidgetShowAll(menu)
-		if w := a.windowByID(uintptr(parent)); w != nil && w.alive && x.gtkMenuAttachWidget != nil {
+		if w := a.windowByID(uintptr(parent)); w != nil && w.alive && w.view != 0 && x.gtkMenuAttachWidget != nil {
 			x.gtkMenuAttachWidget(menu, w.view)
 		}
 		gw := uintptr(0)

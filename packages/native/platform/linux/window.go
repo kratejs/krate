@@ -36,6 +36,14 @@ type Window struct {
 	onLoadDone func()
 
 	// Touched on the main thread only.
+	released     bool // the webview was destroyed; see release.go
+	releasing    bool
+	abort        bool // Show arrived while the release waited for the page
+	route        string
+	state        caps.ViewState
+	scrollJS     string
+	fixedW       int
+	fixedH       int
 	preventClose bool
 	wantAbove    bool
 	menubar      uintptr
@@ -56,7 +64,7 @@ func (a *App) newWindow(opts WindowOptions, onLoad func()) (*Window, error) {
 	if w.win == 0 {
 		return nil, errors.New("krate: gtk_window_new failed")
 	}
-	w.view = api.wkViewNewWithContext(a.ctx)
+	w.view = a.newView()
 	if w.view == 0 {
 		api.gtkWidgetDestroy(w.win)
 		return nil, errors.New("krate: webkit_web_view_new failed")
@@ -70,30 +78,25 @@ func (a *App) newWindow(opts WindowOptions, onLoad func()) (*Window, error) {
 	api.gtkWindowSetTitle(w.win, opts.Title)
 	api.gtkWindowSetDefSize(w.win, int32(opts.Width), int32(opts.Height))
 	api.gtkWindowSetResize(w.win, b2i(opts.Resizable))
+	w.fixedW, w.fixedH = opts.Width, opts.Height
 	if !opts.Resizable {
 		api.gtkWidgetSetSizeReq(w.view, int32(opts.Width), int32(opts.Height))
 	}
-	if settings := api.wkViewGetSettings(w.view); settings != 0 {
-		api.wkSettingsDevExtras(settings, b2i(a.debug))
-		a.applyViewSettings(settings)
-	}
+	a.applyViewSettings(w.view)
 	api.gSignalConnectData(w.win, "destroy", cbDestroy, w.id, 0, 0)
 	if x := a.x; x.gtkBoxNew != nil && x.gtkWindowPresent != nil {
 		api.gSignalConnectData(w.win, "delete-event", cbDelete, w.id, 0, 0)
 		api.gSignalConnectData(w.win, "window-state-event", cbWinState, w.id, 0, 0)
 	}
-	api.gSignalConnectData(w.view, "decide-policy", cbPolicy, w.id, 0, 0)
-	api.gSignalConnectData(w.view, "load-changed", cbLoad, w.id, 0, 0)
-	api.gSignalConnectData(w.view, "close", cbClose, w.id, 0, 0)
+	w.connectView()
 
 	if x := a.x; x.gtkBoxNew != nil {
 		w.box = x.gtkBoxNew(1, 0)
-		x.gtkBoxPackStart(w.box, w.view, 1, 1, 0)
 		api.gtkContainerAdd(w.win, w.box)
-	} else {
-		api.gtkContainerAdd(w.win, w.view)
 	}
-	api.wkViewLoadURI(w.view, Origin+cleanPath(opts.Path))
+	w.packView()
+	w.route = cleanPath(opts.Path)
+	api.wkViewLoadURI(w.view, Origin+w.route)
 	api.gtkWidgetShowAll(w.win)
 	a.applyAppMenu(w)
 	return w, nil
@@ -128,8 +131,13 @@ func (w *Window) OnLoadFinished(fn func()) {
 // Navigate loads path on the app origin.
 func (w *Window) Navigate(path string) {
 	w.app.Dispatch(func() {
-		if w.alive {
-			w.app.api.wkViewLoadURI(w.view, Origin+cleanPath(path))
+		if !w.alive {
+			return
+		}
+		w.route = cleanPath(path)
+		w.state = caps.ViewState{Route: w.route}
+		if w.view != 0 {
+			w.app.api.wkViewLoadURI(w.view, Origin+w.route)
 		}
 	})
 }
@@ -137,7 +145,7 @@ func (w *Window) Navigate(path string) {
 // Eval runs JavaScript in the page without waiting for a result.
 func (w *Window) Eval(js string) {
 	w.app.Dispatch(func() {
-		if w.alive {
+		if w.alive && w.view != 0 {
 			w.app.api.wkViewEval(w.view, js, -1, 0, 0, 0, 0, 0)
 		}
 	})
@@ -159,19 +167,26 @@ func (w *Window) SetSize(width, height int) {
 			return
 		}
 		api := w.app.api
-		if !w.resizable {
+		w.fixedW, w.fixedH = width, height
+		if !w.resizable && w.view != 0 {
 			api.gtkWidgetSetSizeReq(w.view, int32(width), int32(height))
 		}
 		api.gtkWindowResize(w.win, int32(width), int32(height))
 	})
 }
 
-// Close destroys the window.
+// Close destroys the window. With KeepAlive the last live window is released
+// instead (hidden, webview destroyed) and Show brings it back.
 func (w *Window) Close() {
 	w.app.Dispatch(func() {
-		if w.alive {
-			w.app.api.gtkWidgetDestroy(w.win)
+		if !w.alive {
+			return
 		}
+		if w.app.parkable(w) {
+			w.release()
+			return
+		}
+		w.app.api.gtkWidgetDestroy(w.win)
 	})
 }
 
@@ -204,6 +219,7 @@ func destroyCallback(widget, id uintptr) uintptr {
 	w := a.windows[id]
 	delete(a.windows, id)
 	last := len(a.windows) == 0
+	keepAlive := a.keepAlive
 	hook := a.onAllClosed
 	a.mu.Unlock()
 	if w != nil {
@@ -217,7 +233,7 @@ func destroyCallback(widget, id uintptr) uintptr {
 	if last && w != nil {
 		if hook != nil {
 			hook()
-		} else {
+		} else if caps.QuitWhenEmpty(keepAlive, 0) {
 			a.api.gtkMainQuit()
 		}
 	}
@@ -227,7 +243,7 @@ func destroyCallback(widget, id uintptr) uintptr {
 // closeCallback handles window.close() from the page.
 func closeCallback(view, id uintptr) uintptr {
 	if w := theApp.windowByID(id); w != nil {
-		theApp.api.gtkWidgetDestroy(w.win)
+		w.Close()
 	}
 	return 0
 }
@@ -239,6 +255,10 @@ func loadCallback(view, event, id uintptr) uintptr {
 	w := theApp.windowByID(id)
 	if w == nil {
 		return 0
+	}
+	if js := w.scrollJS; js != "" && w.view != 0 {
+		w.scrollJS = ""
+		theApp.api.wkViewEval(w.view, js, -1, 0, 0, 0, 0, 0)
 	}
 	w.mu.Lock()
 	fn := w.onLoadDone
@@ -286,4 +306,16 @@ func allowedNavigation(uri string) bool {
 		return strings.HasPrefix(u.Opaque, Origin) || strings.HasPrefix(u.Path, "//app")
 	}
 	return false
+}
+
+// applyViewSettings configures a new view's WebKitSettings: the developer
+// extras, then the memory profile. Every view calls it, the first window's
+// and the ones that share its web process, and a recreated one after release.
+func (a *App) applyViewSettings(view uintptr) {
+	settings := a.api.wkViewGetSettings(view)
+	if settings == 0 {
+		return
+	}
+	a.api.wkSettingsDevExtras(settings, b2i(a.debug))
+	a.applyProfileSettings(settings)
 }

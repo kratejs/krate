@@ -80,6 +80,7 @@ green run there is what moves a cell.
 | Native: Node, Bun and Deno host children | Partial | Untested | Untested | Krate Native v1 |
 | Native: SDK data areas (kv, db, fs, net, os) | Supported | Untested | Untested | Krate Native v1 |
 | Native: SDK windows | Partial | Untested | Untested | Krate Native v1 |
+| Native: shared web process, release and background mode | Supported | Untested | Untested | Krate Native v1 |
 | Native: SDK dialogs, clipboard and menus | Supported | Untested | Untested | Krate Native v1 |
 | Native: SDK notifications | Supported | n/a | n/a | Krate Native v1 |
 | Native: SDK tray and global shortcuts | Partial | n/a | n/a | Krate Native v1 |
@@ -560,6 +561,20 @@ Known limits:
 - macOS and Windows: untested. The same Go code is built for them (cross-compile checks in CI) and the CI native job runs go test on both, but no result of a run against a real WKWebView or WebView2 window has been confirmed.
 
 Evidence: `TestGUIWindowControls`, `TestGUIWindowOps`, `TestGUICloseRequested`, `TestGUITwoWindows`, `TestWindowOps`, `TestSecondWindowOnARoute`, `TestWindowOpenScopes`, `TestWindowScopeNarrowsCalls`
+
+### Native: shared web process, release and background mode
+
+**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+
+All windows of an app share one web process (related web views on Linux, one WebView2 environment on Windows). A window can release its webview (hide with release) and get it back on the same route and scroll position; native.window.keepAlive keeps a tray app running with no window; hidden and minimized pages get a krate:memory-pressure event.
+
+Known limits:
+
+- macOS and Windows: untested. The code builds for both and the Windows vtable slots are checked against WebView2.h, but no run against a real WKWebView or WebView2 window has been confirmed. On macOS the single-web-process switch is a private WebKit selector guarded by respondsToSelector; on Windows ICoreWebView2_19 memory targets need a recent runtime and are skipped without it.
+- A hidden page that is not released keeps its web process memory; only the page's own handlers of krate:memory-pressure and the shell's heap trim run. Release is what returns the web process memory.
+- The network process of WebKitGTK stays alive while the app runs, so a released Linux app still holds it.
+
+Evidence: `TestGUISharedWebProcess`, `TestGUIReleaseRestore`, `TestGUIKeepAlive`, `TestGUINavigateReleased`, `TestGUIMemoryPressureOnHide`, `TestGUIWindowsBackground`, `TestParseViewState`, `TestParkOnClose`, `TestQuitWhenEmpty`
 
 ### Native: SDK dialogs, clipboard and menus
 

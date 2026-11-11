@@ -75,6 +75,8 @@ type NativeWindowMeta struct {
 	// Permissions narrows the SDK permissions of the main window's page
 	// (native.window.permissions).
 	Permissions *[]string `json:"permissions,omitempty"`
+	// KeepAlive is native.window.keepAlive.
+	KeepAlive bool `json:"keepAlive,omitempty"`
 }
 
 // NativeFallback maps a dynamic route to the prerendered shell page the shell
@@ -299,6 +301,7 @@ func (b *Builder) BuildNativeApp(opts NativeAppOptions) (*NativeAppResult, error
 	})
 	m.Features = &resolved
 	m.Window.Permissions = eff.Window.Permissions
+	m.Window.KeepAlive = eff.Window.KeepAlive
 	if opts.Derive {
 		cap, ds, err := b.deriveNativePermissions(eff)
 		if err != nil {

@@ -44,7 +44,7 @@ const (
 var Capabilities = []string{
 	"dialog", "clipboard", "clipboard:image", "clipboard:files", "menu",
 	"tray", "notify", "shortcut", "window", "window:alwaysOnTop",
-	"window:fullscreen", "window:frameless", "window:position",
+	"window:fullscreen", "window:frameless", "window:position", "window:release",
 }
 
 func init() {
@@ -63,7 +63,7 @@ func Relaunch() error { return bridge.CallDo(context.Background(), IDRelaunch, n
 // Supports reports whether a capability works right now. Names:
 // "dialog", "clipboard", "clipboard:image", "clipboard:files", "menu",
 // "tray", "notify", "shortcut", "window", "window:alwaysOnTop",
-// "window:fullscreen", "window:frameless", "window:position".
+// "window:fullscreen", "window:frameless", "window:position", "window:release".
 func Supports(capability string) bool {
 	d, err := bridge.Call(context.Background(), IDSupports, func(e *wire.Encoder) { e.String(capability) })
 	if err != nil {

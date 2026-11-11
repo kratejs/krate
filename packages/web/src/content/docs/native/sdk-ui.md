@@ -88,7 +88,10 @@ func Setup() error {
 
 `window.Open` opens another window on a route of the same app. `settings.SetAlwaysOnTop`,
 `SetFullscreen`, `SetFrameless`, `SetPosition`, `Minimize`, `Maximize`, `Restore`,
-`Focus`, `Show`, `Hide` and `Close` do what they say. `SetPreventClose(true)`
+`Focus`, `Show`, `Hide` and `Close` do what they say; `Hide` with
+`window.HideOptions{Release: true}` (`win.hide({ release: true })` in TypeScript)
+also frees the window's webview, and `Show` brings it back on the same route
+and scroll position ([background mode](/docs/native/memory/#windows-and-background-mode)). `SetPreventClose(true)`
 turns a close request into an event (`OnCloseRequested`), so the app can ask
 "save changes?" and then call `Close`. `window.SaveState` and `window.RestoreState`
 keep a window's size, position and maximized flag between runs.
@@ -122,6 +125,10 @@ Events reach the UI as host streams: `krate/menu.events`, `krate/window.events`,
 `krate/app.events`. The helpers `onMenu`, `onClick`, `onEvent`,
 `onCloseRequested`, `onAction` and `onSecondInstance` wrap them; each returns a
 function that stops the subscription and reopens a dropped stream on its own.
+`onMemoryPressure(fn)` from `@krate/app/window` is a DOM-event helper instead:
+the shell dispatches `krate:memory-pressure` on a page whose window was hidden
+or minimized so it can drop caches (see [Windows and background
+mode](/docs/native/memory/#windows-and-background-mode)).
 
 Windows are named by id. The first is `"main"`; `open()` returns a handle with
 the id of the new one. A page does not know its own id unless it is told, so
@@ -170,6 +177,7 @@ against the platform API but has not run in this release.
 | Clipboard text, PNG image, file list | Verified | Text, PNG and files compile-only | Compile-only |
 | Menu bar and context menus | Verified (GtkMenuBar in each window; popups at the pointer) | Compile-only (global menu bar) | Compile-only (accelerators are shown but not active) |
 | Multiple windows on routes, title, size | Verified | Existing platform layer | Existing platform layer |
+| Windows share one web process; hide with release, `keepAlive`, memory-pressure event | Verified (related web views; the WebKitWebProcess count is asserted) | Compile-only (private single-process switch behind `respondsToSelector`) | Compile-only (one shared environment; `put_IsVisible` and `MemoryUsageTargetLevel` on hide) |
 | Frameless, position, always on top | Verified (X11; Wayland ignores position and always-on-top) | Compile-only | Compile-only |
 | Fullscreen, maximize, minimize | Verified with a window manager (openbox on Xvfb) | Compile-only | Compile-only |
 | Close requested (prevent close) | Verified | Compile-only | Compile-only |

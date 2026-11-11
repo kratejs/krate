@@ -30,7 +30,7 @@ func TestParseGUID(t *testing.T) {
 	}
 	for _, s := range []string{
 		iidISequentialStream, iidEnvCompletedHandler, iidControllerCompletedHandler,
-		iidWebResourceRequestedHandler, iidNavigationStartingHandler, iidNewWindowRequestedHandler, iidExecuteScriptHandler,
+		iidWebResourceRequestedHandler, iidNavigationStartingHandler, iidNewWindowRequestedHandler, iidExecuteScriptHandler, iidWebView19,
 	} {
 		if _, err := parseGUID(s); err != nil {
 			t.Errorf("%s: %v", s, err)
@@ -65,7 +65,8 @@ func TestVtableLayout(t *testing.T) {
 		"ICoreWebView2NewWindowRequestedEventHandler":                4,
 		"ICoreWebView2NewWindowRequestedEventArgs":                   11,
 		"ICoreWebView2ExecuteScriptCompletedHandler":                 4,
-		"IStream": 14,
+		"ICoreWebView2_19":                                           121,
+		"IStream":                                                    14,
 	}
 	for name, n := range counts {
 		ms := ifaceMethods[name]
@@ -83,6 +84,8 @@ func TestVtableLayout(t *testing.T) {
 		{wvNavigate, 5, "Navigate"},
 		{wvAddNavigationStarting, 7, "add_NavigationStarting"},
 		{wvExecuteScript, 29, "ExecuteScript"},
+		{wvAddScriptOnDocCreated, 27, "AddScriptToExecuteOnDocumentCreated"},
+		{wv19PutMemoryTarget, 120, "put_MemoryUsageTargetLevel"},
 		{wvAddWebResourceRequested, 55, "add_WebResourceRequested"},
 		{wvAddWebResourceFilter, 57, "AddWebResourceRequestedFilter"},
 		{wvGetSettings, 3, "get_Settings"},

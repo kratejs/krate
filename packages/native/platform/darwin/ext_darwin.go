@@ -166,14 +166,30 @@ func (w *Window) Restore() {
 
 // Focus makes the window key and brings it forward.
 func (w *Window) Focus() {
-	w.withWin(func() { w.win.Send(sel("makeKeyAndOrderFront:"), objc.ID(0)) })
+	w.withWin(func() {
+		w.revive()
+		w.win.Send(sel("makeKeyAndOrderFront:"), objc.ID(0))
+	})
 }
 
-// Show orders the window in.
-func (w *Window) Show() { w.withWin(func() { w.win.Send(sel("orderFront:"), objc.ID(0)) }) }
+// Show orders the window in. A released window gets its webview back on the
+// route and scroll position it had.
+func (w *Window) Show() {
+	w.withWin(func() {
+		w.revive()
+		w.win.Send(sel("orderFront:"), objc.ID(0))
+	})
+}
 
-// Hide orders the window out.
-func (w *Window) Hide() { w.withWin(func() { w.win.Send(sel("orderOut:"), objc.ID(0)) }) }
+// Hide orders the window out. WebKit throttles the hidden page by itself; the
+// page also gets a krate:memory-pressure event. Release also removes the
+// webview.
+func (w *Window) Hide() {
+	w.withWin(func() {
+		w.win.Send(sel("orderOut:"), objc.ID(0))
+		w.memoryPressure()
+	})
+}
 
 // SetPreventClose makes windowShouldClose: refuse and report instead.
 func (w *Window) SetPreventClose(on bool) { w.withWin(func() { w.preventClose = on }) }

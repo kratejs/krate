@@ -45,6 +45,9 @@ type Options struct {
 	// Memory selects the memory profile; the zero value keeps the engine
 	// defaults.
 	Memory Memory
+	// KeepAlive keeps the app running when its last window closes: that
+	// window is released (hidden, webview destroyed) and Show brings it back.
+	KeepAlive bool
 }
 
 // WindowOptions configures one window.
@@ -70,6 +73,11 @@ type App struct {
 	cleanup  func()
 	mainTid  int
 
+	keepAlive bool
+	v         *viewAPI
+	evalCbs   map[uintptr]func(string) // main thread only; see evalString
+	nextTok   uintptr
+
 	mu          sync.Mutex
 	windows     map[uintptr]*Window
 	nextWin     uintptr
@@ -93,7 +101,7 @@ var (
 	theApp *App
 
 	cbIdle, cbScheme, cbPolicy, cbLoad, cbDestroy, cbClose, cbHeader uintptr
-	cbDelete, cbWinState                                             uintptr
+	cbDelete, cbWinState, cbEvalDone                                 uintptr
 	curHeader                                                        http.Header
 )
 
@@ -109,7 +117,7 @@ func New(opts Options) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	app := &App{api: a, handler: opts.Handler, debug: opts.Debug, windows: map[uintptr]*Window{}, stopCh: make(chan struct{}), mainTid: syscall.Gettid()}
+	app := &App{api: a, handler: opts.Handler, debug: opts.Debug, keepAlive: opts.KeepAlive, evalCbs: map[uintptr]func(string){}, windows: map[uintptr]*Window{}, stopCh: make(chan struct{}), mainTid: syscall.Gettid()}
 	if syscall.Getpid() != app.mainTid {
 		return nil, errors.New("krate: New must be called on the main thread (call from the main goroutine)")
 	}
@@ -133,7 +141,9 @@ func New(opts Options) (*App, error) {
 	cbHeader = purego.NewCallback(headerCallback)
 	cbDelete = purego.NewCallback(deleteCallback)
 	cbWinState = purego.NewCallback(winStateCallback)
+	cbEvalDone = purego.NewCallback(evalDoneCallback)
 	app.x = loadExt()
+	app.v = loadView()
 	app.initExt()
 
 	app.mem = loadMemAPI()
@@ -142,9 +152,7 @@ func New(opts Options) (*App, error) {
 	// Process-wide settings WebKit reads when it starts its child processes.
 	app.mem.applyMemoryPressure(app.profile)
 	applyJSCOptions(app.profile)
-	if app.profile.Enabled() {
-		memory.AddTrimHook(mallocTrim)
-	}
+	memory.AddTrimHook(mallocTrim)
 	mgr, cleanup := app.mem.newDataManager(a, dataDir("XDG_DATA_HOME", ".local/share", id), dataDir("XDG_CACHE_HOME", ".cache", id), app.profile)
 	app.cleanup = cleanup
 	if mgr == 0 {

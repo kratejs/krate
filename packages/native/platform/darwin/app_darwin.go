@@ -111,7 +111,7 @@ func (a *App) setup() error {
 	a.nsApp.Send(sel("setDelegate:"), a.appDelegate)
 
 	// One process pool for every window so scheme registration is shared.
-	a.processPool = cls("WKProcessPool").Send(sel("new"))
+	a.processPool = newProcessPool()
 	registerSchemePrivate(a.processPool)
 
 	a.buildMenu()
@@ -275,11 +275,22 @@ func registerClasses(a *App) error {
 			a.windowWillClose(note.Send(sel("object")))
 		}},
 		{Cmd: sel("windowShouldClose:"), Fn: func(self objc.ID, _ objc.SEL, nsWin objc.ID) bool {
-			if w := a.windows[nsWin]; w != nil && w.preventClose {
-				emitWindow(w, caps.WindowCloseRequested)
-				return false
+			if w := a.windows[nsWin]; w != nil {
+				if w.preventClose {
+					emitWindow(w, caps.WindowCloseRequested)
+					return false
+				}
+				if a.parkable(w) {
+					w.release()
+					return false
+				}
 			}
 			return true
+		}},
+		{Cmd: sel("windowDidMiniaturize:"), Fn: func(self objc.ID, _ objc.SEL, note objc.ID) {
+			if w := a.windows[note.Send(sel("object"))]; w != nil {
+				w.memoryPressure()
+			}
 		}},
 		{Cmd: sel("windowDidBecomeKey:"), Fn: func(self objc.ID, _ objc.SEL, note objc.ID) {
 			if w := a.windows[note.Send(sel("object"))]; w != nil {
@@ -320,6 +331,9 @@ func registerClasses(a *App) error {
 	_, err = objc.RegisterClass("KrateNavDelegate", nsObject, protos("WKNavigationDelegate"), nil, []objc.MethodDef{
 		{Cmd: sel("webView:decidePolicyForNavigationAction:decisionHandler:"), Fn: func(self objc.ID, _ objc.SEL, webView, action, handler objc.ID) {
 			a.decideNavigation(action, handler)
+		}},
+		{Cmd: sel("webView:didFinishNavigation:"), Fn: func(self objc.ID, _ objc.SEL, webView, nav objc.ID) {
+			a.navigationFinished(webView)
 		}},
 	})
 	return err

@@ -109,6 +109,10 @@ type WindowSpec struct {
 	// main window may use to this list (a subset of the app's). An empty
 	// list leaves the page nothing.
 	Permissions *[]string `json:"permissions,omitempty"`
+	// KeepAlive keeps the app running with no window open (a tray app):
+	// closing the last window releases its webview instead of quitting, and
+	// Show or reopening the window brings it back on the same route.
+	KeepAlive bool `json:"keepAlive,omitempty"`
 }
 
 // Fallback maps a route pattern in Krate's segment syntax to the file that

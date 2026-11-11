@@ -6,6 +6,7 @@ import (
 	"os"
 	"runtime"
 
+	"github.com/kratejs/krate/packages/native/platform/caps"
 	"github.com/kratejs/krate/packages/native/sdk/internal/bridge"
 	"github.com/kratejs/krate/packages/native/sdk/window"
 )
@@ -23,6 +24,13 @@ func init() {
 			case "window:fullscreen", "window:frameless":
 				_, _, _, err := env.Controls("")
 				return err == nil, true
+			case "window:release":
+				_, w, _, err := env.Controls("")
+				if err != nil {
+					return false, true
+				}
+				_, ok := w.(caps.WindowRelease)
+				return ok, true
 			case "window:alwaysOnTop", "window:position":
 				_, _, _, err := env.Controls("")
 				wayland := runtime.GOOS == "linux" && os.Getenv("WAYLAND_DISPLAY") != ""

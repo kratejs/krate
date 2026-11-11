@@ -8,6 +8,13 @@
 // Platform notes: on Wayland compositors always-on-top and absolute window
 // positions are ignored (the compositor decides); X11 window managers honor
 // both. Minimize, maximize and fullscreen need a window manager.
+//
+// Memory: the windows of an app share one web process. Hide with
+// HideOptions{Release: true} also destroys the window's webview, and Show
+// recreates it on the route and scroll position it had; with
+// native.window.keepAlive the app keeps running when its last window closes,
+// which is released the same way. A window that is hidden or minimized without
+// release gets the "krate:memory-pressure" DOM event.
 package window
 
 import (
@@ -101,6 +108,10 @@ const (
 	Closed         EventKind = "closed"
 	Focused        EventKind = "focus"
 	Blurred        EventKind = "blur"
+	// Released: the window gave up its webview (see HideOptions); Restored:
+	// Show brought it back.
+	Released EventKind = "released"
+	Restored EventKind = "restored"
 )
 
 // Event is a window event.
@@ -194,11 +205,39 @@ func (w *Window) Restore() error { return w.do(IDRestore, nil) }
 // Focus raises and focuses the window.
 func (w *Window) Focus() error { return w.do(IDFocus, nil) }
 
-// Show shows a hidden window.
+// Show shows a hidden window. A window hidden with HideOptions.Release gets
+// its webview back on the route and scroll position it had; the page loads
+// again and re-subscribes to host signals, which resend their current values.
 func (w *Window) Show() error { return w.do(IDShow, nil) }
 
-// Hide hides the window without closing it.
-func (w *Window) Hide() error { return w.do(IDHide, nil) }
+// HideOptions configures Hide.
+type HideOptions struct {
+	// Release also destroys the window's webview. When every window of the
+	// app is released the web process exits, which is what a tray app that
+	// runs in the background wants. Without Release the window keeps its page
+	// and only gets a "krate:memory-pressure" event.
+	Release bool
+}
+
+// Hide hides the window without closing it. On a platform that cannot
+// release a webview, Release is ignored and the window is only hidden.
+func (w *Window) Hide(opts ...HideOptions) error {
+	release := false
+	for _, o := range opts {
+		release = release || o.Release
+	}
+	return w.do(IDHide, func(e *wire.Encoder) {
+		if release {
+			e.Bool(true)
+		}
+	})
+}
+
+// Show shows the window with this id (see Window.Show).
+func Show(id string) error { return Get(id).Show() }
+
+// Hide hides the window with this id (see Window.Hide).
+func Hide(id string, o HideOptions) error { return Get(id).Hide(o) }
 
 // SetPreventClose makes close requests (title bar button, Alt+F4) emit a
 // CloseRequested event instead of closing; call Close to close for real.

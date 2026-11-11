@@ -10,9 +10,10 @@ import (
 // on the main goroutine.
 func New(opts Options) (App, error) {
 	a, err := winplat.New(winplat.Config{
-		AppID:   opts.AppID,
-		Handler: opts.Handler,
-		Debug:   opts.Debug,
+		AppID:     opts.AppID,
+		Handler:   opts.Handler,
+		Debug:     opts.Debug,
+		KeepAlive: opts.KeepAlive,
 	})
 	if err != nil {
 		return nil, err
