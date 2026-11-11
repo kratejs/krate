@@ -17,6 +17,24 @@ type Options struct {
 	Handler http.Handler
 	// Debug enables the webview's developer tools.
 	Debug bool
+	// Memory selects the memory profile of the webview. The zero value is
+	// the engine defaults. Only the Linux layer applies it today.
+	Memory Memory
+}
+
+// Memory configures the webview's memory use.
+type Memory struct {
+	// Profile is "balanced", "minimal" or "performance"; empty means
+	// "performance" (no levers).
+	Profile string
+	// Features says which optional engine features the app uses; the
+	// profiles other than "performance" switch the others off.
+	Features Features
+}
+
+// Features are the optional webview features an app uses.
+type Features struct {
+	Media, WebAudio, WebGL, WebRTC, SpellCheck bool
 }
 
 // WindowOptions configures one window.

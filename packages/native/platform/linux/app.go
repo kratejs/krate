@@ -20,6 +20,7 @@ import (
 	"syscall"
 
 	"github.com/ebitengine/purego"
+	"github.com/kratejs/krate/packages/native/internal/memory"
 	"github.com/kratejs/krate/packages/native/platform/caps"
 )
 
@@ -41,6 +42,9 @@ type Options struct {
 	AppID   string
 	Handler http.Handler
 	Debug   bool
+	// Memory selects the memory profile; the zero value keeps the engine
+	// defaults.
+	Memory Memory
 }
 
 // WindowOptions configures one window.
@@ -59,7 +63,12 @@ type App struct {
 	handler http.Handler
 	debug   bool
 	ctx     uintptr // WebKitWebContext
-	mainTid int
+	mem     *memAPI
+	profile memory.Profile
+	// features are the engine features the app uses (memory profiles).
+	features Features
+	cleanup  func()
+	mainTid  int
 
 	mu          sync.Mutex
 	windows     map[uintptr]*Window
@@ -127,8 +136,17 @@ func New(opts Options) (*App, error) {
 	app.x = loadExt()
 	app.initExt()
 
-	mgr := a.wkDataManagerNew("base-data-directory", dataDir("XDG_DATA_HOME", ".local/share", id),
-		"base-cache-directory", dataDir("XDG_CACHE_HOME", ".cache", id), 0)
+	app.mem = loadMemAPI()
+	app.profile = opts.Memory.profile()
+	app.features = opts.Memory.Features
+	// Process-wide settings WebKit reads when it starts its child processes.
+	app.mem.applyMemoryPressure(app.profile)
+	applyJSCOptions(app.profile)
+	if app.profile.Enabled() {
+		memory.AddTrimHook(mallocTrim)
+	}
+	mgr, cleanup := app.mem.newDataManager(a, dataDir("XDG_DATA_HOME", ".local/share", id), dataDir("XDG_CACHE_HOME", ".cache", id), app.profile)
+	app.cleanup = cleanup
 	if mgr == 0 {
 		return nil, errors.New("krate: cannot create website data manager")
 	}
@@ -136,6 +154,7 @@ func New(opts Options) (*App, error) {
 	if app.ctx == 0 {
 		return nil, errors.New("krate: cannot create web context")
 	}
+	app.mem.applyContext(app.ctx, mgr, app.profile, app.features)
 	a.wkContextRegisterSchem(app.ctx, "krate", cbScheme, 0, 0)
 	sm := a.wkContextSecurityMgr(app.ctx)
 	a.wkSecSecure(sm, "krate")
@@ -188,6 +207,9 @@ func (a *App) Run(onReady func()) error {
 	}
 	a.api.gtkMain()
 	a.markStopped()
+	if a.cleanup != nil {
+		a.cleanup()
+	}
 	return nil
 }
 

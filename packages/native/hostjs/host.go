@@ -295,3 +295,9 @@ func (h *Host) loadError(err error) error {
 	}
 	return fmt.Errorf("hostjs: loading %s: %s", h.filename, msg)
 }
+
+// GC runs a full QuickJS garbage collection on the VM goroutine. It does not
+// wait for it. The shell calls it when the app goes idle.
+func (h *Host) GC() {
+	h.post(func() { h.rt.GC() })
+}

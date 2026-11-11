@@ -186,3 +186,8 @@ func runGC(vm *quickjs.VM) {
 	tls, ctx := vmHandles(vm)
 	lib.XJS_RunGC(tls, lib.XJS_GetRuntime(tls, ctx))
 }
+
+// GC runs a full QuickJS garbage collection, cycles included, and returns
+// freed memory to the allocator. It must run where the VM may be used. It does
+// nothing when the engine's memory layout is unknown.
+func (r *Runtime) GC() { runGC(r.vm) }

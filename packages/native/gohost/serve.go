@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/kratejs/krate/packages/native/internal/memory"
 	"github.com/kratejs/krate/packages/native/scheme"
 )
 
@@ -30,7 +31,10 @@ func Serve(register func(*scheme.Registry)) {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	err := Run(ctx, register, Config{Socket: os.Getenv(SocketEnv), Stdin: os.Stdin, Ready: os.Stdout, Dev: os.Getenv(DevEnv) == "1"})
+	// The shell passes its memory profile down.
+	prof := memory.Parse(os.Getenv(memory.EnvProfile))
+	memory.ApplyGo(prof)
+	err := Run(ctx, register, Config{Socket: os.Getenv(SocketEnv), Stdin: os.Stdin, Ready: os.Stdout, Dev: os.Getenv(DevEnv) == "1", Reaper: memory.StartReaper(prof, nil)})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "krate gohost:", err)
 		stopProfile()
@@ -50,6 +54,8 @@ type Config struct {
 	Ready io.Writer
 	// Dev puts panic stacks (with source paths) in the errors the UI sees.
 	Dev bool
+	// Reaper, when set, is touched by every request and stopped on return.
+	Reaper *memory.Reaper
 }
 
 // Run serves until ctx ends or cfg.Stdin reaches EOF. It returns nil on a
@@ -70,7 +76,16 @@ func Run(ctx context.Context, register func(*scheme.Registry), cfg Config) error
 	}
 	defer os.Remove(cfg.Socket)
 
-	srv := &http.Server{Handler: scheme.New(scheme.Options{Registry: reg, Dev: cfg.Dev})}
+	h := http.Handler(scheme.New(scheme.Options{Registry: reg, Dev: cfg.Dev}))
+	if cfg.Reaper != nil {
+		inner := h
+		h = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			cfg.Reaper.Touch()
+			inner.ServeHTTP(w, r)
+		})
+		defer cfg.Reaper.Stop()
+	}
+	srv := &http.Server{Handler: h}
 	served := make(chan error, 1)
 	go func() { served <- srv.Serve(ln) }()
 

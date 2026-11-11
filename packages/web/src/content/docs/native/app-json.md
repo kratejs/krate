@@ -32,6 +32,8 @@ is in the directory; paths in `app.json` are relative to it.
   "assets": "dist",
   "fallbacks": [{ "pattern": "/tasks/[id]", "file": "tasks/[id]/index.html" }],
   "hostjs": { "bundle": "host/host.js", "map": "host/host.js.map" },
+  "memory": "balanced",
+  "features": { "media": false, "webaudio": false, "webgl": false, "webrtc": false, "spellcheck": false },
   "hostchildren": [{
     "runtime": "node",
     "entry": "host/node/host.mjs",
@@ -63,6 +65,9 @@ is in the directory; paths in `app.json` are relative to it.
 | `strictPermissions` | `true` in a build that derived `permissions` from the code: an empty list then means nothing instead of the defaults. |
 | `permissions` | Optional list that gates the SDK ids the UI may call: `os:info`, `kv`, `db`, `fs`, `fs:read`, `os:secrets`, `os:secrets.read`, `shell:openExternal`, `net`, `window`, `app`, `menu`, `dialog`, `notify`, `clipboard`, `clipboard:read`, `tray`, `shortcut`, `updater`. Empty means `os:info`, `kv`, `db`, `window`, `app`, `menu`, `dialog`, `notify` and `clipboard`; unknown names are an error when the app loads. See [Native SDK](/docs/native/sdk/#permissions). |
 | `updater` | Present when `native.updater` is configured: `url` (the feed URL template) and `publicKey` (base64 Ed25519). See [Updates](/docs/native/updater/). |
+| `memory` | The memory profile, from `native.memory`: `balanced` (default), `minimal` or `performance`. See [Memory](/docs/native/memory/). |
+| `features` | `{media, webaudio, webgl, webrtc, spellcheck}`: which optional webview features the UI uses, found by scanning the built UI and adjusted by `native.features`. The `balanced` and `minimal` profiles switch the others off. An `app.json` without it keeps every feature on. |
+| `hostjs.memoryMB` | From `native.host.memoryMB`: the QuickJS heap limit in MiB. Absent means the profile default (64, 32 or 256). |
 | `debug` | `false` for a build made by `krate native build`. |
 
 The build manifest of the web build (`dist/.krate`) is removed from `dist/`.

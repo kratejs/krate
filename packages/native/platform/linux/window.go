@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/kratejs/krate/packages/native/internal/memory"
 	"github.com/kratejs/krate/packages/native/platform/caps"
 )
 
@@ -74,6 +75,7 @@ func (a *App) newWindow(opts WindowOptions, onLoad func()) (*Window, error) {
 	}
 	if settings := api.wkViewGetSettings(w.view); settings != 0 {
 		api.wkSettingsDevExtras(settings, b2i(a.debug))
+		a.applyViewSettings(settings)
 	}
 	api.gSignalConnectData(w.win, "destroy", cbDestroy, w.id, 0, 0)
 	if x := a.x; x.gtkBoxNew != nil && x.gtkWindowPresent != nil {
@@ -207,6 +209,10 @@ func destroyCallback(widget, id uintptr) uintptr {
 	if w != nil {
 		w.alive = false
 		a.emitWindow(w, caps.WindowClosed)
+	}
+	if w != nil && !last {
+		// A closed window frees its page memory; trim once things settle.
+		memory.Request()
 	}
 	if last && w != nil {
 		if hook != nil {

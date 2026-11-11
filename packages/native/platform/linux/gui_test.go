@@ -33,7 +33,7 @@ func TestMain(m *testing.M) {
 	}
 	guiStart = time.Now()
 	guiSrv = newTestServer()
-	app, err := New(Options{AppID: "dev.krate.guitest", Handler: guiSrv.mux, Debug: true})
+	app, err := New(Options{AppID: "dev.krate.guitest", Handler: guiSrv.mux, Debug: true, Memory: guiMemory()})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "GUI test setup:", err)
 		os.Exit(1)

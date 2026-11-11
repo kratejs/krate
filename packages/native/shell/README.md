@@ -73,6 +73,9 @@ Release layout: the app directory sits next to the shell binary
 | `strictPermissions` | With `true`, an empty or missing `permissions` list grants nothing instead of the defaults. A derived build sets it. |
 | `window.permissions` | Optional list narrowing the SDK permissions of the main window's page to a subset of `permissions`; `[]` leaves it nothing. Windows opened with `window.Open` take the same option and inherit the opener's scope. |
 | `updater` | Optional `{url, publicKey}`: the update feed URL template (`{target}`, `{version}`) and the base64 Ed25519 public key. Without it `krate/updater.*` answers `unsupported`. See `updater/` and the Updates docs page. |
+| `memory` | `"balanced"` (default), `"minimal"` or `"performance"`. The memory profile of the webview and host: `performance` keeps the engine defaults, `balanced` and `minimal` apply the levers described in the Memory docs page (webview features off unless used, cache and pressure settings, QuickJS and Go limits, idle trimming). Anything else makes the manifest fail to load. |
+| `features` | Optional `{media, webaudio, webgl, webrtc, spellcheck}` booleans: the webview features the UI uses, written by `krate native build` from a scan of the built UI and `native.features`. Under `balanced` and `minimal` a feature that is `false` is switched off in the webview. A manifest without the block keeps every feature on. |
+| `hostjs.memoryMB` | Optional QuickJS heap limit in MiB. Default by profile: 64 (`balanced`), 32 (`minimal`), 256 (`performance`). |
 | `debug` | Enables the webview's developer tools even without `--dev`. |
 
 Every path is relative to the app directory and must stay inside it (no
