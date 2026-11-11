@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -55,5 +56,44 @@ func TestExcluded(t *testing.T) {
 	mu.Unlock()
 	if Excluded(app) {
 		t.Fatal("a go.work that uses the app's module must stay active")
+	}
+}
+
+// Env sets PWD like os/exec does for a nil Cmd.Env, so the go command reports
+// directories under the path the caller used, not a symlink-resolved one.
+func TestEnvSetsPWD(t *testing.T) {
+	dir := t.TempDir()
+	env := Env(dir)
+	want := "PWD=" + dir
+	for _, kv := range env {
+		if kv == want {
+			return
+		}
+	}
+	t.Fatalf("Env(%s) has no %s", dir, want)
+}
+
+// Through a symlinked directory go list reports the symlinked path, as it does
+// with the implicit PWD of a nil Cmd.Env.
+func TestEnvKeepsSymlinkedDirectory(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go not on PATH")
+	}
+	real := t.TempDir()
+	write(t, filepath.Join(real, "go.mod"), "module example.com/m\n\ngo 1.21\n")
+	write(t, filepath.Join(real, "p", "p.go"), "package p\n")
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skip("symlinks not available:", err)
+	}
+	cmd := exec.Command("go", "list", "-f", "{{.Dir}}", "./p")
+	cmd.Dir = link
+	cmd.Env = Env(link)
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.TrimSpace(string(out)), filepath.Join(link, "p"); got != want {
+		t.Fatalf("go list Dir = %s, want %s", got, want)
 	}
 }

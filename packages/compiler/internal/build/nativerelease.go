@@ -180,6 +180,9 @@ type NativeTarget struct {
 var NativeGoRunner = func(dir string, env []string, args ...string) ([]byte, error) {
 	cmd := exec.Command("go", args...)
 	cmd.Dir = dir
+	if env != nil {
+		env = goenv.WithPWD(env, dir)
+	}
 	cmd.Env = env
 	var buf bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &buf, &buf

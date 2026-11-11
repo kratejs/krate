@@ -124,6 +124,8 @@ func goList(root string, pats []string, env []string) (map[string]*listedPkg, ma
 	cmd.Dir = root
 	if env == nil {
 		env = goenv.Env(root)
+	} else {
+		env = goenv.WithPWD(env, root)
 	}
 	cmd.Env = env
 	var stdout, stderr bytes.Buffer

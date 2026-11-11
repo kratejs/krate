@@ -500,6 +500,8 @@ func goSDKImportsIn(root string, args, env []string) ([]Site, error) {
 	cmd.Dir = root
 	if env == nil {
 		env = goenv.Env(root)
+	} else {
+		env = goenv.WithPWD(env, root)
 	}
 	cmd.Env = env
 	var out, errb bytes.Buffer

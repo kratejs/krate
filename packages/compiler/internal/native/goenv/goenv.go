@@ -24,14 +24,32 @@ var (
 	cache = map[string]bool{}
 )
 
-// Env returns os.Environ() plus GOWORK=off when an active go.work does not
-// use the module rooted at root.
+// Env returns the environment for a go command run in root: os.Environ(),
+// PWD set to root, and GOWORK=off when an active go.work does not use the
+// module rooted at root.
+//
+// os/exec sets PWD itself only when Cmd.Env is nil. Without it the go command
+// falls back to getcwd, which resolves symlinks (macOS's /var is
+// /private/var), and the directories it reports no longer match the paths the
+// caller built.
 func Env(root string) []string {
 	env := os.Environ()
+	if abs, err := filepath.Abs(root); err == nil {
+		env = append(env, "PWD="+abs)
+	}
 	if Excluded(root) {
 		env = append(env, "GOWORK=off")
 	}
 	return env
+}
+
+// WithPWD returns env with PWD set to dir (absolute), for a go command whose
+// caller chose its own environment; see Env.
+func WithPWD(env []string, dir string) []string {
+	if abs, err := filepath.Abs(dir); err == nil {
+		dir = abs
+	}
+	return append(env[:len(env):len(env)], "PWD="+dir)
 }
 
 // Excluded reports whether an active go.work leaves out the module at root.
