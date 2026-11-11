@@ -40,8 +40,9 @@ func newProcessPool() objc.ID {
 	return poolCls.Send(sel("new"))
 }
 
-// Release saves the route and scroll position, hides the window and removes
-// its WKWebView. Show or Focus creates a new one on the saved route.
+// Release saves the route and scroll position of every view of the window,
+// hides it and removes all its WKWebViews. Show or Focus creates new ones on
+// the saved routes and layout.
 func (w *Window) Release() { w.withWin(w.release) }
 
 // Released reports whether the window holds no webview.
@@ -50,53 +51,78 @@ func (w *Window) Released() (r bool) {
 	return
 }
 
-// release runs on the main thread. The page is asked for its route and scroll
-// position first; one that does not answer in time is released with the route
-// it was last told to load.
+// release runs on the main thread. Every page is asked for its route and
+// scroll position first; one that does not answer in time is released with the
+// route it was last told to load.
 func (w *Window) release() {
 	if w.closed || w.web == 0 || w.releasing {
 		return
 	}
 	w.releasing, w.abort = true, false
-	fallback := w.route
+	live := w.liveViews()
+	fallback := map[*view]string{}
+	for _, v := range live {
+		fallback[v] = v.route
+	}
 	w.win.Send(sel("orderOut:"), objc.ID(0))
-	done := false
-	finish := func(raw string) {
-		if done {
-			return
-		}
-		done = true
+	answered := map[*view]bool{}
+	finish := func() {
 		w.releasing = false
 		if w.closed || w.web == 0 || w.abort {
 			return
 		}
-		w.state = caps.ParseViewState(raw, fallback)
-		w.route = w.state.Route
-		web := w.web
-		w.web = 0
-		web.Send(sel("stopLoading"))
-		web.Send(sel("setNavigationDelegate:"), objc.ID(0))
+		w.snapshotRatios()
+		w.splits = nil
+		for _, v := range live {
+			v.route = v.state.Route
+			web := v.web
+			w.app.setWeb(v, 0)
+			web.Send(sel("stopLoading"))
+			web.Send(sel("setNavigationDelegate:"), objc.ID(0))
+			web.Send(sel("removeFromSuperview"))
+			release(web)
+		}
 		w.win.Send(sel("setContentView:"), objc.ID(0))
-		release(web)
+		w.root = 0
 		w.released = true
 		emitWindow(w, caps.WindowReleased)
 		shrinkHeapSoon()
 	}
-	// void (^)(id result, NSError *error); result is the script's string.
-	blk := objc.NewBlock(func(_ objc.Block, result, err objc.ID) {
-		raw := ""
-		if err == 0 && result != 0 {
-			raw = goString(result)
+	settle := func(v *view, raw string) {
+		if answered[v] {
+			return
 		}
-		finish(raw)
+		answered[v] = true
+		v.state = caps.ParseViewState(raw, fallback[v])
+		if len(answered) == len(live) {
+			finish()
+		}
+	}
+	for _, v := range live {
+		v := v
+		// void (^)(id result, NSError *error); result is the script's string.
+		blk := objc.NewBlock(func(_ objc.Block, result, err objc.ID) {
+			raw := ""
+			if err == 0 && result != 0 {
+				raw = goString(result)
+			}
+			settle(v, raw)
+		})
+		v.web.Send(sel("evaluateJavaScript:completionHandler:"), nsString(caps.ViewStateScript), objc.ID(blk))
+		blk.Release() // WebKit holds its own copy
+	}
+	time.AfterFunc(releaseWait, func() {
+		dispatch(func() {
+			for _, v := range live {
+				settle(v, "")
+			}
+		})
 	})
-	w.web.Send(sel("evaluateJavaScript:completionHandler:"), nsString(caps.ViewStateScript), objc.ID(blk))
-	blk.Release() // WebKit holds its own copy
-	time.AfterFunc(releaseWait, func() { dispatch(func() { finish("") }) })
 }
 
-// revive creates a new WKWebView for a released window on its saved route, or
-// cancels a release that is still waiting for the page. Main thread.
+// revive creates new WKWebViews for a released window on their saved routes
+// and layout, or cancels a release that is still waiting for the pages. Main
+// thread.
 func (w *Window) revive() {
 	if w.releasing {
 		w.abort = true
@@ -105,29 +131,45 @@ func (w *Window) revive() {
 	if !w.released || w.closed {
 		return
 	}
-	web := w.app.newWebView()
-	if web == 0 {
-		return
+	all := w.allViews()
+	var made []objc.ID
+	for _, v := range all {
+		web := w.app.newWebView()
+		if web == 0 {
+			for _, m := range made {
+				release(m)
+			}
+			return
+		}
+		made = append(made, web)
+		w.app.setWeb(v, web)
 	}
-	w.web = web
 	w.released = false
-	w.scrollJS = caps.ScrollScript(w.state.X, w.state.Y)
-	w.win.Send(sel("setContentView:"), web)
-	w.load(w.route)
+	for _, v := range all {
+		v.scrollJS = caps.ScrollScript(v.state.X, v.state.Y)
+		v.applyMinSize()
+	}
+	w.applyLayout()
+	for _, v := range all {
+		v.load(v.route)
+	}
 	emitWindow(w, caps.WindowRestored)
 }
 
-// navigationFinished runs webView:didFinishNavigation:. A revived window
-// restores its scroll position once its page has loaded.
+// navigationFinished runs webView:didFinishNavigation:. A revived view
+// restores its scroll position once its page has loaded; every load is
+// reported as a navigated event.
 func (a *App) navigationFinished(web objc.ID) {
-	for _, w := range a.windows {
-		if w.web == web && w.scrollJS != "" {
-			js := w.scrollJS
-			w.scrollJS = ""
-			web.Send(sel("evaluateJavaScript:completionHandler:"), nsString(js), objc.ID(0))
-			return
-		}
+	v := a.byWeb[web]
+	if v == nil {
+		return
 	}
+	if v.scrollJS != "" {
+		js := v.scrollJS
+		v.scrollJS = ""
+		web.Send(sel("evaluateJavaScript:completionHandler:"), nsString(js), objc.ID(0))
+	}
+	emitView(a, v, caps.ViewNavigated, v.currentRoute())
 }
 
 // parkable reports whether closing w releases it instead of destroying it
@@ -153,8 +195,8 @@ func (a *App) parkable(w *Window) bool {
 // returns free Go heap to the system shortly after. WebKit throttles hidden
 // and miniaturized web views on its own; nothing else is set. Main thread.
 func (w *Window) memoryPressure() {
-	if w.web != 0 {
-		w.web.Send(sel("evaluateJavaScript:completionHandler:"), nsString(caps.MemoryPressureScript), objc.ID(0))
+	for _, v := range w.liveViews() {
+		v.web.Send(sel("evaluateJavaScript:completionHandler:"), nsString(caps.MemoryPressureScript), objc.ID(0))
 	}
 	shrinkHeapSoon()
 }

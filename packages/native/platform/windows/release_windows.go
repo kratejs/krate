@@ -18,9 +18,9 @@ var _ caps.WindowRelease = (*Window)(nil)
 
 const releaseWait = 1500 * time.Millisecond
 
-// Release saves the route and scroll position, hides the window and closes
-// its WebView2 controller. Show or Focus creates a new controller (from the
-// same shared environment) on the saved route.
+// Release saves the route and scroll position of every view, hides the window
+// and closes all its WebView2 controllers. Show or Focus creates new ones
+// (from the same shared environment) on the saved routes and layout.
 func (w *Window) Release() { w.onMain(w.release) }
 
 // Released reports whether the window holds no webview.
@@ -29,55 +29,80 @@ func (w *Window) Released() (r bool) {
 	return
 }
 
-// release runs on the main thread. The page is asked for its route and scroll
-// position first; one that does not answer in time is released with the
-// route it was last told to load.
+// release runs on the main thread. Every page is asked for its route and
+// scroll position first; one that does not answer in time is released with
+// the route it was last told to load.
 func (w *Window) release() {
-	if w.webview == nil || w.releasing || w.released || w.destroyed {
+	if w.pv.webview == nil || w.releasing || w.released || w.destroyed {
 		return
 	}
 	w.releasing, w.abort = true, false
-	fallback := w.path
+	var live []*view
+	for _, v := range w.allViews() {
+		if v.webview != nil {
+			live = append(live, v)
+		}
+	}
+	fallback := map[*view]string{}
+	for _, v := range live {
+		fallback[v] = v.path
+	}
 	pShowWindow.Call(w.hwnd, swHide)
-	done := false
-	finish := func(raw string) {
-		if done {
-			return
-		}
-		done = true
+	answered := map[*view]bool{}
+	finish := func() {
 		w.releasing = false
-		if w.destroyed || w.webview == nil || w.abort {
+		if w.destroyed || w.pv.webview == nil || w.abort {
 			return
 		}
-		w.state = caps.ParseViewState(raw, fallback)
-		w.path = w.state.Route
-		w.closeController()
+		// The divider ratios live in w.layout, so they survive as is.
+		for _, v := range live {
+			v.path = v.state.Route
+			v.closeController()
+		}
 		w.released = true
 		emit(w, caps.WindowReleased)
 		shrinkHeapSoon()
 	}
-	h := newHandler(iidExecuteScriptHandler, true, func(hr, result uintptr) uintptr {
-		raw := ""
-		if !failed(hr) && result != 0 {
-			// The result is the script's value as JSON; the script returns a
-			// string, so it is a quoted string holding the JSON of the state.
-			var s string
-			if json.Unmarshal([]byte(xw.UTF16PtrToString((*uint16)(ptr(result)))), &s) == nil {
-				raw = s
-			}
+	settle := func(v *view, raw string) {
+		if answered[v] {
+			return
 		}
-		finish(raw)
-		return sOK
-	})
-	if failed(vcall(w.webview, wvExecuteScript, uintptr(unsafe.Pointer(wstr(caps.ViewStateScript))), uintptr(h))) {
-		finish("")
-		return
+		answered[v] = true
+		v.state = caps.ParseViewState(raw, fallback[v])
+		if len(answered) == len(live) {
+			finish()
+		}
 	}
-	time.AfterFunc(releaseWait, func() { w.app.Dispatch(func() { finish("") }) })
+	for _, v := range live {
+		v := v
+		h := newHandler(iidExecuteScriptHandler, true, func(hr, result uintptr) uintptr {
+			raw := ""
+			if !failed(hr) && result != 0 {
+				// The result is the script's value as JSON; the script returns a
+				// string, so it is a quoted string holding the JSON of the state.
+				var s string
+				if json.Unmarshal([]byte(xw.UTF16PtrToString((*uint16)(ptr(result)))), &s) == nil {
+					raw = s
+				}
+			}
+			settle(v, raw)
+			return sOK
+		})
+		if failed(vcall(v.webview, wvExecuteScript, uintptr(unsafe.Pointer(wstr(caps.ViewStateScript))), uintptr(h))) {
+			settle(v, "")
+		}
+	}
+	time.AfterFunc(releaseWait, func() {
+		w.app.Dispatch(func() {
+			for _, v := range live {
+				settle(v, "")
+			}
+		})
+	})
 }
 
-// revive recreates the controller of a released window, or cancels a release
-// that is still waiting for the page. Main thread.
+// revive recreates the controllers of a released window, or cancels a release
+// that is still waiting for the pages. Main thread.
 func (w *Window) revive() {
 	if w.releasing {
 		w.abort = true
@@ -87,25 +112,28 @@ func (w *Window) revive() {
 		return
 	}
 	w.released = false
-	w.path = w.state.Route
-	w.scrollJS = caps.ScrollScript(w.state.X, w.state.Y)
 	emit(w, caps.WindowRestored)
-	w.createController()
+	for _, v := range w.allViews() {
+		v.path = v.state.Route
+		v.scrollJS = caps.ScrollScript(v.state.X, v.state.Y)
+		v.ready = make(chan struct{})
+		v.createController()
+	}
 }
 
-// addScrollRestore registers the scroll restore of a revived window as a
+// addScrollRestore registers the scroll restore of a revived view as a
 // script that runs when the next document is created. It guards itself: only
 // documents of the app origin run it, and only the first one.
-func (w *Window) addScrollRestore() {
-	js := w.scrollJS
-	w.scrollJS = ""
-	if js == "" || w.webview == nil {
+func (v *view) addScrollRestore() {
+	js := v.scrollJS
+	v.scrollJS = ""
+	if js == "" || v.webview == nil {
 		return
 	}
 	guarded := `(function(){if(location.origin!==` + jsString(Origin) + `)return;` +
 		`try{if(sessionStorage.getItem("__krate_scroll"))return;sessionStorage.setItem("__krate_scroll","1")}catch(e){}` +
 		js + `})()`
-	vcall(w.webview, wvAddScriptOnDocCreated, uintptr(unsafe.Pointer(wstr(guarded))), 0)
+	vcall(v.webview, wvAddScriptOnDocCreated, uintptr(unsafe.Pointer(wstr(guarded))), 0)
 }
 
 func jsString(s string) string {
@@ -116,7 +144,7 @@ func jsString(s string) string {
 // parkable reports whether closing w releases it instead of destroying it
 // (KeepAlive, and w is the last window with a webview). Main thread.
 func (a *App) parkable(w *Window) bool {
-	if !a.cfg.KeepAlive || w.destroyed || w.webview == nil || w.releasing {
+	if !a.cfg.KeepAlive || w.destroyed || w.pv.webview == nil || w.releasing {
 		return false
 	}
 	live, parked := 0, 0
@@ -132,27 +160,35 @@ func (a *App) parkable(w *Window) bool {
 	return caps.ParkOnClose(a.cfg.KeepAlive, live, parked)
 }
 
-// setViewHidden makes the controller invisible (hidden or minimized window) or
-// visible again, and sets the browser's memory target for the page: LOW while
-// hidden, the profile's visible level otherwise. A page that becomes hidden also gets the
-// krate:memory-pressure event. Main thread.
+// setViewHidden makes the controllers invisible (hidden or minimized window)
+// or visible again, and sets the browser's memory target for the pages: LOW
+// while hidden, the profile's visible level otherwise. A page that becomes
+// hidden also gets the krate:memory-pressure event. Main thread.
 func (w *Window) setViewHidden(hidden bool) {
-	if w.controller == nil || w.viewHid == hidden {
+	for _, v := range w.allViews() {
+		v.setHidden(hidden)
+	}
+	if hidden {
+		shrinkHeapSoon()
+	}
+}
+
+func (v *view) setHidden(hidden bool) {
+	if v.controller == nil || v.viewHid == hidden {
 		return
 	}
-	w.viewHid = hidden
+	v.viewHid = hidden
 	if hidden {
-		vcall(w.controller, ctlPutIsVisible, 0)
-		setMemoryTarget(w.webview, memTargetLow)
-		if w.webview != nil {
-			vcall(w.webview, wvExecuteScript, uintptr(unsafe.Pointer(wstr(caps.MemoryPressureScript))), 0)
+		vcall(v.controller, ctlPutIsVisible, 0)
+		setMemoryTarget(v.webview, memTargetLow)
+		if v.webview != nil {
+			vcall(v.webview, wvExecuteScript, uintptr(unsafe.Pointer(wstr(caps.MemoryPressureScript))), 0)
 		}
-		shrinkHeapSoon()
 		return
 	}
 	// Back to the level a visible view has in this profile (LOW for minimal).
-	setMemoryTarget(w.webview, visibleMemoryTarget(w.app.cfg.Memory))
-	vcall(w.controller, ctlPutIsVisible, 1)
+	setMemoryTarget(v.webview, visibleMemoryTarget(v.w.app.cfg.Memory))
+	vcall(v.controller, ctlPutIsVisible, 1)
 }
 
 var trimPending atomic.Bool

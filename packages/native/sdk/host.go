@@ -152,6 +152,47 @@ func (h *Host) SetWindowScope(f func(caller, window string, permissions []string
 	}
 }
 
+// SetWindowUnscope installs the function the window area calls when a window
+// or view goes away, to drop its permission scope. sdk/all sets it from the
+// permission Set.
+func (h *Host) SetWindowUnscope(f func(id string)) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.env != nil {
+		h.env.Unscope = f
+	}
+}
+
+// ViewWindow maps the view a request came from, as the platform reported it,
+// to the id the SDK knows it by, which is also the key of its permission
+// scope: the window id for a window's primary view, the view id for the
+// others. A view the platform has but the SDK has not registered yet (its page
+// asked before the code that created it returned) is waited for briefly. ok is
+// false for a view nobody knows.
+func (h *Host) ViewWindow(ref caps.ViewRef) (id string, ok bool) {
+	h.mu.Lock()
+	env := h.env
+	h.mu.Unlock()
+	if env == nil || ref == 0 {
+		return "", false
+	}
+	if r, found := env.Windows.ViewByRef(ref); found {
+		return r.ID, true
+	}
+	if l, can := env.App.(caps.ViewLookup); can {
+		if _, known := l.WindowOfView(ref); !known {
+			return "", false
+		}
+		if r, found := env.Windows.WaitView(ref, viewWait); found {
+			return r.ID, true
+		}
+	}
+	return "", false
+}
+
+// viewWait is how long a request waits for its view to be registered.
+const viewWait = 3 * time.Second
+
 // AddWindow registers a platform window under id ("main" for the first).
 func (h *Host) AddWindow(id string, w platform.Window) string {
 	h.mu.Lock()

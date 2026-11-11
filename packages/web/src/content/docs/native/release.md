@@ -233,15 +233,31 @@ it, and an explicit list must be a subset of the opener's, so a narrow window
 cannot open a wide one (it fails with `permission_denied`). Go host code is not
 affected.
 
-The check runs on every UI call, against the window named by the call's
-`x-krate-window` header. The shell opens a scoped window at a URL with a
-`__krate_win` query parameter and injects a small script into every HTML page
-that keeps the id in `sessionStorage` and sets it as the client's window id, so
-reloads and later pages of the window keep it.
+The check runs on every UI call, against the window or view the call came from.
+The platform layer tags every request with the webview that made it (on Linux
+WebKitGTK's `webkit_uri_scheme_request_get_web_view`, on macOS the `webView`
+argument of `startURLSchemeTask`, on Windows the WebView2 that raised
+`WebResourceRequested`), and the shell maps that webview to its window and scope.
+The `x-krate-window` header that page script can set is **ignored** in a native
+window, so a scoped page cannot claim another window's id. A request from a
+webview the shell cannot place gets an empty scope: it can use no SDK id.
 
-> A script that runs in a scoped window can still send another window's id. A
-> scope limits what a window's own code can do by accident or through a bug in a
-> dependency; it is not a sandbox for code you do not trust.
+The shell still opens a scoped window at a URL with a `__krate_win` query
+parameter and injects a small script into every HTML page that keeps the id in
+`sessionStorage` and sets it as the client's window id. In a native window that
+only keeps the id across reloads and released windows; the header it feeds is not
+trusted.
+
+Browser mode (`krate native dev --browser`) is the exception: there are no native
+webviews to bind requests to, so the header is the identity and a script in a
+tab can send another window's id. Scopes there narrow what a window's own code does
+by accident; they are not a boundary.
+
+> A scope limits what a window's code may ask the host to do. It does not isolate
+> the window's origin: every window and view shares the `krate://app` origin, so
+> pages of different scopes can read each other's `localStorage` and cookies. Do
+> not load content you do not trust into a window and rely on its scope alone.
+> The [views](/docs/native/views/#scopes-and-identity) page covers scopes of views.
 
 ## Profile-guided optimization
 

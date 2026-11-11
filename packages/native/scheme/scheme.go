@@ -49,6 +49,25 @@ type Options struct {
 	// signals) for the dev inspector. It runs on the serving goroutines, so
 	// it must be quick and safe for concurrent use.
 	Observe func(Event)
+	// Identify, when set, tells which window a request really came from.
+	// The platform layer attaches the originating webview to every request
+	// it serves (see caps.ViewOf) and the shell maps it to a window id. When
+	// it reports native, the page's own x-krate-window header is ignored:
+	// page script can set that header to anything. Without Identify, or when
+	// it reports native=false (browser mode has no native views), the header
+	// is the identity.
+	Identify func(r *http.Request) (window string, native bool)
+}
+
+// windowOf returns the window a request belongs to: the native identity when
+// there is one, otherwise what the page claims.
+func (s *server) windowOf(r *http.Request) string {
+	if s.o.Identify != nil {
+		if w, native := s.o.Identify(r); native {
+			return w
+		}
+	}
+	return r.Header.Get(windowHdr)
 }
 
 // Event describes one piece of host traffic.

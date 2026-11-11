@@ -35,9 +35,20 @@ type (
 	Shortcuts            = caps.Shortcuts
 	ProcessRef           = caps.ProcessRef
 	ProcessInfo          = caps.ProcessInfo
+	ViewRef              = caps.ViewRef
+	ViewEvent            = caps.ViewEvent
+	ViewEvents           = caps.ViewEvents
+	ViewLookup           = caps.ViewLookup
+	ViewInfo             = caps.ViewInfo
+	ViewOptions          = caps.ViewOptions
+	WindowViews          = caps.WindowViews
+	LayoutNode           = caps.LayoutNode
+	Axis                 = caps.Axis
 )
 
 const (
+	Horizontal           = caps.Horizontal
+	Vertical             = caps.Vertical
 	WindowCloseRequested = caps.WindowCloseRequested
 	WindowClosed         = caps.WindowClosed
 	WindowFocused        = caps.WindowFocused

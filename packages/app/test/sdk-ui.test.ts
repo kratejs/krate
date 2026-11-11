@@ -144,6 +144,84 @@ describe("window", () => {
     expect(win.main().id).toBe("main");
   });
 
+  it("views: addView maps options, handles drive the id-first commands, layouts are normalized", async () => {
+    setup({
+      "krate/window.addView": () => "v1",
+      "krate/window.removeView": () => null,
+      "krate/window.focusView": () => null,
+      "krate/window.navigateView": () => null,
+      "krate/window.postMessage": () => null,
+      "krate/window.setLayout": () => null,
+      "krate/window.layout": () => ({ view: "main" }),
+      "krate/window.views": () => [{ id: "main", window: "main", path: "/", primary: true }],
+    });
+    const w = win.main();
+    const side = await w.addView({ path: "/side", side: "left", size: 0.25, minWidth: 180, beside: win.getView("main"), permissions: ["kv"] });
+    expect(side.id).toBe("v1");
+    expect(seen[0].args).toEqual(["main", { path: "/side", side: "left", size: 0.25, minWidth: 180, beside: "main", permissions: ["kv"] }]);
+    await w.addView();
+    expect(seen[1].args).toEqual(["main", {}]);
+
+    await side.focus();
+    await side.navigate("/other");
+    await side.post({ n: 1, nested: { ok: true } });
+    await side.remove();
+    expect(seen.slice(2).map((c) => [c.id, c.args])).toEqual([
+      ["krate/window.focusView", ["v1"]],
+      ["krate/window.navigateView", ["v1", "/other"]],
+      ["krate/window.postMessage", ["v1", { n: 1, nested: { ok: true } }]],
+      ["krate/window.removeView", ["v1"]],
+    ]);
+    await expect(side.post(undefined)).rejects.toThrow(/JSON/);
+
+    await w.setLayout(win.split("horizontal", win.pane(side, { minWidth: 100 }), win.split("vertical", win.pane("main"), win.pane("v2"), 0.7)));
+    expect(seen[seen.length - 1].args).toEqual([
+      "main",
+      {
+        direction: "horizontal",
+        first: { view: "v1", minWidth: 100 },
+        second: { direction: "vertical", ratio: 0.7, first: { view: "main" }, second: { view: "v2" } },
+      },
+    ]);
+    expect(await w.layout()).toEqual({ view: "main" });
+    expect(await w.views()).toHaveLength(1);
+    expect(await win.views()).toHaveLength(1);
+    expect(seen[seen.length - 1].args).toEqual([""]);
+  });
+
+  it("onViewMessage listens for the DOM event and stops when asked", () => {
+    const listeners = new Map<string, (e: unknown) => void>();
+    const g = globalThis as unknown as { addEventListener?: unknown; removeEventListener?: unknown };
+    const saved = { add: g.addEventListener, remove: g.removeEventListener };
+    g.addEventListener = (type: string, fn: (e: unknown) => void) => listeners.set(type, fn);
+    g.removeEventListener = (type: string) => listeners.delete(type);
+    try {
+      const got: unknown[] = [];
+      const stop = win.onViewMessage((m) => got.push(m));
+      listeners.get("krate:view-message")!({ detail: { from: "v2", data: { a: 1 } } });
+      expect(got).toEqual([{ from: "v2", data: { a: 1 } }]);
+      stop();
+      expect(listeners.has("krate:view-message")).toBe(false);
+    } finally {
+      g.addEventListener = saved.add;
+      g.removeEventListener = saved.remove;
+    }
+  });
+
+  it("onViewEvent delivers view events", async () => {
+    setup({}, {
+      "krate/window.viewEvents": async function* () {
+        yield { view: "v1", window: "main", kind: "added", path: "/side" };
+        yield { view: "v1", window: "main", kind: "removed", path: "" };
+      } as unknown as FakeHandler,
+    });
+    const got: string[] = [];
+    const stop = win.onViewEvent((e) => got.push(`${e.view}:${e.kind}`));
+    await flushAll();
+    expect(got).toEqual(["v1:added", "v1:removed"]);
+    stop();
+  });
+
   it("onCloseRequested filters by window and the unsubscribe stops delivery", async () => {
     let push!: (v: unknown) => void;
     const queue: unknown[] = [];

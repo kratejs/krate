@@ -130,6 +130,9 @@ the shell dispatches `krate:memory-pressure` on a page whose window was hidden
 or minimized so it can drop caches (see [Windows and background
 mode](/docs/native/memory/#windows-and-background-mode)).
 
+A window can hold several webviews as split panes, each with its own route and
+scope; see [Views and split panes](/docs/native/views/).
+
 Windows are named by id. The first is `"main"`; `open()` returns a handle with
 the id of the new one. A page does not know its own id unless it is told, so
 pass it through the route (`/settings?w=<id>`) if a window must control itself.
@@ -142,7 +145,7 @@ source. By area:
 
 | Area | Functions | Streams |
 |------|-----------|---------|
-| window | `krate/window.open`, `List`, `State`, `Close`, `SetTitle`, `SetSize`, `SetPosition`, `SetAlwaysOnTop`, `SetFullscreen`, `SetFrameless`, `Minimize`, `Maximize`, `Restore`, `Focus`, `Show`, `Hide`, `SetPreventClose`, `Navigate` | `krate/window.events` |
+| window | `krate/window.open`, `List`, `State`, `Close`, `SetTitle`, `SetSize`, `SetPosition`, `SetAlwaysOnTop`, `SetFullscreen`, `SetFrameless`, `Minimize`, `Maximize`, `Restore`, `Focus`, `Show`, `Hide`, `SetPreventClose`, `Navigate`; views: `krate/window.addView`, `krate/window.removeView`, `krate/window.views`, `krate/window.setLayout`, `krate/window.layout`, `krate/window.focusView`, `krate/window.navigateView`, `krate/window.postMessage` | `krate/window.events`, `krate/window.viewEvents` |
 | dialog | `krate/dialog.openFile`, `OpenFolder`, `SaveFile`, `Message` | |
 | clipboard | `krate/clipboard.readText`, `ReadImage`, `ReadFiles` (need `clipboard:read`), `WriteText`, `WriteImage`, `WriteFiles`, `Clear` | |
 | menu | `krate/menu.setApp`, `Popup` | `krate/menu.events` |

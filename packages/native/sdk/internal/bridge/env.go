@@ -2,7 +2,9 @@ package bridge
 
 import (
 	"fmt"
+	"sort"
 	"sync"
+	"time"
 
 	"github.com/kratejs/krate/packages/native/krate"
 	"github.com/kratejs/krate/packages/native/platform"
@@ -25,6 +27,8 @@ type Env struct {
 	// permission list (has reports whether one was given). It reports whether
 	// the new window is scoped; an error refuses the window.
 	Scope func(caller, window string, perms []string, has bool) (bool, error)
+	// Unscope, when set, forgets the scope of a window or view that went away.
+	Unscope func(id string)
 }
 
 // NewEnv returns an Env for app.
@@ -51,11 +55,184 @@ type Windows struct {
 	byRef map[caps.WindowRef]string
 	next  int
 	main  string
+
+	// Views: every webview of every window, by SDK id and by platform ref.
+	// The primary view of a window has the window's id, so the id of a view
+	// is also the key of its permission scope.
+	views    map[string]*ViewRec
+	viewRefs map[caps.ViewRef]*ViewRec
+	nextView int
+	seq      int
+	changed  chan struct{} // closed (and replaced) when a view is registered
+	held     []caps.ViewEvent
+	onView   func(rec ViewRec, held []caps.ViewEvent)
+}
+
+// ViewRec is one registered view.
+type ViewRec struct {
+	ID      string
+	Ref     caps.ViewRef
+	Window  string
+	Primary bool
+	seq     int
 }
 
 // NewWindows returns an empty registry.
 func NewWindows() *Windows {
-	return &Windows{byID: map[string]platform.Window{}, byRef: map[caps.WindowRef]string{}}
+	return &Windows{byID: map[string]platform.Window{}, byRef: map[caps.WindowRef]string{},
+		views: map[string]*ViewRec{}, viewRefs: map[caps.ViewRef]*ViewRec{}, changed: make(chan struct{})}
+}
+
+// ReserveView returns an unused view id "v<N>".
+func (w *Windows) ReserveView() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for {
+		w.nextView++
+		id := fmt.Sprintf("v%d", w.nextView)
+		if _, taken := w.views[id]; !taken {
+			if _, win := w.byID[id]; !win {
+				return id
+			}
+		}
+	}
+}
+
+// IDTaken reports whether id names a window or a view.
+func (w *Windows) IDTaken(id string) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	_, v := w.views[id]
+	_, win := w.byID[id]
+	return v || win
+}
+
+// AddView registers a view of a window under id.
+func (w *Windows) AddView(id, window string, ref caps.ViewRef, primary bool) error {
+	w.mu.Lock()
+	rec, held, err := w.addViewLocked(id, window, ref, primary)
+	fn := w.onView
+	w.mu.Unlock()
+	if err == nil && fn != nil {
+		fn(rec, held)
+	}
+	return err
+}
+
+// addViewLocked also takes the events held for the view's ref.
+func (w *Windows) addViewLocked(id, window string, ref caps.ViewRef, primary bool) (ViewRec, []caps.ViewEvent, error) {
+	if _, dup := w.views[id]; dup {
+		return ViewRec{}, nil, fmt.Errorf("view %q already exists", id)
+	}
+	w.seq++
+	r := &ViewRec{ID: id, Ref: ref, Window: window, Primary: primary, seq: w.seq}
+	w.views[id] = r
+	w.viewRefs[ref] = r
+	close(w.changed)
+	w.changed = make(chan struct{})
+	var held, rest []caps.ViewEvent
+	for _, e := range w.held {
+		if e.View == ref {
+			held = append(held, e)
+		} else {
+			rest = append(rest, e)
+		}
+	}
+	w.held = rest
+	return *r, held, nil
+}
+
+// OnView sets the function called when a view is registered, with the events
+// that were held for it (see Hold).
+func (w *Windows) OnView(fn func(rec ViewRec, held []caps.ViewEvent)) {
+	w.mu.Lock()
+	w.onView = fn
+	w.mu.Unlock()
+}
+
+// Hold keeps an event of a view that is not registered yet, to be delivered
+// when it is. The platform reports events as soon as a view exists, which can
+// be before the code that created it has registered it.
+func (w *Windows) Hold(e caps.ViewEvent) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if _, ok := w.viewRefs[e.View]; ok {
+		return
+	}
+	w.held = append(w.held, e)
+	if len(w.held) > 64 {
+		w.held = w.held[len(w.held)-64:]
+	}
+}
+
+// RemoveView forgets a view.
+func (w *Windows) RemoveView(id string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if r, ok := w.views[id]; ok {
+		delete(w.viewRefs, r.Ref)
+		delete(w.views, id)
+	}
+}
+
+// View returns the view with this id.
+func (w *Windows) View(id string) (ViewRec, bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if r, ok := w.views[id]; ok {
+		return *r, true
+	}
+	return ViewRec{}, false
+}
+
+// ViewByRef returns the view for a platform reference.
+func (w *Windows) ViewByRef(ref caps.ViewRef) (ViewRec, bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if r, ok := w.viewRefs[ref]; ok {
+		return *r, true
+	}
+	return ViewRec{}, false
+}
+
+// ViewsOf lists the views of a window ("" = all windows) in creation order.
+func (w *Windows) ViewsOf(window string) []ViewRec {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	var out []ViewRec
+	for _, r := range w.views {
+		if window == "" || r.Window == window {
+			out = append(out, *r)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].seq < out[j].seq })
+	return out
+}
+
+// WaitView returns the view for ref, waiting up to d for it to be registered:
+// a page can send its first request before the code that created its view has
+// returned.
+func (w *Windows) WaitView(ref caps.ViewRef, d time.Duration) (ViewRec, bool) {
+	deadline := time.NewTimer(d)
+	defer deadline.Stop()
+	for {
+		w.mu.Lock()
+		r, ok := w.viewRefs[ref]
+		ch := w.changed
+		var rec ViewRec
+		if ok {
+			rec = *r
+		}
+		w.mu.Unlock()
+		if ok {
+			return rec, true
+		}
+		select {
+		case <-ch:
+		case <-deadline.C:
+			return ViewRec{}, false
+		}
+	}
 }
 
 // Reserve returns the id the next window with an empty id would get.
@@ -70,7 +247,6 @@ func (w *Windows) Reserve() string {
 // is the main window.
 func (w *Windows) Add(id string, win platform.Window) string {
 	w.mu.Lock()
-	defer w.mu.Unlock()
 	if id == "" {
 		w.next++
 		id = fmt.Sprintf("w%d", w.next)
@@ -81,6 +257,16 @@ func (w *Windows) Add(id string, win platform.Window) string {
 	}
 	if w.main == "" {
 		w.main = id
+	}
+	var rec ViewRec
+	var held []caps.ViewEvent
+	if v, ok := win.(caps.WindowViews); ok {
+		rec, held, _ = w.addViewLocked(id, id, v.PrimaryView(), true)
+	}
+	fn := w.onView
+	w.mu.Unlock()
+	if rec.ID != "" && fn != nil {
+		fn(rec, held)
 	}
 	return id
 }
@@ -95,6 +281,12 @@ func (w *Windows) Remove(id string) {
 		}
 	}
 	delete(w.byID, id)
+	for vid, r := range w.views {
+		if r.Window == id {
+			delete(w.viewRefs, r.Ref)
+			delete(w.views, vid)
+		}
+	}
 	if w.main == id {
 		w.main = ""
 		for k := range w.byID {

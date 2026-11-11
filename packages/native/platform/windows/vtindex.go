@@ -32,6 +32,9 @@ var (
 
 	wvGetSettings                = vtIndex("ICoreWebView2", "get_Settings")
 	wvNavigate                   = vtIndex("ICoreWebView2", "Navigate")
+	wvGetSource                  = vtIndex("ICoreWebView2", "get_Source")
+	wvAddNavigationCompleted     = vtIndex("ICoreWebView2", "add_NavigationCompleted")
+	wvAddWindowCloseRequested    = vtIndex("ICoreWebView2", "add_WindowCloseRequested")
 	wvAddNavigationStarting      = vtIndex("ICoreWebView2", "add_NavigationStarting")
 	wvAddFrameNavigationStarting = vtIndex("ICoreWebView2", "add_FrameNavigationStarting")
 	wvAddNewWindowRequested      = vtIndex("ICoreWebView2", "add_NewWindowRequested")

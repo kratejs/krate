@@ -237,6 +237,49 @@ func TestWindowReachesCtx(t *testing.T) {
 	}
 }
 
+// A native identity replaces the header the page sets: a request the platform
+// tagged with a view cannot name another window, and one the platform could
+// not tag is not trusted either. Without a native identity the header holds.
+func TestIdentifyOverridesTheWindowHeader(t *testing.T) {
+	reg := NewRegistry()
+	reg.Func("m.Window", func(ctx krate.Ctx, _ *wire.Decoder, out *wire.Encoder) error {
+		out.String(ctx.Window())
+		return nil
+	})
+	_, ts := newTestServer(t, Options{Registry: reg, Identify: func(r *http.Request) (string, bool) {
+		switch r.Header.Get("x-test-native") {
+		case "":
+			return "", false
+		case "unknown":
+			return "?unknown", true
+		}
+		return "scoped", true
+	}})
+	call := func(native, header string) string {
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/__krate/call", bytes.NewReader(callsFrame(t, callSpec{id: 1, fn: "m.Window"})))
+		req.Header.Set("x-krate-window", header)
+		if native != "" {
+			req.Header.Set("x-test-native", native)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		s, _ := parseResult(t, next(t, resp.Body)).OK.String()
+		return s
+	}
+	if got := call("yes", "main"); got != "scoped" {
+		t.Errorf("forged header won: %q", got)
+	}
+	if got := call("unknown", "main"); got != "?unknown" {
+		t.Errorf("unknown native view fell back to the header: %q", got)
+	}
+	if got := call("", "main"); got != "main" {
+		t.Errorf("no native identity: want the header, got %q", got)
+	}
+}
+
 func TestArgsDecoding(t *testing.T) {
 	reg := NewRegistry()
 	reg.Func("m.Sum", func(_ krate.Ctx, a *wire.Decoder, out *wire.Encoder) error {

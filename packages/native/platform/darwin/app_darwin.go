@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/ebitengine/purego/objc"
@@ -68,6 +69,13 @@ type App struct {
 	// Touched only on the main thread.
 	windows map[objc.ID]*Window
 	tasks   map[objc.ID]*taskState
+	byWeb   map[objc.ID]*view
+
+	// viewMu guards viewOwner, which WindowOfView reads from any goroutine.
+	viewMu      sync.Mutex
+	viewOwner   map[caps.ViewRef]caps.WindowRef
+	nextView    uint64
+	viewHandler func(caps.ViewEvent)
 }
 
 var theApp *App
@@ -95,6 +103,9 @@ func New(opts Options) (*App, error) {
 		opts:    opts,
 		windows: map[objc.ID]*Window{},
 		tasks:   map[objc.ID]*taskState{},
+		byWeb:   map[objc.ID]*view{},
+
+		viewOwner: map[caps.ViewRef]caps.WindowRef{},
 	}
 	var err error
 	withPool(func() { err = a.setup() })
@@ -326,7 +337,7 @@ func registerClasses(a *App) error {
 
 	_, err = objc.RegisterClass("KrateSchemeHandler", nsObject, protos("WKURLSchemeHandler"), nil, []objc.MethodDef{
 		{Cmd: sel("webView:startURLSchemeTask:"), Fn: func(self objc.ID, _ objc.SEL, webView, task objc.ID) {
-			a.startTask(task)
+			a.startTask(webView, task)
 		}},
 		{Cmd: sel("webView:stopURLSchemeTask:"), Fn: func(self objc.ID, _ objc.SEL, webView, task objc.ID) {
 			a.stopTask(task)

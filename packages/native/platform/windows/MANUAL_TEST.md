@@ -58,6 +58,21 @@ Check by hand with a small program (`platform.New`, `NewWindow`, `Run`):
 7. Fallback loader: put `WebView2Loader.dll` next to the executable on a
    machine where the registry route fails and confirm it is used.
 
+## 2b. Views (split panes)
+
+`TestGUIViews` covers identity, layout and removal. By hand, from a program that
+calls `AddView`:
+
+- Two views side by side leave a 6 px gap; the pointer turns into the
+  left-right (or up-down) arrows over it and dragging moves the divider. A pane
+  stops at its minimum size. The result is the same at 100 and 200 percent DPI.
+- Dragging past the window edge, or releasing the button outside the window,
+  ends the drag (capture is released).
+- `Release` then `Show` brings back every view on its route with the divider
+  where it was.
+- `window.close()` in a secondary view removes it and sends a `closed` event
+  (this relies on the WindowCloseRequested handler GUID, unverified).
+
 ## 3. If something fails
 
 - `Run` returns "WebView2 Runtime not found" listing paths: the registry

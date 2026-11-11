@@ -66,3 +66,9 @@ same `permissions` list as the data modules (a missing permission rejects with
 `permission_denied`; `tray`, `shortcut` and `clipboard:read` are off unless
 listed); see the SDK pages in the Native docs.
 
+`@krate/app/window` also splits a window into several webviews: `main().addView({ path,
+side, size, minWidth, permissions })` returns a `View` (`remove`, `focus`, `navigate`,
+`post`), `window.setLayout(split(...))` and `window.layout()` set and read the pane
+tree, `onViewEvent` reports added, navigated, removed and closed views, and
+`onViewMessage` receives what another view `post`ed. See the Views page of the Native docs.
+

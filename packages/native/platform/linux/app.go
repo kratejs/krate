@@ -81,6 +81,13 @@ type App struct {
 	mu          sync.Mutex
 	windows     map[uintptr]*Window
 	nextWin     uintptr
+	views       map[caps.ViewRef]*view
+	byWidget    map[uintptr]*view
+	nextView    uint64
+	viewHandler func(caps.ViewEvent)
+	// panes maps a GtkPaned id to its state (main thread only).
+	panes       map[uintptr]*paneState
+	nextPaned   uintptr
 	onAllClosed func()
 	winHandler  func(caps.WindowEvent)
 	shortcutFn  func(string)
@@ -101,7 +108,7 @@ var (
 	theApp *App
 
 	cbIdle, cbScheme, cbPolicy, cbLoad, cbDestroy, cbClose, cbHeader uintptr
-	cbDelete, cbWinState, cbEvalDone                                 uintptr
+	cbDelete, cbWinState, cbEvalDone, cbPaneAlloc                    uintptr
 	curHeader                                                        http.Header
 )
 
@@ -117,7 +124,7 @@ func New(opts Options) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	app := &App{api: a, handler: opts.Handler, debug: opts.Debug, keepAlive: opts.KeepAlive, evalCbs: map[uintptr]func(string){}, windows: map[uintptr]*Window{}, stopCh: make(chan struct{}), mainTid: syscall.Gettid()}
+	app := &App{api: a, handler: opts.Handler, debug: opts.Debug, keepAlive: opts.KeepAlive, evalCbs: map[uintptr]func(string){}, windows: map[uintptr]*Window{}, views: map[caps.ViewRef]*view{}, byWidget: map[uintptr]*view{}, panes: map[uintptr]*paneState{}, stopCh: make(chan struct{}), mainTid: syscall.Gettid()}
 	if syscall.Getpid() != app.mainTid {
 		return nil, errors.New("krate: New must be called on the main thread (call from the main goroutine)")
 	}
@@ -142,6 +149,7 @@ func New(opts Options) (*App, error) {
 	cbDelete = purego.NewCallback(deleteCallback)
 	cbWinState = purego.NewCallback(winStateCallback)
 	cbEvalDone = purego.NewCallback(evalDoneCallback)
+	cbPaneAlloc = purego.NewCallback(allocateCallback)
 	app.x = loadExt()
 	app.v = loadView()
 	app.initExt()

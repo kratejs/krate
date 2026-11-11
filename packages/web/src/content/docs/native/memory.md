@@ -116,6 +116,10 @@ processes.
 | Windows | The app creates one `ICoreWebView2Environment` (one user data folder, `%LOCALAPPDATA%\<appId>\WebView2`) and every window asks it for a controller, so all windows run under one WebView2 browser process. The renderer processes are WebView2's own business; Krate does not pass `--renderer-process-limit`. |
 | macOS | All windows use one `WKProcessPool`. WebKit starts a WebContent process per web view unless the pool says otherwise, so the pool is created with the private `_WKProcessPoolConfiguration.usesSingleWebProcess` switch when the class and both selectors exist (`respondsToSelector` is checked); a WebKit without them keeps one process per window. |
 
+A window can also hold several views as split panes
+([Views](/docs/native/views/)); they share the same web process, and an extra view
+costs about 1 MB of web process memory on Linux.
+
 ### Release a window, run in the background
 
 `Hide` with release hides a window and destroys its webview:

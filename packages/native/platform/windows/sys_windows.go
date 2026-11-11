@@ -118,14 +118,20 @@ const (
 
 	cwUseDefault = 0x80000000
 
-	wmDestroy    = 0x0002
-	wmSize       = 0x0005
-	wmSetFocus   = 0x0007
-	wmClose      = 0x0010
-	wmQuit       = 0x0012
-	wmDpiChanged = 0x02E0
-	wmApp        = 0x8000
-	wmDispatch   = wmApp + 0x4B
+	wmDestroy        = 0x0002
+	wmSize           = 0x0005
+	wmSetCursor      = 0x0020
+	wmMouseMove      = 0x0200
+	wmLButtonDown    = 0x0201
+	wmLButtonUp      = 0x0202
+	wmCaptureChanged = 0x0215
+	htClient         = 1
+	wmSetFocus       = 0x0007
+	wmClose          = 0x0010
+	wmQuit           = 0x0012
+	wmDpiChanged     = 0x02E0
+	wmApp            = 0x8000
+	wmDispatch       = wmApp + 0x4B
 
 	sizeMinimized = 1
 
@@ -141,6 +147,8 @@ const (
 	qsAllInput          = 0x04FF
 	mwmoInputAvailable  = 0x0004
 	idcArrow            = 32512
+	idcSizeNS           = 32645
+	idcSizeWE           = 32644
 	colorWindow         = 5
 	csHRedraw           = 0x0002
 	csVRedraw           = 0x0001
@@ -179,6 +187,10 @@ var (
 	pShowWindow           = user32.NewProc("ShowWindow")
 	pUpdateWindow         = user32.NewProc("UpdateWindow")
 	pLoadCursorW          = user32.NewProc("LoadCursorW")
+	pSetCursor            = user32.NewProc("SetCursor")
+	pSetCapture           = user32.NewProc("SetCapture")
+	pReleaseCapture       = user32.NewProc("ReleaseCapture")
+	pScreenToClient       = user32.NewProc("ScreenToClient")
 	pAdjustWindowRectEx   = user32.NewProc("AdjustWindowRectEx")
 	pAdjustWindowRectExDP = user32.NewProc("AdjustWindowRectExForDpi")
 	pGetDpiForWindow      = user32.NewProc("GetDpiForWindow")

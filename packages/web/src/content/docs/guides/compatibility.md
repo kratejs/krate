@@ -80,6 +80,8 @@ green run there is what moves a cell.
 | Native: Node, Bun and Deno host children | Partial | Untested | Untested | Krate Native v1 |
 | Native: SDK data areas (kv, db, fs, net, os) | Supported | Untested | Untested | Krate Native v1 |
 | Native: SDK windows | Partial | Untested | Untested | Krate Native v1 |
+| Native: requests are bound to the webview they came from | Supported | Untested | Untested | Krate Native v1 |
+| Native: views and split panes | Supported | Untested | Untested | Krate Native v1 |
 | Native: shared web process, release and background mode | Supported | Untested | Untested | Krate Native v1 |
 | Native: SDK dialogs, clipboard and menus | Supported | Untested | Untested | Krate Native v1 |
 | Native: SDK notifications | Supported | n/a | n/a | Krate Native v1 |
@@ -552,29 +554,62 @@ Evidence: `TestGoAPI`, `TestTwoProcesses`, `TestWALAndPragmas`, `TestTraversalIs
 
 **Linux:** Partial - **macOS:** Untested - **Windows:** Untested
 
-Extra windows on routes, title and size, fullscreen, maximize, minimize, frameless windows, close-requested interception and per-window permission scopes.
+Extra windows on routes, title and size, fullscreen, maximize, minimize, frameless windows, close-requested interception and per-window permission scopes bound to the webview, not to anything the page sends. A window can hold several webviews (native-views).
 
 Known limits:
 
+- Per-window permission scopes are enforced against the native webview a request came from (see native-view-identity). In browser mode the page's own x-krate-window header is the identity, so a script there can name another window's scope.
 - Wayland: a client cannot place windows or keep them above others, so SetPosition and SetAlwaysOnTop are accepted and ignored there. Window position and always-on-top were verified on X11 only.
 - Fullscreen, maximize and minimize are verified with openbox on Xvfb (KRATE_NATIVE_WM=1), not on a full desktop environment.
 - macOS and Windows: untested. The same Go code is built for them (cross-compile checks in CI) and the CI native job runs go test on both, but no result of a run against a real WKWebView or WebView2 window has been confirmed.
 
 Evidence: `TestGUIWindowControls`, `TestGUIWindowOps`, `TestGUICloseRequested`, `TestGUITwoWindows`, `TestWindowOps`, `TestSecondWindowOnARoute`, `TestWindowOpenScopes`, `TestWindowScopeNarrowsCalls`
 
+### Native: requests are bound to the webview they came from
+
+**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+
+The platform layer tags every request on the app scheme with the webview that made it (WebKitGTK webkit_uri_scheme_request_get_web_view, the webView of WKURLSchemeHandler, one WebView2 WebResourceRequested handler per view) and the shell maps that view to its window or view id and permission scope. The x-krate-window header that page script can set is ignored in a native window, so a scoped page cannot claim a wider scope. A request from a webview the shell cannot place gets a scope that allows nothing.
+
+Known limits:
+
+- Browser mode (krate native dev --browser) has no native webviews, so the page's x-krate-window header is the identity there and a script can send another window's id; scopes in browser mode only catch mistakes.
+- A scope limits what a page may ask the host to do; it does not isolate the page. Every window and view shares one origin, so pages of different scopes can read each other's localStorage and cookies.
+- macOS and Windows: untested. The code is compiled for both (cross-compile checks) and the request tagging is written against the documented APIs, but no result of a run against a real WKWebView or WebView2 has been confirmed. On Windows the identity is the handler object registered for the view, not a pointer comparison of the sender.
+
+Evidence: `TestIdentifyOverridesTheWindowHeader`, `TestIdentify`, `TestViewContext`, `TestScopedWindowCannotForgeAWiderScope`, `TestViewScopeIsBoundNatively`, `TestGUIScopedWindowCannotForgeAWiderScope`, `TestGUIViewIdentity`, `TestViewScopes`, `TestViewWindowMapping`, `TestGUIViews`
+
+### Native: views and split panes
+
+**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+
+A window can hold several webviews laid out as a tree of horizontal and vertical splits with draggable dividers, minimum pane sizes and ratios that can be read back after a drag. Views are added, removed, focused, navigated and given their own permission scope; they report added, navigated, removed and closed events and can post messages to each other. All views share the app's one web process (about 1 MB of web process memory per extra view on Linux). Layout arithmetic is pure Go and tested on every OS.
+
+Known limits:
+
+- Divider drags on Linux are verified by calling gtk_paned_set_position, which is what the handle does, not by moving a real pointer.
+- macOS (nested NSSplitView, Auto Layout minimum sizes) and Windows (several WebView2 controllers in one HWND, dividers hit-tested in the window procedure) are untested: compiled, with the layout and drag arithmetic unit-tested, but never run. The WebView2 NavigationCompleted and WindowCloseRequested handler GUIDs are written from memory of WebView2.h and unverified.
+- On macOS a page's window.close() does not remove a secondary view (no closed event for it); Linux and Windows do.
+- Release applies to a whole window, not to one view. While a window is released, adding, removing or re-laying out its views fails.
+- A divider drag fires no event; read the ratios with layout().
+- Messages are JSON up to 1 MiB, not queued for a page that has not loaded, and carry the sender's view id only when the sender is a page.
+
+Evidence: `TestArrangeTwoPanes`, `TestArrangeNestedCoversBounds`, `TestSplitSizesMinimums`, `TestMinSizePropagates`, `TestHitDividerAndDrag`, `TestValidate`, `TestSplitLeafAndRemove`, `TestRatiosAndMins`, `TestSplitterHitAndCursor`, `TestSplitterDrag`, `TestSplitterDPIScales`, `TestViewOps`, `TestViewEventsAreHeldUntilRegistered`, `TestGUIViewsTwoPane`, `TestGUIViewsNestedThreePane`, `TestGUIViewsReleaseRestore`, `TestGUIViewClosedByItsPage`, `TestGUIViewsMemory`, `TestViewMessagingEventsAndLayout`, `TestGUIViews`, `fixture:examples/native-views/src/pages/index.tsx`
+
 ### Native: shared web process, release and background mode
 
 **Linux:** Supported - **macOS:** Untested - **Windows:** Untested
 
-All windows of an app share one web process (related web views on Linux, one WebView2 environment on Windows). A window can release its webview (hide with release) and get it back on the same route and scroll position; native.window.keepAlive keeps a tray app running with no window; hidden and minimized pages get a krate:memory-pressure event.
+All windows of an app, and all webviews of a window, share one web process (related web views on Linux, one WebView2 environment on Windows). A window can release its webview (hide with release) and get it back on the same route and scroll position; native.window.keepAlive keeps a tray app running with no window; hidden and minimized pages get a krate:memory-pressure event.
 
 Known limits:
 
 - macOS and Windows: untested. The code builds for both and the Windows vtable slots are checked against WebView2.h, but no run against a real WKWebView or WebView2 window has been confirmed. On macOS the single-web-process switch is a private WebKit selector guarded by respondsToSelector; on Windows ICoreWebView2_19 memory targets need a recent runtime and are skipped without it.
 - A hidden page that is not released keeps its web process memory; only the page's own handlers of krate:memory-pressure and the shell's heap trim run. Release is what returns the web process memory.
 - The network process of WebKitGTK stays alive while the app runs, so a released Linux app still holds it.
+- Release destroys every webview of a window and restores them all with their routes and layout ratios; there is no per-view release.
 
-Evidence: `TestGUISharedWebProcess`, `TestGUIReleaseRestore`, `TestGUIKeepAlive`, `TestGUINavigateReleased`, `TestGUIMemoryPressureOnHide`, `TestGUIWindowsBackground`, `TestParseViewState`, `TestParkOnClose`, `TestQuitWhenEmpty`
+Evidence: `TestGUISharedWebProcess`, `TestGUIReleaseRestore`, `TestGUIKeepAlive`, `TestGUINavigateReleased`, `TestGUIMemoryPressureOnHide`, `TestGUIWindowsBackground`, `TestParseViewState`, `TestParkOnClose`, `TestQuitWhenEmpty`, `TestGUIViewsReleaseRestore`
 
 ### Native: SDK dialogs, clipboard and menus
 

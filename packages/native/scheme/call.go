@@ -146,7 +146,7 @@ func (s *server) handleCall(w http.ResponseWriter, r *http.Request) {
 		s.badRequest(w, err)
 		return
 	}
-	window := r.Header.Get(windowHdr)
+	window := s.windowOf(r)
 
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
@@ -339,7 +339,7 @@ func (s *server) handleCancel(w http.ResponseWriter, r *http.Request) {
 		s.badRequest(w, err)
 		return
 	}
-	window := r.Header.Get(windowHdr)
+	window := s.windowOf(r)
 	s.mu.Lock()
 	var cancels []context.CancelFunc
 	for _, id := range ids {

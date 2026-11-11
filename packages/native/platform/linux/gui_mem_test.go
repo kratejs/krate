@@ -224,8 +224,8 @@ func TestGUIReleaseRestore(t *testing.T) {
 	}
 	time.Sleep(700 * time.Millisecond)
 	t.Logf("PSS with a window: %.1f MB, released: %.1f MB", before, totalPSSMB())
-	if w.state.Route != "/tall?x=2&__krate_win=w7#frag" || w.state.Y != 900 {
-		t.Errorf("saved state %+v", w.state)
+	if w.pv.state.Route != "/tall?x=2&__krate_win=w7#frag" || w.pv.state.Y != 900 {
+		t.Errorf("saved state %+v", w.pv.state)
 	}
 
 	// Releasing twice is harmless.

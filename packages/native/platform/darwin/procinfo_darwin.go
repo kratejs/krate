@@ -30,17 +30,23 @@ func (a *App) WebviewProcesses() ([]caps.ProcessRef, []string) {
 	}
 	runOnMain(func() {
 		withPool(func() {
+			var webs []objc.ID
 			for _, w := range a.windows {
-				if s := sel("_webProcessIdentifier"); respondsTo(w.web, s) {
-					add(objc.Send[int32](w.web, s), memstat.RoleWebviewWeb)
+				for _, v := range w.liveViews() {
+					webs = append(webs, v.web)
+				}
+			}
+			for _, web := range webs {
+				if s := sel("_webProcessIdentifier"); respondsTo(web, s) {
+					add(objc.Send[int32](web, s), memstat.RoleWebviewWeb)
 				} else {
 					notes = append(notes, "WKWebView does not answer _webProcessIdentifier; web content processes are not attributable")
 				}
-				if s := sel("_gpuProcessIdentifier"); respondsTo(w.web, s) {
-					add(objc.Send[int32](w.web, s), memstat.RoleWebviewGPU)
+				if s := sel("_gpuProcessIdentifier"); respondsTo(web, s) {
+					add(objc.Send[int32](web, s), memstat.RoleWebviewGPU)
 				}
 				found := false
-				cfg := w.web.Send(sel("configuration"))
+				cfg := web.Send(sel("configuration"))
 				for _, owner := range []objc.ID{cfg.Send(sel("websiteDataStore")), cfg.Send(sel("processPool"))} {
 					if owner == 0 {
 						continue

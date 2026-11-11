@@ -110,7 +110,13 @@ A Go `error` that is not a `*krate.Error` has code `internal`. A panic has code
 `panic`; its message carries the stack only in dev builds.
 
 Each request carries `x-krate-window: <window id>`. Call ids are unique per
-window; cancellation is scoped to the window.
+window; cancellation is scoped to the window. In a native window the header is
+only a hint: the platform layer tags every request with the webview it came
+from (`caps.ViewOf`), the shell maps that view to its window or view id, and
+the page's header is ignored, so page script cannot name another window's
+scope. Without a native view (`--browser` mode) the header is the identity.
+A request from a native view the shell cannot place gets a scope that allows
+nothing.
 
 Errors that are not a call's own (bad frame, unknown fn) are a `400` with a
 frame `{"error": {"code": "bad_request", "message": "..."}}`.

@@ -23,6 +23,7 @@ import (
 	"github.com/kratejs/krate/packages/native/internal/memory"
 	"github.com/kratejs/krate/packages/native/krate"
 	"github.com/kratejs/krate/packages/native/platform"
+	"github.com/kratejs/krate/packages/native/platform/caps"
 	"github.com/kratejs/krate/packages/native/scheme"
 	"github.com/kratejs/krate/packages/native/sdk"
 	sdkall "github.com/kratejs/krate/packages/native/sdk/all"
@@ -148,6 +149,11 @@ func loadApp(dir string, fsys fs.FS, opts RunOptions) (*app, error) {
 		return nil, fmt.Errorf("shell: registering the SDK: %w", err)
 	}
 	a.perms = set
+	// A request from a native view the shell cannot place gets this scope,
+	// which allows nothing; see identify.
+	if err := set.Scope(unknownView, []string{}); err != nil {
+		return nil, fmt.Errorf("shell: %w", err)
+	}
 	a.sdk = sdk.NewHost()
 	// Host children (JavaScript) reach the data SDK through the private socket.
 	a.sdk.ShareWithParent(a.reg)
@@ -186,6 +192,7 @@ func loadApp(dir string, fsys fs.FS, opts RunOptions) (*app, error) {
 		Registry: a.reg,
 		Dev:      opts.Dev,
 		Fallback: fallback,
+		Identify: a.identify,
 	}
 	if opts.Dev {
 		a.dev = newDevTools(a.logf)
@@ -209,6 +216,27 @@ func loadApp(dir string, fsys fs.FS, opts RunOptions) (*app, error) {
 		app.ServeHTTP(w, r)
 	})
 	return a, nil
+}
+
+// unknownView is the scope key of a request whose native view the shell cannot
+// place in a window. Its scope is empty, so such a request can use no SDK id.
+const unknownView = "?unknown-view"
+
+// identify binds a request to the window or view it came from. The platform
+// layer tags every request it serves with the webview that made it (see
+// caps.ViewOf), and the SDK maps that view to the id its permission scope is
+// kept under. Page script cannot influence either step, so the page's own
+// x-krate-window header is ignored whenever there is a native identity. Only
+// without one (browser mode has no native views) does the header count.
+func (a *app) identify(r *http.Request) (string, bool) {
+	ref, ok := caps.ViewOf(r)
+	if !ok {
+		return "", false
+	}
+	if id, ok := a.sdk.ViewWindow(ref); ok {
+		return id, true
+	}
+	return unknownView, true
 }
 
 // attachSDK connects the UI half of the SDK to the platform (nil in browser
@@ -501,7 +529,8 @@ func (c *Control) HMR(msg string) error {
 	return c.a.dev.hmr.publish([]byte(msg))
 }
 
-// Eval runs JavaScript in every open window. It does not wait for a result.
+// Eval runs JavaScript in every view of every open window. It does not wait
+// for a result.
 func (c *Control) Eval(js string) error {
 	if c.wins == nil {
 		return errors.New("browser mode has no native windows")
@@ -511,6 +540,12 @@ func (c *Control) Eval(js string) error {
 		return errors.New("no open window")
 	}
 	for _, w := range list {
+		if wv, ok := w.(platform.WindowViews); ok {
+			for _, v := range wv.Views() {
+				wv.EvalView(v.Ref, js)
+			}
+			continue
+		}
 		w.Eval(js)
 	}
 	return nil

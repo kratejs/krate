@@ -124,7 +124,7 @@ func TestMain(m *testing.M) {
 	if os.Getenv("KRATE_NATIVE_GUI") != "1" {
 		os.Exit(m.Run()) // GUI tests skip themselves; unit tests still run
 	}
-	app, err := New(Options{AppID: "dev.krate.guitest", Handler: guiHandler(), Debug: true, KeepAlive: true})
+	app, err := New(Options{AppID: "dev.krate.guitest", Handler: withViewPing(guiHandler()), Debug: true, KeepAlive: true})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "New:", err)
 		os.Exit(2)

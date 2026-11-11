@@ -70,6 +70,17 @@ writes a CPU profile on exit. `sdk/ids.json` is the id table the compiler reads
 (`go test ./sdk -run IDsJSON -update-ids` rewrites it; copy it to
 `packages/compiler/internal/native/capability/ids.json`).
 
+## Views and split panes
+
+A window can hold several webviews as split panes (`platform/caps` `WindowViews`,
+SDK ids `krate/window.addView` and friends, the `views` page of the docs). The
+layout arithmetic (tree to rectangles, divider hit-testing and drag, minimum
+sizes) is pure Go in `platform/caps/layout.go`; Linux nests `GtkPaned`, macOS
+nests `NSSplitView`, Windows places several WebView2 controllers from that Go
+layout. Every request on the app scheme carries the webview it came from
+(`caps.ViewOf`), which the shell maps to a window or view scope; the page's
+`x-krate-window` header is ignored in a native window.
+
 ## UI half of the SDK
 
 The `sdk` packages cover windows, dialogs, the clipboard, menus, the tray,

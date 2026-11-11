@@ -67,9 +67,13 @@ type App struct {
 	envWaiters  []func()
 	envStarted  bool
 	windows     map[uintptr]*Window
+	byWebview   map[unsafe.Pointer]*view
+	viewMu      sync.Mutex
+	viewOwner   map[caps.ViewRef]caps.WindowRef // read by WindowOfView from any goroutine
+	nextView    uint64
+	viewHandler func(caps.ViewEvent)
 	everOpened  bool
 	runErr      error
-	hResource   unsafe.Pointer // shared WebResourceRequested handler
 	hNavigation unsafe.Pointer // shared NavigationStarting handler
 	hFrameNav   unsafe.Pointer // shared FrameNavigationStarting handler
 	hNewWindow  unsafe.Pointer // shared NewWindowRequested handler
@@ -115,10 +119,12 @@ func New(cfg Config) (*App, error) {
 	}
 
 	a := &App{
-		cfg:     cfg,
-		mainTID: currentThreadID(),
-		windows: map[uintptr]*Window{},
-		exited:  make(chan struct{}),
+		cfg:       cfg,
+		mainTID:   currentThreadID(),
+		windows:   map[uintptr]*Window{},
+		byWebview: map[unsafe.Pointer]*view{},
+		viewOwner: map[caps.ViewRef]caps.WindowRef{},
+		exited:    make(chan struct{}),
 	}
 	h, _, _ := pGetModuleHandleW.Call(0)
 	a.hInst = h
@@ -133,7 +139,6 @@ func New(cfg Config) (*App, error) {
 	}
 	a.msgWnd = hwnd
 
-	a.hResource = newHandler(iidWebResourceRequestedHandler, false, a.onResourceRequested)
 	a.hNavigation = newHandler(iidNavigationStartingHandler, false, a.onNavigationStarting)
 	a.hFrameNav = newHandler(iidNavigationStartingHandler, false, a.onFrameNavigationStarting)
 	a.hNewWindow = newHandler(iidNewWindowRequestedHandler, false, a.onNewWindowRequested)
@@ -349,7 +354,7 @@ func (a *App) withEnv(fn func()) {
 // the page loads in the background; Navigate and Eval calls are queued until
 // the webview exists.
 func (a *App) NewWindow(cfg WindowConfig) (*Window, error) {
-	w := &Window{app: a, ready: make(chan struct{})}
+	w := &Window{app: a}
 	if a.onMain() {
 		if err := a.createWindow(cfg, w); err != nil {
 			return nil, err
@@ -367,12 +372,12 @@ func (a *App) NewWindow(cfg WindowConfig) (*Window, error) {
 		return nil, errors.New("windows: app is not running")
 	}
 	select {
-	case <-w.ready:
+	case <-w.pv.ready:
 	case <-a.exited:
 		return nil, errors.New("windows: app stopped before the window was ready")
 	}
-	if w.err != nil {
-		return nil, w.err
+	if w.pv.err != nil {
+		return nil, w.pv.err
 	}
 	return w, nil
 }
@@ -422,6 +427,18 @@ func wndProc(hwnd, message, wParam, lParam uintptr) (ret uintptr) {
 			}
 		case wmSetFocus:
 			w.focus()
+		case wmLButtonDown:
+			if w.mouseDown(lParam) {
+				return 0
+			}
+		case wmMouseMove:
+			w.mouseMove(lParam)
+		case wmLButtonUp, wmCaptureChanged:
+			w.mouseUp()
+		case wmSetCursor:
+			if uint16(lParam&0xFFFF) == htClient && w.setCursor() {
+				return 1
+			}
 		case wmDpiChanged:
 			rc := (*rect)(ptr(lParam))
 			pSetWindowPos.Call(hwnd, 0, uintptr(rc.left), uintptr(rc.top),

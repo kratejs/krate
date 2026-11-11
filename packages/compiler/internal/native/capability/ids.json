@@ -514,6 +514,120 @@
       ]
     },
     {
+      "id": "krate/window.addView",
+      "permission": "window",
+      "area": "window",
+      "module": "window",
+      "exports": [
+        "Window",
+        "get",
+        "main",
+        "open"
+      ]
+    },
+    {
+      "id": "krate/window.removeView",
+      "permission": "window",
+      "area": "window",
+      "module": "window",
+      "exports": [
+        "View",
+        "Window",
+        "get",
+        "getView",
+        "main",
+        "open"
+      ]
+    },
+    {
+      "id": "krate/window.views",
+      "permission": "window",
+      "area": "window",
+      "module": "window",
+      "exports": [
+        "Window",
+        "get",
+        "main",
+        "open",
+        "views"
+      ]
+    },
+    {
+      "id": "krate/window.setLayout",
+      "permission": "window",
+      "area": "window",
+      "module": "window",
+      "exports": [
+        "Window",
+        "get",
+        "main",
+        "open"
+      ]
+    },
+    {
+      "id": "krate/window.layout",
+      "permission": "window",
+      "area": "window",
+      "module": "window",
+      "exports": [
+        "Window",
+        "get",
+        "main",
+        "open"
+      ]
+    },
+    {
+      "id": "krate/window.focusView",
+      "permission": "window",
+      "area": "window",
+      "module": "window",
+      "exports": [
+        "View",
+        "Window",
+        "get",
+        "getView",
+        "main",
+        "open"
+      ]
+    },
+    {
+      "id": "krate/window.navigateView",
+      "permission": "window",
+      "area": "window",
+      "module": "window",
+      "exports": [
+        "View",
+        "Window",
+        "get",
+        "getView",
+        "main",
+        "open"
+      ]
+    },
+    {
+      "id": "krate/window.postMessage",
+      "permission": "window",
+      "area": "window",
+      "module": "window",
+      "exports": [
+        "View",
+        "Window",
+        "get",
+        "getView",
+        "main",
+        "open"
+      ]
+    },
+    {
+      "id": "krate/window.viewEvents",
+      "permission": "window",
+      "area": "window",
+      "module": "window",
+      "exports": [
+        "onViewEvent"
+      ]
+    },
+    {
       "id": "krate/dialog.openFile",
       "permission": "dialog",
       "area": "dialog",

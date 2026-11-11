@@ -42,18 +42,20 @@ func (a *App) WebviewProcesses() ([]caps.ProcessRef, []string) {
 		}
 		seen := map[int]bool{}
 		for _, w := range a.windows {
-			if w.webview == nil {
-				continue
-			}
-			var pid uint32
-			if hr := vcall(w.webview, wvGetBrowserProcessId, uintptr(unsafe.Pointer(&pid))); failed(hr) || pid == 0 {
-				continue
-			}
-			kids, _ := memstat.Descendants(int(pid))
-			for _, p := range append([]int{int(pid)}, kids...) {
-				if !seen[p] {
-					seen[p] = true
-					refs = append(refs, caps.ProcessRef{PID: p, Role: memstat.RoleWebviewOther})
+			for _, v := range w.allViews() {
+				if v.webview == nil {
+					continue
+				}
+				var pid uint32
+				if hr := vcall(v.webview, wvGetBrowserProcessId, uintptr(unsafe.Pointer(&pid))); failed(hr) || pid == 0 {
+					continue
+				}
+				kids, _ := memstat.Descendants(int(pid))
+				for _, p := range append([]int{int(pid)}, kids...) {
+					if !seen[p] {
+						seen[p] = true
+						refs = append(refs, caps.ProcessRef{PID: p, Role: memstat.RoleWebviewOther})
+					}
 				}
 			}
 		}
