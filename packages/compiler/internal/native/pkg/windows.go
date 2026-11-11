@@ -63,7 +63,9 @@ func packageWindows(o *Options, ic *Icon, want map[string]bool, stage string, re
 			return err
 		}
 		res.add(Artifact{Path: out, Format: "msix"})
-		res.note("the .msix is unsigned; Windows installs only signed packages: sign it with krate native sign (signtool) using a certificate whose subject is exactly %q", msixPublisher(m.Publisher))
+		if o.Signer == nil {
+			res.note("the .msix is unsigned; Windows installs only signed packages: sign it with krate native sign (signtool) using a certificate whose subject is exactly %q", msixPublisher(m.Publisher))
+		}
 		if o.Signer != nil {
 			if err := o.Signer.SignFile(out, "msix"); err != nil {
 				return err
@@ -149,6 +151,15 @@ func NSISScript(m Metadata, p Payload, srcDir, outFile string) string {
 	w("!insertmacro MUI_UNPAGE_CONFIRM")
 	w("!insertmacro MUI_UNPAGE_INSTFILES")
 	w("!insertmacro MUI_LANGUAGE \"English\"")
+	w("")
+	// The registry keys live in the 64-bit view; without this the uninstaller
+	// (a 32-bit process) would look in WOW6432Node and leave them behind.
+	w("Function .onInit")
+	w("  SetRegView 64")
+	w("FunctionEnd")
+	w("Function un.onInit")
+	w("  SetRegView 64")
+	w("FunctionEnd")
 	w("")
 	w("Function EnsureWebView2")
 	w("  ; Evergreen runtime client GUID. Present per machine or per user when installed.")

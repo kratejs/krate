@@ -52,7 +52,7 @@ func guiHandler() http.Handler {
 		w.Header().Set("X-Echo-Len", fmt.Sprint(len(b)))
 		_, _ = w.Write(b)
 	})
-	mux.HandleFunc("/stream", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/__krate/stream/gui", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		fl := w.(http.Flusher)
 		for i := 0; i < 5; i++ {
@@ -228,7 +228,7 @@ const guiPage = `<!doctype html><meta charset=utf-8><title>krate gui test</title
       const d = new Uint8Array(await crypto.subtle.digest('SHA-256', back));
       rep.subtleSum = Array.from(d, b => b.toString(16).padStart(2, '0')).join('');
     }
-    const sres = await fetch('/stream');
+    const sres = await fetch("/__krate/stream/gui");
     const reader = sres.body.getReader();
     const t0 = performance.now();
     let text = '';

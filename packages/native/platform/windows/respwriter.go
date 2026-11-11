@@ -37,6 +37,9 @@ type responseWriter struct {
 	stream   *blockBuf
 	head     bool
 	finished bool
+	// whole holds the response back until the handler returns: WebView2 wants
+	// the complete body when the response is installed.
+	whole bool
 
 	commit   func(status int, h http.Header, body *blockBuf)
 	complete func(status int, h http.Header, body []byte)
@@ -84,7 +87,7 @@ func (w *responseWriter) Write(p []byte) (int, error) {
 		return s.Write(p)
 	}
 	w.buf = append(w.buf, p...)
-	if len(w.buf) >= commitThreshold {
+	if !w.whole && len(w.buf) >= commitThreshold {
 		w.commitLocked()
 	}
 	w.mu.Unlock()
@@ -99,7 +102,7 @@ func (w *responseWriter) Flush() {
 		return
 	}
 	w.writeHeaderLocked(http.StatusOK)
-	if w.stream == nil {
+	if w.stream == nil && !w.whole {
 		w.commitLocked()
 	}
 }

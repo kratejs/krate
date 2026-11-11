@@ -292,6 +292,9 @@ func BuildMSIX(m Metadata, p Payload, ic *Icon, inner *tree, out string) error {
 func writeStored(zw *zip.Writer, name string, data []byte) error {
 	h := &zip.FileHeader{
 		Name: name, Method: zip.Store,
+		// Windows accepts only version 10 (or 45 for zip64) here; Go's raw
+		// writer would leave 0, which makeappx rejects as inconsistent.
+		CreatorVersion: 10, ReaderVersion: 10,
 		CRC32:              crc32.ChecksumIEEE(data),
 		CompressedSize64:   uint64(len(data)),
 		UncompressedSize64: uint64(len(data)),

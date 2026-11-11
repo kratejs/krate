@@ -19,6 +19,7 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"unicode/utf16"
 	"unsafe"
 
@@ -355,6 +356,14 @@ func (a *App) toastShow(n caps.Notification) error {
 	return nil
 }
 
+// toastFailures counts Failed events and lastDismissReason is the reason of
+// the latest Dismissed event; the GUI test tells a failed toast from one the
+// OS dismissed (no foreground UI, Focus Assist) with them.
+var (
+	toastFailures     atomic.Int32
+	lastDismissReason atomic.Int32
+)
+
 // attachToastEvents connects Activated, Dismissed and Failed. The toast keeps
 // its own reference to each handler, so ours are released right away. If an
 // event cannot be connected the toast is still shown; its events are lost and
@@ -405,6 +414,7 @@ func (a *App) attachToastEvents(toast unsafe.Pointer, id string) {
 				comRelease(da)
 			}
 		}
+		lastDismissReason.Store(reason)
 		if dismissEvent(reason) || reason == -1 {
 			emitNotify(caps.NotifyEvent{ID: id, Closed: true})
 		}
@@ -419,6 +429,7 @@ func (a *App) attachToastEvents(toast unsafe.Pointer, id string) {
 			}
 		}
 		logf("notification %q failed: 0x%08x", id, uint32(code))
+		toastFailures.Add(1)
 		emitNotify(caps.NotifyEvent{ID: id, Closed: true})
 		forget()
 	}, "failure")
