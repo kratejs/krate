@@ -248,7 +248,16 @@ func (b *Builder) BuildNativeApp(opts NativeAppOptions) (*NativeAppResult, error
 		}
 		gh := &NativeGoHostMeta{Binary: filepath.ToSlash(bin), Funcs: []string{}, Streams: []string{}, Signals: []string{}}
 		for _, mod := range g.Modules {
-			gh.Funcs = append(gh.Funcs, mod.Funcs...)
+			// Build functions run during the build; the shell never serves them.
+			skip := map[string]bool{}
+			for _, n := range mod.Build {
+				skip[mod.ID+"."+n] = true
+			}
+			for _, f := range mod.Funcs {
+				if !skip[f] {
+					gh.Funcs = append(gh.Funcs, f)
+				}
+			}
 			gh.Streams = append(gh.Streams, mod.Streams...)
 			gh.Signals = append(gh.Signals, mod.Signals...)
 		}

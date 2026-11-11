@@ -18,7 +18,7 @@ import (
 // their results by function id and canonical argument key. The functions run
 // in a generated Go program (see gobind.Evaluate), which is only built when
 // the UI uses at least one of them.
-func (b *Builder) bakeGoBuilds(res *gobind.Result, imps []hostts.GoImport) (bake.Table, []diag.Diagnostic, error) {
+func (b *Builder) bakeGoBuilds(res *gobind.Result, imps []hostts.GoImport) (bake.Table, []hostts.BakedCall, []diag.Diagnostic, error) {
 	buildNames := map[string]map[string]bool{} // source path -> name -> true
 	for _, m := range res.Modules {
 		if len(m.Build) == 0 {
@@ -31,7 +31,7 @@ func (b *Builder) bakeGoBuilds(res *gobind.Result, imps []hostts.GoImport) (bake
 		buildNames[filepath.Clean(m.Source)] = set
 	}
 	if len(buildNames) == 0 {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 	idOf := map[string]string{}
 	for _, m := range res.Modules {
@@ -39,6 +39,7 @@ func (b *Builder) bakeGoBuilds(res *gobind.Result, imps []hostts.GoImport) (bake
 	}
 
 	var ds []diag.Diagnostic
+	var goCalls []hostts.BakedCall
 	type request struct {
 		id, key string
 		args    []any
@@ -71,6 +72,7 @@ func (b *Builder) bakeGoBuilds(res *gobind.Result, imps []hostts.GoImport) (bake
 			default:
 				id := idOf[filepath.Clean(imp.File)] + "." + u.Name
 				key := bake.Key(u.Args)
+				goCalls = append(goCalls, hostts.BakedCall{File: u.File, Offset: u.Offset, Local: u.Local, ID: id, Key: key})
 				if !seen[id+"\x00"+key] {
 					seen[id+"\x00"+key] = true
 					reqs = append(reqs, request{id, key, u.Args, u})
@@ -79,10 +81,10 @@ func (b *Builder) bakeGoBuilds(res *gobind.Result, imps []hostts.GoImport) (bake
 		}
 	}
 	if len(ds) > 0 {
-		return nil, ds, nil
+		return nil, nil, ds, nil
 	}
 	if len(reqs) == 0 {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 	sort.SliceStable(reqs, func(i, j int) bool {
 		if reqs[i].id != reqs[j].id {
@@ -99,10 +101,10 @@ func (b *Builder) bakeGoBuilds(res *gobind.Result, imps []hostts.GoImport) (bake
 	if err != nil {
 		var be *gobind.BakeError
 		if errors.As(err, &be) {
-			return nil, []diag.Diagnostic{diag.New("go.mod", 1, 1, be.Msg+":\n"+indent(trimTail(be.Output, 20)),
+			return nil, nil, []diag.Diagnostic{diag.New("go.mod", 1, 1, be.Msg+":\n"+indent(trimTail(be.Output, 20)),
 				"the packages the UI imports must compile, and the go command must be on PATH; run go build ./... in the project for the full output", "").WithCode(diag.CodeBakeGo)}, nil
 		}
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	table := bake.Table{}
 	for i, r := range reqs {
@@ -123,5 +125,5 @@ func (b *Builder) bakeGoBuilds(res *gobind.Result, imps []hostts.GoImport) (bake
 			table.Set(r.id, r.key, json.RawMessage(o.OK))
 		}
 	}
-	return table, ds, nil
+	return table, goCalls, ds, nil
 }

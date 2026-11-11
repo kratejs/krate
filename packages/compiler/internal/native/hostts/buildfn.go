@@ -69,7 +69,9 @@ func (b *builder) addBuild(bf *buildFn) {
 			at(diag.CodeBakeArgs, fmt.Sprintf("argument %d of the call to build function %s is not a literal", u.BadArg, bf.Name),
 				"build functions run once during the build, so every argument must be a literal (string, number, boolean, null, or an array or object of those)")
 		default:
-			built.requests[bake.Key(u.Args)] = u.Args
+			key := bake.Key(u.Args)
+			built.requests[key] = u.Args
+			b.res.Calls = append(b.res.Calls, BakedCall{File: u.File, Offset: u.Offset, Local: u.Local, ID: bf.ID, Key: key})
 		}
 	}
 }

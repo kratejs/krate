@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
@@ -65,7 +66,47 @@ func e2eBuildApp(t *testing.T, ex, out string) string {
 	if err != nil {
 		t.Fatalf("native build: %v", err)
 	}
+	e2eCheckBaked(t, res.AppDir)
 	return res.AppDir
+}
+
+// e2eCheckBaked asserts the build functions of the example were evaluated at
+// build time: their values are in the prerendered HTML, and nothing in the
+// manifest or the host bundle can be called for them.
+func e2eCheckBaked(t *testing.T, appDir string) {
+	t.Helper()
+	html, err := os.ReadFile(filepath.Join(appDir, "dist", "index.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(html)
+	if m := regexp.MustCompile(`<p id="?build-ts"?[^>]*>(Built \d{4}-\d{2}-\d{2})</p>`).FindStringSubmatch(page); m == nil {
+		t.Errorf("the @build TS value is not in the prerendered HTML:\n%s", page)
+	}
+	if !strings.Contains(page, ">Krate Native Tasks edition, built with go") {
+		t.Errorf("the //krate:build Go value is not in the prerendered HTML:\n%s", page)
+	}
+	man, err := os.ReadFile(filepath.Join(appDir, "app.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(man), "Edition") {
+		t.Errorf("the Go build function must not be served by the Go host:\n%s", man)
+	}
+	host, err := os.ReadFile(filepath.Join(appDir, "host", "host.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(host), "buildInfo") {
+		t.Errorf("the @build function must not be in the host bundle")
+	}
+}
+
+// TestNativeE2EBaked builds the example and checks the baked values; it needs
+// no shell and no browser.
+func TestNativeE2EBaked(t *testing.T) {
+	ex := e2eRequireDeps(t)
+	e2eBuildApp(t, ex, filepath.Join(t.TempDir(), "dist-native"))
 }
 
 // e2eBuildShell compiles cmd/krate-shell from this checkout.
@@ -342,7 +383,7 @@ func TestNativeE2EGUI(t *testing.T) {
 	if err := s.query(e2eReadFlow(t, "flow_main.js"), &steps); err != nil {
 		t.Fatalf("main flow: %v", err)
 	}
-	e2eCheckSteps(t, steps, 14)
+	e2eCheckSteps(t, steps, 17)
 	e2eFootprint(t, s.cmd.Process.Pid)
 
 	for _, path := range []string{"/tasks/2", "/tasks/77"} {
@@ -431,7 +472,7 @@ func TestNativeE2EBrowser(t *testing.T) {
 	if err := json.Unmarshal(out, &res); err != nil {
 		t.Fatalf("driver output: %v\n%s", err, out)
 	}
-	e2eCheckSteps(t, res.Reports, 16)
+	e2eCheckSteps(t, res.Reports, 19)
 	for _, e := range res.Errors {
 		t.Errorf("browser error: %s", e)
 	}

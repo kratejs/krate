@@ -17,6 +17,8 @@
   const rows = () => document.querySelectorAll('#list li').length;
 
   await until('lists the tasks from Go List()', () => rows() === 1 && text('#list').includes('Read the Krate Native docs'));
+  await until('baked @build TS value is on the page', () => /^Built \d{4}-\d{2}-\d{2}$/.test(text('#build-ts')));
+  await until('baked //krate:build Go value is on the page', () => text('#build-go').startsWith('Krate Native Tasks edition, built with go'));
   await until('host signal Count() renders', () => text('#open') === 'Open tasks: 1');
 
   const input = $('#title');
@@ -36,6 +38,8 @@
 
   $('#note').click();
   await until('TS host hostSignal updates live', () => text('#notes') === 'Notes: 1');
+  $('#last').click();
+  await until('TS host code wrote kv in-process and reads it back', () => text('#last-note') === 'hello');
   $('#greet').click();
   await until('TS host function returns a value', () => text('#greeting') === 'Hello, world, from the host.');
 

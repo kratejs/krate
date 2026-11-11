@@ -80,6 +80,10 @@ permission from a typo. `isPermissionDenied(e)` and `deniedPermission(e)` from
 
 ## Ids
 
+All ids are `krate/<area>.<operation>` with a lowerCamel operation name
+(`krate/os.info`, `krate/kv.get`, `krate/window.open`). Your own Go functions keep
+their Go names (`src/lib/tasks.List`).
+
 | Id | Permission | Arguments | Result |
 |----|------------|-----------|--------|
 | `krate/os.appDataDir` | `os:info` | none | `string` |

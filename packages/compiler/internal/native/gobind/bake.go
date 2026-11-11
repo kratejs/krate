@@ -41,6 +41,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 
 %s
 	"github.com/kratejs/krate/packages/native/krate"

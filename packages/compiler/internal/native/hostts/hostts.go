@@ -88,6 +88,21 @@ type Result struct {
 	// id and canonical argument key (see package bake). The UI stubs of those
 	// functions read it through the app module.
 	Baked bake.Table
+	// Calls lists the UI calls of build functions with their baked keys, so
+	// the caller can replace them by the values.
+	Calls []BakedCall
+}
+
+// BakedCall is one literal call of a build function in a UI module.
+type BakedCall struct {
+	// File is the UI module relative to the project root; Offset and Local
+	// locate the callee in the source the build saw (the module with its
+	// inline host functions split out).
+	File   string
+	Offset int
+	Local  string
+	ID     string
+	Key    string
 }
 
 // Use is a use of an imported host name in a UI module.

@@ -59,6 +59,10 @@ A name in `hostFunctions` marks top-level functions with that name in any
 module. An entry that contains a `/`, or ends in a script extension or `.go`, is
 a path. A name that matches no function is reported as a warning.
 
+`@build` (and `"@build"`) is a function-level marker too: the function is host
+code that also runs during the build and is baked into the UI. See
+[Build Functions](/docs/native/build-functions).
+
 ### Precedence
 
 Precedence decides which source is reported as the reason code is host code, and

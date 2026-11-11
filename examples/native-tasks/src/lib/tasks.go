@@ -1,6 +1,7 @@
 package lib
 
 import (
+	"runtime"
 	"sync"
 	"time"
 
@@ -32,6 +33,12 @@ func recount() {
 	}
 	Count.Set(open)
 }
+
+// Edition is evaluated while the app is built (//krate:build); the UI gets the
+// baked string.
+//
+//krate:build
+func Edition(name string) string { return "Krate " + name + " edition, built with " + runtime.Version() }
 
 // List returns every task.
 func List() []Task {

@@ -1,6 +1,7 @@
 import { createSignal, createEffect } from '@krate/runtime';
-import { List, Add, Toggle, Watch, Count } from '../lib/tasks.go';
-import { greet, addNote, noteCount } from '../lib/notes.host';
+import { List, Add, Toggle, Watch, Count, Edition } from '../lib/tasks.go';
+import { greet, addNote, lastNote, noteCount } from '../lib/notes.host';
+import { buildInfo } from '../lib/build.host';
 
 export default function Home() {
   const [tasks, setTasks] = createSignal([]);
@@ -8,6 +9,7 @@ export default function Home() {
   const [greeting, setGreeting] = createSignal('');
   const [seen, setSeen] = createSignal(0);
   const [error, setError] = createSignal('');
+  const [last, setLast] = createSignal('');
 
   // Host functions are async: call them from handlers and effects. Reading a
   // host signal such as Count() in JSX stays up to date by itself.
@@ -40,6 +42,8 @@ export default function Home() {
   return (
     <main>
       <h1>Native Tasks</h1>
+      <p id="build-ts">{buildInfo('Built')}</p>
+      <p id="build-go">{Edition('Native Tasks')}</p>
       <p id="open">Open tasks: {Count()}</p>
       <p id="notes">Notes: {noteCount()}</p>
       <p id="seen">Tasks seen by the stream: {seen()}</p>
@@ -58,7 +62,9 @@ export default function Home() {
       <button id="watch" onClick={watch}>Watch</button>
       <button id="greet" onClick={async () => setGreeting(await greet('world'))}>Greet</button>
       <button id="note" onClick={() => addNote('hello')}>Add note</button>
+      <button id="last" onClick={async () => setLast(await lastNote())}>Last note</button>
       <button id="missing" onClick={toggleMissing}>Toggle missing</button>
+      <p id="last-note">{last()}</p>
       <p id="greeting">{greeting()}</p>
       <p id="error">{error()}</p>
     </main>

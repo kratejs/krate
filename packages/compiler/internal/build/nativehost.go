@@ -62,6 +62,7 @@ func (b *Builder) prepareNativeHost() error {
 		}
 	}
 	overlays := map[string]string{}
+	var tsCalls []hostts.BakedCall
 	if hasTS {
 		res, ds, err := hostts.Build(b.Root, b.Cfg, p, hostts.Options{Resolve: b.importResolver().Resolve})
 		if err != nil {
@@ -84,12 +85,13 @@ func (b *Builder) prepareNativeHost() error {
 		b.nativeHost = res
 		b.nativeBaked = bake.Table{}
 		b.nativeBaked.Merge(res.Baked)
+		tsCalls = res.Calls
 		for path, src := range res.Overlays {
 			overlays[path] = src
 		}
 	}
 
-	goRes, goOverlays, goBaked, ds, err := b.prepareNativeGo(p)
+	goRes, goOverlays, goBaked, goCalls, ds, err := b.prepareNativeGo(p)
 	if err != nil {
 		return err
 	}
@@ -107,12 +109,19 @@ func (b *Builder) prepareNativeHost() error {
 		overlays[path] = src
 	}
 
+	plain, err := b.rewriteBakedCalls(overlays, append(tsCalls, goCalls...))
+	if err != nil {
+		return err
+	}
 	if len(overlays) > 0 {
 		appMod, err := b.writeNativeAppModule()
 		if err != nil {
 			return err
 		}
 		for path, src := range overlays {
+			if plain[path] {
+				continue
+			}
 			rel, err := filepath.Rel(filepath.Dir(path), appMod)
 			if err != nil {
 				return err
@@ -244,13 +253,13 @@ const nativeAppPkg = "@krate/app"
 // prepareNativeGo finds the .go files the UI imports, generates their glue,
 // stubs and declarations, and returns the overlays that make the UI bundlers
 // read the stub in place of each file.
-func (b *Builder) prepareNativeGo(p *native.Placement) (*gobind.Result, map[string]string, bake.Table, []diag.Diagnostic, error) {
+func (b *Builder) prepareNativeGo(p *native.Placement) (*gobind.Result, map[string]string, bake.Table, []hostts.BakedCall, []diag.Diagnostic, error) {
 	imps, err := hostts.GoImports(b.Root, b.Cfg, p, hostts.Options{Resolve: b.importResolver().Resolve})
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
 	if len(imps) == 0 {
-		return nil, nil, nil, nil, nil
+		return nil, nil, nil, nil, nil, nil
 	}
 	var ds []diag.Diagnostic
 	var in []gobind.Import
@@ -263,16 +272,16 @@ func (b *Builder) prepareNativeGo(p *native.Placement) (*gobind.Result, map[stri
 		in = append(in, gobind.Import{File: imp.File, Names: imp.Names, From: imp.From, Line: imp.Line, Col: imp.Col})
 	}
 	if len(ds) > 0 {
-		return nil, nil, nil, ds, nil
+		return nil, nil, nil, nil, ds, nil
 	}
 	if !b.onlyGoComponents(imps) {
 		if d := checkNativeGoModule(b.Root); d != nil {
-			return nil, nil, nil, []diag.Diagnostic{*d}, nil
+			return nil, nil, nil, nil, []diag.Diagnostic{*d}, nil
 		}
 	}
 	res, ds, err := gobind.Generate(b.Root, in, b.nativeOutDir())
 	if err != nil || len(ds) > 0 {
-		return nil, nil, nil, ds, err
+		return nil, nil, nil, nil, ds, err
 	}
 	overlays := map[string]string{}
 	for _, m := range res.Modules {
@@ -281,7 +290,7 @@ func (b *Builder) prepareNativeGo(p *native.Placement) (*gobind.Result, map[stri
 		}
 		data, err := os.ReadFile(m.Stub)
 		if err != nil {
-			return nil, nil, nil, nil, err
+			return nil, nil, nil, nil, nil, err
 		}
 		src := string(data)
 		// Go components imported from the same file stay components; the
@@ -291,11 +300,11 @@ func (b *Builder) prepareNativeGo(p *native.Placement) (*gobind.Result, map[stri
 		}
 		overlays[filepath.Clean(m.Source)] = src
 	}
-	baked, ds, err := b.bakeGoBuilds(res, imps)
+	baked, goCalls, ds, err := b.bakeGoBuilds(res, imps)
 	if err != nil || len(ds) > 0 {
-		return nil, nil, nil, ds, err
+		return nil, nil, nil, nil, ds, err
 	}
-	return res, overlays, baked, nil, nil
+	return res, overlays, baked, goCalls, nil, nil
 }
 
 // onlyGoComponents reports whether every imported name is a Go component
@@ -360,4 +369,45 @@ func goModRequires(gomod, path string) bool {
 		}
 	}
 	return false
+}
+
+// rewriteBakedCalls replaces the literal calls of build functions in the UI
+// modules by their baked values, so the prerendered page holds the values. A
+// module the build did not already overlay gets an overlay of its own; the
+// returned set names those (they need no host stub import rewrite).
+func (b *Builder) rewriteBakedCalls(overlays map[string]string, calls []hostts.BakedCall) (map[string]bool, error) {
+	plain := map[string]bool{}
+	byFile := map[string][]bake.Edit{}
+	for _, c := range calls {
+		v, ok := b.nativeBaked[c.ID][c.Key]
+		if !ok {
+			continue
+		}
+		abs := filepath.Join(b.Root, filepath.FromSlash(c.File))
+		byFile[abs] = append(byFile[abs], bake.Edit{Offset: c.Offset, Len: len(c.Local), Value: v})
+	}
+	for abs, edits := range byFile {
+		src, ok := overlays[abs]
+		if !ok {
+			data, err := os.ReadFile(abs)
+			if err != nil {
+				return nil, err
+			}
+			src = string(data)
+			plain[abs] = true
+		}
+		out, skipped := bake.Rewrite(src, edits)
+		if len(skipped) > 0 {
+			fmt.Fprintf(os.Stderr, "  %sWarning:%s %s: %d build function call(s) were left to the baked stub\n", cYellow, cReset, b.relTo(abs), len(skipped))
+		}
+		overlays[abs] = out
+	}
+	return plain, nil
+}
+
+func (b *Builder) relTo(abs string) string {
+	if r, err := filepath.Rel(b.Root, abs); err == nil {
+		return filepath.ToSlash(r)
+	}
+	return abs
 }

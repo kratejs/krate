@@ -30,8 +30,8 @@ const (
 type Site struct {
 	// Name is the exported (remote) name; Local the binding the module uses.
 	Name, Local string
-	// Line and Col locate the use, 1-based.
-	Line, Col int
+	// Line and Col locate the use, 1-based; Offset is its byte offset.
+	Line, Col, Offset int
 	// Call is true for a direct call; Args then holds the literal arguments
 	// when Literal is true.
 	Call    bool
@@ -64,7 +64,7 @@ func FindUses(prog *ast.Program, locals map[string]string) []Site {
 			return true
 		}
 		callee[id] = true
-		s := Site{Name: remote, Local: id.Name, Line: id.Position.Line, Col: id.Position.Col, Call: true, Literal: true}
+		s := Site{Name: remote, Local: id.Name, Line: id.Position.Line, Col: id.Position.Col, Offset: id.Position.Offset, Call: true, Literal: true}
 		for i, a := range c.Args {
 			v, ok := Literal(a)
 			if !ok {
@@ -83,7 +83,7 @@ func FindUses(prog *ast.Program, locals map[string]string) []Site {
 	bundler.WalkStmts(prog.Body, func(n any, _ bool) bool {
 		if id, ok := n.(*ast.Identifier); ok && !callee[id] {
 			if remote, ok := locals[id.Name]; ok {
-				sites = append(sites, Site{Name: remote, Local: id.Name, Line: id.Position.Line, Col: id.Position.Col})
+				sites = append(sites, Site{Name: remote, Local: id.Name, Line: id.Position.Line, Col: id.Position.Col, Offset: id.Position.Offset})
 			}
 		}
 		return true
@@ -375,4 +375,118 @@ func AppModule(t Table) string {
 }
 `)
 	return sb.String()
+}
+
+// Edit replaces the call that starts at Offset (an identifier of Len bytes
+// followed by its argument list) with a baked value.
+type Edit struct {
+	Offset, Len int
+	Value       json.RawMessage
+}
+
+// Rewrite replaces the calls of edits in src with their values, so the
+// prerendered page sees constants. The newlines of a replaced call are kept
+// after the value, so later lines keep their numbers. A call whose extent
+// cannot be found is left alone and reported in the returned list.
+func Rewrite(src string, edits []Edit) (string, []Edit) {
+	sort.Slice(edits, func(i, j int) bool { return edits[i].Offset > edits[j].Offset })
+	var skipped []Edit
+	for _, e := range edits {
+		i := e.Offset + e.Len
+		if e.Offset < 0 || i > len(src) {
+			skipped = append(skipped, e)
+			continue
+		}
+		for i < len(src) && (src[i] == ' ' || src[i] == '\t' || src[i] == '\n' || src[i] == '\r') {
+			i++
+		}
+		if i >= len(src) || src[i] != '(' {
+			skipped = append(skipped, e)
+			continue
+		}
+		end := matchParen(src, i)
+		if end < 0 {
+			skipped = append(skipped, e)
+			continue
+		}
+		val := string(e.Value)
+		if len(val) > 0 && (val[0] == '{' || val[0] == '[') {
+			val = "(" + val + ")"
+		}
+		src = src[:e.Offset] + val + strings.Repeat("\n", strings.Count(src[e.Offset:end], "\n")) + src[end:]
+	}
+	return src, skipped
+}
+
+// matchParen returns the offset just past the ")" that closes the "(" at open,
+// skipping strings, templates and comments, or -1.
+func matchParen(src string, open int) int {
+	depth := 0
+	for i := open; i < len(src); i++ {
+		switch c := src[i]; c {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				return i + 1
+			}
+		case '"', '\'':
+			for i++; i < len(src) && src[i] != c; i++ {
+				if src[i] == '\\' {
+					i++
+				}
+			}
+		case '`':
+			i = skipTemplate(src, i)
+		case '/':
+			if i+1 < len(src) {
+				switch src[i+1] {
+				case '/':
+					j := strings.IndexByte(src[i:], '\n')
+					if j < 0 {
+						return -1
+					}
+					i += j
+				case '*':
+					j := strings.Index(src[i+2:], "*/")
+					if j < 0 {
+						return -1
+					}
+					i += j + 3
+				}
+			}
+		}
+	}
+	return -1
+}
+
+func skipTemplate(src string, i int) int {
+	for i++; i < len(src); i++ {
+		switch src[i] {
+		case '\\':
+			i++
+		case '`':
+			return i
+		case '$':
+			if i+1 < len(src) && src[i+1] == '{' {
+				depth := 0
+				for j := i + 1; j < len(src); j++ {
+					switch src[j] {
+					case '{':
+						depth++
+					case '}':
+						depth--
+					case '`':
+						j = skipTemplate(src, j)
+					}
+					if depth == 0 {
+						i = j
+						break
+					}
+				}
+			}
+		}
+	}
+	return len(src)
 }
