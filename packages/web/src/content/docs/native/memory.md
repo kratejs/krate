@@ -199,7 +199,9 @@ what it has.
 > run on a Mac or a Windows machine, and no memory number has been measured.
 > The `Native memory report` step in CI (`.github/workflows/ci.yml`, job
 > `native`) runs `krate native profile --memory` on macOS and Windows runners
-> and uploads `report.json` for the `balanced` and `performance` profiles; this
+> and uploads `report.json` for the `balanced` and `performance` profiles. The
+> `Native memory budget comparison` step prints those numbers next to the
+> linux-amd64 limits (informational; macOS and Windows budgets are planned). This
 > section stays marked untested until that step reports. The window release and
 > hide behavior described above is untested there too. Treat the savings as
 > hypotheses.

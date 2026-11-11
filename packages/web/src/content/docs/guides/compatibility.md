@@ -677,7 +677,7 @@ krate native package builds .tar.gz, .deb, .rpm and AppImage on Linux, .app, .zi
 
 Known limits:
 
-- AppImage needs appimagetool and a .dmg needs hdiutil on macOS; neither is exercised end to end here.
+- On Linux the .deb, .rpm and AppImage of examples/native-tasks are built, and the .deb contents and AppImage were launched and checked to serve the first page (scripts/native-smoke.mjs; the CI native job installs the .deb with dpkg and runs the AppImage). The .dmg needs hdiutil and the NSIS installer needs makensis, so those are exercised only in the macOS and Windows CI steps, which have not run yet.
 - macOS and Windows packages are assembled by pure Go code on Linux and checked for structure; none has been installed or opened on its OS. The NSIS installer needs makensis.
 
 Evidence: `TestLinuxTarGzAndDeb`, `TestRPM`, `TestAppImageNeedsTool`, `TestMacAppAndZip`, `TestMacDMGUsesHdiutilOnlyOnMac`, `TestWindowsZipAndNSIS`, `TestMSIXStructure`, `TestNativePackageEndToEnd`, `TestUpdateArtifactsAreSignedAndFeedWritten`
@@ -703,10 +703,10 @@ In-app updates: an Ed25519-signed feed, resumable verified downloads, and an app
 
 Known limits:
 
-- The macOS bundle and Windows apply steps are file-system logic tested on Linux; replacing a running Windows executable has not been tried on Windows.
+- The macOS bundle and Windows apply steps are file-system logic tested on Linux; replacing a running Windows executable has not been tried on Windows. TestSmokeUpdateInstalledApp (skipped unless scripts/native-smoke.mjs sets its environment) runs the real updater against a signed local feed from 1.0.0 to 1.1.0 of an installed packaged app; it ran on Linux only.
 - macOS and Windows: untested. The same Go code is built for them (cross-compile checks in CI) and the CI native job runs go test on both, but no result of a run against a real WKWebView or WebView2 window has been confirmed.
 
-Evidence: `TestSignatureGoodBadWrongKey`, `TestCheck`, `TestDownloadVerifiesAndProgress`, `TestDownloadResumes`, `TestApplyLinuxReplacesExecutableAndAppDir`, `TestApplyRollsBackOnFailure`, `TestApplyAppImage`, `TestApplyMacBundle`, `TestApplyWindowsOrder`
+Evidence: `TestSignatureGoodBadWrongKey`, `TestCheck`, `TestDownloadVerifiesAndProgress`, `TestDownloadResumes`, `TestApplyLinuxReplacesExecutableAndAppDir`, `TestApplyRollsBackOnFailure`, `TestApplyAppImage`, `TestApplyMacBundle`, `TestApplyWindowsOrder`, `TestSmokeUpdateInstalledApp`
 
 ### Native: size, start-up and memory budgets
 
@@ -717,7 +717,7 @@ packages/native/budgets.json limits the stripped shell, Go-only, TypeScript-only
 Known limits:
 
 - Budgets exist for linux-amd64 only; the start-up limits were measured on a developer machine and CI applies KRATE_BUDGET_SCALE=3 until a hosted runner has been measured.
-- macOS and Windows have no recorded budgets.
+- macOS and Windows have no recorded budgets (planned). The CI native job runs the memory profile there and prints a comparison with the linux-amd64 limits (scripts/native-budget-compare.mjs); it is informational until the numbers have been reviewed.
 
 Evidence: `TestNativeBudgetSizes`, `TestNativeBudgetGUI`
 

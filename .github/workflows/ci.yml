@@ -313,23 +313,36 @@ jobs:
         env:
           KRATE_REQUIRE_E2E: "1"
 
-  # Krate Native: vet, tests and the real-window (GUI) tests on each OS. The
-  # macOS and Windows GUI steps have never been run in CI yet, so they are
-  # continue-on-error: they report without blocking until they have proven
-  # stable. Linux runs the GUI under Xvfb and is blocking.
+  # Krate Native: vet, tests, the real-window (GUI) tests, packaging and update
+  # smoke tests on each OS.
+  #
+  # Linux is blocking. The macOS and Windows entries have never run on a hosted
+  # runner, so each carries `experimental: true`, which feeds the job's
+  # continue-on-error: their steps report without blocking. After their first
+  # green run, make them blocking by changing that one line to
+  # `experimental: false` on the macos-latest and windows-latest entries.
+  #
+  # The GUI step runs the whole native module (./...) with KRATE_NATIVE_GUI=1,
+  # so a GUI test added in any package is picked up without editing this file.
+  # node, bun and deno are installed on every OS so the host-child tests run;
+  # KRATE_REQUIRE_E2E=1 turns a missing tool into a failure.
   native:
     name: Native (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.experimental }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
-            gui: ./platform/linux ./sdk/... ./shell
+            gui: ./...
+            experimental: false
           - os: macos-latest
-            gui: ./platform/darwin ./sdk/... ./shell
+            gui: ./...
+            experimental: true
           - os: windows-latest
-            gui: ./platform/windows ./sdk/... ./shell
+            gui: ./...
+            experimental: true
     defaults:
       run:
         shell: bash
@@ -354,6 +367,16 @@ jobs:
           node-version: "22"
           cache: pnpm
 
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Set up Deno
+        uses: denoland/setup-deno@v1
+        with:
+          deno-version: v2.x
+
       - name: Install JS dependencies
         run: pnpm install --no-frozen-lockfile
 
@@ -364,6 +387,7 @@ jobs:
         run: pnpm -r --filter '!@krate/web' --filter '!@krate/benchmark' build
 
       - name: Go vet (native)
+        continue-on-error: ${{ matrix.experimental }}
         run: go vet ./...
         working-directory: packages/native
 
@@ -386,33 +410,104 @@ jobs:
 
       - name: Go test (native)
         if: matrix.os != 'ubuntu-latest'
+        continue-on-error: ${{ matrix.experimental }}
         run: go test -timeout 20m ./...
         working-directory: packages/native
         env:
           KRATE_REQUIRE_E2E: "1"
 
-      - name: Install the Linux webview and Xvfb
+      # The real services the Linux tests talk to: dunst (notifications),
+      # stalonetray (XEmbed tray), the Ayatana application indicator service
+      # (a StatusNotifierWatcher and host), openbox (window-manager state),
+      # xdotool (clicks), weston (a Wayland compositor) and the tools the
+      # packaging smoke test needs (rpm, desktop-file-validate, squashfs).
+      - name: Install the Linux webview, Xvfb and desktop services
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-0 xvfb
+          sudo apt-get install -y libwebkit2gtk-4.1-0 xvfb openbox xdotool dbus dbus-bin \
+            dunst stalonetray ayatana-indicator-application weston \
+            rpm desktop-file-utils squashfs-tools file
 
-      # -p 1: GUI packages share one display and one webview at a time.
-      - name: GUI tests (Linux, Xvfb)
+      - name: Install appimagetool (Linux)
         if: matrix.os == 'ubuntu-latest'
-        run: xvfb-run -a go test -p 1 -count=1 -timeout 20m ${{ matrix.gui }}
+        run: |
+          mkdir -p "$HOME/bin"
+          curl -fsSL -o "$HOME/bin/appimagetool.AppImage" https://github.com/AppImage/appimagetool/releases/download/1.9.0/appimagetool-x86_64.AppImage
+          chmod +x "$HOME/bin/appimagetool.AppImage"
+          # No FUSE on the runner: run the tool by extracting it.
+          printf '#!/bin/sh\nAPPIMAGE_EXTRACT_AND_RUN=1 exec "%s/bin/appimagetool.AppImage" "$@"\n' "$HOME" > "$HOME/bin/appimagetool"
+          chmod +x "$HOME/bin/appimagetool"
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+
+      # -p 1: GUI packages share one display and one webview at a time. Runs
+      # under openbox, so fullscreen, maximize and minimize are real window
+      # manager state, and with the real daemons installed above:
+      # KRATE_REQUIRE_E2E makes a missing daemon a failure, not a skip.
+      - name: GUI tests (Linux, Xvfb and openbox, real desktop services)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          # shellcheck disable=SC2016
+          xvfb-run -a bash -c '
+            openbox --sm-disable &
+            wm=$!
+            sleep 1
+            go test -p 1 -count=1 -timeout 20m $GUI_PKGS
+            status=$?
+            kill $wm
+            exit $status
+          '
+        working-directory: packages/native
+        env:
+          GUI_PKGS: ${{ matrix.gui }}
+          KRATE_NATIVE_GUI: "1"
+          KRATE_NATIVE_WM: "1"
+          KRATE_REQUIRE_E2E: "1"
+
+      # The same GUI packages under a Wayland compositor: weston nested on
+      # Xvfb (its x11 backend has an input seat; the headless backend has none
+      # and GTK's clipboard crashes without a seat). GDK_BACKEND=wayland makes
+      # GTK use it. The XEmbed tray and key-grab tests skip themselves there;
+      # TestWaylandPlacementIsIgnored checks that SetPosition and
+      # SetAlwaysOnTop are accepted and ignored.
+      - name: "GUI tests (Linux, Wayland via weston on Xvfb)"
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          # shellcheck disable=SC2016
+          xvfb-run -a bash -c '
+            export XDG_RUNTIME_DIR="$(mktemp -d)"
+            chmod 700 "$XDG_RUNTIME_DIR"
+            weston --backend=x11 --renderer=pixman --socket=wl-ci --width=1280 --height=800 --no-config &
+            comp=$!
+            for i in $(seq 1 50); do
+              [ -S "$XDG_RUNTIME_DIR/wl-ci" ] && break
+              sleep 0.2
+            done
+            [ -S "$XDG_RUNTIME_DIR/wl-ci" ] || { echo "weston did not start"; kill $comp; exit 1; }
+            GDK_BACKEND=wayland WAYLAND_DISPLAY=wl-ci go test -p 1 -count=1 -timeout 20m ./platform/linux ./sdk/... ./shell
+            status=$?
+            kill $comp
+            exit $status
+          '
         working-directory: packages/native
         env:
           KRATE_NATIVE_GUI: "1"
+          WEBKIT_DISABLE_COMPOSITING_MODE: "1"
+          WEBKIT_DISABLE_DMABUF_RENDERER: "1"
+          LIBGL_ALWAYS_SOFTWARE: "1"
 
       # Never run on a hosted runner before: report, do not block.
       - name: GUI tests (macOS, Windows)
         if: matrix.os != 'ubuntu-latest'
-        continue-on-error: true
-        run: go test -p 1 -count=1 -timeout 20m ${{ matrix.gui }}
+        continue-on-error: ${{ matrix.experimental }}
+        run: |
+          # shellcheck disable=SC2086
+          go test -p 1 -count=1 -timeout 20m $GUI_PKGS
         working-directory: packages/native
         env:
+          GUI_PKGS: ${{ matrix.gui }}
           KRATE_NATIVE_GUI: "1"
+          KRATE_REQUIRE_E2E: "1"
 
       # The compiler's native tests build the example app and drive the shell.
       # TestNativeBudgetGUI checks cold start and memory against
@@ -430,6 +525,19 @@ jobs:
           KRATE_REQUIRE_E2E: "1"
           KRATE_BUDGET_SCALE: "3"
 
+      # The same on macOS and Windows. There are no budgets for them yet
+      # (planned), so the budget tests only report what they measure there.
+      - name: Compiler native tests (macOS, Windows)
+        if: matrix.os != 'ubuntu-latest'
+        continue-on-error: ${{ matrix.experimental }}
+        run: go test -p 1 -count=1 -timeout 20m -v -run 'TestNativeE2EGUI|TestNativeBudgetGUI|GUI' ./internal/build
+        working-directory: packages/compiler
+        env:
+          GOWORK: "off"
+          KRATE_NATIVE_GUI: "1"
+          KRATE_REQUIRE_E2E: "1"
+          KRATE_BUDGET_SCALE: "3"
+
       # Binary sizes (the stripped shell, Go-only, TypeScript-only and example
       # release executables) against packages/native/budgets.json. No display.
       - name: Native size budgets (Linux)
@@ -439,17 +547,92 @@ jobs:
         env:
           KRATE_REQUIRE_E2E: "1"
 
+      # Packaging, install, launch and update smoke tests, per OS (see
+      # scripts/native-smoke.mjs). "prepare" builds the example as 1.0.0 and
+      # 1.1.0 with `krate native build --release --package` and a freshly
+      # generated updater key; the other steps install 1.0.0 the way a user
+      # would, check that it serves its first page, and update it to 1.1.0
+      # through the real updater against a local signed feed.
+      - name: Packaging smoke test, build packages (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: node scripts/native-smoke.mjs linux prepare
+        env:
+          KRATE_REQUIRE_E2E: "1"
+
+      - name: Packaging smoke test, .deb install, launch, remove (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: xvfb-run -a node scripts/native-smoke.mjs linux deb
+
+      - name: Packaging smoke test, .rpm structure (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: node scripts/native-smoke.mjs linux rpm
+        env:
+          KRATE_REQUIRE_E2E: "1"
+
+      - name: Packaging smoke test, AppImage launch (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: xvfb-run -a node scripts/native-smoke.mjs linux appimage
+        env:
+          KRATE_REQUIRE_E2E: "1"
+
+      - name: Update smoke test, 1.0.0 to 1.1.0 (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: node scripts/native-smoke.mjs linux update
+
+      - name: Packaging smoke test, build packages (macOS)
+        if: matrix.os == 'macos-latest'
+        continue-on-error: ${{ matrix.experimental }}
+        run: node scripts/native-smoke.mjs macos prepare
+
+      - name: Packaging smoke test, mount the dmg, launch (macOS)
+        if: matrix.os == 'macos-latest'
+        continue-on-error: ${{ matrix.experimental }}
+        run: node scripts/native-smoke.mjs macos dmg
+
+      - name: Update smoke test, 1.0.0 to 1.1.0 (macOS)
+        if: matrix.os == 'macos-latest'
+        continue-on-error: ${{ matrix.experimental }}
+        run: node scripts/native-smoke.mjs macos update
+
+      - name: Install NSIS and create a signing certificate (Windows)
+        if: matrix.os == 'windows-latest'
+        continue-on-error: ${{ matrix.experimental }}
+        run: |
+          choco install nsis -y --no-progress
+          echo "C:\Program Files (x86)\NSIS" >> "$GITHUB_PATH"
+          node scripts/native-smoke.mjs windows cert
+
+      - name: Packaging smoke test, build and sign packages (Windows)
+        if: matrix.os == 'windows-latest'
+        continue-on-error: ${{ matrix.experimental }}
+        run: node scripts/native-smoke.mjs windows prepare
+
+      - name: Packaging smoke test, NSIS silent install, launch, uninstall (Windows)
+        if: matrix.os == 'windows-latest'
+        continue-on-error: ${{ matrix.experimental }}
+        run: node scripts/native-smoke.mjs windows nsis
+
+      - name: Packaging smoke test, MSIX validate, install, launch (Windows)
+        if: matrix.os == 'windows-latest'
+        continue-on-error: ${{ matrix.experimental }}
+        run: node scripts/native-smoke.mjs windows msix
+
+      - name: Update smoke test, 1.0.0 to 1.1.0 (Windows)
+        if: matrix.os == 'windows-latest'
+        continue-on-error: ${{ matrix.experimental }}
+        run: node scripts/native-smoke.mjs windows update
+
       # Memory of the system webview on real macOS and Windows machines. The
       # WKWebView and WebView2 memory levers were written without being able to
       # run them: this step produces the first numbers. It reports without
-      # blocking (continue-on-error). `krate native profile --memory` builds the
-      # app, measures PSS-equivalent and private memory per process role against
-      # a blank-page floor and writes dist-native/report.json. The profile
-      # comes from native.memory in krate.config.ts, set here per run and
-      # restored afterwards.
+      # blocking while `experimental` is true. `krate native profile --memory`
+      # builds the app, measures PSS-equivalent and private memory per process
+      # role against a blank-page floor and writes dist-native/report.json. The
+      # profile comes from native.memory in krate.config.ts, set here per run
+      # and restored afterwards.
       - name: Native memory report (macOS, Windows)
         if: matrix.os != 'ubuntu-latest'
-        continue-on-error: true
+        continue-on-error: ${{ matrix.experimental }}
         env:
           GOWORK: "off"
         run: |
@@ -470,6 +653,17 @@ jobs:
             cp "$RUNNER_TEMP/krate.config.ts.orig" "$cfg"
           done
           exit $status
+
+      # Compare the numbers above with the linux-amd64 limits in
+      # packages/native/budgets.json. Informational: macOS and Windows budgets
+      # stay "planned" until these numbers have been seen and reviewed.
+      - name: Native memory budget comparison (macOS, Windows)
+        if: always() && matrix.os != 'ubuntu-latest'
+        continue-on-error: true
+        run: |
+          node scripts/native-budget-compare.mjs \
+            "balanced=native-memory/balanced/report.json" \
+            "performance=native-memory/performance/report.json"
 
       - name: Upload native memory reports
         if: always() && matrix.os != 'ubuntu-latest'
