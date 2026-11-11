@@ -27,7 +27,11 @@ type listedPkg struct {
 	GoFiles    []string
 	CgoFiles   []string
 	ImportMap  map[string]string
-	Module     *struct {
+	// Match lists the command-line patterns that named the package; it maps
+	// a listed directory to its package without comparing path spellings,
+	// which differ on Windows (drive letter case, short names).
+	Match  []string
+	Module *struct {
 		Path string
 		Dir  string
 	}
@@ -52,6 +56,7 @@ func goListIn(specs map[string]listSpec, dirs []string) (map[string]*listedPkg, 
 		pats []string
 	}
 	groups := map[string]*group{}
+	patOf := map[string][2]string{}
 	var order []string
 	for _, d := range dirs {
 		sp := specs[filepath.Clean(d)]
@@ -70,9 +75,11 @@ func goListIn(specs map[string]listSpec, dirs []string) (map[string]*listedPkg, 
 			order = append(order, sp.root)
 		}
 		g.pats = append(g.pats, pat)
+		patOf[filepath.Clean(d)] = [2]string{sp.root, pat}
 	}
 	pkgs := map[string]*listedPkg{}
 	byDir := map[string]string{}
+	byPat := map[[2]string]string{}
 	var msgs []string
 	for _, r := range order {
 		p, bd, msg, err := goList(r, groups[r].pats, groups[r].env)
@@ -81,12 +88,20 @@ func goListIn(specs map[string]listSpec, dirs []string) (map[string]*listedPkg, 
 		}
 		for k, v := range p {
 			pkgs[k] = v
+			for _, m := range v.Match {
+				byPat[[2]string{r, m}] = k
+			}
 		}
 		for k, v := range bd {
 			byDir[k] = v
 		}
 		if msg != "" {
 			msgs = append(msgs, msg)
+		}
+	}
+	for d, rp := range patOf {
+		if ip, ok := byPat[rp]; ok {
+			byDir[d] = ip
 		}
 	}
 	return pkgs, byDir, strings.Join(msgs, "\n"), nil
@@ -101,7 +116,7 @@ func goList(root string, pats []string, env []string) (map[string]*listedPkg, ma
 		return nil, nil, "", errors.New("the go command was not found on PATH; Go host code needs the Go toolchain")
 	}
 	args := []string{"list", "-e", "-export", "-deps",
-		"-json=ImportPath,Dir,Name,Export,GoFiles,CgoFiles,ImportMap,Module,Error"}
+		"-json=ImportPath,Dir,Name,Export,GoFiles,CgoFiles,ImportMap,Match,Module,Error"}
 	args = append(args, pats...)
 	cmd := exec.Command(goBin, args...)
 	cmd.Dir = root

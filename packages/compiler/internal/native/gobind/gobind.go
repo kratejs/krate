@@ -178,7 +178,7 @@ func GenerateWith(root string, imports []Import, outDir string, opts Options) (*
 	for _, d := range dirs {
 		lp := listed[byDir[filepath.Clean(d)]]
 		if lp == nil {
-			a.add(diag.New(a.display(d), 0, 0, "go list did not report a package in this directory",
+			a.add(diag.New(a.display(d), 0, 0, "go list did not report a package in this directory"+listedRoots(listed),
 				"the directory needs .go files that build for this platform", "").WithCode(diag.CodeGoBindLoad))
 			continue
 		}
@@ -546,4 +546,20 @@ func componentNames(m *module) map[string]bool {
 		}
 	}
 	return out
+}
+
+// listedRoots describes the packages go list matched by pattern, for a
+// diagnostic that cannot find the package of a directory.
+func listedRoots(listed map[string]*listedPkg) string {
+	var out []string
+	for _, p := range listed {
+		if len(p.Match) > 0 {
+			out = append(out, p.ImportPath+" in "+p.Dir)
+		}
+	}
+	if len(out) == 0 {
+		return " (go list matched no package)"
+	}
+	sort.Strings(out)
+	return " (go list matched " + strings.Join(out, ", ") + ")"
 }

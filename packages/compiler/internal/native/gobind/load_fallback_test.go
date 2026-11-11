@@ -45,3 +45,22 @@ func TestSourceImporterFallbackChecksPackage(t *testing.T) {
 		t.Fatalf("source-checked package failed: ok=%v errs=%v", ok, errs)
 	}
 }
+
+// The directory of a listed package is found through the pattern go list
+// matched, not by comparing path spellings: on Windows the Dir go list prints
+// can differ from ours in drive letter case or short names.
+func TestGoListInMapsDirectoriesThroughPatterns(t *testing.T) {
+	root := newApp(t, "app")
+	dir := filepath.Join(root, "src", "lib")
+	listed, byDir, goErr, err := goListIn(map[string]listSpec{dir: {root: root}}, []string{dir})
+	if err != nil || goErr != "" {
+		t.Fatalf("goListIn: %v %s", err, goErr)
+	}
+	lp := listed[byDir[dir]]
+	if lp == nil {
+		t.Fatal("package not mapped to its directory")
+	}
+	if len(lp.Match) != 1 || lp.Match[0] != "./src/lib" {
+		t.Fatalf("Match = %v, want [./src/lib]", lp.Match)
+	}
+}
