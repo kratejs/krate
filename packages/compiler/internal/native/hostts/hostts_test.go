@@ -132,7 +132,7 @@ export default function Home() { return <button onClick={() => syncNow(true)}>sy
 		t.Fatalf("registered %s (only imported names are registered)", got)
 	}
 	stub := res.Overlays[filepath.Join(root, "src/lib/sync.host.ts")]
-	if !strings.Contains(stub, `export const syncNow = (...a) => call("src/lib/sync.host.syncNow", a);`) ||
+	if !strings.Contains(stub, `export const syncNow = (...a) => __krateCall("src/lib/sync.host.syncNow", a);`) ||
 		!strings.Contains(stub, `from "@krate/app"`) {
 		t.Fatalf("stub:\n%s", stub)
 	}

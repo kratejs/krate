@@ -1,6 +1,6 @@
 ---
 title: Host Code
-order: 2
+order: 3
 description: Mark Go and TypeScript code that runs in the native process of a Krate Native app - markers, precedence, conflicts, inline functions and target restrictions.
 ---
 

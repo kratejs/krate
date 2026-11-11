@@ -10,10 +10,9 @@ sidebar:
 
 # Krate Native (Preview)
 
-> **Preview.** Krate Native is under construction. The `krate native check`
-> command and the host code markers described here work today; `init`, `dev`,
-> `build`, `profile`, `sign`, `notarize` and `doctor` print "not implemented yet".
-> Names and options may change before release.
+> **Preview.** Krate Native is under construction. `krate native init`, `check`
+> and `build` work today; `dev`, `profile`, `sign`, `notarize` and `doctor` print
+> "not implemented yet". Names and options may change before release.
 
 Krate Native compiles a Krate app into a desktop app. The UI is TSX shown in the
 system webview. Code that must run in the native process, such as file access,
@@ -23,9 +22,15 @@ functions you mark. The UI imports host code and calls it like an async function
 There is no server in a native app, so there is no SSR: every route is
 prerendered at build time.
 
+- [Getting started](/docs/native/getting-started/) - `krate native init` and
+  `krate native build`, and what a build produces.
 - [Host code](/docs/native/host-code/) - the six ways to mark host code, their
   precedence, conflicts, inline function rules and the native target's
   restrictions.
+- [Go host code](/docs/native/go-host/) - call exported Go functions, streams
+  and signals from the UI.
+- [The app directory and app.json](/docs/native/app-json/) - the output of a
+  build and the manifest the shell reads.
 
 ## Quick start
 

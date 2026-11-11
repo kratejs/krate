@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -78,5 +79,106 @@ func TestNativeStubsAndUnknown(t *testing.T) {
 	code, out := runKrate(t, "native", "--help")
 	if code != 0 || !strings.Contains(out, "check") {
 		t.Errorf("native --help: exit %d:\n%s", code, out)
+	}
+}
+
+// nativeDeps are the npm packages a native project needs, reduced to stubs.
+var nativeDeps = map[string]string{
+	"node_modules/@krate/app/package.json":     `{"name":"@krate/app","version":"0.0.0","type":"module","exports":{".":"./index.js","./host":"./host.js"}}`,
+	"node_modules/@krate/app/index.js":         "export function createClient() { return {}; }\nexport function setClient() {}\nexport function getClient() { return { call() {}, stream() {}, signal() {} }; }\n",
+	"node_modules/@krate/app/host.js":          "export function hostSignal(v) { return { get: () => v, set() {} }; }\n",
+	"node_modules/@krate/core/package.json":    `{"name":"@krate/core","version":"0.0.0","type":"module","main":"./dist/index.js"}`,
+	"node_modules/@krate/core/dist/index.js":   "export const defineConfig = (c) => c;\n",
+	"node_modules/@krate/runtime/package.json": `{"name":"@krate/runtime","version":"0.0.0","type":"module"}`,
+}
+
+func TestNativeInitThenBuild(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "hello-app")
+	code, out := runKrate(t, "native", "init", dir)
+	if code != 0 {
+		t.Fatalf("init exit %d:\n%s", code, out)
+	}
+	for _, f := range []string{"krate.config.ts", "package.json", "src/lib/greet.host.ts", "src/pages/index.tsx"} {
+		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(f))); err != nil {
+			t.Errorf("init did not create %s", f)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+		t.Error("a TypeScript-only init must not create go.mod")
+	}
+	if code, out := runKrate(t, "native", "init", dir); code != 1 || !strings.Contains(out, "KR7205") {
+		t.Errorf("second init: exit %d:\n%s", code, out)
+	}
+
+	for name, content := range nativeDeps {
+		writeTestFile(t, filepath.Join(dir, filepath.FromSlash(name)), content)
+	}
+	code, out = runKrate(t, "native", "build", dir)
+	if code != 0 {
+		t.Fatalf("build exit %d:\n%s", code, out)
+	}
+	for _, want := range []string{"Hello App", "host/host.js", "krate-shell dist-native/app"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("build output lacks %q:\n%s", want, out)
+		}
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "dist-native", "app", "app.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"appId": "com.example.helloapp"`, `"productName": "Hello App"`, `"assets": "dist"`, `"bundle": "host/host.js"`} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("app.json lacks %s:\n%s", want, data)
+		}
+	}
+
+	// --out moves the whole output.
+	code, out = runKrate(t, "native", "build", dir, "--out", filepath.Join(dir, "out-elsewhere"))
+	if code != 0 {
+		t.Fatalf("build --out exit %d:\n%s", code, out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "out-elsewhere", "app", "app.json")); err != nil {
+		t.Errorf("--out ignored: %v", err)
+	}
+}
+
+func TestNativeInitGoScaffold(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "go-app")
+	code, out := runKrate(t, "native", "init", dir, "--go")
+	if code != 0 {
+		t.Fatalf("init --go exit %d:\n%s", code, out)
+	}
+	for _, f := range []string{"go.mod", "src/lib/tasks.go", "src/lib/greet.host.ts"} {
+		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(f))); err != nil {
+			t.Errorf("init --go did not create %s", f)
+		}
+	}
+	tasks, _ := os.ReadFile(filepath.Join(dir, "src", "lib", "tasks.go"))
+	if !strings.Contains(string(tasks), "krate.NewSignal") {
+		t.Errorf("tasks.go has no host signal:\n%s", tasks)
+	}
+	if !strings.Contains(out, "go get github.com/kratejs/krate/packages/native") {
+		t.Errorf("init --go outside the monorepo must say how to add the host module:\n%s", out)
+	}
+}
+
+func TestNativeBuildFailures(t *testing.T) {
+	root := nativeProject(t, map[string]string{
+		"krate.config.json":   `{"native":{"appId":"com.acme.app"}}`,
+		"src/pages/index.tsx": nativePage,
+	})
+	if code, out := runKrate(t, "native", "build", root, "--target", "plan9/amd64"); code != 1 || !strings.Contains(out, "KR7204") {
+		t.Errorf("bad target: exit %d:\n%s", code, out)
+	}
+	bad := nativeProject(t, map[string]string{
+		"krate.config.json":   `{"native":{"appId":"com.acme.app"}}`,
+		"src/pages/index.tsx": nativePage,
+		"src/api/users.ts":    "export function GET() {}\n",
+	})
+	if code, out := runKrate(t, "native", "build", bad); code != 1 || !strings.Contains(out, "KR7175") {
+		t.Errorf("api route: exit %d:\n%s", code, out)
+	}
+	if _, err := os.Stat(filepath.Join(bad, "dist-native", "app", "app.json")); err == nil {
+		t.Error("a failed build wrote app.json")
 	}
 }

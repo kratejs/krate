@@ -18,13 +18,13 @@ func stubSource(modID string, exps []*export) string {
 		case kindValue:
 			continue
 		case KindStream:
-			expr = "(...a) => stream(" + id + ", a)"
+			expr = "(...a) => __krateStream(" + id + ", a)"
 			usesStream = true
 		case KindSignal:
-			expr = "signal(" + id + ")"
+			expr = "__krateSig(" + id + ")"
 			usesSignal = true
 		default:
-			expr = "(...a) => call(" + id + ", a)"
+			expr = "(...a) => __krateCall(" + id + ", a)"
 			usesCall = true
 		}
 		if e.Name == "default" {
@@ -35,18 +35,23 @@ func stubSource(modID string, exps []*export) string {
 	}
 	var names []string
 	if usesCall {
-		names = append(names, "call")
+		names = append(names, "call as __krateCall")
 	}
 	if usesSignal {
-		names = append(names, "signal")
+		names = append(names, "signal as __krateSignal")
 	}
 	if usesStream {
-		names = append(names, "stream")
+		names = append(names, "stream as __krateStream")
 	}
 	var sb strings.Builder
 	sb.WriteString("// generated: host stub for " + modID + "\n")
 	if len(names) > 0 {
 		sb.WriteString("import { " + strings.Join(names, ", ") + " } from " + quote(appPkg) + ";\n")
+	}
+	if usesSignal {
+		// The signal is created on first use, after the page has installed the
+		// reactive client, so importing the module never opens a connection.
+		sb.WriteString("const __krateSig = (name) => {\n  let s;\n  const get = () => (s ??= __krateSignal(name));\n  const f = () => get()();\n  f.subscribe = (fn) => get().subscribe(fn);\n  return f;\n};\n")
 	}
 	sb.WriteString(body.String())
 	return sb.String()

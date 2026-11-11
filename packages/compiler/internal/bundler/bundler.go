@@ -583,6 +583,12 @@ func (b *Bundler) resolveModule(path string, isEntry bool) error {
 		return b.resolveMarkdownModule(path, abs, mtime, size, statOK, isEntry)
 	}
 
+	// A native build replaces an imported .go file with the generated stub
+	// module (see SetSourceOverlays); the overlay is parsed as JavaScript.
+	if _, ok := b.overlays[abs]; ok && strings.EqualFold(filepath.Ext(path), ".go") {
+		return b.resolveTSXModule(path, abs, mtime, size, statOK, isEntry)
+	}
+
 	if !isSourceExt(path) {
 		if assetExtensions[strings.ToLower(filepath.Ext(path))] {
 			return b.resolveAssetModule(path, abs, mtime, size, statOK)

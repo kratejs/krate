@@ -1,0 +1,24 @@
+import { createSignal } from '@krate/runtime';
+import { greet } from '../lib/greet.host';
+import { Add, List, Count } from '../lib/tasks.go';
+
+export default function Home() {
+  const [message, setMessage] = createSignal('');
+  const [titles, setTitles] = createSignal<string[]>([]);
+
+  async function add() {
+    await Add('Task ' + (Count() + 1));
+    setTitles((await List()).map((t) => t.title));
+  }
+
+  return (
+    <main>
+      <h1>{{.Product}}</h1>
+      <button onClick={async () => setMessage(await greet('world'))}>Greet</button>
+      <p>{message()}</p>
+      <button onClick={add}>Add task</button>
+      <p>Tasks: {Count()}</p>
+      <ul>{titles().map((t) => <li>{t}</li>)}</ul>
+    </main>
+  );
+}

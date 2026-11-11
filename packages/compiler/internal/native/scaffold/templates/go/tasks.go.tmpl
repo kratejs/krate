@@ -1,0 +1,40 @@
+package lib
+
+import (
+	"sync"
+
+	"github.com/kratejs/krate/packages/native/krate"
+)
+
+// Task is one item of the list. The UI sees it as an object with the json
+// field names.
+type Task struct {
+	ID    int    `json:"id"`
+	Title string `json:"title"`
+}
+
+// Count is a host signal: import it in the UI and read it like a reactive
+// value, Count().
+var Count = krate.NewSignal(0)
+
+var (
+	mu    sync.Mutex
+	tasks []Task
+)
+
+// List returns every task.
+func List() []Task {
+	mu.Lock()
+	defer mu.Unlock()
+	return append([]Task(nil), tasks...)
+}
+
+// Add appends a task and updates Count.
+func Add(title string) Task {
+	mu.Lock()
+	defer mu.Unlock()
+	t := Task{ID: len(tasks) + 1, Title: title}
+	tasks = append(tasks, t)
+	Count.Set(len(tasks))
+	return t
+}

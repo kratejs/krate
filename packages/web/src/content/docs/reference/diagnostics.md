@@ -614,6 +614,42 @@ UI code imports a name from a host module, but the module has no such export (or
 
 The UI can call host functions and read host signals. An export that is a plain value (a number, string, object or class) has no meaning across the boundary because the UI would get a copy that never changes. Export a function that returns the value, or a `hostSignal()` for a value that changes.
 
+### KR7200
+
+**@krate/app is not installed**
+
+A native app's UI calls host code through generated stubs, and the stubs import `@krate/app` (the host call client). The package is not resolvable from the project. Install it next to `@krate/core`: `npm i @krate/app`.
+
+### KR7201
+
+**Namespace import of a .go file**
+
+The compiler generates a binding for each name a UI file imports from a `.go` file, so it has to see the names. `import * as tasks from "./tasks.go"` and `export * from "./tasks.go"` hide them. Import the functions and signals by name: `import { List, Count } from "./tasks.go"`.
+
+### KR7202
+
+**Go module cannot build the Go host**
+
+The Go host binary is built inside the project's own Go module, next to the generated glue, so the module has to exist (`go.mod` at the project root) and require `github.com/kratejs/krate/packages/native`. Run `go get github.com/kratejs/krate/packages/native` in the project, or `krate native init --go` in an empty directory to get a working `go.mod`.
+
+### KR7203
+
+**Go host failed to compile**
+
+`go build` failed for the generated Go host program. The output of the Go command is shown. The packages the UI imports must compile for the target platform; check build constraints and cgo use when you build with `--target` for another operating system.
+
+### KR7204
+
+**Unknown native build target**
+
+`krate native build --target` takes `<os>/<arch>` where os is windows, linux or darwin (macos is accepted) and arch is amd64 or arm64, for example `--target linux/arm64`.
+
+### KR7205
+
+**krate native init cannot write its files**
+
+`krate native init` creates a small app in a directory. It refuses to overwrite an existing file, so run it in an empty directory or remove the files it names.
+
 ## KR8xxx: islands, compiled packages and general React compatibility
 
 ### KR8001

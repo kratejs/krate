@@ -110,7 +110,8 @@ type builder struct {
 	gen     map[string]*genModule // module id -> generated inline host module
 	genList []*genModule
 	// srcs holds the original source of each UI module that was split.
-	srcs map[string]string
+	srcs   map[string]string
+	goImps []GoImport
 }
 
 // genModule is a generated host module for the inline functions of a UI module.
@@ -166,6 +167,47 @@ func Build(root string, cfg *config.Config, p *native.Placement, opts Options) (
 		return nil, nil, err
 	}
 	return b.res, b.diags, nil
+}
+
+// GoImport is one import of a .go file found in the UI import graph.
+type GoImport struct {
+	// File is the absolute path of the .go file.
+	File string
+	// Names are the imported names (the remote names of a named import or
+	// re-export). A default import adds no name.
+	Names []string
+	// Namespace is true for `import * as x` and `export *`.
+	Namespace bool
+	// From is the importing UI file relative to the project root, with the
+	// 1-based position of the import.
+	From      string
+	Line, Col int
+}
+
+// GoImports finds every import of a .go file in the UI import graph. It
+// follows the same graph as Build and has no other effect.
+func GoImports(root string, cfg *config.Config, p *native.Placement, opts Options) ([]GoImport, error) {
+	b := &builder{
+		root: root, cfg: cfg, p: p, opts: opts,
+		res:     &Result{Overlays: map[string]string{}},
+		hostMod: map[string]*native.Module{},
+		use:     map[string]*usage{},
+		gen:     map[string]*genModule{},
+		srcs:    map[string]string{},
+	}
+	if b.opts.Resolve == nil {
+		b.opts.Resolve = bundler.ResolveImport
+	}
+	for i := range p.Modules {
+		m := &p.Modules[i]
+		if m.Whole && isTSPath(m.Path) {
+			b.hostMod[m.Path] = m
+		}
+	}
+	if err := b.walkUI(); err != nil {
+		return nil, err
+	}
+	return b.goImps, nil
 }
 
 func (b *builder) hasErrors() bool {
@@ -289,6 +331,16 @@ func (b *builder) scanImports(path, src string, queue *[]string) {
 			return
 		}
 		target = filepath.Clean(target)
+		if strings.EqualFold(filepath.Ext(target), ".go") {
+			var named []string
+			for _, n := range names {
+				if n != "default" {
+					named = append(named, n)
+				}
+			}
+			b.goImps = append(b.goImps, GoImport{File: target, Names: named, Namespace: all, From: rel, Line: pos.Line, Col: pos.Col})
+			return
+		}
 		if b.hostMod[target] == nil {
 			*queue = append(*queue, target)
 			return

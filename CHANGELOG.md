@@ -38,6 +38,10 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Added
 
+- `krate native init` and `krate native build` (preview): `build` writes an app directory
+  (`dist-native/app` with `app.json`, the prerendered UI, a TypeScript host bundle and a compiled
+  Go host binary) for the Krate Native shell; dynamic routes get one shell page and a `fallbacks`
+  entry. New codes `KR7200` to `KR7205`.
 - The embedded QuickJS runtime installs each group of Web APIs the first time code reads one of
   its globals, so creating a VM costs about 1.4 ms instead of 3.2 ms. Config and
   Tailwind evaluation, `generateStaticParams`, metadata and isolation-mode API requests get
@@ -105,6 +109,11 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Fixed
 
+- A named `async function` used as an event handler keeps `async` in the hydration code (it
+  was emitted as a plain function, so `await` was a syntax error).
+- A capitalized arrow constant imported by a page and used in a handler is declared once (the
+  page script declared it as both `var` and `function`, which does not parse), and an arrow
+  function that is an operand of `??`, `||` or another operator is parenthesized.
 - Binary data crosses between Go and the embedded QuickJS runtime as raw ArrayBuffer copies
   instead of base64 text encoded and decoded in JavaScript: request and response bodies
   (buffered and streamed), middleware responses, `fetch` request and response bodies,
