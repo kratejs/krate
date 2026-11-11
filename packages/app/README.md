@@ -40,3 +40,12 @@ object, not a `Map`; a `Map` or `Set` argument is accepted by Go as an object
 `@krate/app/os`, `/db` and `/kv` are placeholders that call host functions named
 `krate/os.<Name>`, `krate/db.<Name>` and `krate/kv.<Name>`. Their names and
 signatures will change when the Go SDK backs them.
+
+## Desktop SDK (UI half)
+
+`@krate/app/window`, `/dialog`, `/clipboard`, `/menu`, `/tray`, `/shortcut`,
+`/notify` and `/app` call the host functions `krate/<area>.<Name>` and subscribe
+to the streams `krate/<area>.events` (`onMenu(id, fn)`, `onClick`, `onEvent`,
+`onCloseRequested`, `onAction`, `onSecondInstance`). Each needs its permission
+in `app.json`; see the SDK page in the Native docs.
+

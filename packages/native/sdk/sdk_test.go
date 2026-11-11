@@ -511,3 +511,68 @@ func errorsIs(err, target error) bool {
 	}
 	return false
 }
+
+// The JSON below is what @krate/app/{dialog,window,menu,tray,notify} send
+// (see packages/app/test/sdk-ui.test.ts); the Go codecs must accept it.
+func TestArgumentsAsTheTSWrappersSendThem(t *testing.T) {
+	r := newRig(t)
+	h := r.ui("dialog", "window", "menu", "notify", "tray", "shortcut", "app", "clipboard")
+	raw := func(js string) func(*wire.Encoder) { return func(e *wire.Encoder) { e.Raw([]byte(js)) } }
+	cases := []struct{ fn, args string }{
+		{"krate/dialog.OpenFile", `{"title":"Pick","multiple":true,"filters":[{"name":"Images","patterns":["*.png"]}]}`},
+		{"krate/dialog.SaveFile", `{"name":"x.txt","overwrite":true}`},
+		{"krate/dialog.Message", `{"message":"boom","buttons":["A","B"],"kind":2}`},
+		{"krate/window.Open", `{"title":"S","path":"/settings","frameless":true,"x":5,"y":6,"hasPosition":true}`},
+		{"krate/menu.SetApp", `[{"id":"","label":"&File","kind":4,"accelerator":"","disabled":false,"checked":false,"submenu":[{"id":"new","label":"New","kind":0,"accelerator":"CmdOrCtrl+N","disabled":false,"checked":false,"submenu":[]}]}]`},
+		{"krate/notify.Send", `{"id":"n","title":"Done","body":"","icon":"","actions":[{"id":"open","label":"Open"}],"urgency":2,"timeoutMs":3000,"silent":false}`},
+	}
+	for _, c := range cases {
+		got := uiCall(t, h, c.fn, raw(c.args))
+		if strings.Contains(got, `"err"`) && !strings.Contains(got, "unsupported") {
+			t.Errorf("%s rejected the TS shape: %s", c.fn, got)
+		}
+	}
+	// Positional forms.
+	for _, c := range []struct {
+		fn   string
+		args func(*wire.Encoder)
+	}{
+		{"krate/window.SetSize", func(e *wire.Encoder) { e.String("main"); e.Int(500); e.Int(400) }},
+		{"krate/window.SetAlwaysOnTop", func(e *wire.Encoder) { e.String("main"); e.Bool(true) }},
+		{"krate/menu.Popup", func(e *wire.Encoder) {
+			e.String("")
+			e.Int(-1)
+			e.Int(-1)
+			e.Raw([]byte(`[{"id":"c","label":"Copy","kind":0,"accelerator":"","disabled":false,"checked":false,"submenu":[]}]`))
+		}},
+		{"krate/shortcut.Register", func(e *wire.Encoder) { e.String("ui-1-abc"); e.String("Ctrl+Shift+K") }},
+		{"krate/shortcut.Unregister", func(e *wire.Encoder) { e.String("ui-1-abc") }},
+		{"krate/app.Supports", func(e *wire.Encoder) { e.String("tray") }},
+	} {
+		if got := uiCall(t, h, c.fn, c.args); strings.Contains(got, "bad_args") {
+			t.Errorf("%s: %s", c.fn, got)
+		}
+	}
+	// And the tray shape, with binary icon bytes.
+	got := uiCall(t, h, "krate/tray.Set", func(e *wire.Encoder) {
+		e.BeginObject()
+		e.Key("tooltip")
+		e.String("T")
+		e.Key("title")
+		e.String("")
+		e.Key("icon")
+		e.Bytes([]byte{1, 2, 3})
+		e.Key("menu")
+		e.Raw([]byte(`[{"id":"quit","label":"Quit","kind":0,"accelerator":"","disabled":false,"checked":false,"submenu":[]}]`))
+		e.EndObject()
+	})
+	if strings.Contains(got, "bad_args") {
+		t.Errorf("tray.Set: %s", got)
+	}
+	if len(r.app.AppMenu) != 1 || r.app.AppMenu[0].Submenu[0].Accelerator != "CmdOrCtrl+N" {
+		t.Errorf("menu from TS shape: %+v", r.app.AppMenu)
+	}
+	if r.main.State().Width != 500 || !r.main.State().AlwaysOnTop {
+		t.Errorf("window ops from TS shape: %+v", r.main.State())
+	}
+}

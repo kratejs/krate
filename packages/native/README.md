@@ -12,6 +12,7 @@ The Go module behind Krate's desktop target.
 | `platform` | Windows, macOS and Linux windows and webviews, no cgo |
 | `gohost` | The Go host child: `Serve` for the generated child main, `Child` for the parent that runs and restarts it |
 | `shell` | The shell as a library: app manifest, `Run`, browser mode, dev control. See `shell/README.md` |
+| `sdk/{window,dialog,clipboard,menu,tray,shortcut,notify,app}` | The UI half of the SDK: plain Go functions for host code, forwarded to the shell in dev. `sdk` assembles them for the shell. See the SDK page in the docs |
 | `cmd/krate-shell` | The prebuilt shell binary |
 
 The module never uses cgo. It cross-compiles from any OS with
@@ -47,3 +48,14 @@ restarts it on demand; signals reconnect with backoff, so the page sees the
 new child's current values without reloading. The child protocol (unix socket
 in `KRATE_GOHOST_SOCKET`, `ready` line, exit on stdin EOF) is in the
 `gohost` package comment.
+
+## UI half of the SDK
+
+The `sdk` packages cover windows, dialogs, the clipboard, menus, the tray,
+global shortcuts, notifications and the app lifecycle. `sdk.Host` registers
+them for the shell: local dispatch for code linked into the shell, a private
+unix socket (`KRATE_GOHOST_PARENT`) for the Go host child, and the
+permission-filtered `krate/<area>.<Name>` ids for the page. Optional platform
+capabilities are interfaces in `platform/caps`; an SDK call answers
+`krate.ErrUnsupported` when the platform lacks one.
+

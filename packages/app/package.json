@@ -51,6 +51,38 @@
     "./kv": {
       "types": "./dist/kv.d.ts",
       "default": "./dist/kv.js"
+    },
+    "./window": {
+      "types": "./dist/window.d.ts",
+      "default": "./dist/window.js"
+    },
+    "./dialog": {
+      "types": "./dist/dialog.d.ts",
+      "default": "./dist/dialog.js"
+    },
+    "./clipboard": {
+      "types": "./dist/clipboard.d.ts",
+      "default": "./dist/clipboard.js"
+    },
+    "./notify": {
+      "types": "./dist/notify.d.ts",
+      "default": "./dist/notify.js"
+    },
+    "./menu": {
+      "types": "./dist/menu.d.ts",
+      "default": "./dist/menu.js"
+    },
+    "./tray": {
+      "types": "./dist/tray.d.ts",
+      "default": "./dist/tray.js"
+    },
+    "./shortcut": {
+      "types": "./dist/shortcut.d.ts",
+      "default": "./dist/shortcut.js"
+    },
+    "./app": {
+      "types": "./dist/lifecycle.d.ts",
+      "default": "./dist/lifecycle.js"
     }
   },
   "files": [

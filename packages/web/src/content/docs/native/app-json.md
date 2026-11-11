@@ -49,6 +49,7 @@ is in the directory; paths in `app.json` are relative to it.
 | `fallbacks` | One entry per dynamic route that accepts parameters the build did not list: the route `pattern` (`[id]`, `[...slug]`) and the shell page `file` under `assets`. The shell serves `file` for a URL that matches `pattern` and has no file of its own. |
 | `hostjs` | Present with TypeScript host code: the host bundle (one script, run in the embedded JavaScript runtime) and its source map. |
 | `gohost` | Present with Go host code: the binary, and the registry ids it serves by kind. An id is `<module id>.<export>`. |
+| `permissions` | The [SDK permissions](/docs/native/sdk-ui/#permissions) the page has: `window`, `dialog`, `clipboard`, `clipboard:read`, `menu`, `tray`, `shortcut`, `notify`, `app`. Default none. |
 | `debug` | `false` for a build made by `krate native build`. |
 
 The build manifest of the web build (`dist/.krate`) is removed from `dist/`.
