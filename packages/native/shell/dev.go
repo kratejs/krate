@@ -16,6 +16,11 @@ type Controller interface {
 	Quit()
 }
 
+// Querier is the optional part of Controller behind the query command.
+type Querier interface {
+	Query(js string) (string, error)
+}
+
 // ServeControl reads newline-terminated commands from r and answers each with
 // one line on w, "ok" or "error <message>". It returns when r ends or after
 // "quit". Commands:
@@ -23,6 +28,7 @@ type Controller interface {
 //	reload-hostjs
 //	restart-gohost
 //	eval <js>
+//	query <js>     answers "ok <json>"; needs a Controller that implements Querier
 //	quit
 //
 // It returns true if it stopped because of "quit".
@@ -52,6 +58,21 @@ func ServeControl(r io.Reader, w io.Writer, ctl Controller) (quit bool) {
 				continue
 			}
 			reply(ctl.Eval(arg))
+		case "query":
+			q, ok := ctl.(Querier)
+			switch {
+			case strings.TrimSpace(arg) == "":
+				reply(fmt.Errorf("query needs a JavaScript expression"))
+			case !ok:
+				reply(fmt.Errorf("query is not supported here"))
+			default:
+				v, err := q.Query(arg)
+				if err != nil {
+					reply(err)
+				} else {
+					fmt.Fprintf(w, "ok %s\n", oneLine(v))
+				}
+			}
 		case "quit":
 			reply(nil)
 			ctl.Quit()

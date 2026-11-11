@@ -117,11 +117,12 @@ to stderr.
 | `reload-hostjs` | Re-reads `app.json` and the host bundle and swaps it into the running VM (`hostjs.Host.Reload`). A bundle that throws leaves the old code running and answers `error`. New ids are registered. |
 | `restart-gohost` | Re-reads `app.json`, stops the Go host child (stdin close, kill after 2 s) and starts the binary it names now. Windows stay open; open signals reconnect on their own and the page sees the new child's values. Starts the child if none ran. |
 | `eval <js>` | Runs the rest of the line as JavaScript in every open window, without waiting for a result. `error` in browser mode or with no window. |
+| `query <js>` | Evaluates the rest of the line as a JavaScript expression in the open window, awaits a returned promise and answers `ok <json>` with the JSON-encoded value (`ok null` for `undefined`), or `error <message>` if the expression throws, the page unloads before it answers (a navigation), or nothing answers within 45 s. Wrap statements in an async arrow function: `query (async () => { ...; return x })()`. If the page is still loading, the script is sent again until the page runs it. Needs `--dev`; not available in browser mode. Used by the end-to-end tests. |
 | `quit` | Answers `ok`, then exits. |
 
 stdin EOF (the driver died) quits the shell. SIGINT and SIGTERM quit it too.
 The same operations are available in process as `Control` (`ReloadHostJS`,
-`RestartGoHost`, `Eval`, `Quit`, `URL`, `Origin`), passed to
+`RestartGoHost`, `Eval`, `Query`, `Quit`, `URL`, `Origin`), passed to
 `RunOptions.OnReady`; `ServeControl` implements the text protocol over any
 reader and writer.
 

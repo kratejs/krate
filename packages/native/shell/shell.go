@@ -86,6 +86,8 @@ type app struct {
 
 	ctl  *Control
 	quit func() // set by the run mode
+
+	results queryResults // dev "query" mailbox
 }
 
 func load(appDir string, opts RunOptions) (*app, error) {
@@ -129,6 +131,9 @@ func load(appDir string, opts RunOptions) (*app, error) {
 	})
 	extra := opts.ExtraHandler
 	a.handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if opts.Dev && a.results.serve(w, r) {
+			return
+		}
 		if extra != nil && extra(w, r) {
 			return
 		}
