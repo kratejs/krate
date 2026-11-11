@@ -42,6 +42,7 @@ func printNativeUsage(w io.Writer) {
 	fmt.Fprintf(w, "  sign       Sign the packaged app (codesign, signtool/osslsigncode, gpg) and rebuild the archives\n")
 	fmt.Fprintf(w, "  notarize   Notarize and staple the signed macOS app\n")
 	fmt.Fprintf(w, "  keygen     Create the Ed25519 key pair that signs update files\n")
+	fmt.Fprintf(w, "  plugin     plugin init <name> [dir]: create a native plugin (default dir native-plugins/<name>)\n")
 	fmt.Fprintf(w, "  doctor     Check the Go toolchain, shell binary, system webview, packaging tools and host runtime (--json)\n\n")
 	fmt.Fprintf(w, "Build flags:\n")
 	fmt.Fprintf(w, "  --out <dir>      Output directory (default dist-native); the app is <dir>/app\n")
@@ -107,6 +108,9 @@ func runNative(flags cliFlags, args []string) {
 		return
 	case "doctor":
 		runNativeDoctor(flags, append([]string{"native"}, args[2:]...))
+		return
+	case "plugin":
+		runNativePlugin(flags, args[2:])
 		return
 	}
 	for _, s := range nativeStubs {

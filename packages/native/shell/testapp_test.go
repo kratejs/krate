@@ -68,9 +68,6 @@ func buildTestApp(root, page string, withGo bool, start int) (*testApp, error) {
 		"assets":    "dist",
 		"fallbacks": []map[string]string{{"pattern": "/tasks/[id]", "file": "tasks/[id]/index.html"}},
 		"hostjs":    map[string]any{"bundle": "host/host.js", "map": "host/host.js.map"},
-		// The test plugin gt and the SDK ids the plugin flow uses.
-		"plugins":     []string{"gt"},
-		"permissions": []string{"plugin:gt.read", "plugin:gt.admin", "window", "app"},
 	}
 	if withGo {
 		bin, err := a.buildGoHost(start)

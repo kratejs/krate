@@ -310,7 +310,7 @@ var (
 )
 
 func (c *collector) scanFile(path, src string) {
-	if !strings.Contains(src, "krate/") && !strings.Contains(src, "@krate/app") {
+	if !strings.Contains(src, "krate/") && !strings.Contains(src, "@krate/app") && !strings.Contains(src, "plugin/") {
 		return
 	}
 	rel, kind := c.rel(path), c.kind(path)

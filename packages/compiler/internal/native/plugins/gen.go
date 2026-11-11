@@ -119,8 +119,13 @@ func Generate(root string, ps []*Plugin, used Used, env []string) (*Output, []di
 		})
 		if err != nil || len(ds) > 0 {
 			for i := range ds {
-				if ds[i].Code == diag.CodeGoBindImport || ds[i].Code == diag.CodeGoBindSignature || ds[i].Code == diag.CodeGoBindType {
-					ds[i].Hint += " (plugin ops are the exported functions and signals the manifest lists)"
+				switch ds[i].Code {
+				case diag.CodeGoBindImport:
+					// A listed op that is not an exported function or signal.
+					ds[i].Code = diag.CodePluginOp
+					ds[i].Hint += " (or mark the op \"manual\" in krate-plugin.json if the plugin registers it from Init)"
+				case diag.CodeGoBindSignature, diag.CodeGoBindType:
+					ds[i].Hint += " (plugin ops are the exported functions and signals krate-plugin.json lists)"
 				}
 			}
 			return nil, ds, err

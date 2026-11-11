@@ -1,7 +1,10 @@
 package shell
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -42,6 +45,27 @@ async function call(fn) {
   await fetch("/__test/report", {method: "POST", body: JSON.stringify(Object.assign({kind: "scoped", origin: location.origin}, rep))});
 })();
 </script></body></html>`
+
+// enableGUIPlugin lists the test plugin gt, and the SDK ids the plugin flow
+// uses, in the manifest of the GUI test app.
+func enableGUIPlugin(dir string) error {
+	path := filepath.Join(dir, ManifestFile)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
+		return err
+	}
+	m["plugins"] = []string{"gt"}
+	m["permissions"] = []string{"plugin:gt.read", "plugin:gt.admin", "window", "app"}
+	out, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, out, 0o644)
+}
 
 // guiPlugin is a plugin that records its lifecycle.
 type guiPlugin struct {

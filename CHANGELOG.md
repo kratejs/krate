@@ -18,6 +18,13 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 - `krate native doctor` reports the Go toolchain, the shell, the system webview (through the new
   `krate-shell --doctor`), packaging and signing tools and the host runtime, and exits 1 when
   something the config needs is missing.
+- Native plugins: a Go package plus a `krate-plugin.json` that ships reusable native capabilities.
+  `native.plugins` enables local directories, npm packages and Go modules; ops are called as
+  `plugin/<name>.<op>` through a generated, typed `krate/plugin/<name>` module (calls, streams,
+  signals) and gated by `plugin:<name>.<permission>`, which a build derives from the code, scopes
+  per window and shakes per op in release builds. The app runs under a per-app shell built with Go
+  (`krate native doctor` reports the toolchain as required). `krate native plugin init <name>`
+  scaffolds one; `examples/native-plugin` is a complete app. New diagnostics `KR7250` to `KR7257`.
 - Krate Native rows in the compatibility matrix (Linux verified, macOS and Windows untested) and
   size, cold-start and memory budgets in `packages/native/budgets.json`.
 

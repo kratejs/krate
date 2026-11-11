@@ -252,3 +252,116 @@ func TestIDsMatchTypeScriptWrappers(t *testing.T) {
 		}
 	}
 }
+
+var testPlugins = []PluginInfo{
+	{Name: "sys", Ops: []PluginOp{
+		{Name: "Info", Permission: "plugin:sys.read"},
+		{Name: "Memory", Permission: "plugin:sys.read"},
+		{Name: "Watch", Permission: "plugin:sys.monitor"},
+		{Name: "Free"},
+	}},
+	{Name: "other", Ops: []PluginOp{{Name: "Run", Permission: "plugin:other.run"}}},
+}
+
+func analyzePlugins(t *testing.T, files map[string]string) *Result {
+	t.Helper()
+	root, cfg, p := project(t, files)
+	res, err := Analyze(root, cfg, p, Options{Plugins: testPlugins})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return res
+}
+
+func TestPluginNamedImports(t *testing.T) {
+	res := analyzePlugins(t, map[string]string{"src/pages/index.tsx": `import { Info, Watch as w } from "krate/plugin/sys";
+export default function P() { return <b onClick={() => { Info(); w(); }}>x</b>; }
+`})
+	if got := strings.Join(res.Permissions, ","); got != "plugin:sys.monitor,plugin:sys.read" {
+		t.Errorf("permissions = %s", got)
+	}
+	if got := strings.Join(res.PluginOps["sys"], ","); got != "Info,Watch" {
+		t.Errorf("ops = %v", res.PluginOps)
+	}
+	if _, ok := res.PluginOps["other"]; ok {
+		t.Error("an unused plugin is reported as used")
+	}
+	site := res.Needs["plugin:sys.read"][0]
+	if site.File != "src/pages/index.tsx" || !strings.Contains(site.Symbol, "Info from krate/plugin/sys") {
+		t.Errorf("site = %+v", site)
+	}
+	// Plugin ops are not SDK areas.
+	for _, a := range res.UIAreas {
+		if strings.HasPrefix(a, "plugin:") {
+			t.Errorf("area %q", a)
+		}
+	}
+}
+
+func TestPluginOpWithoutPermissionStillCounts(t *testing.T) {
+	res := analyzePlugins(t, map[string]string{"src/pages/index.tsx": `import { Free } from "krate/plugin/sys";
+export default function P() { return <b onClick={() => Free()}>x</b>; }
+`})
+	if len(res.Permissions) != 0 {
+		t.Errorf("permissions = %v", res.Permissions)
+	}
+	if got := strings.Join(res.PluginOps["sys"], ","); got != "Free" {
+		t.Errorf("ops = %v", res.PluginOps)
+	}
+}
+
+func TestPluginNamespaceAndDynamicUse(t *testing.T) {
+	res := analyzePlugins(t, map[string]string{
+		"src/pages/index.tsx": `import * as sys from "krate/plugin/sys";
+export default function P() { return <b onClick={() => sys.Memory()}>x</b>; }
+`,
+		"src/pages/two.tsx": `export default function P() { return <b onClick={async () => (await import("krate/plugin/other")).Run()}>x</b>; }
+`,
+	})
+	if got := strings.Join(res.PluginOps["sys"], ","); got != "Memory" {
+		t.Errorf("namespace member use: %v", res.PluginOps)
+	}
+	// A dynamic import cannot be narrowed: every op of the plugin.
+	if got := strings.Join(res.PluginOps["other"], ","); got != "Run" {
+		t.Errorf("dynamic import: %v", res.PluginOps)
+	}
+	if !strings.Contains(strings.Join(res.Permissions, ","), "plugin:other.run") {
+		t.Errorf("permissions = %v", res.Permissions)
+	}
+}
+
+func TestPluginNamespaceEscapeUsesWholePlugin(t *testing.T) {
+	res := analyzePlugins(t, map[string]string{"src/pages/index.tsx": `import * as sys from "krate/plugin/sys";
+const api = sys;
+export default function P() { return <b>{String(api)}</b>; }
+`})
+	if got := strings.Join(res.PluginOps["sys"], ","); got != "Free,Info,Memory,Watch" {
+		t.Errorf("whole plugin: %v", res.PluginOps)
+	}
+}
+
+func TestPluginIDLiterals(t *testing.T) {
+	res := analyzePlugins(t, map[string]string{"src/pages/index.tsx": `const a = "plugin/sys.Watch";
+const b = "plugin/other.Unknown";
+export default function P() { return <b>{a}{b}</b>; }
+`})
+	if got := strings.Join(res.PluginOps["sys"], ","); got != "Watch" {
+		t.Errorf("literal id: %v", res.PluginOps)
+	}
+	// An unknown op of a known plugin counts as the whole plugin.
+	if got := strings.Join(res.PluginOps["other"], ","); got != "Run" {
+		t.Errorf("unknown op: %v", res.PluginOps)
+	}
+}
+
+func TestAddGoSites(t *testing.T) {
+	r := &Result{GoAreas: []string{"kv"}}
+	r.AddGoSites([]Site{{File: "p/p.go", Symbol: "sdk/tray", Kind: "go"}, {File: "p/q.go", Symbol: "sdk/kv", Kind: "go"}})
+	if strings.Join(r.GoAreas, ",") != "kv,tray" || len(r.GoSites) != 2 {
+		t.Errorf("GoAreas = %v sites %v", r.GoAreas, r.GoSites)
+	}
+	// A plugin that imports sdk/tray keeps the tray area, and the menu it needs.
+	if got := strings.Join(r.Linked(), ","); !strings.Contains(got, "tray") || !strings.Contains(got, "menu") {
+		t.Errorf("Linked = %s", got)
+	}
+}

@@ -44,6 +44,9 @@ prerendered at build time.
   clipboard, menus, tray, shortcuts and notifications.
 - [Release builds](/docs/native/release/) - one executable per platform, SDK
   shaking, derived permissions, per-window scopes and profile-guided builds.
+- [Native plugins](/docs/native/plugins/) - reusable native capabilities as a Go
+  package with a manifest, generated TypeScript and declared permissions;
+  `native.plugins` turns one on.
 - [Packaging](/docs/native/packaging/) - `krate native package`: installers
   and archives for macOS, Windows and Linux, icons and Windows resources.
 - [Signing and notarization](/docs/native/signing/) - `krate native sign` and

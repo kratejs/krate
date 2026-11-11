@@ -173,6 +173,7 @@ func loadApp(dir string, fsys fs.FS, opts RunOptions) (*app, error) {
 		})
 		for _, p := range active {
 			if err := a.plug.Install(p); err != nil {
+				a.close()
 				return nil, fmt.Errorf("shell: %w", err)
 			}
 		}

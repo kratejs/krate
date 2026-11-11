@@ -41,6 +41,11 @@ func TestMain(m *testing.M) {
 		fmt.Fprintln(os.Stderr, "GUI test setup:", err)
 		os.Exit(1)
 	}
+	if err := enableGUIPlugin(guiApp.dir); err != nil {
+		cleanup()
+		fmt.Fprintln(os.Stderr, "GUI test setup:", err)
+		os.Exit(1)
+	}
 	code := make(chan int, 1)
 	err = Run(guiApp.dir, RunOptions{
 		Dev:          true,
