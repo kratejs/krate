@@ -27,6 +27,8 @@ const (
 	iidExecuteScriptHandler = "49511172-cc67-4bca-9923-137112f4c4cc"
 	// WebView2.h line 48591
 	iidEnvironmentOptions = "2fde08a8-1e9a-4766-8c05-95a9ceb9d1c5"
+	// ICoreWebView2WebMessageReceivedEventHandler
+	iidWebMessageHandler = "57213f19-00e6-49fa-8e07-898ea01ecbd2"
 	// WebView2.h line 4386
 	iidPermissionRequestedHandler = "15e1c6a3-c72a-4df3-91d7-d097fbec6bfd"
 	// WebView2.h line 21808 (ICoreWebView2_19, MemoryUsageTargetLevel)

@@ -29,8 +29,12 @@ pass in well under 30 seconds. They assert, from inside the page:
 - `location.origin` is `https://app.localhost` and `crypto.subtle` works
   (secure context),
 - a 64 KiB POST to `/echo` comes back byte for byte,
-- a 5 chunk response with 50 ms gaps arrives incrementally (the test fails if
-  the chunks arrive within 120 ms of each other, which means buffering),
+- a 5 chunk response with 50 ms gaps from `/__krate/stream/...` arrives
+  incrementally (the test fails if the chunks arrive within 120 ms of each
+  other, which means buffering). Streaming GETs (`/__krate/stream/`,
+  `/__krate/signals`, `/__krate/hmr`) travel over web messages, because
+  WebView2 reads a WebResourceRequested response stream to its end before the
+  page sees it; every other response is delivered whole (`msgstream.go`),
 - navigating the top-level page to `https://example.com/` is cancelled,
 - `/report` receives the results; 1000 goroutines calling Dispatch all run on
   the main thread; two windows work side by side.
@@ -144,6 +148,7 @@ calls `AddView`:
   Windows reports it. `Show` succeeding does not prove a banner was drawn.
 - A toast is rejected with an HRESULT: the XML failed WinRT's parser; run
   `TestToastXMLAcceptedByWinRT` and look at `buildToastXML` in `toast.go`.
-- Large or streamed responses hang: the IStream `Read` path. The stream
-  blocks on a background thread and pumps messages if WebView2 reads it on the
-  UI thread; see `com_windows.go` (`goStream.read`).
+- A streamed response (signals, hmr, async iterables) never arrives: the
+  fetch wrapper (`streamShim` in `msgstream.go`) was not injected or the web
+  message channel failed; look for `add_WebMessageReceived` lines on stderr.
+  Any other response that never ends is held back by WebView2 until it does.

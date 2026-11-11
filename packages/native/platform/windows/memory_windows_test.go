@@ -39,6 +39,9 @@ func TestEnvironmentOptionsObject(t *testing.T) {
 	if got := get(vtIndex(iface, "get_AdditionalBrowserArguments")); got != "--renderer-process-limit=1" {
 		t.Errorf("arguments: %q", got)
 	}
+	if got := get(vtIndex(iface, "get_TargetCompatibleBrowserVersion")); got != defaultTargetVersion {
+		t.Errorf("target version: %q (the runtime rejects a null one)", got)
+	}
 	if got := get(vtIndex(iface, "get_Language")); got != "" {
 		t.Errorf("language should be unset: %q", got)
 	}

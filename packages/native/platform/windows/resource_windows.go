@@ -145,6 +145,7 @@ func (a *App) serve(view caps.ViewRef, args, def unsafe.Pointer, method, uri str
 		func(status int, h http.Header, b []byte) {
 			a.Dispatch(func() { a.respond(args, def, status, h, nil, b) })
 		})
+	rw.whole = true // streaming GETs take the web message route (msgstream.go)
 	func() {
 		defer func() {
 			if r := recover(); r != nil {

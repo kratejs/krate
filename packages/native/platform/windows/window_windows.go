@@ -45,6 +45,8 @@ type view struct {
 	hRes       unsafe.Pointer // this view's WebResourceRequested handler
 	hNav       unsafe.Pointer // NavigationCompleted
 	hClose     unsafe.Pointer // WindowCloseRequested
+	hMsg       unsafe.Pointer // WebMessageReceived (streamed responses)
+	streams    streamTable
 	pending    []func()
 	path       string
 	minW, minH int
@@ -207,6 +209,7 @@ func (v *view) controllerCompleted(hr, controller uintptr) {
 	})
 	vcall(v.webview, wvAddWindowCloseRequested, uintptr(v.hClose), uintptr(unsafe.Pointer(&token)))
 
+	v.setupStreams()
 	a.tuneMemory(v)
 
 	w.placeViews()
@@ -241,6 +244,7 @@ func (w *Window) destroy() {
 // closeController closes the WebView2 controller and drops the references
 // to it and to its CoreWebView2.
 func (v *view) closeController() {
+	v.streams.closeAll()
 	if v.controller != nil {
 		vcall(v.controller, ctlClose)
 		comRelease(v.controller)
@@ -251,7 +255,7 @@ func (v *view) closeController() {
 		comRelease(v.webview)
 		v.webview = nil
 	}
-	for _, h := range []*unsafe.Pointer{&v.hRes, &v.hNav, &v.hClose} {
+	for _, h := range []*unsafe.Pointer{&v.hRes, &v.hNav, &v.hClose, &v.hMsg} {
 		if *h != nil {
 			comRelease(*h)
 			*h = nil

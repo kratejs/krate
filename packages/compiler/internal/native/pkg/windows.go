@@ -63,7 +63,9 @@ func packageWindows(o *Options, ic *Icon, want map[string]bool, stage string, re
 			return err
 		}
 		res.add(Artifact{Path: out, Format: "msix"})
-		res.note("the .msix is unsigned; Windows installs only signed packages: sign it with krate native sign (signtool) using a certificate whose subject is exactly %q", msixPublisher(m.Publisher))
+		if o.Signer == nil {
+			res.note("the .msix is unsigned; Windows installs only signed packages: sign it with krate native sign (signtool) using a certificate whose subject is exactly %q", msixPublisher(m.Publisher))
+		}
 		if o.Signer != nil {
 			if err := o.Signer.SignFile(out, "msix"); err != nil {
 				return err

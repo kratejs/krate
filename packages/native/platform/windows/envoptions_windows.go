@@ -17,6 +17,10 @@ import (
 // implemented; QueryInterface answers E_NOINTERFACE for them and the runtime
 // then uses their defaults. This follows the COM contract but has not been run.
 //
+// TargetCompatibleBrowserVersion defaults to defaultTargetVersion: the SDK
+// implementation always reports a version there, and the runtime rejects the
+// whole options object with E_INVALIDARG when it is null.
+//
 // String getters return nil when the property was never set, like the SDK
 // implementation in WebView2EnvironmentOptions.h; non-empty values are copied
 // with CoTaskMemAlloc because the caller frees them with CoTaskMemFree.
@@ -25,6 +29,10 @@ type envOptions struct {
 	arguments, lang, version string
 	sso                      bool
 }
+
+// defaultTargetVersion is the oldest runtime that has the options interface
+// we implement; any installed runtime is at least this new.
+const defaultTargetVersion = "86.0.616.0"
 
 var (
 	optOnce sync.Once
@@ -136,7 +144,7 @@ func newEnvironmentOptions(args string) unsafe.Pointer {
 	o := &comObj{
 		vtbl: vtOpts,
 		ids:  []guid{mustGUID(iidIUnknown), mustGUID(iidEnvironmentOptions)},
-		opts: &envOptions{arguments: args},
+		opts: &envOptions{arguments: args, version: defaultTargetVersion},
 	}
 	return register(o)
 }
