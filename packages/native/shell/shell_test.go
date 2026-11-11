@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/kratejs/krate/packages/native/internal/gohosttest"
+	"github.com/kratejs/krate/packages/native/internal/memory"
 	"github.com/kratejs/krate/packages/native/wire"
 )
 
@@ -473,5 +474,33 @@ func TestSDKRegisteredByShell(t *testing.T) {
 	}
 	if got := callVia(t, c, base, "h.tag", nil); !strings.Contains(got, "host-v1") {
 		t.Errorf("host code still works: %s", got)
+	}
+}
+
+func TestParseManifestMemory(t *testing.T) {
+	m, err := ParseManifest([]byte(`{"appId":"a.b"}`), "app.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.MemoryProfile() != memory.Balanced {
+		t.Errorf("default profile = %q, want balanced", m.MemoryProfile())
+	}
+	if pm := platformMemory(m); pm.Profile != "balanced" || !pm.Features.Media || !pm.Features.WebGL || !pm.Features.SpellCheck {
+		t.Errorf("a manifest without features must keep every feature on: %+v", pm)
+	}
+	m, err = ParseManifest([]byte(`{"appId":"a.b","memory":"minimal","features":{"webgl":true},"hostjs":{"bundle":"h.js","memoryMB":48}}`), "app.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pm := platformMemory(m); pm.Profile != "minimal" || !pm.Features.WebGL || pm.Features.Media || pm.Features.WebAudio {
+		t.Errorf("platformMemory = %+v", pm)
+	}
+	if m.HostJS.MemoryMB != 48 {
+		t.Errorf("memoryMB = %d", m.HostJS.MemoryMB)
+	}
+	for _, bad := range []string{`{"appId":"a.b","memory":"tiny"}`, `{"appId":"a.b","hostjs":{"bundle":"h.js","memoryMB":-1}}`} {
+		if _, err := ParseManifest([]byte(bad), "app.json"); err == nil {
+			t.Errorf("%s: no error", bad)
+		}
 	}
 }

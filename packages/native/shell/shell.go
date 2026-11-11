@@ -20,6 +20,7 @@ import (
 	"sync/atomic"
 
 	"github.com/kratejs/krate/packages/native/gohost"
+	"github.com/kratejs/krate/packages/native/internal/memory"
 	"github.com/kratejs/krate/packages/native/krate"
 	"github.com/kratejs/krate/packages/native/platform"
 	"github.com/kratejs/krate/packages/native/scheme"
@@ -78,6 +79,7 @@ func Run(appDir string, opts RunOptions) error {
 		return err
 	}
 	defer a.close()
+	defer a.startMemory()()
 	if opts.Browser {
 		return a.runBrowser()
 	}
@@ -110,6 +112,7 @@ type app struct {
 	perms   permission.Set               // from the manifest; read once at load
 	glued   bool                         // opts.GoGlue was registered
 	plat    atomic.Pointer[platform.App] // native mode only, set before the loop runs
+	reaper  *memory.Reaper               // idle trim; nil under the performance profile
 }
 
 func load(appDir string, opts RunOptions) (*app, error) {
@@ -193,6 +196,7 @@ func loadApp(dir string, fsys fs.FS, opts RunOptions) (*app, error) {
 	app := windowIDHandler(scheme.New(so))
 	extra := opts.ExtraHandler
 	a.handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		a.reaper.Touch()
 		if opts.Dev && a.results.serve(w, r) {
 			return
 		}
@@ -216,6 +220,23 @@ func (a *app) attachSDK(p platform.App) {
 		sdkupdater.SetQuit(p.Quit)
 	}
 	sdkall.RegisterUI(a.reg, a.sdk, a.perms, a.opts.Allowed)
+}
+
+// startMemory applies the Go side of the memory profile and starts the idle
+// reaper. The returned function stops it.
+func (a *app) startMemory() func() {
+	p := a.man.MemoryProfile()
+	memory.ApplyGo(p)
+	r := memory.StartReaper(p, func() {
+		a.mu.Lock()
+		h := a.host
+		a.mu.Unlock()
+		if h != nil {
+			h.GC()
+		}
+	})
+	a.reaper = r
+	return r.Stop
 }
 
 func (a *app) close() {
@@ -286,7 +307,11 @@ func (a *app) reloadQuickJS() error {
 		if a.opts.Dev {
 			env["NODE_ENV"] = "development"
 		}
-		h, err := newJSHost(a.opts.Dev, env, a.logf)
+		mb := spec.MemoryMB
+		if mb == 0 {
+			mb = man.MemoryProfile().HostMemoryMB()
+		}
+		h, err := newJSHost(a.opts.Dev, mb, env, a.logf)
 		if err != nil {
 			return err
 		}
@@ -354,6 +379,7 @@ func (a *app) restartGoHost() error {
 		if a.opts.Dev {
 			env = append(env, "KRATE_DEV=1")
 		}
+		env = append(env, memory.EnvProfile+"="+string(man.MemoryProfile()))
 		if err := c.Start(context.Background(), binary, env); err != nil {
 			return err
 		}
@@ -390,6 +416,7 @@ func (a *app) runNative() error {
 		AppID:   man.AppID,
 		Handler: a.handler,
 		Debug:   a.opts.Dev || man.Debug,
+		Memory:  platformMemory(man),
 	})
 	if err != nil {
 		return err
@@ -500,3 +527,16 @@ func (c *Control) URL() string { return c.url }
 // Origin is the native app origin ("krate://app" or "https://app.localhost"),
 // or "" in browser mode.
 func (c *Control) Origin() string { return c.origin }
+
+// platformMemory is the webview side of the manifest's memory profile. An
+// app.json without a features block was not scanned, so every optional
+// feature stays on for it.
+func platformMemory(m *Manifest) platform.Memory {
+	out := platform.Memory{Profile: string(m.MemoryProfile())}
+	if f := m.Features; f != nil {
+		out.Features = platform.Features{Media: f.Media, WebAudio: f.WebAudio, WebGL: f.WebGL, WebRTC: f.WebRTC, SpellCheck: f.SpellCheck}
+	} else {
+		out.Features = platform.Features{Media: true, WebAudio: true, WebGL: true, WebRTC: true, SpellCheck: true}
+	}
+	return out
+}

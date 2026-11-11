@@ -359,3 +359,18 @@ func TestSharedVectors(t *testing.T) {
 		})
 	}
 }
+
+func TestHostGCKeepsTheHostWorking(t *testing.T) {
+	r := newRig(t, `
+let n = 0;
+async function bump(): Promise<number> { return ++n; }
+__krateHost.register("host.bump", bump, "func");
+`, Options{MemoryMB: 32})
+	r.h.GC() // queued on the VM goroutine; must not disturb later calls
+	for i := 1; i <= 2; i++ {
+		res := r.call("host.bump", nil)
+		if res.Err != nil || res.OK != float64(i) {
+			t.Fatalf("call %d: %+v", i, res)
+		}
+	}
+}

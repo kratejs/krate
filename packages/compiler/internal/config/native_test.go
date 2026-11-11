@@ -93,6 +93,27 @@ func TestNativeDefaults(t *testing.T) {
 	}
 }
 
+func TestNativeMemoryAndFeatures(t *testing.T) {
+	cfg := nativeCfg(t, `{"native": {"appId": "com.acme.app", "memory": "minimal",
+		"features": {"media": true, "webgl": false}, "host": {"memoryMB": 48}}}`)
+	n := cfg.EffectiveNative()
+	if n.Memory != "minimal" || n.Host.MemoryMB != 48 {
+		t.Errorf("memory = %q, host.memoryMB = %d", n.Memory, n.Host.MemoryMB)
+	}
+	f := n.Features
+	if f.Media == nil || !*f.Media || f.WebGL == nil || *f.WebGL || f.WebAudio != nil {
+		t.Errorf("features = %+v", f)
+	}
+	c := Default()
+	c.Native = &NativeConfig{AppID: "com.acme.app"}
+	if got := c.EffectiveNative().Memory; got != "balanced" {
+		t.Errorf("default memory = %q, want balanced", got)
+	}
+	if c.Native.Memory != "" {
+		t.Error("EffectiveNative must not mutate the config")
+	}
+}
+
 func TestValidateNative(t *testing.T) {
 	cases := []struct {
 		name string
@@ -132,6 +153,9 @@ func TestValidateNative(t *testing.T) {
 			n.Window.Permissions = &w
 		}, ""},
 		{"empty window scope", func(n *NativeConfig) { w := []string{}; n.Window.Permissions = &w }, ""},
+		{"memory profile", func(n *NativeConfig) { n.Memory = "minimal" }, ""},
+		{"memory unknown", func(n *NativeConfig) { n.Memory = "tiny" }, "native.memory"},
+		{"host memoryMB negative", func(n *NativeConfig) { n.Host.MemoryMB = -1 }, "host.memoryMB"},
 		{"updater https", func(n *NativeConfig) { n.Updater = &NativeUpdater{URL: "http://a.b/u.json", PublicKey: "k"} }, "https"},
 	}
 	for _, tc := range cases {

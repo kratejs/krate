@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/kratejs/krate/packages/native/internal/memory"
 	"github.com/kratejs/krate/packages/native/sdk/permission"
 )
 
@@ -51,8 +52,28 @@ type Manifest struct {
 	// Ed25519 public key that verifies update files.
 	Updater *UpdaterSpec `json:"updater,omitempty"`
 
+	// Memory is the memory profile: "balanced" (default), "minimal" or
+	// "performance". See README.md.
+	Memory string `json:"memory,omitempty"`
+	// Features says which optional webview features the UI uses. The
+	// profiles other than "performance" switch the others off. A nil block
+	// (an older app.json, not scanned) keeps every feature on.
+	Features *Features `json:"features,omitempty"`
+
 	Debug bool `json:"debug"`
 }
+
+// Features are the optional webview features an app uses.
+type Features struct {
+	Media      bool `json:"media"`
+	WebAudio   bool `json:"webaudio"`
+	WebGL      bool `json:"webgl"`
+	WebRTC     bool `json:"webrtc"`
+	SpellCheck bool `json:"spellcheck"`
+}
+
+// MemoryProfile is the manifest's profile with the default applied.
+func (m *Manifest) MemoryProfile() memory.Profile { return memory.Parse(m.Memory) }
 
 // PermissionSet parses the manifest's permission list.
 func (m *Manifest) PermissionSet() (permission.Set, error) {
@@ -103,6 +124,9 @@ type HostJSSpec struct {
 	Bundle string `json:"bundle"`
 	// Map is its source map (optional).
 	Map string `json:"map"`
+	// MemoryMB is the QuickJS heap limit in MiB. 0 means the profile's
+	// default (64 balanced, 32 minimal, 256 performance).
+	MemoryMB int `json:"memoryMB,omitempty"`
 }
 
 // GoHostSpec locates the Go host child and lists what it registers.
@@ -210,6 +234,14 @@ func (m *Manifest) normalize() error {
 				return fmt.Errorf("window.permissions: %q is not in the app's permissions", n)
 			}
 		}
+	}
+	switch m.Memory {
+	case "", "balanced", "minimal", "performance":
+	default:
+		return fmt.Errorf("memory %q must be balanced, minimal or performance", m.Memory)
+	}
+	if m.HostJS != nil && m.HostJS.MemoryMB < 0 {
+		return fmt.Errorf("hostjs.memoryMB %d must not be negative", m.HostJS.MemoryMB)
 	}
 	if m.Assets == "" {
 		m.Assets = "dist"

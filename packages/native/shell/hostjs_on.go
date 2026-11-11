@@ -13,11 +13,14 @@ type jsHost interface {
 	Load(bundle, srcMap []byte, name string) error
 	Reload(bundle, srcMap []byte, name string) error
 	Register(r *scheme.Registry)
+	// GC collects the VM's garbage; it is called when the app goes idle.
+	GC()
 	Close() error
 }
 
-func newJSHost(dev bool, env map[string]string, logf func(string, ...any)) (jsHost, error) {
+func newJSHost(dev bool, memoryMB int, env map[string]string, logf func(string, ...any)) (jsHost, error) {
 	return hostjs.New(hostjs.Options{
+		MemoryMB:  memoryMB,
 		Dev:       dev,
 		Env:       env,
 		LogPrefix: "[host] ",

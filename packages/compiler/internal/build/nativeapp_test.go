@@ -299,6 +299,75 @@ func TestNativeAppBuildsExample(t *testing.T) {
 
 // A dynamic page without generateStaticParams gets one shell page and a
 // fallback entry; the shell carries the script that fills params from the URL.
+func TestNativeAppMemoryProfileAndFeatures(t *testing.T) {
+	root := nativeExampleCopy(t)
+	b := newNativeBuilder(t, root)
+	on := true
+	b.Cfg.Native = &config.NativeConfig{
+		AppID: "com.example.tasks", Memory: "minimal",
+		Host:     config.NativeHost{MemoryMB: 48},
+		Features: config.NativeFeatures{WebGL: &on},
+	}
+	if _, err := b.BuildNativeApp(NativeAppOptions{SkipGoCompile: true}); err != nil {
+		t.Fatalf("native build: %v", err)
+	}
+	m := readNativeManifest(t, filepath.Join(root, "dist-native", "app"))
+	if m["memory"] != "minimal" {
+		t.Errorf("memory = %v", m["memory"])
+	}
+	f, _ := m["features"].(map[string]any)
+	if f == nil || f["webgl"] != true || f["media"] != false || f["webaudio"] != false || f["webrtc"] != false || f["spellcheck"] != false {
+		t.Errorf("features = %v", m["features"])
+	}
+	if hj := m["hostjs"].(map[string]any); hj["memoryMB"] != float64(48) {
+		t.Errorf("hostjs = %v", hj)
+	}
+}
+
+func TestNativeAppDetectsFeaturesInTheBuiltUI(t *testing.T) {
+	root := nativeExampleCopy(t)
+	page := filepath.Join(root, "src", "pages", "index.tsx")
+	data, err := os.ReadFile(page)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Add a media element and a contenteditable region to the first element
+	// the page returns.
+	src := string(data)
+	i := strings.Index(src, "<main")
+	if i < 0 {
+		i = strings.Index(src, "<div")
+	}
+	if i < 0 {
+		t.Skip("example page has no root element to extend")
+	}
+	j := strings.Index(src[i:], ">") + i + 1
+	src = src[:j] + `<video src="/a.mp4" /><div contentEditable="true">x</div>` + src[j:]
+	if err := os.WriteFile(page, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	b := newNativeBuilder(t, root)
+	off := false
+	b.Cfg.Native = &config.NativeConfig{AppID: "com.example.tasks", Features: config.NativeFeatures{SpellCheck: &off}}
+	if _, err := b.BuildNativeApp(NativeAppOptions{SkipGoCompile: true}); err != nil {
+		t.Fatalf("native build: %v", err)
+	}
+	m := readNativeManifest(t, filepath.Join(root, "dist-native", "app"))
+	if m["memory"] != "balanced" {
+		t.Errorf("memory = %v, want the balanced default", m["memory"])
+	}
+	f, _ := m["features"].(map[string]any)
+	if f == nil || f["media"] != true {
+		t.Errorf("a <video> element should switch media on: %v", m["features"])
+	}
+	if f["spellcheck"] != false {
+		t.Errorf("native.features.spellcheck=false must win over detection: %v", m["features"])
+	}
+	if f["webgl"] != false {
+		t.Errorf("webgl = %v", f["webgl"])
+	}
+}
+
 func TestNativeAppDynamicRoutes(t *testing.T) {
 	root := t.TempDir()
 	writeTree(t, root, fakeKrateModules)

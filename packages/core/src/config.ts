@@ -345,6 +345,8 @@ export interface NativeHostConfig {
   version?: string;
   /** Ship the runtime inside the app. Default true. */
   bundle?: boolean;
+  /** QuickJS heap limit in MiB. Default 64 (balanced), 32 (minimal), 256 (performance). */
+  memoryMB?: number;
   /** Packages that run in a different runtime than the main host runtime. */
   islands?: Record<string, "node" | "bun" | "deno" | "quickjs">;
 }
@@ -404,6 +406,23 @@ export interface NativeConfig {
   };
   /** In-app updates; `url` may contain `{target}`. Needs both fields. */
   updater?: { url: string; publicKey: string };
+  /**
+   * Memory profile of the webview and host. "balanced" (default) trims what
+   * the app does not use; "minimal" trims harder and turns the JS JIT off
+   * in the web process (slower); "performance" keeps the engine defaults.
+   */
+  memory?: "balanced" | "minimal" | "performance";
+  /**
+   * Explicit overrides for the webview features detected from the UI code.
+   * A detected feature is on unless set to false here; true forces it on.
+   */
+  features?: {
+    media?: boolean;
+    webaudio?: boolean;
+    webgl?: boolean;
+    webrtc?: boolean;
+    spellcheck?: boolean;
+  };
 }
 
 /** Deploy adapter selection + options for `krate deploy`. */

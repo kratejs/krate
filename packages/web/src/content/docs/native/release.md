@@ -25,6 +25,7 @@ krate native build --release --target windows/amd64,darwin/arm64,linux/arm64
 | `--release` | Link executables. Needs Go on `PATH` (see [compile modes](#compile-modes)). |
 | `--target <os>/<arch>` | `windows`, `darwin` (or `macos`) and `linux`, with `amd64` or `arm64`. Repeat the flag or separate targets with commas. Every target is built with `CGO_ENABLED=0`, so one machine builds all of them. Default: this machine. |
 | `--out <dir>` | Output directory. Default `dist-native`. |
+| `--layout shell\|executable` | For plain `krate native build` (without `--release`). An app with Go host code builds as one executable, like `--release`, when Go is installed (Go is needed to compile that code anyway): one process instead of the shell plus a Go host child, which saves the child's runtime (about 10 MB). `--layout shell` keeps the prebuilt-shell layout with the Go host child; `--shell <path>` does too. `krate native dev` always runs the shell and the child. |
 
 Output:
 
