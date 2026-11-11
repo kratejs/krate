@@ -441,14 +441,13 @@ jobs:
 
       # Memory of the system webview on real macOS and Windows machines. The
       # WKWebView and WebView2 memory levers were written without being able to
-      # run them, and this step has NEVER RUN: it only exists so the first CI
-      # run produces numbers. It is continue-on-error and may fail on flag
-      # names or paths; fix it from the first log. `krate native profile
-      # --memory --idle <duration> <dir>` is the interface documented for the
-      # memory measurement command (writes dist-native/report.json); the
-      # profile is chosen through native.memory in krate.config.ts, which this
-      # step sets for the run and restores afterwards.
-      - name: Native memory report (macOS, Windows; never run)
+      # run them: this step produces the first numbers. It reports without
+      # blocking (continue-on-error). `krate native profile --memory` builds the
+      # app, measures PSS-equivalent and private memory per process role against
+      # a blank-page floor and writes dist-native/report.json. The profile
+      # comes from native.memory in krate.config.ts, set here per run and
+      # restored afterwards.
+      - name: Native memory report (macOS, Windows)
         if: matrix.os != 'ubuntu-latest'
         continue-on-error: true
         env:
@@ -465,7 +464,6 @@ jobs:
           for profile in balanced performance; do
             cp "$cfg" "$RUNNER_TEMP/krate.config.ts.orig"
             sed "s/native: {/native: { memory: '$profile',/" "$RUNNER_TEMP/krate.config.ts.orig" > "$cfg"
-            "$RUNNER_TEMP/krate$EXE" native build "$app" || status=1
             "$RUNNER_TEMP/krate$EXE" native profile --memory --idle 10s "$app" || status=1
             mkdir -p "native-memory/$profile"
             cp "$app/dist-native/report.json" "native-memory/$profile/report.json" || status=1

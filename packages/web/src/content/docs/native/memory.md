@@ -1,16 +1,17 @@
 ---
-title: Memory Profiles
+title: Memory
 order: 15
-description: native.memory profiles (balanced, minimal, performance), the levers each one applies to the webview, the QuickJS host and the Go runtime, the native.features overrides, and measured numbers.
+description: Memory profiles, feature detection, Linux levers, shared web process, background mode, macOS and Windows levers, and measured numbers.
 ---
 
-# Memory profiles
+# Memory
 
 > **Preview.** Part of [Krate Native](/docs/native/). Linux (WebKitGTK) is the
-> first and, for now, the only platform that applies the webview levers. On
-> macOS and Windows the profile is accepted and written to `app.json`, the
-> shared host levers (QuickJS limit, Go limit, idle trimming) apply, and the
-> webview behaves as before.
+> platform where the levers are written and measured. The macOS (WKWebView) and
+> Windows (WebView2) levers compile and have unit-tested decision tables, but
+> have never run on those systems; see [macOS and Windows](#macos-and-windows-untested).
+
+## Profiles and config
 
 A native app is several processes: the shell (the window, the Go runtime and
 the QuickJS host), the system webview's web process and network process, and
@@ -24,15 +25,20 @@ export default {
     memory: "balanced", // "balanced" (default) | "minimal" | "performance"
     features: { media: true }, // optional overrides, see below
     host: { memoryMB: 64 }, // optional QuickJS heap limit override
+    window: { keepAlive: false }, // tray apps: see Windows and background mode
   },
 };
 ```
+
+`krate native build` writes these to `app.json` as `memory`, `features`,
+`hostjs.memoryMB` and `window.keepAlive`, and the shell reads them once at
+load. One path carries the profile and the features to every platform layer.
 
 | Profile | What it does |
 |---------|--------------|
 | `performance` | The engine defaults. No lever below runs. This is how the preview behaved before profiles existed. |
 | `balanced` (default) | Switches off the webview features the app does not use, uses the document-viewer cache model, drops the HTTP disk cache, sets memory pressure thresholds, lowers the host limits and returns freed memory to the OS when the app is idle. No measurable CPU cost. |
-| `minimal` | Everything in `balanced` with tighter thresholds and limits, and JavaScriptCore's JIT turned off in the web and network processes. Page script runs several times slower than with the JIT. Pick it for apps whose scripts are light. |
+| `minimal` | Everything in `balanced` with tighter thresholds and limits, and JavaScriptCore's JIT turned off in the web and network processes (Linux). Page script runs several times slower than with the JIT. Pick it for apps whose scripts are light. |
 
 ## Features
 
@@ -61,9 +67,9 @@ native: { features: { media: false } }  // force off, even if detected
 An `app.json` without a `features` block (built before profiles existed) keeps
 every feature on.
 
-## Levers
+## Linux levers
 
-Linux, verified. Each lever is a small function in `platform/linux` that checks
+Verified on Linux. Each lever is a small function in `platform/linux` that checks
 that the loaded WebKitGTK has the symbol it needs and skips itself otherwise.
 
 | Lever | Profiles | What it saves |
@@ -93,56 +99,193 @@ runtime (its own heap, scheduler and socket) is gone. `krate native build
 dev` always runs two processes so that Go code can be rebuilt without closing
 the window.
 
-### macOS and Windows
+## Windows and background mode
 
-Not tuned yet. The profile and features are written to `app.json` and the
-shared host levers run, but WKWebView and WebView2 configuration is unchanged.
+A webview is most of an app's memory: the web process of one window costs
+more than the Go shell and the host code together. Three things keep that
+cost low as windows come and go.
 
-## Measured
+### Windows share one web process
 
-Linux, WebKitGTK 2.54 under Xvfb with software rendering, the shell in
-`--dev` mode (developer extras on), each number the median of 5 runs
-alternated between profiles, sampled 16 s after start from
-`/proc/<pid>/smaps_rollup`. Values are **PSS / private dirty** in MB.
+Every window of an app loads the same origin, so they do not need separate web
+processes.
 
-`examples/native-tasks` (prebuilt-shell layout, Go host child):
+| OS | What happens |
+|----|--------------|
+| Linux | The first window creates a WebKitWebView; every later one is created with `webkit_web_view_new_with_related_view` of a live view. They share the web context, the website data (cookies, local storage) and one WebKitWebProcess. Closing the first window is fine: the next window is related to any view that is still alive, and when the last view goes the web process exits and the next window starts a new one. Settings are applied to each view as it is created. |
+| Windows | The app creates one `ICoreWebView2Environment` (one user data folder, `%LOCALAPPDATA%\<appId>\WebView2`) and every window asks it for a controller, so all windows run under one WebView2 browser process. The renderer processes are WebView2's own business; Krate does not pass `--renderer-process-limit`. |
+| macOS | All windows use one `WKProcessPool`. WebKit starts a WebContent process per web view unless the pool says otherwise, so the pool is created with the private `_WKProcessPoolConfiguration.usesSingleWebProcess` switch when the class and both selectors exist (`respondsToSelector` is checked); a WebKit without them keeps one process per window. |
 
-| Profile | Shell | WebKitWebProcess | WebKitNetworkProcess | Go host child | Total |
-|---------|-------|------------------|----------------------|---------------|-------|
-| `performance` | 62 / 21 | 86 / 18 | 30 / 11 | 8 / 2 | 186 / 52 |
-| `balanced` | 62 / 20 | 87 / 19 | 30 / 11 | 8 / 2 | 187 / 53 |
-| `minimal` | 61 / 19 | 79 / 17 | 30 / 11 | 8 / 3 | 178 / 50 |
-| `balanced`, one process (`krate native build`) | 62 / 21 | 86 / 18 | 30 / 11 | none | 178 / 51 |
+### Release a window, run in the background
 
-A blank page (no host code):
+`Hide` with release hides a window and destroys its webview:
 
-| Profile | Shell | WebKitWebProcess | WebKitNetworkProcess | Total |
-|---------|-------|------------------|----------------------|-------|
-| `performance` | 57 / 16 | 74 / 15 | 30 / 11 | 162 / 43 |
-| `balanced` | 57 / 16 | 74 / 15 | 30 / 11 | 162 / 43 |
-| `minimal` | 57 / 16 | 70 / 13 | 30 / 11 | 157 / 41 |
+```go
+window.Get("settings").Hide(window.HideOptions{Release: true})
+// later, for example on a tray click:
+window.Get("settings").Show()
+```
 
-What to read from this:
+```ts
+import * as win from "@krate/app/window";
+await win.get("settings").hide({ release: true });
+await win.get("settings").show();
+```
 
-- On a small app almost all of the memory is shared library code and the
-  engine's fixed start-up cost. The levers act on what the app adds on top
-  (caches, unused subsystems, a growing heap), so `balanced` is within noise
-  of `performance` here. Its value shows up as bounded growth, not as a lower
-  idle number.
-- The one-process layout is the largest single saving for an app with Go host
-  code: the whole child process.
-- `minimal` saves about 8 MB PSS, all in the web process, by turning the JIT
-  off. Turning the JIT off in the shell as well (setting `JSC_useJIT=false`
-  from outside) measured the same, so there is no re-exec.
-- Absolute PSS depends on what else shares the libraries on the machine (a
-  second WebKit app lowers every number). Private dirty is steadier. Compare
-  profiles within one session, as the table does.
+When every window is released the web process is gone; what is left is the Go
+shell, the Go host and, on Linux, the WebKit network process. Before the
+webview is destroyed the shell asks the page for `location.pathname +
+location.search + location.hash` and the scroll position (a page that does
+not answer within 1.5 seconds is released with the route WebKit reports).
+`Show` (or `Focus`) creates a new webview on that route and scrolls back to
+the saved position once the page has loaded. The page is loaded again, so it
+starts with fresh JavaScript state and subscribes to the host signals again;
+signals are the source of truth and the endpoint sends their current values
+first. A route set with `Navigate` while the window is released replaces the
+saved one. A window opened with a scoped permission list keeps its window id
+across the restore.
 
-### Measure it yourself
+The window events stream reports `released` and `restored`. Where the platform
+cannot release a webview, `app.Supports("window:release")` is false and
+`Hide` with `Release` only hides the window.
 
-`krate native profile --memory` reports per-process PSS and private dirty of a
-running app (it lands with the memory measurement tooling). Or sample the
-process tree directly:
+`native.window.keepAlive` (`window.keepAlive` in `app.json`) is for tray apps:
+
+```ts
+export default defineConfig({
+  native: { window: { keepAlive: true } },
+});
+```
+
+With it the app does not quit when its last window closes. Closing the last
+window (the title bar button, or `Close`) releases that window instead of
+destroying it, and `Show` brings it back, so a tray click, a menu item or a
+second launch (`app.OnSecondInstance`) reopens the main window with
+`window.Main().Show()`. At most one window is kept this way; another window
+that closes while one is released is destroyed. Closing a window that is
+already released destroys it, and the app keeps running with no window until
+`app.Quit()`. Without `keepAlive` the app quits when the last window is gone,
+as before.
+
+### Hidden and minimized windows shrink
+
+A window that is hidden (`Hide`) or minimized keeps its page. The shell tells
+the page, then trims its own heap:
+
+- The page gets a `krate:memory-pressure` event on `window`. A page uses it to
+  drop caches and large buffers (`onMemoryPressure(fn)` in `@krate/app/window`
+  wraps it and returns a function that stops listening). It fires on `Hide`
+  and when the window is minimized; it does not fire when the window is merely
+  covered.
+- The shell runs the same trim as the idle reaper (a Go collection that
+  returns free heap to the system and, on Linux, glibc `malloc_trim`), about
+  400 ms later (once for a burst of hides).
+
+| OS | Also |
+|----|------|
+| Linux | Nothing else: WebKitGTK has no call that puts a web process under memory pressure. It does throttle a page whose window is unmapped. |
+| Windows | `ICoreWebView2Controller::put_IsVisible(FALSE)` and, through `QueryInterface` to `ICoreWebView2_19`, `put_MemoryUsageTargetLevel(LOW)`; shown again, the level goes back to the one a visible view has in the profile (LOW for `minimal`, NORMAL otherwise) and the controller is visible. A WebView2 runtime without `ICoreWebView2_19` skips the memory target. |
+| macOS | Nothing: WebKit throttles hidden and miniaturized views by itself. |
+
+Only a released window gives its web process memory back; a hidden page keeps
+what it has.
+
+
+## macOS and Windows (untested)
+
+> **Untested.** Everything in this section was written on Linux from Apple's
+> WebKit headers and the WebView2 headers and documentation. It compiles for
+> `darwin` and `windows`, its decision tables are unit tested, but none of it has
+> run on a Mac or a Windows machine, and no memory number has been measured.
+> The `Native memory report` step in CI (`.github/workflows/ci.yml`, job
+> `native`) runs `krate native profile --memory` on macOS and Windows runners
+> and uploads `report.json` for the `balanced` and `performance` profiles; this
+> section stays marked untested until that step reports. The window release and
+> hide behavior described above is untested there too. Treat the savings as
+> hypotheses.
+
+Every lever is guarded. A missing Objective-C selector, a failed
+`QueryInterface` or a rejected argument skips that lever and logs one line to
+stderr; it never stops the app from starting. If the WebView2 runtime refuses
+the memory arguments, the app starts again without them.
+
+Inputs, read from `app.json`: `memory` (`balanced` when missing or unknown) and
+`features` (`media`, `webaudio`, `webgl`, `webrtc`, `spellcheck`). When the
+manifest has no `features` object, nothing is switched off for lack of
+detection. When it has one, every feature that is missing or false counts as
+unused and its lever applies.
+
+### Profiles
+
+| Profile | macOS (WKWebView) | Windows (WebView2) |
+| --- | --- | --- |
+| `performance` | Nothing changes. | Nothing changes. |
+| `balanced` | Page cache off, scripts cannot open windows on their own, unused features off. | One renderer process, spare renderer and back/forward cache off, unused features off. |
+| `minimal` | `balanced`, plus the WebKit memory cache is purged after the first load and every two minutes. | `balanced`, plus a 512 MB JavaScript heap limit, no on-disk shader cache and `MemoryUsageTargetLevel` LOW while visible. |
+
+### macOS
+
+The default `WKWebsiteDataStore` is always kept, so `localStorage` and
+cookies persist. All windows already share one `WKProcessPool`.
+
+| Lever | API | Profiles |
+| --- | --- | --- |
+| `mediaTypesRequiringUserActionForPlayback = all` | public | `balanced`, `minimal`, when `media` is unused |
+| `javaScriptCanOpenWindowsAutomatically = NO` | public | `balanced`, `minimal` |
+| Remove `WKWebsiteDataTypeMemoryCache` with `removeDataOfTypes:modifiedSince:completionHandler:` | public | `minimal` |
+| WebGL off (`WebGLEnabled`, `_setWebGLEnabled:`) | private | `balanced`, `minimal`, when `webgl` is unused |
+| Web Audio off (`WebAudioEnabled`, `_setWebAudioEnabled:`) | private | when `webaudio` is unused |
+| `navigator.mediaDevices` off (`MediaDevicesEnabled`, `_setMediaDevicesEnabled:`) | private | when `webrtc` is unused |
+| Back/forward page cache off (`UsesBackForwardCache`, `_setUsesBackForwardCache:` or `_setPageCacheEnabled:`) | private | `balanced`, `minimal` |
+
+The private levers use `WKPreferencesPrivate.h` names remembered without access
+to the header. They try `-[WKPreferences _setEnabled:forFeature:]` with a
+feature found by key in `+[WKPreferences _features]`, then the direct setters,
+each only after `respondsToSelector:`. They are not public API, may change in
+any macOS release and can be absent, in which case they are skipped. The
+completion handler of `removeDataOfTypes:...` is declared non-null, so a
+no-op block is passed.
+
+### Windows
+
+Windows has one WebView2 environment for the whole app, so the browser
+arguments are set once through an `ICoreWebView2EnvironmentOptions` object
+implemented in Go (`AdditionalBrowserArguments`). WebView2 requires identical
+arguments for one user data folder: a second copy of the app started with a
+different `memory` profile while the first runs falls back to starting without
+the arguments.
+
+| Argument | Profiles | Why |
+| --- | --- | --- |
+| `--renderer-process-limit=1` | `balanced`, `minimal` | One origin, trusted content. A limit, not a guarantee: site isolation can still add processes for cross-origin frames. |
+| `--disable-features=SpareRendererForSitePerProcess` | `balanced`, `minimal` | Chromium feature that keeps an idle renderer process warm. |
+| `...,BackForwardCache` | `balanced`, `minimal` | Keeps whole previous pages alive. |
+| `...,msWebOOUI,msPdfOOUI` | `balanced`, `minimal` | Edge out-of-process UI surfaces. Not documented by Microsoft; Tauri ships the same two names by default. Effect unmeasured. |
+| `--js-flags=--max-old-space-size=512` | `minimal` | Caps the V8 heap. A page that really needs more crashes its renderer. |
+| `--disable-gpu-shader-disk-cache` | `minimal` | No on-disk shader cache. |
+| `--disable-webgl` | `balanced`, `minimal`, when `webgl` is unused | No WebGL contexts. |
+
+Not used on purpose: `msSmartScreenProtection` stays on because it is a
+security feature; `--disable-background-networking` is left out because it also
+stops component updates such as certificate revocation data; `--disable-gpu`
+moves all rendering to the CPU and is only a choice the app can make through
+`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`. `media`, `webaudio` and `spellcheck`
+have no safe Chromium switch.
+
+Two more Windows levers: when `webrtc` is unused, camera and microphone
+permission requests are denied without a prompt (`PermissionRequested`; a
+safeguard more than a saving), and in `minimal` the webview's
+`ICoreWebView2_19::MemoryUsageTargetLevel` is set to LOW at creation. That
+interface needs a recent runtime; on an older one the call is skipped. The
+`ICoreWebView2Settings` stay as they are: none of them affects memory.
+
+## Measuring
+
+`krate native profile --memory [dir] [--idle 30s] [--out dist-native]` builds
+the app, runs it and reports **PSS** and **private dirty** memory per process
+role next to a blank-page floor built from the same shell; see
+[Measuring memory](/docs/native/release/#measuring-memory). On Linux you can
+also sample the process tree yourself:
 
 ```sh
 for p in $(pgrep -P $APP_PID) $APP_PID; do
@@ -150,4 +293,53 @@ for p in $(pgrep -P $APP_PID) $APP_PID; do
 done
 ```
 
-Edit `memory` in a built `app.json` to compare profiles without rebuilding.
+Edit `memory` in a built `app.json` (prebuilt-shell layout) to compare profiles
+without rebuilding.
+
+## Measured
+
+Linux only. WebKitGTK 2.54 under Xvfb with software rendering, on a shared
+12-core machine (load average below 2 during the runs). The example is
+`examples/native-tasks` with a scenario script baked into the page. Every
+number is the median of 5 runs, interleaved between the "before" build
+(the tree before profiles, shared web process and the one-process layout) and
+the "after" build, sampled 14 s after launch from `/proc/<pid>/smaps_rollup`
+summed over the process tree. Cells are **PSS / private dirty** in MB; the
+Total column is the median of the totals, so a row need not equal the sum of
+its cells.
+
+| Setup | Shell | Web process(es) | Network process | Go host child | Total |
+|-------|-------|-----------------|-----------------|---------------|-------|
+| Blank page, before | 70 / 29 | 76 / 17 | 32 / 13 | none | **183 / 64** |
+| Blank page, after | 73 / 33 | 74 / 15 | 34 / 15 | none | **182 / 63** |
+| 1 window, before (shell + Go host child) | 77 / 35 | 86 / 18 | 30 / 11 | 10 / 5 | **205 / 72** |
+| 1 window, after (`krate native build`, one process, `balanced`) | 76 / 35 | 87 / 19 | 32 / 13 | none | **195 / 67** |
+| 1 window, after, `--layout shell` (`balanced`) | 76 / 34 | 86 / 19 | 30 / 11 | 10 / 5 | **203 / 69** |
+| 1 window, after, `minimal` | 74 / 33 | 81 / 19 | 30 / 11 | none | **186 / 64** |
+| 3 windows, before (3 web processes) | 72 / 31 | 149 / 60 | 25 / 12 | 10 / 5 | **256 / 109** |
+| 3 windows, after (1 web process) | 84 / 35 | 105 / 29 | 30 / 11 | none | **220 / 76** |
+| After, all windows released (`keepAlive`) | 90 / 32 | none | 38 / 11 | none | **131 / 47** |
+
+What to read from this:
+
+- **Windows are where the big saving is.** Three windows cost 256 / 109 before
+  (three web processes) and 220 / 76 after (one). Releasing every window of a
+  tray app drops the web process: 131 / 47, most of what is left being the
+  shell and the network process.
+- **The one-process layout removes the Go host child**, about 10 / 5 per app
+  (compare the two "after" 1 window rows with `--layout shell`).
+- **`balanced` does not lower an idle small app by itself.** The blank page is
+  the same before and after (183 / 64 and 182 / 63), and the app minus the
+  blank page shrinks from 22 / 7 to 13 / 4, which is mostly the host child.
+  Its levers bound growth (caches, unused subsystems, a growing heap) rather
+  than lowering the first number.
+- **`minimal` saves about 9 / 3 more**, mostly in the web process, by turning
+  the JIT off.
+- **Noise is large.** Run to run, the PSS total of one configuration varied by
+  up to 30 MB (for example 193 to 225 for the 1 window before row), so
+  differences under about 15 MB between single-window rows are not
+  significant; the 3-window and released rows are. Private dirty is steadier
+  than PSS, which also counts shared library pages and moves with whatever
+  else uses WebKit on the machine.
+- Not measured: macOS and Windows, hardware rendering, apps with media, WebGL
+  or large pages, and a page that grows its heap over time.
