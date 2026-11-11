@@ -30,7 +30,7 @@ func TestParseGUID(t *testing.T) {
 	}
 	for _, s := range []string{
 		iidISequentialStream, iidEnvCompletedHandler, iidControllerCompletedHandler,
-		iidWebResourceRequestedHandler, iidNavigationStartingHandler, iidExecuteScriptHandler,
+		iidWebResourceRequestedHandler, iidNavigationStartingHandler, iidNewWindowRequestedHandler, iidExecuteScriptHandler,
 	} {
 		if _, err := parseGUID(s); err != nil {
 			t.Errorf("%s: %v", s, err)
@@ -62,6 +62,8 @@ func TestVtableLayout(t *testing.T) {
 		"ICoreWebView2CreateCoreWebView2ControllerCompletedHandler":  4,
 		"ICoreWebView2WebResourceRequestedEventHandler":              4,
 		"ICoreWebView2NavigationStartingEventHandler":                4,
+		"ICoreWebView2NewWindowRequestedEventHandler":                4,
+		"ICoreWebView2NewWindowRequestedEventArgs":                   11,
 		"ICoreWebView2ExecuteScriptCompletedHandler":                 4,
 		"IStream": 14,
 	}
@@ -105,6 +107,9 @@ func TestVtableLayout(t *testing.T) {
 		{deferralComplete, 3, "Complete"},
 		{navArgsGetUri, 3, "get_Uri"},
 		{navArgsPutCancel, 8, "put_Cancel"},
+		{wvAddFrameNavigationStarting, 17, "add_FrameNavigationStarting"},
+		{wvAddNewWindowRequested, 44, "add_NewWindowRequested"},
+		{newWinArgsPutHandled, 6, "put_Handled"},
 		{handlerInvoke, 3, "Invoke"},
 	}
 	for _, s := range slots {
@@ -522,5 +527,18 @@ func TestLoaderDLLCandidates(t *testing.T) {
 	got = loaderDLLCandidates("/e/a/120.0.1", "120.0.1", "arm64")
 	if len(got) != 1 {
 		t.Fatalf("got %v", got)
+	}
+}
+
+func TestAllowedFrameNavigation(t *testing.T) {
+	for _, s := range []string{"https://app.localhost/x", "about:blank", "about:srcdoc"} {
+		if !allowedFrameNavigation(s) {
+			t.Errorf("%q must be allowed in a frame", s)
+		}
+	}
+	for _, s := range []string{"https://example.com/", "javascript:alert(1)", "data:text/html,x", "file:///c:/x", "http://app.localhost/", ""} {
+		if allowedFrameNavigation(s) {
+			t.Errorf("%q must be blocked in a frame", s)
+		}
 	}
 }

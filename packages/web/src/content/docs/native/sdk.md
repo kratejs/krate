@@ -32,8 +32,9 @@ console.log(await appDataDir(), (await info()).os);
 
 ## Permissions
 
-`app.json` has a `permissions` list. Go host code is trusted and never checked;
-permissions decide which ids the UI and TypeScript host code may call.
+`app.json` has a `permissions` list. Go and TypeScript host code are trusted and
+never checked (a TypeScript call through `__krateHost.call` reaches the ungated
+implementation); permissions decide which ids the UI may call.
 
 | Permission | Default | Grants |
 |------------|---------|--------|

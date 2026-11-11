@@ -2,8 +2,9 @@
 // "permissions" list into a Set and gates registration of UI-facing ids.
 //
 // Go host code that calls the SDK packages directly is trusted and never
-// checked. Permissions only decide which "krate/*" ids the UI (and TypeScript
-// host code) may call. A call to an id whose permission is not granted fails
+// checked, and so is TypeScript host code (its __krateHost.call reaches the
+// Trusted twin of each id). Permissions only decide which "krate/*" ids the UI
+// may call. A call to an id whose permission is not granted fails
 // with a structured error:
 //
 //	{code: "permission_denied", data: {permission: "fs"}}

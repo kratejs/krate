@@ -243,6 +243,12 @@ func (c *Config) validateNative() (warnings []string, err error) {
 	if n.Version != "" && !nativeSemverRe.MatchString(n.Version) {
 		return nil, nativeErr("version", fmt.Sprintf("must be a semantic version, got %q", n.Version), "use MAJOR.MINOR.PATCH, for example \"1.0.0\"")
 	}
+	for key, v := range map[string]string{"productName": n.ProductName, "bundle.windows.publisher": n.Bundle.Windows.Publisher} {
+		if i := strings.IndexFunc(v, func(r rune) bool { return r < 0x20 || r == 0x7f }); i >= 0 {
+			return nil, nativeErr(key, fmt.Sprintf("contains a control character (%U), got %q", rune(v[i]), v),
+				"the name ends up in package metadata (deb control, desktop entry, installer scripts) and must be a single line")
+		}
+	}
 	for _, p := range n.Platforms {
 		if !oneOf(p, NativePlatforms) {
 			return nil, nativeErr("platforms", fmt.Sprintf("has unknown platform %q", p), "use windows, macos or linux")

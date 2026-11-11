@@ -16,9 +16,28 @@ import (
 
 const (
 	tokenParam  = "krate_token"
-	tokenCookie = "krate_token"
 	tokenHeader = "X-Krate-Token"
 )
+
+// tokenCookieName is per port: cookies are shared by every port of a host, so
+// two sessions on 127.0.0.1 would otherwise overwrite each other's token.
+func tokenCookieName(port string) string { return "krate_token_" + port }
+
+// sameOriginRequest reports whether a browser request that carries the cookie
+// came from the app page itself. SameSite does not help here: another dev
+// server on localhost (any port) is the same site, and the cookie would be sent
+// with its cross-origin POSTs. A request without Origin and Sec-Fetch-Site
+// headers is not from a browser page (curl, the shell's own client).
+func sameOriginRequest(r *http.Request) bool {
+	if o := r.Header.Get("Origin"); o != "" && o != "http://"+r.Host {
+		return false
+	}
+	switch r.Header.Get("Sec-Fetch-Site") {
+	case "", "same-origin", "none":
+		return true
+	}
+	return false
+}
 
 // guardHandler admits only requests that carry the session token, and only
 // when addressed to a loopback name on the listener's port (which stops DNS
@@ -30,6 +49,7 @@ func guardHandler(next http.Handler, token string, port string) http.Handler {
 		net.JoinHostPort("localhost", port): true,
 		net.JoinHostPort("::1", port):       true,
 	}
+	cookieName := tokenCookieName(port)
 	valid := func(got string) bool {
 		return got != "" && subtle.ConstantTimeCompare([]byte(got), []byte(token)) == 1
 	}
@@ -45,7 +65,7 @@ func guardHandler(next http.Handler, token string, port string) http.Handler {
 				return
 			}
 			http.SetCookie(w, &http.Cookie{
-				Name: tokenCookie, Value: token, Path: "/",
+				Name: cookieName, Value: token, Path: "/",
 				HttpOnly: true, SameSite: http.SameSiteStrictMode,
 			})
 			q.Del(tokenParam)
@@ -57,7 +77,11 @@ func guardHandler(next http.Handler, token string, port string) http.Handler {
 			http.Redirect(w, r, dest.String(), http.StatusFound)
 			return
 		}
-		if c, err := r.Cookie(tokenCookie); err == nil && valid(c.Value) {
+		if c, err := r.Cookie(cookieName); err == nil && valid(c.Value) {
+			if !sameOriginRequest(r) {
+				http.Error(w, "forbidden: cross-origin request", http.StatusForbidden)
+				return
+			}
 			next.ServeHTTP(w, r)
 			return
 		}

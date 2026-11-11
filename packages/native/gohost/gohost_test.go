@@ -512,3 +512,53 @@ func eventually(t *testing.T, cond func() bool) {
 	}
 	t.Fatal("condition not reached")
 }
+
+func TestRunPanicStacksOnlyInDev(t *testing.T) {
+	for _, dev := range []bool{false, true} {
+		dir, cleanup, err := gohosttest.TempDir("runp-")
+		if err != nil {
+			t.Fatal(err)
+		}
+		sock := filepath.Join(dir, "s.sock")
+		stdinR, stdinW, _ := os.Pipe()
+		var ready bytes.Buffer
+		var rmu sync.Mutex
+		done := make(chan error, 1)
+		go func() {
+			done <- gohost.Run(context.Background(), func(r *scheme.Registry) {
+				r.Func("x.Boom", func(krate.Ctx, *wire.Decoder, *wire.Encoder) error { panic("kaboom") })
+			}, gohost.Config{Socket: sock, Stdin: stdinR, Ready: lockedWriter{&rmu, &ready}, Dev: dev})
+		}()
+		eventually(t, func() bool { rmu.Lock(); defer rmu.Unlock(); return ready.String() == "ready\n" })
+		client := &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			var d net.Dialer
+			return d.DialContext(ctx, "unix", sock)
+		}}}
+		e := wire.NewEncoder()
+		e.BeginObject()
+		e.Key("calls")
+		e.BeginArray()
+		e.BeginObject()
+		e.Key("id")
+		e.Int(1)
+		e.Key("fn")
+		e.String("x.Boom")
+		e.EndObject()
+		e.EndArray()
+		e.EndObject()
+		resp, err := client.Post("http://gohost/__krate/call", "application/x-krate-frames", bytes.NewReader(e.Frame()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := new(bytes.Buffer)
+		body.ReadFrom(resp.Body)
+		resp.Body.Close()
+		hasStack := strings.Contains(body.String(), "goroutine")
+		if hasStack != dev {
+			t.Errorf("dev=%v: stack in the error = %v: %q", dev, hasStack, body.String())
+		}
+		stdinW.Close()
+		<-done
+		cleanup()
+	}
+}

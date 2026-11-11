@@ -198,8 +198,8 @@ func TestWindowsZipAndNSIS(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		`!define APPEXE "Acme Notes.exe"`, `InstallDir "$PROGRAMFILES64\${APPNAME}"`, `WriteUninstaller`,
-		`CreateShortCut "$SMPROGRAMS\${APPNAME}\${APPNAME}.lnk"`, `NSISdl::download`, `F3017226-FE2A-4295-8BDF-00C3A9A7E4C5`,
+		`!define APPEXE "Acme Notes.exe"`, `InstallDir "$PROGRAMFILES64\${DIRNAME}"`, `WriteUninstaller`,
+		`CreateShortCut "$SMPROGRAMS\${DIRNAME}\${DIRNAME}.lnk"`, `NSISdl::download`, `F3017226-FE2A-4295-8BDF-00C3A9A7E4C5`,
 		`WriteRegStr HKCR "acme" "URL Protocol" ""`, `WriteRegStr HKCR "acme-dev\shell\open\command" "" '"$INSTDIR\${APPEXE}" "%1"'`,
 		`DeleteRegKey HKCR "acme"`, `Section "Uninstall"`, `File /r `, `RequestExecutionLevel admin`,
 	} {
@@ -688,5 +688,39 @@ func TestDiscoverPrefersReport(t *testing.T) {
 	}
 	if p, err := Discover(out, "linux", "amd64", "My-App"); err != nil || p.Executable != filepath.Join(dir, "My-App") {
 		t.Errorf("fallback = %+v, %v", p, err)
+	}
+}
+
+func TestProductNameCannotInjectOrEscape(t *testing.T) {
+	for in, want := range map[string]string{"..": "App", ".": "App", " .. ": "App", "../x": "-x", "A\nB": "AB", "My App": "My App", "a.": "a"} {
+		if got := fileSafe(in); got != want {
+			t.Errorf("fileSafe(%q) = %q, want %q", in, got, want)
+		}
+	}
+	m := Metadata{AppID: "com.acme.app", ProductName: "Acme\nDepends: evil-pkg", Version: "1.0.0", Publisher: "P\nPre-Depends: x"}
+	ctrl := string(debControl(m, Payload{Arch: "amd64"}, 1))
+	for _, line := range strings.Split(strings.TrimSpace(ctrl), "\n") {
+		if strings.HasPrefix(line, "Depends: evil") || strings.HasPrefix(line, "Pre-Depends") {
+			t.Errorf("injected control field %q in:\n%s", line, ctrl)
+		}
+	}
+	if !strings.Contains(maintainer(m), "P Pre-Depends: x <") {
+		t.Errorf("maintainer = %q", maintainer(m))
+	}
+}
+
+func TestNSISPathsUseTheFileSafeName(t *testing.T) {
+	m := Metadata{AppID: "com.acme.app", ProductName: `..\..\Windows`, Version: "1.0.0"}
+	script := NSISScript(m, Payload{OS: "windows", Arch: "amd64"}, `C:\stage`, `C:\out\setup.exe`)
+	if !strings.Contains(script, `!define DIRNAME "-..-Windows"`) {
+		t.Errorf("DIRNAME is not file safe:\n%s", script)
+	}
+	if !strings.Contains(script, `!define APPNAME "..\..\Windows"`) {
+		t.Errorf("the display name must stay as configured")
+	}
+	for _, line := range strings.Split(script, "\n") {
+		if (strings.HasPrefix(line, "InstallDir") || strings.Contains(line, "SMPROGRAMS") || strings.Contains(line, "$DESKTOP")) && strings.Contains(line, "${APPNAME}") {
+			t.Errorf("path built from the display name: %s", line)
+		}
 	}
 }

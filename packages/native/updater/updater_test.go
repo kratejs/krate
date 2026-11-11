@@ -585,3 +585,28 @@ func TestExtractRejectsEscapes(t *testing.T) {
 }
 
 var _ = io.EOF
+
+func TestExtractRejectsWritingThroughSymlinkChain(t *testing.T) {
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	tw.WriteHeader(&tar.Header{Name: "a/", Typeflag: tar.TypeDir, Mode: 0o755})
+	// Each link stays inside the root when checked on its own.
+	tw.WriteHeader(&tar.Header{Name: "a/b", Typeflag: tar.TypeSymlink, Linkname: "..", Mode: 0o755})
+	tw.WriteHeader(&tar.Header{Name: "c", Typeflag: tar.TypeSymlink, Linkname: "a/b/..", Mode: 0o755})
+	body := "pwned"
+	tw.WriteHeader(&tar.Header{Name: "c/evil", Typeflag: tar.TypeReg, Mode: 0o644, Size: int64(len(body))})
+	tw.Write([]byte(body))
+	tw.Close()
+	gz.Close()
+
+	dir := t.TempDir()
+	art := staged(t, "chain.tar.gz", buf.Bytes())
+	err := extractArchive(OSFS{}, art, filepath.Join(dir, "out", "stage"))
+	if err == nil {
+		t.Fatal("a symlink chain let an entry through")
+	}
+	if _, serr := os.Stat(filepath.Join(dir, "out", "evil")); serr == nil {
+		t.Fatal("file written outside the staging directory")
+	}
+}

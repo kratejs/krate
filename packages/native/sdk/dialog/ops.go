@@ -5,6 +5,7 @@ import (
 	"github.com/kratejs/krate/packages/native/platform/caps"
 	"github.com/kratejs/krate/packages/native/sdk/internal/bridge"
 	"github.com/kratejs/krate/packages/native/sdk/internal/codec"
+	"github.com/kratejs/krate/packages/native/sdk/internal/picked"
 	"github.com/kratejs/krate/packages/native/wire"
 )
 
@@ -27,6 +28,9 @@ func Register(t *bridge.Table, env *bridge.Env) {
 			})
 			if err != nil {
 				return err
+			}
+			for _, p := range paths {
+				picked.Notify(p)
 			}
 			codec.WriteStrings(out, paths)
 			return nil
@@ -53,6 +57,7 @@ func Register(t *bridge.Table, env *bridge.Env) {
 		if len(paths) == 0 {
 			out.Null()
 		} else {
+			picked.Notify(paths[0])
 			out.String(paths[0])
 		}
 		return nil

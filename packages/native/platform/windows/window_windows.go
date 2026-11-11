@@ -131,6 +131,8 @@ func (w *Window) controllerCompleted(hr, controller uintptr) {
 		return
 	}
 	vcall(w.webview, wvAddNavigationStarting, uintptr(a.hNavigation), uintptr(unsafe.Pointer(&token)))
+	vcall(w.webview, wvAddFrameNavigationStarting, uintptr(a.hFrameNav), uintptr(unsafe.Pointer(&token)))
+	vcall(w.webview, wvAddNewWindowRequested, uintptr(a.hNewWindow), uintptr(unsafe.Pointer(&token)))
 
 	w.resize()
 	vcall(w.controller, ctlPutIsVisible, 1)

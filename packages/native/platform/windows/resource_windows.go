@@ -20,6 +20,23 @@ func (a *App) onNavigationStarting(sender, args uintptr) uintptr {
 	return sOK
 }
 
+// onFrameNavigationStarting applies the same lock to iframes.
+func (a *App) onFrameNavigationStarting(sender, args uintptr) uintptr {
+	nav := ptr(args)
+	if !allowedFrameNavigation(comString(nav, navArgsGetUri)) {
+		vcall(nav, navArgsPutCancel, 1)
+	}
+	return sOK
+}
+
+// onNewWindowRequested refuses every window.open and target=_blank: without a
+// handler WebView2 opens an unlocked popup, which could load any site. Runs on
+// the main thread. args is borrowed.
+func (a *App) onNewWindowRequested(sender, args uintptr) uintptr {
+	vcall(ptr(args), newWinArgsPutHandled, 1)
+	return sOK
+}
+
 // onResourceRequested is the WebResourceRequested handler. It runs on the
 // main thread: it copies the request out of COM, takes a deferral and hands
 // the work to a goroutine. The response is installed back on the main thread.

@@ -91,9 +91,42 @@ type writer struct {
 	total int64
 }
 
+// noLinks rejects a destination whose path (below the root) runs through a
+// symlink the archive itself created: each link is checked on its own, but a
+// chain such as a/b -> .. followed by c -> a/b/.. leaves the root once the
+// system resolves them, and a later entry c/x would be written outside.
+func (w *writer) noLinks(p string, includeLast bool) error {
+	rel, err := filepath.Rel(w.root, p)
+	if err != nil || rel == "." {
+		return err
+	}
+	parts := strings.Split(rel, string(filepath.Separator))
+	if !includeLast {
+		parts = parts[:len(parts)-1]
+	}
+	cur := w.root
+	for _, part := range parts {
+		cur = filepath.Join(cur, part)
+		st, err := w.fs.Lstat(cur)
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				return nil
+			}
+			return err
+		}
+		if st.Mode()&fs.ModeSymlink != 0 {
+			return fmt.Errorf("updater: archive entry %q is written through the symlink %q", rel, part)
+		}
+	}
+	return nil
+}
+
 func (w *writer) dir(name string, mode fs.FileMode) error {
 	p, err := safeJoin(w.root, name)
 	if err != nil || p == "" {
+		return err
+	}
+	if err := w.noLinks(p, true); err != nil {
 		return err
 	}
 	return w.fs.MkdirAll(p, mode.Perm()|0o700)
@@ -106,6 +139,9 @@ func (w *writer) file(name string, mode fs.FileMode, r io.Reader) error {
 	}
 	if p == "" {
 		return fmt.Errorf("updater: bad archive entry %q", name)
+	}
+	if err := w.noLinks(p, true); err != nil {
+		return err
 	}
 	if err := w.fs.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return err
@@ -135,6 +171,9 @@ func (w *writer) symlink(name, target string) error {
 	}
 	if !linkOK(name, target) {
 		return fmt.Errorf("updater: archive symlink %q -> %q leaves the install directory", name, target)
+	}
+	if err := w.noLinks(p, false); err != nil {
+		return err
 	}
 	if err := w.fs.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return err

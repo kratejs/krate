@@ -21,6 +21,8 @@ const (
 	iidWebResourceRequestedHandler = "ab00b74c-15f1-4646-80e8-e76341d25d71"
 	// WebView2.h line 4218
 	iidNavigationStartingHandler = "9adbe429-f36d-432b-9ddc-f8881fbd76e3"
+	// WebView2.h line 4300
+	iidNewWindowRequestedHandler = "d4c185fe-c81c-4989-97af-2d3fa7ab5651"
 	// WebView2.h line 5078
 	iidExecuteScriptHandler = "49511172-cc67-4bca-9923-137112f4c4cc"
 )

@@ -165,11 +165,24 @@ func slug(s string) string {
 // fileSafe makes a product name usable as a file name.
 func fileSafe(s string) string {
 	r := strings.NewReplacer("/", "-", "\\", "-", ":", "-", "*", "", "?", "", "\"", "", "<", "", ">", "", "|", "-")
-	s = strings.TrimSpace(r.Replace(s))
+	s = strings.Map(func(c rune) rune {
+		if c < 0x20 || c == 0x7f {
+			return -1
+		}
+		return c
+	}, r.Replace(s))
+	// ".." must not survive as a path element, and Windows drops trailing dots.
+	s = strings.Trim(strings.TrimSpace(s), ". ")
 	if s == "" {
 		return "App"
 	}
 	return s
+}
+
+// oneLine collapses control characters (newlines above all) to spaces, for
+// metadata formats that are line based.
+func oneLine(s string) string {
+	return strings.Join(strings.FieldsFunc(s, func(c rune) bool { return c < 0x20 || c == 0x7f }), " ")
 }
 
 func (m Metadata) slug() string { return slug(m.ProductName) }
