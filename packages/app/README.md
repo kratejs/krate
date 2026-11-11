@@ -55,6 +55,9 @@ permission rejects with `KrateError` code `permission_denied` and
 
 ## Desktop SDK (UI half)
 
+`@krate/app/updater` (`check`, `download`, `apply`, `relaunch`, `update`) needs the
+`updater` permission and `native.updater` in the config.
+
 `@krate/app/window`, `/dialog`, `/clipboard`, `/menu`, `/tray`, `/shortcut`,
 `/notify` and `/app` call the host functions `krate/<area>.<Name>` and subscribe
 to the streams `krate/<area>.events` (`onMenu(id, fn)`, `onClick`, `onEvent`,

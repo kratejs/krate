@@ -25,6 +25,7 @@ import (
 	"github.com/kratejs/krate/packages/native/sdk"
 	sdkall "github.com/kratejs/krate/packages/native/sdk/all"
 	"github.com/kratejs/krate/packages/native/sdk/permission"
+	sdkupdater "github.com/kratejs/krate/packages/native/sdk/updater"
 )
 
 // RunOptions configures Run.
@@ -130,10 +131,14 @@ func loadApp(dir string, fsys fs.FS, opts RunOptions) (*app, error) {
 	// ids. The permission set is parsed once, here; changing app.json needs a
 	// restart. The UI half (sdk.Host) is attached to the platform later, by
 	// attachSDK, and filtered by the same set.
-	set, err := sdkall.Register(a.reg, sdkall.Options{
+	opt := sdkall.Options{
 		AppID: man.AppID, Name: man.ProductName, Version: man.Version, Permissions: man.Permissions,
 		Strict: man.StrictPermissions,
-	})
+	}
+	if man.Updater != nil {
+		opt.UpdaterURL, opt.UpdaterPublicKey = man.Updater.URL, man.Updater.PublicKey
+	}
+	set, err := sdkall.Register(a.reg, opt)
 	if err != nil {
 		return nil, fmt.Errorf("shell: registering the SDK: %w", err)
 	}
@@ -202,6 +207,9 @@ func loadApp(dir string, fsys fs.FS, opts RunOptions) (*app, error) {
 // whose permission is missing fails with permission_denied.
 func (a *app) attachSDK(p platform.App) {
 	a.sdk.Attach(p)
+	if p != nil {
+		sdkupdater.SetQuit(p.Quit)
+	}
 	sdkall.RegisterUI(a.reg, a.sdk, a.perms, a.opts.Allowed)
 }
 

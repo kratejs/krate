@@ -43,7 +43,16 @@ type NativeManifest struct {
 	// shell validates the names.
 	Permissions       []string `json:"permissions,omitempty"`
 	StrictPermissions bool     `json:"strictPermissions,omitempty"`
-	Debug             bool     `json:"debug"`
+	// Updater is native.updater: the feed URL template and the Ed25519
+	// public key that verifies update files.
+	Updater *NativeUpdaterMeta `json:"updater,omitempty"`
+	Debug   bool               `json:"debug"`
+}
+
+// NativeUpdaterMeta is the updater block of app.json.
+type NativeUpdaterMeta struct {
+	URL       string `json:"url"`
+	PublicKey string `json:"publicKey"`
 }
 
 // NativeWindowMeta is the main window of app.json.
@@ -292,6 +301,10 @@ func (b *Builder) BuildNativeApp(opts NativeAppOptions) (*NativeAppResult, error
 		m.HostChildren = children
 		res.Notes = append(res.Notes, notes...)
 	}
+	if eff.Updater != nil {
+		m.Updater = &NativeUpdaterMeta{URL: eff.Updater.URL, PublicKey: eff.Updater.PublicKey}
+	}
+
 	if h := b.NativeHost(); h != nil && h.HostBundle != "" {
 		if err := copyNativeFile(h.HostBundle, filepath.Join(appDir, "host", "host.js")); err != nil {
 			return nil, err

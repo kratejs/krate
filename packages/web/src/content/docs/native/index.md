@@ -11,9 +11,9 @@ sidebar:
 # Krate Native (Preview)
 
 > **Preview.** Krate Native is under construction. `krate native init`, `check`,
-> `dev`, `build` (also `--release`) and `profile` work today; `sign`, `notarize`
-> and `doctor` print "not implemented yet". Names and options may change before
-> release.
+> `dev`, `build` (also `--release`), `profile`, `package`, `sign`, `notarize` and
+> `keygen` work today; `doctor` prints "not implemented yet". Names and options
+> may change before release.
 
 Krate Native compiles a Krate app into a desktop app. The UI is TSX shown in the
 system webview. Code that must run in the native process, such as file access,
@@ -38,6 +38,11 @@ prerendered at build time.
   SQLite, key-value storage, secrets and permissions.
 - [Release builds](/docs/native/release/) - one executable per platform, SDK
   shaking, derived permissions, per-window scopes and profile-guided builds.
+- [Packaging](/docs/native/packaging/) - `krate native package`: installers
+  and archives for macOS, Windows and Linux, icons and Windows resources.
+- [Signing and notarization](/docs/native/signing/) - `krate native sign` and
+  `notarize`.
+- [Updates](/docs/native/updater/) - in-app updates with signed update files.
 
 ## Quick start
 

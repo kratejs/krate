@@ -20,6 +20,10 @@ type Options struct {
 	Permissions []string
 	// Strict makes an empty Permissions list mean "nothing".
 	Strict bool
+	// UpdaterURL and UpdaterPublicKey are native.updater from app.json; both
+	// empty leaves the updater ids answering "unsupported".
+	UpdaterURL       string
+	UpdaterPublicKey string
 }
 
 // Register configures the SDK for the app and registers every UI id on r.
@@ -39,6 +43,9 @@ func Register(r *scheme.Registry, o Options) (permission.Set, error) {
 	}
 	if err := sdkos.Configure(sdkos.App{ID: o.AppID, Name: o.Name, Version: o.Version}); err != nil {
 		return permission.Set{}, err
+	}
+	if configureUpdater != nil {
+		configureUpdater(o)
 	}
 	RegisterAreas(r, set)
 	return set, nil
@@ -68,6 +75,10 @@ func RegisterAreas(r *scheme.Registry, set permission.Set) {
 	}
 }
 
-// dataAreas are the optional data areas (fs, db, kv, net). Each registers
+// dataAreas are the optional data areas (fs, db, kv, net, updater). Each registers
 // itself from init in area_<name>.go behind the build tag !krate_no_<name>.
 var dataAreas []func(*scheme.Registry, permission.Set)
+
+// configureUpdater is set by area_updater.go; nil when the updater area is
+// built out (build tag krate_no_updater).
+var configureUpdater func(Options)

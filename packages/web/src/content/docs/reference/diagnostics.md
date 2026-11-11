@@ -680,6 +680,66 @@ A release build of an app without Go code generates a small Go module that requi
 
 `krate native profile` builds the app (a release executable when Go is available), runs it with `KRATE_CPUPROFILE` set and copies the profile to `native.release.pgo` when the app exits. The message says which step failed: the app produced no profile (it must exit normally, for example by closing its window or sending SIGINT), or the profile could not be copied.
 
+### KR7220
+
+**Nothing to package**
+
+`krate native package` packages a built app. It looks in `dist-native/<os>-<arch>/` for a release executable (`krate native build --release`), and falls back to the prebuilt-shell layout (`dist-native/krate-shell` next to `dist-native/app/`, from `krate native build --shell auto`). Build first, or pass `--target <os>/<arch>` to package a different platform's output.
+
+### KR7221
+
+**A packaging tool is not installed**
+
+Most formats are written by the compiler itself (zip, tar.gz, .deb, .rpm, MSIX, .app). Some need a platform tool that cannot be replaced: `makensis` for an NSIS installer, `appimagetool` for an AppImage, `hdiutil` (macOS only) for a .dmg. Install the tool or pick another format with `--format`. On macOS without `hdiutil` the .app is delivered as a .zip.
+
+### KR7222
+
+**Unknown or unsupported package format**
+
+Formats by platform: macOS `app`, `zip`, `dmg`; Windows `zip`, `nsis`, `msix`; Linux `tar.gz`, `deb`, `rpm`, `appimage`. `native.bundle.windows.installer` takes `msix` or `nsis`; `native.bundle.linux.formats` takes `deb`, `rpm` and `appimage`.
+
+### KR7223
+
+**Application icon cannot be used**
+
+`native.icons` must name a PNG (or JPEG) file of at least 256x256 pixels; 1024x1024 gives sharp icons on every platform. The packager makes .icns, .ico and PNG sizes from it. Without `native.icons` a placeholder icon is generated.
+
+### KR7224
+
+**Signing tool not available**
+
+macOS signing needs `codesign` and runs on macOS only. Windows signing needs `signtool` (on Windows) or `osslsigncode` (anywhere). Linux package signatures need `gpg`. Sign on a machine that has the tool, or skip signing for development builds.
+
+### KR7225
+
+**Signing or notarization failed**
+
+The signing tool exited with an error; its output is shown with secrets removed. Common causes: the identity is not in the keychain, the certificate expired, the timestamp server is unreachable, or Apple rejected the submission (run `xcrun notarytool log <id>`).
+
+### KR7226
+
+**Notarization credentials missing**
+
+`krate native notarize` needs credentials: a keychain profile (`--keychain-profile` or `KRATE_NOTARY_PROFILE`, created with `xcrun notarytool store-credentials`), or an App Store Connect API key (`KRATE_NOTARY_KEY` file path, `KRATE_NOTARY_KEY_ID`, `KRATE_NOTARY_ISSUER`), or an Apple ID (`KRATE_NOTARY_APPLE_ID`, `KRATE_NOTARY_TEAM_ID`, `KRATE_NOTARY_PASSWORD` app-specific password). Prefer the profile or API key: a password on the command line is visible to other users.
+
+### KR7227
+
+**Updater signing key missing or invalid**
+
+Update files are signed with an Ed25519 key. `krate native keygen` creates the pair; put the public key in `native.updater.publicKey` and give the private key to `krate native package` as `KRATE_UPDATER_PRIVATE_KEY` (the base64 text) or `KRATE_UPDATER_PRIVATE_KEY_FILE` (a path). The private key must match the public key in the config.
+
+### KR7228
+
+**Writing a package failed**
+
+A package file or its staging directory could not be written. The message names the path and the operating system error.
+
+### KR7229
+
+**App metadata cannot be packaged**
+
+Packaging needs `native.appId` (reverse-DNS), `native.productName` and a semantic `native.version`; a MSIX package also needs `native.bundle.windows.publisher`. The message names the field and the value that was rejected.
+
 ### KR7230
 
 **Host code imports a Node built-in on the QuickJS runtime**

@@ -93,6 +93,7 @@ type cliFlags struct {
 	Targets       []string
 	Scriptc       bool
 	ScriptcFailOn string
+	Pkg           nativePkgFlags
 }
 
 // exitHooks run, last registered first, before the process exits, so the run
@@ -384,6 +385,11 @@ func parseFlagsChecked(args []string) (cliFlags, []string, error) {
 	var flags cliFlags
 	var remaining []string
 	for i := 0; i < len(args); i++ {
+		if handled, err := parsePkgFlag(&flags, args, &i); err != nil {
+			return flags, nil, err
+		} else if handled {
+			continue
+		}
 		if name, inline, hasInline := strings.Cut(args[i], "="); valuedFlags[name] {
 			val := inline
 			if !hasInline {

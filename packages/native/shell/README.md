@@ -65,9 +65,10 @@ Release layout: the app directory sits next to the shell binary
 | `hostjs.map` | Its source map. Optional. |
 | `gohost.binary` | The Go host child. `.exe` is appended on Windows when missing. Optional section. |
 | `gohost.funcs`, `streams`, `signals` | Ids (`<module id>.<export>`) the child registers. The shell forwards exactly these. |
-| `permissions` | Optional list of SDK permission names (`sdk/permission`: `os:info`, `kv`, `db`, `fs`, `fs:read`, `os:secrets`, `os:secrets.read`, `shell:openExternal`, `net`, `window`, `app`, `menu`, `dialog`, `notify`, `clipboard`, `clipboard:read`, `tray`, `shortcut`). It gates which `krate/*` SDK ids the page and the TypeScript host code may call; Go host code is never gated. Empty or missing means `os:info`, `kv`, `db`, `window`, `app`, `menu`, `dialog`, `notify` and `clipboard`. A non-empty list grants exactly what it names. An unknown name makes the manifest fail to load. Read once at start. |
+| `permissions` | Optional list of SDK permission names (`sdk/permission`: `os:info`, `kv`, `db`, `fs`, `fs:read`, `os:secrets`, `os:secrets.read`, `shell:openExternal`, `net`, `window`, `app`, `menu`, `dialog`, `notify`, `clipboard`, `clipboard:read`, `tray`, `shortcut`, `updater`). It gates which `krate/*` SDK ids the page and the TypeScript host code may call; Go host code is never gated. Empty or missing means `os:info`, `kv`, `db`, `window`, `app`, `menu`, `dialog`, `notify` and `clipboard`. A non-empty list grants exactly what it names. An unknown name makes the manifest fail to load. Read once at start. |
 | `strictPermissions` | With `true`, an empty or missing `permissions` list grants nothing instead of the defaults. A derived build sets it. |
 | `window.permissions` | Optional list narrowing the SDK permissions of the main window's page to a subset of `permissions`; `[]` leaves it nothing. Windows opened with `window.Open` take the same option and inherit the opener's scope. |
+| `updater` | Optional `{url, publicKey}`: the update feed URL template (`{target}`, `{version}`) and the base64 Ed25519 public key. Without it `krate/updater.*` answers `unsupported`. See `updater/` and the Updates docs page. |
 | `debug` | Enables the webview's developer tools even without `--dev`. |
 
 Every path is relative to the app directory and must stay inside it (no

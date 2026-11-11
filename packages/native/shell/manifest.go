@@ -47,6 +47,10 @@ type Manifest struct {
 	// "nothing" instead of the defaults. A derived release build sets it.
 	StrictPermissions bool `json:"strictPermissions,omitempty"`
 
+	// Updater is native.updater: the feed URL template and the base64
+	// Ed25519 public key that verifies update files.
+	Updater *UpdaterSpec `json:"updater,omitempty"`
+
 	Debug bool `json:"debug"`
 }
 
@@ -56,6 +60,12 @@ func (m *Manifest) PermissionSet() (permission.Set, error) {
 		return permission.None(), nil
 	}
 	return permission.Parse(m.Permissions)
+}
+
+// UpdaterSpec configures in-app updates.
+type UpdaterSpec struct {
+	URL       string `json:"url"`
+	PublicKey string `json:"publicKey"`
 }
 
 // HasPermission reports whether the manifest grants a permission, with the
