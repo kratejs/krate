@@ -409,6 +409,11 @@ func TestGUIViewsReleaseRestore(t *testing.T) {
 	}
 	waitProcs(t, 1)
 	waitFor(t, "ratio", func() bool { return math.Abs(w.Layout().Ratio-0.6) < 0.03 })
+	// A scroll only sticks once the page is loaded and laid out; on a loaded
+	// runner the added view can still be on its first document.
+	waitFor(t, "the tall page to load", func() bool {
+		return evalIn(t, w, ref, `document.readyState + location.pathname + (document.body ? document.body.scrollHeight > 3000 : false)`) == "complete/talltrue"
+	})
 	evalIn(t, w, ref, `(history.pushState({}, "", "/tall?x=2#frag"), window.scrollTo(0, 700), "")`)
 	waitFor(t, "scrolled", func() bool { return evalIn(t, w, ref, `String(Math.round(scrollY))`) == "700" })
 	if err := w.SetDividerPosition("", 300); err != nil {

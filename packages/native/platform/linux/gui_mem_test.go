@@ -212,6 +212,9 @@ func TestGUIReleaseRestore(t *testing.T) {
 	defer w.Close()
 	waitProcs(t, 1)
 	// Navigation inside the page drops the query; the window id must survive.
+	waitFor(t, "the tall page to load", func() bool {
+		return evalValue(t, w, `document.readyState + location.pathname + (document.body ? document.body.scrollHeight > 3000 : false)`) == "complete/talltrue"
+	})
 	evalValue(t, w, `(history.pushState({}, "", "/tall?x=2#frag"), window.scrollTo(0, 900), "")`)
 	waitFor(t, "scrolled", func() bool { return evalValue(t, w, `String(Math.round(scrollY))`) == "900" })
 	before := totalPSSMB()
