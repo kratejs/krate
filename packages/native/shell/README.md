@@ -117,6 +117,7 @@ to stderr.
 | `reload-hostjs` | Re-reads `app.json` and the host bundle and swaps it into the running VM (`hostjs.Host.Reload`). A bundle that throws leaves the old code running and answers `error`. New ids are registered. |
 | `restart-gohost` | Re-reads `app.json`, stops the Go host child (stdin close, kill after 2 s) and starts the binary it names now. Windows stay open; open signals reconnect on their own and the page sees the new child's values. Starts the child if none ran. |
 | `eval <js>` | Runs the rest of the line as JavaScript in every open window, without waiting for a result. `error` in browser mode or with no window. |
+| `hmr <json>` | Delivers one dev-hub message (a JSON object with a `type`: `reload`, `build-error`, `client-error`) to every open `/__krate/hmr` stream. `error` without `--dev` or when the message is not a JSON object. |
 | `quit` | Answers `ok`, then exits. |
 
 stdin EOF (the driver died) quits the shell. SIGINT and SIGTERM quit it too.
@@ -124,6 +125,23 @@ The same operations are available in process as `Control` (`ReloadHostJS`,
 `RestartGoHost`, `Eval`, `Quit`, `URL`, `Origin`), passed to
 `RunOptions.OnReady`; `ServeControl` implements the text protocol over any
 reader and writer.
+
+## Dev endpoints
+
+With `--dev` the app origin serves, besides the host protocol:
+
+- `GET /__krate/hmr` is the frame stream of `hmr` messages, one `{"hmr": <message>}`
+  frame each, starting with `{"type":"connected"}`. The driver feeds it through the
+  `hmr` control command, so no extra port or token is needed and it works in
+  both window and browser mode. The latest `build-error` is replayed to a stream
+  that opens after it; a `reload` clears it. `ping` messages keep idle streams alive.
+- `GET /__krate/dev/events[?since=<seq>&follow=1]` is the host inspector feed:
+  one `{"ev": {"seq", "kind", "fn", "id", "window", "time", "durNs", "code",
+  "message"}}` frame per recorded event (calls, stream open/end, signal
+  subscriptions and updates; the newest 500 are kept). `follow=1` keeps the
+  stream open. Arguments and values are never recorded.
+- `POST /__krate/dev/client-error` takes the dev overlay's error reports and logs
+  them to stderr as `[webview] ...`.
 
 ## Go host child
 

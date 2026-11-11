@@ -86,6 +86,7 @@ type app struct {
 
 	ctl  *Control
 	quit func() // set by the run mode
+	dev  *devTools
 }
 
 func load(appDir string, opts RunOptions) (*app, error) {
@@ -121,15 +122,24 @@ func load(appDir string, opts RunOptions) (*app, error) {
 	if len(man.Fallbacks) > 0 {
 		fallback = matcher.Match
 	}
-	app := scheme.New(scheme.Options{
+	so := scheme.Options{
 		Assets:   os.DirFS(assets),
 		Registry: a.reg,
 		Dev:      opts.Dev,
 		Fallback: fallback,
-	})
+	}
+	if opts.Dev {
+		a.dev = newDevTools(a.logf)
+		so.HMR = a.dev.hmr.serve
+		so.Observe = a.dev.ring.add
+	}
+	app := scheme.New(so)
 	extra := opts.ExtraHandler
 	a.handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if extra != nil && extra(w, r) {
+			return
+		}
+		if a.dev != nil && a.dev.handle(w, r) {
 			return
 		}
 		app.ServeHTTP(w, r)
@@ -341,6 +351,15 @@ func (c *Control) ReloadHostJS() error { return c.a.reloadHostJS() }
 // RestartGoHost restarts only the Go host child, with the binary app.json
 // names now. Windows stay open and signals reconnect on their own.
 func (c *Control) RestartGoHost() error { return c.a.restartGoHost() }
+
+// HMR delivers one dev-hub message (a JSON object with a "type") to every
+// window's /__krate/hmr stream. It needs a shell started with Dev.
+func (c *Control) HMR(msg string) error {
+	if c.a.dev == nil {
+		return errors.New("hmr needs dev mode")
+	}
+	return c.a.dev.hmr.publish([]byte(msg))
+}
 
 // Eval runs JavaScript in every open window. It does not wait for a result.
 func (c *Control) Eval(js string) error {

@@ -127,6 +127,7 @@ func (f *fakeCtl) rec(s string) error {
 func (f *fakeCtl) ReloadHostJS() error  { return f.rec("reload") }
 func (f *fakeCtl) RestartGoHost() error { return f.rec("restart") }
 func (f *fakeCtl) Eval(js string) error { return f.rec("eval " + js) }
+func (f *fakeCtl) HMR(m string) error   { return f.rec("hmr " + m) }
 func (f *fakeCtl) Quit()                { f.quit = true }
 
 type errFake string

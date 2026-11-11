@@ -35,6 +35,10 @@ interface DevEvent {
 
 interface DevConfig {
   sse?: string;
+  /** Path of a frame stream carrying `{hmr: message}` frames (Krate Native). Replaces SSE. */
+  frames?: string;
+  /** Path of the host inspector feed (Krate Native). Enables the Host panel. */
+  events?: string;
   errors?: string;
   open?: string;
   overlay?: boolean;
@@ -42,12 +46,24 @@ interface DevConfig {
   basePath?: string;
 }
 
+/** True inside a Krate Native window (`krate://app`, or `https://app.localhost` on Windows). */
+export function isNativeOrigin(): boolean {
+  try {
+    return location.protocol === 'krate:' || location.origin === 'https://app.localhost';
+  } catch {
+    return false;
+  }
+}
+
 function devConfig(): Required<DevConfig> {
   const raw = (window as any).__KRATE_DEV__ as DevConfig | undefined;
   const runtime = (window as any).__KRATE_CFG__ as DevConfig | undefined;
+  const native = isNativeOrigin();
   return {
     sse: raw?.sse ?? '/__krate/hotreload',
-    errors: raw?.errors ?? '/__krate/client-error',
+    frames: raw?.frames ?? (native ? '/__krate/hmr' : ''),
+    events: raw?.events ?? (native ? '/__krate/dev/events' : ''),
+    errors: raw?.errors ?? (native ? '/__krate/dev/client-error' : '/__krate/client-error'),
     open: raw?.open ?? '/__krate/open',
     overlay: raw?.overlay ?? true,
     toolbar: raw?.toolbar ?? true,
@@ -238,6 +254,72 @@ export function routeMatches(pattern: string, pathname: string, basePath = ''): 
   return a.length === b.length;
 }
 
+/**
+ * Splits a buffer of Krate frames (u32 length, JSON, u16 blob count, blobs)
+ * into its complete JSON values. `rest` is the incomplete tail to prepend to
+ * the next chunk. Exported (pure) for testing.
+ */
+export function parseFrames(buf: Uint8Array): { values: unknown[]; rest: Uint8Array } {
+  const values: unknown[] = [];
+  const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  const td = new TextDecoder();
+  let pos = 0;
+  while (buf.length - pos >= 4) {
+    const n = view.getUint32(pos);
+    let end = pos + 4 + n;
+    if (buf.length < end + 2) break;
+    const json = td.decode(buf.subarray(pos + 4, end));
+    const blobs = view.getUint16(end);
+    end += 2;
+    let complete = true;
+    for (let i = 0; i < blobs; i++) {
+      if (buf.length < end + 4) {
+        complete = false;
+        break;
+      }
+      end += 4 + view.getUint32(end);
+      if (buf.length < end) {
+        complete = false;
+        break;
+      }
+    }
+    if (!complete) break;
+    try {
+      values.push(JSON.parse(json));
+    } catch {
+      /* skip a malformed frame */
+    }
+    pos = end;
+  }
+  return { values, rest: buf.subarray(pos) };
+}
+
+/** The host-side stack a KrateError carries in dev (`data.stack`), or "". */
+export function hostStackOf(reason: unknown): string {
+  const data = (reason as { data?: unknown } | null)?.data;
+  const stack = data && typeof data === 'object' ? (data as { stack?: unknown }).stack : undefined;
+  return typeof stack === 'string' ? stack : '';
+}
+
+interface HostEvent {
+  seq: number;
+  kind: string;
+  fn: string;
+  id?: number;
+  time?: string;
+  durNs?: number;
+  code?: string;
+  message?: string;
+}
+
+/** One line of the Host panel. Exported (pure) for testing. */
+export function hostEventLine(ev: HostEvent): string {
+  const t = ev.time ? new Date(ev.time).toLocaleTimeString() : '';
+  const dur = ev.durNs ? (ev.durNs / 1e6 >= 10 ? Math.round(ev.durNs / 1e6) : Math.round(ev.durNs / 1e5) / 10) + 'ms' : '';
+  const err = ev.code ? ' ' + ev.code + (ev.message ? ': ' + ev.message : '') : '';
+  return [t, ev.kind, ev.fn, dur].filter(Boolean).join(' ') + err;
+}
+
 const ICON_RELOAD =
   '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
   'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
@@ -248,6 +330,11 @@ const ICON_ALERT =
   'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
   '<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>' +
   '<path d="M12 9v4"/><path d="M12 17h.01"/></svg>';
+
+const ICON_HOST =
+  '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+  'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+  '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8"/><path d="M12 16v4"/></svg>';
 
 const STYLE = `
 :host { all: initial; }
@@ -351,6 +438,19 @@ const STYLE = `
 .frame .src { color: #d4d4d4; }
 .frame .caret { color: var(--red); }
 .hint { margin-top: 8px; color: #a3e635; }
+.hostpanel {
+  position: fixed; right: 12px; bottom: 12px; z-index: 2147483002;
+  width: min(560px, calc(100vw - 24px)); max-height: 50vh; display: flex; flex-direction: column;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 12px;
+  box-shadow: 0 16px 48px rgba(0,0,0,.5); overflow: hidden;
+  font: 12px/1.45 "SF Mono", Menlo, Monaco, Consolas, "Courier New", monospace; color: var(--fg);
+}
+.hostpanel[hidden] { display: none; }
+.hostpanel .card-head { padding: 8px 12px; }
+.hostrows { overflow: auto; padding: 4px 0; }
+.hostrow { padding: 2px 12px; white-space: pre-wrap; word-break: break-word; }
+.hostrow.err { color: var(--red); }
+.hostrow.sig { color: var(--muted); }
 .stack {
   margin-top: 10px; color: var(--muted); white-space: pre-wrap; word-break: break-word;
   max-height: 320px; overflow: auto;
@@ -366,7 +466,11 @@ class KrateDev {
   private title!: HTMLElement;
   private routeEl!: HTMLElement;
   private buildDiags: DevDiagnostic[] = [];
-  private runtimeErrors: { title: string; message: string; stack?: string }[] = [];
+  private runtimeErrors: { title: string; message: string; stack?: string; hostStack?: string }[] = [];
+  private hostPanel?: HTMLElement;
+  private hostRows?: HTMLElement;
+  private hostSeq = 0;
+  private hostTimer?: number;
   private seen = new Set<string>();
 
   init(): void {
@@ -400,6 +504,9 @@ class KrateDev {
         '<button class="tb-btn errors" type="button" title="Show errors">' +
         ICON_ALERT +
         '<span class="tb-label">Errors</span></button>' +
+        (this.cfg.events
+          ? '<button class="tb-btn host" type="button" title="Host calls">' + ICON_HOST + '<span class="tb-label">Host</span></button>'
+          : '') +
         '<div class="tb-center"><span class="brand">krate</span>' +
         '<span class="route"></span></div>' +
         '<button class="tb-btn reload" type="button" title="Reload">' +
@@ -416,7 +523,8 @@ class KrateDev {
       if (e.key === 'Escape') this.hide();
     });
 
-    this.connectSSE();
+    if (this.cfg.frames) this.connectFrames();
+    else this.connectSSE();
     this.captureRuntimeErrors();
   }
 
@@ -434,6 +542,14 @@ class KrateDev {
     if (t.classList.contains('errors') || t.classList.contains('toggle')) {
       if (this.overlay.hidden) this.show();
       else this.hide();
+      return;
+    }
+    if (t.classList.contains('host')) {
+      this.toggleHost();
+      return;
+    }
+    if (t.classList.contains('hostclose')) {
+      this.toggleHost(false);
       return;
     }
     if (t.classList.contains('reload')) {
@@ -488,58 +604,145 @@ class KrateDev {
       if (connectedOnce) location.reload();
       connectedOnce = true;
     });
-    sse.addEventListener('reload', (e) => {
-      // A rebuild without diagnostics supersedes any compile error on screen,
-      // whichever route it touched.
-      if (this.buildDiags.length > 0) {
-        this.buildDiags = [];
-        this.setStatus(true);
-        this.render();
-      }
-      let cssOnly = false;
+    const parse = (e: Event): any => {
       try {
-        const d = JSON.parse((e as MessageEvent).data);
-        cssOnly = d.cssOnly === true;
-        if (
-          d.pages &&
-          Array.isArray(d.pages) &&
-          !d.pages.some(
-            (p: string) => p === '/404' || p === '/500' || routeMatches(p, location.pathname, this.cfg.basePath),
-          )
-        ) {
-          return;
-        }
+        return JSON.parse((e as MessageEvent).data);
       } catch {
-        /* full reload */
+        return null;
       }
-      if (cssOnly) {
-        this.swapStylesheets().catch(() => location.reload());
+    };
+    sse.addEventListener('reload', (e) => this.onReload(parse(e)));
+    sse.addEventListener('build-error', (e) => this.onBuildError(parse(e)));
+    sse.addEventListener('client-error', (e) => this.onClientError(parse(e)));
+  }
+
+  /**
+   * Krate Native: the same events as SSE, as `{hmr: {type, ...}}` frames on a
+   * streaming fetch. Reconnects after the stream ends; a second "connected"
+   * means the shell restarted, so the page is stale.
+   */
+  private connectFrames(): void {
+    let connectedOnce = false;
+    const run = async (): Promise<void> => {
+      const res = await fetch(this.cfg.frames, { cache: 'no-store' });
+      if (!res.ok || !res.body) throw new Error('hmr stream unavailable');
+      const reader = res.body.getReader();
+      let buf: Uint8Array = new Uint8Array(0);
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) return;
+        const joined = new Uint8Array(buf.length + value.length);
+        joined.set(buf);
+        joined.set(value, buf.length);
+        const parsed = parseFrames(joined);
+        buf = parsed.rest;
+        for (const v of parsed.values) {
+          const m = (v as { hmr?: any } | null)?.hmr;
+          if (!m || typeof m !== 'object') continue;
+          if (m.type === 'connected') {
+            if (connectedOnce) location.reload();
+            connectedOnce = true;
+          } else if (m.type === 'reload') this.onReload(m);
+          else if (m.type === 'build-error') this.onBuildError(m);
+          else if (m.type === 'client-error') this.onClientError(m);
+        }
+      }
+    };
+    const loop = (): void => {
+      run().then(
+        () => setTimeout(loop, 1000),
+        () => setTimeout(loop, 1000),
+      );
+    };
+    loop();
+  }
+
+  private onReload(d: any): void {
+    // A rebuild without diagnostics supersedes any compile error on screen,
+    // whichever route it touched.
+    if (this.buildDiags.length > 0) {
+      this.buildDiags = [];
+      this.setStatus(true);
+      this.render();
+    }
+    let cssOnly = false;
+    if (d) {
+      cssOnly = d.cssOnly === true;
+      const pages = d.pages;
+      if (
+        pages &&
+        Array.isArray(pages) &&
+        !pages.some((p: string) => p === '/404' || p === '/500' || routeMatches(p, location.pathname, this.cfg.basePath))
+      ) {
         return;
       }
-      location.reload();
-    });
-    sse.addEventListener('build-error', (e) => {
-      try {
-        const d = JSON.parse((e as MessageEvent).data);
-        this.buildDiags = Array.isArray(d.diagnostics) ? d.diagnostics : [];
-      } catch {
-        this.buildDiags = [];
+    }
+    if (cssOnly) {
+      this.swapStylesheets().catch(() => location.reload());
+      return;
+    }
+    location.reload();
+  }
+
+  private onBuildError(d: any): void {
+    this.buildDiags = d && Array.isArray(d.diagnostics) ? d.diagnostics : [];
+    this.setStatus(this.buildDiags.length === 0);
+    this.render();
+  }
+
+  private onClientError(d: DevEvent | null): void {
+    if (!d || !d.clientError) return;
+    const err = d.clientError;
+    // This tab reported the error itself and already shows it.
+    if (this.seen.has(err.message + '|' + (err.stack || ''))) return;
+    this.addRuntime('Runtime Error', err.message, err.stack);
+  }
+
+  private toggleHost(force?: boolean): void {
+    if (!this.cfg.events) return;
+    if (!this.hostPanel) {
+      const el = document.createElement('div');
+      el.className = 'hostpanel';
+      el.hidden = true;
+      el.innerHTML =
+        '<div class="card-head"><span class="title" style="color:inherit">Host calls</span>' +
+        '<span class="spacer"></span><button class="btn hostclose" type="button">Close</button></div>' +
+        '<div class="hostrows"></div>';
+      this.shadow.appendChild(el);
+      this.hostPanel = el;
+      this.hostRows = el.querySelector('.hostrows') as HTMLElement;
+    }
+    const open = force ?? this.hostPanel.hidden;
+    this.hostPanel.hidden = !open;
+    if (this.hostTimer) clearInterval(this.hostTimer);
+    this.hostTimer = undefined;
+    if (open) {
+      void this.pollHost();
+      this.hostTimer = setInterval(() => void this.pollHost(), 1000) as unknown as number;
+    }
+  }
+
+  private async pollHost(): Promise<void> {
+    try {
+      const res = await fetch(this.cfg.events + '?since=' + this.hostSeq, { cache: 'no-store' });
+      if (!res.ok) return;
+      const parsed = parseFrames(new Uint8Array(await res.arrayBuffer()));
+      const rows = this.hostRows!;
+      const pinned = rows.scrollTop + rows.clientHeight >= rows.scrollHeight - 8;
+      for (const v of parsed.values) {
+        const ev = (v as { ev?: HostEvent } | null)?.ev;
+        if (!ev) continue;
+        this.hostSeq = Math.max(this.hostSeq, ev.seq);
+        const row = document.createElement('div');
+        row.className = 'hostrow' + (ev.code ? ' err' : ev.kind === 'signal' ? ' sig' : '');
+        row.textContent = hostEventLine(ev);
+        rows.appendChild(row);
       }
-      this.setStatus(this.buildDiags.length === 0);
-      this.render();
-    });
-    sse.addEventListener('client-error', (e) => {
-      try {
-        const d = JSON.parse((e as MessageEvent).data) as DevEvent;
-        if (!d.clientError) return;
-        const err = d.clientError;
-        // This tab reported the error itself and already shows it.
-        if (this.seen.has(err.message + '|' + (err.stack || ''))) return;
-        this.addRuntime('Runtime Error', err.message, err.stack);
-      } catch {
-        /* ignore */
-      }
-    });
+      while (rows.childElementCount > 200) rows.firstElementChild!.remove();
+      if (pinned) rows.scrollTop = rows.scrollHeight;
+    } catch {
+      /* the panel is best-effort */
+    }
   }
 
   /**
@@ -606,23 +809,25 @@ class KrateDev {
   private onError(e: ErrorEvent): void {
     const stack = e.error?.stack || '';
     const message = e.message || 'Unknown error';
+    const hostStack = hostStackOf(e.error);
     this.report({
       message,
-      stack,
+      stack: hostStack ? stack + '\nHost stack:\n' + hostStack : stack,
       url: e.filename,
       line: e.lineno,
       col: e.colno,
       kind: 'error',
     });
-    this.addRuntime('Runtime Error', message, stack);
+    this.addRuntime('Runtime Error', message, stack, hostStack);
   }
 
   private onRejection(e: PromiseRejectionEvent): void {
     const reason = e.reason;
     const message = reason instanceof Error ? reason.message : String(reason);
     const stack = reason instanceof Error ? reason.stack : '';
-    this.report({ message, stack, url: location.href, kind: 'unhandledrejection' });
-    this.addRuntime('Unhandled Promise Rejection', message, stack);
+    const hostStack = hostStackOf(reason);
+    this.report({ message, stack: hostStack ? (stack || '') + '\nHost stack:\n' + hostStack : stack, url: location.href, kind: 'unhandledrejection' });
+    this.addRuntime('Unhandled Promise Rejection', message, stack, hostStack);
   }
 
   private report(payload: DevClientError): void {
@@ -641,8 +846,8 @@ class KrateDev {
     }
   }
 
-  private addRuntime(title: string, message: string, stack?: string): void {
-    const entry = { title, message, stack };
+  private addRuntime(title: string, message: string, stack?: string, hostStack?: string): void {
+    const entry = { title, message, stack, hostStack };
     this.runtimeErrors.push(entry);
     this.setStatus(false);
     this.render();
@@ -684,8 +889,9 @@ class KrateDev {
     return '<div class="diag">' + actions + '<div class="msg">' + esc(d.message) + '</div>' + this.frameHTML(d) + hint + '</div>';
   }
 
-  private runtimeHTML(r: { title: string; message: string; stack?: string }): string {
-    const stack = r.stack ? '<div class="stack">' + esc(r.stack) + '</div>' : '';
+  private runtimeHTML(r: { title: string; message: string; stack?: string; hostStack?: string }): string {
+    const host = r.hostStack ? '<div class="stack">Host stack:\n' + esc(r.hostStack) + '</div>' : '';
+    const stack = host + (r.stack ? '<div class="stack">' + esc(r.stack) + '</div>' : '');
     return '<div class="diag"><div class="msg">' + esc(r.message) + '</div>' + stack + '</div>';
   }
 

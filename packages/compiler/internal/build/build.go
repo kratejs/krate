@@ -152,11 +152,15 @@ type Builder struct {
 	// the watcher asks the dev server to restart; otherwise it has already
 	// surfaced the error and the current server keeps running.
 	DevReload func(reason string) bool
-	ctx       context.Context     // optional cancellation for long builds
-	Env       map[string]string   // resolved .env values (build/serve-time only, never client-facing)
-	depGraph  map[string][]string // file path -> page source paths that depend on it
-	pageDeps  map[string][]string // page source path -> files it depends on
-	depMu     sync.Mutex          // protects depGraph/pageDeps
+	// DevHandleChanges, when set, takes each debounced batch of changed files
+	// from the dev watcher instead of processChanges. `krate native dev` uses
+	// it to route host code edits before the UI rebuild.
+	DevHandleChanges func(changed []string, hub *DevHub)
+	ctx              context.Context     // optional cancellation for long builds
+	Env              map[string]string   // resolved .env values (build/serve-time only, never client-facing)
+	depGraph         map[string][]string // file path -> page source paths that depend on it
+	pageDeps         map[string][]string // page source path -> files it depends on
+	depMu            sync.Mutex          // protects depGraph/pageDeps
 
 	// twMu guards twPages/twWarned: Tailwind CSS-first directives collected
 	// from the authored CSS that flows through processCSSDirectives (replaced
@@ -351,6 +355,13 @@ func (b *Builder) devBootstrapJSON() string {
 		"open":    "/__krate/open",
 		"overlay": b.Cfg.DevServer.OverlayEnabled(),
 		"toolbar": b.Cfg.DevServer.ToolbarEnabled(),
+	}
+	if b.NativeTarget {
+		// The native shell serves HMR as a frame stream on the app origin.
+		cfg["frames"] = "/__krate/hmr"
+		cfg["events"] = "/__krate/dev/events"
+		cfg["errors"] = "/__krate/dev/client-error"
+		delete(cfg, "open")
 	}
 	data, err := json.Marshal(cfg)
 	if err != nil {

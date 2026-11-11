@@ -2,6 +2,8 @@ package scheme
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io/fs"
 	"net/http"
 	"runtime"
@@ -9,6 +11,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/kratejs/krate/packages/native/krate"
 )
 
 // DefaultCSP is the policy used when Options.CSP is empty. Prerendered pages
@@ -41,6 +45,53 @@ type Options struct {
 	Fallback func(urlPath string) (file string, ok bool)
 	// HMR serves GET /__krate/hmr when Dev is set.
 	HMR func(w http.ResponseWriter, r *http.Request)
+	// Observe, when set, receives host traffic events (calls, streams,
+	// signals) for the dev inspector. It runs on the serving goroutines, so
+	// it must be quick and safe for concurrent use.
+	Observe func(Event)
+}
+
+// Event describes one piece of host traffic.
+type Event struct {
+	// Kind is "call", "stream-open", "stream-end", "signal-open" or "signal".
+	Kind string `json:"kind"`
+	// ID is the call id (calls and stream-open), 0 otherwise.
+	ID int64 `json:"id,omitempty"`
+	// Fn is the function, stream or signal name.
+	Fn     string    `json:"fn"`
+	Window string    `json:"window,omitempty"`
+	Time   time.Time `json:"time"`
+	// Dur is how long a call ran, or how long a stream was open.
+	Dur time.Duration `json:"durNs,omitempty"`
+	// Code and Message describe the error, if any.
+	Code    string `json:"code,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+func (s *server) observe(ev Event) {
+	if s.o.Observe == nil {
+		return
+	}
+	ev.Time = time.Now()
+	s.o.Observe(ev)
+}
+
+// errCodeMsg returns the code and message encodeError would send, without the
+// dev stack.
+func errCodeMsg(err error) (code, msg string) {
+	var pe *panicError
+	var ke *krate.Error
+	switch {
+	case errors.As(err, &pe):
+		return "panic", fmt.Sprint(pe.val)
+	case errors.As(err, &ke):
+		return ke.Code, ke.Message
+	case errors.Is(err, context.Canceled):
+		return "canceled", err.Error()
+	case errors.Is(err, context.DeadlineExceeded):
+		return "deadline_exceeded", err.Error()
+	}
+	return "internal", err.Error()
 }
 
 const (
