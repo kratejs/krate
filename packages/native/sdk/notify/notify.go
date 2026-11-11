@@ -4,11 +4,14 @@
 // libnotify). Actions come back through the ActionInvoked signal. Servers
 // that do not advertise "actions" show a plain notification.
 //
-// macOS: UNUserNotificationCenter needs an app bundle with a bundle
-// identifier; unbundled processes (go run, krate-shell in dev) get
-// krate.ErrUnsupported. Windows: toast notifications need an AppUserModelID
-// registered through a Start menu shortcut; without it the call returns
-// krate.ErrUnsupported. Both are compile-only in this release.
+// macOS: UNUserNotificationCenter, which needs an app bundle with a bundle
+// identifier. `krate native dev` runs the shell from a generated dev bundle;
+// a process outside a bundle (go run, a bare krate-shell) gets
+// krate.ErrUnsupported with the reason and the fix, and app.Supports("notify")
+// is false. A refused permission is a permission_denied error. Windows: toast
+// notifications need an AppUserModelID registered through a Start menu
+// shortcut; without it the call returns krate.ErrUnsupported. Both are
+// compile-only in this release.
 package notify
 
 import (

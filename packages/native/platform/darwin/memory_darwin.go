@@ -5,6 +5,7 @@ package darwin
 import (
 	"log"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ebitengine/purego/objc"
@@ -22,96 +23,124 @@ const wkAudiovisualMediaTypeAll = ^uint(0)
 
 var memLogged sync.Map
 
+// memDebug turns the "skipped" messages on; they are debug-level because a
+// missing private selector is expected on some macOS versions.
+var memDebug atomic.Bool
+
+// memLogOnce logs a skipped lever once per key, and only in debug mode.
 func memLogOnce(key, format string, a ...any) {
+	if !memDebug.Load() {
+		return
+	}
 	if _, dup := memLogged.LoadOrStore(key, true); !dup {
 		log.Printf("krate/native: memory: "+format, a...)
 	}
 }
 
+// canSend reports whether target is a live object that answers s. Every
+// selector in this file goes through it (or findPrivateFeature) before it is
+// sent: an unknown selector would raise an Objective-C exception, which Go
+// cannot catch.
+func canSend(target objc.ID, s objc.SEL) bool {
+	return target != 0 && respondsTo(target, s)
+}
+
+// classAnswers reports whether the class exists and answers the class method.
+func classAnswers(name, selector string) (objc.ID, bool) {
+	c := cls(name)
+	if c == 0 || !respondsTo(c, sel(selector)) {
+		return 0, false
+	}
+	return c, true
+}
+
+// isKindOf reports whether obj is an instance of the named class; false when
+// the class does not exist.
+func isKindOf(obj objc.ID, class string) bool {
+	c := cls(class)
+	return obj != 0 && c != 0 && objc.Send[bool](obj, sel("isKindOfClass:"), c)
+}
+
 // applyMemoryConfig applies the plan to a WKWebViewConfiguration before the
-// web view is created (main thread).
+// web view is created (main thread). Only the levers in planLevers are used.
 func (a *App) applyMemoryConfig(config objc.ID) {
-	plan := planMemory(a.opts.Memory, a.opts.Features)
-	if plan == (memoryPlan{}) {
+	levers := planLevers(planMemory(a.opts.Memory, a.opts.Features))
+	if len(levers) == 0 || config == 0 {
 		return
 	}
-	if plan.RequireUserActionForMedia {
-		// Public, macOS 10.12+.
-		if s := sel("setMediaTypesRequiringUserActionForPlayback:"); respondsTo(config, s) {
-			config.Send(s, wkAudiovisualMediaTypeAll)
-		} else {
-			memLogOnce("media", "setMediaTypesRequiringUserActionForPlayback: missing; skipped")
+	var prefs objc.ID
+	prefsTried := false
+	for _, l := range levers {
+		target := config
+		if l.Target == targetPrefs {
+			if !prefsTried {
+				prefsTried = true
+				if ps := sel(selPreferences); canSend(config, ps) {
+					prefs = config.Send(ps)
+				}
+			}
+			target = prefs
+			if target == 0 {
+				memLogOnce("prefs", "WKWebViewConfiguration.preferences unavailable; preference levers skipped")
+				continue
+			}
 		}
-	}
-	prefs := config.Send(sel("preferences"))
-	if prefs == 0 {
-		memLogOnce("prefs", "WKWebViewConfiguration.preferences is nil; preference levers skipped")
-		return
-	}
-	if plan.NoAutoOpenWindows {
-		// Public.
-		if s := sel("setJavaScriptCanOpenWindowsAutomatically:"); respondsTo(prefs, s) {
-			prefs.Send(s, false)
-		}
-	}
-	// Private levers. The _setEnabled:forFeature: path is tried first because
-	// newer WebKit exposes preferences that way; the direct setters are the
-	// older spelling.
-	if plan.NoWebGL {
-		setPrivatePreference(prefs, "WebGLEnabled", "_setWebGLEnabled:", false)
-	}
-	if plan.NoWebAudio {
-		setPrivatePreference(prefs, "WebAudioEnabled", "_setWebAudioEnabled:", false)
-	}
-	if plan.NoMediaDevices {
-		setPrivatePreference(prefs, "MediaDevicesEnabled", "_setMediaDevicesEnabled:", false)
-	}
-	if plan.NoPageCache {
-		// Equivalent of the Linux document-viewer cache model. The setter
-		// name is the least certain of all of these; three spellings are
-		// tried, first match wins.
-		setPrivatePreference(prefs, "UsesBackForwardCache", "_setUsesBackForwardCache:", false, "_setPageCacheEnabled:")
+		applyLever(target, l)
 	}
 }
 
-// setPrivatePreference sets a private WKPreferences boolean. featureKey is the
-// WebKit preference key (as listed by +[WKPreferences _features]); setters are
-// direct selectors tried in order. It logs once and does nothing when neither
-// route exists.
-func setPrivatePreference(prefs objc.ID, featureKey, setter string, value bool, altSetters ...string) {
-	if f := findPrivateFeature(featureKey); f != 0 {
-		if s := sel("_setEnabled:forFeature:"); respondsTo(prefs, s) {
-			prefs.Send(s, value, f)
+// applyLever sets one lever on its target. Private levers try the WebKit
+// feature table first (newer WebKit exposes preferences that way), then each
+// direct setter in order. It logs once and does nothing when none is there.
+func applyLever(target objc.ID, l lever) {
+	value := leverValue(l)
+	if l.Feature != "" {
+		if f := findPrivateFeature(l.Feature); f != 0 {
+			if s := sel(selSetFeature); canSend(target, s) {
+				target.Send(s, false, f)
+				return
+			}
+		}
+	}
+	for _, name := range l.Selectors {
+		if s := sel(name); canSend(target, s) {
+			target.Send(s, value)
 			return
 		}
 	}
-	for _, name := range append([]string{setter}, altSetters...) {
-		if s := sel(name); respondsTo(prefs, s) {
-			prefs.Send(s, value)
-			return
-		}
+	memLogOnce(l.Name, "%s: none of %v is available on this macOS; skipped", l.Name, l.Selectors)
+}
+
+// leverValue is the argument of a lever's setter: all media types for the
+// playback restriction, NO for every other lever.
+func leverValue(l lever) any {
+	if l.Name == "media" {
+		return wkAudiovisualMediaTypeAll
 	}
-	memLogOnce(featureKey, "private WKPreferences %s not available on this macOS; skipped", featureKey)
+	return false
 }
 
 // findPrivateFeature returns the _WKFeature whose key is key, or 0. Private:
-// +[WKPreferences _features] and -[_WKFeature key].
+// +[WKPreferences _features] (an NSArray) and -[_WKFeature key].
 func findPrivateFeature(key string) objc.ID {
-	c := cls("WKPreferences")
-	if c == 0 || !respondsTo(c, sel("_features")) {
+	c, ok := classAnswers("WKPreferences", selFeatures)
+	if !ok {
+		memLogOnce("features", "+[WKPreferences _features] unavailable; the feature table is not used")
 		return 0
 	}
-	list := c.Send(sel("_features"))
-	if list == 0 {
+	list := c.Send(sel(selFeatures))
+	if !isKindOf(list, "NSArray") {
+		memLogOnce("features-type", "+[WKPreferences _features] did not return an NSArray; the feature table is not used")
 		return 0
 	}
 	n := objc.Send[uint](list, sel("count"))
 	for i := uint(0); i < n; i++ {
 		f := list.Send(sel("objectAtIndex:"), i)
-		if f == 0 || !respondsTo(f, sel("key")) {
+		if !canSend(f, sel(selFeatureKey)) {
 			continue
 		}
-		if goString(f.Send(sel("key"))) == key {
+		k := f.Send(sel(selFeatureKey))
+		if isKindOf(k, "NSString") && goString(k) == key {
 			return f
 		}
 	}
@@ -135,14 +164,15 @@ func completionBlock() objc.Block {
 // WKWebsiteDataStore API. Only WKWebsiteDataTypeMemoryCache is requested, so
 // localStorage, cookies and the disk cache are untouched (main thread).
 func purgeMemoryCache() {
-	store := cls("WKWebsiteDataStore")
-	if store == 0 || !respondsTo(store, sel("defaultDataStore")) {
+	store, ok := classAnswers("WKWebsiteDataStore", selDefaultStore)
+	if !ok {
 		memLogOnce("store", "WKWebsiteDataStore unavailable; memory cache purge skipped")
 		return
 	}
-	ds := store.Send(sel("defaultDataStore"))
-	s := sel("removeDataOfTypes:modifiedSince:completionHandler:")
-	if ds == 0 || !respondsTo(ds, s) {
+	ds := store.Send(sel(selDefaultStore))
+	s := sel(selRemoveData)
+	if !canSend(ds, s) {
+		memLogOnce("removeData", "%s unavailable; memory cache purge skipped", selRemoveData)
 		return
 	}
 	types := cls("NSSet").Send(sel("setWithObject:"), nsString("WKWebsiteDataTypeMemoryCache"))

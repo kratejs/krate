@@ -82,8 +82,8 @@ green run there is what moves a cell.
 | Native: SDK windows | Partial | Untested | Untested | Krate Native v1 |
 | Native: shared web process, release and background mode | Supported | Untested | Untested | Krate Native v1 |
 | Native: SDK dialogs, clipboard and menus | Supported | Untested | Untested | Krate Native v1 |
-| Native: SDK notifications | Supported | n/a | n/a | Krate Native v1 |
-| Native: SDK tray and global shortcuts | Partial | n/a | n/a | Krate Native v1 |
+| Native: SDK notifications | Supported | Untested | n/a | Krate Native v1 |
+| Native: SDK tray and global shortcuts | Partial | Untested | n/a | Krate Native v1 |
 | Native: SDK app lifecycle | Supported | Untested | Untested | Krate Native v1 |
 | Native: release as a single executable | Supported | Untested | Untested | Krate Native v1 |
 | Native: prebuilt shell for apps without Go | Supported | Untested | Untested | Krate Native v1 |
@@ -574,7 +574,7 @@ Known limits:
 - A hidden page that is not released keeps its web process memory; only the page's own handlers of krate:memory-pressure and the shell's heap trim run. Release is what returns the web process memory.
 - The network process of WebKitGTK stays alive while the app runs, so a released Linux app still holds it.
 
-Evidence: `TestGUISharedWebProcess`, `TestGUIReleaseRestore`, `TestGUIKeepAlive`, `TestGUINavigateReleased`, `TestGUIMemoryPressureOnHide`, `TestGUIWindowsBackground`, `TestParseViewState`, `TestParkOnClose`, `TestQuitWhenEmpty`
+Evidence: `TestGUISharedWebProcess`, `TestGUIReleaseRestore`, `TestGUIKeepAlive`, `TestGUINavigateReleased`, `TestGUIMemoryPressureOnHide`, `TestGUIWindowsBackground`, `TestParseViewState`, `TestParkOnClose`, `TestQuitWhenEmpty`, `TestMemorySelectors`, `TestLeversAreGuardable`
 
 ### Native: SDK dialogs, clipboard and menus
 
@@ -592,30 +592,33 @@ Evidence: `TestGUIDialogs`, `TestGUIClipboard`, `TestGUIMenus`, `TestDialogsAreC
 
 ### Native: SDK notifications
 
-**Linux:** Supported - **macOS:** n/a - **Windows:** n/a
+**Linux:** Supported - **macOS:** Untested - **Windows:** n/a
 
-Desktop notifications with actions. On Linux they use org.freedesktop.Notifications over D-Bus.
+Desktop notifications with actions. On Linux they use org.freedesktop.Notifications over D-Bus; on macOS UNUserNotificationCenter.
 
 Known limits:
 
 - Verified against a fake notification service, not a real desktop daemon. Without a service that owns org.freedesktop.Notifications the call returns ErrUnsupported.
-- macOS and Windows return ErrUnsupported: UNUserNotificationCenter needs an app bundle and Windows toasts need an AppUserModelID from a Start menu shortcut.
+- macOS: implemented, not yet run on a Mac (untested). It needs an app bundle with a bundle identifier; krate native dev runs the shell from a generated <appId>.dev bundle under .krate/dev. A process outside a bundle gets an ErrUnsupported error that names the fix. The first notification asks for permission and a refusal is a permission_denied error. Icon and Timeout are ignored, and critical urgency is only time-sensitive (the critical level needs an Apple entitlement).
+- Windows returns ErrUnsupported: toasts need an AppUserModelID from a Start menu shortcut.
 
-Evidence: `TestNotifyOverDBus`, `TestNotifyWithoutServiceIsUnsupported`, `TestNotificationAndTrayWithFakeDesktopServices`
+Evidence: `TestNotifyOverDBus`, `TestNotifyWithoutServiceIsUnsupported`, `TestNotificationAndTrayWithFakeDesktopServices`, `TestNotifyUnbundled`, `TestNotifyBundled`, `TestBundleProblem`, `TestNotifyEvent`, `TestPlatformNotifyAvailability`, `TestPrepareMacDevBundle`
 
 ### Native: SDK tray and global shortcuts
 
-**Linux:** Partial - **macOS:** n/a - **Windows:** n/a
+**Linux:** Partial - **macOS:** Untested - **Windows:** n/a
 
-A tray icon with a menu (StatusNotifierItem and dbusmenu) and global keyboard shortcuts.
+A tray icon with a menu (StatusNotifierItem and dbusmenu on Linux, NSStatusItem on macOS) and global keyboard shortcuts (XGrabKey, Carbon RegisterEventHotKey).
 
 Known limits:
 
 - Linux tray needs a StatusNotifier host; stock GNOME without the AppIndicator extension returns ErrUnsupported.
 - Linux shortcuts are verified on X11 (XGrabKey). On Wayland they need the org.freedesktop.portal.GlobalShortcuts portal, verified against a fake portal only, and return ErrUnsupported without it.
-- macOS and Windows return ErrUnsupported for both.
+- macOS: implemented, not yet run on a Mac (untested). With a tray menu any click opens the menu and is reported as click; right-click and double-click are only reported without a menu. Radio items show a checkmark. Single-tone gray icons become template images.
+- macOS shortcuts use Carbon RegisterEventHotKey (no Accessibility permission). Keys are ANSI key positions, so other layouts differ, and macOS 15 ignores hot keys whose only modifiers are Option and/or Shift. A combination that is already registered is an error. Pressing a real hot key and clicking the real status item are manual checks (platform/darwin/MANUAL_TEST.md).
+- Windows returns ErrUnsupported for both.
 
-Evidence: `TestTrayOverDBus`, `TestTrayWithoutHostIsUnsupported`, `TestShortcutPortal`, `TestShortcutWaylandWithoutPortalIsUnsupported`, `TestGUIGlobalShortcut`, `TestShortcutAndSupports`
+Evidence: `TestTrayOverDBus`, `TestTrayWithoutHostIsUnsupported`, `TestShortcutPortal`, `TestShortcutWaylandWithoutPortalIsUnsupported`, `TestGUIGlobalShortcut`, `TestShortcutAndSupports`, `TestTrayItemAndMenu`, `TestHotKeyRegisterUnregister`, `TestToCarbon`, `TestCarbonStatusError`, `TestInspectTrayIcon`, `TestAccelKeyEquivalent`, `TestPlatformTrayIsUsed`, `TestParseCmdOrCtrl`
 
 ### Native: SDK app lifecycle
 

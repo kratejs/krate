@@ -949,7 +949,9 @@
         "TestGUIWindowsBackground",
         "TestParseViewState",
         "TestParkOnClose",
-        "TestQuitWhenEmpty"
+        "TestQuitWhenEmpty",
+        "TestMemorySelectors",
+        "TestLeversAreGuardable"
       ],
       "knownLimits": [
         "macOS and Windows: untested. The code builds for both and the Windows vtable slots are checked against WebView2.h, but no run against a real WKWebView or WebView2 window has been confirmed. On macOS the single-web-process switch is a private WebKit selector guarded by respondsToSelector; on Windows ICoreWebView2_19 memory targets need a recent runtime and are skipped without it.",
@@ -988,19 +990,26 @@
       "area": "Native: SDK notifications",
       "native": {
         "linux": "supported",
-        "macos": "n/a",
+        "macos": "untested",
         "windows": "n/a"
       },
       "target": "Krate Native v1",
-      "summary": "Desktop notifications with actions. On Linux they use org.freedesktop.Notifications over D-Bus.",
+      "summary": "Desktop notifications with actions. On Linux they use org.freedesktop.Notifications over D-Bus; on macOS UNUserNotificationCenter.",
       "tests": [
         "TestNotifyOverDBus",
         "TestNotifyWithoutServiceIsUnsupported",
-        "TestNotificationAndTrayWithFakeDesktopServices"
+        "TestNotificationAndTrayWithFakeDesktopServices",
+        "TestNotifyUnbundled",
+        "TestNotifyBundled",
+        "TestBundleProblem",
+        "TestNotifyEvent",
+        "TestPlatformNotifyAvailability",
+        "TestPrepareMacDevBundle"
       ],
       "knownLimits": [
         "Verified against a fake notification service, not a real desktop daemon. Without a service that owns org.freedesktop.Notifications the call returns ErrUnsupported.",
-        "macOS and Windows return ErrUnsupported: UNUserNotificationCenter needs an app bundle and Windows toasts need an AppUserModelID from a Start menu shortcut."
+        "macOS: implemented, not yet run on a Mac (untested). It needs an app bundle with a bundle identifier; krate native dev runs the shell from a generated <appId>.dev bundle under .krate/dev. A process outside a bundle gets an ErrUnsupported error that names the fix. The first notification asks for permission and a refusal is a permission_denied error. Icon and Timeout are ignored, and critical urgency is only time-sensitive (the critical level needs an Apple entitlement).",
+        "Windows returns ErrUnsupported: toasts need an AppUserModelID from a Start menu shortcut."
       ]
     },
     {
@@ -1008,23 +1017,33 @@
       "area": "Native: SDK tray and global shortcuts",
       "native": {
         "linux": "partial",
-        "macos": "n/a",
+        "macos": "untested",
         "windows": "n/a"
       },
       "target": "Krate Native v1",
-      "summary": "A tray icon with a menu (StatusNotifierItem and dbusmenu) and global keyboard shortcuts.",
+      "summary": "A tray icon with a menu (StatusNotifierItem and dbusmenu on Linux, NSStatusItem on macOS) and global keyboard shortcuts (XGrabKey, Carbon RegisterEventHotKey).",
       "tests": [
         "TestTrayOverDBus",
         "TestTrayWithoutHostIsUnsupported",
         "TestShortcutPortal",
         "TestShortcutWaylandWithoutPortalIsUnsupported",
         "TestGUIGlobalShortcut",
-        "TestShortcutAndSupports"
+        "TestShortcutAndSupports",
+        "TestTrayItemAndMenu",
+        "TestHotKeyRegisterUnregister",
+        "TestToCarbon",
+        "TestCarbonStatusError",
+        "TestInspectTrayIcon",
+        "TestAccelKeyEquivalent",
+        "TestPlatformTrayIsUsed",
+        "TestParseCmdOrCtrl"
       ],
       "knownLimits": [
         "Linux tray needs a StatusNotifier host; stock GNOME without the AppIndicator extension returns ErrUnsupported.",
         "Linux shortcuts are verified on X11 (XGrabKey). On Wayland they need the org.freedesktop.portal.GlobalShortcuts portal, verified against a fake portal only, and return ErrUnsupported without it.",
-        "macOS and Windows return ErrUnsupported for both."
+        "macOS: implemented, not yet run on a Mac (untested). With a tray menu any click opens the menu and is reported as click; right-click and double-click are only reported without a menu. Radio items show a checkmark. Single-tone gray icons become template images.",
+        "macOS shortcuts use Carbon RegisterEventHotKey (no Accessibility permission). Keys are ANSI key positions, so other layouts differ, and macOS 15 ignores hot keys whose only modifiers are Option and/or Shift. A combination that is already registered is an error. Pressing a real hot key and clicking the real status item are manual checks (platform/darwin/MANUAL_TEST.md).",
+        "Windows returns ErrUnsupported for both."
       ]
     },
     {

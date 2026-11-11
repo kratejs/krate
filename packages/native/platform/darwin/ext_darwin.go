@@ -13,11 +13,8 @@ package darwin
 //     Objective-C target class.
 //   - Window controls: NSWindow level, fullscreen, zoom, miniaturize, style
 //     mask. Unlike GTK there is no window manager variance.
-//   - Notifications need an app bundle (UNUserNotificationCenter requires a
-//     bundle identifier), tray needs NSStatusItem plus an action target, and
-//     global shortcuts need RegisterEventHotKey; none of these are
-//     implemented here, so Notifier, Tray and Shortcuts are absent and the
-//     SDK answers ErrUnsupported.
+//   - Tray (tray_darwin.go), global shortcuts (hotkey_darwin.go) and
+//     notifications (notify_darwin.go) are implemented in their own files.
 
 import (
 	"errors"
@@ -462,34 +459,17 @@ func (a *App) menuClicked(item objc.ID) {
 	}
 }
 
-func keyEquivalent(acc string) (string, uint) {
-	if acc == "" {
-		return "", 0
-	}
-	parts := strings.Split(acc, "+")
-	var mask uint
-	for _, p := range parts[:len(parts)-1] {
-		switch strings.ToLower(p) {
-		case "cmdorctrl", "cmd", "command", "ctrl", "control":
-			mask |= nsEventModifierFlagCommand
-		case "shift":
-			mask |= nsEventModifierFlagShift
-		case "alt", "option":
-			mask |= 1 << 19
-		}
-	}
-	return strings.ToLower(parts[len(parts)-1]), mask
-}
-
 func buildNSMenu(title string, items []caps.MenuItem) objc.ID {
 	m := newMenu(title)
+	// Items are enabled by this flag alone, not by the responder chain.
+	m.Send(sel("setAutoenablesItems:"), false)
 	for _, it := range items {
 		if it.Kind == caps.MenuItemSeparator {
 			m.Send(sel("addItem:"), cls("NSMenuItem").Send(sel("separatorItem")))
 			continue
 		}
-		label := strings.ReplaceAll(it.Label, "&", "")
-		key, mask := keyEquivalent(it.Accelerator)
+		label := menuLabel(it.Label)
+		key, mask := accelKeyEquivalent(it.Accelerator)
 		item := menuItem(label, sel("krateMenu:"), key, mask)
 		if len(it.Submenu) > 0 || it.Kind == caps.MenuItemSubmenu {
 			item.Send(sel("setSubmenu:"), buildNSMenu(label, it.Submenu))
@@ -531,7 +511,7 @@ func (a *App) SetAppMenu(items []caps.MenuItem) error {
 			}
 			userTop = nil
 			for i, it := range items {
-				label := strings.ReplaceAll(it.Label, "&", "")
+				label := menuLabel(it.Label)
 				top := menuItem("", 0, "", 0)
 				top.Send(sel("setSubmenu:"), buildNSMenu(label, it.Submenu))
 				retain(top)
@@ -554,4 +534,16 @@ func (a *App) PopupMenu(parent caps.WindowRef, items []caps.MenuItem, x, y int) 
 		})
 	})
 	return nil
+}
+
+// mainCall runs fn on the main thread inside an autorelease pool and returns
+// its error. Before the app is running, off the main thread, there is no loop
+// to run fn, so it fails instead of blocking forever.
+func (a *App) mainCall(fn func() error) error {
+	if !a.ready.Load() && !isMainThread() {
+		return errors.New("darwin: the app is not running yet; call this after Run's onReady callback")
+	}
+	var err error
+	runOnMain(func() { withPool(func() { err = fn() }) })
+	return err
 }

@@ -181,9 +181,9 @@ against the platform API but has not run in this release.
 | Frameless, position, always on top | Verified (X11; Wayland ignores position and always-on-top) | Compile-only | Compile-only |
 | Fullscreen, maximize, minimize | Verified with a window manager (openbox on Xvfb) | Compile-only | Compile-only |
 | Close requested (prevent close) | Verified | Compile-only | Compile-only |
-| Notifications | Verified against a fake `org.freedesktop.Notifications`; actions via `ActionInvoked` | `ErrUnsupported`: `UNUserNotificationCenter` needs an app bundle | `ErrUnsupported`: toasts need an AppUserModelID from a Start menu shortcut |
-| Tray | Verified against a fake StatusNotifierWatcher (StatusNotifierItem plus `com.canonical.dbusmenu`); needs a StatusNotifier host | `ErrUnsupported` | `ErrUnsupported` |
-| Global shortcuts | Verified on X11 (`XGrabKey`); Wayland uses the GlobalShortcuts portal (verified against a fake portal) or returns `ErrUnsupported` | `ErrUnsupported` | `ErrUnsupported` |
+| Notifications | Verified against a fake `org.freedesktop.Notifications`; actions via `ActionInvoked` | Untested (implemented, not yet run on a Mac): `UNUserNotificationCenter`, needs an app bundle; `krate native dev` runs from a generated dev bundle | `ErrUnsupported`: toasts need an AppUserModelID from a Start menu shortcut |
+| Tray | Verified against a fake StatusNotifierWatcher (StatusNotifierItem plus `com.canonical.dbusmenu`); needs a StatusNotifier host | Untested (implemented, not yet run on a Mac): `NSStatusItem` with an `NSMenu` | `ErrUnsupported` |
+| Global shortcuts | Verified on X11 (`XGrabKey`); Wayland uses the GlobalShortcuts portal (verified against a fake portal) or returns `ErrUnsupported` | Untested (implemented, not yet run on a Mac): Carbon `RegisterEventHotKey`, no Accessibility permission | `ErrUnsupported` |
 | Single instance, deep links | Verified (unix socket in the runtime dir) | The same code; URL scheme registration is an Info.plist packaging step | The same code; scheme registration is a registry packaging step |
 
 ### Linux details
@@ -197,6 +197,48 @@ against the platform API but has not run in this release.
   extension) `tray.New` returns `ErrUnsupported`.
 - **Notifications.** If no notification service owns
   `org.freedesktop.Notifications` the call returns `ErrUnsupported`.
+
+### macOS details
+
+The tray, global shortcuts and notifications are implemented against AppKit,
+Carbon and `UserNotifications` through purego. They compile for macOS and the
+logic around them (key table, menu model, error mapping) is unit tested, but
+they have not been run on a Mac yet; `platform/darwin/MANUAL_TEST.md` lists
+what to check by hand.
+
+- **Tray.** One `NSStatusItem`. A PNG icon that is a single gray tone (black or
+  white artwork on transparent) is installed as a template image, so it follows
+  the light or dark menu bar; other icons keep their colors. Icons taller than
+  18 points are scaled down to 18 points, keeping the aspect ratio. A title
+  without an icon works; an icon with neither is an error. With a menu, any
+  click opens the menu and is reported as `click`; `right-click` and
+  `double-click` are only reported while the tray has no menu. Check items
+  toggle themselves when clicked; a radio item switches its radio siblings off.
+  macOS menus have no radio style, so a selected radio item shows a checkmark.
+  Accelerators are displayed as key equivalents.
+- **Global shortcuts.** Carbon `RegisterEventHotKey` works without the
+  Accessibility permission and while the app is in the background. `CmdOrCtrl`
+  and `Cmd` mean Command, `Ctrl` is Control. Keys name physical positions of an
+  ANSI keyboard, so on another layout a letter is the key at that position.
+  `plus` is the `=` key with Shift. A combination already registered, by this
+  app or by the system, fails with an error naming the combination. macOS 15
+  stops delivering hot keys whose only modifiers are Option and/or Shift; use
+  Command or Control.
+- **Notifications.** `UNUserNotificationCenter` only delivers to a process that
+  runs from an `.app` bundle with a bundle identifier. In a packaged app that
+  is automatic. `krate native dev` starts the shell from a generated bundle at
+  `.krate/dev/<name>.app` (bundle id `<appId>.dev`), so notifications and the
+  tray name behave as in the release app. A process outside a bundle, such as a
+  bare `krate-shell` or `go run`, gets an `ErrUnsupported` error that says so and
+  names the fix, and `app.Supports("notify")` is false. The first notification
+  asks for permission; if the user refuses, the call fails with a
+  `permission_denied` error that points at System Settings > Notifications.
+  Actions become notification buttons, a click on the body reports an empty
+  action, and a dismissal reports `closed`. `Close` withdraws a notification by
+  its id. `Icon` and `Timeout` are ignored (macOS shows the app icon and decides
+  how long a banner stays); urgency low delivers quietly and critical asks for
+  time-sensitive delivery, which macOS may downgrade without a special
+  entitlement. `Notify` must not be called from the main thread.
 
 ### Deep links on Linux
 

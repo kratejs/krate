@@ -15,8 +15,14 @@ cd packages/native
 KRATE_NATIVE_GUI=1 CGO_ENABLED=0 go test ./platform/darwin -run . -v -count=1
 ```
 
-Without `KRATE_NATIVE_GUI=1` the three GUI tests skip; the pure-Go unit tests
-always run.
+Without `KRATE_NATIVE_GUI=1` the GUI tests skip; the pure-Go unit tests
+always run. The GUI run includes `ext_gui_test.go`: the tray item and its menu
+(read back from the `NSStatusItem` and `NSMenu`, and driven with
+`performActionForItemAtIndex:`), hotkey register, duplicate and unregister,
+notifications in an unbundled process (the documented error) and in a
+generated `.app` (`TestNotifyBundled` copies the test binary into a bundle
+and runs it; whether the notification is allowed depends on the machine, the
+test only requires that the bundle is recognized and nothing crashes).
 
 The test binary is not an app bundle, so its first window can open behind other
 windows. Click the new icon in the Dock if nothing appears.
@@ -50,6 +56,58 @@ Run a small program that uses `platform.New` with `Debug: true`:
   lock); a link to `/other` works.
 - Dragging the window while a stream is in flight does not stall delivery.
 
+## Tray, global shortcut and notifications (by hand)
+
+CI cannot click the status bar, press a key system-wide or look at the
+notification center. Run these once on a Mac. The simplest way is
+`krate native dev` on an app that uses `tray`, `shortcut` and `notify` (it
+starts the shell from the generated dev bundle `.krate/dev/<name>.app`).
+
+Tray:
+
+1. The icon appears in the menu bar with the tooltip on hover. A black or
+   white single-color PNG follows light and dark mode (switch the appearance in
+   System Settings); a colored PNG keeps its colors. A 36 px PNG is 18 pt high.
+2. With a menu: a left click and a right click both open it, and the page gets
+   a `click` event. Menu items arrive as `menu` events with their id. A check
+   item toggles its checkmark; choosing a radio item moves the checkmark; the
+   disabled item is grayed; the submenu opens; accelerators are shown.
+3. `tray.SetMenu` with no items, then click the icon: `click` arrives without
+   a menu; a right click gives `right-click`; a quick double click gives
+   `double-click`.
+4. `tray.Remove()` removes the icon; quitting the app removes it too.
+
+Global shortcut (try `Cmd+Shift+K`, then `Ctrl+Alt+Space`):
+
+1. Register it, switch to another app and press the keys: the callback runs
+   without any Accessibility prompt.
+2. Register the same combination twice: the second call fails with an error
+   naming the combination. Pick one the system uses (for example `Cmd+Space`
+   with Spotlight on): the call fails or the system wins; note which.
+3. Unregister it and press the keys again: nothing happens. Register again.
+4. `Alt+Shift+K` (only Option and Shift) is expected not to fire on macOS 15.
+
+Notifications:
+
+1. First call from the dev bundle: the permission prompt appears for the
+   `<appId>.dev` app. Allow it; the banner shows the title, body and action
+   buttons (hover or expand the banner).
+2. Click the body: `OnEvent` gets `Action == ""`. Click an action button: it
+   gets that action id. Dismiss with the close button: `Closed == true`.
+3. Send with the same `ID` twice: the second replaces the first. `Close(id)`
+   removes it from the notification center.
+4. Refuse the permission (or turn it off in System Settings > Notifications):
+   `Send` fails with `permission_denied` and the text points at System
+   Settings. Turn it back on and send again: it works without restarting.
+5. Run the shell directly (`.krate/native/bin/krate-shell .krate/native/dev/app`,
+   no bundle): `Send` fails with the "not running from an .app bundle" error
+   and `app.Supports("notify")` is false.
+6. With the app frontmost, a notification still shows a banner.
+
+Memory settings: run an app with `memory: "minimal"` and `Debug` on; stderr
+shows at most one `krate/native: memory: ... skipped` line per lever that this
+macOS does not have, and the app starts either way.
+
 ## If something fails
 
 | Symptom | Likely cause |
@@ -61,4 +119,8 @@ Run a small program that uses `platform.New` with `Debug: true`:
 | Stream arrives in a single read after 200 ms | WebKit buffered `didReceiveData`; check `reads` in the failure message. |
 | Hang in `TestScenario` with a white window | `decideNavigation` did not call the block (check `invokeBlock1`), or the scheme handler was not registered. |
 | `Run` never returns after Cmd+Q | The stop/post-event wakeup in `Quit` is not working (NSPoint struct argument?). |
+| `unrecognized selector` naming a `_set...` selector | A memory lever bypassed its guard; every selector must go through `canSend` in `memory_darwin.go`. |
+| Tray icon invisible | An icon with no PNG and no title has no width (SetTray refuses it); otherwise check the PNG decodes. |
+| Hotkey never fires | The key code table is for an ANSI layout; macOS 15 ignores Option/Shift-only combinations; the handler runs on the main loop, so a blocked main thread delays it. |
+| Notification call hangs about two minutes | The permission prompt was never answered (`notifyAuthTimeout`); answer it. |
 | Crash only on Intel | Struct-by-value argument passing for NSRect (32 bytes, passed in memory on amd64). |

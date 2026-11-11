@@ -96,6 +96,7 @@ func New(opts Options) (*App, error) {
 		windows: map[objc.ID]*Window{},
 		tasks:   map[objc.ID]*taskState{},
 	}
+	memDebug.Store(opts.Debug)
 	var err error
 	withPool(func() { err = a.setup() })
 	if err != nil {
@@ -107,6 +108,9 @@ func New(opts Options) (*App, error) {
 
 func (a *App) setup() error {
 	if err := registerClasses(a); err != nil {
+		return err
+	}
+	if err := registerTrayClass(a); err != nil {
 		return err
 	}
 	a.nsApp = cls("NSApplication").Send(sel("sharedApplication"))

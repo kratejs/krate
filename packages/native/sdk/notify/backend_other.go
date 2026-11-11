@@ -16,6 +16,5 @@ func newDefaultBackend(publish func(caps.NotifyEvent)) (backend, error) {
 
 // Available reports whether notifications can be sent.
 func Available(env *bridge.Env) bool {
-	_, ok := env.App.(caps.Notifier)
-	return ok
+	return platformAvailable(env)
 }
