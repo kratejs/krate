@@ -101,6 +101,24 @@ type Result struct {
 	UIAreas, GoAreas []string
 	// GoSites are the Go imports that put an area in GoAreas.
 	GoSites []Site
+	// PluginOps maps each plugin the code reaches to the ops it uses, sorted.
+	// A plugin the code reaches only as a whole (a namespace import, a dynamic
+	// import) lists every op.
+	PluginOps map[string][]string
+}
+
+// PluginOp is one op of an enabled plugin.
+type PluginOp struct {
+	Name string
+	// Permission is the full permission name ("plugin:<plugin>.<name>"), or ""
+	// for an op that is always allowed.
+	Permission string
+}
+
+// PluginInfo describes an enabled plugin to the analysis.
+type PluginInfo struct {
+	Name string
+	Ops  []PluginOp
 }
 
 // Options tune Analyze.
@@ -109,6 +127,9 @@ type Options struct {
 	// and everything those import are scanned for SDK imports. Empty for a
 	// project without Go host code.
 	GoFiles []string
+	// Plugins are the enabled native plugins: the page code reaches their ops
+	// through imports of "krate/plugin/<name>" and the ids "plugin/<name>.<op>".
+	Plugins []PluginInfo
 }
 
 type collector struct {
@@ -119,21 +140,31 @@ type collector struct {
 	areas    map[string]bool
 	byModule map[string][]Row
 	byID     map[string]Row
+	pluginOp map[string]map[string]bool
 }
 
 // Analyze scans the project.
 func Analyze(root string, cfg *config.Config, p *native.Placement, opts Options) (*Result, error) {
 	c := &collector{
 		root: root, p: p,
-		res:      &Result{Needs: map[string][]Site{}},
+		res:      &Result{Needs: map[string][]Site{}, PluginOps: map[string][]string{}},
 		perms:    map[string]map[string]bool{},
 		areas:    map[string]bool{},
 		byModule: map[string][]Row{},
 		byID:     map[string]Row{},
+		pluginOp: map[string]map[string]bool{},
 	}
 	for _, r := range table {
 		c.byModule[r.Module] = append(c.byModule[r.Module], r)
 		c.byID[r.ID] = r
+	}
+	for _, pl := range opts.Plugins {
+		for _, op := range pl.Ops {
+			r := Row{ID: "plugin/" + pl.Name + "." + op.Name, Permission: op.Permission, Area: pluginArea + pl.Name,
+				Module: pluginSpec + pl.Name, Exports: []string{op.Name}}
+			c.byModule[r.Module] = append(c.byModule[r.Module], r)
+			c.byID[r.ID] = r
+		}
 	}
 	files, err := native.ProjectFiles(root, cfg)
 	if err != nil {
@@ -177,8 +208,19 @@ func Analyze(root string, cfg *config.Config, p *native.Placement, opts Options)
 		c.res.UIAreas = append(c.res.UIAreas, a)
 	}
 	sort.Strings(c.res.UIAreas)
+	for pl, ops := range c.pluginOp {
+		for op := range ops {
+			c.res.PluginOps[pl] = append(c.res.PluginOps[pl], op)
+		}
+		sort.Strings(c.res.PluginOps[pl])
+	}
 	return c.res, nil
 }
+
+const (
+	pluginArea = "plugin:"
+	pluginSpec = "krate/plugin/"
+)
 
 // implied lists the permissions a name grants along with itself.
 var implied = map[string][]string{"fs": {"fs:read"}}
@@ -236,7 +278,15 @@ func (c *collector) rel(path string) string {
 
 // add records that id is reachable from a site.
 func (c *collector) add(r Row, s Site) {
-	c.areas[r.Area] = true
+	if strings.HasPrefix(r.Area, pluginArea) {
+		name := strings.TrimPrefix(r.Area, pluginArea)
+		if c.pluginOp[name] == nil {
+			c.pluginOp[name] = map[string]bool{}
+		}
+		c.pluginOp[name][r.Exports[0]] = true
+	} else {
+		c.areas[r.Area] = true
+	}
 	if r.Permission == "" {
 		return
 	}
@@ -254,6 +304,9 @@ func (c *collector) add(r Row, s Site) {
 var (
 	idLitRe = regexp.MustCompile(`["'` + "`" + `]krate/([a-z]+)\.([A-Za-z]*)`)
 	dynRe   = regexp.MustCompile(`(?:import|require)\s*\(\s*["']@krate/app/([a-z]+)["']\s*\)`)
+	// plugin ids and dynamic imports of a plugin's module.
+	pluginIDRe  = regexp.MustCompile(`["'` + "`" + `]plugin/([a-z0-9-]+)\.([A-Za-z0-9_]*)`)
+	pluginDynRe = regexp.MustCompile(`(?:import|require)\s*\(\s*["']krate/plugin/([a-z0-9-]+)["']\s*\)`)
 )
 
 func (c *collector) scanFile(path, src string) {
@@ -275,13 +328,13 @@ func (c *collector) scanFile(path, src string) {
 				}
 				switch {
 				case d.Namespace != "":
-					c.namespaceUse(mod, d.Namespace, src, site(d.Position, "* as "+d.Namespace+" from @krate/app/"+mod))
+					c.namespaceUse(mod, d.Namespace, src, site(d.Position, "* as "+d.Namespace+" from "+fromText(mod)))
 				default:
 					for _, n := range d.Named {
-						c.useExport(mod, n.Remote, site(d.Position, n.Remote+" from @krate/app/"+mod))
+						c.useExport(mod, n.Remote, site(d.Position, n.Remote+" from "+fromText(mod)))
 					}
 					if d.Default != "" {
-						c.useModule(mod, site(d.Position, "default from @krate/app/"+mod))
+						c.useModule(mod, site(d.Position, "default from "+fromText(mod)))
 					}
 				}
 			case *ast.ExportStmt:
@@ -290,10 +343,10 @@ func (c *collector) scanFile(path, src string) {
 					continue
 				}
 				if d.StarReexport || d.Namespace != "" {
-					c.useModule(mod, site(d.Position, "export * from @krate/app/"+mod))
+					c.useModule(mod, site(d.Position, "export * from "+fromText(mod)))
 				}
 				for _, n := range d.ReexportNamed {
-					c.useExport(mod, n.Local, site(d.Position, n.Local+" from @krate/app/"+mod))
+					c.useExport(mod, n.Local, site(d.Position, n.Local+" from "+fromText(mod)))
 				}
 			}
 		}
@@ -302,6 +355,21 @@ func (c *collector) scanFile(path, src string) {
 		mod := src[m[2]:m[3]]
 		line, col := lineCol(src, m[0])
 		c.useModule(mod, Site{File: rel, Line: line, Col: col, Kind: kind, Symbol: "import(@krate/app/" + mod + ")"})
+	}
+	for _, m := range pluginDynRe.FindAllStringSubmatchIndex(src, -1) {
+		line, col := lineCol(src, m[0])
+		name := src[m[2]:m[3]]
+		c.useModule(pluginSpec+name, Site{File: rel, Line: line, Col: col, Kind: kind, Symbol: "import(" + pluginSpec + name + ")"})
+	}
+	for _, m := range pluginIDRe.FindAllStringSubmatchIndex(src, -1) {
+		name, op := src[m[2]:m[3]], src[m[4]:m[5]]
+		line, col := lineCol(src, m[0])
+		s := Site{File: rel, Line: line, Col: col, Kind: kind, Symbol: "plugin/" + name + "." + op}
+		if r, ok := c.byID["plugin/"+name+"."+op]; ok {
+			c.add(r, s)
+			continue
+		}
+		c.useModule(pluginSpec+name, s)
 	}
 	for _, m := range idLitRe.FindAllStringSubmatchIndex(src, -1) {
 		area, op := src[m[2]:m[3]], src[m[4]:m[5]]
@@ -320,8 +388,18 @@ func (c *collector) scanFile(path, src string) {
 	}
 }
 
+func fromText(mod string) string {
+	if strings.HasPrefix(mod, pluginSpec) {
+		return mod
+	}
+	return "@krate/app/" + mod
+}
+
 func moduleOf(spec string) (string, bool) {
 	spec = strings.Trim(spec, "\"'`")
+	if strings.HasPrefix(spec, pluginSpec) && !strings.Contains(spec[len(pluginSpec):], "/") {
+		return spec, true
+	}
 	if !strings.HasPrefix(spec, appPkg) {
 		return "", false
 	}
@@ -365,7 +443,7 @@ func (c *collector) namespaceUse(mod, ns, src string, s Site) {
 		return
 	}
 	for _, m := range ms {
-		c.useExport(mod, m[1], Site{File: s.File, Line: s.Line, Col: s.Col, Kind: s.Kind, Symbol: ns + "." + m[1] + " from @krate/app/" + mod})
+		c.useExport(mod, m[1], Site{File: s.File, Line: s.Line, Col: s.Col, Kind: s.Kind, Symbol: ns + "." + m[1] + " from " + fromText(mod)})
 	}
 }
 
@@ -405,8 +483,23 @@ func goSDKImports(root string, goFiles []string) ([]Site, error) {
 		}
 	}
 	sort.Strings(args)
+	return goSDKImportsIn(root, args, nil)
+}
+
+// GoSDKImportsIn lists the SDK area imports of the packages named by args
+// (go list patterns relative to dir) and their non-standard dependencies, with
+// go run in dir under env (nil = the process environment). The per-app plugin
+// shell module uses it to find the areas its plugins import.
+func GoSDKImportsIn(dir string, args, env []string) ([]Site, error) {
+	return goSDKImportsIn(dir, args, env)
+}
+
+func goSDKImportsIn(root string, args, env []string) ([]Site, error) {
 	cmd := exec.Command("go", append([]string{"list", "-e", "-deps", "-json=ImportPath,Dir,GoFiles,Imports,Standard,Module"}, args...)...)
 	cmd.Dir = root
+	if env != nil {
+		cmd.Env = env
+	}
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	if err := cmd.Run(); err != nil {
@@ -518,4 +611,22 @@ func (r *Result) Tags(hasHostJS bool) []string {
 		tags = append(tags, "krate_no_hostjs")
 	}
 	return tags
+}
+
+// AddGoSites records Go imports of SDK areas found outside the project's Go
+// host code (the packages of native plugins).
+func (r *Result) AddGoSites(sites []Site) {
+	seen := map[string]bool{}
+	for _, a := range r.GoAreas {
+		seen[a] = true
+	}
+	for _, s := range sites {
+		area := strings.TrimPrefix(s.Symbol, "sdk/")
+		if !seen[area] {
+			seen[area] = true
+			r.GoAreas = append(r.GoAreas, area)
+		}
+		r.GoSites = append(r.GoSites, s)
+	}
+	sort.Strings(r.GoAreas)
 }

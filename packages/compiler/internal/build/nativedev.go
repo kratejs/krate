@@ -388,6 +388,9 @@ type nativeDev struct {
 	deps    NativeChangeClassifier
 	// failed is true while a host build error is on screen.
 	failed bool
+	// restart asks runNativeDevOnce to start over (a plugin's Go code changed:
+	// plugins are linked into the shell, so the shell has to be rebuilt).
+	restart chan struct{}
 }
 
 func runNativeDevOnce(o NativeDevOptions) (bool, error) {
@@ -404,7 +407,7 @@ func runNativeDevOnce(o NativeDevOptions) (bool, error) {
 	b.DevMode = true
 	b.SetContext(ctx)
 	hub := NewDevHub()
-	nd := &nativeDev{b: b, o: o, hub: hub}
+	nd := &nativeDev{b: b, o: o, hub: hub, restart: make(chan struct{}, 1)}
 	nd.outDir = filepath.Join(root, ".krate", "native", "dev")
 	b.DevReload = func(reason string) bool {
 		printf("  %s%s changed; reloading configuration...%s\n", cYellow, reason, cReset)
@@ -432,7 +435,24 @@ func runNativeDevOnce(o NativeDevOptions) (bool, error) {
 	if o.Port > 0 {
 		addr = fmt.Sprintf("127.0.0.1:%d", o.Port)
 	}
-	sh, err := startNativeShell(o.Shell, nd.appDir, o.Browser, addr, o.Stderr)
+	shellPath := o.Shell
+	if names := b.NativePluginNames(); len(names) > 0 {
+		if o.Shell != "" {
+			return false, errors.New("the app uses native plugins, which are linked into a shell built for it; drop --shell and $KRATE_SHELL")
+		}
+		shellPath, err = b.PluginShell(nd.goos, nd.goarch)
+		if err != nil {
+			return false, err
+		}
+		printf("  %sPlugins: %s (the shell is built for them; editing a plugin's Go code restarts native dev)%s\n", cGray, strings.Join(names, ", "), cReset)
+	} else if shellPath == "" {
+		// The config dropped its plugins while native dev was running.
+		shellPath, err = LocateNativeShell(root, "")
+		if err != nil {
+			return false, err
+		}
+	}
+	sh, err := startNativeShell(shellPath, nd.appDir, o.Browser, addr, o.Stderr)
 	if err != nil {
 		return false, err
 	}
@@ -481,6 +501,10 @@ func runNativeDevOnce(o NativeDevOptions) (bool, error) {
 			return true, nil
 		}
 		return false, err
+	case <-nd.restart:
+		cancel()
+		<-errc
+		return true, nil
 	case <-sh.exited:
 		cancel()
 		<-errc
@@ -620,6 +644,14 @@ func (nd *nativeDev) handleChanges(changed []string, hub *DevHub) {
 		}
 	}()
 	b := nd.b
+	if dir := nd.changedPlugin(changed); dir != "" {
+		printf("  %s%s changed; the plugins are linked into the shell, restarting...%s\n", cYellow, b.relTo(dir), cReset)
+		select {
+		case nd.restart <- struct{}{}:
+		default:
+		}
+		return
+	}
 	plan := PlanNativeChanges(nd.deps, changed)
 	if len(plan.UI) == 0 && !plan.GoHost && !plan.HostJS {
 		return
@@ -673,6 +705,24 @@ func (nd *nativeDev) handleChanges(changed []string, hub *DevHub) {
 		// reloading any page (no route matches the marker).
 		hub.Publish(DevEvent{Type: "reload", Routes: []string{"/__krate_clear"}})
 	}
+}
+
+// changedPlugin returns a changed file inside a local plugin that affects the
+// build of the shell (Go sources, go.mod, go.sum and the manifest), or "".
+func (nd *nativeDev) changedPlugin(changed []string) string {
+	dirs := nd.b.pluginDirs()
+	for _, p := range changed {
+		base := filepath.Base(p)
+		if !(strings.HasSuffix(base, ".go") && !strings.HasSuffix(base, "_test.go")) && base != "go.mod" && base != "go.sum" && base != "krate-plugin.json" {
+			continue
+		}
+		for _, d := range dirs {
+			if r, err := filepath.Rel(d, p); err == nil && !strings.HasPrefix(r, "..") {
+				return p
+			}
+		}
+	}
+	return ""
 }
 
 func (nd *nativeDev) captureDeps() {

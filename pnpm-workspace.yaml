@@ -2,6 +2,7 @@ packages:
   - packages/*
   - examples
   - examples/native-tasks
+  - examples/native-plugin
 
 allowBuilds:
   '@krate/core': true

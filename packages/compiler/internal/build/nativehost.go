@@ -32,6 +32,7 @@ func (b *Builder) nativeOutDir() string { return filepath.Join(b.Root, ".krate",
 // bundlers are armed with stub overlays for both. A web build is untouched.
 func (b *Builder) prepareNativeHost() error {
 	b.nativeHost, b.nativeGo, b.nativeOverlays, b.nativeBaked, b.nativeGoFiles = nil, nil, nil, nil, nil
+	b.nativePlugins, b.nativePluginMods = nil, nil
 	if !b.NativeTarget {
 		return nil
 	}
@@ -107,6 +108,10 @@ func (b *Builder) prepareNativeHost() error {
 	}
 	for path, src := range goOverlays {
 		overlays[path] = src
+	}
+
+	if err := b.prepareNativePlugins(p, overlays); err != nil {
+		return err
 	}
 
 	plain, err := b.rewriteBakedCalls(overlays, append(tsCalls, goCalls...))

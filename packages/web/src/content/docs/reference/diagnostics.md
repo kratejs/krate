@@ -824,6 +824,54 @@ The value a build function returned is embedded in the app, so it has to be plai
 
 `//krate:build` functions are evaluated by compiling and running a small generated Go program in the project's Go module, so the Go toolchain has to be installed and the host packages must compile. The output of the Go command is shown.
 
+### KR7250
+
+**Plugin has no krate-plugin.json**
+
+Every entry of `native.plugins` names a directory, an npm package or a Go module that contains a `krate-plugin.json` next to its Go package. The compiler could not find one at the resolved location. Check the path or package name, install the package (npm i), or create the manifest with `krate native plugin init <name>`.
+
+### KR7251
+
+**Invalid plugin manifest**
+
+`krate-plugin.json` must be valid JSON with a `name` (lowercase words joined by hyphens, 2 to 40 characters), a `go` import path, optional `version`, `krate` (the minimum Krate version), `ts`, `permissions` (a list of `{name, description}`) and `ops` (a list of `{name, permission, manual}`). Op names are exported Go identifiers; permission names are lowercase letters, digits and hyphens, and an op's `permission` must be one the manifest declares. The message names the field.
+
+### KR7252
+
+**Duplicate plugin, op or permission**
+
+Plugin names, the ops of one plugin and the permissions of one plugin must each be unique, because an op is the host id `plugin/<name>.<op>` and a permission is `plugin:<name>.<permission>`. Rename one of the two, or remove the plugin that is listed twice in `native.plugins`.
+
+### KR7253
+
+**Plugin Go import path does not resolve**
+
+The `go` field of `krate-plugin.json` must be the import path of the plugin's Go package: the module path from the nearest `go.mod` plus the package's directory inside that module. The plugin also has to live in a Go module (its own `go.mod`, or the app's). For a `go:` plugin the module has to be downloadable (`go mod download`); give the version after an `@` or require it in the app's go.mod.
+
+### KR7254
+
+**Plugin needs a newer Krate**
+
+The plugin's `krate` field names the oldest Krate version it works with, and this compiler is older. Upgrade Krate (`npm i @krate/core@latest`) or use an older release of the plugin.
+
+### KR7255
+
+**Unknown or disallowed plugin permission**
+
+A plugin permission is written `plugin:<plugin>.<permission>` and has to be declared by an enabled plugin. It appears in `native.permissions` or `native.window.permissions` without such a plugin or declaration. A build derives the plugin permissions the code needs; list them in `native.permissions` only to restrict the app.
+
+### KR7256
+
+**Could not build the shell for the app's plugins**
+
+An app with native plugins runs under a shell that is built for it with the Go toolchain, because plugins are Go code linked into the shell process. The Go command failed or is missing. The output of `go build` is shown; the plugin's package has to compile for the target with CGO_ENABLED=0, and its module has to be resolvable (`go mod download`).
+
+### KR7257
+
+**Plugin op cannot be bound**
+
+Each op in `krate-plugin.json` (not marked `manual`) must be an exported function or an exported `*krate.Signal[T]` variable of the plugin's Go package, with a signature the host-call bindings support (see Go host code). The Go error is shown with the position in the plugin.
+
 ## KR8xxx: islands, compiled packages and general React compatibility
 
 ### KR8001

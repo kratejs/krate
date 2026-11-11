@@ -36,25 +36,78 @@ type listedPkg struct {
 	}
 }
 
+// listSpec says how one package directory is listed: in which directory,
+// with which package pattern (default "./<dir relative to the directory>") and
+// environment (default the process's).
+type listSpec struct {
+	root    string
+	pattern string
+	env     []string
+}
+
+// goListIn runs goList once per listing directory and merges the results.
+func goListIn(specs map[string]listSpec, dirs []string) (map[string]*listedPkg, map[string]string, string, error) {
+	type group struct {
+		env  []string
+		pats []string
+	}
+	groups := map[string]*group{}
+	var order []string
+	for _, d := range dirs {
+		sp := specs[filepath.Clean(d)]
+		pat := sp.pattern
+		if pat == "" {
+			rel, err := filepath.Rel(sp.root, d)
+			if err != nil {
+				return nil, nil, "", err
+			}
+			pat = "./" + filepath.ToSlash(rel)
+		}
+		g, ok := groups[sp.root]
+		if !ok {
+			g = &group{env: sp.env}
+			groups[sp.root] = g
+			order = append(order, sp.root)
+		}
+		g.pats = append(g.pats, pat)
+	}
+	pkgs := map[string]*listedPkg{}
+	byDir := map[string]string{}
+	var msgs []string
+	for _, r := range order {
+		p, bd, msg, err := goList(r, groups[r].pats, groups[r].env)
+		if err != nil {
+			return nil, nil, "", err
+		}
+		for k, v := range p {
+			pkgs[k] = v
+		}
+		for k, v := range bd {
+			byDir[k] = v
+		}
+		if msg != "" {
+			msgs = append(msgs, msg)
+		}
+	}
+	return pkgs, byDir, strings.Join(msgs, "\n"), nil
+}
+
 // goList runs `go list -export -deps` in root for the package directories and
 // returns every listed package by import path, plus the import path each
 // directory resolved to.
-func goList(root string, dirs []string) (map[string]*listedPkg, map[string]string, string, error) {
+func goList(root string, pats []string, env []string) (map[string]*listedPkg, map[string]string, string, error) {
 	goBin, err := exec.LookPath("go")
 	if err != nil {
 		return nil, nil, "", errors.New("the go command was not found on PATH; Go host code needs the Go toolchain")
 	}
 	args := []string{"list", "-e", "-export", "-deps",
 		"-json=ImportPath,Dir,Name,Export,GoFiles,CgoFiles,ImportMap,Module,Error"}
-	for _, d := range dirs {
-		rel, err := filepath.Rel(root, d)
-		if err != nil {
-			return nil, nil, "", err
-		}
-		args = append(args, "./"+filepath.ToSlash(rel))
-	}
+	args = append(args, pats...)
 	cmd := exec.Command(goBin, args...)
 	cmd.Dir = root
+	if env != nil {
+		cmd.Env = env
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	runErr := cmd.Run()
