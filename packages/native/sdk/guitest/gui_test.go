@@ -226,6 +226,11 @@ func linuxRequestClose(t *testing.T, id string) {
 	}
 }
 
+// The X CLIPBOARD selection belongs to the display, not to the process. Run
+// alongside another GUI test process on the same display (go test without
+// -p 1, or two packages at once) another clipboard test can take the selection
+// between the write and the read here, so this test needs the display to
+// itself. CI and the documented commands use -p 1.
 func TestClipboardThroughTheSDK(t *testing.T) {
 	need(t)
 	if err := clipboard.WriteText("sdk text é"); err != nil {

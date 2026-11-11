@@ -52,8 +52,18 @@ fetch("/ping?name=closer").then(function(){setTimeout(function(){window.close()}
 	})
 }
 
+// pingBacklog holds pings that arrived while waiting for another one, so the
+// order in which two views load does not matter.
+var pingBacklog []viewPing
+
 func waitPing(t *testing.T, name string) viewPing {
 	t.Helper()
+	for i, p := range pingBacklog {
+		if p.name == name {
+			pingBacklog = append(pingBacklog[:i], pingBacklog[i+1:]...)
+			return p
+		}
+	}
 	deadline := time.After(20 * time.Second)
 	for {
 		select {
@@ -61,13 +71,15 @@ func waitPing(t *testing.T, name string) viewPing {
 			if p.name == name {
 				return p
 			}
+			pingBacklog = append(pingBacklog, p)
 		case <-deadline:
-			t.Fatalf("timed out waiting for the ping of %q", name)
+			t.Fatalf("timed out waiting for the ping of %q (backlog %v)", name, pingBacklog)
 		}
 	}
 }
 
 func drainPings() {
+	pingBacklog = nil
 	for {
 		select {
 		case <-viewPings:
