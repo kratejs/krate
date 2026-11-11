@@ -21,6 +21,8 @@ export function hostSignal<T>(initial: T): HostSignal<T> {
       };
     },
   };
-  (globalThis as any).__krateHost?.registerSignal?.(sig);
+  // The compiler-generated host entry finds signals by this brand and
+  // registers them under their export id (registerSignal(id, sig)).
+  Object.defineProperty(sig, "__krateHostSignal", { value: true });
   return sig;
 }

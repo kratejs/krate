@@ -90,15 +90,9 @@ describe("hostSignal (host side)", () => {
     expect(seen).toEqual([2, 7]);
   });
 
-  it("registers with globalThis.__krateHost when present", () => {
-    const reg: unknown[] = [];
-    (globalThis as any).__krateHost = { registerSignal: (s: unknown) => reg.push(s) };
-    try {
-      const s = hostSignal("x");
-      expect(reg).toEqual([s]);
-    } finally {
-      delete (globalThis as any).__krateHost;
-    }
-    expect(() => hostSignal(1)).not.toThrow();
+  it("is branded so the host entry can register it", () => {
+    const s = hostSignal("x");
+    expect((s as any).__krateHostSignal).toBe(true);
+    expect(Object.keys(s)).not.toContain("__krateHostSignal");
   });
 });

@@ -123,6 +123,11 @@ type Bundler struct {
 	// tsOpts are the tsconfig options used when stripping TypeScript.
 	tsOpts tsstrip.Options
 
+	// overlays replaces the source of the modules at these absolute paths
+	// (native builds: host module stubs and UI modules with their inline host
+	// functions split out). Nil for a web build.
+	overlays map[string]string
+
 	// dev selects development export conditions.
 	dev bool
 
@@ -231,6 +236,20 @@ func (b *Bundler) SetVirtualModules(mods map[string]string) {
 	}
 	for spec, path := range mods {
 		b.virtualModules[spec] = path
+	}
+}
+
+// SetSourceOverlays makes the bundler read the source of the module at an
+// absolute path from src instead of from disk. Overlaid modules bypass the
+// parse cache. A nil map (the default) leaves the bundler unchanged.
+func (b *Bundler) SetSourceOverlays(src map[string]string) {
+	b.overlays = nil
+	if len(src) == 0 {
+		return
+	}
+	b.overlays = make(map[string]string, len(src))
+	for p, s := range src {
+		b.overlays[filepath.Clean(p)] = s
 	}
 }
 
@@ -737,7 +756,8 @@ func (b *Bundler) resolveTSXModule(path, abs string, mtime time.Time, size int64
 	// (plugins may replace it; universal transforms run in place), so sharing an
 	// entry program would leak mutations across builds. Shared imports are the
 	// hot cost and are cached.
-	cacheable := statOK && !isEntry
+	overlay, overlaid := b.overlays[abs]
+	cacheable := statOK && !isEntry && !overlaid
 	if cacheable {
 		if e, ok := b.cache.getProgram(abs, mtime, size); ok {
 			mod := &Module{Path: path, Program: e.program, IsEntry: isEntry, SourceCode: e.source, ComponentClass: e.compClass, Diagnostics: e.diags}
@@ -750,11 +770,16 @@ func (b *Bundler) resolveTSXModule(path, abs string, mtime time.Time, size int64
 		}
 	}
 
-	data, err := os.ReadFile(abs)
-	if err != nil {
-		return fmt.Errorf("reading %s: %w", path, err)
+	var src string
+	if overlaid {
+		src = overlay
+	} else {
+		data, err := os.ReadFile(abs)
+		if err != nil {
+			return fmt.Errorf("reading %s: %w", path, err)
+		}
+		src = string(data)
 	}
-	src := string(data)
 	// TypeScript is stripped by esbuild first; positions in the AST and in
 	// diagnostics refer to the original src. SourceCode stays the original so
 	// comment directives (`// @server`) are still seen.

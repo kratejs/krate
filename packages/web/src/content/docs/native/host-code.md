@@ -127,6 +127,78 @@ code, and it does not follow names through `eval` or dynamic access. The
 decorator form applies to top-level declarations; the body-string form also works
 on functions nested in a component.
 
+## Splitting host code from the UI
+
+In a native build the compiler splits TypeScript host code from the UI and
+generates the calls between them. You write plain imports and call host
+functions like async functions:
+
+```tsx
+import { syncNow, count } from "../lib/sync.host";   // a host module
+```
+
+What happens:
+
+- **Host modules.** The UI bundle gets a stub module in place of each host
+  module it imports: `export const syncNow = (...a) => call("src/lib/sync.host.syncNow", a)`,
+  `stream(...)` for generator functions and `signal(...)` for exports made by
+  `hostSignal()` from `@krate/app/host`. The real module goes only into the host
+  bundle.
+- **Inline functions.** An `@host` function inside a page is cut out of the
+  page and replaced by a stub (`const addTask = (...a) => __krateCall("src/pages/index#addTask", a)`).
+  Imports that only the function used are removed from the page, so
+  `@krate/app/db` used by a host function never ships to the webview. The
+  function moves, with the imports it uses, into the host bundle. Line numbers in
+  the page do not change.
+- **Host bundle.** `.krate/native/host/host.js` is one ES2020 script (an IIFE)
+  with an external source map `host.js.map` (paths relative to the project root,
+  with sources). It registers each function with `globalThis.__krateHost`:
+  `register(id, fn, "func" | "stream")` and `registerSignal(id, signal)`.
+- **Manifest.** `.krate/native/host/manifest.json` lists every registered id with
+  its kind and `file`/`line`, and the imports left external (`node:*` and bare
+  Node built-ins).
+- **Types.** For each host module the UI imports, `.krate/native/types/<module id>.d.ts`
+  re-declares its exports with async types (`Promise<Awaited<R>>` for functions,
+  `AsyncIterable<T>` for generators) using `typeof import(...)`, so no type
+  checker is needed. Inline functions have no generated types: the original
+  declaration types the stub but still describes a synchronous result.
+
+Ids are `<module id>.<export>` (the module id is the path relative to the project
+root without its extension, such as `src/lib/sync.host`) and
+`<module id>#<function>` for inline functions. **Only host code the UI imports is
+callable.** A host module imported only by another host module is bundled into
+the host but not registered, and an export the UI does not import is not
+registered either (`import * as`, `export *` and dynamic imports register every
+function export).
+
+Whether an export is a function, a stream or a signal is decided from the
+declaration when possible (`async function*` is a stream; a call of `hostSignal`
+imported from `@krate/app/host` is a signal). A re-export or a value of unknown
+origin is checked when the host starts, and its UI stub is a function.
+
+### Data across the boundary (KR7190)
+
+Arguments and results cross as data. A parameter with an explicit annotation that
+is a function type, a class declared in the project, or a DOM type (`HTMLElement`,
+`Node`, `Event` and friends) fails the build and names the parameter. The check
+only reads annotations and stays silent when unsure; the runtime codec still
+rejects functions and class instances at call time.
+
+### Other errors
+
+| Code | What |
+|------|------|
+| KR7191 | An inline host function cannot be split: an anonymous default export, an expression-bodied arrow, or two functions with one name in a module |
+| KR7192 | The host bundle failed (unresolved import, syntax the script bundle cannot express) |
+| KR7193 | Warning: host code uses an API the embedded QuickJS runtime lacks. Use a Go host function or `native.host.islands` |
+| KR7195 | The UI imports a name the host module does not export |
+| KR7196 | The UI imports a host export that is a plain value, not a function or `hostSignal()` |
+
+An inline host function can only use its parameters, its locals, the imports it
+names, other host functions in the module and globals. A reference to a
+non-host declaration at module level of the page is not checked and fails when the
+function runs.
+
 ## Native target restrictions
 
 A native build has no server. These are errors in `krate native check` and, once
