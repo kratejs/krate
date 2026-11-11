@@ -35,6 +35,11 @@ type Config struct {
 	Debug bool
 	// KeepAlive stops the app from quitting when its last window closes.
 	KeepAlive bool
+	// AppName is the display name shown on toast notifications (the product
+	// name); empty means AppID.
+	AppName string
+	// IconPath is an optional PNG or ICO file used as the default toast icon.
+	IconPath string
 	// Memory is the memory profile from app.json "memory": "balanced"
 	// (default), "minimal" or "performance". UNTESTED, see memory.go.
 	Memory string
@@ -61,6 +66,15 @@ type App struct {
 	mainTID uint32
 	msgWnd  uintptr
 	hInst   uintptr
+
+	// utilWnd is a hidden top-level window (not message-only: those do not
+	// receive the TaskbarCreated broadcast) that owns the tray icon and the
+	// global hotkeys.
+	utilWnd    uintptr
+	taskbarMsg uint32
+	tray       *trayState
+	hot        *hotkeyTable
+	toast      *toastState
 
 	// Main-thread state.
 	env         unsafe.Pointer // ICoreWebView2Environment
@@ -138,6 +152,18 @@ func New(cfg Config) (*App, error) {
 		return nil, fmt.Errorf("windows: creating message window: %v", e)
 	}
 	a.msgWnd = hwnd
+
+	a.tray, a.hot, a.toast = &trayState{}, newHotkeyTable(), &toastState{}
+	uw, _, e := pCreateWindowExW.Call(0,
+		uintptr(unsafe.Pointer(wstr(msgClassName))), 0, wsPopup, 0, 0, 0, 0,
+		0, 0, a.hInst, 0)
+	if uw == 0 {
+		return nil, fmt.Errorf("windows: creating the utility window: %v", e)
+	}
+	a.utilWnd = uw
+	tm, _, _ := pRegisterWindowMessageW.Call(uintptr(unsafe.Pointer(wstr("TaskbarCreated"))))
+	a.taskbarMsg = uint32(tm)
+	setProcessAUMID(cfg.AppID)
 
 	a.hNavigation = newHandler(iidNavigationStartingHandler, false, a.onNavigationStarting)
 	a.hFrameNav = newHandler(iidNavigationStartingHandler, false, a.onFrameNavigationStarting)
@@ -234,7 +260,20 @@ func (a *App) Run(onReady func()) error {
 		w.markNoQuit()
 		pDestroyWindow.Call(h)
 	}
+	a.shutdownExt()
 	return a.runErr
+}
+
+// shutdownExt removes the tray icon, releases the hotkeys and toast objects
+// and destroys the utility window. Main thread, after the loop ended.
+func (a *App) shutdownExt() {
+	a.removeTray()
+	a.releaseHotkeys()
+	a.releaseToasts()
+	if a.utilWnd != 0 {
+		pDestroyWindow.Call(a.utilWnd)
+		a.utilWnd = 0
+	}
 }
 
 // pumpOnce waits up to ms milliseconds for input and dispatches pending
@@ -408,6 +447,21 @@ func wndProc(hwnd, message, wParam, lParam uintptr) (ret uintptr) {
 	if hwnd == a.msgWnd {
 		if message == wmDispatch {
 			a.q.drain()
+			return 0
+		}
+		r, _, _ := pDefWindowProcW.Call(hwnd, message, wParam, lParam)
+		return r
+	}
+	if hwnd == a.utilWnd {
+		switch {
+		case message == wmTrayCallback:
+			a.trayMessage(wParam, lParam)
+			return 0
+		case message == wmHotkey:
+			a.hotkeyMessage(int32(wParam))
+			return 0
+		case a.taskbarMsg != 0 && message == uintptr(a.taskbarMsg):
+			a.trayReadd()
 			return 0
 		}
 		r, _, _ := pDefWindowProcW.Call(hwnd, message, wParam, lParam)

@@ -67,6 +67,10 @@ func TestVtableLayout(t *testing.T) {
 		"ICoreWebView2ExecuteScriptCompletedHandler":                 4,
 		"ICoreWebView2_19":                                           121,
 		"IStream":                                                    14,
+		"IToastNotificationManagerStatics":                           9,
+		"IToastNotifier":                                             12,
+		"IToastNotification":                                         15,
+		"IXmlDocumentIO":                                             9,
 	}
 	for name, n := range counts {
 		ms := ifaceMethods[name]
@@ -82,6 +86,15 @@ func TestVtableLayout(t *testing.T) {
 		name      string
 	}{
 		{wvNavigate, 5, "Navigate"},
+		{notifierShow, 6, "IToastNotifier.Show"},
+		{notifierGetSetting, 8, "IToastNotifier.get_Setting"},
+		{toastMgrCreateNotifierID, 7, "CreateToastNotifierWithId"},
+		{toastFactoryCreate, 6, "CreateToastNotification"},
+		{toastAddDismissed, 9, "add_Dismissed"},
+		{toastAddActivated, 11, "add_Activated"},
+		{toastAddFailed, 13, "add_Failed"},
+		{xmlIOLoadXML, 6, "LoadXml"},
+		{activationFactoryActivate, 6, "ActivateInstance"},
 		{wvAddNavigationStarting, 7, "add_NavigationStarting"},
 		{wvExecuteScript, 29, "ExecuteScript"},
 		{wvAddScriptOnDocCreated, 27, "AddScriptToExecuteOnDocumentCreated"},

@@ -8,6 +8,11 @@ import (
 // Memory tuning for the WebView2 runtime (pure decisions; the COM plumbing is
 // in memory_windows.go and envoptions_windows.go).
 //
+// Every switch and feature name below was checked against the Chromium
+// sources (content_switches.cc, gpu_switches.cc, blink common switches.cc,
+// content_features.cc) and Microsoft's WebView2 browser flag list; see
+// TestBrowserArgumentNames. Whether the runtime honors each one is unmeasured.
+//
 // UNTESTED: none of this has run on Windows. It is compile-checked only and
 // the argument lists below are reasoned from Chromium and WebView2 documentation, not
 // measured. The CI "native-memory" step is expected to produce the first
@@ -72,8 +77,9 @@ func disabledFeatures(profile string) []string {
 		// an app shell navigates rarely.
 		"BackForwardCache",
 		// Edge-specific out-of-process UI surfaces for web content and
-		// the PDF viewer. Not documented by Microsoft; included because
-		// Tauri/wry ships the same two names in its default arguments.
+		// the PDF viewer. Not in Microsoft's flag list and not in
+		// Chromium; included because Tauri/wry ships the same two names
+		// in its default arguments. An unknown feature name is ignored.
 		// The memory effect is unmeasured. msSmartScreenProtection, which
 		// wry also disables, is a security feature and is NOT disabled
 		// here.
@@ -120,9 +126,10 @@ func browserArguments(profile string, features map[string]bool) []string {
 			"--disable-gpu-shader-disk-cache")
 	}
 	if featureOff(features, "webgl") {
-		// Chromium switch; WebGL contexts are a large GPU-process cost.
-		// Canvas 2D is unaffected.
-		args = append(args, "--disable-webgl")
+		// Chromium switches (content/public/common/content_switches.cc:
+		// kDisableWebGL, kDisableWebGL2); WebGL contexts are a large
+		// GPU-process cost. Canvas 2D is unaffected.
+		args = append(args, "--disable-webgl", "--disable-webgl2")
 	}
 	// media, webaudio, webrtc and spellcheck have no safe Chromium switch.
 	// webrtc is handled through permission denial (denyMediaCapture);

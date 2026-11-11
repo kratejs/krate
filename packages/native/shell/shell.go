@@ -442,6 +442,7 @@ func (a *app) runNative() error {
 	man := a.man
 	platApp, err := platform.New(platform.Options{
 		AppID:   man.AppID,
+		AppName: man.ProductName,
 		Handler: a.handler,
 		Debug:   a.opts.Dev || man.Debug,
 		Memory:  platformMemory(man),

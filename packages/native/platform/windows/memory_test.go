@@ -32,11 +32,11 @@ func TestBrowserArguments(t *testing.T) {
 		{"performance ignores features", "performance", map[string]bool{}, nil},
 		{"default is balanced", "", nil, base},
 		{"unknown is balanced", "weird", nil, base},
-		{"balanced, nothing detected", "balanced", map[string]bool{}, append(append([]string{}, base...), "--disable-webgl")},
+		{"balanced, nothing detected", "balanced", map[string]bool{}, append(append([]string{}, base...), "--disable-webgl", "--disable-webgl2")},
 		{"balanced, everything used", "balanced", used, base},
 		{"balanced, webgl only", "balanced", map[string]bool{"webgl": true}, base},
 		{"minimal, unknown features", "minimal", nil, minimal},
-		{"minimal, nothing detected", "minimal", map[string]bool{}, append(append([]string{}, minimal...), "--disable-webgl")},
+		{"minimal, nothing detected", "minimal", map[string]bool{}, append(append([]string{}, minimal...), "--disable-webgl", "--disable-webgl2")},
 		{"minimal, everything used", "minimal", used, minimal},
 	}
 	for _, c := range cases {
@@ -46,6 +46,56 @@ func TestBrowserArguments(t *testing.T) {
 		}
 		if s := browserArgumentString(c.profile, c.features); s != strings.Join(c.want, " ") {
 			t.Errorf("%s: string %q", c.name, s)
+		}
+	}
+}
+
+// TestBrowserArgumentNames lists every switch and feature the builder can
+// emit with where its name was checked. Adding an argument means adding it
+// here with a source, which forces the check.
+func TestBrowserArgumentNames(t *testing.T) {
+	switches := map[string]string{
+		"--renderer-process-limit":        "content/public/common/content_switches.cc kRendererProcessLimit",
+		"--disable-features":              "base switches (kDisableFeatures); used in Microsoft's WebView2 docs",
+		"--js-flags":                      "third_party/blink/common/switches.cc kJavaScriptFlags",
+		"--disable-gpu-shader-disk-cache": "gpu/config/gpu_switches.cc kDisableGpuShaderDiskCache",
+		"--disable-webgl":                 "content/public/common/content_switches.cc kDisableWebGL",
+		"--disable-webgl2":                "content/public/common/content_switches.cc kDisableWebGL2",
+	}
+	features := map[string]string{
+		"SpareRendererForSitePerProcess": "content_features.cc; listed in Microsoft's WebView2 flag list",
+		"BackForwardCache":               "content_features.cc kBackForwardCache",
+		"msWebOOUI":                      "Edge feature, used by wry; not independently documented",
+		"msPdfOOUI":                      "Edge feature, used by wry; not independently documented",
+	}
+	seen := map[string]bool{}
+	for _, p := range []string{"balanced", "minimal", "performance", ""} {
+		for _, f := range []map[string]bool{nil, {}, {"webgl": true}} {
+			for _, a := range browserArguments(p, f) {
+				name, val, _ := strings.Cut(a, "=")
+				if _, ok := switches[name]; !ok {
+					t.Errorf("unlisted switch %q", a)
+				}
+				seen[name] = true
+				if name == "--disable-features" {
+					for _, ft := range strings.Split(val, ",") {
+						if _, ok := features[ft]; !ok {
+							t.Errorf("unlisted feature %q", ft)
+						}
+						seen[ft] = true
+					}
+				}
+			}
+		}
+	}
+	for n := range switches {
+		if !seen[n] {
+			t.Errorf("switch %s is listed but never emitted", n)
+		}
+	}
+	for n := range features {
+		if !seen[n] {
+			t.Errorf("feature %s is listed but never emitted", n)
 		}
 	}
 }

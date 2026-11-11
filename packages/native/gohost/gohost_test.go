@@ -562,3 +562,81 @@ func TestRunPanicStacksOnlyInDev(t *testing.T) {
 		cleanup()
 	}
 }
+
+// A Go child can run on the tcp transport too (the shell uses it for
+// JavaScript children on Windows); restart keeps working.
+func TestChildTCPTransport(t *testing.T) {
+	b1, b2 := binaries(t)
+	logs := &logSink{}
+	child := gohost.NewChild(gohost.ChildOptions{Logf: logs.logf, Transport: "tcp"})
+	if err := child.Start(context.Background(), b1, []string{"KRATE_TEST=1"}); err != nil {
+		t.Fatal(err)
+	}
+	defer child.Stop()
+	ts := frontend(t, child)
+	if v := version(t, ts); v != "v1" {
+		t.Fatalf("version = %q", v)
+	}
+	if err := child.Restart(b2); err != nil {
+		t.Fatal(err)
+	}
+	if v := version(t, ts); v != "v2" {
+		t.Fatalf("after restart version = %q", v)
+	}
+}
+
+// Run on a tcp endpoint announces its port on the ready line and refuses
+// requests without the token.
+func TestRunTCPToken(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var rmu sync.Mutex
+	var ready bytes.Buffer
+	done := make(chan error, 1)
+	go func() {
+		done <- gohost.Run(ctx, nil, gohost.Config{Socket: "tcp:127.0.0.1:0", Token: "s3cret", Ready: lockedWriter{&rmu, &ready}})
+	}()
+	var addr string
+	eventually(t, func() bool {
+		rmu.Lock()
+		defer rmu.Unlock()
+		line := strings.TrimSpace(ready.String())
+		if a, ok := strings.CutPrefix(line, "ready tcp:"); ok {
+			addr = a
+			return true
+		}
+		return false
+	})
+	get := func(token string) int {
+		req, _ := http.NewRequest(http.MethodGet, "http://"+addr+"/__krate/nothing", nil)
+		if token != "" {
+			req.Header.Set("X-Krate-Token", token)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	if c := get(""); c != 401 {
+		t.Errorf("no token: %d", c)
+	}
+	if c := get("wrong"); c != 401 {
+		t.Errorf("wrong token: %d", c)
+	}
+	if c := get("s3cret"); c == 401 {
+		t.Errorf("right token refused")
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Errorf("Run: %v", err)
+	}
+}
+
+func TestRunTCPNeedsToken(t *testing.T) {
+	err := gohost.Run(context.Background(), nil, gohost.Config{Socket: "tcp:127.0.0.1:0"})
+	if err == nil || !strings.Contains(err.Error(), "KRATE_GOHOST_TOKEN") {
+		t.Errorf("err = %v", err)
+	}
+}

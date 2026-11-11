@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/kratejs/krate/packages/native/internal/gohosttest"
+	"github.com/kratejs/krate/packages/native/internal/hosttransport"
 	"github.com/kratejs/krate/packages/native/krate"
 	"github.com/kratejs/krate/packages/native/scheme"
 	"github.com/kratejs/krate/packages/native/wire"
@@ -15,7 +16,7 @@ import (
 
 // serveParent serves a registry like the shell's private SDK socket does and
 // returns the value for KRATE_GOHOST_PARENT.
-func serveParent(t *testing.T) string {
+func serveParent(t *testing.T, r rt) string {
 	t.Helper()
 	dir, cleanup, err := gohosttest.TempDir("parent-")
 	if err != nil {
@@ -48,19 +49,31 @@ func serveParent(t *testing.T) string {
 		}
 		return nil
 	})
-	ln, err := net.Listen("unix", filepath.Join(dir, "sdk.sock"))
-	if err != nil {
-		t.Skipf("unix sockets: %v", err)
+	var h http.Handler = scheme.New(scheme.Options{Registry: reg})
+	var ln net.Listener
+	var ep hosttransport.Endpoint
+	if r.transport == "tcp" {
+		ln, ep, err = hosttransport.ListenTCP()
+		if err != nil {
+			t.Fatal(err)
+		}
+		h = hosttransport.Guard(ep, h)
+	} else {
+		ep = hosttransport.Endpoint{Network: hosttransport.Unix, Addr: filepath.Join(dir, "sdk.sock")}
+		ln, err = net.Listen("unix", ep.Addr)
+		if err != nil {
+			t.Skipf("unix sockets: %v", err)
+		}
 	}
-	srv := &http.Server{Handler: scheme.New(scheme.Options{Registry: reg})}
+	srv := &http.Server{Handler: h}
 	go srv.Serve(ln)
 	t.Cleanup(func() { srv.Close() })
-	return "unix:" + filepath.Join(dir, "sdk.sock")
+	return ep.String()
 }
 
 func TestHostCallForwardsToParent(t *testing.T) {
-	addr := serveParent(t)
 	each(t, func(t *testing.T, r rt) {
+		addr := serveParent(t, r)
 		f := setupEnv(t, r, func(src string) string {
 			return strings.Replace(src, "console.log(\"version \"", `h.register("t.ViaSDK", (x) => h.call("krate/p.echo", [x]));
 h.register("t.ViaDeny", () => h.call("krate/p.deny", []));

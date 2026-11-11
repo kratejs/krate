@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -16,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kratejs/krate/packages/native/internal/hosttransport"
 	"github.com/kratejs/krate/packages/native/scheme"
 )
 
@@ -52,6 +52,11 @@ type ChildOptions struct {
 	// the first line. A JavaScript host child needs it: the host code may log
 	// while it loads, before the runtime can report that it is listening.
 	ReadyAnyLine bool
+	// Transport is "unix" (default) or "tcp". A tcp child listens on a
+	// loopback port it chooses and announces on its ready line; every request
+	// carries a random token. JavaScript host children use it on Windows,
+	// where Node, Bun and Deno cannot use AF_UNIX (see TransportFor).
+	Transport string
 }
 
 // Child manages one Go host child process at a time.
@@ -72,7 +77,7 @@ type Child struct {
 type run struct {
 	cmd      *exec.Cmd
 	stdin    io.WriteCloser
-	socket   string
+	socket   string // unix socket path; empty for tcp
 	client   *http.Client
 	tr       *http.Transport
 	exited   chan struct{} // closed when the process has been reaped
@@ -224,19 +229,33 @@ func (c *Child) socketDir() (string, error) {
 }
 
 func (c *Child) startLocked(ctx context.Context) error {
-	dir, err := c.socketDir()
-	if err != nil {
-		return err
-	}
-	c.seq++
-	socket := filepath.Join(dir, fmt.Sprintf("g%03d.sock", c.seq%1000))
-	if len(socket) > maxSocketPath {
-		return fmt.Errorf("gohost: socket path %q is too long", socket)
+	tcp := c.o.Transport == hosttransport.TCP
+	var socket, listen, token string
+	if tcp {
+		var err error
+		if token, err = hosttransport.NewToken(); err != nil {
+			return err
+		}
+		listen = "tcp:127.0.0.1:0"
+	} else {
+		dir, err := c.socketDir()
+		if err != nil {
+			return err
+		}
+		c.seq++
+		socket = filepath.Join(dir, fmt.Sprintf("g%03d.sock", c.seq%1000))
+		if len(socket) > maxSocketPath {
+			return fmt.Errorf("gohost: socket path %q is too long", socket)
+		}
+		listen = socket
 	}
 
 	cmd := exec.Command(c.binary, c.o.Args...)
 	cmd.Dir = c.o.Dir
-	cmd.Env = append(append(os.Environ(), c.env...), SocketEnv+"="+socket)
+	cmd.Env = append(append(os.Environ(), c.env...), SocketEnv+"="+listen)
+	if tcp {
+		cmd.Env = append(cmd.Env, TokenEnv+"="+token)
+	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return err
@@ -255,6 +274,7 @@ func (c *Child) startLocked(ctx context.Context) error {
 	r := &run{cmd: cmd, stdin: stdin, socket: socket, exited: make(chan struct{})}
 	ready := make(chan struct{})
 	var readyOnce sync.Once
+	var readyAddr string
 	pump := func(rd io.Reader, isOut bool) {
 		defer r.ioDone.Done()
 		sc := bufio.NewScanner(rd)
@@ -262,10 +282,12 @@ func (c *Child) startLocked(ctx context.Context) error {
 		first := isOut
 		for sc.Scan() {
 			line := strings.TrimRight(sc.Text(), "\r")
-			if (first || (isOut && c.o.ReadyAnyLine)) && line == ReadyLine {
-				first = false
-				readyOnce.Do(func() { close(ready) })
-				continue
+			if first || (isOut && c.o.ReadyAnyLine) {
+				if addr, ok := hosttransport.ReadyAddr(line); ok && (addr != "") == tcp {
+					first = false
+					readyOnce.Do(func() { readyAddr = addr; close(ready) })
+					continue
+				}
 			}
 			first = false
 			r.lastLine.add(line)
@@ -295,15 +317,13 @@ func (c *Child) startLocked(ctx context.Context) error {
 		return ctx.Err()
 	}
 
-	r.tr = &http.Transport{
-		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			var d net.Dialer
-			return d.DialContext(ctx, "unix", socket)
-		},
-		MaxIdleConnsPerHost: 8,
-		IdleConnTimeout:     30 * time.Second,
+	ep := hosttransport.Endpoint{Network: hosttransport.Unix, Addr: socket}
+	if tcp {
+		ep = hosttransport.Endpoint{Network: hosttransport.TCP, Addr: readyAddr, Token: token}
 	}
-	r.client = &http.Client{Transport: r.tr}
+	rt, tr := hosttransport.NewTransport(ep)
+	r.tr = tr
+	r.client = &http.Client{Transport: rt}
 	c.run = r
 	c.remote.SetTarget(r.client, Base)
 	return nil
@@ -339,7 +359,9 @@ func (c *Child) stopRunLocked() {
 	if r.tr != nil {
 		r.tr.CloseIdleConnections()
 	}
-	_ = os.Remove(r.socket)
+	if r.socket != "" {
+		_ = os.Remove(r.socket)
+	}
 }
 
 // lastLines keeps the last few output lines for error messages.

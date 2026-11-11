@@ -259,15 +259,24 @@ arguments for one user data folder: a second copy of the app started with a
 different `memory` profile while the first runs falls back to starting without
 the arguments.
 
+Every switch and feature name below was checked against the Chromium sources
+(`content_switches.cc`, `gpu_switches.cc`, `content_features.cc`) and
+Microsoft's WebView2 browser flag list, and a unit test lists each emitted name
+with its source, so an argument cannot be added without that check. That a
+name exists does not mean WebView2 honors it or that it saves memory: no
+number has been measured on Windows. Microsoft's own page says browser flags
+are for development and may change; the arguments are also skipped
+automatically if the runtime refuses them.
+
 | Argument | Profiles | Why |
 | --- | --- | --- |
 | `--renderer-process-limit=1` | `balanced`, `minimal` | One origin, trusted content. A limit, not a guarantee: site isolation can still add processes for cross-origin frames. |
 | `--disable-features=SpareRendererForSitePerProcess` | `balanced`, `minimal` | Chromium feature that keeps an idle renderer process warm. |
 | `...,BackForwardCache` | `balanced`, `minimal` | Keeps whole previous pages alive. |
-| `...,msWebOOUI,msPdfOOUI` | `balanced`, `minimal` | Edge out-of-process UI surfaces. Not documented by Microsoft; Tauri ships the same two names by default. Effect unmeasured. |
+| `...,msWebOOUI,msPdfOOUI` | `balanced`, `minimal` | Edge out-of-process UI surfaces. Not in Microsoft's flag list; Tauri ships the same two names by default, and Chromium ignores a feature name it does not know. Effect unmeasured. |
 | `--js-flags=--max-old-space-size=512` | `minimal` | Caps the V8 heap. A page that really needs more crashes its renderer. |
 | `--disable-gpu-shader-disk-cache` | `minimal` | No on-disk shader cache. |
-| `--disable-webgl` | `balanced`, `minimal`, when `webgl` is unused | No WebGL contexts. |
+| `--disable-webgl --disable-webgl2` | `balanced`, `minimal`, when `webgl` is unused | No WebGL contexts. Both are defined in Chromium `content_switches.cc`. |
 
 Not used on purpose: `msSmartScreenProtection` stays on because it is a
 security feature; `--disable-background-networking` is left out because it also

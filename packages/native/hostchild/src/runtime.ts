@@ -1,8 +1,10 @@
 // The host child runtime: serves the Krate host call protocol (see
 // packages/native/PROTOCOL.md) for TypeScript host code running on Node, Bun or
 // Deno. It is the JS twin of packages/native/gohost: the shell starts it with
-// KRATE_GOHOST_SOCKET set, it listens on that unix socket, writes "ready" to
-// stdout and exits when stdin reaches EOF or on SIGTERM.
+// KRATE_GOHOST_SOCKET set, it listens there (a unix socket, or on Windows a
+// loopback TCP port guarded by a token: Node, Bun and Deno cannot use AF_UNIX
+// there), writes "ready" to stdout and exits when stdin reaches EOF or on
+// SIGTERM.
 //
 // The codec is packages/app/src/wire.ts, bundled in by the build (see
 // bundle_test.go), so there is one implementation of the frame format.
@@ -12,6 +14,7 @@
 import { createServer, request as httpRequest } from "node:http";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { unlinkSync } from "node:fs";
+import { timingSafeEqual } from "node:crypto";
 import { Readable } from "node:stream";
 import { createClient } from "../../../app/src/client.ts";
 import type { Client } from "../../../app/src/client.ts";
@@ -35,6 +38,8 @@ interface HostSignal {
 }
 
 const SOCKET_ENV = "KRATE_GOHOST_SOCKET";
+const TOKEN_ENV = "KRATE_GOHOST_TOKEN";
+const TOKEN_HDR = "x-krate-token";
 const FRAMES = "application/x-krate-frames";
 const WINDOW_HDR = "x-krate-window";
 const STREAM_PREFIX = "/__krate/stream/";
@@ -46,21 +51,75 @@ const sigs = new Map<string, HostSignal>();
 
 const PARENT_ENV = "KRATE_GOHOST_PARENT";
 
-// parentFetch is a fetch for the shell's private SDK socket (unix:<path>, the
-// value of KRATE_GOHOST_PARENT). fetch itself cannot reach a unix socket on
-// every runtime, node:http can on Node, Bun and Deno.
+// Endpoint is a parsed transport address: "unix:<path>" (or a bare path), or
+// "tcp:<loopback host>:<port>?token=<hex>".
+interface Endpoint {
+  socketPath?: string;
+  host?: string;
+  port?: number;
+  token?: string;
+}
+
+function isLoopback(host: string): boolean {
+  return host === "127.0.0.1" || host === "::1" || host === "[::1]" || /^127\.\d+\.\d+\.\d+$/.test(host);
+}
+
+// parseEndpoint reads an address; it throws on anything that is not a unix
+// path or a loopback tcp address.
+function parseEndpoint(addr: string): Endpoint {
+  if (addr.startsWith("tcp:")) {
+    let rest = addr.slice("tcp:".length);
+    let token = "";
+    const q = rest.indexOf("?");
+    if (q >= 0) {
+      token = new URLSearchParams(rest.slice(q + 1)).get("token") ?? "";
+      rest = rest.slice(0, q);
+    }
+    const colon = rest.lastIndexOf(":");
+    const host = colon > 0 ? rest.slice(0, colon).replace(/^\[|\]$/g, "") : "";
+    const port = colon > 0 ? Number(rest.slice(colon + 1)) : NaN;
+    if (!host || !isLoopback(host) || !Number.isInteger(port) || port < 0 || port > 65535) {
+      throw new Error(`bad tcp address ${JSON.stringify(addr)}: need a loopback IP and a port`);
+    }
+    return { host, port, token };
+  }
+  const path = addr.startsWith("unix:") ? addr.slice("unix:".length) : addr;
+  if (!path) throw new Error("empty socket address");
+  return { socketPath: path };
+}
+
+// tokenOk checks the request token of a tcp transport in constant time.
+function tokenOk(got: string | string[] | undefined, want: string): boolean {
+  if (!want || typeof got !== "string") return false;
+  const a = Buffer.from(got);
+  const b = Buffer.from(want);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+// parentFetch is a fetch for the shell's private SDK endpoint (the value of
+// KRATE_GOHOST_PARENT: unix:<path> or tcp:127.0.0.1:<port>?token=<hex>). fetch
+// itself cannot reach a unix socket on every runtime, node:http can on Node,
+// Bun and Deno.
 function parentFetch(addr: string): (input: string, init?: RequestInit) => Promise<Response> {
-  const socketPath = addr.startsWith("unix:") ? addr.slice("unix:".length) : "";
+  let ep: Endpoint | undefined;
+  let epErr: Error | undefined;
+  try {
+    ep = parseEndpoint(addr);
+  } catch (e) {
+    epErr = new Error(`${PARENT_ENV}=${JSON.stringify(addr)}: ${(e as Error).message}`);
+  }
   return (input, init) =>
     new Promise<Response>((resolve, reject) => {
-      if (!socketPath) {
-        reject(new Error(`${PARENT_ENV}=${JSON.stringify(addr)} must be unix:<path>`));
+      if (!ep) {
+        reject(epErr);
         return;
       }
       const url = new URL(input, "http://krate-parent");
       const headers: Record<string, string> = {};
       new Headers(init?.headers).forEach((v, k) => (headers[k] = v));
-      const req = httpRequest({ socketPath, path: url.pathname + url.search, method: init?.method ?? "GET", headers }, (res) => {
+      if (ep.token) headers[TOKEN_HDR] = ep.token;
+      const target = ep.socketPath ? { socketPath: ep.socketPath } : { host: ep.host, port: ep.port };
+      const req = httpRequest({ ...target, path: url.pathname + url.search, method: init?.method ?? "GET", headers }, (res) => {
         const h = new Headers();
         for (const [k, v] of Object.entries(res.headers)) {
           if (Array.isArray(v)) for (const x of v) h.append(k, x);
@@ -502,7 +561,14 @@ function handleSignals(req: IncomingMessage, res: ServerResponse, url: URL): voi
 
 // Server.
 
+let serverToken = "";
+
 function route(req: IncomingMessage, res: ServerResponse): void {
+  if (serverToken && !tokenOk(req.headers[TOKEN_HDR], serverToken)) {
+    res.writeHead(401, { "content-type": "text/plain" });
+    res.end("unauthorized");
+    return;
+  }
   const url = new URL(req.url ?? "/", "http://hostchild");
   const p = url.pathname;
   const method = (want: string): boolean => {
@@ -549,10 +615,12 @@ function shutdown(socket: string, code: number): void {
   } catch {
     // ignored
   }
-  try {
-    unlinkSync(socket);
-  } catch {
-    // the socket may already be gone
+  if (socket) {
+    try {
+      unlinkSync(socket);
+    } catch {
+      // the socket may already be gone
+    }
   }
   process.exit(code);
 }
@@ -560,24 +628,49 @@ function shutdown(socket: string, code: number): void {
 // start listens on KRATE_GOHOST_SOCKET and reports ready. Call it once, after
 // the host functions are registered.
 export function start(): void {
-  const socket = process.env[SOCKET_ENV];
-  if (!socket) {
+  const addr = process.env[SOCKET_ENV];
+  if (!addr) {
     console.error(`krate hostchild: ${SOCKET_ENV} is not set; this program is started by the Krate shell`);
     process.exit(1);
   }
+  let ep: Endpoint;
   try {
-    unlinkSync(socket);
-  } catch {
-    // no stale socket
+    ep = parseEndpoint(addr);
+  } catch (e) {
+    console.error(`krate hostchild: ${SOCKET_ENV}: ${(e as Error).message}`);
+    process.exit(1);
+  }
+  const tcp = ep.socketPath === undefined;
+  const socket = ep.socketPath ?? "";
+  if (tcp) {
+    serverToken = process.env[TOKEN_ENV] ?? "";
+    if (!serverToken) {
+      console.error(`krate hostchild: ${TOKEN_ENV} is not set; a tcp transport needs it`);
+      process.exit(1);
+    }
+  } else {
+    try {
+      unlinkSync(socket);
+    } catch {
+      // no stale socket
+    }
   }
   server = createServer(route);
   server.on("error", (e) => {
-    console.error("krate hostchild: listening on " + socket + ":", e);
+    console.error("krate hostchild: listening on " + addr + ":", e);
     process.exit(1);
   });
-  server.listen(socket, () => {
-    process.stdout.write("ready\n");
-  });
+  const onListening = () => {
+    if (tcp) {
+      const a = server?.address();
+      const port = a && typeof a === "object" ? a.port : 0;
+      process.stdout.write(`ready tcp:${ep.host!.includes(":") ? "[" + ep.host + "]" : ep.host}:${port}\n`);
+    } else {
+      process.stdout.write("ready\n");
+    }
+  };
+  if (tcp) server.listen(ep.port!, ep.host!, onListening);
+  else server.listen(socket, onListening);
   const leave = () => shutdown(socket, 0);
   process.stdin.on("end", leave);
   process.stdin.on("close", leave);

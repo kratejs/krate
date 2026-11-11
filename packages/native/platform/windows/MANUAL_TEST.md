@@ -37,6 +37,30 @@ pass in well under 30 seconds. They assert, from inside the page:
 
 Without `KRATE_NATIVE_GUI=1` the GUI tests are skipped.
 
+The same command also runs the tray, hotkey and toast tests
+(`TestGUITrayLifecycle`, `TestGUIHotkeys`, `TestGUIToast`):
+
+- Tray: add, modify (tooltip, image, a tooltip over the 127 character limit,
+  the stock icon), a rejected invalid PNG, click and double-click events (sent
+  as the messages the shell would post), the `TaskbarCreated` re-add, delete,
+  delete again, add again. Skipped when there is no `Shell_TrayWnd`.
+- Hotkeys: register, duplicate combination (the error must say "already
+  registered by another app"), duplicate handle, unknown key, `WM_HOTKEY`
+  reaching the handler, unregister, register again, and a stale id being
+  ignored. It also injects the real key presses and logs whether they fired;
+  a locked or non-interactive desktop drops injected input, so that part never
+  fails the test.
+- Toast: `Notify` succeeds (skipped if notifications are turned off), the
+  AppUserModelID is registered with the app name, the toast is tracked, no
+  Failed event arrives, replacing by id, `CloseNotification`.
+
+Without a display, `go test ./platform/windows -count=1 -v` still runs
+`TestToastXMLAcceptedByWinRT` (the real WinRT XML parser accepts every toast
+the builder writes, including hostile text), `TestToastDelegateInterfaces`
+(the delegate objects answer `IAgileObject` and the right
+`TypedEventHandler` id and call back), `TestHStringRoundTrip` and
+`TestAUMIDRegistration`.
+
 ## 2. Things the test does not cover
 
 Check by hand with a small program (`platform.New`, `NewWindow`, `Run`):
@@ -73,6 +97,39 @@ calls `AddView`:
 - `window.close()` in a secondary view removes it and sends a `closed` event
   (this relies on the WindowCloseRequested handler GUID, unverified).
 
+### Tray, hotkeys and toasts (not visible to a test)
+
+8. Tray: the icon appears in the notification area (or the overflow
+   flyout), is sharp at 100%, 150% and 200% scaling, and shows its tooltip on
+   hover. Left click reports `click`, double click `double-click`. Right click
+   shows the menu; clicking outside the menu closes it (this is the
+   `SetForegroundWindow` workaround; if the menu stays up, that is the bug).
+   Choosing an item reports `menu` with its id.
+9. Tray after explorer restarts: end `explorer.exe` in Task Manager and start
+   it again (File, Run new task). The icon comes back by itself.
+10. Tray on quit: after the app quits normally the icon is gone at once, with
+    no ghost that disappears only when the mouse moves over it. (A killed
+    process always leaves a ghost; that is Windows.)
+11. Hotkeys: register `Ctrl+Alt+Shift+F9`, press it from another app and the
+    handler fires once even when the keys are held (`MOD_NOREPEAT`). Registering
+    `Win+L` or `Ctrl+Alt+Del` fails with a clear error. Start two copies of the
+    app: the second gets "already registered by another app".
+12. Toasts: a toast appears with the app name (not the exe name) and the
+    default icon if `IconPath` is set. Buttons are shown; clicking the body
+    and each button reports the notification id and the action id. Dismissing
+    (the x) reports `closed`. The toast is in the Action Center afterwards.
+    With Focus assist on, `Notify` still succeeds and the toast goes to the
+    Action Center without a banner. With notifications turned off for the app
+    in Settings, `Notify` returns the "turned off" error.
+13. Toast after quit: quit the app and click a toast in the Action Center.
+    Nothing happens (documented: a closed app is not started from a toast).
+14. Packaged app: from an MSIX build the toast carries the package's name and
+    icon and no `HKCU\Software\Classes\AppUserModelId` key is written.
+15. Host children: with node, bun and deno installed, an app with a TypeScript
+    host calls a host function from the page (the `hostchild` tests do this
+    with a script, but not through the shell and a window). A firewall prompt
+    must not appear (the listener is `127.0.0.1` only).
+
 ## 3. If something fails
 
 - `Run` returns "WebView2 Runtime not found" listing paths: the registry
@@ -80,6 +137,13 @@ calls `AddView`:
   the bracketed text has the HRESULT per attempt.
 - Window opens but stays blank: the WebResourceRequested filter did not match
   or the response stream failed; look for `krate native:` lines on stderr.
+- `Shell_NotifyIcon failed`: no taskbar yet (explorer not running); the icon is
+  re-added on `TaskbarCreated` only after one `SetTray` has succeeded.
+- No toast and no error: Focus assist or the per-app switch in Settings,
+  System, Notifications. The error text from `Notify` says "turned off" when
+  Windows reports it. `Show` succeeding does not prove a banner was drawn.
+- A toast is rejected with an HRESULT: the XML failed WinRT's parser; run
+  `TestToastXMLAcceptedByWinRT` and look at `buildToastXML` in `toast.go`.
 - Large or streamed responses hang: the IStream `Read` path. The stream
   blocks on a background thread and pumps messages if WebView2 reads it on the
   UI thread; see `com_windows.go` (`goStream.read`).

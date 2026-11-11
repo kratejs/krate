@@ -27,7 +27,7 @@ import (
 )
 
 // ParentEnv names the environment variable that tells a Go host child where
-// the shell serves its SDK operations: "unix:<socket path>" or an http URL.
+// the shell serves its SDK operations: "unix:<socket path>", "tcp:127.0.0.1:<port>?token=<token>" or an http URL.
 const ParentEnv = "KRATE_GOHOST_PARENT"
 
 type entry struct {

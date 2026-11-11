@@ -6,9 +6,16 @@
 //
 // macOS: UNUserNotificationCenter needs an app bundle with a bundle
 // identifier; unbundled processes (go run, krate-shell in dev) get
-// krate.ErrUnsupported. Windows: toast notifications need an AppUserModelID
-// registered through a Start menu shortcut; without it the call returns
-// krate.ErrUnsupported. Both are compile-only in this release.
+// krate.ErrUnsupported.
+//
+// Windows: toast notifications through WinRT. An unpackaged app registers its
+// AppUserModelID (derived from the app id) under HKCU\Software\Classes\
+// AppUserModelId with the product name as display name; a packaged (MSIX)
+// app uses the identity of its package. Actions and clicks come back while
+// the app runs; clicking a toast after the app exited does nothing (COM
+// activation of a closed app is not implemented). Windows has no per-toast
+// timeout (short or long display only) and no urgency levels. macOS and
+// Windows are compile-only in this release.
 package notify
 
 import (

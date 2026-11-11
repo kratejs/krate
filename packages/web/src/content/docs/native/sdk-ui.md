@@ -184,9 +184,9 @@ against the platform API but has not run in this release.
 | Frameless, position, always on top | Verified (X11; Wayland ignores position and always-on-top) | Compile-only | Compile-only |
 | Fullscreen, maximize, minimize | Verified with a window manager (openbox on Xvfb) | Compile-only | Compile-only |
 | Close requested (prevent close) | Verified | Compile-only | Compile-only |
-| Notifications | Verified against a fake `org.freedesktop.Notifications`; actions via `ActionInvoked` | `ErrUnsupported`: `UNUserNotificationCenter` needs an app bundle | `ErrUnsupported`: toasts need an AppUserModelID from a Start menu shortcut |
-| Tray | Verified against a fake StatusNotifierWatcher (StatusNotifierItem plus `com.canonical.dbusmenu`); needs a StatusNotifier host | `ErrUnsupported` | `ErrUnsupported` |
-| Global shortcuts | Verified on X11 (`XGrabKey`); Wayland uses the GlobalShortcuts portal (verified against a fake portal) or returns `ErrUnsupported` | `ErrUnsupported` | `ErrUnsupported` |
+| Notifications | Verified against a fake `org.freedesktop.Notifications`; actions via `ActionInvoked` | `ErrUnsupported`: `UNUserNotificationCenter` needs an app bundle | Compile-only (WinRT toasts; the app registers its AppUserModelID under `HKCU`, packaged apps use their package identity) |
+| Tray | Verified against a fake StatusNotifierWatcher (StatusNotifierItem plus `com.canonical.dbusmenu`); needs a StatusNotifier host | `ErrUnsupported` | Compile-only (`Shell_NotifyIconW` version 4; the icon returns when explorer restarts) |
+| Global shortcuts | Verified on X11 (`XGrabKey`); Wayland uses the GlobalShortcuts portal (verified against a fake portal) or returns `ErrUnsupported` | `ErrUnsupported` | Compile-only (`RegisterHotKey`) |
 | Single instance, deep links | Verified (unix socket in the runtime dir) | The same code; URL scheme registration is an Info.plist packaging step | The same code; scheme registration is a registry packaging step |
 
 ### Linux details
@@ -200,6 +200,41 @@ against the platform API but has not run in this release.
   extension) `tray.New` returns `ErrUnsupported`.
 - **Notifications.** If no notification service owns
   `org.freedesktop.Notifications` the call returns `ErrUnsupported`.
+
+### Windows details
+
+None of this has run on a real Windows desktop yet; the pure parts (key table,
+toast XML, struct layouts) are tested on Linux and a CI job runs the tray,
+hotkey and toast calls on `windows-latest` (see `MANUAL_TEST.md` in
+`platform/windows` for what a person still has to look at).
+
+- **Tray.** The icon is a PNG (scaled to the small-icon size), the tooltip is
+  cut to the 127 characters the shell holds, and a title stands in for an empty
+  tooltip. A left click reports `click`, a double click `double-click`, and a
+  right click `right-click` and then shows the menu you set; a chosen item
+  reports `menu`. When explorer restarts the icon is added again. If there is
+  no taskbar, `tray.Set` returns an error.
+- **Global shortcuts.** `RegisterHotKey` on a hidden window, with
+  `MOD_NOREPEAT` so holding the keys fires once. A combination another app or
+  Windows holds (many `Win+` combinations are reserved) fails with "already
+  registered by another app". `CmdOrCtrl` is `Ctrl`; `Super` is the Windows
+  key. Keys: letters, digits, `F1` to `F24`, `Space`, `Enter`, `Escape`,
+  `Tab`, `Backspace`, `Delete`, `Insert`, `Home`, `End`, `PageUp`, `PageDown`,
+  the arrows, `Plus`, `Minus`, `Comma`, `Period`, `Numpad0` to `Numpad9`,
+  `PrintScreen` and the media keys.
+- **Notifications.** An unpackaged app gets an AppUserModelID derived from its
+  app id (`com.acme.app` stays as it is) and registers it, with the product
+  name as display name, under `HKCU\Software\Classes\AppUserModelId`. A
+  packaged (MSIX) app takes the identity of its package and registers nothing.
+  Buttons and clicks come back as notification events while the app runs. Two
+  limits to know: Windows has no per-toast timeout (a toast is on screen for
+  the short or long default, and a timeout above 10 seconds or "never" asks
+  for the long one), and **clicking a toast after the app has quit does
+  nothing**: starting a closed app from a toast needs a COM activator and a
+  Start menu shortcut, which Krate does not set up. If notifications are turned
+  off for the app (Focus assist, Settings, group policy) `notify.Send` returns
+  an error that says so. Urgency is ignored except that a critical toast with
+  buttons stays on screen until dismissed.
 
 ### Deep links on Linux
 

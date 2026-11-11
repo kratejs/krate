@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -13,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/kratejs/krate/packages/native/internal/hosttransport"
 	"github.com/kratejs/krate/packages/native/internal/memory"
 	"github.com/kratejs/krate/packages/native/scheme"
 )
@@ -34,7 +34,7 @@ func Serve(register func(*scheme.Registry)) {
 	// The shell passes its memory profile down.
 	prof := memory.Parse(os.Getenv(memory.EnvProfile))
 	memory.ApplyGo(prof)
-	err := Run(ctx, register, Config{Socket: os.Getenv(SocketEnv), Stdin: os.Stdin, Ready: os.Stdout, Dev: os.Getenv(DevEnv) == "1", Reaper: memory.StartReaper(prof, nil)})
+	err := Run(ctx, register, Config{Socket: os.Getenv(SocketEnv), Token: os.Getenv(TokenEnv), Stdin: os.Stdin, Ready: os.Stdout, Dev: os.Getenv(DevEnv) == "1", Reaper: memory.StartReaper(prof, nil)})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "krate gohost:", err)
 		stopProfile()
@@ -46,8 +46,11 @@ func Serve(register func(*scheme.Registry)) {
 
 // Config is Serve's environment, separated for tests.
 type Config struct {
-	// Socket is the unix socket path to listen on.
+	// Socket is what to listen on: a unix socket path (optionally "unix:"
+	// prefixed) or "tcp:127.0.0.1:0" together with Token.
 	Socket string
+	// Token is the request token of a tcp transport.
+	Token string
 	// Stdin is watched for EOF; nil disables the check.
 	Stdin io.Reader
 	// Ready receives "ready\n" once the child is listening.
@@ -68,13 +71,26 @@ func Run(ctx context.Context, register func(*scheme.Registry), cfg Config) error
 	if register != nil {
 		register(reg)
 	}
-	// A stale file from a crashed run would make Listen fail.
-	_ = os.Remove(cfg.Socket)
-	ln, err := net.Listen("unix", cfg.Socket)
+	ep, err := hosttransport.Parse(cfg.Socket)
+	if err != nil {
+		return err
+	}
+	if ep.Network == hosttransport.TCP {
+		if cfg.Token == "" {
+			return fmt.Errorf("%s is not set; a tcp transport needs it", TokenEnv)
+		}
+		ep.Token = cfg.Token
+	} else {
+		// A stale file from a crashed run would make Listen fail.
+		_ = os.Remove(ep.Addr)
+	}
+	ln, ep, err := hosttransport.Listen(ep)
 	if err != nil {
 		return fmt.Errorf("listening on %s: %w", cfg.Socket, err)
 	}
-	defer os.Remove(cfg.Socket)
+	if ep.Network == hosttransport.Unix {
+		defer os.Remove(ep.Addr)
+	}
 
 	h := http.Handler(scheme.New(scheme.Options{Registry: reg, Dev: cfg.Dev}))
 	if cfg.Reaper != nil {
@@ -85,12 +101,12 @@ func Run(ctx context.Context, register func(*scheme.Registry), cfg Config) error
 		})
 		defer cfg.Reaper.Stop()
 	}
-	srv := &http.Server{Handler: h}
+	srv := &http.Server{Handler: hosttransport.Guard(ep, h)}
 	served := make(chan error, 1)
 	go func() { served <- srv.Serve(ln) }()
 
 	if cfg.Ready != nil {
-		if _, err := io.WriteString(cfg.Ready, ReadyLine+"\n"); err != nil {
+		if _, err := io.WriteString(cfg.Ready, hosttransport.ReadyLineFor(ep)+"\n"); err != nil {
 			srv.Close()
 			return err
 		}

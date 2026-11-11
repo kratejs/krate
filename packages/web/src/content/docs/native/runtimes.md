@@ -101,9 +101,34 @@ Differences from the embedded runtime:
 - The SDK packages that need the shell (`@krate/app/db`, `/kv`, `/fs`, ...) are
   not wired into Node, Bun and Deno children yet. Call them from the UI or from
   QuickJS host code.
-- The unix socket needs Linux or macOS. Windows would need a named-pipe
-  transport, which is not implemented.
+- On Windows the child cannot use a unix socket (Node, Bun and Deno read a
+  path as a named pipe there), so the shell uses loopback TCP instead; see
+  [Transport](#transport). The Windows transport is compile-only in this
+  release: the same code runs on Linux in the tests, but it has not run on
+  Windows yet.
 - Native addons (`.node` files) cannot be bundled.
+
+### Transport
+
+On Linux and macOS the shell sets `KRATE_GOHOST_SOCKET` to a unix socket path
+and `KRATE_GOHOST_PARENT` to `unix:<path>`. On Windows both use loopback TCP
+with a random token:
+
+- `KRATE_GOHOST_SOCKET` is `tcp:127.0.0.1:0` and `KRATE_GOHOST_TOKEN` carries
+  128 random bits. The child listens on a port it picks, announces it on
+  stdout as `ready tcp:127.0.0.1:<port>`, and answers 401 to any request whose
+  `X-Krate-Token` header differs.
+- `KRATE_GOHOST_PARENT` is `tcp:127.0.0.1:<port>?token=<hex>`; the child sends
+  the token with every SDK call.
+- Only loopback addresses are accepted. The token keeps another user's process
+  on the same machine from calling the child or the SDK; processes of your own
+  user can read it from the child's environment, as they could read its
+  memory.
+
+A named pipe would not need a token, but Go has no standard named-pipe
+listener, so it would add a dependency. A restart gets a new port and a new
+token; the shell reconnects as it does for a unix socket. Go host children keep
+unix sockets on every OS (AF_UNIX works for Go on Windows 10 and later).
 
 ### Development
 
@@ -114,7 +139,7 @@ Differences from the embedded runtime:
 |---------|---------|
 | `node` | `node --enable-source-maps {entry}` |
 | `bun` | `bun run {entry}` |
-| `deno` | `deno run --no-prompt --allow-env --allow-read={sockdir} --allow-write={sockdir} ... {entry}` |
+| `deno` | `deno run --no-prompt --allow-env --allow-read={sockdir} --allow-write={sockdir} --allow-net=127.0.0.1 ... {entry}` |
 
 The runtime must be on `PATH` (`bundle: false` is the same). The build prints a
 note when it is not. A release build bundles it instead.
@@ -122,7 +147,8 @@ note when it is not. A release build bundles it instead.
 ### Deno permissions
 
 `native.permissions` maps to Deno flags. The child always gets `--no-prompt`,
-`--allow-env`, and read and write access to the shell's socket directory
+`--allow-env`, `--allow-net=127.0.0.1` (the Windows transport to the shell is
+loopback TCP) and read and write access to the shell's socket directory
 (`{sockdir}`; a compiled executable cannot name it, so `deno compile` gets
 unscoped `--allow-read --allow-write`).
 
@@ -130,7 +156,7 @@ unscoped `--allow-read --allow-write`).
 |----------------------|------------|
 | `fs` | `--allow-read --allow-write` |
 | `fs:read` | `--allow-read` |
-| `net` | `--allow-net` |
+| `net` | `--allow-net` (replaces `--allow-net=127.0.0.1`) |
 | `os:info` | `--allow-sys` |
 | every other name | none (those areas are served by the shell) |
 
@@ -195,7 +221,7 @@ from `app.json`).
 Host code in a child can call the Krate SDK (`@krate/app/db`, `kv`, `fs`, ...):
 the child runtime installs `__krateHost.call`, `stream` and `signal`, which run
 ids it registered in place and forward every other id to the shell over the
-private SDK socket (`KRATE_GOHOST_PARENT`). Host code is trusted, so the shell
+private SDK endpoint (`KRATE_GOHOST_PARENT`). Host code is trusted, so the shell
 applies no permission gate on that socket. Calls to host functions of other
 runtimes are not routed through it; go through the UI instead.
 
