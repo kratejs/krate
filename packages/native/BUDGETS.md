@@ -34,8 +34,10 @@ more than 25 percent of a small delta. An absolute value over its limit prints a
 warning (and a GitHub Actions `::warning::` line); an `appMinusFloor` value over
 its limit fails the test. A role that was not measured counts 0.
 
-Only `linux-amd64` has entries. macOS and Windows sizes are not tracked
-because no CI job measures them. The start-up test builds the executable with
+Only `linux-amd64` has entries. macOS and Windows budgets are planned: the CI
+`native` job measures their memory with `krate native profile --memory` and
+`scripts/native-budget-compare.mjs` prints it next to the linux-amd64 limits,
+but nothing enforces it until those numbers have been reviewed. The start-up test builds the executable with
 the `krate_devcontrol` tag, which it needs to read the page; that adds a few
 kilobytes to the size, so the size entries come from a build without it.
 

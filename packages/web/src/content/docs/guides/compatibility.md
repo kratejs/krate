@@ -560,11 +560,11 @@ Extra windows on routes, title and size, fullscreen, maximize, minimize, framele
 Known limits:
 
 - Per-window permission scopes are enforced against the native webview a request came from (see native-view-identity). In browser mode the page's own x-krate-window header is the identity, so a script there can name another window's scope.
-- Wayland: a client cannot place windows or keep them above others, so SetPosition and SetAlwaysOnTop are accepted and ignored there. Window position and always-on-top were verified on X11 only.
+- Wayland: a client cannot place windows or keep them above others, so SetPosition and SetAlwaysOnTop are accepted and ignored there and the capability report says unsupported. The GUI test packages also run under weston (GDK_BACKEND=wayland, weston nested on Xvfb); TestWaylandPlacementIsIgnored checks the ignored placement. Window position and always-on-top were verified on X11 only.
 - Fullscreen, maximize and minimize are verified with openbox on Xvfb (KRATE_NATIVE_WM=1), not on a full desktop environment.
 - macOS and Windows: untested. The same Go code is built for them (cross-compile checks in CI) and the CI native job runs go test on both, but no result of a run against a real WKWebView or WebView2 window has been confirmed.
 
-Evidence: `TestGUIWindowControls`, `TestGUIWindowOps`, `TestGUICloseRequested`, `TestGUITwoWindows`, `TestWindowOps`, `TestSecondWindowOnARoute`, `TestWindowOpenScopes`, `TestWindowScopeNarrowsCalls`
+Evidence: `TestGUIWindowControls`, `TestGUIWindowOps`, `TestGUICloseRequested`, `TestGUITwoWindows`, `TestWindowOps`, `TestSecondWindowOnARoute`, `TestWindowOpenScopes`, `TestWindowScopeNarrowsCalls`, `TestWaylandPlacementIsIgnored`
 
 ### Native: requests are bound to the webview they came from
 
@@ -634,29 +634,29 @@ Desktop notifications with actions. On Linux they use org.freedesktop.Notificati
 
 Known limits:
 
-- Verified against a fake notification service, not a real desktop daemon. Without a service that owns org.freedesktop.Notifications the call returns ErrUnsupported.
+- Verified against a real dunst daemon on a private session bus (text, icon, urgency, replacement by id, close from the app and from the daemon with the NotificationClosed reason, default action and action buttons, expiry, daemon gone) and against a fake service for protocol edge cases. Other daemons (GNOME Shell, KDE Plasma) were not run. Without a service that owns org.freedesktop.Notifications the call returns ErrUnsupported.
 - macOS: implemented, not yet run on a Mac (untested). It needs an app bundle with a bundle identifier; krate native dev runs the shell from a generated <appId>.dev bundle under .krate/dev. A process outside a bundle gets an ErrUnsupported error that names the fix. The first notification asks for permission and a refusal is a permission_denied error. Icon and Timeout are ignored, and critical urgency is only time-sensitive (the critical level needs an Apple entitlement).
 - Windows: untested. Toasts use WinRT through hand-written COM bindings; the toast XML, ids and registry values are unit tested on Linux, and a Windows CI job shows a toast, but nothing here has been confirmed on a real desktop. An unpackaged app registers its AppUserModelID under HKCU; a packaged app uses its package identity.
 - Windows: clicking a toast after the app has quit does nothing (COM activation of a closed app is not implemented). Windows has no per-toast timeout or urgency levels, and Show succeeding does not prove a banner was drawn (Focus assist and per-app settings can suppress it).
 
-Evidence: `TestNotifyOverDBus`, `TestNotifyWithoutServiceIsUnsupported`, `TestNotificationAndTrayWithFakeDesktopServices`, `TestBuildToastXML`, `TestBuildToastXMLVariants`, `TestPinterfaceIID`, `TestAUMIDFor`, `TestToastXMLAcceptedByWinRT`, `TestToastDelegateInterfaces`, `TestGUIToast`, `TestPlatformBackendClose`, `TestNotifyUnbundled`, `TestNotifyBundled`, `TestBundleProblem`, `TestNotifyEvent`, `TestPlatformNotifyAvailability`, `TestPrepareMacDevBundle`
+Evidence: `TestNotifyOverDBus`, `TestNotifyWithoutServiceIsUnsupported`, `TestNotificationAndTrayWithFakeDesktopServices`, `TestBuildToastXML`, `TestBuildToastXMLVariants`, `TestPinterfaceIID`, `TestAUMIDFor`, `TestToastXMLAcceptedByWinRT`, `TestToastDelegateInterfaces`, `TestGUIToast`, `TestPlatformBackendClose`, `TestNotifyUnbundled`, `TestNotifyBundled`, `TestBundleProblem`, `TestNotifyEvent`, `TestPlatformNotifyAvailability`, `TestPrepareMacDevBundle`, `TestRealDunstShowsNotification`, `TestRealDunstUrgencyLevels`, `TestRealDunstReplaceByID`, `TestRealDunstClosedByApp`, `TestRealDunstClosedByDaemon`, `TestRealDunstExpires`, `TestRealDunstDefaultAction`, `TestRealDunstActionButton`, `TestRealDunstGoneIsUnsupported`, `TestRealNoDaemonOnARealBus`
 
 ### Native: SDK tray and global shortcuts
 
 **Linux:** Partial - **macOS:** Untested - **Windows:** Untested
 
-A tray icon with a menu (StatusNotifierItem and dbusmenu on Linux, NSStatusItem on macOS, Shell_NotifyIconW on Windows) and global keyboard shortcuts (XGrabKey or the portal on Linux, Carbon RegisterEventHotKey on macOS, RegisterHotKey on Windows).
+A tray icon with a menu (StatusNotifierItem and dbusmenu on Linux with a legacy XEmbed tray fallback, NSStatusItem on macOS, Shell_NotifyIconW on Windows) and global keyboard shortcuts (XGrabKey or the portal on Linux, Carbon RegisterEventHotKey on macOS, RegisterHotKey on Windows).
 
 Known limits:
 
-- Linux tray needs a StatusNotifier host; stock GNOME without the AppIndicator extension returns ErrUnsupported.
-- Linux shortcuts are verified on X11 (XGrabKey). On Wayland they need the org.freedesktop.portal.GlobalShortcuts portal, verified against a fake portal only, and return ErrUnsupported without it.
+- The tray uses the StatusNotifierItem protocol when a StatusNotifier host exists and falls back to the legacy XEmbed system tray (GtkStatusIcon) when only an XEmbed tray manager owns _NET_SYSTEM_TRAY_S<screen> (X11 only). Stock GNOME with neither returns ErrUnsupported with a hint to install the AppIndicator extension. Verified against stalonetray (XEmbed, with real clicks and menu selection through XTEST) and against the Ayatana application indicator service as a real StatusNotifierWatcher and host; KDE Plasma, GNOME Shell with the extension and other panels were not run.
+- Linux shortcuts are verified on X11 (XGrabKey). On Wayland they need the org.freedesktop.portal.GlobalShortcuts portal, verified against a fake portal only (TestShortcutPortal), and return ErrUnsupported without it. No portal backend that implements GlobalShortcuts can run headless here: the GNOME backend needs a running gnome-shell/mutter session, the KDE backend needs KGlobalAccel in a Plasma session, the Hyprland and COSMIC backends are not packaged for Debian or Ubuntu, and xdg-desktop-portal-wlr does not implement the interface.
 - macOS: implemented, not yet run on a Mac (untested). With a tray menu any click opens the menu and is reported as click; right-click and double-click are only reported without a menu. Radio items show a checkmark. Single-tone gray icons become template images.
 - macOS shortcuts use Carbon RegisterEventHotKey (no Accessibility permission). Keys are ANSI key positions, so other layouts differ, and macOS 15 ignores hot keys whose only modifiers are Option and/or Shift. A combination that is already registered is an error. Pressing a real hot key and clicking the real status item are manual checks (platform/darwin/MANUAL_TEST.md).
 - Windows: untested. The key table, the NOTIFYICONDATAW layout, event decoding and icon scaling are unit tested on Linux, and a Windows CI job adds, modifies and removes a tray icon and registers hotkeys, but the icon, its menu behavior, the explorer-restart re-add and real key presses have not been confirmed on a real desktop.
 - Windows: a shortcut another app or Windows holds fails with an 'already registered by another app' error; many Win+ combinations are reserved by the system. The tray menu has no accelerators and one icon per app.
 
-Evidence: `TestTrayOverDBus`, `TestTrayWithoutHostIsUnsupported`, `TestShortcutPortal`, `TestShortcutWaylandWithoutPortalIsUnsupported`, `TestGUIGlobalShortcut`, `TestShortcutAndSupports`, `TestVirtualKey`, `TestHotkeySpec`, `TestHotkeyError`, `TestHotkeyTable`, `TestNotifyIconDataLayout`, `TestTrayEventKind`, `TestPNGToIconBits`, `TestGUITrayLifecycle`, `TestGUIHotkeys`, `TestTrayItemAndMenu`, `TestHotKeyRegisterUnregister`, `TestToCarbon`, `TestCarbonStatusError`, `TestInspectTrayIcon`, `TestAccelKeyEquivalent`, `TestPlatformTrayIsUsed`, `TestParseCmdOrCtrl`
+Evidence: `TestTrayOverDBus`, `TestTrayWithoutHostIsUnsupported`, `TestShortcutPortal`, `TestShortcutWaylandWithoutPortalIsUnsupported`, `TestGUIGlobalShortcut`, `TestShortcutAndSupports`, `TestVirtualKey`, `TestHotkeySpec`, `TestHotkeyError`, `TestHotkeyTable`, `TestNotifyIconDataLayout`, `TestTrayEventKind`, `TestPNGToIconBits`, `TestGUITrayLifecycle`, `TestGUIHotkeys`, `TestTrayItemAndMenu`, `TestHotKeyRegisterUnregister`, `TestToCarbon`, `TestCarbonStatusError`, `TestInspectTrayIcon`, `TestAccelKeyEquivalent`, `TestPlatformTrayIsUsed`, `TestParseCmdOrCtrl`, `TestRealStatusNotifierHost`, `TestRealXEmbedTray`, `TestRealNoTrayAtAll`, `TestTrayFallsBackToXEmbedWithoutAStatusNotifierHost`, `TestTrayPrefersStatusNotifierOverXEmbed`, `TestNoTrayAtAllNamesTheAppIndicatorExtension`
 
 ### Native: SDK app lifecycle
 
@@ -718,7 +718,7 @@ krate native package builds .tar.gz, .deb, .rpm and AppImage on Linux, .app, .zi
 
 Known limits:
 
-- AppImage needs appimagetool and a .dmg needs hdiutil on macOS; neither is exercised end to end here.
+- On Linux the .deb, .rpm and AppImage of examples/native-tasks are built, and the .deb contents and AppImage were launched and checked to serve the first page (scripts/native-smoke.mjs; the CI native job installs the .deb with dpkg and runs the AppImage). The .dmg needs hdiutil and the NSIS installer needs makensis, so those are exercised only in the macOS and Windows CI steps, which have not run yet.
 - macOS and Windows packages are assembled by pure Go code on Linux and checked for structure; none has been installed or opened on its OS. The NSIS installer needs makensis.
 
 Evidence: `TestLinuxTarGzAndDeb`, `TestRPM`, `TestAppImageNeedsTool`, `TestMacAppAndZip`, `TestMacDMGUsesHdiutilOnlyOnMac`, `TestWindowsZipAndNSIS`, `TestMSIXStructure`, `TestNativePackageEndToEnd`, `TestUpdateArtifactsAreSignedAndFeedWritten`
@@ -744,10 +744,10 @@ In-app updates: an Ed25519-signed feed, resumable verified downloads, and an app
 
 Known limits:
 
-- The macOS bundle and Windows apply steps are file-system logic tested on Linux; replacing a running Windows executable has not been tried on Windows.
+- The macOS bundle and Windows apply steps are file-system logic tested on Linux; replacing a running Windows executable has not been tried on Windows. TestSmokeUpdateInstalledApp (skipped unless scripts/native-smoke.mjs sets its environment) runs the real updater against a signed local feed from 1.0.0 to 1.1.0 of an installed packaged app; it ran on Linux only.
 - macOS and Windows: untested. The same Go code is built for them (cross-compile checks in CI) and the CI native job runs go test on both, but no result of a run against a real WKWebView or WebView2 window has been confirmed.
 
-Evidence: `TestSignatureGoodBadWrongKey`, `TestCheck`, `TestDownloadVerifiesAndProgress`, `TestDownloadResumes`, `TestApplyLinuxReplacesExecutableAndAppDir`, `TestApplyRollsBackOnFailure`, `TestApplyAppImage`, `TestApplyMacBundle`, `TestApplyWindowsOrder`
+Evidence: `TestSignatureGoodBadWrongKey`, `TestCheck`, `TestDownloadVerifiesAndProgress`, `TestDownloadResumes`, `TestApplyLinuxReplacesExecutableAndAppDir`, `TestApplyRollsBackOnFailure`, `TestApplyAppImage`, `TestApplyMacBundle`, `TestApplyWindowsOrder`, `TestSmokeUpdateInstalledApp`
 
 ### Native: size, start-up and memory budgets
 
@@ -758,7 +758,7 @@ packages/native/budgets.json limits the stripped shell, Go-only, TypeScript-only
 Known limits:
 
 - Budgets exist for linux-amd64 only; the start-up limits were measured on a developer machine and CI applies KRATE_BUDGET_SCALE=3 until a hosted runner has been measured.
-- macOS and Windows have no recorded budgets.
+- macOS and Windows have no recorded budgets (planned). The CI native job runs the memory profile there and prints a comparison with the linux-amd64 limits (scripts/native-budget-compare.mjs); it is informational until the numbers have been reviewed.
 
 Evidence: `TestNativeBudgetSizes`, `TestNativeBudgetGUI`
 
