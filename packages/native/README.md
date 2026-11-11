@@ -10,7 +10,9 @@ The Go module behind Krate's desktop target.
 | `jsruntime` | The embedded QuickJS engine: VM, Web API prelude, Go-backed fetch and crypto, binary transfer. Shared with the compiler |
 | `hostjs` | A persistent QuickJS VM that runs an app's TypeScript host code and registers it with `scheme` |
 | `platform` | Windows, macOS and Linux windows and webviews, no cgo |
-| `cmd/krate-shell` | The prebuilt shell |
+| `gohost` | The Go host child: `Serve` for the generated child main, `Child` for the parent that runs and restarts it |
+| `shell` | The shell as a library: app manifest, `Run`, browser mode, dev control. See `shell/README.md` |
+| `cmd/krate-shell` | The prebuilt shell binary |
 
 The module never uses cgo. It cross-compiles from any OS with
 `CGO_ENABLED=0`.
@@ -34,3 +36,14 @@ map, and `Register` adds everything the bundle registered to a
 goroutine; `fetch` runs on its own goroutines and never blocks it.
 `Reload` swaps the bundle in place for development. See the package comment for
 the details and limits.
+
+## Go host in a child process
+
+An app with Go host code runs it in a separate process so that a Go edit
+restarts only the child and the window survives. The generated child main is
+`gohost.Serve(glue.Register)`. The shell starts it through `gohost.Child`,
+registers `scheme.Remote` forwarders for the ids listed in `app.json`, and
+restarts it on demand; signals reconnect with backoff, so the page sees the
+new child's current values without reloading. The child protocol (unix socket
+in `KRATE_GOHOST_SOCKET`, `ready` line, exit on stdin EOF) is in the
+`gohost` package comment.

@@ -1,0 +1,372 @@
+// Package shell is the Krate Native shell as a library: it loads an app
+// directory (see README.md), serves the built UI on the app origin, runs the
+// app's TypeScript host code in-process on QuickJS, runs its Go host code in a
+// separate child process when it has any, and opens the window.
+//
+// The prebuilt krate-shell binary is a thin main around Run. Release builds
+// link everything into one process and use the same pieces.
+package shell
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sync"
+
+	"github.com/kratejs/krate/packages/native/gohost"
+	"github.com/kratejs/krate/packages/native/hostjs"
+	"github.com/kratejs/krate/packages/native/platform"
+	"github.com/kratejs/krate/packages/native/scheme"
+)
+
+// RunOptions configures Run.
+type RunOptions struct {
+	// Browser serves the app on a loopback port behind a per-session token
+	// instead of opening a window.
+	Browser bool
+	// Addr is the browser-mode listen address. Default "127.0.0.1:0".
+	Addr string
+	// Dev enables developer behavior: panic stacks in errors, mapped JS
+	// stacks, webview developer tools.
+	Dev bool
+	// OnReady runs on its own goroutine once the window is open (or the
+	// browser listener is up). The Control stays valid until Run returns.
+	OnReady func(ctl *Control)
+	// ExtraHandler is consulted before the app handler (and after the token
+	// check in browser mode); returning true means it handled the request.
+	// Meant for tests and embedders.
+	ExtraHandler func(w http.ResponseWriter, r *http.Request) bool
+	// Logf receives diagnostics. Default: stderr.
+	Logf func(format string, args ...any)
+	// Out receives the "url ..." line in browser mode. Default os.Stdout.
+	Out io.Writer
+	// Context, when done, quits the app.
+	Context context.Context
+}
+
+// Run loads the app in appDir and runs it until the window closes (or, in
+// browser mode, until Quit or Context). In native mode it must be called from
+// the main goroutine of a process that locked the main thread
+// (runtime.LockOSThread in an init function).
+func Run(appDir string, opts RunOptions) error {
+	if opts.Logf == nil {
+		opts.Logf = func(format string, args ...any) { fmt.Fprintf(os.Stderr, "krate-shell: "+format+"\n", args...) }
+	}
+	if opts.Out == nil {
+		opts.Out = os.Stdout
+	}
+	a, err := load(appDir, opts)
+	if err != nil {
+		return err
+	}
+	defer a.close()
+	if opts.Browser {
+		return a.runBrowser()
+	}
+	return a.runNative()
+}
+
+// app is a loaded app directory.
+type app struct {
+	dir  string
+	opts RunOptions
+	logf func(string, ...any)
+
+	reg     *scheme.Registry
+	handler http.Handler
+
+	mu    sync.Mutex // guards man, host, child
+	man   *Manifest
+	host  *hostjs.Host
+	child *gohost.Child
+
+	ctl  *Control
+	quit func() // set by the run mode
+}
+
+func load(appDir string, opts RunOptions) (*app, error) {
+	dir, err := filepath.Abs(appDir)
+	if err != nil {
+		return nil, err
+	}
+	man, err := ReadManifest(dir)
+	if err != nil {
+		return nil, err
+	}
+	a := &app{dir: dir, opts: opts, logf: opts.Logf, man: man, reg: scheme.NewRegistry()}
+	a.ctl = &Control{a: a}
+	if err := a.reloadHostJS(); err != nil {
+		a.close()
+		return nil, err
+	}
+	if err := a.restartGoHost(); err != nil {
+		a.close()
+		return nil, err
+	}
+	matcher, err := NewMatcher(man.Fallbacks)
+	if err != nil {
+		a.close()
+		return nil, err
+	}
+	assets := man.AssetsDir(dir)
+	if st, err := os.Stat(assets); err != nil || !st.IsDir() {
+		a.close()
+		return nil, fmt.Errorf("shell: assets directory %s not found (app.json assets=%q)", assets, man.Assets)
+	}
+	var fallback func(string) (string, bool)
+	if len(man.Fallbacks) > 0 {
+		fallback = matcher.Match
+	}
+	app := scheme.New(scheme.Options{
+		Assets:   os.DirFS(assets),
+		Registry: a.reg,
+		Dev:      opts.Dev,
+		Fallback: fallback,
+	})
+	extra := opts.ExtraHandler
+	a.handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if extra != nil && extra(w, r) {
+			return
+		}
+		app.ServeHTTP(w, r)
+	})
+	return a, nil
+}
+
+func (a *app) close() {
+	a.mu.Lock()
+	host, child := a.host, a.child
+	a.host, a.child = nil, nil
+	a.mu.Unlock()
+	if child != nil {
+		child.Stop()
+	}
+	if host != nil {
+		host.Close()
+	}
+}
+
+// guard turns a registry panic (duplicate id) into an error.
+func guard(what string, f func()) (err error) {
+	defer func() {
+		if v := recover(); v != nil {
+			err = fmt.Errorf("shell: %s: %v", what, v)
+		}
+	}()
+	f()
+	return nil
+}
+
+// reloadHostJS loads or reloads the hostjs bundle named by the manifest on
+// disk and registers what it exports.
+func (a *app) reloadHostJS() error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	man, err := ReadManifest(a.dir)
+	if err != nil {
+		return err
+	}
+	a.man = man
+	spec := man.HostJS
+	if spec == nil {
+		return nil
+	}
+	bundlePath := filepath.Join(a.dir, filepath.FromSlash(spec.Bundle))
+	bundle, err := os.ReadFile(bundlePath)
+	if err != nil {
+		return fmt.Errorf("shell: reading the host bundle: %w", err)
+	}
+	var srcMap []byte
+	if spec.Map != "" {
+		srcMap, err = os.ReadFile(filepath.Join(a.dir, filepath.FromSlash(spec.Map)))
+		if err != nil {
+			return fmt.Errorf("shell: reading the host source map: %w", err)
+		}
+	}
+	if a.host == nil {
+		env := map[string]string{"NODE_ENV": "production", "KRATE_APP_DIR": a.dir}
+		if a.opts.Dev {
+			env["NODE_ENV"] = "development"
+		}
+		h, err := hostjs.New(hostjs.Options{
+			Dev:       a.opts.Dev,
+			Env:       env,
+			LogPrefix: "[host] ",
+			Log:       func(msg string) { a.logf("%s", msg) },
+		})
+		if err != nil {
+			return err
+		}
+		if err := h.Load(bundle, srcMap, spec.Bundle); err != nil {
+			h.Close()
+			return err
+		}
+		if err := guard("registering host functions", func() { h.Register(a.reg) }); err != nil {
+			h.Close()
+			return err
+		}
+		a.host = h
+		return nil
+	}
+	if err := a.host.Reload(bundle, srcMap, spec.Bundle); err != nil {
+		return err
+	}
+	return guard("registering host functions", func() { a.host.Register(a.reg) })
+}
+
+// restartGoHost starts the Go host child, or restarts it with the binary the
+// manifest names now.
+func (a *app) restartGoHost() error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	man, err := ReadManifest(a.dir)
+	if err != nil {
+		return err
+	}
+	a.man = man
+	spec := man.GoHost
+	if spec == nil {
+		return nil
+	}
+	binary := filepath.Join(a.dir, filepath.FromSlash(spec.Binary))
+	if _, err := os.Stat(binary); err != nil {
+		return fmt.Errorf("shell: the Go host binary: %w", err)
+	}
+	if a.child == nil {
+		c := gohost.NewChild(gohost.ChildOptions{
+			Logf:   func(format string, args ...any) { a.logf(format, args...) },
+			Prefix: "[gohost] ",
+		})
+		env := []string{"KRATE_APP_DIR=" + a.dir}
+		if a.opts.Dev {
+			env = append(env, "KRATE_DEV=1")
+		}
+		if err := c.Start(context.Background(), binary, env); err != nil {
+			return err
+		}
+		a.child = c
+	} else if err := a.child.Restart(binary); err != nil {
+		return err
+	}
+	return guard("registering Go host functions", func() {
+		a.child.Remote().RegisterInto(a.reg, spec.Funcs, spec.Streams, spec.Signals)
+	})
+}
+
+// windows tracks the windows this app opened.
+type windows struct {
+	mu   sync.Mutex
+	list []platform.Window
+}
+
+func (w *windows) add(win platform.Window) {
+	w.mu.Lock()
+	w.list = append(w.list, win)
+	w.mu.Unlock()
+}
+
+func (w *windows) all() []platform.Window {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return append([]platform.Window(nil), w.list...)
+}
+
+func (a *app) runNative() error {
+	man := a.man
+	platApp, err := platform.New(platform.Options{
+		AppID:   man.AppID,
+		Handler: a.handler,
+		Debug:   a.opts.Dev || man.Debug,
+	})
+	if err != nil {
+		return err
+	}
+	wins := &windows{}
+	a.ctl.wins = wins
+	a.ctl.origin = platApp.Origin()
+	a.quit = platApp.Quit
+	if ctx := a.opts.Context; ctx != nil {
+		stop := make(chan struct{})
+		defer close(stop)
+		go func() {
+			select {
+			case <-ctx.Done():
+				platApp.Quit()
+			case <-stop:
+			}
+		}()
+	}
+	var openErr error
+	runErr := platApp.Run(func() {
+		win, err := platApp.NewWindow(platform.WindowOptions{
+			Title:     man.Window.Title,
+			Width:     man.Window.Width,
+			Height:    man.Window.Height,
+			Resizable: man.Window.IsResizable(),
+			Path:      man.Window.Path,
+		})
+		if err != nil {
+			openErr = fmt.Errorf("shell: opening the window: %w", err)
+			platApp.Quit()
+			return
+		}
+		wins.add(win)
+		if a.opts.OnReady != nil {
+			go a.opts.OnReady(a.ctl)
+		}
+	})
+	if runErr != nil {
+		return runErr
+	}
+	return openErr
+}
+
+// Control drives a running app: the dev loop uses it to reload host code
+// without restarting the process.
+type Control struct {
+	a      *app
+	wins   *windows
+	origin string
+	url    string
+}
+
+// ReloadHostJS re-reads app.json and the host bundle from disk and swaps it
+// into the running VM (see hostjs.Host.Reload for what survives).
+func (c *Control) ReloadHostJS() error { return c.a.reloadHostJS() }
+
+// RestartGoHost restarts only the Go host child, with the binary app.json
+// names now. Windows stay open and signals reconnect on their own.
+func (c *Control) RestartGoHost() error { return c.a.restartGoHost() }
+
+// Eval runs JavaScript in every open window. It does not wait for a result.
+func (c *Control) Eval(js string) error {
+	if c.wins == nil {
+		return errors.New("browser mode has no native windows")
+	}
+	list := c.wins.all()
+	if len(list) == 0 {
+		return errors.New("no open window")
+	}
+	for _, w := range list {
+		w.Eval(js)
+	}
+	return nil
+}
+
+// Quit stops the app; Run returns.
+func (c *Control) Quit() {
+	if q := c.a.quit; q != nil {
+		q()
+	}
+}
+
+// URL is the browser-mode address including the session token, or "".
+func (c *Control) URL() string { return c.url }
+
+// Origin is the native app origin ("krate://app" or "https://app.localhost"),
+// or "" in browser mode.
+func (c *Control) Origin() string { return c.origin }
