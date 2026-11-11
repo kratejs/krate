@@ -437,6 +437,23 @@ export interface NativeConfig {
     webrtc?: boolean;
     spellcheck?: boolean;
   };
+  /**
+   * "auto" keeps View Transitions in a native build. Default off, whatever the
+   * top-level viewTransitions says: a cross-document transition aborts the
+   * WebKitGTK web process in software-rendered setups.
+   */
+  viewTransitions?: "auto";
+  /** Thresholds for the lean-page checks of `krate native check` (KR7270 to KR7275). */
+  lean?: {
+    /** KiB above which an inlined data: URL is reported. Default 16. */
+    dataUriKb?: number;
+    /** How many times larger than its rendered size an image may be. Default 2. */
+    imageRatio?: number;
+    /** Items a list may render without a windowing component. Default 100. */
+    listItems?: number;
+    /** Diagnostic codes to silence, for example ["KR7272"]. */
+    ignore?: string[];
+  };
 }
 
 /** Deploy adapter selection + options for `krate deploy`. */

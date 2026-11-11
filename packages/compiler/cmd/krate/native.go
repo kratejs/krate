@@ -146,6 +146,12 @@ func runNativeCheck(flags cliFlags, args []string) {
 		fmt.Printf("%s  ! %s%s\n", cYellow, w, cReset)
 	}
 
+	lean, err := native.CheckLean(root, cfg, placement)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%sNative check error:%s %v\n", cRed, cReset, err)
+		exit(1)
+	}
+
 	var diags []diag.Diagnostic
 	diags = append(diags, placement.Diagnostics...)
 	diags = append(diags, target...)
@@ -161,6 +167,15 @@ func runNativeCheck(flags cliFlags, args []string) {
 			errs[i] = d
 		}
 		fmt.Fprintf(os.Stderr, "%s\n", diag.FormatDiagnostics(errs))
+	}
+
+	if len(lean) > 0 {
+		errs := make([]error, len(lean))
+		for i, d := range lean {
+			errs[i] = d
+		}
+		fmt.Fprintf(os.Stderr, "%s\n", diag.FormatDiagnostics(errs))
+		fmt.Printf("%s  ! %d lean-page warning(s): memory hygiene for the webview (see docs native/memory)%s\n", cYellow, len(lean), cReset)
 	}
 
 	printPlacementSummary(placement)

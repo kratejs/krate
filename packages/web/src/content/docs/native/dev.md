@@ -82,6 +82,13 @@ and message), stream open and end, signal subscriptions and updates, the newest
 `GET /__krate/dev/events` (add `?follow=1` to stream). Arguments and returned
 values are not recorded.
 
+## Memory panel
+
+The toolbar also has a "Memory" button. Its panel shows PSS and private dirty
+per process (from `GET /__krate/dev/memory`), the DOM node count and, where the
+engine exposes it, the JS heap. It samples every 2 seconds while open and not at
+all when closed. See [Memory](/docs/native/memory/#the-dev-memory-panel).
+
 ## Finding the shell
 
 In order:

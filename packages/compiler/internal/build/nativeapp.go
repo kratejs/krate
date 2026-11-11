@@ -235,6 +235,9 @@ func (b *Builder) BuildNativeApp(opts NativeAppOptions) (*NativeAppResult, error
 	}
 	b.NativeTarget = true
 	b.nativeShake = opts.Derive
+	// The shell serves the files from the app bundle: .br and .gz siblings
+	// would only add to its size.
+	b.Cfg.Compress = config.CompressConfig{}
 
 	ds, err := native.CheckTarget(b.Root, b.Cfg)
 	if err != nil {
@@ -242,6 +245,13 @@ func (b *Builder) BuildNativeApp(opts NativeAppOptions) (*NativeAppResult, error
 	}
 	if len(ds) > 0 {
 		return nil, nativeDiagError(ds, "native target error(s)")
+	}
+
+	if !opts.Dev {
+		pl, _ := native.Analyze(b.Root, b.Cfg)
+		if lean, err := native.CheckLean(b.Root, b.Cfg, pl); err == nil {
+			printWarningsOnce(os.Stderr, lean)
+		}
 	}
 
 	outDir := opts.OutDir
@@ -611,6 +621,11 @@ func copyNativeFile(src, dst string) error {
 		return err
 	}
 	defer in.Close()
+	if si, err := in.Stat(); err == nil {
+		if di, err := os.Stat(dst); err == nil && os.SameFile(si, di) {
+			return nil // os.Create would truncate the source
+		}
+	}
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return err
 	}

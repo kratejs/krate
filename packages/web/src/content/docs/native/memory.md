@@ -1,7 +1,7 @@
 ---
 title: Memory
 order: 15
-description: Memory profiles, feature detection, Linux levers, shared web process, background mode, macOS and Windows levers, and measured numbers.
+description: Memory profiles, feature detection, Linux levers, shared web process, lean-page checks, the dev Memory panel, macOS and Windows levers, measured numbers.
 ---
 
 # Memory
@@ -194,6 +194,82 @@ the page, then trims its own heap:
 Only a released window gives its web process memory back; a hidden page keeps
 what it has.
 
+
+## Leaner pages
+
+The webview is most of an app's memory, and what the page asks of it decides
+how much it uses. Four things are done for you in a native build, and five
+checks tell you about the rest.
+
+### What a native build does by default
+
+- **Each page loads only its own code.** A native build is multi-page: every
+  route gets its own HTML file and its own script, plus the shared runtime
+  chunk only when the page needs it. A route the user never opens is never
+  read.
+- **A page without client code ships no JavaScript.** A page with no event
+  handlers, no signals and no client-only components is plain HTML: no
+  `<script>`, no preload link and no `__KRATE_CFG__` block. A page that reads
+  a host signal does need script, because the value only exists at run time;
+  it is prerendered as an empty slot and the script fills it.
+- **Lazy components stay lazy.** The hydration code of a `lazy()` component is
+  its own chunk. The web build links it with `modulepreload`; a native build
+  does not, so the chunk is read and compiled when the component first
+  renders, not when the page loads. A component behind a closed dialog costs
+  nothing until it opens.
+- **Dev builds are unchanged**, so hot reload keeps working.
+
+### The checks
+
+`krate native check` and every native build run five checks over `src`, the
+pages directory and the public directory. They are warnings: they never fail a
+build. Each has its own code, and the message names the file and line.
+
+| Code | Reports | How it decides |
+|------|---------|----------------|
+| `KR7270` | An `<img>` much larger than its rendered size | The `src` is a local PNG, JPEG, GIF or WebP (a path under the public dir, or an imported file) and `width`/`height` (attributes or a literal `style`) are literal. It fires when the file is at least 256 px and more than `imageRatio` (default 2) times the rendered size. A decoded bitmap costs width x height x 4 bytes whatever the file size. Sizes set from CSS classes are not known to the compiler and are not checked. |
+| `KR7271` | A large base64 `data:` URL in a script or stylesheet | The payload decodes to more than `dataUriKb` (default 16 KiB). |
+| `KR7272` | A web font | An `@font-face` rule with a `url()` font file, an `@fontsource/*` import, or a font service link (Google Fonts, Bunny, Typekit). Icon fonts (family names containing icon, symbol, awesome, material, glyph, emoji and the like) are skipped. This is a heuristic: it cannot know whether the design needs the typeface, so it only says what a web font costs (the file, a parsed copy and glyph caches per family and weight in the web process) and suggests a system stack. |
+| `KR7273` | A CSS effect that forces compositing layers | `backdrop-filter` (also the `backdrop-blur` utility); `filter: blur()` of 16 px or more; a blur inside `@keyframes`; a `box-shadow` with blur plus spread of 40 px or more on a tag or `*` selector; `will-change` on a tag or `*` selector, or in five or more places. A shadow on a class, a small blur or one `will-change` is not reported. |
+| `KR7274` | A long list without windowing | A `.map()` that returns JSX over an array known at build time with more than `listItems` (default 100) entries (a literal, `Array.from({ length: n })`), or over a value that comes from host code (a Go or `.host.ts` import, or a host signal) whose length the UI does not bound. A `.slice()` in the chain, or a windowing component (`react-window`, `react-virtuoso`, `@tanstack/react-virtual` or a component named `Virtual*`), silences it. |
+
+The thresholds and a silence list live in the config:
+
+```ts
+export default defineConfig({
+  native: {
+    lean: {
+      dataUriKb: 32,       // default 16
+      imageRatio: 3,       // default 2
+      listItems: 200,      // default 100
+      ignore: ["KR7272"],  // the brand needs its typeface
+    },
+  },
+});
+```
+
+Only what the compiler can see is checked: a size chosen at run time, an image
+from a URL or a list built from data fetched later is not. On this repository
+`examples/native-tasks` produces no warning, and the docs site
+(`packages/web`) reports its two variable fonts and the one `backdrop-filter`
+of its header, all of which are real.
+
+### The dev Memory panel
+
+`krate native dev` adds a **Memory** button to the dev toolbar (the strip at
+the bottom edge of the window). It opens a panel with:
+
+- PSS and private dirty per process (shell, Go host child, host children, the
+  web, network and GPU processes of the webview), and the total, read from the
+  shell's `/__krate/dev/memory` endpoint;
+- the number of DOM nodes of the page;
+- the JS heap of the page where the engine exposes it. WebKit (Linux and
+  macOS) has no heap size API (`performance.memory` is Chromium only), so the
+  panel says it is unavailable; the web process row (PSS and private dirty)
+  includes the JS heap and is the number to watch.
+
+It samples once when opened and then every 2 seconds, and stops when closed, so
+a closed panel costs nothing.
 
 ## macOS and Windows (untested)
 

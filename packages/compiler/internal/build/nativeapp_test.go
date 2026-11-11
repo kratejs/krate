@@ -646,6 +646,22 @@ func TestNativeShellCopy(t *testing.T) {
 	}
 }
 
+// A shell passed from inside the output directory is its own copy target.
+func TestNativeShellInsideOutDirIsNotTruncated(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		"src/pages/index.tsx":     "export default function P() { return <main/>; }\n",
+		"dist-native/krate-shell": "binary",
+	})
+	res, err := newNativeBuilder(t, root).BuildNativeApp(NativeAppOptions{Shell: filepath.Join(root, "dist-native", "krate-shell"), WantShell: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(res.ShellPath); string(data) != "binary" {
+		t.Errorf("shell content = %q (path %s)", data, res.ShellPath)
+	}
+}
+
 func TestGoModRequires(t *testing.T) {
 	const path = "github.com/kratejs/krate/packages/native"
 	for gomod, want := range map[string]bool{
@@ -784,8 +800,14 @@ func TestNativeTargetDisablesViewTransitionsByDefault(t *testing.T) {
 	if strings.Contains(head, "@view-transition") || !strings.Contains(head, `"viewTransitions":false`) {
 		t.Errorf("a native build must not emit cross-document view transitions: %s", head)
 	}
+	// The top-level setting belongs to the web build: the docs site sets it
+	// and its desktop app must still work.
 	b.Cfg.ViewTransitions = "auto"
+	if head := b.runtimeCommonHead(); strings.Contains(head, "@view-transition") {
+		t.Errorf("a top-level viewTransitions: \"auto\" must not reach a native build: %s", head)
+	}
+	b.Cfg.Native.ViewTransitions = "auto"
 	if head := b.runtimeCommonHead(); !strings.Contains(head, "@view-transition") {
-		t.Errorf("an explicit viewTransitions: \"auto\" must still be honored: %s", head)
+		t.Errorf("native.viewTransitions: \"auto\" must be honored: %s", head)
 	}
 }

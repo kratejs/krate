@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"unsafe"
 
 	"github.com/kratejs/krate/packages/native/platform/caps"
@@ -32,12 +33,13 @@ func schemeCallback(request, data uintptr) uintptr {
 		curHeader = nil
 	}
 	// webkit_uri_scheme_request_get_http_body returns a new reference. The
-	// stream is read later from the handler goroutine with the synchronous
-	// g_input_stream_read; WebKit hands out memory-backed streams for which
-	// that is safe off the main thread.
+	// handler goroutine reads the stream, but every operation on it (read,
+	// close, unref) runs on the main thread: the stream shares its FormData
+	// with the request on the UI side, and that object is reference counted
+	// without atomics, so touching it from another thread corrupts it.
 	var body *streamBody
 	if s := api.wkReqBody(request); s != 0 {
-		body = &streamBody{api: api, stream: s}
+		body = &streamBody{app: a, api: api, stream: s}
 	}
 	api.gObjectRef(request)
 
@@ -138,8 +140,10 @@ func headerCallback(name, value, data uintptr) uintptr {
 	return 0
 }
 
-// streamBody reads a GInputStream as an io.ReadCloser.
+// streamBody reads a GInputStream as an io.ReadCloser. The stream is only
+// touched on the main thread (see schemeCallback): Read and Close hop there.
 type streamBody struct {
+	app    *App
 	api    *api
 	stream uintptr
 	once   sync.Once
@@ -149,6 +153,28 @@ func (b *streamBody) Read(p []byte) (int, error) {
 	if len(p) == 0 {
 		return 0, nil
 	}
+	var n int
+	var err error
+	if !b.app.callMain(func() { n, err = b.readMain(p) }) {
+		return 0, io.ErrClosedPipe
+	}
+	return n, err
+}
+
+// bodyOps counts operations on request body streams and bodyOffMain those
+// that did not run on the main thread (always 0; tests check it).
+var bodyOps, bodyOffMain atomic.Int64
+
+func (b *streamBody) noteOp() {
+	bodyOps.Add(1)
+	if !b.app.onMain() {
+		bodyOffMain.Add(1)
+	}
+}
+
+// readMain runs on the main thread.
+func (b *streamBody) readMain(p []byte) (int, error) {
+	b.noteOp()
 	if b.stream == 0 {
 		return 0, io.EOF
 	}
@@ -167,12 +193,17 @@ func (b *streamBody) Read(p []byte) (int, error) {
 
 func (b *streamBody) Close() error {
 	b.once.Do(func() {
-		var gerr uintptr
-		b.api.gInputStreamClose(b.stream, 0, &gerr)
-		if gerr != 0 {
-			b.api.gErrorFree(gerr)
-		}
-		b.api.gObjectUnref(b.stream)
+		// With the main loop gone nothing else can use the stream, and the
+		// process is ending: leaking it is safe, unreffing it elsewhere is not.
+		b.app.callMain(func() {
+			b.noteOp()
+			var gerr uintptr
+			b.api.gInputStreamClose(b.stream, 0, &gerr)
+			if gerr != 0 {
+				b.api.gErrorFree(gerr)
+			}
+			b.api.gObjectUnref(b.stream)
+		})
 	})
 	return nil
 }

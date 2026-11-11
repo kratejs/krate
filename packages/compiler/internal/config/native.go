@@ -54,6 +54,30 @@ type NativeConfig struct {
 	// Features overrides the detected engine features. A feature the UI code
 	// uses is switched on under "balanced" and "minimal" unless set false.
 	Features NativeFeatures `json:"features,omitempty"`
+	// ViewTransitions is "auto" to keep View Transitions in a native build.
+	// The default is off, whatever the top-level viewTransitions says: a
+	// cross-document transition aborts the WebKitGTK web process in
+	// software-rendered setups.
+	ViewTransitions string `json:"viewTransitions,omitempty"`
+	// Lean tunes the memory-hygiene checks of `krate native check` and
+	// native builds.
+	Lean NativeLean `json:"lean,omitempty"`
+}
+
+// NativeLean tunes the lean-page checks (KR7270 to KR7275). Zero values keep
+// the defaults.
+type NativeLean struct {
+	// DataURIKB is the size in KiB above which an inlined data: URL is
+	// reported. Default 16.
+	DataURIKB int `json:"dataUriKb,omitempty"`
+	// ImageRatio is how many times larger (in pixels per side) an image file
+	// may be than its rendered size before it is reported. Default 2.
+	ImageRatio float64 `json:"imageRatio,omitempty"`
+	// ListItems is the number of items a statically visible list may render
+	// without a windowing component. Default 100.
+	ListItems int `json:"listItems,omitempty"`
+	// Ignore lists diagnostic codes (for example "KR7272") to silence.
+	Ignore []string `json:"ignore,omitempty"`
 }
 
 // NativeFeatures are explicit overrides for the webview features that the
@@ -373,6 +397,10 @@ func (c *Config) validateNative() (warnings []string, err error) {
 	if n.Memory != "" && !oneOf(n.Memory, NativeMemoryProfiles) {
 		return nil, nativeErr("memory", fmt.Sprintf("must be one of %s, got %q", strings.Join(NativeMemoryProfiles, ", "), n.Memory),
 			"\"balanced\" (default) trims the webview, \"minimal\" trims harder at some CPU cost, \"performance\" keeps the engine defaults")
+	}
+	if n.ViewTransitions != "" && n.ViewTransitions != "auto" {
+		return nil, nativeErr("viewTransitions", fmt.Sprintf("must be \"auto\" or omitted, got %q", n.ViewTransitions),
+			"a native build keeps View Transitions off unless you set \"auto\"")
 	}
 	if n.Host.MemoryMB < 0 {
 		return nil, nativeErr("host.memoryMB", fmt.Sprintf("must be >= 0, got %d", n.Host.MemoryMB), "omit it for the profile default")

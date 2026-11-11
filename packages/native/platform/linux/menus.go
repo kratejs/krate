@@ -298,6 +298,7 @@ func (a *App) PopupMenu(parent caps.WindowRef, items []caps.MenuItem, px, py int
 		// GdkRectangle { x, y, width, height }; anchors are GDK_GRAVITY_NORTH_WEST.
 		rect := [4]int32{int32(px), int32(py), 1, 1}
 		x.gtkMenuPopupRect(menu, gw, unsafe.Pointer(&rect[0]), 1, 1, 0)
+		a.popup = menu
 		// Handles stay registered until the process ends; context menus are
 		// short-lived and small.
 		return nil
@@ -319,7 +320,15 @@ func (a *App) ActivateMenuItem(ref caps.WindowRef, id string) bool {
 	if item == 0 {
 		return false
 	}
-	a.callMain(func() { a.x.gtkMenuItemActivate(item) })
+	a.callMain(func() {
+		a.x.gtkMenuItemActivate(item)
+		// A click closes the menu it hit; activating the item does not, and
+		// the open menu would keep its keyboard grab.
+		if a.popup != 0 && a.x.gtkMenuPopdown != nil {
+			a.x.gtkMenuPopdown(a.popup)
+			a.popup = 0
+		}
+	})
 	return true
 }
 

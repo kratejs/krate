@@ -59,6 +59,30 @@ func TestNativeCheckReportsDiagnostics(t *testing.T) {
 	}
 }
 
+// The lean-page checks warn but never fail the check, and the config can
+// silence a code.
+func TestNativeCheckLeanWarnings(t *testing.T) {
+	files := map[string]string{
+		"krate.config.json":   `{"native":{"appId":"com.acme.app"}}`,
+		"src/pages/index.tsx": nativePage,
+		"src/fonts.css":       "@font-face { font-family: Brand; src: url(/brand.woff2); }\n.glass { backdrop-filter: blur(8px); }\n",
+	}
+	code, out := runKrate(t, "native", "check", nativeProject(t, files))
+	if code != 0 {
+		t.Fatalf("warnings must not fail the check, exit %d:\n%s", code, out)
+	}
+	for _, want := range []string{"KR7272", "KR7273", "hint:", "2 lean-page warning(s)", "Native check passed"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
+	}
+	files["krate.config.json"] = `{"native":{"appId":"com.acme.app","lean":{"ignore":["KR7272"]}}}`
+	code, out = runKrate(t, "native", "check", nativeProject(t, files))
+	if code != 0 || strings.Contains(out, "KR7272") || !strings.Contains(out, "KR7273") {
+		t.Fatalf("native.lean.ignore should silence only KR7272 (exit %d):\n%s", code, out)
+	}
+}
+
 func TestNativeCheckWithoutHostCode(t *testing.T) {
 	root := nativeProject(t, map[string]string{"src/pages/index.tsx": nativePage})
 	code, out := runKrate(t, "native", "check", root)
