@@ -191,7 +191,7 @@ func (b *builder) bundleBuild(entry string) (string, []api.Message, error) {
 		Write:         false,
 		LogLevel:      api.LogLevelSilent,
 		Define:        map[string]string{"process.env.NODE_ENV": `"production"`},
-		Plugins:       []api.Plugin{b.hostPlugin(entry, b.genByID())},
+		Plugins:       []api.Plugin{b.virtualPlugin(entry, b.genByID(), false)},
 	}
 	tsstrip.HandleTierDecorators(&opts)
 	r := api.Build(opts)

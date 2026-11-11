@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"syscall"
@@ -17,6 +18,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/native"
 	"github.com/kratejs/krate/packages/compiler/internal/native/capability"
+	"github.com/kratejs/krate/packages/compiler/internal/native/runtimes"
 	"github.com/kratejs/krate/packages/compiler/internal/native/scaffold"
 )
 
@@ -47,6 +49,9 @@ func printNativeUsage(w io.Writer) {
 	fmt.Fprintf(w, "\nProfile flags:\n")
 	fmt.Fprintf(w, "  --out <file>     Profile path (default native.release.pgo, ./native.pgo)\n")
 	fmt.Fprintf(w, "  --browser        Run the app in browser mode and print its URL\n")
+	fmt.Fprintf(w, "\nCheck flags:\n")
+	fmt.Fprintf(w, "  --scriptc        Also run scriptc coverage on the host code (experimental)\n")
+	fmt.Fprintf(w, "  --scriptc-fail-on <level>  blockers (default), divergences, dynamic, dynamic-slots or type-claims\n")
 	fmt.Fprintf(w, "\nDev flags:\n")
 	fmt.Fprintf(w, "  --browser        No window: print a tokenized http://127.0.0.1 URL instead\n")
 	fmt.Fprintf(w, "  --port <n>       Browser-mode port (default: any free port)\n")
@@ -140,11 +145,55 @@ func runNativeCheck(flags cliFlags, args []string) {
 		}
 	}
 
+	if flags.Scriptc && len(diags) == 0 {
+		diags = append(diags, runScriptcCheck(root, cfg, flags)...)
+	}
+
 	if len(diags) > 0 {
 		fmt.Fprintf(os.Stderr, "\n%s%s  x Native check failed: %d error(s).%s\n", cBold, cRed, len(diags), cReset)
 		exit(1)
 	}
 	fmt.Printf("\n%s%s  + Native check passed.%s\n", cBold, cGreen, cReset)
+}
+
+// runScriptcCheck compiles the host bundle for scriptc and runs
+// `scriptc coverage --fail-on=<level>` on it. Its blockers come back as
+// KR7235 diagnostics at the original file and line.
+func runScriptcCheck(root string, cfg *config.Config, flags cliFlags) []diag.Diagnostic {
+	level := flags.ScriptcFailOn
+	if level == "" {
+		level = "blockers"
+	}
+	if !slices.Contains(runtimes.ScriptcFailOn, level) {
+		fmt.Fprintf(os.Stderr, "%sError:%s --scriptc-fail-on must be one of %s\n", cRed, cReset, strings.Join(runtimes.ScriptcFailOn, ", "))
+		exit(1)
+	}
+	b := build.New(root, cfg)
+	b.Verbose = flags.Verbose
+	ds, ran, err := b.NativeScriptcCheck(level)
+	if err != nil {
+		if d, ok := diag.FromError(err); ok && d.Code != "" {
+			return []diag.Diagnostic{d}
+		}
+		fmt.Fprintf(os.Stderr, "%sscriptc check error:%s %v\n", cRed, cReset, build.BuildErrorSummary(err))
+		exit(1)
+	}
+	if !ran {
+		fmt.Printf("%s  ! scriptc: no TypeScript host code to check.%s\n", cYellow, cReset)
+		return nil
+	}
+	var errs []diag.Diagnostic
+	for _, d := range ds {
+		if d.IsWarning() {
+			fmt.Printf("%s  ! %s%s\n", cYellow, d.Error(), cReset)
+			continue
+		}
+		errs = append(errs, d)
+	}
+	if len(errs) == 0 {
+		fmt.Printf("  scriptc coverage (--fail-on=%s): host code compiles.\n", level)
+	}
+	return errs
 }
 
 // printPlacementSummary lists the host modules and their functions.
@@ -241,6 +290,9 @@ func runNativeBuild(flags cliFlags, args []string) {
 	fmt.Printf("    permissions  %s\n", joinOrNone(m.Permissions))
 	if m.HostJS != nil {
 		fmt.Printf("    host js      %s\n", m.HostJS.Bundle)
+	}
+	for _, c := range m.HostChildren {
+		fmt.Printf("    %-12s %s (%d funcs, %d streams, %d signals)\n", c.Runtime+" host", c.Entry, len(c.Funcs), len(c.Streams), len(c.Signals))
 	}
 	if m.GoHost != nil {
 		fmt.Printf("    go host      %s (%d funcs, %d streams, %d signals)\n", m.GoHost.Binary, len(m.GoHost.Funcs), len(m.GoHost.Streams), len(m.GoHost.Signals))

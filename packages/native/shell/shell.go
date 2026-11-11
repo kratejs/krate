@@ -96,6 +96,8 @@ type app struct {
 	man   *Manifest
 	host  jsHost
 	child *gohost.Child
+	// hostChildren are the running JavaScript host children by entry path.
+	hostChildren map[string]*hostChild
 
 	ctl  *Control
 	quit func() // set by the run mode
@@ -208,7 +210,12 @@ func (a *app) close() {
 	a.mu.Lock()
 	host, child := a.host, a.child
 	a.host, a.child = nil, nil
+	hcs := a.hostChildren
+	a.hostChildren = nil
 	a.mu.Unlock()
+	for _, hc := range hcs {
+		hc.child.Stop()
+	}
 	if child != nil {
 		child.Stop()
 	}
@@ -229,8 +236,16 @@ func guard(what string, f func()) (err error) {
 }
 
 // reloadHostJS loads or reloads the hostjs bundle named by the manifest on
-// disk and registers what it exports.
+// disk and registers what it exports, and restarts the JavaScript host
+// children, which have no state worth keeping across a code change.
 func (a *app) reloadHostJS() error {
+	if err := a.reloadQuickJS(); err != nil {
+		return err
+	}
+	return a.restartHostChildren()
+}
+
+func (a *app) reloadQuickJS() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	man, err := ReadManifestFS(a.fsys)

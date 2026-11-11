@@ -89,8 +89,10 @@ type cliFlags struct {
 	Browser       bool
 	// Release asks `krate native build` for compiled executables. Targets
 	// holds every --target value (comma-separated lists allowed).
-	Release bool
-	Targets []string
+	Release       bool
+	Targets       []string
+	Scriptc       bool
+	ScriptcFailOn string
 }
 
 // exitHooks run, last registered first, before the process exits, so the run
@@ -373,6 +375,7 @@ var valuedFlags = map[string]bool{
 	"--config": true, "--out-dir": true, "--target": true, "--mode": true,
 	"--report": true, "--token": true, "--root": true, "--cpuprofile": true,
 	"--memprofile": true, "--host": true, "--port": true, "--out": true, "--shell": true,
+	"--scriptc-fail-on": true,
 }
 
 // parseFlagsChecked parses CLI flags, returning an error for malformed values
@@ -406,6 +409,8 @@ func parseFlagsChecked(args []string) (cliFlags, []string, error) {
 				flags.NativeOut = val
 			case "--shell":
 				flags.Shell, flags.WantShell = val, true
+			case "--scriptc-fail-on":
+				flags.ScriptcFailOn = val
 			case "--mode":
 				flags.Mode = val
 			case "--report":
@@ -434,6 +439,8 @@ func parseFlagsChecked(args []string) (cliFlags, []string, error) {
 			flags.Browser = true
 		case args[i] == "--release":
 			flags.Release = true
+		case args[i] == "--scriptc":
+			flags.Scriptc = true
 		case args[i] == "--go":
 			flags.GoHost = true
 		case args[i] == "--static-only":

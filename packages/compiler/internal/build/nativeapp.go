@@ -18,6 +18,8 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/native"
 	"github.com/kratejs/krate/packages/compiler/internal/native/capability"
 	"github.com/kratejs/krate/packages/compiler/internal/native/gobind"
+	"github.com/kratejs/krate/packages/compiler/internal/native/hostts"
+	"github.com/kratejs/krate/packages/compiler/internal/native/runtimes"
 )
 
 // NativeManifest is app.json, the contract between the build and the shell
@@ -31,6 +33,9 @@ type NativeManifest struct {
 	Fallbacks   []NativeFallback  `json:"fallbacks"`
 	HostJS      *NativeHostJSMeta `json:"hostjs,omitempty"`
 	GoHost      *NativeGoHostMeta `json:"gohost,omitempty"`
+	// HostChildren are the host code programs that run in a child process on
+	// Node, Bun or Deno (see native.host.runtime and native.host.islands).
+	HostChildren []NativeHostChildMeta `json:"hostchildren,omitempty"`
 	// Permissions is the SDK permission list. A derived build (see
 	// NativeAppOptions.Derive) writes the permissions the code needs and sets
 	// StrictPermissions so an empty list means nothing; otherwise it is
@@ -64,6 +69,21 @@ type NativeFallback struct {
 type NativeHostJSMeta struct {
 	Bundle string `json:"bundle"`
 	Map    string `json:"map,omitempty"`
+}
+
+// NativeHostChildMeta locates one JavaScript host child and lists what it
+// serves. Entry is the script and Command the argv that runs it, with
+// "{entry}" for the script path and "{sockdir}" for the shell's socket
+// directory; a release build replaces both by an executable (Entry set to the
+// compiled file, Command empty).
+type NativeHostChildMeta struct {
+	Runtime string   `json:"runtime"`
+	Entry   string   `json:"entry"`
+	Map     string   `json:"map,omitempty"`
+	Command []string `json:"command,omitempty"`
+	Funcs   []string `json:"funcs"`
+	Streams []string `json:"streams"`
+	Signals []string `json:"signals"`
 }
 
 // NativeGoHostMeta locates the Go host binary and lists what it serves.
@@ -104,6 +124,11 @@ type NativeAppResult struct {
 	Manifest       NativeManifest
 	// GoHostMain is the generated Go host program, "" without Go host code.
 	GoHostMain string
+	// HostGroups are the host bundles of the build, one per runtime, as the
+	// host build wrote them under .krate/native/host. A release build compiles
+	// the child groups (and the "scriptc" group) into executables with
+	// runtimes.BuildRelease.
+	HostGroups []hostts.Group
 	// ShellPath is the shell binary copied or built next to the app.
 	ShellPath string
 	// Notes are non-fatal remarks (for example a shell that could not be built).
@@ -258,6 +283,15 @@ func (b *Builder) BuildNativeApp(opts NativeAppOptions) (*NativeAppResult, error
 		}
 	}
 
+	if h := b.NativeHost(); h != nil {
+		res.HostGroups = h.Groups
+		children, notes, err := writeHostChildren(h, appDir, eff.Permissions)
+		if err != nil {
+			return nil, err
+		}
+		m.HostChildren = children
+		res.Notes = append(res.Notes, notes...)
+	}
 	if h := b.NativeHost(); h != nil && h.HostBundle != "" {
 		if err := copyNativeFile(h.HostBundle, filepath.Join(appDir, "host", "host.js")); err != nil {
 			return nil, err
@@ -531,4 +565,41 @@ func (b *Builder) deriveNativePermissions(eff *config.NativeConfig) (*capability
 	}
 	ds := permissionDiagnostics(res, eff.Permissions)
 	return res, ds, nil
+}
+
+// writeHostChildren copies the bundles of the child runtimes (node, bun, deno)
+// into the app directory and returns their app.json entries. The scriptc
+// variant is not copied: development runs that code on QuickJS, and a release
+// build compiles the bundle.
+func writeHostChildren(h *hostts.Result, appDir string, perms []string) ([]NativeHostChildMeta, []string, error) {
+	var out []NativeHostChildMeta
+	var notes []string
+	for _, g := range h.Groups {
+		rt := runtimes.Runtime(g.Runtime)
+		if !rt.Child() {
+			continue
+		}
+		rel := "host/" + g.Runtime + "/host.mjs"
+		if err := copyNativeFile(g.Bundle, filepath.Join(appDir, filepath.FromSlash(rel))); err != nil {
+			return nil, nil, err
+		}
+		meta := NativeHostChildMeta{
+			Runtime: g.Runtime, Entry: rel, Command: runtimes.Command(rt, perms),
+			Funcs: append([]string{}, g.Funcs...), Streams: append([]string{}, g.Streams...), Signals: append([]string{}, g.Signals...),
+		}
+		if _, err := os.Stat(g.SourceMap); err == nil {
+			if err := copyNativeFile(g.SourceMap, filepath.Join(appDir, filepath.FromSlash(rel+".map"))); err != nil {
+				return nil, nil, err
+			}
+			meta.Map = rel + ".map"
+		}
+		sort.Strings(meta.Funcs)
+		sort.Strings(meta.Streams)
+		sort.Strings(meta.Signals)
+		out = append(out, meta)
+		if _, err := exec.LookPath(meta.Command[0]); err != nil {
+			notes = append(notes, fmt.Sprintf("%s is not on PATH: this app directory needs it to start its host code (a release build bundles the runtime)", meta.Command[0]))
+		}
+	}
+	return out, notes, nil
 }

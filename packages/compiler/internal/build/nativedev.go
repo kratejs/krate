@@ -22,6 +22,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/config"
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/native"
+	"github.com/kratejs/krate/packages/compiler/internal/native/runtimes"
 )
 
 // NativeChangeClassifier decides what a changed file means for a running
@@ -192,7 +193,7 @@ type nativeShell struct {
 }
 
 // shellTaggedPrefixes are the stderr prefixes the shell already adds.
-var shellTaggedPrefixes = []string{"[gohost] ", "[host] ", "[webview] ", "krate-shell: "}
+var shellTaggedPrefixes = []string{"[gohost] ", "[host] ", "[node] ", "[bun] ", "[deno] ", "[webview] ", "krate-shell: "}
 
 func startNativeShell(path, appDir string, browser bool, addr string, stderr io.Writer) (*nativeShell, error) {
 	args := []string{"--dev"}
@@ -496,9 +497,11 @@ func (nd *nativeDev) captureState() {
 			}
 		}
 	}
-	if h := nd.b.NativeHost(); h != nil && h.SourceMap != "" {
-		for _, s := range sourceMapSources(h.SourceMap) {
-			nd.deps.HostDeps[s] = true
+	if h := nd.b.NativeHost(); h != nil {
+		for _, g := range h.Groups {
+			for _, s := range sourceMapSources(g.SourceMap) {
+				nd.deps.HostDeps[s] = true
+			}
 		}
 	}
 }
@@ -529,12 +532,30 @@ func sourceMapSources(mapPath string) []string {
 }
 
 func (nd *nativeDev) hostBundleSum() [32]byte {
-	if h := nd.b.NativeHost(); h != nil && h.HostBundle != "" {
-		if data, err := os.ReadFile(h.HostBundle); err == nil {
-			return sha256.Sum256(data)
+	h := nd.b.NativeHost()
+	if h == nil {
+		return [32]byte{}
+	}
+	// One digest over every bundle the app directory holds: the QuickJS one
+	// and those of the child runtimes.
+	sum := sha256.New()
+	any := false
+	for _, g := range h.Groups {
+		if rt := runtimes.Runtime(g.Runtime); rt != runtimes.QuickJS && !rt.Child() {
+			continue
+		}
+		if data, err := os.ReadFile(g.Bundle); err == nil {
+			fmt.Fprintln(sum, g.Runtime, len(data))
+			sum.Write(data)
+			any = true
 		}
 	}
-	return [32]byte{}
+	if !any {
+		return [32]byte{}
+	}
+	var out [32]byte
+	copy(out[:], sum.Sum(nil))
+	return out
 }
 
 // goDigest summarizes everything the Go host program is generated from, apart
@@ -655,18 +676,25 @@ func (nd *nativeDev) syncHost(goEdited bool) error {
 	b := nd.b
 	manifestDirty := false
 	reload := false
-	if h := b.NativeHost(); h != nil && h.HostBundle != "" {
+	if h := b.NativeHost(); h != nil && len(h.Groups) > 0 {
 		sum := nd.hostBundleSum()
 		dst := filepath.Join(nd.appDir, "host", "host.js")
-		if _, err := os.Stat(dst); sum != nd.hostSum || err != nil {
-			if err := copyNativeFile(h.HostBundle, dst); err != nil {
-				return err
-			}
-			if h.SourceMap != "" {
-				if _, err := os.Stat(h.SourceMap); err == nil {
-					_ = copyNativeFile(h.SourceMap, filepath.Join(nd.appDir, "host", "host.js.map"))
+		_, statErr := os.Stat(dst)
+		if h.HostBundle == "" {
+			statErr = nil
+		}
+		if sum != nd.hostSum || statErr != nil {
+			if h.HostBundle != "" {
+				if err := copyNativeFile(h.HostBundle, dst); err != nil {
+					return err
+				}
+				if h.SourceMap != "" {
+					if _, err := os.Stat(h.SourceMap); err == nil {
+						_ = copyNativeFile(h.SourceMap, filepath.Join(nd.appDir, "host", "host.js.map"))
+					}
 				}
 			}
+			// The child runtimes' scripts are rewritten by rewriteHostManifest.
 			nd.hostSum = sum
 			reload = true
 			manifestDirty = true
@@ -741,6 +769,14 @@ func (nd *nativeDev) rewriteHostManifest() error {
 		if _, err := os.Stat(filepath.Join(nd.appDir, "host", "host.js.map")); err == nil && h.SourceMap != "" {
 			m.HostJS.Map = "host/host.js.map"
 		}
+	}
+	m.HostChildren = nil
+	if h := nd.b.NativeHost(); h != nil {
+		children, _, err := writeHostChildren(h, nd.appDir, nativeEffective(nd.b.Cfg).Permissions)
+		if err != nil {
+			return err
+		}
+		m.HostChildren = children
 	}
 	m.GoHost = nil
 	if g := nd.b.NativeGo(); g != nil && len(g.Glue) > 0 {

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strings"
 
 	"github.com/kratejs/krate/packages/native/sdk/permission"
@@ -32,6 +33,10 @@ type Manifest struct {
 
 	HostJS *HostJSSpec `json:"hostjs,omitempty"`
 	GoHost *GoHostSpec `json:"gohost,omitempty"`
+	// HostChildren are TypeScript host code programs that run in a child
+	// process on Node, Bun, Deno or as a compiled executable (scriptc), each
+	// serving its own ids. See README.md.
+	HostChildren []HostChildSpec `json:"hostchildren,omitempty"`
 
 	// Permissions lists what the UI may use of the SDK (see package
 	// sdk/permission). Empty means the default set (os:info, kv, db, window,
@@ -99,6 +104,31 @@ type GoHostSpec struct {
 	Streams []string `json:"streams"`
 	Signals []string `json:"signals"`
 }
+
+// HostChildSpec describes one JavaScript host child: a program that speaks the
+// gohost child protocol (package hostchild is its runtime) and serves the ids
+// listed here, plus any it reports at run time.
+type HostChildSpec struct {
+	// Runtime is "node", "bun", "deno" or "scriptc". It labels the child in
+	// logs; how it starts is decided by Command and Entry.
+	Runtime string `json:"runtime"`
+	// Entry is the child's file, relative to the app directory: the script
+	// when Command is set, otherwise an executable (".exe" is appended on
+	// Windows when missing).
+	Entry string `json:"entry"`
+	// Map is the entry's source map (informational).
+	Map string `json:"map,omitempty"`
+	// Command is the argv that starts a script entry. The element "{entry}" is
+	// replaced by the absolute path of Entry. A first element without a path
+	// separator is looked up on PATH. Empty means Entry is the executable.
+	Command []string `json:"command,omitempty"`
+	Funcs   []string `json:"funcs"`
+	Streams []string `json:"streams"`
+	Signals []string `json:"signals"`
+}
+
+// HostChildRuntimes are the values of HostChildSpec.Runtime.
+var HostChildRuntimes = []string{"node", "bun", "deno", "scriptc"}
 
 var appIDRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
@@ -205,6 +235,39 @@ func (m *Manifest) normalize() error {
 			for _, id := range list {
 				if id == "" {
 					return fmt.Errorf("gohost: empty function id")
+				}
+			}
+		}
+	}
+	seen := map[string]bool{}
+	for i := range m.HostChildren {
+		h := &m.HostChildren[i]
+		field := fmt.Sprintf("hostchildren[%d]", i)
+		if !slices.Contains(HostChildRuntimes, h.Runtime) {
+			return fmt.Errorf("%s.runtime %q must be one of %s", field, h.Runtime, strings.Join(HostChildRuntimes, ", "))
+		}
+		if err := local(field+".entry", h.Entry); err != nil {
+			return err
+		}
+		if len(h.Command) == 0 && runtime.GOOS == "windows" && !strings.HasSuffix(strings.ToLower(h.Entry), ".exe") {
+			h.Entry += ".exe"
+		}
+		if seen[h.Entry] {
+			return fmt.Errorf("%s.entry %q is listed twice", field, h.Entry)
+		}
+		seen[h.Entry] = true
+		if h.Map != "" {
+			if err := local(field+".map", h.Map); err != nil {
+				return err
+			}
+		}
+		if len(h.Command) > 0 && (h.Command[0] == "" || !slices.Contains(h.Command, "{entry}")) {
+			return fmt.Errorf("%s.command must name a program and contain {entry}", field)
+		}
+		for _, list := range [][]string{h.Funcs, h.Streams, h.Signals} {
+			for _, id := range list {
+				if id == "" {
+					return fmt.Errorf("%s: empty function id", field)
 				}
 			}
 		}

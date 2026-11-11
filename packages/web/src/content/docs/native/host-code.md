@@ -159,8 +159,10 @@ What happens:
   with sources). It registers each function with `globalThis.__krateHost`:
   `register(id, fn, "func" | "stream")` and `registerSignal(id, signal)`.
 - **Manifest.** `.krate/native/host/manifest.json` lists every registered id with
-  its kind and `file`/`line`, and the imports left external (`node:*` and bare
-  Node built-ins).
+  its kind and `file`/`line`, and the imports left external. On the embedded
+  runtime a Node built-in import is an error (KR7230); with another
+  [host runtime](/docs/native/runtimes/) the built-ins stay external and each runtime gets its own bundle,
+  `host/<runtime>/host.mjs`.
 - **Types.** For each host module the UI imports, `.krate/native/types/<module id>.d.ts`
   re-declares its exports with async types (`Promise<Awaited<R>>` for functions,
   `AsyncIterable<T>` for generators) using `typeof import(...)`, so no type
@@ -195,6 +197,7 @@ rejects functions and class instances at call time.
 | KR7191 | An inline host function cannot be split: an anonymous default export, an expression-bodied arrow, or two functions with one name in a module |
 | KR7192 | The host bundle failed (unresolved import, syntax the script bundle cannot express) |
 | KR7193 | Warning: host code uses an API the embedded QuickJS runtime lacks. Use a Go host function or `native.host.islands` |
+| KR7230 | Host code on QuickJS imports a Node built-in (`node:fs`, `path`, ...). Use `native.host.islands` or `native.host.runtime`; see [Host runtimes](/docs/native/runtimes/) |
 | KR7195 | The UI imports a name the host module does not export |
 | KR7196 | The UI imports a host export that is a plain value, not a function or `hostSignal()` |
 

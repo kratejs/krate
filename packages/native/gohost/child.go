@@ -39,6 +39,19 @@ type ChildOptions struct {
 	Prefix string
 	// ReadyTimeout bounds the wait for "ready". Default 30 s.
 	ReadyTimeout time.Duration
+	// Args are passed to the program after its name. A JavaScript host child
+	// is started as a runtime (node, bun, deno) with its script in Args.
+	Args []string
+	// Dir is the child's working directory. Default: the parent's.
+	Dir string
+	// Name separates the socket directory of one Child from another's in the
+	// same process (keep it short: a unix socket path is limited to about 100
+	// bytes). Empty for the only or first child.
+	Name string
+	// ReadyAnyLine accepts the "ready" line anywhere on stdout, not only as
+	// the first line. A JavaScript host child needs it: the host code may log
+	// while it loads, before the runtime can report that it is listening.
+	ReadyAnyLine bool
 }
 
 // Child manages one Go host child process at a time.
@@ -173,6 +186,9 @@ func (c *Child) Stop() error {
 	c.started = false
 	if c.dir != "" {
 		_ = os.RemoveAll(c.dir)
+		if c.o.Name != "" {
+			_ = os.Remove(filepath.Dir(c.dir)) // succeeds only when no sibling child remains
+		}
 		c.dir = ""
 	}
 	return nil
@@ -185,6 +201,9 @@ func (c *Child) socketDir() (string, error) {
 	var base string
 	if cache, err := os.UserCacheDir(); err == nil {
 		base = filepath.Join(cache, "krate", "native", strconv.Itoa(os.Getpid()))
+		if c.o.Name != "" {
+			base = filepath.Join(base, c.o.Name)
+		}
 		if err := os.MkdirAll(base, 0o700); err != nil {
 			base = ""
 		}
@@ -215,7 +234,8 @@ func (c *Child) startLocked(ctx context.Context) error {
 		return fmt.Errorf("gohost: socket path %q is too long", socket)
 	}
 
-	cmd := exec.Command(c.binary)
+	cmd := exec.Command(c.binary, c.o.Args...)
+	cmd.Dir = c.o.Dir
 	cmd.Env = append(append(os.Environ(), c.env...), SocketEnv+"="+socket)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -242,7 +262,7 @@ func (c *Child) startLocked(ctx context.Context) error {
 		first := isOut
 		for sc.Scan() {
 			line := strings.TrimRight(sc.Text(), "\r")
-			if first && line == ReadyLine {
+			if (first || (isOut && c.o.ReadyAnyLine)) && line == ReadyLine {
 				first = false
 				readyOnce.Do(func() { close(ready) })
 				continue

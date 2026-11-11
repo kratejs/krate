@@ -155,3 +155,12 @@ Same frame stream carrying the dev hub's messages as `{"hmr": <message>}`.
 the format. Both sides must decode every vector and re-encode it byte for byte,
 except where a `.flags.json` says one side cannot (Go has no Map/Set encoder; JS
 cannot write `-0`). Forms only one side emits live in that side's own tests.
+
+## JavaScript host children
+
+A TypeScript host program on Node, Bun or Deno (`packages/native/hostchild`) is a
+child like the Go host child: `KRATE_GOHOST_SOCKET`, `ready` on stdout, exit on
+stdin EOF or SIGTERM, and the four endpoints above. It adds one endpoint, so
+that the shell learns ids whose kind is only known when the code runs:
+
+`GET /__krate/hostchild/list` answers JSON `{"funcs": [...], "streams": [...], "signals": [...]}`.

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kratejs/krate/packages/compiler/internal/config"
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/native/jsruntime"
 )
@@ -175,7 +176,7 @@ export default function P() { return <p onClick={open}>x</p>; }
 	}
 }
 
-func TestNodeBuiltinsStayExternal(t *testing.T) {
+func TestNodeBuiltinsStayExternalOnNode(t *testing.T) {
 	_, res, ds := buildProject(t, map[string]string{
 		"src/lib/files.host.ts": `import { readFileSync } from "node:fs";
 import path from "path";
@@ -184,17 +185,40 @@ export function read(p: string) { return readFileSync(path.join("/", p), "utf8")
 		"src/pages/index.tsx": `import { read } from "../lib/files.host";
 export default function P() { return <p onClick={() => read("a")}>x</p>; }
 `,
-	}, nil)
+	}, func(c *config.Config) { c.Native = &config.NativeConfig{Host: config.NativeHost{Runtime: "node"}} })
 	mustNoErrors(t, ds)
-	if got := strings.Join(res.Externals, ","); got != "node:fs,path" {
-		t.Fatalf("externals %q", got)
+	// A bare built-in is rewritten to its node: form, which every runtime accepts.
+	if got := strings.Join(res.Externals, ","); got != "" {
+		t.Fatalf("quickjs externals %q on a node project", got)
+	}
+	if len(res.Groups) != 1 || res.Groups[0].Runtime != "node" {
+		t.Fatalf("groups %+v", res.Groups)
+	}
+	ext := strings.Join(res.Groups[0].Externals, ",")
+	if !strings.Contains(ext, "node:fs") || !strings.Contains(ext, "node:path") || strings.Contains(ext, ",path") {
+		t.Fatalf("node externals %q", ext)
+	}
+	if res.HostBundle != "" {
+		t.Fatalf("a node project wrote a QuickJS bundle: %s", res.HostBundle)
+	}
+	code := read(t, res.Groups[0].Bundle)
+	for _, want := range []string{`from "node:fs"`, `from "node:path"`, "start();", "createServer", `register("src/lib/files.host.read"`} {
+		if !strings.Contains(code, want) {
+			t.Errorf("node bundle lacks %q", want)
+		}
+	}
+	if !strings.HasSuffix(filepath.ToSlash(res.Groups[0].Bundle), "host/node/host.mjs") {
+		t.Errorf("bundle path %s", res.Groups[0].Bundle)
+	}
+	if res.Registered[0].Runtime != "node" {
+		t.Errorf("registration runtime %q", res.Registered[0].Runtime)
 	}
 	var m manifest
 	if err := json.Unmarshal([]byte(read(t, res.Manifest)), &m); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(m.Externals, ",") != "node:fs,path" {
-		t.Fatalf("manifest externals %v", m.Externals)
+	if len(m.Groups) != 1 || m.Groups[0].Runtime != "node" || m.Groups[0].Ids[0] != "src/lib/files.host.read" {
+		t.Fatalf("manifest groups %+v", m.Groups)
 	}
 }
 

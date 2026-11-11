@@ -180,6 +180,18 @@ shell starts it with `KRATE_GOHOST_SOCKET` (a unix socket path under the user
 cache directory), `KRATE_APP_DIR` and, in dev, `KRATE_DEV=1`, and forwards the
 manifest's ids to it with `scheme.Remote`.
 
+## JavaScript host children
+
+An app.json `hostchildren` entry (see `docs/native/app-json`) runs TypeScript
+host code on Node, Bun or Deno (or a compiled scriptc executable) as a child
+process, the same way the Go host child runs. The shell starts it with
+`command` (`{entry}` is the script, `{sockdir}` the socket directory), sets
+`KRATE_GOHOST_SOCKET` and the other `KRATE_*` variables, accepts the `ready`
+line anywhere on stdout (host code may log while it loads), asks the child for
+the ids it registered (`GET /__krate/hostchild/list`) and forwards the union of
+those and the manifest's lists with `scheme.Remote`. `reload-hostjs` restarts
+the children. See `../hostchild` for the child runtime.
+
 ## RunOptions
 
 | Field | Meaning |
