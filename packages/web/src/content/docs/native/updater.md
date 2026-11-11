@@ -68,6 +68,15 @@ relative `url` resolves against the feed URL.
 context), base64. Hashing first lets the client verify a large file as a
 stream. Artifact URLs must be https.
 
+> The signature covers the file and nothing else; the feed JSON, including
+> `version`, is not signed. Someone who controls the feed (a compromised server
+> or CDN, not the signing key) can therefore point `url` at an older, validly
+> signed artifact and report a newer `version`, which downgrades users to a
+> release with known bugs. The client cannot tell, because the version is not
+> inside the signed bytes. Serve the feed from a location you trust as much as
+> the key, and keep old artifacts you no longer want installed off the feed's
+> host (or rotate the key when you retire a vulnerable release).
+
 ## Update files
 
 | OS | File | Contents |
