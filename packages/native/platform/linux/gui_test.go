@@ -182,6 +182,7 @@ func newTestServer() *testServer {
 		w.WriteHeader(204)
 	})
 	registerMemHandlers(s)
+	registerViewHandlers(s)
 	s.mux.HandleFunc("/report", func(w http.ResponseWriter, r *http.Request) {
 		var rep map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&rep); err != nil {

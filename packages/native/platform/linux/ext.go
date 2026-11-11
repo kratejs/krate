@@ -55,6 +55,16 @@ type ext struct {
 	gtkBoxReorderChild func(box, child uintptr, pos int32)
 	gtkContainerRemove func(c, child uintptr)
 
+	// split panes
+	gtkPanedNew        func(orient int32) uintptr
+	gtkPanedPack1      func(p, child uintptr, resize, shrink int32)
+	gtkPanedPack2      func(p, child uintptr, resize, shrink int32)
+	gtkPanedSetPos     func(p uintptr, pos int32)
+	gtkPanedGetPos     func(p uintptr) int32
+	gtkWidgetAllocW    func(w uintptr) int32
+	gtkWidgetAllocH    func(w uintptr) int32
+	gtkWidgetGrabFocus func(w uintptr)
+
 	// gtk menus
 	gtkMenuBarNew       func() uintptr
 	gtkMenuNew          func() uintptr
@@ -211,6 +221,14 @@ func loadExt() *ext {
 	bind(gtk, &e.gtkBoxPackStart, "gtk_box_pack_start")
 	bind(gtk, &e.gtkBoxReorderChild, "gtk_box_reorder_child")
 	bind(gtk, &e.gtkContainerRemove, "gtk_container_remove")
+	bind(gtk, &e.gtkPanedNew, "gtk_paned_new")
+	bind(gtk, &e.gtkPanedPack1, "gtk_paned_pack1")
+	bind(gtk, &e.gtkPanedPack2, "gtk_paned_pack2")
+	bind(gtk, &e.gtkPanedSetPos, "gtk_paned_set_position")
+	bind(gtk, &e.gtkPanedGetPos, "gtk_paned_get_position")
+	bind(gtk, &e.gtkWidgetAllocW, "gtk_widget_get_allocated_width")
+	bind(gtk, &e.gtkWidgetAllocH, "gtk_widget_get_allocated_height")
+	bind(gtk, &e.gtkWidgetGrabFocus, "gtk_widget_grab_focus")
 
 	bind(gtk, &e.gtkMenuBarNew, "gtk_menu_bar_new")
 	bind(gtk, &e.gtkMenuNew, "gtk_menu_new")

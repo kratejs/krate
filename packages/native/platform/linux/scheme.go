@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"sync"
 	"unsafe"
+
+	"github.com/kratejs/krate/packages/native/platform/caps"
 )
 
 // schemeCallback runs on the main thread for each krate:// request. It only
@@ -48,12 +50,12 @@ func schemeCallback(request, data uintptr) uintptr {
 		resp.fail("bad request URI")
 		return 0
 	}
-	go runRequest(a.handler, method, u, hdr, body, resp)
+	go runRequest(a.handler, a.viewOfRequest(request), method, u, hdr, body, resp)
 	return 0
 }
 
-func runRequest(h http.Handler, method string, u *url.URL, hdr http.Header, body *streamBody, resp *schemeResponder) {
-	ctx, cancel := context.WithCancel(context.Background())
+func runRequest(h http.Handler, view caps.ViewRef, method string, u *url.URL, hdr http.Header, body *streamBody, resp *schemeResponder) {
+	ctx, cancel := context.WithCancel(caps.WithView(context.Background(), view))
 	var rb io.ReadCloser = http.NoBody
 	if body != nil {
 		rb = body

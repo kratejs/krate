@@ -62,6 +62,7 @@ func RegisterUI(r *scheme.Registry, h *sdk.Host, set permission.Set, override fu
 		allowed = func(_, p string) bool { return override(p) }
 	}
 	h.SetWindowScope(set.ScopeChild)
+	h.SetWindowUnscope(set.Unscope)
 	h.RegisterUIFor(r, allowed, permission.Denied)
 }
 

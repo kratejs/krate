@@ -22,13 +22,21 @@ const (
 	policyNewWindow  = 1 // WEBKIT_POLICY_DECISION_TYPE_NEW_WINDOW_ACTION
 )
 
-// Window is one top-level window with one webview.
+// Window is one top-level window with one webview, or several laid out as
+// split panes (see views.go).
 type Window struct {
 	app  *App
 	id   uintptr
 	win  uintptr // GtkWindow
-	view uintptr // WebKitWebView
-	box  uintptr // GtkBox holding the menu bar and the view
+	view uintptr // the primary WebKitWebView; mirrors pv.widget
+	box  uintptr // GtkBox holding the menu bar and the pane tree
+
+	// Touched on the main thread only.
+	pv     *view   // the primary view
+	extra  []*view // views added with AddView, in creation order
+	layout *caps.LayoutNode
+	root   uintptr // the widget in box: the primary view or the top pane
+	panes  []*paneState
 
 	mu         sync.Mutex
 	alive      bool
@@ -39,9 +47,6 @@ type Window struct {
 	released     bool // the webview was destroyed; see release.go
 	releasing    bool
 	abort        bool // Show arrived while the release waited for the page
-	route        string
-	state        caps.ViewState
-	scrollJS     string
 	fixedW       int
 	fixedH       int
 	preventClose bool
@@ -64,8 +69,8 @@ func (a *App) newWindow(opts WindowOptions, onLoad func()) (*Window, error) {
 	if w.win == 0 {
 		return nil, errors.New("krate: gtk_window_new failed")
 	}
-	w.view = a.newView()
-	if w.view == 0 {
+	widget := a.newView()
+	if widget == 0 {
 		api.gtkWidgetDestroy(w.win)
 		return nil, errors.New("krate: webkit_web_view_new failed")
 	}
@@ -74,32 +79,42 @@ func (a *App) newWindow(opts WindowOptions, onLoad func()) (*Window, error) {
 	w.id = a.nextWin
 	a.windows[w.id] = w
 	a.mu.Unlock()
+	w.pv = a.registerView(w, widget, true)
 
 	api.gtkWindowSetTitle(w.win, opts.Title)
 	api.gtkWindowSetDefSize(w.win, int32(opts.Width), int32(opts.Height))
 	api.gtkWindowSetResize(w.win, b2i(opts.Resizable))
 	w.fixedW, w.fixedH = opts.Width, opts.Height
-	if !opts.Resizable {
-		api.gtkWidgetSetSizeReq(w.view, int32(opts.Width), int32(opts.Height))
-	}
 	a.applyViewSettings(w.view)
 	api.gSignalConnectData(w.win, "destroy", cbDestroy, w.id, 0, 0)
 	if x := a.x; x.gtkBoxNew != nil && x.gtkWindowPresent != nil {
 		api.gSignalConnectData(w.win, "delete-event", cbDelete, w.id, 0, 0)
 		api.gSignalConnectData(w.win, "window-state-event", cbWinState, w.id, 0, 0)
 	}
-	w.connectView()
+	a.connectView(w.pv)
 
 	if x := a.x; x.gtkBoxNew != nil {
 		w.box = x.gtkBoxNew(1, 0)
 		api.gtkContainerAdd(w.win, w.box)
 	}
-	w.packView()
-	w.route = cleanPath(opts.Path)
-	api.wkViewLoadURI(w.view, Origin+w.route)
+	if !opts.Resizable {
+		api.gtkWidgetSetSizeReq(w.sizeTarget(), int32(opts.Width), int32(opts.Height))
+	}
+	w.applyLayout()
+	w.pv.load(opts.Path)
 	api.gtkWidgetShowAll(w.win)
 	a.applyAppMenu(w)
 	return w, nil
+}
+
+// sizeTarget is the widget that carries the fixed size of a window that
+// cannot be resized: the box around the pane tree, so that splits can divide
+// the whole size.
+func (w *Window) sizeTarget() uintptr {
+	if w.box != 0 {
+		return w.box
+	}
+	return w.view
 }
 
 func b2i(b bool) int32 {
@@ -134,11 +149,7 @@ func (w *Window) Navigate(path string) {
 		if !w.alive {
 			return
 		}
-		w.route = cleanPath(path)
-		w.state = caps.ViewState{Route: w.route}
-		if w.view != 0 {
-			w.app.api.wkViewLoadURI(w.view, Origin+w.route)
-		}
+		w.pv.load(path)
 	})
 }
 
@@ -168,8 +179,8 @@ func (w *Window) SetSize(width, height int) {
 		}
 		api := w.app.api
 		w.fixedW, w.fixedH = width, height
-		if !w.resizable && w.view != 0 {
-			api.gtkWidgetSetSizeReq(w.view, int32(width), int32(height))
+		if !w.resizable && w.sizeTarget() != 0 {
+			api.gtkWidgetSetSizeReq(w.sizeTarget(), int32(width), int32(height))
 		}
 		api.gtkWindowResize(w.win, int32(width), int32(height))
 	})
@@ -224,6 +235,20 @@ func destroyCallback(widget, id uintptr) uintptr {
 	a.mu.Unlock()
 	if w != nil {
 		w.alive = false
+		views := w.allViews()
+		for _, v := range views {
+			a.unregisterView(v)
+			v.widget = 0
+		}
+		for _, p := range w.panes {
+			delete(a.panes, p.id)
+		}
+		w.panes, w.root = nil, 0
+		// Views first: the SDK forgets a window's views when it hears that
+		// the window closed.
+		for _, v := range views {
+			a.emitView(v, caps.ViewClosed, "")
+		}
 		a.emitWindow(w, caps.WindowClosed)
 	}
 	if w != nil && !last {
@@ -240,25 +265,37 @@ func destroyCallback(widget, id uintptr) uintptr {
 	return 0
 }
 
-// closeCallback handles window.close() from the page.
-func closeCallback(view, id uintptr) uintptr {
-	if w := theApp.windowByID(id); w != nil {
-		w.Close()
+// closeCallback handles window.close() from a page. In the primary view it
+// closes the window; in another view it removes the view.
+func closeCallback(_, ref uintptr) uintptr {
+	v := theApp.viewByRef(ref)
+	if v == nil {
+		return 0
 	}
+	if v.primary {
+		v.w.Close()
+		return 0
+	}
+	v.w.removeView(v.ref, caps.ViewClosed)
 	return 0
 }
 
-func loadCallback(view, event, id uintptr) uintptr {
+func loadCallback(_, event, ref uintptr) uintptr {
 	if event != loadFinished {
 		return 0
 	}
-	w := theApp.windowByID(id)
-	if w == nil {
+	v := theApp.viewByRef(ref)
+	if v == nil {
 		return 0
 	}
-	if js := w.scrollJS; js != "" && w.view != 0 {
-		w.scrollJS = ""
-		theApp.api.wkViewEval(w.view, js, -1, 0, 0, 0, 0, 0)
+	w := v.w
+	if js := v.scrollJS; js != "" && v.widget != 0 {
+		v.scrollJS = ""
+		theApp.api.wkViewEval(v.widget, js, -1, 0, 0, 0, 0, 0)
+	}
+	theApp.emitView(v, caps.ViewNavigated, v.currentRoute())
+	if !v.primary {
+		return 0
 	}
 	w.mu.Lock()
 	fn := w.onLoadDone

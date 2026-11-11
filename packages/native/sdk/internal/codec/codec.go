@@ -70,6 +70,16 @@ func (r *R) Int() int64 {
 	return v
 }
 
+// Float reads a number.
+func (r *R) Float() float64 {
+	if r.err != nil {
+		return 0
+	}
+	v, err := r.D.Float()
+	r.fail(err)
+	return v
+}
+
 // Bytes reads binary data.
 func (r *R) Bytes() []byte {
 	if r.err != nil {

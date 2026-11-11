@@ -53,6 +53,7 @@ func buildTestApp(root, page string, withGo bool, start int) (*testApp, error) {
 		"dist/index.html":            page,
 		"dist/tasks/[id]/index.html": "<!doctype html><title>task</title>task page",
 		"dist/404.html":              "<!doctype html>not found page",
+		"dist/forge/index.html":      forgePageHTML,
 		"host/host.js":               hostJSv1,
 		"host/host.js.map":           `{"version":3,"sources":[],"names":[],"mappings":""}`,
 	}
@@ -190,3 +191,29 @@ func (r *reportSink) wait(t testing.TB, kind string, ok func(map[string]any) boo
 		}
 	}
 }
+
+// forgePageHTML calls krate/kv.get four ways: as the page is, and with three
+// forged x-krate-window headers. It reports the error code of each (or "ok").
+const forgePageHTML = `<!doctype html><title>forge</title><body>forge<script>
+(async function () {
+  var tag = new URLSearchParams(location.search).get("tag") || "";
+  function frame(o) {
+    var j = new TextEncoder().encode(JSON.stringify(o));
+    var b = new Uint8Array(4 + j.length + 2);
+    new DataView(b.buffer).setUint32(0, j.length);
+    b.set(j, 4);
+    return b;
+  }
+  async function call(header) {
+    var h = {};
+    if (header !== undefined) h["x-krate-window"] = header;
+    var r = await fetch("/__krate/call", {method: "POST", headers: h, body: frame({calls: [{id: 1, fn: "krate/kv.get", args: ["k"]}]})});
+    var buf = new Uint8Array(await r.arrayBuffer());
+    var n = new DataView(buf.buffer).getUint32(0);
+    var res = JSON.parse(new TextDecoder().decode(buf.subarray(4, 4 + n)));
+    return res.err ? res.err.code : "ok";
+  }
+  var out = {plain: await call(), forgedMain: await call("main"), forgedEmpty: await call(""), forgedOther: await call("w999")};
+  await fetch("/__test/report", {method: "POST", body: JSON.stringify({kind: "forge", tag: tag, result: out})});
+})();
+</script></body>`

@@ -15,8 +15,13 @@ import (
 // still know it. A page opened without the parameter and with nothing stored
 // keeps the client's random id.
 //
-// A script that can run in a window can set another id. Scopes narrow what a
-// window's own code can do by accident or through a bug; they are not a
+// In a native window the header is only a label: the platform layer tags
+// every request with the webview it came from and the shell maps that view to
+// its window and scope, ignoring the header (see app.identify). Page script
+// that sets another id gains nothing. The header decides only where there is
+// no native view, in browser mode (krate native dev --browser), which has one
+// browser context per tab and no way to tell tabs apart natively; there a
+// scope narrows what a window's own code does by accident, and is not a
 // sandbox for code you do not trust.
 const windowIDScript = `<script>(function(){try{var k="__krate_win",v=new URLSearchParams(location.search).get(k)||sessionStorage.getItem(k);if(v){sessionStorage.setItem(k,v);globalThis.__KRATE_WINDOW__=v}}catch(e){}})()</script>`
 

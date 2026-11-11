@@ -32,6 +32,7 @@ import (
 	"github.com/kratejs/krate/packages/native/platform/linux"
 	"github.com/kratejs/krate/packages/native/scheme"
 	"github.com/kratejs/krate/packages/native/sdk"
+	sdkall "github.com/kratejs/krate/packages/native/sdk/all"
 	"github.com/kratejs/krate/packages/native/sdk/clipboard"
 	"github.com/kratejs/krate/packages/native/sdk/dialog"
 	"github.com/kratejs/krate/packages/native/sdk/menu"
@@ -60,7 +61,15 @@ func TestMain(m *testing.M) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		io.WriteString(w, "<!doctype html><title>"+r.URL.Path+"</title><body>"+r.URL.Path)
 	})
-	appHandler := scheme.New(scheme.Options{Registry: reg})
+	set := permission.AllowAll()
+	// The ids the view tests call: a data id the window scopes can narrow.
+	permission.Register(reg, set, "krate/kv.get", func(ctx krate.Ctx, args *wire.Decoder, out *wire.Encoder) error {
+		out.String("secret")
+		return nil
+	})
+	registerForgeHandlers(mux)
+	registerChatHandlers(mux)
+	appHandler := scheme.New(scheme.Options{Registry: reg, Identify: identify})
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/__krate/") {
 			appHandler.ServeHTTP(w, r)
@@ -75,7 +84,7 @@ func TestMain(m *testing.M) {
 	}
 	plat = app
 	host.Attach(app)
-	host.RegisterUI(reg, func(p string) bool { return true }, permission.Denied)
+	sdkall.RegisterUI(reg, host, set, nil)
 	ui = appHandler
 	code := 0
 	err = app.Run(func() {

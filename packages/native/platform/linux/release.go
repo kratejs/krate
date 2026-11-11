@@ -3,7 +3,6 @@
 package linux
 
 import (
-	"strings"
 	"sync/atomic"
 	"time"
 
@@ -22,6 +21,9 @@ type viewAPI struct {
 	getURI     func(v uintptr) uintptr
 	evalFinish func(v, res uintptr, gerr *uintptr) uintptr
 	jscString  func(val uintptr) uintptr
+	// reqView is webkit_uri_scheme_request_get_web_view: the view a scheme
+	// request came from.
+	reqView func(request uintptr) uintptr
 }
 
 func loadView() *viewAPI {
@@ -45,6 +47,7 @@ func loadView() *viewAPI {
 	bind(wk, &v.newRelated, "webkit_web_view_new_with_related_view")
 	bind(wk, &v.getURI, "webkit_web_view_get_uri")
 	bind(wk, &v.evalFinish, "webkit_web_view_evaluate_javascript_finish")
+	bind(wk, &v.reqView, "webkit_uri_scheme_request_get_web_view")
 	bind(jsc, &v.jscString, "jsc_value_to_string")
 	return v
 }
@@ -75,24 +78,6 @@ func (a *App) relatedView() uintptr {
 		return 0
 	}
 	return best.view
-}
-
-// connectView installs the per-view signal handlers.
-func (w *Window) connectView() {
-	api := w.app.api
-	api.gSignalConnectData(w.view, "decide-policy", cbPolicy, w.id, 0, 0)
-	api.gSignalConnectData(w.view, "load-changed", cbLoad, w.id, 0, 0)
-	api.gSignalConnectData(w.view, "close", cbClose, w.id, 0, 0)
-}
-
-// packView puts the view into the window and shows it.
-func (w *Window) packView() {
-	a := w.app
-	if w.box != 0 {
-		a.x.gtkBoxPackStart(w.box, w.view, 1, 1, 0)
-	} else {
-		a.api.gtkContainerAdd(w.win, w.view)
-	}
 }
 
 // evalString runs js in view and calls fn with the string it evaluates to.
@@ -129,19 +114,9 @@ func evalDoneCallback(src, res, tok uintptr) uintptr {
 	return 0
 }
 
-// currentRoute is the route the view shows according to WebKit, or the last
-// route the window was told to load.
-func (w *Window) currentRoute() string {
-	if w.view != 0 && w.app.v.getURI != nil {
-		if uri := goString(w.app.v.getURI(w.view)); strings.HasPrefix(uri, Origin+"/") {
-			return uri[len(Origin):]
-		}
-	}
-	return w.route
-}
-
-// Release saves the route and scroll position, hides the window and destroys
-// its webview. Show or Focus recreates it.
+// Release saves the route and scroll position of every view of the window,
+// hides the window and destroys all its webviews. Show or Focus recreates
+// them on the routes and layout they had.
 func (w *Window) Release() { w.app.Dispatch(w.release) }
 
 // Released reports whether the window holds no webview.
@@ -152,49 +127,77 @@ func (w *Window) Released() (r bool) {
 
 const releaseWait = 1500 * time.Millisecond
 
-// release runs on the main thread. The page is asked for its route and scroll
-// position first; a page that does not answer in time is released with the
-// route WebKit reports.
+// release runs on the main thread. Every page is asked for its route and
+// scroll position first; a page that does not answer in time is released with
+// the route WebKit reports.
 func (w *Window) release() {
 	a := w.app
 	if !w.alive || w.view == 0 || w.releasing {
 		return
 	}
 	w.releasing, w.abort = true, false
-	fallback := w.currentRoute()
+	live := w.liveViews()
+	fallback := map[*view]string{}
+	for _, v := range live {
+		fallback[v] = v.currentRoute()
+	}
 	if x := a.x; x.gtkWidgetHide != nil {
 		x.gtkWidgetHide(w.win)
 	}
-	done := false
-	finish := func(raw string) {
-		if done {
-			return
-		}
-		done = true
+	answered := map[*view]bool{}
+	finish := func() {
 		w.releasing = false
 		if !w.alive || w.view == 0 || w.abort {
 			return
 		}
-		w.state = caps.ParseViewState(raw, fallback)
-		w.route = w.state.Route
-		v := w.view
-		w.view = 0
-		a.api.gtkWidgetDestroy(v)
+		w.snapshotRatios()
+		// Destroying the root takes the pane tree and every webview in it.
+		if w.root != 0 {
+			a.api.gtkWidgetDestroy(w.root)
+			w.root = 0
+		}
+		for _, p := range w.panes {
+			delete(a.panes, p.id)
+		}
+		w.panes = nil
+		for _, v := range live {
+			v.route = v.state.Route
+			a.setWidget(v, 0)
+		}
 		w.released = true
 		a.emitWindow(w, caps.WindowReleased)
 		shrinkHeapSoon()
 	}
-	tok := a.evalString(w.view, caps.ViewStateScript, finish)
+	settle := func(v *view, raw string) {
+		if answered[v] {
+			return
+		}
+		answered[v] = true
+		v.state = caps.ParseViewState(raw, fallback[v])
+		if len(answered) == len(live) {
+			finish()
+		}
+	}
+	var toks []uintptr
+	for _, v := range live {
+		v := v
+		toks = append(toks, a.evalString(v.widget, caps.ViewStateScript, func(raw string) { settle(v, raw) }))
+	}
 	time.AfterFunc(releaseWait, func() {
 		a.Dispatch(func() {
-			delete(a.evalCbs, tok)
-			finish("")
+			for _, t := range toks {
+				delete(a.evalCbs, t)
+			}
+			for _, v := range live {
+				settle(v, "")
+			}
 		})
 	})
 }
 
-// revive recreates the webview of a released window on its saved route, or
-// cancels a release that is still waiting for the page. Main thread.
+// revive recreates the webviews of a released window on their saved routes and
+// layout, or cancels a release that is still waiting for the pages. Main
+// thread.
 func (w *Window) revive() {
 	if w.releasing {
 		w.abort = true
@@ -204,32 +207,45 @@ func (w *Window) revive() {
 		return
 	}
 	a := w.app
-	view := a.newView()
-	if view == 0 {
-		logf("krate: cannot recreate the webview of window %d", w.id)
-		return
+	all := w.allViews()
+	widgets := make([]uintptr, 0, len(all))
+	for range all {
+		// The first view is created first, so the others are related to it
+		// and share its web process.
+		widget := a.newView()
+		if widget == 0 {
+			logf("krate: cannot recreate the webviews of window %d", w.id)
+			for _, d := range widgets {
+				a.api.gtkWidgetDestroy(d)
+			}
+			return
+		}
+		widgets = append(widgets, widget)
+		a.setWidget(all[len(widgets)-1], widget)
 	}
-	w.view = view
 	w.released = false
-	a.applyViewSettings(view)
-	w.connectView()
-	if !w.resizable && w.fixedW > 0 {
-		a.api.gtkWidgetSetSizeReq(view, int32(w.fixedW), int32(w.fixedH))
+	for _, v := range all {
+		a.applyViewSettings(v.widget)
+		a.connectView(v)
+		if v.minW > 0 || v.minH > 0 {
+			a.api.gtkWidgetSetSizeReq(v.widget, int32(v.minW), int32(v.minH))
+		}
 	}
-	w.packView()
-	a.api.gtkWidgetShowAll(w.win)
+	w.applyLayout()
 	a.emitWindow(w, caps.WindowRestored)
-	if js := caps.ScrollScript(w.state.X, w.state.Y); js != "" {
-		w.scrollJS = js
+	for _, v := range all {
+		if js := caps.ScrollScript(v.state.X, v.state.Y); js != "" {
+			v.scrollJS = js
+		}
+		a.api.wkViewLoadURI(v.widget, Origin+caps.CleanRoute(v.route))
 	}
-	a.api.wkViewLoadURI(view, Origin+caps.CleanRoute(w.route))
 }
 
-// memoryPressure tells a page that its window was hidden or minimized, and
-// returns freed memory of this process to the system shortly after.
+// memoryPressure tells the pages of a window that it was hidden or minimized,
+// and returns freed memory of this process to the system shortly after.
 func (w *Window) memoryPressure() {
-	if w.view != 0 {
-		w.app.api.wkViewEval(w.view, caps.MemoryPressureScript, -1, 0, 0, 0, 0, 0)
+	for _, v := range w.liveViews() {
+		w.app.api.wkViewEval(v.widget, caps.MemoryPressureScript, -1, 0, 0, 0, 0, 0)
 	}
 	shrinkHeapSoon()
 }
@@ -273,6 +289,20 @@ func (a *App) parkable(w *Window) bool {
 	}
 	a.mu.Unlock()
 	return caps.ParkOnClose(a.keepAlive, live, parked)
+}
+
+// WebViewCount returns the number of live webviews of the app, for tests.
+func (a *App) WebViewCount() (n int) {
+	a.callMain(func() {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		for _, v := range a.views {
+			if v.widget != 0 {
+				n++
+			}
+		}
+	})
+	return
 }
 
 // ViewCount returns the number of windows that hold a webview, for tests.

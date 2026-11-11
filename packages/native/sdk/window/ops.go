@@ -22,11 +22,21 @@ func Register(t *bridge.Table, env *bridge.Env) {
 				return
 			}
 			if e.Kind == caps.WindowClosed {
+				if env.Unscope != nil {
+					for _, v := range env.Windows.ViewsOf(id) {
+						if !v.Primary {
+							env.Unscope(v.ID)
+						}
+					}
+					env.Unscope(id)
+				}
 				env.Windows.Remove(id)
 			}
 			topic.Publish(func(enc *wire.Encoder) { encodeEvent(enc, Event{Window: id, Kind: EventKind(e.Kind)}) })
 		})
 	}
+
+	registerViews(t, env)
 
 	t.Func(IDOpen, Permission, true, func(ctx krate.Ctx, args *wire.Decoder, out *wire.Encoder) error {
 		r := codec.Args(args, IDOpen)
