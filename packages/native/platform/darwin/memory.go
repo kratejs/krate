@@ -97,3 +97,113 @@ func planMemory(profile string, features map[string]bool) memoryPlan {
 	}
 	return p
 }
+
+// leverTarget names the object a lever's selector is sent to.
+type leverTarget string
+
+// Lever targets.
+const (
+	targetConfig leverTarget = "WKWebViewConfiguration"
+	targetPrefs  leverTarget = "WKPreferences"
+	targetStore  leverTarget = "WKWebsiteDataStore"
+)
+
+// lever is one way the plan touches WebKit. The Objective-C side
+// (memory_darwin.go) applies levers from planLevers and nothing else, so the
+// table is the complete list of selectors the memory code can send.
+type lever struct {
+	// Name is the log key and the plan field it implements.
+	Name   string
+	Target leverTarget
+	// Selectors are tried in order; the first one the target answers is
+	// used. Setters take one argument.
+	Selectors []string
+	// Feature, for private preferences, is the WebKit feature key tried
+	// first through +[WKPreferences _features] and -_setEnabled:forFeature:.
+	Feature string
+	// Private levers are not public API and may vanish in any macOS release.
+	Private bool
+}
+
+// Selectors the memory code sends besides the lever setters.
+const (
+	selPreferences  = "preferences"             // WKWebViewConfiguration, public
+	selFeatures     = "_features"               // +[WKPreferences], private
+	selFeatureKey   = "key"                     // -[_WKFeature], private class
+	selSetFeature   = "_setEnabled:forFeature:" // WKPreferences, private
+	selDefaultStore = "defaultDataStore"        // +[WKWebsiteDataStore], public
+	selRemoveData   = "removeDataOfTypes:modifiedSince:completionHandler:"
+)
+
+// planLevers lists the levers of a plan in the order they are applied.
+func planLevers(p memoryPlan) []lever {
+	var out []lever
+	if p.RequireUserActionForMedia {
+		out = append(out, lever{Name: "media", Target: targetConfig, Selectors: []string{"setMediaTypesRequiringUserActionForPlayback:"}})
+	}
+	if p.NoAutoOpenWindows {
+		out = append(out, lever{Name: "autoOpenWindows", Target: targetPrefs, Selectors: []string{"setJavaScriptCanOpenWindowsAutomatically:"}})
+	}
+	if p.NoWebGL {
+		out = append(out, lever{Name: "webgl", Target: targetPrefs, Feature: "WebGLEnabled", Selectors: []string{"_setWebGLEnabled:"}, Private: true})
+	}
+	if p.NoWebAudio {
+		out = append(out, lever{Name: "webaudio", Target: targetPrefs, Feature: "WebAudioEnabled", Selectors: []string{"_setWebAudioEnabled:"}, Private: true})
+	}
+	if p.NoMediaDevices {
+		out = append(out, lever{Name: "mediadevices", Target: targetPrefs, Feature: "MediaDevicesEnabled", Selectors: []string{"_setMediaDevicesEnabled:"}, Private: true})
+	}
+	if p.NoPageCache {
+		out = append(out, lever{Name: "pagecache", Target: targetPrefs, Feature: "UsesBackForwardCache",
+			Selectors: []string{"_setUsesBackForwardCache:", "_setPageCacheEnabled:"}, Private: true})
+	}
+	return out
+}
+
+// memorySelectors lists every selector the memory code may send for a
+// profile and feature set, sorted by first use and without duplicates. It is
+// what the per-profile test pins down.
+func memorySelectors(profile string, features map[string]bool) []string {
+	plan := planMemory(profile, features)
+	if plan == (memoryPlan{}) {
+		return nil
+	}
+	var out []string
+	seen := map[string]bool{}
+	add := func(s ...string) {
+		for _, x := range s {
+			if !seen[x] {
+				seen[x] = true
+				out = append(out, x)
+			}
+		}
+	}
+	levers := planLevers(plan)
+	needPrefs := false
+	for _, l := range levers {
+		if l.Target == targetPrefs {
+			needPrefs = true
+		}
+	}
+	for _, l := range levers {
+		if l.Target == targetConfig {
+			add(l.Selectors...)
+		}
+	}
+	if needPrefs {
+		add(selPreferences)
+	}
+	for _, l := range levers {
+		if l.Target != targetPrefs {
+			continue
+		}
+		if l.Feature != "" {
+			add(selFeatures, selFeatureKey, selSetFeature)
+		}
+		add(l.Selectors...)
+	}
+	if plan.PurgeMemoryCache {
+		add(selDefaultStore, selRemoveData)
+	}
+	return out
+}

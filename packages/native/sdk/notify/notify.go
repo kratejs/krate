@@ -4,9 +4,11 @@
 // libnotify). Actions come back through the ActionInvoked signal. Servers
 // that do not advertise "actions" show a plain notification.
 //
-// macOS: UNUserNotificationCenter needs an app bundle with a bundle
-// identifier; unbundled processes (go run, krate-shell in dev) get
-// krate.ErrUnsupported.
+// macOS: UNUserNotificationCenter, which needs an app bundle with a bundle
+// identifier. `krate native dev` runs the shell from a generated dev bundle;
+// a process outside a bundle (go run, a bare krate-shell) gets
+// krate.ErrUnsupported with the reason and the fix, and app.Supports("notify")
+// is false. A refused permission is a permission_denied error.
 //
 // Windows: toast notifications through WinRT. An unpackaged app registers its
 // AppUserModelID (derived from the app id) under HKCU\Software\Classes\

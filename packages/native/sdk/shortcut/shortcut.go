@@ -5,17 +5,19 @@
 // already grabbed is an error. Linux/Wayland: there is no way to grab keys
 // from a client; the xdg-desktop-portal GlobalShortcuts interface is used when
 // the desktop offers it (the user may be asked to confirm), otherwise
-// Register returns krate.ErrUnsupported. Windows: RegisterHotKey on the app's
-// hidden window; a combination another app or Windows holds is an error
-// ("already registered by another app"). The Windows backend is compile-only
-// in this release. The macOS implementation (RegisterEventHotKey) is not part
-// of this release and returns krate.ErrUnsupported.
+// Register returns krate.ErrUnsupported. macOS: Carbon RegisterEventHotKey
+// (no Accessibility permission needed); a combination that is already taken
+// is an error. Windows: RegisterHotKey on the app's hidden window; a
+// combination another app or Windows holds is an error ("already registered
+// by another app"). The macOS and Windows backends are compile-only in this
+// release.
 package shortcut
 
 import (
 	"context"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -37,8 +39,14 @@ const (
 )
 
 // Parse reads an accelerator such as "Ctrl+Shift+K", "Alt+F4" or
-// "CmdOrCtrl+Space". "CmdOrCtrl" is Ctrl here (Super on macOS builds).
+// "CmdOrCtrl+Space". "CmdOrCtrl" is Ctrl, and Command (Super) on macOS.
 func Parse(accel string) (caps.Accelerator, error) {
+	return parse(accel, runtime.GOOS)
+}
+
+// parse is Parse for a given GOOS: on "darwin" CmdOrCtrl is Command (Super),
+// elsewhere Ctrl.
+func parse(accel, goos string) (caps.Accelerator, error) {
 	var a caps.Accelerator
 	parts := strings.Split(accel, "+")
 	for i, p := range parts {
@@ -58,7 +66,13 @@ func Parse(accel string) (caps.Accelerator, error) {
 			break
 		}
 		switch strings.ToLower(p) {
-		case "ctrl", "control", "cmdorctrl", "commandorcontrol":
+		case "cmdorctrl", "commandorcontrol":
+			if goos == "darwin" {
+				a.Super = true
+			} else {
+				a.Ctrl = true
+			}
+		case "ctrl", "control":
 			a.Ctrl = true
 		case "shift":
 			a.Shift = true

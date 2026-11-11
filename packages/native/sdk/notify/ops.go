@@ -87,3 +87,16 @@ func (p platformBackend) close(id string) error {
 	}
 	return fmt.Errorf("%w: closing notifications is not supported on this platform", krate.ErrUnsupported)
 }
+
+// platformAvailable reports whether the platform layer implements Notifier
+// and says it can work in this process (see caps.NotifierAvailability).
+func platformAvailable(env *bridge.Env) bool {
+	n, ok := env.App.(caps.Notifier)
+	if !ok {
+		return false
+	}
+	if a, ok := n.(caps.NotifierAvailability); ok {
+		return a.NotifyAvailability() == nil
+	}
+	return true
+}

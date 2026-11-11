@@ -168,7 +168,7 @@ func appName() string {
 
 // Available reports whether a notification service is running.
 func Available(env *bridge.Env) bool {
-	if _, ok := env.App.(caps.Notifier); ok {
+	if platformAvailable(env) {
 		return true
 	}
 	return sessionbus.NameHasOwner(dest)

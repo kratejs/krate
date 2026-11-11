@@ -2,7 +2,10 @@
 
 package platform
 
-import "github.com/kratejs/krate/packages/native/platform/darwin"
+import (
+	"github.com/kratejs/krate/packages/native/platform/caps"
+	"github.com/kratejs/krate/packages/native/platform/darwin"
+)
 
 // New creates the macOS application (AppKit + WKWebView via purego).
 func New(opts Options) (App, error) {
@@ -34,5 +37,12 @@ func (a darwinApp) NewWindow(o WindowOptions) (Window, error) {
 	return w, nil
 }
 
-var _ App = darwinApp{}
+var (
+	_ App                       = darwinApp{}
+	_ caps.Tray                 = darwinApp{}
+	_ caps.Shortcuts            = darwinApp{}
+	_ caps.Notifier             = darwinApp{}
+	_ caps.NotifierAvailability = darwinApp{}
+	_ caps.NotificationCloser   = darwinApp{}
+)
 var _ Window = (*darwin.Window)(nil)

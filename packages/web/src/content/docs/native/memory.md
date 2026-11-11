@@ -210,7 +210,8 @@ what it has.
 
 Every lever is guarded. A missing Objective-C selector, a failed
 `QueryInterface` or a rejected argument skips that lever and logs one line to
-stderr; it never stops the app from starting. If the WebView2 runtime refuses
+stderr (on macOS only in debug mode, see below); it never stops the app from
+starting. If the WebView2 runtime refuses
 the memory arguments, the app starts again without them.
 
 Inputs, read from `app.json`: `memory` (`balanced` when missing or unknown) and
@@ -241,6 +242,23 @@ cookies persist. All windows already share one `WKProcessPool`.
 | Web Audio off (`WebAudioEnabled`, `_setWebAudioEnabled:`) | private | when `webaudio` is unused |
 | `navigator.mediaDevices` off (`MediaDevicesEnabled`, `_setMediaDevicesEnabled:`) | private | when `webrtc` is unused |
 | Back/forward page cache off (`UsesBackForwardCache`, `_setUsesBackForwardCache:` or `_setPageCacheEnabled:`) | private | `balanced`, `minimal` |
+
+Nothing here can crash the app on a WebKit that lacks a selector. Every
+selector the memory code sends goes through one guard: the target object must
+exist (a missing class or a nil `preferences` skips the lever), and it must
+answer `respondsToSelector:`, because an unknown selector raises an Objective-C
+exception that Go cannot catch. The result of `+[WKPreferences _features]` is
+also checked to be an `NSArray` and each feature key to be an `NSString`. A
+skipped lever is logged once, at debug level only (when the app runs with
+`Debug` on, as `krate native dev` does). The levers are one table in
+`platform/darwin/memory.go` (`planLevers`); the Objective-C side applies
+nothing outside it, and a unit test pins the selectors each profile uses:
+
+| Profile | Selectors that may be sent |
+| --- | --- |
+| `performance` | none |
+| `balanced` | `preferences`, `setJavaScriptCanOpenWindowsAutomatically:`, `setMediaTypesRequiringUserActionForPlayback:` (media unused), and the private `_features`, `key`, `_setEnabled:forFeature:`, `_setWebGLEnabled:`, `_setWebAudioEnabled:`, `_setMediaDevicesEnabled:`, `_setUsesBackForwardCache:`, `_setPageCacheEnabled:` |
+| `minimal` | the `balanced` set plus `defaultDataStore` and `removeDataOfTypes:modifiedSince:completionHandler:` |
 
 The private levers use `WKPreferencesPrivate.h` names remembered without access
 to the header. They try `-[WKPreferences _setEnabled:forFeature:]` with a

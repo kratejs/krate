@@ -16,6 +16,19 @@ It builds the app directory into `.krate/native/dev/app` (the manifest has
 `debug: true`, so the webview's developer tools are on), starts the shell with
 `krate-shell --dev`, and watches the project.
 
+## On macOS: a dev app bundle
+
+macOS gives a process a bundle identifier (which notifications need, and which
+names the app in the menu bar, the Dock and the notification settings) only
+when it runs from an `.app` bundle. With a window (not `--browser`),
+`krate native dev` on macOS therefore copies the shell into a minimal bundle
+at `.krate/dev/<productName>.app` with an `Info.plist` whose identifier is
+`<appId>.dev`, signs it ad hoc when `codesign` is on the PATH, and starts the
+shell from there. The bundle is refreshed when the shell or the app id
+changes. If it cannot be created the shell runs unbundled and says so;
+notifications then return an `ErrUnsupported` error that explains why. This
+part is untested on a Mac.
+
 ## Two processes
 
 The prebuilt shell owns the window. Your Go code and the generated glue run in

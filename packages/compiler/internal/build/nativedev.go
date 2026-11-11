@@ -432,7 +432,16 @@ func runNativeDevOnce(o NativeDevOptions) (bool, error) {
 	if o.Port > 0 {
 		addr = fmt.Sprintf("127.0.0.1:%d", o.Port)
 	}
-	sh, err := startNativeShell(o.Shell, nd.appDir, o.Browser, addr, o.Stderr)
+	shellExe := o.Shell
+	if macDevBundleWanted(runtime.GOOS, nd.goos, o.Browser) {
+		exe, err := prepareMacDevBundle(filepath.Join(root, ".krate", "dev"), o.Shell, res.Manifest.AppID, res.Manifest.ProductName)
+		if err != nil {
+			printf("  %s! Could not create the dev app bundle (%v); running the shell unbundled, so notifications are unavailable%s\n", cYellow, err, cReset)
+		} else {
+			shellExe = exe
+		}
+	}
+	sh, err := startNativeShell(shellExe, nd.appDir, o.Browser, addr, o.Stderr)
 	if err != nil {
 		return false, err
 	}

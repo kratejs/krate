@@ -258,8 +258,17 @@ type Notifier interface {
 	OnNotify(fn func(NotifyEvent))
 }
 
-// NotificationCloser is implemented by Notifiers that can withdraw a posted
-// notification by its Notification.ID.
+// NotifierAvailability is implemented by Notifiers that can say in advance
+// whether Notify can work in this process. NotifyAvailability returns nil, or
+// the error every Notify call would return (for example macOS without an app
+// bundle). The SDK reports the notify capability as unavailable when it is
+// not nil.
+type NotifierAvailability interface {
+	NotifyAvailability() error
+}
+
+// NotificationCloser is implemented by Notifiers that can withdraw a
+// notification by the ID it was posted with.
 type NotificationCloser interface {
 	CloseNotification(id string) error
 }

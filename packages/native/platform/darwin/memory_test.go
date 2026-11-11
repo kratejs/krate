@@ -65,3 +65,93 @@ func TestPlanKeepsPersistence(t *testing.T) {
 		}
 	}
 }
+
+func TestMemorySelectors(t *testing.T) {
+	media := "setMediaTypesRequiringUserActionForPlayback:"
+	const (
+		prefs   = "preferences"
+		windows = "setJavaScriptCanOpenWindowsAutomatically:"
+		feats   = "_features"
+		key     = "key"
+		setFeat = "_setEnabled:forFeature:"
+		webgl   = "_setWebGLEnabled:"
+		audio   = "_setWebAudioEnabled:"
+		devices = "_setMediaDevicesEnabled:"
+		cache1  = "_setUsesBackForwardCache:"
+		cache2  = "_setPageCacheEnabled:"
+		store   = "defaultDataStore"
+		remove  = "removeDataOfTypes:modifiedSince:completionHandler:"
+	)
+	all := map[string]bool{"media": true, "webaudio": true, "webgl": true, "webrtc": true}
+	none := map[string]bool{}
+	cases := []struct {
+		name     string
+		profile  string
+		features map[string]bool
+		want     []string
+	}{
+		{"performance sends nothing", "performance", none, nil},
+		{"performance, unknown features", "performance", nil, nil},
+		{"balanced, unknown features: only the page cache is private", "balanced", nil,
+			[]string{prefs, windows, feats, key, setFeat, cache1, cache2}},
+		{"balanced, all features used", "balanced", all,
+			[]string{prefs, windows, feats, key, setFeat, cache1, cache2}},
+		{"balanced, nothing detected", "balanced", none,
+			[]string{media, prefs, windows, feats, key, setFeat, webgl, audio, devices, cache1, cache2}},
+		{"minimal adds the purge", "minimal", none,
+			[]string{media, prefs, windows, feats, key, setFeat, webgl, audio, devices, cache1, cache2, store, remove}},
+		{"minimal, unknown features", "minimal", nil,
+			[]string{prefs, windows, feats, key, setFeat, cache1, cache2, store, remove}},
+	}
+	for _, c := range cases {
+		got := memorySelectors(c.profile, c.features)
+		if len(got) != len(c.want) {
+			t.Errorf("%s:\n got %q\nwant %q", c.name, got, c.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != c.want[i] {
+				t.Errorf("%s:\n got %q\nwant %q", c.name, got, c.want)
+				break
+			}
+		}
+	}
+}
+
+// TestLeversAreGuardable checks the invariants the guard code relies on:
+// private setters start with an underscore, public ones do not, setters take
+// one argument, and no lever is empty.
+func TestLeversAreGuardable(t *testing.T) {
+	for _, profile := range []string{"balanced", "minimal"} {
+		plan := planMemory(profile, map[string]bool{})
+		for _, l := range planLevers(plan) {
+			if l.Name == "" || l.Target == "" || len(l.Selectors) == 0 {
+				t.Errorf("%s: incomplete lever %+v", profile, l)
+			}
+			for _, s := range l.Selectors {
+				if got := s[0] == '_'; got != l.Private {
+					t.Errorf("%s/%s: selector %q private=%v", profile, l.Name, s, l.Private)
+				}
+				if s[len(s)-1] != ':' || len(s) < 2 || countColons(s) != 1 {
+					t.Errorf("%s/%s: setter %q must take exactly one argument", profile, l.Name, s)
+				}
+			}
+			if l.Feature != "" && !l.Private {
+				t.Errorf("%s/%s: only private levers use the feature table", profile, l.Name)
+			}
+		}
+	}
+	if len(planLevers(planMemory("performance", nil))) != 0 {
+		t.Error("performance must not apply a lever")
+	}
+}
+
+func countColons(s string) int {
+	n := 0
+	for _, c := range s {
+		if c == ':' {
+			n++
+		}
+	}
+	return n
+}

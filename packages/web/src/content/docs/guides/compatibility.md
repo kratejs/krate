@@ -84,8 +84,8 @@ green run there is what moves a cell.
 | Native: views and split panes | Supported | Untested | Untested | Krate Native v1 |
 | Native: shared web process, release and background mode | Supported | Untested | Untested | Krate Native v1 |
 | Native: SDK dialogs, clipboard and menus | Supported | Untested | Untested | Krate Native v1 |
-| Native: SDK notifications | Supported | n/a | Untested | Krate Native v1 |
-| Native: SDK tray and global shortcuts | Partial | n/a | Untested | Krate Native v1 |
+| Native: SDK notifications | Supported | Untested | Untested | Krate Native v1 |
+| Native: SDK tray and global shortcuts | Partial | Untested | Untested | Krate Native v1 |
 | Native: SDK app lifecycle | Supported | Untested | Untested | Krate Native v1 |
 | Native: release as a single executable | Supported | Untested | Untested | Krate Native v1 |
 | Native: prebuilt shell for apps without Go | Supported | Untested | Untested | Krate Native v1 |
@@ -610,7 +610,7 @@ Known limits:
 - The network process of WebKitGTK stays alive while the app runs, so a released Linux app still holds it.
 - Release destroys every webview of a window and restores them all with their routes and layout ratios; there is no per-view release.
 
-Evidence: `TestGUISharedWebProcess`, `TestGUIReleaseRestore`, `TestGUIKeepAlive`, `TestGUINavigateReleased`, `TestGUIMemoryPressureOnHide`, `TestGUIWindowsBackground`, `TestParseViewState`, `TestParkOnClose`, `TestQuitWhenEmpty`, `TestGUIViewsReleaseRestore`
+Evidence: `TestGUISharedWebProcess`, `TestGUIReleaseRestore`, `TestGUIKeepAlive`, `TestGUINavigateReleased`, `TestGUIMemoryPressureOnHide`, `TestGUIWindowsBackground`, `TestParseViewState`, `TestParkOnClose`, `TestQuitWhenEmpty`, `TestGUIViewsReleaseRestore`, `TestMemorySelectors`, `TestLeversAreGuardable`
 
 ### Native: SDK dialogs, clipboard and menus
 
@@ -628,34 +628,35 @@ Evidence: `TestGUIDialogs`, `TestGUIClipboard`, `TestGUIMenus`, `TestDialogsAreC
 
 ### Native: SDK notifications
 
-**Linux:** Supported - **macOS:** n/a - **Windows:** Untested
+**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
 
-Desktop notifications with actions. On Linux they use org.freedesktop.Notifications over D-Bus; on Windows, WinRT toasts.
+Desktop notifications with actions. On Linux they use org.freedesktop.Notifications over D-Bus; on macOS UNUserNotificationCenter; on Windows, WinRT toasts.
 
 Known limits:
 
 - Verified against a fake notification service, not a real desktop daemon. Without a service that owns org.freedesktop.Notifications the call returns ErrUnsupported.
-- macOS returns ErrUnsupported: UNUserNotificationCenter needs an app bundle.
+- macOS: implemented, not yet run on a Mac (untested). It needs an app bundle with a bundle identifier; krate native dev runs the shell from a generated <appId>.dev bundle under .krate/dev. A process outside a bundle gets an ErrUnsupported error that names the fix. The first notification asks for permission and a refusal is a permission_denied error. Icon and Timeout are ignored, and critical urgency is only time-sensitive (the critical level needs an Apple entitlement).
 - Windows: untested. Toasts use WinRT through hand-written COM bindings; the toast XML, ids and registry values are unit tested on Linux, and a Windows CI job shows a toast, but nothing here has been confirmed on a real desktop. An unpackaged app registers its AppUserModelID under HKCU; a packaged app uses its package identity.
 - Windows: clicking a toast after the app has quit does nothing (COM activation of a closed app is not implemented). Windows has no per-toast timeout or urgency levels, and Show succeeding does not prove a banner was drawn (Focus assist and per-app settings can suppress it).
 
-Evidence: `TestNotifyOverDBus`, `TestNotifyWithoutServiceIsUnsupported`, `TestNotificationAndTrayWithFakeDesktopServices`, `TestBuildToastXML`, `TestBuildToastXMLVariants`, `TestPinterfaceIID`, `TestAUMIDFor`, `TestToastXMLAcceptedByWinRT`, `TestToastDelegateInterfaces`, `TestGUIToast`, `TestPlatformBackendClose`
+Evidence: `TestNotifyOverDBus`, `TestNotifyWithoutServiceIsUnsupported`, `TestNotificationAndTrayWithFakeDesktopServices`, `TestBuildToastXML`, `TestBuildToastXMLVariants`, `TestPinterfaceIID`, `TestAUMIDFor`, `TestToastXMLAcceptedByWinRT`, `TestToastDelegateInterfaces`, `TestGUIToast`, `TestPlatformBackendClose`, `TestNotifyUnbundled`, `TestNotifyBundled`, `TestBundleProblem`, `TestNotifyEvent`, `TestPlatformNotifyAvailability`, `TestPrepareMacDevBundle`
 
 ### Native: SDK tray and global shortcuts
 
-**Linux:** Partial - **macOS:** n/a - **Windows:** Untested
+**Linux:** Partial - **macOS:** Untested - **Windows:** Untested
 
-A tray icon with a menu (StatusNotifierItem and dbusmenu on Linux, Shell_NotifyIconW on Windows) and global keyboard shortcuts (XGrabKey or the portal on Linux, RegisterHotKey on Windows).
+A tray icon with a menu (StatusNotifierItem and dbusmenu on Linux, NSStatusItem on macOS, Shell_NotifyIconW on Windows) and global keyboard shortcuts (XGrabKey or the portal on Linux, Carbon RegisterEventHotKey on macOS, RegisterHotKey on Windows).
 
 Known limits:
 
 - Linux tray needs a StatusNotifier host; stock GNOME without the AppIndicator extension returns ErrUnsupported.
 - Linux shortcuts are verified on X11 (XGrabKey). On Wayland they need the org.freedesktop.portal.GlobalShortcuts portal, verified against a fake portal only, and return ErrUnsupported without it.
-- macOS returns ErrUnsupported for both.
+- macOS: implemented, not yet run on a Mac (untested). With a tray menu any click opens the menu and is reported as click; right-click and double-click are only reported without a menu. Radio items show a checkmark. Single-tone gray icons become template images.
+- macOS shortcuts use Carbon RegisterEventHotKey (no Accessibility permission). Keys are ANSI key positions, so other layouts differ, and macOS 15 ignores hot keys whose only modifiers are Option and/or Shift. A combination that is already registered is an error. Pressing a real hot key and clicking the real status item are manual checks (platform/darwin/MANUAL_TEST.md).
 - Windows: untested. The key table, the NOTIFYICONDATAW layout, event decoding and icon scaling are unit tested on Linux, and a Windows CI job adds, modifies and removes a tray icon and registers hotkeys, but the icon, its menu behavior, the explorer-restart re-add and real key presses have not been confirmed on a real desktop.
 - Windows: a shortcut another app or Windows holds fails with an 'already registered by another app' error; many Win+ combinations are reserved by the system. The tray menu has no accelerators and one icon per app.
 
-Evidence: `TestTrayOverDBus`, `TestTrayWithoutHostIsUnsupported`, `TestShortcutPortal`, `TestShortcutWaylandWithoutPortalIsUnsupported`, `TestGUIGlobalShortcut`, `TestShortcutAndSupports`, `TestVirtualKey`, `TestHotkeySpec`, `TestHotkeyError`, `TestHotkeyTable`, `TestNotifyIconDataLayout`, `TestTrayEventKind`, `TestPNGToIconBits`, `TestGUITrayLifecycle`, `TestGUIHotkeys`
+Evidence: `TestTrayOverDBus`, `TestTrayWithoutHostIsUnsupported`, `TestShortcutPortal`, `TestShortcutWaylandWithoutPortalIsUnsupported`, `TestGUIGlobalShortcut`, `TestShortcutAndSupports`, `TestVirtualKey`, `TestHotkeySpec`, `TestHotkeyError`, `TestHotkeyTable`, `TestNotifyIconDataLayout`, `TestTrayEventKind`, `TestPNGToIconBits`, `TestGUITrayLifecycle`, `TestGUIHotkeys`, `TestTrayItemAndMenu`, `TestHotKeyRegisterUnregister`, `TestToCarbon`, `TestCarbonStatusError`, `TestInspectTrayIcon`, `TestAccelKeyEquivalent`, `TestPlatformTrayIsUsed`, `TestParseCmdOrCtrl`
 
 ### Native: SDK app lifecycle
 
