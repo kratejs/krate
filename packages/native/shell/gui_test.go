@@ -321,7 +321,10 @@ func TestGUIZMemoryPanel(t *testing.T) {
 	src, _ := json.Marshal(string(bundle))
 	// Install the overlay, open the panel, wait for the first sample.
 	expr := fmt.Sprintf(`(async () => {
-  (0, eval)(%s);
+  const el = document.createElement("script");
+  el.textContent = %s;
+  document.head.appendChild(el);
+  if (!document.getElementById("krate-dev-root")) return {err: "the overlay did not mount"};
   const root = document.getElementById("krate-dev-root").shadowRoot;
   root.querySelector(".tb-btn.mem").click();
   for (let i = 0; i < 50; i++) {
@@ -338,12 +341,16 @@ func TestGUIZMemoryPanel(t *testing.T) {
 		t.Fatalf("query: %v", err)
 	}
 	var got struct {
+		Err    string   `json:"err"`
 		Hidden bool     `json:"hidden"`
 		Rows   []string `json:"rows"`
 		Heap   string   `json:"heap"`
 	}
 	if err := json.Unmarshal([]byte(out), &got); err != nil {
 		t.Fatalf("%v\n%s", err, out)
+	}
+	if got.Err != "" {
+		t.Fatalf("installing the overlay: %s", got.Err)
 	}
 	if got.Hidden {
 		t.Fatal("the Memory panel did not open")

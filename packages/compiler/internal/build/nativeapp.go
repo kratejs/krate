@@ -599,6 +599,11 @@ func copyNativeFile(src, dst string) error {
 		return err
 	}
 	defer in.Close()
+	if si, err := in.Stat(); err == nil {
+		if di, err := os.Stat(dst); err == nil && os.SameFile(si, di) {
+			return nil // os.Create would truncate the source
+		}
+	}
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return err
 	}

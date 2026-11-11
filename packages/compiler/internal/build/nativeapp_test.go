@@ -646,6 +646,22 @@ func TestNativeShellCopy(t *testing.T) {
 	}
 }
 
+// A shell passed from inside the output directory is its own copy target.
+func TestNativeShellInsideOutDirIsNotTruncated(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		"src/pages/index.tsx":     "export default function P() { return <main/>; }\n",
+		"dist-native/krate-shell": "binary",
+	})
+	res, err := newNativeBuilder(t, root).BuildNativeApp(NativeAppOptions{Shell: filepath.Join(root, "dist-native", "krate-shell"), WantShell: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(res.ShellPath); string(data) != "binary" {
+		t.Errorf("shell content = %q (path %s)", data, res.ShellPath)
+	}
+}
+
 func TestGoModRequires(t *testing.T) {
 	const path = "github.com/kratejs/krate/packages/native"
 	for gomod, want := range map[string]bool{
