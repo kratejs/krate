@@ -159,6 +159,9 @@ func ensure(pick func(Dirs) string) (string, error) {
 	if err := os.MkdirAll(p, 0o700); err != nil {
 		return "", fmt.Errorf("sdkos: creating %s: %w", p, err)
 	}
+	if err := checkPrivate(p); err != nil {
+		return "", err
+	}
 	return p, nil
 }
 
