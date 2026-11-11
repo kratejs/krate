@@ -178,6 +178,10 @@ type Builder struct {
 	// evaluate and report the same findings twice.
 	SkipQualityChecks bool
 
+	// NativeTarget marks a native (desktop) build, where host code is allowed.
+	// A web build rejects every host marker (KR7173).
+	NativeTarget bool
+
 	// fontPreloadHTML holds the `<link rel="preload">` tags for fonts declared
 	// in the global stylesheet; injected into every page head.
 	fontPreloadHTML string
@@ -841,6 +845,9 @@ func (b *Builder) BuildAll() error {
 		return err
 	}
 	if err := b.guardOutDir(); err != nil {
+		return err
+	}
+	if err := b.checkHostMarkers(); err != nil {
 		return err
 	}
 	if err := os.RemoveAll(b.Cfg.OutDir); err != nil {

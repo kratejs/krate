@@ -175,6 +175,8 @@ func main() {
 		runConfig(flags, args)
 	case "plugin":
 		runPlugin(flags, args)
+	case "native":
+		runNative(flags, args)
 	case "init", "create":
 		// Handled by the @krate/core npm wrapper, which delegates to
 		// create-krate-app so the scaffold follows the same release channel.
@@ -273,6 +275,8 @@ func printCommandUsage(w io.Writer, cmd string) {
 	case "config":
 		fmt.Fprintf(w, "Usage: krate config [dir] [--mode <mode>] [--config <path>] [--schema]\n\n")
 		fmt.Fprintf(w, "Print the fully resolved configuration as JSON (--schema prints a JSON Schema).\n")
+	case "native":
+		printNativeUsage(w)
 	case "plugin":
 		fmt.Fprintf(w, "Usage: krate plugin add <package> [dir]\n\n")
 		fmt.Fprintf(w, "Manage Krate plugins.\n")
@@ -318,6 +322,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  explain   Explain a diagnostic code (krate explain KR7110)\n")
 	fmt.Fprintf(w, "  config    Print the fully resolved configuration\n")
 	fmt.Fprintf(w, "  plugin    Manage plugins (add <pkg>)\n")
+	fmt.Fprintf(w, "  native    Desktop target (preview): check, init, dev, build, ...\n")
 	fmt.Fprintf(w, "  init      Scaffold a new project (alias: create; via the npm wrapper)\n")
 	fmt.Fprintf(w, "  mcp       Run the MCP server (Model Context Protocol; --http for HTTP)\n")
 	fmt.Fprintf(w, "  version   Print the version\n")

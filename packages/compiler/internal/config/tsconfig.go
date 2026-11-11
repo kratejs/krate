@@ -720,6 +720,20 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 		cfg.ServerDirs = configStrings(cfg.ServerDirs, val)
 	case "runtimeDirs":
 		cfg.RuntimeDirs = configStrings(cfg.RuntimeDirs, val)
+	case "hostFunctions":
+		cfg.HostFunctions = configStrings(cfg.HostFunctions, val)
+	case "hostDirs":
+		cfg.HostDirs = configStrings(cfg.HostDirs, val)
+	case "native":
+		data, err := json.Marshal(val)
+		if err != nil {
+			return err
+		}
+		var nc NativeConfig
+		if err := json.Unmarshal(data, &nc); err != nil {
+			return fmt.Errorf("native: %w", err)
+		}
+		cfg.Native = &nc
 	case "devServer":
 		m, ok := val.(map[string]interface{})
 		if !ok {

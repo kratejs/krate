@@ -5,7 +5,7 @@ import type ts from 'typescript';
 // them from the editor; `krate typecheck` does the same for tsc, which ignores
 // language service plugins. Keep the rules in step with internal/typecheck.
 
-const TIER_LINE = /^[ \t]*@(server|static|runtime|client)(?:[ \t]|\r?$)/;
+const TIER_LINE = /^[ \t]*@(server|static|runtime|client|host)(?:[ \t]|\r?$)/;
 
 export function isTierDiagnostic(text: string, start: number, code: number, message: string): boolean {
   const lineStart = text.lastIndexOf('\n', start - 1) + 1;

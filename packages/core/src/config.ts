@@ -325,6 +325,62 @@ export interface ImagesConfig {
   remotePatterns?: ImageRemotePattern[];
 }
 
+/** Main window settings for the native target. */
+export interface NativeWindowConfig {
+  /** Default 1280. */
+  width?: number;
+  /** Default 800. */
+  height?: number;
+  /** Default true. */
+  resizable?: boolean;
+  /** Default "native". */
+  titleBar?: "native" | "hidden" | "none";
+}
+
+/** Runtime for TypeScript host code in the native target. */
+export interface NativeHostConfig {
+  /** Default "quickjs". "scriptc" needs `experimental.scriptc`. */
+  runtime?: "quickjs" | "node" | "bun" | "deno" | "scriptc";
+  /** Pinned runtime version for node, bun and deno. */
+  version?: string;
+  /** Ship the runtime inside the app. Default true. */
+  bundle?: boolean;
+  /** Packages that run in a different runtime than the main host runtime. */
+  islands?: Record<string, "node" | "bun" | "deno" | "quickjs">;
+}
+
+/** The `native` block: desktop target settings (`krate native`). Preview. */
+export interface NativeConfig {
+  /** Reverse-DNS id, e.g. "com.acme.app". */
+  appId?: string;
+  productName?: string;
+  /** Semantic version, e.g. "1.0.0". */
+  version?: string;
+  /** Default: all three. */
+  platforms?: Array<"windows" | "macos" | "linux">;
+  /** Path of the source icon image. */
+  icons?: string;
+  window?: NativeWindowConfig;
+  permissions?: Array<"dialog" | "clipboard" | "notify" | "tray" | "db" | "shell:openExternal">;
+  /** Custom URL schemes the app registers (without "://"). */
+  deepLinks?: string[];
+  host?: NativeHostConfig;
+  experimental?: { scriptc?: boolean };
+  release?: {
+    /** Default "auto". */
+    compile?: "auto" | "always" | "never";
+    /** Profile for profile-guided optimization. */
+    pgo?: string;
+  };
+  bundle?: {
+    macos?: { category?: string };
+    windows?: { publisher?: string; installer?: "msix" | "nsis" };
+    linux?: { formats?: Array<"deb" | "rpm" | "appimage"> };
+  };
+  /** In-app updates; `url` may contain `{target}`. Needs both fields. */
+  updater?: { url: string; publicKey: string };
+}
+
 /** Deploy adapter selection + options for `krate deploy`. */
 export interface DeployConfig {
   target?: "netlify" | "vercel" | "cloudflare" | "gh-pages";
@@ -605,6 +661,15 @@ export interface KrateConfig {
   runtimeComponents?: string[];
   serverDirs?: string[];
   runtimeDirs?: string[];
+  /**
+   * Native target: functions (names or file paths) that are host code and run
+   * in the native process, not the webview. See `@host`.
+   */
+  hostFunctions?: string[];
+  /** Native target: every module in these directories is host code. */
+  hostDirs?: string[];
+  /** Desktop target settings (`krate native`). Preview. */
+  native?: NativeConfig;
   pathAliases?: Record<string, string[]>;
   tsBaseDir?: string;
 

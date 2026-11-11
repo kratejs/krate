@@ -152,6 +152,8 @@ var additiveArrayKeys = map[string]bool{
 	"runtimeComponents": true,
 	"serverDirs":        true,
 	"runtimeDirs":       true,
+	"hostFunctions":     true,
+	"hostDirs":          true,
 }
 
 func deepMergeJSON(base, override map[string]any) map[string]any {

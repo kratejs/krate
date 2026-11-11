@@ -746,6 +746,17 @@ type Config struct {
 	// Paths are relative to project root (e.g. "src/components/runtime").
 	RuntimeDirs []string `json:"runtimeDirs,omitempty"`
 
+	// HostFunctions marks host code for the native target: function names or
+	// file paths. Host code runs in the native process, not the webview.
+	HostFunctions []string `json:"hostFunctions,omitempty"`
+
+	// HostDirs: every module in these dirs is host code (native target).
+	// Paths are relative to project root.
+	HostDirs []string `json:"hostDirs,omitempty"`
+
+	// Native configures the desktop target (`krate native`).
+	Native *NativeConfig `json:"native,omitempty"`
+
 	// Content declares typed content collections (`content: defineContent({...})`
 	// or a plain object). Each key is a collection name mapping to a `dir` and
 	// a frontmatter `schema`. Krate validates entries and generates types.

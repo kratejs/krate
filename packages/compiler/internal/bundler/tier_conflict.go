@@ -240,3 +240,32 @@ func bodyDirectiveTier(body []ast.Stmt) string {
 	}
 	return ""
 }
+
+// FileTier is a file-wide source that names a component tier.
+type FileTier struct {
+	What  string // for example "the `// @server` comment"
+	Class ComponentClass
+	Line  int // 1-based line in the module, 0 when unknown
+}
+
+// FileTierSources lists the file-wide sources that name a tier for a module
+// (leading comment, file name, config lists and dirs). The native placement
+// check uses it to find sources that contradict a host marker.
+func FileTierSources(source, path string, serverComponents, runtimeComponents, serverDirs, runtimeDirs []string) []FileTier {
+	var out []FileTier
+	for _, s := range fileTierSources(source, path, serverComponents, runtimeComponents, serverDirs, runtimeDirs) {
+		out = append(out, FileTier{What: s.what, Class: s.tier, Line: s.line})
+	}
+	return out
+}
+
+// BodyDirectiveTier reads a leading `"@server"` style string statement of a
+// function body and returns the tier name ("" for none).
+func BodyDirectiveTier(body []ast.Stmt) string { return bodyDirectiveTier(body) }
+
+// WalkStmts visits every statement and expression node under stmts. inFn is
+// true for nodes inside a function nested in stmts. Returning false from fn
+// skips the node's children.
+func WalkStmts(stmts []ast.Stmt, fn func(n any, inFn bool) bool) {
+	visitStmts(stmts, false, fn)
+}
