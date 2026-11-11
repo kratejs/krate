@@ -59,7 +59,10 @@ type sni struct {
 	publish func(caps.TrayEvent)
 	name    string
 
+	xembed caps.XEmbedTray // legacy tray fallback, nil when the platform has none
+
 	mu       sync.Mutex
+	useXE    bool // the icon lives in the XEmbed tray, not on the bus
 	active   bool
 	icon     caps.TrayIcon
 	revision uint32
@@ -71,14 +74,37 @@ type sni struct {
 
 type layoutItem struct{ props map[string]dbusiface.Variant }
 
-func newDefaultBackend(publish func(caps.TrayEvent)) (backend, error) {
+func newDefaultBackend(app any, publish func(caps.TrayEvent)) (backend, error) {
 	conn, err := sessionbus.Get()
 	if err != nil {
 		return nil, err
 	}
 	s := &sni{conn: conn, publish: publish, name: fmt.Sprintf("org.kde.StatusNotifierItem-%d-1", os.Getpid())}
+	s.xembed, _ = app.(caps.XEmbedTray)
 	s.export()
 	return s, nil
+}
+
+// current reports whether the backend still uses the live session bus
+// connection.
+func (s *sni) current() bool {
+	c, err := sessionbus.Get()
+	return err == nil && c == s.conn
+}
+
+func (s *sni) release() {
+	s.mu.Lock()
+	xe, useXE := s.xembed, s.useXE
+	s.useXE = false
+	s.mu.Unlock()
+	if useXE {
+		xe.SetXEmbedTray(nil)
+	}
+}
+
+// noHostError is what the user sees when neither tray kind exists.
+func noHostError() error {
+	return fmt.Errorf("%w: no system tray is running: neither a StatusNotifier host nor an XEmbed tray. On GNOME install and enable the AppIndicator extension (gnome-shell-extension-appindicator)", krate.ErrUnsupported)
 }
 
 func (s *sni) export() {
@@ -91,8 +117,10 @@ func (s *sni) export() {
 	s.conn.Export(itemPath, itemIface, map[string]dbusiface.Method{
 		"Activate":          ev("click"),
 		"SecondaryActivate": ev("middle-click"),
-		"ContextMenu":       ev("right-click"),
-		"Scroll":            func(args []any) ([]any, error) { return nil, nil },
+		// Ayatana hosts (Ubuntu panels) call this instead of SecondaryActivate.
+		"XAyatanaSecondaryActivate": ev("middle-click"),
+		"ContextMenu":               ev("right-click"),
+		"Scroll":                    func(args []any) ([]any, error) { return nil, nil },
 	})
 	s.conn.ExportProperties(itemPath, itemIface, s.itemProps)
 	s.conn.Export(menuPath, menuIface, map[string]dbusiface.Method{
@@ -116,6 +144,14 @@ func (s *sni) export() {
 
 func (s *sni) set(icon *caps.TrayIcon) error {
 	s.mu.Lock()
+	if s.useXE {
+		xe := s.xembed
+		if icon == nil {
+			s.useXE = false
+		}
+		s.mu.Unlock()
+		return xe.SetXEmbedTray(icon)
+	}
 	if icon == nil {
 		was := s.active
 		s.active = false
@@ -137,7 +173,7 @@ func (s *sni) set(icon *caps.TrayIcon) error {
 			var de *dbusiface.Error
 			if errors.As(err, &de) && (strings.HasSuffix(de.Name, "ServiceUnknown") || strings.HasSuffix(de.Name, "NameHasNoOwner")) {
 				s.conn.Call(dbusNameDest, "/org/freedesktop/DBus", dbusNameDest, "ReleaseName", s.name)
-				return fmt.Errorf("%w: no StatusNotifier host (system tray) is running", krate.ErrUnsupported)
+				return s.fallbackXEmbed(icon)
 			}
 			return err
 		}
@@ -153,6 +189,22 @@ func (s *sni) set(icon *caps.TrayIcon) error {
 	rev := s.revision
 	s.mu.Unlock()
 	s.conn.Emit(menuPath, menuIface, "LayoutUpdated", rev, int32(0))
+	return nil
+}
+
+// fallbackXEmbed shows the icon in an XEmbed tray when there is no
+// StatusNotifier host.
+func (s *sni) fallbackXEmbed(icon *caps.TrayIcon) error {
+	if s.xembed == nil || !s.xembed.XEmbedTrayAvailable() {
+		return noHostError()
+	}
+	s.xembed.OnXEmbedTray(s.publish)
+	if err := s.xembed.SetXEmbedTray(icon); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.useXE = true
+	s.mu.Unlock()
 	return nil
 }
 
@@ -403,10 +455,15 @@ func (s *sni) eventGroup(args []any) ([]any, error) {
 	return []any{[]int32{}}, nil
 }
 
-// Available reports whether a StatusNotifier host is running.
+// Available reports whether a StatusNotifier host or an XEmbed tray is
+// running.
 func Available(env *bridge.Env) bool {
 	if _, ok := env.App.(caps.Tray); ok {
 		return true
 	}
-	return sessionbus.NameHasOwner(watcherName)
+	if sessionbus.NameHasOwner(watcherName) {
+		return true
+	}
+	xe, ok := env.App.(caps.XEmbedTray)
+	return ok && xe.XEmbedTrayAvailable()
 }

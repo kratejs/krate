@@ -556,11 +556,11 @@ Extra windows on routes, title and size, fullscreen, maximize, minimize, framele
 
 Known limits:
 
-- Wayland: a client cannot place windows or keep them above others, so SetPosition and SetAlwaysOnTop are accepted and ignored there. Window position and always-on-top were verified on X11 only.
+- Wayland: a client cannot place windows or keep them above others, so SetPosition and SetAlwaysOnTop are accepted and ignored there and the capability report says unsupported. The GUI test packages also run under weston (GDK_BACKEND=wayland, weston nested on Xvfb); TestWaylandPlacementIsIgnored checks the ignored placement. Window position and always-on-top were verified on X11 only.
 - Fullscreen, maximize and minimize are verified with openbox on Xvfb (KRATE_NATIVE_WM=1), not on a full desktop environment.
 - macOS and Windows: untested. The same Go code is built for them (cross-compile checks in CI) and the CI native job runs go test on both, but no result of a run against a real WKWebView or WebView2 window has been confirmed.
 
-Evidence: `TestGUIWindowControls`, `TestGUIWindowOps`, `TestGUICloseRequested`, `TestGUITwoWindows`, `TestWindowOps`, `TestSecondWindowOnARoute`, `TestWindowOpenScopes`, `TestWindowScopeNarrowsCalls`
+Evidence: `TestGUIWindowControls`, `TestGUIWindowOps`, `TestGUICloseRequested`, `TestGUITwoWindows`, `TestWindowOps`, `TestSecondWindowOnARoute`, `TestWindowOpenScopes`, `TestWindowScopeNarrowsCalls`, `TestWaylandPlacementIsIgnored`
 
 ### Native: shared web process, release and background mode
 
@@ -598,24 +598,24 @@ Desktop notifications with actions. On Linux they use org.freedesktop.Notificati
 
 Known limits:
 
-- Verified against a fake notification service, not a real desktop daemon. Without a service that owns org.freedesktop.Notifications the call returns ErrUnsupported.
+- Verified against a real dunst daemon on a private session bus (text, icon, urgency, replacement by id, close from the app and from the daemon with the NotificationClosed reason, default action and action buttons, expiry, daemon gone) and against a fake service for protocol edge cases. Other daemons (GNOME Shell, KDE Plasma) were not run. Without a service that owns org.freedesktop.Notifications the call returns ErrUnsupported.
 - macOS and Windows return ErrUnsupported: UNUserNotificationCenter needs an app bundle and Windows toasts need an AppUserModelID from a Start menu shortcut.
 
-Evidence: `TestNotifyOverDBus`, `TestNotifyWithoutServiceIsUnsupported`, `TestNotificationAndTrayWithFakeDesktopServices`
+Evidence: `TestNotifyOverDBus`, `TestNotifyWithoutServiceIsUnsupported`, `TestNotificationAndTrayWithFakeDesktopServices`, `TestRealDunstShowsNotification`, `TestRealDunstUrgencyLevels`, `TestRealDunstReplaceByID`, `TestRealDunstClosedByApp`, `TestRealDunstClosedByDaemon`, `TestRealDunstExpires`, `TestRealDunstDefaultAction`, `TestRealDunstActionButton`, `TestRealDunstGoneIsUnsupported`, `TestRealNoDaemonOnARealBus`
 
 ### Native: SDK tray and global shortcuts
 
 **Linux:** Partial - **macOS:** n/a - **Windows:** n/a
 
-A tray icon with a menu (StatusNotifierItem and dbusmenu) and global keyboard shortcuts.
+A tray icon with a menu (StatusNotifierItem and dbusmenu, with a legacy XEmbed tray fallback) and global keyboard shortcuts.
 
 Known limits:
 
-- Linux tray needs a StatusNotifier host; stock GNOME without the AppIndicator extension returns ErrUnsupported.
-- Linux shortcuts are verified on X11 (XGrabKey). On Wayland they need the org.freedesktop.portal.GlobalShortcuts portal, verified against a fake portal only, and return ErrUnsupported without it.
+- The tray uses the StatusNotifierItem protocol when a StatusNotifier host exists and falls back to the legacy XEmbed system tray (GtkStatusIcon) when only an XEmbed tray manager owns _NET_SYSTEM_TRAY_S<screen> (X11 only). Stock GNOME with neither returns ErrUnsupported with a hint to install the AppIndicator extension. Verified against stalonetray (XEmbed, with real clicks and menu selection through XTEST) and against the Ayatana application indicator service as a real StatusNotifierWatcher and host; KDE Plasma, GNOME Shell with the extension and other panels were not run.
+- Linux shortcuts are verified on X11 (XGrabKey). On Wayland they need the org.freedesktop.portal.GlobalShortcuts portal, verified against a fake portal only (TestShortcutPortal), and return ErrUnsupported without it. No portal backend that implements GlobalShortcuts can run headless here: the GNOME backend needs a running gnome-shell/mutter session, the KDE backend needs KGlobalAccel in a Plasma session, the Hyprland and COSMIC backends are not packaged for Debian or Ubuntu, and xdg-desktop-portal-wlr does not implement the interface.
 - macOS and Windows return ErrUnsupported for both.
 
-Evidence: `TestTrayOverDBus`, `TestTrayWithoutHostIsUnsupported`, `TestShortcutPortal`, `TestShortcutWaylandWithoutPortalIsUnsupported`, `TestGUIGlobalShortcut`, `TestShortcutAndSupports`
+Evidence: `TestTrayOverDBus`, `TestTrayWithoutHostIsUnsupported`, `TestShortcutPortal`, `TestShortcutWaylandWithoutPortalIsUnsupported`, `TestGUIGlobalShortcut`, `TestShortcutAndSupports`, `TestRealStatusNotifierHost`, `TestRealXEmbedTray`, `TestRealNoTrayAtAll`, `TestTrayFallsBackToXEmbedWithoutAStatusNotifierHost`, `TestTrayPrefersStatusNotifierOverXEmbed`, `TestNoTrayAtAllNamesTheAppIndicatorExtension`
 
 ### Native: SDK app lifecycle
 

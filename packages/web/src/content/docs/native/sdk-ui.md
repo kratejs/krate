@@ -167,9 +167,10 @@ subscriptions.
 ## Platform support
 
 "Verified" means a test runs it against the real thing on Linux (GTK 3 and
-WebKitGTK through purego, a private D-Bus session bus and fake desktop
-services). "Compile-only" means the code builds for the target and is written
-against the platform API but has not run in this release.
+WebKitGTK through purego, a private D-Bus session bus, and real desktop
+services: dunst, stalonetray and the Ayatana indicator service, plus fake ones
+for protocol edge cases). "Compile-only" means the code builds for the target
+and is written against the platform API but has not run in this release.
 
 | Capability | Linux | macOS | Windows |
 |------------|-------|-------|---------|
@@ -178,23 +179,29 @@ against the platform API but has not run in this release.
 | Menu bar and context menus | Verified (GtkMenuBar in each window; popups at the pointer) | Compile-only (global menu bar) | Compile-only (accelerators are shown but not active) |
 | Multiple windows on routes, title, size | Verified | Existing platform layer | Existing platform layer |
 | Windows share one web process; hide with release, `keepAlive`, memory-pressure event | Verified (related web views; the WebKitWebProcess count is asserted) | Compile-only (private single-process switch behind `respondsToSelector`) | Compile-only (one shared environment; `put_IsVisible` and `MemoryUsageTargetLevel` on hide) |
-| Frameless, position, always on top | Verified (X11; Wayland ignores position and always-on-top) | Compile-only | Compile-only |
+| Frameless, position, always on top | Verified (X11; Wayland ignores position and always-on-top, checked under weston) | Compile-only | Compile-only |
 | Fullscreen, maximize, minimize | Verified with a window manager (openbox on Xvfb) | Compile-only | Compile-only |
 | Close requested (prevent close) | Verified | Compile-only | Compile-only |
-| Notifications | Verified against a fake `org.freedesktop.Notifications`; actions via `ActionInvoked` | `ErrUnsupported`: `UNUserNotificationCenter` needs an app bundle | `ErrUnsupported`: toasts need an AppUserModelID from a Start menu shortcut |
-| Tray | Verified against a fake StatusNotifierWatcher (StatusNotifierItem plus `com.canonical.dbusmenu`); needs a StatusNotifier host | `ErrUnsupported` | `ErrUnsupported` |
-| Global shortcuts | Verified on X11 (`XGrabKey`); Wayland uses the GlobalShortcuts portal (verified against a fake portal) or returns `ErrUnsupported` | `ErrUnsupported` | `ErrUnsupported` |
+| Notifications | Verified against a real dunst daemon (text, icon, urgency, replace by id, close from either side, actions through `dunstctl`) and a fake `org.freedesktop.Notifications` for edge cases | `ErrUnsupported`: `UNUserNotificationCenter` needs an app bundle | `ErrUnsupported`: toasts need an AppUserModelID from a Start menu shortcut |
+| Tray | Verified against a real StatusNotifier host (StatusNotifierItem plus `com.canonical.dbusmenu`) and a real XEmbed tray (stalonetray); needs one of the two | `ErrUnsupported` | `ErrUnsupported` |
+| Global shortcuts | Verified on X11 (`XGrabKey`); Wayland uses the GlobalShortcuts portal (verified against a fake portal only: no backend runs headless) or returns `ErrUnsupported` | `ErrUnsupported` | `ErrUnsupported` |
 | Single instance, deep links | Verified (unix socket in the runtime dir) | The same code; URL scheme registration is an Info.plist packaging step | The same code; scheme registration is a registry packaging step |
 
 ### Linux details
 
 - **Wayland.** A client cannot place windows or keep them above others;
   `SetPosition` and `SetAlwaysOnTop` are accepted and ignored by compositors.
-  Global shortcuts need the `org.freedesktop.portal.GlobalShortcuts` portal
-  (the user may be asked to confirm); without it `shortcut.Register` returns
-  `ErrUnsupported`.
-- **Tray.** Without a StatusNotifier host (stock GNOME without the AppIndicator
-  extension) `tray.New` returns `ErrUnsupported`.
+  `window.supports` reports `window:position` and `window:alwaysOnTop` as
+  unsupported. Global shortcuts need the `org.freedesktop.portal.GlobalShortcuts`
+  portal (the user may be asked to confirm); without it `shortcut.Register`
+  returns `ErrUnsupported`. The XEmbed tray fallback does not apply on Wayland.
+- **Tray.** The icon uses the StatusNotifierItem protocol when a StatusNotifier
+  host is running. Without one, if an XEmbed tray manager owns
+  `_NET_SYSTEM_TRAY_S<screen>` (a legacy panel, stalonetray), the icon goes
+  there through `GtkStatusIcon`; that fallback works on X11 only. With neither
+  (stock GNOME without the AppIndicator extension) `tray.New` returns
+  `ErrUnsupported`; the error says to install and enable the AppIndicator
+  extension (`gnome-shell-extension-appindicator`).
 - **Notifications.** If no notification service owns
   `org.freedesktop.Notifications` the call returns `ErrUnsupported`.
 

@@ -27,6 +27,7 @@ type (
 	TrayIcon             = caps.TrayIcon
 	TrayEvent            = caps.TrayEvent
 	Tray                 = caps.Tray
+	XEmbedTray           = caps.XEmbedTray
 	Notification         = caps.Notification
 	NotificationAction   = caps.NotificationAction
 	NotifyEvent          = caps.NotifyEvent

@@ -53,6 +53,20 @@ func newDefaultBackend(publish func(caps.NotifyEvent)) (backend, error) {
 	return b, nil
 }
 
+// current reports whether the backend still uses the live session bus
+// connection.
+func (b *dbusBackend) current() bool {
+	c, err := sessionbus.Get()
+	return err == nil && c == b.conn
+}
+
+func (b *dbusBackend) release() {
+	for _, c := range b.cancels {
+		c()
+	}
+	b.cancels = nil
+}
+
 func (b *dbusBackend) onAction(s dbusiface.Signal) {
 	if len(s.Body) < 2 {
 		return

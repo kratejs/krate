@@ -25,19 +25,32 @@ func Register(t *bridge.Table, env *bridge.Env) {
 	publish := func(ev caps.NotifyEvent) {
 		topic.Publish(func(e *wire.Encoder) { encodeEvent(e, Event{ID: ev.ID, Action: ev.Action, Closed: ev.Closed}) })
 	}
-	var once sync.Once
+	var mu sync.Mutex
 	var be backend
-	var beErr error
 	get := func() (backend, error) {
-		once.Do(func() {
-			if n, ok := env.App.(caps.Notifier); ok {
-				n.OnNotify(publish)
-				be = platformBackend{n}
-				return
+		mu.Lock()
+		defer mu.Unlock()
+		if be != nil {
+			if c, ok := be.(interface{ current() bool }); !ok || c.current() {
+				return be, nil
 			}
-			be, beErr = newDefaultBackend(publish)
-		})
-		return be, beErr
+			// The session bus connection died or moved; start over.
+			if r, ok := be.(interface{ release() }); ok {
+				r.release()
+			}
+			be = nil
+		}
+		if n, ok := env.App.(caps.Notifier); ok {
+			n.OnNotify(publish)
+			be = platformBackend{n}
+			return be, nil
+		}
+		b, err := newDefaultBackend(publish)
+		if err != nil {
+			return nil, err
+		}
+		be = b
+		return be, nil
 	}
 
 	t.Func(IDSend, Permission, true, func(ctx krate.Ctx, args *wire.Decoder, out *wire.Encoder) error {

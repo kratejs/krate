@@ -2,8 +2,11 @@
 //
 // Linux: the StatusNotifierItem protocol with a com.canonical.dbusmenu menu,
 // implemented in pure Go over the session bus. It needs a StatusNotifier host
-// (KDE Plasma, most panels, GNOME with the AppIndicator extension); without
-// one New returns krate.ErrUnsupported. One tray icon per app.
+// (KDE Plasma, most panels, GNOME with the AppIndicator extension). Without
+// one, the icon goes into a legacy XEmbed system tray (GtkStatusIcon) if a
+// tray manager owns _NET_SYSTEM_TRAY_S<screen>; with neither, New returns
+// krate.ErrUnsupported with a hint naming the AppIndicator extension. One
+// tray icon per app.
 package tray
 
 import (

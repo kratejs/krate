@@ -44,14 +44,21 @@ func Register(t *bridge.Table, env *bridge.Env) {
 		mu.Lock()
 		defer mu.Unlock()
 		if be != nil {
-			return be, nil
+			if c, ok := be.(interface{ current() bool }); !ok || c.current() {
+				return be, nil
+			}
+			// The session bus connection died or moved; start over.
+			if r, ok := be.(interface{ release() }); ok {
+				r.release()
+			}
+			be = nil
 		}
 		if p, ok := env.App.(caps.Tray); ok {
 			p.OnTray(publish)
 			be = platformBackend{p}
 			return be, nil
 		}
-		b, err := newDefaultBackend(publish)
+		b, err := newDefaultBackend(env.App, publish)
 		if err != nil {
 			return nil, err
 		}

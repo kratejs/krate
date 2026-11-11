@@ -10,7 +10,7 @@ import (
 	"github.com/kratejs/krate/packages/native/sdk/internal/bridge"
 )
 
-func newDefaultBackend(publish func(caps.TrayEvent)) (backend, error) {
+func newDefaultBackend(app any, publish func(caps.TrayEvent)) (backend, error) {
 	return nil, fmt.Errorf("%w: the tray is not available on this platform build", krate.ErrUnsupported)
 }
 
