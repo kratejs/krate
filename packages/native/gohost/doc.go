@@ -25,6 +25,10 @@ package gohost
 // shell's SDK socket (see the package comment).
 const ParentEnv = "KRATE_GOHOST_PARENT"
 
+// DevEnv is set to "1" by a shell started with Dev; only then do panic
+// errors of the child carry stacks.
+const DevEnv = "KRATE_DEV"
+
 // SocketEnv names the environment variable that carries the socket path.
 const SocketEnv = "KRATE_GOHOST_SOCKET"
 

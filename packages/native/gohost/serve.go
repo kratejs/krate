@@ -30,7 +30,7 @@ func Serve(register func(*scheme.Registry)) {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	err := Run(ctx, register, Config{Socket: os.Getenv(SocketEnv), Stdin: os.Stdin, Ready: os.Stdout})
+	err := Run(ctx, register, Config{Socket: os.Getenv(SocketEnv), Stdin: os.Stdin, Ready: os.Stdout, Dev: os.Getenv(DevEnv) == "1"})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "krate gohost:", err)
 		stopProfile()
@@ -48,6 +48,8 @@ type Config struct {
 	Stdin io.Reader
 	// Ready receives "ready\n" once the child is listening.
 	Ready io.Writer
+	// Dev puts panic stacks (with source paths) in the errors the UI sees.
+	Dev bool
 }
 
 // Run serves until ctx ends or cfg.Stdin reaches EOF. It returns nil on a
@@ -68,7 +70,7 @@ func Run(ctx context.Context, register func(*scheme.Registry), cfg Config) error
 	}
 	defer os.Remove(cfg.Socket)
 
-	srv := &http.Server{Handler: scheme.New(scheme.Options{Registry: reg, Dev: true})}
+	srv := &http.Server{Handler: scheme.New(scheme.Options{Registry: reg, Dev: cfg.Dev})}
 	served := make(chan error, 1)
 	go func() { served <- srv.Serve(ln) }()
 
