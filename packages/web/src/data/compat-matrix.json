@@ -1,5 +1,5 @@
 {
-  "updated": "2026-11-05",
+  "updated": "2026-11-11",
   "rows": [
     {
       "id": "hooks-state",
@@ -727,6 +727,465 @@
         "Request-time highlighting runs in the Node renderer; serverless deploy targets write plain text.",
         "The browser and request-time highlighters ship 16 languages; other languages are highlighted at build time only.",
         "A Markdown fence that names a language outside the shipped set leaves the snippet plain."
+      ]
+    },
+    {
+      "id": "native-window-scheme",
+      "area": "Native: window and custom scheme",
+      "native": {
+        "linux": "supported",
+        "macos": "untested",
+        "windows": "untested"
+      },
+      "target": "Krate Native v1",
+      "summary": "The shell opens a window around the system webview (WebKitGTK 4.1 through purego on Linux, WKWebView on macOS, WebView2 on Windows) and serves the built UI from an in-process custom scheme with a content security policy. Navigation away from the app origin is blocked, paths cannot escape the asset directory, and browser mode serves the same app on a loopback port behind a session token.",
+      "tests": [
+        "TestGUIPage",
+        "TestGUINavigationLock",
+        "TestGUIShell",
+        "TestGUITwoWindows",
+        "TestStaticResolution",
+        "TestStaticRejectsTraversal",
+        "TestDefaultCSPShape",
+        "TestBrowserMode",
+        "TestNativeE2EGUI"
+      ],
+      "knownLimits": [
+        "Linux GUI tests need a display and WebKitGTK 2.40 or newer (KRATE_NATIVE_GUI=1); CI runs them under Xvfb.",
+        "macOS and Windows: untested. The same Go code is built for them (cross-compile checks in CI) and the CI native job runs go test on both, but no result of a run against a real WKWebView or WebView2 window has been confirmed.",
+        "WebView2 on Windows needs the Evergreen runtime installed; krate native doctor reports it."
+      ]
+    },
+    {
+      "id": "native-streaming",
+      "area": "Native: streaming responses",
+      "native": {
+        "linux": "supported",
+        "macos": "untested",
+        "windows": "untested"
+      },
+      "target": "Krate Native v1",
+      "summary": "Responses are streamed to the webview as the handler writes them: headers go out first, body chunks are flushed as they come, a handler panic before the first byte becomes a 500, and closing the reader cancels the handler's context. Server-sent streams from host code use the same path.",
+      "tests": [
+        "TestServeStreamsChunks",
+        "TestServeCancelsWhenReaderCloses",
+        "TestServePanicBeforeHeadersIs500",
+        "TestStreamValuesThenEnd",
+        "TestStreamError",
+        "TestGUIRequestAbort"
+      ],
+      "knownLimits": [
+        "macOS and Windows: untested. The same Go code is built for them (cross-compile checks in CI) and the CI native job runs go test on both, but no result of a run against a real WKWebView or WebView2 window has been confirmed.",
+        "The Windows response writer (TestResponseWriterFlushStreams, TestBlockBufStreaming) and the macOS task writer have pure-Go unit tests; only the Linux path has been driven through a real webview."
+      ]
+    },
+    {
+      "id": "native-host-calls",
+      "area": "Native: host calls, streams and signals",
+      "native": {
+        "linux": "supported",
+        "macos": "untested",
+        "windows": "untested"
+      },
+      "target": "Krate Native v1",
+      "summary": "The page calls host functions by id over the scheme: unary calls, server streams and signals (a value with change notifications that reconnects with the current value). Calls are cancellable, errors map to stable codes, concurrency is bounded, and permissions gate which SDK ids a page may reach.",
+      "tests": [
+        "TestInvoke",
+        "TestInvokeStreamAndSubscribe",
+        "TestSignalsReconnectGetsCurrentValue",
+        "TestBatchFastResultArrivesBeforeSlow",
+        "TestCancelByID",
+        "TestErrorMapping",
+        "TestConcurrencyIsBounded",
+        "TestEveryIDIsRegisteredAndGated"
+      ],
+      "knownLimits": [
+        "The scheme package is pure Go and identical on every OS; the Linux run is the one verified here. macOS and Windows: untested. The same Go code is built for them (cross-compile checks in CI) and the CI native job runs go test on both, but no result of a run against a real WKWebView or WebView2 window has been confirmed."
+      ]
+    },
+    {
+      "id": "native-go-host",
+      "area": "Native: Go host code",
+      "native": {
+        "linux": "supported",
+        "macos": "untested",
+        "windows": "untested"
+      },
+      "target": "Krate Native v1",
+      "summary": "Go host code (functions, streams and signals in .go files next to the pages) runs in a child process under krate native dev and krate native build, and is linked into the single executable in a release build. The child restarts after a crash and reconnects subscriptions.",
+      "tests": [
+        "TestChildLifecycle",
+        "TestChildCrashAndRestart",
+        "TestRunInProcess",
+        "TestNativeReleaseExample",
+        "TestNativeReleaseGoOnlyHasNoQuickJSAndShakesTray",
+        "fixture:examples/native-tasks"
+      ],
+      "knownLimits": [
+        "Needs the Go toolchain on the build machine (krate native doctor reports it).",
+        "macOS and Windows: untested. The same Go code is built for them (cross-compile checks in CI) and the CI native job runs go test on both, but no result of a run against a real WKWebView or WebView2 window has been confirmed."
+      ]
+    },
+    {
+      "id": "native-ts-quickjs",
+      "area": "Native: TypeScript host code on QuickJS",
+      "native": {
+        "linux": "supported",
+        "macos": "untested",
+        "windows": "untested"
+      },
+      "target": "Krate Native v1",
+      "summary": "TypeScript host code (*.host.ts files and @host functions) is bundled to one script and runs in the embedded QuickJS engine with no external runtime. Stack traces map back to the TypeScript sources, a watchdog stops runaway synchronous code, and the globals follow the published runtime compatibility ledger.",
+      "tests": [
+        "TestCalls",
+        "TestSourceMappedStack",
+        "TestWatchdog",
+        "TestTimers",
+        "TestCompatLedger",
+        "TestNativeReleaseTSOnlyRuns",
+        "fixture:examples/native-tasks"
+      ],
+      "knownLimits": [
+        "QuickJS is not Node: only the globals in the runtime compatibility ledger exist; code that needs more selects a node, bun or deno host.",
+        "macOS and Windows: untested. The same Go code is built for them (cross-compile checks in CI) and the CI native job runs go test on both, but no result of a run against a real WKWebView or WebView2 window has been confirmed."
+      ]
+    },
+    {
+      "id": "native-host-children",
+      "area": "Native: Node, Bun and Deno host children",
+      "native": {
+        "linux": "partial",
+        "macos": "untested",
+        "windows": "untested"
+      },
+      "target": "Krate Native v1",
+      "summary": "TypeScript host code can run as a child process of the shell under Node, Bun or Deno (native.host.runtime, or native.host.islands for single packages). Deno gets permission flags derived from the app's permissions; a release build compiles the child into an executable (Node SEA, bun build --compile, deno compile).",
+      "tests": [
+        "TestHostChildNode",
+        "TestNativeHostChildNodeEndToEnd",
+        "TestNativeDevReloadsHostChild",
+        "TestDenoFlags",
+        "TestCommand",
+        "TestBuildReleaseNodeSEA",
+        "TestBuildReleaseBun",
+        "TestBuildReleaseDeno",
+        "TestReleaseBunCompiled",
+        "TestReleaseNodeSEA"
+      ],
+      "knownLimits": [
+        "Node children are verified end to end on Linux. Bun and Deno command lines, flags and release builds are unit tested with stand-in executables; a real Deno child has not been run by any test, and the Bun and Node compile tests skip when the tool is missing.",
+        "macOS and Windows: untested. The same Go code is built for them (cross-compile checks in CI) and the CI native job runs go test on both, but no result of a run against a real WKWebView or WebView2 window has been confirmed."
+      ]
+    },
+    {
+      "id": "native-sdk-data",
+      "area": "Native: SDK data areas (kv, db, fs, net, os)",
+      "native": {
+        "linux": "supported",
+        "macos": "untested",
+        "windows": "untested"
+      },
+      "target": "Krate Native v1",
+      "summary": "The key-value store, SQLite database, scoped file access, HTTP client with secrets, and OS information, directories, secrets and openExternal are available to the page and to Go and TypeScript host code, each behind its permission. Two processes can share a database and a store.",
+      "tests": [
+        "TestGoAPI",
+        "TestTwoProcesses",
+        "TestWALAndPragmas",
+        "TestTraversalIsDenied",
+        "TestSymlinkEscapeIsDenied",
+        "TestClientTimeouts",
+        "TestSecretNotForwardedAcrossHosts",
+        "TestSecretServiceRoundTrip",
+        "TestInfo",
+        "TestUIDefaultsAndDenials"
+      ],
+      "knownLimits": [
+        "Linux secrets use the freedesktop Secret Service over D-Bus (verified against a fake service); without a provider os.secret answers unsupported.",
+        "macOS and Windows: untested. The same Go code is built for them (cross-compile checks in CI) and the CI native job runs go test on both, but no result of a run against a real WKWebView or WebView2 window has been confirmed."
+      ]
+    },
+    {
+      "id": "native-sdk-window",
+      "area": "Native: SDK windows",
+      "native": {
+        "linux": "partial",
+        "macos": "untested",
+        "windows": "untested"
+      },
+      "target": "Krate Native v1",
+      "summary": "Extra windows on routes, title and size, fullscreen, maximize, minimize, frameless windows, close-requested interception and per-window permission scopes.",
+      "tests": [
+        "TestGUIWindowControls",
+        "TestGUIWindowOps",
+        "TestGUICloseRequested",
+        "TestGUITwoWindows",
+        "TestWindowOps",
+        "TestSecondWindowOnARoute",
+        "TestWindowOpenScopes",
+        "TestWindowScopeNarrowsCalls"
+      ],
+      "knownLimits": [
+        "Wayland: a client cannot place windows or keep them above others, so SetPosition and SetAlwaysOnTop are accepted and ignored there. Window position and always-on-top were verified on X11 only.",
+        "Fullscreen, maximize and minimize are verified with openbox on Xvfb (KRATE_NATIVE_WM=1), not on a full desktop environment.",
+        "macOS and Windows: untested. The same Go code is built for them (cross-compile checks in CI) and the CI native job runs go test on both, but no result of a run against a real WKWebView or WebView2 window has been confirmed."
+      ]
+    },
+    {
+      "id": "native-sdk-dialog-clipboard-menu",
+      "area": "Native: SDK dialogs, clipboard and menus",
+      "native": {
+        "linux": "supported",
+        "macos": "untested",
+        "windows": "untested"
+      },
+      "target": "Krate Native v1",
+      "summary": "Open, save, folder and message dialogs, clipboard text, PNG image and file list, and the menu bar and context menus with click events delivered to Go and to the page.",
+      "tests": [
+        "TestGUIDialogs",
+        "TestGUIClipboard",
+        "TestGUIMenus",
+        "TestDialogsAreCreatedWithTheRightOptions",
+        "TestClipboardThroughTheSDK",
+        "TestMenuClickReachesGoAndTheUI",
+        "TestDialogRoundTrip",
+        "TestMenuEvents"
+      ],
+      "knownLimits": [
+        "A native dialog cannot be clicked headlessly: the tests check that it is created with the right options and answer it programmatically.",
+        "Windows menu accelerators are shown but not active; Windows message boxes do not support custom button labels.",
+        "macOS and Windows: untested. The same Go code is built for them (cross-compile checks in CI) and the CI native job runs go test on both, but no result of a run against a real WKWebView or WebView2 window has been confirmed."
+      ]
+    },
+    {
+      "id": "native-sdk-notify",
+      "area": "Native: SDK notifications",
+      "native": {
+        "linux": "supported",
+        "macos": "n/a",
+        "windows": "n/a"
+      },
+      "target": "Krate Native v1",
+      "summary": "Desktop notifications with actions. On Linux they use org.freedesktop.Notifications over D-Bus.",
+      "tests": [
+        "TestNotifyOverDBus",
+        "TestNotifyWithoutServiceIsUnsupported",
+        "TestNotificationAndTrayWithFakeDesktopServices"
+      ],
+      "knownLimits": [
+        "Verified against a fake notification service, not a real desktop daemon. Without a service that owns org.freedesktop.Notifications the call returns ErrUnsupported.",
+        "macOS and Windows return ErrUnsupported: UNUserNotificationCenter needs an app bundle and Windows toasts need an AppUserModelID from a Start menu shortcut."
+      ]
+    },
+    {
+      "id": "native-sdk-tray-shortcut",
+      "area": "Native: SDK tray and global shortcuts",
+      "native": {
+        "linux": "partial",
+        "macos": "n/a",
+        "windows": "n/a"
+      },
+      "target": "Krate Native v1",
+      "summary": "A tray icon with a menu (StatusNotifierItem and dbusmenu) and global keyboard shortcuts.",
+      "tests": [
+        "TestTrayOverDBus",
+        "TestTrayWithoutHostIsUnsupported",
+        "TestShortcutPortal",
+        "TestShortcutWaylandWithoutPortalIsUnsupported",
+        "TestGUIGlobalShortcut",
+        "TestShortcutAndSupports"
+      ],
+      "knownLimits": [
+        "Linux tray needs a StatusNotifier host; stock GNOME without the AppIndicator extension returns ErrUnsupported.",
+        "Linux shortcuts are verified on X11 (XGrabKey). On Wayland they need the org.freedesktop.portal.GlobalShortcuts portal, verified against a fake portal only, and return ErrUnsupported without it.",
+        "macOS and Windows return ErrUnsupported for both."
+      ]
+    },
+    {
+      "id": "native-sdk-app",
+      "area": "Native: SDK app lifecycle",
+      "native": {
+        "linux": "supported",
+        "macos": "untested",
+        "windows": "untested"
+      },
+      "target": "Krate Native v1",
+      "summary": "Single instance, deep links and the Linux .desktop entry that registers the app's URL schemes.",
+      "tests": [
+        "TestSingleInstance",
+        "TestStaleSocketIsReplaced",
+        "TestURLsFromArgs",
+        "TestDesktopEntry"
+      ],
+      "knownLimits": [
+        "URL scheme registration is a packaging step on macOS (Info.plist) and Windows (registry); the runtime code is shared.",
+        "macOS and Windows: untested. The same Go code is built for them (cross-compile checks in CI) and the CI native job runs go test on both, but no result of a run against a real WKWebView or WebView2 window has been confirmed."
+      ]
+    },
+    {
+      "id": "native-release-binary",
+      "area": "Native: release as a single executable",
+      "native": {
+        "linux": "supported",
+        "macos": "untested",
+        "windows": "untested"
+      },
+      "target": "Krate Native v1",
+      "summary": "krate native build --release links the shell, the UI, the host code and only the SDK areas the app uses into one executable per target (CGO_ENABLED=0, stripped, with a report of linked and left-out areas). Cross-compiling to the other OSes is covered; running those executables is not.",
+      "tests": [
+        "TestNativeReleaseDerivesPermissionsAndReport",
+        "TestNativeReleaseTSOnlyRuns",
+        "TestNativeReleaseGoOnlyHasNoQuickJSAndShakesTray",
+        "TestNativeReleaseCrossCompiles",
+        "TestNativeReleaseWindowsFlagsAndTargets",
+        "TestNativeReleaseExample",
+        "TestNativeReleaseE2EGUI"
+      ],
+      "knownLimits": [
+        "The macOS and Windows executables are cross-compiled from Linux and checked for their format, never launched.",
+        "Needs Go on the build machine; without it (native.release.compile auto) the build falls back to the prebuilt-shell layout."
+      ]
+    },
+    {
+      "id": "native-prebuilt-shell",
+      "area": "Native: prebuilt shell for apps without Go",
+      "native": {
+        "linux": "supported",
+        "macos": "untested",
+        "windows": "untested"
+      },
+      "target": "Krate Native v1",
+      "summary": "The @krate/core-<platform> packages carry krate-shell next to krate. krate native build then writes a runnable dist-native/<os>-<arch>/<productName> with app/ beside it for a TypeScript-only app, with no Go toolchain, and krate native package turns that into tar.gz, deb and the other formats. The shell is found in order: --shell, $KRATE_SHELL, next to the krate executable, a build from a Krate checkout.",
+      "tests": [
+        "TestFindPrebuiltShellOrder",
+        "TestLocateNativeShellOrder",
+        "TestAssembleShellDist",
+        "TestNativePrebuiltShellWithoutGo",
+        "TestDiscoverPrefersReport"
+      ],
+      "knownLimits": [
+        "The Linux test uses a stand-in shell executable placed next to a copy of the test krate binary and a PATH with no go command; it proves the layout and packaging, not a launch.",
+        "The packages for all seven platforms are built by scripts/build-platform-packages.mjs and checked by pnpm check:release; the npm install of them (scripts/smoke-install.mjs) runs in the release workflow.",
+        "macOS and Windows: untested. The same Go code is built for them (cross-compile checks in CI) and the CI native job runs go test on both, but no result of a run against a real WKWebView or WebView2 window has been confirmed."
+      ]
+    },
+    {
+      "id": "native-doctor",
+      "area": "Native: krate native doctor",
+      "native": {
+        "linux": "supported",
+        "macos": "untested",
+        "windows": "untested"
+      },
+      "target": "Krate Native v1",
+      "summary": "Reports the Go toolchain, the shell binary and its path, the system webview (WebKitGTK 4.1 version and library paths and display on Linux, the OS version on macOS, the WebView2 runtime version on Windows, through krate-shell --doctor), the packaging and signing tools, and the host runtime the config selects. Exits 1 when something the config needs is missing.",
+      "tests": [
+        "TestHealthyTypeScriptOnlyLinuxWithoutGo",
+        "TestGoRequiredForGoHostAndCompileAlways",
+        "TestWebviewMissingIsRequired",
+        "TestHostRuntimes",
+        "TestPackagingToolsPerOS",
+        "TestNativeDoctorCommand",
+        "TestBinaryDoctor",
+        "TestProbeShape"
+      ],
+      "knownLimits": [
+        "The report logic is tested with injected probes for all three OSes; the real probes ran only on Linux. The macOS version and Windows registry probes compile (go vet per GOOS) but have not run."
+      ]
+    },
+    {
+      "id": "native-packaging",
+      "area": "Native: packaging formats",
+      "native": {
+        "linux": "partial",
+        "macos": "untested",
+        "windows": "untested"
+      },
+      "target": "Krate Native v1",
+      "summary": "krate native package builds .tar.gz, .deb, .rpm and AppImage on Linux, .app, .zip and .dmg on macOS, and .zip, NSIS installer and MSIX on Windows, from a release executable or the prebuilt-shell layout, with icons, desktop entries and update files.",
+      "tests": [
+        "TestLinuxTarGzAndDeb",
+        "TestRPM",
+        "TestAppImageNeedsTool",
+        "TestMacAppAndZip",
+        "TestMacDMGUsesHdiutilOnlyOnMac",
+        "TestWindowsZipAndNSIS",
+        "TestMSIXStructure",
+        "TestNativePackageEndToEnd",
+        "TestUpdateArtifactsAreSignedAndFeedWritten"
+      ],
+      "knownLimits": [
+        "AppImage needs appimagetool and a .dmg needs hdiutil on macOS; neither is exercised end to end here.",
+        "macOS and Windows packages are assembled by pure Go code on Linux and checked for structure; none has been installed or opened on its OS. The NSIS installer needs makensis."
+      ]
+    },
+    {
+      "id": "native-signing",
+      "area": "Native: signing and notarization",
+      "native": {
+        "linux": "partial",
+        "macos": "untested",
+        "windows": "untested"
+      },
+      "target": "Krate Native v1",
+      "summary": "krate native sign and notarize drive codesign and notarytool on macOS, signtool or osslsigncode for Windows, and gpg for Linux packages, and rebuild the archives around the signed payload.",
+      "tests": [
+        "TestSignMacAppDeepSignsInnerFirst",
+        "TestSignMacAdHocAndEntitlements",
+        "TestSignMacOnlyOnMac",
+        "TestNotarize",
+        "TestSignWindows",
+        "TestSignLinuxGPG",
+        "TestPackageSignsBeforeArchiving",
+        "TestRedactCommand"
+      ],
+      "knownLimits": [
+        "The signing tools are replaced by stand-ins in every test: command lines, ordering and secret redaction are checked, a real certificate and Apple notarization service never were.",
+        "macOS and Windows: untested. The same Go code is built for them (cross-compile checks in CI) and the CI native job runs go test on both, but no result of a run against a real WKWebView or WebView2 window has been confirmed."
+      ]
+    },
+    {
+      "id": "native-updater",
+      "area": "Native: updater",
+      "native": {
+        "linux": "supported",
+        "macos": "untested",
+        "windows": "untested"
+      },
+      "target": "Krate Native v1",
+      "summary": "In-app updates: an Ed25519-signed feed, resumable verified downloads, and an apply step that replaces the executable and app directory (Linux, AppImage, macOS bundle, Windows ordering) with rollback on failure.",
+      "tests": [
+        "TestSignatureGoodBadWrongKey",
+        "TestCheck",
+        "TestDownloadVerifiesAndProgress",
+        "TestDownloadResumes",
+        "TestApplyLinuxReplacesExecutableAndAppDir",
+        "TestApplyRollsBackOnFailure",
+        "TestApplyAppImage",
+        "TestApplyMacBundle",
+        "TestApplyWindowsOrder"
+      ],
+      "knownLimits": [
+        "The macOS bundle and Windows apply steps are file-system logic tested on Linux; replacing a running Windows executable has not been tried on Windows.",
+        "macOS and Windows: untested. The same Go code is built for them (cross-compile checks in CI) and the CI native job runs go test on both, but no result of a run against a real WKWebView or WebView2 window has been confirmed."
+      ]
+    },
+    {
+      "id": "native-budgets",
+      "area": "Native: size, start-up and memory budgets",
+      "native": {
+        "linux": "supported",
+        "macos": "planned",
+        "windows": "planned"
+      },
+      "target": "Krate Native v1",
+      "summary": "packages/native/budgets.json limits the stripped shell, Go-only, TypeScript-only and example release executables (bytes), the cold start of the example in a real window (ms) and its resident memory (KB). Limits are the measured value plus 25 percent.",
+      "tests": [
+        "TestNativeBudgetSizes",
+        "TestNativeBudgetGUI"
+      ],
+      "knownLimits": [
+        "Budgets exist for linux-amd64 only; the start-up limits were measured on a developer machine and CI applies KRATE_BUDGET_SCALE=3 until a hosted runner has been measured.",
+        "macOS and Windows have no recorded budgets."
       ]
     }
   ]

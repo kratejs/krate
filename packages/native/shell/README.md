@@ -24,6 +24,10 @@ A release build embeds the same layout as a zip (`shell.RunEmbedded(fsys, opts)`
 `shell.Main(fsys, register)`): the manifest has no `gohost` section and the Go host
 code is registered in process (`RunOptions.GoGlue`). See the release page of the docs.
 
+`krate-shell --doctor` does not load an app: it prints one line of JSON (`shell.DoctorReport`) with the
+webview name, version and library paths, the minimum version and whether a display is reachable, and
+exits 0 even when the webview is missing. `krate native doctor` runs it.
+
 Release layout: the app directory sits next to the shell binary
 (`<dir of exe>/app`), or at `../Resources/app` inside a macOS `.app`
 (`Contents/MacOS/<exe>`). `krate-shell <appDir>` takes any directory.

@@ -6,6 +6,11 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const matrixPath = path.join(root, "packages/web/src/data/compat-matrix.json");
 const statuses = new Set(["stable", "supported", "partial", "planned", "n/a"]);
+// Krate Native rows carry a status per OS instead of source/islands/ssr.
+// "untested" means the code exists and builds for that OS but no test has run
+// there; it needs a knownLimits entry that says so.
+const nativeOS = ["linux", "macos", "windows"];
+const nativeStatuses = new Set([...statuses, "untested"]);
 
 function walk(dir, out = []) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -44,6 +49,49 @@ function diagnosticCodes() {
   return names;
 }
 
+function checkRefs(row, label) {
+  for (const ref of row.tests) {
+    if (ref.startsWith("Test")) {
+      if (!tests.has(ref)) fail(`${label}: missing Go test ${ref}`);
+    } else if (ref.startsWith("fixture:")) {
+      const target = ref.slice("fixture:".length);
+      if (!fs.existsSync(path.join(root, target))) fail(`${label}: missing fixture ${target}`);
+    } else if (ref.startsWith("browser:")) {
+      if (!ref.slice("browser:".length).startsWith("/")) fail(`${label}: browser ref ${ref} must start with /`);
+    } else if (!ref.startsWith("ci:")) {
+      fail(`${label}: unsupported test reference ${ref}`);
+    }
+  }
+}
+
+function checkNativeRow(row, label) {
+  const native = row.native;
+  const cells = [];
+  for (const os of nativeOS) {
+    const value = native?.[os];
+    if (!nativeStatuses.has(value)) fail(`${label}: invalid native.${os} status ${value}`);
+    cells.push(value);
+  }
+  for (const key of Object.keys(native ?? {})) {
+    if (!nativeOS.includes(key)) fail(`${label}: unknown native OS ${key}`);
+  }
+  if (!Array.isArray(row.tests)) {
+    fail(`${label}: tests must be an array`);
+    return;
+  }
+  if (cells.some((c) => ["stable", "supported", "partial"].includes(c)) && row.tests.length === 0) {
+    fail(`${label}: supported rows need at least one test reference`);
+  }
+  if (cells.some((c) => c === "partial" || c === "untested") && (!Array.isArray(row.knownLimits) || row.knownLimits.length === 0)) {
+    fail(`${label}: partial or untested platforms need at least one knownLimits entry`);
+  }
+  if (row.knownLimits !== undefined && !Array.isArray(row.knownLimits)) {
+    fail(`${label}: knownLimits must be an array`);
+  }
+  if (row.roadmap && cells.includes("planned")) fail(`${label}: roadmap v1 rows cannot remain planned`);
+  checkRefs(row, label);
+}
+
 const matrix = JSON.parse(fs.readFileSync(matrixPath, "utf8"));
 if (!matrix.updated || Number.isNaN(Date.parse(matrix.updated))) {
   fail("updated must be an ISO date");
@@ -65,6 +113,11 @@ for (const row of matrix.rows) {
   }
   if (seen.has(row.id)) fail(`${label}: duplicate id`);
   seen.add(row.id);
+  if (row.native !== undefined) {
+    checkNativeRow(row, label);
+    if (row.roadmap) roadmapRows++;
+    continue;
+  }
   for (const key of ["source", "islands", "ssr"]) {
     if (row[key] === "beta") fail(`${label}: ${key} status "beta" was renamed to "supported"`);
     else if (!statuses.has(row[key])) fail(`${label}: invalid ${key} status ${row[key]}`);
@@ -92,18 +145,7 @@ for (const row of matrix.rows) {
   for (const code of row.diagnostics ?? []) {
     if (!diagnostics.has(code)) fail(`${label}: missing diagnostic ${code}`);
   }
-  for (const ref of row.tests) {
-    if (ref.startsWith("Test")) {
-      if (!tests.has(ref)) fail(`${label}: missing Go test ${ref}`);
-    } else if (ref.startsWith("fixture:")) {
-      const target = ref.slice("fixture:".length);
-      if (!fs.existsSync(path.join(root, target))) fail(`${label}: missing fixture ${target}`);
-    } else if (ref.startsWith("browser:")) {
-      if (!ref.slice("browser:".length).startsWith("/")) fail(`${label}: browser ref ${ref} must start with /`);
-    } else if (!ref.startsWith("ci:")) {
-      fail(`${label}: unsupported test reference ${ref}`);
-    }
-  }
+  checkRefs(row, label);
   if (row.roadmap) roadmapRows++;
 }
 

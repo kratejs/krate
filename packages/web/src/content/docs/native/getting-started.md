@@ -40,6 +40,19 @@ prebuilt shell runs:
 krate-shell dist-native/app
 ```
 
+When a shell is available without building it (`--shell`, `$KRATE_SHELL`, or the
+`krate-shell` that the `@krate/core-<platform>` package puts next to `krate`),
+the build also writes a runnable distributable, no Go toolchain needed:
+
+```
+dist-native/linux-amd64/
+  My App          the shell, renamed to the product name (My App.exe on Windows)
+  app/            a copy of the app directory
+```
+
+Run `dist-native/linux-amd64/My\ App` directly, or hand the directory to
+`krate native package`. Check the machine with `krate native doctor`.
+
 The build
 
 1. loads the config and runs the same checks as `krate native check`; any error
@@ -55,7 +68,54 @@ The build
 | `--out <dir>` | Output directory; the app is `<dir>/app`. Default `dist-native`. |
 | `--target <os>/<arch>` | Platform of the Go host: `linux`, `darwin` (or `macos`), `windows`, with `amd64` or `arm64`. Default: this machine. A different platform builds with `CGO_ENABLED=0`. |
 | `--release` | Link one executable per `--target` instead (comma-separated or repeated): `dist-native/<os>-<arch>/<productName>`. See [Release builds](/docs/native/release/). |
-| `--shell <path>` | Copy a shell binary to `<dir>/krate-shell`. `--shell auto`, or the `KRATE_SHELL` environment variable, uses `$KRATE_SHELL` or builds `packages/native/cmd/krate-shell` when run inside the Krate repository. A shell that cannot be found is a note, not an error. |
+| `--shell <path>` | Copy a shell binary to `<dir>/krate-shell`. `--shell auto` looks for `$KRATE_SHELL`, then the `krate-shell` next to the `krate` executable, then builds `packages/native/cmd/krate-shell` when run inside the Krate repository. A shell that cannot be found is a note, not an error. |
+
+## Check the machine
+
+```sh
+krate native doctor [dir] [--shell <path>] [--json]
+```
+
+`doctor` reads the config and reports what the app needs and what is there:
+
+- the **Go toolchain**: required only for Go host code, `native.release.compile:
+  "always"`, and to link a single-file release;
+- the **shell binary** and where it was found (see
+  [Finding the shell](/docs/native/dev/#finding-the-shell));
+- the **system webview**, asked of the shell itself (`krate-shell --doctor`
+  prints it as JSON): on Linux the WebKitGTK 4.1 version (2.40 or newer) with
+  the library paths and whether a display is reachable; on macOS the OS version
+  (WKWebView is part of the system); on Windows the WebView2 Runtime version
+  from the registry;
+- the **packaging and signing tools** for this OS (`appimagetool`, `dpkg-deb`,
+  `rpm`, `makensis`, `hdiutil`, `codesign`, `xcrun` for notarytool, `signtool`
+  or `osslsigncode`). A tool is required only when the config picks the format
+  that needs it on its home OS; the rest are listed as optional;
+- the **host runtime** the config selects: `node`, `bun` or `deno` with their
+  version against `native.host.version`, or `scriptc` with its linker.
+
+```
+Krate Native doctor (linux/amd64)
+
+Toolchain
+  ok       Go               go1.26.1 (/usr/local/go/bin/go); ...
+
+Shell
+  ok       krate-shell      .../node_modules/@krate/core-linux-x64/bin/krate-shell (next to the krate executable)
+
+Webview
+  ok       WebKitGTK 4.1    2.54.0 (needs 2.40 or newer); OS Debian GNU/Linux 13 (trixie)
+           /usr/lib/x86_64-linux-gnu/libwebkit2gtk-4.1.so.0.24.3
+  ok       display          x11 (:0)
+
+Packaging and signing
+  MISSING  appimagetool     not found on PATH; builds .AppImage (native.bundle.linux.formats)
+  -        rpm              not found on PATH; optional: .rpm files are written without it
+```
+
+`doctor` exits 1 when a required item is `MISSING`. A missing display is only a
+warning: builds and `--browser` mode work without one. `--json` prints the same
+items for scripts.
 
 ## Pages in a native app
 

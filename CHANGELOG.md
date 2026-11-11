@@ -7,6 +7,20 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ## Unreleased
 
+### Krate Native
+
+- The `@krate/core-<platform>` packages ship `krate-shell` next to `krate`, cross-compiled with
+  `CGO_ENABLED=0` for all seven platforms. The compiler finds the shell in this order: `--shell`,
+  `$KRATE_SHELL`, next to the running `krate` executable, a build from a Krate checkout.
+- `krate native build` writes a runnable `dist-native/<os>-<arch>/<productName>` with `app/` next
+  to it when a shell is available, so a TypeScript-only app needs no Go toolchain to build and
+  package. `krate native build --release` falls back to the same layout without Go.
+- `krate native doctor` reports the Go toolchain, the shell, the system webview (through the new
+  `krate-shell --doctor`), packaging and signing tools and the host runtime, and exits 1 when
+  something the config needs is missing.
+- Krate Native rows in the compatibility matrix (Linux verified, macOS and Windows untested) and
+  size, cold-start and memory budgets in `packages/native/budgets.json`.
+
 ### Breaking
 
 - `outDir` values that are or contain the project root, pages directory or public directory
