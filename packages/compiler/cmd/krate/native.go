@@ -1,15 +1,19 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/kratejs/krate/packages/compiler/internal/build"
+	"github.com/kratejs/krate/packages/compiler/internal/config"
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/native"
 	"github.com/kratejs/krate/packages/compiler/internal/native/scaffold"
@@ -17,7 +21,7 @@ import (
 
 // nativeStubs are the `krate native` subcommands that exist in the command
 // surface but are not built yet.
-var nativeStubs = []string{"dev", "profile", "sign", "notarize", "doctor"}
+var nativeStubs = []string{"profile", "sign", "notarize", "doctor"}
 
 func printNativeUsage(w io.Writer) {
 	fmt.Fprintf(w, "Usage: krate native <command> [dir] [flags]\n\n")
@@ -25,7 +29,7 @@ func printNativeUsage(w io.Writer) {
 	fmt.Fprintf(w, "Commands:\n")
 	fmt.Fprintf(w, "  check      Check host code placement and native target restrictions\n")
 	fmt.Fprintf(w, "  init       Create a native app in a directory (--go adds Go host code)\n")
-	fmt.Fprintf(w, "  dev        Run the app with hot reload (not implemented yet)\n")
+	fmt.Fprintf(w, "  dev        Run the app with hot reload (--browser serves it on a loopback port)\n")
 	fmt.Fprintf(w, "  build      Build the app directory (dist-native/app) the shell runs\n")
 	fmt.Fprintf(w, "  profile    Collect a profile for optimized builds (not implemented yet)\n")
 	fmt.Fprintf(w, "  sign       Sign a built app (not implemented yet)\n")
@@ -36,6 +40,10 @@ func printNativeUsage(w io.Writer) {
 	fmt.Fprintf(w, "  --target <o/a>   Platform of the Go host, for example linux/arm64\n")
 	fmt.Fprintf(w, "  --shell <path>   Copy a shell binary next to the app (\"auto\" builds the monorepo shell\n")
 	fmt.Fprintf(w, "                   or uses $KRATE_SHELL)\n")
+	fmt.Fprintf(w, "\nDev flags:\n")
+	fmt.Fprintf(w, "  --browser        No window: print a tokenized http://127.0.0.1 URL instead\n")
+	fmt.Fprintf(w, "  --port <n>       Browser-mode port (default: any free port)\n")
+	fmt.Fprintf(w, "  --shell <path>   Shell binary (default: $KRATE_SHELL, or a build of the monorepo shell)\n")
 }
 
 func runNative(flags cliFlags, args []string) {
@@ -53,6 +61,9 @@ func runNative(flags cliFlags, args []string) {
 		return
 	case "init":
 		runNativeInit(flags, args[2:])
+		return
+	case "dev":
+		runNativeDev(flags, append([]string{"dev"}, args[2:]...))
 		return
 	}
 	for _, s := range nativeStubs {
@@ -187,6 +198,41 @@ func runNativeBuild(flags cliFlags, args []string) {
 		fmt.Printf("  run it with: %s %s\n", rel(res.ShellPath), rel(res.AppDir))
 	} else {
 		fmt.Printf("  run it with: krate-shell %s\n", rel(res.AppDir))
+	}
+}
+
+// runNativeDev runs the app under the shell with hot reload.
+func runNativeDev(flags cliFlags, args []string) {
+	root, cfg := resolveConfig(flags, args)
+	defer startRunLog(root, cfg, "native dev")()
+	defer build.TeeDevLog(root)()
+
+	shellPath, err := build.LocateNativeShell(root, flags.Shell)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%sError:%s %v\n", cRed, cReset, err)
+		exit(1)
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	fmt.Printf("%s%s  Starting native dev for %s%s\n", cBold, cCyan, root, cReset)
+	err = build.RunNativeDev(build.NativeDevOptions{
+		LoadConfig: func() (string, *config.Config, map[string]string, error) {
+			r, c, err := loadConfig(flags, args)
+			if err != nil {
+				return "", nil, nil, fmt.Errorf("%s", formatConfigError(err))
+			}
+			return r, c, loadProjectEnv(r, "development", flags.Verbose), nil
+		},
+		Browser: flags.Browser,
+		Port:    flags.Port,
+		Shell:   shellPath,
+		Target:  flags.Target,
+		Verbose: flags.Verbose,
+		Ctx:     ctx,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%sNative dev error:%s %v\n", cRed, cReset, err)
+		exit(1)
 	}
 }
 

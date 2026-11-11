@@ -118,6 +118,7 @@ to stderr.
 | `restart-gohost` | Re-reads `app.json`, stops the Go host child (stdin close, kill after 2 s) and starts the binary it names now. Windows stay open; open signals reconnect on their own and the page sees the new child's values. Starts the child if none ran. |
 | `eval <js>` | Runs the rest of the line as JavaScript in every open window, without waiting for a result. `error` in browser mode or with no window. |
 | `query <js>` | Evaluates the rest of the line as a JavaScript expression in the open window, awaits a returned promise and answers `ok <json>` with the JSON-encoded value (`ok null` for `undefined`), or `error <message>` if the expression throws, the page unloads before it answers (a navigation), or nothing answers within 45 s. Wrap statements in an async arrow function: `query (async () => { ...; return x })()`. If the page is still loading, the script is sent again until the page runs it. Needs `--dev`; not available in browser mode. Used by the end-to-end tests. |
+| `hmr <json>` | Delivers one dev-hub message (a JSON object with a `type`: `reload`, `build-error`, `client-error`) to every open `/__krate/hmr` stream. `error` without `--dev` or when the message is not a JSON object. |
 | `quit` | Answers `ok`, then exits. |
 
 stdin EOF (the driver died) quits the shell. SIGINT and SIGTERM quit it too.
@@ -125,6 +126,23 @@ The same operations are available in process as `Control` (`ReloadHostJS`,
 `RestartGoHost`, `Eval`, `Query`, `Quit`, `URL`, `Origin`), passed to
 `RunOptions.OnReady`; `ServeControl` implements the text protocol over any
 reader and writer.
+
+## Dev endpoints
+
+With `--dev` the app origin serves, besides the host protocol:
+
+- `GET /__krate/hmr` is the frame stream of `hmr` messages, one `{"hmr": <message>}`
+  frame each, starting with `{"type":"connected"}`. The driver feeds it through the
+  `hmr` control command, so no extra port or token is needed and it works in
+  both window and browser mode. The latest `build-error` is replayed to a stream
+  that opens after it; a `reload` clears it. `ping` messages keep idle streams alive.
+- `GET /__krate/dev/events[?since=<seq>&follow=1]` is the host inspector feed:
+  one `{"ev": {"seq", "kind", "fn", "id", "window", "time", "durNs", "code",
+  "message"}}` frame per recorded event (calls, stream open/end, signal
+  subscriptions and updates; the newest 500 are kept). `follow=1` keeps the
+  stream open. Arguments and values are never recorded.
+- `POST /__krate/dev/client-error` takes the dev overlay's error reports and logs
+  them to stderr as `[webview] ...`.
 
 ## Go host child
 

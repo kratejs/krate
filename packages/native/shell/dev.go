@@ -13,6 +13,7 @@ type Controller interface {
 	ReloadHostJS() error
 	RestartGoHost() error
 	Eval(js string) error
+	HMR(msg string) error
 	Quit()
 }
 
@@ -29,6 +30,7 @@ type Querier interface {
 //	restart-gohost
 //	eval <js>
 //	query <js>     answers "ok <json>"; needs a Controller that implements Querier
+//	hmr <json>
 //	quit
 //
 // It returns true if it stopped because of "quit".
@@ -73,6 +75,12 @@ func ServeControl(r io.Reader, w io.Writer, ctl Controller) (quit bool) {
 					fmt.Fprintf(w, "ok %s\n", oneLine(v))
 				}
 			}
+		case "hmr":
+			if strings.TrimSpace(arg) == "" {
+				reply(fmt.Errorf("hmr needs a JSON message"))
+				continue
+			}
+			reply(ctl.HMR(arg))
 		case "quit":
 			reply(nil)
 			ctl.Quit()

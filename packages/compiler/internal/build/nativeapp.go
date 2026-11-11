@@ -76,6 +76,9 @@ type NativeAppOptions struct {
 	WantShell bool
 	// SkipGoCompile writes the Go host program but does not compile it.
 	SkipGoCompile bool
+	// Dev marks a `krate native dev` build: the manifest enables the
+	// webview's developer tools.
+	Dev bool
 }
 
 // NativeAppResult describes the app directory BuildNativeApp wrote.
@@ -211,6 +214,7 @@ func (b *Builder) BuildNativeApp(opts NativeAppOptions) (*NativeAppResult, error
 		},
 		Assets:    "dist",
 		Fallbacks: fallbacks,
+		Debug:     opts.Dev,
 	}
 
 	if h := b.NativeHost(); h != nil && h.HostBundle != "" {

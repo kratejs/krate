@@ -66,8 +66,16 @@ func (s *server) startStream(window string, c call, f StreamFunc) []byte {
 		}
 	})
 
+	opened := time.Now()
+	s.observe(Event{Kind: "stream-open", ID: c.id, Fn: c.fn, Window: window})
 	go func() {
+		var endErr error
 		defer func() {
+			ev := Event{Kind: "stream-end", ID: c.id, Fn: c.fn, Window: window, Dur: time.Since(opened)}
+			if endErr != nil {
+				ev.Code, ev.Message = errCodeMsg(endErr)
+			}
+			s.observe(ev)
 			timer.Stop()
 			cancel()
 			s.mu.Lock()
@@ -97,8 +105,10 @@ func (s *server) startStream(window string, c call, f StreamFunc) []byte {
 		}
 		err := protect(func() error { return f(kctx, c.args, emit) })
 		if ctx.Err() != nil {
+			endErr = context.Canceled
 			return
 		}
+		endErr = err
 		e := wire.NewEncoder()
 		e.BeginObject()
 		if err == nil {

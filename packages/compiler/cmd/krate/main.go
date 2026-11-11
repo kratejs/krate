@@ -86,6 +86,7 @@ type cliFlags struct {
 	Shell         string
 	WantShell     bool
 	GoHost        bool
+	Browser       bool
 }
 
 // exitHooks run, last registered first, before the process exits, so the run
@@ -420,6 +421,8 @@ func parseFlagsChecked(args []string) (cliFlags, []string, error) {
 			continue
 		}
 		switch {
+		case args[i] == "--browser":
+			flags.Browser = true
 		case args[i] == "--go":
 			flags.GoHost = true
 		case args[i] == "--static-only":

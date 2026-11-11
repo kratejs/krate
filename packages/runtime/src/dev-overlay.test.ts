@@ -185,3 +185,60 @@ describe('source-map symbolication', () => {
     expect(await overlay.symbolicateStack(stack)).toBe(stack);
   });
 });
+
+describe('dev-overlay native transport', () => {
+  function frame(obj: unknown, blobs: Uint8Array[] = []): Uint8Array {
+    const json = new TextEncoder().encode(JSON.stringify(obj));
+    let size = 4 + json.length + 2;
+    for (const b of blobs) size += 4 + b.length;
+    const out = new Uint8Array(size);
+    const dv = new DataView(out.buffer);
+    dv.setUint32(0, json.length);
+    out.set(json, 4);
+    let pos = 4 + json.length;
+    dv.setUint16(pos, blobs.length);
+    pos += 2;
+    for (const b of blobs) {
+      dv.setUint32(pos, b.length);
+      out.set(b, pos + 4);
+      pos += 4 + b.length;
+    }
+    return out;
+  }
+  function cat(...parts: Uint8Array[]): Uint8Array {
+    const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+    let pos = 0;
+    for (const p of parts) {
+      out.set(p, pos);
+      pos += p.length;
+    }
+    return out;
+  }
+
+  it('parses frames and keeps an incomplete tail', () => {
+    const a = frame({ hmr: { type: 'connected' } });
+    const b = frame({ hmr: { type: 'reload', pages: ['/'] } }, [new Uint8Array([1, 2, 3])]);
+    const whole = overlay.parseFrames(cat(a, b));
+    expect(whole.values).toEqual([{ hmr: { type: 'connected' } }, { hmr: { type: 'reload', pages: ['/'] } }]);
+    expect(whole.rest.length).toBe(0);
+
+    const cut = cat(a, b).subarray(0, a.length + b.length - 2);
+    const part = overlay.parseFrames(cut);
+    expect(part.values).toEqual([{ hmr: { type: 'connected' } }]);
+    expect(part.rest.length).toBe(b.length - 2);
+    const done = overlay.parseFrames(cat(part.rest, b.subarray(b.length - 2)));
+    expect(done.values.length).toBe(1);
+  });
+
+  it('detects native origins and extracts host stacks', () => {
+    expect(overlay.isNativeOrigin()).toBe(false);
+    expect(overlay.hostStackOf({ code: 'internal', data: { stack: 'at f (src/lib/x.host.ts:3:9)' } })).toBe('at f (src/lib/x.host.ts:3:9)');
+    expect(overlay.hostStackOf(new Error('plain'))).toBe('');
+    expect(overlay.hostStackOf(null)).toBe('');
+  });
+
+  it('formats host events', () => {
+    expect(overlay.hostEventLine({ seq: 1, kind: 'call', fn: 'tasks.Add', durNs: 3200000 })).toContain('call tasks.Add 3.2ms');
+    expect(overlay.hostEventLine({ seq: 2, kind: 'call', fn: 'tasks.Add', code: 'not_found', message: 'nope' })).toContain('not_found: nope');
+  });
+});

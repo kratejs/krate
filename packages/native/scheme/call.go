@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"runtime/debug"
+	"time"
 
 	"github.com/kratejs/krate/packages/native/krate"
 	"github.com/kratejs/krate/packages/native/wire"
@@ -172,7 +173,9 @@ func (s *server) handleCall(w http.ResponseWriter, r *http.Request) {
 		case sfn != nil:
 			results <- s.startStream(window, c, sfn)
 		default:
-			results <- s.errFrame(c.id, krate.Errorf("not_found", "no such function %q", c.fn))
+			nf := krate.Errorf("not_found", "no such function %q", c.fn)
+			s.observe(Event{Kind: "call", ID: c.id, Fn: c.fn, Window: window, Code: "not_found", Message: nf.Error()})
+			results <- s.errFrame(c.id, nf)
 		}
 	}
 
@@ -198,11 +201,22 @@ func (s *server) handleCall(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) runFunc(ctx krate.Ctx, c call, fn Func) []byte {
+	start := time.Now()
+	fr, err := s.runFuncErr(ctx, c, fn)
+	ev := Event{Kind: "call", ID: c.id, Fn: c.fn, Window: ctx.Window(), Dur: time.Since(start)}
+	if err != nil {
+		ev.Code, ev.Message = errCodeMsg(err)
+	}
+	s.observe(ev)
+	return fr
+}
+
+func (s *server) runFuncErr(ctx krate.Ctx, c call, fn Func) ([]byte, error) {
 	select {
 	case s.sem <- struct{}{}:
 		defer func() { <-s.sem }()
 	case <-ctx.Done():
-		return s.errFrame(c.id, ctx.Err())
+		return s.errFrame(c.id, ctx.Err()), ctx.Err()
 	}
 	e := wire.NewEncoder()
 	e.BeginObject()
@@ -214,11 +228,11 @@ func (s *server) runFunc(ctx krate.Ctx, c call, fn Func) []byte {
 		e.EndObject()
 		fr, ferr := e.Finish()
 		if ferr == nil {
-			return fr
+			return fr, nil
 		}
 		err = krate.Errorf("internal", "%s: encoding the result: %w", c.fn, ferr)
 	}
-	return s.errFrame(c.id, err)
+	return s.errFrame(c.id, err), err
 }
 
 // errFrame builds {"id":n,"err":{...}}.

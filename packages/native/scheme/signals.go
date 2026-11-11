@@ -92,6 +92,7 @@ func (s *server) handleSignals(w http.ResponseWriter, r *http.Request) {
 			flush()
 			continue
 		}
+		s.observe(Event{Kind: "signal-open", Fn: name})
 		var cancel func()
 		err := protect(func() error {
 			cancel = sf(func(write func(*wire.Encoder)) { q.push(name, write) })
@@ -131,6 +132,9 @@ func (s *server) handleSignals(w http.ResponseWriter, r *http.Request) {
 			}
 			if err != nil {
 				fr = s.sigErrFrame(name, err)
+			}
+			if err == nil {
+				s.observe(Event{Kind: "signal", Fn: name})
 			}
 			if _, werr := w.Write(fr); werr != nil {
 				return
