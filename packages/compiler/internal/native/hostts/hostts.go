@@ -64,6 +64,9 @@ type Registration struct {
 	Export string `json:"export"`
 	// Inline is true for a function split out of a UI module.
 	Inline bool `json:"inline,omitempty"`
+	// Runtime is the child runtime ("node", "bun" or "deno") that serves the
+	// id; empty for the default in-process runtime.
+	Runtime string `json:"runtime,omitempty"`
 }
 
 // Result is what Build produced.
@@ -83,6 +86,30 @@ type Result struct {
 	// TypesDir holds the .d.ts files, one per host module the UI imports.
 	TypesDir string
 	Types    []string
+	// Groups lists every bundle written: the QuickJS one (when any host code
+	// runs there) and one per child runtime. HostBundle, SourceMap and
+	// Externals describe the QuickJS bundle.
+	Groups []Group
+	// Origin maps a (source, line) of a source map entry to the project file
+	// and line, for generated inline modules.
+	Origin func(source string, line int) (string, int)
+}
+
+// Group is one host bundle and the ids it registers.
+type Group struct {
+	// Runtime is "quickjs" for the in-process bundle, "node", "bun" or "deno"
+	// for a child process bundle (an ES module), or "scriptc" for the child
+	// bundle a release build compiles with scriptc.
+	Runtime string
+	// Bundle and SourceMap are absolute paths.
+	Bundle, SourceMap string
+	// Registered lists the group's registrations.
+	Registered []Registration
+	// Funcs, Streams and Signals are the ids whose kind is known at build
+	// time; an id of kind "auto" is reported by the running host.
+	Funcs, Streams, Signals []string
+	// Externals lists the imports left external.
+	Externals []string
 }
 
 // loc is a place in a UI module, for diagnostics.

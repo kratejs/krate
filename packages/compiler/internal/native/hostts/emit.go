@@ -111,6 +111,16 @@ function __auto(id, v) {
 	return sb.String()
 }
 
+// childEntrySource generates the entry of a host child bundle: the Krate
+// host child runtime first (it installs globalThis.__krateHost), then the host
+// modules and their registrations, then the server start.
+func childEntrySource(regs []regEntry) string {
+	body := entrySource(regs)
+	const head = "// generated host entry\n"
+	return head + "import { start as __krateStart } from \"krate-hostchild:runtime\";\n" +
+		strings.TrimPrefix(body, head) + "__krateStart();\n"
+}
+
 // typesSource writes the .d.ts of a host module. importPath is the specifier
 // of the module as seen from the .d.ts file.
 func typesSource(importPath string, exps []*export) string {

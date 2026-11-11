@@ -1,0 +1,1 @@
+{"schema":"scriptc-diagnostics","schemaVersion":1,"compilerVersion":"0.3.0","command":"coverage","entry":"/work/app/host.mjs","success":true,"phase":"complete","stats":{"statementsTotal":2,"statementsStatic":2,"statementsDynamic":0,"statementsFailed":0,"functionsSkipped":0,"percentStatic":100},"groups":[],"diagnostics":[]}

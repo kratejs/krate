@@ -44,12 +44,20 @@ func (a *app) commandOf(spec HostChildSpec) (prog string, args []string, err err
 		prog = p
 	}
 	for _, s := range spec.Command[1:] {
-		if s == "{entry}" {
-			s = entry
-		}
+		s = strings.ReplaceAll(s, "{entry}", entry)
+		s = strings.ReplaceAll(s, "{sockdir}", sockDir())
 		args = append(args, s)
 	}
 	return prog, args, nil
+}
+
+// sockDir is the directory the host child sockets live under, which a Deno
+// child needs to read and write.
+func sockDir() string {
+	if c, err := os.UserCacheDir(); err == nil {
+		return filepath.Join(c, "krate", "native")
+	}
+	return os.TempDir()
 }
 
 // restartHostChildren starts the host children the manifest lists, restarts
