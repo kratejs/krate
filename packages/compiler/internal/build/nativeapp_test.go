@@ -32,7 +32,7 @@ func repoRoot(t *testing.T) string {
 // fakeKrateModules are the npm packages a native project depends on, reduced
 // to what a build needs: the host call client, the host API and defineConfig.
 var fakeKrateModules = map[string]string{
-	"node_modules/@krate/app/package.json": `{"name":"@krate/app","version":"0.0.0","type":"module","exports":{".":"./index.js","./host":"./host.js"}}`,
+	"node_modules/@krate/app/package.json": `{"name":"@krate/app","version":"0.0.0","type":"module","exports":{".":"./index.js","./host":"./host.js","./kv":"./kv.js"}}`,
 	"node_modules/@krate/app/index.js": `let current;
 export function createClient(o = {}) { return { call: (fn, a) => Promise.resolve([fn, a]), stream: (fn, a) => ({ fn, a }), signal: (n) => { const [g] = (o.createSignal || ((v) => [() => v, () => {}]))(undefined); return g; } }; }
 export function setClient(c) { current = c; }
@@ -42,6 +42,7 @@ export function stream(fn, args, opts) { return getClient().stream(fn, args, opt
 export function signal(name) { return getClient().signal(name); }
 `,
 	"node_modules/@krate/app/host.js":          "export function hostSignal(v) { return { get: () => v, set: () => {} }; }\n",
+	"node_modules/@krate/app/kv.js":            "const m = new Map();\nexport async function get(k) { return m.has(k) ? m.get(k) : null; }\nexport async function set(k, v) { m.set(k, v); }\n",
 	"node_modules/@krate/core/package.json":    `{"name":"@krate/core","version":"0.0.0","type":"module","main":"./dist/index.js"}`,
 	"node_modules/@krate/core/dist/index.js":   "export const defineConfig = (c) => c;\n",
 	"node_modules/@krate/runtime/package.json": `{"name":"@krate/runtime","version":"0.0.0","type":"module","main":"./dist/index.js"}`,
