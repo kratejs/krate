@@ -41,19 +41,25 @@ Request body: one frame.
 `fn` is `<module id>.<export name>`. The module id is assigned by the compiler
 (a stable hash-free path such as `src/lib/tasks`). `args` omits `ctx`.
 
-Response: `200`, `content-type: application/x-krate-frames`, one frame.
+Response: `200`, `content-type: application/x-krate-frames`, a stream of
+frames, one per call, each flushed as soon as that call finishes. A slow call
+never holds back a fast one in the same batch.
 
 ```json
-{"results": [
-  {"id": 1, "ok": [ ... ]},
-  {"id": 2, "err": {"code": "not_found", "message": "no such task", "data": null}},
-  {"id": 3, "stream": "s7"}
-]}
+{"id": 1, "ok": [ ... ]}
+{"id": 2, "err": {"code": "not_found", "message": "no such task", "data": null}}
+{"id": 3, "stream": "s7"}
 ```
 
-Results may arrive in any order. A call that returns a channel or an async
-iterable answers with a stream id; its values are read from
-`GET /__krate/stream/<id>`.
+Every call in the request gets exactly one result frame, in completion order.
+A call that returns a channel or an async iterable answers with a stream id;
+its values are read from `GET /__krate/stream/<id>`.
+
+A Go `error` that is not a `*krate.Error` has code `internal`. A panic has code
+`panic`; its message carries the stack only in dev builds.
+
+Each request carries `x-krate-window: <window id>`. Call ids are unique per
+window; cancellation is scoped to the window.
 
 Errors that are not a call's own (bad frame, unknown fn) are a `400` with a
 frame `{"error": {"code": "bad_request", "message": "..."}}`.
