@@ -43,7 +43,7 @@ signals. `examples/native-plugin` is a complete app with a real plugin
 
 | Entry | Meaning |
 |-------|---------|
-| `"./native-plugins/hello"` | A directory with a `krate-plugin.json` (relative to the project, or absolute). It is a Go module of its own, or lives inside the app's module. |
+| `"./native-plugins/hello"` | A directory with a `krate-plugin.json` (relative to the project, or absolute; on Windows `.\native-plugins\hello` and `C:\path` forms work too, and paths with spaces do not). It is a Go module of its own, or lives inside the app's module. |
 | `"@acme/krate-sqlite"` | An npm package that ships a plugin: `node_modules/@acme/krate-sqlite/krate-plugin.json`, or the directory its `package.json` names in `"krate": {"plugin": "go/krate-plugin.json"}`. |
 | `"go:github.com/acme/krate-sqlite@v1.2.0"` | A Go module, fetched with `go mod download`. Without `@version` the app's `go.mod` decides (it has to require the module). The manifest is at the module root. |
 

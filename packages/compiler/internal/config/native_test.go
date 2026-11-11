@@ -133,8 +133,9 @@ func TestValidateNative(t *testing.T) {
 		{"permission", func(n *NativeConfig) { n.Permissions = []string{"camera"} }, "unknown permission"},
 		{"deep link", func(n *NativeConfig) { n.DeepLinks = []string{"acme://"} }, "URL scheme"},
 		{"plugins ok", func(n *NativeConfig) {
-			n.Plugins = []string{"./native-plugins/hello", "@acme/krate-sqlite", "go:github.com/acme/p@v1.0.0", "krate-plugin-x", "../shared/p", "/abs/p"}
+			n.Plugins = []string{"./native-plugins/hello", "@acme/krate-sqlite", "go:github.com/acme/p@v1.0.0", "krate-plugin-x", "../shared/p", "/abs/p", `.\native-plugins\hello`, `D:\a\app\echo`, "C:/work/echo", `\\host\share\p`}
 		}, ""},
+		{"plugin backslash in package", func(n *NativeConfig) { n.Plugins = []string{`acme\p`} }, "not a plugin reference"},
 		{"plugin empty", func(n *NativeConfig) { n.Plugins = []string{""} }, "not a plugin reference"},
 		{"plugin spaces", func(n *NativeConfig) { n.Plugins = []string{"./a b"} }, "not a plugin reference"},
 		{"plugin bare go prefix", func(n *NativeConfig) { n.Plugins = []string{"go:"} }, "not a plugin reference"},

@@ -180,7 +180,11 @@ func TestNativeAppBuildsExample(t *testing.T) {
 		t.Errorf("hostjs = %v", hostjs)
 	}
 	gh := m["gohost"].(map[string]any)
-	if gh["binary"] != "gohost/krate-gohost" {
+	wantBin := "gohost/krate-gohost"
+	if runtime.GOOS == "windows" {
+		wantBin += ".exe"
+	}
+	if gh["binary"] != wantBin {
 		t.Errorf("gohost binary = %v", gh["binary"])
 	}
 	if got := strings.Join(nativeStrings(gh["funcs"]), ","); got != "src/lib/tasks.Add,src/lib/tasks.Get,src/lib/tasks.List,src/lib/tasks.Toggle" {

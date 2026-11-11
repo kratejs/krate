@@ -231,10 +231,12 @@ func IsNativePermission(p string) bool {
 // package name, "" when it is none of them.
 func NativePluginSpecKind(spec string) string {
 	switch {
-	case spec == "" || strings.TrimSpace(spec) != spec || strings.ContainsAny(spec, " \t\n\\"):
+	case spec == "" || strings.TrimSpace(spec) != spec || strings.ContainsAny(spec, " \t\n"):
 		return ""
-	case strings.HasPrefix(spec, "./") || strings.HasPrefix(spec, "../") || strings.HasPrefix(spec, "/") || spec == "." || spec == "..":
+	case isPathPluginSpec(spec):
 		return "path"
+	case strings.Contains(spec, "\\"):
+		return ""
 	case strings.HasPrefix(spec, "go:"):
 		if len(spec) > 3 && !strings.HasPrefix(spec[3:], "@") {
 			return "go"
@@ -244,6 +246,21 @@ func NativePluginSpecKind(spec string) string {
 		return "npm"
 	}
 	return ""
+}
+
+// isPathPluginSpec reports whether spec names a directory: relative (with
+// either separator), rooted, or a Windows drive or UNC path.
+func isPathPluginSpec(spec string) bool {
+	if spec == "." || spec == ".." {
+		return true
+	}
+	for _, p := range []string{"./", "../", "/", `.\`, `..\`, `\\`} {
+		if strings.HasPrefix(spec, p) {
+			return true
+		}
+	}
+	return len(spec) >= 3 && spec[1] == ':' && (spec[2] == '\\' || spec[2] == '/') &&
+		(spec[0] >= 'A' && spec[0] <= 'Z' || spec[0] >= 'a' && spec[0] <= 'z')
 }
 
 var npmNameRe = regexp.MustCompile(`^(@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*(/[A-Za-z0-9._-]+)*$`)

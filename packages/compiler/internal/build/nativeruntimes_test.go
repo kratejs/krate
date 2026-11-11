@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -117,7 +118,7 @@ func TestNativeHostChildNodeEndToEnd(t *testing.T) {
 	if !hasGoHostPackage(t) {
 		t.Skip("no native module in this checkout")
 	}
-	shellBin := filepath.Join(t.TempDir(), "krate-shell")
+	shellBin := filepath.Join(t.TempDir(), ShellFileName(runtime.GOOS))
 	cmd := exec.Command("go", "build", "-o", shellBin, "./cmd/krate-shell")
 	cmd.Dir = filepath.Join(repoRoot(t), "packages", "native")
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -194,7 +195,7 @@ func TestNativeDevReloadsHostChild(t *testing.T) {
 		t.Skip("no native module in this checkout")
 	}
 	root := runtimesProject(t)
-	shellBin := filepath.Join(t.TempDir(), "krate-shell")
+	shellBin := filepath.Join(t.TempDir(), ShellFileName(runtime.GOOS))
 	cmd := exec.Command("go", "build", "-o", shellBin, "./cmd/krate-shell")
 	cmd.Dir = filepath.Join(repoRoot(t), "packages", "native")
 	if out, err := cmd.CombinedOutput(); err != nil {

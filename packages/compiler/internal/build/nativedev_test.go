@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -189,7 +190,7 @@ func TestNativeDevSession(t *testing.T) {
 	writeTree(t, root, map[string]string{
 		"node_modules/@krate/app/host.js": "export function hostSignal(v) { const subs = new Set(); return { get: () => v, set: (n) => { v = n; subs.forEach((f) => f(n)); }, subscribe: (f) => { subs.add(f); return () => subs.delete(f); } }; }\n",
 	})
-	shellBin := filepath.Join(t.TempDir(), "krate-shell")
+	shellBin := filepath.Join(t.TempDir(), ShellFileName(runtime.GOOS))
 	cmd := exec.Command("go", "build", "-o", shellBin, "./cmd/krate-shell")
 	cmd.Dir = filepath.Join(repoRoot(t), "packages", "native")
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -338,4 +339,29 @@ func (l *lockedWriter) String() string {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.w.String()
+}
+
+func TestReplaceExecutable(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "host")
+	next := bin + ".next"
+	for _, tc := range []struct{ old, new string }{{"", "v1"}, {"v1", "v2"}} {
+		if tc.old != "" {
+			if err := os.WriteFile(bin, []byte(tc.old), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := os.WriteFile(next, []byte(tc.new), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := replaceExecutable(next, bin); err != nil {
+			t.Fatal(err)
+		}
+		if got, _ := os.ReadFile(bin); string(got) != tc.new {
+			t.Errorf("bin = %q, want %q", got, tc.new)
+		}
+		if _, err := os.Stat(bin + ".old"); err == nil {
+			t.Error("left a .old file behind")
+		}
+	}
 }

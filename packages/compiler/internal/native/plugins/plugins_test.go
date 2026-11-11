@@ -291,7 +291,11 @@ func fakeProxy(t *testing.T, module, version string, files map[string]string) {
 	if err := os.WriteFile(filepath.Join(dir, version+".zip"), zb.Bytes(), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("GOPROXY", "file://"+filepath.ToSlash(proxy))
+	u := filepath.ToSlash(proxy)
+	if !strings.HasPrefix(u, "/") {
+		u = "/" + u // a drive letter path needs file:///C:/...
+	}
+	t.Setenv("GOPROXY", "file://"+u)
 	t.Setenv("GOSUMDB", "off")
 	t.Setenv("GOFLAGS", "-modcacherw")
 	t.Setenv("GOMODCACHE", t.TempDir())

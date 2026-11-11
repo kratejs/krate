@@ -3,6 +3,7 @@ package build
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -66,7 +67,7 @@ func TestPrepareMacDevBundle(t *testing.T) {
 	if string(data) != "shell-v1" {
 		t.Errorf("executable content = %q", data)
 	}
-	if st, _ := os.Stat(exe); st.Mode()&0o111 == 0 {
+	if st, _ := os.Stat(exe); runtime.GOOS != "windows" && st.Mode()&0o111 == 0 {
 		t.Error("executable bit missing")
 	}
 	plist, _ := os.ReadFile(filepath.Join(out, "Acme Notes.app", "Contents", "Info.plist"))

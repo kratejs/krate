@@ -787,7 +787,7 @@ func (nd *nativeDev) syncHost(goEdited bool) error {
 			if err := b.compileGoHost(next, nd.goos, nd.goarch, false); err != nil {
 				return err
 			}
-			if err := os.Rename(next, bin); err != nil {
+			if err := replaceExecutable(next, bin); err != nil {
 				_ = os.Remove(next)
 				return fmt.Errorf("replacing the Go host binary (it may still be running): %w", err)
 			}
@@ -903,4 +903,28 @@ func (nd *nativeDev) syncFallbacks() {
 		_ = os.WriteFile(path, append(out, '\n'), 0o644)
 	}
 	printf("  %s! The dynamic routes changed; restart native dev to serve the new ones.%s\n", cYellow, cReset)
+}
+
+// replaceExecutable moves next over bin, which may be a running program.
+// Unix lets the rename replace it. Windows refuses to overwrite a running
+// executable but lets it be renamed, so the old file is moved aside first
+// (and removed when it is no longer in use, now or on the next call).
+func replaceExecutable(next, bin string) error {
+	_ = os.Remove(bin + ".old")
+	err := os.Rename(next, bin)
+	if err == nil {
+		return nil
+	}
+	if _, statErr := os.Stat(bin); statErr != nil {
+		return err
+	}
+	if mvErr := os.Rename(bin, bin+".old"); mvErr != nil {
+		return err
+	}
+	if err := os.Rename(next, bin); err != nil {
+		_ = os.Rename(bin+".old", bin)
+		return err
+	}
+	_ = os.Remove(bin + ".old")
+	return nil
 }

@@ -225,7 +225,13 @@ func downloadGo(root, spec string) (dir, version, why string) {
 		if err := cmd.Run(); err != nil {
 			msg := strings.TrimSpace(errb.String())
 			if msg == "" {
-				msg = err.Error()
+				// "go mod download -json" reports its error on stdout.
+				var info struct{ Error string }
+				if json.Unmarshal(out.Bytes(), &info) == nil && info.Error != "" {
+					msg = info.Error
+				} else {
+					msg = err.Error()
+				}
 			}
 			return nil, msg
 		}
