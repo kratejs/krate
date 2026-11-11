@@ -45,6 +45,7 @@ type paneState struct {
 	first, second uintptr
 	ratio         float64
 	pending       int // size-allocate rounds left to apply ratio
+	skipped       int // rounds seen before the children had a real size
 	handle        int
 }
 
@@ -452,6 +453,32 @@ func (w *Window) applyLayout() {
 		api.gObjectUnref(v.widget)
 	}
 	api.gtkWidgetShowAll(w.win)
+	w.layoutNow()
+}
+
+// layoutNow runs the pending resize passes of the window right away instead of
+// waiting for the frame clock. GTK on Wayland only runs them when the
+// compositor has answered the previous frame; weston can take long to do so
+// for a surface that just changed, and until then the new panes have no size,
+// so the ratios could not be applied and Layout could not read them. Main
+// thread.
+func (w *Window) layoutNow() {
+	x := w.app.x
+	if x.gtkCheckResize == nil || x.gtkWidgetGetVisible == nil || x.gtkWidgetGetVisible(w.win) == 0 {
+		return
+	}
+	for i := 0; i < 6; i++ {
+		x.gtkCheckResize(w.win)
+		settled := true
+		for _, p := range w.panes {
+			if p.pending > 0 {
+				settled = false
+			}
+		}
+		if settled {
+			return
+		}
+	}
 }
 
 func (w *Window) rootIsView(live []*view) bool {
@@ -516,10 +543,19 @@ func allocateCallback(widget, alloc, id uintptr) uintptr {
 	if total <= 1 {
 		return 0
 	}
-	if h := total - fs - ss; fs > 0 && ss > 0 && h > 0 {
-		ps.handle = h
+	// A child that was never allocated reports 1x1 (GTK's default), which is
+	// not a size: measuring the divider from it would give a handle as wide as
+	// the paned. Under a compositor that configures surfaces asynchronously
+	// (Wayland) the first round often sees exactly that, so such a round only
+	// positions the divider with the last known handle and is not counted.
+	if fs > 1 && ss > 1 {
+		if h := total - fs - ss; h > 0 {
+			ps.handle = h
+		}
+		ps.pending--
+	} else if ps.skipped++; ps.skipped > 16 {
+		ps.pending--
 	}
-	ps.pending--
 	fw, fh := caps.MinSize(ps.node.First, ps.handle)
 	sw, sh := caps.MinSize(ps.node.Second, ps.handle)
 	minF, minS := fw, sw
@@ -542,7 +578,7 @@ func (w *Window) snapshotRatios() {
 		if p.axis == caps.Vertical {
 			fs, ss = int(x.gtkWidgetAllocH(p.first)), int(x.gtkWidgetAllocH(p.second))
 		}
-		if fs <= 0 || ss <= 0 || p.pending > 0 {
+		if fs <= 1 || ss <= 1 || p.pending > 0 {
 			continue
 		}
 		if n := w.layout.At(p.path); n != nil && !n.IsLeaf() {
@@ -561,6 +597,7 @@ func (w *Window) SetDividerPosition(path string, pos int) (err error) {
 			if p.path == path {
 				p.pending = 0
 				w.app.x.gtkPanedSetPos(p.widget, int32(pos))
+				w.layoutNow()
 				return
 			}
 		}
