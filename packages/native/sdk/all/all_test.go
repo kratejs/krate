@@ -11,6 +11,7 @@ import (
 	"github.com/kratejs/krate/packages/native/krate"
 	"github.com/kratejs/krate/packages/native/scheme"
 	"github.com/kratejs/krate/packages/native/sdk"
+	"github.com/kratejs/krate/packages/native/sdk/internal/fakeplat"
 	"github.com/kratejs/krate/packages/native/sdk/internal/sdktest"
 	sdkos "github.com/kratejs/krate/packages/native/sdk/os"
 	"github.com/kratejs/krate/packages/native/sdk/permission"
@@ -43,9 +44,18 @@ func TestEveryIDIsRegisteredAndGated(t *testing.T) {
 		t.Fatal(err)
 	}
 	RegisterAreas(reg, set)
+	// The UI half, served by a Host on a fake platform, under the same set.
+	host := sdk.NewHost()
+	host.Attach(fakeplat.New())
+	t.Cleanup(host.Close)
+	RegisterUI(reg, host, set, nil)
 	c := sdktest.New(t, reg)
 	for _, id := range sdk.IDs {
 		r := c.Call(id.Name, func(e *wire.Encoder) { e.String("x") })
+		if strings.HasSuffix(id.Name, ".events") {
+			// A stream opens first and fails when read; sdk_test checks that.
+			continue
+		}
 		if r.ErrCode == "not_found" {
 			t.Errorf("%s is in the id table but not registered", id.Name)
 			continue
@@ -123,6 +133,14 @@ func TestCapabilities(t *testing.T) {
 	_ = sdkos.ErrSecretNotFound
 }
 
+// calledByName reports whether a wrapper builds the id from a template such
+// as `krate/window.${name}` and passes the operation name as a string, which
+// is how the window methods share one helper.
+func calledByName(src, id string) bool {
+	area, op, _ := strings.Cut(strings.TrimPrefix(id, "krate/"), ".")
+	return strings.Contains(src, "`krate/"+area+".${") && strings.Contains(src, `"`+op+`"`)
+}
+
 var idRe = regexp.MustCompile(`krate/[a-zA-Z]+\.[a-zA-Z]+`)
 
 // The TypeScript wrappers and the docs must mention exactly the ids in the
@@ -146,7 +164,7 @@ func TestTSWrappersAndDocsMatchTable(t *testing.T) {
 		}
 		src := string(b)
 		for _, id := range ids {
-			if !strings.Contains(src, `"`+id+`"`) {
+			if !strings.Contains(src, `"`+id+`"`) && !calledByName(src, id) {
 				t.Errorf("%s.ts does not call %s", file, id)
 			}
 		}
@@ -172,10 +190,13 @@ func TestTSWrappersAndDocsMatchTable(t *testing.T) {
 		}
 	}
 
-	doc := filepath.Join("..", "..", "..", "web", "src", "content", "docs", "native", "sdk.md")
-	b, err := os.ReadFile(doc)
+	docDir := filepath.Join("..", "..", "..", "web", "src", "content", "docs", "native")
+	b, err := os.ReadFile(filepath.Join(docDir, "sdk.md"))
 	if err != nil {
 		t.Skip("docs page missing: ", err)
+	}
+	if ui, err := os.ReadFile(filepath.Join(docDir, "sdk-ui.md")); err == nil {
+		b = append(b, ui...)
 	}
 	var missing []string
 	for _, id := range sdk.IDs {
@@ -190,6 +211,6 @@ func TestTSWrappersAndDocsMatchTable(t *testing.T) {
 	}
 	sort.Strings(missing)
 	if len(missing) > 0 {
-		t.Errorf("sdk.md does not mention: %v", missing)
+		t.Errorf("sdk.md and sdk-ui.md do not mention: %v", missing)
 	}
 }

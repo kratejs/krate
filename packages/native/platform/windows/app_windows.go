@@ -350,6 +350,9 @@ func wndProc(hwnd, message, wParam, lParam uintptr) (ret uintptr) {
 		return r
 	}
 	if w := a.windows[hwnd]; w != nil {
+		if handled, r := winExtMessage(a, w, message, wParam, lParam); handled {
+			return r
+		}
 		switch message {
 		case wmSize:
 			if wParam != sizeMinimized {

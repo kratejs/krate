@@ -19,6 +19,18 @@
 //	os:secrets.read     no             read secrets (never implied by os:secrets)
 //	shell:openExternal  no             open http, https and mailto URLs in the OS handler
 //	net                 no             reserved for network policy; no UI id yet
+//	window              yes (default)  open and control windows
+//	app                 yes (default)  quit, relaunch, capability checks, second-instance events
+//	menu                yes (default)  application menu, context menus
+//	dialog              yes (default)  native file and message dialogs
+//	notify              yes (default)  desktop notifications
+//	clipboard           yes (default)  write the clipboard
+//	clipboard:read      no             read the clipboard
+//	tray                no             system tray icon
+//	shortcut            no             global keyboard shortcuts
+//
+// The compiler keeps a copy of the names in names.json (a test here keeps the
+// file in step; run "go test ./sdk/permission -update" to rewrite it).
 //
 // An empty or missing "permissions" list means the defaults above. A non-empty
 // list grants exactly what it names (plus what a name implies), so an app that
@@ -75,6 +87,15 @@ func init() {
 		{Name: "os:secrets.read", Doc: "read secrets from the OS credential store"},
 		{Name: "shell:openExternal", Doc: "open http, https and mailto URLs in the default handler"},
 		{Name: "net", Doc: "reserved for network policy; no UI id yet"},
+		{Name: "window", Doc: "open and control windows", Default: true},
+		{Name: "app", Doc: "quit or relaunch the app, query capabilities, receive second-instance events", Default: true},
+		{Name: "menu", Doc: "set the application menu and show context menus", Default: true},
+		{Name: "dialog", Doc: "show native file and message dialogs", Default: true},
+		{Name: "notify", Doc: "post desktop notifications", Default: true},
+		{Name: "clipboard", Doc: "write the system clipboard", Default: true},
+		{Name: "clipboard:read", Doc: "read the system clipboard (sees what the user copied elsewhere)"},
+		{Name: "tray", Doc: "show a system tray icon"},
+		{Name: "shortcut", Doc: "register global keyboard shortcuts"},
 	} {
 		Define(i)
 	}

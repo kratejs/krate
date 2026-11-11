@@ -20,6 +20,7 @@ import (
 	"syscall"
 
 	"github.com/ebitengine/purego"
+	"github.com/kratejs/krate/packages/native/platform/caps"
 )
 
 func init() {
@@ -54,6 +55,7 @@ type WindowOptions struct {
 // App is the WebKitGTK application.
 type App struct {
 	api     *api
+	x       *ext
 	handler http.Handler
 	debug   bool
 	ctx     uintptr // WebKitWebContext
@@ -63,6 +65,8 @@ type App struct {
 	windows     map[uintptr]*Window
 	nextWin     uintptr
 	onAllClosed func()
+	winHandler  func(caps.WindowEvent)
+	shortcutFn  func(string)
 
 	queue struct {
 		sync.Mutex
@@ -80,6 +84,7 @@ var (
 	theApp *App
 
 	cbIdle, cbScheme, cbPolicy, cbLoad, cbDestroy, cbClose, cbHeader uintptr
+	cbDelete, cbWinState                                             uintptr
 	curHeader                                                        http.Header
 )
 
@@ -117,6 +122,10 @@ func New(opts Options) (*App, error) {
 	cbDestroy = purego.NewCallback(destroyCallback)
 	cbClose = purego.NewCallback(closeCallback)
 	cbHeader = purego.NewCallback(headerCallback)
+	cbDelete = purego.NewCallback(deleteCallback)
+	cbWinState = purego.NewCallback(winStateCallback)
+	app.x = loadExt()
+	app.initExt()
 
 	mgr := a.wkDataManagerNew("base-data-directory", dataDir("XDG_DATA_HOME", ".local/share", id),
 		"base-cache-directory", dataDir("XDG_CACHE_HOME", ".cache", id), 0)

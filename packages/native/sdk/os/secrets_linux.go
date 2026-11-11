@@ -222,7 +222,7 @@ func (s *secretService) get(ctx context.Context, service, key string) (string, e
 	if err != nil {
 		return "", mapSSError(err)
 	}
-	st, _ := res[0].([]any)
+	st, _ := res[0].(dbus.Struct)
 	if len(st) != 4 {
 		return "", errors.New("sdkos: bad GetSecret reply")
 	}

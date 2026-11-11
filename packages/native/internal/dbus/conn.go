@@ -377,6 +377,10 @@ type Match struct {
 	Path      ObjectPath
 	Interface string
 	Member    string
+	// PathNamespace matches Path and everything below it.
+	PathNamespace ObjectPath
+	// Arg0 matches a string first argument.
+	Arg0 string
 }
 
 func (m Match) matches(msg *Message) bool {
@@ -388,6 +392,14 @@ func (m Match) matches(msg *Message) bool {
 	}
 	if m.Member != "" && m.Member != msg.Member {
 		return false
+	}
+	if ns := string(m.PathNamespace); ns != "" && string(msg.Path) != ns && !strings.HasPrefix(string(msg.Path), strings.TrimSuffix(ns, "/")+"/") {
+		return false
+	}
+	if m.Arg0 != "" {
+		if len(msg.Body) == 0 || fmt.Sprint(msg.Body[0]) != m.Arg0 {
+			return false
+		}
 	}
 	// A well-known Sender is not comparable with the unique sender of the
 	// message; the bus has already filtered on it through the match rule.
@@ -408,6 +420,8 @@ func (m Match) rule() string {
 	add("path", string(m.Path))
 	add("interface", m.Interface)
 	add("member", m.Member)
+	add("path_namespace", string(m.PathNamespace))
+	add("arg0", m.Arg0)
 	return strings.Join(parts, ",")
 }
 

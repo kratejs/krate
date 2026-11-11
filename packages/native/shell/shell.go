@@ -21,7 +21,9 @@ import (
 	"github.com/kratejs/krate/packages/native/hostjs"
 	"github.com/kratejs/krate/packages/native/platform"
 	"github.com/kratejs/krate/packages/native/scheme"
+	"github.com/kratejs/krate/packages/native/sdk"
 	sdkall "github.com/kratejs/krate/packages/native/sdk/all"
+	"github.com/kratejs/krate/packages/native/sdk/permission"
 )
 
 // RunOptions configures Run.
@@ -47,6 +49,11 @@ type RunOptions struct {
 	Out io.Writer
 	// Context, when done, quits the app.
 	Context context.Context
+	// Allowed, when set, replaces the manifest's permission set for the UI
+	// half of the SDK (window, dialog, clipboard, ...); the data areas
+	// always follow the manifest. Meant for tests. Default: the manifest's
+	// "permissions" (or the defaults when it lists none).
+	Allowed func(permission string) bool
 }
 
 // Run loads the app in appDir and runs it until the window closes (or, in
@@ -90,6 +97,8 @@ type app struct {
 
 	results queryResults // dev "query" mailbox
 	dev     *devTools
+	sdk     *sdk.Host
+	perms   permission.Set // from the manifest; read once at load
 }
 
 func load(appDir string, opts RunOptions) (*app, error) {
@@ -103,12 +112,20 @@ func load(appDir string, opts RunOptions) (*app, error) {
 	}
 	a := &app{dir: dir, opts: opts, logf: opts.Logf, man: man, reg: scheme.NewRegistry()}
 	a.ctl = &Control{a: a}
-	// The SDK is registered first so that host code cannot shadow its ids.
-	// Permissions are read once, here; changing them needs a restart.
-	if _, err := sdkall.Register(a.reg, sdkall.Options{
+	// The data SDK is registered first so that host code cannot shadow its
+	// ids. The permission set is parsed once, here; changing app.json needs a
+	// restart. The UI half (sdk.Host) is attached to the platform later, by
+	// attachSDK, and filtered by the same set.
+	set, err := sdkall.Register(a.reg, sdkall.Options{
 		AppID: man.AppID, Name: man.ProductName, Version: man.Version, Permissions: man.Permissions,
-	}); err != nil {
+	})
+	if err != nil {
 		return nil, fmt.Errorf("shell: registering the SDK: %w", err)
+	}
+	a.perms = set
+	a.sdk = sdk.NewHost()
+	if os.Getenv("KRATE_APP_ID") == "" {
+		os.Setenv("KRATE_APP_ID", man.AppID)
 	}
 	if err := a.reloadHostJS(); err != nil {
 		a.close()
@@ -160,7 +177,16 @@ func load(appDir string, opts RunOptions) (*app, error) {
 	return a, nil
 }
 
+// attachSDK connects the UI half of the SDK to the platform (nil in browser
+// mode) and exposes it to the page under the manifest's permissions. An id
+// whose permission is missing fails with permission_denied.
+func (a *app) attachSDK(p platform.App) {
+	a.sdk.Attach(p)
+	sdkall.RegisterUI(a.reg, a.sdk, a.perms, a.opts.Allowed)
+}
+
 func (a *app) close() {
+	a.sdk.Close()
 	a.mu.Lock()
 	host, child := a.host, a.child
 	a.host, a.child = nil, nil
@@ -270,6 +296,11 @@ func (a *app) restartGoHost() error {
 			"KRATE_APP_NAME=" + man.ProductName,
 			"KRATE_APP_VERSION=" + man.Version,
 		}
+		parent, err := a.sdk.ServeParent()
+		if err != nil {
+			return err
+		}
+		env = append(env, gohost.ParentEnv+"="+parent)
 		if a.opts.Dev {
 			env = append(env, "KRATE_DEV=1")
 		}
@@ -313,6 +344,7 @@ func (a *app) runNative() error {
 	if err != nil {
 		return err
 	}
+	a.attachSDK(platApp)
 	wins := &windows{}
 	a.ctl.wins = wins
 	a.ctl.origin = platApp.Origin()
@@ -343,6 +375,7 @@ func (a *app) runNative() error {
 			return
 		}
 		wins.add(win)
+		a.sdk.AddWindow("main", win)
 		if a.opts.OnReady != nil {
 			go a.opts.OnReady(a.ctl)
 		}

@@ -15,6 +15,11 @@ type ObjectPath string
 // Signature is a D-Bus type signature (signature g).
 type Signature string
 
+// Struct is a decoded struct (signature "(...)"): one entry per field. It
+// keeps structs apart from arrays, which decode to []any. Encoding accepts
+// either type for a struct.
+type Struct []any
+
 // Variant is a value tagged with its signature (signature v).
 type Variant struct {
 	Sig   string
@@ -252,8 +257,13 @@ func (e *encoder) encode(t string, v any, depth int) error {
 	case 'a':
 		return e.encodeArray(t, v, depth)
 	case '(':
-		fields, ok := v.([]any)
-		if !ok {
+		var fields []any
+		switch f := v.(type) {
+		case []any:
+			fields = f
+		case Struct:
+			fields = f
+		default:
 			return badValue(t, v)
 		}
 		inner, err := splitSig(t[1 : len(t)-1])
@@ -484,7 +494,7 @@ func (d *decoder) decode(t string, depth int) (any, error) {
 		if err := d.align(8); err != nil {
 			return nil, err
 		}
-		out := make([]any, 0, len(inner))
+		out := make(Struct, 0, len(inner))
 		for _, ft := range inner {
 			v, err := d.decode(ft, depth+1)
 			if err != nil {

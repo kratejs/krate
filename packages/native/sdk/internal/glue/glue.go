@@ -4,7 +4,6 @@
 package glue
 
 import (
-	"errors"
 	"strconv"
 
 	"github.com/kratejs/krate/packages/native/krate"
@@ -167,4 +166,4 @@ func Code(err error) error {
 	return err
 }
 
-func isUnsupported(err error) bool { return errors.Is(err, krate.ErrUnsupported) }
+func isUnsupported(err error) bool { return krate.IsUnsupported(err) }

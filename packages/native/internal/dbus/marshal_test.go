@@ -94,6 +94,10 @@ func looselyEqual(got, want []any) bool {
 }
 
 func valEqual(g, w any) bool {
+	if gs, ok := g.(Struct); ok {
+		ws, ok := w.([]any)
+		return ok && looselyEqual(gs, ws)
+	}
 	if gv, ok := g.(Variant); ok {
 		wv, ok := w.(Variant)
 		return ok && gv.Sig == wv.Sig && valEqual(gv.Value, wv.Value)

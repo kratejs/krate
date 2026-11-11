@@ -4,6 +4,7 @@ package all
 
 import (
 	"github.com/kratejs/krate/packages/native/scheme"
+	"github.com/kratejs/krate/packages/native/sdk"
 	"github.com/kratejs/krate/packages/native/sdk/db"
 	"github.com/kratejs/krate/packages/native/sdk/fs"
 	"github.com/kratejs/krate/packages/native/sdk/kv"
@@ -37,6 +38,19 @@ func Register(r *scheme.Registry, o Options) (permission.Set, error) {
 	}
 	RegisterAreas(r, set)
 	return set, nil
+}
+
+// RegisterUI exposes the UI half of the SDK (window, dialog, clipboard, menu,
+// tray, shortcut, notify, app) of an attached Host on r under the same
+// permission set as the data areas. A call to an id whose permission is
+// missing fails with "permission_denied" naming it. override, when non-nil,
+// replaces set.Allows (tests of the shell use it).
+func RegisterUI(r *scheme.Registry, h *sdk.Host, set permission.Set, override func(permission string) bool) {
+	allowed := set.Allows
+	if override != nil {
+		allowed = override
+	}
+	h.RegisterUI(r, allowed, permission.Denied)
 }
 
 // RegisterAreas registers every area on r without configuring the app

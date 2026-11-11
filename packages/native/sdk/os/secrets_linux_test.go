@@ -89,7 +89,7 @@ func startFakeKeyring(t *testing.T, addr string, locked bool) *fakeKeyring {
 		"CreateItem": func(m *dbus.Message) (string, []any, error) {
 			props := m.Body[0].(map[string]any)
 			attrs := props[itemAttrsProp].(dbus.Variant).Value.(map[string]any)
-			secret := m.Body[1].([]any)
+			secret := m.Body[1].(dbus.Struct)
 			f.mu.Lock()
 			defer f.mu.Unlock()
 			if f.locked {

@@ -33,10 +33,18 @@ type Manifest struct {
 	GoHost *GoHostSpec `json:"gohost,omitempty"`
 
 	// Permissions lists what the UI may use of the SDK (see package
-	// sdk/permission). Empty means the defaults: os:info, kv and db.
+	// sdk/permission). Empty means the default set (os:info, kv, db, window,
+	// app, menu, dialog, notify, clipboard). Unknown names fail at load.
 	Permissions []string `json:"permissions,omitempty"`
 
 	Debug bool `json:"debug"`
+}
+
+// HasPermission reports whether the manifest grants a permission, with the
+// defaults for an empty list and implied names resolved.
+func (m *Manifest) HasPermission(name string) bool {
+	set, err := permission.Parse(m.Permissions)
+	return err == nil && set.Allows(name)
 }
 
 // WindowSpec is the first window.

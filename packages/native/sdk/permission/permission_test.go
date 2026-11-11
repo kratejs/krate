@@ -1,8 +1,10 @@
 package permission
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"flag"
 	"os"
 	"reflect"
 	"strings"
@@ -20,7 +22,7 @@ func TestDefaults(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got, want := s.List(), []string{"db", "kv", "os:info"}; !reflect.DeepEqual(got, want) {
+		if got, want := s.List(), []string{"app", "clipboard", "db", "dialog", "kv", "menu", "notify", "os:info", "window"}; !reflect.DeepEqual(got, want) {
 			t.Errorf("Parse(%v) = %v, want %v", list, got, want)
 		}
 	}
@@ -117,6 +119,52 @@ func TestDocListsEveryPermission(t *testing.T) {
 	for _, p := range All() {
 		if !strings.Contains(string(src), "//\t"+p.Name+" ") {
 			t.Errorf("the package comment does not list %q", p.Name)
+		}
+	}
+}
+
+var update = flag.Bool("update", false, "rewrite names.json")
+
+// names.json is the copy of the permission names the compiler validates
+// against (packages/compiler/internal/config). It must match the table.
+func TestNamesJSONMatchesTable(t *testing.T) {
+	var out struct {
+		Names    []string `json:"names"`
+		Defaults []string `json:"defaults"`
+	}
+	for _, i := range All() {
+		out.Names = append(out.Names, i.Name)
+	}
+	out.Defaults = Defaults().List()
+	want, err := json.MarshalIndent(out, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want = append(want, '\n')
+	if *update {
+		if err := os.WriteFile("names.json", want, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := os.ReadFile("names.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("names.json is stale; run: go test ./sdk/permission -run NamesJSON -update\nhave:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestUIDefaultsAndDenials(t *testing.T) {
+	d := Defaults()
+	for _, n := range []string{"window", "app", "menu", "dialog", "notify", "clipboard"} {
+		if !d.Allows(n) {
+			t.Errorf("default set lacks %s", n)
+		}
+	}
+	for _, n := range []string{"clipboard:read", "tray", "shortcut", "fs", "fs:read", "os:secrets", "os:secrets.read", "shell:openExternal", "net"} {
+		if d.Allows(n) {
+			t.Errorf("default set allows %s", n)
 		}
 	}
 }

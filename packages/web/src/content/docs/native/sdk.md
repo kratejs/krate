@@ -13,7 +13,10 @@ The SDK is a set of Go packages under `packages/native/sdk`. Go host code
 imports them and calls plain functions. The UI and TypeScript host code reach
 selected operations through host ids named `krate/<area>.<name>`, wrapped by
 `@krate/app/os`, `@krate/app/fs`, `@krate/app/db`, `@krate/app/kv` and
-`@krate/app/permission`. The shell registers the SDK for every app.
+`@krate/app/permission`. The shell registers the SDK for every app. The
+windows, dialogs, clipboard, menus, tray, shortcuts, notifications and
+lifecycle have [their own page](/docs/native/sdk-ui/); they share the
+permission list, the denial error and the id table below.
 
 ```ts
 import { appDataDir, info } from "@krate/app/os";
@@ -43,8 +46,21 @@ permissions decide which ids the UI and TypeScript host code may call.
 | `os:secrets.read` | no | Reading secrets; `os:secrets` does not imply it |
 | `shell:openExternal` | no | Opening http, https and mailto URLs in the default handler |
 | `net` | no | Reserved for a network policy; no UI id uses it yet |
+| `window` | yes | Opening and controlling windows |
+| `app` | yes | Quitting, relaunching, capability checks, second-instance events |
+| `menu` | yes | The application menu and context menus |
+| `dialog` | yes | Native file and message dialogs |
+| `notify` | yes | Desktop notifications |
+| `clipboard` | yes | Writing the clipboard |
+| `clipboard:read` | no | Reading the clipboard (sees what the user copied elsewhere) |
+| `tray` | no | A system tray icon |
+| `shortcut` | no | Global keyboard shortcuts |
 
-An empty or missing list means the defaults (`os:info`, `kv`, `db`). A
+An empty or missing list means the defaults: the non-sensitive set marked
+"yes" above. The compiler will later derive the list from the SDK calls an app
+can reach and `native.permissions` in the config will narrow it; until then
+list what a sensitive feature needs (`tray`, `shortcut`, `clipboard:read`,
+`fs`, secrets, `shell:openExternal`). A
 non-empty list grants exactly what it names (plus what a name implies), so an
 app that lists only `fs` loses `kv` and `db` unless it lists them too. Unknown
 names are an error when the app loads. Permissions are read once at start;
@@ -56,7 +72,8 @@ A call to an id whose permission is missing rejects with a `KrateError`:
 { "code": "permission_denied", "message": "...", "data": { "permission": "os:secrets.read" } }
 ```
 
-An id that does not exist at all is `not_found`, so the UI can tell a missing
+This holds for every id, data and UI alike (`krate/window.Open` without
+`window` is a `permission_denied`, not a `not_found`). An id that does not exist at all is `not_found`, so the UI can tell a missing
 permission from a typo. `isPermissionDenied(e)` and `deniedPermission(e)` from
 `@krate/app/permission` read this, and `query(name)` (host id
 `krate/permission.query`, always allowed) asks whether a permission is granted.
@@ -93,6 +110,52 @@ permission from a typo. `isPermissionDenied(e)` and `deniedPermission(e)` from
 | `krate/kv.delete` | `kv` | `key` | nothing |
 | `krate/kv.keys` | `kv` | `prefix?` | `string[]` |
 | `krate/permission.query` | none | `name` | `boolean` |
+| `krate/window.Open` | `window` | `options: WindowOptions` | `string` |
+| `krate/window.List` | `window` | none | `string[]` |
+| `krate/window.State` | `window` | `window: string` | `WindowState` |
+| `krate/window.Close` | `window` | `window: string` | nothing |
+| `krate/window.SetTitle` | `window` | `window: string, title: string` | nothing |
+| `krate/window.SetSize` | `window` | `window: string, width: number, height: number` | nothing |
+| `krate/window.SetPosition` | `window` | `window: string, x: number, y: number` | nothing |
+| `krate/window.SetAlwaysOnTop` | `window` | `window: string, on: boolean` | nothing |
+| `krate/window.SetFullscreen` | `window` | `window: string, on: boolean` | nothing |
+| `krate/window.SetFrameless` | `window` | `window: string, on: boolean` | nothing |
+| `krate/window.Minimize` | `window` | `window: string` | nothing |
+| `krate/window.Maximize` | `window` | `window: string` | nothing |
+| `krate/window.Restore` | `window` | `window: string` | nothing |
+| `krate/window.Focus` | `window` | `window: string` | nothing |
+| `krate/window.Show` | `window` | `window: string` | nothing |
+| `krate/window.Hide` | `window` | `window: string` | nothing |
+| `krate/window.SetPreventClose` | `window` | `window: string, on: boolean` | nothing |
+| `krate/window.Navigate` | `window` | `window: string, path: string` | nothing |
+| `krate/window.events` | `window` | none (stream) | `WindowEvent` |
+| `krate/dialog.OpenFile` | `dialog` | `options: OpenOptions` | `string[]` |
+| `krate/dialog.OpenFolder` | `dialog` | `options: OpenOptions` | `string[]` |
+| `krate/dialog.SaveFile` | `dialog` | `options: SaveOptions` | `string | null` |
+| `krate/dialog.Message` | `dialog` | `options: MessageOptions` | `number` |
+| `krate/clipboard.WriteText` | `clipboard` | `text: string` | nothing |
+| `krate/clipboard.WriteImage` | `clipboard` | `png: Uint8Array` | nothing |
+| `krate/clipboard.WriteFiles` | `clipboard` | `paths: string[]` | nothing |
+| `krate/clipboard.Clear` | `clipboard` | none | nothing |
+| `krate/clipboard.ReadText` | `clipboard:read` | none | `string` |
+| `krate/clipboard.ReadImage` | `clipboard:read` | none | `Uint8Array | null` |
+| `krate/clipboard.ReadFiles` | `clipboard:read` | none | `string[]` |
+| `krate/menu.SetApp` | `menu` | `items: MenuItem[]` | nothing |
+| `krate/menu.Popup` | `menu` | `window: string, x: number, y: number, items: MenuItem[]` | nothing |
+| `krate/menu.events` | `menu` | none (stream) | `MenuEvent` |
+| `krate/tray.Set` | `tray` | `options: TrayOptions` | nothing |
+| `krate/tray.Remove` | `tray` | none | nothing |
+| `krate/tray.events` | `tray` | none (stream) | `TrayEvent` |
+| `krate/shortcut.Register` | `shortcut` | `handle: string, accelerator: string` | nothing |
+| `krate/shortcut.Unregister` | `shortcut` | `handle: string` | nothing |
+| `krate/shortcut.events` | `shortcut` | none (stream) | `{id: string}` |
+| `krate/notify.Send` | `notify` | `notification: Notification` | nothing |
+| `krate/notify.Close` | `notify` | `id: string` | nothing |
+| `krate/notify.events` | `notify` | none (stream) | `NotificationEvent` |
+| `krate/app.Quit` | `app` | none | nothing |
+| `krate/app.Relaunch` | `app` | none | nothing |
+| `krate/app.Supports` | `app` | `capability: string` | `boolean` |
+| `krate/app.events` | `app` | none (stream) | `SecondInstance` |
 
 `packages/native/sdk/ids.go` is the source of truth for this table; a Go test
 checks it against the registrations, the TypeScript wrappers and this page.

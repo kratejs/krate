@@ -49,7 +49,7 @@ is in the directory; paths in `app.json` are relative to it.
 | `fallbacks` | One entry per dynamic route that accepts parameters the build did not list: the route `pattern` (`[id]`, `[...slug]`) and the shell page `file` under `assets`. The shell serves `file` for a URL that matches `pattern` and has no file of its own. |
 | `hostjs` | Present with TypeScript host code: the host bundle (one script, run in the embedded JavaScript runtime) and its source map. |
 | `gohost` | Present with Go host code: the binary, and the registry ids it serves by kind. An id is `<module id>.<export>`. |
-| `permissions` | Optional list that gates the SDK ids the UI may call (`os:info`, `kv`, `db`, `fs`, `fs:read`, `os:secrets`, `os:secrets.read`, `shell:openExternal`, `net`). Empty means `os:info`, `kv` and `db`; unknown names are an error. See [Native SDK](/docs/native/sdk/). |
+| `permissions` | Optional list that gates the SDK ids the UI may call: `os:info`, `kv`, `db`, `fs`, `fs:read`, `os:secrets`, `os:secrets.read`, `shell:openExternal`, `net`, `window`, `app`, `menu`, `dialog`, `notify`, `clipboard`, `clipboard:read`, `tray`, `shortcut`. Empty means `os:info`, `kv`, `db`, `window`, `app`, `menu`, `dialog`, `notify` and `clipboard`; unknown names are an error when the app loads. See [Native SDK](/docs/native/sdk/#permissions). |
 | `debug` | `false` for a build made by `krate native build`. |
 
 The build manifest of the web build (`dist/.krate`) is removed from `dist/`.

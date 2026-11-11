@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 
 	"github.com/ebitengine/purego/objc"
+	"github.com/kratejs/krate/packages/native/platform/caps"
 )
 
 // AppKit constants used below.
@@ -272,6 +273,32 @@ func registerClasses(a *App) error {
 	_, err = objc.RegisterClass("KrateWindowDelegate", nsObject, protos("NSWindowDelegate"), nil, []objc.MethodDef{
 		{Cmd: sel("windowWillClose:"), Fn: func(self objc.ID, _ objc.SEL, note objc.ID) {
 			a.windowWillClose(note.Send(sel("object")))
+		}},
+		{Cmd: sel("windowShouldClose:"), Fn: func(self objc.ID, _ objc.SEL, nsWin objc.ID) bool {
+			if w := a.windows[nsWin]; w != nil && w.preventClose {
+				emitWindow(w, caps.WindowCloseRequested)
+				return false
+			}
+			return true
+		}},
+		{Cmd: sel("windowDidBecomeKey:"), Fn: func(self objc.ID, _ objc.SEL, note objc.ID) {
+			if w := a.windows[note.Send(sel("object"))]; w != nil {
+				emitWindow(w, caps.WindowFocused)
+			}
+		}},
+		{Cmd: sel("windowDidResignKey:"), Fn: func(self objc.ID, _ objc.SEL, note objc.ID) {
+			if w := a.windows[note.Send(sel("object"))]; w != nil {
+				emitWindow(w, caps.WindowBlurred)
+			}
+		}},
+	})
+	if err != nil {
+		return err
+	}
+
+	_, err = objc.RegisterClass("KrateMenuTarget", nsObject, nil, nil, []objc.MethodDef{
+		{Cmd: sel("krateMenu:"), Fn: func(self objc.ID, _ objc.SEL, item objc.ID) {
+			a.menuClicked(item)
 		}},
 	})
 	if err != nil {

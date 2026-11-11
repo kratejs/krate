@@ -20,7 +20,7 @@ func Start(t testing.TB) string {
 	if err != nil {
 		t.Skip("dbus-daemon not installed")
 	}
-	dir, err := os.MkdirTemp("", "krate-dbus-")
+	dir, err := os.MkdirTemp(os.Getenv("KRATE_TEST_TMP"), "krate-dbus-")
 	if err != nil {
 		t.Fatal(err)
 	}
