@@ -1,7 +1,7 @@
 ---
 title: Views and Split Panes
 order: 11
-description: Several webviews in one window, laid out as split panes with draggable dividers, each with its own route and permission scope, and how requests are bound to the view they came from.
+description: Several webviews in one window as split panes with draggable dividers, each with its own route and permission scope, and how requests bind to their view.
 ---
 
 # Views and split panes

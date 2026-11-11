@@ -1,7 +1,7 @@
 ---
 title: Native Plugins
 order: 11
-description: Ship reusable native capabilities as plugins - a Go package, a krate-plugin.json manifest, generated TypeScript, declared permissions - and enable them in an app with one line of config.
+description: Ship reusable native capabilities as plugins: a Go package and a manifest, generated TypeScript, declared permissions, enabled with one line of config.
 ---
 
 # Native Plugins
