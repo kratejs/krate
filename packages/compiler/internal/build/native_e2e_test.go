@@ -281,59 +281,23 @@ func e2eCheckSteps(t *testing.T, steps []e2eStep, want int) {
 	}
 }
 
-// e2eFootprint logs resident memory of the shell and its direct children
-// (Linux) and returns the shell's and the total in KB.
-func e2eFootprint(t *testing.T, pid int) (shellKB, totalKB int) {
+// e2eFootprint logs the memory of the shell and its helper processes (PSS and
+// private dirty per role, from the shell's memory control command).
+func e2eFootprint(t *testing.T, s *e2eShell) {
 	t.Helper()
-	if runtime.GOOS != "linux" {
-		return 0, 0
+	out, err := s.send("memory", 30*time.Second)
+	if err != nil {
+		t.Logf("footprint: memory command: %v", err)
+		return
 	}
-	rss := func(p int) (name string, kb int) {
-		b, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", p))
-		if err != nil {
-			return "", 0
-		}
-		for _, l := range strings.Split(string(b), "\n") {
-			if strings.HasPrefix(l, "Name:") {
-				name = strings.TrimSpace(strings.TrimPrefix(l, "Name:"))
-			}
-			if strings.HasPrefix(l, "VmRSS:") {
-				fmt.Sscanf(strings.TrimSpace(strings.TrimPrefix(l, "VmRSS:")), "%d", &kb)
-			}
-		}
-		return name, kb
+	var r shellMemoryReport
+	if err := json.Unmarshal([]byte(out), &r); err != nil {
+		t.Logf("footprint: %v", err)
+		return
 	}
-	_, shellKB = rss(pid)
-	total := shellKB
-	t.Logf("footprint: krate-shell RSS %d KB", shellKB)
-	entries, _ := os.ReadDir("/proc")
-	for _, e := range entries {
-		var p int
-		if _, err := fmt.Sscanf(e.Name(), "%d", &p); err != nil || p == pid {
-			continue
-		}
-		b, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", p))
-		if err != nil {
-			continue
-		}
-		// pid (comm) state ppid ...; comm may contain spaces.
-		s := string(b)
-		i := strings.LastIndex(s, ")")
-		if i < 0 {
-			continue
-		}
-		var state string
-		var ppid int
-		fmt.Sscanf(strings.TrimSpace(s[i+1:]), "%s %d", &state, &ppid)
-		if ppid != pid {
-			continue
-		}
-		name, kb := rss(p)
-		total += kb
-		t.Logf("footprint: child %s (%d) RSS %d KB", name, p, kb)
+	for role, v := range memPointOf(&r).Roles {
+		t.Logf("footprint: %-16s PSS %6d KB, private dirty %6d KB", role, v.PSS>>10, v.PrivateDirty>>10)
 	}
-	t.Logf("footprint: shell and direct children %d KB", total)
-	return shellKB, total
 }
 
 func e2eDirSize(t *testing.T, dir string) int64 {
@@ -465,7 +429,7 @@ func e2eGUIFlows(t *testing.T, s *e2eShell) {
 		t.Fatalf("main flow: %v", err)
 	}
 	e2eCheckSteps(t, steps, 17)
-	e2eFootprint(t, s.cmd.Process.Pid)
+	e2eFootprint(t, s)
 
 	for _, path := range []string{"/tasks/2", "/tasks/77"} {
 		// Navigate from a timer so the query that starts it still answers,

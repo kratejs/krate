@@ -94,7 +94,7 @@ func TestNativeReleaseE2EGUI(t *testing.T) {
 	s := e2eStartShell(t, bin, "")
 	s.waitReady(60 * time.Second)
 	e2eGUIFlows(t, s)
-	e2eFootprint(t, s.cmd.Process.Pid)
+	e2eFootprint(t, s)
 	if _, err := s.send("quit", 10*time.Second); err != nil {
 		t.Errorf("quit: %v", err)
 	}

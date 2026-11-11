@@ -33,6 +33,8 @@ type (
 	Notifier             = caps.Notifier
 	Accelerator          = caps.Accelerator
 	Shortcuts            = caps.Shortcuts
+	ProcessRef           = caps.ProcessRef
+	ProcessInfo          = caps.ProcessInfo
 )
 
 const (

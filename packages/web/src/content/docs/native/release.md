@@ -256,7 +256,35 @@ project root) when the app exits. Use the app the way users do: open the windows
 call the host functions that matter, then **close the window or press Ctrl-C**
 (a killed process writes no profile; on Windows close the window). `--browser`
 runs the app in browser mode and prints its URL; `--out <file>` writes the profile
-elsewhere. Commit the file: every later `--release` build finds it and passes
+elsewhere (`--memory` measures memory instead; see [Measuring memory](#measuring-memory)). Commit the file: every later `--release` build finds it and passes
 `-pgo=<file>` to `go build`, typically a few percent faster at the cost of a
 longer compile. A configured `native.release.pgo` that does not exist is a note,
 not an error. Without a profile nothing changes.
+
+## Measuring memory
+
+```sh
+krate native profile --memory [dir] [--idle 30s] [--out dist-native]
+```
+
+`--memory` builds the app (a release executable with the dev control channel, or
+the prebuilt-shell layout without Go), runs it and samples every process it owns:
+the shell, the Go host child, JavaScript host children and the webview's own
+processes. Each sample reports **PSS** and **private dirty** memory per role, next
+to a **floor** (a blank one-line page, same shell and window size, no host code),
+and their difference. PSS counts a shared page once, split between the processes
+that map it; private dirty is memory only that process holds. Summed resident size
+counts shared WebKit libraries once per process and is not used.
+
+Samples: after the load event plus 5 s (`afterLoad`), after `--idle` more
+(`afterIdle`, default 30 s; `0s` skips it), after navigating through every
+prerendered route three times (`afterStorm`), and with the window hidden
+(`hidden`, only for an app that links the `window` SDK area). The table is
+printed and stored as the `memory` section of `<out>/report.json`: per sample, per
+role `pss` and `privateDirty` in bytes for `app`, `floor` and `appMinusFloor`.
+
+Linux reads `/proc/<pid>/smaps_rollup`. macOS reports `phys_footprint` (what
+Activity Monitor shows) for both numbers and Windows reports private bytes; there
+the webview's processes are found through WebKit and WebView2 APIs and some may be
+missing (the report's `notes` say which). The same data is available from a
+running `--dev` shell as the `memory` control command and `GET /__krate/dev/memory`.

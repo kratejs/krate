@@ -28,6 +28,8 @@ type devTools struct {
 	logf func(string, ...any)
 	hmr  *hmrHub
 	ring *eventRing
+	// memory serves devMemoryPath; the app sets it.
+	memory http.HandlerFunc
 }
 
 func newDevTools(logf func(string, ...any)) *devTools {
@@ -44,6 +46,12 @@ func (d *devTools) handle(w http.ResponseWriter, r *http.Request) bool {
 			return true
 		}
 		d.ring.serve(w, r)
+		return true
+	case devMemoryPath:
+		if d.memory == nil {
+			return false
+		}
+		d.memory(w, r)
 		return true
 	case devClientErrorPath:
 		if r.Method != http.MethodPost {

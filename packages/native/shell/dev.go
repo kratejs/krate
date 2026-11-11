@@ -2,6 +2,7 @@ package shell
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -30,6 +31,7 @@ type Querier interface {
 //	restart-gohost
 //	eval <js>
 //	query <js>     answers "ok <json>"; needs a Controller that implements Querier
+//	memory         answers "ok <json>" (a memstat.Report); needs a MemorySampler
 //	hmr <json>
 //	quit
 //
@@ -75,6 +77,23 @@ func ServeControl(r io.Reader, w io.Writer, ctl Controller) (quit bool) {
 					fmt.Fprintf(w, "ok %s\n", oneLine(v))
 				}
 			}
+		case "memory":
+			m, ok := ctl.(MemorySampler)
+			if !ok {
+				reply(fmt.Errorf("memory is not supported here"))
+				continue
+			}
+			rep, err := m.Memory()
+			if rep == nil {
+				reply(err)
+				continue
+			}
+			data, jerr := json.Marshal(rep)
+			if jerr != nil {
+				reply(jerr)
+				continue
+			}
+			fmt.Fprintf(w, "ok %s\n", oneLine(string(data)))
 		case "hmr":
 			if strings.TrimSpace(arg) == "" {
 				reply(fmt.Errorf("hmr needs a JSON message"))

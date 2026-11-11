@@ -55,6 +55,10 @@ func printNativeUsage(w io.Writer) {
 	fmt.Fprintf(w, "\nProfile flags:\n")
 	fmt.Fprintf(w, "  --out <file>     Profile path (default native.release.pgo, ./native.pgo)\n")
 	fmt.Fprintf(w, "  --browser        Run the app in browser mode and print its URL\n")
+	fmt.Fprintf(w, "  --memory         Measure memory instead: PSS and private dirty per process role next to a blank-page\n")
+	fmt.Fprintf(w, "                   floor, after load, idle, a navigation storm and with the window hidden; written to\n")
+	fmt.Fprintf(w, "                   <out>/report.json (--out is then the native output directory, default dist-native)\n")
+	fmt.Fprintf(w, "  --idle <dur>     With --memory, the idle wait before the second sample (default 30s)\n")
 	fmt.Fprintf(w, "\nCheck flags:\n")
 	fmt.Fprintf(w, "  --scriptc        Also run scriptc coverage on the host code (experimental)\n")
 	fmt.Fprintf(w, "  --scriptc-fail-on <level>  blockers (default), divergences, dynamic, dynamic-slots or type-claims\n")
@@ -417,6 +421,10 @@ func runNativeProfile(flags cliFlags, args []string) {
 	builder := build.New(root, cfg)
 	builder.Verbose = flags.Verbose
 	builder.Env = env
+	if flags.Memory {
+		runNativeMemory(builder, root, flags)
+		return
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -442,6 +450,38 @@ func runNativeProfile(flags cliFlags, args []string) {
 	}
 	fmt.Printf("\n%s%s  Profile saved to %s (%s)%s\n", cBold, cGreen, p, build.FormatBytes(res.Size), cReset)
 	fmt.Printf("  the next `krate native build --release` passes it to go build as -pgo\n")
+}
+
+// runNativeMemory implements `krate native profile --memory`.
+func runNativeMemory(builder *build.Builder, root string, flags cliFlags) {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	outDir := flags.NativeOut
+	if outDir == "" {
+		outDir = "dist-native"
+	}
+	idle := 30 * time.Second
+	if flags.IdleSet {
+		idle = flags.Idle
+	}
+	fmt.Printf("%s%s  Measuring the memory of native app %s%s\n", cBold, cCyan, root, cReset)
+	rep, err := builder.MemoryNative(build.NativeMemoryProfileOptions{
+		OutDir: outDir, Shell: flags.Shell, Idle: idle,
+		Log: os.Stdout, Stderr: os.Stderr, Ctx: ctx,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%sMemory error:%s %s\n", cRed, cReset, build.BuildErrorSummary(err))
+		exit(1)
+	}
+	fmt.Printf("\n%s\n", build.FormatNativeMemory(rep))
+	p := filepath.Join(outDir, "report.json")
+	if !filepath.IsAbs(p) {
+		p = filepath.Join(root, p)
+	}
+	if r, err := filepath.Rel(root, p); err == nil && !strings.HasPrefix(r, "..") {
+		p = filepath.ToSlash(r)
+	}
+	fmt.Printf("%s%s  Memory written to %s%s\n", cBold, cGreen, p, cReset)
 }
 
 // runNativeDev runs the app under the shell with hot reload.

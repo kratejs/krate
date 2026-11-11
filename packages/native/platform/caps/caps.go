@@ -268,3 +268,21 @@ type Shortcuts interface {
 	// OnShortcut sets the handler for presses. fn must not block.
 	OnShortcut(fn func(handle string))
 }
+
+// ProcessRef is an operating system process that serves the app's webviews.
+// Role is one of "webview:web", "webview:network", "webview:gpu" and
+// "webview:other" (the memstat.RoleWebview* values).
+type ProcessRef struct {
+	PID  int
+	Role string
+}
+
+// ProcessInfo is implemented by Apps that can name the processes behind their
+// webviews, for memory measurement. The notes say what could not be
+// attributed (for example "webview processes not attributable"); an empty
+// list with notes is a normal answer. On Linux the processes are descendants
+// of the shell; on macOS they are XPC services found through private WKWebView
+// selectors; on Windows they come from WebView2's GetProcessInfos.
+type ProcessInfo interface {
+	WebviewProcesses() (procs []ProcessRef, notes []string)
+}

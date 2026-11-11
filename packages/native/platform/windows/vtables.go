@@ -165,6 +165,44 @@ var ifaceMethods = map[string][]string{
 		"add_NewBrowserVersionAvailable",
 		"remove_NewBrowserVersionAvailable",
 	},
+	// WebView2.h line 45974 (Environment, Environment2 .. Environment8 in one table)
+	"ICoreWebView2Environment8": {
+		"QueryInterface",
+		"AddRef",
+		"Release",
+		"CreateCoreWebView2Controller",
+		"CreateWebResourceResponse",
+		"get_BrowserVersionString",
+		"add_NewBrowserVersionAvailable",
+		"remove_NewBrowserVersionAvailable",
+		"CreateWebResourceRequest",
+		"CreateCoreWebView2CompositionController",
+		"CreateCoreWebView2PointerInfo",
+		"GetAutomationProviderForWindow",
+		"add_BrowserProcessExited",
+		"remove_BrowserProcessExited",
+		"CreatePrintSettings",
+		"get_UserDataFolder",
+		"add_ProcessInfosChanged",
+		"remove_ProcessInfosChanged",
+		"GetProcessInfos",
+	},
+	// WebView2.h line 46289
+	"ICoreWebView2ProcessInfoCollection": {
+		"QueryInterface",
+		"AddRef",
+		"Release",
+		"get_Count",
+		"GetValueAtIndex",
+	},
+	// WebView2.h line 59341
+	"ICoreWebView2ProcessInfo": {
+		"QueryInterface",
+		"AddRef",
+		"Release",
+		"get_ProcessId",
+		"get_Kind",
+	},
 	// WebView2.h line 44676
 	"ICoreWebView2CreateCoreWebView2ControllerCompletedHandler": {
 		"QueryInterface",

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func nativeProject(t *testing.T, files map[string]string) string {
@@ -205,11 +206,24 @@ func TestNativeFlagsCombined(t *testing.T) {
 	}
 }
 
+func TestNativeProfileMemoryFlags(t *testing.T) {
+	flags, rest, err := parseFlagsChecked([]string{"native", "profile", ".", "--memory", "--idle", "45s", "--out", "dist-m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !flags.Memory || !flags.IdleSet || flags.Idle != 45*time.Second || flags.NativeOut != "dist-m" || strings.Join(rest, " ") != "native profile ." {
+		t.Errorf("flags = %+v rest = %v", flags, rest)
+	}
+	if _, _, err := parseFlagsChecked([]string{"native", "profile", "--idle", "soon"}); err == nil || !strings.Contains(err.Error(), "--idle") {
+		t.Errorf("a bad --idle: %v", err)
+	}
+}
+
 func TestNativeUsageListsEveryCommandAndFlag(t *testing.T) {
 	var sb strings.Builder
 	printNativeUsage(&sb)
 	for _, want := range []string{"check", "init", "dev", "build", "profile", "package", "sign", "notarize", "keygen", "doctor",
-		"--release", "--target", "--package", "--format", "--scriptc", "--scriptc-fail-on", "--browser", "--port"} {
+		"--release", "--target", "--package", "--format", "--scriptc", "--scriptc-fail-on", "--browser", "--port", "--memory", "--idle"} {
 		if !strings.Contains(sb.String(), want) {
 			t.Errorf("usage does not mention %q", want)
 		}
