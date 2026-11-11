@@ -29,6 +29,8 @@ prerendered at build time.
   restrictions.
 - [Go host code](/docs/native/go-host/) - call exported Go functions, streams
   and signals from the UI.
+- [Host runtimes](/docs/native/runtimes/) - run TypeScript host code on Node,
+  Bun, Deno or scriptc, islands, release bundling.
 - [The app directory and app.json](/docs/native/app-json/) - the output of a
   build and the manifest the shell reads.
 - [Native SDK: data and system](/docs/native/sdk/) - app directories, files,

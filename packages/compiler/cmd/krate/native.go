@@ -236,6 +236,9 @@ func runNativeBuild(flags cliFlags, args []string) {
 	if m.HostJS != nil {
 		fmt.Printf("    host js      %s\n", m.HostJS.Bundle)
 	}
+	for _, c := range m.HostChildren {
+		fmt.Printf("    %-12s %s (%d funcs, %d streams, %d signals)\n", c.Runtime+" host", c.Entry, len(c.Funcs), len(c.Streams), len(c.Signals))
+	}
 	if m.GoHost != nil {
 		fmt.Printf("    go host      %s (%d funcs, %d streams, %d signals)\n", m.GoHost.Binary, len(m.GoHost.Funcs), len(m.GoHost.Streams), len(m.GoHost.Signals))
 	}

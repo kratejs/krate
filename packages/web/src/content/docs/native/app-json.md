@@ -15,7 +15,8 @@ description: The output of krate native build - the app directory layout and eve
 app/
   app.json
   dist/...            the prerendered UI
-  host/host.js(.map)  only with TypeScript host code
+  host/host.js(.map)  only with TypeScript host code on the embedded runtime
+  host/<runtime>/host.mjs(.map)  host code that runs on Node, Bun or Deno
   gohost/krate-gohost[.exe]  only with Go host code
 ```
 
@@ -31,6 +32,15 @@ is in the directory; paths in `app.json` are relative to it.
   "assets": "dist",
   "fallbacks": [{ "pattern": "/tasks/[id]", "file": "tasks/[id]/index.html" }],
   "hostjs": { "bundle": "host/host.js", "map": "host/host.js.map" },
+  "hostchildren": [{
+    "runtime": "node",
+    "entry": "host/node/host.mjs",
+    "map": "host/node/host.mjs.map",
+    "command": ["node", "--enable-source-maps", "{entry}"],
+    "funcs": ["src/lib/img.host.resize"],
+    "streams": [],
+    "signals": []
+  }],
   "gohost": {
     "binary": "gohost/krate-gohost",
     "funcs": ["src/lib/tasks.List"],
@@ -48,6 +58,7 @@ is in the directory; paths in `app.json` are relative to it.
 | `assets` | The directory with the prerendered UI, served at `/`. |
 | `fallbacks` | One entry per dynamic route that accepts parameters the build did not list: the route `pattern` (`[id]`, `[...slug]`) and the shell page `file` under `assets`. The shell serves `file` for a URL that matches `pattern` and has no file of its own. |
 | `hostjs` | Present with TypeScript host code: the host bundle (one script, run in the embedded JavaScript runtime) and its source map. |
+| `hostchildren` | One entry per TypeScript host program that runs in a child process on `node`, `bun` or `deno` (see [Host runtimes](/docs/native/runtimes/)): the `entry` script (and its `map`), the `command` that starts it and the ids it serves. In `command`, `{entry}` is the absolute path of the entry and `{sockdir}` the shell's socket directory; a first element without a path separator is looked up on `PATH`. A release replaces the script by an executable: `entry` names it and `command` is absent. The child may also report ids at run time, which the shell registers too. A reload restarts the child. |
 | `gohost` | Present with Go host code: the binary, and the registry ids it serves by kind. An id is `<module id>.<export>`. |
 | `permissions` | Optional list that gates the SDK ids the UI may call: `os:info`, `kv`, `db`, `fs`, `fs:read`, `os:secrets`, `os:secrets.read`, `shell:openExternal`, `net`, `window`, `app`, `menu`, `dialog`, `notify`, `clipboard`, `clipboard:read`, `tray`, `shortcut`. Empty means `os:info`, `kv`, `db`, `window`, `app`, `menu`, `dialog`, `notify` and `clipboard`; unknown names are an error when the app loads. See [Native SDK](/docs/native/sdk/#permissions). |
 | `debug` | `false` for a build made by `krate native build`. |

@@ -650,6 +650,54 @@ The Go host binary is built inside the project's own Go module, next to the gene
 
 `krate native init` creates a small app in a directory. It refuses to overwrite an existing file, so run it in an empty directory or remove the files it names.
 
+### KR7230
+
+**Host code imports a Node built-in on the QuickJS runtime**
+
+Host code runs on an embedded QuickJS runtime by default. It has the ECMAScript built-ins and a small set of web APIs, but no Node built-in modules, so an import of `node:fs`, `node:path` or any other built-in cannot work and the build refuses it. Run the host code on a full runtime with `native.host.runtime` set to `"node"`, `"bun"` or `"deno"`, or run only the module (or package) that needs the built-in there with `native.host.islands`, for example `{ "sharp": "node" }`. Go host functions are the third option.
+
+### KR7231
+
+**Host export reaches islands of different runtimes**
+
+`native.host.islands` assigns a package or path to a runtime, and a registered host export runs wherever the modules it imports run. When one export imports modules assigned to two different runtimes there is no process that can run it. Split the export so that each part imports one island, or move both modules to the same runtime.
+
+### KR7232
+
+**An islands entry matches no host code**
+
+An entry of `native.host.islands` names a package or path that no registered host export imports, so it changes nothing. Package names must match the import specifier's package (`sharp`, `@scope/name`); paths are relative to the project root and may use `*` and `**`.
+
+### KR7233
+
+**Host runtime not found or wrong version**
+
+A host child needs its runtime (Node, Bun or Deno): on PATH for development, or to build the executable that ships with the app. The runtime was not found, or its version does not match `native.host.version`. Install it, point `KRATE_NODE`, `KRATE_BUN` or `KRATE_DENO` at a binary, or change the pinned version. Release builds require `native.host.bundle` to be true.
+
+### KR7234
+
+**Compiling the host child failed**
+
+A release build turns each host child into a self-contained executable: a Node single executable application, `bun build --compile`, or `deno compile`. The tool failed; its output is in the message. Cross-compiling needs the target's runtime, which the tool downloads or you provide with `KRATE_NODE_<OS>_<ARCH>`.
+
+### KR7235
+
+**scriptc cannot compile this host code**
+
+With `native.host.runtime` set to `"scriptc"` the host code is compiled to a native executable that has no JavaScript engine, so code scriptc rejects fails the build; there is no fallback to an interpreter. The message carries scriptc's own diagnostic code (SC####) and hint. Rewrite the code as the hint suggests, move it to a Go host function, or run it on QuickJS or Node. `krate native check --scriptc` reports these without building.
+
+### KR7236
+
+**scriptc or its toolchain is missing**
+
+scriptc is not on PATH, or the linker it needs to build an executable is missing: clang on macOS and glibc Linux, zig on Windows and musl Linux and for cross-compiling. Install scriptc (`npm install -g scriptc`, Node 24 or later) and the linker, or use another host runtime.
+
+### KR7237
+
+**scriptc rejects the Krate host child runtime**
+
+The host code compiled, but scriptc rejected a line of the Krate host child runtime (packages/native/hostchild) that serves the call protocol. This is a limitation of the installed scriptc version, not of your code. Update scriptc, or use another host runtime.
+
 ## KR8xxx: islands, compiled packages and general React compatibility
 
 ### KR8001
