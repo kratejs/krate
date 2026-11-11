@@ -542,41 +542,41 @@ A native app has no HTTP server, so routes under `src/api` have nothing to serve
 
 `"use server"` actions are POSTed to a server. A native app has no server; call an `@host` function (or a Go function) from the UI instead.
 
-### KR7180
+### KR7190
 
-**Go function signature cannot be a host call**
+**Host function parameter cannot cross the boundary**
 
-A UI file imports an exported Go function and calls it as an async function. The bridge supports an optional first parameter `ctx krate.Ctx`, then the arguments, and one of these result shapes: nothing, `error`, `T`, `(T, error)`, `<-chan T` or `(<-chan T, error)`. A channel result makes the call a stream. Variadic functions, generic functions, a first parameter of `context.Context` (use `krate.Ctx`), `krate.Ctx` anywhere but first, send-only channels, and more than one non-error result are rejected. Change the signature, or wrap the function in one that has a supported shape.
+Arguments and results of a host function travel between the webview and the native process as data: strings, numbers, booleans, null, arrays, plain objects, Date, Map, Set and bytes. A parameter typed as a function, as a class you declared, or as a DOM type (`HTMLElement`, `Node`, `Event` and friends) can never be sent, so the call would fail at run time. Pass the plain data you need from it instead, for example the element's `value` or an id. The check only reads explicit parameter annotations and stays silent when it is not sure.
 
-### KR7181
+### KR7191
 
-**Go type has no wire mapping**
+**Inline host function cannot be split out**
 
-Values cross the host boundary through generated encoders without reflection, so every parameter, result and field type must map to a wire type. Supported: bool, string, all int, uint and float kinds, `time.Time` (a `Date`), `[]byte` (a `Uint8Array`), structs, slices and arrays, `map[string]T` (also string-kinded named keys), pointers (`T | null`) and named types of these. Rejected: `any` and other interfaces, channels and funcs inside values, complex numbers, `uintptr`, unsafe pointers, maps with non-string keys, embedded pointers, and unexported named types (the generated glue lives in another package and cannot name them). The message gives the path to the offending parameter or field. Replace the type with a concrete one.
+An `@host` function inside a UI module is moved into the host bundle and replaced by a stub in the UI. That needs a name to register and call it by, so an anonymous default export cannot be split. Give the function a name, or move it to a `.host.ts` module.
 
-### KR7182
+### KR7192
 
-**Go package could not be loaded**
+**Host code failed to bundle**
 
-The compiler type-checks the Go package behind a `.go` import with the Go toolchain (`go list -export`) and the standard `go/types` package. It failed: the `go` command is missing, the project has no `go.mod`, the package has compile errors, or it is `package main`. Fix the error shown, and check that `go build ./...` works in the project.
+The host entry and the host modules it imports are bundled into one ES2020 script for the embedded host runtime. The bundler reported an error, usually an import that cannot be resolved, a syntax error, or syntax the bundle cannot express (top-level await in a script bundle).
 
-### KR7183
+### KR7193
 
-**Import from a .go file is not host code**
+**Host code uses an API the embedded runtime lacks**
 
-In a native build a UI import from a `.go` file must name either a Go component (a function in a `*.server.go` / `*.runtime.go` file or marked `//krate:component`) or exported host code: a function with a supported signature, or a package-level variable created with `krate.NewSignal`. Types, constants, other variables, methods and unexported or missing names cannot be imported. Export a function that returns the value instead.
+Host code runs on an embedded JavaScript runtime (QuickJS) by default. It has the ECMAScript built-ins and a small set of web APIs, but no Node built-in modules and no DOM. The build found a reference to an API the runtime does not provide, so the call would throw. Implement the work as a Go host function, or run the module on a full runtime with `native.host.islands`. A reference inside a feature check such as `typeof X !== "undefined"` is not reported.
 
-### KR7184
+### KR7195
 
-**Go type has a custom marshaler**
+**Import is not exported by the host module**
 
-A type with `MarshalJSON`, `UnmarshalJSON`, `MarshalText` or `UnmarshalText` encodes itself in a way the generated encoders cannot know, and they do not call encoding/json. Types such as `big.Int`, `netip.Addr` or `uuid.UUID` fall in this group. Convert the value to a plain type (a string, a number or a struct) in the exported function.
+UI code imports a name from a host module, but the module has no such export (or the export is marked for another tier). The stub that replaces the host module in the UI bundle only has the module's real exports, so the import would be undefined at run time.
 
-### KR7185
+### KR7196
 
-**Go import has no valid module id or output location**
+**Host export is not callable from the UI**
 
-Each `.go` file imported by the UI gets a module id: its path relative to the project root without the extension (`src/lib/tasks.go` becomes `src/lib/tasks`), and host calls are named `<module id>.<Name>`. The file must exist inside the project, be a non-test `.go` file, and belong to the project's Go module, and the generated output directory must be inside that module so the glue can import the package.
+The UI can call host functions and read host signals. An export that is a plain value (a number, string, object or class) has no meaning across the boundary because the UI would get a copy that never changes. Export a function that returns the value, or a `hostSignal()` for a value that changes.
 
 ## KR8xxx: islands, compiled packages and general React compatibility
 

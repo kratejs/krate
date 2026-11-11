@@ -32,6 +32,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/irtree"
 	jscompat "github.com/kratejs/krate/packages/compiler/internal/jsruntime"
 	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
+	"github.com/kratejs/krate/packages/compiler/internal/native/hostts"
 	"github.com/kratejs/krate/packages/compiler/internal/plugin"
 	"github.com/kratejs/krate/packages/compiler/internal/reactive"
 	"github.com/kratejs/krate/packages/compiler/internal/renderer"
@@ -182,6 +183,10 @@ type Builder struct {
 	// NativeTarget marks a native (desktop) build, where host code is allowed.
 	// A web build rejects every host marker (KR7173).
 	NativeTarget bool
+	// nativeHost is the host code split of a native build (see
+	// prepareNativeHost); its overlays replace host modules and inline host
+	// functions in every UI bundle.
+	nativeHost *hostts.Result
 
 	// fontPreloadHTML holds the `<link rel="preload">` tags for fonts declared
 	// in the global stylesheet; injected into every page head.
@@ -849,6 +854,9 @@ func (b *Builder) BuildAll() error {
 		return err
 	}
 	if err := b.checkHostMarkers(); err != nil {
+		return err
+	}
+	if err := b.prepareNativeHost(); err != nil {
 		return err
 	}
 	if err := os.RemoveAll(b.Cfg.OutDir); err != nil {
@@ -2149,6 +2157,9 @@ func (b *Builder) newBundler() *bundler.Bundler {
 		bnd.SetActionBasePath(b.Cfg.BaseURLPath())
 	}
 	bnd.SetModuleCache(b.moduleCache)
+	if b.nativeHost != nil {
+		bnd.SetSourceOverlays(b.nativeHost.Overlays)
+	}
 	bnd.SetDevMode(b.DevMode)
 	bnd.SetTailwindImports(b.tailwindImportMode())
 	bnd.SetMarkdownConfig(b.Cfg.Markdown)
