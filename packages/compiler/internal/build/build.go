@@ -327,7 +327,13 @@ func (b *Builder) shouldMinifyJS() bool {
 // them, they stay off (a cross-document transition aborts the WebKitGTK web
 // process in software-rendered setups).
 func (b *Builder) viewTransitionsOff() bool {
-	return b.Cfg.ViewTransitions == "off" || (b.NativeTarget && b.Cfg.ViewTransitions == "")
+	if b.NativeTarget {
+		// The top-level setting is for the web build: a site that opts in
+		// there (the docs site does) would hang its desktop app. Only
+		// native.viewTransitions turns them on.
+		return b.Cfg.Native == nil || b.Cfg.Native.ViewTransitions != "auto"
+	}
+	return b.Cfg.ViewTransitions == "off"
 }
 
 var nativeCfgScriptRe = regexp.MustCompile(`<script>window\.__KRATE_CFG__=[^<]*;</script>\n?`)

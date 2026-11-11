@@ -800,8 +800,14 @@ func TestNativeTargetDisablesViewTransitionsByDefault(t *testing.T) {
 	if strings.Contains(head, "@view-transition") || !strings.Contains(head, `"viewTransitions":false`) {
 		t.Errorf("a native build must not emit cross-document view transitions: %s", head)
 	}
+	// The top-level setting belongs to the web build: the docs site sets it
+	// and its desktop app must still work.
 	b.Cfg.ViewTransitions = "auto"
+	if head := b.runtimeCommonHead(); strings.Contains(head, "@view-transition") {
+		t.Errorf("a top-level viewTransitions: \"auto\" must not reach a native build: %s", head)
+	}
+	b.Cfg.Native.ViewTransitions = "auto"
 	if head := b.runtimeCommonHead(); !strings.Contains(head, "@view-transition") {
-		t.Errorf("an explicit viewTransitions: \"auto\" must still be honored: %s", head)
+		t.Errorf("native.viewTransitions: \"auto\" must be honored: %s", head)
 	}
 }

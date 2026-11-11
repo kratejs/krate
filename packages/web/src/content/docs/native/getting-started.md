@@ -179,9 +179,10 @@ fallback, only the listed parameters.
 
 Use `<Link>` for navigation inside the app: it is a soft navigation that keeps
 the window and the host connections, as on the web. A plain `<a href>` is a full
-page load. A native build turns View Transitions off unless `krate.config.ts`
-sets `viewTransitions` itself, because a cross-document transition aborts the
-WebKitGTK web process in software-rendered setups.
+page load. A native build turns View Transitions off, whatever the top-level
+`viewTransitions` says (a site can opt in for the web and stay safe on the
+desktop), because a cross-document transition aborts the WebKitGTK web process
+in software-rendered setups. Set `native.viewTransitions: "auto"` to keep them.
 
 ## Footprint (Linux, measured)
 

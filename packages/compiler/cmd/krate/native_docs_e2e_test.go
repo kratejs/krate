@@ -4,6 +4,7 @@ package main
 
 import (
 	"bufio"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -71,6 +72,9 @@ func TestNativeDocsSiteE2E(t *testing.T) {
 		return nil
 	})
 	checkDocsPages(t, exe)
+	if os.Getenv("KRATE_NATIVE_GUI") == "1" {
+		checkDocsInWindow(t, exe)
+	}
 
 	formats := "deb,rpm,tar.gz"
 	if _, err := exec.LookPath("appimagetool"); err == nil {
@@ -108,7 +112,11 @@ func TestNativeDocsSiteE2E(t *testing.T) {
 		if err != nil || link != "../lib/krate-docs/krate-docs" {
 			t.Errorf("usr/bin/krate-docs link = %q, %v", link, err)
 		}
-		checkDocsPages(t, filepath.Join(root, "usr", "lib", "krate-docs", "krate-docs"))
+		installed := filepath.Join(root, "usr", "lib", "krate-docs", "krate-docs")
+		checkDocsPages(t, installed)
+		if os.Getenv("KRATE_NATIVE_GUI") == "1" {
+			checkDocsInWindow(t, installed)
+		}
 	} else {
 		t.Log("dpkg-deb not found: .deb contents not checked")
 	}
@@ -136,6 +144,9 @@ func TestNativeDocsSiteE2E(t *testing.T) {
 		ai := filepath.Join(pkgs, "krate-docs-0.1.0-linux-amd64.AppImage")
 		size(filepath.Base(ai))
 		checkDocsPages(t, ai, "--appimage-extract-and-run")
+		if os.Getenv("KRATE_NATIVE_GUI") == "1" {
+			checkDocsInWindow(t, ai, "--appimage-extract-and-run")
+		}
 	} else {
 		t.Log("appimagetool or file not found: AppImage not built")
 	}
@@ -206,4 +217,81 @@ func checkDocsPages(t *testing.T, exe string, pre ...string) {
 		}
 	}
 	t.Logf("%s: %d pages served; cold start to the URL %s", filepath.Base(exe), len(pages), cold.Round(time.Millisecond))
+}
+
+// checkDocsInWindow opens the app in a real window (--dev, driven over stdin)
+// and navigates it across several pages. A page that never comes back means
+// the web process hung, as it did when the site's own viewTransitions setting
+// reached the native build. It needs a display and WebKitGTK
+// (KRATE_NATIVE_GUI=1, see the native docs for a rootless setup).
+func checkDocsInWindow(t *testing.T, exe string, pre ...string) {
+	t.Helper()
+	cmd := exec.Command(exe, append(append([]string{}, pre...), "--dev")...)
+	in, _ := cmd.StdinPipe()
+	out, _ := cmd.StdoutPipe()
+	cmd.Stderr = io.Discard
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	started := time.Now()
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("starting %s --dev: %v", exe, err)
+	}
+	defer func() {
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		_ = cmd.Wait()
+	}()
+	lines := make(chan string, 16)
+	go func() {
+		sc := bufio.NewScanner(out)
+		sc.Buffer(make([]byte, 1<<20), 1<<20)
+		for sc.Scan() {
+			lines <- sc.Text()
+		}
+		close(lines)
+	}()
+	send := func(cmdline string, wait time.Duration) (string, bool) {
+		fmt.Fprintln(in, cmdline)
+		timeout := time.After(wait)
+		for {
+			select {
+			case l, ok := <-lines:
+				if !ok {
+					return "", false
+				}
+				if strings.HasPrefix(l, "ok") || strings.HasPrefix(l, "error") {
+					return l, true
+				}
+			case <-timeout:
+				return "", false
+			}
+		}
+	}
+	var first string
+	for time.Since(started) < 90*time.Second {
+		if l, ok := send("query document.title", 20*time.Second); ok && strings.HasPrefix(l, "ok") {
+			first = l
+			break
+		}
+	}
+	if first == "" {
+		t.Fatal("the window never answered a query")
+	}
+	t.Logf("window: cold start to the first answered query %s (%s)", time.Since(started).Round(time.Millisecond), first)
+	for _, path := range []string{"/docs/", "/docs/native/memory/", "/docs/core-concepts/routing/", "/blog/", "/"} {
+		if _, ok := send(fmt.Sprintf("eval location.assign(%q)", path), 10*time.Second); !ok {
+			t.Fatalf("navigating to %s: no reply", path)
+		}
+		var got string
+		for i := 0; i < 20 && !strings.Contains(got, path); i++ {
+			time.Sleep(500 * time.Millisecond)
+			if l, ok := send("query location.pathname + ' ' + document.readyState", 8*time.Second); ok {
+				got = l
+			}
+		}
+		if !strings.Contains(got, path) || !strings.Contains(got, "complete") {
+			t.Fatalf("after navigating to %s the page answered %q: the window did not load it", path, got)
+		}
+	}
+	if l, ok := send("memory", 10*time.Second); ok {
+		t.Logf("window memory: %.300s", l)
+	}
 }

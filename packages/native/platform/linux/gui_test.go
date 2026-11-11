@@ -520,3 +520,41 @@ func TestGUIRequestAbort(t *testing.T) {
 		t.Fatal("handler context was not cancelled after the page aborted the fetch")
 	}
 }
+
+// TestGUIRequestBodyStress posts many request bodies at once. WebKit's body
+// stream shares its FormData with the request on the UI side, and that object
+// is not thread safe, so the stream must only be touched on the main thread;
+// done elsewhere, this crashed the process every few hundred requests.
+func TestGUIRequestBodyStress(t *testing.T) {
+	needGUI(t)
+	loaded := make(chan struct{}, 8)
+	w, err := guiApp.NewWindowNotify(WindowOptions{Title: "stress", Width: 400, Height: 300, Resizable: true, Path: "/blank?stress"}, func() { loaded <- struct{}{} })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	<-loaded
+	w.Eval(`(async () => {
+  const sizes = [0, 1, 17, 4096, 20000, 65536, 300000];
+  let bad = 0;
+  for (let round = 0; round < 6; round++) {
+    await Promise.all(Array.from({length: 80}, async (_, i) => {
+      const n = sizes[(i + round) % sizes.length];
+      const data = new Uint8Array(n);
+      for (let j = 0; j < n; j++) data[j] = (j * 7 + i) & 255;
+      const r = await fetch("/echo", {method: "POST", body: data});
+      const back = new Uint8Array(await r.arrayBuffer());
+      if (back.length !== n) { bad++; return; }
+      for (let j = 0; j < n; j += 997) if (back[j] !== data[j]) { bad++; return; }
+    }));
+  }
+  fetch("/mark?name=" + (bad ? "stress-bad-" + bad : "stress-ok"));
+})()`)
+	guiSrv.waitMark(t, "stress-ok")
+	if bodyOps.Load() == 0 {
+		t.Error("no request body stream was read")
+	}
+	if n := bodyOffMain.Load(); n != 0 {
+		t.Errorf("%d request body stream operations ran off the main thread", n)
+	}
+}

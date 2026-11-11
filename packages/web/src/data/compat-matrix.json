@@ -976,7 +976,11 @@
         "TestLeanWillChangeEverywhere",
         "TestLeanLongLists",
         "TestMemoryBrowserMode",
-        "TestGUIZMemoryPanel"
+        "TestGUIZMemoryPanel",
+        "TestNativeBuildWritesNoPrecompressedAssets",
+        "TestNativeTargetDisablesViewTransitionsByDefault",
+        "TestNativeDocsSiteE2E",
+        "TestGUIRequestBodyStress"
       ],
       "knownLimits": [
         "The checks are static: sizes set from CSS classes, values chosen at run time and data fetched later are not seen. The web font check is a heuristic.",

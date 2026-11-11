@@ -61,6 +61,8 @@ type WindowOptions struct {
 
 // App is the WebKitGTK application.
 type App struct {
+	// popup is the context menu on screen, 0 if none (main thread).
+	popup   uintptr
 	api     *api
 	x       *ext
 	handler http.Handler

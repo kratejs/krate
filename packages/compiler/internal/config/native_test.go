@@ -137,6 +137,8 @@ func TestValidateNative(t *testing.T) {
 		{"scriptc opted in", func(n *NativeConfig) { n.Host.Runtime = "scriptc"; n.Experimental.Scriptc = true }, ""},
 		{"island runtime", func(n *NativeConfig) { n.Host.Islands = map[string]string{"sharp": "scriptc"} }, "host.islands"},
 		{"island ok", func(n *NativeConfig) { n.Host.Islands = map[string]string{"sharp": "quickjs"} }, ""},
+		{"viewTransitions", func(n *NativeConfig) { n.ViewTransitions = "on" }, "viewTransitions"},
+		{"viewTransitions auto", func(n *NativeConfig) { n.ViewTransitions = "auto" }, ""},
 		{"compile", func(n *NativeConfig) { n.Release.Compile = "sometimes" }, "release.compile"},
 		{"installer", func(n *NativeConfig) { n.Bundle.Windows.Installer = "exe" }, "installer"},
 		{"linux format", func(n *NativeConfig) { n.Bundle.Linux.Formats = []string{"snap"} }, "format"},

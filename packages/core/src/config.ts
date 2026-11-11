@@ -429,6 +429,12 @@ export interface NativeConfig {
     webrtc?: boolean;
     spellcheck?: boolean;
   };
+  /**
+   * "auto" keeps View Transitions in a native build. Default off, whatever the
+   * top-level viewTransitions says: a cross-document transition aborts the
+   * WebKitGTK web process in software-rendered setups.
+   */
+  viewTransitions?: "auto";
   /** Thresholds for the lean-page checks of `krate native check` (KR7270 to KR7275). */
   lean?: {
     /** KiB above which an inlined data: URL is reported. Default 16. */

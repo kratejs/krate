@@ -589,7 +589,7 @@ Known limits:
 - WebKit has no JS heap size API, so the Memory panel shows the heap as unavailable on Linux and macOS and points at the web process row.
 - macOS and Windows: the panel and the checks are platform independent, but only the Linux webview has run them.
 
-Evidence: `TestNativePagesLoadOnlyWhatTheyUse`, `TestLeanOversizedImage`, `TestLeanDataURIThreshold`, `TestLeanWebFonts`, `TestLeanCompositing`, `TestLeanWillChangeEverywhere`, `TestLeanLongLists`, `TestMemoryBrowserMode`, `TestGUIZMemoryPanel`
+Evidence: `TestNativePagesLoadOnlyWhatTheyUse`, `TestLeanOversizedImage`, `TestLeanDataURIThreshold`, `TestLeanWebFonts`, `TestLeanCompositing`, `TestLeanWillChangeEverywhere`, `TestLeanLongLists`, `TestMemoryBrowserMode`, `TestGUIZMemoryPanel`, `TestNativeBuildWritesNoPrecompressedAssets`, `TestNativeTargetDisablesViewTransitionsByDefault`, `TestNativeDocsSiteE2E`, `TestGUIRequestBodyStress`
 
 ### Native: SDK dialogs, clipboard and menus
 
