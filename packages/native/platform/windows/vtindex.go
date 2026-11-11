@@ -49,4 +49,11 @@ var (
 	navArgsPutCancel             = vtIndex("ICoreWebView2NavigationStartingEventArgs", "put_Cancel")
 	streamReadSlot               = vtIndex("IStream", "Read")
 	handlerInvoke                = vtIndex("ICoreWebView2WebResourceRequestedEventHandler", "Invoke")
+
+	// Memory tuning (see memory.go).
+	wvAddPermissionRequested  = vtIndex("ICoreWebView2", "add_PermissionRequested")
+	permArgsGetPermissionKind = vtIndex("ICoreWebView2PermissionRequestedEventArgs", "get_PermissionKind")
+	permArgsPutState          = vtIndex("ICoreWebView2PermissionRequestedEventArgs", "put_State")
+	wv19PutMemoryTargetLevel  = vtIndex("ICoreWebView2_19", "put_MemoryUsageTargetLevel")
+	optGetArguments           = vtIndex("ICoreWebView2EnvironmentOptions", "get_AdditionalBrowserArguments")
 )

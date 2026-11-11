@@ -38,6 +38,13 @@ type Manifest struct {
 	// serving its own ids. See README.md.
 	HostChildren []HostChildSpec `json:"hostchildren,omitempty"`
 
+	// Memory is native.memory ("balanced", "minimal" or "performance") and
+	// Features is native.features (media, webaudio, webgl, webrtc,
+	// spellcheck), both emitted by the compiler. Read here for the macOS
+	// and Windows memory levers.
+	Memory   string          `json:"memory,omitempty"`
+	Features map[string]bool `json:"features,omitempty"`
+
 	// Permissions lists what the UI may use of the SDK (see package
 	// sdk/permission). Empty means the default set (os:info, kv, db, window,
 	// app, menu, dialog, notify, clipboard). Unknown names fail at load.

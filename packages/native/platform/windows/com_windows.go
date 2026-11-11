@@ -27,6 +27,7 @@ type comObj struct {
 
 	invoke func(a, b uintptr) uintptr // completion and event handlers
 	stream *goStream                  // IStream objects
+	opts   *envOptions                // ICoreWebView2EnvironmentOptions objects
 	app    *App
 }
 

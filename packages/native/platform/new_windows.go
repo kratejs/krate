@@ -9,10 +9,13 @@ import (
 // New creates the Windows application (Win32 + WebView2). It must be called
 // on the main goroutine.
 func New(opts Options) (App, error) {
+	mem, feat := MemorySettings()
 	a, err := winplat.New(winplat.Config{
-		AppID:   opts.AppID,
-		Handler: opts.Handler,
-		Debug:   opts.Debug,
+		AppID:    opts.AppID,
+		Handler:  opts.Handler,
+		Debug:    opts.Debug,
+		Memory:   mem,
+		Features: feat,
 	})
 	if err != nil {
 		return nil, err

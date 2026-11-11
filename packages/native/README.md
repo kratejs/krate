@@ -17,6 +17,7 @@ The Go module behind Krate's desktop target.
 | `platform/probe` | The result type of that webview probe, shared by the per-OS platform packages |
 
 Size, start-up and memory budgets are in `budgets.json`; see `BUDGETS.md`.
+The macOS (WKWebView) and Windows (WebView2) memory levers are untested until CI reports; see the "macOS and Windows" section of the Memory docs page.
 
 The module never uses cgo. It cross-compiles from any OS with
 `CGO_ENABLED=0`.

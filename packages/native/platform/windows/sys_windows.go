@@ -20,6 +20,7 @@ const (
 	eNoInterface = 0x80004002
 	eNotImpl     = 0x80004001
 	eFail        = 0x80004005
+	eOutOfMemory = 0x8007000E
 	eInvalidArg  = 0x80070057
 	// STG_E_INVALIDFUNCTION, returned by Seek on a non-seekable stream.
 	stgEInvalidFunction = 0x80030001
@@ -190,6 +191,7 @@ var (
 	pGetCurrentThreadID = kernel32.NewProc("GetCurrentThreadId")
 
 	pCoInitializeEx = ole32.NewProc("CoInitializeEx")
+	pCoTaskMemAlloc = ole32.NewProc("CoTaskMemAlloc")
 
 	pSHCreateMemStream = shlwapi.NewProc("SHCreateMemStream")
 

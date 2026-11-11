@@ -383,6 +383,7 @@ func (w *windows) all() []platform.Window {
 
 func (a *app) runNative() error {
 	man := a.man
+	platform.SetMemory(man.Memory, man.Features)
 	platApp, err := platform.New(platform.Options{
 		AppID:   man.AppID,
 		Handler: a.handler,

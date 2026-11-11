@@ -79,6 +79,8 @@ func (a *App) newWindow(o WindowOptions) (*Window, error) {
 			cls("NSNumber").Send(sel("numberWithBool:"), true), nsString("developerExtrasEnabled"))
 	}
 
+	a.applyMemoryConfig(config)
+
 	web := cls("WKWebView").Send(sel("alloc")).Send(sel("initWithFrame:configuration:"), nsRect{}, config)
 	if web == 0 {
 		return nil, errors.New("darwin: WKWebView creation failed")
@@ -110,6 +112,7 @@ func (a *App) newWindow(o WindowOptions) (*Window, error) {
 
 	w.load(o.Path)
 	win.Send(sel("makeKeyAndOrderFront:"), objc.ID(0))
+	a.startMemoryPurge()
 	return w, nil
 }
 

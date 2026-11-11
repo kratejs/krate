@@ -30,6 +30,12 @@ type Options struct {
 	Debug   bool
 	// KeepAlive stops the app from quitting when its last window closes.
 	KeepAlive bool
+	// Memory is the app.json "memory" profile ("balanced" when empty).
+	// UNTESTED on macOS, see memory.go.
+	Memory string
+	// Features is app.json "features"; nil means not detected, so no
+	// feature is switched off.
+	Features map[string]bool
 }
 
 // WindowOptions configures one window; it mirrors platform.WindowOptions.
@@ -54,8 +60,10 @@ type App struct {
 	navDelegate   objc.ID
 	processPool   objc.ID
 
-	ready   atomic.Bool
-	onReady func()
+	ready atomic.Bool
+	// purgeStarted is true while the memory cache purge chain runs.
+	purgeStarted atomic.Bool
+	onReady      func()
 
 	// Touched only on the main thread.
 	windows map[objc.ID]*Window
