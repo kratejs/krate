@@ -235,3 +235,15 @@ func (h *Host) Subscribers(topic string) int {
 
 // SupportsForTest answers the same question as app.Supports for the host.
 func (h *Host) SupportsForTest(capability string) bool { return h.supports(capability) }
+
+// WindowRef returns the platform reference of the window with this SDK id
+// ("" = main), or 0. For tests.
+func (h *Host) WindowRef(id string) caps.WindowRef {
+	h.mu.Lock()
+	env := h.env
+	h.mu.Unlock()
+	if env == nil {
+		return 0
+	}
+	return env.Windows.Ref(id)
+}

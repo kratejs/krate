@@ -326,3 +326,14 @@ func (a *App) ActivateMenuItem(ref caps.WindowRef, id string) bool {
 func init() {
 	cbMenuActivate = purego.NewCallback(menuActivateCallback)
 }
+
+// ActivateMenuItem activates the first menu item with this id on any window
+// of a platform.App made by this package (as a click would). For tests; it
+// reports false for other Apps or an unknown id.
+func ActivateMenuItem(app any, id string) bool {
+	a := appOf(app)
+	if a == nil {
+		return false
+	}
+	return a.ActivateMenuItem(0, id)
+}

@@ -175,3 +175,35 @@ func winStateCallback(widget, event, id uintptr) uintptr {
 	}
 	return 0
 }
+
+// appOf extracts the *App from a platform.App built by package platform
+// (which wraps it) or from an *App itself.
+func appOf(app any) *App {
+	switch v := app.(type) {
+	case *App:
+		return v
+	case interface{ Unwrap() *App }:
+		return v.Unwrap()
+	}
+	return nil
+}
+
+// RequestClose delivers a window-manager style close request to a window (by
+// platform reference) as the title bar button would. It reports whether the
+// window was found. For tests.
+func RequestClose(app any, ref caps.WindowRef) bool {
+	a := appOf(app)
+	if a == nil {
+		return false
+	}
+	w := a.windowByID(uintptr(ref))
+	if w == nil {
+		return false
+	}
+	a.callMain(func() {
+		if deleteCallback(w.win, 0, w.id) == 0 {
+			a.api.gtkWidgetDestroy(w.win)
+		}
+	})
+	return true
+}
