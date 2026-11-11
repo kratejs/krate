@@ -28,5 +28,12 @@ const ParentEnv = "KRATE_GOHOST_PARENT"
 // SocketEnv names the environment variable that carries the socket path.
 const SocketEnv = "KRATE_GOHOST_SOCKET"
 
+// ListPath is a request path the JavaScript host children (package hostchild)
+// serve in addition to the scheme handler's: a JSON object with the funcs,
+// streams and signals arrays of the ids they registered. The shell merges it
+// with the lists in app.json, which matters for exports whose kind is only
+// known when the code runs.
+const ListPath = "/__krate/hostchild/list"
+
 // ReadyLine is what the child writes to stdout once it is listening.
 const ReadyLine = "ready"
