@@ -182,3 +182,88 @@ func TestNativeBuildFailures(t *testing.T) {
 		t.Error("a failed build wrote app.json")
 	}
 }
+
+func TestNativeFlagsRelease(t *testing.T) {
+	flags, rest, err := parseFlagsChecked([]string{"native", "build", ".", "--release", "--target", "windows/amd64,darwin/arm64", "--target=linux/arm64"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !flags.Release || strings.Join(flags.Targets, " ") != "windows/amd64 darwin/arm64 linux/arm64" || strings.Join(rest, " ") != "native build ." {
+		t.Errorf("flags = %+v rest = %v", flags, rest)
+	}
+}
+
+func TestNativeCheckPrintsCapabilities(t *testing.T) {
+	root := nativeProject(t, map[string]string{
+		"krate.config.json": `{"native":{"appId":"com.acme.app"}}`,
+		"src/pages/index.tsx": `import { readText } from "@krate/app/fs";
+import { set } from "@krate/app/tray";
+void readText; void set;
+` + nativePage,
+	})
+	code, out := runKrate(t, "native", "check", root)
+	if code != 0 {
+		t.Fatalf("exit %d:\n%s", code, out)
+	}
+	for _, want := range []string{"capabilities", "permissions: 2 (derived from the code)", "fs:read", "tray", "src/pages/index.tsx:1", "sdk areas linked: os, permission, fs, menu, tray", "left out of release builds:"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
+	}
+
+	// A permission the allowlist lacks fails the check with KR7210.
+	bad := nativeProject(t, map[string]string{
+		"krate.config.json": `{"native":{"appId":"com.acme.app","permissions":["kv"]}}`,
+		"src/pages/index.tsx": `import { set } from "@krate/app/tray";
+void set;
+` + nativePage,
+	})
+	code, out = runKrate(t, "native", "check", bad)
+	if code != 1 || !strings.Contains(out, "KR7210") || !strings.Contains(out, "src/pages/index.tsx:1") || !strings.Contains(out, `"tray"`) {
+		t.Errorf("allowlist violation: exit %d:\n%s", code, out)
+	}
+}
+
+func TestCheckPrintsNativeCapabilities(t *testing.T) {
+	root := nativeProject(t, map[string]string{
+		"krate.config.json": `{"native":{"appId":"com.acme.app"}}`,
+		"src/pages/index.tsx": `import { writeText } from "@krate/app/clipboard";
+void writeText;
+` + nativePage,
+		"node_modules/@krate/app/package.json": `{"name":"@krate/app","type":"module","exports":{"./clipboard":"./clipboard.js"}}`,
+		"node_modules/@krate/app/clipboard.js": "export const writeText = () => {};\n",
+	})
+	code, out := runKrate(t, "check", root)
+	if code != 0 || !strings.Contains(out, "Native capabilities") || !strings.Contains(out, "clipboard") {
+		t.Fatalf("exit %d:\n%s", code, out)
+	}
+	web := nativeProject(t, map[string]string{"src/pages/index.tsx": nativePage})
+	if _, out := runKrate(t, "check", web); strings.Contains(out, "Native capabilities") {
+		t.Errorf("a project without a native block must not print the section:\n%s", out)
+	}
+}
+
+func TestNativeBuildDerivesPermissions(t *testing.T) {
+	root := nativeProject(t, map[string]string{
+		"krate.config.json": `{"native":{"appId":"com.acme.app"}}`,
+		"src/pages/index.tsx": `import { writeText } from "@krate/app/clipboard";
+void writeText;
+` + nativePage,
+		"node_modules/@krate/app/package.json": `{"name":"@krate/app","type":"module","exports":{"./clipboard":"./clipboard.js"}}`,
+		"node_modules/@krate/app/clipboard.js": "export const writeText = () => {};\n",
+	})
+	code, out := runKrate(t, "native", "build", root)
+	if code != 0 {
+		t.Fatalf("exit %d:\n%s", code, out)
+	}
+	if !strings.Contains(out, "permissions  clipboard") {
+		t.Errorf("output lacks the derived permissions:\n%s", out)
+	}
+	data, err := os.ReadFile(filepath.Join(root, "dist-native", "app", "app.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"clipboard"`) || !strings.Contains(string(data), `"strictPermissions": true`) {
+		t.Errorf("app.json:\n%s", data)
+	}
+}

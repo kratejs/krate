@@ -1,8 +1,10 @@
 package shell
 
 import (
+	"archive/zip"
 	"bytes"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/cookiejar"
 	"strings"
@@ -32,6 +34,15 @@ func embeddedFS(withHost bool) fstest.MapFS {
 
 func runEmbeddedBrowser(t *testing.T, fsys fstest.MapFS, glue func(*scheme.Registry)) (*Control, *http.Client) {
 	t.Helper()
+	return runEmbeddedBrowserFS(t, fsys, glue)
+}
+
+func runEmbeddedBrowserFS(t *testing.T, fsys fs.FS, glue ...func(*scheme.Registry)) (*Control, *http.Client) {
+	t.Helper()
+	var g func(*scheme.Registry)
+	if len(glue) > 0 {
+		g = glue[0]
+	}
 	var out bytes.Buffer
 	var omu sync.Mutex
 	ready := make(chan *Control, 1)
@@ -41,7 +52,7 @@ func runEmbeddedBrowser(t *testing.T, fsys fstest.MapFS, glue func(*scheme.Regis
 			Browser: true,
 			Out:     lockedBuf{&omu, &out},
 			Logf:    t.Logf,
-			GoGlue:  glue,
+			GoGlue:  g,
 			OnReady: func(c *Control) { ready <- c },
 		})
 	}()
@@ -149,5 +160,32 @@ func TestInjectIntoHead(t *testing.T) {
 		if got := string(injectIntoHead([]byte(in))); got != want {
 			t.Errorf("injectIntoHead(%q) = %q", in, got)
 		}
+	}
+}
+
+func TestZipFSServesDynamicRouteNames(t *testing.T) {
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for name, body := range map[string]string{
+		"app.json":                   `{"appId":"dev.krate.zip","fallbacks":[{"pattern":"/tasks/[id]","file":"tasks/[id]/index.html"}],"permissions":["kv"],"strictPermissions":true}`,
+		"dist/index.html":            "<!doctype html><head></head>home",
+		"dist/tasks/[id]/index.html": "<!doctype html><head></head>task page",
+	} {
+		w, _ := zw.Create(name)
+		w.Write([]byte(body))
+	}
+	zw.Close()
+	fsys, err := ZipFS(buf.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ZipFS([]byte("not a zip")); err == nil {
+		t.Fatal("a damaged archive must fail")
+	}
+	// The zip stands in for the embedded app directory.
+	ctl, c := runEmbeddedBrowserFS(t, fsys)
+	base := strings.TrimSuffix(strings.SplitN(ctl.URL(), "?", 2)[0], "/")
+	if _, body := get(t, c, base+"/tasks/7", nil); !strings.Contains(body, "task page") {
+		t.Fatalf("dynamic fallback from the archive: %q", body)
 	}
 }

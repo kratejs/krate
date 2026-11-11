@@ -30,7 +30,7 @@ client, imported by the generated stubs) and `@krate/runtime`.
 ## Build
 
 ```sh
-krate native build [dir] [--out dist-native] [--target linux/arm64] [--shell <path>]
+krate native build [dir] [--out dist-native] [--target linux/arm64] [--shell <path>] [--release]
 ```
 
 `krate native build` produces an **app directory**, `dist-native/app/`, that the
@@ -47,12 +47,14 @@ The build
 2. splits host code from the UI: TypeScript host code becomes `host/host.js`, Go
    host code gets generated glue and becomes `gohost/krate-gohost`;
 3. prerenders every route into `dist/`;
-4. writes [`app.json`](/docs/native/app-json/).
+4. works out the SDK permissions the code needs ([derived permissions](/docs/native/release/#derived-permissions)) and
+   writes [`app.json`](/docs/native/app-json/) with them.
 
 | Flag | Meaning |
 |------|---------|
 | `--out <dir>` | Output directory; the app is `<dir>/app`. Default `dist-native`. |
 | `--target <os>/<arch>` | Platform of the Go host: `linux`, `darwin` (or `macos`), `windows`, with `amd64` or `arm64`. Default: this machine. A different platform builds with `CGO_ENABLED=0`. |
+| `--release` | Link one executable per `--target` instead (comma-separated or repeated): `dist-native/<os>-<arch>/<productName>`. See [Release builds](/docs/native/release/). |
 | `--shell <path>` | Copy a shell binary to `<dir>/krate-shell`. `--shell auto`, or the `KRATE_SHELL` environment variable, uses `$KRATE_SHELL` or builds `packages/native/cmd/krate-shell` when run inside the Krate repository. A shell that cannot be found is a note, not an error. |
 
 ## Pages in a native app

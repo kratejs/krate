@@ -45,6 +45,11 @@ without its permission rejects with code `permission_denied` and
 `data.permission`, like every other SDK id. Go host code is trusted and is
 never gated.
 
+A window can be given less than the app has: `native.window.permissions` for
+the main window, and the `permissions` option of `window.open` for windows opened
+at run time (a subset of the opener's, inherited when omitted). See
+[Per-window scopes](/docs/native/release/#per-window-scopes).
+
 ## From Go
 
 ```go

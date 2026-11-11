@@ -20,6 +20,10 @@ app/
   gohost/krate-gohost       Go host child executable (krate-gohost.exe on Windows)
 ```
 
+A release build embeds the same layout as a zip (`shell.RunEmbedded(fsys, opts)`,
+`shell.Main(fsys, register)`): the manifest has no `gohost` section and the Go host
+code is registered in process (`RunOptions.GoGlue`). See the release page of the docs.
+
 Release layout: the app directory sits next to the shell binary
 (`<dir of exe>/app`), or at `../Resources/app` inside a macOS `.app`
 (`Contents/MacOS/<exe>`). `krate-shell <appDir>` takes any directory.
@@ -62,6 +66,8 @@ Release layout: the app directory sits next to the shell binary
 | `gohost.binary` | The Go host child. `.exe` is appended on Windows when missing. Optional section. |
 | `gohost.funcs`, `streams`, `signals` | Ids (`<module id>.<export>`) the child registers. The shell forwards exactly these. |
 | `permissions` | Optional list of SDK permission names (`sdk/permission`: `os:info`, `kv`, `db`, `fs`, `fs:read`, `os:secrets`, `os:secrets.read`, `shell:openExternal`, `net`, `window`, `app`, `menu`, `dialog`, `notify`, `clipboard`, `clipboard:read`, `tray`, `shortcut`). It gates which `krate/*` SDK ids the page and the TypeScript host code may call; Go host code is never gated. Empty or missing means `os:info`, `kv`, `db`, `window`, `app`, `menu`, `dialog`, `notify` and `clipboard`. A non-empty list grants exactly what it names. An unknown name makes the manifest fail to load. Read once at start. |
+| `strictPermissions` | With `true`, an empty or missing `permissions` list grants nothing instead of the defaults. A derived build sets it. |
+| `window.permissions` | Optional list narrowing the SDK permissions of the main window's page to a subset of `permissions`; `[]` leaves it nothing. Windows opened with `window.Open` take the same option and inherit the opener's scope. |
 | `debug` | Enables the webview's developer tools even without `--dev`. |
 
 Every path is relative to the app directory and must stay inside it (no

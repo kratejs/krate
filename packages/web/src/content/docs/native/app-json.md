@@ -44,11 +44,12 @@ is in the directory; paths in `app.json` are relative to it.
 | Field | Meaning |
 |-------|---------|
 | `appId`, `productName`, `version` | From the `native` config block. Defaults when unset: an id derived from the product name (with a note), the project directory name, `0.1.0`. |
-| `window` | From `native.window`. `title` is the product name. `path` is the first page. |
+| `window` | From `native.window`. `title` is the product name. `path` is the first page. `permissions`, when present, narrows the SDK permissions of the main window's page ([per-window scopes](/docs/native/release/#per-window-scopes)). |
 | `assets` | The directory with the prerendered UI, served at `/`. |
 | `fallbacks` | One entry per dynamic route that accepts parameters the build did not list: the route `pattern` (`[id]`, `[...slug]`) and the shell page `file` under `assets`. The shell serves `file` for a URL that matches `pattern` and has no file of its own. |
 | `hostjs` | Present with TypeScript host code: the host bundle (one script, run in the embedded JavaScript runtime) and its source map. |
 | `gohost` | Present with Go host code: the binary, and the registry ids it serves by kind. An id is `<module id>.<export>`. |
+| `strictPermissions` | `true` in a build that derived `permissions` from the code: an empty list then means nothing instead of the defaults. |
 | `permissions` | Optional list that gates the SDK ids the UI may call: `os:info`, `kv`, `db`, `fs`, `fs:read`, `os:secrets`, `os:secrets.read`, `shell:openExternal`, `net`, `window`, `app`, `menu`, `dialog`, `notify`, `clipboard`, `clipboard:read`, `tray`, `shortcut`. Empty means `os:info`, `kv`, `db`, `window`, `app`, `menu`, `dialog`, `notify` and `clipboard`; unknown names are an error when the app loads. See [Native SDK](/docs/native/sdk/#permissions). |
 | `debug` | `false` for a build made by `krate native build`. |
 

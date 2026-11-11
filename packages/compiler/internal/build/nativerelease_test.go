@@ -3,6 +3,7 @@ package build
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"debug/pe"
 	"encoding/json"
 	"io"
@@ -827,3 +828,63 @@ func TestNativeReleaseCrossCompiles(t *testing.T) {
 
 func versionValue() string     { return version.Value }
 func setVersionValue(v string) { version.Value = v }
+
+type readySignal struct {
+	buf   bytes.Buffer
+	ready chan struct{}
+	done  bool
+}
+
+func (r *readySignal) Write(p []byte) (int, error) {
+	r.buf.Write(p)
+	if !r.done && strings.Contains(r.buf.String(), "ready\n") {
+		r.done = true
+		close(r.ready)
+	}
+	return len(p), nil
+}
+
+// krate native profile: run the executable, collect a CPU profile when it
+// exits, save it as native.pgo; the next release build passes it to go build.
+func TestNativeProfileCollectsAndFeedsPGO(t *testing.T) {
+	requireRelease(t)
+	if runtime.GOOS == "windows" {
+		t.Skip("a Windows process is stopped without writing its profile")
+	}
+	root := tsOnlyProject(t, "")
+	b := releaseBuilder(t, root, nil)
+	sig := &readySignal{ready: make(chan struct{})}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		select {
+		case <-sig.ready:
+			time.Sleep(500 * time.Millisecond) // let it serve a little
+			cancel()
+		case <-time.After(120 * time.Second):
+			cancel()
+		}
+	}()
+	res, err := b.ProfileNative(NativeProfileOptions{OutDir: filepath.Join(root, "out"), Args: []string{"--browser"}, Stdout: sig, Stderr: &testLogWriter{t: t}, Ctx: ctx})
+	if err != nil {
+		t.Fatalf("profile: %v", err)
+	}
+	if res.Path != filepath.Join(root, "native.pgo") || res.Size == 0 {
+		t.Fatalf("result = %+v", res)
+	}
+	head, _ := os.ReadFile(res.Path)
+	if len(head) < 2 || head[0] != 0x1f || head[1] != 0x8b {
+		t.Fatalf("the profile is not a gzip-compressed pprof file: % x", head[:min(len(head), 8)])
+	}
+
+	rel, err := releaseBuilder(t, root, nil).BuildNativeRelease(NativeReleaseOptions{OutDir: filepath.Join(root, "out2")})
+	if err != nil {
+		t.Fatalf("release with pgo: %v", err)
+	}
+	if rel.PGO != res.Path {
+		t.Fatalf("pgo = %q", rel.PGO)
+	}
+	if info := goTool(t, "version", "-m", rel.Binaries[0].Path); !strings.Contains(info, "-pgo=") {
+		t.Errorf("build info lacks the pgo setting:\n%s", info)
+	}
+}

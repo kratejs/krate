@@ -42,6 +42,16 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
   (`dist-native/app` with `app.json`, the prerendered UI, a TypeScript host bundle and a compiled
   Go host binary) for the Krate Native shell; dynamic routes get one shell page and a `fallbacks`
   entry. New codes `KR7200` to `KR7205`.
+- `krate native build --release [--target os/arch,...]` (preview) links one executable per
+  platform (`dist-native/<os>-<arch>/<productName>`): the platform layer, the SDK areas the app
+  reaches, Go host code registered in process, QuickJS only with TypeScript host code, and the UI in
+  an embedded archive. `native.release.compile` (`auto`, `always`, `never`) and `native.release.pgo`
+  work; `krate native profile` collects a CPU profile for `-pgo`. `krate native build` now derives
+  the app's SDK permissions from `@krate/app/<area>` imports and `krate/<area>.<op>` ids and writes
+  them to `app.json` (`strictPermissions`); `native.permissions` is an allowlist (`KR7210`), and
+  `native.window.permissions` and the `permissions` option of `window.open` scope single windows.
+  `krate native check` and `krate check` print a capability report, and `dist-native/report.json`
+  records permissions with their sites, linked SDK areas and sizes. New codes `KR7210` to `KR7214`.
 - The embedded QuickJS runtime installs each group of Web APIs the first time code reads one of
   its globals, so creating a VM costs about 1.4 ms instead of 3.2 ms. Config and
   Tailwind evaluation, `generateStaticParams`, metadata and isolation-mode API requests get
