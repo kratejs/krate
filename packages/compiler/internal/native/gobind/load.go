@@ -1,0 +1,175 @@
+package gobind
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"go/ast"
+	"go/importer"
+	"go/parser"
+	"go/scanner"
+	"go/token"
+	"go/types"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+)
+
+// listedPkg is the part of `go list -json` output that gobind reads.
+type listedPkg struct {
+	ImportPath string
+	Dir        string
+	Name       string
+	Export     string
+	GoFiles    []string
+	CgoFiles   []string
+	ImportMap  map[string]string
+	Module     *struct {
+		Path string
+		Dir  string
+	}
+	Error *struct {
+		Err string
+	}
+}
+
+// goList runs `go list -export -deps` in root for the package directories and
+// returns every listed package by import path, plus the import path each
+// directory resolved to.
+func goList(root string, dirs []string) (map[string]*listedPkg, map[string]string, string, error) {
+	goBin, err := exec.LookPath("go")
+	if err != nil {
+		return nil, nil, "", errors.New("the go command was not found on PATH; Go host code needs the Go toolchain")
+	}
+	args := []string{"list", "-e", "-export", "-deps",
+		"-json=ImportPath,Dir,Name,Export,GoFiles,CgoFiles,ImportMap,Module,Error"}
+	for _, d := range dirs {
+		rel, err := filepath.Rel(root, d)
+		if err != nil {
+			return nil, nil, "", err
+		}
+		args = append(args, "./"+filepath.ToSlash(rel))
+	}
+	cmd := exec.Command(goBin, args...)
+	cmd.Dir = root
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	runErr := cmd.Run()
+
+	pkgs := map[string]*listedPkg{}
+	byDir := map[string]string{}
+	dec := json.NewDecoder(&stdout)
+	for {
+		var p listedPkg
+		if err := dec.Decode(&p); err != nil {
+			if err != io.EOF && runErr == nil {
+				return nil, nil, "", fmt.Errorf("reading go list output: %w", err)
+			}
+			break
+		}
+		pkgs[p.ImportPath] = &p
+		byDir[filepath.Clean(p.Dir)] = p.ImportPath
+	}
+	msg := ""
+	if runErr != nil {
+		msg = strings.TrimSpace(stderr.String())
+		if msg == "" {
+			msg = runErr.Error()
+		}
+	}
+	return pkgs, byDir, msg, nil
+}
+
+// exportImporter reads compiler export data for every dependency go list
+// reported.
+type exportImporter struct {
+	inner   types.Importer
+	mapping map[string]string
+}
+
+func newExportImporter(fset *token.FileSet, pkgs map[string]*listedPkg) *exportImporter {
+	lookup := func(path string) (io.ReadCloser, error) {
+		p := pkgs[path]
+		if p == nil || p.Export == "" {
+			return nil, fmt.Errorf("no export data for %q", path)
+		}
+		return os.Open(p.Export)
+	}
+	return &exportImporter{inner: importer.ForCompiler(fset, "gc", lookup)}
+}
+
+// forPackage returns an importer that applies the package's vendor mapping.
+func (e *exportImporter) forPackage(p *listedPkg) types.Importer {
+	return mappedImporter{e: e, m: p.ImportMap}
+}
+
+type mappedImporter struct {
+	e *exportImporter
+	m map[string]string
+}
+
+func (mi mappedImporter) Import(path string) (*types.Package, error) {
+	if r, ok := mi.m[path]; ok {
+		path = r
+	}
+	return mi.e.inner.Import(path)
+}
+
+// userPkg is a Go package type-checked from source.
+type userPkg struct {
+	dir        string
+	importPath string
+	name       string
+	modPath    string
+	modDir     string
+	files      []string // absolute paths of the non-test Go files
+	pkg        *types.Package
+	asts       []*ast.File
+}
+
+// loadErr is a positioned parse or type error.
+type loadErr struct {
+	pos token.Position
+	msg string
+}
+
+// checkPackage parses and type-checks p from source.
+func checkPackage(fset *token.FileSet, imp types.Importer, p *listedPkg) (*userPkg, []loadErr) {
+	up := &userPkg{dir: p.Dir, importPath: p.ImportPath, name: p.Name}
+	if p.Module != nil {
+		up.modPath, up.modDir = p.Module.Path, p.Module.Dir
+	}
+	var errs []loadErr
+	for _, f := range p.GoFiles {
+		path := filepath.Join(p.Dir, f)
+		up.files = append(up.files, path)
+		af, err := parser.ParseFile(fset, path, nil, parser.ParseComments|parser.SkipObjectResolution)
+		if list, ok := err.(scanner.ErrorList); ok {
+			for _, e := range list {
+				errs = append(errs, loadErr{pos: e.Pos, msg: e.Msg})
+			}
+			continue
+		} else if err != nil {
+			errs = append(errs, loadErr{pos: token.Position{Filename: path}, msg: err.Error()})
+			continue
+		}
+		up.asts = append(up.asts, af)
+	}
+	if len(errs) > 0 {
+		return up, errs
+	}
+	conf := types.Config{
+		Importer: imp,
+		Error: func(err error) {
+			if te, ok := err.(types.Error); ok && !te.Soft {
+				errs = append(errs, loadErr{pos: te.Fset.Position(te.Pos), msg: te.Msg})
+			}
+		},
+	}
+	pkg, _ := conf.Check(p.ImportPath, fset, up.asts, nil)
+	up.pkg = pkg
+	return up, errs
+}
