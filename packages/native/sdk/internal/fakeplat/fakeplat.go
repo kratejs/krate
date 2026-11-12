@@ -21,6 +21,7 @@ type App struct {
 	viewFn   func(caps.ViewEvent)
 	openFn   func([]string)
 	dropFn   func(caps.FileDrop)
+	urlFn    func([]string)
 	Quit_    int
 
 	// Dialogs

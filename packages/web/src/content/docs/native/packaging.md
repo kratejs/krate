@@ -98,7 +98,8 @@ pixels works but gives soft large icons (`KR7223` is an unreadable file).
 carries the bundle id (`native.appId`), the version, `LSApplicationCategoryType`
 from `bundle.macos.category` (`productivity` or a full
 `public.app-category.*`), `NSHighResolutionCapable`, `LSMinimumSystemVersion`
-and, for `deepLinks`, `CFBundleURLTypes`.
+and, for `deepLinks`, `CFBundleURLTypes`; for `fileAssociations`, `CFBundleDocumentTypes` and `UTExportedTypeDeclarations`
+([Files](/docs/native/files/#file-associations)).
 
 **Signatures.** The Go linker signs `darwin/arm64` executables ad hoc, which is
 enough for Apple silicon to run them (checked: `LC_CODE_SIGNATURE` with the
@@ -111,11 +112,11 @@ implemented. See [Signing](/docs/native/signing/).
 The portable `.zip` holds `<Name>/<Name>.exe` and its files. The **NSIS**
 script (kept at `packages/windows-<arch>/installer.nsi`) installs to
 `Program Files`, adds Start menu and desktop shortcuts and an uninstaller,
-registers each `deepLinks` scheme under `HKCR`, and downloads Microsoft's
+registers each `deepLinks` scheme and each `fileAssociations` type under `HKCR` (the uninstaller removes them), and downloads Microsoft's
 WebView2 bootstrapper when the runtime is missing. **MSIX** needs
 `bundle.windows.publisher`, the subject of your signing certificate (`CN=Acme
 Inc`). The package is a zip with `AppxManifest.xml` (identity, logos, protocol
-extensions, `runFullTrust`), `[Content_Types].xml` and `AppxBlockMap.xml`
+and file type extensions, `runFullTrust`), `[Content_Types].xml` and `AppxBlockMap.xml`
 (SHA-256 per 64 KiB block). Files are stored uncompressed so the block map
 needs no compressed sizes.
 
@@ -141,7 +142,8 @@ The `.deb` installs a single executable to `/usr/bin/<name>`. With support
 files (the shell layout) the executable and files go to `/usr/lib/<name>/` and
 `/usr/bin/<name>` is a symlink. It also installs
 `/usr/share/applications/<appId>.desktop` (with
-`MimeType=x-scheme-handler/<scheme>` for `deepLinks`), hicolor icons and an
+`MimeType=` entries for `deepLinks` and `fileAssociations`, plus
+`/usr/share/mime/packages/<appId>.xml` for the file types), hicolor icons and an
 `md5sums` file. `Depends:` lists `libwebkit2gtk-4.1-0` and `libgtk-3-0`; the
 `.rpm` requires `webkit2gtk4.1` and `gtk3`. Check a `.deb` with
 `dpkg-deb --info` and `--contents`.

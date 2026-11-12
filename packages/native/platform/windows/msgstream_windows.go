@@ -24,6 +24,7 @@ func (v *view) setupStreams() {
 		return
 	}
 	vcall(v.webview, wvAddScriptOnDocCreated, uintptr(unsafe.Pointer(wstr(streamShim))), 0)
+	vcall(v.webview, wvAddScriptOnDocCreated, uintptr(unsafe.Pointer(wstr(dropShim))), 0)
 }
 
 // onWebMessage handles a message from the page. Main thread; args is borrowed.
@@ -33,6 +34,13 @@ func (a *App) onWebMessage(v *view, args uintptr) uintptr {
 		return sOK
 	}
 	text := comString(nargs, msgArgsTryGetString)
+	if dm, isDrop, err := parseDropMsg(text); err != nil {
+		logf("ignoring a web message: %v", err)
+		return sOK
+	} else if isDrop {
+		a.onDropMessage(v, nargs, dm)
+		return sOK
+	}
 	m, err := parseStreamMsg(text)
 	if err != nil {
 		logf("ignoring a web message: %v", err)

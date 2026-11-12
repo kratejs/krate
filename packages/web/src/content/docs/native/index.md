@@ -44,6 +44,9 @@ prerendered at build time.
   clipboard, menus, tray, shortcuts and notifications.
 - [Views and split panes](/docs/native/views/) - several webviews in one window,
   draggable dividers, per-view scopes and view-to-view messages.
+- [Files and drag and drop](/docs/native/files/) - file associations in the
+  installers, opening the files an app is launched with, and the paths of
+  dropped files.
 - [Release builds](/docs/native/release/) - one executable per platform, SDK
   shaking, derived permissions, per-window scopes and profile-guided builds.
 - [Native plugins](/docs/native/plugins/) - reusable native capabilities as a Go
@@ -91,6 +94,7 @@ modules it found.
 | `window` | 1280 x 800, `resizable: true`, `titleBar: "native"` | `titleBar` is `native`, `hidden` or `none`; `permissions` [narrows](/docs/native/release/#per-window-scopes) the main window's page; `keepAlive: true` keeps the app running with no window open, for tray apps ([background mode](/docs/native/memory/#windows-and-background-mode)) |
 | `permissions` | no restriction | An optional allowlist of [SDK permission names](/docs/native/sdk/#permissions). A build [derives](/docs/native/release/#derived-permissions) the permissions the code needs, writes them to `app.json`, and fails (KR7210) if one is not listed. Unknown names fail the config check |
 | `deepLinks` | none | URL schemes without `://` |
+| `fileAssociations` | none | File types the app opens: `ext` (without the dot), `name`, `mime`, `role` (`editor` or `viewer`), `icon`. See [Files](/docs/native/files/) |
 | `host` | `runtime: "quickjs"` | `runtime` is `quickjs`, `node`, `bun`, `deno` or `scriptc`; `scriptc` needs `experimental.scriptc: true`; `islands` maps a package to `node`, `bun`, `deno` or `quickjs` |
 | `release` | `compile: "auto"`, `pgo: "native.pgo"` | `compile` is `auto`, `always` or `never` ([release builds](/docs/native/release/#compile-modes)); `pgo` is the CPU profile `krate native profile` writes and `--release` uses |
 | `bundle` | none | `macos.category`, `windows.publisher`, `windows.installer` (`msix` or `nsis`), `linux.formats` (`deb`, `rpm`, `appimage`) |

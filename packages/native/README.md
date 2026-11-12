@@ -82,6 +82,10 @@ layout. Every request on the app scheme carries the webview it came from
 (`caps.ViewOf`), which the shell maps to a window or view scope; the page's
 `x-krate-window` header is ignored in a native window.
 
+## Files
+
+Open-file events (`sdk/app` `OnOpenFile`, `OpenedFiles`, `FilesFromArgs`) and file drops (`sdk/window` `OnFileDrop`) grant what the user opened or dropped to the `fs` scope, like a dialog pick. The platform side is two optional capabilities, `caps.OpenFiles` (macOS delegate) and `caps.FileDrops` (GTK drag signals, a `WKWebView` subclass, WebView2 additional objects). An app with `native.fileAssociations` takes the single-instance lock (`app.json` `singleInstance`). See the Files docs page.
+
 ## Plugins
 
 A plugin is a Go package plus a `krate-plugin.json`; `krate native dev` and

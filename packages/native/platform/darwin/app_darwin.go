@@ -124,6 +124,7 @@ func (a *App) setup() error {
 	if err := registerTrayClass(a); err != nil {
 		return err
 	}
+	registerFileClasses(a)
 	a.nsApp = cls("NSApplication").Send(sel("sharedApplication"))
 	a.nsApp.Send(sel("setActivationPolicy:"), nsApplicationActivationPolicyRegular)
 	a.appDelegate = cls("KrateAppDelegate").Send(sel("new"))
@@ -284,6 +285,9 @@ func registerClasses(a *App) error {
 		}},
 		{Cmd: sel("applicationSupportsSecureRestorableState:"), Fn: func(self objc.ID, _ objc.SEL, app objc.ID) bool {
 			return true
+		}},
+		{Cmd: sel("application:openURLs:"), Fn: func(self objc.ID, _ objc.SEL, app, urls objc.ID) {
+			a.openURLs(urls)
 		}},
 		{Cmd: sel("krateQuit:"), Fn: func(self objc.ID, _ objc.SEL, sender objc.ID) {
 			a.Quit()

@@ -55,6 +55,13 @@ var (
 	navArgsPutCancel             = vtIndex("ICoreWebView2NavigationStartingEventArgs", "put_Cancel")
 	handlerInvoke                = vtIndex("ICoreWebView2WebResourceRequestedEventHandler", "Invoke")
 
+	// Dropped files (see filedrop.go): the message's additional objects are
+	// ICoreWebView2File values in an ICoreWebView2ObjectCollectionView.
+	msgArgs2GetAdditionalObjects = vtIndex("ICoreWebView2WebMessageReceivedEventArgs2", "get_AdditionalObjects")
+	objViewGetCount              = vtIndex("ICoreWebView2ObjectCollectionView", "get_Count")
+	objViewGetValueAtIndex       = vtIndex("ICoreWebView2ObjectCollectionView", "GetValueAtIndex")
+	fileGetPath                  = vtIndex("ICoreWebView2File", "get_Path")
+
 	// Memory tuning (see memory.go).
 	wvAddPermissionRequested  = vtIndex("ICoreWebView2", "add_PermissionRequested")
 	permArgsGetPermissionKind = vtIndex("ICoreWebView2PermissionRequestedEventArgs", "get_PermissionKind")

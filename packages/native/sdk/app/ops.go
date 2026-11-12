@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/kratejs/krate/packages/native/krate"
+	"github.com/kratejs/krate/packages/native/platform/caps"
 	"github.com/kratejs/krate/packages/native/sdk/internal/bridge"
 	"github.com/kratejs/krate/packages/native/sdk/internal/codec"
 	"github.com/kratejs/krate/packages/native/sdk/internal/picked"
@@ -69,6 +70,16 @@ func Register(t *bridge.Table, env *bridge.Env, support func(capability string) 
 		}
 	}
 	files := registerOpenFiles(t, env, env.Topic("appopen"), picked.Notify, raise)
+
+	// macOS hands URLs of the app's schemes to the running app instead of
+	// starting it with a command line; they reach OnOpenURL like the ones a
+	// second launch carries.
+	if ou, ok := env.App.(caps.OpenURLs); ok {
+		ou.OnOpenURLs(func(urls []string) {
+			topic.Publish(func(e *wire.Encoder) { encodeSecond(e, SecondInstance{Args: urls, URLs: urls}) })
+			raise()
+		})
+	}
 
 	var mu sync.Mutex
 	var held *Instance

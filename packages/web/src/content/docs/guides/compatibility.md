@@ -88,6 +88,9 @@ green run there is what moves a cell.
 | Native: SDK notifications | Supported | Untested | Untested | Krate Native v1 |
 | Native: SDK tray and global shortcuts | Partial | Untested | Untested | Krate Native v1 |
 | Native: SDK app lifecycle | Supported | Untested | Untested | Krate Native v1 |
+| Native: file associations | Partial | Untested | Untested | Krate Native v1 |
+| Native: opening files | Supported | Untested | Untested | Krate Native v1 |
+| Native: dropped file paths | Supported | Untested | Untested | Krate Native v1 |
 | Native: release as a single executable | Supported | Untested | Untested | Krate Native v1 |
 | Native: prebuilt shell for apps without Go | Supported | Untested | Untested | Krate Native v1 |
 | Native: krate native doctor | Supported | Untested | Untested | Krate Native v1 |
@@ -686,6 +689,49 @@ Known limits:
 - macOS and Windows: untested. The same Go code is built for them (cross-compile checks in CI) and the CI native job runs go test on both, but no result of a run against a real WKWebView or WebView2 window has been confirmed.
 
 Evidence: `TestSingleInstance`, `TestStaleSocketIsReplaced`, `TestURLsFromArgs`, `TestDesktopEntry`
+
+### Native: file associations
+
+**Linux:** Partial - **macOS:** Untested - **Windows:** Untested
+
+native.fileAssociations is validated (extensions, media types, roles, icons) and packaged as macOS CFBundleDocumentTypes with exported UTIs, MSIX file type associations, NSIS ProgID and OpenWithProgids registry entries removed again on uninstall, and a Linux MimeType with a shared-mime-info file in the deb, rpm and AppImage.
+
+Known limits:
+
+- Only the generated files are checked: no package was installed on a desktop, so Launch Services, the Windows registry and update-mime-database never read them. The NSIS script was not compiled with makensis and the MSIX was not installed.
+- An installed app is not made the default handler of a type another program owns, and the viewer role has no Windows equivalent.
+- macOS and Windows: untested. The same Go code is built for them (cross-compile checks in CI) and the CI native job runs go test on both, but no result of a run against a real WKWebView or WebView2 window has been confirmed.
+
+Evidence: `TestValidateNative`, `TestNativeFileAssociationsLoad`, `TestFileTypesDefaults`, `TestInfoPlistDocumentTypes`, `TestMacBundleHasTypeIcons`, `TestAppxManifestFileTypes`, `TestMSIXShipsTypeLogos`, `TestNSISFileAssociations`, `TestSharedMimeXML`, `TestDesktopFileMimeTypes`, `TestLinuxPackagesCarryTheMimeFile`, `TestAppImageCarriesTheMimeFile`, `TestRequireLinksAnAreaTheCodeNeverReaches`, `TestDesktopEntryFileTypes`
+
+### Native: opening files
+
+**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+
+Files on the command line of the first launch, handed over by a second launch through the single-instance lock, or sent by macOS to the app delegate reach app.onOpenFile and openedFiles (page and Go) with absolute paths, raise the window, and are granted to the fs scope like a dialog pick.
+
+Known limits:
+
+- On Linux a first launch with a file and a second launch handing over another were run through the real shell and a real webview (TestNativeE2EFilesGUI); no desktop environment launched the app from a double click.
+- macOS: the delegate method is called by the test, not by Launch Services. Windows and Linux file-manager launches were not tried.
+- macOS and Windows: untested. The same Go code is built for them (cross-compile checks in CI) and the CI native job runs go test on both, but no result of a run against a real WKWebView or WebView2 window has been confirmed.
+
+Evidence: `TestFilesFromArgs`, `TestFileURLPaths`, `TestLaunchFilesAreOpenedAndGranted`, `TestOnOpenFileReplaysThenStreams`, `TestSecondInstanceOpensItsFiles`, `TestSystemOpenedURLsReachOnOpenURL`, `TestIsAppDir`, `TestDropLaunchServicesArgs`, `TestPathQueueHoldsUntilAHandlerIsSet`, `TestNativeE2EFilesGUI`, `TestGUIDelegateOpensFilesAndURLs`
+
+### Native: dropped file paths
+
+**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+
+Files dropped from the desktop onto a view are reported with absolute paths (window.onFileDrop, Go window.OnFileDrop) and granted to the fs scope, while the page keeps its HTML5 drop events: GTK drag signals on Linux, a WKWebView subclass reading the dragging pasteboard on macOS, postMessageWithAdditionalObjects and ICoreWebView2File on Windows.
+
+Known limits:
+
+- Linux: a real drag between two GTK windows with synthesized pointer events (xdotool, needs a window manager) delivers the path and the page's drop event. In that setup WebKitGTK offers no File objects to the page with or without the watcher, so File contents were not checked. Without xdotool the real drag test skips; the signal-level tests use plain GTK widgets.
+- macOS: the drop path is checked with a fake NSDraggingInfo and the class registration; a real Finder drag was not tried.
+- Windows: the injected script runs against the real WebView2 with a script-made File (which has no path); the COM walk that reads paths is tested with Go fakes of the WebView2.h layouts. A drag from Explorer was not tried and needs a WebView2 Runtime with ICoreWebView2WebMessageReceivedEventArgs2.
+- macOS and Windows: untested. The same Go code is built for them (cross-compile checks in CI) and the CI native job runs go test on both, but no result of a run against a real WKWebView or WebView2 window has been confirmed.
+
+Evidence: `TestGUIFileDropFromARealDrag`, `TestGUIFileDropHoverThenDrop`, `TestGUIFileDropWithoutHoverData`, `TestGUIFileDropForgetsAHoverThatLeft`, `TestGUIFileDropIgnoresWhatIsNotAFile`, `TestGUIFileDropWatchesTheRealView`, `TestParseURIList`, `TestPathsFromURIs`, `TestFileDropsReachTheViewAndAreGranted`, `TestInjectFileDropGoesThroughThePlatformHandler`, `TestNativeE2EFilesGUI`, `TestGUIWebViewWatchesDrops`, `TestGUIDropReadsFilePathsFromThePasteboard`, `TestDropShimInNode`, `TestParseDropMsg`, `TestDroppedFilesReadsPathsFromAdditionalObjects`, `TestGUISyntheticDropReachesTheHost`
 
 ### Native: release as a single executable
 

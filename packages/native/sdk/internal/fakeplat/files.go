@@ -5,6 +5,7 @@ import "github.com/kratejs/krate/packages/native/platform/caps"
 var (
 	_ caps.OpenFiles = (*App)(nil)
 	_ caps.FileDrops = (*App)(nil)
+	_ caps.OpenURLs  = (*App)(nil)
 )
 
 // OnOpenFiles implements caps.OpenFiles.
@@ -30,5 +31,18 @@ func (a *App) EmitFileDrop(d caps.FileDrop) {
 	a.mu.Unlock()
 	if fn != nil {
 		fn(d)
+	}
+}
+
+// OnOpenURLs implements caps.OpenURLs.
+func (a *App) OnOpenURLs(fn func([]string)) { a.mu.Lock(); a.urlFn = fn; a.mu.Unlock() }
+
+// EmitOpenURLs delivers URLs of the app's schemes as macOS would.
+func (a *App) EmitOpenURLs(urls ...string) {
+	a.mu.Lock()
+	fn := a.urlFn
+	a.mu.Unlock()
+	if fn != nil {
+		fn(urls)
 	}
 }

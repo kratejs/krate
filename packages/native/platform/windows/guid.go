@@ -29,6 +29,12 @@ const (
 	iidEnvironmentOptions = "2fde08a8-1e9a-4766-8c05-95a9ceb9d1c5"
 	// ICoreWebView2WebMessageReceivedEventHandler
 	iidWebMessageHandler = "57213f19-00e6-49fa-8e07-898ea01ecbd2"
+	// ICoreWebView2WebMessageReceivedEventArgs2
+	iidWebMessageArgs2 = "06fc7ab7-c90c-4297-9389-33ca01cf6d5e"
+	// ICoreWebView2ObjectCollectionView
+	iidObjectCollectionView = "0f36fd87-4f69-4415-98da-888f89fb9a33"
+	// ICoreWebView2File
+	iidWebView2File = "f2c19559-6bc1-4583-a757-90021be9afec"
 	// WebView2.h line 4386
 	iidPermissionRequestedHandler = "15e1c6a3-c72a-4df3-91d7-d097fbec6bfd"
 	// WebView2.h line 21808 (ICoreWebView2_19, MemoryUsageTargetLevel)

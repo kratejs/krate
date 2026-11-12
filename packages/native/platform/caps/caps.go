@@ -340,3 +340,12 @@ type FileDrops interface {
 	// the main thread and must not block.
 	OnFileDrop(fn func(FileDrop))
 }
+
+// OpenURLs is implemented by Apps the operating system can hand URLs of the
+// app's registered schemes while it runs (macOS delivers them to the app
+// delegate; on Windows and Linux they arrive on the command line of a launch).
+type OpenURLs interface {
+	// OnOpenURLs sets the handler. URLs that arrived before it was set are
+	// delivered at once. fn runs on the main thread and must not block.
+	OnOpenURLs(fn func(urls []string))
+}

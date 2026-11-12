@@ -134,6 +134,24 @@ calls `AddView`:
     with a script, but not through the shell and a window). A firewall prompt
     must not appear (the listener is `127.0.0.1` only).
 
+## 2c. Files: open and drop
+
+`TestDroppedFilesReadsPathsFromAdditionalObjects` walks fake COM objects with
+the WebView2.h layouts, and `TestGUISyntheticDropReachesTheHost` proves the
+page script's `postMessageWithAdditionalObjects` reaches the host. A File made
+by script has no path, so a real path needs a person:
+
+1. Install the NSIS or MSIX package of `examples/native-files`. Double-click a
+   `.krnote` file: the app opens and lists it. Double-click another while it
+   runs: it is added to the same window, no second window, and the first window
+   comes forward.
+2. Drag a file from Explorer onto the window: it appears under "dropped", the
+   page's own drop event still fires.
+3. Uninstall: `HKCR\.krnote\OpenWithProgids` no longer lists the app and the
+   `com.example.files.file.krnote` key is gone.
+4. On an old WebView2 Runtime without `ICoreWebView2WebMessageReceivedEventArgs2`
+   a log line says dropped paths are unavailable and nothing else breaks.
+
 ## 3. If something fails
 
 - `Run` returns "WebView2 Runtime not found" listing paths: the registry

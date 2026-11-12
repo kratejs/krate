@@ -131,7 +131,9 @@ or minimized so it can drop caches (see [Windows and background
 mode](/docs/native/memory/#windows-and-background-mode)).
 
 A window can hold several webviews as split panes, each with its own route and
-scope; see [Views and split panes](/docs/native/views/).
+scope; see [Views and split panes](/docs/native/views/). Opening files, file
+associations and the real paths of dropped files are on [Files and drag and
+drop](/docs/native/files/).
 
 Windows are named by id. The first is `"main"`; `open()` returns a handle with
 the id of the new one. A page does not know its own id unless it is told, so
@@ -145,14 +147,14 @@ source. By area:
 
 | Area | Functions | Streams |
 |------|-----------|---------|
-| window | `krate/window.open`, `List`, `State`, `Close`, `SetTitle`, `SetSize`, `SetPosition`, `SetAlwaysOnTop`, `SetFullscreen`, `SetFrameless`, `Minimize`, `Maximize`, `Restore`, `Focus`, `Show`, `Hide`, `SetPreventClose`, `Navigate`; views: `krate/window.addView`, `krate/window.removeView`, `krate/window.views`, `krate/window.setLayout`, `krate/window.layout`, `krate/window.focusView`, `krate/window.navigateView`, `krate/window.postMessage` | `krate/window.events`, `krate/window.viewEvents` |
+| window | `krate/window.open`, `List`, `State`, `Close`, `SetTitle`, `SetSize`, `SetPosition`, `SetAlwaysOnTop`, `SetFullscreen`, `SetFrameless`, `Minimize`, `Maximize`, `Restore`, `Focus`, `Show`, `Hide`, `SetPreventClose`, `Navigate`; views: `krate/window.addView`, `krate/window.removeView`, `krate/window.views`, `krate/window.setLayout`, `krate/window.layout`, `krate/window.focusView`, `krate/window.navigateView`, `krate/window.postMessage`; files: `krate/window.thisView` | `krate/window.events`, `krate/window.viewEvents`, `krate/window.fileDrops` |
 | dialog | `krate/dialog.openFile`, `OpenFolder`, `SaveFile`, `Message` | |
 | clipboard | `krate/clipboard.readText`, `ReadImage`, `ReadFiles` (need `clipboard:read`), `WriteText`, `WriteImage`, `WriteFiles`, `Clear` | |
 | menu | `krate/menu.setApp`, `Popup` | `krate/menu.events` |
 | tray | `krate/tray.set`, `Remove` | `krate/tray.events` |
 | shortcut | `krate/shortcut.register`, `Unregister` | `krate/shortcut.events` |
 | notify | `krate/notify.send`, `Close` | `krate/notify.events` |
-| app | `krate/app.quit`, `Relaunch`, `Supports` | `krate/app.events` |
+| app | `krate/app.quit`, `Relaunch`, `Supports`, `krate/app.openedFiles` | `krate/app.events`, `krate/app.openFileEvents` |
 
 `SingleInstance` and `LaunchArgs` exist only for Go host code.
 

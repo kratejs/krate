@@ -241,3 +241,24 @@ func TestInjectFileDropGoesThroughThePlatformHandler(t *testing.T) {
 		t.Error("a drop on a window that does not exist was accepted")
 	}
 }
+
+func TestSystemOpenedURLsReachOnOpenURL(t *testing.T) {
+	r := newRig(t)
+	got := make(chan string, 4)
+	if err := app.OnOpenURL(func(u string) { got <- u }); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the event stream", func() bool { return r.host.Subscribers("app") > 0 })
+	r.app.EmitOpenURLs("acme://open/7", "acme://open/8")
+	for _, want := range []string{"acme://open/7", "acme://open/8"} {
+		select {
+		case u := <-got:
+			if u != want {
+				t.Fatalf("got %s, want %s", u, want)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("no URL; wanted %s", want)
+		}
+	}
+	waitFor(t, "the window to be raised", func() bool { return slices.Contains(r.main.Called(), "focus") })
+}
