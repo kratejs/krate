@@ -127,6 +127,9 @@ __krateHost.register("st.stats", streamStats, "func");
 // cancellation of a call
 let sawAbort = false;
 async function waitForAbort(this: any) {
+  // A cancel that arrives before this body runs has already aborted the
+  // signal, and an abort listener added after that never fires.
+  if (this.signal.aborted) { sawAbort = true; return "aborted"; }
   await new Promise<void>((resolve) => this.signal.addEventListener("abort", () => { sawAbort = true; resolve(); }));
   return "aborted";
 }
