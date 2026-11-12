@@ -53,6 +53,8 @@ type view struct {
 	viewHid    bool // the controller is invisible (hidden or minimized)
 	state      caps.ViewState
 	scrollJS   string
+	find       caps.FindTracker
+	zoom       float64 // 0 until set; restored when the controller is recreated
 
 	ready chan struct{} // closed when the webview is usable or creation failed
 	err   error
@@ -211,6 +213,10 @@ func (v *view) controllerCompleted(hr, controller uintptr) {
 
 	v.setupStreams()
 	a.tuneMemory(v)
+	a.watchDownloads(v)
+	if v.zoom != 0 {
+		vcall(v.controller, ctlPutZoomFactor, f64(v.zoom))
+	}
 
 	w.placeViews()
 	vcall(v.controller, ctlPutIsVisible, 1)

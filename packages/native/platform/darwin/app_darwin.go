@@ -59,6 +59,8 @@ type App struct {
 	winDelegate   objc.ID
 	schemeHandler objc.ID
 	navDelegate   objc.ID
+	dlDelegate    objc.ID
+	printDelegate objc.ID
 	processPool   objc.ID
 
 	ready atomic.Bool
@@ -130,6 +132,8 @@ func (a *App) setup() error {
 	a.winDelegate = cls("KrateWindowDelegate").Send(sel("new"))
 	a.schemeHandler = cls("KrateSchemeHandler").Send(sel("new"))
 	a.navDelegate = cls("KrateNavDelegate").Send(sel("new"))
+	a.dlDelegate = cls("KrateDownloadDelegate").Send(sel("new"))
+	a.printDelegate = cls("KratePrintDelegate").Send(sel("new"))
 	// NSApplication.delegate is unretained; the App (a package global) owns it.
 	a.nsApp.Send(sel("setDelegate:"), a.appDelegate)
 
@@ -204,6 +208,20 @@ func (a *App) buildMenu() {
 		m.Send(sel("addItem:"), menuItem("Copy", sel("copy:"), "c", cmd))
 		m.Send(sel("addItem:"), menuItem("Paste", sel("paste:"), "v", cmd))
 		m.Send(sel("addItem:"), menuItem("Select All", sel("selectAll:"), "a", cmd))
+	})
+	addTop("View", func(m objc.ID) {
+		zoom := func(title string, action string, key string, mask uint, alt bool) {
+			it := menuItem(title, sel(action), key, mask)
+			it.Send(sel("setTarget:"), a.appDelegate)
+			if alt {
+				it.Send(sel("setAlternate:"), true)
+			}
+			m.Send(sel("addItem:"), it)
+		}
+		zoom("Zoom In", "krateZoomIn:", "=", cmd, false)
+		zoom("Zoom In", "krateZoomIn:", "=", cmdShift, true) // Cmd+Shift+= types "+"
+		zoom("Zoom Out", "krateZoomOut:", "-", cmd, false)
+		zoom("Actual Size", "krateZoomReset:", "0", cmd, false)
 	})
 	windowMenu := addTop("Window", func(m objc.ID) {
 		m.Send(sel("addItem:"), menuItem("Minimize", sel("performMiniaturize:"), "m", cmd))
@@ -288,6 +306,9 @@ func registerClasses(a *App) error {
 		{Cmd: sel("krateQuit:"), Fn: func(self objc.ID, _ objc.SEL, sender objc.ID) {
 			a.Quit()
 		}},
+		{Cmd: sel("krateZoomIn:"), Fn: func(self objc.ID, _ objc.SEL, sender objc.ID) { a.zoomStep(1) }},
+		{Cmd: sel("krateZoomOut:"), Fn: func(self objc.ID, _ objc.SEL, sender objc.ID) { a.zoomStep(-1) }},
+		{Cmd: sel("krateZoomReset:"), Fn: func(self objc.ID, _ objc.SEL, sender objc.ID) { a.zoomStep(0) }},
 	})
 	if err != nil {
 		return err
@@ -353,10 +374,43 @@ func registerClasses(a *App) error {
 
 	_, err = objc.RegisterClass("KrateNavDelegate", nsObject, protos("WKNavigationDelegate"), nil, []objc.MethodDef{
 		{Cmd: sel("webView:decidePolicyForNavigationAction:decisionHandler:"), Fn: func(self objc.ID, _ objc.SEL, webView, action, handler objc.ID) {
-			a.decideNavigation(action, handler)
+			a.decideNavigation(webView, action, handler)
 		}},
 		{Cmd: sel("webView:didFinishNavigation:"), Fn: func(self objc.ID, _ objc.SEL, webView, nav objc.ID) {
 			a.navigationFinished(webView)
+		}},
+		{Cmd: sel("webView:decidePolicyForNavigationResponse:decisionHandler:"), Fn: func(self objc.ID, _ objc.SEL, webView, resp, handler objc.ID) {
+			invokeBlock1(handler, uintptr(a.decideResponse(webView, resp)))
+		}},
+		{Cmd: sel("webView:navigationAction:didBecomeDownload:"), Fn: func(self objc.ID, _ objc.SEL, webView, action, dl objc.ID) {
+			a.attachDownload(webView, dl)
+		}},
+		{Cmd: sel("webView:navigationResponse:didBecomeDownload:"), Fn: func(self objc.ID, _ objc.SEL, webView, resp, dl objc.ID) {
+			a.attachDownload(webView, dl)
+		}},
+	})
+	if err != nil {
+		return err
+	}
+
+	_, err = objc.RegisterClass("KrateDownloadDelegate", nsObject, protos("WKDownloadDelegate"), nil, []objc.MethodDef{
+		{Cmd: sel("download:decideDestinationUsingResponse:suggestedFilename:completionHandler:"), Fn: func(self objc.ID, _ objc.SEL, dl, resp, name, handler objc.ID) {
+			a.decideDestination(dl, resp, name, handler)
+		}},
+		{Cmd: sel("downloadDidFinish:"), Fn: func(self objc.ID, _ objc.SEL, dl objc.ID) {
+			a.downloadFinished(dl)
+		}},
+		{Cmd: sel("download:didFailWithError:resumeData:"), Fn: func(self objc.ID, _ objc.SEL, dl, e, resume objc.ID) {
+			a.downloadFailed(dl, e)
+		}},
+	})
+	if err != nil {
+		return err
+	}
+
+	_, err = objc.RegisterClass("KratePrintDelegate", nsObject, nil, nil, []objc.MethodDef{
+		{Cmd: sel("printOperationDidRun:success:contextInfo:"), Fn: func(self objc.ID, _ objc.SEL, op objc.ID, ok bool, ctx uintptr) {
+			printDidRun(op, ok, ctx)
 		}},
 	})
 	return err
@@ -364,10 +418,15 @@ func registerClasses(a *App) error {
 
 // decideNavigation implements the navigation lock. The decision handler is
 // void (^)(WKNavigationActionPolicy) with Cancel = 0 and Allow = 1.
-func (a *App) decideNavigation(action, handler objc.ID) {
+func (a *App) decideNavigation(webView, action, handler objc.ID) {
 	allow := false
 	if u := action.Send(sel("request")).Send(sel("URL")); u != 0 {
 		scheme := goString(u.Send(sel("scheme")))
+		// A link with the download attribute (macOS 11.3) is a download.
+		if s := sel("shouldPerformDownload"); respondsTo(action, s) && objc.Send[bool](action, s) {
+			invokeBlock1(handler, uintptr(a.decideDownloadAction(webView, action, scheme, goString(u.Send(sel("absoluteString"))))))
+			return
+		}
 		host := goString(u.Send(sel("host")))
 		mainFrame := true
 		if frame := action.Send(sel("targetFrame")); frame != 0 {

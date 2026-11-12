@@ -148,6 +148,10 @@ func (w *Window) revive() {
 	for _, v := range all {
 		v.scrollJS = caps.ScrollScript(v.state.X, v.state.Y)
 		v.applyMinSize()
+		v.find.Reset()
+		if v.zoom != 0 && respondsTo(v.web, sel("setPageZoom:")) {
+			v.web.Send(sel("setPageZoom:"), v.zoom)
+		}
 	}
 	w.applyLayout()
 	for _, v := range all {
