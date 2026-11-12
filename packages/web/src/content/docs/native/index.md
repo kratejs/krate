@@ -94,7 +94,7 @@ modules it found.
 | `host` | `runtime: "quickjs"` | `runtime` is `quickjs`, `node`, `bun`, `deno` or `scriptc`; `scriptc` needs `experimental.scriptc: true`; `islands` maps a package to `node`, `bun`, `deno` or `quickjs` |
 | `release` | `compile: "auto"`, `pgo: "native.pgo"` | `compile` is `auto`, `always` or `never` ([release builds](/docs/native/release/#compile-modes)); `pgo` is the CPU profile `krate native profile` writes and `--release` uses |
 | `bundle` | none | `macos.category`, `windows.publisher`, `windows.installer` (`msix` or `nsis`), `linux.formats` (`deb`, `rpm`, `appimage`) |
-| `updater` | none | `url` (https, may contain `{target}`) and `publicKey`, both required |
+| `updater` | none | `url` (https, may contain `{target}`, `{version}`, `{channel}`) and `publicKey`, both required; optional `channel`, `maxStarts`, `healthTimeout`, `confirm` (see [Updates](/docs/native/updater/)) |
 
 Unknown keys inside the block warn like the other config blocks. The top-level
 `hostFunctions` and `hostDirs` lists mark host code; see
