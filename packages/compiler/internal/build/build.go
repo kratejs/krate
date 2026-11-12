@@ -4087,7 +4087,7 @@ func (b *Builder) BuildMiddleware() error {
 	_ = os.MkdirAll(outDir, 0755)
 	outPath := filepath.Join(outDir, "middleware.js")
 
-	result := esbuildBuild(api.BuildOptions{
+	middlewareOpts := api.BuildOptions{
 		EntryPoints: []string{middlewarePath},
 		Outdir:      outDir,
 		Bundle:      true,
@@ -4096,7 +4096,9 @@ func (b *Builder) BuildMiddleware() error {
 		Write:       false,
 		LogLevel:    api.LogLevelError,
 		Metafile:    true,
-	})
+	}
+	withAuthDefines(&middlewareOpts, b.Cfg)
+	result := esbuildBuild(middlewareOpts)
 
 	if len(result.Errors) > 0 {
 		for _, e := range result.Errors {
@@ -5032,6 +5034,8 @@ func (b *Builder) compileSingleRoute(file string, apiSrcDir string) (apiRouteMet
 		nodeOpts.MinifySyntax = true
 	}
 
+	withAuthDefines(&quickjsOpts, b.Cfg)
+	withAuthDefines(&nodeOpts, b.Cfg)
 	quickjsResult := esbuildBuild(quickjsOpts)
 	if len(quickjsResult.Errors) > 0 {
 		return apiRouteMeta{}, fmt.Errorf("esbuild compilation failed:\n%s", formatEsbuildErrors(quickjsResult.Errors))
