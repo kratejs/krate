@@ -71,6 +71,8 @@ prerendered at build time.
 - [Updates](/docs/native/updater/) - in-app updates with signed update files.
 - [Memory](/docs/native/memory/) - memory profiles, shared web process,
   tray-style background mode and measured numbers.
+- [Benchmarks](/docs/native/benchmarks/) - cold start, idle memory and size
+  against Electron and Tauri, and how to reproduce them.
 - [Testing your app](/docs/native/testing/) - `krate native test` and the
   `@krate/app/driver` module: drive pages, host calls and native events from
   Node tests, headless in CI.

@@ -1,0 +1,20 @@
+[package]
+name = "bench-native-tauri"
+version = "1.0.0"
+description = "Tauri v2 side of the native benchmark"
+edition = "2021"
+publish = false
+
+[build-dependencies]
+tauri-build = { version = "=2.7.4", features = [] }
+
+[dependencies]
+tauri = { version = "=2.12.5", features = [] }
+
+# Size and speed settings the Tauri docs recommend for release builds.
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

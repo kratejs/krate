@@ -9,6 +9,10 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Krate Native
 
+- Benchmarks of Krate Native against Electron and Tauri v2 on the same small app (cold start to first
+  contentful paint, idle memory over the whole process tree, installer and on-disk size):
+  `packages/benchmark/native/bench.mjs`, the informational `Native benchmark` workflow on Linux, macOS
+  and Windows, `packages/native/cmd/krate-memtree`, and docs/native/benchmarks with Linux numbers.
 - `krate native test` runs a project's `*.native.test.ts` files against the real shell with Node's
   test runner. The new `@krate/app/driver` module launches the app and drives pages (`evaluate`,
   `click`, `fill`, `press`, `text`, `waitFor`, `errors`, host `call`), several windows and views, and
