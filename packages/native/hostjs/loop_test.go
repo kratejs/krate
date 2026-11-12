@@ -126,7 +126,9 @@ __krateHost.register("st.stats", streamStats, "func");
 
 // cancellation of a call
 let sawAbort = false;
+let waitStarted = false;
 async function waitForAbort(this: any) {
+  waitStarted = true;
   // A cancel that arrives before this body runs has already aborted the
   // signal, and an abort listener added after that never fires.
   if (this.signal.aborted) { sawAbort = true; return "aborted"; }
@@ -136,6 +138,7 @@ async function waitForAbort(this: any) {
 function abortSeen() { return sawAbort; }
 __krateHost.register("c.waitForAbort", waitForAbort, "func");
 __krateHost.register("c.abortSeen", abortSeen, "func");
+__krateHost.register("c.waitStarted", () => waitStarted, "func");
 `
 
 // signalPrelude defines the hostSignal shape of packages/app/src/host.ts that
@@ -452,9 +455,14 @@ func TestCallCancellation(t *testing.T) {
 			return e.Frame()
 		}())
 	}
-	// A cancel that arrives before the call is in flight is ignored (the id is
-	// unknown then), so on a slow machine it is sent again until the JS side
-	// sees the abort.
+	// Cancel a call whose function is running: a cancel that arrives before
+	// the call is registered is ignored, and one that arrives before the
+	// function starts stops it from starting at all.
+	for deadline := time.Now().Add(10 * time.Second); r.call("c.waitStarted", nil).OK != true; time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the JS function never started")
+		}
+	}
 	deadline := time.Now().Add(10 * time.Second)
 	for r.call("c.abortSeen", nil).OK != true {
 		if time.Now().After(deadline) {
