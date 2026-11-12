@@ -161,7 +161,10 @@ func dts(items []*hostItem) string {
 		switch it.kind {
 		case itemSignal:
 			useSignal = true
-			fmt.Fprintf(&sigs, "export const %s: ReadonlyHostSignal<%s>;\n", it.exportName(), t.ref(it.result))
+			// undefined until the host sends the first value, as for @host
+			// TypeScript signals (hostts).
+			ref := t.ref(it.result)
+			fmt.Fprintf(&sigs, "export const %s: ReadonlyHostSignal<%s, %s | undefined>;\n", it.exportName(), ref, ref)
 		default:
 			useOpts = useOpts || !it.build
 			names := tsParamNames(it)

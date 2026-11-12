@@ -121,7 +121,7 @@ func TestTypeMapping(t *testing.T) {
 		{"stream", `func F(ctx krate.Ctx) (<-chan int, error) { return nil, nil }`, "F", []string{"F(opts?: CallOptions): AsyncIterable<number>"}},
 		{"stream no error", `func F() <-chan string { return nil }`, "F", []string{"AsyncIterable<string>"}},
 		{"bidirectional chan", `func F() chan int { return nil }`, "F", []string{"AsyncIterable<number>"}},
-		{"signal", `var S = krate.NewSignal([]string{})`, "S", []string{"export const S: ReadonlyHostSignal<string[]>;"}},
+		{"signal", `var S = krate.NewSignal([]string{})`, "S", []string{"export const S: ReadonlyHostSignal<string[], string[] | undefined>;"}},
 		{"struct tags", `type T struct {
 	A int ` + "`json:\"a\"`" + `
 	B string ` + "`json:\"b,omitempty\"`" + `

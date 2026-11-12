@@ -41,7 +41,9 @@ A function takes an optional first parameter `krate.Ctx`, then its arguments, an
 returns nothing, `error`, `T`, `(T, error)`, `<-chan T` or `(<-chan T, error)`.
 A channel result is a stream (`AsyncIterable<T>`). An exported package-level
 `*krate.Signal[T]` variable is a host signal: in the UI it is a function that
-returns the current value and is tracked like a runtime signal. Variadic and
+returns the current value and is tracked like a runtime signal. It returns
+`undefined` until the host has sent the first value, so its type is
+`T | undefined` (write `count() ?? 0`). Variadic and
 generic functions are rejected. Values map to JavaScript as: `bool`, `string`;
 numbers; structs as objects (`json` tags are honored); slices as arrays;
 `map[string]T` as records; `[]byte` as `Uint8Array`; `time.Time` as `Date`;
