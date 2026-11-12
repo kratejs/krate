@@ -19,6 +19,10 @@ import (
 	"github.com/kratejs/krate/packages/native/platform/caps"
 )
 
+// This file is named so that it sorts after gui_views_test.go: Go runs tests in
+// file name order, and the memory tests there compare the cost of a view with
+// the cost of a window, which windows opened and closed just before disturb.
+
 // xtest drives the X server's pointer through the XTEST extension.
 type xtest struct {
 	dpy    uintptr

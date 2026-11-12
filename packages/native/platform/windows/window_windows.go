@@ -85,7 +85,7 @@ func (a *App) createWindow(cfg WindowConfig, w *Window) error {
 	if customFrame(chromeOpts.TitleBar) {
 		// The caption becomes client area (see chromeMessage), so the outer
 		// window is one caption shorter than AdjustWindowRect says.
-		oh -= metric(smCYCaption, dpi) + metric(smCXPaddedBorder, dpi)
+		oh -= metric(smCYCaption, dpi) + metric(smCYSizeFrame, dpi) + metric(smCXPaddedBorder, dpi)
 	}
 
 	hwnd, _, e := pCreateWindowExW.Call(0,
@@ -103,6 +103,9 @@ func (a *App) createWindow(cfg WindowConfig, w *Window) error {
 	a.windows[hwnd] = w
 	a.everOpened = true
 	w.initChrome(chromeOpts)
+	if customFrame(chromeOpts.TitleBar) {
+		w.fitClient(scaleDPI(cfg.Width, dpi), scaleDPI(cfg.Height, dpi))
+	}
 	_, _, _ = pShowWindow.Call(hwnd, swShow)
 	_, _, _ = pUpdateWindow.Call(hwnd)
 

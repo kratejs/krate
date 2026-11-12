@@ -51,6 +51,7 @@ const (
 	vkLButton               = 0x01
 	smCXSizeFrame           = 32
 	smCYCaption             = 4
+	smCYSizeFrame           = 33
 	smCXPaddedBorder        = 92
 	blackBrush              = 4
 )
@@ -68,6 +69,9 @@ type chromeState struct {
 	backdrop      string
 	overlay       *caps.TitleBarOverlay
 	nativeRegions bool
+	// bgSet: the webview background was made transparent at some point, so
+	// leaving glass must put it back.
+	bgSet bool
 
 	// Taskbar thumbnail buttons, see taskbar_windows.go.
 	thumbs       []caps.ThumbButton
@@ -159,6 +163,9 @@ func (w *Window) initChrome(o caps.ChromeOptions) {
 	if c.titleBar == "" {
 		c.titleBar = caps.TitleBarNative
 	}
+	if o.IsZero() {
+		return // an ordinary window: leave Windows alone
+	}
 	c.transparent = o.Transparent
 	if c.titleBar == caps.TitleBarHidden {
 		ov := caps.TitleBarOverlay{Height: caps.DefaultOverlayHeight}
@@ -186,6 +193,22 @@ func (w *Window) refreshFrame() {
 	}
 	_, _, _ = pDwmExtendFrame.Call(w.hwnd, uintptr(unsafe.Pointer(&m)))
 	_, _, _ = pSetWindowPos.Call(w.hwnd, 0, 0, 0, 0, 0, swpNoMove|swpNoSize|swpNoZOrder|swpNoActivate|swpFrameChg)
+}
+
+// fitClient resizes the window so that its client area is exactly w by h
+// pixels. The outer size is computed from the metrics Windows reports for a
+// caption, but those differ between Windows versions and DPI settings, so the
+// result is measured and corrected once.
+func (w *Window) fitClient(cw, ch int) {
+	var rc rect
+	_, _, _ = pGetClientRect.Call(w.hwnd, uintptr(unsafe.Pointer(&rc)))
+	dw, dh := cw-int(rc.right), ch-int(rc.bottom)
+	if dw == 0 && dh == 0 {
+		return
+	}
+	var wr rect
+	_, _, _ = pGetWindowRect.Call(w.hwnd, uintptr(unsafe.Pointer(&wr)))
+	_, _, _ = pSetWindowPos.Call(w.hwnd, 0, 0, 0, uintptr(int(wr.right-wr.left)+dw), uintptr(int(wr.bottom-wr.top)+dh), swpNoMove|swpNoZOrder|swpNoActivate)
 }
 
 // applyCaptionColors sets the caption and symbol colors of a hidden title
@@ -489,8 +512,11 @@ func (w *Window) ToggleMaximize() error {
 func (v *view) applyChromeToController() {
 	w := v.w
 	c := &w.chrome
-	if v.controller == nil {
+	if v.controller == nil || !(c.glass() || c.bgSet || customFrame(c.titleBar)) {
 		return
+	}
+	if c.glass() {
+		c.bgSet = true
 	}
 	if c2 := queryInterface(v.controller, iidWebView2Controller2); c2 != nil {
 		col := caps.RGBA{R: 255, G: 255, B: 255, A: 255}

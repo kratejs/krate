@@ -89,6 +89,9 @@ func (w *Window) applyChrome(o caps.ChromeOptions) {
 	if w.chrome.titleBar == "" {
 		w.chrome.titleBar = caps.TitleBarNative
 	}
+	if o.IsZero() {
+		return // an ordinary window: leave AppKit's defaults alone
+	}
 	w.applyTitleBar()
 	if o.Transparent {
 		w.setTransparent(true)
