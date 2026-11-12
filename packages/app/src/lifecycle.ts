@@ -19,7 +19,7 @@ export function relaunch(): Promise<void> {
 }
 
 // supports reports whether a capability works right now: "dialog",
-// "clipboard", "menu", "tray", "notify", "shortcut", "window",
+// "clipboard", "menu", "tray", "notify", "shortcut", "media", "window",
 // "window:alwaysOnTop", "window:fullscreen", "window:frameless",
 // "window:position", "window:release".
 export function supports(capability: string): Promise<boolean> {
