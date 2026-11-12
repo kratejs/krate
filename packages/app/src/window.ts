@@ -300,3 +300,42 @@ export function onMemoryPressure(fn: () => void): () => void {
   target.addEventListener("krate:memory-pressure", fn);
   return () => target.removeEventListener?.("krate:memory-pressure", fn);
 }
+
+// Files dropped from the operating system onto a view. The page still gets
+// its normal HTML5 drop event with File objects; this adds the real paths.
+export interface FileDropEvent {
+  // The view the files landed on; a window's first view has the window's id.
+  view: string;
+  window: string;
+  // Absolute paths of the files and folders. The app may read them through
+  // @krate/app/fs when it has the fs permission, like files chosen in a dialog.
+  paths: string[];
+  // Drop position in the view in CSS pixels, -1 when the platform cannot say.
+  x: number;
+  y: number;
+}
+
+export interface FileDropOptions extends SubscribeOptions {
+  // Also receive drops onto the other views of the app. Default: only this page.
+  all?: boolean;
+}
+
+// Calls fn when the user drops files from the operating system onto this page
+// (its view). Returns a function that stops listening.
+export function onFileDrop(fn: (e: FileDropEvent) => void, opts: FileDropOptions = {}): () => void {
+  if (opts.all) return subscribe<FileDropEvent>("krate/window.fileDrops", fn, opts);
+  let stopped = false;
+  let stop = () => {};
+  call<string>("krate/window.thisView")
+    .then((self) => {
+      if (stopped) return;
+      stop = subscribe<FileDropEvent>("krate/window.fileDrops", (e) => {
+        if (e.view === self) fn(e);
+      }, opts);
+    })
+    .catch((e) => opts.onError?.(e));
+  return () => {
+    stopped = true;
+    stop();
+  };
+}

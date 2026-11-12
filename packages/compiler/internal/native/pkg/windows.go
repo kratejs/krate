@@ -23,6 +23,19 @@ func packageWindows(o *Options, ic *Icon, want map[string]bool, stage string, re
 		return fail(diag.CodeNativePkgIcon, "native.icons", err.Error(), "")
 	}
 	t.addData(dir+"/"+"icon.ico", 0o644, ico)
+	for _, ft := range m.FileTypes() {
+		if f := ft.iconFile(); f != "" {
+			fi, err := fileTypeIcon(ft)
+			if err != nil {
+				return err
+			}
+			data, err := fi.ICO()
+			if err != nil {
+				return fail(diag.CodeNativePkgIcon, ft.Icon, err.Error(), "")
+			}
+			t.addData(dir+"/"+f+".ico", 0o644, data)
+		}
+	}
 	if err := writeDisk(stage, t); err != nil {
 		return wrapWrite(stage, err)
 	}
@@ -206,6 +219,7 @@ func NSISScript(m Metadata, p Payload, srcDir, outFile string) string {
 		w("  WriteRegStr HKCR %s \"$INSTDIR\\${APPEXE},0\"", nsisStr(s+"\\DefaultIcon")+" \"\"")
 		w("  WriteRegStr HKCR %s '\"$INSTDIR\\${APPEXE}\" \"%%1\"'", nsisStr(s+"\\shell\\open\\command")+" \"\"")
 	}
+	nsisFileAssoc(w, m)
 	w("SectionEnd")
 	w("")
 	w("Section \"Uninstall\"")
@@ -218,6 +232,7 @@ func NSISScript(m Metadata, p Payload, srcDir, outFile string) string {
 	for _, s := range m.DeepLinks {
 		w("  DeleteRegKey HKCR %s", nsisStr(s))
 	}
+	nsisFileAssocRemove(w, m)
 	w("SectionEnd")
 	return b.String()
 }

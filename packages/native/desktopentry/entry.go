@@ -21,6 +21,10 @@ type Options struct {
 	Comment string
 	// Schemes are the URL schemes the app handles ("acme" for acme://...).
 	Schemes []string
+	// MimeTypes are the media types of the files the app opens
+	// ("text/markdown"). Exec gets %F, or %U together with Schemes, so the
+	// files arrive as arguments.
+	MimeTypes []string
 	// Categories such as "Utility;" (default "Utility;").
 	Categories string
 	// StartupWMClass should match the window class (the app id).
@@ -46,8 +50,13 @@ func Entry(o Options) string {
 		fmt.Fprintf(&b, "Comment=%s\n", esc(o.Comment))
 	}
 	exec := quoteExec(o.Exec)
-	if len(o.Schemes) > 0 {
+	switch {
+	case len(o.Schemes) > 0 && len(o.MimeTypes) > 0:
+		exec += " %U"
+	case len(o.Schemes) > 0:
 		exec += " %u"
+	case len(o.MimeTypes) > 0:
+		exec += " %F"
 	}
 	fmt.Fprintf(&b, "Exec=%s\n", exec)
 	if o.Icon != "" {
@@ -61,13 +70,14 @@ func Entry(o Options) string {
 	if o.StartupWMClass != "" {
 		fmt.Fprintf(&b, "StartupWMClass=%s\n", esc(o.StartupWMClass))
 	}
-	if len(o.Schemes) > 0 {
+	if len(o.Schemes) > 0 || len(o.MimeTypes) > 0 {
 		s := append([]string(nil), o.Schemes...)
 		sort.Strings(s)
 		var mimes []string
 		for _, sc := range s {
 			mimes = append(mimes, "x-scheme-handler/"+strings.ToLower(sc))
 		}
+		mimes = append(mimes, o.MimeTypes...)
 		fmt.Fprintf(&b, "MimeType=%s;\n", strings.Join(mimes, ";"))
 	}
 	b.WriteString("Terminal=false\n")

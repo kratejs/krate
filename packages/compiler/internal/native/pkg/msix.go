@@ -93,13 +93,29 @@ func AppxManifest(m Metadata, p Payload) []byte {
 	w(`    <Application Id="App" Executable="%s" EntryPoint="Windows.FullTrustApplication">`, xmlEscape(winExeName(m)))
 	w(`      <uap:VisualElements DisplayName="%s" Description="%s" BackgroundColor="transparent"`, xmlEscape(m.ProductName), xmlEscape(m.ProductName))
 	w(`                          Square150x150Logo="Assets\Square150x150Logo.png" Square44x44Logo="Assets\Square44x44Logo.png"/>`)
-	if len(m.DeepLinks) > 0 {
+	types := m.FileTypes()
+	if len(m.DeepLinks) > 0 || len(types) > 0 {
 		w(`      <Extensions>`)
 		for _, s := range m.DeepLinks {
 			w(`        <uap:Extension Category="windows.protocol">`)
 			w(`          <uap:Protocol Name="%s">`, xmlEscape(s))
 			w(`            <uap:DisplayName>%s</uap:DisplayName>`, xmlEscape(m.ProductName))
 			w(`          </uap:Protocol>`)
+			w(`        </uap:Extension>`)
+		}
+		for _, ft := range types {
+			w(`        <uap:Extension Category="windows.fileTypeAssociation">`)
+			w(`          <uap:FileTypeAssociation Name="%s">`, xmlEscape(msixFileTypeName(ft)))
+			w(`            <uap:DisplayName>%s</uap:DisplayName>`, xmlEscape(ft.Name))
+			if ft.iconFile() != "" {
+				w(`            <uap:Logo>%s</uap:Logo>`, xmlEscape(strings.ReplaceAll(msixLogoPart(ft), "/", `\`)))
+			}
+			w(`            <uap:SupportedFileTypes>`)
+			for _, e := range ft.Exts {
+				w(`              <uap:FileType ContentType="%s">.%s</uap:FileType>`, xmlEscape(ft.MIME), xmlEscape(e))
+			}
+			w(`            </uap:SupportedFileTypes>`)
+			w(`          </uap:FileTypeAssociation>`)
 			w(`        </uap:Extension>`)
 		}
 		w(`      </Extensions>`)
@@ -255,6 +271,20 @@ func BuildMSIX(m Metadata, p Payload, ic *Icon, inner *tree, out string) error {
 			return fail(diag.CodeNativePkgIcon, "native.icons", err.Error(), "")
 		}
 		files = append(files, msixFile{l.Name, data})
+	}
+	for _, ft := range m.FileTypes() {
+		if ft.iconFile() == "" {
+			continue
+		}
+		fi, err := fileTypeIcon(ft)
+		if err != nil {
+			return err
+		}
+		data, err := fi.PNG(44)
+		if err != nil {
+			return fail(diag.CodeNativePkgIcon, ft.Icon, err.Error(), "")
+		}
+		files = append(files, msixFile{msixLogoPart(ft), data})
 	}
 	files = append(files, msixFile{"AppxManifest.xml", AppxManifest(m, p)})
 	sort.Slice(files, func(i, j int) bool { return files[i].name < files[j].name })

@@ -8,6 +8,7 @@ import (
 	"github.com/kratejs/krate/packages/native/krate"
 	"github.com/kratejs/krate/packages/native/sdk/internal/bridge"
 	"github.com/kratejs/krate/packages/native/sdk/internal/codec"
+	"github.com/kratejs/krate/packages/native/sdk/internal/picked"
 	"github.com/kratejs/krate/packages/native/wire"
 )
 
@@ -61,6 +62,14 @@ func Register(t *bridge.Table, env *bridge.Env, support func(capability string) 
 		return nil
 	})
 
+	raise := func() {
+		if c, _, _, err := env.Controls(""); err == nil {
+			c.Show()
+			c.Focus()
+		}
+	}
+	files := registerOpenFiles(t, env, env.Topic("appopen"), picked.Notify, raise)
+
 	var mu sync.Mutex
 	var held *Instance
 	t.Func(IDSingleInstance, "", false, func(ctx krate.Ctx, args *wire.Decoder, out *wire.Encoder) error {
@@ -77,7 +86,9 @@ func Register(t *bridge.Table, env *bridge.Env, support func(capability string) 
 			return nil
 		}
 		inst, first, err := Acquire("", id, argv, func(si SecondInstance) {
+			files.add(sourceSecond, FilesFromArgs(si.Args, si.Dir))
 			topic.Publish(func(e *wire.Encoder) { encodeSecond(e, si) })
+			raise()
 		})
 		if err != nil {
 			return err

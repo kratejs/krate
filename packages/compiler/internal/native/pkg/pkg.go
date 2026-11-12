@@ -49,6 +49,9 @@ type Metadata struct {
 	// Icon is the path of the source image, "" for a generated placeholder.
 	Icon      string
 	DeepLinks []string
+	// FileAssociations are native.fileAssociations with icon paths made
+	// absolute. See FileTypes for the defaults.
+	FileAssociations []config.NativeFileAssociation
 	// MacCategory is a UTI such as "public.app-category.productivity".
 	MacCategory string
 	// Publisher is the Windows publisher (an MSIX subject or a display name).
@@ -89,6 +92,13 @@ func MetadataFromConfig(root string, cfg *config.Config) Metadata {
 		if !filepath.IsAbs(m.Icon) {
 			m.Icon = filepath.Join(root, m.Icon)
 		}
+	}
+	for _, fa := range n.FileAssociations {
+		fa.Ext = append([]string(nil), fa.Ext...)
+		if fa.Icon != "" && !filepath.IsAbs(fa.Icon) {
+			fa.Icon = filepath.Join(root, fa.Icon)
+		}
+		m.FileAssociations = append(m.FileAssociations, fa)
 	}
 	m.MacCategory = macCategory(n.Bundle.MacOS.Category)
 	return m

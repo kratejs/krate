@@ -37,6 +37,7 @@ func Register(t *bridge.Table, env *bridge.Env) {
 	}
 
 	registerViews(t, env)
+	registerFileDrops(t, env)
 
 	t.Func(IDOpen, Permission, true, func(ctx krate.Ctx, args *wire.Decoder, out *wire.Encoder) error {
 		r := codec.Args(args, IDOpen)

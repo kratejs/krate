@@ -58,6 +58,7 @@ func InfoPlist(m Metadata, exeName string) []byte {
 		}
 		b.WriteString("\t\t\t</array>\n\t\t</dict>\n\t</array>\n")
 	}
+	plistFileTypes(&b, m)
 	b.WriteString("</dict>\n</plist>\n")
 	return []byte(b.String())
 }
@@ -79,6 +80,19 @@ func macAppTree(o *Options, ic *Icon) (*tree, string, error) {
 		return nil, "", fail(diag.CodeNativePkgIcon, "native.icons", err.Error(), "")
 	}
 	t.addData(app+"/Contents/Resources/icon.icns", 0o644, icns)
+	for _, ft := range m.FileTypes() {
+		if f := ft.iconFile(); f != "" {
+			fi, err := fileTypeIcon(ft)
+			if err != nil {
+				return nil, "", err
+			}
+			data, err := fi.ICNS()
+			if err != nil {
+				return nil, "", fail(diag.CodeNativePkgIcon, ft.Icon, err.Error(), "")
+			}
+			t.addData(app+"/Contents/Resources/"+f+".icns", 0o644, data)
+		}
+	}
 	for dest, src := range o.Payload.ExtraFiles {
 		if err := t.addDisk(app+"/Contents/Resources/"+cleanPath(dest), src); err != nil {
 			return nil, "", fail(diag.CodeNativePkgInput, src, err.Error(), "")

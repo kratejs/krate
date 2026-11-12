@@ -36,7 +36,7 @@ func desktopCategories(macCat string) string {
 func desktopFile(m Metadata, exec string) []byte {
 	return []byte(desktopentry.Entry(desktopentry.Options{
 		Name: m.ProductName, Exec: exec, Icon: m.slug(), Comment: m.ProductName,
-		Schemes: m.DeepLinks, Categories: desktopCategories(m.MacCategory), StartupWMClass: m.AppID,
+		Schemes: m.DeepLinks, MimeTypes: desktopMimeTypes(m), Categories: desktopCategories(m.MacCategory), StartupWMClass: m.AppID,
 	}))
 }
 
@@ -62,6 +62,9 @@ func linuxInstallTree(o *Options, ic *Icon) (*tree, string, error) {
 		t.addSymlink("usr/bin/"+name, "../lib/"+name+"/"+name)
 	}
 	t.addData("usr/share/applications/"+m.AppID+".desktop", 0o644, desktopFile(m, exec))
+	if x := SharedMimeXML(m); x != nil {
+		t.addData("usr/share/mime/packages/"+m.AppID+".xml", 0o644, x)
+	}
 	for _, s := range hicolorSizes {
 		data, err := ic.PNG(s)
 		if err != nil {
@@ -380,6 +383,9 @@ func buildAppImage(o *Options, ic *Icon, stage, out string) error {
 	apprun := "#!/bin/sh\nHERE=\"$(dirname \"$(readlink -f \"$0\")\")\"\nexec \"$HERE/" + base + "/" + name + "\" \"$@\"\n"
 	t.addData("AppRun", 0o755, []byte(apprun))
 	t.addData(name+".desktop", 0o644, desktopFile(m, name))
+	if x := SharedMimeXML(m); x != nil {
+		t.addData("usr/share/mime/packages/"+m.AppID+".xml", 0o644, x)
+	}
 	for _, s := range []int{256, 512} {
 		data, err := ic.PNG(s)
 		if err != nil {

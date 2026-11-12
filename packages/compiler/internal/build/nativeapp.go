@@ -57,7 +57,11 @@ type NativeManifest struct {
 	// switch the unused ones off.
 	Memory   string              `json:"memory,omitempty"`
 	Features *NativeFeaturesMeta `json:"features,omitempty"`
-	Debug    bool                `json:"debug"`
+	// SingleInstance makes the shell take the single-instance lock at start,
+	// so a file opened while the app runs reaches the running instance. It is
+	// set when native.fileAssociations is not empty.
+	SingleInstance bool `json:"singleInstance,omitempty"`
+	Debug          bool `json:"debug"`
 }
 
 // NativeFeaturesMeta is the features block of app.json.
@@ -317,6 +321,7 @@ func (b *Builder) BuildNativeApp(opts NativeAppOptions) (*NativeAppResult, error
 	m.Features = &resolved
 	m.Window.Permissions = eff.Window.Permissions
 	m.Window.KeepAlive = eff.Window.KeepAlive
+	m.SingleInstance = len(eff.FileAssociations) > 0
 	m.Plugins = b.NativePluginNames()
 	if !opts.Derive {
 		m.Permissions = b.pluginDevPermissions(m.Permissions)
