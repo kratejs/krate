@@ -143,7 +143,7 @@ func TestWorkersNode(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer worker.Stop(id)
+		defer func() { _ = worker.Stop(id) }()
 		ev, cancel := watch(t, id)
 		defer cancel()
 		if err := worker.Post(id, map[string]any{"op": "echo", "n": 7}); err != nil {
@@ -217,7 +217,7 @@ func TestWorkersNode(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer worker.Stop(id)
+		defer func() { _ = worker.Stop(id) }()
 		ends, err := port.Channel()
 		if err != nil {
 			t.Fatal(err)
@@ -261,7 +261,7 @@ func TestWorkersNode(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer worker.Stop(id)
+		defer func() { _ = worker.Stop(id) }()
 		ends, _ := port.Channel()
 		err = port.Transfer(ends.B, port.WorkerOwner(id))
 		if err == nil || !strings.Contains(err.Error(), "port:receive") {
@@ -347,7 +347,7 @@ func TestWorkerGo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer worker.Stop(id)
+	defer func() { _ = worker.Stop(id) }()
 	ev, cancel := watch(t, id)
 	defer cancel()
 	_ = worker.Post(id, map[string]any{"a": 1})

@@ -35,7 +35,6 @@ const (
 type snapAPI struct {
 	getSnapshot       func(view uintptr, region, options int32, cancellable, cb, data uintptr)
 	getSnapshotFinish func(view, res uintptr, gerr *uintptr) uintptr
-	gErrorMessage     func(e uintptr) uintptr // reads GError->message via offset; see errMessage
 
 	offscreenNew func() uintptr
 
