@@ -971,14 +971,17 @@ async function windowsWebView2() {
   const marker = path.join(process.env.ProgramData || 'C:\\ProgramData', 'krate-wv2-marker.txt');
   const dir = path.join(work, 'install-webview2');
   const guid = '{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}';
+  // Windows keeps a just-exited Uninstall.exe locked for a moment (EPERM or
+  // EBUSY on unlink); rmSync retries those.
+  const removeDir = () => fs.rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 });
   const installAndRemove = () => {
     fs.rmSync(marker, { force: true });
-    fs.rmSync(dir, { recursive: true, force: true });
+    removeDir();
     run(setup, ['/S', `/D=${dir}`]);
     const ran = fs.existsSync(marker) ? fs.readFileSync(marker, 'utf8') : '';
     const uninstall = path.join(dir, 'Uninstall.exe');
     if (fs.existsSync(uninstall)) run(uninstall, ['/S', `_?=${dir}`], { allowFail: true });
-    fs.rmSync(dir, { recursive: true, force: true });
+    removeDir();
     return ran;
   };
 
@@ -1014,7 +1017,7 @@ async function windowsWebView2() {
   const ran = fs.existsSync(marker) ? fs.readFileSync(marker, 'utf8') : '';
   const uninstall = path.join(dir, 'Uninstall.exe');
   if (fs.existsSync(uninstall)) run(uninstall, ['/S', `_?=${dir}`], { allowFail: true });
-  fs.rmSync(dir, { recursive: true, force: true });
+  removeDir();
   fs.rmSync(marker, { force: true });
   if (!/SETUP_EXIT=0/.test(r.stdout)) fail(`the installer did not finish cleanly with the runtime missing:\n${r.stdout}`);
   if (!/\/silent \/install/.test(ran)) fail(`the installer did not run the bootstrapper with /silent /install (marker: ${JSON.stringify(ran)})`);
