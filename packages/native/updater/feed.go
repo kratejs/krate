@@ -32,6 +32,30 @@ type Feed struct {
 	URL       string `json:"url"`
 	Signature string `json:"signature"`
 	Size      int64  `json:"size,omitempty"`
+
+	// Patches are optional delta updates from older versions. A client takes
+	// the entry whose From is its own version and falls back to URL when the
+	// patch cannot be used.
+	Patches []FeedPatch `json:"patches,omitempty"`
+	// Rollout limits who is offered the update. Nil means everyone.
+	Rollout *Rollout `json:"rollout,omitempty"`
+	// Critical offers the update to every client whatever Rollout says.
+	Critical bool `json:"critical,omitempty"`
+	// MinVersion: a client running an older version is offered the update
+	// whatever Rollout says, and Update.Required is set.
+	MinVersion string `json:"min_version,omitempty"`
+}
+
+// FeedPatch is one delta update (see GeneratePatch).
+type FeedPatch struct {
+	// From is the version the patch applies to.
+	From string `json:"from"`
+	URL  string `json:"url"`
+	// Signature is the SignPatch signature of the patch file.
+	Signature string `json:"signature"`
+	Size      int64  `json:"size,omitempty"`
+	// SHA512 is the lowercase hex digest of the patch file.
+	SHA512 string `json:"sha512,omitempty"`
 }
 
 // ParseFeed decodes and validates a feed document.
@@ -53,14 +77,33 @@ func ParseFeed(b []byte) (*Feed, error) {
 	if f.Size < 0 {
 		return nil, errors.New("updater: feed size is negative")
 	}
+	if f.MinVersion != "" {
+		if _, ok := parseVersion(f.MinVersion); !ok {
+			return nil, fmt.Errorf("updater: feed min_version %q is not a semantic version", f.MinVersion)
+		}
+	}
+	if f.Rollout != nil {
+		if err := f.Rollout.validate(); err != nil {
+			return nil, err
+		}
+	}
 	return &f, nil
 }
 
 // ExpandURL fills {target} and {version} in a feed URL template.
 func ExpandURL(tmpl, target, version string) string {
+	return ExpandURLChannel(tmpl, target, version, "")
+}
+
+// ExpandURLChannel is ExpandURL with {channel} too (default "stable").
+func ExpandURLChannel(tmpl, target, version, channel string) string {
+	if channel == "" {
+		channel = DefaultChannel
+	}
 	return strings.NewReplacer(
 		"{target}", url.PathEscape(target),
 		"{version}", url.PathEscape(version),
+		"{channel}", url.PathEscape(channel),
 	).Replace(tmpl)
 }
 
@@ -104,6 +147,20 @@ type Config struct {
 	Version string
 	// Target defaults to GOOS-GOARCH of the running process.
 	Target string
+	// Channel fills {channel} in URL; default "stable". A channel chosen at
+	// run time with SetChannel (kept in StateDir) takes precedence.
+	Channel string
+	// StateDir holds the install id, the rollback state and the chosen
+	// channel. Without it an update does not keep the previous version for
+	// rollback and a staged rollout uses an id that lasts for the process.
+	StateDir string
+	// InstallID overrides the persisted random install id (tests).
+	InstallID string
+	// Now overrides the clock (tests).
+	Now func() time.Time
+	// Logf receives diagnostics, for example why a delta update fell back to
+	// the full download. Default: discard.
+	Logf func(format string, args ...any)
 	// CacheDir holds staged downloads; required for Download.
 	CacheDir string
 	// Client defaults to a client with a 30 s timeout for the feed. Downloads
@@ -128,15 +185,56 @@ type Update struct {
 	PubDate string
 	URL     string
 	Size    int64
+	// Critical is the feed's flag; Required is set when the running version
+	// is older than the feed's min_version. Both bypass a staged rollout.
+	Critical bool
+	Required bool
 
 	cfg       Config
 	pub       ed25519.PublicKey
 	signature string
 	path      string // downloaded and verified file
+	patch     *FeedPatch
+	patchURL  string
+	stage     string // new tree built from a patch, ready for Apply
+	deltaErr  error
 }
 
-// Path returns the verified downloaded file, "" before Download finishes.
+// Path returns the verified downloaded file, "" before Download finishes (and
+// after a delta update, which never downloads the full file).
 func (u *Update) Path() string { return u.path }
+
+// Delta reports whether the downloaded update is a delta update.
+func (u *Update) Delta() bool { return u.stage != "" }
+
+// HasDelta reports whether the feed offered a patch for the running version.
+func (u *Update) HasDelta() bool { return u.patch != nil }
+
+// DeltaError is why the last Download fell back to the full artifact, nil
+// when it did not.
+func (u *Update) DeltaError() error { return u.deltaErr }
+
+// DownloadSize is the number of bytes Download fetches: the patch size when a
+// patch is offered, Size otherwise. 0 when unknown.
+func (u *Update) DownloadSize() int64 {
+	if u.patch != nil && u.patch.Size > 0 {
+		return u.patch.Size
+	}
+	return u.Size
+}
+
+func (c *Config) logf(format string, args ...any) {
+	if c.Logf != nil {
+		c.Logf(format, args...)
+	}
+}
+
+func (c *Config) now() time.Time {
+	if c.Now != nil {
+		return c.Now()
+	}
+	return time.Now()
+}
 
 func (c *Config) client() *http.Client {
 	if c.Client != nil {
@@ -180,7 +278,7 @@ func Check(ctx context.Context, cfg Config) (*Update, error) {
 	if !ok {
 		return nil, fmt.Errorf("updater: running version %q is not a semantic version", cfg.Version)
 	}
-	feedURL := ExpandURL(cfg.URL, cfg.target(), cfg.Version)
+	feedURL := ExpandURLChannel(cfg.URL, cfg.target(), cfg.Version, cfg.channel())
 	if err := cfg.checkScheme(feedURL); err != nil {
 		return nil, err
 	}
@@ -222,8 +320,54 @@ func Check(ctx context.Context, cfg Config) (*Update, error) {
 	if err := cfg.checkScheme(artifact.String()); err != nil {
 		return nil, err
 	}
-	return &Update{
+	u := &Update{
 		Version: f.Version, Notes: f.Notes, PubDate: f.PubDate, URL: artifact.String(), Size: f.Size,
-		cfg: cfg, pub: pub, signature: f.Signature,
-	}, nil
+		Critical: f.Critical,
+		cfg:      cfg, pub: pub, signature: f.Signature,
+	}
+	if f.MinVersion != "" {
+		if min, ok := parseVersion(f.MinVersion); ok && compareVersions(cur, min) < 0 {
+			u.Required = true
+		}
+	}
+	if cfg.StateDir != "" && cfg.failedVersion(f.Version) {
+		cfg.logf("updater: version %s was rolled back on this install; not offering it again", f.Version)
+		return nil, nil
+	}
+	if !u.Critical && !u.Required && f.Rollout != nil {
+		id := cfg.installID()
+		if !f.Rollout.Includes(id, f.Version, cfg.now()) {
+			cfg.logf("updater: %s is in a staged rollout that does not include this install yet", f.Version)
+			return nil, nil
+		}
+	}
+	for i := range f.Patches {
+		p := &f.Patches[i]
+		from, ok := parseVersion(p.From)
+		if !ok || compareVersions(from, cur) != 0 || p.URL == "" || p.Signature == "" {
+			continue
+		}
+		pu, err := res.Request.URL.Parse(p.URL)
+		if err != nil || cfg.checkScheme(pu.String()) != nil {
+			continue
+		}
+		// A patch that is not smaller than the full file saves nothing.
+		if p.Size > 0 && f.Size > 0 && p.Size >= f.Size {
+			continue
+		}
+		u.patch, u.patchURL = p, pu.String()
+		break
+	}
+	return u, nil
+}
+
+// Validate checks a feed built in code the way ParseFeed checks one read from
+// the network.
+func (f *Feed) Validate() error {
+	b, err := json.Marshal(f)
+	if err != nil {
+		return err
+	}
+	_, err = ParseFeed(b)
+	return err
 }

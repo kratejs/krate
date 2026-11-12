@@ -30,8 +30,21 @@
 // or a .app bundle on macOS, or a single AppImage file. Apply replaces the
 // installed files by renaming: a failure part way restores what was moved.
 //
-// Delta updates are not implemented. A later version can add an optional
-// "patches" list to the feed (binary diffs from specific older versions)
-// and fall back to the full artifact; clients that do not know the field
-// ignore it.
+// Delta updates. The feed may list "patches": signed binary diffs (bsdiff,
+// pure Go) from specific older versions to this one, see GeneratePatch and
+// SignPatch. Download takes the patch for Config.Version, checks its signature
+// and every file hash while it builds the new tree in a staging directory next
+// to the install, and falls back to the full artifact on any failure.
+//
+// Staged rollouts. The feed may carry "rollout" (percentage, start, ramp),
+// "critical" and "min_version". Check offers the update only to installs whose
+// stable bucket (from a random per-install id kept in Config.StateDir) is
+// inside the effective percentage, unless the update is critical or required.
+//
+// Rollback. With Config.StateDir set, Apply keeps the replaced files and records
+// the update as unconfirmed. Boot, called first thing at start-up, counts the
+// starts of the new version; MarkHealthy confirms one and deletes the kept
+// files. A start that crashed or did not confirm in time makes the next Boot
+// restore the previous version and report a RollbackEvent. Feed fields are
+// optional and ignored by older clients; an old feed works unchanged.
 package updater

@@ -27,9 +27,11 @@ const trashName = ".krate-old"
 //	                directories.
 //	AppImage        the .AppImage file is replaced.
 //
-// If a step fails, what was moved is restored.
+// If a step fails, what was moved is restored. With Config.StateDir set the
+// replaced files are kept and the update is recorded as unconfirmed until
+// MarkHealthy runs in the new version (see Boot).
 func (u *Update) Apply() error {
-	if u.path == "" {
+	if u.path == "" && u.stage == "" {
 		return ErrNotDownloaded
 	}
 	exe, err := u.cfg.executable()
@@ -37,17 +39,87 @@ func (u *Update) Apply() error {
 		return err
 	}
 	fsys := u.cfg.fs()
+	keep := u.cfg.StateDir != ""
+	var prev *PrevInfo
 	switch {
 	case goos(&u.cfg) == "darwin":
 		bundle := bundleOf(exe)
 		if bundle == "" {
 			return fmt.Errorf("updater: %s is not inside a .app bundle; a macOS update replaces the whole bundle", exe)
 		}
-		return applyBundle(fsys, u.path, bundle, u.Version)
+		prev, err = u.installFrom(fsys, KindBundle, exe, bundle, keep)
 	case goos(&u.cfg) == "linux" && u.cfg.appImage() != "":
-		return applyFile(fsys, u.path, u.cfg.appImage(), u.Version)
+		prev, err = u.installFrom(fsys, KindFile, exe, u.cfg.appImage(), keep)
+	default:
+		prev, err = u.installFrom(fsys, KindTree, exe, filepath.Dir(exe), keep)
 	}
-	return applyTree(fsys, u.path, filepath.Dir(exe), filepath.Base(exe), u.Version)
+	if err != nil {
+		return err
+	}
+	u.stage = ""
+	if keep {
+		if err := recordApplied(u.cfg, u.Version, prev); err != nil {
+			// Without the record there is nothing to roll back to.
+			discardPrevious(fsys, prev)
+			u.cfg.logf("updater: could not record the update for rollback: %v", err)
+		}
+	}
+	return nil
+}
+
+// installFrom installs the downloaded artifact (extracting it) or the tree a
+// delta update staged. target is the install directory (KindTree), the bundle
+// or the file.
+func (u *Update) installFrom(fsys FS, kind, exe, target string, keep bool) (*PrevInfo, error) {
+	stage := u.stage
+	if stage == "" {
+		if !isArchive(u.path) && kind != KindFile {
+			return nil, fmt.Errorf("updater: %q is not an archive", filepath.Base(u.path))
+		}
+		stage = stagePath(kind, target, u.Version)
+		if isArchive(u.path) {
+			_ = fsys.RemoveAll(stage)
+			if err := extractArchive(fsys, u.path, stage); err != nil {
+				_ = fsys.RemoveAll(stage)
+				return nil, err
+			}
+		}
+	}
+	if isArchive(u.path) || u.stage != "" {
+		defer func() { _ = fsys.RemoveAll(stage) }()
+	}
+	var prev *PrevInfo
+	var err error
+	switch kind {
+	case KindBundle:
+		prev, err = installBundle(fsys, stage, target, keep)
+	case KindFile:
+		src := u.path
+		if isArchive(u.path) || u.stage != "" {
+			if src, err = singleFile(fsys, stage); err != nil {
+				return nil, err
+			}
+		}
+		prev, err = installFile(fsys, src, target, keep)
+	default:
+		prev, err = installTree(fsys, stage, target, filepath.Base(exe), keep)
+	}
+	if prev != nil {
+		prev.Exe = exe
+	}
+	return prev, err
+}
+
+// stagePath is where an artifact is unpacked before it is installed; it is on
+// the same file system as the files it replaces.
+func stagePath(kind, target, version string) string {
+	switch kind {
+	case KindBundle:
+		return filepath.Join(filepath.Dir(target), "."+filepath.Base(target)+".new-"+safeVersion(version))
+	case KindFile:
+		return target + ".new-" + safeVersion(version)
+	}
+	return filepath.Join(target, ".krate-new-"+safeVersion(version))
 }
 
 func (c *Config) executable() (string, error) {
@@ -88,35 +160,33 @@ func bundleOf(exe string) string {
 
 type move struct{ from, to string }
 
-// applyTree moves each top-level entry of the artifact into dir. The files
-// they replace go to dir/.krate-old.
-func applyTree(fsys FS, artifact, dir, exeName, version string) error {
-	if !isArchive(artifact) {
-		return fmt.Errorf("updater: %q is not an archive", filepath.Base(artifact))
-	}
-	stage := filepath.Join(dir, ".krate-new-"+safeVersion(version))
-	trash := filepath.Join(dir, trashName)
-	// Leftovers from an earlier run; a real failure shows in the next steps.
-	_ = fsys.RemoveAll(stage)
-	if err := extractArchive(fsys, artifact, stage); err != nil {
-		_ = fsys.RemoveAll(stage)
-		return err
-	}
-	defer func() { _ = fsys.RemoveAll(stage) }()
+// PrevInfo records the files an update replaced, so a failed first start can
+// put them back.
+type PrevInfo struct {
+	// Kind is KindTree, KindBundle or KindFile.
+	Kind string `json:"kind"`
+	// Target is the install directory, the bundle or the file.
+	Target string `json:"target"`
+	// Exe is the executable to start again after a rollback.
+	Exe string `json:"exe"`
+	// Dir holds the replaced files (tree), or is the replaced bundle or file.
+	Dir string `json:"dir"`
+	// Placed and Trashed are the top-level names a tree update installed and
+	// the ones it moved into Dir.
+	Placed  []string `json:"placed,omitempty"`
+	Trashed []string `json:"trashed,omitempty"`
+}
 
-	entries, err := fsys.ReadDir(stage)
+// prevName is the directory next to the installed files that keeps the
+// replaced entries until the new version confirms a healthy start.
+const prevName = ".krate-prev"
+
+// installTree moves each top-level entry of the unpacked stage into dir. The
+// files they replace go to dir/.krate-old, or dir/.krate-prev with keep.
+func installTree(fsys FS, stage, dir, exeName string, keep bool) (*PrevInfo, error) {
+	stage, entries, err := unwrapTree(fsys, stage, exeName)
 	if err != nil {
-		return err
-	}
-	// A single top-level directory that holds the executable is a wrapper
-	// (name-1.2.0/...); step into it.
-	if len(entries) == 1 && entries[0].IsDir() && entries[0].Name() != "app" {
-		if _, err := fsys.Stat(filepath.Join(stage, entries[0].Name(), exeName)); err == nil {
-			stage = filepath.Join(stage, entries[0].Name())
-			if entries, err = fsys.ReadDir(stage); err != nil {
-				return err
-			}
-		}
+		return nil, err
 	}
 	hasExe := false
 	for _, e := range entries {
@@ -125,11 +195,15 @@ func applyTree(fsys FS, artifact, dir, exeName, version string) error {
 		}
 	}
 	if !hasExe {
-		return fmt.Errorf("updater: the update does not contain %s", exeName)
+		return nil, fmt.Errorf("updater: the update does not contain %s", exeName)
+	}
+	trash := filepath.Join(dir, trashName)
+	if keep {
+		trash = filepath.Join(dir, prevName)
 	}
 	_ = fsys.RemoveAll(trash)
 	if err := fsys.MkdirAll(trash, 0o755); err != nil {
-		return fmt.Errorf("updater: %s is not writable: %w (an app installed by a package manager updates through it)", dir, err)
+		return nil, fmt.Errorf("updater: %s is not writable: %w (an app installed by a package manager updates through it)", dir, err)
 	}
 
 	var trashed, placed []move
@@ -140,92 +214,76 @@ func applyTree(fsys FS, artifact, dir, exeName, version string) error {
 		for i := len(trashed) - 1; i >= 0; i-- {
 			_ = fsys.Rename(trashed[i].to, trashed[i].from)
 		}
+		if keep {
+			_ = fsys.RemoveAll(trash)
+		}
 	}
+	prev := &PrevInfo{Kind: KindTree, Target: dir, Dir: trash}
 	for _, e := range entries {
 		dst := filepath.Join(dir, e.Name())
 		if _, err := fsys.Lstat(dst); err == nil {
 			t := filepath.Join(trash, e.Name())
 			if err := fsys.Rename(dst, t); err != nil {
 				rollback()
-				return fmt.Errorf("updater: moving %s aside: %w", e.Name(), err)
+				return nil, fmt.Errorf("updater: moving %s aside: %w", e.Name(), err)
 			}
 			trashed = append(trashed, move{from: dst, to: t})
+			prev.Trashed = append(prev.Trashed, e.Name())
 		}
 		if err := fsys.Rename(filepath.Join(stage, e.Name()), dst); err != nil {
 			rollback()
-			return fmt.Errorf("updater: installing %s: %w", e.Name(), err)
+			return nil, fmt.Errorf("updater: installing %s: %w", e.Name(), err)
 		}
 		placed = append(placed, move{to: dst})
+		prev.Placed = append(prev.Placed, e.Name())
 	}
-	// Best effort: a running executable cannot be deleted on Windows.
-	_ = fsys.RemoveAll(trash)
-	return nil
+	if !keep {
+		// Best effort: a running executable cannot be deleted on Windows.
+		_ = fsys.RemoveAll(trash)
+	}
+	return prev, nil
 }
 
-// applyBundle replaces a .app directory.
-func applyBundle(fsys FS, artifact, bundle, version string) error {
-	if !isArchive(artifact) {
-		return fmt.Errorf("updater: %q is not an archive", filepath.Base(artifact))
-	}
+// installBundle replaces a .app directory with the one in the unpacked stage.
+func installBundle(fsys FS, stage, bundle string, keep bool) (*PrevInfo, error) {
 	parent := filepath.Dir(bundle)
 	name := filepath.Base(bundle)
-	stage := filepath.Join(parent, "."+name+".new-"+safeVersion(version))
-	old := filepath.Join(parent, "."+name+".old")
-	_ = fsys.RemoveAll(stage)
-	if err := extractArchive(fsys, artifact, stage); err != nil {
-		_ = fsys.RemoveAll(stage)
-		return err
+	next, err := findBundle(fsys, stage, name)
+	if err != nil {
+		return nil, err
 	}
-	defer func() { _ = fsys.RemoveAll(stage) }()
-	next := filepath.Join(stage, name)
-	if st, err := fsys.Stat(next); err != nil || !st.IsDir() {
-		entries, _ := fsys.ReadDir(stage)
-		next = ""
-		for _, e := range entries {
-			if e.IsDir() && strings.HasSuffix(e.Name(), ".app") {
-				if next != "" {
-					return errors.New("updater: the update contains more than one .app bundle")
-				}
-				next = filepath.Join(stage, e.Name())
-			}
-		}
-		if next == "" {
-			return fmt.Errorf("updater: the update does not contain %s", name)
-		}
+	old := filepath.Join(parent, "."+name+".old")
+	if keep {
+		old = filepath.Join(parent, "."+name+".prev")
 	}
 	_ = fsys.RemoveAll(old)
 	if err := fsys.Rename(bundle, old); err != nil {
-		return fmt.Errorf("updater: moving %s aside: %w (is %s writable?)", name, err, parent)
+		return nil, fmt.Errorf("updater: moving %s aside: %w (is %s writable?)", name, err, parent)
 	}
 	if err := fsys.Rename(next, bundle); err != nil {
 		_ = fsys.Rename(old, bundle)
-		return fmt.Errorf("updater: installing %s: %w", name, err)
+		return nil, fmt.Errorf("updater: installing %s: %w", name, err)
 	}
-	_ = fsys.RemoveAll(old)
-	return nil
+	if !keep {
+		_ = fsys.RemoveAll(old)
+	}
+	return &PrevInfo{Kind: KindBundle, Target: bundle, Dir: old}, nil
 }
 
-// applyFile replaces one file (an AppImage) with the artifact, which is the
-// file itself or an archive holding exactly one file.
-func applyFile(fsys FS, artifact, target, version string) error {
-	src := artifact
-	if isArchive(artifact) {
-		stage := target + ".new-" + safeVersion(version)
-		_ = fsys.RemoveAll(stage)
-		if err := extractArchive(fsys, artifact, stage); err != nil {
-			_ = fsys.RemoveAll(stage)
-			return err
-		}
-		defer func() { _ = fsys.RemoveAll(stage) }()
-		entries, err := fsys.ReadDir(stage)
-		if err != nil {
-			return err
-		}
-		if len(entries) != 1 || entries[0].IsDir() {
-			return errors.New("updater: an AppImage update must hold exactly one file")
-		}
-		src = filepath.Join(stage, entries[0].Name())
+// singleFile returns the one file in an unpacked stage.
+func singleFile(fsys FS, stage string) (string, error) {
+	entries, err := fsys.ReadDir(stage)
+	if err != nil {
+		return "", err
 	}
+	if len(entries) != 1 || entries[0].IsDir() {
+		return "", errors.New("updater: an AppImage update must hold exactly one file")
+	}
+	return filepath.Join(stage, entries[0].Name()), nil
+}
+
+// installFile replaces one file (an AppImage) with src.
+func installFile(fsys FS, src, target string, keep bool) (*PrevInfo, error) {
 	mode := fs.FileMode(0o755)
 	if st, err := fsys.Stat(target); err == nil {
 		mode = st.Mode().Perm()
@@ -233,12 +291,12 @@ func applyFile(fsys FS, artifact, target, version string) error {
 	tmp := target + ".new"
 	in, err := os.Open(src)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer in.Close()
 	out, err := fsys.Create(tmp, mode|0o200)
 	if err != nil {
-		return fmt.Errorf("updater: writing next to %s: %w", target, err)
+		return nil, fmt.Errorf("updater: writing next to %s: %w", target, err)
 	}
 	_, err = io.Copy(out, in)
 	if cerr := out.Close(); err == nil {
@@ -247,14 +305,74 @@ func applyFile(fsys FS, artifact, target, version string) error {
 	if err == nil {
 		err = fsys.Chmod(tmp, mode)
 	}
-	if err == nil {
+	prev := &PrevInfo{Kind: KindFile, Target: target, Dir: target + ".prev"}
+	if err == nil && keep {
+		_ = fsys.RemoveAll(prev.Dir)
+		err = fsys.Rename(target, prev.Dir)
+		if err == nil {
+			if err = fsys.Rename(tmp, target); err != nil {
+				_ = fsys.Rename(prev.Dir, target)
+			}
+		}
+	} else if err == nil {
 		err = fsys.Rename(tmp, target)
 	}
 	if err != nil {
 		_ = fsys.RemoveAll(tmp)
-		return fmt.Errorf("updater: replacing %s: %w", target, err)
+		return nil, fmt.Errorf("updater: replacing %s: %w", target, err)
 	}
-	return nil
+	return prev, nil
+}
+
+// restorePrevious puts the files an update replaced back and moves the
+// update's own files aside. It works on the real or an injected file system.
+func restorePrevious(fsys FS, p *PrevInfo) error {
+	var first error
+	note := func(err error) {
+		if first == nil && err != nil {
+			first = err
+		}
+	}
+	switch p.Kind {
+	case KindTree:
+		failed := filepath.Join(p.Target, ".krate-failed")
+		note(fsys.MkdirAll(failed, 0o755))
+		for i := len(p.Placed) - 1; i >= 0; i-- {
+			cur := filepath.Join(p.Target, p.Placed[i])
+			if _, err := fsys.Lstat(cur); err == nil {
+				note(fsys.Rename(cur, filepath.Join(failed, p.Placed[i])))
+			}
+		}
+		for _, name := range p.Trashed {
+			note(fsys.Rename(filepath.Join(p.Dir, name), filepath.Join(p.Target, name)))
+		}
+		if first == nil {
+			_ = fsys.RemoveAll(failed)
+			_ = fsys.RemoveAll(p.Dir)
+		}
+	case KindBundle, KindFile:
+		failed := p.Target + ".failed"
+		_ = fsys.RemoveAll(failed)
+		note(fsys.Rename(p.Target, failed))
+		if first == nil {
+			if err := fsys.Rename(p.Dir, p.Target); err != nil {
+				note(err)
+				_ = fsys.Rename(failed, p.Target)
+			} else {
+				_ = fsys.RemoveAll(failed)
+			}
+		}
+	default:
+		return fmt.Errorf("updater: unknown rollback kind %q", p.Kind)
+	}
+	return first
+}
+
+// discardPrevious deletes the kept files of a confirmed (or abandoned) update.
+func discardPrevious(fsys FS, p *PrevInfo) {
+	if p != nil && p.Dir != "" {
+		_ = fsys.RemoveAll(p.Dir)
+	}
 }
 
 func safeVersion(v string) string { return unsafeName.ReplaceAllString(v, "_") }
@@ -270,8 +388,10 @@ func CleanupStale(exe string) {
 	}
 	dir := filepath.Dir(exe)
 	os.RemoveAll(filepath.Join(dir, trashName))
+	os.RemoveAll(filepath.Join(dir, ".krate-failed"))
 	if b := bundleOf(exe); b != "" {
 		os.RemoveAll(filepath.Join(filepath.Dir(b), "."+filepath.Base(b)+".old"))
+		os.RemoveAll(b + ".failed")
 	}
 	if entries, err := os.ReadDir(dir); err == nil {
 		for _, e := range entries {
@@ -293,6 +413,13 @@ func Relaunch() error {
 			return err
 		}
 	}
+	return RelaunchPath(exe)
+}
+
+// RelaunchPath is Relaunch for a given executable (after a rollback the
+// running executable has been renamed, so its own path is not the one to
+// start).
+func RelaunchPath(exe string) error {
 	cmd := exec.Command(exe, os.Args[1:]...)
 	cmd.Stdin = nil
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
