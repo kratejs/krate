@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -135,9 +136,11 @@ func validateEasing(name, value string) error {
 		}
 	}
 	if m := cubicBezierRe.FindStringSubmatch(value); m != nil {
-		var x1, x2 float64
-		fmt.Sscan(m[1], &x1)
-		fmt.Sscan(m[3], &x2)
+		x1, err1 := strconv.ParseFloat(m[1], 64)
+		x2, err2 := strconv.ParseFloat(m[3], 64)
+		if err1 != nil || err2 != nil {
+			return fmt.Errorf("%s: invalid cubic-bezier %q", name, value)
+		}
 		if x1 < 0 || x1 > 1 || x2 < 0 || x2 > 1 {
 			return fmt.Errorf("%s: cubic-bezier x values must be between 0 and 1, got %q", name, value)
 		}
