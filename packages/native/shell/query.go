@@ -141,8 +141,12 @@ func pingScript(id int) string {
 
 func queryScript(id int, expr string) string {
 	u := fmt.Sprintf("%s?id=%d", queryPath, id)
-	return fmt.Sprintf(`(async()=>{try{await fetch(%q,{method:"POST",body:`+docToken+`})}catch(_){return}const gone=()=>{navigator.sendBeacon(%q,"1")};addEventListener("pagehide",gone);let b;try{const v=await (%s);b=JSON.stringify({ok:true,v:v===undefined?null:v})}catch(e){b=JSON.stringify({ok:false,error:e&&e.message!==undefined?String(e.name||"Error")+": "+e.message+(e.stack?"\n"+e.stack:""):String(e)})}try{await fetch(%q,{method:"POST",body:b})}catch(_){}removeEventListener("pagehide",gone)})()`,
-		u+"&phase=start", u+"&phase=gone", expr, u)
+	// The shell resends the script until the page reports the start; a slow
+	// report must not make a second copy run, so a copy that finds its id
+	// already started on this page does nothing (seen on windows-11-arm: a
+	// test flow ran twice and clicked everything twice).
+	return fmt.Sprintf(`(async()=>{const q=(globalThis.__krateQ??=new Set());if(q.has(%d))return;q.add(%d);try{await fetch(%q,{method:"POST",body:`+docToken+`})}catch(_){q.delete(%d);return}const gone=()=>{navigator.sendBeacon(%q,"1")};addEventListener("pagehide",gone);let b;try{const v=await (%s);b=JSON.stringify({ok:true,v:v===undefined?null:v})}catch(e){b=JSON.stringify({ok:false,error:e&&e.message!==undefined?String(e.name||"Error")+": "+e.message+(e.stack?"\n"+e.stack:""):String(e)})}try{await fetch(%q,{method:"POST",body:b})}catch(_){}removeEventListener("pagehide",gone)})()`,
+		id, id, u+"&phase=start", id, u+"&phase=gone", expr, u)
 }
 
 // Query evaluates a JavaScript expression in every open window and returns its

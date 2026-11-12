@@ -3,6 +3,7 @@ package shell
 import (
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
 	"regexp"
 	"strings"
 	"sync"
@@ -185,5 +186,44 @@ func TestQueryViewKeepsWaitingOnTheSameDocument(t *testing.T) {
 	got, err := c.query(navigatingPage(c, func() string { return "a" }, 3, `{"ok":true,"v":"slow"}`), "1", true)
 	if err != nil || got != `"slow"` {
 		t.Fatalf("query = %q, %v", got, err)
+	}
+}
+
+// TestQueryScriptRunsOncePerPage runs the real query script twice on one
+// "page" in Node, as the shell does when the start report is slow: the
+// expression must run once. When the start report fails (the page could not
+// reach the endpoint yet), a resent copy runs it.
+func TestQueryScriptRunsOncePerPage(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is not installed")
+	}
+	run := func(failFirst bool) string {
+		t.Helper()
+		fail := "false"
+		if failFirst {
+			fail = "true"
+		}
+		js := `let calls = 0, failNext = ` + fail + `;
+globalThis.addEventListener = () => {}; globalThis.removeEventListener = () => {};
+globalThis.fetch = async (u) => {
+  calls++;
+  await new Promise((r) => setTimeout(r, 20));
+  if (failNext && u.includes("phase=start")) { failNext = false; throw new TypeError("not reachable"); }
+};
+` + queryScript(7, "(globalThis.ran = (globalThis.ran || 0) + 1)") + `;
+setTimeout(() => {` + queryScript(7, "(globalThis.ran = (globalThis.ran || 0) + 1)") + `}, 40);
+setTimeout(() => console.log(String(globalThis.ran || 0)), 200);`
+		out, err := exec.Command(node, "-e", js).CombinedOutput()
+		if err != nil {
+			t.Fatalf("node: %v\n%s", err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	if got := run(false); got != "1" {
+		t.Errorf("a resent script ran the expression %s times, want 1", got)
+	}
+	if got := run(true); got != "1" {
+		t.Errorf("after a failed start, the resent script ran the expression %s times, want 1", got)
 	}
 }
