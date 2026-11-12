@@ -8,8 +8,9 @@ description: Memory profiles, feature detection, Linux levers, shared web proces
 
 > **Preview.** Part of [Krate Native](/docs/native/). Linux (WebKitGTK) is the
 > platform where the levers are written and measured. The macOS (WKWebView) and
-> Windows (WebView2) levers compile and have unit-tested decision tables, but
-> have never run on those systems; see [macOS and Windows](#macos-and-windows-untested).
+> Windows (WebView2) levers have unit-tested decision tables and run on every
+> window the CI native job opens on those systems; what they save is measured but
+> not asserted, see [macOS and Windows](#macos-and-windows).
 
 ## Profiles and config
 
@@ -271,20 +272,25 @@ the bottom edge of the window). It opens a panel with:
 It samples once when opened and then every 2 seconds, and stops when closed, so
 a closed panel costs nothing.
 
-## macOS and Windows (untested)
+## macOS and Windows
 
-> **Untested.** Everything in this section was written on Linux from Apple's
-> WebKit headers and the WebView2 headers and documentation. It compiles for
-> `darwin` and `windows`, its decision tables are unit tested, but none of it has
-> run on a Mac or a Windows machine, and no memory number has been measured.
-> The `Native memory report` step in CI (`.github/workflows/ci.yml`, job
-> `native`) runs `krate native profile --memory` on macOS and Windows runners
-> and uploads `report.json` for the `balanced` and `performance` profiles. The
-> `Native memory budget comparison` step prints those numbers next to the
-> linux-amd64 limits (informational; macOS and Windows budgets are planned). This
-> section stays marked untested until that step reports. The window release and
-> hide behavior described above is untested there too. Treat the savings as
-> hypotheses.
+> **Run in CI, savings not asserted.** The levers were written on Linux from
+> Apple's WebKit headers and the WebView2 headers and documentation. The CI
+> native job opens windows with them on macOS and Windows runners (the platform
+> GUI tests and `TestGUIMemory`), and its `Native memory report` step runs
+> `krate native profile --memory` on `examples/native-tasks` for the `balanced`
+> and `performance` profiles and uploads `report.json`. No test asserts what a
+> lever saves, and the macOS and Windows budgets are planned (the `Native memory
+> budget comparison` step prints the numbers next to the linux-amd64 limits and
+> is informational).
+>
+> The last green run (commit 8cef55f3) measured, after the page had been idle
+> for 10 seconds: on macOS (Apple silicon runner, `phys_footprint`) a total of
+> 52.4 MB for `balanced` and 52.1 MB for `performance`, with the web content
+> process at 21.3 and 21.7 MB, so the profile made no visible difference there;
+> on Windows (`PrivateUsage`) 144.6 MB and 149.4 MB, with the web process at 23.2
+> and 26.6 MB. Treat the savings on these two systems as unproven. The window
+> release and hide behavior described above has no macOS or Windows test.
 
 Every lever is guarded. A missing Objective-C selector, a failed
 `QueryInterface` or a rejected argument skips that lever and logs one line to

@@ -13,10 +13,11 @@ import (
 // content_features.cc) and Microsoft's WebView2 browser flag list; see
 // TestBrowserArgumentNames. Whether the runtime honors each one is unmeasured.
 //
-// UNTESTED: none of this has run on Windows. It is compile-checked only and
-// the argument lists below are reasoned from Chromium and WebView2 documentation, not
-// measured. The CI "native-memory" step is expected to produce the first
-// numbers. Every lever is guarded: a failed QueryInterface or HRESULT skips the
+// The arguments are applied to the WebView2 environment of every Windows CI
+// GUI test, and the CI native job measures the example on windows-latest
+// (informational). No test asserts that the runtime honors an argument or what
+// it saves: the lists below are reasoned from Chromium and WebView2
+// documentation. Every lever is guarded: a failed QueryInterface or HRESULT skips the
 // lever and logs once; nothing here may stop the app from starting.
 //
 // Expected inputs, set from app.json by the shell: Config.Memory is the

@@ -20,8 +20,9 @@ const releaseWait = 1500 * time.Millisecond
 // _WKProcessPoolConfiguration.usesSingleWebProcess switch makes every view of
 // the pool share one, which is what an app with a single origin wants. Both
 // the class and the selectors are checked, and a WebKit without them gets the
-// plain pool (one WebContent process per window). This path has not been run
-// on macOS hardware yet; see the memory docs page.
+// plain pool (one WebContent process per window). This path runs when
+// each macOS GUI test creates its first window; no test asserts that the
+// views then share one process (see the memory docs page).
 func newProcessPool() objc.ID {
 	poolCls := cls("WKProcessPool")
 	confCls := cls("_WKProcessPoolConfiguration")

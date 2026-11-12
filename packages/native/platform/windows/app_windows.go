@@ -41,7 +41,7 @@ type Config struct {
 	// IconPath is an optional PNG or ICO file used as the default toast icon.
 	IconPath string
 	// Memory is the memory profile from app.json "memory": "balanced"
-	// (default), "minimal" or "performance". UNTESTED, see memory.go.
+	// (default), "minimal" or "performance". See memory.go.
 	Memory string
 	// Features is app.json "features" (media, webaudio, webgl, webrtc,
 	// spellcheck). Nil means not detected: no feature is switched off.

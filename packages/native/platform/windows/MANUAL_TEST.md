@@ -1,8 +1,10 @@
 # Manual test on Windows
 
-The Win32 and COM code in this package cannot be exercised from Linux; it was
-checked against WebView2.h by reading and by compiling for windows/amd64 and
-windows/arm64. These steps verify it on a real machine.
+The CI native job runs the GUI tests of this package on windows-latest. It
+cannot see real key presses, real tray clicks, toast banners, high-DPI
+monitors or arm64 hardware; these steps verify those on a real machine. The
+code was also checked against WebView2.h by reading and by compiling for
+windows/amd64 and windows/arm64.
 
 ## Prerequisites
 

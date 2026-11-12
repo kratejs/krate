@@ -3,8 +3,8 @@
 package windows
 
 // Global shortcuts through RegisterHotKey on the hidden utility window. WM_HOTKEY
-// arrives on the main thread. UNTESTED beyond compilation and the pure logic in
-// hotkey.go; the CI GUI test registers and releases real hotkeys.
+// arrives on the main thread. The pure logic is in hotkey.go; the CI GUI test
+// registers and releases real hotkeys.
 
 import (
 	"syscall"
