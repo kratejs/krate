@@ -24,6 +24,7 @@ module for the UI.
 | Global shortcuts | `sdk/shortcut` | `@krate/app/shortcut` | `shortcut` |
 | Notifications | `sdk/notify` | `@krate/app/notify` | `notify` |
 | Lifecycle | `sdk/app` | `@krate/app/app` | `app` |
+| Badge, displays, power, login, theme, crash | `sdk/badge`, `sdk/screen`, `sdk/power`, `sdk/login`, `sdk/theme`, `sdk/crash` | `@krate/app/badge` and so on | `badge`, `screen`, `power`, `power:inhibit`, `login`, `theme`, `crash` ([OS integration](/docs/native/system/)) |
 
 Go packages live under `github.com/kratejs/krate/packages/native/sdk/`.
 
@@ -37,9 +38,9 @@ for the full table):
 { "permissions": ["window", "dialog", "clipboard", "menu", "notify", "tray"] }
 ```
 
-With no list, `window`, `app`, `menu`, `dialog`, `notify` and `clipboard`
-(write) are granted. `clipboard:read`, `tray` and `shortcut` must be listed:
-a page that can read the clipboard sees what the user copied in other
+With no list, `window`, `app`, `menu`, `dialog`, `notify`, `clipboard`
+(write), `badge`, `screen`, `power` and `theme` are granted. `clipboard:read`, `tray`, `shortcut`, `power:inhibit`, `login` and
+`crash` must be listed: a page that can read the clipboard sees what the user copied in other
 applications, and tray icons and global shortcuts outlive the window. A call
 without its permission rejects with code `permission_denied` and
 `data.permission`, like every other SDK id. Go host code is trusted and is
@@ -155,6 +156,17 @@ source. By area:
 | app | `krate/app.quit`, `Relaunch`, `Supports` | `krate/app.events` |
 
 `SingleInstance` and `LaunchArgs` exist only for Go host code.
+
+The [OS integration](/docs/native/system/) areas have these ids:
+
+| Area | Ids |
+|------|-----|
+| badge (`badge`) | `krate/badge.set`, `krate/badge.get`, `krate/badge.setProgress`, `krate/badge.progress`, `krate/badge.setUrgent` |
+| screen (`screen`) | `krate/screen.list`, `krate/screen.primary`, `krate/screen.ofWindow`, `krate/screen.centerWindow`, stream `krate/screen.events` |
+| power (`power`; blockers need `power:inhibit`) | `krate/power.state`, `krate/power.idleTime`, `krate/power.setIdleThreshold`, `krate/power.preventSleep`, `krate/power.allowSleep`, stream `krate/power.events` |
+| login (`login`) | `krate/login.get`, `krate/login.set` |
+| theme (`theme`) | `krate/theme.get`, `krate/theme.set`, stream `krate/theme.events` |
+| crash (`crash`) | `krate/crash.list`, `krate/crash.read`, `krate/crash.delete`, `krate/crash.setAutoReload`, stream `krate/crash.events` |
 
 ## How it works in dev
 

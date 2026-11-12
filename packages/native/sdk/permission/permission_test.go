@@ -22,7 +22,7 @@ func TestDefaults(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got, want := s.List(), []string{"app", "clipboard", "db", "dialog", "kv", "menu", "notify", "os:info", "window"}; !reflect.DeepEqual(got, want) {
+		if got, want := s.List(), []string{"app", "badge", "clipboard", "db", "dialog", "kv", "menu", "notify", "os:info", "power", "screen", "theme", "window"}; !reflect.DeepEqual(got, want) {
 			t.Errorf("Parse(%v) = %v, want %v", list, got, want)
 		}
 	}

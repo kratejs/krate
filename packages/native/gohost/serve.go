@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/kratejs/krate/packages/native/crashreport"
 	"github.com/kratejs/krate/packages/native/internal/hosttransport"
 	"github.com/kratejs/krate/packages/native/internal/memory"
 	"github.com/kratejs/krate/packages/native/scheme"
@@ -31,6 +32,12 @@ func Serve(register func(*scheme.Registry)) {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	// A panic or fatal error of the child leaves a crash log the shell turns
+	// into a report (see package crashreport).
+	crashreport.Configure(crashreport.Config{
+		AppID: os.Getenv("KRATE_APP_ID"), AppVersion: os.Getenv("KRATE_APP_VERSION"), Process: "host",
+	})
+	stopCrash := crashreport.Install()
 	// The shell passes its memory profile down.
 	prof := memory.Parse(os.Getenv(memory.EnvProfile))
 	memory.ApplyGo(prof)
@@ -38,9 +45,11 @@ func Serve(register func(*scheme.Registry)) {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "krate gohost:", err)
 		stopProfile()
+		stopCrash()
 		os.Exit(1)
 	}
 	stopProfile()
+	stopCrash()
 	os.Exit(0)
 }
 

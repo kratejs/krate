@@ -99,10 +99,13 @@ type App struct {
 		fns       []func()
 		scheduled bool
 	}
-	stopCh    chan struct{}
-	running   atomic.Bool
-	stopped   atomic.Bool
-	quitEarly atomic.Bool
+	stopCh chan struct{}
+	// displaysFn and crashFn are the OS integration handlers (system.go).
+	displaysFn func()
+	crashFn    func(caps.ViewCrash)
+	running    atomic.Bool
+	stopped    atomic.Bool
+	quitEarly  atomic.Bool
 }
 
 // The C callbacks are created once; purego limits how many may exist.

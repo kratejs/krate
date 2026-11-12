@@ -1,27 +1,35 @@
 {
   "names": [
     "app",
+    "badge",
     "clipboard",
     "clipboard:read",
+    "crash",
     "db",
     "dialog",
     "fs",
     "fs:read",
     "kv",
+    "login",
     "menu",
     "net",
     "notify",
     "os:info",
     "os:secrets",
     "os:secrets.read",
+    "power",
+    "power:inhibit",
+    "screen",
     "shell:openExternal",
     "shortcut",
+    "theme",
     "tray",
     "updater",
     "window"
   ],
   "defaults": [
     "app",
+    "badge",
     "clipboard",
     "db",
     "dialog",
@@ -29,6 +37,9 @@
     "menu",
     "notify",
     "os:info",
+    "power",
+    "screen",
+    "theme",
     "window"
   ]
 }
