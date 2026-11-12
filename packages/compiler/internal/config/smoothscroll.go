@@ -9,34 +9,33 @@ import (
 )
 
 type SmoothScrollConfig struct {
-	Enabled bool `json:"enabled,omitempty"`
-	Lerp *float64 `json:"lerp,omitempty"`
-	Duration *float64 `json:"duration,omitempty"`
-	Easing string `json:"easing,omitempty"`
-	SmoothWheel *bool `json:"smoothWheel,omitempty"`
-	SyncTouch bool `json:"syncTouch,omitempty"`
-	SyncTouchLerp *float64 `json:"syncTouchLerp,omitempty"`
-	TouchInertiaExponent *float64 `json:"touchInertiaExponent,omitempty"`
-	Infinite bool `json:"infinite,omitempty"`
-	Orientation string `json:"orientation,omitempty"`
-	GestureOrientation string `json:"gestureOrientation,omitempty"`
-	TouchMultiplier *float64 `json:"touchMultiplier,omitempty"`
-	WheelMultiplier *float64 `json:"wheelMultiplier,omitempty"`
-	AutoResize *bool `json:"autoResize,omitempty"`
-	Overscroll *bool `json:"overscroll,omitempty"`
-	AutoRaf *bool `json:"autoRaf,omitempty"`
-	Anchors *SmoothScrollAnchors `json:"anchors,omitempty"`
-	AutoToggle bool `json:"autoToggle,omitempty"`
-	AllowNestedScroll bool `json:"allowNestedScroll,omitempty"`
-	NaiveDimensions bool `json:"naiveDimensions,omitempty"`
-	StopInertiaOnNavigate bool `json:"stopInertiaOnNavigate,omitempty"`
-	RespectReducedMotion *bool `json:"respectReducedMotion,omitempty"`
-	Prevent string `json:"prevent,omitempty"`
-	Wrapper      string `json:"wrapper,omitempty"`
-	Content      string `json:"content,omitempty"`
-	EventsTarget string `json:"eventsTarget,omitempty"`
-	ScrollTopOnNavigate *bool `json:"scrollTopOnNavigate,omitempty"`
-	Snap *SmoothScrollSnap `json:"snap,omitempty"`
+	Enabled               bool                 `json:"enabled,omitempty"`
+	Lerp                  *float64             `json:"lerp,omitempty"`
+	Duration              *float64             `json:"duration,omitempty"`
+	Easing                string               `json:"easing,omitempty"`
+	SmoothWheel           *bool                `json:"smoothWheel,omitempty"`
+	SyncTouch             bool                 `json:"syncTouch,omitempty"`
+	SyncTouchLerp         *float64             `json:"syncTouchLerp,omitempty"`
+	TouchInertiaExponent  *float64             `json:"touchInertiaExponent,omitempty"`
+	Infinite              bool                 `json:"infinite,omitempty"`
+	Orientation           string               `json:"orientation,omitempty"`
+	GestureOrientation    string               `json:"gestureOrientation,omitempty"`
+	TouchMultiplier       *float64             `json:"touchMultiplier,omitempty"`
+	WheelMultiplier       *float64             `json:"wheelMultiplier,omitempty"`
+	AutoResize            *bool                `json:"autoResize,omitempty"`
+	Overscroll            *bool                `json:"overscroll,omitempty"`
+	AutoRaf               *bool                `json:"autoRaf,omitempty"`
+	Anchors               *SmoothScrollAnchors `json:"anchors,omitempty"`
+	AutoToggle            bool                 `json:"autoToggle,omitempty"`
+	AllowNestedScroll     bool                 `json:"allowNestedScroll,omitempty"`
+	NaiveDimensions       bool                 `json:"naiveDimensions,omitempty"`
+	StopInertiaOnNavigate bool                 `json:"stopInertiaOnNavigate,omitempty"`
+	RespectReducedMotion  *bool                `json:"respectReducedMotion,omitempty"`
+	Prevent               string               `json:"prevent,omitempty"`
+	Wrapper               string               `json:"wrapper,omitempty"`
+	Content               string               `json:"content,omitempty"`
+	EventsTarget          string               `json:"eventsTarget,omitempty"`
+	Snap                  *SmoothScrollSnap    `json:"snap,omitempty"`
 }
 
 type SmoothScrollAnchors struct {
@@ -49,13 +48,13 @@ type SmoothScrollAnchors struct {
 }
 
 type SmoothScrollSnap struct {
-	Enabled bool `json:"enabled,omitempty"`
-	Type string `json:"type,omitempty"`
-	Lerp     *float64 `json:"lerp,omitempty"`
-	Duration *float64 `json:"duration,omitempty"`
-	Easing   string   `json:"easing,omitempty"`
-	DistanceThreshold string `json:"distanceThreshold,omitempty"`
-	Debounce *int `json:"debounce,omitempty"`
+	Enabled           bool     `json:"enabled,omitempty"`
+	Type              string   `json:"type,omitempty"`
+	Lerp              *float64 `json:"lerp,omitempty"`
+	Duration          *float64 `json:"duration,omitempty"`
+	Easing            string   `json:"easing,omitempty"`
+	DistanceThreshold string   `json:"distanceThreshold,omitempty"`
+	Debounce          *int     `json:"debounce,omitempty"`
 }
 
 var SmoothScrollEasings = []string{

@@ -101,7 +101,7 @@ func TestSmoothScrollKnownKeys(t *testing.T) {
 	if !knownTopLevelKeys["smoothScroll"] {
 		t.Fatal("smoothScroll must be a known top-level key")
 	}
-	for _, key := range []string{"lerp", "duration", "easing", "smoothWheel", "syncTouch", "infinite", "anchors", "snap", "prevent", "scrollTopOnNavigate"} {
+	for _, key := range []string{"lerp", "duration", "easing", "smoothWheel", "syncTouch", "infinite", "anchors", "snap", "prevent"} {
 		if !knownNestedKeys["smoothScroll"][key] {
 			t.Errorf("smoothScroll.%s must be a known nested key", key)
 		}
