@@ -186,6 +186,7 @@ func (a *App) connectView(v *view) {
 	api.gSignalConnectData(v.widget, "decide-policy", cbPolicy, uintptr(v.ref), 0, 0)
 	api.gSignalConnectData(v.widget, "load-changed", cbLoad, uintptr(v.ref), 0, 0)
 	api.gSignalConnectData(v.widget, "close", cbClose, uintptr(v.ref), 0, 0)
+	a.connectChrome(v)
 }
 
 // PrimaryView is the view the window was created with.
