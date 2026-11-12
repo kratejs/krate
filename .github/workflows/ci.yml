@@ -920,17 +920,22 @@ jobs:
         env:
           KRATE_REQUIRE_E2E: "1"
 
-      # The snap store is sometimes unreachable for a moment from the
-      # runners ("unable to contact snap store"): retry with a backoff.
+      # snapcraft, the core24 base and the GNOME content snaps only come from
+      # the snap store, which is sometimes unreachable from the runners for
+      # many minutes. A few retries; if the store stays down, the job warns
+      # and the snap smoke test skips itself (snapcraft becomes an optional
+      # tool) instead of failing a run whose code is fine. The generated
+      # snapcraft.yaml is still checked by the unit tests.
       - name: Install snapcraft
         if: matrix.os == 'ubuntu-latest'
         run: |
-          for i in 1 2 3 4 5; do
+          for i in 1 2 3; do
             sudo snap install snapcraft --classic && exit 0
             echo "snap install failed (attempt $i); retrying in $((i * 20))s"
             sleep $((i * 20))
           done
-          exit 1
+          echo "::warning title=snap store unreachable::snapcraft could not be installed from the snap store; the snap smoke test is skipped in this run"
+          echo "KRATE_OPTIONAL_TOOLS=${KRATE_OPTIONAL_TOOLS:+$KRATE_OPTIONAL_TOOLS,}snapcraft" >> "$GITHUB_ENV"
 
       - name: Packaging smoke test, snap build, install, run (Linux)
         if: matrix.os == 'ubuntu-latest'
