@@ -216,10 +216,11 @@ func (a *App) trayReadd() {
 // (the GUI test waits on it).
 var trayReadds atomic.Int32
 
-// allowTaskbarCreated lets the utility window receive TaskbarCreated when the
-// process runs elevated: explorer.exe is not, and User Interface Privilege
-// Isolation drops its broadcast otherwise.
-func allowTaskbarCreated(hwnd uintptr, msg uint32) {
+// allowMessage lets the utility window receive a message from a process of
+// lower integrity. An elevated app needs it for TaskbarCreated (explorer.exe
+// is not elevated) and for WM_COPYDATA (the process a toast click starts is
+// not elevated); User Interface Privilege Isolation drops both otherwise.
+func allowMessage(hwnd uintptr, msg uint32) {
 	if pChangeWindowMessageFilterEx.Find() != nil {
 		return
 	}

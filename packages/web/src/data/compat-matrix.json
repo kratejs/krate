@@ -854,12 +854,12 @@
       "id": "native-host-children",
       "area": "Native: Node, Bun and Deno host children",
       "native": {
-        "linux": "partial",
+        "linux": "supported",
         "macos": "untested",
         "windows": "untested"
       },
       "target": "Krate Native v1",
-      "summary": "TypeScript host code can run as a child process of the shell under Node, Bun or Deno (native.host.runtime, or native.host.islands for single packages). Deno gets permission flags derived from the app's permissions; a release build compiles the child into an executable (Node SEA, bun build --compile, deno compile).",
+      "summary": "TypeScript host code can run as a child process of the shell under Node, Bun or Deno (native.host.runtime, or native.host.islands for single packages). Deno gets permission flags derived from the app's permissions (including its own unix socket, which recent Deno versions treat as network access); a release build compiles the child into an executable (Node SEA, bun build --compile, deno compile).",
       "tests": [
         "TestHostChildNode",
         "TestNativeHostChildNodeEndToEnd",
@@ -877,12 +877,17 @@
         "TestChildTCPTransport",
         "TestRunTCPToken",
         "TestServeParentTCP",
-        "TestRemoteTCPSendsToken"
+        "TestRemoteTCPSendsToken",
+        "TestNativeHostChildGUI",
+        "TestExpandSocketArgs",
+        "TestDenoCompileNetFlagPerTarget"
       ],
       "knownLimits": [
-        "Node children are verified end to end on Linux. Bun and Deno command lines, flags and release builds are unit tested with stand-in executables; a real Deno child has not been run by any test, and the Bun and Node compile tests skip when the tool is missing.",
-        "macOS: untested. The same Go code is built for it (cross-compile checks in CI) and the CI native job runs go test on it, but no result of a run against a real WKWebView window has been confirmed.",
-        "Windows: untested. Node, Bun and Deno cannot use AF_UNIX there, so the shell uses loopback TCP with a random token (tests run that transport on every OS, including Linux with Node and Bun, and the hostchild tests run on the Windows CI job). A real Windows run of the shell with a host child, and of Deno on any OS, has not been confirmed."
+        "Linux: Node, Bun and Deno children are run end to end through the real krate-shell in a window (TestNativeHostChildGUI: host call, host signal, stream, thrown error, binary and unicode arguments). Node and Bun release builds are verified; the Deno release command line (deno compile with plain --allow-net for unix targets) is unit tested only, and the Bun and Node compile tests skip when the tool is missing.",
+        "Deno must be recent enough to take unix:<path> in --allow-net (verified with 2.9.8); older versions reject the entry, and the dev command line is not adapted to them.",
+        "macOS: untested. The same Go code is built for it and the CI native job runs TestNativeHostChildGUI there, but no result of a run against a real WKWebView window has been confirmed.",
+        "Windows: untested. Node, Bun and Deno cannot use AF_UNIX there, so the shell uses loopback TCP with a random token (tests run that transport on every OS, and TestNativeHostChildGUI runs it through the real shell on the Windows CI job); a passing Windows run has not been confirmed.",
+        "arm64: Bun and Deno publish no Windows on ARM builds, so the windows-11-arm CI job skips those two (KRATE_SKIP_RUNTIMES) and runs Node only; Linux arm64 and macOS run all three."
       ]
     },
     {
@@ -1136,13 +1141,21 @@
         "TestRealDunstDefaultAction",
         "TestRealDunstActionButton",
         "TestRealDunstGoneIsUnsupported",
-        "TestRealNoDaemonOnARealBus"
+        "TestRealNoDaemonOnARealBus",
+        "TestToastXMLProtocolActivation",
+        "TestPlatformNotifyLaunchEventWaitsForSubscriber",
+        "TestPublishRetainedWaitsForTheFirstSubscriber",
+        "TestActivationPayloadRoundTrip",
+        "TestSchemeIsStableAndValid",
+        "TestURIRoundTrip",
+        "TestGUIToastActivationFromASecondProcess",
+        "TestGUIToastProtocolRegistration"
       ],
       "knownLimits": [
         "Verified against a real dunst daemon on a private session bus (text, icon, urgency, replacement by id, close from the app and from the daemon with the NotificationClosed reason, default action and action buttons, expiry, daemon gone) and against a fake service for protocol edge cases. Other daemons (GNOME Shell, KDE Plasma) were not run. Without a service that owns org.freedesktop.Notifications the call returns ErrUnsupported.",
         "macOS: implemented, not yet run on a Mac (untested). It needs an app bundle with a bundle identifier; krate native dev runs the shell from a generated <appId>.dev bundle under .krate/dev. A process outside a bundle gets an ErrUnsupported error that names the fix. The first notification asks for permission and a refusal is a permission_denied error. Icon and Timeout are ignored, and critical urgency is only time-sensitive (the critical level needs an Apple entitlement).",
         "Windows: untested. Toasts use WinRT through hand-written COM bindings; the toast XML, ids and registry values are unit tested on Linux, and a Windows CI job shows a toast, but nothing here has been confirmed on a real desktop. An unpackaged app registers its AppUserModelID under HKCU; a packaged app uses its package identity.",
-        "Windows: clicking a toast after the app has quit does nothing (COM activation of a closed app is not implemented). Windows has no per-toast timeout or urgency levels, and Show succeeding does not prove a banner was drawn (Focus assist and per-app settings can suppress it)."
+        "Windows: a toast click uses protocol activation with a per-app URL scheme (HKCU registration for an unpackaged app, NSIS and MSIX registration too), not a COM activator. With the app running, the new process hands the click to it (WM_COPYDATA); with no instance, the click is kept and delivered when the page subscribes (the event that started the app). Unit tests cover the URL, the payload, the registry values and the manifest; the Windows CI job relaunches the test binary with the URL to prove both paths and checks the registration, but a real click on a real toast, Action Center after a reboot and the packaged (MSIX) path are not confirmed. Windows has no per-toast timeout or urgency levels, and Show succeeding does not prove a banner was drawn (Focus assist and per-app settings can suppress it)."
       ]
     },
     {
@@ -1184,14 +1197,15 @@
         "TestRealNoTrayAtAll",
         "TestTrayFallsBackToXEmbedWithoutAStatusNotifierHost",
         "TestTrayPrefersStatusNotifierOverXEmbed",
-        "TestNoTrayAtAllNamesTheAppIndicatorExtension"
+        "TestNoTrayAtAllNamesTheAppIndicatorExtension",
+        "TestGUITrayTaskbarCreated"
       ],
       "knownLimits": [
         "The tray uses the StatusNotifierItem protocol when a StatusNotifier host exists and falls back to the legacy XEmbed system tray (GtkStatusIcon) when only an XEmbed tray manager owns _NET_SYSTEM_TRAY_S<screen> (X11 only). Stock GNOME with neither returns ErrUnsupported with a hint to install the AppIndicator extension. Verified against stalonetray (XEmbed, with real clicks and menu selection through XTEST) and against the Ayatana application indicator service as a real StatusNotifierWatcher and host; KDE Plasma, GNOME Shell with the extension and other panels were not run.",
         "Linux shortcuts are verified on X11 (XGrabKey). On Wayland they need the org.freedesktop.portal.GlobalShortcuts portal, verified against a fake portal only (TestShortcutPortal), and return ErrUnsupported without it. No portal backend that implements GlobalShortcuts can run headless here: the GNOME backend needs a running gnome-shell/mutter session, the KDE backend needs KGlobalAccel in a Plasma session, the Hyprland and COSMIC backends are not packaged for Debian or Ubuntu, and xdg-desktop-portal-wlr does not implement the interface.",
         "macOS: implemented, not yet run on a Mac (untested). With a tray menu any click opens the menu and is reported as click; right-click and double-click are only reported without a menu. Radio items show a checkmark. Single-tone gray icons become template images.",
         "macOS shortcuts use Carbon RegisterEventHotKey (no Accessibility permission). Keys are ANSI key positions, so other layouts differ, and macOS 15 ignores hot keys whose only modifiers are Option and/or Shift. A combination that is already registered is an error. Pressing a real hot key and clicking the real status item are manual checks (platform/darwin/MANUAL_TEST.md).",
-        "Windows: untested. The key table, the NOTIFYICONDATAW layout, event decoding and icon scaling are unit tested on Linux, and a Windows CI job adds, modifies and removes a tray icon and registers hotkeys, but the icon, its menu behavior, the explorer-restart re-add and real key presses have not been confirmed on a real desktop.",
+        "Windows: untested. The key table, the NOTIFYICONDATAW layout, event decoding and icon scaling are unit tested on Linux, and a Windows CI job adds, modifies and removes a tray icon, registers hotkeys, and plays an explorer restart (the icon is deleted behind the app's back, the real TaskbarCreated message is broadcast, and the icon must be modifiable again, TestGUITrayTaskbarCreated). None of this has passed on a real desktop yet, and a real explorer.exe restart and real key presses are manual checks. An elevated app is allowed to receive TaskbarCreated with ChangeWindowMessageFilterEx.",
         "Windows: a shortcut another app or Windows holds fails with an 'already registered by another app' error; many Win+ combinations are reserved by the system. The tray menu has no accelerators and one icon per app."
       ]
     },
@@ -1332,7 +1346,7 @@
         "windows": "untested"
       },
       "target": "Krate Native v1",
-      "summary": "krate native package builds .tar.gz, .deb, .rpm and AppImage on Linux, .app, .zip and .dmg on macOS, and .zip, NSIS installer and MSIX on Windows, from a release executable or the prebuilt-shell layout, with icons, desktop entries and update files.",
+      "summary": "krate native package builds .tar.gz, .deb, .rpm and AppImage on Linux, .app, .zip and .dmg on macOS, and .zip, NSIS installer and MSIX on Windows, from a release executable or the prebuilt-shell layout, with icons, desktop entries and update files. The Windows installer checks for the WebView2 Runtime and, by native.bundle.windows.webview2, downloads or embeds Microsoft's bootstrapper or ships a Fixed Version runtime folder; the app shows a message box with the download link when the runtime is missing.",
       "tests": [
         "TestLinuxTarGzAndDeb",
         "TestRPM",
@@ -1342,11 +1356,20 @@
         "TestWindowsZipAndNSIS",
         "TestMSIXStructure",
         "TestNativePackageEndToEnd",
-        "TestUpdateArtifactsAreSignedAndFeedWritten"
+        "TestUpdateArtifactsAreSignedAndFeedWritten",
+        "TestNSISWebView2Download",
+        "TestNSISWebView2Embed",
+        "TestNSISWebView2NoneAndFixed",
+        "TestNSISRegistersTheToastScheme",
+        "TestMSIXDeclaresTheToastScheme",
+        "TestAddWebView2",
+        "TestGUIRuntimeMissingMessageBox"
       ],
       "knownLimits": [
         "On Linux the .deb, .rpm and AppImage of examples/native-tasks are built, and the .deb contents and AppImage were launched and checked to serve the first page (scripts/native-smoke.mjs; the CI native job installs the .deb with dpkg and runs the AppImage). The .dmg needs hdiutil and the NSIS installer needs makensis, so those are exercised only in the macOS and Windows CI steps, which have not run yet.",
-        "macOS and Windows packages are assembled by pure Go code on Linux and checked for structure; none has been installed or opened on its OS. The NSIS installer needs makensis."
+        "macOS and Windows packages are assembled by pure Go code on Linux and checked for structure; none has been installed or opened on its OS. The NSIS installer needs makensis.",
+        "arm64 packages are built for linux/arm64, windows/arm64 and darwin/arm64 (deb and rpm architecture, MSIX ProcessorArchitecture, AppImage ARCH, Windows resources) and checked by unit tests; the CI native job also runs on ubuntu-24.04-arm and windows-11-arm, where the packaging steps run natively. Those two jobs have not run yet, and makensis, the Windows SDK and appimagetool may be missing on the Windows on ARM image (each is skipped with a notice, not failed).",
+        "WebView2: the registry check, the stand-in bootstrapper run and the message box are exercised by CI steps (scripts/native-smoke.mjs windows webview2, TestGUIRuntimeMissingMessageBox) that have not run on a real runner yet. The Fixed Version runtime loader path uses the runtime type value from open reimplementations of the loader and is not confirmed. An MSIX cannot declare the Evergreen runtime as a dependency (it is not a framework package), so an MSIX app relies on the runtime being present (Windows 11, current Edge) and on the message box."
       ]
     },
     {
@@ -1358,7 +1381,7 @@
         "windows": "untested"
       },
       "target": "Krate Native v1",
-      "summary": "krate native sign and notarize drive codesign and notarytool on macOS, signtool or osslsigncode for Windows, and gpg for Linux packages, and rebuild the archives around the signed payload.",
+      "summary": "krate native sign and notarize drive codesign and notarytool on macOS, signtool or osslsigncode for Windows, and gpg for Linux packages, and rebuild the archives around the signed payload. CI signs for real with throwaway keys (gpg on Linux, a self-signed identity in a temporary keychain and an ad hoc signature on macOS, a self-signed code-signing certificate on Windows) and verifies with gpg --verify, codesign --verify --deep --strict, signtool verify /pa and Get-AuthenticodeSignature.",
       "tests": [
         "TestSignMacAppDeepSignsInnerFirst",
         "TestSignMacAdHocAndEntitlements",
@@ -1367,10 +1390,11 @@
         "TestSignWindows",
         "TestSignLinuxGPG",
         "TestPackageSignsBeforeArchiving",
-        "TestRedactCommand"
+        "TestRedactCommand",
+        "ci:native-smoke-sign"
       ],
       "knownLimits": [
-        "The signing tools are replaced by stand-ins in every test: command lines, ordering and secret redaction are checked, a real certificate and Apple notarization service never were.",
+        "Unit tests replace the signing tools with stand-ins (command lines, ordering and secret redaction). The CI native job also signs for real with certificates made in the job (scripts/native-smoke.mjs linux sign, macos sign, and windows prepare/nsis/msix) and verifies the results; those steps have not run yet. Notarization needs an Apple Developer account and stays manual, as do Developer ID and EV or OV Authenticode certificates and timestamps from a paid authority.",
         "macOS and Windows: untested. The same Go code is built for them (cross-compile checks in CI) and the CI native job runs go test on both, but no result of a run against a real WKWebView or WebView2 window has been confirmed."
       ]
     },
@@ -1410,14 +1434,17 @@
         "windows": "planned"
       },
       "target": "Krate Native v1",
-      "summary": "packages/native/budgets.json limits the stripped shell, Go-only, TypeScript-only and example release executables (bytes), the cold start of the example in a real window (ms) and its resident memory (KB). Limits are the measured value plus 25 percent.",
+      "summary": "packages/native/budgets.json limits the stripped shell, Go-only, TypeScript-only and example release executables (bytes), the cold start of the example in a real window (ms) and its resident memory (KB). Limits are the measured value plus 25 percent. Any platform can have entries (linux-amd64 today); one with entries is enforced by the same measured-plus-headroom rule, one without only reports and prints a paste-ready BUDGET-RECORD block.",
       "tests": [
         "TestNativeBudgetSizes",
-        "TestNativeBudgetGUI"
+        "TestNativeBudgetGUI",
+        "TestBudgetVerdictPerPlatform",
+        "TestEvalMemoryEnforcesRecordedEntries",
+        "TestBudgetRecordTextIsPasteable"
       ],
       "knownLimits": [
         "Budgets exist for linux-amd64 only; the start-up limits were measured on a developer machine and CI applies KRATE_BUDGET_SCALE=3 until a hosted runner has been measured.",
-        "macOS and Windows have no recorded budgets (planned). The CI native job runs the memory profile there and prints a comparison with the linux-amd64 limits (scripts/native-budget-compare.mjs); it is informational until the numbers have been reviewed."
+        "darwin-arm64, windows-amd64, windows-arm64 and linux-arm64 run the same size, cold-start and memory tests in CI and report their measured values (BUDGET-RECORD-BEGIN/END in the log and the job summary) but have no recorded entries, so nothing is enforced there yet; the numbers have to be copied into packages/native/budgets.json after a review."
       ]
     }
   ]

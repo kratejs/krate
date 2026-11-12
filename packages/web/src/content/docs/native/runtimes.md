@@ -139,7 +139,7 @@ unix sockets on every OS (AF_UNIX works for Go on Windows 10 and later).
 |---------|---------|
 | `node` | `node --enable-source-maps {entry}` |
 | `bun` | `bun run {entry}` |
-| `deno` | `deno run --no-prompt --allow-env --allow-read={sockdir} --allow-write={sockdir} --allow-net=127.0.0.1 ... {entry}` |
+| `deno` | `deno run --no-prompt --allow-env --allow-read={sockdir} --allow-write={sockdir} --allow-net=127.0.0.1,unix:{socket} ... {entry}` |
 
 The runtime must be on `PATH` (`bundle: false` is the same). The build prints a
 note when it is not. A release build bundles it instead.
@@ -148,9 +148,15 @@ note when it is not. A release build bundles it instead.
 
 `native.permissions` maps to Deno flags. The child always gets `--no-prompt`,
 `--allow-env`, `--allow-net=127.0.0.1` (the Windows transport to the shell is
-loopback TCP) and read and write access to the shell's socket directory
-(`{sockdir}`; a compiled executable cannot name it, so `deno compile` gets
-unscoped `--allow-read --allow-write`).
+loopback TCP), read and write access to the shell's socket directory
+(`{sockdir}`), and network access to its own unix socket (`unix:{socket}`;
+recent Deno versions treat listening on a unix socket as network access, and
+the entry needs the exact path, which the shell fills in when it starts the
+child, one path per run, and drops on Windows). A compiled executable cannot
+name either, so `deno compile` gets unscoped `--allow-read --allow-write` and,
+for targets that use unix sockets, plain `--allow-net`; a Windows target keeps
+`--allow-net=127.0.0.1`. The scoped entry needs a Deno that accepts
+`unix:<path>` in `--allow-net` (checked with 2.9.8).
 
 | `native.permissions` | Deno flags |
 |----------------------|------------|
@@ -171,7 +177,7 @@ executable per target. Pin the runtime with `native.host.version` (`"22"`,
 |---------|-----|----------|
 | `node` | Bundle as CommonJS, `node --experimental-sea-config`, copy the node binary, inject the blob with `postject` (`npx --yes postject`, or an installed `postject`) and flip the SEA fuse. On macOS the signature is removed and re-added ad hoc. | Linux x64 |
 | `bun` | `bun build --compile --target=bun-<os>-<arch>` | Linux x64 |
-| `deno` | `deno compile --target <triple>` with the flags above | Command line only |
+| `deno` | `deno compile --target <triple>` with the flags above | Command line only (the dev child runs end to end on Linux) |
 | `scriptc` | `scriptc build -o <exe> --strip --optimization release`, `SCRIPTC_TARGET` for a cross build | Command line only |
 
 Cross-building Node needs the target's node binary: set

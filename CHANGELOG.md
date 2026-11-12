@@ -33,6 +33,26 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
   and a silence list in `native.lean`). Native builds no longer preload lazy chunks, ship no
   script or config block on pages without client code, and write no `.br`/`.gz` siblings.
   `krate native dev` has a Memory panel (PSS, private dirty, DOM nodes, JS heap where available).
+- Windows: clicking a toast after the app has quit starts it again. Toasts use protocol activation
+  with a per-app URL scheme (registered under `HKCU` at run time, by the NSIS installer and in the
+  MSIX manifest, now with `uap3:Protocol` so the URL reaches the executable); a new process hands the
+  click to the running instance or, when none runs, delivers it to the page as the first
+  notification event. The tray icon is verified to come back on `TaskbarCreated`.
+- Windows: the NSIS installer's WebView2 check follows Microsoft's registry locations, and
+  `native.bundle.windows.webview2` (`download`, `embed`, `fixed`, `none`, with `webview2Path`)
+  chooses how a missing runtime is handled. A shell that cannot find the runtime shows a message box
+  with the download link instead of exiting silently.
+- Deno host children: recent Deno versions need `unix:<socket path>` in `--allow-net` to listen on
+  the child's socket; the dev command now carries `{socket}`, which the shell fills in per run
+  (`deno compile` gets plain `--allow-net` for unix targets). A new end-to-end test runs Node, Bun and
+  Deno children through the real shell.
+- CI: the `native` job also runs on `ubuntu-24.04-arm` and `windows-11-arm`; tools with no arm64
+  build are skipped with a notice (`optional_runtimes`, `optional_tools`) and never fail
+  `KRATE_REQUIRE_E2E` falsely. Packaging smoke steps sign with throwaway keys (gpg, a self-signed
+  macOS identity in a temporary keychain, a self-signed Authenticode certificate) and verify them.
+- Native budgets accept entries for any platform (`darwin-arm64`, `windows-amd64`, ...) with the
+  same measured-plus-headroom rule and fail when a recorded entry is exceeded; platforms without
+  entries print a paste-ready `BUDGET-RECORD` block.
 - A top-level `viewTransitions` no longer reaches the desktop app (it hung the docs site's window on
   WebKitGTK); `native.viewTransitions: "auto"` opts in.
 - Linux: request body streams are only touched on the main thread. WebKit shares their FormData

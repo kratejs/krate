@@ -10,7 +10,7 @@ fail when a measurement is over its limit.
 | `sizes.<platform>.goOnlyRelease` | release executable of an app with Go host code only | `TestNativeBudgetSizes` | Go |
 | `sizes.<platform>.tsOnlyRelease` | release executable of an app with TypeScript host code only (QuickJS linked) | `TestNativeBudgetSizes` | Go |
 | `sizes.<platform>.nativeTasksRelease` | release executable of `examples/native-tasks` | `TestNativeBudgetSizes` | Go, `pnpm install && pnpm build` |
-| `startup.<platform>.coldStartMs` | process start to the first page's load event of the `native-tasks` release executable, median of three runs, in ms | `TestNativeBudgetGUI` | `KRATE_NATIVE_GUI=1`, a display and WebKitGTK |
+| `startup.<platform>.coldStartMs` | process start to the first page's load event of the `native-tasks` release executable, median of three runs, in ms | `TestNativeBudgetGUI` | `KRATE_NATIVE_GUI=1`, a display and WebKitGTK, or a macOS or Windows desktop |
 | `memory.<platform>.appMinusFloor.<role>.<metric>` | memory of the `native-tasks` release executable minus the floor, 5 s after the page loaded; **enforced** | `TestNativeBudgetGUI` | same |
 | `memory.<platform>.app.<role>.<metric>`, `...floor...` | the absolute values of the app and of the floor; **warn only** | `TestNativeBudgetGUI` | same |
 
@@ -34,10 +34,18 @@ more than 25 percent of a small delta. An absolute value over its limit prints a
 warning (and a GitHub Actions `::warning::` line); an `appMinusFloor` value over
 its limit fails the test. A role that was not measured counts 0.
 
-Only `linux-amd64` has entries. macOS and Windows budgets are planned: the CI
-`native` job measures their memory with `krate native profile --memory` and
-`scripts/native-budget-compare.mjs` prints it next to the linux-amd64 limits,
-but nothing enforces it until those numbers have been reviewed. The start-up test builds the executable with
+Only `linux-amd64` has entries so far, but the machinery accepts any
+`<goos>-<goarch>` key (`darwin-arm64`, `windows-amd64`, `windows-arm64`,
+`linux-arm64`, ...) with the same rule: once a platform has entries in a
+section, each measured value is compared with its `max` and a value over it
+fails (absolute memory values only warn, as above). A platform with **no**
+entries in a section is not enforced yet: it runs the same tests, never fails
+for a missing entry, and prints what it measured in the form to paste (see
+"Recording a new platform" below). `linux-amd64` is the exception and keeps
+failing on a missing entry, so a renamed metric cannot go unnoticed there. The
+`native` job also still measures macOS and Windows memory with
+`krate native profile --memory`, and `scripts/native-budget-compare.mjs` prints
+it next to the linux-amd64 limits. The start-up test builds the executable with
 the `krate_devcontrol` tag, which it needs to read the page; that adds a few
 kilobytes to the size, so the size entries come from a build without it.
 
@@ -85,3 +93,27 @@ one of the three `first page load event` lines is far from the other two or the
 three memory runs disagree by more than a few MB. Commit the new
 `budgets.json` with the change that caused it and say why in the commit
 message.
+
+## Recording a new platform
+
+`darwin-arm64`, `windows-amd64`, `windows-arm64` and `linux-arm64` run
+`TestNativeBudgetSizes` and `TestNativeBudgetGUI` in the CI `native` job and
+report instead of enforcing. Each run ends the test with a block like
+
+```
+BUDGET-RECORD-BEGIN windows-amd64
+{
+  "sizes": { "windows-amd64": { "shell": { "measured": 15990784, "max": 19988480 } } },
+  "startup": { "windows-amd64": { "coldStartMs": { "measured": 640, "max": 800 } } },
+  "memory": { "windows-amd64": { "appMinusFloor.total.pss": { ... } } }
+}
+BUDGET-RECORD-END windows-amd64
+```
+
+on stdout (find it with the markers in the step log) and in the job summary.
+Memory values and sizes use the same headroom and slack rules as update mode,
+so the fragment can be merged into `budgets.json` by hand: copy each platform
+key under the matching `sizes`, `startup` and `memory` section. Run the job
+more than once and take the larger measured values when they differ. From then
+on the platform is enforced. `KRATE_UPDATE_BUDGETS=1` still rewrites the entries
+of the platform the run is on.

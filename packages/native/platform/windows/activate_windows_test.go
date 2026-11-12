@@ -4,12 +4,15 @@ package windows
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
+	"unsafe"
 
 	"golang.org/x/sys/windows/registry"
 
@@ -149,5 +152,92 @@ func TestGUIToastProtocolRegistration(t *testing.T) {
 	defer pk.Close()
 	if _, _, err := pk.GetStringValue("URL Protocol"); err != nil {
 		t.Errorf("URL Protocol marker: %v", err)
+	}
+}
+
+// The WebView2 Runtime missing: the app must say so in a message box, not
+// exit silently. The helper process runs the app with the runtime hidden
+// (KRATE_NATIVE_SIMULATE_NO_WEBVIEW2); the test finds the box, checks its text
+// and presses No, which makes the helper exit with the error.
+
+const runtimeHelperEnv = "KRATE_TEST_RUNTIME_HELPER"
+
+func runtimeHelperMain() {
+	a, err := New(Config{AppID: "dev.krate.native.runtimehelper", AppName: "Krate Runtime Helper", Handler: guiHandler(), Args: []string{}})
+	if err != nil {
+		fmt.Println("RESULT new", err)
+		os.Exit(3)
+	}
+	err = a.Run(nil)
+	var re *runtimeError
+	if errors.As(err, &re) && re.missing {
+		fmt.Println("RESULT runtime missing")
+		os.Exit(0)
+	}
+	fmt.Println("RESULT other", err)
+	os.Exit(4)
+}
+
+var (
+	pGetDlgItem       = user32.NewProc("GetDlgItem")
+	pSendMessageWProc = user32.NewProc("SendMessageW")
+)
+
+func TestGUIRuntimeMissingMessageBox(t *testing.T) {
+	needGUI(t)
+	cmd := exec.Command(os.Args[0], "-test.run=NoSuchTest")
+	cmd.Env = append(os.Environ(), runtimeHelperEnv+"=1", simulateNoRuntimeEnv+"=1")
+	var out bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &out
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	defer func() { _ = cmd.Process.Kill() }()
+
+	// The box is a standard dialog (#32770) titled with the app name.
+	var dlg uintptr
+	deadline := time.Now().Add(45 * time.Second)
+	for dlg == 0 && time.Now().Before(deadline) {
+		dlg, _, _ = pFindWindow.Call(uintptr(unsafe.Pointer(wstr("#32770"))), uintptr(unsafe.Pointer(wstr("Krate Runtime Helper"))))
+		if dlg == 0 {
+			select {
+			case err := <-done:
+				t.Fatalf("the helper exited (%v) without showing a message box:\n%s", err, out.String())
+			case <-time.After(100 * time.Millisecond):
+			}
+		}
+	}
+	if dlg == 0 {
+		t.Fatalf("no message box within 45s:\n%s", out.String())
+	}
+	// The message is the static control 0xFFFF.
+	static, _, _ := pGetDlgItem.Call(dlg, 0xFFFF)
+	buf := make([]uint16, 2048)
+	n, _, _ := pGetWindowTextW.Call(static, uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)))
+	text := syscall.UTF16ToString(buf[:n])
+	for _, want := range []string{"WebView2", "not installed", webview2DownloadPage} {
+		if !strings.Contains(text, want) {
+			t.Errorf("message box text lacks %q: %q", want, text)
+		}
+	}
+	// Press No (IDNO = 7) so the page is not opened.
+	no, _, _ := pGetDlgItem.Call(dlg, 7)
+	if no == 0 {
+		t.Fatal("the message box has no No button")
+	}
+	const bmClick = 0x00F5
+	_, _, _ = pSendMessageWProc.Call(no, bmClick, 0, 0)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("helper failed: %v\n%s", err, out.String())
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatalf("the helper did not exit after the box was answered:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "RESULT runtime missing") {
+		t.Errorf("helper output:\n%s", out.String())
 	}
 }

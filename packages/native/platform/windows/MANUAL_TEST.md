@@ -152,3 +152,22 @@ calls `AddView`:
   fetch wrapper (`streamShim` in `msgstream.go`) was not injected or the web
   message channel failed; look for `add_WebMessageReceived` lines on stderr.
   Any other response that never ends is held back by WebView2 until it does.
+
+## Checks CI cannot make
+
+CI covers the message plumbing of these (TestGUITrayTaskbarCreated,
+TestGUIToastActivationFromASecondProcess, TestGUIRuntimeMissingMessageBox);
+a person still has to look at the real thing once per release:
+
+1. **Toast click after quit.** Run an app that shows a toast with a button,
+   quit the app, then click the toast in the Action Center (or the button on
+   the banner). The app must start, raise its window and deliver the
+   notification event to the page. Click it once more while the app runs: no
+   second window may appear and the running app must get the event.
+2. **Explorer restart.** With the tray icon showing, run
+   `taskkill /f /im explorer.exe & start explorer.exe`. The icon must come back
+   within a few seconds and its menu must work.
+3. **No WebView2.** On a Windows 10 machine without the runtime (or with
+   `KRATE_NATIVE_SIMULATE_NO_WEBVIEW2=1`), start the app: a message box names
+   the runtime and offers the download page; the installer built with
+   `webview2: "download"` or `"embed"` installs the runtime first.

@@ -29,12 +29,12 @@ const (
 )
 
 var (
-	pFindWindow                = user32.NewProc("FindWindowW")
-	pSendMessageTimeout        = user32.NewProc("SendMessageTimeoutW")
-	pGetWindowThreadProcessID  = user32.NewProc("GetWindowThreadProcessId")
-	pAllowSetForegroundWindow  = user32.NewProc("AllowSetForegroundWindow")
-	pShellExecuteW             = shell32.NewProc("ShellExecuteW")
-	activationDialogsSuppressd = os.Getenv("KRATE_NATIVE_NO_DIALOG") != ""
+	pFindWindow               = user32.NewProc("FindWindowW")
+	pSendMessageTimeout       = user32.NewProc("SendMessageTimeoutW")
+	pGetWindowThreadProcessID = user32.NewProc("GetWindowThreadProcessId")
+	pAllowSetForegroundWindow = user32.NewProc("AllowSetForegroundWindow")
+	pShellExecuteW            = shell32.NewProc("ShellExecuteW")
+	dialogsSuppressed         = os.Getenv("KRATE_NATIVE_NO_DIALOG") != ""
 )
 
 // copyDataStruct is COPYDATASTRUCT.
@@ -133,7 +133,7 @@ func deleteToastProtocol(scheme string) {
 // would just not appear.
 func (a *App) reportRuntimeFailure(err error) {
 	var re *runtimeError
-	if !errors.As(err, &re) || activationDialogsSuppressd {
+	if !errors.As(err, &re) || dialogsSuppressed {
 		return
 	}
 	text, caption := runtimeDialogText(a.displayName(), re.missing, re.detail)

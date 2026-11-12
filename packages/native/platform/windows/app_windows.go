@@ -191,8 +191,9 @@ func New(cfg Config) (*App, error) {
 	tm, _, _ := pRegisterWindowMessageW.Call(uintptr(unsafe.Pointer(wstr("TaskbarCreated"))))
 	a.taskbarMsg = uint32(tm)
 	if a.taskbarMsg != 0 {
-		allowTaskbarCreated(a.utilWnd, a.taskbarMsg)
+		allowMessage(a.utilWnd, a.taskbarMsg)
 	}
+	allowMessage(a.utilWnd, wmCopyData)
 	setProcessAUMID(cfg.AppID)
 
 	a.hNavigation = newHandler(iidNavigationStartingHandler, false, a.onNavigationStarting)

@@ -43,6 +43,8 @@ const (
 	// way to point WebView2 at a browser executable folder.
 	fixedRuntimeDirName = "WebView2Runtime"
 	fixedRuntimeEnv     = "WEBVIEW2_BROWSER_EXECUTABLE_FOLDER"
+
+	simulateNoRuntimeEnv = "KRATE_NATIVE_SIMULATE_NO_WEBVIEW2"
 )
 
 type runtimeInfo struct{ location, pv string }
@@ -132,6 +134,11 @@ func internalLoaderCandidates() []string {
 // Invoke is called later from the message loop.
 // opts is an optional ICoreWebView2EnvironmentOptions (nil for none).
 func createEnvironment(userDataDir string, opts, handler unsafe.Pointer) error {
+	// A test hook: behave as if no runtime were installed (the message box
+	// test runs the app with it).
+	if os.Getenv(simulateNoRuntimeEnv) != "" {
+		return &runtimeError{missing: true}
+	}
 	var tried []string
 
 	// A bundled Fixed Version runtime wins over an installed one: the app was

@@ -342,8 +342,16 @@ jobs:
   #
   # The GUI step runs the whole native module (./...) with KRATE_NATIVE_GUI=1,
   # so a GUI test added in any package is picked up without editing this file.
-  # node, bun and deno are installed on every OS so the host-child tests run;
+  # node, bun and deno are installed on every OS (except Bun and Deno on
+  # Windows on ARM, see below) so the host-child tests run;
   # KRATE_REQUIRE_E2E=1 turns a missing tool into a failure.
+  #
+  # arm64: ubuntu-24.04-arm and windows-11-arm run the same job natively
+  # (macos-latest is arm64 already). Tools that have no arm64 build there are
+  # named in the matrix entry's optional_runtimes / optional_tools; each is
+  # skipped with a ::notice:: line when it is really missing, and a tool that
+  # is not named stays a hard failure. KRATE_REQUIRE_E2E therefore never fails
+  # for a missing optional tool and still fails for every other one.
   native:
     name: Native (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -353,10 +361,18 @@ jobs:
         include:
           - os: ubuntu-latest
             gui: ./...
+          - os: ubuntu-24.04-arm
+            gui: ./...
           - os: macos-latest
             gui: ./...
           - os: windows-latest
             gui: ./...
+          - os: windows-11-arm
+            gui: ./...
+            # Bun and Deno publish no Windows on ARM builds; the runner
+            # image may also lack the Windows SDK tools and NSIS.
+            optional_runtimes: "bun,deno"
+            optional_tools: "makensis,signtool,makeappx"
     defaults:
       run:
         shell: bash
@@ -364,6 +380,8 @@ jobs:
       # Plugin tests build per-app shells with the Go toolchain; a read-only
       # module cache would make their temporary modules fail to clean up.
       GOFLAGS: -modcacherw
+      # Read by scripts/native-smoke.mjs.
+      KRATE_OPTIONAL_TOOLS: ${{ matrix.optional_tools }}
     steps:
       - uses: actions/checkout@v4
 
@@ -387,13 +405,35 @@ jobs:
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
+        continue-on-error: ${{ contains(matrix.optional_runtimes, 'bun') }}
         with:
           bun-version: latest
 
       - name: Set up Deno
         uses: denoland/setup-deno@v1
+        continue-on-error: ${{ contains(matrix.optional_runtimes, 'deno') }}
         with:
           deno-version: v2.x
+
+      # A host runtime that is missing and listed in optional_runtimes is
+      # skipped by the host child tests (KRATE_SKIP_RUNTIMES); a missing one
+      # that is not listed fails them under KRATE_REQUIRE_E2E.
+      - name: Check the host runtimes
+        env:
+          OPTIONAL_RUNTIMES: ${{ matrix.optional_runtimes }}
+        run: |
+          skip=""
+          for t in node bun deno; do
+            if command -v "$t" >/dev/null 2>&1; then
+              echo "$t: $("$t" --version | head -1)"
+            elif [[ ",$OPTIONAL_RUNTIMES," == *",$t,"* ]]; then
+              echo "::notice title=$t unavailable::$t has no build for this runner ($RUNNER_OS $RUNNER_ARCH); its host child tests are skipped"
+              skip="$skip,$t"
+            else
+              echo "::error title=$t missing::$t is not installed on this runner"
+            fi
+          done
+          echo "KRATE_SKIP_RUNTIMES=${skip#,}" >> "$GITHUB_ENV"
 
       - name: Install JS dependencies
         run: pnpm install --no-frozen-lockfile
@@ -419,14 +459,14 @@ jobs:
         working-directory: packages/native
 
       - name: Go test (race, native)
-        if: matrix.os == 'ubuntu-latest'
+        if: runner.os == 'Linux'
         run: go test -race -gcflags=all=-d=checkptr=0 -p 2 -timeout 20m ./...
         working-directory: packages/native
         env:
           KRATE_REQUIRE_E2E: "1"
 
       - name: Go test (native)
-        if: matrix.os != 'ubuntu-latest'
+        if: runner.os != 'Linux'
         run: go test -timeout 20m ./...
         working-directory: packages/native
         env:
@@ -438,7 +478,7 @@ jobs:
       # xdotool (clicks), weston (a Wayland compositor) and the tools the
       # packaging smoke test needs (rpm, desktop-file-validate, squashfs).
       - name: Install the Linux webview, Xvfb and desktop services
-        if: matrix.os == 'ubuntu-latest'
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-0 xvfb openbox xdotool dbus dbus-bin \
@@ -446,10 +486,11 @@ jobs:
             rpm desktop-file-utils squashfs-tools file
 
       - name: Install appimagetool (Linux)
-        if: matrix.os == 'ubuntu-latest'
+        if: runner.os == 'Linux'
         run: |
           mkdir -p "$HOME/bin"
-          curl -fsSL -o "$HOME/bin/appimagetool.AppImage" https://github.com/AppImage/appimagetool/releases/download/1.9.0/appimagetool-x86_64.AppImage
+          # appimagetool-x86_64 or appimagetool-aarch64, matching the runner.
+          curl -fsSL -o "$HOME/bin/appimagetool.AppImage" "https://github.com/AppImage/appimagetool/releases/download/1.9.0/appimagetool-$(uname -m).AppImage"
           chmod +x "$HOME/bin/appimagetool.AppImage"
           # No FUSE on the runner: run the tool by extracting it.
           printf '#!/bin/sh\nAPPIMAGE_EXTRACT_AND_RUN=1 exec "%s/bin/appimagetool.AppImage" "$@"\n' "$HOME" > "$HOME/bin/appimagetool"
@@ -461,7 +502,7 @@ jobs:
       # manager state, and with the real daemons installed above:
       # KRATE_REQUIRE_E2E makes a missing daemon a failure, not a skip.
       - name: GUI tests (Linux, Xvfb and openbox, real desktop services)
-        if: matrix.os == 'ubuntu-latest'
+        if: runner.os == 'Linux'
         run: |
           # shellcheck disable=SC2016
           xvfb-run -a bash -c '
@@ -487,7 +528,7 @@ jobs:
       # TestWaylandPlacementIsIgnored checks that SetPosition and
       # SetAlwaysOnTop are accepted and ignored.
       - name: "GUI tests (Linux, Wayland via weston on Xvfb)"
-        if: matrix.os == 'ubuntu-latest'
+        if: runner.os == 'Linux'
         run: |
           # shellcheck disable=SC2016
           xvfb-run -a bash -c '
@@ -514,7 +555,7 @@ jobs:
 
       # Never run on a hosted runner before: report, do not block.
       - name: GUI tests (macOS, Windows)
-        if: matrix.os != 'ubuntu-latest'
+        if: runner.os != 'Linux'
         run: |
           # shellcheck disable=SC2086
           go test -p 1 -count=1 -timeout 20m $GUI_PKGS
@@ -532,7 +573,7 @@ jobs:
       # TestGUIZMemoryPanel there reads packages/runtime/dist/krate-dev.js,
       # which the JS build produces.
       - name: GUI tests repeated (Linux, platform/linux, sdk/guitest)
-        if: matrix.os == 'ubuntu-latest'
+        if: runner.os == 'Linux'
         run: |
           # shellcheck disable=SC2016
           xvfb-run -a bash -c '
@@ -558,7 +599,7 @@ jobs:
       # only app minus a blank-page floor (same shell, same runner) fails the
       # job, the absolute values print a warning. Memory limits are not scaled.
       - name: Compiler native tests (Linux, GUI under Xvfb)
-        if: matrix.os == 'ubuntu-latest'
+        if: runner.os == 'Linux'
         run: xvfb-run -a go test -p 1 -count=1 -timeout 20m -v -run 'TestNativeE2EGUI|TestNativeBudgetGUI|GUI' ./internal/build
         working-directory: packages/compiler
         env:
@@ -581,7 +622,7 @@ jobs:
       # Plugins are Go code linked into a per-app shell, built with the Go
       # toolchain on the runner; the system-info plugin has its own module.
       - name: Native plugin tests (macOS, Windows)
-        if: matrix.os != 'ubuntu-latest'
+        if: runner.os != 'Linux'
         run: |
           (cd packages/compiler && GOWORK=off go test -p 1 -count=1 -timeout 20m -run Plugin ./internal/build)
           (cd examples/native-plugin/native-plugins/system-info && GOWORK=off go test -count=1 ./...)
@@ -598,11 +639,15 @@ jobs:
           (cd packages/compiler && go build -o "$RUNNER_TEMP/krate-views$EXE" ./cmd/krate)
           (cd examples/native-views && "$RUNNER_TEMP/krate-views$EXE" build)
 
-      # The same on macOS and Windows. There are no budgets for them yet
-      # (planned), so the budget tests only report what they measure there.
+      # The same on macOS and Windows (including the host child test, which
+      # runs Node, Bun and Deno through the real shell, and the size budgets).
+      # The budget tests enforce the entries budgets.json has for the platform
+      # (darwin-arm64, windows-amd64, ...). A platform with none yet only
+      # reports: look for the BUDGET-RECORD-BEGIN block in this step's log (or
+      # in the job summary), a fragment of budgets.json to paste in.
       - name: Compiler native tests (macOS, Windows)
-        if: matrix.os != 'ubuntu-latest'
-        run: go test -p 1 -count=1 -timeout 20m -v -run 'TestNativeE2EGUI|TestNativeBudgetGUI|GUI' ./internal/build
+        if: runner.os != 'Linux'
+        run: go test -p 1 -count=1 -timeout 20m -v -run 'TestNativeE2EGUI|TestNativeBudgetGUI|TestNativeBudgetSizes|GUI' ./internal/build
         working-directory: packages/compiler
         env:
           GOWORK: "off"
@@ -612,8 +657,9 @@ jobs:
 
       # Binary sizes (the stripped shell, Go-only, TypeScript-only and example
       # release executables) against packages/native/budgets.json. No display.
+      # linux-arm64 has no entries yet and only reports (BUDGET-RECORD block).
       - name: Native size budgets (Linux)
-        if: matrix.os == 'ubuntu-latest'
+        if: runner.os == 'Linux'
         run: go test -p 1 -count=1 -timeout 20m -run 'TestNativeBudgetSizes' -v ./internal/build
         working-directory: packages/compiler
         env:
@@ -626,64 +672,108 @@ jobs:
       # would, check that it serves its first page, and update it to 1.1.0
       # through the real updater against a local signed feed.
       - name: Packaging smoke test, build packages (Linux)
-        if: matrix.os == 'ubuntu-latest'
+        if: runner.os == 'Linux'
         run: node scripts/native-smoke.mjs linux prepare
         env:
           KRATE_REQUIRE_E2E: "1"
 
       - name: Packaging smoke test, .deb install, launch, remove (Linux)
-        if: matrix.os == 'ubuntu-latest'
+        if: runner.os == 'Linux'
         run: xvfb-run -a node scripts/native-smoke.mjs linux deb
 
       - name: Packaging smoke test, .rpm structure (Linux)
-        if: matrix.os == 'ubuntu-latest'
+        if: runner.os == 'Linux'
         run: node scripts/native-smoke.mjs linux rpm
         env:
           KRATE_REQUIRE_E2E: "1"
 
       - name: Packaging smoke test, AppImage launch (Linux)
-        if: matrix.os == 'ubuntu-latest'
+        if: runner.os == 'Linux'
         run: xvfb-run -a node scripts/native-smoke.mjs linux appimage
         env:
           KRATE_REQUIRE_E2E: "1"
 
       - name: Update smoke test, 1.0.0 to 1.1.0 (Linux)
-        if: matrix.os == 'ubuntu-latest'
+        if: runner.os == 'Linux'
         run: node scripts/native-smoke.mjs linux update
 
+      # Real signatures with a key generated in the job: krate native sign
+      # --gpg-key, then gpg --verify on every package (and a tampered copy must
+      # fail). Notarization and Developer ID signing need secrets and stay
+      # manual (docs/native/signing).
+      - name: Signing smoke test, gpg (Linux)
+        if: runner.os == 'Linux'
+        run: node scripts/native-smoke.mjs linux sign
+        env:
+          KRATE_REQUIRE_E2E: "1"
+
       - name: Packaging smoke test, build packages (macOS)
-        if: matrix.os == 'macos-latest'
+        if: runner.os == 'macOS'
         run: node scripts/native-smoke.mjs macos prepare
 
       - name: Packaging smoke test, mount the dmg, launch (macOS)
-        if: matrix.os == 'macos-latest'
+        if: runner.os == 'macOS'
         run: node scripts/native-smoke.mjs macos dmg
 
       - name: Update smoke test, 1.0.0 to 1.1.0 (macOS)
-        if: matrix.os == 'macos-latest'
+        if: runner.os == 'macOS'
         run: node scripts/native-smoke.mjs macos update
 
+      # codesign with the ad hoc signature of "prepare" and with a self-signed
+      # identity from a temporary keychain, both checked with codesign --verify
+      # --deep --strict (a tampered bundle must fail).
+      - name: Signing smoke test, ad hoc and self-signed identity (macOS)
+        if: runner.os == 'macOS'
+        run: node scripts/native-smoke.mjs macos sign
+        env:
+          KRATE_REQUIRE_E2E: "1"
+
+      # NSIS is an x86 program; on Windows on ARM it runs emulated, and the
+      # runner image may lack Chocolatey. makensis is optional there
+      # (optional_tools): the smoke steps then skip the NSIS installer with a
+      # notice.
       - name: Install NSIS and create a signing certificate (Windows)
-        if: matrix.os == 'windows-latest'
+        if: runner.os == 'Windows'
+        continue-on-error: ${{ contains(matrix.optional_tools, 'makensis') }}
         run: |
           choco install nsis -y --no-progress
           echo "C:\Program Files (x86)\NSIS" >> "$GITHUB_PATH"
-          node scripts/native-smoke.mjs windows cert
+
+      - name: Create a signing certificate (Windows)
+        if: runner.os == 'Windows'
+        run: node scripts/native-smoke.mjs windows cert
+        env:
+          KRATE_REQUIRE_E2E: "1"
 
       - name: Packaging smoke test, build and sign packages (Windows)
-        if: matrix.os == 'windows-latest'
+        if: runner.os == 'Windows'
         run: node scripts/native-smoke.mjs windows prepare
+        env:
+          KRATE_REQUIRE_E2E: "1"
 
       - name: Packaging smoke test, NSIS silent install, launch, uninstall (Windows)
-        if: matrix.os == 'windows-latest'
+        if: runner.os == 'Windows'
         run: node scripts/native-smoke.mjs windows nsis
+        env:
+          KRATE_REQUIRE_E2E: "1"
+
+      # The installer's WebView2 check against the real registry, with a
+      # stand-in bootstrapper (nothing is downloaded, the runner's runtime
+      # registration is hidden only for the run and restored).
+      - name: Packaging smoke test, NSIS WebView2 check (Windows)
+        if: runner.os == 'Windows'
+        run: node scripts/native-smoke.mjs windows webview2
+        env:
+          KRATE_REQUIRE_E2E: "1"
 
       - name: Packaging smoke test, MSIX validate, install, launch (Windows)
-        if: matrix.os == 'windows-latest'
+        if: runner.os == 'Windows'
         run: node scripts/native-smoke.mjs windows msix
+        env:
+          KRATE_REQUIRE_E2E: "1"
 
       - name: Update smoke test, 1.0.0 to 1.1.0 (Windows)
-        if: matrix.os == 'windows-latest'
+        if: runner.os == 'Windows'
         run: node scripts/native-smoke.mjs windows update
 
       # Memory of the system webview on real macOS and Windows machines. The
@@ -694,7 +784,7 @@ jobs:
       # profile comes from native.memory in krate.config.ts, set here per run
       # and restored afterwards.
       - name: Native memory report (macOS, Windows)
-        if: matrix.os != 'ubuntu-latest'
+        if: runner.os != 'Linux'
         env:
           GOWORK: "off"
         run: |
@@ -720,7 +810,7 @@ jobs:
       # packages/native/budgets.json. Informational: macOS and Windows budgets
       # stay "planned" until these numbers have been seen and reviewed.
       - name: Native memory budget comparison (macOS, Windows)
-        if: always() && matrix.os != 'ubuntu-latest'
+        if: always() && runner.os != 'Linux'
         continue-on-error: true
         run: |
           node scripts/native-budget-compare.mjs \
@@ -728,7 +818,7 @@ jobs:
             "performance=native-memory/performance/report.json"
 
       - name: Upload native memory reports
-        if: always() && matrix.os != 'ubuntu-latest'
+        if: always() && runner.os != 'Linux'
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
