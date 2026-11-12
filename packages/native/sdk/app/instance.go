@@ -40,6 +40,16 @@ func socketPath(dir, appID string) (string, error) {
 		p = filepath.Join(dir, "krate-"+hash8(appID)+".sock")
 	}
 	if len(p) > 100 {
+		// A private directory in the home directory, which a sandboxed macOS
+		// app has short enough. The shared temporary directory is the last
+		// resort: another user could create the path there first.
+		if home, err := os.UserHomeDir(); err == nil && home != "" {
+			d := filepath.Join(home, ".krate-run")
+			hp := filepath.Join(d, "krate-"+hash8(appID)+".sock")
+			if len(hp) <= 100 && os.MkdirAll(d, 0o700) == nil && os.Chmod(d, 0o700) == nil {
+				return hp, nil
+			}
+		}
 		p = filepath.Join(os.TempDir(), fmt.Sprintf("krate-%d-%s.sock", os.Getuid(), hash8(appID)))
 	}
 	return p, nil
