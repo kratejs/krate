@@ -148,7 +148,7 @@ func (e uiaEl) name() string {
 	if failed(vcall(e.p, elName, uintptr(unsafe.Pointer(&b)))) || b == 0 {
 		return ""
 	}
-	defer pSysFreeString.Call(b)
+	defer func() { _, _, _ = pSysFreeString.Call(b) }()
 	return xw.UTF16PtrToString((*uint16)(ptr(b)))
 }
 
@@ -157,7 +157,7 @@ func (e uiaEl) className() string {
 	if failed(vcall(e.p, elClassName, uintptr(unsafe.Pointer(&b)))) || b == 0 {
 		return ""
 	}
-	defer pSysFreeString.Call(b)
+	defer func() { _, _, _ = pSysFreeString.Call(b) }()
 	return xw.UTF16PtrToString((*uint16)(ptr(b)))
 }
 
@@ -169,8 +169,6 @@ func (e uiaEl) intProp(slot int) int32 {
 
 func (e uiaEl) controlType() int { return int(e.intProp(elControlType)) }
 func (e uiaEl) offscreen() bool  { return e.intProp(elIsOffscreen) != 0 }
-func (e uiaEl) enabled() bool    { return e.intProp(elEnabled) != 0 }
-func (e uiaEl) focusable() bool  { return e.intProp(elFocusable) != 0 }
 func (e uiaEl) hwnd() uintptr    { return uintptr(e.intProp(elNativeWindow)) }
 
 // all returns the elements under e in the scope; the caller releases them.
