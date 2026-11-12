@@ -4,8 +4,8 @@
 //
 //   node scripts/native-smoke.mjs <linux|macos|windows> <step>
 //
-//   linux    prepare deb rpm appimage update sign
-//   macos    prepare dmg update sign
+//   linux    prepare deb rpm appimage update sign flatpak snap
+//   macos    prepare dmg update sign universal mas
 //   windows  cert prepare nsis msix update webview2
 //
 // "prepare" builds examples/native-tasks three times with `krate native build
@@ -516,8 +516,52 @@ async function linux(step) {
     }
     case 'sign':
       return linuxSign();
+    case 'flatpak':
+      return linuxFlatpak();
+    case 'snap':
+      return linuxSnap();
     default:
       fail(`unknown linux step ${step}`);
+  }
+}
+
+// linuxFlatpak builds the Flatpak bundle (flatpak-builder, the GNOME runtime),
+// validates the metainfo, installs the bundle for the user and starts the app
+// inside the sandbox. The example has an updater block, which the sandbox must
+// not use; its finish-args must be the ones its permissions need.
+async function linuxFlatpak() {
+  if (!which('flatpak-builder') || !which('flatpak')) return skipOrFail('flatpak and flatpak-builder are not installed', 'flatpak-builder');
+  buildPackages('Flatpak', versionA, ['flatpak'], [], { KRATE_FLATPAK_INSTALL_DEPS: '1' });
+  const bundle = findPackage('Flatpak', /\.flatpak$/);
+  const meta = findPackage('Flatpak', new RegExp(`${appId.replace(/\./g, '\\.')}\\.metainfo\\.xml$`));
+  if (which('appstreamcli')) run('appstreamcli', ['validate', '--no-net', meta]);
+  else skipOrFail('appstreamcli is not installed; the metainfo was not validated', 'appstreamcli');
+  run('flatpak', ['install', '--user', '--noninteractive', '--bundle', bundle]);
+  try {
+    const perms = run('flatpak', ['info', '--show-permissions', appId], { capture: true }).stdout;
+    if (!/wayland/.test(perms) || !/dri/.test(perms)) fail(`unexpected permissions:\n${perms}`);
+    if (/filesystem=(home|host)/.test(perms)) fail(`the sandbox is too open:\n${perms}`);
+    const v = run('flatpak', ['run', appId, '--version'], { capture: true });
+    if (!v.stdout.includes(versionA)) fail(`--version inside the sandbox printed ${JSON.stringify(v.stdout)}`);
+    log('the app runs inside the Flatpak sandbox');
+  } finally {
+    run('flatpak', ['uninstall', '--user', '--noninteractive', appId], { allowFail: true });
+  }
+}
+
+// linuxSnap builds the snap with snapcraft (destructive mode on a runner),
+// installs it with --dangerous and starts the app confined.
+async function linuxSnap() {
+  if (!which('snapcraft') || !which('snap')) return skipOrFail('snapcraft and snap are not installed', 'snapcraft');
+  buildPackages('Snap', versionA, ['snap'], [], { KRATE_SNAP_DESTRUCTIVE: '1' });
+  const snap = findPackage('Snap', /\.snap$/);
+  run('sudo', ['snap', 'install', '--dangerous', snap]);
+  try {
+    const v = run('native-tasks', ['--version'], { capture: true });
+    if (!v.stdout.includes(versionA)) fail(`--version inside the snap printed ${JSON.stringify(v.stdout)}`);
+    log('the app runs confined as a snap');
+  } finally {
+    run('sudo', ['snap', 'remove', 'native-tasks'], { allowFail: true });
   }
 }
 
@@ -685,6 +729,51 @@ async function macos(step) {
       const plist = walk(path.join(work, 'A', 'packages')).find((p) => p.endsWith(`${appName}${path.sep}Contents${path.sep}Info.plist`));
       if (!plist) fail(`run prepare first: no ${appName} under ${path.join(work, 'A', 'packages')}`);
       await macosSign(path.dirname(path.dirname(plist)), appName);
+      return;
+    }
+    case 'universal': {
+      // One app with both architectures: lipo agrees, both slices start.
+      buildPackages('U', versionA, ['app', 'zip'], ['--arch', 'universal', '--sign']);
+      const exe = walk(path.join(work, 'U', 'packages')).find((p) => p.endsWith(path.join('darwin-universal', appName, 'Contents', 'MacOS', productName)));
+      if (!exe) fail('no universal executable under ' + path.join(work, 'U', 'packages'));
+      const info = run('lipo', ['-info', exe], { capture: true }).stdout;
+      if (!/x86_64/.test(info) || !/arm64/.test(info)) fail(`lipo -info: ${info}`);
+      findPackage('U', /darwin-universal\.zip$/);
+      for (const arch of ['arm64', 'x86_64']) {
+        const can = spawnSync('arch', [`-${arch}`, '/usr/bin/true']).status === 0;
+        if (!can) {
+          log(`this machine cannot run the ${arch} slice`);
+          continue;
+        }
+        const v = run('arch', [`-${arch}`, exe, '--version'], { capture: true });
+        if (!v.stdout.includes(versionA)) fail(`${arch}: --version printed ${JSON.stringify(v.stdout)}`);
+        log(`${arch} slice runs`);
+      }
+      return;
+    }
+    case 'mas': {
+      // The Mac App Store variant, ad hoc signed with the sandbox entitlement.
+      buildPackages('MAS', versionA, ['mas'], ['--target', 'mas']);
+      const app = walk(path.join(work, 'MAS', 'packages')).find((p) => p.endsWith(`${appName}${path.sep}Contents${path.sep}Info.plist`));
+      if (!app) fail('no MAS app under ' + path.join(work, 'MAS', 'packages'));
+      const dir = path.dirname(path.dirname(app));
+      const ents = runBoth('codesign', ['-d', '--entitlements', '-', dir]).text;
+      if (!/com\.apple\.security\.app-sandbox/.test(ents)) fail(`the app is not sandboxed:\n${ents}`);
+      run('codesign', ['--verify', '--deep', '--strict', dir]);
+      const exe = path.join(dir, 'Contents', 'MacOS', productName);
+      const v = run(exe, ['--version'], { capture: true });
+      if (!v.stdout.includes(versionA)) fail(`--version printed ${JSON.stringify(v.stdout)}`);
+      // --browser needs a listening socket, which the sandbox does not allow
+      // without network.server; the window needs none.
+      const win = start(exe, [], { stdio: ['ignore', 'ignore', 'pipe'] });
+      let werr = '';
+      win.stderr.on('data', (c) => (werr += c));
+      await sleep(8000);
+      const alive = win.exitCode === null;
+      killTree(win);
+      await exited(win);
+      if (!alive) fail(`the sandboxed app exited early (code ${win.exitCode}):\n${werr}`);
+      log('the sandboxed app stayed up for 8s');
       return;
     }
     default:

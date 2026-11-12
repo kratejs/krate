@@ -69,7 +69,7 @@ func TestPortalBackendSendsAndRoutesActions(t *testing.T) {
 	if err := b.close("n1"); err != nil || bus.calls[len(bus.calls)-1] != "org.freedesktop.portal.Desktop org.freedesktop.portal.Notification.RemoveNotification" {
 		t.Errorf("close: %v %v", err, bus.calls)
 	}
-	b.send(caps.Notification{Title: "no id"})
+	_ = b.send(caps.Notification{Title: "no id"})
 	if id := bus.args[len(bus.args)-1][0]; id != "krate-1" {
 		t.Errorf("generated id = %v", id)
 	}

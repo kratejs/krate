@@ -59,7 +59,7 @@ func TestPackageStoreMSIX(t *testing.T) {
 	o := winStoreOpts(t, m, "amd64")
 	// The shell layout's app.json carries the updater block and permission.
 	appJSON := filepath.Join(o.Payload.ExtraFiles["app"], "app.json")
-	os.WriteFile(appJSON, []byte(`{"appId":"com.acme.notes","updater":{"url":"https://a.b/u.json","publicKey":"k"},"permissions":["kv","updater"]}`), 0o644)
+	_ = os.WriteFile(appJSON, []byte(`{"appId":"com.acme.notes","updater":{"url":"https://a.b/u.json","publicKey":"k"},"permissions":["kv","updater"]}`), 0o644)
 	res, err := Package(o)
 	if err != nil {
 		t.Fatal(err)

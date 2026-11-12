@@ -101,7 +101,7 @@ func TestWriteFatRejects(t *testing.T) {
 		t.Errorf("same arch: %v", err)
 	}
 	txt := filepath.Join(d, "t.txt")
-	os.WriteFile(txt, []byte("not macho at all"), 0o644)
+	_ = os.WriteFile(txt, []byte("not macho at all"), 0o644)
 	if err := WriteFat(filepath.Join(d, "o"), []string{arm, txt}); err == nil || !strings.Contains(err.Error(), "not a Mach-O") {
 		t.Errorf("text: %v", err)
 	}
@@ -114,10 +114,10 @@ func archPayload(t *testing.T, cpu macho.Cpu, child bool, ui string) Payload {
 	d := t.TempDir()
 	exe := writeThin(t, d, "Acme Notes", cpu, "main")
 	app := filepath.Join(d, "app")
-	os.MkdirAll(filepath.Join(app, "dist"), 0o755)
-	os.WriteFile(filepath.Join(app, "app.json"), []byte(`{"appId":"com.acme.notes"}`), 0o644)
-	os.WriteFile(filepath.Join(app, "dist", "index.html"), []byte(ui), 0o644)
-	os.Symlink("index.html", filepath.Join(app, "dist", "home.html"))
+	_ = os.MkdirAll(filepath.Join(app, "dist"), 0o755)
+	_ = os.WriteFile(filepath.Join(app, "app.json"), []byte(`{"appId":"com.acme.notes"}`), 0o644)
+	_ = os.WriteFile(filepath.Join(app, "dist", "index.html"), []byte(ui), 0o644)
+	_ = os.Symlink("index.html", filepath.Join(app, "dist", "home.html"))
 	extra := map[string]string{"app": app}
 	if child {
 		extra["host"] = filepath.Dir(writeThin(t, d, "host/krate-host-node", cpu, "node-"+cpu.String()))
@@ -174,9 +174,9 @@ func TestDiscoverUniversalNeedsBothBuilds(t *testing.T) {
 	out := t.TempDir()
 	arm := archPayload(t, macho.CpuArm64, false, "a")
 	dir := filepath.Join(out, "darwin-arm64")
-	os.MkdirAll(dir, 0o755)
+	_ = os.MkdirAll(dir, 0o755)
 	data, _ := os.ReadFile(arm.Executable)
-	os.WriteFile(filepath.Join(dir, "Acme Notes"), data, 0o755)
+	_ = os.WriteFile(filepath.Join(dir, "Acme Notes"), data, 0o755)
 	_, err := DiscoverUniversal(out, "Acme Notes", filepath.Join(out, "w"))
 	if err == nil || !strings.Contains(err.Error(), "darwin/amd64") || !strings.Contains(err.Error(), "--arch universal") {
 		t.Errorf("err = %v", err)

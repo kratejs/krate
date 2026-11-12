@@ -121,7 +121,7 @@ func TestPackageMASAdHocSignsWithSandbox(t *testing.T) {
 	o := masOptions(t, m, r)
 	// Put a host child in the payload so nested signing is exercised.
 	hostDir := t.TempDir()
-	os.WriteFile(filepath.Join(hostDir, "krate-host-node"), thinMachO(0x0100000c, 0, "x"), 0o755)
+	_ = os.WriteFile(filepath.Join(hostDir, "krate-host-node"), thinMachO(0x0100000c, 0, "x"), 0o755)
 	o.Payload.ExtraFiles["host"] = hostDir
 	res, err := Package(o)
 	if err != nil {
@@ -221,7 +221,7 @@ func TestPackageMASRejects(t *testing.T) {
 		{"not a profile", func(o *Options) {
 			o.MAS.AppIdentity = "Apple Distribution: A (ABCDE12345)"
 			p := filepath.Join(t.TempDir(), "x")
-			os.WriteFile(p, []byte("hello"), 0o644)
+			_ = os.WriteFile(p, []byte("hello"), 0o644)
 			o.Meta.MAS.ProvisioningProfile = p
 		}, "not a provisioning profile"},
 		{"bad installer", func(o *Options) {
