@@ -197,6 +197,13 @@ func (a *App) SetAppMenu(items []caps.MenuItem) error {
 	a.mu.Unlock()
 	return nil
 }
+// PopupsShown returns a copy of the popup menus shown so far.
+func (a *App) PopupsShown() [][]caps.MenuItem {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([][]caps.MenuItem(nil), a.Popups...)
+}
+
 func (a *App) PopupMenu(parent caps.WindowRef, items []caps.MenuItem, x, y int) error {
 	a.mu.Lock()
 	a.Popups = append(a.Popups, items)
@@ -425,6 +432,13 @@ func (a *App) EmitContext(i caps.ContextMenuInfo) {
 }
 
 // ContextCommand records "cmd:arg".
+// ContextCommandsRun returns a copy of the context menu commands run so far.
+func (a *App) ContextCommandsRun() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]string(nil), a.ContextCommands...)
+}
+
 func (a *App) ContextCommand(w caps.WindowRef, cmd, arg string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()

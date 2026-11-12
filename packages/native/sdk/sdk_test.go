@@ -444,14 +444,16 @@ func TestContextMenuSDK(t *testing.T) {
 	}
 	// The answer is popped up at the click.
 	deadline := time.Now().Add(3 * time.Second)
-	for len(r.app.Popups) == 0 && time.Now().Before(deadline) {
+	popups := r.app.PopupsShown()
+	for len(popups) == 0 && time.Now().Before(deadline) {
 		time.Sleep(5 * time.Millisecond)
+		popups = r.app.PopupsShown()
 	}
-	if len(r.app.Popups) != 1 {
-		t.Fatalf("popups %v", r.app.Popups)
+	if len(popups) != 1 {
+		t.Fatalf("popups %v", popups)
 	}
 	var ids []string
-	for _, it := range r.app.Popups[0] {
+	for _, it := range popups[0] {
 		ids = append(ids, it.ID+"/"+it.Label)
 	}
 	want := []string{"krate:replaceMisspelling:the/the", "krate:replaceMisspelling:tech/tech", "krate:addToDictionary/Add to Dictionary", "/",
@@ -491,10 +493,15 @@ func TestContextMenuSDK(t *testing.T) {
 	}
 	// The commands run on the main thread as they arrive; their order is not
 	// part of the contract.
-	cmds := append([]string(nil), r.app.ContextCommands...)
+	var cmds []string
+	for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
+		if cmds = r.app.ContextCommandsRun(); len(cmds) >= 2 {
+			break
+		}
+	}
 	sort.Strings(cmds)
 	if !reflect.DeepEqual(cmds, []string{"copy:", "replaceMisspelling:the"}) {
-		t.Fatalf("commands %v", r.app.ContextCommands)
+		t.Fatalf("commands %v", cmds)
 	}
 
 	// The page needs only the menu permission.
