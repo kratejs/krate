@@ -363,7 +363,9 @@ func (a *App) createEnv(dir string) error {
 	a.userDir = dir
 	var opts unsafe.Pointer
 	if !a.envNoOpts {
-		opts = newEnvironmentOptions(joinArgs(browserArgumentString(a.cfg.Memory, a.cfg.Features), remoteArguments(a.cfg.Remote)), a.cfg.Extensions)
+		// The options object replaces WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS
+		// in the runtime, so the variable is carried over into it.
+		opts = newEnvironmentOptions(joinArgs(browserArgumentString(a.cfg.Memory, a.cfg.Features), remoteArguments(a.cfg.Remote), os.Getenv("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS")), a.cfg.Extensions)
 	}
 	a.envOpts = opts
 	handler := newHandler(iidEnvCompletedHandler, true, a.environmentCompleted)

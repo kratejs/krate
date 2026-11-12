@@ -7,6 +7,7 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -22,8 +23,9 @@ import (
 // test skips with the reason instead of failing.
 
 var (
-	pFindWindowW = user32.NewProc("FindWindowW")
-	pKeybdEvent  = user32.NewProc("keybd_event")
+	pFindWindowW   = user32.NewProc("FindWindowW")
+	pFindWindowExW = user32.NewProc("FindWindowExW")
+	pKeybdEvent    = user32.NewProc("keybd_event")
 )
 
 func testPNG(t *testing.T, c color.NRGBA) []byte {
@@ -41,9 +43,34 @@ func testPNG(t *testing.T, c color.NRGBA) []byte {
 	return b.Bytes()
 }
 
+// taskbarRunning reports whether the desktop has a visible taskbar with a
+// notification area, which Shell_NotifyIcon needs. A bare Shell_TrayWnd is
+// not enough: some images have one without a usable tray.
 func taskbarRunning() bool {
 	h, _, _ := pFindWindowW.Call(uintptr(unsafe.Pointer(wstr("Shell_TrayWnd"))), 0)
-	return h != 0
+	if h == 0 {
+		return false
+	}
+	if vis, _, _ := pIsWindowVisible.Call(h); vis == 0 {
+		return false
+	}
+	n, _, _ := pFindWindowExW.Call(h, 0, uintptr(unsafe.Pointer(wstr("TrayNotifyWnd"))), 0)
+	return n != 0
+}
+
+// addTrayOrSkip adds the tray icon. On Windows on ARM runner images the
+// shell has a taskbar window yet Shell_NotifyIcon(NIM_ADD) fails; only there
+// is that failure a skip, so a runner with a working taskbar still fails.
+func addTrayOrSkip(t *testing.T, icon *caps.TrayIcon) {
+	t.Helper()
+	err := guiApp.SetTray(icon)
+	if err == nil {
+		return
+	}
+	if runtime.GOARCH == "arm64" && strings.Contains(err.Error(), "Shell_NotifyIcon failed") {
+		t.Skipf("the notification area is not usable on this arm64 runner: %v", err)
+	}
+	t.Fatalf("add: %v", err)
 }
 
 type trayEvents struct {
@@ -83,9 +110,7 @@ func TestGUITrayLifecycle(t *testing.T) {
 	menu := []caps.MenuItem{{ID: "open", Label: "Open"}, {Kind: caps.MenuItemSeparator}, {ID: "quit", Label: "Quit"}}
 
 	// Add.
-	if err := guiApp.SetTray(&caps.TrayIcon{Tooltip: "Krate test", PNG: testPNG(t, color.NRGBA{R: 200, A: 255}), Menu: menu}); err != nil {
-		t.Fatalf("add: %v", err)
-	}
+	addTrayOrSkip(t, &caps.TrayIcon{Tooltip: "Krate test", PNG: testPNG(t, color.NRGBA{R: 200, A: 255}), Menu: menu})
 	// Modify: new tooltip, new image, a tooltip longer than the 127 units
 	// the shell holds.
 	if err := guiApp.SetTray(&caps.TrayIcon{Tooltip: strings.Repeat("long ", 80), PNG: testPNG(t, color.NRGBA{G: 200, A: 255}), Menu: menu}); err != nil {
@@ -148,9 +173,7 @@ func TestGUITrayTaskbarCreated(t *testing.T) {
 	if !taskbarRunning() {
 		t.Skip("no taskbar (Shell_TrayWnd) on this desktop")
 	}
-	if err := guiApp.SetTray(&caps.TrayIcon{Tooltip: "before explorer restart", PNG: testPNG(t, color.NRGBA{B: 200, A: 255})}); err != nil {
-		t.Fatalf("add: %v", err)
-	}
+	addTrayOrSkip(t, &caps.TrayIcon{Tooltip: "before explorer restart", PNG: testPNG(t, color.NRGBA{B: 200, A: 255})})
 	defer func() { _ = guiApp.SetTray(nil) }()
 
 	// The message the app listens for is the system-wide registered one.
@@ -306,10 +329,10 @@ func TestGUIToast(t *testing.T) {
 	needGUI(t)
 	var evs notifyEvents
 	guiApp.OnNotify(evs.add)
+	// The registration is written once per App, when the first toast is
+	// shown, and TestMain removes it at the end; deleting it here would leave
+	// a later test of the same App without it.
 	aumid := aumidFor(guiApp.cfg.AppID)
-	if !isPackaged() {
-		defer deleteAUMID(aumid)
-	}
 
 	n := caps.Notification{
 		ID: "t1", Title: "Krate toast test", Body: "Shown by the GUI test <&>",

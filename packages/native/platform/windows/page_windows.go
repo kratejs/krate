@@ -711,7 +711,12 @@ func b2u(b bool) uint32 {
 	return 0
 }
 
-// DeleteCookie removes the cookies of the origin with this name.
+var cookMgrDeleteWithDomainPath = vtIndex("ICoreWebView2CookieManager", "DeleteCookiesWithDomainAndPath")
+
+// DeleteCookie removes the cookies of the origin with this name. The runtime
+// applies a deletion asynchronously and DeleteCookies has no completion, so
+// the call waits until the cookie is gone. When the URL-based deletion does
+// not remove it, the cookie is deleted by its own domain and path.
 func (a *App) DeleteCookie(origin string, c caps.Cookie) error {
 	uri, _, err := caps.CookieOrigin(origin, krate.ErrUnsupported)
 	if err != nil {
@@ -724,7 +729,49 @@ func (a *App) DeleteCookie(origin string, c caps.Cookie) error {
 		done(nil, nil)
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	left, err := a.waitCookieGone(origin, c.Name)
+	if err != nil || len(left) == 0 {
+		return err
+	}
+	for _, k := range left {
+		_, err = a.siteCall("deleting a cookie", func(cm unsafe.Pointer, done func(any, error)) error {
+			if hr := vcall(cm, cookMgrDeleteWithDomainPath, uintptr(unsafe.Pointer(wstr(k.Name))), uintptr(unsafe.Pointer(wstr(k.Domain))), uintptr(unsafe.Pointer(wstr(k.Path)))); failed(hr) {
+				return fmt.Errorf("windows: DeleteCookiesWithDomainAndPath: 0x%08x", uint32(hr))
+			}
+			done(nil, nil)
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+	}
+	_, err = a.waitCookieGone(origin, c.Name)
 	return err
+}
+
+// waitCookieGone polls until no cookie called name is sent to origin, for at
+// most two seconds, and returns the ones still there.
+func (a *App) waitCookieGone(origin, name string) ([]caps.Cookie, error) {
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		cs, err := a.Cookies(origin)
+		if err != nil {
+			return nil, err
+		}
+		var left []caps.Cookie
+		for _, k := range cs {
+			if k.Name == name {
+				left = append(left, k)
+			}
+		}
+		if len(left) == 0 || time.Now().After(deadline) {
+			return left, nil
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
 }
 
 // Bits of COREWEBVIEW2_BROWSING_DATA_KINDS.

@@ -64,19 +64,18 @@ func withPageHandlers(h http.Handler) http.Handler {
 		w.Header().Set("Content-Disposition", `attachment; filename="att.bin"`)
 		_, _ = io.WriteString(w, "attachment body")
 	})
+	// The app origin is served through WebResourceRequested, which hands the
+	// webview the whole body only once the handler returns, so a download
+	// cannot be made slow by pacing the writes. A large body gives the cancel
+	// a window instead.
+	const bigSize = 128 << 20
 	mux.HandleFunc("/pgslow", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/octet-stream")
-		w.Header().Set("Content-Length", strconv.Itoa(64*1024*100))
-		chunk := make([]byte, 64*1024)
-		for i := 0; i < 100; i++ {
+		w.Header().Set("Content-Length", strconv.Itoa(bigSize))
+		chunk := make([]byte, 1<<20)
+		for i := 0; i < bigSize/len(chunk); i++ {
 			if _, err := w.Write(chunk); err != nil {
 				return
-			}
-			w.(http.Flusher).Flush()
-			select {
-			case <-r.Context().Done():
-				return
-			case <-time.After(150 * time.Millisecond):
 			}
 		}
 	})
@@ -342,12 +341,16 @@ func TestGUIPageDownloads(t *testing.T) {
 	needGUI(t)
 	dir := t.TempDir()
 	rig := newDownloadRig(t, func(r caps.DownloadRequest) string { return filepath.Join(dir, r.SuggestedName) })
-	w, v := openPage(t, "/pgdl")
 	for _, c := range []struct{ link, name, body string }{
 		{"a", "hello.txt", "hello download"},
 		{"att", "att.bin", "attachment body"},
 		{"blob", "blob.txt", "blob body"},
 	} {
+		// A fresh page per download: Chromium lets a page start one download
+		// without a user gesture and holds back the later ones, and a script
+		// click is not a gesture.
+		w, v := openPage(t, "/pgdl")
+		t.Logf("downloading via #%s", c.link)
 		click(t, w, v, c.link)
 		req := rig.request(t)
 		if req.SuggestedName != c.name || req.ID == 0 || req.View != v {
@@ -382,8 +385,11 @@ func TestGUIPageDownloadCancel(t *testing.T) {
 	click(t, w, v, "slow")
 	req := rig.request(t)
 	rig.until(t, req.ID, caps.DownloadStarted)
-	time.Sleep(500 * time.Millisecond)
 	if err := guiApp.CancelDownload(req.ID); err != nil {
+		// The body is already in memory, so a fast disk can finish first.
+		if e := rig.until(t, req.ID, end...); e.State == caps.DownloadCompleted {
+			t.Skipf("the download finished before it could be cancelled (%v)", err)
+		}
 		t.Fatal(err)
 	}
 	if e := rig.until(t, req.ID, end...); e.State != caps.DownloadCancelled {

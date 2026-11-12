@@ -3,6 +3,7 @@
 package windows
 
 import (
+	"encoding/json"
 	"reflect"
 	"sync"
 	"sync/atomic"
@@ -201,7 +202,7 @@ func TestGUISyntheticDropReachesTheHost(t *testing.T) {
 	deadline := time.Now().Add(15 * time.Second)
 	for dropSeen.messages.Load() == m0 {
 		if time.Now().After(deadline) {
-			t.Fatal("the host got no drop message: the shim did not post, or the runtime lacks postMessageWithAdditionalObjects")
+			dropNoMessage(t, w)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
@@ -213,4 +214,35 @@ func TestGUISyntheticDropReachesTheHost(t *testing.T) {
 		t.Errorf("a File with no path was reported as a drop: %+v", d)
 	case <-time.After(200 * time.Millisecond):
 	}
+}
+
+// dropNoMessage tells why the host got no drop message: it asks the page
+// whether the shim is installed and whether the runtime accepts a File made by
+// script as an additional object. The first is a failure; the second is a
+// property of the runtime that this test cannot change.
+func dropNoMessage(t *testing.T, w *Window) {
+	t.Helper()
+	w.Eval(`(function(){
+		var wv = window.chrome && window.chrome.webview, err = "";
+		try { wv.postMessageWithAdditionalObjects("{}", [new File(["x"], "p.txt")]); } catch (e) { err = String(e); }
+		fetch("/report", {method: "POST", body: JSON.stringify({window: "dropprobe", error: JSON.stringify({shim: !!window.__krateDrop, api: !!(wv && wv.postMessageWithAdditionalObjects), err: err})})});
+	})();`)
+	r := waitReport(t, "dropprobe")
+	t.Logf("page probe: %s", r.Error)
+	var p struct {
+		Shim, API bool
+		Err       string
+	}
+	if err := json.Unmarshal([]byte(r.Error), &p); err != nil {
+		t.Fatalf("the host got no drop message (unreadable probe %q)", r.Error)
+	}
+	switch {
+	case !p.API:
+		t.Skip("this WebView2 runtime has no postMessageWithAdditionalObjects")
+	case !p.Shim:
+		t.Fatal("the drop shim is not installed in the page")
+	case p.Err != "":
+		t.Skipf("the runtime refuses a script-made File as an additional object: %s", p.Err)
+	}
+	t.Fatal("the shim is installed and the runtime accepts the call, yet the host got no drop message")
 }

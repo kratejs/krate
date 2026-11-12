@@ -101,6 +101,9 @@ func TestMain(m *testing.M) {
 	err = app.Run(func() {
 		go func() {
 			code = m.Run()
+			if !isPackaged() {
+				deleteAUMID(aumidFor(app.cfg.AppID))
+			}
 			app.Quit()
 		}()
 	})

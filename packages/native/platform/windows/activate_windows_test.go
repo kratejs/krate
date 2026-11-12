@@ -123,7 +123,6 @@ func TestGUIToastProtocolRegistration(t *testing.T) {
 	}
 	scheme := toastscheme.Scheme(guiApp.cfg.AppID)
 	defer deleteToastProtocol(scheme)
-	defer deleteAUMID(aumidFor(guiApp.cfg.AppID))
 
 	err := guiApp.Notify(caps.Notification{ID: "reg1", Title: "Registration test", Body: "x"})
 	if err != nil && strings.Contains(err.Error(), "turned off") {
