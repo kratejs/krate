@@ -56,21 +56,34 @@ func Register(t *bridge.Table, env *bridge.Env) {
 			id = env.Windows.Reserve()
 			scoped, err := env.Scope(ctx.Window(), id, o.Permissions, o.HasPermissions)
 			if err != nil {
+				env.Windows.Release(id)
 				return err
 			}
 			if scoped {
 				o.Path = krate.ScopedPath(o.Path, id)
 			}
 		}
+		// A window that was not created gives its id and scope back.
+		drop := func() {
+			if id == "" {
+				return
+			}
+			if env.Unscope != nil {
+				env.Unscope(id)
+			}
+			env.Windows.Release(id)
+		}
 		if o.Frameless && (o.Chrome.TitleBar == "" || o.Chrome.TitleBar == caps.TitleBarNative) {
 			o.Chrome.TitleBar = caps.TitleBarNone
 		}
 		chromeOpts, err := o.Chrome.Validate()
 		if err != nil {
+			drop()
 			return krate.Errorf("bad_args", "window chrome: %w", err)
 		}
 		w, err := env.App.NewWindow(platform.WindowOptions{Title: o.Title, Width: o.Width, Height: o.Height, Resizable: !o.Fixed, Path: o.Path, Chrome: chromeOpts})
 		if err != nil {
+			drop()
 			return err
 		}
 		id = env.Windows.Add(id, w)
