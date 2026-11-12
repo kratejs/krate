@@ -249,6 +249,9 @@ func (a *App) MessageDialog(parent caps.WindowRef, o caps.MessageDialogOptions) 
 		dlg = x.gtkMessageDialogNew(a.parentWin(parent), 0, kind, 0, "%s", o.Message)
 		if o.Title != "" {
 			x.gtkWindowSetTitle(dlg, o.Title)
+			// GtkMessageDialog names its accessible after the message type
+			// ("Question") and ignores the title, so say the title again.
+			accessibleName(dlg, o.Title, "")
 		}
 		if o.Detail != "" {
 			x.gtkMessageSecondary(dlg, "%s", o.Detail)

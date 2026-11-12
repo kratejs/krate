@@ -121,12 +121,25 @@
   }
 
   var INTERACTIVE = /^(A|BUTTON|INPUT|SELECT|TEXTAREA|LABEL|SUMMARY|OPTION|VIDEO|AUDIO)$/;
+  // ARIA widget roles: a div with one of these is a control as much as a
+  // button is, and a press on it must reach the page (focus, click).
+  var WIDGET = /^(button|link|checkbox|radio|switch|tab|menuitem|menuitemcheckbox|menuitemradio|option|slider|spinbutton|textbox|searchbox|combobox|treeitem|gridcell|scrollbar)$/;
+
+  // isControl reports whether an element takes its own presses: a native
+  // control, an ARIA widget, a focusable element or editable content.
+  function isControl(n) {
+    if (INTERACTIVE.test(n.tagName) || n.isContentEditable) return true;
+    var role = n.getAttribute ? n.getAttribute("role") : null;
+    if (role && WIDGET.test(role.trim().toLowerCase())) return true;
+    var ti = n.getAttribute ? n.getAttribute("tabindex") : null;
+    return ti !== null && ti !== "" && parseInt(ti, 10) >= 0;
+  }
 
   // regionOf is the region at an element: the nearest ancestor that declares
   // one. Controls inside a drag region stay clickable.
   function regionOf(el) {
     for (var n = el; n && n.nodeType === 1; n = n.parentElement) {
-      if (INTERACTIVE.test(n.tagName) || n.isContentEditable) {
+      if (isControl(n)) {
         if (explicit(n) !== "drag") return "no-drag";
       }
       var v = explicit(n);
@@ -180,6 +193,9 @@
       Object.keys(CURSORS).forEach(function (name) {
         var el = document.createElement("div");
         el.setAttribute("data-krate-edge", name);
+        // Not content: keep the resize strips out of the accessibility tree.
+        el.setAttribute("aria-hidden", "true");
+        el.setAttribute("role", "presentation");
         place(el, name, name.length > 6 && /Left|Right/.test(name) ? 8 : 5);
         el.addEventListener("mousedown", function (e) {
           if (e.button !== 0) return;

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -772,4 +773,61 @@ func EdgeIndex(name string) int {
 		}
 	}
 	return -1
+}
+
+// TrayLabel returns the title and the tooltip a tray icon carries. Assistive
+// technology names a tray icon from them (StatusNotifierItem Title and
+// ToolTip, the notification area tip, the status button label), so an icon
+// must never go out with both empty: each falls back to the other, and the
+// application name is the last resort.
+func TrayLabel(ic *TrayIcon, appName string) (title, tooltip string) {
+	if ic == nil {
+		return appName, appName
+	}
+	title, tooltip = strings.TrimSpace(ic.Title), strings.TrimSpace(ic.Tooltip)
+	if title == "" {
+		title = tooltip
+	}
+	if tooltip == "" {
+		tooltip = title
+	}
+	if title == "" {
+		title, tooltip = appName, appName
+	}
+	return title, tooltip
+}
+
+// AppDisplayName is the name of the running app for labels that must not be
+// empty: KRATE_APP_NAME, then KRATE_APP_ID, then the executable's name.
+func AppDisplayName() string {
+	for _, k := range []string{"KRATE_APP_NAME", "KRATE_APP_ID"} {
+		if v := strings.TrimSpace(os.Getenv(k)); v != "" {
+			return v
+		}
+	}
+	if exe, err := os.Executable(); err == nil {
+		b := filepath.Base(exe)
+		return strings.TrimSuffix(b, filepath.Ext(b))
+	}
+	return "app"
+}
+
+// ThumbButtonName is the name of a taskbar thumbnail button. The button is an
+// icon only, so its tooltip is the only name assistive technology can read;
+// a button without a tooltip is named after its id rather than left unnamed.
+func ThumbButtonName(b ThumbButton) string {
+	if t := strings.TrimSpace(b.Tooltip); t != "" {
+		return b.Tooltip
+	}
+	return b.ID
+}
+
+// ActionLabel is the text of a notification button. A button needs a name to
+// be usable with a screen reader; an action without a label is named after
+// its id.
+func ActionLabel(a NotificationAction) string {
+	if strings.TrimSpace(a.Label) == "" {
+		return a.ID
+	}
+	return a.Label
 }

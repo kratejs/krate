@@ -188,7 +188,7 @@ func makeThumb(slot int, b *caps.ThumbButton, icon uintptr) thumbButton {
 		return t
 	}
 	t.mask |= thbTooltip
-	copyUTF16(t.tip[:], b.Tooltip)
+	copyUTF16(t.tip[:], caps.ThumbButtonName(*b))
 	if icon != 0 {
 		t.mask |= thbIcon
 		t.icon = icon

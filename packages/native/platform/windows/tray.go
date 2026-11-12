@@ -7,6 +7,8 @@ import (
 	"image"
 	"image/png"
 	"unicode/utf16"
+
+	"github.com/kratejs/krate/packages/native/platform/caps"
 )
 
 // System tray logic (pure; the Shell_NotifyIconW glue is in tray_windows.go).
@@ -83,12 +85,11 @@ func tipUnits(s string, max int) []uint16 {
 	return append(u, 0)
 }
 
-// trayTooltip prefers the tooltip and falls back to the title.
+// trayTooltip prefers the tooltip and falls back to the title, then to the app
+// name: the tip is the name Narrator reads for a notification area icon.
 func trayTooltip(tooltip, title string) string {
-	if tooltip != "" {
-		return tooltip
-	}
-	return title
+	_, tip := caps.TrayLabel(&caps.TrayIcon{Tooltip: tooltip, Title: title}, caps.AppDisplayName())
+	return tip
 }
 
 // iconBits is a square 32-bit BGRA image (non-premultiplied alpha, top row

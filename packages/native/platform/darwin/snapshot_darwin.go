@@ -42,6 +42,7 @@ func parkOffscreen(win objc.ID, width, height int) {
 	win.Send(sel("setHasShadow:"), false)
 	win.Send(sel("setIgnoresMouseEvents:"), true)
 	win.Send(sel("setExcludedFromWindowsMenu:"), true)
+	hideFromAccessibility(win)
 	win.Send(sel("orderFront:"), objc.ID(0))
 }
 

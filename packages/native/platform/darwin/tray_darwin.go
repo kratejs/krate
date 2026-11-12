@@ -198,6 +198,8 @@ func (a *App) setTray(icon *caps.TrayIcon) error {
 		tip = nsString(icon.Tooltip)
 	}
 	button.Send(sel("setToolTip:"), tip)
+	label, help := caps.TrayLabel(icon, caps.AppDisplayName())
+	nameTrayButton(button, label, help)
 
 	// Rebuild the menu. The old tags go with the old menu.
 	trayState.tags = map[int]trayEntry{}

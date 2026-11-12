@@ -498,6 +498,7 @@ func (w *Window) applyLayout() {
 		api.gObjectUnref(v.widget)
 	}
 	api.gtkWidgetShowAll(w.win)
+	w.labelPanes(layout)
 	w.layoutNow()
 }
 

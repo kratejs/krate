@@ -371,3 +371,40 @@ func TestJumpArgs(t *testing.T) {
 		}
 	}
 }
+
+func TestTrayLabel(t *testing.T) {
+	for _, c := range []struct {
+		name         string
+		ic           *TrayIcon
+		wantT, wantP string
+	}{
+		{"both", &TrayIcon{Title: "Mail", Tooltip: "3 unread"}, "Mail", "3 unread"},
+		{"title only", &TrayIcon{Title: "Mail"}, "Mail", "Mail"},
+		{"tooltip only", &TrayIcon{Tooltip: "3 unread"}, "3 unread", "3 unread"},
+		{"blank", &TrayIcon{Title: "  ", Tooltip: ""}, "My App", "My App"},
+		{"nil", nil, "My App", "My App"},
+	} {
+		gt, gp := TrayLabel(c.ic, "My App")
+		if gt != c.wantT || gp != c.wantP {
+			t.Errorf("%s: got (%q, %q), want (%q, %q)", c.name, gt, gp, c.wantT, c.wantP)
+		}
+	}
+}
+
+func TestThumbButtonName(t *testing.T) {
+	if got := ThumbButtonName(ThumbButton{ID: "play", Tooltip: "Play"}); got != "Play" {
+		t.Errorf("tooltip: %q", got)
+	}
+	if got := ThumbButtonName(ThumbButton{ID: "play", Tooltip: " "}); got != "play" {
+		t.Errorf("blank tooltip falls back to the id: %q", got)
+	}
+}
+
+func TestActionLabel(t *testing.T) {
+	if got := ActionLabel(NotificationAction{ID: "reply", Label: "Reply"}); got != "Reply" {
+		t.Errorf("label: %q", got)
+	}
+	if got := ActionLabel(NotificationAction{ID: "reply", Label: ""}); got != "reply" {
+		t.Errorf("unlabelled action: %q", got)
+	}
+}
