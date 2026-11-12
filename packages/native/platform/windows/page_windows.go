@@ -817,9 +817,12 @@ func (a *App) ClearSiteData(o caps.ClearSiteDataOptions) error {
 	}
 	for _, p := range parts {
 		if err := a.clearKinds(o, p.kinds, p.name); err != nil {
-			// Chromium removed WebSQL; a runtime without it may never
-			// complete the call. There is nothing of it to clear.
-			if p.kinds == dataWebSQL && errors.Is(err, errClearTimeout) {
+			// WebSQL (removed from Chromium) and the legacy FileSystem API
+			// hold nothing in an app that does not use them, and some
+			// runtimes never complete clearing them (seen on Windows on
+			// ARM, where the DevTools fallback answered ERROR_INVALID_STATE
+			// too). A timeout there is not an error.
+			if (p.kinds == dataWebSQL || p.kinds == dataFileSystems) && errors.Is(err, errClearTimeout) {
 				continue
 			}
 			return err

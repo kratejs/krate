@@ -5,6 +5,7 @@ package darwin
 import (
 	"fmt"
 	"log"
+	"runtime"
 	"strings"
 	"structs"
 	"sync"
@@ -155,7 +156,14 @@ func runOnMain(fn func()) {
 
 // withPool runs fn inside an autorelease pool. Main-thread only work that is
 // not already inside dispatch or a callback from AppKit needs this.
+//
+// An autorelease pool belongs to the thread that pushed it, and popping it on
+// another thread crashes. A goroutine off the main thread can move between
+// OS threads at any cgo call, so the goroutine is pinned to its thread for
+// the pool's lifetime (LockOSThread nests; the main thread is already pinned).
 func withPool(fn func()) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	pool := lib.poolPush()
 	defer lib.poolPop(pool)
 	fn()

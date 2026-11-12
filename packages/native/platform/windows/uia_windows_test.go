@@ -42,9 +42,12 @@ const (
 	uiaWindow   = 50032
 	uiaTitleBar = 50037
 
-	vkEscape  = 0x1B
-	keyUpFlag = 0x2
-	bmClick   = 0x00F5
+	vkEscape = 0x1B
+	// WM_KEYDOWN and WM_KEYUP, posted to a menu window.
+	wmKeyDownMsg = 0x0100
+	wmKeyUpMsg   = 0x0101
+	keyUpFlag    = 0x2
+	bmClick      = 0x00F5
 )
 
 // IUIAutomation vtable slots.
@@ -613,9 +616,11 @@ func TestGUIUIAPopupMenuItemsAndEscape(t *testing.T) {
 				t.Errorf("popup item %q missing from %v", want, items)
 			}
 		}
-		// The menu is not a keyboard trap: Escape closes it.
-		pressEscape()
-		pollUIA(t, "the popup to close on Escape", func() bool {
+		// The menu is not a keyboard trap: Escape closes it. keybd_event
+		// goes to the foreground input; on a runner where the app is not in
+		// the foreground the injected key never reaches the menu, so Escape is
+		// then posted to the menu window itself.
+		closed := func() bool {
 			root, ok := u.root()
 			if !ok {
 				return false
@@ -629,6 +634,17 @@ func TestGUIUIAPopupMenuItemsAndEscape(t *testing.T) {
 				}
 			}
 			return true
-		})
+		}
+		pressEscape()
+		for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline) && !closed(); {
+			time.Sleep(100 * time.Millisecond)
+		}
+		if !closed() {
+			hwnd := menu.hwnd()
+			t.Logf("the injected Escape did not reach the menu (foreground elsewhere); posting it to the menu window %#x", hwnd)
+			_, _, _ = pPostMessageW.Call(hwnd, wmKeyDownMsg, vkEscape, 0)
+			_, _, _ = pPostMessageW.Call(hwnd, wmKeyUpMsg, vkEscape, 0)
+		}
+		pollUIA(t, "the popup to close on Escape", closed)
 	})
 }
