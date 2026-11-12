@@ -1103,7 +1103,7 @@
       "knownLimits": [
         "WebKit keeps no cookies for the app's custom scheme (document.cookie is inert on krate://app and the jar refuses a single-label host such as app), so on Linux and macOS cookie calls for the app origin answer unsupported; pass the URL of an http(s) site. On Windows the app origin is https://app.localhost and has cookies.",
         "An older WebView2 runtime without ICoreWebView2Profile2 can only clear cookies.",
-        "Windows on ARM: the WebView2 runtime on the windows-11-arm CI runner never finishes clearing DOM storage (local storage, IndexedDB), so clearing storage there returns an error, and the webview answers further calls with an invalid-state error until the app restarts; clear cookies and the cache alone there.",
+        "Windows on ARM: ClearBrowsingData never finished clearing DOM storage on the windows-11-arm runner's WebView2 and left the webview unusable, so on arm64 the app origin's DOM storage (local storage, IndexedDB, cache storage, service workers, file systems) is cleared through the DevTools protocol (Storage.clearDataForOrigin) instead; storage of other origins in the profile is not cleared there.",
         "macOS and Windows: untested. The same GUI tests run in CI on macos-latest and windows-latest."
       ]
     },
