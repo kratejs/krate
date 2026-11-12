@@ -47,6 +47,11 @@ type Config struct {
 	// Features is app.json "features" (media, webaudio, webgl, webrtc,
 	// spellcheck). Nil means not detected: no feature is switched off.
 	Features map[string]bool
+	// Remote starts the DevTools protocol endpoint (see automation_windows.go).
+	Remote caps.RemoteDebug
+	// Extensions makes the environment ready for browser extensions (see
+	// extensions_windows.go).
+	Extensions bool
 	// Args are the command-line arguments to look at for a toast click that
 	// started the process; nil means os.Args[1:].
 	Args []string
@@ -62,6 +67,8 @@ type WindowConfig struct {
 	Path      string
 	// Chrome is the window chrome the window starts with.
 	Chrome caps.ChromeOptions
+	// Offscreen opens the window out of view (see snapshot_windows.go).
+	Offscreen bool
 }
 
 // App is the running application.
@@ -356,7 +363,7 @@ func (a *App) createEnv(dir string) error {
 	a.userDir = dir
 	var opts unsafe.Pointer
 	if !a.envNoOpts {
-		opts = newEnvironmentOptions(browserArgumentString(a.cfg.Memory, a.cfg.Features))
+		opts = newEnvironmentOptions(joinArgs(browserArgumentString(a.cfg.Memory, a.cfg.Features), remoteArguments(a.cfg.Remote)), a.cfg.Extensions)
 	}
 	a.envOpts = opts
 	handler := newHandler(iidEnvCompletedHandler, true, a.environmentCompleted)

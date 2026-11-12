@@ -31,8 +31,10 @@ import (
 	"github.com/kratejs/krate/packages/native/sdk"
 	sdkall "github.com/kratejs/krate/packages/native/sdk/all"
 	appsdk "github.com/kratejs/krate/packages/native/sdk/app"
+	sdkautomation "github.com/kratejs/krate/packages/native/sdk/automation"
 	"github.com/kratejs/krate/packages/native/sdk/permission"
 	sdkupdater "github.com/kratejs/krate/packages/native/sdk/updater"
+	"github.com/kratejs/krate/packages/native/sdk/worker"
 )
 
 // RunOptions configures Run.
@@ -116,6 +118,8 @@ type app struct {
 	child *gohost.Child
 	// hostChildren are the running JavaScript host children by entry path.
 	hostChildren map[string]*hostChild
+	// workers supervises the worker processes of the manifest; nil without any.
+	workers *worker.Supervisor
 
 	ctl  *Control
 	quit func() // set by the run mode
@@ -209,6 +213,10 @@ func loadApp(dir string, fsys fs.FS, opts RunOptions) (*app, error) {
 		os.Setenv("KRATE_APP_ID", man.AppID)
 	}
 	a.setupCrash(man)
+	if err := a.setupWorkers(man); err != nil {
+		a.close()
+		return nil, err
+	}
 	if err := a.reloadHostJS(); err != nil {
 		a.close()
 		return nil, err
@@ -314,6 +322,7 @@ func (a *app) attachSDK(p platform.App) {
 		sdkupdater.SetQuit(p.Quit)
 	}
 	sdkall.RegisterUI(a.reg, a.sdk, a.perms, a.opts.Allowed)
+	a.startAutoWorkers()
 }
 
 // startMemory applies the Go side of the memory profile and starts the idle
@@ -340,6 +349,9 @@ func (a *app) close() {
 	}
 	if a.plug != nil {
 		a.plug.Quit()
+	}
+	if a.workers != nil {
+		a.workers.StopAll()
 	}
 	a.sdk.Close()
 	a.mu.Lock()
@@ -525,6 +537,15 @@ func (w *windows) all() []platform.Window {
 
 func (a *app) runNative() error {
 	man := a.man
+	autoOn := a.opts.Dev || man.Debug
+	if man.Automation != nil && !autoOn {
+		a.logf("shell: app.json asks for automation, which runs only in a dev run or with native.debug; ignoring it")
+	}
+	sdkautomation.Configure(autoOn)
+	remote := caps.RemoteDebug{}
+	if autoOn && man.Automation != nil {
+		remote = caps.RemoteDebug{Enabled: true, Port: man.Automation.Port}
+	}
 	platApp, err := platform.New(platform.Options{
 		AppID:   man.AppID,
 		AppName: man.ProductName,
@@ -532,12 +553,15 @@ func (a *app) runNative() error {
 		Debug:   a.opts.Dev || man.Debug,
 		Memory:  platformMemory(man),
 		// The manifest is read once, at load, like the permissions.
-		KeepAlive: man.Window.KeepAlive,
-		Agent:     man.Mac != nil && man.Mac.Agent,
+		KeepAlive:  man.Window.KeepAlive,
+		Agent:      man.Mac != nil && man.Mac.Agent,
+		Remote:     remote,
+		Extensions: len(man.Extensions) > 0,
 	})
 	if err != nil {
 		return err
 	}
+	a.declareExtensions(man)
 	a.attachSDK(platApp)
 	a.plat.Store(&platApp)
 	if man.SingleInstance {
@@ -603,6 +627,7 @@ func (a *app) runNative() error {
 		}
 		wins.add(win)
 		a.sdk.AddWindow("main", win)
+		a.startAutomationAndExtensions(platApp)
 		if a.opts.OnReady != nil {
 			go a.opts.OnReady(a.ctl)
 		}

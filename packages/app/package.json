@@ -143,6 +143,30 @@
     "./cookies": {
       "types": "./dist/cookies.d.ts",
       "default": "./dist/cookies.js"
+    },
+    "./port": {
+      "types": "./dist/port.d.ts",
+      "default": "./dist/port.js"
+    },
+    "./worker": {
+      "types": "./dist/worker.d.ts",
+      "default": "./dist/worker.js"
+    },
+    "./worker-host": {
+      "types": "./dist/worker-host.d.ts",
+      "default": "./dist/worker-host.js"
+    },
+    "./offscreen": {
+      "types": "./dist/offscreen.d.ts",
+      "default": "./dist/offscreen.js"
+    },
+    "./automation": {
+      "types": "./dist/automation.d.ts",
+      "default": "./dist/automation.js"
+    },
+    "./extension": {
+      "types": "./dist/extension.d.ts",
+      "default": "./dist/extension.js"
     }
   },
   "files": [

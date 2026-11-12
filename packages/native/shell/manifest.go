@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -16,6 +17,7 @@ import (
 	"github.com/kratejs/krate/packages/native/plugin"
 	"github.com/kratejs/krate/packages/native/sdk/media"
 	"github.com/kratejs/krate/packages/native/sdk/permission"
+	"github.com/kratejs/krate/packages/native/sdk/worker"
 )
 
 // ManifestFile is the name of the manifest inside an app directory.
@@ -44,6 +46,9 @@ type Manifest struct {
 	// process on Node, Bun, Deno or as a compiled executable (scriptc), each
 	// serving its own ids. See README.md.
 	HostChildren []HostChildSpec `json:"hostchildren,omitempty"`
+	// Workers are the background worker processes pages and host code may
+	// start by name (see package sdk/worker).
+	Workers []worker.Spec `json:"workers,omitempty"`
 
 	// Permissions lists what the UI may use of the SDK (see package
 	// sdk/permission). Empty means the default set (os:info, kv, db, window,
@@ -80,7 +85,22 @@ type Manifest struct {
 	// screen capture and location requests. See sdk/media.
 	Media *MediaSpec `json:"media,omitempty"`
 
+	// Automation is native.automation: a remote debugging endpoint for tests
+	// and debugging sessions. It is honored only in a dev run or when Debug is
+	// set; a release build without native.debug ignores it.
+	Automation *AutomationSpec `json:"automation,omitempty"`
+	// Extensions are the unpacked browser extensions the app packages:
+	// directories relative to the app directory, loaded at start where the
+	// engine supports them.
+	Extensions []string `json:"extensions,omitempty"`
+
 	Debug bool `json:"debug"`
+}
+
+// AutomationSpec is the automation block of app.json.
+type AutomationSpec struct {
+	// Port is the loopback port of the endpoint (default 9222).
+	Port int `json:"port,omitempty"`
 }
 
 // MediaSpec is the media block of app.json.
@@ -325,6 +345,41 @@ func (m *Manifest) normalize() error {
 			}
 			if !media.ValidPolicy(p) {
 				return fmt.Errorf("media.policy.%s must be prompt, allow or deny, got %q", k, p)
+			}
+		}
+	}
+	if a := m.Automation; a != nil && (a.Port < 0 || a.Port > 65535) {
+		return fmt.Errorf("automation.port %d is not a port", a.Port)
+	}
+	seenExt := map[string]bool{}
+	for i, e := range m.Extensions {
+		if err := local(fmt.Sprintf("extensions[%d]", i), e); err != nil {
+			return err
+		}
+		name := path.Base(e)
+		if seenExt[name] {
+			return fmt.Errorf("extensions[%d]: two extensions are named %q", i, name)
+		}
+		seenExt[name] = true
+	}
+	seenWorker := map[string]bool{}
+	for i, w := range m.Workers {
+		if err := w.Validate(); err != nil {
+			return fmt.Errorf("workers[%d]: %w", i, err)
+		}
+		if seenWorker[w.Name] {
+			return fmt.Errorf("workers[%d]: %q is declared twice", i, w.Name)
+		}
+		seenWorker[w.Name] = true
+		if err := local(fmt.Sprintf("workers[%d].entry", i), w.Entry); err != nil {
+			return err
+		}
+		if _, err := permission.Parse(w.Permissions); err != nil {
+			return fmt.Errorf("workers[%d].permissions: %w", i, err)
+		}
+		for _, n := range w.Permissions {
+			if !set.Allows(n) {
+				return fmt.Errorf("workers[%d].permissions: %q is not in the app's permissions", i, n)
 			}
 		}
 	}

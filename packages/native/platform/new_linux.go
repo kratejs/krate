@@ -7,7 +7,7 @@ import "github.com/kratejs/krate/packages/native/platform/linux"
 // New creates the WebKitGTK application. Call it from the main goroutine.
 func New(opts Options) (App, error) {
 	a, err := linux.New(linux.Options{
-		AppID: opts.AppID, Handler: opts.Handler, Debug: opts.Debug, KeepAlive: opts.KeepAlive,
+		AppID: opts.AppID, Handler: opts.Handler, Debug: opts.Debug, KeepAlive: opts.KeepAlive, Remote: opts.Remote,
 		Memory: linux.Memory{Profile: opts.Memory.Profile, Features: linux.Features(opts.Memory.Features)},
 	})
 	if err != nil {

@@ -66,7 +66,14 @@ type NativeManifest struct {
 	// Media is native.media: the policy for the page's camera, microphone,
 	// screen capture and location requests.
 	Media *NativeMediaMeta `json:"media,omitempty"`
-	Debug bool             `json:"debug"`
+	// Workers are the background worker processes (native.workers).
+	Workers []NativeWorkerMeta `json:"workers,omitempty"`
+	// Extensions are the packaged browser extension directories.
+	Extensions []string `json:"extensions,omitempty"`
+	// Automation is native.automation; present only in a dev build or one with
+	// native.debug.
+	Automation *NativeAutomationMeta `json:"automation,omitempty"`
+	Debug      bool                  `json:"debug"`
 }
 
 // NativeMediaMeta is the media block of app.json.
@@ -528,6 +535,7 @@ func (b *Builder) BuildNativeApp(opts NativeAppOptions) (*NativeAppResult, error
 		var useNotes []string
 		m.Permissions, useNotes = devUsePermissions(m.Permissions, uses)
 		res.Notes = append(res.Notes, useNotes...)
+		m.Permissions = addWorkerPermissions(m.Permissions, eff)
 		m.Permissions = b.pluginDevPermissions(m.Permissions)
 	}
 	if opts.Derive {
@@ -541,6 +549,7 @@ func (b *Builder) BuildNativeApp(opts NativeAppOptions) (*NativeAppResult, error
 		if len(eff.FileAssociations) > 0 {
 			cap.Require("app")
 		}
+		cap.Permissions = addWorkerPermissions(cap.Permissions, eff)
 		res.Capabilities = cap
 		m.Permissions = append([]string{}, cap.Permissions...)
 		m.StrictPermissions = true
@@ -563,6 +572,9 @@ func (b *Builder) BuildNativeApp(opts NativeAppOptions) (*NativeAppResult, error
 		}
 		m.HostChildren = children
 		res.Notes = append(res.Notes, notes...)
+	}
+	if err := b.buildNativeProcs(eff, appDir, opts, &m, res); err != nil {
+		return nil, err
 	}
 	if eff.Updater != nil {
 		u := eff.Updater

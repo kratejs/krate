@@ -3,6 +3,7 @@
 package windows
 
 import (
+	"strings"
 	"sync"
 	"syscall"
 	"unicode/utf16"
@@ -30,6 +31,7 @@ type envOptions struct {
 	mu                       sync.Mutex
 	arguments, lang, version string
 	sso                      bool
+	extensions               bool // AreBrowserExtensionsEnabled
 }
 
 // defaultTargetVersion is the oldest runtime that has the options interface
@@ -39,6 +41,7 @@ const defaultTargetVersion = "86.0.616.0"
 var (
 	optOnce sync.Once
 	vtOpts  unsafe.Pointer
+	vtOpts6 unsafe.Pointer
 )
 
 func initOptionsVtable() {
@@ -86,6 +89,37 @@ func initOptionsVtable() {
 			return sOK
 		})
 		vtOpts = unsafe.Pointer(&t[0])
+
+		// ICoreWebView2EnvironmentOptions6 is its own interface: IUnknown plus
+		// the one property.
+		const iface6 = "ICoreWebView2EnvironmentOptions6"
+		t6 := make([]uintptr, len(ifaceMethods[iface6]))
+		t6[iunknownSlotQI], t6[iunknownSlotAddRef], t6[iunknownSlotRelease] = qi, addRef, release
+		t6[vtIndex(iface6, "get_AreBrowserExtensionsEnabled")] = syscall.NewCallback(func(this, out uintptr) uintptr {
+			o := optsOf(this)
+			if o == nil || out == 0 {
+				return eInvalidArg
+			}
+			o.mu.Lock()
+			defer o.mu.Unlock()
+			v := uint32(0)
+			if o.extensions {
+				v = 1
+			}
+			*(*uint32)(ptr(out)) = v
+			return sOK
+		})
+		t6[vtIndex(iface6, "put_AreBrowserExtensionsEnabled")] = syscall.NewCallback(func(this, v uintptr) uintptr {
+			o := optsOf(this)
+			if o == nil {
+				return eInvalidArg
+			}
+			o.mu.Lock()
+			o.extensions = uint32(v) != 0
+			o.mu.Unlock()
+			return sOK
+		})
+		vtOpts6 = unsafe.Pointer(&t6[0])
 	})
 }
 
@@ -138,15 +172,35 @@ func optPutString(this, value uintptr, field func(*envOptions) *string) uintptr 
 // the given AdditionalBrowserArguments, or nil when args is empty (the loader
 // then receives no options, exactly as before). The caller owns one
 // reference.
-func newEnvironmentOptions(args string) unsafe.Pointer {
-	if args == "" {
+func newEnvironmentOptions(args string, extensions bool) unsafe.Pointer {
+	if args == "" && !extensions {
 		return nil
 	}
 	initOptionsVtable()
+	state := &envOptions{arguments: args, version: defaultTargetVersion, extensions: extensions}
 	o := &comObj{
 		vtbl: vtOpts,
 		ids:  []guid{mustGUID(iidIUnknown), mustGUID(iidEnvironmentOptions)},
-		opts: &envOptions{arguments: args, version: defaultTargetVersion},
+		opts: state,
+	}
+	if extensions {
+		// The runtime asks for the extensions interface with QueryInterface.
+		// The extra object lives as long as the process: it is one small
+		// allocation per environment.
+		alt := &comObj{vtbl: vtOpts6, ids: []guid{mustGUID(iidIUnknown), mustGUID(iidEnvironmentOptions6)}, opts: state}
+		register(alt)
+		o.alts = []*comObj{alt}
 	}
 	return register(o)
+}
+
+// joinArgs joins non-empty browser argument strings.
+func joinArgs(parts ...string) string {
+	var out []string
+	for _, p := range parts {
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return strings.Join(out, " ")
 }

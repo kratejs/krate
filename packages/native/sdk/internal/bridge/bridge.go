@@ -229,6 +229,11 @@ func CallDo(ctx context.Context, id string, args func(e *wire.Encoder)) error {
 // each value, on its own goroutine, until cancel is called or ctx ends. In a
 // child process it reconnects if the stream drops.
 func Subscribe(ctx context.Context, id string, onValue func(d *wire.Decoder)) (cancel func(), err error) {
+	return SubscribeArgs(ctx, id, nil, onValue)
+}
+
+// SubscribeArgs is Subscribe for a stream that takes arguments.
+func SubscribeArgs(ctx context.Context, id string, args func(e *wire.Encoder), onValue func(d *wire.Decoder)) (cancel func(), err error) {
 	ctx, stop := context.WithCancel(ctx)
 	if t := local.Load(); t != nil {
 		e, ok := t.lookup(id)
@@ -236,7 +241,7 @@ func Subscribe(ctx context.Context, id string, onValue func(d *wire.Decoder)) (c
 			stop()
 			return nil, krate.Errorf("not_found", "no SDK stream %s", id)
 		}
-		ad, err := codec.EncodeArgs(nil)
+		ad, err := codec.EncodeArgs(args)
 		if err != nil {
 			stop()
 			return nil, err
@@ -268,7 +273,7 @@ func Subscribe(ctx context.Context, id string, onValue func(d *wire.Decoder)) (c
 		stop()
 		return nil, err
 	}
-	go r.stream(asCtx(ctx), id, onValue)
+	go r.stream(asCtx(ctx), id, args, onValue)
 	return stop, nil
 }
 

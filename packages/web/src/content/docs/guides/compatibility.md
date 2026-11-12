@@ -124,6 +124,11 @@ green run there is what moves a cell.
 | Native: custom title bars, drag regions and transparency | Supported | Untested | Untested | Krate Native v1 |
 | Native: Mica, Acrylic, vibrancy, caption overlay and traffic lights | n/a | Untested | Untested | Krate Native v1 |
 | Native: tabs, sheets, document state, share menu, dock, thumbnail buttons and jump lists | n/a | Untested | Untested | Krate Native v1 |
+| Native: worker processes | Supported | Untested | Untested | Krate Native v1 |
+| Native: message ports between views, windows and workers | Supported | Untested | Untested | Krate Native v1 |
+| Native: offscreen rendering | Supported | Untested | Untested | Krate Native v1 |
+| Native: remote debugging and automation | Supported | Untested | Untested | Krate Native v1 |
+| Native: browser extensions | n/a | Untested | Untested | Krate Native v1 |
 
 ## Details
 
@@ -1212,6 +1217,73 @@ Known limits:
 - A new-tab event is delivered through the window delegate's newWindowForTab: action, the way AppKit sends it from the tab bar's plus button.
 
 Evidence: `TestInfoPlistAgent`, `TestMetadataAgentFromConfig`, `TestValidateThumbButtons`, `TestValidateJumpTasks`, `TestQuoteArgs`, `TestQuoteArgsRoundTrip`, `TestShareItemsValidate`, `TestThumbButtonLayout`, `TestMakeThumb`, `TestThumbIDs`, `TestSplitCommand`, `TestChromeSheetsTabsThumbs`, `TestChromeAppLevel`, `TestChromeEvents`, `TestChromeRejectsBadArguments`, `TestChromePermissions`, `TestGUIChromeDocumentState`, `TestGUIChromeTabbing`, `TestGUIChromeSheet`, `TestGUIChromeActivationPolicy`, `TestGUIChromeShareValidates`, `TestGUIChromeThumbButtons`, `TestGUIChromeJumpList`
+
+### Native: worker processes
+
+**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+
+Background worker processes declared in native.workers (a TypeScript module on Node, Bun or Deno, a Go main package, or a prebuilt executable) are started by name from a page or host code, with their own SDK endpoint whose permissions are narrowed per worker, stdout and stderr in the app log, a restart policy with backoff, crash and restart events, and two-way messages over the wire codec (binary, Date, Map, Set). The supervisor and policy are pure Go and tested on every OS; the shell tests run real Node and Go workers.
+
+Known limits:
+
+- macOS and Windows compile and share the portable supervisor and the host child transport (loopback TCP with a token for JavaScript workers on Windows); the worker tests run on Linux only.
+- A release build ships worker scripts under host/workers next to the executable and needs Node, Bun or Deno on the user's machine for a TypeScript worker; a Go worker is compiled for the build machine's platform only.
+- Permissions narrow the SDK ids a worker can call; a worker is still an ordinary process with the user's file and network access.
+
+Evidence: `TestStartUnknownWorker`, `TestCrashRestartsOnFailure`, `TestNeverPolicyStaysStopped`, `TestGivesUpAfterMax`, `TestFailedRestartStartsAreRetried`, `TestMessagesBothWays`, `TestDecide`, `TestSpecValidate`, `TestWorkersNode`, `TestWorkerGo`, `TestParseManifestWorkers`, `TestNativeE2EProcsGUI`, `fixture:examples/native-procs/src/workers/echo.ts`
+
+### Native: message ports between views, windows and workers
+
+**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+
+A channel has two ends; whoever creates it can hand each end to a window, view or worker, and messages (JSON, binary, Date, Map, Set) then flow directly between the ends without host code relaying them, in order, with a bounded queue (1024 messages, 16 MiB) and backpressure errors. An end can only be handed to a scope that has port:receive. The page object is a Port in @krate/app/port backed by the shell.
+
+Known limits:
+
+- The engines give two top-level webviews no way to share a real MessagePort, so a port is a shell-backed object, not a transferable MessagePort; inside one page the browser's MessageChannel is untouched.
+- The pure broker is tested on every OS; the page-to-page and page-to-worker round trips run on Linux.
+
+Evidence: `TestPostIsDeliveredInOrderToTheOtherEnd`, `TestOnlyTheHolderMayUseAnEnd`, `TestTransferNeedsAReceiver`, `TestQueuedMessagesFollowTheEnd`, `TestTransferEndsTheOldListener`, `TestCloseDrainsThenReportsClosed`, `TestBackpressureAndLimits`, `TestDropOwnerClosesItsChannels`, `TestWorkersNode`, `TestNativeE2EProcsGUI`, `fixture:examples/native-procs/src/pages/peer.tsx`
+
+### Native: offscreen rendering
+
+**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+
+No system webview streams offscreen frames. The closest equivalent: a window that is never shown (a GtkOffscreenWindow on Linux, a window parked off every display on Windows and macOS) whose page renders normally, plus snapshots (webkit_web_view_get_snapshot, WKWebView takeSnapshot, WebView2 CapturePreview) delivered as PNG or raw premultiplied BGRA, one at a time at a requested rate up to 60 per second, with dropped frames counted instead of queued.
+
+Known limits:
+
+- This is polling, not a paint callback: frames are snapshots, so the rate depends on page complexity and engine; the measured Linux numbers are in docs native/processes.
+- Windows and macOS are written and compiled; their capture and parked-window code runs only in the CI native job.
+- An open offscreen window counts as a window: close it, or the app does not quit when the last visible window closes.
+
+Evidence: `TestGUIOffscreenSnapshot`, `TestGUISnapshotOfAMappedWindowAndErrors`, `TestEncodePNGKeepsColorsAndUnpremultiplies`, `TestRawBGRARemovesRowPadding`, `TestPacing`, `TestStreamPacesAndCountsDroppedFrames`, `TestStreamStopsWithTheContextAndReportsCaptureErrors`, `TestSnapshotFromPNG`, `TestNativeE2EProcsGUI`
+
+### Native: remote debugging and automation
+
+**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+
+An endpoint for tests and debugging, on in dev and with native.debug and never in a release build otherwise: WebView2 serves the Chrome DevTools Protocol (Playwright connectOverCDP, Puppeteer connect) and krate can send one CDP method or subscribe to an event in process; WebKitGTK serves the WebKit remote inspector over HTTP (WEBKIT_INSPECTOR_HTTP_SERVER), which is not CDP; WKWebView is inspectable from Safari's Develop menu. CDP answers unsupported where the engine does not speak it.
+
+Known limits:
+
+- Playwright and Puppeteer attach only to WebView2; they cannot drive WebKitGTK or WKWebView. Microsoft documents --remote-debugging-port with Edge WebDriver's DebuggerAddress for WebView2; attaching Playwright through connectOverCDP to the same port is standard Chromium CDP but was not run here.
+- The WebView2 CDP command and event code is checked against WebView2.h and compiled; it runs only in the CI native job.
+
+Evidence: `TestGUIOffscreenSnapshot`, `TestNativeE2EProcsGUI`, `TestProcsVtableSlots`
+
+### Native: browser extensions
+
+**Linux:** n/a - **macOS:** Untested - **Windows:** Untested
+
+native.extensions packages unpacked extension folders loaded at start and by name: WebView2 through ICoreWebView2Profile7 AddBrowserExtension with AreBrowserExtensionsEnabled, WKWebView through WKWebExtensionController on macOS 15.4 and later. WebKitGTK has no extension API and answers unsupported.
+
+Known limits:
+
+- Linux is unsupported by the engine.
+- WebView2 and macOS are written and compiled and never run by the author. On macOS the API's match patterns cover http, https and file pages, so a content script is not expected to run on the app's own krate:// pages.
+
+Evidence: `TestProcsVtableSlots`, `TestNativeE2EProcsGUI`
 
 ## How claims are verified
 

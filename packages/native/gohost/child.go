@@ -78,6 +78,7 @@ type Child struct {
 	mu      sync.Mutex
 	dir     string
 	run     *run
+	last    *run // the run that stopRunLocked ended, for ExitStatus
 	seq     int
 	binary  string
 	env     []string
@@ -137,6 +138,29 @@ func (c *Child) Exited() <-chan struct{} {
 		return nil
 	}
 	return c.run.exited
+}
+
+// ExitStatus reports how the current child process ended: ok is false while
+// it still runs (or none was started). code is -1 when a signal ended it.
+func (c *Child) ExitStatus() (code int, err error, ok bool) {
+	c.mu.Lock()
+	r := c.run
+	if r == nil {
+		r = c.last
+	}
+	c.mu.Unlock()
+	if r == nil {
+		return 0, nil, false
+	}
+	select {
+	case <-r.exited:
+	default:
+		return 0, nil, false
+	}
+	if r.cmd.ProcessState != nil {
+		code = r.cmd.ProcessState.ExitCode()
+	}
+	return code, r.waitErr, true
 }
 
 // Pid is the process id of the running child, or 0.
@@ -363,6 +387,7 @@ func (c *Child) stopRunLocked() {
 		return
 	}
 	c.run = nil
+	c.last = r
 	// Detach first so nothing is sent to a dying child.
 	c.remote.SetTarget(nil, Base)
 	if c.o.BeforeStop != nil {

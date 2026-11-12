@@ -14,14 +14,16 @@ import (
 func New(opts Options) (App, error) {
 	mem, feat := opts.Memory.Backend()
 	a, err := winplat.New(winplat.Config{
-		AppID:     opts.AppID,
-		AppName:   opts.AppName,
-		IconPath:  opts.IconPath,
-		Handler:   opts.Handler,
-		Debug:     opts.Debug,
-		KeepAlive: opts.KeepAlive,
-		Memory:    mem,
-		Features:  feat,
+		AppID:      opts.AppID,
+		AppName:    opts.AppName,
+		IconPath:   opts.IconPath,
+		Handler:    opts.Handler,
+		Debug:      opts.Debug,
+		KeepAlive:  opts.KeepAlive,
+		Memory:     mem,
+		Features:   feat,
+		Remote:     opts.Remote,
+		Extensions: opts.Extensions,
 	})
 	if errors.Is(err, winplat.ErrActivationForwarded) {
 		// A notification click started this process and the running instance
@@ -46,6 +48,7 @@ func (w winApp) NewWindow(o WindowOptions) (Window, error) {
 		Resizable: o.Resizable,
 		Path:      o.Path,
 		Chrome:    o.Chrome,
+		Offscreen: o.Offscreen,
 	})
 	if err != nil {
 		return nil, err

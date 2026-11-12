@@ -83,6 +83,30 @@ const (
 	iidWebView2_11 = "0be78e56-c193-4051-b943-23b460c08bdb"
 	// ICoreWebView2Environment9
 	iidEnvironment9 = "f06f41bf-4b5a-49d8-b9f6-fa16cd29f274"
+	// Process and automation interfaces (snapshot_windows.go, automation_windows.go,
+	// extensions_windows.go). Ids from the MIDL_INTERFACE lines of WebView2.h.
+	// ICoreWebView2CapturePreviewCompletedHandler
+	iidCapturePreviewHandler = "697e05e9-3d8f-45fa-96f4-8ffe1ededaf5"
+	// ICoreWebView2CallDevToolsProtocolMethodCompletedHandler
+	iidCallCDPHandler = "5c4889f0-5ef6-4c5a-952c-d8f1b92d0574"
+	// ICoreWebView2DevToolsProtocolEventReceivedEventHandler
+	iidCDPEventHandler = "e2fda4be-5456-406c-a261-3d452138362c"
+	// ICoreWebView2_13
+	iidWebView2_13 = "f75f09a8-667e-4983-88d6-c8773f315e84"
+	// ICoreWebView2Profile7
+	iidProfile7 = "7b4c7906-a1aa-4cb4-b723-db09f813d541"
+	// ICoreWebView2BrowserExtension
+	iidBrowserExtension = "7ef7ffa0-fac5-462c-b189-3d9edbe575da"
+	// ICoreWebView2BrowserExtensionList
+	iidBrowserExtensionList = "2ef3d2dc-bd5f-4f4d-90af-fd67798f0c2f"
+	// ICoreWebView2ProfileAddBrowserExtensionCompletedHandler
+	iidAddExtensionHandler = "df1aab27-82b9-4ab6-aae8-017a49398c14"
+	// ICoreWebView2ProfileGetBrowserExtensionsCompletedHandler
+	iidGetExtensionsHandler = "fce16a1c-f107-4601-8b75-fc4940ae25d0"
+	// ICoreWebView2BrowserExtensionRemoveCompletedHandler
+	iidRemoveExtensionHandler = "8e41909a-9b18-4bb1-8cdf-930f467a50be"
+	// ICoreWebView2EnvironmentOptions6
+	iidEnvironmentOptions6 = "57d29cc3-c84f-42a0-b0e2-effbd5e179de"
 )
 
 // guid is a GUID in its in-memory (Windows GUID struct) layout: Data1, Data2

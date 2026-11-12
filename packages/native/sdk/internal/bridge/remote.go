@@ -192,10 +192,10 @@ func (r *remote) call(ctx krate.Ctx, id string, args func(*wire.Encoder)) (*wire
 
 // stream opens id and forwards values until ctx ends, reconnecting after a
 // drop.
-func (r *remote) stream(ctx krate.Ctx, id string, onValue func(*wire.Decoder)) {
+func (r *remote) stream(ctx krate.Ctx, id string, args func(*wire.Encoder), onValue func(*wire.Decoder)) {
 	backoff := 100 * time.Millisecond
 	for ctx.Err() == nil {
-		if r.streamOnce(ctx, id, onValue) {
+		if r.streamOnce(ctx, id, args, onValue) {
 			backoff = 100 * time.Millisecond
 		}
 		select {
@@ -209,8 +209,8 @@ func (r *remote) stream(ctx krate.Ctx, id string, onValue func(*wire.Decoder)) {
 	}
 }
 
-func (r *remote) streamOnce(ctx krate.Ctx, id string, onValue func(*wire.Decoder)) (got bool) {
-	resp, err := r.post(ctx, id, nil)
+func (r *remote) streamOnce(ctx krate.Ctx, id string, args func(*wire.Encoder), onValue func(*wire.Decoder)) (got bool) {
+	resp, err := r.post(ctx, id, args)
 	if err != nil {
 		return false
 	}

@@ -301,6 +301,13 @@ func (b *Builder) BuildNativeRelease(opts NativeReleaseOptions) (*NativeReleaseR
 		if err != nil {
 			return nil, err
 		}
+		if len(ar.Manifest.Workers) > 0 {
+			wd := filepath.Join(outDir, goos+"-"+goarch, filepath.FromSlash(workersDir))
+			if err := copyTreeFiles(filepath.Join(ar.AppDir, filepath.FromSlash(workersDir)), wd); err != nil {
+				return nil, err
+			}
+			files = append(files, filepath.ToSlash(mustRel(outDir, wd)))
+		}
 		hostFiles[goos+"/"+goarch] = files
 		if goos == "windows" {
 			// The Go linker picks the .syso up from the main package for this

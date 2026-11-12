@@ -489,7 +489,11 @@ func TestContextMenuSDK(t *testing.T) {
 	if s, _ := r.app.ReadText(); s != "https://e.x/a:b" {
 		t.Fatalf("copyLink put %q on the clipboard", s)
 	}
-	if !reflect.DeepEqual(r.app.ContextCommands, []string{"copy:", "replaceMisspelling:the"}) {
+	// The commands run on the main thread as they arrive; their order is not
+	// part of the contract.
+	cmds := append([]string(nil), r.app.ContextCommands...)
+	sort.Strings(cmds)
+	if !reflect.DeepEqual(cmds, []string{"copy:", "replaceMisspelling:the"}) {
 		t.Fatalf("commands %v", r.app.ContextCommands)
 	}
 

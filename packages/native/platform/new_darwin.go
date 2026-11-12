@@ -11,13 +11,15 @@ import (
 func New(opts Options) (App, error) {
 	mem, feat := opts.Memory.Backend()
 	a, err := darwin.New(darwin.Options{
-		AppID:     opts.AppID,
-		Handler:   opts.Handler,
-		Debug:     opts.Debug,
-		KeepAlive: opts.KeepAlive,
-		Memory:    mem,
-		Features:  feat,
-		Agent:     opts.Agent,
+		AppID:      opts.AppID,
+		Handler:    opts.Handler,
+		Debug:      opts.Debug,
+		KeepAlive:  opts.KeepAlive,
+		Memory:     mem,
+		Features:   feat,
+		Agent:      opts.Agent,
+		Remote:     opts.Remote,
+		Extensions: opts.Extensions,
 	})
 	if err != nil {
 		return nil, err

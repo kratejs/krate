@@ -28,6 +28,7 @@ type comObj struct {
 	invoke func(a, b uintptr) uintptr // completion and event handlers
 	stream *goStream                  // IStream objects
 	opts   *envOptions                // ICoreWebView2EnvironmentOptions objects
+	alts   []*comObj                  // other interfaces of the same object, found by QueryInterface
 	app    *App
 }
 
@@ -113,6 +114,15 @@ func cbQueryInterface(this, riid, out uintptr) uintptr {
 			o.refs.Add(1)
 			*(*uintptr)(ptr(out)) = this
 			return sOK
+		}
+	}
+	for _, alt := range o.alts {
+		for _, id := range alt.ids {
+			if id == g {
+				alt.refs.Add(1)
+				*(*uintptr)(ptr(out)) = uintptr(unsafe.Pointer(alt))
+				return sOK
+			}
 		}
 	}
 	return eNoInterface

@@ -1529,6 +1529,213 @@
       ]
     },
     {
+      "id": "krate/port.channel",
+      "permission": "port",
+      "area": "port",
+      "module": "port",
+      "exports": [
+        "createChannel"
+      ]
+    },
+    {
+      "id": "krate/port.transfer",
+      "permission": "port",
+      "area": "port",
+      "module": "port",
+      "exports": [
+        "transferPort"
+      ]
+    },
+    {
+      "id": "krate/port.post",
+      "permission": "port:receive",
+      "area": "port",
+      "module": "port",
+      "exports": [
+        "Port",
+        "createChannel",
+        "portFromId"
+      ]
+    },
+    {
+      "id": "krate/port.listen",
+      "permission": "port:receive",
+      "area": "port",
+      "module": "port",
+      "exports": [
+        "Port",
+        "createChannel",
+        "portFromId"
+      ]
+    },
+    {
+      "id": "krate/port.close",
+      "permission": "port:receive",
+      "area": "port",
+      "module": "port",
+      "exports": [
+        "Port",
+        "createChannel",
+        "portFromId"
+      ]
+    },
+    {
+      "id": "krate/worker.start",
+      "permission": "worker",
+      "area": "worker",
+      "module": "worker",
+      "exports": [
+        "startWorker"
+      ]
+    },
+    {
+      "id": "krate/worker.stop",
+      "permission": "worker",
+      "area": "worker",
+      "module": "worker",
+      "exports": [
+        "WorkerHandle",
+        "startWorker"
+      ]
+    },
+    {
+      "id": "krate/worker.list",
+      "permission": "worker",
+      "area": "worker",
+      "module": "worker",
+      "exports": [
+        "listWorkers"
+      ]
+    },
+    {
+      "id": "krate/worker.specs",
+      "permission": "worker",
+      "area": "worker",
+      "module": "worker",
+      "exports": [
+        "workerSpecs"
+      ]
+    },
+    {
+      "id": "krate/worker.post",
+      "permission": "worker",
+      "area": "worker",
+      "module": "worker",
+      "exports": [
+        "WorkerHandle",
+        "startWorker"
+      ]
+    },
+    {
+      "id": "krate/worker.events",
+      "permission": "worker",
+      "area": "worker",
+      "module": "worker",
+      "exports": [
+        "WorkerHandle",
+        "onWorkerEvent",
+        "startWorker"
+      ]
+    },
+    {
+      "id": "krate/worker.emit",
+      "area": "worker",
+      "module": "worker-host",
+      "exports": [
+        "postMessage"
+      ]
+    },
+    {
+      "id": "krate/offscreen.open",
+      "permission": "offscreen",
+      "area": "offscreen",
+      "module": "offscreen",
+      "exports": [
+        "openOffscreen"
+      ]
+    },
+    {
+      "id": "krate/offscreen.capture",
+      "permission": "offscreen",
+      "area": "offscreen",
+      "module": "offscreen",
+      "exports": [
+        "captureFrame"
+      ]
+    },
+    {
+      "id": "krate/offscreen.frames",
+      "permission": "offscreen",
+      "area": "offscreen",
+      "module": "offscreen",
+      "exports": [
+        "frames"
+      ]
+    },
+    {
+      "id": "krate/automation.endpoint",
+      "permission": "automation",
+      "area": "automation",
+      "module": "automation",
+      "exports": [
+        "automationEndpoint"
+      ]
+    },
+    {
+      "id": "krate/automation.cdp",
+      "permission": "automation",
+      "area": "automation",
+      "module": "automation",
+      "exports": [
+        "cdp"
+      ]
+    },
+    {
+      "id": "krate/automation.cdpEvents",
+      "permission": "automation",
+      "area": "automation",
+      "module": "automation",
+      "exports": [
+        "cdpEvents"
+      ]
+    },
+    {
+      "id": "krate/extension.declared",
+      "permission": "extension",
+      "area": "extension",
+      "module": "extension",
+      "exports": [
+        "declaredExtensions"
+      ]
+    },
+    {
+      "id": "krate/extension.list",
+      "permission": "extension",
+      "area": "extension",
+      "module": "extension",
+      "exports": [
+        "listExtensions"
+      ]
+    },
+    {
+      "id": "krate/extension.load",
+      "permission": "extension",
+      "area": "extension",
+      "module": "extension",
+      "exports": [
+        "loadExtension"
+      ]
+    },
+    {
+      "id": "krate/extension.remove",
+      "permission": "extension",
+      "area": "extension",
+      "module": "extension",
+      "exports": [
+        "removeExtension"
+      ]
+    },
+    {
       "id": "krate/badge.set",
       "permission": "badge",
       "area": "badge",

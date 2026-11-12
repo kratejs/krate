@@ -1295,6 +1295,76 @@ var ifaceMethods = map[string][]string{
 		"QueryInterface", "AddRef", "Release", "GetIids", "GetRuntimeClassName", "GetTrustLevel",
 		"LoadXml", "LoadXmlWithSettings", "SaveToFileAsync",
 	},
+	// Process and automation interfaces (offscreen capture, DevTools protocol, extensions).
+	// WebView2.h line 54490
+	"ICoreWebView2Profile7": {
+		"QueryInterface",
+		"AddRef",
+		"Release",
+		"get_ProfileName",
+		"get_IsInPrivateModeEnabled",
+		"get_ProfilePath",
+		"get_DefaultDownloadFolderPath",
+		"put_DefaultDownloadFolderPath",
+		"get_PreferredColorScheme",
+		"put_PreferredColorScheme",
+		"ClearBrowsingData",
+		"ClearBrowsingDataInTimeRange",
+		"ClearBrowsingDataAll",
+		"get_PreferredTrackingPreventionLevel",
+		"put_PreferredTrackingPreventionLevel",
+		"SetPermissionState",
+		"GetNonDefaultPermissionSettings",
+		"get_CookieManager",
+		"get_IsPasswordAutosaveEnabled",
+		"put_IsPasswordAutosaveEnabled",
+		"get_IsGeneralAutofillEnabled",
+		"put_IsGeneralAutofillEnabled",
+		"AddBrowserExtension",
+		"GetBrowserExtensions",
+	},
+	// WebView2.h line 32897
+	"ICoreWebView2BrowserExtension": {
+		"QueryInterface",
+		"AddRef",
+		"Release",
+		"get_Id",
+		"get_Name",
+		"Remove",
+		"get_IsEnabled",
+		"Enable",
+	},
+	// WebView2.h line 54924
+	"ICoreWebView2BrowserExtensionList": {
+		"QueryInterface",
+		"AddRef",
+		"Release",
+		"get_Count",
+		"GetValueAtIndex",
+	},
+	// WebView2.h line 39069
+	"ICoreWebView2DevToolsProtocolEventReceiver": {
+		"QueryInterface",
+		"AddRef",
+		"Release",
+		"add_DevToolsProtocolEventReceived",
+		"remove_DevToolsProtocolEventReceived",
+	},
+	// WebView2.h line 38888
+	"ICoreWebView2DevToolsProtocolEventReceivedEventArgs": {
+		"QueryInterface",
+		"AddRef",
+		"Release",
+		"get_ParameterObjectAsJson",
+	},
+	// WebView2.h line 44407
+	"ICoreWebView2EnvironmentOptions6": {
+		"QueryInterface",
+		"AddRef",
+		"Release",
+		"get_AreBrowserExtensionsEnabled",
+		"put_AreBrowserExtensionsEnabled",
+	},
 	// Typed event handler delegates have the IUnknown slots and Invoke.
 	"TypedEventHandler": {"QueryInterface", "AddRef", "Release", "Invoke"},
 }

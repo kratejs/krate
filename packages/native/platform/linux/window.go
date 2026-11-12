@@ -58,6 +58,7 @@ type Window struct {
 	menubar      uintptr
 	accel        uintptr
 	lastState    uint32
+	offscreen    bool // a GtkOffscreenWindow: never shown on screen
 }
 
 func (a *App) newWindow(opts WindowOptions, onLoad func()) (*Window, error) {
@@ -69,7 +70,8 @@ func (a *App) newWindow(opts WindowOptions, onLoad func()) (*Window, error) {
 	if opts.Height <= 0 {
 		opts.Height = 768
 	}
-	w.win = api.gtkWindowNew(gtkWindowToplevel)
+	w.offscreen = opts.Offscreen && a.OffscreenSupported()
+	w.win = a.newToplevel(w.offscreen)
 	if w.win == 0 {
 		return nil, errors.New("krate: gtk_window_new failed")
 	}

@@ -4,6 +4,7 @@ packages:
   - examples/native-tasks
   - examples/native-media
   - examples/native-views
+  - examples/native-procs
   - examples/native-files
   - examples/native-chrome
   - examples/native-page

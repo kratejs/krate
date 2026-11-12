@@ -40,6 +40,11 @@ type Options struct {
 	// Agent starts the app as a menu-bar-only agent (accessory activation
 	// policy: no dock icon, no application menu), like LSUIElement.
 	Agent bool
+	// Remote says whether remote debugging was asked for (see automation_darwin.go).
+	Remote caps.RemoteDebug
+	// Extensions prepares the web views for browser extensions (see
+	// extensions_darwin.go).
+	Extensions bool
 }
 
 // WindowOptions configures one window; it mirrors platform.WindowOptions.
@@ -50,7 +55,8 @@ type WindowOptions struct {
 	Resizable bool
 	Path      string
 	// Chrome is the window chrome the window starts with.
-	Chrome caps.ChromeOptions
+	Chrome    caps.ChromeOptions
+	Offscreen bool
 }
 
 // App is the macOS application. The first goroutine to import this package
@@ -69,6 +75,7 @@ type App struct {
 	dlDelegate    objc.ID
 	printDelegate objc.ID
 	processPool   objc.ID
+	extCtl        objc.ID // WKWebExtensionController, see extensions_darwin.go
 
 	ready atomic.Bool
 	// purgeStarted is true while the memory cache purge chain runs.

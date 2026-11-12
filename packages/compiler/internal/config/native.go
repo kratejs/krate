@@ -77,7 +77,72 @@ type NativeConfig struct {
 	// Debug keeps the webview's developer tools (the web inspector) on in a
 	// release build. They are always on in `krate native dev`.
 	Debug bool `json:"debug,omitempty"`
+	// Workers declares background worker processes (Electron's
+	// utilityProcess.fork): a TypeScript module on Node, Bun or Deno, a Go
+	// main package, or a prebuilt executable. Pages and host code start them
+	// by name with @krate/app/worker. See docs native/processes.
+	Workers map[string]NativeWorker `json:"workers,omitempty"`
+	// Extensions lists unpacked browser extension directories packaged with
+	// the app and loaded at start where the engine supports them (WebView2,
+	// WKWebView on macOS 15.4+; WebKitGTK has no extension API).
+	Extensions []string `json:"extensions,omitempty"`
+	// Automation turns on a remote debugging endpoint for tests and debugging
+	// sessions: a CDP port on WebView2, the WebKit remote inspector on
+	// WebKitGTK, Safari inspection on WKWebView. It runs in `krate native dev`
+	// and in builds with native.debug; a release build without native.debug
+	// ignores it.
+	Automation *NativeAutomation `json:"automation,omitempty"`
 }
+
+// NativeWorker is one worker declared in native.workers. Exactly one of Entry,
+// Go and Exec is set.
+type NativeWorker struct {
+	// Entry is a TypeScript or JavaScript module that runs as a host child
+	// program on Runtime. Use onMessage and postMessage from
+	// @krate/app/worker-host inside it.
+	Entry string `json:"entry,omitempty"`
+	// Go is a Go main package (a path like "./cmd/indexer") that calls
+	// worker.Serve from the native module's sdk/worker package.
+	Go string `json:"go,omitempty"`
+	// Exec is a prebuilt executable that serves the host child protocol.
+	Exec string `json:"exec,omitempty"`
+	// Runtime is node, bun or deno for Entry; default node.
+	Runtime string `json:"runtime,omitempty"`
+	// Args are passed to the worker's program.
+	Args []string `json:"args,omitempty"`
+	// Permissions narrows what the worker may call in the SDK: a subset of
+	// the app's permissions. Empty means nothing.
+	Permissions []string `json:"permissions,omitempty"`
+	// Restart is the restart policy; the default never restarts.
+	Restart *NativeWorkerRestart `json:"restart,omitempty"`
+	// Autostart starts one instance when the app starts.
+	Autostart bool `json:"autostart,omitempty"`
+}
+
+// NativeWorkerRestart is a worker's restart policy.
+type NativeWorkerRestart struct {
+	// Policy is "never" (default), "onFailure" or "always".
+	Policy string `json:"policy,omitempty"`
+	// Max is how many restarts in a row are allowed (default 5).
+	Max int `json:"max,omitempty"`
+	// BackoffMs is the delay before the first restart (default 200); it
+	// doubles for each restart in a row up to 10 seconds.
+	BackoffMs int `json:"backoffMs,omitempty"`
+}
+
+// NativeAutomation is native.automation.
+type NativeAutomation struct {
+	// Port is the loopback port of the endpoint (default 9222).
+	Port int `json:"port,omitempty"`
+}
+
+// NativeWorkerRuntimes are the values of NativeWorker.Runtime.
+var NativeWorkerRuntimes = []string{"node", "bun", "deno"}
+
+// NativeWorkerPolicies are the values of NativeWorkerRestart.Policy.
+var NativeWorkerPolicies = []string{"never", "onFailure", "always"}
+
+var nativeWorkerNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`)
 
 // NativeFileAssociation is one file type the app opens.
 type NativeFileAssociation struct {
@@ -654,6 +719,9 @@ func (c *Config) validateNative() (warnings []string, err error) {
 	if err := validateNativeFileAssociations(n.FileAssociations); err != nil {
 		return nil, err
 	}
+	if err := validateNativeProcs(n); err != nil {
+		return nil, err
+	}
 	if n.Host.Runtime != "" && !oneOf(n.Host.Runtime, NativeHostRuntimes) {
 		return nil, nativeErr("host.runtime", fmt.Sprintf("must be one of %s, got %q", strings.Join(NativeHostRuntimes, ", "), n.Host.Runtime),
 			"\"quickjs\" is embedded and needs no install; node, bun and deno run as a bundled sidecar")
@@ -933,6 +1001,68 @@ func validateNativeDistribution(n *NativeConfig) error {
 	}
 	if c := l.Snap.Confinement; c != "" && c != "strict" && c != "classic" && c != "devmode" {
 		return nativeErr("bundle.linux.snap.confinement", fmt.Sprintf("must be \"strict\", \"classic\" or \"devmode\", got %q", c), "strict is what the store prefers")
+	}
+	return nil
+}
+
+// validateNativeProcs checks native.workers, native.extensions and
+// native.automation.
+func validateNativeProcs(n *NativeConfig) error {
+	for name, w := range n.Workers {
+		key := "workers." + name
+		if !nativeWorkerNameRe.MatchString(name) {
+			return nativeErr(key, "has a name that is not usable", "use letters, digits, '_', '.' and '-' (up to 64, starting with a letter or digit)")
+		}
+		set := 0
+		for _, v := range []string{w.Entry, w.Go, w.Exec} {
+			if v != "" {
+				set++
+			}
+		}
+		if set != 1 {
+			return nativeErr(key, "must set exactly one of entry, go and exec",
+				"entry is a TypeScript module, go is a Go main package (\"./cmd/indexer\"), exec is a prebuilt executable")
+		}
+		if w.Runtime != "" && !oneOf(w.Runtime, NativeWorkerRuntimes) {
+			return nativeErr(key+".runtime", fmt.Sprintf("must be one of %s, got %q", strings.Join(NativeWorkerRuntimes, ", "), w.Runtime),
+				"runtime picks Node, Bun or Deno for a TypeScript entry; go and exec workers have none")
+		}
+		if w.Runtime != "" && w.Entry == "" {
+			return nativeErr(key+".runtime", "only applies to an entry module", "remove it for go and exec workers")
+		}
+		for _, p := range w.Permissions {
+			if !IsNativePermission(p) {
+				return nativeErr(key+".permissions", fmt.Sprintf("has unknown permission %q", p), "known permissions: "+strings.Join(NativePermissions, ", "))
+			}
+			if len(n.Permissions) > 0 && !nativePermissionCovered(n.Permissions, p) {
+				return nativeErr(key+".permissions", fmt.Sprintf("lists %q, which native.permissions does not allow", p),
+					"a worker narrows the app's permissions; add it to native.permissions or remove it here")
+			}
+		}
+		if r := w.Restart; r != nil {
+			if r.Policy != "" && !oneOf(r.Policy, NativeWorkerPolicies) {
+				return nativeErr(key+".restart.policy", fmt.Sprintf("must be one of %s, got %q", strings.Join(NativeWorkerPolicies, ", "), r.Policy),
+					"\"never\" leaves an exited worker stopped, \"onFailure\" restarts a crash, \"always\" restarts every exit")
+			}
+			if r.Max < 0 || r.BackoffMs < 0 {
+				return nativeErr(key+".restart", "max and backoffMs must be >= 0", "omit them for the defaults (5 restarts, 200 ms)")
+			}
+		}
+	}
+	seen := map[string]bool{}
+	for i, e := range n.Extensions {
+		key := fmt.Sprintf("extensions[%d]", i)
+		if e == "" || filepath.IsAbs(e) || strings.HasPrefix(filepath.ToSlash(filepath.Clean(e)), "..") {
+			return nativeErr(key, fmt.Sprintf("must be a directory inside the project, got %q", e), "list the folder of an unpacked extension, for example \"./extensions/dark\"")
+		}
+		base := filepath.Base(e)
+		if seen[base] {
+			return nativeErr(key, fmt.Sprintf("two extensions are named %q", base), "extensions are loaded by their folder name; rename one")
+		}
+		seen[base] = true
+	}
+	if a := n.Automation; a != nil && (a.Port < 0 || a.Port > 65535) {
+		return nativeErr("automation.port", fmt.Sprintf("must be a TCP port, got %d", a.Port), "omit it for 9222")
 	}
 	return nil
 }
