@@ -41,11 +41,24 @@ func TestNativeE2EViewsGUI(t *testing.T) {
 	}
 	var err error
 	sizeRe := regexp.MustCompile(`(sidebar|log) (\d+)x(\d+)`)
+	// Each view reports its size when it loads and whenever the layout
+	// resizes it; a view that loads while the layout is still being applied
+	// first reports a transient size, so wait for the settled ones.
+	roomy := func() bool {
+		sizes := sizeRe.FindAllStringSubmatch(page.Loaded, -1)
+		for _, m := range sizes {
+			w, _ := strconv.Atoi(m[2])
+			h, _ := strconv.Atoi(m[3])
+			if w < 50 || h < 50 {
+				return false
+			}
+		}
+		return len(sizes) == 2
+	}
 	for deadline := time.Now().Add(60 * time.Second); ; time.Sleep(200 * time.Millisecond) {
 		err = s.query(`({status: document.getElementById("status")?.textContent ?? "",
 			loaded: document.getElementById("loaded")?.textContent ?? ""})`, &page)
-		if err == nil && strings.Contains(page.Status, "sidebar") && strings.Contains(page.Status, "log") &&
-			len(sizeRe.FindAllString(page.Loaded, -1)) == 2 {
+		if err == nil && strings.Contains(page.Status, "sidebar") && strings.Contains(page.Status, "log") && roomy() {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -53,7 +66,7 @@ func TestNativeE2EViewsGUI(t *testing.T) {
 			var errs string
 			_ = s.query(`JSON.stringify(globalThis.__krateErrs ?? [], (k, v) => v instanceof Error ? String(v) + " " + v.stack : v)`, &errs)
 			t.Logf("page errors: %s", errs)
-			t.Fatalf("the views did not all open within 60s: status %q, loaded %q, last query error: %v",
+			t.Fatalf("the views did not all open with room within 60s: status %q, loaded %q, last query error: %v",
 				page.Status, page.Loaded, err)
 		}
 	}
@@ -130,14 +143,21 @@ func TestNativeE2EMediaGUI(t *testing.T) {
 	}
 	// The app's policy allows the camera, but the operating system's consent
 	// is checked after it: a runner whose camera privacy is off (osCamera
-	// "denied", Windows CI) still ends in NotAllowedError.
-	switch {
-	case got["osCamera"] != "" && got["osCamera"] != "granted" && got["osCamera"] != "notDetermined":
+	// "denied", Windows CI) still ends in NotAllowedError. Where the OS has
+	// no consent to report ("unknown", Linux), either answer is the OS's.
+	switch got["osCamera"] {
+	case "denied", "restricted":
 		if got["camera"] != "NotAllowedError" {
 			t.Errorf("camera (policy allow, OS consent %s) = %q, want NotAllowedError", got["osCamera"], got["camera"])
 		}
-	case got["camera"] == "NotAllowedError" || got["camera"] == "":
-		t.Errorf("camera (policy allow) = %q", got["camera"])
+	case "unknown":
+		if got["camera"] == "" {
+			t.Error("camera (policy allow, OS consent unknown): no answer")
+		}
+	default:
+		if got["camera"] == "NotAllowedError" || got["camera"] == "" {
+			t.Errorf("camera (policy allow, OS consent %q) = %q", got["osCamera"], got["camera"])
+		}
 	}
 	if got["microphone"] != "NotAllowedError" {
 		t.Errorf("microphone (policy deny) = %q, want NotAllowedError", got["microphone"])

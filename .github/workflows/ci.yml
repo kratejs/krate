@@ -629,9 +629,23 @@ jobs:
       # (KRATE_BUDGET_SCALE). Memory is PSS and private dirty per process role;
       # only app minus a blank-page floor (same shell, same runner) fails the
       # job, the absolute values print a warning. Memory limits are not scaled.
+      #
+      # A private session bus with dunst on the test display: the runner's own
+      # session bus would start dunst through systemd without the display, and
+      # a notification would wait for the bus's 25s activation timeout.
       - name: Compiler native tests (Linux, GUI under Xvfb)
         if: runner.os == 'Linux'
-        run: xvfb-run -a go test -p 1 -count=1 -timeout 20m -v -run 'TestNativeE2EGUI|TestNativeBudgetGUI|TestNativeDebugGoHost|GUI' ./internal/build
+        run: |
+          # shellcheck disable=SC2016
+          xvfb-run -a dbus-run-session -- bash -c '
+            dunst &
+            notifier=$!
+            sleep 1
+            go test -p 1 -count=1 -timeout 20m -v -run "TestNativeE2EGUI|TestNativeBudgetGUI|TestNativeDebugGoHost|GUI" ./internal/build
+            status=$?
+            kill $notifier
+            exit $status
+          '
         working-directory: packages/compiler
         env:
           KRATE_NATIVE_GUI: "1"

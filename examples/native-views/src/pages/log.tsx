@@ -7,9 +7,12 @@ export default function Log() {
     const line = (data as { line?: string }).line ?? JSON.stringify(data);
     setLines([...lines(), (from || 'host') + ': ' + line]);
   });
-  // Tell the main page this view loaded, and at what size.
+  // Tell the main page this view loaded, and at what size; again whenever the
+  // layout resizes it.
   createEffect(() => {
-    void getView('main').post({ loaded: innerWidth + 'x' + innerHeight });
+    const report = () => void getView('main').post({ loaded: innerWidth + 'x' + innerHeight });
+    report();
+    addEventListener('resize', report);
   });
   return (
     <main>

@@ -219,6 +219,14 @@ func (s *e2eShell) next(timeout time.Duration) string {
 		}
 		return l
 	case <-time.After(timeout):
+		// Show where the shell is stuck: its goroutine stacks go to stderr,
+		// which the test log already carries.
+		if s.cmd.Process != nil && dumpGoStacks(s.cmd.Process) {
+			select {
+			case <-s.done:
+			case <-time.After(5 * time.Second):
+			}
+		}
 		s.t.Fatalf("no line from krate-shell within %s", timeout)
 	}
 	return ""

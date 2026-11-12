@@ -7,8 +7,8 @@ import { main, onViewMessage, pane, split } from '@krate/app/window';
 export default function Home() {
   const [status, setStatus] = createSignal('opening views...');
   const [heard, setHeard] = createSignal('');
-  // The views that loaded, with the size their page saw.
-  const [loaded, setLoaded] = createSignal<string[]>([]);
+  // The views that loaded, with the latest size their page reported.
+  const [loaded, setLoaded] = createSignal<[string, string][]>([]);
 
   createEffect(() => {
     openViews().catch((e) => setStatus('could not open the views: ' + (e instanceof Error ? e.message : String(e))));
@@ -30,15 +30,18 @@ export default function Home() {
 
   onViewMessage(({ from, data }) => {
     const size = (data as { loaded?: string }).loaded;
-    if (size) setLoaded([...loaded(), from + ' ' + size]);
-    else setHeard(from + ': ' + JSON.stringify(data));
+    if (size) {
+      const cur = loaded();
+      const i = cur.findIndex(([id]) => id === from);
+      setLoaded(i < 0 ? [...cur, [from, size]] : cur.map((e, j): [string, string] => (j === i ? [from, size] : e)));
+    } else setHeard(from + ': ' + JSON.stringify(data));
   });
 
   return (
     <main>
       <h1>Native Views</h1>
       <p id="status">{status()}</p>
-      <p id="loaded">{loaded().join(', ')}</p>
+      <p id="loaded">{loaded().map(([id, s]) => id + ' ' + s).join(', ')}</p>
       <p id="heard">{heard()}</p>
     </main>
   );

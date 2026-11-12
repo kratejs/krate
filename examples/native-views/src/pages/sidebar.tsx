@@ -4,9 +4,12 @@ import { getView } from '@krate/app/window';
 // Tells the log view which entry was picked: a view-to-view message. The
 // shell fills in who sent it.
 export default function Sidebar() {
-  // Tell the main page this view loaded, and at what size.
+  // Tell the main page this view loaded, and at what size; again whenever the
+  // layout resizes it.
   createEffect(() => {
-    void getView('main').post({ loaded: innerWidth + 'x' + innerHeight });
+    const report = () => void getView('main').post({ loaded: innerWidth + 'x' + innerHeight });
+    report();
+    addEventListener('resize', report);
   });
   return (
     <main>
