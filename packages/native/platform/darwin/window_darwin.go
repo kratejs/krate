@@ -134,6 +134,7 @@ func (a *App) newWebView() objc.ID {
 	}
 	web.Send(sel("setAutoresizingMask:"), nsViewWidthSizable|nsViewHeightSizable)
 	web.Send(sel("setNavigationDelegate:"), a.navDelegate)
+	web.Send(sel("setUIDelegate:"), a.uiDelegate)
 	if a.opts.Debug {
 		if s := sel("setInspectable:"); respondsTo(web, s) {
 			web.Send(s, true)

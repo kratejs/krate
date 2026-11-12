@@ -59,7 +59,6 @@ func registerPermHandlers(s *testServer) {
 	})
 }
 
-
 // runPerm opens a window on /perm?run=<run>, answers the permission request
 // with allow (or leaves it unanswered when handler is nil) and returns what
 // the page saw and the requests the handler got.

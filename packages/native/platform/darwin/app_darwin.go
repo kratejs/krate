@@ -59,6 +59,8 @@ type App struct {
 	winDelegate   objc.ID
 	schemeHandler objc.ID
 	navDelegate   objc.ID
+	uiDelegate    objc.ID
+	perm          permState
 	processPool   objc.ID
 
 	ready atomic.Bool
@@ -124,12 +126,16 @@ func (a *App) setup() error {
 	if err := registerTrayClass(a); err != nil {
 		return err
 	}
+	if err := registerUIClass(a); err != nil {
+		return err
+	}
 	a.nsApp = cls("NSApplication").Send(sel("sharedApplication"))
 	a.nsApp.Send(sel("setActivationPolicy:"), nsApplicationActivationPolicyRegular)
 	a.appDelegate = cls("KrateAppDelegate").Send(sel("new"))
 	a.winDelegate = cls("KrateWindowDelegate").Send(sel("new"))
 	a.schemeHandler = cls("KrateSchemeHandler").Send(sel("new"))
 	a.navDelegate = cls("KrateNavDelegate").Send(sel("new"))
+	a.uiDelegate = cls("KrateUIDelegate").Send(sel("new"))
 	// NSApplication.delegate is unretained; the App (a package global) owns it.
 	a.nsApp.Send(sel("setDelegate:"), a.appDelegate)
 

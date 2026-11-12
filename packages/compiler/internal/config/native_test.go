@@ -316,3 +316,22 @@ func TestNativePluginSpecKind(t *testing.T) {
 		}
 	}
 }
+
+func TestNativeMediaValidation(t *testing.T) {
+	cfg := &Config{Native: &NativeConfig{AppID: "com.acme.app", Media: NativeMedia{Camera: "allow", Microphone: "deny", Location: "prompt"}}}
+	if _, err := cfg.validateNative(); err != nil {
+		t.Fatal(err)
+	}
+	cfg.Native.Media.Screen = "maybe"
+	_, err := cfg.validateNative()
+	if err == nil || !strings.Contains(err.Error(), "media.screen") {
+		t.Fatalf("a bad policy must name the key: %v", err)
+	}
+	cfg.Native.Media = NativeMedia{Usage: NativeMediaUsage{Camera: "line one\nline two"}}
+	if _, err := cfg.validateNative(); err == nil || !strings.Contains(err.Error(), "media.usage.camera") {
+		t.Fatalf("a multi-line usage description must fail: %v", err)
+	}
+	if !IsNativePermission("media") || !IsNativePermission("media:manage") || !IsNativePermission("location") {
+		t.Error("the new permission names are not accepted")
+	}
+}

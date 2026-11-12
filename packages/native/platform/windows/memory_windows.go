@@ -32,30 +32,7 @@ func queryInterface(obj unsafe.Pointer, iid string) unsafe.Pointer {
 // tuneMemory applies the per-webview memory levers at controller creation.
 // It does not touch hide, show or release handling.
 func (a *App) tuneMemory(v *view) {
-	if a.hPermission != nil {
-		var token int64
-		if hr := vcall(v.webview, wvAddPermissionRequested, uintptr(a.hPermission), uintptr(unsafe.Pointer(&token))); failed(hr) {
-			logOnce("permission", "memory: add_PermissionRequested failed: 0x%08x; camera and microphone prompts stay on", uint32(hr))
-		}
-	}
 	setVisibleMemoryTarget(v.webview, a.cfg.Memory)
-}
-
-// onPermissionRequested denies camera and microphone requests when the
-// webrtc feature was not detected (see denyMediaCapture). Everything else
-// keeps the WebView2 default (prompt).
-func (a *App) onPermissionRequested(sender, args uintptr) uintptr {
-	if args == 0 {
-		return sOK
-	}
-	var kind uint32
-	if failed(vcall(ptr(args), permArgsGetPermissionKind, uintptr(unsafe.Pointer(&kind)))) {
-		return sOK
-	}
-	if deniedPermission(true, kind) {
-		vcall(ptr(args), permArgsPutState, permStateDeny)
-	}
-	return sOK
 }
 
 // setVisibleMemoryTarget sets ICoreWebView2_19::MemoryUsageTargetLevel for a
