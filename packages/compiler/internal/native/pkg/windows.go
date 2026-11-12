@@ -70,6 +70,11 @@ func packageWindows(o *Options, ic *Icon, want map[string]bool, stage string, re
 			}
 		}
 	}
+	if want["msix-store"] {
+		if err := packageMSIXStore(o, ic, stage, dir, res); err != nil {
+			return err
+		}
+	}
 	if want["msix"] {
 		inner := newTree()
 		if err := inner.addDisk("", filepath.Join(stage, dir)); err != nil {

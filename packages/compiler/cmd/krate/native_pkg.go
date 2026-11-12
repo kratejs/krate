@@ -25,6 +25,10 @@ type nativePkgFlags struct {
 	UpdateBaseURL, KeyOut   string
 	PFX, Thumbprint         string
 	TimestampURL            string
+	// Arch is --arch (only "universal" exists); InstallerIdentity signs the
+	// Mac App Store .pkg; MAS is set when --target mas was given.
+	Arch, InstallerIdentity string
+	MAS                     bool
 }
 
 // Update-related flags live in updateFlags (native_update.go).
@@ -33,6 +37,7 @@ var pkgValuedFlags = map[string]bool{
 	"--format": true, "--identity": true, "--entitlements": true, "--keychain-profile": true,
 	"--gpg-key": true, "--notes": true, "--update-base-url": true, "--key-out": true,
 	"--pfx": true, "--thumbprint": true, "--timestamp-url": true,
+	"--arch": true, "--installer-identity": true,
 }
 
 // parsePkgFlag handles one packaging flag at args[*i]. It reports whether the
@@ -102,6 +107,13 @@ func parsePkgFlag(f *cliFlags, args []string, i *int) (bool, error) {
 		p.Thumbprint = val
 	case "--timestamp-url":
 		p.TimestampURL = val
+	case "--arch":
+		if val != "universal" {
+			return true, fmt.Errorf("--arch takes \"universal\" (arm64 and x86_64 in one app), got %q; use --target <os>/<arch> for a single architecture", val)
+		}
+		p.Arch = val
+	case "--installer-identity":
+		p.InstallerIdentity = val
 	}
 	return true, nil
 }
@@ -115,8 +127,9 @@ func nativeHostTarget(t string) (goos, goarch string, err error) {
 	if o == "macos" {
 		o = "darwin"
 	}
-	if !ok || (o != "linux" && o != "windows" && o != "darwin") || (a != "amd64" && a != "arm64") {
-		return "", "", fmt.Errorf("unknown target %q: use <os>/<arch>, for example linux/amd64, windows/arm64 or darwin/arm64", t)
+	universal := a == pkg.ArchUniversal && (o == "darwin" || o == "windows")
+	if !ok || (o != "linux" && o != "windows" && o != "darwin") || (a != "amd64" && a != "arm64" && !universal) {
+		return "", "", fmt.Errorf("unknown target %q: use <os>/<arch>, for example linux/amd64, windows/arm64, darwin/arm64 or darwin/universal (mas for the Mac App Store)", t)
 	}
 	return o, a, nil
 }
@@ -222,6 +235,10 @@ func printPackageResult(c *pkgContext, res *pkg.Result) {
 func runNativePackage(flags cliFlags, args []string) {
 	root, cfg := resolveConfig(flags, args)
 	defer startRunLog(root, cfg, "native package")()
+	if err := resolveDistTargets(&flags, cfg); err != nil {
+		reportPkgError(err)
+		exit(1)
+	}
 	c, err := newPkgContext(flags, root, cfg)
 	if err != nil {
 		reportPkgError(err)
@@ -237,23 +254,43 @@ func packageNative(flags cliFlags, c *pkgContext) {
 		exit(1)
 	}
 	fmt.Printf("%s%s  Packaging %s for %s/%s%s\n", cBold, cCyan, c.meta.ProductName, c.goos, c.goarch, cReset)
-	payload, err := pkg.Discover(c.outDir, c.goos, c.goarch, c.meta.ProductName)
-	if err != nil {
-		reportPkgError(err)
-		exit(1)
-	}
 	o, err := c.options(flags)
 	if err != nil {
 		reportPkgError(err)
 		exit(1)
 	}
-	o.Payload = payload
-	if flags.Pkg.Sign {
-		o.Signer = pkg.NewSigner(c.signConfig(flags), c.goos)
+	o.MAS = pkg.MASOptions{AppIdentity: flags.Pkg.Identity, InstallerIdentity: flags.Pkg.InstallerIdentity}
+	var res *pkg.Result
+	switch {
+	case c.goos == "windows" && c.goarch == pkg.ArchUniversal:
+		x64, e1 := pkg.Discover(c.outDir, "windows", "amd64", c.meta.ProductName)
+		arm, e2 := pkg.Discover(c.outDir, "windows", "arm64", c.meta.ProductName)
+		if err = errors.Join(e1, e2); err == nil {
+			res, err = pkg.PackageStoreBundle(o, x64, arm)
+		}
+	default:
+		var payload pkg.Payload
+		if c.goos == "darwin" && c.goarch == pkg.ArchUniversal {
+			work := filepath.Join(c.outDir, ".universal")
+			defer os.RemoveAll(work)
+			payload, err = pkg.DiscoverUniversal(c.outDir, c.meta.ProductName, work)
+		} else {
+			payload, err = pkg.Discover(c.outDir, c.goos, c.goarch, c.meta.ProductName)
+		}
+		if err == nil {
+			o.Payload = payload
+			if flags.Pkg.Sign && !flags.Pkg.MAS {
+				o.Signer = pkg.NewSigner(c.signConfig(flags), c.goos)
+			}
+			res, err = pkg.Package(o)
+		}
 	}
-	res, err := pkg.Package(o)
 	if err != nil {
 		reportPkgError(err)
+		exit(1)
+	}
+	if flags.Pkg.Notarize && flags.Pkg.MAS {
+		reportPkgError(errors.New("--notarize does not apply to the Mac App Store: Apple reviews the app after upload"))
 		exit(1)
 	}
 	if flags.Pkg.Notarize {
@@ -282,6 +319,14 @@ func pkgAppName(m pkg.Metadata) string { return pkg.MacAppName(m) }
 // archives from the signed files.
 func runNativeSign(flags cliFlags, args []string) {
 	root, cfg := resolveConfig(flags, args)
+	if err := resolveDistTargets(&flags, cfg); err != nil {
+		reportPkgError(err)
+		exit(1)
+	}
+	if flags.Pkg.MAS {
+		reportPkgError(errors.New("a Mac App Store build is signed while it is packaged: run krate native package --target mas --identity \"3rd Party Mac Developer Application: ...\" --installer-identity \"3rd Party Mac Developer Installer: ...\""))
+		exit(1)
+	}
 	c, err := newPkgContext(flags, root, cfg)
 	if err != nil {
 		reportPkgError(err)
@@ -322,6 +367,10 @@ func runNativeSign(flags cliFlags, args []string) {
 // the archives.
 func runNativeNotarize(flags cliFlags, args []string) {
 	root, cfg := resolveConfig(flags, args)
+	if err := resolveDistTargets(&flags, cfg); err != nil {
+		reportPkgError(err)
+		exit(1)
+	}
 	if flags.Target == "" {
 		flags.Target = "darwin/" + runtime.GOARCH
 	}
@@ -373,4 +422,101 @@ func runNativeKeygen(flags cliFlags) {
 	fmt.Printf("  Keep it secret and out of git; give it to CI as %s.\n\n", pkg.EnvUpdaterKey)
 	fmt.Printf("  Public key (put it in the config):\n\n    %s\n\n", pub)
 	fmt.Printf("  native: { updater: { url: \"https://example.com/updates/latest-{target}.json\", publicKey: %q } }\n", pub)
+}
+
+// resolveDistTargets applies --arch universal, native.bundle.macos.universal and
+// --target mas to flags.Targets and flags.Target, and picks the default
+// formats of a store target. It returns an error for a combination that
+// cannot work.
+func resolveDistTargets(flags *cliFlags, cfg *config.Config) error {
+	p := &flags.Pkg
+	targets := append([]string(nil), flags.Targets...)
+	n := cfg.EffectiveNative()
+	cfgUniversal := n != nil && n.Bundle.MacOS.Universal
+	universal := p.Arch == pkg.ArchUniversal
+
+	for i, t := range targets {
+		o, a, _ := strings.Cut(t, "/")
+		if o != "mas" {
+			continue
+		}
+		p.MAS = true
+		switch {
+		case a != "":
+		case universal || cfgUniversal:
+			a = pkg.ArchUniversal
+		default:
+			a = runtime.GOARCH
+		}
+		targets[i] = "darwin/" + a
+	}
+	if len(targets) == 0 {
+		switch {
+		case universal && runtime.GOOS == "windows":
+			targets = []string{"windows/" + pkg.ArchUniversal}
+		case universal || (cfgUniversal && runtime.GOOS == "darwin"):
+			targets = []string{"darwin/" + pkg.ArchUniversal}
+		}
+	} else if universal {
+		for i, t := range targets {
+			o, _, _ := strings.Cut(t, "/")
+			if o != "darwin" && o != "windows" {
+				return fmt.Errorf("--arch universal applies to macOS (arm64 and x86_64) and Windows Store bundles (x64 and arm64), not to %s", t)
+			}
+			targets[i] = o + "/" + pkg.ArchUniversal
+		}
+	}
+	seen := map[string]bool{}
+	var dedup []string
+	for _, t := range targets {
+		if !seen[t] {
+			seen[t] = true
+			dedup = append(dedup, t)
+		}
+	}
+	if len(dedup) > 0 {
+		flags.Targets = dedup
+		flags.Target = strings.Join(dedup, ",")
+		if len(dedup) == 1 {
+			flags.Target = dedup[0]
+		}
+	}
+	if p.MAS && len(p.Formats) == 0 {
+		p.Formats = []string{"mas"}
+	}
+	for _, t := range flags.Targets {
+		if t == "windows/"+pkg.ArchUniversal && (len(p.Formats) != 1 || p.Formats[0] != "msix-store") {
+			if len(p.Formats) == 0 {
+				p.Formats = []string{"msix-store"}
+			} else {
+				return fmt.Errorf("windows/universal builds the Microsoft Store bundle; use --format msix-store")
+			}
+		}
+	}
+	return nil
+}
+
+// buildTargets expands universal targets into the architectures to compile.
+func buildTargets(targets []string) []string {
+	var out []string
+	for _, t := range targets {
+		switch t {
+		case "darwin/" + pkg.ArchUniversal:
+			out = append(out, "darwin/arm64", "darwin/amd64")
+		case "windows/" + pkg.ArchUniversal:
+			out = append(out, "windows/amd64", "windows/arm64")
+		default:
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+func hasUniversal(targets []string) bool {
+	for _, t := range targets {
+		if strings.HasSuffix(t, "/"+pkg.ArchUniversal) {
+			return true
+		}
+	}
+	return false
 }

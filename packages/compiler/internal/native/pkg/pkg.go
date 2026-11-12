@@ -393,6 +393,12 @@ func Package(o Options) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
+	if want["mas"] || want["msix-store"] {
+		// A store delivers updates: no update file is signed, no feed written.
+		for i := range res.Artifacts {
+			res.Artifacts[i].Update = false
+		}
+	}
 	if err := signUpdates(&o, res); err != nil {
 		return nil, err
 	}

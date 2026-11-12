@@ -74,9 +74,6 @@ func AppStreamMetainfo(m Metadata, desktopID string, date time.Time) []byte {
 	if m.Homepage != "" {
 		w(`  <url type="homepage">%s</url>`, xmlEscape(m.Homepage))
 	}
-	w(`  <provides>`)
-	w(`    <id>%s</id>`, xmlEscape(desktopID))
-	w(`  </provides>`)
 	w(`  <releases>`)
 	w(`    <release version="%s" date="%s"/>`, xmlEscape(m.Version), date.UTC().Format("2006-01-02"))
 	w(`  </releases>`)
