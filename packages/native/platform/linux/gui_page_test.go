@@ -330,8 +330,16 @@ func TestGUIPagePrintPDF(t *testing.T) {
 	}
 }
 
+// TestGUIPagePrintDialog opens the real, modal GTK print dialog. It runs only
+// with KRATE_NATIVE_PRINT_DIALOG=1, as on macOS and Windows: CI sets it for the
+// single GUI pass. In a long process that has opened many web contexts (the
+// repeated pass, go test -count=3) WebKit's run_dialog was seen to block
+// before entering its loop, hanging the job.
 func TestGUIPagePrintDialog(t *testing.T) {
 	needGUI(t)
+	if os.Getenv("KRATE_NATIVE_PRINT_DIALOG") != "1" {
+		t.Skip("set KRATE_NATIVE_PRINT_DIALOG=1 to open the print dialog")
+	}
 	w, v := pageView(t, "/pgprint")
 	before, _ := guiApp.topLevelTitles()
 	if err := w.PrintDialog(v); err != nil {

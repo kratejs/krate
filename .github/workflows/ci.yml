@@ -548,6 +548,8 @@ jobs:
           KRATE_NATIVE_GUI: "1"
           KRATE_NATIVE_WM: "1"
           KRATE_REQUIRE_E2E: "1"
+          # The real print dialog opens in this pass only.
+          KRATE_NATIVE_PRINT_DIALOG: "1"
 
       # The same GUI packages under a Wayland compositor: weston nested on
       # Xvfb (its x11 backend has an input seat; the headless backend has none
