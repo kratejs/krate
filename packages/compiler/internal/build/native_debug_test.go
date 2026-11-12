@@ -40,12 +40,18 @@ func e2eRequireDlv(t *testing.T) string {
 }
 
 // e2eCopyExample copies an example into a temp dir, so a test can edit its
-// sources: node_modules is linked, and the replace line of go.mod made
-// absolute.
+// sources; node_modules is linked.
 func e2eCopyExample(t *testing.T, ex string) string {
 	t.Helper()
-	dst := filepath.Join(t.TempDir(), "app")
-	err := filepath.WalkDir(ex, func(p string, d os.DirEntry, err error) error {
+	// The copy lives next to the example, inside the checkout, so that the
+	// build finds the runtime bundles and ../../packages/native resolves.
+	parent, err := os.MkdirTemp(filepath.Dir(ex), ".debugtest-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(parent) })
+	dst := parent
+	err = filepath.WalkDir(ex, func(p string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -56,7 +62,7 @@ func e2eCopyExample(t *testing.T, ex string) string {
 		switch d.Name() {
 		case "node_modules":
 			if d.IsDir() {
-				if err := os.Symlink(p, filepath.Join(dst, rel)); err != nil {
+				if err := linkNodeModules(p, filepath.Join(dst, rel)); err != nil {
 					return err
 				}
 				return filepath.SkipDir
@@ -78,23 +84,40 @@ func e2eCopyExample(t *testing.T, ex string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mod := filepath.Join(dst, "go.mod")
-	data, err := os.ReadFile(mod)
-	if err != nil {
-		t.Fatal(err)
-	}
-	native := filepath.Join(repoRoot(t), "packages", "native")
-	out := strings.ReplaceAll(string(data), "=> ../../packages/native", "=> "+filepath.ToSlash(native))
-	if out == string(data) {
-		t.Fatalf("go.mod has no replace line to make absolute:\n%s", data)
-	}
-	if err := os.WriteFile(mod, []byte(out), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	// go.mod keeps its relative replace line: the copy is as deep as the example.
 	if sum, err := os.ReadFile(filepath.Join(ex, "go.sum")); err == nil {
 		_ = os.WriteFile(filepath.Join(dst, "go.sum"), sum, 0o644)
 	}
 	return dst
+}
+
+// linkNodeModules recreates a node_modules directory with a link to the real
+// location of every package, two levels deep (scopes): a single link to the
+// whole directory is not followed by the runtime lookup of the build.
+func linkNodeModules(src, dst string) error {
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		return err
+	}
+	ents, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+	for _, e := range ents {
+		real, err := filepath.EvalSymlinks(filepath.Join(src, e.Name()))
+		if err != nil {
+			return err
+		}
+		if strings.HasPrefix(e.Name(), "@") {
+			if err := linkNodeModules(real, filepath.Join(dst, e.Name())); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := os.Symlink(real, filepath.Join(dst, e.Name())); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // delve is a JSON-RPC client of a headless Delve server.
