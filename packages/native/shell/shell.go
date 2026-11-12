@@ -299,6 +299,14 @@ func (a *app) identify(r *http.Request) (string, bool) {
 	if !ok {
 		return "", false
 	}
+	// A remote view gets the empty scope whatever else is known about it: the
+	// platform keeps remote webviews away from the app scheme, and this is
+	// the second line if a request ever arrives anyway.
+	if p := a.plat.Load(); p != nil {
+		if rc, ok := (*p).(caps.RemoteContent); ok && rc.IsRemoteView(ref) {
+			return unknownView, true
+		}
+	}
 	if id, ok := a.sdk.ViewWindow(ref); ok {
 		return id, true
 	}
@@ -638,6 +646,13 @@ func (c *Control) Eval(js string) error {
 	for _, w := range list {
 		if wv, ok := w.(platform.WindowViews); ok {
 			for _, v := range wv.Views() {
+				// Dev scripts (hot reload, queries) are for the app's own
+				// pages, never for remote content.
+				if p := c.a.plat.Load(); p != nil {
+					if rc, ok := (*p).(caps.RemoteContent); ok && rc.IsRemoteView(v.Ref) {
+						continue
+					}
+				}
 				if err := wv.EvalView(v.Ref, js); err != nil {
 					return err
 				}

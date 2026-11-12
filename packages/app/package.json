@@ -143,6 +143,10 @@
     "./cookies": {
       "types": "./dist/cookies.d.ts",
       "default": "./dist/cookies.js"
+    },
+    "./remote": {
+      "types": "./dist/remote.d.ts",
+      "default": "./dist/remote.js"
     }
   },
   "files": [

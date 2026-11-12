@@ -64,6 +64,9 @@ implementation); permissions decide which ids the UI may call.
 | `page` | no | Print, find in page, zoom and capture the app's own views; see [Web contents](/docs/native/webcontents/) |
 | `downloads` | no | Choosing where page downloads go, watching and cancelling them; see [Web contents](/docs/native/webcontents/#downloads) |
 | `cookies` | no | Reading, writing and deleting cookies, clearing site data and the cache; see [Web contents](/docs/native/webcontents/#cookies-and-site-data) |
+| `remote` | no | Views and windows with web pages that have no access to the app, navigating them and the message channel; see [Remote content](/docs/native/remote/) |
+| `remote:intercept` | no | Block, redirect and add headers to the requests of remote views, and watch them |
+| `remote:network` | no | User agent and proxy of remote partitions, certificate decisions, logins, client certificates and clearing remote data |
 
 An empty or missing list means the defaults: the non-sensitive set marked
 "yes" above. `krate native build` writes the list for you: it
@@ -222,6 +225,23 @@ their Go names (`src/lib/tasks.List`).
 | `krate/cookies.set` | `cookies` | `cookie: CookieInput, url?: string` | nothing |
 | `krate/cookies.delete` | `cookies` | `name: string, url?: string` | nothing |
 | `krate/cookies.clearSiteData` | `cookies` | `options?: ClearOptions` | nothing |
+| `krate/remote.open` | `remote` | `options: RemoteWindowOptions` | window id |
+| `krate/remote.addView` | `remote` | `window: string, options: RemoteViewOptions` | view id |
+| `krate/remote.navigate` | `remote` | `view: string, url: string` | nothing |
+| `krate/remote.post` | `remote` | `view: string, targetOrigin: string, data: unknown` | nothing |
+| `krate/remote.messages` | `remote` | stream | `RemoteMessage` |
+| `krate/remote.events` | `remote` | stream | `RemoteEvent` |
+| `krate/remote.capabilities` | `remote` | none | `RemoteCapabilities` |
+| `krate/remote.setRules` | `remote:intercept` | `partition: string, rules: RemoteRule[]` | nothing |
+| `krate/remote.requests` | `remote:intercept` | stream | `RemoteRequest` |
+| `krate/remote.setUserAgent` | `remote:network` | `partition: string, userAgent: string` | nothing |
+| `krate/remote.setProxy` | `remote:network` | `partition: string, proxy: RemoteProxy` | nothing |
+| `krate/remote.setClientCertificate` | `remote:network` | `partition, host, certFile, keyFile: string` | nothing |
+| `krate/remote.clearData` | `remote:network` | `partition: string, options?: RemoteClearOptions` | nothing |
+| `krate/remote.certificates` | `remote:network` | stream | `RemoteCertificateError` |
+| `krate/remote.answerCertificate` | `remote:network` | `id: number, allow: boolean` | nothing |
+| `krate/remote.auth` | `remote:network` | stream | `RemoteAuthChallenge` |
+| `krate/remote.answerAuth` | `remote:network` | `id: number, user: string, password: string, ok: boolean` | nothing |
 
 `packages/native/sdk/ids.go` is the source of truth for this table; a Go test
 checks it against the registrations, the TypeScript wrappers and this page.

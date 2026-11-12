@@ -416,6 +416,9 @@ export type NativePermission =
   | "page"
   | "downloads"
   | "cookies"
+  | "remote"
+  | "remote:intercept"
+  | "remote:network"
   | `plugin:${string}.${string}`;
 
 export interface NativeConfig {

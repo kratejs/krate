@@ -73,7 +73,7 @@ func Rows() []Row { return table }
 // Shakeable lists the SDK areas a release build links only when they are
 // reachable (build tag krate_no_<area>). The areas os and permission are
 // always linked.
-var Shakeable = []string{"fs", "db", "kv", "net", "window", "chrome", "dialog", "clipboard", "menu", "tray", "shortcut", "notify", "app", "updater", "badge", "screen", "power", "login", "crash", "page", "downloads", "cookies"}
+var Shakeable = []string{"fs", "db", "kv", "net", "window", "chrome", "dialog", "clipboard", "menu", "tray", "shortcut", "notify", "app", "updater", "badge", "screen", "power", "login", "crash", "page", "downloads", "cookies", "remote"}
 
 // needs lists, for an area, the areas its package imports.
 var needs = map[string][]string{"kv": {"db"}, "tray": {"menu"}, "shortcut": {"app"}}

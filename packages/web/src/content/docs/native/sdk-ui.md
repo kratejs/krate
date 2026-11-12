@@ -29,6 +29,7 @@ module for the UI.
 | Web contents: print, find, zoom, capture | `sdk/page` | `@krate/app/page` | `page` |
 | Downloads | `sdk/downloads` | `@krate/app/downloads` | `downloads` |
 | Cookies and site data | `sdk/cookies` | `@krate/app/cookies` | `cookies` |
+| Remote content | `sdk/remote` | `@krate/app/remote` | `remote`, `remote:intercept`, `remote:network` ([Remote content](/docs/native/remote/)) |
 
 Go packages live under `github.com/kratejs/krate/packages/native/sdk/`.
 
@@ -170,6 +171,7 @@ source. By area:
 | page | `krate/page.print`, `PrintToPdf`, `Find`, `StopFind`, `Zoom`, `SetZoom`, `Capture` | `krate/page.findEvents` |
 | downloads | `krate/downloads.configure`, `List`, `Cancel` | `krate/downloads.events` |
 | cookies | `krate/cookies.list`, `Get`, `Set`, `Delete`, `ClearSiteData` | |
+| remote | `krate/remote.open`, `AddView`, `Navigate`, `Post`, `Capabilities`, `SetRules`, `SetUserAgent`, `SetProxy`, `SetClientCertificate`, `ClearData`, `AnswerCertificate`, `AnswerAuth` | `krate/remote.messages`, `Events`, `Requests`, `Certificates`, `Auth` |
 
 `SingleInstance` and `LaunchArgs` exist only for Go host code.
 

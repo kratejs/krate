@@ -44,6 +44,9 @@
 //	page                no             print, find in page, zoom and capture the app's own views
 //	downloads           no             choose where page downloads go, watch and cancel them
 //	cookies             no             read, write and delete cookies, clear site data and cache
+//	remote              no             open views and windows with web pages that have no access to the app, navigate them, message channel
+//	remote:intercept    no             block, redirect and add headers to the requests of remote views, watch them
+//	remote:network      no             remote user agent, proxy, certificate decisions, logins, client certificates and stored data
 //
 // The compiler keeps a copy of the names in names.json (a test here keeps the
 // file in step; run "go test ./sdk/permission -update" to rewrite it).
@@ -134,6 +137,9 @@ func init() {
 		{Name: "page", Doc: "print, find in page, zoom and capture the app's own views"},
 		{Name: "downloads", Doc: "choose where page downloads are saved, watch and cancel them"},
 		{Name: "cookies", Doc: "read, write and delete cookies and clear site data and cache"},
+		{Name: "remote", Doc: "open views and windows with web pages that have no access to the app, navigate them and talk to them over the message channel"},
+		{Name: "remote:intercept", Doc: "block, redirect and add headers to the requests of remote views and watch them"},
+		{Name: "remote:network", Doc: "set the user agent and proxy of remote partitions, decide certificate errors and logins, present client certificates and clear remote data"},
 	} {
 		Define(i)
 	}
