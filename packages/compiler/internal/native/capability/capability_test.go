@@ -407,3 +407,50 @@ func TestConfiguredUpdaterIsLinkedWithoutUse(t *testing.T) {
 		t.Fatalf("linking the area must not grant the permission: %v", res.Permissions)
 	}
 }
+
+func TestChromeUIImports(t *testing.T) {
+	res := analyze(t, map[string]string{
+		"src/pages/index.tsx": `import { mainChrome } from "@krate/app/chrome";
+import { share } from "@krate/app/chrome";
+import { setJumpList } from "@krate/app/chrome";
+export default function Page() {
+  mainChrome().setVibrancy("sidebar");
+  void share("main", { text: "x" });
+  void setJumpList([]);
+  return <div/>;
+}
+`,
+	})
+	want := []string{"app", "share", "window"}
+	if !reflect.DeepEqual(res.Permissions, want) {
+		t.Fatalf("permissions = %v, want %v", res.Permissions, want)
+	}
+	if !reflect.DeepEqual(res.UIAreas, []string{"chrome"}) {
+		t.Fatalf("areas = %v", res.UIAreas)
+	}
+	if tags := strings.Join(res.Tags(false), ","); strings.Contains(tags, "krate_no_chrome") || !strings.Contains(tags, "krate_no_window") {
+		t.Fatalf("tags %s", tags)
+	}
+}
+
+func TestChromeWindowOnlyDoesNotNeedShare(t *testing.T) {
+	res := analyze(t, map[string]string{
+		"src/pages/index.tsx": `import { mainChrome } from "@krate/app/chrome";
+export default function Page() { mainChrome().setDocumentEdited(true); return <div/>; }
+`,
+	})
+	if !reflect.DeepEqual(res.Permissions, []string{"window"}) {
+		t.Fatalf("permissions = %v", res.Permissions)
+	}
+}
+
+func TestChromeShakenWhenUnused(t *testing.T) {
+	res := analyze(t, map[string]string{
+		"src/pages/index.tsx": `import { get } from "@krate/app/kv";
+export default function Page() { return <div>{String(get)}</div>; }
+`,
+	})
+	if tags := strings.Join(res.Tags(false), ","); !strings.Contains(tags, "krate_no_chrome") {
+		t.Fatalf("an app without chrome keeps the area: %s", tags)
+	}
+}

@@ -37,6 +37,7 @@ func encodeOptions(e *wire.Encoder, o Options) {
 		e.Key("permissions")
 		codec.WriteStrings(e, o.Permissions)
 	}
+	encodeChrome(e, o.Chrome)
 	e.EndObject()
 }
 
@@ -73,7 +74,7 @@ func decodeOptions(r *codec.R) (o Options) {
 			o.Permissions = r.Strings()
 			o.HasPermissions = true
 		default:
-			return false
+			return decodeChromeKey(r, k, &o.Chrome)
 		}
 		return true
 	})

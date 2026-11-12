@@ -36,6 +36,14 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 - `krate native build` writes a runnable `dist-native/<os>-<arch>/<productName>` with `app/` next
   to it when a shell is available, so a TypeScript-only app needs no Go toolchain to build and
   package. `krate native build --release` falls back to the same layout without Go.
+- Window chrome: `native.window.titleBar` hidden and none now work on every OS, with drag regions
+  (`data-krate-drag`, `-webkit-app-region`, `app-region`), a native move and resize, double-press
+  maximize, `transparent`, Windows 11 `backdrop` (Mica, Mica Alt, Acrylic), `titleBarOverlay`, macOS
+  `vibrancy` and `trafficLightPosition`, document state, sheets, native tabs, the share menu
+  (new `share` permission), `bundle.macos.agent` (`LSUIElement`) with run-time dock control, Windows
+  thumbnail toolbar buttons and jump list tasks, through `@krate/app/chrome` and `sdk/chrome`. Linux
+  is tested; macOS and Windows are untested until the CI native job passes. See the Window chrome
+  page and `examples/native-chrome`.
 - `krate native doctor` reports the Go toolchain, the shell, the system webview (through the new
   `krate-shell --doctor`), packaging and signing tools and the host runtime, and exits 1 when
   something the config needs is missing.

@@ -62,14 +62,23 @@ func Register(t *bridge.Table, env *bridge.Env) {
 				o.Path = krate.ScopedPath(o.Path, id)
 			}
 		}
-		w, err := env.App.NewWindow(platform.WindowOptions{Title: o.Title, Width: o.Width, Height: o.Height, Resizable: !o.Fixed, Path: o.Path})
+		if o.Frameless && (o.Chrome.TitleBar == "" || o.Chrome.TitleBar == caps.TitleBarNative) {
+			o.Chrome.TitleBar = caps.TitleBarNone
+		}
+		chromeOpts, err := o.Chrome.Validate()
+		if err != nil {
+			return krate.Errorf("bad_args", "window chrome: %w", err)
+		}
+		w, err := env.App.NewWindow(platform.WindowOptions{Title: o.Title, Width: o.Width, Height: o.Height, Resizable: !o.Fixed, Path: o.Path, Chrome: chromeOpts})
 		if err != nil {
 			return err
 		}
 		id = env.Windows.Add(id, w)
 		if c, ok := w.(caps.WindowControls); ok {
-			if o.Frameless {
-				c.SetDecorated(false)
+			if o.Frameless && o.Chrome.TitleBar == caps.TitleBarNone {
+				if _, ok := w.(caps.WindowChrome); !ok {
+					c.SetDecorated(false)
+				}
 			}
 			if o.AlwaysOnTop {
 				c.SetAlwaysOnTop(true)

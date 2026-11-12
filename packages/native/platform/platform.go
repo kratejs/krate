@@ -30,6 +30,10 @@ type Options struct {
 	// live window is then released (hidden, webview destroyed) rather than
 	// destroyed, and Show brings it back; see caps.WindowRelease.
 	KeepAlive bool
+	// Agent makes the app a menu-bar-only agent at launch: no dock icon and
+	// no application menu (macOS NSApplicationActivationPolicyAccessory,
+	// like LSUIElement in Info.plist). Other platforms ignore it.
+	Agent bool
 }
 
 // Memory configures the webview's memory use.
@@ -70,6 +74,10 @@ type WindowOptions struct {
 	Resizable bool
 	// Path is the route to open, relative to the app origin ("/" by default).
 	Path string
+	// Chrome is the window chrome the window is created with (title bar
+	// style, transparency, backdrop and so on). The zero value is a native
+	// window. Platforms apply what they can and ignore the rest.
+	Chrome ChromeOptions
 }
 
 // App is the running application. New must be called on the main goroutine

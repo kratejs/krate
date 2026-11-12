@@ -161,3 +161,16 @@ reading are checked. A real Finder and a real drag are not.
 | Notification call hangs about two minutes | The permission prompt was never answered (`notifyAuthTimeout`); answer it. |
 | Dropped files are not reported, the page's drop works | `KrateWebView` was not registered (`fileState.dropClass`), or WebKit's `performDragOperation:` was not found; the GUI test `TestGUIWebViewWatchesDrops` says which. |
 | Crash only on Intel | Struct-by-value argument passing for NSRect (32 bytes, passed in memory on amd64). |
+
+## Window chrome
+
+Run `KRATE_NATIVE_GUI=1 go test ./platform/darwin -run GUIChrome -v`; it reads AppKit
+state back. By eye, with `examples/native-chrome` (titleBar `hidden`, then `vibrancy`):
+the traffic lights sit at `trafficLightPosition` and stay there after a resize and
+after leaving fullscreen; dragging the page's bar moves the window and a double click
+zooms it (or minimizes, per System Settings); `vibrancy: "sidebar"` shows the desktop
+blurred through the page; `setDocumentEdited(true)` puts a dot in the close button;
+`attachSheet` slides a window out of the title bar; two windows with the same
+`tabbingIdentifier` merge with Window > Merge All Windows and the tab bar's `+` fires
+`new-tab`; `share` opens the picker; `setDockVisible(false)` removes the dock icon and
+the menu bar, and a `bundle.macos.agent` build never shows them.

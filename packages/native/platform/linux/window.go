@@ -4,6 +4,7 @@ package linux
 
 import (
 	"errors"
+	"fmt"
 	"net/url"
 	"strings"
 	"sync"
@@ -51,6 +52,8 @@ type Window struct {
 	fixedH       int
 	preventClose bool
 	wantAbove    bool
+	chrome       chromeState
+	lastPress    press
 	menubar      uintptr
 	accel        uintptr
 	lastState    uint32
@@ -68,6 +71,10 @@ func (a *App) newWindow(opts WindowOptions, onLoad func()) (*Window, error) {
 	w.win = api.gtkWindowNew(gtkWindowToplevel)
 	if w.win == 0 {
 		return nil, errors.New("krate: gtk_window_new failed")
+	}
+	if _, err := opts.Chrome.Validate(); err != nil {
+		api.gtkWidgetDestroy(w.win)
+		return nil, fmt.Errorf("krate: window chrome: %w", err)
 	}
 	widget := a.newView()
 	if widget == 0 {
@@ -100,6 +107,7 @@ func (a *App) newWindow(opts WindowOptions, onLoad func()) (*Window, error) {
 	if !opts.Resizable {
 		api.gtkWidgetSetSizeReq(w.sizeTarget(), int32(opts.Width), int32(opts.Height))
 	}
+	_ = w.applyChrome(opts.Chrome)
 	w.applyLayout()
 	w.pv.load(opts.Path)
 	api.gtkWidgetShowAll(w.win)

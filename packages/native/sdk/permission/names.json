@@ -23,6 +23,7 @@
     "power",
     "power:inhibit",
     "screen",
+    "share",
     "shell:openExternal",
     "shortcut",
     "theme",

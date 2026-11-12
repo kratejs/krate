@@ -55,6 +55,23 @@ type (
 	CaptureSource        = caps.CaptureSource
 	CaptureSources       = caps.CaptureSources
 	CaptureChooser       = caps.CaptureChooser
+	ChromeOptions        = caps.ChromeOptions
+	ChromeState          = caps.ChromeState
+	ChromeEvent          = caps.ChromeEvent
+	TitleBarOverlay      = caps.TitleBarOverlay
+	Point                = caps.Point
+	WindowChrome         = caps.WindowChrome
+	WindowDocument       = caps.WindowDocument
+	WindowSheets         = caps.WindowSheets
+	WindowTabs           = caps.WindowTabs
+	WindowThumbBar       = caps.WindowThumbBar
+	ThumbButton          = caps.ThumbButton
+	JumpTask             = caps.JumpTask
+	JumpLister           = caps.JumpLister
+	AppPresence          = caps.AppPresence
+	Sharer               = caps.Sharer
+	ShareItems           = caps.ShareItems
+	ChromeEvents         = caps.ChromeEvents
 )
 
 const (

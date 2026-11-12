@@ -37,6 +37,9 @@ type Options struct {
 	// Features is app.json "features"; nil means not detected, so no
 	// feature is switched off.
 	Features map[string]bool
+	// Agent starts the app as a menu-bar-only agent (accessory activation
+	// policy: no dock icon, no application menu), like LSUIElement.
+	Agent bool
 }
 
 // WindowOptions configures one window; it mirrors platform.WindowOptions.
@@ -46,6 +49,8 @@ type WindowOptions struct {
 	Height    int
 	Resizable bool
 	Path      string
+	// Chrome is the window chrome the window starts with.
+	Chrome caps.ChromeOptions
 }
 
 // App is the macOS application. The first goroutine to import this package
@@ -131,7 +136,11 @@ func (a *App) setup() error {
 		return err
 	}
 	a.nsApp = cls("NSApplication").Send(sel("sharedApplication"))
-	a.nsApp.Send(sel("setActivationPolicy:"), nsApplicationActivationPolicyRegular)
+	policy := nsApplicationActivationPolicyRegular
+	if a.opts.Agent {
+		policy = 1 // NSApplicationActivationPolicyAccessory
+	}
+	a.nsApp.Send(sel("setActivationPolicy:"), policy)
 	a.appDelegate = cls("KrateAppDelegate").Send(sel("new"))
 	a.winDelegate = cls("KrateWindowDelegate").Send(sel("new"))
 	a.schemeHandler = cls("KrateSchemeHandler").Send(sel("new"))
@@ -324,6 +333,22 @@ func registerClasses(a *App) error {
 			if w := a.windows[note.Send(sel("object"))]; w != nil {
 				w.memoryPressure()
 			}
+		}},
+		{Cmd: sel("windowDidResize:"), Fn: func(self objc.ID, _ objc.SEL, note objc.ID) {
+			if w := a.windows[note.Send(sel("object"))]; w != nil {
+				w.applyTrafficLights()
+			}
+		}},
+		{Cmd: sel("windowDidExitFullScreen:"), Fn: func(self objc.ID, _ objc.SEL, note objc.ID) {
+			if w := a.windows[note.Send(sel("object"))]; w != nil {
+				w.applyTrafficLights()
+			}
+		}},
+		{Cmd: sel("windowDidEndSheet:"), Fn: func(self objc.ID, _ objc.SEL, note objc.ID) {
+			a.windowDidEndSheet(note.Send(sel("object")))
+		}},
+		{Cmd: sel("newWindowForTab:"), Fn: func(self objc.ID, _ objc.SEL, sender objc.ID) {
+			a.newWindowForTab(sender)
 		}},
 		{Cmd: sel("windowDidBecomeKey:"), Fn: func(self objc.ID, _ objc.SEL, note objc.ID) {
 			if w := a.windows[note.Send(sel("object"))]; w != nil {

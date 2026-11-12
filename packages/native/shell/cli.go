@@ -42,7 +42,16 @@ func CLI(args []string, plugins []*plugin.Plugin) int {
 		fmt.Fprintln(os.Stderr, "       krate-shell --doctor")
 		fs.PrintDefaults()
 	}
-	if err := fs.Parse(DropLaunchServicesArgs(args)); err != nil {
+	// Arguments after "--" belong to the app (a launcher puts them there); the
+	// app reads them from the command line itself.
+	shellArgs := DropLaunchServicesArgs(args)
+	for i, a := range shellArgs {
+		if a == "--" {
+			shellArgs = shellArgs[:i]
+			break
+		}
+	}
+	if err := fs.Parse(shellArgs); err != nil {
 		if err == flag.ErrHelp {
 			return 0
 		}

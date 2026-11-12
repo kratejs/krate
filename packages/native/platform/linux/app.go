@@ -57,6 +57,8 @@ type WindowOptions struct {
 	Height    int
 	Resizable bool
 	Path      string
+	// Chrome is the window chrome the window starts with.
+	Chrome caps.ChromeOptions
 }
 
 // App is the WebKitGTK application.

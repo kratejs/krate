@@ -27,14 +27,16 @@ import (
 // NativeManifest is app.json, the contract between the build and the shell
 // that runs an app directory. Field names are fixed.
 type NativeManifest struct {
-	AppID       string            `json:"appId"`
-	ProductName string            `json:"productName"`
-	Version     string            `json:"version"`
-	Window      NativeWindowMeta  `json:"window"`
-	Assets      string            `json:"assets"`
-	Fallbacks   []NativeFallback  `json:"fallbacks"`
-	HostJS      *NativeHostJSMeta `json:"hostjs,omitempty"`
-	GoHost      *NativeGoHostMeta `json:"gohost,omitempty"`
+	AppID       string           `json:"appId"`
+	ProductName string           `json:"productName"`
+	Version     string           `json:"version"`
+	Window      NativeWindowMeta `json:"window"`
+	// Mac holds macOS-only settings (native.bundle.macos.agent).
+	Mac       *NativeMacMeta    `json:"mac,omitempty"`
+	Assets    string            `json:"assets"`
+	Fallbacks []NativeFallback  `json:"fallbacks"`
+	HostJS    *NativeHostJSMeta `json:"hostjs,omitempty"`
+	GoHost    *NativeGoHostMeta `json:"gohost,omitempty"`
 	// HostChildren are the host code programs that run in a child process on
 	// Node, Bun or Deno (see native.host.runtime and native.host.islands).
 	HostChildren []NativeHostChildMeta `json:"hostchildren,omitempty"`
@@ -205,6 +207,63 @@ type NativeWindowMeta struct {
 	Permissions *[]string `json:"permissions,omitempty"`
 	// KeepAlive is native.window.keepAlive.
 	KeepAlive bool `json:"keepAlive,omitempty"`
+	// Chrome is the window chrome (native.window.titleBar, transparent,
+	// backdrop, vibrancy, titleBarOverlay, trafficLightPosition, tabbing).
+	Chrome *NativeChromeMeta `json:"chrome,omitempty"`
+}
+
+// NativeChromeMeta is the chrome block of the main window in app.json.
+type NativeChromeMeta struct {
+	TitleBar             string             `json:"titleBar,omitempty"`
+	Transparent          bool               `json:"transparent,omitempty"`
+	Backdrop             string             `json:"backdrop,omitempty"`
+	Vibrancy             string             `json:"vibrancy,omitempty"`
+	TitleBarOverlay      *NativeOverlayMeta `json:"titleBarOverlay,omitempty"`
+	TrafficLightPosition *NativePointMeta   `json:"trafficLightPosition,omitempty"`
+	TabbingIdentifier    string             `json:"tabbingIdentifier,omitempty"`
+	TabbingMode          string             `json:"tabbingMode,omitempty"`
+}
+
+// NativeOverlayMeta is the caption button overlay of a hidden title bar.
+type NativeOverlayMeta struct {
+	Color       string `json:"color,omitempty"`
+	SymbolColor string `json:"symbolColor,omitempty"`
+	Height      int    `json:"height,omitempty"`
+}
+
+// NativePointMeta is a position in device-independent pixels.
+type NativePointMeta struct {
+	X int `json:"x"`
+	Y int `json:"y"`
+}
+
+// NativeMacMeta holds the macOS-only settings of app.json.
+type NativeMacMeta struct {
+	// Agent is native.bundle.macos.agent.
+	Agent bool `json:"agent,omitempty"`
+}
+
+// chromeMeta turns the window chrome of the config into its app.json block;
+// nil when the window is a plain native one.
+func chromeMeta(w config.NativeWindow) *NativeChromeMeta {
+	o := w.ChromeOptions()
+	if o.IsZero() {
+		return nil
+	}
+	m := &NativeChromeMeta{
+		Transparent: o.Transparent, Backdrop: o.Backdrop, Vibrancy: o.Vibrancy,
+		TabbingIdentifier: o.TabbingID, TabbingMode: o.TabbingMode,
+	}
+	if o.TitleBar != "" && o.TitleBar != "native" {
+		m.TitleBar = o.TitleBar
+	}
+	if o.Overlay != nil {
+		m.TitleBarOverlay = &NativeOverlayMeta{Color: o.Overlay.Color, SymbolColor: o.Overlay.SymbolColor, Height: o.Overlay.Height}
+	}
+	if o.TrafficLight != nil {
+		m.TrafficLightPosition = &NativePointMeta{X: o.TrafficLight.X, Y: o.TrafficLight.Y}
+	}
+	return m
 }
 
 // NativeFallback maps a dynamic route to the prerendered shell page the shell
@@ -457,6 +516,10 @@ func (b *Builder) BuildNativeApp(opts NativeAppOptions) (*NativeAppResult, error
 	m.Window.Permissions = eff.Window.Permissions
 	m.Window.KeepAlive = eff.Window.KeepAlive
 	m.SingleInstance = len(eff.FileAssociations) > 0
+	m.Window.Chrome = chromeMeta(eff.Window)
+	if eff.Bundle.MacOS.Agent {
+		m.Mac = &NativeMacMeta{Agent: true}
+	}
 	m.Plugins = b.NativePluginNames()
 	if !opts.Derive {
 		var useNotes []string

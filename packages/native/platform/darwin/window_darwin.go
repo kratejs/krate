@@ -4,6 +4,7 @@ package darwin
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/kratejs/krate/packages/native/platform/caps"
 
@@ -46,6 +47,8 @@ type Window struct {
 	layoutGen     int
 	ratiosSettled bool
 
+	chrome chromeState
+
 	// Release state, see release_darwin.go.
 	released  bool
 	releasing bool
@@ -79,10 +82,15 @@ func (a *App) newWindow(o WindowOptions) (*Window, error) {
 	if height <= 0 {
 		height = defaultHeight
 	}
+	chromeOpts, err := o.Chrome.Validate()
+	if err != nil {
+		return nil, fmt.Errorf("darwin: window chrome: %w", err)
+	}
 	style := nsWindowStyleMaskTitled | nsWindowStyleMaskClosable | nsWindowStyleMaskMiniaturizable
 	if o.Resizable {
 		style |= nsWindowStyleMaskResizable
 	}
+	style = int(styleFor(uint(style), chromeOpts.TitleBar))
 
 	web := a.newWebView()
 	if web == 0 {
@@ -106,6 +114,7 @@ func (a *App) newWindow(o WindowOptions) (*Window, error) {
 	w.pv = a.registerView(w, web, true)
 	a.windows[win] = w
 	w.applyLayout()
+	w.applyChrome(chromeOpts)
 
 	w.pv.load(o.Path)
 	win.Send(sel("makeKeyAndOrderFront:"), objc.ID(0))

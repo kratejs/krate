@@ -17,7 +17,7 @@ func TestInspectorScriptOnlyWhenAsked(t *testing.T) {
 		want  bool
 	}{{"", false}, {inspectorKeyScript, true}} {
 		rec := httptest.NewRecorder()
-		windowIDHandler(page, tc.extra).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+		windowIDHandler(page, tc.extra, false).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 		if got := strings.Contains(rec.Body.String(), inspectorPath); got != tc.want {
 			t.Errorf("extra %q: script present = %v, want %v", tc.extra, got, tc.want)
 		}

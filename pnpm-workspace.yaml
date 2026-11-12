@@ -5,6 +5,7 @@ packages:
   - examples/native-media
   - examples/native-views
   - examples/native-files
+  - examples/native-chrome
   - examples/native-plugin
 
 allowBuilds:

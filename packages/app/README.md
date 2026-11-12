@@ -69,6 +69,11 @@ same `permissions` list as the data modules (a missing permission rejects with
 `permission_denied`; `tray`, `shortcut` and `clipboard:read` are off unless
 listed); see the SDK pages in the Native docs.
 
+`@krate/app/chrome` controls window chrome: title bar styles, backdrops and vibrancy, the
+Windows caption buttons, traffic lights, document state, sheets, native tabs, thumbnail buttons,
+jump lists, the share menu and the dock. Calls a platform lacks reject with `unsupported`; see
+the Window chrome page in the Native docs.
+
 `@krate/app/window` also splits a window into several webviews: `main().addView({ path,
 side, size, minWidth, permissions })` returns a `View` (`remove`, `focus`, `navigate`,
 `post`), `window.setLayout(split(...))` and `window.layout()` set and read the pane

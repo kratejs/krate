@@ -32,6 +32,7 @@
 //	media               no             camera, microphone and screen capture for the page
 //	media:manage        no             media policy, request handlers, screen and window list; implies media
 //	location            no             geolocation for the page
+//	share               no             show the system share menu for text, URLs and files
 //	updater             no             check for, download, apply updates and relaunch
 //	badge               yes (default)  badge and progress on the app icon
 //	screen              yes (default)  list displays, center windows, display change events
@@ -125,6 +126,7 @@ func init() {
 		{Name: "media", Doc: "the page may use the camera, microphone and screen capture (subject to the policy, the prompt and the operating system's consent), and read the media state"},
 		{Name: "media:manage", Doc: "change the camera, microphone and screen capture policy, answer the page's permission requests, list screens and windows", Implies: []string{"media"}},
 		{Name: "location", Doc: "the page may read the device location (subject to the policy, the prompt and the operating system's consent)"},
+		{Name: "share", Doc: "show the system share menu for text, URLs and files"},
 		{Name: "updater", Doc: "check for, download and apply app updates, and relaunch"},
 	} {
 		Define(i)

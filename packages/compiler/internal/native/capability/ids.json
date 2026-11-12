@@ -949,6 +949,250 @@
       ]
     },
     {
+      "id": "krate/chrome.state",
+      "permission": "window",
+      "area": "chrome",
+      "module": "chrome",
+      "exports": [
+        "ChromeWindow",
+        "getChrome",
+        "mainChrome"
+      ]
+    },
+    {
+      "id": "krate/chrome.setTitleBar",
+      "permission": "window",
+      "area": "chrome",
+      "module": "chrome",
+      "exports": [
+        "ChromeWindow",
+        "getChrome",
+        "mainChrome"
+      ]
+    },
+    {
+      "id": "krate/chrome.setBackdrop",
+      "permission": "window",
+      "area": "chrome",
+      "module": "chrome",
+      "exports": [
+        "ChromeWindow",
+        "getChrome",
+        "mainChrome"
+      ]
+    },
+    {
+      "id": "krate/chrome.setVibrancy",
+      "permission": "window",
+      "area": "chrome",
+      "module": "chrome",
+      "exports": [
+        "ChromeWindow",
+        "getChrome",
+        "mainChrome"
+      ]
+    },
+    {
+      "id": "krate/chrome.setTitleBarOverlay",
+      "permission": "window",
+      "area": "chrome",
+      "module": "chrome",
+      "exports": [
+        "ChromeWindow",
+        "getChrome",
+        "mainChrome"
+      ]
+    },
+    {
+      "id": "krate/chrome.setTrafficLightPosition",
+      "permission": "window",
+      "area": "chrome",
+      "module": "chrome",
+      "exports": [
+        "ChromeWindow",
+        "getChrome",
+        "mainChrome"
+      ]
+    },
+    {
+      "id": "krate/chrome.startDrag",
+      "permission": "window",
+      "area": "chrome",
+      "module": "chrome",
+      "exports": [
+        "ChromeWindow",
+        "getChrome",
+        "mainChrome"
+      ]
+    },
+    {
+      "id": "krate/chrome.toggleMaximize",
+      "permission": "window",
+      "area": "chrome",
+      "module": "chrome",
+      "exports": [
+        "ChromeWindow",
+        "getChrome",
+        "mainChrome"
+      ]
+    },
+    {
+      "id": "krate/chrome.setDocumentEdited",
+      "permission": "window",
+      "area": "chrome",
+      "module": "chrome",
+      "exports": [
+        "ChromeWindow",
+        "getChrome",
+        "mainChrome"
+      ]
+    },
+    {
+      "id": "krate/chrome.setRepresentedFile",
+      "permission": "window",
+      "area": "chrome",
+      "module": "chrome",
+      "exports": [
+        "ChromeWindow",
+        "getChrome",
+        "mainChrome"
+      ]
+    },
+    {
+      "id": "krate/chrome.attachSheet",
+      "permission": "window",
+      "area": "chrome",
+      "module": "chrome",
+      "exports": [
+        "ChromeWindow",
+        "getChrome",
+        "mainChrome"
+      ]
+    },
+    {
+      "id": "krate/chrome.endSheet",
+      "permission": "window",
+      "area": "chrome",
+      "module": "chrome",
+      "exports": [
+        "ChromeWindow",
+        "getChrome",
+        "mainChrome"
+      ]
+    },
+    {
+      "id": "krate/chrome.setTabbing",
+      "permission": "window",
+      "area": "chrome",
+      "module": "chrome",
+      "exports": [
+        "ChromeWindow",
+        "getChrome",
+        "mainChrome"
+      ]
+    },
+    {
+      "id": "krate/chrome.mergeAllWindows",
+      "permission": "window",
+      "area": "chrome",
+      "module": "chrome",
+      "exports": [
+        "ChromeWindow",
+        "getChrome",
+        "mainChrome"
+      ]
+    },
+    {
+      "id": "krate/chrome.moveTabToNewWindow",
+      "permission": "window",
+      "area": "chrome",
+      "module": "chrome",
+      "exports": [
+        "ChromeWindow",
+        "getChrome",
+        "mainChrome"
+      ]
+    },
+    {
+      "id": "krate/chrome.tabs",
+      "permission": "window",
+      "area": "chrome",
+      "module": "chrome",
+      "exports": [
+        "ChromeWindow",
+        "getChrome",
+        "mainChrome"
+      ]
+    },
+    {
+      "id": "krate/chrome.setThumbButtons",
+      "permission": "window",
+      "area": "chrome",
+      "module": "chrome",
+      "exports": [
+        "ChromeWindow",
+        "getChrome",
+        "mainChrome"
+      ]
+    },
+    {
+      "id": "krate/chrome.share",
+      "permission": "share",
+      "area": "chrome",
+      "module": "chrome",
+      "exports": [
+        "share"
+      ]
+    },
+    {
+      "id": "krate/chrome.setJumpList",
+      "permission": "app",
+      "area": "chrome",
+      "module": "chrome",
+      "exports": [
+        "setJumpList"
+      ]
+    },
+    {
+      "id": "krate/chrome.clearJumpList",
+      "permission": "app",
+      "area": "chrome",
+      "module": "chrome",
+      "exports": [
+        "clearJumpList"
+      ]
+    },
+    {
+      "id": "krate/chrome.setActivationPolicy",
+      "permission": "app",
+      "area": "chrome",
+      "module": "chrome",
+      "exports": [
+        "setActivationPolicy"
+      ]
+    },
+    {
+      "id": "krate/chrome.setDockVisible",
+      "permission": "app",
+      "area": "chrome",
+      "module": "chrome",
+      "exports": [
+        "setDockVisible"
+      ]
+    },
+    {
+      "id": "krate/chrome.events",
+      "permission": "window",
+      "area": "chrome",
+      "module": "chrome",
+      "exports": [
+        "ChromeWindow",
+        "getChrome",
+        "mainChrome",
+        "onChromeEvent"
+      ]
+    },
+    {
       "id": "krate/media.policy",
       "permission": "media",
       "area": "media",

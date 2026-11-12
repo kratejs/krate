@@ -59,7 +59,13 @@ func Register(t *bridge.Table, env *bridge.Env, support func(capability string) 
 		if err := codec.Args(args, IDLaunchArgs).Done(); err != nil {
 			return err
 		}
-		codec.WriteStrings(out, launchArgs())
+		launch := launchArgs()
+		// A launcher (a jump list task) puts "--" before arguments that start
+		// with "-" so that the shell does not read them as its own flags.
+		if len(launch) > 0 && launch[0] == "--" {
+			launch = launch[1:]
+		}
+		codec.WriteStrings(out, launch)
 		return nil
 	})
 

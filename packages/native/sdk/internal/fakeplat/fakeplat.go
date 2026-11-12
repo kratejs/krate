@@ -42,6 +42,12 @@ type App struct {
 	winFn      func(caps.WindowEvent)
 	shortcutFn func(string)
 	Shortcuts  map[string]caps.Accelerator
+
+	// Chrome: jump list, activation policy, share menu and events.
+	Jump     []caps.JumpTask
+	Policy   string
+	Shared   []caps.ShareItems
+	chromeFn func(caps.ChromeEvent)
 }
 
 var (
@@ -79,6 +85,10 @@ func (a *App) NewWindow(o platform.WindowOptions) (platform.Window, error) {
 	defer a.mu.Unlock()
 	a.nextRef++
 	w := &Window{app: a, ref: a.nextRef, Opts: o, St: caps.WindowState{Width: o.Width, Height: o.Height, Title: o.Title, Decorated: true, Visible: true}}
+	w.chrome.init(o.Chrome)
+	if tb := o.Chrome.TitleBar; tb != "" && tb != caps.TitleBarNative {
+		w.St.Decorated = false
+	}
 	a.Windows = append(a.Windows, w)
 	return w, nil
 }
@@ -204,6 +214,8 @@ type Window struct {
 	pv     *viewRec
 	extra  []*viewRec
 	layout *caps.LayoutNode
+
+	chrome chromeRec
 }
 
 func (w *Window) rec(s string) { w.mu.Lock(); w.Calls = append(w.Calls, s); w.mu.Unlock() }

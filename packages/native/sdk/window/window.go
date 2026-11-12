@@ -27,6 +27,7 @@ import (
 	"regexp"
 
 	"github.com/kratejs/krate/packages/native/krate"
+	"github.com/kratejs/krate/packages/native/platform/caps"
 	"github.com/kratejs/krate/packages/native/sdk/internal/bridge"
 	"github.com/kratejs/krate/packages/native/sdk/internal/codec"
 	"github.com/kratejs/krate/packages/native/wire"
@@ -76,6 +77,10 @@ type Options struct {
 	HasPosition bool
 	// PreventClose delivers a close-requested event instead of closing.
 	PreventClose bool
+	// Chrome is the window chrome: title bar style, transparency, backdrop,
+	// vibrancy and so on (see package chrome). The zero value is a native
+	// window. Frameless is the older spelling of TitleBar "none".
+	Chrome caps.ChromeOptions
 	// Permissions, when HasPermissions is set, narrows the SDK permissions
 	// the page of this window may use to this list (it must be a subset of
 	// the opening window's). An empty list leaves the page nothing. Without

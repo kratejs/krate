@@ -17,6 +17,22 @@ export interface WindowOptions {
   fullscreen?: boolean;
   maximized?: boolean;
   position?: { x: number; y: number };
+  // Window chrome (see @krate/app/chrome). frameless is the same as
+  // titleBar: "none".
+  titleBar?: "native" | "hidden" | "none";
+  // Transparent window and webview background.
+  transparent?: boolean;
+  // Windows 11 system backdrop behind a transparent page.
+  backdrop?: "none" | "mica" | "micaAlt" | "acrylic";
+  // macOS vibrancy material behind a transparent page.
+  vibrancy?: string;
+  // Windows: the OS caption buttons over a hidden title bar.
+  titleBarOverlay?: boolean | { color?: string; symbolColor?: string; height?: number };
+  // macOS: where the traffic lights sit.
+  trafficLightPosition?: { x: number; y: number };
+  // macOS: windows with the same identifier tab together.
+  tabbingIdentifier?: string;
+  tabbingMode?: "auto" | "preferred" | "disallowed";
   // Deliver "close-requested" instead of closing; call close() to close.
   preventClose?: boolean;
   // Narrow the SDK permissions the page of this window may use to these

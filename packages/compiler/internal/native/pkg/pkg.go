@@ -56,6 +56,8 @@ type Metadata struct {
 	FileAssociations []config.NativeFileAssociation
 	// MacCategory is a UTI such as "public.app-category.productivity".
 	MacCategory string
+	// MacAgent marks a menu-bar-only app: LSUIElement in Info.plist.
+	MacAgent bool
 	// Publisher is the Windows publisher (an MSIX subject or a display name).
 	Publisher string
 	// Installer is "msix" or "nsis" or "".
@@ -119,6 +121,7 @@ func MetadataFromConfig(root string, cfg *config.Config) Metadata {
 	}
 	m.MediaUsage = MediaUsage{Camera: n.Media.Usage.Camera, Microphone: n.Media.Usage.Microphone,
 		Location: n.Media.Usage.Location, ScreenCapture: n.Media.Usage.ScreenCapture}
+	m.MacAgent = n.Bundle.MacOS.Agent
 	return m
 }
 

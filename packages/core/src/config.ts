@@ -335,6 +335,37 @@ export interface NativeWindowConfig {
   resizable?: boolean;
   /** Default "native". */
   titleBar?: "native" | "hidden" | "none";
+  /** Transparent window and webview background; the page paints what the user sees. */
+  transparent?: boolean;
+  /** Windows 11 22H2+ system backdrop behind a transparent page. Ignored elsewhere. */
+  backdrop?: "none" | "mica" | "micaAlt" | "acrylic";
+  /** macOS vibrancy material behind a transparent page. Ignored elsewhere. */
+  vibrancy?:
+    | "titlebar"
+    | "selection"
+    | "menu"
+    | "popover"
+    | "sidebar"
+    | "headerView"
+    | "sheet"
+    | "windowBackground"
+    | "hudWindow"
+    | "fullScreenUI"
+    | "tooltip"
+    | "contentBackground"
+    | "underWindowBackground"
+    | "underPageBackground";
+  /**
+   * Windows: the OS caption buttons over a hidden title bar. `true` uses the
+   * defaults; colors are `#rgb`, `#rrggbb` or `#rrggbbaa`, `height` is the
+   * height of the area in pixels (default 32). Needs `titleBar: "hidden"`.
+   */
+  titleBarOverlay?: boolean | { color?: string; symbolColor?: string; height?: number };
+  /** macOS: where the traffic lights sit on a hidden title bar. */
+  trafficLightPosition?: { x: number; y: number };
+  /** macOS: windows with the same identifier tab together. */
+  tabbingIdentifier?: string;
+  tabbingMode?: "auto" | "preferred" | "disallowed";
   /**
    * Keep the app running with no window open (tray apps). Closing the last
    * window then releases its webview instead of quitting; `window.show()` or a
@@ -381,6 +412,7 @@ export type NativePermission =
   | "media"
   | "media:manage"
   | "location"
+  | "share"
   | `plugin:${string}.${string}`;
 
 export interface NativeConfig {
@@ -410,7 +442,11 @@ export interface NativeConfig {
     pgo?: string;
   };
   bundle?: {
-    macos?: { category?: string };
+    macos?: {
+      category?: string;
+      /** Menu-bar-only app: `LSUIElement` in Info.plist, no dock icon (a running app can show it again). */
+      agent?: boolean;
+    };
     windows?: {
       publisher?: string;
       installer?: "msix" | "nsis";

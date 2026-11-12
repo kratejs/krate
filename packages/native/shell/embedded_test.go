@@ -202,7 +202,7 @@ func TestWindowIDHandlerWithDevScript(t *testing.T) {
 		w.Header().Set("Content-Type", "text/html")
 		w.Header().Set("Content-Length", strconv.Itoa(len(page)))
 		_, _ = w.Write([]byte(page))
-	}), devErrorsScript)
+	}), devErrorsScript, false)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 	body := rec.Body.String()

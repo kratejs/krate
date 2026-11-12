@@ -60,6 +60,8 @@ type WindowConfig struct {
 	Height    int
 	Resizable bool
 	Path      string
+	// Chrome is the window chrome the window starts with.
+	Chrome caps.ChromeOptions
 }
 
 // App is the running application.
@@ -505,7 +507,13 @@ func wndProc(hwnd, message, wParam, lParam uintptr) (ret uintptr) {
 		return r
 	}
 	if w := a.windows[hwnd]; w != nil {
-		if a.windowMessage(hwnd, message) {
+		// Both see TaskbarButtonCreated: the badge and the thumbnail buttons
+		// are re-applied from it.
+		taskbar := a.windowMessage(hwnd, message)
+		if handled, r := w.chromeMessage(message, wParam, lParam); handled {
+			return r
+		}
+		if taskbar {
 			return 0
 		}
 		if handled, r := winExtMessage(a, w, message, wParam, lParam); handled {
