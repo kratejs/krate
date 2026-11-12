@@ -25,6 +25,8 @@ type Window struct {
 	destroyed bool
 	noQuit    bool
 
+	chrome chromeState
+
 	// Release state, see release_windows.go.
 	released  bool
 	releasing bool
@@ -68,12 +70,23 @@ func (a *App) createWindow(cfg WindowConfig, w *Window) error {
 	if cfg.Height <= 0 {
 		cfg.Height = defaultClientHeight
 	}
+	ensureChromeMessages()
+	chromeOpts, err := cfg.Chrome.Validate()
+	if err != nil {
+		return fmt.Errorf("windows: window chrome: %w", err)
+	}
 	style := uint32(wsOverlappedWindow | wsClipChildren | wsClipSiblings)
 	if !cfg.Resizable {
 		style &^= wsThickFrame | wsMaximizeBox
 	}
+	style = chromeStyle(style, chromeOpts.TitleBar)
 	dpi := systemDPI()
 	ow, oh := frameSize(style, scaleDPI(cfg.Width, dpi), scaleDPI(cfg.Height, dpi), dpi)
+	if customFrame(chromeOpts.TitleBar) {
+		// The caption becomes client area (see chromeMessage), so the outer
+		// window is one caption shorter than AdjustWindowRect says.
+		oh -= metric(smCYCaption, dpi) + metric(smCXPaddedBorder, dpi)
+	}
 
 	hwnd, _, e := pCreateWindowExW.Call(0,
 		uintptr(unsafe.Pointer(wstr(appClassName))),
@@ -89,6 +102,7 @@ func (a *App) createWindow(cfg WindowConfig, w *Window) error {
 	w.pv.path = cfg.Path
 	a.windows[hwnd] = w
 	a.everOpened = true
+	w.initChrome(chromeOpts)
 	_, _, _ = pShowWindow.Call(hwnd, swShow)
 	_, _, _ = pUpdateWindow.Call(hwnd)
 
@@ -211,6 +225,7 @@ func (v *view) controllerCompleted(hr, controller uintptr) {
 
 	v.setupStreams()
 	a.tuneMemory(v)
+	v.applyChromeToController()
 
 	w.placeViews()
 	vcall(v.controller, ctlPutIsVisible, 1)

@@ -56,6 +56,8 @@ type WindowConfig struct {
 	Height    int
 	Resizable bool
 	Path      string
+	// Chrome is the window chrome the window starts with.
+	Chrome caps.ChromeOptions
 }
 
 // App is the running application.
@@ -468,6 +470,9 @@ func wndProc(hwnd, message, wParam, lParam uintptr) (ret uintptr) {
 		return r
 	}
 	if w := a.windows[hwnd]; w != nil {
+		if handled, r := w.chromeMessage(message, wParam, lParam); handled {
+			return r
+		}
 		if handled, r := winExtMessage(a, w, message, wParam, lParam); handled {
 			return r
 		}

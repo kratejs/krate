@@ -37,6 +37,7 @@ func (w winApp) NewWindow(o WindowOptions) (Window, error) {
 		Height:    o.Height,
 		Resizable: o.Resizable,
 		Path:      o.Path,
+		Chrome:    o.Chrome,
 	})
 	if err != nil {
 		return nil, err
