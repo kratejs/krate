@@ -18,7 +18,7 @@ export interface PowerEvent {
   kind: PowerEventKind;
 }
 
-export function state(): Promise<PowerState> {
+export function powerState(): Promise<PowerState> {
   return call("krate/power.state", []);
 }
 
@@ -44,13 +44,13 @@ export function allowSleep(id: string): Promise<void> {
   return call("krate/power.allowSleep", [id]);
 }
 
-export function onEvent(fn: (e: PowerEvent) => void, opts?: SubscribeOptions): () => void {
+export function onPowerEvent(fn: (e: PowerEvent) => void, opts?: SubscribeOptions): () => void {
   return subscribe<PowerEvent>("krate/power.events", fn, opts);
 }
 
 // on calls fn for one kind of event.
-export function on(kind: PowerEventKind, fn: () => void, opts?: SubscribeOptions): () => void {
-  return onEvent((e) => {
+export function onPower(kind: PowerEventKind, fn: () => void, opts?: SubscribeOptions): () => void {
+  return onPowerEvent((e) => {
     if (e.kind === kind) fn();
   }, opts);
 }

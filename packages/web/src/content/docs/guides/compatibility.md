@@ -95,6 +95,12 @@ green run there is what moves a cell.
 | Native: packaging formats | Partial | Untested | Untested | Krate Native v1 |
 | Native: signing and notarization | Partial | Untested | Untested | Krate Native v1 |
 | Native: updater | Supported | Untested | Untested | Krate Native v1 |
+| Native: app icon badge and progress | Supported | Untested | Untested | Krate Native round 3 |
+| Native: displays | Supported | Untested | Untested | Krate Native round 3 |
+| Native: power, idle and sleep blockers | Supported | Untested | Untested | Krate Native round 3 |
+| Native: launch at login | Supported | Untested | Untested | Krate Native round 3 |
+| Native: system theme | Supported | Untested | Untested | Krate Native round 3 |
+| Native: crash reports | Supported | Untested | Untested | Krate Native round 3 |
 | Native: size, start-up and memory budgets | Supported | Planned | Planned | Krate Native v1 |
 
 ## Details
@@ -780,6 +786,92 @@ Known limits:
 - macOS and Windows: untested. The same Go code is built for them (cross-compile checks in CI) and the CI native job runs go test on both, but no result of a run against a real WKWebView or WebView2 window has been confirmed.
 
 Evidence: `TestSignatureGoodBadWrongKey`, `TestCheck`, `TestDownloadVerifiesAndProgress`, `TestDownloadResumes`, `TestApplyLinuxReplacesExecutableAndAppDir`, `TestApplyRollsBackOnFailure`, `TestApplyAppImage`, `TestApplyMacBundle`, `TestApplyWindowsOrder`, `TestSmokeUpdateInstalledApp`
+
+### Native: app icon badge and progress
+
+**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+
+krate/badge.* sets a badge (count or short text), a progress value (none, normal, indeterminate, error, paused) and an urgent flag on the app icon. Linux emits the Unity LauncherEntry D-Bus signal that GNOME Dash to Dock, KDE and Plank read; macOS uses NSDockTile with a progress bar in the tile; Windows uses ITaskbarList3 progress and an overlay icon the SDK draws.
+
+Known limits:
+
+- Linux launchers show numbers only (other text is refused as unsupported) and no indeterminate state; the signal was verified with a listener on a private D-Bus session, not in a real dock.
+- macOS draws error and paused as normal progress.
+- macOS and Windows: the same Go code is built for them and the CI GUI tests TestGUIBadgeAndProgress set and read back what the OS allows; untested until CI has run them.
+
+Evidence: `TestBadgeLauncherEntryOverDBus`, `TestBadgeWithoutSessionBus`, `TestProgressValidate`, `TestBadgeImage`, `TestBGRAPremultiplied`, `TestTaskbarFlags`, `TestGUIBadgeAndProgress`
+
+### Native: displays
+
+**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+
+krate/screen.* lists displays (bounds, work area, scale, primary, refresh rate), finds the display of a window, centers a window on a display and reports display changes. GDK monitors on Linux, NSScreen on macOS, EnumDisplayMonitors and GetDpiForMonitor on Windows.
+
+Known limits:
+
+- Linux was run against Xvfb, which has one monitor; multi-monitor layouts are covered by the pure geometry tests, not a real second monitor.
+- Display change events are wired to GDK monitors-changed, NSApplicationDidChangeScreenParametersNotification and WM_DISPLAYCHANGE; only the Windows message path is driven by a test (TestGUIDisplays).
+- macOS and Windows: untested until CI has run the GUI tests.
+
+Evidence: `TestGUIDisplays`, `TestScreenOps`, `TestScreenPermissionAndUnsupported`, `TestDisplayForRect`, `TestCenterIn`, `TestTopLeftY`, `TestDisplayHelpers`
+
+### Native: power, idle and sleep blockers
+
+**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+
+krate/power.* reports on-battery, idle time and lock state, delivers suspend, resume, lock, unlock, battery, AC, idle and active events, and holds sleep blockers. Linux uses logind, UPower, Mutter IdleMonitor or the ScreenSaver service, and the GNOME session manager or PowerManagement inhibitors; macOS NSWorkspace, IOKit and IOPMAssertion; Windows WM_POWERBROADCAST, WTS session notifications and SetThreadExecutionState.
+
+Known limits:
+
+- Linux was tested against fake services on private buses, never a real suspend or lock.
+- logind's Inhibit returns a file descriptor, which the SDK's D-Bus client cannot receive, so it is not used.
+- Battery and idle events come from sampling every three seconds while an event stream is open.
+- macOS and Windows: untested until CI has run the GUI tests; a real suspend was never tried.
+
+Evidence: `TestSampleFromServices`, `TestIdleFallsBackToLogind`, `TestBatteryFromSysfsWhenNoUPower`, `TestEventsFromLogindAndPolling`, `TestPreventSleepGnome`, `TestPreventSleepKDE`, `TestPreventSleepWithoutAnyService`, `TestTrackerBatteryEvents`, `TestTrackerIdleEvents`, `TestPowerThroughTheHost`, `TestGUIPowerMessages`
+
+### Native: launch at login
+
+**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+
+krate/login.get and set register the app to start at login: an XDG autostart entry on Linux, SMAppService with a LaunchAgent fallback on macOS, the HKCU Run key on Windows.
+
+Known limits:
+
+- A packaged (MSIX) Windows app declares a startupTask extension instead; the calls answer unsupported because toggling a StartupTask from code is not implemented.
+- macOS: SMAppService needs a signed bundle and was never run; the LaunchAgent fallback writes the plist but does not call launchctl, so it takes effect at the next login.
+- macOS and Windows: untested until CI has run the temp-HOME and temp-registry-key round trips.
+
+Evidence: `TestAutostartRoundTrip`, `TestAutostartNeedsAppID`, `TestAutostartEntry`, `TestLoginThroughTheHost`, `TestLaunchAgentRoundTrip`, `TestRunKeyRoundTrip`, `TestGUILoginItemAnswersCleanly`
+
+### Native: system theme
+
+**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+
+krate/theme.* reads the system appearance (light or dark, high contrast), reports changes and makes native title bars follow it or a fixed choice: the desktop portal and gtk-application-prefer-dark-theme on Linux, NSApp.appearance on macOS, the Personalize registry key and DWMWA_USE_IMMERSIVE_DARK_MODE on Windows.
+
+Known limits:
+
+- Linux was tested against a fake portal and by reading back the GTK setting; whether a given desktop redraws its title bars is up to the window manager (client-side GTK decorations follow it).
+- macOS observes AppleInterfaceThemeChangedNotification, not KVO on effectiveAppearance.
+- macOS and Windows: untested until CI has run the GUI tests.
+
+Evidence: `TestThemeFollowsThePortal`, `TestThemeFallsBackToGTKSettings`, `TestGUIWindowTheme`, `TestGUIThemeFollowsOverride`, `TestGUIThemeFollowsSettings`
+
+### Native: crash reports
+
+**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+
+A Go panic or fatal error in the shell or the Go host is written to a JSON report under the app's log directory (runtime/debug.SetCrashOutput, collected on the next launch), and a crashed or killed webview process is reported as an event and a report; krate/crash.* lists, reads and deletes reports, and can reload a crashed view automatically (at most three times in 30 seconds). WebKitGTK web-process-terminated, WKWebView webViewWebContentProcessDidTerminate: and WebView2 ProcessFailed.
+
+Known limits:
+
+- A crash of the shell itself is reported on the next launch, not live.
+- Nothing is uploaded; the app reads the reports and sends them where it likes.
+- WKWebView does not say why its process ended, so macOS reports the reason as crashed.
+- macOS and Windows: untested until CI has run the forced-crash tests.
+
+Evidence: `TestRealCrashBecomesAReport`, `TestCollectSkipsLiveProcessesAndEmptyLogs`, `TestWriteListReadDelete`, `TestIDsCannotEscapeTheDirectory`, `TestLimiter`, `TestWebviewCrashEventsReportsAndAutoReload`, `TestGUIWebviewCrash`, `TestNativeE2ESystemGUI`
 
 ### Native: size, start-up and memory budgets
 

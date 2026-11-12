@@ -881,8 +881,8 @@
       "area": "badge",
       "module": "badge",
       "exports": [
-        "clear",
-        "set"
+        "clearBadge",
+        "setBadge"
       ]
     },
     {
@@ -891,7 +891,7 @@
       "area": "badge",
       "module": "badge",
       "exports": [
-        "get"
+        "getBadge"
       ]
     },
     {
@@ -910,7 +910,7 @@
       "area": "badge",
       "module": "badge",
       "exports": [
-        "progress"
+        "getProgress"
       ]
     },
     {
@@ -928,7 +928,7 @@
       "area": "screen",
       "module": "screen",
       "exports": [
-        "list"
+        "listDisplays"
       ]
     },
     {
@@ -937,7 +937,7 @@
       "area": "screen",
       "module": "screen",
       "exports": [
-        "primary"
+        "primaryDisplay"
       ]
     },
     {
@@ -946,7 +946,7 @@
       "area": "screen",
       "module": "screen",
       "exports": [
-        "ofWindow"
+        "displayOfWindow"
       ]
     },
     {
@@ -964,7 +964,7 @@
       "area": "screen",
       "module": "screen",
       "exports": [
-        "onChange"
+        "onDisplaysChanged"
       ]
     },
     {
@@ -973,7 +973,7 @@
       "area": "power",
       "module": "power",
       "exports": [
-        "state"
+        "powerState"
       ]
     },
     {
@@ -1018,8 +1018,8 @@
       "area": "power",
       "module": "power",
       "exports": [
-        "on",
-        "onEvent"
+        "onPower",
+        "onPowerEvent"
       ]
     },
     {
@@ -1028,7 +1028,7 @@
       "area": "login",
       "module": "login",
       "exports": [
-        "get"
+        "getLoginItem"
       ]
     },
     {
@@ -1037,7 +1037,7 @@
       "area": "login",
       "module": "login",
       "exports": [
-        "set"
+        "setLoginItem"
       ]
     },
     {
@@ -1046,7 +1046,7 @@
       "area": "theme",
       "module": "theme",
       "exports": [
-        "get"
+        "getTheme"
       ]
     },
     {
@@ -1055,7 +1055,7 @@
       "area": "theme",
       "module": "theme",
       "exports": [
-        "set"
+        "setTheme"
       ]
     },
     {
@@ -1064,7 +1064,7 @@
       "area": "theme",
       "module": "theme",
       "exports": [
-        "onChange"
+        "onThemeChange"
       ]
     },
     {
@@ -1073,7 +1073,7 @@
       "area": "crash",
       "module": "crash",
       "exports": [
-        "list"
+        "listCrashReports"
       ]
     },
     {
@@ -1082,7 +1082,7 @@
       "area": "crash",
       "module": "crash",
       "exports": [
-        "read"
+        "readCrashReport"
       ]
     },
     {
@@ -1091,7 +1091,7 @@
       "area": "crash",
       "module": "crash",
       "exports": [
-        "remove"
+        "deleteCrashReport"
       ]
     },
     {
@@ -1100,7 +1100,7 @@
       "area": "crash",
       "module": "crash",
       "exports": [
-        "setAutoReload"
+        "setCrashAutoReload"
       ]
     },
     {

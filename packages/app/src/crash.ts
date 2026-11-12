@@ -45,23 +45,23 @@ export interface CrashEvent {
   reloaded: boolean;
 }
 
-export function list(): Promise<CrashSummary[]> {
+export function listCrashReports(): Promise<CrashSummary[]> {
   return call("krate/crash.list", []);
 }
 
-export function read(id: string): Promise<CrashReport> {
+export function readCrashReport(id: string): Promise<CrashReport> {
   return call("krate/crash.read", [id]);
 }
 
 // remove deletes a report (deleting a missing one succeeds).
-export function remove(id: string): Promise<void> {
+export function deleteCrashReport(id: string): Promise<void> {
   return call("krate/crash.delete", [id]);
 }
 
 // setAutoReload makes the shell reload a webview whose process crashed. It
 // gives up on a window that crashes again within seconds, so a broken page
 // cannot loop.
-export function setAutoReload(on: boolean): Promise<void> {
+export function setCrashAutoReload(on: boolean): Promise<void> {
   return call("krate/crash.setAutoReload", [on]);
 }
 

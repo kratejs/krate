@@ -13,15 +13,15 @@ export interface Theme {
   source: ThemeSource;
 }
 
-export function get(): Promise<Theme> {
+export function getTheme(): Promise<Theme> {
   return call("krate/theme.get", []);
 }
 
 // set makes native title bars and dialogs light, dark or follow the system.
-export function set(source: ThemeSource): Promise<void> {
+export function setTheme(source: ThemeSource): Promise<void> {
   return call("krate/theme.set", [source]);
 }
 
-export function onChange(fn: (t: Theme) => void, opts?: SubscribeOptions): () => void {
+export function onThemeChange(fn: (t: Theme) => void, opts?: SubscribeOptions): () => void {
   return subscribe<Theme>("krate/theme.events", fn, opts);
 }

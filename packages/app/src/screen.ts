@@ -28,16 +28,16 @@ export interface ScreenEvent {
   displays: Display[];
 }
 
-export function list(): Promise<Display[]> {
+export function listDisplays(): Promise<Display[]> {
   return call("krate/screen.list", []);
 }
 
-export function primary(): Promise<Display> {
+export function primaryDisplay(): Promise<Display> {
   return call("krate/screen.primary", []);
 }
 
 // ofWindow resolves the display most of the window is on ("" is the main window).
-export function ofWindow(window = ""): Promise<Display> {
+export function displayOfWindow(window = ""): Promise<Display> {
   return call("krate/screen.ofWindow", [window]);
 }
 
@@ -49,6 +49,6 @@ export function centerWindow(window = "", display = ""): Promise<void> {
 
 // onChange calls fn when a display is added, removed or changes geometry or
 // scale.
-export function onChange(fn: (e: ScreenEvent) => void, opts?: SubscribeOptions): () => void {
+export function onDisplaysChanged(fn: (e: ScreenEvent) => void, opts?: SubscribeOptions): () => void {
   return subscribe<ScreenEvent>("krate/screen.events", fn, opts);
 }

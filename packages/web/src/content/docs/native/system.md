@@ -22,6 +22,12 @@ each is gated by a [permission](/docs/native/sdk-ui/#permissions).
 | Theme | `sdk/theme` | `@krate/app/theme` | `theme` |
 | Crash reports | `sdk/crash` | `@krate/app/crash` | `crash` |
 
+Export names in the TypeScript modules are unique across the SDK (`setBadge`,
+`listDisplays`, `getTheme`, ...) on purpose: the compiler puts every module of
+a page in one namespace, so two modules that both export `set` or `get` collide
+(warning KR7116) when a page imports both. The Go packages use short names
+(`badge.Set`, `screen.List`).
+
 `badge`, `screen`, `power` and `theme` are granted when `app.json` lists no
 permissions. `power:inhibit`, `login` and `crash` must be listed: they keep the
 machine awake, change what starts at login, and expose stack traces.
@@ -33,17 +39,17 @@ machine awake, change what starts at login, and expose stack traces.
 ```ts
 import * as badge from "@krate/app/badge";
 
-await badge.set(3);                       // a count; set(0) or clear() removes it
+await badge.setBadge(3);                  // a count; setBadge(0) or clearBadge() removes it
 await badge.setProgress("normal", 0.4);   // none | normal | indeterminate | error | paused
 await badge.setUrgent(true);              // bounce, flash or mark urgent
 ```
 
 | Call | Id |
 |------|----|
-| `set(text or count)`, `clear()` | `krate/badge.set` |
-| `get()` | `krate/badge.get` |
+| `setBadge(text or count)`, `clearBadge()` | `krate/badge.set` |
+| `getBadge()` | `krate/badge.get` |
 | `setProgress(state, value)`, `clearProgress()` | `krate/badge.setProgress` |
-| `progress()` | `krate/badge.progress` |
+| `getProgress()` | `krate/badge.progress` |
 | `setUrgent(on)` | `krate/badge.setUrgent` |
 
 - **macOS:** `NSDockTile` badge label and a progress bar drawn into the dock
@@ -66,10 +72,10 @@ await badge.setUrgent(true);              // bounce, flash or mark urgent
 ```ts
 import * as screen from "@krate/app/screen";
 
-const all = await screen.list();          // primary first
-const here = await screen.ofWindow("");   // the main window's display
+const all = await screen.listDisplays();          // primary first
+const here = await screen.displayOfWindow("");    // the main window's display
 await screen.centerWindow("", all[1].id); // center on another display
-screen.onChange(({ displays }) => redraw(displays));
+screen.onDisplaysChanged(({ displays }) => redraw(displays));
 ```
 
 A `Display` has `id`, `name`, bounds (`x`, `y`, `width`, `height`), a work area
@@ -77,7 +83,7 @@ A `Display` has `id`, `name`, bounds (`x`, `y`, `width`, `height`), a work area
 taskbars and menu bars), `scale`, `primary` and `refreshHz` (0 when unknown).
 Coordinates are logical pixels in the space `window.state` and
 `window.setPosition` use. An id is stable while the display configuration does
-not change. `ofWindow` is the display with the largest overlap with the window.
+not change. `displayOfWindow` is the display with the largest overlap with the window.
 
 Ids: `krate/screen.list`, `krate/screen.primary`, `krate/screen.ofWindow`,
 `krate/screen.centerWindow`, and the stream `krate/screen.events`.
@@ -95,9 +101,9 @@ Ids: `krate/screen.list`, `krate/screen.primary`, `krate/screen.ofWindow`,
 ```ts
 import * as power from "@krate/app/power";
 
-const s = await power.state();            // { onBattery, idleSeconds, locked, idleState }
-power.on("suspend", saveWork);
-power.on("resume", reconnect);
+const s = await power.powerState();       // { onBattery, idleSeconds, locked, idleState }
+power.onPower("suspend", saveWork);
+power.onPower("resume", reconnect);
 await power.setIdleThreshold(300);        // "idle" and "active" events
 const id = await power.preventSleep("exporting", true);
 await power.allowSleep(id);
@@ -133,8 +139,8 @@ when released or when the app exits. Ids: `krate/power.state`,
 ```ts
 import * as login from "@krate/app/login";
 
-await login.set(true, { args: ["--background"] });
-const { enabled, method } = await login.get();
+await login.setLoginItem(true, { args: ["--background"] });
+const { enabled, method } = await login.getLoginItem();
 ```
 
 Ids: `krate/login.get`, `krate/login.set`. The entry starts the running
@@ -159,13 +165,13 @@ use a release build to try it.
 ```ts
 import * as theme from "@krate/app/theme";
 
-const t = await theme.get();   // { scheme, highContrast, system, source }
-theme.onChange((t) => document.documentElement.dataset.theme = t.scheme);
-await theme.set("dark");       // "system" (default), "light" or "dark"
+const t = await theme.getTheme();   // { scheme, highContrast, system, source }
+theme.onThemeChange((t) => document.documentElement.dataset.theme = t.scheme);
+await theme.setTheme("dark");       // "system" (default), "light" or "dark"
 ```
 
-Native title bars follow the system without any call. `set` overrides them
-(and, on Linux, GTK dialogs and menus) until `set("system")`. The page's own
+Native title bars follow the system without any call. `setTheme` overrides them
+(and, on Linux, GTK dialogs and menus) until `setTheme("system")`. The page's own
 `prefers-color-scheme` is the webview's business and is not changed. Ids:
 `krate/theme.get`, `krate/theme.set`, `krate/theme.events`.
 
@@ -186,11 +192,11 @@ Native title bars follow the system without any call. `set` overrides them
 ```ts
 import * as crash from "@krate/app/crash";
 
-for (const r of await crash.list()) {      // reports from earlier runs
-  upload(await crash.read(r.id));          // your own endpoint
-  await crash.remove(r.id);
+for (const r of await crash.listCrashReports()) {   // reports from earlier runs
+  upload(await crash.readCrashReport(r.id));         // your own endpoint
+  await crash.deleteCrashReport(r.id);
 }
-await crash.setAutoReload(true);           // reload a view whose process died
+await crash.setCrashAutoReload(true);                // reload a view whose process died
 crash.onCrash((e) => console.warn(e.kind, e.reason, e.reloaded));
 ```
 
@@ -206,7 +212,7 @@ At most 50 are kept. Nothing is sent anywhere; uploading is the app's job.
 - **Go panics and fatal errors** end the process before any code can run, so the
   shell and the Go host child ask the runtime to copy its crash output to
   `pending-<pid>.log` (`runtime/debug.SetCrashOutput`). The next
-  `crash.list()` (or the shell, when the Go host child exits) turns the log of
+  `listCrashReports()` (or the shell, when the Go host child exits) turns the log of
   a dead process into a report, and a crash of the child while the shell runs
   also raises a crash event. A crash of the shell itself is therefore reported
   on the next launch, never live.
@@ -214,7 +220,7 @@ At most 50 are kept. Nothing is sent anywhere; uploading is the app's job.
   WebKitGTK `web-process-terminated`, `WKWebView`
   `webViewWebContentProcessDidTerminate:`, WebView2 `ProcessFailed` (render and
   GPU process failures). The `reason` is `crashed`, `killed`, `out-of-memory`,
-  `unresponsive` or `unknown`. With `setAutoReload(true)` the shell reloads the
+  `unresponsive` or `unknown`. With `setCrashAutoReload(true)` the shell reloads the
   view; it stops after three reloads of one view in 30 seconds, so a page that
   kills its renderer on load cannot loop.
 - Verified on Linux by killing the web process of a real window. macOS and

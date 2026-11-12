@@ -13,10 +13,10 @@ export interface LoginOptions {
   args?: string[];
 }
 
-export function get(): Promise<LoginItem> {
+export function getLoginItem(): Promise<LoginItem> {
   return call("krate/login.get", []);
 }
 
-export function set(enabled: boolean, options: LoginOptions = {}): Promise<void> {
+export function setLoginItem(enabled: boolean, options: LoginOptions = {}): Promise<void> {
   return call("krate/login.set", [enabled, { args: options.args ?? [] }]);
 }

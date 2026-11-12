@@ -23,11 +23,11 @@ beforeEach(() => setup());
 describe("badge", () => {
   it("set turns counts into text and 0 or null into a removal", async () => {
     setup({ "krate/badge.set": () => null });
-    await badge.set(3);
-    await badge.set("new");
-    await badge.set(0);
-    await badge.set(null);
-    await badge.clear();
+    await badge.setBadge(3);
+    await badge.setBadge("new");
+    await badge.setBadge(0);
+    await badge.setBadge(null);
+    await badge.clearBadge();
     expect(seen.map((s) => s.args)).toEqual([["3"], ["new"], [""], [""], [""]]);
   });
 
@@ -42,8 +42,8 @@ describe("badge", () => {
 
   it("get and progress return what the host says", async () => {
     setup({ "krate/badge.get": () => "7", "krate/badge.progress": () => ({ state: "paused", value: 0.2 }) });
-    expect(await badge.get()).toBe("7");
-    expect(await badge.progress()).toEqual({ state: "paused", value: 0.2 });
+    expect(await badge.getBadge()).toBe("7");
+    expect(await badge.getProgress()).toEqual({ state: "paused", value: 0.2 });
   });
 });
 
@@ -57,9 +57,9 @@ describe("screen", () => {
       "krate/screen.ofWindow": () => d,
       "krate/screen.centerWindow": () => null,
     });
-    expect(await screen.list()).toEqual([d]);
-    expect((await screen.primary()).primary).toBe(true);
-    expect((await screen.ofWindow()).id).toBe("m0");
+    expect(await screen.listDisplays()).toEqual([d]);
+    expect((await screen.primaryDisplay()).primary).toBe(true);
+    expect((await screen.displayOfWindow()).id).toBe("m0");
     await screen.centerWindow("w2", "m1");
     await screen.centerWindow();
     expect(seen.map((s) => s.fn + JSON.stringify(s.args))).toEqual([
@@ -79,7 +79,7 @@ describe("screen", () => {
       } as unknown as FakeHandler,
     });
     const got: unknown[] = [];
-    const stop = screen.onChange((e) => got.push(e));
+    const stop = screen.onDisplaysChanged((e) => got.push(e));
     await flushAll();
     expect(got).toEqual([{ displays: [d] }]);
     stop();
@@ -106,7 +106,7 @@ describe("power", () => {
       } as unknown as FakeHandler,
     });
     let n = 0;
-    const stop = power.on("resume", () => n++);
+    const stop = power.onPower("resume", () => n++);
     await flushAll();
     expect(n).toBe(2);
     stop();
@@ -117,7 +117,7 @@ describe("power", () => {
       "krate/power.state": () => ({ onBattery: true, idleSeconds: 4, locked: false, idleState: "active" }),
       "krate/power.idleTime": () => 4,
     });
-    expect((await power.state()).onBattery).toBe(true);
+    expect((await power.powerState()).onBattery).toBe(true);
     expect(await power.idleTime()).toBe(4);
   });
 });
@@ -125,10 +125,10 @@ describe("power", () => {
 describe("login", () => {
   it("set sends the flag and the arguments", async () => {
     setup({ "krate/login.set": () => null, "krate/login.get": () => ({ enabled: true, method: "autostart" }) });
-    await login.set(true, { args: ["--background"] });
-    await login.set(false);
+    await login.setLoginItem(true, { args: ["--background"] });
+    await login.setLoginItem(false);
     expect(seen.map((s) => s.args)).toEqual([[true, { args: ["--background"] }], [false, { args: [] }]]);
-    expect(await login.get()).toEqual({ enabled: true, method: "autostart" });
+    expect(await login.getLoginItem()).toEqual({ enabled: true, method: "autostart" });
   });
 });
 
@@ -141,11 +141,11 @@ describe("theme", () => {
         await new Promise(() => {});
       } as unknown as FakeHandler,
     });
-    expect(await theme.get()).toEqual(t);
-    await theme.set("light");
+    expect(await theme.getTheme()).toEqual(t);
+    await theme.setTheme("light");
     expect(seen[1].args).toEqual(["light"]);
     const got: string[] = [];
-    const stop = theme.onChange((x) => got.push(x.scheme));
+    const stop = theme.onThemeChange((x) => got.push(x.scheme));
     await flushAll();
     expect(got).toEqual(["light"]);
     stop();
@@ -160,10 +160,10 @@ describe("crash", () => {
       "krate/crash.delete": () => null,
       "krate/crash.setAutoReload": () => null,
     });
-    expect((await crash.list())[0].id).toBe("crash-1");
-    expect((await crash.read("crash-1")).reason).toBe("crashed");
-    await crash.remove("crash-1");
-    await crash.setAutoReload(true);
+    expect((await crash.listCrashReports())[0].id).toBe("crash-1");
+    expect((await crash.readCrashReport("crash-1")).reason).toBe("crashed");
+    await crash.deleteCrashReport("crash-1");
+    await crash.setCrashAutoReload(true);
     expect(seen.map((s) => s.fn)).toEqual(["krate/crash.list", "krate/crash.read", "krate/crash.delete", "krate/crash.setAutoReload"]);
     expect(seen[2].args).toEqual(["crash-1"]);
     expect(seen[3].args).toEqual([true]);

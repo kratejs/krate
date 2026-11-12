@@ -13,17 +13,17 @@ export interface BadgeProgress {
 // set shows a count or short text on the app icon; "", 0 or null removes it.
 // Linux launchers can only show numbers and reject other text with code
 // "unsupported". Windows shows up to two or three glyphs ("99+" above 99).
-export function set(badge: string | number | null): Promise<void> {
+export function setBadge(badge: string | number | null): Promise<void> {
   const text = badge === null || badge === 0 ? "" : String(badge);
   return call("krate/badge.set", [text]);
 }
 
-export function clear(): Promise<void> {
-  return set("");
+export function clearBadge(): Promise<void> {
+  return setBadge("");
 }
 
 // get resolves the text last set, "" when none.
-export function get(): Promise<string> {
+export function getBadge(): Promise<string> {
   return call("krate/badge.get", []);
 }
 
@@ -38,7 +38,7 @@ export function clearProgress(): Promise<void> {
   return setProgress("none");
 }
 
-export function progress(): Promise<BadgeProgress> {
+export function getProgress(): Promise<BadgeProgress> {
   return call("krate/badge.progress", []);
 }
 
