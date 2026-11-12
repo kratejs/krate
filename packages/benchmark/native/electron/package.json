@@ -1,0 +1,24 @@
+{
+  "name": "bench-native-electron",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Electron side of the native benchmark: the same page as the Krate and Tauri apps.",
+  "author": "Krate <noreply@krate.js.org>",
+  "homepage": "https://krate.js.org",
+  "license": "Apache-2.0",
+  "main": "main.js",
+  "devDependencies": {
+    "electron": "45.3.1",
+    "electron-builder": "26.18.0"
+  },
+  "build": {
+    "appId": "dev.krate.bench.electron",
+    "productName": "ElectronBench",
+    "directories": { "output": "dist" },
+    "files": ["main.js", "preload.js", "index.html", "app.js", "package.json"],
+    "asar": true,
+    "mac": { "target": ["dmg"], "identity": null },
+    "win": { "target": ["nsis"], "signAndEditExecutable": false },
+    "linux": { "target": ["deb", "AppImage"], "executableName": "electron-bench", "category": "Utility", "maintainer": "Krate <noreply@krate.js.org>" }
+  }
+}
