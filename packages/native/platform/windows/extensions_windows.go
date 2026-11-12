@@ -9,7 +9,6 @@ import (
 	"time"
 	"unsafe"
 
-
 	"github.com/kratejs/krate/packages/native/krate"
 	"github.com/kratejs/krate/packages/native/platform/caps"
 )
@@ -216,4 +215,3 @@ func (a *App) RemoveExtension(id string) error {
 		return errors.New("windows: removing the extension timed out")
 	}
 }
-
