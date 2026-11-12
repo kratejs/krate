@@ -13,8 +13,7 @@ import (
 )
 
 // GUI tests of several views in one window. They run with the other GUI tests
-// (KRATE_NATIVE_GUI=1) and have not been run yet; the CI native job is the
-// first run. The layout arithmetic they rely on is unit-tested in
+// (KRATE_NATIVE_GUI=1) in the CI native job on windows-latest. The layout arithmetic they rely on is unit-tested in
 // platform/caps.
 
 type viewPing struct {

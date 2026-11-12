@@ -81,7 +81,7 @@ green run there is what moves a cell.
 | Native: SDK data areas (kv, db, fs, net, os) | Supported | Untested | Untested | Krate Native v1 |
 | Native: SDK windows | Partial | Untested | Untested | Krate Native v1 |
 | Native: requests are bound to the webview they came from | Supported | Untested | Untested | Krate Native v1 |
-| Native: views and split panes | Supported | Untested | Untested | Krate Native v1 |
+| Native: views and split panes | Supported | Supported | Supported | Krate Native v1 |
 | Native: shared web process, release and background mode | Supported | Untested | Untested | Krate Native v1 |
 | Native: lean pages and the dev Memory panel | Supported | Untested | Untested | Krate Native v1 |
 | Native: SDK dialogs, clipboard and menus | Supported | Untested | Untested | Krate Native v1 |
@@ -584,9 +584,9 @@ Evidence: `TestIdentifyOverridesTheWindowHeader`, `TestIdentify`, `TestViewConte
 
 ### Native: views and split panes
 
-**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+**Linux:** Supported - **macOS:** Supported - **Windows:** Supported
 
-A window can hold several webviews laid out as a tree of horizontal and vertical splits with draggable dividers, minimum pane sizes and ratios that can be read back after a drag. Views are added, removed, focused, navigated and given their own permission scope; they report added, navigated, removed and closed events and can post messages to each other. All views share the app's one web process; an extra view costs about what a page costs (about 1 MB of web process memory on the WebKitGTK 2.54 sysroot, about 40 MB with software-GL compositing on the CI runner). Layout arithmetic is pure Go and tested on every OS.
+A window can hold several webviews laid out as a tree of horizontal and vertical splits with draggable dividers, minimum pane sizes and ratios that can be read back after a drag. Views are added, removed, focused, navigated and given their own permission scope; they report added, navigated, removed and closed events and can post messages to each other. All views share the app's one web process; an extra view costs about what a page costs (about 1 MB of web process memory on the WebKitGTK 2.54 sysroot, about 40 MB with software-GL compositing on the CI runner). Layout arithmetic is pure Go and tested on every OS; the real-window view tests and the native-views example run in CI on Linux, macOS and Windows.
 
 Known limits:
 

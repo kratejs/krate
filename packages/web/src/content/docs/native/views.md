@@ -210,7 +210,7 @@ overhead.
 
 ## Platform notes
 
-| | Linux (tested) | macOS (untested) | Windows (untested) |
+| | Linux | macOS | Windows |
 |--|--|--|--|
 | Panes | nested `GtkPaned`; children keep their size request, which carries the minimum sizes | nested `NSSplitView`; minimum sizes are Auto Layout constraints on each web view | one WebView2 controller per view in the window, bounds from the Go layout |
 | Divider drag | native `GtkPaned` handle | native `NSSplitView` divider | the window procedure hit-tests the divider (6 px, with a 3 px grab margin), shows the resize cursor and drags |

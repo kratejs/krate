@@ -12,8 +12,9 @@ import (
 	"github.com/kratejs/krate/packages/native/platform/caps"
 )
 
-// Several WKWebViews in one NSWindow, laid out as nested NSSplitViews. This
-// code has not run on macOS; it is compile-checked only.
+// Several WKWebViews in one NSWindow, laid out as nested NSSplitViews.
+// TestGUIViews and the compiler's TestNativeE2EViewsGUI run it in CI on
+// macos-latest.
 //
 // The layout tree and its arithmetic come from caps (pure Go, unit-tested).
 // NSSplitView draws the dividers and handles the drag. Minimum pane sizes are
