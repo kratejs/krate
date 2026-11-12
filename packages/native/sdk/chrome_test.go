@@ -231,7 +231,8 @@ func TestChromeEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer c2()
-	waitSubs(t, r, "chrome")
+	// OnEvent and OnThumbClick each open a subscription.
+	waitSubsN(t, r, "chrome", 2)
 	r.app.EmitChrome(r.main, caps.ChromeThumbClick, "play")
 	r.app.EmitChrome(r.main, caps.ChromeNewTab, "")
 	deadline := time.Now().Add(3 * time.Second)

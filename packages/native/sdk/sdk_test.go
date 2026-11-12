@@ -523,16 +523,20 @@ func TestContextMenuSDK(t *testing.T) {
 }
 
 // waitSubs waits until a topic has a subscriber, so an event is not lost.
-func waitSubs(t *testing.T, r *rig, topic string) {
+func waitSubs(t *testing.T, r *rig, topic string) { waitSubsN(t, r, topic, 1) }
+
+// waitSubsN waits until n subscribers listen to topic: events published
+// before a subscription is live are not delivered to it.
+func waitSubsN(t *testing.T, r *rig, topic string, n int) {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		if r.host.Subscribers(topic) > 0 {
+		if r.host.Subscribers(topic) >= n {
 			return
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	t.Fatalf("nobody subscribed to %s", topic)
+	t.Fatalf("fewer than %d subscribers to %s", n, topic)
 }
 
 func TestMenuEventsReachThePage(t *testing.T) {
