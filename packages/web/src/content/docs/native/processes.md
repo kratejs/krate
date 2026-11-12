@@ -74,7 +74,17 @@ What a worker gets:
 - **Its own, narrower SDK.** A worker calls the SDK through an endpoint that
   carries its identity, and may use only the permissions listed in its
   declaration, which must be a subset of the app's. A worker that lists nothing
-  can call nothing but its own messaging.
+  can call nothing but its own messaging. This keeps a worker's own code from
+  using more of the SDK than it declares; it is not a sandbox. A worker is a
+  process of the user with the user's file and network access, and it could
+  reach the shell's private host socket like any process of the user.
+- **Environment from the caller, within limits.** `startWorker(name, { env })`
+  adds variables, but not `KRATE_*` (the shell's own), `NODE_*` other than
+  `NODE_ENV`, `BUN_*`, `DENO_*`, `LD_*`, `DYLD_*`, `PATH` or the other variables
+  that change how a runtime or the dynamic loader loads code or which
+  certificates it trusts (`bad_args`). A page that may start a worker must not
+  be able to run code of its choice in it (`NODE_OPTIONS=--import=data:...`). Put
+  runtime flags in the worker's `command`.
 - **Logs.** Its stdout and stderr go to the app log, prefixed with
   `[worker <name>]`.
 - **A restart policy.** `never` (default), `onFailure` (a crash or non-zero

@@ -178,6 +178,9 @@ func (s *Supervisor) Start(ctx context.Context, name string, args []string, env 
 	if !ok {
 		return "", krate.Errorf("not_found", "no worker %q is declared (declare it in native.workers)", name)
 	}
+	if err := ValidateEnv(env); err != nil {
+		return "", krate.Errorf("bad_args", "worker %q: %v", name, err)
+	}
 	s.mu.Lock()
 	s.next++
 	id := "w" + strconv.Itoa(s.next)

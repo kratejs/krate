@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -281,5 +282,41 @@ func TestSpecValidate(t *testing.T) {
 	}
 	if _, err := NewSupervisor(nil, []Spec{good, good}); err == nil {
 		t.Fatal("duplicate names")
+	}
+}
+
+// The environment a start request adds cannot change how the worker's runtime
+// or the dynamic loader loads code, or replace what the shell sets: a page that
+// may start a worker would otherwise run code of its choice in it
+// (NODE_OPTIONS=--import=data:..., LD_PRELOAD) or point it at another SDK
+// endpoint (KRATE_GOHOST_PARENT). Plain variables still pass.
+func TestStartRefusesLoaderAndShellEnv(t *testing.T) {
+	r := &fakeRunner{}
+	sup := newSup(t, r, spec(RestartNever, 0))
+	for _, env := range []map[string]string{
+		{"NODE_OPTIONS": "--import=data:text/javascript,process.exit(7)"},
+		{"node_options": "--require=/tmp/x.js"},
+		{"LD_PRELOAD": "/tmp/x.so"},
+		{"DYLD_INSERT_LIBRARIES": "/tmp/x.dylib"},
+		{"KRATE_GOHOST_PARENT": "unix:/tmp/other.sock"},
+		{"KRATE_APP_DIR": "/tmp"},
+		{"BUN_OPTIONS": "--preload=/tmp/x.ts"},
+		{"DENO_DIR": "/tmp/cache"},
+		{"PATH": "/tmp"},
+		{"A=B": "c"},
+		{"": "c"},
+		{"OK": "nul\x00byte"},
+	} {
+		if _, err := sup.Start(context.Background(), "job", nil, env); err == nil {
+			t.Errorf("started with env %q", env)
+		} else if !strings.Contains(err.Error(), "bad_args") && !strings.Contains(err.Error(), "environment") {
+			t.Errorf("env %q: unexpected error %v", env, err)
+		}
+	}
+	if n := len(r.procs); n != 0 {
+		t.Fatalf("%d processes were started", n)
+	}
+	if _, err := sup.Start(context.Background(), "job", nil, map[string]string{"JOB_MODE": "fast", "NODE_ENV": "test"}); err != nil {
+		t.Fatalf("plain variables: %v", err)
 	}
 }
