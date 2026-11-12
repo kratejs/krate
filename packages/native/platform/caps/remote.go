@@ -1,6 +1,10 @@
 package caps
 
 import (
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -808,13 +812,40 @@ type RemoteContent interface {
 // JSON.
 const MaxRemoteMessage = 1 << 20
 
+// NewRemoteToken returns a random secret for one remote view. The page
+// script of the view signs every message with it, so a message from a frame
+// that never ran the script (an iframe calling the engine's message handler
+// directly) is dropped.
+func NewRemoteToken() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		panic("krate: no randomness: " + err.Error())
+	}
+	return hex.EncodeToString(b[:])
+}
+
 // RemotePageScript is the script installed in the top frame of a remote view
 // whose messages are enabled. send is a JavaScript function expression that
-// hands a string to the host (the engine adds the frame's real origin).
-func RemotePageScript(send string) string {
-	return `(function(){if(window.krateRemote)return;var s=` + send + `;` +
+// hands a string to the host (the engine adds the frame's real origin); the
+// string is the token, a newline and the JSON message.
+func RemotePageScript(send, token string) string {
+	return `(function(){if(window.krateRemote)return;var s=` + send + `;var k=` + jsString(token) + `;` +
 		`Object.defineProperty(window,"krateRemote",{value:Object.freeze({postMessage:function(d){` +
-		`var j=JSON.stringify(d);if(j===undefined)throw new TypeError("not JSON");s(j)}})})})();`
+		`var j=JSON.stringify(d);if(j===undefined)throw new TypeError("not JSON");s(k+"\n"+j)}})})})();`
+}
+
+// ParseRemoteMessage checks a string produced by RemotePageScript and returns
+// its JSON. ok is false for a wrong token, a message that is too large or
+// invalid JSON.
+func ParseRemoteMessage(raw, token string) (data []byte, ok bool) {
+	tok, body, found := strings.Cut(raw, "\n")
+	if !found || subtle.ConstantTimeCompare([]byte(tok), []byte(token)) != 1 {
+		return nil, false
+	}
+	if len(body) > MaxRemoteMessage || !json.Valid([]byte(body)) {
+		return nil, false
+	}
+	return []byte(body), true
 }
 
 // DeliverToRemoteScript builds the script that delivers a JSON message to a

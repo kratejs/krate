@@ -33,8 +33,10 @@ type view struct {
 	find     caps.FindTracker
 	// findConnected says the find controller's signals are connected.
 	findConnected bool
-	minW          int
-	minH          int
+	// rv is set for a view that shows remote content.
+	rv   *remoteView
+	minW int
+	minH int
 }
 
 // paneState is one GtkPaned of the layout tree. Its position is applied from
@@ -167,6 +169,14 @@ func (w *Window) viewByRef(ref caps.ViewRef) *view {
 }
 
 func (v *view) currentRoute() string {
+	if v.rv != nil {
+		if v.widget != 0 && v.w.app.v.getURI != nil {
+			if uri := goString(v.w.app.v.getURI(v.widget)); uri != "" {
+				return uri
+			}
+		}
+		return v.rv.cur
+	}
 	if v.widget != 0 && v.w.app.v.getURI != nil {
 		if uri := goString(v.w.app.v.getURI(v.widget)); len(uri) > len(Origin) && uri[:len(Origin)+1] == Origin+"/" {
 			return uri[len(Origin):]
@@ -176,6 +186,13 @@ func (v *view) currentRoute() string {
 }
 
 func (v *view) load(path string) {
+	if v.rv != nil {
+		// A remote view only loads what its policy allows.
+		if v.widget != 0 && v.rv.policy.Decide(path) == caps.NavAllow {
+			v.w.app.api.wkViewLoadURI(v.widget, path)
+		}
+		return
+	}
 	v.route = cleanPath(path)
 	v.state = caps.ViewState{Route: v.route}
 	if v.widget != 0 {
@@ -222,13 +239,13 @@ var errReleased = errors.New("krate: the window is released; Show it first")
 
 // AddView creates a view on o.Path and splits it into the layout.
 func (w *Window) AddView(o caps.ViewOptions) (ref caps.ViewRef, err error) {
-	if !w.app.callMain(func() { ref, err = w.addView(o) }) {
+	if !w.app.callMain(func() { ref, err = w.addView(o, nil) }) {
 		return 0, errors.New("krate: application is not running")
 	}
 	return
 }
 
-func (w *Window) addView(o caps.ViewOptions) (caps.ViewRef, error) {
+func (w *Window) addView(o caps.ViewOptions, rs *remoteSpec) (caps.ViewRef, error) {
 	a := w.app
 	if !w.alive {
 		return 0, errors.New("krate: the window is closed")
@@ -246,7 +263,16 @@ func (w *Window) addView(o caps.ViewOptions) (caps.ViewRef, error) {
 	if bv := w.viewByRef(beside); bv == nil {
 		return 0, fmt.Errorf("krate: view %d is not in this window", beside)
 	}
-	widget := a.newView()
+	var widget uintptr
+	var part *partition
+	if rs != nil {
+		var err error
+		if part, widget, err = a.newRemoteWidget(rs); err != nil {
+			return 0, err
+		}
+	} else {
+		widget = a.newView()
+	}
 	if widget == 0 {
 		return 0, errors.New("krate: webkit_web_view_new failed")
 	}
@@ -258,16 +284,25 @@ func (w *Window) addView(o caps.ViewOptions) (caps.ViewRef, error) {
 		a.unregisterView(v)
 		return 0, err
 	}
-	a.applyViewSettings(widget)
-	a.connectView(v)
+	if rs != nil {
+		a.setupRemote(v, part, rs)
+	} else {
+		a.applyViewSettings(widget)
+		a.connectView(v)
+	}
 	if v.minW > 0 || v.minH > 0 {
 		a.api.gtkWidgetSetSizeReq(widget, int32(v.minW), int32(v.minH))
 	}
 	w.extra = append(w.extra, v)
 	w.layout = next
 	w.applyLayout()
-	v.load(o.Path)
-	a.emitView(v, caps.ViewAdded, v.route)
+	if rs != nil {
+		v.loadRemote()
+		a.emitView(v, caps.ViewAdded, rs.policy.Start)
+	} else {
+		v.load(o.Path)
+		a.emitView(v, caps.ViewAdded, v.route)
+	}
 	return v.ref, nil
 }
 

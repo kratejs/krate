@@ -231,7 +231,22 @@ func TestScripts(t *testing.T) {
 	if strings.Contains(s, "</script>") || !strings.Contains(s, "location.origin!==t") {
 		t.Fatal(s)
 	}
-	if !strings.Contains(RemotePageScript("function(j){}"), "krateRemote") {
+	if !strings.Contains(RemotePageScript("function(j){}", "tok"), "krateRemote") {
 		t.Fatal("bridge script")
+	}
+}
+
+func TestParseRemoteMessage(t *testing.T) {
+	tok := NewRemoteToken()
+	if len(tok) != 32 || tok == NewRemoteToken() {
+		t.Fatal("token")
+	}
+	if d, ok := ParseRemoteMessage(tok+"\n"+`{"a":1}`, tok); !ok || string(d) != `{"a":1}` {
+		t.Fatal("valid message refused")
+	}
+	for _, bad := range []string{`{"a":1}`, "wrong\n{}", tok + "\n{", tok + "\n" + strings.Repeat("1", MaxRemoteMessage+1), ""} {
+		if _, ok := ParseRemoteMessage(bad, tok); ok {
+			t.Errorf("accepted %.20q", bad)
+		}
 	}
 }
