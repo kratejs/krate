@@ -1837,6 +1837,26 @@
       ]
     },
     {
+      "id": "native-migration",
+      "area": "Native: migration guides and the worked Electron port",
+      "native": {
+        "linux": "supported",
+        "macos": "untested",
+        "windows": "untested"
+      },
+      "target": "Krate Native v1",
+      "summary": "Migration guides from Electron and from Tauri v2 map concepts, APIs, security, packaging, updates, testing and debugging to Krate Native. examples/native-from-electron is a small Electron app (electron/, pinned, not run by CI) and its port: host functions and a host signal for ipcMain and webContents.send, an application menu, a tray, dialogs, scoped file reads and writes, a notification, a kv settings store and a second window. krate native test drives the port through the real shell.",
+      "tests": [
+        "TestNativeFromElectronGUI",
+        "fixture:examples/native-from-electron/tests/port.native.test.ts"
+      ],
+      "knownLimits": [
+        "The Electron original is a reference and is not built or run in CI.",
+        "Native dialogs and notification banners cannot be clicked headlessly: the test calls the code behind the dialogs and accepts 'sent' or 'unsupported' for the notification and tray (Linux without a notification service or tray host answers unsupported).",
+        "The macOS and Windows runs happen only in the CI native job."
+      ]
+    },
+    {
       "id": "native-plugins",
       "area": "Native: plugins",
       "native": {

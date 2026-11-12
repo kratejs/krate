@@ -74,6 +74,12 @@ prerendered at build time.
 - [Testing your app](/docs/native/testing/) - `krate native test` and the
   `@krate/app/driver` module: drive pages, host calls and native events from
   Node tests, headless in CI.
+- [Migrating from Electron](/docs/native/from-electron/) - concepts, a full API
+  mapping, a worked port (`examples/native-from-electron`), security, packaging,
+  testing and what is different.
+- [Migrating from Tauri](/docs/native/from-tauri/) - commands, events,
+  capabilities, plugins, `tauri.conf.json`, sidecars, the updater and bundler
+  targets.
 
 ## Quick start
 
