@@ -74,6 +74,7 @@ type AuthTwoFactor struct {
 
 type AuthPasskeys struct {
 	Enabled          bool     `json:"enabled,omitempty"`
+	AllowSignUp      *bool    `json:"allowSignUp,omitempty"`
 	RPName           string   `json:"rpName,omitempty"`
 	RPID             string   `json:"rpId,omitempty"`
 	Origins          []string `json:"origins,omitempty"`

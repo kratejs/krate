@@ -2,6 +2,7 @@ import { AuthError, createContext, type RequestContext, type ResolvedConfig } fr
 import { ResponseCookies } from "./cookies.js";
 import { createCsrfToken, verifyCsrfCookie } from "./crypto.js";
 import { finishEmail, startEmail } from "./email-flow.js";
+import { handlePasskey } from "./passkeys.js";
 import { handleTwoFactor } from "./twofactor.js";
 import { finishOAuth, startOAuth } from "./oauth-flow.js";
 import { errorPage, signInPage, signOutPage, providerSummary, verifyRequestPage, twoFactorPage } from "./pages.js";
@@ -30,7 +31,7 @@ function actionSegments(ctx: RequestContext): string[] | null {
 
 function failure(ctx: RequestContext | null, request: Request, err: unknown): Response {
   if (err instanceof AuthError) {
-    if (!ctx || isJsonClient(request) || request.method === "GET" && err.status >= 500) {
+    if (!ctx || isJsonClient(request) || (request.method === "GET" && (err.status >= 500 || err.status === 401))) {
       return jsonResponse({ error: err.code, message: err.message }, { status: err.status });
     }
     return errorRedirect(ctx, err.code);
@@ -120,6 +121,8 @@ async function route(ctx: RequestContext, segments: string[]): Promise<Response 
       if (provider.type === "oauth" || provider.type === "oidc") return finishOAuth(ctx, provider as OAuthConfig);
       return errorRedirect(ctx, "Configuration");
     }
+    case "passkey":
+      return handlePasskey(ctx, segments);
     case "signout": {
       if (method === "GET") {
         const jar = new ResponseCookies();

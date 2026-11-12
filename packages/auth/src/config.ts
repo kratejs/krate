@@ -147,9 +147,9 @@ export function resolveConfig(options: AuthOptions = {}, declarative: Declarativ
     },
     passkeys: {
       ...pk,
-      enabled: pk.enabled ?? false,
+      enabled: pk.enabled ?? providers.some((p) => p.type === "passkey"),
       userVerification: pk.userVerification ?? "preferred",
-      residentKey: pk.residentKey ?? "preferred",
+      residentKey: pk.residentKey ?? "required",
       attestation: pk.attestation ?? "none",
       timeout: pk.timeout ?? 60000,
     },

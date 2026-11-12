@@ -550,6 +550,7 @@ export interface AuthTwoFactorConfig {
 
 export interface AuthPasskeysConfig {
   enabled?: boolean;
+  allowSignUp?: boolean;
   rpName?: string;
   rpId?: string;
   origins?: string[];
