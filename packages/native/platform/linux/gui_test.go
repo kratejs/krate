@@ -32,6 +32,7 @@ func TestMain(m *testing.M) {
 		os.Exit(m.Run())
 	}
 	guiStart = time.Now()
+	os.Setenv("KRATE_NATIVE_MOCK_CAPTURE", "1")
 	guiSrv = newTestServer()
 	app, err := New(Options{AppID: "dev.krate.guitest", Handler: guiSrv.mux, Debug: true, Memory: guiMemory()})
 	if err != nil {
@@ -183,6 +184,7 @@ func newTestServer() *testServer {
 	})
 	registerMemHandlers(s)
 	registerViewHandlers(s)
+	registerPermHandlers(s)
 	s.mux.HandleFunc("/report", func(w http.ResponseWriter, r *http.Request) {
 		var rep map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&rep); err != nil {

@@ -72,6 +72,10 @@
       "types": "./dist/clipboard.d.ts",
       "default": "./dist/clipboard.js"
     },
+    "./media": {
+      "types": "./dist/media.d.ts",
+      "default": "./dist/media.js"
+    },
     "./notify": {
       "types": "./dist/notify.d.ts",
       "default": "./dist/notify.js"

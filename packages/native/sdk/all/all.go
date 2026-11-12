@@ -20,10 +20,23 @@ type Options struct {
 	Permissions []string
 	// Strict makes an empty Permissions list mean "nothing".
 	Strict bool
+	// Media is native.media from app.json; the zero value prompts for
+	// everything and remembers the answers.
+	Media MediaOptions
 	// UpdaterURL and UpdaterPublicKey are native.updater from app.json; both
 	// empty leaves the updater ids answering "unsupported".
 	UpdaterURL       string
 	UpdaterPublicKey string
+}
+
+// MediaOptions are native.media from app.json.
+type MediaOptions struct {
+	// Policy maps a permission kind ("camera", "microphone", "screen",
+	// "location", "notifications", "clipboardRead") to "prompt", "allow" or
+	// "deny". A missing kind prompts.
+	Policy map[string]string
+	// NoRemember stops the native prompt from remembering the answers.
+	NoRemember bool
 }
 
 // Register configures the SDK for the app and registers every UI id on r.
@@ -44,6 +57,9 @@ func Register(r *scheme.Registry, o Options) (permission.Set, error) {
 	if err := sdkos.Configure(sdkos.App{ID: o.AppID, Name: o.Name, Version: o.Version}); err != nil {
 		return permission.Set{}, err
 	}
+	if configureMedia != nil {
+		configureMedia(o)
+	}
 	if configureUpdater != nil {
 		configureUpdater(o)
 	}
@@ -63,6 +79,11 @@ func RegisterUI(r *scheme.Registry, h *sdk.Host, set permission.Set, override fu
 	}
 	h.SetWindowScope(set.ScopeChild)
 	h.SetWindowUnscope(set.Unscope)
+	if override != nil {
+		h.SetPermissionCheck(func(_, p string) bool { return override(p) })
+	} else {
+		h.SetPermissionCheck(set.AllowsFor)
+	}
 	h.RegisterUIFor(r, allowed, permission.Denied)
 }
 
@@ -83,3 +104,7 @@ var dataAreas []func(*scheme.Registry, permission.Set)
 // configureUpdater is set by area_updater.go; nil when the updater area is
 // built out (build tag krate_no_updater).
 var configureUpdater func(Options)
+
+// configureMedia is set by area_media.go; nil when the media area is built
+// out (build tag krate_no_media).
+var configureMedia func(Options)

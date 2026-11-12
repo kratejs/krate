@@ -87,6 +87,8 @@ type App struct {
 	byWidget    map[uintptr]*view
 	nextView    uint64
 	viewHandler func(caps.ViewEvent)
+	permHandler caps.PermissionHandler
+	perm        *permAPI
 	// panes maps a GtkPaned id to its state (main thread only).
 	panes       map[uintptr]*paneState
 	nextPaned   uintptr
@@ -110,7 +112,7 @@ var (
 	theApp *App
 
 	cbIdle, cbScheme, cbPolicy, cbLoad, cbDestroy, cbClose, cbHeader uintptr
-	cbDelete, cbWinState, cbEvalDone, cbPaneAlloc                    uintptr
+	cbDelete, cbWinState, cbEvalDone, cbPaneAlloc, cbPermission      uintptr
 	curHeader                                                        http.Header
 )
 
@@ -152,8 +154,10 @@ func New(opts Options) (*App, error) {
 	cbWinState = purego.NewCallback(winStateCallback)
 	cbEvalDone = purego.NewCallback(evalDoneCallback)
 	cbPaneAlloc = purego.NewCallback(allocateCallback)
+	cbPermission = purego.NewCallback(permissionCallback)
 	app.x = loadExt()
 	app.v = loadView()
+	app.perm = loadPermAPI()
 	app.initExt()
 
 	app.mem = loadMemAPI()

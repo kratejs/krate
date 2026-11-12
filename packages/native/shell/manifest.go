@@ -13,6 +13,7 @@ import (
 
 	"github.com/kratejs/krate/packages/native/internal/memory"
 	"github.com/kratejs/krate/packages/native/plugin"
+	"github.com/kratejs/krate/packages/native/sdk/media"
 	"github.com/kratejs/krate/packages/native/sdk/permission"
 )
 
@@ -66,7 +67,20 @@ type Manifest struct {
 	// (an older app.json, not scanned) keeps every feature on.
 	Features *Features `json:"features,omitempty"`
 
+	// Media is native.media: the policy for the page's camera, microphone,
+	// screen capture and location requests. See sdk/media.
+	Media *MediaSpec `json:"media,omitempty"`
+
 	Debug bool `json:"debug"`
+}
+
+// MediaSpec is the media block of app.json.
+type MediaSpec struct {
+	// Policy maps a kind (camera, microphone, screen, location,
+	// notifications, clipboardRead) to prompt, allow or deny.
+	Policy map[string]string `json:"policy,omitempty"`
+	// NoRemember stops the native prompt from remembering answers.
+	NoRemember bool `json:"noRemember,omitempty"`
 }
 
 // Features are the optional webview features an app uses.
@@ -247,6 +261,16 @@ func (m *Manifest) normalize() error {
 		for _, n := range *wp {
 			if !set.Allows(n) {
 				return fmt.Errorf("window.permissions: %q is not in the app's permissions", n)
+			}
+		}
+	}
+	if m.Media != nil {
+		for k, p := range m.Media.Policy {
+			if !media.ValidKind(k) {
+				return fmt.Errorf("media.policy has unknown kind %q", k)
+			}
+			if !media.ValidPolicy(p) {
+				return fmt.Errorf("media.policy.%s must be prompt, allow or deny, got %q", k, p)
 			}
 		}
 	}

@@ -29,6 +29,9 @@
 //	clipboard:read      no             read the clipboard
 //	tray                no             system tray icon
 //	shortcut            no             global keyboard shortcuts
+//	media               no             camera, microphone and screen capture for the page
+//	media:manage        no             media policy, request handlers, screen and window list; implies media
+//	location            no             geolocation for the page
 //	updater             no             check for, download, apply updates and relaunch
 //
 // The compiler keeps a copy of the names in names.json (a test here keeps the
@@ -112,6 +115,9 @@ func init() {
 		{Name: "clipboard:read", Doc: "read the system clipboard (sees what the user copied elsewhere)"},
 		{Name: "tray", Doc: "show a system tray icon"},
 		{Name: "shortcut", Doc: "register global keyboard shortcuts"},
+		{Name: "media", Doc: "the page may use the camera, microphone and screen capture (subject to the policy, the prompt and the operating system's consent), and read the media state"},
+		{Name: "media:manage", Doc: "change the camera, microphone and screen capture policy, answer the page's permission requests, list screens and windows", Implies: []string{"media"}},
+		{Name: "location", Doc: "the page may read the device location (subject to the policy, the prompt and the operating system's consent)"},
 		{Name: "updater", Doc: "check for, download and apply app updates, and relaunch"},
 	} {
 		Define(i)
