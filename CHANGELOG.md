@@ -273,6 +273,9 @@ host code runs in the native process. Names and options may change before releas
 
 ### Fixed
 
+- Two client navigations in quick succession no longer leave an unhandled "Transition was skipped"
+  rejection on the page: the router also handles the `ready` promise of a view transition the
+  newer navigation skipped.
 - Module constants are declared in the order their initializers need: the name after a dot
   (`getClient().signal`) no longer counts as a read of a constant called `signal`. That false
   dependency put `const signal = hostSignal.signal` from `@krate/app` before `hostSignal`, so

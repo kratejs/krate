@@ -1101,6 +1101,10 @@ function runMutation(mutate: () => void): Promise<void> {
   try {
     const vt = (document as any).startViewTransition(once);
     if (vt && vt.finished && typeof vt.finished.catch === 'function') vt.finished.catch(() => {});
+    // A newer navigation skips this transition; ready then rejects with
+    // "Transition was skipped", which would otherwise surface as an unhandled
+    // rejection on the page.
+    if (vt && vt.ready && typeof vt.ready.catch === 'function') vt.ready.catch(() => {});
     const done: Promise<unknown> | undefined = vt && vt.updateCallbackDone;
     if (done && typeof done.then === 'function') {
       return done.then(
