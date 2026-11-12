@@ -66,6 +66,13 @@ same `permissions` list as the data modules (a missing permission rejects with
 `permission_denied`; `tray`, `shortcut` and `clipboard:read` are off unless
 listed); see the SDK pages in the Native docs.
 
+`@krate/app/page` (print, `printToPdf`, `find`, `zoom`, `setZoom`, `capture`),
+`/downloads` (`configure`, `list`, `cancel`, `onEvent`, `onDone`) and `/cookies`
+(`list`, `get`, `set`, `delete`, `clearSiteData`) control the web contents of a view, the
+downloads the page starts and the cookies; they need the `page`, `downloads` and
+`cookies` permissions (off unless listed or derived). See [Web
+contents](https://krate.js.org/docs/native/webcontents/).
+
 `@krate/app/window` also splits a window into several webviews: `main().addView({ path,
 side, size, minWidth, permissions })` returns a `View` (`remove`, `focus`, `navigate`,
 `post`), `window.setLayout(split(...))` and `window.layout()` set and read the pane

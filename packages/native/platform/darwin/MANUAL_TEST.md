@@ -138,3 +138,17 @@ macOS does not have, and the app starts either way.
 | Hotkey never fires | The key code table is for an ANSI layout; macOS 15 ignores Option/Shift-only combinations; the handler runs on the main loop, so a blocked main thread delays it. |
 | Notification call hangs about two minutes | The permission prompt was never answered (`notifyAuthTimeout`); answer it. |
 | Crash only on Intel | Struct-by-value argument passing for NSRect (32 bytes, passed in memory on amd64). |
+
+## Print dialog
+
+`TestGUIPagePrintDialog` opens the system print dialog, which nothing in a test can
+close, so it only runs on request:
+
+```sh
+KRATE_NATIVE_GUI=1 KRATE_NATIVE_PRINT_DIALOG=1 go test ./platform/darwin -run TestGUIPagePrintDialog -v
+```
+
+Check that the macOS print dialog appears for the window and that cancelling it
+leaves the app running. The PDF output, zoom, find, capture, downloads and cookies
+are covered by the other `TestGUIPage*` tests.
+

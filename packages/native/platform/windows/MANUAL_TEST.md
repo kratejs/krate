@@ -152,3 +152,17 @@ calls `AddView`:
   fetch wrapper (`streamShim` in `msgstream.go`) was not injected or the web
   message channel failed; look for `add_WebMessageReceived` lines on stderr.
   Any other response that never ends is held back by WebView2 until it does.
+
+## Print dialog
+
+`TestGUIPagePrintDialog` opens the system print dialog, which nothing in a test can
+close, so it only runs on request:
+
+```sh
+KRATE_NATIVE_GUI=1 KRATE_NATIVE_PRINT_DIALOG=1 go test ./platform/windows -run TestGUIPagePrintDialog -v
+```
+
+Check that the Windows print dialog appears for the window and that cancelling it
+leaves the app running. The PDF output, zoom, find, capture, downloads and cookies
+are covered by the other `TestGUIPage*` tests.
+

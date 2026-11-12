@@ -70,11 +70,11 @@ export function set(cookie: CookieInput, url = ""): Promise<void> {
   ]);
 }
 
-/** remove deletes the cookies with this name. */
-function remove(name: string, url = ""): Promise<void> {
+/** delete removes the cookies with this name. */
+function deleteCookie(name: string, url = ""): Promise<void> {
   return call("krate/cookies.delete", [name, url]);
 }
-export { remove as delete };
+export { deleteCookie as delete };
 
 /** clearSiteData removes cookies, cache and storage; with no options, all of it. */
 export function clearSiteData(options: ClearOptions = {}): Promise<void> {

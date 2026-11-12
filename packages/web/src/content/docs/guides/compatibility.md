@@ -82,6 +82,9 @@ green run there is what moves a cell.
 | Native: SDK windows | Partial | Untested | Untested | Krate Native v1 |
 | Native: requests are bound to the webview they came from | Supported | Untested | Untested | Krate Native v1 |
 | Native: views and split panes | Supported | Supported | Supported | Krate Native v1 |
+| Native: print, PDF, find, zoom and capture of a view | Supported | Untested | Untested | Krate Native v1 |
+| Native: downloads started by the page | Supported | Untested | Untested | Krate Native v1 |
+| Native: cookies and site data | Supported | Untested | Untested | Krate Native v1 |
 | Native: shared web process, release and background mode | Supported | Untested | Untested | Krate Native v1 |
 | Native: lean pages and the dev Memory panel | Supported | Untested | Untested | Krate Native v1 |
 | Native: SDK dialogs, clipboard and menus | Supported | Untested | Untested | Krate Native v1 |
@@ -598,6 +601,51 @@ Known limits:
 - Messages are JSON up to 1 MiB, not queued for a page that has not loaded, and carry the sender's view id only when the sender is a page.
 
 Evidence: `TestNativeE2EViewsGUI`, `TestArrangeTwoPanes`, `TestArrangeNestedCoversBounds`, `TestSplitSizesMinimums`, `TestMinSizePropagates`, `TestHitDividerAndDrag`, `TestValidate`, `TestSplitLeafAndRemove`, `TestRatiosAndMins`, `TestSplitterHitAndCursor`, `TestSplitterDrag`, `TestSplitterDPIScales`, `TestViewOps`, `TestViewEventsAreHeldUntilRegistered`, `TestGUIViewsTwoPane`, `TestGUIViewsNestedThreePane`, `TestGUIViewsReleaseRestore`, `TestGUIViewClosedByItsPage`, `TestGUIViewsMemory`, `TestViewMessagingEventsAndLayout`, `TestGUIViews`, `fixture:examples/native-views/src/pages/index.tsx`
+
+### Native: print, PDF, find, zoom and capture of a view
+
+**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+
+Per view (a window's primary view or any added view): the system print dialog, PDF output with page size, margins, orientation and backgrounds, find in page with match counts and stepping, a zoom factor with the Ctrl or Cmd plus, minus and 0 keys kept working, and a PNG capture of the view. WebKitGTK uses GtkPrintOperation, WebKitFindController, the zoom level and webkit_web_view_get_snapshot; WKWebView printOperationWithPrintInfo, findString:withConfiguration:, pageZoom and takeSnapshot; WebView2 ShowPrintUI, PrintToPdf, put_ZoomFactor and CapturePreview.
+
+Known limits:
+
+- The print dialog test on Linux closes the GTK dialog programmatically; macOS and Windows open it only with KRATE_NATIVE_PRINT_DIALOG=1 because a test cannot close a system dialog.
+- The PDF page size and orientation are asserted on Linux only. macOS and Windows tests check for a PDF.
+- WebKitGTK reports the match count but not the highlighted index (Krate follows it as you step); WKWebView reports only found or not, and WebView2 has no find interface in the WebView2.h Krate builds against, so macOS counts in the visible text and Windows runs window.find and counts the same way.
+- WebView2 PrintToPdf takes portrait paper dimensions with an orientation, as GTK does; that reading of the settings is untested on Windows.
+- macOS and Windows: untested. The code is written against the platform APIs, builds for both, and the same GUI tests run in CI on macos-latest and windows-latest.
+
+Evidence: `TestGUIPageZoom`, `TestGUIPageFind`, `TestGUIPageCapture`, `TestGUIPagePrintPDF`, `TestGUIPagePrintDialog`, `TestNativeE2EPageGUI`, `TestPageZoomPerView`, `TestPagePrintFindCapture`, `TestPageNeedsPermission`, `TestPDFOptionsResolve`, `TestZoomSteps`, `TestEncodePNGFromBGRA`, `TestFindTracker`, `TestFindScripts`, `fixture:examples/native-page/src/pages/index.tsx`
+
+### Native: downloads started by the page
+
+**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+
+Downloads from a link with the download attribute, a blob URL or an attachment response get a destination (the native save dialog by default, or a configured folder with free file names), report started, progress, completed, cancelled and failed events with the final path, and can be cancelled. WebKitGTK uses the download signals, WKWebView WKDownload and WebView2 DownloadStarting. WebKit cannot download the app's custom scheme, so those downloads are fetched from the app handler by the shell and report the same events.
+
+Known limits:
+
+- A download of a page of the app origin is requested once more than the page made it, and the file name comes from the link's download attribute only when the link is in the DOM at the time.
+- Downloads need the downloads area to be linked (the app imports @krate/app/downloads); otherwise the engine's default applies, and downloads of the app's own scheme do nothing.
+- Windows hands the app origin to WebView2's own download path, which has not been run.
+- macOS and Windows: untested. The same GUI tests run in CI on macos-latest and windows-latest.
+
+Evidence: `TestGUIPageDownloadCompletes`, `TestGUIPageDownloadDeclined`, `TestGUIPageDownloadCancel`, `TestGUIPageDownloadAttachmentAndBlob`, `TestGUIPageDownloads`, `TestSchemeDownloadCompletes`, `TestSchemeDownloadNames`, `TestSchemeDownloadFailures`, `TestSchemeDownloadCancel`, `TestUniqueName`, `TestSafeFileName`, `TestDownloadsPolicy`, `TestDownloadsEventsListCancel`, `TestNativeE2EPageGUI`
+
+### Native: cookies and site data
+
+**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+
+List, get, set and delete cookies by URL, and clear cookies, the cache and storage. WebKitGTK uses WebKitCookieManager and WebKitWebsiteDataManager (cookies persist in the app data directory), WKWebView WKHTTPCookieStore and WKWebsiteDataStore, WebView2 ICoreWebView2CookieManager and ClearBrowsingData.
+
+Known limits:
+
+- WebKit keeps no cookies for the app's custom scheme (document.cookie is inert on krate://app and the jar refuses a single-label host such as app), so on Linux and macOS cookie calls for the app origin answer unsupported; pass the URL of an http(s) site. On Windows the app origin is https://app.localhost and has cookies.
+- An older WebView2 runtime without ICoreWebView2Profile2 can only clear cookies.
+- macOS and Windows: untested. The same GUI tests run in CI on macos-latest and windows-latest.
+
+Evidence: `TestGUIPageCookies`, `TestCookies`, `TestCookieDomainMatches`, `TestCookieOrigin`, `TestNativeE2EPageGUI`
 
 ### Native: shared web process, release and background mode
 

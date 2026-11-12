@@ -44,6 +44,8 @@ prerendered at build time.
   clipboard, menus, tray, shortcuts and notifications.
 - [Views and split panes](/docs/native/views/) - several webviews in one window,
   draggable dividers, per-view scopes and view-to-view messages.
+- [Web contents](/docs/native/webcontents/) - print and PDF, find in page, zoom,
+  capturing a view, downloads and cookies.
 - [Release builds](/docs/native/release/) - one executable per platform, SDK
   shaking, derived permissions, per-window scopes and profile-guided builds.
 - [Native plugins](/docs/native/plugins/) - reusable native capabilities as a Go

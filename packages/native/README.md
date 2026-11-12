@@ -82,6 +82,17 @@ layout. Every request on the app scheme carries the webview it came from
 (`caps.ViewOf`), which the shell maps to a window or view scope; the page's
 `x-krate-window` header is ignored in a native window.
 
+## Web contents
+
+Per view: `platform/caps` `PageControls` (print dialog, PDF, find, zoom, capture),
+`PageEvents` (find results), `Downloads` and `SiteData` (cookies, cache, storage),
+SDK areas `sdk/page`, `sdk/downloads` and `sdk/cookies` with the `page`, `downloads`
+and `cookies` permissions, and the `web contents` page of the docs. WebKit cannot
+download a URL of the app's custom scheme, so `caps.SchemeDownloader` fetches those
+from the app handler; `caps.FindTracker` follows the highlighted match for engines
+that only count. Linux (WebKitGTK) has real GUI tests; the macOS and Windows packages
+have the same tests (`gui_page_test.go`) and run them in CI.
+
 ## Plugins
 
 A plugin is a Go package plus a `krate-plugin.json`; `krate native dev` and

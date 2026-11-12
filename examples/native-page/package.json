@@ -1,0 +1,11 @@
+{
+  "name": "krate-native-page",
+  "private": true,
+  "type": "module",
+  "description": "Krate Native example: print to PDF, find in page, zoom, capture, downloads and cookies from the page, with a flow the end-to-end test checks.",
+  "dependencies": {
+    "@krate/app": "workspace:*",
+    "@krate/core": "workspace:*",
+    "@krate/runtime": "workspace:*"
+  }
+}
