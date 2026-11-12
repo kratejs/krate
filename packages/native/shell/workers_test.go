@@ -298,12 +298,7 @@ func TestParseManifestWorkers(t *testing.T) {
 
 const goWorkerSrc = `package main
 
-import (
-	"fmt"
-	"io"
-	"sync"
-	"github.com/kratejs/krate/packages/native/sdk/worker"
-)
+import "github.com/kratejs/krate/packages/native/sdk/worker"
 
 func main() {
 	worker.Serve(func(m worker.Message) {

@@ -146,6 +146,9 @@ type contextState struct {
 	handler func(caps.ContextMenuInfo)
 	learn   uintptr                  // the engine's "learn spelling" item of the last menu, ref'd
 	lastVis map[uintptr]caps.ViewRef // window id -> view of its last context menu
+	// handles are the menu targets of the extension items of the last menu,
+	// dropped when the next menu is built so they do not pile up.
+	handles []uintptr
 	// Seen by tests: how many menus the policy suppressed, and the titles of
 	// the last engine menu after extension.
 	suppressed int
@@ -222,6 +225,8 @@ func contextMenuCallback(view, menu, event, hit, ref uintptr) uintptr {
 		return 0
 	}
 	st := a.ctxSt()
+	a.dropHandles(st.handles)
+	st.handles = st.handles[:0]
 	st.lastVis[v.w.id] = v.ref
 	p := st.policy(v)
 	switch p.Mode {
@@ -414,6 +419,8 @@ func (a *App) actionItem(it caps.MenuItem, win caps.WindowRef) uintptr {
 	h := menuNext
 	menuTargets[h] = &menuTarget{id: it.ID, win: win, isCtrl: check, checked: it.Checked}
 	menuMu.Unlock()
+	st := a.ctxSt()
+	st.handles = append(st.handles, h)
 	c.signalConnect(action, "activate", cbCtxAction, h, 0, 0)
 	return c.itemFromGAction(action, plainLabel(it.Label), 0)
 }

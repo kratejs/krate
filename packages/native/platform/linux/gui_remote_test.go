@@ -364,8 +364,15 @@ func TestGUIRemoteRedirectOffOrigin(t *testing.T) {
 	}
 }
 
+// partitionPass counts the runs of TestGUIRemotePartitions in this process.
+var partitionPass int
+
 func TestGUIRemotePartitions(t *testing.T) {
 	needGUI(t)
+	// In-memory partitions live as long as the app, so each pass of a
+	// repeated run (-count) uses partition names of its own.
+	partitionPass++
+	pa := fmt.Sprintf("pa%d", partitionPass)
 	site, _ := remoteSite(t, "A")
 	ev := collectRemote(t)
 	set := `document.cookie = "mine=1; path=/"; localStorage.setItem("k", "v"); document.cookie + "|" + localStorage.getItem("k")`
@@ -373,11 +380,11 @@ func TestGUIRemotePartitions(t *testing.T) {
 	open := func(part string) (*Window, caps.ViewRef) {
 		return openRemote(t, ev, caps.RemoteOptions{URL: site.URL + "/", Partition: part})
 	}
-	wa, ra := open("persist:pa")
+	wa, ra := open("persist:" + pa)
 	if got := evalIn(t, wa, ra, set); got != "mine=1|v" {
 		t.Fatalf("set: %q", got)
 	}
-	wb, rb := open("persist:pb")
+	wb, rb := open(fmt.Sprintf("persist:pb%d", partitionPass))
 	if got := evalIn(t, wb, rb, read); got != "|null" {
 		t.Fatalf("partition B sees A's data: %q", got)
 	}
@@ -386,7 +393,7 @@ func TestGUIRemotePartitions(t *testing.T) {
 		t.Fatalf("the default partition sees A's data: %q", got)
 	}
 	// The same partition shares.
-	wa2, ra2 := open("persist:pa")
+	wa2, ra2 := open("persist:" + pa)
 	if got := evalIn(t, wa2, ra2, read); got != "mine=1|v" {
 		t.Fatalf("partition A does not share with itself: %q", got)
 	}
@@ -402,21 +409,21 @@ func TestGUIRemotePartitions(t *testing.T) {
 	app := memWindow(t, "/pane?part")
 	defer app.Close()
 	// In-memory partitions are separate from the persistent one of the same name.
-	wm, rm := open("pa")
+	wm, rm := open(pa)
 	if got := evalIn(t, wm, rm, read); got != "|null" {
 		t.Fatalf("memory partition sees the persistent one: %q", got)
 	}
 	evalIn(t, wm, rm, set)
-	wm2, rm2 := open("pa")
+	wm2, rm2 := open(pa)
 	if got := evalIn(t, wm2, rm2, read); got != "mine=1|v" {
 		t.Fatalf("memory partition lost its data between windows: %q", got)
 	}
 	// Persistent partitions have a directory of their own; in-memory ones live
 	// in a per-process temporary directory and keep no cookie file.
-	if _, err := os.Stat(filepath.Join(guiApp.dataDir, "remote-pa")); err != nil {
+	if _, err := os.Stat(filepath.Join(guiApp.dataDir, "remote-"+pa)); err != nil {
 		t.Errorf("no directory for the persistent partition: %v", err)
 	}
-	memDir := filepath.Join(guiApp.dataDir, memPartitionsDir, fmt.Sprintf("%d-pa", os.Getpid()))
+	memDir := filepath.Join(guiApp.dataDir, memPartitionsDir, fmt.Sprintf("%d-%s", os.Getpid(), pa))
 	if _, err := os.Stat(memDir); err != nil {
 		t.Errorf("no temporary directory for the memory partition: %v", err)
 	}
@@ -424,7 +431,7 @@ func TestGUIRemotePartitions(t *testing.T) {
 		t.Error("a memory partition keeps a cookie file")
 	}
 	// Clearing one partition leaves the others.
-	if err := guiApp.ClearPartition("persist:pa", caps.ClearSiteDataOptions{}); err != nil {
+	if err := guiApp.ClearPartition("persist:"+pa, caps.ClearSiteDataOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	evalIn(t, wa2, ra2, "location.reload()")
