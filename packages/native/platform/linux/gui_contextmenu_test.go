@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"reflect"
 	"strings"
 	"sync"
@@ -68,6 +69,7 @@ func viewOrigin(w *Window) (x, y int) {
 // fakeClick presses mouse button b at screen x, y through XTEST.
 func fakeClick(t *testing.T, button uint32, sx, sy int) {
 	t.Helper()
+	skipOnWayland(t, "XTEST input does not reach Wayland windows")
 	xt, err := purego.Dlopen("libXtst.so.6", rtldNow|rtldGlobal)
 	if err != nil {
 		t.Skip("libXtst.so.6 is not available: ", err)
@@ -373,5 +375,15 @@ func TestGUIContextHitScript(t *testing.T) {
 	}
 	if i := run(300, 280); i.Has("link") || i.Has("image") || i.Has("editable") {
 		t.Fatalf("blank page: %+v", i)
+	}
+}
+
+// skipOnWayland skips a test that needs X11: input injected through XTEST and
+// window placement only work there (the CI also runs this package under
+// weston with GDK_BACKEND=wayland).
+func skipOnWayland(t *testing.T, why string) {
+	t.Helper()
+	if os.Getenv("GDK_BACKEND") == "wayland" || (os.Getenv("WAYLAND_DISPLAY") != "" && os.Getenv("DISPLAY") == "") {
+		t.Skip("Wayland: " + why)
 	}
 }

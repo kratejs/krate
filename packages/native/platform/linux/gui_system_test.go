@@ -4,6 +4,7 @@ package linux
 
 import (
 	"fmt"
+	"os"
 	"syscall"
 	"testing"
 	"time"
@@ -42,7 +43,11 @@ func TestGUIDisplays(t *testing.T) {
 	if !ok || d.ID == "" {
 		t.Errorf("window %+v is on no display of %+v", st, ds)
 	}
-	// Centering uses the work area.
+	// Centering uses the work area. A Wayland client cannot place its windows
+	// (SetPosition is ignored there), so the move is only checked on X11.
+	if os.Getenv("GDK_BACKEND") == "wayland" {
+		return
+	}
 	x, y := caps.CenterIn(d, st.Width, st.Height)
 	// A move that reaches the window manager before it has finished placing
 	// the new frame is overridden by that placement, so ask again until the
