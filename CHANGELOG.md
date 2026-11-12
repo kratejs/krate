@@ -385,6 +385,30 @@ host code runs in the native process. Names and options may change before releas
   no longer moves `latest`.
 - Compatibility matrix rows backed by CI tests read "Supported" instead of "Beta".
 
+### Security
+
+- Krate Native: a page could take over a permission scope by naming one of its views after the
+  window id `window.open` would hand out next. The window then shared the id, and closing it removed
+  the scope of that id, leaving the view with every permission of the app. Window ids now skip ids
+  that views hold, and an id is claimed atomically when it is chosen, so two concurrent `addView`
+  calls with one id can no longer make the losing call drop the winner's scope. See
+  `packages/native/SECURITY_REVIEW.md`.
+- Krate Native: a stream started from one view (window events, remote requests, media requests,
+  port messages, ...) could be opened by any other view, since stream ids are a counter; a view with
+  an empty scope could read what the producer emitted with the starter's permissions. A stream is now
+  bound to the native view that started it. Plugin signal gates now check the native view instead of
+  the `x-krate-window` header the page sets.
+- Krate Native: `startWorker(name, { env })` no longer accepts variables that change how a runtime or
+  the dynamic loader loads code (`NODE_OPTIONS`, `LD_PRELOAD`, `DYLD_*`, `BUN_*`, `DENO_*`, `PATH`,
+  ...) or the shell's own `KRATE_*`: a page with the `worker` permission could run arbitrary code with
+  `NODE_OPTIONS=--import=data:...`.
+- Krate Native: the prebuilt-shell distributable (`<productName>` with `app/` next to it) refuses
+  `--dev` (unless built with `native.debug`) and another app directory on its command line, which let
+  anyone who could start it run their own code or drive its pages under the app's signature,
+  keychain items and camera or microphone consent.
+- Krate Native: the single-instance socket falls back to a private `~/.krate-run` directory before the
+  shared temporary directory when the runtime directory path is too long.
+
 ### Known issues
 
 - Under Preact, an uncontrolled Radix Tooltip closes right after it opens, and a Dialog opened
