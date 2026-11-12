@@ -27,6 +27,19 @@ func packageWindows(o *Options, ic *Icon, want map[string]bool, stage string, re
 	if err := addWebView2(m, t, dir); err != nil {
 		return err
 	}
+	for _, ft := range m.FileTypes() {
+		if f := ft.iconFile(); f != "" {
+			fi, err := fileTypeIcon(ft)
+			if err != nil {
+				return err
+			}
+			data, err := fi.ICO()
+			if err != nil {
+				return fail(diag.CodeNativePkgIcon, ft.Icon, err.Error(), "")
+			}
+			t.addData(dir+"/"+f+".ico", 0o644, data)
+		}
+	}
 	if err := writeDisk(stage, t); err != nil {
 		return wrapWrite(stage, err)
 	}
@@ -206,6 +219,7 @@ func NSISScript(m Metadata, p Payload, srcDir, outFile string) string {
 		}
 		w("  WriteRegStr HKLM %s %s %s", nsisStr(v.Key), nsisStr(v.Name), val)
 	}
+	nsisFileAssoc(w, m)
 	w("SectionEnd")
 	w("")
 	w("Section \"Uninstall\"")
@@ -219,6 +233,7 @@ func NSISScript(m Metadata, p Payload, srcDir, outFile string) string {
 		w("  DeleteRegKey HKCR %s", nsisStr(s))
 	}
 	w("  DeleteRegKey HKLM %s", nsisStr(`Software\Classes\`+scheme))
+	nsisFileAssocRemove(w, m)
 	w("SectionEnd")
 	return b.String()
 }

@@ -369,6 +369,31 @@ var ifaceMethods = map[string][]string{
 		"put_Cancel",
 		"get_NavigationId",
 	},
+	// WebView2.h line 59408
+	"ICoreWebView2WebMessageReceivedEventArgs2": {
+		"QueryInterface",
+		"AddRef",
+		"Release",
+		"get_Source",
+		"get_WebMessageAsJson",
+		"TryGetWebMessageAsString",
+		"get_AdditionalObjects",
+	},
+	// WebView2.h line 50280
+	"ICoreWebView2ObjectCollectionView": {
+		"QueryInterface",
+		"AddRef",
+		"Release",
+		"get_Count",
+		"GetValueAtIndex",
+	},
+	// WebView2.h line 44830
+	"ICoreWebView2File": {
+		"QueryInterface",
+		"AddRef",
+		"Release",
+		"get_Path",
+	},
 	// WebView2.h line 59308
 	"ICoreWebView2WebMessageReceivedEventArgs": {
 		"QueryInterface",

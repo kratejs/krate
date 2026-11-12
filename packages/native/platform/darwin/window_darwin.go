@@ -128,7 +128,7 @@ func (a *App) newWebView() objc.ID {
 			cls("NSNumber").Send(sel("numberWithBool:"), true), nsString("developerExtrasEnabled"))
 	}
 	a.applyMemoryConfig(config)
-	web := cls("WKWebView").Send(sel("alloc")).Send(sel("initWithFrame:configuration:"), nsRect{}, config)
+	web := cls(webViewClassName()).Send(sel("alloc")).Send(sel("initWithFrame:configuration:"), nsRect{}, config)
 	if web == 0 {
 		return 0
 	}

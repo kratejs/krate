@@ -310,3 +310,46 @@ type ProcessRef struct {
 type ProcessInfo interface {
 	WebviewProcesses() (procs []ProcessRef, notes []string)
 }
+
+// OpenFiles is implemented by Apps the operating system can ask to open files
+// while they run (macOS: application:openURLs: and application:openFiles:
+// after a double click, "open -a" or a drop on the Dock icon). On Windows and
+// Linux files arrive on the command line of a launch, which the SDK handles
+// itself.
+type OpenFiles interface {
+	// OnOpenFiles sets the handler for open-file requests. Requests that
+	// arrived before the handler was set, such as the file that launched the
+	// app, are delivered to it at once. paths are absolute file paths; fn
+	// runs on the main thread and must not block.
+	OnOpenFiles(fn func(paths []string))
+}
+
+// FileDrop reports files the user dropped from the operating system onto a
+// view.
+type FileDrop struct {
+	View   ViewRef
+	Window WindowRef
+	// Paths are absolute paths of the dropped files and folders.
+	Paths []string
+	// X and Y are the drop position in view coordinates (CSS pixels), -1 when
+	// the platform cannot say.
+	X, Y int
+}
+
+// FileDrops is implemented by Apps that can read the paths of files dropped
+// onto a webview. The page keeps getting its normal HTML5 drop events with
+// File objects; this adds the real paths, which a page cannot see.
+type FileDrops interface {
+	// OnFileDrop sets the single handler for every view's drops. fn runs on
+	// the main thread and must not block.
+	OnFileDrop(fn func(FileDrop))
+}
+
+// OpenURLs is implemented by Apps the operating system can hand URLs of the
+// app's registered schemes while it runs (macOS delivers them to the app
+// delegate; on Windows and Linux they arrive on the command line of a launch).
+type OpenURLs interface {
+	// OnOpenURLs sets the handler. URLs that arrived before it was set are
+	// delivered at once. fn runs on the main thread and must not block.
+	OnOpenURLs(fn func(urls []string))
+}

@@ -30,7 +30,7 @@ func TestParseGUID(t *testing.T) {
 	}
 	for _, s := range []string{
 		iidISequentialStream, iidEnvCompletedHandler, iidControllerCompletedHandler,
-		iidWebResourceRequestedHandler, iidNavigationStartingHandler, iidNewWindowRequestedHandler, iidExecuteScriptHandler, iidWebMessageHandler, iidWebView2_19,
+		iidWebResourceRequestedHandler, iidNavigationStartingHandler, iidNewWindowRequestedHandler, iidExecuteScriptHandler, iidWebMessageHandler, iidWebView2_19, iidWebMessageArgs2, iidObjectCollectionView, iidWebView2File,
 	} {
 		if _, err := parseGUID(s); err != nil {
 			t.Errorf("%s: %v", s, err)
@@ -67,6 +67,9 @@ func TestVtableLayout(t *testing.T) {
 		"ICoreWebView2ExecuteScriptCompletedHandler":                 4,
 		"ICoreWebView2_19":                                           121,
 		"IStream":                                                    14,
+		"ICoreWebView2WebMessageReceivedEventArgs2":                  7,
+		"ICoreWebView2ObjectCollectionView":                          5,
+		"ICoreWebView2File":                                          4,
 		"IToastNotificationManagerStatics":                           9,
 		"IToastNotifier":                                             12,
 		"IToastNotification":                                         15,
@@ -86,6 +89,10 @@ func TestVtableLayout(t *testing.T) {
 		name      string
 	}{
 		{wvNavigate, 5, "Navigate"},
+		{msgArgs2GetAdditionalObjects, 6, "get_AdditionalObjects"},
+		{objViewGetCount, 3, "ObjectCollectionView.get_Count"},
+		{objViewGetValueAtIndex, 4, "ObjectCollectionView.GetValueAtIndex"},
+		{fileGetPath, 3, "File.get_Path"},
 		{notifierShow, 6, "IToastNotifier.Show"},
 		{notifierGetSetting, 8, "IToastNotifier.get_Setting"},
 		{toastMgrCreateNotifierID, 7, "CreateToastNotifierWithId"},

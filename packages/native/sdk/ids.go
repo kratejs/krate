@@ -100,6 +100,8 @@ var IDs = []ID{
 	{"krate/window.navigateView", "window", "[view: string, path: string]", "void", "window"},
 	{"krate/window.postMessage", "window", "[view: string, data: unknown]", "void", "window"},
 	{"krate/window.viewEvents", "window", "[] (stream)", "ViewEvent", "window"},
+	{"krate/window.fileDrops", "window", "[] (stream)", "FileDropEvent", "window"},
+	{"krate/window.thisView", "window", "[]", "string", "window"},
 
 	{"krate/dialog.openFile", "dialog", "[options: OpenOptions]", "string[]", "dialog"},
 	{"krate/dialog.openFolder", "dialog", "[options: OpenOptions]", "string[]", "dialog"},
@@ -134,6 +136,8 @@ var IDs = []ID{
 	{"krate/app.relaunch", "app", "[]", "void", "lifecycle"},
 	{"krate/app.supports", "app", "[capability: string]", "boolean", "lifecycle"},
 	{"krate/app.events", "app", "[] (stream)", "SecondInstance", "lifecycle"},
+	{"krate/app.openedFiles", "app", "[]", "string[]", "lifecycle"},
+	{"krate/app.openFileEvents", "app", "[] (stream)", "OpenFileEvent", "lifecycle"},
 }
 
 // Lookup returns the table row for id.

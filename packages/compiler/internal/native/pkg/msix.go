@@ -107,6 +107,21 @@ func AppxManifest(m Metadata, p Payload) []byte {
 		w(`          </uap3:Protocol>`)
 		w(`        </uap3:Extension>`)
 	}
+	for _, ft := range m.FileTypes() {
+		w(`        <uap:Extension Category="windows.fileTypeAssociation">`)
+		w(`          <uap:FileTypeAssociation Name="%s">`, xmlEscape(msixFileTypeName(ft)))
+		w(`            <uap:DisplayName>%s</uap:DisplayName>`, xmlEscape(ft.Name))
+		if ft.iconFile() != "" {
+			w(`            <uap:Logo>%s</uap:Logo>`, xmlEscape(strings.ReplaceAll(msixLogoPart(ft), "/", `\`)))
+		}
+		w(`            <uap:SupportedFileTypes>`)
+		for _, e := range ft.Exts {
+			w(`              <uap:FileType ContentType="%s">.%s</uap:FileType>`, xmlEscape(ft.MIME), xmlEscape(e))
+		}
+		w(`            </uap:SupportedFileTypes>`)
+		w(`          </uap:FileTypeAssociation>`)
+		w(`        </uap:Extension>`)
+	}
 	w(`      </Extensions>`)
 	w(`    </Application>`)
 	w(`  </Applications>`)
@@ -259,6 +274,20 @@ func BuildMSIX(m Metadata, p Payload, ic *Icon, inner *tree, out string) error {
 			return fail(diag.CodeNativePkgIcon, "native.icons", err.Error(), "")
 		}
 		files = append(files, msixFile{l.Name, data})
+	}
+	for _, ft := range m.FileTypes() {
+		if ft.iconFile() == "" {
+			continue
+		}
+		fi, err := fileTypeIcon(ft)
+		if err != nil {
+			return err
+		}
+		data, err := fi.PNG(44)
+		if err != nil {
+			return fail(diag.CodeNativePkgIcon, ft.Icon, err.Error(), "")
+		}
+		files = append(files, msixFile{msixLogoPart(ft), data})
 	}
 	files = append(files, msixFile{"AppxManifest.xml", AppxManifest(m, p)})
 	sort.Slice(files, func(i, j int) bool { return files[i].name < files[j].name })

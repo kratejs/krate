@@ -143,6 +143,8 @@ their Go names (`src/lib/tasks.List`).
 | `krate/window.setPreventClose` | `window` | `window: string, on: boolean` | nothing |
 | `krate/window.navigate` | `window` | `window: string, path: string` | nothing |
 | `krate/window.events` | `window` | none (stream) | `WindowEvent` |
+| `krate/window.fileDrops` | `window` | none (stream) | `FileDropEvent` |
+| `krate/window.thisView` | `window` | none | `string` |
 | `krate/dialog.openFile` | `dialog` | `options: OpenOptions` | `string[]` |
 | `krate/dialog.openFolder` | `dialog` | `options: OpenOptions` | `string[]` |
 | `krate/dialog.saveFile` | `dialog` | `options: SaveOptions` | `string | null` |
@@ -170,6 +172,8 @@ their Go names (`src/lib/tasks.List`).
 | `krate/app.relaunch` | `app` | none | nothing |
 | `krate/app.supports` | `app` | `capability: string` | `boolean` |
 | `krate/app.events` | `app` | none (stream) | `SecondInstance` |
+| `krate/app.openedFiles` | `app` | none | `string[]` |
+| `krate/app.openFileEvents` | `app` | none (stream) | `OpenFileEvent` |
 
 `packages/native/sdk/ids.go` is the source of truth for this table; a Go test
 checks it against the registrations, the TypeScript wrappers and this page.

@@ -125,6 +125,25 @@ Memory settings: run an app with `memory: "minimal"` and `Debug` on; stderr
 shows at most one `krate/native: memory: ... skipped` line per lever that this
 macOS does not have, and the app starts either way.
 
+## Files: open and drop (by hand)
+
+`gui_filedrop_test.go` calls `application:openURLs:` on the app delegate and
+`notifyDrop` with a fake `NSDraggingInfo`, so the selector and the pasteboard
+reading are checked. A real Finder and a real drag are not.
+
+1. Package `examples/native-files` (`krate native package`), copy the `.app` to
+   /Applications and open it once.
+2. Double-click a `.krnote` file in Finder: the app opens it (and "Open With"
+   lists the app). Double-click another while the app runs: it joins the same
+   window's list, no second Dock icon.
+3. Quit the app, then `open -a "Native Files" a.krnote b.krnote`: both files
+   are listed (the launch files arrive before the page listens).
+4. Drag a file from Finder onto the window: it appears under "dropped" and the
+   page's own drop event still fires (try a page with a `drop` listener).
+5. Drag a file onto the Dock icon: it is opened like a double click.
+6. Open `acme://...` (a `deepLinks` scheme) from Terminal with `open`: the
+   running app's `onOpenURL` gets it.
+
 ## If something fails
 
 | Symptom | Likely cause |
@@ -140,4 +159,5 @@ macOS does not have, and the app starts either way.
 | Tray icon invisible | An icon with no PNG and no title has no width (SetTray refuses it); otherwise check the PNG decodes. |
 | Hotkey never fires | The key code table is for an ANSI layout; macOS 15 ignores Option/Shift-only combinations; the handler runs on the main loop, so a blocked main thread delays it. |
 | Notification call hangs about two minutes | The permission prompt was never answered (`notifyAuthTimeout`); answer it. |
+| Dropped files are not reported, the page's drop works | `KrateWebView` was not registered (`fileState.dropClass`), or WebKit's `performDragOperation:` was not found; the GUI test `TestGUIWebViewWatchesDrops` says which. |
 | Crash only on Intel | Struct-by-value argument passing for NSRect (32 bytes, passed in memory on amd64). |

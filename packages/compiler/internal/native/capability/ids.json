@@ -628,6 +628,24 @@
       ]
     },
     {
+      "id": "krate/window.fileDrops",
+      "permission": "window",
+      "area": "window",
+      "module": "window",
+      "exports": [
+        "onFileDrop"
+      ]
+    },
+    {
+      "id": "krate/window.thisView",
+      "permission": "window",
+      "area": "window",
+      "module": "window",
+      "exports": [
+        "onFileDrop"
+      ]
+    },
+    {
       "id": "krate/dialog.openFile",
       "permission": "dialog",
       "area": "dialog",
@@ -873,6 +891,25 @@
       "exports": [
         "onOpenURL",
         "onSecondInstance"
+      ]
+    },
+    {
+      "id": "krate/app.openedFiles",
+      "permission": "app",
+      "area": "app",
+      "module": "app",
+      "exports": [
+        "onOpenFile",
+        "openedFiles"
+      ]
+    },
+    {
+      "id": "krate/app.openFileEvents",
+      "permission": "app",
+      "area": "app",
+      "module": "app",
+      "exports": [
+        "onOpenFile"
       ]
     },
     {

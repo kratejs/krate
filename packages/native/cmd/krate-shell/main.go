@@ -2,7 +2,7 @@
 // of an app directory (see packages/native/shell/README.md), serves the built
 // UI, runs the app's host code and, in dev, takes commands on stdin.
 //
-//	krate-shell [--browser] [--addr 127.0.0.1:0] [--dev] [appDir]
+//	krate-shell [--browser] [--addr 127.0.0.1:0] [--dev] [appDir] [files and URLs...]
 //	krate-shell --doctor
 //
 // --doctor prints one line of JSON about the system webview (library

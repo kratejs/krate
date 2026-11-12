@@ -33,6 +33,11 @@ type ViewQuerier interface {
 	Emit(area, payload string) error
 }
 
+// Dropper is the optional part of Controller behind the drop command.
+type Dropper interface {
+	Drop(paths []string) error
+}
+
 // ServeControl reads newline-terminated commands from r and answers each with
 // one line on w, "ok" or "error <message>". It returns when r ends or after
 // "quit". Commands:
@@ -51,6 +56,7 @@ type ViewQuerier interface {
 //	emit <area> <json>     deliver a tray, menu or shortcut event to the app
 //	memory         answers "ok <json>" (a memstat.Report); needs a MemorySampler
 //	hmr <json>
+//	drop <path>[\x1f<path>...]  report a drop of files onto the main window, as the platform does
 //	quit
 //
 // It returns true if it stopped because of "quit".
@@ -165,6 +171,16 @@ func ServeControl(r io.Reader, w io.Writer, ctl Controller) (quit bool) {
 				continue
 			}
 			fmt.Fprintf(w, "ok %s\n", oneLine(string(data)))
+		case "drop":
+			d, ok := ctl.(Dropper)
+			switch {
+			case strings.TrimSpace(arg) == "":
+				reply(fmt.Errorf("drop needs file paths"))
+			case !ok:
+				reply(fmt.Errorf("drop is not supported here"))
+			default:
+				reply(d.Drop(strings.Split(arg, "\x1f")))
+			}
 		case "hmr":
 			if strings.TrimSpace(arg) == "" {
 				reply(fmt.Errorf("hmr needs a JSON message"))

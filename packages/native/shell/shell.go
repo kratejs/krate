@@ -30,6 +30,7 @@ import (
 	"github.com/kratejs/krate/packages/native/scheme"
 	"github.com/kratejs/krate/packages/native/sdk"
 	sdkall "github.com/kratejs/krate/packages/native/sdk/all"
+	appsdk "github.com/kratejs/krate/packages/native/sdk/app"
 	"github.com/kratejs/krate/packages/native/sdk/permission"
 	sdkupdater "github.com/kratejs/krate/packages/native/sdk/updater"
 )
@@ -513,6 +514,16 @@ func (a *app) runNative() error {
 	}
 	a.attachSDK(platApp)
 	a.plat.Store(&platApp)
+	if man.SingleInstance {
+		first, err := appsdk.SingleInstance(man.AppID, appsdk.CurrentLaunchArgs())
+		switch {
+		case err != nil:
+			a.logf("single instance: %v; starting a second instance", err)
+		case !first:
+			// The running instance has the launch's files and raises itself.
+			return nil
+		}
+	}
 	wins := &windows{}
 	a.ctl.wins = wins
 	a.ctl.origin = platApp.Origin()
@@ -612,6 +623,15 @@ func (c *Control) Eval(js string) error {
 			continue
 		}
 		w.Eval(js)
+	}
+	return nil
+}
+
+// Drop reports a drop of files onto the first view of the main window, as the
+// platform does (the dev control command "drop").
+func (c *Control) Drop(paths []string) error {
+	if !c.a.sdk.InjectFileDrop("main", paths, 10, 10) {
+		return fmt.Errorf("no main window to drop on, or the window area is not linked")
 	}
 	return nil
 }

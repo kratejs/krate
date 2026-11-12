@@ -93,6 +93,7 @@ type App struct {
 	onAllClosed func()
 	winHandler  func(caps.WindowEvent)
 	shortcutFn  func(string)
+	dropFn      func(caps.FileDrop)
 
 	queue struct {
 		sync.Mutex

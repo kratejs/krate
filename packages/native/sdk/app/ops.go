@@ -6,8 +6,10 @@ import (
 	"sync"
 
 	"github.com/kratejs/krate/packages/native/krate"
+	"github.com/kratejs/krate/packages/native/platform/caps"
 	"github.com/kratejs/krate/packages/native/sdk/internal/bridge"
 	"github.com/kratejs/krate/packages/native/sdk/internal/codec"
+	"github.com/kratejs/krate/packages/native/sdk/internal/picked"
 	"github.com/kratejs/krate/packages/native/wire"
 )
 
@@ -57,9 +59,27 @@ func Register(t *bridge.Table, env *bridge.Env, support func(capability string) 
 		if err := codec.Args(args, IDLaunchArgs).Done(); err != nil {
 			return err
 		}
-		codec.WriteStrings(out, os.Args[1:])
+		codec.WriteStrings(out, launchArgs())
 		return nil
 	})
+
+	raise := func() {
+		if c, _, _, err := env.Controls(""); err == nil {
+			c.Show()
+			c.Focus()
+		}
+	}
+	files := registerOpenFiles(t, env, env.Topic("appopen"), picked.Notify, raise)
+
+	// macOS hands URLs of the app's schemes to the running app instead of
+	// starting it with a command line; they reach OnOpenURL like the ones a
+	// second launch carries.
+	if ou, ok := env.App.(caps.OpenURLs); ok {
+		ou.OnOpenURLs(func(urls []string) {
+			topic.Publish(func(e *wire.Encoder) { encodeSecond(e, SecondInstance{Args: urls, URLs: urls}) })
+			raise()
+		})
+	}
 
 	var mu sync.Mutex
 	var held *Instance
@@ -77,7 +97,9 @@ func Register(t *bridge.Table, env *bridge.Env, support func(capability string) 
 			return nil
 		}
 		inst, first, err := Acquire("", id, argv, func(si SecondInstance) {
+			files.add(sourceSecond, FilesFromArgs(si.Args, si.Dir))
 			topic.Publish(func(e *wire.Encoder) { encodeSecond(e, si) })
+			raise()
 		})
 		if err != nil {
 			return err

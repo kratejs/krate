@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -32,6 +33,12 @@ type NativeConfig struct {
 	Permissions []string `json:"permissions,omitempty"`
 	// DeepLinks lists custom URL schemes the app registers.
 	DeepLinks []string `json:"deepLinks,omitempty"`
+	// FileAssociations lists the file types the app opens. Packaging turns
+	// them into macOS document types, MSIX file type associations, NSIS
+	// ProgID keys and Linux MimeType entries with a shared-mime-info file. An
+	// app that lists any takes the single-instance lock, so opening a file
+	// while it runs reaches the running instance. See docs native/files.
+	FileAssociations []NativeFileAssociation `json:"fileAssociations,omitempty"`
 	// Host configures the runtime for TypeScript host code.
 	Host NativeHost `json:"host,omitempty"`
 	// Experimental holds opt-ins for unfinished features.
@@ -66,6 +73,30 @@ type NativeConfig struct {
 	// release build. They are always on in `krate native dev`.
 	Debug bool `json:"debug,omitempty"`
 }
+
+// NativeFileAssociation is one file type the app opens.
+type NativeFileAssociation struct {
+	// Ext lists the extensions without the dot: ["md", "markdown"].
+	Ext []string `json:"ext"`
+	// Name is the type's display name, for example "Markdown document".
+	// Default: "<EXT> file".
+	Name string `json:"name,omitempty"`
+	// MIME is the media type, for example "text/markdown". Default:
+	// application/x-<app>-<first extension>.
+	MIME string `json:"mime,omitempty"`
+	// Role is "editor" (default) or "viewer".
+	Role string `json:"role,omitempty"`
+	// Icon is the path of a PNG for files of this type; relative paths resolve
+	// against the project root. Default: the app icon.
+	Icon string `json:"icon,omitempty"`
+}
+
+// NativeFileRoles are the values of NativeFileAssociation.Role.
+var NativeFileRoles = []string{"editor", "viewer"}
+
+// nativeNeverAssociate lists extensions of programs and shortcuts: an app
+// cannot claim them (they would become launchers for the app).
+var nativeNeverAssociate = []string{"exe", "dll", "bat", "cmd", "com", "msi", "scr", "lnk", "ps1", "vbs", "sh", "app", "pif"}
 
 // NativeLean tunes the lean-page checks (KR7270 to KR7275). Zero values keep
 // the defaults.
@@ -284,6 +315,8 @@ var (
 	nativeAppIDRe  = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9-]*(\.[A-Za-z][A-Za-z0-9-]*)+$`)
 	nativeSemverRe = regexp.MustCompile(`^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$`)
 	nativeSchemeRe = regexp.MustCompile(`^[a-z][a-z0-9+.-]*$`)
+	nativeExtRe    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_+-]{0,31}$`)
+	nativeMIMERe   = regexp.MustCompile(`^[a-z0-9][a-z0-9!#$&^_.+-]*/[a-z0-9][a-z0-9!#$&^_.+-]*$`)
 )
 
 // EffectiveNative returns the native block with defaults applied: a 1280x800
@@ -412,6 +445,9 @@ func (c *Config) validateNative() (warnings []string, err error) {
 				"list the scheme only, lowercase and without \"://\", for example \"acme\"")
 		}
 	}
+	if err := validateNativeFileAssociations(n.FileAssociations); err != nil {
+		return nil, err
+	}
 	if n.Host.Runtime != "" && !oneOf(n.Host.Runtime, NativeHostRuntimes) {
 		return nil, nativeErr("host.runtime", fmt.Sprintf("must be one of %s, got %q", strings.Join(NativeHostRuntimes, ", "), n.Host.Runtime),
 			"\"quickjs\" is embedded and needs no install; node, bun and deno run as a bundled sidecar")
@@ -481,4 +517,62 @@ func (c *Config) validateNative() (warnings []string, err error) {
 		}
 	}
 	return warnings, nil
+}
+
+// validateNativeFileAssociations checks native.fileAssociations.
+func validateNativeFileAssociations(list []NativeFileAssociation) error {
+	seenExt := map[string]int{}
+	seenMIME := map[string]int{}
+	for i, fa := range list {
+		key := fmt.Sprintf("fileAssociations[%d]", i)
+		if len(fa.Ext) == 0 {
+			return nativeErr(key+".ext", "needs at least one extension", `list the extensions without the dot, for example ext: ["md", "markdown"]`)
+		}
+		for _, e := range fa.Ext {
+			if !nativeExtRe.MatchString(e) {
+				hint := "use letters, digits, \"_\", \"+\" and \"-\" only, without a dot or a wildcard, for example \"md\""
+				if strings.HasPrefix(e, ".") || strings.HasPrefix(e, "*") {
+					hint = fmt.Sprintf("write the extension without the leading dot or wildcard: %q", strings.TrimLeft(e, ".*"))
+				}
+				return nativeErr(key+".ext", fmt.Sprintf("entry %q is not a file extension", e), hint)
+			}
+			l := strings.ToLower(e)
+			if oneOf(l, nativeNeverAssociate) {
+				return nativeErr(key+".ext", fmt.Sprintf("%q is an executable or shortcut type the app cannot claim", e),
+					"associate document types only; claiming launcher types would make every such file open in the app")
+			}
+			if j, dup := seenExt[l]; dup {
+				return nativeErr(key+".ext", fmt.Sprintf("extension %q is already listed by fileAssociations[%d]", e, j), "list each extension once")
+			}
+			seenExt[l] = i
+		}
+		if i := strings.IndexFunc(fa.Name, func(r rune) bool { return r < 0x20 || r == 0x7f }); i >= 0 {
+			return nativeErr(key+".name", fmt.Sprintf("contains a control character (%U), got %q", rune(fa.Name[i]), fa.Name),
+				"the name ends up in the Info.plist, the registry and the MIME database and must be a single line")
+		}
+		if fa.MIME != "" {
+			if !nativeMIMERe.MatchString(fa.MIME) {
+				return nativeErr(key+".mime", fmt.Sprintf("is not a media type, got %q", fa.MIME),
+					"use lowercase type/subtype such as \"text/markdown\" or \"application/x-acme-doc\"")
+			}
+			if j, dup := seenMIME[fa.MIME]; dup {
+				return nativeErr(key+".mime", fmt.Sprintf("media type %q is already used by fileAssociations[%d]", fa.MIME, j),
+					"merge the two entries into one with both extensions")
+			}
+			seenMIME[fa.MIME] = i
+		}
+		if fa.Role != "" && !oneOf(fa.Role, NativeFileRoles) {
+			return nativeErr(key+".role", fmt.Sprintf("must be \"editor\" or \"viewer\", got %q", fa.Role),
+				"\"editor\" can open and save the file, \"viewer\" only shows it")
+		}
+		if fa.Icon != "" {
+			switch strings.ToLower(filepath.Ext(fa.Icon)) {
+			case ".png", ".jpg", ".jpeg":
+			default:
+				return nativeErr(key+".icon", fmt.Sprintf("must be a PNG or JPEG image, got %q", fa.Icon),
+					"packaging builds the .icns, .ico and PNG sizes from one image; use a 512x512 or larger PNG")
+			}
+		}
+	}
+	return nil
 }

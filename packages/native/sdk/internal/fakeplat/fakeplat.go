@@ -19,6 +19,9 @@ type App struct {
 	nextView caps.ViewRef
 	viewRecs map[caps.ViewRef]*viewRec
 	viewFn   func(caps.ViewEvent)
+	openFn   func([]string)
+	dropFn   func(caps.FileDrop)
+	urlFn    func([]string)
 	Quit_    int
 
 	// Dialogs

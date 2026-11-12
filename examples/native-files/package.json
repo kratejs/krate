@@ -1,0 +1,11 @@
+{
+  "name": "krate-native-files",
+  "private": true,
+  "type": "module",
+  "description": "Krate Native example: a viewer that registers file associations, opens the files it is launched with or handed by a second launch, and reports files dropped on its window.",
+  "dependencies": {
+    "@krate/app": "workspace:*",
+    "@krate/core": "workspace:*",
+    "@krate/runtime": "workspace:*"
+  }
+}

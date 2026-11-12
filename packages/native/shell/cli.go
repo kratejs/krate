@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/kratejs/krate/packages/native/plugin"
@@ -13,8 +15,12 @@ import (
 
 // CLI is the whole main function of a krate-shell binary:
 //
-//	krate-shell [--browser] [--addr 127.0.0.1:0] [--dev] [appDir]
+//	krate-shell [--browser] [--addr 127.0.0.1:0] [--dev] [appDir] [files and URLs...]
 //	krate-shell --doctor
+//
+// The first argument is the app directory only when it holds an app.json;
+// otherwise the app is the one next to the binary and every argument is a file
+// or URL the app is asked to open (see sdk/app).
 //
 // plugins are the native plugins linked into this binary; the per-app shell
 // that `krate native dev` builds for an app with plugins passes them. The
@@ -36,7 +42,7 @@ func CLI(args []string, plugins []*plugin.Plugin) int {
 		fmt.Fprintln(os.Stderr, "       krate-shell --doctor")
 		fs.PrintDefaults()
 	}
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(DropLaunchServicesArgs(args)); err != nil {
 		if err == flag.ErrHelp {
 			return 0
 		}
@@ -49,11 +55,12 @@ func CLI(args []string, plugins []*plugin.Plugin) int {
 		}
 		return 0
 	}
-	if fs.NArg() > 1 {
-		fs.Usage()
-		return 2
+	appDir := ""
+	if rest := fs.Args(); len(rest) > 0 && IsAppDir(rest[0]) {
+		// Arguments after the app directory (or all of them, when the first is
+		// not one) are files and URLs the app is asked to open.
+		appDir = rest[0]
 	}
-	appDir := fs.Arg(0)
 	if appDir == "" {
 		exe, err := os.Executable()
 		if err != nil {
@@ -89,4 +96,24 @@ func CLI(args []string, plugins []*plugin.Plugin) int {
 		return 1
 	}
 	return 0
+}
+
+// IsAppDir reports whether p is an app directory (it holds app.json), so that
+// the shell can tell it from a file the app is asked to open.
+func IsAppDir(p string) bool {
+	st, err := os.Stat(filepath.Join(p, ManifestFile))
+	return err == nil && st.Mode().IsRegular()
+}
+
+// DropLaunchServicesArgs removes the "-psn_<n>_<n>" process serial number
+// argument that older macOS versions pass when Finder launches an app: it is
+// not a flag of the shell.
+func DropLaunchServicesArgs(args []string) []string {
+	out := make([]string, 0, len(args))
+	for _, a := range args {
+		if !strings.HasPrefix(a, "-psn_") {
+			out = append(out, a)
+		}
+	}
+	return out
 }

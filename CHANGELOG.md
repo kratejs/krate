@@ -31,6 +31,15 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
   per window and shakes per op in release builds. The app runs under a per-app shell built with Go
   (`krate native doctor` reports the toolchain as required). `krate native plugin init <name>`
   scaffolds one; `examples/native-plugin` is a complete app. New diagnostics `KR7250` to `KR7257`.
+- Files: `native.fileAssociations` becomes macOS document types (with exported UTIs where macOS has
+  none), MSIX file type associations, NSIS ProgID and registry entries (removed on uninstall) and a
+  Linux `MimeType` with a shared-mime-info file in the deb, rpm and AppImage. `onOpenFile` and
+  `openedFiles` (`@krate/app/app`, Go `app.OnOpenFile`) deliver the files an app is launched with,
+  handed over by a second launch (apps with file associations take the single-instance lock
+  automatically) or sent by macOS, and grant them to the `fs` scope like a dialog pick;
+  `onFileDrop` (`@krate/app/window`, Go `window.OnFileDrop`) reports the real paths of files
+  dropped on a view while the page keeps its HTML5 drop events. `krate-shell` takes files after the
+  app directory. See `examples/native-files` and docs native/files.
 - Krate Native rows in the compatibility matrix (Linux verified, macOS and Windows untested) and
   size, cold-start and memory budgets in `packages/native/budgets.json`.
 - Native OS integration SDK areas, each a Go package and a `@krate/app/<area>` module: `badge`

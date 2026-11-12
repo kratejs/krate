@@ -617,6 +617,19 @@ func (r *Result) Tags(hasHostJS bool) []string {
 	return tags
 }
 
+// Require links an SDK area the shell itself uses, whatever the code reaches:
+// an app with file associations needs the app area for the single-instance
+// lock and the open-file events even when no page calls it.
+func (r *Result) Require(area string) {
+	for _, a := range r.UIAreas {
+		if a == area {
+			return
+		}
+	}
+	r.UIAreas = append(r.UIAreas, area)
+	sort.Strings(r.UIAreas)
+}
+
 // AddGoSites records Go imports of SDK areas found outside the project's Go
 // host code (the packages of native plugins).
 func (r *Result) AddGoSites(sites []Site) {

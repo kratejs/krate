@@ -27,6 +27,10 @@ type Env struct {
 	// permission list (has reports whether one was given). It reports whether
 	// the new window is scoped; an error refuses the window.
 	Scope func(caller, window string, perms []string, has bool) (bool, error)
+	// FileDrop is the handler the window area registered for dropped files; it
+	// is what a platform's own drop handler calls. The dev control channel and
+	// tests use it to inject a drop.
+	FileDrop func(caps.FileDrop)
 	// Unscope, when set, forgets the scope of a window or view that went away.
 	Unscope func(id string)
 }

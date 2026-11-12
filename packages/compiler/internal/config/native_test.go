@@ -57,6 +57,22 @@ func TestNativeLoadsFullBlock(t *testing.T) {
 	}
 }
 
+func TestNativeFileAssociationsLoad(t *testing.T) {
+	cfg := nativeCfg(t, `{"native": {"appId": "com.acme.app", "fileAssociations": [
+		{"ext": ["md", "markdown"], "name": "Markdown document", "mime": "text/markdown", "role": "viewer", "icon": "md.png"}]}}`)
+	fa := cfg.EffectiveNative().FileAssociations
+	if len(fa) != 1 || fa[0].Name != "Markdown document" || fa[0].Role != "viewer" || strings.Join(fa[0].Ext, ",") != "md,markdown" || fa[0].Icon != "md.png" {
+		t.Fatalf("fileAssociations = %+v", fa)
+	}
+	if len(Warnings) != 0 {
+		t.Errorf("unexpected warnings: %v", Warnings)
+	}
+	raw := []byte(`{"native":{"appId":"com.a.b","fileAssociations":[{"ext":["md"],"rol":"viewer"}]}}`)
+	if got := strings.Join(UnknownKeyWarnings(raw), "\n"); !strings.Contains(got, "native.fileAssociations.rol") {
+		t.Errorf("typo in an association not reported:\n%s", got)
+	}
+}
+
 func TestNativeLoadsFromTSConfig(t *testing.T) {
 	dir := t.TempDir()
 	src := `export default { hostDirs: ["src/host"], native: { appId: "com.acme.app", window: { width: 800 } } };`
@@ -186,6 +202,32 @@ func TestValidateNative(t *testing.T) {
 		{"memory profile", func(n *NativeConfig) { n.Memory = "minimal" }, ""},
 		{"memory unknown", func(n *NativeConfig) { n.Memory = "tiny" }, "native.memory"},
 		{"host memoryMB negative", func(n *NativeConfig) { n.Host.MemoryMB = -1 }, "host.memoryMB"},
+		{"file assoc ok", func(n *NativeConfig) {
+			n.FileAssociations = []NativeFileAssociation{{Ext: []string{"md", "Markdown"}, Name: "Markdown document", MIME: "text/markdown", Role: "editor", Icon: "icons/md.png"}, {Ext: []string{"log"}, Role: "viewer"}}
+		}, ""},
+		{"file assoc no ext", func(n *NativeConfig) { n.FileAssociations = []NativeFileAssociation{{Name: "x"}} }, "at least one extension"},
+		{"file assoc dot", func(n *NativeConfig) { n.FileAssociations = []NativeFileAssociation{{Ext: []string{".md"}}} }, "without the leading dot"},
+		{"file assoc wildcard", func(n *NativeConfig) { n.FileAssociations = []NativeFileAssociation{{Ext: []string{"*.md"}}} }, "not a file extension"},
+		{"file assoc space", func(n *NativeConfig) { n.FileAssociations = []NativeFileAssociation{{Ext: []string{"m d"}}} }, "not a file extension"},
+		{"file assoc exe", func(n *NativeConfig) { n.FileAssociations = []NativeFileAssociation{{Ext: []string{"EXE"}}} }, "cannot claim"},
+		{"file assoc duplicate", func(n *NativeConfig) {
+			n.FileAssociations = []NativeFileAssociation{{Ext: []string{"md"}}, {Ext: []string{"MD"}}}
+		}, "already listed"},
+		{"file assoc name newline", func(n *NativeConfig) {
+			n.FileAssociations = []NativeFileAssociation{{Ext: []string{"md"}, Name: "a\nb"}}
+		}, "control character"},
+		{"file assoc mime", func(n *NativeConfig) {
+			n.FileAssociations = []NativeFileAssociation{{Ext: []string{"md"}, MIME: "Text/Markdown"}}
+		}, "not a media type"},
+		{"file assoc mime twice", func(n *NativeConfig) {
+			n.FileAssociations = []NativeFileAssociation{{Ext: []string{"md"}, MIME: "text/markdown"}, {Ext: []string{"mdx"}, MIME: "text/markdown"}}
+		}, "already used"},
+		{"file assoc role", func(n *NativeConfig) {
+			n.FileAssociations = []NativeFileAssociation{{Ext: []string{"md"}, Role: "owner"}}
+		}, "editor"},
+		{"file assoc icon", func(n *NativeConfig) {
+			n.FileAssociations = []NativeFileAssociation{{Ext: []string{"md"}, Icon: "md.ico"}}
+		}, "PNG or JPEG"},
 		{"updater https", func(n *NativeConfig) { n.Updater = &NativeUpdater{URL: "http://a.b/u.json", PublicKey: "k"} }, "https"},
 	}
 	for _, tc := range cases {
