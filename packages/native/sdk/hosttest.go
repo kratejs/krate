@@ -1,13 +1,10 @@
 package sdk
 
 import (
-	"encoding/json"
 	"fmt"
 
 	"github.com/kratejs/krate/packages/native/platform/caps"
-	"github.com/kratejs/krate/packages/native/sdk/menu"
-	"github.com/kratejs/krate/packages/native/sdk/shortcut"
-	"github.com/kratejs/krate/packages/native/sdk/tray"
+	"github.com/kratejs/krate/packages/native/sdk/internal/bridge"
 )
 
 // ViewInfo describes one webview of an open window.
@@ -61,9 +58,10 @@ func (h *Host) EvalView(id, js string) error {
 }
 
 // Inject delivers a native event as if the platform had produced it, for
-// tests that drive an app through the dev control channel. area is "tray"
-// (payload {"kind":"click","id":""}), "menu" ({"id":"file.open","window":"main",
-// "checked":false}) or "shortcut" ({"id":"<handle>"}).
+// tests that drive an app through the dev control channel. payload is a JSON
+// object; area is "tray" ({"kind":"click","id":""}), "menu" ({"id":"file.open",
+// "window":"main","checked":false}) or "shortcut" ({"accelerator":"CmdOrCtrl+K"}
+// or {"id":"<handle>"}). An area a build left out cannot be injected.
 func (h *Host) Inject(area string, payload []byte) error {
 	h.mu.Lock()
 	env := h.env
@@ -71,41 +69,9 @@ func (h *Host) Inject(area string, payload []byte) error {
 	if env == nil {
 		return fmt.Errorf("no platform is attached")
 	}
-	switch area {
-	case "tray":
-		var p struct{ Kind, ID string }
-		if err := json.Unmarshal(payload, &p); err != nil {
-			return fmt.Errorf("tray event: %w", err)
-		}
-		switch p.Kind {
-		case "click", "middle-click", "right-click", "menu":
-		default:
-			return fmt.Errorf("tray event: kind must be click, middle-click, right-click or menu, got %q", p.Kind)
-		}
-		tray.Inject(env, tray.Event{Kind: p.Kind, ID: p.ID})
-	case "menu":
-		var p struct {
-			ID, Window string
-			Checked    bool
-		}
-		if err := json.Unmarshal(payload, &p); err != nil {
-			return fmt.Errorf("menu event: %w", err)
-		}
-		if p.ID == "" {
-			return fmt.Errorf("menu event: id is required")
-		}
-		menu.Inject(env, menu.Event{ID: p.ID, Window: p.Window, Checked: p.Checked})
-	case "shortcut":
-		var p struct{ ID string }
-		if err := json.Unmarshal(payload, &p); err != nil {
-			return fmt.Errorf("shortcut event: %w", err)
-		}
-		if p.ID == "" {
-			return fmt.Errorf("shortcut event: id (the registered handle) is required")
-		}
-		shortcut.Inject(env, p.ID)
-	default:
-		return fmt.Errorf("cannot emit %q events (tray, menu and shortcut can be emitted)", area)
+	f, ok := env.Providers[bridge.InjectKey(area)].(func([]byte) error)
+	if !ok {
+		return fmt.Errorf("cannot emit %q events (tray, menu and shortcut can be emitted, when the app includes them)", area)
 	}
-	return nil
+	return f(payload)
 }

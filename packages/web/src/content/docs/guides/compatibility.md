@@ -91,6 +91,7 @@ green run there is what moves a cell.
 | Native: release as a single executable | Supported | Untested | Untested | Krate Native v1 |
 | Native: prebuilt shell for apps without Go | Supported | Untested | Untested | Krate Native v1 |
 | Native: krate native doctor | Supported | Untested | Untested | Krate Native v1 |
+| Native: krate native test and the app driver | Supported | Untested | Untested | Krate Native v1 |
 | Native: plugins | Supported | Untested | Untested | Krate Native v1 |
 | Native: packaging formats | Partial | Untested | Untested | Krate Native v1 |
 | Native: signing and notarization | Partial | Untested | Untested | Krate Native v1 |
@@ -726,6 +727,21 @@ Known limits:
 - The report logic is tested with injected probes for all three OSes; the real probes ran only on Linux. The macOS version and Windows registry probes compile (go vet per GOOS) but have not run.
 
 Evidence: `TestHealthyTypeScriptOnlyLinuxWithoutGo`, `TestGoRequiredForGoHostAndCompileAlways`, `TestWebviewMissingIsRequired`, `TestHostRuntimes`, `TestPackagingToolsPerOS`, `TestNativeDoctorCommand`, `TestBinaryDoctor`, `TestProbeShape`
+
+### Native: krate native test and the app driver
+
+**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+
+krate native test builds the app like native dev, bundles the project's *.native.test.ts files with esbuild and runs them with node --test. The @krate/app/driver module launches the real shell (--dev) per test file with isolated data directories and drives pages over the dev control channel: evaluate, click, fill, press, text, waitFor, url, errors, calls of host functions and SDK ids, several windows and views, and injected tray, menu and shortcut events for app logic behind native events. Input is DOM-level; real operating-system input is out of scope.
+
+Known limits:
+
+- Clicks, typing and key presses are synthesized DOM events (isTrusted is false); native dialogs, the real tray icon, menu bars and notifications cannot be operated, only their events injected.
+- page.screenshot() is not available: the platform layer has no webview capture API yet.
+- No --browser mode for tests; they drive the native shell.
+- The macOS and Windows runs happen only in the CI native job (a desktop session is needed); the per-OS data-directory isolation (HOME on macOS, APPDATA and LOCALAPPDATA on Windows) has not been tried by hand.
+
+Evidence: `TestNativeTestCommandGUI`, `TestFindNativeTests`, `TestBundleNativeTests`, `TestRunNativeTestRunsNodeWithEnvironment`, `TestNativeTestFlags`, `TestNativeTestListAndDiagnostics`, `TestServeControlDriverCommands`, `TestHostInjectMenuAndViews`, `TestHostInjectShortcut`, `fixture:examples/native-tasks/tests/tasks.native.test.ts`, `fixture:examples/native-views/tests/views.native.test.ts`
 
 ### Native: plugins
 

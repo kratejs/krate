@@ -1,8 +1,10 @@
 package shortcut
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/kratejs/krate/packages/native/krate"
@@ -30,6 +32,7 @@ func RegisterOps(t *bridge.Table, env *bridge.Env) {
 	var portal backend
 	var portalTried bool
 	owner := map[string]backend{}
+	accels := map[string]caps.Accelerator{} // handle to accelerator, for Inject
 	if s, ok := env.App.(caps.Shortcuts); ok {
 		s.OnShortcut(publish)
 		primary = platformBackend{s}
@@ -64,6 +67,7 @@ func RegisterOps(t *bridge.Table, env *bridge.Env) {
 		if primary != nil {
 			if err2 = primary.register(handle, a); err2 == nil {
 				owner[handle] = primary
+				accels[handle] = a
 				out.Null()
 				return nil
 			}
@@ -82,9 +86,46 @@ func RegisterOps(t *bridge.Table, env *bridge.Env) {
 			return err
 		}
 		owner[handle] = p
+		accels[handle] = a
 		out.Null()
 		return nil
 	})
+	env.Providers[bridge.InjectKey("shortcut")] = func(payload []byte) error {
+		var q struct{ ID, Accelerator string }
+		if err := json.Unmarshal(payload, &q); err != nil {
+			return fmt.Errorf("shortcut event: %w", err)
+		}
+		handle, accel := q.ID, q.Accelerator
+		if handle == "" && accel == "" {
+			return fmt.Errorf("shortcut event: accelerator (as the app registered it) or id (the handle) is required")
+		}
+		mu.Lock()
+		var hit []string
+		var known []string
+		var want caps.Accelerator
+		if accel != "" {
+			a, err := Parse(accel)
+			if err != nil {
+				mu.Unlock()
+				return err
+			}
+			want = a
+		}
+		for h, a := range accels {
+			known = append(known, fmt.Sprintf("%s=%+v", h, a))
+			if (handle != "" && h == handle) || (accel != "" && a == want) {
+				hit = append(hit, h)
+			}
+		}
+		mu.Unlock()
+		if len(hit) == 0 {
+			return fmt.Errorf("no shortcut is registered for %q%s (the app registers it with shortcut.register, and the operating system must have accepted it)", handle+accel, registeredNote(known))
+		}
+		for _, h := range hit {
+			publish(h)
+		}
+		return nil
+	}
 	t.Func(IDUnregister, Permission, true, func(ctx krate.Ctx, args *wire.Decoder, out *wire.Encoder) error {
 		r := codec.Args(args, IDUnregister)
 		handle := r.String()
@@ -94,6 +135,7 @@ func RegisterOps(t *bridge.Table, env *bridge.Env) {
 		mu.Lock()
 		b := owner[handle]
 		delete(owner, handle)
+		delete(accels, handle)
 		mu.Unlock()
 		out.Null()
 		if b == nil {
@@ -109,3 +151,10 @@ func (p platformBackend) register(h string, a caps.Accelerator) error {
 	return p.s.RegisterShortcut(h, a)
 }
 func (p platformBackend) unregister(h string) error { return p.s.UnregisterShortcut(h) }
+
+func registeredNote(known []string) string {
+	if len(known) == 0 {
+		return "; none is registered"
+	}
+	return "; registered: " + strings.Join(known, ", ")
+}

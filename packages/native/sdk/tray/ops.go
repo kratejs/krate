@@ -1,6 +1,8 @@
 package tray
 
 import (
+	"encoding/json"
+	"fmt"
 	"sync"
 
 	"github.com/kratejs/krate/packages/native/krate"
@@ -37,6 +39,19 @@ func Register(t *bridge.Table, env *bridge.Env) {
 				e.EndObject()
 			})
 		}
+	}
+	env.Providers[bridge.InjectKey("tray")] = func(payload []byte) error {
+		var p struct{ Kind, ID string }
+		if err := json.Unmarshal(payload, &p); err != nil {
+			return fmt.Errorf("tray event: %w", err)
+		}
+		switch p.Kind {
+		case "click", "middle-click", "right-click", "menu":
+		default:
+			return fmt.Errorf("tray event: kind must be click, middle-click, right-click or menu, got %q", p.Kind)
+		}
+		publish(caps.TrayEvent{Kind: p.Kind, ID: p.ID})
+		return nil
 	}
 	var mu sync.Mutex
 	var be backend

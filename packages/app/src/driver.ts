@@ -539,8 +539,11 @@ export interface Emitter {
   tray(kind?: "click" | "middle-click" | "right-click" | "menu", id?: string): Promise<void>;
   /** A menu item use. */
   menu(id: string, opts?: { window?: string; checked?: boolean }): Promise<void>;
-  /** The global shortcut registered under this handle. */
-  shortcut(handle: string): Promise<void>;
+  /**
+   * The global shortcut the app registered for this accelerator, written as
+   * the app wrote it ("CmdOrCtrl+Shift+K"). Fails if none is registered.
+   */
+  shortcut(accelerator: string): Promise<void>;
 }
 
 /** A running app. */
@@ -563,7 +566,7 @@ export class App {
         this.send(`emit menu ${JSON.stringify({ id, window: o.window ?? "main", checked: o.checked ?? false })}`).then(
           () => undefined,
         ),
-      shortcut: (handle) => this.send(`emit shortcut ${JSON.stringify({ id: handle })}`).then(() => undefined),
+      shortcut: (accelerator) => this.send(`emit shortcut ${JSON.stringify({ accelerator })}`).then(() => undefined),
     };
   }
 

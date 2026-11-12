@@ -155,13 +155,3 @@ func decodeEvent(d *wire.Decoder) (ev Event, err error) {
 	})
 	return ev, r.Err()
 }
-
-// Inject delivers ev as if the tray had produced it. It is for tests that
-// drive an app through the dev control channel.
-func Inject(env *bridge.Env, ev Event) {
-	topic := env.Topic("tray")
-	topic.Publish(func(e *wire.Encoder) { encodeEvent(e, ev) })
-	if ev.Kind == "menu" {
-		menu.Inject(env, menu.Event{ID: ev.ID})
-	}
-}

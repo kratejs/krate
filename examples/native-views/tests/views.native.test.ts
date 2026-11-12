@@ -36,12 +36,16 @@ test("each view is its own page", async () => {
 });
 
 test("a menu event reaches the page that listens for it", async () => {
-  const main = app.page();
-  await main.waitFor("#events");
+  // Send the sidebar view to the route that listens, then fire the event.
+  const view = app.page("sidebar");
+  await view.evaluate(() => {
+    setTimeout(() => location.assign("/events"), 0);
+  });
+  await view.waitFor("#events");
   // The page subscribes after it hydrates; emit until it has heard one.
   await poll(async () => {
     await app.emit.menu("view.refresh");
-    return (await main.text("#events")).includes("menu view.refresh");
+    return (await view.text("#events")).includes("menu view.refresh");
   });
 });
 

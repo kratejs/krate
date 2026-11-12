@@ -1,10 +1,12 @@
 package sdk_test
 
 import (
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/kratejs/krate/packages/native/sdk/menu"
+	"github.com/kratejs/krate/packages/native/sdk/shortcut"
 )
 
 func TestHostInjectMenuAndViews(t *testing.T) {
@@ -48,5 +50,33 @@ func TestHostInjectRejects(t *testing.T) {
 	}
 	if err := r.host.EvalView("nope", "1"); err == nil {
 		t.Error("EvalView of an unknown view succeeded")
+	}
+}
+
+func TestHostInjectShortcut(t *testing.T) {
+	r := newRig(t)
+	fired := make(chan struct{}, 4)
+	unreg, err := shortcut.Register("Ctrl+Shift+K", func() { fired <- struct{}{} })
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitSubs(t, r, "shortcut")
+	if err := r.host.Inject("shortcut", []byte(`{"accelerator":"Shift+Ctrl+K"}`)); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-fired:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the registered handler did not run")
+	}
+	err = r.host.Inject("shortcut", []byte(`{"accelerator":"Ctrl+Shift+J"}`))
+	if err == nil || !strings.Contains(err.Error(), "no shortcut is registered") {
+		t.Errorf("unregistered accelerator: %v", err)
+	}
+	if err := unreg(); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.host.Inject("shortcut", []byte(`{"accelerator":"Ctrl+Shift+K"}`)); err == nil {
+		t.Error("an unregistered shortcut was delivered")
 	}
 }

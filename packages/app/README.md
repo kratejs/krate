@@ -10,6 +10,9 @@ calls into this package. See `packages/native/PROTOCOL.md` for the wire format.
 - `@krate/app/host`: `hostSignal(initial)` for host-side TS code.
 - `@krate/app/testing`: `mockHost(moduleId, impl)`, `resetHostMocks()`,
   `createFakeHost(registry)` (an in-memory fetch speaking the protocol).
+- `@krate/app/driver` (Node only): `launch()` starts the real app under
+  `krate native test` and drives its pages, host calls and native events; see
+  docs/native/testing.
 
 ## Signals
 

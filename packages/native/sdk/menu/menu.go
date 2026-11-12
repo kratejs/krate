@@ -222,9 +222,3 @@ func DecodeItems(r *codec.R) []Item { return decodeItems(r, 0) }
 
 // ToCaps converts items to the platform representation.
 func ToCaps(items []Item) []caps.MenuItem { return toCaps(items) }
-
-// Inject delivers ev as if a menu item had been used. It is for tests that
-// drive an app through the dev control channel.
-func Inject(env *bridge.Env, ev Event) {
-	env.Topic("menu").Publish(func(e *wire.Encoder) { encodeEvent(e, ev) })
-}

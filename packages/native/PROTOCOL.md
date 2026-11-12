@@ -176,7 +176,7 @@ order and a command never spans lines (JSON is written without raw newlines).
 | `query <js>` | Run an expression in every view, await a promise, answer `ok <json>` (the first view to answer wins). Page errors answer `error <stack>`. |
 | `views` | `ok [{"id":"main","window":"main","primary":true}, ...]`: every open view of every window, windows in creation order and each window's primary view first. A window's primary view has the window's id. Native windows only. |
 | `query-in <view> <js>` | `query`, but in the one view with this SDK id. An unknown view answers `error no view "x" (open views: ...)`. |
-| `emit <area> <json>` | Deliver a native event to the app as the platform would: `tray` `{"kind":"click"\|"middle-click"\|"right-click"\|"menu","id":""}`, `menu` `{"id":"file.open","window":"main","checked":false}`, `shortcut` `{"id":"<registered handle>"}`. |
+| `emit <area> <json>` | Deliver a native event to the app as the platform would: `tray` `{"kind":"click"\|"middle-click"\|"right-click"\|"menu","id":""}`, `menu` `{"id":"file.open","window":"main","checked":false}`, `shortcut` `{"accelerator":"CmdOrCtrl+Shift+K"}` (every registration of that accelerator; or `{"id":"<handle>"}`). The shortcut must have been registered and accepted by the system. |
 | `memory` | `ok <json>`: a memory report (see BUDGETS.md). |
 | `hmr <json>` | Publish one message on `/__krate/hmr`. |
 | `quit` | Quit the app. |

@@ -1289,6 +1289,36 @@
       ]
     },
     {
+      "id": "native-testing",
+      "area": "Native: krate native test and the app driver",
+      "native": {
+        "linux": "supported",
+        "macos": "untested",
+        "windows": "untested"
+      },
+      "target": "Krate Native v1",
+      "summary": "krate native test builds the app like native dev, bundles the project's *.native.test.ts files with esbuild and runs them with node --test. The @krate/app/driver module launches the real shell (--dev) per test file with isolated data directories and drives pages over the dev control channel: evaluate, click, fill, press, text, waitFor, url, errors, calls of host functions and SDK ids, several windows and views, and injected tray, menu and shortcut events for app logic behind native events. Input is DOM-level; real operating-system input is out of scope.",
+      "tests": [
+        "TestNativeTestCommandGUI",
+        "TestFindNativeTests",
+        "TestBundleNativeTests",
+        "TestRunNativeTestRunsNodeWithEnvironment",
+        "TestNativeTestFlags",
+        "TestNativeTestListAndDiagnostics",
+        "TestServeControlDriverCommands",
+        "TestHostInjectMenuAndViews",
+        "TestHostInjectShortcut",
+        "fixture:examples/native-tasks/tests/tasks.native.test.ts",
+        "fixture:examples/native-views/tests/views.native.test.ts"
+      ],
+      "knownLimits": [
+        "Clicks, typing and key presses are synthesized DOM events (isTrusted is false); native dialogs, the real tray icon, menu bars and notifications cannot be operated, only their events injected.",
+        "page.screenshot() is not available: the platform layer has no webview capture API yet.",
+        "No --browser mode for tests; they drive the native shell.",
+        "The macOS and Windows runs happen only in the CI native job (a desktop session is needed); the per-OS data-directory isolation (HOME on macOS, APPDATA and LOCALAPPDATA on Windows) has not been tried by hand."
+      ]
+    },
+    {
       "id": "native-plugins",
       "area": "Native: plugins",
       "native": {
