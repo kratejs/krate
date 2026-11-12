@@ -237,9 +237,9 @@ func TestChromeEvents(t *testing.T) {
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		mu.Lock()
-		n := len(got)
+		n, c := len(got), len(clicks)
 		mu.Unlock()
-		if n >= 2 {
+		if n >= 2 && c >= 1 {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)

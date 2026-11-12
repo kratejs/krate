@@ -197,6 +197,7 @@ func (a *App) SetAppMenu(items []caps.MenuItem) error {
 	a.mu.Unlock()
 	return nil
 }
+
 // PopupsShown returns a copy of the popup menus shown so far.
 func (a *App) PopupsShown() [][]caps.MenuItem {
 	a.mu.Lock()

@@ -510,10 +510,17 @@ func zoomShortcuts(t *testing.T, w *Window, v caps.ViewRef) {
 	if !key {
 		t.Skip("the window did not become the key window; the View menu acts on one")
 	}
-	item := func(index int) {
+	// By title: AppKit inserts "Show Tab Bar" and "Show All Tabs" at the top of
+	// a menu titled View once window tabbing is on, which shifts the indexes.
+	item := func(title string) {
 		runOnMain(func() {
 			withPool(func() {
 				menu := guiApp.nsApp.Send(sel("mainMenu")).Send(sel("itemWithTitle:"), nsString("View")).Send(sel("submenu"))
+				index := int(menu.Send(sel("indexOfItemWithTitle:"), nsString(title)))
+				if index < 0 {
+					t.Errorf("no %q item in the View menu", title)
+					return
+				}
 				menu.Send(sel("performActionForItemAtIndex:"), index)
 			})
 		})
@@ -525,16 +532,16 @@ func zoomShortcuts(t *testing.T, w *Window, v caps.ViewRef) {
 		}
 		return z
 	}
-	item(0) // Zoom In
+	item("Zoom In")
 	if z := zoom(); z < 1.09 || z > 1.11 {
 		t.Fatalf("zoom after Zoom In: %v, want 1.1", z)
 	}
-	item(2) // Zoom Out
+	item("Zoom Out")
 	if z := zoom(); z < 0.99 || z > 1.01 {
 		t.Fatalf("zoom after Zoom Out: %v, want 1", z)
 	}
-	item(0)
-	item(3) // Actual Size
+	item("Zoom In")
+	item("Actual Size")
 	if z := zoom(); z < 0.99 || z > 1.01 {
 		t.Fatalf("zoom after Actual Size: %v, want 1", z)
 	}
