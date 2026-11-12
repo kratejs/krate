@@ -59,6 +59,7 @@ type fakeRunner struct {
 	goos  string
 	calls []string
 	fail  map[string]bool
+	out   map[string]string // output of a failing tool (default "boom")
 }
 
 func (f *fakeRunner) LookPath(n string) (string, error) {
@@ -71,6 +72,9 @@ func (f *fakeRunner) GOOS() string { return f.goos }
 func (f *fakeRunner) Run(dir string, env []string, name string, args ...string) ([]byte, error) {
 	f.calls = append(f.calls, name+" "+strings.Join(args, " "))
 	if f.fail[name] {
+		if o, ok := f.out[name]; ok {
+			return []byte(o), exec.ErrNotFound
+		}
 		return []byte("boom"), exec.ErrNotFound
 	}
 	return nil, nil

@@ -234,15 +234,39 @@ func validateSandboxMeta(m Metadata, format string) error {
 }
 
 // validateMetainfo runs appstreamcli when it is installed and fails on errors.
+// appstreamcli also fails on warnings and infos (a missing homepage, a short
+// first paragraph); those do not stop a local package and are reported as a
+// note, because Flathub's own checks are where they matter.
 func validateMetainfo(o *Options, path string, res *Result) error {
 	if _, err := o.Runner.LookPath("appstreamcli"); err != nil {
 		res.note("the AppStream metainfo was not validated: appstreamcli is not installed (apt install appstream)")
 		return nil
 	}
 	out, err := o.run("", nil, "appstreamcli", "validate", "--no-net", path)
-	if err != nil {
-		return fail(diag.CodeNativeSandboxPkg, path, "appstreamcli rejected the metainfo:\n"+indentLines(trimTail(string(out), 12)),
-			"set native.bundle.linux.summary, description, license and homepage; the file is kept in the flatpak directory")
+	if err == nil {
+		return nil
 	}
-	return nil
+	if onlyAppStreamWarnings(string(out)) {
+		res.note("appstreamcli has remarks about the AppStream metainfo (set native.bundle.linux.summary, description, license and homepage before publishing to Flathub):\n%s", indentLines(trimTail(string(out), 12)))
+		return nil
+	}
+	return fail(diag.CodeNativeSandboxPkg, path, "appstreamcli rejected the metainfo:\n"+indentLines(trimTail(string(out), 12)),
+		"set native.bundle.linux.summary, description, license and homepage; the file is kept in the flatpak directory")
+}
+
+// onlyAppStreamWarnings reports whether appstreamcli's output lists remarks
+// (W: warnings, I: infos, P: pedantic) and no E: errors. Output it does not
+// recognize counts as an error.
+func onlyAppStreamWarnings(out string) bool {
+	remarks := 0
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(line, "E:"):
+			return false
+		case strings.HasPrefix(line, "W:"), strings.HasPrefix(line, "I:"), strings.HasPrefix(line, "P:"):
+			remarks++
+		}
+	}
+	return remarks > 0
 }

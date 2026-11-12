@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -31,7 +32,11 @@ func TestFindDlvMissingHintsAtInstall(t *testing.T) {
 
 func TestFindDlvSources(t *testing.T) {
 	dir := t.TempDir()
-	exe := filepath.Join(dir, "dlv")
+	name := "dlv"
+	if runtime.GOOS == "windows" {
+		name += ".exe" // what PATH and GOBIN lookups find there
+	}
+	exe := filepath.Join(dir, name)
 	if err := os.WriteFile(exe, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}

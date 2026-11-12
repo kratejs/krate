@@ -230,7 +230,9 @@ func stoppedAt(t *testing.T, res map[string]any, file string, line int, fn strin
 	if th == nil || th["breakPoint"] == nil {
 		t.Fatalf("the program did not stop on a breakpoint: %v", res)
 	}
-	if got := th["file"]; got != file || int(th["line"].(float64)) != line {
+	// Delve reports paths with forward slashes on every OS.
+	got, _ := th["file"].(string)
+	if filepath.Clean(filepath.FromSlash(got)) != filepath.Clean(file) || int(th["line"].(float64)) != line {
 		t.Fatalf("stopped at %v:%v, want %s:%d", got, th["line"], file, line)
 	}
 	f, _ := th["function"].(map[string]any)

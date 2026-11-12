@@ -298,3 +298,21 @@ func TestLinuxFormatsDefaultsStayDeb(t *testing.T) {
 		t.Errorf("default formats = %v %v", want, err)
 	}
 }
+
+// appstreamcli fails on warnings and infos too; those become a note, an E:
+// line still fails the package.
+func TestPackageFlatpakAppStreamRemarksAreNotes(t *testing.T) {
+	remarks := "I: com.example.tasks:12: description-first-para-too-short Native Tasks\nW: com.example.tasks:~: url-homepage-missing\n\nValidation failed: warnings: 1, infos: 1\n"
+	r := &fakeRunner{goos: "linux", tools: map[string]bool{"appstreamcli": true}, fail: map[string]bool{"appstreamcli": true}, out: map[string]string{"appstreamcli": remarks}}
+	res, err := Package(linuxOpts(t, sandboxMeta(t), r, "flatpak"))
+	if err != nil {
+		t.Fatalf("remarks failed the package: %v", err)
+	}
+	if !strings.Contains(strings.Join(res.Notes, "\n"), "url-homepage-missing") {
+		t.Errorf("notes %q lack the remark", res.Notes)
+	}
+	r = &fakeRunner{goos: "linux", tools: map[string]bool{"appstreamcli": true}, fail: map[string]bool{"appstreamcli": true}, out: map[string]string{"appstreamcli": "E: com.example.tasks:3: tag-invalid\n" + remarks}}
+	if _, err := Package(linuxOpts(t, sandboxMeta(t), r, "flatpak")); err == nil || !strings.Contains(err.Error(), "KR7302") {
+		t.Errorf("an E: line must fail the package: %v", err)
+	}
+}
