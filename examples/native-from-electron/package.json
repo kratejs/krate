@@ -1,0 +1,11 @@
+{
+  "name": "krate-native-from-electron",
+  "private": true,
+  "type": "module",
+  "description": "Krate Native example: a small Electron app (electron/) ported to Krate Native, with a menu, tray, dialogs, file access, a notification and a settings store.",
+  "dependencies": {
+    "@krate/app": "workspace:*",
+    "@krate/core": "workspace:*",
+    "@krate/runtime": "workspace:*"
+  }
+}

@@ -110,6 +110,7 @@ green run there is what moves a cell.
 | Native: prebuilt shell for apps without Go | Supported | Partial | Partial | Krate Native v1 |
 | Native: krate native doctor | Supported | Supported | Supported | Krate Native v1 |
 | Native: krate native test and the app driver | Supported | Untested | Untested | Krate Native v1 |
+| Native: migration guides and the worked Electron port | Supported | Untested | Untested | Krate Native v1 |
 | Native: plugins | Supported | Supported | Supported | Krate Native v1 |
 | Native: packaging formats | Partial | Supported | Supported | Krate Native v1 |
 | Native: signing and notarization | Partial | Partial | Partial | Krate Native v1 |
@@ -1031,6 +1032,20 @@ Known limits:
 - The macOS and Windows runs happen only in the CI native job (a desktop session is needed); the per-OS data-directory isolation (HOME on macOS, APPDATA and LOCALAPPDATA on Windows) has not been tried by hand.
 
 Evidence: `TestNativeTestCommandGUI`, `TestFindNativeTests`, `TestBundleNativeTests`, `TestRunNativeTestRunsNodeWithEnvironment`, `TestNativeTestFlags`, `TestNativeTestListAndDiagnostics`, `TestServeControlDriverCommands`, `TestHostInjectMenuAndViews`, `TestHostInjectShortcut`, `fixture:examples/native-tasks/tests/tasks.native.test.ts`, `fixture:examples/native-views/tests/views.native.test.ts`
+
+### Native: migration guides and the worked Electron port
+
+**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+
+Migration guides from Electron and from Tauri v2 map concepts, APIs, security, packaging, updates, testing and debugging to Krate Native. examples/native-from-electron is a small Electron app (electron/, pinned, not run by CI) and its port: host functions and a host signal for ipcMain and webContents.send, an application menu, a tray, dialogs, scoped file reads and writes, a notification, a kv settings store and a second window. krate native test drives the port through the real shell.
+
+Known limits:
+
+- The Electron original is a reference and is not built or run in CI.
+- Native dialogs and notification banners cannot be clicked headlessly: the test calls the code behind the dialogs and accepts 'sent' or 'unsupported' for the notification and tray (Linux without a notification service or tray host answers unsupported).
+- The macOS and Windows runs happen only in the CI native job.
+
+Evidence: `TestNativeFromElectronGUI`, `fixture:examples/native-from-electron/tests/port.native.test.ts`
 
 ### Native: plugins
 
