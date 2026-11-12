@@ -79,6 +79,14 @@ func (s *SchemeDownloader) Cancel(id uint64) bool {
 
 func (s *SchemeDownloader) run(ctx context.Context, id uint64, view ViewRef, rawURL, hint string) {
 	ev := DownloadEvent{ID: id, View: view, URL: rawURL, Total: -1}
+	// end reports the final state. The download leaves the running set first,
+	// so a Cancel that follows the event finds nothing to cancel.
+	end := func() {
+		s.mu.Lock()
+		delete(s.running, id)
+		s.mu.Unlock()
+		s.Emit(ev)
+	}
 	fail := func(err error) {
 		switch {
 		case errors.Is(err, errCancelled), ctx.Err() != nil:
@@ -86,7 +94,7 @@ func (s *SchemeDownloader) run(ctx context.Context, id uint64, view ViewRef, raw
 		default:
 			ev.State, ev.Error = DownloadFailed, err.Error()
 		}
-		s.Emit(ev)
+		end()
 	}
 	u, err := url.Parse(rawURL)
 	if err != nil {
@@ -125,7 +133,7 @@ func (s *SchemeDownloader) run(ctx context.Context, id uint64, view ViewRef, raw
 	ev.State = DownloadCompleted
 	ev.Path = w.dest
 	ev.Received = w.n
-	s.Emit(ev)
+	end()
 }
 
 // downloadWriter is the ResponseWriter a download handler writes to. The

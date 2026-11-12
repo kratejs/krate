@@ -74,17 +74,28 @@ func TestGUIFileDropFromARealDrag(t *testing.T) {
 	dragSrcURIs.Unlock()
 
 	logCh := make(chan string, 8)
-	guiSrv.mux.HandleFunc("/dropzone", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = io.WriteString(w, dropZonePage)
-	})
-	guiSrv.mux.HandleFunc("/droplog", func(w http.ResponseWriter, r *http.Request) {
-		b, _ := io.ReadAll(r.Body)
-		select {
-		case logCh <- string(b):
-		default:
-		}
-		w.WriteHeader(http.StatusNoContent)
+	xdndLog.Lock()
+	xdndLog.ch = logCh
+	xdndLog.Unlock()
+	// The mux is shared by the whole package and a pattern can be registered
+	// once, so the routes outlive a run (go test -count=N) and send to the
+	// channel of the current one.
+	xdndRoutes.Do(func() {
+		guiSrv.mux.HandleFunc("/dropzone", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = io.WriteString(w, dropZonePage)
+		})
+		guiSrv.mux.HandleFunc("/droplog", func(w http.ResponseWriter, r *http.Request) {
+			b, _ := io.ReadAll(r.Body)
+			xdndLog.Lock()
+			ch := xdndLog.ch
+			xdndLog.Unlock()
+			select {
+			case ch <- string(b):
+			default:
+			}
+			w.WriteHeader(http.StatusNoContent)
+		})
 	})
 
 	drops := make(chan caps.FileDrop, 4)
@@ -209,3 +220,11 @@ func (u *urlPath) escaped() string {
 	}
 	return b.String()
 }
+
+var (
+	xdndRoutes sync.Once
+	xdndLog    struct {
+		sync.Mutex
+		ch chan string
+	}
+)

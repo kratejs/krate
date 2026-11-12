@@ -133,7 +133,9 @@ func (a *App) CancelDownload(id uint64) (err error) {
 	if !a.callMain(func() {
 		d := a.downloads[id]
 		switch {
-		case d == nil:
+		case d == nil || d.failed:
+			// A failed or cancelled download stays in the table until WebKit's
+			// finished signal releases it, but it is no longer running.
 			err = krate.Errorf("not_found", "no running download %d", id)
 		case a.dl.cancel == nil:
 			err = fmt.Errorf("%w: downloads cannot be cancelled in this WebKitGTK", krate.ErrUnsupported)
