@@ -777,6 +777,11 @@ func (a *App) waitCookieGone(origin, name string) ([]caps.Cookie, error) {
 
 // Bits of COREWEBVIEW2_BROWSING_DATA_KINDS.
 const (
+	dataFileSystems   = 0x1
+	dataIndexedDB     = 0x2
+	dataLocalStorage  = 0x4
+	dataWebSQL        = 0x8
+	dataCacheStorage  = 0x10
 	dataAllDOMStorage = 0x20
 	dataCookies       = 0x40
 	dataDiskCache     = 0x100
@@ -800,15 +805,30 @@ func (a *App) ClearSiteData(o caps.ClearSiteDataOptions) error {
 		parts = append(parts, part{"disk cache", dataDiskCache})
 	}
 	if all || o.Storage {
-		parts = append(parts, part{"DOM storage", dataAllDOMStorage}, part{"service workers", dataServiceWork})
+		// The parts of ALL_DOM_STORAGE one by one: on windows-11-arm the
+		// combined kind never completed, and one call each names the culprit.
+		parts = append(parts,
+			part{"file systems", dataFileSystems},
+			part{"IndexedDB", dataIndexedDB},
+			part{"local storage", dataLocalStorage},
+			part{"cache storage", dataCacheStorage},
+			part{"WebSQL", dataWebSQL},
+			part{"service workers", dataServiceWork})
 	}
 	for _, p := range parts {
 		if err := a.clearKinds(o, p.kinds, p.name); err != nil {
+			// Chromium removed WebSQL; a runtime without it may never
+			// complete the call. There is nothing of it to clear.
+			if p.kinds == dataWebSQL && errors.Is(err, errClearTimeout) {
+				continue
+			}
 			return err
 		}
 	}
 	return nil
 }
+
+var errClearTimeout = errors.New("did not finish in time")
 
 // clearKinds runs one ClearBrowsingData call and waits for it.
 func (a *App) clearKinds(o caps.ClearSiteDataOptions, kinds uint32, name string) error {
@@ -871,7 +891,7 @@ func (a *App) clearKinds(o caps.ClearSiteDataOptions, kinds uint32, name string)
 	case err := <-done:
 		return err
 	case <-time.After(30 * time.Second):
-		return fmt.Errorf("windows: clearing %s did not finish in time", name)
+		return fmt.Errorf("windows: clearing %s: %w", name, errClearTimeout)
 	}
 }
 
