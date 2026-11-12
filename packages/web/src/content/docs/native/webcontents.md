@@ -1,7 +1,7 @@
 ---
-title: Web Contents - Print, Find, Zoom, Capture, Downloads and Cookies
+title: Web contents: print, find, zoom, downloads
 order: 12
-description: Control what a view shows from the SDK - the print dialog and PDF output, find in page, zoom, a PNG capture of a view, the downloads the page starts, and cookies and site data - with the platform behavior of each.
+description: Print and PDF, find in page, zoom, capturing a view, downloads and cookies for the views of a Krate Native app.
 ---
 
 # Web contents
