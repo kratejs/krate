@@ -710,6 +710,10 @@ type Config struct {
 	// navigation and omits the router from the shared runtime.
 	SPA *bool `json:"spa,omitempty"`
 
+	// SmoothScroll enables Lenis smooth scrolling. `true` uses the Lenis
+	// defaults; an object tunes it. Nil leaves it off and ships no Lenis code.
+	SmoothScroll *SmoothScrollConfig `json:"smoothScroll,omitempty"`
+
 	// ViewTransitions controls the View Transitions API integration. "" or
 	// "auto" (default) enables it (same-document SPA morphs + a cross-document
 	// @view-transition rule); "off" disables it.
