@@ -5,6 +5,10 @@
 import { call } from "./index.js";
 import { subscribe, type SubscribeOptions } from "./events.js";
 
+// The functions are declared under prefixed names and exported under their short ones:
+// the bundler hoists top-level declarations of every module into one scope, so two modules
+// that both declare a `list` would call each other when imported as namespaces.
+
 export type DownloadState = "started" | "progress" | "completed" | "cancelled" | "failed";
 
 export interface DownloadInfo {
@@ -32,28 +36,30 @@ export interface DownloadOptions {
 }
 
 /** configure sets where downloads are saved. */
-export function configure(options: DownloadOptions): Promise<void> {
+function downloadsConfigure(options: DownloadOptions): Promise<void> {
   return call("krate/downloads.configure", [{ dir: options.dir ?? "", ask: options.ask ?? false }]);
 }
 
 /** list resolves to the running downloads and the most recent finished ones. */
-export function list(): Promise<DownloadInfo[]> {
+function downloadsList(): Promise<DownloadInfo[]> {
   return call("krate/downloads.list");
 }
 
 /** cancel stops a running download. */
-export function cancel(id: number): Promise<void> {
+function downloadsCancel(id: number): Promise<void> {
   return call("krate/downloads.cancel", [id]);
 }
 
 /** onEvent calls fn for every download event until the returned function is called. */
-export function onEvent(fn: (e: DownloadEvent) => void, opts?: SubscribeOptions): () => void {
+function downloadsOnEvent(fn: (e: DownloadEvent) => void, opts?: SubscribeOptions): () => void {
   return subscribe<DownloadEvent>("krate/downloads.events", fn, opts);
 }
 
 /** onDone calls fn once for each download that completes, with its final path. */
-export function onDone(fn: (e: DownloadInfo) => void, opts?: SubscribeOptions): () => void {
-  return onEvent((e) => {
+function downloadsOnDone(fn: (e: DownloadInfo) => void, opts?: SubscribeOptions): () => void {
+  return downloadsOnEvent((e) => {
     if (e.state === "completed") fn(e);
   }, opts);
 }
+
+export { downloadsConfigure as configure, downloadsList as list, downloadsCancel as cancel, downloadsOnEvent as onEvent, downloadsOnDone as onDone };

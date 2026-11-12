@@ -7,6 +7,10 @@
 // https origin and has cookies. clearSiteData works everywhere.
 import { call } from "./index.js";
 
+// The functions are declared under prefixed names and exported under their short ones:
+// the bundler hoists top-level declarations of every module into one scope, so two modules
+// that both declare a `get` or `list` would call each other when imported as namespaces.
+
 export type SameSite = "none" | "lax" | "strict" | "";
 
 export interface Cookie {
@@ -43,17 +47,17 @@ export interface ClearOptions {
 }
 
 /** list resolves to the cookies that would be sent to the URL. */
-export function list(url = ""): Promise<Cookie[]> {
+function cookiesList(url = ""): Promise<Cookie[]> {
   return call("krate/cookies.list", [url]);
 }
 
 /** get resolves to the cookie with this name, or null. */
-export function get(name: string, url = ""): Promise<Cookie | null> {
+function cookiesGet(name: string, url = ""): Promise<Cookie | null> {
   return call("krate/cookies.get", [name, url]);
 }
 
 /** set stores a cookie. */
-export function set(cookie: CookieInput, url = ""): Promise<void> {
+function cookiesSet(cookie: CookieInput, url = ""): Promise<void> {
   const expires = cookie.expires instanceof Date ? cookie.expires.getTime() : (cookie.expires ?? null);
   return call("krate/cookies.set", [
     {
@@ -71,14 +75,16 @@ export function set(cookie: CookieInput, url = ""): Promise<void> {
 }
 
 /** delete removes the cookies with this name. */
-function deleteCookie(name: string, url = ""): Promise<void> {
+function cookiesDelete(name: string, url = ""): Promise<void> {
   return call("krate/cookies.delete", [name, url]);
 }
-export { deleteCookie as delete };
+export { cookiesDelete as delete };
 
 /** clearSiteData removes cookies, cache and storage; with no options, all of it. */
-export function clearSiteData(options: ClearOptions = {}): Promise<void> {
+function cookiesClearSiteData(options: ClearOptions = {}): Promise<void> {
   return call("krate/cookies.clearSiteData", [
     { cookies: options.cookies ?? false, cache: options.cache ?? false, storage: options.storage ?? false },
   ]);
 }
+
+export { cookiesList as list, cookiesGet as get, cookiesSet as set, cookiesClearSiteData as clearSiteData };

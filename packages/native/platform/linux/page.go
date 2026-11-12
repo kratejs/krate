@@ -271,14 +271,26 @@ func keyCallback(widget, ev, ref uintptr) uintptr {
 // Find state and callbacks.
 
 func (a *App) connectPage(v *view) {
-	api := a.api
-	api.gSignalConnectData(v.widget, "key-press-event", cbKey, uintptr(v.ref), 0, 0)
-	if a.pg.findController != nil {
-		if fc := a.pg.findController(v.widget); fc != 0 {
-			api.gSignalConnectData(fc, "found-text", cbFound, uintptr(v.ref), 0, 0)
-			api.gSignalConnectData(fc, "failed-to-find-text", cbFindFailed, uintptr(v.ref), 0, 0)
-		}
+	a.api.gSignalConnectData(v.widget, "key-press-event", cbKey, uintptr(v.ref), 0, 0)
+	v.findConnected = false
+}
+
+// findControllerOf returns the find controller of a view, connecting its
+// signals on first use. Creating it earlier, while the view is made, changes
+// when the first page loads relative to the pane layout, so it waits for the
+// first search. Main thread.
+func (a *App) findControllerOf(v *view) uintptr {
+	p := a.pg
+	if p.findController == nil || p.findSearch == nil {
+		return 0
 	}
+	fc := p.findController(v.widget)
+	if fc != 0 && !v.findConnected {
+		a.api.gSignalConnectData(fc, "found-text", cbFound, uintptr(v.ref), 0, 0)
+		a.api.gSignalConnectData(fc, "failed-to-find-text", cbFindFailed, uintptr(v.ref), 0, 0)
+		v.findConnected = true
+	}
+	return fc
 }
 
 // OnFind sets the handler for find results.
@@ -337,11 +349,7 @@ func (w *Window) Find(ref caps.ViewRef, text string, o caps.FindOptions) (err er
 			return
 		}
 		p := w.app.pg
-		if p.findController == nil || p.findSearch == nil {
-			err = unsupported("find in page")
-			return
-		}
-		fc := p.findController(v.widget)
+		fc := w.app.findControllerOf(v)
 		if fc == 0 {
 			err = unsupported("find in page")
 			return
@@ -380,13 +388,12 @@ func (w *Window) StopFind(ref caps.ViewRef) (err error) {
 			return
 		}
 		p := w.app.pg
-		if p.findController == nil {
+		fc := w.app.findControllerOf(v)
+		if fc == 0 {
 			err = unsupported("find in page")
 			return
 		}
-		if fc := p.findController(v.widget); fc != 0 {
-			p.findFinish(fc)
-		}
+		p.findFinish(fc)
 		v.find.Reset()
 	}) {
 		return errors.New("krate: application is not running")

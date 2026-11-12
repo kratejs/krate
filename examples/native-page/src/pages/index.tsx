@@ -49,21 +49,6 @@ async function step(name: string, fn: () => Promise<string>) {
   }
 }
 
-function wait<T>(subscribe: (done: (v: T) => void) => () => void, ms = 15000): Promise<T> {
-  return new Promise((resolve, reject) => {
-    let stop = () => {};
-    const timer = setTimeout(() => {
-      stop();
-      reject(new Error('timed out'));
-    }, ms);
-    stop = subscribe((v) => {
-      clearTimeout(timer);
-      stop();
-      resolve(v);
-    });
-  });
-}
-
 async function run() {
   await step('zoom', async () => {
     const before = await zoom();
@@ -75,11 +60,22 @@ async function run() {
   });
 
   await step('find', async () => {
-    const first = wait<FindEvent>((done) => onFind((e) => e.final && done(e)));
-    await new Promise((r) => setTimeout(r, 300)); // let the subscription open
-    await find('foo');
-    const e = await first;
-    await stopFind();
+    // Events are not replayed: ask again if the stream was not open yet.
+    let e: FindEvent | undefined;
+    const heard: FindEvent[] = [];
+    const stopListening = onFind((ev) => ev.final && heard.push(ev));
+    try {
+      for (let attempt = 0; attempt < 5 && !e; attempt++) {
+        await new Promise((r) => setTimeout(r, 300));
+        await find('foo');
+        for (let i = 0; i < 20 && !heard.length; i++) await new Promise((r) => setTimeout(r, 100));
+        e = heard[0];
+      }
+    } finally {
+      stopListening();
+      await stopFind();
+    }
+    if (!e) throw new Error('no find event');
     if (e.matches !== 3) throw new Error(`found ${e.matches} matches, want 3`);
     return `${e.matches} matches`;
   });
@@ -101,17 +97,29 @@ async function run() {
   await step('download', async () => {
     const dir = (await appDataDir()) + '/downloads';
     await downloads.configure({ dir });
-    const done = wait<downloads.DownloadInfo>((fn) => downloads.onDone(fn));
-    await new Promise((r) => setTimeout(r, 300));
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob(['hello from the page'], { type: 'text/plain' }));
-    a.download = 'page.txt';
-    document.body.appendChild(a);
-    a.click();
-    const info = await done;
-    const text = await readText(info.path);
-    if (text !== 'hello from the page') throw new Error(`file holds ${JSON.stringify(text)}`);
-    return info.path;
+    const seen: string[] = [];
+    const stop = downloads.onEvent((e) => seen.push(e.state));
+    try {
+      await new Promise((r) => setTimeout(r, 300));
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob(['hello from the page'], { type: 'text/plain' }));
+      a.download = 'page.txt';
+      document.body.appendChild(a);
+      a.click();
+      // The list is the source of truth; the events are checked as well.
+      let info: downloads.DownloadInfo | undefined;
+      for (let i = 0; i < 150 && !info; i++) {
+        await new Promise((r) => setTimeout(r, 100));
+        info = (await downloads.list()).find((d) => d.state === 'completed' || d.state === 'failed' || d.state === 'cancelled');
+      }
+      if (!info) throw new Error('the download did not finish');
+      if (info.state !== 'completed') throw new Error(`the download ${info.state}: ${info.error}`);
+      const text = await readText(info.path);
+      if (text !== 'hello from the page') throw new Error(`file holds ${JSON.stringify(text)}`);
+      return `${info.path} (events: ${seen.join(',') || 'none'})`;
+    } finally {
+      stop();
+    }
   });
 
   await step('cookies', async () => {

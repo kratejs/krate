@@ -4,6 +4,10 @@
 import { call } from "./index.js";
 import { subscribe, type SubscribeOptions } from "./events.js";
 
+// The functions are declared under prefixed names and exported under their short ones: the
+// bundler hoists top-level declarations of every module into one scope, so two modules that
+// both declare a `find` or `capture` would call each other when imported as namespaces.
+
 export type PageSize = "A3" | "A4" | "A5" | "Letter" | "Legal" | "Tabloid" | { width: number; height: number };
 
 export interface Margins {
@@ -50,7 +54,7 @@ export interface FindEvent {
 }
 
 /** print opens the system print dialog for the view. */
-export function print(view = ""): Promise<void> {
+function pagePrint(view = ""): Promise<void> {
   return call("krate/page.print", [view]);
 }
 
@@ -58,7 +62,7 @@ export function print(view = ""): Promise<void> {
  * printToPdf renders the view to a PDF and resolves to its bytes. Write them
  * with @krate/app/fs.writeFile, or hand them to Go host code.
  */
-export function printToPdf(options: PdfOptions = {}): Promise<Uint8Array> {
+function pagePrintToPdf(options: PdfOptions = {}): Promise<Uint8Array> {
   const { view = "", pageSize, margins, landscape, printBackground } = options;
   const o: Record<string, unknown> = { landscape: landscape ?? false, printBackground: printBackground ?? false };
   if (typeof pageSize === "string") o.pageSize = pageSize;
@@ -77,7 +81,7 @@ export function printToPdf(options: PdfOptions = {}): Promise<Uint8Array> {
  * count through onFind. Call it again with `continue: true` to step through
  * the matches.
  */
-export function find(text: string, options: FindOptions = {}): Promise<void> {
+function pageFind(text: string, options: FindOptions = {}): Promise<void> {
   const { view = "", backward, matchCase, noWrap } = options;
   return call("krate/page.find", [
     view,
@@ -87,26 +91,28 @@ export function find(text: string, options: FindOptions = {}): Promise<void> {
 }
 
 /** stopFind clears the highlight of the search. */
-export function stopFind(view = ""): Promise<void> {
+function pageStopFind(view = ""): Promise<void> {
   return call("krate/page.stopFind", [view]);
 }
 
 /** onFind calls fn with the result of every find until the returned function is called. */
-export function onFind(fn: (e: FindEvent) => void, opts?: SubscribeOptions): () => void {
+function pageOnFind(fn: (e: FindEvent) => void, opts?: SubscribeOptions): () => void {
   return subscribe<FindEvent>("krate/page.findEvents", fn, opts);
 }
 
 /** zoom resolves to the zoom factor of the view; 1 is 100 percent. */
-export function zoom(view = ""): Promise<number> {
+function pageZoom(view = ""): Promise<number> {
   return call("krate/page.zoom", [view]);
 }
 
 /** setZoom sets the zoom factor, between 0.25 and 5. Ctrl/Cmd plus, minus and 0 also change it. */
-export function setZoom(factor: number, view = ""): Promise<void> {
+function pageSetZoom(factor: number, view = ""): Promise<void> {
   return call("krate/page.setZoom", [view, factor]);
 }
 
 /** capture resolves to a PNG of the visible area of the view. */
-export function capture(view = ""): Promise<Uint8Array> {
+function pageCapture(view = ""): Promise<Uint8Array> {
   return call("krate/page.capture", [view]);
 }
+
+export { pagePrint as print, pagePrintToPdf as printToPdf, pageFind as find, pageStopFind as stopFind, pageOnFind as onFind, pageZoom as zoom, pageSetZoom as setZoom, pageCapture as capture };
