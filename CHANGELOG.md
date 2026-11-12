@@ -162,6 +162,11 @@ host code runs in the native process. Names and options may change before releas
 
 ### Fixed
 
+- Module constants are declared in the order their initializers need: the name after a dot
+  (`getClient().signal`) no longer counts as a read of a constant called `signal`. That false
+  dependency put `const signal = hostSignal.signal` from `@krate/app` before `hostSignal`, so
+  pages importing `@krate/app/window` threw on load (the `examples/native-views` views never
+  opened).
 - A named `async function` used as an event handler keeps `async` in the hydration code (it
   was emitted as a plain function, so `await` was a syntax error).
 - A capitalized arrow constant imported by a page and used in a handler is declared once (the
