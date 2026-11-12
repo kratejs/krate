@@ -442,18 +442,23 @@ func TestCallCancellation(t *testing.T) {
 			resp.Body.Close()
 		}
 	}()
-	time.Sleep(50 * time.Millisecond)
-	r.post("/__krate/cancel", func() []byte {
-		e := wire.NewEncoder()
-		e.Raw([]byte(`{"ids":[5]}`))
-		return e.Frame()
-	}())
-	deadline := time.Now().Add(5 * time.Second)
+	cancelCall := func() {
+		r.post("/__krate/cancel", func() []byte {
+			e := wire.NewEncoder()
+			e.Raw([]byte(`{"ids":[5]}`))
+			return e.Frame()
+		}())
+	}
+	// A cancel that arrives before the call is in flight is ignored (the id is
+	// unknown then), so on a slow machine it is sent again until the JS side
+	// sees the abort.
+	deadline := time.Now().Add(10 * time.Second)
 	for r.call("c.abortSeen", nil).OK != true {
 		if time.Now().After(deadline) {
 			t.Fatal("the JS function never saw its AbortSignal fire")
 		}
-		time.Sleep(5 * time.Millisecond)
+		cancelCall()
+		time.Sleep(20 * time.Millisecond)
 	}
 	cancel()
 	<-done
