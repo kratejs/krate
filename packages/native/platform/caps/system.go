@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 )
 
 // OS integration capabilities: badge and progress, displays, power, theme and
@@ -59,8 +60,10 @@ type Badger interface {
 	SetProgress(p Progress) error
 }
 
-// Display describes one monitor. Coordinates are logical pixels in the space
-// WindowState.X and Y and WindowControls.SetPosition use, y growing downward.
+// Display describes one monitor. Coordinates are in the space WindowState.X
+// and Y and WindowControls.SetPosition use (the origin is the top-left of the
+// primary display on macOS and Windows, y grows downward), in the units of
+// that space: points on macOS, device pixels on Windows.
 type Display struct {
 	// ID is stable while the display configuration does not change.
 	ID   string
@@ -258,4 +261,19 @@ type LoginItems interface {
 type Attention interface {
 	// RequestAttention starts (on) or cancels (!on) the request.
 	RequestAttention(on bool) error
+}
+
+// TopLeftY converts the y of a rectangle in Cocoa screen coordinates (origin
+// at the bottom-left of the primary display, y growing upward) to the
+// top-left origin used for windows and displays. primaryHeight is the height
+// of the primary display.
+func TopLeftY(primaryHeight, y, height float64) int {
+	return int(math.Round(primaryHeight - y - height))
+}
+
+// OnBatteryFromSourceType reads the string IOPSGetProvidingPowerSourceType
+// returns ("AC Power", "Battery Power" or "UPS Power"): true only for the
+// battery.
+func OnBatteryFromSourceType(s string) bool {
+	return strings.EqualFold(strings.TrimSpace(s), "Battery Power")
 }

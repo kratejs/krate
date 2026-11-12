@@ -45,6 +45,7 @@ type view struct {
 	hRes       unsafe.Pointer // this view's WebResourceRequested handler
 	hNav       unsafe.Pointer // NavigationCompleted
 	hClose     unsafe.Pointer // WindowCloseRequested
+	hFail      unsafe.Pointer // ProcessFailed
 	hMsg       unsafe.Pointer // WebMessageReceived (streamed responses)
 	streams    streamTable
 	pending    []func()
@@ -88,6 +89,7 @@ func (a *App) createWindow(cfg WindowConfig, w *Window) error {
 	w.pv = a.registerView(w, true)
 	w.pv.path = cfg.Path
 	a.windows[hwnd] = w
+	a.windowCreated(hwnd)
 	a.everOpened = true
 	_, _, _ = pShowWindow.Call(hwnd, swShow)
 	_, _, _ = pUpdateWindow.Call(hwnd)
@@ -208,6 +210,7 @@ func (v *view) controllerCompleted(hr, controller uintptr) {
 		return sOK
 	})
 	vcall(v.webview, wvAddWindowCloseRequested, uintptr(v.hClose), uintptr(unsafe.Pointer(&token)))
+	a.connectProcessFailed(v)
 
 	v.setupStreams()
 	a.tuneMemory(v)
@@ -255,7 +258,7 @@ func (v *view) closeController() {
 		comRelease(v.webview)
 		v.webview = nil
 	}
-	for _, h := range []*unsafe.Pointer{&v.hRes, &v.hNav, &v.hClose, &v.hMsg} {
+	for _, h := range []*unsafe.Pointer{&v.hRes, &v.hNav, &v.hClose, &v.hMsg, &v.hFail} {
 		if *h != nil {
 			comRelease(*h)
 			*h = nil

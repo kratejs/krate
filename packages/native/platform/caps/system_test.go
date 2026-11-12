@@ -2,6 +2,7 @@ package caps
 
 import (
 	"image"
+	"image/color"
 	"math"
 	"testing"
 )
@@ -131,5 +132,40 @@ func TestBadgeImage(t *testing.T) {
 	}
 	if c := n12.NRGBAAt(16, 2); c.R != 0xD9 {
 		t.Errorf("circle fill = %+v", c)
+	}
+}
+
+func TestTopLeftY(t *testing.T) {
+	// A 1080-high primary display; a window at the bottom-left origin with
+	// height 600 sits 480 from the top.
+	if got := TopLeftY(1080, 0, 600); got != 480 {
+		t.Errorf("got %d", got)
+	}
+	// A display stacked above the primary has a positive Cocoa y and a
+	// negative top-left y.
+	if got := TopLeftY(1080, 1080, 1440); got != -1440 {
+		t.Errorf("got %d", got)
+	}
+	if got := TopLeftY(900.4, 25, 875); got != 0 {
+		t.Errorf("menu bar offset: got %d", got)
+	}
+}
+
+func TestOnBatteryFromSourceType(t *testing.T) {
+	for in, want := range map[string]bool{"Battery Power": true, " battery power\n": true, "AC Power": false, "UPS Power": false, "": false} {
+		if got := OnBatteryFromSourceType(in); got != want {
+			t.Errorf("%q = %v", in, got)
+		}
+	}
+}
+
+func TestBGRAPremultiplied(t *testing.T) {
+	img := image.NewNRGBA(image.Rect(0, 0, 2, 1))
+	img.SetNRGBA(0, 0, color.NRGBA{R: 200, G: 100, B: 50, A: 255})
+	img.SetNRGBA(1, 0, color.NRGBA{R: 200, G: 100, B: 50, A: 128})
+	got := BGRAPremultiplied(img)
+	want := []byte{50, 100, 200, 255, 25, 50, 100, 128}
+	if string(got) != string(want) {
+		t.Errorf("got %v want %v", got, want)
 	}
 }

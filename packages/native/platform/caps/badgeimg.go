@@ -98,3 +98,19 @@ func BadgeImage(text string, size int) *image.NRGBA {
 	}
 	return img
 }
+
+// BGRAPremultiplied returns the pixels of img as top-down
+// BGRA bytes with premultiplied alpha, the layout of a 32-bit Windows bitmap
+// used for a taskbar overlay icon.
+func BGRAPremultiplied(img *image.NRGBA) []byte {
+	b := img.Bounds()
+	out := make([]byte, 0, b.Dx()*b.Dy()*4)
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			c := img.NRGBAAt(x, y)
+			a := uint32(c.A)
+			out = append(out, byte(uint32(c.B)*a/255), byte(uint32(c.G)*a/255), byte(uint32(c.R)*a/255), c.A)
+		}
+	}
+	return out
+}
