@@ -264,10 +264,6 @@ func (b *Bundler) planExportRenames(mods []*Module, dynamic map[string]bool) exp
 	plan := exportPlan{renames: map[string]map[string]string{}}
 	owners := map[string]map[string]bool{}
 	for _, mod := range mods {
-		// A package's own copies are out of the project's hands.
-		if inNodeModules(mod.Path) {
-			continue
-		}
 		for _, stmt := range mod.Program.Body {
 			exp, ok := stmt.(*ast.ExportStmt)
 			if !ok || exp.Default || exp.ReexportSource != "" {
@@ -339,12 +335,17 @@ func (b *Bundler) planExportRenames(mods []*Module, dynamic map[string]bool) exp
 	for _, mod := range mods {
 		byPath[mod.Path] = mod
 	}
+	// A package module moves like a project one: its renamed copy is private to
+	// this bundle, and every consumer of its exports is a visible import here.
 	movable := func(mod *Module) bool {
-		return !mod.IsEntry && !inNodeModules(mod.Path) && !pinned[mod.Path] && !dynamic[mod.Path] && !ownsExports(mod)
+		return !mod.IsEntry && !pinned[mod.Path] && !dynamic[mod.Path] && !ownsExports(mod)
 	}
 
-	clashNames := make([]string, 0, len(imported))
-	for name, from := range imported {
+	// Two modules that both export a name collide in the page's namespace
+	// whether or not the page imports it from both: a module calling its own
+	// export would otherwise find the other module's declaration.
+	clashNames := make([]string, 0, len(owners))
+	for name, from := range owners {
 		if len(from) > 1 {
 			clashNames = append(clashNames, name)
 		}
@@ -353,7 +354,7 @@ func (b *Bundler) planExportRenames(mods []*Module, dynamic map[string]bool) exp
 	for _, name := range clashNames {
 		var group []*Module
 		for _, mod := range mods {
-			if imported[name][mod.Path] {
+			if owners[name][mod.Path] {
 				group = append(group, mod)
 			}
 		}
@@ -378,7 +379,7 @@ func (b *Bundler) planExportRenames(mods []*Module, dynamic map[string]bool) exp
 			}
 			plan.renames[mod.Path][name] = name + b.privateSuffix(mod.Path)
 		}
-		if len(stuck) > 1 {
+		if len(stuck) > 1 && len(imported[name]) > 1 {
 			var files []string
 			for _, mod := range stuck {
 				files = append(files, filepath.Base(mod.Path))

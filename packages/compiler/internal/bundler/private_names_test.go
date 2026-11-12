@@ -247,7 +247,7 @@ func importSpecs(mod *Module, base string) []ast.NamedImport {
 func TestSameNamedExportsMoveAndImportersFollow(t *testing.T) {
 	dir := writeModules(t, map[string]string{
 		"a.tsx":    "export function Card() { return <p />; }\nexport const unused = 1;\n",
-		"b.tsx":    "export function Card() { return <b />; }\nexport const unused = 2;\n",
+		"b.tsx":    "export function Card() { return <b />; }\nexport const other = 2;\n",
 		"page.tsx": "import { Card as A } from './a';\nimport { Card as B } from './b';\nexport default function P() { return <main><A /><B /></main>; }\n",
 	})
 	bundle, err := New(dir).Bundle(filepath.Join(dir, "page.tsx"))
@@ -277,9 +277,9 @@ func TestSameNamedExportsMoveAndImportersFollow(t *testing.T) {
 	if specs := importSpecs(moduleNamed(t, bundle, "page.tsx"), "./a"); len(specs) != 1 || specs[0].Remote != "Card" {
 		t.Errorf("import of a changed: %+v", specs)
 	}
-	// An export that nobody imports under a clashing name is left alone.
-	if !b["unused"] {
-		t.Errorf("unrelated export renamed: %v", b)
+	// An export that only one module declares is left alone.
+	if !b["other"] || !a["unused"] {
+		t.Errorf("unrelated export renamed: a %v, b %v", a, b)
 	}
 }
 
@@ -461,4 +461,44 @@ func renderNames(prog *ast.Program) string {
 		return true
 	})
 	return strings.Join(out, ",")
+}
+
+// Two modules that export the same name collide in the page's one namespace
+// even when the page imports it from only one of them: menu's onMenu calls its
+// own onClick, and the page imports tray's. Before, menu's onClick was dropped
+// and onMenu subscribed to tray clicks (@krate/app/menu and @krate/app/tray).
+func TestExportDeclaredTwiceMovesWhenImportedOnce(t *testing.T) {
+	for _, pkg := range []string{"", "node_modules/pkg/"} {
+		t.Run("dir="+pkg, func(t *testing.T) {
+			dir := t.TempDir()
+			files := map[string]string{
+				pkg + "menu.ts":  "export function onClick(fn) { return 'menu:' + fn; }\nexport function onMenu(fn) { return onClick(fn); }\n",
+				pkg + "tray.ts":  "export function onClick(fn) { return 'tray:' + fn; }\n",
+				"page.tsx": "import { onMenu } from './" + pkg + "menu';\nimport { onClick } from './" + pkg + "tray';\n" +
+					"export default function P() { return <main onClick={() => { onMenu(1); onClick(2); }} />; }\n",
+			}
+			for name, src := range files {
+				p := filepath.Join(dir, filepath.FromSlash(name))
+				if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(p, []byte(src), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			bundle, err := New(dir).Bundle(filepath.Join(dir, "page.tsx"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := collisionWarnings(t, bundle); len(got) != 0 {
+				t.Errorf("the collision should be resolved: %+v", got)
+			}
+			menu, tray := topNames(moduleNamed(t, bundle, "menu.ts").Program), topNames(moduleNamed(t, bundle, "tray.ts").Program)
+			for name := range menu {
+				if tray[name] {
+					t.Errorf("menu.ts and tray.ts both declare %s: menu %v, tray %v", name, menu, tray)
+				}
+			}
+		})
+	}
 }

@@ -12,6 +12,7 @@ import (
 
 	"github.com/evanw/esbuild/pkg/api"
 	"github.com/kratejs/krate/packages/compiler/ast"
+	"github.com/kratejs/krate/packages/compiler/internal/bundler"
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/fsutil"
 	"github.com/kratejs/krate/packages/compiler/internal/irtree"
@@ -376,8 +377,15 @@ func writeIslandImportLines(sb *strings.Builder, imports []irtree.ExternalImport
 		case imp.Default:
 			fmt.Fprintf(sb, "import %s from %q;\n", imp.Local, imp.Source)
 		default:
-			if imp.Remote != "" && imp.Remote != imp.Local {
-				fmt.Fprintf(sb, "import { %s as %s } from %q;\n", imp.Remote, imp.Local, imp.Source)
+			// An island is bundled from the original sources, which still
+			// export the name the bundler may have moved (bundler.OriginalName).
+			remote := imp.Remote
+			if remote == "" {
+				remote = imp.Local
+			}
+			remote = bundler.OriginalName(remote)
+			if remote != imp.Local {
+				fmt.Fprintf(sb, "import { %s as %s } from %q;\n", remote, imp.Local, imp.Source)
 			} else {
 				fmt.Fprintf(sb, "import { %s } from %q;\n", imp.Local, imp.Source)
 			}
