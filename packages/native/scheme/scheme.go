@@ -62,12 +62,19 @@ type Options struct {
 // windowOf returns the window a request belongs to: the native identity when
 // there is one, otherwise what the page claims.
 func (s *server) windowOf(r *http.Request) string {
+	w, _ := s.identity(r)
+	return w
+}
+
+// identity is windowOf that also reports whether the window is a native
+// identity (bound by the platform) rather than the page's claim.
+func (s *server) identity(r *http.Request) (window string, native bool) {
 	if s.o.Identify != nil {
 		if w, native := s.o.Identify(r); native {
-			return w
+			return w, true
 		}
 	}
-	return r.Header.Get(windowHdr)
+	return r.Header.Get(windowHdr), false
 }
 
 // Event describes one piece of host traffic.

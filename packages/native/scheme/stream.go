@@ -18,8 +18,11 @@ type outFrame struct {
 }
 
 type stream struct {
-	id       string
-	window   string
+	id     string
+	window string
+	// native is set when window is the identity the platform bound to the
+	// opening request; only a request from the same native view may open it.
+	native   bool
 	ctx      context.Context
 	cancel   context.CancelFunc
 	opened   bool          // guarded by server.mu
@@ -46,11 +49,11 @@ func (st *stream) send(data []byte, final bool) error {
 
 // startStream registers a stream and parks its producer until the stream is
 // opened. It returns the call's result frame.
-func (s *server) startStream(window string, c call, f StreamFunc) []byte {
+func (s *server) startStream(window string, native bool, c call, f StreamFunc) []byte {
 	id := "s" + strconv.FormatInt(s.nextID.Add(1), 10)
 	ctx, cancel := context.WithCancel(context.Background())
 	st := &stream{
-		id: id, window: window, ctx: ctx, cancel: cancel,
+		id: id, window: window, native: native, ctx: ctx, cancel: cancel,
 		open: make(chan struct{}), out: make(chan outFrame), finished: make(chan struct{}),
 	}
 	s.mu.Lock()
@@ -134,8 +137,17 @@ func (s *server) startStream(window string, c call, f StreamFunc) []byte {
 
 func (s *server) handleStream(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimPrefix(r.URL.Path, streamPath)
+	// Stream ids are a counter. A stream opened from a native view can be
+	// read only from that view: the producer runs with the opener's
+	// permissions, and another view must not take its values. Without a
+	// native identity (browser mode, the private sockets) the ids are all
+	// there is, as for calls.
+	window, native := s.identity(r)
 	s.mu.Lock()
 	st := s.streams[id]
+	if st != nil && st.native && (!native || window != st.window) {
+		st = nil
+	}
 	if st != nil && !st.opened {
 		st.opened = true
 	} else {

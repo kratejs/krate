@@ -120,7 +120,12 @@ and its scope. The `x-krate-window` header a page sets is ignored in a native
 window. So a view with `permissions: ["kv"]` cannot reach `fs` by sending the
 id of a wider view or window, and a message's `from` field (below) is the real
 sender. A request from a webview the shell cannot place gets a scope that allows
-nothing.
+nothing. An id names exactly one window or view from the moment it is chosen: a
+view id that a window or view holds, or that `window.open` has handed out, is
+refused with `already_exists`, and `window.open` skips ids that views took, so
+closing a window never removes the scope of a view. Event streams and gated
+signals follow the same identity: a stream started from one view can be read only
+from that view.
 
 Two limits remain. Every view of every window is on the same origin
 (`krate://app`, `https://app.localhost`), so pages can read each other's
