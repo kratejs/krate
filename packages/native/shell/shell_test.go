@@ -2,6 +2,7 @@ package shell
 
 import (
 	"bytes"
+	"github.com/kratejs/krate/packages/native/platform/caps"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
@@ -43,6 +44,27 @@ func TestParseManifestDefaults(t *testing.T) {
 	m, err = ParseManifest([]byte(`{"appId":"a.b","window":{"keepAlive":true}}`), "app.json")
 	if err != nil || !m.Window.KeepAlive {
 		t.Errorf("keepAlive true lost: %v %+v", err, m.Window)
+	}
+}
+
+func TestManifestContextMenu(t *testing.T) {
+	for in, want := range map[string]caps.ContextMenuMode{
+		``: caps.ContextMenuDefault, `"default"`: caps.ContextMenuDefault, `"none"`: caps.ContextMenuNone, `"custom"`: caps.ContextMenuCustom,
+	} {
+		field := ""
+		if in != "" {
+			field = `,"contextMenu":` + in
+		}
+		m, err := ParseManifest([]byte(`{"appId":"a.b","window":{"title":"x"`+field+`}}`), "app.json")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p, _ := m.Window.ContextMenuPolicy(); p.Mode != want {
+			t.Errorf("contextMenu %s = %q, want %q", in, p.Mode, want)
+		}
+	}
+	if _, err := ParseManifest([]byte(`{"appId":"a.b","window":{"contextMenu":"popup"}}`), "app.json"); err == nil || !strings.Contains(err.Error(), "contextMenu") {
+		t.Errorf("unknown mode: %v", err)
 	}
 }
 

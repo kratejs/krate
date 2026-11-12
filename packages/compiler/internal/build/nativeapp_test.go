@@ -147,7 +147,7 @@ func TestNativeAppBuildsExample(t *testing.T) {
 	b := newNativeBuilder(t, root)
 	// Cfg from the example's own config is not loaded here; the builder
 	// gets the same native block the example declares.
-	b.Cfg.Native = &config.NativeConfig{AppID: "com.example.tasks", ProductName: "Native Tasks", Version: "1.0.0", Window: config.NativeWindow{Width: 960, Height: 640, KeepAlive: true}, Permissions: []string{"dialog", "tray", "clipboard:read"}}
+	b.Cfg.Native = &config.NativeConfig{AppID: "com.example.tasks", ProductName: "Native Tasks", Version: "1.0.0", Window: config.NativeWindow{Width: 960, Height: 640, KeepAlive: true, ContextMenu: "custom"}, Permissions: []string{"dialog", "tray", "clipboard:read"}}
 	compile := hasGoHostPackage(t)
 	res, err := b.BuildNativeApp(NativeAppOptions{SkipGoCompile: !compile})
 	if err != nil {
@@ -168,7 +168,7 @@ func TestNativeAppBuildsExample(t *testing.T) {
 		t.Errorf("app.json permissions = %q", got)
 	}
 	win := m["window"].(map[string]any)
-	if win["title"] != "Native Tasks" || win["width"] != float64(960) || win["height"] != float64(640) || win["resizable"] != true || win["path"] != "/" || win["keepAlive"] != true {
+	if win["title"] != "Native Tasks" || win["width"] != float64(960) || win["height"] != float64(640) || win["resizable"] != true || win["path"] != "/" || win["keepAlive"] != true || win["contextMenu"] != "custom" {
 		t.Errorf("window = %v", win)
 	}
 	fb := m["fallbacks"].([]any)

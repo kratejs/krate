@@ -81,6 +81,8 @@ type NativeWindowMeta struct {
 	Permissions *[]string `json:"permissions,omitempty"`
 	// KeepAlive is native.window.keepAlive.
 	KeepAlive bool `json:"keepAlive,omitempty"`
+	// ContextMenu is native.window.contextMenu ("" means default).
+	ContextMenu string `json:"contextMenu,omitempty"`
 }
 
 // NativeFallback maps a dynamic route to the prerendered shell page the shell
@@ -317,6 +319,7 @@ func (b *Builder) BuildNativeApp(opts NativeAppOptions) (*NativeAppResult, error
 	m.Features = &resolved
 	m.Window.Permissions = eff.Window.Permissions
 	m.Window.KeepAlive = eff.Window.KeepAlive
+	m.Window.ContextMenu = eff.Window.ContextMenu
 	m.Plugins = b.NativePluginNames()
 	if !opts.Derive {
 		m.Permissions = b.pluginDevPermissions(m.Permissions)

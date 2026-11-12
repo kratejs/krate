@@ -511,6 +511,15 @@ func (a *app) runNative() error {
 		if a.plug != nil {
 			a.plug.Start(platApp, a.sdk)
 		}
+		if pol, _ := man.Window.ContextMenuPolicy(); pol.Mode != caps.ContextMenuDefault {
+			if cm, ok := platApp.(caps.ContextMenus); ok {
+				if err := cm.SetContextMenu(0, 0, pol); err != nil {
+					openErr = fmt.Errorf("shell: window.contextMenu: %w", err)
+					platApp.Quit()
+					return
+				}
+			}
+		}
 		path := man.Window.Path
 		if wp := man.Window.Permissions; wp != nil {
 			if err := a.perms.Scope("main", *wp); err != nil {
