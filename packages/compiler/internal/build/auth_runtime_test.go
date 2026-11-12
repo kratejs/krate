@@ -165,6 +165,11 @@ export async function GET(request: Request) {
   return Response.json({ session: await auth.auth(request) });
 }
 `,
+		"middleware.ts": `import { auth } from "./src/auth";
+export function middleware(request: Request) {
+  return auth.middleware(request);
+}
+`,
 		"src/api/webauthn.ts": `import { verifyRegistration, verifyAuthentication } from "` + imp + `/webauthn.js";
 const fixtures = ` + string(fixtures) + `;
 export function GET() {
@@ -188,6 +193,7 @@ export function GET() {
 			Providers: []config.AuthProvider{{ID: "github"}},
 			Pages:     config.AuthPages{SignIn: "/login"},
 			TwoFactor: config.AuthTwoFactor{Enabled: true, Issuer: "Embedded"},
+			Protect:   []config.AuthProtect{{Source: "/dashboard"}, {Source: "/api/private", Status: 401}},
 		}
 	})
 	var routes []string
@@ -204,6 +210,10 @@ export function GET() {
 	}
 	if ws := b.RuntimeCompatWarnings(); len(ws) > 0 {
 		t.Errorf("@krate/auth uses APIs the embedded runtime lacks: %v", ws)
+	}
+
+	if err := b.BuildMiddleware(); err != nil {
+		t.Fatalf("building the middleware: %v", err)
 	}
 
 	rt := jsruntime.NewAPIRouteRuntime(apiBundleDir(b.Cfg.OutDir))
@@ -318,6 +328,50 @@ export function GET() {
 			if r.CredentialID == "" || r.Counter != 1 || !r.UserVerified || !r.ForgedRejected {
 				t.Errorf("%s: %+v", r.Name, r)
 			}
+		}
+	})
+
+	t.Run("middleware uses the protect rules from krate.config", func(t *testing.T) {
+		mwPath := filepath.Join(root, ".krate", "middleware.js")
+		mw := jsruntime.NewLazyMiddlewareRuntime(mwPath)
+		mw.SetEnv(map[string]string{"AUTH_SECRET": authTestSecret})
+		t.Cleanup(mw.Close)
+		g := &middlewareGate{rt: mw, file: mwPath}
+		page := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, "page") })
+		h := g.wrap(page)
+		do := func(path, cookie string) *httptest.ResponseRecorder {
+			req := httptest.NewRequest("GET", "http://example.com"+path, nil)
+			if cookie != "" {
+				req.Header.Set("Cookie", cookie)
+			}
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+			return rec
+		}
+		if rec := do("/open", ""); rec.Code != 200 || rec.Body.String() != "page" {
+			t.Errorf("unprotected path: %d %q", rec.Code, rec.Body)
+		}
+		rec := do("/dashboard/settings", "")
+		loc := rec.Header().Get("Location")
+		if rec.Code != 302 || !strings.Contains(loc, "/login?callbackUrl=%2Fdashboard%2Fsettings") {
+			t.Errorf("anonymous page request: %d %q", rec.Code, loc)
+		}
+		if rec := do("/api/private/x", ""); rec.Code != 401 {
+			t.Errorf("anonymous api request: %d %q", rec.Code, rec.Body)
+		}
+
+		a := newAuthHTTP(t, srv.URL)
+		a.postForm("/api/auth/callback/credentials", map[string]string{"email": "heidi@example.com", "password": "pw"})
+		u, _ := url.Parse(srv.URL)
+		var cookies []string
+		for _, c := range a.client.Jar.Cookies(u) {
+			cookies = append(cookies, c.Name+"="+c.Value)
+		}
+		if rec := do("/dashboard/settings", strings.Join(cookies, "; ")); rec.Code != 200 || rec.Body.String() != "page" {
+			t.Errorf("signed in request: %d %q (cookies %v)", rec.Code, rec.Body, cookies)
+		}
+		if rec := do("/dashboard", "krate-auth.session-token=garbage"); rec.Code != 302 {
+			t.Errorf("forged cookie must not pass: %d", rec.Code)
 		}
 	})
 }
