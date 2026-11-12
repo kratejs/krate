@@ -102,6 +102,7 @@ type cliFlags struct {
 	Scriptc       bool
 	ScriptcFailOn string
 	Pkg           nativePkgFlags
+	Update        updateFlags
 }
 
 // exitHooks run, last registered first, before the process exits, so the run

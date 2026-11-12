@@ -168,12 +168,26 @@ type NativeBundleLinux struct {
 	Formats []string `json:"formats,omitempty"`
 }
 
+var nativeChannelRe = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,31}$`)
+
 // NativeUpdater configures in-app updates.
 type NativeUpdater struct {
 	// URL is the update manifest URL; {target} expands to the platform.
 	URL string `json:"url,omitempty"`
 	// PublicKey verifies update signatures.
 	PublicKey string `json:"publicKey,omitempty"`
+	// Channel fills {channel} in URL; default "stable".
+	Channel string `json:"channel,omitempty"`
+	// MaxStarts is how many starts a freshly updated version gets to confirm
+	// a healthy start before the next launch restores the previous version
+	// (default 1). HealthTimeout is the seconds one start may take to
+	// confirm (default 60).
+	MaxStarts     int `json:"maxStarts,omitempty"`
+	HealthTimeout int `json:"healthTimeout,omitempty"`
+	// Confirm is "auto" (default: the shell confirms a healthy start after
+	// the first page was served) or "app" (the app calls
+	// updater.markHealthy()).
+	Confirm string `json:"confirm,omitempty"`
 }
 
 // nativePermissionsJSON is a copy of packages/native/sdk/permission/names.json,
@@ -453,6 +467,17 @@ func (c *Config) validateNative() (warnings []string, err error) {
 		if !strings.HasPrefix(u.URL, "https://") {
 			return nil, nativeErr("updater.url", fmt.Sprintf("must be an https URL, got %q", u.URL),
 				"use a URL such as \"https://acme.com/updates/{target}.json\"")
+		}
+		if u.Channel != "" && !nativeChannelRe.MatchString(u.Channel) {
+			return nil, nativeErr("updater.channel", fmt.Sprintf("%q is not a channel name", u.Channel),
+				"use lowercase letters, digits, dots, underscores and dashes, for example \"beta\"")
+		}
+		if u.MaxStarts < 0 || u.HealthTimeout < 0 {
+			return nil, nativeErr("updater", "maxStarts and healthTimeout cannot be negative", "omit them for the defaults (1 start, 60 seconds)")
+		}
+		if u.Confirm != "" && u.Confirm != "auto" && u.Confirm != "app" {
+			return nil, nativeErr("updater.confirm", fmt.Sprintf("%q is not \"auto\" or \"app\"", u.Confirm),
+				"\"auto\" lets the shell confirm a healthy start; \"app\" waits for updater.markHealthy()")
 		}
 	}
 	return warnings, nil

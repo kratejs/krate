@@ -205,6 +205,13 @@ func Analyze(root string, cfg *config.Config, p *native.Placement, opts Options)
 	}
 	sort.Strings(c.res.Permissions)
 	c.res.Permissions = pruneImplied(c.res.Permissions)
+	// native.updater links the updater area even when no code calls it: its
+	// start-up check restores the previous version after a failed update.
+	if cfg != nil {
+		if n := cfg.EffectiveNative(); n != nil && n.Updater != nil {
+			c.areas["updater"] = true
+		}
+	}
 	for a := range c.areas {
 		c.res.UIAreas = append(c.res.UIAreas, a)
 	}

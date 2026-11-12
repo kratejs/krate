@@ -11,6 +11,8 @@
 package pkg
 
 import (
+	"github.com/kratejs/krate/packages/native/updater"
+
 	"bytes"
 	"crypto/ed25519"
 	"fmt"
@@ -109,6 +111,19 @@ type Options struct {
 	UpdateBaseURL string
 	// Notes goes into latest-<target>.json.
 	Notes string
+	// DeltaFrom lists directories (or files) that hold the update files of
+	// earlier releases; a patch from each of the newest DeltaCount versions
+	// older than this one is generated.
+	DeltaFrom []string
+	// DeltaCount defaults to 3.
+	DeltaCount int
+	// Channel names the release channel; the feed is then written as
+	// latest-<channel>-<os>-<arch>.json.
+	Channel string
+	// Rollout, Critical and MinVersion are copied into the feed.
+	Rollout    *updater.Rollout
+	Critical   bool
+	MinVersion string
 	// Signer, when set, signs the staged tree before archives are made and
 	// the installers after (see Signer).
 	Signer Signer
@@ -126,6 +141,8 @@ type Artifact struct {
 	Update bool
 	// Signature is the base64 updater signature of an update artifact.
 	Signature string
+	// Detail is a short note printed next to the file.
+	Detail string
 }
 
 // Result lists what Package produced.

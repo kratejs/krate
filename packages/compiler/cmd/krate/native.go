@@ -42,6 +42,8 @@ func printNativeUsage(w io.Writer) {
 	fmt.Fprintf(w, "  sign       Sign the packaged app (codesign, signtool/osslsigncode, gpg) and rebuild the archives\n")
 	fmt.Fprintf(w, "  notarize   Notarize and staple the signed macOS app\n")
 	fmt.Fprintf(w, "  keygen     Create the Ed25519 key pair that signs update files\n")
+	fmt.Fprintf(w, "  rollout    Change the staged rollout, critical flag or minimum version of written update feeds\n")
+	fmt.Fprintf(w, "  patch      Write one signed delta update between two update files\n")
 	fmt.Fprintf(w, "  plugin     plugin init <name> [dir]: create a native plugin (default dir native-plugins/<name>)\n")
 	fmt.Fprintf(w, "  doctor     Check the Go toolchain, shell binary, system webview, packaging tools and host runtime (--json)\n\n")
 	fmt.Fprintf(w, "Build flags:\n")
@@ -56,6 +58,10 @@ func printNativeUsage(w io.Writer) {
 	fmt.Fprintf(w, "  --package        Package the build for --target; with --release, each of the targets (see: krate native package)\n")
 	fmt.Fprintf(w, "\nPackage flags: --format, --sign, --notarize, --identity, --keychain-profile, --pfx, --thumbprint,\n")
 	fmt.Fprintf(w, "  --gpg-key, --notes, --update-base-url, --key-out (see docs/native/packaging)\n")
+	fmt.Fprintf(w, "  --delta-from <dir>[,<dir>] --delta-count <n>   Write delta updates from earlier releases found there\n")
+	fmt.Fprintf(w, "  --channel <name>  Write latest-<channel>-<target>.json\n")
+	fmt.Fprintf(w, "  --rollout <percent> [--rollout-start <RFC3339>] [--rollout-ramp-hours <h>]  Staged rollout\n")
+	fmt.Fprintf(w, "  --critical, --min-version <v>   Offer the update regardless of the rollout\n")
 	fmt.Fprintf(w, "\nProfile flags:\n")
 	fmt.Fprintf(w, "  --out <file>     Profile path (default native.release.pgo, ./native.pgo)\n")
 	fmt.Fprintf(w, "  --browser        Run the app in browser mode and print its URL\n")
@@ -105,6 +111,12 @@ func runNative(flags cliFlags, args []string) {
 		return
 	case "keygen":
 		runNativeKeygen(flags)
+		return
+	case "rollout":
+		runNativeRollout(flags)
+		return
+	case "patch":
+		runNativePatch(flags)
 		return
 	case "doctor":
 		runNativeDoctor(flags, append([]string{"native"}, args[2:]...))

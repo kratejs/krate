@@ -27,6 +27,8 @@ type nativePkgFlags struct {
 	TimestampURL            string
 }
 
+// Update-related flags live in updateFlags (native_update.go).
+
 var pkgValuedFlags = map[string]bool{
 	"--format": true, "--identity": true, "--entitlements": true, "--keychain-profile": true,
 	"--gpg-key": true, "--notes": true, "--update-base-url": true, "--key-out": true,
@@ -47,9 +49,18 @@ func parsePkgFlag(f *cliFlags, args []string, i *int) (bool, error) {
 	case "--notarize":
 		f.Pkg.Notarize = true
 		return true, nil
+	case "--critical":
+		f.Update.Critical = true
+		return true, nil
+	case "--uncritical":
+		f.Update.Uncritical = true
+		return true, nil
+	case "--halt":
+		f.Update.Halt = true
+		return true, nil
 	}
 	name, inline, hasInline := strings.Cut(a, "=")
-	if !pkgValuedFlags[name] {
+	if !pkgValuedFlags[name] && !updateValuedFlags[name] {
 		return false, nil
 	}
 	val := inline
@@ -59,6 +70,9 @@ func parsePkgFlag(f *cliFlags, args []string, i *int) (bool, error) {
 		}
 		*i++
 		val = args[*i]
+	}
+	if updateValuedFlags[name] {
+		return true, f.Update.set(name, val)
 	}
 	p := &f.Pkg
 	switch name {
@@ -157,9 +171,15 @@ func (c *pkgContext) options(flags cliFlags) (pkg.Options, error) {
 	if err != nil {
 		return pkg.Options{}, err
 	}
+	rollout, err := flags.Update.rollout()
+	if err != nil {
+		return pkg.Options{}, err
+	}
 	return pkg.Options{
 		Meta: c.meta, Payload: pkg.Payload{OS: c.goos, Arch: c.goarch}, OutDir: c.pkgDir, Formats: flags.Pkg.Formats,
 		UpdaterKey: key, UpdateBaseURL: flags.Pkg.UpdateBaseURL, Notes: notesArg(flags.Pkg.Notes), Log: os.Stderr,
+		DeltaFrom: flags.Update.DeltaFrom, DeltaCount: flags.Update.DeltaCount, Channel: flags.Update.Channel,
+		Rollout: rollout, Critical: flags.Update.Critical, MinVersion: flags.Update.MinVersion,
 	}, nil
 }
 
@@ -188,6 +208,9 @@ func printPackageResult(c *pkgContext, res *pkg.Result) {
 		extra := ""
 		if a.Update {
 			extra = " (update file)"
+		}
+		if a.Detail != "" {
+			extra = " (" + a.Detail + ")"
 		}
 		fmt.Printf("    %-10s %s%s\n", a.Format, rel(a.Path), extra)
 	}
