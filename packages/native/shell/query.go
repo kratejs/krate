@@ -25,6 +25,10 @@ const (
 // startWait is a variable so tests can shorten it.
 var startWait = defaultStartWait
 
+// pingEvery is how often a single-view query checks that its page is still
+// the one showing.
+var pingEvery = 500 * time.Millisecond
+
 // queryResults matches the pages' answers to the queries waiting for them.
 // Only dev builds route requests here.
 type queryResults struct {
@@ -37,6 +41,7 @@ type pending struct {
 	started chan struct{} // closed when the page runs the script
 	gone    chan struct{} // closed when the page unloads before answering
 	result  chan []byte
+	doc     string // the document token the script started in
 }
 
 func (q *queryResults) open() (int, *pending) {
@@ -79,10 +84,29 @@ func (q *queryResults) serve(w http.ResponseWriter, r *http.Request) bool {
 	if p != nil {
 		switch r.URL.Query().Get("phase") {
 		case "start":
+			q.mu.Lock()
+			if p.doc == "" {
+				p.doc = string(body)
+			}
+			q.mu.Unlock()
 			select {
 			case <-p.started:
 			default:
 				close(p.started)
+			}
+		case "ping":
+			// A ping answered by another document means the page that ran
+			// the query has gone (sendBeacon cannot reach krate://app, so
+			// this is how WebKit notices a navigation).
+			q.mu.Lock()
+			moved := p.doc != "" && string(body) != p.doc
+			q.mu.Unlock()
+			if moved {
+				select {
+				case <-p.gone:
+				default:
+					close(p.gone)
+				}
 			}
 		case "gone":
 			select {
@@ -106,9 +130,18 @@ func (q *queryResults) serve(w http.ResponseWriter, r *http.Request) bool {
 // then posts the value (a promise is awaited) back as JSON. A page that
 // unloads before answering reports that instead, so a query racing a
 // navigation fails at once.
+// docToken names the current document: set once per page load, so a new
+// page after a navigation has a different one.
+const docToken = `(globalThis.__krateDoc??=Math.random().toString(36).slice(2)+Date.now())`
+
+// pingScript reports the current document's token for a pending query.
+func pingScript(id int) string {
+	return fmt.Sprintf(`fetch(%q,{method:"POST",body:`+docToken+`}).catch(()=>{})`, fmt.Sprintf("%s?id=%d&phase=ping", queryPath, id))
+}
+
 func queryScript(id int, expr string) string {
 	u := fmt.Sprintf("%s?id=%d", queryPath, id)
-	return fmt.Sprintf(`(async()=>{try{await fetch(%q,{method:"POST",body:"1"})}catch(_){return}const gone=()=>{navigator.sendBeacon(%q,"1")};addEventListener("pagehide",gone);let b;try{const v=await (%s);b=JSON.stringify({ok:true,v:v===undefined?null:v})}catch(e){b=JSON.stringify({ok:false,error:e&&e.message!==undefined?String(e.name||"Error")+": "+e.message+(e.stack?"\n"+e.stack:""):String(e)})}removeEventListener("pagehide",gone);try{await fetch(%q,{method:"POST",body:b})}catch(_){}})()`,
+	return fmt.Sprintf(`(async()=>{try{await fetch(%q,{method:"POST",body:`+docToken+`})}catch(_){return}const gone=()=>{navigator.sendBeacon(%q,"1")};addEventListener("pagehide",gone);let b;try{const v=await (%s);b=JSON.stringify({ok:true,v:v===undefined?null:v})}catch(e){b=JSON.stringify({ok:false,error:e&&e.message!==undefined?String(e.name||"Error")+": "+e.message+(e.stack?"\n"+e.stack:""):String(e)})}try{await fetch(%q,{method:"POST",body:b})}catch(_){}removeEventListener("pagehide",gone)})()`,
 		u+"&phase=start", u+"&phase=gone", expr, u)
 }
 
@@ -116,7 +149,7 @@ func queryScript(id int, expr string) string {
 // JSON-encoded value, awaiting a returned promise. It needs Dev. The first
 // window to answer wins.
 func (c *Control) Query(expr string) (string, error) {
-	return c.query(c.Eval, expr)
+	return c.query(c.Eval, expr, false)
 }
 
 // QueryView is Query for one view, named by its SDK id (a window's primary
@@ -135,7 +168,7 @@ func (c *Control) QueryView(view, expr string) (string, error) {
 	if !found {
 		return "", fmt.Errorf("no view %q (open views: %s)", view, strings.Join(ids, ", "))
 	}
-	return c.query(func(js string) error { return c.a.sdk.EvalView(view, js) }, expr)
+	return c.query(func(js string) error { return c.a.sdk.EvalView(view, js) }, expr, true)
 }
 
 // Views lists the open views.
@@ -155,7 +188,10 @@ func (c *Control) Emit(area, payload string) error {
 	return c.a.sdk.Inject(area, []byte(payload))
 }
 
-func (c *Control) query(eval func(js string) error, expr string) (string, error) {
+// query runs expr through eval. With one view (single), it also pings the
+// view while waiting, so a navigation away from the page ends the query at
+// once instead of at the timeout.
+func (c *Control) query(eval func(js string) error, expr string, single bool) (string, error) {
 	if !c.a.opts.Dev {
 		return "", errors.New("query needs --dev")
 	}
@@ -174,23 +210,45 @@ func (c *Control) query(eval func(js string) error, expr string) (string, error)
 			return "", fmt.Errorf("query: the page did not run the script within %s", queryTimeout)
 		}
 	}
-	select {
-	case body := <-p.result:
-		var res struct {
-			OK    bool            `json:"ok"`
-			V     json.RawMessage `json:"v"`
-			Error string          `json:"error"`
-		}
-		if err := json.Unmarshal(body, &res); err != nil {
-			return "", fmt.Errorf("query: unreadable answer: %v", err)
-		}
-		if !res.OK {
-			return "", errors.New(res.Error)
-		}
-		return string(res.V), nil
-	case <-p.gone:
-		return "", errors.New("query: the page unloaded before it answered")
-	case <-deadline:
-		return "", fmt.Errorf("query: no answer from the page after %s", queryTimeout)
+	var ping <-chan time.Time
+	if single {
+		t := time.NewTicker(pingEvery)
+		defer t.Stop()
+		ping = t.C
 	}
+	for {
+		select {
+		case body := <-p.result:
+			return decodeAnswer(body)
+		case <-ping:
+			_ = eval(pingScript(id))
+			continue
+		case <-p.gone:
+			// The answer may have arrived just before the page left.
+			select {
+			case body := <-p.result:
+				return decodeAnswer(body)
+			default:
+			}
+			return "", errors.New("query: the page unloaded before it answered")
+		case <-deadline:
+			return "", fmt.Errorf("query: no answer from the page after %s", queryTimeout)
+		}
+	}
+}
+
+// decodeAnswer reads the answer the query script posted.
+func decodeAnswer(body []byte) (string, error) {
+	var res struct {
+		OK    bool            `json:"ok"`
+		V     json.RawMessage `json:"v"`
+		Error string          `json:"error"`
+	}
+	if err := json.Unmarshal(body, &res); err != nil {
+		return "", fmt.Errorf("query: unreadable answer: %v", err)
+	}
+	if !res.OK {
+		return "", errors.New(res.Error)
+	}
+	return string(res.V), nil
 }

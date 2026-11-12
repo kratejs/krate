@@ -129,3 +129,61 @@ func TestServeControlQuery(t *testing.T) {
 		t.Errorf("replies = %q", got)
 	}
 }
+
+// navigatingPage plays a single view for query(..., single=true): it starts
+// the query in document "a", never answers, and answers pings from doc.
+func navigatingPage(c *Control, doc func() string, answerAfterPings int, answer string) func(string) error {
+	var mu sync.Mutex
+	pings := 0
+	post := func(q, body string) {
+		req := httptest.NewRequest(http.MethodPost, queryPath+"?"+q, strings.NewReader(body))
+		rw := httptest.NewRecorder()
+		c.a.results.serve(rw, req)
+	}
+	pingRe := regexp.MustCompile(`id=(\d+)&phase=ping`)
+	return func(js string) error {
+		if m := idRe.FindStringSubmatch(js); m != nil {
+			go post("id="+m[1]+"&phase=start", "a")
+			return nil
+		}
+		if m := pingRe.FindStringSubmatch(js); m != nil {
+			mu.Lock()
+			pings++
+			n := pings
+			mu.Unlock()
+			go func() {
+				post("id="+m[1]+"&phase=ping", doc())
+				if answerAfterPings > 0 && n == answerAfterPings {
+					post("id="+m[1], answer)
+				}
+			}()
+		}
+		return nil
+	}
+}
+
+func TestQueryViewEndsWhenTheViewShowsAnotherDocument(t *testing.T) {
+	old := pingEvery
+	pingEvery = 20 * time.Millisecond
+	defer func() { pingEvery = old }()
+	c := newQueryControl(&scriptWindow{})
+	start := time.Now()
+	_, err := c.query(navigatingPage(c, func() string { return "b" }, 0, ""), "1", true)
+	if err == nil || !strings.Contains(err.Error(), "unloaded") {
+		t.Fatalf("err = %v", err)
+	}
+	if time.Since(start) > 5*time.Second {
+		t.Error("a navigated view must not wait for the timeout")
+	}
+}
+
+func TestQueryViewKeepsWaitingOnTheSameDocument(t *testing.T) {
+	old := pingEvery
+	pingEvery = 20 * time.Millisecond
+	defer func() { pingEvery = old }()
+	c := newQueryControl(&scriptWindow{})
+	got, err := c.query(navigatingPage(c, func() string { return "a" }, 3, `{"ok":true,"v":"slow"}`), "1", true)
+	if err != nil || got != `"slow"` {
+		t.Fatalf("query = %q, %v", got, err)
+	}
+}

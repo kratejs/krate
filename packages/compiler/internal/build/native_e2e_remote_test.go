@@ -33,7 +33,7 @@ const remoteProbePage = `<!doctype html><title>remote</title><body>remote page<s
   r.opened = String(window.open("krate://app/"));
   r.hasSdk = typeof window.krate;
   krateRemote.postMessage({probe: r});
-  const leave = () => { location.href = "http://127.0.0.1:1/elsewhere"; setTimeout(() => krateRemote.postMessage({stillAt: location.href}), 800); };
+  const leave = () => { location.href = "http://localhost:" + location.port + "/elsewhere"; setTimeout(() => krateRemote.postMessage({stillAt: location.href}), 800); };
   addEventListener("message", e => { if (e.data && e.data.leave) leave(); else krateRemote.postMessage({echo: e.data, origin: e.origin}); });
 })();
 </script>`
@@ -208,12 +208,15 @@ func TestNativeE2ERemoteGUI(t *testing.T) {
 	}
 
 	// The origin allowlist: leaving is refused and reported; the page stays.
+	// The page leaves for localhost on the same port, another origin; not a
+	// port such as 1, which WebKit refuses before the navigation policy runs.
+	elsewhere := strings.Replace(origin, "127.0.0.1", "localhost", 1) + "/elsewhere"
 	if err := s.query(fmt.Sprintf(`postRemote(%q, {leave: true}, %q)`, view, origin), nil); err != nil {
 		t.Fatalf("post: %v", err)
 	}
 	poll("the refused navigation", func() bool {
 		for _, e := range got.Events {
-			if e.Kind == "navBlocked" && strings.Contains(e.URL, "127.0.0.1:1/elsewhere") && e.Verdict == "block" {
+			if e.Kind == "navBlocked" && strings.Contains(e.URL, elsewhere) && e.Verdict == "block" {
 				return true
 			}
 		}
