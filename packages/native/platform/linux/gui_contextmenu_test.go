@@ -323,9 +323,8 @@ func TestGUIContextCommands(t *testing.T) {
 	if err := a.ContextCommand(w.Ref(), "nonsense", ""); err == nil {
 		t.Fatal("an unknown command is an error")
 	}
-	if err := a.ContextCommand(w.Ref(), caps.CommandInspect, ""); err != nil {
-		t.Fatalf("inspect in a debug app: %v", err)
-	}
+	// Opening the inspector is not exercised: it keeps a web process alive
+	// past the window and would disturb the process-count tests.
 }
 
 // The action numbers above are hard-coded; check them against the library.
@@ -347,5 +346,32 @@ func TestContextMenuActionValues(t *testing.T) {
 		if got := *(*int32)(*(*unsafe.Pointer)(unsafe.Pointer(&v))); got != want {
 			t.Fatalf("%s = %d in WebKit, %d here", nick, got, want)
 		}
+	}
+}
+
+// The script macOS uses for hit testing is plain JavaScript; run it here so a
+// syntax slip shows up on Linux too.
+func TestGUIContextHitScript(t *testing.T) {
+	needGUI(t)
+	w := ctxWindow(t, "ctxhit")
+	a := guiApp
+	run := func(x, y int) caps.ContextMenuInfo {
+		got := make(chan string, 1)
+		a.callMain(func() { a.evalString(w.view, caps.ContextHitScript(x, y), func(s string) { got <- s }) })
+		info := caps.ContextMenuInfo{Kinds: []string{"page"}}
+		caps.ParseContextHit(<-got, &info)
+		return info
+	}
+	if i := run(40, 25); !i.Has("link") || i.LinkURL != "https://example.com/x" {
+		t.Fatalf("link: %+v", i)
+	}
+	if i := run(30, 80); !i.Has("image") || !strings.HasPrefix(i.ImageURL, "data:image/gif") {
+		t.Fatalf("image: %+v", i)
+	}
+	if i := run(100, 150); !i.Has("editable") {
+		t.Fatalf("editable: %+v", i)
+	}
+	if i := run(300, 280); i.Has("link") || i.Has("image") || i.Has("editable") {
+		t.Fatalf("blank page: %+v", i)
 	}
 }

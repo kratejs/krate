@@ -85,6 +85,9 @@ green run there is what moves a cell.
 | Native: shared web process, release and background mode | Supported | Untested | Untested | Krate Native v1 |
 | Native: lean pages and the dev Memory panel | Supported | Untested | Untested | Krate Native v1 |
 | Native: SDK dialogs, clipboard and menus | Supported | Untested | Untested | Krate Native v1 |
+| Native: rich clipboard formats | Supported | Untested | Untested | Krate Native round 4 |
+| Native: webview context menu | Supported | Untested | Untested | Krate Native round 4 |
+| Native: debugging in krate native dev | Supported | Untested | Untested | Krate Native round 4 |
 | Native: SDK notifications | Supported | Untested | Untested | Krate Native v1 |
 | Native: SDK tray and global shortcuts | Partial | Untested | Untested | Krate Native v1 |
 | Native: SDK app lifecycle | Supported | Untested | Untested | Krate Native v1 |
@@ -641,6 +644,47 @@ Known limits:
 - macOS and Windows: untested. The same Go code is built for them (cross-compile checks in CI) and the CI native job runs go test on both, but no result of a run against a real WKWebView or WebView2 window has been confirmed.
 
 Evidence: `TestGUIDialogs`, `TestGUIClipboard`, `TestGUIMenus`, `TestDialogsAreCreatedWithTheRightOptions`, `TestClipboardThroughTheSDK`, `TestMenuClickReachesGoAndTheUI`, `TestDialogRoundTrip`, `TestMenuEvents`
+
+### Native: rich clipboard formats
+
+**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+
+clipboard.write puts text, HTML and RTF on the clipboard together; readHtml, readRtf, formats, readFormat and writeFormat read and write by MIME name (UTIs on macOS, registered formats with the CF_HTML header on Windows).
+
+Known limits:
+
+- macOS and Windows: untested until the CI GUI tests (TestGUIClipboardRich) pass there.
+- HTML is stored as given on Linux, without a charset declaration.
+
+Evidence: `TestGUIClipboardRich`, `TestCFHTMLOffsets`, `TestDecodeCFHTMLFromOtherProducers`, `TestDecodeClipboardText`, `TestFormatNameMaps`, `TestClipboardRichFormats`
+
+### Native: webview context menu
+
+**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+
+native.window.contextMenu and menu.setContextMenu disable, replace (custom: event with kind, link, image, selection, spelling; answered with menu items) or extend the engine's context menu per app, window or view; built-in krate: actions for editing, spelling and Inspect Element.
+
+Known limits:
+
+- Spelling suggestions and Add to Dictionary are not exercised by any test: no spelling dictionary is available to the Linux test environment.
+- macOS and Windows: untested until TestGUIContextMenu passes in CI. Windows suggestions and Add to Dictionary are best effort.
+- Inspect Element from a custom menu opens the inspector without selecting the element on WebKitGTK.
+
+Evidence: `TestGUIContextMenuCustom`, `TestGUIContextMenuNone`, `TestGUIContextMenuExtend`, `TestGUIContextCommands`, `TestContextMenuActionValues`, `TestContextMenuSDK`, `TestManifestContextMenu`, `TestParseContextHit`
+
+### Native: debugging in krate native dev
+
+**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+
+krate native dev --debug-go builds the Go host with -N -l and runs it under a headless Delve; breakpoints in src/lib/*.go hit and a Go edit restarts it on the same address. --debug-host starts node, bun and deno host children with --inspect. --debug-config vscode writes attach configurations.
+
+Known limits:
+
+- Needs dlv installed; the integration tests skip without it unless KRATE_REQUIRE_E2E is set.
+- A debugger has to attach again after a Go edit; breakpoints are not carried over.
+- macOS and Windows: untested.
+
+Evidence: `TestNativeDebugGoHostGUI`, `TestNativeDebugGoHostRestart`, `TestChildWrap`, `TestDlvArgs`, `TestDlvDetachKillsTheProgram`, `TestFindDlvMissingHintsAtInstall`, `TestMergeLaunchJSON`, `TestResolveDebugAddr`
 
 ### Native: SDK notifications
 
