@@ -104,7 +104,10 @@ header .tools { -webkit-app-region: no-drag; }
 - `--krate-app-region: drag` as a custom property also works, for rules that
   must be computed.
 - Buttons, links, inputs and other controls inside a drag region stay clickable
-  unless you mark them `drag`.
+  unless you mark them `drag`. That includes elements with an ARIA widget role
+  (`role="button"`, `tab`, `menuitem`, ...), elements with `tabindex` 0 or more and
+  editable content, so a custom caption button built from a `div` works. See
+  [Accessibility](/docs/native/accessibility/) for what a custom title bar needs.
 - A double press maximizes the window (macOS follows the user's double click
   setting: zoom, minimize or nothing).
 

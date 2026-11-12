@@ -16,6 +16,14 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
   the real shell by `krate native test` (compiler test `TestNativeFromElectronGUI`). A real find while
   porting: a host signal reads `undefined` in the page until the host pushes its first value, so a page
   that reads `settings().theme` throws; the guide shows the guard.
+- Accessibility of the shell's own UI, checked through AT-SPI (Linux, GUI tests), NSAccessibility and AX
+  (macOS) and UI Automation (Windows). Fixed: offscreen windows are hidden from assistive technology
+  (Linux, macOS); message dialog titles reach the accessible name (Linux); split-pane dividers and panes
+  are named (Linux); tray, notification action and thumbnail button names are never empty; macOS menu bar
+  items carry their title, the status button has a label and alerts honor `default`; Windows message boxes
+  name which button means what, honor `default` and fall back to the app name as title; drag regions no
+  longer turn presses on ARIA widgets and focusable elements into window moves. See docs/native/accessibility
+  and packages/native/ACCESSIBILITY.md.
 - `krate native test` runs a project's `*.native.test.ts` files against the real shell with Node's
   test runner. The new `@krate/app/driver` module launches the app and drives pages (`evaluate`,
   `click`, `fill`, `press`, `text`, `waitFor`, `errors`, host `call`), several windows and views, and

@@ -54,6 +54,8 @@ prerendered at build time.
   dropped files.
 - [Web contents](/docs/native/webcontents/) - print and PDF, find in page, zoom,
   capturing a view, downloads and cookies.
+- [Accessibility](/docs/native/accessibility/) - what the shell guarantees to screen
+  readers and keyboard users, and what custom title bars, menus and dialogs need.
 - [Remote content](/docs/native/remote/) - web pages in views and windows with their own
   storage, an origin allowlist, request rules, user agent, proxy, certificates
   and logins, and no access to the app.

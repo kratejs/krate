@@ -207,3 +207,11 @@ func TestChromeVtables(t *testing.T) {
 		t.Errorf("webview slots %d %d", c2PutDefaultBackground, set9PutNonClientRegion)
 	}
 }
+
+func TestMakeThumbNamesEveryButton(t *testing.T) {
+	// The tooltip is the button's accessible name; an empty one falls back to the id.
+	th := makeThumb(0, &caps.ThumbButton{ID: "next"}, 0)
+	if th.mask&thbTooltip == 0 || th.tip[0] != 'n' || th.tip[3] != 't' || th.tip[4] != 0 {
+		t.Errorf("tip = %v", th.tip[:6])
+	}
+}

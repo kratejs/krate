@@ -11,8 +11,9 @@ package windows
 //     classic dialogs need no COM vtable code. Folder choice is single
 //     selection.
 //   - MessageBoxW has fixed button sets, so custom button labels are mapped
-//     to OK / OK+Cancel / Yes+No / Yes+No+Cancel by count and the labels are
-//     ignored.
+//     to OK / Yes+No / Yes+No+Cancel by count; labels that differ from the
+//     system's are named in the message text (msgbox.go), and an empty title
+//     becomes the app name.
 //   - Menu accelerators are shown as text only; there is no accelerator table.
 //   - Tray, global shortcuts and toast notifications are in tray_windows.go,
 //     hotkey_windows.go and toast_windows.go; they share the hidden utility
@@ -114,6 +115,8 @@ const (
 	bifNewDialogStyle   = 0x0040
 
 	mbOK          = 0x0
+	mbDefButton2  = 0x100
+	mbDefButton3  = 0x200
 	mbOKCancel    = 0x1
 	mbYesNoCancel = 0x3
 	mbYesNo       = 0x4
@@ -568,13 +571,17 @@ func (a *App) MessageDialog(parent caps.WindowRef, o caps.MessageDialogOptions) 
 	default:
 		flags |= mbIconInfo
 	}
-	text := o.Message
-	if o.Detail != "" {
-		text += "\n\n" + o.Detail
+	switch messageBoxDefault(o) {
+	case 1:
+		flags |= mbDefButton2
+	case 2:
+		flags |= mbDefButton3
 	}
+	text := messageBoxText(o)
+	title := messageBoxTitle(o)
 	n = -1
 	a.callMain(func() {
-		r, _, _ := pMessageBoxW.Call(owner, uintptr(unsafe.Pointer(wstr(text))), uintptr(unsafe.Pointer(wstr(o.Title))), flags)
+		r, _, _ := pMessageBoxW.Call(owner, uintptr(unsafe.Pointer(wstr(text))), uintptr(unsafe.Pointer(wstr(title))), flags)
 		switch r {
 		case idOK, idYes:
 			n = 0

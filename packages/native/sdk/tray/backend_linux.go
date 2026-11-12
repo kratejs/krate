@@ -223,6 +223,7 @@ func (s *sni) itemProps() map[string]dbusiface.Variant {
 	s.mu.Lock()
 	ic := s.icon
 	s.mu.Unlock()
+	title, tip := caps.TrayLabel(&ic, caps.AppDisplayName())
 	pm := toPixmaps(ic.PNG)
 	if pm == nil {
 		pm = []pixmap{}
@@ -230,7 +231,7 @@ func (s *sni) itemProps() map[string]dbusiface.Variant {
 	return map[string]dbusiface.Variant{
 		"Category":            {Value: "ApplicationStatus"},
 		"Id":                  {Value: os.Getenv("KRATE_APP_ID")},
-		"Title":               {Value: ic.Title},
+		"Title":               {Value: title},
 		"Status":              {Value: "Active"},
 		"WindowId":            {Value: int32(0)},
 		"IconName":            {Value: ""},
@@ -240,7 +241,7 @@ func (s *sni) itemProps() map[string]dbusiface.Variant {
 		"AttentionIconName":   {Value: ""},
 		"AttentionIconPixmap": {Value: []pixmap{}},
 		"AttentionMovieName":  {Value: ""},
-		"ToolTip":             {Value: tooltip{IconName: "", Icon: []pixmap{}, Title: ic.Tooltip, Desc: ""}},
+		"ToolTip":             {Value: tooltip{IconName: "", Icon: []pixmap{}, Title: tip, Desc: ""}},
 		"ItemIsMenu":          {Value: false},
 		"Menu":                {Value: dbusiface.ObjectPath(menuPath)},
 	}

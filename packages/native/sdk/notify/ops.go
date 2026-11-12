@@ -81,7 +81,9 @@ func Register(t *bridge.Table, env *bridge.Env) {
 			if a.ID == "" {
 				return krate.Errorf("bad_args", "%s: notification action needs an id", IDSend)
 			}
-			cn.Actions = append(cn.Actions, caps.NotificationAction{ID: a.ID, Label: a.Label})
+			ca := caps.NotificationAction{ID: a.ID, Label: a.Label}
+			ca.Label = caps.ActionLabel(ca)
+			cn.Actions = append(cn.Actions, ca)
 		}
 		out.Null()
 		return b.send(cn)

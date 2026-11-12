@@ -308,6 +308,7 @@ func (a *App) MessageDialog(parent caps.WindowRef, o caps.MessageDialogOptions) 
 			for _, b := range buttons {
 				alert.Send(sel("addButtonWithTitle:"), nsString(b))
 			}
+			makeDefaultAlertButton(alert, o.Default)
 			r := objc.Send[int](alert, sel("runModal"))
 			if i := r - nsAlertFirstButtonReturn; i >= 0 && i < len(buttons) {
 				n = i
@@ -489,7 +490,9 @@ func (a *App) SetAppMenu(items []caps.MenuItem) error {
 			userTop = nil
 			for i, it := range items {
 				label := menuLabel(it.Label)
-				top := menuItem("", 0, "", 0)
+				// The menu bar item carries the label too: VoiceOver reads the
+				// item's title, and an empty one would leave the menu unnamed.
+				top := menuItem(label, 0, "", 0)
 				top.Send(sel("setSubmenu:"), buildNSMenu(label, it.Submenu))
 				retain(top)
 				bar.Send(sel("insertItem:atIndex:"), top, 1+i)

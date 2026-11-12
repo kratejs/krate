@@ -107,6 +107,9 @@ func (a *App) newWindowRemote(opts WindowOptions, onLoad func(), rs *remoteSpec)
 	a.mu.Unlock()
 	w.pv = a.registerView(w, widget, true)
 
+	if w.offscreen {
+		hideFromAssistive(w.win)
+	}
 	api.gtkWindowSetTitle(w.win, opts.Title)
 	api.gtkWindowSetDefSize(w.win, int32(opts.Width), int32(opts.Height))
 	api.gtkWindowSetResize(w.win, b2i(opts.Resizable))

@@ -241,8 +241,9 @@ func (a *App) SetXEmbedTray(ic *caps.TrayIcon) error {
 		} else if pb != 0 {
 			s.setFromPixbuf(icon, pb)
 		}
-		s.setTooltip(icon, ic.Tooltip)
-		s.setTitle(icon, ic.Title)
+		title, tip := caps.TrayLabel(ic, caps.AppDisplayName())
+		s.setTooltip(icon, tip)
+		s.setTitle(icon, title)
 		s.setVisible(icon, 1)
 		a.replaceTrayMenu(ic.Menu)
 		return nil

@@ -216,3 +216,37 @@ func TestScriptReportsVersion(t *testing.T) {
 		t.Errorf("version %v (%T)", v, v)
 	}
 }
+
+func TestDragRegionLeavesControlsAlone(t *testing.T) {
+	// Elements are plain stubs; only the attributes regionOf reads exist.
+	const defs = `
+function el(tag, attrs, parent) {
+  return { nodeType: 1, tagName: tag, parentElement: parent || null, isContentEditable: false,
+    getAttribute: function (k) { return attrs && k in attrs ? attrs[k] : null; },
+    matches: function () { return false; } };
+}
+var bar = el("HEADER", { "data-krate-drag": "" });
+`
+	cases := map[string]string{
+		"plain":            `el("DIV", null, bar)`,
+		"native button":    `el("BUTTON", null, bar)`,
+		"role button":      `el("DIV", { role: "button" }, bar)`,
+		"role Menuitem":    `el("SPAN", { role: " Menuitem " }, bar)`,
+		"tabindex 0":       `el("DIV", { tabindex: "0" }, bar)`,
+		"tabindex -1":      `el("DIV", { tabindex: "-1" }, bar)`,
+		"role heading":     `el("H1", { role: "heading" }, bar)`,
+		"child of control": `el("SPAN", null, el("DIV", { role: "tab" }, bar))`,
+		"explicit drag":    `el("DIV", { role: "button", "data-krate-drag": "" }, bar)`,
+	}
+	want := map[string]string{
+		"plain": "drag", "native button": "no-drag", "role button": "no-drag", "role Menuitem": "no-drag",
+		"tabindex 0": "no-drag", "tabindex -1": "drag", "role heading": "drag", "child of control": "no-drag",
+		"explicit drag": "drag",
+	}
+	for name, expr := range cases {
+		got := runJS(t, defs+`__krateChrome.regionOf(`+expr+`)`)
+		if got != want[name] {
+			t.Errorf("%s: region %v, want %s", name, got, want[name])
+		}
+	}
+}
