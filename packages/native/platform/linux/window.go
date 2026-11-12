@@ -62,6 +62,12 @@ type Window struct {
 }
 
 func (a *App) newWindow(opts WindowOptions, onLoad func()) (*Window, error) {
+	return a.newWindowRemote(opts, onLoad, nil)
+}
+
+// newWindowRemote opens a window; with rs its primary view shows remote
+// content.
+func (a *App) newWindowRemote(opts WindowOptions, onLoad func(), rs *remoteSpec) (*Window, error) {
 	api := a.api
 	w := &Window{app: a, alive: true, resizable: opts.Resizable, onLoadDone: onLoad}
 	if opts.Width <= 0 {
@@ -79,7 +85,17 @@ func (a *App) newWindow(opts WindowOptions, onLoad func()) (*Window, error) {
 		api.gtkWidgetDestroy(w.win)
 		return nil, fmt.Errorf("krate: window chrome: %w", err)
 	}
-	widget := a.newView()
+	var widget uintptr
+	var part *partition
+	if rs != nil {
+		var err error
+		if part, widget, err = a.newRemoteWidget(rs); err != nil {
+			api.gtkWidgetDestroy(w.win)
+			return nil, err
+		}
+	} else {
+		widget = a.newView()
+	}
 	if widget == 0 {
 		api.gtkWidgetDestroy(w.win)
 		return nil, errors.New("krate: webkit_web_view_new failed")
@@ -95,13 +111,19 @@ func (a *App) newWindow(opts WindowOptions, onLoad func()) (*Window, error) {
 	api.gtkWindowSetDefSize(w.win, int32(opts.Width), int32(opts.Height))
 	api.gtkWindowSetResize(w.win, b2i(opts.Resizable))
 	w.fixedW, w.fixedH = opts.Width, opts.Height
-	a.applyViewSettings(w.view)
+	if rs == nil {
+		a.applyViewSettings(w.view)
+	}
 	api.gSignalConnectData(w.win, "destroy", cbDestroy, w.id, 0, 0)
 	if x := a.x; x.gtkBoxNew != nil && x.gtkWindowPresent != nil {
 		api.gSignalConnectData(w.win, "delete-event", cbDelete, w.id, 0, 0)
 		api.gSignalConnectData(w.win, "window-state-event", cbWinState, w.id, 0, 0)
 	}
-	a.connectView(w.pv)
+	if rs != nil {
+		a.setupRemote(w.pv, part, rs)
+	} else {
+		a.connectView(w.pv)
+	}
 
 	if x := a.x; x.gtkBoxNew != nil {
 		w.box = x.gtkBoxNew(1, 0)
@@ -112,7 +134,11 @@ func (a *App) newWindow(opts WindowOptions, onLoad func()) (*Window, error) {
 	}
 	_ = w.applyChrome(opts.Chrome)
 	w.applyLayout()
-	w.pv.load(opts.Path)
+	if rs != nil {
+		w.pv.loadRemote()
+	} else {
+		w.pv.load(opts.Path)
+	}
 	api.gtkWidgetShowAll(w.win)
 	a.applyAppMenu(w)
 	return w, nil

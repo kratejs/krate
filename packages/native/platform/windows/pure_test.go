@@ -39,6 +39,7 @@ func TestParseGUID(t *testing.T) {
 		iidITaskbarList3, clsidDestinationList, iidICustomDestinationList, clsidEnumerableObjectCollection,
 		iidIObjectCollection, iidIObjectArray, clsidShellLink, iidIShellLinkW, iidIPropertyStore,
 		iidWebView2Controller2, iidWebView2Settings9, fmtidTitle,
+		iidWV2Environment10, iidWV2ControllerOptions, iidWV2Settings2, iidWV2_14, iidWV2_10, iidWV2ServerCertHandler, iidWV2BasicAuthHandler, iidWV2ServerCertArgs,
 	} {
 		if _, err := parseGUID(s); err != nil {
 			t.Errorf("%s: %v", s, err)
@@ -225,6 +226,29 @@ func TestVtableLayout(t *testing.T) {
 		{dlOpCancel, 18, "DownloadOperation.Cancel"},
 		{istreamRead, 3, "IStream.Read"},
 		{istreamSeek, 5, "IStream.Seek"},
+		// Remote content.
+		{env10CreateOptions, 20, "CreateCoreWebView2ControllerOptions"},
+		{env10CreateWithOptions, 21, "CreateCoreWebView2ControllerWithOptions"},
+		{ctlOptPutProfileName, 4, "put_ProfileName"},
+		{ctlOptPutPrivate, 6, "put_IsInPrivateModeEnabled"},
+		{set2PutUserAgent, 22, "put_UserAgent"},
+		{wv14AddServerCert, 106, "add_ServerCertificateErrorDetected"},
+		{certArgsGetStatus, 3, "get_ErrorStatus"},
+		{certArgsGetUri, 4, "get_RequestUri"},
+		{certArgsPutAction, 7, "put_Action"},
+		{certArgsGetDeferral, 8, "GetDeferral"},
+		{wv10AddBasicAuth, 97, "add_BasicAuthenticationRequested"},
+		{basicArgsGetUri, 3, "get_Uri"},
+		{basicArgsGetChallenge, 4, "get_Challenge"},
+		{basicArgsGetResponse, 5, "get_Response"},
+		{basicArgsPutCancel, 7, "put_Cancel"},
+		{basicArgsGetDeferral, 8, "GetDeferral"},
+		{basicRespPutUser, 4, "put_UserName"},
+		{basicRespPutPassword, 6, "put_Password"},
+		{reqPutUri, 4, "put_Uri"},
+		{hdrSetHeader, 6, "SetHeader"},
+		{argsGetResourceContext, 7, "get_ResourceContext"},
+		{newWinArgsGetUri, 3, "get_Uri"},
 	}
 	for _, s := range slots {
 		if s.got != s.want {

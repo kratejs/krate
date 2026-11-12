@@ -49,6 +49,8 @@ type view struct {
 	cons     []objc.ID // the minimum-size constraints now active
 	find     caps.FindTracker
 	zoom     float64 // 0 until set; restored when the web view is recreated
+	// rv is set for a view that shows remote content (remote_darwin.go).
+	rv *remoteView
 }
 
 // splitState is one NSSplitView of the layout tree.
@@ -150,6 +152,14 @@ func (w *Window) currentLayout() *caps.LayoutNode {
 // currentRoute is the route the view shows according to WebKit, or the last
 // route it was told to load.
 func (v *view) currentRoute() string {
+	if v.rv != nil {
+		if v.web != 0 {
+			if u := v.web.Send(sel("URL")); u != 0 {
+				return goString(u.Send(sel("absoluteString")))
+			}
+		}
+		return v.rv.cur
+	}
 	if v.web != 0 {
 		if u := v.web.Send(sel("URL")); u != 0 {
 			if s := goString(u.Send(sel("absoluteString"))); strings.HasPrefix(s, OriginURL+"/") {
@@ -162,6 +172,13 @@ func (v *view) currentRoute() string {
 
 // load starts a navigation to path on the app origin (main thread).
 func (v *view) load(path string) {
+	if v.rv != nil {
+		// A remote view only loads what its policy allows.
+		if v.web != 0 && v.rv.policy.Decide(path) == caps.NavAllow {
+			v.web.Send(sel("loadRequest:"), cls("NSURLRequest").Send(sel("requestWithURL:"), cls("NSURL").Send(sel("URLWithString:"), nsString(path))))
+		}
+		return
+	}
 	v.route = caps.CleanRoute(path)
 	v.state = caps.ViewState{Route: v.route}
 	if v.web == 0 {
@@ -227,7 +244,9 @@ func (w *Window) AddView(o caps.ViewOptions) (ref caps.ViewRef, err error) {
 	return
 }
 
-func (w *Window) addView(o caps.ViewOptions) (caps.ViewRef, error) {
+func (w *Window) addView(o caps.ViewOptions) (caps.ViewRef, error) { return w.addViewWith(o, nil) }
+
+func (w *Window) addViewWith(o caps.ViewOptions, rs *remoteSpec) (caps.ViewRef, error) {
 	a := w.app
 	if w.closed {
 		return 0, errors.New("darwin: the window is closed")
@@ -245,7 +264,17 @@ func (w *Window) addView(o caps.ViewOptions) (caps.ViewRef, error) {
 	if w.viewByRef(beside) == nil {
 		return 0, fmt.Errorf("darwin: view %d is not in this window", beside)
 	}
-	web := a.newWebView()
+	var web objc.ID
+	var pt *partition
+	var token string
+	if rs != nil {
+		var err error
+		if web, pt, token, err = a.newRemoteWebView(rs); err != nil {
+			return 0, err
+		}
+	} else {
+		web = a.newWebView()
+	}
 	if web == 0 {
 		return 0, errors.New("darwin: WKWebView creation failed")
 	}
@@ -257,12 +286,20 @@ func (w *Window) addView(o caps.ViewOptions) (caps.ViewRef, error) {
 		release(web)
 		return 0, err
 	}
+	if rs != nil {
+		a.attachRemote(v, pt, rs, token)
+	}
 	v.minW, v.minH = o.MinWidth, o.MinHeight
 	w.snapshotRatios()
 	w.extra = append(w.extra, v)
 	w.layout = next
 	v.applyMinSize() // before the dividers are positioned: a later constraint resets them
 	w.applyLayout()
+	if rs != nil {
+		v.loadRemote()
+		emitView(a, v, caps.ViewAdded, rs.policy.Start)
+		return v.ref, nil
+	}
 	v.load(o.Path)
 	emitView(a, v, caps.ViewAdded, v.route)
 	return v.ref, nil

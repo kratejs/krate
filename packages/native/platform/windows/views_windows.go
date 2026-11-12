@@ -37,6 +37,7 @@ func (a *App) registerView(w *Window, primary bool) *view {
 }
 
 func (a *App) unregisterView(v *view) {
+	a.forgetRemote(v)
 	a.viewMu.Lock()
 	delete(a.viewOwner, v.ref)
 	a.viewMu.Unlock()
@@ -188,10 +189,12 @@ var errReleased = errors.New("windows: the window is released; Show it first")
 
 // AddView creates a view and splits it into the layout. Called from another
 // goroutine it returns once the view's webview is ready.
-func (w *Window) AddView(o caps.ViewOptions) (caps.ViewRef, error) {
+func (w *Window) AddView(o caps.ViewOptions) (caps.ViewRef, error) { return w.addViewWait(o, nil) }
+
+func (w *Window) addViewWait(o caps.ViewOptions, rs *remoteSpec) (caps.ViewRef, error) {
 	var v *view
 	var err error
-	w.app.callMain(func() { v, err = w.addView(o) })
+	w.app.callMain(func() { v, err = w.addView(o, rs) })
 	if err != nil {
 		return 0, err
 	}
@@ -208,7 +211,7 @@ func (w *Window) AddView(o caps.ViewOptions) (caps.ViewRef, error) {
 	return v.ref, nil
 }
 
-func (w *Window) addView(o caps.ViewOptions) (*view, error) {
+func (w *Window) addView(o caps.ViewOptions, rs *remoteSpec) (*view, error) {
 	a := w.app
 	switch {
 	case w.destroyed:
@@ -233,6 +236,10 @@ func (w *Window) addView(o caps.ViewOptions) (*view, error) {
 	}
 	v.minW, v.minH = o.MinWidth, o.MinHeight
 	v.path = o.Path
+	if rs != nil {
+		a.makeRemote(v, rs)
+		v.path = rs.policy.Start
+	}
 	w.extra = append(w.extra, v)
 	w.layout = next
 	w.placeViews() // the existing controllers shrink to make room
@@ -356,6 +363,12 @@ func (w *Window) NavigateView(ref caps.ViewRef, path string) (err error) {
 		v := w.viewByRef(ref)
 		if w.destroyed || v == nil {
 			err = fmt.Errorf("windows: view %d is not in this window", ref)
+			return
+		}
+		if v.rv != nil {
+			if path != "about:blank" && v.rv.policy.Decide(path) == caps.NavAllow && v.webview != nil {
+				vcall(v.webview, wvNavigate, uintptr(unsafe.Pointer(wstr(path))))
+			}
 			return
 		}
 		v.path = path

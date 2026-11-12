@@ -1736,6 +1736,159 @@
       ]
     },
     {
+      "id": "krate/remote.open",
+      "permission": "remote",
+      "area": "remote",
+      "module": "remote",
+      "exports": [
+        "openWindow"
+      ]
+    },
+    {
+      "id": "krate/remote.addView",
+      "permission": "remote",
+      "area": "remote",
+      "module": "remote",
+      "exports": [
+        "addView"
+      ]
+    },
+    {
+      "id": "krate/remote.navigate",
+      "permission": "remote",
+      "area": "remote",
+      "module": "remote",
+      "exports": [
+        "navigate"
+      ]
+    },
+    {
+      "id": "krate/remote.post",
+      "permission": "remote",
+      "area": "remote",
+      "module": "remote",
+      "exports": [
+        "post"
+      ]
+    },
+    {
+      "id": "krate/remote.messages",
+      "permission": "remote",
+      "area": "remote",
+      "module": "remote",
+      "exports": [
+        "onMessage"
+      ]
+    },
+    {
+      "id": "krate/remote.events",
+      "permission": "remote",
+      "area": "remote",
+      "module": "remote",
+      "exports": [
+        "onRemoteEvent"
+      ]
+    },
+    {
+      "id": "krate/remote.capabilities",
+      "permission": "remote",
+      "area": "remote",
+      "module": "remote",
+      "exports": [
+        "capabilities"
+      ]
+    },
+    {
+      "id": "krate/remote.setRules",
+      "permission": "remote:intercept",
+      "area": "remote",
+      "module": "remote",
+      "exports": [
+        "setRules"
+      ]
+    },
+    {
+      "id": "krate/remote.requests",
+      "permission": "remote:intercept",
+      "area": "remote",
+      "module": "remote",
+      "exports": [
+        "onRequest"
+      ]
+    },
+    {
+      "id": "krate/remote.setUserAgent",
+      "permission": "remote:network",
+      "area": "remote",
+      "module": "remote",
+      "exports": [
+        "setUserAgent"
+      ]
+    },
+    {
+      "id": "krate/remote.setProxy",
+      "permission": "remote:network",
+      "area": "remote",
+      "module": "remote",
+      "exports": [
+        "setProxy"
+      ]
+    },
+    {
+      "id": "krate/remote.setClientCertificate",
+      "permission": "remote:network",
+      "area": "remote",
+      "module": "remote",
+      "exports": [
+        "setClientCertificate"
+      ]
+    },
+    {
+      "id": "krate/remote.clearData",
+      "permission": "remote:network",
+      "area": "remote",
+      "module": "remote",
+      "exports": [
+        "clearData"
+      ]
+    },
+    {
+      "id": "krate/remote.certificates",
+      "permission": "remote:network",
+      "area": "remote",
+      "module": "remote",
+      "exports": [
+        "onCertificateError"
+      ]
+    },
+    {
+      "id": "krate/remote.answerCertificate",
+      "permission": "remote:network",
+      "area": "remote",
+      "module": "remote",
+      "exports": [
+        "onCertificateError"
+      ]
+    },
+    {
+      "id": "krate/remote.auth",
+      "permission": "remote:network",
+      "area": "remote",
+      "module": "remote",
+      "exports": [
+        "onAuth"
+      ]
+    },
+    {
+      "id": "krate/remote.answerAuth",
+      "permission": "remote:network",
+      "area": "remote",
+      "module": "remote",
+      "exports": [
+        "onAuth"
+      ]
+    },
+    {
       "id": "krate/badge.set",
       "permission": "badge",
       "area": "badge",

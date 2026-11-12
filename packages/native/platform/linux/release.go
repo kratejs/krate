@@ -70,7 +70,7 @@ func (a *App) relatedView() uintptr {
 	defer a.mu.Unlock()
 	var best *Window
 	for _, w := range a.windows {
-		if w.view != 0 && (best == nil || w.id < best.id) {
+		if w.view != 0 && w.pv.rv == nil && (best == nil || w.id < best.id) {
 			best = w
 		}
 	}
@@ -212,7 +212,12 @@ func (w *Window) revive() {
 	for range all {
 		// The first view is created first, so the others are related to it
 		// and share its web process.
-		widget := a.newView()
+		var widget uintptr
+		if rv := all[len(widgets)].rv; rv != nil {
+			_, widget, _ = a.newRemoteWidget(&remoteSpec{policy: rv.policy})
+		} else {
+			widget = a.newView()
+		}
 		if widget == 0 {
 			logf("krate: cannot recreate the webviews of window %d", w.id)
 			for _, d := range widgets {
@@ -225,8 +230,12 @@ func (w *Window) revive() {
 	}
 	w.released = false
 	for _, v := range all {
-		a.applyViewSettings(v.widget)
-		a.connectView(v)
+		if v.rv != nil {
+			a.setupRemote(v, v.rv.part, &remoteSpec{policy: v.rv.policy})
+		} else {
+			a.applyViewSettings(v.widget)
+			a.connectView(v)
+		}
 		if v.zoom != 0 && a.pg.setZoom != nil {
 			a.pg.setZoom(v.widget, v.zoom)
 		}
@@ -240,6 +249,10 @@ func (w *Window) revive() {
 	for _, v := range all {
 		if js := caps.ScrollScript(v.state.X, v.state.Y); js != "" {
 			v.scrollJS = js
+		}
+		if v.rv != nil {
+			a.api.wkViewLoadURI(v.widget, v.rv.cur)
+			continue
 		}
 		a.api.wkViewLoadURI(v.widget, Origin+caps.CleanRoute(v.route))
 	}

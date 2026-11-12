@@ -94,6 +94,8 @@ type App struct {
 	site      *siteAPI
 	dataDir   string // the website data directory
 	cookieMgr uintptr
+	rapi      *remoteAPI
+	rem       *remoteState
 
 	// Main thread only.
 	asyncCbs  map[uintptr]func(src, res uintptr)
@@ -218,6 +220,7 @@ func New(opts Options) (*App, error) {
 	app.initPage()
 	app.initDownloads()
 	app.initSiteData()
+	app.initRemote()
 	a.wkContextRegisterSchem(app.ctx, "krate", cbScheme, 0, 0)
 	sm := a.wkContextSecurityMgr(app.ctx)
 	a.wkSecSecure(sm, "krate")
@@ -274,6 +277,7 @@ func (a *App) Run(onReady func()) error {
 	if a.cleanup != nil {
 		a.cleanup()
 	}
+	a.cleanupRemote()
 	return nil
 }
 

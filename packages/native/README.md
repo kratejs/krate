@@ -100,6 +100,16 @@ from the app handler; `caps.FindTracker` follows the highlighted match for engin
 that only count. Linux (WebKitGTK) has real GUI tests; the macOS and Windows packages
 have the same tests (`gui_page_test.go`) and run them in CI.
 
+## Remote content
+
+Web pages in views and windows that cannot reach the app: `platform/caps/remote.go`
+(`RemotePolicy`, partitions, request rules and the `RemoteContent`, `RemoteWindows` and
+`RemoteViews` capabilities), the per-OS `remote.go` / `remote_darwin.go` /
+`remote_windows.go`, the `sdk/remote` area (permissions `remote`, `remote:intercept`,
+`remote:network`) and the `remote content` page of the docs, which lists the enforcement
+points for review. Linux has real GUI tests (`gui_remote_test.go`); macOS and Windows
+have the same tests and run them in CI.
+
 ## Plugins
 
 A plugin is a Go package plus a `krate-plugin.json`; `krate native dev` and

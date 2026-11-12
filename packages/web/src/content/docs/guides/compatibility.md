@@ -85,6 +85,11 @@ green run there is what moves a cell.
 | Native: print, PDF, find, zoom and capture of a view | Supported | Untested | Untested | Krate Native v1 |
 | Native: downloads started by the page | Supported | Untested | Untested | Krate Native v1 |
 | Native: cookies and site data | Supported | Untested | Untested | Krate Native v1 |
+| Native: remote views cannot reach the app | Supported | Untested | Untested | Krate Native v1 |
+| Native: remote storage partitions | Supported | Untested | Untested | Krate Native v1 |
+| Native: request rules for remote views | Supported | Untested | Untested | Krate Native v1 |
+| Native: remote user agent, proxy, certificates and logins | Supported | Untested | Untested | Krate Native v1 |
+| Native: remote message channel | Supported | Untested | Untested | Krate Native v1 |
 | Native: shared web process, release and background mode | Supported | Untested | Untested | Krate Native v1 |
 | Native: lean pages and the dev Memory panel | Supported | Supported | Supported | Krate Native v1 |
 | Native: SDK dialogs, clipboard and menus | Supported | Untested | Untested | Krate Native v1 |
@@ -677,6 +682,76 @@ Known limits:
 - macOS and Windows: untested. The same GUI tests run in CI on macos-latest and windows-latest.
 
 Evidence: `TestGUIPageCookies`, `TestCookies`, `TestCookieDomainMatches`, `TestCookieOrigin`, `TestNativeE2EPageGUI`
+
+### Native: remote views cannot reach the app
+
+**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+
+Remote content (web pages) lives in views and windows created as remote (@krate/app/remote). A remote view has its own web context, configuration or profile with no handler for the app scheme and no bridge, so fetches, iframes, images, window.open and navigations to the app fail; the shell gives requests from a remote view the empty scope; navigation is limited to the start origin plus an allowlist, with everything else opened in the system browser or dropped; permissions are denied and downloads cancelled.
+
+Known limits:
+
+- Windows resolves https://app.localhost to the loopback address, so that host is refused as a remote URL, allowed origin and navigation target.
+- Subframes follow the allowlist but never open the system browser. On WebKitGTK the policy callback does not tell main frames from frames, so a refused frame navigation of a remote page is reported with the same verdict as a top-level one.
+- Opening needs a WebView2 runtime with ICoreWebView2Environment10 (profiles) on Windows.
+- macOS and Windows: untested. The same GUI tests (gui_remote_test.go) run in CI on macos-latest and windows-latest.
+
+Evidence: `TestGUIRemoteBasics`, `TestGUIRemoteCannotReachApp`, `TestGUIRemoteNavigationRules`, `TestGUIRemoteRedirectOffOrigin`, `TestGUIRemoteViewInAppWindow`, `TestRemoteDecide`, `TestRemoteDecideModes`, `TestRemoteResolveErrors`, `TestRemoteViewsHaveNoScope`, `TestRemoteNavigateAndPost`, `TestRemoteNeedsPermission`, `TestRemoteExternalOpenIsRateLimited`, `TestNativeE2ERemoteGUI`
+
+### Native: remote storage partitions
+
+**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+
+Remote content gets its own storage partition: the default one (persistent, never the app's), named persistent ones (persist:name) and in-memory ones (name). Cookies, local storage, caches, logins and certificate decisions are not shared between partitions or with the app, and a partition can be cleared on its own.
+
+Known limits:
+
+- WebKitGTK in-memory partitions use a temporary directory removed at exit rather than WebKit's ephemeral managers, whose certificate exceptions leak between partitions.
+- macOS before 14 has no named persistent data stores: persist:name answers unsupported and the default partition is in-memory.
+- Windows clears a profile through an open view of it.
+- macOS and Windows: untested. The same GUI tests (gui_remote_test.go) run in CI on macos-latest and windows-latest.
+
+Evidence: `TestGUIRemotePartitions`, `TestPartitions`, `TestProfileName`, `TestNativeE2ERemoteGUI`
+
+### Native: request rules for remote views
+
+**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+
+Declarative request rules per partition (block, redirect, add headers, with URL match patterns) and a request stream, with capability reporting. WebKitGTK blocks with a user content filter and rewrites main-frame navigations; WKWebView with a content rule list and navigation decisions; WebView2 with WebResourceRequested on the remote view.
+
+Known limits:
+
+- WebKitGTK and WKWebView cannot redirect or add headers to subresources, and WKWebView does not observe them; capabilities() reports the level per feature.
+- Block rules on WebKit follow the content-blocker regular expression subset.
+- macOS and Windows: untested. The same GUI tests (gui_remote_test.go) run in CI on macos-latest and windows-latest.
+
+Evidence: `TestGUIRemoteInterception`, `TestMatchURLPattern`, `TestEvalRules`, `TestRuleValidation`, `TestContentBlockerJSON`, `TestRemoteRulesAndNetwork`, `TestRemoteMessagesEventsAndRequests`
+
+### Native: remote user agent, proxy, certificates and logins
+
+**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+
+A user agent per partition or view, a proxy per partition (WebKitGTK, macOS 14), certificate errors that end the load unless the app accepts the host for that partition, HTTP basic and digest logins answered by the app, and client certificates from PEM files (Linux).
+
+Known limits:
+
+- Windows has no per-partition proxy (WebView2 takes --proxy-server for the whole environment) and no client certificates from files; macOS has no client certificates (they need a keychain identity). Those calls answer unsupported.
+- macOS reports every certificate error as untrusted.
+- macOS and Windows: untested. The same GUI tests (gui_remote_test.go) run in CI on macos-latest and windows-latest.
+
+Evidence: `TestGUIRemoteUserAgent`, `TestGUIRemoteProxy`, `TestGUIRemoteTLS`, `TestGUIRemoteAuth`, `TestGUIRemoteAuthCancelled`, `TestGUIRemoteClientCertificate`, `TestRemoteCertificatesAndAuth`, `TestProxyValidate`, `TestCertErrorNames`, `TestParseChallenge`
+
+### Native: remote message channel
+
+**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+
+The app and a remote page talk only through an opt-in channel: the page calls krateRemote.postMessage, the app gets the engine-reported origin; the app posts to a target origin and the page receives a message event with the app's origin. Messages carry a per-view token, so a frame that never ran the view's script cannot forge one.
+
+Known limits:
+
+- macOS and Windows: untested. The same GUI tests (gui_remote_test.go) run in CI on macos-latest and windows-latest.
+
+Evidence: `TestGUIRemoteMessages`, `TestParseRemoteMessage`, `TestScripts`, `TestNativeE2ERemoteGUI`
 
 ### Native: shared web process, release and background mode
 

@@ -167,6 +167,10 @@
     "./extension": {
       "types": "./dist/extension.d.ts",
       "default": "./dist/extension.js"
+    },
+    "./remote": {
+      "types": "./dist/remote.d.ts",
+      "default": "./dist/remote.js"
     }
   },
   "files": [

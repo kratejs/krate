@@ -32,6 +32,7 @@ type App struct {
 	Cancelled   []uint64
 	running     map[uint64]bool
 	cookieJar   *cookieJar
+	remote      *remoteState
 
 	// Dialogs
 	FileResult   []string

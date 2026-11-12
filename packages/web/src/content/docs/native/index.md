@@ -54,6 +54,9 @@ prerendered at build time.
   dropped files.
 - [Web contents](/docs/native/webcontents/) - print and PDF, find in page, zoom,
   capturing a view, downloads and cookies.
+- [Remote content](/docs/native/remote/) - web pages in views and windows with their own
+  storage, an origin allowlist, request rules, user agent, proxy, certificates
+  and logins, and no access to the app.
 - [Release builds](/docs/native/release/) - one executable per platform, SDK
   shaking, derived permissions, per-window scopes and profile-guided builds.
 - [Native plugins](/docs/native/plugins/) - reusable native capabilities as a Go
