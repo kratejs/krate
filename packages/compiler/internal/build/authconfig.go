@@ -8,22 +8,24 @@ import (
 
 const authConfigGlobal = "__KRATE_AUTH_CONFIG__"
 
-func authDefines(cfg *config.Config) map[string]string {
+func authBanner(cfg *config.Config) string {
 	if cfg == nil || !cfg.Auth.Active() {
-		return map[string]string{authConfigGlobal: "null"}
+		return ""
 	}
 	raw, err := cfg.Auth.RuntimeJSON()
 	if err != nil {
-		return map[string]string{authConfigGlobal: "null"}
+		return ""
 	}
-	return map[string]string{authConfigGlobal: string(raw)}
+	return "globalThis." + authConfigGlobal + "=" + string(raw) + ";\n"
 }
 
-func withAuthDefines(opts *api.BuildOptions, cfg *config.Config) {
-	if opts.Define == nil {
-		opts.Define = map[string]string{}
+func withAuthConfig(opts *api.BuildOptions, cfg *config.Config) {
+	banner := authBanner(cfg)
+	if banner == "" {
+		return
 	}
-	for k, v := range authDefines(cfg) {
-		opts.Define[k] = v
+	if opts.Banner == nil {
+		opts.Banner = map[string]string{}
 	}
+	opts.Banner["js"] = banner + opts.Banner["js"]
 }
