@@ -127,7 +127,7 @@ func TestGUIChromeFixedWindowHasNoResizeBorder(t *testing.T) {
 }
 
 func TestGUIChromeClientAreaFillsTheWindow(t *testing.T) {
-	dpi := 96
+	var dpi int
 	for _, style := range []string{caps.TitleBarHidden, caps.TitleBarNone} {
 		w := chromeWin(t, caps.ChromeOptions{TitleBar: style}, true)
 		dpi = windowDPI(w.hwnd)

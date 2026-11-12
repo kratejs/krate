@@ -669,7 +669,9 @@ func writeTgz(t *testing.T, path string, files map[string]string) {
 		if err := tw.WriteHeader(&tar.Header{Name: name, Typeflag: tar.TypeReg, Mode: 0o755, Size: int64(len(body))}); err != nil {
 			t.Fatal(err)
 		}
-		tw.Write([]byte(body))
+		if _, err := tw.Write([]byte(body)); err != nil {
+			t.Fatal(err)
+		}
 	}
 	tw.Close()
 	gz.Close()

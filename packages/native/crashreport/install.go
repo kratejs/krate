@@ -10,8 +10,6 @@ import (
 	"time"
 )
 
-var installed *os.File
-
 // Install makes the Go runtime copy the output of an unhandled panic or fatal
 // error to <dir>/pending-<pid>.log, so a later process can report it. The
 // returned function ends the hook and deletes the log if nothing was written;
@@ -34,14 +32,12 @@ func Install() (uninstall func()) {
 		os.Remove(path)
 		return func() {}
 	}
-	installed = f
 	return func() {
 		_ = debug.SetCrashOutput(nil, debug.CrashOptions{})
 		f.Close()
 		if st, err := os.Stat(path); err == nil && st.Size() == 0 {
 			os.Remove(path)
 		}
-		installed = nil
 	}
 }
 

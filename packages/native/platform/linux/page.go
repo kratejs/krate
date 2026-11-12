@@ -57,7 +57,6 @@ type pageAPI struct {
 	printDialog    func(op, parent uintptr) int32
 	printSettings  func() uintptr
 	printSet       func(s uintptr, key, value string)
-	settingsPrintB func(s uintptr, on int32)
 	pageSetupNew   func() uintptr
 	pageSetOrient  func(s uintptr, o int32)
 	pageSetPaper   func(s, paper uintptr)

@@ -113,8 +113,9 @@ func TestInstallIDPersists(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Without a directory the id still lasts for the process.
-	if InstallID("") != InstallID("") {
-		t.Fatal("in-memory id unstable")
+	first := InstallID("")
+	if second := InstallID(""); first != second {
+		t.Fatalf("in-memory id unstable: %q then %q", first, second)
 	}
 }
 

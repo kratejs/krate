@@ -20,7 +20,10 @@ type macStore struct {
 	sm caps.LoginItems
 }
 
-func newStore(env *bridge.Env) store { return macStore{sm: platformLogin(env)} }
+func newStore(env *bridge.Env) store {
+	sm, _ := env.App.(caps.LoginItems)
+	return macStore{sm: sm}
+}
 
 func appID() (string, error) {
 	id := os.Getenv("KRATE_APP_ID")

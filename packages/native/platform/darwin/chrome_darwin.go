@@ -51,7 +51,6 @@ type chromeState struct {
 	vibrancy    string
 	fx          objc.ID // the NSVisualEffectView, 0 when none
 	tl          *caps.Point
-	tabID       string
 	tabMode     string
 	sheetOf     objc.ID // the parent window while this one is a sheet
 	// buttonSpacing is the distance between traffic lights, measured before
@@ -97,7 +96,7 @@ func (w *Window) applyChrome(o caps.ChromeOptions) {
 		w.setTransparent(true)
 	}
 	if o.Vibrancy != "" {
-		w.setVibrancy(o.Vibrancy)
+		_ = w.setVibrancy(o.Vibrancy) // an unsupported material leaves the window plain
 	}
 	if o.TrafficLight != nil {
 		p := *o.TrafficLight

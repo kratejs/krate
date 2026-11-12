@@ -60,7 +60,9 @@ func TestSchemeDownloadCompletes(t *testing.T) {
 		gotView, _ = ViewOf(r)
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("Content-Length", "5")
-		w.Write([]byte("hello"))
+		if _, err := w.Write([]byte("hello")); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
 	})
 	dir := t.TempDir()
 	r := newDLRig(mux, func(q DownloadRequest) string { return filepath.Join(dir, q.SuggestedName) })
@@ -92,9 +94,15 @@ func TestSchemeDownloadNames(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/cd", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Disposition", `attachment; filename="../evil.txt"`)
-		w.Write([]byte("x"))
+		if _, err := w.Write([]byte("x")); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
 	})
-	mux.HandleFunc("/dir/plain.bin", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("y")) })
+	mux.HandleFunc("/dir/plain.bin", func(w http.ResponseWriter, r *http.Request) {
+		if _, err := w.Write([]byte("y")); err != nil {
+			t.Errorf("write: %v", err)
+		}
+	})
 	dir := t.TempDir()
 	r := newDLRig(mux, func(q DownloadRequest) string { return filepath.Join(dir, q.SuggestedName) })
 	r.sd.Start(1, "krate://app/cd", "")
@@ -117,7 +125,9 @@ func TestSchemeDownloadFailures(t *testing.T) {
 		t.Fatalf("404: %+v", e)
 	}
 	// Declined destination.
-	mux.HandleFunc("/ok", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("z")) })
+	mux.HandleFunc("/ok", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("z")) // the client is declined and may hang up first
+	})
 	r2 := newDLRig(mux, func(DownloadRequest) string { return "" })
 	r2.sd.Start(1, "krate://app/ok", "")
 	if e := r2.last(t); e.State != DownloadCancelled {
@@ -138,7 +148,7 @@ func TestSchemeDownloadCancel(t *testing.T) {
 	started := make(chan struct{})
 	mux := http.NewServeMux()
 	mux.HandleFunc("/slow", func(w http.ResponseWriter, r *http.Request) {
-		w.Write(make([]byte, 1024))
+		_, _ = w.Write(make([]byte, 1024)) // the client cancels mid-body
 		close(started)
 		for i := 0; i < 100; i++ {
 			if _, err := w.Write(make([]byte, 1024)); err != nil {

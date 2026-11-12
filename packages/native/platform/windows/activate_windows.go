@@ -20,6 +20,9 @@ import (
 // The caller should exit without an error.
 var ErrActivationForwarded = errors.New("windows: the notification click was handed to the running instance")
 
+// copyDataMagic marks a WM_COPYDATA message as a toast activation ("KTOA").
+const copyDataMagic = 0x4B544F41
+
 const (
 	wmCopyData      = 0x004A
 	smtoAbortIfHung = 0x0002

@@ -64,7 +64,9 @@ func TestWriteListReadDelete(t *testing.T) {
 func TestIDsCannotEscapeTheDirectory(t *testing.T) {
 	dir := setup(t)
 	secret := filepath.Join(filepath.Dir(dir), "secret.json")
-	os.WriteFile(secret, []byte(`{"kind":"x"}`), 0o600)
+	if err := os.WriteFile(secret, []byte(`{"kind":"x"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	for _, id := range []string{"../secret", "..", "crash-../../secret", "", "crash-a/b", `crash-a\b`} {
 		if _, err := Read(id); err == nil {
 			t.Errorf("Read(%q) succeeded", id)
@@ -138,7 +140,9 @@ func TestParseCrashLog(t *testing.T) {
 
 func TestCollectSkipsLiveProcessesAndEmptyLogs(t *testing.T) {
 	dir := setup(t)
-	os.MkdirAll(dir, 0o700)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	write := func(name, text string) {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(text), 0o600); err != nil {
 			t.Fatal(err)

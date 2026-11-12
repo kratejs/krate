@@ -2,7 +2,6 @@ package login
 
 import (
 	"github.com/kratejs/krate/packages/native/krate"
-	"github.com/kratejs/krate/packages/native/platform/caps"
 	"github.com/kratejs/krate/packages/native/sdk/internal/bridge"
 	"github.com/kratejs/krate/packages/native/sdk/internal/codec"
 	"github.com/kratejs/krate/packages/native/sdk/internal/jsonwire"
@@ -48,9 +47,3 @@ func Register(t *bridge.Table, env *bridge.Env) {
 
 // Available reports whether login items work.
 func Available(env *bridge.Env) bool { return true }
-
-// platformLogin returns the platform's own login item support, if any.
-func platformLogin(env *bridge.Env) caps.LoginItems {
-	l, _ := env.App.(caps.LoginItems)
-	return l
-}

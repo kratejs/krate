@@ -28,10 +28,6 @@ const (
 	// minCaptionColorBuild is the first Windows 11 build with
 	// DWMWA_CAPTION_COLOR (21H2).
 	minCaptionColorBuild = 22000
-
-	// colorDefault is DWMWA_COLOR_DEFAULT, the "use the system's" value of
-	// the caption color attributes.
-	colorDefault = 0xFFFFFFFF
 )
 
 // backdropSupported reports whether a Windows build has system backdrops.
@@ -158,12 +154,12 @@ const (
 
 // thumbButton is THUMBBUTTON.
 type thumbButton struct {
-	mask   uint32
-	id     uint32
-	bitmap uint32
-	icon   uintptr
-	tip    [260]uint16
-	flags  uint32
+	mask  uint32
+	id    uint32
+	_     uint32 // iBitmap, unused
+	icon  uintptr
+	tip   [260]uint16
+	flags uint32
 }
 
 // thumbID is the button id of the slot-th button; ids start at 1 so a click

@@ -31,10 +31,21 @@ func TestParseGUID(t *testing.T) {
 	for _, s := range []string{
 		iidISequentialStream, iidEnvCompletedHandler, iidControllerCompletedHandler,
 		iidWebResourceRequestedHandler, iidNavigationStartingHandler, iidNewWindowRequestedHandler, iidExecuteScriptHandler, iidWebMessageHandler, iidWebView2_19, iidWebMessageArgs2, iidObjectCollectionView, iidWebView2File,
+		iidPermissionArgs3, iidWebView2_27, iidScreenCaptureStartingHandler,
+		iidWV2_2, iidWV2_4, iidWV2_7, iidWV2_13, iidWV2_16, iidWV2Environment6, iidWV2Profile2,
+		iidWV2DownloadStartingEventHandler, iidWV2GetCookiesCompletedHandler, iidWV2PrintToPdfCompletedHandler,
+		iidWV2CapturePreviewCompletedHandler, iidWV2ClearBrowsingDataCompletedHandler,
+		iidWV2StateChangedEventHandler, iidWV2BytesReceivedChangedEventHandler,
+		iidITaskbarList3, clsidDestinationList, iidICustomDestinationList, clsidEnumerableObjectCollection,
+		iidIObjectCollection, iidIObjectArray, clsidShellLink, iidIShellLinkW, iidIPropertyStore,
+		iidWebView2Controller2, iidWebView2Settings9, fmtidTitle,
 	} {
 		if _, err := parseGUID(s); err != nil {
 			t.Errorf("%s: %v", s, err)
 		}
+	}
+	if pidTitle != 2 {
+		t.Errorf("PKEY_Title pid %d, want 2", pidTitle)
 	}
 	for _, bad := range []string{"", "1234", "zzzzzzzz-0000-0000-0000-000000000000", "00000000-0000-0000-0000-00000000000"} {
 		if _, err := parseGUID(bad); err == nil {
@@ -147,6 +158,51 @@ func TestVtableLayout(t *testing.T) {
 		{wv2GetCookieManager, 66, "get_CookieManager"},
 		{wv4AddDownloadStart, 75, "add_DownloadStarting"},
 		{wv7PrintToPdf, 80, "PrintToPdf"},
+		// Slots only the Windows files call; pinned here so every OS checks them.
+		{wvOpenDevToolsWindow, 51, "OpenDevToolsWindow"},
+		{permArgsGetUri, 3, "PermissionRequested.get_Uri"},
+		{permArgsGetDeferral, 8, "PermissionRequested.GetDeferral"},
+		{permArgs3PutSavesProfile, 12, "put_SavesInProfile"},
+		{wv27AddScreenCapture, 133, "add_ScreenCaptureStarting"},
+		{scrArgsPutCancel, 4, "ScreenCapture.put_Cancel"},
+		{cdlSetAppID, 3, "SetAppID"},
+		{cdlAbortList, 11, "AbortList"},
+		{objCollAddObject, 5, "AddObject"},
+		{linkSetDescription, 7, "SetDescription"},
+		{linkSetArguments, 11, "SetArguments"},
+		{linkSetIconLocation, 17, "SetIconLocation"},
+		{linkSetPath, 20, "SetPath"},
+		{propStoreSetValue, 6, "SetValue"},
+		{propStoreCommit, 7, "Commit"},
+		{scrArgsGetDeferral, 8, "scrArgsGetDeferral"},
+		{psPutPageHeight, 10, "psPutPageHeight"},
+		{psPutMarginTop, 12, "psPutMarginTop"},
+		{psPutMarginBottom, 14, "psPutMarginBottom"},
+		{psPutMarginLeft, 16, "psPutMarginLeft"},
+		{psPutHeaderFooter, 24, "psPutHeaderFooter"},
+		{cookMgrDeleteAll, 10, "cookMgrDeleteAll"},
+		{cookieGetValue, 4, "cookieGetValue"},
+		{cookieGetDomain, 6, "cookieGetDomain"},
+		{cookieGetPath, 7, "cookieGetPath"},
+		{cookieGetExpires, 8, "cookieGetExpires"},
+		{cookieGetHTTPOnly, 10, "cookieGetHTTPOnly"},
+		{cookiePutHTTPOnly, 11, "cookiePutHTTPOnly"},
+		{cookieGetSameSite, 12, "cookieGetSameSite"},
+		{cookiePutSameSite, 13, "cookiePutSameSite"},
+		{cookieGetSecure, 14, "cookieGetSecure"},
+		{cookiePutSecure, 15, "cookiePutSecure"},
+		{cookieListGetCount, 3, "cookieListGetCount"},
+		{dlArgsGetOperation, 3, "dlArgsGetOperation"},
+		{dlArgsPutCancel, 5, "dlArgsPutCancel"},
+		{dlArgsGetResultPath, 6, "dlArgsGetResultPath"},
+		{dlArgsPutHandled, 9, "dlArgsPutHandled"},
+		{dlOpAddBytes, 3, "dlOpAddBytes"},
+		{dlOpGetURI, 9, "dlOpGetURI"},
+		{dlOpGetMIME, 11, "dlOpGetMIME"},
+		{dlOpGetTotal, 12, "dlOpGetTotal"},
+		{dlOpGetReceived, 13, "dlOpGetReceived"},
+		{dlOpGetState, 16, "dlOpGetState"},
+		{dlOpGetInterrupt, 17, "dlOpGetInterrupt"},
 		{wv13GetProfile, 105, "get_Profile"},
 		{wv16ShowPrintUI, 114, "ShowPrintUI"},
 		{env6CreatePrintSet, 14, "CreatePrintSettings"},

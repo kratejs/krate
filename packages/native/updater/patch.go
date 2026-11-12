@@ -15,7 +15,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 )
@@ -700,23 +699,4 @@ func patchFile(fsys FS, patch *os.File, dataStart, dataLen int64, e *patchEntry,
 		return write(bytes.NewReader(nw))
 	}
 	return fmt.Errorf("unknown operation %q", e.Op)
-}
-
-// patchNames lists the entry paths of a patch, for tests and tools.
-func patchNames(patchPath string) ([]string, error) {
-	f, err := os.Open(patchPath)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	m, _, err := readManifest(f)
-	if err != nil {
-		return nil, err
-	}
-	var out []string
-	for _, e := range m.Entries {
-		out = append(out, e.Path+":"+e.Op)
-	}
-	sort.Strings(out)
-	return out, nil
 }

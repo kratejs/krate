@@ -227,9 +227,15 @@ func TestViewScopedDecisionWinsOverApp(t *testing.T) {
 func TestStorePersistsAppDecisionsOnly(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sub", "permissions.json")
 	m := NewManager(Config{StorePath: path}, baseHost())
-	m.Remember(caps.PermCamera, "app", true)
-	m.Remember(caps.PermMicrophone, "v2", true)
-	m.Remember(caps.PermLocation, "app", false)
+	if err := m.Remember(caps.PermCamera, "app", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Remember(caps.PermMicrophone, "v2", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Remember(caps.PermLocation, "app", false); err != nil {
+		t.Fatal(err)
+	}
 	m2 := NewManager(Config{StorePath: path}, baseHost())
 	ds := m2.Decisions()
 	if len(ds) != 2 || ds[0].Kind != caps.PermCamera || !ds[0].Allow || ds[1].Kind != caps.PermLocation || ds[1].Allow {
@@ -261,7 +267,9 @@ func TestHandlerStreamDecides(t *testing.T) {
 
 	go func() {
 		r := <-pubs
-		m.Respond(r.ID, true, "view")
+		if err := m.Respond(r.ID, true, "view"); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
 	}()
 	o := m.Decide(req(7, 2, caps.PermCamera))
 	if !o.Allowed || o.Reason != "handler" {
@@ -279,7 +287,9 @@ func TestHandlerStreamDecides(t *testing.T) {
 	// A handler that says no, without remembering.
 	go func() {
 		r := <-pubs
-		m.Respond(r.ID, false, "none")
+		if err := m.Respond(r.ID, false, "none"); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
 	}()
 	if o := m.Decide(req(9, 1, caps.PermMicrophone)); o.Allowed || o.Reason != "handler" {
 		t.Fatalf("%+v", o)
@@ -311,7 +321,9 @@ func TestRememberedDecisionSkipsHandler(t *testing.T) {
 	h.Handlers = func() int { return 1 }
 	h.Publish = func(Request) { t.Error("a remembered kind must not reach the handler") }
 	m := NewManager(Config{}, h)
-	m.Remember(caps.PermCamera, "app", true)
+	if err := m.Remember(caps.PermCamera, "app", true); err != nil {
+		t.Fatal(err)
+	}
 	if o := m.Decide(req(1, 1, caps.PermCamera)); !o.Allowed {
 		t.Fatalf("%+v", o)
 	}

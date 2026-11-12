@@ -152,15 +152,21 @@ func newDeltaFix(t *testing.T, kind string) *deltaFix {
 			Rollout:   f.rollout, Critical: f.critical, MinVersion: f.minVersion}
 		sum := sha512.Sum512(f.patchBytes)
 		fe.Patches = []FeedPatch{{From: f.patchFrom, URL: "/patch/p.krpatch", Signature: f.patchSig, Size: int64(len(f.patchBytes)), SHA512: hex.EncodeToString(sum[:])}}
-		json.NewEncoder(w).Encode(fe)
+		if err := json.NewEncoder(w).Encode(fe); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
 	})
 	mux.HandleFunc("/full/", func(w http.ResponseWriter, r *http.Request) {
 		f.fullHits.Add(1)
-		w.Write(f.newFull)
+		if _, err := w.Write(f.newFull); err != nil {
+			t.Errorf("write: %v", err)
+		}
 	})
 	mux.HandleFunc("/patch/", func(w http.ResponseWriter, r *http.Request) {
 		f.patchHits.Add(1)
-		w.Write(f.patchBytes)
+		if _, err := w.Write(f.patchBytes); err != nil {
+			t.Errorf("write: %v", err)
+		}
 	})
 	f.srv = httptest.NewServer(mux)
 	t.Cleanup(f.srv.Close)
@@ -279,7 +285,9 @@ func TestDeltaFallsBackToFull(t *testing.T) {
 			}
 			b, _ := os.ReadFile(p)
 			b[10] ^= 1
-			os.WriteFile(p, b, 0o755)
+			if err := os.WriteFile(p, b, 0o755); err != nil {
+				t.Fatal(err)
+			}
 		},
 		"installed file missing": func(f *deltaFix) {
 			p := filepath.Join(f.target, "acme")
@@ -291,7 +299,9 @@ func TestDeltaFallsBackToFull(t *testing.T) {
 			}
 			os.Remove(p)
 			if f.kind == KindFile {
-				os.WriteFile(p, []byte("a different file entirely"), 0o755)
+				if err := os.WriteFile(p, []byte("a different file entirely"), 0o755); err != nil {
+					t.Fatal(err)
+				}
 			}
 		},
 	}
@@ -364,7 +374,9 @@ func TestPatchRejectsHostilePaths(t *testing.T) {
 	// Rewrite the manifest with an escaping path, keeping the blobs.
 	m, start, err := func() (*patchManifest, int64, error) {
 		p := filepath.Join(t.TempDir(), "p")
-		os.WriteFile(p, f.patchBytes, 0o644)
+		if err := os.WriteFile(p, f.patchBytes, 0o644); err != nil {
+			t.Fatal(err)
+		}
 		fh, _ := os.Open(p)
 		defer fh.Close()
 		return readManifest(fh)
@@ -378,7 +390,9 @@ func TestPatchRejectsHostilePaths(t *testing.T) {
 		m2.Entries[0].Path = bad
 		data := rebuildPatch(t, &m2, f.patchBytes[start:])
 		pp := filepath.Join(t.TempDir(), "x.krpatch")
-		os.WriteFile(pp, data, 0o644)
+		if err := os.WriteFile(pp, data, 0o644); err != nil {
+			t.Fatal(err)
+		}
 		stage := filepath.Join(f.target, ".krate-new-x")
 		if err := buildPatched(OSFS{}, pp, KindTree, f.target, stage, "", "1.0.0", "1.1.0"); err == nil {
 			t.Errorf("path %q accepted", bad)
@@ -441,7 +455,9 @@ func TestPatchIsSmallerThanFull(t *testing.T) {
 func TestPatchRejectsEscapingBasePath(t *testing.T) {
 	f := newDeltaFix(t, KindTree)
 	p := filepath.Join(t.TempDir(), "p")
-	os.WriteFile(p, f.patchBytes, 0o644)
+	if err := os.WriteFile(p, f.patchBytes, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	fh, _ := os.Open(p)
 	m, start, err := readManifest(fh)
 	fh.Close()
@@ -454,7 +470,9 @@ func TestPatchRejectsEscapingBasePath(t *testing.T) {
 		}
 	}
 	pp := filepath.Join(t.TempDir(), "x.krpatch")
-	os.WriteFile(pp, rebuildPatch(t, m, f.patchBytes[start:]), 0o644)
+	if err := os.WriteFile(pp, rebuildPatch(t, m, f.patchBytes[start:]), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	stage := filepath.Join(f.target, ".krate-new-x")
 	if err := buildPatched(OSFS{}, pp, KindTree, f.target, stage, "", "1.0.0", "1.1.0"); err == nil {
 		t.Fatal("escaping base path accepted")

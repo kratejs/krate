@@ -187,8 +187,12 @@ func TestBatteryFromSysfsWhenNoUPower(t *testing.T) {
 	put := func(dir string, kv map[string]string) {
 		for k, v := range kv {
 			p := filepath.Join(root, dir, k)
-			os.MkdirAll(filepath.Dir(p), 0o755)
-			os.WriteFile(p, []byte(v+"\n"), 0o644)
+			if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(p, []byte(v+"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	put("BAT0", map[string]string{"type": "Battery", "status": "Discharging"})

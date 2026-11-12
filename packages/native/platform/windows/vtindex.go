@@ -139,7 +139,6 @@ var (
 	dlOpGetMIME          = vtIndex("ICoreWebView2DownloadOperation", "get_MimeType")
 	dlOpGetTotal         = vtIndex("ICoreWebView2DownloadOperation", "get_TotalBytesToReceive")
 	dlOpGetReceived      = vtIndex("ICoreWebView2DownloadOperation", "get_BytesReceived")
-	dlOpGetResultPath    = vtIndex("ICoreWebView2DownloadOperation", "get_ResultFilePath")
 	dlOpGetState         = vtIndex("ICoreWebView2DownloadOperation", "get_State")
 	dlOpGetInterrupt     = vtIndex("ICoreWebView2DownloadOperation", "get_InterruptReason")
 	dlOpCancel           = vtIndex("ICoreWebView2DownloadOperation", "Cancel")

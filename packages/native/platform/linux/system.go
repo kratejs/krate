@@ -47,10 +47,11 @@ type sysAPI struct {
 
 type gdkRect struct{ x, y, w, h int32 }
 
-// gValue is a GValue: the type and two words of data.
+// gValue is a GValue: the type and two words of data. Only GLib touches
+// the fields; Go just provides the zeroed storage.
 type gValue struct {
-	typ  uintptr
-	data [2]uint64
+	_ uintptr
+	_ [2]uint64
 }
 
 const gTypeBoolean = 5 << 2

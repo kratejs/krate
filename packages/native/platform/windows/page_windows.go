@@ -358,12 +358,11 @@ type winDownload struct {
 }
 
 type dlState struct {
-	mu       sync.Mutex
-	start    func(caps.DownloadRequest, func(string))
-	event    func(caps.DownloadEvent)
-	running  map[uint64]*winDownload
-	nextID   atomic.Uint64
-	handlers map[*view]unsafe.Pointer
+	mu      sync.Mutex
+	start   func(caps.DownloadRequest, func(string))
+	event   func(caps.DownloadEvent)
+	running map[uint64]*winDownload
+	nextID  atomic.Uint64
 }
 
 var dl = &dlState{running: map[uint64]*winDownload{}}
@@ -442,8 +441,7 @@ func (a *App) downloadStarting(v *view, args unsafe.Pointer) {
 		return
 	}
 	op := ptr(opp)
-	var defPath string
-	defPath = comString(args, dlArgsGetResultPath)
+	defPath := comString(args, dlArgsGetResultPath)
 	d := &winDownload{id: dl.nextID.Add(1), op: op, view: v.ref, url: comString(op, dlOpGetURI), total: -1}
 	vcall(op, dlOpGetTotal, uintptr(unsafe.Pointer(&d.total)))
 	if d.total <= 0 {

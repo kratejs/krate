@@ -61,8 +61,6 @@ const (
 	iidWV2Environment6 = "e59ee362-acbd-4857-9a8e-d3644d9459a9"
 	// ICoreWebView2Profile2
 	iidWV2Profile2 = "fa740d4b-5eae-4344-a8ad-74be31925397"
-	// ICoreWebView2CookieManager
-	iidWV2CookieManager = "177cd9e7-b6f5-451a-94a0-5d7a3a4c4141"
 	// ICoreWebView2DownloadStartingEventHandler
 	iidWV2DownloadStartingEventHandler = "efedc989-c396-41ca-83f7-07f845a55724"
 	// ICoreWebView2GetCookiesCompletedHandler

@@ -126,7 +126,7 @@ func (a *App) CaptureSources(thumbWidth int) ([]caps.CaptureSource, error) {
 		}
 		return 1
 	})
-	pcEnumMonitors.Call(0, 0, cb, 0)
+	_, _, _ = pcEnumMonitors.Call(0, 0, cb, 0)
 	for i, m := range mons {
 		s := caps.CaptureSource{ID: fmt.Sprintf("screen:%d", i+1), Kind: "screen", Name: monitorName(i + 1),
 			Width: int(m.right - m.left), Height: int(m.bottom - m.top)}
@@ -143,9 +143,9 @@ func (a *App) CaptureSources(thumbWidth int) ([]caps.CaptureSource, error) {
 		}
 		vis, _, _ := pcIsWindowVisible.Call(hwnd)
 		var r rect
-		pcGetWindowRect.Call(hwnd, uintptr(unsafe.Pointer(&r)))
+		_, _, _ = pcGetWindowRect.Call(hwnd, uintptr(unsafe.Pointer(&r)))
 		var cloaked uint32
-		pcDwmGetWindowAttrs.Call(hwnd, dwmwaCloaked, uintptr(unsafe.Pointer(&cloaked)), 4)
+		_, _, _ = pcDwmGetWindowAttrs.Call(hwnd, dwmwaCloaked, uintptr(unsafe.Pointer(&cloaked)), 4)
 		ex, _, _ := pcGetWindowLongW.Call(hwnd, uintptr(^uintptr(0)-19)) // GWL_EXSTYLE (-20)
 		var buf [512]uint16
 		n, _, _ := pGetWindowTextW.Call(hwnd, uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)))
@@ -156,12 +156,13 @@ func (a *App) CaptureSources(thumbWidth int) ([]caps.CaptureSource, error) {
 		})
 		return 1
 	})
-	pcEnumWindows.Call(wcb, 0)
+	_, _, _ = pcEnumWindows.Call(wcb, 0)
 	for _, s := range windowSources(rows) {
 		if thumbWidth > 0 {
 			var h uint64
-			fmt.Sscanf(s.ID, "window:%d", &h)
-			s.Thumbnail = grabWindow(uintptr(h), s.Width, s.Height, thumbWidth)
+			if _, err := fmt.Sscanf(s.ID, "window:%d", &h); err == nil {
+				s.Thumbnail = grabWindow(uintptr(h), s.Width, s.Height, thumbWidth)
+			}
 		}
 		out = append(out, s)
 	}
@@ -172,7 +173,7 @@ func (a *App) CaptureSources(thumbWidth int) ([]caps.CaptureSource, error) {
 // that owns hwnd; "" when it cannot be read.
 func processName(hwnd uintptr) string {
 	var pid uint32
-	pcGetWindowPID.Call(hwnd, uintptr(unsafe.Pointer(&pid)))
+	_, _, _ = pcGetWindowPID.Call(hwnd, uintptr(unsafe.Pointer(&pid)))
 	if pid == 0 {
 		return ""
 	}
@@ -180,7 +181,7 @@ func processName(hwnd uintptr) string {
 	if err != nil {
 		return ""
 	}
-	defer xw.CloseHandle(h)
+	defer func() { _ = xw.CloseHandle(h) }()
 	buf := make([]uint16, 1024)
 	n := uint32(len(buf))
 	if xw.QueryFullProcessImageName(h, 0, &buf[0], &n) != nil {
@@ -200,19 +201,19 @@ func withBitmap(w, h int, paint func(hdc uintptr) bool) []byte {
 	if screen == 0 {
 		return nil
 	}
-	defer pcReleaseDC.Call(0, screen)
+	defer func() { _, _, _ = pcReleaseDC.Call(0, screen) }()
 	mem, _, _ := pcCreateCompatDC.Call(screen)
 	if mem == 0 {
 		return nil
 	}
-	defer pcDeleteDC.Call(mem)
+	defer func() { _, _, _ = pcDeleteDC.Call(mem) }()
 	bmp, _, _ := pcCreateCompatBmp.Call(screen, uintptr(w), uintptr(h))
 	if bmp == 0 {
 		return nil
 	}
-	defer pDeleteObject.Call(bmp)
+	defer func() { _, _, _ = pDeleteObject.Call(bmp) }()
 	old, _, _ := pcSelectObject.Call(mem, bmp)
-	defer pcSelectObject.Call(mem, old)
+	defer func() { _, _, _ = pcSelectObject.Call(mem, old) }()
 	if !paint(mem) {
 		return nil
 	}
@@ -228,7 +229,7 @@ func grabScreen(m rect, width int) []byte {
 	w, h := int(m.right-m.left), int(m.bottom-m.top)
 	pix := withBitmap(w, h, func(mem uintptr) bool {
 		screen, _, _ := pcGetDC.Call(0)
-		defer pcReleaseDC.Call(0, screen)
+		defer func() { _, _, _ = pcReleaseDC.Call(0, screen) }()
 		r, _, _ := pcBitBlt.Call(mem, 0, 0, uintptr(w), uintptr(h), screen, uintptr(uint32(m.left)), uintptr(uint32(m.top)), srcCopy|captureBlt)
 		return r != 0
 	})

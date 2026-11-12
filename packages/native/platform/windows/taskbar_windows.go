@@ -264,7 +264,7 @@ func (a *App) taskLink(exe string, t caps.JumpTask) (unsafe.Pointer, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer pPropVariantClear.Call(uintptr(unsafe.Pointer(&pv)))
+	defer func() { _, _, _ = pPropVariantClear.Call(uintptr(unsafe.Pointer(&pv))) }()
 	if hr := vcall(store, propStoreSetValue, uintptr(unsafe.Pointer(&key)), uintptr(unsafe.Pointer(&pv))); failed(hr) {
 		return nil, fmt.Errorf("windows: IPropertyStore::SetValue(title): 0x%08x", uint32(hr))
 	}

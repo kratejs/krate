@@ -208,6 +208,10 @@ func (w *Window) fitClient(cw, ch int) {
 	_, _, _ = pSetWindowPos.Call(w.hwnd, 0, 0, 0, uintptr(int(wr.right-wr.left)+dw), uintptr(int(wr.bottom-wr.top)+dh), swpNoMove|swpNoZOrder|swpNoActivate)
 }
 
+// colorDefault is DWMWA_COLOR_DEFAULT, the "use the system's" value of the
+// caption color attributes.
+const colorDefault = 0xFFFFFFFF
+
 // applyCaptionColors sets the caption and symbol colors of a hidden title
 // bar (Windows 11).
 func (w *Window) applyCaptionColors() {
@@ -289,7 +293,7 @@ func (w *Window) chromeMessage(message, wParam, lParam uintptr) (handled bool, r
 	default:
 		if msgTaskbarButtonCreated != 0 && message == uintptr(msgTaskbarButtonCreated) {
 			c.taskbarReady = true
-			w.applyThumbs()
+			_ = w.applyThumbs() // best effort
 			return true, 0
 		}
 	}

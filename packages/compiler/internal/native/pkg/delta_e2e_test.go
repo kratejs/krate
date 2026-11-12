@@ -254,26 +254,36 @@ func unzip(t *testing.T, src, dst string) {
 		p := filepath.Join(dst, filepath.FromSlash(f.Name))
 		switch {
 		case f.Mode().IsDir():
-			os.MkdirAll(p, 0o755)
+			if err := os.MkdirAll(p, 0o755); err != nil {
+				t.Fatal(err)
+			}
 		case f.Mode()&os.ModeSymlink != 0:
 			rc, _ := f.Open()
 			b, _ := io.ReadAll(rc)
 			rc.Close()
-			os.MkdirAll(filepath.Dir(p), 0o755)
+			if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+				t.Fatal(err)
+			}
 			if err := os.Symlink(string(b), p); err != nil {
 				t.Fatal(err)
 			}
 		default:
-			os.MkdirAll(filepath.Dir(p), 0o755)
+			if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+				t.Fatal(err)
+			}
 			rc, _ := f.Open()
 			out, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode().Perm()|0o200)
 			if err != nil {
 				t.Fatal(err)
 			}
-			io.Copy(out, rc)
+			if _, err := io.Copy(out, rc); err != nil {
+				t.Fatal(err)
+			}
 			out.Close()
 			rc.Close()
-			os.Chmod(p, f.Mode().Perm())
+			if err := os.Chmod(p, f.Mode().Perm()); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 }
@@ -301,19 +311,31 @@ func untar(t *testing.T, src, dst string) {
 		p := filepath.Join(dst, filepath.FromSlash(h.Name))
 		switch h.Typeflag {
 		case tar.TypeDir:
-			os.MkdirAll(p, 0o755)
+			if err := os.MkdirAll(p, 0o755); err != nil {
+				t.Fatal(err)
+			}
 		case tar.TypeSymlink:
-			os.MkdirAll(filepath.Dir(p), 0o755)
-			os.Symlink(h.Linkname, p)
+			if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(h.Linkname, p); err != nil {
+				t.Fatal(err)
+			}
 		case tar.TypeReg:
-			os.MkdirAll(filepath.Dir(p), 0o755)
+			if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+				t.Fatal(err)
+			}
 			out, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, fs.FileMode(h.Mode)|0o200)
 			if err != nil {
 				t.Fatal(err)
 			}
-			io.Copy(out, tr)
+			if _, err := io.Copy(out, tr); err != nil {
+				t.Fatal(err)
+			}
 			out.Close()
-			os.Chmod(p, fs.FileMode(h.Mode))
+			if err := os.Chmod(p, fs.FileMode(h.Mode)); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 }

@@ -40,7 +40,6 @@ type macDownload struct {
 	path     string
 	total    int64
 	finished bool
-	lastEmit time.Time
 }
 
 type dlState struct {

@@ -13,9 +13,6 @@ import (
 // instance it keeps the click and delivers it as a notification event once
 // the page can receive it (caps.NotifyEvent.Launch).
 
-// copyDataMagic marks a WM_COPYDATA message as a toast activation ("KTOA").
-const copyDataMagic = 0x4B544F41
-
 // sinkWindowName is the title of the hidden utility window of an app.
 func sinkWindowName(scheme string) string { return "KrateToastSink:" + scheme }
 

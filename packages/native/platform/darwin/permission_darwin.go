@@ -379,7 +379,10 @@ func captureSources(thumbWidth int) []caps.CaptureSource {
 	for _, s := range windowSources(rows) {
 		if thumbWidth > 0 && frameworks.windowImage != nil {
 			var num int
-			fmt.Sscanf(s.ID, "window:%d", &num)
+			if _, err := fmt.Sscanf(s.ID, "window:%d", &num); err != nil {
+				out = append(out, s)
+				continue
+			}
 			// CGRectNull asks for the window's own bounds.
 			null := nsRect{Origin: nsPoint{X: math.Inf(1), Y: math.Inf(1)}}
 			if img := frameworks.windowImage(null, cgWindowListIncludingWindow, uint32(num), cgWindowImageBoundsIgnoreFrame); img != 0 {

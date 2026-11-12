@@ -33,24 +33,23 @@ type siteAPI struct {
 	clearData   func(mgr uintptr, types uint32, span int64, cancel, cb, data uintptr)
 	clearFinish func(mgr, res uintptr, gerr *uintptr) int32
 
-	cookieNew    func(name, value, domain, path string, maxAge int32) uintptr
-	cookieFree   func(c uintptr)
-	cName        func(c uintptr) uintptr
-	cValue       func(c uintptr) uintptr
-	cDomain      func(c uintptr) uintptr
-	cPath        func(c uintptr) uintptr
-	cExpires     func(c uintptr) uintptr
-	cSecure      func(c uintptr) int32
-	cHTTPOnly    func(c uintptr) int32
-	cSameSite    func(c uintptr) int32
-	setSecure    func(c uintptr, on int32)
-	setHTTPOnly  func(c uintptr, on int32)
-	setSameSite  func(c uintptr, p int32)
-	setExpires   func(c, dt uintptr)
-	dtFromUnix   func(t int64) uintptr
-	dtToUnix     func(dt uintptr) int64
-	dtUnref      func(dt uintptr)
-	glistFreeAll func(l uintptr)
+	cookieNew   func(name, value, domain, path string, maxAge int32) uintptr
+	cookieFree  func(c uintptr)
+	cName       func(c uintptr) uintptr
+	cValue      func(c uintptr) uintptr
+	cDomain     func(c uintptr) uintptr
+	cPath       func(c uintptr) uintptr
+	cExpires    func(c uintptr) uintptr
+	cSecure     func(c uintptr) int32
+	cHTTPOnly   func(c uintptr) int32
+	cSameSite   func(c uintptr) int32
+	setSecure   func(c uintptr, on int32)
+	setHTTPOnly func(c uintptr, on int32)
+	setSameSite func(c uintptr, p int32)
+	setExpires  func(c, dt uintptr)
+	dtFromUnix  func(t int64) uintptr
+	dtToUnix    func(dt uintptr) int64
+	dtUnref     func(dt uintptr)
 }
 
 func loadSiteAPI() *siteAPI {

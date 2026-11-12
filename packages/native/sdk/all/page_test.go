@@ -258,7 +258,9 @@ func TestDownloadsPolicy(t *testing.T) {
 	if a != filepath.Join(dir, "a.txt") {
 		t.Fatalf("a.txt placed at %q", a)
 	}
-	os.WriteFile(a, []byte("x"), 0o644)
+	if err := os.WriteFile(a, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	req.ID = 3
 	if b := r.plat.StartDownload(req); b != filepath.Join(dir, "a (1).txt") {
 		t.Fatalf("second a.txt placed at %q", b)
