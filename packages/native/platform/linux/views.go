@@ -29,6 +29,8 @@ type view struct {
 	route    string
 	state    caps.ViewState
 	scrollJS string
+	zoom     float64 // 0 until set; restored when the webview is recreated
+	find     findState
 	minW     int
 	minH     int
 }
@@ -186,6 +188,7 @@ func (a *App) connectView(v *view) {
 	api.gSignalConnectData(v.widget, "decide-policy", cbPolicy, uintptr(v.ref), 0, 0)
 	api.gSignalConnectData(v.widget, "load-changed", cbLoad, uintptr(v.ref), 0, 0)
 	api.gSignalConnectData(v.widget, "close", cbClose, uintptr(v.ref), 0, 0)
+	a.connectPage(v)
 }
 
 // PrimaryView is the view the window was created with.

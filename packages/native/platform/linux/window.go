@@ -20,6 +20,7 @@ const (
 
 	policyNavigation = 0 // WEBKIT_POLICY_DECISION_TYPE_NAVIGATION_ACTION
 	policyNewWindow  = 1 // WEBKIT_POLICY_DECISION_TYPE_NEW_WINDOW_ACTION
+	policyResponse   = 2 // WEBKIT_POLICY_DECISION_TYPE_RESPONSE
 )
 
 // Window is one top-level window with one webview, or several laid out as
@@ -309,6 +310,9 @@ func loadCallback(_, event, ref uintptr) uintptr {
 // policyCallback implements the navigation lock: only the app origin (and
 // in-page about:/blob: documents) may load.
 func policyCallback(view, decision, kind, id uintptr) uintptr {
+	if kind == policyResponse {
+		return responsePolicy(id, decision)
+	}
 	if kind != policyNavigation && kind != policyNewWindow {
 		return 0 // not handled; default behavior
 	}

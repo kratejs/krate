@@ -227,6 +227,10 @@ func (w *Window) revive() {
 	for _, v := range all {
 		a.applyViewSettings(v.widget)
 		a.connectView(v)
+		if v.zoom != 0 && a.pg.setZoom != nil {
+			a.pg.setZoom(v.widget, v.zoom)
+		}
+		v.find = findState{}
 		if v.minW > 0 || v.minH > 0 {
 			a.api.gtkWidgetSetSizeReq(v.widget, int32(v.minW), int32(v.minH))
 		}
