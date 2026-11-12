@@ -34,25 +34,29 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "default": "./dist/client.js"
+    },
     "./drizzle": {
       "types": "./dist/adapters/drizzle/index.d.ts",
       "default": "./dist/adapters/drizzle/index.js"
     },
-    "./drizzle/sqlite": {
-      "types": "./dist/adapters/drizzle/sqlite.d.ts",
-      "default": "./dist/adapters/drizzle/sqlite.js"
-    },
-    "./drizzle/pg": {
-      "types": "./dist/adapters/drizzle/pg.d.ts",
-      "default": "./dist/adapters/drizzle/pg.js"
+    "./drizzle/ddl": {
+      "types": "./dist/adapters/drizzle/ddl.d.ts",
+      "default": "./dist/adapters/drizzle/ddl.js"
     },
     "./drizzle/mysql": {
       "types": "./dist/adapters/drizzle/mysql.d.ts",
       "default": "./dist/adapters/drizzle/mysql.js"
     },
-    "./drizzle/ddl": {
-      "types": "./dist/adapters/drizzle/ddl.d.ts",
-      "default": "./dist/adapters/drizzle/ddl.js"
+    "./drizzle/pg": {
+      "types": "./dist/adapters/drizzle/pg.d.ts",
+      "default": "./dist/adapters/drizzle/pg.js"
+    },
+    "./drizzle/sqlite": {
+      "types": "./dist/adapters/drizzle/sqlite.d.ts",
+      "default": "./dist/adapters/drizzle/sqlite.js"
     },
     "./memory": {
       "types": "./dist/adapters/memory.d.ts",

@@ -1,5 +1,6 @@
 import { createContext, readDeclarative, resolveConfig, type ResolvedConfig } from "./config.js";
 import { handleAuth } from "./handler.js";
+import { createMiddleware, type AuthMiddleware } from "./middleware.js";
 import { readSession } from "./session.js";
 import type { AuthOptions, Session } from "./types.js";
 
@@ -8,6 +9,7 @@ export interface AuthInstance {
   GET: (request: Request) => Promise<Response>;
   POST: (request: Request) => Promise<Response>;
   auth: (request: Request) => Promise<Session | null>;
+  middleware: AuthMiddleware;
   config: () => ResolvedConfig;
 }
 
@@ -15,7 +17,7 @@ export function defineAuth(options: AuthOptions = {}): AuthInstance {
   let resolved: ResolvedConfig | null = null;
   const config = () => (resolved ??= resolveConfig(options, readDeclarative()));
   const handle = (request: Request) => handleAuth(request, config());
-  return {
+  const instance: AuthInstance = {
     handlers: { GET: handle, POST: handle },
     GET: handle,
     POST: handle,
@@ -25,11 +27,15 @@ export function defineAuth(options: AuthOptions = {}): AuthInstance {
       const state = await readSession(ctx);
       return state.session;
     },
+    middleware: createMiddleware(() => instance.config()),
     config,
   };
+  return instance;
 }
 
 export { AuthError } from "./config.js";
+export { createMiddleware, type AuthMiddleware } from "./middleware.js";
+export { matchesPath } from "./match.js";
 export { MemoryAdapter, createMemoryStore } from "./adapters/memory.js";
 export * from "./providers/catalog.js";
 export { credentials } from "./providers/credentials.js";
