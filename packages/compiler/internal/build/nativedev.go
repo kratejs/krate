@@ -395,7 +395,12 @@ type nativeDev struct {
 	shell   *nativeShell
 	hostSum [32]byte
 	goSum   string
-	deps    NativeChangeClassifier
+	// goBin is the app-relative path of the current Go host binary when a
+	// rebuild had to use a new name (see rebuildGoHost); "" means the
+	// default gohost/krate-gohost.
+	goBin  string
+	goBins int
+	deps   NativeChangeClassifier
 	// failed is true while a host build error is on screen.
 	failed bool
 	// restart asks runNativeDevOnce to start over (a plugin's Go code changed:
@@ -800,17 +805,27 @@ func (nd *nativeDev) syncHost(goEdited bool) error {
 				return err
 			}
 			_ = mainPath
-			bin := filepath.Join(nd.appDir, "gohost", "krate-gohost")
-			if nd.goos == "windows" {
-				bin += ".exe"
-			}
+			bin := filepath.Join(nd.appDir, filepath.FromSlash(nd.goHostBinary()))
 			next := bin + ".next"
 			if err := b.compileGoHost(next, nd.goos, nd.goarch, false); err != nil {
 				return err
 			}
 			if err := replaceExecutable(next, bin); err != nil {
-				_ = os.Remove(next)
-				return fmt.Errorf("replacing the Go host binary (it may still be running): %w", err)
+				// The binary cannot be moved while something holds it open
+				// without sharing (Delve reading its debug info on Windows).
+				// The new build gets a name of its own; the manifest points
+				// the shell's restart at it.
+				nd.goBins++
+				fresh := fmt.Sprintf("gohost/krate-gohost-%d", nd.goBins)
+				if nd.goos == "windows" {
+					fresh += ".exe"
+				}
+				if mvErr := os.Rename(next, filepath.Join(nd.appDir, filepath.FromSlash(fresh))); mvErr != nil {
+					_ = os.Remove(next)
+					return fmt.Errorf("replacing the Go host binary (it may still be running): %w", err)
+				}
+				nd.goBin = fresh
+				nd.removeStaleGoHosts()
 			}
 			nd.goSum = digest
 			restart = true
@@ -874,11 +889,7 @@ func (nd *nativeDev) rewriteHostManifest() error {
 	}
 	m.GoHost = nil
 	if g := nd.b.NativeGo(); g != nil && len(g.Glue) > 0 {
-		bin := filepath.Join("gohost", "krate-gohost")
-		if nd.goos == "windows" {
-			bin += ".exe"
-		}
-		gh := &NativeGoHostMeta{Binary: filepath.ToSlash(bin), Funcs: []string{}, Streams: []string{}, Signals: []string{}}
+		gh := &NativeGoHostMeta{Binary: nd.goHostBinary(), Funcs: []string{}, Streams: []string{}, Signals: []string{}}
 		for _, mod := range g.Modules {
 			gh.Funcs = append(gh.Funcs, mod.Funcs...)
 			gh.Streams = append(gh.Streams, mod.Streams...)
@@ -933,6 +944,34 @@ func (nd *nativeDev) syncFallbacks() {
 // Unix lets the rename replace it. Windows refuses to overwrite a running
 // executable but lets it be renamed, so the old file is moved aside first
 // (and removed when it is no longer in use, now or on the next call).
+// goHostBinary is the app-relative (slash) path of the current Go host binary.
+func (nd *nativeDev) goHostBinary() string {
+	if nd.goBin != "" {
+		return nd.goBin
+	}
+	if nd.goos == "windows" {
+		return "gohost/krate-gohost.exe"
+	}
+	return "gohost/krate-gohost"
+}
+
+// removeStaleGoHosts deletes earlier numbered Go host binaries, best effort:
+// one that a stopped debug session still holds is removed on a later build.
+func (nd *nativeDev) removeStaleGoHosts() {
+	dir := filepath.Join(nd.appDir, "gohost")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	current := filepath.Base(filepath.FromSlash(nd.goBin))
+	for _, e := range entries {
+		name := e.Name()
+		if name != current && strings.HasPrefix(name, "krate-gohost-") && !strings.HasSuffix(name, ".next") {
+			_ = os.Remove(filepath.Join(dir, name))
+		}
+	}
+}
+
 func replaceExecutable(next, bin string) error {
 	_ = os.Remove(bin + ".old")
 	err := os.Rename(next, bin)

@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -122,7 +123,9 @@ func TestPackageFlatpakWithoutTools(t *testing.T) {
 			t.Errorf("missing %s: %v", f, err)
 		}
 	}
-	if st, _ := os.Stat(filepath.Join(dir, "files", "acme-notes")); st == nil || st.Mode().Perm()&0o111 == 0 {
+	// Windows file systems keep no execute bit; the archive written from
+	// here still marks it (checked by the tar tests).
+	if st, _ := os.Stat(filepath.Join(dir, "files", "acme-notes")); runtime.GOOS != "windows" && (st == nil || st.Mode().Perm()&0o111 == 0) {
 		t.Error("the executable lost its mode")
 	}
 	desk, _ := os.ReadFile(filepath.Join(dir, "com.acme.notes.desktop"))

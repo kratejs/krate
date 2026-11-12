@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -85,7 +86,7 @@ func TestWriteFatLayout(t *testing.T) {
 	if goos, goarch, err := BinaryTarget(out); err != nil || goos != "darwin" || goarch != "universal" {
 		t.Errorf("BinaryTarget = %s %s %v", goos, goarch, err)
 	}
-	if st, _ := os.Stat(out); st.Mode().Perm()&0o111 == 0 {
+	if st, _ := os.Stat(out); runtime.GOOS != "windows" && st.Mode().Perm()&0o111 == 0 {
 		t.Error("the universal binary must be executable")
 	}
 }
