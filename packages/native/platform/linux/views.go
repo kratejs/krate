@@ -30,7 +30,7 @@ type view struct {
 	state    caps.ViewState
 	scrollJS string
 	zoom     float64 // 0 until set; restored when the webview is recreated
-	find     findState
+	find     caps.FindTracker
 	minW     int
 	minH     int
 }

@@ -5,7 +5,6 @@ package linux
 import (
 	"errors"
 	"fmt"
-	"net/url"
 	"strings"
 	"time"
 	"unsafe"
@@ -194,14 +193,7 @@ func (a *App) gerr(prefix string, gerr uintptr) error {
 }
 
 func originURI(origin string) (string, string, error) {
-	u, err := url.Parse(origin)
-	if err != nil || u.Scheme == "" || u.Host == "" {
-		return "", "", krate.Errorf("bad_args", "%q is not an origin", origin)
-	}
-	if u.Scheme != "http" && u.Scheme != "https" {
-		return "", "", fmt.Errorf("%w: WebKit keeps no cookies for the %s: scheme (the app origin); pass an http(s) URL", krate.ErrUnsupported, u.Scheme)
-	}
-	return u.Scheme + "://" + u.Host + "/", u.Hostname(), nil
+	return caps.CookieOrigin(origin, krate.ErrUnsupported)
 }
 
 // Cookies lists the cookies of an origin.

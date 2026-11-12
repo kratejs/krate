@@ -303,14 +303,8 @@ func foundCallback(fc, count, ref uintptr) uintptr {
 	if v == nil {
 		return 0
 	}
-	total := int(uint32(count))
-	if v.find.continuing && v.find.total > 0 {
-		total = v.find.total // a continued search does not report the total
-	}
-	v.find.total = total
-	active := v.find.step(total)
-	v.find.continuing = false
-	a.emitFind(caps.FindEvent{View: v.ref, Text: v.find.text, Matches: total, Active: active, Final: true})
+	active := v.find.Report(int(uint32(count)))
+	a.emitFind(caps.FindEvent{View: v.ref, Text: v.find.Text(), Matches: v.find.Total(), Active: active, Final: true})
 	return 0
 }
 
@@ -320,41 +314,10 @@ func findFailedCallback(fc, ref uintptr) uintptr {
 	if v == nil {
 		return 0
 	}
-	v.find.total, v.find.active, v.find.continuing = 0, 0, false
-	a.emitFind(caps.FindEvent{View: v.ref, Text: v.find.text, Matches: 0, Final: true})
+	text := v.find.Text()
+	v.find.Report(0)
+	a.emitFind(caps.FindEvent{View: v.ref, Text: text, Matches: 0, Final: true})
 	return 0
-}
-
-// findState is what the platform remembers about a view's search. WebKitGTK
-// reports the number of matches but not which one is highlighted, so the
-// index is followed here.
-type findState struct {
-	text       string
-	flags      uint32
-	total      int
-	active     int
-	backward   bool
-	continuing bool
-}
-
-func (f *findState) step(total int) int {
-	switch {
-	case total == 0:
-		f.active = 0
-	case f.active == 0:
-		f.active = 1
-		if f.backward {
-			f.active = total
-		}
-	case f.continuing && f.backward:
-		f.active = (f.active+total-2)%total + 1
-	case f.continuing:
-		f.active = f.active%total + 1
-	}
-	if f.active > total {
-		f.active = total
-	}
-	return f.active
 }
 
 const (
@@ -393,9 +356,7 @@ func (w *Window) Find(ref caps.ViewRef, text string, o caps.FindOptions) (err er
 		if !o.NoWrap {
 			flags |= findWrap
 		}
-		f := &v.find
-		if o.Continue && f.text == text && f.flags&^findBackwards == flags&^findBackwards && f.total > 0 {
-			f.continuing, f.backward = true, o.Backward
+		if v.find.Start(text, o) {
 			if o.Backward {
 				p.findPrev(fc)
 			} else {
@@ -404,7 +365,6 @@ func (w *Window) Find(ref caps.ViewRef, text string, o caps.FindOptions) (err er
 			// WebKit answers a continued search with found-text too.
 			return
 		}
-		*f = findState{text: text, flags: flags, backward: o.Backward}
 		p.findSearch(fc, text, flags, 0xffffffff)
 	}) {
 		return errors.New("krate: application is not running")
@@ -427,7 +387,7 @@ func (w *Window) StopFind(ref caps.ViewRef) (err error) {
 		if fc := p.findController(v.widget); fc != 0 {
 			p.findFinish(fc)
 		}
-		v.find = findState{}
+		v.find.Reset()
 	}) {
 		return errors.New("krate: application is not running")
 	}

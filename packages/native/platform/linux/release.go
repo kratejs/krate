@@ -230,7 +230,7 @@ func (w *Window) revive() {
 		if v.zoom != 0 && a.pg.setZoom != nil {
 			a.pg.setZoom(v.widget, v.zoom)
 		}
-		v.find = findState{}
+		v.find.Reset()
 		if v.minW > 0 || v.minH > 0 {
 			a.api.gtkWidgetSetSizeReq(v.widget, int32(v.minW), int32(v.minH))
 		}

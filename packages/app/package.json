@@ -95,6 +95,18 @@
     "./updater": {
       "types": "./dist/updater.d.ts",
       "default": "./dist/updater.js"
+    },
+    "./page": {
+      "types": "./dist/page.d.ts",
+      "default": "./dist/page.js"
+    },
+    "./downloads": {
+      "types": "./dist/downloads.d.ts",
+      "default": "./dist/downloads.js"
+    },
+    "./cookies": {
+      "types": "./dist/cookies.d.ts",
+      "default": "./dist/cookies.js"
     }
   },
   "files": [

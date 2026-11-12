@@ -33,6 +33,38 @@ const (
 	iidPermissionRequestedHandler = "15e1c6a3-c72a-4df3-91d7-d097fbec6bfd"
 	// WebView2.h line 21808 (ICoreWebView2_19, MemoryUsageTargetLevel)
 	iidWebView2_19 = "6921f954-79b0-437f-a997-c85811897c68"
+
+	// Web contents controls (page.go): zoom, print, capture, downloads, cookies.
+	// ICoreWebView2_2
+	iidWV2_2 = "9e8f0cf8-e670-4b5e-b2bc-73e061e3184c"
+	// ICoreWebView2_4
+	iidWV2_4 = "20d02d59-6df2-42dc-bd06-f98a694b1302"
+	// ICoreWebView2_7
+	iidWV2_7 = "79c24d83-09a3-45ae-9418-487f32a58740"
+	// ICoreWebView2_13
+	iidWV2_13 = "f75f09a8-667e-4983-88d6-c8773f315e84"
+	// ICoreWebView2_16
+	iidWV2_16 = "0eb34dc9-9f91-41e1-8639-95cd5943906b"
+	// ICoreWebView2Environment6
+	iidWV2Environment6 = "e59ee362-acbd-4857-9a8e-d3644d9459a9"
+	// ICoreWebView2Profile2
+	iidWV2Profile2 = "fa740d4b-5eae-4344-a8ad-74be31925397"
+	// ICoreWebView2CookieManager
+	iidWV2CookieManager = "177cd9e7-b6f5-451a-94a0-5d7a3a4c4141"
+	// ICoreWebView2DownloadStartingEventHandler
+	iidWV2DownloadStartingEventHandler = "efedc989-c396-41ca-83f7-07f845a55724"
+	// ICoreWebView2GetCookiesCompletedHandler
+	iidWV2GetCookiesCompletedHandler = "5a4f5069-5c15-47c3-8646-f4de1c116670"
+	// ICoreWebView2PrintToPdfCompletedHandler
+	iidWV2PrintToPdfCompletedHandler = "ccf1ef04-fd8e-4d5f-b2de-0983e41b8c36"
+	// ICoreWebView2CapturePreviewCompletedHandler
+	iidWV2CapturePreviewCompletedHandler = "697e05e9-3d8f-45fa-96f4-8ffe1ededaf5"
+	// ICoreWebView2ClearBrowsingDataCompletedHandler
+	iidWV2ClearBrowsingDataCompletedHandler = "e9710a06-1d1d-49b2-8234-226f35846ae5"
+	// ICoreWebView2StateChangedEventHandler
+	iidWV2StateChangedEventHandler = "81336594-7ede-4ba9-bf71-acf0a95b58dd"
+	// ICoreWebView2BytesReceivedChangedEventHandler
+	iidWV2BytesReceivedChangedEventHandler = "828e8ab6-d94c-4264-9cef-5217170d6251"
 )
 
 // guid is a GUID in its in-memory (Windows GUID struct) layout: Data1, Data2

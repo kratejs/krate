@@ -2,8 +2,10 @@ package caps
 
 import (
 	"bytes"
+	"errors"
 	"image/png"
 	"math"
+	"strings"
 	"testing"
 )
 
@@ -154,6 +156,85 @@ func TestCookieDomainMatches(t *testing.T) {
 	} {
 		if got := CookieDomainMatches(c.domain, c.host); got != c.want {
 			t.Errorf("CookieDomainMatches(%q, %q) = %v", c.domain, c.host, got)
+		}
+	}
+}
+
+func TestFindTracker(t *testing.T) {
+	var f FindTracker
+	if f.Start("foo", FindOptions{}) {
+		t.Fatal("first search counted as a continuation")
+	}
+	if a := f.Report(3); a != 1 {
+		t.Fatalf("first match %d", a)
+	}
+	if !f.Start("foo", FindOptions{Continue: true}) || !f.Continuing() {
+		t.Fatal("next was not a continuation")
+	}
+	if a := f.Report(1); a != 2 { // an engine that reports the stepped count only
+		t.Fatalf("second match %d", a)
+	}
+	f.Start("foo", FindOptions{Continue: true})
+	if a := f.Report(3); a != 3 {
+		t.Fatalf("third %d", a)
+	}
+	f.Start("foo", FindOptions{Continue: true})
+	if a := f.Report(3); a != 1 {
+		t.Fatalf("wrap forward %d", a)
+	}
+	f.Start("foo", FindOptions{Continue: true, Backward: true})
+	if a := f.Report(3); a != 3 {
+		t.Fatalf("wrap backward %d", a)
+	}
+	f.Start("foo", FindOptions{Continue: true, Backward: true})
+	if a := f.Report(3); a != 2 {
+		t.Fatalf("previous %d", a)
+	}
+	// A different text or case rule starts over; so does a search without matches.
+	if f.Start("bar", FindOptions{Continue: true}) || f.Start("bar", FindOptions{Continue: true, MatchCase: true}) {
+		t.Fatal("a different search continued")
+	}
+	if a := f.Report(0); a != 0 {
+		t.Fatalf("no match %d", a)
+	}
+	if f.Start("bar", FindOptions{Continue: true}) {
+		t.Fatal("a search without matches continued")
+	}
+	f.Start("zed", FindOptions{Backward: true})
+	if a := f.Report(4); a != 4 {
+		t.Fatalf("fresh backward search starts at the last match, got %d", a)
+	}
+	f.Reset()
+	if f.Text() != "" || f.Total() != 0 {
+		t.Fatal("Reset")
+	}
+}
+
+func TestFindScripts(t *testing.T) {
+	s := FindCountScript(`a"b</script>`, true)
+	if strings.Contains(s, "</script>") || !strings.Contains(s, `a\"b`) {
+		t.Fatalf("text is not safely quoted: %s", s)
+	}
+	if !strings.Contains(FindScript("x", FindOptions{Backward: true, NoWrap: true}, true), "window.find(\"x\",false,true,false") {
+		t.Fatal(FindScript("x", FindOptions{Backward: true, NoWrap: true}, true))
+	}
+	if strings.Contains(FindScript("x", FindOptions{}, false), "removeAllRanges") {
+		t.Fatal("a continued search cleared the selection")
+	}
+}
+
+func TestCookieOrigin(t *testing.T) {
+	bad := errors.New("unsupported")
+	uri, host, err := CookieOrigin("https://api.example.com:8443/x?y=1", bad)
+	if err != nil || uri != "https://api.example.com:8443/" || host != "api.example.com" {
+		t.Fatalf("%q %q %v", uri, host, err)
+	}
+	if _, _, err := CookieOrigin("krate://app", bad); !errors.Is(err, bad) {
+		t.Fatalf("custom scheme: %v", err)
+	}
+	for _, in := range []string{"", "nonsense", "https://", "https://u:p@host/"} {
+		if _, _, err := CookieOrigin(in, bad); err == nil || errors.Is(err, bad) {
+			t.Errorf("CookieOrigin(%q) = %v", in, err)
 		}
 	}
 }

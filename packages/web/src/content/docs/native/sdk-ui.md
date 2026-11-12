@@ -24,6 +24,9 @@ module for the UI.
 | Global shortcuts | `sdk/shortcut` | `@krate/app/shortcut` | `shortcut` |
 | Notifications | `sdk/notify` | `@krate/app/notify` | `notify` |
 | Lifecycle | `sdk/app` | `@krate/app/app` | `app` |
+| Web contents: print, find, zoom, capture | `sdk/page` | `@krate/app/page` | `page` |
+| Downloads | `sdk/downloads` | `@krate/app/downloads` | `downloads` |
+| Cookies and site data | `sdk/cookies` | `@krate/app/cookies` | `cookies` |
 
 Go packages live under `github.com/kratejs/krate/packages/native/sdk/`.
 
@@ -131,7 +134,9 @@ or minimized so it can drop caches (see [Windows and background
 mode](/docs/native/memory/#windows-and-background-mode)).
 
 A window can hold several webviews as split panes, each with its own route and
-scope; see [Views and split panes](/docs/native/views/).
+scope; see [Views and split panes](/docs/native/views/). Printing, find in page,
+zoom, capturing a view as an image, downloads and cookies are on their own page,
+[Web contents](/docs/native/webcontents/).
 
 Windows are named by id. The first is `"main"`; `open()` returns a handle with
 the id of the new one. A page does not know its own id unless it is told, so
@@ -153,6 +158,9 @@ source. By area:
 | shortcut | `krate/shortcut.register`, `Unregister` | `krate/shortcut.events` |
 | notify | `krate/notify.send`, `Close` | `krate/notify.events` |
 | app | `krate/app.quit`, `Relaunch`, `Supports` | `krate/app.events` |
+| page | `krate/page.print`, `PrintToPdf`, `Find`, `StopFind`, `Zoom`, `SetZoom`, `Capture` | `krate/page.findEvents` |
+| downloads | `krate/downloads.configure`, `List`, `Cancel` | `krate/downloads.events` |
+| cookies | `krate/cookies.list`, `Get`, `Set`, `Delete`, `ClearSiteData` | |
 
 `SingleInstance` and `LaunchArgs` exist only for Go host code.
 

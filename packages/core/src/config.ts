@@ -378,6 +378,9 @@ export type NativePermission =
   | "clipboard:read"
   | "tray"
   | "shortcut"
+  | "page"
+  | "downloads"
+  | "cookies"
   | `plugin:${string}.${string}`;
 
 export interface NativeConfig {
