@@ -58,6 +58,28 @@ importers:
         specifier: ^10.24.0
         version: 10.29.8
 
+  packages/auth:
+    dependencies:
+      '@noble/ciphers':
+        specifier: ^1.3.0
+        version: 1.3.0
+      '@noble/curves':
+        specifier: ^1.9.0
+        version: 1.9.7
+      '@noble/hashes':
+        specifier: ^1.8.0
+        version: 1.8.0
+    devDependencies:
+      '@types/node':
+        specifier: ^26.2.0
+        version: 26.2.0
+      typescript:
+        specifier: ^5.5.0
+        version: 5.9.3
+      vitest:
+        specifier: ^5.0.3
+        version: 5.0.3(@types/node@26.2.0)(happy-dom@20.14.5)(vite@8.3.2(@types/node@26.2.0)(esbuild@0.28.2)(tsx@4.23.13))
+
   packages/base-docs-theme:
     dependencies:
       '@krate/plugin':
@@ -421,18 +443,8 @@ packages:
     cpu: [arm64]
     os: [darwin]
 
-  '@krate/core-darwin-arm64@0.5.0-beta.3':
-    resolution: {integrity: sha512-oZxi1rwkqYjKxCRHYVPGr4Ln81NLCGbB10+K1dmKk2gNol2Wu2isaI5gwV+AHtDEIoqTAYuQCORSSqsG/X538Q==}
-    cpu: [arm64]
-    os: [darwin]
-
   '@krate/core-darwin-x64@0.1.0':
     resolution: {integrity: sha512-zhT/NUimyQ3uRP+Vzp69nJFNBNL7OQrKuCcbPztnKLwFdjyQLS3c+S3jP/9QPXL1wQk9R+ZLjdDX0IH6zhwY0Q==}
-    cpu: [x64]
-    os: [darwin]
-
-  '@krate/core-darwin-x64@0.5.0-beta.3':
-    resolution: {integrity: sha512-ApgIqO1sxw+0JdpmKkKWUnrS4EHte0Sj7e443EUZZJIkCvNDG8OuDnR0Z+Q1RyeMw1tUe86qB4RmW6lBR6EF+A==}
     cpu: [x64]
     os: [darwin]
 
@@ -441,18 +453,8 @@ packages:
     cpu: [arm64]
     os: [linux]
 
-  '@krate/core-linux-arm64@0.5.0-beta.3':
-    resolution: {integrity: sha512-aSIaJJeatwYZXzi1bUhbMx8o4zAPCCS6XAgNajnUhyn7s2caM1sEhMJHeZl01zfbZqeIZX0KDEjnp9ZgbTJmIw==}
-    cpu: [arm64]
-    os: [linux]
-
   '@krate/core-linux-x64-musl@0.1.0':
     resolution: {integrity: sha512-/nb4E2N5tnMAXvyGrahUD7WgSXAbpFFZcbNUq/9rvthponOD/j9k3WUUwKdHo3hVRh0jP28rME46ZK3ikP2VzA==}
-    cpu: [x64]
-    os: [linux]
-
-  '@krate/core-linux-x64-musl@0.5.0-beta.3':
-    resolution: {integrity: sha512-ijRIdVUSud7PqIDJP6NVA7WbB6b7gEZPbUSLmob/av1IKXH9ktiSDJiBy7CcOXIL8oXMRYiqNK+nZGPk5q/1lQ==}
     cpu: [x64]
     os: [linux]
 
@@ -461,28 +463,13 @@ packages:
     cpu: [x64]
     os: [linux]
 
-  '@krate/core-linux-x64@0.5.0-beta.3':
-    resolution: {integrity: sha512-k0r4M27iztjUq8co0mnwTL9z+uphWgUL26aFz2BjPmXyq5payIpl1tArqPETPDhwJ/dOigW3nrtwDMpQy+ax3w==}
-    cpu: [x64]
-    os: [linux]
-
   '@krate/core-win32-arm64@0.1.0':
     resolution: {integrity: sha512-7jCcyfvOWZNFLUwKbCdOHrOV9WdLFYWU4NC3YUkJgTmHuasA4N3SwCCUu+k7ZvLcvZ3cKyFgQlMKgybKIlhS1g==}
     cpu: [arm64]
     os: [win32]
 
-  '@krate/core-win32-arm64@0.5.0-beta.3':
-    resolution: {integrity: sha512-h17y7UY2wXDNEhr6hRUDdpY07ZWjXXpkxXexYCj+TF6JCjrGkVij6g+T24JR4B6Jegh1Xqjvs6rzaFk44PHFiw==}
-    cpu: [arm64]
-    os: [win32]
-
   '@krate/core-win32-x64@0.1.0':
     resolution: {integrity: sha512-b0/QBgocnFlrftTQ6umXKNZXU8bN96aTtlVlM1n8NBWzuxi6Xxxyc1ZMZaH4H+oxhC4h16MO4CrwHzRyn4L0oQ==}
-    cpu: [x64]
-    os: [win32]
-
-  '@krate/core-win32-x64@0.5.0-beta.3':
-    resolution: {integrity: sha512-vGT9hSPXObIK6UwC45ekse2mZgYDwJLhiCqmlFOoh3z3DqzwjtwJCRg2QNUOdiRkbu9hMxKN8J/AJuBqjF5j5w==}
     cpu: [x64]
     os: [win32]
 
@@ -501,6 +488,18 @@ packages:
 
   '@minimistjs/subarg@1.0.0':
     resolution: {integrity: sha512-Q/ONBiM2zNeYUy0mVSO44mWWKYM3UHuEK43PKIOzJCbvUnPoMH1K+gk3cf1kgnCVJFlWmddahQQCmrmBGlk9jQ==}
+
+  '@noble/ciphers@1.3.0':
+    resolution: {integrity: sha512-2I0gnIVPtfnMw9ee9h1dJG7tp81+8Ob3OJb3Mv37rx5L40/b0i7djjCVvGOVqc9AEIQyvyu1i6ypKdFw8R8gQw==}
+    engines: {node: ^14.21.3 || >=16}
+
+  '@noble/curves@1.9.7':
+    resolution: {integrity: sha512-gbKGcRUYIjA3/zCCNaWDciTMFI0dCkvou3TL8Zmy5Nc7sJ47a0jtOeZoTaMxkuqRo9cRhjOdZJXegxYE5FN/xw==}
+    engines: {node: ^14.21.3 || >=16}
+
+  '@noble/hashes@1.8.0':
+    resolution: {integrity: sha512-jCs9ldd7NwzpgXDIf6P3+NrHh9/sD6CQdxHyjQI+h/6rDNo88ypBxxz45UDuZHz9r3tNz7N/VInSVoVdtXEI4A==}
+    engines: {node: ^14.21.3 || >=16}
 
   '@oxc-project/types@0.154.0':
     resolution: {integrity: sha512-KYOUGQFlLWR+s4QMV2Q9ko38TZm7EdO87Qm7rvZLqk/webse/cDjtyxKhg/47l0byCbs/k46LT8qc4PKjAikzA==}
@@ -1300,8 +1299,8 @@ packages:
   '@types/deep-eql@4.0.2':
     resolution: {integrity: sha512-c9h9dVVMigMPc4bwTvC5dxqtqJZwQPePsWjPlpSOnojbor6pGqdk541lfA7AqFQr5pB1BRdq0juY9db81BwyFw==}
 
-  '@types/estree@1.0.9':
-    resolution: {integrity: sha512-GhdPgy1el4/ImP05X05Uw4cw2/M93BCUmnEvWZNStlCzEKME4Fkk+YpoA5OiHNQmoS7Cafb8Xa3Pya8m1Qrzeg==}
+  '@types/estree@1.0.10':
+    resolution: {integrity: sha512-lTyOMnOcmRBzdCv6/4zUZCrEhV0xrqQiUZBZtVcbmLHBXKLnN8q89v/wKRF/Q0HbwVsqbIG3o5HDoFl9sduM+g==}
 
   '@types/node@20.19.43':
     resolution: {integrity: sha512-6oYBAi5ikg4Pl+kGsoYtawUMBT2zZMCvPNF7pVLnHZfd1zf38DRiWn/gT01RYCdUqkv7Fhr+C9ot4/tb+2sVvA==}
@@ -1944,6 +1943,7 @@ packages:
   why-is-node-running@3.2.1:
     resolution: {integrity: sha512-Tb2FUhB4vUsGQlfSquQLYkApkuPAFQXGFzxWKHHumVz2dK+X1RUm/HnID4+TfIGYJ1kTcwOaCk/buYCEJr6YjQ==}
     engines: {node: '>=20.11'}
+    hasBin: true
 
   ws@8.22.0:
     resolution: {integrity: sha512-Ydggc987+RO0AnWtZ/7Wq9FtNvcrL1b/RO0ud9mWjUPgDrsAAwQSF51sm2hm1XofbU/4jkpGEsLFsZZxU+1DOg==}
@@ -2075,56 +2075,27 @@ snapshots:
   '@krate/core-darwin-arm64@0.1.0':
     optional: true
 
-  '@krate/core-darwin-arm64@0.5.0-beta.3':
-    optional: true
-
   '@krate/core-darwin-x64@0.1.0':
-    optional: true
-
-  '@krate/core-darwin-x64@0.5.0-beta.3':
     optional: true
 
   '@krate/core-linux-arm64@0.1.0':
     optional: true
 
-  '@krate/core-linux-arm64@0.5.0-beta.3':
-    optional: true
-
   '@krate/core-linux-x64-musl@0.1.0':
-    optional: true
-
-  '@krate/core-linux-x64-musl@0.5.0-beta.3':
     optional: true
 
   '@krate/core-linux-x64@0.1.0':
     optional: true
 
-  '@krate/core-linux-x64@0.5.0-beta.3':
-    optional: true
-
   '@krate/core-win32-arm64@0.1.0':
-    optional: true
-
-  '@krate/core-win32-arm64@0.5.0-beta.3':
     optional: true
 
   '@krate/core-win32-x64@0.1.0':
     optional: true
 
-  '@krate/core-win32-x64@0.5.0-beta.3':
-    optional: true
-
   '@krate/core@0.5.0-beta.3':
     dependencies:
       '@krate/plugin': 0.5.0-beta.3
-    optionalDependencies:
-      '@krate/core-darwin-arm64': 0.5.0-beta.3
-      '@krate/core-darwin-x64': 0.5.0-beta.3
-      '@krate/core-linux-arm64': 0.5.0-beta.3
-      '@krate/core-linux-x64': 0.5.0-beta.3
-      '@krate/core-linux-x64-musl': 0.5.0-beta.3
-      '@krate/core-win32-arm64': 0.5.0-beta.3
-      '@krate/core-win32-x64': 0.5.0-beta.3
 
   '@krate/plugin@0.5.0-beta.3': {}
 
@@ -2133,6 +2104,14 @@ snapshots:
   '@minimistjs/subarg@1.0.0':
     dependencies:
       minimist: 1.2.8
+
+  '@noble/ciphers@1.3.0': {}
+
+  '@noble/curves@1.9.7':
+    dependencies:
+      '@noble/hashes': 1.8.0
+
+  '@noble/hashes@1.8.0': {}
 
   '@oxc-project/types@0.154.0': {}
 
@@ -2781,7 +2760,7 @@ snapshots:
 
   '@types/deep-eql@4.0.2': {}
 
-  '@types/estree@1.0.9': {}
+  '@types/estree@1.0.10': {}
 
   '@types/node@20.19.43':
     dependencies:
@@ -2967,7 +2946,7 @@ snapshots:
 
   estree-walker@3.0.3:
     dependencies:
-      '@types/estree': 1.0.9
+      '@types/estree': 1.0.10
 
   expect-type@1.4.0: {}
 
