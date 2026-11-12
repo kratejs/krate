@@ -321,8 +321,16 @@ func TestBootFirstStartIsWatchedAndConfirms(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if _, err := os.Stat(filepath.Join(install, ".krate-prev")); err == nil {
-		t.Fatal("kept previous version survived the confirmation")
+	// The state is cleared before the kept copy is deleted (so a crash in
+	// between never loses the rollback target); wait for the deletion too.
+	for {
+		if _, err := os.Stat(filepath.Join(install, ".krate-prev")); err != nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("kept previous version survived the confirmation")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 	if r := c.Call("krate/updater.markHealthy", nil); r.Failed {
 		t.Fatalf("markHealthy when nothing is pending must succeed: %+v", r)

@@ -3,6 +3,7 @@
 package linux
 
 import (
+	"fmt"
 	"syscall"
 	"testing"
 	"time"
@@ -43,8 +44,17 @@ func TestGUIDisplays(t *testing.T) {
 	}
 	// Centering uses the work area.
 	x, y := caps.CenterIn(d, st.Width, st.Height)
-	w.SetPosition(x, y)
-	waitFor(t, "centered", func() bool { s := w.State(); return abs(s.X-x) <= 40 && abs(s.Y-y) <= 40 })
+	// A move that reaches the window manager before it has finished placing
+	// the new frame is overridden by that placement, so ask again until the
+	// position holds.
+	waitFor(t, fmt.Sprintf("centered at %d,%d on %+v", x, y, d), func() bool {
+		s := w.State()
+		if abs(s.X-x) <= 40 && abs(s.Y-y) <= 40 {
+			return true
+		}
+		w.SetPosition(x, y)
+		return false
+	})
 	guiApp.OnDisplays(func() {})
 }
 
