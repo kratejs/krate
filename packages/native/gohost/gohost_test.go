@@ -670,3 +670,44 @@ func TestRunTCPNeedsToken(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+// A wrapped child is started through the wrapper, which may print its own
+// lines before the child's ready line; BeforeStop runs when it is stopped.
+func TestChildWrap(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the wrapper is a sh script")
+	}
+	b1, _ := binaries(t)
+	logs := &logSink{}
+	var wrapped, stopped int
+	child := gohost.NewChild(gohost.ChildOptions{
+		Logf: logs.logf,
+		Wrap: func(binary string, args []string) (string, []string) {
+			wrapped++
+			return "sh", append([]string{"-c", `echo "wrapper banner"; exec "$@"`, "sh", binary}, args...)
+		},
+		BeforeStop: func() { stopped++ },
+	})
+	if err := child.Start(context.Background(), b1, []string{"KRATE_TEST=1"}); err != nil {
+		t.Fatal(err)
+	}
+	ts := frontend(t, child)
+	if v := version(t, ts); v != "v1" {
+		t.Fatalf("version = %q", v)
+	}
+	if err := child.Restart(""); err != nil {
+		t.Fatal(err)
+	}
+	if v := version(t, ts); v != "v1" {
+		t.Fatalf("version after restart = %q", v)
+	}
+	if err := child.Stop(); err != nil {
+		t.Fatal(err)
+	}
+	if wrapped != 2 || stopped != 2 {
+		t.Fatalf("wrapped %d times, BeforeStop %d times; want 2 and 2", wrapped, stopped)
+	}
+	if !strings.Contains(strings.Join(logs.lines, "\n"), "wrapper banner") {
+		t.Fatalf("the wrapper's own output was not logged:\n%s", strings.Join(logs.lines, "\n"))
+	}
+}

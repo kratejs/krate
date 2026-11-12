@@ -70,6 +70,10 @@ func printNativeUsage(w io.Writer) {
 	fmt.Fprintf(w, "  --browser        No window: print a tokenized http://127.0.0.1 URL instead\n")
 	fmt.Fprintf(w, "  --port <n>       Browser-mode port (default: any free port)\n")
 	fmt.Fprintf(w, "  --shell <path>   Shell binary (default: $KRATE_SHELL, the krate-shell next to krate, or a build of the checkout shell)\n")
+	fmt.Fprintf(w, "  --debug-go       Build the Go host without optimizations and run it under Delve (dlv), listening for a debugger\n")
+	fmt.Fprintf(w, "  --debug-addr <host:port>  Where Delve listens (default 127.0.0.1:2345, or a free port when that is taken)\n")
+	fmt.Fprintf(w, "  --debug-config vscode     Write a VS Code attach configuration to .vscode/launch.json\n")
+	fmt.Fprintf(w, "  --debug-host     Start the node, bun and deno host children with --inspect (ports from 9229)\n")
 }
 
 func runNative(flags cliFlags, args []string) {
@@ -567,6 +571,13 @@ func runNativeDev(flags cliFlags, args []string) {
 			exit(1)
 		}
 	}
+	var debug *build.NativeDebugOptions
+	if flags.DebugGo || flags.DebugHost {
+		debug = &build.NativeDebugOptions{GoHost: flags.DebugGo, Addr: flags.DebugAddr, Config: flags.DebugConfig, Host: flags.DebugHost}
+	} else if flags.DebugAddr != "" || flags.DebugConfig != "" {
+		fmt.Fprintf(os.Stderr, "%sError:%s --debug-addr and --debug-config go with --debug-go or --debug-host\n", cRed, cReset)
+		exit(1)
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	fmt.Printf("%s%s  Starting native dev for %s%s\n", cBold, cCyan, root, cReset)
@@ -583,6 +594,7 @@ func runNativeDev(flags cliFlags, args []string) {
 		Shell:   shellPath,
 		Target:  flags.Target,
 		Verbose: flags.Verbose,
+		Debug:   debug,
 		Ctx:     ctx,
 	})
 	if err != nil {

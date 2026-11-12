@@ -133,6 +133,12 @@ type PageResult struct {
 }
 
 type Builder struct {
+	// DebugGo builds the native Go host for a debugger: no optimizations or
+	// inlining, and source paths as they are on disk (see compileGoHost).
+	DebugGo bool
+	// InspectHost, when set to host:port, starts the node, bun and deno host
+	// children with --inspect on consecutive ports from there.
+	InspectHost string
 	// runtimeCompatWarnings holds the KR7160 warnings of the latest build of
 	// each API route and the middleware built for the embedded runtime, keyed
 	// by route source file ("middleware" for the middleware).
