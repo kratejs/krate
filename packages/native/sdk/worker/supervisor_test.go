@@ -320,3 +320,40 @@ func TestStartRefusesLoaderAndShellEnv(t *testing.T) {
 		t.Fatalf("plain variables: %v", err)
 	}
 }
+
+func TestSubscribeAfterEmitGetsBacklog(t *testing.T) {
+	r := &fakeRunner{}
+	sup := newSup(t, r, spec(RestartNever, 0))
+	id, _ := sup.Start(context.Background(), "job", nil, nil)
+	// The worker answers before the page's subscription is open.
+	_ = sup.Emit(id, []byte("early"))
+	ch, cancel := sup.Subscribe(id)
+	defer cancel()
+	if ev := waitKind(t, ch, EventMessage); string(ev.Data) != "early" {
+		t.Fatalf("got %q", ev.Data)
+	}
+	// Once attached, a later subscriber starts clean.
+	_ = sup.Emit(id, []byte("late"))
+	waitKind(t, ch, EventMessage)
+	ch2, cancel2 := sup.Subscribe(id)
+	defer cancel2()
+	select {
+	case ev := <-ch2:
+		t.Fatalf("replayed %+v", ev)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func TestBacklogIsBounded(t *testing.T) {
+	r := &fakeRunner{}
+	sup := newSup(t, r, spec(RestartNever, 0))
+	id, _ := sup.Start(context.Background(), "job", nil, nil)
+	for i := 0; i < maxBacklogEvents+50; i++ {
+		_ = sup.Emit(id, []byte{byte(i)})
+	}
+	ch, cancel := sup.Subscribe(id)
+	defer cancel()
+	if n := len(ch); n != maxBacklogEvents {
+		t.Fatalf("backlog of %d events, want %d", n, maxBacklogEvents)
+	}
+}

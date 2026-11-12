@@ -2,10 +2,13 @@ package shell
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -296,6 +299,9 @@ func TestParseManifestWorkers(t *testing.T) {
 const goWorkerSrc = `package main
 
 import (
+	"fmt"
+	"io"
+	"sync"
 	"github.com/kratejs/krate/packages/native/sdk/worker"
 )
 
@@ -367,4 +373,69 @@ func exeSuffix() string {
 		return ".exe"
 	}
 	return ""
+}
+
+// A worker that cannot start must say why in the shell log and fail the call
+// that started it, rather than leave the page waiting for messages.
+func TestWorkerStartFailureIsLogged(t *testing.T) {
+	needNode(t)
+	root, cleanup, err := gohosttest.TempDir("shell-wkfail-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	missing := nodeWorker("missing", "never")
+	missing["entry"] = "workers/absent.mjs"
+	dies := nodeWorker("dies", "never")
+	dies["entry"] = "workers/dies.mjs"
+	dir := workerApp(t, root, []map[string]any{missing, dies}, []string{"worker"})
+	src := "console.error('worker boom: bad config');\nprocess.exit(2);\n"
+	if err := os.WriteFile(filepath.Join(dir, "workers", "dies.mjs"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var mu sync.Mutex
+	var logs []string
+	ready := make(chan *Control, 1)
+	done := make(chan error, 1)
+	go func() {
+		done <- Run(dir, RunOptions{
+			Browser: true, Dev: true, Out: io.Discard, ExtraHandler: newReportSink().handle,
+			Logf: func(format string, args ...any) {
+				mu.Lock()
+				logs = append(logs, fmt.Sprintf(format, args...))
+				mu.Unlock()
+			},
+			OnReady: func(c *Control) { ready <- c },
+		})
+	}()
+	select {
+	case ctl := <-ready:
+		defer func() {
+			ctl.Quit()
+			<-done
+		}()
+	case err := <-done:
+		t.Fatalf("Run returned early: %v", err)
+	case <-time.After(60 * time.Second):
+		t.Fatal("not ready")
+	}
+	logged := func() string {
+		mu.Lock()
+		defer mu.Unlock()
+		return strings.Join(logs, "\n")
+	}
+
+	for name, want := range map[string]string{"missing": "absent.mjs", "dies": "worker boom: bad config"} {
+		_, err := worker.Start(name, nil)
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("starting %s: %v, want an error naming %q", name, err, want)
+		}
+		if l := logged(); !strings.Contains(l, "the "+name+" worker failed to start") || !strings.Contains(l, want) {
+			t.Fatalf("the shell log lacks the %s failure:\n%s", name, l)
+		}
+	}
+	if list, _ := worker.List(); len(list) != 0 {
+		t.Fatalf("failed starts left instances: %+v", list)
+	}
 }

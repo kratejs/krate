@@ -105,7 +105,21 @@ type inst struct {
 	err     string
 	cancel  context.CancelFunc
 	done    chan struct{}
+
+	// backlog holds the events published before any subscriber for this
+	// instance attached (guarded by Supervisor.mu). The page opens its
+	// subscription over several round trips after the start call returned, and
+	// a worker can answer before that; the first subscriber gets the backlog.
+	backlog      []Event
+	backlogBytes int
+	attached     bool
 }
+
+// Bounds of the backlog of an instance nobody subscribed to yet.
+const (
+	maxBacklogEvents = 256
+	maxBacklogBytes  = 4 << 20
+)
 
 // Supervisor starts declared workers and keeps them running per their policy.
 type Supervisor struct {
@@ -426,6 +440,13 @@ func (s *Supervisor) Subscribe(id string) (<-chan Event, func()) {
 	sb := &sub{id: id, ch: make(chan Event, 512)}
 	s.mu.Lock()
 	s.subs[sb] = struct{}{}
+	if in := s.insts[id]; in != nil && !in.attached {
+		in.attached = true
+		for _, ev := range in.backlog {
+			sb.ch <- ev // at most maxBacklogEvents, below the capacity
+		}
+		in.backlog, in.backlogBytes = nil, 0
+	}
 	s.mu.Unlock()
 	return sb.ch, func() {
 		s.mu.Lock()
@@ -437,6 +458,14 @@ func (s *Supervisor) Subscribe(id string) (<-chan Event, func()) {
 func (s *Supervisor) publish(ev Event) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if in := s.insts[ev.ID]; in != nil && !in.attached {
+		in.backlog = append(in.backlog, ev)
+		in.backlogBytes += len(ev.Data)
+		for len(in.backlog) > maxBacklogEvents || (in.backlogBytes > maxBacklogBytes && len(in.backlog) > 1) {
+			in.backlogBytes -= len(in.backlog[0].Data)
+			in.backlog = in.backlog[1:]
+		}
+	}
 	for sb := range s.subs {
 		if sb.id != "" && sb.id != ev.ID {
 			continue

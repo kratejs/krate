@@ -76,7 +76,19 @@ func defaultCommand(rt string) []string {
 	return nil
 }
 
+// Start starts one process of a worker. A failure is logged here as well as
+// returned (to the page's call, or to the restart loop), so it reaches the
+// shell log whoever asked.
 func (r *workerRunner) Start(ctx context.Context, in worker.Instance) (worker.Proc, error) {
+	p, err := r.start(ctx, in)
+	if err != nil {
+		r.a.logf("shell: the %s worker failed to start: %v", in.Spec.Name, err)
+		return nil, err
+	}
+	return p, nil
+}
+
+func (r *workerRunner) start(ctx context.Context, in worker.Instance) (worker.Proc, error) {
 	a := r.a
 	sp := in.Spec
 	command := sp.Command
