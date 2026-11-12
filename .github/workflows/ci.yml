@@ -27,6 +27,15 @@ jobs:
           go-version-file: packages/compiler/go.mod
           cache: true
 
+      # TestNativeDebugGoHostRestart drives a real dlv session; under
+      # KRATE_REQUIRE_E2E a missing dlv is a failure.
+      - name: Install Delve
+        if: ${{ !(runner.os == 'Windows' && runner.arch == 'ARM64') }}
+        shell: bash
+        run: |
+          go install github.com/go-delve/delve/cmd/dlv@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
       - name: Enable pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -287,6 +296,15 @@ jobs:
 
       # The integration tests load examples/krate.config.ts, which imports the
       # workspace @krate/core package, so the JS workspace must be linked.
+      # TestNativeDebugGoHostRestart drives a real dlv session; under
+      # KRATE_REQUIRE_E2E a missing dlv is a failure.
+      - name: Install Delve
+        if: ${{ !(runner.os == 'Windows' && runner.arch == 'ARM64') }}
+        shell: bash
+        run: |
+          go install github.com/go-delve/delve/cmd/dlv@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
       - name: Enable pnpm
         uses: pnpm/action-setup@v4
         with:

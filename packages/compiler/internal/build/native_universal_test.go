@@ -76,7 +76,7 @@ func TestNativeUniversalMacApp(t *testing.T) {
 		if err != nil || !strings.Contains(s, "x86_64") || !strings.Contains(s, "arm64") || !strings.Contains(s, "Architectures in the fat file") {
 			t.Errorf("lipo -info: %v\n%s", err, s)
 		}
-		if o, err := exec.Command(lipo, "-verify_arch", exe, "x86_64", "arm64").CombinedOutput(); err != nil {
+		if o, err := exec.Command(lipo, exe, "-verify_arch", "x86_64", "arm64").CombinedOutput(); err != nil {
 			t.Errorf("lipo -verify_arch: %v\n%s", err, o)
 		}
 	}
