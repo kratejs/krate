@@ -890,9 +890,73 @@ func (a *App) clearKinds(o caps.ClearSiteDataOptions, kinds uint32, name string)
 	select {
 	case err := <-done:
 		return err
-	case <-time.After(30 * time.Second):
-		return fmt.Errorf("windows: clearing %s: %w", name, errClearTimeout)
+	case <-time.After(clearKindDeadline):
+		cdpErr := a.clearOriginByProtocol(kinds)
+		if cdpErr == errNoCDPStorageType {
+			return fmt.Errorf("windows: clearing %s: %w", name, errClearTimeout)
+		}
+		if cdpErr != nil {
+			return fmt.Errorf("windows: clearing %s: %w; the DevTools fallback failed too: %v", name, errClearTimeout, cdpErr)
+		}
+		return nil
 	}
+}
+
+// clearKindDeadline is how long one ClearBrowsingData call may take before
+// the DevTools protocol path is tried (on windows-11-arm the DOM storage
+// kinds never completed).
+const clearKindDeadline = 10 * time.Second
+
+var errNoCDPStorageType = errors.New("no DevTools storage type")
+
+// cdpStorageType maps a ClearBrowsingData DOM storage kind to the
+// Storage.clearDataForOrigin type list, or "" when there is none.
+func cdpStorageType(kinds uint32) string {
+	switch kinds {
+	case dataFileSystems:
+		return "file_systems"
+	case dataIndexedDB:
+		return "indexeddb"
+	case dataLocalStorage:
+		return "local_storage"
+	case dataWebSQL:
+		return "websql"
+	case dataCacheStorage:
+		return "cache_storage"
+	case dataServiceWork:
+		return "service_workers"
+	}
+	return ""
+}
+
+// clearOriginByProtocol clears one DOM storage kind of the app origin through
+// the DevTools protocol, for a runtime whose ClearBrowsingData never
+// completes it. Any goroutine.
+func (a *App) clearOriginByProtocol(kinds uint32) error {
+	types := cdpStorageType(kinds)
+	if types == "" {
+		return errNoCDPStorageType
+	}
+	var ref caps.ViewRef
+	found := false
+	a.callMain(func() {
+		for _, w := range a.windows {
+			if w.released {
+				continue
+			}
+			for _, v := range w.allViews() {
+				if !found && v.webview != nil && v.rv == nil {
+					ref, found = v.ref, true
+				}
+			}
+		}
+	})
+	if !found {
+		return errors.New("no webview is open")
+	}
+	params := fmt.Sprintf(`{"origin":%q,"storageTypes":%q}`, Origin, types)
+	_, err := a.CDP(ref, "Storage.clearDataForOrigin", params)
+	return err
 }
 
 // clearWithoutProfile handles a runtime without ICoreWebView2Profile2: only
