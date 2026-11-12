@@ -77,8 +77,8 @@ func init() {
 	})
 }
 
-// Configure sets the feed for this process and removes what an earlier update
-// left next to the executable.
+// Configure sets the feed for this process. What an earlier update left next
+// to the executable is removed by Boot, once it knows no update is pending.
 func Configure(c Config) {
 	mu.Lock()
 	cfg = c
@@ -86,10 +86,10 @@ func Configure(c Config) {
 	guard = nil
 	served = false
 	mu.Unlock()
-	if c.URL != "" {
-		go updater.CleanupStale("")
-	}
 }
+
+// cleanupStale is updater.CleanupStale; tests replace it.
+var cleanupStale = updater.CleanupStale
 
 // SetQuit sets the function relaunch calls to end the running app after the
 // new process has started. Without it the process exits.
@@ -181,6 +181,13 @@ func Boot(logf func(format string, args ...any)) {
 	mu.Lock()
 	guard = res.Guard
 	mu.Unlock()
+	// The leftovers of an earlier update go only when no update is pending:
+	// an unconfirmed start (a guard) still needs the kept previous version
+	// (.krate-old), and a rollback needs both it and .krate-failed. Removing
+	// them while Boot ran raced the rollback (seen in CI).
+	if err == nil && res.Guard == nil {
+		go cleanupStale("")
+	}
 }
 
 // PageServed tells the updater the app's first page was requested. Unless the

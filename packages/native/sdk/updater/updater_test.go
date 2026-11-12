@@ -419,3 +419,33 @@ func str(s string) func(*wire.Encoder) {
 		e.String(s)
 	}
 }
+
+// TestBootCleansUpOnlyWithoutPendingUpdate: the leftovers of an earlier update
+// are removed at a start with nothing pending, never while an unconfirmed
+// start still needs the kept previous version.
+func TestBootCleansUpOnlyWithoutPendingUpdate(t *testing.T) {
+	isolate(t)
+	cleaned := make(chan struct{}, 4)
+	cleanupStale = func(string) { cleaned <- struct{}{} }
+	defer func() { cleanupStale = updater.CleanupStale }()
+	exit = func(int) {}
+	defer func() { exit = os.Exit }()
+
+	Configure(Config{URL: "https://x/feed", PublicKey: "k"})
+	seedPending(t, 0)
+	Boot(nil)
+	select {
+	case <-cleaned:
+		t.Fatal("cleaned up during an unconfirmed first start")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	isolate(t)
+	Configure(Config{URL: "https://x/feed", PublicKey: "k"})
+	Boot(nil)
+	select {
+	case <-cleaned:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no cleanup at a start with nothing pending")
+	}
+}
