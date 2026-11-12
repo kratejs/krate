@@ -547,8 +547,12 @@ async function linuxFlatpak() {
   buildPackages('Flatpak', versionA, ['flatpak'], [], { KRATE_FLATPAK_INSTALL_DEPS: '1' });
   const bundle = findPackage('Flatpak', /\.flatpak$/);
   const meta = findPackage('Flatpak', new RegExp(`${appId.replace(/\./g, '\\.')}\\.metainfo\\.xml$`));
-  if (which('appstreamcli')) run('appstreamcli', ['validate', '--no-net', meta]);
-  else skipOrFail('appstreamcli is not installed; the metainfo was not validated', 'appstreamcli');
+  if (which('appstreamcli')) {
+    // appstreamcli fails on warnings and infos too (exit 3); like `krate
+    // native package`, only errors (E:) fail here.
+    const v = runBoth('appstreamcli', ['validate', '--no-net', meta], { allowFail: true });
+    if (v.status !== 0 && (/^\s*E:/m.test(v.text) || !/^\s*[WIP]:/m.test(v.text))) fail(`appstreamcli rejected the metainfo:\n${v.text}`);
+  } else skipOrFail('appstreamcli is not installed; the metainfo was not validated', 'appstreamcli');
   run('flatpak', ['install', '--user', '--noninteractive', '--bundle', bundle]);
   try {
     const perms = run('flatpak', ['info', '--show-permissions', appId], { capture: true }).stdout;
