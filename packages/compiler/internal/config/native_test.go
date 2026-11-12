@@ -316,3 +316,64 @@ func TestNativePluginSpecKind(t *testing.T) {
 		}
 	}
 }
+
+func TestNativeWindowChrome(t *testing.T) {
+	cfg := nativeCfg(t, `{"native": {"appId": "com.acme.app", "window": {
+		"titleBar": "hidden", "transparent": true, "backdrop": "mica", "vibrancy": "sidebar",
+		"titleBarOverlay": {"color": "#202020", "symbolColor": "#fff", "height": 40},
+		"trafficLightPosition": {"x": 14, "y": 18}, "tabbingIdentifier": "docs", "tabbingMode": "preferred"}}}`)
+	if _, err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	o := cfg.EffectiveNative().Window.ChromeOptions()
+	if o.TitleBar != "hidden" || !o.Transparent || o.Backdrop != "mica" || o.Vibrancy != "sidebar" ||
+		o.Overlay == nil || o.Overlay.Height != 40 || o.Overlay.Color != "#202020" ||
+		o.TrafficLight == nil || o.TrafficLight.X != 14 || o.TabbingID != "docs" || o.TabbingMode != "preferred" {
+		t.Fatalf("options %+v", o)
+	}
+	if _, err := o.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNativeTitleBarOverlayForms(t *testing.T) {
+	on := nativeCfg(t, `{"native":{"appId":"com.acme.app","window":{"titleBar":"hidden","titleBarOverlay":true}}}`)
+	if _, err := on.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if o := on.EffectiveNative().Window.ChromeOptions(); o.Overlay == nil || o.Overlay.Height != 0 {
+		t.Fatalf("true gives %+v", o.Overlay)
+	}
+	off := nativeCfg(t, `{"native":{"appId":"com.acme.app","window":{"titleBar":"hidden","titleBarOverlay":false}}}`)
+	if _, err := off.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if o := off.EffectiveNative().Window.ChromeOptions(); o.Overlay != nil {
+		t.Fatalf("false gives %+v", o.Overlay)
+	}
+}
+
+func TestNativeWindowChromeErrors(t *testing.T) {
+	cases := map[string]struct{ body, key string }{
+		"backdrop":   {`"backdrop":"glass"`, "native.window.backdrop"},
+		"vibrancy":   {`"vibrancy":"jelly"`, "native.window.vibrancy"},
+		"overlay":    {`"titleBar":"hidden","titleBarOverlay":{"color":"red"}`, "native.window.titleBarOverlay"},
+		"overlayBar": {`"titleBarOverlay":true`, "needs a hidden title bar"},
+		"traffic":    {`"trafficLightPosition":{"x":-3,"y":2}`, "native.window.trafficLightPosition"},
+		"tabbing":    {`"tabbingMode":"many"`, "native.window.tabbingMode"},
+	}
+	for name, c := range cases {
+		raw := `{"entry":"x","native":{"appId":"com.acme.app","window":{` + c.body + `}}}`
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "krate.config.json"), []byte(raw), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(dir)
+		if err == nil {
+			_, err = cfg.Validate()
+		}
+		if err == nil || !strings.Contains(err.Error(), c.key) {
+			t.Errorf("%s: error %v, want it to mention %q", name, err, c.key)
+		}
+	}
+}

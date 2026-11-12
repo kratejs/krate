@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+
+	"github.com/kratejs/krate/packages/native/internal/chrome"
 )
 
 // windowIDScript tells the page which window it is in, so that its host calls
@@ -26,13 +28,13 @@ import (
 const windowIDScript = `<script>(function(){try{var k="__krate_win",v=new URLSearchParams(location.search).get(k)||sessionStorage.getItem(k);if(v){sessionStorage.setItem(k,v);globalThis.__KRATE_WINDOW__=v}}catch(e){}})()</script>`
 
 // windowIDHandler injects windowIDScript into the HTML pages next serves.
-func windowIDHandler(next http.Handler) http.Handler {
+func windowIDHandler(next http.Handler, chromeAlways bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if (r.Method != http.MethodGet && r.Method != http.MethodHead) || strings.HasPrefix(r.URL.Path, "/__krate/") {
 			next.ServeHTTP(w, r)
 			return
 		}
-		iw := &injectWriter{ResponseWriter: w, head: r.Method == http.MethodHead}
+		iw := &injectWriter{ResponseWriter: w, head: r.Method == http.MethodHead, chromeAlways: chromeAlways}
 		next.ServeHTTP(iw, r)
 		iw.finish()
 	})
@@ -40,11 +42,14 @@ func windowIDHandler(next http.Handler) http.Handler {
 
 type injectWriter struct {
 	http.ResponseWriter
-	head   bool
-	status int
-	html   bool
-	buf    bytes.Buffer
-	sent   bool
+	// chromeAlways injects the window chrome script into every page; without
+	// it only pages that mention a drag region get it (see internal/chrome).
+	chromeAlways bool
+	head         bool
+	status       int
+	html         bool
+	buf          bytes.Buffer
+	sent         bool
 }
 
 func (w *injectWriter) WriteHeader(status int) {
@@ -84,13 +89,17 @@ func (w *injectWriter) finish() {
 		return
 	}
 	body := w.buf.Bytes()
-	out := injectIntoHead(body)
+	snippets := []string{windowIDScript}
+	if w.chromeAlways || chrome.Wanted(body) {
+		snippets = append(snippets, chrome.Script)
+	}
+	out := injectSnippets(body, snippets...)
 	h := w.Header()
 	if cl := h.Get("Content-Length"); cl != "" {
 		n := len(out)
 		if w.head {
 			old, _ := strconv.Atoi(cl)
-			n = old + len(windowIDScript)
+			n = old + len(out) - len(body)
 		}
 		h.Set("Content-Length", strconv.Itoa(n))
 	}
@@ -103,7 +112,10 @@ func (w *injectWriter) finish() {
 // injectIntoHead puts the script right after the opening head tag, or at the
 // start of the document when there is none (after the html tag or doctype
 // when it has one).
-func injectIntoHead(body []byte) []byte {
+func injectIntoHead(body []byte) []byte { return injectSnippets(body, windowIDScript) }
+
+// injectSnippets is injectIntoHead for several elements, inserted in order.
+func injectSnippets(body []byte, snippets ...string) []byte {
 	lower := bytes.ToLower(body)
 	at := 0
 	for _, tag := range []string{"<head", "<html", "<!doctype"} {
@@ -116,9 +128,15 @@ func injectIntoHead(body []byte) []byte {
 			break
 		}
 	}
-	out := make([]byte, 0, len(body)+len(windowIDScript))
+	n := len(body)
+	for _, s := range snippets {
+		n += len(s)
+	}
+	out := make([]byte, 0, n)
 	out = append(out, body[:at]...)
-	out = append(out, windowIDScript...)
+	for _, s := range snippets {
+		out = append(out, s...)
+	}
 	out = append(out, body[at:]...)
 	return out
 }

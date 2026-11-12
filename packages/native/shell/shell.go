@@ -230,7 +230,8 @@ func loadApp(dir string, fsys fs.FS, opts RunOptions) (*app, error) {
 		so.Observe = a.dev.ring.add
 		a.dev.memory = a.serveMemory
 	}
-	app := windowIDHandler(scheme.New(so))
+	app := windowIDHandler(scheme.New(so), man.Window.Chrome.needsScript())
+	chromeH := a.newChromeHandler()
 	extra := opts.ExtraHandler
 	a.handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		a.reaper.Touch()
@@ -241,6 +242,9 @@ func loadApp(dir string, fsys fs.FS, opts RunOptions) (*app, error) {
 			return
 		}
 		if a.dev != nil && a.dev.handle(w, r) {
+			return
+		}
+		if chromeH(w, r) {
 			return
 		}
 		app.ServeHTTP(w, r)
@@ -485,6 +489,7 @@ func (a *app) runNative() error {
 		Memory:  platformMemory(man),
 		// The manifest is read once, at load, like the permissions.
 		KeepAlive: man.Window.KeepAlive,
+		Agent:     man.Mac != nil && man.Mac.Agent,
 	})
 	if err != nil {
 		return err
@@ -526,6 +531,7 @@ func (a *app) runNative() error {
 			Height:    man.Window.Height,
 			Resizable: man.Window.IsResizable(),
 			Path:      path,
+			Chrome:    man.Window.Chrome.Options(),
 		})
 		if err != nil {
 			openErr = fmt.Errorf("shell: opening the window: %w", err)

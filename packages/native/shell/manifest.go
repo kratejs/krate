@@ -27,6 +27,9 @@ type Manifest struct {
 
 	Window WindowSpec `json:"window"`
 
+	// Mac holds macOS-only settings.
+	Mac *MacSpec `json:"mac,omitempty"`
+
 	// Assets is the built UI directory, relative to the app directory.
 	// Default "dist".
 	Assets string `json:"assets"`
@@ -119,6 +122,16 @@ type WindowSpec struct {
 	// closing the last window releases its webview instead of quitting, and
 	// Show or reopening the window brings it back on the same route.
 	KeepAlive bool `json:"keepAlive,omitempty"`
+	// Chrome is the window chrome: title bar style, transparency, backdrops.
+	Chrome *ChromeSpec `json:"chrome,omitempty"`
+}
+
+// MacSpec holds macOS-only app settings.
+type MacSpec struct {
+	// Agent makes the app a menu-bar-only agent: no dock icon and no
+	// application menu, as LSUIElement does in a bundled app. The packaged
+	// Info.plist carries the same key.
+	Agent bool `json:"agent,omitempty"`
 }
 
 // Fallback maps a route pattern in Krate's segment syntax to the file that
@@ -230,6 +243,9 @@ func (m *Manifest) normalize() error {
 	}
 	if !strings.HasPrefix(m.Window.Path, "/") {
 		return fmt.Errorf("window.path %q must start with /", m.Window.Path)
+	}
+	if err := m.Window.Chrome.validate(); err != nil {
+		return err
 	}
 	for _, n := range m.Plugins {
 		if !plugin.ValidName(n) {

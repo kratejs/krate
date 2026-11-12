@@ -51,6 +51,8 @@ type Metadata struct {
 	DeepLinks []string
 	// MacCategory is a UTI such as "public.app-category.productivity".
 	MacCategory string
+	// MacAgent marks a menu-bar-only app: LSUIElement in Info.plist.
+	MacAgent bool
 	// Publisher is the Windows publisher (an MSIX subject or a display name).
 	Publisher string
 	// Installer is "msix" or "nsis" or "".
@@ -91,6 +93,7 @@ func MetadataFromConfig(root string, cfg *config.Config) Metadata {
 		}
 	}
 	m.MacCategory = macCategory(n.Bundle.MacOS.Category)
+	m.MacAgent = n.Bundle.MacOS.Agent
 	return m
 }
 

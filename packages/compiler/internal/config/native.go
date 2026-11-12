@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/kratejs/krate/packages/native/platform/caps"
 )
 
 // NativeConfig is the `native` block: settings for the desktop target
@@ -104,11 +106,69 @@ type NativeWindow struct {
 	// leaves the page nothing. Windows opened with window.Open take the same
 	// option and inherit the opener's scope.
 	Permissions *[]string `json:"permissions,omitempty"`
+	// Transparent makes the window and its webview background transparent
+	// (the page then paints everything the user sees). Default false.
+	Transparent bool `json:"transparent,omitempty"`
+	// Backdrop is a Windows 11 system backdrop behind a transparent page:
+	// "none", "mica", "micaAlt" or "acrylic". Ignored elsewhere.
+	Backdrop string `json:"backdrop,omitempty"`
+	// Vibrancy is a macOS vibrancy material behind a transparent page, for
+	// example "sidebar" or "hudWindow". Ignored elsewhere.
+	Vibrancy string `json:"vibrancy,omitempty"`
+	// TitleBarOverlay draws the operating system's caption buttons over a
+	// hidden title bar (Windows). true uses the defaults; an object sets the
+	// colors and the height of the draggable strip.
+	TitleBarOverlay *NativeTitleBarOverlay `json:"titleBarOverlay,omitempty"`
+	// TrafficLightPosition moves the macOS window buttons of a hidden title
+	// bar.
+	TrafficLightPosition *NativePoint `json:"trafficLightPosition,omitempty"`
+	// TabbingIdentifier groups windows into native tabs (macOS) and
+	// TabbingMode is "auto", "preferred" or "disallowed".
+	TabbingIdentifier string `json:"tabbingIdentifier,omitempty"`
+	TabbingMode       string `json:"tabbingMode,omitempty"`
 	// KeepAlive keeps the app running with no window open, for tray apps.
 	// Closing the last window then releases its webview instead of quitting,
 	// and window.show() (or reopening from the tray) brings it back on the
 	// same route. Default false.
 	KeepAlive bool `json:"keepAlive,omitempty"`
+}
+
+// NativeTitleBarOverlay is the caption button overlay of a hidden title bar.
+// In the config it is true, false or an object.
+type NativeTitleBarOverlay struct {
+	Color       string `json:"color,omitempty"`
+	SymbolColor string `json:"symbolColor,omitempty"`
+	Height      int    `json:"height,omitempty"`
+	// off is set by false: the overlay is explicitly disabled.
+	off bool
+}
+
+// UnmarshalJSON accepts a boolean or an object.
+func (o *NativeTitleBarOverlay) UnmarshalJSON(b []byte) error {
+	switch strings.TrimSpace(string(b)) {
+	case "true":
+		*o = NativeTitleBarOverlay{}
+		return nil
+	case "false":
+		*o = NativeTitleBarOverlay{off: true}
+		return nil
+	}
+	type plain NativeTitleBarOverlay
+	var p plain
+	if err := json.Unmarshal(b, &p); err != nil {
+		return fmt.Errorf("window.titleBarOverlay must be a boolean or an object: %w", err)
+	}
+	*o = NativeTitleBarOverlay(p)
+	return nil
+}
+
+// Enabled reports whether the overlay is switched on.
+func (o *NativeTitleBarOverlay) Enabled() bool { return o != nil && !o.off }
+
+// NativePoint is a position in device-independent pixels.
+type NativePoint struct {
+	X int `json:"x"`
+	Y int `json:"y"`
 }
 
 // NativeHost configures where TypeScript host code runs.
@@ -153,6 +213,11 @@ type NativeBundle struct {
 // NativeBundleMacOS holds macOS packaging options.
 type NativeBundleMacOS struct {
 	Category string `json:"category,omitempty"`
+	// Agent makes the app a menu-bar-only agent: LSUIElement in Info.plist
+	// (no dock icon, no application menu). The shell also starts as an agent
+	// in dev. A running app can still show its dock icon with
+	// chrome.setDockVisible.
+	Agent bool `json:"agent,omitempty"`
 }
 
 // NativeBundleWindows holds Windows packaging options.
@@ -373,6 +438,9 @@ func (c *Config) validateNative() (warnings []string, err error) {
 		return nil, nativeErr("window.titleBar", fmt.Sprintf("must be \"native\", \"hidden\" or \"none\", got %q", n.Window.TitleBar),
 			"\"native\" uses the system title bar, \"hidden\" keeps window controls over the page, \"none\" removes the frame")
 	}
+	if err := n.validateChrome(); err != nil {
+		return nil, err
+	}
 	for _, p := range n.Permissions {
 		if !IsNativePermission(p) {
 			return nil, nativeErr("permissions", fmt.Sprintf("has unknown permission %q", p),
@@ -456,4 +524,54 @@ func (c *Config) validateNative() (warnings []string, err error) {
 		}
 	}
 	return warnings, nil
+}
+
+// ChromeOptions returns the window chrome of the main window.
+func (w NativeWindow) ChromeOptions() caps.ChromeOptions {
+	o := caps.ChromeOptions{
+		TitleBar: w.TitleBar, Transparent: w.Transparent, Backdrop: w.Backdrop, Vibrancy: w.Vibrancy,
+		TabbingID: w.TabbingIdentifier, TabbingMode: w.TabbingMode,
+	}
+	if w.TitleBarOverlay.Enabled() {
+		o.Overlay = &caps.TitleBarOverlay{Color: w.TitleBarOverlay.Color, SymbolColor: w.TitleBarOverlay.SymbolColor, Height: w.TitleBarOverlay.Height}
+	}
+	if w.TrafficLightPosition != nil {
+		o.TrafficLight = &caps.Point{X: w.TrafficLightPosition.X, Y: w.TrafficLightPosition.Y}
+	}
+	return o
+}
+
+// validateChrome checks the window chrome keys with the platform's own rules.
+func (n *NativeConfig) validateChrome() error {
+	w := n.Window
+	if w.Backdrop != "" {
+		if _, ok := caps.BackdropType(w.Backdrop); !ok {
+			return nativeErr("window.backdrop", fmt.Sprintf("must be one of %s, got %q", strings.Join(caps.BackdropNames(), ", "), w.Backdrop),
+				"backdrops are Windows 11 system materials; use vibrancy for macOS")
+		}
+	}
+	if w.Vibrancy != "" {
+		if _, ok := caps.VibrancyMaterial(w.Vibrancy); !ok {
+			return nativeErr("window.vibrancy", fmt.Sprintf("must be one of %s, got %q", strings.Join(caps.VibrancyNames(), ", "), w.Vibrancy),
+				"vibrancy materials are macOS NSVisualEffectView materials; use backdrop for Windows")
+		}
+	}
+	if w.TitleBarOverlay.Enabled() {
+		if _, err := (caps.TitleBarOverlay{Color: w.TitleBarOverlay.Color, SymbolColor: w.TitleBarOverlay.SymbolColor, Height: w.TitleBarOverlay.Height}).Normalize(); err != nil {
+			return nativeErr("window.titleBarOverlay", err.Error(), "colors are #rgb, #rrggbb or #rrggbbaa; height is 0 to 200")
+		}
+		if w.TitleBar == "" || w.TitleBar == "native" {
+			return nativeErr("window.titleBarOverlay", "needs a hidden title bar", "set native.window.titleBar to \"hidden\"")
+		}
+	}
+	if p := w.TrafficLightPosition; p != nil && (p.X < 0 || p.Y < 0 || p.X > 1000 || p.Y > 1000) {
+		return nativeErr("window.trafficLightPosition", fmt.Sprintf("(%d, %d) is out of range", p.X, p.Y), "use 0 to 1000")
+	}
+	if _, ok := caps.TabbingModeValue(w.TabbingMode); !ok {
+		return nativeErr("window.tabbingMode", fmt.Sprintf("must be \"auto\", \"preferred\" or \"disallowed\", got %q", w.TabbingMode), "see the window chrome docs")
+	}
+	if len(w.TabbingIdentifier) > 128 {
+		return nativeErr("window.tabbingIdentifier", "is longer than 128 characters", "use a short identifier")
+	}
+	return nil
 }

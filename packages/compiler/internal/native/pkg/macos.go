@@ -43,6 +43,9 @@ func InfoPlist(m Metadata, exeName string) []byte {
 	str("CFBundleVersion", v.core())
 	str("LSApplicationCategoryType", m.MacCategory)
 	str("LSMinimumSystemVersion", minMacOS)
+	if m.MacAgent {
+		b.WriteString("\t<key>LSUIElement</key>\n\t<true/>\n")
+	}
 	b.WriteString("\t<key>NSHighResolutionCapable</key>\n\t<true/>\n")
 	str("NSPrincipalClass", "NSApplication")
 	b.WriteString("\t<key>NSSupportsAutomaticGraphicsSwitching</key>\n\t<true/>\n")
