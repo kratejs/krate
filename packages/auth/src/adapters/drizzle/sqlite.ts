@@ -67,6 +67,7 @@ export function createSqliteSchema(names?: Partial<TableNames>) {
     secret: text("secret").notNull(),
     backupCodes: text("backupCodes").notNull(),
     confirmed: integer("confirmed", { mode: "boolean" }).notNull().default(false),
+    lastUsedCounter: integer("lastUsedCounter"),
     createdAt: integer("createdAt", { mode: "timestamp_ms" }).$defaultFn(() => new Date()),
   });
 

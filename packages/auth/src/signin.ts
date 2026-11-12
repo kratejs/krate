@@ -56,14 +56,14 @@ export function assertCsrf(ctx: RequestContext, supplied: string | undefined): v
   }
 }
 
-export function limit(ctx: RequestContext, action: string, identifier?: string): void {
+export function limit(ctx: RequestContext, action: string, identifier?: string, max?: number): void {
   const { rateLimit } = ctx.config;
   if (!rateLimit.enabled) return;
   const ip = clientIp(ctx.request);
   const checks = [`${action}:ip:${ip}`];
   if (identifier) checks.push(`${action}:id:${identifier.toLowerCase()}`);
   for (const key of checks) {
-    const result = consume(key, rateLimit.max, rateLimit.window);
+    const result = consume(key, max === undefined ? rateLimit.max : Math.min(max, rateLimit.max), rateLimit.window);
     if (!result.allowed) throw new AuthError("RateLimited", `too many attempts, retry in ${result.retryAfter}s`, 429);
   }
 }

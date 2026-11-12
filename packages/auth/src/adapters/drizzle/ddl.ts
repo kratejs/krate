@@ -76,6 +76,7 @@ export function authTablesSql(dialect: Dialect, names?: Partial<TableNames>): st
   ${Q("secret")} ${longText} NOT NULL,
   ${Q("backupCodes")} ${longText} NOT NULL,
   ${Q("confirmed")} ${bool} NOT NULL DEFAULT ${falseValue},
+  ${Q("lastUsedCounter")} ${int},
   ${Q("createdAt")} ${nullTime}${now},
   ${fk("userId")}
 )`,

@@ -150,7 +150,13 @@ export function DrizzleAdapter(db: any, schema: AuthSchema): Adapter {
       return { ...row, backupCodes: JSON.parse(row.backupCodes) as string[] } as TwoFactorRecord;
     },
     async upsertTwoFactor(record) {
-      const values = { userId: record.userId, secret: record.secret, backupCodes: JSON.stringify(record.backupCodes), confirmed: record.confirmed };
+      const values = {
+        userId: record.userId,
+        secret: record.secret,
+        backupCodes: JSON.stringify(record.backupCodes),
+        confirmed: record.confirmed,
+        lastUsedCounter: record.lastUsedCounter ?? null,
+      };
       const existing = first(await db.select().from(twoFactors).where(eq(twoFactors.userId, record.userId)).limit(1));
       if (existing) await db.update(twoFactors).set(values).where(eq(twoFactors.userId, record.userId));
       else await db.insert(twoFactors).values(values);

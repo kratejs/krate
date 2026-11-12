@@ -67,6 +67,7 @@ export function createMysqlSchema(names?: Partial<TableNames>) {
     secret: text("secret").notNull(),
     backupCodes: text("backupCodes").notNull(),
     confirmed: boolean("confirmed").notNull().default(false),
+    lastUsedCounter: int("lastUsedCounter"),
     createdAt: timestamp("createdAt", { mode: "date", fsp: 3 }).defaultNow(),
   });
 

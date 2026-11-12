@@ -66,6 +66,7 @@ export interface TwoFactorRecord {
   secret: string;
   backupCodes: string[];
   confirmed: boolean;
+  lastUsedCounter?: number | null;
   createdAt?: Date;
 }
 
@@ -104,6 +105,7 @@ export interface Session {
     image?: string | null;
     role?: string | null;
     twoFactorEnabled?: boolean;
+    twoFactorSetupRequired?: boolean;
     [key: string]: unknown;
   };
   expires: string;

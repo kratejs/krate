@@ -2,20 +2,13 @@ import { AuthError, createContext, type RequestContext, type ResolvedConfig } fr
 import { ResponseCookies } from "./cookies.js";
 import { createCsrfToken, verifyCsrfCookie } from "./crypto.js";
 import { finishEmail, startEmail } from "./email-flow.js";
+import { handleTwoFactor } from "./twofactor.js";
 import { finishOAuth, startOAuth } from "./oauth-flow.js";
 import { errorPage, signInPage, signOutPage, providerSummary, verifyRequestPage, twoFactorPage } from "./pages.js";
 import { errorRedirect, isJsonClient, jsonResponse, redirectResponse, sanitizeRedirect } from "./redirect.js";
 import { readSession, requestCookies } from "./session.js";
 import { assertCsrf, handleCredentials, handleSignOut, parseBody, resolveCallbackUrl } from "./signin.js";
 import type { CredentialsConfig, EmailConfig, OAuthConfig } from "./types.js";
-
-export type RouteHandler = (ctx: RequestContext, segments: string[]) => Promise<Response | null>;
-
-const extraRoutes: RouteHandler[] = [];
-
-export function registerRoutes(handler: RouteHandler): void {
-  if (!extraRoutes.includes(handler)) extraRoutes.push(handler);
-}
 
 export function csrfFor(ctx: RequestContext, jar: ResponseCookies): string {
   const existing = verifyCsrfCookie(requestCookies(ctx.request)[ctx.cookies.csrfToken.name], ctx.secrets);
@@ -65,11 +58,6 @@ async function route(ctx: RequestContext, segments: string[]): Promise<Response 
   const { request, config } = ctx;
   const method = request.method.toUpperCase();
   const [action, id] = segments;
-
-  for (const extra of extraRoutes) {
-    const res = await extra(ctx, segments);
-    if (res) return res;
-  }
 
   switch (action) {
     case "providers":
@@ -150,7 +138,8 @@ async function route(ctx: RequestContext, segments: string[]): Promise<Response 
       if (method !== "GET") return null;
       return verifyRequestPage();
     case "2fa":
-      if (method === "GET" && !id) {
+      if (id) return handleTwoFactor(ctx, segments);
+      if (method === "GET") {
         const jar = new ResponseCookies();
         const callbackUrl = await sanitizeRedirect(ctx, ctx.url.searchParams.get("callbackUrl"));
         const page = twoFactorPage(ctx, csrfFor(ctx, jar), callbackUrl, ctx.url.searchParams.get("error"));

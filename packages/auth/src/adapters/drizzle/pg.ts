@@ -67,6 +67,7 @@ export function createPgSchema(names?: Partial<TableNames>) {
     secret: text("secret").notNull(),
     backupCodes: text("backupCodes").notNull(),
     confirmed: boolean("confirmed").notNull().default(false),
+    lastUsedCounter: integer("lastUsedCounter"),
     createdAt: timestamp("createdAt", { mode: "date", withTimezone: true }).defaultNow(),
   });
 

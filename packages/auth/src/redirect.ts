@@ -2,7 +2,11 @@ import type { ResponseCookies } from "./cookies.js";
 import type { RequestContext } from "./config.js";
 
 export function isJsonClient(request: Request): boolean {
-  return request.headers.get("x-auth-return-redirect") === "1" || (request.headers.get("accept") ?? "").includes("application/json");
+  return (
+    request.headers.get("x-auth-return-redirect") === "1" ||
+    (request.headers.get("accept") ?? "").includes("application/json") ||
+    (request.headers.get("content-type") ?? "").includes("application/json")
+  );
 }
 
 export async function sanitizeRedirect(ctx: RequestContext, target: string | null | undefined, fallback?: string): Promise<string> {

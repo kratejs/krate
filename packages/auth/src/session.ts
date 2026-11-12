@@ -1,4 +1,4 @@
-import type { RequestContext } from "./config.js";
+import { AuthError, type RequestContext } from "./config.js";
 import { ResponseCookies, parseCookies, readChunked } from "./cookies.js";
 import type { TokenClaims } from "./crypto.js";
 import type { Account, AdapterUser, Session, User } from "./types.js";
@@ -23,6 +23,7 @@ function buildSession(ctx: RequestContext, expires: Date, base: { id: string; na
   };
   if (base.role !== undefined && base.role !== null) user.role = base.role as string;
   if (base.twoFactorEnabled !== undefined) user.twoFactorEnabled = Boolean(base.twoFactorEnabled);
+  if (ctx.config.twoFactor.enabled && ctx.config.twoFactor.required && !user.twoFactorEnabled) user.twoFactorSetupRequired = true;
   return { user, expires: expires.toISOString(), ...(base.extra ?? {}) };
 }
 
@@ -182,4 +183,28 @@ export async function destroySession(ctx: RequestContext, jar: ResponseCookies):
   }
   jar.deleteChunked(cookies.sessionToken.name, cookies.sessionToken.options, existing);
   return state;
+}
+
+export async function patchSessionClaims(ctx: RequestContext, jar: ResponseCookies, patch: Record<string, unknown>): Promise<void> {
+  const { config, cookies } = ctx;
+  if (config.strategy !== "jwt") return;
+  const existing = requestCookies(ctx.request);
+  const raw = readChunked(existing, cookies.sessionToken.name);
+  if (!raw) return;
+  const token = await config.decode({ token: raw, secret: ctx.secrets, salt: cookies.sessionToken.name });
+  if (!token) return;
+  const { exp: _exp, iat: _iat, jti: _jti, ...claims } = token;
+  const encoded = await config.encode({ token: { ...claims, ...patch }, secret: ctx.secrets, salt: cookies.sessionToken.name, maxAge: config.jwtMaxAge });
+  jar.setChunked(
+    cookies.sessionToken.name,
+    encoded,
+    { ...cookies.sessionToken.options, expires: new Date(Date.now() + config.jwtMaxAge * 1000) },
+    existing,
+  );
+}
+
+export async function requireSession(ctx: RequestContext, jar?: ResponseCookies): Promise<SessionState & { session: Session }> {
+  const state = await readSession(ctx, jar);
+  if (!state.session) throw new AuthError("Unauthorized", "sign in required", 401);
+  return state as SessionState & { session: Session };
 }

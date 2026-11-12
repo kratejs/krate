@@ -100,8 +100,8 @@ export function runAdapterSuite(name: string, make: () => Promise<Adapter> | Ada
       expect(await adapter.getTwoFactor!(user.id)).toBeNull();
       await adapter.upsertTwoFactor!({ userId: user.id, secret: "sealed", backupCodes: ["h1", "h2"], confirmed: false });
       expect(await adapter.getTwoFactor!(user.id)).toMatchObject({ secret: "sealed", backupCodes: ["h1", "h2"], confirmed: false });
-      await adapter.upsertTwoFactor!({ userId: user.id, secret: "sealed", backupCodes: ["h2"], confirmed: true });
-      expect(await adapter.getTwoFactor!(user.id)).toMatchObject({ backupCodes: ["h2"], confirmed: true });
+      await adapter.upsertTwoFactor!({ userId: user.id, secret: "sealed", backupCodes: ["h2"], confirmed: true, lastUsedCounter: 56_666_667 });
+      expect(await adapter.getTwoFactor!(user.id)).toMatchObject({ backupCodes: ["h2"], confirmed: true, lastUsedCounter: 56_666_667 });
       await adapter.deleteTwoFactor!(user.id);
       expect(await adapter.getTwoFactor!(user.id)).toBeNull();
     });
