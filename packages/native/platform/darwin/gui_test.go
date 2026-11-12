@@ -179,8 +179,11 @@ func checkReport(t *testing.T, r pageReport) {
 	if want := "chunk0\nchunk1\nchunk2\nchunk3\nchunk4\n"; r.Stream != want {
 		t.Errorf("stream = %q", r.Stream)
 	}
-	if r.Reads < 2 || r.SpanMs < 150 {
-		t.Errorf("stream not incremental: %d reads spanning %.0f ms (want >= 150 ms)", r.Reads, r.SpanMs)
+	// The server spaces the chunks over 200 ms; a buffered response arrives as
+	// one read. WebKit delivers in batches, so the page's span varies (145 ms
+	// was seen on CI): half the server's span still proves streaming.
+	if r.Reads < 3 || r.SpanMs < 100 {
+		t.Errorf("stream not incremental: %d reads spanning %.0f ms (want >= 3 reads over >= 100 ms)", r.Reads, r.SpanMs)
 	}
 }
 
