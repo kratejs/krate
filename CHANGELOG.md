@@ -38,6 +38,18 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Added
 
+- `@krate/auth`: authentication in the style of NextAuth, configured from the new `auth` key in
+  `krate.config.ts`. 56 built-in OAuth and OpenID Connect providers, credentials, email magic
+  links and Resend, JWT or database sessions, a Drizzle adapter for SQLite, PostgreSQL and MySQL,
+  TOTP two-factor authentication with backup codes, passkeys (ES256, EdDSA and RS256), route
+  protection from `auth.protect` rules, and a browser client. It runs in the embedded runtime, so
+  API routes and middleware need no Node.js process.
+- `auth` is validated at load time: unknown keys warn, invalid values fail the build, secrets in
+  provider options are rejected with a pointer to `AUTH_<PROVIDER>_SECRET`, and database
+  sessions, two-factor authentication and passkeys fail without `auth.adapter.dialect`.
+- The serializable part of `auth` is delivered to API routes, server actions and middleware as
+  `globalThis.__KRATE_AUTH_CONFIG__`, so packages that stay external in the Node sidecar read it
+  too.
 - The embedded QuickJS runtime installs each group of Web APIs the first time code reads one of
   its globals, so creating a VM costs about 1.4 ms instead of 3.2 ms. Config and
   Tailwind evaluation, `generateStaticParams`, metadata and isolation-mode API requests get
@@ -105,6 +117,8 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Fixed
 
+- A middleware or API bundle whose last top-level statement evaluates to a BigInt no longer fails
+  to load with "Do not know how to serialize a BigInt". Bundled crypto libraries produce one.
 - Binary data crosses between Go and the embedded QuickJS runtime as raw ArrayBuffer copies
   instead of base64 text encoded and decoded in JavaScript: request and response bodies
   (buffered and streamed), middleware responses, `fetch` request and response bodies,

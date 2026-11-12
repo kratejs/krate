@@ -165,6 +165,50 @@ Cloudflare Pages) and to `vercel.json` (Vercel). Only explicit rules are emitted
 `security` defaults stay serve-only so static-host behavior is not changed
 implicitly.
 
+## Auth
+
+`auth` configures [authentication](/docs/features/authentication/) from
+`@krate/auth`. It holds the parts that are data. Callbacks, the database
+adapter and credentials logic stay in `defineAuth()`, and the code wins when
+both set an option.
+
+```typescript
+auth: {
+  providers: [{ id: "github" }, { id: "okta", name: "Company SSO" }],
+  session: { strategy: "jwt", maxAge: 60 * 60 * 24 * 7 },
+  pages: { signIn: "/login" },
+  adapter: { dialect: "sqlite" },
+  twoFactor: { enabled: true, issuer: "My App" },
+  passkeys: { enabled: true, rpName: "My App" },
+  protect: [{ source: "/dashboard" }, { source: "/admin", roles: ["admin"], status: 404 }],
+},
+```
+
+| Key | Type | Default |
+|-----|------|---------|
+| `enabled` | `boolean` | on when anything is configured |
+| `basePath` | `string` | `"/api/auth"` |
+| `trustHost` | `boolean` | `false` |
+| `debug` | `boolean` | `false` |
+| `providers` | `{ id, type?, name?, enabled?, options? }[]` | `[]` |
+| `session` | `{ strategy, maxAge, updateAge }` | `jwt`, 30 days, 1 day |
+| `pages` | `{ signIn, signOut, error, verifyRequest, newUser, twoFactor }` | built-in pages |
+| `cookies` | `{ prefix, secure, sameSite, domain }` | `krate-auth`, secure on https, `lax` |
+| `adapter` | `{ dialect, tables }` | none |
+| `twoFactor` | `{ enabled, required, issuer, digits, period, algorithm, window, backupCodes }` | off |
+| `passkeys` | `{ enabled, allowSignUp, rpName, rpId, origins, userVerification, residentKey, attestation, timeout }` | off |
+| `protect` | `{ source, roles?, redirect?, status? }[]` | `[]` |
+| `rateLimit` | `{ enabled, max, window }` | 20 per 60 seconds |
+| `redirects` | `{ signedIn, signedOut, allowed }` | none |
+| `linking` | `{ automatic }` | `false` |
+
+Provider options may not contain secrets (`clientSecret`, `secret`,
+`password`, `apiKey`, `privateKey`, `token`): the build fails and points to the
+`AUTH_<PROVIDER>_SECRET` environment variable instead. `session.strategy:
+"database"`, `twoFactor.enabled` and `passkeys.enabled` require
+`adapter.dialect`. An unknown provider id is a warning unless `type` is
+`"oauth"` or `"oidc"`.
+
 ## Images
 
 ```typescript
