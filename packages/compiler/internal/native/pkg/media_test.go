@@ -9,7 +9,7 @@ import (
 
 func TestInfoPlistUsageDescriptions(t *testing.T) {
 	m := Metadata{AppID: "com.acme.cam", ProductName: "Cam", Version: "1.0.0", MacCategory: "public.app-category.video",
-		MediaUses: []string{"camera", "microphone", "location"},
+		MediaUses:  []string{"camera", "microphone", "location"},
 		MediaUsage: MediaUsage{Camera: "Cam shows your video call."}}
 	got := string(InfoPlist(m, "Cam"))
 	for _, want := range []string{

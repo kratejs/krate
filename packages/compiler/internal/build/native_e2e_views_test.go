@@ -1,6 +1,7 @@
 package build
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -8,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kratejs/krate/packages/compiler/internal/config"
 )
 
 // TestNativeE2EViewsGUI runs examples/native-views in the real webview: the
@@ -63,5 +66,131 @@ func TestNativeE2EViewsGUI(t *testing.T) {
 	}
 	if _, err := s.send("quit", 10*time.Second); err != nil {
 		t.Errorf("quit: %v", err)
+	}
+}
+
+// TestNativeE2EMediaGUI runs examples/native-media in the real webview with
+// the mock capture devices: the page asks for the camera, the microphone and
+// the location, and native.media decides (camera allowed, the other two
+// denied). It goes through the shell, the permission handler of the platform
+// and the manager as an app does.
+func TestNativeE2EMediaGUI(t *testing.T) {
+	if os.Getenv("KRATE_NATIVE_GUI") != "1" {
+		t.Skip("set KRATE_NATIVE_GUI=1 to run the native GUI end-to-end test")
+	}
+	e2eRequireDeps(t)
+	ex := filepath.Join(repoRoot(t), "examples", "native-media")
+	if _, err := os.Stat(filepath.Join(ex, "node_modules", "@krate", "app", "dist", "media.js")); err != nil {
+		requireE2E(t, "examples/native-media has no built @krate/app (run pnpm install and pnpm build)")
+	}
+	t.Setenv("KRATE_NATIVE_MOCK_CAPTURE", "1")
+	work := t.TempDir()
+	appDir := e2eBuildNative(t, ex, filepath.Join(work, "dist-native"))
+
+	raw, err := os.ReadFile(filepath.Join(appDir, "app.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"media"`, `"camera": "allow"`, `"microphone": "deny"`, `"uses"`} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("app.json lacks %s:\n%s", want, raw)
+		}
+	}
+
+	bin := e2eBuildShell(t, work)
+	s := e2eStartShell(t, bin, appDir)
+	s.waitReady(60 * time.Second)
+
+	var res string
+	for deadline := time.Now().Add(60 * time.Second); ; time.Sleep(300 * time.Millisecond) {
+		err = s.query(`document.getElementById("result")?.textContent ?? ""`, &res)
+		if err == nil && strings.HasPrefix(res, "{") {
+			break
+		}
+		if time.Now().After(deadline) {
+			var errs string
+			_ = s.query(`JSON.stringify(globalThis.__krateErrs ?? [], (k, v) => v instanceof Error ? String(v) + " " + v.stack : v)`, &errs)
+			t.Logf("page errors: %s", errs)
+			t.Fatalf("the page did not report within 60s: %q (last query error: %v)", res, err)
+		}
+	}
+	t.Logf("page result: %s", res)
+	var got map[string]string
+	if err := json.Unmarshal([]byte(res), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["camera"] == "NotAllowedError" || got["camera"] == "" {
+		t.Errorf("camera (policy allow) = %q", got["camera"])
+	}
+	if got["microphone"] != "NotAllowedError" {
+		t.Errorf("microphone (policy deny) = %q, want NotAllowedError", got["microphone"])
+	}
+	if got["location"] != "code1" {
+		t.Errorf("location (policy deny) = %q, want code1 (PERMISSION_DENIED)", got["location"])
+	}
+	// The dev build derives media and location from the code.
+	if got["mediaPermission"] != "true" || got["locationPermission"] != "true" {
+		t.Errorf("permissions: media %q, location %q", got["mediaPermission"], got["locationPermission"])
+	}
+	if !strings.Contains(got["policy"], `"camera":"allow"`) || !strings.Contains(got["policy"], `"microphone":"deny"`) {
+		t.Errorf("policy = %q", got["policy"])
+	}
+	if _, err := s.send("quit", 10*time.Second); err != nil {
+		t.Errorf("quit: %v", err)
+	}
+}
+
+// TestNativeMediaDerivedPermissions: a derived build grants "media" and
+// "location" because the UI code calls getUserMedia and geolocation, and the
+// manifest lists what the page uses for packaging.
+func TestNativeMediaDerivedPermissions(t *testing.T) {
+	e2eRequireDeps(t)
+	ex := filepath.Join(repoRoot(t), "examples", "native-media")
+	if _, err := os.Stat(filepath.Join(ex, "node_modules", "@krate", "app", "dist", "media.js")); err != nil {
+		requireE2E(t, "examples/native-media has no built @krate/app (run pnpm install and pnpm build)")
+	}
+	cfg, err := config.Load(ex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := New(ex, cfg)
+	res, err := b.BuildNativeApp(NativeAppOptions{OutDir: filepath.Join(t.TempDir(), "dist-native"), Derive: true})
+	if err != nil {
+		t.Fatalf("native build: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(res.AppDir, "app.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var man struct {
+		Permissions       []string `json:"permissions"`
+		StrictPermissions bool     `json:"strictPermissions"`
+		Media             struct {
+			Uses []string `json:"uses"`
+		} `json:"media"`
+	}
+	if err := json.Unmarshal(raw, &man); err != nil {
+		t.Fatal(err)
+	}
+	has := func(l []string, s string) bool {
+		for _, x := range l {
+			if x == s {
+				return true
+			}
+		}
+		return false
+	}
+	// media:manage is not needed by a page that only reads the policy; the
+	// SDK ids it calls (media.policy, media.decisions, media.osStatus) need media.
+	for _, p := range []string{"media", "location"} {
+		if !has(man.Permissions, p) {
+			t.Errorf("derived permissions %v lack %q", man.Permissions, p)
+		}
+	}
+	if !man.StrictPermissions || has(man.Permissions, "media:manage") {
+		t.Errorf("strict %v, permissions %v", man.StrictPermissions, man.Permissions)
+	}
+	if strings.Join(man.Media.Uses, ",") != "camera,microphone,location" {
+		t.Errorf("media.uses = %v", man.Media.Uses)
 	}
 }
