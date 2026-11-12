@@ -33,6 +33,14 @@ const (
 	iidPermissionRequestedHandler = "15e1c6a3-c72a-4df3-91d7-d097fbec6bfd"
 	// WebView2.h line 21808 (ICoreWebView2_19, MemoryUsageTargetLevel)
 	iidWebView2_19 = "6921f954-79b0-437f-a997-c85811897c68"
+	// WebView2.h line 13620
+	iidContextMenuRequestedHandler = "04d3fe1d-ab87-42fb-a898-da241d35b63c"
+	// WebView2.h line 35340
+	iidCustomItemSelectedHandler = "49e1d0bc-fe9e-4481-b7c2-32324aa21998"
+	// ICoreWebView2_11 (add_ContextMenuRequested is on this interface)
+	iidWebView2_11 = "0be78e56-c193-4051-b943-23b460c08bdb"
+	// ICoreWebView2Environment9
+	iidEnvironment9 = "f06f41bf-4b5a-49d8-b9f6-fa16cd29f274"
 )
 
 // guid is a GUID in its in-memory (Windows GUID struct) layout: Data1, Data2

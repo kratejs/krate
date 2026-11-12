@@ -46,6 +46,7 @@ type view struct {
 	hNav       unsafe.Pointer // NavigationCompleted
 	hClose     unsafe.Pointer // WindowCloseRequested
 	hMsg       unsafe.Pointer // WebMessageReceived (streamed responses)
+	hCtx       unsafe.Pointer // ContextMenuRequested
 	streams    streamTable
 	pending    []func()
 	path       string
@@ -211,6 +212,7 @@ func (v *view) controllerCompleted(hr, controller uintptr) {
 
 	v.setupStreams()
 	a.tuneMemory(v)
+	a.hookContextMenu(v)
 
 	w.placeViews()
 	vcall(v.controller, ctlPutIsVisible, 1)
@@ -255,7 +257,7 @@ func (v *view) closeController() {
 		comRelease(v.webview)
 		v.webview = nil
 	}
-	for _, h := range []*unsafe.Pointer{&v.hRes, &v.hNav, &v.hClose, &v.hMsg} {
+	for _, h := range []*unsafe.Pointer{&v.hRes, &v.hNav, &v.hClose, &v.hMsg, &v.hCtx} {
 		if *h != nil {
 			comRelease(*h)
 			*h = nil

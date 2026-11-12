@@ -70,6 +70,7 @@ type App struct {
 	windows map[objc.ID]*Window
 	tasks   map[objc.ID]*taskState
 	byWeb   map[objc.ID]*view
+	cm      *ctxState // context menu configuration (main thread)
 
 	// viewMu guards viewOwner, which WindowOfView reads from any goroutine.
 	viewMu      sync.Mutex
@@ -122,6 +123,9 @@ func (a *App) setup() error {
 		return err
 	}
 	if err := registerTrayClass(a); err != nil {
+		return err
+	}
+	if err := registerWebViewClass(a); err != nil {
 		return err
 	}
 	a.nsApp = cls("NSApplication").Send(sel("sharedApplication"))
