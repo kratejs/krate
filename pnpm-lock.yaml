@@ -82,6 +82,9 @@ importers:
       drizzle-orm:
         specifier: ^0.44.0
         version: 0.44.7(@electric-sql/pglite@0.3.16)(@libsql/client@0.15.15)
+      esbuild:
+        specifier: ^0.28.0
+        version: 0.28.2
       typescript:
         specifier: ^5.5.0
         version: 5.9.3
@@ -1626,6 +1629,7 @@ packages:
   esbuild@0.28.2:
     resolution: {integrity: sha512-HKVLS8dvII+xoKW9kmqxbRKrnWEXfJJr/FZhhJmiqIB0e053QNYFqOBouTMO/k5sID4MvCiUCvv8b9M4h32wIA==}
     engines: {node: '>=18'}
+    hasBin: true
 
   estree-walker@3.0.3:
     resolution: {integrity: sha512-7RUKfXgSMMkzt6ZuXmqapOurLGPPfgj6l9uRZ7lRGolvk0y2yocc35LdcxKC5PQZdn2DMqioAQ2NoWcrTKmm6g==}

@@ -1,0 +1,138 @@
+{
+  "rpId": "localhost",
+  "origin": "http://localhost:3000",
+  "cases": [
+    {
+      "name": "ES256",
+      "alg": -7,
+      "regChallenge": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+      "authChallenge": "CwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCws",
+      "registration": {
+        "id": "BsNSjfsv_GGvU3zaogdIQu_J028121GBuU4cVEf2q4M",
+        "rawId": "BsNSjfsv_GGvU3zaogdIQu_J028121GBuU4cVEf2q4M",
+        "type": "public-key",
+        "response": {
+          "clientDataJSON": "eyJ0eXBlIjoid2ViYXV0aG4uY3JlYXRlIiwiY2hhbGxlbmdlIjoiQVFFQkFRRUJBUUVCQVFFQkFRRUJBUUVCQVFFQkFRRUJBUUVCQVFFQkFRRSIsIm9yaWdpbiI6Imh0dHA6Ly9sb2NhbGhvc3Q6MzAwMCIsImNyb3NzT3JpZ2luIjpmYWxzZX0",
+          "attestationObject": "o2NmbXRkbm9uZWdhdHRTdG10oGhhdXRoRGF0YVikSZYN5YgOjGh0NBcPZHZgW4_krrmihjLHmVzzuoMdl2NFAAAAAAAAAAAAAAAAAAAAAAAAAAAAIAbDUo37L_xhr1N82qIHSELvydNvNdtRgblOHFRH9quDpQECAyYgASFYINW9rNnM58Ei5o2yyIP0Q8nKsVd2MH5Cwqr-QzuPnImYIlggvINHzjOVObZpBlmt-tDAdon9STgdTannbOB3RtuXN4Q",
+          "transports": [
+            "internal",
+            "hybrid"
+          ]
+        },
+        "clientExtensionResults": {}
+      },
+      "authentication": {
+        "id": "BsNSjfsv_GGvU3zaogdIQu_J028121GBuU4cVEf2q4M",
+        "rawId": "BsNSjfsv_GGvU3zaogdIQu_J028121GBuU4cVEf2q4M",
+        "type": "public-key",
+        "response": {
+          "clientDataJSON": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiQ3dzTEN3c0xDd3NMQ3dzTEN3c0xDd3NMQ3dzTEN3c0xDd3NMQ3dzTEN3cyIsIm9yaWdpbiI6Imh0dHA6Ly9sb2NhbGhvc3Q6MzAwMCIsImNyb3NzT3JpZ2luIjpmYWxzZX0",
+          "authenticatorData": "SZYN5YgOjGh0NBcPZHZgW4_krrmihjLHmVzzuoMdl2MFAAAAAQ",
+          "signature": "MEUCIF5RWO_517cZkcUYZAAKxTJC-dTc1QjIXlFSKn3ian8mAiEAkaouPDTw-EN2V7o8yox5AEXDloQx63draSKaOZQNbt4",
+          "userHandle": null
+        },
+        "clientExtensionResults": {}
+      },
+      "forged": {
+        "id": "BsNSjfsv_GGvU3zaogdIQu_J028121GBuU4cVEf2q4M",
+        "rawId": "BsNSjfsv_GGvU3zaogdIQu_J028121GBuU4cVEf2q4M",
+        "type": "public-key",
+        "response": {
+          "clientDataJSON": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiWTJOalkyTmpZMk5qWTJOalkyTmpZMk5qWTJOalkyTmpZMk5qWTJOalkyTSIsIm9yaWdpbiI6Imh0dHA6Ly9sb2NhbGhvc3Q6MzAwMCIsImNyb3NzT3JpZ2luIjpmYWxzZX0",
+          "authenticatorData": "SZYN5YgOjGh0NBcPZHZgW4_krrmihjLHmVzzuoMdl2MFAAAAAg",
+          "signature": "MEQCIH9jaOVvGxGqZ3X9_XmM986qZP3jhy08I-f6k5ptXO24AiAmlD46e39RmATiN624MPm0clKTWoaesk9Ld6fp8hy20Q",
+          "userHandle": null
+        },
+        "clientExtensionResults": {}
+      }
+    },
+    {
+      "name": "EdDSA",
+      "alg": -8,
+      "regChallenge": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI",
+      "authChallenge": "DAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAw",
+      "registration": {
+        "id": "UnS4uKQS6uLmXNEBkNw8q738pjg5GYZ_XUncnPGCS1s",
+        "rawId": "UnS4uKQS6uLmXNEBkNw8q738pjg5GYZ_XUncnPGCS1s",
+        "type": "public-key",
+        "response": {
+          "clientDataJSON": "eyJ0eXBlIjoid2ViYXV0aG4uY3JlYXRlIiwiY2hhbGxlbmdlIjoiQWdJQ0FnSUNBZ0lDQWdJQ0FnSUNBZ0lDQWdJQ0FnSUNBZ0lDQWdJQ0FnSSIsIm9yaWdpbiI6Imh0dHA6Ly9sb2NhbGhvc3Q6MzAwMCIsImNyb3NzT3JpZ2luIjpmYWxzZX0",
+          "attestationObject": "o2NmbXRkbm9uZWdhdHRTdG10oGhhdXRoRGF0YViBSZYN5YgOjGh0NBcPZHZgW4_krrmihjLHmVzzuoMdl2NFAAAAAAAAAAAAAAAAAAAAAAAAAAAAIFJ0uLikEuri5lzRAZDcPKu9_KY4ORmGf11J3JzxgktbpAEBAycgBiFYIAQzuGkRW_YhYRs6ecTV2Xj9CPOGGEYTOKcHrnp7l-F2",
+          "transports": [
+            "internal",
+            "hybrid"
+          ]
+        },
+        "clientExtensionResults": {}
+      },
+      "authentication": {
+        "id": "UnS4uKQS6uLmXNEBkNw8q738pjg5GYZ_XUncnPGCS1s",
+        "rawId": "UnS4uKQS6uLmXNEBkNw8q738pjg5GYZ_XUncnPGCS1s",
+        "type": "public-key",
+        "response": {
+          "clientDataJSON": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiREF3TURBd01EQXdNREF3TURBd01EQXdNREF3TURBd01EQXdNREF3TURBdyIsIm9yaWdpbiI6Imh0dHA6Ly9sb2NhbGhvc3Q6MzAwMCIsImNyb3NzT3JpZ2luIjpmYWxzZX0",
+          "authenticatorData": "SZYN5YgOjGh0NBcPZHZgW4_krrmihjLHmVzzuoMdl2MFAAAAAQ",
+          "signature": "41tVdGTW25s0CiUBh5iQalnCk95n72V4D5iY_AUx_TwToS5CN3HMxCSs6QNivh-gbQiH2uL7XzqtItpufbeqCg",
+          "userHandle": null
+        },
+        "clientExtensionResults": {}
+      },
+      "forged": {
+        "id": "UnS4uKQS6uLmXNEBkNw8q738pjg5GYZ_XUncnPGCS1s",
+        "rawId": "UnS4uKQS6uLmXNEBkNw8q738pjg5GYZ_XUncnPGCS1s",
+        "type": "public-key",
+        "response": {
+          "clientDataJSON": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiWTJOalkyTmpZMk5qWTJOalkyTmpZMk5qWTJOalkyTmpZMk5qWTJOalkyTSIsIm9yaWdpbiI6Imh0dHA6Ly9sb2NhbGhvc3Q6MzAwMCIsImNyb3NzT3JpZ2luIjpmYWxzZX0",
+          "authenticatorData": "SZYN5YgOjGh0NBcPZHZgW4_krrmihjLHmVzzuoMdl2MFAAAAAg",
+          "signature": "yLeOAy_CPAgw0LCytecYPPzJbIIOJRH6sWj_k0z9cQoLOXcitvZGZ1haLozoqWHY5uB9nF6sDU-LwEatZZKfAg",
+          "userHandle": null
+        },
+        "clientExtensionResults": {}
+      }
+    },
+    {
+      "name": "RS256",
+      "alg": -257,
+      "regChallenge": "AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM",
+      "authChallenge": "DQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0",
+      "registration": {
+        "id": "NR0wqW6qgttXfydJRumsGcadlHDAS_KiLJu5g_3KIJE",
+        "rawId": "NR0wqW6qgttXfydJRumsGcadlHDAS_KiLJu5g_3KIJE",
+        "type": "public-key",
+        "response": {
+          "clientDataJSON": "eyJ0eXBlIjoid2ViYXV0aG4uY3JlYXRlIiwiY2hhbGxlbmdlIjoiQXdNREF3TURBd01EQXdNREF3TURBd01EQXdNREF3TURBd01EQXdNREF3TSIsIm9yaWdpbiI6Imh0dHA6Ly9sb2NhbGhvc3Q6MzAwMCIsImNyb3NzT3JpZ2luIjpmYWxzZX0",
+          "attestationObject": "o2NmbXRkbm9uZWdhdHRTdG10oGhhdXRoRGF0YVkBZ0mWDeWIDoxodDQXD2R2YFuP5K65ooYyx5lc87qDHZdjRQAAAAAAAAAAAAAAAAAAAAAAAAAAACA1HTCpbqqC21d_J0lG6awZxp2UcMBL8qIsm7mD_cogkaQBAwM5AQAgWQEA9G6KKgCASIhXYU1xOgwaicVYCkfwQDRIFSkDcGKA-ixMJONNQDpqId9j6VCMkaPTu0y61xG-_cH5jAX1JyiaBRNkW3KhevVP9vjiTvZ7SjwTLOQ-6J2dpXDKx8dI9UxXjsm_4DiMSCJ8cXJH4lZHwN5KsFedD9zsq_nDFu9mwd24Nk9m7NEB7RQgKR2vv8qDi38l_h2dVcWcy9UuDAHqnQv_o6nHTPvpTnBrAcg0IdOD4adySr9nlAQSO6OSrObnH6Su8F7M2jYTkk5RT8YpNImnHfo1-haTcXQatv9ALBHaoza3y9aP_V2TjpGKQXLOravvKMO14YXKNcb89c5DgyFDAQAB",
+          "transports": [
+            "internal",
+            "hybrid"
+          ]
+        },
+        "clientExtensionResults": {}
+      },
+      "authentication": {
+        "id": "NR0wqW6qgttXfydJRumsGcadlHDAS_KiLJu5g_3KIJE",
+        "rawId": "NR0wqW6qgttXfydJRumsGcadlHDAS_KiLJu5g_3KIJE",
+        "type": "public-key",
+        "response": {
+          "clientDataJSON": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiRFEwTkRRME5EUTBORFEwTkRRME5EUTBORFEwTkRRME5EUTBORFEwTkRRMCIsIm9yaWdpbiI6Imh0dHA6Ly9sb2NhbGhvc3Q6MzAwMCIsImNyb3NzT3JpZ2luIjpmYWxzZX0",
+          "authenticatorData": "SZYN5YgOjGh0NBcPZHZgW4_krrmihjLHmVzzuoMdl2MFAAAAAQ",
+          "signature": "AhK7Da01EIOOc4mBVsOFw2ekFQi87oavOKgbG9G8hULTHAYW8tKQitiHG7QJ6PPxMMysyj5BZXU32aTWNSeY5bcTEUp1uZJiszZEdMvWjFgxCvkx7FkYw0GllusMRVvhvmowfG7E9OOivKwgNPI5hGgfnJcZJaiN8o8qRkIjl27-YrcEXVJOckBEcRBlgYcby06xPmJBD46cLeXrgKPETUgM4HFCGT-OcAkVUnEOclDSrMRERRwlXSz8_PzfTMLbTJhZOixQwJ64C2HLYdM-b7w96YpG8gEzA0lwOM6uWPnMmby2dWK8CUr4KYUBSu1ZNsftilInszaf_3jshT7R0w",
+          "userHandle": null
+        },
+        "clientExtensionResults": {}
+      },
+      "forged": {
+        "id": "NR0wqW6qgttXfydJRumsGcadlHDAS_KiLJu5g_3KIJE",
+        "rawId": "NR0wqW6qgttXfydJRumsGcadlHDAS_KiLJu5g_3KIJE",
+        "type": "public-key",
+        "response": {
+          "clientDataJSON": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiWTJOalkyTmpZMk5qWTJOalkyTmpZMk5qWTJOalkyTmpZMk5qWTJOalkyTSIsIm9yaWdpbiI6Imh0dHA6Ly9sb2NhbGhvc3Q6MzAwMCIsImNyb3NzT3JpZ2luIjpmYWxzZX0",
+          "authenticatorData": "SZYN5YgOjGh0NBcPZHZgW4_krrmihjLHmVzzuoMdl2MFAAAAAg",
+          "signature": "Kv28kpFntdh5nwqp5s8Gi-vSjC1His9YqLWzsYg7USFl46c8U1BrSJR_xHOPJm1JdrLQNnAicq-hFoyp46gwDZ8F5WVuoQGoFMamkQNmXzUacv_GxxuqD9GItwmxcjLBHGlCGeR4OLV3kJmEUOTSXQjixlkbJNMKulGbsBobLbBf9m9O2h24yE0Xl9UKn0XzeQvgCjRjvmcM4qHaw_WxQEU_mPqaydFbBxP03nGb3SIjYwCLM2Xt9G_kkOLPxGWWOh4MnfDPjJgSO26FEK4mnQnMHm2a4qN-wIeOSRjRdZNi03N29SZUzdlvRdAR6HuJuSjqnT1kwGvs3mdS_9uvew",
+          "userHandle": null
+        },
+        "clientExtensionResults": {}
+      }
+    }
+  ]
+}
