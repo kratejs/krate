@@ -148,13 +148,14 @@ func registerViews(t *bridge.Table, env *bridge.Env) {
 			id = env.Windows.ReserveView()
 		} else if !viewIDRe.MatchString(id) {
 			return krate.Errorf("bad_args", "%s: view id %q must match %s", IDAddView, id, viewIDRe)
-		} else if env.Windows.IDTaken(id) {
+		} else if !env.Windows.Claim(id) {
 			return krate.Errorf("already_exists", "an id %q is already in use by a window or view", id)
 		}
 		path := o.Path
 		if env.Scope != nil {
 			scoped, err := env.Scope(ctx.Window(), id, o.Permissions, o.HasPermissions)
 			if err != nil {
+				env.Windows.Release(id)
 				return err
 			}
 			if scoped {
@@ -167,6 +168,7 @@ func registerViews(t *bridge.Table, env *bridge.Env) {
 			if env.Unscope != nil {
 				env.Unscope(id)
 			}
+			env.Windows.Release(id)
 			return err
 		}
 		if err := env.Windows.AddView(id, winID, ref, false); err != nil {
@@ -174,6 +176,7 @@ func registerViews(t *bridge.Table, env *bridge.Env) {
 			if env.Unscope != nil {
 				env.Unscope(id)
 			}
+			env.Windows.Release(id)
 			return krate.Errorf("already_exists", "%v", err)
 		}
 		out.String(id)

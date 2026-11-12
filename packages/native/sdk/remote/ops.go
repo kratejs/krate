@@ -415,13 +415,14 @@ func registerOps(t *bridge.Table, env *bridge.Env, rc caps.RemoteContent, need f
 			wid = env.Windows.Reserve()
 		} else if !idRe.MatchString(wid) {
 			return krate.Errorf("bad_args", "%s: id %q must match %s", IDOpen, wid, idRe)
-		} else if env.Windows.IDTaken(wid) {
+		} else if !env.Windows.Claim(wid) {
 			return krate.Errorf("already_exists", "an id %q is already in use by a window or view", wid)
 		}
 		if env.Scope != nil {
 			// A remote window has an empty scope: nothing it asks of the SDK
 			// is granted, whatever the caller may do.
 			if _, err := env.Scope(ctx.Window(), wid, []string{}, true); err != nil {
+				env.Windows.Release(wid)
 				return err
 			}
 		}
@@ -430,6 +431,7 @@ func registerOps(t *bridge.Table, env *bridge.Env, rc caps.RemoteContent, need f
 			if env.Unscope != nil {
 				env.Unscope(wid)
 			}
+			env.Windows.Release(wid)
 			return err
 		}
 		wid = env.Windows.Add(wid, platform.Window(w))
@@ -506,11 +508,12 @@ func registerOps(t *bridge.Table, env *bridge.Env, rc caps.RemoteContent, need f
 			vid = env.Windows.ReserveView()
 		} else if !idRe.MatchString(vid) {
 			return krate.Errorf("bad_args", "%s: id %q must match %s", IDAddView, vid, idRe)
-		} else if env.Windows.IDTaken(vid) {
+		} else if !env.Windows.Claim(vid) {
 			return krate.Errorf("already_exists", "an id %q is already in use by a window or view", vid)
 		}
 		if env.Scope != nil {
 			if _, err := env.Scope(ctx.Window(), vid, []string{}, true); err != nil {
+				env.Windows.Release(vid)
 				return err
 			}
 		}
@@ -519,6 +522,7 @@ func registerOps(t *bridge.Table, env *bridge.Env, rc caps.RemoteContent, need f
 			if env.Unscope != nil {
 				env.Unscope(vid)
 			}
+			env.Windows.Release(vid)
 			return err
 		}
 		if err := env.Windows.AddView(vid, winID, ref, false); err != nil {
@@ -528,6 +532,7 @@ func registerOps(t *bridge.Table, env *bridge.Env, rc caps.RemoteContent, need f
 			if env.Unscope != nil {
 				env.Unscope(vid)
 			}
+			env.Windows.Release(vid)
 			return krate.Errorf("already_exists", "%v", err)
 		}
 		h.flush(ref)

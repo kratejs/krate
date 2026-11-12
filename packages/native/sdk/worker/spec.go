@@ -3,6 +3,7 @@ package worker
 import (
 	"fmt"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -148,4 +149,49 @@ func (r Restart) Decide(e Exit, streak int) Decision {
 		d = maxBackoff
 	}
 	return Decision{Restart: true, Delay: d, Streak: streak + 1}
+}
+
+var envNameRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// envDenied lists variables a start request may not set (compared in upper
+// case: Windows names are case-insensitive). They change how a runtime or the
+// dynamic loader loads code, which TLS certificates a worker trusts, or what
+// the shell itself passes to the worker.
+var envDenied = map[string]bool{
+	"PATH": true, "PATHEXT": true, "COMSPEC": true, "IFS": true, "BASH_ENV": true, "ENV": true,
+	"GODEBUG": true, "SSL_CERT_FILE": true, "SSL_CERT_DIR": true,
+	"PYTHONPATH": true, "PYTHONSTARTUP": true, "PYTHONHOME": true, "PERL5LIB": true, "PERL5OPT": true,
+	"RUBYOPT": true, "RUBYLIB": true, "JAVA_TOOL_OPTIONS": true, "_JAVA_OPTIONS": true, "JDK_JAVA_OPTIONS": true,
+	"ELECTRON_RUN_AS_NODE": true,
+}
+
+// envDeniedPrefixes are the families envDenied cannot list one by one. NODE_ENV
+// is the one NODE_ variable allowed.
+var envDeniedPrefixes = []string{"KRATE_", "LD_", "DYLD_", "NODE_", "BUN_", "DENO_"}
+
+// ValidateEnv checks the environment a start request adds to a worker. A
+// name that is not a plain identifier, a value with a NUL byte, or a variable
+// of envDenied is refused: the page that may start a worker must not be able
+// to run code of its choice in it (NODE_OPTIONS=--import=data:..., LD_PRELOAD)
+// or point it at another SDK endpoint (KRATE_GOHOST_PARENT).
+func ValidateEnv(env map[string]string) error {
+	for k, v := range env {
+		if !envNameRE.MatchString(k) {
+			return fmt.Errorf("environment variable name %q is not a plain identifier", k)
+		}
+		if strings.ContainsRune(v, 0) {
+			return fmt.Errorf("environment variable %s: the value contains a NUL byte", k)
+		}
+		u := strings.ToUpper(k)
+		denied := envDenied[u]
+		for _, p := range envDeniedPrefixes {
+			if strings.HasPrefix(u, p) && u != "NODE_ENV" {
+				denied = true
+			}
+		}
+		if denied {
+			return fmt.Errorf("environment variable %s cannot be set when a worker starts: it changes how the worker loads code or what the shell passes to it (put runtime flags in the worker's command)", k)
+		}
+	}
+	return nil
 }

@@ -146,7 +146,7 @@ func (s *server) handleCall(w http.ResponseWriter, r *http.Request) {
 		s.badRequest(w, err)
 		return
 	}
-	window := s.windowOf(r)
+	window, native := s.identity(r)
 
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
@@ -171,7 +171,7 @@ func (s *server) handleCall(w http.ResponseWriter, r *http.Request) {
 				results <- s.runFunc(krate.WithWindow(cctx, window), c, fn)
 			}()
 		case sfn != nil:
-			results <- s.startStream(window, c, sfn)
+			results <- s.startStream(window, native, c, sfn)
 		default:
 			nf := krate.Errorf("not_found", "no such function %q", c.fn)
 			s.observe(Event{Kind: "call", ID: c.id, Fn: c.fn, Window: window, Code: "not_found", Message: nf.Error()})

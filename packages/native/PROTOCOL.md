@@ -137,7 +137,9 @@ Response body: a stream of frames, flushed as they are produced.
 ```
 
 Closing the response (the reader cancels) cancels the producer's `ctx`. A stream
-id is single-use and expires 30 s after it is issued if never opened.
+id is single-use and expires 30 s after it is issued if never opened. A stream
+started from a native view can be opened only from that same view (the same
+identity as the call); any other request gets the `404` of an unknown stream.
 
 ## GET /__krate/signals?names=a,b
 
@@ -149,6 +151,9 @@ signal, then one frame per change:
 ```
 
 A reconnect gets the current values again. Signals are read-only from the UI.
+A signal behind a permission (a plugin signal) is checked against the scope of
+the requesting window, identified as for calls (the native view, not the
+header).
 
 ## GET /__krate/hmr (dev only)
 

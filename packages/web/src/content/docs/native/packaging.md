@@ -33,6 +33,11 @@ machine. A few formats need a platform tool; the table says which.
    layout. No Go toolchain is needed. The shell finds `app/` next to itself, or
    in `Contents/Resources/app` inside a macOS bundle. The older pair
    `dist-native/krate-shell[.exe]` next to `dist-native/app/` is still packaged.
+   With `app/` next to it the shell is that app: it refuses another app
+   directory on its command line and refuses `--dev` unless the app was built
+   with `native.debug`, so nobody can run their own code or drive the app's pages
+   under the app's signature and permissions. Run other app directories, and
+   `--dev`, with a bare `krate-shell`.
 
 The executable's header is checked against `--target`, so a Linux binary is
 never packaged as a Windows app. With neither layout present the command stops

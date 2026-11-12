@@ -54,6 +54,8 @@ func buildTestApp(root, page string, withGo bool, start int) (*testApp, error) {
 		"dist/tasks/[id]/index.html": "<!doctype html><title>task</title>task page",
 		"dist/404.html":              "<!doctype html>not found page",
 		"dist/forge/index.html":      forgePageHTML,
+		"dist/hijack/index.html":     hijackPageHTML,
+		"dist/squat/index.html":      squatPageHTML,
 		"host/host.js":               hostJSv1,
 		"host/host.js.map":           `{"version":3,"sources":[],"names":[],"mappings":""}`,
 		"dist/scoped.html":           scopedPage,
@@ -224,5 +226,58 @@ const forgePageHTML = `<!doctype html><title>forge</title><body>forge<script>
   }
   var out = {plain: await call(), forgedMain: await call("main"), forgedEmpty: await call(""), forgedOther: await call("w999")};
   await fetch("/__test/report", {method: "POST", body: JSON.stringify({kind: "forge", tag: tag, result: out})});
+})();
+</script></body>`
+
+// hijackPageHTML tries to open the stream named by its sid parameter, which
+// another window started, and reports the HTTP status.
+const hijackPageHTML = `<!doctype html><title>hijack</title><body>hijack<script>
+(async function () {
+  var sid = new URLSearchParams(location.search).get("sid") || "";
+  // An accepted stream with nothing to send yet may not answer at all, so a
+  // fetch still pending after a while counts as "open".
+  var ctrl = new AbortController();
+  var status = await Promise.race([
+    fetch("/__krate/stream/" + encodeURIComponent(sid), {headers: {"x-krate-window": "main"}, signal: ctrl.signal}).then(function (r) { return r.status; }, function () { return -1; }),
+    new Promise(function (res) { setTimeout(function () { res("open"); }, 3000); })
+  ]);
+  ctrl.abort();
+  await fetch("/__test/report", {method: "POST", body: JSON.stringify({kind: "hijack", status: status})});
+})();
+</script></body>`
+
+// squatPageHTML names a view of its own window after the window id that
+// window.open hands out next, opens and closes a window, then reloads the view
+// with the forge page (tag squat-after), which reports what the view may do.
+const squatPageHTML = `<!doctype html><title>squat</title><body>squat<script>
+(async function () {
+  function frame(o) {
+    var j = new TextEncoder().encode(JSON.stringify(o));
+    var b = new Uint8Array(4 + j.length + 2);
+    new DataView(b.buffer).setUint32(0, j.length);
+    b.set(j, 4);
+    return b;
+  }
+  async function call(fn, args) {
+    var r = await fetch("/__krate/call", {method: "POST", body: frame({calls: [{id: 1, fn: fn, args: args}]})});
+    var buf = new Uint8Array(await r.arrayBuffer());
+    var n = new DataView(buf.buffer).getUint32(0);
+    var res = JSON.parse(new TextDecoder().decode(buf.subarray(4, 4 + n)));
+    if (res.err) throw new Error(res.err.code + ": " + res.err.message);
+    return res.ok;
+  }
+  var out = {};
+  try {
+    var me = await call("krate/window.thisView", []);
+    var probe = await call("krate/window.open", [{title: "probe", path: "/404"}]);
+    await call("krate/window.close", [probe]);
+    out.predicted = "w" + (parseInt(probe.slice(1), 10) + 1);
+    out.view = await call("krate/window.addView", [me, {id: out.predicted, path: "/404"}]);
+    out.opened = await call("krate/window.open", [{title: "victim", path: "/404"}]);
+    await call("krate/window.close", [out.opened]);
+    await new Promise(function (r) { setTimeout(r, 500); });
+    await call("krate/window.navigateView", [out.predicted, "/forge/?tag=squat-after"]);
+  } catch (e) { out.error = String(e); }
+  await fetch("/__test/report", {method: "POST", body: JSON.stringify({kind: "squat", out: out})});
 })();
 </script></body>`

@@ -163,3 +163,31 @@ func TestDesktopEntryFileTypes(t *testing.T) {
 		}
 	}
 }
+
+// When the runtime directory is too long for a socket path, the lock socket
+// goes to a private directory in the home directory, not to the shared
+// temporary directory, where another user could create the path first and
+// receive the launch arguments of every later start.
+func TestLongPathAvoidsTheSharedTempDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix socket paths")
+	}
+	home, err := os.MkdirTemp("", "h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(home) })
+	t.Setenv("HOME", home)
+	long := filepath.Join(t.TempDir(), strings.Repeat("d", 120))
+	p, err := socketPath(long, "com.acme.app")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(p, home+string(filepath.Separator)) {
+		t.Fatalf("socket %q is not under the home directory %q", p, home)
+	}
+	st, err := os.Stat(filepath.Dir(p))
+	if err != nil || st.Mode().Perm() != 0o700 {
+		t.Fatalf("socket directory: %v %v", st.Mode(), err)
+	}
+}

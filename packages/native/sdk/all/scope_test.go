@@ -2,10 +2,14 @@ package all
 
 import (
 	"errors"
+	"fmt"
+	"strings"
+	"sync"
 
 	"github.com/kratejs/krate/packages/native/krate"
 	"testing"
 
+	"github.com/kratejs/krate/packages/native/platform/caps"
 	"github.com/kratejs/krate/packages/native/scheme"
 	"github.com/kratejs/krate/packages/native/sdk"
 	"github.com/kratejs/krate/packages/native/sdk/internal/fakeplat"
@@ -194,6 +198,146 @@ func TestTrustedCallsSkipAppAndWindowGates(t *testing.T) {
 			if errors.As(err, &ke) && ke.Code == "permission_denied" {
 				t.Errorf("Invoke(%s) was gated: %v", id, err)
 			}
+		}
+	}
+}
+
+// A page cannot name one of its views after a window that does not exist yet.
+// If window.open handed out an id a view already held, the window's scope
+// would replace the view's, and closing the window would drop the scope of
+// that id, leaving the view with every permission of the app.
+func TestViewCannotSquatTheNextWindowID(t *testing.T) {
+	isolate(t)
+	set, _ := permission.Parse([]string{"kv", "db", "window"})
+	if _, err := Register(scheme.NewRegistry(), Options{AppID: "com.acme.squat"}); err != nil {
+		t.Fatal(err)
+	}
+	reg := scheme.NewRegistry()
+	RegisterAreas(reg, set)
+	host := sdk.NewHost()
+	plat := fakeplat.New()
+	host.Attach(plat)
+	t.Cleanup(host.Close)
+	RegisterUI(reg, host, set, nil)
+	c := sdktest.New(t, reg)
+
+	open := func(caller string, perms ...string) string {
+		t.Helper()
+		r := c.CallFrom(caller, "krate/window.open", func(e *wire.Encoder) {
+			e.BeginObject()
+			e.Key("title")
+			e.String("x")
+			if perms != nil {
+				e.Key("permissions")
+				e.BeginArray()
+				for _, p := range perms {
+					e.String(p)
+				}
+				e.EndArray()
+			}
+			e.EndObject()
+		})
+		if r.Failed {
+			t.Fatalf("open from %s: %+v", caller, r)
+		}
+		return r.OK[1 : len(r.OK)-1]
+	}
+	scoped := open("main", "kv", "window")
+	if scoped != "w1" {
+		t.Fatalf("first window id %q", scoped)
+	}
+	// The scoped page names a view of its own window after the next window.
+	r := c.CallFrom(scoped, "krate/window.addView", func(e *wire.Encoder) {
+		e.String(scoped)
+		e.BeginObject()
+		e.Key("id")
+		e.String("w2")
+		e.Key("path")
+		e.String("/")
+		e.EndObject()
+	})
+	if r.Failed {
+		t.Fatalf("addView: %+v", r)
+	}
+	db := func(win string) sdktest.Result {
+		return c.CallFrom(win, "krate/db.query", func(e *wire.Encoder) { e.String("select 1") })
+	}
+	if r := db("w2"); r.ErrCode != "permission_denied" {
+		t.Fatalf("db from the squatting view before: %+v", r)
+	}
+	next := open(scoped)
+	if next == "w2" {
+		t.Errorf("window.open returned %q, the id of an existing view", next)
+	}
+	win, _, ok := host.Window(next)
+	if !ok {
+		t.Fatalf("no window %q", next)
+	}
+	plat.EmitWindow(win.(*fakeplat.Window), caps.WindowClosed)
+	if r := db("w2"); r.ErrCode != "permission_denied" {
+		t.Fatalf("the squatting view gained db after the window closed: %+v", r)
+	}
+	if got, ok := set.ScopeOf("w2"); !ok || len(got) != 2 {
+		t.Fatalf("scope of the view = %v %v", got, ok)
+	}
+}
+
+// Two calls that add a view under the same id at the same time: one wins, the
+// other fails, and the failure must not drop the scope the winner was given
+// (the batch endpoint runs the calls of one request concurrently).
+func TestConcurrentViewIDsKeepTheirScope(t *testing.T) {
+	isolate(t)
+	set, _ := permission.Parse([]string{"kv", "db", "window"})
+	if _, err := Register(scheme.NewRegistry(), Options{AppID: "com.acme.race"}); err != nil {
+		t.Fatal(err)
+	}
+	reg := scheme.NewRegistry()
+	RegisterAreas(reg, set)
+	host := sdk.NewHost()
+	plat := fakeplat.New()
+	host.Attach(plat)
+	t.Cleanup(host.Close)
+	RegisterUI(reg, host, set, nil)
+	c := sdktest.New(t, reg)
+	r := c.CallFrom("main", "krate/window.open", func(e *wire.Encoder) {
+		e.BeginObject()
+		e.Key("permissions")
+		e.BeginArray()
+		e.String("window")
+		e.EndArray()
+		e.EndObject()
+	})
+	if r.Failed {
+		t.Fatalf("open: %+v", r)
+	}
+	scoped := r.OK[1 : len(r.OK)-1]
+	for i := 0; i < 50; i++ {
+		id := fmt.Sprintf("race%d", i)
+		var wg sync.WaitGroup
+		for j := 0; j < 2; j++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				c.CallFrom(scoped, "krate/window.addView", func(e *wire.Encoder) {
+					e.String(scoped)
+					e.BeginObject()
+					e.Key("id")
+					e.String(id)
+					e.EndObject()
+				})
+			}()
+		}
+		wg.Wait()
+		vs := c.CallFrom("main", "krate/window.views", func(e *wire.Encoder) { e.String(scoped) })
+		if !strings.Contains(vs.OK, `"`+id+`"`) {
+			t.Fatalf("no view %s was added: %+v", id, vs)
+		}
+		if got, ok := set.ScopeOf(id); !ok || len(got) != 1 || got[0] != "window" {
+			t.Fatalf("view %s: scope %v %v after a concurrent duplicate; it must keep the caller's", id, got, ok)
+		}
+		// Keep the layout shallow for the next round.
+		if r := c.CallFrom("main", "krate/window.removeView", func(e *wire.Encoder) { e.String(id) }); r.Failed {
+			t.Fatalf("removeView: %+v", r)
 		}
 	}
 }

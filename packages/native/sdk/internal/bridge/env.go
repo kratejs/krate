@@ -72,9 +72,13 @@ type Windows struct {
 	viewRefs map[caps.ViewRef]*ViewRec
 	nextView int
 	seq      int
-	changed  chan struct{} // closed (and replaced) when a view is registered
-	held     []caps.ViewEvent
-	onView   func(rec ViewRec, held []caps.ViewEvent)
+	// claimed holds ids handed out by Reserve, ReserveView or Claim whose
+	// window or view is not registered yet. An id is a permission scope key,
+	// so it may have only one holder from the moment it is chosen.
+	claimed map[string]bool
+	changed chan struct{} // closed (and replaced) when a view is registered
+	held    []caps.ViewEvent
+	onView  func(rec ViewRec, held []caps.ViewEvent)
 	// created and closed are called (outside the lock) after a window is
 	// added or removed.
 	created, closed []func(id string)
@@ -107,28 +111,60 @@ func NewWindows() *Windows {
 		views: map[string]*ViewRec{}, viewRefs: map[caps.ViewRef]*ViewRec{}, changed: make(chan struct{})}
 }
 
-// ReserveView returns an unused view id "v<N>".
+// ReserveView returns an unused view id "v<N>" and claims it (see Claim).
 func (w *Windows) ReserveView() string {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	for {
 		w.nextView++
 		id := fmt.Sprintf("v%d", w.nextView)
-		if _, taken := w.views[id]; !taken {
-			if _, win := w.byID[id]; !win {
-				return id
-			}
+		if !w.takenLocked(id) {
+			w.claimLocked(id)
+			return id
 		}
 	}
 }
 
-// IDTaken reports whether id names a window or a view.
+// IDTaken reports whether id names a window or a view, or is claimed for one.
 func (w *Windows) IDTaken(id string) bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	return w.takenLocked(id)
+}
+
+// Claim takes id for a window or view that is about to be created, and
+// reports false when a window, a view or another claim holds it. Check and
+// claim are one step: two calls racing for one id cannot both win, so the
+// loser cannot undo the permission scope the winner set. A claim ends when
+// the id is registered (Add, AddView) or released (Release).
+func (w *Windows) Claim(id string) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.takenLocked(id) {
+		return false
+	}
+	w.claimLocked(id)
+	return true
+}
+
+// Release gives up a claim whose window or view was not created.
+func (w *Windows) Release(id string) {
+	w.mu.Lock()
+	delete(w.claimed, id)
+	w.mu.Unlock()
+}
+
+func (w *Windows) takenLocked(id string) bool {
 	_, v := w.views[id]
 	_, win := w.byID[id]
-	return v || win
+	return v || win || w.claimed[id]
+}
+
+func (w *Windows) claimLocked(id string) {
+	if w.claimed == nil {
+		w.claimed = map[string]bool{}
+	}
+	w.claimed[id] = true
 }
 
 // AddView registers a view of a window under id.
@@ -148,6 +184,7 @@ func (w *Windows) addViewLocked(id, window string, ref caps.ViewRef, primary boo
 	if _, dup := w.views[id]; dup {
 		return ViewRec{}, nil, fmt.Errorf("view %q already exists", id)
 	}
+	delete(w.claimed, id)
 	w.seq++
 	r := &ViewRec{ID: id, Ref: ref, Window: window, Primary: primary, seq: w.seq}
 	w.views[id] = r
@@ -259,12 +296,28 @@ func (w *Windows) WaitView(ref caps.ViewRef, d time.Duration) (ViewRec, bool) {
 	}
 }
 
-// Reserve returns the id the next window with an empty id would get.
+// Reserve returns the id the next window with an empty id would get, and
+// claims it (see Claim).
 func (w *Windows) Reserve() string {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	w.next++
-	return fmt.Sprintf("w%d", w.next)
+	id := w.nextWindowLocked()
+	w.claimLocked(id)
+	return id
+}
+
+// nextWindowLocked returns an unused window id "w<N>". A page may name its
+// views (window.addView with an id), so an id is skipped when a view, a window
+// or a claim already holds it: two holders would share one permission scope,
+// and closing the window would drop the scope the view still relies on.
+func (w *Windows) nextWindowLocked() string {
+	for {
+		w.next++
+		id := fmt.Sprintf("w%d", w.next)
+		if !w.takenLocked(id) {
+			return id
+		}
+	}
 }
 
 // Add registers w under id; an empty id gets "w<N>". The first window added
@@ -280,9 +333,9 @@ func (w *Windows) Add(id string, win platform.Window) string {
 func (w *Windows) add(id string, win platform.Window) (string, []func(string)) {
 	w.mu.Lock()
 	if id == "" {
-		w.next++
-		id = fmt.Sprintf("w%d", w.next)
+		id = w.nextWindowLocked()
 	}
+	delete(w.claimed, id)
 	w.byID[id] = win
 	if c, ok := win.(caps.WindowControls); ok {
 		w.byRef[c.Ref()] = id

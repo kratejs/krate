@@ -93,7 +93,7 @@ func (s *server) handleSignals(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if gate := s.reg.signalGate(name); gate != nil {
-			if gerr := gate(r.Header.Get(windowHdr)); gerr != nil {
+			if gerr := gate(s.windowOf(r)); gerr != nil {
 				_, _ = w.Write(s.sigErrFrame(name, gerr))
 				flush()
 				continue

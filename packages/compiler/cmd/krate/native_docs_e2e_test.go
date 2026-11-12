@@ -4,6 +4,7 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -72,8 +73,9 @@ func TestNativeDocsSiteE2E(t *testing.T) {
 		return nil
 	})
 	checkDocsPages(t, exe)
+	checkRefusesDev(t, exe)
 	if os.Getenv("KRATE_NATIVE_GUI") == "1" {
-		checkDocsInWindow(t, exe)
+		checkDocsInWindow(t, shell, filepath.Join(dist, "app"))
 	}
 
 	formats := "deb,rpm,tar.gz"
@@ -114,8 +116,9 @@ func TestNativeDocsSiteE2E(t *testing.T) {
 		}
 		installed := filepath.Join(root, "usr", "lib", "krate-docs", "krate-docs")
 		checkDocsPages(t, installed)
+		checkRefusesDev(t, installed)
 		if os.Getenv("KRATE_NATIVE_GUI") == "1" {
-			checkDocsInWindow(t, installed)
+			checkDocsInWindow(t, shell, filepath.Join(filepath.Dir(installed), "app"))
 		}
 	} else {
 		t.Log("dpkg-deb not found: .deb contents not checked")
@@ -145,7 +148,7 @@ func TestNativeDocsSiteE2E(t *testing.T) {
 		size(filepath.Base(ai))
 		checkDocsPages(t, ai, "--appimage-extract-and-run")
 		if os.Getenv("KRATE_NATIVE_GUI") == "1" {
-			checkDocsInWindow(t, ai, "--appimage-extract-and-run")
+			checkDocsInWindow(t, shell, appImageAppDir(t, ai))
 		}
 	} else {
 		t.Log("appimagetool or file not found: AppImage not built")
@@ -223,10 +226,13 @@ func checkDocsPages(t *testing.T, exe string, pre ...string) {
 // and navigates it across several pages. A page that never comes back means
 // the web process hung, as it did when the site's own viewTransitions setting
 // reached the native build. It needs a display and WebKitGTK
-// (KRATE_NATIVE_GUI=1, see the native docs for a rootless setup).
-func checkDocsInWindow(t *testing.T, exe string, pre ...string) {
+// (KRATE_NATIVE_GUI=1, see the native docs for a rootless setup). The packaged
+// executable takes no --dev (see checkRefusesDev), so the packaged app
+// directory runs under the bare shell.
+func checkDocsInWindow(t *testing.T, shell, appDir string) {
 	t.Helper()
-	cmd := exec.Command(exe, append(append([]string{}, pre...), "--dev")...)
+	exe := shell
+	cmd := exec.Command(shell, "--dev", appDir)
 	in, _ := cmd.StdinPipe()
 	out, _ := cmd.StdoutPipe()
 	cmd.Stderr = io.Discard
@@ -294,4 +300,39 @@ func checkDocsInWindow(t *testing.T, exe string, pre ...string) {
 	if l, ok := send("memory", 10*time.Second); ok {
 		t.Logf("window memory: %.300s", l)
 	}
+}
+
+// checkRefusesDev checks that a distributed executable (an app next to it)
+// will not start with --dev, which would let whoever runs it drive the app's
+// pages over the control channel under the app's identity.
+func checkRefusesDev(t *testing.T, exe string) {
+	t.Helper()
+	cmd := exec.Command(exe, "--dev")
+	out, err := cmd.CombinedOutput()
+	var ee *exec.ExitError
+	if !errors.As(err, &ee) || ee.ExitCode() != 2 || !strings.Contains(string(out), "--dev is not available in a distributed app") {
+		t.Errorf("%s --dev: %v\n%.400s", filepath.Base(exe), err, out)
+	}
+}
+
+// appImageAppDir extracts an AppImage and returns the app directory inside it.
+func appImageAppDir(t *testing.T, ai string) string {
+	t.Helper()
+	dir := t.TempDir()
+	cmd := exec.Command(ai, "--appimage-extract")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("%s --appimage-extract: %v\n%.400s", filepath.Base(ai), err, out)
+	}
+	var app string
+	_ = filepath.Walk(filepath.Join(dir, "squashfs-root"), func(p string, fi os.FileInfo, err error) error {
+		if err == nil && app == "" && !fi.IsDir() && fi.Name() == "app.json" {
+			app = filepath.Dir(p)
+		}
+		return nil
+	})
+	if app == "" {
+		t.Fatal("the AppImage holds no app.json")
+	}
+	return app
 }

@@ -85,8 +85,10 @@ func (r *Registry) Snapshot() Snapshot {
 }
 
 // SignalGate makes the UI's subscription to the signal name fail with the
-// error gate returns for the subscribing window (the x-krate-window header of
-// the request, "" when absent). In-process callers (Subscribe) are not gated.
+// error gate returns for the subscribing window: the native identity of the
+// request when the platform bound one (Options.Identify), otherwise its
+// x-krate-window header ("" when absent). In-process callers (Subscribe) are
+// not gated.
 func (r *Registry) SignalGate(name string, gate func(window string) error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
