@@ -134,7 +134,7 @@ func (a *App) decide(webView, origin, handler objc.ID, kinds []caps.PermissionKi
 	h(caps.PermissionRequest{ID: permNextID.Add(1), View: ref, Origin: originString(proto, host, port), Kinds: kinds}, answer)
 }
 
-// ---- operating system consent ----
+// Operating system consent.
 
 var frameworks struct {
 	once sync.Once
@@ -304,7 +304,7 @@ func mgrKeep(m objc.ID) {
 	keepMgr = m
 }
 
-// ---- capture sources ----
+// Capture sources.
 
 const (
 	cgWindowListOnScreenOnly       = 1
