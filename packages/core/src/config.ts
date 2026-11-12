@@ -449,6 +449,21 @@ export interface NativeConfig {
       category?: string;
       /** Menu-bar-only app: `LSUIElement` in Info.plist, no dock icon (a running app can show it again). */
       agent?: boolean;
+      /** Package arm64 and x86_64 code in one .app (same as --arch universal). */
+      universal?: boolean;
+      /** The Mac App Store variant (krate native package --target mas). */
+      mas?: {
+        /** Apple developer team id, ten capital letters and digits. */
+        teamId?: string;
+        /** Mac App Store .provisionprofile, relative to the project. Do not commit it. */
+        provisioningProfile?: string;
+        /** Extra entitlements plist merged into the generated sandbox entitlements. */
+        entitlements?: string;
+        /** Network entitlements. Default ["client"]. */
+        network?: Array<"client" | "server">;
+        /** Access to files the user picks. Default "read-write". */
+        files?: "read-write" | "read-only" | "none";
+      };
     };
     windows?: {
       publisher?: string;
@@ -467,8 +482,40 @@ export interface NativeConfig {
        * not part of Krate: do not commit them.
        */
       webview2Path?: string;
+      /** Partner Center identity for the Microsoft Store variant (--format msix-store). */
+      store?: {
+        /** Package/Identity/Name, such as "12345Acme.AcmeNotes". */
+        identityName?: string;
+        /** Package/Identity/Publisher, such as "CN=01234567-89AB-CDEF-0123-456789ABCDEF". */
+        publisherId?: string;
+        /** Package/Properties/PublisherDisplayName. */
+        publisherDisplayName?: string;
+      };
     };
-    linux?: { formats?: Array<"deb" | "rpm" | "appimage"> };
+    linux?: {
+      formats?: Array<"deb" | "rpm" | "appimage" | "flatpak" | "snap">;
+      /** One-line description (AppStream and snap summary). */
+      summary?: string;
+      /** Long description, plain text. */
+      description?: string;
+      /** SPDX license expression, or "LicenseRef-proprietary". */
+      license?: string;
+      homepage?: string;
+      flatpak?: {
+        /** Default "org.gnome.Platform". */
+        runtime?: string;
+        /** Runtime branch, default "48". */
+        runtimeVersion?: string;
+        /** Extra finish-args such as "--filesystem=xdg-documents". */
+        finishArgs?: string[];
+      };
+      snap?: {
+        grade?: "stable" | "devel";
+        confinement?: "strict" | "classic" | "devmode";
+        /** Extra plugs beyond the ones derived from the app's permissions. */
+        plugs?: string[];
+      };
+    };
   };
   /** In-app updates; `url` may contain `{target}`. Needs both fields. */
   updater?: { url: string; publicKey: string };

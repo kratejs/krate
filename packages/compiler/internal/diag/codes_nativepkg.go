@@ -46,9 +46,9 @@ func init() {
 		CodeInfo{
 			Code:  CodeNativePkgFormat,
 			Title: "Unknown or unsupported package format",
-			Explanation: "Formats by platform: macOS `app`, `zip`, `dmg`; Windows `zip`, `nsis`, `msix`; " +
-				"Linux `tar.gz`, `deb`, `rpm`, `appimage`. `native.bundle.windows.installer` takes `msix` or " +
-				"`nsis`; `native.bundle.linux.formats` takes `deb`, `rpm` and `appimage`.",
+			Explanation: "Formats by platform: macOS `app`, `zip`, `dmg`, `mas`; Windows `zip`, `nsis`, `msix`, `msix-store`; " +
+				"Linux `tar.gz`, `deb`, `rpm`, `appimage`, `flatpak`, `snap`. `native.bundle.windows.installer` " +
+				"takes `msix` or `nsis`; `native.bundle.linux.formats` takes `deb`, `rpm`, `appimage`, `flatpak` and `snap`.",
 		},
 		CodeInfo{
 			Code:  CodeNativePkgIcon,

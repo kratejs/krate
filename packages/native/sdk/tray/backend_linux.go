@@ -79,10 +79,20 @@ func newDefaultBackend(app any, publish func(caps.TrayEvent)) (backend, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &sni{conn: conn, publish: publish, name: fmt.Sprintf("org.kde.StatusNotifierItem-%d-1", os.Getpid())}
+	s := &sni{conn: conn, publish: publish, name: itemBusName(os.Getenv("FLATPAK_ID"), os.Getpid())}
 	s.xembed, _ = app.(caps.XEmbedTray)
 	s.export()
 	return s, nil
+}
+
+// itemBusName is the bus name of the item. Inside Flatpak the process id is
+// the sandbox's own and the org.kde.* names are not owned by the app, but an
+// app may own its id and every name below it, and a watcher takes any name.
+func itemBusName(flatpakID string, pid int) string {
+	if flatpakID != "" {
+		return flatpakID + ".StatusNotifierItem"
+	}
+	return fmt.Sprintf("org.kde.StatusNotifierItem-%d-1", pid)
 }
 
 // current reports whether the backend still uses the live session bus

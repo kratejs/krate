@@ -215,11 +215,15 @@ func (c *Child) socketDir() (string, error) {
 	}
 	if base == "" || len(filepath.Join(base, "g000.sock")) > maxSocketPath {
 		// The cache path is unusable or too long for a socket.
-		d, err := os.MkdirTemp("", "krate-gh")
-		if err != nil {
-			return "", fmt.Errorf("gohost: no directory for the socket: %w", err)
+		if short := hosttransport.ShortSocketDir("g000.sock", maxSocketPath); short != "" {
+			base = short
+		} else {
+			d, err := os.MkdirTemp("", "krate-gh")
+			if err != nil {
+				return "", fmt.Errorf("gohost: no directory for the socket: %w", err)
+			}
+			base = d
 		}
-		base = d
 	}
 	if err := os.Chmod(base, 0o700); err != nil && !errors.Is(err, os.ErrPermission) {
 		return "", err

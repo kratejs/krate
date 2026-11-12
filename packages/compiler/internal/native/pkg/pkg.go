@@ -78,6 +78,27 @@ type Metadata struct {
 	// from app.json by ApplyAppJSON.
 	MediaUsage MediaUsage
 	MediaUses  []string
+	// Permissions are the SDK permissions in app.json ("net", "tray", ...);
+	// HostRuntimes the runtimes of the app's host children ("node", "bun",
+	// "deno", "scriptc") and HasHost whether the app runs any host process.
+	// Flatpak, Snap and Mac App Store builds derive their sandbox grants
+	// from them. ApplyAppJSON fills all three.
+	Permissions  []string
+	HostRuntimes []string
+	HasHost      bool
+
+	// Store is the distribution variant: "" for a direct download, "mas" for
+	// the Mac App Store, "msstore" for the Microsoft Store.
+	Store string
+	// MAS is native.bundle.macos.mas with absolute paths.
+	MAS config.NativeMAS
+	// WinStore is native.bundle.windows.store.
+	WinStore config.NativeWindowsStore
+
+	// Linux store metadata (native.bundle.linux).
+	Summary, LongDescription, License, Homepage string
+	Flatpak                                     config.NativeFlatpak
+	Snap                                        config.NativeSnap
 }
 
 // MetadataFromConfig reads the packaging metadata from the native block;
@@ -119,6 +140,15 @@ func MetadataFromConfig(root string, cfg *config.Config) Metadata {
 	if m.WebView2Path != "" && !filepath.IsAbs(m.WebView2Path) {
 		m.WebView2Path = filepath.Join(root, m.WebView2Path)
 	}
+	mas := n.Bundle.MacOS.MAS
+	for _, p := range []*string{&mas.ProvisioningProfile, &mas.Entitlements} {
+		if *p != "" && !filepath.IsAbs(*p) {
+			*p = filepath.Join(root, *p)
+		}
+	}
+	m.MAS, m.WinStore = mas, n.Bundle.Windows.Store
+	l := n.Bundle.Linux
+	m.Summary, m.LongDescription, m.License, m.Homepage, m.Flatpak, m.Snap = l.Summary, l.Description, l.License, l.Homepage, l.Flatpak, l.Snap
 	m.MediaUsage = MediaUsage{Camera: n.Media.Usage.Camera, Microphone: n.Media.Usage.Microphone,
 		Location: n.Media.Usage.Location, ScreenCapture: n.Media.Usage.ScreenCapture}
 	m.MacAgent = n.Bundle.MacOS.Agent
@@ -153,6 +183,8 @@ type Options struct {
 	Rollout    *updater.Rollout
 	Critical   bool
 	MinVersion string
+	// MAS configures the Mac App Store variant (format "mas").
+	MAS MASOptions
 	// Signer, when set, signs the staged tree before archives are made and
 	// the installers after (see Signer).
 	Signer Signer
@@ -235,9 +267,9 @@ func (m Metadata) slug() string { return slug(m.ProductName) }
 
 // Valid formats per OS.
 var formatsByOS = map[string][]string{
-	"darwin":  {"app", "zip", "dmg"},
-	"windows": {"zip", "nsis", "msix"},
-	"linux":   {"tar.gz", "deb", "rpm", "appimage"},
+	"darwin":  {"app", "zip", "dmg", "mas"},
+	"windows": {"zip", "nsis", "msix", "msix-store"},
+	"linux":   {"tar.gz", "deb", "rpm", "appimage", "flatpak", "snap"},
 }
 
 func contains(l []string, s string) bool {
@@ -289,8 +321,9 @@ func wantedFormats(o Options) (map[string]bool, error) {
 // validate checks the options and fills defaults.
 func (o *Options) validate() error {
 	p := o.Payload
-	if !contains([]string{"linux", "windows", "darwin"}, p.OS) || !contains([]string{"amd64", "arm64"}, p.Arch) {
-		return fail(diag.CodeNativePkgInput, "--target", fmt.Sprintf("cannot package for %s/%s", p.OS, p.Arch), "use linux, windows or darwin with amd64 or arm64")
+	universal := p.Arch == ArchUniversal && p.OS == "darwin"
+	if !contains([]string{"linux", "windows", "darwin"}, p.OS) || !(contains([]string{"amd64", "arm64"}, p.Arch) || universal) {
+		return fail(diag.CodeNativePkgInput, "--target", fmt.Sprintf("cannot package for %s/%s", p.OS, p.Arch), "use linux, windows or darwin with amd64 or arm64 (darwin also takes universal)")
 	}
 	if st, err := os.Stat(p.Executable); err != nil || !st.Mode().IsRegular() {
 		return fail(diag.CodeNativePkgInput, p.Executable, "the executable to package does not exist", "build first: krate native build --release")
@@ -362,6 +395,12 @@ func Package(o Options) (*Result, error) {
 	}
 	if err != nil {
 		return nil, err
+	}
+	if want["mas"] || want["msix-store"] {
+		// A store delivers updates: no update file is signed, no feed written.
+		for i := range res.Artifacts {
+			res.Artifacts[i].Update = false
+		}
 	}
 	if err := signUpdates(&o, res); err != nil {
 		return nil, err

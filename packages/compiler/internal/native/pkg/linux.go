@@ -132,6 +132,18 @@ func packageLinux(o *Options, ic *Icon, want map[string]bool, stage string, res 
 			}
 		}
 	}
+	if want["flatpak"] || want["snap"] {
+		if want["flatpak"] {
+			if err := packageFlatpak(o, ic, ut, res); err != nil {
+				return err
+			}
+		}
+		if want["snap"] {
+			if err := packageSnap(o, ic, ut, res); err != nil {
+				return err
+			}
+		}
+	}
 	if want["appimage"] {
 		out := filepath.Join(o.OutDir, artifactName(m, p, ".AppImage"))
 		if err := buildAppImage(o, ic, stage, out); err != nil {

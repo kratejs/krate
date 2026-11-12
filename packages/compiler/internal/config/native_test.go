@@ -185,7 +185,7 @@ func TestValidateNative(t *testing.T) {
 			n.Bundle.Windows.WebView2Path = "vendor/MicrosoftEdgeWebview2Setup.exe"
 		}, ""},
 		{"webview2 none ok", func(n *NativeConfig) { n.Bundle.Windows.WebView2 = "none" }, ""},
-		{"linux format", func(n *NativeConfig) { n.Bundle.Linux.Formats = []string{"snap"} }, "format"},
+		{"linux format", func(n *NativeConfig) { n.Bundle.Linux.Formats = []string{"pacman"} }, "format"},
 		{"updater needs key", func(n *NativeConfig) { n.Updater = &NativeUpdater{URL: "https://a.b/u.json"} }, "url and publicKey"},
 		{"window permission unknown", func(n *NativeConfig) { w := []string{"camera"}; n.Window.Permissions = &w }, "window.permissions"},
 		{"window permission outside the allowlist", func(n *NativeConfig) {

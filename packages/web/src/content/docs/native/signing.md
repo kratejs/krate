@@ -43,6 +43,14 @@ and the Go runtime do not JIT. If `native.host.runtime` is `node`, `bun` or
 runtime. The app is not sandboxed by default, so the network client
 entitlement is not added.
 
+### Mac App Store
+
+A Mac App Store build is signed differently (sandbox entitlements, no hardened
+runtime, an "Apple Distribution" or "3rd Party Mac Developer Application"
+identity, a signed `.pkg`) and is signed while it is packaged:
+`krate native package --target mas`. `krate native sign` refuses a store build.
+See [Stores and universal apps](/docs/native/distribution/#mac-app-store).
+
 ### Notarization
 
 `krate native notarize` (or `package --sign --notarize`) zips the app with

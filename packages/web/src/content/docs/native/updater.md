@@ -33,7 +33,7 @@ native: {
 }
 ```
 
-`url` must be https and may contain `{target}` (`<goos>-<goarch>`, for example
+`url` must be https and may contain `{target}` (`<goos>-<goarch>`, or `darwin-universal` for a [universal macOS app](/docs/native/distribution/#universal-macos-apps); for example
 `linux-amd64`, `windows-arm64`, `darwin-arm64`), `{version}` (the running
 version) and `{channel}` (see [Channels](#channels)). All of `native.updater` is
 written to [`app.json`](/docs/native/app-json/). The app needs the `updater`
@@ -61,6 +61,17 @@ Besides the installers this writes the update file and
 `latest-linux-amd64.json` next to it; upload both. (`KRATE_UPDATER_PRIVATE_KEY_FILE`
 names a file instead.) The private key must match the configured public key
 (`KR7227`).
+
+## In a store
+
+Flatpak, Snap, the Mac App Store and the Microsoft Store deliver updates
+themselves and forbid apps that replace their own files. A copy that runs from
+one (the shell reads `FLATPAK_ID`, `SNAP_NAME`, the macOS sandbox container id or
+the `krate-dist.json` marker the packager writes) reports the `updater`
+capability as absent, the `updater` calls fail with a message that names the
+store's own mechanism, and no rollback watchdog is armed. Store builds also drop
+`native.updater` from the packaged `app.json`. See
+[Stores and universal apps](/docs/native/distribution/).
 
 ## Feed
 

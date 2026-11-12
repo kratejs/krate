@@ -78,11 +78,16 @@ func AppxManifest(m Metadata, p Payload) []byte {
 	w(`         xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"`)
 	w(`         xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"`)
 	w(`         IgnorableNamespaces="uap uap3 rescap">`)
+	identity, publisher, pubDisplay := msixIdentityName(m.AppID), msixPublisher(m.Publisher), publisherDisplay(m.Publisher)
+	if m.Store == "msstore" {
+		// The Store owns these three values; they must match Partner Center.
+		identity, publisher, pubDisplay = m.WinStore.IdentityName, m.WinStore.PublisherID, m.WinStore.PublisherDisplayName
+	}
 	w(`  <Identity Name="%s" Publisher="%s" Version="%s" ProcessorArchitecture="%s"/>`,
-		xmlEscape(msixIdentityName(m.AppID)), xmlEscape(msixPublisher(m.Publisher)), v.msix(), arch)
+		xmlEscape(identity), xmlEscape(publisher), v.msix(), arch)
 	w(`  <Properties>`)
 	w(`    <DisplayName>%s</DisplayName>`, xmlEscape(m.ProductName))
-	w(`    <PublisherDisplayName>%s</PublisherDisplayName>`, xmlEscape(publisherDisplay(m.Publisher)))
+	w(`    <PublisherDisplayName>%s</PublisherDisplayName>`, xmlEscape(pubDisplay))
 	w(`    <Logo>Assets\StoreLogo.png</Logo>`)
 	w(`  </Properties>`)
 	w(`  <Dependencies>`)
@@ -248,7 +253,7 @@ func BlockMapXML(files []blockInfo) []byte {
 // files at their install paths (the executable at the root). Signing is left
 // to signtool.
 func BuildMSIX(m Metadata, p Payload, ic *Icon, inner *tree, out string) error {
-	if m.Publisher == "" {
+	if m.Publisher == "" && m.Store != "msstore" {
 		return fail(diag.CodeNativePkgMeta, "native.bundle.windows.publisher", "an MSIX package needs a publisher",
 			`set native.bundle.windows.publisher to the subject of your signing certificate, for example "CN=Acme Inc"`)
 	}

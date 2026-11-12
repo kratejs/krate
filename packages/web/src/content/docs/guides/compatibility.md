@@ -105,6 +105,11 @@ green run there is what moves a cell.
 | Native: plugins | Supported | Supported | Supported | Krate Native v1 |
 | Native: packaging formats | Partial | Supported | Supported | Krate Native v1 |
 | Native: signing and notarization | Partial | Partial | Partial | Krate Native v1 |
+| Native: macOS universal apps | Supported | Untested | Supported | Krate Native round 4 |
+| Native: Flatpak | Partial | Planned | Planned | Krate Native round 4 |
+| Native: Snap | Partial | Planned | Planned | Krate Native round 4 |
+| Native: Mac App Store | Planned | Untested | Planned | Krate Native round 4 |
+| Native: Microsoft Store | Supported | Supported | Untested | Krate Native round 4 |
 | Native: updater | Supported | Supported | Supported | Krate Native v1 |
 | Native: app icon badge and progress | Supported | Untested | Untested | Krate Native round 3 |
 | Native: displays | Supported | Untested | Untested | Krate Native round 3 |
@@ -945,6 +950,69 @@ Known limits:
 - Notarization needs an Apple Developer account and stays manual, as do Developer ID identities, certificates from a CA (EV or OV Authenticode), timestamps from a paid authority and hardware or cloud signing services.
 
 Evidence: `TestSignMacAppDeepSignsInnerFirst`, `TestSignMacAdHocAndEntitlements`, `TestSignMacOnlyOnMac`, `TestNotarize`, `TestSignWindows`, `TestSignLinuxGPG`, `TestPackageSignsBeforeArchiving`, `TestRedactCommand`, `TestSignLinuxArtifactsFindsEveryPackage`, `ci:native-smoke-sign`
+
+### Native: macOS universal apps
+
+**Linux:** Supported - **macOS:** Untested - **Windows:** Supported
+
+krate native build --release --arch universal compiles darwin/arm64 and darwin/amd64 and package merges them in pure Go into one .app: the executable and every shared Mach-O file (Go host child, compiled Bun and Deno hosts, Node single executables) become fat binaries with FAT_MAGIC, one fat_arch per slice and 2^14 alignment. The update target is darwin-universal (zip, latest-darwin-universal.json), which the running app learns from a krate-dist.json marker. The Linux and Windows columns mean the merge runs there (a cross build from any OS).
+
+Known limits:
+
+- The fat Mach-O is written by Krate and read back with debug/macho on every OS (TestNativeUniversalMacApp merges real cross-compiled Go binaries). Running both slices (native, and x86_64 under Rosetta) and lipo -info are checked by that test on macOS only when KRATE_NATIVE_GUI=1 and lipo exist; that CI run is pending, so macOS stays untested.
+- A Node host needs a node binary per architecture (KRATE_NODE_DARWIN_ARM64 / KRATE_NODE_DARWIN_AMD64); Bun and Deno cross-compile by themselves. The prebuilt-shell layout holds one platform, so a universal app needs the compiled-executable layout.
+
+Evidence: `TestWriteFatLayout`, `TestWriteFatRejects`, `TestMergeUniversalMergesMachOAndChecksTheRest`, `TestMergeUniversalDiagnostics`, `TestPackageUniversalMacApp`, `TestUniversalUpdateFeedTarget`, `TestNativeUniversalMacApp`, `TestNativeBuildUniversalCLI`, `TestResolveDistTargets`, `TestDetect`
+
+### Native: Flatpak
+
+**Linux:** Partial - **macOS:** Planned - **Windows:** Planned
+
+krate native package --format flatpak writes a flatpak-builder manifest on org.gnome.Platform (WebKitGTK 4.1) with finish-args derived from the app's permissions, a desktop file, AppStream metainfo (validated with appstreamcli when installed), icons named by the app id and a Flathub manifest that builds from a source archive with a sha256. With flatpak-builder installed it builds a .flatpak bundle. Inside the sandbox the shell opens links and sends notifications through the portals, uses the file chooser portal (GTK_USE_PORTAL), names its tray item below its own id and keeps data in the sandbox XDG directories.
+
+Known limits:
+
+- The manifest, metainfo and portal calls are tested without Flatpak (command lines, files, a fake D-Bus). Building the bundle and running the app inside a real sandbox needs flatpak-builder and the GNOME runtime and has not been done; the first CI run of that step is pending. appstreamcli validation of the generated metainfo has not run on any machine yet.
+- Flathub prefers apps built from source; a prebuilt-binary submission is reviewed case by case, and screenshots must be added to the metainfo by hand.
+
+Evidence: `TestFlatpakFinishArgsFollowPermissions`, `TestFlatpakManifestShape`, `TestAppStreamMetainfo`, `TestPackageFlatpakWithoutTools`, `TestPackageFlatpakBuildsBundle`, `TestPackageFlatpakFailures`, `TestNativePackageFlatpakSnapCLI`, `TestOpenURICallsThePortal`, `TestPortalBackendSendsAndRoutesActions`, `TestItemBusName`, `TestDirsFollowSandboxXDG`, `TestUpdaterRefusesInsideAStore`
+
+### Native: Snap
+
+**Linux:** Partial - **macOS:** Planned - **Windows:** Planned
+
+krate native package --format snap writes snap/snapcraft.yaml (core24, gnome extension, libwebkit2gtk-4.1-0 staged, plugs derived from the app's permissions) with the app and icon, and builds the .snap with snapcraft when it is installed. Inside a snap the shell uses the OpenURI and notification portals, GTK_USE_PORTAL and the snap's XDG directories, and has no self-updater.
+
+Known limits:
+
+- The snapcraft.yaml is checked as text; building it with snapcraft and running the snap under strict confinement has not been done. The exact plugs a WebKitGTK app needs under strict confinement (for example for the tray) are unconfirmed.
+
+Evidence: `TestSnapcraftYAML`, `TestSnapName`, `TestPackageSnap`, `TestNativePackageFlatpakSnapCLI`, `TestDetect`
+
+### Native: Mac App Store
+
+**Linux:** Planned - **macOS:** Untested - **Windows:** Planned
+
+krate native package --target mas builds a sandboxed .app: com.apple.security.app-sandbox with network.client, user-selected files, camera, microphone and location entitlements derived from the app, inherit-only entitlements for helper executables, the embedded provisioning profile (checked against TEAMID.appId), codesign with a 3rd Party Mac Developer Application or Apple Distribution identity (ad hoc without one) and a productbuild .pkg signed with the installer identity. native.updater is removed and the running sandboxed app refuses updater calls.
+
+Known limits:
+
+- The entitlements, Info.plist, tool command lines and failure cases are unit tested on any OS. TestNativeMASSandboxGUI signs the example ad hoc with the sandbox entitlement and runs its GUI flows inside the container on macOS; that run is pending. Uploading to App Store Connect, a real distribution identity and App Store validation have not been tried.
+- Access to a file the user picked lasts for that run; security-scoped bookmarks are not used.
+
+Evidence: `TestMASEntitlementsFollowPermissions`, `TestEntitlementsPlistIsWellFormed`, `TestStripUpdaterJSON`, `TestPackageMASAdHocSignsWithSandbox`, `TestPackageMASRealIdentity`, `TestPackageMASRejects`, `TestPackageMASOffMacKeepsApp`, `TestNativeMASSandboxGUI`, `TestShortSocketDir`
+
+### Native: Microsoft Store
+
+**Linux:** Supported - **macOS:** Supported - **Windows:** Untested
+
+krate native package --format msix-store builds the Store variant of the MSIX with the Partner Center identity (name, publisher id, publisher display name), no self-updater and a static check of the full-trust rules, plus a .msixupload; --arch universal --target windows/amd64 bundles x64 and arm64 into an .msixbundle (AppxBundleManifest.xml, block map, uncompressed packages) and its .msixupload. The Linux and macOS columns mean the package is built and checked there.
+
+Known limits:
+
+- The bundle manifest offsets are consistent with the zip layout (tested), but neither makeappx nor the Windows App Certification Kit nor Partner Center has opened a package; the Windows column stays untested until a runner does (makeappx unbundle, Add-AppxPackage of a signed copy).
+
+Evidence: `TestStoreManifestUsesPartnerCenterIdentity`, `TestPackageStoreMSIX`, `TestStoreMetaValidation`, `TestCheckStoreMSIXFindsProblems`, `TestPackageStoreBundle`
 
 ### Native: updater
 

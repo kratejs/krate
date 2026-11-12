@@ -39,7 +39,7 @@ func printNativeUsage(w io.Writer) {
 	fmt.Fprintf(w, "             one executable per target (dist-native/<os>-<arch>/<name>)\n")
 	fmt.Fprintf(w, "  test       Build the app and run its *.native.test.ts files against the real shell (see docs native/testing)\n")
 	fmt.Fprintf(w, "  profile    Run the app, collect a CPU profile and save it for optimized builds\n")
-	fmt.Fprintf(w, "  package    Make installers and update files: .app/.zip/.dmg, .zip/NSIS/MSIX, .tar.gz/.deb/.rpm/AppImage\n")
+	fmt.Fprintf(w, "  package    Make installers and update files: .app/.zip/.dmg/.pkg, .zip/NSIS/MSIX, .tar.gz/.deb/.rpm/AppImage/Flatpak/Snap\n")
 	fmt.Fprintf(w, "  sign       Sign the packaged app (codesign, signtool/osslsigncode, gpg) and rebuild the archives\n")
 	fmt.Fprintf(w, "  notarize   Notarize and staple the signed macOS app\n")
 	fmt.Fprintf(w, "  keygen     Create the Ed25519 key pair that signs update files\n")
@@ -49,7 +49,8 @@ func printNativeUsage(w io.Writer) {
 	fmt.Fprintf(w, "  doctor     Check the Go toolchain, shell binary, system webview, packaging tools and host runtime (--json)\n\n")
 	fmt.Fprintf(w, "Build flags:\n")
 	fmt.Fprintf(w, "  --out <dir>      Output directory (default dist-native); the app is <dir>/app\n")
-	fmt.Fprintf(w, "  --target <o/a>   Platform of the Go host, for example linux/arm64\n")
+	fmt.Fprintf(w, "  --target <o/a>   Platform of the Go host, for example linux/arm64; darwin/universal, windows/universal and mas\n")
+	fmt.Fprintf(w, "  --arch universal One macOS app with arm64 and x86_64 code (or one Windows Store bundle with x64 and arm64)\n")
 	fmt.Fprintf(w, "  --shell <path>   Copy a shell binary next to the app. Without it the shell is $KRATE_SHELL or the\n")
 	fmt.Fprintf(w, "                   krate-shell next to the krate executable (\"auto\" also builds the checkout's shell)\n")
 	fmt.Fprintf(w, "  --layout <l>     \"shell\" keeps the prebuilt shell plus a Go host child; \"executable\" links one process.\n")
@@ -57,7 +58,7 @@ func printNativeUsage(w io.Writer) {
 	fmt.Fprintf(w, "  --release        Link one executable per target (needs Go); --target takes several,\n")
 	fmt.Fprintf(w, "                   comma-separated or repeated\n")
 	fmt.Fprintf(w, "  --package        Package the build for --target; with --release, each of the targets (see: krate native package)\n")
-	fmt.Fprintf(w, "\nPackage flags: --format, --sign, --notarize, --identity, --keychain-profile, --pfx, --thumbprint,\n")
+	fmt.Fprintf(w, "\nPackage flags: --format, --sign, --notarize, --identity, --keychain-profile, --installer-identity, --pfx, --thumbprint,\n")
 	fmt.Fprintf(w, "  --gpg-key, --notes, --update-base-url, --key-out (see docs/native/packaging)\n")
 	fmt.Fprintf(w, "  --delta-from <dir>[,<dir>] --delta-count <n>   Write delta updates from earlier releases found there\n")
 	fmt.Fprintf(w, "  --channel <name>  Write latest-<channel>-<target>.json\n")
@@ -324,6 +325,14 @@ func runNativeBuild(flags cliFlags, args []string) {
 	}
 	root, cfg := resolveConfig(flags, args)
 	defer startRunLog(root, cfg, "native build")()
+	if err := resolveDistTargets(&flags, cfg); err != nil {
+		reportPkgError(err)
+		exit(1)
+	}
+	if hasUniversal(flags.Targets) && !flags.Release {
+		// Both architectures are compiled executables.
+		flags.Release = true
+	}
 	env := loadProjectEnv(root, "production", flags.Verbose)
 
 	outDir := flags.NativeOut
@@ -437,7 +446,7 @@ func joinOrNone(s []string) string {
 
 // runNativeRelease implements `krate native build --release`.
 func runNativeRelease(builder *build.Builder, root, outDir string, flags cliFlags, start time.Time) {
-	res, err := builder.BuildNativeRelease(build.NativeReleaseOptions{OutDir: outDir, Targets: flags.Targets})
+	res, err := builder.BuildNativeRelease(build.NativeReleaseOptions{OutDir: outDir, Targets: buildTargets(flags.Targets)})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%sBuild error:%s %s\n", cRed, cReset, build.BuildErrorSummary(err))
 		exit(1)

@@ -397,6 +397,9 @@ func (c *checker) packaging() {
 	switch c.p.GOOS {
 	case "linux":
 		c.tool(g, "appimagetool", "appimagetool", has(c.in.LinuxFormats, "appimage"), "builds .AppImage (native.bundle.linux.formats)")
+		c.tool(g, "flatpak-builder", "flatpak-builder", has(c.in.LinuxFormats, "flatpak"), "builds the .flatpak bundle (native.bundle.linux.formats)")
+		c.tool(g, "appstreamcli", "appstreamcli", false, "optional: validates the Flatpak AppStream metainfo")
+		c.tool(g, "snapcraft", "snapcraft", has(c.in.LinuxFormats, "snap"), "builds the .snap (native.bundle.linux.formats)")
 		c.tool(g, "dpkg-deb", "dpkg-deb", false, "optional: .deb files are written without it")
 		c.tool(g, "rpm", "rpm", false, "optional: .rpm files are written without it")
 		c.tool(g, "makensis", "makensis", false, "optional: builds Windows NSIS installers from Linux")
@@ -404,6 +407,8 @@ func (c *checker) packaging() {
 	case "darwin":
 		c.tool(g, "hdiutil", "hdiutil", true, "builds .dmg files")
 		c.tool(g, "codesign", "codesign", false, "optional: signs the app (krate native sign)")
+		c.tool(g, "productbuild", "productbuild", false, "optional: builds the Mac App Store .pkg (krate native package --target mas)")
+		c.tool(g, "lipo", "lipo", false, "optional: only to inspect universal binaries; Krate merges them itself")
 		c.tool(g, "xcrun", "xcrun", false, "optional: runs notarytool for notarization (krate native notarize)")
 		c.tool(g, "makensis", "makensis", false, "optional: builds Windows NSIS installers")
 		c.tool(g, "osslsigncode", "osslsigncode", false, "optional: signs Windows packages")
