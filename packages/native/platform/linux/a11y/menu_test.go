@@ -125,11 +125,26 @@ func TestAppMenuKeyboardAccess(t *testing.T) {
 	_ = client.KeySym("Escape")
 	waitFor(t, "the menu to close", func() bool { n, ok := state("New"); return ok && !n.HasState(atspi.StateShowing) })
 
-	// The mnemonic: Alt+F opens File, N activates New.
-	if err := client.KeyCombo([]int32{atspi.KeycodeAlt}, "f"); err != nil {
-		t.Fatal(err)
+	// The mnemonic: Alt+F opens File, N activates New. After the menu closes
+	// the focus goes back to the window asynchronously; an Alt+F that lands
+	// before it does is lost, so the window is focused again and the combo is
+	// retried a few times before the test fails.
+	focusWindow(t, w, "Menu keys")
+	opened := false
+	for attempt := 0; attempt < 3 && !opened; attempt++ {
+		if err := client.KeyCombo([]int32{atspi.KeycodeAlt}, "f"); err != nil {
+			t.Fatal(err)
+		}
+		for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+			if n, ok := state("New"); ok && n.HasState(atspi.StateShowing) {
+				opened = true
+				break
+			}
+		}
 	}
-	waitFor(t, "New to show after Alt+F", func() bool { n, ok := state("New"); return ok && n.HasState(atspi.StateShowing) })
+	if !opened {
+		t.Fatal("New did not show after Alt+F (three tries)")
+	}
 	_ = client.KeySym("n")
 	waitFor(t, "the New menu event", func() bool { mu.Lock(); defer mu.Unlock(); return len(got) > 0 })
 	mu.Lock()
