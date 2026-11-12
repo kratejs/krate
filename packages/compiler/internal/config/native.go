@@ -737,7 +737,6 @@ func validateNativeFileAssociations(list []NativeFileAssociation) error {
 	return nil
 }
 
-
 var (
 	nativeTeamIDRe     = regexp.MustCompile(`^[A-Z0-9]{10}$`)
 	nativeStoreNameRe  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9.-]{2,49}$`)
