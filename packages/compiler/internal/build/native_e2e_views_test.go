@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -85,6 +86,13 @@ func TestNativeE2EMediaGUI(t *testing.T) {
 		requireE2E(t, "examples/native-media has no built @krate/app (run pnpm install and pnpm build)")
 	}
 	t.Setenv("KRATE_NATIVE_MOCK_CAPTURE", "1")
+	// WebView2 fails getUserMedia with NotFoundError before asking for
+	// permission when the machine has no camera or microphone (CI runners);
+	// Chromium's fake devices stand in, like KRATE_NATIVE_MOCK_CAPTURE does for
+	// WebKitGTK. The shell merges this variable into its browser arguments.
+	if runtime.GOOS == "windows" {
+		t.Setenv("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "--use-fake-device-for-media-stream")
+	}
 	work := t.TempDir()
 	appDir := e2eBuildNative(t, ex, filepath.Join(work, "dist-native"))
 

@@ -40,7 +40,7 @@ func exampleOrSkip(t *testing.T) string {
 func TestNativeBuildUniversalCLI(t *testing.T) {
 	ex := exampleOrSkip(t)
 	out := filepath.Join(t.TempDir(), "dist-native")
-	code, log := runKrate(t, "native", "build", ex, "--release", "--arch", "universal", "--package", "--format", "zip", "--out", out)
+	code, log := runKrate(t, "native", "build", ex, "--release", "--target", "darwin/universal", "--package", "--format", "zip", "--out", out)
 	if code != 0 {
 		t.Fatalf("exit %d:\n%s", code, log)
 	}

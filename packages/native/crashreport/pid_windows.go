@@ -2,16 +2,21 @@
 
 package crashreport
 
-import "golang.org/x/sys/windows"
+import "syscall"
+
+// processQueryLimitedInformation is PROCESS_QUERY_LIMITED_INFORMATION. The
+// standard syscall package is enough here: the Go host imports this package,
+// and golang.org/x/sys would have to be in every app's go.sum.
+const processQueryLimitedInformation = 0x1000
 
 func pidAlive(pid int) bool {
-	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
+	h, err := syscall.OpenProcess(processQueryLimitedInformation, false, uint32(pid))
 	if err != nil {
 		return false
 	}
-	defer func() { _ = windows.CloseHandle(h) }()
+	defer func() { _ = syscall.CloseHandle(h) }()
 	var code uint32
-	if err := windows.GetExitCodeProcess(h, &code); err != nil {
+	if err := syscall.GetExitCodeProcess(h, &code); err != nil {
 		return true
 	}
 	const stillActive = 259
