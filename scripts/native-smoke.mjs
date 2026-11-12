@@ -66,16 +66,28 @@ function quote(a) {
   return /[\s"]/.test(a) ? JSON.stringify(a) : a;
 }
 
+// commandTimeout bounds every command, so one that waits for a prompt nobody
+// can answer (a keychain or trust dialog on a headless runner) fails the step
+// instead of hanging the job.
+const commandTimeout = 15 * 60 * 1000;
+
+function timedOut(cmd, r, ms) {
+  return r.error && r.error.code === 'ETIMEDOUT' ? new Error(`${cmd} did not finish within ${ms / 60000} minutes`) : r.error;
+}
+
 function run(cmd, args, o = {}) {
   log(`+ ${cmd} ${args.map(quote).join(' ')}`);
+  const ms = o.timeout ?? commandTimeout;
   const r = spawnSync(cmd, args, {
     cwd: o.cwd,
     env: { ...process.env, ...o.env },
     encoding: 'utf8',
     stdio: o.capture ? ['ignore', 'pipe', 'inherit'] : 'inherit',
     maxBuffer: 64 << 20,
+    timeout: ms,
+    killSignal: 'SIGKILL',
   });
-  if (r.error) throw r.error;
+  if (r.error) throw timedOut(cmd, r, ms);
   if (r.status !== 0 && !o.allowFail) throw new Error(`${cmd} exited with ${r.status}`);
   return r;
 }
@@ -84,8 +96,9 @@ function run(cmd, args, o = {}) {
 // writes its report to stderr).
 function runBoth(cmd, args, o = {}) {
   log(`+ ${cmd} ${args.map(quote).join(' ')}`);
-  const r = spawnSync(cmd, args, { cwd: o.cwd, env: { ...process.env, ...o.env }, encoding: 'utf8', maxBuffer: 64 << 20 });
-  if (r.error) throw r.error;
+  const ms = o.timeout ?? commandTimeout;
+  const r = spawnSync(cmd, args, { cwd: o.cwd, env: { ...process.env, ...o.env }, encoding: 'utf8', maxBuffer: 64 << 20, timeout: ms, killSignal: 'SIGKILL' });
+  if (r.error) throw timedOut(cmd, r, ms);
   const text = (r.stdout || '') + (r.stderr || '');
   log(text.trimEnd());
   if (r.status !== 0 && !o.allowFail) throw new Error(`${cmd} exited with ${r.status}`);
@@ -636,9 +649,9 @@ function macSelfSigned() {
   run('security', ['import', p12, '-k', kc, '-P', pw, '-T', '/usr/bin/codesign', '-T', '/usr/bin/security']);
   run('security', ['set-key-partition-list', '-S', 'apple-tool:,apple:,codesign:', '-s', '-k', pw, kc]);
   run('security', ['list-keychains', '-d', 'user', '-s', kc, ...before]);
-  // Trusting a self-signed root needs user interaction on some systems; the
-  // signature is made and verified without it, so a failure here is fine.
-  run('security', ['add-trusted-cert', '-r', 'trustRoot', '-p', 'codeSign', '-k', kc, crt], { allowFail: true });
+  // The certificate is not marked trusted: add-trusted-cert opens an
+  // authorization dialog that blocks forever on a headless runner, and
+  // codesign signs and verifies with an untrusted identity.
   const found = run('security', ['find-identity', '-p', 'codesigning', kc], { capture: true }).stdout;
   const hash = /^\s*\d+\)\s+([0-9A-F]{40})\s+"Krate CI Signing"/m.exec(found)?.[1];
   if (!hash) fail(`the self-signed identity was not found in the keychain:\n${found}`);
