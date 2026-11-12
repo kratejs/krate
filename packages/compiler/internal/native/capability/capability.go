@@ -231,7 +231,7 @@ const (
 )
 
 // implied lists the permissions a name grants along with itself.
-var implied = map[string][]string{"fs": {"fs:read"}}
+var implied = map[string][]string{"fs": {"fs:read"}, "media:manage": {"media"}}
 
 func pruneImplied(perms []string) []string {
 	have := map[string]bool{}

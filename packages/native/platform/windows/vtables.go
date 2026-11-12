@@ -497,6 +497,47 @@ var ifaceMethods = map[string][]string{
 		"put_State",
 		"GetDeferral",
 	},
+	// WebView2.h line 50759
+	"ICoreWebView2PermissionRequestedEventArgs3": {
+		"QueryInterface", "AddRef", "Release", "get_Uri", "get_PermissionKind", "get_IsUserInitiated",
+		"get_State", "put_State", "GetDeferral", "get_Handled", "put_Handled", "get_SavesInProfile",
+		"put_SavesInProfile",
+	},
+	// WebView2.h line 31007
+	"ICoreWebView2_27": {
+		"QueryInterface", "AddRef", "Release", "get_Settings", "get_Source", "Navigate",
+		"NavigateToString", "add_NavigationStarting", "remove_NavigationStarting", "add_ContentLoading", "remove_ContentLoading", "add_SourceChanged",
+		"remove_SourceChanged", "add_HistoryChanged", "remove_HistoryChanged", "add_NavigationCompleted", "remove_NavigationCompleted", "add_FrameNavigationStarting",
+		"remove_FrameNavigationStarting", "add_FrameNavigationCompleted", "remove_FrameNavigationCompleted", "add_ScriptDialogOpening", "remove_ScriptDialogOpening", "add_PermissionRequested",
+		"remove_PermissionRequested", "add_ProcessFailed", "remove_ProcessFailed", "AddScriptToExecuteOnDocumentCreated", "RemoveScriptToExecuteOnDocumentCreated", "ExecuteScript",
+		"CapturePreview", "Reload", "PostWebMessageAsJson", "PostWebMessageAsString", "add_WebMessageReceived", "remove_WebMessageReceived",
+		"CallDevToolsProtocolMethod", "get_BrowserProcessId", "get_CanGoBack", "get_CanGoForward", "GoBack", "GoForward",
+		"GetDevToolsProtocolEventReceiver", "Stop", "add_NewWindowRequested", "remove_NewWindowRequested", "add_DocumentTitleChanged", "remove_DocumentTitleChanged",
+		"get_DocumentTitle", "AddHostObjectToScript", "RemoveHostObjectFromScript", "OpenDevToolsWindow", "add_ContainsFullScreenElementChanged", "remove_ContainsFullScreenElementChanged",
+		"get_ContainsFullScreenElement", "add_WebResourceRequested", "remove_WebResourceRequested", "AddWebResourceRequestedFilter", "RemoveWebResourceRequestedFilter", "add_WindowCloseRequested",
+		"remove_WindowCloseRequested", "add_WebResourceResponseReceived", "remove_WebResourceResponseReceived", "NavigateWithWebResourceRequest", "add_DOMContentLoaded", "remove_DOMContentLoaded",
+		"get_CookieManager", "get_Environment", "TrySuspend", "Resume", "get_IsSuspended", "SetVirtualHostNameToFolderMapping",
+		"ClearVirtualHostNameToFolderMapping", "add_FrameCreated", "remove_FrameCreated", "add_DownloadStarting", "remove_DownloadStarting", "add_ClientCertificateRequested",
+		"remove_ClientCertificateRequested", "OpenTaskManagerWindow", "PrintToPdf", "add_IsMutedChanged", "remove_IsMutedChanged", "get_IsMuted",
+		"put_IsMuted", "add_IsDocumentPlayingAudioChanged", "remove_IsDocumentPlayingAudioChanged", "get_IsDocumentPlayingAudio", "add_IsDefaultDownloadDialogOpenChanged", "remove_IsDefaultDownloadDialogOpenChanged",
+		"get_IsDefaultDownloadDialogOpen", "OpenDefaultDownloadDialog", "CloseDefaultDownloadDialog", "get_DefaultDownloadDialogCornerAlignment", "put_DefaultDownloadDialogCornerAlignment", "get_DefaultDownloadDialogMargin",
+		"put_DefaultDownloadDialogMargin", "add_BasicAuthenticationRequested", "remove_BasicAuthenticationRequested", "CallDevToolsProtocolMethodForSession", "add_ContextMenuRequested", "remove_ContextMenuRequested",
+		"add_StatusBarTextChanged", "remove_StatusBarTextChanged", "get_StatusBarText", "get_Profile", "add_ServerCertificateErrorDetected", "remove_ServerCertificateErrorDetected",
+		"ClearServerCertificateErrorActions", "add_FaviconChanged", "remove_FaviconChanged", "get_FaviconUri", "GetFavicon", "Print",
+		"ShowPrintUI", "PrintToPdfStream", "PostSharedBufferToScript", "add_LaunchingExternalUriScheme", "remove_LaunchingExternalUriScheme", "get_MemoryUsageTargetLevel",
+		"put_MemoryUsageTargetLevel", "get_FrameId", "ExecuteScriptWithResult", "AddWebResourceRequestedFilterWithRequestSourceKinds", "RemoveWebResourceRequestedFilterWithRequestSourceKinds", "PostWebMessageAsJsonWithAdditionalObjects",
+		"add_NotificationReceived", "remove_NotificationReceived", "add_SaveAsUIShowing", "remove_SaveAsUIShowing", "ShowSaveAsUI", "add_SaveFileSecurityCheckStarting",
+		"remove_SaveFileSecurityCheckStarting", "add_ScreenCaptureStarting", "remove_ScreenCaptureStarting",
+	},
+	// WebView2.h line 55746
+	"ICoreWebView2ScreenCaptureStartingEventArgs": {
+		"QueryInterface", "AddRef", "Release", "get_Cancel", "put_Cancel", "get_Handled",
+		"put_Handled", "get_OriginalSourceFrameInfo", "GetDeferral",
+	},
+	// WebView2.h line 32247
+	"ICoreWebView2ScreenCaptureStartingEventHandler": {
+		"QueryInterface", "AddRef", "Release", "Invoke",
+	},
 	// objidl.h: ISequentialStream (Read, Write) then IStream.
 	"IStream": {
 		"QueryInterface", "AddRef", "Release",

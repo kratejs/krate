@@ -902,6 +902,12 @@ The project loads a web font (an `@font-face` rule with a font file, a Google Fo
 
 A `.map()` renders a JSX element per item over an array with more than `native.lean.listItems` entries (default 100) known at build time, or over a value from host code, whose length the UI does not bound, and the file uses no windowing component or `.slice()`. Every item stays in the DOM, so memory grows with the list. Render only the visible window (a virtual list component), page the data with `.slice()`, or have host code return one page at a time.
 
+### KR7290
+
+**Media or location used without a macOS usage description**
+
+The UI code calls `getUserMedia`, `getDisplayMedia` or `navigator.geolocation`, and `native.media.usage` has no sentence for it. macOS ends a process that touches the camera, microphone or location when its Info.plist lacks `NSCameraUsageDescription`, `NSMicrophoneUsageDescription` or `NSLocationUsageDescription`, and it shows that sentence in its consent prompt. Packaging writes a generic sentence so the app does not crash, but a prompt that says why the app needs the device gets more yeses. Set `native.media.usage.camera`, `.microphone`, `.location` or `.screenCapture`. The check runs for builds that target macOS and only when the scan of the built UI finds the call; an API name built at run time is not found.
+
 ## KR8xxx: islands, compiled packages and general React compatibility
 
 ### KR8001

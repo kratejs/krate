@@ -171,6 +171,9 @@ func loadApp(dir string, fsys fs.FS, opts RunOptions) (*app, error) {
 		opt.UpdaterChannel, opt.UpdaterMaxStarts, opt.UpdaterHealthTimeout = u.Channel, u.MaxStarts, u.HealthTimeout
 		opt.UpdaterManualConfirm = u.Confirm == "app"
 	}
+	if man.Media != nil {
+		opt.Media = sdkall.MediaOptions{Policy: man.Media.Policy, NoRemember: man.Media.NoRemember}
+	}
 	set, err := sdkall.Register(a.reg, opt)
 	if err != nil {
 		return nil, fmt.Errorf("shell: registering the SDK: %w", err)

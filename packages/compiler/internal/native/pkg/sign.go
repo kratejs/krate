@@ -42,6 +42,10 @@ type SignConfig struct {
 	// HostRuntime is native.host.runtime and decides the generated
 	// entitlements.
 	HostRuntime string
+	// MediaUses are the webview permissions the UI uses ("camera",
+	// "microphone", "location"); the generated entitlements grant the
+	// matching device access under the hardened runtime.
+	MediaUses []string
 
 	// WinPFX, WinThumbprint and WinTimestampURL select the Authenticode
 	// certificate; the PFX password comes from EnvWinPFXPassword.
@@ -110,7 +114,11 @@ func NewSigner(c SignConfig, goos string) Signer {
 // or JavaScriptCore with a JIT and needs allow-jit and
 // allow-unsigned-executable-memory. The app is not sandboxed, so the network
 // client entitlement is not needed either.
-func MacEntitlements(hostRuntime string) []byte {
+//
+// A UI that uses the camera, microphone or location (uses) needs the device
+// entitlements as well: under the hardened runtime macOS gives the process no
+// data from those devices without them, and shows no prompt.
+func MacEntitlements(hostRuntime string, uses ...string) []byte {
 	var b strings.Builder
 	b.WriteString("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
 	b.WriteString("<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n")
@@ -119,6 +127,16 @@ func MacEntitlements(hostRuntime string) []byte {
 	case "node", "bun", "deno":
 		b.WriteString("\t<key>com.apple.security.cs.allow-jit</key>\n\t<true/>\n")
 		b.WriteString("\t<key>com.apple.security.cs.allow-unsigned-executable-memory</key>\n\t<true/>\n")
+	}
+	for _, u := range uses {
+		switch u {
+		case "camera":
+			b.WriteString("\t<key>com.apple.security.device.camera</key>\n\t<true/>\n")
+		case "microphone":
+			b.WriteString("\t<key>com.apple.security.device.audio-input</key>\n\t<true/>\n")
+		case "location":
+			b.WriteString("\t<key>com.apple.security.personal-information.location</key>\n\t<true/>\n")
+		}
 	}
 	b.WriteString("</dict>\n</plist>\n")
 	return []byte(b.String())
@@ -258,7 +276,7 @@ func SignMacApp(c SignConfig, app string) error {
 	ent := c.MacEntitlements
 	if ent == "" {
 		ent = filepath.Join(filepath.Dir(app), "entitlements.plist")
-		if err := os.WriteFile(ent, MacEntitlements(c.HostRuntime), 0o644); err != nil {
+		if err := os.WriteFile(ent, MacEntitlements(c.HostRuntime, c.MediaUses...), 0o644); err != nil {
 			return wrapWrite(ent, err)
 		}
 	}

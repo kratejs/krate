@@ -44,6 +44,9 @@ prerendered at build time.
   clipboard, menus, tray, shortcuts and notifications.
 - [Native SDK: OS integration](/docs/native/system/) - badge and progress on the app
   icon, displays, power and idle, launch at login, the system theme and crash reports.
+- [Camera, microphone and location](/docs/native/media/) - app-controlled
+  permissions for getUserMedia, getDisplayMedia and geolocation, OS consent and
+  screen sources.
 - [Views and split panes](/docs/native/views/) - several webviews in one window,
   draggable dividers, per-view scopes and view-to-view messages.
 - [Files and drag and drop](/docs/native/files/) - file associations in the

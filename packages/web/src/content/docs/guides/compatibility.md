@@ -86,6 +86,10 @@ green run there is what moves a cell.
 | Native: lean pages and the dev Memory panel | Supported | Supported | Supported | Krate Native v1 |
 | Native: SDK dialogs, clipboard and menus | Supported | Untested | Untested | Krate Native v1 |
 | Native: SDK notifications | Supported | Partial | Partial | Krate Native v1 |
+| Native: camera, microphone, screen capture and location permissions | Supported | Untested | Untested | Krate Native v1 |
+| Native: media permissions derived from the UI, usage descriptions and capabilities | Supported | Untested | Untested | Krate Native v1 |
+| Native: operating system consent for camera, microphone, screen and location | Partial | Untested | Untested | Krate Native v1 |
+| Native: screen and window capture sources | Partial | Untested | Untested | Krate Native v1 |
 | Native: SDK tray and global shortcuts | Partial | Partial | Partial | Krate Native v1 |
 | Native: SDK app lifecycle | Supported | Partial | Partial | Krate Native v1 |
 | Native: file associations | Partial | Untested | Untested | Krate Native v1 |
@@ -667,6 +671,58 @@ Known limits:
 - Windows: a toast click uses protocol activation with a per-app URL scheme (HKCU registration for an unpackaged app, NSIS and MSIX registration too), not a COM activator. With the app running, the new process hands the click to it (WM_COPYDATA); with no instance, the click is kept and delivered when the page subscribes (the event that started the app). Unit tests cover the URL, the payload, the registry values and the manifest; the Windows CI job relaunches the test binary with the URL to prove both paths and checks the registration (first run pending), but a real click on a real toast, Action Center after a reboot and the packaged (MSIX) path are not confirmed. Windows has no per-toast timeout or urgency levels, and Show succeeding does not prove a banner was drawn (Focus assist and per-app settings can suppress it).
 
 Evidence: `TestNotifyOverDBus`, `TestNotifyWithoutServiceIsUnsupported`, `TestNotificationAndTrayWithFakeDesktopServices`, `TestBuildToastXML`, `TestBuildToastXMLVariants`, `TestPinterfaceIID`, `TestAUMIDFor`, `TestToastXMLAcceptedByWinRT`, `TestToastDelegateInterfaces`, `TestGUIToast`, `TestPlatformBackendClose`, `TestNotifyUnbundled`, `TestNotifyBundled`, `TestBundleProblem`, `TestNotifyEvent`, `TestPlatformNotifyAvailability`, `TestPrepareMacDevBundle`, `TestRealDunstShowsNotification`, `TestRealDunstUrgencyLevels`, `TestRealDunstReplaceByID`, `TestRealDunstClosedByApp`, `TestRealDunstClosedByDaemon`, `TestRealDunstExpires`, `TestRealDunstDefaultAction`, `TestRealDunstActionButton`, `TestRealDunstGoneIsUnsupported`, `TestRealNoDaemonOnARealBus`, `TestToastXMLProtocolActivation`, `TestPlatformNotifyLaunchEventWaitsForSubscriber`, `TestPublishRetainedWaitsForTheFirstSubscriber`, `TestActivationPayloadRoundTrip`, `TestSchemeIsStableAndValid`, `TestURIRoundTrip`, `TestGUIToastActivationFromASecondProcess`, `TestGUIToastProtocolRegistration`
+
+### Native: camera, microphone, screen capture and location permissions
+
+**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+
+The page's getUserMedia, getDisplayMedia and geolocation requests go to the SDK instead of the engine's own policy. A request is denied when its window or view scope lacks media or location; otherwise a remembered decision, the request stream (onRequest in TypeScript, media.OnRequest in Go), the native.media policy (allow, deny or a native prompt) and the operating system's consent decide. Decisions are remembered per app (stored) and per view. The UI half is @krate/app/media.
+
+Known limits:
+
+- Linux: verified in a real WebKitGTK 2.54 with the mock capture devices (KRATE_NATIVE_MOCK_CAPTURE): a camera or microphone request reaches the handler with the right kinds and view, allow yields a stream, deny yields NotAllowedError, no handler denies, geolocation deny is PERMISSION_DENIED, and a getDisplayMedia request arrives as kind screen. Real cameras and microphones were not used; no CI runner has one. An allowed geolocation request fails with POSITION_UNAVAILABLE without GeoClue, which the tests accept.
+- macOS: implemented as a WKUIDelegate (media capture on macOS 12+, a private method for display capture, geolocation where WebKit calls it) and not yet run on a Mac. A runner has no camera, so the test calls the delegate methods of the real web view with its own blocks. Notification and clipboard requests have no public delegate.
+- Windows: implemented with PermissionRequested under a deferral and ScreenCaptureStarting (ICoreWebView2_27, absent from older runtimes, which leaves screen capture ungated), with SavesInProfile off so the runtime never answers from its profile. Untested on Windows; the test runs Chromium's fake devices. getUserMedia with audio and video raises two requests there.
+- Pointer lock, website data access and the other WebKitGTK request types, and the sensor, download, file and MIDI kinds of WebView2, are left to the engine.
+
+Evidence: `TestGUIPermissionCameraAllowAndDeny`, `TestGUIPermissionMicrophoneAndBoth`, `TestGUIPermissionNoHandlerDenies`, `TestGUIPermissionGeolocation`, `TestGUIPermissionScreenCapture`, `TestScopeWithoutPermissionDenies`, `TestPromptRemembersAnswers`, `TestViewScopedDecisionWinsOverApp`, `TestStorePersistsAppDecisionsOnly`, `TestHandlerStreamDecides`, `TestHandlerTimeoutDenies`, `TestMediaHandlerIsInstalledAndPolicyApplies`, `TestMediaPromptAndRememberedDecisions`, `TestMediaScopeAndPermissionGates`, `TestMediaRequestHandlerStream`, `TestNativeE2EMediaGUI`, `TestGUIPermissionDelegate`, `TestCaptureKinds`, `TestGUIPermissionCamera`, `TestPermissionKindOf`
+
+### Native: media permissions derived from the UI, usage descriptions and capabilities
+
+**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+
+The build scans the built UI for getUserMedia, getDisplayMedia and navigator.geolocation and grants media and location in a derived build (reported as KR7210 against native.permissions), and in dev for an app without a permission list. Packaging writes the macOS usage descriptions and device entitlements and the MSIX device capabilities from what the UI uses, and the build reports KR7290 when a macOS usage description is missing.
+
+Known limits:
+
+- The scan is textual: a call whose API name is built at run time is not found, and a library that mentions getUserMedia asks for the permission. The Info.plist, entitlements and MSIX output are unit-tested as text; no signed macOS app or MSIX package was run.
+
+Evidence: `TestScanUses`, `TestScanDirUsesReportsFirstSite`, `TestDevUsePermissions`, `TestNativeMediaMeta`, `TestMediaUsageDiagnostics`, `TestAddUsesJoinsTheDerivedPermissions`, `TestNativeMediaDerivedPermissions`, `TestNativeMediaValidation`, `TestInfoPlistUsageDescriptions`, `TestMacEntitlementsForDevices`, `TestMSIXDeviceCapabilities`, `TestApplyAppJSON`
+
+### Native: operating system consent for camera, microphone, screen and location
+
+**Linux:** Partial - **macOS:** Untested - **Windows:** Untested
+
+An allowed request is checked against the operating system: AVCaptureDevice, CGPreflightScreenCaptureAccess and CLLocationManager on macOS, the capability consent store on Windows (read only), and the Camera portal under Flatpak or Snap on Linux. media.osStatus reads the state and media.osRequest shows the system prompt where one exists. A refusal denies the request.
+
+Known limits:
+
+- Linux: outside a sandbox there is no consent switch for the camera or microphone, and the screen and location go through the ScreenCast portal and GeoClue inside WebKitGTK; only the Camera portal is driven by the SDK, and only against a fake portal in the tests.
+- macOS: screen recording reads as granted or not yet granted, and a grant takes effect after a restart. Windows: an unpackaged app cannot be shown a consent prompt, so osRequest only reports the state. Neither was run on its OS.
+
+Evidence: `TestOSConsent`, `TestMediaOSConsentIDs`, `TestPortalCameraGrantAndDeny`, `TestPortalOutsideASandboxHasNoSwitch`, `TestPortalErrorsAndTimeout`, `TestPrivacyMappings`, `TestConsentStatus`, `TestGUIPrivacyAndSources`
+
+### Native: screen and window capture sources
+
+**Linux:** Partial - **macOS:** Untested - **Windows:** Untested
+
+media.sources lists capturable screens and windows with PNG thumbnails on macOS (CoreGraphics) and Windows (EnumDisplayMonitors, EnumWindows, GDI). No engine accepts a source chosen by the app, so media.chooseSource returns unsupported everywhere and getDisplayMedia always shows the system picker; the SDK can only allow or deny the capture request.
+
+Known limits:
+
+- Linux has no list (media.sources returns unsupported, so the row is partial): WebKitGTK reaches the screen through the ScreenCast portal and PipeWire, whose picker is the only list. ScreenCaptureKit is not used on macOS. Window titles and thumbnails on macOS need the Screen Recording permission. The listing code was not run on macOS or Windows.
+
+Evidence: `TestMediaSources`, `TestWindowSources`, `TestScaleKeepsAspectAndColor`, `TestPNGRoundTrip`, `TestBGRA`, `TestGUIPrivacyAndSources`
 
 ### Native: SDK tray and global shortcuts
 

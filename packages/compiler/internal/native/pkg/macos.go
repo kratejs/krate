@@ -46,6 +46,9 @@ func InfoPlist(m Metadata, exeName string) []byte {
 	b.WriteString("\t<key>NSHighResolutionCapable</key>\n\t<true/>\n")
 	str("NSPrincipalClass", "NSApplication")
 	b.WriteString("\t<key>NSSupportsAutomaticGraphicsSwitching</key>\n\t<true/>\n")
+	for _, kv := range macUsageKeys(m) {
+		str(kv[0], kv[1])
+	}
 	if len(m.DeepLinks) > 0 {
 		links := append([]string(nil), m.DeepLinks...)
 		sort.Strings(links)

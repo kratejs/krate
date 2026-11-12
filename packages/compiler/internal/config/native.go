@@ -61,6 +61,9 @@ type NativeConfig struct {
 	// Features overrides the detected engine features. A feature the UI code
 	// uses is switched on under "balanced" and "minimal" unless set false.
 	Features NativeFeatures `json:"features,omitempty"`
+	// Media is the policy for the page's camera, microphone, screen capture
+	// and location requests, and the usage descriptions packaging writes.
+	Media NativeMedia `json:"media,omitempty"`
 	// ViewTransitions is "auto" to keep View Transitions in a native build.
 	// The default is off, whatever the top-level viewTransitions says: a
 	// cross-document transition aborts the WebKitGTK web process in
@@ -113,6 +116,36 @@ type NativeLean struct {
 	// Ignore lists diagnostic codes (for example "KR7272") to silence.
 	Ignore []string `json:"ignore,omitempty"`
 }
+
+// NativeMedia configures webview permission requests. Each policy is
+// "prompt" (default: a native dialog), "allow" or "deny". An allowed request
+// still needs the "media" or "location" permission in the window's scope and
+// the operating system's consent.
+type NativeMedia struct {
+	Camera        string `json:"camera,omitempty"`
+	Microphone    string `json:"microphone,omitempty"`
+	Screen        string `json:"screen,omitempty"`
+	Location      string `json:"location,omitempty"`
+	Notifications string `json:"notifications,omitempty"`
+	ClipboardRead string `json:"clipboardRead,omitempty"`
+	// Remember keeps the answers of the native prompt (default true).
+	Remember *bool `json:"remember,omitempty"`
+	// Usage holds the sentences the operating system shows in its consent
+	// prompts: macOS Info.plist usage descriptions. A native build that uses
+	// the feature without one reports KR7290.
+	Usage NativeMediaUsage `json:"usage,omitempty"`
+}
+
+// NativeMediaUsage are the usage descriptions.
+type NativeMediaUsage struct {
+	Camera        string `json:"camera,omitempty"`
+	Microphone    string `json:"microphone,omitempty"`
+	Location      string `json:"location,omitempty"`
+	ScreenCapture string `json:"screenCapture,omitempty"`
+}
+
+// NativeMediaPolicies are the values of a media policy.
+var NativeMediaPolicies = []string{"prompt", "allow", "deny"}
 
 // NativeFeatures are explicit overrides for the webview features that the
 // memory profiles switch off when the UI does not use them. Nil means
@@ -479,6 +512,24 @@ func (c *Config) validateNative() (warnings []string, err error) {
 	if n.Memory != "" && !oneOf(n.Memory, NativeMemoryProfiles) {
 		return nil, nativeErr("memory", fmt.Sprintf("must be one of %s, got %q", strings.Join(NativeMemoryProfiles, ", "), n.Memory),
 			"\"balanced\" (default) trims the webview, \"minimal\" trims harder at some CPU cost, \"performance\" keeps the engine defaults")
+	}
+	for key, v := range map[string]string{
+		"camera": n.Media.Camera, "microphone": n.Media.Microphone, "screen": n.Media.Screen,
+		"location": n.Media.Location, "notifications": n.Media.Notifications, "clipboardRead": n.Media.ClipboardRead,
+	} {
+		if v != "" && !oneOf(v, NativeMediaPolicies) {
+			return nil, nativeErr("media."+key, fmt.Sprintf("must be one of %s, got %q", strings.Join(NativeMediaPolicies, ", "), v),
+				"\"prompt\" asks with a native dialog, \"allow\" and \"deny\" decide without asking")
+		}
+	}
+	for key, v := range map[string]string{
+		"media.usage.camera": n.Media.Usage.Camera, "media.usage.microphone": n.Media.Usage.Microphone,
+		"media.usage.location": n.Media.Usage.Location, "media.usage.screenCapture": n.Media.Usage.ScreenCapture,
+	} {
+		if i := strings.IndexFunc(v, func(r rune) bool { return r < 0x20 || r == 0x7f }); i >= 0 {
+			return nil, nativeErr(key, fmt.Sprintf("contains a control character (%U), got %q", rune(v[i]), v),
+				"a usage description is one line of text that ends up in Info.plist")
+		}
 	}
 	if n.ViewTransitions != "" && n.ViewTransitions != "auto" {
 		return nil, nativeErr("viewTransitions", fmt.Sprintf("must be \"auto\" or omitted, got %q", n.ViewTransitions),

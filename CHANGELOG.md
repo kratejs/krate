@@ -56,6 +56,16 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
   `onFileDrop` (`@krate/app/window`, Go `window.OnFileDrop`) reports the real paths of files
   dropped on a view while the page keeps its HTML5 drop events. `krate-shell` takes files after the
   app directory. See `examples/native-files` and docs native/files.
+- Camera, microphone, screen capture and location with app-controlled permissions: the page's
+  `getUserMedia`, `getDisplayMedia` and geolocation requests go to the SDK (`@krate/app/media`,
+  Go `sdk/media`) instead of the engine's policy. A `native.media` policy per kind (`prompt`,
+  `allow`, `deny`), remembered decisions per app and per view, a request handler
+  (`onRequest`) and a native prompt decide; a window or view scope without the new `media` or
+  `location` permission is denied, and the build derives both from the UI code. An allowed request
+  also goes through the operating system's consent (macOS TCC, the Windows consent store, the Linux
+  Camera portal). `native.media.usage` writes the macOS usage descriptions, packaging adds the
+  device entitlements and MSIX capabilities, and `KR7290` warns when a description is missing.
+  `media.sources` lists screens and windows on macOS and Windows; no engine accepts a chosen source.
 - Krate Native rows in the compatibility matrix (Linux verified, macOS and Windows untested) and
   size, cold-start and memory budgets in `packages/native/budgets.json`.
 - Native OS integration SDK areas, each a Go package and a `@krate/app/<area>` module: `badge`

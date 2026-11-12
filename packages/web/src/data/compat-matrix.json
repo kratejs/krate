@@ -1158,6 +1158,120 @@
       ]
     },
     {
+      "id": "native-media-permissions",
+      "area": "Native: camera, microphone, screen capture and location permissions",
+      "native": {
+        "linux": "supported",
+        "macos": "untested",
+        "windows": "untested"
+      },
+      "target": "Krate Native v1",
+      "summary": "The page's getUserMedia, getDisplayMedia and geolocation requests go to the SDK instead of the engine's own policy. A request is denied when its window or view scope lacks media or location; otherwise a remembered decision, the request stream (onRequest in TypeScript, media.OnRequest in Go), the native.media policy (allow, deny or a native prompt) and the operating system's consent decide. Decisions are remembered per app (stored) and per view. The UI half is @krate/app/media.",
+      "tests": [
+        "TestGUIPermissionCameraAllowAndDeny",
+        "TestGUIPermissionMicrophoneAndBoth",
+        "TestGUIPermissionNoHandlerDenies",
+        "TestGUIPermissionGeolocation",
+        "TestGUIPermissionScreenCapture",
+        "TestScopeWithoutPermissionDenies",
+        "TestPromptRemembersAnswers",
+        "TestViewScopedDecisionWinsOverApp",
+        "TestStorePersistsAppDecisionsOnly",
+        "TestHandlerStreamDecides",
+        "TestHandlerTimeoutDenies",
+        "TestMediaHandlerIsInstalledAndPolicyApplies",
+        "TestMediaPromptAndRememberedDecisions",
+        "TestMediaScopeAndPermissionGates",
+        "TestMediaRequestHandlerStream",
+        "TestNativeE2EMediaGUI",
+        "TestGUIPermissionDelegate",
+        "TestCaptureKinds",
+        "TestGUIPermissionCamera",
+        "TestPermissionKindOf"
+      ],
+      "knownLimits": [
+        "Linux: verified in a real WebKitGTK 2.54 with the mock capture devices (KRATE_NATIVE_MOCK_CAPTURE): a camera or microphone request reaches the handler with the right kinds and view, allow yields a stream, deny yields NotAllowedError, no handler denies, geolocation deny is PERMISSION_DENIED, and a getDisplayMedia request arrives as kind screen. Real cameras and microphones were not used; no CI runner has one. An allowed geolocation request fails with POSITION_UNAVAILABLE without GeoClue, which the tests accept.",
+        "macOS: implemented as a WKUIDelegate (media capture on macOS 12+, a private method for display capture, geolocation where WebKit calls it) and not yet run on a Mac. A runner has no camera, so the test calls the delegate methods of the real web view with its own blocks. Notification and clipboard requests have no public delegate.",
+        "Windows: implemented with PermissionRequested under a deferral and ScreenCaptureStarting (ICoreWebView2_27, absent from older runtimes, which leaves screen capture ungated), with SavesInProfile off so the runtime never answers from its profile. Untested on Windows; the test runs Chromium's fake devices. getUserMedia with audio and video raises two requests there.",
+        "Pointer lock, website data access and the other WebKitGTK request types, and the sensor, download, file and MIDI kinds of WebView2, are left to the engine."
+      ]
+    },
+    {
+      "id": "native-media-derived-permissions",
+      "area": "Native: media permissions derived from the UI, usage descriptions and capabilities",
+      "native": {
+        "linux": "supported",
+        "macos": "untested",
+        "windows": "untested"
+      },
+      "target": "Krate Native v1",
+      "summary": "The build scans the built UI for getUserMedia, getDisplayMedia and navigator.geolocation and grants media and location in a derived build (reported as KR7210 against native.permissions), and in dev for an app without a permission list. Packaging writes the macOS usage descriptions and device entitlements and the MSIX device capabilities from what the UI uses, and the build reports KR7290 when a macOS usage description is missing.",
+      "tests": [
+        "TestScanUses",
+        "TestScanDirUsesReportsFirstSite",
+        "TestDevUsePermissions",
+        "TestNativeMediaMeta",
+        "TestMediaUsageDiagnostics",
+        "TestAddUsesJoinsTheDerivedPermissions",
+        "TestNativeMediaDerivedPermissions",
+        "TestNativeMediaValidation",
+        "TestInfoPlistUsageDescriptions",
+        "TestMacEntitlementsForDevices",
+        "TestMSIXDeviceCapabilities",
+        "TestApplyAppJSON"
+      ],
+      "knownLimits": [
+        "The scan is textual: a call whose API name is built at run time is not found, and a library that mentions getUserMedia asks for the permission. The Info.plist, entitlements and MSIX output are unit-tested as text; no signed macOS app or MSIX package was run."
+      ]
+    },
+    {
+      "id": "native-media-os-consent",
+      "area": "Native: operating system consent for camera, microphone, screen and location",
+      "native": {
+        "linux": "partial",
+        "macos": "untested",
+        "windows": "untested"
+      },
+      "target": "Krate Native v1",
+      "summary": "An allowed request is checked against the operating system: AVCaptureDevice, CGPreflightScreenCaptureAccess and CLLocationManager on macOS, the capability consent store on Windows (read only), and the Camera portal under Flatpak or Snap on Linux. media.osStatus reads the state and media.osRequest shows the system prompt where one exists. A refusal denies the request.",
+      "tests": [
+        "TestOSConsent",
+        "TestMediaOSConsentIDs",
+        "TestPortalCameraGrantAndDeny",
+        "TestPortalOutsideASandboxHasNoSwitch",
+        "TestPortalErrorsAndTimeout",
+        "TestPrivacyMappings",
+        "TestConsentStatus",
+        "TestGUIPrivacyAndSources"
+      ],
+      "knownLimits": [
+        "Linux: outside a sandbox there is no consent switch for the camera or microphone, and the screen and location go through the ScreenCast portal and GeoClue inside WebKitGTK; only the Camera portal is driven by the SDK, and only against a fake portal in the tests.",
+        "macOS: screen recording reads as granted or not yet granted, and a grant takes effect after a restart. Windows: an unpackaged app cannot be shown a consent prompt, so osRequest only reports the state. Neither was run on its OS."
+      ]
+    },
+    {
+      "id": "native-media-sources",
+      "area": "Native: screen and window capture sources",
+      "native": {
+        "linux": "partial",
+        "macos": "untested",
+        "windows": "untested"
+      },
+      "target": "Krate Native v1",
+      "summary": "media.sources lists capturable screens and windows with PNG thumbnails on macOS (CoreGraphics) and Windows (EnumDisplayMonitors, EnumWindows, GDI). No engine accepts a source chosen by the app, so media.chooseSource returns unsupported everywhere and getDisplayMedia always shows the system picker; the SDK can only allow or deny the capture request.",
+      "tests": [
+        "TestMediaSources",
+        "TestWindowSources",
+        "TestScaleKeepsAspectAndColor",
+        "TestPNGRoundTrip",
+        "TestBGRA",
+        "TestGUIPrivacyAndSources"
+      ],
+      "knownLimits": [
+        "Linux has no list (media.sources returns unsupported, so the row is partial): WebKitGTK reaches the screen through the ScreenCast portal and PipeWire, whose picker is the only list. ScreenCaptureKit is not used on macOS. Window titles and thumbnails on macOS need the Screen Recording permission. The listing code was not run on macOS or Windows."
+      ]
+    },
+    {
       "id": "native-sdk-tray-shortcut",
       "area": "Native: SDK tray and global shortcuts",
       "native": {

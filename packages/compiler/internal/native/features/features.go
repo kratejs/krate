@@ -151,3 +151,123 @@ func ScanDir(dir string) (Set, error) {
 	})
 	return out, err
 }
+
+// Uses records which webview permissions the UI code asks for. They decide
+// the "media" and "location" app permissions of a derived native build and
+// the usage descriptions packaging needs.
+type Uses struct {
+	// Capture is getUserMedia (camera or microphone) or getDisplayMedia.
+	Capture bool `json:"capture"`
+	// Camera and Microphone narrow Capture when the constraints are literal:
+	// both stay true when they cannot be told apart.
+	Camera     bool `json:"camera"`
+	Microphone bool `json:"microphone"`
+	Screen     bool `json:"screen"`
+	// Location is navigator.geolocation.
+	Location bool `json:"location"`
+	// File and Line are where the first use was found, relative to the
+	// scanned directory, for diagnostics.
+	File string `json:"-"`
+	Line int    `json:"-"`
+}
+
+// Any reports whether the code uses any of them.
+func (u Uses) Any() bool { return u.Capture || u.Screen || u.Location }
+
+var (
+	reGUM     = regexp.MustCompile(`\bgetUserMedia\b`)
+	reDisplay = regexp.MustCompile(`\bgetDisplayMedia\b`)
+	reGeo     = regexp.MustCompile(`\bgeolocation\b`)
+	// A literal "video: false" or "audio: false" next to a getUserMedia call
+	// narrows it.
+	reVideoOff = regexp.MustCompile(`\bvideo\s*:\s*(?:false|!1|0)\b`)
+	reAudioOff = regexp.MustCompile(`\baudio\s*:\s*(?:false|!1|0)\b`)
+	reVideoOn  = regexp.MustCompile(`\bvideo\s*:`)
+	reAudioOn  = regexp.MustCompile(`\baudio\s*:`)
+)
+
+// ScanUses reports the permissions one source text asks the webview for.
+// Like Scan it is textual and generous: a mention counts.
+func ScanUses(src string) Uses {
+	var u Uses
+	if loc := reGUM.FindStringIndex(src); loc != nil {
+		u.Capture = true
+		// Look at the constraints near each call.
+		for _, m := range reGUM.FindAllStringIndex(src, -1) {
+			end := m[1] + 160
+			if end > len(src) {
+				end = len(src)
+			}
+			win := src[m[1]:end]
+			vOff, aOff := reVideoOff.MatchString(win), reAudioOff.MatchString(win)
+			vOn, aOn := reVideoOn.MatchString(win), reAudioOn.MatchString(win)
+			if (!vOn && !aOn) || (vOn && !vOff) {
+				u.Camera = true
+			}
+			if (!vOn && !aOn) || (aOn && !aOff) {
+				u.Microphone = true
+			}
+		}
+	}
+	if reDisplay.MatchString(src) {
+		u.Screen = true
+	}
+	if reGeo.MatchString(src) && strings.Contains(src, "navigator") {
+		u.Location = true
+	}
+	return u
+}
+
+// ScanDirUses scans the HTML and JavaScript files below dir.
+func ScanDirUses(dir string) (Uses, error) {
+	var out Uses
+	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if p != dir && strings.HasPrefix(d.Name(), ".") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		switch strings.ToLower(filepath.Ext(p)) {
+		case ".html", ".htm", ".js", ".mjs", ".cjs":
+		default:
+			return nil
+		}
+		if info, err := d.Info(); err != nil || info.Size() > maxFile {
+			return nil
+		}
+		b, err := os.ReadFile(p)
+		if err != nil {
+			return nil
+		}
+		u := ScanUses(string(b))
+		if !u.Any() {
+			return nil
+		}
+		if !out.Any() {
+			rel, _ := filepath.Rel(dir, p)
+			out.File = filepath.ToSlash(rel)
+			re := reGUM
+			switch {
+			case u.Capture:
+			case u.Screen:
+				re = reDisplay
+			default:
+				re = reGeo
+			}
+			if loc := re.FindStringIndex(string(b)); loc != nil {
+				out.Line = 1 + strings.Count(string(b)[:loc[0]], "\n")
+			}
+		}
+		out.Capture = out.Capture || u.Capture
+		out.Camera = out.Camera || u.Camera
+		out.Microphone = out.Microphone || u.Microphone
+		out.Screen = out.Screen || u.Screen
+		out.Location = out.Location || u.Location
+		return nil
+	})
+	return out, err
+}

@@ -949,6 +949,114 @@
       ]
     },
     {
+      "id": "krate/media.policy",
+      "permission": "media",
+      "area": "media",
+      "module": "media",
+      "exports": [
+        "getPolicy"
+      ]
+    },
+    {
+      "id": "krate/media.setPolicy",
+      "permission": "media:manage",
+      "area": "media",
+      "module": "media",
+      "exports": [
+        "setPolicy"
+      ]
+    },
+    {
+      "id": "krate/media.decisions",
+      "permission": "media",
+      "area": "media",
+      "module": "media",
+      "exports": [
+        "decisions"
+      ]
+    },
+    {
+      "id": "krate/media.decide",
+      "permission": "media:manage",
+      "area": "media",
+      "module": "media",
+      "exports": [
+        "decide"
+      ]
+    },
+    {
+      "id": "krate/media.reset",
+      "permission": "media:manage",
+      "area": "media",
+      "module": "media",
+      "exports": [
+        "reset"
+      ]
+    },
+    {
+      "id": "krate/media.requests",
+      "permission": "media:manage",
+      "area": "media",
+      "module": "media",
+      "exports": [
+        "onRequest"
+      ]
+    },
+    {
+      "id": "krate/media.respond",
+      "permission": "media:manage",
+      "area": "media",
+      "module": "media",
+      "exports": [
+        "onRequest"
+      ]
+    },
+    {
+      "id": "krate/media.events",
+      "permission": "media:manage",
+      "area": "media",
+      "module": "media",
+      "exports": [
+        "onOutcome"
+      ]
+    },
+    {
+      "id": "krate/media.osStatus",
+      "permission": "media",
+      "area": "media",
+      "module": "media",
+      "exports": [
+        "osStatus"
+      ]
+    },
+    {
+      "id": "krate/media.osRequest",
+      "permission": "media:manage",
+      "area": "media",
+      "module": "media",
+      "exports": [
+        "osRequest"
+      ]
+    },
+    {
+      "id": "krate/media.sources",
+      "permission": "media:manage",
+      "area": "media",
+      "module": "media",
+      "exports": [
+        "sources"
+      ]
+    },
+    {
+      "id": "krate/media.chooseSource",
+      "permission": "media:manage",
+      "area": "media",
+      "module": "media",
+      "exports": [
+        "chooseSource"
+      ]
+    },
+    {
       "id": "krate/badge.set",
       "permission": "badge",
       "area": "badge",

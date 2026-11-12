@@ -472,8 +472,8 @@ func TestExportDeclaredTwiceMovesWhenImportedOnce(t *testing.T) {
 		t.Run("dir="+pkg, func(t *testing.T) {
 			dir := t.TempDir()
 			files := map[string]string{
-				pkg + "menu.ts":  "export function onClick(fn) { return 'menu:' + fn; }\nexport function onMenu(fn) { return onClick(fn); }\n",
-				pkg + "tray.ts":  "export function onClick(fn) { return 'tray:' + fn; }\n",
+				pkg + "menu.ts": "export function onClick(fn) { return 'menu:' + fn; }\nexport function onMenu(fn) { return onClick(fn); }\n",
+				pkg + "tray.ts": "export function onClick(fn) { return 'tray:' + fn; }\n",
 				"page.tsx": "import { onMenu } from './" + pkg + "menu';\nimport { onClick } from './" + pkg + "tray';\n" +
 					"export default function P() { return <main onClick={() => { onMenu(1); onClick(2); }} />; }\n",
 			}

@@ -127,6 +127,9 @@ func AppxManifest(m Metadata, p Payload) []byte {
 	w(`  </Applications>`)
 	w(`  <Capabilities>`)
 	w(`    <rescap:Capability Name="runFullTrust"/>`)
+	for _, c := range msixDeviceCapabilities(m) {
+		w(`    <DeviceCapability Name="%s"/>`, c)
+	}
 	w(`  </Capabilities>`)
 	w(`</Package>`)
 	return []byte(b.String())

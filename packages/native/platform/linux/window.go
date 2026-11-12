@@ -355,4 +355,5 @@ func (a *App) applyViewSettings(view uintptr) {
 	}
 	a.api.wkSettingsDevExtras(settings, b2i(a.debug))
 	a.applyProfileSettings(settings)
+	a.applyMediaSettings(settings)
 }

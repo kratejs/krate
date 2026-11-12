@@ -101,7 +101,7 @@ type App struct {
 	hNavigation unsafe.Pointer // shared NavigationStarting handler
 	hFrameNav   unsafe.Pointer // shared FrameNavigationStarting handler
 	hNewWindow  unsafe.Pointer // shared NewWindowRequested handler
-	hPermission unsafe.Pointer // shared PermissionRequested handler (nil: not installed)
+	perm        permState
 
 	envOpts   unsafe.Pointer // options object while the environment is being created
 	envNoOpts bool           // second attempt: created without options
@@ -199,9 +199,6 @@ func New(cfg Config) (*App, error) {
 	a.hNavigation = newHandler(iidNavigationStartingHandler, false, a.onNavigationStarting)
 	a.hFrameNav = newHandler(iidNavigationStartingHandler, false, a.onFrameNavigationStarting)
 	a.hNewWindow = newHandler(iidNewWindowRequestedHandler, false, a.onNewWindowRequested)
-	if denyMediaCapture(cfg.Memory, cfg.Features) {
-		a.hPermission = newHandler(iidPermissionRequestedHandler, false, a.onPermissionRequested)
-	}
 	theApp = a
 	return a, nil
 }

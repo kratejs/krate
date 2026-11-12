@@ -67,6 +67,12 @@ var (
 	wvAddPermissionRequested  = vtIndex("ICoreWebView2", "add_PermissionRequested")
 	permArgsGetPermissionKind = vtIndex("ICoreWebView2PermissionRequestedEventArgs", "get_PermissionKind")
 	permArgsPutState          = vtIndex("ICoreWebView2PermissionRequestedEventArgs", "put_State")
+	permArgsGetUri            = vtIndex("ICoreWebView2PermissionRequestedEventArgs", "get_Uri")
+	permArgsGetDeferral       = vtIndex("ICoreWebView2PermissionRequestedEventArgs", "GetDeferral")
+	permArgs3PutSavesProfile  = vtIndex("ICoreWebView2PermissionRequestedEventArgs3", "put_SavesInProfile")
+	wv27AddScreenCapture      = vtIndex("ICoreWebView2_27", "add_ScreenCaptureStarting")
+	scrArgsPutCancel          = vtIndex("ICoreWebView2ScreenCaptureStartingEventArgs", "put_Cancel")
+	scrArgsGetDeferral        = vtIndex("ICoreWebView2ScreenCaptureStartingEventArgs", "GetDeferral")
 	wv19PutMemoryTargetLevel  = vtIndex("ICoreWebView2_19", "put_MemoryUsageTargetLevel")
 	optGetArguments           = vtIndex("ICoreWebView2EnvironmentOptions", "get_AdditionalBrowserArguments")
 

@@ -39,6 +39,12 @@ const (
 	iidPermissionRequestedHandler = "15e1c6a3-c72a-4df3-91d7-d097fbec6bfd"
 	// WebView2.h line 21808 (ICoreWebView2_19, MemoryUsageTargetLevel)
 	iidWebView2_19 = "6921f954-79b0-437f-a997-c85811897c68"
+	// ICoreWebView2PermissionRequestedEventArgs3
+	iidPermissionArgs3 = "e61670bc-3dce-4177-86d2-c629ae3cb6ac"
+	// ICoreWebView2_27
+	iidWebView2_27 = "00fbe33b-8c07-517c-aa23-0ddd4b5f6fa0"
+	// ICoreWebView2ScreenCaptureStartingEventHandler
+	iidScreenCaptureStartingHandler = "e24ff05a-1db5-59d9-89f3-3c864268db4a"
 )
 
 // guid is a GUID in its in-memory (Windows GUID struct) layout: Data1, Data2

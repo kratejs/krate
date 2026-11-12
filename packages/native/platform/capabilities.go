@@ -46,6 +46,15 @@ type (
 	WindowViews          = caps.WindowViews
 	LayoutNode           = caps.LayoutNode
 	Axis                 = caps.Axis
+	PermissionKind       = caps.PermissionKind
+	PermissionRequest    = caps.PermissionRequest
+	PermissionHandler    = caps.PermissionHandler
+	PermissionRequests   = caps.PermissionRequests
+	PrivacyStatus        = caps.PrivacyStatus
+	Privacy              = caps.Privacy
+	CaptureSource        = caps.CaptureSource
+	CaptureSources       = caps.CaptureSources
+	CaptureChooser       = caps.CaptureChooser
 )
 
 const (

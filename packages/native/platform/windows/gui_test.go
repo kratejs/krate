@@ -87,7 +87,11 @@ func TestMain(m *testing.M) {
 	if !guiEnabled {
 		os.Exit(m.Run())
 	}
-	app, err := New(Config{AppID: "dev.krate.native.guitest", AppName: "Krate GUI Test", Handler: withViewPing(guiHandler()), Debug: true, KeepAlive: true})
+	// Fake camera and microphone for the permission tests: a CI runner has none.
+	if os.Getenv("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS") == "" {
+		os.Setenv("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "--use-fake-device-for-media-stream")
+	}
+	app, err := New(Config{AppID: "dev.krate.native.guitest", AppName: "Krate GUI Test", Handler: withPermPages(withViewPing(guiHandler())), Debug: true, KeepAlive: true})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "New:", err)
 		os.Exit(2)

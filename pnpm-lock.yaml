@@ -94,6 +94,18 @@ importers:
         specifier: workspace:*
         version: link:../../packages/runtime
 
+  examples/native-media:
+    dependencies:
+      '@krate/app':
+        specifier: workspace:*
+        version: link:../../packages/app
+      '@krate/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@krate/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
+
   examples/native-views:
     dependencies:
       '@krate/app':

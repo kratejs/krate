@@ -242,6 +242,17 @@ func (h *Host) SetWindowUnscope(f func(id string)) {
 	}
 }
 
+// SetPermissionCheck installs the function the media area asks whether a
+// window or view has a permission in its scope (permission.Set.AllowsFor).
+// Without it every webview permission request is denied. sdk/all sets it.
+func (h *Host) SetPermissionCheck(f func(window, permission string) bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.env != nil {
+		h.env.Allows = f
+	}
+}
+
 // ViewWindow maps the view a request came from, as the platform reported it,
 // to the id the SDK knows it by, which is also the key of its permission
 // scope: the window id for a window's primary view, the view id for the

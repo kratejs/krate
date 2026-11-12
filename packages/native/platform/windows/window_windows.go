@@ -47,6 +47,8 @@ type view struct {
 	hClose     unsafe.Pointer // WindowCloseRequested
 	hFail      unsafe.Pointer // ProcessFailed
 	hMsg       unsafe.Pointer // WebMessageReceived (streamed responses)
+	hPerm      unsafe.Pointer // PermissionRequested
+	hScreen    unsafe.Pointer // ScreenCaptureStarting (WebView2 runtimes with ICoreWebView2_27)
 	streams    streamTable
 	pending    []func()
 	path       string
@@ -214,6 +216,7 @@ func (v *view) controllerCompleted(hr, controller uintptr) {
 
 	v.setupStreams()
 	a.tuneMemory(v)
+	a.hookPermissions(v)
 
 	w.placeViews()
 	vcall(v.controller, ctlPutIsVisible, 1)
@@ -258,7 +261,7 @@ func (v *view) closeController() {
 		comRelease(v.webview)
 		v.webview = nil
 	}
-	for _, h := range []*unsafe.Pointer{&v.hRes, &v.hNav, &v.hClose, &v.hMsg, &v.hFail} {
+	for _, h := range []*unsafe.Pointer{&v.hRes, &v.hNav, &v.hClose, &v.hMsg, &v.hFail, &v.hPerm, &v.hScreen} {
 		if *h != nil {
 			comRelease(*h)
 			*h = nil

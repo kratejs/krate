@@ -33,6 +33,11 @@ type Env struct {
 	FileDrop func(caps.FileDrop)
 	// Unscope, when set, forgets the scope of a window or view that went away.
 	Unscope func(id string)
+	// Allows, when set, reports whether the window or view id has the
+	// permission in its scope. The media area uses it to deny a page's
+	// camera, microphone and location requests. Unset means nothing is
+	// allowed.
+	Allows func(window, permission string) bool
 }
 
 // NewEnv returns an Env for app.
