@@ -346,8 +346,10 @@ deleted.
   Each top-level entry replaces the installed one by renaming: the old entry
   moves into `.krate-old/` first (Windows lets a running `.exe` be renamed), the
   new one is renamed into place. If any step fails, everything already moved
-  is put back. `.krate-old/` is deleted after the swap and again at the next
-  start, because Windows cannot delete the running `.exe`. The update must
+  is put back. `.krate-old/` holds the previous version until the new one
+  confirms a healthy start (a rollback restores from it), then it is deleted;
+  what remains (Windows cannot delete the running `.exe`) is removed at the
+  next start that has no update pending. The update must
   contain the running executable's name. An app installed by a package manager
   in a root-owned directory fails with a "not writable" error; update those
   through the package manager.
