@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/ebitengine/purego"
 	"github.com/ebitengine/purego/objc"
@@ -68,7 +69,11 @@ func TestGUIAccessibilityWindowIsNamedInEveryChrome(t *testing.T) {
 			if webLabelOrRole == "" {
 				t.Error("the webview has no accessibility role")
 			}
-			if c.lights {
+			if c.lights && !appActive() {
+				// AppKit fills in its own window buttons for accessibility only
+				// in the active app; a CI runner may never activate the test.
+				t.Logf("the app is not active; close traffic light shown=%v role=%q label=%q not checked", closeShown, closeRole, closeLabel)
+			} else if c.lights {
 				if !closeShown || closeRole != "AXButton" {
 					t.Errorf("close traffic light shown=%v role=%q, want a visible AXButton", closeShown, closeRole)
 				}
@@ -358,6 +363,9 @@ func TestGUIAccessibilityAXMenuBar(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = guiApp.SetAppMenu(nil) })
+	if !appActive() {
+		t.Skip("the app could not be made active; macOS exposes the menu bar of the active app")
+	}
 	var found bool
 	waitCond(t, "the menu in the AX menu bar", func() bool {
 		bar := axValue(app, "AXMenuBar")
@@ -371,4 +379,24 @@ func TestGUIAccessibilityAXMenuBar(t *testing.T) {
 		}
 		return found
 	})
+}
+
+// appActive asks AppKit to activate the app and reports whether it is the
+// active app, retrying for a moment: the menu bar and the standard window
+// buttons are exposed to accessibility for the active app only.
+func appActive() bool {
+	for i := 0; i < 20; i++ {
+		var active bool
+		runOnMain(func() {
+			withPool(func() {
+				guiApp.nsApp.Send(sel("activateIgnoringOtherApps:"), true)
+				active = objc.Send[bool](guiApp.nsApp, sel("isActive"))
+			})
+		})
+		if active {
+			return true
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return false
 }
