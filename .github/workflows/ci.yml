@@ -920,9 +920,17 @@ jobs:
         env:
           KRATE_REQUIRE_E2E: "1"
 
+      # The snap store is sometimes unreachable for a moment from the
+      # runners ("unable to contact snap store"): retry with a backoff.
       - name: Install snapcraft
         if: matrix.os == 'ubuntu-latest'
-        run: sudo snap install snapcraft --classic
+        run: |
+          for i in 1 2 3 4 5; do
+            sudo snap install snapcraft --classic && exit 0
+            echo "snap install failed (attempt $i); retrying in $((i * 20))s"
+            sleep $((i * 20))
+          done
+          exit 1
 
       - name: Packaging smoke test, snap build, install, run (Linux)
         if: matrix.os == 'ubuntu-latest'
