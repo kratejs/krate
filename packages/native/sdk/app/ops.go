@@ -58,7 +58,7 @@ func Register(t *bridge.Table, env *bridge.Env, support func(capability string) 
 		if err := codec.Args(args, IDLaunchArgs).Done(); err != nil {
 			return err
 		}
-		codec.WriteStrings(out, os.Args[1:])
+		codec.WriteStrings(out, launchArgs())
 		return nil
 	})
 

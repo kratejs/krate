@@ -212,3 +212,32 @@ func TestFileDropsReachTheViewAndAreGranted(t *testing.T) {
 		t.Errorf("thisView = %s", raw)
 	}
 }
+
+func TestInjectFileDropGoesThroughThePlatformHandler(t *testing.T) {
+	ps := filesFixture(t, "injected.md")
+	r := newRig(t)
+	got := make(chan window.FileDropEvent, 1)
+	cancel, err := window.OnFileDrop(func(e window.FileDropEvent) { got <- e })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cancel()
+	waitFor(t, "the drop stream", func() bool { return r.host.Subscribers("windowdrops") > 0 })
+	if !r.host.InjectFileDrop("main", ps, 1, 2) {
+		t.Fatal("InjectFileDrop refused a drop on the main window")
+	}
+	select {
+	case e := <-got:
+		if e.View != "main" || !reflect.DeepEqual(e.Paths, ps) || e.X != 1 || e.Y != 2 {
+			t.Fatalf("event %+v", e)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no event")
+	}
+	if !readable(t, ps[0]) {
+		t.Error("an injected drop is not granted")
+	}
+	if r.host.InjectFileDrop("nowhere", ps, 0, 0) {
+		t.Error("a drop on a window that does not exist was accepted")
+	}
+}

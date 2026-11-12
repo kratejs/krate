@@ -66,6 +66,12 @@ type Manifest struct {
 	// (an older app.json, not scanned) keeps every feature on.
 	Features *Features `json:"features,omitempty"`
 
+	// SingleInstance makes the shell take the single-instance lock before it
+	// opens a window. A later launch hands its command line to the running
+	// instance (which raises its window and receives the files on it) and
+	// exits. The build sets it for apps with file associations.
+	SingleInstance bool `json:"singleInstance,omitempty"`
+
 	Debug bool `json:"debug"`
 }
 

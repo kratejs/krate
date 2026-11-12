@@ -201,13 +201,21 @@ func TestValidateNative(t *testing.T) {
 		{"file assoc duplicate", func(n *NativeConfig) {
 			n.FileAssociations = []NativeFileAssociation{{Ext: []string{"md"}}, {Ext: []string{"MD"}}}
 		}, "already listed"},
-		{"file assoc name newline", func(n *NativeConfig) { n.FileAssociations = []NativeFileAssociation{{Ext: []string{"md"}, Name: "a\nb"}} }, "control character"},
-		{"file assoc mime", func(n *NativeConfig) { n.FileAssociations = []NativeFileAssociation{{Ext: []string{"md"}, MIME: "Text/Markdown"}} }, "not a media type"},
+		{"file assoc name newline", func(n *NativeConfig) {
+			n.FileAssociations = []NativeFileAssociation{{Ext: []string{"md"}, Name: "a\nb"}}
+		}, "control character"},
+		{"file assoc mime", func(n *NativeConfig) {
+			n.FileAssociations = []NativeFileAssociation{{Ext: []string{"md"}, MIME: "Text/Markdown"}}
+		}, "not a media type"},
 		{"file assoc mime twice", func(n *NativeConfig) {
 			n.FileAssociations = []NativeFileAssociation{{Ext: []string{"md"}, MIME: "text/markdown"}, {Ext: []string{"mdx"}, MIME: "text/markdown"}}
 		}, "already used"},
-		{"file assoc role", func(n *NativeConfig) { n.FileAssociations = []NativeFileAssociation{{Ext: []string{"md"}, Role: "owner"}} }, "editor"},
-		{"file assoc icon", func(n *NativeConfig) { n.FileAssociations = []NativeFileAssociation{{Ext: []string{"md"}, Icon: "md.ico"}} }, "PNG or JPEG"},
+		{"file assoc role", func(n *NativeConfig) {
+			n.FileAssociations = []NativeFileAssociation{{Ext: []string{"md"}, Role: "owner"}}
+		}, "editor"},
+		{"file assoc icon", func(n *NativeConfig) {
+			n.FileAssociations = []NativeFileAssociation{{Ext: []string{"md"}, Icon: "md.ico"}}
+		}, "PNG or JPEG"},
 		{"updater https", func(n *NativeConfig) { n.Updater = &NativeUpdater{URL: "http://a.b/u.json", PublicKey: "k"} }, "https"},
 	}
 	for _, tc := range cases {

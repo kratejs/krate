@@ -92,11 +92,7 @@ func registerFileDrops(t *bridge.Table, env *bridge.Env) {
 		out.String(ctx.Window())
 		return nil
 	})
-	fd, ok := env.App.(caps.FileDrops)
-	if !ok {
-		return
-	}
-	fd.OnFileDrop(func(d caps.FileDrop) {
+	handle := func(d caps.FileDrop) {
 		ev := FileDropEvent{Paths: d.Paths, X: d.X, Y: d.Y}
 		if rec, ok := env.Windows.ViewByRef(d.View); ok {
 			ev.View, ev.Window = rec.ID, rec.Window
@@ -113,5 +109,9 @@ func registerFileDrops(t *bridge.Table, env *bridge.Env) {
 			picked.Notify(p)
 		}
 		topic.Publish(func(e *wire.Encoder) { encodeFileDrop(e, ev) })
-	})
+	}
+	env.FileDrop = handle
+	if fd, ok := env.App.(caps.FileDrops); ok {
+		fd.OnFileDrop(handle)
+	}
 }

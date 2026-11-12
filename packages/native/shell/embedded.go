@@ -119,7 +119,7 @@ func RunMainPlugins(args []string, embedded fs.FS, register func(*scheme.Registr
 	if allowDev {
 		dev = fl.Bool("dev", false, "development mode: developer tools and control commands on stdin")
 	}
-	if err := fl.Parse(args); err != nil {
+	if err := fl.Parse(DropLaunchServicesArgs(args)); err != nil {
 		if err == flag.ErrHelp {
 			return 0
 		}

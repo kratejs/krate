@@ -371,3 +371,29 @@ func (h *Host) WindowRef(id string) caps.WindowRef {
 	}
 	return env.Windows.Ref(id)
 }
+
+// InjectFileDrop reports a drop of files onto the first view of a window ("" =
+// the main window) as the platform would. It is for the dev control channel
+// and tests; it reports whether the window exists and the SDK handles drops.
+func (h *Host) InjectFileDrop(window string, paths []string, x, y int) bool {
+	h.mu.Lock()
+	env := h.env
+	h.mu.Unlock()
+	if env == nil || env.FileDrop == nil {
+		return false
+	}
+	win, _, ok := env.Windows.Get(window)
+	if !ok {
+		return false
+	}
+	v, ok := win.(caps.WindowViews)
+	if !ok {
+		return false
+	}
+	var wref caps.WindowRef
+	if c, ok := win.(caps.WindowControls); ok {
+		wref = c.Ref()
+	}
+	env.FileDrop(caps.FileDrop{View: v.PrimaryView(), Window: wref, Paths: paths, X: x, Y: y})
+	return true
+}

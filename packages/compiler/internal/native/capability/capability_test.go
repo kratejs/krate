@@ -178,6 +178,24 @@ func TestLinkedAreasAndTags(t *testing.T) {
 	}
 }
 
+func TestRequireLinksAnAreaTheCodeNeverReaches(t *testing.T) {
+	r := &Result{UIAreas: []string{"kv", "os"}}
+	if strings.Contains(strings.Join(r.Tags(false), ","), "krate_no_app") == false {
+		t.Fatal("app should be shaken without Require")
+	}
+	r.Require("app")
+	r.Require("app")
+	if !reflect.DeepEqual(r.UIAreas, []string{"app", "kv", "os"}) {
+		t.Fatalf("areas = %v", r.UIAreas)
+	}
+	if strings.Contains(strings.Join(r.Tags(false), ","), "krate_no_app") {
+		t.Error("the app area is still shaken out")
+	}
+	if len(r.Permissions) != 0 {
+		t.Errorf("Require must not grant permissions: %v", r.Permissions)
+	}
+}
+
 func TestGoSDKImports(t *testing.T) {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("no go")

@@ -334,6 +334,9 @@ func (b *Builder) BuildNativeApp(opts NativeAppOptions) (*NativeAppResult, error
 		if len(ds) > 0 {
 			return nil, nativeDiagError(ds, "native permission error(s)")
 		}
+		if len(eff.FileAssociations) > 0 {
+			cap.Require("app")
+		}
 		res.Capabilities = cap
 		m.Permissions = append([]string{}, cap.Permissions...)
 		m.StrictPermissions = true

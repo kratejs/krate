@@ -149,9 +149,9 @@ func TestAppxManifestFileTypes(t *testing.T) {
 		Exts []struct {
 			Category string `xml:"Category,attr"`
 			FTA      struct {
-				Name        string   `xml:"Name,attr"`
-				DisplayName string   `xml:"DisplayName"`
-				Logo        string   `xml:"Logo"`
+				Name        string `xml:"Name,attr"`
+				DisplayName string `xml:"DisplayName"`
+				Logo        string `xml:"Logo"`
 				Types       []struct {
 					CT  string `xml:"ContentType,attr"`
 					Ext string `xml:",chardata"`
@@ -250,8 +250,8 @@ func TestSharedMimeXML(t *testing.T) {
 	wellFormed(t, "shared-mime-info", x)
 	var doc struct {
 		Types []struct {
-			Type    string   `xml:"type,attr"`
-			Comment string   `xml:"comment"`
+			Type    string `xml:"type,attr"`
+			Comment string `xml:"comment"`
 			G       []struct {
 				P string `xml:"pattern,attr"`
 			} `xml:"glob"`

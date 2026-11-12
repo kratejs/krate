@@ -107,6 +107,10 @@ func argPath(a, dir string) (string, bool) {
 // start. Tests replace it.
 var launchArgs = func() []string { return os.Args[1:] }
 
+// CurrentLaunchArgs returns the command line arguments of this launch, without
+// the program name: what LaunchArgs reports and SingleInstance passes on.
+func CurrentLaunchArgs() []string { return launchArgs() }
+
 // SetLaunchArgsForTest replaces the arguments read for the launch files and
 // returns a function that restores them.
 func SetLaunchArgsForTest(args []string) (restore func()) {
