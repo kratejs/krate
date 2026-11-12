@@ -219,6 +219,61 @@ func TestClipboardRoundTrip(t *testing.T) {
 	}
 }
 
+func TestClipboardRichFormats(t *testing.T) {
+	r := newRig(t)
+	if err := clipboard.Write(clipboard.Data{Text: "plain", HTML: "<b>bold</b>", RTF: "{\\rtf1 x}"}); err != nil {
+		t.Fatal(err)
+	}
+	if h, _ := clipboard.ReadHTML(); h != "<b>bold</b>" {
+		t.Fatalf("html %q", h)
+	}
+	if v, _ := clipboard.ReadRTF(); v != "{\\rtf1 x}" {
+		t.Fatalf("rtf %q", v)
+	}
+	if s, _ := clipboard.ReadText(); s != "plain" {
+		t.Fatalf("text %q", s)
+	}
+	fm, _ := clipboard.Formats()
+	if !reflect.DeepEqual(fm, []string{"text/plain", "text/html", "text/rtf"}) {
+		t.Fatalf("formats %v", fm)
+	}
+	if err := clipboard.WriteFormat("application/x-acme", []byte{1, 0, 2}); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := clipboard.ReadFormat("application/x-acme"); !bytes.Equal(b, []byte{1, 0, 2}) {
+		t.Fatalf("custom %v", b)
+	}
+	if b, err := clipboard.ReadFormat("text/html"); err != nil || b != nil {
+		t.Fatalf("absent = %v, %v", b, err)
+	}
+	// The page needs clipboard to write and clipboard:read for every read.
+	h := r.ui("clipboard")
+	call := func(id string, enc func(e *wire.Encoder)) string { return uiCall(t, h, id, enc) }
+	if got := call("krate/clipboard.write", func(e *wire.Encoder) {
+		e.BeginObject()
+		e.Key("html")
+		e.String("<i>x</i>")
+		e.EndObject()
+	}); !strings.Contains(got, `"ok":null`) {
+		t.Fatalf("write: %s", got)
+	}
+	for _, id := range []string{"krate/clipboard.readHtml", "krate/clipboard.readRtf", "krate/clipboard.formats"} {
+		if got := call(id, nil); !strings.Contains(got, `"permission":"clipboard:read"`) {
+			t.Fatalf("%s without clipboard:read: %s", id, got)
+		}
+	}
+	if got := call("krate/clipboard.readFormat", func(e *wire.Encoder) { e.String("text/html") }); !strings.Contains(got, "permission_denied") {
+		t.Fatalf("readFormat without clipboard:read: %s", got)
+	}
+	h = r.ui("clipboard", "clipboard:read")
+	if got := uiCall(t, h, "krate/clipboard.readHtml", nil); !strings.Contains(got, `"ok":"\u003ci\u003ex\u003c/i\u003e"`) && !strings.Contains(got, `"ok":"<i>x</i>"`) {
+		t.Fatalf("readHtml: %s", got)
+	}
+	if got := uiCall(t, h, "krate/clipboard.write", func(e *wire.Encoder) { e.Int(3) }); !strings.Contains(got, "bad_args") && !strings.Contains(got, "permission_denied") {
+		t.Fatalf("bad write args: %s", got)
+	}
+}
+
 func TestPermissionGating(t *testing.T) {
 	r := newRig(t)
 	r.app.Text = "secret"

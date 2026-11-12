@@ -28,9 +28,10 @@ type App struct {
 	MessageReply int
 
 	// Clipboard
-	Text  string
-	Image []byte
-	Files []string
+	Text    string
+	Image   []byte
+	Files   []string
+	Formats map[string][]byte
 
 	// Menus
 	AppMenu    []caps.MenuItem
@@ -152,7 +153,7 @@ func (a *App) ReadFiles() ([]string, error) {
 func (a *App) WriteFiles(p []string) error { a.mu.Lock(); a.Files = p; a.mu.Unlock(); return nil }
 func (a *App) Clear() error {
 	a.mu.Lock()
-	a.Text, a.Image, a.Files = "", nil, nil
+	a.Text, a.Image, a.Files, a.Formats = "", nil, nil, nil
 	a.mu.Unlock()
 	return nil
 }
@@ -291,4 +292,68 @@ func (a *App) ShortcutHandles() []string {
 		out = append(out, h)
 	}
 	return out
+}
+
+var _ caps.RichClipboard = (*App)(nil)
+
+func (a *App) WriteRich(d caps.ClipboardData) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.Formats = map[string][]byte{}
+	a.Text = d.Text
+	if d.Text != "" {
+		a.Formats[caps.FormatText] = []byte(d.Text)
+	}
+	if d.HTML != "" {
+		a.Formats[caps.FormatHTML] = []byte(d.HTML)
+	}
+	if d.RTF != "" {
+		a.Formats[caps.FormatRTF] = []byte(d.RTF)
+	}
+	return nil
+}
+
+func (a *App) ReadHTML() (string, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return string(a.Formats[caps.FormatHTML]), nil
+}
+
+func (a *App) ReadRTF() (string, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return string(a.Formats[caps.FormatRTF]), nil
+}
+
+func (a *App) ClipboardFormats() ([]string, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	var out []string
+	for _, n := range []string{caps.FormatText, caps.FormatHTML, caps.FormatRTF} {
+		if _, ok := a.Formats[n]; ok {
+			out = append(out, n)
+		}
+	}
+	for n := range a.Formats {
+		if n != caps.FormatText && n != caps.FormatHTML && n != caps.FormatRTF {
+			out = append(out, n)
+		}
+	}
+	return out, nil
+}
+
+func (a *App) ReadFormat(name string) ([]byte, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.Formats[name], nil
+}
+
+func (a *App) WriteFormat(name string, data []byte) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.Formats = map[string][]byte{name: data}
+	if name == caps.FormatText {
+		a.Text = string(data)
+	}
+	return nil
 }

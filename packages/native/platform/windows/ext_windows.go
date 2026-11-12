@@ -677,21 +677,24 @@ func (a *App) WriteImage(png []byte) error {
 	})
 }
 
+// hdropPaths reads a CF_HDROP entry; the clipboard must be open.
+func (a *App) hdropPaths() (paths []string) {
+	h, _, _ := pGetClipboardData.Call(cfHDrop)
+	if h == 0 {
+		return nil
+	}
+	n, _, _ := pDragQueryFileW.Call(h, ^uintptr(0), 0, 0)
+	for i := uintptr(0); i < n; i++ {
+		buf := make([]uint16, 32768)
+		l, _, _ := pDragQueryFileW.Call(h, i, uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)))
+		paths = append(paths, string(utf16.Decode(buf[:l])))
+	}
+	return paths
+}
+
 // ReadFiles returns the file paths of a CF_HDROP clipboard entry.
 func (a *App) ReadFiles() (paths []string, err error) {
-	err = a.withClipboard(func() error {
-		h, _, _ := pGetClipboardData.Call(cfHDrop)
-		if h == 0 {
-			return nil
-		}
-		n, _, _ := pDragQueryFileW.Call(h, ^uintptr(0), 0, 0)
-		for i := uintptr(0); i < n; i++ {
-			buf := make([]uint16, 32768)
-			l, _, _ := pDragQueryFileW.Call(h, i, uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)))
-			paths = append(paths, string(utf16.Decode(buf[:l])))
-		}
-		return nil
-	})
+	err = a.withClipboard(func() error { paths = a.hdropPaths(); return nil })
 	return
 }
 

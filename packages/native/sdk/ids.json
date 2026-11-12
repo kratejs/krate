@@ -874,6 +874,60 @@
         "onOpenURL",
         "onSecondInstance"
       ]
+    },
+    {
+      "id": "krate/clipboard.write",
+      "permission": "clipboard",
+      "area": "clipboard",
+      "module": "clipboard",
+      "exports": [
+        "write"
+      ]
+    },
+    {
+      "id": "krate/clipboard.writeFormat",
+      "permission": "clipboard",
+      "area": "clipboard",
+      "module": "clipboard",
+      "exports": [
+        "writeFormat"
+      ]
+    },
+    {
+      "id": "krate/clipboard.readHtml",
+      "permission": "clipboard:read",
+      "area": "clipboard",
+      "module": "clipboard",
+      "exports": [
+        "readHtml"
+      ]
+    },
+    {
+      "id": "krate/clipboard.readRtf",
+      "permission": "clipboard:read",
+      "area": "clipboard",
+      "module": "clipboard",
+      "exports": [
+        "readRtf"
+      ]
+    },
+    {
+      "id": "krate/clipboard.formats",
+      "permission": "clipboard:read",
+      "area": "clipboard",
+      "module": "clipboard",
+      "exports": [
+        "formats"
+      ]
+    },
+    {
+      "id": "krate/clipboard.readFormat",
+      "permission": "clipboard:read",
+      "area": "clipboard",
+      "module": "clipboard",
+      "exports": [
+        "readFormat"
+      ]
     }
   ]
 }
