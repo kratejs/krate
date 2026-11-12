@@ -699,6 +699,7 @@ type Config struct {
 	Headers     []HeaderRule    `json:"headers,omitempty"`     // custom response headers
 	Images      ImagesConfig    `json:"images,omitempty"`      // responsive-image pipeline
 	Deploy      DeployConfig    `json:"deploy,omitempty"`      // deploy adapter + options
+	Auth        AuthConfig      `json:"auth,omitempty"`        // authentication: providers, sessions, 2FA, passkeys
 
 	// BasePath is the URL path prefix the whole site is served under (e.g.
 	// "/docs"). Empty takes the path of site.url; "/" forces the root. Read it

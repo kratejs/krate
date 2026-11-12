@@ -498,6 +498,104 @@ export interface GoAPIConfig {
 }
 
 /** The full, type-checked Krate configuration surface. */
+export type AuthProviderId = string;
+
+export interface AuthProviderConfig {
+  id: AuthProviderId;
+  type?: "oauth" | "oidc" | "credentials" | "email" | "passkey";
+  name?: string;
+  enabled?: boolean;
+  options?: Record<string, unknown>;
+}
+
+export interface AuthSessionConfig {
+  strategy?: "jwt" | "database";
+  maxAge?: number;
+  updateAge?: number;
+}
+
+export interface AuthPagesConfig {
+  signIn?: string;
+  signOut?: string;
+  error?: string;
+  verifyRequest?: string;
+  newUser?: string;
+  twoFactor?: string;
+}
+
+export interface AuthCookiesConfig {
+  prefix?: string;
+  secure?: boolean;
+  sameSite?: "lax" | "strict" | "none";
+  domain?: string;
+}
+
+export interface AuthAdapterConfig {
+  dialect?: "sqlite" | "postgres" | "mysql";
+  tables?: Partial<
+    Record<"users" | "accounts" | "sessions" | "verificationTokens" | "authenticators" | "twoFactors", string>
+  >;
+}
+
+export interface AuthTwoFactorConfig {
+  enabled?: boolean;
+  required?: boolean;
+  issuer?: string;
+  digits?: 6 | 7 | 8;
+  period?: number;
+  algorithm?: "SHA1" | "SHA256" | "SHA512";
+  window?: number;
+  backupCodes?: number;
+}
+
+export interface AuthPasskeysConfig {
+  enabled?: boolean;
+  rpName?: string;
+  rpId?: string;
+  origins?: string[];
+  userVerification?: "required" | "preferred" | "discouraged";
+  residentKey?: "required" | "preferred" | "discouraged";
+  attestation?: "none" | "indirect" | "direct" | "enterprise";
+  timeout?: number;
+}
+
+export interface AuthProtectRule {
+  source: string;
+  roles?: string[];
+  redirect?: string;
+  status?: 401 | 403 | 404;
+}
+
+export interface AuthRateLimitConfig {
+  enabled?: boolean;
+  max?: number;
+  window?: number;
+}
+
+export interface AuthRedirectsConfig {
+  signedIn?: string;
+  signedOut?: string;
+  allowed?: string[];
+}
+
+export interface AuthConfig {
+  enabled?: boolean;
+  basePath?: string;
+  trustHost?: boolean;
+  debug?: boolean;
+  providers?: AuthProviderConfig[];
+  session?: AuthSessionConfig;
+  pages?: AuthPagesConfig;
+  cookies?: AuthCookiesConfig;
+  adapter?: AuthAdapterConfig;
+  twoFactor?: AuthTwoFactorConfig;
+  passkeys?: AuthPasskeysConfig;
+  protect?: AuthProtectRule[];
+  rateLimit?: AuthRateLimitConfig;
+  redirects?: AuthRedirectsConfig;
+  linking?: { automatic?: boolean };
+}
+
 export interface KrateConfig {
   entry?: string;
   outDir?: string;
@@ -589,6 +687,7 @@ export interface KrateConfig {
   images?: ImagesConfig;
   /** Deploy adapter + options (`krate deploy`). */
   deploy?: DeployConfig;
+  auth?: AuthConfig;
   /** Build-time precompression. */
   compress?: CompressConfig;
   /** Browser compatibility output mode. */

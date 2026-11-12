@@ -218,6 +218,12 @@ func (c *Config) Validate() (warnings []string, err error) {
 		}
 	}
 
+	authWarnings, authErr := c.Auth.validate()
+	if authErr != nil {
+		return nil, authErr
+	}
+	warnings = append(warnings, authWarnings...)
+
 	if c.SSR.RendererPort != 0 && c.SSR.RendererPort == c.DevServer.Port {
 		warnings = append(warnings, "ssr.rendererPort equals devServer.port; choose a distinct port")
 	}
