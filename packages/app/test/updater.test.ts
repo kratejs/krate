@@ -47,6 +47,22 @@ describe("updater", () => {
     expect(seen.map((s) => s.id)).toEqual(["krate/updater.apply", "krate/updater.relaunch"]);
   });
 
+  it("markHealthy, status, ackRollback and setChannel call their ids", async () => {
+    const status = { version: "1.0.0", channel: "stable", unconfirmed: false, rollback: { failed: "1.1.0", restored: "1.0.0", reason: "x", at: "2026-01-01T00:00:00Z" } };
+    const { seen } = installFakeHost({
+      "krate/updater.markHealthy": () => null,
+      "krate/updater.status": () => status,
+      "krate/updater.ackRollback": () => null,
+      "krate/updater.setChannel": () => null,
+    });
+    await updater.markHealthy();
+    expect(await updater.status()).toEqual(status);
+    await updater.ackRollback();
+    await updater.setChannel("beta");
+    expect(seen.map((s) => s.id)).toEqual(["krate/updater.markHealthy", "krate/updater.status", "krate/updater.ackRollback", "krate/updater.setChannel"]);
+    expect(seen[3].args).toEqual(["beta"]);
+  });
+
   it("update runs check, download and apply, and skips both when up to date", async () => {
     let answer: unknown = info;
     const { seen } = installFakeHost({

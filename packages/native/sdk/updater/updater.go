@@ -5,10 +5,19 @@
 // The flow is check, download (a progress stream), apply, relaunch. The feed
 // URL and the public key come from native.updater in the app configuration,
 // through app.json. Go host code can call package updater directly.
+//
+// After an applied update the new version has to confirm a healthy start:
+// the shell does so a few seconds after the first page was served, or the app
+// calls markHealthy (native.updater.confirm "app"). A version that crashes or
+// does not confirm is rolled back at the next launch (see Boot).
 package sdkupdater
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 
@@ -25,7 +34,26 @@ import (
 type Config struct {
 	URL       string
 	PublicKey string
+	// Channel fills {channel} in URL; default "stable".
+	Channel string
+	// MaxStarts is how many starts a new version gets to confirm before the
+	// next launch restores the previous one; default 1.
+	MaxStarts int
+	// HealthTimeout is the seconds a start may take to confirm; default 60.
+	HealthTimeout int
+	// ManualConfirm switches off the shell's automatic confirmation: the app
+	// calls markHealthy itself.
+	ManualConfirm bool
 }
+
+// GraceEnv names an environment variable that sets the milliseconds between
+// the first page being served and the automatic confirmation (default 3000).
+// CI and tests use it.
+const GraceEnv = "KRATE_UPDATER_HEALTH_GRACE_MS"
+
+// NoRelaunchEnv, when "1", makes a rollback restore the files without
+// starting the previous version (CI uses it to inspect the result).
+const NoRelaunchEnv = "KRATE_UPDATER_ROLLBACK_NO_RELAUNCH"
 
 var (
 	mu      sync.Mutex
@@ -33,6 +61,8 @@ var (
 	pending *updater.Update
 	busy    bool
 	quit    func()
+	guard   *updater.Guard
+	served  bool
 
 	// allowHTTP lets tests use an httptest server.
 	allowHTTP bool
@@ -52,6 +82,8 @@ func Configure(c Config) {
 	mu.Lock()
 	cfg = c
 	pending = nil
+	guard = nil
+	served = false
 	mu.Unlock()
 	if c.URL != "" {
 		go updater.CleanupStale("")
@@ -81,7 +113,108 @@ func current() (updater.Config, error) {
 	if err != nil {
 		return updater.Config{}, err
 	}
-	return updater.Config{URL: c.URL, PublicKey: c.PublicKey, AppID: app.ID, Version: app.Version, CacheDir: cache, Insecure: allowHTTP}, nil
+	state, err := stateDir()
+	if err != nil {
+		return updater.Config{}, err
+	}
+	return updater.Config{
+		URL: c.URL, PublicKey: c.PublicKey, AppID: app.ID, Version: app.Version, CacheDir: cache, Insecure: allowHTTP,
+		Channel: c.Channel, StateDir: state,
+		Logf: func(f string, a ...any) { fmt.Fprintf(os.Stderr, "krate: "+f+"\n", a...) },
+	}, nil
+}
+
+// stateDir is where the install id, the rollback state and the chosen
+// channel live: <app data dir>/updater.
+func stateDir() (string, error) {
+	d, err := sdkos.AppDataDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(d, "updater"), nil
+}
+
+// Boot runs the first-start protection of an updated app; the shell calls it
+// right after the SDK is configured. When the previous start of a freshly
+// updated version never confirmed, Boot restores the previous version, starts
+// it and exits this process. Otherwise it arms the watchdog of an unconfirmed
+// start. logf may be nil.
+func Boot(logf func(format string, args ...any)) {
+	mu.Lock()
+	c := cfg
+	mu.Unlock()
+	if c.URL == "" || c.PublicKey == "" {
+		return
+	}
+	app, err := sdkos.Current()
+	if err != nil {
+		return
+	}
+	dir, err := stateDir()
+	if err != nil {
+		return
+	}
+	if logf == nil {
+		logf = func(string, ...any) {}
+	}
+	res, err := updater.Boot(updater.BootConfig{
+		StateDir: dir, Version: app.Version, MaxStarts: c.MaxStarts,
+		Timeout: time.Duration(c.HealthTimeout) * time.Second, Logf: logf,
+	})
+	if err != nil {
+		logf("updater: %v", err)
+	}
+	if res.RolledBack != nil {
+		if os.Getenv(NoRelaunchEnv) != "1" && res.Restart != "" {
+			if err := updater.RelaunchPath(res.Restart); err != nil {
+				logf("updater: %v", err)
+				return
+			}
+		}
+		exit(0)
+		return
+	}
+	mu.Lock()
+	guard = res.Guard
+	mu.Unlock()
+}
+
+// PageServed tells the updater the app's first page was requested. Unless the
+// app confirms by itself it is marked healthy after a short grace period, so
+// a crash right after the window opened still counts as a failed start.
+func PageServed() {
+	mu.Lock()
+	if served || guard == nil || cfg.ManualConfirm {
+		mu.Unlock()
+		return
+	}
+	served = true
+	mu.Unlock()
+	grace := 3 * time.Second
+	if v, err := strconv.Atoi(os.Getenv(GraceEnv)); err == nil && v >= 0 {
+		grace = time.Duration(v) * time.Millisecond
+	}
+	time.AfterFunc(grace, func() { _ = MarkHealthy() })
+}
+
+// CleanExit tells the updater the app is quitting normally. If its first page
+// was served, a quick quit counts as a healthy start.
+func CleanExit() {
+	mu.Lock()
+	ok := served && !cfg.ManualConfirm
+	mu.Unlock()
+	if ok {
+		_ = MarkHealthy()
+	}
+}
+
+// MarkHealthy confirms that this version started fine: the previous version
+// kept for rollback is deleted. Harmless when nothing is pending.
+func MarkHealthy() error {
+	mu.Lock()
+	g := guard
+	mu.Unlock()
+	return g.MarkHealthy()
 }
 
 func wrap(err error) error {
@@ -135,6 +268,10 @@ func Register(r *scheme.Registry, set permission.Set) {
 		idDownload = "krate/updater.download"
 		idApply    = "krate/updater.apply"
 		idRelaunch = "krate/updater.relaunch"
+		idHealthy  = "krate/updater.markHealthy"
+		idStatus   = "krate/updater.status"
+		idAck      = "krate/updater.ackRollback"
+		idChannel  = "krate/updater.setChannel"
 	)
 	noArgs := func(id string, args *wire.Decoder) error {
 		a, err := glue.Open(id, args)
@@ -165,6 +302,14 @@ func Register(r *scheme.Registry, set permission.Set) {
 		out.String(u.PubDate)
 		out.Key("size")
 		out.Int(u.Size)
+		out.Key("critical")
+		out.Bool(u.Critical)
+		out.Key("required")
+		out.Bool(u.Required)
+		out.Key("delta")
+		out.Bool(u.HasDelta())
+		out.Key("downloadSize")
+		out.Int(u.DownloadSize())
 		out.EndObject()
 		return nil
 	})
@@ -237,6 +382,93 @@ func Register(r *scheme.Registry, set permission.Set) {
 		return nil
 	})
 
+	permission.Register(r, set, idHealthy, func(ctx krate.Ctx, args *wire.Decoder, out *wire.Encoder) error {
+		if err := noArgs(idHealthy, args); err != nil {
+			return err
+		}
+		if err := MarkHealthy(); err != nil {
+			return wrap(err)
+		}
+		out.Null()
+		return nil
+	})
+
+	permission.Register(r, set, idStatus, func(ctx krate.Ctx, args *wire.Decoder, out *wire.Encoder) error {
+		if err := noArgs(idStatus, args); err != nil {
+			return err
+		}
+		c, err := current()
+		if err != nil {
+			return err
+		}
+		st := updater.LoadState(c.StateDir)
+		out.BeginObject()
+		out.Key("version")
+		out.String(c.Version)
+		out.Key("channel")
+		out.String(effectiveChannel(c, st))
+		out.Key("unconfirmed")
+		out.Bool(st.Phase == updater.PhasePending && st.To == c.Version)
+		out.Key("rollback")
+		if ev := st.Event; ev != nil {
+			out.BeginObject()
+			out.Key("failed")
+			out.String(ev.Failed)
+			out.Key("restored")
+			out.String(ev.Restored)
+			out.Key("reason")
+			out.String(ev.Reason)
+			out.Key("at")
+			out.String(ev.At.UTC().Format(time.RFC3339))
+			out.EndObject()
+		} else {
+			out.Null()
+		}
+		out.EndObject()
+		return nil
+	})
+
+	permission.Register(r, set, idAck, func(ctx krate.Ctx, args *wire.Decoder, out *wire.Encoder) error {
+		if err := noArgs(idAck, args); err != nil {
+			return err
+		}
+		c, err := current()
+		if err != nil {
+			return err
+		}
+		if err := updater.AckRollback(c.StateDir); err != nil {
+			return wrap(err)
+		}
+		out.Null()
+		return nil
+	})
+
+	permission.Register(r, set, idChannel, func(ctx krate.Ctx, args *wire.Decoder, out *wire.Encoder) error {
+		a, err := glue.Open(idChannel, args)
+		if err != nil {
+			return err
+		}
+		name, err := a.String("channel")
+		if err != nil {
+			return err
+		}
+		if err := a.Done(); err != nil {
+			return err
+		}
+		c, err := current()
+		if err != nil {
+			return err
+		}
+		if err := updater.SetChannel(c.StateDir, name); err != nil {
+			return krate.Errorf("bad_args", "%v", err)
+		}
+		mu.Lock()
+		pending = nil
+		mu.Unlock()
+		out.Null()
+		return nil
+	})
+
 	permission.Register(r, set, idRelaunch, func(ctx krate.Ctx, args *wire.Decoder, out *wire.Encoder) error {
 		if err := noArgs(idRelaunch, args); err != nil {
 			return err
@@ -259,4 +491,14 @@ func Register(r *scheme.Registry, set permission.Set) {
 		}()
 		return nil
 	})
+}
+
+func effectiveChannel(c updater.Config, st updater.State) string {
+	if st.Channel != "" {
+		return st.Channel
+	}
+	if c.Channel != "" {
+		return c.Channel
+	}
+	return updater.DefaultChannel
 }

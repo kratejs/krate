@@ -89,9 +89,14 @@ func Run(appDir string, opts RunOptions) error {
 	defer a.close()
 	defer a.startMemory()()
 	if opts.Browser {
-		return a.runBrowser()
+		err = a.runBrowser()
+	} else {
+		err = a.runNative()
 	}
-	return a.runNative()
+	if err == nil {
+		sdkupdater.CleanExit()
+	}
+	return err
 }
 
 // app is a loaded app directory.
@@ -158,13 +163,20 @@ func loadApp(dir string, fsys fs.FS, opts RunOptions) (*app, error) {
 		Strict: man.StrictPermissions,
 	}
 	if man.Updater != nil {
-		opt.UpdaterURL, opt.UpdaterPublicKey = man.Updater.URL, man.Updater.PublicKey
+		u := man.Updater
+		opt.UpdaterURL, opt.UpdaterPublicKey = u.URL, u.PublicKey
+		opt.UpdaterChannel, opt.UpdaterMaxStarts, opt.UpdaterHealthTimeout = u.Channel, u.MaxStarts, u.HealthTimeout
+		opt.UpdaterManualConfirm = u.Confirm == "app"
 	}
 	set, err := sdkall.Register(a.reg, opt)
 	if err != nil {
 		return nil, fmt.Errorf("shell: registering the SDK: %w", err)
 	}
 	a.perms = set
+	if man.Updater != nil && !opts.Dev {
+		// First-start protection: may restore the previous version and exit.
+		sdkupdater.Boot(opts.Logf)
+	}
 	// A request from a native view the shell cannot place gets this scope,
 	// which allows nothing; see identify.
 	if err := set.Scope(unknownView, []string{}); err != nil {
@@ -234,6 +246,7 @@ func loadApp(dir string, fsys fs.FS, opts RunOptions) (*app, error) {
 	extra := opts.ExtraHandler
 	a.handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		a.reaper.Touch()
+		sdkupdater.PageServed()
 		if opts.Dev && a.results.serve(w, r) {
 			return
 		}
