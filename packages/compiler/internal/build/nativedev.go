@@ -848,6 +848,9 @@ func (nd *nativeDev) rewriteHostManifest() error {
 		}
 		m.HostChildren = children
 	}
+	if err := nd.b.buildNativeProcs(nativeEffective(nd.b.Cfg), nd.appDir, NativeAppOptions{Dev: true}, &m, &NativeAppResult{}); err != nil {
+		return err
+	}
 	m.GoHost = nil
 	if g := nd.b.NativeGo(); g != nil && len(g.Glue) > 0 {
 		bin := filepath.Join("gohost", "krate-gohost")

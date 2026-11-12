@@ -73,10 +73,10 @@ func Rows() []Row { return table }
 // Shakeable lists the SDK areas a release build links only when they are
 // reachable (build tag krate_no_<area>). The areas os and permission are
 // always linked.
-var Shakeable = []string{"fs", "db", "kv", "net", "window", "dialog", "clipboard", "menu", "tray", "shortcut", "notify", "app", "updater", "badge", "screen", "power", "login", "crash"}
+var Shakeable = []string{"fs", "db", "kv", "net", "window", "dialog", "clipboard", "menu", "tray", "shortcut", "notify", "app", "updater", "badge", "screen", "power", "login", "crash", "port", "worker", "offscreen", "automation", "extension"}
 
 // needs lists, for an area, the areas its package imports.
-var needs = map[string][]string{"kv": {"db"}, "tray": {"menu"}, "shortcut": {"app"}}
+var needs = map[string][]string{"kv": {"db"}, "tray": {"menu"}, "shortcut": {"app"}, "worker": {"port"}}
 
 // Site is where a capability is used.
 type Site struct {
@@ -231,7 +231,7 @@ const (
 )
 
 // implied lists the permissions a name grants along with itself.
-var implied = map[string][]string{"fs": {"fs:read"}, "media:manage": {"media"}}
+var implied = map[string][]string{"fs": {"fs:read"}, "media:manage": {"media"}, "port": {"port:receive"}}
 
 func pruneImplied(perms []string) []string {
 	have := map[string]bool{}
