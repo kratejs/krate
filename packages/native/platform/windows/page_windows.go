@@ -783,21 +783,38 @@ const (
 	dataServiceWork   = 0x8000
 )
 
-// ClearSiteData removes cookies, caches and storage.
+// ClearSiteData removes cookies, caches and storage. Each kind is cleared by
+// its own ClearBrowsingData call with its own deadline, so a kind the runtime
+// never completes is named in the error and does not hold the others back.
 func (a *App) ClearSiteData(o caps.ClearSiteDataOptions) error {
-	var kinds uint32
 	all := o.Everything()
+	type part struct {
+		name  string
+		kinds uint32
+	}
+	var parts []part
 	if all || o.Cookies {
-		kinds |= dataCookies
+		parts = append(parts, part{"cookies", dataCookies})
 	}
 	if all || o.Cache {
-		kinds |= dataDiskCache
+		parts = append(parts, part{"disk cache", dataDiskCache})
 	}
 	if all || o.Storage {
-		kinds |= dataAllDOMStorage | dataServiceWork
+		parts = append(parts, part{"DOM storage", dataAllDOMStorage}, part{"service workers", dataServiceWork})
 	}
+	for _, p := range parts {
+		if err := a.clearKinds(o, p.kinds, p.name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// clearKinds runs one ClearBrowsingData call and waits for it.
+func (a *App) clearKinds(o caps.ClearSiteDataOptions, kinds uint32, name string) error {
 	done := make(chan error, 1)
 	var startErr error
+	fallback := false
 	a.callMain(func() {
 		wv := a.anyWebview()
 		if wv == nil {
@@ -806,7 +823,7 @@ func (a *App) ClearSiteData(o caps.ClearSiteDataOptions) error {
 		}
 		wv13 := queryInterface(wv, iidWV2_13)
 		if wv13 == nil {
-			startErr = a.clearWithoutProfile(o)
+			fallback = true
 			return
 		}
 		defer comRelease(wv13)
@@ -819,30 +836,42 @@ func (a *App) ClearSiteData(o caps.ClearSiteDataOptions) error {
 		defer comRelease(profile)
 		p2 := queryInterface(profile, iidWV2Profile2)
 		if p2 == nil {
-			startErr = a.clearWithoutProfile(o)
+			fallback = true
 			return
 		}
 		defer comRelease(p2)
 		h := newHandler(iidWV2ClearBrowsingDataCompletedHandler, true, func(hr, _ uintptr) uintptr {
 			if failed(hr) {
-				done <- fmt.Errorf("windows: ClearBrowsingData: 0x%08x", uint32(hr))
+				done <- fmt.Errorf("windows: ClearBrowsingData (%s): 0x%08x", name, uint32(hr))
 			} else {
 				done <- nil
 			}
 			return sOK
 		})
 		if hr := vcall(p2, profile2ClearData, uintptr(kinds), uintptr(h)); failed(hr) {
-			startErr = fmt.Errorf("windows: ClearBrowsingData: 0x%08x", uint32(hr))
+			startErr = fmt.Errorf("windows: ClearBrowsingData (%s): 0x%08x", name, uint32(hr))
 		}
 	})
+	if fallback {
+		// clearWithoutProfile is main-thread COM like the call above.
+		var err error
+		a.callMain(func() {
+			if kinds == dataCookies {
+				err = a.clearWithoutProfile(caps.ClearSiteDataOptions{Cookies: true})
+			} else {
+				err = a.clearWithoutProfile(o)
+			}
+		})
+		return err
+	}
 	if startErr != nil {
 		return startErr
 	}
 	select {
 	case err := <-done:
 		return err
-	case <-time.After(60 * time.Second):
-		return errors.New("windows: clearing site data did not finish in time")
+	case <-time.After(30 * time.Second):
+		return fmt.Errorf("windows: clearing %s did not finish in time", name)
 	}
 }
 
