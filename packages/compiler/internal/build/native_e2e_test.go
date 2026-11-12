@@ -221,6 +221,9 @@ func (s *e2eShell) next(timeout time.Duration) string {
 	case <-time.After(timeout):
 		// Show where the shell is stuck: its goroutine stacks go to stderr,
 		// which the test log already carries.
+		if s.cmd.Process != nil {
+			logNativeStacks(s.t, s.cmd.Process)
+		}
 		if s.cmd.Process != nil && dumpGoStacks(s.cmd.Process) {
 			select {
 			case <-s.done:

@@ -2,6 +2,7 @@ package build
 
 import (
 	"encoding/json"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -109,6 +110,23 @@ func TestNativeE2EProcsGUI(t *testing.T) {
 	}
 	if !got.Endpoint.Enabled || got.Endpoint.Kind == "" {
 		t.Errorf("automation endpoint = %+v", got.Endpoint)
+	}
+	// The endpoint really serves (the WebKit inspector page or the CDP
+	// version document) on the configured port; Safari's has no URL.
+	if got.Endpoint.Kind == "webkit-inspector" || got.Endpoint.Kind == "cdp" {
+		u := "http://127.0.0.1:19321/"
+		if got.Endpoint.Kind == "cdp" {
+			u += "json/version"
+		}
+		cl := &http.Client{Timeout: 10 * time.Second}
+		if resp, err := cl.Get(u); err != nil {
+			t.Errorf("the %s endpoint does not answer at %s: %v", got.Endpoint.Kind, u, err)
+		} else {
+			_ = resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				t.Errorf("the %s endpoint answered %s at %s", got.Endpoint.Kind, resp.Status, u)
+			}
+		}
 	}
 	if got.Endpoint.Kind != "cdp" && got.CDP != "unsupported" {
 		t.Errorf("cdp on a non-CDP engine = %q, want unsupported", got.CDP)
