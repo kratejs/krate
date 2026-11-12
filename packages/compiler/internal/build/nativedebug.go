@@ -44,9 +44,16 @@ type NativeDebugOptions struct {
 	Dlv string
 }
 
+// ErrDelveUnsupported is FindDlv's error on a platform Delve does not run on
+// (Windows on ARM).
+var ErrDelveUnsupported = errors.New("Delve does not support Windows on ARM (windows/arm64); debug the Go host on x64 or another OS")
+
 // FindDlv locates the Delve debugger: $KRATE_DLV, then PATH, then the go bin
 // directories, where `go install` puts it.
 func FindDlv() (string, error) {
+	if runtime.GOOS == "windows" && runtime.GOARCH == "arm64" {
+		return "", ErrDelveUnsupported
+	}
 	exe := "dlv"
 	if runtime.GOOS == "windows" {
 		exe += ".exe"

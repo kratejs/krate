@@ -392,8 +392,10 @@ jobs:
           cache: true
 
       # TestNativeDebugGoHost* drive a real dlv session; without dlv they
-      # skip, or fail under KRATE_REQUIRE_E2E.
+      # skip, or fail under KRATE_REQUIRE_E2E. Delve does not support Windows
+      # on ARM, where the tests skip (build.ErrDelveUnsupported).
       - name: Install Delve
+        if: ${{ !(runner.os == 'Windows' && runner.arch == 'ARM64') }}
         run: |
           go install github.com/go-delve/delve/cmd/dlv@latest
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"

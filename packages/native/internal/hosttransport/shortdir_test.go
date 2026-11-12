@@ -2,11 +2,15 @@ package hosttransport
 
 import (
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 )
 
 func TestShortSocketDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("socket paths only: Windows host children use loopback TCP, and HOME is not the home directory there")
+	}
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	d := ShortSocketDir("sdk.sock", 4096)

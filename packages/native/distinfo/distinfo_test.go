@@ -2,15 +2,18 @@ package distinfo
 
 import (
 	"errors"
+	"path/filepath"
 	"testing"
 )
 
 func env(goos string, vars map[string]string, files map[string]string) Env {
 	return Env{
 		Getenv: func(k string) string { return vars[k] },
-		Exists: func(p string) bool { _, ok := files[p]; return ok },
+		// The detector joins paths with the host's separator; the table is
+		// written with slashes.
+		Exists: func(p string) bool { _, ok := files[filepath.ToSlash(p)]; return ok },
 		ReadFile: func(p string) ([]byte, error) {
-			if s, ok := files[p]; ok {
+			if s, ok := files[filepath.ToSlash(p)]; ok {
 				return []byte(s), nil
 			}
 			return nil, errors.New("missing")

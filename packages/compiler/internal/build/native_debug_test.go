@@ -3,6 +3,7 @@ package build
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -33,6 +34,9 @@ import (
 func e2eRequireDlv(t *testing.T) string {
 	t.Helper()
 	dlv, err := FindDlv()
+	if errors.Is(err, ErrDelveUnsupported) {
+		t.Skip(err)
+	}
 	if err != nil {
 		requireE2E(t, "%v", err)
 	}
