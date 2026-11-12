@@ -110,9 +110,16 @@ export interface Session {
   [key: string]: unknown;
 }
 
+export interface EndpointContext {
+  tokens: OAuthTokens;
+  provider: OAuthConfig;
+  fetch: typeof fetch;
+}
+
 export interface Endpoint {
   url?: string;
   params?: Record<string, string>;
+  request?: (context: EndpointContext) => Awaitable<Record<string, any>>;
 }
 
 export interface OAuthConfig {

@@ -1,11 +1,13 @@
 import { AuthError, createContext, type RequestContext, type ResolvedConfig } from "./config";
 import { ResponseCookies } from "./cookies";
 import { createCsrfToken, verifyCsrfCookie } from "./crypto";
+import { finishEmail, startEmail } from "./email-flow";
+import { finishOAuth, startOAuth } from "./oauth-flow";
 import { errorPage, signInPage, signOutPage, providerSummary, verifyRequestPage, twoFactorPage } from "./pages";
 import { errorRedirect, isJsonClient, jsonResponse, redirectResponse, sanitizeRedirect } from "./redirect";
 import { readSession, requestCookies } from "./session";
 import { assertCsrf, handleCredentials, handleSignOut, parseBody, resolveCallbackUrl } from "./signin";
-import type { CredentialsConfig } from "./types";
+import type { CredentialsConfig, EmailConfig, OAuthConfig } from "./types";
 
 export type RouteHandler = (ctx: RequestContext, segments: string[]) => Promise<Response | null>;
 
@@ -112,9 +114,9 @@ async function route(ctx: RequestContext, segments: string[]): Promise<Response 
         const provider = config.providers.find((p) => p.id === id);
         if (!provider) return errorRedirect(ctx, "Configuration");
         if (provider.type === "credentials") return null;
-        const handler = signInStarters.get(provider.type);
-        if (!handler) return errorRedirect(ctx, "Configuration");
-        return handler(ctx, provider);
+        if (provider.type === "email") return startEmail(ctx, provider as EmailConfig);
+        if (provider.type === "oauth" || provider.type === "oidc") return startOAuth(ctx, provider as OAuthConfig);
+        return errorRedirect(ctx, "Configuration");
       }
       return null;
     }
@@ -126,9 +128,9 @@ async function route(ctx: RequestContext, segments: string[]): Promise<Response 
         if (method !== "POST") return null;
         return handleCredentials(ctx, provider as CredentialsConfig);
       }
-      const handler = callbackHandlers.get(provider.type);
-      if (!handler) return errorRedirect(ctx, "Configuration");
-      return handler(ctx, provider);
+      if (provider.type === "email") return finishEmail(ctx, provider as EmailConfig);
+      if (provider.type === "oauth" || provider.type === "oidc") return finishOAuth(ctx, provider as OAuthConfig);
+      return errorRedirect(ctx, "Configuration");
     }
     case "signout": {
       if (method === "GET") {
@@ -160,9 +162,5 @@ async function route(ctx: RequestContext, segments: string[]): Promise<Response 
       return null;
   }
 }
-
-type ProviderHandler = (ctx: RequestContext, provider: any) => Promise<Response>;
-export const signInStarters = new Map<string, ProviderHandler>();
-export const callbackHandlers = new Map<string, ProviderHandler>();
 
 export { parseBody };
