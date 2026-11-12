@@ -510,6 +510,12 @@ func zoomShortcuts(t *testing.T, w *Window, v caps.ViewRef) {
 	if !key {
 		t.Skip("the window did not become the key window; the View menu acts on one")
 	}
+	// The menu zooms the view with the keyboard focus, and the view the test
+	// added last took it.
+	if err := w.FocusView(v); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond)
 	// By title: AppKit inserts "Show Tab Bar" and "Show All Tabs" at the top of
 	// a menu titled View once window tabbing is on, which shifts the indexes.
 	item := func(title string) {
