@@ -181,3 +181,36 @@ func TestPlatformNotifyAvailability(t *testing.T) {
 		t.Errorf("Send while unavailable = %v", err)
 	}
 }
+
+// A click that started the app arrives before the page has subscribed; it
+// must be held until the first subscriber (Windows toast activation).
+func TestPlatformNotifyLaunchEventWaitsForSubscriber(t *testing.T) {
+	d, h := newDesktopRig(t)
+	d.EmitNotify(caps.NotifyEvent{ID: "cold", Action: "open", Launch: true})
+	d.EmitNotify(caps.NotifyEvent{ID: "plain"}) // not a launch event: dropped without a subscriber
+
+	var mu sync.Mutex
+	var evs []notify.Event
+	cancel, err := notify.OnEvent(func(e notify.Event) { mu.Lock(); evs = append(evs, e); mu.Unlock() })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cancel()
+	waitHost(t, h, "notify")
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		c := len(evs)
+		mu.Unlock()
+		if c >= 1 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	time.Sleep(50 * time.Millisecond)
+	mu.Lock()
+	defer mu.Unlock()
+	if len(evs) != 1 || evs[0].ID != "cold" || evs[0].Action != "open" {
+		t.Errorf("events = %+v, want only the launch click", evs)
+	}
+}

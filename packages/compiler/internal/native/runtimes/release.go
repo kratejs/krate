@@ -289,7 +289,16 @@ func DenoCompileArgs(target Target, perms []string, entry, exe string) ([]string
 		return nil, err
 	}
 	args := []string{"compile", "--target", t, "--output", exe}
-	args = append(args, DenoFlags(perms, false)...)
+	for _, f := range DenoFlags(perms, false) {
+		// A compiled executable cannot name the socket it will listen on, and
+		// listening on a unix socket needs network access in recent Deno
+		// versions, so a target that uses sockets gets plain --allow-net.
+		// Windows uses loopback TCP.
+		if f == "--allow-net="+LoopbackHost && target.OS != "windows" {
+			f = "--allow-net"
+		}
+		args = append(args, f)
+	}
 	return append(args, entry), nil
 }
 

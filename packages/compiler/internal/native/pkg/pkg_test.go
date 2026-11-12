@@ -274,7 +274,7 @@ func TestMSIXStructure(t *testing.T) {
 	manifest := string(read(byName["AppxManifest.xml"]))
 	for _, want := range []string{
 		`Name="com.acme.notes"`, `Publisher="CN=Acme Inc"`, `Version="1.2.0.0"`, `ProcessorArchitecture="arm64"`,
-		`Executable="Acme Notes.exe"`, `EntryPoint="Windows.FullTrustApplication"`, `<uap:Protocol Name="acme-dev">`,
+		`Executable="Acme Notes.exe"`, `EntryPoint="Windows.FullTrustApplication"`, `<uap3:Protocol Name="acme-dev" Parameters="&quot;%1&quot;">`,
 		`windows.protocol`, `runFullTrust`, `Square150x150Logo="Assets\Square150x150Logo.png"`,
 	} {
 		if !strings.Contains(manifest, want) {

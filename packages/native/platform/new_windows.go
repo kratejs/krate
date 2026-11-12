@@ -3,6 +3,9 @@
 package platform
 
 import (
+	"errors"
+	"os"
+
 	winplat "github.com/kratejs/krate/packages/native/platform/windows"
 )
 
@@ -20,6 +23,11 @@ func New(opts Options) (App, error) {
 		Memory:    mem,
 		Features:  feat,
 	})
+	if errors.Is(err, winplat.ErrActivationForwarded) {
+		// A notification click started this process and the running instance
+		// has it; there is nothing left to do.
+		os.Exit(0)
+	}
 	if err != nil {
 		return nil, err
 	}

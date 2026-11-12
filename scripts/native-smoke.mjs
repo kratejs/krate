@@ -4,8 +4,8 @@
 //
 //   node scripts/native-smoke.mjs <linux|macos|windows> <step>
 //
-//   linux    prepare deb rpm appimage update
-//   macos    prepare dmg update
+//   linux    prepare deb rpm appimage update sign
+//   macos    prepare dmg update sign
 //   windows  cert prepare nsis msix update
 //
 // "prepare" builds examples/native-tasks twice with `krate native build
@@ -15,6 +15,14 @@
 // page (the release executable's --browser mode prints the URL; a window is
 // opened too when a display exists), then update A to B through the real
 // updater package against a local HTTP feed.
+//
+// The "sign" steps sign for real with throwaway keys made in the job and
+// verify the result with the platform's own tool: gpg --verify on Linux, a
+// self-signed identity in a temporary keychain and codesign --verify --deep
+// --strict on macOS. Windows signs in "prepare" with a self-signed certificate
+// from the "cert" step (trusted in the job) and verifies with signtool verify
+// /pa and Get-AuthenticodeSignature. Notarization is not tested: it needs an
+// Apple Developer account (see docs/native/signing).
 //
 // Environment: SMOKE_WORK (work directory, default $RUNNER_TEMP/native-smoke),
 // KRATE_REQUIRE_E2E (a missing optional tool fails instead of skipping).
@@ -63,6 +71,18 @@ function run(cmd, args, o = {}) {
   if (r.error) throw r.error;
   if (r.status !== 0 && !o.allowFail) throw new Error(`${cmd} exited with ${r.status}`);
   return r;
+}
+
+// runBoth runs a command and returns its stdout and stderr together (codesign
+// writes its report to stderr).
+function runBoth(cmd, args, o = {}) {
+  log(`+ ${cmd} ${args.map(quote).join(' ')}`);
+  const r = spawnSync(cmd, args, { cwd: o.cwd, env: { ...process.env, ...o.env }, encoding: 'utf8', maxBuffer: 64 << 20 });
+  if (r.error) throw r.error;
+  const text = (r.stdout || '') + (r.stderr || '');
+  log(text.trimEnd());
+  if (r.status !== 0 && !o.allowFail) throw new Error(`${cmd} exited with ${r.status}`);
+  return { status: r.status, text };
 }
 
 // runAsync is run for callers that must keep the event loop alive (the local
@@ -399,12 +419,126 @@ async function linux(step) {
       await launchCheck(exe, { version: versionB, window: false });
       return;
     }
+    case 'sign':
+      return linuxSign();
     default:
       fail(`unknown linux step ${step}`);
   }
 }
 
+// linuxSign signs the packages of "prepare" with a freshly generated gpg key
+// through `krate native sign --gpg-key` and checks every detached signature
+// with gpg --verify, and that a changed file fails.
+async function linuxSign() {
+  if (!which('gpg')) return skipOrFail('gpg is not installed');
+  const home = path.join(work, 'gnupg');
+  fs.rmSync(home, { recursive: true, force: true });
+  fs.mkdirSync(home, { recursive: true, mode: 0o700 });
+  const env = { GNUPGHOME: home };
+  const batch = path.join(work, 'gpg-batch.txt');
+  fs.writeFileSync(batch, '%no-protection\nKey-Type: RSA\nKey-Length: 3072\nName-Real: Krate CI\nName-Email: ci@krate.invalid\nExpire-Date: 1d\n%commit\n');
+  run('gpg', ['--batch', '--gen-key', batch], { env });
+  const colons = run('gpg', ['--batch', '--list-secret-keys', '--with-colons'], { env, capture: true }).stdout;
+  const fpr = /^fpr:+([0-9A-F]{40}):/m.exec(colons)?.[1];
+  if (!fpr) fail(`no key fingerprint in:\n${colons}`);
+  ensureKrate();
+  const out = path.join(work, 'A');
+  for (const f of walk(path.join(out, 'packages'))) if (f.endsWith('.asc')) fs.rmSync(f);
+  withConfig(versionA, () =>
+    run(krateBin, ['native', 'sign', exampleDir, '--out', out, '--gpg-key', fpr], { env: { GOWORK: 'off', KRATE_UPDATER_PRIVATE_KEY_FILE: keyFile, ...env } }),
+  );
+  const signed = walk(path.join(out, 'packages')).filter((p) => /\.(deb|rpm|tar\.gz|AppImage)$/.test(p));
+  if (signed.length === 0) fail('no packages to check; run prepare first');
+  for (const f of signed) {
+    if (!fs.existsSync(`${f}.asc`)) fail(`no signature next to ${path.basename(f)}`);
+    const r = run('gpg', ['--batch', '--verify', `${f}.asc`, f], { env, allowFail: true });
+    if (r.status !== 0) fail(`gpg --verify rejected ${path.basename(f)}`);
+  }
+  // A changed file must not verify.
+  const victim = signed[0];
+  const copy = path.join(work, 'tampered-' + path.basename(victim));
+  const data = fs.readFileSync(victim);
+  data[data.length >> 1] ^= 0xff;
+  fs.writeFileSync(copy, data);
+  const bad = run('gpg', ['--batch', '--verify', `${victim}.asc`, copy], { env, allowFail: true });
+  if (bad.status === 0) fail('gpg verified a tampered package');
+  log(`signed and verified ${signed.length} packages with key ${fpr}`);
+}
+
 // ---------------------------------------------------------------- macos
+
+// macSelfSigned creates a code-signing identity in a temporary keychain: a
+// self-signed certificate (openssl) imported into a new keychain that is put
+// on the search list. It returns the identity's SHA-1 hash and a cleanup
+// function.
+function macSelfSigned() {
+  const dir = path.join(work, 'macos-identity');
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(dir, { recursive: true });
+  const kc = path.join(dir, 'krate-ci.keychain-db');
+  const pw = 'krate-ci-' + Math.random().toString(36).slice(2);
+  const conf = path.join(dir, 'openssl.cnf');
+  fs.writeFileSync(
+    conf,
+    '[req]\ndistinguished_name=dn\nx509_extensions=ext\nprompt=no\n[dn]\nCN=Krate CI Signing\n[ext]\nbasicConstraints=critical,CA:false\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=critical,codeSigning\n',
+  );
+  const key = path.join(dir, 'ci.key');
+  const crt = path.join(dir, 'ci.crt');
+  const p12 = path.join(dir, 'ci.p12');
+  // /usr/bin/openssl is LibreSSL, whose PKCS#12 output (3DES) is what
+  // `security import` reads; OpenSSL 3 from Homebrew writes AES it cannot.
+  const ossl = fs.existsSync('/usr/bin/openssl') ? '/usr/bin/openssl' : 'openssl';
+  run(ossl, ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '2', '-config', conf, '-keyout', key, '-out', crt]);
+  run(ossl, ['pkcs12', '-export', '-inkey', key, '-in', crt, '-out', p12, '-passout', `pass:${pw}`]);
+  const before = run('security', ['list-keychains', '-d', 'user'], { capture: true }).stdout.split('\n').map((l) => l.trim().replace(/^"|"$/g, '')).filter(Boolean);
+  run('security', ['create-keychain', '-p', pw, kc]);
+  run('security', ['set-keychain-settings', '-lut', '3600', kc]);
+  run('security', ['unlock-keychain', '-p', pw, kc]);
+  run('security', ['import', p12, '-k', kc, '-P', pw, '-T', '/usr/bin/codesign', '-T', '/usr/bin/security']);
+  run('security', ['set-key-partition-list', '-S', 'apple-tool:,apple:,codesign:', '-s', '-k', pw, kc]);
+  run('security', ['list-keychains', '-d', 'user', '-s', kc, ...before]);
+  // Trusting a self-signed root needs user interaction on some systems; the
+  // signature is made and verified without it, so a failure here is fine.
+  run('security', ['add-trusted-cert', '-r', 'trustRoot', '-p', 'codeSign', '-k', kc, crt], { allowFail: true });
+  const found = run('security', ['find-identity', '-p', 'codesigning', kc], { capture: true }).stdout;
+  const hash = /^\s*\d+\)\s+([0-9A-F]{40})\s+"Krate CI Signing"/m.exec(found)?.[1];
+  if (!hash) fail(`the self-signed identity was not found in the keychain:\n${found}`);
+  return {
+    hash,
+    cleanup() {
+      run('security', ['list-keychains', '-d', 'user', '-s', ...before], { allowFail: true });
+      run('security', ['delete-keychain', kc], { allowFail: true });
+    },
+  };
+}
+
+async function macosSign(app, label) {
+  // Ad hoc: what `--sign` without an identity does. Runs here, trusted nowhere.
+  const adhoc = runBoth('codesign', ['-dvv', app], { allowFail: true });
+  if (!/Signature=adhoc/.test(adhoc.text)) fail(`the ad hoc signed ${label} is not ad hoc signed:\n${adhoc.text}`);
+  runBoth('codesign', ['--verify', '--deep', '--strict', '--verbose=2', app]);
+
+  // A self-signed identity from a temporary keychain.
+  const id = macSelfSigned();
+  try {
+    buildPackages('S', versionA, ['app', 'zip'], ['--sign', '--identity', id.hash]);
+    const signedApp = walk(path.join(work, 'S', 'packages')).find((p) => p.endsWith(`${productName}.app${path.sep}Contents${path.sep}Info.plist`));
+    if (!signedApp) fail('the self-signed build produced no .app');
+    const bundle = path.dirname(path.dirname(signedApp));
+    runBoth('codesign', ['--verify', '--deep', '--strict', '--verbose=2', bundle]);
+    const info = runBoth('codesign', ['-dvv', bundle]);
+    if (/Signature=adhoc/.test(info.text)) fail(`the app signed with the identity is still ad hoc signed:\n${info.text}`);
+    if (!/Authority=Krate CI Signing/.test(info.text)) fail(`the signature does not name the self-signed identity:\n${info.text}`);
+    // Changing a file inside the bundle must break --strict verification.
+    const victim = path.join(bundle, 'Contents', 'Info.plist');
+    fs.appendFileSync(victim, '\n<!-- tampered -->\n');
+    const bad = runBoth('codesign', ['--verify', '--deep', '--strict', bundle], { allowFail: true });
+    if (bad.status === 0) fail('codesign verified a tampered bundle');
+    log('ad hoc and self-signed signatures verified');
+  } finally {
+    id.cleanup();
+  }
+}
 
 async function macos(step) {
   const installDir = path.join(work, 'install-macos');
@@ -434,7 +568,7 @@ async function macos(step) {
       }
       const app = path.join(installDir, appName);
       run('codesign', ['--verify', '--deep', '--strict', '--verbose=2', app]);
-      run('codesign', ['-dv', '--verbose=2', app], { allowFail: true });
+      runBoth('codesign', ['-dvv', app], { allowFail: true });
       run('plutil', ['-p', path.join(app, 'Contents', 'Info.plist')]);
       await launchCheck(appExe(installDir), { version: versionA });
       return;
@@ -444,6 +578,12 @@ async function macos(step) {
       await updateFlow({ exe: appExe(installDir), feedDir: path.join(work, 'B', 'packages') });
       run('codesign', ['--verify', '--deep', '--strict', path.join(installDir, appName)], { allowFail: true });
       await launchCheck(appExe(installDir), { version: versionB });
+      return;
+    }
+    case 'sign': {
+      const app = path.join(installDir, appName);
+      if (!fs.existsSync(app)) fail(`run the dmg step first: ${app} is missing`);
+      await macosSign(app, appName);
       return;
     }
     default:
@@ -460,8 +600,14 @@ function signtoolDir() {
   for (const r of roots) {
     if (!fs.existsSync(r)) continue;
     for (const v of fs.readdirSync(r)) {
-      const d = path.join(r, v, 'x64');
-      if (fs.existsSync(path.join(d, 'signtool.exe'))) found.push(d);
+      // An ARM64 runner runs x64 tools through emulation; prefer the native one.
+      for (const arch of process.arch === 'arm64' ? ['arm64', 'x64'] : ['x64']) {
+        const d = path.join(r, v, arch);
+        if (fs.existsSync(path.join(d, 'signtool.exe'))) {
+          found.push(d);
+          break;
+        }
+      }
     }
   }
   found.sort();
@@ -585,6 +731,13 @@ async function windows(step) {
 }
 
 function verifySignature(file) {
+  // signtool verify /pa checks the Authenticode chain against the machine's
+  // trust store (the "cert" step trusted the throwaway root); the PowerShell
+  // check reads the same signature through a second implementation.
+  const d = signtoolDir();
+  const tool = which('signtool') || (d ? path.join(d, 'signtool.exe') : '');
+  if (tool) run(tool, ['verify', '/pa', '/v', file]);
+  else skipOrFail('signtool was not found; only Get-AuthenticodeSignature checked the signature');
   ps(
     `$s = Get-AuthenticodeSignature -FilePath '${file}'; Write-Output ($s.Status.ToString() + ' ' + $s.SignerCertificate.Subject); if ($s.Status -ne 'Valid') { throw ('not validly signed: ' + $s.Status) }`,
   );

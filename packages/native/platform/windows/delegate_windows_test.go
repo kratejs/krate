@@ -88,12 +88,14 @@ func TestToastXMLAcceptedByWinRT(t *testing.T) {
 		{},
 	}
 	for _, n := range cases {
-		doc, err := toastDocument(buildToastXML(n, fileURI(`C:\Program Files\App\icon.png`)))
-		if err != nil {
-			t.Errorf("notification %+v: %v", n, err)
-			continue
+		for _, scheme := range []string{"", "krate-toast-0123456789ab"} {
+			doc, err := toastDocument(buildToastXMLFor(n, fileURI(`C:\Program Files\App\icon.png`), scheme))
+			if err != nil {
+				t.Errorf("notification %+v (scheme %q): %v", n, scheme, err)
+				continue
+			}
+			comRelease(doc)
 		}
-		comRelease(doc)
 	}
 	if doc, err := toastDocument("<toast><unclosed>"); err == nil {
 		comRelease(doc)

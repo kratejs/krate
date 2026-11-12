@@ -25,7 +25,7 @@ func Probe() probe.Info {
 		}
 	} else {
 		wv.Error = "the WebView2 Runtime is not installed"
-		wv.Hint = "install the Evergreen runtime from " + bootstrapperURL + " (it ships with Windows 11 and current Microsoft Edge), or ship WebView2Loader.dll next to the executable"
+		wv.Hint = "install the Evergreen runtime from " + webview2DownloadPage + " (it ships with Windows 11 and current Microsoft Edge), or ship WebView2Loader.dll next to the executable"
 	}
 	info.Webview = wv
 	info.Display = probe.Display{Available: true, Detail: "desktop session (not probed)"}

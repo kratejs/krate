@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
+	"github.com/kratejs/krate/packages/native/toastscheme"
 )
 
 // blockSize is the unit of the MSIX block map.
@@ -74,8 +75,9 @@ func AppxManifest(m Metadata, p Payload) []byte {
 	w(`<?xml version="1.0" encoding="UTF-8"?>`)
 	w(`<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"`)
 	w(`         xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"`)
+	w(`         xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"`)
 	w(`         xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"`)
-	w(`         IgnorableNamespaces="uap rescap">`)
+	w(`         IgnorableNamespaces="uap uap3 rescap">`)
 	w(`  <Identity Name="%s" Publisher="%s" Version="%s" ProcessorArchitecture="%s"/>`,
 		xmlEscape(msixIdentityName(m.AppID)), xmlEscape(msixPublisher(m.Publisher)), v.msix(), arch)
 	w(`  <Properties>`)
@@ -93,17 +95,19 @@ func AppxManifest(m Metadata, p Payload) []byte {
 	w(`    <Application Id="App" Executable="%s" EntryPoint="Windows.FullTrustApplication">`, xmlEscape(winExeName(m)))
 	w(`      <uap:VisualElements DisplayName="%s" Description="%s" BackgroundColor="transparent"`, xmlEscape(m.ProductName), xmlEscape(m.ProductName))
 	w(`                          Square150x150Logo="Assets\Square150x150Logo.png" Square44x44Logo="Assets\Square44x44Logo.png"/>`)
-	if len(m.DeepLinks) > 0 {
-		w(`      <Extensions>`)
-		for _, s := range m.DeepLinks {
-			w(`        <uap:Extension Category="windows.protocol">`)
-			w(`          <uap:Protocol Name="%s">`, xmlEscape(s))
-			w(`            <uap:DisplayName>%s</uap:DisplayName>`, xmlEscape(m.ProductName))
-			w(`          </uap:Protocol>`)
-			w(`        </uap:Extension>`)
-		}
-		w(`      </Extensions>`)
+	// Protocols: the deep link schemes and the scheme a notification click
+	// launches (package toastscheme). uap3:Protocol with Parameters is what
+	// hands the URL to a full-trust executable on its command line.
+	schemes := append(append([]string(nil), m.DeepLinks...), toastscheme.Scheme(m.AppID))
+	w(`      <Extensions>`)
+	for _, s := range schemes {
+		w(`        <uap3:Extension Category="windows.protocol" EntryPoint="Windows.FullTrustApplication" Executable="%s">`, xmlEscape(winExeName(m)))
+		w(`          <uap3:Protocol Name="%s" Parameters="&quot;%%1&quot;">`, xmlEscape(s))
+		w(`            <uap:DisplayName>%s</uap:DisplayName>`, xmlEscape(m.ProductName))
+		w(`          </uap3:Protocol>`)
+		w(`        </uap3:Extension>`)
 	}
+	w(`      </Extensions>`)
 	w(`    </Application>`)
 	w(`  </Applications>`)
 	w(`  <Capabilities>`)

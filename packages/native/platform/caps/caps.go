@@ -249,6 +249,10 @@ type NotifyEvent struct {
 	ID     string // the Notification.ID
 	Action string // action id, or "" for the notification body
 	Closed bool   // true when the notification was dismissed
+	// Launch is true for a click that started this process (Windows: the app
+	// had quit and the toast relaunched it). The SDK keeps such an event until
+	// the page subscribes.
+	Launch bool
 }
 
 // Notifier is implemented by Apps that can post notifications on their own.

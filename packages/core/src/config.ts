@@ -408,7 +408,24 @@ export interface NativeConfig {
   };
   bundle?: {
     macos?: { category?: string };
-    windows?: { publisher?: string; installer?: "msix" | "nsis" };
+    windows?: {
+      publisher?: string;
+      installer?: "msix" | "nsis";
+      /**
+       * What the NSIS installer does when the Microsoft WebView2 Runtime is
+       * missing: "download" (default) fetches Microsoft's Evergreen
+       * bootstrapper, "embed" ships it in the installer, "fixed" ships a
+       * Fixed Version runtime folder next to the app, "none" leaves it to the
+       * app (which shows a message box with the download link).
+       */
+      webview2?: "download" | "embed" | "fixed" | "none";
+      /**
+       * For "embed" the MicrosoftEdgeWebview2Setup.exe, for "fixed" the
+       * extracted runtime folder; relative to the project. Microsoft's files,
+       * not part of Krate: do not commit them.
+       */
+      webview2Path?: string;
+    };
     linux?: { formats?: Array<"deb" | "rpm" | "appimage"> };
   };
   /** In-app updates; `url` may contain `{target}`. Needs both fields. */

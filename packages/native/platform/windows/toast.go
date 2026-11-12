@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/kratejs/krate/packages/native/platform/caps"
+	"github.com/kratejs/krate/packages/native/toastscheme"
 )
 
 // Toast notification logic (pure; the WinRT glue is in toast_windows.go).
@@ -200,25 +201,11 @@ func fileURI(path string) string {
 
 // toastArgs encodes what a click returns: the notification id and the action
 // id ("" for the body). The activation arguments string is opaque to Windows.
-func toastArgs(id, action string) string {
-	v := url.Values{}
-	v.Set("krate", "1")
-	v.Set("id", id)
-	if action != "" {
-		v.Set("action", action)
-	}
-	return v.Encode()
-}
+func toastArgs(id, action string) string { return toastscheme.Args(id, action) }
 
 // parseToastArgs reverses toastArgs. ok is false for arguments this package
 // did not write.
-func parseToastArgs(s string) (id, action string, ok bool) {
-	v, err := url.ParseQuery(s)
-	if err != nil || v.Get("krate") != "1" {
-		return "", "", false
-	}
-	return v.Get("id"), v.Get("action"), true
-}
+func parseToastArgs(s string) (id, action string, ok bool) { return toastscheme.ParseArgs(s) }
 
 func xmlText(s string) string {
 	var b strings.Builder
@@ -231,9 +218,25 @@ func xmlText(s string) string {
 // never inject markup. The element and attribute names are fixed; every
 // caller-supplied value goes through xmlText.
 func buildToastXML(n caps.Notification, iconURI string) string {
+	return buildToastXMLFor(n, iconURI, "")
+}
+
+// buildToastXMLFor is buildToastXML for an app whose clicks use protocol
+// activation: with a scheme, the body and every button launch the activation
+// URL of that scheme, which works after the app has quit (see package
+// toastscheme). Without one the clicks are foreground activations that only a
+// running app receives.
+func buildToastXMLFor(n caps.Notification, iconURI, scheme string) string {
+	activation := func(action string) (args, kind string) {
+		if scheme == "" {
+			return toastArgs(n.ID, action), "foreground"
+		}
+		return toastscheme.URI(scheme, n.ID, action), "protocol"
+	}
 	var b strings.Builder
 	b.WriteString(`<toast`)
-	b.WriteString(` launch="` + xmlText(toastArgs(n.ID, "")) + `" activationType="foreground"`)
+	launch, kind := activation("")
+	b.WriteString(` launch="` + xmlText(launch) + `" activationType="` + kind + `"`)
 	switch {
 	case n.TimeoutMS < 0 && len(n.Actions) > 0, n.Urgency >= 2 && len(n.Actions) > 0:
 		// A reminder stays on screen until dismissed; Windows requires a button.
@@ -261,7 +264,8 @@ func buildToastXML(n caps.Notification, iconURI string) string {
 			if i == 5 {
 				break // Windows shows at most five buttons
 			}
-			b.WriteString(`<action content="` + xmlText(a.Label) + `" arguments="` + xmlText(toastArgs(n.ID, a.ID)) + `" activationType="foreground"/>`)
+			args, kind := activation(a.ID)
+			b.WriteString(`<action content="` + xmlText(a.Label) + `" arguments="` + xmlText(args) + `" activationType="` + kind + `"/>`)
 		}
 		b.WriteString("</actions>")
 	}

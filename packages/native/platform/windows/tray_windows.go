@@ -10,6 +10,7 @@ package windows
 import (
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"unsafe"
 
 	xw "golang.org/x/sys/windows"
@@ -18,18 +19,19 @@ import (
 )
 
 var (
-	pShellNotifyIconW                   = shell32.NewProc("Shell_NotifyIconW")
-	pCreateIconFromResourceEx           = user32.NewProc("CreateIconFromResourceEx")
-	pCreateIconIndirect                 = user32.NewProc("CreateIconIndirect")
-	pDestroyIcon                        = user32.NewProc("DestroyIcon")
-	pLoadIconW                          = user32.NewProc("LoadIconW")
-	pGetSystemMetrics                   = user32.NewProc("GetSystemMetrics")
-	pGetSystemMetricsForDpi             = user32.NewProc("GetSystemMetricsForDpi")
-	pRegisterWindowMessageW             = user32.NewProc("RegisterWindowMessageW")
-	gdi32                               = xw.NewLazySystemDLL("gdi32.dll")
-	pCreateBitmap                       = gdi32.NewProc("CreateBitmap")
-	pDeleteObject                       = gdi32.NewProc("DeleteObject")
-	_                         caps.Tray = (*App)(nil)
+	pShellNotifyIconW                      = shell32.NewProc("Shell_NotifyIconW")
+	pCreateIconFromResourceEx              = user32.NewProc("CreateIconFromResourceEx")
+	pCreateIconIndirect                    = user32.NewProc("CreateIconIndirect")
+	pDestroyIcon                           = user32.NewProc("DestroyIcon")
+	pLoadIconW                             = user32.NewProc("LoadIconW")
+	pGetSystemMetrics                      = user32.NewProc("GetSystemMetrics")
+	pGetSystemMetricsForDpi                = user32.NewProc("GetSystemMetricsForDpi")
+	pRegisterWindowMessageW                = user32.NewProc("RegisterWindowMessageW")
+	pChangeWindowMessageFilterEx           = user32.NewProc("ChangeWindowMessageFilterEx")
+	gdi32                                  = xw.NewLazySystemDLL("gdi32.dll")
+	pCreateBitmap                          = gdi32.NewProc("CreateBitmap")
+	pDeleteObject                          = gdi32.NewProc("DeleteObject")
+	_                            caps.Tray = (*App)(nil)
 )
 
 const (
@@ -207,6 +209,22 @@ func (a *App) trayReadd() {
 		return
 	}
 	_, _, _ = pShellNotifyIconW.Call(nimSetVersion, uintptr(unsafe.Pointer(&t.nid)))
+	trayReadds.Add(1)
+}
+
+// trayReadds counts the successful re-adds after a TaskbarCreated broadcast
+// (the GUI test waits on it).
+var trayReadds atomic.Int32
+
+// allowTaskbarCreated lets the utility window receive TaskbarCreated when the
+// process runs elevated: explorer.exe is not, and User Interface Privilege
+// Isolation drops its broadcast otherwise.
+func allowTaskbarCreated(hwnd uintptr, msg uint32) {
+	if pChangeWindowMessageFilterEx.Find() != nil {
+		return
+	}
+	const msgfltAllow = 1
+	_, _, _ = pChangeWindowMessageFilterEx.Call(hwnd, uintptr(msg), msgfltAllow, 0)
 }
 
 // trayMessage handles the callback message of the tray icon.

@@ -16,6 +16,7 @@ import (
 	xw "golang.org/x/sys/windows"
 
 	"github.com/kratejs/krate/packages/native/platform/caps"
+	"github.com/kratejs/krate/packages/native/toastscheme"
 )
 
 func init() {
@@ -46,6 +47,9 @@ type Config struct {
 	// Features is app.json "features" (media, webaudio, webgl, webrtc,
 	// spellcheck). Nil means not detected: no feature is switched off.
 	Features map[string]bool
+	// Args are the command-line arguments to look at for a toast click that
+	// started the process; nil means os.Args[1:].
+	Args []string
 }
 
 // WindowConfig configures one window. Width and Height are the client area in
@@ -75,6 +79,12 @@ type App struct {
 	tray       *trayState
 	hot        *hotkeyTable
 	toast      *toastState
+
+	// toastScheme is the URL scheme of toast clicks (package toastscheme).
+	// launchEvent is the click that started this process, delivered when the
+	// notification handler is set.
+	toastScheme string
+	launchEvent *caps.NotifyEvent
 
 	// Main-thread state.
 	env         unsafe.Pointer // ICoreWebView2Environment
@@ -124,6 +134,20 @@ func New(cfg Config) (*App, error) {
 	if cfg.Handler == nil {
 		return nil, errors.New("windows: Config.Handler is required")
 	}
+	scheme := toastscheme.Scheme(cfg.AppID)
+	var launch *caps.NotifyEvent
+	args := cfg.Args
+	if args == nil && len(os.Args) > 1 {
+		args = os.Args[1:]
+	}
+	if id, action, ok := toastscheme.FindArg(scheme, args); ok {
+		// A toast click started this process. If the app is already running,
+		// it takes the click and this process has nothing to do.
+		if forwardActivation(scheme, id, action) {
+			return nil, ErrActivationForwarded
+		}
+		launch = &caps.NotifyEvent{ID: id, Action: action, Launch: true}
+	}
 	initCallbacks()
 	setDPIAware()
 
@@ -139,6 +163,9 @@ func New(cfg Config) (*App, error) {
 		byWebview: map[unsafe.Pointer]*view{},
 		viewOwner: map[caps.ViewRef]caps.WindowRef{},
 		exited:    make(chan struct{}),
+
+		toastScheme: scheme,
+		launchEvent: launch,
 	}
 	h, _, _ := pGetModuleHandleW.Call(0)
 	a.hInst = h
@@ -155,7 +182,7 @@ func New(cfg Config) (*App, error) {
 
 	a.tray, a.hot, a.toast = &trayState{}, newHotkeyTable(), &toastState{}
 	uw, _, e := pCreateWindowExW.Call(0,
-		uintptr(unsafe.Pointer(wstr(msgClassName))), 0, wsPopup, 0, 0, 0, 0,
+		uintptr(unsafe.Pointer(wstr(msgClassName))), uintptr(unsafe.Pointer(wstr(sinkWindowName(scheme)))), wsPopup, 0, 0, 0, 0,
 		0, 0, a.hInst, 0)
 	if uw == 0 {
 		return nil, fmt.Errorf("windows: creating the utility window: %v", e)
@@ -163,6 +190,9 @@ func New(cfg Config) (*App, error) {
 	a.utilWnd = uw
 	tm, _, _ := pRegisterWindowMessageW.Call(uintptr(unsafe.Pointer(wstr("TaskbarCreated"))))
 	a.taskbarMsg = uint32(tm)
+	if a.taskbarMsg != 0 {
+		allowTaskbarCreated(a.utilWnd, a.taskbarMsg)
+	}
 	setProcessAUMID(cfg.AppID)
 
 	a.hNavigation = newHandler(iidNavigationStartingHandler, false, a.onNavigationStarting)
@@ -238,6 +268,7 @@ func (a *App) Run(onReady func()) error {
 	defer a.once.Do(func() { close(a.exited) })
 
 	if err := a.startEnvironment(); err != nil {
+		a.reportRuntimeFailure(err)
 		return err
 	}
 	a.withEnv(func() {
@@ -365,6 +396,9 @@ func (a *App) environmentCompleted(hr, env uintptr) uintptr {
 	}
 	if failed(hr) || env == 0 {
 		a.runErr = fmt.Errorf("windows: creating the WebView2 environment failed: 0x%08x", uint32(hr))
+		if runtimeMissingHRESULT(uint32(hr)) {
+			a.reportRuntimeFailure(&runtimeError{missing: true})
+		}
 		_, _, _ = pPostQuitMessage.Call(1)
 		return sOK
 	}
@@ -460,6 +494,8 @@ func wndProc(hwnd, message, wParam, lParam uintptr) (ret uintptr) {
 		case message == wmHotkey:
 			a.hotkeyMessage(int32(wParam))
 			return 0
+		case message == wmCopyData:
+			return a.activationMessage(lParam)
 		case a.taskbarMsg != 0 && message == uintptr(a.taskbarMsg):
 			a.trayReadd()
 			return 0

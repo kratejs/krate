@@ -136,6 +136,70 @@ func TestGUITrayLifecycle(t *testing.T) {
 	_ = guiApp.SetTray(nil)
 }
 
+var pSendMessageTimeoutW = user32.NewProc("SendMessageTimeoutW")
+
+// TestGUITrayTaskbarCreated plays what explorer.exe does when it restarts:
+// the shell loses every icon and broadcasts the registered TaskbarCreated
+// message to all top-level windows. The icon is deleted behind the app's
+// back, the real broadcast is sent, and the icon must work again (NIM_MODIFY
+// fails for an icon the shell does not know).
+func TestGUITrayTaskbarCreated(t *testing.T) {
+	needGUI(t)
+	if !taskbarRunning() {
+		t.Skip("no taskbar (Shell_TrayWnd) on this desktop")
+	}
+	if err := guiApp.SetTray(&caps.TrayIcon{Tooltip: "before explorer restart", PNG: testPNG(t, color.NRGBA{B: 200, A: 255})}); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	defer func() { _ = guiApp.SetTray(nil) }()
+
+	// The message the app listens for is the system-wide registered one.
+	want, _, _ := pRegisterWindowMessageW.Call(uintptr(unsafe.Pointer(wstr("TaskbarCreated"))))
+	if want == 0 || uint32(want) != guiApp.taskbarMsg {
+		t.Fatalf("app listens for message %d, RegisterWindowMessage(TaskbarCreated) is %d", guiApp.taskbarMsg, want)
+	}
+
+	modify := func() bool {
+		ok := false
+		done := make(chan struct{})
+		guiApp.Dispatch(func() {
+			nid := guiApp.tray.nid
+			r, _, _ := pShellNotifyIconW.Call(nimModify, uintptr(unsafe.Pointer(&nid)))
+			ok = r != 0
+			close(done)
+		})
+		<-done
+		return ok
+	}
+	if !modify() {
+		t.Fatal("a freshly added icon cannot be modified")
+	}
+
+	// The shell forgets the icon.
+	done := make(chan struct{})
+	guiApp.Dispatch(func() {
+		nid := guiApp.tray.nid
+		_, _, _ = pShellNotifyIconW.Call(nimDelete, uintptr(unsafe.Pointer(&nid)))
+		close(done)
+	})
+	<-done
+	if modify() {
+		t.Fatal("the icon still exists after NIM_DELETE")
+	}
+
+	before := trayReadds.Load()
+	const hwndBroadcast, smtoAbortIfHung = 0xFFFF, 0x2
+	var res uintptr
+	r, _, _ := pSendMessageTimeoutW.Call(hwndBroadcast, want, 0, 0, smtoAbortIfHung, 5000, uintptr(unsafe.Pointer(&res)))
+	if r == 0 {
+		t.Fatal("broadcasting TaskbarCreated failed or timed out")
+	}
+	waitFor(t, "the tray icon to be re-added", func() bool { return trayReadds.Load() > before })
+	if !modify() {
+		t.Fatal("the icon was not re-added after TaskbarCreated")
+	}
+}
+
 type hotEvents struct {
 	mu sync.Mutex
 	hs []string

@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -86,31 +87,144 @@ func (f *budgetFile) save(t *testing.T) {
 	}
 }
 
-func budgetPlatform() string { return runtime.GOOS + "-" + runtime.GOARCH }
+// budgetPlatformOverride lets the unit tests pretend to run elsewhere.
+var budgetPlatformOverride string
+
+func budgetPlatform() string {
+	if budgetPlatformOverride != "" {
+		return budgetPlatformOverride
+	}
+	return runtime.GOOS + "-" + runtime.GOARCH
+}
+
+// budgetStrictPlatform is the platform whose entries must all exist: a
+// missing one is a failure. Any other platform is checked against the entries
+// it has; with none at all it only reports what it measured, in a form that
+// can be pasted into budgets.json (see budgetRecordText).
+const budgetStrictPlatform = "linux-amd64"
+
+// budgetEnforced reports whether a section holds limits for the platform.
+func budgetEnforced(section map[string]map[string]budgetEntry, plat string) bool {
+	return plat == budgetStrictPlatform || len(section[plat]) > 0
+}
+
+// budgetStatus is the outcome of comparing one value with its limit.
+type budgetStatus int
+
+const (
+	budgetOK budgetStatus = iota
+	budgetOver
+	budgetMissing // enforced platform, no entry for this name
+	budgetReportOnly
+)
+
+// budgetVerdict compares a measurement with its entry. scale multiplies the
+// limit. It is pure so that it can be tested for every platform.
+func budgetVerdict(section map[string]map[string]budgetEntry, plat, name string, value int64, scale float64) (budgetEntry, int64, budgetStatus) {
+	if !budgetEnforced(section, plat) {
+		return budgetEntry{}, 0, budgetReportOnly
+	}
+	e, ok := section[plat][name]
+	if !ok {
+		return budgetEntry{}, 0, budgetMissing
+	}
+	limit := int64(float64(e.Max) * scale)
+	if value > limit {
+		return e, limit, budgetOver
+	}
+	return e, limit, budgetOK
+}
+
+// budgetRecorded collects, for a platform without limits, the entries that
+// the run would write in update mode.
+var budgetRecorded struct {
+	sync.Mutex
+	sizes, startup, memory map[string]budgetEntry
+}
+
+func budgetRecord(section string, name string, e budgetEntry) {
+	budgetRecorded.Lock()
+	defer budgetRecorded.Unlock()
+	var m *map[string]budgetEntry
+	switch section {
+	case "sizes":
+		m = &budgetRecorded.sizes
+	case "startup":
+		m = &budgetRecorded.startup
+	default:
+		m = &budgetRecorded.memory
+	}
+	if *m == nil {
+		*m = map[string]budgetEntry{}
+	}
+	(*m)[name] = e
+}
+
+// budgetRecordText renders the recorded entries as the fragment of
+// budgets.json for the platform, between two marker lines that are easy to
+// find in a CI log. It returns "" when nothing was recorded.
+func budgetRecordText(plat string) string {
+	budgetRecorded.Lock()
+	defer budgetRecorded.Unlock()
+	doc := map[string]map[string]map[string]budgetEntry{}
+	for sec, m := range map[string]map[string]budgetEntry{"sizes": budgetRecorded.sizes, "startup": budgetRecorded.startup, "memory": budgetRecorded.memory} {
+		if len(m) > 0 {
+			doc[sec] = map[string]map[string]budgetEntry{plat: m}
+		}
+	}
+	if len(doc) == 0 {
+		return ""
+	}
+	data, _ := json.MarshalIndent(doc, "", "  ")
+	return "BUDGET-RECORD-BEGIN " + plat + "\n" + string(data) + "\nBUDGET-RECORD-END " + plat + "\n"
+}
+
+// flushBudgetRecord prints what a report-only platform measured, to the log
+// and to the GitHub step summary when there is one.
+func flushBudgetRecord(t *testing.T) {
+	t.Helper()
+	text := budgetRecordText(budgetPlatform())
+	if text == "" {
+		return
+	}
+	fmt.Print("\n" + text)
+	fmt.Printf("::notice title=native budgets %s::%s has no budget entries yet; the measured values are printed between BUDGET-RECORD markers (paste them into packages/native/budgets.json)\n", budgetPlatform(), budgetPlatform())
+	if sum := os.Getenv("GITHUB_STEP_SUMMARY"); sum != "" {
+		if f, err := os.OpenFile(sum, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0o644); err == nil {
+			fmt.Fprintf(f, "### Native budgets, %s (not enforced yet)\n\n```json\n%s```\n", budgetPlatform(), text)
+			f.Close()
+		}
+	}
+}
 
 // budgetCheck compares a measurement with its limit, or in update mode
-// records it. scale multiplies the limit.
-func budgetCheck(t *testing.T, f *budgetFile, section map[string]map[string]budgetEntry, name string, value int64, unit string, scale float64) {
+// records it. scale multiplies the limit. sectionName names the file section
+// ("sizes" or "startup").
+func budgetCheck(t *testing.T, f *budgetFile, section map[string]map[string]budgetEntry, sectionName, name string, value int64, unit string, scale float64) {
 	t.Helper()
 	plat := budgetPlatform()
+	newEntry := budgetEntry{Measured: value, Max: int64(math.Ceil(float64(value) * (1 + f.Headroom)))}
 	if os.Getenv("KRATE_UPDATE_BUDGETS") == "1" {
 		if section[plat] == nil {
 			section[plat] = map[string]budgetEntry{}
 		}
-		e := budgetEntry{Measured: value, Max: int64(math.Ceil(float64(value) * (1 + f.Headroom)))}
-		section[plat][name] = e
-		t.Logf("%s %s: measured %d %s, new limit %d %s", plat, name, value, unit, e.Max, unit)
+		section[plat][name] = newEntry
+		t.Logf("%s %s: measured %d %s, new limit %d %s", plat, name, value, unit, newEntry.Max, unit)
 		return
 	}
-	e, ok := section[plat][name]
-	if !ok {
+	e, limit, st := budgetVerdict(section, plat, name, value, scale)
+	switch st {
+	case budgetReportOnly:
+		budgetRecord(sectionName, name, newEntry)
+		t.Logf("%s %s: %d %s (no budget recorded for %s yet; reported only)", plat, name, value, unit, plat)
+	case budgetMissing:
 		t.Fatalf("budgets.json has no %s entry for %s; measured %d %s. Run with KRATE_UPDATE_BUDGETS=1 to record it", name, plat, value, unit)
-	}
-	limit := int64(float64(e.Max) * scale)
-	t.Logf("%s %s: %d %s (limit %d %s, measured when set %d %s)", plat, name, value, unit, limit, unit, e.Measured, unit)
-	if value > limit {
-		t.Errorf("%s is over its budget: %d %s > %d %s (it measured %d %s when the budget was set). "+
-			"If the growth is intended, update the budget (KRATE_UPDATE_BUDGETS=1, see packages/native/BUDGETS.md)", name, value, unit, limit, unit, e.Measured, unit)
+	default:
+		t.Logf("%s %s: %d %s (limit %d %s, measured when set %d %s)", plat, name, value, unit, limit, unit, e.Measured, unit)
+		if st == budgetOver {
+			t.Errorf("%s is over its budget: %d %s > %d %s (it measured %d %s when the budget was set). "+
+				"If the growth is intended, update the budget (KRATE_UPDATE_BUDGETS=1, see packages/native/BUDGETS.md)", name, value, unit, limit, unit, e.Measured, unit)
+		}
 	}
 }
 
@@ -140,18 +254,18 @@ func goVersionString(t *testing.T) string {
 // stripped shell, a Go-only release, a TypeScript-only release and the
 // examples/native-tasks release.
 func TestNativeBudgetSizes(t *testing.T) {
-	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
-		t.Skip("the size budgets are recorded for linux-amd64")
-	}
 	requireRelease(t)
 	f := loadBudgets(t)
 	sizes := map[string]int64{}
 
 	// The shell, built the way the platform packages build it.
 	shell := filepath.Join(t.TempDir(), "krate-shell")
+	if runtime.GOOS == "windows" {
+		shell += ".exe"
+	}
 	cmd := exec.Command("go", "build", "-trimpath", "-ldflags=-s -w", "-o", shell, "./cmd/krate-shell")
 	cmd.Dir = releaseNativeDir(t)
-	cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=linux", "GOARCH=amd64")
+	cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS="+runtime.GOOS, "GOARCH="+runtime.GOARCH)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("building krate-shell: %v\n%s", err, out)
 	}
@@ -184,8 +298,9 @@ func TestNativeBudgetSizes(t *testing.T) {
 		f.Sizes = map[string]map[string]budgetEntry{}
 	}
 	for _, n := range names {
-		budgetCheck(t, f, f.Sizes, n, sizes[n], "bytes", 1)
+		budgetCheck(t, f, f.Sizes, "sizes", n, sizes[n], "bytes", 1)
 	}
+	flushBudgetRecord(t)
 	if os.Getenv("KRATE_UPDATE_BUDGETS") == "1" {
 		f.MeasuredWith = fmt.Sprintf("%s, %s, CGO_ENABLED=0, -trimpath -s -w", goVersionString(t), budgetPlatform())
 		f.save(t)
@@ -253,9 +368,36 @@ func medianValues(runs []map[string]int64) map[string]int64 {
 	return out
 }
 
+// memResult is the outcome for one recorded memory entry.
+type memResult struct {
+	name     string
+	value    int64
+	entry    budgetEntry
+	over     bool
+	enforced bool // appMinusFloor entries fail the test, absolute ones warn
+}
+
+// evalMemory compares measured values with a platform's entries. Names that
+// are absent from vals count 0 (a process role that is gone).
+func evalMemory(entries map[string]budgetEntry, vals map[string]int64) []memResult {
+	names := make([]string, 0, len(entries))
+	for n := range entries {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	var out []memResult
+	for _, name := range names {
+		e := entries[name]
+		v := vals[name]
+		out = append(out, memResult{name: name, value: v, entry: e, over: v > e.Max, enforced: strings.HasPrefix(name, "appMinusFloor.")})
+	}
+	return out
+}
+
 // checkMemoryBudgets compares measured values with budgets.json (or, in
 // update mode, replaces the platform's memory entries). Only appMinusFloor
-// entries fail the test; the absolute ones warn.
+// entries fail the test; the absolute ones warn. A platform other than
+// linux-amd64 with no memory entries only reports (see budgetRecordText).
 func checkMemoryBudgets(t *testing.T, f *budgetFile, vals map[string]int64) {
 	t.Helper()
 	plat := budgetPlatform()
@@ -270,27 +412,31 @@ func checkMemoryBudgets(t *testing.T, f *budgetFile, vals map[string]int64) {
 		t.Logf("recorded %d memory entries for %s", len(vals), plat)
 		return
 	}
+	if !budgetEnforced(f.Memory, plat) {
+		names := make([]string, 0, len(vals))
+		for n := range vals {
+			names = append(names, n)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			budgetRecord("memory", name, budgetEntry{Measured: vals[name], Max: memBudgetMax(f, name, vals[name])})
+			t.Logf("%s memory %s: %d bytes (no budget recorded yet; reported only)", plat, name, vals[name])
+		}
+		return
+	}
 	entries := f.Memory[plat]
 	for _, must := range []string{"appMinusFloor.total.pss", "appMinusFloor.total.privateDirty"} {
 		if _, ok := entries[must]; !ok {
 			t.Fatalf("budgets.json has no memory %s entry for %s. Run with KRATE_UPDATE_BUDGETS=1 to record it", must, plat)
 		}
 	}
-	names := make([]string, 0, len(entries))
-	for n := range entries {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	for _, name := range names {
-		e := entries[name]
-		v := vals[name] // a role that is absent now counts 0
-		enforced := strings.HasPrefix(name, "appMinusFloor.")
-		t.Logf("%s memory %s: %d bytes (limit %d, measured when set %d)", plat, name, v, e.Max, e.Measured)
-		if v <= e.Max {
+	for _, r := range evalMemory(entries, vals) {
+		t.Logf("%s memory %s: %d bytes (limit %d, measured when set %d)", plat, r.name, r.value, r.entry.Max, r.entry.Measured)
+		if !r.over {
 			continue
 		}
-		msg := fmt.Sprintf("memory %s is over its budget: %d bytes > %d (it measured %d when the budget was set)", name, v, e.Max, e.Measured)
-		if enforced {
+		msg := fmt.Sprintf("memory %s is over its budget: %d bytes > %d (it measured %d when the budget was set)", r.name, r.value, r.entry.Max, r.entry.Measured)
+		if r.enforced {
 			t.Errorf("%s. If the growth is intended, update the budget (KRATE_UPDATE_BUDGETS=1, see packages/native/BUDGETS.md)", msg)
 		} else {
 			t.Logf("WARNING: %s (absolute values move with the WebKit version and the runner, so this only warns)", msg)
@@ -309,12 +455,6 @@ func checkMemoryBudgets(t *testing.T, f *budgetFile, vals map[string]int64) {
 func TestNativeBudgetGUI(t *testing.T) {
 	if os.Getenv("KRATE_NATIVE_GUI") != "1" {
 		t.Skip("set KRATE_NATIVE_GUI=1 to run the native start-up and memory budget test")
-	}
-	if runtime.GOOS != "linux" {
-		t.Skip("the start-up and memory budgets are recorded for linux-amd64")
-	}
-	if runtime.GOARCH != "amd64" {
-		t.Skip("the start-up and memory budgets are recorded for linux-amd64")
 	}
 	f := loadBudgets(t)
 	ex := e2eRequireDeps(t)
@@ -383,8 +523,9 @@ func TestNativeBudgetGUI(t *testing.T) {
 	if f.Startup == nil {
 		f.Startup = map[string]map[string]budgetEntry{}
 	}
-	budgetCheck(t, f, f.Startup, "coldStartMs", median, "ms", budgetScale(t))
+	budgetCheck(t, f, f.Startup, "startup", "coldStartMs", median, "ms", budgetScale(t))
 	checkMemoryBudgets(t, f, medianValues(runs))
+	flushBudgetRecord(t)
 	if os.Getenv("KRATE_UPDATE_BUDGETS") == "1" {
 		f.save(t)
 	}
