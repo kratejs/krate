@@ -7,11 +7,15 @@ package windows
 // beyond compilation and the pure logic in toast.go; the CI GUI test shows a
 // toast and the manual list covers what CI cannot see.
 //
-// What a click does when the app is not running: nothing. An unpackaged app
-// has no COM activator registered, so Windows cannot start it from a toast; a
-// toast in the Action Center whose app has exited does nothing when clicked.
-// Activation of a closed app (INotificationActivationCallback plus a Start
-// Menu shortcut carrying the AUMID and activator CLSID) is not implemented.
+// A click on a toast uses protocol activation, so it works after the app has
+// quit: the toast carries a URL of a per-app scheme (package toastscheme), the
+// app registers that scheme under HKCU (a packaged app declares it in its
+// manifest) and Windows runs the executable with the URL. The new process
+// either hands the click to the running instance (WM_COPYDATA, see
+// activate_windows.go) or keeps it and delivers it as a notification event
+// when the page can receive it. This avoids a COM activator
+// (INotificationActivationCallback), which needs a registered class factory
+// and a Start Menu shortcut with the activator CLSID.
 
 import (
 	"errors"
@@ -148,6 +152,7 @@ type toastState struct {
 	ready    bool
 	initErr  error
 	mode     toastMode
+	scheme   string // protocol activation scheme; "" for foreground activation
 	aumid    string
 	notifier unsafe.Pointer            // IToastNotifier
 	factory  unsafe.Pointer            // IToastNotificationFactory
@@ -158,7 +163,15 @@ type toastState struct {
 func (a *App) OnNotify(fn func(caps.NotifyEvent)) {
 	extMu.Lock()
 	notifyFn = fn
+	launch := a.launchEvent
+	if fn != nil {
+		a.launchEvent = nil
+	}
 	extMu.Unlock()
+	// The click that started the app goes out as soon as someone listens.
+	if launch != nil && fn != nil {
+		fn(*launch)
+	}
 }
 
 func emitNotify(ev caps.NotifyEvent) {
@@ -217,9 +230,17 @@ func (a *App) toastInit() error {
 	}
 	t.mode = toastModeFor(isPackaged())
 	t.aumid = aumidFor(a.cfg.AppID)
+	t.scheme = a.toastScheme
 	if t.mode == toastRegistered {
 		if err := registerAUMID(t.aumid, a.displayName(), a.cfg.IconPath); err != nil {
 			return fail(err)
+		}
+		// Clicks launch the executable through this scheme, so they work after
+		// the app has quit. If the registration fails the toasts fall back to
+		// foreground activation (clicks reach only a running app).
+		if err := registerToastProtocol(t.scheme, a.displayName()); err != nil {
+			logf("%v; clicking a notification after the app has quit will do nothing", err)
+			t.scheme = ""
 		}
 	}
 	mgr, err := activationFactory(classToastManager, iidToastManagerStatics)
@@ -327,7 +348,7 @@ func (a *App) toastShow(n caps.Notification) error {
 			return errors.New("windows: " + msg)
 		}
 	}
-	doc, err := toastDocument(buildToastXML(n, fileURI(n.Icon)))
+	doc, err := toastDocument(buildToastXMLFor(n, fileURI(n.Icon), t.scheme))
 	if err != nil {
 		return err
 	}

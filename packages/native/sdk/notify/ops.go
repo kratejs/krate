@@ -23,7 +23,17 @@ func Register(t *bridge.Table, env *bridge.Env) {
 	t.Stream(IDEvents, Permission, true, topic.Stream())
 
 	publish := func(ev caps.NotifyEvent) {
-		topic.Publish(func(e *wire.Encoder) { encodeEvent(e, Event{ID: ev.ID, Action: ev.Action, Closed: ev.Closed}) })
+		write := func(e *wire.Encoder) { encodeEvent(e, Event{ID: ev.ID, Action: ev.Action, Closed: ev.Closed}) }
+		if ev.Launch {
+			topic.PublishRetained(write)
+			return
+		}
+		topic.Publish(write)
+	}
+	// Connect the platform right away: a click that started the app arrives
+	// before the page has sent anything.
+	if n, ok := env.App.(caps.Notifier); ok {
+		n.OnNotify(publish)
 	}
 	var mu sync.Mutex
 	var be backend

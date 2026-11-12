@@ -78,6 +78,12 @@ func guiHandler() http.Handler {
 }
 
 func TestMain(m *testing.M) {
+	if os.Getenv(toastHelperEnv) != "" {
+		toastHelperMain()
+	}
+	if os.Getenv(runtimeHelperEnv) != "" {
+		runtimeHelperMain()
+	}
 	if !guiEnabled {
 		os.Exit(m.Run())
 	}

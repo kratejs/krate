@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/kratejs/krate/packages/native/platform/caps"
+	"github.com/kratejs/krate/packages/native/toastscheme"
 )
 
 // Known ids of parameterized WinRT interfaces, from the Windows SDK. They
@@ -196,5 +197,28 @@ func TestAUMIDValues(t *testing.T) {
 	v = aumidValues("My App", `C:\i.png`)
 	if v["IconUri"] != `C:\i.png` {
 		t.Errorf("values = %v", v)
+	}
+}
+
+func TestToastXMLProtocolActivation(t *testing.T) {
+	scheme := toastscheme.Scheme("com.acme.app")
+	n := caps.Notification{ID: "n&1", Title: "t", Actions: []caps.NotificationAction{{ID: "ok", Label: "OK"}, {ID: "later", Label: "Later"}}}
+	x := buildToastXMLFor(n, "", scheme)
+	wellFormed(t, x)
+	if strings.Contains(x, `activationType="foreground"`) {
+		t.Errorf("a protocol toast has a foreground activation: %s", x)
+	}
+	if c := strings.Count(x, `activationType="protocol"`); c != 3 {
+		t.Errorf("want the body and two buttons to use protocol activation, got %d in %s", c, x)
+	}
+	for _, act := range []string{"", "ok", "later"} {
+		want := xmlText(toastscheme.URI(scheme, n.ID, act))
+		if !strings.Contains(x, `="`+want+`"`) {
+			t.Errorf("no activation URL for action %q (%s) in %s", act, want, x)
+		}
+	}
+	// The foreground form is unchanged for an empty scheme.
+	if buildToastXMLFor(n, "", "") != buildToastXML(n, "") || !strings.Contains(buildToastXML(n, ""), `activationType="foreground"`) {
+		t.Error("buildToastXML must keep foreground activation")
 	}
 }

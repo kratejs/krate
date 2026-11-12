@@ -12,9 +12,12 @@ import (
 // blocks: a subscriber that is more than queueLen events behind loses the
 // oldest ones.
 type Topic struct {
-	mu   sync.Mutex
-	subs map[*topicSub]struct{}
+	mu       sync.Mutex
+	subs     map[*topicSub]struct{}
+	retained [][]byte // PublishRetained frames nobody has received yet
 }
+
+const maxRetained = 8
 
 const queueLen = 256
 
@@ -23,7 +26,15 @@ type topicSub struct {
 }
 
 // Publish encodes one value with write and delivers it to the subscribers.
-func (t *Topic) Publish(write func(e *wire.Encoder)) {
+func (t *Topic) Publish(write func(e *wire.Encoder)) { t.publish(write, false) }
+
+// PublishRetained is Publish, but when nobody is subscribed the value is kept
+// (the newest 8) and delivered to the next subscriber. It is for events that
+// happen before a page can have subscribed, such as the click that started the
+// app.
+func (t *Topic) PublishRetained(write func(e *wire.Encoder)) { t.publish(write, true) }
+
+func (t *Topic) publish(write func(e *wire.Encoder), retain bool) {
 	e := wire.NewEncoder()
 	write(e)
 	frame, err := e.Finish()
@@ -31,6 +42,12 @@ func (t *Topic) Publish(write func(e *wire.Encoder)) {
 		return
 	}
 	t.mu.Lock()
+	if retain && len(t.subs) == 0 {
+		t.retained = append(t.retained, frame)
+		if len(t.retained) > maxRetained {
+			t.retained = t.retained[len(t.retained)-maxRetained:]
+		}
+	}
 	for s := range t.subs {
 		select {
 		case s.ch <- frame:
@@ -63,6 +80,10 @@ func (t *Topic) Stream() scheme.StreamFunc {
 			t.subs = map[*topicSub]struct{}{}
 		}
 		t.subs[s] = struct{}{}
+		for _, f := range t.retained {
+			s.ch <- f // queueLen is larger than maxRetained
+		}
+		t.retained = nil
 		t.mu.Unlock()
 		defer func() {
 			t.mu.Lock()

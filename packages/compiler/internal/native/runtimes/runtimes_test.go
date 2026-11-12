@@ -39,12 +39,12 @@ func TestDenoFlags(t *testing.T) {
 		scoped bool
 		want   string
 	}{
-		{"none, scoped", nil, true, "--no-prompt --allow-env --allow-read={sockdir} --allow-write={sockdir} --allow-net=127.0.0.1"},
+		{"none, scoped", nil, true, "--no-prompt --allow-env --allow-read={sockdir} --allow-write={sockdir} --allow-net=127.0.0.1,unix:{socket}"},
 		{"none, compiled", nil, false, "--no-prompt --allow-env --allow-read --allow-write --allow-net=127.0.0.1"},
-		{"fs", []string{"fs"}, true, "--no-prompt --allow-env --allow-read --allow-write --allow-net=127.0.0.1"},
-		{"fs:read keeps write scoped", []string{"fs:read"}, true, "--no-prompt --allow-env --allow-read --allow-write={sockdir} --allow-net=127.0.0.1"},
+		{"fs", []string{"fs"}, true, "--no-prompt --allow-env --allow-read --allow-write --allow-net=127.0.0.1,unix:{socket}"},
+		{"fs:read keeps write scoped", []string{"fs:read"}, true, "--no-prompt --allow-env --allow-read --allow-write={sockdir} --allow-net=127.0.0.1,unix:{socket}"},
 		{"net and os", []string{"net", "os:info"}, true, "--no-prompt --allow-env --allow-read={sockdir} --allow-write={sockdir} --allow-net --allow-sys"},
-		{"ui areas add nothing", []string{"window", "dialog", "kv", "db", "clipboard", "shell:openExternal", "os:secrets"}, true, "--no-prompt --allow-env --allow-read={sockdir} --allow-write={sockdir} --allow-net=127.0.0.1"},
+		{"ui areas add nothing", []string{"window", "dialog", "kv", "db", "clipboard", "shell:openExternal", "os:secrets"}, true, "--no-prompt --allow-env --allow-read={sockdir} --allow-write={sockdir} --allow-net=127.0.0.1,unix:{socket}"},
 	}
 	for _, c := range cases {
 		if got := strings.Join(DenoFlags(c.perms, c.scoped), " "); got != c.want {
@@ -289,5 +289,24 @@ func TestBuildReleaseMissingRuntime(t *testing.T) {
 	var d diag.Diagnostic
 	if !errors.As(err, &d) || d.Code != diag.CodeRuntimeUnavailable || !strings.Contains(d.Hint, "KRATE_BUN") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestDenoCompileNetFlagPerTarget(t *testing.T) {
+	for _, c := range []struct {
+		target Target
+		want   string
+	}{
+		{Target{"linux", "amd64"}, "--allow-net "},
+		{Target{"darwin", "arm64"}, "--allow-net "},
+		{Target{"windows", "amd64"}, "--allow-net=127.0.0.1 "},
+	} {
+		args, err := DenoCompileArgs(c.target, nil, "/w/host.mjs", "/o/host")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Join(args, " ") + " "; !strings.Contains(got, c.want) {
+			t.Errorf("%s: %v lacks %q", c.target.OS, args, c.want)
+		}
 	}
 }

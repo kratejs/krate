@@ -250,7 +250,7 @@ func (c *Child) startLocked(ctx context.Context) error {
 		listen = socket
 	}
 
-	cmd := exec.Command(c.binary, c.o.Args...)
+	cmd := exec.Command(c.binary, expandSocketArgs(c.o.Args, socket)...)
 	cmd.Dir = c.o.Dir
 	cmd.Env = append(append(os.Environ(), c.env...), SocketEnv+"="+listen)
 	if tcp {
@@ -386,4 +386,24 @@ func (l *lastLines) suffix() string {
 		return ""
 	}
 	return "\n" + strings.Join(l.lines, "\n")
+}
+
+// SocketPlaceholder in an argument stands for the unix socket path of the run
+// (g001.sock and so on, known only when the child starts). Deno needs the
+// exact path in --allow-net to listen on it. For a child on the TCP transport
+// there is no socket: the placeholder and the ",unix:" before it are dropped.
+const SocketPlaceholder = "{socket}"
+
+func expandSocketArgs(args []string, socket string) []string {
+	if len(args) == 0 {
+		return args
+	}
+	out := make([]string, len(args))
+	for i, a := range args {
+		if socket == "" {
+			a = strings.ReplaceAll(a, ",unix:"+SocketPlaceholder, "")
+		}
+		out[i] = strings.ReplaceAll(a, SocketPlaceholder, socket)
+	}
+	return out
 }

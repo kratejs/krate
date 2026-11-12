@@ -64,6 +64,12 @@ const EntryPlaceholder = "{entry}"
 // in; Deno needs read and write access to it.
 const SockDirPlaceholder = "{sockdir}"
 
+// SocketPlaceholder stands for the unix socket path of one run of a child. A
+// Deno child needs it in --allow-net (recent Deno versions treat listening on
+// a unix socket as network access); the shell fills it in when it starts the
+// child, and drops it on Windows where the transport is loopback TCP.
+const SocketPlaceholder = "{socket}"
+
 // LoopbackHost is the only host a Deno child may reach without the net
 // permission: the transport to the shell on Windows is loopback TCP.
 const LoopbackHost = "127.0.0.1"
@@ -91,7 +97,9 @@ func Command(rt Runtime, perms []string) []string {
 //
 // The table (also in docs/native/runtimes.md):
 //
-//	always         --no-prompt --allow-env, --allow-net=127.0.0.1, read and write access to the socket directory
+//	always         --no-prompt --allow-env, --allow-net=127.0.0.1,unix:{socket} (a compiled executable cannot name the
+//	               socket: --allow-net=127.0.0.1 for Windows targets, plain --allow-net elsewhere),
+//	               read and write access to the socket directory
 //	fs             --allow-read --allow-write
 //	fs:read        --allow-read
 //	net            --allow-net (without it only --allow-net=127.0.0.1, the Windows transport to the shell)
@@ -122,11 +130,13 @@ func DenoFlags(perms []string, scoped bool) []string {
 	default:
 		flags = append(flags, "--allow-write")
 	}
-	if has["net"] {
+	switch {
+	case has["net"]:
 		flags = append(flags, "--allow-net")
-	} else {
-		// The host child talks to the shell over loopback TCP on Windows
-		// (Deno cannot use AF_UNIX there), so loopback is always allowed.
+	case scoped:
+		// Loopback for the Windows transport, the run's own socket elsewhere.
+		flags = append(flags, "--allow-net="+LoopbackHost+",unix:"+SocketPlaceholder)
+	default:
 		flags = append(flags, "--allow-net="+LoopbackHost)
 	}
 	if has["os:info"] {

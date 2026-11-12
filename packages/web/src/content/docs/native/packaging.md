@@ -111,13 +111,64 @@ implemented. See [Signing](/docs/native/signing/).
 The portable `.zip` holds `<Name>/<Name>.exe` and its files. The **NSIS**
 script (kept at `packages/windows-<arch>/installer.nsi`) installs to
 `Program Files`, adds Start menu and desktop shortcuts and an uninstaller,
-registers each `deepLinks` scheme under `HKCR`, and downloads Microsoft's
-WebView2 bootstrapper when the runtime is missing. **MSIX** needs
+registers each `deepLinks` scheme and the scheme of
+[notification clicks](/docs/native/sdk-ui/#windows-details) under the registry,
+and makes sure the WebView2 Runtime is installed (below). **MSIX** needs
 `bundle.windows.publisher`, the subject of your signing certificate (`CN=Acme
 Inc`). The package is a zip with `AppxManifest.xml` (identity, logos, protocol
 extensions, `runFullTrust`), `[Content_Types].xml` and `AppxBlockMap.xml`
 (SHA-256 per 64 KiB block). Files are stored uncompressed so the block map
 needs no compressed sizes.
+
+### The WebView2 Runtime
+
+The app shows its pages with Microsoft's Evergreen WebView2 Runtime. Windows 11
+and current Windows 10 machines with Edge have it; an older Windows 10 may not.
+`native.bundle.windows.webview2` says what the NSIS installer does about that:
+
+| Value | The installer |
+|-------|---------------|
+| `download` (default) | Downloads Microsoft's Evergreen bootstrapper (`go.microsoft.com/fwlink/p/?LinkId=2124703`, PowerShell as the second try) and runs it with `/silent /install` |
+| `embed` | The same without the download: `webview2Path` is a `MicrosoftEdgeWebview2Setup.exe` that is stored inside the installer (about 1.7 MB) |
+| `fixed` | Installs no runtime. `webview2Path` is an extracted Fixed Version runtime folder (from the `.cab` on the WebView2 download page, for the architecture you build); it is copied to `WebView2Runtime` next to the executable and the app uses it before any installed runtime. Adds 150 to 300 MB |
+| `none` | Does nothing; the app handles a missing runtime itself |
+
+```ts
+bundle: { windows: { installer: "nsis", webview2: "embed", webview2Path: "vendor/MicrosoftEdgeWebview2Setup.exe" } }
+```
+
+The files are Microsoft's: download them yourself, keep them out of version
+control, and check Microsoft's redistribution terms. A missing or wrong file is
+`KR7220` with a hint that names the fix.
+
+The check follows Microsoft's documentation: the `pv` value under
+`EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}`, in
+`HKLM\SOFTWARE\WOW6432Node` (64-bit Windows), `HKLM\SOFTWARE` (32-bit Windows)
+and `HKCU\Software` (per-user installs); a missing value or `0.0.0.0` means not
+installed. The bootstrapper runs only when none is found, so reinstalling an
+app does not touch an existing runtime. If the bootstrapper cannot be fetched or
+fails, the installer says so (a message box, or the log of a silent install)
+and finishes anyway.
+
+The app itself does not fail silently either. A program started from Explorer
+has no console, so when no runtime can be started the app shows a message box
+("Native Tasks needs the Microsoft Edge WebView2 Runtime...") with the download
+page and offers to open it, then exits with the error. Set
+`KRATE_NATIVE_NO_DIALOG=1` to suppress the box for unattended runs.
+
+**MSIX** cannot declare the Evergreen runtime as a dependency: it is not a
+framework package, so a manifest has nothing to name. An MSIX app relies on the
+runtime being present and on the message box above. The package targets Windows
+10 1809 and later.
+
+### Architectures
+
+`--target windows/arm64` (and `linux/arm64`, `darwin/arm64`) builds and packages
+for ARM: the `.deb`/`.rpm` architecture, the MSIX `ProcessorArchitecture`, the
+AppImage `ARCH` and the Windows resource object follow the target. CI runs the
+packaging steps natively on `ubuntu-24.04-arm` and `windows-11-arm` as well as on
+x64 and Apple silicon. Bun and Deno publish no Windows on ARM builds, so a
+Windows on ARM machine can use Node (or QuickJS) host code only.
 
 ### Icon and version resources
 

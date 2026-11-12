@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
+	"github.com/kratejs/krate/packages/native/toastscheme"
 )
 
 func winExeName(m Metadata) string { return fileSafe(m.ProductName) + ".exe" }
@@ -23,6 +24,9 @@ func packageWindows(o *Options, ic *Icon, want map[string]bool, stage string, re
 		return fail(diag.CodeNativePkgIcon, "native.icons", err.Error(), "")
 	}
 	t.addData(dir+"/"+"icon.ico", 0o644, ico)
+	if err := addWebView2(m, t, dir); err != nil {
+		return err
+	}
 	if err := writeDisk(stage, t); err != nil {
 		return wrapWrite(stage, err)
 	}
@@ -105,9 +109,10 @@ func nsisStr(s string) string {
 }
 
 // NSISScript returns the installer script: install dir, Start menu and
-// desktop shortcuts, uninstaller, URL protocol keys for deep links, and a
-// WebView2 runtime check that runs Microsoft's evergreen bootstrapper when the
-// runtime is missing.
+// desktop shortcuts, uninstaller, URL protocol keys for deep links and for
+// notification clicks, and a WebView2 runtime check that runs Microsoft's
+// Evergreen bootstrapper when the runtime is missing (native.bundle.windows
+// .webview2 chooses how the bootstrapper arrives).
 func NSISScript(m Metadata, p Payload, srcDir, outFile string) string {
 	v, _ := splitVersion(m.Version)
 	exe := winExeName(m)
@@ -122,6 +127,7 @@ func NSISScript(m Metadata, p Payload, srcDir, outFile string) string {
 	w("Unicode true")
 	w("!include \"MUI2.nsh\"")
 	w("!include \"x64.nsh\"")
+	w("!include \"LogicLib.nsh\"")
 	w("")
 	w("!define APPNAME %s", nsisStr(m.ProductName))
 	w("!define DIRNAME %s", nsisStr(fileSafe(m.ProductName))) // the name used in file system paths
@@ -161,30 +167,11 @@ func NSISScript(m Metadata, p Payload, srcDir, outFile string) string {
 	w("  SetRegView 64")
 	w("FunctionEnd")
 	w("")
-	w("Function EnsureWebView2")
-	w("  ; Evergreen runtime client GUID. Present per machine or per user when installed.")
-	w("  SetRegView 32")
-	w("  ReadRegStr $0 HKLM \"SOFTWARE\\Microsoft\\EdgeUpdate\\Clients\\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}\" \"pv\"")
-	w("  SetRegView 64")
-	w("  ${If} $0 == \"\"")
-	w("    ReadRegStr $0 HKCU \"Software\\Microsoft\\EdgeUpdate\\Clients\\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}\" \"pv\"")
-	w("  ${EndIf}")
-	w("  ${If} $0 == \"\"")
-	w("    DetailPrint \"Installing the Microsoft WebView2 runtime\"")
-	w("    NSISdl::download \"https://go.microsoft.com/fwlink/p/?LinkId=2124703\" \"$TEMP\\MicrosoftEdgeWebview2Setup.exe\"")
-	w("    Pop $1")
-	w("    ${If} $1 == \"success\"")
-	w("      ExecWait '\"$TEMP\\MicrosoftEdgeWebview2Setup.exe\" /silent /install'")
-	w("      Delete \"$TEMP\\MicrosoftEdgeWebview2Setup.exe\"")
-	w("    ${Else}")
-	w("      MessageBox MB_OK|MB_ICONEXCLAMATION \"${APPNAME} needs the Microsoft WebView2 runtime. Install it from https://developer.microsoft.com/microsoft-edge/webview2/ and run this installer again.\"")
-	w("      Abort")
-	w("    ${EndIf}")
-	w("  ${EndIf}")
-	w("FunctionEnd")
-	w("")
+	writeWebView2Check(&b, m)
 	w("Section \"Install\"")
-	w("  Call EnsureWebView2")
+	if webView2Mode(m) == "download" || webView2Mode(m) == "embed" {
+		w("  Call EnsureWebView2")
+	}
 	w("  SetOutPath \"$INSTDIR\"")
 	w("  File /r %s", nsisStr(filepath.Join(srcDir, "*")))
 	w("  WriteUninstaller \"$INSTDIR\\Uninstall.exe\"")
@@ -206,6 +193,19 @@ func NSISScript(m Metadata, p Payload, srcDir, outFile string) string {
 		w("  WriteRegStr HKCR %s \"$INSTDIR\\${APPEXE},0\"", nsisStr(s+"\\DefaultIcon")+" \"\"")
 		w("  WriteRegStr HKCR %s '\"$INSTDIR\\${APPEXE}\" \"%%1\"'", nsisStr(s+"\\shell\\open\\command")+" \"\"")
 	}
+	// The scheme a notification click launches, so that clicking a toast
+	// after the app has quit starts it again (see package toastscheme).
+	scheme := toastscheme.Scheme(m.AppID)
+	for _, v := range toastscheme.RegistryValues(scheme, m.ProductName, "@EXE@") {
+		var val string
+		if strings.Contains(v.Value, `"`) && !strings.Contains(v.Value, "'") {
+			// The command line: quotes inside, so use NSIS single quotes.
+			val = "'" + strings.ReplaceAll(strings.ReplaceAll(v.Value, "$", "$$"), "@EXE@", `$INSTDIR\${APPEXE}`) + "'"
+		} else {
+			val = strings.ReplaceAll(nsisStr(v.Value), "@EXE@", `$INSTDIR\${APPEXE}`)
+		}
+		w("  WriteRegStr HKLM %s %s %s", nsisStr(v.Key), nsisStr(v.Name), val)
+	}
 	w("SectionEnd")
 	w("")
 	w("Section \"Uninstall\"")
@@ -218,6 +218,122 @@ func NSISScript(m Metadata, p Payload, srcDir, outFile string) string {
 	for _, s := range m.DeepLinks {
 		w("  DeleteRegKey HKCR %s", nsisStr(s))
 	}
+	w("  DeleteRegKey HKLM %s", nsisStr(`Software\Classes\`+scheme))
 	w("SectionEnd")
 	return b.String()
+}
+
+// webView2Mode returns the effective native.bundle.windows.webview2.
+func webView2Mode(m Metadata) string {
+	if m.WebView2 == "" {
+		return "download"
+	}
+	return m.WebView2
+}
+
+// webView2Folder is the install-relative folder of a bundled Fixed Version
+// runtime; the shell looks for it next to its executable.
+const webView2Folder = "WebView2Runtime"
+
+// addWebView2 adds the Fixed Version runtime folder to the install tree when
+// native.bundle.windows.webview2 is "fixed". The runtime is Microsoft's and
+// stays on the developer's machine; it is copied into the package only.
+func addWebView2(m Metadata, t *tree, dir string) error {
+	switch webView2Mode(m) {
+	case "fixed":
+		if _, err := os.Stat(filepath.Join(m.WebView2Path, "msedgewebview2.exe")); err != nil {
+			return fail(diag.CodeNativePkgInput, "native.bundle.windows.webview2Path",
+				fmt.Sprintf("%s is not an extracted Fixed Version runtime (msedgewebview2.exe is missing)", m.WebView2Path),
+				"download the Fixed Version cab from https://developer.microsoft.com/microsoft-edge/webview2/ for the architecture you build, extract it and point webview2Path at the folder")
+		}
+		if err := t.addDisk(dir+"/"+webView2Folder, m.WebView2Path); err != nil {
+			return fail(diag.CodeNativePkgInput, m.WebView2Path, err.Error(), "")
+		}
+	case "embed":
+		b, err := os.ReadFile(m.WebView2Path)
+		if err != nil || len(b) < 2 || b[0] != 'M' || b[1] != 'Z' {
+			return fail(diag.CodeNativePkgInput, "native.bundle.windows.webview2Path",
+				fmt.Sprintf("%s is not the WebView2 bootstrapper (MicrosoftEdgeWebview2Setup.exe)", m.WebView2Path),
+				"download the Evergreen Bootstrapper from https://developer.microsoft.com/microsoft-edge/webview2/")
+		}
+	}
+	return nil
+}
+
+const webView2ClientKey = `Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}`
+
+const bootstrapperDownloadURL = "https://go.microsoft.com/fwlink/p/?LinkId=2124703"
+
+// writeWebView2Check writes the HasWebView2 and EnsureWebView2 functions.
+//
+// HasWebView2 uses the locations Microsoft documents for the Evergreen
+// runtime: the "pv" value of the EdgeUpdate client key, per machine in
+// HKLM\SOFTWARE\WOW6432Node (64-bit Windows; the 32-bit registry view of this
+// 32-bit installer is that key) or HKLM\SOFTWARE (32-bit Windows), and per
+// user in HKCU\Software. A missing value or "0.0.0.0" means not installed.
+func writeWebView2Check(b *strings.Builder, m Metadata) {
+	mode := webView2Mode(m)
+	b.WriteString(`Function HasWebView2
+  ; Result in $0: the runtime version, or "" when none is installed.
+  StrCpy $0 ""
+  SetRegView 32
+  ReadRegStr $1 HKLM "SOFTWARE\` + webView2ClientKey + `" "pv"
+  SetRegView 64
+  ${If} $1 != ""
+  ${AndIf} $1 != "0.0.0.0"
+    StrCpy $0 $1
+  ${EndIf}
+  ${If} $0 == ""
+    ReadRegStr $1 HKCU "Software\` + webView2ClientKey + `" "pv"
+    ${If} $1 != ""
+    ${AndIf} $1 != "0.0.0.0"
+      StrCpy $0 $1
+    ${EndIf}
+  ${EndIf}
+FunctionEnd
+
+`)
+	if mode == "none" || mode == "fixed" {
+		fmt.Fprintf(b, "; native.bundle.windows.webview2 is %q: the installer does not install the runtime.\n", mode)
+		b.WriteString("\n")
+		return
+	}
+	b.WriteString(`Function EnsureWebView2
+  Call HasWebView2
+  ${If} $0 != ""
+    DetailPrint "Microsoft WebView2 Runtime $0 is installed"
+    Return
+  ${EndIf}
+  DetailPrint "Installing the Microsoft WebView2 Runtime"
+  InitPluginsDir
+  StrCpy $2 "$PLUGINSDIR\MicrosoftEdgeWebview2Setup.exe"
+`)
+	if mode == "embed" {
+		fmt.Fprintf(b, "  File \"/oname=$PLUGINSDIR\\MicrosoftEdgeWebview2Setup.exe\" %s\n", nsisStr(m.WebView2Path))
+	} else {
+		fmt.Fprintf(b, `  NSISdl::download "%s" $2
+  Pop $1
+  ${If} $1 != "success"
+    ; NSISdl cannot always follow Microsoft's redirects; try PowerShell once.
+    nsExec::ExecToLog 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; (New-Object Net.WebClient).DownloadFile(\"%s\", \"$2\")"'
+    Pop $1
+  ${EndIf}
+  ${IfNot} ${FileExists} $2
+    MessageBox MB_OK|MB_ICONEXCLAMATION "${APPNAME} needs the Microsoft WebView2 Runtime and it could not be downloaded. Install it from https://developer.microsoft.com/microsoft-edge/webview2/ before starting ${APPNAME}." /SD IDOK
+    Return
+  ${EndIf}
+`, bootstrapperDownloadURL, bootstrapperDownloadURL)
+	}
+	b.WriteString(`  ExecWait '"$2" /silent /install' $1
+  Delete $2
+  Call HasWebView2
+  ${If} $0 == ""
+    DetailPrint "The WebView2 Runtime installer exited with code $1 and the runtime is still missing"
+    MessageBox MB_OK|MB_ICONEXCLAMATION "The Microsoft WebView2 Runtime could not be installed (exit code $1). Install it from https://developer.microsoft.com/microsoft-edge/webview2/ before starting ${APPNAME}." /SD IDOK
+  ${Else}
+    DetailPrint "Microsoft WebView2 Runtime $0 installed"
+  ${EndIf}
+FunctionEnd
+
+`)
 }

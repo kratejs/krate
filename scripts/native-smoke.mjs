@@ -4,9 +4,9 @@
 //
 //   node scripts/native-smoke.mjs <linux|macos|windows> <step>
 //
-//   linux    prepare deb rpm appimage update
-//   macos    prepare dmg update
-//   windows  cert prepare nsis msix update
+//   linux    prepare deb rpm appimage update sign
+//   macos    prepare dmg update sign
+//   windows  cert prepare nsis msix update webview2
 //
 // "prepare" builds examples/native-tasks twice with `krate native build
 // --release --package`: version 1.0.0 (A) and 1.1.0 (B), both with the
@@ -15,6 +15,14 @@
 // page (the release executable's --browser mode prints the URL; a window is
 // opened too when a display exists), then update A to B through the real
 // updater package against a local HTTP feed.
+//
+// The "sign" steps sign for real with throwaway keys made in the job and
+// verify the result with the platform's own tool: gpg --verify on Linux, a
+// self-signed identity in a temporary keychain and codesign --verify --deep
+// --strict on macOS. Windows signs in "prepare" with a self-signed certificate
+// from the "cert" step (trusted in the job) and verifies with signtool verify
+// /pa and Get-AuthenticodeSignature. Notarization is not tested: it needs an
+// Apple Developer account (see docs/native/signing).
 //
 // Environment: SMOKE_WORK (work directory, default $RUNNER_TEMP/native-smoke),
 // KRATE_REQUIRE_E2E (a missing optional tool fails instead of skipping).
@@ -37,6 +45,10 @@ const appId = 'com.example.tasks';
 const versionA = '1.0.0';
 const versionB = '1.1.0';
 const requireE2E = !!process.env.KRATE_REQUIRE_E2E;
+// Tools the runner may really lack (no arm64 build, not in the image): a
+// missing one is skipped with a notice even under KRATE_REQUIRE_E2E. Any other
+// missing tool still fails.
+const optionalTools = new Set((process.env.KRATE_OPTIONAL_TOOLS || '').split(/[,\s]+/).filter(Boolean));
 
 const krateBin = path.join(work, 'bin', isWin ? 'krate.exe' : 'krate');
 const keyFile = path.join(work, 'updater.key');
@@ -65,6 +77,18 @@ function run(cmd, args, o = {}) {
   return r;
 }
 
+// runBoth runs a command and returns its stdout and stderr together (codesign
+// writes its report to stderr).
+function runBoth(cmd, args, o = {}) {
+  log(`+ ${cmd} ${args.map(quote).join(' ')}`);
+  const r = spawnSync(cmd, args, { cwd: o.cwd, env: { ...process.env, ...o.env }, encoding: 'utf8', maxBuffer: 64 << 20 });
+  if (r.error) throw r.error;
+  const text = (r.stdout || '') + (r.stderr || '');
+  log(text.trimEnd());
+  if (r.status !== 0 && !o.allowFail) throw new Error(`${cmd} exited with ${r.status}`);
+  return { status: r.status, text };
+}
+
 // runAsync is run for callers that must keep the event loop alive (the local
 // update feed is served by this process).
 function runAsync(cmd, args, o = {}) {
@@ -84,9 +108,10 @@ function fail(msg) {
   throw new Error(msg);
 }
 
-function skipOrFail(what) {
-  if (requireE2E) fail(`${what} (KRATE_REQUIRE_E2E is set)`);
+function skipOrFail(what, tool = '') {
+  if (requireE2E && !(tool && optionalTools.has(tool))) fail(`${what} (KRATE_REQUIRE_E2E is set)`);
   log(`SKIP: ${what}`);
+  if (process.env.GITHUB_ACTIONS) console.log(`::notice title=skipped::${what}`);
 }
 
 function which(name) {
@@ -141,12 +166,12 @@ function ensureKeys() {
   return m[1];
 }
 
-function withConfig(version, fn) {
+function withConfig(version, fn, windowsBundle = '') {
   const pub = ensureKeys();
   const orig = fs.readFileSync(cfgPath, 'utf8');
   const marker = "version: '1.0.0',";
   if (!orig.includes(marker)) fail(`${cfgPath} no longer contains ${marker}`);
-  const bundle = goos === 'windows' ? "\n    bundle: { windows: { publisher: 'CN=Krate CI' } }," : '';
+  const bundle = goos === 'windows' ? `\n    bundle: { windows: { publisher: 'CN=Krate CI'${windowsBundle} } },` : '';
   const edited = orig.replace(
     marker,
     `version: '${version}',\n    updater: { url: 'https://updates.example.invalid/latest-{target}.json', publicKey: '${pub}' },${bundle}`,
@@ -161,7 +186,7 @@ function withConfig(version, fn) {
 
 // buildPackages builds and packages the example as one version into
 // <work>/<label>.
-function buildPackages(label, version, formats, extraArgs = [], env = {}) {
+function buildPackages(label, version, formats, extraArgs = [], env = {}, windowsBundle = '') {
   ensureKrate();
   const out = path.join(work, label);
   fs.rmSync(out, { recursive: true, force: true });
@@ -171,6 +196,7 @@ function buildPackages(label, version, formats, extraArgs = [], env = {}) {
       ['native', 'build', exampleDir, '--release', '--package', '--format', formats.join(','), '--out', out, '--notes', `smoke ${version}`, ...extraArgs],
       { env: { GOWORK: 'off', KRATE_UPDATER_PRIVATE_KEY_FILE: keyFile, ...env } },
     ),
+    windowsBundle,
   );
   log(`packages for ${label}:`);
   for (const p of walk(path.join(out, 'packages'))) log(`  ${path.relative(out, p)}`);
@@ -335,7 +361,7 @@ async function linux(step) {
     case 'prepare': {
       const formats = ['tar.gz', 'deb', 'rpm'];
       if (appImageTool()) formats.push('appimage');
-      else skipOrFail('appimagetool is not on PATH; the AppImage is not built');
+      else skipOrFail('appimagetool is not on PATH; the AppImage is not built', 'appimagetool');
       buildPackages('A', versionA, formats);
       buildPackages('B', versionB, formats.filter((f) => f === 'tar.gz'));
       return;
@@ -369,7 +395,7 @@ async function linux(step) {
     }
     case 'rpm': {
       const rpm = findPackage('A', /\.rpm$/);
-      if (!which('rpm')) return skipOrFail('rpm is not installed');
+      if (!which('rpm')) return skipOrFail('rpm is not installed', 'rpm');
       run('rpm', ['-qpi', rpm]);
       const list = run('rpm', ['-qpl', rpm], { capture: true }).stdout;
       for (const want of ['/usr/bin/native-tasks', `/usr/share/applications/${appId}.desktop`]) {
@@ -380,7 +406,7 @@ async function linux(step) {
       return;
     }
     case 'appimage': {
-      if (!appImageTool()) return skipOrFail('appimagetool is not on PATH');
+      if (!appImageTool()) return skipOrFail('appimagetool is not on PATH', 'appimagetool');
       const img = findPackage('A', /\.AppImage$/);
       fs.chmodSync(img, 0o755);
       await launchCheck(img, { version: versionA, env: { APPIMAGE_EXTRACT_AND_RUN: '1' } });
@@ -399,12 +425,126 @@ async function linux(step) {
       await launchCheck(exe, { version: versionB, window: false });
       return;
     }
+    case 'sign':
+      return linuxSign();
     default:
       fail(`unknown linux step ${step}`);
   }
 }
 
+// linuxSign signs the packages of "prepare" with a freshly generated gpg key
+// through `krate native sign --gpg-key` and checks every detached signature
+// with gpg --verify, and that a changed file fails.
+async function linuxSign() {
+  if (!which('gpg')) return skipOrFail('gpg is not installed', 'gpg');
+  const home = path.join(work, 'gnupg');
+  fs.rmSync(home, { recursive: true, force: true });
+  fs.mkdirSync(home, { recursive: true, mode: 0o700 });
+  const env = { GNUPGHOME: home };
+  const batch = path.join(work, 'gpg-batch.txt');
+  fs.writeFileSync(batch, '%no-protection\nKey-Type: RSA\nKey-Length: 3072\nName-Real: Krate CI\nName-Email: ci@krate.invalid\nExpire-Date: 1d\n%commit\n');
+  run('gpg', ['--batch', '--gen-key', batch], { env });
+  const colons = run('gpg', ['--batch', '--list-secret-keys', '--with-colons'], { env, capture: true }).stdout;
+  const fpr = /^fpr:+([0-9A-F]{40}):/m.exec(colons)?.[1];
+  if (!fpr) fail(`no key fingerprint in:\n${colons}`);
+  ensureKrate();
+  const out = path.join(work, 'A');
+  for (const f of walk(path.join(out, 'packages'))) if (f.endsWith('.asc')) fs.rmSync(f);
+  withConfig(versionA, () =>
+    run(krateBin, ['native', 'sign', exampleDir, '--out', out, '--gpg-key', fpr], { env: { GOWORK: 'off', KRATE_UPDATER_PRIVATE_KEY_FILE: keyFile, ...env } }),
+  );
+  const signed = walk(path.join(out, 'packages')).filter((p) => /\.(deb|rpm|tar\.gz|AppImage)$/.test(p));
+  if (signed.length === 0) fail('no packages to check; run prepare first');
+  for (const f of signed) {
+    if (!fs.existsSync(`${f}.asc`)) fail(`no signature next to ${path.basename(f)}`);
+    const r = run('gpg', ['--batch', '--verify', `${f}.asc`, f], { env, allowFail: true });
+    if (r.status !== 0) fail(`gpg --verify rejected ${path.basename(f)}`);
+  }
+  // A changed file must not verify.
+  const victim = signed[0];
+  const copy = path.join(work, 'tampered-' + path.basename(victim));
+  const data = fs.readFileSync(victim);
+  data[data.length >> 1] ^= 0xff;
+  fs.writeFileSync(copy, data);
+  const bad = run('gpg', ['--batch', '--verify', `${victim}.asc`, copy], { env, allowFail: true });
+  if (bad.status === 0) fail('gpg verified a tampered package');
+  log(`signed and verified ${signed.length} packages with key ${fpr}`);
+}
+
 // ---------------------------------------------------------------- macos
+
+// macSelfSigned creates a code-signing identity in a temporary keychain: a
+// self-signed certificate (openssl) imported into a new keychain that is put
+// on the search list. It returns the identity's SHA-1 hash and a cleanup
+// function.
+function macSelfSigned() {
+  const dir = path.join(work, 'macos-identity');
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(dir, { recursive: true });
+  const kc = path.join(dir, 'krate-ci.keychain-db');
+  const pw = 'krate-ci-' + Math.random().toString(36).slice(2);
+  const conf = path.join(dir, 'openssl.cnf');
+  fs.writeFileSync(
+    conf,
+    '[req]\ndistinguished_name=dn\nx509_extensions=ext\nprompt=no\n[dn]\nCN=Krate CI Signing\n[ext]\nbasicConstraints=critical,CA:false\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=critical,codeSigning\n',
+  );
+  const key = path.join(dir, 'ci.key');
+  const crt = path.join(dir, 'ci.crt');
+  const p12 = path.join(dir, 'ci.p12');
+  // /usr/bin/openssl is LibreSSL, whose PKCS#12 output (3DES) is what
+  // `security import` reads; OpenSSL 3 from Homebrew writes AES it cannot.
+  const ossl = fs.existsSync('/usr/bin/openssl') ? '/usr/bin/openssl' : 'openssl';
+  run(ossl, ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '2', '-config', conf, '-keyout', key, '-out', crt]);
+  run(ossl, ['pkcs12', '-export', '-inkey', key, '-in', crt, '-out', p12, '-passout', `pass:${pw}`]);
+  const before = run('security', ['list-keychains', '-d', 'user'], { capture: true }).stdout.split('\n').map((l) => l.trim().replace(/^"|"$/g, '')).filter(Boolean);
+  run('security', ['create-keychain', '-p', pw, kc]);
+  run('security', ['set-keychain-settings', '-lut', '3600', kc]);
+  run('security', ['unlock-keychain', '-p', pw, kc]);
+  run('security', ['import', p12, '-k', kc, '-P', pw, '-T', '/usr/bin/codesign', '-T', '/usr/bin/security']);
+  run('security', ['set-key-partition-list', '-S', 'apple-tool:,apple:,codesign:', '-s', '-k', pw, kc]);
+  run('security', ['list-keychains', '-d', 'user', '-s', kc, ...before]);
+  // Trusting a self-signed root needs user interaction on some systems; the
+  // signature is made and verified without it, so a failure here is fine.
+  run('security', ['add-trusted-cert', '-r', 'trustRoot', '-p', 'codeSign', '-k', kc, crt], { allowFail: true });
+  const found = run('security', ['find-identity', '-p', 'codesigning', kc], { capture: true }).stdout;
+  const hash = /^\s*\d+\)\s+([0-9A-F]{40})\s+"Krate CI Signing"/m.exec(found)?.[1];
+  if (!hash) fail(`the self-signed identity was not found in the keychain:\n${found}`);
+  return {
+    hash,
+    cleanup() {
+      run('security', ['list-keychains', '-d', 'user', '-s', ...before], { allowFail: true });
+      run('security', ['delete-keychain', kc], { allowFail: true });
+    },
+  };
+}
+
+async function macosSign(app, label) {
+  // Ad hoc: what `--sign` without an identity does. Runs here, trusted nowhere.
+  const adhoc = runBoth('codesign', ['-dvv', app], { allowFail: true });
+  if (!/Signature=adhoc/.test(adhoc.text)) fail(`the ad hoc signed ${label} is not ad hoc signed:\n${adhoc.text}`);
+  runBoth('codesign', ['--verify', '--deep', '--strict', '--verbose=2', app]);
+
+  // A self-signed identity from a temporary keychain.
+  const id = macSelfSigned();
+  try {
+    buildPackages('S', versionA, ['app', 'zip'], ['--sign', '--identity', id.hash]);
+    const signedApp = walk(path.join(work, 'S', 'packages')).find((p) => p.endsWith(`${productName}.app${path.sep}Contents${path.sep}Info.plist`));
+    if (!signedApp) fail('the self-signed build produced no .app');
+    const bundle = path.dirname(path.dirname(signedApp));
+    runBoth('codesign', ['--verify', '--deep', '--strict', '--verbose=2', bundle]);
+    const info = runBoth('codesign', ['-dvv', bundle]);
+    if (/Signature=adhoc/.test(info.text)) fail(`the app signed with the identity is still ad hoc signed:\n${info.text}`);
+    if (!/Authority=Krate CI Signing/.test(info.text)) fail(`the signature does not name the self-signed identity:\n${info.text}`);
+    // Changing a file inside the bundle must break --strict verification.
+    const victim = path.join(bundle, 'Contents', 'Info.plist');
+    fs.appendFileSync(victim, '\n<!-- tampered -->\n');
+    const bad = runBoth('codesign', ['--verify', '--deep', '--strict', bundle], { allowFail: true });
+    if (bad.status === 0) fail('codesign verified a tampered bundle');
+    log('ad hoc and self-signed signatures verified');
+  } finally {
+    id.cleanup();
+  }
+}
 
 async function macos(step) {
   const installDir = path.join(work, 'install-macos');
@@ -434,7 +574,7 @@ async function macos(step) {
       }
       const app = path.join(installDir, appName);
       run('codesign', ['--verify', '--deep', '--strict', '--verbose=2', app]);
-      run('codesign', ['-dv', '--verbose=2', app], { allowFail: true });
+      runBoth('codesign', ['-dvv', app], { allowFail: true });
       run('plutil', ['-p', path.join(app, 'Contents', 'Info.plist')]);
       await launchCheck(appExe(installDir), { version: versionA });
       return;
@@ -444,6 +584,14 @@ async function macos(step) {
       await updateFlow({ exe: appExe(installDir), feedDir: path.join(work, 'B', 'packages') });
       run('codesign', ['--verify', '--deep', '--strict', path.join(installDir, appName)], { allowFail: true });
       await launchCheck(appExe(installDir), { version: versionB });
+      return;
+    }
+    case 'sign': {
+      // The .app that "prepare" built and signed ad hoc (the update step has
+      // replaced the installed copy since).
+      const plist = walk(path.join(work, 'A', 'packages')).find((p) => p.endsWith(`${appName}${path.sep}Contents${path.sep}Info.plist`));
+      if (!plist) fail(`run prepare first: no ${appName} under ${path.join(work, 'A', 'packages')}`);
+      await macosSign(path.dirname(path.dirname(plist)), appName);
       return;
     }
     default:
@@ -460,8 +608,14 @@ function signtoolDir() {
   for (const r of roots) {
     if (!fs.existsSync(r)) continue;
     for (const v of fs.readdirSync(r)) {
-      const d = path.join(r, v, 'x64');
-      if (fs.existsSync(path.join(d, 'signtool.exe'))) found.push(d);
+      // An ARM64 runner runs x64 tools through emulation; prefer the native one.
+      for (const arch of process.arch === 'arm64' ? ['arm64', 'x64'] : ['x64']) {
+        const d = path.join(r, v, arch);
+        if (fs.existsSync(path.join(d, 'signtool.exe'))) {
+          found.push(d);
+          break;
+        }
+      }
     }
   }
   found.sort();
@@ -500,27 +654,32 @@ async function windows(step) {
         ].join('; '),
       );
       fs.writeFileSync(certEnvFile, JSON.stringify({ pfx, password }));
-      if (!signtoolDir() && !which('signtool')) skipOrFail('signtool was not found in the Windows SDK');
+      if (!signtoolDir() && !which('signtool')) skipOrFail('signtool was not found in the Windows SDK; the packages are not signed', 'signtool');
       return;
     }
     case 'prepare': {
-      if (!which('makensis')) skipOrFail('makensis is not on PATH (choco install nsis)');
-      const env = windowsEnv();
-      const formats = ['zip', 'nsis', 'msix'];
-      buildPackages('A', versionA, formats, ['--sign'], env);
-      buildPackages('B', versionB, ['zip'], ['--sign'], env);
+      const formats = ['zip', 'msix'];
+      if (which('makensis')) formats.push('nsis');
+      else skipOrFail('makensis is not on PATH (choco install nsis); no NSIS installer is built', 'makensis');
+      const haveSigntool = !!(signtoolDir() || which('signtool'));
+      const env = haveSigntool ? windowsEnv() : {};
+      const sign = haveSigntool ? ['--sign'] : [];
+      if (!haveSigntool) skipOrFail('signtool is missing, so the packages are built unsigned', 'signtool');
+      buildPackages('A', versionA, formats, sign, env);
+      buildPackages('B', versionB, ['zip'], sign, env);
       return;
     }
     case 'nsis': {
+      if (!which('makensis')) return skipOrFail('makensis is not on PATH; the NSIS installer was not built', 'makensis');
       const setup = findPackage('A', /-setup\.exe$/);
-      verifySignature(setup);
+      if (signed()) verifySignature(setup);
       fs.rmSync(installDir, { recursive: true, force: true });
       // /D must be the last argument and must not be quoted.
       run(setup, ['/S', `/D=${installDir}`]);
       const exe = path.join(installDir, `${productName}.exe`);
       for (let i = 0; i < 100 && !fs.existsSync(exe); i++) await sleep(200);
       for (const f of [exe, path.join(installDir, 'Uninstall.exe')]) if (!fs.existsSync(f)) fail(`the installer did not create ${f}`);
-      verifySignature(exe);
+      if (signed()) verifySignature(exe);
       ps(`if (-not (Test-Path 'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\${appId}')) { throw 'no uninstall registry entry' }`);
       await launchCheck(exe, { version: versionA });
       // _?= keeps the uninstaller in place so -Wait works; remove it after.
@@ -541,8 +700,9 @@ async function windows(step) {
         // makeappx validates the manifest and the block map our packager wrote.
         run(makeappx, ['unpack', '/p', msix, '/d', unpacked, '/l']);
       } else {
-        skipOrFail('makeappx was not found in the Windows SDK');
+        skipOrFail('makeappx was not found in the Windows SDK', 'makeappx');
       }
+      if (!signed()) return skipOrFail('the MSIX is unsigned and Windows installs only signed packages', 'signtool');
       verifySignature(msix);
       ps(`Add-AppxPackage -Path '${msix}'`);
       try {
@@ -568,6 +728,8 @@ async function windows(step) {
       }
       return;
     }
+    case 'webview2':
+      return windowsWebView2();
     case 'update': {
       const zip = findPackage('A', /-windows-.*\.zip$|\.zip$/);
       fs.rmSync(installDir, { recursive: true, force: true });
@@ -584,7 +746,95 @@ async function windows(step) {
   }
 }
 
+// windowsWebView2 tests the installer's WebView2 check against the real
+// registry. The installer embeds a stand-in "bootstrapper" (a tiny program
+// that records that it ran) so that nothing is downloaded and the runner's
+// runtime is untouched:
+//   - with the runtime registered (as on the runner image) the installer must
+//     not run the bootstrapper;
+//   - with its registration hidden for the duration of the run (restored in a
+//     finally block) the installer must run it with /silent /install.
+async function windowsWebView2() {
+  if (!which('makensis')) return skipOrFail('makensis is not on PATH; the NSIS installer was not built', 'makensis');
+  const dummyDir = path.join(work, 'dummy-bootstrapper');
+  fs.rmSync(dummyDir, { recursive: true, force: true });
+  fs.mkdirSync(dummyDir, { recursive: true });
+  fs.writeFileSync(path.join(dummyDir, 'go.mod'), 'module dummy\n\ngo 1.21\n');
+  fs.writeFileSync(
+    path.join(dummyDir, 'main.go'),
+    'package main\n\nimport (\n\t"os"\n\t"path/filepath"\n\t"strings"\n)\n\nfunc main() {\n\tf, err := os.OpenFile(filepath.Join(os.Getenv("ProgramData"), "krate-wv2-marker.txt"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)\n\tif err != nil {\n\t\tos.Exit(2)\n\t}\n\tf.WriteString(strings.Join(os.Args[1:], " ") + "\\n")\n\tf.Close()\n}\n',
+  );
+  const bootstrapper = path.join(work, 'MicrosoftEdgeWebview2Setup.exe');
+  run('go', ['build', '-o', bootstrapper, '.'], { cwd: dummyDir, env: { GOWORK: 'off', CGO_ENABLED: '0' } });
+  buildPackages('W', versionA, ['nsis'], [], {}, `, webview2: 'embed', webview2Path: ${JSON.stringify(bootstrapper)}`);
+  const setup = findPackage('W', /-setup\.exe$/);
+
+  const marker = path.join(process.env.ProgramData || 'C:\\ProgramData', 'krate-wv2-marker.txt');
+  const dir = path.join(work, 'install-webview2');
+  const guid = '{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}';
+  const installAndRemove = () => {
+    fs.rmSync(marker, { force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+    run(setup, ['/S', `/D=${dir}`]);
+    const ran = fs.existsSync(marker) ? fs.readFileSync(marker, 'utf8') : '';
+    const uninstall = path.join(dir, 'Uninstall.exe');
+    if (fs.existsSync(uninstall)) run(uninstall, ['/S', `_?=${dir}`], { allowFail: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+    return ran;
+  };
+
+  const present = ps(
+    `$k = @('HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\EdgeUpdate\\Clients\\${guid}', 'HKCU:\\Software\\Microsoft\\EdgeUpdate\\Clients\\${guid}', 'HKLM:\\SOFTWARE\\Microsoft\\EdgeUpdate\\Clients\\${guid}'); $v = foreach ($p in $k) { if (Test-Path -LiteralPath $p) { $pv = (Get-ItemProperty -LiteralPath $p).pv; if ($pv -and $pv -ne '0.0.0.0') { $pv } } }; Write-Output ('PV=' + ($v -join ','))`,
+    { capture: true },
+  ).stdout.match(/PV=(.*)/)?.[1]?.trim();
+  if (present) {
+    log(`the runner has the WebView2 Runtime ${present}`);
+    const ran = installAndRemove();
+    if (ran) fail(`the installer ran the bootstrapper although the runtime ${present} is installed: ${ran}`);
+    log('runtime present: the bootstrapper was not run');
+  } else {
+    log('the runner has no WebView2 Runtime registered; only the missing case is checked');
+  }
+
+  // Hide the registrations, install, put them back.
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    `$guid = '${guid}'`,
+    "$bases = @('HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\EdgeUpdate\\Clients', 'HKCU:\\Software\\Microsoft\\EdgeUpdate\\Clients', 'HKLM:\\SOFTWARE\\Microsoft\\EdgeUpdate\\Clients')",
+    '$hidden = @()',
+    "foreach ($b in $bases) { $p = Join-Path $b $guid; if (Test-Path -LiteralPath $p) { Rename-Item -LiteralPath $p -NewName ($guid + '.krate-bak'); $hidden += $b } }",
+    'try {',
+    `  Remove-Item -LiteralPath '${marker}' -Force -ErrorAction SilentlyContinue`,
+    `  $p = Start-Process -FilePath '${setup}' -ArgumentList '/S', '/D=${dir}' -Wait -PassThru`,
+    "  Write-Output ('SETUP_EXIT=' + $p.ExitCode)",
+    '} finally {',
+    "  foreach ($b in $hidden) { Rename-Item -LiteralPath (Join-Path $b ($guid + '.krate-bak')) -NewName $guid }",
+    '}',
+  ].join('\n');
+  const r = ps(script, { capture: true });
+  const ran = fs.existsSync(marker) ? fs.readFileSync(marker, 'utf8') : '';
+  const uninstall = path.join(dir, 'Uninstall.exe');
+  if (fs.existsSync(uninstall)) run(uninstall, ['/S', `_?=${dir}`], { allowFail: true });
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.rmSync(marker, { force: true });
+  if (!/SETUP_EXIT=0/.test(r.stdout)) fail(`the installer did not finish cleanly with the runtime missing:\n${r.stdout}`);
+  if (!/\/silent \/install/.test(ran)) fail(`the installer did not run the bootstrapper with /silent /install (marker: ${JSON.stringify(ran)})`);
+  log('runtime missing: the installer ran the bootstrapper with /silent /install');
+}
+
+// signed reports whether this run signed the Windows packages.
+function signed() {
+  return !!(signtoolDir() || which('signtool'));
+}
+
 function verifySignature(file) {
+  // signtool verify /pa checks the Authenticode chain against the machine's
+  // trust store (the "cert" step trusted the throwaway root); the PowerShell
+  // check reads the same signature through a second implementation.
+  const d = signtoolDir();
+  const tool = which('signtool') || (d ? path.join(d, 'signtool.exe') : '');
+  if (tool) run(tool, ['verify', '/pa', '/v', file]);
+  else skipOrFail('signtool was not found; only Get-AuthenticodeSignature checked the signature', 'signtool');
   ps(
     `$s = Get-AuthenticodeSignature -FilePath '${file}'; Write-Output ($s.Status.ToString() + ' ' + $s.SignerCertificate.Subject); if ($s.Status -ne 'Valid') { throw ('not validly signed: ' + $s.Status) }`,
   );

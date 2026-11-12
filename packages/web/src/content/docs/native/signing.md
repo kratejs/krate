@@ -85,6 +85,26 @@ With `--gpg-key <id>` (or `KRATE_GPG_KEY`) every `.deb`, `.rpm`, `.tar.gz` and
 `.AppImage` gets a detached, armored signature `<file>.asc` from `gpg`. The key
 passphrase is handled by gpg-agent.
 
+## What CI checks
+
+The CI `native` job signs with throwaway keys made inside the job, so the code
+paths run against the real tools, not stand-ins:
+
+| OS | Signing | Verified with |
+|----|---------|---------------|
+| Linux | `krate native sign --gpg-key` with a key from `gpg --gen-key` | `gpg --verify` on every `.deb`, `.rpm`, `.tar.gz` and AppImage, and a tampered copy must fail |
+| macOS | ad hoc (`--sign`), and `--identity <hash>` of a self-signed code-signing certificate in a temporary keychain | `codesign --verify --deep --strict`, `codesign -dvv` (the identity is named, or `Signature=adhoc`), and a tampered bundle must fail |
+| Windows | `signtool` with a certificate from `New-SelfSignedCertificate`, trusted in the job | `signtool verify /pa`, `Get-AuthenticodeSignature`, and the signed MSIX installs |
+
+A self-signed signature is real but trusted by nobody else: Gatekeeper and
+SmartScreen still warn, and the MSIX installs only because the job trusts its
+certificate. **Notarization stays manual.** It needs an Apple Developer account
+and credentials that CI does not have, and so do Developer ID signing and an
+Authenticode certificate from a public authority; run `krate native notarize`
+yourself for a release and check it with `spctl -a -vv` and `xcrun stapler
+validate`. An RPM gets a detached `.asc` like the other Linux packages, not an
+embedded RPM signature, so `rpm -K` reports digests only.
+
 ## Update signatures are separate
 
 Update files are signed with the updater key, not with a platform certificate;

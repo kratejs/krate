@@ -219,8 +219,9 @@ hotkey and toast calls on `windows-latest` (see `MANUAL_TEST.md` in
   cut to the 127 characters the shell holds, and a title stands in for an empty
   tooltip. A left click reports `click`, a double click `double-click`, and a
   right click `right-click` and then shows the menu you set; a chosen item
-  reports `menu`. When explorer restarts the icon is added again. If there is
-  no taskbar, `tray.Set` returns an error.
+  reports `menu`. When explorer restarts the icon is added again: the app
+  listens for the registered `TaskbarCreated` message (and allows it through
+  the message filter when it runs elevated). If there is no taskbar, `tray.Set` returns an error.
 - **Global shortcuts.** `RegisterHotKey` on a hidden window, with
   `MOD_NOREPEAT` so holding the keys fires once. A combination another app or
   Windows holds (many `Win+` combinations are reserved) fails with "already
@@ -233,14 +234,21 @@ hotkey and toast calls on `windows-latest` (see `MANUAL_TEST.md` in
   app id (`com.acme.app` stays as it is) and registers it, with the product
   name as display name, under `HKCU\Software\Classes\AppUserModelId`. A
   packaged (MSIX) app takes the identity of its package and registers nothing.
-  Buttons and clicks come back as notification events while the app runs. Two
-  limits to know: Windows has no per-toast timeout (a toast is on screen for
-  the short or long default, and a timeout above 10 seconds or "never" asks
-  for the long one), and **clicking a toast after the app has quit does
-  nothing**: starting a closed app from a toast needs a COM activator and a
-  Start menu shortcut, which Krate does not set up. If notifications are turned
-  off for the app (Focus assist, Settings, group policy) `notify.Send` returns
-  an error that says so. Urgency is ignored except that a critical toast with
+  Buttons and clicks come back as notification events. **A click works after
+  the app has quit**: a toast uses protocol activation with a URL scheme of its
+  own (`krate-toast-` and a hash of the app id), so Windows runs the app's
+  executable with the click as its argument. The app registers the scheme
+  under `HKCU\Software\Classes` the first time it shows a toast, the NSIS
+  installer writes it under `HKLM` and the MSIX manifest declares it. A new
+  process started that way hands the click to the instance that is already
+  running and exits, and the running app raises its window; when none is
+  running the app starts, and the click is delivered to the page as the first
+  notification event as soon as it subscribes (`notify.onEvent` in TypeScript, `notify.OnEvent` in Go). Clicks that
+  nobody is subscribed to while the app runs are dropped, as before. One limit
+  to know: Windows has no per-toast timeout (a toast is on screen for the short
+  or long default, and a timeout above 10 seconds or "never" asks for the long
+  one). If notifications are turned off for the app (Focus assist, Settings,
+  group policy) `notify.Send` returns an error that says so. Urgency is ignored except that a critical toast with
   buttons stays on screen until dismissed.
 
 ### macOS details

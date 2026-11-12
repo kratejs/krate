@@ -3,7 +3,6 @@
 package windows
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -31,10 +30,21 @@ const (
 	runtimeClientGUID = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
 	internalExport    = "CreateWebViewEnvironmentWithOptionsInternal"
 	publicExport      = "CreateCoreWebView2EnvironmentWithOptions"
-	// runtimeTypeInstalled is the "installed" (Evergreen) runtime type.
+	// runtimeTypeInstalled is the "installed" (Evergreen) runtime type and
+	// runtimeTypeRedist the one of a Fixed Version runtime folder. The value of
+	// the second is from the open reimplementations of the loader, not from
+	// Microsoft documentation.
 	runtimeTypeInstalled = 0
+	runtimeTypeRedist    = 1
 
-	bootstrapperURL = "https://go.microsoft.com/fwlink/p/?LinkId=2124703"
+	// fixedRuntimeDirName is the folder next to the executable that holds a
+	// Fixed Version runtime (native.bundle.windows.webview2 "fixed"). The
+	// environment variable below overrides it; Microsoft documents it as the
+	// way to point WebView2 at a browser executable folder.
+	fixedRuntimeDirName = "WebView2Runtime"
+	fixedRuntimeEnv     = "WEBVIEW2_BROWSER_EXECUTABLE_FOLDER"
+
+	simulateNoRuntimeEnv = "KRATE_NATIVE_SIMULATE_NO_WEBVIEW2"
 )
 
 type runtimeInfo struct{ location, pv string }
@@ -76,6 +86,24 @@ func runtimeArch() string {
 	return "x64"
 }
 
+// fixedRuntimeDir returns the Fixed Version runtime folder to use, or "". The
+// folder must hold msedgewebview2.exe.
+func fixedRuntimeDir() string {
+	dirs := []string{os.Getenv(fixedRuntimeEnv)}
+	if exe, err := os.Executable(); err == nil {
+		dirs = append(dirs, filepath.Join(filepath.Dir(exe), fixedRuntimeDirName))
+	}
+	for _, d := range dirs {
+		if d == "" {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(d, "msedgewebview2.exe")); err == nil {
+			return d
+		}
+	}
+	return ""
+}
+
 // internalLoaderCandidates lists EmbeddedBrowserWebView.dll paths to try.
 func internalLoaderCandidates() []string {
 	var out []string
@@ -106,13 +134,39 @@ func internalLoaderCandidates() []string {
 // Invoke is called later from the message loop.
 // opts is an optional ICoreWebView2EnvironmentOptions (nil for none).
 func createEnvironment(userDataDir string, opts, handler unsafe.Pointer) error {
+	// A test hook: behave as if no runtime were installed (the message box
+	// test runs the app with it).
+	if os.Getenv(simulateNoRuntimeEnv) != "" {
+		return &runtimeError{missing: true}
+	}
 	var tried []string
+
+	// A bundled Fixed Version runtime wins over an installed one: the app was
+	// tested with it.
+	if fixed := fixedRuntimeDir(); fixed != "" {
+		_ = os.Setenv(fixedRuntimeEnv, fixed)
+		for _, dll := range loaderDLLCandidates(fixed, "", runtimeArch()) {
+			if _, err := os.Stat(dll); err != nil {
+				continue
+			}
+			for _, typ := range []uintptr{runtimeTypeRedist, runtimeTypeInstalled} {
+				hr, err := callInternal(dll, typ, userDataDir, opts, handler)
+				if err == nil && !failed(hr) {
+					return nil
+				}
+				if err == nil {
+					err = fmt.Errorf("HRESULT 0x%08x", uint32(hr))
+				}
+				tried = append(tried, fmt.Sprintf("%s (type %d): %v", dll, typ, err))
+			}
+		}
+	}
 
 	for _, dll := range internalLoaderCandidates() {
 		if _, err := os.Stat(dll); err != nil {
 			continue
 		}
-		hr, err := callInternal(dll, userDataDir, opts, handler)
+		hr, err := callInternal(dll, runtimeTypeInstalled, userDataDir, opts, handler)
 		if err == nil && !failed(hr) {
 			return nil
 		}
@@ -125,7 +179,7 @@ func createEnvironment(userDataDir string, opts, handler unsafe.Pointer) error {
 	if exe, err := os.Executable(); err == nil {
 		dll := filepath.Join(filepath.Dir(exe), "WebView2Loader.dll")
 		if _, err := os.Stat(dll); err == nil {
-			hr, err := callPublic(dll, userDataDir, opts, handler)
+			hr, err := callPublic(dll, fixedRuntimeDir(), userDataDir, opts, handler)
 			if err == nil && !failed(hr) {
 				return nil
 			}
@@ -136,16 +190,13 @@ func createEnvironment(userDataDir string, opts, handler unsafe.Pointer) error {
 		}
 	}
 
-	msg := "the WebView2 Runtime is not installed (or could not be started); " +
-		"install the Evergreen Runtime with the bootstrapper from " + bootstrapperURL +
-		", or ship WebView2Loader.dll next to the executable"
 	if len(tried) > 0 {
-		msg += " [" + strings.Join(tried, "; ") + "]"
+		return &runtimeError{detail: " [" + strings.Join(tried, "; ") + "]"}
 	}
-	return errors.New(msg)
+	return &runtimeError{missing: true}
 }
 
-func callInternal(dll, userDataDir string, opts, handler unsafe.Pointer) (uintptr, error) {
+func callInternal(dll string, runtimeType uintptr, userDataDir string, opts, handler unsafe.Pointer) (uintptr, error) {
 	h, err := xw.LoadLibraryEx(dll, 0, xw.LOAD_WITH_ALTERED_SEARCH_PATH)
 	if err != nil {
 		return 0, err
@@ -155,15 +206,15 @@ func callInternal(dll, userDataDir string, opts, handler unsafe.Pointer) (uintpt
 		return 0, err
 	}
 	r, _, _ := syscall.SyscallN(proc,
-		1,                    // checkRunningInstance
-		runtimeTypeInstalled, // runtime type
+		1,           // checkRunningInstance
+		runtimeType, // runtime type
 		uintptr(unsafe.Pointer(wstr(userDataDir))),
 		uintptr(opts), // environment options (0: none)
 		uintptr(handler))
 	return r, nil
 }
 
-func callPublic(dll, userDataDir string, opts, handler unsafe.Pointer) (uintptr, error) {
+func callPublic(dll, browserDir, userDataDir string, opts, handler unsafe.Pointer) (uintptr, error) {
 	h, err := xw.LoadLibraryEx(dll, 0, xw.LOAD_WITH_ALTERED_SEARCH_PATH)
 	if err != nil {
 		return 0, err
@@ -172,10 +223,17 @@ func callPublic(dll, userDataDir string, opts, handler unsafe.Pointer) (uintptr,
 	if err != nil {
 		return 0, err
 	}
+	var browser uintptr // 0: the installed runtime
+	var keep *uint16
+	if browserDir != "" {
+		keep = wstr(browserDir)
+		browser = uintptr(unsafe.Pointer(keep))
+	}
 	r, _, _ := syscall.SyscallN(proc,
-		0, // browser executable folder: installed runtime
+		browser,
 		uintptr(unsafe.Pointer(wstr(userDataDir))),
 		uintptr(opts), // options (0: none)
 		uintptr(handler))
+	runtime.KeepAlive(keep)
 	return r, nil
 }

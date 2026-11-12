@@ -160,6 +160,17 @@ type NativeBundleWindows struct {
 	Publisher string `json:"publisher,omitempty"`
 	// Installer is "msix" or "nsis".
 	Installer string `json:"installer,omitempty"`
+	// WebView2 says what the NSIS installer does when the Microsoft WebView2
+	// Runtime is missing: "download" (default) fetches Microsoft's Evergreen
+	// bootstrapper, "embed" ships the bootstrapper inside the installer,
+	// "fixed" ships a Fixed Version runtime folder with the app, "none" does
+	// nothing (the app then shows a message box with the download link).
+	WebView2 string `json:"webview2,omitempty"`
+	// WebView2Path is the bootstrapper file for "embed" (the
+	// MicrosoftEdgeWebview2Setup.exe from Microsoft) or the extracted
+	// runtime folder for "fixed", relative to the project root. The files
+	// are Microsoft's and are not part of Krate; do not commit them.
+	WebView2Path string `json:"webview2Path,omitempty"`
 }
 
 // NativeBundleLinux holds Linux packaging options.
@@ -208,6 +219,7 @@ var (
 	nativeTitleBars      = []string{"native", "hidden", "none"}
 	nativeCompileModes   = []string{"auto", "always", "never"}
 	nativeInstallers     = []string{"msix", "nsis"}
+	nativeWebView2Modes  = []string{"download", "embed", "fixed", "none"}
 	nativeLinuxFormats   = []string{"deb", "rpm", "appimage"}
 	NativeMemoryProfiles = []string{"balanced", "minimal", "performance"}
 )
@@ -428,6 +440,16 @@ func (c *Config) validateNative() (warnings []string, err error) {
 	}
 	if in := n.Bundle.Windows.Installer; in != "" && !oneOf(in, nativeInstallers) {
 		return nil, nativeErr("bundle.windows.installer", fmt.Sprintf("must be \"msix\" or \"nsis\", got %q", in), "pick one installer format")
+	}
+	if m := n.Bundle.Windows.WebView2; m != "" && !oneOf(m, nativeWebView2Modes) {
+		return nil, nativeErr("bundle.windows.webview2", fmt.Sprintf("must be \"download\", \"embed\", \"fixed\" or \"none\", got %q", m),
+			"\"download\" (default) fetches Microsoft's bootstrapper at install time, \"embed\" ships it in the installer, \"fixed\" ships a runtime folder, \"none\" leaves it to the app")
+	}
+	if m, p := n.Bundle.Windows.WebView2, n.Bundle.Windows.WebView2Path; (m == "embed" || m == "fixed") && p == "" {
+		return nil, nativeErr("bundle.windows.webview2Path", fmt.Sprintf("is required when webview2 is %q", m),
+			"set it to MicrosoftEdgeWebview2Setup.exe (embed) or the extracted Fixed Version runtime folder (fixed); download them from https://developer.microsoft.com/microsoft-edge/webview2/")
+	} else if p != "" && m != "embed" && m != "fixed" {
+		return nil, nativeErr("bundle.windows.webview2Path", "is only used when webview2 is \"embed\" or \"fixed\"", "remove it or set webview2")
 	}
 	for _, f := range n.Bundle.Linux.Formats {
 		if !oneOf(f, nativeLinuxFormats) {

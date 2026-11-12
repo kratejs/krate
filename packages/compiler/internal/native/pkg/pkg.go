@@ -55,6 +55,11 @@ type Metadata struct {
 	Publisher string
 	// Installer is "msix" or "nsis" or "".
 	Installer string
+	// WebView2 is the Windows runtime mode ("download", "embed", "fixed",
+	// "none"; "" means download) and WebView2Path its file or folder
+	// (absolute).
+	WebView2     string
+	WebView2Path string
 	// LinuxFormats are "deb", "rpm", "appimage".
 	LinuxFormats []string
 	// Updater is native.updater, nil when not configured.
@@ -91,6 +96,10 @@ func MetadataFromConfig(root string, cfg *config.Config) Metadata {
 		}
 	}
 	m.MacCategory = macCategory(n.Bundle.MacOS.Category)
+	m.WebView2, m.WebView2Path = n.Bundle.Windows.WebView2, n.Bundle.Windows.WebView2Path
+	if m.WebView2Path != "" && !filepath.IsAbs(m.WebView2Path) {
+		m.WebView2Path = filepath.Join(root, m.WebView2Path)
+	}
 	return m
 }
 

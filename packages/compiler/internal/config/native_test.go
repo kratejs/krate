@@ -157,6 +157,18 @@ func TestValidateNative(t *testing.T) {
 		{"viewTransitions auto", func(n *NativeConfig) { n.ViewTransitions = "auto" }, ""},
 		{"compile", func(n *NativeConfig) { n.Release.Compile = "sometimes" }, "release.compile"},
 		{"installer", func(n *NativeConfig) { n.Bundle.Windows.Installer = "exe" }, "installer"},
+		{"webview2 mode", func(n *NativeConfig) { n.Bundle.Windows.WebView2 = "bundle" }, "webview2"},
+		{"webview2 embed needs a path", func(n *NativeConfig) { n.Bundle.Windows.WebView2 = "embed" }, "webview2Path"},
+		{"webview2 fixed needs a path", func(n *NativeConfig) { n.Bundle.Windows.WebView2 = "fixed" }, "webview2Path"},
+		{"webview2 path without a mode that uses it", func(n *NativeConfig) {
+			n.Bundle.Windows.WebView2 = "download"
+			n.Bundle.Windows.WebView2Path = "x.exe"
+		}, "only used"},
+		{"webview2 embed ok", func(n *NativeConfig) {
+			n.Bundle.Windows.WebView2 = "embed"
+			n.Bundle.Windows.WebView2Path = "vendor/MicrosoftEdgeWebview2Setup.exe"
+		}, ""},
+		{"webview2 none ok", func(n *NativeConfig) { n.Bundle.Windows.WebView2 = "none" }, ""},
 		{"linux format", func(n *NativeConfig) { n.Bundle.Linux.Formats = []string{"snap"} }, "format"},
 		{"updater needs key", func(n *NativeConfig) { n.Updater = &NativeUpdater{URL: "https://a.b/u.json"} }, "url and publicKey"},
 		{"window permission unknown", func(n *NativeConfig) { w := []string{"camera"}; n.Window.Permissions = &w }, "window.permissions"},
