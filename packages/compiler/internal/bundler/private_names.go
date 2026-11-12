@@ -263,6 +263,7 @@ func (p exportPlan) importerRewrites(b *Bundler, mods []*Module) map[string]map[
 func (b *Bundler) planExportRenames(mods []*Module, dynamic map[string]bool) exportPlan {
 	plan := exportPlan{renames: map[string]map[string]string{}}
 	owners := map[string]map[string]bool{}
+	aliased := map[string]map[string]bool{} // name -> modules exporting it as an alias
 	for _, mod := range mods {
 		for _, stmt := range mod.Program.Body {
 			exp, ok := stmt.(*ast.ExportStmt)
@@ -281,6 +282,16 @@ func (b *Bundler) planExportRenames(mods []*Module, dynamic map[string]bool) exp
 			for _, spec := range exp.Named {
 				if spec.Local == spec.Remote {
 					add(spec.Local)
+				} else if spec.Remote != "" && spec.Remote != "default" {
+					// `export { remoteOnEvent as onEvent }` declares no onEvent,
+					// but an importer's onEvent lands in the page scope, where it
+					// meets another module's onEvent. The alias owner keeps the
+					// name; a declaring owner moves.
+					add(spec.Remote)
+					if aliased[spec.Remote] == nil {
+						aliased[spec.Remote] = map[string]bool{}
+					}
+					aliased[spec.Remote][mod.Path] = true
 				}
 			}
 		}
@@ -358,9 +369,12 @@ func (b *Bundler) planExportRenames(mods []*Module, dynamic map[string]bool) exp
 				group = append(group, mod)
 			}
 		}
+		// An alias export cannot move (its binding has another name), so it
+		// stays where it is like a module that cannot move.
+		canMove := func(mod *Module) bool { return movable(mod) && !aliased[name][mod.Path] }
 		keeper := group[0]
 		for _, mod := range group {
-			if !movable(mod) {
+			if !canMove(mod) {
 				keeper = mod
 				break
 			}
@@ -370,7 +384,7 @@ func (b *Bundler) planExportRenames(mods []*Module, dynamic map[string]bool) exp
 			if mod == keeper {
 				continue
 			}
-			if !movable(mod) {
+			if !canMove(mod) {
 				stuck = append(stuck, mod)
 				continue
 			}

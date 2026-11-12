@@ -521,3 +521,27 @@ func TestNamespaceImportsKeepSameNamedExportsApart(t *testing.T) {
 		}
 	}
 }
+
+// An aliased export claims its name in importers: remote.ts exports
+// remoteOnEvent as onEvent, window.ts declares onEvent, and the page imports
+// onEvent from remote. Before, the page's onEvent landed on window.ts's
+// declaration (@krate/app/remote). The declaring module moves; the alias
+// keeps the name.
+func TestAliasedExportMovesTheDeclaringModule(t *testing.T) {
+	dir := writeModules(t, map[string]string{
+		"events.ts": "export function subscribe(id, fn) { return id; }\n",
+		"window.ts": "import { subscribe } from './events';\nexport class Win {}\nexport function main() { return new Win(); }\nexport function onEvent(fn) { return subscribe('krate/window.events', fn); }\n",
+		"remote.ts": "import { subscribe } from './events';\nimport { Win } from './window';\nexport function addView(w) { return w instanceof Win; }\nfunction remoteOnEvent(fn) { return subscribe('krate/remote.events', fn); }\nexport { remoteOnEvent as onEvent };\n",
+		"page.tsx":  "import { addView, onEvent } from './remote';\nimport { main } from './window';\nexport default function P() { return <main onClick={() => { addView(main()); onEvent(() => 1); }} />; }\n",
+	})
+	bundle, err := New(dir).Bundle(filepath.Join(dir, "page.tsx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w := topNames(moduleNamed(t, bundle, "window.ts").Program); w["onEvent"] {
+		t.Errorf("window.ts keeps onEvent, which the page's import from remote.ts would reach: %v", w)
+	}
+	if specs := importSpecs(moduleNamed(t, bundle, "page.tsx"), "./remote"); len(specs) != 2 || specs[1].Remote != "onEvent" {
+		t.Errorf("the import of remote changed: %+v", specs)
+	}
+}

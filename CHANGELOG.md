@@ -289,6 +289,9 @@ host code runs in the native process. Names and options may change before releas
 
 ### Fixed
 
+- An aliased export (`export { remoteOnEvent as onEvent }`) and another module's declared export of
+  the same name no longer meet in the page scope: the page's `onEvent` imported from one module
+  used to call the other one. The declaring module moves to a private name.
 - Two client navigations in quick succession no longer leave an unhandled "Transition was skipped"
   rejection on the page: the router also handles the `ready` promise of a view transition the
   newer navigation skipped.
