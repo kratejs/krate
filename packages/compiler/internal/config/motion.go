@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -204,9 +205,8 @@ func validateMotionEase(name, value string, custom map[string][]float64) error {
 		return nil
 	}
 	if m := motionBezierRe.FindStringSubmatch(value); m != nil {
-		var x1, x2 float64
-		fmt.Sscan(m[1], &x1)
-		fmt.Sscan(m[3], &x2)
+		x1, _ := strconv.ParseFloat(m[1], 64)
+		x2, _ := strconv.ParseFloat(m[3], 64)
 		if x1 < 0 || x1 > 1 || x2 < 0 || x2 > 1 {
 			return fmt.Errorf("%s: cubic-bezier x values must be between 0 and 1, got %q", name, value)
 		}
