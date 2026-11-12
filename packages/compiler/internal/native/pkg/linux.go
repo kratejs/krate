@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -410,11 +411,20 @@ func buildAppImage(o *Options, ic *Icon, stage, out string) error {
 // signer (detached gpg signatures).
 func SignLinuxArtifacts(s Signer, dir string, m Metadata) (*Result, error) {
 	res := &Result{Stage: dir}
-	for _, pat := range []string{"*.deb", "*.rpm", "*.tar.gz", "*.AppImage"} {
-		files, _ := filepath.Glob(filepath.Join(dir, m.slug()+pat[1:]))
-		more, _ := filepath.Glob(filepath.Join(dir, m.slug()+"_"+pat))
-		for _, f := range append(files, more...) {
-			if err := s.SignFile(f, strings.TrimPrefix(filepath.Ext(f), ".")); err != nil {
+	// The artifacts are named <slug>_<version>_<arch>.deb,
+	// <slug>-<version>-<release>.<arch>.rpm, <slug>-<version>-linux-<arch>.tar.gz
+	// and <slug>-<version>-<arch>.AppImage: everything that starts with the slug.
+	seen := map[string]bool{}
+	for _, ext := range []string{".deb", ".rpm", ".tar.gz", ".AppImage"} {
+		files, _ := filepath.Glob(filepath.Join(dir, m.slug()+"*"+ext))
+		sort.Strings(files)
+		for _, f := range files {
+			if seen[f] {
+				continue
+			}
+			seen[f] = true
+			format := strings.TrimPrefix(ext, ".")
+			if err := s.SignFile(f, format); err != nil {
 				return nil, err
 			}
 			res.add(Artifact{Path: f + ".asc", Format: "signature"})

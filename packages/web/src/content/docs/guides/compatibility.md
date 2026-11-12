@@ -770,7 +770,7 @@ Known limits:
 - Unit tests replace the signing tools with stand-ins (command lines, ordering and secret redaction). The CI native job also signs for real with certificates made in the job (scripts/native-smoke.mjs linux sign, macos sign, and windows prepare/nsis/msix) and verifies the results; those steps have not run yet. Notarization needs an Apple Developer account and stays manual, as do Developer ID and EV or OV Authenticode certificates and timestamps from a paid authority.
 - macOS and Windows: untested. The same Go code is built for them (cross-compile checks in CI) and the CI native job runs go test on both, but no result of a run against a real WKWebView or WebView2 window has been confirmed.
 
-Evidence: `TestSignMacAppDeepSignsInnerFirst`, `TestSignMacAdHocAndEntitlements`, `TestSignMacOnlyOnMac`, `TestNotarize`, `TestSignWindows`, `TestSignLinuxGPG`, `TestPackageSignsBeforeArchiving`, `TestRedactCommand`, `ci:native-smoke-sign`
+Evidence: `TestSignMacAppDeepSignsInnerFirst`, `TestSignMacAdHocAndEntitlements`, `TestSignMacOnlyOnMac`, `TestNotarize`, `TestSignWindows`, `TestSignLinuxGPG`, `TestPackageSignsBeforeArchiving`, `TestRedactCommand`, `TestSignLinuxArtifactsFindsEveryPackage`, `ci:native-smoke-sign`
 
 ### Native: updater
 

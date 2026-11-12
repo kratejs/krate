@@ -587,9 +587,11 @@ async function macos(step) {
       return;
     }
     case 'sign': {
-      const app = path.join(installDir, appName);
-      if (!fs.existsSync(app)) fail(`run the dmg step first: ${app} is missing`);
-      await macosSign(app, appName);
+      // The .app that "prepare" built and signed ad hoc (the update step has
+      // replaced the installed copy since).
+      const plist = walk(path.join(work, 'A', 'packages')).find((p) => p.endsWith(`${appName}${path.sep}Contents${path.sep}Info.plist`));
+      if (!plist) fail(`run prepare first: no ${appName} under ${path.join(work, 'A', 'packages')}`);
+      await macosSign(path.dirname(path.dirname(plist)), appName);
       return;
     }
     default:

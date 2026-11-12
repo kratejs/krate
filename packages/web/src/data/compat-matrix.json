@@ -1391,6 +1391,7 @@
         "TestSignLinuxGPG",
         "TestPackageSignsBeforeArchiving",
         "TestRedactCommand",
+        "TestSignLinuxArtifactsFindsEveryPackage",
         "ci:native-smoke-sign"
       ],
       "knownLimits": [

@@ -50,6 +50,8 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
   build are skipped with a notice (`optional_runtimes`, `optional_tools`) and never fail
   `KRATE_REQUIRE_E2E` falsely. Packaging smoke steps sign with throwaway keys (gpg, a self-signed
   macOS identity in a temporary keychain, a self-signed Authenticode certificate) and verify them.
+- Fixed: `krate native sign` on Linux signed only the `.deb`; the `.rpm`, `.tar.gz` and AppImage names
+  were never matched. Found by signing the real packages with gpg in the new CI smoke step.
 - Native budgets accept entries for any platform (`darwin-arm64`, `windows-amd64`, ...) with the
   same measured-plus-headroom rule and fail when a recorded entry is exceeded; platforms without
   entries print a paste-ready `BUDGET-RECORD` block.

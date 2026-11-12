@@ -398,3 +398,40 @@ func TestRebuildMacArchives(t *testing.T) {
 		t.Fatal("rebuilt zip lacks the stapled ticket")
 	}
 }
+
+type recordSigner struct{ files []string }
+
+func (r *recordSigner) SignStage(string) error { return nil }
+func (r *recordSigner) SignFile(p, format string) error {
+	r.files = append(r.files, filepath.Base(p)+":"+format)
+	return nil
+}
+
+// The file names are the ones the packager writes (artifactName and the deb
+// and rpm naming), so a rename in either place breaks this test.
+func TestSignLinuxArtifactsFindsEveryPackage(t *testing.T) {
+	dir := t.TempDir()
+	m := testMeta(t)
+	slug := m.slug()
+	names := []string{
+		slug + "_1.2.0_amd64.deb", slug + "-1.2.0-1.x86_64.rpm", slug + "-1.2.0-linux-amd64.tar.gz",
+		slug + "-1.2.0-x86_64.AppImage", slug + "-1.2.0-linux-amd64.zip", "other_1.0.0_amd64.deb", slug + "_1.2.0_amd64.deb.asc",
+	}
+	for _, n := range names {
+		if err := os.WriteFile(filepath.Join(dir, n), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rs := &recordSigner{}
+	res, err := SignLinuxArtifacts(rs, dir, m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{slug + "_1.2.0_amd64.deb:deb", slug + "-1.2.0-1.x86_64.rpm:rpm", slug + "-1.2.0-linux-amd64.tar.gz:tar.gz", slug + "-1.2.0-x86_64.AppImage:AppImage"}
+	if strings.Join(rs.files, ",") != strings.Join(want, ",") {
+		t.Errorf("signed %v\nwant   %v", rs.files, want)
+	}
+	if len(res.Artifacts) != 4 {
+		t.Errorf("artifacts %v", res.Artifacts)
+	}
+}
