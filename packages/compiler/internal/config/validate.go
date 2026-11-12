@@ -112,6 +112,9 @@ func (c *Config) Validate() (warnings []string, err error) {
 	if c.Server.Port < 0 || c.Server.Port > 65535 {
 		return nil, fmt.Errorf("server.port must be between 0 and 65535, got %d", c.Server.Port)
 	}
+	if err := c.Motion.Validate(); err != nil {
+		return nil, err
+	}
 	if c.Server.MaxBodySize < 0 {
 		return nil, fmt.Errorf("server.maxBodySize must be >= 0, got %d", c.Server.MaxBodySize)
 	}

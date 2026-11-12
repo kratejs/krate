@@ -710,6 +710,11 @@ type Config struct {
 	// navigation and omits the router from the shared runtime.
 	SPA *bool `json:"spa,omitempty"`
 
+	// Motion enables the Motion (Framer Motion) animation library and its
+	// declarative data-motion attributes. `true` uses the defaults; an object
+	// tunes them. Nil leaves it off and ships no Motion code.
+	Motion *MotionConfig `json:"motion,omitempty"`
+
 	// ViewTransitions controls the View Transitions API integration. "" or
 	// "auto" (default) enables it (same-document SPA morphs + a cross-document
 	// @view-transition rule); "off" disables it.
