@@ -522,7 +522,7 @@ func zoomShortcuts(t *testing.T, w *Window, v caps.ViewRef) {
 	item := func(title string) {
 		runOnMain(func() {
 			withPool(func() {
-				menu := guiApp.nsApp.Send(sel("mainMenu")).Send(sel("itemWithTitle:"), nsString("View")).Send(sel("submenu"))
+				menu := viewMenu()
 				index := int(menu.Send(sel("indexOfItemWithTitle:"), nsString(title)))
 				if index < 0 {
 					t.Errorf("no %q item in the View menu", title)
@@ -546,9 +546,8 @@ func zoomShortcuts(t *testing.T, w *Window, v caps.ViewRef) {
 		var diag string
 		runOnMain(func() {
 			withPool(func() {
-				bar := guiApp.nsApp.Send(sel("mainMenu"))
-				viewItem := bar.Send(sel("itemWithTitle:"), nsString("View"))
-				menu := viewItem.Send(sel("submenu"))
+				menu := viewMenu()
+				viewItem := menu
 				index := int(menu.Send(sel("indexOfItemWithTitle:"), nsString("Zoom In")))
 				var enabled bool
 				var target objc.ID
@@ -588,4 +587,19 @@ func appOriginCookies(t *testing.T, list func(string) map[string]caps.Cookie) {
 	if err := guiApp.SetCookie(OriginURL, caps.Cookie{Name: "a", Value: "b"}); !errors.Is(err, krate.ErrUnsupported) {
 		t.Fatalf("SetCookie(app origin) = %v, want ErrUnsupported", err)
 	}
+}
+
+// viewMenu returns the View menu of the main menu. The menu bar's items have
+// no titles of their own (the submenu's title is what AppKit shows), so it is
+// found by the submenu title. Main thread.
+func viewMenu() objc.ID {
+	bar := guiApp.nsApp.Send(sel("mainMenu"))
+	n := int(objc.Send[int64](bar, sel("numberOfItems")))
+	for i := 0; i < n; i++ {
+		sub := bar.Send(sel("itemAtIndex:"), i).Send(sel("submenu"))
+		if sub != 0 && goString(sub.Send(sel("title"))) == "View" {
+			return sub
+		}
+	}
+	return 0
 }

@@ -160,7 +160,9 @@ func TestGUIPermissionGeolocation(t *testing.T) {
 	// the location service, off on CI runners) still applies, and then the
 	// page gets PERMISSION_DENIED although the handler allowed it.
 	if st, err := guiApp.PrivacyStatus(caps.PermLocation); err == nil && st != caps.PrivacyGranted {
-		if res["code"] != "1" {
+		// PERMISSION_DENIED (1) or, when the location service never answers,
+		// TIMEOUT (3): either way no position.
+		if res["result"] == "ok" {
 			t.Fatalf("location privacy is %q but the page got a position: %v", st, res)
 		}
 		t.Logf("location privacy is %q, so the allowed request still ends denied: %v", st, res)
