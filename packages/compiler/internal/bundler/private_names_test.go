@@ -327,7 +327,6 @@ func TestSameNamedExportsStayAndWarnWhenTheyCannotMove(t *testing.T) {
 		"barrel":       {"barrel.ts": "export { Card as CA } from './a';\nexport { Card as CB } from './b';\n", "page.tsx": importBarrel},
 		"star":         {"barrel.ts": "export * from './a';\nexport * from './b';\n", "page.tsx": importBarrel},
 		"local barrel": {"barrel.ts": "import { Card as CA } from './a';\nimport { Card as CB } from './b';\nexport { CA, CB };\n", "page.tsx": importBarrel},
-		"namespace":    {"barrel.ts": "import * as a from './a';\nimport * as b from './b';\nexport const keys = [a, b];\n", "page.tsx": importBarrel},
 		"use client":   {"a.tsx": "\"use client\";\nexport function Card() { return <p />; }\n", "b.tsx": "\"use client\";\nexport function Card() { return <b />; }\n"},
 		"use server":   {"a.tsx": "\"use server\";\nexport async function Card() { return 1; }\n", "b.tsx": "\"use server\";\nexport async function Card() { return 2; }\n"},
 	}
@@ -500,5 +499,25 @@ func TestExportDeclaredTwiceMovesWhenImportedOnce(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// Namespace imports of two modules that export one name: a.main and b.main
+// must stay two functions (@krate/app/window and @krate/app/chrome).
+func TestNamespaceImportsKeepSameNamedExportsApart(t *testing.T) {
+	dir := writeModules(t, map[string]string{
+		"a.ts":     "export function main() { return 'a'; }\n",
+		"b.ts":     "export function main() { return 'b'; }\n",
+		"page.tsx": "import * as a from './a';\nimport * as b from './b';\nexport default function P() { return <main onClick={() => [a.main(), b.main()]} />; }\n",
+	})
+	bundle, err := New(dir).Bundle(filepath.Join(dir, "page.tsx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, b := topNames(moduleNamed(t, bundle, "a.ts").Program), topNames(moduleNamed(t, bundle, "b.ts").Program)
+	for name := range a {
+		if b[name] {
+			t.Errorf("a.ts and b.ts both declare %s: a %v, b %v; warnings %+v", name, a, b, collisionWarnings(t, bundle))
+		}
 	}
 }

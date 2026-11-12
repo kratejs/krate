@@ -27,7 +27,7 @@ import (
 // it had the old one. That is only safe when every consumer is visible as an
 // import of the module, so a module stays as it is, and the two modules that
 // export one name keep a warning (KR7116), when it is re-exported through a
-// barrel or `export *`, imported as a namespace, loaded with import(), or is a
+// barrel or `export *`, loaded with import(), or is a
 // "use client" or "use server" module, whose consumers read export names from
 // source. An ordinary import renames nothing: only a name that the bundle
 // imports from two modules is touched.
@@ -293,10 +293,10 @@ func (b *Bundler) planExportRenames(mods []*Module, dynamic map[string]bool) exp
 		for _, stmt := range mod.Program.Body {
 			switch st := stmt.(type) {
 			case *ast.ImportStmt:
+				// A namespace import does not pin its module: the page builds
+				// the namespace object from the export table, keyed by the
+				// original names (build.exportBindings).
 				target := b.resolveImportForModule(mod.Path, strings.Trim(st.Source, "\"'`"))
-				if st.Namespace != "" {
-					pinned[target] = true
-				}
 				for _, spec := range st.Named {
 					if owners[spec.Remote][target] {
 						if imported[spec.Remote] == nil {

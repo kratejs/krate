@@ -193,24 +193,26 @@ func exportBindings(res *bundler.ImportResolver, path string, byPath map[string]
 			continue
 		}
 		switch d := exp.Declaration.(type) {
+		// The bundler may have moved an export to a private name
+		// (bundler.OriginalName); `ns.member` still asks for the written one.
 		case *ast.FnDecl:
 			if !exp.Default && d.Name != "" {
-				out[d.Name] = d.Name
+				out[bundler.OriginalName(d.Name)] = d.Name
 			}
 		case *ast.ClassDecl:
 			if !exp.Default && d.Name != "" {
-				out[d.Name] = d.Name
+				out[bundler.OriginalName(d.Name)] = d.Name
 			}
 		case *ast.VarStmt:
 			for _, decl := range d.Decls {
 				if decl != nil && decl.Name != "" {
-					out[decl.Name] = decl.Name
+					out[bundler.OriginalName(decl.Name)] = decl.Name
 				}
 			}
 		}
 		for _, n := range exp.Named {
 			if n.Local != "" && n.Remote != "" && n.Remote != "default" {
-				out[n.Remote] = n.Local
+				out[bundler.OriginalName(n.Remote)] = n.Local
 			}
 		}
 		if exp.ReexportSource != "" {
