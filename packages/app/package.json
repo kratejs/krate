@@ -64,6 +64,10 @@
       "types": "./dist/window.d.ts",
       "default": "./dist/window.js"
     },
+    "./chrome": {
+      "types": "./dist/chrome.d.ts",
+      "default": "./dist/chrome.js"
+    },
     "./dialog": {
       "types": "./dist/dialog.d.ts",
       "default": "./dist/dialog.js"

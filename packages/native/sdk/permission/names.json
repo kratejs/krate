@@ -14,6 +14,7 @@
     "os:info",
     "os:secrets",
     "os:secrets.read",
+    "share",
     "shell:openExternal",
     "shortcut",
     "tray",

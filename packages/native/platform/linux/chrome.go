@@ -215,6 +215,10 @@ func (w *Window) ChromeState() (st caps.ChromeState) {
 		st.Transparent = w.chrome.transparent
 		st.Resizable = w.resizable
 		st.ScriptResize = true
+		st.Features = []string{caps.FeatureTitleBar, caps.FeatureDrag, caps.FeatureResize}
+		if c := loadChromeAPI(); c != nil && c.gdkRGBAVisual != nil && c.gtkSetVisual != nil {
+			st.Features = append(st.Features, caps.FeatureTransparent)
+		}
 		if x := w.app.x; x.gtkWindowGetDecorated != nil {
 			st.Decorated = x.gtkWindowGetDecorated(w.win) != 0
 		}

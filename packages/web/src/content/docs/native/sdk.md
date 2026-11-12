@@ -59,6 +59,7 @@ implementation); permissions decide which ids the UI may call.
 | `clipboard:read` | no | Reading the clipboard (sees what the user copied elsewhere) |
 | `tray` | no | A system tray icon |
 | `shortcut` | no | Global keyboard shortcuts |
+| `share` | no | The system share menu for text, URLs and files |
 | `updater` | no | Checking for, downloading and applying app updates, and relaunching; see [Updates](/docs/native/updater/) |
 
 An empty or missing list means the defaults: the non-sensitive set marked
@@ -143,6 +144,29 @@ their Go names (`src/lib/tasks.List`).
 | `krate/window.setPreventClose` | `window` | `window: string, on: boolean` | nothing |
 | `krate/window.navigate` | `window` | `window: string, path: string` | nothing |
 | `krate/window.events` | `window` | none (stream) | `WindowEvent` |
+| `krate/chrome.state` | `window` | `window: string` | `ChromeState` |
+| `krate/chrome.setTitleBar` | `window` | `window: string, style: "native" | "hidden" | "none"` | nothing |
+| `krate/chrome.setBackdrop` | `window` | `window: string, name: Backdrop` | nothing |
+| `krate/chrome.setVibrancy` | `window` | `window: string, material: Vibrancy | ""` | nothing |
+| `krate/chrome.setTitleBarOverlay` | `window` | `window: string, overlay: TitleBarOverlay | null` | nothing |
+| `krate/chrome.setTrafficLightPosition` | `window` | `window: string, x: number, y: number` | nothing |
+| `krate/chrome.startDrag` | `window` | `window: string` | nothing |
+| `krate/chrome.toggleMaximize` | `window` | `window: string` | nothing |
+| `krate/chrome.setDocumentEdited` | `window` | `window: string, on: boolean` | nothing |
+| `krate/chrome.setRepresentedFile` | `window` | `window: string, path: string` | nothing |
+| `krate/chrome.attachSheet` | `window` | `window: string, child: string` | nothing |
+| `krate/chrome.endSheet` | `window` | `window: string` | nothing |
+| `krate/chrome.setTabbing` | `window` | `window: string, identifier: string, mode: TabbingMode` | nothing |
+| `krate/chrome.mergeAllWindows` | `window` | `window: string` | nothing |
+| `krate/chrome.moveTabToNewWindow` | `window` | `window: string` | nothing |
+| `krate/chrome.tabs` | `window` | `window: string` | `string[]` |
+| `krate/chrome.setThumbButtons` | `window` | `window: string, buttons: ThumbButton[]` | nothing |
+| `krate/chrome.share` | `share` | `window: string, items: ShareItems` | nothing |
+| `krate/chrome.setJumpList` | `app` | `tasks: JumpTask[]` | nothing |
+| `krate/chrome.clearJumpList` | `app` | none | nothing |
+| `krate/chrome.setActivationPolicy` | `app` | `policy: "regular" | "accessory" | "prohibited"` | nothing |
+| `krate/chrome.setDockVisible` | `app` | `on: boolean` | nothing |
+| `krate/chrome.events` | `window` | none (stream) | `ChromeEvent` |
 | `krate/dialog.openFile` | `dialog` | `options: OpenOptions` | `string[]` |
 | `krate/dialog.openFolder` | `dialog` | `options: OpenOptions` | `string[]` |
 | `krate/dialog.saveFile` | `dialog` | `options: SaveOptions` | `string | null` |

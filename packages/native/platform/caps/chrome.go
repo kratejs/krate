@@ -299,9 +299,45 @@ type ChromeState struct {
 	// script needs to decide whether to draw resize edges.
 	Resizable bool
 	Decorated bool
+	// Features names what the window supports, from the Feature constants.
+	Features []string
 	// ScriptResize reports that the OS gives a frameless window no resize
 	// border (Linux), so the page script draws resize edges.
 	ScriptResize bool
+}
+
+// Chrome features a window can report in ChromeState.Features, and the
+// names app.supports answers as "chrome:<feature>".
+const (
+	FeatureTitleBar        = "titleBar"
+	FeatureTransparent     = "transparent"
+	FeatureBackdrop        = "backdrop"
+	FeatureVibrancy        = "vibrancy"
+	FeatureTitleBarOverlay = "titleBarOverlay"
+	FeatureTrafficLights   = "trafficLights"
+	FeatureDrag            = "drag"
+	FeatureResize          = "resize"
+	FeatureDocument        = "document"
+	FeatureSheets          = "sheets"
+	FeatureTabs            = "tabs"
+	FeatureThumbButtons    = "thumbButtons"
+)
+
+// App-level features, answered by the App itself.
+const (
+	FeatureJumpList = "jumpList"
+	FeatureShare    = "share"
+	FeatureDock     = "dock"
+)
+
+// HasFeature reports whether the state lists a feature.
+func (s ChromeState) HasFeature(f string) bool {
+	for _, x := range s.Features {
+		if x == f {
+			return true
+		}
+	}
+	return false
 }
 
 // ChromeEvent is delivered to the handler set with ChromeEvents.
