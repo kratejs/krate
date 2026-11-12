@@ -1,6 +1,9 @@
 package menu
 
 import (
+	"encoding/json"
+	"fmt"
+
 	"github.com/kratejs/krate/packages/native/krate"
 	"github.com/kratejs/krate/packages/native/platform/caps"
 	"github.com/kratejs/krate/packages/native/sdk/internal/bridge"
@@ -24,6 +27,20 @@ func toCaps(items []Item) []caps.MenuItem {
 func Register(t *bridge.Table, env *bridge.Env) {
 	topic := env.Topic("menu")
 	t.Stream(IDEvents, Permission, true, topic.Stream())
+	env.Providers[bridge.InjectKey("menu")] = func(payload []byte) error {
+		var p struct {
+			ID, Window string
+			Checked    bool
+		}
+		if err := json.Unmarshal(payload, &p); err != nil {
+			return fmt.Errorf("menu event: %w", err)
+		}
+		if p.ID == "" {
+			return fmt.Errorf("menu event: id is required")
+		}
+		topic.Publish(func(e *wire.Encoder) { encodeEvent(e, Event{ID: p.ID, Window: p.Window, Checked: p.Checked}) })
+		return nil
+	}
 	if m, ok := env.App.(caps.Menus); ok {
 		m.OnMenu(func(ev caps.MenuEvent) {
 			topic.Publish(func(e *wire.Encoder) {

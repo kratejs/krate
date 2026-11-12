@@ -95,6 +95,10 @@
     "./updater": {
       "types": "./dist/updater.d.ts",
       "default": "./dist/updater.js"
+    },
+    "./driver": {
+      "types": "./dist/driver.d.ts",
+      "default": "./dist/driver.js"
     }
   },
   "files": [

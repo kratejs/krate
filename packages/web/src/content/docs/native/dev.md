@@ -120,3 +120,8 @@ An app with [native plugins](/docs/native/plugins/) runs under a shell that
 `$KRATE_SHELL` are refused. Every plugin op is linked in dev. Editing the Go code,
 `go.mod` or manifest of a plugin inside the project restarts the session, because
 plugins are linked into the shell and not into the Go host child.
+
+## Testing
+
+`krate native test` runs your own tests against the app; see
+[Testing your app](/docs/native/testing/).

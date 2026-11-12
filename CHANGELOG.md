@@ -9,6 +9,11 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Krate Native
 
+- `krate native test` runs a project's `*.native.test.ts` files against the real shell with Node's
+  test runner. The new `@krate/app/driver` module launches the app and drives pages (`evaluate`,
+  `click`, `fill`, `press`, `text`, `waitFor`, `errors`, host `call`), several windows and views, and
+  injected tray, menu and shortcut events. The shell's dev control channel gained `views`,
+  `query-in` and `emit`. See docs/native/testing.
 - The `@krate/core-<platform>` packages ship `krate-shell` next to `krate`, cross-compiled with
   `CGO_ENABLED=0` for all seven platforms. The compiler finds the shell in this order: `--shell`,
   `$KRATE_SHELL`, next to the running `krate` executable, a build from a Krate checkout.

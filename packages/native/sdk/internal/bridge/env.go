@@ -397,3 +397,7 @@ func (e *Env) Controls(id string) (caps.WindowControls, platform.Window, string,
 	}
 	return c, win, wid, nil
 }
+
+// InjectKey is the Providers key under which an area leaves its test-event
+// injector (a func(payload []byte) error); see sdk.Host.Inject.
+func InjectKey(area string) string { return "inject." + area }
