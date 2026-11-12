@@ -604,11 +604,11 @@ class KrateDev {
         (this.cfg.events
           ? '<button class="tb-btn host" type="button" title="Host calls">' + ICON_HOST + '<span class="tb-label">Host</span></button>'
           : '') +
+        '<div class="tb-center"><span class="brand">krate</span>' +
+        '<span class="route"></span></div>' +
         (this.cfg.memory
           ? '<button class="tb-btn mem" type="button" title="Memory">' + ICON_MEM + '<span class="tb-label">Memory</span></button>'
           : '') +
-        '<div class="tb-center"><span class="brand">krate</span>' +
-        '<span class="route"></span></div>' +
         '<button class="tb-btn reload" type="button" title="Reload">' +
         ICON_RELOAD +
         '<span class="tb-label">Reload</span></button>';
