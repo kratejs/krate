@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kratejs/krate/packages/native/krate"
 	"github.com/kratejs/krate/packages/native/scheme"
@@ -225,5 +226,188 @@ func TestDownloadStreamHonorsWindowScope(t *testing.T) {
 	var ke *krate.Error
 	if !errors.As(err, &ke) || ke.Code != "permission_denied" {
 		t.Fatalf("a window scoped without updater reached the download stream: %v", err)
+	}
+}
+
+// seedPending writes the state of an applied but unconfirmed update to 1.0.0
+// (the version isolate configures) with real kept files.
+func seedPending(t *testing.T, starts int) (dir, install string) {
+	t.Helper()
+	dir, err := stateDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	install = t.TempDir()
+	prev := filepath.Join(install, ".krate-prev")
+	for p, body := range map[string]string{
+		filepath.Join(install, "app"):     "new binary",
+		filepath.Join(prev, "app"):        "old binary",
+		filepath.Join(install, "keep.md"): "x",
+	} {
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	st := updater.State{
+		Phase: updater.PhasePending, From: "0.9.0", To: "1.0.0", Starts: starts,
+		Prev: &updater.PrevInfo{Kind: updater.KindTree, Target: install, Exe: filepath.Join(install, "app"), Dir: prev, Placed: []string{"app"}, Trashed: []string{"app"}},
+	}
+	b, _ := json.Marshal(st)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "state.json"), b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return dir, install
+}
+
+func TestBootRollsBackAfterUnconfirmedStart(t *testing.T) {
+	isolate(t)
+	t.Setenv(NoRelaunchEnv, "1")
+	Configure(Config{URL: "https://x/feed", PublicKey: "k"})
+	dir, install := seedPending(t, 1)
+	code := -1
+	exit = func(c int) { code = c }
+	defer func() { exit = os.Exit }()
+	Boot(nil)
+	if code != 0 {
+		t.Fatalf("exit code %d, want 0 after a rollback", code)
+	}
+	if b, _ := os.ReadFile(filepath.Join(install, "app")); string(b) != "old binary" {
+		t.Fatalf("app = %q", b)
+	}
+	c := sdktest.New(t, registry(t, "updater"))
+	r := c.Call("krate/updater.status", nil)
+	if r.Failed || !strings.Contains(r.OK, `"failed":"1.0.0"`) || !strings.Contains(r.OK, `"restored":"0.9.0"`) || !strings.Contains(r.OK, `"unconfirmed":false`) {
+		t.Fatalf("%+v", r)
+	}
+	if r := c.Call("krate/updater.ackRollback", nil); r.Failed {
+		t.Fatalf("%+v", r)
+	}
+	if r := c.Call("krate/updater.status", nil); !strings.Contains(r.OK, `"rollback":null`) {
+		t.Fatalf("%+v", r)
+	}
+	if st := updater.LoadState(dir); st.Event != nil || len(st.Failed) != 1 {
+		t.Fatalf("%+v", st)
+	}
+}
+
+func TestBootFirstStartIsWatchedAndConfirms(t *testing.T) {
+	isolate(t)
+	t.Setenv(GraceEnv, "0")
+	Configure(Config{URL: "https://x/feed", PublicKey: "k"})
+	dir, install := seedPending(t, 0)
+	code := -1
+	exit = func(c int) { code = c }
+	defer func() { exit = os.Exit }()
+	Boot(nil)
+	if code != -1 {
+		t.Fatal("a first start must not roll back")
+	}
+	c := sdktest.New(t, registry(t, "updater"))
+	if r := c.Call("krate/updater.status", nil); !strings.Contains(r.OK, `"unconfirmed":true`) {
+		t.Fatalf("%+v", r)
+	}
+	// The page being served confirms after the (zero) grace period.
+	PageServed()
+	deadline := time.Now().Add(5 * time.Second)
+	for updater.LoadState(dir).Phase != updater.PhaseIdle {
+		if time.Now().After(deadline) {
+			t.Fatal("start never confirmed")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if _, err := os.Stat(filepath.Join(install, ".krate-prev")); err == nil {
+		t.Fatal("kept previous version survived the confirmation")
+	}
+	if r := c.Call("krate/updater.markHealthy", nil); r.Failed {
+		t.Fatalf("markHealthy when nothing is pending must succeed: %+v", r)
+	}
+}
+
+func TestManualConfirmIgnoresPageServedButCleanExitCountsOnlyWhenAuto(t *testing.T) {
+	isolate(t)
+	t.Setenv(GraceEnv, "0")
+	Configure(Config{URL: "https://x/feed", PublicKey: "k", ManualConfirm: true})
+	dir, _ := seedPending(t, 0)
+	Boot(nil)
+	PageServed()
+	CleanExit()
+	time.Sleep(100 * time.Millisecond)
+	if updater.LoadState(dir).Phase != updater.PhasePending {
+		t.Fatal("confirm \"app\" was confirmed by the shell")
+	}
+	c := sdktest.New(t, registry(t, "updater"))
+	if r := c.Call("krate/updater.markHealthy", nil); r.Failed {
+		t.Fatalf("%+v", r)
+	}
+	if updater.LoadState(dir).Phase != updater.PhaseIdle {
+		t.Fatal("markHealthy did not confirm")
+	}
+}
+
+func TestCleanExitAfterPageServedConfirms(t *testing.T) {
+	isolate(t)
+	t.Setenv(GraceEnv, "600000")
+	Configure(Config{URL: "https://x/feed", PublicKey: "k"})
+	dir, _ := seedPending(t, 0)
+	Boot(nil)
+	CleanExit()
+	if updater.LoadState(dir).Phase != updater.PhasePending {
+		t.Fatal("a quit before any page was served confirmed the start")
+	}
+	PageServed()
+	CleanExit()
+	if updater.LoadState(dir).Phase != updater.PhaseIdle {
+		t.Fatal("a normal quit after the first page did not confirm")
+	}
+}
+
+func TestSetChannelPersistsAndFillsTheURL(t *testing.T) {
+	isolate(t)
+	var seen string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = r.URL.Path
+		w.WriteHeader(204)
+	}))
+	defer srv.Close()
+	Configure(Config{URL: srv.URL + "/{channel}/latest.json", PublicKey: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="})
+	c := sdktest.New(t, registry(t, "updater"))
+	c.Call("krate/updater.check", nil)
+	if seen != "/stable/latest.json" {
+		t.Fatalf("default channel path %q", seen)
+	}
+	if r := c.Call("krate/updater.setChannel", str("beta")); r.Failed {
+		t.Fatalf("%+v", r)
+	}
+	c.Call("krate/updater.check", nil)
+	if seen != "/beta/latest.json" {
+		t.Fatalf("beta channel path %q", seen)
+	}
+	if r := c.Call("krate/updater.status", nil); !strings.Contains(r.OK, `"channel":"beta"`) {
+		t.Fatalf("%+v", r)
+	}
+	if r := c.Call("krate/updater.setChannel", str("../x")); r.ErrCode != "bad_args" {
+		t.Fatalf("%+v", r)
+	}
+}
+
+func TestNewIDsNeedThePermission(t *testing.T) {
+	isolate(t)
+	c := sdktest.New(t, registry(t, "kv"))
+	for _, id := range []string{"krate/updater.markHealthy", "krate/updater.status", "krate/updater.ackRollback", "krate/updater.setChannel"} {
+		if r := c.Call(id, nil); r.ErrCode != "permission_denied" {
+			t.Errorf("%s: %+v", id, r)
+		}
+	}
+}
+
+func str(s string) func(*wire.Encoder) {
+	return func(e *wire.Encoder) {
+		e.String(s)
 	}
 }

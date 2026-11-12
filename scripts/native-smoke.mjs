@@ -8,13 +8,16 @@
 //   macos    prepare dmg update sign
 //   windows  cert prepare nsis msix update webview2
 //
-// "prepare" builds examples/native-tasks twice with `krate native build
-// --release --package`: version 1.0.0 (A) and 1.1.0 (B), both with the
-// updater public key of a freshly generated Ed25519 key pair. The other steps
-// install A the way a user would, launch it and check that it serves its first
-// page (the release executable's --browser mode prints the URL; a window is
-// opened too when a display exists), then update A to B through the real
-// updater package against a local HTTP feed.
+// "prepare" builds examples/native-tasks three times with `krate native build
+// --release --package`: version 1.0.0 (A), 1.1.0 (B, with a delta update from
+// A) and 1.1.0 again with a host that exits shortly after start (Bad), all
+// with the updater public key of a freshly generated Ed25519 key pair. The
+// other steps install A the way a user would, launch it and check that it
+// serves its first page (the release executable's --browser mode prints the
+// URL; a window is opened too when a display exists), then update A to B
+// through the real updater package against a local HTTP feed (the update
+// must be a delta update, and B confirms a healthy start), and finally update
+// a fresh A to Bad and check that the second launch of Bad restores A.
 //
 // The "sign" steps sign for real with throwaway keys made in the job and
 // verify the result with the platform's own tool: gpg --verify on Linux, a
@@ -184,6 +187,28 @@ function withConfig(version, fn, windowsBundle = '') {
   }
 }
 
+// withBadHost adds a Go file to the example whose package init ends the
+// process 1.5 s after start: after the shell's first-start protection ran, but
+// long before it would confirm a healthy start.
+function withBadHost(fn) {
+  const file = path.join(exampleDir, 'src', 'lib', 'zz_smoke_bad.go');
+  fs.writeFileSync(
+    file,
+    'package lib\n\nimport (\n\t"os"\n\t"time"\n)\n\nfunc init() {\n\tgo func() {\n\t\ttime.Sleep(1500 * time.Millisecond)\n\t\tos.Exit(3)\n\t}()\n}\n',
+  );
+  try {
+    return fn();
+  } finally {
+    fs.rmSync(file, { force: true });
+  }
+}
+
+// buildUpdateVersions builds B (with a delta update from A) and Bad.
+function buildUpdateVersions(formats, extraArgs = [], env = {}) {
+  buildPackages('B', versionB, formats, [...extraArgs, '--delta-from', path.join(work, 'A', 'packages'), '--delta-count', '3'], env);
+  withBadHost(() => buildPackages('Bad', versionB, formats, extraArgs, env));
+}
+
 // buildPackages builds and packages the example as one version into
 // <work>/<label>.
 function buildPackages(label, version, formats, extraArgs = [], env = {}, windowsBundle = '') {
@@ -258,7 +283,7 @@ async function httpGet(url, hops = 4) {
 // launchCheck starts an installed app and checks that it reports the
 // version, serves its first page in browser mode and, when a display exists,
 // keeps a window open.
-async function launchCheck(bin, { version, env = {}, window = true } = {}) {
+async function launchCheck(bin, { version, env = {}, window = true, settle = 0 } = {}) {
   log(`== launch check: ${bin}`);
   const v = run(bin, ['--version'], { capture: true, env });
   if (!v.stdout.includes(version)) fail(`--version printed ${JSON.stringify(v.stdout)}, want ${version}`);
@@ -280,6 +305,7 @@ async function launchCheck(bin, { version, env = {}, window = true } = {}) {
     const res = await httpGet(url);
     if (res.status !== 200 || !res.body.includes(productName)) fail(`first page: HTTP ${res.status}, body does not mention ${productName}:\n${res.body.slice(0, 400)}`);
     log(`first page served at ${url.replace(/\?.*/, '')} (${res.body.length} bytes)`);
+    if (settle) await sleep(settle);
   } finally {
     killTree(child);
     await exited(child);
@@ -322,8 +348,8 @@ function serveDir(dir) {
 
 // updateFlow runs the real updater against the signed feed of version B and
 // replaces the installed version A.
-async function updateFlow({ exe, feedDir, appImage }) {
-  log(`== update ${versionA} -> ${versionB}: ${exe}`);
+async function updateFlow({ exe, feedDir, appImage, delta = '0' }) {
+  log(`== update ${versionA} -> ${versionB} (delta ${delta}): ${exe}`);
   const srv = await serveDir(feedDir);
   try {
     const target = `${goos}-${goarch}`;
@@ -341,6 +367,8 @@ async function updateFlow({ exe, feedDir, appImage }) {
         KRATE_UPDATE_SMOKE_EXPECT: versionB,
         KRATE_UPDATE_SMOKE_EXE: exe,
         KRATE_UPDATE_SMOKE_APPIMAGE: appImage || '',
+        KRATE_UPDATE_SMOKE_DELTA: delta,
+        KRATE_UPDATE_SMOKE_ROLLBACK: appImage ? '' : '1',
       },
     });
   } finally {
@@ -350,6 +378,62 @@ async function updateFlow({ exe, feedDir, appImage }) {
   const v = run(bin, ['--version'], { capture: true, env: appImage ? { APPIMAGE_EXTRACT_AND_RUN: '1' } : {} });
   if (!v.stdout.includes(versionB)) fail(`after the update ${bin} reports ${JSON.stringify(v.stdout)}, want ${versionB}`);
   log(`updated: ${v.stdout.trim()}`);
+}
+
+// Environment of the launch that must confirm a healthy start at once.
+const confirmEnv = { KRATE_UPDATER_HEALTH_GRACE_MS: '0' };
+
+// keptPrevious lists what an unconfirmed update keeps next to the install.
+function keptPrevious(exe) {
+  const dir = path.dirname(exe);
+  const hits = [];
+  for (const d of [dir, ...[1, 2, 3, 4].map((n) => Array.from({ length: n }).reduce((acc) => path.dirname(acc), dir))]) {
+    if (!fs.existsSync(d)) continue;
+    for (const n of fs.readdirSync(d)) if (/^\.krate-prev$|\.app\.prev$/.test(n)) hits.push(path.join(d, n));
+  }
+  return hits;
+}
+
+// deltaFlow updates the installed A to B with the delta update, starts B (which
+// confirms a healthy start) and checks that the kept copy of A is gone.
+async function deltaFlow({ exe, feedDir }) {
+  await updateFlow({ exe, feedDir, delta: '1' });
+  if (keptPrevious(exe).length === 0) fail('the previous version was not kept for rollback after the update');
+  await launchCheck(exe, { version: versionB, window: false, env: confirmEnv, settle: 800 });
+  let left = keptPrevious(exe);
+  for (let i = 0; i < 20 && left.length; i++) {
+    await sleep(250);
+    left = keptPrevious(exe);
+  }
+  if (left.length) fail(`the previous version is still kept after B confirmed a healthy start: ${left.join(', ')}`);
+  log('B confirmed a healthy start; the previous version was deleted');
+}
+
+// rollbackFlow updates a fresh install of A to Bad, whose host exits before it
+// can confirm a healthy start: the next launch must restore A.
+async function rollbackFlow({ exe, feedDir }) {
+  log('== rollback flow');
+  await updateFlow({ exe, feedDir, delta: '0' });
+  // First start of Bad: it dies on its own (exit 3) before confirming.
+  const first = spawnSync(exe, ['--browser'], { encoding: 'utf8', timeout: 60000, env: process.env });
+  log(`first start of ${versionB}: exit ${first.status}`);
+  if (first.status === 0 || first.status === null) fail(`the bad build should have exited with an error, got ${first.status} ${first.error || ''}\n${first.stdout}\n${first.stderr}`);
+  // The next start restores A. NO_RELAUNCH keeps A from starting detached.
+  const second = spawnSync(exe, ['--browser'], { encoding: 'utf8', timeout: 60000, env: { ...process.env, KRATE_UPDATER_ROLLBACK_NO_RELAUNCH: '1' } });
+  log(`second start: exit ${second.status}\n${second.stderr}`);
+  if (second.status !== 0 || !/rolled back/.test(second.stderr)) fail(`the second start should roll back and exit 0:\n${second.stdout}\n${second.stderr}`);
+  const v = run(exe, ['--version'], { capture: true });
+  if (!v.stdout.includes(versionA)) fail(`after the rollback ${exe} reports ${JSON.stringify(v.stdout)}, want ${versionA}`);
+  await runAsync('go', ['test', '-count=1', '-run', 'TestSmokeRollbackState', '-v', './updater'], {
+    cwd: path.join(repo, 'packages', 'native'),
+    env: {
+      KRATE_UPDATE_SMOKE_APP_ID: appId,
+      KRATE_UPDATE_SMOKE_ROLLED_BACK_FROM: versionB,
+      KRATE_UPDATE_SMOKE_VERSION: versionA,
+    },
+  });
+  await launchCheck(exe, { version: versionA, window: false });
+  log('rolled back to ' + versionA);
 }
 
 // ---------------------------------------------------------------- linux
@@ -363,7 +447,7 @@ async function linux(step) {
       if (appImageTool()) formats.push('appimage');
       else skipOrFail('appimagetool is not on PATH; the AppImage is not built', 'appimagetool');
       buildPackages('A', versionA, formats);
-      buildPackages('B', versionB, formats.filter((f) => f === 'tar.gz'));
+      buildUpdateVersions(['tar.gz']);
       return;
     }
     case 'deb': {
@@ -421,8 +505,13 @@ async function linux(step) {
       const exe = walk(dir).find((p) => path.basename(p) === 'native-tasks' || path.basename(p) === productName);
       if (!exe) fail(`no executable in ${tgz}: ${walk(dir).join(', ')}`);
       await launchCheck(exe, { version: versionA, window: false });
-      await updateFlow({ exe, feedDir: path.join(work, 'B', 'packages') });
-      await launchCheck(exe, { version: versionB, window: false });
+      await deltaFlow({ exe, feedDir: path.join(work, 'B', 'packages') });
+      const dir2 = path.join(work, 'install-linux-rb');
+      fs.rmSync(dir2, { recursive: true, force: true });
+      fs.mkdirSync(dir2, { recursive: true });
+      run('tar', ['-xzf', tgz, '-C', dir2]);
+      const exe2 = walk(dir2).find((p) => path.basename(p) === path.basename(exe));
+      await rollbackFlow({ exe: exe2, feedDir: path.join(work, 'Bad', 'packages') });
       return;
     }
     case 'sign':
@@ -554,7 +643,7 @@ async function macos(step) {
     case 'prepare':
       // --sign without an identity signs ad hoc (codesign --sign -).
       buildPackages('A', versionA, ['app', 'zip', 'dmg'], ['--sign']);
-      buildPackages('B', versionB, ['zip'], ['--sign']);
+      buildUpdateVersions(['zip'], ['--sign']);
       return;
     case 'dmg': {
       const dmg = findPackage('A', /\.dmg$/);
@@ -581,9 +670,13 @@ async function macos(step) {
     }
     case 'update': {
       if (!fs.existsSync(appExe(installDir))) fail(`run the dmg step first: ${appExe(installDir)} is missing`);
-      await updateFlow({ exe: appExe(installDir), feedDir: path.join(work, 'B', 'packages') });
+      await deltaFlow({ exe: appExe(installDir), feedDir: path.join(work, 'B', 'packages') });
       run('codesign', ['--verify', '--deep', '--strict', path.join(installDir, appName)], { allowFail: true });
-      await launchCheck(appExe(installDir), { version: versionB });
+      const dir2 = path.join(work, 'install-macos-rb');
+      fs.rmSync(dir2, { recursive: true, force: true });
+      fs.mkdirSync(dir2, { recursive: true });
+      run('ditto', ['-x', '-k', findPackage('A', /\.zip$/), dir2]);
+      await rollbackFlow({ exe: appExe(dir2), feedDir: path.join(work, 'Bad', 'packages') });
       return;
     }
     case 'sign': {
@@ -666,7 +759,7 @@ async function windows(step) {
       const sign = haveSigntool ? ['--sign'] : [];
       if (!haveSigntool) skipOrFail('signtool is missing, so the packages are built unsigned', 'signtool');
       buildPackages('A', versionA, formats, sign, env);
-      buildPackages('B', versionB, ['zip'], sign, env);
+      buildUpdateVersions(['zip'], sign, env);
       return;
     }
     case 'nsis': {
@@ -737,8 +830,12 @@ async function windows(step) {
       const exe = walk(installDir).find((p) => path.basename(p) === `${productName}.exe`);
       if (!exe) fail(`no ${productName}.exe in ${zip}`);
       await launchCheck(exe, { version: versionA, window: false });
-      await updateFlow({ exe, feedDir: path.join(work, 'B', 'packages') });
-      await launchCheck(exe, { version: versionB, window: false });
+      await deltaFlow({ exe, feedDir: path.join(work, 'B', 'packages') });
+      const dir2 = `${installDir}-rb`;
+      fs.rmSync(dir2, { recursive: true, force: true });
+      ps(`Expand-Archive -Path '${zip}' -DestinationPath '${dir2}' -Force`);
+      const exe2 = walk(dir2).find((p) => path.basename(p) === `${productName}.exe`);
+      await rollbackFlow({ exe: exe2, feedDir: path.join(work, 'Bad', 'packages') });
       return;
     }
     default:

@@ -77,3 +77,14 @@ func compareVersions(a, b version) int {
 	}
 	return 0
 }
+
+// CompareVersions compares two semantic version strings and reports -1, 0 or
+// 1. ok is false when either is not a semantic version.
+func CompareVersions(a, b string) (cmp int, ok bool) {
+	va, oka := parseVersion(a)
+	vb, okb := parseVersion(b)
+	if !oka || !okb {
+		return 0, false
+	}
+	return compareVersions(va, vb), true
+}

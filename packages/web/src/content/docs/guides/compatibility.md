@@ -843,13 +843,14 @@ Evidence: `TestSignMacAppDeepSignsInnerFirst`, `TestSignMacAdHocAndEntitlements`
 
 **Linux:** Supported - **macOS:** Supported - **Windows:** Supported
 
-In-app updates: an Ed25519-signed feed, resumable verified downloads, and an apply step that replaces the executable and app directory (Linux, AppImage, macOS bundle, Windows ordering) with rollback on failure.
+In-app updates: an Ed25519-signed feed, resumable verified downloads, signed delta updates (pure Go bsdiff patches for the install tree, macOS bundle and AppImage, with fallback to the full file), staged rollouts with halt/critical/min_version, channels, and an apply step that replaces the executable and app directory (Linux, AppImage, macOS bundle, Windows ordering) with rollback on failure and rollback of a version that fails its first start.
 
 Known limits:
 
-- The macOS bundle and Windows apply steps have file-system tests that run on every OS. TestSmokeUpdateInstalledApp (skipped unless scripts/native-smoke.mjs sets its environment) runs the real updater against a signed local feed from 1.0.0 to 1.1.0 of an installed packaged app; it runs in the CI native job on Linux, macOS and Windows. Replacing the executable of a running Windows app is not covered: the smoke test updates an installed app from a separate process.
+- The macOS bundle and Windows apply, delta and rollback steps are file-system logic tested on Linux (the delta and rollback tests run the macOS bundle and Windows wrapper layouts with GOOS overridden); replacing a running Windows executable has not been tried on Windows. scripts/native-smoke.mjs runs, for each OS, a real update 1.0.0 to 1.1.0 of an installed packaged app (TestSmokeUpdateInstalledApp, which must now be a delta), a confirmed healthy start, and a 1.1.0 build whose host exits early being rolled back on its second launch (TestSmokeRollbackState). The full update passed in the CI native job on Linux, macOS and Windows before deltas and rollback were added; the delta and rollback flows have run on Linux only so far.
+- First-start protection does not see a crash before the shell's start-up check runs (a loader error, a panic in a package init), and the first update from a version built without it is not protected. An installer-based install (NSIS, MSIX, deb, rpm) does not take delta updates or rollbacks: the updater replaces an install directory, a bundle or an AppImage.
 
-Evidence: `TestSignatureGoodBadWrongKey`, `TestCheck`, `TestDownloadVerifiesAndProgress`, `TestDownloadResumes`, `TestApplyLinuxReplacesExecutableAndAppDir`, `TestApplyRollsBackOnFailure`, `TestApplyAppImage`, `TestApplyMacBundle`, `TestApplyWindowsOrder`, `TestSmokeUpdateInstalledApp`
+Evidence: `TestSignatureGoodBadWrongKey`, `TestCheck`, `TestDownloadVerifiesAndProgress`, `TestDownloadResumes`, `TestApplyLinuxReplacesExecutableAndAppDir`, `TestApplyRollsBackOnFailure`, `TestApplyAppImage`, `TestApplyMacBundle`, `TestApplyWindowsOrder`, `TestSmokeUpdateInstalledApp`, `TestDeltaUpdateEveryKind`, `TestDeltaFallsBackToFull`, `TestPatchRejectsHostilePaths`, `TestPatchSignatureBindsMeta`, `TestBsdiffRoundTrip`, `TestBucketIsStableAndSpread`, `TestRolloutIsMonotonic`, `TestCheckGatesOnRollout`, `TestDecideBoot`, `TestRollbackAfterFailedFirstStart`, `TestWatchdogTimeoutMakesNextLaunchRollBack`, `TestBootRollsBackAfterUnconfirmedStart`, `TestPackageWritesPatchesAndClientAppliesThem`, `TestSmokeRollbackState`
 
 ### Native: app icon badge and progress
 

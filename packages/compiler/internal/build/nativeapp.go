@@ -69,8 +69,12 @@ type NativeFeaturesMeta = features.Set
 
 // NativeUpdaterMeta is the updater block of app.json.
 type NativeUpdaterMeta struct {
-	URL       string `json:"url"`
-	PublicKey string `json:"publicKey"`
+	URL           string `json:"url"`
+	PublicKey     string `json:"publicKey"`
+	Channel       string `json:"channel,omitempty"`
+	MaxStarts     int    `json:"maxStarts,omitempty"`
+	HealthTimeout int    `json:"healthTimeout,omitempty"`
+	Confirm       string `json:"confirm,omitempty"`
 }
 
 // NativeWindowMeta is the main window of app.json.
@@ -366,7 +370,8 @@ func (b *Builder) BuildNativeApp(opts NativeAppOptions) (*NativeAppResult, error
 		res.Notes = append(res.Notes, notes...)
 	}
 	if eff.Updater != nil {
-		m.Updater = &NativeUpdaterMeta{URL: eff.Updater.URL, PublicKey: eff.Updater.PublicKey}
+		u := eff.Updater
+		m.Updater = &NativeUpdaterMeta{URL: u.URL, PublicKey: u.PublicKey, Channel: u.Channel, MaxStarts: u.MaxStarts, HealthTimeout: u.HealthTimeout, Confirm: u.Confirm}
 	}
 
 	if h := b.NativeHost(); h != nil && h.HostBundle != "" {

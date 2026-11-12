@@ -383,3 +383,27 @@ func TestAddGoSites(t *testing.T) {
 		t.Errorf("Linked = %s", got)
 	}
 }
+
+// native.updater links the updater area although no code calls it, so the
+// first-start protection of an updated app is in the binary.
+func TestConfiguredUpdaterIsLinkedWithoutUse(t *testing.T) {
+	root, cfg, p := project(t, map[string]string{"src/pages/index.tsx": "export default function Page() { return <div/>; }\n"})
+	res, err := Analyze(root, cfg, p, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(strings.Join(res.Linked(), ","), "updater") {
+		t.Fatal("updater linked without native.updater")
+	}
+	cfg.Native = &config.NativeConfig{Updater: &config.NativeUpdater{URL: "https://a.b/u.json", PublicKey: "k"}}
+	res, err = Analyze(root, cfg, p, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(res.Linked(), ","), "updater") {
+		t.Fatalf("updater not linked: %v", res.Linked())
+	}
+	if strings.Contains(strings.Join(res.Permissions, ","), "updater") {
+		t.Fatalf("linking the area must not grant the permission: %v", res.Permissions)
+	}
+}

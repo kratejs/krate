@@ -24,6 +24,12 @@ type Options struct {
 	// empty leaves the updater ids answering "unsupported".
 	UpdaterURL       string
 	UpdaterPublicKey string
+	// UpdaterChannel, UpdaterMaxStarts, UpdaterHealthTimeout (seconds) and
+	// UpdaterManualConfirm are the other native.updater keys.
+	UpdaterChannel       string
+	UpdaterMaxStarts     int
+	UpdaterHealthTimeout int
+	UpdaterManualConfirm bool
 }
 
 // Register configures the SDK for the app and registers every UI id on r.

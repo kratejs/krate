@@ -15,6 +15,7 @@ import (
 	"github.com/kratejs/krate/packages/native/gohost"
 	"github.com/kratejs/krate/packages/native/plugin"
 	"github.com/kratejs/krate/packages/native/scheme"
+	sdkupdater "github.com/kratejs/krate/packages/native/sdk/updater"
 )
 
 // ProfileEnv names the environment variable that makes Main (and a Go host
@@ -43,9 +44,14 @@ func RunEmbedded(fsys fs.FS, opts RunOptions) error {
 	}
 	defer a.close()
 	if opts.Browser {
-		return a.runBrowser()
+		err = a.runBrowser()
+	} else {
+		err = a.runNative()
 	}
-	return a.runNative()
+	if err == nil {
+		sdkupdater.CleanExit()
+	}
+	return err
 }
 
 // ZipFS opens an embedded zip archive as a file system. A release build packs

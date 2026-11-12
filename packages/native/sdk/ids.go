@@ -69,6 +69,10 @@ var IDs = []ID{
 	{"krate/updater.download", "updater", "[] (stream)", "DownloadProgress", "updater"},
 	{"krate/updater.apply", "updater", "[]", "void", "updater"},
 	{"krate/updater.relaunch", "updater", "[]", "void", "updater"},
+	{"krate/updater.markHealthy", "updater", "[]", "void", "updater"},
+	{"krate/updater.status", "updater", "[]", "UpdaterStatus", "updater"},
+	{"krate/updater.ackRollback", "updater", "[]", "void", "updater"},
+	{"krate/updater.setChannel", "updater", "[channel: string]", "void", "updater"},
 
 	{"krate/permission.query", "", "[name: string]", "boolean", "permission"},
 

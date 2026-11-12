@@ -119,10 +119,14 @@ their Go names (`src/lib/tasks.List`).
 | `krate/kv.set` | `kv` | `key`, `value` | nothing |
 | `krate/kv.delete` | `kv` | `key` | nothing |
 | `krate/kv.keys` | `kv` | `prefix?` | `string[]` |
-| `krate/updater.check` | `updater` | none | `{ version, notes, pubDate, size }` or `null` |
+| `krate/updater.check` | `updater` | none | `{ version, notes, pubDate, size, critical, required, delta, downloadSize }` or `null` |
 | `krate/updater.download` | `updater` | none (stream) | `{ done, total }` progress events |
 | `krate/updater.apply` | `updater` | none | nothing |
 | `krate/updater.relaunch` | `updater` | none | nothing |
+| `krate/updater.markHealthy` | `updater` | none | nothing |
+| `krate/updater.status` | `updater` | none | `{ version, channel, unconfirmed, rollback }` |
+| `krate/updater.ackRollback` | `updater` | none | nothing |
+| `krate/updater.setChannel` | `updater` | channel: string | nothing |
 | `krate/permission.query` | none | `name` | `boolean` |
 | `krate/window.open` | `window` | `options: WindowOptions` | `string` |
 | `krate/window.list` | `window` | none | `string[]` |

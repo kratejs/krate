@@ -14,6 +14,22 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
   `click`, `fill`, `press`, `text`, `waitFor`, `errors`, host `call`), several windows and views, and
   injected tray, menu and shortcut events. The shell's dev control channel gained `views`,
   `query-in` and `emit`. See docs/native/testing.
+- Updater: delta updates, staged rollouts, channels and rollback. `krate native package --delta-from <dir>`
+  writes signed pure-Go bsdiff patches from the newest earlier releases (install tree, macOS bundle,
+  AppImage; unchanged and renamed files cost nothing) and lists them under `patches` in the feed; the
+  client verifies the patch signature, every installed base hash and every written file, and falls back
+  to the full download on any failure (1.0.0 to 1.1.0 of `examples/native-tasks`: 16 KB to 115 KB for a
+  6.6 MB update file). Feeds take `rollout` (percentage, start, ramp), `critical` and `min_version`,
+  decided by a stable bucket from a per-install random id; `krate native rollout` changes or halts them
+  after release without re-signing. `{channel}` in the feed URL, `native.updater.channel`,
+  `updater.setChannel()` and `package --channel`. A freshly updated version must confirm a healthy start
+  (the shell does after the first page, or `updater.markHealthy()` with `confirm: "app"`); after a crash
+  or timeout the next launch restores the previous version, reports it through `updater.status()` and
+  does not offer that version again. New ids `krate/updater.markHealthy`, `.status`, `.ackRollback`,
+  `.setChannel`; new `native.updater` keys `channel`, `maxStarts`, `healthTimeout`, `confirm`;
+  `krate native patch` writes a patch for files the packager does not feed. All new feed fields are
+  ignored by older clients, and old feeds work unchanged. A configured `native.updater` now links the
+  updater area even when no code calls it.
 - The `@krate/core-<platform>` packages ship `krate-shell` next to `krate`, cross-compiled with
   `CGO_ENABLED=0` for all seven platforms. The compiler finds the shell in this order: `--shell`,
   `$KRATE_SHELL`, next to the running `krate` executable, a build from a Krate checkout.

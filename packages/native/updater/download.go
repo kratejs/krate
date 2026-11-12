@@ -2,6 +2,7 @@ package updater
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -59,8 +60,26 @@ func (u *Update) Download(ctx context.Context, progress func(done, total int64))
 		}
 		os.Remove(final)
 	}
+	if u.stage != "" {
+		if st, err := os.Stat(u.stage); err == nil && st.IsDir() {
+			return nil
+		}
+		u.stage = ""
+	}
 
-	err := u.fetchInto(ctx, part, progress)
+	if u.patch != nil {
+		err := u.downloadDelta(ctx, dir, progress)
+		if err == nil {
+			return nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		u.deltaErr = err
+		u.cfg.logf("updater: delta update failed, downloading the full file: %v", err)
+	}
+
+	err := u.cfg.fetchInto(ctx, u.URL, part, u.Size, progress)
 	if err != nil {
 		return err
 	}
@@ -72,6 +91,87 @@ func (u *Update) Download(ctx context.Context, progress func(done, total int64))
 		return err
 	}
 	u.path = final
+	return nil
+}
+
+// downloadDelta fetches and verifies the patch and builds the new tree from
+// the installed files into a staging directory. Any error means the caller
+// should download the full file.
+func (u *Update) downloadDelta(ctx context.Context, dir string, progress func(done, total int64)) error {
+	p := u.patch
+	final := filepath.Join(dir, stagedName(u.patchURL))
+	part := final + ".part"
+	verify := func(name string) error {
+		f, err := os.Open(name)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		if p.Size > 0 {
+			if st, err := f.Stat(); err == nil && st.Size() != p.Size {
+				return fmt.Errorf("updater: patch is %d bytes, the feed says %d", st.Size(), p.Size)
+			}
+		}
+		if p.SHA512 != "" {
+			sum, _, err := digest(f)
+			if err != nil {
+				return err
+			}
+			if !strings.EqualFold(hex.EncodeToString(sum), p.SHA512) {
+				return errors.New("updater: patch does not match the digest in the feed")
+			}
+			if _, err := f.Seek(0, io.SeekStart); err != nil {
+				return err
+			}
+		}
+		return VerifyPatch(u.pub, PatchMeta{AppID: u.cfg.AppID, Target: u.cfg.target(), From: p.From, To: u.Version}, f, p.Signature)
+	}
+	if st, err := os.Stat(final); err == nil && st.Mode().IsRegular() && verify(final) == nil {
+		progress(st.Size(), st.Size())
+	} else {
+		os.Remove(final)
+		if err := u.cfg.fetchInto(ctx, u.patchURL, part, p.Size, progress); err != nil {
+			return err
+		}
+		if err := verify(part); err != nil {
+			os.Remove(part)
+			return err
+		}
+		if err := os.Rename(part, final); err != nil {
+			return err
+		}
+	}
+	return u.stageDelta(final)
+}
+
+// stageDelta applies the verified patch file to the installed files.
+func (u *Update) stageDelta(patchFile string) error {
+	exe, err := u.cfg.executable()
+	if err != nil {
+		return err
+	}
+	fsys := u.cfg.fs()
+	var kind, base, dst string
+	switch {
+	case goos(&u.cfg) == "darwin":
+		base = bundleOf(exe)
+		if base == "" {
+			return fmt.Errorf("updater: %s is not inside a .app bundle", exe)
+		}
+		kind, dst = KindBundle, filepath.Base(base)
+	case goos(&u.cfg) == "linux" && u.cfg.appImage() != "":
+		base = u.cfg.appImage()
+		kind, dst = KindFile, filepath.Base(base)
+	default:
+		kind, base = KindTree, filepath.Dir(exe)
+	}
+	stage := stagePath(kind, base, u.Version)
+	_ = fsys.RemoveAll(stage)
+	if err := buildPatched(fsys, patchFile, kind, base, stage, dst, u.patch.From, u.Version); err != nil {
+		_ = fsys.RemoveAll(stage)
+		return err
+	}
+	u.stage = stage
 	return nil
 }
 
@@ -89,24 +189,24 @@ func (u *Update) verifyFile(p string) error {
 	return Verify(u.pub, u.meta(), f, u.signature)
 }
 
-func (u *Update) fetchInto(ctx context.Context, part string, progress func(done, total int64)) error {
+func (c *Config) fetchInto(ctx context.Context, rawURL, part string, size int64, progress func(done, total int64)) error {
 	var have int64
 	if st, err := os.Stat(part); err == nil {
 		have = st.Size()
 	}
-	if u.Size > 0 && have > u.Size {
+	if size > 0 && have > size {
 		os.Remove(part)
 		have = 0
 	}
 	for attempt := 0; attempt < 2; attempt++ {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.URL, nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 		if err != nil {
 			return err
 		}
 		if have > 0 {
 			req.Header.Set("Range", fmt.Sprintf("bytes=%d-", have))
 		}
-		res, err := u.cfg.client().Do(req)
+		res, err := c.client().Do(req)
 		if err != nil {
 			return fmt.Errorf("updater: downloading: %w", err)
 		}
@@ -140,7 +240,7 @@ func (u *Update) fetchInto(ctx context.Context, part string, progress func(done,
 			return fmt.Errorf("updater: download answered HTTP %d", res.StatusCode)
 		}
 		if total <= 0 {
-			total = u.Size
+			total = size
 		}
 		f, err := os.OpenFile(part, flags, 0o600)
 		if err != nil {

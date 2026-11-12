@@ -99,6 +99,14 @@ func (m *Manifest) PermissionSet() (permission.Set, error) {
 type UpdaterSpec struct {
 	URL       string `json:"url"`
 	PublicKey string `json:"publicKey"`
+	// Channel fills {channel} in URL (default "stable").
+	Channel string `json:"channel,omitempty"`
+	// MaxStarts and HealthTimeout (seconds) tune first-start protection.
+	MaxStarts     int `json:"maxStarts,omitempty"`
+	HealthTimeout int `json:"healthTimeout,omitempty"`
+	// Confirm is "auto" (default: the shell confirms a healthy start) or
+	// "app" (the app calls updater.markHealthy()).
+	Confirm string `json:"confirm,omitempty"`
 }
 
 // HasPermission reports whether the manifest grants a permission, with the

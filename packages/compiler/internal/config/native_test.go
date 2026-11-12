@@ -228,6 +228,18 @@ func TestValidateNative(t *testing.T) {
 		{"file assoc icon", func(n *NativeConfig) {
 			n.FileAssociations = []NativeFileAssociation{{Ext: []string{"md"}, Icon: "md.ico"}}
 		}, "PNG or JPEG"},
+		{"updater channel ok", func(n *NativeConfig) {
+			n.Updater = &NativeUpdater{URL: "https://a.b/{channel}.json", PublicKey: "k", Channel: "beta", MaxStarts: 3, HealthTimeout: 30, Confirm: "app"}
+		}, ""},
+		{"updater channel bad", func(n *NativeConfig) {
+			n.Updater = &NativeUpdater{URL: "https://a.b/u.json", PublicKey: "k", Channel: "Beta!"}
+		}, "updater.channel"},
+		{"updater confirm bad", func(n *NativeConfig) {
+			n.Updater = &NativeUpdater{URL: "https://a.b/u.json", PublicKey: "k", Confirm: "never"}
+		}, "updater.confirm"},
+		{"updater negative starts", func(n *NativeConfig) {
+			n.Updater = &NativeUpdater{URL: "https://a.b/u.json", PublicKey: "k", MaxStarts: -1}
+		}, "cannot be negative"},
 		{"updater https", func(n *NativeConfig) { n.Updater = &NativeUpdater{URL: "http://a.b/u.json", PublicKey: "k"} }, "https"},
 	}
 	for _, tc := range cases {

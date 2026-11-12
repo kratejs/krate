@@ -1,6 +1,8 @@
 package main
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -300,8 +302,8 @@ func TestNativeProfileMemoryFlags(t *testing.T) {
 func TestNativeUsageListsEveryCommandAndFlag(t *testing.T) {
 	var sb strings.Builder
 	printNativeUsage(&sb)
-	for _, want := range []string{"check", "init", "dev", "build", "profile", "package", "sign", "notarize", "keygen", "doctor", "plugin",
-		"--release", "--target", "--package", "--format", "--scriptc", "--scriptc-fail-on", "--browser", "--port", "--memory", "--idle"} {
+	for _, want := range []string{"check", "init", "dev", "build", "profile", "package", "sign", "notarize", "keygen", "rollout", "patch", "doctor", "plugin",
+		"--delta-from", "--rollout", "--channel", "--release", "--target", "--package", "--format", "--scriptc", "--scriptc-fail-on", "--browser", "--port", "--memory", "--idle"} {
 		if !strings.Contains(sb.String(), want) {
 			t.Errorf("usage does not mention %q", want)
 		}
@@ -619,5 +621,81 @@ func TestNativeTestListAndDiagnostics(t *testing.T) {
 	code, out = runKrate(t, "native", "help")
 	if !strings.Contains(out, "krate native test") && !strings.Contains(out, "  test ") {
 		t.Errorf("usage does not list test (exit %d):\n%s", code, out)
+	}
+}
+
+func TestNativeRolloutEditsAFeedAndHaltsIt(t *testing.T) {
+	feed := filepath.Join(t.TempDir(), "latest-linux-amd64.json")
+	sig := strings.Repeat("A", 86) + "=="
+	if err := os.WriteFile(feed, []byte(`{"version":"1.2.0","url":"a.tar.gz","signature":"`+sig+`"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code, out := runKrate(t, "native", "rollout", "--feed", feed, "--rollout", "20", "--rollout-ramp-hours", "24", "--critical", "--min-version", "1.0.0"); code != 0 {
+		t.Fatalf("exit %d:\n%s", code, out)
+	}
+	b, _ := os.ReadFile(feed)
+	for _, want := range []string{`"percentage": 20`, `"ramp_hours": 24`, `"critical": true`, `"min_version": "1.0.0"`} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("feed lacks %s:\n%s", want, b)
+		}
+	}
+	if code, out := runKrate(t, "native", "rollout", "--feed", feed, "--halt"); code != 0 {
+		t.Fatalf("halt: exit %d:\n%s", code, out)
+	}
+	b, _ = os.ReadFile(feed)
+	if !strings.Contains(string(b), `"percentage": 0`) || !strings.Contains(string(b), sig) {
+		t.Errorf("halted feed:\n%s", b)
+	}
+	if code, _ := runKrate(t, "native", "rollout", "--feed", feed, "--rollout", "250"); code == 0 {
+		t.Error("a percentage over 100 was accepted")
+	}
+	if code, _ := runKrate(t, "native", "rollout", "--feed", feed); code == 0 {
+		t.Error("rollout with nothing to change succeeded")
+	}
+	if code, _ := runKrate(t, "native", "rollout"); code == 0 {
+		t.Error("rollout without --feed succeeded")
+	}
+}
+
+func writeTgz(t *testing.T, path string, files map[string]string) {
+	t.Helper()
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gz := gzip.NewWriter(f)
+	tw := tar.NewWriter(gz)
+	for name, body := range files {
+		if err := tw.WriteHeader(&tar.Header{Name: name, Typeflag: tar.TypeReg, Mode: 0o755, Size: int64(len(body))}); err != nil {
+			t.Fatal(err)
+		}
+		tw.Write([]byte(body))
+	}
+	tw.Close()
+	gz.Close()
+	f.Close()
+}
+
+func TestNativePatchWritesAFeedEntry(t *testing.T) {
+	dir := t.TempDir()
+	key := filepath.Join(dir, "up.key")
+	if code, out := runKrate(t, "native", "keygen", "--key-out", key); code != 0 {
+		t.Fatalf("keygen: %d\n%s", code, out)
+	}
+	t.Setenv("KRATE_UPDATER_PRIVATE_KEY_FILE", key)
+	old, nw, out := filepath.Join(dir, "a-1.0.0.tar.gz"), filepath.Join(dir, "a-1.1.0.tar.gz"), filepath.Join(dir, "p.krpatch")
+	body := strings.Repeat("some executable bytes ", 400)
+	writeTgz(t, old, map[string]string{"acme": body, "app.json": "{}"})
+	writeTgz(t, nw, map[string]string{"acme": body + "more", "app.json": "{}"})
+	code, text := runKrate(t, "native", "patch", "--patch-old", old, "--patch-new", nw, "--patch-kind", "tree", "--patch-exe", "acme",
+		"--patch-from", "1.0.0", "--patch-to", "1.1.0", "--patch-app-id", "com.acme.app", "--patch-target", "linux-amd64", "--patch-out", out)
+	if code != 0 || !strings.Contains(text, `"from": "1.0.0"`) || !strings.Contains(text, `"sha512"`) {
+		t.Fatalf("exit %d:\n%s", code, text)
+	}
+	if st, err := os.Stat(out); err != nil || st.Size() == 0 {
+		t.Fatalf("patch file: %v %v", st, err)
+	}
+	if code, _ := runKrate(t, "native", "patch", "--patch-old", old); code == 0 {
+		t.Error("patch with missing flags succeeded")
 	}
 }

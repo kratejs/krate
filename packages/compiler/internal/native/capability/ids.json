@@ -283,6 +283,42 @@
       ]
     },
     {
+      "id": "krate/updater.markHealthy",
+      "permission": "updater",
+      "area": "updater",
+      "module": "updater",
+      "exports": [
+        "markHealthy"
+      ]
+    },
+    {
+      "id": "krate/updater.status",
+      "permission": "updater",
+      "area": "updater",
+      "module": "updater",
+      "exports": [
+        "status"
+      ]
+    },
+    {
+      "id": "krate/updater.ackRollback",
+      "permission": "updater",
+      "area": "updater",
+      "module": "updater",
+      "exports": [
+        "ackRollback"
+      ]
+    },
+    {
+      "id": "krate/updater.setChannel",
+      "permission": "updater",
+      "area": "updater",
+      "module": "updater",
+      "exports": [
+        "setChannel"
+      ]
+    },
+    {
       "id": "krate/permission.query",
       "area": "permission",
       "module": "permission",

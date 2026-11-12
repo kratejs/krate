@@ -11,6 +11,9 @@ import (
 func init() {
 	dataAreas = append(dataAreas, func(r *scheme.Registry, set permission.Set) { sdkupdater.Register(r, set) })
 	configureUpdater = func(o Options) {
-		sdkupdater.Configure(sdkupdater.Config{URL: o.UpdaterURL, PublicKey: o.UpdaterPublicKey})
+		sdkupdater.Configure(sdkupdater.Config{
+			URL: o.UpdaterURL, PublicKey: o.UpdaterPublicKey, Channel: o.UpdaterChannel,
+			MaxStarts: o.UpdaterMaxStarts, HealthTimeout: o.UpdaterHealthTimeout, ManualConfirm: o.UpdaterManualConfirm,
+		})
 	}
 }

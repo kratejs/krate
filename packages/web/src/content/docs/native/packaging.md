@@ -216,6 +216,10 @@ The zip (macOS, Windows) or tar.gz (Linux) is also the file the
 | `--sign`, `--notarize` | sign (and notarize) while packaging; see [Signing](/docs/native/signing/) |
 | `--notes <text or @file>` | release notes for the update feed |
 | `--update-base-url <url>` | where the update files will be hosted |
+| `--delta-from <dir>[,<dir>]`, `--delta-count <n>` | write signed delta updates from the newest `n` (default 3) earlier releases whose update files are in these directories; see [Updates](/docs/native/updater/#delta-updates) |
+| `--channel <name>` | write the feed as `latest-<name>-<os>-<arch>.json` for that [channel](/docs/native/updater/#channels) |
+| `--rollout <percent>`, `--rollout-start <RFC 3339>`, `--rollout-ramp-hours <h>` | [staged rollout](/docs/native/updater/#staged-rollouts) |
+| `--critical`, `--min-version <v>` | offer the update to every install, whatever the rollout says |
 
 ## Diagnostics
 
