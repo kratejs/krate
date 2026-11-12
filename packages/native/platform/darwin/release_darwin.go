@@ -135,7 +135,12 @@ func (w *Window) revive() {
 	all := w.allViews()
 	var made []objc.ID
 	for _, v := range all {
-		web := w.app.newWebView()
+		var web objc.ID
+		if v.rv != nil {
+			web, _, _, _ = w.app.newRemoteWebView(&remoteSpec{policy: v.rv.policy})
+		} else {
+			web = w.app.newWebView()
+		}
 		if web == 0 {
 			for _, m := range made {
 				release(m)
@@ -147,6 +152,9 @@ func (w *Window) revive() {
 	}
 	w.released = false
 	for _, v := range all {
+		if v.rv != nil {
+			w.app.attachRemote(v, v.rv.part, &remoteSpec{policy: v.rv.policy}, "")
+		}
 		v.scrollJS = caps.ScrollScript(v.state.X, v.state.Y)
 		v.applyMinSize()
 		v.find.Reset()
@@ -156,6 +164,10 @@ func (w *Window) revive() {
 	}
 	w.applyLayout()
 	for _, v := range all {
+		if v.rv != nil {
+			v.web.Send(sel("loadRequest:"), cls("NSURLRequest").Send(sel("requestWithURL:"), cls("NSURL").Send(sel("URLWithString:"), nsString(v.rv.restoreURL()))))
+			continue
+		}
 		v.load(v.route)
 	}
 	emitWindow(w, caps.WindowRestored)

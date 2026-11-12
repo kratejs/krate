@@ -3,8 +3,16 @@
 package linux
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -848,4 +856,80 @@ func waitLong(t *testing.T, what string, cond func() bool) {
 		time.Sleep(25 * time.Millisecond)
 	}
 	t.Fatalf("timed out waiting for %s", what)
+}
+
+// writeClientCert makes a self-signed client certificate and returns the PEM
+// file paths.
+func writeClientCert(t *testing.T, cn string) (certFile, keyFile string) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(7), Subject: pkix.Name{CommonName: cn},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
+		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kb, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	certFile, keyFile = filepath.Join(dir, "c.pem"), filepath.Join(dir, "k.pem")
+	if err := os.WriteFile(certFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyFile, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: kb}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return
+}
+
+func TestGUIRemoteClientCertificate(t *testing.T) {
+	needGUI(t)
+	var mu sync.Mutex
+	var cns []string
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cn := ""
+		if r.TLS != nil && len(r.TLS.PeerCertificates) > 0 {
+			cn = r.TLS.PeerCertificates[0].Subject.CommonName
+		}
+		mu.Lock()
+		cns = append(cns, cn)
+		mu.Unlock()
+		page("hello "+cn)(w, r)
+	}))
+	srv.TLS = &tls.Config{ClientAuth: tls.RequireAnyClientCert}
+	srv.StartTLS()
+	defer srv.Close()
+	certFile, keyFile := writeClientCert(t, "krate-client")
+	if guiApp.SetClientCertificate("mtls", "127.0.0.1", certFile, certFile+".missing") == nil {
+		t.Fatal("a missing key file was accepted")
+	}
+	if err := guiApp.SetClientCertificate("mtls", "127.0.0.1", certFile, keyFile); err != nil {
+		t.Fatal(err)
+	}
+	guiApp.SetCertificateHandler(func(e caps.CertError, answer func(bool)) { answer(true) })
+	defer guiApp.SetCertificateHandler(nil)
+	ev := collectRemote(t)
+	w, ref := openRemote(t, ev, caps.RemoteOptions{URL: srv.URL + "/", Partition: "mtls"})
+	waitLong(t, "the page behind the client certificate", func() bool {
+		return evalIn(t, w, ref, "document.body ? document.body.textContent : ''") == "hello krate-client"
+	})
+	// A partition without the certificate gets no page.
+	w2, _ := guiApp.NewRemoteWindow(caps.RemoteWindowSpec{Title: "x", Width: 300, Height: 200, Remote: caps.RemoteOptions{URL: srv.URL + "/other", Partition: "mtls-none"}})
+	defer w2.Close()
+	time.Sleep(2 * time.Second)
+	mu.Lock()
+	defer mu.Unlock()
+	for _, cn := range cns {
+		if cn != "krate-client" {
+			t.Fatalf("a request without the certificate reached the handler: %q", cns)
+		}
+	}
 }

@@ -69,6 +69,10 @@ type App struct {
 	dlDelegate    objc.ID
 	printDelegate objc.ID
 	processPool   objc.ID
+	rem           *remoteState
+	remoteNav     objc.ID
+	remoteUI      objc.ID
+	remoteMsg     objc.ID
 
 	ready atomic.Bool
 	// purgeStarted is true while the memory cache purge chain runs.
@@ -137,6 +141,9 @@ func (a *App) setup() error {
 	if err := registerUIClass(a); err != nil {
 		return err
 	}
+	if err := registerRemoteClasses(a); err != nil {
+		return err
+	}
 	a.nsApp = cls("NSApplication").Send(sel("sharedApplication"))
 	policy := nsApplicationActivationPolicyRegular
 	if a.opts.Agent {
@@ -150,6 +157,7 @@ func (a *App) setup() error {
 	a.uiDelegate = cls("KrateUIDelegate").Send(sel("new"))
 	a.dlDelegate = cls("KrateDownloadDelegate").Send(sel("new"))
 	a.printDelegate = cls("KratePrintDelegate").Send(sel("new"))
+	a.initRemote()
 	// NSApplication.delegate is unretained; the App (a package global) owns it.
 	a.nsApp.Send(sel("setDelegate:"), a.appDelegate)
 

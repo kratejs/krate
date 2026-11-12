@@ -74,7 +74,9 @@ func (a *App) NewWindow(o WindowOptions) (*Window, error) {
 	return w, nil
 }
 
-func (a *App) newWindow(o WindowOptions) (*Window, error) {
+func (a *App) newWindow(o WindowOptions) (*Window, error) { return a.newWindowWith(o, nil) }
+
+func (a *App) newWindowWith(o WindowOptions, rs *remoteSpec) (*Window, error) {
 	width, height := o.Width, o.Height
 	if width <= 0 {
 		width = defaultWidth
@@ -92,7 +94,17 @@ func (a *App) newWindow(o WindowOptions) (*Window, error) {
 	}
 	style = int(styleFor(uint(style), chromeOpts.TitleBar))
 
-	web := a.newWebView()
+	var web objc.ID
+	var pt *partition
+	var token string
+	if rs != nil {
+		var err error
+		if web, pt, token, err = a.newRemoteWebView(rs); err != nil {
+			return nil, err
+		}
+	} else {
+		web = a.newWebView()
+	}
 	if web == 0 {
 		return nil, errors.New("darwin: WKWebView creation failed")
 	}
@@ -113,10 +125,17 @@ func (a *App) newWindow(o WindowOptions) (*Window, error) {
 	w := &Window{app: a, win: win, ref: nextRef.Add(1)}
 	w.pv = a.registerView(w, web, true)
 	a.windows[win] = w
+	if rs != nil {
+		a.attachRemote(w.pv, pt, rs, token)
+	}
 	w.applyLayout()
 	w.applyChrome(chromeOpts)
 
-	w.pv.load(o.Path)
+	if rs != nil {
+		w.pv.loadRemote()
+	} else {
+		w.pv.load(o.Path)
+	}
 	win.Send(sel("makeKeyAndOrderFront:"), objc.ID(0))
 	a.startMemoryPurge()
 	return w, nil

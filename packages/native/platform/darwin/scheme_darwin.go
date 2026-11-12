@@ -26,6 +26,12 @@ type taskState struct {
 // everything it needs out of the NSURLRequest, then serves the request on a
 // goroutine. The task is retained until it completes or is stopped.
 func (a *App) startTask(webView, task objc.ID) {
+	if v := a.byWeb[webView]; v != nil && v.rv != nil {
+		// A remote view has no scheme handler; if one is ever registered for
+		// it by mistake this is the second line.
+		task.Send(sel("didFailWithError:"), cls("NSError").Send(sel("errorWithDomain:code:userInfo:"), nsString("krate"), -1, objc.ID(0)))
+		return
+	}
 	retain(task)
 	st := &taskState{task: task}
 	a.tasks[task] = st
