@@ -74,7 +74,7 @@ func TestNativePluginDevBuild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"export function info(", "export function cpuLoad(", "AsyncIterable<number>", "ReadonlyHostSignal<number>"} {
+	for _, want := range []string{"export function info(", "export function cpuLoad(", "AsyncIterable<number>", "ReadonlyHostSignal<number, number | undefined>"} {
 		if !strings.Contains(string(dts), want) {
 			t.Errorf("the plugin's .d.ts lacks %q:\n%s", want, dts)
 		}
