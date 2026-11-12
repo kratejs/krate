@@ -6,7 +6,11 @@
 // implementation marshals the call onto the platform's main thread.
 package platform
 
-import "net/http"
+import (
+	"net/http"
+
+	"github.com/kratejs/krate/packages/native/platform/caps"
+)
 
 // Options configures the application.
 type Options struct {
@@ -30,6 +34,13 @@ type Options struct {
 	// live window is then released (hidden, webview destroyed) rather than
 	// destroyed, and Show brings it back; see caps.WindowRelease.
 	KeepAlive bool
+	// Remote asks the engine for a remote debugging endpoint (see
+	// caps.Automation). The shell sets it only in dev runs and for apps
+	// built with native.debug.
+	Remote caps.RemoteDebug
+	// Extensions prepares the engine for browser extensions; WebView2 must
+	// know when it creates its environment. See caps.Extensions.
+	Extensions bool
 }
 
 // Memory configures the webview's memory use.
@@ -70,6 +81,10 @@ type WindowOptions struct {
 	Resizable bool
 	// Path is the route to open, relative to the app origin ("/" by default).
 	Path string
+	// Offscreen opens a window that is never shown on screen: its page renders
+	// and can be captured with caps.ViewSnapshots. Only Apps that implement
+	// caps.OffscreenWindows honor it; the others open a normal window.
+	Offscreen bool
 }
 
 // App is the running application. New must be called on the main goroutine

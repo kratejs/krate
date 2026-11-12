@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -80,7 +81,22 @@ type Manifest struct {
 	// screen capture and location requests. See sdk/media.
 	Media *MediaSpec `json:"media,omitempty"`
 
+	// Automation is native.automation: a remote debugging endpoint for tests
+	// and debugging sessions. It is honored only in a dev run or when Debug is
+	// set; a release build without native.debug ignores it.
+	Automation *AutomationSpec `json:"automation,omitempty"`
+	// Extensions are the unpacked browser extensions the app packages:
+	// directories relative to the app directory, loaded at start where the
+	// engine supports them.
+	Extensions []string `json:"extensions,omitempty"`
+
 	Debug bool `json:"debug"`
+}
+
+// AutomationSpec is the automation block of app.json.
+type AutomationSpec struct {
+	// Port is the loopback port of the endpoint (default 9222).
+	Port int `json:"port,omitempty"`
 }
 
 // MediaSpec is the media block of app.json.
@@ -293,6 +309,20 @@ func (m *Manifest) normalize() error {
 				return fmt.Errorf("media.policy.%s must be prompt, allow or deny, got %q", k, p)
 			}
 		}
+	}
+	if a := m.Automation; a != nil && (a.Port < 0 || a.Port > 65535) {
+		return fmt.Errorf("automation.port %d is not a port", a.Port)
+	}
+	seenExt := map[string]bool{}
+	for i, e := range m.Extensions {
+		if err := local(fmt.Sprintf("extensions[%d]", i), e); err != nil {
+			return err
+		}
+		name := path.Base(e)
+		if seenExt[name] {
+			return fmt.Errorf("extensions[%d]: two extensions are named %q", i, name)
+		}
+		seenExt[name] = true
 	}
 	seenWorker := map[string]bool{}
 	for i, w := range m.Workers {

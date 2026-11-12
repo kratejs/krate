@@ -43,6 +43,9 @@
 //	port                no             create message channels and hand ends to windows, views and workers; implies port:receive
 //	port:receive        no             be handed a channel end and use the ends it holds
 //	worker              no             start, stop and message the declared worker processes
+//	offscreen           no             render windows out of sight and capture frames of windows and views
+//	automation          no             read the debugging endpoint and send DevTools protocol commands (dev and native.debug only)
+//	extension           no             list, load and remove the browser extensions the app packages
 //
 // The compiler keeps a copy of the names in names.json (a test here keeps the
 // file in step; run "go test ./sdk/permission -update" to rewrite it).

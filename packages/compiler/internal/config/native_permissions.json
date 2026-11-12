@@ -1,12 +1,14 @@
 {
   "names": [
     "app",
+    "automation",
     "badge",
     "clipboard",
     "clipboard:read",
     "crash",
     "db",
     "dialog",
+    "extension",
     "fs",
     "fs:read",
     "kv",
@@ -17,9 +19,12 @@
     "menu",
     "net",
     "notify",
+    "offscreen",
     "os:info",
     "os:secrets",
     "os:secrets.read",
+    "port",
+    "port:receive",
     "power",
     "power:inhibit",
     "screen",
@@ -28,7 +33,8 @@
     "theme",
     "tray",
     "updater",
-    "window"
+    "window",
+    "worker"
   ],
   "defaults": [
     "app",

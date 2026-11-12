@@ -22,6 +22,8 @@ func New(opts Options) (App, error) {
 		KeepAlive: opts.KeepAlive,
 		Memory:    mem,
 		Features:  feat,
+		Remote:     opts.Remote,
+		Extensions: opts.Extensions,
 	})
 	if errors.Is(err, winplat.ErrActivationForwarded) {
 		// A notification click started this process and the running instance
@@ -45,6 +47,7 @@ func (w winApp) NewWindow(o WindowOptions) (Window, error) {
 		Height:    o.Height,
 		Resizable: o.Resizable,
 		Path:      o.Path,
+		Offscreen: o.Offscreen,
 	})
 	if err != nil {
 		return nil, err

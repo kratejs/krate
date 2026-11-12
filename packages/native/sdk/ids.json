@@ -1174,6 +1174,96 @@
       ]
     },
     {
+      "id": "krate/offscreen.open",
+      "permission": "offscreen",
+      "area": "offscreen",
+      "module": "offscreen",
+      "exports": [
+        "openOffscreen"
+      ]
+    },
+    {
+      "id": "krate/offscreen.capture",
+      "permission": "offscreen",
+      "area": "offscreen",
+      "module": "offscreen",
+      "exports": [
+        "captureFrame"
+      ]
+    },
+    {
+      "id": "krate/offscreen.frames",
+      "permission": "offscreen",
+      "area": "offscreen",
+      "module": "offscreen",
+      "exports": [
+        "frames"
+      ]
+    },
+    {
+      "id": "krate/automation.endpoint",
+      "permission": "automation",
+      "area": "automation",
+      "module": "automation",
+      "exports": [
+        "automationEndpoint"
+      ]
+    },
+    {
+      "id": "krate/automation.cdp",
+      "permission": "automation",
+      "area": "automation",
+      "module": "automation",
+      "exports": [
+        "cdp"
+      ]
+    },
+    {
+      "id": "krate/automation.cdpEvents",
+      "permission": "automation",
+      "area": "automation",
+      "module": "automation",
+      "exports": [
+        "cdpEvents"
+      ]
+    },
+    {
+      "id": "krate/extension.declared",
+      "permission": "extension",
+      "area": "extension",
+      "module": "extension",
+      "exports": [
+        "declaredExtensions"
+      ]
+    },
+    {
+      "id": "krate/extension.list",
+      "permission": "extension",
+      "area": "extension",
+      "module": "extension",
+      "exports": [
+        "listExtensions"
+      ]
+    },
+    {
+      "id": "krate/extension.load",
+      "permission": "extension",
+      "area": "extension",
+      "module": "extension",
+      "exports": [
+        "loadExtension"
+      ]
+    },
+    {
+      "id": "krate/extension.remove",
+      "permission": "extension",
+      "area": "extension",
+      "module": "extension",
+      "exports": [
+        "removeExtension"
+      ]
+    },
+    {
       "id": "krate/badge.set",
       "permission": "badge",
       "area": "badge",

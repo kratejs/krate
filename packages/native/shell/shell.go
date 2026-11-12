@@ -31,6 +31,7 @@ import (
 	"github.com/kratejs/krate/packages/native/sdk"
 	sdkall "github.com/kratejs/krate/packages/native/sdk/all"
 	appsdk "github.com/kratejs/krate/packages/native/sdk/app"
+	sdkautomation "github.com/kratejs/krate/packages/native/sdk/automation"
 	"github.com/kratejs/krate/packages/native/sdk/permission"
 	sdkupdater "github.com/kratejs/krate/packages/native/sdk/updater"
 	"github.com/kratejs/krate/packages/native/sdk/worker"
@@ -527,6 +528,15 @@ func (w *windows) all() []platform.Window {
 
 func (a *app) runNative() error {
 	man := a.man
+	autoOn := a.opts.Dev || man.Debug
+	if man.Automation != nil && !autoOn {
+		a.logf("shell: app.json asks for automation, which runs only in a dev run or with native.debug; ignoring it")
+	}
+	sdkautomation.Configure(autoOn)
+	remote := caps.RemoteDebug{}
+	if autoOn && man.Automation != nil {
+		remote = caps.RemoteDebug{Enabled: true, Port: man.Automation.Port}
+	}
 	platApp, err := platform.New(platform.Options{
 		AppID:   man.AppID,
 		AppName: man.ProductName,
@@ -534,11 +544,14 @@ func (a *app) runNative() error {
 		Debug:   a.opts.Dev || man.Debug,
 		Memory:  platformMemory(man),
 		// The manifest is read once, at load, like the permissions.
-		KeepAlive: man.Window.KeepAlive,
+		KeepAlive:  man.Window.KeepAlive,
+		Remote:     remote,
+		Extensions: len(man.Extensions) > 0,
 	})
 	if err != nil {
 		return err
 	}
+	a.declareExtensions(man)
 	a.attachSDK(platApp)
 	a.plat.Store(&platApp)
 	if man.SingleInstance {
@@ -594,6 +607,7 @@ func (a *app) runNative() error {
 		}
 		wins.add(win)
 		a.sdk.AddWindow("main", win)
+		a.startAutomationAndExtensions(platApp)
 		if a.opts.OnReady != nil {
 			go a.opts.OnReady(a.ctl)
 		}

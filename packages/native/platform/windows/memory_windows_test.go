@@ -13,11 +13,11 @@ import (
 // vtable the way the WebView2 loader does. It needs no WebView2
 // runtime or display and runs on windows-latest in CI.
 func TestEnvironmentOptionsObject(t *testing.T) {
-	if newEnvironmentOptions("") != nil {
+	if newEnvironmentOptions("", false) != nil {
 		t.Fatal("empty arguments must produce no options object")
 	}
 	initCallbacks()
-	o := newEnvironmentOptions("--renderer-process-limit=1")
+	o := newEnvironmentOptions("--renderer-process-limit=1", false)
 	if o == nil {
 		t.Fatal("no options object")
 	}

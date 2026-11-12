@@ -78,11 +78,18 @@ func (a *App) createWindow(cfg WindowConfig, w *Window) error {
 	dpi := systemDPI()
 	ow, oh := frameSize(style, scaleDPI(cfg.Width, dpi), scaleDPI(cfg.Height, dpi), dpi)
 
-	hwnd, _, e := pCreateWindowExW.Call(0,
+	exStyle, x, y, show := uintptr(0), uintptr(cwUseDefault), uintptr(cwUseDefault), uintptr(swShow)
+	if cfg.Offscreen {
+		// Parked far outside every display, off the taskbar, never activated:
+		// the page still renders, so CapturePreview returns real frames.
+		off := offscreenPosition
+		exStyle, x, y, show = wsExToolWindow|wsExNoActivate, uintptr(off), uintptr(off), swShowNoActivate
+	}
+	hwnd, _, e := pCreateWindowExW.Call(exStyle,
 		uintptr(unsafe.Pointer(wstr(appClassName))),
 		uintptr(unsafe.Pointer(wstr(cfg.Title))),
 		uintptr(style),
-		cwUseDefault, cwUseDefault, uintptr(ow), uintptr(oh),
+		x, y, uintptr(ow), uintptr(oh),
 		0, 0, a.hInst, 0)
 	if hwnd == 0 {
 		return fmt.Errorf("windows: CreateWindowEx: %v", e)
@@ -93,7 +100,7 @@ func (a *App) createWindow(cfg WindowConfig, w *Window) error {
 	a.windows[hwnd] = w
 	a.windowCreated(hwnd)
 	a.everOpened = true
-	_, _, _ = pShowWindow.Call(hwnd, swShow)
+	_, _, _ = pShowWindow.Call(hwnd, show)
 	_, _, _ = pUpdateWindow.Call(hwnd)
 
 	w.pv.createController()

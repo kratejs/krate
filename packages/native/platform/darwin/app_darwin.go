@@ -37,6 +37,11 @@ type Options struct {
 	// Features is app.json "features"; nil means not detected, so no
 	// feature is switched off.
 	Features map[string]bool
+	// Remote says whether remote debugging was asked for (see automation_darwin.go).
+	Remote caps.RemoteDebug
+	// Extensions prepares the web views for browser extensions (see
+	// extensions_darwin.go).
+	Extensions bool
 }
 
 // WindowOptions configures one window; it mirrors platform.WindowOptions.
@@ -46,6 +51,7 @@ type WindowOptions struct {
 	Height    int
 	Resizable bool
 	Path      string
+	Offscreen bool
 }
 
 // App is the macOS application. The first goroutine to import this package
@@ -62,6 +68,7 @@ type App struct {
 	uiDelegate    objc.ID
 	perm          permState
 	processPool   objc.ID
+	extCtl        objc.ID // WKWebExtensionController, see extensions_darwin.go
 
 	ready atomic.Bool
 	// purgeStarted is true while the memory cache purge chain runs.

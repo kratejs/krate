@@ -256,7 +256,7 @@ func (a *App) SetAppMenu(items []caps.MenuItem) error {
 
 // applyAppMenu gives a new window the current app menu (main thread).
 func (a *App) applyAppMenu(w *Window) {
-	if len(appItems) > 0 && w.box != 0 && a.x.gtkMenuBarNew != nil {
+	if len(appItems) > 0 && w.box != 0 && !w.offscreen && a.x.gtkMenuBarNew != nil {
 		a.installBar(w, appItems)
 	}
 }

@@ -48,6 +48,8 @@ type Options struct {
 	// KeepAlive keeps the app running when its last window closes: that
 	// window is released (hidden, webview destroyed) and Show brings it back.
 	KeepAlive bool
+	// Remote starts the WebKit remote inspector server (see automation.go).
+	Remote caps.RemoteDebug
 }
 
 // WindowOptions configures one window.
@@ -57,10 +59,15 @@ type WindowOptions struct {
 	Height    int
 	Resizable bool
 	Path      string
+	// Offscreen opens a window that is never mapped on screen (a
+	// GtkOffscreenWindow) whose page still renders; see SnapshotView.
+	Offscreen bool
 }
 
 // App is the WebKitGTK application.
 type App struct {
+	// endpoint is the remote inspector endpoint, zero when off.
+	endpoint caps.Endpoint
 	// popup is the context menu on screen, 0 if none (main thread).
 	popup   uintptr
 	api     *api
@@ -132,6 +139,7 @@ func New(opts Options) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
+	endpoint := startRemoteInspector(opts.Remote)
 	app := &App{api: a, handler: opts.Handler, debug: opts.Debug, keepAlive: opts.KeepAlive, evalCbs: map[uintptr]func(string){}, windows: map[uintptr]*Window{}, views: map[caps.ViewRef]*view{}, byWidget: map[uintptr]*view{}, panes: map[uintptr]*paneState{}, stopCh: make(chan struct{}), mainTid: syscall.Gettid()}
 	if syscall.Getpid() != app.mainTid {
 		return nil, errors.New("krate: New must be called on the main thread (call from the main goroutine)")
@@ -186,6 +194,7 @@ func New(opts Options) (*App, error) {
 	a.wkSecSecure(sm, "krate")
 	a.wkSecCORS(sm, "krate")
 
+	app.endpoint = endpoint
 	theApp = app
 	return app, nil
 }

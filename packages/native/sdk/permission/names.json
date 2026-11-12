@@ -1,12 +1,14 @@
 {
   "names": [
     "app",
+    "automation",
     "badge",
     "clipboard",
     "clipboard:read",
     "crash",
     "db",
     "dialog",
+    "extension",
     "fs",
     "fs:read",
     "kv",
@@ -17,6 +19,7 @@
     "menu",
     "net",
     "notify",
+    "offscreen",
     "os:info",
     "os:secrets",
     "os:secrets.read",

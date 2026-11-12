@@ -83,6 +83,11 @@ func (a *App) newWindow(o WindowOptions) (*Window, error) {
 	if o.Resizable {
 		style |= nsWindowStyleMaskResizable
 	}
+	if o.Offscreen {
+		// Borderless windows are not constrained to a screen (see
+		// snapshot_darwin.go), so this one can sit far outside every display.
+		style = 0
+	}
 
 	web := a.newWebView()
 	if web == 0 {
@@ -108,7 +113,11 @@ func (a *App) newWindow(o WindowOptions) (*Window, error) {
 	w.applyLayout()
 
 	w.pv.load(o.Path)
-	win.Send(sel("makeKeyAndOrderFront:"), objc.ID(0))
+	if o.Offscreen {
+		parkOffscreen(win, width, height)
+	} else {
+		win.Send(sel("makeKeyAndOrderFront:"), objc.ID(0))
+	}
 	a.startMemoryPurge()
 	return w, nil
 }
@@ -128,6 +137,7 @@ func (a *App) newWebView() objc.ID {
 			cls("NSNumber").Send(sel("numberWithBool:"), true), nsString("developerExtrasEnabled"))
 	}
 	a.applyMemoryConfig(config)
+	a.applyExtensionConfig(config)
 	web := cls(webViewClassName()).Send(sel("alloc")).Send(sel("initWithFrame:configuration:"), nsRect{}, config)
 	if web == 0 {
 		return 0

@@ -17,5 +17,18 @@ func init() {
 		ID{"krate/worker.post", "worker", "[id: string, data: unknown]", "void", "worker"},
 		ID{"krate/worker.events", "worker", "[id?: string] (stream)", "WorkerEvent", "worker"},
 		ID{"krate/worker.emit", "", "[data: unknown]", "void", "worker-host"},
+
+		ID{"krate/offscreen.open", "offscreen", "[options?: OffscreenOptions]", "string", "offscreen"},
+		ID{"krate/offscreen.capture", "offscreen", "[window: string, options?: CaptureOptions]", "Frame", "offscreen"},
+		ID{"krate/offscreen.frames", "offscreen", "[window: string, options?: CaptureOptions] (stream)", "Frame", "offscreen"},
+
+		ID{"krate/automation.endpoint", "automation", "[]", "AutomationEndpoint", "automation"},
+		ID{"krate/automation.cdp", "automation", "[method: string, params?: object, view?: string]", "unknown", "automation"},
+		ID{"krate/automation.cdpEvents", "automation", "[event: string, view?: string] (stream)", "unknown", "automation"},
+
+		ID{"krate/extension.declared", "extension", "[]", "string[]", "extension"},
+		ID{"krate/extension.list", "extension", "[]", "ExtensionInfo[]", "extension"},
+		ID{"krate/extension.load", "extension", "[name: string]", "ExtensionInfo", "extension"},
+		ID{"krate/extension.remove", "extension", "[id: string]", "void", "extension"},
 	)
 }
