@@ -681,6 +681,7 @@ Known limits:
 
 - WebKit keeps no cookies for the app's custom scheme (document.cookie is inert on krate://app and the jar refuses a single-label host such as app), so on Linux and macOS cookie calls for the app origin answer unsupported; pass the URL of an http(s) site. On Windows the app origin is https://app.localhost and has cookies.
 - An older WebView2 runtime without ICoreWebView2Profile2 can only clear cookies.
+- Windows on ARM: the WebView2 runtime on the windows-11-arm CI runner never finishes clearing DOM storage (local storage, IndexedDB), so clearing storage there returns an error; cookies and the cache clear.
 - macOS and Windows: untested. The same GUI tests run in CI on macos-latest and windows-latest.
 
 Evidence: `TestGUIPageCookies`, `TestCookies`, `TestCookieDomainMatches`, `TestCookieOrigin`, `TestNativeE2EPageGUI`

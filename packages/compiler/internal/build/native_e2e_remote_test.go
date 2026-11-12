@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -184,13 +185,19 @@ func TestNativeE2ERemoteGUI(t *testing.T) {
 		t.Fatalf("post: %v", err)
 	}
 	poll("the echo", func() bool { _, ok := has("echo"); return ok })
+	// The app origin the remote page sees: WebView2 serves the app from
+	// https://app.localhost, the WebKit platforms from krate://app.
+	appOrigin := "krate://app"
+	if runtime.GOOS == "windows" {
+		appOrigin = "https://app.localhost"
+	}
 	for _, m := range got.Messages {
 		var d struct {
 			Echo   map[string]any `json:"echo"`
 			Origin string         `json:"origin"`
 		}
 		if json.Unmarshal(m.Data, &d) == nil && d.Echo != nil {
-			if d.Origin != "krate://app" || d.Echo["n"] != float64(7) {
+			if d.Origin != appOrigin || d.Echo["n"] != float64(7) {
 				t.Errorf("echo %+v", d)
 			}
 		}
