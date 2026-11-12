@@ -5,6 +5,7 @@ package darwin
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"image/png"
 	"io"
 	"net/http"
@@ -540,7 +541,33 @@ func zoomShortcuts(t *testing.T, w *Window, v caps.ViewRef) {
 	}
 	item("Zoom In")
 	if z := zoom(); z < 1.09 || z > 1.11 {
-		t.Fatalf("zoom after Zoom In: %v, want 1.1", z)
+		// Say why: the menu, its item, where the action goes and which view
+		// the zoom code picks.
+		var diag string
+		runOnMain(func() {
+			withPool(func() {
+				bar := guiApp.nsApp.Send(sel("mainMenu"))
+				viewItem := bar.Send(sel("itemWithTitle:"), nsString("View"))
+				menu := viewItem.Send(sel("submenu"))
+				index := int(menu.Send(sel("indexOfItemWithTitle:"), nsString("Zoom In")))
+				var enabled bool
+				var target objc.ID
+				if menu != 0 && index >= 0 {
+					it := menu.Send(sel("itemAtIndex:"), index)
+					enabled = objc.Send[bool](it, sel("isEnabled"))
+					target = it.Send(sel("target"))
+				}
+				fv := guiApp.focusedView()
+				var fvRef caps.ViewRef
+				if fv != nil {
+					fvRef = fv.ref
+				}
+				diag = fmt.Sprintf("view menu item %v, menu %v, index %d, enabled %v, target %v (delegate %v), key is window %v, focused view %d (want %d)",
+					viewItem != 0, menu != 0, index, enabled, target, guiApp.appDelegate,
+					guiApp.nsApp.Send(sel("keyWindow")) == w.win, fvRef, v)
+			})
+		})
+		t.Fatalf("zoom after Zoom In: %v, want 1.1; %s", z, diag)
 	}
 	item("Zoom Out")
 	if z := zoom(); z < 0.99 || z > 1.01 {
