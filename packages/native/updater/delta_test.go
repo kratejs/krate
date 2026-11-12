@@ -222,7 +222,7 @@ func (f *deltaFix) assertInstalled() {
 				f.t.Fatalf("%s differs after the update", name)
 			}
 		}
-		if l, err := os.Readlink(filepath.Join(f.target, "Contents", "link")); err != nil || l != "app/app.json" {
+		if l, err := os.Readlink(filepath.Join(f.target, "Contents", "link")); err != nil || filepath.ToSlash(l) != "app/app.json" {
 			f.t.Fatalf("symlink lost: %q %v", l, err)
 		}
 	}

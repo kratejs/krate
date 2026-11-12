@@ -1,6 +1,7 @@
 package caps
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -327,7 +328,7 @@ func TestShareItemsValidate(t *testing.T) {
 	if err := (ShareItems{Text: "hi"}).Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if err := (ShareItems{URLs: []string{"https://krate.js.org"}, Files: []string{"/tmp/a.txt"}}).Validate(); err != nil {
+	if err := (ShareItems{URLs: []string{"https://krate.js.org"}, Files: []string{filepath.Join(t.TempDir(), "a.txt")}}).Validate(); err != nil {
 		t.Fatal(err)
 	}
 	for _, bad := range []ShareItems{

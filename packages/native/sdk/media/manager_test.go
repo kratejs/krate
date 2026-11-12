@@ -3,6 +3,7 @@ package media
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -241,7 +242,7 @@ func TestStorePersistsAppDecisionsOnly(t *testing.T) {
 	if len(ds) != 2 || ds[0].Kind != caps.PermCamera || !ds[0].Allow || ds[1].Kind != caps.PermLocation || ds[1].Allow {
 		t.Fatalf("reloaded %+v", ds)
 	}
-	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o600 {
+	if info, err := os.Stat(path); err != nil || (runtime.GOOS != "windows" && info.Mode().Perm() != 0o600) {
 		t.Fatalf("store file: %v %v", info, err)
 	}
 	m2.Reset("")

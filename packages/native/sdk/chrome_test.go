@@ -3,6 +3,7 @@ package sdk_test
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -20,6 +21,7 @@ import (
 )
 
 func TestChromeWindowOps(t *testing.T) {
+	notes := filepath.Join(t.TempDir(), "notes.txt")
 	r := newRig(t)
 	w := chrome.Main()
 
@@ -45,7 +47,7 @@ func TestChromeWindowOps(t *testing.T) {
 	if err := w.SetDocumentEdited(true); err != nil {
 		t.Fatal(err)
 	}
-	if err := w.SetRepresentedFile("/tmp/notes.txt"); err != nil {
+	if err := w.SetRepresentedFile(notes); err != nil {
 		t.Fatal(err)
 	}
 	if err := w.SetTabbing("docs", "preferred"); err != nil {
@@ -58,7 +60,7 @@ func TestChromeWindowOps(t *testing.T) {
 	if st.TitleBar != "hidden" || st.Backdrop != "acrylic" || st.Vibrancy != "sidebar" ||
 		st.Overlay == nil || st.Overlay.Height != 40 || st.Overlay.Color != "#101010" ||
 		st.TrafficLight == nil || st.TrafficLight.X != 14 || st.TrafficLight.Y != 18 ||
-		!st.DocumentEdited || st.RepresentedFile != "/tmp/notes.txt" || st.TabbingID != "docs" || st.TabbingMode != "preferred" {
+		!st.DocumentEdited || st.RepresentedFile != notes || st.TabbingID != "docs" || st.TabbingMode != "preferred" {
 		t.Fatalf("state %+v", st)
 	}
 	if len(st.Features) < 5 {
@@ -206,7 +208,7 @@ func TestChromeAppLevel(t *testing.T) {
 	if r.app.ActivationPolicy() != "regular" {
 		t.Fatalf("policy %q", r.app.ActivationPolicy())
 	}
-	if err := chrome.Main().Share(chrome.ShareItems{Text: "hi", URLs: []string{"https://krate.js.org"}, Files: []string{"/tmp/x.txt"}}); err != nil {
+	if err := chrome.Main().Share(chrome.ShareItems{Text: "hi", URLs: []string{"https://krate.js.org"}, Files: []string{filepath.Join(t.TempDir(), "x.txt")}}); err != nil {
 		t.Fatal(err)
 	}
 	if len(r.app.Shared) != 1 || r.app.Shared[0].Text != "hi" || r.app.Shared[0].URLs[0] != "https://krate.js.org" {
