@@ -226,11 +226,16 @@ func loadApp(dir string, fsys fs.FS, opts RunOptions) (*app, error) {
 	}
 	if opts.Dev {
 		a.dev = newDevTools(a.logf)
+		a.dev.identify = a.identify
 		so.HMR = a.dev.hmr.serve
 		so.Observe = a.dev.ring.add
 		a.dev.memory = a.serveMemory
 	}
-	app := windowIDHandler(scheme.New(so))
+	inject := ""
+	if opts.Dev || man.Debug {
+		inject = inspectorKeyScript
+	}
+	app := windowIDHandler(scheme.New(so), inject)
 	extra := opts.ExtraHandler
 	a.handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		a.reaper.Touch()
@@ -241,6 +246,10 @@ func loadApp(dir string, fsys fs.FS, opts RunOptions) (*app, error) {
 			return
 		}
 		if a.dev != nil && a.dev.handle(w, r) {
+			return
+		}
+		if (opts.Dev || man.Debug) && r.URL.Path == inspectorPath {
+			a.serveInspector(w, r)
 			return
 		}
 		app.ServeHTTP(w, r)

@@ -2860,7 +2860,13 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 			// original .tsx positions.
 			inputMap := ""
 			if len(emitResult.SrcMarks) > 0 {
-				rawJS, inputMap = buildHydrationMap(rawJS, emitResult.SrcMarks, pageDir)
+				mapDir := pageDir
+				if b.NativeTarget {
+					// The terminal prints these paths: project-relative reads
+					// better than a path out of the build directory.
+					mapDir = b.Root
+				}
+				rawJS, inputMap = buildHydrationMap(rawJS, emitResult.SrcMarks, mapDir)
 			}
 			finalJS := rawJS
 			mapJSON := ""

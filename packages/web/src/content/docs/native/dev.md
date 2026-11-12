@@ -26,8 +26,9 @@ at `.krate/dev/<productName>.app` with an `Info.plist` whose identifier is
 `<appId>.dev`, signs it ad hoc when `codesign` is on the PATH, and starts the
 shell from there. The bundle is refreshed when the shell or the app id
 changes. If it cannot be created the shell runs unbundled and says so;
-notifications then return an `ErrUnsupported` error that explains why. This
-part is untested on a Mac.
+notifications then return an `ErrUnsupported` error that explains why. CI
+tests the bundle creation and the notification code on macOS; whether a banner
+appears from a dev bundle is a manual check.
 
 ## Two processes
 
@@ -49,6 +50,30 @@ the UI is rebuilt completely.
 ## Errors
 
 Build errors print in the terminal and show in the dev overlay in the window.
+
+Errors in the page reach the terminal too, from every window and view. The dev
+overlay catches an uncaught error, an unhandled promise rejection, a
+`console.error` call and a script or stylesheet that fails to load, including
+those that happen while the page starts, and the shell prints each one with the
+id of the window or view it came from (`main`, or the id you gave `addView`):
+
+```text
+[webview] main: Error: boom
+[webview]     @src/pages/index.tsx:16:34
+[webview]     click@[native code]
+[webview] sidebar: unhandled rejection: fetch failed
+```
+
+The overlay in the window lists the same errors. The stack is mapped to your
+source through the dev build's source maps where the compiler recorded a
+position: event handlers and expression bindings of a page. Other frames, such
+as the body of an effect or a timer callback, print the generated file and line
+(`index.v0hgz6.js:1046:18`). The shell takes the window id from the webview the
+report came from, not from the page.
+
+If a page shows nothing or stays on its first state and the terminal says
+nothing, query the page: the runtime keeps the errors it caught in
+`globalThis.__krateErrs`.
 The session keeps running with the last good host code; the next good build
 clears the error. A TypeScript host error reaches the UI as a `KrateError`
 whose `data.stack` is the stack mapped through the source map (`file:line`);
@@ -73,6 +98,28 @@ window and browser mode. Pages are served with `Cache-Control: no-cache`.
 from `--port`, default any free port) and the command prints a tokenized URL.
 Nothing is opened automatically. This is meant for Playwright and browser
 devtools.
+
+## Developer tools
+
+The webview's own inspector (elements, console, network, sources) is on in
+`krate native dev` on every platform, and off in a release build unless the
+config sets `native: { debug: true }`. Open it from the page with:
+
+| Platform | Shortcut | Also |
+| --- | --- | --- |
+| Linux (WebKitGTK) | F12 or Ctrl+Shift+I | right-click, Inspect Element |
+| Windows (WebView2) | F12 or Ctrl+Shift+I | right-click, Inspect |
+| macOS (WKWebView) | Cmd+Option+I (F12 also works) | right-click, Inspect Element; Safari's Develop menu lists the app on macOS 13.3 and later |
+
+The shell adds the shortcut script to the pages of a build with the tools on, and
+opens the inspector of the window or view that had the focus. On macOS it uses
+WebKit's `_inspector` accessor, which is not public API; if a macOS release
+removes it the shortcut logs a line and the context menu and Safari keep
+working. Each window and each view has its own inspector.
+
+With the tools off (a release build without `native.debug`), the shortcut script
+is not added, the endpoint it posts to does not exist and the platform's
+developer tools are disabled.
 
 ## Host inspector
 

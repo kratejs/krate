@@ -184,6 +184,13 @@ page load. A native build turns View Transitions off, whatever the top-level
 desktop), because a cross-document transition aborts the WebKitGTK web process
 in software-rendered setups. Set `native.viewTransitions: "auto"` to keep them.
 
+### Developer tools
+
+The webview's inspector is on in `krate native dev` and off in a release build.
+Set `native: { debug: true }` to keep it in a release build (to look at a bug on
+a user's machine, for example). F12 or Ctrl+Shift+I opens it (Cmd+Option+I on
+macOS); see [Developer tools](/docs/native/dev/#developer-tools).
+
 ## Footprint (Linux, measured)
 
 Measured with the `examples/native-tasks` app on Linux x86-64 (WebKitGTK 2.54,

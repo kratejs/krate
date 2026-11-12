@@ -62,6 +62,9 @@ type NativeConfig struct {
 	// Lean tunes the memory-hygiene checks of `krate native check` and
 	// native builds.
 	Lean NativeLean `json:"lean,omitempty"`
+	// Debug keeps the webview's developer tools (the web inspector) on in a
+	// release build. They are always on in `krate native dev`.
+	Debug bool `json:"debug,omitempty"`
 }
 
 // NativeLean tunes the lean-page checks (KR7270 to KR7275). Zero values keep

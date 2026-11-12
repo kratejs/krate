@@ -815,3 +815,27 @@ func TestNativeTargetDisablesViewTransitionsByDefault(t *testing.T) {
 		t.Errorf("native.viewTransitions: \"auto\" must be honored: %s", head)
 	}
 }
+
+func TestNativeAppDeveloperToolsAreDevOnlyUnlessDebug(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		dev   bool
+		debug bool
+		want  bool
+	}{
+		{"release", false, false, false},
+		{"release with native.debug", false, true, true},
+		{"dev", true, false, true},
+	} {
+		root := nativeExampleCopy(t)
+		b := newNativeBuilder(t, root)
+		b.Cfg.Native = &config.NativeConfig{AppID: "com.example.tasks", Debug: tc.debug}
+		if _, err := b.BuildNativeApp(NativeAppOptions{SkipGoCompile: true, Dev: tc.dev}); err != nil {
+			t.Fatalf("%s: native build: %v", tc.name, err)
+		}
+		m := readNativeManifest(t, filepath.Join(root, "dist-native", "app"))
+		if m["debug"] != tc.want {
+			t.Errorf("%s: manifest debug = %v, want %v", tc.name, m["debug"], tc.want)
+		}
+	}
+}

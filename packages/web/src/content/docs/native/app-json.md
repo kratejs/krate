@@ -69,6 +69,6 @@ is in the directory; paths in `app.json` are relative to it.
 | `memory` | The memory profile, from `native.memory`: `balanced` (default), `minimal` or `performance`. See [Memory](/docs/native/memory/). |
 | `features` | `{media, webaudio, webgl, webrtc, spellcheck}`: which optional webview features the UI uses, found by scanning the built UI and adjusted by `native.features`. The `balanced` and `minimal` profiles switch the others off. An `app.json` without it keeps every feature on. |
 | `hostjs.memoryMB` | From `native.host.memoryMB`: the QuickJS heap limit in MiB. Absent means the profile default (64, 32 or 256). |
-| `debug` | `false` for a build made by `krate native build`. |
+| `debug` | `true` for a build made by `krate native dev` and for a release build with `native.debug: true`; `false` otherwise. It turns the webview's developer tools on; see [Developer tools](/docs/native/dev/#developer-tools). |
 
 The build manifest of the web build (`dist/.krate`) is removed from `dist/`.

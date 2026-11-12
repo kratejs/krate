@@ -190,9 +190,15 @@ With `--dev` the app origin serves, besides the host protocol:
   `ProcessInfo` capability (`platform/caps`): descendants named `WebKit*Process`
   on Linux, private `WKWebView` selectors on macOS and WebView2's
   `GetProcessInfos` on Windows. Where a process cannot be named, `notes` says so
-  and the role is absent. Only macOS and Windows are compile-checked.
-- `POST /__krate/dev/client-error` takes the dev overlay's error reports and logs
-  them to stderr as `[webview] ...`.
+  and the role is absent. On macOS and Windows, TestGUIMemory and the CI memory report run it.
+- `POST /__krate/dev/client-error` takes the dev overlay's error reports (uncaught
+  errors, unhandled rejections, `console.error`, failed script loads) and logs
+  them to stderr as `[webview] <window or view id>: <message>` followed by the
+  stack. The id comes from the webview that sent the request, not from the body.
+- `POST /__krate/inspector` opens the web inspector of the requesting view
+  (`caps.InspectorOpener`). It exists only when the developer tools are on (`--dev`
+  or `debug: true` in the manifest), where the shell also injects the script that
+  posts to it on F12, Ctrl+Shift+I or Cmd+Option+I.
 
 ## Go host child
 

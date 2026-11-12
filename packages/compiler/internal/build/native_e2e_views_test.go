@@ -25,7 +25,7 @@ func TestNativeE2EViewsGUI(t *testing.T) {
 		requireE2E(t, "examples/native-views has no built @krate/app (run pnpm install and pnpm build)")
 	}
 	work := t.TempDir()
-	appDir := e2eBuildNative(t, ex, filepath.Join(work, "dist-native"))
+	appDir := e2eBuildNativeDev(t, ex, filepath.Join(work, "dist-native"))
 	bin := e2eBuildShell(t, work)
 
 	s := e2eStartShell(t, bin, appDir)
@@ -61,6 +61,7 @@ func TestNativeE2EViewsGUI(t *testing.T) {
 			t.Errorf("view %s loaded at %dx%d; its pane has no room", m[1], w, h)
 		}
 	}
+	e2eNoPageErrors(t, s)
 	if _, err := s.send("quit", 10*time.Second); err != nil {
 		t.Errorf("quit: %v", err)
 	}

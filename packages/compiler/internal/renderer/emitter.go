@@ -32,6 +32,10 @@ type SrcMark struct {
 // into a source map.
 const SrcMarkPrefix = "/*@k:"
 
+// SrcMarkEnd closes the mapping the last marker started, so code after a
+// mapped statement (an effect, a timer) is not attributed to it.
+const SrcMarkEnd = "/*@k:end*/"
+
 type EmitResult struct {
 	// TrackSources makes GenerateNewHydrationJS leave source markers.
 	TrackSources bool

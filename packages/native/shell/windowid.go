@@ -25,20 +25,22 @@ import (
 // sandbox for code you do not trust.
 const windowIDScript = `<script>(function(){try{var k="__krate_win",v=new URLSearchParams(location.search).get(k)||sessionStorage.getItem(k);if(v){sessionStorage.setItem(k,v);globalThis.__KRATE_WINDOW__=v}}catch(e){}})()</script>`
 
-// windowIDHandler injects windowIDScript into the HTML pages next serves.
-func windowIDHandler(next http.Handler) http.Handler {
+// windowIDHandler injects windowIDScript, and extra when given, into the HTML
+// pages next serves.
+func windowIDHandler(next http.Handler, extra string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if (r.Method != http.MethodGet && r.Method != http.MethodHead) || strings.HasPrefix(r.URL.Path, "/__krate/") {
 			next.ServeHTTP(w, r)
 			return
 		}
-		iw := &injectWriter{ResponseWriter: w, head: r.Method == http.MethodHead}
+		iw := &injectWriter{ResponseWriter: w, head: r.Method == http.MethodHead, extra: extra}
 		next.ServeHTTP(iw, r)
 		iw.finish()
 	})
 }
 
 type injectWriter struct {
+	extra string
 	http.ResponseWriter
 	head   bool
 	status int
@@ -84,13 +86,13 @@ func (w *injectWriter) finish() {
 		return
 	}
 	body := w.buf.Bytes()
-	out := injectIntoHead(body)
+	out := injectIntoHead(body, w.extra)
 	h := w.Header()
 	if cl := h.Get("Content-Length"); cl != "" {
 		n := len(out)
 		if w.head {
 			old, _ := strconv.Atoi(cl)
-			n = old + len(windowIDScript)
+			n = old + len(windowIDScript) + len(w.extra)
 		}
 		h.Set("Content-Length", strconv.Itoa(n))
 	}
@@ -103,7 +105,7 @@ func (w *injectWriter) finish() {
 // injectIntoHead puts the script right after the opening head tag, or at the
 // start of the document when there is none (after the html tag or doctype
 // when it has one).
-func injectIntoHead(body []byte) []byte {
+func injectIntoHead(body []byte, extra ...string) []byte {
 	lower := bytes.ToLower(body)
 	at := 0
 	for _, tag := range []string{"<head", "<html", "<!doctype"} {
@@ -119,6 +121,9 @@ func injectIntoHead(body []byte) []byte {
 	out := make([]byte, 0, len(body)+len(windowIDScript))
 	out = append(out, body[:at]...)
 	out = append(out, windowIDScript...)
+	for _, e := range extra {
+		out = append(out, e...)
+	}
 	out = append(out, body[at:]...)
 	return out
 }

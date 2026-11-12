@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -30,6 +31,8 @@ type devTools struct {
 	ring *eventRing
 	// memory serves devMemoryPath; the app sets it.
 	memory http.HandlerFunc
+	// identify names the window or view a request came from.
+	identify func(*http.Request) (string, bool)
 }
 
 func newDevTools(logf func(string, ...any)) *devTools {
@@ -59,19 +62,19 @@ func (d *devTools) handle(w http.ResponseWriter, r *http.Request) bool {
 			return true
 		}
 		body, _ := io.ReadAll(io.LimitReader(r.Body, maxClientError))
-		var ce struct {
-			Message string `json:"message"`
-			Stack   string `json:"stack"`
-			URL     string `json:"url"`
-			Line    int    `json:"line"`
-			Col     int    `json:"col"`
-		}
+		var ce clientError
 		if json.Unmarshal(body, &ce) == nil && ce.Message != "" {
-			loc := ce.URL
-			if ce.Line > 0 {
-				loc = fmt.Sprintf("%s:%d:%d", ce.URL, ce.Line, ce.Col)
+			win := ce.Window
+			if d.identify != nil {
+				// The shell's own view-to-window mapping beats the id the
+				// page claims.
+				if id, ok := d.identify(r); ok && id != unknownView {
+					win = id
+				}
 			}
-			d.logf("[webview] %s %s", ce.Message, loc)
+			for _, line := range ce.logLines(win) {
+				d.logf("%s", line)
+			}
 		}
 		w.WriteHeader(http.StatusNoContent)
 		return true
@@ -303,4 +306,59 @@ func (r *eventRing) serve(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 	}
+}
+
+// clientError is what the dev overlay posts when the page threw, rejected a
+// promise, logged console.error or failed to load a script.
+type clientError struct {
+	Message string `json:"message"`
+	Stack   string `json:"stack"`
+	URL     string `json:"url"`
+	Line    int    `json:"line"`
+	Col     int    `json:"col"`
+	Kind    string `json:"kind"`
+	Window  string `json:"window"`
+}
+
+// maxStackLines caps the stack lines printed for one error.
+const maxStackLines = 12
+
+// logLines renders the error for the terminal: one tagged line with the
+// window or view id and the message, then the stack. win falls back to "main"
+// (the first window carries no id of its own).
+func (ce clientError) logLines(win string) []string {
+	if win == "" {
+		win = "main"
+	}
+	msg := ce.Message
+	switch ce.Kind {
+	case "unhandledrejection":
+		msg = "unhandled rejection: " + msg
+	case "console":
+		msg = "console.error: " + msg
+	}
+	head := strings.SplitN(msg, "\n", 2)[0]
+	loc := ce.URL
+	if ce.Line > 0 {
+		loc = fmt.Sprintf("%s:%d:%d", ce.URL, ce.Line, ce.Col)
+	}
+	first := "[webview] " + win + ": " + head
+	if loc != "" && strings.TrimSpace(ce.Stack) == "" {
+		first += " (" + loc + ")"
+	}
+	out := []string{first}
+	n := 0
+	for _, l := range strings.Split(strings.TrimSpace(ce.Stack), "\n") {
+		l = strings.TrimSpace(l)
+		if l == "" || l == head {
+			continue
+		}
+		if n == maxStackLines {
+			out = append(out, "[webview]     ...")
+			break
+		}
+		out = append(out, "[webview]     "+l)
+		n++
+	}
+	return out
 }

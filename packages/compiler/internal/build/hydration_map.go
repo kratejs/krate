@@ -20,6 +20,8 @@ import (
 // next one, so an error thrown inside a handler or expression binding is
 // reported at that handler or expression in the .tsx file.
 func buildHydrationMap(js string, marks []renderer.SrcMark, jsDir string) (string, string) {
+	// src < 0 is an end marker: a segment of one field, which the source map
+	// format reads as "no original position from here".
 	type seg struct{ genLine, genCol, src, srcLine, srcCol int }
 	var segs []seg
 	var sources []string
@@ -28,6 +30,11 @@ func buildHydrationMap(js string, marks []renderer.SrcMark, jsDir string) (strin
 	out.Grow(len(js))
 	line, col := 0, 0
 	for i := 0; i < len(js); {
+		if strings.HasPrefix(js[i:], renderer.SrcMarkEnd) {
+			segs = append(segs, seg{line, col, -1, 0, 0})
+			i += len(renderer.SrcMarkEnd)
+			continue
+		}
 		if strings.HasPrefix(js[i:], renderer.SrcMarkPrefix) {
 			end := strings.Index(js[i:], "*/")
 			if end > 0 {
@@ -74,6 +81,11 @@ func buildHydrationMap(js string, marks []renderer.SrcMark, jsDir string) (strin
 			prevGenCol = 0
 		} else {
 			mappings.WriteString(",")
+		}
+		if s.src < 0 {
+			mappings.WriteString(vlqEncode([]int{s.genCol - prevGenCol}))
+			prevLine, prevGenCol = s.genLine, s.genCol
+			continue
 		}
 		mappings.WriteString(vlqEncode([]int{s.genCol - prevGenCol, s.src - prevSrc, s.srcLine - prevSrcLine, s.srcCol - prevSrcCol}))
 		prevLine, prevGenCol, prevSrc, prevSrcLine, prevSrcCol = s.genLine, s.genCol, s.src, s.srcLine, s.srcCol
