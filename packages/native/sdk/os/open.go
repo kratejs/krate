@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/kratejs/krate/packages/native/dist"
 	"github.com/kratejs/krate/packages/native/krate"
 )
 
@@ -77,6 +78,13 @@ func startHandler(raw string) error {
 	case "windows":
 		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", raw)
 	default:
+		// A sandboxed app (Flatpak, Snap) hands the URL to the OpenURI portal,
+		// which opens it in the host's default handler.
+		if dist.Current().Sandboxed() {
+			if err := portalOpen(raw); err == nil {
+				return nil
+			}
+		}
 		cmd = exec.Command("xdg-open", raw)
 	}
 	if cmd.Err != nil {

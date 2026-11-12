@@ -39,6 +39,9 @@ func newDefaultBackend(publish func(caps.NotifyEvent)) (backend, error) {
 	if err != nil {
 		return nil, err
 	}
+	if usePortal() {
+		return newPortalBackend(conn, publish)
+	}
 	b := &dbusBackend{conn: conn, publish: publish, byID: map[string]uint32{}, byServ: map[uint32]string{}, acted: map[uint32]bool{}}
 	c1, err := conn.Subscribe("type='signal',interface='"+iface+"',member='ActionInvoked'", b.onAction)
 	if err != nil {
@@ -185,5 +188,5 @@ func Available(env *bridge.Env) bool {
 	if platformAvailable(env) {
 		return true
 	}
-	return sessionbus.NameHasOwner(dest)
+	return sessionbus.NameHasOwner(dest) || usePortal()
 }

@@ -286,8 +286,9 @@ func wantedFormats(o Options) (map[string]bool, error) {
 // validate checks the options and fills defaults.
 func (o *Options) validate() error {
 	p := o.Payload
-	if !contains([]string{"linux", "windows", "darwin"}, p.OS) || !contains([]string{"amd64", "arm64"}, p.Arch) {
-		return fail(diag.CodeNativePkgInput, "--target", fmt.Sprintf("cannot package for %s/%s", p.OS, p.Arch), "use linux, windows or darwin with amd64 or arm64")
+	universal := p.Arch == ArchUniversal && p.OS == "darwin"
+	if !contains([]string{"linux", "windows", "darwin"}, p.OS) || !(contains([]string{"amd64", "arm64"}, p.Arch) || universal) {
+		return fail(diag.CodeNativePkgInput, "--target", fmt.Sprintf("cannot package for %s/%s", p.OS, p.Arch), "use linux, windows or darwin with amd64 or arm64 (darwin also takes universal)")
 	}
 	if st, err := os.Stat(p.Executable); err != nil || !st.Mode().IsRegular() {
 		return fail(diag.CodeNativePkgInput, p.Executable, "the executable to package does not exist", "build first: krate native build --release")
