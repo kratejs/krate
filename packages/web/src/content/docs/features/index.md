@@ -28,6 +28,7 @@ A tour of the features that ship with Krate beyond the core compiler.
 | [Middleware](/docs/features/middleware/) | Request interception before page rendering |
 | [Environment Variables](/docs/features/environment-variables/) | `.env` files, precedence, `process.env` in server contexts |
 | [Analytics](/docs/features/analytics/) | Snippets via `<Head>`/`<Script>` + the SPA route-change hook |
+| [Smooth Scroll](/docs/features/smooth-scroll/) | Lenis smooth scrolling, anchors and snap, set with `smoothScroll` in config |
 | [HTTP Headers](/docs/features/http-headers/) | Middleware headers, automatic cache/security headers, ISR `Cache-Control` |
 | [Typed Routes & Content](/docs/features/typed-routes/) | Generated `.d.ts` for routes, params, and content collections |
 | [Quality Checks](/docs/features/quality-checks/) | Compiler-enforced a11y, SEO, and performance gates (`krate check`) |
