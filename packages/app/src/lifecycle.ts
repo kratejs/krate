@@ -21,7 +21,7 @@ export function relaunch(): Promise<void> {
 // supports reports whether a capability works right now: "dialog",
 // "clipboard", "menu", "tray", "notify", "shortcut", "window",
 // "window:alwaysOnTop", "window:fullscreen", "window:frameless",
-// "window:position", "window:release".
+// "window:position", "window:release", "page", "downloads", "cookies".
 export function supports(capability: string): Promise<boolean> {
   return call("krate/app.supports", [capability], { dedupe: true });
 }

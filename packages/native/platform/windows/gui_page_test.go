@@ -4,7 +4,6 @@ package windows
 
 import (
 	"bytes"
-	"errors"
 	"image/png"
 	"io"
 	"net/http"
@@ -16,7 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kratejs/krate/packages/native/krate"
 	"github.com/kratejs/krate/packages/native/platform/caps"
 )
 
@@ -119,11 +117,6 @@ func waitLoaded(t *testing.T, path string) {
 			t.Fatalf("page %s did not load", path)
 		}
 	}
-}
-
-func evalResult(t *testing.T, w *Window, ref caps.ViewRef, js string) string {
-	t.Helper()
-	return pageEval(t, w, ref, js)
 }
 
 func TestGUIPageZoom(t *testing.T) {
@@ -464,9 +457,6 @@ func TestGUIPageCookies(t *testing.T) {
 		t.Fatalf("cookies after clearing everything: %+v", got)
 	}
 }
-
-var _ = errors.New
-var _ = krate.ErrUnsupported
 
 func pageEval(t *testing.T, w *Window, ref caps.ViewRef, js string) string {
 	t.Helper()

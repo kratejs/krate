@@ -122,11 +122,6 @@ func waitLoaded(t *testing.T, path string) {
 	}
 }
 
-func evalResult(t *testing.T, w *Window, ref caps.ViewRef, js string) string {
-	t.Helper()
-	return pageEval(t, w, ref, js)
-}
-
 func TestGUIPageZoom(t *testing.T) {
 	requireGUI(t)
 	w, v := openPage(t, "/pgfind")
@@ -465,9 +460,6 @@ func TestGUIPageCookies(t *testing.T) {
 		t.Fatalf("cookies after clearing everything: %+v", got)
 	}
 }
-
-var _ = errors.New
-var _ = krate.ErrUnsupported
 
 func pageEval(t *testing.T, w *Window, ref caps.ViewRef, js string) string {
 	t.Helper()

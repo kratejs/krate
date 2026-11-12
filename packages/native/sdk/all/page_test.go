@@ -407,3 +407,12 @@ func TestCookies(t *testing.T) {
 		t.Fatalf("platform clears %+v", cl)
 	}
 }
+
+func TestPageSupports(t *testing.T) {
+	r := newPageRig(t, "page")
+	for _, c := range []string{"page", "downloads", "cookies"} {
+		if !r.host.SupportsForTest(c) {
+			t.Errorf("app.supports(%q) is false on a platform with the capability", c)
+		}
+	}
+}
