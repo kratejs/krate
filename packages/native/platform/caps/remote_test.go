@@ -38,7 +38,7 @@ func TestRemoteDecide(t *testing.T) {
 		"javascript:alert(1)":             NavBlock,
 		"about:blank":                     NavAllow,
 		"about:srcdoc":                    NavBlock,
-		"https://app.localhost/":          NavExternal,
+		"https://app.localhost/":          NavBlock,
 		"":                                NavBlock,
 		"https://":                        NavBlock,
 		"ftp://example.com/":              NavBlock,
@@ -76,6 +76,9 @@ func TestRemoteResolveErrors(t *testing.T) {
 		{URL: "https://a.test/", Allow: []string{"krate://app"}},
 		{URL: "https://a.test/", Partition: "../x"},
 		{URL: "https://a.test/", Blocked: "maybe"},
+		{URL: "https://app.localhost/"},
+		{URL: "https://a.test/", Allow: []string{"https://app.localhost"}},
+		{URL: "https://a.test/", Allow: []string{"https://*.app.localhost"}},
 	}
 	for _, o := range bad {
 		if _, err := o.Resolve(); err == nil {

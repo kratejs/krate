@@ -60,6 +60,8 @@ type view struct {
 	scrollJS   string
 	find       caps.FindTracker
 	zoom       float64 // 0 until set; restored when the controller is recreated
+	// rv is set for a view that shows remote content (remote_windows.go).
+	rv *remoteView
 
 	ready chan struct{} // closed when the webview is usable or creation failed
 	err   error
@@ -105,6 +107,10 @@ func (a *App) createWindow(cfg WindowConfig, w *Window) error {
 	w.hwnd = hwnd
 	w.pv = a.registerView(w, true)
 	w.pv.path = cfg.Path
+	if cfg.remote != nil {
+		a.makeRemote(w.pv, cfg.remote)
+		w.pv.path = cfg.remote.policy.Start
+	}
 	a.windows[hwnd] = w
 	a.windowCreated(hwnd)
 	a.everOpened = true
@@ -124,6 +130,10 @@ func (a *App) createWindow(cfg WindowConfig, w *Window) error {
 // data folder), so all webviews run under one browser process; a released
 // window gets new controllers here when it is shown again.
 func (v *view) createController() {
+	if v.rv != nil {
+		v.createRemoteController()
+		return
+	}
 	w := v.w
 	a := w.app
 	a.withEnv(func() {
@@ -197,6 +207,24 @@ func (v *view) controllerCompleted(hr, controller uintptr) {
 		}
 		vcall(ptr(settings), setPutAreDevToolsEnabled, dev)
 		comRelease(ptr(settings))
+	}
+
+	if v.rv != nil {
+		a.setupRemote(v)
+		w.placeViews()
+		vcall(v.controller, ctlPutIsVisible, 1)
+		v.viewHid = false
+		vcall(v.webview, wvNavigate, uintptr(unsafe.Pointer(wstr(v.rv.restoreURL()))))
+		if v.primary {
+			v.focus()
+		}
+		pending := v.pending
+		v.pending = nil
+		for _, f := range pending {
+			f()
+		}
+		v.finish(nil)
+		return
 	}
 
 	// One handler object per view: the request is bound to the view whose
@@ -334,6 +362,13 @@ func (v *view) currentRoute() string {
 // Navigate loads path on the app origin.
 func (w *Window) Navigate(path string) {
 	v := w.pv
+	if v.rv != nil {
+		// A remote view only loads what its policy allows.
+		if path != "about:blank" && v.rv.policy.Decide(path) == caps.NavAllow {
+			v.do(func() { vcall(v.webview, wvNavigate, uintptr(unsafe.Pointer(wstr(path)))) })
+		}
+		return
+	}
 	v.do(func() {
 		v.path = path
 		vcall(v.webview, wvNavigate, uintptr(unsafe.Pointer(wstr(navURL(path)))))

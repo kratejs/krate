@@ -538,7 +538,8 @@ func (a *App) anyWebview() unsafe.Pointer {
 			continue
 		}
 		for _, v := range w.allViews() {
-			if v.webview != nil {
+			// Never a remote view: its profile is not the app's.
+			if v.webview != nil && v.rv == nil {
 				return v.webview
 			}
 		}

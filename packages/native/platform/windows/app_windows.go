@@ -55,6 +55,8 @@ type Config struct {
 // WindowConfig configures one window. Width and Height are the client area in
 // device-independent pixels (1/96 inch).
 type WindowConfig struct {
+	// remote, when set, makes the primary view show remote content.
+	remote    *remoteSpec
 	Title     string
 	Width     int
 	Height    int
@@ -94,6 +96,8 @@ type App struct {
 	envStarted  bool
 	windows     map[uintptr]*Window
 	byWebview   map[unsafe.Pointer]*view
+	remMu       sync.Mutex
+	rem         *remoteState
 	viewMu      sync.Mutex
 	viewOwner   map[caps.ViewRef]caps.WindowRef // read by WindowOfView from any goroutine
 	nextView    uint64

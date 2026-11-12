@@ -119,6 +119,9 @@ func (o RemoteOptions) Resolve() (*RemotePolicy, error) {
 	default:
 		return nil, fmt.Errorf("krate: remote blocked mode %q must be %q or %q", o.Blocked, BlockedExternal, BlockedDrop)
 	}
+	if isAppHost(u.Hostname()) {
+		return nil, fmt.Errorf("krate: remote URL %q is the app's own origin", o.URL)
+	}
 	p.startOrigin = OriginOf(u)
 	p.exact[p.startOrigin] = true
 	if len(o.Allow) > 64 {
@@ -139,6 +142,9 @@ func (p *RemotePolicy) addOrigin(a string) error {
 		return fmt.Errorf("krate: allowed origin %q must look like https://example.com or https://*.example.com", a)
 	}
 	host := strings.ToLower(u.Hostname())
+	if isAppHost(host) || strings.HasSuffix(host, "*.app.localhost") {
+		return fmt.Errorf("krate: allowed origin %q is the app's own origin", a)
+	}
 	if strings.HasPrefix(host, "*.") {
 		suffix := host[1:]
 		if strings.Contains(suffix[1:], "*") || strings.Count(suffix, ".") < 2 {
@@ -162,6 +168,14 @@ func defaultPort(u *url.URL) string {
 		return "443"
 	}
 	return "80"
+}
+
+// isAppHost reports the host of the app origin on Windows
+// (https://app.localhost), which Chromium resolves to the loopback address:
+// a remote page must never be sent there or allowed there.
+func isAppHost(h string) bool {
+	h = strings.ToLower(strings.TrimSuffix(h, "."))
+	return h == "app.localhost" || strings.HasSuffix(h, ".app.localhost")
 }
 
 // OriginOf returns "scheme://host[:port]" in lower case, with the default
@@ -208,7 +222,7 @@ func (p *RemotePolicy) Decide(target string) NavVerdict {
 	scheme := strings.ToLower(u.Scheme)
 	switch scheme {
 	case "http", "https":
-		if u.Hostname() == "" || u.User != nil {
+		if u.Hostname() == "" || u.User != nil || isAppHost(u.Hostname()) {
 			return NavBlock
 		}
 		if p.originAllowed(u) {

@@ -77,6 +77,24 @@ const (
 	iidWV2StateChangedEventHandler = "81336594-7ede-4ba9-bf71-acf0a95b58dd"
 	// ICoreWebView2BytesReceivedChangedEventHandler
 	iidWV2BytesReceivedChangedEventHandler = "828e8ab6-d94c-4264-9cef-5217170d6251"
+	// Remote content (remote_windows.go): profiles, user agent, certificate
+	// errors and logins of remote views.
+	// ICoreWebView2Environment10
+	iidWV2Environment10 = "ee0eb9df-6f12-46ce-b53f-3f47b9c928e0"
+	// ICoreWebView2ControllerOptions
+	iidWV2ControllerOptions = "12aae616-8ccb-44ec-bcb3-eb1831881635"
+	// ICoreWebView2Settings2
+	iidWV2Settings2 = "ee9a0f68-f46c-4e32-ac23-ef8cac224d2a"
+	// ICoreWebView2_14
+	iidWV2_14 = "6daa4f10-4a90-4753-8898-77c5df534165"
+	// ICoreWebView2_10
+	iidWV2_10 = "b1690564-6f5a-4983-8e48-31d1143fecdb"
+	// ICoreWebView2ServerCertificateErrorDetectedEventHandler
+	iidWV2ServerCertHandler = "969b3a26-d85e-4795-8199-fef57344da22"
+	// ICoreWebView2BasicAuthenticationRequestedEventHandler
+	iidWV2BasicAuthHandler = "58b4d6c2-18d4-497e-b39b-9a96533fa278"
+	// ICoreWebView2ServerCertificateErrorDetectedEventArgs
+	iidWV2ServerCertArgs = "012193ed-7c13-48ff-969d-a84c1f432a14"
 )
 
 // guid is a GUID in its in-memory (Windows GUID struct) layout: Data1, Data2

@@ -91,14 +91,14 @@ func TestGUIRemoteCannotReachApp(t *testing.T) {
   }
   r.open = String(window.open("krate://app/viewping?tag=open"));
   r.globals = Object.getOwnPropertyNames(window).filter(k => /krate/i.test(k)).join(",");
-  window.__res = JSON.stringify(r);
+  window.__res = Object.entries(r).map(([k, v]) => k + "=" + v).join(";") + ";";
 })(); 1`)
 	var res string
 	for i := 0; i < 100 && res == ""; i++ {
 		time.Sleep(100 * time.Millisecond)
 		res = pageEval(t, w, ref, "window.__res")
 	}
-	if res == "" || strings.Contains(res, "reachable") || !strings.Contains(res, `"globals":""`) {
+	if res == "" || strings.Contains(res, "reachable") || !strings.Contains(res, "globals=;") {
 		t.Fatalf("probe result %q", res)
 	}
 	select {
