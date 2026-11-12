@@ -176,6 +176,16 @@ The [OS integration](/docs/native/system/) areas have these ids:
 | theme (`theme`) | `krate/theme.get`, `krate/theme.set`, stream `krate/theme.events` |
 | crash (`crash`) | `krate/crash.list`, `krate/crash.read`, `krate/crash.delete`, `krate/crash.setAutoReload`, stream `krate/crash.events` |
 
+The [process and automation](/docs/native/processes/) areas have these ids:
+
+| Area | Ids |
+|------|-----|
+| port (`port`; using an end needs `port:receive`) | `krate/port.channel`, `krate/port.transfer`, `krate/port.post`, `krate/port.close`, stream `krate/port.listen` |
+| worker (`worker`) | `krate/worker.start`, `krate/worker.stop`, `krate/worker.list`, `krate/worker.specs`, `krate/worker.post`, `krate/worker.emit` (called by a worker), stream `krate/worker.events` |
+| offscreen (`offscreen`) | `krate/offscreen.open`, `krate/offscreen.capture`, stream `krate/offscreen.frames` |
+| automation (`automation`) | `krate/automation.endpoint`, `krate/automation.cdp`, stream `krate/automation.cdpEvents` |
+| extension (`extension`) | `krate/extension.declared`, `krate/extension.list`, `krate/extension.load`, `krate/extension.remove` |
+
 ## How it works in dev
 
 Go host code runs in a child process that has no windows. Every SDK call is a

@@ -18,6 +18,13 @@ func registerColorPage() {
 }
 
 func registerColor() {
+	guiSrv.mux.HandleFunc("/anim", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(`<!doctype html><title>a</title><body style="margin:0"><canvas id=c width=800 height=600></canvas><script>
+const g=document.getElementById("c").getContext("2d");let t=0;
+(function f(){t++;for(let i=0;i<200;i++){g.fillStyle="hsl("+((t*3+i*7)%360)+",80%,50%)";g.fillRect((i*37+t*5)%760,(i*53+t*3)%560,40,40);}requestAnimationFrame(f)})();
+</script></body>`))
+	})
 	guiSrv.mux.HandleFunc("/color", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		c := r.URL.Query().Get("c")
@@ -97,5 +104,34 @@ func TestGUISnapshotOfAMappedWindowAndErrors(t *testing.T) {
 	}
 	if _, err := guiApp.SnapshotView(caps.ViewRef(99999), caps.SnapshotOptions{}); err == nil {
 		t.Fatal("a missing view must fail")
+	}
+}
+
+func TestGUIOffscreenSnapshotRate(t *testing.T) {
+	needGUI(t)
+	registerColorPage()
+	loaded := make(chan struct{}, 4)
+	w, err := guiApp.NewWindowNotify(WindowOptions{Title: "rate", Width: 800, Height: 600, Resizable: true, Path: "/anim", Offscreen: true}, func() { loaded <- struct{}{} })
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(w.Close)
+	select {
+	case <-loaded:
+	case <-time.After(20 * time.Second):
+		t.Fatal("the animated page did not load")
+	}
+	time.Sleep(500 * time.Millisecond)
+	start := time.Now()
+	n := 0
+	for time.Since(start) < 3*time.Second {
+		if _, err := guiApp.SnapshotView(w.PrimaryView(), caps.SnapshotOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		n++
+	}
+	t.Logf("offscreen snapshot of an animated 800x600 canvas page: %.1f frames/s (%d in %s)", float64(n)/time.Since(start).Seconds(), n, time.Since(start).Round(time.Millisecond))
+	if n < 2 {
+		t.Fatalf("only %d snapshots in three seconds", n)
 	}
 }

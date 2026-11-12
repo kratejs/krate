@@ -66,6 +66,18 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
   Camera portal). `native.media.usage` writes the macOS usage descriptions, packaging adds the
   device entitlements and MSIX capabilities, and `KR7290` warns when a description is missing.
   `media.sources` lists screens and windows on macOS and Windows; no engine accepts a chosen source.
+- Electron's advanced process features, where the system webviews allow them (docs native/processes):
+  worker processes (`native.workers`, `@krate/app/worker`, Go `sdk/worker`: a TypeScript module on Node, Bun
+  or Deno, a Go program or an executable, started by name, with per-worker narrowed SDK permissions, logs in
+  the app log, a restart policy and crash events, and two-way messages), message ports between views, windows
+  and workers (`@krate/app/port`: a channel's ends are handed to scopes that hold `port:receive`; the engines
+  cannot share a real `MessagePort`, so the port is shell-backed), offscreen rendering (`@krate/app/offscreen`:
+  a never-shown window plus PNG or BGRA snapshots from WebKitGTK, WKWebView and WebView2 at up to 60 a second
+  with dropped-frame counts; about 230 snapshots a second of an animated 800x600 page on the Linux sysroot),
+  automation (`native.automation`, dev and `native.debug` only: CDP on WebView2 with in-process commands, the
+  WebKit remote inspector on WebKitGTK, Safari inspection on WKWebView) and browser extensions
+  (`native.extensions`: WebView2 and macOS 15.4+, unsupported on WebKitGTK). New permissions `worker`, `port`,
+  `port:receive`, `offscreen`, `automation`, `extension`. See `examples/native-procs`.
 - Krate Native rows in the compatibility matrix (Linux verified, macOS and Windows untested) and
   size, cold-start and memory budgets in `packages/native/budgets.json`.
 - Native OS integration SDK areas, each a Go package and a `@krate/app/<area>` module: `badge`

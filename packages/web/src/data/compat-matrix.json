@@ -1856,6 +1856,131 @@
         "Budgets exist for linux-amd64 only; the start-up limits were measured on a developer machine and CI applies KRATE_BUDGET_SCALE=3 until a hosted runner has been measured.",
         "darwin-arm64, windows-amd64, windows-arm64 and linux-arm64 run the same size, cold-start and memory tests in CI and report their measured values (BUDGET-RECORD-BEGIN/END in the log and the job summary) but have no recorded entries, so nothing is enforced there yet; the numbers have to be copied into packages/native/budgets.json after a review."
       ]
+    },
+    {
+      "id": "native-workers",
+      "area": "Native: worker processes",
+      "native": {
+        "linux": "supported",
+        "macos": "untested",
+        "windows": "untested"
+      },
+      "target": "Krate Native v1",
+      "summary": "Background worker processes declared in native.workers (a TypeScript module on Node, Bun or Deno, a Go main package, or a prebuilt executable) are started by name from a page or host code, with their own SDK endpoint whose permissions are narrowed per worker, stdout and stderr in the app log, a restart policy with backoff, crash and restart events, and two-way messages over the wire codec (binary, Date, Map, Set). The supervisor and policy are pure Go and tested on every OS; the shell tests run real Node and Go workers.",
+      "tests": [
+        "TestStartUnknownWorker",
+        "TestCrashRestartsOnFailure",
+        "TestNeverPolicyStaysStopped",
+        "TestGivesUpAfterMax",
+        "TestFailedRestartStartsAreRetried",
+        "TestMessagesBothWays",
+        "TestDecide",
+        "TestSpecValidate",
+        "TestWorkersNode",
+        "TestWorkerGo",
+        "TestParseManifestWorkers",
+        "TestNativeE2EProcsGUI",
+        "fixture:examples/native-procs/src/workers/echo.ts"
+      ],
+      "knownLimits": [
+        "macOS and Windows compile and share the portable supervisor and the host child transport (loopback TCP with a token for JavaScript workers on Windows); the worker tests run on Linux only.",
+        "A release build ships worker scripts under host/workers next to the executable and needs Node, Bun or Deno on the user's machine for a TypeScript worker; a Go worker is compiled for the build machine's platform only.",
+        "Permissions narrow the SDK ids a worker can call; a worker is still an ordinary process with the user's file and network access."
+      ]
+    },
+    {
+      "id": "native-message-ports",
+      "area": "Native: message ports between views, windows and workers",
+      "native": {
+        "linux": "supported",
+        "macos": "untested",
+        "windows": "untested"
+      },
+      "target": "Krate Native v1",
+      "summary": "A channel has two ends; whoever creates it can hand each end to a window, view or worker, and messages (JSON, binary, Date, Map, Set) then flow directly between the ends without host code relaying them, in order, with a bounded queue (1024 messages, 16 MiB) and backpressure errors. An end can only be handed to a scope that has port:receive. The page object is a Port in @krate/app/port backed by the shell.",
+      "tests": [
+        "TestPostIsDeliveredInOrderToTheOtherEnd",
+        "TestOnlyTheHolderMayUseAnEnd",
+        "TestTransferNeedsAReceiver",
+        "TestQueuedMessagesFollowTheEnd",
+        "TestTransferEndsTheOldListener",
+        "TestCloseDrainsThenReportsClosed",
+        "TestBackpressureAndLimits",
+        "TestDropOwnerClosesItsChannels",
+        "TestWorkersNode",
+        "TestNativeE2EProcsGUI",
+        "fixture:examples/native-procs/src/pages/peer.tsx"
+      ],
+      "knownLimits": [
+        "The engines give two top-level webviews no way to share a real MessagePort, so a port is a shell-backed object, not a transferable MessagePort; inside one page the browser's MessageChannel is untouched.",
+        "The pure broker is tested on every OS; the page-to-page and page-to-worker round trips run on Linux."
+      ]
+    },
+    {
+      "id": "native-offscreen",
+      "area": "Native: offscreen rendering",
+      "native": {
+        "linux": "supported",
+        "macos": "untested",
+        "windows": "untested"
+      },
+      "target": "Krate Native v1",
+      "summary": "No system webview streams offscreen frames. The closest equivalent: a window that is never shown (a GtkOffscreenWindow on Linux, a window parked off every display on Windows and macOS) whose page renders normally, plus snapshots (webkit_web_view_get_snapshot, WKWebView takeSnapshot, WebView2 CapturePreview) delivered as PNG or raw premultiplied BGRA, one at a time at a requested rate up to 60 per second, with dropped frames counted instead of queued.",
+      "tests": [
+        "TestGUIOffscreenSnapshot",
+        "TestGUISnapshotOfAMappedWindowAndErrors",
+        "TestEncodePNGKeepsColorsAndUnpremultiplies",
+        "TestRawBGRARemovesRowPadding",
+        "TestPacing",
+        "TestStreamPacesAndCountsDroppedFrames",
+        "TestStreamStopsWithTheContextAndReportsCaptureErrors",
+        "TestSnapshotFromPNG",
+        "TestNativeE2EProcsGUI"
+      ],
+      "knownLimits": [
+        "This is polling, not a paint callback: frames are snapshots, so the rate depends on page complexity and engine; the measured Linux numbers are in docs native/processes.",
+        "Windows and macOS are written and compiled; their capture and parked-window code runs only in the CI native job.",
+        "An open offscreen window counts as a window: close it, or the app does not quit when the last visible window closes."
+      ]
+    },
+    {
+      "id": "native-automation",
+      "area": "Native: remote debugging and automation",
+      "native": {
+        "linux": "supported",
+        "macos": "untested",
+        "windows": "untested"
+      },
+      "target": "Krate Native v1",
+      "summary": "An endpoint for tests and debugging, on in dev and with native.debug and never in a release build otherwise: WebView2 serves the Chrome DevTools Protocol (Playwright connectOverCDP, Puppeteer connect) and krate can send one CDP method or subscribe to an event in process; WebKitGTK serves the WebKit remote inspector over HTTP (WEBKIT_INSPECTOR_HTTP_SERVER), which is not CDP; WKWebView is inspectable from Safari's Develop menu. CDP answers unsupported where the engine does not speak it.",
+      "tests": [
+        "TestGUIOffscreenSnapshot",
+        "TestNativeE2EProcsGUI",
+        "TestProcsVtableSlots"
+      ],
+      "knownLimits": [
+        "Playwright and Puppeteer attach only to WebView2; they cannot drive WebKitGTK or WKWebView. Microsoft documents --remote-debugging-port with Edge WebDriver's DebuggerAddress for WebView2; attaching Playwright through connectOverCDP to the same port is standard Chromium CDP but was not run here.",
+        "The WebView2 CDP command and event code is checked against WebView2.h and compiled; it runs only in the CI native job."
+      ]
+    },
+    {
+      "id": "native-extensions",
+      "area": "Native: browser extensions",
+      "native": {
+        "linux": "n/a",
+        "macos": "untested",
+        "windows": "untested"
+      },
+      "target": "Krate Native v1",
+      "summary": "native.extensions packages unpacked extension folders loaded at start and by name: WebView2 through ICoreWebView2Profile7 AddBrowserExtension with AreBrowserExtensionsEnabled, WKWebView through WKWebExtensionController on macOS 15.4 and later. WebKitGTK has no extension API and answers unsupported.",
+      "tests": [
+        "TestProcsVtableSlots",
+        "TestNativeE2EProcsGUI"
+      ],
+      "knownLimits": [
+        "Linux is unsupported by the engine.",
+        "WebView2 and macOS are written and compiled and never run by the author. On macOS the API's match patterns cover http, https and file pages, so a content script is not expected to run on the app's own krate:// pages."
+      ]
     }
   ]
 }
