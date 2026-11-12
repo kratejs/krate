@@ -340,12 +340,6 @@ jobs:
   # Krate Native: vet, tests, the real-window (GUI) tests, packaging and update
   # smoke tests on each OS.
   #
-  # Linux is blocking. The macOS and Windows entries have never run on a hosted
-  # runner, so each carries `experimental: true`, which feeds the job's
-  # continue-on-error: their steps report without blocking. After their first
-  # green run, make them blocking by changing that one line to
-  # `experimental: false` on the macos-latest and windows-latest entries.
-  #
   # The GUI step runs the whole native module (./...) with KRATE_NATIVE_GUI=1,
   # so a GUI test added in any package is picked up without editing this file.
   # node, bun and deno are installed on every OS so the host-child tests run;
@@ -353,20 +347,16 @@ jobs:
   native:
     name: Native (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ matrix.experimental }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
             gui: ./...
-            experimental: false
           - os: macos-latest
             gui: ./...
-            experimental: true
           - os: windows-latest
             gui: ./...
-            experimental: true
     defaults:
       run:
         shell: bash
@@ -415,7 +405,6 @@ jobs:
         run: pnpm -r --filter '!@krate/web' --filter '!@krate/benchmark' build
 
       - name: Go vet (native)
-        continue-on-error: ${{ matrix.experimental }}
         run: go vet ./...
         working-directory: packages/native
 
@@ -438,7 +427,6 @@ jobs:
 
       - name: Go test (native)
         if: matrix.os != 'ubuntu-latest'
-        continue-on-error: ${{ matrix.experimental }}
         run: go test -timeout 20m ./...
         working-directory: packages/native
         env:
@@ -527,7 +515,6 @@ jobs:
       # Never run on a hosted runner before: report, do not block.
       - name: GUI tests (macOS, Windows)
         if: matrix.os != 'ubuntu-latest'
-        continue-on-error: ${{ matrix.experimental }}
         run: |
           # shellcheck disable=SC2086
           go test -p 1 -count=1 -timeout 20m $GUI_PKGS
@@ -595,7 +582,6 @@ jobs:
       # toolchain on the runner; the system-info plugin has its own module.
       - name: Native plugin tests (macOS, Windows)
         if: matrix.os != 'ubuntu-latest'
-        continue-on-error: ${{ matrix.experimental }}
         run: |
           (cd packages/compiler && GOWORK=off go test -p 1 -count=1 -timeout 20m -run Plugin ./internal/build)
           (cd examples/native-plugin/native-plugins/system-info && GOWORK=off go test -count=1 ./...)
@@ -616,7 +602,6 @@ jobs:
       # (planned), so the budget tests only report what they measure there.
       - name: Compiler native tests (macOS, Windows)
         if: matrix.os != 'ubuntu-latest'
-        continue-on-error: ${{ matrix.experimental }}
         run: go test -p 1 -count=1 -timeout 20m -v -run 'TestNativeE2EGUI|TestNativeBudgetGUI|GUI' ./internal/build
         working-directory: packages/compiler
         env:
@@ -668,22 +653,18 @@ jobs:
 
       - name: Packaging smoke test, build packages (macOS)
         if: matrix.os == 'macos-latest'
-        continue-on-error: ${{ matrix.experimental }}
         run: node scripts/native-smoke.mjs macos prepare
 
       - name: Packaging smoke test, mount the dmg, launch (macOS)
         if: matrix.os == 'macos-latest'
-        continue-on-error: ${{ matrix.experimental }}
         run: node scripts/native-smoke.mjs macos dmg
 
       - name: Update smoke test, 1.0.0 to 1.1.0 (macOS)
         if: matrix.os == 'macos-latest'
-        continue-on-error: ${{ matrix.experimental }}
         run: node scripts/native-smoke.mjs macos update
 
       - name: Install NSIS and create a signing certificate (Windows)
         if: matrix.os == 'windows-latest'
-        continue-on-error: ${{ matrix.experimental }}
         run: |
           choco install nsis -y --no-progress
           echo "C:\Program Files (x86)\NSIS" >> "$GITHUB_PATH"
@@ -691,35 +672,29 @@ jobs:
 
       - name: Packaging smoke test, build and sign packages (Windows)
         if: matrix.os == 'windows-latest'
-        continue-on-error: ${{ matrix.experimental }}
         run: node scripts/native-smoke.mjs windows prepare
 
       - name: Packaging smoke test, NSIS silent install, launch, uninstall (Windows)
         if: matrix.os == 'windows-latest'
-        continue-on-error: ${{ matrix.experimental }}
         run: node scripts/native-smoke.mjs windows nsis
 
       - name: Packaging smoke test, MSIX validate, install, launch (Windows)
         if: matrix.os == 'windows-latest'
-        continue-on-error: ${{ matrix.experimental }}
         run: node scripts/native-smoke.mjs windows msix
 
       - name: Update smoke test, 1.0.0 to 1.1.0 (Windows)
         if: matrix.os == 'windows-latest'
-        continue-on-error: ${{ matrix.experimental }}
         run: node scripts/native-smoke.mjs windows update
 
       # Memory of the system webview on real macOS and Windows machines. The
       # WKWebView and WebView2 memory levers were written without being able to
-      # run them: this step produces the first numbers. It reports without
-      # blocking while `experimental` is true. `krate native profile --memory`
+      # run them: this step produces the first numbers. `krate native profile --memory`
       # builds the app, measures PSS-equivalent and private memory per process
       # role against a blank-page floor and writes dist-native/report.json. The
       # profile comes from native.memory in krate.config.ts, set here per run
       # and restored afterwards.
       - name: Native memory report (macOS, Windows)
         if: matrix.os != 'ubuntu-latest'
-        continue-on-error: ${{ matrix.experimental }}
         env:
           GOWORK: "off"
         run: |
