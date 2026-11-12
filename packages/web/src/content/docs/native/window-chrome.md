@@ -1,7 +1,7 @@
 ---
 title: Window Chrome
 order: 11
-description: Custom title bars with drag regions, Mica, Acrylic and vibrancy, caption buttons, macOS tabs and sheets, thumbnail buttons, jump lists, the share menu and agent apps.
+description: Custom title bars and drag regions, Mica, Acrylic and vibrancy, caption buttons, macOS tabs and sheets, thumbnail buttons, jump lists and agent apps.
 ---
 
 # Window chrome
