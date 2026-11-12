@@ -174,3 +174,17 @@ blurred through the page; `setDocumentEdited(true)` puts a dot in the close butt
 `tabbingIdentifier` merge with Window > Merge All Windows and the tab bar's `+` fires
 `new-tab`; `share` opens the picker; `setDockVisible(false)` removes the dock icon and
 the menu bar, and a `bundle.macos.agent` build never shows them.
+
+## Print dialog
+
+`TestGUIPagePrintDialog` opens the system print dialog, which nothing in a test can
+close, so it only runs on request:
+
+```sh
+KRATE_NATIVE_GUI=1 KRATE_NATIVE_PRINT_DIALOG=1 go test ./platform/darwin -run TestGUIPagePrintDialog -v
+```
+
+Check that the macOS print dialog appears for the window and that cancelling it
+leaves the app running. The PDF output, zoom, find, capture, downloads and cookies
+are covered by the other `TestGUIPage*` tests.
+

@@ -24,6 +24,15 @@ type App struct {
 	urlFn    func([]string)
 	Quit_    int
 
+	// Page, downloads and site data (page.go).
+	findFn      func(caps.FindEvent)
+	FindMatches int
+	dlStart     func(caps.DownloadRequest, func(string))
+	dlEvent     func(caps.DownloadEvent)
+	Cancelled   []uint64
+	running     map[uint64]bool
+	cookieJar   *cookieJar
+
 	// Dialogs
 	FileResult   []string
 	FileOpts     []caps.FileDialogOptions
@@ -215,7 +224,10 @@ type Window struct {
 	extra  []*viewRec
 	layout *caps.LayoutNode
 
-	chrome chromeRec
+	chrome    chromeRec
+	pageCalls []string
+	pages     map[caps.ViewRef]*pageState
+	lastPDF   caps.PDFOptions
 }
 
 func (w *Window) rec(s string) { w.mu.Lock(); w.Calls = append(w.Calls, s); w.mu.Unlock() }

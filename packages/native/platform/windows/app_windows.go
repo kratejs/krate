@@ -104,6 +104,8 @@ type App struct {
 	hFrameNav   unsafe.Pointer // shared FrameNavigationStarting handler
 	hNewWindow  unsafe.Pointer // shared NewWindowRequested handler
 	perm        permState
+	hPermission unsafe.Pointer // shared PermissionRequested handler (nil: not installed)
+	findHandler func(caps.FindEvent)
 
 	envOpts   unsafe.Pointer // options object while the environment is being created
 	envNoOpts bool           // second attempt: created without options

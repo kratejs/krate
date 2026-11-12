@@ -47,6 +47,8 @@ type view struct {
 	minW     int
 	minH     int
 	cons     []objc.ID // the minimum-size constraints now active
+	find     caps.FindTracker
+	zoom     float64 // 0 until set; restored when the web view is recreated
 }
 
 // splitState is one NSSplitView of the layout tree.

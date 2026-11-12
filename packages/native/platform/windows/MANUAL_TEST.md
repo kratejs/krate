@@ -205,3 +205,17 @@ edge and corner; dragging a `data-krate-drag` bar moves it and a double click ma
 exists and a click reaches `onThumbClick`; right-clicking the taskbar icon lists the jump
 list tasks, and choosing one starts the app with its arguments (a running instance gets them
 as a second-instance event).
+
+## Print dialog
+
+`TestGUIPagePrintDialog` opens the system print dialog, which nothing in a test can
+close, so it only runs on request:
+
+```sh
+KRATE_NATIVE_GUI=1 KRATE_NATIVE_PRINT_DIALOG=1 go test ./platform/windows -run TestGUIPagePrintDialog -v
+```
+
+Check that the Windows print dialog appears for the window and that cancelling it
+leaves the app running. The PDF output, zoom, find, capture, downloads and cookies
+are covered by the other `TestGUIPage*` tests.
+

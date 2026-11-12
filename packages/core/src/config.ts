@@ -413,6 +413,9 @@ export type NativePermission =
   | "media:manage"
   | "location"
   | "share"
+  | "page"
+  | "downloads"
+  | "cookies"
   | `plugin:${string}.${string}`;
 
 export interface NativeConfig {

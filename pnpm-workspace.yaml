@@ -6,6 +6,7 @@ packages:
   - examples/native-views
   - examples/native-files
   - examples/native-chrome
+  - examples/native-page
   - examples/native-plugin
 
 allowBuilds:

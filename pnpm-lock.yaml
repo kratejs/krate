@@ -82,6 +82,18 @@ importers:
         specifier: workspace:*
         version: link:../../packages/runtime
 
+  examples/native-page:
+    dependencies:
+      '@krate/app':
+        specifier: workspace:*
+        version: link:../../packages/app
+      '@krate/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@krate/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
+
   examples/native-plugin:
     dependencies:
       '@krate/app':

@@ -1301,6 +1301,160 @@
       ]
     },
     {
+      "id": "krate/page.print",
+      "permission": "page",
+      "area": "page",
+      "module": "page",
+      "exports": [
+        "print"
+      ]
+    },
+    {
+      "id": "krate/page.printToPdf",
+      "permission": "page",
+      "area": "page",
+      "module": "page",
+      "exports": [
+        "printToPdf"
+      ]
+    },
+    {
+      "id": "krate/page.find",
+      "permission": "page",
+      "area": "page",
+      "module": "page",
+      "exports": [
+        "find"
+      ]
+    },
+    {
+      "id": "krate/page.stopFind",
+      "permission": "page",
+      "area": "page",
+      "module": "page",
+      "exports": [
+        "stopFind"
+      ]
+    },
+    {
+      "id": "krate/page.findEvents",
+      "permission": "page",
+      "area": "page",
+      "module": "page",
+      "exports": [
+        "onFind"
+      ]
+    },
+    {
+      "id": "krate/page.zoom",
+      "permission": "page",
+      "area": "page",
+      "module": "page",
+      "exports": [
+        "zoom"
+      ]
+    },
+    {
+      "id": "krate/page.setZoom",
+      "permission": "page",
+      "area": "page",
+      "module": "page",
+      "exports": [
+        "setZoom"
+      ]
+    },
+    {
+      "id": "krate/page.capture",
+      "permission": "page",
+      "area": "page",
+      "module": "page",
+      "exports": [
+        "capture"
+      ]
+    },
+    {
+      "id": "krate/downloads.configure",
+      "permission": "downloads",
+      "area": "downloads",
+      "module": "downloads",
+      "exports": [
+        "configure"
+      ]
+    },
+    {
+      "id": "krate/downloads.list",
+      "permission": "downloads",
+      "area": "downloads",
+      "module": "downloads",
+      "exports": [
+        "list"
+      ]
+    },
+    {
+      "id": "krate/downloads.cancel",
+      "permission": "downloads",
+      "area": "downloads",
+      "module": "downloads",
+      "exports": [
+        "cancel"
+      ]
+    },
+    {
+      "id": "krate/downloads.events",
+      "permission": "downloads",
+      "area": "downloads",
+      "module": "downloads",
+      "exports": [
+        "onDone",
+        "onEvent"
+      ]
+    },
+    {
+      "id": "krate/cookies.list",
+      "permission": "cookies",
+      "area": "cookies",
+      "module": "cookies",
+      "exports": [
+        "list"
+      ]
+    },
+    {
+      "id": "krate/cookies.get",
+      "permission": "cookies",
+      "area": "cookies",
+      "module": "cookies",
+      "exports": [
+        "get"
+      ]
+    },
+    {
+      "id": "krate/cookies.set",
+      "permission": "cookies",
+      "area": "cookies",
+      "module": "cookies",
+      "exports": [
+        "set"
+      ]
+    },
+    {
+      "id": "krate/cookies.delete",
+      "permission": "cookies",
+      "area": "cookies",
+      "module": "cookies",
+      "exports": [
+        "delete"
+      ]
+    },
+    {
+      "id": "krate/cookies.clearSiteData",
+      "permission": "cookies",
+      "area": "cookies",
+      "module": "cookies",
+      "exports": [
+        "clearSiteData"
+      ]
+    },
+    {
       "id": "krate/badge.set",
       "permission": "badge",
       "area": "badge",

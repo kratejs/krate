@@ -312,6 +312,14 @@ func gerrMessage(gerr uintptr) string {
 	return goString(p)
 }
 
+// gerrCode reads GError.code (the field after domain).
+func gerrCode(gerr uintptr) int {
+	if gerr == 0 {
+		return 0
+	}
+	return int(*(*int32)(unsafe.Add(*(*unsafe.Pointer)(unsafe.Pointer(&gerr)), 4)))
+}
+
 // slistStrings collects the strings of a GSList of char*, then frees the list
 // and (when freeData) the strings.
 func (a *App) slistStrings(list uintptr, freeData bool) []string {

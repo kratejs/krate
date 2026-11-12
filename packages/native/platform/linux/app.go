@@ -79,8 +79,24 @@ type App struct {
 
 	keepAlive bool
 	v         *viewAPI
-	evalCbs   map[uintptr]func(string) // main thread only; see evalString
-	nextTok   uintptr
+	pg        *pageAPI
+	dl        *downloadAPI
+	site      *siteAPI
+	dataDir   string // the website data directory
+	cookieMgr uintptr
+
+	// Main thread only.
+	asyncCbs  map[uintptr]func(src, res uintptr)
+	printJobs map[uintptr]*printJob
+	downloads map[uint64]*download
+	nextDL    atomic.Uint64
+	sd        *caps.SchemeDownloader
+
+	findHandler func(caps.FindEvent)
+	dlStart     func(caps.DownloadRequest, func(string))
+	dlEvent     func(caps.DownloadEvent)
+	evalCbs     map[uintptr]func(string) // main thread only; see evalString
+	nextTok     uintptr
 
 	mu          sync.Mutex
 	windows     map[uintptr]*Window
@@ -173,7 +189,8 @@ func New(opts Options) (*App, error) {
 	app.mem.applyMemoryPressure(app.profile)
 	applyJSCOptions(app.profile)
 	memory.AddTrimHook(mallocTrim)
-	mgr, cleanup := app.mem.newDataManager(a, dataDir("XDG_DATA_HOME", ".local/share", id), dataDir("XDG_CACHE_HOME", ".cache", id), app.profile)
+	app.dataDir = dataDir("XDG_DATA_HOME", ".local/share", id)
+	mgr, cleanup := app.mem.newDataManager(a, app.dataDir, dataDir("XDG_CACHE_HOME", ".cache", id), app.profile)
 	app.cleanup = cleanup
 	if mgr == 0 {
 		return nil, errors.New("krate: cannot create website data manager")
@@ -183,6 +200,9 @@ func New(opts Options) (*App, error) {
 		return nil, errors.New("krate: cannot create web context")
 	}
 	app.mem.applyContext(app.ctx, mgr, app.profile, app.features)
+	app.initPage()
+	app.initDownloads()
+	app.initSiteData()
 	a.wkContextRegisterSchem(app.ctx, "krate", cbScheme, 0, 0)
 	sm := a.wkContextSecurityMgr(app.ctx)
 	a.wkSecSecure(sm, "krate")

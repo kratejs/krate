@@ -41,6 +41,9 @@
 //	login               no             read and change whether the app starts at login
 //	theme               yes (default)  system appearance and title bar theme
 //	crash               no             list, read and delete crash reports, crash events
+//	page                no             print, find in page, zoom and capture the app's own views
+//	downloads           no             choose where page downloads go, watch and cancel them
+//	cookies             no             read, write and delete cookies, clear site data and cache
 //
 // The compiler keeps a copy of the names in names.json (a test here keeps the
 // file in step; run "go test ./sdk/permission -update" to rewrite it).
@@ -128,6 +131,9 @@ func init() {
 		{Name: "location", Doc: "the page may read the device location (subject to the policy, the prompt and the operating system's consent)"},
 		{Name: "share", Doc: "show the system share menu for text, URLs and files"},
 		{Name: "updater", Doc: "check for, download and apply app updates, and relaunch"},
+		{Name: "page", Doc: "print, find in page, zoom and capture the app's own views"},
+		{Name: "downloads", Doc: "choose where page downloads are saved, watch and cancel them"},
+		{Name: "cookies", Doc: "read, write and delete cookies and clear site data and cache"},
 	} {
 		Define(i)
 	}

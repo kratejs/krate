@@ -26,6 +26,9 @@ module for the UI.
 | Camera, microphone, location | `sdk/media` | `@krate/app/media` | `media`, `media:manage`, `location` |
 | Lifecycle | `sdk/app` | `@krate/app/app` | `app` |
 | Badge, displays, power, login, theme, crash | `sdk/badge`, `sdk/screen`, `sdk/power`, `sdk/login`, `sdk/theme`, `sdk/crash` | `@krate/app/badge` and so on | `badge`, `screen`, `power`, `power:inhibit`, `login`, `theme`, `crash` ([OS integration](/docs/native/system/)) |
+| Web contents: print, find, zoom, capture | `sdk/page` | `@krate/app/page` | `page` |
+| Downloads | `sdk/downloads` | `@krate/app/downloads` | `downloads` |
+| Cookies and site data | `sdk/cookies` | `@krate/app/cookies` | `cookies` |
 
 Go packages live under `github.com/kratejs/krate/packages/native/sdk/`.
 
@@ -140,6 +143,8 @@ A window can hold several webviews as split panes, each with its own route and
 scope; see [Views and split panes](/docs/native/views/). Opening files, file
 associations and the real paths of dropped files are on [Files and drag and
 drop](/docs/native/files/).
+Printing, find in page, zoom, capturing a view as an image, downloads and
+cookies are on their own page, [Web contents](/docs/native/webcontents/).
 
 Windows are named by id. The first is `"main"`; `open()` returns a handle with
 the id of the new one. A page does not know its own id unless it is told, so
@@ -162,6 +167,9 @@ source. By area:
 | notify | `krate/notify.send`, `Close` | `krate/notify.events` |
 | media | `krate/media.policy`, `krate/media.setPolicy`, `krate/media.decisions`, `krate/media.decide`, `krate/media.reset`, `krate/media.respond`, `krate/media.osStatus`, `krate/media.osRequest`, `krate/media.sources`, `krate/media.chooseSource` | `krate/media.requests`, `krate/media.events` |
 | app | `krate/app.quit`, `Relaunch`, `Supports`, `krate/app.openedFiles` | `krate/app.events`, `krate/app.openFileEvents` |
+| page | `krate/page.print`, `PrintToPdf`, `Find`, `StopFind`, `Zoom`, `SetZoom`, `Capture` | `krate/page.findEvents` |
+| downloads | `krate/downloads.configure`, `List`, `Cancel` | `krate/downloads.events` |
+| cookies | `krate/cookies.list`, `Get`, `Set`, `Delete`, `ClearSiteData` | |
 
 `SingleInstance` and `LaunchArgs` exist only for Go host code.
 

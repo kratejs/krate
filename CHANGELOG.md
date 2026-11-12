@@ -74,6 +74,13 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
   Camera portal). `native.media.usage` writes the macOS usage descriptions, packaging adds the
   device entitlements and MSIX capabilities, and `KR7290` warns when a description is missing.
   `media.sources` lists screens and windows on macOS and Windows; no engine accepts a chosen source.
+- Native web contents controls per view: the print dialog and PDF output (`@krate/app/page`
+  `print`, `printToPdf`), find in page with match counts, zoom (Ctrl or Cmd plus, minus and 0 keep
+  working), a PNG capture of a view, downloads the page starts (`@krate/app/downloads`: a save
+  dialog or a configured folder, progress, completion and cancel events) and cookies and site data
+  (`@krate/app/cookies`). New permissions `page`, `downloads` and `cookies`; see [Web
+  contents](https://krate.js.org/docs/native/webcontents/). WebKit keeps no cookies for the app's
+  custom scheme, so the cookie calls take an http(s) URL on Linux and macOS.
 - Krate Native rows in the compatibility matrix (Linux verified, macOS and Windows untested) and
   size, cold-start and memory budgets in `packages/native/budgets.json`.
 - Native OS integration SDK areas, each a Go package and a `@krate/app/<area>` module: `badge`

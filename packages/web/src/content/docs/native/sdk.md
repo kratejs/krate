@@ -61,6 +61,9 @@ implementation); permissions decide which ids the UI may call.
 | `shortcut` | no | Global keyboard shortcuts |
 | `share` | no | The system share menu for text, URLs and files |
 | `updater` | no | Checking for, downloading and applying app updates, and relaunching; see [Updates](/docs/native/updater/) |
+| `page` | no | Print, find in page, zoom and capture the app's own views; see [Web contents](/docs/native/webcontents/) |
+| `downloads` | no | Choosing where page downloads go, watching and cancelling them; see [Web contents](/docs/native/webcontents/#downloads) |
+| `cookies` | no | Reading, writing and deleting cookies, clearing site data and the cache; see [Web contents](/docs/native/webcontents/#cookies-and-site-data) |
 
 An empty or missing list means the defaults: the non-sensitive set marked
 "yes" above. `krate native build` writes the list for you: it
@@ -202,6 +205,23 @@ their Go names (`src/lib/tasks.List`).
 | `krate/app.events` | `app` | none (stream) | `SecondInstance` |
 | `krate/app.openedFiles` | `app` | none | `string[]` |
 | `krate/app.openFileEvents` | `app` | none (stream) | `OpenFileEvent` |
+| `krate/page.print` | `page` | `view?: string` | nothing |
+| `krate/page.printToPdf` | `page` | `view: string, options?: PdfOptions` | `Uint8Array` |
+| `krate/page.find` | `page` | `view: string, text: string, options?: FindOptions` | nothing |
+| `krate/page.stopFind` | `page` | `view: string` | nothing |
+| `krate/page.findEvents` | `page` | none (stream) | `FindEvent` |
+| `krate/page.zoom` | `page` | `view: string` | `number` |
+| `krate/page.setZoom` | `page` | `view: string, factor: number` | nothing |
+| `krate/page.capture` | `page` | `view: string` | `Uint8Array` |
+| `krate/downloads.configure` | `downloads` | `options: DownloadOptions` | nothing |
+| `krate/downloads.list` | `downloads` | none | `DownloadInfo[]` |
+| `krate/downloads.cancel` | `downloads` | `id: number` | nothing |
+| `krate/downloads.events` | `downloads` | none (stream) | `DownloadEvent` |
+| `krate/cookies.list` | `cookies` | `url?: string` | `Cookie[]` |
+| `krate/cookies.get` | `cookies` | `name: string, url?: string` | `Cookie | null` |
+| `krate/cookies.set` | `cookies` | `cookie: CookieInput, url?: string` | nothing |
+| `krate/cookies.delete` | `cookies` | `name: string, url?: string` | nothing |
+| `krate/cookies.clearSiteData` | `cookies` | `options?: ClearOptions` | nothing |
 
 `packages/native/sdk/ids.go` is the source of truth for this table; a Go test
 checks it against the registrations, the TypeScript wrappers and this page.

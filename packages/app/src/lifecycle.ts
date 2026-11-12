@@ -22,7 +22,7 @@ export function relaunch(): Promise<void> {
 // "clipboard", "menu", "tray", "notify", "shortcut", "media", "window",
 // "window:alwaysOnTop", "window:fullscreen", "window:frameless",
 // "window:position", "window:release", "badge", "screen", "power", "login",
-// "theme", "crash".
+// "theme", "crash", "page", "downloads", "cookies".
 export function supports(capability: string): Promise<boolean> {
   return call("krate/app.supports", [capability], { dedupe: true });
 }

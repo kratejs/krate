@@ -29,8 +29,12 @@ type view struct {
 	route    string
 	state    caps.ViewState
 	scrollJS string
-	minW     int
-	minH     int
+	zoom     float64 // 0 until set; restored when the webview is recreated
+	find     caps.FindTracker
+	// findConnected says the find controller's signals are connected.
+	findConnected bool
+	minW          int
+	minH          int
 }
 
 // paneState is one GtkPaned of the layout tree. Its position is applied from
@@ -190,6 +194,7 @@ func (a *App) connectView(v *view) {
 	a.connectDrops(v.widget, v.ref)
 	api.gSignalConnectData(v.widget, "permission-request", cbPermission, uintptr(v.ref), 0, 0)
 	a.connectChrome(v)
+	a.connectPage(v)
 }
 
 // PrimaryView is the view the window was created with.

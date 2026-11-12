@@ -52,6 +52,8 @@ prerendered at build time.
 - [Files and drag and drop](/docs/native/files/) - file associations in the
   installers, opening the files an app is launched with, and the paths of
   dropped files.
+- [Web contents](/docs/native/webcontents/) - print and PDF, find in page, zoom,
+  capturing a view, downloads and cookies.
 - [Release builds](/docs/native/release/) - one executable per platform, SDK
   shaking, derived permissions, per-window scopes and profile-guided builds.
 - [Native plugins](/docs/native/plugins/) - reusable native capabilities as a Go
