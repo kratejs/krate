@@ -153,8 +153,21 @@ func TestGUIPermissionGeolocation(t *testing.T) {
 		t.Fatalf("denied geolocation: result %v, requests %+v", res, seen)
 	}
 	res, seen = runPerm(t, "geo", func(caps.PermissionRequest) bool { return true })
-	if len(seen) != 1 || res["code"] == "1" {
+	if len(seen) != 1 {
 		t.Fatalf("allowed geolocation: result %v, requests %+v", res, seen)
+	}
+	// The app's answer is not the last word: Windows location privacy (and
+	// the location service, off on CI runners) still applies, and then the
+	// page gets PERMISSION_DENIED although the handler allowed it.
+	if st, err := guiApp.PrivacyStatus(caps.PermLocation); err == nil && st != caps.PrivacyGranted {
+		if res["code"] != "1" {
+			t.Fatalf("location privacy is %q but the page got a position: %v", st, res)
+		}
+		t.Logf("location privacy is %q, so the allowed request still ends denied: %v", st, res)
+		return
+	}
+	if res["code"] == "1" {
+		t.Fatalf("allowed geolocation was denied although location privacy is granted: %v", res)
 	}
 }
 
