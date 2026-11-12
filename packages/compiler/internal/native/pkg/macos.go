@@ -78,6 +78,9 @@ func macAppTree(o *Options, ic *Icon) (*tree, string, error) {
 	t.addFile(app+"/Contents/MacOS/"+exe, 0o755, o.Payload.Executable)
 	t.addData(app+"/Contents/Info.plist", 0o644, InfoPlist(m, exe))
 	t.addData(app+"/Contents/PkgInfo", 0o644, []byte("APPL????"))
+	if marker := distMarker(m, o.Payload); marker != nil {
+		t.addData(app+"/Contents/Resources/krate-dist.json", 0o644, marker)
+	}
 	icns, err := ic.ICNS()
 	if err != nil {
 		return nil, "", fail(diag.CodeNativePkgIcon, "native.icons", err.Error(), "")
@@ -105,6 +108,12 @@ func macAppTree(o *Options, ic *Icon) (*tree, string, error) {
 }
 
 func packageMac(o *Options, ic *Icon, want map[string]bool, stage string, res *Result) error {
+	if want["mas"] {
+		if len(want) > 1 {
+			res.note("the Mac App Store variant is built alone; the other formats are not combined with it")
+		}
+		return packageMAS(o, ic, stage, res)
+	}
 	p := o.Payload
 	t, app, err := macAppTree(o, ic)
 	if err != nil {
@@ -113,8 +122,8 @@ func packageMac(o *Options, ic *Icon, want map[string]bool, stage string, res *R
 	if err := writeDisk(stage, t); err != nil {
 		return wrapWrite(stage, err)
 	}
-	if p.Arch == "arm64" {
-		if ok, err := machoHasSignature(p.Executable); err == nil && !ok {
+	if p.Arch == "arm64" || p.Arch == ArchUniversal {
+		if ok, err := arm64SliceSigned(p.Executable); err == nil && !ok {
 			res.note("%s has no code signature; Apple silicon refuses to run unsigned code. Build it with the Go linker for darwin/arm64 (it signs ad hoc) or run krate native sign", filepath.Base(p.Executable))
 		}
 	}
@@ -222,3 +231,20 @@ func makeDMG(o *Options, stage, app, out string) error {
 
 // MacAppName is the file name of the app bundle.
 func MacAppName(m Metadata) string { return fileSafe(m.ProductName) + ".app" }
+
+// distMarker is the krate-dist.json the running app reads (package dist): the
+// update target of a universal app and the store of a store build. nil when
+// the build is a plain direct one.
+func distMarker(m Metadata, p Payload) []byte {
+	var parts []string
+	if p.OS == "darwin" && p.Arch == ArchUniversal {
+		parts = append(parts, `"target": "darwin-universal"`)
+	}
+	if m.Store != "" {
+		parts = append(parts, fmt.Sprintf(`"store": %q`, m.Store))
+	}
+	if len(parts) == 0 {
+		return nil
+	}
+	return []byte("{ " + strings.Join(parts, ", ") + " }\n")
+}

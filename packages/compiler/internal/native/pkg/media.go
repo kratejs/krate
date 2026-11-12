@@ -13,7 +13,7 @@ type MediaUsage struct {
 }
 
 // ApplyAppJSON reads which webview permissions the built UI uses from the
-// media block of app.json, so Info.plist, the entitlements and the MSIX
+// media block of app.json (and the SDK permissions and host processes), so Info.plist, the entitlements and the MSIX
 // capabilities cover them. A missing or unreadable file changes nothing.
 func ApplyAppJSON(m *Metadata, appJSON string) {
 	b, err := os.ReadFile(appJSON)
@@ -24,9 +24,21 @@ func ApplyAppJSON(m *Metadata, appJSON string) {
 		Media struct {
 			Uses []string `json:"uses"`
 		} `json:"media"`
+		Permissions  []string  `json:"permissions"`
+		HostJS       *struct{} `json:"hostjs"`
+		GoHost       *struct{} `json:"gohost"`
+		HostChildren []struct {
+			Runtime string `json:"runtime"`
+		} `json:"hostchildren"`
 	}
 	if json.Unmarshal(b, &doc) == nil {
 		m.MediaUses = doc.Media.Uses
+		m.Permissions = doc.Permissions
+		m.HasHost = doc.HostJS != nil || doc.GoHost != nil || len(doc.HostChildren) > 0
+		m.HostRuntimes = nil
+		for _, c := range doc.HostChildren {
+			m.HostRuntimes = append(m.HostRuntimes, c.Runtime)
+		}
 	}
 }
 

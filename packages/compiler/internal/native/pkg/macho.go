@@ -37,3 +37,18 @@ func loadsSignature(f *macho.File) bool {
 	}
 	return false
 }
+
+// arm64SliceSigned reports whether the arm64 slice of the Mach-O file p (thin
+// or universal) carries a code signature; false when there is none.
+func arm64SliceSigned(p string) (bool, error) {
+	if fat, err := macho.OpenFat(p); err == nil {
+		defer fat.Close()
+		for _, a := range fat.Arches {
+			if a.Cpu == macho.CpuArm64 {
+				return loadsSignature(a.File), nil
+			}
+		}
+		return false, nil
+	}
+	return machoHasSignature(p)
+}

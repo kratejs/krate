@@ -220,6 +220,33 @@ type NativeBundle struct {
 // NativeBundleMacOS holds macOS packaging options.
 type NativeBundleMacOS struct {
 	Category string `json:"category,omitempty"`
+	// Universal packages arm64 and x86_64 code in one .app (the same as
+	// --arch universal). The release build then compiles both architectures.
+	Universal bool `json:"universal,omitempty"`
+	// MAS configures the Mac App Store variant (--target mas).
+	MAS NativeMAS `json:"mas,omitempty"`
+}
+
+// NativeMAS configures the Mac App Store build: an app sandbox, an embedded
+// provisioning profile, and a signed .pkg for App Store Connect.
+type NativeMAS struct {
+	// TeamID is the 10-character Apple developer team id. It forms the
+	// application identifier TEAMID.<appId> in the entitlements.
+	TeamID string `json:"teamId,omitempty"`
+	// ProvisioningProfile is the path of the Mac App Store provisioning
+	// profile (.provisionprofile) downloaded from the developer portal,
+	// relative to the project root. Do not commit it.
+	ProvisioningProfile string `json:"provisioningProfile,omitempty"`
+	// Entitlements is the path of an extra entitlements plist whose keys are
+	// added to the generated sandbox entitlements.
+	Entitlements string `json:"entitlements,omitempty"`
+	// Network lists "client" and/or "server": the network entitlements.
+	// Default ["client"].
+	Network []string `json:"network,omitempty"`
+	// Files is the access to files the user picks: "read-write" (default),
+	// "read-only" or "none". Pair "read-write" with security-scoped
+	// bookmarks (fs.persistAccess) to keep access across launches.
+	Files string `json:"files,omitempty"`
 }
 
 // NativeBundleWindows holds Windows packaging options.
@@ -238,12 +265,66 @@ type NativeBundleWindows struct {
 	// runtime folder for "fixed", relative to the project root. The files
 	// are Microsoft's and are not part of Krate; do not commit them.
 	WebView2Path string `json:"webview2Path,omitempty"`
+	// Store configures the Microsoft Store variant of the MSIX package
+	// (--format msix-store). The three fields are copied from Partner Center
+	// (Product identity).
+	Store NativeWindowsStore `json:"store,omitempty"`
+}
+
+// NativeWindowsStore holds the Partner Center identity of the app.
+type NativeWindowsStore struct {
+	// IdentityName is Package/Identity/Name, for example
+	// "12345Acme.AcmeNotes".
+	IdentityName string `json:"identityName,omitempty"`
+	// PublisherID is Package/Identity/Publisher, for example
+	// "CN=01234567-89AB-CDEF-0123-456789ABCDEF".
+	PublisherID string `json:"publisherId,omitempty"`
+	// PublisherDisplayName is Package/Properties/PublisherDisplayName.
+	PublisherDisplayName string `json:"publisherDisplayName,omitempty"`
 }
 
 // NativeBundleLinux holds Linux packaging options.
 type NativeBundleLinux struct {
-	// Formats lists "deb", "rpm" and "appimage".
+	// Formats lists "deb", "rpm", "appimage", "flatpak" and "snap".
 	Formats []string `json:"formats,omitempty"`
+	// Summary is the one-line description (AppStream summary, snap summary).
+	Summary string `json:"summary,omitempty"`
+	// Description is the long description, plain text (AppStream, snap).
+	Description string `json:"description,omitempty"`
+	// License is an SPDX expression for the app ("MIT", "Apache-2.0 OR MIT");
+	// "LicenseRef-proprietary" for closed source. Flathub and the Snap Store
+	// show it.
+	License string `json:"license,omitempty"`
+	// Homepage is the project URL.
+	Homepage string `json:"homepage,omitempty"`
+	// Flatpak configures the flatpak format.
+	Flatpak NativeFlatpak `json:"flatpak,omitempty"`
+	// Snap configures the snap format.
+	Snap NativeSnap `json:"snap,omitempty"`
+}
+
+// NativeFlatpak configures the Flatpak manifest.
+type NativeFlatpak struct {
+	// Runtime is the runtime id; default "org.gnome.Platform", which carries
+	// WebKitGTK 4.1.
+	Runtime string `json:"runtime,omitempty"`
+	// RuntimeVersion is the runtime branch, for example "48". Default "48".
+	RuntimeVersion string `json:"runtimeVersion,omitempty"`
+	// FinishArgs are extra flatpak finish-args (for example
+	// "--filesystem=xdg-documents"), added to the ones derived from the
+	// app's permissions.
+	FinishArgs []string `json:"finishArgs,omitempty"`
+}
+
+// NativeSnap configures snapcraft.yaml.
+type NativeSnap struct {
+	// Grade is "stable" (default) or "devel".
+	Grade string `json:"grade,omitempty"`
+	// Confinement is "strict" (default), "classic" or "devmode".
+	Confinement string `json:"confinement,omitempty"`
+	// Plugs are extra plugs, added to the ones derived from the app's
+	// permissions.
+	Plugs []string `json:"plugs,omitempty"`
 }
 
 var nativeChannelRe = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,31}$`)
@@ -301,7 +382,7 @@ var (
 	nativeCompileModes   = []string{"auto", "always", "never"}
 	nativeInstallers     = []string{"msix", "nsis"}
 	nativeWebView2Modes  = []string{"download", "embed", "fixed", "none"}
-	nativeLinuxFormats   = []string{"deb", "rpm", "appimage"}
+	nativeLinuxFormats   = []string{"deb", "rpm", "appimage", "flatpak", "snap"}
 	NativeMemoryProfiles = []string{"balanced", "minimal", "performance"}
 )
 
@@ -557,8 +638,11 @@ func (c *Config) validateNative() (warnings []string, err error) {
 	}
 	for _, f := range n.Bundle.Linux.Formats {
 		if !oneOf(f, nativeLinuxFormats) {
-			return nil, nativeErr("bundle.linux.formats", fmt.Sprintf("has unknown format %q", f), "use deb, rpm or appimage")
+			return nil, nativeErr("bundle.linux.formats", fmt.Sprintf("has unknown format %q", f), "use deb, rpm, appimage, flatpak or snap")
 		}
+	}
+	if err := validateNativeDistribution(n); err != nil {
+		return nil, err
 	}
 	seenPlugin := map[string]bool{}
 	for i, spec := range n.Plugins {
@@ -649,6 +733,79 @@ func validateNativeFileAssociations(list []NativeFileAssociation) error {
 					"packaging builds the .icns, .ico and PNG sizes from one image; use a 512x512 or larger PNG")
 			}
 		}
+	}
+	return nil
+}
+
+
+var (
+	nativeTeamIDRe     = regexp.MustCompile(`^[A-Z0-9]{10}$`)
+	nativeStoreNameRe  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9.-]{2,49}$`)
+	nativeStorePubRe   = regexp.MustCompile(`^CN=[^,=]+(,\s*[A-Za-z]+=[^,]+)*$`)
+	nativeRuntimeVerRe = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?$`)
+	nativeFlatpakRtRe  = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_-]*)+$`)
+	nativeSPDXRe       = regexp.MustCompile(`^[A-Za-z0-9.+-]+( (AND|OR|WITH) [A-Za-z0-9.+-]+)*$`)
+)
+
+// validateNativeDistribution checks the store and sandbox packaging keys:
+// bundle.macos.mas, bundle.windows.store, bundle.linux flatpak and snap.
+func validateNativeDistribution(n *NativeConfig) error {
+	mas := n.Bundle.MacOS.MAS
+	if mas.TeamID != "" && !nativeTeamIDRe.MatchString(mas.TeamID) {
+		return nativeErr("bundle.macos.mas.teamId", fmt.Sprintf("%q is not a 10-character team id", mas.TeamID),
+			"copy the Team ID from developer.apple.com/account (ten capital letters and digits, such as ABCDE12345)")
+	}
+	for _, v := range mas.Network {
+		if v != "client" && v != "server" {
+			return nativeErr("bundle.macos.mas.network", fmt.Sprintf("has unknown entry %q", v), "use \"client\" and/or \"server\"")
+		}
+	}
+	if f := mas.Files; f != "" && f != "read-write" && f != "read-only" && f != "none" {
+		return nativeErr("bundle.macos.mas.files", fmt.Sprintf("must be \"read-write\", \"read-only\" or \"none\", got %q", f),
+			"it sets the entitlement for files the user picks in an open or save panel")
+	}
+	st := n.Bundle.Windows.Store
+	if st.IdentityName != "" && !nativeStoreNameRe.MatchString(st.IdentityName) {
+		return nativeErr("bundle.windows.store.identityName", fmt.Sprintf("%q is not a package identity name", st.IdentityName),
+			"copy Package/Identity/Name from Partner Center (3 to 50 letters, digits, dots and dashes, such as 12345Acme.AcmeNotes)")
+	}
+	if st.PublisherID != "" && !nativeStorePubRe.MatchString(st.PublisherID) {
+		return nativeErr("bundle.windows.store.publisherId", fmt.Sprintf("%q is not a publisher distinguished name", st.PublisherID),
+			"copy Package/Identity/Publisher from Partner Center, for example \"CN=01234567-89AB-CDEF-0123-456789ABCDEF\"")
+	}
+	if st.PublisherDisplayName != "" && strings.ContainsAny(st.PublisherDisplayName, "\r\n<>") {
+		return nativeErr("bundle.windows.store.publisherDisplayName", "contains a line break or angle bracket",
+			"use the publisher display name from Partner Center")
+	}
+	l := n.Bundle.Linux
+	if l.License != "" && !nativeSPDXRe.MatchString(l.License) {
+		return nativeErr("bundle.linux.license", fmt.Sprintf("%q is not an SPDX license expression", l.License),
+			"use an id such as \"MIT\" or \"GPL-3.0-or-later\"; \"LicenseRef-proprietary\" for closed source")
+	}
+	if l.Homepage != "" && !strings.HasPrefix(l.Homepage, "https://") && !strings.HasPrefix(l.Homepage, "http://") {
+		return nativeErr("bundle.linux.homepage", fmt.Sprintf("must be an http(s) URL, got %q", l.Homepage), "AppStream metadata links to it")
+	}
+	for k, v := range map[string]string{"summary": l.Summary} {
+		if strings.ContainsAny(v, "\r\n") {
+			return nativeErr("bundle.linux."+k, "must be one line", "the long text goes in bundle.linux.description")
+		}
+	}
+	if r := l.Flatpak.Runtime; r != "" && !nativeFlatpakRtRe.MatchString(r) {
+		return nativeErr("bundle.linux.flatpak.runtime", fmt.Sprintf("%q is not a runtime id", r), "use org.gnome.Platform (WebKitGTK 4.1 ships with it) or org.kde.Platform")
+	}
+	if v := l.Flatpak.RuntimeVersion; v != "" && !nativeRuntimeVerRe.MatchString(v) {
+		return nativeErr("bundle.linux.flatpak.runtimeVersion", fmt.Sprintf("%q is not a runtime branch", v), "use a GNOME release number such as \"48\"")
+	}
+	for _, a := range l.Flatpak.FinishArgs {
+		if !strings.HasPrefix(a, "--") {
+			return nativeErr("bundle.linux.flatpak.finishArgs", fmt.Sprintf("%q is not a finish-arg", a), "finish-args start with --, for example \"--filesystem=xdg-documents\"")
+		}
+	}
+	if g := l.Snap.Grade; g != "" && g != "stable" && g != "devel" {
+		return nativeErr("bundle.linux.snap.grade", fmt.Sprintf("must be \"stable\" or \"devel\", got %q", g), "the Snap Store lists only stable grade in the stable channel")
+	}
+	if c := l.Snap.Confinement; c != "" && c != "strict" && c != "classic" && c != "devmode" {
+		return nativeErr("bundle.linux.snap.confinement", fmt.Sprintf("must be \"strict\", \"classic\" or \"devmode\", got %q", c), "strict is what the store prefers")
 	}
 	return nil
 }

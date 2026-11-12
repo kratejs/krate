@@ -113,6 +113,9 @@ func (h *Host) ServeParent() (string, error) {
 		}
 	}
 	if dir == "" {
+		dir = hosttransport.ShortSocketDir("sdk.sock", 100)
+	}
+	if dir == "" {
 		d, err := os.MkdirTemp("", "krate-sdk")
 		if err != nil {
 			return "", err
