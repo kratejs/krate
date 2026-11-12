@@ -72,3 +72,45 @@ func TestScanDir(t *testing.T) {
 		t.Fatalf("enabled %v", n)
 	}
 }
+
+func TestScanUses(t *testing.T) {
+	cases := []struct {
+		name, src string
+		want      Uses
+	}{
+		{"none", `fetch("/x")`, Uses{}},
+		{"camera only", `navigator.mediaDevices.getUserMedia({ video: true })`, Uses{Capture: true, Camera: true}},
+		{"mic only", `navigator.mediaDevices.getUserMedia({ audio: true, video: false })`, Uses{Capture: true, Microphone: true}},
+		{"both", `getUserMedia({audio:true,video:{width:640}})`, Uses{Capture: true, Camera: true, Microphone: true}},
+		{"unknown constraints", `getUserMedia(constraints)`, Uses{Capture: true, Camera: true, Microphone: true}},
+		{"screen", `navigator.mediaDevices.getDisplayMedia({video:true})`, Uses{Screen: true}},
+		{"geolocation", `navigator.geolocation.getCurrentPosition(f)`, Uses{Location: true}},
+		{"a bare word is not a use", `const geolocation = 1`, Uses{}},
+	}
+	for _, c := range cases {
+		got := ScanUses(c.src)
+		if got != c.want {
+			t.Errorf("%s: got %+v, want %+v", c.name, got, c.want)
+		}
+	}
+}
+
+func TestScanDirUsesReportsFirstSite(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("a.js", "var x = 1;\nvar y = 2;\nnavigator.mediaDevices.getUserMedia({audio: true});\n")
+	write("b.html", "<p>no</p>")
+	write("c.map", "getUserMedia")
+	u, err := ScanDirUses(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !u.Capture || !u.Microphone || u.Camera || u.File != "a.js" || u.Line != 3 {
+		t.Fatalf("%+v", u)
+	}
+}

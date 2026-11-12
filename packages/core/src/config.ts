@@ -378,6 +378,9 @@ export type NativePermission =
   | "clipboard:read"
   | "tray"
   | "shortcut"
+  | "media"
+  | "media:manage"
+  | "location"
   | `plugin:${string}.${string}`;
 
 export interface NativeConfig {
@@ -436,6 +439,27 @@ export interface NativeConfig {
     webgl?: boolean;
     webrtc?: boolean;
     spellcheck?: boolean;
+  };
+  /**
+   * What happens to the page's camera, microphone, screen capture and
+   * location requests. Each policy is "prompt" (default, a native dialog),
+   * "allow" or "deny". A request also needs "media" (or "location") in the
+   * window's permissions, and the operating system's consent.
+   */
+  media?: {
+    camera?: "prompt" | "allow" | "deny";
+    microphone?: "prompt" | "allow" | "deny";
+    screen?: "prompt" | "allow" | "deny";
+    location?: "prompt" | "allow" | "deny";
+    notifications?: "prompt" | "allow" | "deny";
+    clipboardRead?: "prompt" | "allow" | "deny";
+    /** Keep the answers of the native prompt. Default true. */
+    remember?: boolean;
+    /**
+     * The sentences macOS shows in its consent prompts (Info.plist usage
+     * descriptions). Missing ones for a feature the UI uses are reported as KR7290.
+     */
+    usage?: { camera?: string; microphone?: string; location?: string; screenCapture?: string };
   };
   /**
    * "auto" keeps View Transitions in a native build. Default off, whatever the

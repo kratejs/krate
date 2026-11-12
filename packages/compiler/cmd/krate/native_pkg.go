@@ -138,8 +138,10 @@ func newPkgContext(flags cliFlags, root string, cfg *config.Config) (*pkgContext
 	if !filepath.IsAbs(out) {
 		out = filepath.Join(root, out)
 	}
+	meta := pkg.MetadataFromConfig(root, cfg)
+	pkg.ApplyAppJSON(&meta, filepath.Join(out, "app", "app.json"))
 	return &pkgContext{
-		root: root, cfg: cfg, meta: pkg.MetadataFromConfig(root, cfg), goos: goos, goarch: goarch,
+		root: root, cfg: cfg, meta: meta, goos: goos, goarch: goarch,
 		outDir: out, pkgDir: filepath.Join(out, "packages"),
 	}, nil
 }
@@ -147,7 +149,7 @@ func newPkgContext(flags cliFlags, root string, cfg *config.Config) (*pkgContext
 func (c *pkgContext) signConfig(flags cliFlags) pkg.SignConfig {
 	return pkg.SignConfig{
 		Log: os.Stderr, MacIdentity: flags.Pkg.Identity, MacEntitlements: flags.Pkg.Entitlements,
-		HostRuntime: c.meta.HostRuntime, WinPFX: flags.Pkg.PFX, WinThumbprint: flags.Pkg.Thumbprint,
+		HostRuntime: c.meta.HostRuntime, MediaUses: c.meta.MediaUses, WinPFX: flags.Pkg.PFX, WinThumbprint: flags.Pkg.Thumbprint,
 		WinTimestampURL: flags.Pkg.TimestampURL, GPGKey: flags.Pkg.GPGKey,
 	}
 }

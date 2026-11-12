@@ -81,6 +81,9 @@ type MediaSpec struct {
 	Policy map[string]string `json:"policy,omitempty"`
 	// NoRemember stops the native prompt from remembering answers.
 	NoRemember bool `json:"noRemember,omitempty"`
+	// Uses lists what the UI asks the webview for. Packaging reads it; the
+	// shell does not.
+	Uses []string `json:"uses,omitempty"`
 }
 
 // Features are the optional webview features an app uses.

@@ -791,6 +791,9 @@ func (b *Builder) AnalyzeNativeCapabilities() (*capability.Result, []diag.Diagno
 	if err != nil {
 		return nil, nil, err
 	}
+	if u, err := capability.ScanSourceUses(b.Root, b.Cfg); err == nil {
+		res.AddUses(u)
+	}
 	return res, append(pluginDiags, permissionDiagnostics(res, nativeEffective(b.Cfg).Permissions)...), nil
 }
 

@@ -61,6 +61,11 @@ type Metadata struct {
 	Updater *config.NativeUpdater
 	// HostRuntime is native.host.runtime ("quickjs", "node", ...).
 	HostRuntime string
+	// MediaUsage is native.media.usage; MediaUses is what the built UI asks
+	// the webview for ("camera", "microphone", "screen", "location"), read
+	// from app.json by ApplyAppJSON.
+	MediaUsage MediaUsage
+	MediaUses  []string
 }
 
 // MetadataFromConfig reads the packaging metadata from the native block;
@@ -91,6 +96,8 @@ func MetadataFromConfig(root string, cfg *config.Config) Metadata {
 		}
 	}
 	m.MacCategory = macCategory(n.Bundle.MacOS.Category)
+	m.MediaUsage = MediaUsage{Camera: n.Media.Usage.Camera, Microphone: n.Media.Usage.Microphone,
+		Location: n.Media.Usage.Location, ScreenCapture: n.Media.Usage.ScreenCapture}
 	return m
 }
 

@@ -57,7 +57,123 @@ type NativeManifest struct {
 	// switch the unused ones off.
 	Memory   string              `json:"memory,omitempty"`
 	Features *NativeFeaturesMeta `json:"features,omitempty"`
-	Debug    bool                `json:"debug"`
+	// Media is native.media: the policy for the page's camera, microphone,
+	// screen capture and location requests.
+	Media *NativeMediaMeta `json:"media,omitempty"`
+	Debug bool             `json:"debug"`
+}
+
+// NativeMediaMeta is the media block of app.json.
+type NativeMediaMeta struct {
+	Policy     map[string]string `json:"policy,omitempty"`
+	NoRemember bool              `json:"noRemember,omitempty"`
+	// Uses lists what the UI code asks the webview for ("camera",
+	// "microphone", "screen", "location"). Packaging reads it to write the
+	// macOS usage descriptions and entitlements and the MSIX capabilities;
+	// the shell ignores it.
+	Uses []string `json:"uses,omitempty"`
+}
+
+// mediaUseKinds lists the kinds the scan found, in a fixed order.
+func mediaUseKinds(u features.Uses) []string {
+	var out []string
+	if u.Camera {
+		out = append(out, "camera")
+	}
+	if u.Microphone {
+		out = append(out, "microphone")
+	}
+	if u.Screen {
+		out = append(out, "screen")
+	}
+	if u.Location {
+		out = append(out, "location")
+	}
+	return out
+}
+
+// nativeTargetsMac reports whether the build targets macOS (an empty
+// platform list means every platform).
+func nativeTargetsMac(eff *config.NativeConfig) bool {
+	if len(eff.Platforms) == 0 {
+		return true
+	}
+	for _, p := range eff.Platforms {
+		if p == "macos" {
+			return true
+		}
+	}
+	return false
+}
+
+// mediaUsageDiagnostics reports each macOS usage description the UI code
+// needs and native.media.usage lacks (KR7290). Without one macOS ends the
+// process the first time the page asks.
+func mediaUsageDiagnostics(eff *config.NativeConfig, u features.Uses) []diag.Diagnostic {
+	var ds []diag.Diagnostic
+	u2 := eff.Media.Usage
+	check := func(used bool, have, key, what string) {
+		if !used || have != "" {
+			return
+		}
+		ds = append(ds, diag.New(u.File, u.Line, 1,
+			fmt.Sprintf("the UI uses %s but native.media.usage.%s is not set", what, key),
+			fmt.Sprintf("set native.media.usage.%s to the sentence macOS shows in its consent prompt; packaging uses a generic one until then", key), "").WithCode(diag.CodeNativeMediaUsage))
+	}
+	check(u.Camera, u2.Camera, "camera", "the camera")
+	check(u.Microphone, u2.Microphone, "microphone", "the microphone")
+	check(u.Location, u2.Location, "location", "the location")
+	check(u.Screen, u2.ScreenCapture, "screenCapture", "screen capture")
+	return ds
+}
+
+// devUsePermissions adds the permissions the page's getUserMedia,
+// getDisplayMedia and geolocation calls need to a build that does not derive
+// them. An app without a native.permissions list gets the defaults plus them;
+// a list the app wrote is kept, with a note for each missing name, because the
+// shell denies the request without saying why to the page.
+func devUsePermissions(configured []string, u features.Uses) ([]string, []string) {
+	var need []string
+	if u.Capture || u.Screen {
+		need = append(need, "media")
+	}
+	if u.Location {
+		need = append(need, "location")
+	}
+	if len(need) == 0 {
+		return configured, nil
+	}
+	if len(configured) == 0 {
+		return append(append([]string{}, config.NativeDefaultPermissions()...), need...), nil
+	}
+	var notes []string
+	for _, p := range need {
+		if !capability.Covers(configured, p) {
+			notes = append(notes, fmt.Sprintf("%s uses the webview's camera, microphone, screen capture or location, but native.permissions does not list %q: the shell will deny those requests", u.File, p))
+		}
+	}
+	return configured, notes
+}
+
+// nativeMediaMeta returns the media block for native.media, nil when the
+// config sets nothing the shell needs.
+func nativeMediaMeta(eff *config.NativeConfig, uses features.Uses) *NativeMediaMeta {
+	m := eff.Media
+	policy := map[string]string{}
+	for k, v := range map[string]string{
+		"camera": m.Camera, "microphone": m.Microphone, "screen": m.Screen,
+		"location": m.Location, "notifications": m.Notifications, "clipboardRead": m.ClipboardRead,
+	} {
+		if v != "" {
+			policy[k] = v
+		}
+	}
+	noRemember := m.Remember != nil && !*m.Remember
+	kinds := mediaUseKinds(uses)
+	if len(policy) == 0 && !noRemember && len(kinds) == 0 {
+		return nil
+	}
+	return &NativeMediaMeta{Policy: policy, NoRemember: noRemember, Uses: kinds}
 }
 
 // NativeFeaturesMeta is the features block of app.json.
@@ -315,14 +431,27 @@ func (b *Builder) BuildNativeApp(opts NativeAppOptions) (*NativeAppResult, error
 		WebRTC: eff.Features.WebRTC, SpellCheck: eff.Features.SpellCheck,
 	})
 	m.Features = &resolved
+	uses, err := features.ScanDirUses(distDir)
+	if err != nil {
+		return nil, fmt.Errorf("scanning the UI for webview permissions: %w", err)
+	}
+	if mm := nativeMediaMeta(eff, uses); mm != nil {
+		m.Media = mm
+	}
+	if !opts.Dev && nativeTargetsMac(eff) {
+		printWarningsOnce(os.Stderr, mediaUsageDiagnostics(eff, uses))
+	}
 	m.Window.Permissions = eff.Window.Permissions
 	m.Window.KeepAlive = eff.Window.KeepAlive
 	m.Plugins = b.NativePluginNames()
 	if !opts.Derive {
+		var useNotes []string
+		m.Permissions, useNotes = devUsePermissions(m.Permissions, uses)
+		res.Notes = append(res.Notes, useNotes...)
 		m.Permissions = b.pluginDevPermissions(m.Permissions)
 	}
 	if opts.Derive {
-		cap, ds, err := b.deriveNativePermissions(eff)
+		cap, ds, err := b.deriveNativePermissions(eff, uses)
 		if err != nil {
 			return nil, err
 		}
@@ -649,7 +778,7 @@ func needGoDiag(why string) diag.Diagnostic {
 
 // deriveNativePermissions runs the capability analysis of the last native
 // build and checks it against the native.permissions allowlist (KR7210).
-func (b *Builder) deriveNativePermissions(eff *config.NativeConfig) (*capability.Result, []diag.Diagnostic, error) {
+func (b *Builder) deriveNativePermissions(eff *config.NativeConfig, uses features.Uses) (*capability.Result, []diag.Diagnostic, error) {
 	p, err := native.Analyze(b.Root, b.Cfg)
 	if err != nil {
 		return nil, nil, err
@@ -670,6 +799,7 @@ func (b *Builder) deriveNativePermissions(eff *config.NativeConfig) (*capability
 		}
 		res.AddGoSites(sites)
 	}
+	res.AddUses(uses)
 	ds := permissionDiagnostics(res, eff.Permissions)
 	return res, ds, nil
 }
