@@ -8,6 +8,7 @@ packages:
   - examples/native-chrome
   - examples/native-page
   - examples/native-plugin
+  - examples/native-remote
 
 allowBuilds:
   '@krate/core': true

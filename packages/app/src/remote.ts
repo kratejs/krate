@@ -15,7 +15,8 @@ import { Window, View } from "./window.js";
 
 // The functions are declared under prefixed names and exported under their short ones:
 // the bundler hoists top-level declarations of every module into one scope, so two modules
-// that both declare a `post` or `navigate` would call each other when imported as namespaces.
+// that both declare a `post` or `navigate` would call each other when imported as namespaces. For the same
+// reason the event subscription is `onRemoteEvent`: window.ts, which this module imports, declares `onEvent`.
 
 export interface RemoteOptions {
   /** The first page, http or https. */
@@ -272,7 +273,7 @@ export {
   remoteNavigate as navigate,
   remotePost as post,
   remoteOnMessage as onMessage,
-  remoteOnEvent as onEvent,
+  remoteOnEvent as onRemoteEvent,
   remoteCapabilities as capabilities,
   remoteSetRules as setRules,
   remoteOnRequest as onRequest,
