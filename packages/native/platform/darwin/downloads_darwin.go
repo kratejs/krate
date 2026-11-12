@@ -271,16 +271,30 @@ func (a *App) decideDestination(dlObj, response, suggested, handler objc.ID) {
 		}
 		req.MIME = goString(response.Send(sel("MIMEType")))
 	}
+	// The completion handler is answered later, after this method returns, so
+	// it is copied: WebKit releases its own reference on return and aborts the
+	// app (NSInternalInconsistencyException) when a handler it gave out is
+	// released without having been called.
+	loadBlockFns()
+	block := handler
+	if handler != 0 && blockFns.copy != nil {
+		block = objc.ID(blockFns.copy(uintptr(handler)))
+	}
 	var once sync.Once
 	start(req, func(path string) {
 		once.Do(func() {
 			dispatch(func() {
+				defer func() {
+					if block != handler && blockFns.release != nil {
+						blockFns.release(uintptr(block))
+					}
+				}()
 				if path == "" {
-					invokeBlock1(handler, 0)
+					invokeBlock1(block, 0)
 					return
 				}
 				d.path = path
-				invokeBlock1(handler, uintptr(cls("NSURL").Send(sel("fileURLWithPath:"), nsString(path))))
+				invokeBlock1(block, uintptr(cls("NSURL").Send(sel("fileURLWithPath:"), nsString(path))))
 				d.emit(caps.DownloadStarted, "")
 			})
 		})
