@@ -1057,6 +1057,123 @@
       ]
     },
     {
+      "id": "krate/port.channel",
+      "permission": "port",
+      "area": "port",
+      "module": "port",
+      "exports": [
+        "createChannel"
+      ]
+    },
+    {
+      "id": "krate/port.transfer",
+      "permission": "port",
+      "area": "port",
+      "module": "port",
+      "exports": [
+        "transferPort"
+      ]
+    },
+    {
+      "id": "krate/port.post",
+      "permission": "port:receive",
+      "area": "port",
+      "module": "port",
+      "exports": [
+        "Port",
+        "createChannel",
+        "portFromId"
+      ]
+    },
+    {
+      "id": "krate/port.listen",
+      "permission": "port:receive",
+      "area": "port",
+      "module": "port",
+      "exports": [
+        "Port",
+        "createChannel",
+        "portFromId"
+      ]
+    },
+    {
+      "id": "krate/port.close",
+      "permission": "port:receive",
+      "area": "port",
+      "module": "port",
+      "exports": [
+        "Port",
+        "createChannel",
+        "portFromId"
+      ]
+    },
+    {
+      "id": "krate/worker.start",
+      "permission": "worker",
+      "area": "worker",
+      "module": "worker",
+      "exports": [
+        "startWorker"
+      ]
+    },
+    {
+      "id": "krate/worker.stop",
+      "permission": "worker",
+      "area": "worker",
+      "module": "worker",
+      "exports": [
+        "WorkerHandle",
+        "startWorker"
+      ]
+    },
+    {
+      "id": "krate/worker.list",
+      "permission": "worker",
+      "area": "worker",
+      "module": "worker",
+      "exports": [
+        "listWorkers"
+      ]
+    },
+    {
+      "id": "krate/worker.specs",
+      "permission": "worker",
+      "area": "worker",
+      "module": "worker",
+      "exports": [
+        "workerSpecs"
+      ]
+    },
+    {
+      "id": "krate/worker.post",
+      "permission": "worker",
+      "area": "worker",
+      "module": "worker",
+      "exports": [
+        "WorkerHandle",
+        "startWorker"
+      ]
+    },
+    {
+      "id": "krate/worker.events",
+      "permission": "worker",
+      "area": "worker",
+      "module": "worker",
+      "exports": [
+        "WorkerHandle",
+        "onWorkerEvent",
+        "startWorker"
+      ]
+    },
+    {
+      "id": "krate/worker.emit",
+      "area": "worker",
+      "module": "worker-host",
+      "exports": [
+        "postMessage"
+      ]
+    },
+    {
       "id": "krate/badge.set",
       "permission": "badge",
       "area": "badge",

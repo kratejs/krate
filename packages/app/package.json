@@ -127,6 +127,18 @@
     "./crash": {
       "types": "./dist/crash.d.ts",
       "default": "./dist/crash.js"
+    },
+    "./port": {
+      "types": "./dist/port.d.ts",
+      "default": "./dist/port.js"
+    },
+    "./worker": {
+      "types": "./dist/worker.d.ts",
+      "default": "./dist/worker.js"
+    },
+    "./worker-host": {
+      "types": "./dist/worker-host.d.ts",
+      "default": "./dist/worker-host.js"
     }
   },
   "files": [

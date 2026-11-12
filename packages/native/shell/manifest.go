@@ -15,6 +15,7 @@ import (
 	"github.com/kratejs/krate/packages/native/plugin"
 	"github.com/kratejs/krate/packages/native/sdk/media"
 	"github.com/kratejs/krate/packages/native/sdk/permission"
+	"github.com/kratejs/krate/packages/native/sdk/worker"
 )
 
 // ManifestFile is the name of the manifest inside an app directory.
@@ -40,6 +41,9 @@ type Manifest struct {
 	// process on Node, Bun, Deno or as a compiled executable (scriptc), each
 	// serving its own ids. See README.md.
 	HostChildren []HostChildSpec `json:"hostchildren,omitempty"`
+	// Workers are the background worker processes pages and host code may
+	// start by name (see package sdk/worker).
+	Workers []worker.Spec `json:"workers,omitempty"`
 
 	// Permissions lists what the UI may use of the SDK (see package
 	// sdk/permission). Empty means the default set (os:info, kv, db, window,
@@ -287,6 +291,27 @@ func (m *Manifest) normalize() error {
 			}
 			if !media.ValidPolicy(p) {
 				return fmt.Errorf("media.policy.%s must be prompt, allow or deny, got %q", k, p)
+			}
+		}
+	}
+	seenWorker := map[string]bool{}
+	for i, w := range m.Workers {
+		if err := w.Validate(); err != nil {
+			return fmt.Errorf("workers[%d]: %w", i, err)
+		}
+		if seenWorker[w.Name] {
+			return fmt.Errorf("workers[%d]: %q is declared twice", i, w.Name)
+		}
+		seenWorker[w.Name] = true
+		if err := local(fmt.Sprintf("workers[%d].entry", i), w.Entry); err != nil {
+			return err
+		}
+		if _, err := permission.Parse(w.Permissions); err != nil {
+			return fmt.Errorf("workers[%d].permissions: %w", i, err)
+		}
+		for _, n := range w.Permissions {
+			if !set.Allows(n) {
+				return fmt.Errorf("workers[%d].permissions: %q is not in the app's permissions", i, n)
 			}
 		}
 	}

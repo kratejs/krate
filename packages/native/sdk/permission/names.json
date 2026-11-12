@@ -20,6 +20,8 @@
     "os:info",
     "os:secrets",
     "os:secrets.read",
+    "port",
+    "port:receive",
     "power",
     "power:inhibit",
     "screen",
@@ -28,7 +30,8 @@
     "theme",
     "tray",
     "updater",
-    "window"
+    "window",
+    "worker"
   ],
   "defaults": [
     "app",

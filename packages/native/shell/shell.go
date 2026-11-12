@@ -33,6 +33,7 @@ import (
 	appsdk "github.com/kratejs/krate/packages/native/sdk/app"
 	"github.com/kratejs/krate/packages/native/sdk/permission"
 	sdkupdater "github.com/kratejs/krate/packages/native/sdk/updater"
+	"github.com/kratejs/krate/packages/native/sdk/worker"
 )
 
 // RunOptions configures Run.
@@ -116,6 +117,8 @@ type app struct {
 	child *gohost.Child
 	// hostChildren are the running JavaScript host children by entry path.
 	hostChildren map[string]*hostChild
+	// workers supervises the worker processes of the manifest; nil without any.
+	workers *worker.Supervisor
 
 	ctl  *Control
 	quit func() // set by the run mode
@@ -209,6 +212,10 @@ func loadApp(dir string, fsys fs.FS, opts RunOptions) (*app, error) {
 		os.Setenv("KRATE_APP_ID", man.AppID)
 	}
 	a.setupCrash(man)
+	if err := a.setupWorkers(man); err != nil {
+		a.close()
+		return nil, err
+	}
 	if err := a.reloadHostJS(); err != nil {
 		a.close()
 		return nil, err
@@ -310,6 +317,7 @@ func (a *app) attachSDK(p platform.App) {
 		sdkupdater.SetQuit(p.Quit)
 	}
 	sdkall.RegisterUI(a.reg, a.sdk, a.perms, a.opts.Allowed)
+	a.startAutoWorkers()
 }
 
 // startMemory applies the Go side of the memory profile and starts the idle
@@ -336,6 +344,9 @@ func (a *app) close() {
 	}
 	if a.plug != nil {
 		a.plug.Quit()
+	}
+	if a.workers != nil {
+		a.workers.StopAll()
 	}
 	a.sdk.Close()
 	a.mu.Lock()

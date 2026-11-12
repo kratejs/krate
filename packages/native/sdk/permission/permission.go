@@ -40,6 +40,9 @@
 //	login               no             read and change whether the app starts at login
 //	theme               yes (default)  system appearance and title bar theme
 //	crash               no             list, read and delete crash reports, crash events
+//	port                no             create message channels and hand ends to windows, views and workers; implies port:receive
+//	port:receive        no             be handed a channel end and use the ends it holds
+//	worker              no             start, stop and message the declared worker processes
 //
 // The compiler keeps a copy of the names in names.json (a test here keeps the
 // file in step; run "go test ./sdk/permission -update" to rewrite it).
