@@ -83,6 +83,17 @@ func TestNativeE2ERemoteGUI(t *testing.T) {
 	s := e2eStartShell(t, bin, appDir)
 	s.waitReady(60 * time.Second)
 
+	// The page defines its helpers when its script has run, which can be
+	// after the shell reports ready on a slow machine.
+	for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(100 * time.Millisecond) {
+		var ready bool
+		if err := s.query(`typeof openRemote === "function"`, &ready); err == nil && ready {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the page never defined openRemote")
+		}
+	}
 	var view string
 	opts := `{blocked: "block"}`
 	if err := s.query(fmt.Sprintf(`openRemote(%q, %s)`, site.URL+"/", opts), &view); err != nil {

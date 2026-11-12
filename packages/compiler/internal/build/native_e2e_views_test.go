@@ -128,7 +128,15 @@ func TestNativeE2EMediaGUI(t *testing.T) {
 	if err := json.Unmarshal([]byte(res), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got["camera"] == "NotAllowedError" || got["camera"] == "" {
+	// The app's policy allows the camera, but the operating system's consent
+	// is checked after it: a runner whose camera privacy is off (osCamera
+	// "denied", Windows CI) still ends in NotAllowedError.
+	switch {
+	case got["osCamera"] != "" && got["osCamera"] != "granted" && got["osCamera"] != "notDetermined":
+		if got["camera"] != "NotAllowedError" {
+			t.Errorf("camera (policy allow, OS consent %s) = %q, want NotAllowedError", got["osCamera"], got["camera"])
+		}
+	case got["camera"] == "NotAllowedError" || got["camera"] == "":
 		t.Errorf("camera (policy allow) = %q", got["camera"])
 	}
 	if got["microphone"] != "NotAllowedError" {
