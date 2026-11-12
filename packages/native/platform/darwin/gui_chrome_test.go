@@ -222,7 +222,6 @@ func TestGUIChromeDocumentState(t *testing.T) {
 
 func TestGUIChromeTabbing(t *testing.T) {
 	a := chromeWin(t, caps.ChromeOptions{TabbingID: "krate-test", TabbingMode: caps.TabbingPreferred})
-	b := chromeWin(t, caps.ChromeOptions{TabbingID: "krate-test", TabbingMode: caps.TabbingPreferred})
 	st := a.ChromeState()
 	if st.TabbingID != "krate-test" || st.TabbingMode != "preferred" {
 		t.Fatalf("state %+v", st)
@@ -235,9 +234,12 @@ func TestGUIChromeTabbing(t *testing.T) {
 	if err := a.SetTabbing("krate-test", "bogus"); err == nil {
 		t.Error("a bad tabbing mode was accepted")
 	}
+	// Checked before the second window exists: a preferred window pulls any
+	// later window with the same identifier into its tab group by itself.
 	if got := a.Tabs(); len(got) != 1 || got[0] != a.Ref() {
 		t.Errorf("a lone window's tab group is %v", got)
 	}
+	b := chromeWin(t, caps.ChromeOptions{TabbingID: "krate-test", TabbingMode: caps.TabbingAuto})
 	events := make(chan caps.ChromeEvent, 8)
 	guiApp.OnChromeEvent(func(e caps.ChromeEvent) { events <- e })
 	defer guiApp.OnChromeEvent(nil)

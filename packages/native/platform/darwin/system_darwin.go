@@ -238,7 +238,7 @@ var powerLibs struct {
 	srcType    func(blob uintptr) uintptr
 	cfRelease  func(uintptr)
 	idleSecs   func(state int32, typ uint32) float64
-	createAsrt func(typ, name uintptr, level uint32, id *uint32) int32
+	createAsrt func(typ uintptr, level uint32, name uintptr, id *uint32) int32
 	release    func(id uint32) int32
 }
 
@@ -346,7 +346,7 @@ func (a *App) PreventSleep(reason string, display bool) (func(), error) {
 		for _, t := range types {
 			var id uint32
 			// kIOPMAssertionLevelOn = 255.
-			if rc := powerLibs.createAsrt(uintptr(nsString(t)), uintptr(nsString(reason)), 255, &id); rc != 0 {
+			if rc := powerLibs.createAsrt(uintptr(nsString(t)), 255, uintptr(nsString(reason)), &id); rc != 0 {
 				err = fmt.Errorf("darwin: IOPMAssertionCreateWithName(%s) failed with 0x%x", t, uint32(rc))
 				return
 			}
