@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -816,6 +817,16 @@ func (a *App) ClearSiteData(o caps.ClearSiteDataOptions) error {
 			part{"service workers", dataServiceWork})
 	}
 	for _, p := range parts {
+		if runtime.GOARCH == "arm64" && cdpStorageType(p.kinds) != "" {
+			// On windows-11-arm, ClearBrowsingData for a DOM storage kind
+			// never completed and left the webview answering every call
+			// with ERROR_INVALID_STATE. Clear the app origin's storage
+			// through the DevTools protocol there instead.
+			if err := a.clearOriginByProtocol(p.kinds); err != nil {
+				return fmt.Errorf("windows: clearing %s: %w", p.name, err)
+			}
+			continue
+		}
 		if err := a.clearKinds(o, p.kinds, p.name); err != nil {
 			// WebSQL (removed from Chromium) and the legacy FileSystem API
 			// hold nothing in an app that does not use them, and some
