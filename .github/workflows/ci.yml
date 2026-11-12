@@ -391,6 +391,14 @@ jobs:
           go-version-file: packages/compiler/go.mod
           cache: true
 
+      # TestNativeDebugGoHost* drive a real dlv session; without dlv they
+      # skip, or fail under KRATE_REQUIRE_E2E.
+      - name: Install Delve
+        run: |
+          go install github.com/go-delve/delve/cmd/dlv@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          "$(go env GOPATH)/bin/dlv" version
+
       - name: Enable pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -509,7 +517,7 @@ jobs:
             openbox --sm-disable &
             wm=$!
             sleep 1
-            go test -p 1 -count=1 -timeout 20m $GUI_PKGS
+            go test -p 1 -count=1 -timeout 20m -v $GUI_PKGS
             status=$?
             kill $wm
             exit $status
@@ -553,12 +561,13 @@ jobs:
           WEBKIT_DISABLE_DMABUF_RENDERER: "1"
           LIBGL_ALWAYS_SOFTWARE: "1"
 
-      # Never run on a hosted runner before: report, do not block.
+      # Blocking, like the Linux GUI steps: a failing macOS or Windows GUI test
+      # fails the job. -v keeps skips visible in the log.
       - name: GUI tests (macOS, Windows)
         if: runner.os != 'Linux'
         run: |
           # shellcheck disable=SC2086
-          go test -p 1 -count=1 -timeout 20m $GUI_PKGS
+          go test -p 1 -count=1 -timeout 20m -v $GUI_PKGS
         working-directory: packages/native
         env:
           GUI_PKGS: ${{ matrix.gui }}
@@ -600,7 +609,7 @@ jobs:
       # job, the absolute values print a warning. Memory limits are not scaled.
       - name: Compiler native tests (Linux, GUI under Xvfb)
         if: runner.os == 'Linux'
-        run: xvfb-run -a go test -p 1 -count=1 -timeout 20m -v -run 'TestNativeE2EGUI|TestNativeBudgetGUI|GUI' ./internal/build
+        run: xvfb-run -a go test -p 1 -count=1 -timeout 20m -v -run 'TestNativeE2EGUI|TestNativeBudgetGUI|TestNativeDebugGoHost|GUI' ./internal/build
         working-directory: packages/compiler
         env:
           KRATE_NATIVE_GUI: "1"
@@ -647,7 +656,7 @@ jobs:
       # in the job summary), a fragment of budgets.json to paste in.
       - name: Compiler native tests (macOS, Windows)
         if: runner.os != 'Linux'
-        run: go test -p 1 -count=1 -timeout 20m -v -run 'TestNativeE2EGUI|TestNativeBudgetGUI|TestNativeBudgetSizes|GUI' ./internal/build
+        run: go test -p 1 -count=1 -timeout 20m -v -run 'TestNativeE2EGUI|TestNativeBudgetGUI|TestNativeBudgetSizes|TestNativeDebugGoHost|TestNativeUniversalMacApp|TestNativeMASSandboxGUI|GUI' ./internal/build
         working-directory: packages/compiler
         env:
           GOWORK: "off"
@@ -725,6 +734,20 @@ jobs:
       - name: Signing smoke test, ad hoc and self-signed identity (macOS)
         if: runner.os == 'macOS'
         run: node scripts/native-smoke.mjs macos sign
+        env:
+          KRATE_REQUIRE_E2E: "1"
+
+      # A universal (arm64 + amd64 lipo) app bundle and a Mac App Store
+      # package (sandbox entitlements, ad hoc signed), both structure-checked.
+      - name: Packaging smoke test, universal app (macOS)
+        if: runner.os == 'macOS'
+        run: node scripts/native-smoke.mjs macos universal
+        env:
+          KRATE_REQUIRE_E2E: "1"
+
+      - name: Packaging smoke test, Mac App Store package (macOS)
+        if: runner.os == 'macOS'
+        run: node scripts/native-smoke.mjs macos mas
         env:
           KRATE_REQUIRE_E2E: "1"
 
@@ -844,6 +867,33 @@ jobs:
         env:
           KRATE_BROWSER: chromium
           KRATE_REQUIRE_E2E: "1"
+
+      # The slow packaging steps run last. Flatpak builds against the GNOME
+      # runtime from Flathub (the smoke script installs it per user); the snap
+      # is built in destructive mode on the runner and installed with --dangerous.
+      - name: Install flatpak and flatpak-builder
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder appstream
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+
+      - name: Packaging smoke test, Flatpak build, install, run (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: xvfb-run -a node scripts/native-smoke.mjs linux flatpak
+        env:
+          KRATE_REQUIRE_E2E: "1"
+
+      - name: Install snapcraft
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo snap install snapcraft --classic
+
+      - name: Packaging smoke test, snap build, install, run (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: xvfb-run -a node scripts/native-smoke.mjs linux snap
+        env:
+          KRATE_REQUIRE_E2E: "1"
+          KRATE_SNAP_DESTRUCTIVE: "1"
 
   node-versions:
     name: Node ${{ matrix.node }}
