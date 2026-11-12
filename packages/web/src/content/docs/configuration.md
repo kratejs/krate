@@ -84,6 +84,7 @@ every key and its default.
 | Build | `entry`, `outDir`, `pagesDir`, `publicDir`, `minify`, `sourcemap` | [Build](/docs/reference/config/#build) |
 | Dev server | `devServer` | [Dev server](/docs/reference/config/#dev-server) |
 | Rendering | `viewTransitions`, `ppr`, `ssr`, `output` | [SSR / Streaming](/docs/reference/config/#ssr-streaming) |
+| Animation | `motion` | [Motion](/docs/reference/config/#motion) |
 | CSS & Tailwind | `tailwind` | [Tailwind CSS](/docs/reference/config/#tailwind-css) |
 | Markdown | `markdown` | [Markdown](/docs/reference/config/#markdown) |
 | Content | `content`, `pathAliases`, `tsBaseDir` | [Content collections](/docs/reference/config/#content-collections) |

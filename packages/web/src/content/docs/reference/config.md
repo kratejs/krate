@@ -449,6 +449,14 @@ cross-document `@view-transition { navigation: auto }` rule so full-page loads
 morph too. Mark persistent chrome with `data-view-transition="name"` to morph it
 instead of cross-fading. Reduced-motion preferences are respected.
 
+## Motion
+
+```typescript
+motion: true, // true | false | { reducedMotion, transition, viewport, stagger, easings, presets, ... }
+```
+
+Enables [Motion](https://motion.dev), the animation engine behind Framer Motion. Unset by default, and nothing from Motion ships until it is set. `true` uses the defaults; an object tunes it, with `enabled: false` to switch it off. Keys: `reducedMotion` (`"user"`, `"always"`, `"never"`), `declarative` (bind `data-motion-*` attributes, default `true`), `transition`, `viewport`, `stagger`, `easings` (named cubic beziers) and `presets` (named animations). See [Motion](/docs/features/motion/) for the attributes and every option.
+
 ## Plugins
 
 ```typescript
