@@ -1,7 +1,7 @@
 ---
 title: Files and Drag and Drop
 order: 12
-description: File associations in the installers, opening the files an app is launched with or handed by a second launch, and the real paths of files dropped from the desktop onto a window.
+description: File associations, opening the files an app is launched with or handed by a second launch, and real paths of files dropped on a window.
 ---
 
 # Files and drag and drop

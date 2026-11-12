@@ -1,7 +1,7 @@
 ---
 title: Testing your app
 order: 20
-description: krate native test runs your app in the real shell and drives its pages and native events from Node tests - the driver API, native event injection, headless CI on Linux, and what it cannot do.
+description: krate native test runs your app in the real shell and drives its pages and native events from Node tests, headless on Linux CI.
 ---
 
 # Testing your app

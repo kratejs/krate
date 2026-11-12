@@ -1,7 +1,7 @@
 ---
 title: Camera, Microphone and Location
 order: 16
-description: Camera, microphone, screen capture and location in Krate Native apps with app-controlled permissions - the policy, remembered decisions, the request handler, operating system consent, usage descriptions and screen sources.
+description: Camera, microphone, screen capture and location in Krate Native apps: permission policy, remembered decisions, request handlers and OS consent.
 ---
 
 # Camera, microphone and location
