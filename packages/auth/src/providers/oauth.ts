@@ -1,5 +1,5 @@
 import { readEnv } from "../env";
-import type { Awaitable, OAuthConfig, OAuthTokens, User } from "../types";
+import type { Awaitable, EndpointContext, OAuthConfig, OAuthTokens, User } from "../types";
 
 export interface OAuthUserOptions {
   clientId?: string;
@@ -31,7 +31,7 @@ export interface OAuthSpec {
   name: string;
   type?: "oauth" | "oidc";
   issuer?: Resolvable<string | undefined>;
-  authorization?: Resolvable<string | { url: string; params?: Record<string, string> }>;
+  authorization?: Resolvable<string | { url: string; params?: Record<string, string> } | undefined>;
   token?: Resolvable<string | { url: string; params?: Record<string, string> } | undefined>;
   userinfo?: Resolvable<string | { url: string; params?: Record<string, string> } | undefined>;
   wellKnown?: Resolvable<string | undefined>;
@@ -40,8 +40,9 @@ export interface OAuthSpec {
   authMethod?: "client_secret_basic" | "client_secret_post" | "none";
   profile?: (profile: Record<string, any>, tokens: OAuthTokens) => Awaitable<User>;
   userinfoFromIdToken?: boolean;
+  skipIssuerCheck?: Resolvable<boolean>;
   brandColor?: string;
-  requiresIssuer?: boolean;
+  userinfoRequest?: (options: ResolvedOAuthOptions) => ((context: EndpointContext) => Awaitable<Record<string, any>>) | undefined;
 }
 
 export function envKey(id: string): string {
@@ -93,7 +94,8 @@ export function defineOAuthProvider(spec: OAuthSpec): (options?: OAuthUserOption
       wellKnown,
       authorization,
       token: tokenEndpoint,
-      userinfo: userinfo.url ? userinfo : undefined,
+      userinfo: userinfo.url || spec.userinfoRequest ? { ...userinfo, request: spec.userinfoRequest?.(options) } : undefined,
+      skipIssuerCheck: spec.skipIssuerCheck === undefined ? undefined : resolve(spec.skipIssuerCheck, options),
       clientId: options.clientId,
       clientSecret: options.clientSecret,
       checks: userOptions.checks ?? spec.checks ?? (type === "oidc" ? ["pkce", "state", "nonce"] : ["pkce", "state"]),

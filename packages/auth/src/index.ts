@@ -30,5 +30,12 @@ export function defineAuth(options: AuthOptions = {}): AuthInstance {
 }
 
 export { AuthError } from "./config";
+export { MemoryAdapter, createMemoryStore } from "./adapters/memory";
+export * from "./providers/catalog";
+export { credentials } from "./providers/credentials";
+export { email, resend, defaultNormalizeIdentifier } from "./providers/email";
+export { passkey } from "./providers/passkey";
+export { genericOAuth, defineOAuthProvider } from "./providers/oauth";
+export { appleClientSecret } from "./providers/apple-secret";
 export type { ResolvedConfig } from "./config";
 export * from "./types";

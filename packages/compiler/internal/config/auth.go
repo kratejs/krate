@@ -108,15 +108,12 @@ type AuthAccountLinks struct {
 
 var AuthKnownProviders = []string{
 	"42-school", "apple", "asgardeo", "atlassian", "auth0", "authentik", "azure-ad-b2c",
-	"battlenet", "box", "bungie", "cognito", "coinbase", "discord", "dribbble",
-	"dropbox", "duende-identityserver6", "eveonline", "facebook", "faceit", "foursquare",
-	"freshbooks", "fusionauth", "github", "gitlab", "google", "hubspot", "huggingface",
-	"instagram", "kakao", "keycloak", "kinde", "line", "linkedin", "logto", "mailchimp",
-	"mailru", "mastodon", "mattermost", "medium", "microsoft-entra-id", "naver", "netlify",
-	"notion", "okta", "onelogin", "orcid", "osu", "passage", "patreon", "pinterest",
-	"pipedrive", "reddit", "roblox", "salesforce", "slack", "spotify", "strava", "tiktok",
-	"todoist", "trakt", "twitch", "twitter", "vipps", "vk", "webex", "wechat",
-	"wikimedia", "workos", "yandex", "zitadel", "zoho", "zoom",
+	"bitbucket", "box", "cognito", "coinbase", "descope", "discord", "dribbble", "dropbox",
+	"duende-identityserver6", "facebook", "fusionauth", "github", "gitlab", "google", "hubspot",
+	"huggingface", "kakao", "keycloak", "kinde", "line", "linkedin", "logto", "mastodon",
+	"mattermost", "microsoft-entra-id", "naver", "netlify", "notion", "okta", "onelogin", "orcid",
+	"osu", "patreon", "pinterest", "reddit", "roblox", "salesforce", "slack", "spotify", "strava",
+	"twitch", "twitter", "webex", "wikimedia", "workos", "yandex", "zitadel", "zoho", "zoom",
 	"credentials", "email", "resend", "passkey",
 }
 

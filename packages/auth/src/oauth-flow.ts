@@ -150,11 +150,9 @@ export function decodeIdToken(idToken: string): Record<string, any> {
 function validateIdToken(provider: OAuthConfig, claims: Record<string, any>, nonce: string | undefined): void {
   const aud = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
   if (!aud.includes(provider.clientId)) throw new AuthError("OAuthCallback", "id_token audience mismatch", 502);
-  if (provider.issuer && claims.iss && claims.iss !== provider.issuer && !String(provider.issuer).includes("{tenantid}") && !String(claims.iss).includes("{tenantid}")) {
+  if (provider.issuer && claims.iss && !provider.skipIssuerCheck) {
     const normalize = (v: string) => v.replace(/\/+$/, "");
-    if (normalize(claims.iss) !== normalize(provider.issuer) && !provider.options?.skipIssuerCheck) {
-      throw new AuthError("OAuthCallback", "id_token issuer mismatch", 502);
-    }
+    if (normalize(String(claims.iss)) !== normalize(provider.issuer)) throw new AuthError("OAuthCallback", "id_token issuer mismatch", 502);
   }
   if (typeof claims.exp === "number" && claims.exp * 1000 < Date.now() - 60_000) throw new AuthError("OAuthCallback", "id_token expired", 502);
   if (nonce !== undefined && claims.nonce !== nonce) throw new AuthError("OAuthCallback", "id_token nonce mismatch", 502);
@@ -162,7 +160,11 @@ function validateIdToken(provider: OAuthConfig, claims: Record<string, any>, non
 
 async function fetchProfile(provider: OAuthConfig, tokens: OAuthTokens, nonce: string | undefined, explicitUserinfo: boolean): Promise<Record<string, any>> {
   if (provider.userinfo?.request) {
-    return provider.userinfo.request({ tokens, provider, fetch: (i, init) => timedFetch(String(i), init) });
+    try {
+      return await provider.userinfo.request({ tokens, provider, fetch: (i, init) => timedFetch(String(i), init) });
+    } catch (err) {
+      throw new AuthError("OAuthCallback", `profile request to ${provider.id} failed: ${(err as Error).message}`, 502);
+    }
   }
   let claims: Record<string, any> | undefined;
   if (tokens.id_token) {

@@ -138,6 +138,7 @@ export interface OAuthConfig {
   profile?: (profile: Record<string, any>, tokens: OAuthTokens) => Awaitable<User>;
   allowDangerousEmailAccountLinking?: boolean;
   userinfoFromIdToken?: boolean;
+  skipIssuerCheck?: boolean;
   style?: { brandColor?: string };
   options?: Record<string, unknown>;
 }

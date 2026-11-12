@@ -1,13 +1,8 @@
 import type { DeclarativeProvider, Provider } from "../types";
+import { catalog } from "./catalog";
 import { genericOAuth, type OAuthUserOptions } from "./oauth";
 import { email } from "./email";
 import { passkey } from "./passkey";
-
-export const catalog: Record<string, (options?: any) => Provider> = {};
-
-export function registerProvider(id: string, factory: (options?: any) => Provider): void {
-  catalog[id] = factory;
-}
 
 export function resolveDeclarativeProvider(decl: DeclarativeProvider): Provider | null {
   const options = decl.options ?? {};
