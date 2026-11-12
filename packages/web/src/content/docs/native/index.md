@@ -13,7 +13,7 @@ sidebar:
 > **Preview.** Krate Native is under construction. `krate native init`, `check`,
 > `dev`, `build` (also `--release`), `profile`, `package`, `sign`, `notarize` and
 > `keygen` and `doctor` work today. Names and options may change before release.
-> The tested platform is Linux; macOS and Windows are [untested](/docs/guides/compatibility/#krate-native).
+> Linux is the most tested platform. The CI native job also runs the shell, the plugin and packaging tests on macOS and Windows; what each feature has been tested with on each OS is in the [compatibility matrix](/docs/guides/compatibility/#krate-native), and manual-only checks (real key presses, tray clicks, notarization) are listed as limits there.
 
 Krate Native compiles a Krate app into a desktop app. The UI is TSX shown in the
 system webview. Code that must run in the native process, such as file access,

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
+	"github.com/kratejs/krate/packages/compiler/internal/renderer"
 )
 
 // decodeVLQ decodes one source-map segment into its fields.
@@ -101,5 +102,30 @@ func TestHydrationSourceMapPointsAtTSX(t *testing.T) {
 		if !found {
 			t.Errorf("minify=%v: no mapping to the onClick handler (7:17); mappings=%q", minify, sm.Mappings)
 		}
+	}
+}
+
+func TestBuildHydrationMapEndMarkerStopsTheMapping(t *testing.T) {
+	js := "a;\n/*@k:0*/kbindHandler(\"x\",\"onClick\",()=>{\n  boom();\n});/*@k:end*/\nsetTimeout(f);\n"
+	marks := []renderer.SrcMark{{File: "/p/src/pages/index.tsx", Line: 8, Col: 3}}
+	out, mapJSON := buildHydrationMap(js, marks, "/p")
+	if strings.Contains(out, "@k:") {
+		t.Fatalf("markers left in the code: %q", out)
+	}
+	var sm sourceMap
+	if err := json.Unmarshal([]byte(mapJSON), &sm); err != nil {
+		t.Fatal(err)
+	}
+	if len(sm.Sources) != 1 || sm.Sources[0] != "src/pages/index.tsx" {
+		t.Fatalf("sources %v", sm.Sources)
+	}
+	// Generated line 1 (0-based) has the mapped statement start and, on line
+	// 3, the end marker as a one-field segment.
+	lines := strings.Split(sm.Mappings, ";")
+	if len(lines) < 4 || len(decodeVLQ(lines[1])) != 4 {
+		t.Fatalf("mappings %q", sm.Mappings)
+	}
+	if got := decodeVLQ(strings.Split(lines[3], ",")[0]); len(got) != 1 {
+		t.Errorf("end marker segment has %d fields: %q", len(got), lines[3])
 	}
 }

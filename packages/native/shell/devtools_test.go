@@ -5,8 +5,10 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -234,5 +236,44 @@ func TestServeControlHMR(t *testing.T) {
 	ServeControl(strings.NewReader("hmr {\"type\":\"reload\"}\nhmr\n"), &out, f)
 	if out.String() != "ok\nerror hmr needs a JSON message\n" || strings.Join(f.calls, ";") != `hmr {"type":"reload"}` {
 		t.Errorf("out=%q calls=%q", out.String(), f.calls)
+	}
+}
+
+func TestClientErrorLogLines(t *testing.T) {
+	ce := clientError{
+		Message: "boom", Kind: "error", URL: "krate://app/x.js", Line: 3, Col: 4,
+		Stack: "Error: boom\nf@src/a.tsx:3:4\ng@src/b.tsx:5:6",
+	}
+	got := strings.Join(ce.logLines("sidebar"), "\n")
+	want := "[webview] sidebar: boom\n[webview]     Error: boom\n[webview]     f@src/a.tsx:3:4\n[webview]     g@src/b.tsx:5:6"
+	if got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+	// Without a stack the location is the only clue; no id means the main window.
+	got = strings.Join(clientError{Message: "x", Kind: "console", URL: "krate://app/p", Line: 0}.logLines(""), "\n")
+	if got != "[webview] main: console.error: x (krate://app/p)" {
+		t.Errorf("got %q", got)
+	}
+	rej := clientError{Message: "no", Kind: "unhandledrejection"}.logLines("main")
+	if rej[0] != "[webview] main: unhandled rejection: no" {
+		t.Errorf("got %q", rej[0])
+	}
+	long := clientError{Message: "m", Stack: strings.Repeat("a@b:1:1\n", 40)}.logLines("main")
+	if len(long) != 1+maxStackLines+1 || !strings.HasSuffix(long[len(long)-1], "...") {
+		t.Errorf("stack not capped: %d lines", len(long))
+	}
+}
+
+func TestClientErrorUsesTheShellsWindowId(t *testing.T) {
+	var lines []string
+	d := newDevTools(func(f string, a ...any) { lines = append(lines, fmt.Sprintf(f, a...)) })
+	d.identify = func(*http.Request) (string, bool) { return "log", true }
+	req := httptest.NewRequest(http.MethodPost, devClientErrorPath, strings.NewReader(`{"message":"m","window":"spoofed"}`))
+	rec := httptest.NewRecorder()
+	if !d.handle(rec, req) || rec.Code != http.StatusNoContent {
+		t.Fatalf("handled/status: %d", rec.Code)
+	}
+	if len(lines) != 1 || lines[0] != "[webview] log: m" {
+		t.Errorf("lines %q", lines)
 	}
 }

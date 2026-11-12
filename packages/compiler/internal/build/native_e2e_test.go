@@ -2,6 +2,7 @@ package build
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -143,6 +145,8 @@ type e2eShell struct {
 	lines chan string
 	done  chan struct{}
 	start time.Time
+	// errs collects everything the shell wrote to stderr.
+	errs *syncBuf
 }
 
 func e2eStartShell(t *testing.T, bin, appDir string, args ...string) *e2eShell {
@@ -152,7 +156,8 @@ func e2eStartShell(t *testing.T, bin, appDir string, args ...string) *e2eShell {
 		argv = append(argv, appDir)
 	}
 	cmd := exec.Command(bin, argv...)
-	cmd.Stderr = &testLogWriter{t: t}
+	errs := &syncBuf{}
+	cmd.Stderr = io.MultiWriter(&testLogWriter{t: t}, errs)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -161,7 +166,7 @@ func e2eStartShell(t *testing.T, bin, appDir string, args ...string) *e2eShell {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := &e2eShell{t: t, cmd: cmd, stdin: stdin, lines: make(chan string, 64), done: make(chan struct{}), start: time.Now()}
+	s := &e2eShell{t: t, cmd: cmd, stdin: stdin, lines: make(chan string, 64), done: make(chan struct{}), start: time.Now(), errs: errs}
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("starting krate-shell: %v", err)
 	}
@@ -176,6 +181,24 @@ func e2eStartShell(t *testing.T, bin, appDir string, args ...string) *e2eShell {
 	go func() { _ = cmd.Wait(); close(s.done) }()
 	t.Cleanup(s.stop)
 	return s
+}
+
+// syncBuf is a bytes.Buffer safe for a writing process and a reading test.
+type syncBuf struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *syncBuf) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuf) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
 }
 
 type testLogWriter struct{ t *testing.T }

@@ -81,6 +81,8 @@ type api struct {
 	wkViewGetSettings    func(v uintptr) uintptr
 	wkViewEval           func(v uintptr, script string, length int64, world, srcURI, cancel, cb, data uintptr)
 	wkSettingsDevExtras  func(s uintptr, on int32)
+	wkViewGetInspector   func(v uintptr) uintptr
+	wkInspectorShow      func(i uintptr)
 
 	wkNavDecisionAction func(d uintptr) uintptr
 	wkNavActionRequest  func(a uintptr) uintptr
@@ -218,6 +220,8 @@ func loadAPI41() (*api, error) {
 	b.bind(&a.wkViewGetSettings, wk, "webkit_web_view_get_settings")
 	b.bind(&a.wkViewEval, wk, "webkit_web_view_evaluate_javascript")
 	b.bind(&a.wkSettingsDevExtras, wk, "webkit_settings_set_enable_developer_extras")
+	b.bind(&a.wkViewGetInspector, wk, "webkit_web_view_get_inspector")
+	b.bind(&a.wkInspectorShow, wk, "webkit_web_inspector_show")
 	b.bind(&a.wkNavDecisionAction, wk, "webkit_navigation_policy_decision_get_navigation_action")
 	b.bind(&a.wkNavActionRequest, wk, "webkit_navigation_action_get_request")
 	b.bind(&a.wkURIRequestURI, wk, "webkit_uri_request_get_uri")

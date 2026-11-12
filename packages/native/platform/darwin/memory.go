@@ -5,11 +5,13 @@ import "time"
 // Memory tuning for WKWebView: the decision table, free of Objective-C so it
 // can be tested on any platform. The Objective-C side is memory_darwin.go.
 //
-// UNTESTED: none of this has run on macOS. It was written on Linux from
-// memory of Apple's WebKit headers and is compile-checked only. Every lever
-// is guarded (respondsToSelector, class lookups that may be nil) so a missing
-// selector skips the lever and logs once; nothing here may stop a window from
-// opening. The "macOS and Windows" section of the memory docs repeats this.
+// The levers run on every window the macOS CI GUI tests open, and the CI
+// native job measures the example on macos-latest (informational); no test
+// asserts what a lever saves. The selector names were written from memory of
+// Apple's WebKit headers. Every lever is guarded (respondsToSelector, class
+// lookups that may be nil) so a missing selector skips the lever and logs
+// once; nothing here may stop a window from opening. The "macOS and Windows"
+// section of the memory docs repeats this.
 //
 // Expected inputs, set from app.json by the shell: Options.Memory is the
 // "memory" profile ("balanced" when empty or unknown) and Options.Features is

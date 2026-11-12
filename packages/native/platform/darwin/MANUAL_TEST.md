@@ -1,7 +1,10 @@
 # macOS GUI smoke test
 
-The darwin layer was written without access to a Mac. Run this once on real
-hardware (Apple silicon and, if you can, Intel) before trusting it.
+The CI native job runs the GUI tests of this package on macos-latest (a
+hosted Apple silicon runner). What it cannot see is below: real key presses,
+real status item clicks, notification banners, notarization and Intel
+hardware. Run this on real hardware (Apple silicon and, if you can, Intel)
+before trusting those.
 
 ## Setup
 

@@ -103,9 +103,9 @@ Differences from the embedded runtime:
   QuickJS host code.
 - On Windows the child cannot use a unix socket (Node, Bun and Deno read a
   path as a named pipe there), so the shell uses loopback TCP instead; see
-  [Transport](#transport). The Windows transport is compile-only in this
-  release: the same code runs on Linux in the tests, but it has not run on
-  Windows yet.
+  [Transport](#transport). The transport tests run on every OS in
+  CI, including Windows, where the hostchild tests start a Node child over it;
+  no test starts the whole shell with a host child in a Windows window.
 - Native addons (`.node` files) cannot be bundled.
 
 ### Transport

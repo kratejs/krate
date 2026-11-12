@@ -23,6 +23,8 @@ interface DevClientError {
   line?: number;
   col?: number;
   kind?: string;
+  /** The window or view id the page was told it is in (Krate Native). */
+  window?: string;
 }
 
 interface DevEvent {
@@ -153,7 +155,10 @@ export function decodeMappings(mappings: string): MapSegment[][] {
         if (!part) continue;
         const nums = decodeVLQ(part);
         genCol += nums[0] || 0;
-        if (nums.length >= 4) {
+        if (nums.length === 1) {
+          // An end marker: no original position from here on.
+          segs.push({ genCol, src: -1, srcLine: 0, srcCol: 0 });
+        } else if (nums.length >= 4) {
           src += nums[1];
           srcLine += nums[2];
           srcCol += nums[3];
@@ -173,7 +178,8 @@ async function loadSourceMap(url: string): Promise<DecodedMap | null> {
   if (cached) return cached;
   const p = (async () => {
     try {
-      if (/^[a-z]+:\/\//i.test(url) && !url.startsWith(location.origin)) return null;
+      const u = new URL(url, location.href);
+      if (u.protocol !== location.protocol || u.host !== location.host) return null;
       const res = await fetch(url + '.map');
       if (!res.ok) return null;
       const json = await res.json();
@@ -198,7 +204,7 @@ interface StackFrame {
 /** Parses a V8/Firefox stack line into its script location, if present. */
 export function parseStackFrame(line: string): StackFrame | null {
   const patterns = [
-    /^(.*?)((?:https?:)?\/\/[^\s)]+|\/[^\s):]+):(\d+):(\d+)(.*)$/,
+    /^(.*?)((?:[a-z][a-z0-9+.-]*:)?\/\/[^\s)]+|\/[^\s):]+):(\d+):(\d+)(.*)$/,
   ];
   for (const re of patterns) {
     const m = re.exec(line);
@@ -209,14 +215,25 @@ export function parseStackFrame(line: string): StackFrame | null {
 }
 
 function remapLocation(map: DecodedMap, line: number, col: number): { source: string; line: number; col: number } | null {
-  const segs = map.lines[line - 1];
-  if (!segs || segs.length === 0) return null;
   let best: MapSegment | null = null;
-  for (const s of segs) {
-    if (s.genCol <= col - 1) best = s;
-    else break;
+  const segs = map.lines[line - 1];
+  if (segs && segs.length > 0) {
+    for (const s of segs) {
+      if (s.genCol <= col - 1) best = s;
+      else break;
+    }
+    if (!best) best = segs[0];
+  } else {
+    // An unminified hydration map has a mapping only where a marker starts;
+    // it holds until the next one, so a line without any takes the last
+    // mapping before it.
+    for (let i = Math.min(line - 1, map.lines.length) - 1; i >= 0 && !best; i--) {
+      const prev = map.lines[i];
+      if (prev && prev.length > 0) best = prev[prev.length - 1];
+    }
+    if (!best) return null;
   }
-  if (!best) best = segs[0];
+  if (best.src < 0) return null;
   const source = map.sources[best.src] || '';
   return { source, line: best.srcLine + 1, col: best.srcCol + 1 };
 }
@@ -232,7 +249,9 @@ export async function symbolicateStack(stack: string): Promise<string> {
       const map = await loadSourceMap(frame.url);
       if (!map) return line;
       const loc = remapLocation(map, frame.line, frame.col);
-      if (!loc) return line;
+      // The generic label of a compiler-generated bundle says nothing more
+      // than the frame's own file and line.
+      if (!loc || !loc.source || loc.source === 'krate-hydration.js') return line;
       return frame.prefix + loc.source + ':' + loc.line + ':' + loc.col + frame.suffix;
     }),
   );
@@ -243,6 +262,16 @@ export async function symbolicateStack(stack: string): Promise<string> {
  * Route matcher: a segment starting with `[` matches anything; `[...x]` matches
  * the rest. Exported (pure) for testing.
  */
+function formatArg(a: unknown): string {
+  if (a instanceof Error) return a.message || String(a);
+  if (typeof a === 'string') return a;
+  try {
+    return JSON.stringify(a) ?? String(a);
+  } catch {
+    return String(a);
+  }
+}
+
 export function routeMatches(pattern: string, pathname: string, basePath = ''): boolean {
   const a = norm(stripBase(pathname, basePath)).split('/');
   const b = norm(pattern).split('/');
@@ -914,14 +943,49 @@ class KrateDev {
   private captureRuntimeErrors(): void {
     window.addEventListener('error', (e) => this.onError(e));
     window.addEventListener('unhandledrejection', (e) => this.onRejection(e));
+    // A script or stylesheet that fails to load fires on its element and does
+    // not bubble, so only the capture phase sees it.
+    window.addEventListener('error', (e) => this.onResourceError(e), true);
+    this.captureConsole();
     // This bundle loads after the page script, so the page's first render ran
     // before these listeners existed. The head buffers what happened until now.
-    const early = (window as any).__KRATE_EARLY_ERRORS__ as Event[] | undefined;
+    const early = (window as any).__KRATE_EARLY_ERRORS__ as any[] | undefined;
     (window as any).__KRATE_EARLY_ERRORS__ = undefined;
     for (const e of early ?? []) {
-      if (e.type === 'error') this.onError(e as ErrorEvent);
+      if (e.type === 'console') this.onConsole(e.message as string, e.stack as string | undefined);
+      else if (e.type === 'error' && e.target && e.target !== window) this.onResourceError(e as ErrorEvent);
+      else if (e.type === 'error') this.onError(e as ErrorEvent);
       else this.onRejection(e as PromiseRejectionEvent);
     }
+  }
+
+  private captureConsole(): void {
+    const c = console as any;
+    const orig = c.error;
+    c.error = (...args: unknown[]) => {
+      try {
+        const first = args.find((a) => a instanceof Error) as Error | undefined;
+        this.onConsole(args.map(formatArg).join(' '), first?.stack);
+      } catch {
+        /* never break the page's own logging */
+      }
+      return orig.apply(c, args);
+    };
+  }
+
+  private onConsole(message: string, stack?: string): void {
+    this.report({ message, stack, url: location.href, kind: 'console' });
+    this.addRuntime('console.error', message, stack);
+  }
+
+  private onResourceError(e: Event): void {
+    const t = e.target as (HTMLElement & { src?: string; href?: string }) | null;
+    if (!t || t === (window as any) || !t.tagName) return;
+    const src = t.src || t.href || '';
+    if (!src) return;
+    const message = 'failed to load <' + t.tagName.toLowerCase() + '> ' + src;
+    this.report({ message, url: src, kind: 'resource' });
+    this.addRuntime('Resource Error', message);
   }
 
   private onError(e: ErrorEvent): void {
@@ -952,13 +1016,33 @@ class KrateDev {
     const key = payload.message + '|' + (payload.stack || '');
     if (this.seen.has(key)) return;
     this.seen.add(key);
+    const win = (globalThis as any).__KRATE_WINDOW__;
+    if (typeof win === 'string' && win) payload.window = win;
+    if (!payload.stack || payload.stack.indexOf('.js') === -1) {
+      this.send(payload);
+      return;
+    }
+    // Map the stack to the sources before it reaches the terminal, but never
+    // hold the report back for long: the source maps are best-effort.
+    const raw = payload.stack;
+    Promise.race([symbolicateStack(raw), new Promise<string>((r) => setTimeout(() => r(raw), 1500))])
+      .catch(() => raw)
+      .then((stack) => this.send({ ...payload, stack }));
+  }
+
+  private send(payload: DevClientError): void {
+    const body = JSON.stringify(payload);
+    // sendBeacon throws on the custom scheme of a native webview (WebKitGTK),
+    // so a failed or absent beacon falls back to fetch.
     try {
-      const body = JSON.stringify(payload);
-      if (navigator.sendBeacon) {
-        navigator.sendBeacon(this.cfg.errors, new Blob([body], { type: 'application/json' }));
-      } else {
-        fetch(this.cfg.errors, { method: 'POST', body, headers: { 'Content-Type': 'application/json' }, keepalive: true }).catch(() => {});
+      if (!this.cfg.frames && navigator.sendBeacon) {
+        if (navigator.sendBeacon(this.cfg.errors, new Blob([body], { type: 'application/json' }))) return;
       }
+    } catch {
+      /* fall through to fetch */
+    }
+    try {
+      fetch(this.cfg.errors, { method: 'POST', body, headers: { 'Content-Type': 'application/json' }, keepalive: true }).catch(() => {});
     } catch {
       /* reporting is best-effort */
     }

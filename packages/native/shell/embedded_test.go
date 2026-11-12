@@ -198,11 +198,11 @@ func TestZipFSServesDynamicRouteNames(t *testing.T) {
 
 func TestWindowIDHandlerWithDevScript(t *testing.T) {
 	const page = "<!doctype html><html><head></head><body>b</body></html>"
-	h := windowIDHandlerWith(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h := windowIDHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		w.Header().Set("Content-Length", strconv.Itoa(len(page)))
 		_, _ = w.Write([]byte(page))
-	}), windowIDScript+devErrorsScript)
+	}), devErrorsScript)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 	body := rec.Body.String()

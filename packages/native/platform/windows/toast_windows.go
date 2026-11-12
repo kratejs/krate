@@ -3,9 +3,10 @@
 package windows
 
 // Toast notifications through WinRT (Windows.UI.Notifications) over raw COM,
-// with the same hand-written vtable approach as the WebView2 code. UNTESTED
-// beyond compilation and the pure logic in toast.go; the CI GUI test shows a
-// toast and the manual list covers what CI cannot see.
+// with the same hand-written vtable approach as the WebView2 code. The pure
+// logic is in toast.go. The Windows CI tests call the real WinRT
+// (TestToastXMLAcceptedByWinRT, TestToastDelegateInterfaces) and show a toast
+// (TestGUIToast); the manual list covers what CI cannot see.
 //
 // A click on a toast uses protocol activation, so it works after the app has
 // quit: the toast carries a URL of a per-app scheme (package toastscheme), the

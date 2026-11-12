@@ -15,7 +15,8 @@ import (
 // cache purge runs: enough for the initial load to settle.
 const purgeFirstDelay = 5 * time.Second
 
-// UNTESTED: compile-checked only, see memory.go. Selector and feature names
+// The levers run on every window the macOS CI GUI tests open; their effect is
+// not asserted, see memory.go. Selector and feature names
 // marked "private" come from WebKit's WKPreferencesPrivate.h as remembered
 // while writing on Linux; they are not public API, may be renamed or removed
 // in any macOS release, and are only called after respondsToSelector says yes.

@@ -173,22 +173,24 @@ subscriptions.
 WebKitGTK through purego, a private D-Bus session bus, and real desktop
 services: dunst, stalonetray and the Ayatana indicator service, plus fake ones
 for protocol edge cases). "Compile-only" means the code builds for the target
-and is written against the platform API but has not run in this release.
+and is written against the platform API, and no test runs it. "CI" means the
+CI native job runs a test of it on macos-latest or windows-latest; real key
+presses, tray clicks and notification banners are still manual checks.
 
 | Capability | Linux | macOS | Windows |
 |------------|-------|-------|---------|
 | Open, save, folder and message dialogs | Verified (GtkFileChooserNative, GtkMessageDialog; created with the right options and answered programmatically, since a native dialog cannot be clicked headlessly) | Compile-only (NSOpenPanel, NSSavePanel, NSAlert) | Compile-only (GetOpenFileNameW, SHBrowseForFolderW, MessageBoxW; custom button labels are not supported) |
 | Clipboard text, PNG image, file list | Verified | Text, PNG and files compile-only | Compile-only |
 | Menu bar and context menus | Verified (GtkMenuBar in each window; popups at the pointer) | Compile-only (global menu bar) | Compile-only (accelerators are shown but not active) |
-| Multiple windows on routes, title, size | Verified | Existing platform layer | Existing platform layer |
+| Multiple windows on routes, title, size | Verified | CI (two windows, title, size) | CI (two windows, title, size) |
 | Windows share one web process; hide with release, `keepAlive`, memory-pressure event | Verified (related web views; the WebKitWebProcess count is asserted) | Compile-only (private single-process switch behind `respondsToSelector`) | Compile-only (one shared environment; `put_IsVisible` and `MemoryUsageTargetLevel` on hide) |
 | Frameless, position, always on top | Verified (X11; Wayland ignores position and always-on-top, checked under weston) | Compile-only | Compile-only |
 | Fullscreen, maximize, minimize | Verified with a window manager (openbox on Xvfb) | Compile-only | Compile-only |
 | Close requested (prevent close) | Verified | Compile-only | Compile-only |
-| Notifications | Verified against a real dunst daemon (text, icon, urgency, replace by id, close from either side, actions through `dunstctl`) and a fake `org.freedesktop.Notifications` for edge cases | Untested (implemented, not yet run on a Mac): `UNUserNotificationCenter`, needs an app bundle; `krate native dev` runs from a generated dev bundle | Compile-only (WinRT toasts; the app registers its AppUserModelID under `HKCU`, packaged apps use their package identity) |
-| Tray | Verified against a real StatusNotifier host (StatusNotifierItem plus `com.canonical.dbusmenu`) and a real XEmbed tray (stalonetray); needs one of the two | Untested (implemented, not yet run on a Mac): `NSStatusItem` with an `NSMenu` | Compile-only (`Shell_NotifyIconW` version 4; the icon returns when explorer restarts) |
-| Global shortcuts | Verified on X11 (`XGrabKey`); Wayland uses the GlobalShortcuts portal (verified against a fake portal only: no backend runs headless) or returns `ErrUnsupported` | Untested (implemented, not yet run on a Mac): Carbon `RegisterEventHotKey`, no Accessibility permission | Compile-only (`RegisterHotKey`) |
-| Single instance, deep links | Verified (unix socket in the runtime dir) | The same code; URL scheme registration is an Info.plist packaging step | The same code; scheme registration is a registry packaging step |
+| Notifications | Verified against a real dunst daemon (text, icon, urgency, replace by id, close from either side, actions through `dunstctl`) and a fake `org.freedesktop.Notifications` for edge cases | CI (`UNUserNotificationCenter`: the unbundled refusal and the generated bundle are tested; the banner is a manual check). Needs an app bundle; `krate native dev` runs from a generated dev bundle | CI (WinRT toasts called for real, a toast shown; the banner is a manual check). The app registers its AppUserModelID under `HKCU`, packaged apps use their package identity) |
+| Tray | Verified against a real StatusNotifier host (StatusNotifierItem plus `com.canonical.dbusmenu`) and a real XEmbed tray (stalonetray); needs one of the two | CI (`NSStatusItem` with an `NSMenu` is created and updated; a real click is a manual check) | CI (`Shell_NotifyIconW` version 4: add, modify and remove an icon, skipped on a runner without a taskbar; the icon returns when explorer restarts) |
+| Global shortcuts | Verified on X11 (`XGrabKey`); Wayland uses the GlobalShortcuts portal (verified against a fake portal only: no backend runs headless) or returns `ErrUnsupported` | CI (Carbon `RegisterEventHotKey` registered and released; a real key press is a manual check), no Accessibility permission | CI (`RegisterHotKey` registered and released; a real key press is a manual check) |
+| Single instance, deep links | Verified (unix socket in the runtime dir) | CI (single instance); URL scheme registration is an Info.plist packaging step | CI (single instance); scheme registration is a registry packaging step |
 
 ### Linux details
 
@@ -254,10 +256,11 @@ hotkey and toast calls on `windows-latest` (see `MANUAL_TEST.md` in
 ### macOS details
 
 The tray, global shortcuts and notifications are implemented against AppKit,
-Carbon and `UserNotifications` through purego. They compile for macOS and the
-logic around them (key table, menu model, error mapping) is unit tested, but
-they have not been run on a Mac yet; `platform/darwin/MANUAL_TEST.md` lists
-what to check by hand.
+Carbon and `UserNotifications` through purego. The logic around them (key
+table, menu model, error mapping) is unit tested, and the CI native job creates
+a real status item and registers real hot keys on macOS. A real click or key
+press is not tested; `platform/darwin/MANUAL_TEST.md` lists what to check by
+hand.
 
 - **Tray.** One `NSStatusItem`. A PNG icon that is a single gray tone (black or
   white artwork on transparent) is installed as a template image, so it follows

@@ -29,7 +29,8 @@ export default function Home() {
       <p id="cpus">{sys() ? sys().cpus + ' CPUs' : ''}</p>
       <p id="memory">{mem() ? Math.round(mem().total / 1048576) + ' MiB' : ''}</p>
       <p id="load">CPU load (stream): {pct().toFixed(1)}%</p>
-      <p id="sampled">CPU load (signal): {load().toFixed(1)}%</p>
+      {/* A host signal reads undefined until the host sends its first value. */}
+      <p id="sampled">CPU load (signal): {(load() ?? 0).toFixed(1)}%</p>
       <button id="watch" onClick={watch}>Watch CPU load</button>
       <p id="error">{error()}</p>
     </main>

@@ -33,7 +33,9 @@ beforeAll(async () => {
   // What the inline head script buffers before this bundle loads.
   (window as any).__KRATE_EARLY_ERRORS__ = [
     new ErrorEvent('error', { message: 'thrown during first render', error: new Error('thrown during first render') }),
+    { type: 'console', message: 'logged during first render' },
   ];
+  (globalThis as any).__KRATE_WINDOW__ = 'view-7';
   (window as any).__KRATE_DEV__ = {
     sse: '/__krate/hotreload',
     errors: '/__krate/client-error',
@@ -55,6 +57,35 @@ describe('dev-overlay', () => {
     const sent = await Promise.all(beacons.map((b) => b.text()));
     expect(sent.some((t) => t.includes('thrown during first render'))).toBe(true);
     expect((window as any).__KRATE_EARLY_ERRORS__).toBeUndefined();
+  });
+
+  it('reports early console.error calls with the window id', async () => {
+    const sent = await Promise.all(beacons.map((b) => b.text()));
+    const e = sent.map((t) => JSON.parse(t)).find((p) => p.message === 'logged during first render');
+    expect(e).toMatchObject({ kind: 'console', window: 'view-7' });
+  });
+
+  it('reports console.error, unhandled rejections and failed scripts', async () => {
+    const before = beacons.length;
+    console.error('later console error', { a: 1 });
+    const rej = new Event('unhandledrejection');
+    (rej as any).reason = new Error('rejected later');
+    window.dispatchEvent(rej);
+    const script = document.createElement('script');
+    script.src = '/nope.js';
+    document.body.appendChild(script);
+    script.dispatchEvent(new Event('error'));
+    await new Promise((r) => setTimeout(r, 20));
+    const sent = (await Promise.all(beacons.slice(before).map((b) => b.text()))).map((t) => JSON.parse(t));
+    expect(sent.find((p) => p.kind === 'console')?.message).toContain('later console error');
+    expect(sent.find((p) => p.kind === 'unhandledrejection')?.message).toBe('rejected later');
+    expect(sent.find((p) => p.kind === 'resource')?.message).toContain('/nope.js');
+  });
+
+  it('decodes a one-field segment as the end of a mapping', () => {
+    const lines = overlay.decodeMappings('AAAA,C;;C');
+    expect(lines[0].map((s) => s.src)).toEqual([0, -1]);
+    expect(lines[2].map((s) => s.src)).toEqual([-1]);
   });
 
   it('mounts a shadow-root host with a toolbar', () => {

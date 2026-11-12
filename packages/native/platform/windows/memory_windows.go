@@ -7,8 +7,9 @@ import (
 	"unsafe"
 )
 
-// UNTESTED: compile-checked only, see memory.go. Every step below skips and
-// logs once on failure; none of them may fail window creation.
+// Every step below runs for each window of the Windows CI GUI tests; see
+// memory.go. A step that fails skips and logs once; none of them may fail
+// window creation.
 
 var memLogged sync.Map
 

@@ -471,6 +471,12 @@ export interface NativeConfig {
     /** Diagnostic codes to silence, for example ["KR7272"]. */
     ignore?: string[];
   };
+  /**
+   * Keeps the webview's developer tools (the web inspector) on in a release
+   * build. They are always on in `krate native dev` and off in a release build
+   * otherwise. Open them with F12 or Ctrl+Shift+I (Cmd+Option+I on macOS).
+   */
+  debug?: boolean;
 }
 
 /** Deploy adapter selection + options for `krate deploy`. */

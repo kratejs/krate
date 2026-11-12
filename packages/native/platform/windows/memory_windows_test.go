@@ -10,8 +10,8 @@ import (
 )
 
 // TestEnvironmentOptionsObject drives the Go options object through its
-// vtable the way the WebView2 loader does. UNTESTED: written on Linux and
-// compile-checked only; it needs no WebView2 runtime or display.
+// vtable the way the WebView2 loader does. It needs no WebView2
+// runtime or display and runs on windows-latest in CI.
 func TestEnvironmentOptionsObject(t *testing.T) {
 	if newEnvironmentOptions("") != nil {
 		t.Fatal("empty arguments must produce no options object")

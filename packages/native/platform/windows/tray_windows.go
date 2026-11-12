@@ -4,8 +4,9 @@ package windows
 
 // System tray icon through Shell_NotifyIconW with NOTIFYICON_VERSION_4. The
 // icon is owned by the app's hidden utility window (see utilWnd) and all work
-// happens on the main thread. UNTESTED beyond compilation and the pure logic
-// in tray.go; see MANUAL_TEST.md.
+// happens on the main thread. The pure logic is in tray.go; TestGUITrayLifecycle
+// adds, modifies and removes an icon in CI, and MANUAL_TEST.md lists what CI
+// cannot see.
 
 import (
 	"errors"

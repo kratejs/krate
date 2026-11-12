@@ -17,7 +17,8 @@ var _ caps.ProcessInfo = (*App)(nil)
 // -[WKWebView _webProcessIdentifier] and _gpuProcessIdentifier per window, and
 // _networkProcessIdentifier on the web view's website data store or process
 // pool. A selector that is missing leaves that process out and adds a note.
-// This code has not run on macOS; it is compile-checked only.
+// The macOS CI memory report lists the webview:web and webview:network roles
+// from it.
 func (a *App) WebviewProcesses() ([]caps.ProcessRef, []string) {
 	var refs []caps.ProcessRef
 	var notes []string

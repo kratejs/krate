@@ -239,6 +239,11 @@ func (b *Builder) BuildNativeApp(opts NativeAppOptions) (*NativeAppResult, error
 	// The shell serves the files from the app bundle: .br and .gz siblings
 	// would only add to its size.
 	b.Cfg.Compress = config.CompressConfig{}
+	if opts.Dev {
+		// Page errors reach the terminal through the dev overlay, which maps
+		// their stacks with these maps.
+		b.Cfg.Sourcemap = true
+	}
 
 	ds, err := native.CheckTarget(b.Root, b.Cfg)
 	if err != nil {
@@ -304,7 +309,7 @@ func (b *Builder) BuildNativeApp(opts NativeAppOptions) (*NativeAppResult, error
 		Fallbacks:   fallbacks,
 		Permissions: append([]string(nil), eff.Permissions...),
 		Memory:      eff.Memory,
-		Debug:       opts.Dev,
+		Debug:       opts.Dev || eff.Debug,
 	}
 	detected, err := features.ScanDir(distDir)
 	if err != nil {

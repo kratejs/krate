@@ -50,6 +50,7 @@ func TestMain(m *testing.M) {
 	code := make(chan int, 1)
 	err = Run(guiApp.dir, RunOptions{
 		Dev:          true,
+		Logf:         guiLogf,
 		Plugins:      []*plugin.Plugin{newGUIPlugin()},
 		ExtraHandler: guiSink.handle,
 		OnReady: func(ctl *Control) {
