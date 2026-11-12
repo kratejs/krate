@@ -81,6 +81,22 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
   (`@krate/app/cookies`). New permissions `page`, `downloads` and `cookies`; see [Web
   contents](https://krate.js.org/docs/native/webcontents/). WebKit keeps no cookies for the app's
   custom scheme, so the cookie calls take an http(s) URL on Linux and macOS.
+- Remote content: web pages in views and windows that cannot reach the app (`@krate/app/remote`, Go
+  `sdk/remote`, new permissions `remote`, `remote:intercept` and `remote:network`, derived from the code
+  like the other SDK ids). A remote view has its own web context, configuration or profile with no handler
+  for the app scheme, no bridge and an empty permission scope; it may navigate only to the origin it
+  started on and an allowlist (everything else opens in the system browser or is dropped, popups load in
+  place); permissions are denied and downloads cancelled. Storage is a partition: the default remote one
+  (never the app's), `persist:name` or an in-memory `name`. The app talks to a page only over an opt-in
+  message channel with origin checks in both directions. Declarative request rules per partition (block,
+  redirect, headers, with URL patterns and a request stream) with capability reporting, a user agent and
+  proxy per partition, certificate errors that end the load unless the app accepts the host, HTTP logins
+  answered by the app, and client certificates from PEM files on Linux. WebKitGTK is tested; WKWebView and
+  WebView2 compile and have GUI tests that CI runs. Windows has no per-partition proxy; subresource
+  redirects and headers are not possible on WebKit. See docs/native/remote and `examples/native-remote`.
+  A real find on the way: `@krate/app` modules that import another module and export a function under a
+  name the other declares (`onEvent`) were linked to the wrong function, so the remote module exports
+  `onRemoteEvent`.
 - Krate Native rows in the compatibility matrix (Linux verified, macOS and Windows untested) and
   size, cold-start and memory budgets in `packages/native/budgets.json`.
 - Native OS integration SDK areas, each a Go package and a `@krate/app/<area>` module: `badge`
