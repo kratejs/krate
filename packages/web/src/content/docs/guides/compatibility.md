@@ -597,7 +597,7 @@ Known limits:
 - A divider drag fires no event; read the ratios with layout().
 - Messages are JSON up to 1 MiB, not queued for a page that has not loaded, and carry the sender's view id only when the sender is a page.
 
-Evidence: `TestArrangeTwoPanes`, `TestArrangeNestedCoversBounds`, `TestSplitSizesMinimums`, `TestMinSizePropagates`, `TestHitDividerAndDrag`, `TestValidate`, `TestSplitLeafAndRemove`, `TestRatiosAndMins`, `TestSplitterHitAndCursor`, `TestSplitterDrag`, `TestSplitterDPIScales`, `TestViewOps`, `TestViewEventsAreHeldUntilRegistered`, `TestGUIViewsTwoPane`, `TestGUIViewsNestedThreePane`, `TestGUIViewsReleaseRestore`, `TestGUIViewClosedByItsPage`, `TestGUIViewsMemory`, `TestViewMessagingEventsAndLayout`, `TestGUIViews`, `fixture:examples/native-views/src/pages/index.tsx`
+Evidence: `TestNativeE2EViewsGUI`, `TestArrangeTwoPanes`, `TestArrangeNestedCoversBounds`, `TestSplitSizesMinimums`, `TestMinSizePropagates`, `TestHitDividerAndDrag`, `TestValidate`, `TestSplitLeafAndRemove`, `TestRatiosAndMins`, `TestSplitterHitAndCursor`, `TestSplitterDrag`, `TestSplitterDPIScales`, `TestViewOps`, `TestViewEventsAreHeldUntilRegistered`, `TestGUIViewsTwoPane`, `TestGUIViewsNestedThreePane`, `TestGUIViewsReleaseRestore`, `TestGUIViewClosedByItsPage`, `TestGUIViewsMemory`, `TestViewMessagingEventsAndLayout`, `TestGUIViews`, `fixture:examples/native-views/src/pages/index.tsx`
 
 ### Native: shared web process, release and background mode
 

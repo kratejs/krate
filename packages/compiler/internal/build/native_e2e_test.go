@@ -57,6 +57,15 @@ func e2eRequireDeps(t *testing.T) string {
 // returns the app directory.
 func e2eBuildApp(t *testing.T, ex, out string) string {
 	t.Helper()
+	appDir := e2eBuildNative(t, ex, out)
+	e2eCheckBaked(t, appDir)
+	return appDir
+}
+
+// e2eBuildNative builds any example as a native app and returns the app
+// directory.
+func e2eBuildNative(t *testing.T, ex, out string) string {
+	t.Helper()
 	cfg, err := config.Load(ex)
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
@@ -66,7 +75,6 @@ func e2eBuildApp(t *testing.T, ex, out string) string {
 	if err != nil {
 		t.Fatalf("native build: %v", err)
 	}
-	e2eCheckBaked(t, res.AppDir)
 	return res.AppDir
 }
 

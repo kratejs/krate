@@ -7,8 +7,14 @@ import { main, onViewMessage, pane, split } from '@krate/app/window';
 export default function Home() {
   const [status, setStatus] = createSignal('opening views...');
   const [heard, setHeard] = createSignal('');
+  // The views that loaded, with the size their page saw.
+  const [loaded, setLoaded] = createSignal<string[]>([]);
 
-  createEffect(async () => {
+  createEffect(() => {
+    openViews().catch((e) => setStatus('could not open the views: ' + (e instanceof Error ? e.message : String(e))));
+  });
+
+  async function openViews() {
     const win = main();
     // A narrower scope for the log: it may use nothing but the window API.
     const sidebar = await win.addView({ id: 'sidebar', path: '/sidebar', side: 'left', size: 0.25, minWidth: 180 });
@@ -20,14 +26,19 @@ export default function Home() {
     // Name the whole layout: the sidebar left, this page above the log. After the
     // user drags a divider, win.layout() returns the ratios to save and set back.
     await win.setLayout(split('horizontal', pane(sidebar, { minWidth: 180 }), split('vertical', pane(win.id), pane(log), 0.7), 0.25));
-  });
+  }
 
-  onViewMessage(({ from, data }) => setHeard(from + ': ' + JSON.stringify(data)));
+  onViewMessage(({ from, data }) => {
+    const size = (data as { loaded?: string }).loaded;
+    if (size) setLoaded([...loaded(), from + ' ' + size]);
+    else setHeard(from + ': ' + JSON.stringify(data));
+  });
 
   return (
     <main>
       <h1>Native Views</h1>
       <p id="status">{status()}</p>
+      <p id="loaded">{loaded().join(', ')}</p>
       <p id="heard">{heard()}</p>
     </main>
   );

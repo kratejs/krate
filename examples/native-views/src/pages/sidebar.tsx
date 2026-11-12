@@ -1,8 +1,13 @@
+import { createEffect } from '@krate/runtime';
 import { getView } from '@krate/app/window';
 
 // Tells the log view which entry was picked: a view-to-view message. The
 // shell fills in who sent it.
 export default function Sidebar() {
+  // Tell the main page this view loaded, and at what size.
+  createEffect(() => {
+    void getView('main').post({ loaded: innerWidth + 'x' + innerHeight });
+  });
   return (
     <main>
       <h2>Sidebar</h2>
