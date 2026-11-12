@@ -25,14 +25,24 @@ import (
 // sandbox for code you do not trust.
 const windowIDScript = `<script>(function(){try{var k="__krate_win",v=new URLSearchParams(location.search).get(k)||sessionStorage.getItem(k);if(v){sessionStorage.setItem(k,v);globalThis.__KRATE_WINDOW__=v}}catch(e){}})()</script>`
 
+// devErrorsScript records the errors a page throws, from the first line of
+// the document, in globalThis.__krateDriverErrs (strings). Dev shells inject
+// it so the test driver can report errors that happened before it looked.
+const devErrorsScript = `<script>(function(){var a=globalThis.__krateDriverErrs=[];function s(e){try{return String((e&&e.stack)||(e&&e.message)||e)}catch(_){return "unprintable error"}}addEventListener("error",function(e){a.push(s(e.error||e.message))});addEventListener("unhandledrejection",function(e){a.push(s(e.reason))})})()</script>`
+
 // windowIDHandler injects windowIDScript into the HTML pages next serves.
 func windowIDHandler(next http.Handler) http.Handler {
+	return windowIDHandlerWith(next, windowIDScript)
+}
+
+// windowIDHandlerWith injects script instead; dev shells add devErrorsScript.
+func windowIDHandlerWith(next http.Handler, script string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if (r.Method != http.MethodGet && r.Method != http.MethodHead) || strings.HasPrefix(r.URL.Path, "/__krate/") {
 			next.ServeHTTP(w, r)
 			return
 		}
-		iw := &injectWriter{ResponseWriter: w, head: r.Method == http.MethodHead}
+		iw := &injectWriter{ResponseWriter: w, head: r.Method == http.MethodHead, script: script}
 		next.ServeHTTP(iw, r)
 		iw.finish()
 	})
@@ -45,6 +55,7 @@ type injectWriter struct {
 	html   bool
 	buf    bytes.Buffer
 	sent   bool
+	script string
 }
 
 func (w *injectWriter) WriteHeader(status int) {
@@ -84,13 +95,13 @@ func (w *injectWriter) finish() {
 		return
 	}
 	body := w.buf.Bytes()
-	out := injectIntoHead(body)
+	out := injectScript(body, w.script)
 	h := w.Header()
 	if cl := h.Get("Content-Length"); cl != "" {
 		n := len(out)
 		if w.head {
 			old, _ := strconv.Atoi(cl)
-			n = old + len(windowIDScript)
+			n = old + len(w.script)
 		}
 		h.Set("Content-Length", strconv.Itoa(n))
 	}
@@ -103,7 +114,9 @@ func (w *injectWriter) finish() {
 // injectIntoHead puts the script right after the opening head tag, or at the
 // start of the document when there is none (after the html tag or doctype
 // when it has one).
-func injectIntoHead(body []byte) []byte {
+func injectIntoHead(body []byte) []byte { return injectScript(body, windowIDScript) }
+
+func injectScript(body []byte, script string) []byte {
 	lower := bytes.ToLower(body)
 	at := 0
 	for _, tag := range []string{"<head", "<html", "<!doctype"} {
@@ -116,9 +129,9 @@ func injectIntoHead(body []byte) []byte {
 			break
 		}
 	}
-	out := make([]byte, 0, len(body)+len(windowIDScript))
+	out := make([]byte, 0, len(body)+len(script))
 	out = append(out, body[:at]...)
-	out = append(out, windowIDScript...)
+	out = append(out, script...)
 	out = append(out, body[at:]...)
 	return out
 }

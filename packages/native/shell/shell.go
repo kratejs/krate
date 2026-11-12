@@ -230,7 +230,11 @@ func loadApp(dir string, fsys fs.FS, opts RunOptions) (*app, error) {
 		so.Observe = a.dev.ring.add
 		a.dev.memory = a.serveMemory
 	}
-	app := windowIDHandler(scheme.New(so))
+	pageScript := windowIDScript
+	if opts.Dev {
+		pageScript += devErrorsScript
+	}
+	app := windowIDHandlerWith(scheme.New(so), pageScript)
 	extra := opts.ExtraHandler
 	a.handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		a.reaper.Touch()

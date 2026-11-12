@@ -7,6 +7,8 @@ import (
 	"io"
 	"path/filepath"
 	"strings"
+
+	"github.com/kratejs/krate/packages/native/sdk"
 )
 
 // Controller is what the dev control channel drives; *Control implements it.
@@ -23,6 +25,14 @@ type Querier interface {
 	Query(js string) (string, error)
 }
 
+// ViewQuerier is the optional part of Controller behind the views, query-in
+// and emit commands (the test driver's).
+type ViewQuerier interface {
+	QueryView(view, js string) (string, error)
+	Views() []sdk.ViewInfo
+	Emit(area, payload string) error
+}
+
 // ServeControl reads newline-terminated commands from r and answers each with
 // one line on w, "ok" or "error <message>". It returns when r ends or after
 // "quit". Commands:
@@ -31,6 +41,14 @@ type Querier interface {
 //	restart-gohost
 //	eval <js>
 //	query <js>     answers "ok <json>"; needs a Controller that implements Querier
+//	views          answers "ok <json>": [{"id","window","primary"}], one per open view
+//	query-in <view> <js>   query, in the one view with this SDK id
+//
+// For query and query-in the JavaScript may be written "@json <string>",
+// where the string is a JSON string literal holding the source; that is how
+// source with line breaks travels on one line.
+//
+//	emit <area> <json>     deliver a tray, menu or shortcut event to the app
 //	memory         answers "ok <json>" (a memstat.Report); needs a MemorySampler
 //	hmr <json>
 //	quit
@@ -70,12 +88,65 @@ func ServeControl(r io.Reader, w io.Writer, ctl Controller) (quit bool) {
 			case !ok:
 				reply(fmt.Errorf("query is not supported here"))
 			default:
-				v, err := q.Query(arg)
+				js, err := jsArg(arg)
+				if err != nil {
+					reply(err)
+					continue
+				}
+				v, err := q.Query(js)
 				if err != nil {
 					reply(err)
 				} else {
 					fmt.Fprintf(w, "ok %s\n", oneLine(v))
 				}
+			}
+		case "views":
+			vq, ok := ctl.(ViewQuerier)
+			if !ok {
+				reply(fmt.Errorf("views is not supported here"))
+				continue
+			}
+			list := vq.Views()
+			if list == nil {
+				list = []sdk.ViewInfo{}
+			}
+			data, jerr := json.Marshal(list)
+			if jerr != nil {
+				reply(jerr)
+				continue
+			}
+			fmt.Fprintf(w, "ok %s\n", oneLine(string(data)))
+		case "query-in":
+			vq, ok := ctl.(ViewQuerier)
+			view, expr, _ := strings.Cut(strings.TrimSpace(arg), " ")
+			switch {
+			case !ok:
+				reply(fmt.Errorf("query-in is not supported here"))
+			case view == "" || strings.TrimSpace(expr) == "":
+				reply(fmt.Errorf("query-in needs a view id and a JavaScript expression"))
+			default:
+				js, err := jsArg(expr)
+				if err != nil {
+					reply(err)
+					continue
+				}
+				v, err := vq.QueryView(view, js)
+				if err != nil {
+					reply(err)
+				} else {
+					fmt.Fprintf(w, "ok %s\n", oneLine(v))
+				}
+			}
+		case "emit":
+			vq, ok := ctl.(ViewQuerier)
+			area, payload, _ := strings.Cut(strings.TrimSpace(arg), " ")
+			switch {
+			case !ok:
+				reply(fmt.Errorf("emit is not supported here"))
+			case area == "":
+				reply(fmt.Errorf("emit needs an area (tray, menu or shortcut) and a JSON payload"))
+			default:
+				reply(vq.Emit(area, payload))
 			}
 		case "memory":
 			m, ok := ctl.(MemorySampler)
@@ -109,6 +180,23 @@ func ServeControl(r io.Reader, w io.Writer, ctl Controller) (quit bool) {
 		}
 	}
 	return false
+}
+
+// jsArg returns the JavaScript of a query argument: the text itself, or the
+// decoded string of "@json <json string>".
+func jsArg(arg string) (string, error) {
+	rest, ok := strings.CutPrefix(arg, "@json ")
+	if !ok {
+		return arg, nil
+	}
+	var src string
+	if err := json.Unmarshal([]byte(rest), &src); err != nil {
+		return "", fmt.Errorf("@json needs a JSON string: %v", err)
+	}
+	if strings.TrimSpace(src) == "" {
+		return "", fmt.Errorf("query needs a JavaScript expression")
+	}
+	return src, nil
 }
 
 func oneLine(s string) string {

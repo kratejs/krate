@@ -37,6 +37,7 @@ func printNativeUsage(w io.Writer) {
 	fmt.Fprintf(w, "  build      Build the app directory (dist-native/app) the shell runs, plus a runnable\n")
 	fmt.Fprintf(w, "             dist-native/<os>-<arch>/<name> + app/ when a prebuilt shell is found; with --release\n")
 	fmt.Fprintf(w, "             one executable per target (dist-native/<os>-<arch>/<name>)\n")
+	fmt.Fprintf(w, "  test       Build the app and run its *.native.test.ts files against the real shell (see docs native/testing)\n")
 	fmt.Fprintf(w, "  profile    Run the app, collect a CPU profile and save it for optimized builds\n")
 	fmt.Fprintf(w, "  package    Make installers and update files: .app/.zip/.dmg, .zip/NSIS/MSIX, .tar.gz/.deb/.rpm/AppImage\n")
 	fmt.Fprintf(w, "  sign       Sign the packaged app (codesign, signtool/osslsigncode, gpg) and rebuild the archives\n")
@@ -63,6 +64,12 @@ func printNativeUsage(w io.Writer) {
 	fmt.Fprintf(w, "                   floor, after load, idle, a navigation storm and with the window hidden; written to\n")
 	fmt.Fprintf(w, "                   <out>/report.json (--out is then the native output directory, default dist-native)\n")
 	fmt.Fprintf(w, "  --idle <dur>     With --memory, the idle wait before the second sample (default 30s)\n")
+	fmt.Fprintf(w, "\nTest flags (krate native test [dir] [patterns...]):\n")
+	fmt.Fprintf(w, "  patterns         Test files, directories, globs (tests/**/*.native.test.ts) or path fragments (default: every *.native.test.ts)\n")
+	fmt.Fprintf(w, "  --grep <re>      Run only the tests whose name matches\n")
+	fmt.Fprintf(w, "  --workers <n>    Test files run at once (default 1: tests open real windows)\n")
+	fmt.Fprintf(w, "  --list           Print the test files and stop\n")
+	fmt.Fprintf(w, "  --shell <path>   Shell binary, as for dev. On Linux without a display run under xvfb-run -a\n")
 	fmt.Fprintf(w, "\nCheck flags:\n")
 	fmt.Fprintf(w, "  --scriptc        Also run scriptc coverage on the host code (experimental)\n")
 	fmt.Fprintf(w, "  --scriptc-fail-on <level>  blockers (default), divergences, dynamic, dynamic-slots or type-claims\n")
@@ -90,6 +97,9 @@ func runNative(flags cliFlags, args []string) {
 		return
 	case "dev":
 		runNativeDev(flags, append([]string{"dev"}, args[2:]...))
+		return
+	case "test":
+		runNativeTest(flags, args[2:])
 		return
 	case "profile":
 		runNativeProfile(flags, append([]string{"native"}, args[2:]...))
@@ -623,4 +633,53 @@ func runNativeInit(flags cliFlags, args []string) {
 		fmt.Printf("    go get github.com/kratejs/krate/packages/native\n")
 	}
 	fmt.Printf("    krate native build\n")
+}
+
+// runNativeTest implements `krate native test [dir] [patterns...]`. The first
+// argument is the project directory when it is one; every other argument is a
+// test pattern.
+func runNativeTest(flags cliFlags, args []string) {
+	dir := "."
+	patterns := args
+	if len(args) > 0 {
+		if st, err := os.Stat(args[0]); err == nil && st.IsDir() {
+			for _, name := range []string{"krate.config.ts", "krate.config.js", "krate.config.mjs", "krate.config.json"} {
+				if _, err := os.Stat(filepath.Join(args[0], name)); err == nil {
+					dir, patterns = args[0], args[1:]
+					break
+				}
+			}
+		}
+	}
+	if flags.Browser {
+		fmt.Fprintf(os.Stderr, "%sError:%s krate native test --browser is not available: the tests drive the native shell. Use krate native dev --browser to look at the app in a browser\n", cRed, cReset)
+		exit(1)
+	}
+	cfgArgs := []string{"native", dir}
+	root, cfg := resolveConfig(flags, cfgArgs)
+	defer startRunLog(root, cfg, "native test")()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	code, err := build.RunNativeTest(build.NativeTestOptions{
+		LoadConfig: func() (string, *config.Config, map[string]string, error) {
+			r, c, err := loadConfig(flags, cfgArgs)
+			if err != nil {
+				return "", nil, nil, fmt.Errorf("%s", formatConfigError(err))
+			}
+			return r, c, loadProjectEnv(r, "development", flags.Verbose), nil
+		},
+		Patterns: patterns,
+		Shell:    flags.Shell,
+		Grep:     flags.TestGrep,
+		Workers:  flags.TestWorkers,
+		List:     flags.TestList,
+		Target:   flags.Target,
+		Verbose:  flags.Verbose,
+		Ctx:      ctx,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%sNative test error:%s %v\n", cRed, cReset, err)
+		exit(1)
+	}
+	exit(code)
 }

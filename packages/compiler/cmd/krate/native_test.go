@@ -549,3 +549,75 @@ func TestNativePluginInit(t *testing.T) {
 		t.Errorf("plugin without a command: exit %d", code)
 	}
 }
+
+func TestNativeTestFlags(t *testing.T) {
+	flags, rest, err := parseFlagsChecked([]string{"native", "test", "app", "tasks", "--grep", "adds", "--workers=3", "--list", "--shell", "/x/shell"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if flags.TestGrep != "adds" || flags.TestWorkers != 3 || !flags.TestList || flags.Shell != "/x/shell" {
+		t.Errorf("flags = %+v", flags)
+	}
+	if strings.Join(rest, " ") != "native test app tasks" {
+		t.Errorf("remaining = %v", rest)
+	}
+	for _, bad := range []string{"0", "x", "-1"} {
+		if _, _, err := parseFlagsChecked([]string{"native", "test", "--workers", bad}); err == nil {
+			t.Errorf("--workers %s was accepted", bad)
+		}
+	}
+}
+
+func TestNativeTestListAndDiagnostics(t *testing.T) {
+	dir := t.TempDir()
+	write := func(rel, src string) {
+		p := filepath.Join(dir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("krate.config.ts", "export default { entry: 'src/index.tsx', native: { appId: 'com.example.t', productName: 'T', version: '1.0.0' } };\n")
+	write("src/index.tsx", "export default function P() { return <main>hi</main>; }\n")
+	write("tests/a.native.test.ts", "// test\n")
+	write("tests/sub/b.native.test.ts", "// test\n")
+
+	code, out := runKrate(t, "native", "test", dir, "--list")
+	if code != 0 {
+		t.Fatalf("--list exited %d:\n%s", code, out)
+	}
+	if !strings.Contains(out, "tests/a.native.test.ts") || !strings.Contains(out, "tests/sub/b.native.test.ts") {
+		t.Errorf("--list output:\n%s", out)
+	}
+
+	code, out = runKrate(t, "native", "test", dir, "--list", "sub")
+	if code != 0 || strings.Contains(out, "tests/a.native.test.ts") || !strings.Contains(out, "tests/sub/b.native.test.ts") {
+		t.Errorf("--list sub (exit %d):\n%s", code, out)
+	}
+
+	code, out = runKrate(t, "native", "test", dir, "--list", "nope")
+	if code == 0 || !strings.Contains(out, `no test file matches "nope"`) {
+		t.Errorf("unmatched pattern (exit %d):\n%s", code, out)
+	}
+
+	code, out = runKrate(t, "native", "test", dir, "--browser")
+	if code == 0 || !strings.Contains(out, "--browser is not available") {
+		t.Errorf("--browser (exit %d):\n%s", code, out)
+	}
+
+	empty := t.TempDir()
+	if err := os.WriteFile(filepath.Join(empty, "krate.config.ts"), []byte("export default { native: { appId: 'com.example.t', productName: 'T', version: '1.0.0' } };\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, out = runKrate(t, "native", "test", empty, "--list")
+	if code == 0 || !strings.Contains(out, "no test files found") || !strings.Contains(out, "docs/native/testing") {
+		t.Errorf("no tests (exit %d):\n%s", code, out)
+	}
+
+	code, out = runKrate(t, "native", "help")
+	if !strings.Contains(out, "krate native test") && !strings.Contains(out, "  test ") {
+		t.Errorf("usage does not list test (exit %d):\n%s", code, out)
+	}
+}

@@ -91,6 +91,10 @@ type cliFlags struct {
 	Memory  bool
 	Idle    time.Duration
 	IdleSet bool
+	// TestGrep, TestWorkers and TestList belong to `krate native test`.
+	TestGrep    string
+	TestWorkers int
+	TestList    bool
 	// Release asks `krate native build` for compiled executables. Targets
 	// holds every --target value (comma-separated lists allowed).
 	Release bool
@@ -384,7 +388,7 @@ var valuedFlags = map[string]bool{
 	"--config": true, "--out-dir": true, "--target": true, "--mode": true,
 	"--report": true, "--token": true, "--root": true, "--cpuprofile": true,
 	"--memprofile": true, "--host": true, "--port": true, "--out": true, "--shell": true, "--layout": true,
-	"--scriptc-fail-on": true, "--idle": true,
+	"--scriptc-fail-on": true, "--idle": true, "--grep": true, "--workers": true,
 }
 
 // parseFlagsChecked parses CLI flags, returning an error for malformed values
@@ -430,6 +434,14 @@ func parseFlagsChecked(args []string) (cliFlags, []string, error) {
 				flags.Layout = val
 			case "--scriptc-fail-on":
 				flags.ScriptcFailOn = val
+			case "--grep":
+				flags.TestGrep = val
+			case "--workers":
+				n, err := strconv.Atoi(val)
+				if err != nil || n < 1 {
+					return flags, nil, fmt.Errorf("--workers needs a positive number, got %q", val)
+				}
+				flags.TestWorkers = n
 			case "--idle":
 				d, err := time.ParseDuration(val)
 				if err != nil || d < 0 {
@@ -464,6 +476,8 @@ func parseFlagsChecked(args []string) (cliFlags, []string, error) {
 			flags.Browser = true
 		case args[i] == "--memory":
 			flags.Memory = true
+		case args[i] == "--list":
+			flags.TestList = true
 		case args[i] == "--release":
 			flags.Release = true
 		case args[i] == "--scriptc":

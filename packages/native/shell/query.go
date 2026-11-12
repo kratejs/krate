@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/kratejs/krate/packages/native/sdk"
 )
 
 const (
@@ -105,7 +108,7 @@ func (q *queryResults) serve(w http.ResponseWriter, r *http.Request) bool {
 // navigation fails at once.
 func queryScript(id int, expr string) string {
 	u := fmt.Sprintf("%s?id=%d", queryPath, id)
-	return fmt.Sprintf(`(async()=>{try{await fetch(%q,{method:"POST",body:"1"})}catch(_){return}const gone=()=>{navigator.sendBeacon(%q,"1")};addEventListener("pagehide",gone);let b;try{const v=await (%s);b=JSON.stringify({ok:true,v:v===undefined?null:v})}catch(e){b=JSON.stringify({ok:false,error:String(e&&e.stack||e)})}removeEventListener("pagehide",gone);try{await fetch(%q,{method:"POST",body:b})}catch(_){}})()`,
+	return fmt.Sprintf(`(async()=>{try{await fetch(%q,{method:"POST",body:"1"})}catch(_){return}const gone=()=>{navigator.sendBeacon(%q,"1")};addEventListener("pagehide",gone);let b;try{const v=await (%s);b=JSON.stringify({ok:true,v:v===undefined?null:v})}catch(e){b=JSON.stringify({ok:false,error:e&&e.message!==undefined?String(e.name||"Error")+": "+e.message+(e.stack?"\n"+e.stack:""):String(e)})}removeEventListener("pagehide",gone);try{await fetch(%q,{method:"POST",body:b})}catch(_){}})()`,
 		u+"&phase=start", u+"&phase=gone", expr, u)
 }
 
@@ -113,6 +116,46 @@ func queryScript(id int, expr string) string {
 // JSON-encoded value, awaiting a returned promise. It needs Dev. The first
 // window to answer wins.
 func (c *Control) Query(expr string) (string, error) {
+	return c.query(c.Eval, expr)
+}
+
+// QueryView is Query for one view, named by its SDK id (a window's primary
+// view has the window's id, "main" for the first).
+func (c *Control) QueryView(view, expr string) (string, error) {
+	if c.a.sdk == nil {
+		return "", errors.New("query-in needs native windows")
+	}
+	known := c.a.sdk.Views()
+	found := false
+	ids := make([]string, 0, len(known))
+	for _, v := range known {
+		ids = append(ids, v.ID)
+		found = found || v.ID == view
+	}
+	if !found {
+		return "", fmt.Errorf("no view %q (open views: %s)", view, strings.Join(ids, ", "))
+	}
+	return c.query(func(js string) error { return c.a.sdk.EvalView(view, js) }, expr)
+}
+
+// Views lists the open views.
+func (c *Control) Views() []sdk.ViewInfo {
+	if c.a.sdk == nil {
+		return nil
+	}
+	return c.a.sdk.Views()
+}
+
+// Emit delivers a native event (tray, menu or shortcut) to the app as if the
+// platform had produced it; payload is a JSON object.
+func (c *Control) Emit(area, payload string) error {
+	if c.a.sdk == nil || !c.a.opts.Dev {
+		return errors.New("emit needs --dev")
+	}
+	return c.a.sdk.Inject(area, []byte(payload))
+}
+
+func (c *Control) query(eval func(js string) error, expr string) (string, error) {
 	if !c.a.opts.Dev {
 		return "", errors.New("query needs --dev")
 	}
@@ -120,7 +163,7 @@ func (c *Control) Query(expr string) (string, error) {
 	defer c.a.results.close(id)
 	deadline := time.After(queryTimeout)
 	for started := false; !started; {
-		if err := c.Eval(queryScript(id, expr)); err != nil {
+		if err := eval(queryScript(id, expr)); err != nil {
 			return "", err
 		}
 		select {

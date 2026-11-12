@@ -154,6 +154,40 @@ A reconnect gets the current values again. Signals are read-only from the UI.
 
 Same frame stream carrying the dev hub's messages as `{"hmr": <message>}`.
 
+## Dev control channel
+
+`krate-shell --dev` (the prebuilt shell; a release executable only when built
+with the `krate_devcontrol` tag) reads commands from stdin, one per line, and
+answers each with one line on stdout. stdout carries only this protocol; the
+host's console output goes to stderr. After startup the shell prints
+`ready` (browser mode first prints `url <address>`). Closing stdin quits.
+
+`query` and `query-in` also take the source as `@json <json string>`, a JSON
+string literal holding the JavaScript, which is how source with line breaks
+travels on one line (`query-in main @json "(() => {\n return 1 })()"`).
+
+A reply is `ok`, `ok <json>` or `error <message>`; replies are in command
+order and a command never spans lines (JSON is written without raw newlines).
+
+| Command | Does |
+| --- | --- |
+| `reload-hostjs`, `restart-gohost` | Reload the host bundle; restart the Go host child. |
+| `eval <js>` | Run JavaScript in every view; no result. |
+| `query <js>` | Run an expression in every view, await a promise, answer `ok <json>` (the first view to answer wins). Page errors answer `error <stack>`. |
+| `views` | `ok [{"id":"main","window":"main","primary":true}, ...]`: every open view of every window, windows in creation order and each window's primary view first. A window's primary view has the window's id. Native windows only. |
+| `query-in <view> <js>` | `query`, but in the one view with this SDK id. An unknown view answers `error no view "x" (open views: ...)`. |
+| `emit <area> <json>` | Deliver a native event to the app as the platform would: `tray` `{"kind":"click"\|"middle-click"\|"right-click"\|"menu","id":""}`, `menu` `{"id":"file.open","window":"main","checked":false}`, `shortcut` `{"id":"<registered handle>"}`. |
+| `memory` | `ok <json>`: a memory report (see BUDGETS.md). |
+| `hmr <json>` | Publish one message on `/__krate/hmr`. |
+| `quit` | Quit the app. |
+
+Everything is DOM-level or host-level: `query`/`query-in` run script in the
+page, and `emit` publishes to the same event streams the platform feeds
+(`krate/tray.events`, `krate/menu.events`, `krate/shortcut.events`), so host
+code and pages see the event as they would a real one. Nothing here sends
+real operating-system input (mouse, keyboard, tray, global shortcuts); an
+event that only the OS can produce is not exercised end to end.
+
 ## Golden vectors
 
 `wire/testdata/*.bin` and their `*.json` descriptions are shared by the Go

@@ -159,3 +159,10 @@ func Register(accel string, fn func()) (unregister func() error, err error) {
 
 // Supported reports whether shortcuts can be registered in this session.
 func Supported() bool { return app.Supports("shortcut") }
+
+// Inject delivers the shortcut registered under handle, as if its keys had
+// been pressed. It is for tests that drive an app through the dev control
+// channel.
+func Inject(env *bridge.Env, handle string) {
+	env.Topic("shortcut").Publish(func(e *wire.Encoder) { encodeEvent(e, handle) })
+}

@@ -7,6 +7,8 @@ import (
 	"io/fs"
 	"net/http"
 	"net/http/cookiejar"
+	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -191,5 +193,23 @@ func TestZipFSServesDynamicRouteNames(t *testing.T) {
 	base := strings.TrimSuffix(strings.SplitN(ctl.URL(), "?", 2)[0], "/")
 	if _, body := get(t, c, base+"/tasks/7", nil); !strings.Contains(body, "task page") {
 		t.Fatalf("dynamic fallback from the archive: %q", body)
+	}
+}
+
+func TestWindowIDHandlerWithDevScript(t *testing.T) {
+	const page = "<!doctype html><html><head></head><body>b</body></html>"
+	h := windowIDHandlerWith(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.Header().Set("Content-Length", strconv.Itoa(len(page)))
+		_, _ = w.Write([]byte(page))
+	}), windowIDScript+devErrorsScript)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	body := rec.Body.String()
+	if !strings.Contains(body, "__krateDriverErrs") || !strings.Contains(body, "__krate_win") {
+		t.Fatalf("scripts missing: %s", body)
+	}
+	if got := rec.Header().Get("Content-Length"); got != strconv.Itoa(len(body)) {
+		t.Errorf("Content-Length %s, body %d bytes", got, len(body))
 	}
 }

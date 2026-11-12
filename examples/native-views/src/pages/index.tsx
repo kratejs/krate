@@ -1,5 +1,6 @@
 import { createSignal, createEffect } from '@krate/runtime';
 import { main, onViewMessage, pane, split } from '@krate/app/window';
+import { onMenu } from '@krate/app/menu';
 
 // The main page splits two more views off its window: a sidebar on the left and
 // a log under the main page. Drag the dividers; the panes keep their minimum
@@ -9,6 +10,12 @@ export default function Home() {
   const [heard, setHeard] = createSignal('');
   // The views that loaded, with the size their page saw.
   const [loaded, setLoaded] = createSignal<string[]>([]);
+
+  // Native events the app reacts to; the test driver emits them (see tests/).
+  const [events, setEvents] = createSignal<string[]>([]);
+  createEffect(() => {
+    onMenu('view.refresh', (e) => setEvents([...events(), 'menu ' + e.id]));
+  });
 
   createEffect(() => {
     openViews().catch((e) => setStatus('could not open the views: ' + (e instanceof Error ? e.message : String(e))));
@@ -40,6 +47,7 @@ export default function Home() {
       <p id="status">{status()}</p>
       <p id="loaded">{loaded().join(', ')}</p>
       <p id="heard">{heard()}</p>
+      <p id="events">{events().join(', ')}</p>
     </main>
   );
 }
