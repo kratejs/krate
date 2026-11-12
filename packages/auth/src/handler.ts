@@ -1,0 +1,168 @@
+import { AuthError, createContext, type RequestContext, type ResolvedConfig } from "./config";
+import { ResponseCookies } from "./cookies";
+import { createCsrfToken, verifyCsrfCookie } from "./crypto";
+import { errorPage, signInPage, signOutPage, providerSummary, verifyRequestPage, twoFactorPage } from "./pages";
+import { errorRedirect, isJsonClient, jsonResponse, redirectResponse, sanitizeRedirect } from "./redirect";
+import { readSession, requestCookies } from "./session";
+import { assertCsrf, handleCredentials, handleSignOut, parseBody, resolveCallbackUrl } from "./signin";
+import type { CredentialsConfig } from "./types";
+
+export type RouteHandler = (ctx: RequestContext, segments: string[]) => Promise<Response | null>;
+
+const extraRoutes: RouteHandler[] = [];
+
+export function registerRoutes(handler: RouteHandler): void {
+  if (!extraRoutes.includes(handler)) extraRoutes.push(handler);
+}
+
+export function csrfFor(ctx: RequestContext, jar: ResponseCookies): string {
+  const existing = verifyCsrfCookie(requestCookies(ctx.request)[ctx.cookies.csrfToken.name], ctx.secrets);
+  if (existing?.valid) return existing.token;
+  const fresh = createCsrfToken(ctx.secret);
+  jar.set(ctx.cookies.csrfToken.name, fresh.cookieValue, ctx.cookies.csrfToken.options);
+  return fresh.token;
+}
+
+function actionSegments(ctx: RequestContext): string[] | null {
+  const base = ctx.config.basePath.replace(/\/+$/, "");
+  const path = ctx.url.pathname;
+  const idx = path.indexOf(base + "/");
+  const exact = path === base || path.endsWith(base);
+  if (idx < 0 && !exact) return null;
+  const rest = idx >= 0 ? path.slice(idx + base.length) : "";
+  return rest.split("/").filter(Boolean).map((s) => decodeURIComponent(s));
+}
+
+function failure(ctx: RequestContext | null, request: Request, err: unknown): Response {
+  if (err instanceof AuthError) {
+    if (!ctx || isJsonClient(request) || request.method === "GET" && err.status >= 500) {
+      return jsonResponse({ error: err.code, message: err.message }, { status: err.status });
+    }
+    return errorRedirect(ctx, err.code);
+  }
+  ctx?.config.logger.error("UnhandledError", err);
+  if (!ctx || isJsonClient(request)) return jsonResponse({ error: "Configuration" }, { status: 500 });
+  return errorRedirect(ctx, "Configuration");
+}
+
+export async function handleAuth(request: Request, config: ResolvedConfig): Promise<Response> {
+  let ctx: RequestContext | null = null;
+  try {
+    if (!config.enabled) return jsonResponse({ error: "Disabled" }, { status: 404 });
+    ctx = createContext(config, request);
+    const segments = actionSegments(ctx);
+    if (!segments) return jsonResponse({ error: "NotFound" }, { status: 404 });
+    const response = await route(ctx, segments);
+    return response ?? jsonResponse({ error: "NotFound" }, { status: 404 });
+  } catch (err) {
+    return failure(ctx, request, err);
+  }
+}
+
+async function route(ctx: RequestContext, segments: string[]): Promise<Response | null> {
+  const { request, config } = ctx;
+  const method = request.method.toUpperCase();
+  const [action, id] = segments;
+
+  for (const extra of extraRoutes) {
+    const res = await extra(ctx, segments);
+    if (res) return res;
+  }
+
+  switch (action) {
+    case "providers":
+      if (method !== "GET") return null;
+      return jsonResponse(providerSummary(ctx));
+    case "csrf": {
+      if (method !== "GET") return null;
+      const jar = new ResponseCookies();
+      return jsonResponse({ csrfToken: csrfFor(ctx, jar) }, { jar });
+    }
+    case "session": {
+      const jar = new ResponseCookies();
+      if (method === "GET") {
+        const state = await readSession(ctx, jar);
+        return jsonResponse(state.session, { jar });
+      }
+      if (method === "POST") {
+        const body = (await request.json().catch(() => ({}))) as { csrfToken?: string; data?: unknown };
+        assertCsrf(ctx, body.csrfToken);
+        const state = await readSession(ctx, jar, { update: body.data });
+        return jsonResponse(state.session, { jar });
+      }
+      return null;
+    }
+    case "signin": {
+      if (method === "GET") {
+        const jar = new ResponseCookies();
+        const callbackUrl = await resolveCallbackUrl(ctx, ctx.url.searchParams.get("callbackUrl"));
+        if (config.pages.signIn) {
+          const target = new URL(config.pages.signIn.startsWith("http") ? config.pages.signIn : ctx.baseUrl + config.pages.signIn);
+          target.searchParams.set("callbackUrl", callbackUrl);
+          const err = ctx.url.searchParams.get("error");
+          if (err) target.searchParams.set("error", err);
+          return redirectResponse(ctx, target.toString(), jar);
+        }
+        const token = csrfFor(ctx, jar);
+        const page = signInPage({ ctx, csrfToken: token, callbackUrl, error: ctx.url.searchParams.get("error") });
+        jar.apply(page.headers);
+        return page;
+      }
+      if (method === "POST" && id) {
+        const provider = config.providers.find((p) => p.id === id);
+        if (!provider) return errorRedirect(ctx, "Configuration");
+        if (provider.type === "credentials") return null;
+        const handler = signInStarters.get(provider.type);
+        if (!handler) return errorRedirect(ctx, "Configuration");
+        return handler(ctx, provider);
+      }
+      return null;
+    }
+    case "callback": {
+      if (!id) return null;
+      const provider = config.providers.find((p) => p.id === id);
+      if (!provider) return errorRedirect(ctx, "Configuration");
+      if (provider.type === "credentials") {
+        if (method !== "POST") return null;
+        return handleCredentials(ctx, provider as CredentialsConfig);
+      }
+      const handler = callbackHandlers.get(provider.type);
+      if (!handler) return errorRedirect(ctx, "Configuration");
+      return handler(ctx, provider);
+    }
+    case "signout": {
+      if (method === "GET") {
+        const jar = new ResponseCookies();
+        const callbackUrl = await sanitizeRedirect(ctx, ctx.url.searchParams.get("callbackUrl"));
+        const page = signOutPage({ ctx, csrfToken: csrfFor(ctx, jar), callbackUrl });
+        jar.apply(page.headers);
+        return page;
+      }
+      if (method === "POST") return handleSignOut(ctx);
+      return null;
+    }
+    case "error":
+      if (method !== "GET") return null;
+      return errorPage(ctx, ctx.url.searchParams.get("error"));
+    case "verify-request":
+      if (method !== "GET") return null;
+      return verifyRequestPage();
+    case "2fa":
+      if (method === "GET" && !id) {
+        const jar = new ResponseCookies();
+        const callbackUrl = await sanitizeRedirect(ctx, ctx.url.searchParams.get("callbackUrl"));
+        const page = twoFactorPage(ctx, csrfFor(ctx, jar), callbackUrl, ctx.url.searchParams.get("error"));
+        jar.apply(page.headers);
+        return page;
+      }
+      return null;
+    default:
+      return null;
+  }
+}
+
+type ProviderHandler = (ctx: RequestContext, provider: any) => Promise<Response>;
+export const signInStarters = new Map<string, ProviderHandler>();
+export const callbackHandlers = new Map<string, ProviderHandler>();
+
+export { parseBody };
