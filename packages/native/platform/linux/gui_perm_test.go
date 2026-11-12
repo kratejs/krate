@@ -16,7 +16,7 @@ import (
 // Tests for the page's permission requests: the handler sees them with the
 // right kinds and view, and its answer reaches the page. Real cameras are not
 // available, so the app runs with the mock capture devices
-// (KRATE_NATIVE_MOCK_CAPTURE).
+// (KRATE_NATIVE_MOCK_CAPTURE, set per test window).
 
 var (
 	permResults = make(chan map[string]string, 16)
@@ -64,6 +64,9 @@ func registerPermHandlers(s *testServer) {
 // the page saw and the requests the handler got.
 func runPerm(t *testing.T, run string, decide func(caps.PermissionRequest) bool) (map[string]string, []caps.PermissionRequest) {
 	t.Helper()
+	// Only the windows of these tests get the mock devices (and the media
+	// settings that go with them); the memory profile tests count on them off.
+	t.Setenv("KRATE_NATIVE_MOCK_CAPTURE", "1")
 	var mu sync.Mutex
 	var seen []caps.PermissionRequest
 	if decide == nil {

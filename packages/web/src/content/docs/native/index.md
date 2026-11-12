@@ -42,6 +42,9 @@ prerendered at build time.
   SQLite, key-value storage, secrets and permissions.
 - [Native SDK: windows and desktop](/docs/native/sdk-ui/) - windows, dialogs,
   clipboard, menus, tray, shortcuts and notifications.
+- [Camera, microphone and location](/docs/native/media/) - app-controlled
+  permissions for getUserMedia, getDisplayMedia and geolocation, OS consent and
+  screen sources.
 - [Views and split panes](/docs/native/views/) - several webviews in one window,
   draggable dividers, per-view scopes and view-to-view messages.
 - [Release builds](/docs/native/release/) - one executable per platform, SDK

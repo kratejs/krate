@@ -68,6 +68,7 @@ is in the directory; paths in `app.json` are relative to it.
 | `updater` | Present when `native.updater` is configured: `url` (the feed URL template) and `publicKey` (base64 Ed25519). See [Updates](/docs/native/updater/). |
 | `memory` | The memory profile, from `native.memory`: `balanced` (default), `minimal` or `performance`. See [Memory](/docs/native/memory/). |
 | `features` | `{media, webaudio, webgl, webrtc, spellcheck}`: which optional webview features the UI uses, found by scanning the built UI and adjusted by `native.features`. The `balanced` and `minimal` profiles switch the others off. An `app.json` without it keeps every feature on. |
+| `media` | From `native.media`: `{policy: {camera, microphone, screen, location, notifications, clipboardRead}, noRemember, uses}`. Each policy is `prompt`, `allow` or `deny`. `uses` lists what the built UI asks the webview for (`camera`, `microphone`, `screen`, `location`); packaging reads it, the shell does not. See [Camera, microphone and location](/docs/native/media/). |
 | `hostjs.memoryMB` | From `native.host.memoryMB`: the QuickJS heap limit in MiB. Absent means the profile default (64, 32 or 256). |
 | `debug` | `false` for a build made by `krate native build`. |
 

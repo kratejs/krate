@@ -54,6 +54,11 @@ JavaScript) and writes the result to `app.json` as `features`:
 | `webrtc` | `RTCPeerConnection`, `getUserMedia`, `getDisplayMedia` |
 | `spellcheck` | `contenteditable`, or a `spellcheck` attribute that is not false |
 
+Using `getUserMedia` or `getDisplayMedia` also decides who may ask: the page's
+camera, microphone and screen capture requests go through the app's [media
+policy](/docs/native/media/) and need the `media` permission, which a derived
+build adds for you.
+
 The scan is textual and errs on the side of turning a feature on: a library in
 your bundle that mentions `AudioContext` switches Web Audio on. A feature your
 code reaches in a way the scan cannot see (an API name built at run time)

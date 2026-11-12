@@ -23,6 +23,7 @@ module for the UI.
 | Tray | `sdk/tray` | `@krate/app/tray` | `tray` |
 | Global shortcuts | `sdk/shortcut` | `@krate/app/shortcut` | `shortcut` |
 | Notifications | `sdk/notify` | `@krate/app/notify` | `notify` |
+| Camera, microphone, location | `sdk/media` | `@krate/app/media` | `media`, `media:manage`, `location` |
 | Lifecycle | `sdk/app` | `@krate/app/app` | `app` |
 
 Go packages live under `github.com/kratejs/krate/packages/native/sdk/`.
@@ -40,7 +41,11 @@ for the full table):
 With no list, `window`, `app`, `menu`, `dialog`, `notify` and `clipboard`
 (write) are granted. `clipboard:read`, `tray` and `shortcut` must be listed:
 a page that can read the clipboard sees what the user copied in other
-applications, and tray icons and global shortcuts outlive the window. A call
+applications, and tray icons and global shortcuts outlive the window. So must
+`media`, `media:manage` and `location`, which gate the camera, microphone,
+screen capture and location (a derived build adds `media` and `location` for
+code that uses them; see [Camera, microphone and
+location](/docs/native/media/)). A call
 without its permission rejects with code `permission_denied` and
 `data.permission`, like every other SDK id. Go host code is trusted and is
 never gated.
@@ -152,6 +157,7 @@ source. By area:
 | tray | `krate/tray.set`, `Remove` | `krate/tray.events` |
 | shortcut | `krate/shortcut.register`, `Unregister` | `krate/shortcut.events` |
 | notify | `krate/notify.send`, `Close` | `krate/notify.events` |
+| media | `krate/media.policy`, `krate/media.setPolicy`, `krate/media.decisions`, `krate/media.decide`, `krate/media.reset`, `krate/media.respond`, `krate/media.osStatus`, `krate/media.osRequest`, `krate/media.sources`, `krate/media.chooseSource` | `krate/media.requests`, `krate/media.events` |
 | app | `krate/app.quit`, `Relaunch`, `Supports` | `krate/app.events` |
 
 `SingleInstance` and `LaunchArgs` exist only for Go host code.

@@ -26,6 +26,16 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
   per window and shakes per op in release builds. The app runs under a per-app shell built with Go
   (`krate native doctor` reports the toolchain as required). `krate native plugin init <name>`
   scaffolds one; `examples/native-plugin` is a complete app. New diagnostics `KR7250` to `KR7257`.
+- Camera, microphone, screen capture and location with app-controlled permissions: the page's
+  `getUserMedia`, `getDisplayMedia` and geolocation requests go to the SDK (`@krate/app/media`,
+  Go `sdk/media`) instead of the engine's policy. A `native.media` policy per kind (`prompt`,
+  `allow`, `deny`), remembered decisions per app and per view, a request handler
+  (`onRequest`) and a native prompt decide; a window or view scope without the new `media` or
+  `location` permission is denied, and the build derives both from the UI code. An allowed request
+  also goes through the operating system's consent (macOS TCC, the Windows consent store, the Linux
+  Camera portal). `native.media.usage` writes the macOS usage descriptions, packaging adds the
+  device entitlements and MSIX capabilities, and `KR7290` warns when a description is missing.
+  `media.sources` lists screens and windows on macOS and Windows; no engine accepts a chosen source.
 - Krate Native rows in the compatibility matrix (Linux verified, macOS and Windows untested) and
   size, cold-start and memory budgets in `packages/native/budgets.json`.
 - `krate native check` and native builds warn about oversized images, large inlined `data:` URLs,

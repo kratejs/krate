@@ -32,7 +32,6 @@ func TestMain(m *testing.M) {
 		os.Exit(m.Run())
 	}
 	guiStart = time.Now()
-	os.Setenv("KRATE_NATIVE_MOCK_CAPTURE", "1")
 	guiSrv = newTestServer()
 	app, err := New(Options{AppID: "dev.krate.guitest", Handler: guiSrv.mux, Debug: true, Memory: guiMemory()})
 	if err != nil {
