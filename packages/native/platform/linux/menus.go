@@ -19,10 +19,11 @@ var cbMenuActivate uintptr
 
 // menuTarget is what a GtkMenuItem's activate signal maps to.
 type menuTarget struct {
-	id     string
-	win    caps.WindowRef
-	item   uintptr
-	isCtrl bool // check or radio item
+	id      string
+	win     caps.WindowRef
+	item    uintptr
+	isCtrl  bool // check or radio item
+	checked bool // extension items: the state we toggle
 }
 
 var (

@@ -393,6 +393,124 @@ func TestMenuEvents(t *testing.T) {
 	}
 }
 
+func TestContextMenuSDK(t *testing.T) {
+	r := newRig(t)
+	if err := menu.SetContextMenu("", "", menu.ContextOptions{Mode: menu.ContextCustom}); err != nil {
+		t.Fatal(err)
+	}
+	if err := menu.SetContextMenu("*", "", menu.ContextOptions{Mode: menu.ContextExtend, Items: []menu.Item{menu.Action("x", "Extra", "")}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := menu.SetContextMenu("main", "main", menu.ContextOptions{Mode: menu.ContextNone}); err != nil {
+		t.Fatal(err)
+	}
+	ps := r.app.ContextPolicies
+	if len(ps) != 3 || ps[0].Window != r.main.Ref() || ps[0].View != 0 || ps[0].Policy.Mode != caps.ContextMenuCustom ||
+		ps[1].Window != 0 || ps[1].View != 0 || ps[1].Policy.Mode != caps.ContextMenuExtend || len(ps[1].Policy.Items) != 1 || ps[1].Policy.Items[0].ID != "x" ||
+		ps[2].View == 0 || ps[2].Policy.Mode != caps.ContextMenuNone {
+		t.Fatalf("policies %+v", ps)
+	}
+	if err := menu.SetContextMenu("nope", "", menu.ContextOptions{Mode: menu.ContextNone}); err == nil {
+		t.Fatal("an unknown window is an error")
+	}
+	if err := menu.SetContextMenu("", "", menu.ContextOptions{Mode: menu.ContextNone, Items: []menu.Item{menu.Action("x", "X", "")}}); err == nil {
+		t.Fatal("items outside extend mode are an error")
+	}
+
+	got := make(chan menu.ContextInfo, 2)
+	cancel, err := menu.OnContextMenu(func(i menu.ContextInfo) []menu.Item {
+		got <- i
+		return append(menu.DefaultContextItems(i), menu.Action("mine", "Mine", ""))
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cancel()
+	waitSubs(t, r, "menu.context")
+	r.app.EmitContext(caps.ContextMenuInfo{
+		Window: r.main.Ref(), View: 1, X: 5, Y: 6, WindowX: 15, WindowY: 26,
+		Kinds: []string{"page", "link", "editable", "selection"}, LinkURL: "https://e.x/", SelectionText: "sel",
+		Misspelled: "teh", Suggestions: []string{"the", "tech"}, Inspectable: true,
+	})
+	var info menu.ContextInfo
+	select {
+	case info = <-got:
+	case <-time.After(3 * time.Second):
+		t.Fatal("no context event")
+	}
+	if info.Window != "main" || info.X != 5 || info.WindowY != 26 || !info.Has("link") || info.LinkURL != "https://e.x/" ||
+		info.SelectionText != "sel" || info.Misspelled != "teh" || !reflect.DeepEqual(info.Suggestions, []string{"the", "tech"}) || !info.Inspectable {
+		t.Fatalf("event %+v", info)
+	}
+	// The answer is popped up at the click.
+	deadline := time.Now().Add(3 * time.Second)
+	for len(r.app.Popups) == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if len(r.app.Popups) != 1 {
+		t.Fatalf("popups %v", r.app.Popups)
+	}
+	var ids []string
+	for _, it := range r.app.Popups[0] {
+		ids = append(ids, it.ID+"/"+it.Label)
+	}
+	want := []string{"krate:replaceMisspelling:the/the", "krate:replaceMisspelling:tech/tech", "krate:addToDictionary/Add to Dictionary", "/",
+		"krate:copyLink:https://e.x//Copy Link Address", "/", "krate:undo/Undo", "krate:redo/Redo", "/", "krate:cut/Cut", "krate:copy/Copy",
+		"krate:paste/Paste", "krate:selectAll/Select All", "/", "krate:inspectElement/Inspect Element", "mine/Mine"}
+	if !reflect.DeepEqual(ids, want) {
+		t.Fatalf("default items:\n got %q\nwant %q", ids, want)
+	}
+
+	// Built-in ids run on the view instead of reaching the page.
+	menuGot := make(chan menu.Event, 4)
+	cancel2, _ := menu.OnClick(func(e menu.Event) { menuGot <- e })
+	defer cancel2()
+	waitSubs(t, r, "menu")
+	ref := r.main.Ref()
+	r.app.EmitMenu(caps.MenuEvent{ID: "krate:copy", Window: ref})
+	r.app.EmitMenu(caps.MenuEvent{ID: menu.ActionReplace("the"), Window: ref})
+	r.app.EmitMenu(caps.MenuEvent{ID: menu.ActionCopyLink("https://e.x/a:b"), Window: ref})
+	r.app.EmitMenu(caps.MenuEvent{ID: "mine", Window: ref})
+	select {
+	case e := <-menuGot:
+		if e.ID != "mine" {
+			t.Fatalf("a built-in id was reported: %+v", e)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("no click")
+	}
+	deadline = time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if s, _ := r.app.ReadText(); s == "https://e.x/a:b" {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if s, _ := r.app.ReadText(); s != "https://e.x/a:b" {
+		t.Fatalf("copyLink put %q on the clipboard", s)
+	}
+	if !reflect.DeepEqual(r.app.ContextCommands, []string{"copy:", "replaceMisspelling:the"}) {
+		t.Fatalf("commands %v", r.app.ContextCommands)
+	}
+
+	// The page needs only the menu permission.
+	h := r.ui("menu")
+	if got := uiCall(t, h, "krate/menu.setContextMenu", func(e *wire.Encoder) {
+		e.String("")
+		e.String("")
+		e.BeginObject()
+		e.Key("mode")
+		e.String("none")
+		e.EndObject()
+	}); !strings.Contains(got, `"ok":null`) {
+		t.Fatalf("setContextMenu from the page: %s", got)
+	}
+	h = r.ui("dialog")
+	if got := uiCall(t, h, "krate/menu.setContextMenu", nil); !strings.Contains(got, "permission_denied") {
+		t.Fatalf("without menu: %s", got)
+	}
+}
+
 // waitSubs waits until a topic has a subscriber, so an event is not lost.
 func waitSubs(t *testing.T, r *rig, topic string) {
 	t.Helper()

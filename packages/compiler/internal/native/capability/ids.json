@@ -742,6 +742,7 @@
       "area": "menu",
       "module": "menu",
       "exports": [
+        "onContextMenu",
         "popup"
       ]
     },
@@ -927,6 +928,25 @@
       "module": "clipboard",
       "exports": [
         "readFormat"
+      ]
+    },
+    {
+      "id": "krate/menu.setContextMenu",
+      "permission": "menu",
+      "area": "menu",
+      "module": "menu",
+      "exports": [
+        "setContextMenu"
+      ]
+    },
+    {
+      "id": "krate/menu.contextEvents",
+      "permission": "menu",
+      "area": "menu",
+      "module": "menu",
+      "exports": [
+        "onContext",
+        "onContextMenu"
       ]
     }
   ]

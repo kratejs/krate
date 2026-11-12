@@ -10,3 +10,10 @@ func init() {
 		{"krate/clipboard.readFormat", "clipboard:read", "[name: string]", "Uint8Array | null", "clipboard"},
 	}...)
 }
+
+func init() {
+	IDs = append(IDs, []ID{
+		{"krate/menu.setContextMenu", "menu", "[window: string, view: string, options: ContextMenuOptions]", "void", "menu"},
+		{"krate/menu.contextEvents", "menu", "[] (stream)", "ContextMenuEvent", "menu"},
+	}...)
+}

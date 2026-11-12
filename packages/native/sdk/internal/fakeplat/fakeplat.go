@@ -40,6 +40,18 @@ type App struct {
 	winFn      func(caps.WindowEvent)
 	shortcutFn func(string)
 	Shortcuts  map[string]caps.Accelerator
+
+	// Context menus
+	ContextPolicies []ContextPolicy
+	ContextCommands []string
+	contextFn       func(caps.ContextMenuInfo)
+}
+
+// ContextPolicy is one SetContextMenu call.
+type ContextPolicy struct {
+	Window caps.WindowRef
+	View   caps.ViewRef
+	Policy caps.ContextMenuPolicy
 }
 
 var (
@@ -355,5 +367,41 @@ func (a *App) WriteFormat(name string, data []byte) error {
 	if name == caps.FormatText {
 		a.Text = string(data)
 	}
+	return nil
+}
+
+var (
+	_ caps.ContextMenus    = (*App)(nil)
+	_ caps.ContextCommands = (*App)(nil)
+)
+
+func (a *App) SetContextMenu(w caps.WindowRef, v caps.ViewRef, p caps.ContextMenuPolicy) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.ContextPolicies = append(a.ContextPolicies, ContextPolicy{w, v, p})
+	return nil
+}
+
+func (a *App) OnContextMenu(fn func(caps.ContextMenuInfo)) {
+	a.mu.Lock()
+	a.contextFn = fn
+	a.mu.Unlock()
+}
+
+// EmitContext delivers a right click.
+func (a *App) EmitContext(i caps.ContextMenuInfo) {
+	a.mu.Lock()
+	fn := a.contextFn
+	a.mu.Unlock()
+	if fn != nil {
+		fn(i)
+	}
+}
+
+// ContextCommand records "cmd:arg".
+func (a *App) ContextCommand(w caps.WindowRef, cmd, arg string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.ContextCommands = append(a.ContextCommands, cmd+":"+arg)
 	return nil
 }
