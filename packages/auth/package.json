@@ -33,7 +33,32 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
-    }
+    },
+    "./drizzle": {
+      "types": "./dist/adapters/drizzle/index.d.ts",
+      "default": "./dist/adapters/drizzle/index.js"
+    },
+    "./drizzle/sqlite": {
+      "types": "./dist/adapters/drizzle/sqlite.d.ts",
+      "default": "./dist/adapters/drizzle/sqlite.js"
+    },
+    "./drizzle/pg": {
+      "types": "./dist/adapters/drizzle/pg.d.ts",
+      "default": "./dist/adapters/drizzle/pg.js"
+    },
+    "./drizzle/mysql": {
+      "types": "./dist/adapters/drizzle/mysql.d.ts",
+      "default": "./dist/adapters/drizzle/mysql.js"
+    },
+    "./drizzle/ddl": {
+      "types": "./dist/adapters/drizzle/ddl.d.ts",
+      "default": "./dist/adapters/drizzle/ddl.js"
+    },
+    "./memory": {
+      "types": "./dist/adapters/memory.d.ts",
+      "default": "./dist/adapters/memory.js"
+    },
+    "./package.json": "./package.json"
   },
   "files": [
     "dist"
@@ -51,6 +76,17 @@
   "devDependencies": {
     "@types/node": "^26.2.0",
     "typescript": "^5.5.0",
-    "vitest": "^5.0.3"
+    "vitest": "^5.0.3",
+    "drizzle-orm": "^0.44.0",
+    "@libsql/client": "^0.15.0",
+    "@electric-sql/pglite": "^0.3.0"
+  },
+  "peerDependencies": {
+    "drizzle-orm": ">=0.36.0"
+  },
+  "peerDependenciesMeta": {
+    "drizzle-orm": {
+      "optional": true
+    }
   }
 }

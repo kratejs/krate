@@ -1,7 +1,7 @@
-import type { RequestContext } from "./config";
-import { ResponseCookies, parseCookies, readChunked } from "./cookies";
-import type { TokenClaims } from "./crypto";
-import type { Account, AdapterUser, Session, User } from "./types";
+import type { RequestContext } from "./config.js";
+import { ResponseCookies, parseCookies, readChunked } from "./cookies.js";
+import type { TokenClaims } from "./crypto.js";
+import type { Account, AdapterUser, Session, User } from "./types.js";
 
 export interface SessionState {
   session: Session | null;

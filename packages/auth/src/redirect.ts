@@ -1,5 +1,5 @@
-import type { ResponseCookies } from "./cookies";
-import type { RequestContext } from "./config";
+import type { ResponseCookies } from "./cookies.js";
+import type { RequestContext } from "./config.js";
 
 export function isJsonClient(request: Request): boolean {
   return request.headers.get("x-auth-return-redirect") === "1" || (request.headers.get("accept") ?? "").includes("application/json");

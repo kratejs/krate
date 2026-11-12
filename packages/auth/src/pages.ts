@@ -1,5 +1,5 @@
-import type { RequestContext } from "./config";
-import type { CredentialsConfig, EmailConfig, OAuthConfig, Provider } from "./types";
+import type { RequestContext } from "./config.js";
+import type { CredentialsConfig, EmailConfig, OAuthConfig, Provider } from "./types.js";
 
 export function escapeHtml(value: unknown): string {
   return String(value ?? "")

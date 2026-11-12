@@ -1,7 +1,7 @@
-import { defaultCookies, type CookieSet } from "./cookies";
-import { decodeToken, encodeToken, secretList, type Secret } from "./crypto";
-import { isProduction, readEnv } from "./env";
-import { resolveDeclarativeProvider } from "./providers/registry";
+import { defaultCookies, type CookieSet } from "./cookies.js";
+import { decodeToken, encodeToken, secretList, type Secret } from "./crypto.js";
+import { isProduction, readEnv } from "./env.js";
+import { resolveDeclarativeProvider } from "./providers/registry.js";
 import type {
   Adapter,
   AuthOptions,
@@ -14,7 +14,7 @@ import type {
   Provider,
   ProtectRule,
   TwoFactorOptions,
-} from "./types";
+} from "./types.js";
 
 declare global {
   var __KRATE_AUTH_CONFIG__: DeclarativeConfig | null | undefined;

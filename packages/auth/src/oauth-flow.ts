@@ -1,12 +1,12 @@
-import { AuthError, type RequestContext } from "./config";
-import { ResponseCookies, type CookieOptions, type CookieSpec } from "./cookies";
-import { b64urlDecodeString, b64urlEncode, timingSafeEqual, randomToken } from "./bytes";
-import { sha256Bytes } from "./crypto";
-import { errorRedirect, redirectResponse } from "./redirect";
-import { requestCookies } from "./session";
-import { assertCsrf, completeSignIn, limit, parseBody, resolveCallbackUrl } from "./signin";
-import { resolveOAuthUser } from "./users";
-import type { Account, OAuthConfig, OAuthTokens, User } from "./types";
+import { AuthError, type RequestContext } from "./config.js";
+import { ResponseCookies, type CookieOptions, type CookieSpec } from "./cookies.js";
+import { b64urlDecodeString, b64urlEncode, timingSafeEqual, randomToken } from "./bytes.js";
+import { sha256Bytes } from "./crypto.js";
+import { errorRedirect, redirectResponse } from "./redirect.js";
+import { requestCookies } from "./session.js";
+import { assertCsrf, completeSignIn, limit, parseBody, resolveCallbackUrl } from "./signin.js";
+import { resolveOAuthUser } from "./users.js";
+import type { Account, OAuthConfig, OAuthTokens, User } from "./types.js";
 
 const TIMEOUT_MS = 10_000;
 const discoveryCache = new Map<string, { expires: number; doc: Record<string, any> }>();

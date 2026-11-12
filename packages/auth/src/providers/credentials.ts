@@ -1,4 +1,4 @@
-import type { CredentialField, CredentialsConfig, User } from "../types";
+import type { CredentialField, CredentialsConfig, User } from "../types.js";
 
 export interface CredentialsOptions {
   id?: string;

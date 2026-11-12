@@ -1,5 +1,5 @@
-import { randomId } from "../bytes";
-import type { Account, Adapter, AdapterSession, AdapterUser, Authenticator, TwoFactorRecord, VerificationToken } from "../types";
+import { randomId } from "../bytes.js";
+import type { Account, Adapter, AdapterSession, AdapterUser, Authenticator, TwoFactorRecord, VerificationToken } from "../types.js";
 
 export interface MemoryStore {
   users: Map<string, AdapterUser>;
@@ -19,7 +19,9 @@ export function MemoryAdapter(store: MemoryStore = createMemoryStore()): Adapter
   return {
     store,
     createUser(data) {
-      const user: AdapterUser = { ...data, id: randomId(), email: (data.email ?? null) as string | null, emailVerified: (data.emailVerified ?? null) as Date | null };
+      const email = typeof data.email === "string" ? data.email.toLowerCase() : null;
+      if (email) for (const u of store.users.values()) if (u.email === email) throw new Error("a user with that email already exists");
+      const user: AdapterUser = { ...data, id: randomId(), email, emailVerified: (data.emailVerified ?? null) as Date | null };
       store.users.set(user.id, user);
       return clone(user);
     },
@@ -42,6 +44,7 @@ export function MemoryAdapter(store: MemoryStore = createMemoryStore()): Adapter
       const existing = store.users.get(data.id);
       if (!existing) throw new Error("user not found");
       const next = { ...existing, ...data };
+      if (typeof next.email === "string") next.email = next.email.toLowerCase();
       store.users.set(next.id, next);
       return clone(next);
     },
@@ -53,6 +56,9 @@ export function MemoryAdapter(store: MemoryStore = createMemoryStore()): Adapter
       store.twoFactors.delete(userId);
     },
     linkAccount(account) {
+      if (store.accounts.some((a) => a.provider === account.provider && a.providerAccountId === account.providerAccountId)) {
+        throw new Error("that provider account is already linked");
+      }
       store.accounts.push(clone(account));
       return clone(account);
     },

@@ -1,13 +1,13 @@
-import { AuthError, createContext, type RequestContext, type ResolvedConfig } from "./config";
-import { ResponseCookies } from "./cookies";
-import { createCsrfToken, verifyCsrfCookie } from "./crypto";
-import { finishEmail, startEmail } from "./email-flow";
-import { finishOAuth, startOAuth } from "./oauth-flow";
-import { errorPage, signInPage, signOutPage, providerSummary, verifyRequestPage, twoFactorPage } from "./pages";
-import { errorRedirect, isJsonClient, jsonResponse, redirectResponse, sanitizeRedirect } from "./redirect";
-import { readSession, requestCookies } from "./session";
-import { assertCsrf, handleCredentials, handleSignOut, parseBody, resolveCallbackUrl } from "./signin";
-import type { CredentialsConfig, EmailConfig, OAuthConfig } from "./types";
+import { AuthError, createContext, type RequestContext, type ResolvedConfig } from "./config.js";
+import { ResponseCookies } from "./cookies.js";
+import { createCsrfToken, verifyCsrfCookie } from "./crypto.js";
+import { finishEmail, startEmail } from "./email-flow.js";
+import { finishOAuth, startOAuth } from "./oauth-flow.js";
+import { errorPage, signInPage, signOutPage, providerSummary, verifyRequestPage, twoFactorPage } from "./pages.js";
+import { errorRedirect, isJsonClient, jsonResponse, redirectResponse, sanitizeRedirect } from "./redirect.js";
+import { readSession, requestCookies } from "./session.js";
+import { assertCsrf, handleCredentials, handleSignOut, parseBody, resolveCallbackUrl } from "./signin.js";
+import type { CredentialsConfig, EmailConfig, OAuthConfig } from "./types.js";
 
 export type RouteHandler = (ctx: RequestContext, segments: string[]) => Promise<Response | null>;
 

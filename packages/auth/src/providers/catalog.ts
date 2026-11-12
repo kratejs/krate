@@ -1,5 +1,5 @@
-import { defineOAuthProvider, type OAuthSpec, type ResolvedOAuthOptions } from "./oauth";
-import type { EndpointContext, OAuthConfig, Provider, User } from "../types";
+import { defineOAuthProvider, type OAuthSpec, type ResolvedOAuthOptions } from "./oauth.js";
+import type { EndpointContext, OAuthConfig, Provider, User } from "../types.js";
 
 type Factory = ReturnType<typeof defineOAuthProvider>;
 

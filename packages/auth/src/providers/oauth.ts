@@ -1,5 +1,5 @@
-import { readEnv } from "../env";
-import type { Awaitable, EndpointContext, OAuthConfig, OAuthTokens, User } from "../types";
+import { readEnv } from "../env.js";
+import type { Awaitable, EndpointContext, OAuthConfig, OAuthTokens, User } from "../types.js";
 
 export interface OAuthUserOptions {
   clientId?: string;

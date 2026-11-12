@@ -1,6 +1,6 @@
 import { p256 } from "@noble/curves/p256";
-import { b64urlDecode, b64urlEncode, concat, utf8 } from "../bytes";
-import { sha256Bytes } from "../crypto";
+import { b64urlDecode, b64urlEncode, concat, utf8 } from "../bytes.js";
+import { sha256Bytes } from "../crypto.js";
 
 export interface AppleSecretOptions {
   teamId: string;

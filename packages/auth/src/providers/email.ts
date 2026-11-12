@@ -1,5 +1,5 @@
-import { readEnv } from "../env";
-import type { EmailConfig, SendVerificationParams } from "../types";
+import { readEnv } from "../env.js";
+import type { EmailConfig, SendVerificationParams } from "../types.js";
 
 export interface EmailOptions {
   id?: string;

@@ -1,5 +1,5 @@
-import type { CookieOptions } from "./cookies";
-import type { Secret, TokenClaims } from "./crypto";
+import type { CookieOptions } from "./cookies.js";
+import type { Secret, TokenClaims } from "./crypto.js";
 
 export type Awaitable<T> = T | Promise<T>;
 

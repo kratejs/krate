@@ -1,10 +1,10 @@
-import { AuthError, type RequestContext } from "./config";
-import { ResponseCookies } from "./cookies";
-import { verifyCsrfCookie } from "./crypto";
-import { clientIp, consume } from "./ratelimit";
-import { errorRedirect, jsonResponse, pagePath, redirectResponse, sanitizeRedirect } from "./redirect";
-import { destroySession, issueSession, requestCookies } from "./session";
-import type { Account, AdapterUser, CredentialsConfig, User } from "./types";
+import { AuthError, type RequestContext } from "./config.js";
+import { ResponseCookies } from "./cookies.js";
+import { verifyCsrfCookie } from "./crypto.js";
+import { clientIp, consume } from "./ratelimit.js";
+import { errorRedirect, jsonResponse, pagePath, redirectResponse, sanitizeRedirect } from "./redirect.js";
+import { destroySession, issueSession, requestCookies } from "./session.js";
+import type { Account, AdapterUser, CredentialsConfig, User } from "./types.js";
 
 export type AuthMethod = "pwd" | "oauth" | "email" | "passkey";
 

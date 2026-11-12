@@ -1,8 +1,8 @@
-import type { DeclarativeProvider, Provider } from "../types";
-import { catalog } from "./catalog";
-import { genericOAuth, type OAuthUserOptions } from "./oauth";
-import { email } from "./email";
-import { passkey } from "./passkey";
+import type { DeclarativeProvider, Provider } from "../types.js";
+import { catalog } from "./catalog.js";
+import { genericOAuth, type OAuthUserOptions } from "./oauth.js";
+import { email } from "./email.js";
+import { passkey } from "./passkey.js";
 
 export function resolveDeclarativeProvider(decl: DeclarativeProvider): Provider | null {
   const options = decl.options ?? {};

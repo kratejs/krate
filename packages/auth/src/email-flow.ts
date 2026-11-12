@@ -1,11 +1,11 @@
-import { AuthError, type RequestContext } from "./config";
-import { ResponseCookies } from "./cookies";
-import { randomToken } from "./bytes";
-import { sha256Hex } from "./crypto";
-import { errorRedirect, pagePath, redirectResponse } from "./redirect";
-import { assertCsrf, completeSignIn, limit, parseBody, resolveCallbackUrl } from "./signin";
-import { resolveEmailUser } from "./users";
-import type { EmailConfig } from "./types";
+import { AuthError, type RequestContext } from "./config.js";
+import { ResponseCookies } from "./cookies.js";
+import { randomToken } from "./bytes.js";
+import { sha256Hex } from "./crypto.js";
+import { errorRedirect, pagePath, redirectResponse } from "./redirect.js";
+import { assertCsrf, completeSignIn, limit, parseBody, resolveCallbackUrl } from "./signin.js";
+import { resolveEmailUser } from "./users.js";
+import type { EmailConfig } from "./types.js";
 
 function hashToken(ctx: RequestContext, token: string): string {
   return sha256Hex(`${token}${ctx.secret}`);

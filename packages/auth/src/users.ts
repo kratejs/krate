@@ -1,6 +1,6 @@
-import { AuthError, type RequestContext } from "./config";
-import { readSession } from "./session";
-import type { Account, AdapterUser, User } from "./types";
+import { AuthError, type RequestContext } from "./config.js";
+import { readSession } from "./session.js";
+import type { Account, AdapterUser, User } from "./types.js";
 
 export interface ResolvedUser {
   user: AdapterUser | User;

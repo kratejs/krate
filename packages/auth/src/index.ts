@@ -1,7 +1,7 @@
-import { createContext, readDeclarative, resolveConfig, type ResolvedConfig } from "./config";
-import { handleAuth } from "./handler";
-import { readSession } from "./session";
-import type { AuthOptions, Session } from "./types";
+import { createContext, readDeclarative, resolveConfig, type ResolvedConfig } from "./config.js";
+import { handleAuth } from "./handler.js";
+import { readSession } from "./session.js";
+import type { AuthOptions, Session } from "./types.js";
 
 export interface AuthInstance {
   handlers: { GET: (request: Request) => Promise<Response>; POST: (request: Request) => Promise<Response> };
@@ -29,13 +29,13 @@ export function defineAuth(options: AuthOptions = {}): AuthInstance {
   };
 }
 
-export { AuthError } from "./config";
-export { MemoryAdapter, createMemoryStore } from "./adapters/memory";
-export * from "./providers/catalog";
-export { credentials } from "./providers/credentials";
-export { email, resend, defaultNormalizeIdentifier } from "./providers/email";
-export { passkey } from "./providers/passkey";
-export { genericOAuth, defineOAuthProvider } from "./providers/oauth";
-export { appleClientSecret } from "./providers/apple-secret";
-export type { ResolvedConfig } from "./config";
-export * from "./types";
+export { AuthError } from "./config.js";
+export { MemoryAdapter, createMemoryStore } from "./adapters/memory.js";
+export * from "./providers/catalog.js";
+export { credentials } from "./providers/credentials.js";
+export { email, resend, defaultNormalizeIdentifier } from "./providers/email.js";
+export { passkey } from "./providers/passkey.js";
+export { genericOAuth, defineOAuthProvider } from "./providers/oauth.js";
+export { appleClientSecret } from "./providers/apple-secret.js";
+export type { ResolvedConfig } from "./config.js";
+export * from "./types.js";

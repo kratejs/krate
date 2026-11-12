@@ -2,7 +2,7 @@ import { gcm } from "@noble/ciphers/aes";
 import { hkdf } from "@noble/hashes/hkdf";
 import { hmac } from "@noble/hashes/hmac";
 import { sha256 } from "@noble/hashes/sha256";
-import { b64urlDecode, b64urlDecodeString, b64urlEncode, concat, fromUtf8, hex, randomBytes, timingSafeEqual, utf8 } from "./bytes";
+import { b64urlDecode, b64urlDecodeString, b64urlEncode, concat, fromUtf8, hex, randomBytes, timingSafeEqual, utf8 } from "./bytes.js";
 
 export type Secret = string | string[];
 
