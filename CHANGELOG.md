@@ -9,6 +9,19 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Krate Native
 
+- Rich clipboard formats: `clipboard.write({ text, html, rtf })` puts several representations on
+  the clipboard together (Electron's `clipboard.write({ text, html })`); `readHtml`, `readRtf`,
+  `formats`, `readFormat` and `writeFormat` read and write by MIME name on all three platforms
+  (GTK targets, `public.html`/`public.rtf`, Windows `HTML Format` with the `CF_HTML` header and
+  `Rich Text Format`).
+- Webview context menu: `native.window.contextMenu` (`default`, `none`, `custom`) and
+  `menu.setContextMenu` per app, window or view. `custom` delivers a context event (kind, link,
+  image and selection, spelling suggestions) that `menu.onContextMenu` answers with items drawn by
+  the native menu code; `extend` adds items to the engine's menu. `krate:` item ids run the
+  built-in editing, spelling and Inspect Element actions.
+- `krate native dev --debug-go` builds the Go host with `-N -l` and runs it under a headless Delve
+  (`--debug-addr`, `--debug-config vscode`); `--debug-host` starts node, bun and deno host children
+  with `--inspect`. A missing `dlv` is diagnosed with its install command.
 - The `@krate/core-<platform>` packages ship `krate-shell` next to `krate`, cross-compiled with
   `CGO_ENABLED=0` for all seven platforms. The compiler finds the shell in this order: `--shell`,
   `$KRATE_SHELL`, next to the running `krate` executable, a build from a Krate checkout.

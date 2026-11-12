@@ -1100,6 +1100,81 @@
       ]
     },
     {
+      "id": "native-clipboard-rich",
+      "area": "Native: rich clipboard formats",
+      "native": {
+        "linux": "supported",
+        "macos": "untested",
+        "windows": "untested"
+      },
+      "target": "Krate Native round 4",
+      "summary": "clipboard.write puts text, HTML and RTF on the clipboard together; readHtml, readRtf, formats, readFormat and writeFormat read and write by MIME name (UTIs on macOS, registered formats with the CF_HTML header on Windows).",
+      "tests": [
+        "TestGUIClipboardRich",
+        "TestCFHTMLOffsets",
+        "TestDecodeCFHTMLFromOtherProducers",
+        "TestDecodeClipboardText",
+        "TestFormatNameMaps",
+        "TestClipboardRichFormats"
+      ],
+      "knownLimits": [
+        "macOS and Windows: untested until the CI GUI tests (TestGUIClipboardRich) pass there.",
+        "HTML is stored as given on Linux, without a charset declaration."
+      ]
+    },
+    {
+      "id": "native-context-menu",
+      "area": "Native: webview context menu",
+      "native": {
+        "linux": "supported",
+        "macos": "untested",
+        "windows": "untested"
+      },
+      "target": "Krate Native round 4",
+      "summary": "native.window.contextMenu and menu.setContextMenu disable, replace (custom: event with kind, link, image, selection, spelling; answered with menu items) or extend the engine's context menu per app, window or view; built-in krate: actions for editing, spelling and Inspect Element.",
+      "tests": [
+        "TestGUIContextMenuCustom",
+        "TestGUIContextMenuNone",
+        "TestGUIContextMenuExtend",
+        "TestGUIContextCommands",
+        "TestContextMenuActionValues",
+        "TestContextMenuSDK",
+        "TestManifestContextMenu",
+        "TestParseContextHit"
+      ],
+      "knownLimits": [
+        "Spelling suggestions and Add to Dictionary are not exercised by any test: no spelling dictionary is available to the Linux test environment.",
+        "macOS and Windows: untested until TestGUIContextMenu passes in CI. Windows suggestions and Add to Dictionary are best effort.",
+        "Inspect Element from a custom menu opens the inspector without selecting the element on WebKitGTK."
+      ]
+    },
+    {
+      "id": "native-dev-debug",
+      "area": "Native: debugging in krate native dev",
+      "native": {
+        "linux": "supported",
+        "macos": "untested",
+        "windows": "untested"
+      },
+      "target": "Krate Native round 4",
+      "summary": "krate native dev --debug-go builds the Go host with -N -l and runs it under a headless Delve; breakpoints in src/lib/*.go hit and a Go edit restarts it on the same address. --debug-host starts node, bun and deno host children with --inspect. --debug-config vscode writes attach configurations.",
+      "tests": [
+        "TestNativeDebugGoHostGUI",
+        "TestNativeDebugGoHostRestart",
+        "TestChildWrap",
+        "TestDlvArgs",
+        "TestDlvDetachKillsTheProgram",
+        "TestFindDlvMissingHintsAtInstall",
+        "TestMergeLaunchJSON",
+        "TestResolveDebugAddr"
+      ],
+      "knownLimits": [
+        "Needs dlv installed; the integration tests skip without it unless KRATE_REQUIRE_E2E is set.",
+        "A debugger has to attach again after a Go edit; breakpoints are not carried over.",
+        "macOS and Windows: untested."
+      ]
+    },
+    {
       "id": "native-sdk-notify",
       "area": "Native: SDK notifications",
       "native": {

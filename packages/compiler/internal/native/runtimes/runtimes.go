@@ -97,7 +97,7 @@ func WithInspect(cmd []string, rt Runtime, addr string) []string {
 		}
 	}
 	if len(cmd) >= 1 {
-		return append(append([]string{cmd[0], flag}, cmd[1:]...))
+		return append([]string{cmd[0], flag}, cmd[1:]...)
 	}
 	return cmd
 }

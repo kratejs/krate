@@ -154,9 +154,17 @@ their Go names (`src/lib/tasks.List`).
 | `krate/clipboard.readText` | `clipboard:read` | none | `string` |
 | `krate/clipboard.readImage` | `clipboard:read` | none | `Uint8Array | null` |
 | `krate/clipboard.readFiles` | `clipboard:read` | none | `string[]` |
+| `krate/clipboard.write` | `clipboard` | `data: ClipboardData` | nothing |
+| `krate/clipboard.writeFormat` | `clipboard` | `name: string, data: Uint8Array` | nothing |
+| `krate/clipboard.readHtml` | `clipboard:read` | none | `string` |
+| `krate/clipboard.readRtf` | `clipboard:read` | none | `string` |
+| `krate/clipboard.formats` | `clipboard:read` | none | `string[]` |
+| `krate/clipboard.readFormat` | `clipboard:read` | `name: string` | `Uint8Array | null` |
 | `krate/menu.setApp` | `menu` | `items: MenuItem[]` | nothing |
 | `krate/menu.popup` | `menu` | `window: string, x: number, y: number, items: MenuItem[]` | nothing |
 | `krate/menu.events` | `menu` | none (stream) | `MenuEvent` |
+| `krate/menu.setContextMenu` | `menu` | `window: string, view: string, options: ContextMenuOptions` | nothing |
+| `krate/menu.contextEvents` | `menu` | none (stream) | `ContextMenuEvent` |
 | `krate/tray.set` | `tray` | `options: TrayOptions` | nothing |
 | `krate/tray.remove` | `tray` | none | nothing |
 | `krate/tray.events` | `tray` | none (stream) | `TrayEvent` |

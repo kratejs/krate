@@ -97,3 +97,10 @@ process and routes calls to it. The project's `go.mod` must require
 `KR7202` and tells you to run `go get github.com/kratejs/krate/packages/native`.
 A compile error is `KR7203` with the output of the Go command. `--target`
 cross-compiles the binary.
+
+## Debugging
+
+`krate native dev --debug-go` builds the Go host without optimization or
+`-trimpath` and runs it under Delve, so breakpoints in your `src/lib/*.go` files
+hit; see [Debugging](/docs/native/dev/#debugging) for attaching VS Code, GoLand
+or `dlv`, and for what happens to the session when you edit Go code.

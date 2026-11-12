@@ -360,7 +360,7 @@ type NativeDevOptions struct {
 	Debug *NativeDebugOptions
 	// ShellEnv is added to the shell's environment.
 	ShellEnv []string
-	// OnDebug, if set, receives the Delve address once the shell is ready.
+	// OnDebug, if set, receives the Delve address before the shell starts.
 	OnDebug func(addr string)
 	Ctx     context.Context
 }
@@ -447,6 +447,9 @@ func runNativeDevOnce(o NativeDevOptions) (bool, error) {
 	shellEnv := append([]string(nil), o.ShellEnv...)
 	if dbg != nil {
 		shellEnv = append(shellEnv, dbg.announce(b, &res.Manifest, root)...)
+		if o.OnDebug != nil && dbg.o.GoHost && res.Manifest.GoHost != nil {
+			o.OnDebug(dbg.addr)
+		}
 	}
 
 	addr := ""
