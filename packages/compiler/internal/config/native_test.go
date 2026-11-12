@@ -268,7 +268,7 @@ func TestNativePermissionsAcceptSDKNames(t *testing.T) {
 	}
 	c := Default()
 	c.Native = &NativeConfig{AppID: "com.acme.app", Permissions: []string{"camera"}}
-	if _, err := c.Validate(); err == nil || !strings.Contains(err.Error(), "known permissions: app, clipboard") {
+	if _, err := c.Validate(); err == nil || !strings.Contains(err.Error(), "known permissions: app, ") {
 		t.Errorf("camera: %v", err)
 	}
 }

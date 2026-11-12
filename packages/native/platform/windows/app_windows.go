@@ -501,10 +501,16 @@ func wndProc(hwnd, message, wParam, lParam uintptr) (ret uintptr) {
 			a.trayReadd()
 			return 0
 		}
+		if handled, r := a.systemMessage(message, wParam, lParam); handled {
+			return r
+		}
 		r, _, _ := pDefWindowProcW.Call(hwnd, message, wParam, lParam)
 		return r
 	}
 	if w := a.windows[hwnd]; w != nil {
+		if a.windowMessage(hwnd, message) {
+			return 0
+		}
 		if handled, r := winExtMessage(a, w, message, wParam, lParam); handled {
 			return r
 		}

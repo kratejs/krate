@@ -33,6 +33,15 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
   scaffolds one; `examples/native-plugin` is a complete app. New diagnostics `KR7250` to `KR7257`.
 - Krate Native rows in the compatibility matrix (Linux verified, macOS and Windows untested) and
   size, cold-start and memory budgets in `packages/native/budgets.json`.
+- Native OS integration SDK areas, each a Go package and a `@krate/app/<area>` module: `badge`
+  (app icon badge, progress and urgent flag: NSDockTile, ITaskbarList3, Unity LauncherEntry),
+  `screen` (displays, a window's display, centering, display changes), `power` (battery, idle,
+  suspend, resume, lock, sleep blockers), `login` (launch at login), `theme` (system light, dark and
+  high contrast, with native title bars following it) and `crash` (JSON crash reports for Go panics
+  and webview process crashes under the app's log directory, a crash event, and automatic view
+  reload). New permissions `badge`, `screen`, `power`, `theme` (granted by default) and
+  `power:inhibit`, `login`, `crash`. Linux is verified against private D-Bus buses, a GTK window and
+  the real shell; macOS and Windows are written and compiled, with GUI tests that CI runs.
 - `krate native check` and native builds warn about oversized images, large inlined `data:` URLs,
   web fonts, compositing CSS effects and long lists without windowing (KR7270 to KR7274; thresholds
   and a silence list in `native.lean`). Native builds no longer preload lazy chunks, ship no

@@ -358,6 +358,9 @@ func registerClasses(a *App) error {
 		{Cmd: sel("webView:didFinishNavigation:"), Fn: func(self objc.ID, _ objc.SEL, webView, nav objc.ID) {
 			a.navigationFinished(webView)
 		}},
+		{Cmd: sel("webViewWebContentProcessDidTerminate:"), Fn: func(self objc.ID, _ objc.SEL, webView objc.ID) {
+			a.webContentTerminated(webView)
+		}},
 	})
 	return err
 }

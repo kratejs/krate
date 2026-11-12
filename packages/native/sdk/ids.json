@@ -874,6 +874,243 @@
         "onOpenURL",
         "onSecondInstance"
       ]
+    },
+    {
+      "id": "krate/badge.set",
+      "permission": "badge",
+      "area": "badge",
+      "module": "badge",
+      "exports": [
+        "clearBadge",
+        "setBadge"
+      ]
+    },
+    {
+      "id": "krate/badge.get",
+      "permission": "badge",
+      "area": "badge",
+      "module": "badge",
+      "exports": [
+        "getBadge"
+      ]
+    },
+    {
+      "id": "krate/badge.setProgress",
+      "permission": "badge",
+      "area": "badge",
+      "module": "badge",
+      "exports": [
+        "clearProgress",
+        "setProgress"
+      ]
+    },
+    {
+      "id": "krate/badge.progress",
+      "permission": "badge",
+      "area": "badge",
+      "module": "badge",
+      "exports": [
+        "getProgress"
+      ]
+    },
+    {
+      "id": "krate/badge.setUrgent",
+      "permission": "badge",
+      "area": "badge",
+      "module": "badge",
+      "exports": [
+        "setUrgent"
+      ]
+    },
+    {
+      "id": "krate/screen.list",
+      "permission": "screen",
+      "area": "screen",
+      "module": "screen",
+      "exports": [
+        "listDisplays"
+      ]
+    },
+    {
+      "id": "krate/screen.primary",
+      "permission": "screen",
+      "area": "screen",
+      "module": "screen",
+      "exports": [
+        "primaryDisplay"
+      ]
+    },
+    {
+      "id": "krate/screen.ofWindow",
+      "permission": "screen",
+      "area": "screen",
+      "module": "screen",
+      "exports": [
+        "displayOfWindow"
+      ]
+    },
+    {
+      "id": "krate/screen.centerWindow",
+      "permission": "screen",
+      "area": "screen",
+      "module": "screen",
+      "exports": [
+        "centerWindow"
+      ]
+    },
+    {
+      "id": "krate/screen.events",
+      "permission": "screen",
+      "area": "screen",
+      "module": "screen",
+      "exports": [
+        "onDisplaysChanged"
+      ]
+    },
+    {
+      "id": "krate/power.state",
+      "permission": "power",
+      "area": "power",
+      "module": "power",
+      "exports": [
+        "powerState"
+      ]
+    },
+    {
+      "id": "krate/power.idleTime",
+      "permission": "power",
+      "area": "power",
+      "module": "power",
+      "exports": [
+        "idleTime"
+      ]
+    },
+    {
+      "id": "krate/power.setIdleThreshold",
+      "permission": "power",
+      "area": "power",
+      "module": "power",
+      "exports": [
+        "setIdleThreshold"
+      ]
+    },
+    {
+      "id": "krate/power.preventSleep",
+      "permission": "power:inhibit",
+      "area": "power",
+      "module": "power",
+      "exports": [
+        "preventSleep"
+      ]
+    },
+    {
+      "id": "krate/power.allowSleep",
+      "permission": "power:inhibit",
+      "area": "power",
+      "module": "power",
+      "exports": [
+        "allowSleep"
+      ]
+    },
+    {
+      "id": "krate/power.events",
+      "permission": "power",
+      "area": "power",
+      "module": "power",
+      "exports": [
+        "onPower",
+        "onPowerEvent"
+      ]
+    },
+    {
+      "id": "krate/login.get",
+      "permission": "login",
+      "area": "login",
+      "module": "login",
+      "exports": [
+        "getLoginItem"
+      ]
+    },
+    {
+      "id": "krate/login.set",
+      "permission": "login",
+      "area": "login",
+      "module": "login",
+      "exports": [
+        "setLoginItem"
+      ]
+    },
+    {
+      "id": "krate/theme.get",
+      "permission": "theme",
+      "area": "theme",
+      "module": "theme",
+      "exports": [
+        "getTheme"
+      ]
+    },
+    {
+      "id": "krate/theme.set",
+      "permission": "theme",
+      "area": "theme",
+      "module": "theme",
+      "exports": [
+        "setTheme"
+      ]
+    },
+    {
+      "id": "krate/theme.events",
+      "permission": "theme",
+      "area": "theme",
+      "module": "theme",
+      "exports": [
+        "onThemeChange"
+      ]
+    },
+    {
+      "id": "krate/crash.list",
+      "permission": "crash",
+      "area": "crash",
+      "module": "crash",
+      "exports": [
+        "listCrashReports"
+      ]
+    },
+    {
+      "id": "krate/crash.read",
+      "permission": "crash",
+      "area": "crash",
+      "module": "crash",
+      "exports": [
+        "readCrashReport"
+      ]
+    },
+    {
+      "id": "krate/crash.delete",
+      "permission": "crash",
+      "area": "crash",
+      "module": "crash",
+      "exports": [
+        "deleteCrashReport"
+      ]
+    },
+    {
+      "id": "krate/crash.setAutoReload",
+      "permission": "crash",
+      "area": "crash",
+      "module": "crash",
+      "exports": [
+        "setCrashAutoReload"
+      ]
+    },
+    {
+      "id": "krate/crash.events",
+      "permission": "crash",
+      "area": "crash",
+      "module": "crash",
+      "exports": [
+        "onCrash"
+      ]
     }
   ]
 }

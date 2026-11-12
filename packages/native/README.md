@@ -13,6 +13,8 @@ The Go module behind Krate's desktop target.
 | `gohost` | The Go host child: `Serve` for the generated child main, `Child` for the parent that runs and restarts it |
 | `shell` | The shell as a library: app manifest, `Run`, `RunEmbedded` and `Main` (release builds), browser mode, dev control. See `shell/README.md` |
 | `sdk/{window,dialog,clipboard,menu,tray,shortcut,notify,app}` | The UI half of the SDK: plain Go functions for host code, forwarded to the shell in dev. `sdk` assembles them for the shell. See the SDK page in the docs |
+| `sdk/{badge,screen,power,login,theme,crash}` | The OS integration areas: app icon badge and progress, displays, power and idle, launch at login, the system theme, crash reports and webview crash events. See the OS integration page of the docs |
+| `crashreport` | Crash report files (JSON under the app's log directory) and the Go crash hook; no dependencies, used by the shell, the Go host child and `sdk/crash` |
 | `cmd/krate-shell` | The prebuilt shell binary. `krate-shell --doctor` prints a JSON report of the system webview and display; it ships in the `@krate/core-<platform>` packages next to `krate` |
 | `plugin` | The native plugin runtime: `Plugin`, `Meta`, `Host` (installs a plugin's ops under `plugin/<name>.`, gates them by permission and window scope, runs the lifecycle hooks) and `Context` (what a plugin's `Init` gets). See the Native plugins docs page |
 | `memstat` | Per-process memory (PSS and private dirty on Linux, footprint on macOS, private bytes on Windows) with roles for the shell, host children and webview processes; behind the shell's `memory` dev command |
@@ -64,7 +66,7 @@ directory is embedded as a zip, Go host code is registered in process through
 the only flags (`--dev` exists only with the `krate_devcontrol` build tag, which
 the end-to-end tests use). Build tags leave code out:
 `krate_no_<area>` for `fs`, `db`, `kv`, `net`, `window`, `dialog`, `clipboard`,
-`menu`, `tray`, `shortcut`, `notify` and `app` (each area registers itself from
+`menu`, `tray`, `shortcut`, `notify`, `app`, `badge`, `screen`, `power`, `login` and `crash` (each area registers itself from
 `area_<name>.go`, `sdk/area_<name>.go` and `sdk/all/area_<name>.go`), and
 `krate_no_hostjs` for QuickJS and the TypeScript host. `KRATE_CPUPROFILE=<file>`
 writes a CPU profile on exit. `sdk/ids.json` is the id table the compiler reads

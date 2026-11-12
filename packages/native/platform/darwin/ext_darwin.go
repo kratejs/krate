@@ -125,10 +125,8 @@ func (w *Window) SetDecorated(on bool) {
 // SetPosition moves the window; y counts down from the top of the main screen.
 func (w *Window) SetPosition(x, y int) {
 	w.withWin(func() {
-		screen := cls("NSScreen").Send(sel("mainScreen"))
-		sf := objc.Send[nsRect](screen, sel("frame"))
 		wf := objc.Send[nsRect](w.win, sel("frame"))
-		w.win.Send(sel("setFrameOrigin:"), nsPoint{X: float64(x), Y: sf.Size.Height - float64(y) - wf.Size.Height})
+		w.win.Send(sel("setFrameOrigin:"), nsPoint{X: float64(x), Y: primaryHeight() - float64(y) - wf.Size.Height})
 	})
 }
 
@@ -199,9 +197,7 @@ func (w *Window) State() (st caps.WindowState) {
 		}
 		withPool(func() {
 			f := objc.Send[nsRect](w.win, sel("frame"))
-			screen := cls("NSScreen").Send(sel("mainScreen"))
-			sf := objc.Send[nsRect](screen, sel("frame"))
-			st.X, st.Y = int(f.Origin.X), int(sf.Size.Height-f.Origin.Y-f.Size.Height)
+			st.X, st.Y = int(f.Origin.X), caps.TopLeftY(primaryHeight(), f.Origin.Y, f.Size.Height)
 			st.Width, st.Height = int(f.Size.Width), int(f.Size.Height)
 			st.Maximized = objc.Send[bool](w.win, sel("isZoomed"))
 			st.Minimized = objc.Send[bool](w.win, sel("isMiniaturized"))

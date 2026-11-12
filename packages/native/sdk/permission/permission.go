@@ -30,6 +30,13 @@
 //	tray                no             system tray icon
 //	shortcut            no             global keyboard shortcuts
 //	updater             no             check for, download, apply updates and relaunch
+//	badge               yes (default)  badge and progress on the app icon
+//	screen              yes (default)  list displays, center windows, display change events
+//	power               yes (default)  power and idle state, suspend, resume, lock and battery events
+//	power:inhibit       no             keep the system or display awake
+//	login               no             read and change whether the app starts at login
+//	theme               yes (default)  system appearance and title bar theme
+//	crash               no             list, read and delete crash reports, crash events
 //
 // The compiler keeps a copy of the names in names.json (a test here keeps the
 // file in step; run "go test ./sdk/permission -update" to rewrite it).

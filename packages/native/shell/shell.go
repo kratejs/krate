@@ -122,6 +122,8 @@ type app struct {
 	glued   bool                         // opts.GoGlue was registered
 	plat    atomic.Pointer[platform.App] // native mode only, set before the loop runs
 	reaper  *memory.Reaper               // idle trim; nil under the performance profile
+	// crashStop ends the Go crash hook (see setupCrash).
+	crashStop func()
 }
 
 func load(appDir string, opts RunOptions) (*app, error) {
@@ -190,6 +192,7 @@ func loadApp(dir string, fsys fs.FS, opts RunOptions) (*app, error) {
 	if os.Getenv("KRATE_APP_ID") == "" {
 		os.Setenv("KRATE_APP_ID", man.AppID)
 	}
+	a.setupCrash(man)
 	if err := a.reloadHostJS(); err != nil {
 		a.close()
 		return nil, err
@@ -310,6 +313,10 @@ func (a *app) startMemory() func() {
 }
 
 func (a *app) close() {
+	if a.crashStop != nil {
+		a.crashStop()
+		a.crashStop = nil
+	}
 	if a.plug != nil {
 		a.plug.Quit()
 	}
@@ -461,8 +468,11 @@ func (a *app) restartGoHost() error {
 			return err
 		}
 		a.child = c
+		watchChildCrash(c)
 	} else if err := a.child.Restart(binary); err != nil {
 		return err
+	} else {
+		watchChildCrash(a.child)
 	}
 	return guard("registering Go host functions", func() {
 		a.child.Remote().RegisterInto(a.reg, spec.Funcs, spec.Streams, spec.Signals)
