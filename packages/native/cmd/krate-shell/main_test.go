@@ -56,7 +56,9 @@ func TestBinaryDevControl(t *testing.T) {
 		t.Fatalf("go build: %v\n%s", err, out)
 	}
 
-	app := filepath.Join(root, "app")
+	// Not next to the binary: that layout is a distributed app (see
+	// shell.checkLaunch), which takes no --dev.
+	app := filepath.Join(root, "testapp")
 	if err := os.MkdirAll(filepath.Join(app, "dist"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +186,9 @@ func TestBinaryExitsOnStdinEOF(t *testing.T) {
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("go build: %v\n%s", err, out)
 	}
-	app := filepath.Join(root, "app")
+	// Not next to the binary: that layout is a distributed app (see
+	// shell.checkLaunch), which takes no --dev.
+	app := filepath.Join(root, "testapp")
 	if err := os.MkdirAll(filepath.Join(app, "dist"), 0o755); err != nil {
 		t.Fatal(err)
 	}
