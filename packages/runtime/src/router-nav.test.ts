@@ -287,6 +287,60 @@ describe('scroll restoration', () => {
   });
 });
 
+describe('smooth scroll (Lenis)', () => {
+  type Call = [number | Element, { immediate?: boolean; force?: boolean } | undefined];
+  let calls: Call[];
+
+  beforeEach(() => {
+    calls = [];
+    (window as unknown as { lenis: unknown }).lenis = {
+      scrollTo: (target: number | Element, options?: { immediate?: boolean; force?: boolean }) => {
+        calls.push([target, options]);
+      },
+    };
+  });
+
+  afterEach(() => {
+    delete (window as unknown as { lenis?: unknown }).lenis;
+  });
+
+  it('resets scroll through Lenis, immediately, after a navigation', async () => {
+    await krateRouter.push('/about');
+    expect(calls).toContainEqual([0, { immediate: true, force: true }]);
+  });
+
+  it('restores a saved position through Lenis on history back', async () => {
+    routes['/'] = { body: page('Home', '<h1>Home</h1>') };
+    const homeState = history.state;
+    window.scrollTo(0, 420);
+    await krateRouter.push('/about');
+    calls.length = 0;
+    history.replaceState(homeState, '', '/');
+    window.dispatchEvent(new PopStateEvent('popstate', { state: homeState }));
+    await settle();
+    expect(calls).toContainEqual([420, { immediate: true, force: true }]);
+  });
+
+  it('animates to a same-page hash target through Lenis', async () => {
+    routes['/docs'] = { body: page('Docs', '<h1>Docs</h1><h2 id="part">Part</h2>') };
+    await krateRouter.push('/docs');
+    calls.length = 0;
+    await krateRouter.push('/docs#part');
+    const target = document.getElementById('part');
+    expect(target).not.toBeNull();
+    expect(calls).toEqual([[target, undefined]]);
+  });
+
+  it('falls back to native scrolling when Lenis is not installed', async () => {
+    delete (window as unknown as { lenis?: unknown }).lenis;
+    const spy = vi.spyOn(window, 'scrollTo');
+    await krateRouter.push('/about');
+    expect(spy).toHaveBeenCalledWith(0, 0);
+    expect(calls).toEqual([]);
+    spy.mockRestore();
+  });
+});
+
 describe('error handling', () => {
   it('shows a server-rendered 404 document in place and reports the status', async () => {
     const errs = events('krate:navigate-error');
