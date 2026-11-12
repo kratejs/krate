@@ -926,15 +926,23 @@ jobs:
       # and the snap smoke test skips itself (snapcraft becomes an optional
       # tool) instead of failing a run whose code is fine. The generated
       # snapcraft.yaml is still checked by the unit tests.
+      # Besides snapcraft, the snaps the gnome extension builds and runs
+      # against (core24 base, GNOME 46 runtime and SDK, mesa, themes) are
+      # installed here, so the build itself does not have to reach the store.
       - name: Install snapcraft
         if: matrix.os == 'ubuntu-latest'
         run: |
+          install() {
+            sudo snap install snapcraft --classic &&
+              sudo snap install core24 gnome-46-2404 gnome-46-2404-sdk mesa-2404 gtk-common-themes
+          }
           for i in 1 2 3; do
-            sudo snap install snapcraft --classic && exit 0
+            install && exit 0
             echo "snap install failed (attempt $i); retrying in $((i * 20))s"
             sleep $((i * 20))
           done
-          echo "::warning title=snap store unreachable::snapcraft could not be installed from the snap store; the snap smoke test is skipped in this run"
+          sudo snap remove snapcraft || true
+          echo "::warning title=snap store unreachable::snapcraft and its snaps could not be installed from the snap store; the snap smoke test is skipped in this run"
           echo "KRATE_OPTIONAL_TOOLS=${KRATE_OPTIONAL_TOOLS:+$KRATE_OPTIONAL_TOOLS,}snapcraft" >> "$GITHUB_ENV"
 
       - name: Packaging smoke test, snap build, install, run (Linux)
