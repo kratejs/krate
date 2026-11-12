@@ -252,6 +252,7 @@
 
   function run() {
     if (C.declarative !== false) refresh(doc);
+    root.classList.remove("krate-motion-pending");
     root.classList.add("krate-motion-ready");
   }
 

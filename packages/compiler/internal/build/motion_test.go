@@ -163,7 +163,7 @@ let page = [];
 let containers = [];
 globalThis.document = {
   readyState: "complete",
-  documentElement: { classList: { add: (c) => classes.push(c) } },
+  documentElement: { classList: { add: (c) => classes.push(c), remove: (c) => classes.push("-" + c) } },
   querySelectorAll: (sel) => (sel === "[data-motion-stagger]" ? containers : page),
   addEventListener() {},
 };
@@ -188,7 +188,7 @@ containers = [box];
 __INIT__
 
 out.hasApi = typeof globalThis.krateMotion === "object" && typeof krateMotion.refresh === "function";
-out.readyClass = classes.indexOf("krate-motion-ready") >= 0;
+out.readyClass = classes.indexOf("krate-motion-ready") >= 0 && classes.indexOf("-krate-motion-pending") >= 0;
 out.aInitial = byId("a", "animate")[0];
 out.aInView = byId("a", "inView")[0];
 a.enter();
