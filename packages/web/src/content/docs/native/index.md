@@ -42,6 +42,8 @@ prerendered at build time.
   SQLite, key-value storage, secrets and permissions.
 - [Native SDK: windows and desktop](/docs/native/sdk-ui/) - windows, dialogs,
   clipboard, menus, tray, shortcuts and notifications.
+- [Native SDK: OS integration](/docs/native/system/) - badge and progress on the app
+  icon, displays, power and idle, launch at login, the system theme and crash reports.
 - [Views and split panes](/docs/native/views/) - several webviews in one window,
   draggable dividers, per-view scopes and view-to-view messages.
 - [Release builds](/docs/native/release/) - one executable per platform, SDK
