@@ -823,6 +823,11 @@ func (a *App) ClearSiteData(o caps.ClearSiteDataOptions) error {
 			// with ERROR_INVALID_STATE. Clear the app origin's storage
 			// through the DevTools protocol there instead.
 			if err := a.clearOriginByProtocol(p.kinds); err != nil {
+				// WebSQL is gone from Chromium: there is nothing to clear,
+				// and the protocol rejects the type (E_INVALIDARG).
+				if p.kinds == dataWebSQL {
+					continue
+				}
 				return fmt.Errorf("windows: clearing %s: %w", p.name, err)
 			}
 			continue
