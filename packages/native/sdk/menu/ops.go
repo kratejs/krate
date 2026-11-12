@@ -43,11 +43,15 @@ func Register(t *bridge.Table, env *bridge.Env) {
 	}
 	if m, ok := env.App.(caps.Menus); ok {
 		m.OnMenu(func(ev caps.MenuEvent) {
+			if runBuiltin(env, ev) {
+				return
+			}
 			topic.Publish(func(e *wire.Encoder) {
 				encodeEvent(e, Event{ID: ev.ID, Window: env.Windows.ID(ev.Window), Checked: ev.Checked})
 			})
 		})
 	}
+	registerContext(t, env)
 	t.Func(IDSetApp, Permission, true, func(ctx krate.Ctx, args *wire.Decoder, out *wire.Encoder) error {
 		r := codec.Args(args, IDSetApp)
 		items := decodeItems(r, 0)

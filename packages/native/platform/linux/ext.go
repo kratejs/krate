@@ -132,6 +132,11 @@ type ext struct {
 	gtkSelFree           func(sd uintptr)
 	gtkSelSet            func(sd, typ uintptr, format int32, data unsafe.Pointer, n int32)
 	gtkSelGetTarget      func(sd uintptr) uintptr
+	gtkSelGetData        func(sd uintptr) uintptr
+	gtkSelGetLength      func(sd uintptr) int32
+	gtkSelSetText        func(sd uintptr, text unsafe.Pointer, n int32) int32
+	gtkClipWaitTargets   func(c uintptr, atoms *uintptr, n *int32) int32
+	gdkAtomName          func(atom uintptr) uintptr
 
 	// gdk-pixbuf
 	pixbufLoaderNew   func(typ string, gerr *uintptr) uintptr
@@ -294,6 +299,11 @@ func loadExt() *ext {
 	bind(gtk, &e.gtkSelFree, "gtk_selection_data_free")
 	bind(gtk, &e.gtkSelSet, "gtk_selection_data_set")
 	bind(gtk, &e.gtkSelGetTarget, "gtk_selection_data_get_target")
+	bind(gtk, &e.gtkSelGetData, "gtk_selection_data_get_data")
+	bind(gtk, &e.gtkSelGetLength, "gtk_selection_data_get_length")
+	bind(gtk, &e.gtkSelSetText, "gtk_selection_data_set_text")
+	bind(gtk, &e.gtkClipWaitTargets, "gtk_clipboard_wait_for_targets")
+	bind(gdk, &e.gdkAtomName, "gdk_atom_name")
 
 	bind(pix, &e.pixbufLoaderNew, "gdk_pixbuf_loader_new_with_type")
 	bind(pix, &e.pixbufLoaderWrite, "gdk_pixbuf_loader_write")

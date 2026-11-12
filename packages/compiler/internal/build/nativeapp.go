@@ -207,6 +207,8 @@ type NativeWindowMeta struct {
 	Permissions *[]string `json:"permissions,omitempty"`
 	// KeepAlive is native.window.keepAlive.
 	KeepAlive bool `json:"keepAlive,omitempty"`
+	// ContextMenu is native.window.contextMenu ("" means default).
+	ContextMenu string `json:"contextMenu,omitempty"`
 	// Chrome is the window chrome (native.window.titleBar, transparent,
 	// backdrop, vibrancy, titleBarOverlay, trafficLightPosition, tabbing).
 	Chrome *NativeChromeMeta `json:"chrome,omitempty"`
@@ -520,6 +522,7 @@ func (b *Builder) BuildNativeApp(opts NativeAppOptions) (*NativeAppResult, error
 	if eff.Bundle.MacOS.Agent {
 		m.Mac = &NativeMacMeta{Agent: true}
 	}
+	m.Window.ContextMenu = eff.Window.ContextMenu
 	m.Plugins = b.NativePluginNames()
 	if !opts.Derive {
 		var useNotes []string
@@ -554,7 +557,7 @@ func (b *Builder) BuildNativeApp(opts NativeAppOptions) (*NativeAppResult, error
 
 	if h := b.NativeHost(); h != nil {
 		res.HostGroups = h.Groups
-		children, notes, err := writeHostChildren(h, appDir, eff.Permissions)
+		children, notes, err := writeHostChildren(h, appDir, eff.Permissions, b.InspectHost)
 		if err != nil {
 			return nil, err
 		}
@@ -738,7 +741,15 @@ func (b *Builder) compileGoHost(out, goos, goarch string, strip bool) error {
 	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
 		return err
 	}
-	args := []string{"build", "-trimpath"}
+	args := []string{"build"}
+	if b.DebugGo && !strip {
+		// A debugger needs the optimizer and inliner off, and the source
+		// paths in the debug info to be the real ones (no -trimpath) so that
+		// a breakpoint in src/lib/tasks.go finds its file.
+		args = append(args, "-gcflags=all=-N -l")
+	} else {
+		args = append(args, "-trimpath")
+	}
 	if strip {
 		args = append(args, "-ldflags=-s -w")
 	}
@@ -889,9 +900,10 @@ func (b *Builder) deriveNativePermissions(eff *config.NativeConfig, uses feature
 // into the app directory and returns their app.json entries. The scriptc
 // variant is not copied: development runs that code on QuickJS, and a release
 // build compiles the bundle.
-func writeHostChildren(h *hostts.Result, appDir string, perms []string) ([]NativeHostChildMeta, []string, error) {
+func writeHostChildren(h *hostts.Result, appDir string, perms []string, inspect string) ([]NativeHostChildMeta, []string, error) {
 	var out []NativeHostChildMeta
 	var notes []string
+	inspectAddrs := InspectAddrs(inspect, len(h.Groups))
 	for _, g := range h.Groups {
 		rt := runtimes.Runtime(g.Runtime)
 		if !rt.Child() {
@@ -901,8 +913,12 @@ func writeHostChildren(h *hostts.Result, appDir string, perms []string) ([]Nativ
 		if err := copyNativeFile(g.Bundle, filepath.Join(appDir, filepath.FromSlash(rel))); err != nil {
 			return nil, nil, err
 		}
+		cmd := runtimes.Command(rt, perms)
+		if len(inspectAddrs) > len(out) {
+			cmd = runtimes.WithInspect(cmd, rt, inspectAddrs[len(out)])
+		}
 		meta := NativeHostChildMeta{
-			Runtime: g.Runtime, Entry: rel, Command: runtimes.Command(rt, perms),
+			Runtime: g.Runtime, Entry: rel, Command: cmd,
 			Funcs: append([]string{}, g.Funcs...), Streams: append([]string{}, g.Streams...), Signals: append([]string{}, g.Signals...),
 		}
 		if _, err := os.Stat(g.SourceMap); err == nil {

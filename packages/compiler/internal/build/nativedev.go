@@ -206,7 +206,7 @@ type nativeShell struct {
 // shellTaggedPrefixes are the stderr prefixes the shell already adds.
 var shellTaggedPrefixes = []string{"[gohost] ", "[host] ", "[node] ", "[bun] ", "[deno] ", "[webview] ", "krate-shell: "}
 
-func startNativeShell(path, appDir string, browser bool, addr string, stderr io.Writer) (*nativeShell, error) {
+func startNativeShell(path, appDir string, browser bool, addr string, stderr io.Writer, env []string) (*nativeShell, error) {
 	args := []string{"--dev"}
 	if browser {
 		args = append(args, "--browser")
@@ -216,6 +216,9 @@ func startNativeShell(path, appDir string, browser bool, addr string, stderr io.
 	}
 	args = append(args, appDir)
 	cmd := exec.Command(path, args...)
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err
@@ -352,7 +355,14 @@ type NativeDevOptions struct {
 	Stderr io.Writer
 	// OnURL, if set, receives the browser-mode URL once printed.
 	OnURL func(url string)
-	Ctx   context.Context
+	// Debug, when set, starts the Go host under Delve and/or the JavaScript
+	// host children with --inspect.
+	Debug *NativeDebugOptions
+	// ShellEnv is added to the shell's environment.
+	ShellEnv []string
+	// OnDebug, if set, receives the Delve address before the shell starts.
+	OnDebug func(addr string)
+	Ctx     context.Context
 }
 
 // RunNativeDev builds the project as a native app and runs it under the shell
@@ -406,6 +416,10 @@ func runNativeDevOnce(o NativeDevOptions) (bool, error) {
 	b.Env = env
 	b.DevMode = true
 	b.SetContext(ctx)
+	dbg, err := prepareNativeDebug(b, o.Debug)
+	if err != nil {
+		return false, err
+	}
 	hub := NewDevHub()
 	nd := &nativeDev{b: b, o: o, hub: hub, restart: make(chan struct{}, 1)}
 	nd.outDir = filepath.Join(root, ".krate", "native", "dev")
@@ -430,6 +444,13 @@ func runNativeDevOnce(o NativeDevOptions) (bool, error) {
 		printf("  %s! %s%s\n", cYellow, n, cReset)
 	}
 	nd.captureState()
+	shellEnv := append([]string(nil), o.ShellEnv...)
+	if dbg != nil {
+		shellEnv = append(shellEnv, dbg.announce(b, &res.Manifest, root)...)
+		if o.OnDebug != nil && dbg.o.GoHost && res.Manifest.GoHost != nil {
+			o.OnDebug(dbg.addr)
+		}
+	}
 
 	addr := ""
 	if o.Port > 0 {
@@ -461,7 +482,7 @@ func runNativeDevOnce(o NativeDevOptions) (bool, error) {
 			shellExe = exe
 		}
 	}
-	sh, err := startNativeShell(shellExe, nd.appDir, o.Browser, addr, o.Stderr)
+	sh, err := startNativeShell(shellExe, nd.appDir, o.Browser, addr, o.Stderr, shellEnv)
 	if err != nil {
 		return false, err
 	}
@@ -842,7 +863,7 @@ func (nd *nativeDev) rewriteHostManifest() error {
 	}
 	m.HostChildren = nil
 	if h := nd.b.NativeHost(); h != nil {
-		children, _, err := writeHostChildren(h, nd.appDir, nativeEffective(nd.b.Cfg).Permissions)
+		children, _, err := writeHostChildren(h, nd.appDir, nativeEffective(nd.b.Cfg).Permissions, nd.b.InspectHost)
 		if err != nil {
 			return err
 		}

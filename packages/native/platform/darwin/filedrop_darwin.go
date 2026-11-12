@@ -55,8 +55,13 @@ func (a *App) OnOpenURLs(fn func(urls []string)) { fileState.urls.setHandler(fn)
 // classMethodImp is class_getMethodImplementation, bound by registerFileClasses.
 var classMethodImp func(class objc.Class, name objc.SEL) uintptr
 
-// registerFileClasses registers the WKWebView subclass. A failure leaves
-// plain WKWebViews, and with them no file drops.
+// registerFileClasses registers KrateWebView, the WKWebView subclass that
+// watches drops (performDragOperation:) and reports context menus before they
+// open (willOpenMenu:withEvent:, see contextmenu_darwin.go). Both overrides
+// call WebKit's own implementation directly instead of objc_msgSendSuper: a
+// KVO observer on the view swaps in a subclass of ours, and a super send from
+// there would find our override again. A failure leaves plain WKWebViews,
+// and with them no file drops and the engine's own context menu.
 func registerFileClasses(a *App) {
 	wk := objc.GetClass("WKWebView")
 	if wk == 0 {
@@ -67,18 +72,26 @@ func registerFileClasses(a *App) {
 		return
 	}
 	purego.RegisterLibFunc(&classMethodImp, libobjc, "class_getMethodImplementation")
+	var methods []objc.MethodDef
 	fileState.superDrag = classMethodImp(wk, sel("performDragOperation:"))
-	if fileState.superDrag == 0 {
-		return
-	}
-	_, err = objc.RegisterClass(webViewClass, wk, nil, nil, []objc.MethodDef{
-		{Cmd: sel("performDragOperation:"), Fn: func(self objc.ID, cmd objc.SEL, sender objc.ID) bool {
+	if fileState.superDrag != 0 {
+		methods = append(methods, objc.MethodDef{Cmd: sel("performDragOperation:"), Fn: func(self objc.ID, cmd objc.SEL, sender objc.ID) bool {
 			// Read the pasteboard first: WebKit's handling may consume it.
 			a.notifyDrop(self, sender)
 			r, _, _ := purego.SyscallN(fileState.superDrag, uintptr(self), uintptr(cmd), uintptr(sender))
 			return byte(r) != 0 // BOOL is a signed char
-		}},
-	})
+		}})
+	}
+	if superMenu := classMethodImp(wk, sel("willOpenMenu:withEvent:")); superMenu != 0 {
+		methods = append(methods, objc.MethodDef{Cmd: sel("willOpenMenu:withEvent:"), Fn: func(self objc.ID, cmd objc.SEL, menu, event objc.ID) {
+			purego.SyscallN(superMenu, uintptr(self), uintptr(cmd), uintptr(menu), uintptr(event))
+			a.webViewWillOpenMenu(self, menu, event)
+		}})
+	}
+	if len(methods) == 0 {
+		return
+	}
+	_, err = objc.RegisterClass(webViewClass, wk, nil, nil, methods)
 	fileState.dropClass = err == nil
 }
 

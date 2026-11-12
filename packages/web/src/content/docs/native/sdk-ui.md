@@ -146,6 +146,152 @@ drop](/docs/native/files/).
 Printing, find in page, zoom, capturing a view as an image, downloads and
 cookies are on their own page, [Web contents](/docs/native/webcontents/).
 
+## Rich clipboard formats
+
+`writeText`, `writeImage` and `writeFiles` each replace the clipboard with one
+kind of data. `write` puts several representations of one value on it together,
+as a browser does on copy, so a rich-text editor pastes the HTML and a plain
+text field pastes the text (Electron's `clipboard.write({ text, html })`):
+
+```ts
+import * as clipboard from "@krate/app/clipboard";
+
+await clipboard.write({ text: "Hello world", html: "<p>Hello <b>world</b></p>", rtf: "{\\rtf1 Hello}" });
+const html = await clipboard.readHtml(); // "<p>Hello <b>world</b></p>", "" when there is none
+const rtf = await clipboard.readRtf();
+const formats = await clipboard.formats(); // ["text/plain", "text/html", "text/rtf"]
+const bytes = await clipboard.readFormat("text/html"); // Uint8Array | null
+await clipboard.writeFormat("application/x-acme-shape", new Uint8Array([1, 2, 3]));
+```
+
+```go
+clipboard.Write(clipboard.Data{Text: "Hello world", HTML: "<p>Hello <b>world</b></p>"})
+html, _ := clipboard.ReadHTML()
+names, _ := clipboard.Formats()
+b, _ := clipboard.ReadFormat("text/html")
+```
+
+Format names are MIME types: `text/plain`, `text/html`, `text/rtf`, `image/png`.
+Each platform maps them to its own: on macOS to the UTIs `public.utf8-plain-text`,
+`public.html`, `public.rtf` and `public.png`; on Windows to `CF_UNICODETEXT` and
+the registered formats `HTML Format`, `Rich Text Format` and `PNG`; on Linux
+they are the X selection targets themselves (`UTF8_STRING` and the other text
+targets answer `text/plain`). A name the platform does not know is used as it
+is, so `writeFormat` and `readFormat` also reach application-specific formats
+(a Windows registered format name, a macOS UTI or a Linux target).
+`writeFormat` replaces everything on the clipboard with that one format.
+`HTML` and `RTF` are returned as text; HTML read from other applications in
+UTF-16 is converted.
+
+On Windows the HTML format is wrapped in the `CF_HTML` envelope (a header of byte
+offsets and `StartFragment`/`EndFragment` markers, UTF-8). `write` and
+`writeFormat("text/html", ...)` build it and `readHtml` and
+`readFormat("text/html")` take the fragment out of it; reading the format by its
+registered name, `readFormat("HTML Format")`, returns the raw envelope. The
+encoder and decoder are plain Go (`platform/caps`) and are unit tested on every
+OS. The clipboard stores the HTML as given: it does not add a charset
+declaration. `formats()` and the `clipboard:html`, `clipboard:rtf` and
+`clipboard:formats` entries of `app.supports` say whether the platform has this
+(`ErrUnsupported` otherwise). `write`, `writeFormat` need `clipboard`;
+`readHtml`, `readRtf`, `formats` and `readFormat` need `clipboard:read`.
+
+## The webview context menu
+
+A right click in a webview shows the engine's own menu (Back, Reload, Copy, Cut,
+Paste, spelling suggestions, Inspect Element in dev builds). The app can change
+that for the whole app, for one window or for one view.
+
+In `krate.config.ts`:
+
+```ts
+native: { window: { contextMenu: "none" } } // or "default" (the default) or "custom"
+```
+
+or at run time (`menu` permission), from the UI or from Go:
+
+```ts
+import * as menu from "@krate/app/menu";
+
+await menu.setContextMenu({ mode: "none" });                       // no menu at all
+await menu.setContextMenu({ mode: "extend", items: [               // the engine's menu plus these
+  { id: "share", label: "Share link" },
+]}, { window: "*" });                                              // "*": every window without its own setting
+await menu.setContextMenu({ mode: "custom" }, { view: "sidebar" }); // this view only
+
+// custom: the click arrives as an event and the answer is a list of items,
+// drawn by the native menu code (the same as menu.popup).
+const stop = menu.onContextMenu((e) => [
+  ...menu.defaultContextItems(e),   // Copy, Paste, Inspect Element, ... for what was clicked
+  { kind: "separator" },
+  { id: "share", label: "Share", disabled: !e.linkUrl },
+]);
+menu.onMenu("share", (e) => { /* ... */ });
+```
+
+```go
+menu.SetContextMenu("", "", menu.ContextOptions{Mode: menu.ContextCustom})
+menu.OnContextMenu(func(i menu.ContextInfo) []menu.Item {
+    return append(menu.DefaultContextItems(i), menu.Separator(), menu.Action("share", "Share", ""))
+})
+```
+
+| Mode | A right click |
+| --- | --- |
+| `default` | shows the engine's menu |
+| `none` | shows nothing |
+| `custom` | shows nothing and sends a `ContextMenuEvent`; `onContextMenu` pops up the items its handler returns (`onContext` just reports the event) |
+| `extend` | shows the engine's menu with the given items added after a separator; their clicks arrive like any menu click (`onMenu`) |
+
+The most specific setting wins: a view's, then its window's, then the app's. The
+window is `""` (the main window), a window id, or `"*"` for the app-wide default;
+`view` is a view id and, when given, makes the setting apply to that view only.
+Extension items are fixed when set; to build a menu per click use `custom`.
+
+The `ContextMenuEvent` holds `window` and `view`; `x` and `y` in the view (like a
+DOM mouse event's `clientX`/`clientY`) and `windowX`, `windowY` in the window
+(what `popup` takes); `kinds`, a list of `"page"` plus `"link"`, `"image"`,
+`"media"`, `"editable"` and `"selection"`; `linkUrl`, `imageUrl`, `mediaUrl`;
+`selectionText`; `misspelled` and `suggestions`; and `inspectable`, true in dev
+builds.
+
+`defaultContextItems(e)` builds a menu from the event with the built-in actions:
+in an editable field undo, redo, cut, copy, paste and select all; Copy for a
+selection; "Copy Link Address" and "Copy Image Address"; spelling suggestions and
+"Add to Dictionary" above them when `misspelled` is set; and "Inspect Element" in
+dev builds. Any item whose id starts with `krate:` (`menu.actions.copy`,
+`menu.actions.replaceMisspelling(word)` and so on) is run by the shell on the view
+that showed the menu and is not reported as a click. Labels are in English.
+
+Spell checking is the `spellcheck` feature (`native.features`, found by scanning
+the UI for editable fields): with it on the engine reports `misspelled` and
+`suggestions`, in the engine's own menu and in the event; with it off the
+`balanced` and `minimal` memory profiles switch it off and there are none.
+
+In dev builds the engine's menu keeps "Inspect Element", and custom menus built
+with `defaultContextItems` end with it too (`krate:inspectElement`). It opens the
+inspector; WebKitGTK cannot select the clicked element for it. A release build
+has no developer tools and the item is absent.
+
+How each platform does it (Linux is verified by a GUI test; macOS and Windows are
+written against the platform API and covered by GUI tests that run in CI):
+
+- **Linux (WebKitGTK):** the `context-menu` signal; its hit test result gives the
+  kind, link, image and media URLs, and the selected text is read with
+  `getSelection()`. Suggestions come from the engine's spelling items.
+  "Add to Dictionary" activates the engine's own "learn spelling" item.
+- **macOS (WKWebView):** the webview is a `WKWebView` subclass that overrides
+  `willOpenMenu:withEvent:` (the override point WebKit documents): `none` and
+  `custom` empty the menu before it opens, `extend` adds items. WebKit gives no hit
+  test, so the kind, URLs and selection come from `elementFromPoint` in the page.
+  Suggestions come from WebKit's spelling items. The position of a popup is the
+  pointer (as for every `popup`).
+- **Windows (WebView2):** `ICoreWebView2_11::ContextMenuRequested`; the target
+  gives kind, link, source and selection, `Handled` suppresses the menu, and
+  `extend` adds items with `ICoreWebView2Environment9::CreateContextMenuItem`. The
+  editing commands go through the DevTools protocol. "Add to Dictionary" and
+  spelling suggestions from the engine's items are best-effort and unverified;
+  a WebView2 runtime without `ICoreWebView2_11` keeps the default menu.
+
 Windows are named by id. The first is `"main"`; `open()` returns a handle with
 the id of the new one. A page does not know its own id unless it is told, so
 pass it through the route (`/settings?w=<id>`) if a window must control itself.
@@ -160,8 +306,8 @@ source. By area:
 |------|-----------|---------|
 | window | `krate/window.open`, `List`, `State`, `Close`, `SetTitle`, `SetSize`, `SetPosition`, `SetAlwaysOnTop`, `SetFullscreen`, `SetFrameless`, `Minimize`, `Maximize`, `Restore`, `Focus`, `Show`, `Hide`, `SetPreventClose`, `Navigate`; views: `krate/window.addView`, `krate/window.removeView`, `krate/window.views`, `krate/window.setLayout`, `krate/window.layout`, `krate/window.focusView`, `krate/window.navigateView`, `krate/window.postMessage`; files: `krate/window.thisView` | `krate/window.events`, `krate/window.viewEvents`, `krate/window.fileDrops` |
 | dialog | `krate/dialog.openFile`, `OpenFolder`, `SaveFile`, `Message` | |
-| clipboard | `krate/clipboard.readText`, `ReadImage`, `ReadFiles` (need `clipboard:read`), `WriteText`, `WriteImage`, `WriteFiles`, `Clear` | |
-| menu | `krate/menu.setApp`, `Popup` | `krate/menu.events` |
+| clipboard | `krate/clipboard.readText`, `ReadImage`, `ReadFiles`, `ReadHtml`, `ReadRtf`, `Formats`, `ReadFormat` (need `clipboard:read`), `WriteText`, `WriteImage`, `WriteFiles`, `Write`, `WriteFormat`, `Clear` | |
+| menu | `krate/menu.setApp`, `Popup`, `SetContextMenu` | `krate/menu.events`, `krate/menu.contextEvents` |
 | tray | `krate/tray.set`, `Remove` | `krate/tray.events` |
 | shortcut | `krate/shortcut.register`, `Unregister` | `krate/shortcut.events` |
 | notify | `krate/notify.send`, `Close` | `krate/notify.events` |
@@ -209,6 +355,8 @@ presses, tray clicks and notification banners are still manual checks.
 |------------|-------|-------|---------|
 | Open, save, folder and message dialogs | Verified (GtkFileChooserNative, GtkMessageDialog; created with the right options and answered programmatically, since a native dialog cannot be clicked headlessly) | Compile-only (NSOpenPanel, NSSavePanel, NSAlert) | Compile-only (GetOpenFileNameW, SHBrowseForFolderW, MessageBoxW; custom button labels are not supported) |
 | Clipboard text, PNG image, file list | Verified | Text, PNG and files compile-only | Compile-only |
+| Clipboard HTML (with a text alternative), RTF, named formats | Verified (GTK selection targets) | Untested (`public.html`, `public.rtf`; GUI test runs in CI) | Untested (`HTML Format` with the `CF_HTML` header, `Rich Text Format`; GUI test runs in CI; the header codec is unit tested everywhere) |
+| Webview context menu: none, custom, extend, built-in actions | Verified (right click through XTEST; hit test, positions, spelling items not exercised: no dictionary) | Untested (`willOpenMenu:withEvent:`; GUI test runs in CI) | Untested (`ContextMenuRequested`; GUI test runs in CI) |
 | Menu bar and context menus | Verified (GtkMenuBar in each window; popups at the pointer) | Compile-only (global menu bar) | Compile-only (accelerators are shown but not active) |
 | Multiple windows on routes, title, size | Verified | CI (two windows, title, size) | CI (two windows, title, size) |
 | Windows share one web process; hide with release, `keepAlive`, memory-pressure event | Verified (related web views; the WebKitWebProcess count is asserted) | Compile-only (private single-process switch behind `respondsToSelector`) | Compile-only (one shared environment; `put_IsVisible` and `MemoryUsageTargetLevel` on hide) |

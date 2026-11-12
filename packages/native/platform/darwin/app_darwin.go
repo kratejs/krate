@@ -79,6 +79,7 @@ type App struct {
 	windows map[objc.ID]*Window
 	tasks   map[objc.ID]*taskState
 	byWeb   map[objc.ID]*view
+	cm      *ctxState // context menu configuration (main thread)
 
 	// viewMu guards viewOwner, which WindowOfView reads from any goroutine.
 	viewMu      sync.Mutex

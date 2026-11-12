@@ -10,6 +10,7 @@ description: Run a Krate Native app with hot reload - Go host restarts, TypeScri
 
 ```sh
 krate native dev [dir] [--browser] [--port <n>] [--shell <path>]
+                 [--debug-go [--debug-addr <host:port>] [--debug-config vscode]] [--debug-host]
 ```
 
 It builds the app directory into `.krate/native/dev/app` (the manifest has
@@ -136,6 +137,91 @@ per process (from `GET /__krate/dev/memory`), the DOM node count and, where the
 engine exposes it, the JS heap. It samples every 2 seconds while open and not at
 all when closed. See [Memory](/docs/native/memory/#the-dev-memory-panel).
 
+## Debugging
+
+### Go host code
+
+```sh
+krate native dev --debug-go
+```
+
+builds the Go host with `-gcflags=all=-N -l` (no optimizer, no inlining, so
+variables and breakpoints behave) and without `-trimpath` (the debug info then
+carries the real paths of `src/lib/*.go`), and starts it under
+[Delve](https://github.com/go-delve/delve) as a headless server. The shell
+starts the Go host child as `dlv exec --headless --listen=<addr> --api-version=2
+--accept-multiclient --continue <binary>`: the app runs at once, as it does
+without the flag, and a debugger attaches whenever you like. The command prints the
+address (default `127.0.0.1:2345`; `--debug-addr` picks another loopback
+address, `:0` a free port, and the default falls back to a free port when taken).
+Only loopback addresses are accepted: anyone who can reach a Delve server can
+run code in your app.
+
+`dlv` has to be installed. When it is not, the command stops with the line to
+run:
+
+```sh
+go install github.com/go-delve/delve/cmd/dlv@latest
+```
+
+It is found through `$KRATE_DLV`, `PATH`, then `$GOBIN` and `$GOPATH/bin`. Use a
+Delve built with a Go version at least as new as the one that builds your app.
+
+Attach with whichever client you use:
+
+- **VS Code** (Go extension): `--debug-config vscode` writes (or merges into)
+  `.vscode/launch.json` a configuration named "Krate: attach to the Go host"
+  (`"request": "attach", "mode": "remote"`, the printed host and port). A
+  `launch.json` with comments is not rewritten; the command prints the
+  configuration to paste instead. Pick it in Run and Debug and set breakpoints in
+  `src/lib/*.go`.
+- **GoLand**: Run, Edit Configurations, add "Go Remote", host `127.0.0.1` and the
+  printed port, then Debug.
+- **dlv** itself: `dlv connect 127.0.0.1:2345`.
+
+A breakpoint in a host function stops the call; the page waits for its answer
+until you continue. A Go edit rebuilds the host and restarts the child as
+usual; the debugger server of the old child goes away with it and a new one
+listens on the same address, so **attach again after a Go edit** (breakpoints
+are per process and are not carried over). In VS Code, stop the session and start
+it again; a "Debug: Restart" does the same. The window, the page and the UI state
+stay as they are.
+
+`--debug-go` needs Go host code and a dev run; it has no effect on `krate native
+build`, whose Go host is always optimized. Delve cannot debug a cross-compiled
+host, so `--target` should be this machine.
+
+### TypeScript host code
+
+With the default `quickjs` runtime the host code runs in the shell's embedded
+QuickJS engine, which has no debugger protocol, so there is nothing to attach an
+editor to. What helps there:
+
+- `console.log` and friends from host code appear in the terminal tagged
+  `[host]`;
+- an uncaught error reaches the UI as a `KrateError` whose `data.stack` is mapped
+  through the source map, so you see `file:line` in your TypeScript;
+- the [host inspector](#host-inspector) lists every call with its duration and
+  error;
+- to step through the same code, set `native.host.runtime` to `"node"`, `"bun"` or
+  `"deno"` while you debug (the code is the same; see [Host
+  runtimes](/docs/native/runtimes/)) and use the flag below.
+
+With host code on a `node`, `bun` or `deno` [child](/docs/native/runtimes/):
+
+```sh
+krate native dev --debug-host [--debug-config vscode]
+```
+
+starts each child with `--inspect=127.0.0.1:<port>`, the first on 9229 and the
+next ones on the following ports (the command prints which runtime has which).
+The host bundle ships a source map, so breakpoints in your `.host.ts` files bind.
+Attach with VS Code's "Attach" debug type for Node (`--debug-config vscode` writes
+"Krate: attach to the node host" with `"restart": true`, so the editor reconnects
+by itself each time a host edit restarts the child), or open `chrome://inspect` in
+Chrome and add the address. For Bun use the Bun extension or
+`https://debug.bun.sh`; no configuration is written for it.
+
 ## Finding the shell
 
 In order:
@@ -155,6 +241,7 @@ shows which shell was found and whether the webview it needs is installed.
 ## Limitations
 
 - The shell restarts for a new dynamic route (the fallback table is read at start).
+- A debugger attached with `--debug-go` has to attach again after each Go edit (see [Debugging](#debugging)).
 - On Windows the Go host binary cannot be replaced while it runs; a Go edit reports that.
 - Page edits reload the page; there is no component-level state-preserving HMR.
 - The "Open in editor" button of the web overlay is not available.

@@ -372,6 +372,14 @@ export interface NativeWindowConfig {
    * tray click brings it back on the same route. Default false.
    */
   keepAlive?: boolean;
+  /**
+   * What a right click in the webview does. "default" keeps the engine's menu;
+   * "none" shows nothing; "custom" shows nothing and reports the click, so the
+   * page or host code can answer with its own menu (`menu.onContextMenu` in
+   * `@krate/app`). Per window or view, `menu.setContextMenu` overrides it.
+   * Default "default".
+   */
+  contextMenu?: "default" | "none" | "custom";
 }
 
 /** Runtime for TypeScript host code in the native target. */

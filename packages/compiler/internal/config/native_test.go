@@ -29,7 +29,7 @@ func TestNativeLoadsFullBlock(t *testing.T) {
 		"native": {
 			"appId": "com.acme.app", "productName": "Acme", "version": "1.0.0",
 			"platforms": ["macos"], "icons": "./assets/icon.png",
-			"window": {"width": 900, "height": 600, "resizable": false, "titleBar": "hidden", "keepAlive": true},
+			"window": {"width": 900, "height": 600, "resizable": false, "titleBar": "hidden", "keepAlive": true, "contextMenu": "custom"},
 			"permissions": ["dialog", "shell:openExternal"],
 			"deepLinks": ["acme"],
 			"host": {"runtime": "node", "version": "22", "bundle": false, "islands": {"sharp": "node"}},
@@ -43,7 +43,7 @@ func TestNativeLoadsFullBlock(t *testing.T) {
 		t.Errorf("host lists: %v %v", cfg.HostFunctions, cfg.HostDirs)
 	}
 	n := cfg.EffectiveNative()
-	if n.AppID != "com.acme.app" || n.Window.Width != 900 || *n.Window.Resizable || n.Window.TitleBar != "hidden" || !n.Window.KeepAlive {
+	if n.AppID != "com.acme.app" || n.Window.Width != 900 || *n.Window.Resizable || n.Window.TitleBar != "hidden" || !n.Window.KeepAlive || n.Window.ContextMenu != "custom" {
 		t.Errorf("native = %+v", n)
 	}
 	if n.Host.Runtime != "node" || *n.Host.Bundle || n.Host.Islands["sharp"] != "node" || n.Release.Compile != "always" {
@@ -145,6 +145,7 @@ func TestValidateNative(t *testing.T) {
 		{"version", func(n *NativeConfig) { n.Version = "1.0" }, "semantic version"},
 		{"platform", func(n *NativeConfig) { n.Platforms = []string{"beos"} }, "unknown platform"},
 		{"titleBar", func(n *NativeConfig) { n.Window.TitleBar = "glass" }, "titleBar"},
+		{"contextMenu", func(n *NativeConfig) { n.Window.ContextMenu = "popup" }, "contextMenu"},
 		{"negative size", func(n *NativeConfig) { n.Window.Width = -1 }, "width and height"},
 		{"permission", func(n *NativeConfig) { n.Permissions = []string{"camera"} }, "unknown permission"},
 		{"deep link", func(n *NativeConfig) { n.DeepLinks = []string{"acme://"} }, "URL scheme"},

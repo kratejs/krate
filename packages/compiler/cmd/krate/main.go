@@ -87,6 +87,14 @@ type cliFlags struct {
 	WantShell     bool
 	GoHost        bool
 	Browser       bool
+	// DebugGo runs the Go host under Delve in `krate native dev`; DebugAddr
+	// is the address it listens on, DebugConfig names an editor to write a
+	// launch config for ("vscode"), DebugHost inspects the JavaScript host
+	// children (node, bun, deno).
+	DebugGo     bool
+	DebugAddr   string
+	DebugConfig string
+	DebugHost   bool
 	// Memory and Idle belong to `krate native profile --memory`.
 	Memory  bool
 	Idle    time.Duration
@@ -389,7 +397,7 @@ var valuedFlags = map[string]bool{
 	"--config": true, "--out-dir": true, "--target": true, "--mode": true,
 	"--report": true, "--token": true, "--root": true, "--cpuprofile": true,
 	"--memprofile": true, "--host": true, "--port": true, "--out": true, "--shell": true, "--layout": true,
-	"--scriptc-fail-on": true, "--idle": true, "--grep": true, "--workers": true,
+	"--scriptc-fail-on": true, "--idle": true, "--grep": true, "--workers": true, "--debug-addr": true, "--debug-config": true,
 }
 
 // parseFlagsChecked parses CLI flags, returning an error for malformed values
@@ -449,6 +457,10 @@ func parseFlagsChecked(args []string) (cliFlags, []string, error) {
 					return flags, nil, fmt.Errorf("--idle needs a duration such as 30s or 1m, got %q", val)
 				}
 				flags.Idle, flags.IdleSet = d, true
+			case "--debug-addr":
+				flags.DebugAddr = val
+			case "--debug-config":
+				flags.DebugConfig = val
 			case "--mode":
 				flags.Mode = val
 			case "--report":
@@ -475,6 +487,10 @@ func parseFlagsChecked(args []string) (cliFlags, []string, error) {
 		switch {
 		case args[i] == "--browser":
 			flags.Browser = true
+		case args[i] == "--debug-go":
+			flags.DebugGo = true
+		case args[i] == "--debug-host":
+			flags.DebugHost = true
 		case args[i] == "--memory":
 			flags.Memory = true
 		case args[i] == "--list":

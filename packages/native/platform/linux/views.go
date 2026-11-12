@@ -195,6 +195,7 @@ func (a *App) connectView(v *view) {
 	api.gSignalConnectData(v.widget, "permission-request", cbPermission, uintptr(v.ref), 0, 0)
 	a.connectChrome(v)
 	a.connectPage(v)
+	a.connectContext(v)
 }
 
 // PrimaryView is the view the window was created with.

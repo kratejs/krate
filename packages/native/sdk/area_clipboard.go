@@ -19,6 +19,9 @@ func init() {
 			case "clipboard", "clipboard:image", "clipboard:files":
 				_, ok := env.App.(caps.Clipboard)
 				return ok, true
+			case "clipboard:html", "clipboard:rtf", "clipboard:formats":
+				_, ok := env.App.(caps.RichClipboard)
+				return ok, true
 			}
 			return false, false
 		},

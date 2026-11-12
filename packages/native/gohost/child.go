@@ -57,6 +57,17 @@ type ChildOptions struct {
 	// carries a random token. JavaScript host children use it on Windows,
 	// where Node, Bun and Deno cannot use AF_UNIX (see TransportFor).
 	Transport string
+	// Wrap, when set, decides how the child is started: it gets the program
+	// and its arguments and returns what to run instead (a debugger that
+	// starts the program, for example). The wrapper must start the program
+	// with the same stdin, stdout, stderr and environment, and the "ready"
+	// line may then follow its own output, so the ready line is accepted
+	// anywhere on stdout.
+	Wrap func(binary string, args []string) (name string, argv []string)
+	// BeforeStop, when set, runs before a wrapped child is stopped, so the
+	// wrapper can shut down cleanly (a debugger that outlives its program
+	// would otherwise be killed after the grace period).
+	BeforeStop func()
 }
 
 // Child manages one Go host child process at a time.
@@ -254,7 +265,11 @@ func (c *Child) startLocked(ctx context.Context) error {
 		listen = socket
 	}
 
-	cmd := exec.Command(c.binary, expandSocketArgs(c.o.Args, socket)...)
+	name, argv := c.binary, expandSocketArgs(c.o.Args, socket)
+	if c.o.Wrap != nil {
+		name, argv = c.o.Wrap(c.binary, argv)
+	}
+	cmd := exec.Command(name, argv...)
 	cmd.Dir = c.o.Dir
 	cmd.Env = append(append(os.Environ(), c.env...), SocketEnv+"="+listen)
 	if tcp {
@@ -286,7 +301,7 @@ func (c *Child) startLocked(ctx context.Context) error {
 		first := isOut
 		for sc.Scan() {
 			line := strings.TrimRight(sc.Text(), "\r")
-			if first || (isOut && c.o.ReadyAnyLine) {
+			if first || (isOut && (c.o.ReadyAnyLine || c.o.Wrap != nil)) {
 				if addr, ok := hosttransport.ReadyAddr(line); ok && (addr != "") == tcp {
 					first = false
 					readyOnce.Do(func() { readyAddr = addr; close(ready) })
@@ -350,6 +365,9 @@ func (c *Child) stopRunLocked() {
 	c.run = nil
 	// Detach first so nothing is sent to a dying child.
 	c.remote.SetTarget(nil, Base)
+	if c.o.BeforeStop != nil {
+		c.o.BeforeStop()
+	}
 	_ = r.stdin.Close()
 	select {
 	case <-r.exited:

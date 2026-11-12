@@ -51,6 +51,7 @@ type view struct {
 	hMsg       unsafe.Pointer // WebMessageReceived (streamed responses)
 	hPerm      unsafe.Pointer // PermissionRequested
 	hScreen    unsafe.Pointer // ScreenCaptureStarting (WebView2 runtimes with ICoreWebView2_27)
+	hCtx       unsafe.Pointer // ContextMenuRequested
 	streams    streamTable
 	pending    []func()
 	path       string
@@ -241,6 +242,7 @@ func (v *view) controllerCompleted(hr, controller uintptr) {
 	if v.zoom != 0 {
 		vcall(v.controller, ctlPutZoomFactor, f64(v.zoom))
 	}
+	a.hookContextMenu(v)
 
 	w.placeViews()
 	vcall(v.controller, ctlPutIsVisible, 1)
@@ -285,7 +287,7 @@ func (v *view) closeController() {
 		comRelease(v.webview)
 		v.webview = nil
 	}
-	for _, h := range []*unsafe.Pointer{&v.hRes, &v.hNav, &v.hClose, &v.hMsg, &v.hFail, &v.hPerm, &v.hScreen} {
+	for _, h := range []*unsafe.Pointer{&v.hRes, &v.hNav, &v.hClose, &v.hMsg, &v.hFail, &v.hPerm, &v.hScreen, &v.hCtx} {
 		if *h != nil {
 			comRelease(*h)
 			*h = nil

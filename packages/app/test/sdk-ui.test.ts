@@ -81,6 +81,28 @@ describe("clipboard", () => {
   });
 });
 
+describe("clipboard rich formats", () => {
+  it("writes several representations and reads them back by name", async () => {
+    setup({
+      "krate/clipboard.write": () => null,
+      "krate/clipboard.readHtml": () => "<b>x</b>",
+      "krate/clipboard.readRtf": () => "{\\rtf1}",
+      "krate/clipboard.formats": () => ["text/plain", "text/html"],
+      "krate/clipboard.readFormat": ([n]) => (n === "text/html" ? new Uint8Array([60, 98, 62]) : null),
+      "krate/clipboard.writeFormat": () => null,
+    });
+    await clipboard.write({ text: "x", html: "<b>x</b>" });
+    expect(seen[0].args).toEqual([{ text: "x", html: "<b>x</b>" }]);
+    expect(await clipboard.readHtml()).toBe("<b>x</b>");
+    expect(await clipboard.readRtf()).toBe("{\\rtf1}");
+    expect(await clipboard.formats()).toEqual(["text/plain", "text/html"]);
+    expect(Array.from((await clipboard.readFormat("text/html"))!)).toEqual([60, 98, 62]);
+    expect(await clipboard.readFormat("image/png")).toBeNull();
+    await clipboard.writeFormat("application/x-acme", new Uint8Array([1, 2]));
+    expect(seen[seen.length - 1].args[0]).toBe("application/x-acme");
+  });
+});
+
 describe("window", () => {
   it("hide sends the release flag only when asked, and show restores", async () => {
     setup({ "krate/window.hide": () => null, "krate/window.show": () => null });
@@ -301,6 +323,60 @@ describe("menu", () => {
     expect(errors).toHaveLength(1);
     expect((errors[0] as KrateError).code).toBe("not_found");
     stop();
+  });
+});
+
+describe("context menu", () => {
+  const ev = (over: Partial<menu.ContextMenuEvent> = {}): menu.ContextMenuEvent => ({
+    window: "w1", view: "w1", x: 1, y: 2, windowX: 3, windowY: 4, kinds: ["page"], linkUrl: "", imageUrl: "", mediaUrl: "",
+    selectionText: "", misspelled: "", suggestions: [], inspectable: false, ...over,
+  });
+
+  it("setContextMenu sends the target, mode and items", async () => {
+    setup({ "krate/menu.setContextMenu": () => null });
+    await menu.setContextMenu({ mode: "none" });
+    await menu.setContextMenu({ mode: "extend", items: [{ id: "a", label: "A" }] }, { window: "*" });
+    await menu.setContextMenu({ mode: "custom" }, { view: "v2" });
+    expect(seen[0].args).toEqual(["", "", { mode: "none", items: [] }]);
+    expect((seen[1].args as any)[0]).toBe("*");
+    expect((seen[1].args as any)[2].items[0].id).toBe("a");
+    expect(seen[2].args.slice(0, 2)).toEqual(["", "v2"]);
+  });
+
+  it("onContextMenu pops up the answer at the window coordinates", async () => {
+    setup(
+      { "krate/menu.popup": () => null },
+      {
+        "krate/menu.contextEvents": async function* () {
+          yield ev({ windowX: 30, windowY: 40, kinds: ["page", "link"], linkUrl: "https://e.x/" });
+          yield ev({ windowX: 1, windowY: 1 });
+          await new Promise(() => {});
+        } as unknown as FakeHandler,
+      },
+    );
+    const stop = menu.onContextMenu((e) => (e.kinds.includes("link") ? [{ id: "open", label: "Open" }] : null));
+    await flushAll();
+    stop();
+    const pops = seen.filter((c) => c.id === "krate/menu.popup");
+    expect(pops).toHaveLength(1);
+    expect(pops[0].args.slice(0, 3)).toEqual(["w1", 30, 40]);
+  });
+
+  it("defaultContextItems follows what was clicked", () => {
+    const ids = (e: menu.ContextMenuEvent) => menu.defaultContextItems(e).map((i) => i.id ?? i.kind ?? i.label);
+    expect(ids(ev())).toEqual([]);
+    expect(ids(ev({ kinds: ["page", "selection"] }))).toEqual(["krate:copy", "krate:selectAll"]);
+    expect(ids(ev({ kinds: ["page", "link"], linkUrl: "https://e.x/", inspectable: true }))).toEqual([
+      "krate:copyLink:https://e.x/",
+      "separator",
+      "krate:inspectElement",
+    ]);
+    const spell = ids(ev({ kinds: ["page", "editable"], misspelled: "teh", suggestions: ["the"] }));
+    expect(spell.slice(0, 3)).toEqual(["krate:replaceMisspelling:the", "krate:addToDictionary", "separator"]);
+    expect(spell).toContain("krate:cut");
+    expect(spell).toContain("krate:paste");
+    expect(ids(ev({ kinds: ["page", "editable"] }))[0]).toBe("krate:undo");
+    expect(ids(ev({ kinds: ["page", "editable"], misspelled: "xx" }))[0]).toBe("No Guesses Found");
   });
 });
 

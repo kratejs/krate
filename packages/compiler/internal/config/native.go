@@ -198,6 +198,11 @@ type NativeWindow struct {
 	// and window.show() (or reopening from the tray) brings it back on the
 	// same route. Default false.
 	KeepAlive bool `json:"keepAlive,omitempty"`
+	// ContextMenu is what a right click in the webview does: "default" (the
+	// engine's menu), "none" (no menu) or "custom" (no menu; the page or host
+	// code answers the menu.onContextMenu event with items). It applies to
+	// every window that does not set its own with menu.setContextMenu.
+	ContextMenu string `json:"contextMenu,omitempty"`
 }
 
 // NativeTitleBarOverlay is the caption button overlay of a hidden title bar.
@@ -444,6 +449,7 @@ var (
 	NativeHostRuntimes   = []string{"quickjs", "node", "bun", "deno", "scriptc"}
 	NativeIslandRuntimes = []string{"node", "bun", "deno", "quickjs"}
 	nativeTitleBars      = []string{"native", "hidden", "none"}
+	nativeContextMenus   = []string{"default", "none", "custom"}
 	nativeCompileModes   = []string{"auto", "always", "never"}
 	nativeInstallers     = []string{"msix", "nsis"}
 	nativeWebView2Modes  = []string{"download", "embed", "fixed", "none"}
@@ -616,6 +622,10 @@ func (c *Config) validateNative() (warnings []string, err error) {
 	}
 	if err := n.validateChrome(); err != nil {
 		return nil, err
+	}
+	if n.Window.ContextMenu != "" && !oneOf(n.Window.ContextMenu, nativeContextMenus) {
+		return nil, nativeErr("window.contextMenu", fmt.Sprintf("must be \"default\", \"none\" or \"custom\", got %q", n.Window.ContextMenu),
+			"\"default\" keeps the engine's menu, \"none\" shows nothing, \"custom\" reports the click so the app can answer with its own menu (menu.onContextMenu)")
 	}
 	for _, p := range n.Permissions {
 		if !IsNativePermission(p) {

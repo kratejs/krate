@@ -466,10 +466,15 @@ func (a *app) restartGoHost() error {
 		return fmt.Errorf("shell: the Go host binary: %w", err)
 	}
 	if a.child == nil {
-		c := gohost.NewChild(gohost.ChildOptions{
+		co := gohost.ChildOptions{
 			Logf:   func(format string, args ...any) { a.logf(format, args...) },
 			Prefix: "[gohost] ",
-		})
+		}
+		if addr := os.Getenv(DebugEnv); addr != "" && a.opts.Dev {
+			co.Wrap, co.BeforeStop = dlvWrap(os.Getenv(DlvEnv), addr)
+			a.logf("debugging the Go host: Delve listens on %s", addr)
+		}
+		c := gohost.NewChild(co)
 		env := []string{
 			"KRATE_APP_DIR=" + a.dir,
 			"KRATE_APP_ID=" + man.AppID,
@@ -564,6 +569,15 @@ func (a *app) runNative() error {
 	runErr := platApp.Run(func() {
 		if a.plug != nil {
 			a.plug.Start(platApp, a.sdk)
+		}
+		if pol, _ := man.Window.ContextMenuPolicy(); pol.Mode != caps.ContextMenuDefault {
+			if cm, ok := platApp.(caps.ContextMenus); ok {
+				if err := cm.SetContextMenu(0, 0, pol); err != nil {
+					openErr = fmt.Errorf("shell: window.contextMenu: %w", err)
+					platApp.Quit()
+					return
+				}
+			}
 		}
 		path := man.Window.Path
 		if wp := man.Window.Permissions; wp != nil {

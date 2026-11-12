@@ -219,6 +219,61 @@ func TestClipboardRoundTrip(t *testing.T) {
 	}
 }
 
+func TestClipboardRichFormats(t *testing.T) {
+	r := newRig(t)
+	if err := clipboard.Write(clipboard.Data{Text: "plain", HTML: "<b>bold</b>", RTF: "{\\rtf1 x}"}); err != nil {
+		t.Fatal(err)
+	}
+	if h, _ := clipboard.ReadHTML(); h != "<b>bold</b>" {
+		t.Fatalf("html %q", h)
+	}
+	if v, _ := clipboard.ReadRTF(); v != "{\\rtf1 x}" {
+		t.Fatalf("rtf %q", v)
+	}
+	if s, _ := clipboard.ReadText(); s != "plain" {
+		t.Fatalf("text %q", s)
+	}
+	fm, _ := clipboard.Formats()
+	if !reflect.DeepEqual(fm, []string{"text/plain", "text/html", "text/rtf"}) {
+		t.Fatalf("formats %v", fm)
+	}
+	if err := clipboard.WriteFormat("application/x-acme", []byte{1, 0, 2}); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := clipboard.ReadFormat("application/x-acme"); !bytes.Equal(b, []byte{1, 0, 2}) {
+		t.Fatalf("custom %v", b)
+	}
+	if b, err := clipboard.ReadFormat("text/html"); err != nil || b != nil {
+		t.Fatalf("absent = %v, %v", b, err)
+	}
+	// The page needs clipboard to write and clipboard:read for every read.
+	h := r.ui("clipboard")
+	call := func(id string, enc func(e *wire.Encoder)) string { return uiCall(t, h, id, enc) }
+	if got := call("krate/clipboard.write", func(e *wire.Encoder) {
+		e.BeginObject()
+		e.Key("html")
+		e.String("<i>x</i>")
+		e.EndObject()
+	}); !strings.Contains(got, `"ok":null`) {
+		t.Fatalf("write: %s", got)
+	}
+	for _, id := range []string{"krate/clipboard.readHtml", "krate/clipboard.readRtf", "krate/clipboard.formats"} {
+		if got := call(id, nil); !strings.Contains(got, `"permission":"clipboard:read"`) {
+			t.Fatalf("%s without clipboard:read: %s", id, got)
+		}
+	}
+	if got := call("krate/clipboard.readFormat", func(e *wire.Encoder) { e.String("text/html") }); !strings.Contains(got, "permission_denied") {
+		t.Fatalf("readFormat without clipboard:read: %s", got)
+	}
+	h = r.ui("clipboard", "clipboard:read")
+	if got := uiCall(t, h, "krate/clipboard.readHtml", nil); !strings.Contains(got, `"ok":"\u003ci\u003ex\u003c/i\u003e"`) && !strings.Contains(got, `"ok":"<i>x</i>"`) {
+		t.Fatalf("readHtml: %s", got)
+	}
+	if got := uiCall(t, h, "krate/clipboard.write", func(e *wire.Encoder) { e.Int(3) }); !strings.Contains(got, "bad_args") && !strings.Contains(got, "permission_denied") {
+		t.Fatalf("bad write args: %s", got)
+	}
+}
+
 func TestPermissionGating(t *testing.T) {
 	r := newRig(t)
 	r.app.Text = "secret"
@@ -335,6 +390,124 @@ func TestMenuEvents(t *testing.T) {
 	}
 	if err := menu.SetApp(nil); err != nil || len(r.app.AppMenu) != 0 {
 		t.Fatalf("clear %v %v", err, r.app.AppMenu)
+	}
+}
+
+func TestContextMenuSDK(t *testing.T) {
+	r := newRig(t)
+	if err := menu.SetContextMenu("", "", menu.ContextOptions{Mode: menu.ContextCustom}); err != nil {
+		t.Fatal(err)
+	}
+	if err := menu.SetContextMenu("*", "", menu.ContextOptions{Mode: menu.ContextExtend, Items: []menu.Item{menu.Action("x", "Extra", "")}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := menu.SetContextMenu("main", "main", menu.ContextOptions{Mode: menu.ContextNone}); err != nil {
+		t.Fatal(err)
+	}
+	ps := r.app.ContextPolicies
+	if len(ps) != 3 || ps[0].Window != r.main.Ref() || ps[0].View != 0 || ps[0].Policy.Mode != caps.ContextMenuCustom ||
+		ps[1].Window != 0 || ps[1].View != 0 || ps[1].Policy.Mode != caps.ContextMenuExtend || len(ps[1].Policy.Items) != 1 || ps[1].Policy.Items[0].ID != "x" ||
+		ps[2].View == 0 || ps[2].Policy.Mode != caps.ContextMenuNone {
+		t.Fatalf("policies %+v", ps)
+	}
+	if err := menu.SetContextMenu("nope", "", menu.ContextOptions{Mode: menu.ContextNone}); err == nil {
+		t.Fatal("an unknown window is an error")
+	}
+	if err := menu.SetContextMenu("", "", menu.ContextOptions{Mode: menu.ContextNone, Items: []menu.Item{menu.Action("x", "X", "")}}); err == nil {
+		t.Fatal("items outside extend mode are an error")
+	}
+
+	got := make(chan menu.ContextInfo, 2)
+	cancel, err := menu.OnContextMenu(func(i menu.ContextInfo) []menu.Item {
+		got <- i
+		return append(menu.DefaultContextItems(i), menu.Action("mine", "Mine", ""))
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cancel()
+	waitSubs(t, r, "menu.context")
+	r.app.EmitContext(caps.ContextMenuInfo{
+		Window: r.main.Ref(), View: 1, X: 5, Y: 6, WindowX: 15, WindowY: 26,
+		Kinds: []string{"page", "link", "editable", "selection"}, LinkURL: "https://e.x/", SelectionText: "sel",
+		Misspelled: "teh", Suggestions: []string{"the", "tech"}, Inspectable: true,
+	})
+	var info menu.ContextInfo
+	select {
+	case info = <-got:
+	case <-time.After(3 * time.Second):
+		t.Fatal("no context event")
+	}
+	if info.Window != "main" || info.X != 5 || info.WindowY != 26 || !info.Has("link") || info.LinkURL != "https://e.x/" ||
+		info.SelectionText != "sel" || info.Misspelled != "teh" || !reflect.DeepEqual(info.Suggestions, []string{"the", "tech"}) || !info.Inspectable {
+		t.Fatalf("event %+v", info)
+	}
+	// The answer is popped up at the click.
+	deadline := time.Now().Add(3 * time.Second)
+	for len(r.app.Popups) == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if len(r.app.Popups) != 1 {
+		t.Fatalf("popups %v", r.app.Popups)
+	}
+	var ids []string
+	for _, it := range r.app.Popups[0] {
+		ids = append(ids, it.ID+"/"+it.Label)
+	}
+	want := []string{"krate:replaceMisspelling:the/the", "krate:replaceMisspelling:tech/tech", "krate:addToDictionary/Add to Dictionary", "/",
+		"krate:copyLink:https://e.x//Copy Link Address", "/", "krate:undo/Undo", "krate:redo/Redo", "/", "krate:cut/Cut", "krate:copy/Copy",
+		"krate:paste/Paste", "krate:selectAll/Select All", "/", "krate:inspectElement/Inspect Element", "mine/Mine"}
+	if !reflect.DeepEqual(ids, want) {
+		t.Fatalf("default items:\n got %q\nwant %q", ids, want)
+	}
+
+	// Built-in ids run on the view instead of reaching the page.
+	menuGot := make(chan menu.Event, 4)
+	cancel2, _ := menu.OnClick(func(e menu.Event) { menuGot <- e })
+	defer cancel2()
+	waitSubs(t, r, "menu")
+	ref := r.main.Ref()
+	r.app.EmitMenu(caps.MenuEvent{ID: "krate:copy", Window: ref})
+	r.app.EmitMenu(caps.MenuEvent{ID: menu.ActionReplace("the"), Window: ref})
+	r.app.EmitMenu(caps.MenuEvent{ID: menu.ActionCopyLink("https://e.x/a:b"), Window: ref})
+	r.app.EmitMenu(caps.MenuEvent{ID: "mine", Window: ref})
+	select {
+	case e := <-menuGot:
+		if e.ID != "mine" {
+			t.Fatalf("a built-in id was reported: %+v", e)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("no click")
+	}
+	deadline = time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if s, _ := r.app.ReadText(); s == "https://e.x/a:b" {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if s, _ := r.app.ReadText(); s != "https://e.x/a:b" {
+		t.Fatalf("copyLink put %q on the clipboard", s)
+	}
+	if !reflect.DeepEqual(r.app.ContextCommands, []string{"copy:", "replaceMisspelling:the"}) {
+		t.Fatalf("commands %v", r.app.ContextCommands)
+	}
+
+	// The page needs only the menu permission.
+	h := r.ui("menu")
+	if got := uiCall(t, h, "krate/menu.setContextMenu", func(e *wire.Encoder) {
+		e.String("")
+		e.String("")
+		e.BeginObject()
+		e.Key("mode")
+		e.String("none")
+		e.EndObject()
+	}); !strings.Contains(got, `"ok":null`) {
+		t.Fatalf("setContextMenu from the page: %s", got)
+	}
+	h = r.ui("dialog")
+	if got := uiCall(t, h, "krate/menu.setContextMenu", nil); !strings.Contains(got, "permission_denied") {
+		t.Fatalf("without menu: %s", got)
 	}
 }
 

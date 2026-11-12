@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/kratejs/krate/packages/native/internal/memory"
+	"github.com/kratejs/krate/packages/native/platform/caps"
 	"github.com/kratejs/krate/packages/native/plugin"
 	"github.com/kratejs/krate/packages/native/sdk/media"
 	"github.com/kratejs/krate/packages/native/sdk/permission"
@@ -152,6 +153,10 @@ type WindowSpec struct {
 	// closing the last window releases its webview instead of quitting, and
 	// Show or reopening the window brings it back on the same route.
 	KeepAlive bool `json:"keepAlive,omitempty"`
+	// ContextMenu is what a right click does in every window without a
+	// setting of its own: "" or "default" (the engine's menu), "none", or
+	// "custom" (the click is reported and the app answers with a menu).
+	ContextMenu string `json:"contextMenu,omitempty"`
 	// Chrome is the window chrome: title bar style, transparency, backdrops.
 	Chrome *ChromeSpec `json:"chrome,omitempty"`
 }
@@ -162,6 +167,20 @@ type MacSpec struct {
 	// application menu, as LSUIElement does in a bundled app. The packaged
 	// Info.plist carries the same key.
 	Agent bool `json:"agent,omitempty"`
+}
+
+// ContextMenuPolicy is the mode ContextMenu names, or an error for an
+// unknown one.
+func (w WindowSpec) ContextMenuPolicy() (caps.ContextMenuPolicy, error) {
+	switch w.ContextMenu {
+	case "", "default":
+		return caps.ContextMenuPolicy{Mode: caps.ContextMenuDefault}, nil
+	case "none":
+		return caps.ContextMenuPolicy{Mode: caps.ContextMenuNone}, nil
+	case "custom":
+		return caps.ContextMenuPolicy{Mode: caps.ContextMenuCustom}, nil
+	}
+	return caps.ContextMenuPolicy{}, fmt.Errorf("window.contextMenu must be \"default\", \"none\" or \"custom\", got %q", w.ContextMenu)
 }
 
 // Fallback maps a route pattern in Krate's segment syntax to the file that
@@ -275,6 +294,9 @@ func (m *Manifest) normalize() error {
 		return fmt.Errorf("window.path %q must start with /", m.Window.Path)
 	}
 	if err := m.Window.Chrome.validate(); err != nil {
+		return err
+	}
+	if _, err := m.Window.ContextMenuPolicy(); err != nil {
 		return err
 	}
 	for _, n := range m.Plugins {

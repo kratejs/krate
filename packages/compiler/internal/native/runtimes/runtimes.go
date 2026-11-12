@@ -90,6 +90,24 @@ func Command(rt Runtime, perms []string) []string {
 	}
 }
 
+// WithInspect adds the inspector flag to a command from Command, listening on
+// addr ("host:port"): node, bun and deno all speak the V8 inspector protocol
+// that editors and Chrome DevTools attach to.
+func WithInspect(cmd []string, rt Runtime, addr string) []string {
+	flag := "--inspect=" + addr
+	switch rt {
+	case Bun, Deno:
+		// bun run --inspect=... entry; deno run --inspect=... entry
+		if len(cmd) >= 2 {
+			return append(append(append([]string{}, cmd[:2]...), flag), cmd[2:]...)
+		}
+	}
+	if len(cmd) >= 1 {
+		return append([]string{cmd[0], flag}, cmd[1:]...)
+	}
+	return cmd
+}
+
 // DenoFlags maps native.permissions to the flags a Deno host child runs with.
 // scoped is true for `deno run`, where the socket directory can be named
 // (SockDirPlaceholder); a compiled executable cannot know it, so its read and

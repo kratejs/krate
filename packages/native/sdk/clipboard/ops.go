@@ -23,6 +23,7 @@ func Register(t *bridge.Table, env *bridge.Env) {
 			return f(c, out)
 		}
 	}
+	registerRich(t, env)
 	t.Func(IDReadText, ReadPermission, true, noArgs(IDReadText, func(c caps.Clipboard, out *wire.Encoder) error {
 		s, err := c.ReadText()
 		if err != nil {

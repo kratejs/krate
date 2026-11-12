@@ -674,3 +674,46 @@ func TestAllowedFrameNavigation(t *testing.T) {
 		}
 	}
 }
+
+func TestContextMenuVtableSlots(t *testing.T) {
+	// Slots from the C++ declaration order in WebView2.h.
+	for _, c := range []struct {
+		got, want int
+		name      string
+	}{
+		{cmArgsGetMenuItems, 3, "get_MenuItems"},
+		{cmArgsGetTarget, 4, "get_ContextMenuTarget"},
+		{cmArgsGetLocation, 5, "get_Location"},
+		{cmArgsPutHandled, 8, "put_Handled"},
+		{cmTargetGetKind, 3, "get_Kind"},
+		{cmTargetGetIsEditable, 4, "get_IsEditable"},
+		{cmTargetGetHasLinkUri, 8, "get_HasLinkUri"},
+		{cmTargetGetLinkUri, 9, "get_LinkUri"},
+		{cmTargetGetHasSourceUri, 12, "get_HasSourceUri"},
+		{cmTargetGetSourceUri, 13, "get_SourceUri"},
+		{cmTargetGetHasSelection, 14, "get_HasSelection"},
+		{cmItemGetLabel, 4, "get_Label"},
+		{cmItemGetIsChecked, 12, "get_IsChecked"},
+		{wvAddContextMenuRequested, 100, "add_ContextMenuRequested"},
+		{wvCallDevToolsProtocol, 36, "CallDevToolsProtocolMethod"},
+		{cmTargetGetSelectionText, 15, "get_SelectionText"},
+		{cmItemsGetCount, 3, "get_Count"},
+		{cmItemsGetAt, 4, "GetValueAtIndex"},
+		{cmItemsInsertAt, 6, "InsertValueAtIndex"},
+		{cmItemGetName, 3, "get_Name"},
+		{cmItemPutIsEnabled, 9, "put_IsEnabled"},
+		{cmItemPutIsChecked, 11, "put_IsChecked"},
+		{cmItemGetChildren, 13, "get_Children"},
+		{cmItemAddCustomSelected, 14, "add_CustomItemSelected"},
+		{env9CreateContextMenuItem, 19, "CreateContextMenuItem"},
+	} {
+		if c.got != c.want {
+			t.Errorf("%s: slot %d, want %d", c.name, c.got, c.want)
+		}
+	}
+	for _, s := range []string{iidWebView2_11, iidContextMenuRequestedHandler, iidCustomItemSelectedHandler, iidEnvironment9} {
+		if _, err := parseGUID(s); err != nil {
+			t.Errorf("%s: %v", s, err)
+		}
+	}
+}
