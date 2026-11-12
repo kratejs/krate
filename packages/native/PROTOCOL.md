@@ -154,6 +154,19 @@ A reconnect gets the current values again. Signals are read-only from the UI.
 
 Same frame stream carrying the dev hub's messages as `{"hmr": <message>}`.
 
+## /__krate/chrome (native windows)
+
+The shell serves this endpoint itself, outside the host call protocol; the page
+script that marks drag regions uses it (see the Window chrome docs page).
+`GET` answers JSON about the window the request came from (`decorated`,
+`resizable`, `maximized`, `fullscreen`, `titleBar`, `nativeRegions`, `edges`);
+`POST` takes `{"op": "drag" | "toggleMaximize" | "resize", "edge": "..."}` and
+starts the native move, the maximize toggle or an edge resize (204 on success,
+400 for an unknown op or edge, 501 when the platform cannot start it). The window
+is found from the webview that sent the request, never from a header or
+a field the page controls; it needs no permission because it acts on the
+requester's own window only.
+
 ## Golden vectors
 
 `wire/testdata/*.bin` and their `*.json` descriptions are shared by the Go

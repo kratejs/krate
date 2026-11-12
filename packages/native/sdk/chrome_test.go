@@ -2,6 +2,7 @@ package sdk_test
 
 import (
 	"errors"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -385,5 +386,25 @@ func TestChromeUnsupportedWithoutPlatformSupport(t *testing.T) {
 	}
 	if app.Supports("chrome:backdrop") || app.Supports("chrome:dock") {
 		t.Error("a platform without chrome reports support")
+	}
+}
+
+func TestLaunchArgsDropsTheTerminatorALauncherAdds(t *testing.T) {
+	newRig(t)
+	saved := os.Args
+	defer func() { os.Args = saved }()
+	for _, c := range []struct{ argv, want []string }{
+		{[]string{"app", "--", "--new-window", "x"}, []string{"--new-window", "x"}},
+		{[]string{"app", "notes.txt"}, []string{"notes.txt"}},
+		{[]string{"app"}, nil},
+	} {
+		os.Args = c.argv
+		got, err := app.LaunchArgs()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Join(got, "|") != strings.Join(c.want, "|") {
+			t.Errorf("LaunchArgs for %q = %q, want %q", c.argv, got, c.want)
+		}
 	}
 }

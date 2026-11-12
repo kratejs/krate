@@ -152,3 +152,17 @@ calls `AddView`:
   fetch wrapper (`streamShim` in `msgstream.go`) was not injected or the web
   message channel failed; look for `add_WebMessageReceived` lines on stderr.
   Any other response that never ends is held back by WebView2 until it does.
+
+## Window chrome
+
+Run `KRATE_NATIVE_GUI=1 go test ./platform/windows -run GUIChrome -v`; it asks the window
+procedure for `WM_NCHITTEST` results and reads DWM state back. By eye, with
+`examples/native-chrome` (titleBar `hidden` with `titleBarOverlay`): the system caption
+buttons show in the top right corner over a transparent part of the page and hovering the
+maximize button on Windows 11 shows the Snap Layouts flyout; the window resizes from every
+edge and corner; dragging a `data-krate-drag` bar moves it and a double click maximizes;
+`backdrop: "mica"` shows the wallpaper tint through the page (Windows 11 22H2+; `micaAlt` and
+`acrylic` differ); the taskbar preview shows the thumbnail buttons once the taskbar button
+exists and a click reaches `onThumbClick`; right-clicking the taskbar icon lists the jump
+list tasks, and choosing one starts the app with its arguments (a running instance gets them
+as a second-instance event).

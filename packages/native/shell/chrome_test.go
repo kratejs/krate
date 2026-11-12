@@ -62,3 +62,15 @@ func TestInjectSnippetsOrderAndChromeScript(t *testing.T) {
 		t.Fatalf("got %s", got)
 	}
 }
+
+func TestRunMainLeavesArgumentsAfterTheTerminatorToTheApp(t *testing.T) {
+	var out strings.Builder
+	// --new-window is not a shell flag: after "--" the shell does not read it,
+	// which is how a jump list task passes it.
+	if code := RunMain([]string{"--version", "--", "--new-window", "--open", "x"}, embeddedFS(false), nil, &out); code != 0 {
+		t.Fatalf("exit code %d, output %q", code, out.String())
+	}
+	if strings.TrimSpace(out.String()) != "Embedded 2.3.4" {
+		t.Fatalf("output %q", out.String())
+	}
+}

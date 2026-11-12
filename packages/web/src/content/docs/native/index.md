@@ -88,7 +88,7 @@ modules it found.
 | `productName`, `version` | none | `version` is semver |
 | `platforms` | `windows`, `macos`, `linux` | |
 | `icons` | none | Path of the source icon |
-| `window` | 1280 x 800, `resizable: true`, `titleBar: "native"` | `titleBar` is `native`, `hidden` or `none`; `permissions` [narrows](/docs/native/release/#per-window-scopes) the main window's page; `keepAlive: true` keeps the app running with no window open, for tray apps ([background mode](/docs/native/memory/#windows-and-background-mode)) |
+| `window` | 1280 x 800, `resizable: true`, `titleBar: "native"` | `titleBar` is `native`, `hidden` or `none`, with `transparent`, `backdrop`, `vibrancy`, `titleBarOverlay` and `trafficLightPosition` next to it ([Window chrome](/docs/native/window-chrome/)); `permissions` [narrows](/docs/native/release/#per-window-scopes) the main window's page; `keepAlive: true` keeps the app running with no window open, for tray apps ([background mode](/docs/native/memory/#windows-and-background-mode)) |
 | `permissions` | no restriction | An optional allowlist of [SDK permission names](/docs/native/sdk/#permissions). A build [derives](/docs/native/release/#derived-permissions) the permissions the code needs, writes them to `app.json`, and fails (KR7210) if one is not listed. Unknown names fail the config check |
 | `deepLinks` | none | URL schemes without `://` |
 | `host` | `runtime: "quickjs"` | `runtime` is `quickjs`, `node`, `bun`, `deno` or `scriptc`; `scriptc` needs `experimental.scriptc: true`; `islands` maps a package to `node`, `bun`, `deno` or `quickjs` |

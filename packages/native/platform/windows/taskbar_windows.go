@@ -244,7 +244,7 @@ func (a *App) taskLink(exe string, t caps.JumpTask) (unsafe.Pointer, error) {
 		return nil, fmt.Errorf("windows: IShellLink::SetPath: 0x%08x", uint32(hr))
 	}
 	if len(t.Args) > 0 {
-		vcall(link, linkSetArguments, uintptr(unsafe.Pointer(wstr(caps.QuoteArgs(t.Args)))))
+		vcall(link, linkSetArguments, uintptr(unsafe.Pointer(wstr(caps.QuoteArgs(caps.JumpArgs(t.Args))))))
 	}
 	if t.Description != "" {
 		vcall(link, linkSetDescription, uintptr(unsafe.Pointer(wstr(t.Description))))

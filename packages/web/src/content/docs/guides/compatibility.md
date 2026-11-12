@@ -96,6 +96,9 @@ green run there is what moves a cell.
 | Native: signing and notarization | Partial | Untested | Untested | Krate Native v1 |
 | Native: updater | Supported | Untested | Untested | Krate Native v1 |
 | Native: size, start-up and memory budgets | Supported | Planned | Planned | Krate Native v1 |
+| Native: custom title bars, drag regions and transparency | Supported | Untested | Untested | Krate Native v1 |
+| Native: Mica, Acrylic, vibrancy, caption overlay and traffic lights | n/a | Untested | Untested | Krate Native v1 |
+| Native: tabs, sheets, document state, share menu, dock, thumbnail buttons and jump lists | n/a | Untested | Untested | Krate Native v1 |
 
 ## Details
 
@@ -793,6 +796,49 @@ Known limits:
 - macOS and Windows have no recorded budgets (planned). The CI native job runs the memory profile there and prints a comparison with the linux-amd64 limits (scripts/native-budget-compare.mjs); it is informational until the numbers have been reviewed.
 
 Evidence: `TestNativeBudgetSizes`, `TestNativeBudgetGUI`
+
+### Native: custom title bars, drag regions and transparency
+
+**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+
+native.window.titleBar hidden or none removes the system title bar; the page marks drag regions with data-krate-drag, -webkit-app-region or app-region (read from its style sheets, or by WebView2 itself) and a press starts the native move, a double press maximizes, and frameless windows keep resize edges (GTK draws them in the page, Windows hit-tests them, AppKit keeps its own). The window and webview can be transparent. The request that starts a move names no window: the shell finds it from the webview that sent it.
+
+Known limits:
+
+- Linux: the drag and resize tests press a real pointer with XTEST under openbox on X11; Wayland compositors decide where a dragged window goes and are untested. Transparency needs an RGBA visual and, to show the desktop, a compositing window manager.
+- macOS and Windows: untested. The code compiles for them, the hit test, colors and style arithmetic are unit-tested on every OS, and GUI tests that read AppKit and Win32 state back run in the CI native job; nothing here has run on a Mac or a Windows PC by hand.
+- Windows draws the caption buttons of a hidden title bar itself, over the extended frame, so the page must leave that corner clear; the WebView2 non-client region support needs a recent runtime and falls back to the page script without it.
+- CSS regions are read from style sheets as text: nesting and @import are not followed, and the nearest marked ancestor wins rather than CSS specificity.
+
+Evidence: `TestHandlerOps`, `TestHandlerNeedsAWindowWithChrome`, `TestInfo`, `TestWanted`, `TestScriptParsesAppRegionRules`, `TestHitTest`, `TestParseColor`, `TestChromeOptionsValidate`, `TestGUIChromeTitleBarStyles`, `TestGUIChromeRegionsFromScript`, `TestGUIChromeDragMovesTheWindow`, `TestGUIChromeDoublePressTogglesMaximize`, `TestGUIChromeEdgeResize`, `TestGUIChromeTransparent`, `TestNativeE2EChromeGUI`, `TestGUIChromeHiddenTitleBarHitTest`, `TestGUIChromeNoTitleBarHasNoButtons`, `TestGUIChromeClientAreaFillsTheWindow`, `TestGUIChromeNonClientRegionSupport`, `TestGUIChromeHiddenTitleBar`, `TestGUIChromeNoTitleBarHidesTheButtons`, `TestManifestChrome`, `TestNativeWindowChrome`, `TestChromeWindowOpenOptions`, `fixture:examples/native-chrome/src/pages/index.tsx`
+
+### Native: Mica, Acrylic, vibrancy, caption overlay and traffic lights
+
+**Linux:** n/a - **macOS:** Untested - **Windows:** Untested
+
+Windows 11 22H2 system backdrops (Mica, Mica Alt, Acrylic) behind a transparent webview, the caption buttons Windows draws over a hidden title bar with Snap Layouts on the maximize button (WM_NCHITTEST returns HTMAXBUTTON) and their colors, and on macOS an NSVisualEffectView with any current material behind a transparent WKWebView and a movable traffic light position. Calls the platform lacks reject with unsupported.
+
+Known limits:
+
+- macOS and Windows: untested; see native-chrome-frame. The WebView2 vtables for ICoreWebView2Controller2 and ICoreWebView2Settings9 are generated from WebView2.h and checked against it.
+- Backdrops need Windows 11 22H2 (build 22621); earlier builds reject them. A backdrop shows only where the page is transparent.
+- Vibrancy attaches the effect view to the window's frame view, below the content view, which AppKit allows but does not document.
+
+Evidence: `TestBackdropAndVibrancyTables`, `TestOverlayNormalize`, `TestBackdropAndCaptionColorBuilds`, `TestColorPacking`, `TestFrameMargins`, `TestNCHitInput`, `TestChromeVtables`, `TestGUIChromeBackdrop`, `TestGUIChromeTransparentWebView`, `TestGUIChromeOverlayNeedsHiddenTitleBar`, `TestGUIChromeVibrancy`, `TestGUIChromeVibrancyAtCreation`, `TestGUIChromeHiddenTitleBar`, `TestGUIChromeUnsupportedOnLinux`, `TestChromeUnsupportedWithoutPlatformSupport`
+
+### Native: tabs, sheets, document state, share menu, dock, thumbnail buttons and jump lists
+
+**Linux:** n/a - **macOS:** Untested - **Windows:** Untested
+
+macOS: document-edited and represented-file title bar state, windows as sheets, native window tabs with merge, move and new-tab events, the share picker for text, URLs and files, and menu-bar-only apps (activation policy at run time, LSUIElement in Info.plist from native.bundle.macos.agent, dock icon show and hide). Windows: taskbar thumbnail toolbar buttons with click events and jump list tasks that relaunch the app with arguments.
+
+Known limits:
+
+- macOS and Windows: untested; see native-chrome-frame. The macOS tab test skips when the CI session does not merge windows into tabs, and the share picker is validated but not shown in CI.
+- Thumbnail buttons need Explorer to create the taskbar button; without a shell session they stay pending. The jump list is committed through ICustomDestinationList and checked by its return codes, not by reading the shell's list back.
+- A new-tab event is delivered through the window delegate's newWindowForTab: action, the way AppKit sends it from the tab bar's plus button.
+
+Evidence: `TestInfoPlistAgent`, `TestMetadataAgentFromConfig`, `TestValidateThumbButtons`, `TestValidateJumpTasks`, `TestQuoteArgs`, `TestQuoteArgsRoundTrip`, `TestShareItemsValidate`, `TestThumbButtonLayout`, `TestMakeThumb`, `TestThumbIDs`, `TestSplitCommand`, `TestChromeSheetsTabsThumbs`, `TestChromeAppLevel`, `TestChromeEvents`, `TestChromeRejectsBadArguments`, `TestChromePermissions`, `TestGUIChromeDocumentState`, `TestGUIChromeTabbing`, `TestGUIChromeSheet`, `TestGUIChromeActivationPolicy`, `TestGUIChromeShareValidates`, `TestGUIChromeThumbButtons`, `TestGUIChromeJumpList`
 
 ## How claims are verified
 

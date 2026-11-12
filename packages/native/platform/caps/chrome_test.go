@@ -347,3 +347,26 @@ func TestEdgeIndex(t *testing.T) {
 		t.Error("edge indexes")
 	}
 }
+
+func TestJumpArgs(t *testing.T) {
+	cases := []struct{ in, want []string }{
+		{nil, nil},
+		{[]string{"notes.txt"}, []string{"notes.txt"}},
+		{[]string{"acme://open?x=1"}, []string{"acme://open?x=1"}},
+		{[]string{"--new-window"}, []string{"--", "--new-window"}},
+		{[]string{"open", "-x"}, []string{"--", "open", "-x"}},
+		{[]string{"--"}, []string{"--"}},
+	}
+	for _, c := range cases {
+		got := JumpArgs(c.in)
+		if len(got) != len(c.want) {
+			t.Errorf("JumpArgs(%q) = %q, want %q", c.in, got, c.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != c.want[i] {
+				t.Errorf("JumpArgs(%q) = %q, want %q", c.in, got, c.want)
+			}
+		}
+	}
+}

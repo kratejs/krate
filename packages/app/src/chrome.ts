@@ -180,22 +180,25 @@ export class ChromeWindow {
     return this.cmd("setThumbButtons", buttons.map((b) => ({ ...b, icon: b.icon ?? new Uint8Array(0) })));
   }
   onNewTab(fn: () => void, opts?: SubscribeOptions): () => void {
-    return onEvent((e) => {
+    return onChromeEvent((e) => {
       if (e.window === this.id && e.kind === "new-tab") fn();
     }, opts);
   }
   onThumbClick(fn: (id: string) => void, opts?: SubscribeOptions): () => void {
-    return onEvent((e) => {
+    return onChromeEvent((e) => {
       if (e.window === this.id && e.kind === "thumb-click") fn(e.id);
     }, opts);
   }
 }
 
-export function main(): ChromeWindow {
+// Named mainChrome, getChrome and onChromeEvent (not main, get and onEvent) so
+// that a page can use this module and @krate/app/window together: the bundler
+// does not yet keep same-named exports of two modules apart.
+export function mainChrome(): ChromeWindow {
   return new ChromeWindow("main");
 }
 
-export function get(id: string): ChromeWindow {
+export function getChrome(id: string): ChromeWindow {
   return new ChromeWindow(id);
 }
 
@@ -228,6 +231,6 @@ export function setDockVisible(on: boolean): Promise<void> {
   return call("krate/chrome.setDockVisible", [on]);
 }
 
-export function onEvent(fn: (e: ChromeEvent) => void, opts?: SubscribeOptions): () => void {
+export function onChromeEvent(fn: (e: ChromeEvent) => void, opts?: SubscribeOptions): () => void {
   return subscribe<ChromeEvent>("krate/chrome.events", fn, opts);
 }

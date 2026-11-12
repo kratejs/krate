@@ -882,8 +882,8 @@
       "module": "chrome",
       "exports": [
         "ChromeWindow",
-        "get",
-        "main"
+        "getChrome",
+        "mainChrome"
       ]
     },
     {
@@ -893,8 +893,8 @@
       "module": "chrome",
       "exports": [
         "ChromeWindow",
-        "get",
-        "main"
+        "getChrome",
+        "mainChrome"
       ]
     },
     {
@@ -904,8 +904,8 @@
       "module": "chrome",
       "exports": [
         "ChromeWindow",
-        "get",
-        "main"
+        "getChrome",
+        "mainChrome"
       ]
     },
     {
@@ -915,8 +915,8 @@
       "module": "chrome",
       "exports": [
         "ChromeWindow",
-        "get",
-        "main"
+        "getChrome",
+        "mainChrome"
       ]
     },
     {
@@ -926,8 +926,8 @@
       "module": "chrome",
       "exports": [
         "ChromeWindow",
-        "get",
-        "main"
+        "getChrome",
+        "mainChrome"
       ]
     },
     {
@@ -937,8 +937,8 @@
       "module": "chrome",
       "exports": [
         "ChromeWindow",
-        "get",
-        "main"
+        "getChrome",
+        "mainChrome"
       ]
     },
     {
@@ -948,8 +948,8 @@
       "module": "chrome",
       "exports": [
         "ChromeWindow",
-        "get",
-        "main"
+        "getChrome",
+        "mainChrome"
       ]
     },
     {
@@ -959,8 +959,8 @@
       "module": "chrome",
       "exports": [
         "ChromeWindow",
-        "get",
-        "main"
+        "getChrome",
+        "mainChrome"
       ]
     },
     {
@@ -970,8 +970,8 @@
       "module": "chrome",
       "exports": [
         "ChromeWindow",
-        "get",
-        "main"
+        "getChrome",
+        "mainChrome"
       ]
     },
     {
@@ -981,8 +981,8 @@
       "module": "chrome",
       "exports": [
         "ChromeWindow",
-        "get",
-        "main"
+        "getChrome",
+        "mainChrome"
       ]
     },
     {
@@ -992,8 +992,8 @@
       "module": "chrome",
       "exports": [
         "ChromeWindow",
-        "get",
-        "main"
+        "getChrome",
+        "mainChrome"
       ]
     },
     {
@@ -1003,8 +1003,8 @@
       "module": "chrome",
       "exports": [
         "ChromeWindow",
-        "get",
-        "main"
+        "getChrome",
+        "mainChrome"
       ]
     },
     {
@@ -1014,8 +1014,8 @@
       "module": "chrome",
       "exports": [
         "ChromeWindow",
-        "get",
-        "main"
+        "getChrome",
+        "mainChrome"
       ]
     },
     {
@@ -1025,8 +1025,8 @@
       "module": "chrome",
       "exports": [
         "ChromeWindow",
-        "get",
-        "main"
+        "getChrome",
+        "mainChrome"
       ]
     },
     {
@@ -1036,8 +1036,8 @@
       "module": "chrome",
       "exports": [
         "ChromeWindow",
-        "get",
-        "main"
+        "getChrome",
+        "mainChrome"
       ]
     },
     {
@@ -1047,8 +1047,8 @@
       "module": "chrome",
       "exports": [
         "ChromeWindow",
-        "get",
-        "main"
+        "getChrome",
+        "mainChrome"
       ]
     },
     {
@@ -1058,8 +1058,8 @@
       "module": "chrome",
       "exports": [
         "ChromeWindow",
-        "get",
-        "main"
+        "getChrome",
+        "mainChrome"
       ]
     },
     {
@@ -1114,9 +1114,9 @@
       "module": "chrome",
       "exports": [
         "ChromeWindow",
-        "get",
-        "main",
-        "onEvent"
+        "getChrome",
+        "mainChrome",
+        "onChromeEvent"
       ]
     }
   ]

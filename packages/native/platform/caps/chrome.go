@@ -574,6 +574,19 @@ func quoteArg(s string) string {
 	return b.String()
 }
 
+// JumpArgs returns the argument list a jump list task launches the app with.
+// The shell reads flags of its own (--browser, --addr), so a task argument
+// that starts with "-" goes after a "--", which ends the shell's flag
+// parsing; LaunchArgs drops that leading "--" again.
+func JumpArgs(args []string) []string {
+	for _, a := range args {
+		if strings.HasPrefix(a, "-") && a != "--" {
+			return append([]string{"--"}, args...)
+		}
+	}
+	return args
+}
+
 // JumpLister is implemented by Apps that can set the taskbar jump list
 // (Windows).
 type JumpLister interface {
