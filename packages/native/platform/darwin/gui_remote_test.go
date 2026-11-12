@@ -84,6 +84,15 @@ func TestGUIRemoteCannotReachApp(t *testing.T) {
 	if !guiApp.IsRemoteView(ref) || guiApp.IsRemoteView(9999) {
 		t.Fatal("IsRemoteView")
 	}
+	// Pings other tests' pages sent (an offscreen window loads
+	// /viewping?tag=off) are not the remote page's.
+	for drained := false; !drained; {
+		select {
+		case <-viewPings:
+		default:
+			drained = true
+		}
+	}
 	pageEval(t, w, ref, `window.__res = ""; (async () => {
   const r = {};
   for (const u of ["krate://app/viewping?tag=remote", "krate://app/__krate/call"]) {
@@ -101,10 +110,16 @@ func TestGUIRemoteCannotReachApp(t *testing.T) {
 	if res == "" || strings.Contains(res, "reachable") || !strings.Contains(res, "globals=;") {
 		t.Fatalf("probe result %q", res)
 	}
-	select {
-	case p := <-viewPings:
-		t.Fatalf("a request of the remote page reached the app handler: %+v", p)
-	case <-time.After(1500 * time.Millisecond):
+	for deadline := time.After(1500 * time.Millisecond); ; {
+		select {
+		case p := <-viewPings:
+			if p.tag == "remote" || p.tag == "open" {
+				t.Fatalf("a request of the remote page reached the app handler: %+v", p)
+			}
+			continue
+		case <-deadline:
+		}
+		break
 	}
 	pageEval(t, w, ref, `location.href = "krate://app/viewping?tag=nav"; 1`)
 	l.wait(t, "the refused app navigation", func(e caps.RemoteEvent) bool {
