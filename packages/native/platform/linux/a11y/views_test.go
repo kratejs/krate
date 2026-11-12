@@ -61,7 +61,7 @@ func TestSplitPanesAreReachableAndNamed(t *testing.T) {
 }
 
 func TestSplitDividerResizesFromTheKeyboard(t *testing.T) {
-	need(t)
+	needWM(t)
 	w, _ := splitWindow(t, "Split keys")
 	focusWindow(t, w, "Split keys")
 	fr, _ := topLevel("Split keys")
@@ -105,7 +105,7 @@ func TestSplitDividerResizesFromTheKeyboard(t *testing.T) {
 }
 
 func TestFocusTraversalVisitsEveryView(t *testing.T) {
-	need(t)
+	needWM(t)
 	w, _ := splitWindow(t, "Split tab")
 	focusWindow(t, w, "Split tab")
 	// The page records the last key and its target in its title; Tab until

@@ -37,7 +37,7 @@ func wait(t *testing.T, ch chan dialogResult) dialogResult {
 }
 
 func TestMessageDialogTree(t *testing.T) {
-	need(t)
+	needWM(t)
 	w := open(t, linux.WindowOptions{Title: "Dialog parent"})
 	focusWindow(t, w, "Dialog parent")
 	res := showMessage(w.Ref(), caps.MessageDialogOptions{
@@ -80,7 +80,7 @@ func TestMessageDialogTree(t *testing.T) {
 }
 
 func TestMessageDialogEscapeAndTabOrder(t *testing.T) {
-	need(t)
+	needWM(t)
 	w := open(t, linux.WindowOptions{Title: "Dialog parent 2"})
 	focusWindow(t, w, "Dialog parent 2")
 	res := showMessage(w.Ref(), caps.MessageDialogOptions{
@@ -128,12 +128,18 @@ func TestMessageDialogWithoutTitleIsStillNamed(t *testing.T) {
 	if dlg.Name() == "" {
 		t.Error("a dialog without a title has no accessible name")
 	}
-	_ = client.KeySym("Return")
-	wait(t, res)
+	// Answer it the way an assistive technology does, by its button's action.
+	btn, ok := dlg.Find(named(atspi.RolePushButton, "OK"))
+	if !ok || !btn.DoAction(0) {
+		t.Fatalf("cannot press OK:\n%s", dlg.Dump())
+	}
+	if r := wait(t, res); r.err != nil || r.button != 0 {
+		t.Errorf("OK answered %+v", r)
+	}
 }
 
 func TestFileDialogIsNamedAndClosesWithEscape(t *testing.T) {
-	need(t)
+	needWM(t)
 	w := open(t, linux.WindowOptions{Title: "File parent"})
 	focusWindow(t, w, "File parent")
 	done := make(chan error, 1)

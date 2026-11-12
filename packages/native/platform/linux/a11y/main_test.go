@@ -106,6 +106,16 @@ func need(t *testing.T) {
 	}
 }
 
+// needWM skips a test that needs a window manager: focus and key delivery
+// depend on one (KRATE_NATIVE_WM=1, as for the other window state tests).
+func needWM(t *testing.T) {
+	t.Helper()
+	need(t)
+	if os.Getenv("KRATE_NATIVE_WM") != "1" {
+		t.Skip("set KRATE_NATIVE_WM=1 (a window manager is running) for focus and keyboard tests")
+	}
+}
+
 // waitFor polls fn for up to ten seconds.
 func waitFor(t *testing.T, what string, fn func() bool) {
 	t.Helper()

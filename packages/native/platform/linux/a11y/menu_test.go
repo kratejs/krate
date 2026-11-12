@@ -93,7 +93,7 @@ func TestAppMenuTree(t *testing.T) {
 }
 
 func TestAppMenuKeyboardAccess(t *testing.T) {
-	need(t)
+	needWM(t)
 	var mu sync.Mutex
 	var got []string
 	app.OnMenu(func(e caps.MenuEvent) { mu.Lock(); got = append(got, e.ID); mu.Unlock() })
@@ -149,7 +149,7 @@ func TestAppMenuKeyboardAccess(t *testing.T) {
 }
 
 func TestContextMenuTreeAndEscape(t *testing.T) {
-	need(t)
+	needWM(t)
 	w := open(t, linux.WindowOptions{Title: "Context menu"})
 	focusWindow(t, w, "Context menu")
 	items := []caps.MenuItem{

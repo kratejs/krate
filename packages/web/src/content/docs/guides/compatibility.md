@@ -134,6 +134,7 @@ green run there is what moves a cell.
 | Native: offscreen rendering | Supported | Untested | Untested | Krate Native v1 |
 | Native: remote debugging and automation | Supported | Untested | Untested | Krate Native v1 |
 | Native: browser extensions | n/a | Untested | Untested | Krate Native v1 |
+| Native: accessibility of the shell's own UI | Supported | Untested | Untested | Krate Native v1 |
 
 ## Details
 
@@ -1359,6 +1360,23 @@ Known limits:
 - WebView2 and macOS are written and compiled and never run by the author. On macOS the API's match patterns cover http, https and file pages, so a content script is not expected to run on the app's own krate:// pages.
 
 Evidence: `TestProcsVtableSlots`, `TestNativeE2EProcsGUI`
+
+### Native: accessibility of the shell's own UI
+
+**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+
+The UI the shell draws or configures is checked through each platform's accessibility API: window names in every title bar style, the webview reachable in native, hidden, frameless, transparent, split and remote windows, menus and context menus (roles, names, checked, disabled, accelerators), message and file dialogs, tray, notification, thumbnail button and jump list names, split-pane dividers, and offscreen windows kept out of the tree. Fixes: offscreen windows hidden (Linux AT-SPI, macOS AX), message dialog titles reach the accessible name, split panes and dividers named, tray and notification action and thumbnail button names never empty, Windows message box labels spelled out in the text, macOS alert default button, and drag regions no longer swallow presses on ARIA widgets and focusable elements.
+
+Known limits:
+
+- Linux is checked through AT-SPI on X11 with a private accessibility bus and keys synthesized by at-spi2-registryd (needs the at-spi2-core package and a window manager); Wayland and a real screen reader were not used.
+- macOS is checked in process through NSAccessibility (no permission needed); the AX API tests skip unless the test process is trusted for accessibility, which CI runners are not. Written and compiled, run only in the CI native job.
+- Windows is checked through UI Automation; written and compiled, run only in the CI native job. The caption buttons of a hidden title bar are reported, not required; the notification area, taskbar thumbnails and jump lists are not read by tests (names come from unit-tested helpers).
+- Windows: split-pane dividers are mouse-only, frameless windows have no system menu, offscreen windows stay in the UI Automation tree marked offscreen, and a two-button message box cannot be closed with Esc.
+- macOS: an alert is dismissed with Esc only through a button titled Cancel; the split divider is reachable by VoiceOver but not by a plain keyboard.
+- No screen reader (Orca, VoiceOver, Narrator, NVDA, JAWS) was used on any platform; web content inside the webview is exposed by the engine and not tested here.
+
+Evidence: `TestWindowIsNamedByItsTitle`, `TestWebviewReachableInEveryWindowConfiguration`, `TestOffscreenWindowIsNotExposed`, `TestAppMenuTree`, `TestAppMenuKeyboardAccess`, `TestContextMenuTreeAndEscape`, `TestMessageDialogTree`, `TestMessageDialogEscapeAndTabOrder`, `TestFileDialogIsNamedAndClosesWithEscape`, `TestSplitPanesAreReachableAndNamed`, `TestSplitDividerResizesFromTheKeyboard`, `TestFocusTraversalVisitsEveryView`, `TestRemoteViewIsReachable`, `TestItemPropsAlwaysNameTheIcon`, `TestMenuItemsCarryLabelsStatesAndShortcuts`, `TestTrayLabel`, `TestThumbButtonName`, `TestActionLabel`, `TestDragRegionLeavesControlsAlone`, `TestMessageBoxTextNamesTheMapping`, `TestGUIAccessibilityWindowIsNamedInEveryChrome`, `TestGUIAccessibilityOffscreenWindowIsHidden`, `TestGUIAccessibilityMenuBar`, `TestGUIAccessibilityTrayButtonIsNamed`, `TestGUIAccessibilitySplitViewRole`, `TestGUIAccessibilityAXWindows`, `TestGUIUIAWindowAndWebviewInEveryChrome`, `TestGUIUIAMenuBarIsNamedAndReachable`, `TestGUIUIAMessageBoxIsNamedAndShowsTheMapping`, `TestGUIUIAPopupMenuItemsAndEscape`
 
 ## How claims are verified
 

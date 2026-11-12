@@ -102,7 +102,7 @@ func TestOffscreenWindowIsNotExposed(t *testing.T) {
 }
 
 func TestFrameHasKeyboardFocusInsideTheWebview(t *testing.T) {
-	need(t)
+	needWM(t)
 	w := open(t, linux.WindowOptions{Title: "Keyboard form", Path: "/form"})
 	fr := focusWindow(t, w, "Keyboard form")
 	waitFor(t, "the form document", func() bool { return len(documents(fr)) > 0 && documents(fr)[0].Name() == "Form" })
