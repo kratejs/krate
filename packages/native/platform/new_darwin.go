@@ -17,6 +17,7 @@ func New(opts Options) (App, error) {
 		KeepAlive: opts.KeepAlive,
 		Memory:    mem,
 		Features:  feat,
+		Agent:     opts.Agent,
 	})
 	if err != nil {
 		return nil, err

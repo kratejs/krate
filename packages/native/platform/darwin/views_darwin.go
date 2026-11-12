@@ -77,6 +77,7 @@ func (a *App) setWeb(v *view, web objc.ID) {
 	v.web = web
 	if web != 0 {
 		a.byWeb[web] = v
+		v.w.chromeAdded(web)
 	}
 	if v.primary {
 		v.w.web = web

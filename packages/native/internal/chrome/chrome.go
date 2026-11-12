@@ -76,7 +76,11 @@ func Handler(resolve Resolver) func(w http.ResponseWriter, r *http.Request) (han
 			case "drag":
 				err = c.StartDrag()
 			case "toggleMaximize":
-				err = c.ToggleMaximize()
+				if d, ok := win.(caps.TitleBarDoubleClicker); ok {
+					err = d.TitleBarDoubleClick()
+				} else {
+					err = c.ToggleMaximize()
+				}
 			case "resize":
 				if caps.EdgeIndex(req.Edge) < 0 {
 					http.Error(w, "unknown edge", http.StatusBadRequest)

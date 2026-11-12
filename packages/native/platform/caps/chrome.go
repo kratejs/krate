@@ -384,6 +384,14 @@ type WindowChrome interface {
 	ToggleMaximize() error
 }
 
+// TitleBarDoubleClicker is implemented by Windows whose operating system
+// decides what a double click on the title bar does (macOS: zoom, minimize or
+// nothing, by the user's setting). The page script uses it when it can and
+// otherwise falls back to WindowChrome.ToggleMaximize.
+type TitleBarDoubleClicker interface {
+	TitleBarDoubleClick() error
+}
+
 // WindowDocument is implemented by Windows with a document state (macOS).
 type WindowDocument interface {
 	SetDocumentEdited(on bool) error
