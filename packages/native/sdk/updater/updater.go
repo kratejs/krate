@@ -21,7 +21,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kratejs/krate/packages/native/dist"
+	"github.com/kratejs/krate/packages/native/distinfo"
 	"github.com/kratejs/krate/packages/native/krate"
 	"github.com/kratejs/krate/packages/native/scheme"
 	"github.com/kratejs/krate/packages/native/sdk/internal/glue"
@@ -73,7 +73,7 @@ func init() {
 	krate.RegisterCapability("updater", func() bool {
 		mu.Lock()
 		defer mu.Unlock()
-		return cfg.URL != "" && cfg.PublicKey != "" && dist.Current().SelfUpdate()
+		return cfg.URL != "" && cfg.PublicKey != "" && distinfo.Current().SelfUpdate()
 	})
 }
 
@@ -106,7 +106,7 @@ func current() (updater.Config, error) {
 	if c.URL == "" || c.PublicKey == "" {
 		return updater.Config{}, krate.Errorf("unsupported", "updates are not configured: set native.updater.url and native.updater.publicKey")
 	}
-	if d := dist.Current(); !d.SelfUpdate() {
+	if d := distinfo.Current(); !d.SelfUpdate() {
 		return updater.Config{}, krate.Errorf("unsupported", "updates are not available here: %s", d.UpdateNote())
 	}
 	app, err := sdkos.Current()
@@ -123,7 +123,7 @@ func current() (updater.Config, error) {
 	}
 	return updater.Config{
 		URL: c.URL, PublicKey: c.PublicKey, AppID: app.ID, Version: app.Version, CacheDir: cache, Insecure: allowHTTP,
-		Channel: c.Channel, StateDir: state, Target: dist.Current().Target,
+		Channel: c.Channel, StateDir: state, Target: distinfo.Current().Target,
 		Logf: func(f string, a ...any) { fmt.Fprintf(os.Stderr, "krate: "+f+"\n", a...) },
 	}, nil
 }
@@ -147,7 +147,7 @@ func Boot(logf func(format string, args ...any)) {
 	mu.Lock()
 	c := cfg
 	mu.Unlock()
-	if c.URL == "" || c.PublicKey == "" || !dist.Current().SelfUpdate() {
+	if c.URL == "" || c.PublicKey == "" || !distinfo.Current().SelfUpdate() {
 		return
 	}
 	app, err := sdkos.Current()

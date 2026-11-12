@@ -1,6 +1,6 @@
 package diag
 
-// Native store and sandbox distribution (KR7300 to KR7304).
+// Native store and sandbox distribution (KR7300 to KR7302).
 const (
 	// CodeNativePkgUniversal: the arm64 and amd64 builds cannot be merged into
 	// one macOS universal app.
@@ -10,8 +10,6 @@ const (
 	CodeNativeStoreConfig Code = "KR7301"
 	// CodeNativeSandboxPkg: a Flatpak or Snap package cannot be generated.
 	CodeNativeSandboxPkg Code = "KR7302"
-	// CodeNativeStoreUpdater: native.updater is not allowed in a store build.
-	CodeNativeStoreUpdater Code = "KR7303"
 )
 
 func init() {
@@ -40,13 +38,6 @@ func init() {
 			Explanation: "The Flatpak manifest, AppStream metadata and snapcraft.yaml are generated from `native.*` " +
 				"values; a value that breaks the format (an invalid license expression, a Flatpak runtime version " +
 				"that is not a number, an unknown Snap grade) is reported with the field and a hint.",
-		},
-		CodeInfo{
-			Code:  CodeNativeStoreUpdater,
-			Title: "Self-updater in a store build",
-			Explanation: "Stores deliver updates themselves: the Mac App Store, the Microsoft Store, Flathub and the " +
-				"Snap Store reject apps that replace their own files. A store build removes `native.updater` from " +
-				"the packaged app.json and warns; the running app also refuses updater calls inside a sandbox.",
 		},
 	)
 }

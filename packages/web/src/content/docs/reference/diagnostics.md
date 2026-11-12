@@ -696,7 +696,7 @@ Most formats are written by the compiler itself (zip, tar.gz, .deb, .rpm, MSIX, 
 
 **Unknown or unsupported package format**
 
-Formats by platform: macOS `app`, `zip`, `dmg`; Windows `zip`, `nsis`, `msix`; Linux `tar.gz`, `deb`, `rpm`, `appimage`. `native.bundle.windows.installer` takes `msix` or `nsis`; `native.bundle.linux.formats` takes `deb`, `rpm` and `appimage`.
+Formats by platform: macOS `app`, `zip`, `dmg`, `mas`; Windows `zip`, `nsis`, `msix`, `msix-store`; Linux `tar.gz`, `deb`, `rpm`, `appimage`, `flatpak`, `snap`. `native.bundle.windows.installer` takes `msix` or `nsis`; `native.bundle.linux.formats` takes `deb`, `rpm`, `appimage`, `flatpak` and `snap`.
 
 ### KR7223
 
@@ -925,12 +925,6 @@ A Mac App Store build (`--target mas`) needs `native.bundle.macos.mas.teamId` an
 **Flatpak or Snap package cannot be generated**
 
 The Flatpak manifest, AppStream metadata and snapcraft.yaml are generated from `native.*` values; a value that breaks the format (an invalid license expression, a Flatpak runtime version that is not a number, an unknown Snap grade) is reported with the field and a hint.
-
-### KR7303
-
-**Self-updater in a store build**
-
-Stores deliver updates themselves: the Mac App Store, the Microsoft Store, Flathub and the Snap Store reject apps that replace their own files. A store build removes `native.updater` from the packaged app.json and warns; the running app also refuses updater calls inside a sandbox.
 
 ## KR8xxx: islands, compiled packages and general React compatibility
 

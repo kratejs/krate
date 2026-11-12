@@ -47,17 +47,21 @@ with `KR7220` and says which build command to run.
 | macOS | `app` | compiler | `<Name>.app`, kept under `packages/darwin-<arch>/` |
 | macOS | `zip` | compiler | always; the update file. Keeps modes and symlinks |
 | macOS | `dmg` | `hdiutil` | only on macOS; elsewhere you get the `.zip` and a note |
+| macOS | `mas` | compiler, `codesign`, `productbuild` | the Mac App Store variant, a sandboxed `.app` and a `.pkg`; see [Stores](/docs/native/distribution/#mac-app-store) |
 | Windows | `zip` | compiler | always; the update file |
 | Windows | `nsis` | `makensis` | install dir, shortcuts, uninstaller, URL protocols, WebView2 check |
 | Windows | `msix` | compiler | unsigned; sign it with `krate native sign` |
+| Windows | `msix-store` | compiler | the Microsoft Store package, `.msixupload` and (x64 + arm64) `.msixbundle`; see [Stores](/docs/native/distribution/#microsoft-store) |
 | Linux | `tar.gz` | compiler | always; the update file |
 | Linux | `deb` | compiler | default Linux installer |
 | Linux | `rpm` | compiler | via the `rpmpack` library |
 | Linux | `appimage` | `appimagetool` | needs a squashfs writer, so the tool is required |
+| Linux | `flatpak` | compiler, `flatpak-builder` | manifest, metainfo and Flathub manifest always; the `.flatpak` bundle needs the tool. [Details](/docs/native/distribution/#flatpak) |
+| Linux | `snap` | compiler, `snapcraft` | `snapcraft.yaml` always; the `.snap` needs the tool. [Details](/docs/native/distribution/#snap) |
 
 Without `--format` the formats come from the config:
 `native.bundle.windows.installer` (`msix` or `nsis`) and
-`native.bundle.linux.formats` (`deb`, `rpm`, `appimage`; default `deb`). A tool
+`native.bundle.linux.formats` (`deb`, `rpm`, `appimage`, `flatpak`, `snap`; default `deb`). A tool
 that is missing for a format you asked for fails with `KR7221` and an install
 hint. `--format` takes a comma separated list and replaces the config.
 
@@ -200,6 +204,13 @@ files (the shell layout) the executable and files go to `/usr/lib/<name>/` and
 `.rpm` requires `webkit2gtk4.1` and `gtk3`. Check a `.deb` with
 `dpkg-deb --info` and `--contents`.
 
+## Universal apps and stores
+
+One macOS app for Apple silicon and Intel (`--arch universal`), Flatpak, Snap,
+the Mac App Store and the Microsoft Store are on their own page:
+[Stores and universal apps](/docs/native/distribution/). The feed of a
+universal app is `latest-darwin-universal.json`.
+
 ## Update files and `--notes`
 
 The zip (macOS, Windows) or tar.gz (Linux) is also the file the
@@ -210,7 +221,9 @@ The zip (macOS, Windows) or tar.gz (Linux) is also the file the
 
 | Flag | Meaning |
 |------|---------|
-| `--target <os/arch>` | `linux`, `windows`, `darwin` with `amd64` or `arm64`; default this machine |
+| `--target <os/arch>` | `linux`, `windows`, `darwin` with `amd64` or `arm64`; default this machine. `darwin/universal` merges arm64 and x86_64, `windows/universal` bundles x64 and arm64 for the Store, `mas` is the Mac App Store variant |
+| `--arch universal` | the same as `universal` as the architecture of the target; also on `native build --release` |
+| `--installer-identity <name>` | the installer identity that signs the Mac App Store `.pkg` |
 | `--format <list>` | formats from the table |
 | `--out <dir>` | native output directory (default `dist-native`) |
 | `--sign`, `--notarize` | sign (and notarize) while packaging; see [Signing](/docs/native/signing/) |
@@ -225,4 +238,5 @@ The zip (macOS, Windows) or tar.gz (Linux) is also the file the
 
 `KR7220` nothing to package, `KR7221` tool missing, `KR7222` unknown format for
 the OS, `KR7223` icon, `KR7228` write failure, `KR7229` metadata (appId,
-version, MSIX publisher).
+version, MSIX publisher). Universal, store and sandbox formats: `KR7300` to
+`KR7302` (see [Stores](/docs/native/distribution/#diagnostics)).

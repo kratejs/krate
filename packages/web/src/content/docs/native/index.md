@@ -61,6 +61,8 @@ prerendered at build time.
   and archives for macOS, Windows and Linux, icons and Windows resources.
 - [Signing and notarization](/docs/native/signing/) - `krate native sign` and
   `notarize`.
+- [Stores and universal apps](/docs/native/distribution/) - one macOS app for
+  arm64 and Intel, Flatpak, Snap, the Mac App Store and the Microsoft Store.
 - [Updates](/docs/native/updater/) - in-app updates with signed update files.
 - [Memory](/docs/native/memory/) - memory profiles, shared web process,
   tray-style background mode and measured numbers.

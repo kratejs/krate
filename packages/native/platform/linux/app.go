@@ -20,7 +20,7 @@ import (
 	"syscall"
 
 	"github.com/ebitengine/purego"
-	"github.com/kratejs/krate/packages/native/dist"
+	"github.com/kratejs/krate/packages/native/distinfo"
 	"github.com/kratejs/krate/packages/native/internal/memory"
 	"github.com/kratejs/krate/packages/native/platform/caps"
 )
@@ -142,7 +142,7 @@ func New(opts Options) (*App, error) {
 	if id == "" {
 		id = "krate-app"
 	}
-	if dist.Current().Sandboxed() && os.Getenv("GTK_USE_PORTAL") == "" {
+	if distinfo.Current().Sandboxed() && os.Getenv("GTK_USE_PORTAL") == "" {
 		// File chooser dialogs go through the desktop portal in a sandbox.
 		os.Setenv("GTK_USE_PORTAL", "1")
 	}

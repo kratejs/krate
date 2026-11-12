@@ -9,7 +9,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/kratejs/krate/packages/native/dist"
+	"github.com/kratejs/krate/packages/native/distinfo"
 	"github.com/kratejs/krate/packages/native/krate"
 	"github.com/kratejs/krate/packages/native/platform/caps"
 	"github.com/kratejs/krate/packages/native/sdk/internal/dbusiface"
@@ -53,7 +53,7 @@ func newPortalBackend(conn dbusiface.Conn, publish func(caps.NotifyEvent)) (*por
 
 // usePortal reports whether notifications should go through the portal.
 func usePortal() bool {
-	return dist.Current().Sandboxed() && sessionbus.NameHasOwner(portalDest)
+	return distinfo.Current().Sandboxed() && sessionbus.NameHasOwner(portalDest)
 }
 
 func (b *portalBackend) onAction(s dbusiface.Signal) {

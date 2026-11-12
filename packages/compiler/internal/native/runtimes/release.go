@@ -184,7 +184,7 @@ func buildNode(target Target, in ReleaseInput, exe string) error {
 		nodeBin = envGet(env)
 		if nodeBin == "" {
 			return unavailable(Node, "building the node executable for "+target.String()+" needs that platform's node binary",
-				"download it from nodejs.org and set "+env+" to the path of its node executable")
+				"download it from nodejs.org and set "+env+" to the path of its node executable"+universalNodeHint(target))
 		}
 	}
 	work := filepath.Join(filepath.Dir(exe), ".sea-"+strings.TrimSuffix(filepath.Base(exe), ".exe"))
@@ -327,3 +327,13 @@ func copyFile(src, dst string, mode os.FileMode) error {
 }
 
 func runtimeIsDarwin() bool { return HostTarget().OS == "darwin" }
+
+// universalNodeHint adds what a universal macOS app needs: Node's single
+// executable application is one binary per architecture, and the node tool
+// cannot produce the other architecture's runtime.
+func universalNodeHint(t Target) string {
+	if t.OS != "darwin" {
+		return ""
+	}
+	return " (a universal macOS app needs a node binary for each architecture: the one that runs on this machine is used, the other comes from KRATE_NODE_DARWIN_ARM64 or KRATE_NODE_DARWIN_AMD64; Bun and Deno cross-compile by themselves)"
+}

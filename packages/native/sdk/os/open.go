@@ -9,7 +9,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/kratejs/krate/packages/native/dist"
+	"github.com/kratejs/krate/packages/native/distinfo"
 	"github.com/kratejs/krate/packages/native/krate"
 )
 
@@ -80,7 +80,7 @@ func startHandler(raw string) error {
 	default:
 		// A sandboxed app (Flatpak, Snap) hands the URL to the OpenURI portal,
 		// which opens it in the host's default handler.
-		if dist.Current().Sandboxed() {
+		if distinfo.Current().Sandboxed() {
 			if err := portalOpen(raw); err == nil {
 				return nil
 			}
