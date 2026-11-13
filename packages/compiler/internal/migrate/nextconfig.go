@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
@@ -40,80 +41,125 @@ type nextHeaderRule struct {
 
 var nextConfigWrapper = regexp.MustCompile(`(?m)(?:export\s+default|module\.exports\s*=)\s*[A-Za-z_$][\w$]*(?:\.[\w$]+)*\s*\(`)
 
+// nextConfigNotes is everything readNextConfig could not translate.
+type nextConfigNotes struct {
+	// Warnings are informational: the key is harmless or has no effect.
+	Warnings []string
+	// Skipped lists whole keys (redirects, rewrites, headers) that were not
+	// read at all, each with the reason.
+	Skipped []string
+	// Manual is one item per rule or key that needs a human.
+	Manual []ManualItem
+}
+
 // readNextConfig extracts static redirects/rewrites/headers/basePath from a
-// next.config file. Each key is translated on its own: a key it cannot prove
-// static is listed in skipped (with the reason) and the others still
-// translate. ok is false only when the config as a whole is not a static
-// default export object (function configs, plugin wrappers, computed values).
-func readNextConfig(path string) (data nextConfigData, warnings, skipped []string, ok bool) {
+// next.config file. Each rule and key is translated on its own: anything it
+// cannot prove static is reported in notes and the rest still translates. A
+// rule guarded by has/missing is never emitted, because Krate matches on the
+// path only and an unconditional copy would be looser than the original. ok is
+// false only when the config as a whole is not a static default export object
+// (function configs, plugin wrappers, computed values).
+func readNextConfig(path string) (data nextConfigData, notes nextConfigNotes, ok bool) {
 	var out nextConfigData
+	file := filepath.Base(path)
 	src, err := os.ReadFile(path)
 	if err != nil {
-		return out, []string{err.Error()}, nil, false
+		notes.Warnings = []string{err.Error()}
+		return out, notes, false
 	}
-	var wrapperWarnings []string
 	if nextConfigWrapper.Match(src) {
-		wrapperWarnings = append(wrapperWarnings, "next.config is wrapped in a function call; plugin wrapper behavior is not migrated")
+		notes.Warnings = append(notes.Warnings, "next.config is wrapped in a function call; plugin wrapper behavior is not migrated")
 	}
 	prog := parser.New(lexer.New(string(src)).Tokenize()).ParseProgram()
 	obj := defaultExportObject(prog)
 	if obj == nil {
-		return out, []string{"config is not a static default export object"}, nil, false
+		notes.Warnings = append(notes.Warnings, "config is not a static default export object")
+		return out, notes, false
+	}
+	rc := &ruleCtx{file: file, dir: filepath.Dir(path), src: string(src), prog: prog}
+
+	for _, p := range obj.Properties {
+		if p != nil && (p.Spread || p.Computed) {
+			notes.Manual = append(notes.Manual, ManualItem{
+				Source: file,
+				Reason: "next.config spreads or computes keys; the keys it adds were not read",
+				Hint:   "copy the keys that matter (redirects, rewrites, headers, images) into krate.config.ts",
+			})
+			break
+		}
 	}
 
 	if v := prop(obj, "basePath"); v != nil {
 		if s, ok := stringValue(v); ok {
 			out.BasePath = s
+		} else {
+			notes.Manual = append(notes.Manual, ManualItem{Source: file, Reason: "basePath is computed and was not translated", Hint: "set basePath in krate.config.ts (see Base path in the config reference)"})
 		}
 	}
 	if v := prop(obj, "redirects"); v != nil {
-		rules, reason := redirectRules(v)
+		rules, items, reason := rc.redirects(v)
 		if reason != "" {
-			skipped = append(skipped, "redirects ("+reason+")")
-		} else {
-			out.Redirects = rules
+			notes.Skipped = append(notes.Skipped, "redirects ("+reason+")")
 		}
+		out.Redirects = rules
+		notes.Manual = append(notes.Manual, items...)
 	}
 	if v := prop(obj, "rewrites"); v != nil {
-		rws, ok := rewritesValue(returnedValue(v))
-		if !ok {
-			skipped = append(skipped, "rewrites (not a static array or beforeFiles/afterFiles/fallback object)")
-		} else {
-			out.Rewrites = rws
+		rws, items, reason := rc.rewrites(returnedValue(v))
+		if reason != "" {
+			notes.Skipped = append(notes.Skipped, "rewrites ("+reason+")")
 		}
+		out.Rewrites = rws
+		notes.Manual = append(notes.Manual, items...)
 	}
 	if v := prop(obj, "headers"); v != nil {
-		rules, reason := headerRules(v)
+		rules, items, reason := rc.headers(v)
 		if reason != "" {
-			skipped = append(skipped, "headers ("+reason+")")
-		} else {
-			out.Headers = rules
+			notes.Skipped = append(notes.Skipped, "headers ("+reason+")")
+			rc.headersLost = true
 		}
+		out.Headers = rules
+		notes.Manual = append(notes.Manual, items...)
+		notes.Manual = append(notes.Manual, rc.securityItem()...)
 	}
-	var notes []string
+	notes.Warnings = append(notes.Warnings, duplicateRuleWarnings(out)...)
+
 	if v := prop(obj, "images"); v != nil {
 		images, imageWarnings := imagesConfig(v)
 		if len(images) > 0 {
 			out.Images = images
 		}
-		notes = append(notes, imageWarnings...)
+		for _, w := range imageWarnings {
+			if item, manual := imageManualItem(file, w); manual {
+				notes.Manual = append(notes.Manual, item)
+			} else {
+				notes.Warnings = append(notes.Warnings, w)
+			}
+		}
 	}
 	if v := prop(obj, "env"); v != nil {
 		if env, ok := staticStringMap(v); ok {
 			out.Env = env
 		} else {
-			notes = append(notes, "next.config env is not a static string map")
+			notes.Manual = append(notes.Manual, ManualItem{
+				Source: file,
+				Reason: "env is not a static string map and was not translated",
+				Hint:   "Krate inlines only KRATE_PUBLIC_* values from .env at build time; put the values there (see Environment Variables)",
+			})
 		}
 	}
-	if exp := prop(obj, "experimental"); exp != nil {
-		// authInterrupts only enables forbidden() and unauthorized(), which
-		// Krate always supports.
-		if eo, ok := exp.(*ast.ObjectExpr); !ok || len(eo.Properties) != 1 || eo.Properties[0].Key != "authInterrupts" {
-			notes = append(notes, "next.config experimental keys are not translated")
-		}
+	if loadEnvConfigCall.MatchString(rc.src) {
+		notes.Manual = append(notes.Manual, ManualItem{
+			Source: file,
+			Reason: "loadEnvConfig(...) is called in next.config; the .env files it loads are not read by Krate",
+			Hint:   "Krate loads .env, .env.<mode>, .env.local and .env.<mode>.local from the project root only (select the mode with --mode); copy or symlink the monorepo root .env into the project, or export the variables in the shell",
+		})
 	}
-	return out, append(wrapperWarnings, notes...), skipped, true
+	translateOtherKeys(file, obj, &notes)
+	return out, notes, true
 }
+
+var loadEnvConfigCall = regexp.MustCompile(`\bloadEnvConfig\s*\(`)
 
 // returnedValue unwraps `async () => value` and `async function () { return
 // value }` (what Next's redirects/rewrites/headers usually are) to value. Any
@@ -135,122 +181,6 @@ func returnedValue(v ast.Expr) ast.Expr {
 		return paren.Expr
 	}
 	return ret.Value
-}
-
-// redirectRules reads a static redirects array (or a function returning one).
-// The second result is empty on success, else why the value is not static.
-func redirectRules(v ast.Expr) ([]nextRedirect, string) {
-	arr, ok := returnedValue(v).(*ast.ArrayExpr)
-	if !ok {
-		return nil, "not a static array"
-	}
-	var out []nextRedirect
-	for i, el := range arr.Elements {
-		item, ok := el.(*ast.ObjectExpr)
-		if !ok {
-			return nil, fmt.Sprintf("redirects[%d] is not an object", i)
-		}
-		source, ok1 := stringValue(prop(item, "source"))
-		dest, ok2 := stringValue(prop(item, "destination"))
-		if !ok1 || !ok2 {
-			return nil, fmt.Sprintf("redirects[%d] has a non-static source or destination", i)
-		}
-		perm := false
-		if p := prop(item, "permanent"); p != nil {
-			if b, ok := boolValue(p); ok {
-				perm = b
-			}
-		}
-		if sc := prop(item, "statusCode"); sc != nil {
-			if n, ok := intValue(sc); ok {
-				perm = n == 301 || n == 308
-			}
-		}
-		out = append(out, nextRedirect{Source: source, Destination: dest, Permanent: perm})
-	}
-	return out, ""
-}
-
-// headerRules reads a static headers array (or a function returning one).
-func headerRules(v ast.Expr) ([]nextHeaderRule, string) {
-	arr, ok := returnedValue(v).(*ast.ArrayExpr)
-	if !ok {
-		return nil, "not a static array"
-	}
-	var out []nextHeaderRule
-	for i, el := range arr.Elements {
-		item, ok := el.(*ast.ObjectExpr)
-		if !ok {
-			return nil, fmt.Sprintf("headers[%d] is not an object", i)
-		}
-		source, ok := stringValue(prop(item, "source"))
-		if !ok {
-			return nil, fmt.Sprintf("headers[%d] has a non-static source", i)
-		}
-		harr, ok := prop(item, "headers").(*ast.ArrayExpr)
-		if !ok {
-			return nil, fmt.Sprintf("headers[%d].headers is not a static array", i)
-		}
-		rule := nextHeaderRule{Source: source, Headers: map[string]string{}}
-		for j, hel := range harr.Elements {
-			hm, ok := hel.(*ast.ObjectExpr)
-			if !ok {
-				return nil, fmt.Sprintf("headers[%d].headers[%d] is not an object", i, j)
-			}
-			k, ok1 := stringValue(prop(hm, "key"))
-			val, ok2 := stringValue(prop(hm, "value"))
-			if !ok1 || !ok2 {
-				return nil, fmt.Sprintf("headers[%d].headers[%d] has a non-static key or value", i, j)
-			}
-			rule.Headers[k] = val
-		}
-		out = append(out, rule)
-	}
-	return out, ""
-}
-
-func rewritesValue(v ast.Expr) ([]nextRewrite, bool) {
-	if arr, ok := v.(*ast.ArrayExpr); ok {
-		return rewriteArray(arr)
-	}
-	obj, ok := v.(*ast.ObjectExpr)
-	if !ok {
-		return nil, false
-	}
-	var out []nextRewrite
-	for _, key := range []string{"beforeFiles", "afterFiles", "fallback"} {
-		v := prop(obj, key)
-		if v == nil {
-			continue
-		}
-		arr, ok := v.(*ast.ArrayExpr)
-		if !ok {
-			return nil, false
-		}
-		rws, ok := rewriteArray(arr)
-		if !ok {
-			return nil, false
-		}
-		out = append(out, rws...)
-	}
-	return out, true
-}
-
-func rewriteArray(arr *ast.ArrayExpr) ([]nextRewrite, bool) {
-	var out []nextRewrite
-	for _, el := range arr.Elements {
-		item, ok := el.(*ast.ObjectExpr)
-		if !ok {
-			return nil, false
-		}
-		source, ok1 := stringValue(prop(item, "source"))
-		dest, ok2 := stringValue(prop(item, "destination"))
-		if !ok1 || !ok2 {
-			return nil, false
-		}
-		out = append(out, nextRewrite{Source: source, Destination: dest})
-	}
-	return out, true
 }
 
 func defaultExportObject(prog *ast.Program) *ast.ObjectExpr {

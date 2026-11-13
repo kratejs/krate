@@ -85,7 +85,25 @@ The first pass:
   literal array), maps static root `metadata` to `site` config, and wraps static,
   synchronous, and async `generateMetadata` results in `<Head>`. A key it cannot
   prove static is reported as manual work on its own; the other keys still
-  translate. An `async` page keeps `async` and its wrapper is `async` too, so the
+  translate, and so does each rule: in a `headers()` array, the static entries
+  translate while a computed one (a helper call, `value: compute()`) is reported
+  with its source path. A redirect, rewrite or header rule with `has` or `missing`
+  is never translated, because Krate matches on the path only and an
+  unconditional copy would apply to every request (a guarded `/store` redirect
+  would send `/store` away for everyone); each is reported with its source and
+  condition, and the hint points at `middleware.ts`. Identical duplicate rules in
+  the output are warned about. When headers could not be translated and the
+  config (or a local module it imports) mentions `Content-Security-Policy`,
+  `Strict-Transport-Security`, `X-Frame-Options` or similar, a separate item says
+  the security headers were not migrated. `krate.config.ts` can import a local
+  module, so a helper that builds static headers can be imported there; values
+  that depend on the request, such as a CSP nonce, belong in `middleware.ts`.
+  Every other `next.config` key gets its own item with a hint instead of one
+  generic warning: `transpilePackages`, `output: 'standalone'`,
+  `serverExternalPackages`, `outputFileTracingIncludes`, computed
+  `images.remotePatterns` or `env`, `experimental` flags, and a
+  `loadEnvConfig(...)` call (Krate loads `.env*` from the project root only).
+  An `async` page keeps `async` and its wrapper is `async` too, so the
   page renders per request;
 - keeps `export const revalidate`, `dynamic` and `dynamicParams` on pages, which
   Krate honors, and notes in the plan what each does (ISR, SSR, 404 for unlisted

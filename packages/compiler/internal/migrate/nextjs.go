@@ -189,18 +189,19 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 	nextConfigStatic := false
 	if nextConfig != "" {
 		rep.Detected = append(rep.Detected, filepath.Base(nextConfig))
-		data, warnings, skipped, ok := readNextConfig(nextConfig)
-		for _, w := range warnings {
+		data, notes, ok := readNextConfig(nextConfig)
+		for _, w := range notes.Warnings {
 			rep.Warnings = append(rep.Warnings, filepath.Base(nextConfig)+": "+w)
 		}
 		if ok {
 			nextCfg = data
 			nextConfigStatic = true
-			rep.Warnings = append(rep.Warnings, "translated static next.config redirects/rewrites/headers/basePath/images; review custom image loaders, env, and experimental keys manually")
-			if len(skipped) > 0 {
+			rep.Warnings = append(rep.Warnings, "translated static next.config redirects/rewrites/headers/basePath/images; every key or rule left out is listed separately")
+			rep.Manual = append(rep.Manual, notes.Manual...)
+			if len(notes.Skipped) > 0 {
 				rep.Manual = append(rep.Manual, ManualItem{
 					Source: filepath.Base(nextConfig),
-					Reason: "next.config keys were not translated: " + strings.Join(skipped, ", ") + "; the other static keys were",
+					Reason: "next.config keys were not translated: " + strings.Join(notes.Skipped, ", ") + "; the other static keys were",
 					Hint:   "write the skipped keys into krate.config.ts by hand",
 				})
 			}
