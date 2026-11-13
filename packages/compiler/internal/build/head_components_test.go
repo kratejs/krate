@@ -7,6 +7,32 @@ import (
 	"testing"
 )
 
+// TestReactiveHeadKeepsItsBindings: a <title> bound to state, hoisted from a
+// component, keeps the hydration marker its binding finds.
+func TestReactiveHeadKeepsItsBindings(t *testing.T) {
+	b, root := scProject(t, map[string]string{
+		"src/pages/index.tsx": `import { useState } from "react";
+function Inbox(props: { unread: number }) {
+  return <section><title>{"Inbox (" + props.unread + ")"}</title><p>{props.unread}</p></section>;
+}
+export default function Page() {
+  const [n, setN] = useState(3);
+  return <div><Inbox unread={n} /><button id="read" onClick={() => setN(n - 1)}>read</button></div>;
+}`,
+	})
+	if err := b.BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(root, "dist", "index.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(data)
+	if head := html[:strings.Index(html, "</head>")]; !strings.Contains(head, "<title data-k") {
+		t.Errorf("the reactive title needs its hydration marker:\n%s", head)
+	}
+}
+
 func TestInjectServerGlobalsSkipsBoundNames(t *testing.T) {
 	for name, tc := range map[string]struct {
 		src  string
@@ -96,8 +122,8 @@ export default function Home() {
 	if strings.Count(head, `name=description`) != 1 && strings.Count(head, `name="description"`) != 1 {
 		t.Errorf("want one description:\n%s", head)
 	}
-	if !strings.Contains(head, "x-counter") || strings.Contains(head, "data-k") {
-		t.Errorf("the interactive component's tag must be in the head without hydration markers:\n%s", head)
+	if !strings.Contains(head, "x-counter") {
+		t.Errorf("the interactive component's tag must be in the head:\n%s", head)
 	}
 }
 

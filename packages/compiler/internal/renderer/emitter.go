@@ -37,6 +37,7 @@ const SrcMarkPrefix = "/*@k:"
 const SrcMarkEnd = "/*@k:end*/"
 
 type EmitResult struct {
+	strippedMeta *sync.Map
 	// TrackSources makes GenerateNewHydrationJS leave source markers.
 	TrackSources bool
 	SrcMarks     []SrcMark
@@ -202,6 +203,10 @@ type Emitter struct {
 	// goCollector accumulates build-time Go-component render requests from both
 	// the slot path and SSREval, so the whole page is rendered in one host call.
 	goCollector *goRenderCollector
+	// strippedMeta records the <Head> slots whose components lost their
+	// signatures as inert (shared with sub-emitters); walkMetaSlots drops the
+	// hydration markers of their head tags. Reactive head content keeps them.
+	strippedMeta *sync.Map
 }
 
 // goRenderCollector accumulates Go-component render requests and hands out
@@ -239,7 +244,7 @@ func (e *Emitter) Errors() []error {
 
 // NewEmitter creates a new emitter.
 func NewEmitter() *Emitter {
-	return &Emitter{goCollector: &goRenderCollector{}}
+	return &Emitter{goCollector: &goRenderCollector{}, strippedMeta: &sync.Map{}}
 }
 
 // Emit walks the ComponentTree and produces an EmitResult.
@@ -308,6 +313,7 @@ func (e *Emitter) Emit(tree *irtree.ComponentTree) *EmitResult {
 		UsedFuncs:        make(map[string]bool),
 		UsedCSS:          make(map[string]bool),
 		ListComponents:   listComponents,
+		strippedMeta:     e.strippedMeta,
 		Errors:           e.errs,
 		GoRenders:        append(output.GoRenders, e.goCollector.snapshot()...),
 		RuntimeChildren:  output.RuntimeChildren,
@@ -827,12 +833,14 @@ func (e *Emitter) emitMetaSlot(s *irtree.MetaSlot) SlotOutput {
 	head := strings.EqualFold(s.ComponentName, "Head") || s.ComponentName == irtree.HoistMeta
 	for _, child := range s.Children {
 		co := e.emitSlotNode(child)
-		if head {
+		if head && len(co.Signatures) > 0 && inertHeadOutput(co) {
+			e.strippedMeta.Store(s, true)
 			// <Head> children are routed into the document <head> by
-			// walkMetaSlots and never reach the body, so a component rendered
-			// there has nothing to hydrate: its signatures, bindings and
-			// templates would only ship JavaScript for markup that is not in
-			// the page body.
+			// walkMetaSlots and never reach the body. A component there whose
+			// state nothing reads or changes (no handlers, effects or caller
+			// bindings) has nothing to hydrate, so it must not ship JavaScript
+			// for markup that is not in the page body. Reactive head content
+			// (a title bound to state) keeps its signatures and bindings.
 			co = SlotOutput{HeadHTML: co.HeadHTML, ScriptHTML: co.ScriptHTML, StyleHTML: co.StyleHTML}
 		}
 		mergeSlotOutput(&out, co)
@@ -843,6 +851,21 @@ func (e *Emitter) emitMetaSlot(s *irtree.MetaSlot) SlotOutput {
 		out.HTML = ""
 	}
 	return out
+}
+
+// inertHeadOutput reports whether the output of a <Head> child can change
+// after the page loads: it has a handler, an effect, a ref, or a binding to a
+// caller's signal.
+func inertHeadOutput(o SlotOutput) bool {
+	if len(o.Orphans) > 0 {
+		return false
+	}
+	for _, sig := range o.Signatures {
+		if len(sig.Handlers) > 0 || len(sig.Effects) > 0 || len(sig.RefBindings) > 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // hydrationAttrRe matches the attributes the emitter adds to elements that
@@ -948,6 +971,7 @@ func (e *Emitter) emitSlotsParallel(slots []irtree.SlotNode) SlotOutput {
 		sub.BasePath = e.BasePath
 		sub.GoComponents = e.GoComponents
 		sub.goCollector = e.goCollector
+		sub.strippedMeta = e.strippedMeta
 		// Propagate build-wide tables so SSREval in this branch folds cva
 		// variants and context defaults exactly like the sequential path.
 		sub.cvaFactories = e.cvaFactories
@@ -1295,6 +1319,10 @@ func walkMetaSlots(node *irtree.ComponentNode, result *EmitResult) {
 			if meta, ok := child.(*irtree.MetaSlot); ok {
 				var childHTML strings.Builder
 				tmp := NewEmitter()
+				inert := false
+				if result.strippedMeta != nil {
+					_, inert = result.strippedMeta.Load(meta)
+				}
 				for _, c := range meta.Children {
 					out := tmp.emitSlotNode(c)
 					childHTML.WriteString(out.inlineHTML())
@@ -1303,12 +1331,19 @@ func walkMetaSlots(node *irtree.ComponentNode, result *EmitResult) {
 				case irtree.HoistMeta:
 					// Hoisted React 19 metadata; identical elements (the same
 					// stylesheet or tag rendered twice) are emitted once.
-					html := headTagHTML(childHTML.String())
+					html := childHTML.String()
+					if inert {
+						html = headTagHTML(html)
+					}
 					if !strings.Contains(result.HeadHTML, html) {
 						result.HeadHTML += html
 					}
 				case "head":
-					result.HeadHTML += headTagHTML(childHTML.String())
+					if inert {
+						result.HeadHTML += headTagHTML(childHTML.String())
+					} else {
+						result.HeadHTML += childHTML.String()
+					}
 				case "script":
 					result.ScriptHTML += childHTML.String()
 				case "style":
