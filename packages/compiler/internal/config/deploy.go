@@ -8,4 +8,8 @@ type DeployConfig struct {
 	Target string `json:"target,omitempty"`
 	// Options are adapter-specific (e.g. vercel: cleanUrls, trailingSlash).
 	Options map[string]string `json:"options,omitempty"`
+	// Worker is a module whose exports are merged into the generated
+	// Cloudflare Worker (scheduled, queue, email, Durable Object classes).
+	// Empty uses src/worker.ts (.js, .mjs, .mts) when it exists.
+	Worker string `json:"worker,omitempty"`
 }

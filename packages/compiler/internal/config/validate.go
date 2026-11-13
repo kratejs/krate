@@ -138,6 +138,11 @@ func (c *Config) Validate() (warnings []string, err error) {
 			warnings = append(warnings, fmt.Sprintf("basePath %q differs from the path of the site URL (%q); basePath wins for routing and assets, so canonical URLs may not match where the site is served", bp, sp))
 		}
 	}
+	switch c.TrailingSlash {
+	case "", "always", "never", "ignore":
+	default:
+		return nil, fmt.Errorf("trailingSlash must be \"always\", \"never\" or \"ignore\", got %q", c.TrailingSlash)
+	}
 	switch c.Compat.ModeOrDefault() {
 	case "modern", "legacy", "hybrid":
 	default:

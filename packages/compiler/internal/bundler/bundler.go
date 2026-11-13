@@ -392,7 +392,7 @@ func (b *Bundler) unresolvedImportError(mod *Module, imp string) error {
 	if resolver.IsCompiledDependency(mod.Path) {
 		return nil
 	}
-	if reactCompatSpecifier(imp) != "" || strings.HasPrefix(imp, "node:") {
+	if reactCompatSpecifier(imp) != "" || strings.HasPrefix(imp, "node:") || strings.HasPrefix(imp, "cloudflare:") {
 		return nil
 	}
 	// The client runtime is shipped by the compiler (window globals), so its

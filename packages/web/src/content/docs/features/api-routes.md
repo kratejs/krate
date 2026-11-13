@@ -215,7 +215,9 @@ export async function POST(request: Request) {
 
 On the Node, Bun and Deno sidecars and in the portable serverless handler the
 tasks start after the handler has returned its response (the serverless handler
-passes them to the platform's `waitUntil`). The embedded QuickJS runtime has no
+passes them to the platform's `waitUntil`; on Cloudflare that is the Worker's
+`ctx.waitUntil`, also for `after()` called while a page renders or in middleware).
+The embedded QuickJS runtime has no
 request-scoped store: there `after()` runs the task on the next microtask turn,
 which is right after the handler settles but may be cut short when the response
 finishes the request. Use the Node runtime (`ssr.apiRuntime: "node"`) for work

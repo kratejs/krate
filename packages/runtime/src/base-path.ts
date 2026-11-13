@@ -1,10 +1,11 @@
 // The site base path, shared by the router, actions and link rendering. The
-// compiler sets `__KRATE_CFG__` in the page head; server bundles set it on
-// globalThis so server-rendered links get the same prefix.
+// compiler writes the config into the page head (see site-config.ts); server
+// bundles set it on globalThis so server-rendered links get the same prefix.
+import { siteConfig } from './site-config.js';
 
 /** The configured base path as "" or "/prefix" (no trailing slash). */
 export function basePath(): string {
-  const cfg = (globalThis as { __KRATE_CFG__?: { basePath?: string } }).__KRATE_CFG__;
+  const cfg = siteConfig();
   const bp = (cfg && cfg.basePath) || '';
   if (!bp || bp === '/') return '';
   return '/' + bp.replace(/^\/+|\/+$/g, '');

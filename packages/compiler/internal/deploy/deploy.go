@@ -302,6 +302,17 @@ func emitVercel(cfg *config.Config, root, outDir string) ([]string, error) {
 	if v, ok := cfg.Deploy.Options["cleanUrls"]; ok {
 		doc["cleanUrls"] = strings.EqualFold(v, "true")
 	}
+	// The top-level trailingSlash setting maps onto Vercel's: "always" is true,
+	// "never" is false and "ignore" leaves it unset (both forms serve). An
+	// explicit deploy option still wins.
+	switch cfg.TrailingSlashMode() {
+	case "never":
+		doc["trailingSlash"] = false
+	default:
+		if cfg.TrailingSlash == "always" {
+			doc["trailingSlash"] = true
+		}
+	}
 	if v, ok := cfg.Deploy.Options["trailingSlash"]; ok {
 		doc["trailingSlash"] = strings.EqualFold(v, "true")
 	}

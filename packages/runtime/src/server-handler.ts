@@ -21,6 +21,7 @@ import {
   type SSRCore,
 } from "./ssr-core.js";
 import { runAfterTasks } from "./after.js";
+import { platformWaitUntil, type PlatformContext } from "./platform.js";
 import { cacheRuntime, installRenderStore, patchFetch, type RevalidateScope } from "./cache-scope.js";
 import {
   allSuspense,
@@ -100,6 +101,8 @@ export interface HandlerConfig {
   security: { nosniff: boolean; frameOptions: string; referrerPolicy: string; permissionsPolicy: string; hsts: string; csp: string };
   cors: { enabled: boolean; origins: string[]; methods: string[]; headers: string[]; credentials: boolean; maxAge: number };
   ssr: { timeout: number; maxCacheSize: number; ppr: boolean; pprRevalidate: number };
+  /** Page URL form: "always" (default) redirects /x to /x/, "never" redirects /x/ to /x, "ignore" serves both. */
+  trailingSlash?: "always" | "never" | "ignore";
 }
 
 export interface HandlerPage {
@@ -217,6 +220,12 @@ export interface StaticLayer {
 export interface HandlerContext {
   /** Keeps the instance alive for work that outlives the response. */
   waitUntil?(work: Promise<unknown>): void;
+  /** Cloudflare only: let the request fall through to the origin when the Worker throws. */
+  passThroughOnException?(): void;
+  /** The platform's bindings (the Worker `env` on cloudflare), reachable from page code through getPlatform(). */
+  env?: unknown;
+  /** Cloudflare's `request.cf` properties. */
+  cf?: Record<string, unknown>;
 }
 
 export interface HandlerOptions {
@@ -263,6 +272,27 @@ function globalStore<T>(name: string): AsyncLocalStorage<T> {
   const g = globalThis as Record<symbol, unknown>;
   if (!g[key]) g[key] = new AsyncLocalStorage<T>();
   return g[key] as AsyncLocalStorage<T>;
+}
+
+/**
+ * Runs fn with the platform of a request (or of a Worker event such as a cron
+ * trigger) published to getPlatform() / getCloudflareContext(). The generated
+ * Cloudflare Worker wraps the exports of src/worker.ts with it.
+ */
+export function runWithPlatform<R>(target: DeployTarget, ctx: HandlerContext, fn: () => R): R {
+  const platform: PlatformContext = {
+    target,
+    env: ctx.env && typeof ctx.env === "object" ? (ctx.env as Record<string, unknown>) : {},
+    ctx: {
+      waitUntil: (work) => {
+        if (ctx.waitUntil) ctx.waitUntil(work);
+        else void Promise.resolve(work).catch(() => {});
+      },
+      passThroughOnException: ctx.passThroughOnException ? () => ctx.passThroughOnException!() : undefined,
+    },
+    cf: ctx.cf,
+  };
+  return globalStore<PlatformContext>("krate.platform.store").run(platform, fn);
 }
 
 function safeDecode(p: string): string {
@@ -587,7 +617,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     ppr: cfg.ssr.ppr,
     pprRevalidate: cfg.ssr.pprRevalidate,
     background: (p) => {
-      if (latestWaitUntil) latestWaitUntil(p);
+      if (!platformWaitUntil(p) && latestWaitUntil) latestWaitUntil(p);
     },
   });
 
@@ -846,7 +876,34 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     return staticLayer.exists(p);
   }
 
+  /** trailingSlash: "always" (default) sends /x to /x/, "never" sends /x/ to /x, "ignore" serves both. */
+  const slashMode = cfg.trailingSlash || "always";
+
+  /** The /404 and /404.html URLs of the not-found page itself answer 404, never the file or a redirect to it. */
+  function notFoundPageURL(p: string): boolean {
+    return p === "/404" || p === "/404/" || p === "/404.html";
+  }
+
+  function answerNotFoundPageURL(rs: ReqState): Response {
+    const page = errorPage(rs.path, 404);
+    if (page) return custom404(rs, page);
+    return notFoundText(rs, true);
+  }
+
+  /** trailingSlash "never": a page URL ending in a slash redirects to the slashless URL. */
+  function redirectToSlashless(rs: ReqState): Response | null {
+    const p = rs.path;
+    if (slashMode !== "never" || p.length < 2 || !p.endsWith("/") || notFoundPageURL(p)) return null;
+    if (rs.method !== "GET" && rs.method !== "HEAD") return null;
+    const trimmed = p.replace(/\/+$/, "");
+    if (trimmed === "" || isFileLikePath(trimmed) || trimmed === "/api" || trimmed.startsWith("/api/") || trimmed.startsWith("/__krate")) return null;
+    // "../" keeps a segment such as "ftp:3232235777" from parsing as an absolute URL.
+    rs.res.set("Location", "../" + baseName(trimmed) + (rs.search || ""));
+    return finish(rs, 301, null);
+  }
+
   function redirectToCanonicalSlash(rs: ReqState): Response | null {
+    if (slashMode !== "always") return null;
     const p = rs.path;
     if (p === "" || p.endsWith("/") || isFileLikePath(p)) return null;
     if (rs.method !== "GET" && rs.method !== "HEAD") return null;
@@ -880,6 +937,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
   async function staticHandler(rs: ReqState): Promise<Response> {
     const p = rs.path;
     if (isInternalOutputPath(p)) return notFoundText(rs);
+    if (notFoundPageURL(p)) return answerNotFoundPageURL(rs);
     if (p.endsWith(".map")) rs.res.set("Content-Type", "application/json; charset=utf-8");
     rs.res.set("Cache-Control", staticCacheControl(p, hashed));
 
@@ -903,7 +961,12 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     const wantsHTML = isHTMLDocRequest(p) || (rs.headers.get("accept") || "").includes("text/html");
     // Conditional headers dropped by an outer layer (flash notices) must not reach the file server.
     const sreq = rs.headers === rs.request.headers ? rs.request : new Request(rs.request.url, { method: rs.request.method, headers: rs.headers });
-    const served = staticLayer ? await staticLayer.serve(sreq, p) : null;
+    let served = staticLayer ? await staticLayer.serve(sreq, p) : null;
+    if (staticLayer && served && slashMode !== "always" && !p.endsWith("/") && [301, 302, 307, 308].includes(served.status)) {
+      // A layer answers a folder URL with a redirect to its slash form; the other modes serve the index in place.
+      const inPlace = await staticLayer.serve(sreq, p + "/");
+      if (inPlace && inPlace.status !== 404) served = inPlace;
+    }
     if (served && served.status !== 404) return mergeStaticResponse(rs, served);
     const page404 = wantsHTML ? errorPage(p, 404, { closed: closedPattern }) : null;
     if (page404) return custom404(rs, page404);
@@ -939,6 +1002,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
   async function pageHandler(rs: ReqState): Promise<Response> {
     const denied = pageMethodAllowed(rs);
     if (denied) return denied;
+    if (notFoundPageURL(rs.path)) return answerNotFoundPageURL(rs);
     if (data.pages.length === 0) return staticHandler(rs);
 
     let route = requestRoute(rs.path);
@@ -1623,7 +1687,8 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
           await revalidateStore.run(scope, () => runAfterTasks(scope));
           await flushRevalidate(scope).catch((e) => console.error(`[krate] revalidation after() failed: ${e}`));
         });
-        if (latestWaitUntil) latestWaitUntil(later);
+        const keepAlive = rs.ctx.waitUntil ? rs.ctx.waitUntil.bind(rs.ctx) : latestWaitUntil;
+        if (keepAlive) keepAlive(later);
       }
       writeHeaderPairs(rs.res, headerPairs(out.headers));
       const status = out.status < 100 || out.status > 999 ? 502 : out.status;
@@ -2019,6 +2084,9 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     return flashNotice(rs, async (rs2) => {
       const blocked = await runMiddleware(rs2);
       if (blocked) return blocked;
+      // Checked on the requested URL, before a rewrite changes the internal path.
+      const slashless = redirectToSlashless(rs2);
+      if (slashless) return slashless;
       return redirectRewriteHandler(rs2);
     });
   }
@@ -2101,7 +2169,12 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     return null;
   }
 
-  return async function handle(request: Request, ctx: HandlerContext = {}): Promise<Response> {
+  return function handle(request: Request, ctx: HandlerContext = {}): Promise<Response> {
+    // Every page, API route, action and middleware of the request sees the same platform.
+    return runWithPlatform(target, ctx, () => handleRequest(request, ctx));
+  };
+
+  async function handleRequest(request: Request, ctx: HandlerContext): Promise<Response> {
     if (ctx.waitUntil) latestWaitUntil = ctx.waitUntil.bind(ctx);
     request = sanitizeForwarded(request);
     const url = new URL(request.url);
@@ -2154,7 +2227,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
       }
       return httpError(rs, "Internal Server Error", 500);
     }
-  };
+  }
 }
 
 export { isDynamicPattern };

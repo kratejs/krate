@@ -9,6 +9,8 @@ export { getActionContext, headers, cookies, redirect } from './action-context.j
 export type { ActionContext, ActionCookies, ActionCookieOptions } from './action-context.js';
 export { revalidatePath, revalidateTag, unstable_cache, unstable_noStore } from './cache.js';
 export { after } from './after.js';
+export { getPlatform, getCloudflareContext } from './platform.js';
+export type { PlatformContext, PlatformTarget, PlatformExecutionContext, CloudflareContext, KrateCloudflareEnv } from './platform.js';
 export type { AfterTask, KrateRequest, KrateRequestCookies, KrateNextURL } from './after.js';
 export type { RevalidatePathType, UnstableCacheOptions } from './cache.js';
 export { getRequestContext, notFound, forbidden, unauthorized } from './request-context.js';

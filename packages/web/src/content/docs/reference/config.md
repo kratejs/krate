@@ -286,8 +286,9 @@ csp: {
 }
 ```
 
-The generated policy hashes the final (minified) document: inline `<script>` and
-`<style>` blocks, the inline speculation-rules script, and `style="..."`
+The generated policy hashes the final (minified) document: executable inline
+`<script>` and `<style>` blocks (JSON data blocks such as the site config never
+execute and are skipped), the inline speculation-rules script, and `style="..."`
 attributes (allowed with `'unsafe-hashes'` plus one SHA-256 hash per distinct
 value). Styles set at runtime through the CSSOM (`el.style.x = ...`) are not
 affected by CSP. When a CSP meta tag is present the client router does not
@@ -449,6 +450,43 @@ cross-document `@view-transition { navigation: auto }` rule so full-page loads
 morph too. Mark persistent chrome with `data-view-transition="name"` to morph it
 instead of cross-fading. Reduced-motion preferences are respected.
 
+Pages carry the router's settings in a JSON data block in `<head>`
+(`<script type="application/json" id="__krate_cfg__">`), and only when a setting
+differs from the defaults: a `basePath`, `viewTransitions: "off"`, or `krate dev`.
+A site on the defaults has no such block. The block is data, not code, so a strict
+`script-src 'self'` policy needs no allowance for it. With View Transitions on,
+the `@view-transition` rule is an inline `<style>` (a `style-src` policy needs
+`csp.enabled` hashing or `'unsafe-inline'` for it, or turn View Transitions off).
+
+## Trailing slash
+
+```typescript
+trailingSlash: "always", // "always" (default) | "never" | "ignore"
+```
+
+The URL form of pages, honoured the same way by `krate serve`/`krate start` and the
+`node`, `vercel`, `netlify` and `cloudflare` targets:
+
+- `"always"`: `/history` answers `301` to `/history/`.
+- `"never"`: `/history/` answers `301` to `/history` (the site root stays `/`).
+- `"ignore"`: no redirect in either direction; both URLs serve the page. Set it when
+  the platform or another layer owns canonicalization, or when you want to link
+  both forms.
+
+Files with an extension (`/feed.xml`), `/api/*` and the internal `/__krate/*` paths
+are never redirected. The setting changes what the servers answer, not what the
+build writes: canonical URLs, sitemap entries and generated links still use the
+slash form, so with `"never"` they point at URLs that redirect (write your own
+links and `seo` URLs without the slash). On the `cloudflare` target the generated
+`wrangler.jsonc` sets `assets.html_handling` to match (`drop-trailing-slash` for
+`"never"`; `"none"` plus `run_worker_first: true` for `"ignore"`, because then the
+Worker serves the pages from the assets). `krate deploy --target vercel` writes
+`trailingSlash` into `vercel.json` (`"always"` is `true`, `"never"` is `false`,
+`"ignore"` leaves it unset); `deploy.options.trailingSlash` still overrides it. On
+`vercel` and `netlify` the CDN serves prerendered pages before the function, so
+their URL form follows the platform's own setting; the function applies the mode to
+the pages it serves.
+
 ## Plugins
 
 ```typescript
@@ -523,11 +561,19 @@ rejected.
 deploy: {
   target: "vercel",                  // netlify | vercel | cloudflare | gh-pages
   options: { cleanUrls: "true", trailingSlash: "false" },
+  worker: "src/worker.ts",           // cloudflare: module merged into the Worker (default src/worker.ts)
 },
 ```
 
 `krate deploy` uses this target unless `--target` is passed; the adapter options
-customize the generated host files.
+customize the generated host files. The top-level [`trailingSlash`](#trailing-slash)
+setting is mapped onto the host's own option where there is one.
+
+`deploy.worker` is the module whose exports are merged into the generated
+Cloudflare Worker: cron `scheduled`, `queue`, `email` handlers and Durable Object
+classes. Without it, `src/worker.ts` (or `.mts`, `.js`, `.mjs`) is used when it
+exists; `deploy.worker: "none"` skips it. See
+[Cloudflare Workers](/docs/guides/deployment/#cloudflare-workers).
 
 ## i18n & versions
 

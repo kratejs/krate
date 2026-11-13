@@ -41,6 +41,42 @@ func TestEmitNetlifyRedirects(t *testing.T) {
 	}
 }
 
+// TestVercelTrailingSlashFromConfig maps the top-level trailingSlash setting
+// onto vercel.json; an explicit deploy option still wins.
+func TestVercelTrailingSlashFromConfig(t *testing.T) {
+	read := func(cfg *config.Config) map[string]any {
+		out := t.TempDir()
+		if _, err := Emit("vercel", cfg, out, out); err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(filepath.Join(out, "vercel.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var doc map[string]any
+		if err := json.Unmarshal(data, &doc); err != nil {
+			t.Fatal(err)
+		}
+		return doc
+	}
+	for _, c := range []struct {
+		mode string
+		want any
+	}{{"", nil}, {"ignore", nil}, {"always", true}, {"never", false}} {
+		cfg := config.Default()
+		cfg.TrailingSlash = c.mode
+		if got := read(cfg)["trailingSlash"]; got != c.want {
+			t.Errorf("trailingSlash %q: vercel.json trailingSlash = %v, want %v", c.mode, got, c.want)
+		}
+	}
+	cfg := config.Default()
+	cfg.TrailingSlash = "never"
+	cfg.Deploy.Options = map[string]string{"trailingSlash": "true"}
+	if read(cfg)["trailingSlash"] != true {
+		t.Error("deploy.options.trailingSlash must override the top-level setting")
+	}
+}
+
 func TestEmitVercel(t *testing.T) {
 	out := t.TempDir()
 	if _, err := Emit("vercel", testConfig(), out, out); err != nil {

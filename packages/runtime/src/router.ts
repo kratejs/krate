@@ -7,6 +7,7 @@
 // loses the prefetch cache, saved scroll positions or the in-flight navigation.
 
 import { basePath, withBase } from './base-path.js';
+import { siteConfig, type KrateRuntimeConfig } from './site-config.js';
 
 /**
  * The shared runtime chunk is loaded once and must persist across SPA
@@ -16,18 +17,8 @@ import { basePath, withBase } from './base-path.js';
  */
 const RUNTIME_CHUNK_RE = /\/chunks\/runtime\.[^/]+\.js$/;
 
-/** Site config injected by the compiler (`window.__KRATE_CFG__`). */
-interface KrateRuntimeConfig {
-  basePath?: string;
-  viewTransitions?: boolean | 'auto';
-  /** Milliseconds a prefetched document stays fresh (default 30000). */
-  prefetchTTL?: number;
-  /** Set by `krate dev`: enables router dev warnings. */
-  dev?: boolean;
-}
-
 function runtimeConfig(): KrateRuntimeConfig {
-  return ((globalThis as any).__KRATE_CFG__ as KrateRuntimeConfig) || {};
+  return siteConfig();
 }
 
 /** Strips the base path from a pathname so route comparisons are consistent. */

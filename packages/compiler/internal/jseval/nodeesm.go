@@ -37,10 +37,13 @@ func ApplyNodeESM(opts *api.BuildOptions) {
 // packages throw unless the bundler resolves the react-server condition, which
 // Krate does not use. A client bundle must not use this plugin: it reports
 // `server-only` as an error (see clientOnlyMarkersPlugin in internal/build).
+// It also keeps `cloudflare:*` imports out of the bundle (see
+// RegisterCloudflareImports).
 func MarkerPackagesPlugin() api.Plugin {
 	return api.Plugin{
 		Name: "krate-server-markers",
 		Setup: func(pb api.PluginBuild) {
+			RegisterCloudflareImports(pb)
 			pb.OnResolve(api.OnResolveOptions{Filter: `^(server-only|client-only)$`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
 				return api.OnResolveResult{Path: args.Path, Namespace: "krate-marker"}, nil
 			})
@@ -50,6 +53,25 @@ func MarkerPackagesPlugin() api.Plugin {
 			})
 		},
 	}
+}
+
+// CloudflareShimSpecifier is the runtime module that stands in for
+// `cloudflare:workers` in server bundles built before a deploy target is
+// known. The cloudflare deploy bundle swaps it for the real module; elsewhere
+// it reads the bindings from getPlatform().
+const CloudflareShimSpecifier = "@krate/runtime/cloudflare-workers"
+
+// RegisterCloudflareImports keeps `cloudflare:*` imports out of server
+// bundles: `cloudflare:workers` becomes the runtime shim and every other
+// `cloudflare:` module stays an external import. `krate deploy` decides per
+// target what they resolve to (see cloudflareModulesPlugin in internal/build).
+func RegisterCloudflareImports(pb api.PluginBuild) {
+	pb.OnResolve(api.OnResolveOptions{Filter: `^cloudflare:`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+		if args.Path == "cloudflare:workers" {
+			return api.OnResolveResult{Path: CloudflareShimSpecifier, External: true}, nil
+		}
+		return api.OnResolveResult{Path: args.Path, External: true}, nil
+	})
 }
 
 // explainDynamicRequire adds guidance to the QuickJS failure for a dependency

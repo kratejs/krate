@@ -5,8 +5,11 @@
  * the response is flushed, in registration order. Errors are logged, never
  * sent to the client. Where no request is active (the embedded runtime, tests)
  * the task runs on a later microtask turn, right after the handler settles.
+ * On a serverless target the task is also handed to the platform's waitUntil
+ * (the Worker's ctx.waitUntil on cloudflare), so it outlives the response.
  */
 import { currentRevalidateScope } from './cache-scope.js';
+import { platformWaitUntil } from './platform.js';
 
 export type AfterTask = (() => unknown) | PromiseLike<unknown>;
 
@@ -23,9 +26,12 @@ export function after(task: AfterTask): void {
     (scope.after ||= []).push(thunk);
     return;
   }
-  void Promise.resolve()
+  const run = Promise.resolve()
     .then(thunk)
     .catch((err) => console.error(`[krate] after() task failed: ${(err && (err as Error).stack) || err}`));
+  // Serverless platforms stop the instance once the response is sent unless
+  // waitUntil keeps it alive.
+  platformWaitUntil(run);
 }
 
 /** Runs and clears a scope's after() tasks in order; each failure is logged. */
