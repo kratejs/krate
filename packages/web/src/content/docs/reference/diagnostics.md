@@ -440,6 +440,12 @@ An `opengraph-image` or `twitter-image` file inside a dynamic segment (`blog/[sl
 
 `sitemap.ts` or `robots.ts` defines the file, so the sitemap or robots plugin (and the `robots` and `seo` config that feed it) did not write its own. The metadata file wins. Remove one of them to silence this warning. This is a warning.
 
+### KR7134
+
+**dynamic or revalidate on a metadata route that cannot run per request**
+
+A `sitemap.ts`, `robots.ts` or `manifest.ts` that exports `dynamic = "force-dynamic"` or a `revalidate` runs per request on the server. This one sits in a dynamic segment (`blog/[slug]/`), where a per-request route has no URL to answer, so it still runs once at build time and the export is ignored. Move the file to a static directory or remove the export. This is a warning.
+
 ### KR7140
 
 **Tailwind input found but Tailwind is not enabled**

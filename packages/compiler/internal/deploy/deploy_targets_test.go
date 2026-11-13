@@ -41,6 +41,27 @@ func TestServerFeaturesBlockStaticTargets(t *testing.T) {
 	}
 }
 
+// A robots.ts or sitemap.ts that runs per request needs a server: a static
+// target refuses it and names the cause instead of publishing no robots.txt.
+func TestPerRequestMetadataRoutesBlockStaticTargets(t *testing.T) {
+	root := t.TempDir()
+	out := filepath.Join(root, "dist")
+	meta := filepath.Join(out, ".krate", "api-node", "__krate_meta")
+	if err := os.MkdirAll(meta, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(meta, "robots.js"), []byte("//"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	feats := ServerFeatures(root, out)
+	if len(feats) != 1 || !strings.Contains(feats[0], "metadata routes") {
+		t.Fatalf("features = %v, want only the metadata routes", feats)
+	}
+	if _, err := Emit("gh-pages", config.Default(), root, out); err == nil || !strings.Contains(err.Error(), "metadata routes") {
+		t.Errorf("gh-pages: expected the error to name the metadata routes, got %v", err)
+	}
+}
+
 func TestEmitDockerfile(t *testing.T) {
 	root := t.TempDir()
 	out := filepath.Join(root, "dist")

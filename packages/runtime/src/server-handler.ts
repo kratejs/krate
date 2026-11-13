@@ -112,6 +112,34 @@ export interface HandlerPage {
   segDir?: string;
 }
 
+/**
+ * A per-request metadata route. `path` is an exact URL; `prefix` and `suffix`
+ * match /sitemap/<id>.xml, where `key` ends in "/[id]".
+ */
+export interface MetaRoute {
+  path?: string;
+  prefix?: string;
+  suffix?: string;
+  key: string;
+}
+
+/** The API route key serving URL path p, or "" when no metadata route does. */
+export function matchMetaRoute(routes: MetaRoute[] | undefined, p: string): string {
+  for (const r of routes || []) {
+    if (r.path) {
+      if (p === r.path) return r.key;
+      continue;
+    }
+    const prefix = r.prefix || "";
+    const suffix = r.suffix || "";
+    if (p.length <= prefix.length + suffix.length || !p.startsWith(prefix) || !p.endsWith(suffix)) continue;
+    const id = p.slice(prefix.length, p.length - suffix.length);
+    if (/[\/\\]/.test(id) || id === "." || id === "..") continue;
+    return r.key.replace(/\[id\]$/, "") + id;
+  }
+  return "";
+}
+
 export interface ActionEntry {
   id: string;
   export: string;
@@ -144,6 +172,11 @@ export interface KrateServerData {
   staticPages?: Record<string, string>;
   /** API route keys: file path under the API dir without extension ("items/[id]"). */
   apiRoutes: string[];
+  /**
+   * Metadata routes (robots.ts, sitemap.ts, manifest.ts) that run per request:
+   * a public URL served by the API route `key`.
+   */
+  metaRoutes?: MetaRoute[];
   actions: ActionEntry[];
   hasMiddleware: boolean;
 }
@@ -1886,6 +1919,15 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
       const blocked = await runMiddleware(rs);
       if (blocked) return blocked;
       return actionHandler(rs);
+    }
+    if (data.metaRoutes && (rs.method === "GET" || rs.method === "HEAD")) {
+      const key = matchMetaRoute(data.metaRoutes, p);
+      if (key) {
+        const blocked = await runMiddleware(rs);
+        if (blocked) return blocked;
+        rs.path = "/api/" + key;
+        return apiHandler(rs);
+      }
     }
     return pageChain(rs);
   }

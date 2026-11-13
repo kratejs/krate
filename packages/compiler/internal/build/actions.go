@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/bundler"
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
+	"github.com/kratejs/krate/packages/compiler/internal/jseval"
 	"github.com/kratejs/krate/packages/compiler/internal/lexer"
 	"github.com/kratejs/krate/packages/compiler/internal/parser"
 )
@@ -64,6 +66,7 @@ func (b *Builder) prepareActions() error {
 		return fmt.Errorf("creating action bundle dir: %w", err)
 	}
 
+	var errs []error
 	reg := &actionRegistry{Modules: make(map[string]*actionModule, len(files))}
 	for _, abs := range files {
 		rel, err := filepath.Rel(b.Root, abs)
@@ -77,7 +80,8 @@ func (b *Builder) prepareActions() error {
 		}
 		exports, err := parseActionExports(string(data), rel)
 		if err != nil {
-			return err
+			errs = append(errs, err)
+			continue
 		}
 		mod := &actionModule{AbsPath: abs, RelPath: rel, Exports: exports}
 		reg.Modules[filepath.Clean(abs)] = mod
@@ -87,11 +91,15 @@ func (b *Builder) prepareActions() error {
 	sort.Slice(reg.Order, func(i, j int) bool { return reg.Order[i].RelPath < reg.Order[j].RelPath })
 	for _, mod := range reg.Order {
 		if err := b.compileActionModule(dir, mod); err != nil {
-			return err
+			errs = append(errs, err)
+			continue
 		}
 		for export, id := range mod.Exports {
 			reg.Entries = append(reg.Entries, actionEntry{ID: id, Export: export, File: mod.File, Source: mod.RelPath})
 		}
+	}
+	if len(errs) > 0 {
+		return errors.Join(errs...)
 	}
 	sort.Slice(reg.Entries, func(i, j int) bool { return reg.Entries[i].ID < reg.Entries[j].ID })
 
@@ -136,6 +144,7 @@ func (b *Builder) compileActionModule(dir string, mod *actionModule) error {
 		Sourcemap:     sourceMapMode(b.Cfg.Sourcemap),
 		LogLevel:      api.LogLevelSilent,
 		Metafile:      true,
+		Plugins:       []api.Plugin{jseval.MarkerPackagesPlugin()},
 	}
 	if b.Cfg.ShouldMinifyJS() {
 		opts.MinifyWhitespace = true

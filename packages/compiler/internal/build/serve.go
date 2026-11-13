@@ -2230,6 +2230,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	}
 
 	// Redirect/rewrite middleware - applies config-based URL transformations
+	metaRoutes := newMetaRouteLoader(absOut, hub != nil)
 	var redirectRewriteHandler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 
@@ -2257,6 +2258,17 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 					return
 				}
 				break
+			}
+		}
+
+		// A dynamic metadata route (robots.ts, sitemap.ts) is an API route on
+		// the Node sidecar, reached through its public URL.
+		if r.Method == http.MethodGet || r.Method == http.MethodHead {
+			if key, ok := metaRoutes.get().match(r.URL.Path); ok {
+				r.URL.Path = "/api/" + key
+				r.URL.RawPath = ""
+				apiProxy.ServeHTTP(newDeadlineWriter(w), r)
+				return
 			}
 		}
 

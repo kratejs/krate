@@ -31,6 +31,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/gotsgen"
 	"github.com/kratejs/krate/packages/compiler/internal/icons"
 	"github.com/kratejs/krate/packages/compiler/internal/irtree"
+	"github.com/kratejs/krate/packages/compiler/internal/jseval"
 	jscompat "github.com/kratejs/krate/packages/compiler/internal/jsruntime"
 	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
 	"github.com/kratejs/krate/packages/compiler/internal/native/bake"
@@ -939,8 +940,11 @@ func (b *Builder) BuildAll() error {
 	b.twMu.Lock()
 	b.twPages = nil
 	b.twMu.Unlock()
+	// Passes before page bundling keep going on failure so one build shows
+	// every error class (see passErrors).
+	var early passErrors
 	if err := b.prepareActions(); err != nil {
-		return err
+		early.add("Server action error", err)
 	}
 
 	if err := writeConfigSchema(b.Root); err != nil {
@@ -952,15 +956,13 @@ func (b *Builder) BuildAll() error {
 		return fmt.Errorf("finding pages: %w", err)
 	}
 	if err := validateRouteTree(pages, b.Cfg.PagesDir); err != nil {
-		return err
+		return early.finish(err)
 	}
 	// Metadata routes (sitemap, robots, manifest, opengraph-image) run first:
-	// the pages' <head> carries the image URLs they produce.
-	if errs := b.buildMetadataRoutes(pages); len(errs) > 0 {
-		for _, err := range errs {
-			fmt.Fprintf(os.Stderr, "  %sMetadata route error:%s %s\n", cRed, cReset, strings.ReplaceAll(diag.FormatDiagnostics([]error{err}), "\n", "\n    "))
-		}
-		return errors.Join(errs...)
+	// the pages' <head> carries the image URLs they produce. A failing route
+	// only leaves its own output (and image URLs) out.
+	for _, err := range b.buildMetadataRoutes(pages) {
+		early.add("Metadata route error", err)
 	}
 	// Intercepting slot pages are built as fragments the SPA router swaps
 	// into their slot (see parallel.go).
@@ -1079,13 +1081,13 @@ func (b *Builder) BuildAll() error {
 		for _, ve := range cres.Validation {
 			fmt.Fprintf(os.Stderr, "  %sContent error:%s %v\n", cRed, cReset, ve)
 		}
-		return &ContentValidationError{Errors: cres.Validation}
+		return early.finish(&ContentValidationError{Errors: cres.Validation})
 	}
 
 	// Build the Go host (API routes + components) before pages, so pages that
 	// import Go components can render them through the host at build time.
 	if err := b.BuildAllGoAPI(); err != nil {
-		return err
+		return early.finish(err)
 	}
 
 	if err := b.contextErr(); err != nil {
@@ -1130,6 +1132,11 @@ func (b *Builder) BuildAll() error {
 	errorCount := 0
 	var failureMessages []string
 	var failureErrs []error
+	for _, err := range early.errs {
+		failureMessages = append(failureMessages, "  "+err.Error())
+		failureErrs = append(failureErrs, err)
+		errorCount++
+	}
 	// failOutput records a shipped file that could not be written.
 	failOutput := func(err error) {
 		fmt.Fprintf(os.Stderr, "\n  %sx Error:%s %v\n", cRed, cReset, err)
@@ -4171,7 +4178,7 @@ func (b *Builder) BuildMiddleware() error {
 	_ = os.MkdirAll(outDir, 0755)
 	outPath := filepath.Join(outDir, "middleware.js")
 
-	result := esbuildBuild(api.BuildOptions{
+	mwOpts := api.BuildOptions{
 		EntryPoints: []string{middlewarePath},
 		Outdir:      outDir,
 		Bundle:      true,
@@ -4180,7 +4187,14 @@ func (b *Builder) BuildMiddleware() error {
 		Write:       false,
 		LogLevel:    api.LogLevelError,
 		Metafile:    true,
-	})
+		Plugins:     []api.Plugin{jseval.MarkerPackagesPlugin()},
+	}
+	// The embedded engine has no node:module; a Node-family runtime needs the
+	// createRequire banner for CommonJS dependencies.
+	if !embeddedRuntime(b.Cfg.SSR.MiddlewareRuntime) {
+		jseval.ApplyNodeESM(&mwOpts)
+	}
+	result := esbuildBuild(mwOpts)
 
 	if len(result.Errors) > 0 {
 		for _, e := range result.Errors {
@@ -5088,6 +5102,7 @@ func (b *Builder) compileSingleRoute(file string, apiSrcDir string) (apiRouteMet
 		Platform:    api.PlatformNode,
 		Format:      api.FormatIIFE,
 		GlobalName:  "__krate_route",
+		Plugins:     []api.Plugin{jseval.MarkerPackagesPlugin()},
 		Outfile:     quickjsPath,
 		Write:       true,
 		Sourcemap:   sourceMapMode(b.Cfg.Sourcemap),
@@ -5101,6 +5116,7 @@ func (b *Builder) compileSingleRoute(file string, apiSrcDir string) (apiRouteMet
 		Platform:    api.PlatformNode,
 		Format:      api.FormatESModule,
 		Packages:    api.PackagesExternal,
+		Plugins:     []api.Plugin{jseval.MarkerPackagesPlugin()},
 		Outfile:     nodePath,
 		Write:       true,
 		Sourcemap:   sourceMapMode(b.Cfg.Sourcemap),

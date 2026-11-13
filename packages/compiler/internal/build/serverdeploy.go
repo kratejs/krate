@@ -14,6 +14,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/deploy"
 	"github.com/kratejs/krate/packages/compiler/internal/fsutil"
 	"github.com/kratejs/krate/packages/compiler/internal/gohost"
+	"github.com/kratejs/krate/packages/compiler/internal/jseval"
 )
 
 // serverDeployDir holds the generated server entries under <out>/.krate.
@@ -268,6 +269,7 @@ type serverData struct {
 	SegmentPages    map[string]string         `json:"segmentPages"`
 	StaticPages     map[string]string         `json:"staticPages,omitempty"`
 	APIRoutes       []string                  `json:"apiRoutes"`
+	MetaRoutes      []metaRouteEntry          `json:"metaRoutes,omitempty"`
 	Actions         []actionEntry             `json:"actions"`
 	HasMiddleware   bool                      `json:"hasMiddleware"`
 }
@@ -502,6 +504,17 @@ func BuildServerBundle(root string, cfg *config.Config, target string) (*deploy.
 	keys, err := apiRouteKeys(root)
 	if err != nil {
 		return nil, fmt.Errorf("scanning API routes: %w", err)
+	}
+	// Per-request metadata routes (robots.ts, sitemap.ts) are API routes whose
+	// generated entry lives under .krate/gen; the handler maps their URLs.
+	for _, e := range loadMetaRoutes(outDir) {
+		keys[e.Key] = filepath.Join(root, filepath.FromSlash(e.Source))
+		data.MetaRoutes = append(data.MetaRoutes, e)
+		if e.Path != "" {
+			plan.ServerPaths = append(plan.ServerPaths, e.Path)
+		} else {
+			plan.ServerPaths = append(plan.ServerPaths, e.Prefix+"*")
+		}
 	}
 	apiKeys := make([]string, 0, len(keys))
 	for k := range keys {
@@ -909,7 +922,7 @@ func bundleServerEntry(root string, cfg *config.Config, target, entry, outFile s
 		Outfile:       outFile,
 		Write:         true,
 		LogLevel:      api.LogLevelSilent,
-		Plugins:       []api.Plugin{rt, builtinGuardPlugin(target)},
+		Plugins:       []api.Plugin{rt, jseval.MarkerPackagesPlugin(), builtinGuardPlugin(target)},
 		Stdin: &api.StdinOptions{
 			Loader:     api.LoaderJS,
 			Contents:   entry,

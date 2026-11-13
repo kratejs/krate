@@ -64,7 +64,7 @@ func Eval(opts Options) (out json.RawMessage, err error) {
 		}
 	}()
 
-	bundle, err := bundle(opts)
+	bundle, err := bundle(opts, false)
 	if err != nil {
 		return nil, err
 	}
@@ -82,7 +82,7 @@ func Eval(opts Options) (out json.RawMessage, err error) {
 	}
 
 	if _, err := rt.ExecuteModule(bundle); err != nil {
-		return nil, err
+		return nil, explainDynamicRequire(err)
 	}
 	if opts.Await {
 		rt.DrainJobs()
@@ -124,13 +124,13 @@ type BundleError struct {
 func (e *BundleError) Error() string { return "bundling entry:\n" + e.text }
 
 // Bundle compiles the entry module and returns plain ESM JavaScript without
-// executing it. Node built-ins remain external so the selected runtime can
-// resolve them.
+// executing it, for a Node-compatible runtime. Node built-ins stay external and
+// CommonJS dependencies may require() them (createRequire banner).
 func Bundle(opts Options) (string, error) {
-	return bundle(opts)
+	return bundle(opts, true)
 }
 
-func bundle(opts Options) (string, error) {
+func bundle(opts Options, node bool) (string, error) {
 	sourcefile := opts.Sourcefile
 	if sourcefile == "" {
 		sourcefile = "__krate_entry.ts"
@@ -139,7 +139,7 @@ func bundle(opts Options) (string, error) {
 	if loader == api.LoaderNone {
 		loader = api.LoaderTS
 	}
-	plugins := []api.Plugin{}
+	plugins := []api.Plugin{MarkerPackagesPlugin()}
 	if opts.NodeShims {
 		plugins = append(plugins, nodeShimPlugin())
 	}
@@ -167,6 +167,9 @@ func bundle(opts Options) (string, error) {
 		buildOpts.TsconfigRaw = `{ "compilerOptions": { "jsx": "react-jsx", "jsxImportSource": "` + opts.JSXImportSource + `" } }`
 	}
 	tsstrip.HandleTierDecorators(&buildOpts)
+	if node {
+		ApplyNodeESM(&buildOpts)
+	}
 	result := api.Build(buildOpts)
 	if len(result.Errors) > 0 {
 		var sb strings.Builder
