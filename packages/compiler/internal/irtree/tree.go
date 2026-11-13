@@ -179,7 +179,12 @@ type ExprSlot struct {
 	// `const badge = on ? <b/> : <i/>`); it is trusted, already-escaped
 	// output of the build-time renderer and replaces Initial.
 	InitialHTML string
-	Signals     []string
+	// PropJSX is the call-site JSX a `{props.X}` child reads. The emitter
+	// renders it for the server when it can; hydration still fills the slot.
+	PropJSX ast.Expr
+	// PropScope holds the caller's values PropJSX reads.
+	PropScope map[string]jsvalue.Value
+	Signals   []string
 	// File and Pos locate the expression in its source (hydration source maps).
 	File string
 	Pos  ast.Pos
@@ -493,6 +498,9 @@ type ComponentNode struct {
 	// component, so props the IR folder cannot represent (JSX values) are
 	// evaluated by the SSR evaluator itself.
 	SSREvalAttrs map[string]ast.Expr
+	// SSREvalCaller holds the caller's build-time values the JSX-valued
+	// attributes read, since they are written in the caller's scope.
+	SSREvalCaller map[string]jsvalue.Value
 	// ContextValues holds the build-time constant provider values (and
 	// folded defaults) in scope at this instance, keyed by context binding, so
 	// SSR evaluation reads the nearest provider instead of the default.

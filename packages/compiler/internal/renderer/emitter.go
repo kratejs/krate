@@ -511,6 +511,7 @@ func (e *Emitter) emitSSREvaluated(node *irtree.ComponentNode) SlotOutput {
 	if node.SSREvalBindings != nil {
 		eval.SetBindings(node.SSREvalBindings)
 	}
+	eval.SetCallerValues(node.SSREvalCaller)
 	eval.ResolveJSXProps(node.SSREvalAttrs)
 	if e.IconResolver != nil {
 		eval.iconEmit = func(name string, attrs []*ast.JSXAttr) (string, bool) {
@@ -1012,6 +1013,11 @@ func (e *Emitter) emitExprSlot(s *irtree.ExprSlot) SlotOutput {
 	body := escape.Text(s.Initial)
 	if s.InitialHTML != "" {
 		body = s.InitialHTML
+	} else if s.PropJSX != nil {
+		if rendered, ok := e.renderPropJSX(s.PropJSX, s.PropScope); ok {
+			body = rendered
+			s.Unresolved = false
+		}
 	}
 	html := slotMarker(id) + body + slotEndMarker(id)
 	if s.Unresolved && s.Initial == "" && s.InitialHTML == "" {
@@ -1511,4 +1517,19 @@ func dropManagedElementBindings(sig *irtree.ComponentSignature, managed map[irtr
 
 func externalIslandKey(local string, offset int) string {
 	return local + "@" + strconv.Itoa(offset)
+}
+
+// renderPropJSX renders the JSX a caller passed as a prop for the server
+// markup of a hydrated component. A value that needs the caller's scope (its
+// signals or locals) cannot be rendered here; hydration fills that slot.
+func (e *Emitter) renderPropJSX(expr ast.Expr, caller map[string]jsvalue.Value) (string, bool) {
+	eval := NewSSREval(e.functions)
+	eval.SetModuleConsts(e.moduleConsts)
+	eval.SetModuleRun(e.moduleRun)
+	eval.SetCallerValues(caller)
+	html := eval.EvalCallerJSX(expr)
+	if len(eval.Errors()) > 0 {
+		return "", false
+	}
+	return html, true
 }

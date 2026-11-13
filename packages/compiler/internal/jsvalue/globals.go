@@ -65,6 +65,14 @@ func globalValue(in *Interp, name string) (Value, bool) {
 		return m, true
 	case "Date":
 		return dateCtor(in), true
+	case "URL":
+		return urlCtor(), true
+	case "encodeURIComponent":
+		return uriFunc("encodeURIComponent", func(s string) (string, bool) { return encodeURIChars(s, uriUnreserved), true }), true
+	case "encodeURI":
+		return uriFunc("encodeURI", func(s string) (string, bool) { return encodeURIChars(s, uriUnreserved+uriReserved), true }), true
+	case "decodeURIComponent":
+		return uriFunc("decodeURIComponent", decodeURIChars), true
 	case "Map":
 		return mapCtor(), true
 	case "Set":

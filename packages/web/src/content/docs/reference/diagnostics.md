@@ -1106,7 +1106,13 @@ The build empties outDir before it writes the site, and `krate clean` deletes it
 
 **Value needed at build time is unknown**
 
-A component without state (no createSignal, useState or other hook that holds state) is rendered to static HTML while the site is built, so every value it renders has to be known then: a prop, a local variable, or a module constant. This expression is none of those, for example it names an identifier that is not defined where the component renders (`unresolved identifier x`), reads the clock or the browser, or calls a function the build cannot run. There is no run time to fall back on, so the build fails instead of printing a guess. Define or import the name, pass the value as a prop, or give the component state so it hydrates in the browser. A value that differs per request belongs in a `*.runtime.tsx` component.
+A component without state (no createSignal, useState or other hook that holds state) is rendered to static HTML while the site is built, so every value it renders has to be known then: a prop, a local variable, or a module constant. This expression is none of those, for example it names an identifier that is not defined where the component renders (`unresolved identifier x`), reads the clock or the browser, or calls a function the build cannot run. A constant that holds JSX (an array of sections whose `body` is a fragment) is known, and so is JSX passed as a prop: both are rendered to HTML at build time. There is no run time to fall back on, so the build fails instead of printing a guess. Define or import the name, pass the value as a prop, or give the component state so it hydrates in the browser. A value that differs per request belongs in a `*.runtime.tsx` component.
+
+### KR8353
+
+**Head value cannot be evaluated at build time**
+
+Tags inside `<Head>` (and `<title>`, `<meta>` and `<link>` rendered on their own) are written into the static HTML so crawlers and link previews see them. A call to an imported helper is evaluated at build time when it is plain code: string and template work, JSON, `URL`, `encodeURIComponent`, and calls to other functions of your project. This value is none of those (it reads the browser, the clock, `process.env`, an object built by a class, or something else the build cannot run), so the tag would only be completed in the browser and crawlers would see it empty. Compute it from plain values, pass it as a prop, or move the tag to a page whose metadata comes from `generateMetadata`.
 
 ### KR8360
 

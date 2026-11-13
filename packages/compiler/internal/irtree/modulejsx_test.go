@@ -53,6 +53,24 @@ export default function P() {
 }`,
 			want: `<main><i><b>mod</b></i></main>`,
 		},
+		{
+			name: "component-local constant with JSX",
+			src: `export default function App() {
+	const label = <b>outer</b>;
+	const rows = [{ id: 1, v: label }, { id: 2, v: <i>two</i> }];
+	return <div>{rows.map(r => <p key={r.id}>{r.v}</p>)}{label}</div>;
+}`,
+			want: `<div><p><b>outer</b></p><p><i>two</i></p><b>outer</b></div>`,
+		},
+		{
+			name: "reassigned local is not inlined",
+			src: `export default function App() {
+	let node = <b>a</b>;
+	node = <i>b</i>;
+	return <div>{node}</div>;
+}`,
+			want: `<div></div>`,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
