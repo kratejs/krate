@@ -470,17 +470,6 @@ func (a *App) releaseToasts() {
 	t.ready = false
 }
 
-// readAUMIDName returns the DisplayName registered for aumid ("" if none).
-func readAUMIDName(aumid string) string {
-	k, err := registry.OpenKey(registry.CURRENT_USER, aumidRegistryPath(aumid), registry.QUERY_VALUE)
-	if err != nil {
-		return ""
-	}
-	defer k.Close()
-	v, _, _ := k.GetStringValue("DisplayName")
-	return v
-}
-
 // deleteAUMID removes the registration of aumid (tests; an app leaves its
 // registration in place).
 func deleteAUMID(aumid string) {

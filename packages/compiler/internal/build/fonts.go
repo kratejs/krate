@@ -59,24 +59,6 @@ var (
 	defaultFontCap  = 4
 )
 
-// collectFontURLs returns the unique, non-data `url()` references inside
-// `@font-face` blocks, in first-seen order.
-func collectFontURLs(cssText string) []string {
-	var urls []string
-	seen := make(map[string]bool)
-	for _, m := range fontFaceRe.FindAllStringSubmatch(cssText, -1) {
-		for _, u := range fontURLRe.FindAllStringSubmatch(m[1], -1) {
-			url := strings.TrimSpace(u[1])
-			if url == "" || seen[url] || strings.HasPrefix(url, "data:") {
-				continue
-			}
-			seen[url] = true
-			urls = append(urls, url)
-		}
-	}
-	return urls
-}
-
 // collectFontPreloads picks the fonts worth a `<link rel="preload">`: for each
 // `@font-face` the first woff2 source (the file a modern browser will fetch;
 // woff/ttf fallbacks are never preloaded unless they are the only source),

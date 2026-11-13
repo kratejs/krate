@@ -1,3 +1,5 @@
+//go:build windows
+
 package windows
 
 import (
@@ -7,8 +9,8 @@ import (
 )
 
 // Pure parts of the window chrome: style bits, frame geometry, structure
-// layouts and the numbers Windows expects. They have no Win32 calls so they
-// are unit-tested on every OS; chrome_windows.go does the calling.
+// layouts and the numbers Windows expects. They have no Win32 calls;
+// chrome_windows.go does the calling.
 
 // Window styles used by the chrome code.
 const (
@@ -63,19 +65,6 @@ func chromeStyle(base uint32, titleBar string) uint32 {
 // customFrame reports whether a title bar style takes over the frame.
 func customFrame(titleBar string) bool {
 	return titleBar == caps.TitleBarHidden || titleBar == caps.TitleBarNone
-}
-
-// captionButtons counts the buttons Windows draws for a style: none without
-// a system menu, close only without minimize and maximize boxes, otherwise
-// minimize, maximize and close.
-func captionButtons(style uint32) int {
-	if style&wsSysMenu == 0 {
-		return 0
-	}
-	if style&(wsMinimizeBox|wsMaximizeBit) == 0 {
-		return 1
-	}
-	return 3
 }
 
 // ncTop is the top of the client area after WM_NCCALCSIZE for a custom frame.

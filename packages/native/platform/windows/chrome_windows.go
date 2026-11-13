@@ -9,8 +9,7 @@ package windows
 // native window moves and resizes started by the page script, WebView2's own
 // support for the CSS app-region property, and the hit test that makes the
 // maximize button show Snap Layouts. The pure parts are in chrome.go and
-// caps/chrome.go and are unit-tested on every OS; this file is compiled for
-// Windows and exercised by gui_chrome_test.go, which CI runs.
+// caps/chrome.go.
 
 import (
 	"fmt"
@@ -31,12 +30,11 @@ var (
 )
 
 var (
-	pDwmGetWindowAttribute = dwmapi.NewProc("DwmGetWindowAttribute")
-	pDwmExtendFrame        = dwmapi.NewProc("DwmExtendFrameIntoClientArea")
-	pDwmDefWindowProc      = dwmapi.NewProc("DwmDefWindowProc")
-	pGetAsyncKeyState      = user32.NewProc("GetAsyncKeyState")
-	pFillRect              = user32.NewProc("FillRect")
-	pGetStockObject        = gdi32.NewProc("GetStockObject")
+	pDwmExtendFrame   = dwmapi.NewProc("DwmExtendFrameIntoClientArea")
+	pDwmDefWindowProc = dwmapi.NewProc("DwmDefWindowProc")
+	pGetAsyncKeyState = user32.NewProc("GetAsyncKeyState")
+	pFillRect         = user32.NewProc("FillRect")
+	pGetStockObject   = gdi32.NewProc("GetStockObject")
 )
 
 const (

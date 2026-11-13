@@ -1,3 +1,5 @@
+//go:build windows
+
 package windows
 
 import (
@@ -31,8 +33,7 @@ const (
 	iidWebMessageHandler = "57213f19-00e6-49fa-8e07-898ea01ecbd2"
 	// ICoreWebView2WebMessageReceivedEventArgs2
 	iidWebMessageArgs2 = "06fc7ab7-c90c-4297-9389-33ca01cf6d5e"
-	// ICoreWebView2ObjectCollectionView
-	iidObjectCollectionView = "0f36fd87-4f69-4415-98da-888f89fb9a33"
+
 	// ICoreWebView2File
 	iidWebView2File = "f2c19559-6bc1-4583-a757-90021be9afec"
 	// WebView2.h line 4386
@@ -95,10 +96,7 @@ const (
 	iidWebView2_13 = "f75f09a8-667e-4983-88d6-c8773f315e84"
 	// ICoreWebView2Profile7
 	iidProfile7 = "7b4c7906-a1aa-4cb4-b723-db09f813d541"
-	// ICoreWebView2BrowserExtension
-	iidBrowserExtension = "7ef7ffa0-fac5-462c-b189-3d9edbe575da"
-	// ICoreWebView2BrowserExtensionList
-	iidBrowserExtensionList = "2ef3d2dc-bd5f-4f4d-90af-fd67798f0c2f"
+
 	// ICoreWebView2ProfileAddBrowserExtensionCompletedHandler
 	iidAddExtensionHandler = "df1aab27-82b9-4ab6-aae8-017a49398c14"
 	// ICoreWebView2ProfileGetBrowserExtensionsCompletedHandler
@@ -111,8 +109,7 @@ const (
 	// errors and logins of remote views.
 	// ICoreWebView2Environment10
 	iidWV2Environment10 = "ee0eb9df-6f12-46ce-b53f-3f47b9c928e0"
-	// ICoreWebView2ControllerOptions
-	iidWV2ControllerOptions = "12aae616-8ccb-44ec-bcb3-eb1831881635"
+
 	// ICoreWebView2Settings2
 	iidWV2Settings2 = "ee9a0f68-f46c-4e32-ac23-ef8cac224d2a"
 	// ICoreWebView2_14
@@ -123,8 +120,6 @@ const (
 	iidWV2ServerCertHandler = "969b3a26-d85e-4795-8199-fef57344da22"
 	// ICoreWebView2BasicAuthenticationRequestedEventHandler
 	iidWV2BasicAuthHandler = "58b4d6c2-18d4-497e-b39b-9a96533fa278"
-	// ICoreWebView2ServerCertificateErrorDetectedEventArgs
-	iidWV2ServerCertArgs = "012193ed-7c13-48ff-969d-a84c1f432a14"
 )
 
 // guid is a GUID in its in-memory (Windows GUID struct) layout: Data1, Data2

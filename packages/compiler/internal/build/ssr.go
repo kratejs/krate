@@ -612,12 +612,6 @@ func (s *SSRServer) patternParams(page *ManifestPage, urlPath string) map[string
 	return nil
 }
 
-func (s *SSRServer) findRendererScript() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.findRendererScriptLocked()
-}
-
 // findRendererScriptLocked resolves the renderer script. The caller must hold
 // s.mu.
 func (s *SSRServer) findRendererScriptLocked() string {

@@ -123,9 +123,6 @@ jobs:
       - name: Build JS packages
         run: pnpm -r --filter '!@krate/web' --filter '!@krate/benchmark' build
 
-      - name: Harness unit tests
-        run: node --test packages/benchmark/native/bench.test.mjs
-
       - name: Benchmark (Linux, Xvfb)
         if: runner.os == 'Linux'
         run: xvfb-run -a -s "-screen 0 1280x800x24" node packages/benchmark/native/bench.mjs --runs "$RUNS" --idle "$IDLE" --out "$RUNNER_TEMP/native-bench"

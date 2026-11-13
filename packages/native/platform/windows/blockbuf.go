@@ -39,13 +39,6 @@ func (b *blockBuf) prime(p []byte) {
 	b.mu.Unlock()
 }
 
-// setOnCancel registers f to run once when the reader cancels.
-func (b *blockBuf) setOnCancel(f func()) {
-	b.mu.Lock()
-	b.onCancel = f
-	b.mu.Unlock()
-}
-
 // Write implements io.Writer.
 func (b *blockBuf) Write(p []byte) (int, error) {
 	b.mu.Lock()

@@ -1,3 +1,5 @@
+//go:build darwin
+
 package darwin
 
 import (
@@ -7,8 +9,7 @@ import (
 )
 
 // The decision tables of the permission and privacy code, free of
-// Objective-C so they are tested on any platform. The Objective-C side is
-// permission_darwin.go.
+// Objective-C. The Objective-C side is permission_darwin.go.
 //
 // UNTESTED against the live frameworks until the macOS CI job runs the GUI
 // test: the selectors and enum values come from Apple's WebKit,

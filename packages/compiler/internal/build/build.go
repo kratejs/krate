@@ -3757,12 +3757,6 @@ func findLoading(pagePath, pagesDir string) string {
 	return findLayoutFile(pagePath, pagesDir, loadingNames)
 }
 
-// findLayout returns the layout .tsx|.ts|.jsx|.js nearest to pagePath, walking
-// up from the page's directory toward pagesDir.
-func findLayout(pagePath, pagesDir string) string {
-	return findLayoutFile(pagePath, pagesDir, layoutNames)
-}
-
 // routeBoundary is one layout or template wrapping a page.
 type routeBoundary struct {
 	Path string
@@ -3782,18 +3776,6 @@ func (rb routeBoundary) src() string {
 		return rb.Origin
 	}
 	return rb.Path
-}
-
-// findLayoutStack returns every layout wrapping pagePath, ordered innermost
-// first (see findRouteStack, which also returns templates).
-func findLayoutStack(pagePath, pagesDir string) []string {
-	var out []string
-	for _, rb := range findRouteStack(pagePath, pagesDir) {
-		if rb.Kind == "layout" {
-			out = append(out, rb.Path)
-		}
-	}
-	return out
 }
 
 // findRouteStack returns every layout and template wrapping pagePath, ordered

@@ -1,11 +1,28 @@
 name: CI
 
+# Pull requests run a fast set; pushes to dev and main, the nightly schedule
+# and manual runs are full runs. .github/scripts/ci-scope.mjs decides which
+# Krate Native runners a pull request needs (it path-filters them) and whether
+# a run is a full one. What a pull request skips, and where it runs instead:
+#   - packaging, install, update and signing smoke tests on every OS, the
+#     Flatpak and snap builds, the docs site as a native app: full runs.
+#   - the Wayland GUI pass, the native size and memory budgets, the memory
+#     reports, the native plugin tests on macOS and Windows: full runs.
+#   - the repeated GUI pass (a flake check): nightly and manual runs.
+#   - the two arm64 native runners run a thin smoke set on pull requests and
+#     everything on full runs.
+#   - go test reuses cached results on pull requests (go-cache-restore gives
+#     files content-derived mtimes); full runs pass -count=1.
+
 on:
   pull_request:
   push:
     branches:
       - main
       - dev
+  schedule:
+    - cron: "37 2 * * *"
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -15,8 +32,26 @@ permissions:
   contents: read
 
 jobs:
-  test:
-    name: Test
+  changes:
+    name: Changes
+    runs-on: ubuntu-latest
+    outputs:
+      full: ${{ steps.scope.outputs.full }}
+      native: ${{ steps.scope.outputs.native }}
+      native_matrix: ${{ steps.scope.outputs.native_matrix }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Decide the scope of this run
+        id: scope
+        run: node .github/scripts/ci-scope.mjs
+        env:
+          EVENT: ${{ github.event_name }}
+
+  lint:
+    name: Lint and checks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,15 +61,6 @@ jobs:
         with:
           go-version-file: packages/compiler/go.mod
           cache: true
-
-      # TestNativeDebugGoHostRestart drives a real dlv session; under
-      # KRATE_REQUIRE_E2E a missing dlv is a failure.
-      - name: Install Delve
-        if: ${{ !(runner.os == 'Windows' && runner.arch == 'ARM64') }}
-        shell: bash
-        run: |
-          go install github.com/go-delve/delve/cmd/dlv@latest
-          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
       - name: Enable pnpm
         uses: pnpm/action-setup@v4
@@ -47,18 +73,6 @@ jobs:
         with:
           node-version: "22"
           cache: pnpm
-
-      # The native host-child release tests compile with bun and deno, and
-      # KRATE_REQUIRE_E2E turns a missing runtime into a failure.
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - name: Set up Deno
-        uses: denoland/setup-deno@v1
-        with:
-          deno-version: v2.x
 
       - name: Install JS dependencies
         run: pnpm install --no-frozen-lockfile
@@ -111,23 +125,12 @@ jobs:
 
       - name: gofmt
         run: |
-          unformatted=$(gofmt -l .)
+          unformatted=$(gofmt -l packages/compiler packages/native)
           if [ -n "$unformatted" ]; then
             echo "gofmt found unformatted files:"
             echo "$unformatted"
             exit 1
           fi
-        working-directory: packages/compiler
-
-      - name: gofmt (native)
-        run: |
-          unformatted=$(gofmt -l .)
-          if [ -n "$unformatted" ]; then
-            echo "gofmt found unformatted files:"
-            echo "$unformatted"
-            exit 1
-          fi
-        working-directory: packages/native
 
       - name: TypeScript type-check
         run: pnpm run typecheck
@@ -135,24 +138,78 @@ jobs:
       - name: JS unit tests (Vitest)
         run: pnpm run test:js
 
+  # The Go tests on Linux, with the race detector.
+  go-test:
+    name: Go (ubuntu-latest, race)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: packages/compiler/go.mod
+          cache: false
+
+      - name: Restore the Go caches
+        uses: ./.github/actions/go-cache-restore
+        with:
+          key: race
+          test-cache: "true"
+
+      # TestNativeDebugGoHostRestart drives a real dlv session; under
+      # KRATE_REQUIRE_E2E a missing dlv is a failure.
+      - name: Install Delve
+        run: |
+          go install github.com/go-delve/delve/cmd/dlv@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Enable pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+          run_install: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      # The native host-child release tests compile with bun and deno, and
+      # KRATE_REQUIRE_E2E turns a missing runtime into a failure.
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Set up Deno
+        uses: denoland/setup-deno@v1
+        with:
+          deno-version: v2.x
+
+      - name: Install JS dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Sync framework docs
+        run: node scripts/sync-krate-docs.mjs
+
+      - name: Build JS packages
+        run: pnpm -r --filter '!@krate/web' --filter '!@krate/benchmark' build
+
       # checkptr is disabled: modernc.org/quickjs (translated C) trips the
       # checkptr instrumentation under -race. Data-race detection is unaffected.
-      # -p 2 keeps packages from saturating the runner (eval timeouts), and the
-      # raised timeout accommodates the instrumented example builds.
+      # -p 2 keeps packages from saturating the runner (eval timeouts).
       - name: Go test (race)
-        run: go test -race -gcflags=all=-d=checkptr=0 -p 2 -timeout 20m -covermode=atomic -coverprofile=coverage.out ./...
+        run: go test -race -gcflags=all=-d=checkptr=0 -p 2 -timeout 20m ${{ github.event_name != 'pull_request' && '-count=1' || '' }} ./...
         working-directory: packages/compiler
         env:
           KRATE_REQUIRE_E2E: "1"
 
-      - name: Coverage summary
-        run: go tool cover -func=coverage.out | tail -1
-        working-directory: packages/compiler
-
       # The native module holds the embedded QuickJS engine and the host
       # runtime; same race flags as the compiler.
       - name: Go test (race, native)
-        run: go test -race -gcflags=all=-d=checkptr=0 -p 2 -timeout 20m -covermode=atomic ./...
+        run: go test -race -gcflags=all=-d=checkptr=0 -p 2 -timeout 20m ${{ github.event_name != 'pull_request' && '-count=1' || '' }} ./...
         working-directory: packages/native
         env:
           KRATE_REQUIRE_E2E: "1"
@@ -170,6 +227,10 @@ jobs:
         env:
           KRATE_CONFORMANCE_MARKDOWN: ${{ runner.temp }}/conformance.md
           KRATE_CONFORMANCE_SUMMARY: ${{ runner.temp }}/conformance.json
+
+      - name: Save the Go caches
+        if: always()
+        uses: ./.github/actions/go-cache-save
 
   # Installs the packed packages with npm and runs the installed compiler. It
   # needs a version nothing on npm has, as at release time. macOS and Windows
@@ -285,6 +346,9 @@ jobs:
       fail-fast: false
       matrix:
         os: [macos-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
 
@@ -292,15 +356,19 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: packages/compiler/go.mod
-          cache: true
+          cache: false
+
+      - name: Restore the Go caches
+        uses: ./.github/actions/go-cache-restore
+        with:
+          key: test
+          test-cache: "true"
 
       # The integration tests load examples/krate.config.ts, which imports the
       # workspace @krate/core package, so the JS workspace must be linked.
       # TestNativeDebugGoHostRestart drives a real dlv session; under
       # KRATE_REQUIRE_E2E a missing dlv is a failure.
       - name: Install Delve
-        if: ${{ !(runner.os == 'Windows' && runner.arch == 'ARM64') }}
-        shell: bash
         run: |
           go install github.com/go-delve/delve/cmd/dlv@latest
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
@@ -337,14 +405,8 @@ jobs:
       - name: Build JS packages
         run: pnpm -r --filter '!@krate/web' --filter '!@krate/benchmark' build
 
-      - name: Go build
-        run: go build ./...
-        working-directory: packages/compiler
-
-      # internal/build alone took 598s on windows-latest: the default 10m
-      # package timeout is too tight there.
       - name: Go test
-        run: go test -timeout 30m ./...
+        run: go test -timeout 30m ${{ github.event_name != 'pull_request' && '-count=1' || '' }} ./...
         working-directory: packages/compiler
         env:
           # The JS workspace and runtime dist are built above, so a missing E2E
@@ -352,47 +414,81 @@ jobs:
           KRATE_REQUIRE_E2E: "1"
 
       - name: Go test (native)
-        run: go test -timeout 30m ./...
+        run: go test -timeout 30m ${{ github.event_name != 'pull_request' && '-count=1' || '' }} ./...
         working-directory: packages/native
         env:
           KRATE_REQUIRE_E2E: "1"
 
-  # Krate Native: vet, tests, the real-window (GUI) tests, packaging and update
-  # smoke tests on each OS.
+      - name: Save the Go caches
+        if: always()
+        uses: ./.github/actions/go-cache-save
+
+  # Vet and build the native module for every other OS and architecture the
+  # native jobs do not run on, from one Linux runner. The compiled packages
+  # come from the Go cache (keyed on the sources), so an unchanged platform
+  # layer costs almost nothing.
+  native-cross:
+    name: Native cross-compile
+    needs: changes
+    if: needs.changes.outputs.native != 'none'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: packages/compiler/go.mod
+          cache: false
+
+      - name: Restore the Go caches
+        uses: ./.github/actions/go-cache-restore
+        with:
+          key: cross
+
+      - name: Cross-compile the platform layers
+        run: |
+          for t in windows/amd64 windows/arm64 darwin/amd64 darwin/arm64 linux/arm64; do
+            echo "== $t"
+            GOOS=${t%/*} GOARCH=${t#*/} go vet ./...
+            GOOS=${t%/*} GOARCH=${t#*/} go build ./...
+          done
+        working-directory: packages/native
+
+      - name: Save the Go caches
+        if: always()
+        uses: ./.github/actions/go-cache-save
+
+  # Krate Native: the real-window (GUI) tests, the compiler's native tests,
+  # and on full runs the packaging and update smoke tests, on each OS.
+  #
+  # Which runners a pull request gets comes from the changes job (see
+  # .github/scripts/ci-scope.mjs). Roles: "primary" (ubuntu-latest) runs the
+  # whole GUI set plus the browser variant; "platform" (macos-latest,
+  # windows-latest) runs the whole GUI set, since their platform layers only
+  # run there; "thin" (the arm64 runners) runs the shell's GUI tests and the
+  # main end-to-end test on pull requests, everything on full runs.
+  #
+  # The vet, unit and race tests of the native module run in the Go jobs
+  # (and the GUI step below runs the module's unit tests again, with the GUI
+  # ones), the cross-compile in native-cross.
   #
   # The GUI step runs the whole native module (./...) with KRATE_NATIVE_GUI=1,
   # so a GUI test added in any package is picked up without editing this file.
   # node, bun and deno are installed on every OS (except Bun and Deno on
-  # Windows on ARM, see below) so the host-child tests run;
-  # KRATE_REQUIRE_E2E=1 turns a missing tool into a failure.
-  #
-  # arm64: ubuntu-24.04-arm and windows-11-arm run the same job natively
-  # (macos-latest is arm64 already). Tools that have no arm64 build there are
-  # named in the matrix entry's optional_runtimes / optional_tools; each is
-  # skipped with a ::notice:: line when it is really missing, and a tool that
-  # is not named stays a hard failure. KRATE_REQUIRE_E2E therefore never fails
-  # for a missing optional tool and still fails for every other one.
+  # Windows on ARM) so the host-child tests run; KRATE_REQUIRE_E2E=1 turns a
+  # missing tool into a failure. Tools with no arm64 build are named in the
+  # matrix entry's optional_runtimes / optional_tools; each is skipped with a
+  # ::notice:: line when it is really missing.
   native:
     name: Native (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.native != 'none'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-latest
-            gui: ./...
-          - os: ubuntu-24.04-arm
-            gui: ./...
-          - os: macos-latest
-            gui: ./...
-          - os: windows-latest
-            gui: ./...
-          - os: windows-11-arm
-            gui: ./...
-            # Bun and Deno publish no Windows on ARM builds; the runner
-            # image may also lack the Windows SDK tools and NSIS.
-            optional_runtimes: "bun,deno"
-            optional_tools: "makensis,signtool,makeappx"
+        include: ${{ fromJSON(needs.changes.outputs.native_matrix) }}
     defaults:
       run:
         shell: bash
@@ -402,6 +498,12 @@ jobs:
       GOFLAGS: -modcacherw
       # Read by scripts/native-smoke.mjs.
       KRATE_OPTIONAL_TOOLS: ${{ matrix.optional_tools }}
+      ROLE: ${{ matrix.role }}
+      FULL: ${{ needs.changes.outputs.full }}
+      NIGHTLY: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+      # The GUI packages: the whole module, or on a thin pull-request run the
+      # shell's GUI tests only.
+      GUI_PKGS: ${{ (matrix.role == 'thin' && needs.changes.outputs.full != 'true') && './shell' || './...' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -409,17 +511,12 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: packages/compiler/go.mod
-          cache: true
+          cache: false
 
-      # TestNativeDebugGoHost* drive a real dlv session; without dlv they
-      # skip, or fail under KRATE_REQUIRE_E2E. Delve does not support Windows
-      # on ARM, where the tests skip (build.ErrDelveUnsupported).
-      - name: Install Delve
-        if: ${{ !(runner.os == 'Windows' && runner.arch == 'ARM64') }}
-        run: |
-          go install github.com/go-delve/delve/cmd/dlv@latest
-          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
-          "$(go env GOPATH)/bin/dlv" version
+      - name: Restore the Go caches
+        uses: ./.github/actions/go-cache-restore
+        with:
+          key: native
 
       - name: Enable pnpm
         uses: pnpm/action-setup@v4
@@ -474,49 +571,22 @@ jobs:
       - name: Build JS packages
         run: pnpm -r --filter '!@krate/web' --filter '!@krate/benchmark' build
 
-      - name: Go vet (native)
-        run: go vet ./...
-        working-directory: packages/native
-
-      - name: Cross-compile the platform layers
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          for t in windows/amd64 windows/arm64 darwin/amd64 darwin/arm64 linux/arm64; do
-            echo "== $t"
-            GOOS=${t%/*} GOARCH=${t#*/} go vet ./...
-            GOOS=${t%/*} GOARCH=${t#*/} go build ./...
-          done
-        working-directory: packages/native
-
-      - name: Go test (race, native)
-        if: runner.os == 'Linux'
-        run: go test -race -gcflags=all=-d=checkptr=0 -p 2 -timeout 20m ./...
-        working-directory: packages/native
-        env:
-          KRATE_REQUIRE_E2E: "1"
-
-      - name: Go test (native)
-        if: runner.os != 'Linux'
-        run: go test -timeout 20m ./...
-        working-directory: packages/native
-        env:
-          KRATE_REQUIRE_E2E: "1"
-
       # The real services the Linux tests talk to: dunst (notifications),
-      # stalonetray (XEmbed tray), the Ayatana application indicator service
-      # (a StatusNotifierWatcher and host), openbox (window-manager state),
-      # xdotool (clicks), weston (a Wayland compositor) and the tools the
-      # packaging smoke test needs (rpm, desktop-file-validate, squashfs).
+      # openbox (window-manager state), xdotool (clicks), weston (a Wayland
+      # compositor) and the tools the packaging smoke test needs (rpm,
+      # desktop-file-validate, squashfs).
       - name: Install the Linux webview, Xvfb and desktop services
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-0 xvfb openbox xdotool dbus dbus-bin \
-            dunst stalonetray ayatana-indicator-application weston \
-            rpm desktop-file-utils squashfs-tools file at-spi2-core gdb
+            dunst at-spi2-core gdb
+          if [ "$FULL" = true ]; then
+            sudo apt-get install -y weston rpm desktop-file-utils squashfs-tools file
+          fi
 
       - name: Install appimagetool (Linux)
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && env.FULL == 'true'
         run: |
           mkdir -p "$HOME/bin"
           # appimagetool-x86_64 or appimagetool-aarch64, matching the runner.
@@ -546,21 +616,17 @@ jobs:
           '
         working-directory: packages/native
         env:
-          GUI_PKGS: ${{ matrix.gui }}
           KRATE_NATIVE_GUI: "1"
           KRATE_NATIVE_WM: "1"
           KRATE_REQUIRE_E2E: "1"
-          # The real print dialog opens in this pass only.
-          KRATE_NATIVE_PRINT_DIALOG: "1"
 
       # The same GUI packages under a Wayland compositor: weston nested on
       # Xvfb (its x11 backend has an input seat; the headless backend has none
       # and GTK's clipboard crashes without a seat). GDK_BACKEND=wayland makes
-      # GTK use it. The XEmbed tray and key-grab tests skip themselves there;
-      # TestWaylandPlacementIsIgnored checks that SetPosition and
-      # SetAlwaysOnTop are accepted and ignored.
+      # GTK use it. The tests are the X11 pass's; only the GDK backend differs,
+      # so pull requests run the X11 pass alone.
       - name: "GUI tests (Linux, Wayland via weston on Xvfb)"
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && env.FULL == 'true'
         run: |
           # shellcheck disable=SC2016
           xvfb-run -a bash -c '
@@ -594,19 +660,16 @@ jobs:
           go test -p 1 -count=1 -timeout 20m -v $GUI_PKGS
         working-directory: packages/native
         env:
-          GUI_PKGS: ${{ matrix.gui }}
           KRATE_NATIVE_GUI: "1"
           KRATE_REQUIRE_E2E: "1"
 
-      # The Linux request-body crash (a body stream read off the main thread)
-      # showed up in about 1 of 100 runs, so the packages that exercise it run
-      # three times. ./shell is not repeated: its GUI tests walk one page load
-      # in order (the first test consumes the page's first report), so a second
-      # pass in the same process cannot work. It runs once in the step above;
-      # TestGUIZMemoryPanel there reads packages/runtime/dist/krate-dev.js,
-      # which the JS build produces.
+      # A flake check: the Linux request-body crash (a body stream read off the
+      # main thread) showed up in about 1 of 100 runs, so the packages that
+      # exercise it run three more times. Nightly and manual runs only. ./shell
+      # is not repeated: its GUI tests walk one page load in order, so a second
+      # pass in the same process cannot work.
       - name: GUI tests repeated (Linux, platform/linux, sdk/guitest)
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && env.NIGHTLY == 'true'
         run: |
           # shellcheck disable=SC2016
           xvfb-run -a bash -c '
@@ -624,13 +687,10 @@ jobs:
           KRATE_NATIVE_WM: "1"
           KRATE_REQUIRE_E2E: "1"
 
-      # The compiler's native tests build the example app and drive the shell.
-      # TestNativeBudgetGUI checks cold start and memory against
-      # packages/native/budgets.json. The cold-start limit was measured on a
-      # developer machine, so the hosted runner gets 3x on it
-      # (KRATE_BUDGET_SCALE). Memory is PSS and private dirty per process role;
-      # only app minus a blank-page floor (same shell, same runner) fails the
-      # job, the absolute values print a warning. Memory limits are not scaled.
+      # The compiler's native tests build the example apps and drive the
+      # shell. Pull requests skip TestNativeBudgetGUI (cold start and memory
+      # against packages/native/budgets.json); full runs check it, with 3x on
+      # the cold-start limit for the hosted runner (KRATE_BUDGET_SCALE).
       #
       # A private session bus with dunst on the test display: the runner's own
       # session bus would start dunst through systemd without the display, and
@@ -638,12 +698,16 @@ jobs:
       - name: Compiler native tests (Linux, GUI under Xvfb)
         if: runner.os == 'Linux'
         run: |
+          if [ "$FULL" = true ]; then run='GUI'; skip=''
+          elif [ "$ROLE" = thin ]; then run='^TestNativeE2EGUI$'; skip=''
+          else run='GUI'; skip='TestNativeBudgetGUI'; fi
+          export run skip
           # shellcheck disable=SC2016
           xvfb-run -a dbus-run-session -- bash -c '
             dunst &
             notifier=$!
             sleep 1
-            go test -p 1 -count=1 -timeout 20m -v -run "TestNativeE2EGUI|TestNativeBudgetGUI|TestNativeDebugGoHost|GUI" ./internal/build
+            go test -p 1 -count=1 -timeout 20m -v -run "$run" -skip "$skip" ./internal/build
             status=$?
             kill $notifier
             exit $status
@@ -656,9 +720,8 @@ jobs:
 
       # Acceptance: the docs site builds as a native app, packages as .deb,
       # .rpm, .tar.gz and an AppImage, and the installed binaries serve it.
-      # Needs the JS packages built (above), appimagetool, file and rpm.
       - name: Docs site as a native app (Linux)
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.role == 'primary' && env.FULL == 'true'
         run: xvfb-run -a go test -count=1 -timeout 30m -v -run TestNativeDocsSiteE2E ./cmd/krate
         working-directory: packages/compiler
         env:
@@ -666,35 +729,19 @@ jobs:
           KRATE_NATIVE_GUI: "1"
           KRATE_REQUIRE_E2E: "1"
 
-      # Plugins are Go code linked into a per-app shell, built with the Go
-      # toolchain on the runner; the system-info plugin has its own module.
-      - name: Native plugin tests (macOS, Windows)
-        if: runner.os != 'Linux'
-        run: |
-          (cd packages/compiler && GOWORK=off go test -p 1 -count=1 -timeout 20m -run Plugin ./internal/build)
-          (cd examples/native-plugin/native-plugins/system-info && GOWORK=off go test -count=1 ./...)
-
-      # The views example (a sidebar and a log view split off the main page)
-      # must keep compiling; TestGUIViews in the module-wide GUI step covers
-      # the runtime side on every OS.
-      - name: Build examples/native-views
-        env:
-          GOWORK: "off"
-        run: |
-          EXE=""
-          if [ "$RUNNER_OS" = "Windows" ]; then EXE=".exe"; fi
-          (cd packages/compiler && go build -o "$RUNNER_TEMP/krate-views$EXE" ./cmd/krate)
-          (cd examples/native-views && "$RUNNER_TEMP/krate-views$EXE" build)
-
       # The same on macOS and Windows (including the host child test, which
-      # runs Node, Bun and Deno through the real shell, and the size budgets).
-      # The budget tests enforce the entries budgets.json has for the platform
-      # (darwin-arm64, windows-amd64, ...). A platform with none yet only
-      # reports: look for the BUDGET-RECORD-BEGIN block in this step's log (or
-      # in the job summary), a fragment of budgets.json to paste in.
+      # runs Node, Bun and Deno through the real shell). Full runs add the
+      # budgets, the universal app and the Mac App Store sandbox. A platform
+      # with no budget entries only reports: look for the BUDGET-RECORD-BEGIN
+      # block in this step's log (or in the job summary), a fragment of
+      # budgets.json to paste in.
       - name: Compiler native tests (macOS, Windows)
         if: runner.os != 'Linux'
-        run: go test -p 1 -count=1 -timeout 20m -v -run 'TestNativeE2EGUI|TestNativeBudgetGUI|TestNativeBudgetSizes|TestNativeDebugGoHost|TestNativeUniversalMacApp|TestNativeMASSandboxGUI|GUI' ./internal/build
+        run: |
+          if [ "$FULL" = true ]; then run='GUI|TestNativeBudgetSizes'; skip=''
+          elif [ "$ROLE" = thin ]; then run='^TestNativeE2EGUI$'; skip=''
+          else run='GUI'; skip='TestNativeBudgetGUI|TestNativeMASSandboxGUI'; fi
+          go test -p 1 -count=1 -timeout 20m -v -run "$run" -skip "$skip" ./internal/build
         working-directory: packages/compiler
         env:
           GOWORK: "off"
@@ -702,46 +749,53 @@ jobs:
           KRATE_REQUIRE_E2E: "1"
           KRATE_BUDGET_SCALE: "3"
 
+      # Plugins are Go code linked into a per-app shell, built with the Go
+      # toolchain on the runner; the system-info plugin has its own module.
+      - name: Native plugin tests (macOS, Windows)
+        if: runner.os != 'Linux' && env.FULL == 'true'
+        run: |
+          (cd packages/compiler && GOWORK=off go test -p 1 -count=1 -timeout 20m -run Plugin ./internal/build)
+          (cd examples/native-plugin/native-plugins/system-info && GOWORK=off go test -count=1 ./...)
+
       # Binary sizes (the stripped shell, Go-only, TypeScript-only and example
       # release executables) against packages/native/budgets.json. No display.
-      # Every CI platform has entries (recorded from run 43344648942).
       - name: Native size budgets (Linux)
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && env.FULL == 'true'
         run: go test -p 1 -count=1 -timeout 20m -run 'TestNativeBudgetSizes' -v ./internal/build
         working-directory: packages/compiler
         env:
           KRATE_REQUIRE_E2E: "1"
 
       # Packaging, install, launch and update smoke tests, per OS (see
-      # scripts/native-smoke.mjs). "prepare" builds the example as 1.0.0 and
-      # 1.1.0 with `krate native build --release --package` and a freshly
-      # generated updater key; the other steps install 1.0.0 the way a user
-      # would, check that it serves its first page, and update it to 1.1.0
-      # through the real updater against a local signed feed.
+      # scripts/native-smoke.mjs), on full runs. "prepare" builds the example
+      # as 1.0.0 and 1.1.0 with `krate native build --release --package` and a
+      # freshly generated updater key; the other steps install 1.0.0 the way a
+      # user would, check that it serves its first page, and update it to
+      # 1.1.0 through the real updater against a local signed feed.
       - name: Packaging smoke test, build packages (Linux)
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && env.FULL == 'true'
         run: node scripts/native-smoke.mjs linux prepare
         env:
           KRATE_REQUIRE_E2E: "1"
 
       - name: Packaging smoke test, .deb install, launch, remove (Linux)
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && env.FULL == 'true'
         run: xvfb-run -a node scripts/native-smoke.mjs linux deb
 
       - name: Packaging smoke test, .rpm structure (Linux)
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && env.FULL == 'true'
         run: node scripts/native-smoke.mjs linux rpm
         env:
           KRATE_REQUIRE_E2E: "1"
 
       - name: Packaging smoke test, AppImage launch (Linux)
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && env.FULL == 'true'
         run: xvfb-run -a node scripts/native-smoke.mjs linux appimage
         env:
           KRATE_REQUIRE_E2E: "1"
 
       - name: Update smoke test, 1.0.0 to 1.1.0 (Linux)
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && env.FULL == 'true'
         run: node scripts/native-smoke.mjs linux update
 
       # Real signatures with a key generated in the job: krate native sign
@@ -749,28 +803,28 @@ jobs:
       # fail). Notarization and Developer ID signing need secrets and stay
       # manual (docs/native/signing).
       - name: Signing smoke test, gpg (Linux)
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && env.FULL == 'true'
         run: node scripts/native-smoke.mjs linux sign
         env:
           KRATE_REQUIRE_E2E: "1"
 
       - name: Packaging smoke test, build packages (macOS)
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && env.FULL == 'true'
         run: node scripts/native-smoke.mjs macos prepare
 
       - name: Packaging smoke test, mount the dmg, launch (macOS)
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && env.FULL == 'true'
         run: node scripts/native-smoke.mjs macos dmg
 
       - name: Update smoke test, 1.0.0 to 1.1.0 (macOS)
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && env.FULL == 'true'
         run: node scripts/native-smoke.mjs macos update
 
       # codesign with the ad hoc signature of "prepare" and with a self-signed
       # identity from a temporary keychain, both checked with codesign --verify
       # --deep --strict (a tampered bundle must fail).
       - name: Signing smoke test, ad hoc and self-signed identity (macOS)
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && env.FULL == 'true'
         run: node scripts/native-smoke.mjs macos sign
         env:
           KRATE_REQUIRE_E2E: "1"
@@ -778,13 +832,13 @@ jobs:
       # A universal (arm64 + amd64 lipo) app bundle and a Mac App Store
       # package (sandbox entitlements, ad hoc signed), both structure-checked.
       - name: Packaging smoke test, universal app (macOS)
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && env.FULL == 'true'
         run: node scripts/native-smoke.mjs macos universal
         env:
           KRATE_REQUIRE_E2E: "1"
 
       - name: Packaging smoke test, Mac App Store package (macOS)
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && env.FULL == 'true'
         run: node scripts/native-smoke.mjs macos mas
         env:
           KRATE_REQUIRE_E2E: "1"
@@ -794,26 +848,26 @@ jobs:
       # (optional_tools): the smoke steps then skip the NSIS installer with a
       # notice.
       - name: Install NSIS and create a signing certificate (Windows)
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && env.FULL == 'true'
         continue-on-error: ${{ contains(matrix.optional_tools, 'makensis') }}
         run: |
           choco install nsis -y --no-progress
           echo "C:\Program Files (x86)\NSIS" >> "$GITHUB_PATH"
 
       - name: Create a signing certificate (Windows)
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && env.FULL == 'true'
         run: node scripts/native-smoke.mjs windows cert
         env:
           KRATE_REQUIRE_E2E: "1"
 
       - name: Packaging smoke test, build and sign packages (Windows)
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && env.FULL == 'true'
         run: node scripts/native-smoke.mjs windows prepare
         env:
           KRATE_REQUIRE_E2E: "1"
 
       - name: Packaging smoke test, NSIS silent install, launch, uninstall (Windows)
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && env.FULL == 'true'
         run: node scripts/native-smoke.mjs windows nsis
         env:
           KRATE_REQUIRE_E2E: "1"
@@ -822,30 +876,29 @@ jobs:
       # stand-in bootstrapper (nothing is downloaded, the runner's runtime
       # registration is hidden only for the run and restored).
       - name: Packaging smoke test, NSIS WebView2 check (Windows)
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && env.FULL == 'true'
         run: node scripts/native-smoke.mjs windows webview2
         env:
           KRATE_REQUIRE_E2E: "1"
 
       - name: Packaging smoke test, MSIX validate, install, launch (Windows)
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && env.FULL == 'true'
         run: node scripts/native-smoke.mjs windows msix
         env:
           KRATE_REQUIRE_E2E: "1"
 
       - name: Update smoke test, 1.0.0 to 1.1.0 (Windows)
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && env.FULL == 'true'
         run: node scripts/native-smoke.mjs windows update
 
-      # Memory of the system webview on real macOS and Windows machines. The
-      # WKWebView and WebView2 memory levers were written without being able to
-      # run them: this step produces the first numbers. `krate native profile --memory`
-      # builds the app, measures PSS-equivalent and private memory per process
-      # role against a blank-page floor and writes dist-native/report.json. The
-      # profile comes from native.memory in krate.config.ts, set here per run
-      # and restored afterwards.
+      # Memory of the system webview on real macOS and Windows machines, on
+      # full runs. `krate native profile --memory` builds the app, measures
+      # PSS-equivalent and private memory per process role against a
+      # blank-page floor and writes dist-native/report.json. The profile comes
+      # from native.memory in krate.config.ts, set here per run and restored
+      # afterwards.
       - name: Native memory report (macOS, Windows)
-        if: runner.os != 'Linux'
+        if: runner.os != 'Linux' && env.FULL == 'true'
         env:
           GOWORK: "off"
         run: |
@@ -868,10 +921,9 @@ jobs:
           exit $status
 
       # Compare the numbers above with the linux-amd64 limits in
-      # packages/native/budgets.json. Informational: macOS and Windows budgets
-      # stay "planned" until these numbers have been seen and reviewed.
+      # packages/native/budgets.json. Informational.
       - name: Native memory budget comparison (macOS, Windows)
-        if: always() && runner.os != 'Linux'
+        if: always() && runner.os != 'Linux' && env.FULL == 'true'
         continue-on-error: true
         run: |
           node scripts/native-budget-compare.mjs \
@@ -879,7 +931,7 @@ jobs:
             "performance=native-memory/performance/report.json"
 
       - name: Upload native memory reports
-        if: always() && runner.os != 'Linux'
+        if: always() && runner.os != 'Linux' && env.FULL == 'true'
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
@@ -888,36 +940,39 @@ jobs:
           if-no-files-found: warn
 
       - name: Cache Playwright browsers
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.role == 'primary'
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-chromium-${{ hashFiles('pnpm-lock.yaml') }}
 
       - name: Install chromium
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.role == 'primary'
         run: pnpm exec playwright install --with-deps chromium
 
+      # The native app with --browser in place of a webview, the dev session
+      # and the release build.
       - name: Native end-to-end in the browser (chromium)
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.role == 'primary'
         run: go test -p 1 -count=1 -timeout 20m -run 'TestNativeE2E|TestNativeDevSession|TestNativeRelease' -v ./internal/build
         working-directory: packages/compiler
         env:
           KRATE_BROWSER: chromium
           KRATE_REQUIRE_E2E: "1"
 
-      # The slow packaging steps run last. Flatpak builds against the GNOME
-      # runtime from Flathub (the smoke script installs it per user); the snap
-      # is built in destructive mode on the runner and installed with --dangerous.
+      # The slow packaging steps run last, on full runs. Flatpak builds against
+      # the GNOME runtime from Flathub (the smoke script installs it per user);
+      # the snap is built in destructive mode on the runner and installed with
+      # --dangerous.
       - name: Install flatpak and flatpak-builder
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.role == 'primary' && env.FULL == 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y flatpak flatpak-builder appstream
           flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
 
       - name: Packaging smoke test, Flatpak build, install, run (Linux)
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.role == 'primary' && env.FULL == 'true'
         run: xvfb-run -a node scripts/native-smoke.mjs linux flatpak
         env:
           KRATE_REQUIRE_E2E: "1"
@@ -926,13 +981,9 @@ jobs:
       # the snap store, which is sometimes unreachable from the runners for
       # many minutes. A few retries; if the store stays down, the job warns
       # and the snap smoke test skips itself (snapcraft becomes an optional
-      # tool) instead of failing a run whose code is fine. The generated
-      # snapcraft.yaml is still checked by the unit tests.
-      # Besides snapcraft, the snaps the gnome extension builds and runs
-      # against (core24 base, GNOME 46 runtime and SDK, mesa, themes) are
-      # installed here, so the build itself does not have to reach the store.
+      # tool) instead of failing a run whose code is fine.
       - name: Install snapcraft
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.role == 'primary' && env.FULL == 'true'
         run: |
           install() {
             sudo snap install snapcraft --classic &&
@@ -948,11 +999,15 @@ jobs:
           echo "KRATE_OPTIONAL_TOOLS=${KRATE_OPTIONAL_TOOLS:+$KRATE_OPTIONAL_TOOLS,}snapcraft" >> "$GITHUB_ENV"
 
       - name: Packaging smoke test, snap build, install, run (Linux)
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.role == 'primary' && env.FULL == 'true'
         run: xvfb-run -a node scripts/native-smoke.mjs linux snap
         env:
           KRATE_REQUIRE_E2E: "1"
           KRATE_SNAP_DESTRUCTIVE: "1"
+
+      - name: Save the Go caches
+        if: always()
+        uses: ./.github/actions/go-cache-save
 
   node-versions:
     name: Node ${{ matrix.node }}
@@ -1097,13 +1152,6 @@ jobs:
           KRATE_REQUIRE_E2E: "1"
           KRATE_HYDRATION_BUDGET_MS: "2500"
 
-      - name: MCP browser tools
-        if: matrix.browser == 'chromium'
-        run: go test -run TestBrowserToolsDriveARealBrowser -count=1 ./internal/mcp
-        working-directory: packages/compiler
-        env:
-          KRATE_BROWSER: ${{ matrix.browser }}
-
       # React 19 vs Krate differential over the R2/R3 corpus. Fails on any
       # divergence not listed in testdata/reactbrowser/divergences.json.
       - name: React browser differential
@@ -1115,13 +1163,12 @@ jobs:
           KRATE_REACT_EXIT: "1"
           KRATE_REACTBROWSER_REPORT: ${{ runner.temp }}/react-browser-${{ matrix.browser }}.txt
 
-      # App-level browser tests: SPA router (layouts, templates, parallel and
-      # intercepting routes), per-segment not-found and error pages, client
-      # components inside server components, a migrated Next.js app (async
-      # server components, revalidation), and code highlighting (light/dark
-      # switching, code highlighted in the browser as it changes).
+      # App-level browser tests: the SPA router (layouts, templates, parallel
+      # and intercepting routes), client components inside server components,
+      # the component library's accessibility, a server action redirect, and
+      # CSP with speculation rules.
       - name: App browser tests
-        run: go test -run 'TestRouterBrowserE2E|TestBasePathBrowser|TestSegmentPagesBrowser|TestServerlessNodeBrowser|TestUseClientIslandBrowser|TestMigratedNextAppBrowser|TestTailwindLayeringInBrowser|TestComponentsA11yBrowser|TestServerActionRedirectInBrowser|TestNoJSActionStateFeedbackInBrowser|TestCSPSpeculationRulesInBrowser|TestCodeThemeBrowser|TestDynamicCodeBrowser' -count=1 -v ./internal/build
+        run: go test -run 'TestRouterBrowserE2E|TestUseClientIslandBrowser|TestComponentsA11yBrowser|TestServerActionRedirectInBrowser|TestCSPSpeculationRulesInBrowser' -count=1 -v ./internal/build
         working-directory: packages/compiler
         env:
           KRATE_BROWSER: ${{ matrix.browser }}

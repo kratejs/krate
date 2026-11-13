@@ -1,3 +1,5 @@
+//go:build windows
+
 package windows
 
 import "fmt"
@@ -99,7 +101,6 @@ var (
 	scrArgsPutCancel          = vtIndex("ICoreWebView2ScreenCaptureStartingEventArgs", "put_Cancel")
 	scrArgsGetDeferral        = vtIndex("ICoreWebView2ScreenCaptureStartingEventArgs", "GetDeferral")
 	wv19PutMemoryTargetLevel  = vtIndex("ICoreWebView2_19", "put_MemoryUsageTargetLevel")
-	optGetArguments           = vtIndex("ICoreWebView2EnvironmentOptions", "get_AdditionalBrowserArguments")
 
 	// Toast notifications (see toast.go).
 	activationFactoryActivate = vtIndex("IActivationFactory", "ActivateInstance")

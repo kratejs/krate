@@ -1,9 +1,11 @@
+//go:build darwin
+
 package darwin
 
 import "time"
 
-// Memory tuning for WKWebView: the decision table, free of Objective-C so it
-// can be tested on any platform. The Objective-C side is memory_darwin.go.
+// Memory tuning for WKWebView: the decision table, free of Objective-C. The
+// Objective-C side is memory_darwin.go.
 //
 // The levers run on every window the macOS CI GUI tests open, and the CI
 // native job measures the example on macos-latest (informational); no test
@@ -154,54 +156,6 @@ func planLevers(p memoryPlan) []lever {
 	if p.NoPageCache {
 		out = append(out, lever{Name: "pagecache", Target: targetPrefs, Feature: "UsesBackForwardCache",
 			Selectors: []string{"_setUsesBackForwardCache:", "_setPageCacheEnabled:"}, Private: true})
-	}
-	return out
-}
-
-// memorySelectors lists every selector the memory code may send for a
-// profile and feature set, sorted by first use and without duplicates. It is
-// what the per-profile test pins down.
-func memorySelectors(profile string, features map[string]bool) []string {
-	plan := planMemory(profile, features)
-	if plan == (memoryPlan{}) {
-		return nil
-	}
-	var out []string
-	seen := map[string]bool{}
-	add := func(s ...string) {
-		for _, x := range s {
-			if !seen[x] {
-				seen[x] = true
-				out = append(out, x)
-			}
-		}
-	}
-	levers := planLevers(plan)
-	needPrefs := false
-	for _, l := range levers {
-		if l.Target == targetPrefs {
-			needPrefs = true
-		}
-	}
-	for _, l := range levers {
-		if l.Target == targetConfig {
-			add(l.Selectors...)
-		}
-	}
-	if needPrefs {
-		add(selPreferences)
-	}
-	for _, l := range levers {
-		if l.Target != targetPrefs {
-			continue
-		}
-		if l.Feature != "" {
-			add(selFeatures, selFeatureKey, selSetFeature)
-		}
-		add(l.Selectors...)
-	}
-	if plan.PurgeMemoryCache {
-		add(selDefaultStore, selRemoveData)
 	}
 	return out
 }

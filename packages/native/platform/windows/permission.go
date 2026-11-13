@@ -1,3 +1,5 @@
+//go:build windows
+
 package windows
 
 import (
@@ -8,7 +10,7 @@ import (
 )
 
 // The decision tables of the permission and privacy code, free of COM and
-// Win32 so they are tested on any platform. The Windows side is
+// Win32. The Windows side is
 // permission_windows.go and privacy_windows.go.
 //
 // UNTESTED against a live runtime until the Windows CI job runs the GUI test:
