@@ -355,7 +355,7 @@ func checkServerTree(ann *irtree.Annotations, roots []string, clientMods map[str
 		}
 		visited[name] = true
 		fn := ann.Functions[name]
-		if fn == nil || isClient(name) {
+		if fn == nil || isClient(name) || resolver.IsCompiledDependency(filepath.ToSlash(ann.ComponentSources[name])) {
 			return
 		}
 		file := filepath.Base(ann.ComponentSources[name])

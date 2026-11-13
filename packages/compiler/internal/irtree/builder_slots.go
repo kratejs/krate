@@ -4230,7 +4230,7 @@ func (b *builder) buildExternalComponentSlot(name string, el *ast.JSXElement) (S
 	if imp.Namespace && len(members) == 0 {
 		return nil, false
 	}
-	id := "island-" + strconv.Itoa(len(b.externals)+1)
+	id := "island-" + b.idPrefix + strconv.Itoa(len(b.externals)+1)
 	// client:visible / client:idle / client:load choose when the island mounts.
 	// They are directives for Krate, never props of the component.
 	hydrate := ""

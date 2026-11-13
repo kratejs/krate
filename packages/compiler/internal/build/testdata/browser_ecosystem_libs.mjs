@@ -48,6 +48,19 @@ try {
     const txt = await p.textContent("[data-sonner-toast]");
     return txt.includes("Saved!") && txt.includes("all good") ? true : `toast text ${txt}`;
   });
+  await run("toastlayout", async (p) => {
+    await p.click("#save");
+    await p.waitForSelector("[data-sonner-toast]", { timeout: 4000 });
+    const first = await p.textContent("[data-sonner-toast]");
+    if (!first.includes("Saved from page")) return `toast text ${first}`;
+    await p.click("#to-b");
+    await p.waitForFunction(() => document.querySelector("h1")?.textContent === "b", null, { timeout: 5000 });
+    await p.waitForTimeout(300);
+    await p.click("#save");
+    await p.waitForSelector("[data-sonner-toast]", { timeout: 4000 });
+    const toasters = await p.locator("[data-sonner-toaster]").count();
+    return toasters === 1 ? true : `toasters after navigation=${toasters}`;
+  });
   await run("cmdk", async (p) => {
     const total = await p.locator("[cmdk-item]").count();
     await p.fill("[cmdk-input]", "ban");
@@ -88,6 +101,13 @@ try {
     return before === "Ada" && after === "Cy" ? true : `${before} -> ${after}`;
   });
   await run("themes", async (p) => {
+    await p.click("#dark");
+    await p.waitForTimeout(200);
+    const cls = await p.evaluate(() => document.documentElement.className);
+    const txt = await p.textContent("#theme");
+    return cls.includes("dark") && txt.startsWith("dark") ? true : `class=${cls} text=${txt}`;
+  });
+  await run("themelayout", async (p) => {
     await p.click("#dark");
     await p.waitForTimeout(200);
     const cls = await p.evaluate(() => document.documentElement.className);

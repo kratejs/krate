@@ -12,7 +12,9 @@ import (
 
 // TestBrowserEcosystemLibraries builds and drives the real npm packages listed
 // in testdata/ecosystem_libs/package.json (sonner, cmdk, embla-carousel-react,
-// @dnd-kit, @tanstack/react-table, next-themes, motion/react) in a browser.
+// @dnd-kit, @tanstack/react-table, next-themes, motion/react) in a browser,
+// including a layout-level Toaster with toast() called from a page and a
+// layout-level ThemeProvider.
 // Unlike the stand-in packages of the other island tests it needs the actual
 // packages: set KRATE_ECOSYSTEM_LIBS to a node_modules directory that has them,
 // or KRATE_ECOSYSTEM_INSTALL=1 to have the test run npm install (network).

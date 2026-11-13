@@ -2819,12 +2819,18 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 	var jsBytes []byte
 	hasJS := false
 	var pageProviders *islandProviders
-	if len(tree.ExternalComponents) > 0 {
+	pageIslands := tree.ExternalComponents
+	layoutExts, layoutImps := b.layoutIslandsFor(page)
+	if len(layoutExts) > 0 {
+		pageIslands = append(append([]irtree.ExternalComponent(nil), layoutExts...), pageIslands...)
+		externalImports = append(append([]irtree.ExternalImport(nil), externalImports...), layoutImps...)
+	}
+	if len(pageIslands) > 0 {
 		pageProviders = b.pageProviders(page)
 	}
 	islandBoot, islandJS, islandSSR, islandStyles, islandErr := b.buildIslands(
 		page,
-		tree.ExternalComponents,
+		pageIslands,
 		externalImports,
 		entryLocalImports(entryModule.Program),
 		filepath.Dir(entryModule.Path),
@@ -3239,6 +3245,8 @@ type layoutEmitCacheEntry struct {
 	// providers are the provider wrappers lifted out of the layout for the
 	// islands of its pages (nil when there are none).
 	providers *layoutProviders
+	// islands are the React islands the layout hosts (nil when there are none).
+	islands *layoutIslands
 }
 
 // layoutIDPrefix returns a stable, collision-free namespace for a layout's
@@ -3360,6 +3368,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 		entry := cached.(*layoutEmitCacheEntry)
 		if layoutCacheFresh(entry) {
 			layoutProviderCache.Store(layoutPath, entry.providers)
+			layoutIslandCache.Store(layoutPath, entry.islands)
 			return &renderer.EmitResult{
 				HTML:           strings.Replace(entry.html, "<!--__children__-->", content, -1),
 				HeadHTML:       entry.headHTML,
@@ -3432,8 +3441,17 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 		}
 	}
 	layoutProviderCache.Store(layoutPath, lifted)
+	var hostedImports []irtree.ExternalImport
+	layoutIslandCache.Store(layoutPath, nil)
 	if islands := b.detectReactIslandModules(layoutBundle.Modules, bnd.Resolve); len(islands) > 0 {
-		return nil, "", nil, false, reactIslandDiag(firstReactIsland(islands), "a layout")
+		lm := findEntryModule(layoutBundle.Modules)
+		if lm == nil || islands[lm.Path] != nil || layoutIslandImports(layoutBundle.Modules, islands, bnd.Resolve) == nil {
+			return nil, "", nil, false, reactIslandDiag(firstReactIsland(islands), "a layout")
+		}
+		hostedImports = layoutIslandImports(layoutBundle.Modules, islands, bnd.Resolve)
+		layoutBundle.Modules = krateSideModules(layoutBundle.Modules, lm, islands, bnd.Resolve)
+	} else {
+		hostedImports = layoutIslandImports(layoutBundle.Modules, nil, bnd.Resolve)
 	}
 	layoutVendorImports.Store(layoutPath, collectVendorImports(layoutBundle))
 	printModuleWarnings(os.Stderr, layoutBundle.Modules)
@@ -3496,10 +3514,24 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	applyModuleBindings(&opts, layoutModule.Path, layoutModule.Program, extraLayoutPrograms)
 	opts.GoComponents = b.collectGoComponents(layoutBundle, b.Root)
 	opts.ActionURLs = layoutBundle.ActionImports
+	if len(hostedImports) > 0 {
+		opts.ExternalImports = map[string]irtree.ExternalImport{}
+		for _, imp := range hostedImports {
+			opts.ExternalImports[imp.Local] = imp
+		}
+	}
 	tree := b.buildTree(layoutModule.Program, ann, opts)
 	if len(tree.Errors) > 0 {
 		return nil, "", nil, false, renderErrors(layoutPath, tree.Errors)
 	}
+	var hosted *layoutIslands
+	if len(tree.ExternalComponents) > 0 {
+		if err := checkLayoutIslands(tree.ExternalComponents); err != nil {
+			return nil, "", nil, false, err
+		}
+		hosted = &layoutIslands{Exts: tree.ExternalComponents, Imports: hostedImports}
+	}
+	layoutIslandCache.Store(layoutPath, hosted)
 	emitter := renderer.NewEmitter()
 	emitter.CodeTheme = b.Cfg.Markdown.CodeTheme
 	emitter.IconResolver = b.iconResolver
@@ -3553,6 +3585,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 		deps:           layoutDeps,
 		depTimes:       modTimesOf(layoutDeps),
 		providers:      lifted,
+		islands:        hosted,
 	})
 
 	// Inject page content at {children} slot
@@ -3977,6 +4010,9 @@ func (b *Builder) applyLayoutStack(page string, emitResult *renderer.EmitResult,
 			}
 		}
 		entry := routeChainEntry{ID: id, Kind: rb.Kind, Depth: routeDepth(rb.Dir, b.Cfg.PagesDir), File: relPath}
+		if layoutHostsIslands(rb.Path) {
+			entry.Why = "the " + rb.Kind + " hosts React islands, which are mounted again on every navigation"
+		}
 		switch n := strings.Count(layoutRes.HTML, open); {
 		case n == 0:
 			b.printRouteWarning(diag.Diagnostic{

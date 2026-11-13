@@ -1203,8 +1203,8 @@ interaction it was clicked or typed into.
 | cmdk | works: `Command`, `Command.Input`, `Command.List`, `Command.Item` filtering as you type, `Command.Empty` | 1.1.1 |
 | embla-carousel-react | works: `useEmblaCarousel`, snap list, `scrollNext()` | 8.6.0 |
 | @dnd-kit | works: `DndContext`, `SortableContext`, `useSortable` with the pointer sensor, reordering through a real drag | core 6.3.1, sortable 10.0.0 |
-| next-themes | partly: `ThemeProvider` and `useTheme` switch the `<html>` class and theme state when the provider is in the island's module; a provider in a layout is not lifted (KR8016) | 0.4.6 |
-| sonner | partly: `toast()` and `<Toaster />` work when both are in one island module; a component that only calls `toast()` fails to build (`cannot bundle "sonner"`), so the usual root-layout `<Toaster />` plus `toast()` elsewhere does not work yet | 2.0.8 |
+| next-themes | works: `ThemeProvider` in the root layout and `useTheme` in a client component switch the `<html>` class and theme state; the theme state is per island (see below) | 0.4.6 |
+| sonner | works: `<Toaster />` in a static layout and `toast()` from a client component of a page, one store; toasts on screen are dropped by a client-side navigation | 2.0.8 |
 | styled-components, `@emotion/styled`, emotion `css` prop, MUI `Button` | work, client-only (see below); a `ThemeProvider` in a layout reaches them | 6.6.0, 11.14.1, 11.14.0, 9.5.0 |
 
 These were run by hand against the real packages. `TestBrowserEcosystemLibraries`
@@ -1280,10 +1280,57 @@ context, and the island hydrates onto it.
 - **No markup of its own.** A lifted wrapper must render only its children. One
   that adds elements (a `<div>` around them) cannot move into the islands, since
   Krate renders the page content; the wrapper then stays in the layout and the
-  build reports `KR8016`.
+  build reports `KR8016`. Scripts are the exception: a provider that adds a
+  `<script>` next to its children (next-themes' anti-flash script) is lifted,
+  and the script is part of every island's server markup.
 - **Layout components stay Krate's.** Krate components in the layout still
   cannot read the provider's context, and a hook of a React library called
   inside the layout is still `KR8013`.
+
+### Islands in a layout
+
+A static layout can render islands itself: a component of a client module of
+the project (a `"use client"` wrapper around a library's component), or the
+component of a package whose module-level state is shared with plain function
+calls (sonner's and react-hot-toast's `<Toaster />`). The layout emits a
+placeholder for each, and the pages under it build the island chunks together
+with their own, so the layout's island and the islands of the page use one
+copy of the library:
+
+```tsx
+// src/pages/_layout.tsx
+import { Toaster } from "sonner";
+
+export default function Layout({ children }) {
+  return <>{children}<Toaster richColors /></>;
+}
+
+// src/components/SaveButton.tsx
+"use client";
+import { toast } from "sonner";
+
+export default function SaveButton() {
+  return <button onClick={() => toast("Saved")}>Save</button>;
+}
+```
+
+A client module that calls a plain function of a React package (`toast()`) runs
+as an island too, so it shares the library with the layout's island. Rules:
+
+- Props of a layout island must be constants or imports; one that reads the
+  layout's own state is reported.
+- A layout that hosts an island is replaced on a client-side navigation instead
+  of being kept mounted, so anything the island holds (toasts on screen) is
+  lost when the page changes.
+- Only static layouts do this. In an async layout the component is a client
+  boundary with a chunk of its own, and `toast()` called from a page does not
+  reach a Toaster there; render the Toaster from a static layout.
+- Only the packages named above are rendered as islands when a layout renders
+  them directly. A wrapper of your own is hosted whatever it renders.
+- `ThemeProvider` from next-themes in a layout is lifted like any provider, so
+  each island has its own copy: `setTheme` updates `<html>` and the stored
+  theme for the page, but `useTheme` in a second island re-renders only after
+  its own provider changes.
 
 ### State across navigation
 

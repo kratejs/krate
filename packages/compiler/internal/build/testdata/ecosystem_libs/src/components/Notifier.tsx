@@ -1,7 +1,7 @@
 import { Toaster, toast } from 'sonner';
 
-// toast() and <Toaster /> share sonner's module state, so they live in one
-// island module. A component that only calls toast() is not an island.
+// toast() and <Toaster /> in one module. SaveButton.tsx calls toast() alone and
+// pages/toastlayout renders the Toaster from a layout.
 export default function Notifier() {
   return (
     <div>

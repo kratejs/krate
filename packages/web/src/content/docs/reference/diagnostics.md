@@ -1028,7 +1028,7 @@ A layout wraps `{children}` in a component of a React library (a `QueryClientPro
 
 **Layout provider renders markup around its children**
 
-A component a layout wraps around `{children}` renders elements of its own, so it is not a context provider that can be moved into the islands: Krate renders the page content, and an island cannot sit inside markup that belongs to the layout. The layout keeps the component as it was and the islands of its pages do not see its context. Split the component into a provider that renders only its children and the markup, or put the provider inside the island's own module.
+A component a layout wraps around `{children}` renders elements of its own, so it is not a context provider that can be moved into the islands: Krate renders the page content, and an island cannot sit inside markup that belongs to the layout. The layout keeps the component as it was and the islands of its pages do not see its context. Split the component into a provider that renders only its children and the markup, or put the provider inside the island's own module. A provider that adds only `<script>` elements next to its children (next-themes) is lifted.
 
 ### KR8030
 
@@ -1106,7 +1106,7 @@ The build empties outDir before it writes the site, and `krate clean` deletes it
 
 **Value needed at build time is unknown**
 
-A component without state (no createSignal, useState or other hook that holds state) is rendered to static HTML while the site is built, so every value it renders has to be known then: a prop, a local variable, or a module constant. This expression is none of those, for example it names an identifier that is not defined where the component renders (`unresolved identifier x`), reads the clock or the browser, or calls a function the build cannot run. A module constant that holds JSX (an array of sections whose `body` is a fragment, say) is known: it is rendered to HTML at build time wherever a component reads it, and read again in the browser for the parts that hydrate. There is no run time to fall back on, so the build fails instead of printing a guess. Define or import the name, pass the value as a prop, or give the component state so it hydrates in the browser. A value that differs per request belongs in a `*.runtime.tsx` component.
+A component without state (no createSignal, useState or other hook that holds state) is rendered to static HTML while the site is built, so every value it renders has to be known then: a prop, a local variable, or a module constant. This expression is none of those, for example it names an identifier that is not defined where the component renders (`unresolved identifier x`), reads the clock or the browser, or calls a function the build cannot run. There is no run time to fall back on, so the build fails instead of printing a guess. Define or import the name, pass the value as a prop, or give the component state so it hydrates in the browser. A value that differs per request belongs in a `*.runtime.tsx` component.
 
 ### KR8360
 

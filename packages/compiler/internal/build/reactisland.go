@@ -323,6 +323,26 @@ func (b *Builder) detectReactIslandModules(mods []*bundler.Module, resolve func(
 		// React libraries it renders are package boundaries (see
 		// packageboundary.go), not a reason to run the module as an island.
 		asyncMod := moduleHasAsyncComponent(in.m.Program)
+		// A plain function of a React library (sonner's toast) keeps module
+		// state its components read, so a client module that calls one must
+		// share the library's module with the islands: it becomes an island
+		// itself. Calls in an event handler count, as does any call in a
+		// "use client" module.
+		useClient := bundler.HasUseClientDirective(in.m.SourceCode)
+		handlerCalls := map[*ast.CallExpr]bool{}
+		if !asyncMod && len(in.tagLibs) > 0 {
+			irtree.WalkAST(in.m.Program.Body, func(n any) bool {
+				if attr, ok := n.(*ast.JSXAttr); ok && attr.Value != nil {
+					irtree.WalkAST(attr.Value, func(v any) bool {
+						if c, ok := v.(*ast.CallExpr); ok {
+							handlerCalls[c] = true
+						}
+						return true
+					})
+				}
+				return true
+			})
+		}
 		irtree.WalkAST(in.m.Program.Body, func(n any) bool {
 			if hit != nil {
 				return false
@@ -360,6 +380,14 @@ func (b *Builder) detectReactIslandModules(mods []*bundler.Module, resolve func(
 			call, ok := n.(*ast.CallExpr)
 			if !ok {
 				return true
+			}
+			if !asyncMod && (useClient || handlerCalls[call]) {
+				if root := factoryRoot(call.Callee); root != "" && !(root[0] >= 'A' && root[0] <= 'Z') {
+					if pkg, ok := in.tagLibs[root]; ok && !hookNameRe.MatchString(root) {
+						hit = &reactIslandModule{Path: in.m.Path, Pkg: pkg, Name: root + "()", Pos: call.Position}
+						return false
+					}
+				}
 			}
 			switch c := call.Callee.(type) {
 			case *ast.Identifier:

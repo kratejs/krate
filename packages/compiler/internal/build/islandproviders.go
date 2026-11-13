@@ -113,6 +113,8 @@ func (b *Builder) pageProviders(page string) *islandProviders {
 	return &out
 }
 
+var providerScriptRe = regexp.MustCompile(`(?s)<script\b[^>]*>.*?</script>`)
+
 // verifyProviderChain checks that a lifted provider renders nothing of its
 // own: Krate renders the page content, so a wrapper that adds markup around
 // its children cannot move into the islands. It returns a warning when the
@@ -141,7 +143,9 @@ func (b *Builder) verifyProviderChain(lp *layoutProviders) *diag.Diagnostic {
 		// client-only, which the island build reports.
 		return nil
 	}
-	if html == "<krate-slot></krate-slot>" {
+	// A provider may add scripts next to its children (next-themes sets the
+	// theme class before first paint): they travel with the islands.
+	if providerScriptRe.ReplaceAllString(html, "") == "<krate-slot></krate-slot>" {
 		return nil
 	}
 	d := diag.Diagnostic{

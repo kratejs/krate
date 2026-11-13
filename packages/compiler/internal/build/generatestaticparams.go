@@ -874,14 +874,19 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	hydrationJS := ""
 	hasJS := false
 	var pageProviders *islandProviders
-	if len(tree.ExternalComponents) > 0 {
+	pageIslands := tree.ExternalComponents
+	if layoutExts, layoutImps := b.layoutIslandsFor(spp.PagePath); len(layoutExts) > 0 {
+		pageIslands = append(append([]irtree.ExternalComponent(nil), layoutExts...), pageIslands...)
+		externalImports = append(append([]irtree.ExternalImport(nil), externalImports...), layoutImps...)
+	}
+	if len(pageIslands) > 0 {
 		pageProviders = b.pageProviders(spp.PagePath)
 	}
 	// Every generated page owns its island entries: the template and each
 	// param entry share a source file, and one owner would keep only the last.
 	islandBoot, islandJS, islandSSR, islandStyles, islandErr := b.buildIslands(
 		spp.PagePath+"\x00"+spp.OutPath,
-		tree.ExternalComponents,
+		pageIslands,
 		externalImports,
 		entryLocalImports(entryModule.Program),
 		filepath.Dir(entryModule.Path),
