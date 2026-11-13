@@ -39,6 +39,15 @@
 
   // makeRequest builds a web Request from the Go envelope. The body is read
   // from the host on first use.
+  // nextUrl is request.nextUrl: the URL with NextURL's basePath and clone().
+  // The host strips the base path before the request reaches the runtime.
+  function nextUrl(href) {
+    var u = new URL(href);
+    Object.defineProperty(u, 'basePath', { value: '', enumerable: false });
+    Object.defineProperty(u, 'clone', { value: function () { return nextUrl(u.href); }, enumerable: false });
+    return u;
+  }
+
   G.__krate_make_request = function (raw) {
     var hasBody = raw.method !== 'GET' && raw.method !== 'HEAD';
     var req = new Request(raw.url, { method: raw.method, headers: raw.headers });
@@ -51,6 +60,7 @@
       };
     }
     Object.defineProperty(req, 'cookies', { value: cookieApi(req.headers), enumerable: false });
+    Object.defineProperty(req, 'nextUrl', { value: nextUrl(req.url), enumerable: false });
     Object.defineProperty(req, 'path', { value: raw.path || new URL(raw.url).pathname, enumerable: false });
     return req;
   };

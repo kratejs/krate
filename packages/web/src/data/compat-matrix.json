@@ -1,5 +1,5 @@
 {
-  "updated": "2026-11-12",
+  "updated": "2026-11-13",
   "rows": [
     {
       "id": "hooks-state",
@@ -1909,6 +1909,118 @@
         "Windows: split-pane dividers are mouse-only, frameless windows have no system menu, offscreen windows stay in the UI Automation tree marked offscreen, and a two-button message box cannot be closed with Esc.",
         "macOS: an alert is dismissed with Esc only through a button titled Cancel; the split divider is reachable by VoiceOver but not by a plain keyboard.",
         "No screen reader (Orca, VoiceOver, Narrator, NVDA, JAWS) was used on any platform; web content inside the webview is exposed by the engine and not tested here."
+      ]
+    },
+    {
+      "id": "lib-sonner",
+      "area": "sonner (toasts)",
+      "source": "n/a",
+      "islands": "partial",
+      "ssr": "supported",
+      "target": "Run as Preact islands",
+      "summary": "toast() and <Toaster /> render and show a toast with its description (sonner 2.0.8). Checked in Chromium by TestBrowserEcosystemLibraries against the real package (the test needs KRATE_ECOSYSTEM_LIBS or KRATE_ECOSYSTEM_INSTALL=1 and is skipped otherwise).",
+      "tests": [
+        "TestBrowserEcosystemLibraries",
+        "fixture:packages/compiler/internal/build/testdata/ecosystem_libs"
+      ],
+      "roadmap": false,
+      "knownLimits": [
+        "toast() and <Toaster /> must live in one island module: a component that only calls toast() is not detected as an island, so the build fails with \"cannot bundle sonner for the browser\" (react is not aliased to preact/compat in the page vendor bundle), and importing a helper from the island module leaves the binding undefined in the page.",
+        "The usual shadcn pattern (a <Toaster /> wrapper in the root layout, toast() called from other components) does not work yet: a layout cannot host the island (KR8013), and toast() in a separate component hits the first limit."
+      ]
+    },
+    {
+      "id": "lib-cmdk",
+      "area": "cmdk (command menu)",
+      "source": "n/a",
+      "islands": "supported",
+      "ssr": "supported",
+      "target": "Run as Preact islands",
+      "summary": "Command, Command.Input, Command.List, Command.Item and Command.Empty render, filter as you type and show the empty state (cmdk 1.1.1). Checked in Chromium by TestBrowserEcosystemLibraries against the real package (the test needs KRATE_ECOSYSTEM_LIBS or KRATE_ECOSYSTEM_INSTALL=1 and is skipped otherwise).",
+      "tests": [
+        "TestBrowserEcosystemLibraries",
+        "fixture:packages/compiler/internal/build/testdata/ecosystem_libs"
+      ],
+      "roadmap": false
+    },
+    {
+      "id": "lib-embla-carousel",
+      "area": "embla-carousel-react",
+      "source": "n/a",
+      "islands": "supported",
+      "ssr": "supported",
+      "target": "Run as Preact islands",
+      "summary": "useEmblaCarousel initializes on mount, reports its snap list and scrolls on api.scrollNext() (embla-carousel-react 8.6.0). Checked in Chromium by TestBrowserEcosystemLibraries against the real package (the test needs KRATE_ECOSYSTEM_LIBS or KRATE_ECOSYSTEM_INSTALL=1 and is skipped otherwise).",
+      "tests": [
+        "TestBrowserEcosystemLibraries",
+        "fixture:packages/compiler/internal/build/testdata/ecosystem_libs"
+      ],
+      "roadmap": false
+    },
+    {
+      "id": "lib-dnd-kit",
+      "area": "@dnd-kit/core and @dnd-kit/sortable",
+      "source": "n/a",
+      "islands": "supported",
+      "ssr": "supported",
+      "target": "Run as Preact islands",
+      "summary": "DndContext, SortableContext and useSortable with the pointer sensor reorder a list through a real drag (@dnd-kit/core 6.3.1, @dnd-kit/sortable 10.0.0, @dnd-kit/utilities 3.2.2). Checked in Chromium by TestBrowserEcosystemLibraries against the real package (the test needs KRATE_ECOSYSTEM_LIBS or KRATE_ECOSYSTEM_INSTALL=1 and is skipped otherwise).",
+      "tests": [
+        "TestBrowserEcosystemLibraries",
+        "fixture:packages/compiler/internal/build/testdata/ecosystem_libs"
+      ],
+      "roadmap": false
+    },
+    {
+      "id": "lib-tanstack-table",
+      "area": "@tanstack/react-table (v8)",
+      "source": "n/a",
+      "islands": "supported",
+      "ssr": "supported",
+      "target": "Run as Preact islands",
+      "summary": "useReactTable with the core and sorted row models, column helpers and flexRender render the table on the server and re-sort on a header click (8.21.3). The v9 API (react-table 9) was not checked. Checked in Chromium by TestBrowserEcosystemLibraries against the real package (the test needs KRATE_ECOSYSTEM_LIBS or KRATE_ECOSYSTEM_INSTALL=1 and is skipped otherwise).",
+      "tests": [
+        "TestBrowserEcosystemLibraries",
+        "fixture:packages/compiler/internal/build/testdata/ecosystem_libs"
+      ],
+      "roadmap": false
+    },
+    {
+      "id": "lib-next-themes",
+      "area": "next-themes",
+      "source": "n/a",
+      "islands": "partial",
+      "ssr": "supported",
+      "target": "Run as Preact islands",
+      "summary": "ThemeProvider and useTheme switch the class on <html> and update the theme state; the anti-flash script is part of the server markup (next-themes 0.4.6). Checked in Chromium by TestBrowserEcosystemLibraries against the real package (the test needs KRATE_ECOSYSTEM_LIBS or KRATE_ECOSYSTEM_INSTALL=1 and is skipped otherwise).",
+      "tests": [
+        "TestBrowserEcosystemLibraries",
+        "fixture:packages/compiler/internal/build/testdata/ecosystem_libs"
+      ],
+      "roadmap": false,
+      "knownLimits": [
+        "A ThemeProvider in a layout is not lifted into the islands (KR8016: it renders a script next to its children), so useTheme in pages and components outside the provider's own module sees no context. Wrap the island's module in the provider instead.",
+        "The server markup renders the theme as undefined until the island hydrates, as it does with React."
+      ],
+      "diagnostics": [
+        "KR8016"
+      ]
+    },
+    {
+      "id": "lib-motion",
+      "area": "motion v12+ (motion/react)",
+      "source": "n/a",
+      "islands": "supported",
+      "ssr": "supported",
+      "target": "Run as Preact islands",
+      "summary": "motion.div with initial/animate/transition, and AnimatePresence with an exit animation, run and unmount their element (motion 14.14.0, imported from motion/react). The older framer-motion package and the vanilla Motion engine config key are separate rows. Checked in Chromium by TestBrowserEcosystemLibraries against the real package (the test needs KRATE_ECOSYSTEM_LIBS or KRATE_ECOSYSTEM_INSTALL=1 and is skipped otherwise).",
+      "tests": [
+        "TestBrowserEcosystemLibraries",
+        "fixture:packages/compiler/internal/build/testdata/ecosystem_libs"
+      ],
+      "roadmap": false,
+      "knownLimits": [
+        "Building a page that imports motion/react logs the warning KR7116 (two motion-dom modules export scrapeMotionValuesFromProps); it does not affect the result."
       ]
     }
   ]

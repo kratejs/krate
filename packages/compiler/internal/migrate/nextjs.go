@@ -261,7 +261,7 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 	planMiddleware(abs, rep)
 	planInstrumentation(abs, rep)
 	linkRelativeImports(rep)
-	migrateNextFonts(rep)
+	migrateNextFonts(rep, abs)
 	rewriteNextModuleImports(rep, abs)
 	warnClientBoundaryRuntime(rep)
 	rewritePublicEnv(rep, readPublicEnv(abs), nextCfg.Env)
@@ -325,6 +325,7 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 		rep.Manual = append(rep.Manual, ManualItem{Source: "tsconfig.json", Reason: note, Hint: "set jsxImportSource to @krate/runtime and include .krate/types"})
 	}
 	dedupeTargets(rep)
+	aggregateSegmentConfig(rep)
 	for i := range rep.Files {
 		if fileExists(filepath.Join(abs, filepath.FromSlash(rep.Files[i].Target))) {
 			rep.Files[i].Conflict = true
@@ -590,8 +591,6 @@ func applyManual(src string, kind FileKind) []string {
 		{"export async function generateViewport", "generateViewport is not supported; export a static `viewport` object or set the viewport meta in <Head>"},
 		{"getStaticProps", "getStaticProps is not supported; use build-time data or createResource"},
 		{"getServerSideProps", "getServerSideProps is not supported; use a server render mode or createResource"},
-		{"from 'next/server'", "next/server request/response helpers need a Request/Response migration"},
-		{`from "next/server"`, "next/server request/response helpers need a Request/Response migration"},
 		{"from 'next/legacy/image'", "next/legacy/image needs a manual Image migration"},
 		{`from "next/legacy/image"`, "next/legacy/image needs a manual Image migration"},
 	}
@@ -599,6 +598,9 @@ func applyManual(src string, kind FileKind) []string {
 		if strings.Contains(src, c.needle) {
 			out = append(out, c.reason)
 		}
+	}
+	if kind != KindAPI && kind != KindModule && (strings.Contains(src, "from 'next/server'") || strings.Contains(src, `from "next/server"`)) {
+		out = append(out, "next/server request/response helpers need a Request/Response migration")
 	}
 	if kind == KindLayout && asyncDefaultExport.MatchString(src) {
 		out = append(out, "async layouts are not supported (KR7101); move the data fetching into an async child component")
@@ -645,6 +647,8 @@ func rewriteNextSource(src string, kind FileKind) (string, []string, []string) {
 			rewrites = append(rewrites, "kept a non-default "+module+" import for manual review")
 		}
 	}
+	src, dropped := dropSegmentConfig(src)
+	rewrites = append(rewrites, dropped...)
 	manual = append(manual, applyManual(src, kind)...)
 	notes, layoutManual := segmentConfigNotes(src, kind)
 	rewrites = append(rewrites, notes...)

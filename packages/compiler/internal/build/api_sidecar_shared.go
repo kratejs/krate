@@ -48,8 +48,18 @@ function krateCookies(headers) {
     has: (n) => jar.has(String(n)),
   };
 }
+// krateNextUrl is request.nextUrl: the request URL with NextURL's basePath and
+// clone(). The host strips the base path before forwarding, so pathname never
+// includes it, as in Next.
+function krateNextUrl(href) {
+  const u = new URL(href);
+  Object.defineProperty(u, 'basePath', { value: process.env.KRATE_BASE_PATH || '', enumerable: false });
+  Object.defineProperty(u, 'clone', { value: () => krateNextUrl(u.href), enumerable: false });
+  return u;
+}
 function krateAttach(request) {
   try { Object.defineProperty(request, 'cookies', { value: krateCookies(request.headers), enumerable: false }); } catch {}
+  try { Object.defineProperty(request, 'nextUrl', { value: krateNextUrl(request.url), enumerable: false }); } catch {}
   return request;
 }
 function krateHeaderPairs(headers) {

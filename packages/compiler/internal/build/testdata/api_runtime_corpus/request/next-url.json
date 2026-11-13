@@ -1,0 +1,6 @@
+{
+  "description": "request.nextUrl is a URL with pathname, searchParams, basePath and clone().",
+  "requests": [
+    { "method": "GET", "query": "?code=abc&state=x" }
+  ]
+}
