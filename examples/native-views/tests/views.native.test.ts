@@ -14,7 +14,9 @@ after(async () => {
 });
 
 test("the main page opens a sidebar and a log view", async () => {
-  await app.waitForViewCount(3);
+  // The first wait covers the cold start: the main page loads, hydrates and
+  // only then opens the two views, which took over 5s on a CI runner.
+  await app.waitForViewCount(3, { timeout: 30_000 });
   const windows = await app.windows();
   assert.deepEqual(
     windows.map((w) => [w.id, w.views.map((v) => v.id)]),
