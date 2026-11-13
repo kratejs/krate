@@ -13,7 +13,7 @@ import (
 )
 
 func plannedMiddleware(root, source string, rep *Report) PlannedFile {
-	f := PlannedFile{Kind: KindMiddleware, Source: source, Target: filepath.ToSlash(source)}
+	f := PlannedFile{Kind: KindMiddleware, Source: source, Target: middlewareTarget(source)}
 	data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(source)))
 	if err != nil {
 		rep.Warnings = append(rep.Warnings, source+": could not read middleware: "+err.Error())
@@ -42,6 +42,13 @@ var (
 // need a human decision because Krate middleware runs on every request.
 func rewriteNextMiddleware(src string) (string, []string, []string) {
 	var rewrites, manual []string
+	if proxyFnExport.MatchString(src) {
+		src = proxyFnExport.ReplaceAllString(src, "${1}middleware")
+		rewrites = append(rewrites, "renamed the exported proxy function to middleware (Next 16 proxy)")
+	}
+	if proxyConstExport.MatchString(src) {
+		manual = append(manual, "arrow-function proxy needs a manual wrapper: export it as middleware")
+	}
 	src = nextRequestType.ReplaceAllString(src, "Request")
 	src = strings.ReplaceAll(src, "NextResponse.redirect(", "Response.redirect(")
 	src = strings.ReplaceAll(src, "NextResponse.json(", "Response.json(")

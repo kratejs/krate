@@ -78,6 +78,12 @@ func krateResolver() api.Plugin {
 	}
 }
 
+// ResolveKratePackage resolves a `@krate/<name>[/<sub>]` specifier from dir the
+// way config evaluation does, so callers can check up front that it will work.
+func ResolveKratePackage(dir, spec string) (string, error) {
+	return resolveKrateEntry(dir, spec)
+}
+
 // resolveKrateEntry resolves a `@krate/<name>[/<sub>]` specifier to the package's
 // real entry file, walking node_modules upward from base.
 func resolveKrateEntry(base, spec string) (string, error) {

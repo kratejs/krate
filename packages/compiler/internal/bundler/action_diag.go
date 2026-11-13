@@ -25,6 +25,16 @@ func (b *Bundler) checkInlineUseServer(prog *ast.Program, path, src string) {
 	_ = b.setActionError(d)
 }
 
+// FindInlineUseServer reports the position of the first inline "use server"
+// directive (one inside a function body) in a parsed program. The Next.js
+// migrator uses it to flag these before the build rejects them.
+func FindInlineUseServer(prog *ast.Program) (ast.Pos, bool) {
+	if prog == nil {
+		return ast.Pos{}, false
+	}
+	return findInlineUseServer(prog.Body)
+}
+
 func isUseServerDirective(stmts []ast.Stmt) (ast.Pos, bool) {
 	if len(stmts) == 0 {
 		return ast.Pos{}, false

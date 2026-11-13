@@ -3,7 +3,8 @@
 // The Next.js migrator is deliberately conservative: it copies route files into
 // Krate's src/pages and src/api trees, strips imports that Krate provides as
 // globals, and reports every pattern it cannot safely rewrite. It never deletes
-// the original Next.js tree and writes atomically from a preflighted plan.
+// the original Next.js tree: --apply moves it into the backup directory, after
+// every write succeeded, and `krate migrate rollback` moves it back.
 package migrate
 
 import (
@@ -81,6 +82,13 @@ type Report struct {
 	Routes    []Route       `json:"routes,omitempty"`
 	Manual    []ManualItem  `json:"manual,omitempty"`
 	Warnings  []string      `json:"warnings,omitempty"`
+	// MoveAside lists the original Next route trees (app/, src/app/, pages/)
+	// that --apply moves into the backup directory after every write
+	// succeeds. `krate migrate rollback` moves them back.
+	MoveAside []string `json:"moveAside,omitempty"`
+
+	apiRewrites []nextRewrite
+	headLinks   []string
 }
 
 // Route is the route inventory the migration will produce.
@@ -107,6 +115,8 @@ type ApplyOptions struct {
 type ApplyResult struct {
 	BackupDir string   `json:"backupDir"`
 	Written   []string `json:"written"`
+	// Moved lists the original route trees moved into the backup directory.
+	Moved []string `json:"moved,omitempty"`
 }
 
 type manifest struct {
@@ -115,6 +125,8 @@ type manifest struct {
 	Root      string         `json:"root"`
 	Created   string         `json:"created"`
 	Files     []manifestFile `json:"files"`
+	// Moved lists project-relative trees moved to <backup>/moved/<path>.
+	Moved []string `json:"moved,omitempty"`
 }
 
 type manifestFile struct {
@@ -246,41 +258,42 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 			return nil, err
 		}
 	}
-	for _, mw := range []string{"middleware.ts", "middleware.js", "src/middleware.ts", "src/middleware.js"} {
-		if _, err := os.Stat(filepath.Join(abs, filepath.FromSlash(mw))); err == nil {
-			rep.Files = append(rep.Files, plannedMiddleware(abs, mw, rep))
-			break
-		}
-	}
+	planMiddleware(abs, rep)
+	planInstrumentation(abs, rep)
 	linkRelativeImports(rep)
 	migrateNextFonts(rep)
 	rewriteNextModuleImports(rep, abs)
 	warnClientBoundaryRuntime(rep)
 	rewritePublicEnv(rep, readPublicEnv(abs), nextCfg.Env)
 	rewriteMetadataTypes(rep)
+	rewriteTestImports(rep)
+	flagInlineUseServer(rep)
+	// Before pruning, so modules routes import count as migrated.
+	warnUnmigratedSources(abs, rep)
 	pruneUnchangedModules(rep)
+	addAPIRewrites(&nextCfg, rep)
+	nextCfg.Head = append(nextCfg.Head, rep.headLinks...)
+	var trees []string
+	if hasApp {
+		trees = append(trees, appPrefix)
+	}
+	if hasPages {
+		trees = append(trees, pagesPrefix)
+	}
+	planMoveAside(abs, trees, rep)
 
 	hasKrateConfig := fileExists(filepath.Join(abs, "krate.config.ts")) || fileExists(filepath.Join(abs, "krate.config.js")) || fileExists(filepath.Join(abs, "krate.config.mjs")) || fileExists(filepath.Join(abs, "krate.config.json"))
 	if !hasKrateConfig {
-		entry := "src/pages/index.tsx"
-		var pages []string
+		// entry only matters when a site has no pages, so it is set for an
+		// index page and omitted otherwise (never a route-group page).
+		entry := ""
 		for _, f := range rep.Files {
-			if f.Kind == KindPage {
-				pages = append(pages, f.Target)
-			}
-		}
-		sort.Strings(pages)
-		if len(pages) > 0 {
-			entry = pages[0]
-		}
-		for _, p := range pages {
-			if p == "src/pages/index.tsx" {
-				entry = p
-				break
+			if f.Kind == KindPage && f.Target == "src/pages/index.tsx" {
+				entry = f.Target
 			}
 		}
 		rep.Files = append(rep.Files, PlannedFile{Kind: KindConfig, Target: "krate.config.ts", Content: configJSON(entry, nextCfg)})
-	} else if nextConfigStatic || len(nextCfg.Site) > 0 {
+	} else if nextConfigStatic || len(nextCfg.Site) > 0 || len(nextCfg.Rewrites) > 0 || len(nextCfg.Head) > 0 {
 		merged, notes, err := mergeKrateConfig(abs, nextCfg)
 		if err != nil {
 			rep.Manual = append(rep.Manual, ManualItem{
@@ -377,7 +390,7 @@ func scanNextApp(root, appDir, prefix string, rep *Report) error {
 		rel = filepath.ToSlash(rel)
 		base := strings.TrimSuffix(filepath.Base(rel), filepath.Ext(rel))
 		ext := strings.ToLower(filepath.Ext(rel))
-		if planStaticMetadata(root, appDir, prefix, rel, rep) {
+		if planStaticIcon(root, prefix, rel, rep) || planStaticMetadata(root, appDir, prefix, rel, rep) {
 			return nil
 		}
 		if !isSourceExt(ext) && !isAssetExt(ext) {
@@ -404,8 +417,13 @@ func scanNextApp(root, appDir, prefix string, rep *Report) error {
 		case "route":
 			apiPath := strings.TrimPrefix(route, "api/")
 			if apiPath == route {
-				rep.Manual = append(rep.Manual, ManualItem{Source: source, Reason: "route handler outside app/api becomes /api/" + route, Hint: "move or rename the route if the public path matters"})
 				apiPath = route
+				if rw, ok := routeRewrite(route, apiPath); ok {
+					rep.apiRewrites = append(rep.apiRewrites, rw)
+					rep.Warnings = append(rep.Warnings, source+": route handler moved to /api/"+route+"; a rewrite from "+rw.Source+" keeps the public URL working")
+				} else {
+					rep.Manual = append(rep.Manual, ManualItem{Source: source, Reason: "route handler at the app root becomes /api", Hint: "a rewrite for / would shadow the home page; point clients at /api or add the rewrite by hand"})
+				}
 			}
 			if apiPath == "." || apiPath == "" {
 				apiPath = "index"
@@ -977,6 +995,16 @@ func Apply(rep *Report, opts ApplyOptions) (*ApplyResult, error) {
 	if len(rep.Files) == 0 {
 		return nil, fmt.Errorf("nothing to migrate")
 	}
+	var moves []string
+	for _, tree := range rep.MoveAside {
+		abs, err := targetPath(rep.Root, tree)
+		if err != nil {
+			return nil, err
+		}
+		if isDir(abs) {
+			moves = append(moves, filepath.ToSlash(filepath.Clean(filepath.FromSlash(tree))))
+		}
+	}
 
 	backupDir := opts.BackupDir
 	if backupDir == "" {
@@ -989,7 +1017,7 @@ func Apply(rep *Report, opts ApplyOptions) (*ApplyResult, error) {
 		return nil, fmt.Errorf("creating backup directory: %w", err)
 	}
 
-	man := manifest{Version: 1, Framework: rep.Framework, Root: rep.Root, Created: time.Now().UTC().Format(time.RFC3339)}
+	man := manifest{Version: 1, Framework: rep.Framework, Root: rep.Root, Created: time.Now().UTC().Format(time.RFC3339), Moved: moves}
 	for _, f := range rep.Files {
 		target, err := targetPath(rep.Root, f.Target)
 		if err != nil {
@@ -1038,11 +1066,20 @@ func Apply(rep *Report, opts ApplyOptions) (*ApplyResult, error) {
 		}
 		written = append(written, filepath.ToSlash(f.Target))
 	}
-	return &ApplyResult{BackupDir: backupDir, Written: written}, nil
+	// Move the original route trees aside only after every write succeeded, so
+	// a failed apply leaves them where they were.
+	for _, tree := range moves {
+		src, _ := targetPath(rep.Root, tree)
+		if err := moveTree(src, filepath.Join(backupDir, "moved", filepath.FromSlash(tree))); err != nil {
+			_ = Rollback(backupDir)
+			return nil, fmt.Errorf("moving %s into the backup: %w", tree, err)
+		}
+	}
+	return &ApplyResult{BackupDir: backupDir, Written: written, Moved: moves}, nil
 }
 
-// Rollback restores every overwritten file and removes every file the migration
-// created.
+// Rollback restores every overwritten file, moves the original route trees back
+// and removes every file the migration created.
 func Rollback(backupDir string) error {
 	data, err := os.ReadFile(filepath.Join(backupDir, "manifest.json"))
 	if err != nil {
@@ -1053,6 +1090,22 @@ func Rollback(backupDir string) error {
 		return fmt.Errorf("parse migration manifest: %w", err)
 	}
 	root := man.Root
+	for _, tree := range man.Moved {
+		dest, err := targetPath(root, tree)
+		if err != nil {
+			return err
+		}
+		saved := filepath.Join(backupDir, "moved", filepath.FromSlash(tree))
+		if !isDir(saved) {
+			continue
+		}
+		if _, err := os.Lstat(dest); err == nil {
+			return fmt.Errorf("cannot restore %s: it already exists (the original is kept in %s)", tree, saved)
+		}
+		if err := moveTree(saved, dest); err != nil {
+			return fmt.Errorf("restore %s: %w", tree, err)
+		}
+	}
 	for _, f := range man.Files {
 		target, err := targetPath(root, f.Target)
 		if err != nil {
@@ -1101,7 +1154,7 @@ func planMetadataRoute(root, source, base, ext, fsRoute string, rep *Report) {
 		return
 	}
 	reason := "Next.js metadata route " + base + "." + strings.TrimPrefix(ext, ".") + " is not migrated"
-	hint := "generate the same icon/apple-icon in Krate (a file under public/ and metadata.icons)"
+	hint := "render the icon once (ImageResponse or any image tool), save it as icon.png/apple-icon.png under public/, and link it from the site head config"
 	if _, ok := metadataRouteExts[base]; ok {
 		hint = "Krate runs " + base + " files with the extensions .ts, .js, .mjs (sitemap, robots, manifest) or .ts, .tsx, .js, .jsx (images)"
 	}

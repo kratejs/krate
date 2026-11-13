@@ -143,6 +143,7 @@ at build time with an `opengraph-image` file instead.
 `manifest`, `opengraph-image` and `twitter-image` modules move to the same
 segment of `src/pages` with `next/og` rewritten to `@krate/runtime/og`; static
 `robots.txt`, `sitemap.xml` and manifest files go to `public/`; static
-`opengraph-image.png` files are copied beside their page. `icon` and `apple-icon`
-files, and `opengraph-image.alt.txt` (export `alt` instead), are still listed as
-manual items.
+`opengraph-image.png` files are copied beside their page. Static `favicon.ico`,
+`icon.*` and `apple-icon.*` files go to `public/` and the root ones are linked from
+the generated `head` config. Dynamic `icon.tsx` and `apple-icon.tsx` modules, and
+`opengraph-image.alt.txt` (export `alt` instead), are still listed as manual items.

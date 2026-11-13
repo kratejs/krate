@@ -21,6 +21,8 @@ type nextConfigData struct {
 	Images    map[string]any    `json:"images,omitempty"`
 	Env       map[string]string `json:"env,omitempty"`
 	Site      map[string]any    `json:"site,omitempty"`
+	// Head holds raw <head> tags written to the config head array.
+	Head []string `json:"head,omitempty"`
 }
 
 type nextRedirect struct {
@@ -327,13 +329,18 @@ func boolValue(e ast.Expr) (bool, bool) {
 // valid JavaScript, which keeps nested redirect/header data unambiguous.
 func configJSON(entry string, next nextConfigData) []byte {
 	opts := map[string]any{
-		"entry":     entry,
 		"outDir":    "dist",
 		"pagesDir":  "src/pages",
 		"publicDir": "public",
 		"minify":    true,
 		"sourcemap": false,
 		"devServer": map[string]any{"port": 3000, "open": false},
+	}
+	if entry != "" {
+		opts["entry"] = entry
+	}
+	if len(next.Head) > 0 {
+		opts["head"] = next.Head
 	}
 	if next.BasePath != "" {
 		opts["basePath"] = next.BasePath

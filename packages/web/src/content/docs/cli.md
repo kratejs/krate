@@ -261,8 +261,8 @@ krate migrate rollback .krate/migrate/nextjs-20261027-190904
 
 | Flag | Description |
 |------|-------------|
-| `--apply` | Write the plan atomically |
-| `--verify` | After applying, build, run checks, and diff the route inventory |
+| `--apply` | Write the plan atomically, then move the original Next route trees (`app/`, `src/app/`, `pages/`) into the backup; rollback moves them back |
+| `--verify` | After applying, build, run checks, and diff the route inventory. Stops before writing when `@krate/core` does not resolve from the project (install the dependencies first) |
 | `--force` | Allow overwriting existing target files |
 | `--update-package` | Add Krate scripts and dependencies to `package.json` |
 | `--report <path>` | Write the plan as JSON before applying |
