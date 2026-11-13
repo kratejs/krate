@@ -62,7 +62,9 @@ rewrites: [
 
 Rewrites map an incoming URL to an internal path **without changing the URL
 the visitor sees**. Use them to serve content from a different route while
-keeping clean public URLs.
+keeping clean public URLs. A destination under `/api/` is answered by the API
+handler (`{ source: "/r/:code", destination: "/api/r/:code" }`), so a public URL
+can front an API route.
 
 ## Difference
 
