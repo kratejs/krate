@@ -228,6 +228,11 @@ func TestDispatchFromManyGoroutines(t *testing.T) {
 	if offMain.Load() != 0 {
 		t.Errorf("%d dispatches ran off the main thread", offMain.Load())
 	}
+	// Work queued by earlier tests (a window closing) may still be in flight;
+	// a real leak never drains.
+	for end := time.Now().Add(2 * time.Second); mainWork.len() != 0 && time.Now().Before(end); {
+		time.Sleep(10 * time.Millisecond)
+	}
 	if mainWork.len() != 0 {
 		t.Errorf("work queue leaked %d entries", mainWork.len())
 	}
