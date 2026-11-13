@@ -306,11 +306,12 @@ different action, is rejected with `400`.
 - Inline actions are invalid in a module that starts with `"use client"`, as in
   Next.js ([`KR7001`](#diagnostics)).
 - The captured values are encrypted with `KRATE_ACTION_SECRET` (at least 16
-  characters) when it is set. Otherwise Krate creates a key in
-  `.krate/action-key` and copies it into `.krate/actions/manifest.json`, which is
-  never written to `dist/`. Set `KRATE_ACTION_SECRET` to the same value on every
-  instance and release when you run more than one server, or keep pages open
-  across deploys: a page rendered under another key submits a token the new
+  characters) when it is set. For local `krate dev`, `krate serve` and
+  `krate start`, Krate otherwise creates a key in `.krate/action-key` and copies
+  it into `.krate/actions/manifest.json`, which is never written to `dist/`.
+  Deploy bundles never contain the key: set `KRATE_ACTION_SECRET` in the
+  deployment environment (the deploy plan warns about it), the same on every
+  instance and release. A page rendered under another key submits a token the
   server cannot open and is rejected.
 - Like any action, an inline action is a public endpoint: the token proves the
   captured values were produced by your server for this action, not who is

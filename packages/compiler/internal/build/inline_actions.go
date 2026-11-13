@@ -195,8 +195,8 @@ const MAX_URL_TOKEN = 3500;
 let sealKey = null;
 
 function actionSecret() {
-  let secret = process.env.KRATE_ACTION_SECRET || globalThis[Symbol.for("krate.action.key")] || "";
-  if (!secret) {
+  let secret = process.env.KRATE_ACTION_SECRET || "";
+  if (!secret && !globalThis[Symbol.for("krate.action.deployed")]) {
     const dir = process.env.KRATE_ACTION_DIR || path.join(process.env.KRATE_ROOT || process.cwd(), ".krate", "actions");
     try { secret = JSON.parse(fs.readFileSync(path.join(dir, "manifest.json"), "utf8")).key || ""; } catch {}
   }

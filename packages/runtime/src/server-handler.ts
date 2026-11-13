@@ -148,8 +148,6 @@ export interface KrateServerData {
   /** API route keys: file path under the API dir without extension ("items/[id]"). */
   apiRoutes: string[];
   actions: ActionEntry[];
-  /** Secret that seals the closed-over values of inline actions (KRATE_ACTION_SECRET overrides it). */
-  actionKey?: string;
   hasMiddleware: boolean;
 }
 
@@ -464,10 +462,10 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
   const staticOnly = new Set(data.staticOnlyRoutes.map(normalizeRoutePattern));
   const sha256Hex = options.sha256Hex || portableSha256Hex;
   const flashSecret = resolveFlashSecret(options.flashSecret, target);
-  const actionSecret =
-    (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.KRATE_ACTION_SECRET || data.actionKey || "";
-  // The server renderer seals inline-action values with the same secret.
-  if (actionSecret) (globalThis as Record<symbol, unknown>)[Symbol.for("krate.action.key")] = actionSecret;
+  // Inline-action values are sealed with KRATE_ACTION_SECRET; the key is never part of the bundle.
+  // A deployed handler never falls back to the build's local key file.
+  (globalThis as Record<symbol, unknown>)[Symbol.for("krate.action.deployed")] = true;
+  const actionSecret = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.KRATE_ACTION_SECRET || "";
   const segEntries = data.segments || [];
   const segPages = data.segmentPages || {};
   const segDirByRoute = new Map<string, string>();

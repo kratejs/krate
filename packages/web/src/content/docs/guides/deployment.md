@@ -425,12 +425,14 @@ one instance wrote is accepted by the others. When it is not set:
 [Inline server actions](/docs/guides/server-actions/#inline-actions) that close
 over values seal those values with AES-256-GCM. Set `KRATE_ACTION_SECRET` (at
 least 16 characters, the same on every instance) so tokens survive a rebuild and
-open on any replica. Without it the build uses a key it keeps in
-`.krate/action-key` and copies into `.krate/actions/manifest.json`, which ships
-with the server and never goes into `dist/`; a page rendered under one key cannot
-submit to a server running another. The server renderer that seals the values
-needs Node built-ins, so inline actions that capture values are not available on
-the Cloudflare target.
+open on any replica. The key is a secret and is never written into a deploy
+bundle: a deployed server (`krate deploy`, Vercel, Netlify, the Node bundle)
+reads it only from `KRATE_ACTION_SECRET` and rejects submissions without it, and
+the deploy plan warns when your project has inline actions that capture values.
+Only local `krate dev`, `krate serve` and `krate start` fall back to a key kept in
+`.krate/action-key` (copied into `.krate/actions/manifest.json`, never into
+`dist/`). The server renderer that seals the values needs Node built-ins, so
+inline actions that capture values are not available on the Cloudflare target.
 
 ### Health & readiness
 
