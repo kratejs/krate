@@ -294,7 +294,7 @@ Every export of a "use server" module becomes a public endpoint and must be a fu
 
 **"use server" module uses a star re-export**
 
-export * and export * as cannot be turned into named endpoints. Re-export the actions by name: export { save } from "./other".
+A star re-export (export * or export * as) cannot be turned into named endpoints. Re-export the actions by name: export { save } from "./other".
 
 ### KR7006
 

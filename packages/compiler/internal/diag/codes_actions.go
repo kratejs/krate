@@ -54,8 +54,8 @@ func init() {
 		CodeInfo{
 			Code:  CodeActionReexport,
 			Title: `"use server" module uses a star re-export`,
-			Explanation: `export * and export * as cannot be turned into named endpoints. Re-export the actions by name: ` +
-				`export { save } from "./other".`,
+			Explanation: `A star re-export (export * or export * as) cannot be turned into named endpoints. ` +
+				`Re-export the actions by name: export { save } from "./other".`,
 		},
 		CodeInfo{
 			Code:        CodeActionImportMissing,
