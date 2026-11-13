@@ -210,7 +210,7 @@ func isSourceFile(path string) bool {
 }
 
 func parseSourceFile(path string, data []byte) (*ast.Program, error) {
-	tokens := lexer.New(string(data)).Tokenize()
+	tokens := lexer.ForFile(path, string(data)).Tokenize()
 	p := parser.New(tokens)
 	p.Filename = path
 	p.SetSource(string(data))
