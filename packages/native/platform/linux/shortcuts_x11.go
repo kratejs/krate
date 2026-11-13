@@ -258,7 +258,11 @@ func (x *x11) startLoop() error {
 		ev := make([]byte, 192)
 		for {
 			fds := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}, {Fd: int32(x.stopR), Events: unix.POLLIN}}
-			if _, e := unix.Poll(fds, -1); e != nil && e != syscall.EINTR {
+			// A timeout, not -1: an XSync made elsewhere on this connection
+			// (RegisterShortcut does one) can read a KeyPress into Xlib's
+			// queue, after which the socket stays quiet and only XPending
+			// finds it.
+			if _, e := unix.Poll(fds, 200); e != nil && e != syscall.EINTR {
 				return
 			}
 			if fds[1].Revents != 0 {

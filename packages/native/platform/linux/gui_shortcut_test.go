@@ -49,14 +49,31 @@ func TestGUIGlobalShortcut(t *testing.T) {
 	if err := guiApp.RegisterShortcut("quick", caps.Accelerator{Ctrl: true, Key: "J"}); err == nil {
 		t.Fatal("duplicate handle accepted")
 	}
-	fakeKeys(t, "Control_L", "Shift_L", "k")
-	select {
-	case h := <-got:
-		if h != "quick" {
-			t.Fatalf("handle %q", h)
+	// Pressed again if it does not arrive: a popup an earlier test left
+	// open can hold an active keyboard grab for a moment, during which
+	// passive grabs on the root window do not fire.
+	delivered := false
+	for try := 0; try < 3 && !delivered; try++ {
+		fakeKeys(t, "Control_L", "Shift_L", "k")
+		select {
+		case h := <-got:
+			if h != "quick" {
+				t.Fatalf("handle %q", h)
+			}
+			delivered = true
+		case <-time.After(2 * time.Second):
 		}
-	case <-time.After(3 * time.Second):
+	}
+	if !delivered {
 		t.Fatal("shortcut not delivered")
+	}
+	// A slow earlier press may still arrive; it is not the one checked below.
+	for drained := false; !drained; {
+		select {
+		case <-got:
+		case <-time.After(500 * time.Millisecond):
+			drained = true
+		}
 	}
 	if err := guiApp.UnregisterShortcut("quick"); err != nil {
 		t.Fatal(err)
