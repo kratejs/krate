@@ -76,6 +76,16 @@ The first pass:
 - copies Pages Router `_app` and wraps it as the root `_layout.tsx` shell;
 - copies app-local relative imports under `src/migrated/` and rewrites the
   migrated route imports to point at them;
+- follows imports from the migrated files to project modules outside `app/`
+  (relative imports and tsconfig `paths` / `baseUrl` aliases such as `@/*`,
+  including `extends`) and applies the same Next import rewrites to them
+  (`next/link`, `next/navigation`, `next/cache`, `next/headers`, `next/dynamic`,
+  `next/server`, `Metadata` from `next`). These modules stay where they are and
+  are rewritten **in place**, so the plan lists them with `target` equal to
+  `source`; each is backed up first and `krate migrate rollback` restores it.
+  Because they overwrite your source, `--apply` needs `--force` when any are
+  planned. Workspace packages that import `next/*` are outside the project and
+  are listed as manual items;
 - keeps `"use client"` (client boundary inside server component trees) and strips
   default imports from `next/link`, `next/image`, and `next/head` (Krate exposes
   those as globals);
@@ -139,8 +149,13 @@ The first pass:
 - creates `krate.config.ts` when the project has none, or merges missing
   Next-derived keys into an existing config (existing keys win);
 - merges/generates `tsconfig.json` for Krate JSX and route types;
-- inlines `NEXT_PUBLIC_*` values from `.env*` and static `next.config.env`;
-- leaves the original Next.js tree untouched.
+- renames reads of `process.env.NEXT_PUBLIC_NAME` (and the keys of static
+  `next.config` `env`) to `process.env.KRATE_PUBLIC_NAME`, the prefix Krate
+  inlines at build time. Values are never copied from `.env*` into the migrated
+  code, so development URLs and keys cannot ship by accident. One manual item
+  lists every variable to rename or set for the Krate build and which `.env`
+  files define it;
+- leaves the original Next.js route tree untouched (only the project modules above are rewritten in place, with backups).
 
 Every apply writes a rollback manifest under
 `.krate/migrate/nextjs-<timestamp>/`. Undo with:

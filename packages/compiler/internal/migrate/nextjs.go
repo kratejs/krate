@@ -67,6 +67,9 @@ type PlannedFile struct {
 	Rewrites     []string `json:"rewrites,omitempty"`
 	Dependencies []string `json:"dependencies,omitempty"`
 	Content      []byte   `json:"-"`
+	// orig is the unmodified source of an in-place module, used to drop
+	// modules no pass changed.
+	orig []byte
 }
 
 // Report is a complete migration plan. It is safe to print as JSON.
@@ -253,12 +256,9 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 	migrateNextFonts(rep)
 	rewriteNextModuleImports(rep, abs)
 	warnClientBoundaryRuntime(rep)
-	publicEnv := readPublicEnv(abs)
-	for k, v := range nextCfg.Env {
-		publicEnv[k] = v
-	}
-	rewritePublicEnv(rep, publicEnv)
+	rewritePublicEnv(rep, readPublicEnv(abs), nextCfg.Env)
 	rewriteMetadataTypes(rep)
+	pruneUnchangedModules(rep)
 
 	hasKrateConfig := fileExists(filepath.Join(abs, "krate.config.ts")) || fileExists(filepath.Join(abs, "krate.config.js")) || fileExists(filepath.Join(abs, "krate.config.mjs")) || fileExists(filepath.Join(abs, "krate.config.json"))
 	if !hasKrateConfig {
@@ -1173,22 +1173,36 @@ func linkRelativeImports(rep *Report) {
 			assets[f.Source] = f.Target
 		}
 	}
+	g := newLocalGraph(rep, assets)
 	for i := range rep.Files {
 		f := &rep.Files[i]
-		if f.Source == "" || (f.Kind != KindPage && f.Kind != KindLayout && f.Kind != KindAPI && f.Kind != KindMetadataRoute && f.Kind != KindNotFound && f.Kind != KindForbidden && f.Kind != KindUnauthorized && f.Kind != KindError) {
+		if f.Source == "" || (f.Kind != KindPage && f.Kind != KindLayout && f.Kind != KindAPI && f.Kind != KindMetadataRoute && f.Kind != KindNotFound && f.Kind != KindForbidden && f.Kind != KindUnauthorized && f.Kind != KindError && f.Kind != KindAsset && f.Kind != KindLoading && f.Kind != KindMiddleware) {
 			continue
 		}
-		body, rewrites, unresolved, deps := rewriteRelativeImports(string(f.Content), f.Source, f.Target, assets)
+		body, rewrites, unresolved, deps := rewriteRelativeImportsWith(string(f.Content), f.Source, f.Target, assets, g.resolveRelative)
+		body, aliasRewrites := g.rewriteAlias(body, f.Source, filepath.ToSlash(filepath.Dir(filepath.FromSlash(f.Target))))
 		f.Content = []byte(body)
 		f.Rewrites = append(f.Rewrites, rewrites...)
+		f.Rewrites = append(f.Rewrites, aliasRewrites...)
 		f.Dependencies = append(f.Dependencies, deps...)
+		if f.Kind == KindAsset || f.Kind == KindMiddleware {
+			continue
+		}
 		for _, u := range unresolved {
 			rep.Manual = append(rep.Manual, ManualItem{Source: f.Source, Reason: "relative import " + u + " has no copied target", Hint: "copy the imported file under src/ and update the import"})
 		}
 	}
+	g.drain()
 }
 
 func rewriteRelativeImports(src, source, target string, assets map[string]string) (string, []string, []string, []string) {
+	return rewriteRelativeImportsWith(src, source, target, assets, nil)
+}
+
+// rewriteRelativeImportsWith is rewriteRelativeImports with a fallback for
+// specifiers that are not copied app assets. local resolves a project file
+// and returns the path the import should end up pointing at.
+func rewriteRelativeImportsWith(src, source, target string, assets map[string]string, local func(sourceDir, spec string) (string, bool)) (string, []string, []string, []string) {
 	var rewrites []string
 	var unresolved []string
 	var deps []string
@@ -1201,6 +1215,12 @@ func rewriteRelativeImports(src, source, target string, assets map[string]string
 		}
 		prefix, quote, spec, suffix := sub[1], sub[2], sub[3], sub[4]
 		asset, ok := resolveAsset(sourceDir, spec, assets)
+		if !ok && local != nil {
+			asset, ok = local(filepath.ToSlash(sourceDir), spec)
+			if ok && sourceDir == targetDir {
+				return match
+			}
+		}
 		if !ok {
 			unresolved = append(unresolved, spec)
 			return match
@@ -1213,12 +1233,18 @@ func rewriteRelativeImports(src, source, target string, assets map[string]string
 		rel = filepath.ToSlash(rel)
 		if filepath.Ext(spec) == "" {
 			switch strings.ToLower(filepath.Ext(rel)) {
-			case ".tsx", ".ts", ".jsx", ".js", ".mdx", ".md":
+			case ".tsx", ".ts", ".jsx", ".js", ".mjs", ".mts", ".mdx", ".md":
 				rel = strings.TrimSuffix(rel, filepath.Ext(rel))
 			}
+		} else if se := filepath.Ext(spec); (se == ".js" || se == ".jsx" || se == ".mjs") && filepath.Ext(rel) != se && isModuleSource(rel) {
+			rel = strings.TrimSuffix(rel, filepath.Ext(rel)) + se
 		}
 		if !strings.HasPrefix(rel, ".") {
 			rel = "./" + rel
+		}
+		if rel == spec {
+			deps = append(deps, asset)
+			return match
 		}
 		rewrites = append(rewrites, "import "+spec+" -> "+rel)
 		deps = append(deps, asset)

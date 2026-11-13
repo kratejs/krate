@@ -4,16 +4,30 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strconv"
+	"sort"
 	"strings"
 )
 
 var publicEnvRe = regexp.MustCompile(`process\.env(?:\.([A-Za-z_][A-Za-z0-9_]*)|\[\s*["']([^"']+)["']\s*\])`)
 
-// readPublicEnv reads NEXT_PUBLIC_* values from the standard .env files, later
-// files overriding earlier ones.
-func readPublicEnv(root string) map[string]string {
-	out := map[string]string{}
+// publicEnvDestructure matches `const { NEXT_PUBLIC_X } = process.env`.
+var publicEnvDestructure = regexp.MustCompile(`\{[^}]*\bNEXT_PUBLIC_\w+[^}]*\}\s*=\s*process\.env\b`)
+
+const (
+	nextPublicPrefix  = "NEXT_PUBLIC_"
+	krateEnvPublicPre = "KRATE_PUBLIC_"
+)
+
+// krateEnvName maps a Next client-visible variable to the name Krate inlines.
+func krateEnvName(key string) string {
+	return krateEnvPublicPre + strings.TrimPrefix(key, nextPublicPrefix)
+}
+
+// readPublicEnv lists which .env files define each NEXT_PUBLIC_* variable.
+// Only names are kept: values are never read into the plan, because the files
+// belong to the developer's machine and may hold development URLs or keys.
+func readPublicEnv(root string) map[string][]string {
+	out := map[string][]string{}
 	for _, name := range []string{".env", ".env.local", ".env.development", ".env.development.local", ".env.production", ".env.production.local"} {
 		data, err := os.ReadFile(filepath.Join(root, name))
 		if err != nil {
@@ -25,59 +39,89 @@ func readPublicEnv(root string) map[string]string {
 				continue
 			}
 			line = strings.TrimPrefix(line, "export ")
-			key, value, ok := strings.Cut(line, "=")
+			key, _, ok := strings.Cut(line, "=")
 			if !ok {
 				continue
 			}
 			key = strings.TrimSpace(key)
-			if !strings.HasPrefix(key, "NEXT_PUBLIC_") {
-				continue
+			if strings.HasPrefix(key, nextPublicPrefix) {
+				out[key] = append(out[key], name)
 			}
-			value = strings.TrimSpace(value)
-			if len(value) >= 2 && ((value[0] == '"' && value[len(value)-1] == '"') || (value[0] == '\'' && value[len(value)-1] == '\'')) {
-				value = value[1 : len(value)-1]
-			}
-			out[key] = value
 		}
 	}
 	return out
 }
 
-// rewritePublicEnv inlines Next's build-time NEXT_PUBLIC_* values. Krate does
-// not expose server env values to client code, so unresolved public refs stay
-// manual rather than silently becoming undefined.
-func rewritePublicEnv(rep *Report, values map[string]string) {
+// rewritePublicEnv points reads of Next's client-visible variables at the
+// KRATE_PUBLIC_* names Krate inlines at build time, and reports the variables
+// to rename. cfgEnv holds the keys of next.config `env`, which Next inlines
+// into every bundle; their reads get the same treatment. No value is ever
+// written into the migrated source.
+func rewritePublicEnv(rep *Report, defined map[string][]string, cfgEnv map[string]string) {
+	used := map[string]bool{}
 	for i := range rep.Files {
 		f := &rep.Files[i]
-		if len(f.Content) == 0 {
+		if len(f.Content) == 0 || f.Kind == KindPublic || f.Kind == KindConfig || f.Kind == KindPackage {
 			continue
 		}
 		body := string(f.Content)
-		replaced := false
-		var unresolved []string
+		changed := false
 		body = publicEnvRe.ReplaceAllStringFunc(body, func(match string) string {
 			sub := publicEnvRe.FindStringSubmatch(match)
 			key := sub[1]
 			if key == "" {
 				key = sub[2]
 			}
-			if !strings.HasPrefix(key, "NEXT_PUBLIC_") {
+			_, inCfg := cfgEnv[key]
+			if !strings.HasPrefix(key, nextPublicPrefix) && !inCfg {
 				return match
 			}
-			value, ok := values[key]
-			if !ok {
-				unresolved = append(unresolved, key)
-				return match
-			}
-			replaced = true
-			return strconv.Quote(value)
+			used[key] = true
+			changed = true
+			return "process.env." + krateEnvName(key)
 		})
 		f.Content = []byte(body)
-		if replaced {
-			f.Rewrites = append(f.Rewrites, "inlined NEXT_PUBLIC_* environment values")
+		if changed {
+			f.Rewrites = append(f.Rewrites, "renamed NEXT_PUBLIC_* environment reads to KRATE_PUBLIC_*")
 		}
-		for _, key := range unresolved {
-			rep.Manual = append(rep.Manual, ManualItem{Source: f.Source, Reason: "public env " + key + " has no value in .env or next.config", Hint: "add it to .env or replace it manually"})
+		if publicEnvDestructure.MatchString(body) {
+			rep.Manual = append(rep.Manual, ManualItem{Source: f.Source, Reason: "NEXT_PUBLIC_* variables are destructured from process.env", Hint: "read each one as process.env.KRATE_PUBLIC_NAME; Krate inlines only direct reads"})
 		}
 	}
+
+	// Union of what code reads, what .env files define and what next.config sets.
+	all := map[string]bool{}
+	for k := range used {
+		all[k] = true
+	}
+	for k := range defined {
+		all[k] = true
+	}
+	for k := range cfgEnv {
+		all[k] = true
+	}
+	if len(all) == 0 {
+		return
+	}
+	keys := make([]string, 0, len(all))
+	for k := range all {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		part := k + " -> " + krateEnvName(k)
+		if files := defined[k]; len(files) > 0 {
+			part += " (defined in " + strings.Join(files, ", ") + ")"
+		} else if _, ok := cfgEnv[k]; ok {
+			part += " (set in next.config env)"
+		} else {
+			part += " (no .env definition found)"
+		}
+		parts = append(parts, part)
+	}
+	rep.Manual = append(rep.Manual, ManualItem{
+		Reason: "public environment variables are not copied; rename or set them for the Krate build: " + strings.Join(parts, "; "),
+		Hint:   "Krate inlines only KRATE_PUBLIC_* at build time (process.env.KRATE_PUBLIC_NAME). Rename them in your .env files or set them in the build environment; values were not written into source",
+	})
 }
