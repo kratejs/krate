@@ -76,6 +76,16 @@ The first pass:
 - copies Pages Router `_app` and wraps it as the root `_layout.tsx` shell;
 - copies app-local relative imports under `src/migrated/` and rewrites the
   migrated route imports to point at them;
+- follows imports from the migrated files to project modules outside `app/`
+  (relative imports and tsconfig `paths` / `baseUrl` aliases such as `@/*`,
+  including `extends`) and applies the same Next import rewrites to them
+  (`next/link`, `next/navigation`, `next/cache`, `next/headers`, `next/dynamic`,
+  `next/server`, `Metadata` from `next`). These modules stay where they are and
+  are rewritten **in place**, so the plan lists them with `target` equal to
+  `source`; each is backed up first and `krate migrate rollback` restores it.
+  Because they overwrite your source, `--apply` needs `--force` when any are
+  planned. Workspace packages that import `next/*` are outside the project and
+  are listed as manual items;
 - keeps `"use client"` (client boundary inside server component trees) and strips
   default imports from `next/link`, `next/image`, and `next/head` (Krate exposes
   those as globals);
@@ -85,14 +95,51 @@ The first pass:
   literal array), maps static root `metadata` to `site` config, and wraps static,
   synchronous, and async `generateMetadata` results in `<Head>`. A key it cannot
   prove static is reported as manual work on its own; the other keys still
-  translate. An `async` page keeps `async` and its wrapper is `async` too, so the
+  translate, and so does each rule: in a `headers()` array, the static entries
+  translate while a computed one (a helper call, `value: compute()`) is reported
+  with its source path. A redirect, rewrite or header rule with `has` or `missing`
+  is never translated, because Krate matches on the path only and an
+  unconditional copy would apply to every request (a guarded `/store` redirect
+  would send `/store` away for everyone); each is reported with its source and
+  condition, and the hint points at `middleware.ts`. Identical duplicate rules in
+  the output are warned about. When headers could not be translated and the
+  config (or a local module it imports) mentions `Content-Security-Policy`,
+  `Strict-Transport-Security`, `X-Frame-Options` or similar, a separate item says
+  the security headers were not migrated. `krate.config.ts` can import a local
+  module, so a helper that builds static headers can be imported there; values
+  that depend on the request, such as a CSP nonce, belong in `middleware.ts`.
+  Every other `next.config` key gets its own item with a hint instead of one
+  generic warning: `transpilePackages`, `output: 'standalone'`,
+  `serverExternalPackages`, `outputFileTracingIncludes`, computed
+  `images.remotePatterns` or `env`, `experimental` flags, and a
+  `loadEnvConfig(...)` call (Krate loads `.env*` from the project root only).
+  An `async` page keeps `async` and its wrapper is `async` too, so the
   page renders per request;
 - keeps `export const revalidate`, `dynamic` and `dynamicParams` on pages, which
   Krate honors, and notes in the plan what each does (ISR, SSR, 404 for unlisted
   params); the same exports in a layout are manual work;
 - rewrites `middleware.ts` to the standard `Request`/`Response` API, including a
   small `NextResponse` shim, static/local matcher checks, and cookie/IP/geo
-  helpers; computed `config.matcher` arrays are checked at runtime;
+  helpers; computed `config.matcher` arrays are checked at runtime. The Next.js 16
+  `proxy.ts` (root or `src/`, a `proxy` function or a default export) is migrated
+  the same way and written to `middleware.ts`, the name Krate loads (`--apply`
+  moves the original `proxy.ts` into the backup); when both files exist only
+  `proxy.ts` is migrated and the other is a manual item;
+- copies static `favicon.ico`, `icon.*` and `apple-icon.*` files from the app root
+  to `public/` and links the root ones from the generated `head` config
+  (`<link rel="icon">`, `<link rel="apple-touch-icon">`). Icons inside a
+  segment are copied but need their `<link>` added by hand. Dynamic `icon.tsx`
+  and `apple-icon.tsx` are manual items;
+- keeps the public URL of route handlers outside `app/api`: they move under
+  `/api/`, and the plan adds a `rewrites` entry from the old path (`/r/[code]`
+  becomes `/r/:code` to `/api/r/:code`; catch-alls use `:path+` and `:path*`).
+  `krate serve` and `krate dev` answer such a rewrite from the API handler. A
+  handler at the app root (`app/route.ts`) is a manual item, because a rewrite
+  for `/` would shadow the home page. Deploy targets that do not run the Krate
+  server may not apply the rewrite;
+- flags inline `"use server"` functions (a directive inside a function body, the
+  Auth.js `signOut` pattern) as manual work, because the build rejects them with
+  `KR7001`; move each into a module whose first statement is `"use server"`;
 - strips root-layout `<html>`/`<body>` wrappers;
 - maps `forbidden.tsx` to `403.tsx` and `unauthorized.tsx` to `401.tsx` (the
   Next.js 15.1 `authInterrupts` pages), and drops the `experimental.authInterrupts`
@@ -121,8 +168,27 @@ The first pass:
 - creates `krate.config.ts` when the project has none, or merges missing
   Next-derived keys into an existing config (existing keys win);
 - merges/generates `tsconfig.json` for Krate JSX and route types;
-- inlines `NEXT_PUBLIC_*` values from `.env*` and static `next.config.env`;
-- leaves the original Next.js tree untouched.
+- renames reads of `process.env.NEXT_PUBLIC_NAME` (and the keys of static
+  `next.config` `env`) to `process.env.KRATE_PUBLIC_NAME`, the prefix Krate
+  inlines at build time. Values are never copied from `.env*` into the migrated
+  code, so development URLs and keys cannot ship by accident. One manual item
+  lists every variable to rename or set for the Krate build and which `.env`
+  files define it;
+- moves the original Next.js route trees (`app/` or `src/app/`, and `pages/` when
+  it was migrated) into the backup directory on `--apply`, after every file is
+  written, so Krate does not compile them next to the migrated copies. The plan
+  says which trees move, and `krate migrate rollback` moves them back. Files in
+  those trees that the migrator does not copy (a README, a `.txt` file) go to the
+  backup with the tree and are listed as a warning. A tree stays in place when a
+  migrated file is written inside it. Copied test files (`*.test.*`, `*.spec.*`,
+  `__tests__`) are kept in `src/migrated/` next to their modules, and their
+  relative imports of migrated routes (`./page`) are re-pointed at
+  `src/pages/`; with the originals moved aside each test runs once;
+- warns about script files at the project root and directly under `src/` that
+  the plan neither copies nor rewrites (`auth.ts`, a stray `proxy.mjs`, ...), skipping
+  `*.config.*`, `*.d.ts` and test files, so nothing is dropped without a trace;
+- lists `instrumentation.ts`, `instrumentation-*.ts` as manual work: Krate has no
+  server startup hook that calls `register()`.
 
 Every apply writes a rollback manifest under
 `.krate/migrate/nextjs-<timestamp>/`. Undo with:
@@ -132,7 +198,12 @@ krate migrate rollback .krate/migrate/nextjs-<timestamp>
 ```
 
 Add `--verify` to build the migrated app, run `krate check`, and diff the built
-route inventory against the migration report before you accept the migration:
+route inventory against the migration report before you accept the migration.
+Verification evaluates `krate.config.ts`, which imports `@krate/core`, so the
+packages must be installed first. Before it writes anything, `--apply --verify`
+checks that `@krate/core` (and any other `@krate/*` package a generated file
+imports) resolves from the project, and stops with a message if not: run with
+`--update-package`, install the dependencies, then re-run.
 
 ```sh
 krate migrate nextjs --apply --verify

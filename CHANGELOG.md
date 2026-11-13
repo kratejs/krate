@@ -213,6 +213,13 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
   collection sorted with them stays a run-time value instead of being folded with the build
   machine's locale and time zone. An expression that reads `globalThis` stays a run-time value
   too.
+- `krate migrate nextjs --apply` moves the original `app/` (or `src/app/`), a migrated Next
+  `pages/` tree and a Next 16 `proxy.ts` into the backup, so Krate does not build them next to
+  the migrated copies; `krate migrate rollback` moves them back. Project modules that routes
+  import (through relative paths or tsconfig `paths` such as `@/`) are rewritten in place, with
+  backups, so `--apply` needs `--force` when any are planned.
+- `krate migrate nextjs` no longer writes `NEXT_PUBLIC_*` values from `.env*` into source. It
+  renames the reads to `KRATE_PUBLIC_*` and lists the variables to set for the build.
 
 ### Added
 
@@ -348,6 +355,20 @@ host code runs in the native process. Names and options may change between relea
   for POST.
 - `new URL(rel, import.meta.url)` threw in page scripts, because the substituted URL was not
   absolute.
+- `krate migrate nextjs` closes the gaps a production Next.js 16 migration found: it migrates
+  `proxy.ts` as middleware and lists root and `src/` scripts it does not migrate; it never
+  emits a looser rule for a redirect, rewrite or header with `has`/`missing` (each is a manual
+  item) and warns on duplicate rules; it translates the static entries of a partly computed
+  `headers()` and says when CSP or HSTS were not migrated; every untranslated `next.config` key
+  (`output`, `transpilePackages`, `serverExternalPackages`, `outputFileTracingIncludes`,
+  `loadEnvConfig`, computed `images.remotePatterns`, ...) gets its own report line; route
+  handlers outside `app/api` keep their public URL through a generated rewrite; static
+  `icon.*`/`apple-icon.*` become public files with a head link; `instrumentation.ts` and inline
+  `"use server"` functions (`KR7001`) are manual items; `--verify` checks that `@krate/core`
+  resolves before writing anything; and the generated config no longer sets `entry` to an
+  arbitrary page.
+- A config rewrite whose destination is an `/api` route is answered by the API handler. It
+  returned 404.
 - Errors thrown during a page's first render reach the dev overlay and `/__krate/state`. The
   overlay loads after the page script, so it missed them; the page head now buffers them.
 - Importing `krate/content` with no collections configured says so, instead of telling you to

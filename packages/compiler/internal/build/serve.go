@@ -2250,6 +2250,12 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 				}
 				r.URL.Path = rewriteTargetPath(rewritten)
 				r.URL.RawPath = ""
+				// A rewrite onto an API route is served by the API handler;
+				// the mux already dispatched this request as a page.
+				if r.URL.Path == "/api" || strings.HasPrefix(r.URL.Path, "/api/") {
+					apiHandler.ServeHTTP(w, r)
+					return
+				}
 				break
 			}
 		}
