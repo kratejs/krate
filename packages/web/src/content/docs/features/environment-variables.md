@@ -144,6 +144,7 @@ limits. All are optional.
 |----------|---------|--------|
 | `KRATE_DEBUG` | unset | Re-throw internal panics with their original stack instead of reporting them as build errors. |
 | `KRATE_EXEC_TIMEOUT` | unset | Fallback timeout for external processes without a specific override (Go duration, e.g. `90s`). |
+| `KRATE_API_TIMEOUT` | `30s` | How long a JS/TS API route may take to return its response before it is answered with 504. A route's `export const maxDuration` overrides it. See [API routes](/docs/features/api-routes/#timeouts). |
 | `KRATE_GOAPI_TIMEOUT` | `15m` | Timeout for `go build` of the Go host (API routes + components). |
 | `KRATE_GOAPI_TIDY_TIMEOUT` | `10m` | Timeout for `go mod tidy` when `go.tidy` is enabled. |
 | `KRATE_GIT_TIMEOUT` | `60s` | Timeout for `git` reads used by `lastUpdated`/sitemap. |

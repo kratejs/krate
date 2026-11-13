@@ -1106,7 +1106,7 @@ The build empties outDir before it writes the site, and `krate clean` deletes it
 
 **Value needed at build time is unknown**
 
-A component without state (no createSignal, useState or other hook that holds state) is rendered to static HTML while the site is built, so every value it renders has to be known then: a prop, a local variable, or a module constant. This expression is none of those, for example it names an identifier that is not defined where the component renders (`unresolved identifier x`), reads the clock or the browser, or calls a function the build cannot run. A module constant that holds JSX (an array of sections whose `body` is a fragment, say) is known: it is rendered to HTML at build time wherever a component reads it, and read again in the browser for the parts that hydrate. There is no run time to fall back on, so the build fails instead of printing a guess. Define or import the name, pass the value as a prop, or give the component state so it hydrates in the browser. A value that differs per request belongs in a `*.runtime.tsx` component.
+A component without state (no createSignal, useState or other hook that holds state) is rendered to static HTML while the site is built, so every value it renders has to be known then: a prop, a local variable, or a module constant. This expression is none of those, for example it names an identifier that is not defined where the component renders (`unresolved identifier x`), reads the clock or the browser, or calls a function the build cannot run. There is no run time to fall back on, so the build fails instead of printing a guess. Define or import the name, pass the value as a prop, or give the component state so it hydrates in the browser. A value that differs per request belongs in a `*.runtime.tsx` component.
 
 ### KR8360
 
@@ -1118,7 +1118,7 @@ A component without state (no createSignal, useState or other hook that holds st
 
 **Unsupported page segment export value**
 
-Krate reads the Next.js-style page exports `export const revalidate` (a constant number of seconds, 0 for per-request rendering, or false to cache indefinitely) and `export const dynamic` ("auto", "force-dynamic", "force-static" or "error") at build time. The value could not be read statically or is not one of the supported values, so it is ignored. Write a literal value.
+Krate reads the Next.js-style page exports `export const revalidate` (a constant number of seconds, 0 for per-request rendering, or false to cache indefinitely) and `export const dynamic` ("auto", "force-dynamic", "force-static" or "error") at build time. The value could not be read statically or is not one of the supported values, so it is ignored. Write a literal value. The same code covers `export const maxDuration` in an API route, which must be a constant positive whole number of seconds (at most 3600); otherwise the route keeps the default API timeout.
 
 ### KR8602
 

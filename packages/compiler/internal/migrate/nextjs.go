@@ -606,6 +606,14 @@ func applyManual(src string, kind FileKind) []string {
 		out = append(out, "async layouts are not supported (KR7101); move the data fetching into an async child component")
 	}
 	for _, m := range segmentConfigExport.FindAllStringSubmatch(src, -1) {
+		if m[1] == "maxDuration" && kind == KindAPI {
+			if keptMaxDuration.MatchString(src) {
+				continue
+			}
+			// Krate reads it, but only as a literal number of seconds.
+			out = append(out, "export const maxDuration must be a literal number of seconds for Krate to apply it as the route's request timeout; the default of 30s applies otherwise")
+			continue
+		}
 		out = append(out, "route segment config "+m[1]+" has no Krate equivalent and was left in place")
 	}
 	if useCacheDirective.MatchString(src) {
@@ -617,6 +625,7 @@ func applyManual(src string, kind FileKind) []string {
 var (
 	asyncDefaultExport  = regexp.MustCompile(`export\s+default\s+async\b`)
 	segmentConfigExport = regexp.MustCompile(`(?m)^export\s+const\s+(fetchCache|runtime|preferredRegion|maxDuration)\b`)
+	keptMaxDuration     = regexp.MustCompile(`(?m)^export\s+const\s+maxDuration\s*=\s*\d+\s*(?:as\s+const\s*)?;?[ \t]*\r?$`)
 	useCacheDirective   = regexp.MustCompile(`(?m)^\s*["']use cache(?::[a-z-]+)?["']`)
 )
 
@@ -647,7 +656,7 @@ func rewriteNextSource(src string, kind FileKind) (string, []string, []string) {
 			rewrites = append(rewrites, "kept a non-default "+module+" import for manual review")
 		}
 	}
-	src, dropped := dropSegmentConfig(src)
+	src, dropped := dropSegmentConfig(src, kind)
 	rewrites = append(rewrites, dropped...)
 	manual = append(manual, applyManual(src, kind)...)
 	notes, layoutManual := segmentConfigNotes(src, kind)

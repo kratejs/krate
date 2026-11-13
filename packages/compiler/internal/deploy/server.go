@@ -34,6 +34,10 @@ type ServerPlan struct {
 	AssetExts  []string
 	HasActions bool
 	HasAPI     bool
+	// MaxDuration is the longest `export const maxDuration` (seconds) of any
+	// API route, 0 when none sets one. One function serves every route, so
+	// platforms that configure a per-function limit get this value.
+	MaxDuration int
 	// UsesRevalidate reports revalidatePath/revalidateTag calls in the sources.
 	UsesRevalidate bool
 	// SharedCache is true when krate.config sets a shared cache adapter.
@@ -232,13 +236,17 @@ func emitVercelServer(cfg *config.Config, root, outDir string, plan *ServerPlan,
 	if err := put(filepath.Join(fnDir, "package.json"), []byte("{\"type\":\"module\"}\n")); err != nil {
 		return nil, err
 	}
-	vc, _ := json.MarshalIndent(map[string]any{
+	vcConf := map[string]any{
 		"runtime":                   "nodejs22.x",
 		"handler":                   "index.mjs",
 		"launcherType":              "Nodejs",
 		"shouldAddHelpers":          false,
 		"supportsResponseStreaming": true,
-	}, "", "  ")
+	}
+	if plan.MaxDuration > 0 {
+		vcConf["maxDuration"] = plan.MaxDuration
+	}
+	vc, _ := json.MarshalIndent(vcConf, "", "  ")
 	if err := put(filepath.Join(fnDir, ".vc-config.json"), append(vc, '\n')); err != nil {
 		return nil, err
 	}
@@ -314,6 +322,9 @@ func emitNetlifyServer(cfg *config.Config, root, outDir string, plan *ServerPlan
 		return nil, err
 	}
 	written = append(written, impl)
+	if plan.MaxDuration > 0 {
+		plan.Warnings = append(plan.Warnings, fmt.Sprintf("an API route sets maxDuration = %d: Krate's handler enforces it, but Netlify limits function run time by plan and the project cannot configure it, so Netlify may stop the function sooner", plan.MaxDuration))
+	}
 	fn := filepath.Join(root, "netlify", "functions", "krate.mjs")
 	wrapper := "// " + generatedMarker + " --target netlify`.\nimport handler from \"../server/krate-server.mjs\";\n\nexport default handler;\nexport const config = " + netlifyConfigLiteral(plan) + ";\n"
 	if err := writeGenerated(fn, []byte(wrapper), "the function"); err != nil {

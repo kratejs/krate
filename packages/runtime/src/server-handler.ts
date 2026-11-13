@@ -177,6 +177,12 @@ export interface KrateServerData {
   /** API route keys: file path under the API dir without extension ("items/[id]"). */
   apiRoutes: string[];
   /**
+   * Per-route request budgets in seconds (`export const maxDuration`), keyed
+   * like apiRoutes. A handler still running at the deadline is aborted
+   * (request.signal) and the request answered 504.
+   */
+  apiMaxDuration?: Record<string, number>;
+  /**
    * Metadata routes (robots.ts, sitemap.ts, manifest.ts) that run per request:
    * a public URL served by the API route `key`.
    */
@@ -1358,6 +1364,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
       return finish(rs, 405, '{"error":"Method Not Allowed"}');
     }
     if (status === 413) return finish(rs, 413, '{"error":"Request Entity Too Large"}');
+    if (status === 504) return finish(rs, 504, '{"error":"Gateway Timeout"}');
     return finish(rs, status < 400 ? 500 : status, '{"error":"Internal Server Error"}');
   }
 
@@ -1568,19 +1575,48 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
       console.error(`[krate] API route ${file} uses the legacy (req, res) handler, which the portable server does not support; export named handlers (GET, POST, ...) that take a Request and return a Response.`);
       return apiFailure(rs, 500);
     }
+    const budgetSec = (data.apiMaxDuration && data.apiMaxDuration[file]) || 0;
+    const abort = budgetSec ? new AbortController() : undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
+      let signal = rs.request.signal;
+      if (abort) {
+        const upstream = rs.request.signal;
+        if (upstream) {
+          if (upstream.aborted) abort.abort(upstream.reason);
+          else upstream.addEventListener("abort", () => abort.abort(upstream.reason), { once: true });
+        }
+        signal = abort.signal;
+      }
       const request = attachCookies(
         new Request(fullURL(rs), {
           method: rs.method,
           headers: new Headers(rs.request.headers),
           body: body && body.byteLength > 0 ? (body as unknown as BodyInit) : undefined,
-          signal: rs.request.signal,
+          signal,
         }),
         basePath,
       );
       const scope: RevalidateScope = { kind: "api", paths: [], tags: [] };
-      const out = await revalidateStore.run(scope, async () => toResponse(await fn(request, { params: apiRouteParams(file, rs.path) })));
-      await flushRevalidate(scope);
+      const work = async () => {
+        const res = await revalidateStore.run(scope, async () => toResponse(await fn(request, { params: apiRouteParams(file, rs.path) })));
+        await flushRevalidate(scope);
+        return res;
+      };
+      let out: Response;
+      if (abort) {
+        const deadline = new Promise<never>((_, reject) => {
+          timer = setTimeout(() => {
+            const err = new Error(`API route exceeded its maxDuration of ${budgetSec}s`);
+            (err as any).krateTimeout = true;
+            reject(err);
+            abort.abort(err);
+          }, budgetSec * 1000);
+        });
+        out = await Promise.race([work(), deadline]);
+      } else {
+        out = await work();
+      }
       if (scope.after && scope.after.length > 0) {
         // after() tasks start once this handler has returned the response.
         const later = new Promise<void>((resolve) => setTimeout(resolve, 0)).then(async () => {
@@ -1597,6 +1633,10 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
       }
       return new Response(out.body, { status, headers: rs.res });
     } catch (err) {
+      if (err && (err as any).krateTimeout) {
+        console.error(`[krate] ${(err as Error).message}: ${rs.method} ${rs.path}`);
+        return apiFailure(rs, 504);
+      }
       // notFound(), forbidden() and unauthorized() end the request with that status.
       const fallback = httpFallbackStatus(err);
       if (fallback === 403 || fallback === 401) return apiFailure(rs, fallback);
@@ -1607,6 +1647,8 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
       }
       console.error(`[krate] API error (${rs.method} ${rs.path}): ${(err && (err as any).stack) || err}`);
       return apiFailure(rs, 500);
+    } finally {
+      if (timer) clearTimeout(timer);
     }
   }
 

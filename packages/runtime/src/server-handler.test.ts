@@ -84,6 +84,44 @@ describe("createKrateHandler", () => {
   });
 });
 
+describe("API maxDuration", () => {
+  const sleep = (ms: number, signal: AbortSignal) =>
+    new Promise<boolean>((resolve) => {
+      const t = setTimeout(() => resolve(false), ms);
+      signal.addEventListener("abort", () => (clearTimeout(t), resolve(true)), { once: true });
+    });
+  let sawAbort = false;
+  const mods = {
+    ...modules,
+    api: {
+      ...modules.api,
+      slow: { GET: async (r: Request) => ((sawAbort = await sleep(2000, r.signal)), Response.json({ late: true })) },
+      ok: { GET: async (r: Request) => (await sleep(50, r.signal), Response.json({ done: true })) },
+    },
+  };
+  const h = createKrateHandler({
+    target: "node",
+    data: data({ hasMiddleware: false, apiRoutes: ["slow", "ok"], apiMaxDuration: { slow: 0.1, ok: 5 } }),
+    modules: mods,
+  });
+  const get = (path: string) => h(new Request("http://localhost" + path));
+
+  it("answers 504 and aborts request.signal at the deadline", async () => {
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    const r = await get("/api/slow");
+    expect(r.status).toBe(504);
+    expect(await r.json()).toEqual({ error: "Gateway Timeout" });
+    expect(sawAbort).toBe(true);
+    err.mockRestore();
+  });
+
+  it("lets a handler that finishes inside its budget through", async () => {
+    const r = await get("/api/ok");
+    expect(r.status).toBe(200);
+    expect(await r.json()).toEqual({ done: true });
+  });
+});
+
 describe("canonical slash redirect", () => {
   const h = createKrateHandler({
     target: "node",

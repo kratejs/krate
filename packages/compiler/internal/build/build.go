@@ -5073,6 +5073,9 @@ type apiRouteMeta struct {
 	// the route's sources reference, for an embedded-runtime route. Absent
 	// means unknown, so the runtime must load everything.
 	Features *[]string `json:"features,omitempty"`
+	// MaxDuration is the route's `export const maxDuration` in seconds (0
+	// when absent): its request budget instead of the 30s default.
+	MaxDuration int `json:"maxDuration,omitempty"`
 }
 
 func (b *Builder) compileSingleRoute(file string, apiSrcDir string) (apiRouteMeta, error) {
@@ -5143,6 +5146,9 @@ func (b *Builder) compileSingleRoute(file string, apiSrcDir string) (apiRouteMet
 	}
 
 	meta := apiRouteMeta{File: filepath.ToSlash(outName)}
+	var durWarnings []diag.Diagnostic
+	meta.MaxDuration, durWarnings = readAPIMaxDuration(file)
+	printWarningsOnce(os.Stderr, durWarnings)
 
 	// Node-only = imports still external after bundling (node builtins / native
 	// deps the embedded runtime cannot provide). Package deps that bundle cleanly

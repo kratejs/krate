@@ -89,7 +89,7 @@ partial and the tests behind each entry, is in the
 [API runtime compatibility](/docs/reference/api-runtime-compat/) reference,
 generated from the ledger the compiler checks against.
 A handler that stays pending longer than 30 seconds (`KRATE_API_TIMEOUT`) is
-failed. Request and response bodies, binary included, are copied into and out
+answered with 504 (see [Timeouts](#timeouts)). Request and response bodies, binary included, are copied into and out
 of the VM as raw bytes, so a megabyte body costs about a millisecond each way.
 While a handler holds a body, the VM's memory limit (`KRATE_JS_MEMORY_MB`,
 default 32) grows by twice the body length when it is read as bytes or form
@@ -149,6 +149,48 @@ export default function handler(req, res) {
   res.json({ message: 'legacy pattern' });
 }
 ```
+
+## Timeouts
+
+A JS/TS route has 30 seconds to return its `Response`. A handler that has not
+returned by then is answered with `504 Gateway Timeout` and the body
+`{"error":"Gateway Timeout"}`, and the work is aborted where it can be:
+`request.signal` aborts at the deadline, so pass it to `fetch` and other
+cancellable calls. Streaming responses are not cut once the headers are sent;
+the embedded runtime still applies the budget to each chunk, and a stream that
+is silent for that long ends.
+
+Raise the limit for one route with a `maxDuration` export, in seconds, the same
+export Next.js route handlers use:
+
+```ts
+// src/api/export.ts
+export const maxDuration = 120;
+
+export async function GET(request: Request) {
+  const rows = await buildExport({ signal: request.signal });
+  return new Response(rows, { headers: { "Content-Type": "text/csv" } });
+}
+```
+
+Krate reads the value when it builds the route, so it must be a constant
+positive whole number of seconds (`60` or `5 * 60`, at most 3600). Anything else
+(a variable, `0`, `1.5`) is ignored with a [`KR8601`](/docs/reference/diagnostics/#kr8601)
+warning and the route keeps the default. A route without `maxDuration` uses
+`KRATE_API_TIMEOUT` (a Go duration such as `45s`, default `30s`), which is also
+the default for routes that do not set one.
+
+How each target applies it:
+
+| Target | Behavior |
+|--------|----------|
+| `krate dev`, `krate start`, Docker | The embedded runtime, the Node/Bun/Deno sidecar and the proxy in front of it all use the route's value, so a long route is not cut at 30 seconds anywhere on the path. |
+| `krate deploy --target node` | The portable server answers 504 and aborts `request.signal` at the deadline of routes that set `maxDuration`. Routes without it have no limit. |
+| `vercel` | One function serves every route, so the longest `maxDuration` in the project becomes the function's `maxDuration` in `.vc-config.json` (it also applies to pages rendered by that function). Vercel caps it by plan. |
+| `netlify` | The handler enforces `maxDuration`, but Netlify limits function run time by plan and the project cannot configure it, so the deploy prints a warning: Netlify may stop the function sooner. |
+| `cloudflare` | The handler enforces `maxDuration`; Workers set no wall-clock limit while the client stays connected. |
+
+Legacy `(req, res)` default-export handlers are not time-limited by `maxDuration`.
 
 ## After the response
 

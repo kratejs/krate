@@ -326,9 +326,12 @@ const server = http.createServer(async (req, res) => {
 
         const revalidateScope = newRevalidateScope('api');
         res.once('finish', () => { krateRunAfter(revalidateScope); });
-        const response = await REVALIDATE_STORE.run(revalidateScope, () => methodHandler(request, { params: routeParamsValue }));
         // revalidatePath/revalidateTag calls are applied before responding.
-        await flushRevalidate(revalidateScope);
+        const response = await krateWithBudget(krateRouteBudgetMs(API_DIR, targetFile), ac, async () => {
+          const out = await REVALIDATE_STORE.run(revalidateScope, () => methodHandler(request, { params: routeParamsValue }));
+          await flushRevalidate(revalidateScope);
+          return out;
+        });
 
         if (response instanceof Response || (response && typeof response.status === 'number' && typeof response.headers === 'object')) {
           res.statusCode = response.status;
@@ -383,6 +386,13 @@ const server = http.createServer(async (req, res) => {
     }
   } catch (err) {
     if (res.headersSent) { res.destroy(err); return; }
+    if (err && err.krateTimeout) {
+      console.error('[krate] ' + err.message + ': ' + req.method + ' ' + req.url);
+      res.statusCode = 504;
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Cache-Control', 'no-store');
+      return res.end('{"error":"Gateway Timeout"}');
+    }
     const fallback = krateHTTPFallback(err);
     res.statusCode = fallback || 500;
     res.setHeader('Content-Type', 'application/json');
@@ -708,15 +718,25 @@ Bun.serve({
     const routeParamsValue = routeParams(file, clean);
     try {
       const revalidateScope = newRevalidateScope('api');
-      const request = krateAttach(req);
-      const out = await REVALIDATE_STORE.run(revalidateScope, async () => ((fn.length >= 2 && !namedHandler) ? legacyInvoke(fn, req, url) : toResponse(await fn(request, { params: routeParamsValue }))));
+      const ac = new AbortController();
+      const request = (fn.length >= 2 && !namedHandler) ? krateAttach(req) : krateAttach(new Request(req, { signal: AbortSignal.any([req.signal, ac.signal]) }));
       // revalidatePath/revalidateTag calls are applied before responding.
-      await flushRevalidate(revalidateScope);
+      const out = await krateWithBudget(krateRouteBudgetMs(API_DIR, file), ac, async () => {
+        const r = await REVALIDATE_STORE.run(revalidateScope, async () => ((fn.length >= 2 && !namedHandler) ? legacyInvoke(fn, req, url) : toResponse(await fn(request, { params: routeParamsValue }))));
+        await flushRevalidate(revalidateScope);
+        return r;
+      });
       // after() tasks start once the handler has returned the response.
       setTimeout(() => { krateRunAfter(revalidateScope); }, 0);
       if (picked.headOnly) return new Response(null, { status: out.status, headers: out.headers });
       return out;
     } catch (e) {
+      if (e && e.krateTimeout) {
+        console.error('[krate] ' + e.message + ': ' + req.method + ' ' + urlPath);
+        const r = json({ error: 'Gateway Timeout' }, 504);
+        r.headers.set('Cache-Control', 'no-store');
+        return r;
+      }
       const fallback = krateHTTPFallback(e);
       if (fallback) { const r = json({ error: KRATE_FALLBACK_LABEL[fallback] }, fallback); r.headers.set('Cache-Control', 'no-store'); return r; }
       return json(krateErrorBody(e, req.method + ' ' + urlPath), 500);
@@ -1401,6 +1421,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	middlewarePath := filepath.Join(root, ".krate", "middleware.js")
 	apiRTOption := strings.ToLower(cfg.SSR.APIRuntime)
 	nodeOnlyRoutes := loadNodeOnlyAPIRoutes(root)
+	apiBudgets := apiRouteBudgets(root)
 	nodeWorkers := cfg.SSR.NodeWorkers
 	if nodeWorkers <= 0 {
 		nodeWorkers = jsruntime.DefaultAPIWorkers()
@@ -1463,6 +1484,8 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 					fmt.Sprintf("KRATE_API_HOT=%d", boolToInt(hub != nil)),
 					fmt.Sprintf("KRATE_API_DEV=%d", boolToInt(hub != nil)),
 					fmt.Sprintf("KRATE_ACTION_MAX_BODY=%d", apiBodyLimit),
+					fmt.Sprintf("KRATE_API_TIMEOUT_MS=%d", jsruntime.APITimeout().Milliseconds()),
+					"KRATE_API_ROUTE_META="+filepath.Join(root, ".krate", "api-routes.json"),
 					fmt.Sprintf("KRATE_PARENT_PID=%d", os.Getpid()),
 					"KRATE_BASE_PATH="+cfg.BaseURLPath(),
 				)
@@ -1578,6 +1601,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 			isolation := cfg.SSR.APIIsolation || hub != nil
 			apiRT.SetPool(cfg.SSR.APIWorkers, isolation)
 			apiRT.SetFeatures(loadAPIRouteFeatures(root))
+			apiRT.SetRouteTimeouts(apiBudgets)
 		}
 	}
 
@@ -1591,7 +1615,13 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		baseDirector(r)
 		r.Header.Set(internalSecretHeader, revalHost.secret)
 	}
-	apiProxy.Transport = newSidecarTransport()
+	apiHeaderWait := longestAPIBudget(apiBudgets) + apiTimeoutGrace
+	if hub != nil && apiHeaderWait < 10*time.Minute {
+		// The sidecar enforces each route's budget; dev may add a longer one
+		// after the server started.
+		apiHeaderWait = 10 * time.Minute
+	}
+	apiProxy.Transport = newSidecarTransportTimeout(apiHeaderWait)
 
 	// Optional user-provided API sidecar. Requests it owns are forwarded first;
 	// a 404 falls through to the built-in Go/TS/QuickJS routes below.
@@ -1657,6 +1687,15 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		if r.Body != nil {
 			r.Body = http.MaxBytesReader(w, r.Body, apiBodyLimit)
 		}
+		budgets := apiBudgets
+		if hub != nil {
+			// A dev rebuild can change a route's maxDuration.
+			budgets = apiRouteBudgets(root)
+			if apiRT != nil {
+				apiRT.SetRouteTimeouts(budgets)
+			}
+		}
+		extendAPIWriteDeadline(w, longestAPIBudget(budgets))
 
 		// Custom sidecar first (default /api prefix): owns the routes it
 		// responds to; a 404 falls through to the built-ins.

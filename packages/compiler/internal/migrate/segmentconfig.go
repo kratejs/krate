@@ -10,19 +10,28 @@ import (
 
 // dropRouteConfig matches the Next.js route segment exports that only steer
 // Vercel's deployment (runtime, maxDuration, preferredRegion) with a plain
-// literal value on one line. Krate self-hosts on Node, where they do nothing.
+// literal value on one line. Krate self-hosts on Node, where they do nothing,
+// except maxDuration in an API route, which Krate reads as the route's request
+// timeout and keeps.
 var dropRouteConfig = regexp.MustCompile(`(?m)^export\s+const\s+(runtime|maxDuration|preferredRegion)\s*=\s*("[^"\n]*"|'[^'\n]*'|\d+|\[[^\]\n]*\])\s*(?:as\s+const\s*)?;?[ \t]*\r?\n?`)
 
 const droppedConfigPrefix = "dropped route segment config "
 
 // dropSegmentConfig removes runtime, maxDuration and preferredRegion exports
 // and reports each removal as an info note. A name that is also used elsewhere
-// in the file is kept, so a live reference is never broken.
-func dropSegmentConfig(src string) (string, []string) {
+// in the file is kept, so a live reference is never broken. In an API route
+// maxDuration is kept too: Krate reads it as the route's request timeout.
+func dropSegmentConfig(src string, kind FileKind) (string, []string) {
 	var notes []string
 	out := dropRouteConfig.ReplaceAllStringFunc(src, func(line string) string {
 		m := dropRouteConfig.FindStringSubmatch(line)
 		name, value := m[1], m[2]
+		if name == "maxDuration" && kind == KindAPI {
+			if _, err := strconv.Atoi(value); err == nil {
+				notes = append(notes, "kept export const maxDuration = "+value+": Krate reads it as this route's request timeout in seconds (default 30)")
+			}
+			return line
+		}
 		if identifierUsedElsewhere(src, name, line) {
 			return line
 		}
@@ -40,7 +49,7 @@ func segmentConfigReason(name, value string) string {
 		}
 		return "Krate API routes already run on Node (or the runtime set in api.runtime)"
 	case "maxDuration":
-		return "Krate has no per-route time limit; see the aggregated maxDuration warning"
+		return "only API routes have a request timeout in Krate, so a page's maxDuration has no effect"
 	}
 	return "Krate deploys to the target you choose, not to a Vercel region"
 }
@@ -69,21 +78,14 @@ const fetchCacheManual = "route segment config fetchCache has no Krate equivalen
 // for fetchCache, whose caching behavior a human has to decide.
 func aggregateSegmentConfig(rep *Report) {
 	counts := map[string]int{}
-	maxDuration := 0
 	for _, f := range rep.Files {
 		for _, r := range f.Rewrites {
 			if !strings.HasPrefix(r, droppedConfigPrefix) {
 				continue
 			}
 			rest := strings.TrimPrefix(r, droppedConfigPrefix)
-			name, value, _ := strings.Cut(rest, " = ")
+			name, _, _ := strings.Cut(rest, " = ")
 			counts[name]++
-			if name == "maxDuration" {
-				v, _, _ := strings.Cut(value, ":")
-				if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n > maxDuration {
-					maxDuration = n
-				}
-			}
 		}
 	}
 	names := make([]string, 0, len(counts))
@@ -96,11 +98,7 @@ func aggregateSegmentConfig(rep *Report) {
 		case "runtime":
 			rep.Warnings = append(rep.Warnings, fmt.Sprintf("dropped export const runtime from %d files: Krate API routes run on Node (or the configured api.runtime), so it has no effect", counts[n]))
 		case "maxDuration":
-			msg := fmt.Sprintf("dropped export const maxDuration from %d files (longest %ds): Krate has no per-route time limit", counts[n], maxDuration)
-			if maxDuration > 30 {
-				msg += "; the API proxy fails a request whose handler sends no response headers within 30s (the embedded runtime also fails handlers after KRATE_API_TIMEOUT, 30s), so stream the response or move long work into after()"
-			}
-			rep.Warnings = append(rep.Warnings, msg)
+			rep.Warnings = append(rep.Warnings, fmt.Sprintf("dropped export const maxDuration from %d non-API files: only API routes have a request timeout in Krate", counts[n]))
 		case "preferredRegion":
 			rep.Warnings = append(rep.Warnings, fmt.Sprintf("dropped export const preferredRegion from %d files: region placement is a property of where you deploy Krate", counts[n]))
 		}

@@ -34,9 +34,10 @@ type APIRouteRuntime struct {
 	features      []string
 	featuresKnown bool
 
-	mu      sync.Mutex
-	created int
-	idle    chan *apiWorker
+	mu            sync.Mutex
+	routeTimeouts map[string]time.Duration
+	created       int
+	idle          chan *apiWorker
 
 	prepMu sync.Mutex
 	prep   map[string]*preparedRoute
@@ -54,6 +55,9 @@ type APIRequest struct {
 	// Params are the dynamic route segments ([id], [...slug]), matching the
 	// second argument Next.js route handlers receive.
 	Params map[string]string
+
+	// timeout is the handler budget for this request (set by Serve).
+	timeout time.Duration
 	// RemoteAddr is the client address (host:port) for legacy handlers.
 	RemoteAddr string
 }
@@ -274,6 +278,32 @@ func (a *APIRouteRuntime) Execute(req APIRequest) APIResult {
 // for the response head, and waiting for each streamed chunk).
 func apiTimeout() time.Duration { return envDuration("KRATE_API_TIMEOUT", 30*time.Second) }
 
+// APITimeout is the default per-request handler budget (KRATE_API_TIMEOUT,
+// 30s) that a route's maxDuration export overrides.
+func APITimeout() time.Duration { return apiTimeout() }
+
+// SetRouteTimeouts sets per-route budgets (from `export const maxDuration`),
+// keyed by the out-dir-relative file name ResolveFile returns. Routes not in
+// the map use KRATE_API_TIMEOUT.
+func (a *APIRouteRuntime) SetRouteTimeouts(m map[string]time.Duration) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.routeTimeouts = m
+}
+
+func (a *APIRouteRuntime) routeTimeout(file string) time.Duration {
+	rel, err := filepath.Rel(a.apiDir, file)
+	a.mu.Lock()
+	m := a.routeTimeouts
+	a.mu.Unlock()
+	if err == nil {
+		if d, ok := m[filepath.ToSlash(rel)]; ok && d > 0 {
+			return d
+		}
+	}
+	return apiTimeout()
+}
+
 // Serve runs the route and streams the response into sink. It returns nil on
 // success, or a failure describing what went wrong.
 func (a *APIRouteRuntime) Serve(ctx context.Context, req APIRequest, sink APISink) *APIFailure {
@@ -304,6 +334,7 @@ func (a *APIRouteRuntime) Serve(ctx context.Context, req APIRequest, sink APISin
 	}
 
 	req.Params = apiRouteParams(a.apiDir, targetFile, req.Path)
+	req.timeout = a.routeTimeout(targetFile)
 	return worker.run(ctx, targetFile, req, sink)
 }
 

@@ -19,7 +19,9 @@ func init() {
 			Explanation: "Krate reads the Next.js-style page exports `export const revalidate` (a constant number of " +
 				"seconds, 0 for per-request rendering, or false to cache indefinitely) and `export const dynamic` " +
 				"(\"auto\", \"force-dynamic\", \"force-static\" or \"error\") at build time. The value could not be read " +
-				"statically or is not one of the supported values, so it is ignored. Write a literal value.",
+				"statically or is not one of the supported values, so it is ignored. Write a literal value. The same code " +
+				"covers `export const maxDuration` in an API route, which must be a constant positive whole number of " +
+				"seconds (at most 3600); otherwise the route keeps the default API timeout.",
 		},
 		CodeInfo{
 			Code:  CodeStaticDataCache,

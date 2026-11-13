@@ -24,12 +24,18 @@ export async function GET() { return Response.json({}); }`,
 		t.Fatal(err)
 	}
 	a := string(findPlan(rep, "src/api/a.ts").Content)
-	if strings.Contains(a, "runtime") || strings.Contains(a, "maxDuration") {
-		t.Errorf("runtime/maxDuration not dropped:\n%s", a)
+	if strings.Contains(a, "runtime") {
+		t.Errorf("runtime not dropped:\n%s", a)
+	}
+	if !strings.Contains(a, "export const maxDuration = 60;") {
+		t.Errorf("API route maxDuration must be kept:\n%s", a)
 	}
 	b := string(findPlan(rep, "src/api/b.ts").Content)
-	if strings.Contains(b, "preferredRegion") || strings.Contains(b, "maxDuration") || strings.Contains(b, "runtime") {
+	if strings.Contains(b, "preferredRegion") || strings.Contains(b, "runtime") {
 		t.Errorf("segment config not dropped:\n%s", b)
+	}
+	if !strings.Contains(b, "export const maxDuration = 300;") {
+		t.Errorf("API route maxDuration must be kept:\n%s", b)
 	}
 	if !strings.Contains(b, "fetchCache") {
 		t.Errorf("fetchCache must stay:\n%s", b)
@@ -44,17 +50,32 @@ export async function GET() { return Response.json({}); }`,
 		t.Errorf("want one aggregated fetchCache manual item, got %q", segment)
 	}
 	joined := strings.Join(rep.Warnings, "\n")
-	for _, want := range []string{"export const runtime from 2 files", "maxDuration from 2 files (longest 300s)", "preferredRegion from 1 files"} {
+	for _, want := range []string{"export const runtime from 2 files", "preferredRegion from 1 files"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("missing aggregated warning %q in:\n%s", want, joined)
 		}
 	}
+	if strings.Contains(joined, "maxDuration") {
+		t.Errorf("a kept maxDuration must not warn:\n%s", joined)
+	}
 }
 
 func TestSegmentConfigKeptWhenReferenced(t *testing.T) {
-	src, notes := dropSegmentConfig("export const runtime = 'nodejs';\nexport function GET() { return Response.json({ runtime }); }\n")
+	src, notes := dropSegmentConfig("export const runtime = 'nodejs';\nexport function GET() { return Response.json({ runtime }); }\n", KindAPI)
 	if len(notes) != 0 || !strings.Contains(src, "export const runtime") {
 		t.Errorf("a referenced export must stay: %q %v", src, notes)
+	}
+}
+
+func TestMaxDurationKeptInAPIRoutesOnly(t *testing.T) {
+	const decl = "export const maxDuration = 120;\n"
+	src, notes := dropSegmentConfig(decl, KindAPI)
+	if src != decl || len(notes) != 1 || !strings.Contains(notes[0], "request timeout") {
+		t.Errorf("API route: want kept with a note, got %q %v", src, notes)
+	}
+	src, notes = dropSegmentConfig(decl, KindPage)
+	if src != "" || len(notes) != 1 || !strings.Contains(notes[0], "only API routes") {
+		t.Errorf("page: want dropped, got %q %v", src, notes)
 	}
 }
 
