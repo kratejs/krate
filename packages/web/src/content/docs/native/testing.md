@@ -84,7 +84,7 @@ Under `krate native test` the shell and the built app come from
 | `shell`, `appDir` | the environment | Shell binary and built app directory. |
 | `env` | | Extra environment for the shell and the host code. |
 | `isolate` | `true` | Empty data, config and cache directories (`XDG_*` on Linux, `APPDATA` and `LOCALAPPDATA` on Windows, `HOME` on macOS). Removed on `close()`. |
-| `startTimeout` | 60000 | Milliseconds to wait for the app. |
+| `startTimeout` | 60000 | Milliseconds to wait for the app to start and its main page to finish loading; `launch()` resolves only then, so a first `waitFor` does not spend its own timeout on a cold start. |
 | `timeout` | 5000 | Default for `waitFor` and the actions that wait. |
 
 ## The app

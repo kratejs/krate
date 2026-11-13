@@ -26,7 +26,7 @@ export interface LaunchOptions {
    * its database, kv store and settings start fresh and never touch yours.
    */
   isolate?: boolean;
-  /** How long to wait for the app to start, in milliseconds (default 60000). */
+  /** How long to wait for the app to start and its main page to load, in milliseconds (default 60000). */
   startTimeout?: number;
   /** Default timeout of waitFor and the actions that wait, in milliseconds (default 5000). */
   timeout?: number;
@@ -708,8 +708,19 @@ export async function launch(options: LaunchOptions = {}): Promise<App> {
   proc.once("exit", () => live.delete(proc));
   const ch = new Channel(proc);
   const app = new App(ch, options.timeout ?? 5000, cleanup);
+  const startTimeout = options.startTimeout ?? 60000;
+  const started = Date.now();
   try {
-    await ch.waitReady(options.startTimeout ?? 60000);
+    await ch.waitReady(startTimeout);
+    // "ready" means the first window exists, not that its page has loaded:
+    // wait for that too, inside the start-up budget, so a test's first wait
+    // is not spent on a cold start (seen on CI runners: over 5s).
+    const views = await app.views();
+    if (views.some((v) => v.id === "main")) {
+      await app.page("main").waitFor(() => document.readyState === "complete", {
+        timeout: Math.max(1000, startTimeout - (Date.now() - started)),
+      });
+    }
   } catch (e) {
     proc.kill();
     cleanup();
