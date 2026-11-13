@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
@@ -137,6 +138,10 @@ type Bundler struct {
 
 	// twImports controls how `@import "tailwindcss"` is treated in CSS.
 	twImports css.TailwindImportMode
+	// cssImportRoots are the configured extra directories CSS may import from.
+	cssImportRoots []string
+	wsRootOnce     sync.Once
+	wsRoot         string
 
 	// mdCfg is the markdown configuration for .md/.mdx modules. The zero
 	// value (mdSet false) means markdown.DefaultConfig().

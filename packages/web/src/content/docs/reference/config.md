@@ -91,6 +91,22 @@ and the merged stylesheet is minified when `minifyCSS` (or `minify`) is on.
 Tailwind generates CSS only for classes detected in the scanned sources, so
 unused utility classes never ship. There are no per-feature CSS config toggles.
 
+`@import` (and `url()`) may read `.css` files from the project root, from
+packages in `node_modules` (including pnpm workspace links whose target is a
+sibling package), and from the enclosing monorepo workspace root (the nearest
+parent with `pnpm-workspace.yaml` or a `package.json` with `workspaces`). A
+shared token file such as `@import "../../packages/tokens/tokens.css"` or
+`@import "@acme/tokens/tokens.css"` therefore works in a monorepo. Anything
+else is refused with a warning naming the resolved path; list extra
+directories explicitly:
+
+```typescript
+cssImportRoots: ["../shared-styles"], // relative to the project root, or absolute
+```
+
+In `krate dev`, edits to such files outside the project root rebuild the pages
+that import them (the file's directory is watched, not its subdirectories).
+
 ## Features
 
 ```typescript
@@ -511,7 +527,7 @@ extends: "./base.config.ts",
 
 Bases are merged underneath this config: objects deep-merge (this config wins),
 and additive arrays (`plugins`, `redirects`, `rewrites`, `serverComponents`,
-`runtimeComponents`, `serverDirs`, `runtimeDirs`, `hostFunctions`, `hostDirs`) concatenate. Duplicate
+`runtimeComponents`, `serverDirs`, `runtimeDirs`, `cssImportRoots`, `hostFunctions`, `hostDirs`) concatenate. Duplicate
 `plugins` are de-duped by name, with the extending config winning. Paths resolve
 relative to the extending config, then to `node_modules` (package presets -
 resolved via `package.json` `krate`, `exports`, `module`, or `main`). Cycles are

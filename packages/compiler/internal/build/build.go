@@ -1595,7 +1595,14 @@ func (b *Builder) inlineImports(cssText string) string {
 			b.warnTailwindOff("", d)
 		}
 	}
-	return css.InlineImportsWith(cssText, b.Root, css.ImportOptions{Root: b.Root, Tailwind: b.tailwindImportMode()})
+	bnd := bundler.New(b.Root)
+	bnd.SetCSSImportRoots(b.Cfg.CSSImportRoots)
+	return css.InlineImportsWith(cssText, b.Root, css.ImportOptions{
+		Root:       b.Root,
+		AllowRoots: bnd.CSSImportRoots(),
+		Resolve:    bundler.ResolveCSSSpecifier,
+		Tailwind:   b.tailwindImportMode(),
+	})
 }
 
 // tailwindOptions builds the Tailwind options from config.
@@ -2223,6 +2230,7 @@ func (b *Builder) newBundler() *bundler.Bundler {
 	bnd.SetProgramReadLock(b.readProgram)
 	bnd.SetPathAliases(b.cfgPathAliasPrefixes(), b.cfgPathAliasTargets(), b.Cfg.TSBaseDir)
 	bnd.SetBaseURL(b.Cfg.TSBaseURL)
+	bnd.SetCSSImportRoots(b.Cfg.CSSImportRoots)
 	bnd.SetServerComponents(b.Cfg.ServerComponents, b.Cfg.RuntimeComponents, b.Cfg.ServerDirs, b.Cfg.RuntimeDirs)
 	bnd.SetTSOptions(tsstrip.Options{
 		ExperimentalDecorators:  b.Cfg.TSCompilerOptions.ExperimentalDecorators,
@@ -2406,7 +2414,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 
 	// Detect rendering mode (SSR/ISR/Streaming) from AST exports + <Suspense>
 	// usage, falling back to the page's data-cache reads (tagged/timed fetch).
-	renderMode, revalidate, dataUsage := resolvePageRenderMode(page, entryModule, bundle.Modules)
+	renderMode, revalidate, dataUsage := resolvePageRenderMode(page, entryModule, bundle.Modules, bnd.Resolve)
 	explicitStatic := renderMode == RenderSSG
 	declaredMode := renderMode
 	pageLang := detectPageLang(entryModule.Program)
