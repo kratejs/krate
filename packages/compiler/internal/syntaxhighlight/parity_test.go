@@ -120,6 +120,23 @@ func firstDiff(got, want string) string {
 	return fmt.Sprintf("at byte %d\n  got:  ...%s\n  want: ...%s", i, strings.ReplaceAll(got[lo:hiG], "\n", `\n`), strings.ReplaceAll(want[lo:hiW], "\n", `\n`))
 }
 
+// referenceMu runs the rechecks of recheckReference one at a time.
+var referenceMu sync.Mutex
+
+// recheckReference recomputes chroma's output for a case that differs. chroma
+// gives each rule's regexp a 250ms match timeout, and a match that times out
+// (a loaded runner with the languages tokenized in parallel) becomes an error
+// token, so one reference can be wrong. A real difference stays.
+func recheckReference(t *testing.T, c parityCase, got, want string) string {
+	t.Helper()
+	referenceMu.Lock()
+	defer referenceMu.Unlock()
+	for i := 0; i < 2 && got != want; i++ {
+		want = expectedHTML(t, c.Lang, c.File, c.Lines)
+	}
+	return want
+}
+
 func expectedHTML(t *testing.T, lang, file, lines string) string {
 	t.Helper()
 	raw, err := os.ReadFile(file)
@@ -280,6 +297,9 @@ func TestParityCorpus(t *testing.T) {
 						st.Declined++
 					default:
 						want := expectedHTML(t, c.Lang, c.File, c.Lines)
+						if *o.HTML != want {
+							want = recheckReference(t, c, *o.HTML, want)
+						}
 						st.TokenizeMS += o.MS
 						if *o.HTML != want {
 							failures++
