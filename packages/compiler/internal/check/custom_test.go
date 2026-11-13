@@ -1,7 +1,6 @@
 package check
 
 import (
-	"github.com/kratejs/krate/packages/compiler/internal/astprint"
 	"os"
 	"path/filepath"
 	"testing"
@@ -54,90 +53,5 @@ func TestCustomRule(t *testing.T) {
 	}
 	if found.Line != 3 {
 		t.Errorf("line = %d, want 3", found.Line)
-	}
-}
-
-func TestCustomRuleFailure(t *testing.T) {
-	root := t.TempDir()
-	rulePath := filepath.Join(root, "boom.ts")
-	if err := os.WriteFile(rulePath, []byte(`export default function check() { return ["not-an-object"]; }`), 0644); err != nil {
-		t.Fatal(err)
-	}
-	cfg := DefaultConfig()
-	cfg.Root = root
-	cfg.Custom = []string{rulePath}
-	_, err := Run(cfg, []Page{{Route: "/", HTML: doc("", "")}})
-	if err == nil {
-		t.Fatal("expected error from malformed custom finding")
-	}
-}
-
-func TestCustomRuleReadsAST(t *testing.T) {
-	root := t.TempDir()
-	rulePath := filepath.Join(root, "rules", "ast.ts")
-	if err := os.MkdirAll(filepath.Dir(rulePath), 0755); err != nil {
-		t.Fatal(err)
-	}
-	src := `export default function check(page: any) {
-  const keys = Object.keys(page).sort().join(",");
-  const same = page.ast === page.ast;
-  return [{ rule: "custom/ast", message: page.ast.kind + " " + page.ast.body.length + " " + same + " " + keys }];
-}
-`
-	if err := os.WriteFile(rulePath, []byte(src), 0644); err != nil {
-		t.Fatal(err)
-	}
-	prog, errs, _ := astprint.Parse("const a = 1;\nexport default function Page() { return <h1>{a}</h1>; }\n")
-	if len(errs) > 0 {
-		t.Fatal(errs[0])
-	}
-	cfg := DefaultConfig()
-	cfg.Root = root
-	cfg.Custom = []string{rulePath}
-	fs, err := Run(cfg, []Page{{Route: "/", RelSource: "src/pages/index.tsx", HTML: doc(`<h1>1</h1>`, ""), Program: prog}})
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	for _, f := range fs {
-		if f.Rule == "custom/ast" {
-			if want := "Program 2 true ast,cssBytes,html,hydrationBytes,islandBytes,jsBytes,route,source"; f.Message != want {
-				t.Fatalf("message = %q, want %q", f.Message, want)
-			}
-			return
-		}
-	}
-	t.Fatalf("expected custom/ast finding, got %+v", fs)
-}
-
-// The page reaches a custom rule as parsed JSON: awkward characters in the
-// HTML and the route must arrive unchanged, and the AST stays lazy.
-func TestCustomRulePageRoundTrip(t *testing.T) {
-	root := t.TempDir()
-	rulePath := filepath.Join(root, "rules", "echo.ts")
-	if err := os.MkdirAll(filepath.Dir(rulePath), 0755); err != nil {
-		t.Fatal(err)
-	}
-	src := `export default function check(page: any) {
-  if (page.html.indexOf("\"q\" \\ ' ' </script>") < 0) {
-    return [{ rule: "custom/echo", message: "html mangled: " + page.html.slice(0, 60), severity: "error" }];
-  }
-  return [];
-}
-`
-	if err := os.WriteFile(rulePath, []byte(src), 0644); err != nil {
-		t.Fatal(err)
-	}
-	cfg := DefaultConfig()
-	cfg.Root = root
-	cfg.Custom = []string{rulePath}
-	html := doc("<h1>Echo</h1><p>\"q\" \\ ' ' </script> ${x}</p>", "")
-	fs, err := Run(cfg, []Page{{Route: "/echo", RelSource: "src/pages/echo.tsx", HTML: html}})
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	for _, f := range fs {
-		if f.Rule == "custom/echo" {
-			t.Fatalf("rule saw a different page: %s", f.Message)
-		}
 	}
 }

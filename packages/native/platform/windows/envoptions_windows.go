@@ -16,9 +16,9 @@ import (
 // (WebView2.h line 48628): four properties with get/put methods. Later
 // options interfaces (ICoreWebView2EnvironmentOptions2..8) are not
 // implemented; QueryInterface answers E_NOINTERFACE for them and the runtime
-// then uses their defaults. It follows the COM contract; TestEnvironmentOptionsObject drives it through
-// its vtable, and the CI GUI tests create their WebView2 environment with it
-// when a memory profile adds browser arguments.
+// then uses their defaults. It follows the COM contract; the CI GUI tests
+// create their WebView2 environment with it when a memory profile adds
+// browser arguments.
 //
 // TargetCompatibleBrowserVersion defaults to defaultTargetVersion: the SDK
 // implementation always reports a version there, and the runtime rejects the

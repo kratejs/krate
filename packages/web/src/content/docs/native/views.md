@@ -193,8 +193,7 @@ window gets `navigated` and `closed` events under the window's id.
 
 ### Measured
 
-Linux x86-64, WebKitGTK 2.54.0, Xvfb, `balanced` profile; PSS after settling
-(`TestGUIViewsMemory`):
+Linux x86-64, WebKitGTK 2.54.0, Xvfb, `balanced` profile; PSS after settling:
 
 | | web process | shell process |
 |--|--|--|

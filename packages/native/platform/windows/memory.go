@@ -12,8 +12,8 @@ import (
 //
 // Every switch and feature name below was checked against the Chromium
 // sources (content_switches.cc, gpu_switches.cc, blink common switches.cc,
-// content_features.cc) and Microsoft's WebView2 browser flag list; see
-// TestBrowserArgumentNames. Whether the runtime honors each one is unmeasured.
+// content_features.cc) and Microsoft's WebView2 browser flag list. Whether the
+// runtime honors each one is unmeasured.
 //
 // The arguments are applied to the WebView2 environment of every Windows CI
 // GUI test, and the CI native job measures the example on windows-latest

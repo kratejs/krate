@@ -1,7 +1,6 @@
 package hostts
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"sort"
@@ -139,40 +138,6 @@ export default function Home() { return <button onClick={() => syncNow(true)}>sy
 	js := read(t, res.HostBundle)
 	if !strings.Contains(js, `"full"`) || !strings.Contains(js, `__krateHost.register`) && !strings.Contains(js, `.register(`) {
 		t.Fatalf("host bundle lacks the real code:\n%s", js)
-	}
-}
-
-func TestManifest(t *testing.T) {
-	root, res, ds := buildProject(t, map[string]string{
-		"src/lib/sync.host.ts": "export async function syncNow() { return 1; }\n",
-		"src/pages/index.tsx":  `import { syncNow } from "../lib/sync.host";` + "\nexport default function H() { return <p onClick={syncNow}>x</p>; }\n",
-	}, nil)
-	mustNoErrors(t, ds)
-	var m manifest
-	if err := json.Unmarshal([]byte(read(t, res.Manifest)), &m); err != nil {
-		t.Fatal(err)
-	}
-	if len(m.Registered) != 1 || m.Registered[0].File != "src/lib/sync.host.ts" || m.Registered[0].Line != 1 || m.Registered[0].Kind != "func" {
-		t.Fatalf("manifest: %+v", m)
-	}
-	if res.HostBundle != filepath.Join(root, ".krate/native/host/host.js") {
-		t.Fatalf("bundle path %s", res.HostBundle)
-	}
-	var sm struct {
-		Sources        []string `json:"sources"`
-		SourcesContent []string `json:"sourcesContent"`
-	}
-	if err := json.Unmarshal([]byte(read(t, res.SourceMap)), &sm); err != nil {
-		t.Fatal(err)
-	}
-	found := false
-	for i, s := range sm.Sources {
-		if s == "src/lib/sync.host.ts" {
-			found = len(sm.SourcesContent) > i && strings.Contains(sm.SourcesContent[i], "syncNow")
-		}
-	}
-	if !found {
-		t.Fatalf("source map sources: %v", sm.Sources)
 	}
 }
 

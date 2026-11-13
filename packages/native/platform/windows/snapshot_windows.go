@@ -16,8 +16,8 @@ import (
 // IStream (a PNG, decoded here to BGRA), and a window parked far outside every
 // display, tool window, never activated.
 //
-// Not run on a real Windows machine by the author: the CI native job runs
-// TestGUIOffscreenSnapshot.
+// Not run on a real Windows machine by the author: the CI native job runs it
+// through the compiler's TestNativeE2EProcsGUI.
 
 var (
 	_ caps.ViewSnapshots    = (*App)(nil)

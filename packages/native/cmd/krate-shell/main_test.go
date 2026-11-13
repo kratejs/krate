@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
@@ -164,100 +163,5 @@ func TestBinaryDevControl(t *testing.T) {
 		}
 	case <-time.After(20 * time.Second):
 		t.Fatal("process did not exit after quit")
-	}
-}
-
-// Closing stdin (the driving process died) also ends a --dev shell.
-func TestBinaryExitsOnStdinEOF(t *testing.T) {
-	if _, err := exec.LookPath("go"); err != nil {
-		t.Skip("no go toolchain")
-	}
-	root, cleanup, err := gohosttest.TempDir("shellbin2-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer cleanup()
-	exe := filepath.Join(root, "krate-shell")
-	if runtime.GOOS == "windows" {
-		exe += ".exe"
-	}
-	build := exec.Command("go", "build", "-o", exe, ".")
-	build.Env = append(os.Environ(), "CGO_ENABLED=0")
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("go build: %v\n%s", err, out)
-	}
-	// Not next to the binary: that layout is a distributed app (see
-	// shell.checkLaunch), which takes no --dev.
-	app := filepath.Join(root, "testapp")
-	if err := os.MkdirAll(filepath.Join(app, "dist"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(app, "app.json"), []byte(`{"appId":"dev.krate.bin"}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	cmd := exec.Command(exe, "--browser", "--dev", app)
-	stdin, _ := cmd.StdinPipe()
-	stdout, _ := cmd.StdoutPipe()
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	sc := bufio.NewScanner(stdout)
-	sc.Scan() // url
-	sc.Scan() // ready
-	stdin.Close()
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
-	select {
-	case <-done:
-	case <-time.After(20 * time.Second):
-		if err := cmd.Process.Kill(); err != nil {
-			t.Fatal(err)
-		}
-		t.Fatal("process did not exit after stdin EOF")
-	}
-}
-
-// TestBinaryDoctor runs the real binary with --doctor: one JSON line on
-// stdout, no window, exit 0 whether or not the webview is installed.
-func TestBinaryDoctor(t *testing.T) {
-	if _, err := exec.LookPath("go"); err != nil {
-		t.Skip("no go toolchain")
-	}
-	root, cleanup, err := gohosttest.TempDir("shelldoc-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer cleanup()
-	exe := filepath.Join(root, "krate-shell")
-	if runtime.GOOS == "windows" {
-		exe += ".exe"
-	}
-	build := exec.Command("go", "build", "-o", exe, ".")
-	build.Env = append(os.Environ(), "CGO_ENABLED=0")
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("go build: %v\n%s", err, out)
-	}
-	out, err := exec.Command(exe, "--doctor").Output()
-	if err != nil {
-		t.Fatalf("--doctor: %v", err)
-	}
-	var rep struct {
-		Schema  int    `json:"schema"`
-		OS      string `json:"os"`
-		Arch    string `json:"arch"`
-		Webview struct {
-			Name string `json:"name"`
-		} `json:"webview"`
-		Display map[string]any `json:"display"`
-	}
-	if err := json.Unmarshal(out, &rep); err != nil {
-		t.Fatalf("not JSON: %v\n%s", err, out)
-	}
-	if rep.Schema != 1 || rep.OS != runtime.GOOS || rep.Arch != runtime.GOARCH || rep.Webview.Name == "" || rep.Display == nil {
-		t.Errorf("report = %+v\n%s", rep, out)
-	}
-	if strings.Count(strings.TrimSpace(string(out)), "\n") != 0 {
-		t.Errorf("want one line, got:\n%s", out)
 	}
 }

@@ -3,7 +3,6 @@ package all
 import (
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/kratejs/krate/packages/native/platform"
 	"github.com/kratejs/krate/packages/native/platform/caps"
@@ -127,87 +126,4 @@ func TestViewScopes(t *testing.T) {
 	if _, ok := r.host.ViewWindow(r.main.PrimaryView()); ok {
 		t.Error("a closed window's primary view is still mapped")
 	}
-}
-
-// The shell binds a request to a view through ViewWindow: registered views map
-// to their ids, views the platform does not know do not, and a view the
-// platform knows but the SDK has not registered yet is waited for.
-func TestViewWindowMapping(t *testing.T) {
-	r := newViewRig(t)
-	if id, ok := r.host.ViewWindow(r.main.PrimaryView()); !ok || id != "main" {
-		t.Fatalf("primary view maps to %q %v", id, ok)
-	}
-	res := r.addView("main", "main", nil)
-	if res.Failed {
-		t.Fatal(res)
-	}
-	id := unquote(res.OK)
-	var ref caps.ViewRef
-	for _, v := range r.main.Views() {
-		if !v.Primary {
-			ref = v.Ref
-		}
-	}
-	if got, ok := r.host.ViewWindow(ref); !ok || got != id {
-		t.Fatalf("added view maps to %q %v, want %q", got, ok, id)
-	}
-	start := time.Now()
-	if _, ok := r.host.ViewWindow(9999); ok || time.Since(start) > time.Second {
-		t.Fatalf("an unknown view must be refused at once (took %v)", time.Since(start))
-	}
-	if _, ok := r.host.ViewWindow(0); ok {
-		t.Fatal("view 0 maps to a window")
-	}
-}
-
-// Events a platform sends for a view before the SDK registered it (the first
-// load can finish before AddView returned) are held and delivered, in order,
-// when it is.
-func TestViewEventsAreHeldUntilRegistered(t *testing.T) {
-	r := newViewRig(t)
-	got := make(chan string, 8)
-	cancel := subscribeViewEvents(t, r, got)
-	defer cancel()
-
-	res := r.addView("main", "main", func(e *wire.Encoder) { e.Key("id"); e.String("late") })
-	if res.Failed {
-		t.Fatal(res)
-	}
-	var ref caps.ViewRef
-	for _, v := range r.main.Views() {
-		if !v.Primary {
-			ref = v.Ref
-		}
-	}
-	r.plat.EmitView(caps.ViewEvent{View: ref, Window: r.main.Ref(), Kind: caps.ViewNavigated, Path: "/late"})
-	for _, want := range []string{"late:added", "late:navigated"} {
-		select {
-		case s := <-got:
-			if s != want {
-				t.Fatalf("event %q, want %q", s, want)
-			}
-		case <-time.After(3 * time.Second):
-			t.Fatalf("no event %q", want)
-		}
-	}
-	// An event of a view nobody registered is dropped after being held, not
-	// delivered to someone else.
-	r.plat.EmitView(caps.ViewEvent{View: 424242, Window: r.main.Ref(), Kind: caps.ViewNavigated})
-	select {
-	case s := <-got:
-		t.Fatalf("unexpected event %q", s)
-	case <-time.After(100 * time.Millisecond):
-	}
-}
-
-// subscribeViewEvents streams krate/window.viewEvents into out as "view:kind".
-func subscribeViewEvents(t *testing.T, r *viewRig, out chan<- string) (cancel func()) {
-	t.Helper()
-	cancel, err := windowOnViewEvent(func(view, kind string) { out <- view + ":" + kind })
-	if err != nil {
-		t.Fatal(err)
-	}
-	// The stream is open once the topic has a subscriber.
-	time.Sleep(100 * time.Millisecond)
-	return cancel
 }

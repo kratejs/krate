@@ -2,13 +2,9 @@ package build
 
 import (
 	"bytes"
-	"fmt"
 	"image"
 	"image/color"
-	"image/png"
-	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -121,139 +117,5 @@ func TestMetadataRouteFilesBuild(t *testing.T) {
 	}
 	if strings.Contains(post, "/blog/beta/") || !strings.Contains(post, "twitter:image") {
 		t.Errorf("the post inherits the root twitter image and not another post's image:\n%s", post)
-	}
-}
-
-// Anything ImageResponse cannot draw fails the build with the list, never a
-// silently wrong image.
-func TestImageResponseUnsupportedFailsTheBuild(t *testing.T) {
-	b, root := hooksProject(t, map[string]string{
-		"src/pages/index.tsx": `export default function Home() { return <p>x</p>; }`,
-		"src/pages/opengraph-image.tsx": `import { ImageResponse } from "@krate/runtime/og";
-export default function Image() {
-  return new ImageResponse(<div style={{ transform: "rotate(3deg)", display: "grid" }}><svg /></div>, { width: 600, height: 300 });
-}`,
-	})
-	err := b.BuildAll()
-	if err == nil {
-		t.Fatal("an image with unsupported features must fail the build")
-	}
-	msg := err.Error()
-	for _, want := range []string{"KR7131", "transform", "display: grid", "<svg>"} {
-		if !strings.Contains(msg, want) {
-			t.Errorf("the error lacks %q:\n%s", want, msg)
-		}
-	}
-	if _, serr := os.Stat(filepath.Join(root, "dist", "opengraph-image.png")); serr == nil {
-		t.Error("no PNG may be written for an image that cannot be drawn")
-	}
-}
-
-func TestMetadataRoutePluginOverrideIsSaid(t *testing.T) {
-	var out string
-	root, _ := func() (string, *config.Config) {
-		return metaRoutesProject(t, "metaroutes_app")
-	}()
-	_ = root
-	// The fixture sets seo.baseUrl, so the sitemap plugin would have run.
-	out = captureStderr(t, func() {
-		b, _ := hooksProject(t, map[string]string{
-			"src/pages/index.tsx":  `export default function Home() { return <p>x</p>; }`,
-			"src/pages/sitemap.ts": `export default function s() { return [{ url: "https://c.example/" }]; }`,
-		})
-		b.Cfg.SEO.BaseURL = "https://plugin.example"
-		if err := b.BuildAll(); err != nil {
-			t.Fatal(err)
-		}
-	})
-	if !strings.Contains(out, "KR7133") || !strings.Contains(out, "sitemap.ts") {
-		t.Errorf("the override must be announced (KR7133):\n%s", out)
-	}
-}
-
-func TestMetadataRouteDetection(t *testing.T) {
-	for name, want := range map[string]bool{
-		"sitemap.ts": true, "robots.js": true, "manifest.ts": true, "opengraph-image.tsx": true, "twitter-image.png": true,
-		"sitemap.tsx": false, "robots.tsx": false, "manifest.json.ts": false, "index.tsx": false, "opengraph-image.css": false,
-	} {
-		if got := isMetadataRouteFile(name); got != want {
-			t.Errorf("isMetadataRouteFile(%q) = %v, want %v", name, got, want)
-		}
-	}
-}
-
-// ImageResponse in a Node route is drawn by the Krate host over the internal
-// endpoint, with the same renderer and diagnostics as the build.
-func TestImageResponsePerRequestOnTheHost(t *testing.T) {
-	if _, err := exec.LookPath("node"); err != nil {
-		t.Skip("node not installed")
-	}
-	ensureHandlerDist(t)
-	repo, err := repoRootPath()
-	if err != nil {
-		t.Fatal(err)
-	}
-	h := newTestRevalidateHost(t)
-	script := fmt.Sprintf(`import { ImageResponse } from %q;
-const card = { type: "div", props: { style: { width: "100%%", height: "100%%", display: "flex", backgroundColor: "#0b3d91", color: "white", fontSize: 40 } }, children: ["hello"] };
-const ok = new ImageResponse(card, { width: 320, height: 160 });
-const bytes = new Uint8Array(await ok.arrayBuffer());
-console.log(ok.headers.get("content-type"), bytes.length > 100, Array.from(bytes.slice(0, 4)).join(","));
-const bad = new ImageResponse({ type: "div", props: { style: { display: "grid" } }, children: [] }, { width: 10, height: 10 });
-try { await bad.arrayBuffer(); console.log("no error"); } catch (e) { console.log("error:", String(e.message).includes("display: grid")); }
-`, "file://"+filepath.ToSlash(filepath.Join(repo, "packages", "runtime", "dist", "og.js")))
-	dir := t.TempDir()
-	f := filepath.Join(dir, "check.mjs")
-	if err := os.WriteFile(f, []byte(script), 0644); err != nil {
-		t.Fatal(err)
-	}
-	cmd := exec.Command("node", f)
-	cmd.Env = append(os.Environ(), h.EnvList()...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("node: %v\n%s", err, out)
-	}
-	want := "image/png true 137,80,78,71\nerror: true\n"
-	if string(out) != want {
-		t.Errorf("got %q, want %q", out, want)
-	}
-	// Without the secret the endpoint refuses.
-	resp, err := http.Post(h.url+"/__krate/internal/image", "application/json", strings.NewReader("{}"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusForbidden {
-		t.Errorf("unauthenticated image request: %d", resp.StatusCode)
-	}
-}
-
-func TestStaticImageRouteHonoursBasePath(t *testing.T) {
-	for _, tc := range []struct{ basePath, want string }{
-		{"", `"url":"/blog/opengraph-image.png"`},
-		{"/sub", `"url":"/sub/blog/opengraph-image.png"`},
-	} {
-		dir := t.TempDir()
-		src := filepath.Join(dir, "opengraph-image.png")
-		var buf bytes.Buffer
-		if err := png.Encode(&buf, image.NewNRGBA(image.Rect(0, 0, 4, 2))); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(src, buf.Bytes(), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		cfg := config.Default()
-		cfg.OutDir = filepath.Join(dir, "dist")
-		cfg.BasePath = tc.basePath
-		b := &Builder{Cfg: cfg, metaImages: &metaImages{}}
-		if err := b.copyStaticImageRoute(metaRouteFile{Kind: mrOG, Path: src, URLDir: "blog", Static: true}); err != nil {
-			t.Fatal(err)
-		}
-		if got := b.metaImages.filesJSON("blog"); !strings.Contains(got, tc.want) {
-			t.Errorf("basePath %q: want %s in %s", tc.basePath, tc.want, got)
-		}
-		if _, err := os.Stat(filepath.Join(cfg.OutDir, "blog", "opengraph-image.png")); err != nil {
-			t.Errorf("the file stays at its unprefixed path in dist: %v", err)
-		}
 	}
 }

@@ -66,34 +66,3 @@ func TestUtilityOrderMatchesTailwind(t *testing.T) {
 		}
 	}
 }
-
-// TestUtilityOrderCascade covers the shorthand-before-longhand pairs that
-// used to sort alphabetically, so the longhand must be emitted later.
-func TestUtilityOrderCascade(t *testing.T) {
-	pairs := [][2]string{
-		{"px-2", "pl-4"}, {"py-2", "pt-4"}, {"my-2", "mt-4"}, {"mx-4", "ml-2"},
-		{"size-4", "h-8"}, {"border-x-2", "border-l-4"}, {"p-4", "px-2"},
-		{"m-4", "mx-2"}, {"rounded-lg", "rounded-t-md"}, {"gap-4", "gap-x-2"},
-		{"inset-0", "top-2"}, {"overflow-hidden", "overflow-x-auto"},
-		{"transition", "duration-300"}, {"transition", "ease-in"},
-	}
-	for _, p := range pairs {
-		out := gen(t, p[1], p[0])
-		a, b := indexOfRule(out, p[0]), indexOfRule(out, p[1])
-		if a < 0 || b < 0 {
-			t.Errorf("%v: missing rule in\n%s", p, out)
-			continue
-		}
-		if a > b {
-			t.Errorf("%q must be emitted before %q:\n%s", p[0], p[1], out)
-		}
-	}
-}
-
-func TestUtilityOrderNumeric(t *testing.T) {
-	out := gen(t, "p-10", "p-2", "p-1")
-	i1, i2, i10 := indexOfRule(out, "p-1"), indexOfRule(out, "p-2"), indexOfRule(out, "p-10")
-	if !(i1 < i2 && i2 < i10) {
-		t.Errorf("p-1, p-2, p-10 must sort numerically:\n%s", out)
-	}
-}

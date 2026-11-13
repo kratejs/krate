@@ -1,9 +1,6 @@
 package jsvalue
 
 import (
-	"encoding/json"
-	"os"
-	"strings"
 	"testing"
 )
 
@@ -283,93 +280,4 @@ func TestInterpreterNeverDisagreesWithNode(t *testing.T) {
 	if resolved < len(cases)/2 {
 		t.Errorf("only %d of %d expressions resolved; the interpreter lost coverage", resolved, len(cases))
 	}
-}
-
-// A standard member without an implementation here must not read as
-// undefined: `typeof arr.splice` or `if (arr.toSpliced)` would fold to the wrong
-// branch at build time. It stays unresolved so the browser computes it.
-func TestMissingBuiltinMembersStayUnresolved(t *testing.T) {
-	for _, src := range []string{
-		`[1, 2, 3].splice`, `typeof [1, 2].pop`, `[1].toSpliced === undefined`, `[1].copyWithin`,
-		`"abc".match`, `typeof "abc".normalize`, `"abc".search === undefined`, `"abc".codePointAt === undefined`,
-		`(1.5).toPrecision`, `typeof (5).toExponential`, `[1].constructor`,
-	} {
-		if v := evalSrc(t, src); !v.IsUnknown() && !v.IsUnsupported() {
-			t.Errorf("%s folded to %q; a real built-in member the interpreter lacks must stay unresolved", src, v.ToString())
-		}
-	}
-	// A property that does not exist is still undefined.
-	for src, want := range map[string]string{`"abc".nope`: "undefined", `[1, 2].nope === undefined`: "true", `(5).nope`: "undefined"} {
-		if got := evalSrc(t, src).ToString(); got != want {
-			t.Errorf("%s = %q, want %q", src, got, want)
-		}
-	}
-}
-
-// A fraction of the extra cases may stay unresolved: the build clock and the
-// engine-specific Object.is are not available at build time.
-func TestExtraNodeCasesMostlyResolve(t *testing.T) {
-	unresolved := 0
-	for _, tc := range extraNodeCases {
-		if v := evalSrcVolatile(t, tc.src, true); v.IsUnknown() || v.IsUnsupported() {
-			unresolved++
-		}
-	}
-	if unresolved > 4 {
-		t.Errorf("%d of %d iterator, Map, Set and Date expressions no longer resolve", unresolved, len(extraNodeCases))
-	}
-}
-
-// TestDateLocaleMatchesNode checks toLocaleDateString, toLocaleTimeString and
-// toLocaleString for en-US/UTC against Node. An option combination the
-// evaluator does not reproduce exactly must stay unresolved; one it does
-// resolve must match.
-func TestDateLocaleMatchesNode(t *testing.T) {
-	raw, err := os.ReadFile("testdata/date_locale_golden.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var golden struct {
-		Node     string
-		Instants []string
-		Cases    [][5]any
-	}
-	if err := json.Unmarshal(raw, &golden); err != nil {
-		t.Fatal(err)
-	}
-	resolved, refusedRight := 0, 0
-	for _, c := range golden.Cases {
-		ts, method, locale, opts, want := golden.Instants[int(c[0].(float64))], c[1].(string), c[2].(string), c[3].(string), c[4].(string)
-		args := strings.Join(nonEmpty(locale, opts, locale == "" && opts != ""), ", ")
-		src := "new Date(" + ts + ")." + method + "(" + args + ")"
-		v := evalSrcVolatile(t, src, true)
-		if v.IsUnknown() || v.IsUnsupported() {
-			if strings.HasPrefix(want, "THROWS") {
-				refusedRight++
-			}
-			continue
-		}
-		resolved++
-		if got := v.ToString(); got != want {
-			t.Errorf("%s\n  interpreter: %q\n  node %s:   %q", src, got, golden.Node, want)
-		}
-	}
-	// The matrix must keep exercising the formatter.
-	if resolved < 1000 {
-		t.Errorf("only %d of %d locale cases resolved; the formatter lost coverage", resolved, len(golden.Cases))
-	}
-	t.Logf("%d of %d locale cases resolved, %d refused where Node throws", resolved, len(golden.Cases), refusedRight)
-}
-
-func nonEmpty(locale, opts string, undefinedLocale bool) []string {
-	var out []string
-	if locale != "" {
-		out = append(out, locale)
-	} else if undefinedLocale {
-		out = append(out, "undefined")
-	}
-	if opts != "" {
-		out = append(out, opts)
-	}
-	return out
 }

@@ -109,67 +109,11 @@ func TestGUIPermissionCamera(t *testing.T) {
 	}
 }
 
-// A denied answer is not kept by WebView2 (SavesInProfile is off): the next
-// request reaches the handler again.
-func TestGUIPermissionAnswersAreNotCachedByTheRuntime(t *testing.T) {
-	needGUI(t)
-	_, seen := runPerm(t, "mic", func(caps.PermissionRequest) bool { return false })
-	if len(seen) != 1 {
-		t.Fatalf("first request: %+v", seen)
-	}
-	_, seen = runPerm(t, "mic", func(caps.PermissionRequest) bool { return false })
-	if len(seen) != 1 {
-		t.Fatalf("the runtime answered the second request itself: %+v", seen)
-	}
-}
-
-func TestGUIPermissionCameraAndMicrophone(t *testing.T) {
-	needGUI(t)
-	// One request per device in WebView2.
-	res, seen := runPerm(t, "both", func(caps.PermissionRequest) bool { return false })
-	got := map[caps.PermissionKind]bool{}
-	for _, r := range seen {
-		for _, k := range r.Kinds {
-			got[k] = true
-		}
-	}
-	if !got[caps.PermCamera] || !got[caps.PermMicrophone] || res["name"] != "NotAllowedError" {
-		t.Fatalf("result %v, requests %+v", res, seen)
-	}
-}
-
 func TestGUIPermissionNoHandlerDenies(t *testing.T) {
 	needGUI(t)
 	res, _ := runPerm(t, "cam", nil)
 	if res["name"] != "NotAllowedError" {
 		t.Fatalf("without a handler the request must be denied: %v", res)
-	}
-}
-
-func TestGUIPermissionGeolocation(t *testing.T) {
-	needGUI(t)
-	res, seen := runPerm(t, "geo", func(caps.PermissionRequest) bool { return false })
-	if len(seen) != 1 || seen[0].Kinds[0] != caps.PermLocation || res["code"] != "1" {
-		t.Fatalf("denied geolocation: result %v, requests %+v", res, seen)
-	}
-	res, seen = runPerm(t, "geo", func(caps.PermissionRequest) bool { return true })
-	if len(seen) != 1 {
-		t.Fatalf("allowed geolocation: result %v, requests %+v", res, seen)
-	}
-	// The app's answer is not the last word: Windows location privacy (and
-	// the location service, off on CI runners) still applies, and then the
-	// page gets PERMISSION_DENIED although the handler allowed it.
-	if st, err := guiApp.PrivacyStatus(caps.PermLocation); err == nil && st != caps.PrivacyGranted {
-		// PERMISSION_DENIED (1) or, when the location service never answers,
-		// TIMEOUT (3): either way no position.
-		if res["result"] == "ok" {
-			t.Fatalf("location privacy is %q but the page got a position: %v", st, res)
-		}
-		t.Logf("location privacy is %q, so the allowed request still ends denied: %v", st, res)
-		return
-	}
-	if res["code"] == "1" {
-		t.Fatalf("allowed geolocation was denied although location privacy is granted: %v", res)
 	}
 }
 

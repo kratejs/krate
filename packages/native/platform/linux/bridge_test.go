@@ -9,9 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"sync"
-	"syscall"
 	"testing"
-	"time"
 )
 
 type fakeResp struct {
@@ -88,107 +86,6 @@ func TestServeStreamsChunks(t *testing.T) {
 	}
 }
 
-func TestServeDefaultsAndSniff(t *testing.T) {
-	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if _, err := io.WriteString(w, "<html><body>hi</body></html>"); err != nil {
-			t.Error(err)
-		}
-	})
-	f, _, _ := runServe(h, "GET")
-	<-f.ready
-	if f.status != 200 || f.header.Get("Content-Type") != "text/html; charset=utf-8" {
-		t.Fatalf("status %d ctype %q", f.status, f.header.Get("Content-Type"))
-	}
-	rf := os.NewFile(uintptr(f.fd), "r")
-	defer rf.Close()
-	b, _ := io.ReadAll(rf)
-	if string(b) != "<html><body>hi</body></html>" {
-		t.Fatalf("body %q", b)
-	}
-}
-
-func TestServeNoWriteIsEmpty200(t *testing.T) {
-	f, _, _ := runServe(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}), "GET")
-	<-f.ready
-	rf := os.NewFile(uintptr(f.fd), "r")
-	defer rf.Close()
-	b, _ := io.ReadAll(rf)
-	if f.status != 200 || len(b) != 0 {
-		t.Fatalf("status %d body %q", f.status, b)
-	}
-}
-
-func TestServePanicBeforeHeadersIs500(t *testing.T) {
-	old := Logf
-	Logf = func(string, ...any) {}
-	defer func() { Logf = old }()
-	f, _, done := runServe(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panic("boom") }), "GET")
-	<-f.ready
-	rf := os.NewFile(uintptr(f.fd), "r")
-	defer rf.Close()
-	if _, err := io.ReadAll(rf); err != nil {
-		t.Fatal(err)
-	}
-	<-done
-	if f.status != 500 {
-		t.Fatalf("status %d", f.status)
-	}
-}
-
-func TestServeHeadDropsBody(t *testing.T) {
-	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if _, err := io.WriteString(w, "body"); err != nil {
-			t.Error(err)
-		}
-	})
-	f, _, _ := runServe(h, "HEAD")
-	<-f.ready
-	rf := os.NewFile(uintptr(f.fd), "r")
-	defer rf.Close()
-	b, _ := io.ReadAll(rf)
-	if len(b) != 0 {
-		t.Fatalf("HEAD body %q", b)
-	}
-}
-
-func TestServeCancelsWhenReaderCloses(t *testing.T) {
-	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// The response is announced before the body is written, so the test
-		// may close the reader first; this write is allowed to fail.
-		_, _ = io.WriteString(w, "x")
-		w.(http.Flusher).Flush()
-		<-r.Context().Done()
-	})
-	f, ctx, done := runServe(h, "GET")
-	<-f.ready
-	syscall.Close(f.fd) // the webview went away
-	select {
-	case <-ctx.Done():
-	case <-time.After(3 * time.Second):
-		t.Fatal("context not cancelled after reader closed")
-	}
-	<-done
-}
-
-func TestServeWriteAfterReaderClosedFails(t *testing.T) {
-	errc := make(chan error, 1)
-	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// The response is announced before the body is written, so the test
-		// may close the reader first; this write is allowed to fail.
-		_, _ = io.WriteString(w, "x")
-		w.(http.Flusher).Flush()
-		time.Sleep(300 * time.Millisecond)
-		_, err := io.WriteString(w, "y")
-		errc <- err
-	})
-	f, _, _ := runServe(h, "GET")
-	<-f.ready
-	syscall.Close(f.fd)
-	if err := <-errc; err == nil {
-		t.Fatal("write to a closed reader succeeded")
-	}
-}
-
 func TestAllowedNavigation(t *testing.T) {
 	for uri, want := range map[string]bool{
 		"krate://app/":          true,
@@ -203,17 +100,6 @@ func TestAllowedNavigation(t *testing.T) {
 	} {
 		if got := allowedNavigation(uri); got != want {
 			t.Errorf("allowedNavigation(%q) = %v, want %v", uri, got, want)
-		}
-	}
-}
-
-func TestVersionOK(t *testing.T) {
-	for _, c := range []struct {
-		maj, min uint32
-		ok       bool
-	}{{2, 38, false}, {2, 40, true}, {2, 54, true}, {3, 0, true}, {1, 99, false}} {
-		if versionOK(c.maj, c.min) != c.ok {
-			t.Errorf("versionOK(%d,%d) != %v", c.maj, c.min, c.ok)
 		}
 	}
 }

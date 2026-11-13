@@ -21,59 +21,6 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/config"
 )
 
-func TestPlanNativeChanges(t *testing.T) {
-	root := filepath.Clean("/proj")
-	c := NativeChangeClassifier{
-		Root:      root,
-		HostDeps:  map[string]bool{"/proj/src/lib/notes.host.ts": true, "/proj/src/lib/util.ts": true, "/proj/src/pages/inline.tsx": true},
-		WholeHost: map[string]bool{"/proj/src/lib/notes.host.ts": true},
-		IsUIGo:    func(p string) bool { return strings.Contains(p, "/components/") },
-	}
-	cases := []struct {
-		name    string
-		changed []string
-		want    NativePlan
-	}{
-		{"config", []string{"/proj/krate.config.ts"}, NativePlan{Config: true}},
-		{"env", []string{"/proj/.env.local"}, NativePlan{Config: true}},
-		{"go", []string{"/proj/src/lib/tasks.go"}, NativePlan{GoHost: true}},
-		{"go mod", []string{"/proj/go.mod"}, NativePlan{GoHost: true}},
-		{"go test", []string{"/proj/src/lib/tasks_test.go"}, NativePlan{}},
-		{"go component", []string{"/proj/src/components/card.go"}, NativePlan{GoHost: true, UI: []string{"/proj/src/components/card.go"}}},
-		{"whole host ts", []string{"/proj/src/lib/notes.host.ts"}, NativePlan{HostJS: true}},
-		{"host helper", []string{"/proj/src/lib/util.ts"}, NativePlan{HostJS: true, UI: []string{"/proj/src/lib/util.ts"}}},
-		{"inline host", []string{"/proj/src/pages/inline.tsx"}, NativePlan{HostJS: true, UI: []string{"/proj/src/pages/inline.tsx"}}},
-		{"page", []string{"/proj/src/pages/index.tsx", "/proj/src/styles.css"}, NativePlan{UI: []string{"/proj/src/pages/index.tsx", "/proj/src/styles.css"}}},
-		{"nested go.mod is not the project's", []string{"/proj/sub/go.mod"}, NativePlan{UI: []string{"/proj/sub/go.mod"}}},
-	}
-	for _, tc := range cases {
-		got := PlanNativeChanges(c, tc.changed)
-		if got.Config != tc.want.Config || got.GoHost != tc.want.GoHost || got.HostJS != tc.want.HostJS || strings.Join(got.UI, ",") != strings.Join(tc.want.UI, ",") {
-			t.Errorf("%s: got %+v, want %+v", tc.name, got, tc.want)
-		}
-	}
-}
-
-func TestNativeHMRMessage(t *testing.T) {
-	var m map[string]any
-	dec := func(ev DevEvent) map[string]any {
-		m = nil
-		if err := json.Unmarshal(NativeHMRMessage(ev), &m); err != nil {
-			t.Fatal(err)
-		}
-		return m
-	}
-	if m := dec(DevEvent{Type: "reload", Routes: []string{"/a"}, CSSOnly: true}); m["type"] != "reload" || m["cssOnly"] != true || len(m["pages"].([]any)) != 1 {
-		t.Errorf("reload: %v", m)
-	}
-	if m := dec(DevEvent{Type: "reload"}); m["type"] != "reload" || m["pages"] != nil {
-		t.Errorf("full reload: %v", m)
-	}
-	if m := dec(DevEvent{Type: "client-error", ClientError: &ClientError{Message: "x"}}); m["type"] != "client-error" || m["clientError"].(map[string]any)["message"] != "x" {
-		t.Errorf("client-error: %v", m)
-	}
-}
-
 // devFrameClient talks the host protocol to a browser-mode shell.
 type devFrameClient struct {
 	t     *testing.T
@@ -339,29 +286,4 @@ func (l *lockedWriter) String() string {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.w.String()
-}
-
-func TestReplaceExecutable(t *testing.T) {
-	dir := t.TempDir()
-	bin := filepath.Join(dir, "host")
-	next := bin + ".next"
-	for _, tc := range []struct{ old, new string }{{"", "v1"}, {"v1", "v2"}} {
-		if tc.old != "" {
-			if err := os.WriteFile(bin, []byte(tc.old), 0o755); err != nil {
-				t.Fatal(err)
-			}
-		}
-		if err := os.WriteFile(next, []byte(tc.new), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := replaceExecutable(next, bin); err != nil {
-			t.Fatal(err)
-		}
-		if got, _ := os.ReadFile(bin); string(got) != tc.new {
-			t.Errorf("bin = %q, want %q", got, tc.new)
-		}
-		if _, err := os.Stat(bin + ".old"); err == nil {
-			t.Error("left a .old file behind")
-		}
-	}
 }

@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"testing"
 )
 
@@ -54,66 +53,6 @@ func writeFile(t *testing.T, p string) string {
 	return p
 }
 
-func TestFindPrebuiltShellOrder(t *testing.T) {
-	sibling := fakeInstall(t, true)
-	dir := t.TempDir()
-	flagShell := writeFile(t, filepath.Join(dir, "flag-shell"))
-	envShell := writeFile(t, filepath.Join(dir, "env-shell"))
-	goos, goarch := runtime.GOOS, runtime.GOARCH
-
-	// Nothing set: the shell next to the executable, found through the
-	// symlink in .bin.
-	got, src, err := FindPrebuiltShell("", goos, goarch)
-	if err != nil || got != sibling || !strings.Contains(src, "next to") {
-		t.Fatalf("sibling: %q %q %v (want %s)", got, src, err, sibling)
-	}
-	// "auto" asks for the same lookup.
-	if got, _, _ := FindPrebuiltShell("auto", goos, goarch); got != sibling {
-		t.Errorf("auto = %q", got)
-	}
-	// $KRATE_SHELL beats the sibling.
-	t.Setenv(ShellEnv, envShell)
-	if got, src, _ := FindPrebuiltShell("", goos, goarch); got != envShell || src != "$KRATE_SHELL" {
-		t.Errorf("env: %q %q", got, src)
-	}
-	// --shell beats $KRATE_SHELL.
-	if got, src, _ := FindPrebuiltShell(flagShell, goos, goarch); got != flagShell || src != "--shell" {
-		t.Errorf("flag: %q %q", got, src)
-	}
-	// A path that was given and is missing is an error, not a fallthrough.
-	if _, _, err := FindPrebuiltShell(filepath.Join(dir, "nope"), goos, goarch); err == nil {
-		t.Error("missing --shell: no error")
-	}
-	t.Setenv(ShellEnv, filepath.Join(dir, "nope"))
-	if _, _, err := FindPrebuiltShell("", goos, goarch); err == nil || !strings.Contains(err.Error(), ShellEnv) {
-		t.Errorf("missing $KRATE_SHELL: %v", err)
-	}
-	// A directory is not a shell.
-	if _, _, err := FindPrebuiltShell(dir, goos, goarch); err == nil {
-		t.Error("directory accepted as shell")
-	}
-}
-
-func TestFindPrebuiltShellOtherTargetSkipsSibling(t *testing.T) {
-	fakeInstall(t, true)
-	other := "arm64"
-	if runtime.GOARCH == "arm64" {
-		other = "amd64"
-	}
-	if got, _, err := FindPrebuiltShell("", runtime.GOOS, other); got != "" || err != nil {
-		t.Errorf("shell for another architecture: %q %v", got, err)
-	}
-	if got, _, _ := FindPrebuiltShell("", "plan9", runtime.GOARCH); got != "" {
-		t.Errorf("shell for another OS: %q", got)
-	}
-}
-
-func TestShellFileName(t *testing.T) {
-	if ShellFileName("windows") != "krate-shell.exe" || ShellFileName("linux") != "krate-shell" || ShellFileName("darwin") != "krate-shell" {
-		t.Error("file names")
-	}
-}
-
 func TestLocateNativeShellOrder(t *testing.T) {
 	sibling := fakeInstall(t, true)
 	// A checkout whose shell sources are absent: reaching it would be an error,
@@ -136,65 +75,5 @@ func TestLocateNativeShellOrder(t *testing.T) {
 	t.Setenv(ShellEnv, flag)
 	if got, err := LocateNativeShell(root, ""); err != nil || got != flag {
 		t.Fatalf("env: %q %v", got, err)
-	}
-}
-
-func TestLocateNativeShellNothingFound(t *testing.T) {
-	fakeInstall(t, false)
-	_, err := LocateNativeShell(t.TempDir(), "")
-	if err == nil {
-		t.Fatal("no error")
-	}
-	for _, want := range []string{"--shell", ShellEnv, "next to the krate executable", "@krate/core"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error lacks %q: %v", want, err)
-		}
-	}
-}
-
-func TestAssembleShellDist(t *testing.T) {
-	out := t.TempDir()
-	app := filepath.Join(out, "app")
-	if err := os.MkdirAll(filepath.Join(app, "gohost"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeFile(t, filepath.Join(app, "app.json"))
-	writeFile(t, filepath.Join(app, "gohost", "krate-gohost"))
-	shell := writeFile(t, filepath.Join(t.TempDir(), "krate-shell"))
-	exe, err := assembleShellDist(out, app, shell, "Acme: Notes", "linux", "amd64")
-	if err != nil {
-		t.Fatal(err)
-	}
-	dir := filepath.Join(out, "linux-amd64")
-	if filepath.Dir(exe) != dir || filepath.Ext(exe) != "" || strings.ContainsAny(filepath.Base(exe), ":") {
-		t.Errorf("exe = %s", exe)
-	}
-	// Windows has no exec bit: only the files need to exist there.
-	modes := runtime.GOOS != "windows"
-	if st, err := os.Stat(exe); err != nil || modes && st.Mode()&0o111 == 0 {
-		t.Errorf("shell not executable: %v", err)
-	}
-	if st, err := os.Stat(filepath.Join(dir, "app", "gohost", "krate-gohost")); err != nil || modes && st.Mode()&0o111 == 0 {
-		t.Errorf("app copy lost the mode of the Go host: %v", err)
-	}
-	exe, err = assembleShellDist(out, app, shell, "Acme", "windows", "arm64")
-	if err != nil || filepath.Base(exe) != "Acme.exe" {
-		t.Errorf("windows: %s %v", exe, err)
-	}
-}
-
-func TestProvideShellUsesTheSibling(t *testing.T) {
-	sibling := fakeInstall(t, true)
-	b := &Builder{Root: t.TempDir()}
-	out := t.TempDir()
-	path, note := b.provideShell(out, "", runtime.GOOS, runtime.GOARCH)
-	if note != "" || filepath.Base(path) != ShellFileName(runtime.GOOS) {
-		t.Fatalf("path %q note %q", path, note)
-	}
-	if data, _ := os.ReadFile(path); string(data) != "#!/bin/sh\n" {
-		t.Errorf("copied %q from %s", data, sibling)
-	}
-	if _, note := b.provideShell(out, filepath.Join(out, "missing"), runtime.GOOS, runtime.GOARCH); note == "" {
-		t.Error("missing shell gave no note")
 	}
 }

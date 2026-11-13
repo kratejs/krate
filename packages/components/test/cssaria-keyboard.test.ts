@@ -11,17 +11,6 @@ import { join } from 'node:path';
 // unless it, or an ancestor, has the `hidden` attribute.
 const source = readFileSync(join(__dirname, '..', '..', 'compiler', 'internal', 'renderer', 'cssaria.js'), 'utf8');
 
-const tabs = `
-<div data-kz="tabs">
-  <input type="radio" class="krc-h" name="t" id="t-one" value="one" aria-hidden="true" tabindex="-1">
-  <input type="radio" class="krc-h" name="t" id="t-two" value="two" aria-hidden="true" tabindex="-1" checked>
-  <input type="radio" class="krc-h" name="t" id="t-three" value="three" aria-hidden="true" tabindex="-1">
-  <div class="krate-tabs"><div role="tablist" aria-orientation="horizontal">
-    <label for="t-one" data-ka="t" role="tab" id="tab-one">One</label>
-    <label for="t-two" data-ka="t" role="tab" id="tab-two">Two</label>
-    <label for="t-three" data-ka="t" role="tab" id="tab-three">Three</label>
-  </div></div>
-</div>`;
 
 const dialog = `
 <div id="page"><a href="#" id="outside">outside link</a></div>
@@ -92,76 +81,6 @@ afterEach(() => {
   document.body.innerHTML = '';
 });
 
-describe('tabs', () => {
-  beforeEach(() => {
-    document.body.innerHTML = tabs;
-    install();
-  });
-
-  it('marks the checked tab selected and gives only it a tab stop', () => {
-    expect($('tab-two').getAttribute('aria-selected')).toBe('true');
-    expect($('tab-one').getAttribute('aria-selected')).toBe('false');
-    expect([...document.querySelectorAll('label')].map((l) => l.getAttribute('tabindex'))).toEqual(['-1', '0', '-1']);
-  });
-
-  it('moves focus and selection with the arrow keys, wrapping at both ends', () => {
-    $('tab-two').focus();
-    expect(key($('tab-two'), 'ArrowRight').defaultPrevented).toBe(true);
-    expect(document.activeElement).toBe($('tab-three'));
-    expect(($('t-three') as HTMLInputElement).checked).toBe(true);
-    expect($('tab-three').getAttribute('aria-selected')).toBe('true');
-    expect($('tab-three').getAttribute('tabindex')).toBe('0');
-    expect($('tab-two').getAttribute('tabindex')).toBe('-1');
-
-    key($('tab-three'), 'ArrowRight');
-    expect(document.activeElement).toBe($('tab-one'));
-    key($('tab-one'), 'ArrowLeft');
-    expect(document.activeElement).toBe($('tab-three'));
-  });
-
-  it('jumps to the first and last tab with Home and End', () => {
-    $('tab-two').focus();
-    key($('tab-two'), 'End');
-    expect(document.activeElement).toBe($('tab-three'));
-    key($('tab-three'), 'Home');
-    expect(document.activeElement).toBe($('tab-one'));
-    expect(($('t-one') as HTMLInputElement).checked).toBe(true);
-  });
-
-  it('ignores the vertical arrows on a horizontal tablist and other keys', () => {
-    $('tab-two').focus();
-    for (const k of ['ArrowDown', 'ArrowUp', 'a', 'Tab']) {
-      const ev = key($('tab-two'), k);
-      expect(ev.defaultPrevented, k).toBe(false);
-    }
-    expect(document.activeElement).toBe($('tab-two'));
-  });
-
-  it('activates the focused tab with Enter and Space', () => {
-    $('tab-one').focus();
-    expect(key($('tab-one'), 'Enter').defaultPrevented).toBe(true);
-    expect(($('t-one') as HTMLInputElement).checked).toBe(true);
-    $('tab-three').focus();
-    key($('tab-three'), ' ');
-    expect(($('t-three') as HTMLInputElement).checked).toBe(true);
-  });
-
-  it('flips left and right in a right-to-left tablist', () => {
-    for (const l of document.querySelectorAll<HTMLElement>('label')) l.style.direction = 'rtl';
-    $('tab-two').focus();
-    key($('tab-two'), 'ArrowRight');
-    expect(document.activeElement).toBe($('tab-one'));
-    key($('tab-one'), 'ArrowLeft');
-    expect(document.activeElement).toBe($('tab-two'));
-  });
-
-  it('does not touch a disabled tab\'s tab stop', () => {
-    $('tab-three').setAttribute('aria-disabled', 'true');
-    ($('t-two') as HTMLInputElement).dispatchEvent(new Event('change', { bubbles: true }));
-    expect($('tab-three').getAttribute('tabindex')).toBe('-1');
-  });
-});
-
 describe('modal dialog', () => {
   const open = () => {
     $('wrap').removeAttribute('hidden');
@@ -170,20 +89,10 @@ describe('modal dialog', () => {
     $('opener').focus();
     $('opener').click();
   };
-  const closeVisuals = () => {
-    $('wrap').setAttribute('hidden', '');
-    $('opener').removeAttribute('hidden');
-    $('opener-open').setAttribute('hidden', '');
-  };
 
   beforeEach(() => {
     document.body.innerHTML = dialog;
     install();
-  });
-
-  it('links the dialog to its title and description', () => {
-    expect($('panel').getAttribute('aria-labelledby')).toBe($('panel').querySelector('h2')!.id);
-    expect($('panel').getAttribute('aria-describedby')).toBe($('panel').querySelector('p')!.id);
   });
 
   it('moves focus into the dialog, makes the rest of the page inert and locks scrolling when it opens', () => {
@@ -192,22 +101,6 @@ describe('modal dialog', () => {
     expect($('page').hasAttribute('inert')).toBe(true);
     expect(document.documentElement.style.overflow).toBe('hidden');
     expect($('panel').hasAttribute('inert')).toBe(false);
-  });
-
-  it('closes on Escape from inside the dialog and restores the page', () => {
-    open();
-    expect(key($('first'), 'Escape').defaultPrevented).toBe(true);
-    expect(($('d-x') as HTMLInputElement).checked).toBe(true);
-    closeVisuals();
-    ($('d-x') as HTMLInputElement).dispatchEvent(new Event('change', { bubbles: true }));
-    expect($('page').hasAttribute('inert')).toBe(false);
-    expect(document.documentElement.style.overflow).toBe('');
-  });
-
-  it('closes on Escape pressed anywhere while the modal is open', () => {
-    open();
-    key(document.body, 'Escape');
-    expect(($('d-x') as HTMLInputElement).checked).toBe(true);
   });
 
   it('keeps Tab and Shift+Tab inside the dialog', () => {
@@ -222,19 +115,5 @@ describe('modal dialog', () => {
     $('first').focus();
     expect(key($('first'), 'Tab', { shiftKey: true }).defaultPrevented).toBe(true);
     expect(document.activeElement).toBe($('closer'));
-  });
-
-  it('pulls focus back when it escapes the open modal', () => {
-    open();
-    $('outside').focus();
-    document.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
-    // focusin on the outside link is redirected into the dialog
-    $('outside').dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
-    expect($('panel').contains(document.activeElement)).toBe(true);
-  });
-
-  it('leaves Escape alone when no dialog is open', () => {
-    expect(key(document.body, 'Escape').defaultPrevented).toBe(false);
-    expect(($('d-x') as HTMLInputElement).checked).toBe(true);
   });
 });

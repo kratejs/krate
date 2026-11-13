@@ -191,7 +191,7 @@ With `--dev` the app origin serves, besides the host protocol:
   `ProcessInfo` capability (`platform/caps`): descendants named `WebKit*Process`
   on Linux, private `WKWebView` selectors on macOS and WebView2's
   `GetProcessInfos` on Windows. Where a process cannot be named, `notes` says so
-  and the role is absent. On macOS and Windows, TestGUIMemory and the CI memory report run it.
+  and the role is absent. On macOS and Windows, the memory report of the full CI runs uses it.
 - `POST /__krate/dev/client-error` takes the dev overlay's error reports (uncaught
   errors, unhandled rejections, `console.error`, failed script loads) and logs
   them to stderr as `[webview] <window or view id>: <message>` followed by the

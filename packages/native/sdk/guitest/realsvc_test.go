@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/kratejs/krate/packages/native/internal/dbus/dbustest"
-	"github.com/kratejs/krate/packages/native/sdk/internal/dbusiface"
 	"github.com/kratejs/krate/packages/native/sdk/internal/sessionbus"
 )
 
@@ -39,16 +38,6 @@ func privateBus(t *testing.T) string {
 	sessionbus.Reset()
 	t.Cleanup(sessionbus.Reset)
 	return addr
-}
-
-func busClient(t *testing.T, addr string) *dbusiface.Client {
-	t.Helper()
-	c, err := dbusiface.Connect(addr)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { c.Close() })
-	return c
 }
 
 // daemon is a real desktop service process started by a test.

@@ -282,7 +282,7 @@ a closed panel costs nothing.
 > **Run in CI, savings not asserted.** The levers were written on Linux from
 > Apple's WebKit headers and the WebView2 headers and documentation. The CI
 > native job opens windows with them on macOS and Windows runners (the platform
-> GUI tests and `TestGUIMemory`), and its `Native memory report` step runs
+> GUI tests), and on full runs its `Native memory report` step runs
 > `krate native profile --memory` on `examples/native-tasks` for the `balanced`
 > and `performance` profiles and uploads `report.json`. No test asserts what a
 > lever saves, and the macOS and Windows budgets are planned (the `Native memory

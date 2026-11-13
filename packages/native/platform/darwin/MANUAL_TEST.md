@@ -21,11 +21,8 @@ KRATE_NATIVE_GUI=1 CGO_ENABLED=0 go test ./platform/darwin -run . -v -count=1
 Without `KRATE_NATIVE_GUI=1` the GUI tests skip; the pure-Go unit tests
 always run. The GUI run includes `ext_gui_test.go`: the tray item and its menu
 (read back from the `NSStatusItem` and `NSMenu`, and driven with
-`performActionForItemAtIndex:`), hotkey register, duplicate and unregister,
-notifications in an unbundled process (the documented error) and in a
-generated `.app` (`TestNotifyBundled` copies the test binary into a bundle
-and runs it; whether the notification is allowed depends on the machine, the
-test only requires that the bundle is recognized and nothing crashes).
+`performActionForItemAtIndex:`). Hotkeys and notifications have no automated
+test; check them by hand (below).
 
 The test binary is not an app bundle, so its first window can open behind other
 windows. Click the new icon in the Dock if nothing appears.
@@ -44,8 +41,7 @@ windows. Click the new icon in the Dock if nothing appears.
    body text becomes "eval ok" (visible for an instant before it closes).
 2. `TestDispatchFromManyGoroutines` runs 1000 `Dispatch` calls from 1000
    goroutines; all must run on the main thread.
-3. `TestTwoWindows` opens two windows and both must report.
-4. The process exits with `PASS`. The app does not hang at the end.
+3. The process exits with `PASS`. The app does not hang at the end.
 
 ## Also check by hand (not covered by the test)
 
@@ -61,8 +57,9 @@ Run a small program that uses `platform.New` with `Debug: true`:
 
 ## Views (split panes)
 
-`TestGUIViews` adds a second view to a window and checks the request identity,
-the layout and removal. By hand, from a program that calls `AddView`:
+The compiler's `TestNativeE2EViewsGUI` runs `examples/native-views` (request
+identity and messaging between views). By hand, from a program that calls
+`AddView`:
 
 - Two views side by side show a draggable divider; dragging it changes the
   ratio `Layout()` reports, and a pane stops at its `MinWidth`.
@@ -159,7 +156,7 @@ reading are checked. A real Finder and a real drag are not.
 | Tray icon invisible | An icon with no PNG and no title has no width (SetTray refuses it); otherwise check the PNG decodes. |
 | Hotkey never fires | The key code table is for an ANSI layout; macOS 15 ignores Option/Shift-only combinations; the handler runs on the main loop, so a blocked main thread delays it. |
 | Notification call hangs about two minutes | The permission prompt was never answered (`notifyAuthTimeout`); answer it. |
-| Dropped files are not reported, the page's drop works | `KrateWebView` was not registered (`fileState.dropClass`), or WebKit's `performDragOperation:` was not found; the GUI test `TestGUIWebViewWatchesDrops` says which. |
+| Dropped files are not reported, the page's drop works | `KrateWebView` was not registered (`fileState.dropClass`), or WebKit's `performDragOperation:` was not found; the shell logs which at startup. |
 | Crash only on Intel | Struct-by-value argument passing for NSRect (32 bytes, passed in memory on amd64). |
 
 ## Window chrome

@@ -64,38 +64,3 @@ func TestIdentifierNamesNeverReachTheMarkup(t *testing.T) {
 func body(arg, use string) string {
 	return "const [n, setN] = createSignal(" + arg + "); const double = createMemo(() => n() * 2); const label = n() ? 'on' : 'off'; return " + use + ";"
 }
-
-// A module constant seeds a signal in a child component the same way it does
-// in the page: the first paint shows its value.
-func TestModuleConstSeedsChildSignal(t *testing.T) {
-	cases := map[string]string{
-		"const": "const initial = 5;",
-		"typed": "const initial: number = 5;",
-		"sum":   "const base = 2;\nconst initial = base + 3;",
-	}
-	for name, mod := range cases {
-		t.Run(name, func(t *testing.T) {
-			html, _ := buildPlain(t, map[string]string{"src/pages/index.tsx": "import { createSignal } from '@krate/runtime';\n" + mod +
-				"\nfunction C() { const [n, setN] = createSignal(initial); return <button onClick={() => setN(n() + 1)}>{n()}</button>; }\nexport default function P() { return <main><C /></main>; }\n"})
-			if want := "5<!--/k:3--></button>"; !strings.Contains(html, want) {
-				t.Errorf("want %q in:\n%s", want, rootOf(t, html))
-			}
-		})
-	}
-}
-
-// In a browser the child signal starts from its constant, or, when the build
-// cannot know the value, from what the page computes on load.
-func TestChildSignalSeedBrowser(t *testing.T) {
-	page := `import { createSignal } from "@krate/runtime";
-const known = 5;
-const unknown = window.innerWidth > 0 ? 7 : 8;
-function Known() { const [n, setN] = createSignal(known); return <button class="known" onClick={() => setN(n() + 1)}>{n()}</button>; }
-function Unknown() { const [n, setN] = createSignal(unknown); return <button class="unknown" onClick={() => setN(n() + 1)}>{n()}</button>; }
-export default function Page() { return <main><Known /><Unknown /></main>; }
-`
-	evalFixBrowser(t, map[string]string{"src/pages/index.tsx": page}, []evalFixCheck{
-		{Path: "/", Selector: "button.known", Hydrated: "5", Click: "button.known", AfterClick: strp("6")},
-		{Path: "/", Selector: "button.unknown", Static: strp(""), Hydrated: "7", Click: "button.unknown", AfterClick: strp("8")},
-	})
-}

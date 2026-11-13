@@ -25,7 +25,7 @@ const (
 
 // notifyIconData is NOTIFYICONDATAW for Windows Vista and later. Its size is
 // 976 bytes on amd64 and arm64 (both have 8-byte pointers and the same
-// alignment rules); TestNotifyIconDataLayout pins the offsets.
+// alignment rules).
 type notifyIconData struct {
 	size            uint32
 	hwnd            uintptr

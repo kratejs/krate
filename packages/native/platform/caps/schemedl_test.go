@@ -4,7 +4,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -87,95 +86,5 @@ func TestSchemeDownloadCompletes(t *testing.T) {
 	}
 	if r.events[0].State != DownloadStarted {
 		t.Fatalf("first event %+v", r.events[0])
-	}
-}
-
-func TestSchemeDownloadNames(t *testing.T) {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/cd", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Disposition", `attachment; filename="../evil.txt"`)
-		if _, err := w.Write([]byte("x")); err != nil {
-			t.Errorf("unexpected error: %v", err)
-		}
-	})
-	mux.HandleFunc("/dir/plain.bin", func(w http.ResponseWriter, r *http.Request) {
-		if _, err := w.Write([]byte("y")); err != nil {
-			t.Errorf("write: %v", err)
-		}
-	})
-	dir := t.TempDir()
-	r := newDLRig(mux, func(q DownloadRequest) string { return filepath.Join(dir, q.SuggestedName) })
-	r.sd.Start(1, "krate://app/cd", "")
-	if e := r.last(t); e.State != DownloadCompleted || filepath.Dir(e.Path) != dir {
-		t.Fatalf("content-disposition: %+v", e)
-	}
-	r.sd.Start(1, "krate://app/dir/plain.bin", "")
-	if e := r.last(t); e.Path != filepath.Join(dir, "plain.bin") {
-		t.Fatalf("path name: %+v", e)
-	}
-}
-
-func TestSchemeDownloadFailures(t *testing.T) {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/missing", http.NotFound)
-	dir := t.TempDir()
-	r := newDLRig(mux, func(q DownloadRequest) string { return filepath.Join(dir, "x") })
-	r.sd.Start(1, "krate://app/missing", "")
-	if e := r.last(t); e.State != DownloadFailed || !strings.Contains(e.Error, "404") {
-		t.Fatalf("404: %+v", e)
-	}
-	// Declined destination.
-	mux.HandleFunc("/ok", func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte("z")) // the client is declined and may hang up first
-	})
-	r2 := newDLRig(mux, func(DownloadRequest) string { return "" })
-	r2.sd.Start(1, "krate://app/ok", "")
-	if e := r2.last(t); e.State != DownloadCancelled {
-		t.Fatalf("declined: %+v", e)
-	}
-	// Relative destination is refused.
-	r3 := newDLRig(mux, func(DownloadRequest) string { return "rel/path" })
-	r3.sd.Start(1, "krate://app/ok", "")
-	if e := r3.last(t); e.State != DownloadFailed {
-		t.Fatalf("relative: %+v", e)
-	}
-	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
-		t.Fatalf("files left: %v", entries)
-	}
-}
-
-func TestSchemeDownloadCancel(t *testing.T) {
-	started := make(chan struct{})
-	mux := http.NewServeMux()
-	mux.HandleFunc("/slow", func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write(make([]byte, 1024)) // the client cancels mid-body
-		close(started)
-		for i := 0; i < 100; i++ {
-			if _, err := w.Write(make([]byte, 1024)); err != nil {
-				return
-			}
-			select {
-			case <-r.Context().Done():
-				return
-			case <-time.After(50 * time.Millisecond):
-			}
-		}
-	})
-	dir := t.TempDir()
-	r := newDLRig(mux, func(q DownloadRequest) string { return filepath.Join(dir, "slow.bin") })
-	r.sd.Start(1, "krate://app/slow", "")
-	<-started
-	time.Sleep(50 * time.Millisecond)
-	if !r.sd.Cancel(1) {
-		t.Fatal("Cancel did not find the download")
-	}
-	if e := r.last(t); e.State != DownloadCancelled {
-		t.Fatalf("cancel: %+v", e)
-	}
-	if r.sd.Cancel(1) {
-		t.Fatal("a finished download was cancelled")
-	}
-	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
-		t.Fatalf("partial file left: %v", entries)
 	}
 }

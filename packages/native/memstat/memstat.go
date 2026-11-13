@@ -24,8 +24,8 @@
 //	         private working set would need QueryWorkingSetEx, which walks
 //	         every page). PrivateClean, Anon and Swap stay 0.
 //
-// All sizes are bytes. The darwin and windows code runs in the CI native job (TestGUIMemory and the
-// memory report on macos-latest and windows-latest).
+// All sizes are bytes. The darwin and windows code runs in the memory report
+// of the full CI runs on macos-latest and windows-latest.
 package memstat
 
 import (

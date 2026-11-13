@@ -26,8 +26,7 @@ const (
 	hitSelection = 1 << 7
 )
 
-// WebKitContextMenuAction values (checked against the library's GEnum by
-// TestContextMenuActionValues).
+// WebKitContextMenuAction values, from the library's GEnum.
 const (
 	actCopyLink         = 4
 	actSpellingGuess    = 21

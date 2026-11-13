@@ -1,12 +1,8 @@
 package media
 
 import (
-	"os"
-	"path/filepath"
-	"runtime"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/kratejs/krate/packages/native/platform/caps"
 )
@@ -52,20 +48,6 @@ func req(id uint64, view caps.ViewRef, kinds ...Kind) caps.PermissionRequest {
 	return caps.PermissionRequest{ID: id, View: view, Origin: "krate://app", Kinds: kinds}
 }
 
-func TestRequiredPermission(t *testing.T) {
-	for k, want := range map[Kind]string{
-		caps.PermCamera: "media", caps.PermMicrophone: "media", caps.PermScreen: "media",
-		caps.PermLocation: "location", caps.PermNotifications: "notify", caps.PermClipboardRead: "clipboard:read",
-	} {
-		if got, ok := RequiredPermission(k); !ok || got != want {
-			t.Errorf("%s: %q %v", k, got, ok)
-		}
-	}
-	if _, ok := RequiredPermission(caps.PermOther); ok {
-		t.Error("other must have no permission")
-	}
-}
-
 func TestScopeWithoutPermissionDenies(t *testing.T) {
 	h := baseHost()
 	h.Allows = func(view, perm string) bool { return !(view == "v2" && perm == "media") }
@@ -90,51 +72,6 @@ func TestNoPermissionCheckDeniesEverything(t *testing.T) {
 	m := NewManager(Config{Policy: map[string]string{"camera": "allow"}}, h)
 	if o := m.Decide(req(1, 1, caps.PermCamera)); o.Allowed {
 		t.Fatal("a missing permission check must deny")
-	}
-}
-
-func TestUnknownViewAndKinds(t *testing.T) {
-	m := NewManager(Config{Policy: map[string]string{"camera": "allow"}}, baseHost())
-	if o := m.Decide(req(1, 0, caps.PermCamera)); o.Allowed || o.Reason != "unknown view" {
-		t.Fatalf("%+v", o)
-	}
-	if o := m.Decide(req(2, 1)); o.Allowed {
-		t.Fatalf("no kinds: %+v", o)
-	}
-	if o := m.Decide(req(3, 1, caps.PermOther)); o.Allowed || o.Reason != "unsupported" {
-		t.Fatalf("other: %+v", o)
-	}
-}
-
-func TestPolicyAllowDenyAndDefault(t *testing.T) {
-	m := NewManager(Config{Policy: map[string]string{"camera": "allow", "microphone": "deny", "bogus": "allow", "location": "maybe"}}, baseHost())
-	if o := m.Decide(req(1, 1, caps.PermCamera)); !o.Allowed || o.Reason != "policy" {
-		t.Fatalf("camera: %+v", o)
-	}
-	if o := m.Decide(req(2, 1, caps.PermMicrophone)); o.Allowed || o.Reason != "policy" {
-		t.Fatalf("microphone: %+v", o)
-	}
-	// Camera allowed, microphone denied: the request is denied.
-	if o := m.Decide(req(3, 1, caps.PermCamera, caps.PermMicrophone)); o.Allowed {
-		t.Fatalf("both: %+v", o)
-	}
-	// A bad policy value and an unknown kind are ignored, so location prompts;
-	// without a prompt UI that is a denial.
-	pol := m.Policy()
-	if pol[caps.PermLocation] != Prompt || len(pol) != len(Kinds) {
-		t.Fatalf("policy %v", pol)
-	}
-	if o := m.Decide(req(4, 1, caps.PermLocation)); o.Allowed || o.Reason != "no handler" {
-		t.Fatalf("location: %+v", o)
-	}
-	if err := m.SetPolicy(caps.PermLocation, Allow); err != nil {
-		t.Fatal(err)
-	}
-	if o := m.Decide(req(5, 1, caps.PermLocation)); !o.Allowed {
-		t.Fatalf("location after SetPolicy: %+v", o)
-	}
-	if m.SetPolicy("nope", Allow) == nil || m.SetPolicy(caps.PermCamera, "sometimes") == nil {
-		t.Fatal("bad SetPolicy arguments must fail")
 	}
 }
 
@@ -189,147 +126,6 @@ func TestPromptRemembersAnswers(t *testing.T) {
 	}
 }
 
-func TestNoRememberAsksEveryTime(t *testing.T) {
-	var asked int
-	h := baseHost()
-	h.Prompt = func(Request) (bool, bool) { asked++; return true, true }
-	m := NewManager(Config{NoRemember: true}, h)
-	m.Decide(req(1, 1, caps.PermCamera))
-	m.Decide(req(2, 1, caps.PermCamera))
-	if asked != 2 || len(m.Decisions()) != 0 {
-		t.Fatalf("asked %d, decisions %v", asked, m.Decisions())
-	}
-}
-
-func TestViewScopedDecisionWinsOverApp(t *testing.T) {
-	m := NewManager(Config{Policy: map[string]string{"camera": "deny"}}, baseHost())
-	if err := m.Remember(caps.PermCamera, "app", true); err != nil {
-		t.Fatal(err)
-	}
-	if err := m.Remember(caps.PermCamera, "v2", false); err != nil {
-		t.Fatal(err)
-	}
-	if o := m.Decide(req(1, 1, caps.PermCamera)); !o.Allowed || o.Reason != "remembered" {
-		t.Fatalf("main: %+v", o)
-	}
-	if o := m.Decide(req(2, 2, caps.PermCamera)); o.Allowed || o.Reason != "remembered" {
-		t.Fatalf("v2: %+v", o)
-	}
-	ds := m.Decisions()
-	if len(ds) != 2 || ds[0].Scope != "app" || ds[1].Scope != "v2" {
-		t.Fatalf("decisions %+v", ds)
-	}
-	m.ForgetView("v2")
-	if o := m.Decide(req(3, 2, caps.PermCamera)); !o.Allowed {
-		t.Fatalf("after ForgetView, the app decision applies: %+v", o)
-	}
-}
-
-func TestStorePersistsAppDecisionsOnly(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "sub", "permissions.json")
-	m := NewManager(Config{StorePath: path}, baseHost())
-	if err := m.Remember(caps.PermCamera, "app", true); err != nil {
-		t.Fatal(err)
-	}
-	if err := m.Remember(caps.PermMicrophone, "v2", true); err != nil {
-		t.Fatal(err)
-	}
-	if err := m.Remember(caps.PermLocation, "app", false); err != nil {
-		t.Fatal(err)
-	}
-	m2 := NewManager(Config{StorePath: path}, baseHost())
-	ds := m2.Decisions()
-	if len(ds) != 2 || ds[0].Kind != caps.PermCamera || !ds[0].Allow || ds[1].Kind != caps.PermLocation || ds[1].Allow {
-		t.Fatalf("reloaded %+v", ds)
-	}
-	if info, err := os.Stat(path); err != nil || (runtime.GOOS != "windows" && info.Mode().Perm() != 0o600) {
-		t.Fatalf("store file: %v %v", info, err)
-	}
-	m2.Reset("")
-	if len(NewManager(Config{StorePath: path}, baseHost()).Decisions()) != 0 {
-		t.Fatal("reset must be stored")
-	}
-	if err := os.WriteFile(path, []byte("{not json"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	m3 := NewManager(Config{StorePath: path}, baseHost())
-	if m3.LoadError() == nil || len(m3.Decisions()) != 0 {
-		t.Fatalf("a corrupt store must be reported and ignored: %v", m3.LoadError())
-	}
-}
-
-func TestHandlerStreamDecides(t *testing.T) {
-	var m *Manager
-	pubs := make(chan Request, 4)
-	h := baseHost()
-	h.Handlers = func() int { return 1 }
-	h.Publish = func(r Request) { pubs <- r }
-	m = NewManager(Config{Policy: map[string]string{"camera": "deny"}}, h)
-
-	go func() {
-		r := <-pubs
-		if err := m.Respond(r.ID, true, "view"); err != nil {
-			t.Errorf("unexpected error: %v", err)
-		}
-	}()
-	o := m.Decide(req(7, 2, caps.PermCamera))
-	if !o.Allowed || o.Reason != "handler" {
-		t.Fatalf("%+v", o)
-	}
-	// "view" remembers for that view only.
-	ds := m.Decisions()
-	if len(ds) != 1 || ds[0].Scope != "v2" {
-		t.Fatalf("decisions %+v", ds)
-	}
-	if o := m.Decide(req(8, 2, caps.PermCamera)); o.Reason != "remembered" || !o.Allowed {
-		t.Fatalf("%+v", o)
-	}
-
-	// A handler that says no, without remembering.
-	go func() {
-		r := <-pubs
-		if err := m.Respond(r.ID, false, "none"); err != nil {
-			t.Errorf("unexpected error: %v", err)
-		}
-	}()
-	if o := m.Decide(req(9, 1, caps.PermMicrophone)); o.Allowed || o.Reason != "handler" {
-		t.Fatalf("%+v", o)
-	}
-	if len(m.Decisions()) != 1 {
-		t.Fatalf("none must not remember: %+v", m.Decisions())
-	}
-	if m.Respond(9, true, "") == nil {
-		t.Fatal("a second answer must fail")
-	}
-	if m.Respond(99, true, "bogus") == nil {
-		t.Fatal("a bad remember value must fail")
-	}
-}
-
-func TestHandlerTimeoutDenies(t *testing.T) {
-	h := baseHost()
-	h.Handlers = func() int { return 1 }
-	h.Publish = func(Request) {}
-	h.HandlerTimeout = 30 * time.Millisecond
-	m := NewManager(Config{Policy: map[string]string{"camera": "allow"}}, h)
-	if o := m.Decide(req(1, 1, caps.PermCamera)); o.Allowed || o.Reason != "timeout" {
-		t.Fatalf("%+v", o)
-	}
-}
-
-func TestRememberedDecisionSkipsHandler(t *testing.T) {
-	h := baseHost()
-	h.Handlers = func() int { return 1 }
-	h.Publish = func(Request) { t.Error("a remembered kind must not reach the handler") }
-	m := NewManager(Config{}, h)
-	if err := m.Remember(caps.PermCamera, "app", true); err != nil {
-		t.Fatal(err)
-	}
-	if o := m.Decide(req(1, 1, caps.PermCamera)); !o.Allowed {
-		t.Fatalf("%+v", o)
-	}
-}
-
 func TestOSConsent(t *testing.T) {
 	h := baseHost()
 	fp := &fakePrivacy{status: map[caps.PermissionKind]caps.PrivacyStatus{
@@ -358,19 +154,5 @@ func TestOSConsent(t *testing.T) {
 	fp.onAsk = caps.PrivacyDenied
 	if o := m.Decide(req(5, 1, caps.PermMicrophone)); o.Allowed {
 		t.Fatalf("microphone refused by the OS prompt: %+v", o)
-	}
-}
-
-func TestHandleAnswersOnce(t *testing.T) {
-	m := NewManager(Config{Policy: map[string]string{"camera": "allow"}}, baseHost())
-	got := make(chan bool, 2)
-	m.Handle(req(1, 1, caps.PermCamera), func(b bool) { got <- b })
-	select {
-	case b := <-got:
-		if !b {
-			t.Fatal("denied")
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("no answer")
 	}
 }

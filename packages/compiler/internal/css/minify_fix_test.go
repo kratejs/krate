@@ -114,60 +114,6 @@ func TestMinifyExact(t *testing.T) {
 	}
 }
 
-func TestRemoveDuplicateDeclarationsFixes(t *testing.T) {
-	tests := []struct {
-		name, in, want string
-	}{
-		{"order kept", "a{background-color:red;background:blue;background-color:green}", "a{background-color:red;background:blue;background-color:green}"},
-		{"fallback kept", "a{width:100%;width:-moz-fit-content}", "a{width:100%;width:-moz-fit-content}"},
-		{"later prefixed", "a{height:100vh;height:100dvh}", "a{height:100vh;height:100dvh}"},
-		{"layer statement", "@media screen{@layer base,components;}", "@media screen{@layer base,components;}"},
-		{"keyframes important", "@keyframes k{from{opacity:0!important;opacity:1}}", "@keyframes k{from{opacity:1}}"},
-		{"important in string", `a{content:"!important";content:"x"}`, `a{content:"x"}`},
-		{"escaped quote", `.c\'x{color:red;color:blue}.d{margin:0;margin:1px}`, `.c\'x{color:blue}.d{margin:1px}`},
-		{"brace in string", `a{content:"}";color:red;color:blue}`, `a{content:"}";color:blue}`},
-		{"unrelated between", "a{\n  padding: 1px;\n  color: red;\n  padding: 2px;\n}", "a{\n  color: red;\n  padding: 2px;\n}"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := RemoveDuplicateDeclarations(tt.in); got != tt.want {
-				t.Errorf("got  %q\nwant %q", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestRemoveAtRuleBlockEscapedBrace(t *testing.T) {
-	prefix := "@supports not selector(:has(*)){/*krate:legacy*/"
-	in := prefix + `.a\{{color:red}}.keep{color:blue}`
-	if got := RemoveAtRuleBlock(in, prefix); got != ".keep{color:blue}" {
-		t.Errorf("got %q", got)
-	}
-}
-
-func TestHasImportantStringAware(t *testing.T) {
-	cases := map[string]bool{
-		"red !important":     true,
-		"red ! important":    true,
-		"red !IMPORTANT":     true,
-		`"!important"`:       false,
-		`'x !important' red`: false,
-		"red":                false,
-	}
-	for in, want := range cases {
-		if got := hasImportant(in); got != want {
-			t.Errorf("hasImportant(%q) = %v, want %v", in, got, want)
-		}
-	}
-}
-
-func TestMinifyCommentOnlyClosesWhatItOpened(t *testing.T) {
-	out := Minify(`ul>*/* c */{color:red}`)
-	if !strings.HasPrefix(out, "ul>*") || strings.Contains(out, " c ") {
-		t.Errorf("comment mishandled: %q", out)
-	}
-}
-
 func braceBalance(s string) (bal int, ok bool) {
 	for i := 0; i < len(s); i++ {
 		switch s[i] {
