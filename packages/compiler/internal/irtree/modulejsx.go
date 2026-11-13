@@ -95,6 +95,40 @@ func (b *builder) declaredInComponent(name string) bool {
 // (`sections`, `cfg.node`, `rows[0].cell`) rooted at a JSX-holding module
 // constant to the expression it stands for, or nil.
 func (b *builder) resolveModuleJSX(expr ast.Expr, depth int) ast.Expr {
+	out := b.resolveModuleJSXPath(expr, depth)
+	if out == nil || b.capturedAtUse(out, map[string]bool{}) {
+		return nil
+	}
+	return out
+}
+
+// capturedAtUse reports whether a free identifier in node (or in a module
+// constant it references) is bound differently where the node is rendered, so
+// splicing the node in would read the wrong binding. Every identifier counts,
+// which over-approximates and only costs a fallback to hydration.
+func (b *builder) capturedAtUse(node any, seen map[string]bool) bool {
+	captured := false
+	WalkAST(node, func(n any) bool {
+		id, ok := n.(*ast.Identifier)
+		if !ok || captured {
+			return !captured
+		}
+		if b.isShadowed(id.Name) || b.isSignalName(id.Name) || b.declaredInComponent(id.Name) {
+			captured = true
+			return false
+		}
+		if init, ok := b.moduleConstInits[id.Name]; ok && init != nil && !seen[id.Name] {
+			seen[id.Name] = true
+			if b.capturedAtUse(init, seen) {
+				captured = true
+			}
+		}
+		return !captured
+	})
+	return captured
+}
+
+func (b *builder) resolveModuleJSXPath(expr ast.Expr, depth int) ast.Expr {
 	if depth > 8 {
 		return nil
 	}
@@ -104,7 +138,7 @@ func (b *builder) resolveModuleJSX(expr ast.Expr, depth int) ast.Expr {
 		if !ok {
 			return nil
 		}
-		if inner := b.resolveModuleJSX(init, depth+1); inner != nil {
+		if inner := b.resolveModuleJSXPath(init, depth+1); inner != nil {
 			return inner
 		}
 		return init
@@ -112,7 +146,7 @@ func (b *builder) resolveModuleJSX(expr ast.Expr, depth int) ast.Expr {
 		if e.Optional {
 			return nil
 		}
-		obj := b.resolveModuleJSX(e.Object, depth+1)
+		obj := b.resolveModuleJSXPath(e.Object, depth+1)
 		if obj == nil {
 			return nil
 		}

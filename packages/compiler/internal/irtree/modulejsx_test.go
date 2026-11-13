@@ -34,6 +34,25 @@ export default function App() {
 }`,
 			want: `<div><p>local</p></div>`,
 		},
+		{
+			name: "local shadows a name the constant uses",
+			src: `const year = 2026;
+const footer = <p>{year}</p>;
+export default function P() {
+	const year = 1999;
+	return <main>{footer}</main>;
+}`,
+			want: `<main></main>`,
+		},
+		{
+			name: "map callback parameter shadows a name the constant uses",
+			src: `const n = 'mod';
+const tag = { v: <b>{n}</b> };
+export default function P() {
+	return <main>{['cb'].map(n => <i>{tag.v}</i>)}</main>;
+}`,
+			want: `<main><i><b>mod</b></i></main>`,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -9,6 +9,7 @@ func TestModuleJSXConstants(t *testing.T) {
 	cases := map[string]struct {
 		files map[string]string
 		want  []string
+		not   []string
 	}{
 		"report": {
 			files: map[string]string{"src/pages/index.tsx": `
@@ -72,6 +73,17 @@ export default function Page() { return <List n={1} />; }`,
 			},
 			want: []string{`<li><b class="badge">B</b></li>`},
 		},
+		"local shadowing a name the constant uses": {
+			files: map[string]string{"src/pages/index.tsx": `
+const year = 2026;
+const footer = <p>{year}</p>;
+export default function P() {
+  const year = 1999;
+  return <main>{footer}</main>;
+}`},
+			want: []string{`<main>`},
+			not:  []string{`1999`},
+		},
 		"interactive page": {
 			files: map[string]string{"src/pages/index.tsx": `
 import { createSignal } from '@krate/runtime';
@@ -117,6 +129,11 @@ export default function Page() { return <ul>{rows.map(r => <li>{r.cell}</li>)}</
 			for _, w := range tc.want {
 				if !strings.Contains(html, w) {
 					t.Errorf("html misses %s:\n%s", w, html)
+				}
+			}
+			for _, w := range tc.not {
+				if strings.Contains(html, w) {
+					t.Errorf("html must not contain %s:\n%s", w, html)
 				}
 			}
 			if name == "interactive page" && !strings.Contains(js, "kbindAttr") {
