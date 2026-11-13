@@ -407,3 +407,68 @@ func TestMoveAsideSkippedWhenTargetsLiveInsideTheTree(t *testing.T) {
 		t.Errorf("tree with migrated output must stay: %+v %v", rep.MoveAside, rep.Warnings)
 	}
 }
+
+func TestApplyMovesProxyAsideAndRollbackRestoresIt(t *testing.T) {
+	proxy := "export function proxy(request: Request) { return Response.redirect(new URL(\"/x\", request.url)); }\n"
+	root := gapsProject(t, map[string]string{
+		"src/app/page.tsx": `export default function P() { return <main/>; }`,
+		"src/proxy.ts":     proxy,
+	})
+	rep, err := ScanNext(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(rep.MoveAside, ",") != "src/app,src/proxy.ts" {
+		t.Fatalf("MoveAside = %v", rep.MoveAside)
+	}
+	res, err := Apply(rep, ApplyOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "src", "proxy.ts")); !os.IsNotExist(err) {
+		t.Errorf("src/proxy.ts should have been moved aside, stat err = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "src", "middleware.ts")); err != nil {
+		t.Fatalf("middleware.ts missing: %v", err)
+	}
+	if err := Rollback(res.BackupDir); err != nil {
+		t.Fatal(err)
+	}
+	if b, err := os.ReadFile(filepath.Join(root, "src", "proxy.ts")); err != nil || string(b) != proxy {
+		t.Errorf("rollback did not restore src/proxy.ts: %v %q", err, b)
+	}
+}
+
+func TestGeneratedConfigKeepsHTMLUnescaped(t *testing.T) {
+	root := gapsProject(t, map[string]string{
+		"app/page.tsx": `export default function P() { return <main/>; }`,
+		"app/icon.svg": `<svg xmlns="http://www.w3.org/2000/svg"/>`,
+	})
+	rep, err := ScanNext(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := findPlan(rep, "krate.config.ts")
+	if cfg == nil || !strings.Contains(string(cfg.Content), `"<link rel=\"icon\" href=\"/icon.svg\"`) || strings.Contains(string(cfg.Content), `\u003c`) {
+		t.Fatalf("generated config head link is escaped or missing:\n%s", cfg.Content)
+	}
+}
+
+func TestInlineUseServerInSharedModuleIsFlagged(t *testing.T) {
+	root := gapsProject(t, map[string]string{
+		"tsconfig.json":    `{"compilerOptions":{"baseUrl":".","paths":{"@/*":["./src/*"]}}}`,
+		"src/app/page.tsx": `import { SignOut } from "@/components/SignOut"; export default function P() { return <SignOut/>; }`,
+		"src/components/SignOut.tsx": `export function SignOut() {
+  async function signOutAction() { "use server"; }
+  return <form action={signOutAction}><button>out</button></form>;
+}
+`,
+	})
+	rep, err := ScanNext(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasManual(rep, "src/components/SignOut.tsx", "KR7001") {
+		t.Fatalf("inline action in a shared module not flagged: %+v", rep.Manual)
+	}
+}

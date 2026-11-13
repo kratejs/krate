@@ -121,6 +121,7 @@ func rewritePublicEnv(rep *Report, defined map[string][]string, cfgEnv map[strin
 		parts = append(parts, part)
 	}
 	rep.Manual = append(rep.Manual, ManualItem{
+		Source: "environment",
 		Reason: "public environment variables are not copied; rename or set them for the Krate build: " + strings.Join(parts, "; "),
 		Hint:   "Krate inlines only KRATE_PUBLIC_* at build time (process.env.KRATE_PUBLIC_NAME). Rename them in your .env files or set them in the build environment; values were not written into source",
 	})

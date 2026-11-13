@@ -1,11 +1,13 @@
 package migrate
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/lexer"
@@ -360,8 +362,13 @@ func configJSON(entry string, next nextConfigData) []byte {
 	if len(next.Site) > 0 {
 		opts["site"] = next.Site
 	}
-	body, _ := json.MarshalIndent(opts, "", "  ")
-	return []byte("import { defineConfig } from '@krate/core';\n\nexport default defineConfig(" + string(body) + ");\n")
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	_ = enc.Encode(opts)
+	body := strings.TrimRight(buf.String(), "\n")
+	return []byte("import { defineConfig } from '@krate/core';\n\nexport default defineConfig(" + body + ");\n")
 }
 
 func staticStringMap(e ast.Expr) (map[string]string, bool) {

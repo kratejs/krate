@@ -83,8 +83,8 @@ type Report struct {
 	Manual    []ManualItem  `json:"manual,omitempty"`
 	Warnings  []string      `json:"warnings,omitempty"`
 	// MoveAside lists the original Next route trees (app/, src/app/, pages/)
-	// that --apply moves into the backup directory after every write
-	// succeeds. `krate migrate rollback` moves them back.
+	// and a Next 16 proxy file that --apply moves into the backup directory
+	// after every write succeeds. `krate migrate rollback` moves them back.
 	MoveAside []string `json:"moveAside,omitempty"`
 
 	apiRewrites []nextRewrite
@@ -279,6 +279,12 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 	}
 	if hasPages {
 		trees = append(trees, pagesPrefix)
+	}
+	// A Next 16 proxy.ts is planned as middleware.ts; move the original aside too.
+	for _, f := range rep.Files {
+		if f.Kind == KindMiddleware && f.Source != "" && f.Source != f.Target {
+			trees = append(trees, f.Source)
+		}
 	}
 	planMoveAside(abs, trees, rep)
 
@@ -1001,7 +1007,7 @@ func Apply(rep *Report, opts ApplyOptions) (*ApplyResult, error) {
 		if err != nil {
 			return nil, err
 		}
-		if isDir(abs) {
+		if _, err := os.Stat(abs); err == nil {
 			moves = append(moves, filepath.ToSlash(filepath.Clean(filepath.FromSlash(tree))))
 		}
 	}
@@ -1096,7 +1102,7 @@ func Rollback(backupDir string) error {
 			return err
 		}
 		saved := filepath.Join(backupDir, "moved", filepath.FromSlash(tree))
-		if !isDir(saved) {
+		if _, err := os.Stat(saved); err != nil {
 			continue
 		}
 		if _, err := os.Lstat(dest); err == nil {

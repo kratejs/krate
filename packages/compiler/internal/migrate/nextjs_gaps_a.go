@@ -239,7 +239,7 @@ func addAPIRewrites(next *nextConfigData, rep *Report) {
 func flagInlineUseServer(rep *Report) {
 	for _, f := range rep.Files {
 		switch f.Kind {
-		case KindPage, KindLayout, KindAsset, KindAPI, KindNotFound, KindForbidden, KindUnauthorized, KindError, KindMetadataRoute:
+		case KindPage, KindLayout, KindLoading, KindAsset, KindModule, KindAPI, KindNotFound, KindForbidden, KindUnauthorized, KindError, KindMetadataRoute:
 		default:
 			continue
 		}

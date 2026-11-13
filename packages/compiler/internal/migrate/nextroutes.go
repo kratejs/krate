@@ -143,7 +143,11 @@ func rewriteNextNavigationImports(src string) (out string, rewrites []string, ma
 		return strings.Join(lines, "\n")
 	})
 	if out != src {
-		rewrites = append(rewrites, "rewrote next/navigation imports to "+signalModule+" and @krate/runtime")
+		mods := signalModule
+		if signalModule != "@krate/runtime" {
+			mods += " and @krate/runtime"
+		}
+		rewrites = append(rewrites, "rewrote next/navigation imports to "+mods)
 	}
 	if strings.Contains(out, "next/navigation") && nextNavigationImport.FindString(out) == "" {
 		// Namespace or default imports: point the whole module at the runtime.

@@ -122,8 +122,9 @@ The first pass:
   small `NextResponse` shim, static/local matcher checks, and cookie/IP/geo
   helpers; computed `config.matcher` arrays are checked at runtime. The Next.js 16
   `proxy.ts` (root or `src/`, a `proxy` function or a default export) is migrated
-  the same way and written to `middleware.ts`, the name Krate loads; when both
-  files exist only `proxy.ts` is migrated and the other is a manual item;
+  the same way and written to `middleware.ts`, the name Krate loads (`--apply`
+  moves the original `proxy.ts` into the backup); when both files exist only
+  `proxy.ts` is migrated and the other is a manual item;
 - copies static `favicon.ico`, `icon.*` and `apple-icon.*` files from the app root
   to `public/` and links the root ones from the generated `head` config
   (`<link rel="icon">`, `<link rel="apple-touch-icon">`). Icons inside a
