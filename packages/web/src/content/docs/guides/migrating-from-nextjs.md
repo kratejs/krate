@@ -137,9 +137,12 @@ The first pass:
   handler at the app root (`app/route.ts`) is a manual item, because a rewrite
   for `/` would shadow the home page. Deploy targets that do not run the Krate
   server may not apply the rewrite;
-- flags inline `"use server"` functions (a directive inside a function body, the
-  Auth.js `signOut` pattern) as manual work, because the build rejects them with
-  `KR7001`; move each into a module whose first statement is `"use server"`;
+- leaves inline `"use server"` functions (a directive inside a function body, the
+  Auth.js `signOut` pattern) as they are: the build hoists them into server
+  actions, sealing the values they close over (see
+  [Server Actions](/docs/guides/server-actions/#inline-actions)). One inside a
+  `"use client"` module is flagged as manual work, because it fails the build
+  with `KR7001` there as it does in Next.js;
 - strips root-layout `<html>`/`<body>` wrappers;
 - maps `forbidden.tsx` to `403.tsx` and `unauthorized.tsx` to `401.tsx` (the
   Next.js 15.1 `authInterrupts` pages), and drops the `experimental.authInterrupts`

@@ -269,6 +269,7 @@ type serverData struct {
 	StaticPages     map[string]string         `json:"staticPages,omitempty"`
 	APIRoutes       []string                  `json:"apiRoutes"`
 	Actions         []actionEntry             `json:"actions"`
+	ActionKey       string                    `json:"actionKey,omitempty"`
 	HasMiddleware   bool                      `json:"hasMiddleware"`
 }
 
@@ -521,6 +522,7 @@ func BuildServerBundle(root string, cfg *config.Config, target string) (*deploy.
 		var am actionManifest
 		if json.Unmarshal(b, &am) == nil {
 			data.Actions = append(data.Actions, am.Actions...)
+			data.ActionKey = am.Key
 			seen := map[string]bool{}
 			for _, a := range am.Actions {
 				if seen[a.File] {

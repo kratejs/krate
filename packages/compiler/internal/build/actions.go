@@ -1,8 +1,6 @@
 package build
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -14,6 +12,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/bundler"
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
+	"github.com/kratejs/krate/packages/compiler/internal/inlineaction"
 	"github.com/kratejs/krate/packages/compiler/internal/lexer"
 	"github.com/kratejs/krate/packages/compiler/internal/parser"
 )
@@ -23,6 +22,10 @@ import (
 // action bundles contain server code and must never be downloadable.
 type actionManifest struct {
 	Actions []actionEntry `json:"actions"`
+	// Key seals the closed-over values of inline actions (see
+	// inline_actions.go). It is absent when KRATE_ACTION_SECRET supplies the
+	// secret or no inline action exists.
+	Key string `json:"key,omitempty"`
 }
 
 type actionEntry struct {
@@ -30,6 +33,10 @@ type actionEntry struct {
 	Export string `json:"export"`
 	File   string `json:"file"`
 	Source string `json:"source,omitempty"`
+	// Inline marks a hoisted inline action. Captures names the values its
+	// token carries, passed as the leading arguments.
+	Inline   bool     `json:"inline,omitempty"`
+	Captures []string `json:"captures,omitempty"`
 }
 
 // actionModule is one file marked with the `"use server"` directive.
@@ -38,6 +45,9 @@ type actionModule struct {
 	RelPath string
 	Exports map[string]string // exported name -> action id
 	File    string            // bundle path relative to .krate/actions
+	// Inline lists the captured names of each hoisted inline action by export;
+	// nil for a regular "use server" module.
+	Inline map[string][]string
 }
 
 type actionRegistry struct {
@@ -53,11 +63,11 @@ func (b *Builder) prepareActions() error {
 	}
 	b.actions = nil
 
-	files, err := discoverActionFiles(b.Root, b.Cfg.OutDir)
+	files, inlineFiles, err := discoverActionSources(b.Root, b.Cfg.OutDir)
 	if err != nil {
 		return err
 	}
-	if len(files) == 0 {
+	if len(files) == 0 && len(inlineFiles) == 0 {
 		return nil
 	}
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -84,22 +94,44 @@ func (b *Builder) prepareActions() error {
 		reg.Order = append(reg.Order, mod)
 	}
 
+	inlineMods, err := b.hoistInlineModules(dir, inlineFiles)
+	if err != nil {
+		return err
+	}
+	reg.Order = append(reg.Order, inlineMods...)
+
 	sort.Slice(reg.Order, func(i, j int) bool { return reg.Order[i].RelPath < reg.Order[j].RelPath })
 	for _, mod := range reg.Order {
 		if err := b.compileActionModule(dir, mod); err != nil {
 			return err
 		}
 		for export, id := range mod.Exports {
-			reg.Entries = append(reg.Entries, actionEntry{ID: id, Export: export, File: mod.File, Source: mod.RelPath})
+			e := actionEntry{ID: id, Export: export, File: mod.File, Source: mod.RelPath}
+			if caps, ok := mod.Inline[export]; ok {
+				e.Inline, e.Captures = true, caps
+			}
+			reg.Entries = append(reg.Entries, e)
 		}
 	}
 	sort.Slice(reg.Entries, func(i, j int) bool { return reg.Entries[i].ID < reg.Entries[j].ID })
 
-	data, err := json.MarshalIndent(actionManifest{Actions: reg.Entries}, "", "  ")
+	manifest := actionManifest{Actions: reg.Entries}
+	perm := os.FileMode(0644)
+	if len(inlineMods) > 0 {
+		secret, fromEnv, err := b.actionSecret()
+		if err != nil {
+			return err
+		}
+		if !fromEnv {
+			manifest.Key = secret
+			perm = 0600
+		}
+	}
+	data, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encoding action manifest: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), data, 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), data, perm); err != nil {
 		return fmt.Errorf("writing action manifest: %w", err)
 	}
 	b.actions = reg
@@ -149,12 +181,13 @@ func (b *Builder) compileActionModule(dir string, mod *actionModule) error {
 	return nil
 }
 
-// discoverActionFiles walks the project for source files whose first statement
-// is the `"use server"` directive. Build output, dependencies, and the framework
-// runtime are excluded.
-func discoverActionFiles(root, outDir string) ([]string, error) {
+// discoverActionSources walks the project for source files whose first
+// statement is the `"use server"` directive, and also returns the other source
+// files that mention "use server": candidates for inline actions. Build output,
+// dependencies, and the framework runtime are excluded.
+func discoverActionSources(root, outDir string) ([]string, []string, error) {
 	outAbs, _ := filepath.Abs(outDir)
-	var files []string
+	var files, inline []string
 	var misplaced []string
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -182,6 +215,7 @@ func discoverActionFiles(root, outDir string) ([]string, error) {
 		}
 		prog, perrs := parseSourceFile(path, data)
 		if perrs != nil {
+			inline = append(inline, path)
 			return nil
 		}
 		found, first := useServerDirective(prog)
@@ -189,16 +223,18 @@ func discoverActionFiles(root, outDir string) ([]string, error) {
 			files = append(files, path)
 		} else if found {
 			misplaced = append(misplaced, path)
+		} else {
+			inline = append(inline, path)
 		}
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if len(misplaced) > 0 {
-		return nil, fmt.Errorf("\"use server\" must be the first statement in %s", strings.Join(misplaced, ", "))
+		return nil, nil, fmt.Errorf("\"use server\" must be the first statement in %s", strings.Join(misplaced, ", "))
 	}
-	return files, nil
+	return files, inline, nil
 }
 
 func isSourceFile(path string) bool {
@@ -238,14 +274,27 @@ func useServerDirective(prog *ast.Program) (found, first bool) {
 	return false, false
 }
 
-// parseActionExports returns every exported function in a `"use server"` file.
-// File-level actions are the Next.js model: every export is a server endpoint.
+// parseActionExports returns every export of a `"use server"` file with its
+// action id. File-level actions are the Next.js model: every export is a server
+// endpoint. An export may be any expression (`export const save =
+// createAction(...)`): whether its value is a function is checked when the
+// module loads, because a wrapper call cannot be judged from syntax. Exports
+// that can never be functions (literals, objects, arrays, classes) are
+// rejected here.
 func parseActionExports(source, rel string) (map[string]string, error) {
 	prog, err := parseSourceFile(rel, []byte(source))
 	if err != nil {
 		return nil, err
 	}
-	localFns := map[string]bool{}
+	// bindings maps each top-level binding to its initializer when it is a
+	// single `const`/`let`/`var` (nil otherwise), so `export { n }` can be
+	// judged by what `n` was declared as.
+	bindings := map[string]ast.Expr{}
+	classes := map[string]bool{}
+	for _, stmt := range prog.Body {
+		collectActionBindings(stmt, bindings, classes)
+	}
+
 	exports := map[string]string{}
 	addExport := func(name string) error {
 		name = strings.TrimSpace(name)
@@ -258,96 +307,97 @@ func parseActionExports(source, rel string) (map[string]string, error) {
 		exports[name] = actionID(rel, name)
 		return nil
 	}
-	recordFn := func(name string) error {
-		localFns[name] = true
-		return addExport(name)
+	notFunction := func(pos ast.Pos, name, what string) error {
+		return diag.New(rel, pos.Line, pos.Col,
+			fmt.Sprintf("server action module exports %s %q; every export must be a function", what, name),
+			"export an async function (or a call that returns one, such as a wrapper), or move the value into a module without \"use server\"", "").WithCode(diag.CodeActionExportNotFunction)
 	}
 
 	for _, stmt := range prog.Body {
-		switch s := stmt.(type) {
-		case *ast.FnDecl:
-			if s.Name != "" {
-				localFns[s.Name] = true
-			}
-			if s.Export {
-				if err := recordFn(s.Name); err != nil {
+		s, ok := stmt.(*ast.ExportStmt)
+		if !ok {
+			continue
+		}
+		if s.StarReexport || s.Namespace != "" {
+			return nil, diag.New(rel, s.Position.Line, s.Position.Col,
+				"a \"use server\" module cannot use `export *` or `export * as`",
+				"name the actions you re-export: export { save } from \"./other\"", "").WithCode(diag.CodeActionReexport)
+		}
+		if s.ReexportSource != "" {
+			for _, n := range s.ReexportNamed {
+				remote := n.Remote
+				if remote == "" {
+					remote = n.Local
+				}
+				if err := addExport(remote); err != nil {
 					return nil, err
 				}
+			}
+			continue
+		}
+		switch d := s.Declaration.(type) {
+		case nil:
+		case *ast.FnDecl:
+			name := d.Name
+			if s.Default || name == "" {
+				name = "default"
+			}
+			if err := addExport(name); err != nil {
+				return nil, err
 			}
 		case *ast.VarStmt:
-			for _, d := range s.Decls {
-				if d != nil && d.Name != "" && isFunctionExpr(d.Init) {
-					localFns[d.Name] = true
+			for _, vd := range d.Decls {
+				if vd == nil || (vd.Name == "" && !vd.IsDestructuring) {
+					continue
 				}
-			}
-		case *ast.ExportStmt:
-			if s.ReexportSource != "" || s.StarReexport || s.Namespace != "" {
-				return nil, diag.New(rel, s.Position.Line, s.Position.Col,
-					"a \"use server\" module cannot re-export from another module",
-					"import the function and re-declare it as an export of this file", "").WithCode(diag.CodeActionReexport)
-			}
-			if s.Declaration != nil {
-				switch d := s.Declaration.(type) {
-				case *ast.FnDecl:
-					if d.Name != "" {
-						localFns[d.Name] = true
-					}
-					name := d.Name
-					if s.Default || name == "" {
-						name = "default"
-					}
-					if err := addExport(name); err != nil {
-						return nil, err
-					}
-				case *ast.VarStmt:
-					for _, vd := range d.Decls {
-						if vd == nil || vd.Name == "" {
-							continue
-						}
-						if !isFunctionExpr(vd.Init) {
-							return nil, diag.New(rel, s.Position.Line, s.Position.Col,
-								fmt.Sprintf("server action module exports non-function %q; every export must be a function", vd.Name),
-								"export an async function, or move the value into a module without \"use server\"", "").WithCode(diag.CodeActionExportNotFunction)
-						}
-						localFns[vd.Name] = true
-						name := vd.Name
-						if s.Default {
-							name = "default"
-						}
-						if err := addExport(name); err != nil {
-							return nil, err
-						}
-					}
-				case *ast.ExprStmt:
-					if !isFunctionExpr(d.Expression) {
-						return nil, fmt.Errorf("server action file %s has an unsupported default export", rel)
-					}
-					if err := addExport("default"); err != nil {
-						return nil, err
-					}
-				default:
+				if vd.IsDestructuring {
 					return nil, diag.New(rel, s.Position.Line, s.Position.Col,
-						"server action module exports a non-function declaration",
-						"export only async functions from a \"use server\" module", "").WithCode(diag.CodeActionExportNotFunction)
+						"server action module exports a destructured binding; every export must be a named function",
+						"export each action as its own `export const name = ...`", "").WithCode(diag.CodeActionExportNotFunction)
 				}
-			}
-			if len(s.Named) > 0 {
-				for _, n := range s.Named {
-					if !localFns[n.Local] {
-						return nil, fmt.Errorf("server action file %s exports %q, but it is not a function declared in this file", rel, n.Local)
-					}
-					if err := addExport(n.Remote); err != nil {
-						return nil, err
-					}
+				if neverCallable(vd.Init) {
+					return nil, notFunction(s.Position, vd.Name, "non-function")
 				}
-			}
-			if s.Local != "" {
-				if !localFns[s.Local] {
-					return nil, fmt.Errorf("server action file %s default-exports %q, but it is not a function declared in this file", rel, s.Local)
+				name := vd.Name
+				if s.Default {
+					name = "default"
 				}
-				if err := addExport("default"); err != nil {
+				if err := addExport(name); err != nil {
 					return nil, err
 				}
+			}
+		case *ast.ClassDecl:
+			return nil, notFunction(s.Position, d.Name, "the class")
+		case *ast.ExprStmt:
+			if neverCallable(d.Expression) {
+				return nil, notFunction(s.Position, "default", "a non-function default")
+			}
+			if err := addExport("default"); err != nil {
+				return nil, err
+			}
+		default:
+			return nil, diag.New(rel, s.Position.Line, s.Position.Col,
+				"server action module exports a non-function declaration",
+				"export only functions (or calls that return one) from a \"use server\" module", "").WithCode(diag.CodeActionExportNotFunction)
+		}
+		for _, n := range s.Named {
+			if err := checkLocalActionExport(rel, s.Position, n.Local, bindings, classes, notFunction); err != nil {
+				return nil, err
+			}
+			remote := n.Remote
+			if remote == "" {
+				remote = n.Local
+			}
+			if err := addExport(remote); err != nil {
+				return nil, err
+			}
+		}
+		if s.Declaration == nil && s.Default && s.Local != "" {
+			if err := checkLocalActionExport(rel, s.Position, s.Local, bindings, classes, notFunction); err != nil {
+				return nil, err
+			}
+			if err := addExport("default"); err != nil {
+				return nil, err
 			}
 		}
 	}
@@ -357,14 +407,89 @@ func parseActionExports(source, rel string) (map[string]string, error) {
 	return exports, nil
 }
 
-func isFunctionExpr(expr ast.Expr) bool {
-	_, ok := expr.(*ast.ArrowFn)
-	return ok
+// collectActionBindings records the top-level bindings of a module.
+func collectActionBindings(stmt ast.Stmt, bindings map[string]ast.Expr, classes map[string]bool) {
+	switch s := stmt.(type) {
+	case *ast.ExportStmt:
+		if s.Declaration != nil {
+			collectActionBindings(s.Declaration, bindings, classes)
+		}
+	case *ast.FnDecl:
+		if s.Name != "" {
+			bindings[s.Name] = nil
+		}
+	case *ast.ClassDecl:
+		if s.Name != "" {
+			bindings[s.Name] = nil
+			classes[s.Name] = true
+		}
+	case *ast.VarStmt:
+		for _, d := range s.Decls {
+			if d == nil {
+				continue
+			}
+			if d.IsDestructuring {
+				for _, n := range d.Names {
+					bindings[n] = nil
+				}
+				continue
+			}
+			if d.Name != "" {
+				bindings[d.Name] = d.Init
+			}
+		}
+	case *ast.ImportStmt:
+		if s.Default != "" {
+			bindings[s.Default] = nil
+		}
+		if s.Namespace != "" {
+			bindings[s.Namespace] = nil
+		}
+		for _, n := range s.Named {
+			local := n.Local
+			if local == "" {
+				local = n.Remote
+			}
+			bindings[local] = nil
+		}
+	}
+}
+
+func checkLocalActionExport(rel string, pos ast.Pos, local string, bindings map[string]ast.Expr, classes map[string]bool,
+	notFunction func(ast.Pos, string, string) error) error {
+	init, ok := bindings[local]
+	if !ok {
+		return diag.New(rel, pos.Line, pos.Col,
+			fmt.Sprintf("server action module exports %q, but it is not declared in this file", local),
+			"export a function declared or imported in this file", "").WithCode(diag.CodeActionExportNotFunction)
+	}
+	if classes[local] {
+		return notFunction(pos, local, "the class")
+	}
+	if neverCallable(init) {
+		return notFunction(pos, local, "non-function")
+	}
+	return nil
+}
+
+// neverCallable reports whether an expression can only produce a value that is
+// not a function (a literal, object, array, template, class or JSX element).
+// Anything else, a call, identifier or conditional, might be a function and is
+// checked when the module loads.
+func neverCallable(expr ast.Expr) bool {
+	switch e := expr.(type) {
+	case *ast.Literal, *ast.ObjectExpr, *ast.ArrayExpr, *ast.TemplateExpr, *ast.ClassExpr, *ast.JSXElement, *ast.JSXFragment:
+		return true
+	case *ast.TypeAssertion:
+		return neverCallable(e.Expr)
+	case *ast.ParenExpr:
+		return neverCallable(e.Expr)
+	}
+	return false
 }
 
 func actionID(rel, export string) string {
-	sum := sha256.Sum256([]byte("krate:action:v1:" + filepath.ToSlash(rel) + "\x00" + export))
-	return "a" + hex.EncodeToString(sum[:9])
+	return inlineaction.ID(rel, export)
 }
 
 func (b *Builder) actionModules() map[string]map[string]string {

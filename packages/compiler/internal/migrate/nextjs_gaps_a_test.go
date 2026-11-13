@@ -291,15 +291,20 @@ func TestGeneratedConfigEntry(t *testing.T) {
 	}
 }
 
-func TestInlineUseServerIsFlagged(t *testing.T) {
+func TestInlineUseServerIsFlaggedOnlyInClientModules(t *testing.T) {
 	root := gapsProject(t, map[string]string{
 		"app/page.tsx": `import { SignOut } from "./sign-out";
 export default function P() { return <SignOut />; }`,
-		"app/sign-out.tsx": `export function SignOut() {
+		"app/sign-out.tsx": `"use client";
+export function SignOut() {
   async function signOutAction() {
     'use server'
     await signOut();
   }
+  return <form action={signOutAction}><button>out</button></form>;
+}`,
+		"app/server-sign-out.tsx": `export function ServerSignOut() {
+  async function signOutAction() { 'use server'; await signOut(); }
   return <form action={signOutAction}><button>out</button></form>;
 }`,
 		"app/actions.ts":  "'use server'\nexport async function ok() {}\n",
@@ -314,6 +319,9 @@ export default function P() { return <SignOut />; }`,
 	}
 	if !hasManualHint(rep, "app/sign-out.tsx", `first statement is "use server"`) {
 		t.Errorf("hint missing: %+v", rep.Manual)
+	}
+	if hasManual(rep, "app/server-sign-out.tsx", "KR7001") {
+		t.Errorf("an inline action in a server module is hoisted by the build and must not be flagged: %+v", rep.Manual)
 	}
 	for _, m := range rep.Manual {
 		if strings.Contains(m.Reason, "KR7001") && (m.Source == "app/actions.ts" || m.Source == "app/strings.tsx") {
@@ -454,11 +462,12 @@ func TestGeneratedConfigKeepsHTMLUnescaped(t *testing.T) {
 	}
 }
 
-func TestInlineUseServerInSharedModuleIsFlagged(t *testing.T) {
+func TestInlineUseServerInSharedClientModuleIsFlagged(t *testing.T) {
 	root := gapsProject(t, map[string]string{
 		"tsconfig.json":    `{"compilerOptions":{"baseUrl":".","paths":{"@/*":["./src/*"]}}}`,
 		"src/app/page.tsx": `import { SignOut } from "@/components/SignOut"; export default function P() { return <SignOut/>; }`,
-		"src/components/SignOut.tsx": `export function SignOut() {
+		"src/components/SignOut.tsx": `"use client";
+export function SignOut() {
   async function signOutAction() { "use server"; }
   return <form action={signOutAction}><button>out</button></form>;
 }

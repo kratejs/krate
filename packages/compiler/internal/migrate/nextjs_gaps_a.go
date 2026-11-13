@@ -233,9 +233,11 @@ func addAPIRewrites(next *nextConfigData, rep *Report) {
 	}
 }
 
-// flagInlineUseServer adds a manual item for every copied file that defines a
-// server action inline (a "use server" directive inside a function body). The
-// build rejects these with KR7001.
+// flagInlineUseServer adds a manual item for every copied "use client" file
+// that defines a server action inline (a "use server" directive inside a
+// function body). Krate hoists inline actions of server components itself;
+// in a client module they are invalid in Next.js too, and the build rejects
+// them with KR7001.
 func flagInlineUseServer(rep *Report) {
 	for _, f := range rep.Files {
 		switch f.Kind {
@@ -253,7 +255,7 @@ func flagInlineUseServer(rep *Report) {
 			continue
 		}
 		pos, ok := bundler.FindInlineUseServer(prog)
-		if !ok {
+		if !ok || !bundler.HasUseClientDirective(src) {
 			continue
 		}
 		source := f.Source
@@ -262,8 +264,8 @@ func flagInlineUseServer(rep *Report) {
 		}
 		rep.Manual = append(rep.Manual, ManualItem{
 			Source: source,
-			Reason: fmt.Sprintf(`inline "use server" function (line %d) is not supported and fails the build with KR7001`, pos.Line),
-			Hint:   `move the function into a module whose first statement is "use server", export it, and import it where it is used`,
+			Reason: fmt.Sprintf(`inline "use server" function (line %d) in a "use client" module fails the build with KR7001`, pos.Line),
+			Hint:   `move the function into a server component, or into a module whose first statement is "use server", export it, and import it where it is used`,
 		})
 	}
 }

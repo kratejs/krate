@@ -319,12 +319,15 @@
       "islands": "n/a",
       "ssr": "supported",
       "target": "Progressive enhancement",
-      "summary": "File-level \"use server\" modules compile to hashed POST endpoints with client proxies, bound arguments, no-JS form posts, SSR forms, registry validation, origin checks, body limits, and no-store responses. Enhanced forms return results without reloading; errors use a {message, digest} envelope; actions read headers() and cookies() and can redirect(). Inline \"use server\" functions are a coded build error (KR7001).",
+      "summary": "File-level \"use server\" modules compile to hashed POST endpoints with client proxies, bound arguments, no-JS form posts, SSR forms, registry validation, origin checks, body limits, and no-store responses. Enhanced forms return results without reloading; errors use a {message, digest} envelope; actions read headers() and cookies() and can redirect(). Exports built by a wrapper (createAction(...)) are checked when the module loads. Inline \"use server\" functions in server components are hoisted into generated actions, with the values they close over sealed per request (async components); in a client module they are a coded build error (KR7001).",
       "tests": [
         "TestPrepareActionsBuildsManifestAndBundle",
         "TestRewriteActionImports",
         "TestActionSidecarTransport",
         "TestActionHandlerSecurity",
+        "TestWrapperBuiltActionsRunInSidecar",
+        "TestInlineServerActionsE2E",
+        "TestInlineServerActionStaticPage",
         "fixture:examples/src/pages/react-actions.tsx",
         "browser:/react-actions/"
       ],
