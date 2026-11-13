@@ -1192,9 +1192,21 @@ interaction it was clicked or typed into.
 | usehooks-ts | works: `useCounter`, `useToggle` | 3.1.1 |
 | recharts, Headless UI | work (they need `import React from "react"`) | 2.15.4, 2.2.10 |
 | framer-motion | works: `motion.*` and `useAnimation` | 11.18.2 |
+| motion (`motion/react`, v12 and later) | works: `motion.*` with `initial`/`animate`/`transition`, `AnimatePresence` with an exit animation. Building logs the warning KR7116, which does not affect the result | 14.14.0 |
+| cmdk | works: `Command`, `Command.Input`, `Command.List`, `Command.Item` filtering as you type, `Command.Empty` | 1.1.1 |
+| embla-carousel-react | works: `useEmblaCarousel`, snap list, `scrollNext()` | 8.6.0 |
+| @dnd-kit | works: `DndContext`, `SortableContext`, `useSortable` with the pointer sensor, reordering through a real drag | core 6.3.1, sortable 10.0.0 |
+| next-themes | partly: `ThemeProvider` and `useTheme` switch the `<html>` class and theme state when the provider is in the island's module; a provider in a layout is not lifted (KR8016) | 0.4.6 |
+| sonner | partly: `toast()` and `<Toaster />` work when both are in one island module; a component that only calls `toast()` fails to build (`cannot bundle "sonner"`), so the usual root-layout `<Toaster />` plus `toast()` elsewhere does not work yet | 2.0.8 |
 | styled-components, `@emotion/styled`, emotion `css` prop, MUI `Button` | work, client-only (see below); a `ThemeProvider` in a layout reaches them | 6.6.0, 11.14.1, 11.14.0, 9.5.0 |
 
-These were run by hand against the real packages. The repository tests run
+These were run by hand against the real packages. `TestBrowserEcosystemLibraries`
+repeats the checks for motion, cmdk, embla-carousel-react, @dnd-kit,
+TanStack Table, next-themes and sonner against the pinned versions in
+`packages/compiler/internal/build/testdata/ecosystem_libs/package.json`; it is
+skipped unless `KRATE_BROWSER` is set and either `KRATE_ECOSYSTEM_LIBS` points
+at a `node_modules` directory holding them or `KRATE_ECOSYSTEM_INSTALL=1` lets
+it run `npm install`. The other repository tests run
 stand-ins with the same import shapes (default `import React`, namespace
 import, `require("react")`) and the same behavior (a store with module-level
 state, a query client with a context provider, a theme provider), because the

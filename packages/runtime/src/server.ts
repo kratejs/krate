@@ -8,6 +8,8 @@ import { highlight as highlightCode, trimSpace } from './highlight.js';
 export { getActionContext, headers, cookies, redirect } from './action-context.js';
 export type { ActionContext, ActionCookies, ActionCookieOptions } from './action-context.js';
 export { revalidatePath, revalidateTag, unstable_cache, unstable_noStore } from './cache.js';
+export { after } from './after.js';
+export type { AfterTask, KrateRequest, KrateRequestCookies, KrateNextURL } from './after.js';
 export type { RevalidatePathType, UnstableCacheOptions } from './cache.js';
 export { getRequestContext, notFound, forbidden, unauthorized } from './request-context.js';
 export {

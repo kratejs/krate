@@ -70,7 +70,8 @@ in the test suite):
   invalid URL throws), `AbortController`/`AbortSignal`, `ReadableStream`.
 - `request.json()`, `.text()`, `.formData()`, `.arrayBuffer()` and `.blob()`
   return promises, so `await req.json().catch(() => null)` works.
-  `request.cookies.get(name)` is available as in Next.js.
+  `request.cookies` (`get`, `getAll`, `has`, read-only) and `request.nextUrl`
+  (a `URL` with `basePath` and `clone()`) are available as in Next.js.
 - `TextEncoder`/`TextDecoder` (UTF-8), `atob`/`btoa`, `structuredClone`,
   `queueMicrotask`, `performance.now()`, real `setTimeout`/`setInterval`
   (handlers can `await new Promise((r) => setTimeout(r, 100))`), `fetch`, and
@@ -148,6 +149,35 @@ export default function handler(req, res) {
   res.json({ message: 'legacy pattern' });
 }
 ```
+
+## After the response
+
+`after(task)` from `@krate/runtime/server` mirrors `after()` in `next/server`:
+it schedules work, a function or a promise, to run once the response has been
+sent, for logging, analytics or warming a cache. Tasks run in registration
+order, a task that throws is logged and does not stop the next one, and
+`revalidatePath`/`revalidateTag` calls made inside a task are applied when the
+tasks finish.
+
+```ts
+import { after } from "@krate/runtime/server";
+
+export async function POST(request: Request) {
+  const body = await request.json();
+  after(async () => {
+    await fetch("https://metrics.example.com/events", { method: "POST", body: JSON.stringify(body) });
+  });
+  return Response.json({ ok: true });
+}
+```
+
+On the Node, Bun and Deno sidecars and in the portable serverless handler the
+tasks start after the handler has returned its response (the serverless handler
+passes them to the platform's `waitUntil`). The embedded QuickJS runtime has no
+request-scoped store: there `after()` runs the task on the next microtask turn,
+which is right after the handler settles but may be cut short when the response
+finishes the request. Use the Node runtime (`ssr.apiRuntime: "node"`) for work
+that must complete.
 
 ## Go routes
 

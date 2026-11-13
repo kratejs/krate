@@ -20,6 +20,7 @@ import {
   type RenderRequest,
   type SSRCore,
 } from "./ssr-core.js";
+import { runAfterTasks } from "./after.js";
 import { cacheRuntime, installRenderStore, patchFetch, type RevalidateScope } from "./cache-scope.js";
 import {
   allSuspense,
@@ -361,7 +362,7 @@ function requestCookiesOf(headers: Headers): Map<string, string> {
   return jar;
 }
 
-function attachCookies(request: Request): Request {
+function attachCookies(request: Request, basePath = ""): Request {
   try {
     const jar = requestCookiesOf(request.headers);
     Object.defineProperty(request, "cookies", {
@@ -372,10 +373,19 @@ function attachCookies(request: Request): Request {
       },
       enumerable: false,
     });
+    Object.defineProperty(request, "nextUrl", { value: makeNextUrl(request.url, basePath), enumerable: false });
   } catch {
     // frozen request objects keep working without the cookies accessor
   }
   return request;
+}
+
+/** A URL carrying Next's NextURL extras: basePath (pathname never includes it) and clone(). */
+function makeNextUrl(href: string, basePath: string): URL {
+  const u = new URL(href);
+  Object.defineProperty(u, "basePath", { value: basePath, enumerable: false });
+  Object.defineProperty(u, "clone", { value: () => makeNextUrl(u.href, basePath), enumerable: false });
+  return u;
 }
 
 const sleepMicrotask = () => Promise.resolve();
@@ -602,7 +612,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     if (matchers && !matchers.some((re) => re.test(p))) return null;
     let result: any;
     try {
-      const request = attachCookies(new Request(fullURL(rs), { method: rs.method, headers: new Headers(rs.request.headers) }));
+      const request = attachCookies(new Request(fullURL(rs), { method: rs.method, headers: new Headers(rs.request.headers) }), basePath);
       result = await handler(request);
     } catch (e) {
       return middlewareFailed(rs, e);
@@ -1517,10 +1527,19 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
           body: body && body.byteLength > 0 ? (body as unknown as BodyInit) : undefined,
           signal: rs.request.signal,
         }),
+        basePath,
       );
       const scope: RevalidateScope = { kind: "api", paths: [], tags: [] };
       const out = await revalidateStore.run(scope, async () => toResponse(await fn(request, { params: apiRouteParams(file, rs.path) })));
       await flushRevalidate(scope);
+      if (scope.after && scope.after.length > 0) {
+        // after() tasks start once this handler has returned the response.
+        const later = new Promise<void>((resolve) => setTimeout(resolve, 0)).then(async () => {
+          await revalidateStore.run(scope, () => runAfterTasks(scope));
+          await flushRevalidate(scope).catch((e) => console.error(`[krate] revalidation after() failed: ${e}`));
+        });
+        if (latestWaitUntil) latestWaitUntil(later);
+      }
       writeHeaderPairs(rs.res, headerPairs(out.headers));
       const status = out.status < 100 || out.status > 999 ? 502 : out.status;
       if (headOnly || rs.method === "HEAD" || !out.body || NO_BODY_STATUS.has(status)) {

@@ -56,6 +56,19 @@ function newRevalidateScope(kind) {
   return { kind, paths: [], tags: [] };
 }
 
+// krateRunAfter runs the tasks an API route registered with after(), in order,
+// once its response has been sent. A failing task is logged and does not stop
+// the next one; revalidations they queue are applied at the end.
+async function krateRunAfter(scope) {
+  if (!scope || !scope.after || scope.after.length === 0) return;
+  await REVALIDATE_STORE.run(scope, async () => {
+    for (let task; (task = scope.after.shift()); ) {
+      try { await task(); } catch (e) { console.error('[krate] after() task failed: ' + ((e && e.stack) || e)); }
+    }
+  });
+  try { await flushRevalidate(scope); } catch (e) { console.error('[krate] revalidation after() failed: ' + ((e && e.message) || e)); }
+}
+
 // flushRevalidate applies a request's queued revalidations on the host and
 // resolves with {paths, tags} (null when nothing was queued). It throws when
 // the host cannot be reached or refuses, so the request fails loudly.

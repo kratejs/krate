@@ -42,6 +42,8 @@ export interface RevalidateScope {
   kind: string;
   paths: Array<{ path: string; type: 'page' | 'layout' }>;
   tags: string[];
+  /** Tasks registered with after(); the host runs them once the response is sent. */
+  after?: Array<() => unknown>;
 }
 
 interface DataEntry {

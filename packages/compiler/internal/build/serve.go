@@ -325,6 +325,7 @@ const server = http.createServer(async (req, res) => {
         }));
 
         const revalidateScope = newRevalidateScope('api');
+        res.once('finish', () => { krateRunAfter(revalidateScope); });
         const response = await REVALIDATE_STORE.run(revalidateScope, () => methodHandler(request, { params: routeParamsValue }));
         // revalidatePath/revalidateTag calls are applied before responding.
         await flushRevalidate(revalidateScope);
@@ -711,6 +712,8 @@ Bun.serve({
       const out = await REVALIDATE_STORE.run(revalidateScope, async () => ((fn.length >= 2 && !namedHandler) ? legacyInvoke(fn, req, url) : toResponse(await fn(request, { params: routeParamsValue }))));
       // revalidatePath/revalidateTag calls are applied before responding.
       await flushRevalidate(revalidateScope);
+      // after() tasks start once the handler has returned the response.
+      setTimeout(() => { krateRunAfter(revalidateScope); }, 0);
       if (picked.headOnly) return new Response(null, { status: out.status, headers: out.headers });
       return out;
     } catch (e) {
@@ -1461,6 +1464,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 					fmt.Sprintf("KRATE_API_DEV=%d", boolToInt(hub != nil)),
 					fmt.Sprintf("KRATE_ACTION_MAX_BODY=%d", apiBodyLimit),
 					fmt.Sprintf("KRATE_PARENT_PID=%d", os.Getpid()),
+					"KRATE_BASE_PATH="+cfg.BaseURLPath(),
 				)
 				cmd.Env = append(cmd.Env, revalHost.EnvList()...)
 				if cacheRuntime != "" {

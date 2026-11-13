@@ -166,7 +166,36 @@ The first pass:
   listed as manual work. `next/headers` and `next/cache` map to
   `@krate/runtime/server`, rewrites common `next/server` API helpers, and maps
   simple `next/dynamic` loaders to React `lazy()`;
-- maps `next/font/google` to a generated helper and Google Fonts CSS;
+- keeps `NextRequest` features in route handlers: the `Request` has
+  `request.cookies` (`get`, `getAll`, `has`, read-only) and `request.nextUrl`
+  (a `URL` with `searchParams`, `pathname`, `basePath` and `clone()`; the
+  pathname never includes the base path), and the handler is typed as
+  `KrateRequest` from `@krate/runtime/server`. `NextResponse.json` and
+  `NextResponse.redirect` come from a small generated shim whose responses carry
+  `cookies.set/delete/get/getAll/has`. `after()` from `next/server` becomes
+  `after` from `@krate/runtime/server` and runs once the response is sent (see
+  [API routes](/docs/features/api-routes/#after-the-response)). Only what is
+  left is manual work: `request.cookies.set/delete`, `request.ip`,
+  `request.geo`, `NextResponse.rewrite/next`, and other `next/server` helpers
+  such as `userAgent`;
+- maps `next/font/google` to a generated helper and Google Fonts CSS, and
+  `next/font/local` plus `geist/font/sans` and `geist/font/mono` to self-hosted
+  `@font-face` CSS: each `localFont({ src, weight, style, variable, display,
+  declarations, fallback })` call (a single `src` or an array of `{ path, weight,
+  style }`, all literals) is replaced by an inline `{ className, variable, style }`
+  object, the font files are copied to `public/migrated-fonts/`, and the rules go
+  to `src/migrated/next-fonts.css`, which the file imports. `GeistSans` and
+  `GeistMono` use the variable font files shipped in the installed `geist`
+  package. `adjustFontFallback` and `preload` are ignored (Krate does not
+  generate size-adjusted fallbacks). A call with a computed option or an
+  imported `src` stays on `next/font/local` and is reported as manual work;
+  the other Geist fonts (`pixel`, `serif`, `*-non-variable`) are not mapped;
+- drops route segment config that only steers Vercel (`runtime`, `maxDuration`,
+  `preferredRegion`) with an info note per file and one aggregated warning, since
+  Krate self-hosts on Node. Krate has no per-route time limit: the API proxy
+  fails a handler that sends no headers within 30 seconds, so a `maxDuration`
+  above 30 is called out. `fetchCache` is kept and reported as one aggregated
+  manual item (set the cache option on the `fetch` calls that relied on it);
 - creates `krate.config.ts` when the project has none, or merges missing
   Next-derived keys into an existing config (existing keys win);
 - merges/generates `tsconfig.json` for Krate JSX and route types;
@@ -219,11 +248,10 @@ Router fixture also runs the browser conformance suite.
 
 The migrator intentionally reports manual work instead of guessing:
 async/class page defaults with `generateMetadata`, `getStaticProps`/
-`getServerSideProps`, middleware response rewrites, local font files, async
+`getServerSideProps`, middleware response rewrites, local font files with computed options, async
 layouts (move the data fetching into an async child component), `next/cache`
 exports without an equivalent (`updateTag`, `cacheLife`, `cacheTag`, `"use cache"`),
-route segment config without an equivalent (`runtime`, `preferredRegion`,
-`fetchCache`, `maxDuration`), a `default.tsx` outside a parallel-route slot, nested
+`fetchCache` route segment config, a `default.tsx` outside a parallel-route slot, nested
 `not-found`, unresolved relative imports, and function/plugin
 `next.config.*` files (or keys of one) are not rewritten automatically. Resolve those before
 running `krate build`. `useSelectedLayoutSegment(s)` count from the layout whose
