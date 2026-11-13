@@ -4184,9 +4184,9 @@ func (b *Builder) BuildMiddleware() error {
 
 	if len(result.Errors) > 0 {
 		for _, e := range result.Errors {
-			fmt.Fprintf(os.Stderr, "  %sMiddleware error:%s %s\n", cRed, cReset, e.Text)
+			fmt.Fprintf(os.Stderr, "  %sMiddleware error:%s %s\n", cRed, cReset, nativeAddonHint(e.Text))
 		}
-		return fmt.Errorf("middleware build failed: %s", result.Errors[0].Text)
+		return fmt.Errorf("middleware build failed: %s", nativeAddonHint(result.Errors[0].Text))
 	}
 
 	if len(result.OutputFiles) == 0 {
@@ -5100,7 +5100,7 @@ func (b *Builder) compileSingleRoute(file string, apiSrcDir string) (apiRouteMet
 		Bundle:      true,
 		Platform:    api.PlatformNode,
 		Format:      api.FormatESModule,
-		Packages:    api.PackagesExternal,
+		Plugins:     []api.Plugin{externalNodeModulesPlugin()},
 		Outfile:     nodePath,
 		Write:       true,
 		Sourcemap:   sourceMapMode(b.Cfg.Sourcemap),
@@ -5116,7 +5116,9 @@ func (b *Builder) compileSingleRoute(file string, apiSrcDir string) (apiRouteMet
 		nodeOpts.MinifySyntax = true
 	}
 
-	quickjsResult := esbuildBuild(quickjsOpts)
+	// Packages with native addons (and serverExternalPackages) stay external
+	// here, which marks the route Node-only below.
+	quickjsResult, _ := buildExternalizingNative(quickjsOpts, b.Cfg.ServerExternalPackages)
 	if len(quickjsResult.Errors) > 0 {
 		return apiRouteMeta{}, fmt.Errorf("esbuild compilation failed:\n%s", formatEsbuildErrors(quickjsResult.Errors))
 	}

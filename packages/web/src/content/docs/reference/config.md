@@ -863,6 +863,44 @@ On `SIGINT`/`SIGTERM` the server stops accepting connections, lets in-flight
 requests finish for `shutdownTimeout` seconds (default 15), then stops its
 sidecars and exits with status 0. A second signal exits immediately.
 
+## Server packages, traced files and env directory
+
+```typescript
+serverExternalPackages: ["sharp", "@napi-rs/canvas"],  // stay in node_modules at run time
+outputFileTracingIncludes: {                           // extra files for the node deploy output
+  "*": ["assets/fonts/**", "workers/image.js"],
+  "/api/og": ["node_modules/@resvg/resvg-js-*/**"],
+},
+envDir: "../..",                                       // where .env files are read from
+```
+
+- `serverExternalPackages` lists npm packages that server bundles do not
+  bundle: API routes compiled for the embedded runtime (a route that imports one
+  becomes Node-only and runs on the Node sidecar) and the `node` deploy bundle,
+  which imports them from a `node_modules` it writes next to `server.mjs`.
+  A package that contains a native `.node` addon is detected and handled the
+  same way without being listed. Entries are package names, not paths. The
+  platform deploy targets (Vercel, Netlify, Cloudflare) bundle everything and
+  refuse a native addon with an error that names the package. See
+  [Self-hosting](/docs/guides/self-hosting/).
+- `outputFileTracingIncludes` maps a route key (kept for compatibility with
+  Next.js, any key works) to globs of project files that `krate deploy --target
+  node` copies next to `server.mjs` at their project-relative paths, and that
+  `--target docker` carries into the image. Globs are relative to the project
+  root (`*`, `?`, `[a-z]` and `**` are supported), may not be absolute or contain
+  `..`, and are checked against the project root when files are copied. Use it
+  for files that import tracing cannot see: a worker entry loaded by path, a
+  platform binary chosen by a computed `require`.
+- `envDir` is the directory the `.env`, `.env.<mode>`, `.env.local` and
+  `.env.<mode>.local` files are read from. A relative path resolves against the
+  project root and may point at a parent directory, such as a monorepo root; it
+  must exist. It applies to `krate dev`, `build`, `serve`, `start` and `deploy`,
+  to `krate.config.ts` itself (the config is evaluated again with the variables
+  from `envDir`) and to everything that reads `process.env` at build or serve
+  time. `KRATE_PUBLIC_*` values are still the only ones inlined into client code.
+  Changes to files in `envDir` outside the project are not watched by `krate
+  dev`; restart it.
+
 ## CORS
 
 ```typescript

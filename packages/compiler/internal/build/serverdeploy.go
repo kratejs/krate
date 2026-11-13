@@ -607,8 +607,14 @@ func BuildServerBundle(root string, cfg *config.Config, target string) (*deploy.
 	if err := os.MkdirAll(filepath.Dir(outFile), 0755); err != nil {
 		return nil, err
 	}
-	if err := bundleServerEntry(root, cfg, target, entry, outFile); err != nil {
+	externals, err := bundleServerEntry(root, cfg, target, entry, outFile)
+	if err != nil {
 		return nil, err
+	}
+	if target == "node" {
+		if err := traceNodeServer(root, cfg, filepath.Dir(outFile), externals, plan); err != nil {
+			return nil, err
+		}
 	}
 	plan.Bundle = outFile
 	return plan, nil
@@ -895,10 +901,13 @@ func pathWithin(dir, p string) bool {
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
-func bundleServerEntry(root string, cfg *config.Config, target, entry, outFile string) error {
+// bundleServerEntry bundles the generated entry. For the node target it also
+// returns the packages left external, which must be installed next to the
+// bundle (see serverTrace).
+func bundleServerEntry(root string, cfg *config.Config, target, entry, outFile string) ([]string, error) {
 	rt, err := runtimePlugin(root)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	entry = strings.NewReplacer("__SHUTDOWN__", fmt.Sprint(cfg.Server.ShutdownTimeout), "__PORT__", fmt.Sprint(cfg.ServerPort())).Replace(entry)
 	opts := api.BuildOptions{
@@ -938,7 +947,20 @@ func bundleServerEntry(root string, cfg *config.Config, target, entry, outFile s
 		}
 		opts.Banner = map[string]string{"js": "import { createRequire as __krateCreateRequire } from 'node:module'; const require = __krateCreateRequire(" + anchor + ");"}
 	}
-	res := esbuildBuild(opts)
+	opts.Metafile = true
+	var res api.BuildResult
+	var detected []string
+	if target == "node" {
+		res, detected = buildExternalizingNative(opts, cfg.ServerExternalPackages)
+	} else {
+		opts.Plugins = append(opts.Plugins, nativeAddonPlugin(&nativeAddons{}, func(pkg, file string) string {
+			if pkg == "" {
+				return fmt.Sprintf("%s is a native addon and cannot be bundled for %s", file, target)
+			}
+			return fmt.Sprintf("package %q contains a native addon (%s), which the %s target cannot run: it bundles all code into one file. Deploy with --target node or docker (they keep native packages in node_modules)", pkg, filepath.Base(file), target)
+		}))
+		res = esbuildBuild(opts)
+	}
 	if len(res.Errors) > 0 {
 		var msgs []string
 		for _, e := range res.Errors {
@@ -948,7 +970,47 @@ func bundleServerEntry(root string, cfg *config.Config, target, entry, outFile s
 			}
 			msgs = append(msgs, m)
 		}
-		return fmt.Errorf("server bundle for %s failed:\n  %s", target, strings.Join(msgs, "\n  "))
+		return nil, fmt.Errorf("server bundle for %s failed:\n  %s", target, strings.Join(msgs, "\n  "))
+	}
+	if target != "node" {
+		return nil, nil
+	}
+	pkgs := map[string]bool{}
+	for _, p := range externalPackagesFromMetafile(res.Metafile) {
+		pkgs[p] = true
+	}
+	for _, p := range append(detected, cfg.ServerExternalPackages...) {
+		pkgs[p] = true
+	}
+	out := make([]string, 0, len(pkgs))
+	for p := range pkgs {
+		out = append(out, p)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// traceNodeServer makes the node target's server directory self-contained: the
+// packages the bundle imports at run time go into node_modules next to
+// server.mjs, and the outputFileTracingIncludes files are copied beside it.
+func traceNodeServer(root string, cfg *config.Config, serverDir string, externals []string, plan *deploy.ServerPlan) error {
+	nm := filepath.Join(serverDir, "node_modules")
+	if err := os.RemoveAll(nm); err != nil {
+		return err
+	}
+	if len(externals) > 0 {
+		tr := newServerTrace(nm)
+		tr.AddPackages(root, externals)
+		plan.Warnings = append(plan.Warnings, tr.Warnings...)
+	}
+	if len(cfg.OutputFileTracingIncludes) > 0 {
+		_, unmatched, err := copyTraceIncludes(root, cfg.OutputFileTracingIncludes, serverDir)
+		if err != nil {
+			return err
+		}
+		for _, g := range unmatched {
+			plan.Warnings = append(plan.Warnings, fmt.Sprintf("outputFileTracingIncludes %q matched no files under %s", g, root))
+		}
 	}
 	return nil
 }

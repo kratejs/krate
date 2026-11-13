@@ -109,10 +109,12 @@ The first pass:
   module, so a helper that builds static headers can be imported there; values
   that depend on the request, such as a CSP nonce, belong in `middleware.ts`.
   Every other `next.config` key gets its own item with a hint instead of one
-  generic warning: `transpilePackages`, `output: 'standalone'`,
-  `serverExternalPackages`, `outputFileTracingIncludes`, computed
+  generic warning: `transpilePackages`, `output: 'standalone'`, computed
   `images.remotePatterns` or `env`, `experimental` flags, and a
-  `loadEnvConfig(...)` call (Krate loads `.env*` from the project root only).
+  `loadEnvConfig(...)` call (point `envDir` at the directory that holds the
+  `.env*` files). A static `serverExternalPackages` list and static
+  `outputFileTracingIncludes` globs are carried over to the Krate keys of the
+  same name (see [Self-hosting](/docs/guides/self-hosting/)); computed ones get an item.
   An `async` page keeps `async` and its wrapper is `async` too, so the
   page renders per request;
 - keeps `export const revalidate`, `dynamic` and `dynamicParams` on pages, which

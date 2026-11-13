@@ -645,17 +645,32 @@ func loadConfig(flags cliFlags, args []string) (string, *config.Config, error) {
 	if flags.Mode != "" {
 		_ = os.Setenv("KRATE_ENV", flags.Mode)
 	}
+	environ.Dir = ""
 	loadProjectEnv(root, defaultMode, flags.Verbose)
 	mode := environ.Mode(defaultMode)
 
 	config.Warnings = nil
-	cfg, err := config.LoadWith(root, config.LoadOptions{
+	loadOpts := config.LoadOptions{
 		ConfigPath: flags.ConfigPath,
 		Command:    command,
 		Mode:       mode,
-	})
+	}
+	cfg, err := config.LoadWith(root, loadOpts)
 	if err != nil {
 		return "", nil, err
+	}
+	if cfg.EnvDir != "" {
+		// envDir moves the .env files: read them from there and evaluate the
+		// config again so a function-form config sees those variables.
+		if fi, serr := os.Stat(cfg.EnvDir); serr != nil || !fi.IsDir() {
+			return "", nil, fmt.Errorf("invalid config: envDir %s is not a directory", cfg.EnvDir)
+		}
+		environ.Dir = cfg.EnvDir
+		loadProjectEnv(root, defaultMode, flags.Verbose)
+		config.Warnings = nil
+		if cfg, err = config.LoadWith(root, loadOpts); err != nil {
+			return "", nil, err
+		}
 	}
 	for _, w := range config.Warnings {
 		fmt.Fprintf(os.Stderr, "  %s! config:%s %s\n", cYellow, cReset, w)

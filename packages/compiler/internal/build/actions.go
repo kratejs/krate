@@ -130,7 +130,7 @@ func (b *Builder) compileActionModule(dir string, mod *actionModule) error {
 		Bundle:        true,
 		Format:        api.FormatESModule,
 		Platform:      api.PlatformNode,
-		Packages:      api.PackagesExternal,
+		Plugins:       []api.Plugin{externalNodeModulesPlugin()},
 		Outfile:       outPath,
 		Write:         true,
 		Sourcemap:     sourceMapMode(b.Cfg.Sourcemap),
