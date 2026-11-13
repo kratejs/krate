@@ -90,6 +90,7 @@ Inline CSS is captured into `<head>`.
 <Link href="/blog" scroll={false}>No scroll-to-top</Link>
 <Link href="https://example.com">External</Link>
 <Link href="/new" target="_blank">New tab</Link>
+<Link href="/pricing" basePath={false}>Outside the base path</Link>
 ```
 
 - **Prefetching** (default on) - `data-prefetch` triggers a prefetch on

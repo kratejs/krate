@@ -845,6 +845,7 @@ func (b *builder) buildLinkSlots(el *ast.JSXElement, parentID string) []SlotNode
 	ariaLabel := ""
 	id := ""
 	external := false
+	noBase := false
 	var forwarded []*ast.JSXAttr
 
 	for _, attr := range el.Opening.Attributes {
@@ -854,6 +855,7 @@ func (b *builder) buildLinkSlots(el *ast.JSXElement, parentID string) []SlotNode
 		}
 		if attr.Value == nil {
 			switch attr.Name {
+			case "basePath":
 			case "prefetch":
 				prefetch = true
 			case "replace":
@@ -877,6 +879,8 @@ func (b *builder) buildLinkSlots(el *ast.JSXElement, parentID string) []SlotNode
 			scroll = val != "false"
 		case "external":
 			external = val == "true"
+		case "basePath":
+			noBase = val == "false"
 		case "className":
 			className = val
 		case "target":
@@ -897,7 +901,9 @@ func (b *builder) buildLinkSlots(el *ast.JSXElement, parentID string) []SlotNode
 		}
 	}
 
-	local := !external && isLocalHref(href) && target != "_blank"
+	// basePath={false}: the URL belongs to another app on the host, so it is
+	// used as written and the router never takes it over.
+	local := !external && !noBase && isLocalHref(href) && target != "_blank"
 
 	var aAttrs []*ast.JSXAttr
 	aAttrs = append(aAttrs, &ast.JSXAttr{Name: "href", Value: &ast.Literal{Kind: ast.StringLit, Value: href}})
@@ -914,6 +920,9 @@ func (b *builder) buildLinkSlots(el *ast.JSXElement, parentID string) []SlotNode
 		}
 	} else {
 		aAttrs = append(aAttrs, &ast.JSXAttr{Name: "data-krate-external", Value: nil})
+		if noBase {
+			aAttrs = append(aAttrs, &ast.JSXAttr{Name: "data-krate-no-base", Value: nil})
+		}
 	}
 	if className != "" {
 		aAttrs = append(aAttrs, &ast.JSXAttr{Name: "class", Value: &ast.Literal{Kind: ast.StringLit, Value: className}})
@@ -937,7 +946,7 @@ func (b *builder) buildLinkSlots(el *ast.JSXElement, parentID string) []SlotNode
 		aAttrs = append(aAttrs, &ast.JSXAttr{Name: "id", Value: &ast.Literal{Kind: ast.StringLit, Value: id}})
 	}
 	aAttrs = append(aAttrs, forwarded...)
-	if h, ok := b.linkHrefWithBase(el); ok {
+	if h, ok := b.linkHrefWithBase(el); ok && !noBase {
 		aAttrs = SetHrefAttr(aAttrs, h)
 	}
 

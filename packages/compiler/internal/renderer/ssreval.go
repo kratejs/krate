@@ -1264,6 +1264,7 @@ func (e *SSREval) evalLink(el *ast.JSXElement) string {
 	prefetch := true
 	replace := false
 	external := false
+	noBase := false
 	scrollFalse := false
 	isFalse := func(v jsvalue.Value) bool {
 		return (v.Kind() == jsvalue.KindBool && !v.BoolValue()) || (v.Kind() == jsvalue.KindString && v.StringValue() == "false")
@@ -1288,6 +1289,10 @@ func (e *SSREval) evalLink(el *ast.JSXElement) string {
 			}
 		case "external":
 			external = true
+		case "basePath":
+			if a.Value != nil && isFalse(e.value(a.Value)) {
+				noBase, external = true, true
+			}
 		case "scroll":
 			if a.Value != nil && isFalse(e.value(a.Value)) {
 				scrollFalse = true
@@ -1300,6 +1305,9 @@ func (e *SSREval) evalLink(el *ast.JSXElement) string {
 	}
 	if external {
 		out = append(out, &ast.JSXAttr{Name: "data-krate-external", Value: nil})
+		if noBase {
+			out = append(out, &ast.JSXAttr{Name: "data-krate-no-base", Value: nil})
+		}
 	} else {
 		out = append(out, &ast.JSXAttr{Name: "data-krate-link", Value: nil})
 		if prefetch {
@@ -1312,7 +1320,7 @@ func (e *SSREval) evalLink(el *ast.JSXElement) string {
 			out = append(out, &ast.JSXAttr{Name: "data-krate-scroll", Value: &ast.Literal{Kind: ast.StringLit, Value: "false"}})
 		}
 	}
-	if h, ok := e.linkHrefWithBase(el); ok {
+	if h, ok := e.linkHrefWithBase(el); ok && !noBase {
 		out = irtree.SetHrefAttr(out, h)
 	}
 	clone := &ast.JSXElement{

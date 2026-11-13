@@ -847,6 +847,25 @@ they point outside the site. A literal value gives a
 [`KR7144`](/docs/reference/diagnostics/#kr7144) build warning: use `<Link>`, or
 `<Image>` or an import. A value computed at run time gets no warning.
 
+### Linking to the rest of the domain
+
+When Krate is one app of several on a domain (the marketing site at `/`, Krate
+at `/app`), links to the other apps must not get the base path. Use the
+explicit opt-out:
+
+```tsx
+<Link href="/pricing" basePath={false}>Pricing</Link>
+<a href="/blog" data-krate-no-base>Blog</a>
+<a href="https://example.com/pricing">Absolute URLs also work</a>
+```
+
+`basePath={false}` and `data-krate-no-base` use the URL as written, never
+rewrite it (at build time, in server renders and in the browser), and keep the
+click out of the client router, so it is a normal full-page navigation. They
+also silence `KR7144`. `<Link external>` is different: it only skips client
+navigation and still adds the base path, for in-site pages that must load
+normally. Config `redirects` use `basePath: false` the same way.
+
 `krate serve` and `krate dev` mount the site under the base path, and requests
 outside it are redirected in. Code behind the base path sees paths without it, and
 a root-relative `Location` it answers with gets the prefix on the way out. Config

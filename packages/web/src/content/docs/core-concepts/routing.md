@@ -380,7 +380,9 @@ The router handles:
 - **GET forms** - submitted client-side (opt out with `data-krate-reload`).
 
 `<Link>` supports `prefetch={false}`, `replace`, `scroll={false}`, and
-`target="_blank"` (which auto-adds `rel="noopener noreferrer"`). After
+`target="_blank"` (which auto-adds `rel="noopener noreferrer"`), and
+`basePath={false}` for a URL served outside the site's base path (see
+[Base path](/docs/reference/config/#base-path)). After
 navigation the link matching the current path gets `aria-current="page"`.
 Programmatic navigation, events and error handling are documented in the
 [runtime API reference](/docs/reference/runtime-api/#spa-router).

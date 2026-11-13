@@ -1175,6 +1175,12 @@ declare global {
       href: KrateHref;
       className?: string;
       external?: boolean;
+      /**
+       * `false` links to a URL served outside this site on the same domain
+       * (for example the marketing site at `/` while Krate runs under a base
+       * path): the href is used as written and the link is a normal navigation.
+       */
+      basePath?: false;
       children?: any;
       /** Prefetch the target page on hover/focus/viewport entry (default: true). */
       prefetch?: boolean;
