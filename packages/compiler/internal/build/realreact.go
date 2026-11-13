@@ -468,7 +468,7 @@ func realModulePaths(mods []*bundler.Module, islands map[string]*reactIslandModu
 		if m == nil || m.Program == nil || m.IsEntry || m.IsExternal {
 			continue
 		}
-		if im, ok := islands[m.Path]; ok && im.Direct {
+		if im, ok := islands[m.Path]; ok && (im.Direct || im.Real && bundler.HasUseClientDirective(m.SourceCode)) {
 			skip[m.Path] = true
 		}
 	}

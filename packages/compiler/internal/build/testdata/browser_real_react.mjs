@@ -71,13 +71,24 @@ try {
   await page.waitForTimeout(300);
   check("a page without a real-React island loads no island chunk", chunks.length === 0 && indexChunks > 0, chunks.join(","));
   check("no errors on the plain page", errors.length === 0, errors.join(" | "));
+  // "use client" Viewer from a sync page (static) and a "use client" parent.
+  for (const route of ["/usync/", "/upanelsync/"]) {
+    errors.length = 0;
+    await page.goto(base + route, { waitUntil: "load" });
+    check(route + " paints through the reconciler", await waitPixel(7, 2, "255,0,0,255"), await pixel(7, 2).catch((e) => String(e)));
+    await page.click("#grow");
+    check(route + " responds to island state", (await waitPixel(12, 2, "255,0,0,255")) && (await pixel(7, 2)) === "0,0,0,0", `${await pixel(7, 2)} / ${await pixel(12, 2)}`);
+    check(route + " ran hooks and effects on real React", (await page.getAttribute("[data-ready]", "data-ready")) === "yes");
+    check(route + " has no console errors", errors.length === 0, errors.join(" | "));
+  }
   // Request-time pages: the server answers with the fallback and the island
   // mounts on real React (directly, through a wrapper module, in a layout).
   if (serverBase) {
-    for (const route of ["/adirect/", "/awrapped/", "/alay/"]) {
+    for (const route of ["/adirect/", "/awrapped/", "/alay/", "/uasync/", "/ulay/", "/upanelasync/"]) {
       errors.length = 0;
       await page.goto(serverBase + route, { waitUntil: "load" });
       check(route + " paints through the reconciler", await waitPixel(7, 2, "255,0,0,255"), await pixel(7, 2).catch((e) => String(e)));
+      if (route.startsWith("/u")) check(route + " ran hooks and effects on real React", (await page.getAttribute("[data-ready]", "data-ready")) === "yes");
       check(route + " has no console errors", errors.length === 0, errors.join(" | "));
       if (route !== "/adirect/") {
         await page.click("#grow");

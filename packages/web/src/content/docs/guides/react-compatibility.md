@@ -1417,6 +1417,17 @@ renders the island there. A reconciler library used as a tag directly in a page
 in `react-reconciler` without being listed fails the Preact island build and the
 message names `react: { islands: [...] }`.
 
+### `"use client"` modules
+
+The usual Next way works unchanged: a `"use client"` module that imports a
+reconciler library (`"use client"; import { Canvas } from "@react-three/fiber"`)
+is a real-React island, whether a sync page, an async page, an async layout or
+another `"use client"` component imports it. Everything inside the module
+(its own hooks, effects and the other components it imports) runs on real
+React. A `"use client"` parent that renders such a component becomes a real-React
+island as a whole; Krate does not nest a real-React root inside a Preact island,
+because the two runtimes cannot share a tree.
+
 ### Rendering
 
 A real-React island is **client-rendered**. Server-rendering a WebGL or canvas

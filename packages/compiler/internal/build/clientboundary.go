@@ -214,7 +214,9 @@ func (b *Builder) prepareClientBoundaries(bundle *bundler.Bundle, ann *irtree.An
 			if mod == nil || mod.Program == nil || mod.IsEntry {
 				continue
 			}
-			if im, ok := islands[mod.Path]; ok && im.Direct {
+			// A "use client" module that renders a real-React module runs on
+			// real React as a whole, like one that imports the package.
+			if im, ok := islands[mod.Path]; ok && (im.Direct || im.Real && bundler.HasUseClientDirective(mod.SourceCode)) {
 				clientMods[filepath.Clean(mod.Path)] = mod
 				realMods[filepath.Clean(mod.Path)] = true
 			}

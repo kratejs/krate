@@ -49,6 +49,7 @@ func TestBrowserRealReactIsland(t *testing.T) {
 	realReactFixtureFrom(t, root, repo)
 	realReactSceneFiles(t, root)
 	realReactAsyncFiles(t, root)
+	realReactClientFiles(t, root)
 	if out, err := captureOutput(func() error { return New(root, cfg).BuildAll() }); err != nil {
 		t.Fatalf("BuildAll: %v\n%s", err, out)
 	}
