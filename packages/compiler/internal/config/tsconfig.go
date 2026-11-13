@@ -676,6 +676,20 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 		for k, v := range m {
 			s, _ := v.(string)
 			switch k {
+			case "htmlAttributes", "bodyAttributes":
+				obj, ok := v.(map[string]interface{})
+				if !ok {
+					return fmt.Errorf("site.%s: expected an object of attributes, got %T", k, v)
+				}
+				attrs, err := AttrMapFrom(obj)
+				if err != nil {
+					return fmt.Errorf("site.%s: %w", k, err)
+				}
+				if k == "htmlAttributes" {
+					cfg.Site.HTMLAttributes = attrs
+				} else {
+					cfg.Site.BodyAttributes = attrs
+				}
 			case "url":
 				cfg.Site.URL = s
 			case "name":

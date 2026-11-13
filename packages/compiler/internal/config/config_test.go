@@ -7,6 +7,41 @@ import (
 	"testing"
 )
 
+// TestLoadSiteDocumentAttributes reads site.htmlAttributes and bodyAttributes
+// from krate.config.ts, rejects an invalid attribute name, and does not flag
+// the keys as unknown.
+func TestLoadSiteDocumentAttributes(t *testing.T) {
+	root := t.TempDir()
+	src := `export default { site: { htmlAttributes: { class: "dark", "data-n": 2, hidden: true }, bodyAttributes: { class: "font-sans" } } };`
+	if err := os.WriteFile(filepath.Join(root, "krate.config.ts"), []byte(src), 0644); err != nil {
+		t.Fatal(err)
+	}
+	Warnings = nil
+	cfg, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Site.HTMLAttributes; got["class"] != "dark" || got["data-n"] != "2" || got["hidden"] != "" || len(got) != 3 {
+		t.Errorf("htmlAttributes = %v", got)
+	}
+	if cfg.Site.BodyAttributes["class"] != "font-sans" {
+		t.Errorf("bodyAttributes = %v", cfg.Site.BodyAttributes)
+	}
+	for _, w := range Warnings {
+		if strings.Contains(w, "htmlAttributes") || strings.Contains(w, "bodyAttributes") {
+			t.Errorf("known keys reported as unknown: %s", w)
+		}
+	}
+
+	bad := `export default { site: { htmlAttributes: { "bad name": "x" } } };`
+	if err := os.WriteFile(filepath.Join(root, "krate.config.ts"), []byte(bad), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(root); err == nil || !strings.Contains(err.Error(), "not a valid HTML attribute name") {
+		t.Errorf("an invalid attribute name must fail the load, got %v", err)
+	}
+}
+
 // TestLoadFunctionFormConfig verifies defineConfig's function form is invoked
 // with the build context (command/mode/isDev).
 func TestLoadFunctionFormConfig(t *testing.T) {

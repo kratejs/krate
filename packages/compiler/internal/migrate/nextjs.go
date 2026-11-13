@@ -638,7 +638,7 @@ func rewriteNextSource(src string, kind FileKind) (string, []string, []string) {
 	if kind == KindLayout {
 		if body, ok := stripDocumentShell(src); ok {
 			src = body
-			rewrites = append(rewrites, "replaced <html>/<body> document shell; move html attributes to site config")
+			rewrites = append(rewrites, "removed the <html>/<body> document shell; their attributes (lang, className, ...) moved into <Head> as <html> and <body> elements")
 		} else if strings.Contains(src, "<html") || strings.Contains(src, "<body") {
 			manual = append(manual, "root layout document shell could not be rewritten automatically")
 		}

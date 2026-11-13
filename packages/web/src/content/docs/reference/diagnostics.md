@@ -1202,9 +1202,9 @@ Two files define the same role for one URL directory: 404.tsx and not-found.tsx,
 
 ### KR9003
 
-**Segment page ignores request-time rendering**
+**Error page ignores request-time rendering**
 
-Segment pages (404.tsx, not-found.tsx, error.tsx, 500.tsx) are prerendered once and written to the output; the server picks the right file per request. A request-time mode (ssr, isr, streaming, runtime components, async server components) on such a page is ignored. Read request data in the page's client code, or link to a normal route.
+An error page (error.tsx, 500.tsx) answers while the app is failing, so it is prerendered once and never depends on the renderer. A request-time mode (ssr, isr, streaming, runtime components, async server components) on it is ignored. Read request data in the page's client code. A not-found, forbidden or unauthorized page (404.tsx, 403.tsx, 401.tsx) can render per request instead.
 
 ## See also
 

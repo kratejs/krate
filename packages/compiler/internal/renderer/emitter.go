@@ -824,16 +824,38 @@ func goPropsJSON(props map[string]string, childrenHTML string) string {
 // emitMetaSlot - Head/Script/Style content routing
 func (e *Emitter) emitMetaSlot(s *irtree.MetaSlot) SlotOutput {
 	var out SlotOutput
+	head := strings.EqualFold(s.ComponentName, "Head") || s.ComponentName == irtree.HoistMeta
 	for _, child := range s.Children {
-		mergeSlotOutput(&out, e.emitSlotNode(child))
+		co := e.emitSlotNode(child)
+		if head {
+			// <Head> children are routed into the document <head> by
+			// walkMetaSlots and never reach the body, so a component rendered
+			// there has nothing to hydrate: its signatures, bindings and
+			// templates would only ship JavaScript for markup that is not in
+			// the page body.
+			co = SlotOutput{HeadHTML: co.HeadHTML, ScriptHTML: co.ScriptHTML, StyleHTML: co.StyleHTML}
+		}
+		mergeSlotOutput(&out, co)
 	}
-	// <Head> children are routed into the document <head> by walkMetaSlots; they
-	// must not also render into the body. <Script>/<Style> keep their body HTML
-	// (valid there, and captured separately into Script/Style fields).
-	if strings.EqualFold(s.ComponentName, "Head") || s.ComponentName == irtree.HoistMeta {
+	// <Script>/<Style> keep their body HTML (valid there, and captured
+	// separately into Script/Style fields).
+	if head {
 		out.HTML = ""
 	}
 	return out
+}
+
+// hydrationAttrRe matches the attributes the emitter adds to elements that
+// hydrate (data-k, data-kattr-*, data-kh, ...). Head tags do not hydrate.
+var hydrationAttrRe = regexp.MustCompile(`\s+data-k(?:attr-[\w-]+|c|b|h|ns)?="[^"]*"`)
+
+// headTagHTML is the markup of a <Head> child as it goes into the document
+// head: hydration markers are removed.
+func headTagHTML(s string) string {
+	if !strings.Contains(s, "data-k") {
+		return s
+	}
+	return hydrationAttrRe.ReplaceAllString(s, "")
 }
 
 // emitSlotNode - type-switch dispatch for SlotNode
@@ -1281,12 +1303,12 @@ func walkMetaSlots(node *irtree.ComponentNode, result *EmitResult) {
 				case irtree.HoistMeta:
 					// Hoisted React 19 metadata; identical elements (the same
 					// stylesheet or tag rendered twice) are emitted once.
-					html := childHTML.String()
+					html := headTagHTML(childHTML.String())
 					if !strings.Contains(result.HeadHTML, html) {
 						result.HeadHTML += html
 					}
 				case "head":
-					result.HeadHTML += childHTML.String()
+					result.HeadHTML += headTagHTML(childHTML.String())
 				case "script":
 					result.ScriptHTML += childHTML.String()
 				case "style":

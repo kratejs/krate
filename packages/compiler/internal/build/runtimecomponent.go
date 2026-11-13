@@ -306,6 +306,7 @@ globalThis.__krate_render = function(__propsJSON) {
 					})
 				},
 			},
+			serverGlobalsPlugin(root),
 		},
 	})
 

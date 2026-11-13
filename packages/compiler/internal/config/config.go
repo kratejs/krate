@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/internal/markdown"
@@ -405,6 +406,72 @@ type SiteConfig struct {
 	Twitter       string `json:"twitter,omitempty"`
 	ThemeColor    string `json:"themeColor,omitempty"`
 	Locale        string `json:"locale,omitempty"`
+	// HTMLAttributes and BodyAttributes are set on every page's <html> and
+	// <body> element. A page or layout refines them with <html> and <body>
+	// elements inside <Head>.
+	HTMLAttributes AttrMap `json:"htmlAttributes,omitempty"`
+	BodyAttributes AttrMap `json:"bodyAttributes,omitempty"`
+}
+
+func (s SiteConfig) isZero() bool {
+	return s.URL == "" && s.Name == "" && s.Description == "" && s.Image == "" && s.TitleTemplate == "" &&
+		s.Twitter == "" && s.ThemeColor == "" && s.Locale == "" && len(s.HTMLAttributes) == 0 && len(s.BodyAttributes) == 0
+}
+
+// AttrMap is a set of HTML attributes. In the config a value is a string or a
+// number; true writes a bare attribute, false and null drop it.
+type AttrMap map[string]string
+
+// UnmarshalJSON reads an attribute object with string, number and boolean values.
+func (m *AttrMap) UnmarshalJSON(data []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return fmt.Errorf("expected an object of attributes: %w", err)
+	}
+	out, err := AttrMapFrom(raw)
+	if err != nil {
+		return err
+	}
+	*m = out
+	return nil
+}
+
+// AttrMapFrom converts a decoded config object into an AttrMap.
+func AttrMapFrom(raw map[string]interface{}) (AttrMap, error) {
+	out := AttrMap{}
+	for k, v := range raw {
+		if !validAttrName(k) {
+			return nil, fmt.Errorf("site attributes: %q is not a valid HTML attribute name (use names like class, lang or data-theme)", k)
+		}
+		switch t := v.(type) {
+		case string:
+			out[strings.ToLower(k)] = t
+		case float64:
+			out[strings.ToLower(k)] = strconv.FormatFloat(t, 'f', -1, 64)
+		case bool:
+			if t {
+				out[strings.ToLower(k)] = ""
+			}
+		case nil:
+		default:
+			return nil, fmt.Errorf("attribute %q must be a string, number or boolean", k)
+		}
+	}
+	return out, nil
+}
+
+func validAttrName(k string) bool {
+	if k == "" {
+		return false
+	}
+	for i := 0; i < len(k); i++ {
+		c := k[i]
+		alpha := c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c == '_' || c == ':'
+		if i == 0 && !alpha || !alpha && !(c >= '0' && c <= '9') && c != '-' && c != '.' {
+			return false
+		}
+	}
+	return true
 }
 
 // EffectiveSEO folds the `site` block over `seo` (site wins per field).

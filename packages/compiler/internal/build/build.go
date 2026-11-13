@@ -47,6 +47,12 @@ import (
 	"github.com/kratejs/krate/packages/native/jsruntime"
 )
 
+// isDynamicSegment reports whether a segment page (404, 401, 403) renders per
+// request instead of being prerendered.
+func (r *PageResult) isDynamicSegment() bool {
+	return r.IsErrorPage && r.Mode != RenderSSG
+}
+
 type PageResult struct {
 	Page     string
 	OutName  string
@@ -2044,7 +2050,7 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 				pageDir = filepath.Join(b.Cfg.OutDir, r.OutName)
 			}
 
-			if !r.IsErrorPage {
+			if !r.IsErrorPage || r.isDynamicSegment() {
 				if err := os.MkdirAll(pageDir, 0755); err != nil {
 					b.pluginFailed(fmt.Errorf("creating page dir %s: %w", pageDir, err))
 					return
@@ -2055,6 +2061,11 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 			// first <title>/meta/canonical per key wins; site.titleTemplate
 			// shapes the document title the same way it shapes og:title.
 			r.HeadHTML = templateHeadTitle(dedupeHead(r.HeadHTML), b.Cfg.SEO)
+			// <html> and <body> elements in <Head> are attributes of the
+			// document elements, not head content. The page's come before
+			// its layouts', so the first one wins.
+			var headHTMLAttrs, headBodyAttrs docAttrs
+			r.HeadHTML, headHTMLAttrs, headBodyAttrs = splitDocTags(r.HeadHTML, false)
 
 			// 1. Construct structural HTML wrapper in memory.
 			// Site-global stylesheets (e.g. Tailwind) are linked first, then
@@ -2137,13 +2148,19 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 			finish := func(h string) string {
 				// 1. Document language: per-page lang wins (e.g. docs locales),
 				// then site.locale; otherwise the default "en" stands.
-				lang := r.Lang
-				if lang == "" {
-					lang = b.Cfg.SEO.Locale
+				// Document attributes: site.locale, then site.htmlAttributes,
+				// then <html> in <Head>; the page's own `lang` export wins.
+				site := b.Cfg.Site
+				htmlAttrs := docAttrs{}
+				if loc := b.Cfg.SEO.Locale; loc != "" {
+					htmlAttrs["lang"] = loc
 				}
-				if lang != "" {
-					h = strings.Replace(h, "<html lang=\"en\">", "<html lang=\""+escape.HTMLAttr(lang)+"\">", 1)
+				htmlAttrs = mergeDocAttrs(mergeDocAttrs(htmlAttrs, configDocAttrs(site.HTMLAttributes)), headHTMLAttrs)
+				if r.Lang != "" {
+					htmlAttrs["lang"] = r.Lang
 				}
+				h = setStartTagAttrs(h, "html", htmlAttrs)
+				h = setStartTagAttrs(h, "body", mergeDocAttrs(configDocAttrs(site.BodyAttributes), headBodyAttrs))
 				// 1b. Site-wide <head> injection (head + analytics), added before
 				// CSP so inline analytics scripts get hash-allow-listed.
 				if tags := b.globalHeadHTML(h); tags != "" {
@@ -2198,6 +2215,14 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 			if err := fsutil.WriteFileIfChanged(htmlPath, []byte(html), 0644); err != nil {
 				b.pluginFailed(fmt.Errorf("writing %s: %w", htmlPath, err))
 				return
+			}
+			if r.isDynamicSegment() {
+				// The renderer addresses the page as a route: its shell sits
+				// where a route's index.html would.
+				if err := fsutil.WriteFileIfChanged(filepath.Join(pageDir, "index.html"), []byte(html), 0644); err != nil {
+					b.pluginFailed(fmt.Errorf("writing the shell of %s: %w", r.Page, err))
+					return
+				}
 			}
 			if legacyHTML != "" {
 				if err := fsutil.WriteFileIfChanged(filepath.Join(pageDir, "index.legacy.html"), []byte(finish(legacyHTML)), 0644); err != nil {
@@ -2489,17 +2514,28 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 	pageBase := strings.TrimSuffix(filepath.Base(page), filepath.Ext(page))
 	isSegment := isSegmentPageBase(pageBase)
 	if isSegment && renderMode != RenderSSG {
-		// Segment pages are prerendered once and picked per request by the
-		// server, so a request-time mode cannot apply to them.
-		if declaredMode != RenderSSG || importsRuntimeComponent(bundle.Modules) {
-			d := diag.New(page, 1, 1, filepath.Base(page)+" is a segment page and is always prerendered; its "+renderMode.String()+" rendering mode is ignored",
-				"read request data in client code, or use a normal route for request-time content", "").WithCode(diag.CodeSegmentRequestMode)
-			d.Severity = diag.SeverityWarning
-			printWarningsOnce(os.Stderr, []diag.Diagnostic{d})
-			pageWarnings = append(pageWarnings, d)
+		segKind, _ := segmentKindOfFile(page)
+		if segKind != SegmentError {
+			// A not-found, forbidden or unauthorized page that asks for
+			// request-time rendering is rendered per request with its status.
+			// ISR makes no sense for a response that is never cached.
+			if renderMode == RenderISR {
+				renderMode = RenderSSR
+			}
+			revalidate = 0
+		} else {
+			// An error page answers while the app is failing, so it never
+			// depends on the renderer: it is prerendered once.
+			if declaredMode != RenderSSG || importsRuntimeComponent(bundle.Modules) {
+				d := diag.New(page, 1, 1, filepath.Base(page)+" is an error page and is always prerendered; its "+renderMode.String()+" rendering mode is ignored",
+					"read request data in client code; only 404, 401 and 403 pages can render per request", "").WithCode(diag.CodeSegmentRequestMode)
+				d.Severity = diag.SeverityWarning
+				printWarningsOnce(os.Stderr, []diag.Diagnostic{d})
+				pageWarnings = append(pageWarnings, d)
+			}
+			renderMode = RenderSSG
+			revalidate = 0
 		}
-		renderMode = RenderSSG
-		revalidate = 0
 	}
 
 	isDynRoute := isDynamicRoute(page, b.Cfg.PagesDir)
@@ -2645,6 +2681,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 			return t, em.Emit(t)
 		})
 		renderer.EmitMeta(tree, emitResult)
+		emitResult.HeadHTML = dedupeHeadLast(emitResult.HeadHTML)
 		warnings := emitResult.Warnings
 		if isDynRoute {
 			warnings = withoutTemplateSlotWarnings(warnings)
@@ -2834,7 +2871,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 		}, bundle.CSS, nil
 	}
 
-	if !isSegment {
+	if !isSegment || renderMode != RenderSSG {
 		if err := os.MkdirAll(pageDir, 0755); err != nil {
 			return nil, "", fmt.Errorf("creating page dir: %w", err)
 		}
@@ -2875,7 +2912,9 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 		deps = append(deps, islandStyles.Deps...)
 	}
 	if len(islandSSR) > 0 {
-		emitResult.HTML = injectIslandSSR(emitResult.HTML, islandSSR)
+		var islandHead string
+		emitResult.HTML, islandHead = injectIslandSSR(emitResult.HTML, islandSSR)
+		emitResult.HeadHTML = islandHead + emitResult.HeadHTML
 	}
 	emitResult.IslandBootJS = islandBoot
 	// Request-time pages are rendered by the server, which highlights their
@@ -3567,6 +3606,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	emitter.GoComponents = opts.GoComponents
 	emitResult := emitter.Emit(tree)
 	renderer.EmitMeta(tree, emitResult)
+	emitResult.HeadHTML = dedupeHeadLast(emitResult.HeadHTML)
 	if len(emitResult.GoRenders) > 0 {
 		rendered, gerr := b.renderGoComponents(emitResult.GoRenders)
 		if gerr != nil {

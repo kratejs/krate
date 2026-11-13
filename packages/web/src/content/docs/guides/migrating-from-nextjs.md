@@ -145,7 +145,11 @@ The first pass:
   [Server Actions](/docs/guides/server-actions/#inline-actions)). One inside a
   `"use client"` module is flagged as manual work, because it fails the build
   with `KR7001` there as it does in Next.js;
-- strips root-layout `<html>`/`<body>` wrappers;
+- strips root-layout `<html>`/`<body>` wrappers and carries their attributes (`lang`,
+  `className`, `data-*`, ...) into a `<Head>` with `<html>` and `<body>` elements, which
+  set the attributes of the document elements (see
+  [Document attributes](/docs/features/built-in-components/#document-attributes));
+  `suppressHydrationWarning` is dropped;
 - maps `forbidden.tsx` to `403.tsx` and `unauthorized.tsx` to `401.tsx` (the
   Next.js 15.1 `authInterrupts` pages), and drops the `experimental.authInterrupts`
   flag, because `forbidden()` and `unauthorized()` always work;

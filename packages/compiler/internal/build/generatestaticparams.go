@@ -783,6 +783,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		emitter.CodeTheme = b.Cfg.Markdown.CodeTheme
 		emitResult = emitter.Emit(tree)
 		renderer.EmitMeta(tree, emitResult)
+		emitResult.HeadHTML = dedupeHeadLast(emitResult.HeadHTML)
 
 		if len(emitResult.Errors) > 0 {
 			return nil, "", renderErrors(spp.PagePath, emitResult.Errors)
@@ -905,7 +906,9 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	}
 	b.recordDeps(spp.PagePath, deps)
 	if len(islandSSR) > 0 {
-		emitResult.HTML = injectIslandSSR(emitResult.HTML, islandSSR)
+		var islandHead string
+		emitResult.HTML, islandHead = injectIslandSSR(emitResult.HTML, islandSSR)
+		emitResult.HeadHTML = islandHead + emitResult.HeadHTML
 	}
 	emitResult.IslandBootJS = islandBoot
 	needsHydrate := len(emitResult.Signatures) > 0 || islandJS != "" || islandBoot != "" || strings.Contains(emitResult.HTML, "data-krate-portal")

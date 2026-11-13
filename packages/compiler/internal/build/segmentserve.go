@@ -28,6 +28,10 @@ type segmentIndex struct {
 	size    int64
 	entries []SegmentEntry
 	segDirs map[string]string // normalized route pattern -> segDir
+
+	// render answers a request with a segment page that renders per request.
+	// It reports false when it wrote nothing, and the baked shell is served.
+	render func(w http.ResponseWriter, r *http.Request, m SegmentMatch, status int) bool
 }
 
 func newSegmentIndex(absOut string) *segmentIndex {
@@ -163,9 +167,47 @@ func fillServerError(page string, e serverError) string {
 	return block + page
 }
 
+// forcedStatusWriter writes its status with the first byte of the body, so a page
+// renderer that leaves the status to the implicit 200 answers with another one.
+type forcedStatusWriter struct {
+	http.ResponseWriter
+	status int
+	wrote  bool
+}
+
+func (w *forcedStatusWriter) WriteHeader(code int) {
+	if w.wrote {
+		return
+	}
+	w.wrote = true
+	if code == http.StatusOK {
+		code = w.status
+	}
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *forcedStatusWriter) Write(b []byte) (int, error) {
+	if !w.wrote {
+		w.WriteHeader(w.status)
+	}
+	return w.ResponseWriter.Write(b)
+}
+
+func (w *forcedStatusWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// Unwrap lets http.ResponseController reach the underlying writer.
+func (w *forcedStatusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
 // respondSegment writes a segment page with the given status. It returns false
 // when no page matched, so the caller can fall back to its default response.
-func respondSegment(w http.ResponseWriter, s *segmentIndex, m SegmentMatch, status int, srvErr *serverError) bool {
+func respondSegment(w http.ResponseWriter, r *http.Request, s *segmentIndex, m SegmentMatch, status int, srvErr *serverError) bool {
+	if m.Route != "" && s.render != nil && s.render(w, r, m, status) {
+		return true
+	}
 	data, ok := s.readPage(m)
 	if !ok {
 		return false
@@ -197,7 +239,7 @@ func writeAccessDenied(w http.ResponseWriter, r *http.Request, segs *segmentInde
 	if status == http.StatusUnauthorized {
 		kind = SegmentUnauthorized
 	}
-	if m, ok := segs.forRoute(kind, r.URL.Path, segDir); ok && respondSegment(w, segs, m, status, nil) {
+	if m, ok := segs.forRoute(kind, r.URL.Path, segDir); ok && respondSegment(w, r, segs, m, status, nil) {
 		return
 	}
 	h := w.Header()

@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 
 	"github.com/evanw/esbuild/pkg/api"
 	"github.com/kratejs/krate/packages/compiler/internal/bundler"
+	"github.com/kratejs/krate/packages/compiler/internal/pluginapi"
 	"github.com/kratejs/krate/packages/compiler/internal/safe"
 )
 
@@ -139,7 +141,7 @@ func compileServerBundles(res *bundler.ImportResolver, results []*PageResult, ro
 					"@krate/runtime",
 					"@krate/runtime/*",
 				},
-				Plugins: serverBundlePlugins(page, absSource, append(composed, reactServerShimPlugin(), serverCSSPlugin(root), cbPlugin, unusedClientModulePlugin(), serverExportPlugin(page.ServerExports, absSource), goServerBundlePlugin(page.GoBaked, root), actionServerBundlePlugin(res, actionModules, actionBasePath), inlineActionPlugin(root, actionBasePath), externalNodeModulesPlugin())...),
+				Plugins: serverBundlePlugins(page, absSource, append(composed, reactServerShimPlugin(), serverCSSPlugin(root), cbPlugin, unusedClientModulePlugin(), serverExportPlugin(page.ServerExports, absSource), goServerBundlePlugin(page.GoBaked, root), actionServerBundlePlugin(res, actionModules, actionBasePath), inlineActionPlugin(root, actionBasePath), serverRuntimeTagsPlugin(), serverGlobalsPlugin(root), externalNodeModulesPlugin())...),
 				Stdin: &api.StdinOptions{
 					Loader:     api.LoaderTSX,
 					Contents:   stdinContents,
@@ -188,50 +190,114 @@ func pageNeedsNodeServerBundle(r *PageResult) bool {
 	return false
 }
 
-// injectServerGlobals prepends imports for Head, Suspense, Script, Style, Link, Image, Icon
-// so TSX pages can use them as globals (matching krate's compiler behavior).
+// serverGlobalTags are the compiler-provided tags a server bundle gives every
+// project module as globals, in the order they are imported.
+var serverGlobalTags = []string{"Head", "Suspense", "Script", "Style", "Link", "Image", "Icon", "SyntaxHighlight"}
+
+// injectServerGlobals prepends imports for the tags the source uses (Head,
+// Suspense, Script, Style, Link, Image, Icon, SyntaxHighlight) so TSX modules
+// can use them as globals (matching krate's compiler behavior). A name the
+// module already declares or imports is left alone, which makes the injection
+// safe to apply twice.
 func injectServerGlobals(source string) string {
-	needsHead := strings.Contains(source, "<Head") || strings.Contains(source, "Head>")
-	needsSuspense := strings.Contains(source, "<Suspense") || strings.Contains(source, "Suspense>")
-	needsScript := strings.Contains(source, "<Script") || strings.Contains(source, "Script>")
-	needsStyle := strings.Contains(source, "<Style") || strings.Contains(source, "Style>")
-	needsLink := strings.Contains(source, "<Link") || strings.Contains(source, "Link>")
-	needsImage := strings.Contains(source, "<Image") || strings.Contains(source, "Image>")
-	needsIcon := strings.Contains(source, "<Icon") || strings.Contains(source, "Icon>")
-	needsSyntaxHighlight := strings.Contains(source, "<SyntaxHighlight") || strings.Contains(source, "SyntaxHighlight>")
-
 	var names []string
-	if needsHead {
-		names = append(names, "Head")
+	for _, tag := range serverGlobalTags {
+		if !strings.Contains(source, "<"+tag) && !strings.Contains(source, tag+">") {
+			continue
+		}
+		if declaresBinding(source, tag) || importsBinding(source, tag) {
+			continue
+		}
+		names = append(names, tag)
 	}
-	if needsSuspense {
-		names = append(names, "Suspense")
-	}
-	if needsScript {
-		names = append(names, "Script")
-	}
-	if needsStyle {
-		names = append(names, "Style")
-	}
-	if needsLink {
-		names = append(names, "Link")
-	}
-	if needsImage {
-		names = append(names, "Image")
-	}
-	if needsIcon {
-		names = append(names, "Icon")
-	}
-	if needsSyntaxHighlight {
-		names = append(names, "SyntaxHighlight")
-	}
-
 	if len(names) == 0 {
 		return source
 	}
 
 	importLine := fmt.Sprintf("import { %s } from '@krate/runtime/server';", strings.Join(names, ", "))
 	return importLine + "\n" + source
+}
+
+var importClauseRe = regexp.MustCompile(`(?s)\bimport\s+(?:type\s+)?([^;'"]*?)\s*from\s*['"]`)
+
+// importsBinding reports whether the module imports a binding named name
+// (default, namespace or named; `X as name` binds name).
+func importsBinding(src, name string) bool {
+	for _, m := range importClauseRe.FindAllStringSubmatch(src, -1) {
+		clause := m[1]
+		if open := strings.Index(clause, "{"); open >= 0 {
+			end := strings.Index(clause[open:], "}")
+			if end < 0 {
+				continue
+			}
+			for _, spec := range strings.Split(clause[open+1:open+end], ",") {
+				fields := strings.Fields(spec)
+				if len(fields) > 0 && fields[len(fields)-1] == name {
+					return true
+				}
+			}
+			clause = clause[:open]
+		}
+		for _, part := range strings.Split(clause, ",") {
+			part = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(part), "* as "))
+			if part == name {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// serverGlobalsPlugin gives project modules that no other plugin claims the
+// compiler-provided tags, so a component imported by a page can use <Head>,
+// <Link> and the rest as globals the way the page itself does. It must come
+// after the plugins that claim a module: those read it through
+// readServerSource, which injects the same imports.
+func serverGlobalsPlugin(root string) api.Plugin {
+	return api.Plugin{
+		Name: "krate-server-globals",
+		Setup: func(pb api.PluginBuild) {
+			pb.OnLoad(api.OnLoadOptions{Filter: `\.[jt]sx$`, Namespace: "file"}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
+				if strings.Contains(filepath.ToSlash(args.Path), "/node_modules/") || !pluginapi.WithinRoot(root, args.Path) {
+					return api.OnLoadResult{}, nil
+				}
+				data, err := os.ReadFile(args.Path)
+				if err != nil {
+					return api.OnLoadResult{}, nil
+				}
+				src := injectServerGlobals(string(data))
+				if src == string(data) {
+					return api.OnLoadResult{}, nil
+				}
+				return api.OnLoadResult{Contents: &src, Loader: loaderForPath(args.Path), ResolveDir: filepath.Dir(args.Path)}, nil
+			})
+		},
+	}
+}
+
+// serverRuntimeTagsPlugin maps the tag names of `import { Head } from
+// "@krate/runtime"` onto the server renderer. @krate/runtime stays external
+// in a server bundle and its client entry only carries inert values for these
+// names; the module this plugin serves re-exports the whole client entry and
+// overrides the tags with @krate/runtime/server.
+func serverRuntimeTagsPlugin() api.Plugin {
+	const ns = "krate-runtime-tags"
+	return api.Plugin{
+		Name: "krate-runtime-tags",
+		Setup: func(pb api.PluginBuild) {
+			pb.OnResolve(api.OnResolveOptions{Filter: `^@krate/runtime$`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+				if args.Namespace == ns {
+					return api.OnResolveResult{}, nil
+				}
+				return api.OnResolveResult{Path: "@krate/runtime", Namespace: ns}, nil
+			})
+			pb.OnLoad(api.OnLoadOptions{Filter: `.*`, Namespace: ns}, func(api.OnLoadArgs) (api.OnLoadResult, error) {
+				contents := "export * from '@krate/runtime';\n" +
+					"export { " + strings.Join(serverGlobalTags, ", ") + " } from '@krate/runtime/server';\n"
+				return api.OnLoadResult{Contents: &contents, Loader: api.LoaderJS}, nil
+			})
+		},
+	}
 }
 
 // reactServerShimPlugin maps `import { Suspense } from "react"` in a server

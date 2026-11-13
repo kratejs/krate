@@ -30,6 +30,8 @@ export interface SegmentEntry {
   error?: string;
   forbidden?: string;
   unauthorized?: string;
+  /** Roles whose page renders per request (its file holds the baked shell). */
+  dynamic?: SegmentKind[];
 }
 
 export interface SegmentMatch {
@@ -38,6 +40,23 @@ export interface SegmentMatch {
   key: string;
   /** Dynamic-segment values when matched against a URL, else undefined. */
   params?: Record<string, string>;
+  /** The renderer's route for a page that renders per request (build/segments.go SegmentRoute). */
+  route?: string;
+}
+
+const KIND_STATUS: Record<SegmentKind, number> = { notFound: 404, error: 500, forbidden: 403, unauthorized: 401 };
+
+/** The route the renderer knows a request-time segment page by ("/__404", "/blog/__404"). */
+export function segmentRoute(key: string, kind: SegmentKind): string {
+  const dir = "__" + KIND_STATUS[kind];
+  return key === "" ? "/" + dir : "/" + key + "/" + dir;
+}
+
+function matchOf(e: SegmentEntry, kind: SegmentKind, params?: Record<string, string>): SegmentMatch {
+  const m: SegmentMatch = { file: entryPage(e, kind), key: e.key };
+  if (params) m.params = params;
+  if (e.dynamic && e.dynamic.includes(kind)) m.route = segmentRoute(e.key, kind);
+  return m;
 }
 
 function entryPage(e: SegmentEntry, kind: SegmentKind): string {
@@ -72,7 +91,7 @@ export function lookupSegmentPage(
     let dir = segDir;
     for (;;) {
       const e = byKey.get(dir);
-      if (e && entryPage(e, kind) !== "") return { file: entryPage(e, kind), key: e.key };
+      if (e && entryPage(e, kind) !== "") return matchOf(e, kind);
       if (dir === "") return null;
       const i = dir.lastIndexOf("/");
       dir = i >= 0 ? dir.slice(0, i) : "";
@@ -90,7 +109,7 @@ export function lookupSegmentPage(
     }
   }
   if (!best) return null;
-  return { file: entryPage(best, kind), key: best.key, params: bestParams };
+  return matchOf(best, kind, bestParams);
 }
 
 /** Matches the leading segments of urlPath; a trailing catch-all takes the rest. */

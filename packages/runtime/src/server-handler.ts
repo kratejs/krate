@@ -114,6 +114,8 @@ export interface HandlerPage {
   serverComponents?: boolean;
   /** Source directory relative to the pages root, route groups kept (segment page lookup). */
   segDir?: string;
+  /** A segment page that renders per request: reached through its synthetic route, never a URL. */
+  segment?: boolean;
 }
 
 /**
@@ -596,7 +598,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
   const instanceId = Math.random().toString(36).slice(2) + Date.now().toString(36);
 
   // Pages: most specific route first, like SSRServer.FindPageForRoute.
-  const pagesBySpecificity = [...data.pages].sort((a, b) => compareRouteSpecificity(a.route, b.route));
+  const pagesBySpecificity = data.pages.filter((p) => !p.segment).sort((a, b) => compareRouteSpecificity(a.route, b.route));
   const manifest = { pages: data.pages as ManifestPage[], regions: data.regions };
   const core: SSRCore = createSSRCore({
     manifest,
@@ -884,7 +886,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     return p === "/404" || p === "/404/" || p === "/404.html";
   }
 
-  function answerNotFoundPageURL(rs: ReqState): Response {
+  async function answerNotFoundPageURL(rs: ReqState): Promise<Response> {
     const page = errorPage(rs.path, 404);
     if (page) return custom404(rs, page);
     return notFoundText(rs, true);
@@ -915,7 +917,12 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
   }
 
   /** Answers 404 with a not-found page; segment pages are never cached. */
-  function custom404(rs: ReqState, page: ErrorPage, status: 401 | 403 | 404 = 404): Response {
+  async function custom404(rs: ReqState, page: ErrorPage, status: 401 | 403 | 404 = 404): Promise<Response> {
+    if (page.match && page.match.route) {
+      // A page that renders per request: the baked file is only its shell.
+      const rendered = await renderSegmentPage404(rs, page.match, status);
+      if (rendered) return rendered;
+    }
     rs.res.set("Content-Type", "text/html; charset=utf-8");
     rs.res.delete("Cache-Control");
     rs.res.delete("Etag");
@@ -925,7 +932,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
   }
 
   /** The 403 or 401 response of a request whose render called forbidden() or unauthorized(). */
-  function accessDenied(rs: ReqState, status: 401 | 403, route?: { segDir?: string; closed?: string }): Response {
+  async function accessDenied(rs: ReqState, status: 401 | 403, route?: { segDir?: string; closed?: string }): Promise<Response> {
     rs.res.delete("X-Krate-Cache");
     const page = errorPage(rs.path, status, route);
     if (page) return custom404(rs, page, status);
@@ -1040,6 +1047,19 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     return staticHandler(rs);
   }
 
+  /** Renders a segment page that renders per request, with the status of its role. Null: the baked shell answers. */
+  async function renderSegmentPage404(rs: ReqState, m: SegmentMatch, status: number): Promise<Response | null> {
+    const route = m.route || "";
+    const page = data.pages.find((p) => p.route === route);
+    const shell = loadShell(route);
+    if (!page || !shell || !shell.ok) return null;
+    rs.res.set("Content-Type", "text/html; charset=utf-8");
+    rs.res.set("Cache-Control", "no-store");
+    rs.res.delete("Etag");
+    rs.res.delete("Last-Modified");
+    return servePageRegions(rs, shell, page, route, m.params || {}, queryOf(rs), headerMap(rs), false, 0, false, status);
+  }
+
   interface Frame {
     type: string;
     id?: string;
@@ -1094,9 +1114,11 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     isISR: boolean,
     revalidate: number,
     outOfOrder: boolean,
+    segmentStatus = 0,
   ): Promise<Response | null> {
     let shell = shellInfo.shell;
-    const renderReq: RenderRequest = { route, url: route, method: "GET", headers, params, query };
+    // A segment page renders for the URL that missed, not for its own route.
+    const renderReq: RenderRequest = { route, url: segmentStatus ? rs.path : route, method: "GET", headers, params, query };
     const pending = startRegionRenders(page, route, shellInfo, renderReq);
 
     if (outOfOrder && !isISR && canStreamOutOfOrder(shellInfo.all) && (!page.serverComponents || allSuspense(shellInfo.all))) {
@@ -1160,6 +1182,11 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
       }
     }
 
+    // A segment page that failed, or asked for another answer, leaves the response to its baked shell.
+    if (segmentStatus && (renderErr || fatalErr || notFound || denied || redirect)) {
+      if (renderErr) console.error(`[krate] Segment page render error (${route}): ${renderErr}`);
+      return null;
+    }
     // A segment error page makes any failed render answer with that page
     // instead of the baked body (build/serve.go failOnRenderErr).
     const routeRef = { segDir: page.segDir !== undefined ? page.segDir : "" };
@@ -1224,7 +1251,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
       }
       html = mergeHead(html, title, head);
     }
-    return finish(rs, 200, html);
+    return finish(rs, segmentStatus || 200, html);
   }
 
   // A <Head> inside a streamed Suspense region renders after the head of the
