@@ -58,6 +58,141 @@ importers:
         specifier: ^10.24.0
         version: 10.29.8
 
+  examples/native-chrome:
+    dependencies:
+      '@krate/app':
+        specifier: workspace:*
+        version: link:../../packages/app
+      '@krate/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@krate/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
+
+  examples/native-files:
+    dependencies:
+      '@krate/app':
+        specifier: workspace:*
+        version: link:../../packages/app
+      '@krate/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@krate/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
+
+  examples/native-from-electron:
+    dependencies:
+      '@krate/app':
+        specifier: workspace:*
+        version: link:../../packages/app
+      '@krate/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@krate/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
+
+  examples/native-media:
+    dependencies:
+      '@krate/app':
+        specifier: workspace:*
+        version: link:../../packages/app
+      '@krate/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@krate/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
+
+  examples/native-page:
+    dependencies:
+      '@krate/app':
+        specifier: workspace:*
+        version: link:../../packages/app
+      '@krate/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@krate/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
+
+  examples/native-plugin:
+    dependencies:
+      '@krate/app':
+        specifier: workspace:*
+        version: link:../../packages/app
+      '@krate/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@krate/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
+
+  examples/native-procs:
+    dependencies:
+      '@krate/app':
+        specifier: workspace:*
+        version: link:../../packages/app
+      '@krate/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@krate/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
+
+  examples/native-remote:
+    dependencies:
+      '@krate/app':
+        specifier: workspace:*
+        version: link:../../packages/app
+      '@krate/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@krate/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
+
+  examples/native-tasks:
+    dependencies:
+      '@krate/app':
+        specifier: workspace:*
+        version: link:../../packages/app
+      '@krate/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@krate/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
+
+  examples/native-views:
+    dependencies:
+      '@krate/app':
+        specifier: workspace:*
+        version: link:../../packages/app
+      '@krate/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@krate/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
+
+  packages/app:
+    devDependencies:
+      '@types/node':
+        specifier: ^26.2.0
+        version: 26.2.0
+      happy-dom:
+        specifier: ^20.14.5
+        version: 20.14.5
+      typescript:
+        specifier: ^5.5.0
+        version: 5.9.3
+      vitest:
+        specifier: ^5.0.3
+        version: 5.0.3(@types/node@26.2.0)(happy-dom@20.14.5)(vite@8.3.2(@types/node@26.2.0)(esbuild@0.28.2)(tsx@4.23.13))
+
   packages/auth:
     dependencies:
       '@noble/ciphers':
@@ -1378,8 +1513,8 @@ packages:
   '@types/deep-eql@4.0.2':
     resolution: {integrity: sha512-c9h9dVVMigMPc4bwTvC5dxqtqJZwQPePsWjPlpSOnojbor6pGqdk541lfA7AqFQr5pB1BRdq0juY9db81BwyFw==}
 
-  '@types/estree@1.0.10':
-    resolution: {integrity: sha512-lTyOMnOcmRBzdCv6/4zUZCrEhV0xrqQiUZBZtVcbmLHBXKLnN8q89v/wKRF/Q0HbwVsqbIG3o5HDoFl9sduM+g==}
+  '@types/estree@1.0.9':
+    resolution: {integrity: sha512-GhdPgy1el4/ImP05X05Uw4cw2/M93BCUmnEvWZNStlCzEKME4Fkk+YpoA5OiHNQmoS7Cafb8Xa3Pya8m1Qrzeg==}
 
   '@types/node@20.19.43':
     resolution: {integrity: sha512-6oYBAi5ikg4Pl+kGsoYtawUMBT2zZMCvPNF7pVLnHZfd1zf38DRiWn/gT01RYCdUqkv7Fhr+C9ot4/tb+2sVvA==}
@@ -2155,7 +2290,6 @@ packages:
   why-is-node-running@3.2.1:
     resolution: {integrity: sha512-Tb2FUhB4vUsGQlfSquQLYkApkuPAFQXGFzxWKHHumVz2dK+X1RUm/HnID4+TfIGYJ1kTcwOaCk/buYCEJr6YjQ==}
     engines: {node: '>=20.11'}
-    hasBin: true
 
   ws@8.22.0:
     resolution: {integrity: sha512-Ydggc987+RO0AnWtZ/7Wq9FtNvcrL1b/RO0ud9mWjUPgDrsAAwQSF51sm2hm1XofbU/4jkpGEsLFsZZxU+1DOg==}
@@ -3038,7 +3172,7 @@ snapshots:
 
   '@types/deep-eql@4.0.2': {}
 
-  '@types/estree@1.0.10': {}
+  '@types/estree@1.0.9': {}
 
   '@types/node@20.19.43':
     dependencies:
@@ -3233,7 +3367,7 @@ snapshots:
 
   estree-walker@3.0.3:
     dependencies:
-      '@types/estree': 1.0.10
+      '@types/estree': 1.0.9
 
   expect-type@1.4.0: {}
 

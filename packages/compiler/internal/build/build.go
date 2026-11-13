@@ -10,6 +10,7 @@ import (
 	"hash/fnv"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -30,8 +31,11 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/gotsgen"
 	"github.com/kratejs/krate/packages/compiler/internal/icons"
 	"github.com/kratejs/krate/packages/compiler/internal/irtree"
-	"github.com/kratejs/krate/packages/compiler/internal/jsruntime"
+	jscompat "github.com/kratejs/krate/packages/compiler/internal/jsruntime"
 	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
+	"github.com/kratejs/krate/packages/compiler/internal/native/bake"
+	"github.com/kratejs/krate/packages/compiler/internal/native/gobind"
+	"github.com/kratejs/krate/packages/compiler/internal/native/hostts"
 	"github.com/kratejs/krate/packages/compiler/internal/plugin"
 	"github.com/kratejs/krate/packages/compiler/internal/reactive"
 	"github.com/kratejs/krate/packages/compiler/internal/renderer"
@@ -39,6 +43,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/safe"
 	"github.com/kratejs/krate/packages/compiler/internal/syntaxhighlight"
 	"github.com/kratejs/krate/packages/compiler/internal/tsstrip"
+	"github.com/kratejs/krate/packages/native/jsruntime"
 )
 
 type PageResult struct {
@@ -128,6 +133,12 @@ type PageResult struct {
 }
 
 type Builder struct {
+	// DebugGo builds the native Go host for a debugger: no optimizations or
+	// inlining, and source paths as they are on disk (see compileGoHost).
+	DebugGo bool
+	// InspectHost, when set to host:port, starts the node, bun and deno host
+	// children with --inspect on consecutive ports from there.
+	InspectHost string
 	// runtimeCompatWarnings holds the KR7160 warnings of the latest build of
 	// each API route and the middleware built for the embedded runtime, keyed
 	// by route source file ("middleware" for the middleware).
@@ -149,11 +160,15 @@ type Builder struct {
 	// the watcher asks the dev server to restart; otherwise it has already
 	// surfaced the error and the current server keeps running.
 	DevReload func(reason string) bool
-	ctx       context.Context     // optional cancellation for long builds
-	Env       map[string]string   // resolved .env values (build/serve-time only, never client-facing)
-	depGraph  map[string][]string // file path -> page source paths that depend on it
-	pageDeps  map[string][]string // page source path -> files it depends on
-	depMu     sync.Mutex          // protects depGraph/pageDeps
+	// DevHandleChanges, when set, takes each debounced batch of changed files
+	// from the dev watcher instead of processChanges. `krate native dev` uses
+	// it to route host code edits before the UI rebuild.
+	DevHandleChanges func(changed []string, hub *DevHub)
+	ctx              context.Context     // optional cancellation for long builds
+	Env              map[string]string   // resolved .env values (build/serve-time only, never client-facing)
+	depGraph         map[string][]string // file path -> page source paths that depend on it
+	pageDeps         map[string][]string // page source path -> files it depends on
+	depMu            sync.Mutex          // protects depGraph/pageDeps
 
 	// twMu guards twPages/twWarned: Tailwind CSS-first directives collected
 	// from the authored CSS that flows through processCSSDirectives (replaced
@@ -177,6 +192,35 @@ type Builder struct {
 	// run their own check pass (e.g. `krate check`, which re-reads dist/) don't
 	// evaluate and report the same findings twice.
 	SkipQualityChecks bool
+
+	// NativeTarget marks a native (desktop) build, where host code is allowed.
+	// A web build rejects every host marker (KR7173).
+	NativeTarget bool
+	// nativeHost is the host code split of a native build (see
+	// prepareNativeHost); its overlays replace host modules and inline host
+	// functions in every UI bundle.
+	nativeHost *hostts.Result
+	// nativeGo holds the generated Go host bindings of a native build.
+	nativeGo *gobind.Result
+	// nativeBaked holds the results of the build functions (`@build`,
+	// `//krate:build`) of a native build; the app module embeds them.
+	nativeBaked bake.Table
+	// nativeGoFiles are the .go files the UI imports (absolute), for the
+	// capability analysis of Go host code.
+	nativeGoFiles []string
+	// nativeOverlays are the source overlays of every host stub (TypeScript
+	// and Go), keyed by absolute module path.
+	nativeOverlays map[string]string
+	// nativePlugins is the state of the native plugins of the last native build
+	// (nil without plugins); nativePluginMods maps their TypeScript module
+	// specifiers ("krate/plugin/<name>") to the generated files.
+	nativePlugins *nativePluginState
+	// nativePluginResolved caches ResolveNativePlugins.
+	nativePluginResolved *pluginResolution
+	nativePluginMods     map[string]string
+	// nativeShake makes a native build link only the plugin ops the code uses
+	// (a release build). It is set by BuildNativeApp from Derive.
+	nativeShake bool
 
 	// fontPreloadHTML holds the `<link rel="preload">` tags for fonts declared
 	// in the global stylesheet; injected into every page head.
@@ -294,6 +338,22 @@ func (b *Builder) shouldMinifyJS() bool {
 	return b.Cfg.ShouldMinifyJS() && !b.DevMode
 }
 
+// viewTransitionsOff reports whether View Transitions are disabled. A native
+// app is a single window, not a set of documents: unless the config asks for
+// them, they stay off (a cross-document transition aborts the WebKitGTK web
+// process in software-rendered setups).
+func (b *Builder) viewTransitionsOff() bool {
+	if b.NativeTarget {
+		// The top-level setting is for the web build: a site that opts in
+		// there (the docs site does) would hang its desktop app. Only
+		// native.viewTransitions turns them on.
+		return b.Cfg.Native == nil || b.Cfg.Native.ViewTransitions != "auto"
+	}
+	return b.Cfg.ViewTransitions == "off"
+}
+
+var nativeCfgScriptRe = regexp.MustCompile(`<script>window\.__KRATE_CFG__=[^<]*;</script>\n?`)
+
 // runtimeCommonHead returns the per-page <head> extras: the site runtime config
 // (window.__KRATE_CFG__) for the SPA router, and the View Transitions CSS when
 // enabled. Emitted on every page (production and dev).
@@ -304,7 +364,8 @@ func (b *Builder) runtimeCommonHead() string {
 		// Enables the SPA router's dev warnings (e.g. a layout it could not keep mounted).
 		cfg["dev"] = true
 	}
-	if b.Cfg.ViewTransitions == "off" {
+	off := b.viewTransitionsOff()
+	if off {
 		cfg["viewTransitions"] = false
 	} else {
 		cfg["viewTransitions"] = "auto"
@@ -314,7 +375,7 @@ func (b *Builder) runtimeCommonHead() string {
 		sb.Write(data)
 		sb.WriteString(";</script>\n")
 	}
-	if b.Cfg.ViewTransitions != "off" {
+	if !off {
 		sb.WriteString("<style>@view-transition{navigation:auto}")
 		sb.WriteString("@media (prefers-reduced-motion: reduce){")
 		sb.WriteString("::view-transition-group(*),::view-transition-old(*),::view-transition-new(*){animation:none!important}}")
@@ -335,6 +396,14 @@ func (b *Builder) devBootstrapJSON() string {
 		"open":    "/__krate/open",
 		"overlay": b.Cfg.DevServer.OverlayEnabled(),
 		"toolbar": b.Cfg.DevServer.ToolbarEnabled(),
+	}
+	if b.NativeTarget {
+		// The native shell serves HMR as a frame stream on the app origin.
+		cfg["frames"] = "/__krate/hmr"
+		cfg["events"] = "/__krate/dev/events"
+		cfg["memory"] = "/__krate/dev/memory"
+		cfg["errors"] = "/__krate/dev/client-error"
+		delete(cfg, "open")
 	}
 	data, err := json.Marshal(cfg)
 	if err != nil {
@@ -841,6 +910,12 @@ func (b *Builder) BuildAll() error {
 		return err
 	}
 	if err := b.guardOutDir(); err != nil {
+		return err
+	}
+	if err := b.checkHostMarkers(); err != nil {
+		return err
+	}
+	if err := b.prepareNativeHost(); err != nil {
 		return err
 	}
 	if err := os.RemoveAll(b.Cfg.OutDir); err != nil {
@@ -1986,6 +2061,16 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 			}
 			chunkPreloads := dynamicChunkURLs(r.HydrationJS, b.Cfg.BaseURLPath())
 			chunkPreloads = append(chunkPreloads, lazyChunkPreloads(r.HydrationJS, b.Cfg.BaseURLPath())...)
+			if b.NativeTarget && !b.DevMode {
+				// Chunks are read from disk on demand: preloading would
+				// compile code for a component or branch that may never show.
+				chunkPreloads = nil
+				if r.JSFile == "" && !pageNeedsRuntime(r) && !strings.Contains(r.OutName, "[") {
+					// A page without client code has nothing to configure
+					// (a dynamic route shell keeps its boot script and config).
+					runtimeHead = nativeCfgScriptRe.ReplaceAllString(runtimeHead, "")
+				}
+			}
 			var html string
 			if r.LoadingHTML != "" {
 				html = generateHTMLWithLoading(r.HTML, r.HeadHTML, r.ScriptHTML, r.StyleHTML, r.LoadingHTML, pageCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath(), chunkPreloads...)
@@ -2125,6 +2210,7 @@ func (b *Builder) importResolver() *bundler.ImportResolver {
 // component tiers, and virtual modules (codegen'd `krate/content`).
 func (b *Builder) newBundler() *bundler.Bundler {
 	bnd := bundler.New(b.Root)
+	bnd.SetProgramReadLock(b.readProgram)
 	bnd.SetPathAliases(b.cfgPathAliasPrefixes(), b.cfgPathAliasTargets(), b.Cfg.TSBaseDir)
 	bnd.SetBaseURL(b.Cfg.TSBaseURL)
 	bnd.SetServerComponents(b.Cfg.ServerComponents, b.Cfg.RuntimeComponents, b.Cfg.ServerDirs, b.Cfg.RuntimeDirs)
@@ -2133,14 +2219,24 @@ func (b *Builder) newBundler() *bundler.Bundler {
 		UseDefineForClassFields: b.Cfg.TSCompilerOptions.UseDefineForClassFields,
 		Define:                  b.publicEnvDefines(),
 	})
-	if b.contentMods != nil {
-		bnd.SetVirtualModules(b.contentMods)
+	if b.contentMods != nil || len(b.nativePluginMods) > 0 {
+		mods := map[string]string{}
+		for k, v := range b.contentMods {
+			mods[k] = v
+		}
+		for k, v := range b.nativePluginMods {
+			mods[k] = v
+		}
+		bnd.SetVirtualModules(mods)
 	}
 	if mods := b.actionModules(); len(mods) > 0 {
 		bnd.SetActionModules(mods)
 		bnd.SetActionBasePath(b.Cfg.BaseURLPath())
 	}
 	bnd.SetModuleCache(b.moduleCache)
+	if b.nativeOverlays != nil {
+		bnd.SetSourceOverlays(b.nativeOverlays)
+	}
 	bnd.SetDevMode(b.DevMode)
 	bnd.SetTailwindImports(b.tailwindImportMode())
 	bnd.SetMarkdownConfig(b.Cfg.Markdown)
@@ -2646,7 +2742,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 
 	b.recordDeps(page, deps)
 
-	emitResult.ScriptHTML += routeInfoScript(routeChain, emitResult.Signatures) + fragmentInfo + pageRouteScript(page, b.Cfg.PagesDir)
+	emitResult.ScriptHTML += routeInfoScript(routeChain, emitResult.Signatures) + fragmentInfo + pageRouteScript(page, b.Cfg.PagesDir) + b.nativeParamScript(page)
 
 	outName := pageToOutput(page, b.Cfg.PagesDir)
 	pageDir := filepath.Join(b.Cfg.OutDir, outName)
@@ -2771,7 +2867,13 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 			// original .tsx positions.
 			inputMap := ""
 			if len(emitResult.SrcMarks) > 0 {
-				rawJS, inputMap = buildHydrationMap(rawJS, emitResult.SrcMarks, pageDir)
+				mapDir := pageDir
+				if b.NativeTarget {
+					// The terminal prints these paths: project-relative reads
+					// better than a path out of the build directory.
+					mapDir = b.Root
+				}
+				rawJS, inputMap = buildHydrationMap(rawJS, emitResult.SrcMarks, mapDir)
 			}
 			finalJS := rawJS
 			mapJSON := ""
@@ -4125,7 +4227,7 @@ func (b *Builder) BuildMiddleware() error {
 		_ = os.Remove(middlewareMetaPath(b.Root))
 		return nil
 	}
-	features := b.scanRuntimeCompat("middleware", result.Metafile, jsruntime.CompatMiddlewareRuntime)
+	features := b.scanRuntimeCompat("middleware", result.Metafile, jscompat.CompatMiddlewareRuntime)
 	if err := writeMiddlewareMeta(b.Root, features); err != nil {
 		return fmt.Errorf("writing middleware metadata: %w", err)
 	}
@@ -4973,7 +5075,7 @@ type apiRouteMeta struct {
 	File string `json:"file"`
 	// NodeOnly is true when the bundle still has external imports.
 	NodeOnly bool `json:"nodeOnly"`
-	// Features lists the compat ledger features (internal/jsruntime/compat.json)
+	// Features lists the compat ledger features (packages/native/jsruntime/compat.json)
 	// the route's sources reference, for an embedded-runtime route. Absent
 	// means unknown, so the runtime must load everything.
 	Features *[]string `json:"features,omitempty"`
@@ -5081,7 +5183,7 @@ func (b *Builder) compileSingleRoute(file string, apiSrcDir string) (apiRouteMet
 	// Node-only routes are served by the sidecar, so only embedded-runtime
 	// routes are checked against the embedded runtime's API surface.
 	if !meta.NodeOnly && embeddedRuntime(b.Cfg.SSR.APIRuntime) {
-		meta.Features = b.scanRuntimeCompat(file, quickjsResult.Metafile, jsruntime.CompatAPIRuntime)
+		meta.Features = b.scanRuntimeCompat(file, quickjsResult.Metafile, jscompat.CompatAPIRuntime)
 	} else {
 		b.setRuntimeCompatWarnings(file, nil)
 	}

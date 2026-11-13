@@ -1,0 +1,11 @@
+{
+  "name": "krate-native-media",
+  "private": true,
+  "type": "module",
+  "description": "Krate Native example: the page asks for the camera, microphone and location, and the app's policy (native.media) decides.",
+  "dependencies": {
+    "@krate/app": "workspace:*",
+    "@krate/core": "workspace:*",
+    "@krate/runtime": "workspace:*"
+  }
+}

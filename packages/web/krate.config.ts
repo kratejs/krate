@@ -35,6 +35,14 @@ export default defineConfig({
     locale: "en",
   },
 
+  // `krate native build` packages the docs as a desktop app (offline docs).
+  native: {
+    appId: "js.krate.docs",
+    productName: "Krate Docs",
+    version: "0.1.0",
+    window: { width: 1180, height: 820, resizable: true },
+  },
+
   // Build-time precompression + deploy adapter for Cloudflare Pages.
   compress: { brotli: true, gzip: true },
   deploy: { target: "cloudflare" },

@@ -180,7 +180,7 @@ func (a AuthConfig) RuntimeJSON() ([]byte, error) {
 	return json.Marshal(a)
 }
 
-func containsString(list []string, v string) bool {
+func authContains(list []string, v string) bool {
 	for _, s := range list {
 		if s == v {
 			return true
@@ -189,8 +189,8 @@ func containsString(list []string, v string) bool {
 	return false
 }
 
-func oneOf(v string, allowed ...string) bool {
-	return v == "" || containsString(allowed, v)
+func authOneOf(v string, allowed ...string) bool {
+	return v == "" || authContains(allowed, v)
 }
 
 func findSecretKey(v any, path string) (string, bool) {
@@ -229,7 +229,7 @@ func (a AuthConfig) validate() (warnings []string, err error) {
 			return nil, fmt.Errorf("auth.basePath must not end with /, got %q", bp)
 		}
 	}
-	if !oneOf(a.Session.Strategy, "jwt", "database") {
+	if !authOneOf(a.Session.Strategy, "jwt", "database") {
 		return nil, fmt.Errorf("auth.session.strategy must be \"jwt\" or \"database\", got %q", a.Session.Strategy)
 	}
 	if a.Session.MaxAge < 0 || a.Session.UpdateAge < 0 {
@@ -238,7 +238,7 @@ func (a AuthConfig) validate() (warnings []string, err error) {
 	if a.Session.UpdateAge > 0 && a.Session.MaxAge > 0 && a.Session.UpdateAge > a.Session.MaxAge {
 		warnings = append(warnings, "auth.session.updateAge is larger than maxAge, so the session is never extended")
 	}
-	if !oneOf(a.Adapter.Dialect, "sqlite", "postgres", "mysql") {
+	if !authOneOf(a.Adapter.Dialect, "sqlite", "postgres", "mysql") {
 		return nil, fmt.Errorf("auth.adapter.dialect must be \"sqlite\", \"postgres\" or \"mysql\", got %q", a.Adapter.Dialect)
 	}
 	for k := range a.Adapter.Tables {
@@ -301,7 +301,7 @@ func (a AuthConfig) validate() (warnings []string, err error) {
 	if tf.Period < 0 || tf.Window < 0 || tf.Window > 10 {
 		return nil, fmt.Errorf("auth.twoFactor.period must be > 0 seconds and window between 0 and 10")
 	}
-	if !oneOf(strings.ToUpper(tf.Algorithm), "SHA1", "SHA256", "SHA512") {
+	if !authOneOf(strings.ToUpper(tf.Algorithm), "SHA1", "SHA256", "SHA512") {
 		return nil, fmt.Errorf("auth.twoFactor.algorithm must be SHA1, SHA256 or SHA512, got %q", tf.Algorithm)
 	}
 	if tf.BackupCodes < 0 || tf.BackupCodes > 32 {
@@ -312,13 +312,13 @@ func (a AuthConfig) validate() (warnings []string, err error) {
 	}
 
 	pk := a.Passkeys
-	if !oneOf(pk.UserVerification, "required", "preferred", "discouraged") {
+	if !authOneOf(pk.UserVerification, "required", "preferred", "discouraged") {
 		return nil, fmt.Errorf("auth.passkeys.userVerification must be required, preferred or discouraged, got %q", pk.UserVerification)
 	}
-	if !oneOf(pk.ResidentKey, "required", "preferred", "discouraged") {
+	if !authOneOf(pk.ResidentKey, "required", "preferred", "discouraged") {
 		return nil, fmt.Errorf("auth.passkeys.residentKey must be required, preferred or discouraged, got %q", pk.ResidentKey)
 	}
-	if !oneOf(pk.Attestation, "none", "indirect", "direct", "enterprise") {
+	if !authOneOf(pk.Attestation, "none", "indirect", "direct", "enterprise") {
 		return nil, fmt.Errorf("auth.passkeys.attestation must be none, indirect, direct or enterprise, got %q", pk.Attestation)
 	}
 	if strings.Contains(pk.RPID, "://") || strings.Contains(pk.RPID, "/") || strings.Contains(pk.RPID, ":") {

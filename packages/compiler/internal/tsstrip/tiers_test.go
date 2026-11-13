@@ -244,3 +244,18 @@ func TestTierDecoratorOnInlineDefaultComponent(t *testing.T) {
 		}
 	})
 }
+
+// @host marks native host code: it is blanked like a tier decorator, allowed on
+// an async function, and never becomes the module tier.
+func TestHostDecorator(t *testing.T) {
+	prog := parseOK(t, "a.tsx", "@host\nexport async function save() {}\n\n@host\nexport default function load() {}\n")
+	if fn := topFn(t, prog, "save"); fn.Tier != "host" || !fn.Async {
+		t.Errorf("save: tier %q async %v", fn.Tier, fn.Async)
+	}
+	if prog.Tier != "" {
+		t.Errorf("module tier = %q, want none", prog.Tier)
+	}
+	if got := BlankTierDecorators("a.tsx", "@host\nexport function f() {}\n"); strings.Contains(got, "@host") {
+		t.Errorf("decorator not blanked: %q", got)
+	}
+}

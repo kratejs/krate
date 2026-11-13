@@ -1,6 +1,16 @@
 packages:
   - packages/*
   - examples
+  - examples/native-tasks
+  - examples/native-media
+  - examples/native-views
+  - examples/native-from-electron
+  - examples/native-procs
+  - examples/native-files
+  - examples/native-chrome
+  - examples/native-page
+  - examples/native-plugin
+  - examples/native-remote
 
 allowBuilds:
   '@krate/core': true

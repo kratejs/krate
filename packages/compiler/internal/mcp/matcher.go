@@ -7,7 +7,7 @@ import (
 )
 
 // compileMiddlewareMatcher is a Go port of the middleware matcher compiler the
-// runtime uses (internal/jsruntime/matcher.js), so list_middleware can answer
+// runtime uses (packages/native/jsruntime/matcher.js), so list_middleware can answer
 // "does this path run the middleware?" exactly as the server would. It needs
 // lookahead (the common /((?!api|_next).*) form), hence regexp2.
 func compileMiddlewareMatcher(src string) (*regexp2.Regexp, error) {

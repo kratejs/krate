@@ -1,0 +1,77 @@
+{
+  "schema": "scriptc-diagnostics",
+  "schemaVersion": 1,
+  "compilerVersion": "0.3.0",
+  "command": "coverage",
+  "entry": "/work/app/.krate/native/host/scriptc/host.mjs",
+  "success": false,
+  "phase": "compile",
+  "stats": {"statementsTotal": 13, "statementsStatic": 12, "statementsDynamic": 0, "statementsFailed": 1, "functionsSkipped": 0, "percentStatic": 92},
+  "groups": [
+    {
+      "id": "SC1031-c2cc8425",
+      "code": "SC1031",
+      "category": "unsupported",
+      "severity": "error",
+      "scope": "reached",
+      "message": "object destructuring of non-record values (the source is array-typed)",
+      "hint": "destructure into named variables",
+      "count": 1,
+      "primary": {"file": "/work/app/.krate/native/host/scriptc/host.mjs", "line": 3, "column": 7},
+      "sites": [{"file": "/work/app/.krate/native/host/scriptc/host.mjs", "line": 3, "column": 7}]
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "SC1031",
+      "category": "unsupported",
+      "severity": "error",
+      "scope": "reached",
+      "file": "/work/app/.krate/native/host/scriptc/host.mjs",
+      "line": 3,
+      "column": 7,
+      "endLine": 3,
+      "endColumn": 28,
+      "start": 352,
+      "end": 373,
+      "message": "object destructuring of non-record values (the source is array-typed) are not supported yet",
+      "hint": "destructure into named variables",
+      "group": "SC1031-c2cc8425"
+    },
+    {
+      "code": "SC1010",
+      "category": "unsupported",
+      "severity": "error",
+      "scope": "reached",
+      "file": "/work/app/.krate/native/host/scriptc/host.mjs",
+      "line": 1,
+      "column": 1,
+      "message": "the host child runtime uses an unsupported construct",
+      "hint": "",
+      "group": "SC1010-aaaaaaaa"
+    },
+    {
+      "code": "SC1031",
+      "category": "unsupported",
+      "severity": "error",
+      "scope": "unreached",
+      "file": "/work/app/.krate/native/host/scriptc/host.mjs",
+      "line": 3,
+      "column": 7,
+      "message": "in code the entry never reaches: does not fail a build",
+      "group": "SC1031-c2cc8425"
+    },
+    {
+      "code": "SC6001",
+      "category": "divergence",
+      "severity": "warning",
+      "scope": "reached",
+      "file": "/work/app/.krate/native/host/scriptc/host.mjs",
+      "line": 3,
+      "column": 7,
+      "message": "conversion copies a value the program can tell from the original",
+      "hint": "pass the value by reference",
+      "group": "SC6001-bbbbbbbb"
+    }
+  ]
+}

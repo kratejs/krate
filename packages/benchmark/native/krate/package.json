@@ -1,0 +1,11 @@
+{
+  "name": "bench-native-krate",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Krate Native side of the native benchmark. Standalone: the harness links @krate/* from the monorepo.",
+  "dependencies": {
+    "@krate/core": "*",
+    "@krate/runtime": "*"
+  }
+}

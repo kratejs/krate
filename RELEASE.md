@@ -52,6 +52,15 @@ the platform optional dependencies, and the runtime peer range. Run
 `node scripts/check-version.mjs` before tagging; both CI and the release
 workflow run it.
 
+## Native module tags
+
+`krate native build --release` of an app without Go code generates a Go module that
+requires `github.com/kratejs/krate/packages/native` at the compiler's own version
+(`v<version>`). Go resolves a module in a subdirectory by the tag
+`packages/native/v<version>`, so every release tags that path next to `v<version>`.
+`internal/build/nativemod/go.mod.txt` and `go.sum.txt` are copies of
+`packages/native/go.mod` and `go.sum` (a test fails when they drift; `cp` them).
+
 ## Deprecation policy
 
 - Announce a deprecation in the docs and release notes at least one minor

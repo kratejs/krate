@@ -1,0 +1,16 @@
+{
+  "name": "echo",
+  "version": "1.2.0",
+  "go": "example.com/krate-plugin-echo",
+  "permissions": [
+    { "name": "use", "description": "call the echo ops" },
+    { "name": "admin", "description": "reconfigure the echo plugin" }
+  ],
+  "ops": [
+    { "name": "echo", "permission": "use" },
+    { "name": "shout", "permission": "use" },
+    { "name": "reset", "permission": "admin" },
+    { "name": "hand", "permission": "use", "manual": true },
+    { "name": "free" }
+  ]
+}

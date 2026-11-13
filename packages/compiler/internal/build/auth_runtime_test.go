@@ -19,7 +19,7 @@ import (
 	"time"
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
-	"github.com/kratejs/krate/packages/compiler/internal/jsruntime"
+	"github.com/kratejs/krate/packages/native/jsruntime"
 )
 
 const authTestSecret = "embedded-runtime-secret-with-plenty-of-entropy-0123456789"

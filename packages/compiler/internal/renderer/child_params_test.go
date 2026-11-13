@@ -140,3 +140,26 @@ export default function Page() {
 		}
 	}
 }
+
+// A constant whose initializer reads a member named like another constant
+// does not depend on that constant: `getClient().signal` is not a read of the
+// module's `signal`. Counting it made hostSignal and signal depend on each
+// other, and the alphabetical tie-break emitted `signal=hostSignal.signal`
+// before hostSignal existed (examples/native-views threw a ReferenceError on
+// load from @krate/app's index).
+func TestModuleConstMemberNameIsNotADependency(t *testing.T) {
+	_, js := fullPipeline(t, `function getClient() { return { signal: (n) => n }; }
+const hostSignal = { signal(name) { return getClient().signal(name); } };
+const signal = hostSignal.signal;
+export default function Page() {
+  return <p onClick={() => signal('x')}>hi</p>;
+}`)
+	def := strings.Index(js, "hostSignal={")
+	use := strings.Index(js, "signal=hostSignal.signal")
+	if def < 0 || use < 0 {
+		t.Fatalf("module constants missing:\n%s", js)
+	}
+	if use < def {
+		t.Errorf("signal is declared before the hostSignal it reads:\n%s", js)
+	}
+}

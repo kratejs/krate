@@ -1,0 +1,297 @@
+package plugins
+
+import (
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"os"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
+
+	"github.com/kratejs/krate/packages/compiler/internal/diag"
+	"github.com/kratejs/krate/packages/compiler/internal/native/gobind"
+)
+
+// ShellModule is the module path of the generated per-app shell module.
+const ShellModule = "krate.local/pluginshell"
+
+// NativePkg is the import path of the native Go module.
+const NativePkg = "github.com/kratejs/krate/packages/native"
+
+// SpecPrefix is the import specifier prefix of a plugin's generated TypeScript
+// module: import { Info } from "krate/plugin/system-info".
+const SpecPrefix = "krate/plugin/"
+
+// Linked is a plugin after generation.
+type Linked struct {
+	Plugin *Plugin
+	// Ops are the ops linked into the shell: the generated ones the code uses
+	// (all of them in a dev build) and every manual op.
+	Ops []Op
+	// Generated names the Go names of the ops bound by generated glue.
+	Generated []string
+	// Permissions are the declared permissions the linked ops need.
+	Permissions []Permission
+	// Spec is the TypeScript import specifier, StubPath and DTSPath the
+	// generated files behind it.
+	Spec              string
+	StubPath, DTSPath string
+	StubJS, DTS       string
+	GlueImport        string
+	HasInit, HasGlue  bool
+	manifestRel       string
+	rename            map[string]string
+}
+
+// Output is the result of Generate.
+type Output struct {
+	// Dir is the shell module directory (the Go module krate.local/pluginshell).
+	Dir    string
+	Linked []*Linked
+}
+
+// ShellDir is the directory of the generated shell module of a project.
+func ShellDir(root string) string { return filepath.Join(root, ".krate", "native", "pluginshell") }
+
+// Used says which ops of each plugin (by name) the app's code uses. A nil Used
+// links every op.
+type Used map[string]map[string]bool
+
+// Generate writes, under <root>/.krate/native, the glue of every plugin and the
+// registry package (shellDir, the module krate.local/pluginshell) and the
+// TypeScript modules (<root>/.krate/native/plugins). used, when not nil,
+// restricts the ops that are bound and the permissions that are defined. The
+// go.mod of the shell module has to exist already (the plugins' packages are
+// type-checked in it); env is the environment of the go commands.
+func Generate(root string, ps []*Plugin, used Used, env []string) (*Output, []diag.Diagnostic, error) {
+	nativeDir := filepath.Join(root, ".krate", "native")
+	out := &Output{Dir: ShellDir(root)}
+	tsDir := filepath.Join(nativeDir, "plugins")
+	sorted := append([]*Plugin(nil), ps...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Manifest.Name < sorted[j].Manifest.Name })
+
+	var imports []gobind.Import
+	byID := map[string]*Linked{}
+	for _, p := range sorted {
+		l := &Linked{Plugin: p, Spec: SpecPrefix + p.Manifest.Name, manifestRel: rel(root, filepath.Join(p.Dir, ManifestFile))}
+		l.HasInit = hasInit(p.Dir)
+		l.rename = map[string]string{}
+		needPerm := map[string]bool{}
+		for _, o := range p.Manifest.Ops {
+			if !o.Manual && used != nil && !used[p.Manifest.Name][o.Name] {
+				continue
+			}
+			l.Ops = append(l.Ops, o)
+			if !o.Manual {
+				l.Generated = append(l.Generated, o.GoName())
+				l.rename[o.GoName()] = o.Name
+			}
+			if o.Permission != "" {
+				needPerm[o.Permission] = true
+			}
+		}
+		for _, pm := range p.Manifest.Permissions {
+			if needPerm[pm.Name] {
+				l.Permissions = append(l.Permissions, pm)
+			}
+		}
+		out.Linked = append(out.Linked, l)
+		id := "plugin/" + p.Manifest.Name
+		byID[id] = l
+		if len(l.Generated) > 0 {
+			imports = append(imports, gobind.Import{
+				File: p.Dir, Names: l.Generated, ID: id,
+				// The package is type-checked inside the shell module, which
+				// replaces the native module and the plugin modules.
+				ModuleDir: out.Dir, Pattern: p.ImportPath, Env: env, Rename: l.rename,
+				From: l.manifestRel, Line: 1, Col: 1,
+			})
+		}
+	}
+
+	gens := map[string]gobind.Module{}
+	if len(imports) > 0 {
+		res, ds, err := gobind.GenerateWith(root, imports, filepath.Join(nativeDir, "plugins-gen"), gobind.Options{
+			GlueDir: func(pi gobind.PkgInfo) (string, string, error) {
+				name := strings.TrimPrefix(pi.ID, "plugin/")
+				return filepath.Join(out.Dir, "plugins", name), ShellModule + "/plugins/" + name, nil
+			},
+		})
+		if err != nil || len(ds) > 0 {
+			for i := range ds {
+				switch ds[i].Code {
+				case diag.CodeGoBindImport:
+					// A listed op that is not an exported function or signal.
+					ds[i].Code = diag.CodePluginOp
+					ds[i].Hint += " (an op \"info\" binds to the Go name Info; set \"go\" for another name, or mark the op \"manual\" if the plugin registers it from Init)"
+				case diag.CodeGoBindSignature, diag.CodeGoBindType:
+					ds[i].Hint += " (plugin ops are the exported functions and signals krate-plugin.json lists)"
+				}
+			}
+			return nil, ds, err
+		}
+		for _, m := range res.Modules {
+			gens[m.ID] = m
+		}
+		for _, g := range res.Glue {
+			for id, l := range byID {
+				if strings.HasSuffix(g.ImportPath, "/plugins/"+strings.TrimPrefix(id, "plugin/")) {
+					l.GlueImport, l.HasGlue = g.ImportPath, true
+				}
+			}
+		}
+	}
+
+	var ambient strings.Builder
+	ambient.WriteString("// Code generated by krate. DO NOT EDIT.\n\n")
+	for _, l := range out.Linked {
+		name := l.Plugin.Manifest.Name
+		stub, dts := "// Code generated by krate. DO NOT EDIT.\n", "// Code generated by krate. DO NOT EDIT.\n"
+		if m, ok := gens["plugin/"+name]; ok && m.Stub != "" {
+			if b, err := os.ReadFile(m.Stub); err == nil {
+				stub = string(b)
+			}
+			if b, err := os.ReadFile(m.DTS); err == nil {
+				dts = string(b)
+			}
+		}
+		var manual []Op
+		for _, o := range l.Ops {
+			if o.Manual {
+				manual = append(manual, o)
+			}
+		}
+		if len(manual) > 0 {
+			stub += "\nimport { call as __manualCall } from \"@krate/app\";\n"
+			for _, o := range manual {
+				stub += fmt.Sprintf("export const %s = (...args) => __manualCall(%s, args);\n", o.Name, strconv.Quote(OpID(name, o.Name)))
+				dts += fmt.Sprintf("export function %s(...args: unknown[]): Promise<unknown>;\n", o.Name)
+			}
+		}
+		l.StubJS, l.DTS = stub, dts
+		l.StubPath = filepath.Join(tsDir, name+".js")
+		l.DTSPath = filepath.Join(tsDir, name+".d.ts")
+		if err := writeIfChanged(l.StubPath, []byte(stub)); err != nil {
+			return nil, nil, err
+		}
+		if err := writeIfChanged(l.DTSPath, []byte(dts)); err != nil {
+			return nil, nil, err
+		}
+		fmt.Fprintf(&ambient, "declare module %s {\n%s}\n\n", strconv.Quote(l.Spec), indentLines(dts))
+		src, err := pluginSource(l)
+		if err != nil {
+			return nil, nil, err
+		}
+		dir := filepath.Join(out.Dir, "plugins", name)
+		if err := writeIfChanged(filepath.Join(dir, "plugin.go"), src); err != nil {
+			return nil, nil, err
+		}
+	}
+	if err := writeIfChanged(filepath.Join(tsDir, "modules.d.ts"), []byte(ambient.String())); err != nil {
+		return nil, nil, err
+	}
+	if err := writeIfChanged(filepath.Join(out.Dir, "registry", "registry.go"), registrySource(out.Linked)); err != nil {
+		return nil, nil, err
+	}
+	return out, nil, nil
+}
+
+func indentLines(s string) string {
+	var b strings.Builder
+	for _, line := range strings.Split(strings.TrimRight(s, "\n"), "\n") {
+		if line != "" {
+			b.WriteString("  ")
+		}
+		b.WriteString(line + "\n")
+	}
+	return b.String()
+}
+
+func writeIfChanged(path string, data []byte) error {
+	if old, err := os.ReadFile(path); err == nil && string(old) == string(data) {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o644)
+}
+
+// pluginSource is plugin.go of the glue package: the plugin value the shell links.
+func pluginSource(l *Linked) ([]byte, error) {
+	name := l.Plugin.Manifest.Name
+	var b strings.Builder
+	b.WriteString("// Code generated by krate. DO NOT EDIT.\n\npackage glue\n\nimport (\n")
+	fmt.Fprintf(&b, "\tkrateplugin %q\n", NativePkg+"/plugin")
+	if l.HasInit {
+		fmt.Fprintf(&b, "\tuserpkg %q\n", l.Plugin.ImportPath)
+	}
+	b.WriteString(")\n\n// Plugin is the plugin for the shell.\nvar Plugin = &krateplugin.Plugin{\n\tMeta: krateplugin.Meta{\n")
+	fmt.Fprintf(&b, "\t\tName: %q,\n\t\tVersion: %q,\n", name, l.Plugin.Manifest.Version)
+	b.WriteString("\t\tPermissions: []krateplugin.PermissionInfo{\n")
+	for _, p := range l.Permissions {
+		fmt.Fprintf(&b, "\t\t\t{Name: %q, Doc: %q},\n", p.Name, p.Description)
+	}
+	b.WriteString("\t\t},\n\t\tOps: []krateplugin.OpInfo{\n")
+	for _, o := range l.Ops {
+		fmt.Fprintf(&b, "\t\t\t{Name: %q, Permission: %q, Manual: %v},\n", o.Name, o.Permission, o.Manual)
+	}
+	b.WriteString("\t\t},\n\t},\n")
+	if l.HasGlue {
+		b.WriteString("\tRegister: Register,\n")
+	}
+	if l.HasInit {
+		b.WriteString("\tInit: userpkg.Init,\n")
+	}
+	b.WriteString("}\n")
+	return formatGo(b.String())
+}
+
+func registrySource(ls []*Linked) []byte {
+	var b strings.Builder
+	b.WriteString("// Code generated by krate. DO NOT EDIT.\n\n// Package registry lists the plugins linked into the shell.\npackage registry\n\nimport (\n")
+	fmt.Fprintf(&b, "\tkrateplugin %q\n", NativePkg+"/plugin")
+	for i, l := range ls {
+		fmt.Fprintf(&b, "\tp%d %q\n", i, ShellModule+"/plugins/"+l.Plugin.Manifest.Name)
+	}
+	b.WriteString(")\n\n// All returns the linked plugins.\nfunc All() []*krateplugin.Plugin {\n\treturn []*krateplugin.Plugin{\n")
+	for i := range ls {
+		fmt.Fprintf(&b, "\t\tp%d.Plugin,\n", i)
+	}
+	b.WriteString("\t}\n}\n")
+	out, err := formatGo(b.String())
+	if err != nil {
+		return []byte(b.String())
+	}
+	return out
+}
+
+// hasInit reports whether the package in dir exports func Init(*X.Context) error.
+func hasInit(dir string) bool {
+	fset := token.NewFileSet()
+	pkgs, err := parser.ParseDir(fset, dir, func(fi os.FileInfo) bool { return !strings.HasSuffix(fi.Name(), "_test.go") }, 0)
+	if err != nil {
+		return false
+	}
+	for _, pkg := range pkgs {
+		for _, f := range pkg.Files {
+			for _, d := range f.Decls {
+				fn, ok := d.(*ast.FuncDecl)
+				if !ok || fn.Recv != nil || fn.Name.Name != "Init" || fn.Type.Params.NumFields() != 1 || fn.Type.Results.NumFields() != 1 {
+					continue
+				}
+				star, ok := fn.Type.Params.List[0].Type.(*ast.StarExpr)
+				if !ok {
+					continue
+				}
+				if sel, ok := star.X.(*ast.SelectorExpr); ok && sel.Sel.Name == "Context" {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}

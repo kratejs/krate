@@ -325,6 +325,281 @@ export interface ImagesConfig {
   remotePatterns?: ImageRemotePattern[];
 }
 
+/** Main window settings for the native target. */
+export interface NativeWindowConfig {
+  /** Default 1280. */
+  width?: number;
+  /** Default 800. */
+  height?: number;
+  /** Default true. */
+  resizable?: boolean;
+  /** Default "native". */
+  titleBar?: "native" | "hidden" | "none";
+  /** Transparent window and webview background; the page paints what the user sees. */
+  transparent?: boolean;
+  /** Windows 11 22H2+ system backdrop behind a transparent page. Ignored elsewhere. */
+  backdrop?: "none" | "mica" | "micaAlt" | "acrylic";
+  /** macOS vibrancy material behind a transparent page. Ignored elsewhere. */
+  vibrancy?:
+    | "titlebar"
+    | "selection"
+    | "menu"
+    | "popover"
+    | "sidebar"
+    | "headerView"
+    | "sheet"
+    | "windowBackground"
+    | "hudWindow"
+    | "fullScreenUI"
+    | "tooltip"
+    | "contentBackground"
+    | "underWindowBackground"
+    | "underPageBackground";
+  /**
+   * Windows: the OS caption buttons over a hidden title bar. `true` uses the
+   * defaults; colors are `#rgb`, `#rrggbb` or `#rrggbbaa`, `height` is the
+   * height of the area in pixels (default 32). Needs `titleBar: "hidden"`.
+   */
+  titleBarOverlay?: boolean | { color?: string; symbolColor?: string; height?: number };
+  /** macOS: where the traffic lights sit on a hidden title bar. */
+  trafficLightPosition?: { x: number; y: number };
+  /** macOS: windows with the same identifier tab together. */
+  tabbingIdentifier?: string;
+  tabbingMode?: "auto" | "preferred" | "disallowed";
+  /**
+   * Keep the app running with no window open (tray apps). Closing the last
+   * window then releases its webview instead of quitting; `window.show()` or a
+   * tray click brings it back on the same route. Default false.
+   */
+  keepAlive?: boolean;
+  /**
+   * What a right click in the webview does. "default" keeps the engine's menu;
+   * "none" shows nothing; "custom" shows nothing and reports the click, so the
+   * page or host code can answer with its own menu (`menu.onContextMenu` in
+   * `@krate/app`). Per window or view, `menu.setContextMenu` overrides it.
+   * Default "default".
+   */
+  contextMenu?: "default" | "none" | "custom";
+}
+
+/** Runtime for TypeScript host code in the native target. */
+export interface NativeHostConfig {
+  /** Default "quickjs". "scriptc" needs `experimental.scriptc`. */
+  runtime?: "quickjs" | "node" | "bun" | "deno" | "scriptc";
+  /** Pinned runtime version for node, bun and deno. */
+  version?: string;
+  /** Ship the runtime inside the app. Default true. */
+  bundle?: boolean;
+  /** QuickJS heap limit in MiB. Default 64 (balanced), 32 (minimal), 256 (performance). */
+  memoryMB?: number;
+  /** Packages that run in a different runtime than the main host runtime. */
+  islands?: Record<string, "node" | "bun" | "deno" | "quickjs">;
+}
+
+/** The `native` block: desktop target settings (`krate native`). Experimental. */
+/** Permission names of the native SDK (packages/native/sdk/permission). */
+export type NativePermission =
+  | "os:info"
+  | "kv"
+  | "db"
+  | "fs"
+  | "fs:read"
+  | "os:secrets"
+  | "os:secrets.read"
+  | "shell:openExternal"
+  | "net"
+  | "window"
+  | "app"
+  | "menu"
+  | "dialog"
+  | "notify"
+  | "clipboard"
+  | "clipboard:read"
+  | "tray"
+  | "shortcut"
+  | "media"
+  | "media:manage"
+  | "location"
+  | "share"
+  | "page"
+  | "downloads"
+  | "cookies"
+  | "remote"
+  | "remote:intercept"
+  | "remote:network"
+  | `plugin:${string}.${string}`;
+
+export interface NativeConfig {
+  /** Reverse-DNS id, e.g. "com.acme.app". */
+  appId?: string;
+  productName?: string;
+  /** Semantic version, e.g. "1.0.0". */
+  version?: string;
+  /** Default: all three. */
+  platforms?: Array<"windows" | "macos" | "linux">;
+  /** Path of the source icon image. */
+  icons?: string;
+  window?: NativeWindowConfig;
+  /**
+   * SDK permissions the app's UI gets. Empty or omitted means os:info, kv, db,
+   * window, app, menu, dialog, notify and clipboard. Written to app.json.
+   */
+  permissions?: NativePermission[];
+  /** Custom URL schemes the app registers (without "://"). */
+  deepLinks?: string[];
+  host?: NativeHostConfig;
+  experimental?: { scriptc?: boolean };
+  release?: {
+    /** Default "auto". */
+    compile?: "auto" | "always" | "never";
+    /** Profile for profile-guided optimization. */
+    pgo?: string;
+  };
+  bundle?: {
+    macos?: {
+      category?: string;
+      /** Menu-bar-only app: `LSUIElement` in Info.plist, no dock icon (a running app can show it again). */
+      agent?: boolean;
+      /** Package arm64 and x86_64 code in one .app (same as --arch universal). */
+      universal?: boolean;
+      /** The Mac App Store variant (krate native package --target mas). */
+      mas?: {
+        /** Apple developer team id, ten capital letters and digits. */
+        teamId?: string;
+        /** Mac App Store .provisionprofile, relative to the project. Do not commit it. */
+        provisioningProfile?: string;
+        /** Extra entitlements plist merged into the generated sandbox entitlements. */
+        entitlements?: string;
+        /** Network entitlements. Default ["client"]. */
+        network?: Array<"client" | "server">;
+        /** Access to files the user picks. Default "read-write". */
+        files?: "read-write" | "read-only" | "none";
+      };
+    };
+    windows?: {
+      publisher?: string;
+      installer?: "msix" | "nsis";
+      /**
+       * What the NSIS installer does when the Microsoft WebView2 Runtime is
+       * missing: "download" (default) fetches Microsoft's Evergreen
+       * bootstrapper, "embed" ships it in the installer, "fixed" ships a
+       * Fixed Version runtime folder next to the app, "none" leaves it to the
+       * app (which shows a message box with the download link).
+       */
+      webview2?: "download" | "embed" | "fixed" | "none";
+      /**
+       * For "embed" the MicrosoftEdgeWebview2Setup.exe, for "fixed" the
+       * extracted runtime folder; relative to the project. Microsoft's files,
+       * not part of Krate: do not commit them.
+       */
+      webview2Path?: string;
+      /** Partner Center identity for the Microsoft Store variant (--format msix-store). */
+      store?: {
+        /** Package/Identity/Name, such as "12345Acme.AcmeNotes". */
+        identityName?: string;
+        /** Package/Identity/Publisher, such as "CN=01234567-89AB-CDEF-0123-456789ABCDEF". */
+        publisherId?: string;
+        /** Package/Properties/PublisherDisplayName. */
+        publisherDisplayName?: string;
+      };
+    };
+    linux?: {
+      formats?: Array<"deb" | "rpm" | "appimage" | "flatpak" | "snap">;
+      /** One-line description (AppStream and snap summary). */
+      summary?: string;
+      /** Long description, plain text. */
+      description?: string;
+      /** SPDX license expression, or "LicenseRef-proprietary". */
+      license?: string;
+      homepage?: string;
+      flatpak?: {
+        /** Default "org.gnome.Platform". */
+        runtime?: string;
+        /** Runtime branch, default "48". */
+        runtimeVersion?: string;
+        /** Extra finish-args such as "--filesystem=xdg-documents". */
+        finishArgs?: string[];
+      };
+      snap?: {
+        grade?: "stable" | "devel";
+        confinement?: "strict" | "classic" | "devmode";
+        /** Extra plugs beyond the ones derived from the app's permissions. */
+        plugs?: string[];
+      };
+    };
+  };
+  /** In-app updates; `url` may contain `{target}`. Needs both fields. */
+  updater?: { url: string; publicKey: string };
+  /**
+   * Native plugins: a directory with a krate-plugin.json ("./native-plugins/hello"),
+   * an npm package that ships one ("@acme/krate-sqlite") or a Go module
+   * ("go:github.com/acme/krate-sqlite@v1.2.0"). The app then runs under a per-app
+   * shell built with the Go toolchain.
+   */
+  plugins?: string[];
+  /**
+   * Memory profile of the webview and host. "balanced" (default) trims what
+   * the app does not use; "minimal" trims harder and turns the JS JIT off
+   * in the web process (slower); "performance" keeps the engine defaults.
+   */
+  memory?: "balanced" | "minimal" | "performance";
+  /**
+   * Explicit overrides for the webview features detected from the UI code.
+   * A detected feature is on unless set to false here; true forces it on.
+   */
+  features?: {
+    media?: boolean;
+    webaudio?: boolean;
+    webgl?: boolean;
+    webrtc?: boolean;
+    spellcheck?: boolean;
+  };
+  /**
+   * What happens to the page's camera, microphone, screen capture and
+   * location requests. Each policy is "prompt" (default, a native dialog),
+   * "allow" or "deny". A request also needs "media" (or "location") in the
+   * window's permissions, and the operating system's consent.
+   */
+  media?: {
+    camera?: "prompt" | "allow" | "deny";
+    microphone?: "prompt" | "allow" | "deny";
+    screen?: "prompt" | "allow" | "deny";
+    location?: "prompt" | "allow" | "deny";
+    notifications?: "prompt" | "allow" | "deny";
+    clipboardRead?: "prompt" | "allow" | "deny";
+    /** Keep the answers of the native prompt. Default true. */
+    remember?: boolean;
+    /**
+     * The sentences macOS shows in its consent prompts (Info.plist usage
+     * descriptions). Missing ones for a feature the UI uses are reported as KR7290.
+     */
+    usage?: { camera?: string; microphone?: string; location?: string; screenCapture?: string };
+  };
+  /**
+   * "auto" keeps View Transitions in a native build. Default off, whatever the
+   * top-level viewTransitions says: a cross-document transition aborts the
+   * WebKitGTK web process in software-rendered setups.
+   */
+  viewTransitions?: "auto";
+  /** Thresholds for the lean-page checks of `krate native check` (KR7270 to KR7275). */
+  lean?: {
+    /** KiB above which an inlined data: URL is reported. Default 16. */
+    dataUriKb?: number;
+    /** How many times larger than its rendered size an image may be. Default 2. */
+    imageRatio?: number;
+    /** Items a list may render without a windowing component. Default 100. */
+    listItems?: number;
+    /** Diagnostic codes to silence, for example ["KR7272"]. */
+    ignore?: string[];
+  };
+  /**
+   * Keeps the webview's developer tools (the web inspector) on in a release
+   * build. They are always on in `krate native dev` and off in a release build
+   * otherwise. Open them with F12 or Ctrl+Shift+I (Cmd+Option+I on macOS).
+   */
+  debug?: boolean;
+}
+
 /** Deploy adapter selection + options for `krate deploy`. */
 export interface DeployConfig {
   target?: "netlify" | "vercel" | "cloudflare" | "gh-pages";
@@ -705,6 +980,15 @@ export interface KrateConfig {
   runtimeComponents?: string[];
   serverDirs?: string[];
   runtimeDirs?: string[];
+  /**
+   * Native target: functions (names or file paths) that are host code and run
+   * in the native process, not the webview. See `@host`.
+   */
+  hostFunctions?: string[];
+  /** Native target: every module in these directories is host code. */
+  hostDirs?: string[];
+  /** Desktop target settings (`krate native`). Experimental. */
+  native?: NativeConfig;
   pathAliases?: Record<string, string[]>;
   tsBaseDir?: string;
 

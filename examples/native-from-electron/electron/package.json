@@ -1,0 +1,25 @@
+{
+  "name": "scratchpad-electron",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Scratchpad: the Electron app that examples/native-from-electron ports to Krate Native",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "playwright test",
+    "dist": "electron-builder"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.49.1",
+    "electron": "33.2.1",
+    "electron-builder": "25.1.8"
+  },
+  "build": {
+    "appId": "com.example.scratchpad",
+    "productName": "Scratchpad",
+    "files": ["main.js", "preload.js", "tray.png", "renderer/**"],
+    "mac": { "category": "public.app-category.productivity" },
+    "win": { "target": ["nsis"] },
+    "linux": { "target": ["deb", "AppImage"], "category": "Utility" }
+  }
+}

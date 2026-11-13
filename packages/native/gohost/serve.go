@@ -1,0 +1,173 @@
+package gohost
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"os/signal"
+	"runtime/pprof"
+	"syscall"
+	"time"
+
+	"github.com/kratejs/krate/packages/native/crashreport"
+	"github.com/kratejs/krate/packages/native/internal/hosttransport"
+	"github.com/kratejs/krate/packages/native/internal/memory"
+	"github.com/kratejs/krate/packages/native/scheme"
+)
+
+// Serve is the whole main of a generated Go host child:
+//
+//	func main() { gohost.Serve(glue.Register) }
+//
+// It never returns normally: it exits the process when the parent goes away
+// (stdin EOF), on SIGTERM or interrupt, and with status 1 on a startup error.
+func Serve(register func(*scheme.Registry)) {
+	// The shell passes its own profile path down; the child writes next to it.
+	stopProfile := func() {}
+	if p := os.Getenv(ProfileEnv); p != "" {
+		stopProfile = StartCPUProfileAt(p+".gohost", os.Stderr)
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	// A panic or fatal error of the child leaves a crash log the shell turns
+	// into a report (see package crashreport).
+	crashreport.Configure(crashreport.Config{
+		AppID: os.Getenv("KRATE_APP_ID"), AppVersion: os.Getenv("KRATE_APP_VERSION"), Process: "host",
+	})
+	stopCrash := crashreport.Install()
+	// The shell passes its memory profile down.
+	prof := memory.Parse(os.Getenv(memory.EnvProfile))
+	memory.ApplyGo(prof)
+	err := Run(ctx, register, Config{Socket: os.Getenv(SocketEnv), Token: os.Getenv(TokenEnv), Stdin: os.Stdin, Ready: os.Stdout, Dev: os.Getenv(DevEnv) == "1", Reaper: memory.StartReaper(prof, nil)})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "krate gohost:", err)
+		stopProfile()
+		stopCrash()
+		os.Exit(1)
+	}
+	stopProfile()
+	stopCrash()
+	os.Exit(0)
+}
+
+// Config is Serve's environment, separated for tests.
+type Config struct {
+	// Socket is what to listen on: a unix socket path (optionally "unix:"
+	// prefixed) or "tcp:127.0.0.1:0" together with Token.
+	Socket string
+	// Token is the request token of a tcp transport.
+	Token string
+	// Stdin is watched for EOF; nil disables the check.
+	Stdin io.Reader
+	// Ready receives "ready\n" once the child is listening.
+	Ready io.Writer
+	// Dev puts panic stacks (with source paths) in the errors the UI sees.
+	Dev bool
+	// Reaper, when set, is touched by every request and stopped on return.
+	Reaper *memory.Reaper
+}
+
+// Run serves until ctx ends or cfg.Stdin reaches EOF. It returns nil on a
+// clean stop.
+func Run(ctx context.Context, register func(*scheme.Registry), cfg Config) error {
+	if cfg.Socket == "" {
+		return fmt.Errorf("%s is not set; this binary is started by the Krate shell", SocketEnv)
+	}
+	reg := scheme.NewRegistry()
+	if register != nil {
+		register(reg)
+	}
+	ep, err := hosttransport.Parse(cfg.Socket)
+	if err != nil {
+		return err
+	}
+	if ep.Network == hosttransport.TCP {
+		if cfg.Token == "" {
+			return fmt.Errorf("%s is not set; a tcp transport needs it", TokenEnv)
+		}
+		ep.Token = cfg.Token
+	} else {
+		// A stale file from a crashed run would make Listen fail.
+		_ = os.Remove(ep.Addr)
+	}
+	ln, ep, err := hosttransport.Listen(ep)
+	if err != nil {
+		return fmt.Errorf("listening on %s: %w", cfg.Socket, err)
+	}
+	if ep.Network == hosttransport.Unix {
+		defer os.Remove(ep.Addr)
+	}
+
+	h := http.Handler(scheme.New(scheme.Options{Registry: reg, Dev: cfg.Dev}))
+	if cfg.Reaper != nil {
+		inner := h
+		h = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			cfg.Reaper.Touch()
+			inner.ServeHTTP(w, r)
+		})
+		defer cfg.Reaper.Stop()
+	}
+	srv := &http.Server{Handler: hosttransport.Guard(ep, h)}
+	served := make(chan error, 1)
+	go func() { served <- srv.Serve(ln) }()
+
+	if cfg.Ready != nil {
+		if _, err := io.WriteString(cfg.Ready, hosttransport.ReadyLineFor(ep)+"\n"); err != nil {
+			srv.Close()
+			return err
+		}
+	}
+
+	parentGone := make(chan struct{})
+	if cfg.Stdin != nil {
+		go func() {
+			_, _ = io.Copy(io.Discard, cfg.Stdin)
+			close(parentGone)
+		}()
+	}
+
+	select {
+	case <-ctx.Done():
+	case <-parentGone:
+	case err := <-served:
+		if !errors.Is(err, http.ErrServerClosed) {
+			return err
+		}
+	}
+	// Streams and signals never end on their own, so do not wait for them.
+	cctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	_ = srv.Shutdown(cctx)
+	_ = srv.Close()
+	return nil
+}
+
+// ProfileEnv names the environment variable that asks a Krate process to write
+// a CPU profile to that path when it exits (see shell.ProfileEnv).
+const ProfileEnv = "KRATE_CPUPROFILE"
+
+// StartCPUProfileAt starts a CPU profile written to path and returns the
+// function that stops it. An empty path does nothing; a failure is reported
+// on logw and leaves the process running without a profile.
+func StartCPUProfileAt(path string, logw io.Writer) (stop func()) {
+	if path == "" {
+		return func() {}
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		fmt.Fprintf(logw, "krate: %s: %v\n", ProfileEnv, err)
+		return func() {}
+	}
+	if err := pprof.StartCPUProfile(f); err != nil {
+		f.Close()
+		fmt.Fprintf(logw, "krate: %s: %v\n", ProfileEnv, err)
+		return func() {}
+	}
+	return func() {
+		pprof.StopCPUProfile()
+		f.Close()
+	}
+}

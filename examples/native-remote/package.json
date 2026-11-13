@@ -1,0 +1,11 @@
+{
+  "name": "krate-native-remote",
+  "private": true,
+  "type": "module",
+  "description": "Krate Native example: a remote web page in a view of the app window, with its own storage, no access to the app, an origin allowlist and the message channel.",
+  "dependencies": {
+    "@krate/app": "workspace:*",
+    "@krate/core": "workspace:*",
+    "@krate/runtime": "workspace:*"
+  }
+}

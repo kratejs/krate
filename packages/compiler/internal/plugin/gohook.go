@@ -7,9 +7,9 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/astjson"
 	"github.com/kratejs/krate/packages/compiler/internal/config"
 	"github.com/kratejs/krate/packages/compiler/internal/environ"
-	"github.com/kratejs/krate/packages/compiler/internal/jsruntime"
 	"github.com/kratejs/krate/packages/compiler/internal/version"
 	pluginsdk "github.com/kratejs/krate/packages/compiler/pluginsdk"
+	"github.com/kratejs/krate/packages/native/jsruntime"
 )
 
 // runGoPluginHook routes one lifecycle hook invocation to a Go plugin

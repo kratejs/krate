@@ -1,0 +1,283 @@
+package shell
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"os"
+	"path/filepath"
+	"runtime"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/kratejs/krate/packages/native/internal/gohosttest"
+	"github.com/kratejs/krate/packages/native/wire"
+)
+
+// The platform layer needs the main goroutine on the main OS thread (GUI test).
+func init() { runtime.LockOSThread() }
+
+const hostJSv1 = `(function () {
+  __krateHost.register("h.add", function (a, b) { return a + b; }, "func");
+  __krateHost.register("h.tag", function () { return "host-v1"; }, "func");
+})();
+`
+
+const hostJSv2 = `(function () {
+  __krateHost.register("h.add", function (a, b) { return a + b + 1000; }, "func");
+  __krateHost.register("h.tag", function () { return "host-v2"; }, "func");
+  __krateHost.register("h.extra", function () { return "new"; }, "func");
+})();
+`
+
+// testApp is an app directory built for tests.
+type testApp struct {
+	dir    string
+	binary string // absolute path of the Go host binary
+}
+
+func writeFile(path, content string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(content), 0o644)
+}
+
+// buildTestApp writes an app directory under root: dist/ with index.html (the
+// given page), a tasks/[id] fallback page, a hostjs bundle and a Go host
+// child (built now) that starts its signal at start.
+func buildTestApp(root, page string, withGo bool, start int) (*testApp, error) {
+	a := &testApp{dir: filepath.Join(root, "app")}
+	files := map[string]string{
+		"dist/index.html":            page,
+		"dist/tasks/[id]/index.html": "<!doctype html><title>task</title>task page",
+		"dist/404.html":              "<!doctype html>not found page",
+		"dist/forge/index.html":      forgePageHTML,
+		"dist/hijack/index.html":     hijackPageHTML,
+		"dist/squat/index.html":      squatPageHTML,
+		"host/host.js":               hostJSv1,
+		"host/host.js.map":           `{"version":3,"sources":[],"names":[],"mappings":""}`,
+		"dist/scoped.html":           scopedPage,
+	}
+	for name, content := range files {
+		if err := writeFile(filepath.Join(a.dir, filepath.FromSlash(name)), content); err != nil {
+			return nil, err
+		}
+	}
+	man := map[string]any{
+		"appId": "dev.krate.shelltest", "productName": "Shell Test", "version": "1.0.0",
+		"window":    map[string]any{"title": "Shell Test", "width": 640, "height": 480, "resizable": true, "path": "/", "keepAlive": true},
+		"assets":    "dist",
+		"fallbacks": []map[string]string{{"pattern": "/tasks/[id]", "file": "tasks/[id]/index.html"}},
+		"hostjs":    map[string]any{"bundle": "host/host.js", "map": "host/host.js.map"},
+	}
+	if withGo {
+		bin, err := a.buildGoHost(start)
+		if err != nil {
+			return nil, err
+		}
+		a.binary = bin
+		man["gohost"] = map[string]any{
+			"binary":  "gohost/krate-gohost",
+			"funcs":   []string{"t.Version", "t.Add", "t.Rev", "t.Wait", "t.Bump"},
+			"streams": []string{"t.Count"},
+			"signals": []string{"t.Count"},
+		}
+	}
+	b, _ := json.MarshalIndent(man, "", "  ")
+	if err := writeFile(filepath.Join(a.dir, ManifestFile), string(b)); err != nil {
+		return nil, err
+	}
+	return a, nil
+}
+
+// buildGoHost (re)builds the child at gohost/krate-gohost with the given
+// version number; the file is replaced by rename, as a rebuild would.
+func (a *testApp) buildGoHost(start int) (string, error) {
+	scratch := filepath.Join(filepath.Dir(a.dir), "build")
+	out := filepath.Join(a.dir, "gohost", "krate-gohost")
+	if runtime.GOOS == "windows" {
+		out += ".exe"
+	}
+	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+		return "", err
+	}
+	tmp, err := gohosttest.Build(scratch, "next", gohosttest.ChildSource(fmt.Sprintf("v%d", start), start))
+	if err != nil {
+		return "", err
+	}
+	if err := os.Rename(tmp, out); err != nil {
+		// Windows will not overwrite a running executable but can rename it.
+		old := out + ".old"
+		_ = os.Remove(old)
+		if os.Rename(out, old) != nil {
+			return "", err
+		}
+		if err := os.Rename(tmp, out); err != nil {
+			return "", err
+		}
+	}
+	return out, nil
+}
+
+// frameReq is a one-call request frame with optional blobs.
+func frameReq(fn string, build func(*wire.Encoder)) []byte {
+	e := wire.NewEncoder()
+	e.BeginObject()
+	e.Key("calls")
+	e.BeginArray()
+	e.BeginObject()
+	e.Key("id")
+	e.Int(1)
+	e.Key("fn")
+	e.String(fn)
+	e.Key("args")
+	e.BeginArray()
+	if build != nil {
+		build(e)
+	}
+	e.EndArray()
+	e.EndObject()
+	e.EndArray()
+	e.EndObject()
+	return e.Frame()
+}
+
+// reportSink collects the reports the test page posts.
+type reportSink struct {
+	mu      sync.Mutex
+	ch      chan map[string]any
+	pending []map[string]any
+	indexes int
+}
+
+func newReportSink() *reportSink { return &reportSink{ch: make(chan map[string]any, 256)} }
+
+func (r *reportSink) handle(w http.ResponseWriter, req *http.Request) bool {
+	switch {
+	case req.URL.Path == "/__test/report" && req.Method == http.MethodPost:
+		var m map[string]any
+		if err := json.NewDecoder(req.Body).Decode(&m); err != nil {
+			m = map[string]any{"kind": "decode-error", "error": err.Error()}
+		}
+		r.ch <- m
+		w.WriteHeader(http.StatusNoContent)
+		return true
+	case req.URL.Path == "/__test/ping":
+		fmt.Fprint(w, "pong")
+		return true
+	case req.URL.Path == "/" || req.URL.Path == "/index.html":
+		r.mu.Lock()
+		r.indexes++
+		r.mu.Unlock()
+	}
+	return false
+}
+
+func (r *reportSink) indexLoads() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.indexes
+}
+
+// wait returns the first report (pending or new) of the given kind that
+// satisfies ok.
+func (r *reportSink) wait(t testing.TB, kind string, ok func(map[string]any) bool) map[string]any {
+	t.Helper()
+	deadline := time.After(45 * time.Second)
+	for {
+		for i, m := range r.pending {
+			if m["kind"] == kind && (ok == nil || ok(m)) {
+				r.pending = append(r.pending[:i], r.pending[i+1:]...)
+				return m
+			}
+		}
+		select {
+		case m := <-r.ch:
+			r.pending = append(r.pending, m)
+		case <-deadline:
+			t.Fatalf("timed out waiting for a %q report (pending %v)", kind, r.pending)
+			return nil
+		}
+	}
+}
+
+// forgePageHTML calls krate/kv.get four ways: as the page is, and with three
+// forged x-krate-window headers. It reports the error code of each (or "ok").
+const forgePageHTML = `<!doctype html><title>forge</title><body>forge<script>
+(async function () {
+  var tag = new URLSearchParams(location.search).get("tag") || "";
+  function frame(o) {
+    var j = new TextEncoder().encode(JSON.stringify(o));
+    var b = new Uint8Array(4 + j.length + 2);
+    new DataView(b.buffer).setUint32(0, j.length);
+    b.set(j, 4);
+    return b;
+  }
+  async function call(header) {
+    var h = {};
+    if (header !== undefined) h["x-krate-window"] = header;
+    var r = await fetch("/__krate/call", {method: "POST", headers: h, body: frame({calls: [{id: 1, fn: "krate/kv.get", args: ["k"]}]})});
+    var buf = new Uint8Array(await r.arrayBuffer());
+    var n = new DataView(buf.buffer).getUint32(0);
+    var res = JSON.parse(new TextDecoder().decode(buf.subarray(4, 4 + n)));
+    return res.err ? res.err.code : "ok";
+  }
+  var out = {plain: await call(), forgedMain: await call("main"), forgedEmpty: await call(""), forgedOther: await call("w999")};
+  await fetch("/__test/report", {method: "POST", body: JSON.stringify({kind: "forge", tag: tag, result: out})});
+})();
+</script></body>`
+
+// hijackPageHTML tries to open the stream named by its sid parameter, which
+// another window started, and reports the HTTP status.
+const hijackPageHTML = `<!doctype html><title>hijack</title><body>hijack<script>
+(async function () {
+  var sid = new URLSearchParams(location.search).get("sid") || "";
+  // An accepted stream with nothing to send yet may not answer at all, so a
+  // fetch still pending after a while counts as "open".
+  var ctrl = new AbortController();
+  var status = await Promise.race([
+    fetch("/__krate/stream/" + encodeURIComponent(sid), {headers: {"x-krate-window": "main"}, signal: ctrl.signal}).then(function (r) { return r.status; }, function () { return -1; }),
+    new Promise(function (res) { setTimeout(function () { res("open"); }, 3000); })
+  ]);
+  ctrl.abort();
+  await fetch("/__test/report", {method: "POST", body: JSON.stringify({kind: "hijack", status: status})});
+})();
+</script></body>`
+
+// squatPageHTML names a view of its own window after the window id that
+// window.open hands out next, opens and closes a window, then reloads the view
+// with the forge page (tag squat-after), which reports what the view may do.
+const squatPageHTML = `<!doctype html><title>squat</title><body>squat<script>
+(async function () {
+  function frame(o) {
+    var j = new TextEncoder().encode(JSON.stringify(o));
+    var b = new Uint8Array(4 + j.length + 2);
+    new DataView(b.buffer).setUint32(0, j.length);
+    b.set(j, 4);
+    return b;
+  }
+  async function call(fn, args) {
+    var r = await fetch("/__krate/call", {method: "POST", body: frame({calls: [{id: 1, fn: fn, args: args}]})});
+    var buf = new Uint8Array(await r.arrayBuffer());
+    var n = new DataView(buf.buffer).getUint32(0);
+    var res = JSON.parse(new TextDecoder().decode(buf.subarray(4, 4 + n)));
+    if (res.err) throw new Error(res.err.code + ": " + res.err.message);
+    return res.ok;
+  }
+  var out = {};
+  try {
+    var me = await call("krate/window.thisView", []);
+    var probe = await call("krate/window.open", [{title: "probe", path: "/404"}]);
+    await call("krate/window.close", [probe]);
+    out.predicted = "w" + (parseInt(probe.slice(1), 10) + 1);
+    out.view = await call("krate/window.addView", [me, {id: out.predicted, path: "/404"}]);
+    out.opened = await call("krate/window.open", [{title: "victim", path: "/404"}]);
+    await call("krate/window.close", [out.opened]);
+    await new Promise(function (r) { setTimeout(r, 500); });
+    await call("krate/window.navigateView", [out.predicted, "/forge/?tag=squat-after"]);
+  } catch (e) { out.error = String(e); }
+  await fetch("/__test/report", {method: "POST", body: JSON.stringify({kind: "squat", out: out})});
+})();
+</script></body>`

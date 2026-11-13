@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kratejs/krate/packages/compiler/internal/jsruntime"
+	"github.com/kratejs/krate/packages/native/jsruntime"
 )
 
 func newGate(t *testing.T, code string, dev bool) *middlewareGate {

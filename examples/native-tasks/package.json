@@ -1,0 +1,11 @@
+{
+  "name": "krate-native-tasks",
+  "private": true,
+  "type": "module",
+  "description": "Krate Native example: a task list with Go host code and a TypeScript host function.",
+  "dependencies": {
+    "@krate/app": "workspace:*",
+    "@krate/core": "workspace:*",
+    "@krate/runtime": "workspace:*"
+  }
+}

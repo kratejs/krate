@@ -416,13 +416,13 @@ func (s *Service) parseModule(rel, src string) *moduleInfo {
 			case "FnDecl":
 				name := str(decl["name"])
 				if isDefault {
-					defaultTier = str(decl["tier"])
+					defaultTier = tierName(decl["tier"])
 					asyncDefault, _ = decl["async"].(bool)
 					exports["default"] = true
 				} else if name != "" {
 					exports[name] = true
 				}
-				if t := str(decl["tier"]); t != "" {
+				if t := tierName(decl["tier"]); t != "" {
 					declTiers = append(declTiers, t)
 				}
 			case "VarStmt":
@@ -432,7 +432,7 @@ func (s *Service) parseModule(rel, src string) *moduleInfo {
 						if n := str(dm["name"]); n != "" {
 							exports[n] = true
 						}
-						if t := str(dm["tier"]); t != "" {
+						if t := tierName(dm["tier"]); t != "" {
 							declTiers = append(declTiers, t)
 						}
 					}
@@ -657,4 +657,13 @@ func (g *moduleGraph) chain(module string) []string {
 		rev[i], rev[j] = rev[j], rev[i]
 	}
 	return rev
+}
+
+// tierName reads a declaration's tier, ignoring `host`, which marks native
+// host code and is not a rendering tier.
+func tierName(v any) string {
+	if t := str(v); t != "host" {
+		return t
+	}
+	return ""
 }

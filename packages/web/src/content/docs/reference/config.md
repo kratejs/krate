@@ -555,7 +555,7 @@ extends: "./base.config.ts",
 
 Bases are merged underneath this config: objects deep-merge (this config wins),
 and additive arrays (`plugins`, `redirects`, `rewrites`, `serverComponents`,
-`runtimeComponents`, `serverDirs`, `runtimeDirs`) concatenate. Duplicate
+`runtimeComponents`, `serverDirs`, `runtimeDirs`, `hostFunctions`, `hostDirs`) concatenate. Duplicate
 `plugins` are de-duped by name, with the extending config winning. Paths resolve
 relative to the extending config, then to `node_modules` (package presets -
 resolved via `package.json` `krate`, `exports`, `module`, or `main`). Cycles are
@@ -627,6 +627,17 @@ runtimeComponents: ["AuthCheck"],  // names -> @runtime
 serverDirs: ["src/components/server"],
 runtimeDirs: ["src/components/runtime"],
 ```
+
+## Native (experimental)
+
+```typescript
+hostFunctions: ["addTask", "src/lib/db.ts"], // names or paths -> host code
+hostDirs: ["src/host"],                      // every module -> host code
+native: { appId: "com.acme.app", productName: "Acme" },
+```
+
+`hostFunctions`, `hostDirs` and the `native` block configure the desktop target.
+See [Native](/docs/native/) and [Host code](/docs/native/host-code/).
 
 ## TypeScript path aliases
 

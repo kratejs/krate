@@ -1,0 +1,205 @@
+package scheme
+
+import (
+	"context"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/kratejs/krate/packages/native/krate"
+	"github.com/kratejs/krate/packages/native/wire"
+)
+
+type outFrame struct {
+	data  []byte
+	final bool
+	done  chan struct{}
+}
+
+type stream struct {
+	id     string
+	window string
+	// native is set when window is the identity the platform bound to the
+	// opening request; only a request from the same native view may open it.
+	native   bool
+	ctx      context.Context
+	cancel   context.CancelFunc
+	opened   bool          // guarded by server.mu
+	open     chan struct{} // closed when the reader opens the stream
+	out      chan outFrame
+	finished chan struct{} // closed when the producer goroutine exits
+}
+
+// send hands a frame to the reader and waits until it is written.
+func (st *stream) send(data []byte, final bool) error {
+	of := outFrame{data: data, final: final, done: make(chan struct{})}
+	select {
+	case st.out <- of:
+	case <-st.ctx.Done():
+		return st.ctx.Err()
+	}
+	select {
+	case <-of.done:
+		return nil
+	case <-st.ctx.Done():
+		return st.ctx.Err()
+	}
+}
+
+// startStream registers a stream and parks its producer until the stream is
+// opened. It returns the call's result frame.
+func (s *server) startStream(window string, native bool, c call, f StreamFunc) []byte {
+	id := "s" + strconv.FormatInt(s.nextID.Add(1), 10)
+	ctx, cancel := context.WithCancel(context.Background())
+	st := &stream{
+		id: id, window: window, native: native, ctx: ctx, cancel: cancel,
+		open: make(chan struct{}), out: make(chan outFrame), finished: make(chan struct{}),
+	}
+	s.mu.Lock()
+	s.streams[id] = st
+	s.mu.Unlock()
+
+	timer := time.AfterFunc(s.expiry, func() {
+		s.mu.Lock()
+		expired := !st.opened
+		s.mu.Unlock()
+		if expired {
+			cancel()
+		}
+	})
+
+	opened := time.Now()
+	s.observe(Event{Kind: "stream-open", ID: c.id, Fn: c.fn, Window: window})
+	go func() {
+		var endErr error
+		defer func() {
+			ev := Event{Kind: "stream-end", ID: c.id, Fn: c.fn, Window: window, Dur: time.Since(opened)}
+			if endErr != nil {
+				ev.Code, ev.Message = errCodeMsg(endErr)
+			}
+			s.observe(ev)
+			timer.Stop()
+			cancel()
+			s.mu.Lock()
+			delete(s.streams, id)
+			s.mu.Unlock()
+			close(st.finished)
+		}()
+		select {
+		case <-st.open:
+		case <-ctx.Done():
+			return
+		}
+		kctx := krate.WithWindow(ctx, window)
+		emit := func(write func(*wire.Encoder)) error {
+			e := wire.NewEncoder()
+			e.BeginObject()
+			e.Key("v")
+			if err := protect(func() error { write(e); return nil }); err != nil {
+				return err
+			}
+			e.EndObject()
+			fr, err := e.Finish()
+			if err != nil {
+				return err
+			}
+			return st.send(fr, false)
+		}
+		err := protect(func() error { return f(kctx, c.args, emit) })
+		if ctx.Err() != nil {
+			endErr = context.Canceled
+			return
+		}
+		endErr = err
+		e := wire.NewEncoder()
+		e.BeginObject()
+		if err == nil {
+			e.Key("end")
+			e.Bool(true)
+		} else {
+			e.Key("err")
+			s.encodeError(e, err)
+		}
+		e.EndObject()
+		_ = st.send(e.Frame(), true) // fails only when the call was cancelled
+	}()
+
+	e := wire.NewEncoder()
+	e.BeginObject()
+	e.Key("id")
+	e.Int(c.id)
+	e.Key("stream")
+	e.String(id)
+	e.EndObject()
+	return e.Frame()
+}
+
+func (s *server) handleStream(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, streamPath)
+	// Stream ids are a counter. A stream opened from a native view can be
+	// read only from that view: the producer runs with the opener's
+	// permissions, and another view must not take its values. Without a
+	// native identity (browser mode, the private sockets) the ids are all
+	// there is, as for calls.
+	window, native := s.identity(r)
+	s.mu.Lock()
+	st := s.streams[id]
+	if st != nil && st.native && (!native || window != st.window) {
+		st = nil
+	}
+	if st != nil && !st.opened {
+		st.opened = true
+	} else {
+		st = nil
+	}
+	s.mu.Unlock()
+	if st == nil {
+		s.badStream(w)
+		return
+	}
+	defer st.cancel()
+	close(st.open)
+
+	w.Header().Set("Content-Type", framesType)
+	w.WriteHeader(http.StatusOK)
+	fl, _ := w.(http.Flusher)
+	if fl != nil {
+		fl.Flush()
+	}
+	for {
+		select {
+		case of := <-st.out:
+			_, err := w.Write(of.data)
+			if fl != nil {
+				fl.Flush()
+			}
+			close(of.done)
+			if err != nil || of.final {
+				return
+			}
+		case <-st.finished:
+			// The producer stopped without a terminal frame: it was cancelled.
+			e := wire.NewEncoder()
+			e.BeginObject()
+			e.Key("err")
+			s.encodeError(e, context.Canceled)
+			e.EndObject()
+			_, _ = e.WriteTo(w)
+			return
+		case <-r.Context().Done():
+			return
+		}
+	}
+}
+
+func (s *server) badStream(w http.ResponseWriter) {
+	e := wire.NewEncoder()
+	e.BeginObject()
+	e.Key("error")
+	s.encodeError(e, krate.Errorf("not_found", "unknown or already opened stream"))
+	e.EndObject()
+	w.Header().Set("Content-Type", framesType)
+	w.WriteHeader(http.StatusNotFound)
+	_, _ = e.WriteTo(w)
+}

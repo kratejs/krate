@@ -31,15 +31,19 @@ export const platforms = [
  * the install ends with no krate command at all. @krate/core finds the binary
  * by path (<pkg>/bin/krate), so nothing needs the link.
  *
- * Without `bin`, the binary needs publishConfig.executableFiles: pnpm packs every
+ * Without `bin`, the binaries need publishConfig.executableFiles: pnpm packs every
  * other file as 0644 whatever its mode on disk, and a binary with no exec bit
  * fails with EACCES on every install outside Windows.
+ *
+ * The package holds two binaries side by side: krate, and krate-shell, the
+ * prebuilt Krate Native shell. The compiler finds the shell by looking next to
+ * its own executable, so both must stay in bin/.
  */
 export function platformManifest(target, version) {
   return {
     name: `@krate/${target.pkg}`,
     version,
-    description: `The Krate compiler binary for ${target.os} ${target.cpu}${target.musl ? ' (musl)' : ''}.`,
+    description: `The Krate compiler binary and the Krate Native shell (krate-shell) for ${target.os} ${target.cpu}${target.musl ? ' (musl)' : ''}.`,
     license: 'Apache-2.0',
     os: [target.os],
     cpu: [target.cpu],
@@ -48,6 +52,6 @@ export function platformManifest(target, version) {
     bugs: { url: repo.bugs },
     keywords: ['krate', 'ssg', 'compiler', target.os, target.cpu],
     files: ['bin'],
-    publishConfig: { executableFiles: [`./bin/krate${target.ext}`] },
+    publishConfig: { executableFiles: [`./bin/krate${target.ext}`, `./bin/krate-shell${target.ext}`] },
   };
 }

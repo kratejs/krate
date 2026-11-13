@@ -1,0 +1,11 @@
+{
+  "name": "krate-native-plugin",
+  "private": true,
+  "type": "module",
+  "description": "Krate Native example: an app that uses the system-info native plugin.",
+  "dependencies": {
+    "@krate/app": "workspace:*",
+    "@krate/core": "workspace:*",
+    "@krate/runtime": "workspace:*"
+  }
+}

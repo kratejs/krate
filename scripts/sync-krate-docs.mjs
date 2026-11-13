@@ -88,7 +88,7 @@ if (check) {
   if (!runtimeCompatInSync()) {
     console.error(
       'sync-krate-docs: reference/api-runtime-compat.md is stale against ' +
-        'packages/compiler/internal/jsruntime/compat.json. Run `pnpm sync:docs`.',
+        'packages/native/jsruntime/compat.json. Run `pnpm sync:docs`.',
     );
     process.exit(1);
   }

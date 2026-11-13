@@ -1,0 +1,247 @@
+---
+title: Packaging
+order: 12
+description: krate native package - installers and archives for macOS, Windows and Linux, generated icons and Windows resources, and which formats need a platform tool.
+---
+
+# Packaging
+
+> **Experimental.** Part of [Krate Native](/docs/native/), which is under construction.
+
+```sh
+krate native package [dir] [--target <os/arch>] [--format <list>] [--out <dir>]
+krate native build --package [--target <os/arch>]
+```
+
+`package` turns a built app into files you can hand to users. Output goes to
+`dist-native/packages/`. Most formats are written by the compiler itself, so
+you can build a Linux `.deb`, a Windows `.zip` or an MSIX package on any
+machine. A few formats need a platform tool; the table says which.
+
+## What it packages
+
+`package` looks in `dist-native/` for one of two layouts:
+
+1. A **release executable**: `dist-native/<os>-<arch>/<productName>[.exe]`, one
+   binary with the app embedded (`krate native build --release`). Anything
+   else in that directory is shipped next to it.
+2. The **prebuilt shell**: `dist-native/<os>-<arch>/<productName>[.exe]`, the
+   `krate-shell` binary under the product name, with `app/` next to it. `krate
+   native build` writes this when it finds a shell (see
+   [Finding the shell](/docs/native/dev/#finding-the-shell)), and so does
+   `krate native build --release` when it falls back to the prebuilt-shell
+   layout. No Go toolchain is needed. The shell finds `app/` next to itself, or
+   in `Contents/Resources/app` inside a macOS bundle. The older pair
+   `dist-native/krate-shell[.exe]` next to `dist-native/app/` is still packaged.
+   With `app/` next to it the shell is that app: it refuses another app
+   directory on its command line and refuses `--dev` unless the app was built
+   with `native.debug`, so nobody can run their own code or drive the app's pages
+   under the app's signature and permissions. Run other app directories, and
+   `--dev`, with a bare `krate-shell`.
+
+The executable's header is checked against `--target`, so a Linux binary is
+never packaged as a Windows app. With neither layout present the command stops
+with `KR7220` and says which build command to run.
+
+`krate native build --package` builds, then packages the same target.
+
+## Formats
+
+| OS | Format | Written by | Notes |
+|----|--------|------------|-------|
+| macOS | `app` | compiler | `<Name>.app`, kept under `packages/darwin-<arch>/` |
+| macOS | `zip` | compiler | always; the update file. Keeps modes and symlinks |
+| macOS | `dmg` | `hdiutil` | only on macOS; elsewhere you get the `.zip` and a note |
+| macOS | `mas` | compiler, `codesign`, `productbuild` | the Mac App Store variant, a sandboxed `.app` and a `.pkg`; see [Stores](/docs/native/distribution/#mac-app-store) |
+| Windows | `zip` | compiler | always; the update file |
+| Windows | `nsis` | `makensis` | install dir, shortcuts, uninstaller, URL protocols, WebView2 check |
+| Windows | `msix` | compiler | unsigned; sign it with `krate native sign` |
+| Windows | `msix-store` | compiler | the Microsoft Store package, `.msixupload` and (x64 + arm64) `.msixbundle`; see [Stores](/docs/native/distribution/#microsoft-store) |
+| Linux | `tar.gz` | compiler | always; the update file |
+| Linux | `deb` | compiler | default Linux installer |
+| Linux | `rpm` | compiler | via the `rpmpack` library |
+| Linux | `appimage` | `appimagetool` | needs a squashfs writer, so the tool is required |
+| Linux | `flatpak` | compiler, `flatpak-builder` | manifest, metainfo and Flathub manifest always; the `.flatpak` bundle needs the tool. [Details](/docs/native/distribution/#flatpak) |
+| Linux | `snap` | compiler, `snapcraft` | `snapcraft.yaml` always; the `.snap` needs the tool. [Details](/docs/native/distribution/#snap) |
+
+Without `--format` the formats come from the config:
+`native.bundle.windows.installer` (`msix` or `nsis`) and
+`native.bundle.linux.formats` (`deb`, `rpm`, `appimage`, `flatpak`, `snap`; default `deb`). A tool
+that is missing for a format you asked for fails with `KR7221` and an install
+hint. `--format` takes a comma separated list and replaces the config.
+
+```ts
+export default defineConfig({
+  native: {
+    appId: "com.acme.notes",
+    productName: "Acme Notes",
+    version: "1.2.0",
+    icons: "assets/icon.png",
+    deepLinks: ["acme"],
+    bundle: {
+      macos: { category: "productivity" },
+      windows: { publisher: "CN=Acme Inc", installer: "msix" },
+      linux: { formats: ["deb", "rpm"] },
+    },
+  },
+});
+```
+
+## Icons
+
+`native.icons` is one PNG, ideally 1024 x 1024. The packager makes everything
+else in pure Go:
+
+- `.icns` with PNG elements `ic07` to `ic10` (128 to 1024 pixels) and the
+  retina and small variants.
+- `.ico` with PNG entries from 16 to 256 pixels.
+- Linux hicolor PNGs from 16 to 512 pixels, and the MSIX logos.
+
+Without `native.icons` a placeholder icon is generated. A source under 512
+pixels works but gives soft large icons (`KR7223` is an unreadable file).
+
+## macOS
+
+`<Name>.app/Contents/` holds `Info.plist`, `MacOS/<Name>`,
+`Resources/icon.icns` and `Resources/app/` (the shell layout). `Info.plist`
+carries the bundle id (`native.appId`), the version, `LSApplicationCategoryType`
+from `bundle.macos.category` (`productivity` or a full
+`public.app-category.*`), `NSHighResolutionCapable`, `LSMinimumSystemVersion`
+and, for `deepLinks`, `CFBundleURLTypes`; for `fileAssociations`, `CFBundleDocumentTypes` and `UTExportedTypeDeclarations`
+([Files](/docs/native/files/#file-associations)).
+
+**Signatures.** The Go linker signs `darwin/arm64` executables ad hoc, which is
+enough for Apple silicon to run them (checked: `LC_CODE_SIGNATURE` with the
+ad hoc flag). The `.app` as a whole has no `_CodeSignature`; that needs
+`codesign`, so run `krate native sign` on a Mac. A pure Go bundle signer is not
+implemented. See [Signing](/docs/native/signing/).
+
+## Windows
+
+The portable `.zip` holds `<Name>/<Name>.exe` and its files. The **NSIS**
+script (kept at `packages/windows-<arch>/installer.nsi`) installs to
+`Program Files`, adds Start menu and desktop shortcuts and an uninstaller,
+registers each `deepLinks` scheme, each `fileAssociations` type (the
+uninstaller removes them) and the scheme of
+[notification clicks](/docs/native/sdk-ui/#windows-details) under the registry,
+and makes sure the WebView2 Runtime is installed (below). **MSIX** needs
+`bundle.windows.publisher`, the subject of your signing certificate (`CN=Acme
+Inc`). The package is a zip with `AppxManifest.xml` (identity, logos, protocol
+and file type extensions, `runFullTrust`), `[Content_Types].xml` and `AppxBlockMap.xml`
+(SHA-256 per 64 KiB block). Files are stored uncompressed so the block map
+needs no compressed sizes.
+
+### The WebView2 Runtime
+
+The app shows its pages with Microsoft's Evergreen WebView2 Runtime. Windows 11
+and current Windows 10 machines with Edge have it; an older Windows 10 may not.
+`native.bundle.windows.webview2` says what the NSIS installer does about that:
+
+| Value | The installer |
+|-------|---------------|
+| `download` (default) | Downloads Microsoft's Evergreen bootstrapper (`go.microsoft.com/fwlink/p/?LinkId=2124703`, PowerShell as the second try) and runs it with `/silent /install` |
+| `embed` | The same without the download: `webview2Path` is a `MicrosoftEdgeWebview2Setup.exe` that is stored inside the installer (about 1.7 MB) |
+| `fixed` | Installs no runtime. `webview2Path` is an extracted Fixed Version runtime folder (from the `.cab` on the WebView2 download page, for the architecture you build); it is copied to `WebView2Runtime` next to the executable and the app uses it before any installed runtime. Adds 150 to 300 MB |
+| `none` | Does nothing; the app handles a missing runtime itself |
+
+```ts
+bundle: { windows: { installer: "nsis", webview2: "embed", webview2Path: "vendor/MicrosoftEdgeWebview2Setup.exe" } }
+```
+
+The files are Microsoft's: download them yourself, keep them out of version
+control, and check Microsoft's redistribution terms. A missing or wrong file is
+`KR7220` with a hint that names the fix.
+
+The check follows Microsoft's documentation: the `pv` value under
+`EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}`, in
+`HKLM\SOFTWARE\WOW6432Node` (64-bit Windows), `HKLM\SOFTWARE` (32-bit Windows)
+and `HKCU\Software` (per-user installs); a missing value or `0.0.0.0` means not
+installed. The bootstrapper runs only when none is found, so reinstalling an
+app does not touch an existing runtime. If the bootstrapper cannot be fetched or
+fails, the installer says so (a message box, or the log of a silent install)
+and finishes anyway.
+
+The app itself does not fail silently either. A program started from Explorer
+has no console, so when no runtime can be started the app shows a message box
+("Native Tasks needs the Microsoft Edge WebView2 Runtime...") with the download
+page and offers to open it, then exits with the error. Set
+`KRATE_NATIVE_NO_DIALOG=1` to suppress the box for unattended runs.
+
+**MSIX** cannot declare the Evergreen runtime as a dependency: it is not a
+framework package, so a manifest has nothing to name. An MSIX app relies on the
+runtime being present and on the message box above. The package targets Windows
+10 1809 and later.
+
+### Architectures
+
+`--target windows/arm64` (and `linux/arm64`, `darwin/arm64`) builds and packages
+for ARM: the `.deb`/`.rpm` architecture, the MSIX `ProcessorArchitecture`, the
+AppImage `ARCH` and the Windows resource object follow the target. CI runs the
+packaging steps natively on `ubuntu-24.04-arm` and `windows-11-arm` as well as on
+x64 and Apple silicon. Bun and Deno publish no Windows on ARM builds, so a
+Windows on ARM machine can use Node (or QuickJS) host code only.
+
+### Icon and version resources
+
+An `.exe` shows its icon and version in Explorer only if they are linked in.
+`pkg.WindowsResources` writes a `.syso` object that the Go linker picks up:
+
+```go
+// in a build step
+err := pkg.WindowsResources(root, cfg, "rsrc_windows_amd64.syso")
+```
+
+Put `rsrc_windows_amd64.syso` (and `rsrc_windows_arm64.syso`) next to the
+`main.go` of the executable; the file name suffix keeps other platforms from
+linking it. It contains the icon (`RT_GROUP_ICON` and `RT_ICON`), the version
+information (`RT_VERSION`) and a manifest that turns on per-monitor DPI
+awareness, long paths and Common Controls v6. The release build calls it.
+
+## Linux
+
+The `.deb` installs a single executable to `/usr/bin/<name>`. With support
+files (the shell layout) the executable and files go to `/usr/lib/<name>/` and
+`/usr/bin/<name>` is a symlink. It also installs
+`/usr/share/applications/<appId>.desktop` (with
+`MimeType=` entries for `deepLinks` and `fileAssociations`, plus
+`/usr/share/mime/packages/<appId>.xml` for the file types), hicolor icons and an
+`md5sums` file. `Depends:` lists `libwebkit2gtk-4.1-0` and `libgtk-3-0`; the
+`.rpm` requires `webkit2gtk4.1` and `gtk3`. Check a `.deb` with
+`dpkg-deb --info` and `--contents`.
+
+## Universal apps and stores
+
+One macOS app for Apple silicon and Intel (`--arch universal`), Flatpak, Snap,
+the Mac App Store and the Microsoft Store are on their own page:
+[Stores and universal apps](/docs/native/distribution/). The feed of a
+universal app is `latest-darwin-universal.json`.
+
+## Update files and `--notes`
+
+The zip (macOS, Windows) or tar.gz (Linux) is also the file the
+[updater](/docs/native/updater/) downloads. With `KRATE_UPDATER_PRIVATE_KEY` set
+`package` signs it and writes `latest-<os>-<arch>.json` beside it.
+
+## Flags
+
+| Flag | Meaning |
+|------|---------|
+| `--target <os/arch>` | `linux`, `windows`, `darwin` with `amd64` or `arm64`; default this machine. `darwin/universal` merges arm64 and x86_64, `windows/universal` bundles x64 and arm64 for the Store, `mas` is the Mac App Store variant |
+| `--arch universal` | the same as `universal` as the architecture of the target; also on `native build --release` |
+| `--installer-identity <name>` | the installer identity that signs the Mac App Store `.pkg` |
+| `--format <list>` | formats from the table |
+| `--out <dir>` | native output directory (default `dist-native`) |
+| `--sign`, `--notarize` | sign (and notarize) while packaging; see [Signing](/docs/native/signing/) |
+| `--notes <text or @file>` | release notes for the update feed |
+| `--update-base-url <url>` | where the update files will be hosted |
+| `--delta-from <dir>[,<dir>]`, `--delta-count <n>` | write signed delta updates from the newest `n` (default 3) earlier releases whose update files are in these directories; see [Updates](/docs/native/updater/#delta-updates) |
+| `--channel <name>` | write the feed as `latest-<name>-<os>-<arch>.json` for that [channel](/docs/native/updater/#channels) |
+| `--rollout <percent>`, `--rollout-start <RFC 3339>`, `--rollout-ramp-hours <h>` | [staged rollout](/docs/native/updater/#staged-rollouts) |
+| `--critical`, `--min-version <v>` | offer the update to every install, whatever the rollout says |
+
+## Diagnostics
+
+`KR7220` nothing to package, `KR7221` tool missing, `KR7222` unknown format for
+the OS, `KR7223` icon, `KR7228` write failure, `KR7229` metadata (appId,
+version, MSIX publisher). Universal, store and sandbox formats: `KR7300` to
+`KR7302` (see [Stores](/docs/native/distribution/#diagnostics)).
