@@ -158,14 +158,25 @@ func (b *Builder) buildMetadataRoutes(pages []string) []error {
 	files := findMetadataRouteFiles(b.Cfg.PagesDir)
 	b.metaImages = &metaImages{}
 	if len(files) == 0 {
+		if err := b.writeMetaRoutes(nil); err != nil {
+			return []error{err}
+		}
 		return nil
 	}
 	bnd := b.newBundler()
 	var errs []error
+	var dynamic []metaRouteEntry
 	for _, f := range files {
 		var err error
 		switch f.Kind {
 		case mrSitemap, mrRobots, mrManifest:
+			if isDyn, revalidate := b.dynamicMetaRoute(f); isDyn {
+				var entry metaRouteEntry
+				if entry, err = b.buildDynamicDataRoute(f, revalidate); err == nil {
+					dynamic = append(dynamic, entry)
+				}
+				break
+			}
 			err = b.buildDataRoute(f, bnd)
 		default:
 			if f.Static {
@@ -177,6 +188,9 @@ func (b *Builder) buildMetadataRoutes(pages []string) []error {
 		if err != nil {
 			errs = append(errs, err)
 		}
+	}
+	if err := b.writeMetaRoutes(dynamic); err != nil {
+		errs = append(errs, err)
 	}
 	return errs
 }

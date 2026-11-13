@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from "vitest";
-import { createKrateHandler, type HandlerConfig, type KrateServerData } from "./server-handler.js";
+import { createKrateHandler, matchMetaRoute, type HandlerConfig, type KrateServerData } from "./server-handler.js";
 import { jsx } from "./server.js";
 
 const config: HandlerConfig = {
@@ -202,5 +202,37 @@ describe("middleware exports", () => {
     expect((await run({ other: 1 })).status).toBe(503);
     expect((await run(undefined)).status).toBe(503);
     error.mockRestore();
+  });
+});
+
+describe("per-request metadata routes", () => {
+  const metaRoutes = [
+    { path: "/robots.txt", key: "__krate_meta/robots" },
+    { prefix: "/sitemap/", suffix: ".xml", key: "__krate_meta/sitemap/[id]" },
+  ];
+
+  it("maps public URLs to API route keys", () => {
+    expect(matchMetaRoute(metaRoutes, "/robots.txt")).toBe("__krate_meta/robots");
+    expect(matchMetaRoute(metaRoutes, "/sitemap/3.xml")).toBe("__krate_meta/sitemap/3");
+    for (const p of ["/sitemap/.xml", "/sitemap/a/b.xml", "/robots.txt/x", "/other"]) expect(matchMetaRoute(metaRoutes, p)).toBe("");
+    expect(matchMetaRoute(undefined, "/robots.txt")).toBe("");
+  });
+
+  it("serves them through the API handler after middleware", async () => {
+    const handler = createKrateHandler({
+      target: "node",
+      data: data({ metaRoutes, apiRoutes: ["__krate_meta/robots", "__krate_meta/sitemap/[id]"], hasMiddleware: false }),
+      modules: {
+        api: {
+          "__krate_meta/robots": { GET: (r: Request) => new Response("User-agent: *\n# " + new URL(r.url).pathname, { headers: { "content-type": "text/plain" } }) },
+          "__krate_meta/sitemap/[id]": { GET: (_r: Request, ctx: any) => new Response("sitemap " + ctx.params.id) },
+        },
+      },
+    });
+    const robots = await handler(new Request("http://localhost/robots.txt"));
+    expect(robots.status).toBe(200);
+    expect(await robots.text()).toContain("User-agent: *");
+    expect(await (await handler(new Request("http://localhost/sitemap/7.xml"))).text()).toBe("sitemap 7");
+    expect((await handler(new Request("http://localhost/robots.txt", { method: "POST" }))).status).not.toBe(200);
   });
 });

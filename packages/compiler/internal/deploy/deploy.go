@@ -41,9 +41,14 @@ func ServerFeatures(root, outDir string) []string {
 			out = append(out, "SSR/ISR/streaming pages")
 		}
 	}
+	// metaDir holds the per-request robots.ts/sitemap.ts/manifest.ts routes.
+	const metaDir = "__krate_meta"
 	hasFiles := func(dir string) bool {
 		n := 0
-		_ = filepath.WalkDir(dir, func(_ string, d os.DirEntry, err error) error {
+		_ = filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
+			if err == nil && d.IsDir() && d.Name() == metaDir {
+				return filepath.SkipDir
+			}
 			if err == nil && !d.IsDir() {
 				n++
 			}
@@ -53,6 +58,9 @@ func ServerFeatures(root, outDir string) []string {
 	}
 	if hasFiles(serverOut("api")) || hasFiles(serverOut("api-node")) || fileExists(gohost.RoutesManifestPath(root)) {
 		out = append(out, "API routes")
+	}
+	if dirExists(filepath.Join(serverOut("api-node"), metaDir)) {
+		out = append(out, "per-request metadata routes (robots.ts, sitemap.ts or manifest.ts with dynamic or revalidate)")
 	}
 	if data, err := os.ReadFile(filepath.Join(root, ".krate", "actions", "manifest.json")); err == nil {
 		var m struct {

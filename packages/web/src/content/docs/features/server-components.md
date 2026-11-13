@@ -128,7 +128,12 @@ Krate signals and event handlers are build errors (`[KR7110]`): add
 `"use client"` to the module that needs them. `import "server-only"` and
 `import "client-only"` are accepted markers; a `"use client"` module that
 reaches a `server-only` module (directly or through its imports) fails the
-build (`[KR7112]`).
+build (`[KR7112]`). In every server context (SSR bundles, route handlers,
+server actions, middleware, and the build-time passes for metadata routes,
+`generateMetadata` and `generateStaticParams`) `server-only` is a no-op, so the
+npm package's "cannot be imported from a Client Component module" error never
+fires there. `client-only` is a no-op everywhere: Krate does not report it when
+a server context imports it.
 
 ## Error boundaries and streaming
 
