@@ -2302,6 +2302,10 @@ func (b *builder) resolveArrayLiteralExpr(expr ast.Expr) *ast.ArrayExpr {
 	// turn its elements back into literals for item substitution.
 	v := b.evalValue(mem.Object)
 	if !v.IsArray() || v.ContainsUnknown() {
+		// A module array holding JSX has no folded value; use its literal.
+		if arr, ok := b.resolveModuleJSX(mem.Object, 0).(*ast.ArrayExpr); ok && !arrayHasSpread(arr) {
+			return arr
+		}
 		return nil
 	}
 	arr, _ := jsvalue.ToAST(v).(*ast.ArrayExpr)

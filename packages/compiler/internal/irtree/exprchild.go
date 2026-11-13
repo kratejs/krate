@@ -24,6 +24,9 @@ func (b *builder) buildExprContainerChildrenMode(ec *ast.JSXExprContainer, paren
 	if nodes, ok := b.jsxValueChild(expr, parentID, doEscape); ok {
 		return nodes
 	}
+	if nodes, ok := b.moduleJSXChild(expr, parentID, doEscape); ok {
+		return nodes
+	}
 	if isChildrenPlaceholder(expr) {
 		b.recordChildrenContext()
 		return []SlotNode{&ChildrenSlot{}}
