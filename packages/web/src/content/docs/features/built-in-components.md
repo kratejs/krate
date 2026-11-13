@@ -30,6 +30,51 @@ by name - they work without any import:
 Content inside `<Head>` is hoisted into the page's `<head>`. This works at any
 component depth, including inside layouts and plugin-generated pages.
 
+`<Head>` and the other built-in tags (`<Link>`, `<Image>`, `<Script>`, `<Style>`,
+`<Icon>`, `<Suspense>`, `<SyntaxHighlight>`) are globals in every component module:
+pages, layouts, components imported by an SSR page, and components that run as
+islands. `import { Head } from "@krate/runtime"` works too and names the same tag.
+
+When a page has several `<Head>` blocks (a component's, a nested component's, the
+page's own), the last `<title>` and the last `<meta name>`, `<meta property>`
+(except repeated `og:image`-style properties), `<link rel="canonical">` and
+`<base>` win, the way they do for pages rendered per request. A page's head wins
+over its layouts'. Components that are not interactive contribute their tags in
+document order; the tags of a component with state or event handlers are collected
+after them, so give a page one `<title>` rather than relying on the order of two.
+A component rendered inside `<Head>` never hydrates: its markup is not in the page
+body, so a page whose only stateful component sits in `<Head>` ships no JavaScript.
+
+### Document attributes
+
+Lowercase `<html>` and `<body>` elements inside `<Head>` set attributes on the
+document's own `<html>` and `<body>` instead of rendering anything:
+
+```tsx
+export default function RootLayout({ children }) {
+  return (
+    <>
+      <Head>
+        <html lang="fr" className="dark" />
+        <body className="font-sans antialiased" />
+      </Head>
+      {children}
+    </>
+  );
+}
+```
+
+Attributes merge in this order, each source replacing single attributes of the
+one before: `site.htmlAttributes` / `site.bodyAttributes` in the config, the
+layouts' `<Head>`, the page's `<Head>` and, for `lang`, the page's `export const
+lang`. Values are escaped. In a page that renders per request the values may be
+dynamic (`<html className={theme} />` after an `await`); a static page takes the
+build-time value. Client-side navigation applies the attributes that differ
+between the old and the new page and leaves ones a script set at runtime (a theme
+class) alone. A `<Head>` inside a streamed `Suspense` region cannot change the
+document attributes, because they are already sent. Plugins see `<html>` and
+`<body>` elements in the `headHTML` their hooks receive and can add their own.
+
 A `<title>`, `<meta>` or `<link>` rendered outside `<Head>` is also placed in
 the `<head>`, following React 19's document metadata rules: a reactive
 `<title>` updates `document.title`, and metadata inside `<svg>`, with an

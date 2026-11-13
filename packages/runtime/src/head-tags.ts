@@ -330,10 +330,96 @@ export function headEndOf(doc: string): number {
   return lower.indexOf("<body");
 }
 
+// Attributes of the document elements. A <Head> may hold lowercase <html> and
+// <body> elements; they render nothing in place and their attributes are set on
+// the document's <html> and <body> instead. A later element replaces an
+// earlier one attribute by attribute. The Go host does the same
+// (internal/build/docattrs.go).
+
+export type DocAttrs = Map<string, string>;
+
+const ATTR_NAME = /^[A-Za-z_:][-A-Za-z0-9_:.]*$/;
+
+function decodeAttr(v: string): string {
+  return v.replace(/&(quot|amp|lt|gt|apos|#34|#39);/g, (_m, e: string) => {
+    switch (e) {
+      case "quot":
+      case "#34":
+        return '"';
+      case "lt":
+        return "<";
+      case "gt":
+        return ">";
+      case "apos":
+      case "#39":
+        return "'";
+      default:
+        return "&";
+    }
+  });
+}
+
+/** Removes the <html> and <body> elements from a head fragment and returns their attributes. */
+export function splitDocTags(fragment: string): { rest: string; html: DocAttrs; body: DocAttrs } {
+  const html: DocAttrs = new Map();
+  const body: DocAttrs = new Map();
+  if (!/<(html|body)[\s>\/]/i.test(fragment)) return { rest: fragment, html, body };
+  let rest = "";
+  let at = 0;
+  for (const el of scanHeadElements(fragment)) {
+    if (el.name !== "html" && el.name !== "body") continue;
+    const target = el.name === "html" ? html : body;
+    for (const [k, v] of el.attrs) if (ATTR_NAME.test(k)) target.set(k, decodeAttr(v));
+    rest += fragment.slice(at, el.start);
+    at = el.end;
+  }
+  rest += fragment.slice(at);
+  return { rest: rest.replace(/<\/(html|body)\s*>/gi, ""), html, body };
+}
+
+function renderAttrs(attrs: DocAttrs): string {
+  return [...attrs.entries()]
+    .filter(([k]) => ATTR_NAME.test(k))
+    .sort((x, y) => (x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0))
+    .map(([k, v]) => (v === "" ? " " + k : " " + k + '="' + escapeAttr(v) + '"'))
+    .join("");
+}
+
+function escapeAttr(v: string): string {
+  return v.replace(/[&<>"']/g, (c) => (c === '"' ? "&quot;" : c === "&" ? "&amp;" : c === "<" ? "&lt;" : c === ">" ? "&gt;" : "&#39;"));
+}
+
+/** Sets attrs on the first start tag of `name` in doc, keeping the attributes it already has. */
+export function setStartTagAttrs(doc: string, name: string, attrs: DocAttrs): string {
+  if (attrs.size === 0) return doc;
+  const re = new RegExp("<" + name + "(?=[\\s>/])", "i");
+  const m = re.exec(doc);
+  if (!m) return doc;
+  let end = m.index + 1;
+  let quote = "";
+  for (; end < doc.length; end++) {
+    const c = doc[end];
+    if (quote) {
+      if (c === quote) quote = "";
+    } else if (c === '"' || c === "'") quote = c;
+    else if (c === ">") {
+      end++;
+      break;
+    }
+  }
+  const merged: DocAttrs = new Map();
+  for (const [k, v] of scanHeadElements(doc.slice(m.index, end))[0]?.attrs ?? []) if (ATTR_NAME.test(k)) merged.set(k, decodeAttr(v));
+  for (const [k, v] of attrs) merged.set(k, v);
+  return doc.slice(0, m.index) + "<" + name + renderAttrs(merged) + ">" + doc.slice(end);
+}
+
 /** Merges the title and head tags into the head of a whole document. */
 export function mergeHead(doc: string, title: string, fragment: string): string {
   if (title === "" && fragment === "") return doc;
   const end = headEndOf(doc);
   if (end === -1) return doc;
-  return mergeHeadSection(doc.slice(0, end), title, fragment) + doc.slice(end);
+  const { rest, html, body } = splitDocTags(fragment);
+  let out = mergeHeadSection(doc.slice(0, end), title, rest) + doc.slice(end);
+  out = setStartTagAttrs(out, "html", html);
+  return setStartTagAttrs(out, "body", body);
 }

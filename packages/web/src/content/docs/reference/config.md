@@ -46,8 +46,15 @@ site: {
   twitter: "mysite",            // twitter:site handle (@ optional)
   themeColor: "#0b1020",
   locale: "en",                 // <html lang> + og:locale
+  htmlAttributes: { class: "dark" },       // attributes of every page's <html>
+  bodyAttributes: { class: "font-sans" },  // attributes of every page's <body>
 },
 ```
+
+`htmlAttributes` and `bodyAttributes` take strings, numbers and booleans (`true`
+writes a bare attribute, `false` and `null` drop it). Values are escaped. A page or
+a layout can add to them or replace single attributes with `<html>` and `<body>`
+elements inside `<Head>`; see [Document attributes](/docs/features/built-in-components/#document-attributes).
 
 `defineConfig` also accepts a function invoked with the build context, and
 `--mode <name>` selects the mode (and `.env.<mode>` files):

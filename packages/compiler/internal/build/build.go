@@ -2031,6 +2031,11 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 			// first <title>/meta/canonical per key wins; site.titleTemplate
 			// shapes the document title the same way it shapes og:title.
 			r.HeadHTML = templateHeadTitle(dedupeHead(r.HeadHTML), b.Cfg.SEO)
+			// <html> and <body> elements in <Head> are attributes of the
+			// document elements, not head content. The page's come before
+			// its layouts', so the first one wins.
+			var headHTMLAttrs, headBodyAttrs docAttrs
+			r.HeadHTML, headHTMLAttrs, headBodyAttrs = splitDocTags(r.HeadHTML, false)
 
 			// 1. Construct structural HTML wrapper in memory.
 			// Site-global stylesheets (e.g. Tailwind) are linked first, then
@@ -2113,13 +2118,19 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 			finish := func(h string) string {
 				// 1. Document language: per-page lang wins (e.g. docs locales),
 				// then site.locale; otherwise the default "en" stands.
-				lang := r.Lang
-				if lang == "" {
-					lang = b.Cfg.SEO.Locale
+				// Document attributes: site.locale, then site.htmlAttributes,
+				// then <html> in <Head>; the page's own `lang` export wins.
+				site := b.Cfg.Site
+				htmlAttrs := docAttrs{}
+				if loc := b.Cfg.SEO.Locale; loc != "" {
+					htmlAttrs["lang"] = loc
 				}
-				if lang != "" {
-					h = strings.Replace(h, "<html lang=\"en\">", "<html lang=\""+escape.HTMLAttr(lang)+"\">", 1)
+				htmlAttrs = mergeDocAttrs(mergeDocAttrs(htmlAttrs, configDocAttrs(site.HTMLAttributes)), headHTMLAttrs)
+				if r.Lang != "" {
+					htmlAttrs["lang"] = r.Lang
 				}
+				h = setStartTagAttrs(h, "html", htmlAttrs)
+				h = setStartTagAttrs(h, "body", mergeDocAttrs(configDocAttrs(site.BodyAttributes), headBodyAttrs))
 				// 1b. Site-wide <head> injection (head + analytics), added before
 				// CSP so inline analytics scripts get hash-allow-listed.
 				if tags := b.globalHeadHTML(h); tags != "" {

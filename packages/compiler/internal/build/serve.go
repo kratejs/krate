@@ -1110,7 +1110,19 @@ func streamRegionPageModeSC(ctx context.Context, w http.ResponseWriter, flusher 
 		}
 		if end := headEndOf(shell); end >= 0 && (len(roots) == 0 || roots[0].openStart >= end) {
 			headEnd = end
-			headSection = mergeHeadSection(shell[:end], title, head)
+			head, htmlAttrs, bodyAttrs := splitDocTags(head, true)
+			headSection = setStartTagAttrs(mergeHeadSection(shell[:end], title, head), "html", htmlAttrs)
+			// The <body> start tag follows the head; when it sits before the
+			// first region it joins the rewritten section.
+			if len(bodyAttrs) > 0 {
+				if at := startTagIndex(shell[end:], "body"); at >= 0 {
+					bodyEnd := end + htmlTagEnd(shell[end:], at)
+					if len(roots) == 0 || roots[0].openStart >= bodyEnd {
+						headSection += setStartTagAttrs(shell[end:bodyEnd], "body", bodyAttrs)
+						headEnd = bodyEnd
+					}
+				}
+			}
 		}
 	}
 	writeShell := func(lo, hi int) {

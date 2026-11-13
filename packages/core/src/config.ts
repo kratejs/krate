@@ -228,6 +228,15 @@ export interface SiteConfig {
   twitter?: string;
   themeColor?: string;
   locale?: string;
+  /**
+   * Attributes set on every page's `<html>` element, e.g. `{ class: "dark" }`.
+   * A string or number writes `name="value"`, `true` a bare attribute; `false`
+   * and `null` drop it. A page or layout refines them with `<html>` inside
+   * `<Head>`.
+   */
+  htmlAttributes?: Record<string, string | number | boolean | null>;
+  /** Attributes set on every page's `<body>` element; see `htmlAttributes`. */
+  bodyAttributes?: Record<string, string | number | boolean | null>;
 }
 
 export interface RobotsConfig {

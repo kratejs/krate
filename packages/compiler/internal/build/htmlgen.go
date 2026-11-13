@@ -511,7 +511,7 @@ func dedupeHead(head string) string {
 // page itself after a wrapper) overrides an earlier one, the same rule the
 // request-time merge applies.
 func dedupeHeadLast(head string) string {
-	return dedupeHeadOrder(head, true)
+	return mergeDocTags(dedupeHeadOrder(head, true), true)
 }
 
 // headToken is a span of head markup: the text before a tag, then the tag.

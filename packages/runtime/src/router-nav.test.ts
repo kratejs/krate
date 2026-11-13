@@ -117,6 +117,24 @@ describe('SPA navigation', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it('follows html and body attribute changes and keeps runtime-set ones', async () => {
+    routes['/themed'] = {
+      body: '<!doctype html><html class="dark" lang="fr"><head><title>T</title></head><body data-x="1"><div id="root"><h1>T</h1></div></body></html>',
+    };
+    document.documentElement.setAttribute('data-runtime', '1');
+    await krateRouter.push('/themed');
+    await settle();
+    expect(document.documentElement.getAttribute('class')).toBe('dark');
+    expect(document.documentElement.getAttribute('lang')).toBe('fr');
+    expect(document.body.getAttribute('data-x')).toBe('1');
+    expect(document.documentElement.getAttribute('data-runtime')).toBe('1');
+    await krateRouter.push('/about');
+    await settle();
+    expect(document.documentElement.hasAttribute('class')).toBe(false);
+    expect(document.body.hasAttribute('data-x')).toBe(false);
+    expect(document.documentElement.getAttribute('data-runtime')).toBe('1');
+  });
+
   it('hard-navigates when a redirect leaves the origin', async () => {
     routes['/out'] = { body: page('x', ''), redirect: 'https://example.com/elsewhere' };
     await krateRouter.push('/out');
