@@ -745,7 +745,11 @@ Elements and attributes are serialized with the same rules as
   and the namespaced SVG attributes `xlinkHref` -> `xlink:href`,
   `xmlnsXlink` -> `xmlns:xlink`, `xmlLang`, `xmlSpace`. SVG names that are
   already camelCase in SVG (`viewBox`, `markerHeight`, `preserveAspectRatio`)
-  are kept as written.
+  are kept as written. The JSX types accept both spellings (`xlinkHref` and
+  `xlink:href`, `xmlSpace` and `xml:space`), the `xmlns` declarations, all SVG
+  elements (`defs`, `linearGradient`, `clipPath`, `filter`, `fe*`, ...) and
+  event handlers on SVG elements, so SVG pasted from Figma, Illustrator or
+  Inkscape typechecks as is.
 - **Boolean attributes** (`disabled`, `checked`, `hidden`, `readOnly`, ...)
   render bare when truthy and are omitted when `false`, `null` or
   `undefined`. `hidden="until-found"` is kept. `translate` is enumerated

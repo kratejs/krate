@@ -700,7 +700,7 @@ declare global {
       disablePictureInPicture?: boolean;
     }
 
-    interface SVGAttributes extends AriaAttributes, IntrinsicAttributes {
+    interface SVGAttributes extends AriaAttributes, ClipboardEventHandler, CompositionEventHandler, FocusEventHandler, FormEventHandler, KeyboardEventHandler, MouseEventHandler, PointerEventHandler, TouchEventHandler, WheelEventHandler, AnimationEventHandler, TransitionEventHandler, UIEventHandler, MediaEventHandler, DOMAttributes {
       children?: unknown[] | unknown;
       key?: string | number;
       ref?: ((el: globalThis.Element) => void) | { current: globalThis.Element | null } | globalThis.Element | null;
@@ -949,6 +949,41 @@ declare global {
       yChannelSelector?: string;
       z?: number | string;
       zoomAndPan?: string;
+      // Namespace declarations and namespaced attributes found in pasted SVGs
+      // (Figma, Illustrator, Inkscape exports). The camelCase forms are React's
+      // spelling; the compiler emits the XML names.
+      xmlns?: string;
+      xmlnsXlink?: string;
+      'xmlns:xlink'?: string;
+      xmlSpace?: 'default' | 'preserve';
+      'xml:space'?: 'default' | 'preserve';
+      xmlLang?: string;
+      'xml:lang'?: string;
+      xmlBase?: string;
+      'xml:base'?: string;
+      xlinkHref?: string;
+      'xlink:href'?: string;
+      xlinkTitle?: string;
+      'xlink:title'?: string;
+      xlinkActuate?: string;
+      'xlink:actuate'?: string;
+      xlinkArcrole?: string;
+      'xlink:arcrole'?: string;
+      xlinkRole?: string;
+      'xlink:role'?: string;
+      xlinkShow?: string;
+      'xlink:show'?: string;
+      xlinkType?: string;
+      'xlink:type'?: string;
+      type?: string;
+      target?: string;
+      crossOrigin?: 'anonymous' | 'use-credentials' | '';
+      mixBlendMode?: string;
+      isolation?: string;
+      transformOrigin?: string;
+      transformBox?: string;
+      color?: string;
+      dangerouslySetInnerHTML?: { __html: string };
     }
 
     interface IntrinsicElements {
@@ -1071,6 +1106,57 @@ declare global {
       circle: SVGAttributes;
       rect: SVGAttributes;
       g: SVGAttributes;
+      animate: SVGAttributes;
+      animateMotion: SVGAttributes;
+      animateTransform: SVGAttributes;
+      clipPath: SVGAttributes;
+      defs: SVGAttributes;
+      desc: SVGAttributes;
+      ellipse: SVGAttributes;
+      feBlend: SVGAttributes;
+      feColorMatrix: SVGAttributes;
+      feComponentTransfer: SVGAttributes;
+      feComposite: SVGAttributes;
+      feConvolveMatrix: SVGAttributes;
+      feDiffuseLighting: SVGAttributes;
+      feDisplacementMap: SVGAttributes;
+      feDistantLight: SVGAttributes;
+      feDropShadow: SVGAttributes;
+      feFlood: SVGAttributes;
+      feFuncA: SVGAttributes;
+      feFuncB: SVGAttributes;
+      feFuncG: SVGAttributes;
+      feFuncR: SVGAttributes;
+      feGaussianBlur: SVGAttributes;
+      feImage: SVGAttributes;
+      feMerge: SVGAttributes;
+      feMergeNode: SVGAttributes;
+      feMorphology: SVGAttributes;
+      feOffset: SVGAttributes;
+      fePointLight: SVGAttributes;
+      feSpecularLighting: SVGAttributes;
+      feSpotLight: SVGAttributes;
+      feTile: SVGAttributes;
+      feTurbulence: SVGAttributes;
+      filter: SVGAttributes;
+      foreignObject: SVGAttributes;
+      image: SVGAttributes;
+      linearGradient: SVGAttributes;
+      marker: SVGAttributes;
+      mask: SVGAttributes;
+      metadata: SVGAttributes;
+      mpath: SVGAttributes;
+      pattern: SVGAttributes;
+      radialGradient: SVGAttributes;
+      set: SVGAttributes;
+      stop: SVGAttributes;
+      switch: SVGAttributes;
+      symbol: SVGAttributes;
+      text: SVGAttributes;
+      textPath: SVGAttributes;
+      tspan: SVGAttributes;
+      use: SVGAttributes;
+      view: SVGAttributes;
     }
 
     interface ImageProps {
