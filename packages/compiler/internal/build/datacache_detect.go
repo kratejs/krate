@@ -10,6 +10,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/bundler"
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
+	"github.com/kratejs/krate/packages/compiler/internal/irtree"
 )
 
 // dataCacheUsage summarizes how a module reads data through the request-time
@@ -75,10 +76,17 @@ func detectDataCacheUsage(prog *ast.Program) dataCacheUsage {
 			}
 		}
 	}
-	walkProgramExprs(prog, func(e ast.Expr) bool {
-		call, ok := e.(*ast.CallExpr)
+	irtree.WalkAST(prog, func(n any) bool {
+		if attr, ok := n.(*ast.JSXAttr); ok {
+			// Event handlers only run in the browser.
+			return attr.Spread || attr.Value == nil || !eventAttrRe.MatchString(attr.Name)
+		}
+		call, ok := n.(*ast.CallExpr)
 		if !ok {
 			return true
+		}
+		if clientOnlyCallbacks[hookCalleeName(call.Callee)] {
+			return false
 		}
 		name := dataCalleeName(call.Callee)
 		switch {
@@ -102,6 +110,26 @@ func detectDataCacheUsage(prog *ast.Program) dataCacheUsage {
 		return true
 	})
 	return u
+}
+
+// clientOnlyCallbacks are the hooks whose callbacks run only in the browser, so
+// a fetch inside them never reads data for the server render.
+var clientOnlyCallbacks = map[string]bool{
+	"useEffect": true, "useLayoutEffect": true, "useInsertionEffect": true,
+	"onMount": true, "onCleanup": true,
+}
+
+// hookCalleeName returns the called name for `name(...)` and `ns.name(...)`.
+func hookCalleeName(e ast.Expr) string {
+	switch v := e.(type) {
+	case *ast.Identifier:
+		return v.Name
+	case *ast.MemberExpr:
+		if p, ok := v.Property.(*ast.Identifier); ok {
+			return p.Name
+		}
+	}
+	return ""
 }
 
 // dataCalleeName returns "fetch" for fetch / globalThis.fetch / window.fetch and
@@ -183,11 +211,48 @@ func inferRenderModeFromData(u dataCacheUsage) (RenderMode, int, string, bool) {
 	return RenderSSG, 0, "", false
 }
 
-// pageDataCacheUsage merges the data-cache usage of a page's local modules
-// (third-party packages are not scanned).
-func pageDataCacheUsage(mods []*bundler.Module) dataCacheUsage {
-	var u dataCacheUsage
+// serverReachableModules returns the modules a page's server render can run:
+// those reachable from the entry without passing through a "use client" module
+// (client modules, and what only they import, execute in the browser).
+func serverReachableModules(mods []*bundler.Module, entry *bundler.Module, resolve func(importer, spec string) string) []*bundler.Module {
+	if resolve == nil || entry == nil {
+		return mods
+	}
+	byPath := make(map[string]*bundler.Module, len(mods))
 	for _, m := range mods {
+		if m != nil {
+			byPath[m.Path] = m
+		}
+	}
+	keep := map[string]bool{entry.Path: true}
+	queue := []*bundler.Module{entry}
+	for len(queue) > 0 {
+		m := queue[0]
+		queue = queue[1:]
+		for _, spec := range m.Imports {
+			path := resolve(m.Path, spec)
+			next := byPath[path]
+			if next == nil || keep[path] || bundler.HasUseClientDirective(next.SourceCode) {
+				continue
+			}
+			keep[path] = true
+			queue = append(queue, next)
+		}
+	}
+	out := make([]*bundler.Module, 0, len(keep))
+	for _, m := range mods {
+		if m != nil && keep[m.Path] {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// pageDataCacheUsage merges the data-cache usage of a page's local modules
+// that run on the server (third-party packages are not scanned).
+func pageDataCacheUsage(mods []*bundler.Module, entry *bundler.Module, resolve func(importer, spec string) string) dataCacheUsage {
+	var u dataCacheUsage
+	for _, m := range serverReachableModules(mods, entry, resolve) {
 		if m == nil || m.Program == nil || m.IsExternal || strings.Contains(filepath.ToSlash(m.Path), "/node_modules/") {
 			continue
 		}
@@ -200,7 +265,7 @@ func pageDataCacheUsage(mods []*bundler.Module) dataCacheUsage {
 // unsupported segment-export values and the data-cache inference: a page that
 // states no mode but reads tagged, timed or no-store data renders as ISR/SSR
 // instead of being frozen at build time.
-func resolvePageRenderMode(page string, entry *bundler.Module, mods []*bundler.Module) (RenderMode, int, dataCacheUsage) {
+func resolvePageRenderMode(page string, entry *bundler.Module, mods []*bundler.Module, resolve func(importer, spec string) string) (RenderMode, int, dataCacheUsage) {
 	cfg := parsePageConfig(entry.Program)
 	var issues []diag.Diagnostic
 	for _, is := range cfg.issues {
@@ -208,7 +273,7 @@ func resolvePageRenderMode(page string, entry *bundler.Module, mods []*bundler.M
 	}
 	printWarningsOnce(os.Stderr, issues)
 
-	usage := pageDataCacheUsage(mods)
+	usage := pageDataCacheUsage(mods, entry, resolve)
 	mode, reval := detectRenderMode(entry.Program)
 	if _, _, explicit := explicitRenderMode(cfg); explicit || mode != RenderSSG {
 		return mode, reval, usage

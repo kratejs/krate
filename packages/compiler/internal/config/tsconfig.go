@@ -728,6 +728,8 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 		cfg.RuntimeComponents = configStrings(cfg.RuntimeComponents, val)
 	case "serverDirs":
 		cfg.ServerDirs = configStrings(cfg.ServerDirs, val)
+	case "cssImportRoots":
+		cfg.CSSImportRoots = configStrings(cfg.CSSImportRoots, val)
 	case "runtimeDirs":
 		cfg.RuntimeDirs = configStrings(cfg.RuntimeDirs, val)
 	case "hostFunctions":

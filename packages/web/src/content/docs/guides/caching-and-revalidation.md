@@ -81,6 +81,11 @@ it imports read data:
 - Tags alone (`{ next: { tags: [...] } }`, `unstable_cache(..., { tags })`) make
   it ISR that stays cached until a tag or path is revalidated.
 
+Only code that runs on the server counts. A `fetch` in a `"use client"` module
+(or a module only client components import), in a `useEffect`/`onMount`
+callback, or in an `onClick`-style event handler runs in the browser and never
+changes how the page renders.
+
 The build prints the inferred mode (`posts.tsx -> isr (tagged data read)`). A
 page that is pinned static (`force-static`, `revalidate = false`,
 `output: "static"`) but reads tagged, timed or no-store data gets warning

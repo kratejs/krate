@@ -887,6 +887,12 @@ export interface KrateConfig {
   hostFunctions?: string[];
   /** Native target: every module in these directories is host code. */
   hostDirs?: string[];
+  /**
+   * Extra directories stylesheets may `@import` and `url()` from, beyond the
+   * project root, node_modules and the enclosing monorepo workspace root.
+   * Relative to the project root, or absolute.
+   */
+  cssImportRoots?: string[];
   /** Desktop target settings (`krate native`). Experimental. */
   native?: NativeConfig;
   pathAliases?: Record<string, string[]>;

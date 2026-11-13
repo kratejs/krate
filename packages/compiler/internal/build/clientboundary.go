@@ -495,15 +495,17 @@ export function Link(props) {
   var href = props.href || "";
   var out = {};
   for (var k in props) {
-    if (k !== "href" && k !== "prefetch" && k !== "replace" && k !== "scroll" && k !== "children" && k !== "className") out[k] = props[k];
+    if (k !== "href" && k !== "prefetch" && k !== "replace" && k !== "scroll" && k !== "basePath" && k !== "children" && k !== "className") out[k] = props[k];
   }
   if (href) {
     var bp = basePath();
-    out.href = bp && href.charCodeAt(0) === 47 && href.charCodeAt(1) !== 47 ? bp + href : href;
+    out.href = bp && props.basePath !== false && href.charCodeAt(0) === 47 && href.charCodeAt(1) !== 47 ? bp + href : href;
   }
-  var external = /^(https?:|mailto:|tel:|#|javascript:)/.test(href) || href.indexOf("//") === 0 || props.target === "_blank" || props.download !== undefined;
-  if (external) out["data-krate-external"] = "";
-  else {
+  var external = props.basePath === false || /^(https?:|mailto:|tel:|#|javascript:)/.test(href) || href.indexOf("//") === 0 || props.target === "_blank" || props.download !== undefined;
+  if (external) {
+    out["data-krate-external"] = "";
+    if (props.basePath === false) out["data-krate-no-base"] = "";
+  } else {
     out["data-krate-link"] = "";
     if (props.prefetch !== false) out["data-prefetch"] = "";
     if (props.replace) out["data-krate-replace"] = "";

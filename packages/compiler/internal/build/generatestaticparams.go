@@ -694,7 +694,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	if err := b.ensureTransformedModules(bundle.Modules); err != nil {
 		return nil, "", err
 	}
-	renderMode, revalidate, _ := resolvePageRenderMode(spp.PagePath, entryModule, bundle.Modules)
+	renderMode, revalidate, _ := resolvePageRenderMode(spp.PagePath, entryModule, bundle.Modules, b.importResolver().Resolve)
 
 	// Global streaming override: if configured, all *static* pages stream.
 	// Explicit ssr/isr opts win - forcing them to streaming would silently

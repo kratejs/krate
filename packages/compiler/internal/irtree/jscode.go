@@ -779,6 +779,7 @@ func generateLinkJSX(el *ast.JSXElement, signals map[string]ast.Expr) string {
 	prefetch := "true"
 	replace := ""
 	external := false
+	noBase := false
 	scrollFalse := false
 	var props []string
 	for _, attr := range el.Opening.Attributes {
@@ -803,6 +804,10 @@ func generateLinkJSX(el *ast.JSXElement, signals map[string]ast.Expr) string {
 			}
 		case "external":
 			external = true
+		case "basePath":
+			if lit, ok := attr.Value.(*ast.Literal); ok && lit.Value == "false" {
+				noBase, external = true, true
+			}
 		case "scroll":
 			if lit, ok := attr.Value.(*ast.Literal); ok && lit.Value == "false" {
 				scrollFalse = true
@@ -823,6 +828,9 @@ func generateLinkJSX(el *ast.JSXElement, signals map[string]ast.Expr) string {
 	}
 	if external {
 		props = append(props, "'data-krate-external':true")
+		if noBase {
+			props = append(props, "'data-krate-no-base':true")
+		}
 	} else {
 		props = append(props, "'data-krate-link':true")
 		props = append(props, "'data-prefetch':("+prefetch+")")

@@ -91,6 +91,22 @@ and the merged stylesheet is minified when `minifyCSS` (or `minify`) is on.
 Tailwind generates CSS only for classes detected in the scanned sources, so
 unused utility classes never ship. There are no per-feature CSS config toggles.
 
+`@import` (and `url()`) may read `.css` files from the project root, from
+packages in `node_modules` (including pnpm workspace links whose target is a
+sibling package), and from the enclosing monorepo workspace root (the nearest
+parent with `pnpm-workspace.yaml` or a `package.json` with `workspaces`). A
+shared token file such as `@import "../../packages/tokens/tokens.css"` or
+`@import "@acme/tokens/tokens.css"` therefore works in a monorepo. Anything
+else is refused with a warning naming the resolved path; list extra
+directories explicitly:
+
+```typescript
+cssImportRoots: ["../shared-styles"], // relative to the project root, or absolute
+```
+
+In `krate dev`, edits to such files outside the project root rebuild the pages
+that import them (the file's directory is watched, not its subdirectories).
+
 ## Features
 
 ```typescript
@@ -511,7 +527,7 @@ extends: "./base.config.ts",
 
 Bases are merged underneath this config: objects deep-merge (this config wins),
 and additive arrays (`plugins`, `redirects`, `rewrites`, `serverComponents`,
-`runtimeComponents`, `serverDirs`, `runtimeDirs`, `hostFunctions`, `hostDirs`) concatenate. Duplicate
+`runtimeComponents`, `serverDirs`, `runtimeDirs`, `cssImportRoots`, `hostFunctions`, `hostDirs`) concatenate. Duplicate
 `plugins` are de-duped by name, with the extending config winning. Paths resolve
 relative to the extending config, then to `node_modules` (package presets -
 resolved via `package.json` `krate`, `exports`, `module`, or `main`). Cycles are
@@ -830,6 +846,25 @@ Plain `<a href="/about">` and `<img src="/logo.png">` stay exactly as written, s
 they point outside the site. A literal value gives a
 [`KR7144`](/docs/reference/diagnostics/#kr7144) build warning: use `<Link>`, or
 `<Image>` or an import. A value computed at run time gets no warning.
+
+### Linking to the rest of the domain
+
+When Krate is one app of several on a domain (the marketing site at `/`, Krate
+at `/app`), links to the other apps must not get the base path. Use the
+explicit opt-out:
+
+```tsx
+<Link href="/pricing" basePath={false}>Pricing</Link>
+<a href="/blog" data-krate-no-base>Blog</a>
+<a href="https://example.com/pricing">Absolute URLs also work</a>
+```
+
+`basePath={false}` and `data-krate-no-base` use the URL as written, never
+rewrite it (at build time, in server renders and in the browser), and keep the
+click out of the client router, so it is a normal full-page navigation. They
+also silence `KR7144`. `<Link external>` is different: it only skips client
+navigation and still adds the base path, for in-site pages that must load
+normally. Config `redirects` use `basePath: false` the same way.
 
 `krate serve` and `krate dev` mount the site under the base path, and requests
 outside it are redirected in. Code behind the base path sees paths without it, and

@@ -773,6 +773,11 @@ type Config struct {
 	// Paths are relative to project root (e.g. "src/components/server").
 	ServerDirs []string `json:"serverDirs,omitempty"`
 
+	// CSSImportRoots are extra directories (relative to the project root, or
+	// absolute) that stylesheets may @import and url() from, beyond the
+	// project root, node_modules and the enclosing monorepo workspace root.
+	CSSImportRoots []string `json:"cssImportRoots,omitempty"`
+
 	// Runtime directories: all components in these dirs are treated as @runtime.
 	// Paths are relative to project root (e.g. "src/components/runtime").
 	RuntimeDirs []string `json:"runtimeDirs,omitempty"`

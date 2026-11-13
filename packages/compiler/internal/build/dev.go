@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -123,6 +124,17 @@ func Watch(b *Builder, debounceDelay time.Duration, hub *DevHub) error {
 		return found
 	}
 
+	// Dependencies outside the project root (a stylesheet shared from a
+	// sibling workspace package) get their directory watched, non-recursively.
+	watchExternalDeps := func() {
+		for _, d := range b.externalDepDirs() {
+			if !watched[d] && watcher.Add(d) == nil {
+				watched[d] = true
+			}
+		}
+	}
+	watchExternalDeps()
+
 	printf("%s  Watching %s for changes...%s\n", cBlue, root, cReset)
 
 	debounce := debounceDelay
@@ -187,6 +199,7 @@ func Watch(b *Builder, debounceDelay time.Duration, hub *DevHub) error {
 		} else {
 			b.processChanges(changed, hub)
 		}
+		watchExternalDeps()
 		printf("%s  Watching %s for changes...%s\n", cBlue, root, cReset)
 		return nil
 	}
@@ -684,6 +697,27 @@ func (b *Builder) watchedFile(path string) bool {
 	b.depMu.Lock()
 	defer b.depMu.Unlock()
 	return len(b.depGraph[path]) > 0
+}
+
+// externalDepDirs lists the directories of known dependencies that live outside
+// the project root and outside node_modules.
+func (b *Builder) externalDepDirs() []string {
+	root := filepath.Clean(b.Root)
+	b.depMu.Lock()
+	defer b.depMu.Unlock()
+	seen := map[string]bool{}
+	var dirs []string
+	for f := range b.depGraph {
+		if !filepath.IsAbs(f) || isWithin(f, root) || strings.Contains(filepath.ToSlash(f), "/node_modules/") {
+			continue
+		}
+		if d := filepath.Dir(f); !seen[d] {
+			seen[d] = true
+			dirs = append(dirs, d)
+		}
+	}
+	sort.Strings(dirs)
+	return dirs
 }
 
 // trackedFile reports whether path has an extension krate rebuilds on.

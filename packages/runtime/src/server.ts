@@ -669,11 +669,14 @@ export function Style(props: { children?: string }): JSXNode {
 // linkAttributes computes the attributes of a <Link> anchor. An empty string
 // stands for a boolean attribute.
 function linkAttributes(props: Record<string, any>): Record<string, string> {
-  const { href = "", prefetch, replace, scroll, children: _children, ...rest } = props;
+  const { href = "", prefetch, replace, scroll, basePath: noBase, children: _children, ...rest } = props;
   const attrs: Record<string, string> = {};
-  if (href) attrs.href = withBase(href);
+  // basePath={false}: the URL belongs to another app on the host.
+  const outside = noBase === false;
+  if (href) attrs.href = outside ? href : withBase(href);
 
   const external =
+    outside ||
     /^(https?:|mailto:|tel:|#|javascript:)/.test(href) ||
     href.startsWith("//") ||
     rest.target === "_blank" ||
@@ -681,6 +684,7 @@ function linkAttributes(props: Record<string, any>): Record<string, string> {
 
   if (external) {
     attrs["data-krate-external"] = "";
+    if (outside) attrs["data-krate-no-base"] = "";
   } else {
     attrs["data-krate-link"] = "";
     if (prefetch !== false) attrs["data-prefetch"] = "";
