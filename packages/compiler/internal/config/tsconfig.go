@@ -504,6 +504,16 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 			return err
 		}
 		cfg.Images = ic
+	case "react":
+		data, err := json.Marshal(val)
+		if err != nil {
+			return err
+		}
+		var rc ReactConfig
+		if err := json.Unmarshal(data, &rc); err != nil {
+			return err
+		}
+		cfg.React = rc
 	case "deploy":
 		data, err := json.Marshal(val)
 		if err != nil {

@@ -1362,6 +1362,107 @@ silent failure in the browser:
   pages; a React-library island has to be rendered by a page. (Providers are
   the exception, see [Providers in layouts](#providers-in-layouts).)
 
+## Libraries built on a React reconciler (real-React islands)
+
+`@react-three/fiber`, `@react-three/drei`, `react-konva` and similar libraries
+draw through `react-reconciler`, React's renderer API. Preact does not have it,
+so these libraries cannot run on the Preact islands above. A module that uses
+one runs in a **real-React island** instead: an island bundled with `react`
+and `react-dom` themselves, with no Preact alias anywhere in its subtree.
+
+```tsx
+// src/components/Viewer.tsx
+import { Canvas } from '@react-three/fiber';
+import { OrbitControls } from '@react-three/drei';
+
+export default function Viewer({ color }: { color: string }) {
+  return (
+    <Canvas>
+      <mesh><boxGeometry /><meshStandardMaterial color={color} /></mesh>
+      <OrbitControls />
+    </Canvas>
+  );
+}
+```
+
+```tsx
+// src/pages/model.tsx
+import Viewer from '../components/Viewer';
+
+export default function Page() {
+  return <Viewer client:visible client:fallback="Loading 3D viewer..." color="#c33" />;
+}
+```
+
+### How a module opts in
+
+Krate does not need a directive on every tag: the requirement belongs to the
+package, so the build decides from the module's imports, the same way it
+detects React-library hooks.
+
+- A package that depends on (or has a peer dependency on) `react-reconciler`,
+  `@react-three/fiber` or `react-konva` needs real React. That covers
+  `@react-three/fiber`, `@react-three/drei`, `react-konva` and the libraries
+  built on them. Nothing needs to be configured.
+- Any other package can be added in `krate.config.ts`:
+
+  ```typescript
+  react: { islands: ["some-canvas-library"] },
+  ```
+
+A user module that imports such a package becomes a real-React island, and so
+does every island module that imports it. Using the component as a tag in a page
+renders the island there. A reconciler library used as a tag directly in a page
+(`<Canvas>` imported in the page itself) is an island too. A library that pulls
+in `react-reconciler` without being listed fails the Preact island build and the
+message names `react: { islands: [...] }`.
+
+### Rendering
+
+A real-React island is **client-rendered**. Server-rendering a WebGL or canvas
+tree is not meaningful, so the server emits only the placeholder. Put
+`client:fallback="text"` on the tag to render a text fallback there until
+React mounts it (escaped, text only). To reserve space, wrap the tag in an
+element with a fixed size. `client:load`, `client:idle` and `client:visible`
+work as for other islands, so a heavy viewer below the fold is fetched only
+when it nears the viewport. Both directives are removed at build time and
+never reach the component.
+
+### Props and children
+
+- Props are serialized like any other island: literals, bridged signal getters
+  (the island re-renders when the signal changes) and function references.
+- The island is one React tree. `children` and nested tags in the island's JSX
+  (`<Canvas><mesh/></Canvas>`) are compiled for React inside it, and may use
+  elements, components imported from packages and imported local modules.
+- **Krate components cannot be passed in.** A same-file Krate function used
+  inside the island, or JSX built by a Krate component and handed to a prop,
+  cannot cross the boundary; the build reports the same-file case (`KR8007`).
+  Move the component into its own module (it is then bundled and run on React)
+  or render it outside the island.
+- The island cannot read Krate signals, only the props the page passes in, and
+  Krate cannot read the island's state.
+- Providers a layout wraps around its children are not applied to a real-React
+  island. Render the provider inside the island's own module.
+- A page that is itself a real-React island, a layout, and an `async` server
+  page follow the limits of the other React-library islands (`KR8013`).
+
+### What it costs
+
+Real React is not part of Krate's runtime, and the 25 KB counter-page figure
+does not include it. The cost is paid only by pages that load a real-React
+island, as one shared chunk of `react`, `react-dom` and the libraries, cached
+across those pages: React plus `react-dom` is roughly 60 KB gzipped for the
+client renderer, and `react-reconciler` libraries add their own weight (Three.js
+is several hundred KB). Pages without such an island load none of it, and
+`krate check` counts the island bytes against the page budget. All real-React
+islands of a page mount from one entry, and the pages of a site share the
+React chunk, so a second viewer page adds only its own code.
+
+The project must have `react` and `react-dom` (18.3 or newer, 19 recommended)
+installed; the build says so if they are missing. Both resolve to the project's
+copy, so a reconciler library and the island share one React.
+
 ## Events, forms and refs
 
 Event handlers, form controls and refs follow React 18/19 semantics as
@@ -1481,8 +1582,10 @@ observed in a browser. The browser conformance suite (`/react-events/` in
 
 ## What is not supported
 
-- **Running React itself.** There is no React runtime; compiled packages run
-  through Preact islands, not React.
+- **Running React itself in a page.** There is no React runtime; compiled
+  packages run through Preact islands, not React. The exception is a
+  [real-React island](#libraries-built-on-a-react-reconciler-real-react-islands),
+  for libraries built on a React reconciler.
 - **React libraries' hooks in lowered source components.** `zustand`,
   `react-hook-form`, `swr` and `@tanstack/react-query` hooks need React's render
   model, so the module that calls them is run as a Preact island instead (see

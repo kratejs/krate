@@ -719,6 +719,9 @@ type ExternalImport struct {
 	ReactIsland bool
 	// ClientOnly skips the build-time server render of the island.
 	ClientOnly bool
+	// RealReact runs the island on real react and react-dom (a React
+	// reconciler library) instead of the Preact alias.
+	RealReact bool
 }
 
 // ExternalComponent is an unresolved package component that is mounted at
@@ -749,6 +752,10 @@ type ExternalComponent struct {
 	// ClientOnly means the island has no server render: its package creates
 	// the markup (styles) in the browser.
 	ClientOnly bool
+	// RealReact is set for an island that runs on real react and react-dom. It
+	// is rendered in the browser only; Fallback is the text shown until then.
+	RealReact bool
+	Fallback  string
 	// Hydrate is the client directive that defers mounting: "" (at load),
 	// "visible" or "idle".
 	Hydrate string

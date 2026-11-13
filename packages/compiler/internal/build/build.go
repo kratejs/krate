@@ -2359,7 +2359,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 			}
 			entryModule = rewritten
 			reactIslandImps = append(reactIslandImps, irtree.ExternalImport{
-				Source: rewritten.Path, Local: reactIslandPageLocal, Default: true, ReactIsland: true, ClientOnly: im.ClientOnly,
+				Source: rewritten.Path, Local: reactIslandPageLocal, Default: true, ReactIsland: true, ClientOnly: im.ClientOnly, RealReact: im.Real,
 			})
 		}
 	}
@@ -2538,6 +2538,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 		regions    []Region
 	)
 	externalByLocal, externalImports, localImports := entryExternalImports(entryModule.Program)
+	b.markRealReactImports(externalByLocal, externalImports, filepath.Dir(entryModule.Path))
 	// A path alias ("@/components/X") looks like a package scope, so the page's
 	// own import list already holds it as a package binding; the island
 	// binding replaces it.

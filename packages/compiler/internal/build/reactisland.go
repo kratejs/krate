@@ -34,11 +34,16 @@ type reactIslandModule struct {
 	// ClientOnly is set when the module (or one it imports) uses a CSS-in-JS
 	// library: styles are created in the browser, so there is no server markup.
 	ClientOnly bool
+	// Real is set when the module needs real react and react-dom (a React
+	// reconciler library): the island is bundled without the Preact alias.
+	Real bool
 }
 
 type reactPkgInfo struct {
 	Name       string
 	ReactBound bool
+	// Reconciler is set when the package is built on a React reconciler.
+	Reconciler bool
 }
 
 var reactPkgCache sync.Map // package dir -> reactPkgInfo
@@ -67,6 +72,14 @@ func reactPackageOf(file string) reactPkgInfo {
 					if _, ok := deps["react-dom"]; ok {
 						info.ReactBound = true
 					}
+					for _, marker := range reconcilerMarkers {
+						if _, ok := deps[marker]; ok {
+							info.Reconciler = true
+						}
+					}
+				}
+				if info.Reconciler {
+					reconcilerPkgs.Store(info.Name, true)
 				}
 				reactPkgCache.Store(dir, info)
 				return info
@@ -304,6 +317,11 @@ func (b *Builder) detectReactIslandModules(mods []*bundler.Module, resolve func(
 		if in.pragma != "" {
 			hit = &reactIslandModule{Path: in.m.Path, Pkg: in.pragma, Name: "@jsxImportSource " + in.pragma, Pos: ast.Pos{Line: 1, Col: 1}}
 		}
+		if hit == nil && !in.m.IsEntry {
+			if pkg := b.realLibPackage(in.libPkgs); pkg != "" {
+				hit = &reactIslandModule{Path: in.m.Path, Pkg: pkg, Name: "import of " + pkg, Pos: ast.Pos{Line: 1, Col: 1}}
+			}
+		}
 		if hit == nil && len(in.factories) > 0 {
 			tags := map[string]bool{}
 			for _, t := range irtree.JSXElementNames(in.m.Program.Body) {
@@ -447,6 +465,7 @@ func (b *Builder) detectReactIslandModules(mods []*bundler.Module, resolve func(
 	for path, im := range out {
 		im.ClientOnly = usesCSSInJS(path, infos, resolve, map[string]bool{})
 	}
+	b.markRealReactModules(out, infos, resolve)
 	return out
 }
 
@@ -488,6 +507,7 @@ func reactIslandImports(mods []*bundler.Module, islands map[string]*reactIslandM
 		seen[imp.Local] = true
 		imp.ReactIsland = true
 		imp.ClientOnly = islands[imp.Source].ClientOnly
+		imp.RealReact = islands[imp.Source].Real
 		out = append(out, imp)
 	}
 	for _, m := range mods {

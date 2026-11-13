@@ -660,7 +660,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 			}
 			entryModule = rewritten
 			reactIslandImps = append(reactIslandImps, irtree.ExternalImport{
-				Source: rewritten.Path, Local: reactIslandPageLocal, Default: true, ReactIsland: true, ClientOnly: im.ClientOnly,
+				Source: rewritten.Path, Local: reactIslandPageLocal, Default: true, ReactIsland: true, ClientOnly: im.ClientOnly, RealReact: im.Real,
 			})
 		}
 	}
@@ -745,6 +745,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		goBaked    map[string]string
 	)
 	externalByLocal, externalImports, localImports := entryExternalImports(entryModule.Program)
+	b.markRealReactImports(externalByLocal, externalImports, filepath.Dir(entryModule.Path))
 	for _, imp := range reactIslandImps {
 		if _, dup := externalByLocal[imp.Local]; dup {
 			kept := externalImports[:0]

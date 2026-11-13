@@ -4234,6 +4234,7 @@ func (b *builder) buildExternalComponentSlot(name string, el *ast.JSXElement) (S
 	// client:visible / client:idle / client:load choose when the island mounts.
 	// They are directives for Krate, never props of the component.
 	hydrate := ""
+	fallback := clientFallbackText(el)
 	el, hydrate = splitClientDirective(el)
 	b.checkIslandScopeProps(el, root)
 	// Replace page-scope signal reads with island props and collect their value
@@ -4330,6 +4331,7 @@ func (b *builder) buildExternalComponentSlot(name string, el *ast.JSXElement) (S
 		Namespace: imp.Namespace, Props: props, Subtree: subtree, PropsJS: propsJS,
 		SSRPropsJS: ssrPropsJS, SSRPropsKnown: ssrKnown,
 		ReactIsland: imp.ReactIsland, ClientOnly: imp.ClientOnly, Hydrate: hydrate,
+		RealReact: imp.RealReact, Fallback: fallback,
 		File: b.ann.SourceFile, Line: el.Position.Line, Col: el.Position.Col, Offset: el.Position.Offset,
 	})
 	html := `<div data-krate-island="` + id + `" style="display:contents"></div>`
@@ -4347,6 +4349,23 @@ func clientDirectiveOf(el *ast.JSXElement) (*ast.JSXAttr, string) {
 		}
 	}
 	return nil, ""
+}
+
+// clientFallbackText returns the string literal of a `client:fallback`
+// attribute: the text a real-React island shows before it mounts.
+func clientFallbackText(el *ast.JSXElement) string {
+	if el == nil || el.Opening == nil {
+		return ""
+	}
+	for _, attr := range el.Opening.Attributes {
+		if attr == nil || attr.Spread || attr.Name != "client:fallback" {
+			continue
+		}
+		if lit, ok := attr.Value.(*ast.Literal); ok && lit.Kind == ast.StringLit {
+			return lit.Value
+		}
+	}
+	return ""
 }
 
 // splitClientDirective removes the `client:*` directive from an island root and
