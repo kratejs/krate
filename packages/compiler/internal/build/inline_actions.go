@@ -94,21 +94,28 @@ func (b *Builder) hoistInlineModules(dir string, files []string) ([]*actionModul
 }
 
 // readServerSource reads a project module for a server bundle with its inline
-// actions hoisted. The bundle plugins that claim project modules read through
-// it, so the hoisting does not depend on which of them loads a file.
+// actions hoisted and the compiler-provided tags (Head, Link, ...) in scope.
+// The bundle plugins that claim project modules read through it, so neither
+// depends on which of them loads a file.
 func readServerSource(root, path string) ([]byte, error) {
 	data, err := os.ReadFile(path)
-	if err != nil || !inlineaction.Has(string(data)) || strings.Contains(filepath.ToSlash(path), "/node_modules/") {
+	if err != nil || strings.Contains(filepath.ToSlash(path), "/node_modules/") {
 		return data, err
 	}
-	res, err := hoistInlineActions(root, path, string(data))
-	if err != nil {
-		return nil, err
+	if inlineaction.Has(string(data)) {
+		res, err := hoistInlineActions(root, path, string(data))
+		if err != nil {
+			return nil, err
+		}
+		if res != nil {
+			data = []byte(withInlineActionImport(res.Source))
+		}
 	}
-	if res == nil {
-		return data, nil
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".tsx", ".jsx":
+		return []byte(injectServerGlobals(string(data))), nil
 	}
-	return []byte(withInlineActionImport(res.Source)), nil
+	return data, nil
 }
 
 // withInlineActionImport adds the helper import to rewritten source without

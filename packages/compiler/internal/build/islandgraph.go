@@ -213,7 +213,7 @@ func (b *Builder) writeIslandBundles() error {
 		LogLevel:            api.LogLevelSilent,
 		Alias:               islandAlias(b.Root, false),
 		External:            []string{"preact", "preact/compat", "preact/hooks", "preact/jsx-runtime"},
-		Plugins:             []api.Plugin{islandEntryPlugin(entries, virtual), islandCSSPlugin(sink), islandJSXPlugin(), islandRequirePlugin(), reconcilerGuardPlugin()},
+		Plugins:             []api.Plugin{islandEntryPlugin(entries, virtual), islandCSSPlugin(sink), islandJSXPlugin(), islandTagsPlugin(b.Root, false), islandRequirePlugin(), reconcilerGuardPlugin()},
 	})
 	if len(result.Errors) > 0 {
 		var msgs []string

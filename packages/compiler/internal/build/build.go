@@ -2620,6 +2620,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 			return t, em.Emit(t)
 		})
 		renderer.EmitMeta(tree, emitResult)
+		emitResult.HeadHTML = dedupeHeadLast(emitResult.HeadHTML)
 		warnings := emitResult.Warnings
 		if isDynRoute {
 			warnings = withoutTemplateSlotWarnings(warnings)
@@ -2844,7 +2845,9 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 		deps = append(deps, islandStyles.Deps...)
 	}
 	if len(islandSSR) > 0 {
-		emitResult.HTML = injectIslandSSR(emitResult.HTML, islandSSR)
+		var islandHead string
+		emitResult.HTML, islandHead = injectIslandSSR(emitResult.HTML, islandSSR)
+		emitResult.HeadHTML = islandHead + emitResult.HeadHTML
 	}
 	emitResult.IslandBootJS = islandBoot
 	// Request-time pages are rendered by the server, which highlights their
@@ -3509,6 +3512,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	emitter.GoComponents = opts.GoComponents
 	emitResult := emitter.Emit(tree)
 	renderer.EmitMeta(tree, emitResult)
+	emitResult.HeadHTML = dedupeHeadLast(emitResult.HeadHTML)
 	if len(emitResult.GoRenders) > 0 {
 		rendered, gerr := b.renderGoComponents(emitResult.GoRenders)
 		if gerr != nil {

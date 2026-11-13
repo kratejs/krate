@@ -503,19 +503,30 @@ func headKey(tag string) string {
 // dedupeHead keeps the first <title>, <meta name|property> and singleton <link>
 // per key. Page heads are placed before layout heads, so the page wins.
 func dedupeHead(head string) string {
-	if head == "" {
-		return head
-	}
-	var out strings.Builder
-	seen := map[string]bool{}
+	return dedupeHeadOrder(head, false)
+}
+
+// dedupeHeadLast is dedupeHead keeping the last tag per key. It settles the
+// <Head> content of one page, where a later <Head> (a nested component, the
+// page itself after a wrapper) overrides an earlier one, the same rule the
+// request-time merge applies.
+func dedupeHeadLast(head string) string {
+	return dedupeHeadOrder(head, true)
+}
+
+// headToken is a span of head markup: the text before a tag, then the tag.
+type headToken struct {
+	pre, tag, key string
+}
+
+func tokenizeHead(head string) (toks []headToken, tail string) {
 	i := 0
 	for i < len(head) {
 		lt := strings.IndexByte(head[i:], '<')
 		if lt < 0 {
-			out.WriteString(head[i:])
-			break
+			return toks, head[i:]
 		}
-		out.WriteString(head[i : i+lt])
+		pre := head[i : i+lt]
 		start := i + lt
 		var end int
 		lower := strings.ToLower(head[start:])
@@ -526,7 +537,7 @@ func dedupeHead(head string) string {
 			} else {
 				end = len(head)
 			}
-			out.WriteString(head[start:end])
+			toks = append(toks, headToken{pre: pre, tag: head[start:end]})
 			i = end
 			continue
 		case strings.HasPrefix(lower, "<script"), strings.HasPrefix(lower, "<style"), strings.HasPrefix(lower, "<title"), strings.HasPrefix(lower, "<noscript"):
@@ -549,20 +560,49 @@ func dedupeHead(head string) string {
 			}
 		}
 		tag := head[start:end]
-		if key := headKey(tag); key != "" {
-			if seen[key] {
-				i = end
-				// Drop the newline that separated the removed tag.
-				if i < len(head) && head[i] == '\n' {
-					i++
-				}
-				continue
-			}
-			seen[key] = true
-		}
-		out.WriteString(tag)
+		toks = append(toks, headToken{pre: pre, tag: tag, key: headKey(tag)})
 		i = end
 	}
+	return toks, ""
+}
+
+func dedupeHeadOrder(head string, last bool) string {
+	if head == "" {
+		return head
+	}
+	toks, tail := tokenizeHead(head)
+	drop := make([]bool, len(toks))
+	seen := map[string]bool{}
+	for n := range toks {
+		i := n
+		if last {
+			i = len(toks) - 1 - n
+		}
+		key := toks[i].key
+		if key == "" {
+			continue
+		}
+		if seen[key] {
+			drop[i] = true
+			continue
+		}
+		seen[key] = true
+	}
+	var out strings.Builder
+	for i, t := range toks {
+		out.WriteString(t.pre)
+		if drop[i] {
+			// Drop the newline that separated the removed tag.
+			if i+1 < len(toks) && strings.HasPrefix(toks[i+1].pre, "\n") {
+				toks[i+1].pre = toks[i+1].pre[1:]
+			} else if i+1 == len(toks) && strings.HasPrefix(tail, "\n") {
+				tail = tail[1:]
+			}
+			continue
+		}
+		out.WriteString(t.tag)
+	}
+	out.WriteString(tail)
 	return out.String()
 }
 
