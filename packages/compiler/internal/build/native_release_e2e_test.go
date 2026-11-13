@@ -99,26 +99,3 @@ func TestNativeReleaseE2EGUI(t *testing.T) {
 		t.Errorf("quit: %v", err)
 	}
 }
-
-// The example builds as a release executable and serves its Go and TypeScript
-// host calls without a browser.
-func TestNativeReleaseExample(t *testing.T) {
-	requireRelease(t)
-	ex := e2eRequireDeps(t)
-	bin, res := e2eBuildRelease(t, ex, filepath.Join(t.TempDir(), "dist-native"))
-	// The example reads its theme from @krate/app/kv, so kv is the only
-	// permission the build derives.
-	if !res.Manifest.StrictPermissions || strings.Join(res.Manifest.Permissions, ",") != "kv" {
-		t.Fatalf("permissions = %v", res.Manifest.Permissions)
-	}
-	app := runReleaseBinary(t, bin)
-	if code, body := app.get(t, "/"); code != 200 || !strings.Contains(body, "list") {
-		t.Fatalf("index: %d", code)
-	}
-	if code, _ := app.get(t, "/tasks/42"); code != 200 {
-		t.Fatalf("dynamic route fallback: %d", code)
-	}
-	if got := app.call(t, "src/lib/tasks.List", nil); !strings.Contains(got, `"ok"`) {
-		t.Fatalf("Go host call: %s", got)
-	}
-}

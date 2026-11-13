@@ -16,9 +16,9 @@ import (
 // Browser extensions. WebView2 loads unpacked Chromium extensions into the
 // profile with ICoreWebView2Profile7::AddBrowserExtension, provided the
 // environment was created with AreBrowserExtensionsEnabled (see
-// envoptions_windows.go). The interfaces are checked against WebView2.h by
-// the vtable table test; the CI native job runs TestGUIExtension with a tiny
-// content-script extension.
+// envoptions_windows.go). The vtable layouts are transcribed from WebView2.h
+// (vtables.go). No CI test loads an extension; the compiler's
+// TestNativeE2EProcsGUI only reports the extension API.
 //
 // Not run on a real Windows machine by the author.
 

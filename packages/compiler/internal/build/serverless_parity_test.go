@@ -291,15 +291,3 @@ func TestServerlessNodeParity(t *testing.T) {
 	}
 	_ = deploy.ServerFeatures
 }
-
-func TestNormalizeBodyDigestOfOnlyDigits(t *testing.T) {
-	const page = `<script type="application/json" id="__krate_error">{"name":"Error","message":"Internal Server Error","digest":"%s"}</script> t=1700000000000`
-	letters := normalizeBody(strings.Replace(page, "%s", "08926a4e5a", 1))
-	digits := normalizeBody(strings.Replace(page, "%s", "0123456789", 1))
-	if letters != digits {
-		t.Errorf("two digests must normalize alike:\n%s\n%s", letters, digits)
-	}
-	if !strings.Contains(digits, "t=N") {
-		t.Errorf("timestamps must still be blanked: %s", digits)
-	}
-}

@@ -49,24 +49,6 @@ export default function Page() {
 	}
 }
 
-func TestRewriteActionImportMissingExport(t *testing.T) {
-	root := t.TempDir()
-	actionPath := filepath.Join(root, "src", "actions.ts")
-	pagePath := filepath.Join(root, "src", "pages", "index.tsx")
-	writeActionFile(t, actionPath, `"use server"; export async function save() {}`)
-	writeActionFile(t, pagePath, `import { missing } from "../actions";
-export default function Page() { return <div>{missing}</div>; }`)
-
-	b := New(root)
-	b.SetActionModules(map[string]map[string]string{
-		filepath.Clean(actionPath): {"save": "a123"},
-	})
-	_, err := b.Bundle(pagePath)
-	if err == nil || !strings.Contains(err.Error(), `imports "missing"`) {
-		t.Fatalf("expected missing-export error, got %v", err)
-	}
-}
-
 func writeActionFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {

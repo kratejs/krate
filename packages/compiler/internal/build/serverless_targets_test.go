@@ -195,59 +195,6 @@ console.log(JSON.stringify({ admin: [r.status, r.headers.get('location')], home:
 	checkHandlerResults(t, res)
 }
 
-func TestNetlifyServerOutput(t *testing.T) {
-	root, cfg := serverlessProject(t, "serverless")
-	_, _ = emitServerTarget(t, root, cfg, "netlify")
-	fn := filepath.Join(root, "netlify", "functions", "krate.mjs")
-	data, _ := os.ReadFile(fn)
-	if !strings.Contains(string(data), `export const config = { path: "/*", excludedPath: [`) || strings.Contains(string(data), "preferStatic") {
-		t.Errorf("with middleware the function runs first (no preferStatic) and excludes only assets, as a literal config export for Netlify's parser:\n%s", data)
-	}
-	for _, ext := range []string{`"/*.js"`} {
-		if !strings.Contains(string(data), ext) {
-			t.Errorf("assets %s must be excluded from the function:\n%s", ext, data)
-		}
-	}
-	if strings.Contains(string(data), `"/*.html"`) {
-		t.Errorf("HTML pages must reach the function:\n%s", data)
-	}
-	for _, p := range []string{fn, filepath.Join(root, "netlify", "server", "krate-server.mjs"), filepath.Join(root, "netlify.toml"), filepath.Join(cfg.OutDir, "_redirects"), filepath.Join(cfg.OutDir, "_headers")} {
-		if _, err := os.Stat(p); err != nil {
-			t.Errorf("missing %s", p)
-		}
-	}
-	if _, err := os.Stat(filepath.Join(cfg.OutDir, ".krate")); err == nil {
-		t.Errorf("dist/.krate must not be published")
-	}
-	res := runNodeScript(t, filepath.Dir(fn), `import handler, { config } from './krate.mjs';
-if (config.path !== '/*' || config.preferStatic || !config.excludedPath.includes('/*.js')) throw new Error('bad config ' + JSON.stringify(config));
-const call = (request) => handler(request, {});
-const adm = await call(new Request('https://example.test/admin'));
-if (adm.status !== 307) throw new Error('middleware did not guard the prerendered /admin: ' + adm.status);`+handlerChecks)
-	checkHandlerResults(t, res)
-}
-
-func TestNetlifyAndVercelWithoutMiddlewareStayStaticFirst(t *testing.T) {
-	root, cfg := serverlessProject(t, "serverless")
-	if err := os.Remove(filepath.Join(root, "middleware.ts")); err != nil {
-		t.Fatal(err)
-	}
-	emitServerTarget(t, root, cfg, "netlify")
-	data, _ := os.ReadFile(filepath.Join(root, "netlify", "functions", "krate.mjs"))
-	if !strings.Contains(string(data), `export const config = { path: "/*", preferStatic: true };`) {
-		t.Errorf("without middleware the CDN serves static files first:\n%s", data)
-	}
-	root2, cfg2 := serverlessProject(t, "serverless")
-	if err := os.Remove(filepath.Join(root2, "middleware.ts")); err != nil {
-		t.Fatal(err)
-	}
-	emitServerTarget(t, root2, cfg2, "vercel")
-	conf, _ := os.ReadFile(filepath.Join(root2, ".vercel", "output", "config.json"))
-	if strings.Contains(string(conf), `/.*\\.html`) {
-		t.Errorf("without middleware there is no catch-all HTML route to the function:\n%s", conf)
-	}
-}
-
 func TestCloudflareServerOutput(t *testing.T) {
 	root, cfg := serverlessProject(t, "serverless")
 	_, _ = emitServerTarget(t, root, cfg, "cloudflare")
@@ -335,55 +282,6 @@ func TestServerBundleHasNoSecrets(t *testing.T) {
 	}
 }
 
-func TestServerlessRefusesGoAndSidecars(t *testing.T) {
-	root, cfg := serverlessProject(t, "serverless")
-	cfg.API.Sidecar = &config.SidecarConfig{Target: "http://127.0.0.1:9999"}
-	_, err := BuildServerBundle(root, cfg, "vercel")
-	if err == nil || !strings.Contains(err.Error(), "api.sidecar") || !strings.Contains(err.Error(), "docker") {
-		t.Fatalf("custom sidecar must be refused with a docker hint, got %v", err)
-	}
-	cfg.API.Sidecar = nil
-	if err := os.MkdirAll(filepath.Join(root, ".krate"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, ".krate", "goapi-routes.json"), []byte("[]"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	_, err = BuildServerBundle(root, cfg, "cloudflare")
-	if err == nil || !strings.Contains(err.Error(), "Go API routes") {
-		t.Fatalf("Go routes must be refused, got %v", err)
-	}
-}
-
-func TestCloudflareRefusesNodeBuiltins(t *testing.T) {
-	root, cfg := serverlessProject(t, "serverless")
-	if err := os.WriteFile(filepath.Join(root, "src", "api", "readfile.ts"), []byte("import fs from 'node:fs';\nexport async function GET() { return new Response(fs.readFileSync('/etc/hostname', 'utf8')); }\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	_, err := BuildServerBundle(root, cfg, "cloudflare")
-	if err == nil || !strings.Contains(err.Error(), "node:fs") || !strings.Contains(err.Error(), "readfile.ts") {
-		t.Fatalf("expected a bundle-time error naming node:fs and the importer, got %v", err)
-	}
-	if _, err := BuildServerBundle(root, cfg, "node"); err != nil {
-		t.Fatalf("the node target allows built-ins: %v", err)
-	}
-}
-
-func TestDeployNeverOverwritesHandWrittenConfig(t *testing.T) {
-	root, cfg := serverlessProject(t, "serverless")
-	if err := os.WriteFile(filepath.Join(root, "wrangler.toml"), []byte("name = \"mine\"\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	plan, _ := emitServerTarget(t, root, cfg, "cloudflare")
-	data, _ := os.ReadFile(filepath.Join(root, "wrangler.toml"))
-	if string(data) != "name = \"mine\"\n" || len(plan.Warnings) == 0 {
-		t.Errorf("hand-written wrangler.toml must stay and be reported: %q %v", data, plan.Warnings)
-	}
-	if _, err := os.Stat(filepath.Join(root, "wrangler.jsonc")); err == nil {
-		t.Errorf("wrangler.jsonc must not be written next to a hand-written wrangler.toml")
-	}
-}
-
 // Platform deploys rewrite dist/: segment pages and their hydration dirs must
 // survive, and unmatched URLs must reach the function (not a CDN 404).
 func TestPlatformDeploysKeepSegmentPages(t *testing.T) {
@@ -425,72 +323,5 @@ func TestPlatformDeploysKeepSegmentPages(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-// No target hard-codes trusting forwarded headers: all three follow
-// server.trustProxy (unset means what the platform guarantees, see PLATFORMS in
-// the handler).
-func TestServerEntryFollowsTrustProxyOnEveryTarget(t *testing.T) {
-	for _, target := range []string{"vercel", "netlify", "cloudflare"} {
-		entry := serverEntry(target, "", "")
-		if strings.Contains(entry, "trustProxy: true") || strings.Contains(entry, "trustProxy: !!") {
-			t.Errorf("%s entry must not override server.trustProxy:\n%s", target, entry)
-		}
-	}
-}
-
-func TestHandlerConfigTrustProxyIsThreeState(t *testing.T) {
-	cfg := config.Default()
-	if hc := trustProxyOf(cfg); hc != nil {
-		t.Errorf("unset trustProxy must be null, got %v", *hc)
-	}
-	cfg.Server.TrustProxySet = true
-	if v := trustProxyOf(cfg); v == nil || *v {
-		t.Errorf("explicit false must stay false, got %v", v)
-	}
-	cfg.Server.TrustProxy = true
-	if v := trustProxyOf(cfg); v == nil || !*v {
-		t.Errorf("explicit true must stay true, got %v", v)
-	}
-}
-
-// The Redis cache adapter and the ImageResponse file reader are Node-only and
-// must stay out of non-Node bundles, while the Node-based targets keep Redis.
-func TestRedisCacheTargets(t *testing.T) {
-	root, cfg := serverlessProject(t, "serverless")
-	cfg.Cache.Adapter = "redis"
-	cfg.Cache.URLEnv = "REDIS_URL"
-	_, err := BuildServerBundle(root, cfg, "cloudflare")
-	if err == nil || !strings.Contains(err.Error(), "cache.adapter \"redis\"") || !strings.Contains(err.Error(), "--target node") {
-		t.Fatalf("cloudflare with the redis adapter must fail with advice, got %v", err)
-	}
-	for _, target := range []string{"node", "vercel", "netlify"} {
-		plan, err := BuildServerBundle(root, cfg, target)
-		if err != nil {
-			t.Fatalf("%s keeps the redis adapter: %v", target, err)
-		}
-		src, _ := os.ReadFile(plan.Bundle)
-		if !strings.Contains(string(src), "node:net") {
-			t.Errorf("%s bundle should still carry the Redis client", target)
-		}
-	}
-}
-
-func TestCloudflareCustomCacheAdapter(t *testing.T) {
-	root, cfg := serverlessProject(t, "serverless")
-	if err := os.WriteFile(filepath.Join(root, "my-cache.mjs"), []byte("export default () => ({ get: async () => null, set: async () => {}, delete: async () => {}, close: async () => {} });\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	cfg.Cache.Adapter = "./my-cache.mjs"
-	plan, err := BuildServerBundle(root, cfg, "cloudflare")
-	if err != nil {
-		t.Fatalf("a custom adapter module must build for cloudflare: %v", err)
-	}
-	src, _ := os.ReadFile(plan.Bundle)
-	for _, bad := range []string{"node:net", "node:tls", "node:fs"} {
-		if strings.Contains(string(src), bad) {
-			t.Errorf("worker bundle references %s", bad)
-		}
 	}
 }

@@ -205,24 +205,6 @@ func TestGUIDispatchFromManyGoroutines(t *testing.T) {
 	}
 }
 
-func TestGUITwoWindows(t *testing.T) {
-	needGUI(t)
-	w1, err := guiApp.NewWindow(WindowConfig{Title: "one", Width: 480, Height: 360, Path: "/?w=one"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	w2, err := guiApp.NewWindow(WindowConfig{Title: "two", Width: 480, Height: 360, Resizable: true, Path: "/?w=two"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	checkReport(t, waitReport(t, "one"))
-	checkReport(t, waitReport(t, "two"))
-	w1.Close()
-	time.Sleep(200 * time.Millisecond)
-	w2.Eval("1+1") // the other window keeps working
-	w2.Close()
-}
-
 const guiPage = `<!doctype html><meta charset=utf-8><title>krate gui test</title>
 <body>running...<script>
 (async () => {

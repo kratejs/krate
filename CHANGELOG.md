@@ -12,8 +12,8 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 - Migration guides: Migrating from Electron and Migrating from Tauri (docs native/from-electron and
   native/from-tauri) with concept maps, full API tables, security, packaging, update, testing and
   debugging comparisons, and an honest list of what has no equivalent. `examples/native-from-electron`
-  holds a small Electron app (`electron/`, pinned versions) and its port to Krate Native, tested through
-  the real shell by `krate native test` (compiler test `TestNativeFromElectronGUI`). A real find while
+  holds a small Electron app (`electron/`, pinned versions) and its port to Krate Native, with a
+  `krate native test` suite that runs through the real shell. A real find while
   porting: a host signal reads `undefined` in the page until the host pushes its first value, so a page
   that reads `settings().theme` throws; the guide shows the guard.
 - Accessibility of the shell's own UI, checked through AT-SPI (Linux, GUI tests), NSAccessibility and AX

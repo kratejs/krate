@@ -119,13 +119,6 @@ func (w *injectWriter) finish() {
 	}
 }
 
-// injectIntoHead puts the script right after the opening head tag, or at the
-// start of the document when there is none (after the html tag or doctype
-// when it has one).
-func injectIntoHead(body []byte, extra ...string) []byte {
-	return injectSnippets(body, append([]string{windowIDScript}, extra...)...)
-}
-
 // injectSnippets is injectIntoHead for several elements, inserted in order.
 func injectSnippets(body []byte, snippets ...string) []byte {
 	lower := bytes.ToLower(body)

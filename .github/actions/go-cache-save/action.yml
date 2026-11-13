@@ -1,0 +1,30 @@
+name: Save the Go caches
+description: >-
+  Saves the caches go-cache-restore restored, minus the build cache entries
+  this run did not use. Call it with `if: always()` so a failing run still
+  saves what it compiled. Only pushes, the schedule and manual runs save:
+  pull requests read the dev branch's cache, and their own entries would
+  push it out of the repository's cache quota.
+runs:
+  using: composite
+  steps:
+    - name: Drop build cache entries this run did not use
+      if: github.event_name != 'pull_request'
+      shell: bash
+      run: |
+        dir="$GO_CACHE_BUILD"; marker="$RUNNER_TEMP/go-cache-marker"
+        if command -v cygpath >/dev/null 2>&1; then dir=$(cygpath -u "$dir"); marker=$(cygpath -u "$marker"); fi
+        if [ -f "$marker" ] && [ -d "$dir" ]; then
+          before=$(du -sm "$dir" | cut -f1)
+          find "$dir" -mindepth 2 -type f ! -newer "$marker" -delete
+          echo "Go build cache: ${before} MB before, $(du -sm "$dir" | cut -f1) MB after dropping unused entries"
+        fi
+
+    - name: Save the Go caches
+      if: github.event_name != 'pull_request'
+      uses: actions/cache/save@v4
+      with:
+        path: |
+          ${{ env.GO_CACHE_BUILD }}
+          ${{ env.GO_CACHE_MOD }}
+        key: ${{ env.GO_CACHE_KEY }}-${{ hashFiles('packages/*/go.sum') }}-${{ github.run_id }}

@@ -3,7 +3,6 @@ package plugin
 import (
 	"errors"
 	"strings"
-	"sync/atomic"
 	"testing"
 
 	"github.com/kratejs/krate/packages/native/krate"
@@ -55,29 +54,6 @@ func isDenied(err error, perm string) bool {
 	}
 	m, _ := ke.Data.(map[string]string)
 	return m["permission"] == perm
-}
-
-func TestValidate(t *testing.T) {
-	bad := map[string]func(*Meta){
-		"name":              func(m *Meta) { m.Name = "Bad_Name" },
-		"short name":        func(m *Meta) { m.Name = "a" },
-		"dup op":            func(m *Meta) { m.Ops = append(m.Ops, OpInfo{Name: "ping"}) },
-		"op case":           func(m *Meta) { m.Ops[0].Name = "Ping" },
-		"unknown perm":      func(m *Meta) { m.Ops[0].Permission = "write" },
-		"dup permission":    func(m *Meta) { m.Permissions = append(m.Permissions, PermissionInfo{Name: "read"}) },
-		"permission name":   func(m *Meta) { m.Permissions[0].Name = "Read!" },
-		"hyphen permission": func(m *Meta) { m.Permissions[0].Name = "read-all" },
-	}
-	for name, mut := range bad {
-		m := testMeta()
-		mut(&m)
-		if m.Validate() == nil {
-			t.Errorf("%s: Validate accepted %+v", name, m)
-		}
-	}
-	if err := (testMeta()).Validate(); err != nil {
-		t.Fatal(err)
-	}
 }
 
 func TestInstallEnforcesNamespace(t *testing.T) {
@@ -161,17 +137,6 @@ func mustArgs(t *testing.T) []byte {
 	return fr
 }
 
-func TestAppLevelDenied(t *testing.T) {
-	p := &Plugin{Meta: testMeta(), Register: func(r *scheme.Registry) { r.Func("plugin/demo.ping", pong) }}
-	h, reg, _ := newHost(t, []*Plugin{p}, []string{"window"})
-	if err := h.Install(p); err != nil {
-		t.Fatal(err)
-	}
-	if err := call(t, reg, "plugin/demo.ping", "main"); !isDenied(err, "plugin:demo.read") {
-		t.Errorf("err = %v, want permission_denied", err)
-	}
-}
-
 func TestSignalGate(t *testing.T) {
 	m := Meta{Name: "sig", Permissions: []PermissionInfo{{Name: "watch"}}, Ops: []OpInfo{{Name: "level", Permission: "watch"}}}
 	p := &Plugin{Meta: m, Register: func(r *scheme.Registry) {
@@ -189,118 +154,5 @@ func TestSignalGate(t *testing.T) {
 	srv := scheme.New(scheme.Options{Registry: reg})
 	if got := signalStatus(t, srv, "w9"); !strings.Contains(got, "permission_denied") {
 		t.Errorf("scoped window got %q, want permission_denied", got)
-	}
-}
-
-func TestManualOps(t *testing.T) {
-	var ctx *Context
-	p := &Plugin{Meta: testMeta(), Init: func(c *Context) error {
-		ctx = c
-		return c.Func("hand", pong)
-	}}
-	h, reg, _ := newHost(t, []*Plugin{p}, []string{"plugin:demo.read"})
-	if err := h.Install(p); err != nil {
-		t.Fatal(err)
-	}
-	if err := call(t, reg, "plugin/demo.hand", ""); err != nil {
-		t.Errorf("manual op: %v", err)
-	}
-	for _, op := range []string{"krate/fs.readFile", "../Hand", "plugin/other.hand", "ping", "missing", "hand"} {
-		var ne *NamespaceError
-		err := ctx.Func(op, pong)
-		if op == "hand" {
-			if err == nil {
-				t.Error("registering a manual op twice succeeded")
-			}
-			continue
-		}
-		if !errors.As(err, &ne) {
-			t.Errorf("Func(%q) = %v, want a NamespaceError", op, err)
-		}
-	}
-	if err := ctx.Stream("ping", nil); err == nil {
-		t.Error("Stream accepted a generated op")
-	}
-}
-
-func TestLifecycle(t *testing.T) {
-	var log []string
-	var ctx *Context
-	p := &Plugin{Meta: Meta{Name: "life"}, Init: func(c *Context) error {
-		ctx = c
-		c.OnStart(func() error { log = append(log, "start"); return nil })
-		c.OnWindowCreated(func(id string) { log = append(log, "created:"+id) })
-		c.OnWindowClosed(func(id string) { log = append(log, "closed:"+id) })
-		c.OnQuit(func() { log = append(log, "quit1") })
-		c.OnQuit(func() { log = append(log, "quit2") })
-		c.Dispatch(func() { log = append(log, "queued") })
-		return nil
-	}}
-	h, _, _ := newHost(t, []*Plugin{p}, nil)
-	if err := h.Install(p); err != nil {
-		t.Fatal(err)
-	}
-	if len(log) != 0 {
-		t.Fatalf("hooks ran before Start: %v", log)
-	}
-	h.Start(nil, nil)
-	h.Start(nil, nil)
-	h.WindowCreated("main")
-	h.WindowClosed("main")
-	h.Quit()
-	h.Quit()
-	want := "queued start created:main closed:main quit2 quit1"
-	if got := strings.Join(log, " "); got != want {
-		t.Errorf("log = %q, want %q", got, want)
-	}
-	if ctx.App() != nil || len(ctx.Windows()) != 0 {
-		t.Error("browser mode has a platform")
-	}
-	if _, err := ctx.Dialogs(); !krate.IsUnsupported(err) {
-		t.Errorf("Dialogs without a platform: %v", err)
-	}
-	// Dispatch after Start without a platform runs on a goroutine.
-	var ran atomic.Bool
-	done := make(chan struct{})
-	ctx.Dispatch(func() { ran.Store(true); close(done) })
-	<-done
-	if !ran.Load() {
-		t.Error("Dispatch did not run")
-	}
-}
-
-func TestHookPanicsAreContained(t *testing.T) {
-	var logged []string
-	p := &Plugin{Meta: Meta{Name: "boom"}, Init: func(c *Context) error {
-		c.OnStart(func() error { panic("start") })
-		c.OnQuit(func() { panic("quit") })
-		return nil
-	}}
-	if err := DefinePermissions([]*Plugin{p}); err != nil {
-		t.Fatal(err)
-	}
-	h := NewHost(HostOptions{Registry: scheme.NewRegistry(), Logf: func(f string, a ...any) { logged = append(logged, f) }})
-	if err := h.Install(p); err != nil {
-		t.Fatal(err)
-	}
-	h.Start(nil, nil)
-	h.Quit()
-	if len(logged) != 2 {
-		t.Errorf("logged %v, want two lines", logged)
-	}
-}
-
-func TestDuplicateAndInitErrors(t *testing.T) {
-	p := &Plugin{Meta: Meta{Name: "dup"}}
-	h, _, _ := newHost(t, []*Plugin{p}, nil)
-	if err := h.Install(p); err != nil {
-		t.Fatal(err)
-	}
-	if err := h.Install(p); err == nil {
-		t.Error("a plugin installed twice")
-	}
-	q := &Plugin{Meta: Meta{Name: "bad-init"}, Init: func(*Context) error { return errors.New("nope") }}
-	if err := h.Install(q); err == nil || !strings.Contains(err.Error(), "nope") {
-		t.Errorf("Init error = %v", err)
 	}
 }

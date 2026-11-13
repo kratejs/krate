@@ -252,20 +252,6 @@ func (a *App) SetWindowTheme(mode string) error {
 	return err
 }
 
-// preferDark reads back gtk-application-prefer-dark-theme (tests).
-func (a *App) preferDark() (on bool) {
-	s := loadSys()
-	a.callMain(func() {
-		st := s.gtkSettingsDefault()
-		var v gValue
-		s.gValueInit(&v, gTypeBoolean)
-		s.gObjectGetProp(st, "gtk-application-prefer-dark-theme", &v)
-		on = s.gValueGetBool(&v) != 0
-		s.gValueUnset(&v)
-	})
-	return on
-}
-
 // OnViewCrash sets the handler for web process crashes.
 func (a *App) OnViewCrash(fn func(caps.ViewCrash)) {
 	a.mu.Lock()

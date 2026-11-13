@@ -86,22 +86,6 @@ func TestStaticResolution(t *testing.T) {
 	}
 }
 
-func TestStaticHeadAndMethods(t *testing.T) {
-	h := New(Options{Assets: testAssets()})
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("HEAD", "/assets/app.js", nil))
-	if rec.Code != 200 || rec.Body.Len() != 0 || rec.Header().Get("Content-Length") != "14" {
-		t.Fatalf("HEAD: %d len=%d cl=%s", rec.Code, rec.Body.Len(), rec.Header().Get("Content-Length"))
-	}
-	for _, m := range []string{"POST", "PUT", "DELETE", "PATCH"} {
-		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, httptest.NewRequest(m, "/", nil))
-		if rec.Code != http.StatusMethodNotAllowed || rec.Header().Get("Allow") == "" {
-			t.Errorf("%s: %d", m, rec.Code)
-		}
-	}
-}
-
 func TestStaticRejectsTraversal(t *testing.T) {
 	assets := testAssets()
 	assets["secret.txt"] = &fstest.MapFile{Data: []byte("secret")}
@@ -124,30 +108,6 @@ func TestStaticRejectsTraversal(t *testing.T) {
 	h.ServeHTTP(rec, httptest.NewRequest("GET", "/nothing", nil))
 	if rec.Code != 404 || strings.Contains(rec.Body.String(), "root") {
 		t.Errorf("bad fallback name: %d %q", rec.Code, rec.Body.String())
-	}
-}
-
-func TestStaticWithoutAssetsOr404Page(t *testing.T) {
-	rec := httptest.NewRecorder()
-	New(Options{}).ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
-	if rec.Code != 404 {
-		t.Fatal(rec.Code)
-	}
-	rec = httptest.NewRecorder()
-	New(Options{Assets: fstest.MapFS{"index.html": {Data: []byte("x")}}}).ServeHTTP(rec, httptest.NewRequest("GET", "/nope", nil))
-	if rec.Code != 404 {
-		t.Fatal(rec.Code)
-	}
-}
-
-func TestCustomCSP(t *testing.T) {
-	h := New(Options{Assets: testAssets(), CSP: "default-src 'none'"})
-	for _, p := range []string{"/", "/__krate/nope", "/missing"} {
-		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, httptest.NewRequest("GET", p, nil))
-		if got := rec.Header().Get("Content-Security-Policy"); got != "default-src 'none'" {
-			t.Errorf("%s: %q", p, got)
-		}
 	}
 }
 

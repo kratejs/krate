@@ -1,0 +1,44 @@
+name: Restore the Go caches
+description: >-
+  Restores the Go build cache (compiled packages and test results) and the
+  module cache saved by an earlier run of the same job kind. Pair it with
+  go-cache-save at the end of the job. With test-cache, the checked-out files
+  also get mtimes derived from their content, so go test can reuse a passing
+  result from an earlier run whose inputs were identical.
+inputs:
+  key:
+    description: Name of the cache, one per kind of job (the build flags differ between them).
+    required: true
+  test-cache:
+    description: Give tracked files content-derived mtimes (go test caches results by file mtime and size).
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - name: Locate the Go caches
+      shell: bash
+      run: |
+        {
+          echo "GO_CACHE_KEY=go-${{ runner.os }}-${{ runner.arch }}-${{ inputs.key }}"
+          echo "GO_CACHE_BUILD=$(go env GOCACHE)"
+          echo "GO_CACHE_MOD=$(go env GOMODCACHE)"
+        } >> "$GITHUB_ENV"
+        # go-cache-save drops the entries this run did not touch: Go refreshes
+        # the mtime of an entry it uses (when it is over an hour old).
+        touch "$RUNNER_TEMP/go-cache-marker"
+
+    - name: Restore the Go caches
+      uses: actions/cache/restore@v4
+      with:
+        path: |
+          ${{ env.GO_CACHE_BUILD }}
+          ${{ env.GO_CACHE_MOD }}
+        key: ${{ env.GO_CACHE_KEY }}-${{ hashFiles('packages/*/go.sum') }}-${{ github.run_id }}
+        restore-keys: |
+          ${{ env.GO_CACHE_KEY }}-${{ hashFiles('packages/*/go.sum') }}-
+          ${{ env.GO_CACHE_KEY }}-
+
+    - name: Give tracked files content-derived mtimes
+      if: inputs.test-cache == 'true'
+      shell: bash
+      run: node .github/scripts/normalize-mtimes.mjs

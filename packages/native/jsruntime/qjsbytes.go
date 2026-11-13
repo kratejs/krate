@@ -13,8 +13,7 @@ package jsruntime
 // reading garbage.
 //
 // When the check fails (a future wrapper version), binaryTransfer is false
-// and every crossing falls back to base64; TestBinaryTransferAvailable fails
-// so the upgrade is noticed.
+// and every crossing falls back to base64.
 //
 // Thread affinity: a VM is driven by one goroutine at a time, and these
 // helpers run on that goroutine (inside host function calls or between

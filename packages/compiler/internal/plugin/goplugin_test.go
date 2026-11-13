@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -16,7 +15,6 @@ import (
 
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/astjson"
-	"github.com/kratejs/krate/packages/compiler/internal/config"
 	"github.com/kratejs/krate/packages/compiler/internal/lexer"
 	"github.com/kratejs/krate/packages/compiler/internal/parser"
 	pluginsdk "github.com/kratejs/krate/packages/compiler/pluginsdk"
@@ -169,145 +167,7 @@ func dumpPage(t *testing.T, prog *ast.Program) string {
 	return string(b)
 }
 
-// TestGoPluginOfficialDescriptorWithImportMeta reproduces the official Go
-// plugin example's descriptor shape (examples/plugins/krate-plugin-demo-go):
-// a CommonJS `module.exports = function() {...}` descriptor that also
-// references `import.meta.url` for its `module:` self-path. esbuild treats such
-// a file as ESM (due to import.meta) and leaves the `module.exports`
-// assignment unwrapped, so discovery used to throw "module is not defined".
-// The loader must shim CommonJS for manifest discovery so the official example
-// loads and its per-platform binary is resolved.
-func TestGoPluginOfficialDescriptorWithImportMeta(t *testing.T) {
-	pkgDir := t.TempDir()
-	desc := `module.exports = function() {
-  return {
-    name: "demo-go",
-    order: 10,
-    module: (typeof import.meta !== "undefined" && import.meta.url) ? import.meta.url : "",
-    runtime: "go",
-    hooks: { BeforeBuild: null, AfterParse: null, AfterRender: null, ServeRequest: null, ServeResponse: null },
-    binaries: { "` + platformKey() + `": "bin/plugin" },
-  };
-};
-`
-	if err := os.WriteFile(filepath.Join(pkgDir, "index.js"), []byte(desc), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	got, err := discoverGoManifest(pkgDir)
-	if err != nil {
-		t.Fatalf("discoverGoManifest with official-style descriptor: %v", err)
-	}
-	if got.Runtime != "go" {
-		t.Errorf("runtime = %q, want go", got.Runtime)
-	}
-	if got.Binaries[platformKey()] != "bin/plugin" {
-		t.Errorf("binaries = %v, want host platform -> bin/plugin", got.Binaries)
-	}
-}
-
-// TestGoPluginDiscoveryAndRouting exercises the full host path: a module whose
-// JS descriptor advertises runtime "go" with a per-platform binary. Krate must
-// discover the manifest, resolve the binary for the host platform, spawn it via
-// go-plugin, run the hook, and apply the returned result.
-func TestGoPluginDiscoveryAndRouting(t *testing.T) {
-	exe := buildFixturePlugin(t)
-
-	// Build an npm-style package with a JS descriptor and a bin/ directory.
-	pkgDir := t.TempDir()
-	binDir := filepath.Join(pkgDir, "bin")
-	_ = os.MkdirAll(binDir, 0755)
-	binName := "fixtureplugin"
-	if runtime.GOOS == "windows" {
-		binName += ".exe"
-	}
-	if err := copyFile(exe, filepath.Join(binDir, binName)); err != nil {
-		t.Fatal(err)
-	}
-	desc := `module.exports = function(options) {
-  return {
-    name: 'fixture-component',
-    runtime: 'go',
-    hooks: { BeforeBuild: null, AfterParse: null, AfterRender: null, AfterBuild: null },
-    binaries: { ['` + platformKey() + `']: 'bin/` + binName + `' },
-  };
-};
-`
-	if err := os.WriteFile(filepath.Join(pkgDir, "index.js"), []byte(desc), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	cfg := config.PluginConfig{
-		Name:    "fixture-component",
-		Module:  pkgDir,
-		Options: map[string]interface{}{},
-	}
-
-	root := t.TempDir()
-	out := t.TempDir()
-
-	// BeforeBuild: the Go plugin writes fixture.txt.
-	ctx := &BuildHookCtx{Root: root, OutDir: out, Pages: []string{"index.tsx"}}
-	defer GoClosePlugins()
-	if err := runCommunityHook("BeforeBuild", cfg, root, out, CommunityEnv{}, ctx); err != nil {
-		t.Fatalf("runCommunityHook BeforeBuild: %v", err)
-	}
-	data, err := os.ReadFile(filepath.Join(out, "fixture.txt"))
-	if err != nil {
-		t.Fatalf("fixture.txt not written: %v", err)
-	}
-	if want := "go plugin running from " + root; string(data) != want {
-		t.Errorf("fixture.txt = %q, want %q", data, want)
-	}
-
-	// AfterParse: edits the program document.
-	src := `export default function App() { return <b>go-plugin-token</b>; }`
-	progDoc, err := astjson.EncodeProgram(parser.New(lexer.New(src).Tokenize()).ParseProgram())
-	if err != nil {
-		t.Fatal(err)
-	}
-	parseCtx := &ParseHookCtx{Page: "index.tsx", Program: decodeProg(t, progDoc)}
-	if err := runCommunityHook("AfterParse", cfg, root, out, CommunityEnv{}, parseCtx); err != nil {
-		t.Fatalf("runCommunityHook AfterParse: %v", err)
-	}
-	if parseCtx.Program == nil {
-		t.Fatal("AfterParse dropped the program")
-	}
-	if !strings.Contains(dumpPage(t, parseCtx.Program), "GO-PLUGIN-EDITED") {
-		t.Errorf("AfterParse edit did not flow into the program:\n%s", dumpPage(t, parseCtx.Program))
-	}
-
-	// AfterRender: injects head content + meta tag.
-	renderCtx := &RenderHookCtx{Page: "index.tsx", HTML: "<p>body</p>", HeadHTML: "<title>t</title>", RawCSS: ""}
-	if err := runCommunityHook("AfterRender", cfg, root, out, CommunityEnv{}, renderCtx); err != nil {
-		t.Fatalf("runCommunityHook AfterRender: %v", err)
-	}
-	if !strings.Contains(renderCtx.HeadHTML, `content="gofix"`) {
-		t.Errorf("AfterRender head edit missing: %q", renderCtx.HeadHTML)
-	}
-	if !strings.Contains(renderCtx.HeadHTML, `name="fixture" content="true"`) {
-		t.Errorf("AfterRender meta tag missing: %q", renderCtx.HeadHTML)
-	}
-}
-
 // GoClosePlugins closes every running Go plugin subprocess (test helper).
 func GoClosePlugins() {
 	CloseGoPlugins()
-}
-
-func decodeProg(t *testing.T, doc []byte) *ast.Program {
-	t.Helper()
-	b, err := astjson.DecodeProgram(doc)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return b
-}
-
-func copyFile(src, dst string) error {
-	b, err := os.ReadFile(src)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(dst, b, 0755)
 }

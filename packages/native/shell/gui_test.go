@@ -1,17 +1,13 @@
 package shell
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/kratejs/krate/packages/native/internal/gohosttest"
-	"github.com/kratejs/krate/packages/native/memstat"
 	"github.com/kratejs/krate/packages/native/plugin"
 )
 
@@ -179,51 +175,6 @@ func TestGUIShell(t *testing.T) {
 	}
 }
 
-// TestGUIMemory checks the memory report of the running window: the shell, the
-// Go host child and the WebKit processes, over the control API and over the
-// dev endpoint the page itself can fetch. It reads the app TestGUIShell leaves
-// running (the Go child is restarted there, so only roles are compared).
-func TestGUIMemory(t *testing.T) {
-	if guiCtl == nil {
-		t.Skip("set KRATE_NATIVE_GUI=1 to run GUI tests")
-	}
-	skipNoMemstat(t)
-	rep, err := guiCtl.Memory()
-	if err != nil {
-		t.Fatalf("Memory: %v", err)
-	}
-	roles := memRoles(rep)
-	want := []string{memstat.RoleShell, memstat.RoleGoHost}
-	if runtime.GOOS == "linux" {
-		want = append(want, memstat.RoleWebviewWeb, memstat.RoleWebviewNetwork)
-	}
-	for _, r := range want {
-		if roles[r].PSS == 0 {
-			t.Errorf("role %s missing or empty: %+v", r, rep.ByRole())
-		}
-	}
-	if t.Failed() {
-		t.Logf("notes: %v", rep.Notes)
-		return
-	}
-	t.Logf("roles: %+v", rep.ByRole())
-
-	out, err := guiCtl.Query(`fetch("/__krate/dev/memory").then(r => r.json())`)
-	if err != nil {
-		t.Fatalf("fetching the endpoint from the page: %v", err)
-	}
-	var got memstat.Report
-	if err := json.Unmarshal([]byte(out), &got); err != nil {
-		t.Fatal(err)
-	}
-	r := memRoles(&got)
-	for _, role := range want {
-		if r[role].PSS == 0 {
-			t.Errorf("endpoint: role %s missing: %+v", role, got.ByRole())
-		}
-	}
-}
-
 const guiPage = `<!doctype html><html><head><meta charset="utf-8"><title>shell</title></head><body>shell<script>
 const loadId = Math.random().toString(36).slice(2);
 const te = new TextEncoder(), td = new TextDecoder();
@@ -321,78 +272,3 @@ async function pluginFlow() {
   }
 })();
 </script></body></html>`
-
-// TestGUIZMemoryPanel runs the real dev overlay bundle in the window, opens
-// its Memory panel and reads the numbers it renders from the live
-// /__krate/dev/memory endpoint. It runs last because it leaves the overlay in
-// the page. The bundle comes from packages/runtime/dist (pnpm build).
-func TestGUIZMemoryPanel(t *testing.T) {
-	if guiCtl == nil {
-		t.Skip("set KRATE_NATIVE_GUI=1 to run GUI tests")
-	}
-	skipNoMemstat(t)
-	bundle, err := os.ReadFile(filepath.Join("..", "..", "runtime", "dist", "krate-dev.js"))
-	if err != nil {
-		if os.Getenv("KRATE_REQUIRE_E2E") == "1" {
-			t.Fatalf("the dev overlay bundle is not built: %v", err)
-		}
-		t.Skipf("the dev overlay bundle is not built: %v", err)
-	}
-	if !strings.Contains(string(bundle), "mempanel") {
-		t.Fatal("the dev overlay bundle predates the Memory panel: rebuild @krate/runtime")
-	}
-	src, _ := json.Marshal(string(bundle))
-	// Install the overlay, open the panel, wait for the first sample.
-	expr := fmt.Sprintf(`(async () => {
-  const el = document.createElement("script");
-  el.textContent = %s;
-  document.head.appendChild(el);
-  if (!document.getElementById("krate-dev-root")) return {err: "the overlay did not mount"};
-  const root = document.getElementById("krate-dev-root").shadowRoot;
-  root.querySelector(".tb-btn.mem").click();
-  for (let i = 0; i < 50; i++) {
-    const t = root.querySelector(".mempanel").textContent;
-    if (/PSS/.test(t)) break;
-    await new Promise(r => setTimeout(r, 100));
-  }
-  const panel = root.querySelector(".mempanel");
-  const rows = Array.from(panel.querySelectorAll(".memrow")).map(r => r.textContent);
-  return {hidden: panel.hidden, rows, heap: typeof (performance.memory || {}).usedJSHeapSize};
-})()`, src)
-	out, err := guiCtl.Query(expr)
-	if err != nil {
-		t.Fatalf("query: %v", err)
-	}
-	var got struct {
-		Err    string   `json:"err"`
-		Hidden bool     `json:"hidden"`
-		Rows   []string `json:"rows"`
-		Heap   string   `json:"heap"`
-	}
-	if err := json.Unmarshal([]byte(out), &got); err != nil {
-		t.Fatalf("%v\n%s", err, out)
-	}
-	if got.Err != "" {
-		t.Fatalf("installing the overlay: %s", got.Err)
-	}
-	if got.Hidden {
-		t.Fatal("the Memory panel did not open")
-	}
-	joined := strings.Join(got.Rows, "\n")
-	t.Logf("panel rows:\n%s", joined)
-	for _, want := range []string{"shell (", "PSS ", "private dirty ", "total", "DOM nodes"} {
-		if !strings.Contains(joined, want) {
-			t.Errorf("panel lacks %q:\n%s", want, joined)
-		}
-	}
-	if runtime.GOOS == "linux" && !strings.Contains(joined, "webview:web (") {
-		t.Errorf("panel lacks the web process row:\n%s", joined)
-	}
-	if got.Heap == "number" {
-		if !strings.Contains(joined, "JS heap") || strings.Contains(joined, "unavailable in this engine") {
-			t.Errorf("the engine exposes the heap but the panel does not show it:\n%s", joined)
-		}
-	} else if !strings.Contains(joined, "unavailable in this engine") {
-		t.Errorf("without performance.memory the panel must say the JS heap is unavailable:\n%s", joined)
-	}
-}

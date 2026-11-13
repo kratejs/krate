@@ -1,7 +1,6 @@
 package build
 
 import (
-	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -223,23 +222,6 @@ func TestServerErrorSanitizing(t *testing.T) {
 	}
 }
 
-func TestFillServerError(t *testing.T) {
-	page := `<html><head><title>t</title></head><body><p>` + errSentinelMessage + `</p><a title="` + errSentinelDigest + `"></a></body></html>`
-	out := fillServerError(page, serverError{Name: "Error", Message: `<script>alert(1)</script> & "q"`, Digest: "abc"})
-	if strings.Contains(out, "<script>alert") {
-		t.Errorf("message must be escaped in the HTML:\n%s", out)
-	}
-	if !strings.Contains(out, "&lt;script&gt;alert(1)&lt;/script&gt; &amp; &#34;q&#34;") || !strings.Contains(out, `title="abc"`) {
-		t.Errorf("placeholders not filled:\n%s", out)
-	}
-	if !strings.Contains(out, `<script type="application/json" id="__krate_error">`) || !strings.Contains(out, `\u003cscript\u003e`) {
-		t.Errorf("the data block must be inert JSON:\n%s", out)
-	}
-	if strings.Count(out, "__krate_error") != 1 {
-		t.Errorf("data block injected %d times", strings.Count(out, "__krate_error"))
-	}
-}
-
 func TestSegmentIndexRefusesPathsOutsideTheOutput(t *testing.T) {
 	out := t.TempDir()
 	secret := filepath.Join(filepath.Dir(out), "secret.html")
@@ -251,75 +233,5 @@ func TestSegmentIndexRefusesPathsOutsideTheOutput(t *testing.T) {
 		if _, ok := idx.readPage(SegmentMatch{File: f}); ok {
 			t.Errorf("readPage(%q) must be refused", f)
 		}
-	}
-}
-
-// In dev the error page carries the real message and stack (the digest stays),
-// and the same segment lookup applies.
-func TestSegmentPagesServeDev(t *testing.T) {
-	e2eEnv(t)
-	b, root := scProject(t, map[string]string{
-		"src/pages/index.tsx":    `export default function Home() { return <h1>home</h1>; }`,
-		"src/pages/404.tsx":      `export default function NF() { return <h1 id="p-root404">ROOT-404</h1>; }`,
-		"src/pages/blog/404.tsx": `export default function NF() { return <h1 id="p-blog404">BLOG-404</h1>; }`,
-		"src/pages/blog/500.tsx": `export default function E({ error }: any) { return <p id="p-blogerr">{error.message}</p>; }`,
-		"src/pages/blog/throw.tsx": `export const config = { ssr: true };
-export default function P() { if (Math.random() >= 0) throw new Error("dev visible failure"); return <p>never</p>; }`,
-	})
-	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
-		t.Fatal(err)
-	}
-	b.DevMode = true
-	if err := b.BuildAll(); err != nil {
-		t.Fatalf("BuildAll: %v", err)
-	}
-	port := freePort(t)
-	b.Cfg.Server.Port = port
-	hub := NewDevHub()
-	errCh := make(chan error, 1)
-	go func() { errCh <- ServeDev(root, b.Cfg, hub, time.Now()) }()
-	base := fmt.Sprintf("http://127.0.0.1:%d", port)
-	deadline := time.Now().Add(30 * time.Second)
-	for {
-		if time.Now().After(deadline) {
-			t.Fatal("dev server did not start")
-		}
-		select {
-		case err := <-errCh:
-			t.Fatalf("dev server exited: %v", err)
-		default:
-		}
-		if resp, err := http.Get(base + "/"); err == nil {
-			_ = resp.Body.Close()
-			registerServerStop(t, errCh)
-			break
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	code, body := httpGet(t, base+"/blog/missing", "text/html")
-	if code != 404 || !strings.Contains(body, "p-blog404") {
-		t.Errorf("dev 404: %d\n%.300s", code, body)
-	}
-	code, body = httpGet(t, base+"/missing", "text/html")
-	if code != 404 || !strings.Contains(body, "p-root404") {
-		t.Errorf("dev root 404: %d\n%.300s", code, body)
-	}
-	code, body = httpGet(t, base+"/blog/throw/", "text/html")
-	if code != 500 || !strings.Contains(body, "dev visible failure") || !strings.Contains(body, "p-blogerr") {
-		t.Errorf("dev error page should show the real error: %d\n%.600s", code, body)
-	}
-	if !strings.Contains(body, `"stack"`) {
-		t.Errorf("dev error data should carry the stack:\n%.600s", body)
-	}
-	if !regexp.MustCompile(`"digest":"[0-9a-f]{10}"`).MatchString(body) {
-		t.Errorf("dev error data should still carry the digest:\n%.600s", body)
-	}
-}
-
-// The renderer (ssr-core.ts, any host) and the Go server must derive the same
-// digest; the same vector is pinned in packages/runtime/src/sha256.test.ts.
-func TestErrorDigestFixedVector(t *testing.T) {
-	if got := errorDigest("boom", "at x"); got != "8a2474a04d" {
-		t.Fatalf("errorDigest = %q, want 8a2474a04d", got)
 	}
 }

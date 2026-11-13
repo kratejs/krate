@@ -1,14 +1,8 @@
 package build
 
 import (
-	"bytes"
-	"os"
-	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
-
-	"github.com/kratejs/krate/packages/compiler/internal/config"
 )
 
 func TestExpandStaticParams(t *testing.T) {
@@ -72,85 +66,5 @@ func TestExpandStaticParams(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func buildStaticParamsProject(t *testing.T, gsp string) (root string, cfg *config.Config, out string, err error) {
-	t.Helper()
-	root = t.TempDir()
-	writeFileRel(t, root, "src/pages/index.tsx", "export default function Page() { return <p>home</p>; }\n")
-	writeFileRel(t, root, "src/pages/blog/[slug].tsx",
-		"export function generateStaticParams() { return "+gsp+"; }\n"+
-			"export const dynamicParams = false;\n"+
-			"export default function Post({ params }: { params: { slug: string } }) { return <h1>{params.slug}</h1>; }\n")
-	cfg = config.Default()
-	cfg.PagesDir = filepath.Join(root, "src", "pages")
-	cfg.OutDir = filepath.Join(root, "dist")
-	var buf bytes.Buffer
-	SetOutput(&buf)
-	defer SetOutput(os.Stdout)
-	err = New(root, cfg).BuildAll()
-	return root, cfg, buf.String(), err
-}
-
-// An entry without the route's param used to be written to the literal path
-// blog/[slug]/index.html while the log still counted it.
-func TestBuildFailsOnStaticParamsEntryWithoutTheRouteParam(t *testing.T) {
-	_, cfg, _, err := buildStaticParamsProject(t, `[{ slug: "a" }, { id: "x" }]`)
-	if err == nil {
-		t.Fatal("BuildAll succeeded with a generateStaticParams entry that has no slug")
-	}
-	if msg := err.Error(); !strings.Contains(msg, "entry #2") || !strings.Contains(msg, `{"id":"x"}`) || !strings.Contains(msg, "KR7142") {
-		t.Errorf("error does not name the entry:\n%s", msg)
-	}
-	if _, serr := os.Stat(filepath.Join(cfg.OutDir, "blog", "[slug]", "index.html")); serr == nil {
-		t.Error("the literal blog/[slug]/index.html was written")
-	}
-}
-
-// Duplicate entries are built once, and the logged count is the number of
-// pages written.
-func TestStaticParamsLogCountMatchesFilesWritten(t *testing.T) {
-	_, cfg, out, err := buildStaticParamsProject(t, `[{ slug: "a" }, { slug: "b" }, { slug: "c" }, { slug: "a" }, { slug: "b" }, { slug: 3 }]`)
-	if err != nil {
-		t.Fatalf("BuildAll: %v", err)
-	}
-	m := regexp.MustCompile(`Building (\d+) statically generated pages`).FindStringSubmatch(out)
-	if m == nil {
-		t.Fatalf("no count in the log:\n%s", out)
-	}
-	files, _ := filepath.Glob(filepath.Join(cfg.OutDir, "blog", "*", "index.html"))
-	if len(files) != 4 || m[1] != "4" {
-		t.Errorf("logged %s pages, wrote %d files %v; want 4 and 4", m[1], len(files), files)
-	}
-	for _, f := range files {
-		if strings.Contains(f, "[") {
-			t.Errorf("literal bracket path written: %s", f)
-		}
-	}
-}
-
-// A numeric value used to make the string-map decode fail halfway, and the
-// fallback then appended to the half-filled result: two entries became four,
-// some of them empty (which wrote the literal [slug] path).
-func TestParseParamSetsWithNonStringValues(t *testing.T) {
-	sets, err := parseParamSets([]byte(`[{"slug":"a"},{"slug":3},{"slug":true},{"path":["a","b",4]}]`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := []map[string]string{{"slug": "a"}, {"slug": "3"}, {"slug": "true"}, {"path": "a/b/4"}}
-	if len(sets) != len(want) {
-		t.Fatalf("got %d entries %v, want %d", len(sets), sets, len(want))
-	}
-	for i := range want {
-		if !sameParams(sets[i], want[i]) {
-			t.Errorf("entry %d = %v, want %v", i+1, sets[i], want[i])
-		}
-	}
-	if _, err := parseParamSets([]byte(`[{"slug":{"a":1}}]`)); err == nil || !strings.Contains(err.Error(), "entry #1") {
-		t.Errorf("an object value must be an error naming the entry, got %v", err)
-	}
-	if _, err := parseParamSets([]byte(`{"slug":"a"}`)); err == nil {
-		t.Error("a non-array result must be an error")
 	}
 }

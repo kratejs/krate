@@ -1,3 +1,5 @@
+//go:build windows
+
 package windows
 
 // Vtable layouts transcribed from WebView2.h (Microsoft.Web.WebView2 NuGet

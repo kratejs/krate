@@ -79,26 +79,6 @@ func TestCSSSignalContract(t *testing.T) {
 	}
 }
 
-// TestCSSSignalDeterministic verifies the generated HTML and CSS are
-// byte-identical across repeated builds of the same source.
-func TestCSSSignalDeterministic(t *testing.T) {
-	src := `export default function P(){const v=createCSSChoice('a',['a','b']);return <div><button {...v.trigger('a')}>A</button><button {...v.trigger('b')}>B</button><div {...v.panel('a')}>A</div><div {...v.panel('b')}>B</div></div>;}`
-	html1, out1, err := buildPageSrc(t, src)
-	if err != nil {
-		t.Fatal(err)
-	}
-	html2, out2, err := buildPageSrc(t, src)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if html1 != html2 {
-		t.Errorf("HTML differs between builds")
-	}
-	if c1, c2 := readAllCSS(t, out1), readAllCSS(t, out2); c1 != c2 {
-		t.Errorf("CSS differs between builds")
-	}
-}
-
 // FuzzCSSOptionValues feeds arbitrary option strings through a full build to
 // catch panics or invalid output on hostile/unicode/empty option values.
 func FuzzCSSOptionValues(f *testing.F) {

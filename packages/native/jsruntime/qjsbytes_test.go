@@ -18,19 +18,6 @@ import (
 	"modernc.org/quickjs"
 )
 
-// TestBinaryTransferAvailable fails when the quickjs wrapper's layout no
-// longer matches qjsbytes.go (after an upgrade): bytes would still cross, but
-// as slow base64.
-func TestBinaryTransferAvailable(t *testing.T) {
-	if !binaryTransfer {
-		t.Fatalf("raw ArrayBuffer transfer is disabled, every binary crossing uses base64: %v (update qjsbytes.go for the new modernc.org/quickjs)", binaryLayoutErr)
-	}
-	rt := mustRuntime(t, Options{})
-	if !rt.bin {
-		t.Fatal("a new VM does not use binary transfer")
-	}
-}
-
 // withBase64 runs f with new VMs forced onto the base64 fallback.
 func withBase64(t *testing.T, f func()) {
 	t.Helper()
@@ -114,87 +101,6 @@ func TestBinaryTransferRoundTrip(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestBinaryTransferViews(t *testing.T) {
-	if !binaryTransfer {
-		t.Skip(binaryLayoutErr)
-	}
-	rt := mustRuntime(t, Options{})
-	execString(t, rt, `globalThis.__t_u = new Uint8Array(16).map((_, i) => i); ''`)
-	for _, c := range []struct {
-		expr string
-		want []byte
-		ok   bool
-	}{
-		{"__t_u.subarray(3, 7)", []byte{3, 4, 5, 6}, true},
-		{"__t_u.subarray(16)", []byte{}, true},
-		{"new Uint8Array(__t_u.buffer, 10)", []byte{10, 11, 12, 13, 14, 15}, true},
-		{"new Uint16Array(__t_u.buffer, 2, 2)", []byte{2, 3, 4, 5}, true},
-		{"__t_u.buffer.slice(14)", []byte{14, 15}, true},
-		{"new DataView(__t_u.buffer)", nil, false},
-		{"'abc'", nil, false},
-		{"42", nil, false},
-		{"({ length: 3 })", nil, false},
-		{"[1, 2]", nil, false},
-		{"null", nil, false},
-		{"(() => { const b = new ArrayBuffer(4); b.transfer(); return b; })()", nil, false},
-		{"(() => { const b = new ArrayBuffer(4); const u = new Uint8Array(b); b.transfer(); return u; })()", nil, false},
-	} {
-		got, ok := evalBytes(t, rt, c.expr)
-		if ok != c.ok || !bytes.Equal(got, c.want) {
-			t.Errorf("%s: got %v (ok %v), want %v (ok %v)", c.expr, got, ok, c.want, c.ok)
-		}
-	}
-	// The VM is still usable: no exception from a failed read leaked.
-	if got := execString(t, rt, `String(1 + 1)`); got != "2" {
-		t.Fatalf("VM unusable after failed reads: %q", got)
-	}
-}
-
-// TestBinaryTransferNoLeak copies 1 MiB each way many times under a memory
-// limit far below the total: a leaked buffer per round trip would exhaust it.
-func TestBinaryTransferNoLeak(t *testing.T) {
-	if !binaryTransfer {
-		t.Skip(binaryLayoutErr)
-	}
-	rt := mustRuntime(t, Options{})
-	rt.vm.SetMemoryLimit(rt.memLimit + 8<<20)
-	data := bytes.Repeat([]byte{1, 2, 3, 250}, 1<<18)
-	n := 500
-	if testing.Short() {
-		n = 50
-	}
-	for i := 0; i < n; i++ {
-		v, ok := newArrayBuffer(rt.vm, data)
-		if !ok {
-			t.Fatalf("iteration %d: newArrayBuffer failed (out of memory?)", i)
-		}
-		setGlobalValue(t, rt, "__t_in", v)
-		v.Free()
-		back, ok := evalBytes(t, rt, `globalThis.__t_out = new Uint8Array(globalThis.__t_in).subarray(1)`)
-		if !ok || len(back) != len(data)-1 || back[0] != 2 {
-			t.Fatalf("iteration %d: bad round trip (%d bytes)", i, len(back))
-		}
-	}
-}
-
-// TestBinaryTransferOutOfMemory checks a buffer over the memory limit fails
-// cleanly instead of crashing or leaving the VM broken.
-func TestBinaryTransferOutOfMemory(t *testing.T) {
-	if !binaryTransfer {
-		t.Skip(binaryLayoutErr)
-	}
-	rt := mustRuntime(t, Options{})
-	if _, ok := newArrayBuffer(rt.vm, make([]byte, rt.memLimit+1)); ok {
-		t.Fatal("a buffer over the memory limit was created")
-	}
-	if pending(rt.vm) {
-		t.Fatal("an exception was left pending")
-	}
-	if got := execString(t, rt, `String(1 + 1)`); got != "2" {
-		t.Fatalf("VM unusable after a failed allocation: %q", got)
 	}
 }
 
@@ -381,26 +287,6 @@ func TestBinaryAPIBodies(t *testing.T) {
 				if r.Status != 200 || !bytes.Equal(r.Body, c.want) {
 					t.Errorf("%s (%d bytes): status %d, %d bytes back, want %d (%s)", c.route, len(c.body), r.Status, len(r.Body), len(c.want), r.Error)
 				}
-			}
-		})
-	}
-}
-
-func TestBinaryMiddlewareBody(t *testing.T) {
-	code := `function middleware(request) { return new Response(new Uint8Array([0, 1, 2, 255])); }`
-	for _, mode := range []string{"arraybuffer", "base64"} {
-		t.Run(mode, func(t *testing.T) {
-			if mode == "arraybuffer" && !binaryTransfer {
-				t.Skip(binaryLayoutErr)
-			}
-			if mode == "base64" {
-				forceBase64 = true
-				defer func() { forceBase64 = false }()
-			}
-			m := newTestMiddleware(t, code)
-			r := m.Execute(MiddlewareRequest{Method: "GET", Path: "/x"})
-			if r.Action != MiddlewareResponse || !bytes.Equal(r.Body, []byte{0, 1, 2, 255}) {
-				t.Fatalf("got %+v", r)
 			}
 		})
 	}

@@ -1,3 +1,5 @@
+//go:build windows
+
 package windows
 
 import (
@@ -211,14 +213,6 @@ func xmlText(s string) string {
 	var b strings.Builder
 	_ = xml.EscapeText(&b, []byte(s))
 	return b.String()
-}
-
-// buildToastXML returns the toast XML for n. iconURI is the file URI of the
-// image (empty for none). The text is escaped, so notification content can
-// never inject markup. The element and attribute names are fixed; every
-// caller-supplied value goes through xmlText.
-func buildToastXML(n caps.Notification, iconURI string) string {
-	return buildToastXMLFor(n, iconURI, "")
 }
 
 // buildToastXMLFor is buildToastXML for an app whose clicks use protocol

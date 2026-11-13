@@ -106,16 +106,6 @@ func need(t *testing.T) {
 	}
 }
 
-// needWM skips a test that needs a window manager: focus and key delivery
-// depend on one (KRATE_NATIVE_WM=1, as for the other window state tests).
-func needWM(t *testing.T) {
-	t.Helper()
-	need(t)
-	if os.Getenv("KRATE_NATIVE_WM") != "1" {
-		t.Skip("set KRATE_NATIVE_WM=1 (a window manager is running) for focus and keyboard tests")
-	}
-}
-
 // waitFor polls fn for up to ten seconds.
 func waitFor(t *testing.T, what string, fn func() bool) {
 	t.Helper()
@@ -167,11 +157,6 @@ func waitTopLevel(t *testing.T, name string) atspi.Node {
 	return n
 }
 
-// documents lists the web documents under n.
-func documents(n atspi.Node) []atspi.Node {
-	return n.FindAll(func(c atspi.Node) bool { return c.Role() == atspi.RoleDocumentWeb })
-}
-
 // open opens a window and removes it (and the app menu) when the test ends.
 func open(t *testing.T, o linux.WindowOptions) *linux.Window {
 	t.Helper()
@@ -203,18 +188,6 @@ func waitGone(name string) {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-}
-
-// focusWindow raises the window and waits until it is the active one.
-func focusWindow(t *testing.T, w *linux.Window, title string) atspi.Node {
-	t.Helper()
-	fr := waitTopLevel(t, title)
-	w.Focus()
-	waitFor(t, title+" to be active", func() bool {
-		fr, _ = topLevel(title)
-		return fr.HasState(atspi.StateActive)
-	})
-	return fr
 }
 
 func registerPages(mux *http.ServeMux) {

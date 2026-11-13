@@ -109,12 +109,6 @@ func (w *Window) applyThumbs() error {
 	return nil
 }
 
-// thumbApplied reports whether the buttons reached the shell (tests).
-func (w *Window) thumbApplied() (applied, ready bool) {
-	w.app.callMain(func() { applied, ready = w.chrome.thumbsAdded, w.chrome.taskbarReady })
-	return
-}
-
 // thumbClicked reports a click on a thumbnail button.
 func (w *Window) thumbClicked(id uint32) {
 	slot := thumbSlot(id)

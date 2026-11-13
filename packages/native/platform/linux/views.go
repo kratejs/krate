@@ -652,16 +652,6 @@ func (w *Window) SetDividerPosition(path string, pos int) (err error) {
 	return
 }
 
-// viewWidget returns the WebKitWebView of a view, for tests.
-func (w *Window) viewWidget(ref caps.ViewRef) (widget uintptr) {
-	w.app.callMain(func() {
-		if v := w.viewByRef(ref); v != nil {
-			widget = v.widget
-		}
-	})
-	return
-}
-
 // DragDivider moves a divider of the window with this platform reference the
 // way a drag does (see Window.SetDividerPosition). app is a platform.App or
 // *App. For tests.

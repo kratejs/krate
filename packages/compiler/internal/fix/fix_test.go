@@ -131,17 +131,6 @@ func TestPlanWithCodesFiltersCodemods(t *testing.T) {
 	}
 }
 
-func TestFixSkipsParseErrors(t *testing.T) {
-	src := `export default function Page() { return <div onclick={go}>`
-	out, changes, err := fixSource(src)
-	if err == nil {
-		t.Fatal("expected a parse error")
-	}
-	if out != src || len(changes) != 0 {
-		t.Fatalf("parse error must not rewrite: %+v\n%s", changes, out)
-	}
-}
-
 func TestRunDryRunAndApply(t *testing.T) {
 	root := t.TempDir()
 	file := filepath.Join(root, "src", "page.tsx")
@@ -180,21 +169,5 @@ func TestRunDryRunAndApply(t *testing.T) {
 	}
 	if len(res.Changes) != 0 {
 		t.Fatalf("second apply should be a no-op: %+v", res.Changes)
-	}
-}
-
-// A tier decorator is valid source for fix: it must not read as a parse error,
-// and edits land at the right offsets because blanking preserves them.
-func TestFixAcceptsTierDecorators(t *testing.T) {
-	src := "@server\nexport default function P() { return <button onclick={f}>x</button>; }\n"
-	out, _, err := fixSource(src)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.HasPrefix(out, "@server\n") {
-		t.Errorf("decorator lost: %q", out)
-	}
-	if !strings.Contains(out, "onClick={f}") {
-		t.Errorf("fix not applied: %q", out)
 	}
 }

@@ -31,27 +31,6 @@ func invoke(t *testing.T, svc *Service, name string, args map[string]any) (map[s
 	return m, res
 }
 
-func mustOK(t *testing.T, svc *Service, name string, args map[string]any) map[string]any {
-	t.Helper()
-	m, res := invoke(t, svc, name, args)
-	if res.IsError {
-		t.Fatalf("%s failed: %s", name, res.Content[0].Text)
-	}
-	if m == nil {
-		t.Fatalf("%s returned no JSON: %v", name, res.Content)
-	}
-	return m
-}
-
-func mustFail(t *testing.T, svc *Service, name string, args map[string]any) string {
-	t.Helper()
-	_, res := invoke(t, svc, name, args)
-	if !res.IsError {
-		t.Fatalf("%s should have failed, got %v", name, res.Content)
-	}
-	return res.Content[0].Text
-}
-
 func list(t *testing.T, m map[string]any, key string) []any {
 	t.Helper()
 	v, ok := m[key].([]any)
@@ -80,32 +59,4 @@ func contains(vs []string, want string) bool {
 		}
 	}
 	return false
-}
-
-// newBuiltService builds the project once so build-output tools have data.
-func newBuiltService(t *testing.T, files map[string]string) *Service {
-	t.Helper()
-	svc := newTestService(t, files)
-	if out, err := svc.runBuild(context.Background()); err != nil {
-		t.Fatalf("build: %v\n%s", err, out)
-	}
-	return svc
-}
-
-func writePolicy(t *testing.T, svc *Service, policy string) {
-	t.Helper()
-	writeFile(t, svc.root, ".krate/mcp.json", policy)
-	svc.policy = loadPolicy(svc.root)
-}
-
-// mustRPCError expects a protocol-level (invalid params) error.
-func mustRPCError(t *testing.T, svc *Service, name string, args map[string]any) string {
-	t.Helper()
-	srv := NewServer(io.Discard, "krate", "test")
-	svc.Register(srv)
-	_, rerr := srv.tools[name].Handler(context.Background(), args)
-	if rerr == nil {
-		t.Fatalf("%s should have returned a protocol error", name)
-	}
-	return rerr.Message
 }

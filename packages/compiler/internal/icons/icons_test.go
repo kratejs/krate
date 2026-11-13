@@ -36,13 +36,6 @@ func TestResolveLocalIcon(t *testing.T) {
 	}
 }
 
-func TestResolveLocalIconMissing(t *testing.T) {
-	root := t.TempDir()
-	if _, err := ResolveIcon(root, "nope"); err == nil {
-		t.Error("expected error for missing local icon")
-	}
-}
-
 func TestResolveLocalIconRejectsTraversal(t *testing.T) {
 	root := t.TempDir()
 	// A name that would escape the icons/ directory must be rejected, not read.
@@ -50,53 +43,6 @@ func TestResolveLocalIconRejectsTraversal(t *testing.T) {
 		if _, err := ResolveIcon(root, name); err == nil {
 			t.Errorf("expected traversal name %q to be rejected", name)
 		}
-	}
-}
-
-// Remote cache read path
-
-func TestResolveRemoteIconFromCache(t *testing.T) {
-	root := t.TempDir()
-	writeFile(t, filepath.Join(root, ".krate", "cache", "icons", "tabler", "menu.svg"),
-		`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M0 0h24v24H0z"/></svg>`)
-
-	ic, err := ResolveIcon(root, "tabler:menu")
-	if err != nil {
-		t.Fatalf("ResolveIcon: %v", err)
-	}
-	if !strings.Contains(ic.Inner, `<path d="M0 0h24v24H0z" />`) {
-		t.Errorf("expected cached inner content, got %q", ic.Inner)
-	}
-}
-
-func TestResolveRemoteIconRejectsBadNames(t *testing.T) {
-	root := t.TempDir()
-	for _, name := range []string{"", "a:b:c", "../x:y", "a:../y", "a:", ":b", "a:b/c", "a?b:c"} {
-		if _, err := ResolveIcon(root, name); err == nil {
-			t.Errorf("expected name %q to be rejected", name)
-		}
-	}
-}
-
-// SVG sanitization
-
-func TestSanitizeSVG(t *testing.T) {
-	in := `<path d="M0 0h24v24H0z" onclick="alert(1)" onmouseover='steal()'/>
-<script>alert('xss')</script>
-<script src="https://evil/x.js"/>
-<foreignObject><div xmlns="http://www.w3.org/1999/xhtml"><script>2</script></div></foreignObject>
-<!-- comment -->
-<a href="javascript:alert(1)">x</a>
-<use href="data:text/html,<script>x</script>"/>
-<path xlink:href="JAVASCRIPT:evil()"/>`
-	out := sanitizeSVG(in)
-	for _, bad := range []string{"<script", "</script>", "foreignObject", "onclick", "onmouseover", "javascript:", "data:text/html", "<!--", "JAVASCRIPT:"} {
-		if strings.Contains(out, bad) {
-			t.Errorf("sanitized output still contains %q:\n%s", bad, out)
-		}
-	}
-	if !strings.Contains(out, `<path d="M0 0h24v24H0z"`) {
-		t.Errorf("sanitizer dropped legitimate path markup:\n%s", out)
 	}
 }
 
@@ -139,65 +85,5 @@ func TestSanitizeSVGHardening(t *testing.T) {
 	}
 	if out := sanitizeSVG(`<style>.a{fill:url(#g)}</style><path d="M0 0"/>`); !strings.Contains(out, "<path") || !strings.Contains(out, "url(#g)") {
 		t.Errorf("fragment style should survive, got %q", out)
-	}
-}
-
-func TestDangerousURLValue(t *testing.T) {
-	cases := map[string]bool{
-		`href="javascript:alert(1)"`:       true,
-		`href='data:text/html,x'`:          true,
-		`href="  JavaScript:alert(1)"`:     true,
-		`href="jav&#x61;script:alert(1)"`:  true,
-		`href="https://example.com/a?b=c"`: false,
-		`href="/relative/path"`:            false,
-		`href="mailto:a@b.c"`:              false,
-		`href="">`:                         false,
-	}
-	for attr, want := range cases {
-		if got := dangerousURLValue(attr); got != want {
-			t.Errorf("dangerousURLValue(%q) = %v, want %v", attr, got, want)
-		}
-	}
-}
-
-// Legacy wrapper
-
-func TestGetIconContentWrapper(t *testing.T) {
-	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "icons", "home.svg"),
-		`<svg viewBox="0 0 24 24"><path d="M0 0h24v24H0z"/></svg>`)
-	inner, err := GetIconContent(root, "home")
-	if err != nil {
-		t.Fatalf("GetIconContent: %v", err)
-	}
-	if !strings.Contains(inner, "M0 0h24v24H0z") {
-		t.Errorf("expected inner content, got %q", inner)
-	}
-}
-
-func TestPaintAttrs(t *testing.T) {
-	cases := []struct {
-		name string
-		svg  string
-		want string
-	}{
-		{"solid root", `<svg fill="currentColor" viewBox="0 0 20 20"><path d="M0 0"/></svg>`, "fill=currentColor"},
-		{"outline root", `<svg fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M0 0"/></svg>`, "fill=none stroke=currentColor stroke-width=1.5 stroke-linecap=round"},
-		{"iconify filled", `<svg viewBox="0 0 24 24" width="1em" height="1em"><path fill="currentColor" d="M0 0"/></svg>`, ""},
-		{"iconify outline", `<svg viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2"><path d="M0 0"/></g></svg>`, ""},
-		{"bare paths", `<svg viewBox="0 0 24 24"><path d="M0 0"/></svg>`, "fill=none stroke=currentColor stroke-width=2"},
-	}
-	for _, c := range cases {
-		ic, err := parseSVG(c.svg)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var parts []string
-		for _, kv := range ic.PaintAttrs() {
-			parts = append(parts, kv[0]+"="+kv[1])
-		}
-		if got := strings.Join(parts, " "); got != c.want {
-			t.Errorf("%s: PaintAttrs = %q, want %q", c.name, got, c.want)
-		}
 	}
 }

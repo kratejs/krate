@@ -9,7 +9,6 @@ import (
 
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/bundler"
-	"github.com/kratejs/krate/packages/compiler/internal/config"
 	"github.com/kratejs/krate/packages/compiler/internal/gohost"
 	"github.com/kratejs/krate/packages/compiler/internal/gotsgen"
 	"github.com/kratejs/krate/packages/compiler/internal/irtree"
@@ -32,10 +31,6 @@ func goAPIAllowedMethods(path string, routes []gohost.RouteEntry) ([]string, boo
 
 func goAPIRouteMatches(method, path string, routes []gohost.RouteEntry) bool {
 	return gohost.RouteMatches(method, path, routes)
-}
-
-func writeGoAPIModule(modDir, apiSrcDir, root string, cfg config.GoCfg) (string, error) {
-	return gohost.WriteModule(modDir, apiSrcDir, root, cfg)
 }
 
 // goInitHinted guards the one-time `krate go:init` nudge per process.

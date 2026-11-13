@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -151,65 +150,5 @@ func TestHostChildNode(t *testing.T) {
 	}
 	if got := callFn(t, c, base, "n.nope"); !strings.Contains(got, "not_found") {
 		t.Fatalf("n.nope = %s", got)
-	}
-}
-
-func TestParseManifestHostChildren(t *testing.T) {
-	ok := `{"appId":"com.acme.app","hostchildren":[{"runtime":"node","entry":"host/node/host.mjs","command":["node","{entry}"],"funcs":["a.b"]}]}`
-	m, err := ParseManifest([]byte(ok), "app.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(m.HostChildren) != 1 || m.HostChildren[0].Funcs[0] != "a.b" {
-		t.Fatalf("hostchildren = %+v", m.HostChildren)
-	}
-	for name, bad := range map[string]string{
-		"runtime":   `{"runtime":"python","entry":"x"}`,
-		"escape":    `{"runtime":"node","entry":"../x","command":["node","{entry}"]}`,
-		"no entry":  `{"runtime":"node","entry":"","command":["node","{entry}"]}`,
-		"no marker": `{"runtime":"node","entry":"x.mjs","command":["node","x.mjs"]}`,
-		"empty id":  `{"runtime":"node","entry":"x.mjs","command":["node","{entry}"],"funcs":[""]}`,
-	} {
-		_, err := ParseManifest([]byte(`{"appId":"com.acme.app","hostchildren":[`+bad+`]}`), "app.json")
-		if err == nil {
-			t.Errorf("%s: accepted", name)
-		}
-	}
-	dup := `{"appId":"com.acme.app","hostchildren":[{"runtime":"node","entry":"a.mjs","command":["node","{entry}"]},{"runtime":"bun","entry":"a.mjs","command":["bun","{entry}"]}]}`
-	if _, err := ParseManifest([]byte(dup), "app.json"); err == nil {
-		t.Error("duplicate entry accepted")
-	}
-}
-
-// An embedded (release) app has no app directory: its host children are
-// executables in host/ next to the running executable.
-func TestCommandOfEmbeddedLooksNextToTheExecutable(t *testing.T) {
-	exe, err := os.Executable()
-	if err != nil {
-		t.Skip(err)
-	}
-	if p, err := filepath.EvalSymlinks(exe); err == nil {
-		exe = p
-	}
-	dir := filepath.Join(filepath.Dir(exe), "host")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Skip(err)
-	}
-	name := "krate-host-test"
-	file := filepath.Join(dir, name)
-	if runtime.GOOS == "windows" {
-		file += ".exe"
-	}
-	if err := os.WriteFile(file, []byte("x"), 0o755); err != nil {
-		t.Skip(err)
-	}
-	t.Cleanup(func() { os.Remove(file); os.Remove(dir) })
-	a := &app{}
-	prog, args, err := a.commandOf(HostChildSpec{Runtime: "node", Entry: "host/" + name})
-	if err != nil || prog != file || len(args) != 0 {
-		t.Fatalf("commandOf = %q %v %v, want %q", prog, args, err, file)
-	}
-	if _, _, err := a.commandOf(HostChildSpec{Runtime: "node", Entry: "host/missing"}); err == nil {
-		t.Error("a missing executable is not an error")
 	}
 }

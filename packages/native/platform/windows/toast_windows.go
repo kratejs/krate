@@ -4,9 +4,8 @@ package windows
 
 // Toast notifications through WinRT (Windows.UI.Notifications) over raw COM,
 // with the same hand-written vtable approach as the WebView2 code. The pure
-// logic is in toast.go. The Windows CI tests call the real WinRT
-// (TestToastXMLAcceptedByWinRT, TestToastDelegateInterfaces) and show a toast
-// (TestGUIToast); the manual list covers what CI cannot see.
+// logic is in toast.go. No CI test shows a toast; MANUAL_TEST.md lists the
+// checks by hand.
 //
 // A click on a toast uses protocol activation, so it works after the app has
 // quit: the toast carries a URL of a per-app scheme (package toastscheme), the
@@ -468,17 +467,6 @@ func (a *App) releaseToasts() {
 	comRelease(t.notifier)
 	t.factory, t.notifier = nil, nil
 	t.ready = false
-}
-
-// readAUMIDName returns the DisplayName registered for aumid ("" if none).
-func readAUMIDName(aumid string) string {
-	k, err := registry.OpenKey(registry.CURRENT_USER, aumidRegistryPath(aumid), registry.QUERY_VALUE)
-	if err != nil {
-		return ""
-	}
-	defer k.Close()
-	v, _, _ := k.GetStringValue("DisplayName")
-	return v
 }
 
 // deleteAUMID removes the registration of aumid (tests; an app leaves its

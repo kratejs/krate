@@ -3,7 +3,6 @@ package sdkos
 import (
 	"os"
 	"runtime"
-	"strings"
 )
 
 // Info describes the machine and the app.
@@ -35,23 +34,4 @@ func GetInfo() Info {
 		OSVersion: osVersion(), Hostname: host, Locale: loc,
 		AppID: a.ID, AppVersion: a.Version,
 	}
-}
-
-// localeFromEnv turns POSIX locale variables into a BCP 47 tag. "C" and
-// "POSIX" count as unset.
-func localeFromEnv(getenv func(string) string) string {
-	for _, k := range []string{"LC_ALL", "LC_MESSAGES", "LANG"} {
-		v := getenv(k)
-		if v == "" || v == "C" || v == "POSIX" {
-			continue
-		}
-		if i := strings.IndexAny(v, ".@"); i >= 0 {
-			v = v[:i]
-		}
-		if v == "" || v == "C" || v == "POSIX" {
-			continue
-		}
-		return strings.ReplaceAll(v, "_", "-")
-	}
-	return ""
 }

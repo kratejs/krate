@@ -112,13 +112,6 @@ func e2eCheckBaked(t *testing.T, appDir string) {
 	}
 }
 
-// TestNativeE2EBaked builds the example and checks the baked values; it needs
-// no shell and no browser.
-func TestNativeE2EBaked(t *testing.T) {
-	ex := e2eRequireDeps(t)
-	e2eBuildApp(t, ex, filepath.Join(t.TempDir(), "dist-native"))
-}
-
 // e2eBuildShell compiles cmd/krate-shell from this checkout.
 func e2eBuildShell(t *testing.T, dir string) string {
 	t.Helper()

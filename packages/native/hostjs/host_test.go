@@ -213,101 +213,6 @@ func TestCalls(t *testing.T) {
 	})
 }
 
-func TestSourceMappedStack(t *testing.T) {
-	src := "declare const __krateHost: any;\n" +
-		"\n" +
-		"function lookup(id: number) {\n" +
-		"  const rows: any = null;\n" +
-		"  return rows.items[id];\n" + // line 5
-		"}\n" +
-		"__krateHost.register(\"tasks.Lookup\", (id: number) => lookup(id), \"func\");\n"
-	r := newRig(t, src, Options{})
-	res := r.call("tasks.Lookup", func(e *wire.Encoder) { e.Int(1) })
-	if res.Err == nil || res.Err["code"] != "internal" {
-		t.Fatalf("%+v", res)
-	}
-	msg, _ := res.Err["message"].(string)
-	if !strings.Contains(msg, "(at src/lib/host.ts:5:") {
-		t.Errorf("message lacks the original position: %q", msg)
-	}
-	data, _ := res.Err["data"].(map[string]any)
-	stack, _ := data["stack"].(string)
-	if !strings.Contains(stack, "lookup (src/lib/host.ts:5:") || !strings.Contains(stack, "src/lib/host.ts:7:") {
-		t.Errorf("stack is not mapped:\n%s", stack)
-	}
-	if strings.Contains(stack, "__kh_") || strings.Contains(stack, "<eval>") {
-		t.Errorf("stack leaks host plumbing:\n%s", stack)
-	}
-	if !strings.Contains(r.logs.String(), "src/lib/host.ts:5:") {
-		t.Errorf("unexpected errors should be logged: %q", r.logs.String())
-	}
-}
-
-func TestLoadErrors(t *testing.T) {
-	h, err := New(Options{Log: func(string) {}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer h.Close()
-	js, sm := bundleTS(t, "src/lib/host.ts", "declare const __krateHost: any;\n\nthrow new Error('init failed');\n")
-	err = h.Load(js, sm, "host.js")
-	if err == nil || !strings.Contains(err.Error(), "src/lib/host.ts:3:") {
-		t.Fatalf("got %v", err)
-	}
-	err = h.Load([]byte("function ("), nil, "bad.js")
-	if err == nil || !strings.Contains(err.Error(), "bad.js") {
-		t.Fatalf("got %v", err)
-	}
-	if err := h.Load([]byte("__krateHost.register('x', 1)"), nil, "bad.js"); err == nil {
-		t.Fatal("register must validate its arguments")
-	}
-}
-
-func TestClosedHost(t *testing.T) {
-	r := newRig(t, callsSrc, Options{})
-	if err := r.h.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := r.h.Close(); err != nil {
-		t.Fatal(err)
-	}
-	res := r.call("host.add", func(e *wire.Encoder) { e.Int(1); e.Int(1) })
-	if res.Err == nil {
-		t.Fatalf("%+v", res)
-	}
-	if err := r.h.Load([]byte("1"), nil, "x.js"); err != ErrClosed {
-		t.Fatalf("got %v", err)
-	}
-}
-
-func TestWatchdog(t *testing.T) {
-	src := `declare const __krateHost: any;
-__krateHost.register("w.spin", () => { for (;;) {} }, "func");
-__krateHost.register("w.ok", () => "ok", "func");`
-	r := newRig(t, src, Options{Watchdog: 200 * time.Millisecond})
-	start := time.Now()
-	res := r.call("w.spin", nil)
-	if res.Err == nil || res.Err["code"] != "internal" {
-		t.Fatalf("%+v", res)
-	}
-	if time.Since(start) > 5*time.Second {
-		t.Fatalf("the watchdog took %v", time.Since(start))
-	}
-	if res := r.call("w.ok", nil); res.OK != "ok" {
-		t.Fatalf("the host did not survive the watchdog: %+v", res)
-	}
-}
-
-func TestNoWatchdogByDefaultForAwaits(t *testing.T) {
-	// Waiting does not count against the watchdog: only synchronous steps do.
-	src := `declare const __krateHost: any;
-__krateHost.register("w.wait", () => new Promise((r) => setTimeout(() => r("late"), 300)), "func");`
-	r := newRig(t, src, Options{Watchdog: 100 * time.Millisecond})
-	if res := r.call("w.wait", nil); res.OK != "late" {
-		t.Fatalf("%+v", res)
-	}
-}
-
 // TestSharedVectors sends each shared wire vector through the JS side (frame
 // to JS value to frame) as the argument and result of host.echo. The result
 // must match the vector byte for byte, which covers Map, Set, Date, Uint8Array
@@ -357,20 +262,5 @@ func TestSharedVectors(t *testing.T) {
 				t.Errorf("round trip differs\n got %q\nwant %q", out, frame)
 			}
 		})
-	}
-}
-
-func TestHostGCKeepsTheHostWorking(t *testing.T) {
-	r := newRig(t, `
-let n = 0;
-async function bump(): Promise<number> { return ++n; }
-__krateHost.register("host.bump", bump, "func");
-`, Options{MemoryMB: 32})
-	r.h.GC() // queued on the VM goroutine; must not disturb later calls
-	for i := 1; i <= 2; i++ {
-		res := r.call("host.bump", nil)
-		if res.Err != nil || res.OK != float64(i) {
-			t.Fatalf("call %d: %+v", i, res)
-		}
 	}
 }

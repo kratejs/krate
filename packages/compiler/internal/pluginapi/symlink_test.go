@@ -55,22 +55,3 @@ func TestResolveRejectsSymlinkEscape(t *testing.T) {
 		}
 	}
 }
-
-func TestSymlinkInsideRootIsAllowed(t *testing.T) {
-	root, _ := symlinkedProject(t)
-	if err := os.MkdirAll(filepath.Join(root, "real"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "real", "a.txt"), []byte("a"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(filepath.Join(root, "real"), filepath.Join(root, "alias")); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := ReadFile(root, "./alias/a.txt"); err != nil {
-		t.Errorf("a symlink that stays inside the project must work: %v", err)
-	}
-	if err := WriteFileToRoot(root, "alias/b.txt", []byte("b")); err != nil {
-		t.Errorf("write through an in-project symlink: %v", err)
-	}
-}

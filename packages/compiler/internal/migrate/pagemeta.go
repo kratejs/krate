@@ -2,7 +2,6 @@ package migrate
 
 import (
 	"html"
-	"regexp"
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
@@ -167,13 +166,6 @@ func jsxText(s string) string {
 func jsxAttr(s string) string {
 	return jsxText(s)
 }
-
-var (
-	// namedDefault matches `export default Name;` as a whole statement, so
-	// `export default async function Name` or `export default Name(...)` never
-	// match. The trailing line break is part of the match.
-	namedDefault = regexp.MustCompile(`(?m)^[ \t]*export[ \t]+default[ \t]+([A-Za-z_$][\w$]*)[ \t]*;?[ \t]*(?:\r?\n|$)`)
-)
 
 // staticGenerateMetadata returns a generateMetadata return object only when
 // every value is a literal, array of literals, or nested object. Dynamic

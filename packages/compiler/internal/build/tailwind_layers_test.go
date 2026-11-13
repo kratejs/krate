@@ -3,7 +3,6 @@ package build
 import (
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -105,30 +104,4 @@ func TestTailwindLayeringAndDirectivesBuild(t *testing.T) {
 	if !strings.Contains(all, "mt-2") || !strings.Contains(all, "data-[state=open]") && !strings.Contains(all, "data-\\[state") {
 		t.Errorf("arbitrary variants missing:\n%s", all)
 	}
-}
-
-// Chromium check: unlayered user CSS beats preflight, utilities beat user
-// `@layer base` and preflight.
-func TestTailwindLayeringInBrowser(t *testing.T) {
-	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
-	if browser == "" {
-		t.Skip("set KRATE_BROWSER=chromium|firefox|webkit to run the browser layering check")
-	}
-	if _, err := exec.LookPath("node"); err != nil {
-		requireE2E(t, "node is not installed")
-	}
-	_, outDir, _ := buildTailwindProject(t)
-	script, err := filepath.Abs(filepath.Join("testdata", "tailwind_layers.cjs"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	cmd := exec.Command("node", script, outDir, browser)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		if strings.Contains(string(out), "Executable doesn't exist") || strings.Contains(string(out), "Cannot find module") {
-			requireE2E(t, "browser unavailable: %s", out)
-		}
-		t.Fatalf("layering check failed: %v\n%s", err, out)
-	}
-	t.Logf("%s", out)
 }

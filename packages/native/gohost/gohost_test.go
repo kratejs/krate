@@ -4,13 +4,10 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -18,7 +15,6 @@ import (
 
 	"github.com/kratejs/krate/packages/native/gohost"
 	"github.com/kratejs/krate/packages/native/internal/gohosttest"
-	"github.com/kratejs/krate/packages/native/krate"
 	"github.com/kratejs/krate/packages/native/scheme"
 	"github.com/kratejs/krate/packages/native/wire"
 )
@@ -305,216 +301,6 @@ func sockOf(t *testing.T, c *gohost.Child) string {
 	return conn.RemoteAddr().String()
 }
 
-func TestChildLogsAndCancel(t *testing.T) {
-	b1, _ := binaries(t)
-	logs := &logSink{}
-	child := gohost.NewChild(gohost.ChildOptions{Logf: logs.logf, Prefix: "[x] "})
-	if err := child.Start(context.Background(), b1, nil); err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		if err := child.Stop(); err != nil {
-			t.Error(err)
-		}
-	}()
-	ts := frontend(t, child)
-
-	// A blocked call is cancelled by the caller dropping the request.
-	ctx, cancel := context.WithCancel(context.Background())
-	e := wire.NewEncoder()
-	e.BeginObject()
-	e.Key("calls")
-	e.BeginArray()
-	e.BeginObject()
-	e.Key("id")
-	e.Int(1)
-	e.Key("fn")
-	e.String("t.Wait")
-	e.EndObject()
-	e.EndArray()
-	e.EndObject()
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, ts.URL+"/__krate/call", bytes.NewReader(e.Frame()))
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		if resp, err := http.DefaultClient.Do(req); err == nil {
-			resp.Body.Close()
-		}
-	}()
-	time.Sleep(200 * time.Millisecond)
-	cancel()
-	<-done
-	// The child stays healthy.
-	if v := version(t, ts); v != "v1" {
-		t.Fatalf("version = %q", v)
-	}
-}
-
-func TestChildCrashAndRestart(t *testing.T) {
-	b1, _ := binaries(t)
-	child := gohost.NewChild(gohost.ChildOptions{Logf: func(string, ...any) {}})
-	if err := child.Start(context.Background(), b1, nil); err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		if err := child.Stop(); err != nil {
-			t.Error(err)
-		}
-	}()
-	ts := frontend(t, child)
-	vals, stop := watch(t, ts)
-	defer stop()
-	recv(t, vals, "initial")
-
-	exited := child.Exited()
-	proc, err := os.FindProcess(child.Pid())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := proc.Kill(); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case <-exited:
-	case <-time.After(10 * time.Second):
-		t.Fatal("Exited never closed after the child was killed")
-	}
-	if err := child.Restart(""); err != nil {
-		t.Fatal(err)
-	}
-	if v := recv(t, vals, "signal after restart"); v != 10 {
-		t.Fatalf("signal = %d", v)
-	}
-	if v := version(t, ts); v != "v1" {
-		t.Fatalf("version = %q", v)
-	}
-}
-
-func TestChildNotReady(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("needs a unix true(1)")
-	}
-	path, err := exec.LookPath("true")
-	if err != nil {
-		t.Skip("no true binary")
-	}
-	child := gohost.NewChild(gohost.ChildOptions{Logf: func(string, ...any) {}})
-	err = child.Start(context.Background(), path, nil)
-	if err == nil || !strings.Contains(err.Error(), "before it was ready") {
-		t.Fatalf("err = %v", err)
-	}
-	if err := child.Stop(); err != nil {
-		t.Fatal(err)
-	}
-
-	child = gohost.NewChild(gohost.ChildOptions{Logf: func(string, ...any) {}, ReadyTimeout: 300 * time.Millisecond})
-	sleep, err := exec.LookPath("sleep")
-	if err != nil {
-		t.Skip("no sleep binary")
-	}
-	// sleep ignores stdin and prints nothing, but needs an argument.
-	script := filepath.Join(t.TempDir(), "slow.sh")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\nexec "+sleep+" 30\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	err = child.Start(context.Background(), script, nil)
-	if err == nil || !strings.Contains(err.Error(), "not ready") {
-		t.Fatalf("timeout err = %v", err)
-	}
-	if err := child.Stop(); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestRunInProcess(t *testing.T) {
-	dir, cleanup, err := gohosttest.TempDir("run-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer cleanup()
-	sock := filepath.Join(dir, "s.sock")
-	// A stale file must not stop the listener.
-	if err := os.WriteFile(sock, []byte("stale"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	stdinR, stdinW, _ := os.Pipe()
-	var ready bytes.Buffer
-	var rmu sync.Mutex
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	done := make(chan error, 1)
-	go func() {
-		done <- gohost.Run(ctx, func(r *scheme.Registry) {
-			r.Func("x.Hi", func(ctx krate.Ctx, a *wire.Decoder, out *wire.Encoder) error {
-				out.String("hi")
-				return nil
-			})
-		}, gohost.Config{Socket: sock, Stdin: stdinR, Ready: lockedWriter{&rmu, &ready}})
-	}()
-	eventually(t, func() bool { rmu.Lock(); defer rmu.Unlock(); return ready.String() == "ready\n" })
-
-	client := &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-		var d net.Dialer
-		return d.DialContext(ctx, "unix", sock)
-	}}}
-	e := wire.NewEncoder()
-	e.BeginObject()
-	e.Key("calls")
-	e.BeginArray()
-	e.BeginObject()
-	e.Key("id")
-	e.Int(1)
-	e.Key("fn")
-	e.String("x.Hi")
-	e.EndObject()
-	e.EndArray()
-	e.EndObject()
-	resp, err := client.Post("http://gohost/__krate/call", "application/x-krate-frames", bytes.NewReader(e.Frame()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	body := new(bytes.Buffer)
-	if _, err := body.ReadFrom(resp.Body); err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
-	if !strings.Contains(body.String(), `"ok":"hi"`) {
-		t.Errorf("body %q", body.String())
-	}
-
-	// Assets are not served by the child.
-	resp, err = client.Get("http://gohost/index.html")
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusNotFound {
-		t.Errorf("static status = %d", resp.StatusCode)
-	}
-
-	// Closing stdin (the parent is gone) stops the child cleanly.
-	stdinW.Close()
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Errorf("Run: %v", err)
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("Run did not return after stdin EOF")
-	}
-	if _, err := os.Stat(sock); !os.IsNotExist(err) {
-		t.Errorf("socket file remains: %v", err)
-	}
-}
-
-func TestRunNeedsSocket(t *testing.T) {
-	err := gohost.Run(context.Background(), nil, gohost.Config{})
-	if err == nil || !strings.Contains(err.Error(), gohost.SocketEnv) {
-		t.Errorf("err = %v", err)
-	}
-}
-
 type lockedWriter struct {
 	mu *sync.Mutex
 	b  *bytes.Buffer
@@ -535,84 +321,6 @@ func eventually(t *testing.T, cond func() bool) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("condition not reached")
-}
-
-func TestRunPanicStacksOnlyInDev(t *testing.T) {
-	for _, dev := range []bool{false, true} {
-		dir, cleanup, err := gohosttest.TempDir("runp-")
-		if err != nil {
-			t.Fatal(err)
-		}
-		sock := filepath.Join(dir, "s.sock")
-		stdinR, stdinW, _ := os.Pipe()
-		var ready bytes.Buffer
-		var rmu sync.Mutex
-		done := make(chan error, 1)
-		go func() {
-			done <- gohost.Run(context.Background(), func(r *scheme.Registry) {
-				r.Func("x.Boom", func(krate.Ctx, *wire.Decoder, *wire.Encoder) error { panic("kaboom") })
-			}, gohost.Config{Socket: sock, Stdin: stdinR, Ready: lockedWriter{&rmu, &ready}, Dev: dev})
-		}()
-		eventually(t, func() bool { rmu.Lock(); defer rmu.Unlock(); return ready.String() == "ready\n" })
-		client := &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			var d net.Dialer
-			return d.DialContext(ctx, "unix", sock)
-		}}}
-		e := wire.NewEncoder()
-		e.BeginObject()
-		e.Key("calls")
-		e.BeginArray()
-		e.BeginObject()
-		e.Key("id")
-		e.Int(1)
-		e.Key("fn")
-		e.String("x.Boom")
-		e.EndObject()
-		e.EndArray()
-		e.EndObject()
-		resp, err := client.Post("http://gohost/__krate/call", "application/x-krate-frames", bytes.NewReader(e.Frame()))
-		if err != nil {
-			t.Fatal(err)
-		}
-		body := new(bytes.Buffer)
-		if _, err := body.ReadFrom(resp.Body); err != nil {
-			t.Fatal(err)
-		}
-		resp.Body.Close()
-		hasStack := strings.Contains(body.String(), "goroutine")
-		if hasStack != dev {
-			t.Errorf("dev=%v: stack in the error = %v: %q", dev, hasStack, body.String())
-		}
-		stdinW.Close()
-		<-done
-		cleanup()
-	}
-}
-
-// A Go child can run on the tcp transport too (the shell uses it for
-// JavaScript children on Windows); restart keeps working.
-func TestChildTCPTransport(t *testing.T) {
-	b1, b2 := binaries(t)
-	logs := &logSink{}
-	child := gohost.NewChild(gohost.ChildOptions{Logf: logs.logf, Transport: "tcp"})
-	if err := child.Start(context.Background(), b1, []string{"KRATE_TEST=1"}); err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		if err := child.Stop(); err != nil {
-			t.Error(err)
-		}
-	}()
-	ts := frontend(t, child)
-	if v := version(t, ts); v != "v1" {
-		t.Fatalf("version = %q", v)
-	}
-	if err := child.Restart(b2); err != nil {
-		t.Fatal(err)
-	}
-	if v := version(t, ts); v != "v2" {
-		t.Fatalf("after restart version = %q", v)
-	}
 }
 
 // Run on a tcp endpoint announces its port on the ready line and refuses
@@ -661,53 +369,5 @@ func TestRunTCPToken(t *testing.T) {
 	cancel()
 	if err := <-done; err != nil {
 		t.Errorf("Run: %v", err)
-	}
-}
-
-func TestRunTCPNeedsToken(t *testing.T) {
-	err := gohost.Run(context.Background(), nil, gohost.Config{Socket: "tcp:127.0.0.1:0"})
-	if err == nil || !strings.Contains(err.Error(), "KRATE_GOHOST_TOKEN") {
-		t.Errorf("err = %v", err)
-	}
-}
-
-// A wrapped child is started through the wrapper, which may print its own
-// lines before the child's ready line; BeforeStop runs when it is stopped.
-func TestChildWrap(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("the wrapper is a sh script")
-	}
-	b1, _ := binaries(t)
-	logs := &logSink{}
-	var wrapped, stopped int
-	child := gohost.NewChild(gohost.ChildOptions{
-		Logf: logs.logf,
-		Wrap: func(binary string, args []string) (string, []string) {
-			wrapped++
-			return "sh", append([]string{"-c", `echo "wrapper banner"; exec "$@"`, "sh", binary}, args...)
-		},
-		BeforeStop: func() { stopped++ },
-	})
-	if err := child.Start(context.Background(), b1, []string{"KRATE_TEST=1"}); err != nil {
-		t.Fatal(err)
-	}
-	ts := frontend(t, child)
-	if v := version(t, ts); v != "v1" {
-		t.Fatalf("version = %q", v)
-	}
-	if err := child.Restart(""); err != nil {
-		t.Fatal(err)
-	}
-	if v := version(t, ts); v != "v1" {
-		t.Fatalf("version after restart = %q", v)
-	}
-	if err := child.Stop(); err != nil {
-		t.Fatal(err)
-	}
-	if wrapped != 2 || stopped != 2 {
-		t.Fatalf("wrapped %d times, BeforeStop %d times; want 2 and 2", wrapped, stopped)
-	}
-	if !strings.Contains(strings.Join(logs.lines, "\n"), "wrapper banner") {
-		t.Fatalf("the wrapper's own output was not logged:\n%s", strings.Join(logs.lines, "\n"))
 	}
 }

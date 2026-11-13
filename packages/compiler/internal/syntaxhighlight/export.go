@@ -314,8 +314,8 @@ func (x *exporter) loadRules(rl *chroma.RegexLexer) error {
 // patternOverrides replace rules whose regular expression backtracks badly on
 // some input with a form that matches exactly the same text. A JavaScript
 // engine has no match timeout, so the original would stall or hang the page,
-// where chroma's regexp2 gives up after 250 ms. TestPatternOverrides checks each
-// pair against regexp2 on random input.
+// where chroma's regexp2 gives up after 250 ms. TestParityCorpus compares the
+// result with chroma.
 var patternOverrides = map[string]map[string]string{
 	"Rust": {
 		// SCREAMING_CASE constants. The group is repeated only to demand a second

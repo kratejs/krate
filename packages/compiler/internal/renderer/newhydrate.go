@@ -562,21 +562,6 @@ func isRefPhaseEffect(eff string) bool {
 	return strings.HasPrefix(eff, "useImperativeHandle(")
 }
 
-// sanitizeHandlerProp converts a slot ID to a safe JS property name component.
-// Replaces dots and other non-alphanumeric chars with underscores.
-func sanitizeHandlerProp(s string) string {
-	var b strings.Builder
-	for i := 0; i < len(s); i++ {
-		ch := s[i]
-		if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_' {
-			b.WriteByte(ch)
-		} else {
-			b.WriteByte('_')
-		}
-	}
-	return b.String()
-}
-
 // isFormPropertyAttr reports whether an attribute is really a DOM property on
 // form controls (value/checked/selected) that must be set via the property, not
 // the attribute, to reflect programmatic updates after user interaction.
@@ -598,32 +583,6 @@ func isJSNumberOrKeyword(v string) bool {
 		return true
 	}
 	return false
-}
-
-// isBareStringToken reports whether v is a bare JS identifier that is not a
-// literal keyword (true/false/null/undefined/NaN/Infinity). Signal initial
-// values that come from string-default expressions (props.x || "") are
-// resolved to their string value at build time but may not be type-inferred
-// as strings; quoting them avoids emitting an undefined-global reference.
-func isBareStringToken(v string) bool {
-	switch v {
-	case "true", "false", "null", "undefined", "NaN", "Infinity":
-		return false
-	}
-	if v == "" {
-		return false
-	}
-	for i := 0; i < len(v); i++ {
-		ch := v[i]
-		if i == 0 {
-			if !(ch == '_' || ch == '$' || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z')) {
-				return false
-			}
-		} else if !(ch == '_' || ch == '$' || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9')) {
-			return false
-		}
-	}
-	return true
 }
 
 // CompatBootstrapJS exposes the small set of React compatibility APIs that

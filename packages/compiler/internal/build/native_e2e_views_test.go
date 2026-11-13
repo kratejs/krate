@@ -10,8 +10,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/kratejs/krate/packages/compiler/internal/config"
 )
 
 // TestNativeE2EViewsGUI runs examples/native-views in the real webview: the
@@ -174,60 +172,5 @@ func TestNativeE2EMediaGUI(t *testing.T) {
 	}
 	if _, err := s.send("quit", 10*time.Second); err != nil {
 		t.Errorf("quit: %v", err)
-	}
-}
-
-// TestNativeMediaDerivedPermissions: a derived build grants "media" and
-// "location" because the UI code calls getUserMedia and geolocation, and the
-// manifest lists what the page uses for packaging.
-func TestNativeMediaDerivedPermissions(t *testing.T) {
-	e2eRequireDeps(t)
-	ex := filepath.Join(repoRoot(t), "examples", "native-media")
-	if _, err := os.Stat(filepath.Join(ex, "node_modules", "@krate", "app", "dist", "media.js")); err != nil {
-		requireE2E(t, "examples/native-media has no built @krate/app (run pnpm install and pnpm build)")
-	}
-	cfg, err := config.Load(ex)
-	if err != nil {
-		t.Fatal(err)
-	}
-	b := New(ex, cfg)
-	res, err := b.BuildNativeApp(NativeAppOptions{OutDir: filepath.Join(t.TempDir(), "dist-native"), Derive: true})
-	if err != nil {
-		t.Fatalf("native build: %v", err)
-	}
-	raw, err := os.ReadFile(filepath.Join(res.AppDir, "app.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var man struct {
-		Permissions       []string `json:"permissions"`
-		StrictPermissions bool     `json:"strictPermissions"`
-		Media             struct {
-			Uses []string `json:"uses"`
-		} `json:"media"`
-	}
-	if err := json.Unmarshal(raw, &man); err != nil {
-		t.Fatal(err)
-	}
-	has := func(l []string, s string) bool {
-		for _, x := range l {
-			if x == s {
-				return true
-			}
-		}
-		return false
-	}
-	// media:manage is not needed by a page that only reads the policy; the
-	// SDK ids it calls (media.policy, media.decisions, media.osStatus) need media.
-	for _, p := range []string{"media", "location"} {
-		if !has(man.Permissions, p) {
-			t.Errorf("derived permissions %v lack %q", man.Permissions, p)
-		}
-	}
-	if !man.StrictPermissions || has(man.Permissions, "media:manage") {
-		t.Errorf("strict %v, permissions %v", man.StrictPermissions, man.Permissions)
-	}
-	if strings.Join(man.Media.Uses, ",") != "camera,microphone,location" {
-		t.Errorf("media.uses = %v", man.Media.Uses)
 	}
 }

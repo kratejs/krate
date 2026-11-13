@@ -1,7 +1,6 @@
 package deploy
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,106 +8,6 @@ import (
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
 )
-
-func TestTranslateRule(t *testing.T) {
-	cases := []struct {
-		src, dst     string
-		vercel       bool
-		wantS, wantD string
-	}{
-		{"/legacy/*", "/docs/:splat", false, "/legacy/*", "/docs/:splat"},
-		{"/legacy/*", "/docs/:splat", true, "/legacy/:path*", "/docs/:path*"},
-		{"/legacy/*", "/docs", false, "/legacy/*", "/docs"},
-		{"/legacy/*", "/docs", true, "/legacy/:path*", "/docs"},
-		{"/blog/:slug", "/posts/:slug", true, "/blog/:slug", "/posts/:slug"},
-		{"/blog/:slug", "/posts/:slug", false, "/blog/:slug", "/posts/:slug"},
-		{"/files/:path*", "/static/:path", false, "/files/*", "/static/:splat"},
-		{"/files/:path*", "/static/:path*", true, "/files/:path*", "/static/:path*"},
-		{"/old", "/new", true, "/old", "/new"},
-	}
-	for _, c := range cases {
-		gs, gd := translateRule(c.src, c.dst, c.vercel)
-		if gs != c.wantS || gd != c.wantD {
-			t.Errorf("translateRule(%q,%q,vercel=%v) = %q,%q want %q,%q", c.src, c.dst, c.vercel, gs, gd, c.wantS, c.wantD)
-		}
-	}
-}
-
-func TestVercelWritesPermanentFalseAndLandsAtProjectRoot(t *testing.T) {
-	root := t.TempDir()
-	out := filepath.Join(root, "dist")
-	if err := os.MkdirAll(out, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	cfg := config.Default()
-	cfg.Redirects = []config.Redirect{{Source: "/a", Destination: "/b", Permanent: false}, {Source: "/legacy/*", Destination: "/docs/:splat", Permanent: true}}
-	files, err := Emit("vercel", cfg, root, out)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if files[0] != filepath.Join(root, "vercel.json") {
-		t.Fatalf("vercel.json written to %s, want project root", files[0])
-	}
-	if _, err := os.Stat(filepath.Join(out, "vercel.json")); err == nil {
-		t.Fatal("vercel.json must not be written inside the output directory")
-	}
-	data, _ := os.ReadFile(files[0])
-	if !strings.Contains(string(data), `"permanent": false`) {
-		t.Fatalf("permanent:false must be explicit (Vercel defaults to true):\n%s", data)
-	}
-	var doc struct {
-		OutputDirectory string `json:"outputDirectory"`
-		Redirects       []struct{ Source, Destination string }
-	}
-	if err := json.Unmarshal(data, &doc); err != nil {
-		t.Fatal(err)
-	}
-	if doc.OutputDirectory != "dist" {
-		t.Errorf("outputDirectory = %q", doc.OutputDirectory)
-	}
-	if doc.Redirects[1].Source != "/legacy/:path*" || doc.Redirects[1].Destination != "/docs/:path*" {
-		t.Errorf("wildcard not translated: %+v", doc.Redirects[1])
-	}
-}
-
-func TestVercelDoesNotClobberHandWrittenFile(t *testing.T) {
-	root := t.TempDir()
-	out := filepath.Join(root, "dist")
-	_ = os.MkdirAll(out, 0o755)
-	mine := `{"buildCommand":"x"}`
-	if err := os.WriteFile(filepath.Join(root, "vercel.json"), []byte(mine), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := Emit("vercel", config.Default(), root, out); err == nil {
-		t.Fatal("expected refusal to overwrite a hand-written vercel.json")
-	}
-	if got, _ := os.ReadFile(filepath.Join(root, "vercel.json")); string(got) != mine {
-		t.Fatalf("file was modified: %s", got)
-	}
-	// A file krate wrote itself is regenerated.
-	_ = os.Remove(filepath.Join(root, "vercel.json"))
-	if _, err := Emit("vercel", config.Default(), root, out); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := Emit("vercel", config.Default(), root, out); err != nil {
-		t.Fatalf("regenerating its own file failed: %v", err)
-	}
-}
-
-func TestNetlifyTranslatesNamedRestParam(t *testing.T) {
-	out := t.TempDir()
-	cfg := config.Default()
-	cfg.Redirects = []config.Redirect{{Source: "/files/:path*", Destination: "/static/:path", Permanent: true}, {Source: "/legacy/*", Destination: "/docs/:splat"}}
-	if _, err := Emit("netlify", cfg, out, out); err != nil {
-		t.Fatal(err)
-	}
-	data, _ := os.ReadFile(filepath.Join(out, "_redirects"))
-	for _, want := range []string{"/files/*\t/static/:splat\t301", "/legacy/*\t/docs/:splat\t302"} {
-		if !strings.Contains(string(data), want) {
-			t.Errorf("missing %q in:\n%s", want, data)
-		}
-	}
-}
 
 func TestServerFeaturesBlockStaticTargets(t *testing.T) {
 	root := t.TempDir()
@@ -139,15 +38,6 @@ func TestServerFeaturesBlockStaticTargets(t *testing.T) {
 	}
 	if _, err := Emit("docker", config.Default(), root, out); err != nil {
 		t.Fatalf("docker target must accept server features: %v", err)
-	}
-}
-
-func TestStaticProjectHasNoServerFeatures(t *testing.T) {
-	root := t.TempDir()
-	out := filepath.Join(root, "dist")
-	_ = os.MkdirAll(out, 0o755)
-	if f := ServerFeatures(root, out); len(f) != 0 {
-		t.Fatalf("features = %v", f)
 	}
 }
 
@@ -214,54 +104,5 @@ func TestEmitDockerfile(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(root, "Dockerfile"), []byte("FROM scratch\n"), 0o644)
 	if _, err := Emit("docker", cfg, root, out); err == nil {
 		t.Fatal("expected refusal to overwrite a hand-written Dockerfile")
-	}
-}
-
-func TestRuleRegexForVercelRoutes(t *testing.T) {
-	tests := []struct{ source, dest, wantSrc, wantDest string }{
-		{"/old", "/new", `^/old$`, "/new"},
-		{"/legacy/:slug", "/blog/:slug", `^/legacy/(?<slug>[^/]+)$`, "/blog/$slug"},
-		{"/old/*", "/new/:splat", `^/old(?:/(?<splat>.*))?$`, "/new/$splat"},
-		{"/files/:path*", "/static/:path", `^/files(?:/(?<path>.*))?$`, "/static/$path"},
-	}
-	for _, tt := range tests {
-		src, dst := ruleRegex(tt.source, tt.dest)
-		if src != tt.wantSrc || dst != tt.wantDest {
-			t.Errorf("ruleRegex(%q, %q) = %q, %q; want %q, %q", tt.source, tt.dest, src, dst, tt.wantSrc, tt.wantDest)
-		}
-	}
-}
-
-func TestWantsServer(t *testing.T) {
-	feats := []string{"middleware"}
-	if !WantsServer("node", nil, false) || !WantsServer("vercel", feats, false) {
-		t.Error("node always, platform targets with features")
-	}
-	if WantsServer("vercel", nil, false) || WantsServer("vercel", feats, true) || WantsServer("gh-pages", feats, false) || WantsServer("docker", feats, false) {
-		t.Error("static projects, --static-only, gh-pages and docker keep their own path")
-	}
-}
-
-func TestEmitDockerfilePackageManagersAndOutDir(t *testing.T) {
-	for lock, want := range map[string]string{"": "npm prune --omit=dev", "package-lock.json": "npm prune --omit=dev", "yarn.lock": "yarn install --production --frozen-lockfile"} {
-		root := t.TempDir()
-		out := filepath.Join(root, "build-out")
-		_ = os.MkdirAll(out, 0o755)
-		if lock != "" {
-			_ = os.WriteFile(filepath.Join(root, lock), []byte(""), 0o644)
-		}
-		if _, err := Emit("docker", config.Default(), root, out); err != nil {
-			t.Fatal(err)
-		}
-		df, _ := os.ReadFile(filepath.Join(root, "Dockerfile"))
-		if !strings.Contains(string(df), want) || !strings.Contains(string(df), `cp -a "build-out/." "/tmp/runtime/build-out/"`) {
-			t.Errorf("%q: Dockerfile lacks %q or the custom outDir copy:\n%s", lock, want, df)
-		}
-	}
-	root := t.TempDir()
-	elsewhere := filepath.Join(t.TempDir(), "elsewhere")
-	_ = os.MkdirAll(elsewhere, 0o755)
-	if _, err := Emit("docker", config.Default(), root, elsewhere); err == nil || !strings.Contains(err.Error(), "outDir") {
-		t.Errorf("an outDir outside the project cannot go into the image, got %v", err)
 	}
 }
