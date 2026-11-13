@@ -319,6 +319,10 @@ func (b *Builder) detectReactIslandModules(mods []*bundler.Module, resolve func(
 				}
 			}
 		}
+		// A module with an async component is server code: the components of
+		// React libraries it renders are package boundaries (see
+		// packageboundary.go), not a reason to run the module as an island.
+		asyncMod := moduleHasAsyncComponent(in.m.Program)
 		irtree.WalkAST(in.m.Program.Body, func(n any) bool {
 			if hit != nil {
 				return false
@@ -328,7 +332,7 @@ func (b *Builder) detectReactIslandModules(mods []*bundler.Module, resolve func(
 			// React's render model, so the module runs as an island. The entry
 			// module is left out: a page or layout renders such tags as islands
 			// inside its own static markup (see reactIslandImports).
-			if el, ok := n.(*ast.JSXElement); ok && el.Opening != nil && !in.m.IsEntry {
+			if el, ok := n.(*ast.JSXElement); ok && el.Opening != nil && !in.m.IsEntry && !asyncMod {
 				root, _, _ := strings.Cut(el.Opening.Name, ".")
 				if pkg, ok := in.tagLibs[root]; ok && root != "" {
 					hit = &reactIslandModule{Path: in.m.Path, Pkg: pkg, Name: "<" + el.Opening.Name + ">", Pos: el.Position}
@@ -606,13 +610,13 @@ func reactIslandPage(mod *bundler.Module, pos ast.Pos) (*bundler.Module, string)
 }
 
 // reactIslandDiag is the build error for a module that needs React's render
-// model but sits where Krate cannot run it as an island (a layout, a server
-// page).
+// model but sits in a static layout, which is baked at build time and has no
+// island to host it.
 func reactIslandDiag(m *reactIslandModule, where string) error {
 	return diag.Diagnostic{
 		File: m.Path, Line: m.Pos.Line, Col: m.Pos.Col,
-		Message: "`" + m.Name + "` from \"" + m.Pkg + "\" needs React's render model, which Krate runs only in a page or client component island, and " + where + " cannot host it",
-		Hint:    "render the component that calls `" + m.Name + "` from a synchronous page instead, or replace the hook with createSignal / createResource",
+		Message: "`" + m.Name + "` from \"" + m.Pkg + "\" needs React's render model, which Krate runs only in an island or a client component, and " + where + " cannot host it",
+		Hint:    "make the layout async (`export default async function Layout`) so it renders per request and can host compiled React components, or render the component from a page instead",
 	}.WithCode(diag.CodeReactLibNotInIsland)
 }
 

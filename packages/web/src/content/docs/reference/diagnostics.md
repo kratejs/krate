@@ -304,9 +304,9 @@ The import names an export that the "use server" module does not declare.
 
 ### KR7101
 
-**Async layouts are not supported**
+**Async layout cannot be used here**
 
-Layouts are baked into the static page shell at build time, so they cannot await data. Keep the layout synchronous and move the data fetching into an async child component (a server component), which renders per request.
+An async layout renders per request in the SSR sidecar, with the page and the layouts inside it, instead of being baked into the static shell. It can await data and gate its subtree with redirect() or notFound(). It cannot sit above a template.tsx or error.tsx in the same route (they hydrate in the browser), and a layout that is baked at build time for another reason (an intercepting or segment route) cannot be async. Move the template or error boundary above the async layout, or make the layout synchronous and fetch data in an async child component.
 
 ### KR7102
 
@@ -1002,9 +1002,9 @@ The compiler could not compute the value of this expression while building the p
 
 ### KR8013
 
-**React library hook used where no island can run it**
+**React library component or hook used where no island can run it**
 
-A component calls a hook of an npm React library (zustand, react-hook-form, swr, @tanstack/react-query, ...). Those hooks need React's render model, which Krate's lowered components do not have, so Krate runs the module that calls them as a Preact island. That is not possible for a layout or template, or for a server or runtime tier component. Move the component into its own module and render it from a page or client component, or replace the library with createSignal / createResource.
+A component calls a hook of an npm React library (zustand, react-hook-form, swr, @tanstack/react-query, ...), or a static layout renders a compiled React component. Those need React's render model, which Krate's lowered components do not have, so Krate runs them on Preact: as an island in a page, and as a client boundary in a server-rendered page, layout or component (icons and other components without state render to plain HTML). A hook cannot be called from a server component: add "use client" to the module that calls it, or replace the library with createSignal / createResource. A layout that is baked into the static shell cannot host compiled components: make it async so it renders per request, or render them from a page.
 
 ### KR8014
 

@@ -45,16 +45,22 @@ func serverComponentNames(ann *irtree.Annotations) []string {
 
 // applyServerComponentMode adjusts the page render mode for server components
 // and reports whether the page component itself is async (a server page).
-func (b *Builder) applyServerComponentMode(page string, entry *bundler.Module, ann *irtree.Annotations, staticMode bool, mode *RenderMode, revalidate *int) (bool, error) {
+func (b *Builder) applyServerComponentMode(page string, entry *bundler.Module, ann *irtree.Annotations, staticMode bool, cut *layoutCut, mode *RenderMode, revalidate *int) (bool, error) {
 	entryFn := ann.Functions[ann.EntryPoint]
-	serverPage := entryFn != nil && entryFn.Async
+	serverPage := (entryFn != nil && entryFn.Async) || cut != nil
 	children := serverComponentNames(ann)
 	if !serverPage && len(children) == 0 {
 		return false, nil
 	}
 	if staticMode {
 		name, fn := ann.EntryPoint, entryFn
-		if !serverPage {
+		if cut != nil {
+			layout := filepath.Base(cut.Layouts[len(cut.Layouts)-1])
+			return false, serverDiag(ann, name, fn, entry.SourceCode,
+				"the async layout "+layout+" needs request-time rendering, but output is \"static\"",
+				"remove `output: \"static\"` from the config, or make "+layout+" synchronous").WithCode(diag.CodeServerComponentStaticOutput)
+		}
+		if !(entryFn != nil && entryFn.Async) {
 			name, fn = children[0], ann.Functions[children[0]]
 		}
 		return false, serverDiag(ann, name, fn, entry.SourceCode,
@@ -71,7 +77,11 @@ func (b *Builder) applyServerComponentMode(page string, entry *bundler.Module, a
 			*mode = RenderSSR
 			*revalidate = 0
 		}
-		printf("  %s*%s %s is an async server component -> %s\n", cCyan, cReset, filepath.Base(page), mode.String())
+		if cut != nil && !(entryFn != nil && entryFn.Async) {
+			printf("  %s*%s %s renders inside the async layout %s -> %s\n", cCyan, cReset, filepath.Base(page), filepath.Base(cut.Layouts[len(cut.Layouts)-1]), mode.String())
+		} else {
+			printf("  %s*%s %s is an async server component -> %s\n", cCyan, cReset, filepath.Base(page), mode.String())
+		}
 		return true, nil
 	}
 	if *mode == RenderSSG {
@@ -110,16 +120,17 @@ func pageRevalidateExport(prog *ast.Program) int {
 	return 0
 }
 
-// asyncLayoutError rejects an async layout: layouts are baked into the static
-// shell at build time, so they cannot await.
+// asyncLayoutError rejects an async layout that reaches the build-time layout
+// pipeline. Pages render async layouts per request (see asyncLayoutCut); this
+// is a route (a segment or intercepting page) whose layouts are baked.
 func asyncLayoutError(layoutPath string, ann *irtree.Annotations, raw string) error {
 	fn := ann.Functions[ann.EntryPoint]
 	if fn == nil || !fn.Async {
 		return nil
 	}
 	d := diag.New(layoutPath, fn.Position.Line, fn.Position.Col,
-		"layout "+ann.EntryPoint+" is an async function; layouts cannot await data",
-		"keep the layout synchronous and move the data fetching into an async child component that a page renders",
+		"layout "+ann.EntryPoint+" is an async function, but the route it wraps is rendered at build time, where it cannot await data",
+		"keep the layout synchronous and move the data fetching into an async child component, or use the layout only above pages that render per request",
 		lineOf(raw, fn.Position.Line))
 	return d.WithCode(diag.CodeAsyncLayout)
 }

@@ -600,9 +600,6 @@ func applyManual(src string, kind FileKind) []string {
 			out = append(out, c.reason)
 		}
 	}
-	if kind == KindLayout && asyncDefaultExport.MatchString(src) {
-		out = append(out, "async layouts are not supported (KR7101); move the data fetching into an async child component")
-	}
 	for _, m := range segmentConfigExport.FindAllStringSubmatch(src, -1) {
 		out = append(out, "route segment config "+m[1]+" has no Krate equivalent and was left in place")
 	}

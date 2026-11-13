@@ -221,7 +221,7 @@ full list is in [Diagnostics](/docs/reference/diagnostics/).
 | `KR7124` | `import { signal } from "@krate/runtime"`: a name the package does not export (it failed in the browser) | Use the Krate name (`createSignal`, ...); see the runtime API |
 | `KR8801` | `<Image src="/missing.jpg">` for a file not in `public/` | Add the file or fix the path |
 | `KR7121` | `src/pages/data.json.ts`-style endpoint threw at build time (0.4 built an empty HTML page for it) | Fix `GET`, or move it to `src/api` |
-| `KR8013` | A hook of an npm React library (zustand, SWR, ...) in a layout or an async server page | Call it from a component on a synchronous page; it runs as an island |
+| `KR8013` | A hook of an npm React library (zustand, SWR, ...) in a server component, or a compiled component in a static layout | Add `"use client"` to the module that calls the hook; make the layout `async` |
 | `KR3003`, `KR3007` | A class component with an unsupported `static` member, or `this` in a static | Rewrite the class as a function component |
 | `KR7115` | A tier decorator (`@server`, `@client`, ...) where it cannot apply | Move it to a function, class or the default export |
 | `KR9001`, `KR9002` | Two `404`/`error` files for one segment, or one in a `@slot` | Keep one per directory |

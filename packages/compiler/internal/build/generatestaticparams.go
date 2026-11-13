@@ -671,7 +671,11 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		}
 	}
 	pageDeps = append(pageDeps, bundle.CSSDeps...)
-	if len(reactIslands) > 0 {
+	layoutCut, cutErr := b.prepareLayoutCut(spp.PagePath)
+	if cutErr != nil {
+		return nil, "", cutErr
+	}
+	if len(reactIslands) > 0 && !entryIsAsync(entryModule.Program) && layoutCut == nil {
 		bundle.Modules = krateSideModules(bundle.Modules, entryModule, reactIslands, bnd.Resolve)
 	}
 
@@ -714,19 +718,26 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	annotator.MergeModuleFunctions(ann, extraPrograms)
 	annotator.MergeImportAliases(ann, extraPrograms, annotator.ModuleSource{Program: entryModule.Program, Path: entryModule.Path, RawSource: entryModule.SourceCode, Resolver: bundle.Resolver})
 	annotator.ReclassifyTiers(ann, b.Cfg)
-	serverPage, serverErr := b.applyServerComponentMode(spp.PagePath, entryModule, ann, strings.EqualFold(b.Cfg.Output, "static"), &renderMode, &revalidate)
+	serverPage, serverErr := b.applyServerComponentMode(spp.PagePath, entryModule, ann, strings.EqualFold(b.Cfg.Output, "static"), layoutCut, &renderMode, &revalidate)
 	if serverErr == nil && !serverPage {
 		serverErr = topLevelAwaitError(entryModule, extraPrograms)
 	}
 	if serverErr != nil {
 		return nil, "", serverErr
 	}
-	if serverPage && len(reactIslands) > 0 {
-		return nil, "", reactIslandDiag(firstReactIsland(reactIslands), "a server-rendered page")
-	}
 	clientBoundaries, cbErr := b.prepareClientBoundaries(bundle, ann, serverPage)
 	if cbErr != nil {
 		return nil, "", cbErr
+	}
+	if serverPage || len(serverComponentNames(ann)) > 0 {
+		pkgBoundaries, pbErr := b.serverTreeBoundaries(bundle, reactIslands, bnd.Resolve, serverPage)
+		if pbErr != nil {
+			return nil, "", pbErr
+		}
+		clientBoundaries = append(clientBoundaries, pkgBoundaries...)
+		if layoutCut != nil {
+			clientBoundaries = mergeBoundaries(clientBoundaries, layoutCut.Boundaries)
+		}
 	}
 	var (
 		tree       *irtree.ComponentTree
@@ -788,7 +799,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		}
 	}
 
-	if len(clientBoundaries) > 0 {
+	if anyBoundaryHydrates(clientBoundaries) {
 		loader, lerr := b.islandLoaderHTML()
 		if lerr != nil {
 			return nil, "", lerr
@@ -841,7 +852,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	}
 
 	var deps []string
-	layoutCSS, layoutFiles, _, routeChain, layoutErr := b.applyLayoutStack(spp.PagePath, emitResult)
+	layoutCSS, layoutFiles, _, routeChain, layoutErr := b.applyLayoutStack(spp.PagePath, emitResult, layoutCut)
 	if layoutErr != nil {
 		return nil, "", layoutErr
 	}
@@ -971,6 +982,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		MetadataSegments:  metaSegs,
 		MetadataPageFiles: metaPageFiles,
 		ClientBoundaries:  clientBoundaries,
+		ComposedLayouts:   layoutCutLayouts(layoutCut),
 	}
 	if renderMode != RenderSSG {
 		result.IslandStubs = newIslandServerStubs(entryModule.Program, tree.ExternalComponents, islandSSR)

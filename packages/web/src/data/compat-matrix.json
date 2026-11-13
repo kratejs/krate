@@ -430,7 +430,7 @@
       ],
       "roadmap": false,
       "knownLimits": [
-        "A layout, template or server-rendered page cannot host these hooks; the build fails with KR8013.",
+        "A layout, template or server-rendered page cannot call these hooks outside a \"use client\" module; the build fails with KR8013. Their components (icons, Radix primitives) render in async pages, layouts and components as client boundaries.",
         "A layout provider whose props read the layout's params, a signal or a state setter, or that renders markup of its own, cannot reach the islands (KR8015, KR8016).",
         "State inside a component resets when its island unmounts on navigation; module-level state is kept.",
         "A page that is itself such an island cannot take route props (KR8013) or use Krate-only APIs in the same module.",
@@ -441,6 +441,31 @@
         "KR8013",
         "KR8015",
         "KR8016"
+      ]
+    },
+    {
+      "id": "react-packages-in-server-components",
+      "area": "Compiled React packages in async pages, layouts and server components (lucide-react, Radix)",
+      "source": "n/a",
+      "islands": "supported",
+      "ssr": "supported",
+      "target": "Client boundaries rendered with Preact",
+      "summary": "The components a server module imports from a package built on React are client boundaries: rendered with Preact on the server, plain HTML when they have no state or effects (an icon), a hydrating island otherwise. Parts of a compound component (Radix Dialog.Root with its Trigger and Content) stay in one Preact tree. Async layouts render per request with the page below them, so a layout can read a session and gate its subtree with redirect() or notFound(). Checked in Chromium against lucide-react 1.28 and radix-ui 1.6 (checkbox, dialog).",
+      "tests": [
+        "TestAsyncPageRendersCompiledReactComponents",
+        "TestCompiledReactComponentsBrowser",
+        "TestAsyncLayouts"
+      ],
+      "roadmap": false,
+      "knownLimits": [
+        "Props follow the \"use client\" rules: serializable values and server actions, no inline functions.",
+        "A synchronous (static) layout cannot host compiled components; make it async (KR8013).",
+        "Server components placed between the parts of a compound component render to HTML, so the parts around one do not share a tree.",
+        "Only Chromium was run for the browser check."
+      ],
+      "diagnostics": [
+        "KR7101",
+        "KR8013"
       ]
     },
     {

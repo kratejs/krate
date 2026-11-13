@@ -127,6 +127,9 @@ type PageResult struct {
 	// page that renders server components. The page server bundle wraps their
 	// exports in client boundaries (clientboundary.go).
 	ClientBoundaries []ClientBoundary
+	// ComposedLayouts are the async layouts (and the layouts inside them) the
+	// page server bundle renders around the page, innermost first.
+	ComposedLayouts []string
 	// IslandStubs replaces the islands of a page rendered per request in its
 	// server bundle (nil for static pages and pages without islands).
 	IslandStubs *islandServerStubs
@@ -321,7 +324,7 @@ type Builder struct {
 	// clientChunkMu guards clientChunks: "use client" module path -> URL of
 	// its hydration chunk, built once per build (clientboundary.go).
 	clientChunkMu sync.Mutex
-	clientChunks  map[string]string
+	clientChunks  map[string]clientChunkInfo
 
 	// actions holds the discovered `"use server"` modules and their compiled
 	// bundles for this build. It is refreshed by prepareActions before pages.
@@ -2367,7 +2370,11 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 	// The modules an island bundles for Preact are not Krate source from here
 	// on: the lowering, module-state and vendor passes would try to compile
 	// their hooks and initializers. Their files stay in deps above.
-	if len(reactIslands) > 0 {
+	layoutCut, cutErr := b.prepareLayoutCut(page)
+	if cutErr != nil {
+		return nil, "", cutErr
+	}
+	if len(reactIslands) > 0 && !entryIsAsync(entryModule.Program) && layoutCut == nil {
 		bundle.Modules = krateSideModules(bundle.Modules, entryModule, reactIslands, bnd.Resolve)
 	}
 
@@ -2478,7 +2485,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 	annotator.MergeImportAliases(ann, extraPrograms, annotator.ModuleSource{Program: entryModule.Program, Path: entryModule.Path, RawSource: entryModule.SourceCode, Resolver: bundle.Resolver})
 	// Re-classify tiers for any newly discovered components
 	annotator.ReclassifyTiers(ann, b.Cfg)
-	serverPage, serverErr := b.applyServerComponentMode(page, entryModule, ann, staticMode, &renderMode, &revalidate)
+	serverPage, serverErr := b.applyServerComponentMode(page, entryModule, ann, staticMode, layoutCut, &renderMode, &revalidate)
 	if serverErr == nil && !serverPage {
 		serverErr = topLevelAwaitError(entryModule, extraPrograms)
 	}
@@ -2498,9 +2505,6 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 			}
 		}
 	}
-	if serverPage && len(reactIslands) > 0 {
-		return nil, "", reactIslandDiag(firstReactIsland(reactIslands), "a server-rendered page")
-	}
 	if errs := annotator.CheckInteractiveTierComponents(ann, bundle.ActionImports); len(errs) > 0 {
 		return nil, "", errs[0]
 	}
@@ -2508,6 +2512,16 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 	clientBoundaries, cbErr := b.prepareClientBoundaries(bundle, ann, serverPage)
 	if cbErr != nil {
 		return nil, "", cbErr
+	}
+	if serverPage || len(serverComponentNames(ann)) > 0 {
+		pkgBoundaries, pbErr := b.serverTreeBoundaries(bundle, reactIslands, bnd.Resolve, serverPage)
+		if pbErr != nil {
+			return nil, "", pbErr
+		}
+		clientBoundaries = append(clientBoundaries, pkgBoundaries...)
+		if layoutCut != nil {
+			clientBoundaries = mergeBoundaries(clientBoundaries, layoutCut.Boundaries)
+		}
 	}
 	var (
 		tree       *irtree.ComponentTree
@@ -2623,7 +2637,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 		}
 	}
 	stopCompile()
-	if len(clientBoundaries) > 0 {
+	if anyBoundaryHydrates(clientBoundaries) {
 		loader, lerr := b.islandLoaderHTML()
 		if lerr != nil {
 			return nil, "", lerr
@@ -2706,7 +2720,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 		fragmentInfo = fragmentInfoScript(intercept.Slot.Key, scope, intercept.Page.Target)
 	} else {
 		var layoutErr error
-		layoutCSS, layoutFiles, layoutHasSignals, routeChain, layoutErr = b.applyLayoutStack(page, emitResult)
+		layoutCSS, layoutFiles, layoutHasSignals, routeChain, layoutErr = b.applyLayoutStack(page, emitResult, layoutCut)
 		if layoutErr != nil {
 			return nil, "", layoutErr
 		}
@@ -2783,6 +2797,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 			MetadataSegments:  metaSegs,
 			MetadataPageFiles: metaPageFiles,
 			ClientBoundaries:  clientBoundaries,
+			ComposedLayouts:   layoutCutLayouts(layoutCut),
 		}, bundle.CSS, nil
 	}
 
@@ -2982,6 +2997,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 		MetadataSegments:  metaSegs,
 		MetadataPageFiles: metaPageFiles,
 		ClientBoundaries:  clientBoundaries,
+		ComposedLayouts:   layoutCutLayouts(layoutCut),
 	}
 	if renderMode != RenderSSG {
 		result.IslandStubs = newIslandServerStubs(entryModule.Program, tree.ExternalComponents, islandSSR)
@@ -3266,6 +3282,7 @@ func (b *Builder) resetBuildCaches() {
 	b.modCSS.clear()
 	loadingEmitCache.Clear()
 	layoutCache.Clear()
+	asyncLayoutMemo.Clear()
 	routeDirSigCache.Clear()
 	interceptCache.Clear()
 	slotCache.Clear()
@@ -3923,12 +3940,15 @@ func isRouteGroup(seg string) bool {
 // build fails the page with a diagnostic. Returns the CSS contributed by the
 // boundaries, the files used (page dependencies), whether any uses CSS
 // signals, and the route chain (outermost first).
-func (b *Builder) applyLayoutStack(page string, emitResult *renderer.EmitResult) (string, []string, bool, []routeChainEntry, error) {
+func (b *Builder) applyLayoutStack(page string, emitResult *renderer.EmitResult, cut *layoutCut) (string, []string, bool, []routeChainEntry, error) {
 	var css string
 	var used []string
 	hasSignals := false
 	var chain []routeChainEntry
-	for _, rb := range b.routeStack(page) {
+	if cut != nil {
+		css, used = cut.CSS, append(used, cut.Deps...)
+	}
+	for _, rb := range b.bakedRouteStack(page, cut) {
 		id := b.layoutIDPrefix(rb.Path)
 		open, end := "<!--kl:"+id+"-->", "<!--/kl:"+id+"-->"
 		var slotCSS string

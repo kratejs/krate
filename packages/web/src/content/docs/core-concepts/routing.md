@@ -78,6 +78,13 @@ layout. Layouts receive their page content through `{children}`, which must be
 rendered exactly once. A layout that fails to build (or has no default export)
 fails the build; one that never renders `{children}` is reported as a warning.
 
+### Async layouts
+
+A layout can be `async` to await a session or feature flags, and can call
+`redirect()` or `notFound()` to gate every page below it. Pages under an async
+layout render per request; layouts above it stay static. See
+[Async layouts](/docs/features/server-components/#async-layouts).
+
 ### Layout persistence
 
 On a client-side navigation the router compares the layouts of the current
