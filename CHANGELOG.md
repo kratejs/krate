@@ -216,6 +216,7 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Added
 
+- `motion` config key enables [Motion](https://motion.dev), the animation engine behind Framer Motion, with a declarative `data-motion` attribute API, built-in and custom presets, staggers, scroll-linked animation and reduced-motion handling. The full library is `window.Motion`. Nothing ships unless it is set.
 - The embedded QuickJS runtime installs each group of Web APIs the first time code reads one of
   its globals, so creating a VM costs about 1.4 ms instead of 3.2 ms. Config and
   Tailwind evaluation, `generateStaticParams`, metadata and isolation-mode API requests get

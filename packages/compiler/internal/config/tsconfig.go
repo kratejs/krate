@@ -514,6 +514,16 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 			return err
 		}
 		cfg.Deploy = dc
+	case "motion":
+		data, err := json.Marshal(val)
+		if err != nil {
+			return err
+		}
+		var mc MotionConfig
+		if err := json.Unmarshal(data, &mc); err != nil {
+			return err
+		}
+		cfg.Motion = &mc
 	case "spa":
 		if b, ok := val.(bool); ok {
 			cfg.SPA = &b

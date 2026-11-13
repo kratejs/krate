@@ -225,6 +225,8 @@ type Builder struct {
 	// fontPreloadHTML holds the `<link rel="preload">` tags for fonts declared
 	// in the global stylesheet; injected into every page head.
 	fontPreloadHTML string
+
+	motionChunk string
 	// globalFonts are the font URLs already preloaded by the global stylesheet.
 	globalFonts []string
 
@@ -384,6 +386,7 @@ func (b *Builder) runtimeCommonHead() string {
 	if b.fontPreloadHTML != "" {
 		sb.WriteString(b.fontPreloadHTML)
 	}
+	sb.WriteString(motionHeadHTML(b.Cfg.BaseURLPath(), b.motionChunk, b.Cfg.Motion.DeclarativeEnabled()))
 	return sb.String()
 }
 
@@ -822,6 +825,9 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 		return results, err
 	}
 	warnMissingRuntime(runtimeJS, results)
+	if err := b.writeMotionChunk(); err != nil {
+		return results, err
+	}
 	if b.DevMode {
 		if _, err := writeDevChunk(b.Cfg.OutDir, b.Root); err != nil {
 			return results, err
@@ -1259,6 +1265,9 @@ func (b *Builder) BuildAll() error {
 		}
 
 		warnMissingRuntime(runtimeJS, results)
+	}
+	if err := b.writeMotionChunk(); err != nil {
+		failOutput(err)
 	}
 	if b.DevMode {
 		if _, err := writeDevChunk(b.Cfg.OutDir, b.Root); err != nil {

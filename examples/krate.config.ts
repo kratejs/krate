@@ -45,6 +45,20 @@ export default defineConfig(({ isDev }) => ({
     },
   ],
 
+  // Motion animations and data-motion attributes (see /motion-demo).
+  motion: {
+    transition: { type: "spring", stiffness: 180, damping: 22 },
+    viewport: { amount: 0.3, once: true },
+    easings: { snappy: [0.2, 0.9, 0.3, 1] },
+    presets: {
+      pop: {
+        initial: { opacity: 0, scale: 0.8 },
+        animate: { opacity: 1, scale: 1 },
+        transition: { type: "tween", ease: "snappy", duration: 0.4 },
+      },
+    },
+  },
+
   // Responsive-image pipeline.
   images: { quality: 80 },
 

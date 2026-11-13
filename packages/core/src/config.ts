@@ -25,6 +25,119 @@ import type {
   DocsThemeOptions,
 } from "@krate/plugin";
 
+export type MotionEasing =
+  | "linear"
+  | "easeIn"
+  | "easeOut"
+  | "easeInOut"
+  | "circIn"
+  | "circOut"
+  | "circInOut"
+  | "backIn"
+  | "backOut"
+  | "backInOut"
+  | "anticipate"
+  | `cubic-bezier(${string})`
+  | (string & {});
+
+export interface MotionTransitionConfig {
+  /** Animation type (default: Motion picks "spring" for physical values and "tween" otherwise). */
+  type?: "spring" | "tween" | "inertia";
+  /** Duration in seconds. */
+  duration?: number;
+  /** Delay in seconds. */
+  delay?: number;
+  /** A built-in easing, a name from `motion.easings`, or `cubic-bezier(x1,y1,x2,y2)`. */
+  ease?: MotionEasing;
+  /** Spring stiffness (greater than 0). */
+  stiffness?: number;
+  /** Spring damping (greater than 0). */
+  damping?: number;
+  /** Spring mass (greater than 0). */
+  mass?: number;
+  /** Spring bounce, from 0 to 1. */
+  bounce?: number;
+  /** Time in seconds the spring takes to visually reach the target. */
+  visualDuration?: number;
+  /** Extra repeats after the first run. */
+  repeat?: number;
+  repeatType?: "loop" | "reverse" | "mirror";
+  /** Seconds between repeats. */
+  repeatDelay?: number;
+}
+
+export interface MotionViewportConfig {
+  /** How much of the element must be visible: "some", "all" or a ratio from 0 to 1 (default: "some"). */
+  amount?: "some" | "all" | number;
+  /** Margin around the viewport, such as "0px 0px -10%" (default: "0px"). */
+  margin?: string;
+  /** Animate the first time only (default: true). */
+  once?: boolean;
+}
+
+export interface MotionStaggerConfig {
+  /** Seconds between each child (default: 0.08). */
+  delay?: number;
+  /** Where the stagger starts: "first", "last", "center" or a child index (default: "first"). */
+  from?: "first" | "last" | "center" | number;
+  /** Easing applied across the stagger. */
+  ease?: MotionEasing;
+}
+
+export type MotionValue = string | number | null | Array<string | number | null>;
+
+export interface MotionPreset {
+  /** State applied instantly before the entrance animation. */
+  initial?: Record<string, MotionValue>;
+  /** State animated to (a keyframe list is allowed per property). */
+  animate?: Record<string, MotionValue>;
+  /** State animated to while hovered. */
+  hover?: Record<string, MotionValue>;
+  /** State animated to while pressed. */
+  press?: Record<string, MotionValue>;
+  transition?: MotionTransitionConfig;
+}
+
+export type MotionBuiltinPreset =
+  | "fade"
+  | "fade-up"
+  | "fade-down"
+  | "fade-left"
+  | "fade-right"
+  | "zoom-in"
+  | "zoom-out"
+  | "blur-in"
+  | "slide-up"
+  | "slide-down"
+  | "slide-left"
+  | "slide-right"
+  | "flip-x"
+  | "flip-y"
+  | "rotate-in";
+
+export interface MotionConfig {
+  /** Set false to turn Motion off while keeping the object (default: true). */
+  enabled?: boolean;
+  /**
+   * How `prefers-reduced-motion` is honoured. "user" follows the visitor's
+   * setting, "always" and "never" force it. Reduced motion drops transform
+   * animations and keeps the rest (default: "user").
+   */
+  reducedMotion?: "user" | "always" | "never";
+  /** Bind `data-motion-*` attributes in the page (default: true). */
+  declarative?: boolean;
+  /** Default transition for every declarative animation. */
+  transition?: MotionTransitionConfig;
+  /** Default viewport options for entrance animations. */
+  viewport?: MotionViewportConfig;
+  /** Default stagger options for `data-motion-stagger` containers. */
+  stagger?: MotionStaggerConfig;
+  /** Named cubic beziers as `[x1, y1, x2, y2]`, usable as `ease` values. */
+  easings?: Record<string, [number, number, number, number]>;
+  /** Named presets used as `data-motion="name"`. A name replaces a built-in one. */
+  presets?: Record<string, MotionPreset>;
+}
+
 export interface LogsConfig {
   /** Save each run's console output to a timestamped log file (default: false). */
   enabled?: boolean;
@@ -798,6 +911,13 @@ export interface KrateConfig {
    * from the shared runtime.
    */
   spa?: boolean;
+  /**
+   * Motion (the animation engine behind Framer Motion). `true` ships the
+   * library and the `data-motion` attributes with defaults; an object tunes
+   * them. Off by default, and nothing is shipped unless it is set. The full
+   * library is available in the browser as `window.Motion`.
+   */
+  motion?: boolean | MotionConfig;
   /**
    * View Transitions API integration. `true`/`"auto"` (default) enables
    * same-document SPA morphs and the cross-document `@view-transition` rule;

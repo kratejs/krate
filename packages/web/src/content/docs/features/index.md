@@ -33,6 +33,7 @@ A tour of the features that ship with Krate beyond the core compiler.
 | [Quality Checks](/docs/features/quality-checks/) | Compiler-enforced a11y, SEO, and performance gates (`krate check`) |
 | [MCP Server](/docs/features/mcp/) | Agent-native compiler surface over the Model Context Protocol (`krate mcp`) |
 | [LLMs.txt](/docs/features/llms-txt/) | Generate `llms.txt` and `llms-full.txt` for LLM crawlers |
+| [Motion](/docs/features/motion/) | Motion (Framer Motion's engine) animations and `data-motion` attributes, set with `motion` in config |
 
 Also see the [component library](/docs/reference/component-library/), a
 shadcn/ui-style set of components built on the runtime.
