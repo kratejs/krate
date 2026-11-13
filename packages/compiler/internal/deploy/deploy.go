@@ -468,6 +468,15 @@ func emitDocker(cfg *config.Config, root, outDir string) ([]string, error) {
 	fmt.Fprintf(&b, "    mkdir -p \"/tmp/runtime/%s\" && cp -a \"%s/.\" \"/tmp/runtime/%s/\" \\\n", rel, rel, rel)
 	b.WriteString(" && if [ -d .krate ]; then mkdir -p /tmp/runtime/.krate && cp -a .krate/. /tmp/runtime/.krate/ \\\n")
 	b.WriteString("      && rm -rf /tmp/runtime/.krate/cache /tmp/runtime/.krate/types /tmp/runtime/.krate/config.schema.json /tmp/runtime/.krate/segments /tmp/runtime/.krate/goext; fi\n")
+	if dirs, skipped := traceIncludeDirs(cfg.OutputFileTracingIncludes); len(dirs) > 0 || len(skipped) > 0 {
+		b.WriteString("# outputFileTracingIncludes: runtime-read project files (the leading directory of each glob).\n")
+		for _, g := range skipped {
+			fmt.Fprintf(&b, "# glob %q has no leading directory: copy what it matches into the runtime stage yourself.\n", g)
+		}
+		if len(dirs) > 0 {
+			b.WriteString("RUN for p in " + strings.Join(dirs, " ") + "; do if [ -e \"$p\" ]; then cp -a --parents \"$p\" /tmp/runtime/; fi; done\n")
+		}
+	}
 	b.WriteString("\n")
 	b.WriteString("FROM node:22-bookworm-slim\n")
 	b.WriteString("ENV NODE_ENV=production\n")

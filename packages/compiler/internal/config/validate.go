@@ -222,6 +222,19 @@ func (c *Config) Validate() (warnings []string, err error) {
 		warnings = append(warnings, "ssr.rendererPort equals devServer.port; choose a distinct port")
 	}
 
+	for _, name := range c.ServerExternalPackages {
+		if name == "" || strings.HasPrefix(name, ".") || strings.HasPrefix(name, "/") || strings.Contains(name, "\\") {
+			return nil, fmt.Errorf("serverExternalPackages entries must be package names such as \"sharp\" or \"@napi-rs/canvas\", got %q", name)
+		}
+	}
+	for key, globs := range c.OutputFileTracingIncludes {
+		for _, g := range globs {
+			if err := checkTraceGlob(g); err != nil {
+				return nil, fmt.Errorf("outputFileTracingIncludes[%q]: %w", key, err)
+			}
+		}
+	}
+
 	nw, nerr := c.validateNative()
 	if nerr != nil {
 		return nil, nerr

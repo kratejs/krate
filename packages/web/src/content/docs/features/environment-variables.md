@@ -34,6 +34,23 @@ The mode depends on the command:
 
 `NODE_ENV` or `KRATE_ENV` overrides the default mode.
 
+## Env files outside the project
+
+By default the files are read from the project root. In a monorepo the shared
+`.env` often sits at the repository root; point Krate at it with `envDir`:
+
+```ts
+// apps/web/krate.config.ts
+export default defineConfig({ envDir: "../.." });
+```
+
+`envDir` resolves against the project root, may be a parent directory, and must
+exist. Every place that loads `.env` files uses it (dev, build, serve, start,
+deploy, API routes, middleware, build-time evaluators, and `krate.config.ts`
+itself, which sees the variables from `envDir`). The built `server.mjs` of
+`krate deploy --target node` never reads `.env` files: set the variables in the
+environment of the process (systemd `EnvironmentFile=`, `docker run --env-file`).
+
 Files named `.env.local` and `.env.*.local` (your local, machine-specific
 overrides) are listed in the `.gitignore` that `create-krate-app` generates so
 secrets are not committed; add them to the `.gitignore` of an existing project. Keep non-secret defaults in committed `.env` files.

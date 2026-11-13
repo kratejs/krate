@@ -89,11 +89,76 @@ krate serve   # serves dist + sidecars
 Static pages are plain HTML, so most assertions are just string/DOM checks on
 `dist/**/index.html`.
 
-## Testing API routes
+## Testing API routes and server actions
 
-`src/api/*.ts` handlers are ordinary functions. With the embedded QuickJS
-runtime they run in-process; for Node semantics, test the compiled
-`dist/.krate/api-node/*.js` directly with Node.
+Route handlers and server actions are plain functions, so a unit test imports
+the module and calls it; no server runs. `@krate/runtime/testing` has two small
+helpers for the parts that are not plain: building the `Request` and the
+`(request, { params })` call a route gets, and the request context a server
+action reads with `cookies()` and `headers()`. It is Node-only; import it from
+test files, never from app code.
+
+```ts
+// src/api/users/[id].test.ts
+import { describe, expect, it } from "vitest";
+import { callRoute } from "@krate/runtime/testing";
+import * as route from "./[id]";
+
+describe("GET /api/users/:id", () => {
+  it("returns the user", async () => {
+    const res = await callRoute(route, "GET", "/api/users/7?verbose=1", { params: { id: "7" } });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ id: "7" });
+  });
+
+  it("creates with a JSON body", async () => {
+    const res = await callRoute(route, "POST", "/api/users", { json: { name: "ada" } });
+    expect(res.status).toBe(201);
+  });
+});
+```
+
+`callRoute(module, method, pathOrUrl | Request, options)` calls the module's
+named export for the method (`GET`, `POST`, ...), like the server does:
+`HEAD` is answered from `GET` without a body, `OPTIONS` answers `Allow`, a
+default export that takes `(request, context)` handles every method, and a
+method with no handler returns `405` with `Allow`. Options are `params` (the
+dynamic segments), `headers`, `json` and `body`. The handler is a plain
+`(Request, { params }) => Response`, so you can also call it directly:
+`await GET(new Request("http://localhost/api/x"), { params: {} })`. A
+Next.js `NextRequest` test becomes a plain `Request`; `request.cookies` is a
+runtime feature, so pass a `cookie` header (`headers: { cookie: "a=1" }`) and
+read it as the route does.
+
+A server action (an export of a `"use server"` file) is an ordinary async
+function when you import it in a test. Only `cookies()`, `headers()` and
+`getActionContext()` from `@krate/runtime/server` need a request, which
+`runAction` provides:
+
+```ts
+import { expect, it } from "vitest";
+import { runAction } from "@krate/runtime/testing";
+import { login } from "./actions";
+
+it("sets the session cookie", async () => {
+  const { result, setCookies } = await runAction(() => login(formData), {
+    cookies: { theme: "dark" },
+    headers: { "user-agent": "vitest" },
+  });
+  expect(setCookies[0]).toMatchObject({ name: "session", deleted: false });
+});
+```
+
+`runAction` resolves with the action's return value and every `cookies().set()`
+and `delete()` call; an action that throws, including through `redirect()`,
+rejects. It does not run the CSRF origin check, argument decoding or the HTTP
+layer; cover those with an end-to-end test against `krate start`.
+
+Routes that import native packages or Node built-ins run on the Node sidecar in
+production; in a unit test they run in Vitest's Node, so what you import is
+what runs. To test the built embedded-runtime artifact instead, load
+`dist/.krate/api/<route>.js` (an IIFE exposing `__krate_route`); for the Node
+artifact import `dist/.krate/api-node/<route>.js`.
 
 ## See also
 

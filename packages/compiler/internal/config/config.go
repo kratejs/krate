@@ -700,6 +700,25 @@ type Config struct {
 	Images      ImagesConfig    `json:"images,omitempty"`      // responsive-image pipeline
 	Deploy      DeployConfig    `json:"deploy,omitempty"`      // deploy adapter + options
 
+	// ServerExternalPackages lists npm packages that server bundles (API
+	// routes, the node deploy bundle) leave out of the bundle and load from
+	// node_modules at run time, like Next's serverExternalPackages. Packages
+	// that contain a native .node addon are detected and treated this way
+	// without being listed. A route that imports one runs on the Node sidecar.
+	ServerExternalPackages []string `json:"serverExternalPackages,omitempty"`
+
+	// OutputFileTracingIncludes maps a route key (or "*" for all) to globs of
+	// project files copied into the node deploy output next to server.mjs, for
+	// files that import tracing cannot see (a worker entry loaded by path, a
+	// platform binary chosen by a computed require). Globs are relative to the
+	// project root and must stay inside it.
+	OutputFileTracingIncludes map[string][]string `json:"outputFileTracingIncludes,omitempty"`
+
+	// EnvDir is the directory the .env files are read from (default: the
+	// project root). Relative paths resolve against the project root and may
+	// point at a parent directory, such as a monorepo root.
+	EnvDir string `json:"envDir,omitempty"`
+
 	// BasePath is the URL path prefix the whole site is served under (e.g.
 	// "/docs"). Empty takes the path of site.url; "/" forces the root. Read it
 	// through BaseURLPath, which applies both rules.
@@ -1050,6 +1069,9 @@ func (c *Config) Resolve(root string) {
 	}
 	if !filepath.IsAbs(c.PublicDir) {
 		c.PublicDir = filepath.Join(root, c.PublicDir)
+	}
+	if c.EnvDir != "" && !filepath.IsAbs(c.EnvDir) {
+		c.EnvDir = filepath.Join(root, c.EnvDir)
 	}
 	// Fold the legacy goApi block into the unified go config once, so the rest
 	// of the codebase reads a single normalized field (c.Go).

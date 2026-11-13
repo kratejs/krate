@@ -30,7 +30,13 @@ default (no Node.js process) or by a Node/Bun/Deno sidecar when configured.
 Each route is compiled twice: a self-contained IIFE bundle for the embedded
 runtime and an ESM output for the Node sidecar. Routes that import a Node
 built-in or a native module that cannot be bundled are marked **Node-only** and
-transparently forwarded to the sidecar.
+transparently forwarded to the sidecar. Packages with a native `.node` addon
+(`@napi-rs/canvas`, `sharp`) are detected and stay in `node_modules`; list other
+packages that must not be bundled in
+[`serverExternalPackages`](/docs/reference/config/#server-packages-traced-files-and-env-directory).
+The embedded runtime cannot load a native addon at all, so such a route always
+runs on the Node sidecar; middleware is bundled into one file and cannot import
+one (call the addon from an API route).
 
 ### Runtime model and performance
 

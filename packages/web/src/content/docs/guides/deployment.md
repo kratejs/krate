@@ -172,8 +172,13 @@ EXPOSE 3000
 CMD ["node", "dist/.krate/server/server.mjs"]
 ```
 
-Everything the server needs is inside the bundle, so no `node_modules` is
-required at runtime.
+Everything Krate can see is inside the bundle, so a project without native
+packages needs no `node_modules` at runtime. Packages with native addons (or
+listed in `serverExternalPackages`) stay external: the build copies them, with
+their dependencies, into `dist/.krate/server/node_modules`, and
+`outputFileTracingIncludes` copies extra files next to `server.mjs`. See
+[Self-hosting](/docs/guides/self-hosting/) for the full standalone story,
+workspace packages, process model, systemd and reverse proxies.
 
 ### What each platform really supports
 
@@ -397,9 +402,10 @@ the table says "client address"; a chain a visitor wrote, a `Forwarded` header o
 an `x-forwarded-host` on Netlify or Cloudflare (where nothing sets it) never
 reaches your code. Set `trustProxy: true` only when a proxy of yours sits in front
 of the platform and sets those headers; `trustedProxies` applies to `krate start`
-and the Node target, not to the serverless platforms. The Node target
+only, not to the serverless platforms or the Node target. The Node target
 (`server.mjs`) trusts forwarded headers only with `trustProxy: true`, like
-`krate start`. The platform headers above come from each platform's
+`krate start`, but passes `x-forwarded-for` on as the proxy delivered it (see
+[Self-hosting](/docs/guides/self-hosting/#behind-a-reverse-proxy)). The platform headers above come from each platform's
 documentation; Netlify does not document `x-nf-client-connection-ip` on the page
 about functions, so check that header on your site before you rely on it.
 

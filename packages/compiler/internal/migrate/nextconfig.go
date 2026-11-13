@@ -25,6 +25,10 @@ type nextConfigData struct {
 	Site      map[string]any    `json:"site,omitempty"`
 	// Head holds raw <head> tags written to the config head array.
 	Head []string `json:"head,omitempty"`
+	// ServerExternalPackages and OutputFileTracingIncludes carry Next's keys of
+	// the same name to the Krate config keys of the same name.
+	ServerExternalPackages    []string            `json:"serverExternalPackages,omitempty"`
+	OutputFileTracingIncludes map[string][]string `json:"outputFileTracingIncludes,omitempty"`
 }
 
 type nextRedirect struct {
@@ -156,10 +160,10 @@ func readNextConfig(path string) (data nextConfigData, notes nextConfigNotes, ok
 		notes.Manual = append(notes.Manual, ManualItem{
 			Source: file,
 			Reason: "loadEnvConfig(...) is called in next.config; the .env files it loads are not read by Krate",
-			Hint:   "Krate loads .env, .env.<mode>, .env.local and .env.<mode>.local from the project root only (select the mode with --mode); copy or symlink the monorepo root .env into the project, or export the variables in the shell",
+			Hint:   "Krate loads .env, .env.<mode>, .env.local and .env.<mode>.local from the project root only (select the mode with --mode); set envDir in krate.config.ts to the directory that holds them (for example envDir: \"../..\" for a monorepo root), or export the variables in the shell",
 		})
 	}
-	translateOtherKeys(file, obj, &notes)
+	translateOtherKeys(file, obj, &notes, serverFileKeys(obj, &out))
 	return out, notes, true
 }
 
@@ -361,6 +365,12 @@ func configJSON(entry string, next nextConfigData) []byte {
 	}
 	if len(next.Site) > 0 {
 		opts["site"] = next.Site
+	}
+	if len(next.ServerExternalPackages) > 0 {
+		opts["serverExternalPackages"] = next.ServerExternalPackages
+	}
+	if len(next.OutputFileTracingIncludes) > 0 {
+		opts["outputFileTracingIncludes"] = next.OutputFileTracingIncludes
 	}
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)

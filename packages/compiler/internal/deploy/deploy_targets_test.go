@@ -41,6 +41,31 @@ func TestServerFeaturesBlockStaticTargets(t *testing.T) {
 	}
 }
 
+func TestEmitDockerfileCopiesTraceIncludes(t *testing.T) {
+	root := t.TempDir()
+	out := filepath.Join(root, "dist")
+	_ = os.MkdirAll(out, 0o755)
+	cfg := config.Default()
+	cfg.OutputFileTracingIncludes = map[string][]string{
+		"/api/og": {"assets/fonts/**", "workers/image.js"},
+		"*":       {"node_modules/@resvg/resvg-js-*/**", "**/*.wasm"},
+	}
+	if _, err := Emit("docker", cfg, root, out); err != nil {
+		t.Fatal(err)
+	}
+	df, _ := os.ReadFile(filepath.Join(root, "Dockerfile"))
+	text := string(df)
+	if !strings.Contains(text, `for p in 'assets/fonts' 'workers/image.js'; do`) || !strings.Contains(text, `cp -a --parents "$p" /tmp/runtime/`) {
+		t.Errorf("runtime-read files must be copied into the runtime stage:\n%s", text)
+	}
+	if strings.Contains(text, "'node_modules") {
+		t.Errorf("node_modules globs are covered by the installed packages:\n%s", text)
+	}
+	if !strings.Contains(text, `glob "**/*.wasm" has no leading directory`) {
+		t.Errorf("a glob without a leading directory must be flagged:\n%s", text)
+	}
+}
+
 func TestEmitDockerfile(t *testing.T) {
 	root := t.TempDir()
 	out := filepath.Join(root, "dist")

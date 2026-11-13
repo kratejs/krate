@@ -120,12 +120,11 @@ func compileServerBundles(res *bundler.ImportResolver, results []*PageResult, ro
 				JSXImportSource: "@krate/runtime/server",
 				TsconfigRaw:     `{ "compilerOptions": { "jsx": "react-jsx", "jsxImportSource": "@krate/runtime/server" } }`,
 				Banner:          basePathBanner(actionBasePath),
-				Packages:        api.PackagesExternal,
 				External: []string{
 					"@krate/runtime",
 					"@krate/runtime/*",
 				},
-				Plugins: serverBundlePlugins(page, absSource, reactServerShimPlugin(), serverCSSPlugin(root), cbPlugin, unusedClientModulePlugin(), serverExportPlugin(page.ServerExports, absSource), goServerBundlePlugin(page.GoBaked, root), actionServerBundlePlugin(res, actionModules, actionBasePath)),
+				Plugins: serverBundlePlugins(page, absSource, reactServerShimPlugin(), serverCSSPlugin(root), cbPlugin, unusedClientModulePlugin(), serverExportPlugin(page.ServerExports, absSource), goServerBundlePlugin(page.GoBaked, root), actionServerBundlePlugin(res, actionModules, actionBasePath), externalNodeModulesPlugin()),
 				Stdin: &api.StdinOptions{
 					Loader:     api.LoaderTSX,
 					Contents:   injectedSource,
