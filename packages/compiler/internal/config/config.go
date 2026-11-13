@@ -253,6 +253,17 @@ func (c CacheConfig) Shared() bool {
 	return c.Adapter != "" && c.Adapter != "memory"
 }
 
+// ReactConfig controls the islands that run on real React instead of Preact.
+type ReactConfig struct {
+	// Islands lists npm packages that must run on real react and react-dom
+	// (libraries built on a React reconciler: @react-three/fiber, react-konva,
+	// and anything built on them). A module that imports one becomes a
+	// client-rendered island bundled with React. Packages that depend on
+	// react-reconciler, @react-three/fiber or react-konva are detected
+	// without being listed.
+	Islands []string `json:"islands,omitempty"`
+}
+
 type SSRConfig struct {
 	// RendererPort is the port for the Node.js SSR renderer server.
 	// If 0, defaults to DevServer.Port + 10 (dev) or 3100 (prod).
@@ -699,6 +710,7 @@ type Config struct {
 	Headers     []HeaderRule    `json:"headers,omitempty"`     // custom response headers
 	Images      ImagesConfig    `json:"images,omitempty"`      // responsive-image pipeline
 	Deploy      DeployConfig    `json:"deploy,omitempty"`      // deploy adapter + options
+	React       ReactConfig     `json:"react,omitempty"`       // real-React islands
 
 	// BasePath is the URL path prefix the whole site is served under (e.g.
 	// "/docs"). Empty takes the path of site.url; "/" forces the root. Read it

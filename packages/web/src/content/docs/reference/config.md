@@ -584,6 +584,21 @@ serverDirs: ["src/components/server"],
 runtimeDirs: ["src/components/runtime"],
 ```
 
+## React islands
+
+```typescript
+react: {
+  islands: ["some-canvas-library"], // packages that must run on real React
+},
+```
+
+- **`islands`** - npm packages that must run on real `react` and
+  `react-dom`, not on Preact. A module that imports one becomes a
+  client-rendered real-React island. Packages that depend on
+  `react-reconciler`, `@react-three/fiber` or `react-konva` (`@react-three/drei`,
+  `react-konva`, ...) are detected without being listed. See
+  [Libraries built on a React reconciler](/docs/guides/react-compatibility/#libraries-built-on-a-react-reconciler-real-react-islands).
+
 ## Native (experimental)
 
 ```typescript

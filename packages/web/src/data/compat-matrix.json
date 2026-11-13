@@ -481,6 +481,82 @@
       ]
     },
     {
+      "id": "real-react-islands",
+      "area": "Real-React islands (react-reconciler libraries)",
+      "source": "n/a",
+      "islands": "supported",
+      "ssr": "n/a",
+      "target": "Opt-in real React",
+      "summary": "A user module that imports a package built on react-reconciler (detected from its dependencies) or listed in react.islands runs in a client-rendered island bundled with real react and react-dom, with no Preact alias in its subtree. The server emits a placeholder (client:fallback text). All islands of a page mount from one entry, and the pages of a site share one React chunk that only pages with such an island load. Signal props bridge in as for other islands.",
+      "tests": [
+        "TestRealReactIsland",
+        "TestBrowserRealReactIsland",
+        "TestRealReactConfigPackage",
+        "TestReconcilerLibraryOnPreactIsland"
+      ],
+      "roadmap": false,
+      "knownLimits": [
+        "Client-rendered only: no server markup beyond the fallback text.",
+        "Adds react and react-dom (about 60 KB gzipped) plus the library to the pages that use it.",
+        "Layout providers are not applied; Krate components cannot be passed in as children (same-file ones are diagnosed with KR8007).",
+        "Layouts and async server pages cannot host them (KR8013)."
+      ]
+    },
+    {
+      "id": "react-three-fiber",
+      "area": "@react-three/fiber",
+      "source": "n/a",
+      "islands": "partial",
+      "ssr": "n/a",
+      "target": "Real-React island",
+      "summary": "A module using Canvas, useFrame and the other fiber APIs runs as a real-React island (fiber depends on react-reconciler, so it is detected without configuration). Verified by hand: Canvas with a mesh renders a WebGL scene under three 0.170 and @react-three/fiber 9.8.",
+      "tests": [
+        "TestRealReactIsland",
+        "TestBrowserRealReactIsland"
+      ],
+      "roadmap": false,
+      "knownLimits": [
+        "The mechanism is tested in CI with a minimal react-reconciler renderer; the library itself was verified by hand in Chromium (@react-three/fiber 9.8, three 0.170, React 19.3) and is not installed in CI.",
+        "WebGL output is client-only; there is no server rendering."
+      ]
+    },
+    {
+      "id": "react-three-drei",
+      "area": "@react-three/drei",
+      "source": "n/a",
+      "islands": "partial",
+      "ssr": "n/a",
+      "target": "Real-React island",
+      "summary": "drei peer-depends on @react-three/fiber, so a module importing it runs as a real-React island with no configuration. Verified by hand: OrbitControls inside a fiber Canvas under @react-three/drei 10.7.",
+      "tests": [
+        "TestRealReactIsland",
+        "TestBrowserRealReactIsland"
+      ],
+      "roadmap": false,
+      "knownLimits": [
+        "The mechanism is tested in CI with a minimal react-reconciler renderer; the library itself was verified by hand in Chromium (@react-three/drei 10.7) and is not installed in CI.",
+        "Only OrbitControls was exercised; other helpers have not been tried."
+      ]
+    },
+    {
+      "id": "react-konva",
+      "area": "react-konva",
+      "source": "n/a",
+      "islands": "partial",
+      "ssr": "n/a",
+      "target": "Real-React island",
+      "summary": "react-konva depends on react-reconciler, so a module using Stage, Layer and the shape components runs as a real-React island with no configuration. Verified by hand: a Rect moves when island state changes under react-konva 19.3 and konva 9.3.",
+      "tests": [
+        "TestRealReactIsland",
+        "TestBrowserRealReactIsland"
+      ],
+      "roadmap": false,
+      "knownLimits": [
+        "The mechanism is tested in CI with a minimal react-reconciler renderer; the library itself was verified by hand in Chromium (react-konva 19.3, konva 9.3) and is not installed in CI.",
+        "The canvas is client-only; there is no server rendering."
+      ]
+    },
+    {
       "id": "ssr-islands",
       "area": "SSR island hydration",
       "source": "n/a",

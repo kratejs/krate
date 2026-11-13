@@ -82,6 +82,30 @@ importers:
         specifier: workspace:*
         version: link:../../packages/runtime
 
+  examples/native-from-electron:
+    dependencies:
+      '@krate/app':
+        specifier: workspace:*
+        version: link:../../packages/app
+      '@krate/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@krate/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
+
+  examples/native-media:
+    dependencies:
+      '@krate/app':
+        specifier: workspace:*
+        version: link:../../packages/app
+      '@krate/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@krate/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
+
   examples/native-page:
     dependencies:
       '@krate/app':
@@ -95,6 +119,18 @@ importers:
         version: link:../../packages/runtime
 
   examples/native-plugin:
+    dependencies:
+      '@krate/app':
+        specifier: workspace:*
+        version: link:../../packages/app
+      '@krate/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@krate/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
+
+  examples/native-procs:
     dependencies:
       '@krate/app':
         specifier: workspace:*
@@ -130,43 +166,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/runtime
 
-  examples/native-media:
-    dependencies:
-      '@krate/app':
-        specifier: workspace:*
-        version: link:../../packages/app
-      '@krate/core':
-        specifier: workspace:*
-        version: link:../../packages/core
-      '@krate/runtime':
-        specifier: workspace:*
-        version: link:../../packages/runtime
-
   examples/native-views:
-    dependencies:
-      '@krate/app':
-        specifier: workspace:*
-        version: link:../../packages/app
-      '@krate/core':
-        specifier: workspace:*
-        version: link:../../packages/core
-      '@krate/runtime':
-        specifier: workspace:*
-        version: link:../../packages/runtime
-
-  examples/native-from-electron:
-    dependencies:
-      '@krate/app':
-        specifier: workspace:*
-        version: link:../../packages/app
-      '@krate/core':
-        specifier: workspace:*
-        version: link:../../packages/core
-      '@krate/runtime':
-        specifier: workspace:*
-        version: link:../../packages/runtime
-
-  examples/native-procs:
     dependencies:
       '@krate/app':
         specifier: workspace:*
@@ -296,6 +296,9 @@ importers:
       react-dom:
         specifier: ^19.0.0
         version: 19.2.8(react@19.2.8)
+      react-reconciler:
+        specifier: ^0.33.0
+        version: 0.33.0(react@19.2.8)
 
   packages/runtime:
     devDependencies:
@@ -1852,6 +1855,12 @@ packages:
     peerDependencies:
       react: ^19.2.8
 
+  react-reconciler@0.33.0:
+    resolution: {integrity: sha512-KetWRytFv1epdpJc3J4G75I4WrplZE5jOL7Yq0p34+OVOKF4Se7WrdIdVC45XsSSmUTlht2FM/fM1FZb1mfQeA==}
+    engines: {node: '>=0.10.0'}
+    peerDependencies:
+      react: ^19.2.0
+
   react-remove-scroll-bar@2.3.8:
     resolution: {integrity: sha512-9r+yi9+mgU33AKcj6IbT9oRCO78WriSj6t/cF8DWBZJ9aOGPOTEDvdUDz1FwKim7QXWwmHqtdHnRJfhAxEG46Q==}
     engines: {node: '>=10'}
@@ -3358,6 +3367,11 @@ snapshots:
       react-dom: 19.2.8(react@19.2.8)
 
   react-dom@19.2.8(react@19.2.8):
+    dependencies:
+      react: 19.2.8
+      scheduler: 0.27.0
+
+  react-reconciler@0.33.0(react@19.2.8):
     dependencies:
       react: 19.2.8
       scheduler: 0.27.0

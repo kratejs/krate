@@ -228,6 +228,9 @@ type exportPlan struct {
 type exportClash struct {
 	name  string
 	files []string
+	// pkgOnly is set when every module involved is inside node_modules: the
+	// page's author cannot rename those exports, so there is nothing to warn.
+	pkgOnly bool
 }
 
 // importerRewrites returns, per importing module, the named imports that must
@@ -399,7 +402,13 @@ func (b *Bundler) planExportRenames(mods []*Module, dynamic map[string]bool) exp
 				files = append(files, filepath.Base(mod.Path))
 			}
 			sort.Strings(files)
-			plan.shared = append(plan.shared, exportClash{name: name, files: files})
+			pkgOnly := true
+			for _, mod := range stuck {
+				if !inNodeModules(mod.Path) {
+					pkgOnly = false
+				}
+			}
+			plan.shared = append(plan.shared, exportClash{name: name, files: files, pkgOnly: pkgOnly})
 		}
 	}
 	return plan
@@ -448,6 +457,9 @@ func (b *Bundler) warnExportCollisions(mods []*Module, clashes []exportClash) {
 		return
 	}
 	for _, c := range clashes {
+		if c.pkgOnly {
+			continue
+		}
 		d := diag.Diagnostic{
 			File: entry.Path, Line: 1, Col: 1,
 			Message: "both " + strings.Join(c.files, " and ") + " export " + strconv.Quote(c.name) + ", and this page imports it from each",

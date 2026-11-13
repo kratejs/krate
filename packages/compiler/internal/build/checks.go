@@ -231,7 +231,7 @@ func (b *Builder) loadBuiltPages() ([]check.Page, error) {
 }
 
 var islandChunkRe = regexp.MustCompile(`chunks/island_[A-Za-z0-9]+\.js`)
-var islandSharedRe = regexp.MustCompile(`\./(isl-[A-Za-z0-9]+\.js)`)
+var islandSharedRe = regexp.MustCompile(`\./((?:isl|isr)-[A-Za-z0-9]+\.js)`)
 
 // islandChunkBytes is the size of an island entry plus the shared chunks it
 // imports (each file counted once through seen).

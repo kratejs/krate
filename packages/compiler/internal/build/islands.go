@@ -196,14 +196,16 @@ func (b *Builder) buildIslands(owner string, exts []irtree.ExternalComponent, im
 		resolveDir = b.Root
 	}
 
-	if _, err := b.ensurePreactShared(); err != nil {
-		return "", "", nil, nil, diag.Diagnostic{
-			Message: "island runtime could not be built: " + err.Error(),
-			Hint:    "install Preact 10.20 or newer with `pnpm add preact`, then rebuild",
-		}.WithCode(diag.CodeIslandAsset)
-	}
-	if v := installedPreactVersion(b.Root); v != "" && versionLess(v, "10.20.0") {
-		fmt.Fprintf(os.Stderr, "  %sWarning:%s preact %s is older than 10.20.0; islands use hooks and compat APIs that older releases can break\n", cYellow, cReset, v)
+	if anyPreactIsland(exts) {
+		if _, err := b.ensurePreactShared(); err != nil {
+			return "", "", nil, nil, diag.Diagnostic{
+				Message: "island runtime could not be built: " + err.Error(),
+				Hint:    "install Preact 10.20 or newer with `pnpm add preact`, then rebuild",
+			}.WithCode(diag.CodeIslandAsset)
+		}
+		if v := installedPreactVersion(b.Root); v != "" && versionLess(v, "10.20.0") {
+			fmt.Fprintf(os.Stderr, "  %sWarning:%s preact %s is older than 10.20.0; islands use hooks and compat APIs that older releases can break\n", cYellow, cReset, v)
+		}
 	}
 	var boot strings.Builder
 	var importsJS strings.Builder
@@ -239,9 +241,17 @@ func (b *Builder) buildIslands(owner string, exts []irtree.ExternalComponent, im
 	}
 
 	chunkURL := map[string]string{}
-	var reactGroup []irtree.ExternalComponent
+	var reactGroup, realGroup []irtree.ExternalComponent
 	for _, e := range exts {
 		if e.Subtree == "" {
+			continue
+		}
+		if e.RealReact {
+			// Client-rendered on real React; the server emits the fallback.
+			realGroup = append(realGroup, e)
+			if fb := realFallbackHTML(e); fb != "" {
+				ssrHTML[e.ID] = fb
+			}
 			continue
 		}
 		used := islandImportsFor(e.Subtree, allImports)
@@ -285,6 +295,18 @@ func (b *Builder) buildIslands(owner string, exts []irtree.ExternalComponent, im
 		}
 		url := register(groupSrc)
 		for _, e := range reactGroup {
+			chunkURL[e.ID] = url
+		}
+	}
+	if len(realGroup) > 0 {
+		groupSrc := realIslandGroupSource(realGroup, allImports)
+		if err := b.buildRealIslandBundle(groupSrc, resolveDir, sink); err != nil {
+			return "", "", nil, nil, buildFailure(realGroup[0], err)
+		}
+		name := b.islandEntryName(groupSrc, resolveDir)
+		entries = append(entries, islandEntry{Name: name, Source: groupSrc, ResolveDir: resolveDir, Real: true})
+		url := b.islandEntryURL(name)
+		for _, e := range realGroup {
 			chunkURL[e.ID] = url
 		}
 	}
@@ -643,7 +665,7 @@ func (b *Builder) buildIslandBundle(src, resolveDir string, ssr bool, plugin *ap
 		JSXImportSource: "preact",
 		LogLevel:        api.LogLevelSilent,
 		Alias:           islandAlias(b.Root, ssr),
-		Plugins:         []api.Plugin{islandCSSPlugin(sink), islandJSXPlugin()},
+		Plugins:         []api.Plugin{islandCSSPlugin(sink), islandJSXPlugin(), reconcilerGuardPlugin()},
 	}
 	if prov != nil {
 		opts.Plugins = append(opts.Plugins, islandEntryPlugin(nil, prov.virtualModules()))
@@ -690,7 +712,11 @@ func (b *Builder) buildIslandBundle(src, resolveDir string, ssr bool, plugin *ap
 // project tsconfig usually says `jsxImportSource: "@krate/runtime"`, which
 // esbuild applies to every module under it, so the JSX options are given per
 // module instead. A module's own `@jsxImportSource` pragma still wins.
-func islandJSXPlugin() api.Plugin {
+func islandJSXPlugin() api.Plugin { return islandJSXPluginFor("preact") }
+
+// islandJSXPluginFor is islandJSXPlugin for another JSX runtime package
+// ("react" for real-React islands).
+func islandJSXPluginFor(importSource string) api.Plugin {
 	return api.Plugin{
 		Name: "krate-island-jsx",
 		Setup: func(pb api.PluginBuild) {
@@ -710,8 +736,8 @@ func islandJSXPlugin() api.Plugin {
 					Loader:          loader,
 					Sourcefile:      args.Path,
 					JSX:             api.JSXAutomatic,
-					JSXImportSource: "preact",
-					TsconfigRaw:     `{"compilerOptions":{"jsx":"react-jsx","jsxImportSource":"preact"}}`,
+					JSXImportSource: importSource,
+					TsconfigRaw:     `{"compilerOptions":{"jsx":"react-jsx","jsxImportSource":"` + importSource + `"}}`,
 					Target:          api.ES2020,
 					LogLevel:        api.LogLevelSilent,
 				})
@@ -970,6 +996,16 @@ func versionLess(a, b string) bool {
 	for i := 0; i < 3; i++ {
 		if av[i] != bv[i] {
 			return av[i] < bv[i]
+		}
+	}
+	return false
+}
+
+// anyPreactIsland reports whether any island of the page runs on Preact.
+func anyPreactIsland(exts []irtree.ExternalComponent) bool {
+	for _, e := range exts {
+		if !e.RealReact {
+			return true
 		}
 	}
 	return false
