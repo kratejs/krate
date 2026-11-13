@@ -204,7 +204,9 @@ func recv[T any](t testing.TB, ch <-chan T, what string) T {
 	select {
 	case v := <-ch:
 		return v
-	case <-time.After(5 * time.Second):
+	// Generous: CI runs this package under -race next to other packages,
+	// and a call once took over 5s to start there.
+	case <-time.After(15 * time.Second):
 		t.Fatalf("timed out waiting for %s", what)
 		panic("unreachable")
 	}
