@@ -154,9 +154,10 @@ func TestLayoutProviderWithScriptIsLifted(t *testing.T) {
 	}
 }
 
-// TestAsyncLayoutRendersLibraryToaster: a package component with hooks that an
-// async layout renders is a client boundary, not a server component (KR7110).
-func TestAsyncLayoutRendersLibraryToaster(t *testing.T) {
+// TestAsyncLayoutToasterSharesStore: the Toaster an async layout renders and the
+// client component of an async page are client boundaries built in the island
+// graph, so the library's module state exists once in the browser.
+func TestAsyncLayoutToasterSharesStore(t *testing.T) {
 	root := t.TempDir()
 	cfg := setupIslandProject(t, root, true)
 	toastFixture(t, root)
@@ -166,8 +167,18 @@ func TestAsyncLayoutRendersLibraryToaster(t *testing.T) {
 			return <div id="shell">{children}<Toaster /></div>;
 		}
 	`)
+	writeProjectFile(t, root, "src/pages/app/index.tsx", `
+		import Save from '../../components/Save';
+		export default async function Page() { return <main><h1>one</h1><Save /></main>; }
+	`)
 	out, err := captureOutput(func() error { return New(root, cfg).BuildAll() })
 	if err != nil {
 		t.Fatalf("BuildAll: %v\n%s", err, out)
+	}
+	if copies := strings.Count(islandCode(t, cfg.OutDir), "toast-store-instance"); copies != 1 {
+		t.Fatalf("the toast store must be bundled once, found %d copies", copies)
+	}
+	if files, _ := filepath.Glob(filepath.Join(cfg.OutDir, "chunks", "client.*.js")); len(files) > 0 {
+		t.Fatalf("boundary chunks must be built with the islands, found %v", files)
 	}
 }

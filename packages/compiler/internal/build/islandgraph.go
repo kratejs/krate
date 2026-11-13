@@ -29,6 +29,8 @@ type islandEntry struct {
 	Virtual map[string]islandVirtualModule
 	// Real marks a real-React entry, bundled by writeRealIslandBundles.
 	Real bool
+	// Boundary marks the hydration chunk of a client boundary.
+	Boundary bool
 }
 
 // islandVirtualModule is a generated module an island entry imports.
@@ -193,6 +195,20 @@ func (b *Builder) writeIslandBundles() error {
 	}
 	sink := &islandCSSSink{root: b.Root}
 	minify := b.shouldMinifyJS()
+	plugins := []api.Plugin{islandEntryPlugin(entries, virtual), islandCSSPlugin(sink), islandJSXPlugin(), islandRequirePlugin(), reconcilerGuardPlugin()}
+	var injects []string
+	for _, e := range entries {
+		if !e.Boundary {
+			continue
+		}
+		shim, err := boundaryShims(filepath.Join(b.Cfg.OutDir, ".krate"))
+		if err != nil {
+			return err
+		}
+		injects = []string{shim}
+		plugins = append(plugins, clientOnlyMarkersPlugin(false), actionServerBundlePlugin(b.importResolver(), b.actionModules(), b.Cfg.BaseURLPath()))
+		break
+	}
 	result := esbuildBuild(api.BuildOptions{
 		AbsWorkingDir:       b.Root,
 		EntryPointsAdvanced: points,
@@ -213,7 +229,8 @@ func (b *Builder) writeIslandBundles() error {
 		LogLevel:            api.LogLevelSilent,
 		Alias:               islandAlias(b.Root, false),
 		External:            []string{"preact", "preact/compat", "preact/hooks", "preact/jsx-runtime"},
-		Plugins:             []api.Plugin{islandEntryPlugin(entries, virtual), islandCSSPlugin(sink), islandJSXPlugin(), islandRequirePlugin(), reconcilerGuardPlugin()},
+		Inject:              injects,
+		Plugins:             plugins,
 	})
 	if len(result.Errors) > 0 {
 		var msgs []string

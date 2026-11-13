@@ -2023,16 +2023,17 @@
       "islands": "supported",
       "ssr": "supported",
       "target": "Run as Preact islands",
-      "summary": "A <Toaster /> in a static layout and toast() called from a client component of a page show the toast, with one copy of sonner's store for the layout's island and the page's islands, also after a client-side navigation (sonner 2.0.8). Checked in Chromium by TestBrowserEcosystemLibraries against the real package (the test needs KRATE_ECOSYSTEM_LIBS or KRATE_ECOSYSTEM_INSTALL=1 and is skipped otherwise).",
+      "summary": "A <Toaster /> in a static or an async layout and toast() called from a client component of an async or sync page show the toast, with one copy of sonner's store for the layout and the page, also after a client-side navigation (sonner 2.0.8). Checked in Chromium by TestBrowserEcosystemLibraries against the real package (the test needs KRATE_ECOSYSTEM_LIBS or KRATE_ECOSYSTEM_INSTALL=1 and is skipped otherwise).",
       "tests": [
         "TestBrowserEcosystemLibraries",
         "TestLayoutToasterSharesStoreWithPageIslands",
+        "TestAsyncLayoutToasterSharesStore",
         "fixture:packages/compiler/internal/build/testdata/ecosystem_libs"
       ],
       "roadmap": false,
       "knownLimits": [
         "A layout that hosts an island is swapped on client-side navigation instead of being kept mounted, so toasts still on screen disappear when the page changes.",
-        "Only a static layout hosts the Toaster as shared-store island; in an async layout (rendered per request) the Toaster and the page's toast() callers are bundled separately, so toast() does not reach it.",
+        "A static layout hosts the Toasters of sonner and react-hot-toast as islands (a fixed list); another library's component in a static layout is compiled by Krate and does not share state with islands. Async layouts have no such limit: their client boundaries are built in the island graph.",
         "A plain function of a React package called from a module that is not an island (no \"use client\", not in an event handler) is bundled into the page script with its own copy of the package's state."
       ]
     },
@@ -2107,7 +2108,7 @@
       ],
       "roadmap": false,
       "knownLimits": [
-        "Each island renders its own ThemeProvider (the lifted chain wraps every island), so the theme state is per island: setTheme in one island changes the class on <html> and the stored value but does not re-render useTheme in other islands.",
+        "Each island renders its own ThemeProvider (the lifted chain wraps every island) and next-themes keeps its state in the provider, so the theme state is per island: setTheme in one island changes the class on <html> and the stored value but does not re-render useTheme in other islands (checked in Chromium with two islands).",
         "The server markup renders the theme as undefined until the island hydrates, as it does with React."
       ],
       "diagnostics": [

@@ -608,14 +608,17 @@ export async function mount(el) {
 		return "", false, clientBuildError(b.Root, key, result.Errors)
 	}
 	out := result.OutputFiles[0].Contents
-	name := "chunks/client." + hashContent(out) + ".js"
-	if err := os.MkdirAll(filepath.Join(b.Cfg.OutDir, "chunks"), 0755); err != nil {
-		return "", false, err
+	// This build checks the module and tells whether it holds state. The
+	// chunk the page loads is built with the island entries (writeIslandBundles),
+	// so a library used by a boundary, an island and a layout is one module in
+	// the browser: sonner's toast() reaches the Toaster of another chunk.
+	name := b.islandEntryName(src, resolveDir)
+	b.setIslandEntries("client-boundary\x00"+key, []islandEntry{{Name: name, Source: src, ResolveDir: resolveDir, Boundary: true}})
+	info := clientChunkInfo{url: b.islandEntryURL(name), stateful: statefulHookRe.Match(out)}
+	if b.clientChunkText == nil {
+		b.clientChunkText = map[string]string{}
 	}
-	if err := fsutil.WriteFileIfChanged(filepath.Join(b.Cfg.OutDir, name), out, 0644); err != nil {
-		return "", false, err
-	}
-	info := clientChunkInfo{url: assetHref(b.Cfg.BaseURLPath(), name), stateful: statefulHookRe.Match(out)}
+	b.clientChunkText[info.url] = string(out)
 	if b.clientChunks == nil {
 		b.clientChunks = map[string]clientChunkInfo{}
 	}

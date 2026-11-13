@@ -1208,7 +1208,7 @@ interaction it was clicked or typed into.
 | embla-carousel-react | works: `useEmblaCarousel`, snap list, `scrollNext()` | 8.6.0 |
 | @dnd-kit | works: `DndContext`, `SortableContext`, `useSortable` with the pointer sensor, reordering through a real drag | core 6.3.1, sortable 10.0.0 |
 | next-themes | works: `ThemeProvider` in the root layout and `useTheme` in a client component switch the `<html>` class and theme state; the theme state is per island (see below) | 0.4.6 |
-| sonner | works: `<Toaster />` in a static layout and `toast()` from a client component of a page, one store; toasts on screen are dropped by a client-side navigation | 2.0.8 |
+| sonner | works: `<Toaster />` in a static or async layout and `toast()` from a client component of a page, one store; toasts on screen are dropped by a client-side navigation | 2.0.8 |
 | styled-components, `@emotion/styled`, emotion `css` prop, MUI `Button` | work, client-only (see below); a `ThemeProvider` in a layout reaches them | 6.6.0, 11.14.1, 11.14.0, 9.5.0 |
 
 These were run by hand against the real packages. `TestBrowserEcosystemLibraries`
@@ -1326,15 +1326,28 @@ as an island too, so it shares the library with the layout's island. Rules:
 - A layout that hosts an island is replaced on a client-side navigation instead
   of being kept mounted, so anything the island holds (toasts on screen) is
   lost when the page changes.
-- Only static layouts do this. In an async layout the component is a client
-  boundary with a chunk of its own, and `toast()` called from a page does not
-  reach a Toaster there; render the Toaster from a static layout.
-- Only the packages named above are rendered as islands when a layout renders
-  them directly. A wrapper of your own is hosted whatever it renders.
-- `ThemeProvider` from next-themes in a layout is lifted like any provider, so
-  each island has its own copy: `setTheme` updates `<html>` and the stored
-  theme for the page, but `useTheme` in a second island re-renders only after
-  its own provider changes.
+- An async layout (one that loads the session, say) needs nothing special:
+  its `<Toaster />` and the `"use client"` components of its async and sync
+  pages are client boundaries, built in the same code-split graph as the
+  islands, so `toast()` reaches the Toaster. Checked in Chromium with an async
+  root layout, an async page and a sync page.
+- A static layout renders a component of a React package itself (compiled by
+  Krate, not as an island) except for `sonner` and `react-hot-toast`, which
+  are hosted as islands because their `<Toaster />` shares a store with
+  `toast()`. For another library whose component must share module state with
+  calls from pages, wrap it in a `"use client"` component of your own: a
+  wrapper is hosted whatever it renders.
+- A plain function of a React package called outside a `"use client"` module
+  and outside an event handler (in an effect of a module without the
+  directive) is bundled into the page script with its own copy of the
+  package; put the call in a `"use client"` module.
+- `ThemeProvider` from next-themes in a layout is lifted like any provider,
+  and every island renders its own copy of it. next-themes keeps its state in
+  the provider, not in a module, so it is not shared: with two islands calling
+  `useTheme`, `setTheme` in one updates `<html>` and the stored theme, but the
+  other island shows its old value until it re-renders for another reason.
+  Keep the theme controls and their display in one island, or read the theme
+  from the `<html>` class.
 
 ### State across navigation
 
