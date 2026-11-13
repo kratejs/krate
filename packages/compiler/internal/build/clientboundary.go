@@ -47,10 +47,14 @@ type ClientBoundary struct {
 	Entry      string
 	ResolveDir string
 	Hydrate    bool
+	// Real marks a boundary that runs on real react and react-dom: a React
+	// reconciler library or a module that imports one. The server emits a
+	// fallback placeholder instead of rendering it (see realreact.go).
+	Real bool
 }
 
 // hydrates reports whether the boundary's components become islands.
-func (cb ClientBoundary) hydrates() bool { return cb.Spec == "" || cb.Hydrate }
+func (cb ClientBoundary) hydrates() bool { return cb.Real || cb.Spec == "" || cb.Hydrate }
 
 // anyBoundaryHydrates reports whether a page needs the island loader: some
 // boundary of it becomes an island.
@@ -201,6 +205,21 @@ func (b *Builder) prepareClientBoundaries(bundle *bundler.Bundle, ann *irtree.An
 			}
 		}
 	}
+	// A module that imports a real-React package is a client boundary too: it
+	// runs in the browser on real React, whether or not it says "use client".
+	realMods := map[string]bool{}
+	if bundle.Resolver != nil {
+		islands := b.detectReactIslandModules(bundle.Modules, bundle.Resolver.Resolve)
+		for _, mod := range bundle.Modules {
+			if mod == nil || mod.Program == nil || mod.IsEntry {
+				continue
+			}
+			if im, ok := islands[mod.Path]; ok && im.Direct {
+				clientMods[filepath.Clean(mod.Path)] = mod
+				realMods[filepath.Clean(mod.Path)] = true
+			}
+		}
+	}
 	if errs := checkServerTree(ann, roots, clientMods, bundle.ActionImports); len(errs) > 0 {
 		return nil, errs[0]
 	}
@@ -218,6 +237,12 @@ func (b *Builder) prepareClientBoundaries(bundle *bundler.Bundle, ann *irtree.An
 		exports, err := clientModuleExports(mod)
 		if err != nil {
 			return nil, err
+		}
+		if realMods[p] {
+			cb := ClientBoundary{ModuleID: clientModuleID(b.Root, mod.Path), SourcePath: mod.Path, Exports: exports, Real: true}
+			cb.ChunkURL = b.registerRealBoundary(cb)
+			out = append(out, cb)
+			continue
 		}
 		if err := asyncClientComponentError(mod); err != nil {
 			return nil, err
@@ -752,8 +777,10 @@ func clientBoundaryPlugin(boundaries []ClientBoundary, impls *clientSSRImpls, ou
 	byPath := map[string]ClientBoundary{}
 	var pkgs []ClientBoundary
 	for _, cb := range boundaries {
-		if err := impls.build(cb); err != nil {
-			return api.Plugin{}, err
+		if !cb.Real {
+			if err := impls.build(cb); err != nil {
+				return api.Plugin{}, err
+			}
 		}
 		if cb.Spec != "" {
 			pkgs = append(pkgs, cb)
@@ -793,6 +820,10 @@ func clientBoundaryPlugin(boundaries []ClientBoundary, impls *clientSSRImpls, ou
 				}
 				if !ok {
 					return api.OnLoadResult{}, nil
+				}
+				if cb.Real {
+					stub := realBoundaryStub(cb)
+					return api.OnLoadResult{Contents: &stub, Loader: api.LoaderJS, ResolveDir: filepath.Dir(args.Path)}, nil
 				}
 				rel, err := filepath.Rel(filepath.Dir(outPath), impls.implPath(cb))
 				if err != nil {
@@ -855,6 +886,10 @@ func setupPackageBoundaries(pb api.PluginBuild, pkgs []ClientBoundary, outPath s
 	})
 	pb.OnLoad(api.OnLoadOptions{Filter: ".*", Namespace: ns}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
 		cb := bySpec[args.Path]
+		if cb.Real {
+			stub := realBoundaryStub(cb)
+			return api.OnLoadResult{Contents: &stub, Loader: api.LoaderJS, ResolveDir: filepath.Dir(outPath)}, nil
+		}
 		rel, err := filepath.Rel(filepath.Dir(outPath), impls.implPath(cb))
 		if err != nil {
 			return api.OnLoadResult{}, err

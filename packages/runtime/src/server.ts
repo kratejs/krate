@@ -590,7 +590,8 @@ function wrapClientNamespace(
  * is plain HTML. Children are rendered on the server and passed as HTML, or,
  * when they hold client components of their own, as a tree that keeps those
  * components in the same Preact tree. A namespace export (Radix's Dialog) is
- * wrapped member by member.
+ * wrapped member by member. With `flight` the children always travel as a
+ * tree (a real-React island rebuilds them as elements, not HTML).
  */
 export function clientBoundary(
   moduleId: string,
@@ -599,6 +600,7 @@ export function clientBoundary(
   impl: unknown,
   render: ClientRender,
   hydrate = true,
+  flight = false,
 ): unknown {
   if (impl && typeof impl === "object" && !Array.isArray(impl)) {
     return wrapClientNamespace(moduleId, exportName, src, impl as Record<string, unknown>, render, hydrate);
@@ -616,7 +618,7 @@ export function clientBoundary(
     const hasChildren = children != null && !(Array.isArray(children) && children.length === 0);
     let hydrates = hydrate;
     let childrenHTML: string | null = null;
-    if (hasChildren && hasClientElement(children)) {
+    if (hasChildren && (flight || hasClientElement(children))) {
       const ctx: FlightCtx = { hydrate: false, component: exportName };
       data.__krateTree = await toFlight(children, ctx);
       if (ctx.hydrate) hydrates = true;

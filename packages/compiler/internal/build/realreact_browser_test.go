@@ -35,23 +35,28 @@ func TestBrowserRealReactIsland(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtimeSrc := filepath.Join(repo, "examples", "node_modules", "@krate", "runtime")
-	if _, err := os.Stat(filepath.Join(runtimeSrc, "dist", "krate-runtime.js")); err != nil {
+	if _, err := os.Stat(filepath.Join(repo, "packages", "runtime", "dist", "krate-runtime.js")); err != nil {
 		requireE2E(t, "the runtime package is not built: %v", err)
 	}
+	e2eEnv(t)
 	if err := os.MkdirAll(filepath.Join(root, "node_modules", "@krate"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(runtimeSrc, filepath.Join(root, "node_modules", "@krate", "runtime")); err != nil {
+	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
 		t.Skipf("cannot link the runtime package: %v", err)
 	}
 	t.Chdir(root)
 	realReactFixtureFrom(t, root, repo)
 	realReactSceneFiles(t, root)
+	realReactAsyncFiles(t, root)
 	if out, err := captureOutput(func() error { return New(root, cfg).BuildAll() }); err != nil {
 		t.Fatalf("BuildAll: %v\n%s", err, out)
 	}
-	cmd := exec.Command("node", script, cfg.OutDir, browser)
+	serverBase, err := startKrateServer(t, root, cfg)
+	if err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+	cmd := exec.Command("node", script, cfg.OutDir, browser, serverBase)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		if strings.Contains(string(out), "Executable doesn't exist") || strings.Contains(string(out), "browserType.launch") {

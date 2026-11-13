@@ -113,6 +113,12 @@ export function Canvas({ id, width, height, children }) {
 // without islands.
 func realReactSceneFiles(t *testing.T, root string) {
 	t.Helper()
+	realReactSceneModule(t, root)
+	realReactSitePages(t, root)
+}
+
+func realReactSceneModule(t *testing.T, root string) {
+	t.Helper()
 	writeProjectFile(t, root, "src/components/Scene.tsx", `
 		import { useState } from 'react';
 		import { Canvas, Rect } from 'fake-canvas';
@@ -126,6 +132,10 @@ func realReactSceneFiles(t *testing.T, root string) {
 			);
 		}
 	`)
+}
+
+func realReactSitePages(t *testing.T, root string) {
+	t.Helper()
 	writeProjectFile(t, root, "src/pages/index.tsx", `
 		import { createSignal } from '@krate/runtime';
 		import Scene from '../components/Scene';

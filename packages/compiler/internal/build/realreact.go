@@ -8,8 +8,11 @@ import (
 	"strings"
 	"sync"
 
+	"strconv"
+
 	"github.com/evanw/esbuild/pkg/api"
 	"github.com/kratejs/krate/packages/compiler/ast"
+	"github.com/kratejs/krate/packages/compiler/internal/bundler"
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/escape"
 	"github.com/kratejs/krate/packages/compiler/internal/fsutil"
@@ -73,6 +76,7 @@ func (b *Builder) markRealReactModules(out map[string]*reactIslandModule, infos 
 	for path, im := range out {
 		if in := infos[path]; in != nil && b.realLibPackage(in.libPkgs) != "" {
 			im.Real = true
+			im.Direct = true
 		}
 	}
 	for changed := true; changed; {
@@ -382,4 +386,91 @@ func reconcilerGuardPlugin() api.Plugin {
 			})
 		},
 	}
+}
+
+// Real-React boundaries: real-React components inside the server tree of an
+// async page or layout. The server module is a stub that emits a
+// <krate-island> carrying the serialized props (and children as a tree) with
+// the fallback text inside; the shared island loader imports the boundary's
+// chunk, which mounts it with react-dom. The component itself never runs on
+// the server, so the package is never imported there.
+
+// realBoundaryChunkJS is the part of a real-React boundary chunk that follows
+// its entry preamble (which binds `__m`).
+const realBoundaryChunkJS = `
+function __resolve(name) {
+  return name.split(".").reduce(function (o, k) { return o == null ? o : o[k]; }, __m);
+}
+export function component(name) { return __resolve(name); }
+export async function mount(el) {
+  var name = el.getAttribute("data-export");
+  var C = __resolve(name);
+  if (C == null) throw new Error("real-React module " + el.getAttribute("data-module") + " has no component export " + name);
+  var raw = JSON.parse(el.getAttribute("data-props") || "{}");
+  delete raw["client:fallback"];
+  var loaded = {};
+  loaded[el.getAttribute("data-module") + "#" + name] = C;
+  await Promise.all(__krateClientRefs(raw.__krateTree, []).map(function (r) {
+    return import(r.s).then(function (m) { loaded[r.m + "#" + r.e] = m.component(r.e); });
+  }));
+  var props = __krateRevive(raw, React.createElement, __krateCallAction, function (m, e) { return loaded[m + "#" + e]; });
+  var root = createRoot(el);
+  root.render(React.createElement(C, props));
+  (globalThis.__krate_island_cleanups ||= []).push(function () { root.unmount(); });
+  el.setAttribute("data-krate-island-hydrated", "");
+}
+`
+
+// registerRealBoundary adds the chunk of a real-React boundary to the
+// site-wide real-React bundle and returns its URL.
+func (b *Builder) registerRealBoundary(cb ClientBoundary) string {
+	src := "import * as React from \"react\";\nimport { createRoot } from \"react-dom/client\";\n" +
+		cb.entrySource() + clientReviveJS + clientActionCallJS + realBoundaryChunkJS
+	dir := cb.resolveDir()
+	name := b.islandEntryName(src, dir)
+	b.setIslandEntries("realboundary:"+cb.ModuleID, []islandEntry{{Name: name, Source: src, ResolveDir: dir, Real: true}})
+	return b.islandEntryURL(name)
+}
+
+// realBoundaryStub is the server-bundle replacement of a real-React boundary.
+// Each export is a placeholder component wrapped by clientBoundary, with
+// children always sent as a tree and the `client:fallback` prop as the markup.
+func realBoundaryStub(cb ClientBoundary) string {
+	var sb strings.Builder
+	sb.WriteString("import { clientBoundary as __krateCB } from \"@krate/runtime/server\";\n")
+	sb.WriteString("const __fallback = (C, p) => { const f = p && p[\"client:fallback\"]; return typeof f === \"string\" ? f.replace(/&/g, \"&amp;\").replace(/</g, \"&lt;\").replace(/>/g, \"&gt;\") : \"\"; };\n")
+	for _, name := range cb.Exports {
+		wrapped := fmt.Sprintf("__krateCB(%s, %s, %s, function %s() { return null; }, __fallback, true, true)",
+			strconv.Quote(cb.ModuleID), strconv.Quote(name), strconv.Quote(cb.ChunkURL), stubFuncName(name))
+		if name == "default" {
+			fmt.Fprintf(&sb, "export default %s;\n", wrapped)
+		} else {
+			fmt.Fprintf(&sb, "export const %s = %s;\n", name, wrapped)
+		}
+	}
+	return sb.String()
+}
+
+// stubFuncName is a valid function name for an export (the name shows up in
+// error messages).
+func stubFuncName(export string) string {
+	if export == "default" {
+		return "RealReactComponent"
+	}
+	return export
+}
+
+// realModulePaths is the set of user modules that import a real-React package;
+// the package boundaries skip them (the package is bundled in their chunk).
+func realModulePaths(mods []*bundler.Module, islands map[string]*reactIslandModule) map[string]bool {
+	skip := map[string]bool{}
+	for _, m := range mods {
+		if m == nil || m.Program == nil || m.IsEntry || m.IsExternal {
+			continue
+		}
+		if im, ok := islands[m.Path]; ok && im.Direct {
+			skip[m.Path] = true
+		}
+	}
+	return skip
 }

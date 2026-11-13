@@ -34,6 +34,7 @@ type pkgBoundarySpec struct {
 	spec       string
 	resolveDir string
 	exports    map[string]bool
+	real       bool
 }
 
 // packageBoundaryEntry is the JS preamble that defines `__m`, an object of
@@ -57,10 +58,10 @@ func packageBoundaryEntry(spec string, exports []string) string {
 // modules of a server tree import from React-bound npm packages and builds a
 // boundary for each package specifier. It returns nil when no module of the
 // bundle reaches a package that way.
-func (b *Builder) preparePackageBoundaries(mods []*bundler.Module, resolve func(importer, spec string) string) ([]ClientBoundary, error) {
+func (b *Builder) preparePackageBoundaries(mods []*bundler.Module, resolve func(importer, spec string) string, skip map[string]bool) ([]ClientBoundary, error) {
 	specs := map[string]*pkgBoundarySpec{}
 	for _, m := range mods {
-		if m == nil || m.Program == nil || m.IsExternal || m.IsCSS || resolver.IsCompiledDependency(m.Path) {
+		if m == nil || m.Program == nil || m.IsExternal || m.IsCSS || resolver.IsCompiledDependency(m.Path) || skip[m.Path] {
 			continue
 		}
 		if bundler.HasUseClientDirective(m.SourceCode) {
@@ -86,6 +87,12 @@ func (b *Builder) preparePackageBoundaries(mods []*bundler.Module, resolve func(
 		sort.Strings(exports)
 		id := "c" + hashContent([]byte(sp.spec+"\x00"+strings.Join(exports, "\x00")))
 		entry := packageBoundaryEntry(sp.spec, exports)
+		if sp.real {
+			cb := ClientBoundary{ModuleID: id, SourcePath: id, Spec: sp.spec, Exports: exports, Entry: entry, ResolveDir: sp.resolveDir, Real: true}
+			cb.ChunkURL = b.registerRealBoundary(cb)
+			out = append(out, cb)
+			continue
+		}
 		url, stateful, err := b.clientChunkFor(id, sp.resolveDir, entry)
 		if err != nil {
 			return nil, err
@@ -194,7 +201,7 @@ func (b *Builder) collectPackageComponents(m *bundler.Module, resolve func(impor
 	add := func(src, export string) {
 		sp := specs[src]
 		if sp == nil {
-			sp = &pkgBoundarySpec{spec: src, resolveDir: filepath.Dir(m.Path), exports: map[string]bool{}}
+			sp = &pkgBoundarySpec{spec: src, resolveDir: filepath.Dir(m.Path), exports: map[string]bool{}, real: b.isRealReactPackage(packageNameOf(src))}
 			specs[src] = sp
 		}
 		sp.exports[export] = true
@@ -253,7 +260,7 @@ func (b *Builder) serverTreeBoundaries(bundle *bundler.Bundle, islands map[strin
 			return nil, err
 		}
 	}
-	return b.preparePackageBoundaries(bundle.Modules, resolve)
+	return b.preparePackageBoundaries(bundle.Modules, resolve, realModulePaths(bundle.Modules, islands))
 }
 
 // moduleHasAsyncComponent reports whether a module declares an async
@@ -353,7 +360,7 @@ func serverPageIslandError(islands map[string]*reactIslandModule, mods []*bundle
 	sort.Strings(paths)
 	for _, p := range paths {
 		im := islands[p]
-		if clientPaths[p] || reactIslandTagOnly(im) {
+		if clientPaths[p] || reactIslandTagOnly(im) || im.Direct {
 			continue
 		}
 		return diag.Diagnostic{

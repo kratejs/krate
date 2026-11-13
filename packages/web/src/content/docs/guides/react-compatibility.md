@@ -1444,8 +1444,15 @@ never reach the component.
   Krate cannot read the island's state.
 - Providers a layout wraps around its children are not applied to a real-React
   island. Render the provider inside the island's own module.
-- A page that is itself a real-React island, a layout, and an `async` server
-  page follow the limits of the other React-library islands (`KR8013`).
+- A page that is itself a real-React island, and a synchronous layout, follow
+  the limits of the other React-library islands (`KR8013`).
+- **In `async` pages and layouts** a real-React component also works, used
+  directly (`<Canvas>` from the library) or through a wrapper module. It never
+  goes through the Preact boundary path: the server sends a `<krate-island>`
+  with the `client:fallback` text, the serialized props and the children as an
+  element tree, and the browser mounts it with `react-dom`. Props must be
+  serializable (as for any client component); children may be host elements and
+  other real-React components, with serializable props.
 
 ### What it costs
 

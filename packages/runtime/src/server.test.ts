@@ -52,6 +52,13 @@ describe('clientBoundary', () => {
     expect(html).toContain('data-export="Box"');
   });
 
+  it('sends children as a tree, not HTML, when asked to (real-React islands)', async () => {
+    const Box = clientBoundary('m7', 'Box', '/c.js', function Box() { return null; }, render, true, true) as any;
+    const html = await renderToStringAsync(jsx(Box, { children: jsx('mesh', { position: [1, 2, 3] }) }));
+    expect(html).toContain('__krateTree');
+    expect(html).not.toContain('__krateChildren');
+  });
+
   it('wraps the members of a namespace export under dotted names', async () => {
     const ns = clientBoundary('m3', 'Dialog', '/c.js', { Root() { return null; }, helper() { return 1; } }, render) as any;
     expect(typeof ns.Root).toBe('function');

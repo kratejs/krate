@@ -37,6 +37,9 @@ type reactIslandModule struct {
 	// Real is set when the module needs real react and react-dom (a React
 	// reconciler library): the island is bundled without the Preact alias.
 	Real bool
+	// Direct is set when the module itself imports the real-React package
+	// (Real alone also covers modules that import such a module).
+	Direct bool
 }
 
 type reactPkgInfo struct {

@@ -520,14 +520,15 @@
         "TestRealReactIsland",
         "TestBrowserRealReactIsland",
         "TestRealReactConfigPackage",
-        "TestReconcilerLibraryOnPreactIsland"
+        "TestReconcilerLibraryOnPreactIsland",
+        "TestRealReactInAsyncPages"
       ],
       "roadmap": false,
       "knownLimits": [
         "Client-rendered only: no server markup beyond the fallback text.",
         "Adds react and react-dom (about 60 KB gzipped) plus the library to the pages that use it.",
         "Layout providers are not applied; Krate components cannot be passed in as children (same-file ones are diagnosed with KR8007).",
-        "Layouts and async server pages cannot host them (KR8013)."
+        "Async pages and layouts host them as client-rendered boundaries (props and children must be serializable); synchronous layouts cannot (KR8013)."
       ]
     },
     {
