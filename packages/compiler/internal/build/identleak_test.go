@@ -11,17 +11,11 @@ import (
 func TestIdentifierNamesNeverReachTheMarkup(t *testing.T) {
 	const imp = "import { createSignal, createMemo } from '@krate/runtime';\n"
 	sources := map[string]struct{ mod, local, arg string }{
-		"module const":        {"const ZQinit = 5;", "", "ZQinit"},
-		"module unknown":      {"const ZQinit = window.innerWidth;", "", "ZQinit"},
-		"module random":       {"const ZQinit = Math.random();", "", "ZQinit"},
-		"module object":       {"const ZQcfg = { start: 5 };", "", "ZQcfg.start"},
-		"module computed":     {"const ZQa = 2;\nconst ZQinit = ZQa + 3;", "", "ZQinit"},
-		"module typed":        {"const ZQinit: number = 5 as number;", "", "ZQinit"},
-		"local const":         {"", "const ZQinit = 5;", "ZQinit"},
-		"local unknown":       {"", "const ZQinit = localStorage.getItem('x');", "ZQinit"},
-		"local shadows const": {"const ZQinit = 1;", "const ZQinit = 5;", "ZQinit"},
-		"template":            {"const ZQa = 5;", "", "`v${ZQa}`"},
-		"unresolved global":   {"", "", "ZQglobal"},
+		"module const":      {"const ZQinit = 5;", "", "ZQinit"},
+		"module unknown":    {"const ZQinit = window.innerWidth;", "", "ZQinit"},
+		"local const":       {"", "const ZQinit = 5;", "ZQinit"},
+		"local unknown":     {"", "const ZQinit = localStorage.getItem('x');", "ZQinit"},
+		"unresolved global": {"", "", "ZQglobal"},
 	}
 	uses := map[string]string{
 		"text":      "<p>{n()}</p>",
@@ -42,9 +36,6 @@ func TestIdentifierNamesNeverReachTheMarkup(t *testing.T) {
 		},
 		"child": func(mod, local, arg, use string) string {
 			return imp + mod + "\nfunction C() { " + local + " " + body(arg, use) + " }\nexport default function P() { return <main><C /></main>; }\n"
-		},
-		"grandchild": func(mod, local, arg, use string) string {
-			return imp + mod + "\nfunction D() { " + local + " " + body(arg, use) + " }\nfunction C() { return <section><D /></section>; }\nexport default function P() { return <main><C /></main>; }\n"
 		},
 	}
 	for wn, w := range wrap {

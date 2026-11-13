@@ -119,5 +119,3 @@ func renderStaticHTML(children []irtree.SlotNode) string {
 	walk(children)
 	return b.String()
 }
-
-// renderSlotHTML flattens slot nodes into their static HTML for assertions.
