@@ -170,6 +170,8 @@ function decodePath(p: string): string {
 export function isInternalOutputPath(urlPath: string): boolean {
   const p = cleanPath("/" + decodePath(urlPath).replace(/\\/g, "/"));
   if (p === "/.krate" || p.startsWith("/.krate/")) return true;
+  // The shell of a segment page that renders per request is not a page of the site.
+  if (/(^|\/)__(401|403|404|500)(\/(index\.html)?)?$/.test(p)) return true;
   return p === "/server-manifest.json" || p === "/api-node" || p.startsWith("/api-node/");
 }
 

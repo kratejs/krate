@@ -7,7 +7,50 @@ import (
 	"testing"
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
+	"github.com/kratejs/krate/packages/compiler/internal/plugin"
 )
+
+type docAttrsPlugin struct{}
+
+func (docAttrsPlugin) Name() string { return "doc-attrs" }
+func (docAttrsPlugin) Order() int   { return 50 }
+func (docAttrsPlugin) Hooks() plugin.PluginHooks {
+	return plugin.PluginHooks{AfterPage: func(ctx *plugin.PageHookCtx) error {
+		ctx.HeadHTML += `<html class="from-plugin" data-plugin="1"></html><body data-plugin="b"></body>`
+		return nil
+	}}
+}
+
+// TestPluginHooksSetDocumentAttributes: a hook that appends <html> and <body>
+// elements to headHTML sets the attributes of the document elements; the
+// page's own attribute of the same name wins.
+func TestPluginHooksSetDocumentAttributes(t *testing.T) {
+	saved := plugin.DefaultRegistry
+	plugin.DefaultRegistry = plugin.NewRegistry()
+	defer func() { plugin.DefaultRegistry = saved }()
+	if err := plugin.Register(docAttrsPlugin{}); err != nil {
+		t.Fatal(err)
+	}
+	b, root := scProject(t, map[string]string{
+		"src/pages/index.tsx": `export default function Home() { return <main><Head><html className="page" /></Head><h1>x</h1></main>; }`,
+	})
+	if err := b.BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(root, "dist", "index.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(data)
+	for _, want := range []string{"class=page", "data-plugin=1", "data-plugin=b"} {
+		if !strings.Contains(html, want) {
+			t.Errorf("missing %q:\n%s", want, html)
+		}
+	}
+	if strings.Contains(html, "from-plugin") {
+		t.Errorf("the page's class must win over the plugin's:\n%s", html)
+	}
+}
 
 func TestSplitDocTagsMergesAttributeByAttribute(t *testing.T) {
 	head := `<meta name="a" content="b"><html lang="fr" class="a"></html><html class="b"></html><body data-x="1"></body>`

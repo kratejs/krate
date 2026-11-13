@@ -1004,7 +1004,7 @@ func streamRegionPageModeSC(ctx context.Context, w http.ResponseWriter, flusher 
 	regionList := make([]map[string]string, 0, len(all))
 	var goReq []goRenderRegion
 	reqCtx, _ := json.Marshal(map[string]any{
-		"method": "GET", "url": route, "params": params, "query": query, "headers": headers,
+		"method": "GET", "url": regionURL(ctx, route), "params": params, "query": query, "headers": headers,
 	})
 	for _, b := range all {
 		if gr, ok := goRenders[b.id]; ok {
@@ -1208,7 +1208,7 @@ func streamRegionPageModeSC(ctx context.Context, w http.ResponseWriter, flusher 
 func fetchNodeRegions(ctx context.Context, ssrPort int, route string, params, query, headers map[string]string, regionList []map[string]string, regionHTML map[string]string, res *regionPageResult, internalSecret string) error {
 	reqBody, _ := json.Marshal(map[string]interface{}{
 		"route":   route,
-		"url":     route,
+		"url":     regionURL(ctx, route),
 		"method":  "GET",
 		"headers": headers,
 		"params":  params,
@@ -1691,8 +1691,10 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		},
 	}
 
+	// Segment pages: the nearest 404/500 page for a request (see segments.go).
+	segs := newSegmentIndex(absOut)
 	if hasActions {
-		mux.Handle("/__krate/action/", loggingMiddleware(gate.wrap(http.HandlerFunc(actionHandlerSegments(apiProxy, apiBodyLimit, newSegmentIndex(absOut))))))
+		mux.Handle("/__krate/action/", loggingMiddleware(gate.wrap(http.HandlerFunc(actionHandlerSegments(apiProxy, apiBodyLimit, segs)))))
 	}
 
 	apiHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1791,8 +1793,6 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		}
 	}
 
-	// Segment pages: the nearest 404/500 page for a request (see segments.go).
-	segs := newSegmentIndex(absOut)
 	devMode := hub != nil
 
 	// Scan for dynamic routes ([param] directories) in the output
@@ -1914,7 +1914,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		buf := &captureResponse{status: http.StatusOK}
 		staticServer.ServeHTTP(buf, r)
 		if buf.status == http.StatusNotFound {
-			if m, ok := segs.forURL(SegmentNotFound, r.URL.Path, closedPattern); ok && respondSegment(w, segs, m, http.StatusNotFound, nil) {
+			if m, ok := segs.forURL(SegmentNotFound, r.URL.Path, closedPattern); ok && respondSegment(w, r, segs, m, http.StatusNotFound, nil) {
 				return
 			}
 		}
@@ -2205,7 +2205,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 			fmt.Fprintf(os.Stderr, "  %sRender error (%s) [digest %s]:%s %s\n", cRed, route, srvErr.Digest, cReset, rr.fatalErr)
 			w.Header().Set("X-Krate-Error", "render")
 			w.Header().Del("X-Krate-Cache")
-			if hasErrPage && respondSegment(w, segs, errMatch, http.StatusInternalServerError, &srvErr) {
+			if hasErrPage && respondSegment(w, r, segs, errMatch, http.StatusInternalServerError, &srvErr) {
 				return
 			}
 			w.Header().Set("Cache-Control", "no-store")
@@ -2242,7 +2242,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 				// notFound() or an unmatched variant: the page nearest to the route,
 				// never cached as a success.
 				w.Header().Del("X-Krate-Cache")
-				if m, ok := segs.forRoute(SegmentNotFound, r.URL.Path, page.SegDir); ok && respondSegment(w, segs, m, http.StatusNotFound, nil) {
+				if m, ok := segs.forRoute(SegmentNotFound, r.URL.Path, page.SegDir); ok && respondSegment(w, r, segs, m, http.StatusNotFound, nil) {
 					return
 				}
 				w.Header().Set("Cache-Control", "no-store")
@@ -2329,6 +2329,70 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 
 		ssrPageHandler.ServeHTTP(w, r)
 	})
+
+	// Segment pages that render per request (a 404, 403 or 401 page with
+	// `ssr`): the shell was baked like an SSR page's, and the region render
+	// runs for the request that missed, answering with the segment's status.
+	segs.render = func(w http.ResponseWriter, r *http.Request, m SegmentMatch, status int) bool {
+		if m.Route == "" || !ssr.HasManifest() {
+			return false
+		}
+		page := ssr.pageByRoute(m.Route)
+		if page == nil {
+			return false
+		}
+		headers := make(map[string]string)
+		for k, v := range r.Header {
+			if len(v) > 0 {
+				headers[k] = v[0]
+			}
+		}
+		query := make(map[string]string)
+		for k, v := range r.URL.Query() {
+			if len(v) > 0 {
+				query[k] = v[0]
+			}
+		}
+		params := m.Params
+		if params == nil {
+			params = map[string]string{}
+		}
+		var renderGo func([]goRenderRegion) (map[string]string, error)
+		if goAPI != nil && goAPI.Active() {
+			requestCtx := r.Context()
+			renderGo = func(regions []goRenderRegion) (map[string]string, error) {
+				return goAPI.RenderContext(requestCtx, regions)
+			}
+		}
+		regionPort := 0
+		if ssrStarted {
+			regionPort = ssrPort
+		}
+		flusher, _ := w.(http.Flusher)
+		sw := &forcedStatusWriter{ResponseWriter: w, status: status}
+		h := w.Header()
+		h.Set("Content-Type", "text/html; charset=utf-8")
+		h.Set("Cache-Control", "no-store")
+		h.Del("Content-Length")
+		h.Del("Content-Encoding")
+		h.Del("Etag")
+		h.Del("Last-Modified")
+		ctx := withRegionURL(r.Context(), r.URL.Path)
+		rr := streamRegionPageModeSC(ctx, sw, flusher, regionShells, absOut, m.Route, regionPort, params, query, headers, goRegionsByRoute[m.Route], renderGo, false, 0, ssr.InternalSecret(), false, page.ServerComponents, false)
+		if !rr.served || rr.unavailable != "" || rr.fatalErr != "" || rr.notFound || rr.denied != 0 || rr.redirect != "" {
+			// Nothing was written: the baked shell answers instead.
+			if rr.unavailable != "" {
+				fmt.Fprintf(os.Stderr, "  %sSegment page renderer unavailable (%s):%s %s\n", cYellow, m.Route, cReset, rr.unavailable)
+			} else if rr.fatalErr != "" {
+				fmt.Fprintf(os.Stderr, "  %sSegment page render error (%s):%s %s\n", cRed, m.Route, cReset, rr.fatalErr)
+			}
+			return false
+		}
+		if rr.renderErr != "" {
+			fmt.Fprintf(os.Stderr, "  %sSegment page region error (%s):%s %s\n", cYellow, m.Route, cReset, rr.renderErr)
+		}
+		return true
+	}
 
 	// User middleware handler for pages (also wraps /api and server actions
 	// above).
@@ -2896,6 +2960,8 @@ func sanitizeRedirectTarget(configured, out string) string {
 // isInternalOutputPath reports whether a request targets Krate's server-only
 // output directory. It normalizes slash/backslash and repeated separators so
 // encoded or Windows-shaped paths cannot slip past.
+var segmentShellPathRe = regexp.MustCompile(`(^|/)__(401|403|404|500)(/(index\.html)?)?$`)
+
 func isInternalOutputPath(urlPath string) bool {
 	if decoded, err := url.PathUnescape(urlPath); err == nil {
 		urlPath = decoded
@@ -2903,6 +2969,11 @@ func isInternalOutputPath(urlPath string) bool {
 	p := strings.ReplaceAll(urlPath, "\\", "/")
 	p = path.Clean("/" + p)
 	if p == "/.krate" || strings.HasPrefix(p, "/.krate/") {
+		return true
+	}
+	// The shell of a segment page that renders per request is not a page of
+	// the site (its hydration script, next to it, is public).
+	if segmentShellPathRe.MatchString(p) {
 		return true
 	}
 	// Defense in depth: where older builds wrote server-only files into the

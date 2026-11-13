@@ -120,13 +120,15 @@
         "TestNestedNotFoundBecomesSegmentPage",
         "TestServerlessNodeParity",
         "TestPlatformDeploysKeepSegmentPages",
+        "TestSegmentPageRendersPerRequest",
+        "TestSegmentPageRendersPerRequestOnNodeTarget",
         "browser:/r18/boundary_reset_state/",
         "browser:/r18/boundary_fallback_throws/"
       ],
       "roadmap": false,
       "knownLimits": [
         "A page that throws while it is prerendered still fails the build (KR3010); the segment error page is not baked in as a build-time fallback.",
-        "Segment pages are always prerendered; request-time rendering modes on them are ignored with KR9003.",
+        "A 404, 403 or 401 page can render per request (ssr, async, runtime components) with its status; error pages are always prerendered and ignore request-time modes with KR9003.",
         "In the server-rendered error page, error.message and error.digest are filled into the HTML before hydration; text derived from them at render time appears once the page hydrates."
       ],
       "diagnostics": [

@@ -47,6 +47,12 @@ import (
 	"github.com/kratejs/krate/packages/native/jsruntime"
 )
 
+// isDynamicSegment reports whether a segment page (404, 401, 403) renders per
+// request instead of being prerendered.
+func (r *PageResult) isDynamicSegment() bool {
+	return r.IsErrorPage && r.Mode != RenderSSG
+}
+
 type PageResult struct {
 	Page     string
 	OutName  string
@@ -2020,7 +2026,7 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 				pageDir = filepath.Join(b.Cfg.OutDir, r.OutName)
 			}
 
-			if !r.IsErrorPage {
+			if !r.IsErrorPage || r.isDynamicSegment() {
 				if err := os.MkdirAll(pageDir, 0755); err != nil {
 					b.pluginFailed(fmt.Errorf("creating page dir %s: %w", pageDir, err))
 					return
@@ -2185,6 +2191,14 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 			if err := fsutil.WriteFileIfChanged(htmlPath, []byte(html), 0644); err != nil {
 				b.pluginFailed(fmt.Errorf("writing %s: %w", htmlPath, err))
 				return
+			}
+			if r.isDynamicSegment() {
+				// The renderer addresses the page as a route: its shell sits
+				// where a route's index.html would.
+				if err := fsutil.WriteFileIfChanged(filepath.Join(pageDir, "index.html"), []byte(html), 0644); err != nil {
+					b.pluginFailed(fmt.Errorf("writing the shell of %s: %w", r.Page, err))
+					return
+				}
 			}
 			if legacyHTML != "" {
 				if err := fsutil.WriteFileIfChanged(filepath.Join(pageDir, "index.legacy.html"), []byte(finish(legacyHTML)), 0644); err != nil {
@@ -2475,17 +2489,28 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 	pageBase := strings.TrimSuffix(filepath.Base(page), filepath.Ext(page))
 	isSegment := isSegmentPageBase(pageBase)
 	if isSegment && renderMode != RenderSSG {
-		// Segment pages are prerendered once and picked per request by the
-		// server, so a request-time mode cannot apply to them.
-		if declaredMode != RenderSSG || importsRuntimeComponent(bundle.Modules) {
-			d := diag.New(page, 1, 1, filepath.Base(page)+" is a segment page and is always prerendered; its "+renderMode.String()+" rendering mode is ignored",
-				"read request data in client code, or use a normal route for request-time content", "").WithCode(diag.CodeSegmentRequestMode)
-			d.Severity = diag.SeverityWarning
-			printWarningsOnce(os.Stderr, []diag.Diagnostic{d})
-			pageWarnings = append(pageWarnings, d)
+		segKind, _ := segmentKindOfFile(page)
+		if segKind != SegmentError {
+			// A not-found, forbidden or unauthorized page that asks for
+			// request-time rendering is rendered per request with its status.
+			// ISR makes no sense for a response that is never cached.
+			if renderMode == RenderISR {
+				renderMode = RenderSSR
+			}
+			revalidate = 0
+		} else {
+			// An error page answers while the app is failing, so it never
+			// depends on the renderer: it is prerendered once.
+			if declaredMode != RenderSSG || importsRuntimeComponent(bundle.Modules) {
+				d := diag.New(page, 1, 1, filepath.Base(page)+" is an error page and is always prerendered; its "+renderMode.String()+" rendering mode is ignored",
+					"read request data in client code; only 404, 401 and 403 pages can render per request", "").WithCode(diag.CodeSegmentRequestMode)
+				d.Severity = diag.SeverityWarning
+				printWarningsOnce(os.Stderr, []diag.Diagnostic{d})
+				pageWarnings = append(pageWarnings, d)
+			}
+			renderMode = RenderSSG
+			revalidate = 0
 		}
-		renderMode = RenderSSG
-		revalidate = 0
 	}
 
 	isDynRoute := isDynamicRoute(page, b.Cfg.PagesDir)
@@ -2821,7 +2846,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 		}, bundle.CSS, nil
 	}
 
-	if !isSegment {
+	if !isSegment || renderMode != RenderSSG {
 		if err := os.MkdirAll(pageDir, 0755); err != nil {
 			return nil, "", fmt.Errorf("creating page dir: %w", err)
 		}

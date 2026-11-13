@@ -68,6 +68,12 @@ export default function myPlugin(options: MyPluginOptions = {}) {
   `BuildContext`, `ParseContext`, `MarkdownContext`, `RenderContext`,
   `PageContext`, `BuildResultContext`, `ServeRequestContext`, and
   `ServeResponseContext`.
+- **Document attributes** - the `<html>` and `<body>` elements a page or layout puts
+  in `<Head>` appear in `ctx.headHTML` of the `AfterRender` and `AfterPage` hooks, and a
+  hook can append its own (`ctx.headHTML += '<html class="dark"></html>'`); they
+  set the attributes of the document elements when the page is written, and the
+  page's own attributes win over a hook's for the same name. Hooks never see the
+  `<html>` and `<body>` tags themselves, because the document is assembled after them.
 - **`krate` capabilities** - instead of raw `fs` guesswork or a hand-rolled
   `node_modules` walk, use the host-backed methods: `krate.resolveFile(spec)`
   and `krate.readFile(spec)` (root-anchored; bare specifiers resolve through
