@@ -449,6 +449,14 @@ cross-document `@view-transition { navigation: auto }` rule so full-page loads
 morph too. Mark persistent chrome with `data-view-transition="name"` to morph it
 instead of cross-fading. Reduced-motion preferences are respected.
 
+## Smooth Scroll
+
+```typescript
+smoothScroll: true, // true | false | { lerp, duration, easing, anchors, snap, ... }
+```
+
+Enables [Lenis](https://lenis.darkroom.engineering) smooth scrolling. Unset by default, and nothing from Lenis ships until it is set. `true` uses the Lenis defaults; an object tunes it, with `enabled: false` to switch it off. Options mirror Lenis: `lerp`, `duration`, `easing` (a preset name or `cubic-bezier(...)`), `smoothWheel`, `syncTouch`, `infinite`, `orientation`, `gestureOrientation`, `wheelMultiplier`, `touchMultiplier`, `anchors`, `prevent` (a CSS selector), `snap`, and more. See [Smooth Scroll](/docs/features/smooth-scroll/) for the full list.
+
 ## Plugins
 
 ```typescript

@@ -494,6 +494,16 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 			return err
 		}
 		cfg.Headers = hr
+	case "smoothScroll":
+		data, err := json.Marshal(val)
+		if err != nil {
+			return err
+		}
+		var sc SmoothScrollConfig
+		if err := json.Unmarshal(data, &sc); err != nil {
+			return err
+		}
+		cfg.SmoothScroll = &sc
 	case "images":
 		data, err := json.Marshal(val)
 		if err != nil {

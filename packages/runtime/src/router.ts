@@ -757,9 +757,32 @@ function hashTarget(hash: string): Element | null {
   return document.getElementById(id) || document.getElementsByName(id)[0] || null;
 }
 
+interface LenisLike {
+  scrollTo(target: number | Element, options?: { immediate?: boolean; force?: boolean }): void;
+}
+
+function smoothScroller(): LenisLike | null {
+  const l = (window as unknown as { lenis?: LenisLike }).lenis;
+  return l && typeof l.scrollTo === 'function' ? l : null;
+}
+
+function jumpTo(y: number): void {
+  const lenis = smoothScroller();
+  if (lenis) {
+    lenis.scrollTo(y, { immediate: true, force: true });
+    return;
+  }
+  window.scrollTo(0, y);
+}
+
 function scrollToHash(hash: string): boolean {
   const el = hashTarget(hash);
   if (!el) return false;
+  const lenis = smoothScroller();
+  if (lenis) {
+    lenis.scrollTo(el);
+    return true;
+  }
   try {
     el.scrollIntoView({ block: 'start' });
   } catch {
@@ -772,13 +795,13 @@ function applyScroll(url: string, req: NavRequest): void {
   if (req.kind === 'pop') {
     const saved = req.restoreKey ? scrollPositions.get(req.restoreKey) : undefined;
     if (saved !== undefined) {
-      window.scrollTo(0, saved);
+      jumpTo(saved);
       return;
     }
   }
   const hash = new URL(url, location.href).hash;
   if (scrollToHash(hash)) return;
-  if (req.scroll && req.kind !== 'refresh') window.scrollTo(0, 0);
+  if (req.scroll && req.kind !== 'refresh') jumpTo(0);
 }
 
 let focusedRoot: HTMLElement | null = null;
@@ -1579,7 +1602,7 @@ function restoreSnapshot(snap: SlotSnapshot, key: string): boolean {
   currentKey = key;
   renderedPath = pathOf(location.href);
   const saved = scrollPositions.get(key);
-  if (saved !== undefined) window.scrollTo(0, saved);
+  if (saved !== undefined) jumpTo(saved);
   updateActiveLinks();
   dispatch('krate:navigate', { url: location.href, status: 200 });
   notifyNavigation(location.href);
@@ -1616,7 +1639,7 @@ function hashNavigate(url: string, req: NavRequest): void {
     }
   }
   const hash = new URL(url).hash;
-  if (!scrollToHash(hash) && req.scroll && !hash) window.scrollTo(0, 0);
+  if (!scrollToHash(hash) && req.scroll && !hash) jumpTo(0);
   emit();
 }
 
@@ -1709,7 +1732,7 @@ function popstateHandler(e: PopStateEvent): void {
     cancelPending();
     currentKey = key || currentKey;
     const saved = key ? scrollPositions.get(key) : undefined;
-    if (saved !== undefined) window.scrollTo(0, saved);
+    if (saved !== undefined) jumpTo(saved);
     else scrollToHash(location.hash);
     emit();
     return;

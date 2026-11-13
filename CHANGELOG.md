@@ -216,6 +216,7 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Added
 
+- `smoothScroll` config key enables [Lenis](https://lenis.darkroom.engineering) smooth scrolling, with its options, anchors and snap. Nothing ships unless it is set. The SPA router scrolls through Lenis on navigation.
 - The embedded QuickJS runtime installs each group of Web APIs the first time code reads one of
   its globals, so creating a VM costs about 1.4 ms instead of 3.2 ms. Config and
   Tailwind evaluation, `generateStaticParams`, metadata and isolation-mode API requests get

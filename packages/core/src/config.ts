@@ -302,6 +302,72 @@ export interface HeaderRule {
 }
 
 /** Allowlist entry for remote <Image> sources. */
+export type SmoothScrollEasing =
+  | "easeOutExpo"
+  | "linear"
+  | "easeInQuad"
+  | "easeOutQuad"
+  | "easeInOutQuad"
+  | "easeInCubic"
+  | "easeOutCubic"
+  | "easeInOutCubic"
+  | "easeInQuart"
+  | "easeOutQuart"
+  | "easeInOutQuart"
+  | "easeInExpo"
+  | "easeInOutExpo"
+  | "easeInSine"
+  | "easeOutSine"
+  | "easeInOutSine"
+  | `cubic-bezier(${string})`;
+
+export interface SmoothScrollAnchorsConfig {
+  offset?: number;
+  duration?: number;
+  easing?: SmoothScrollEasing;
+  immediate?: boolean;
+  lock?: boolean;
+}
+
+export interface SmoothScrollSnapConfig {
+  type?: "proximity" | "mandatory" | "lock";
+  lerp?: number;
+  duration?: number;
+  easing?: SmoothScrollEasing;
+  distanceThreshold?: number | `${number}%`;
+  debounce?: number;
+}
+
+export interface SmoothScrollConfig {
+  enabled?: boolean;
+  lerp?: number;
+  duration?: number;
+  easing?: SmoothScrollEasing;
+  smoothWheel?: boolean;
+  syncTouch?: boolean;
+  syncTouchLerp?: number;
+  touchInertiaExponent?: number;
+  infinite?: boolean;
+  orientation?: "vertical" | "horizontal";
+  gestureOrientation?: "vertical" | "horizontal" | "both";
+  touchMultiplier?: number;
+  wheelMultiplier?: number;
+  autoResize?: boolean;
+  overscroll?: boolean;
+  autoRaf?: boolean;
+  anchors?: boolean | SmoothScrollAnchorsConfig;
+  autoToggle?: boolean;
+  allowNestedScroll?: boolean;
+  naiveDimensions?: boolean;
+  stopInertiaOnNavigate?: boolean;
+  respectReducedMotion?: boolean;
+  prevent?: string;
+  wrapper?: string;
+  content?: string;
+  eventsTarget?: string;
+  snap?: boolean | SmoothScrollSnapConfig;
+}
+
 export interface ImageRemotePattern {
   hostname: string;
   pathname?: string;
@@ -804,6 +870,7 @@ export interface KrateConfig {
    * `false`/`"off"` disables it.
    */
   viewTransitions?: boolean | "auto" | "off";
+  smoothScroll?: boolean | SmoothScrollConfig;
   /**
    * Partial prerendering: cache dynamic regions on non-ISR pages with
    * stale-while-revalidate. `true` uses the default window; an object sets it.
