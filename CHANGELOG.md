@@ -275,6 +275,14 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
   `node_modules`, so a sibling monorepo package can share tokens.
 - `<Link basePath={false}>` and `<a data-krate-no-base>` link to pages outside the base path; the
   `KR7144` hint points at them.
+- `<html>` and `<body>` attributes: `site.htmlAttributes` and `site.bodyAttributes` in the config, and
+  `<html className="dark" />` / `<body className="..." />` inside `<Head>` per layout or page (merged
+  site, layouts, page; per request on SSR pages). The Next migrator moves root-layout `<html>` and
+  `<body>` attributes there.
+- `Head`, `Link`, `Image`, `Script`, `Style`, `Icon`, `Suspense` and `SyntaxHighlight` are exported from
+  `@krate/runtime` and work in any component module, islands included.
+- A 404, 403 or 401 page that is SSR, async or uses runtime components renders per request with its
+  status on `krate serve`, dev and the server targets; `output: "static"` still prerenders it.
 - `KR8353` warns when a `<Head>` value cannot be computed at build time, so crawlers would not see it.
   Head values may use `URL` and `encodeURIComponent`.
 - `krate migrate nextjs` maps `next/font/local` and the `geist` fonts, keeps `maxDuration` in API
@@ -388,6 +396,9 @@ host code runs in the native process. Names and options may change between relea
   out as an empty slot or fail with `KR8352`.
 - A `fetch(..., { cache: "no-store" })` in client code no longer turns the page into SSR.
 - SVG types accept `xmlns`, `xlink:*`, `xml:space`, filter and gradient elements and event handlers.
+- `<Head>` inside a component no longer throws `Head is not defined` on SSR pages, and Head content from
+  island components reaches prerendered pages (the last `<title>` wins, as at request time).
+- A prerendered page whose only stateful component sits in `<Head>` ships no hydration JavaScript.
 - `/404` and `/404.html` answer with the 404 page and status 404 instead of redirecting.
 - A symlinked workspace package with TypeScript source loads in the Node server output.
 - The generated types of a Go host signal say `T | undefined`, as for `@host` TypeScript signals: it
