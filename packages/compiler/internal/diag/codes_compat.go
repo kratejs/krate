@@ -153,7 +153,8 @@ func init() {
 				"context provider that can be moved into the islands: Krate renders the page content, and an island " +
 				"cannot sit inside markup that belongs to the layout. The layout keeps the component as it was and " +
 				"the islands of its pages do not see its context. Split the component into a provider that renders " +
-				"only its children and the markup, or put the provider inside the island's own module.",
+				"only its children and the markup, or put the provider inside the island's own module. A provider that adds " +
+				"only `<script>` elements next to its children (next-themes) is lifted.",
 		},
 		CodeInfo{
 			Code:  CodeClientDirective,

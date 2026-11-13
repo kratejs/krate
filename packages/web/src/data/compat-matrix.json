@@ -2020,18 +2020,20 @@
       "id": "lib-sonner",
       "area": "sonner (toasts)",
       "source": "n/a",
-      "islands": "partial",
+      "islands": "supported",
       "ssr": "supported",
       "target": "Run as Preact islands",
-      "summary": "toast() and <Toaster /> render and show a toast with its description (sonner 2.0.8). Checked in Chromium by TestBrowserEcosystemLibraries against the real package (the test needs KRATE_ECOSYSTEM_LIBS or KRATE_ECOSYSTEM_INSTALL=1 and is skipped otherwise).",
+      "summary": "A <Toaster /> in a static layout and toast() called from a client component of a page show the toast, with one copy of sonner's store for the layout's island and the page's islands, also after a client-side navigation (sonner 2.0.8). Checked in Chromium by TestBrowserEcosystemLibraries against the real package (the test needs KRATE_ECOSYSTEM_LIBS or KRATE_ECOSYSTEM_INSTALL=1 and is skipped otherwise).",
       "tests": [
         "TestBrowserEcosystemLibraries",
+        "TestLayoutToasterSharesStoreWithPageIslands",
         "fixture:packages/compiler/internal/build/testdata/ecosystem_libs"
       ],
       "roadmap": false,
       "knownLimits": [
-        "toast() and <Toaster /> must live in one island module: a component that only calls toast() is not detected as an island, so the build fails with \"cannot bundle sonner for the browser\" (react is not aliased to preact/compat in the page vendor bundle), and importing a helper from the island module leaves the binding undefined in the page.",
-        "The usual shadcn pattern (a <Toaster /> wrapper in the root layout, toast() called from other components) does not work yet: a layout cannot host the island (KR8013), and toast() in a separate component hits the first limit."
+        "A layout that hosts an island is swapped on client-side navigation instead of being kept mounted, so toasts still on screen disappear when the page changes.",
+        "Only a static layout hosts the Toaster as shared-store island; in an async layout (rendered per request) the Toaster and the page's toast() callers are bundled separately, so toast() does not reach it.",
+        "A plain function of a React package called from a module that is not an island (no \"use client\", not in an event handler) is bundled into the page script with its own copy of the package's state."
       ]
     },
     {
@@ -2094,17 +2096,18 @@
       "id": "lib-next-themes",
       "area": "next-themes",
       "source": "n/a",
-      "islands": "partial",
+      "islands": "supported",
       "ssr": "supported",
       "target": "Run as Preact islands",
-      "summary": "ThemeProvider and useTheme switch the class on <html> and update the theme state; the anti-flash script is part of the server markup (next-themes 0.4.6). Checked in Chromium by TestBrowserEcosystemLibraries against the real package (the test needs KRATE_ECOSYSTEM_LIBS or KRATE_ECOSYSTEM_INSTALL=1 and is skipped otherwise).",
+      "summary": "A ThemeProvider in a layout is lifted into the islands of its pages and useTheme in a client component switches the class on <html> and updates the theme state (next-themes 0.4.6). The provider's anti-flash script is part of each island's server markup. Checked in Chromium by TestBrowserEcosystemLibraries against the real package (the test needs KRATE_ECOSYSTEM_LIBS or KRATE_ECOSYSTEM_INSTALL=1 and is skipped otherwise).",
       "tests": [
         "TestBrowserEcosystemLibraries",
+        "TestLayoutProviderWithScriptIsLifted",
         "fixture:packages/compiler/internal/build/testdata/ecosystem_libs"
       ],
       "roadmap": false,
       "knownLimits": [
-        "A ThemeProvider in a layout is not lifted into the islands (KR8016: it renders a script next to its children), so useTheme in pages and components outside the provider's own module sees no context. Wrap the island's module in the provider instead.",
+        "Each island renders its own ThemeProvider (the lifted chain wraps every island), so the theme state is per island: setTheme in one island changes the class on <html> and the stored value but does not re-render useTheme in other islands.",
         "The server markup renders the theme as undefined until the island hydrates, as it does with React."
       ],
       "diagnostics": [

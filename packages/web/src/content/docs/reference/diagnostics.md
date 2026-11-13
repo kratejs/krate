@@ -1028,7 +1028,7 @@ A layout wraps `{children}` in a component of a React library (a `QueryClientPro
 
 **Layout provider renders markup around its children**
 
-A component a layout wraps around `{children}` renders elements of its own, so it is not a context provider that can be moved into the islands: Krate renders the page content, and an island cannot sit inside markup that belongs to the layout. The layout keeps the component as it was and the islands of its pages do not see its context. Split the component into a provider that renders only its children and the markup, or put the provider inside the island's own module.
+A component a layout wraps around `{children}` renders elements of its own, so it is not a context provider that can be moved into the islands: Krate renders the page content, and an island cannot sit inside markup that belongs to the layout. The layout keeps the component as it was and the islands of its pages do not see its context. Split the component into a provider that renders only its children and the markup, or put the provider inside the island's own module. A provider that adds only `<script>` elements next to its children (next-themes) is lifted.
 
 ### KR8030
 
