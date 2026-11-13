@@ -219,6 +219,12 @@ func (b *Builder) prepareClientBoundaries(bundle *bundler.Bundle, ann *irtree.An
 			if im, ok := islands[mod.Path]; ok && (im.Direct || im.Real && bundler.HasUseClientDirective(mod.SourceCode)) {
 				clientMods[filepath.Clean(mod.Path)] = mod
 				realMods[filepath.Clean(mod.Path)] = true
+				// The canonical spelling registered above must be real too, or
+				// a symlinked root (macOS /var) builds it as a Preact boundary.
+				if resolved := canonicalPath(mod.Path); resolved != filepath.Clean(mod.Path) {
+					clientMods[resolved] = mod
+					realMods[resolved] = true
+				}
 			}
 		}
 	}

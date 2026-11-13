@@ -39,11 +39,7 @@ func hoistInlineActions(root, abs, src string) (*inlineaction.Result, error) {
 	if !inlineaction.Has(src) {
 		return nil, nil
 	}
-	rel, err := filepath.Rel(root, abs)
-	if err != nil {
-		rel = abs
-	}
-	rel = filepath.ToSlash(rel)
+	rel := inlineActionRel(root, abs)
 	return inlineaction.Hoist(src, inlineaction.Options{
 		Path:   rel,
 		Rel:    rel,
@@ -51,6 +47,22 @@ func hoistInlineActions(root, abs, src string) (*inlineaction.Result, error) {
 		Client: bundler.HasUseClientDirective(src),
 		Call:   inlineaction.Call,
 	})
+}
+
+// inlineActionRel is abs relative to root with symlinks resolved on both
+// sides. Action IDs derive from it, and esbuild hands plugins canonical paths
+// (macOS /var is /private/var), so the registry and the server bundles must
+// agree on one spelling.
+func inlineActionRel(root, abs string) string {
+	rel, err := filepath.Rel(canonicalPath(root), canonicalPath(abs))
+	if err != nil || strings.HasPrefix(rel, "..") {
+		if r2, err2 := filepath.Rel(root, abs); err2 == nil {
+			rel = r2
+		} else {
+			rel = abs
+		}
+	}
+	return filepath.ToSlash(rel)
 }
 
 // hoistInlineModules writes one generated action module per source file that
@@ -69,8 +81,7 @@ func (b *Builder) hoistInlineModules(dir string, files []string) ([]*actionModul
 		if res == nil {
 			continue
 		}
-		rel, _ := filepath.Rel(b.Root, abs)
-		rel = filepath.ToSlash(rel)
+		rel := inlineActionRel(b.Root, abs)
 		ext := ".tsx"
 		if e := strings.ToLower(filepath.Ext(abs)); e == ".ts" || e == ".mts" {
 			ext = ".ts"
