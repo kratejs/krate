@@ -22,15 +22,16 @@ const server = http.createServer((req, res) => {
 });
 await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 const base = `http://127.0.0.1:${server.address().port}`;
+const serverBase = process.argv[4];
 const browser = await browserType.launch({ headless: true });
 const failures = [];
 
-async function run(name, fn) {
+async function run(name, fn, origin = base) {
   const page = await browser.newPage({ viewport: { width: 800, height: 600 } });
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
   try {
-    await page.goto(`${base}/${name}/`, { waitUntil: "load" });
+    await page.goto(`${origin}/${name}/`, { waitUntil: "load" });
     // Islands are display:contents, so they are attached but never "visible".
     await page.waitForSelector("[data-krate-island-hydrated]", { state: "attached", timeout: 10000 });
     const out = await fn(page);
@@ -61,6 +62,26 @@ try {
     const toasters = await p.locator("[data-sonner-toaster]").count();
     return toasters === 1 ? true : `toasters after navigation=${toasters}`;
   });
+  for (const [name, firstTitle] of [["asynctoast", "a"]]) {
+    await run(name, async (p) => {
+      await p.click("#save");
+      await p.waitForSelector("[data-sonner-toast]", { timeout: 4000 });
+      const first = await p.textContent("[data-sonner-toast]");
+      if (!first.includes("Saved from page")) return `toast text ${first}`;
+      await p.click("#to-b");
+      await p.waitForFunction(() => document.querySelector("h1")?.textContent === "b", null, { timeout: 5000 });
+      await p.waitForTimeout(500);
+      await p.click("#save");
+      await p.waitForSelector("[data-sonner-toast]", { timeout: 4000 });
+      const toasters = await p.locator("[data-sonner-toaster]").count();
+      return toasters === 1 ? true : `toasters after navigation=${toasters}`;
+    }, serverBase);
+  }
+  await run("asynctoast/b", async (p) => {
+    await p.click("#save");
+    await p.waitForSelector("[data-sonner-toast]", { timeout: 4000 });
+    return true;
+  }, serverBase);
   await run("cmdk", async (p) => {
     const total = await p.locator("[cmdk-item]").count();
     await p.fill("[cmdk-input]", "ban");
@@ -112,6 +133,10 @@ try {
     await p.waitForTimeout(200);
     const cls = await p.evaluate(() => document.documentElement.className);
     const txt = await p.textContent("#theme");
+    const txt2 = await p.textContent("#theme2");
+    // Each island has its own ThemeProvider, so the second island keeps its
+    // own theme state (documented limit); only the first one is asserted.
+    console.log("themelayout second island:", txt2);
     return cls.includes("dark") && txt.startsWith("dark") ? true : `class=${cls} text=${txt}`;
   });
   await run("motion", async (p) => {

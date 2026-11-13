@@ -34,6 +34,7 @@ func TestBrowserEcosystemLibraries(t *testing.T) {
 	if err := exec.Command("node", "-e", "require.resolve('playwright')").Run(); err != nil {
 		requireE2E(t, "playwright is not installed (run pnpm install)")
 	}
+	e2eEnv(t)
 	repo, err := repoRootPath()
 	if err != nil {
 		t.Fatal(err)
@@ -107,7 +108,12 @@ func TestBrowserEcosystemLibraries(t *testing.T) {
 	if _, err := captureOutput(func() error { return New(root, cfg).BuildAll() }); err != nil {
 		t.Fatalf("BuildAll: %v", err)
 	}
-	out, err := exec.Command("node", script, cfg.OutDir, browser).CombinedOutput()
+	// Pages under async layouts render per request, so they need the server.
+	serverBase, err := startKrateServer(t, root, cfg)
+	if err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+	out, err := exec.Command("node", script, cfg.OutDir, browser, serverBase).CombinedOutput()
 	if err != nil {
 		if strings.Contains(string(out), "Executable doesn't exist") || strings.Contains(string(out), "browserType.launch") {
 			requireE2E(t, "%s browser is not installed: %s", browser, out)

@@ -326,6 +326,9 @@ type Builder struct {
 	// its hydration chunk, built once per build (clientboundary.go).
 	clientChunkMu sync.Mutex
 	clientChunks  map[string]clientChunkInfo
+	// clientChunkText is the standalone build of each boundary chunk, by URL,
+	// for the CSS pass that scans client code.
+	clientChunkText map[string]string
 
 	// actions holds the discovered `"use server"` modules and their compiled
 	// bundles for this build. It is refreshed by prepareActions before pages.
@@ -3325,6 +3328,7 @@ func (b *Builder) resetBuildCaches() {
 	// to a "use client" module or its imports.
 	b.clientChunkMu.Lock()
 	b.clientChunks = nil
+	b.clientChunkText = nil
 	b.clientChunkMu.Unlock()
 	// Filesystem-existence and import-resolution memos are per-build: a file
 	// added/removed between dev rebuilds must not be served from a stale entry.
