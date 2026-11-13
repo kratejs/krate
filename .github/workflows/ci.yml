@@ -702,7 +702,7 @@ jobs:
 
       # Binary sizes (the stripped shell, Go-only, TypeScript-only and example
       # release executables) against packages/native/budgets.json. No display.
-      # linux-arm64 has no entries yet and only reports (BUDGET-RECORD block).
+      # Every CI platform has entries (recorded from run 43344648942).
       - name: Native size budgets (Linux)
         if: runner.os == 'Linux'
         run: go test -p 1 -count=1 -timeout 20m -run 'TestNativeBudgetSizes' -v ./internal/build

@@ -83,59 +83,59 @@ green run there is what moves a cell.
 | Native: requests are bound to the webview they came from | Supported | Supported | Supported | Krate Native v1 |
 | Native: views and split panes | Supported | Supported | Supported | Krate Native v1 |
 | Native: print, PDF, find, zoom and capture of a view | Supported | Untested | Untested | Krate Native v1 |
-| Native: downloads started by the page | Supported | Untested | Untested | Krate Native v1 |
-| Native: cookies and site data | Supported | Untested | Untested | Krate Native v1 |
+| Native: downloads started by the page | Supported | Supported | Supported | Krate Native v1 |
+| Native: cookies and site data | Supported | Supported | Supported | Krate Native v1 |
 | Native: remote views cannot reach the app | Supported | Untested | Untested | Krate Native v1 |
-| Native: remote storage partitions | Supported | Untested | Untested | Krate Native v1 |
+| Native: remote storage partitions | Supported | Supported | Supported | Krate Native v1 |
 | Native: request rules for remote views | Supported | Untested | Untested | Krate Native v1 |
 | Native: remote user agent, proxy, certificates and logins | Supported | Untested | Untested | Krate Native v1 |
-| Native: remote message channel | Supported | Untested | Untested | Krate Native v1 |
+| Native: remote message channel | Supported | Supported | Supported | Krate Native v1 |
 | Native: shared web process, release and background mode | Supported | Untested | Untested | Krate Native v1 |
 | Native: lean pages and the dev Memory panel | Supported | Supported | Supported | Krate Native v1 |
 | Native: SDK dialogs, clipboard and menus | Supported | Untested | Untested | Krate Native v1 |
-| Native: rich clipboard formats | Supported | Untested | Untested | Krate Native round 4 |
+| Native: rich clipboard formats | Supported | Supported | Supported | Krate Native round 4 |
 | Native: webview context menu | Supported | Untested | Untested | Krate Native round 4 |
-| Native: debugging in krate native dev | Supported | Untested | Untested | Krate Native round 4 |
+| Native: debugging in krate native dev | Supported | Supported | Untested | Krate Native round 4 |
 | Native: SDK notifications | Supported | Partial | Partial | Krate Native v1 |
-| Native: camera, microphone, screen capture and location permissions | Supported | Untested | Untested | Krate Native v1 |
+| Native: camera, microphone, screen capture and location permissions | Supported | Supported | Supported | Krate Native v1 |
 | Native: media permissions derived from the UI, usage descriptions and capabilities | Supported | Untested | Untested | Krate Native v1 |
-| Native: operating system consent for camera, microphone, screen and location | Partial | Untested | Untested | Krate Native v1 |
-| Native: screen and window capture sources | Partial | Untested | Untested | Krate Native v1 |
+| Native: operating system consent for camera, microphone, screen and location | Partial | Supported | Supported | Krate Native v1 |
+| Native: screen and window capture sources | Partial | Supported | Supported | Krate Native v1 |
 | Native: SDK tray and global shortcuts | Partial | Partial | Partial | Krate Native v1 |
 | Native: SDK app lifecycle | Supported | Partial | Partial | Krate Native v1 |
 | Native: file associations | Partial | Untested | Untested | Krate Native v1 |
-| Native: opening files | Supported | Untested | Untested | Krate Native v1 |
-| Native: dropped file paths | Supported | Untested | Untested | Krate Native v1 |
+| Native: opening files | Supported | Supported | Supported | Krate Native v1 |
+| Native: dropped file paths | Supported | Supported | Untested | Krate Native v1 |
 | Native: release as a single executable | Supported | Supported | Supported | Krate Native v1 |
 | Native: prebuilt shell for apps without Go | Supported | Partial | Partial | Krate Native v1 |
 | Native: krate native doctor | Supported | Supported | Supported | Krate Native v1 |
-| Native: krate native test and the app driver | Supported | Untested | Untested | Krate Native v1 |
-| Native: migration guides and the worked Electron port | Supported | Untested | Untested | Krate Native v1 |
+| Native: krate native test and the app driver | Supported | Supported | Supported | Krate Native v1 |
+| Native: migration guides and the worked Electron port | Supported | Supported | Supported | Krate Native v1 |
 | Native: plugins | Supported | Supported | Supported | Krate Native v1 |
 | Native: packaging formats | Partial | Supported | Supported | Krate Native v1 |
 | Native: signing and notarization | Partial | Partial | Partial | Krate Native v1 |
 | Native: macOS universal apps | Supported | Untested | Supported | Krate Native round 4 |
 | Native: Flatpak | Partial | Planned | Planned | Krate Native round 4 |
 | Native: Snap | Partial | Planned | Planned | Krate Native round 4 |
-| Native: Mac App Store | Planned | Untested | Planned | Krate Native round 4 |
+| Native: Mac App Store | Planned | Supported | Planned | Krate Native round 4 |
 | Native: Microsoft Store | Supported | Supported | Untested | Krate Native round 4 |
 | Native: updater | Supported | Supported | Supported | Krate Native v1 |
-| Native: app icon badge and progress | Supported | Untested | Untested | Krate Native round 3 |
-| Native: displays | Supported | Untested | Untested | Krate Native round 3 |
-| Native: power, idle and sleep blockers | Supported | Untested | Untested | Krate Native round 3 |
-| Native: launch at login | Supported | Untested | Untested | Krate Native round 3 |
-| Native: system theme | Supported | Untested | Untested | Krate Native round 3 |
-| Native: crash reports | Supported | Untested | Untested | Krate Native round 3 |
-| Native: size, start-up and memory budgets | Supported | Planned | Planned | Krate Native v1 |
+| Native: app icon badge and progress | Supported | Supported | Supported | Krate Native round 3 |
+| Native: displays | Supported | Supported | Supported | Krate Native round 3 |
+| Native: power, idle and sleep blockers | Supported | Untested | Supported | Krate Native round 3 |
+| Native: launch at login | Supported | Supported | Supported | Krate Native round 3 |
+| Native: system theme | Supported | Supported | Supported | Krate Native round 3 |
+| Native: crash reports | Supported | Supported | Supported | Krate Native round 3 |
+| Native: size, start-up and memory budgets | Supported | Supported | Supported | Krate Native v1 |
 | Native: custom title bars, drag regions and transparency | Supported | Untested | Untested | Krate Native v1 |
-| Native: Mica, Acrylic, vibrancy, caption overlay and traffic lights | n/a | Untested | Untested | Krate Native v1 |
-| Native: tabs, sheets, document state, share menu, dock, thumbnail buttons and jump lists | n/a | Untested | Untested | Krate Native v1 |
-| Native: worker processes | Supported | Untested | Untested | Krate Native v1 |
-| Native: message ports between views, windows and workers | Supported | Untested | Untested | Krate Native v1 |
-| Native: offscreen rendering | Supported | Untested | Untested | Krate Native v1 |
-| Native: remote debugging and automation | Supported | Untested | Untested | Krate Native v1 |
+| Native: Mica, Acrylic, vibrancy, caption overlay and traffic lights | n/a | Supported | Supported | Krate Native v1 |
+| Native: tabs, sheets, document state, share menu, dock, thumbnail buttons and jump lists | n/a | Supported | Supported | Krate Native v1 |
+| Native: worker processes | Supported | Supported | Supported | Krate Native v1 |
+| Native: message ports between views, windows and workers | Supported | Supported | Supported | Krate Native v1 |
+| Native: offscreen rendering | Supported | Supported | Supported | Krate Native v1 |
+| Native: remote debugging and automation | Supported | Supported | Supported | Krate Native v1 |
 | Native: browser extensions | n/a | Untested | Untested | Krate Native v1 |
-| Native: accessibility of the shell's own UI | Supported | Untested | Untested | Krate Native v1 |
+| Native: accessibility of the shell's own UI | Supported | Supported | Supported | Krate Native v1 |
 
 ## Details
 
@@ -658,7 +658,7 @@ Evidence: `TestGUIPageZoom`, `TestGUIPageFind`, `TestGUIPageCapture`, `TestGUIPa
 
 ### Native: downloads started by the page
 
-**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+**Linux:** Supported - **macOS:** Supported - **Windows:** Supported
 
 Downloads from a link with the download attribute, a blob URL or an attachment response get a destination (the native save dialog by default, or a configured folder with free file names), report started, progress, completed, cancelled and failed events with the final path, and can be cancelled. WebKitGTK uses the download signals, WKWebView WKDownload and WebView2 DownloadStarting. WebKit cannot download the app's custom scheme, so those downloads are fetched from the app handler by the shell and report the same events.
 
@@ -667,13 +667,12 @@ Known limits:
 - A download of a page of the app origin is requested once more than the page made it, and the file name comes from the link's download attribute only when the link is in the DOM at the time.
 - Downloads need the downloads area to be linked (the app imports @krate/app/downloads); otherwise the engine's default applies, and downloads of the app's own scheme do nothing.
 - Windows hands the app origin to WebView2's own download path, which has not been run.
-- macOS and Windows: untested. The same GUI tests run in CI on macos-latest and windows-latest.
 
 Evidence: `TestGUIPageDownloadCompletes`, `TestGUIPageDownloadDeclined`, `TestGUIPageDownloadCancel`, `TestGUIPageDownloadAttachmentAndBlob`, `TestGUIPageDownloads`, `TestSchemeDownloadCompletes`, `TestSchemeDownloadNames`, `TestSchemeDownloadFailures`, `TestSchemeDownloadCancel`, `TestUniqueName`, `TestSafeFileName`, `TestDownloadsPolicy`, `TestDownloadsEventsListCancel`, `TestNativeE2EPageGUI`
 
 ### Native: cookies and site data
 
-**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+**Linux:** Supported - **macOS:** Supported - **Windows:** Supported
 
 List, get, set and delete cookies by URL, and clear cookies, the cache and storage. WebKitGTK uses WebKitCookieManager and WebKitWebsiteDataManager (cookies persist in the app data directory), WKWebView WKHTTPCookieStore and WKWebsiteDataStore, WebView2 ICoreWebView2CookieManager and ClearBrowsingData.
 
@@ -682,7 +681,6 @@ Known limits:
 - WebKit keeps no cookies for the app's custom scheme (document.cookie is inert on krate://app and the jar refuses a single-label host such as app), so on Linux and macOS cookie calls for the app origin answer unsupported; pass the URL of an http(s) site. On Windows the app origin is https://app.localhost and has cookies.
 - An older WebView2 runtime without ICoreWebView2Profile2 can only clear cookies.
 - Windows on ARM: ClearBrowsingData never finished clearing DOM storage on the windows-11-arm runner's WebView2 and left the webview unusable, so on arm64 the app origin's DOM storage (local storage, IndexedDB, cache storage, service workers, file systems) is cleared through the DevTools protocol (Storage.clearDataForOrigin) instead; storage of other origins in the profile is not cleared there.
-- macOS and Windows: untested. The same GUI tests run in CI on macos-latest and windows-latest.
 
 Evidence: `TestGUIPageCookies`, `TestCookies`, `TestCookieDomainMatches`, `TestCookieOrigin`, `TestNativeE2EPageGUI`
 
@@ -703,7 +701,7 @@ Evidence: `TestGUIRemoteBasics`, `TestGUIRemoteCannotReachApp`, `TestGUIRemoteNa
 
 ### Native: remote storage partitions
 
-**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+**Linux:** Supported - **macOS:** Supported - **Windows:** Supported
 
 Remote content gets its own storage partition: the default one (persistent, never the app's), named persistent ones (persist:name) and in-memory ones (name). Cookies, local storage, caches, logins and certificate decisions are not shared between partitions or with the app, and a partition can be cleared on its own.
 
@@ -712,7 +710,6 @@ Known limits:
 - WebKitGTK in-memory partitions use a temporary directory removed at exit rather than WebKit's ephemeral managers, whose certificate exceptions leak between partitions.
 - macOS before 14 has no named persistent data stores: persist:name answers unsupported and the default partition is in-memory.
 - Windows clears a profile through an open view of it.
-- macOS and Windows: untested. The same GUI tests (gui_remote_test.go) run in CI on macos-latest and windows-latest.
 
 Evidence: `TestGUIRemotePartitions`, `TestPartitions`, `TestProfileName`, `TestNativeE2ERemoteGUI`
 
@@ -746,13 +743,9 @@ Evidence: `TestGUIRemoteUserAgent`, `TestGUIRemoteProxy`, `TestGUIRemoteTLS`, `T
 
 ### Native: remote message channel
 
-**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+**Linux:** Supported - **macOS:** Supported - **Windows:** Supported
 
 The app and a remote page talk only through an opt-in channel: the page calls krateRemote.postMessage, the app gets the engine-reported origin; the app posts to a target origin and the page receives a message event with the app's origin. Messages carry a per-view token, so a frame that never ran the view's script cannot forge one.
-
-Known limits:
-
-- macOS and Windows: untested. The same GUI tests (gui_remote_test.go) run in CI on macos-latest and windows-latest.
 
 Evidence: `TestGUIRemoteMessages`, `TestParseRemoteMessage`, `TestScripts`, `TestNativeE2ERemoteGUI`
 
@@ -801,13 +794,12 @@ Evidence: `TestGUIDialogs`, `TestGUIClipboard`, `TestGUIMenus`, `TestDialogsAreC
 
 ### Native: rich clipboard formats
 
-**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+**Linux:** Supported - **macOS:** Supported - **Windows:** Supported
 
 clipboard.write puts text, HTML and RTF on the clipboard together; readHtml, readRtf, formats, readFormat and writeFormat read and write by MIME name (UTIs on macOS, registered formats with the CF_HTML header on Windows).
 
 Known limits:
 
-- macOS and Windows: untested until the CI GUI tests (TestGUIClipboardRich) pass there.
 - HTML is stored as given on Linux, without a charset declaration.
 
 Evidence: `TestGUIClipboardRich`, `TestCFHTMLOffsets`, `TestDecodeCFHTMLFromOtherProducers`, `TestDecodeClipboardText`, `TestFormatNameMaps`, `TestClipboardRichFormats`
@@ -828,7 +820,7 @@ Evidence: `TestGUIContextMenuCustom`, `TestGUIContextMenuNone`, `TestGUIContextM
 
 ### Native: debugging in krate native dev
 
-**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+**Linux:** Supported - **macOS:** Supported - **Windows:** Untested
 
 krate native dev --debug-go builds the Go host with -N -l and runs it under a headless Delve; breakpoints in src/lib/*.go hit and a Go edit restarts it on the same address. --debug-host starts node, bun and deno host children with --inspect. --debug-config vscode writes attach configurations.
 
@@ -836,7 +828,7 @@ Known limits:
 
 - Needs dlv installed; the integration tests skip without it unless KRATE_REQUIRE_E2E is set.
 - A debugger has to attach again after a Go edit; breakpoints are not carried over.
-- macOS and Windows: untested.
+- Windows: untested (the child-wrapping test skips on the CI runner); the Delve integration tests pass on macOS and Windows in CI.
 
 Evidence: `TestNativeDebugGoHostGUI`, `TestNativeDebugGoHostRestart`, `TestChildWrap`, `TestDlvArgs`, `TestDlvDetachKillsTheProgram`, `TestFindDlvMissingHintsAtInstall`, `TestMergeLaunchJSON`, `TestResolveDebugAddr`
 
@@ -857,15 +849,15 @@ Evidence: `TestNotifyOverDBus`, `TestNotifyWithoutServiceIsUnsupported`, `TestNo
 
 ### Native: camera, microphone, screen capture and location permissions
 
-**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+**Linux:** Supported - **macOS:** Supported - **Windows:** Supported
 
 The page's getUserMedia, getDisplayMedia and geolocation requests go to the SDK instead of the engine's own policy. A request is denied when its window or view scope lacks media or location; otherwise a remembered decision, the request stream (onRequest in TypeScript, media.OnRequest in Go), the native.media policy (allow, deny or a native prompt) and the operating system's consent decide. Decisions are remembered per app (stored) and per view. The UI half is @krate/app/media.
 
 Known limits:
 
 - Linux: verified in a real WebKitGTK 2.54 with the mock capture devices (KRATE_NATIVE_MOCK_CAPTURE): a camera or microphone request reaches the handler with the right kinds and view, allow yields a stream, deny yields NotAllowedError, no handler denies, geolocation deny is PERMISSION_DENIED, and a getDisplayMedia request arrives as kind screen. Real cameras and microphones were not used; no CI runner has one. An allowed geolocation request fails with POSITION_UNAVAILABLE without GeoClue, which the tests accept.
-- macOS: implemented as a WKUIDelegate (media capture on macOS 12+, a private method for display capture, geolocation where WebKit calls it) and not yet run on a Mac. A runner has no camera, so the test calls the delegate methods of the real web view with its own blocks. Notification and clipboard requests have no public delegate.
-- Windows: implemented with PermissionRequested under a deferral and ScreenCaptureStarting (ICoreWebView2_27, absent from older runtimes, which leaves screen capture ungated), with SavesInProfile off so the runtime never answers from its profile. Untested on Windows; the test runs Chromium's fake devices. getUserMedia with audio and video raises two requests there.
+- macOS: implemented as a WKUIDelegate (media capture on macOS 12+, a private method for display capture, geolocation where WebKit calls it) and run in CI on macos-latest. A runner has no camera, so the test calls the delegate methods of the real web view with its own blocks. Notification and clipboard requests have no public delegate.
+- Windows: implemented with PermissionRequested under a deferral and ScreenCaptureStarting (ICoreWebView2_27, absent from older runtimes, which leaves screen capture ungated), with SavesInProfile off so the runtime never answers from its profile. Run in CI on windows-latest; the test runs Chromium's fake devices. getUserMedia with audio and video raises two requests there.
 - Pointer lock, website data access and the other WebKitGTK request types, and the sensor, download, file and MIDI kinds of WebView2, are left to the engine.
 
 Evidence: `TestGUIPermissionCameraAllowAndDeny`, `TestGUIPermissionMicrophoneAndBoth`, `TestGUIPermissionNoHandlerDenies`, `TestGUIPermissionGeolocation`, `TestGUIPermissionScreenCapture`, `TestScopeWithoutPermissionDenies`, `TestPromptRemembersAnswers`, `TestViewScopedDecisionWinsOverApp`, `TestStorePersistsAppDecisionsOnly`, `TestHandlerStreamDecides`, `TestHandlerTimeoutDenies`, `TestMediaHandlerIsInstalledAndPolicyApplies`, `TestMediaPromptAndRememberedDecisions`, `TestMediaScopeAndPermissionGates`, `TestMediaRequestHandlerStream`, `TestNativeE2EMediaGUI`, `TestGUIPermissionDelegate`, `TestCaptureKinds`, `TestGUIPermissionCamera`, `TestPermissionKindOf`
@@ -884,26 +876,26 @@ Evidence: `TestScanUses`, `TestScanDirUsesReportsFirstSite`, `TestDevUsePermissi
 
 ### Native: operating system consent for camera, microphone, screen and location
 
-**Linux:** Partial - **macOS:** Untested - **Windows:** Untested
+**Linux:** Partial - **macOS:** Supported - **Windows:** Supported
 
 An allowed request is checked against the operating system: AVCaptureDevice, CGPreflightScreenCaptureAccess and CLLocationManager on macOS, the capability consent store on Windows (read only), and the Camera portal under Flatpak or Snap on Linux. media.osStatus reads the state and media.osRequest shows the system prompt where one exists. A refusal denies the request.
 
 Known limits:
 
 - Linux: outside a sandbox there is no consent switch for the camera or microphone, and the screen and location go through the ScreenCast portal and GeoClue inside WebKitGTK; only the Camera portal is driven by the SDK, and only against a fake portal in the tests.
-- macOS: screen recording reads as granted or not yet granted, and a grant takes effect after a restart. Windows: an unpackaged app cannot be shown a consent prompt, so osRequest only reports the state. Neither was run on its OS.
+- macOS: screen recording reads as granted or not yet granted, and a grant takes effect after a restart. Windows: an unpackaged app cannot be shown a consent prompt, so osRequest only reports the state. Both run in CI on their OS, reading the state; no consent prompt is answered there.
 
 Evidence: `TestOSConsent`, `TestMediaOSConsentIDs`, `TestPortalCameraGrantAndDeny`, `TestPortalOutsideASandboxHasNoSwitch`, `TestPortalErrorsAndTimeout`, `TestPrivacyMappings`, `TestConsentStatus`, `TestGUIPrivacyAndSources`
 
 ### Native: screen and window capture sources
 
-**Linux:** Partial - **macOS:** Untested - **Windows:** Untested
+**Linux:** Partial - **macOS:** Supported - **Windows:** Supported
 
 media.sources lists capturable screens and windows with PNG thumbnails on macOS (CoreGraphics) and Windows (EnumDisplayMonitors, EnumWindows, GDI). No engine accepts a source chosen by the app, so media.chooseSource returns unsupported everywhere and getDisplayMedia always shows the system picker; the SDK can only allow or deny the capture request.
 
 Known limits:
 
-- Linux has no list (media.sources returns unsupported, so the row is partial): WebKitGTK reaches the screen through the ScreenCast portal and PipeWire, whose picker is the only list. ScreenCaptureKit is not used on macOS. Window titles and thumbnails on macOS need the Screen Recording permission. The listing code was not run on macOS or Windows.
+- Linux has no list (media.sources returns unsupported, so the row is partial): WebKitGTK reaches the screen through the ScreenCast portal and PipeWire, whose picker is the only list. ScreenCaptureKit is not used on macOS. Window titles and thumbnails on macOS need the Screen Recording permission. The listing runs in CI on macOS and Windows.
 
 Evidence: `TestMediaSources`, `TestWindowSources`, `TestScaleKeepsAspectAndColor`, `TestPNGRoundTrip`, `TestBGRA`, `TestGUIPrivacyAndSources`
 
@@ -953,7 +945,7 @@ Evidence: `TestValidateNative`, `TestNativeFileAssociationsLoad`, `TestFileTypes
 
 ### Native: opening files
 
-**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+**Linux:** Supported - **macOS:** Supported - **Windows:** Supported
 
 Files on the command line of the first launch, handed over by a second launch through the single-instance lock, or sent by macOS to the app delegate reach app.onOpenFile and openedFiles (page and Go) with absolute paths, raise the window, and are granted to the fs scope like a dialog pick.
 
@@ -961,13 +953,12 @@ Known limits:
 
 - On Linux a first launch with a file and a second launch handing over another were run through the real shell and a real webview (TestNativeE2EFilesGUI); no desktop environment launched the app from a double click.
 - macOS: the delegate method is called by the test, not by Launch Services. Windows and Linux file-manager launches were not tried.
-- macOS and Windows: untested. The same Go code is built for them (cross-compile checks in CI) and the CI native job runs go test on both, but no result of a run against a real WKWebView or WebView2 window has been confirmed.
 
 Evidence: `TestFilesFromArgs`, `TestFileURLPaths`, `TestLaunchFilesAreOpenedAndGranted`, `TestOnOpenFileReplaysThenStreams`, `TestSecondInstanceOpensItsFiles`, `TestSystemOpenedURLsReachOnOpenURL`, `TestIsAppDir`, `TestDropLaunchServicesArgs`, `TestPathQueueHoldsUntilAHandlerIsSet`, `TestNativeE2EFilesGUI`, `TestGUIDelegateOpensFilesAndURLs`
 
 ### Native: dropped file paths
 
-**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+**Linux:** Supported - **macOS:** Supported - **Windows:** Untested
 
 Files dropped from the desktop onto a view are reported with absolute paths (window.onFileDrop, Go window.OnFileDrop) and granted to the fs scope, while the page keeps its HTML5 drop events: GTK drag signals on Linux, a WKWebView subclass reading the dragging pasteboard on macOS, postMessageWithAdditionalObjects and ICoreWebView2File on Windows.
 
@@ -976,7 +967,7 @@ Known limits:
 - Linux: a real drag between two GTK windows with synthesized pointer events (xdotool, needs a window manager) delivers the path and the page's drop event. In that setup WebKitGTK offers no File objects to the page with or without the watcher, so File contents were not checked. Without xdotool the real drag test skips; the signal-level tests use plain GTK widgets.
 - macOS: the drop path is checked with a fake NSDraggingInfo and the class registration; a real Finder drag was not tried.
 - Windows: the injected script runs against the real WebView2 with a script-made File (which has no path); the COM walk that reads paths is tested with Go fakes of the WebView2.h layouts. A drag from Explorer was not tried and needs a WebView2 Runtime with ICoreWebView2WebMessageReceivedEventArgs2.
-- macOS and Windows: untested. The same Go code is built for them (cross-compile checks in CI) and the CI native job runs go test on both, but no result of a run against a real WKWebView or WebView2 window has been confirmed.
+- Windows: untested. The synthetic drop test skips on the windows-latest runner, so no drop into a real WebView2 window has been confirmed; macOS runs the drop tests against a real WKWebView in CI.
 
 Evidence: `TestGUIFileDropFromARealDrag`, `TestGUIFileDropHoverThenDrop`, `TestGUIFileDropWithoutHoverData`, `TestGUIFileDropForgetsAHoverThatLeft`, `TestGUIFileDropIgnoresWhatIsNotAFile`, `TestGUIFileDropWatchesTheRealView`, `TestParseURIList`, `TestPathsFromURIs`, `TestFileDropsReachTheViewAndAreGranted`, `TestInjectFileDropGoesThroughThePlatformHandler`, `TestNativeE2EFilesGUI`, `TestGUIWebViewWatchesDrops`, `TestGUIDropReadsFilePathsFromThePasteboard`, `TestDropShimInNode`, `TestParseDropMsg`, `TestDroppedFilesReadsPathsFromAdditionalObjects`, `TestGUISyntheticDropReachesTheHost`
 
@@ -1022,7 +1013,7 @@ Evidence: `TestHealthyTypeScriptOnlyLinuxWithoutGo`, `TestGoRequiredForGoHostAnd
 
 ### Native: krate native test and the app driver
 
-**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+**Linux:** Supported - **macOS:** Supported - **Windows:** Supported
 
 krate native test builds the app like native dev, bundles the project's *.native.test.ts files with esbuild and runs them with node --test. The @krate/app/driver module launches the real shell (--dev) per test file with isolated data directories and drives pages over the dev control channel: evaluate, click, fill, press, text, waitFor, url, errors, calls of host functions and SDK ids, several windows and views, and injected tray, menu and shortcut events for app logic behind native events. Input is DOM-level; real operating-system input is out of scope.
 
@@ -1037,7 +1028,7 @@ Evidence: `TestNativeTestCommandGUI`, `TestFindNativeTests`, `TestBundleNativeTe
 
 ### Native: migration guides and the worked Electron port
 
-**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+**Linux:** Supported - **macOS:** Supported - **Windows:** Supported
 
 Migration guides from Electron and from Tauri v2 map concepts, APIs, security, packaging, updates, testing and debugging to Krate Native. examples/native-from-electron is a small Electron app (electron/, pinned, not run by CI) and its port: host functions and a host signal for ipcMain and webContents.send, an application menu, a tray, dialogs, scoped file reads and writes, a notification, a kv settings store and a second window. krate native test drives the port through the real shell.
 
@@ -1132,13 +1123,13 @@ Evidence: `TestSnapcraftYAML`, `TestSnapName`, `TestPackageSnap`, `TestNativePac
 
 ### Native: Mac App Store
 
-**Linux:** Planned - **macOS:** Untested - **Windows:** Planned
+**Linux:** Planned - **macOS:** Supported - **Windows:** Planned
 
 krate native package --target mas builds a sandboxed .app: com.apple.security.app-sandbox with network.client, user-selected files, camera, microphone and location entitlements derived from the app, inherit-only entitlements for helper executables, the embedded provisioning profile (checked against TEAMID.appId), codesign with a 3rd Party Mac Developer Application or Apple Distribution identity (ad hoc without one) and a productbuild .pkg signed with the installer identity. native.updater is removed and the running sandboxed app refuses updater calls.
 
 Known limits:
 
-- The entitlements, Info.plist, tool command lines and failure cases are unit tested on any OS. TestNativeMASSandboxGUI signs the example ad hoc with the sandbox entitlement and runs its GUI flows inside the container on macOS; that run is pending. Uploading to App Store Connect, a real distribution identity and App Store validation have not been tried.
+- The entitlements, Info.plist, tool command lines and failure cases are unit tested on any OS. TestNativeMASSandboxGUI signs the example ad hoc with the sandbox entitlement and runs its GUI flows inside the container on macOS; it passes in CI on macos-latest. Uploading to App Store Connect, a real distribution identity and App Store validation have not been tried.
 - Access to a file the user picked lasts for that run; security-scoped bookmarks are not used.
 
 Evidence: `TestMASEntitlementsFollowPermissions`, `TestEntitlementsPlistIsWellFormed`, `TestStripUpdaterJSON`, `TestPackageMASAdHocSignsWithSandbox`, `TestPackageMASRealIdentity`, `TestPackageMASRejects`, `TestPackageMASOffMacKeepsApp`, `TestNativeMASSandboxGUI`, `TestShortSocketDir`
@@ -1170,7 +1161,7 @@ Evidence: `TestSignatureGoodBadWrongKey`, `TestCheck`, `TestDownloadVerifiesAndP
 
 ### Native: app icon badge and progress
 
-**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+**Linux:** Supported - **macOS:** Supported - **Windows:** Supported
 
 krate/badge.* sets a badge (count or short text), a progress value (none, normal, indeterminate, error, paused) and an urgent flag on the app icon. Linux emits the Unity LauncherEntry D-Bus signal that GNOME Dash to Dock, KDE and Plank read; macOS uses NSDockTile with a progress bar in the tile; Windows uses ITaskbarList3 progress and an overlay icon the SDK draws.
 
@@ -1184,7 +1175,7 @@ Evidence: `TestBadgeLauncherEntryOverDBus`, `TestBadgeWithoutSessionBus`, `TestP
 
 ### Native: displays
 
-**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+**Linux:** Supported - **macOS:** Supported - **Windows:** Supported
 
 krate/screen.* lists displays (bounds, work area, scale, primary, refresh rate), finds the display of a window, centers a window on a display and reports display changes. GDK monitors on Linux, NSScreen on macOS, EnumDisplayMonitors and GetDpiForMonitor on Windows.
 
@@ -1192,13 +1183,12 @@ Known limits:
 
 - Linux was run against Xvfb, which has one monitor; multi-monitor layouts are covered by the pure geometry tests, not a real second monitor.
 - Display change events are wired to GDK monitors-changed, NSApplicationDidChangeScreenParametersNotification and WM_DISPLAYCHANGE; only the Windows message path is driven by a test (TestGUIDisplays).
-- macOS and Windows: untested until CI has run the GUI tests.
 
 Evidence: `TestGUIDisplays`, `TestScreenOps`, `TestScreenPermissionAndUnsupported`, `TestDisplayForRect`, `TestCenterIn`, `TestTopLeftY`, `TestDisplayHelpers`
 
 ### Native: power, idle and sleep blockers
 
-**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+**Linux:** Supported - **macOS:** Untested - **Windows:** Supported
 
 krate/power.* reports on-battery, idle time and lock state, delivers suspend, resume, lock, unlock, battery, AC, idle and active events, and holds sleep blockers. Linux uses logind, UPower, Mutter IdleMonitor or the ScreenSaver service, and the GNOME session manager or PowerManagement inhibitors; macOS NSWorkspace, IOKit and IOPMAssertion; Windows WM_POWERBROADCAST, WTS session notifications and SetThreadExecutionState.
 
@@ -1207,13 +1197,13 @@ Known limits:
 - Linux was tested against fake services on private buses, never a real suspend or lock.
 - logind's Inhibit returns a file descriptor, which the SDK's D-Bus client cannot receive, so it is not used.
 - Battery and idle events come from sampling every three seconds while an event stream is open.
-- macOS and Windows: untested until CI has run the GUI tests; a real suspend was never tried.
+- macOS: untested (only the event tracker is tested there). Windows runs the GUI power test in CI. A real suspend was never tried on any OS.
 
 Evidence: `TestSampleFromServices`, `TestIdleFallsBackToLogind`, `TestBatteryFromSysfsWhenNoUPower`, `TestEventsFromLogindAndPolling`, `TestPreventSleepGnome`, `TestPreventSleepKDE`, `TestPreventSleepWithoutAnyService`, `TestTrackerBatteryEvents`, `TestTrackerIdleEvents`, `TestPowerThroughTheHost`, `TestGUIPowerMessages`
 
 ### Native: launch at login
 
-**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+**Linux:** Supported - **macOS:** Supported - **Windows:** Supported
 
 krate/login.get and set register the app to start at login: an XDG autostart entry on Linux, SMAppService with a LaunchAgent fallback on macOS, the HKCU Run key on Windows.
 
@@ -1221,13 +1211,13 @@ Known limits:
 
 - A packaged (MSIX) Windows app declares a startupTask extension instead; the calls answer unsupported because toggling a StartupTask from code is not implemented.
 - macOS: SMAppService needs a signed bundle and was never run; the LaunchAgent fallback writes the plist but does not call launchctl, so it takes effect at the next login.
-- macOS and Windows: untested until CI has run the temp-HOME and temp-registry-key round trips.
+- macOS and Windows run the temp-HOME and temp-registry-key round trips in CI.
 
 Evidence: `TestAutostartRoundTrip`, `TestAutostartNeedsAppID`, `TestAutostartEntry`, `TestLoginThroughTheHost`, `TestLaunchAgentRoundTrip`, `TestRunKeyRoundTrip`, `TestGUILoginItemAnswersCleanly`
 
 ### Native: system theme
 
-**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+**Linux:** Supported - **macOS:** Supported - **Windows:** Supported
 
 krate/theme.* reads the system appearance (light or dark, high contrast), reports changes and makes native title bars follow it or a fixed choice: the desktop portal and gtk-application-prefer-dark-theme on Linux, NSApp.appearance on macOS, the Personalize registry key and DWMWA_USE_IMMERSIVE_DARK_MODE on Windows.
 
@@ -1235,13 +1225,12 @@ Known limits:
 
 - Linux was tested against a fake portal and by reading back the GTK setting; whether a given desktop redraws its title bars is up to the window manager (client-side GTK decorations follow it).
 - macOS observes AppleInterfaceThemeChangedNotification, not KVO on effectiveAppearance.
-- macOS and Windows: untested until CI has run the GUI tests.
 
 Evidence: `TestThemeFollowsThePortal`, `TestThemeFallsBackToGTKSettings`, `TestGUIWindowTheme`, `TestGUIThemeFollowsOverride`, `TestGUIThemeFollowsSettings`
 
 ### Native: crash reports
 
-**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+**Linux:** Supported - **macOS:** Supported - **Windows:** Supported
 
 A Go panic or fatal error in the shell or the Go host is written to a JSON report under the app's log directory (runtime/debug.SetCrashOutput, collected on the next launch), and a crashed or killed webview process is reported as an event and a report; krate/crash.* lists, reads and deletes reports, and can reload a crashed view automatically (at most three times in 30 seconds). WebKitGTK web-process-terminated, WKWebView webViewWebContentProcessDidTerminate: and WebView2 ProcessFailed.
 
@@ -1250,20 +1239,20 @@ Known limits:
 - A crash of the shell itself is reported on the next launch, not live.
 - Nothing is uploaded; the app reads the reports and sends them where it likes.
 - WKWebView does not say why its process ended, so macOS reports the reason as crashed.
-- macOS and Windows: untested until CI has run the forced-crash tests.
 
 Evidence: `TestRealCrashBecomesAReport`, `TestCollectSkipsLiveProcessesAndEmptyLogs`, `TestWriteListReadDelete`, `TestIDsCannotEscapeTheDirectory`, `TestLimiter`, `TestWebviewCrashEventsReportsAndAutoReload`, `TestGUIWebviewCrash`, `TestNativeE2ESystemGUI`
 
 ### Native: size, start-up and memory budgets
 
-**Linux:** Supported - **macOS:** Planned - **Windows:** Planned
+**Linux:** Supported - **macOS:** Supported - **Windows:** Supported
 
-packages/native/budgets.json limits the stripped shell, Go-only, TypeScript-only and example release executables (bytes), the cold start of the example in a real window (ms) and its resident memory (KB). Limits are the measured value plus 25 percent. Any platform can have entries (linux-amd64 today); one with entries is enforced by the same measured-plus-headroom rule, one without only reports and prints a paste-ready BUDGET-RECORD block.
+packages/native/budgets.json limits the stripped shell, Go-only, TypeScript-only and example release executables (bytes), the cold start of the example in a real window (ms) and its resident memory (KB). Limits are the measured value plus 25 percent. linux-amd64, linux-arm64, darwin-arm64, windows-amd64 and windows-arm64 have entries; a platform with entries is enforced by the same measured-plus-headroom rule, one without only reports and prints a paste-ready BUDGET-RECORD block.
 
 Known limits:
 
-- Budgets exist for linux-amd64 only; the start-up limits were measured on a developer machine and CI applies KRATE_BUDGET_SCALE=3 until a hosted runner has been measured.
-- darwin-arm64, windows-amd64, windows-arm64 and linux-arm64 run the same size, cold-start and memory tests in CI and report their measured values (BUDGET-RECORD-BEGIN/END in the log and the job summary) but have no recorded entries, so nothing is enforced there yet; the numbers have to be copied into packages/native/budgets.json after a review.
+- linux-amd64 was measured on a developer machine; linux-arm64, darwin-arm64, windows-amd64 and windows-arm64 were recorded from one green CI run on the GitHub-hosted runners, so they describe those runners rather than typical user machines.
+- CI multiplies every cold-start limit by 3 (KRATE_BUDGET_SCALE): hosted runners vary a lot in start-up time. Memory limits are not scaled; only appMinusFloor entries fail the job.
+- darwin-amd64 (Intel Macs) has no hosted runner in the CI matrix and no entries, so it only reports.
 
 Evidence: `TestNativeBudgetSizes`, `TestNativeBudgetGUI`, `TestBudgetVerdictPerPlatform`, `TestEvalMemoryEnforcesRecordedEntries`, `TestBudgetRecordTextIsPasteable`
 
@@ -1284,13 +1273,13 @@ Evidence: `TestHandlerOps`, `TestHandlerNeedsAWindowWithChrome`, `TestInfo`, `Te
 
 ### Native: Mica, Acrylic, vibrancy, caption overlay and traffic lights
 
-**Linux:** n/a - **macOS:** Untested - **Windows:** Untested
+**Linux:** n/a - **macOS:** Supported - **Windows:** Supported
 
 Windows 11 22H2 system backdrops (Mica, Mica Alt, Acrylic) behind a transparent webview, the caption buttons Windows draws over a hidden title bar with Snap Layouts on the maximize button (WM_NCHITTEST returns HTMAXBUTTON) and their colors, and on macOS an NSVisualEffectView with any current material behind a transparent WKWebView and a movable traffic light position. Calls the platform lacks reject with unsupported.
 
 Known limits:
 
-- macOS and Windows: untested; see native-chrome-frame. The WebView2 vtables for ICoreWebView2Controller2 and ICoreWebView2Settings9 are generated from WebView2.h and checked against it.
+- The WebView2 vtables for ICoreWebView2Controller2 and ICoreWebView2Settings9 are generated from WebView2.h and checked against it.
 - Backdrops need Windows 11 22H2 (build 22621); earlier builds reject them. A backdrop shows only where the page is transparent.
 - Vibrancy attaches the effect view to the window's frame view, below the content view, which AppKit allows but does not document.
 
@@ -1298,13 +1287,13 @@ Evidence: `TestBackdropAndVibrancyTables`, `TestOverlayNormalize`, `TestBackdrop
 
 ### Native: tabs, sheets, document state, share menu, dock, thumbnail buttons and jump lists
 
-**Linux:** n/a - **macOS:** Untested - **Windows:** Untested
+**Linux:** n/a - **macOS:** Supported - **Windows:** Supported
 
 macOS: document-edited and represented-file title bar state, windows as sheets, native window tabs with merge, move and new-tab events, the share picker for text, URLs and files, and menu-bar-only apps (activation policy at run time, LSUIElement in Info.plist from native.bundle.macos.agent, dock icon show and hide). Windows: taskbar thumbnail toolbar buttons with click events and jump list tasks that relaunch the app with arguments.
 
 Known limits:
 
-- macOS and Windows: untested; see native-chrome-frame. The macOS tab test skips when the CI session does not merge windows into tabs, and the share picker is validated but not shown in CI.
+- The macOS tab test skips when the CI session does not merge windows into tabs, and the share picker is validated but not shown in CI.
 - Thumbnail buttons need Explorer to create the taskbar button; without a shell session they stay pending. The jump list is committed through ICustomDestinationList and checked by its return codes, not by reading the shell's list back.
 - A new-tab event is delivered through the window delegate's newWindowForTab: action, the way AppKit sends it from the tab bar's plus button.
 
@@ -1312,13 +1301,13 @@ Evidence: `TestInfoPlistAgent`, `TestMetadataAgentFromConfig`, `TestValidateThum
 
 ### Native: worker processes
 
-**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+**Linux:** Supported - **macOS:** Supported - **Windows:** Supported
 
 Background worker processes declared in native.workers (a TypeScript module on Node, Bun or Deno, a Go main package, or a prebuilt executable) are started by name from a page or host code, with their own SDK endpoint whose permissions are narrowed per worker, stdout and stderr in the app log, a restart policy with backoff, crash and restart events, and two-way messages over the wire codec (binary, Date, Map, Set). The supervisor and policy are pure Go and tested on every OS; the shell tests run real Node and Go workers.
 
 Known limits:
 
-- macOS and Windows compile and share the portable supervisor and the host child transport (loopback TCP with a token for JavaScript workers on Windows); the worker tests run on Linux only.
+- macOS and Windows compile and share the portable supervisor and the host child transport (loopback TCP with a token for JavaScript workers on Windows); the worker tests and the procs end-to-end test run in CI on Linux, macOS and Windows.
 - A release build ships worker scripts under host/workers next to the executable and needs Node, Bun or Deno on the user's machine for a TypeScript worker; a Go worker is compiled for the build machine's platform only.
 - Permissions narrow the SDK ids a worker can call; a worker is still an ordinary process with the user's file and network access.
 
@@ -1326,34 +1315,34 @@ Evidence: `TestStartUnknownWorker`, `TestCrashRestartsOnFailure`, `TestNeverPoli
 
 ### Native: message ports between views, windows and workers
 
-**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+**Linux:** Supported - **macOS:** Supported - **Windows:** Supported
 
 A channel has two ends; whoever creates it can hand each end to a window, view or worker, and messages (JSON, binary, Date, Map, Set) then flow directly between the ends without host code relaying them, in order, with a bounded queue (1024 messages, 16 MiB) and backpressure errors. An end can only be handed to a scope that has port:receive. The page object is a Port in @krate/app/port backed by the shell.
 
 Known limits:
 
 - The engines give two top-level webviews no way to share a real MessagePort, so a port is a shell-backed object, not a transferable MessagePort; inside one page the browser's MessageChannel is untouched.
-- The pure broker is tested on every OS; the page-to-page and page-to-worker round trips run on Linux.
+- The pure broker is tested on every OS; the page-to-page and page-to-worker round trips run in CI on Linux, macOS and Windows.
 
 Evidence: `TestPostIsDeliveredInOrderToTheOtherEnd`, `TestOnlyTheHolderMayUseAnEnd`, `TestTransferNeedsAReceiver`, `TestQueuedMessagesFollowTheEnd`, `TestTransferEndsTheOldListener`, `TestCloseDrainsThenReportsClosed`, `TestBackpressureAndLimits`, `TestDropOwnerClosesItsChannels`, `TestWorkersNode`, `TestNativeE2EProcsGUI`, `fixture:examples/native-procs/src/pages/peer.tsx`
 
 ### Native: offscreen rendering
 
-**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+**Linux:** Supported - **macOS:** Supported - **Windows:** Supported
 
 No system webview streams offscreen frames. The closest equivalent: a window that is never shown (a GtkOffscreenWindow on Linux, a window parked off every display on Windows and macOS) whose page renders normally, plus snapshots (webkit_web_view_get_snapshot, WKWebView takeSnapshot, WebView2 CapturePreview) delivered as PNG or raw premultiplied BGRA, one at a time at a requested rate up to 60 per second, with dropped frames counted instead of queued.
 
 Known limits:
 
 - This is polling, not a paint callback: frames are snapshots, so the rate depends on page complexity and engine; the measured Linux numbers are in docs native/processes.
-- Windows and macOS are written and compiled; their capture and parked-window code runs only in the CI native job.
+- Windows and macOS run the capture and parked-window code in the CI native job.
 - An open offscreen window counts as a window: close it, or the app does not quit when the last visible window closes.
 
 Evidence: `TestGUIOffscreenSnapshot`, `TestGUISnapshotOfAMappedWindowAndErrors`, `TestEncodePNGKeepsColorsAndUnpremultiplies`, `TestRawBGRARemovesRowPadding`, `TestPacing`, `TestStreamPacesAndCountsDroppedFrames`, `TestStreamStopsWithTheContextAndReportsCaptureErrors`, `TestSnapshotFromPNG`, `TestNativeE2EProcsGUI`
 
 ### Native: remote debugging and automation
 
-**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+**Linux:** Supported - **macOS:** Supported - **Windows:** Supported
 
 An endpoint for tests and debugging, on in dev and with native.debug and never in a release build otherwise: WebView2 serves the Chrome DevTools Protocol (Playwright connectOverCDP, Puppeteer connect) and krate can send one CDP method or subscribe to an event in process; WebKitGTK serves the WebKit remote inspector over HTTP (WEBKIT_INSPECTOR_HTTP_SERVER), which is not CDP; WKWebView is inspectable from Safari's Develop menu. CDP answers unsupported where the engine does not speak it.
 
@@ -1379,15 +1368,15 @@ Evidence: `TestProcsVtableSlots`, `TestNativeE2EProcsGUI`
 
 ### Native: accessibility of the shell's own UI
 
-**Linux:** Supported - **macOS:** Untested - **Windows:** Untested
+**Linux:** Supported - **macOS:** Supported - **Windows:** Supported
 
 The UI the shell draws or configures is checked through each platform's accessibility API: window names in every title bar style, the webview reachable in native, hidden, frameless, transparent, split and remote windows, menus and context menus (roles, names, checked, disabled, accelerators), message and file dialogs, tray, notification, thumbnail button and jump list names, split-pane dividers, and offscreen windows kept out of the tree. Fixes: offscreen windows hidden (Linux AT-SPI, macOS AX), message dialog titles reach the accessible name, split panes and dividers named, tray and notification action and thumbnail button names never empty, Windows message box labels spelled out in the text, macOS alert default button, and drag regions no longer swallow presses on ARIA widgets and focusable elements.
 
 Known limits:
 
 - Linux is checked through AT-SPI on X11 with a private accessibility bus and keys synthesized by at-spi2-registryd (needs the at-spi2-core package and a window manager); Wayland and a real screen reader were not used.
-- macOS is checked in process through NSAccessibility (no permission needed); the AX API tests skip unless the test process is trusted for accessibility, which CI runners are not. Written and compiled, run only in the CI native job.
-- Windows is checked through UI Automation; written and compiled, run only in the CI native job. The caption buttons of a hidden title bar are reported, not required; the notification area, taskbar thumbnails and jump lists are not read by tests (names come from unit-tested helpers).
+- macOS is checked in process through NSAccessibility (no permission needed); the AX API tests skip unless the test process is trusted for accessibility, which CI runners are not. Runs in the CI native job.
+- Windows is checked through UI Automation; runs in the CI native job. The caption buttons of a hidden title bar are reported, not required; the notification area, taskbar thumbnails and jump lists are not read by tests (names come from unit-tested helpers).
 - Windows: split-pane dividers are mouse-only, frameless windows have no system menu, offscreen windows stay in the UI Automation tree marked offscreen, and a two-button message box cannot be closed with Esc.
 - macOS: an alert is dismissed with Esc only through a button titled Cancel; the split divider is reachable by VoiceOver but not by a plain keyboard.
 - No screen reader (Orca, VoiceOver, Narrator, NVDA, JAWS) was used on any platform; web content inside the webview is exposed by the engine and not tested here.
