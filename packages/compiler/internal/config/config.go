@@ -741,6 +741,12 @@ type Config struct {
 	// navigation and omits the router from the shared runtime.
 	SPA *bool `json:"spa,omitempty"`
 
+	// TrailingSlash is the page URL form every server honours (krate serve and
+	// start, the node, vercel, netlify and cloudflare targets): "always" ("" is
+	// the same) redirects /x to /x/, "never" redirects /x/ to /x, "ignore"
+	// serves both without redirecting. Read it through TrailingSlashMode.
+	TrailingSlash string `json:"trailingSlash,omitempty"`
+
 	// ViewTransitions controls the View Transitions API integration. "" or
 	// "auto" (default) enables it (same-document SPA morphs + a cross-document
 	// @view-transition rule); "off" disables it.
@@ -861,6 +867,16 @@ func (c *Config) MaxAPIBodyBytes() int64 {
 // SPAEnabled reports whether the client-side router is enabled (default true).
 func (c *Config) SPAEnabled() bool {
 	return c.SPA == nil || *c.SPA
+}
+
+// TrailingSlashMode returns trailingSlash as "always", "never" or "ignore";
+// an unset or unknown value is "always" (Validate rejects unknown ones).
+func (c *Config) TrailingSlashMode() string {
+	switch c.TrailingSlash {
+	case "never", "ignore":
+		return c.TrailingSlash
+	}
+	return "always"
 }
 
 // BaseURLPath returns the path the site is served under, normalized to either

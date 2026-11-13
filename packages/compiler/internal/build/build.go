@@ -359,14 +359,27 @@ func (b *Builder) viewTransitionsOff() bool {
 	return b.Cfg.ViewTransitions == "off"
 }
 
-var nativeCfgScriptRe = regexp.MustCompile(`<script>window\.__KRATE_CFG__=[^<]*;</script>\n?`)
+// cfgBlockID is the id of the JSON data block that carries the site runtime
+// config; the runtime copies it into globalThis.__KRATE_CFG__ (see
+// packages/runtime/src/site-config.ts).
+const cfgBlockID = "__krate_cfg__"
+
+var nativeCfgScriptRe = regexp.MustCompile(`<script type="application/json" id="` + cfgBlockID + `">[^<]*</script>\n?`)
 
 // runtimeCommonHead returns the per-page <head> extras: the site runtime config
-// (window.__KRATE_CFG__) for the SPA router, and the View Transitions CSS when
-// enabled. Emitted on every page (production and dev).
+// for the SPA router, and the View Transitions CSS when enabled. Emitted on
+// every page (production and dev).
+//
+// The config is a non-executing JSON data block, so a strict script-src
+// policy needs no allowance for it. It is written only when it carries
+// something the runtime cannot assume: a base path, View Transitions turned
+// off, or the dev flag. The defaults need no block at all.
 func (b *Builder) runtimeCommonHead() string {
 	var sb strings.Builder
-	cfg := map[string]interface{}{"basePath": b.Cfg.BaseURLPath()}
+	cfg := map[string]interface{}{}
+	if bp := b.Cfg.BaseURLPath(); bp != "" {
+		cfg["basePath"] = bp
+	}
 	if b.DevMode {
 		// Enables the SPA router's dev warnings (e.g. a layout it could not keep mounted).
 		cfg["dev"] = true
@@ -374,13 +387,14 @@ func (b *Builder) runtimeCommonHead() string {
 	off := b.viewTransitionsOff()
 	if off {
 		cfg["viewTransitions"] = false
-	} else {
-		cfg["viewTransitions"] = "auto"
 	}
-	if data, err := json.Marshal(cfg); err == nil {
-		sb.WriteString("<script>window.__KRATE_CFG__=")
-		sb.Write(data)
-		sb.WriteString(";</script>\n")
+	if len(cfg) > 0 {
+		// json.Marshal escapes "<", so a value can never close the block.
+		if data, err := json.Marshal(cfg); err == nil {
+			sb.WriteString(`<script type="application/json" id="` + cfgBlockID + `">`)
+			sb.Write(data)
+			sb.WriteString("</script>\n")
+		}
 	}
 	if !off {
 		sb.WriteString("<style>@view-transition{navigation:auto}")

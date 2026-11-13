@@ -153,6 +153,19 @@ func TestVercelServerOutput(t *testing.T) {
 	if !sawFS || !sawFallback {
 		t.Errorf("routes need a filesystem handle followed by a function fallback: %s", data)
 	}
+	// /404 and /404.html reach the function before the CDN's copy of the file.
+	notFoundRoute, fsIndex := -1, -1
+	for i, r := range conf.Routes {
+		if src, _ := r["src"].(string); src == `^/404(?:\.html|/)?$` {
+			notFoundRoute = i
+		}
+		if r["handle"] == "filesystem" {
+			fsIndex = i
+		}
+	}
+	if notFoundRoute < 0 || notFoundRoute > fsIndex {
+		t.Errorf("a route for /404 and /404.html must precede the filesystem handle: %s", data)
+	}
 	var vc map[string]interface{}
 	data, _ = os.ReadFile(filepath.Join(out, "functions", "__krate.func", ".vc-config.json"))
 	if err := json.Unmarshal(data, &vc); err != nil || vc["runtime"] == nil || vc["handler"] != "index.mjs" || vc["launcherType"] != "Nodejs" {

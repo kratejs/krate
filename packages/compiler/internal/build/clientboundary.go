@@ -487,6 +487,10 @@ var statefulHookRe = regexp.MustCompile(`\buse(State|Reducer|Effect|LayoutEffect
 const boundaryLinkShim = `import { h } from "preact";
 function basePath() {
   var c = globalThis.__KRATE_CFG__;
+  if (!c && typeof document !== "undefined") {
+    var el = document.getElementById("__krate_cfg__");
+    if (el) { try { c = globalThis.__KRATE_CFG__ = JSON.parse(el.textContent || "{}"); } catch (e) {} }
+  }
   var bp = (c && c.basePath) || "";
   if (!bp || bp === "/") return "";
   return "/" + bp.replace(/^\/+|\/+$/g, "");

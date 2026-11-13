@@ -308,7 +308,10 @@ func extractInlineContent(html, tag string) []string {
 		content := html[contentStart : contentStart+closeIdx]
 		// Skip external references: the tag points at a src/href, so its body is
 		// not inline content to hash.
-		if !referencesExternalAsset(openTag) {
+		// A JSON data block (the site config, the route table) never executes,
+		// so a script-src policy has nothing to allow for it.
+		dataBlock := tag == "script" && strings.Contains(strings.ToLower(openTag), "application/json")
+		if !referencesExternalAsset(openTag) && !dataBlock {
 			if content != "" {
 				results = append(results, content)
 			}

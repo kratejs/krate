@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -130,5 +131,31 @@ func TestLoadTSConfigPathsWithAliases(t *testing.T) {
 	expectedBase := filepath.Join(dir, "src")
 	if cfg.TSBaseDir != expectedBase {
 		t.Errorf("TSBaseDir = %q, want %q", cfg.TSBaseDir, expectedBase)
+	}
+}
+
+// TestTrailingSlashAndDeployWorkerConfig covers the trailingSlash setting and
+// deploy.worker: both load, unset means "always", and an unknown form is a
+// hard error.
+func TestTrailingSlashAndDeployWorkerConfig(t *testing.T) {
+	root := t.TempDir()
+	src := `export default { trailingSlash: "never", deploy: { target: "cloudflare", worker: "src/edge.ts" } };`
+	if err := os.WriteFile(filepath.Join(root, "krate.config.ts"), []byte(src), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.TrailingSlashMode() != "never" || cfg.Deploy.Worker != "src/edge.ts" {
+		t.Errorf("trailingSlash %q, deploy.worker %q", cfg.TrailingSlashMode(), cfg.Deploy.Worker)
+	}
+	if got := Default().TrailingSlashMode(); got != "always" {
+		t.Errorf("default mode = %q, want always", got)
+	}
+	bad := Default()
+	bad.TrailingSlash = "sometimes"
+	if _, err := bad.Validate(); err == nil || !strings.Contains(err.Error(), "trailingSlash") {
+		t.Errorf("unknown trailingSlash must be rejected, got %v", err)
 	}
 }

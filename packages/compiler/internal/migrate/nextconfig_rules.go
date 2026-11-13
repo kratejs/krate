@@ -413,7 +413,7 @@ var otherKeyNotes = map[string]keyNote{
 	"outputFileTracingExcludes":   {true, "outputFileTracingExcludes is not translated", "no Krate equivalent yet"},
 	"outputFileTracingRoot":       {true, "outputFileTracingRoot is not translated", "no Krate equivalent yet; a Krate project builds from its own root"},
 	"i18n":                        {true, "i18n routing is not translated", "Krate's i18n key is docs-scoped; for app pages use a [locale] dynamic segment (see Internationalization)"},
-	"trailingSlash":               {true, "trailingSlash is not translated", "set deploy.options.trailingSlash in krate.config.ts for static hosts (see Deploy in the config reference)"},
+	"trailingSlash":               {true, "trailingSlash is not translated", "set trailingSlash in krate.config.ts: \"always\" matches trailingSlash: true, \"never\" matches Next.js' default of false, \"ignore\" serves both (see Trailing slash in the config reference)"},
 	"assetPrefix":                 {true, "assetPrefix is not translated", "no Krate equivalent yet; basePath serves the site under a sub-path"},
 	"distDir":                     {true, "distDir is not translated", "set outDir in krate.config.ts (default dist)"},
 	"webpack":                     {true, "the webpack hook is not translated", "Krate has no webpack hook; custom build steps go in a plugin (see Plugins)"},

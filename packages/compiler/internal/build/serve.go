@@ -1814,11 +1814,27 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		}, fileServer)
 	}
 
+	// trailingSlash "never" and "ignore" serve /x from x/index.html in place
+	// rather than through the file server's redirect to /x/.
+	slashMode := cfg.TrailingSlashMode()
+	if slashMode != "always" {
+		staticServer = serveIndexInPlace(absOut, staticServer)
+	}
+
 	handlerWith404 := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Server-only build artifacts live under dist/.krate. Never serve them
 		// from the static handler; they contain bundles, the renderer, and the
 		// persisted ISR cache.
 		if isInternalOutputPath(r.URL.Path) {
+			http.NotFound(w, r)
+			return
+		}
+		// The not-found page's own URLs answer 404 (with that page), not 200
+		// with the file or a redirect.
+		if notFoundPageURL(r.URL.Path) {
+			if m, ok := segs.forURL(SegmentNotFound, r.URL.Path, ""); ok && respondSegment(w, segs, m, http.StatusNotFound, nil) {
+				return
+			}
 			http.NotFound(w, r)
 			return
 		}
@@ -1873,7 +1889,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 					continue
 				}
 				if params, ok := matchDynamicRoute(r.URL.Path, dr.pattern); ok {
-					if redirectToCanonicalSlash(w, r) {
+					if redirectToCanonicalSlash(slashMode, w, r) {
 						return
 					}
 					templatePath := filepath.Join(dr.dir, "index.html")
@@ -2104,7 +2120,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		}
 		// SSG pages answer /x with a 301 to /x/; request-time pages use the
 		// same single canonical form.
-		if redirectToCanonicalSlash(w, r) {
+		if redirectToCanonicalSlash(slashMode, w, r) {
 			return
 		}
 		isISR := page.Mode == RenderISR.String()
@@ -2280,6 +2296,12 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		// Check redirects first. Under a base path, basePath: false rules were
 		// already matched against the full path by basePathMiddleware.
 		if serveConfigRedirect(w, r, path, insideRedirects) {
+			return
+		}
+
+		// trailingSlash "never": /x/ goes to /x, judged on the requested URL
+		// before a rewrite maps it onto another internal path.
+		if redirectToSlashless(slashMode, w, r) {
 			return
 		}
 

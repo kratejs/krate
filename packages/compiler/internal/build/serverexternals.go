@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/evanw/esbuild/pkg/api"
+	"github.com/kratejs/krate/packages/compiler/internal/jseval"
 )
 
 // nativeAddons collects the packages that own a .node file the bundler tried
@@ -104,6 +105,7 @@ func externalNodeModulesPlugin() api.Plugin {
 	return api.Plugin{
 		Name: "krate-external-node-modules",
 		Setup: func(b api.PluginBuild) {
+			jseval.RegisterCloudflareImports(b)
 			b.OnResolve(api.OnResolveOptions{Filter: `^[^./]`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
 				if args.PluginData == marker || strings.Contains(args.Path, ":") {
 					return api.OnResolveResult{}, nil

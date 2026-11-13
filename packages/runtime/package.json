@@ -78,6 +78,10 @@
       "types": "./dist/node-server.d.ts",
       "default": "./dist/node-server.js"
     },
+    "./cloudflare-workers": {
+      "types": "./dist/cloudflare-workers.d.ts",
+      "default": "./dist/cloudflare-workers.js"
+    },
     "./assets-static": {
       "types": "./dist/assets-static.d.ts",
       "default": "./dist/assets-static.js"
