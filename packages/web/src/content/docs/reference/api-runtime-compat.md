@@ -4,7 +4,7 @@ order: 6
 description: Which Web APIs and Node globals the embedded QuickJS runtime for API routes and middleware supports, generated from the compiler ledger.
 ---
 
-<!-- Generated from packages/compiler/internal/jsruntime/compat.json by
+<!-- Generated from packages/native/jsruntime/compat.json by
      scripts/sync-runtime-compat.mjs. Do not edit by hand; edit the ledger and
      run pnpm sync:docs. -->
 

@@ -16,7 +16,7 @@ import (
 
 var (
 	diagRe = regexp.MustCompile(`^(.+)\((\d+),(\d+)\): error TS(\d+): (.*)$`)
-	tierRe = regexp.MustCompile(`^[ \t]*@(server|static|runtime|client)(?:[ \t]|\r?$)`)
+	tierRe = regexp.MustCompile(`^[ \t]*@(server|static|runtime|client|host)(?:[ \t]|\r?$)`)
 )
 
 // isTierDiagnostic reports whether a tsc error comes from a tier decorator:

@@ -27,7 +27,7 @@ import (
 // it had the old one. That is only safe when every consumer is visible as an
 // import of the module, so a module stays as it is, and the two modules that
 // export one name keep a warning (KR7116), when it is re-exported through a
-// barrel or `export *`, imported as a namespace, loaded with import(), or is a
+// barrel or `export *`, loaded with import(), or is a
 // "use client" or "use server" module, whose consumers read export names from
 // source. An ordinary import renames nothing: only a name that the bundle
 // imports from two modules is touched.
@@ -263,11 +263,8 @@ func (p exportPlan) importerRewrites(b *Bundler, mods []*Module) map[string]map[
 func (b *Bundler) planExportRenames(mods []*Module, dynamic map[string]bool) exportPlan {
 	plan := exportPlan{renames: map[string]map[string]string{}}
 	owners := map[string]map[string]bool{}
+	aliased := map[string]map[string]bool{} // name -> modules exporting it as an alias
 	for _, mod := range mods {
-		// A package's own copies are out of the project's hands.
-		if inNodeModules(mod.Path) {
-			continue
-		}
 		for _, stmt := range mod.Program.Body {
 			exp, ok := stmt.(*ast.ExportStmt)
 			if !ok || exp.Default || exp.ReexportSource != "" {
@@ -285,6 +282,16 @@ func (b *Bundler) planExportRenames(mods []*Module, dynamic map[string]bool) exp
 			for _, spec := range exp.Named {
 				if spec.Local == spec.Remote {
 					add(spec.Local)
+				} else if spec.Remote != "" && spec.Remote != "default" {
+					// `export { remoteOnEvent as onEvent }` declares no onEvent,
+					// but an importer's onEvent lands in the page scope, where it
+					// meets another module's onEvent. The alias owner keeps the
+					// name; a declaring owner moves.
+					add(spec.Remote)
+					if aliased[spec.Remote] == nil {
+						aliased[spec.Remote] = map[string]bool{}
+					}
+					aliased[spec.Remote][mod.Path] = true
 				}
 			}
 		}
@@ -297,10 +304,10 @@ func (b *Bundler) planExportRenames(mods []*Module, dynamic map[string]bool) exp
 		for _, stmt := range mod.Program.Body {
 			switch st := stmt.(type) {
 			case *ast.ImportStmt:
+				// A namespace import does not pin its module: the page builds
+				// the namespace object from the export table, keyed by the
+				// original names (build.exportBindings).
 				target := b.resolveImportForModule(mod.Path, strings.Trim(st.Source, "\"'`"))
-				if st.Namespace != "" {
-					pinned[target] = true
-				}
 				for _, spec := range st.Named {
 					if owners[spec.Remote][target] {
 						if imported[spec.Remote] == nil {
@@ -339,12 +346,17 @@ func (b *Bundler) planExportRenames(mods []*Module, dynamic map[string]bool) exp
 	for _, mod := range mods {
 		byPath[mod.Path] = mod
 	}
+	// A package module moves like a project one: its renamed copy is private to
+	// this bundle, and every consumer of its exports is a visible import here.
 	movable := func(mod *Module) bool {
-		return !mod.IsEntry && !inNodeModules(mod.Path) && !pinned[mod.Path] && !dynamic[mod.Path] && !ownsExports(mod)
+		return !mod.IsEntry && !pinned[mod.Path] && !dynamic[mod.Path] && !ownsExports(mod)
 	}
 
-	clashNames := make([]string, 0, len(imported))
-	for name, from := range imported {
+	// Two modules that both export a name collide in the page's namespace
+	// whether or not the page imports it from both: a module calling its own
+	// export would otherwise find the other module's declaration.
+	clashNames := make([]string, 0, len(owners))
+	for name, from := range owners {
 		if len(from) > 1 {
 			clashNames = append(clashNames, name)
 		}
@@ -353,13 +365,16 @@ func (b *Bundler) planExportRenames(mods []*Module, dynamic map[string]bool) exp
 	for _, name := range clashNames {
 		var group []*Module
 		for _, mod := range mods {
-			if imported[name][mod.Path] {
+			if owners[name][mod.Path] {
 				group = append(group, mod)
 			}
 		}
+		// An alias export cannot move (its binding has another name), so it
+		// stays where it is like a module that cannot move.
+		canMove := func(mod *Module) bool { return movable(mod) && !aliased[name][mod.Path] }
 		keeper := group[0]
 		for _, mod := range group {
-			if !movable(mod) {
+			if !canMove(mod) {
 				keeper = mod
 				break
 			}
@@ -369,7 +384,7 @@ func (b *Bundler) planExportRenames(mods []*Module, dynamic map[string]bool) exp
 			if mod == keeper {
 				continue
 			}
-			if !movable(mod) {
+			if !canMove(mod) {
 				stuck = append(stuck, mod)
 				continue
 			}
@@ -378,7 +393,7 @@ func (b *Bundler) planExportRenames(mods []*Module, dynamic map[string]bool) exp
 			}
 			plan.renames[mod.Path][name] = name + b.privateSuffix(mod.Path)
 		}
-		if len(stuck) > 1 {
+		if len(stuck) > 1 && len(imported[name]) > 1 {
 			var files []string
 			for _, mod := range stuck {
 				files = append(files, filepath.Base(mod.Path))
@@ -457,7 +472,15 @@ func (b *Bundler) applyPrivateRenames(mod *Module, bindings, imports, exports ma
 			mod.Program = prog
 			return
 		}
-		mod.Program = cloneProgram(orig)
+		// Another page's build may be transforming the cached program in
+		// place (icons, images) while this copy is taken.
+		if b.readLock != nil {
+			unlock := b.readLock(orig)
+			mod.Program = cloneProgram(orig)
+			unlock()
+		} else {
+			mod.Program = cloneProgram(orig)
+		}
 	}
 	all := make(map[string]string, len(bindings)+len(imports)+len(exports))
 	for name := range renamableNames(mod.Program, func(n string) bool { _, ok := bindings[n]; return ok }) {

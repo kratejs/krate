@@ -221,6 +221,20 @@ describe('view transitions', () => {
     spy.mockRestore();
     expect(order).toEqual(['mutate', 'push:About']);
   });
+  it('handles the ready promise of a transition a newer navigation skipped', async () => {
+    (globalThis as any).__KRATE_CFG__ = { viewTransitions: 'auto' };
+    let readyCaught = false;
+    (document as any).startViewTransition = (cb: () => void) => {
+      const updateCallbackDone = Promise.resolve().then(cb);
+      const skipped = Promise.reject(new DOMException('Transition was skipped', 'AbortError'));
+      const ready = { catch: (fn: (e: unknown) => void) => { readyCaught = true; return skipped.catch(fn); } };
+      return { updateCallbackDone, finished: updateCallbackDone, ready };
+    };
+    await krateRouter.push('/about');
+    await settle();
+    expect(readyCaught).toBe(true);
+    expect(location.pathname).toBe('/about');
+  });
 });
 
 describe('view transition names', () => {

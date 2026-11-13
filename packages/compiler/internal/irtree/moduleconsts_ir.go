@@ -254,12 +254,22 @@ func (b *builder) moduleInitRefs(name, js string) map[string]bool {
 		return jsIdentRefs(js)
 	}
 	refs := map[string]bool{}
-	WalkAST(init, func(n any) bool {
-		if id, ok := n.(*ast.Identifier); ok {
-			refs[id.Name] = true
+	var visit func(n any) bool
+	visit = func(n any) bool {
+		switch x := n.(type) {
+		case *ast.Identifier:
+			refs[x.Name] = true
+		case *ast.MemberExpr:
+			// The name after the dot of `a.signal` is a property, not a read
+			// of a binding called signal.
+			if !x.Computed {
+				WalkAST(x.Object, visit)
+				return false
+			}
 		}
 		return true
-	})
+	}
+	WalkAST(init, visit)
 	return refs
 }
 

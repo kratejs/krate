@@ -7,6 +7,184 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ## Unreleased
 
+### Krate Native
+
+- Migration guides: Migrating from Electron and Migrating from Tauri (docs native/from-electron and
+  native/from-tauri) with concept maps, full API tables, security, packaging, update, testing and
+  debugging comparisons, and an honest list of what has no equivalent. `examples/native-from-electron`
+  holds a small Electron app (`electron/`, pinned versions) and its port to Krate Native, tested through
+  the real shell by `krate native test` (compiler test `TestNativeFromElectronGUI`). A real find while
+  porting: a host signal reads `undefined` in the page until the host pushes its first value, so a page
+  that reads `settings().theme` throws; the guide shows the guard.
+- Accessibility of the shell's own UI, checked through AT-SPI (Linux, GUI tests), NSAccessibility and AX
+  (macOS) and UI Automation (Windows). Fixed: offscreen windows are hidden from assistive technology
+  (Linux, macOS); message dialog titles reach the accessible name (Linux); split-pane dividers and panes
+  are named (Linux); tray, notification action and thumbnail button names are never empty; macOS menu bar
+  items carry their title, the status button has a label and alerts honor `default`; Windows message boxes
+  name which button means what, honor `default` and fall back to the app name as title; drag regions no
+  longer turn presses on ARIA widgets and focusable elements into window moves. See docs/native/accessibility
+  and packages/native/ACCESSIBILITY.md.
+- Benchmarks of Krate Native against Electron and Tauri v2 on the same small app (cold start to first
+  contentful paint, idle memory over the whole process tree, installer and on-disk size):
+  `packages/benchmark/native/bench.mjs`, the informational `Native benchmark` workflow on Linux, macOS
+  and Windows, `packages/native/cmd/krate-memtree`, and docs/native/benchmarks with Linux numbers.
+- `krate native test` runs a project's `*.native.test.ts` files against the real shell with Node's
+  test runner. The new `@krate/app/driver` module launches the app and drives pages (`evaluate`,
+  `click`, `fill`, `press`, `text`, `waitFor`, `errors`, host `call`), several windows and views, and
+  injected tray, menu and shortcut events. The shell's dev control channel gained `views`,
+  `query-in` and `emit`. See docs/native/testing.
+- Updater: delta updates, staged rollouts, channels and rollback. `krate native package --delta-from <dir>`
+  writes signed pure-Go bsdiff patches from the newest earlier releases (install tree, macOS bundle,
+  AppImage; unchanged and renamed files cost nothing) and lists them under `patches` in the feed; the
+  client verifies the patch signature, every installed base hash and every written file, and falls back
+  to the full download on any failure (1.0.0 to 1.1.0 of `examples/native-tasks`: 16 KB to 115 KB for a
+  6.6 MB update file). Feeds take `rollout` (percentage, start, ramp), `critical` and `min_version`,
+  decided by a stable bucket from a per-install random id; `krate native rollout` changes or halts them
+  after release without re-signing. `{channel}` in the feed URL, `native.updater.channel`,
+  `updater.setChannel()` and `package --channel`. A freshly updated version must confirm a healthy start
+  (the shell does after the first page, or `updater.markHealthy()` with `confirm: "app"`); after a crash
+  or timeout the next launch restores the previous version, reports it through `updater.status()` and
+  does not offer that version again. New ids `krate/updater.markHealthy`, `.status`, `.ackRollback`,
+  `.setChannel`; new `native.updater` keys `channel`, `maxStarts`, `healthTimeout`, `confirm`;
+  `krate native patch` writes a patch for files the packager does not feed. All new feed fields are
+  ignored by older clients, and old feeds work unchanged. A configured `native.updater` now links the
+  updater area even when no code calls it.
+- Rich clipboard formats: `clipboard.write({ text, html, rtf })` puts several representations on
+  the clipboard together (Electron's `clipboard.write({ text, html })`); `readHtml`, `readRtf`,
+  `formats`, `readFormat` and `writeFormat` read and write by MIME name on all three platforms
+  (GTK targets, `public.html`/`public.rtf`, Windows `HTML Format` with the `CF_HTML` header and
+  `Rich Text Format`).
+- Webview context menu: `native.window.contextMenu` (`default`, `none`, `custom`) and
+  `menu.setContextMenu` per app, window or view. `custom` delivers a context event (kind, link,
+  image and selection, spelling suggestions) that `menu.onContextMenu` answers with items drawn by
+  the native menu code; `extend` adds items to the engine's menu. `krate:` item ids run the
+  built-in editing, spelling and Inspect Element actions.
+- `krate native dev --debug-go` builds the Go host with `-N -l` and runs it under a headless Delve
+  (`--debug-addr`, `--debug-config vscode`); `--debug-host` starts node, bun and deno host children
+  with `--inspect`. A missing `dlv` is diagnosed with its install command.
+- The `@krate/core-<platform>` packages ship `krate-shell` next to `krate`, cross-compiled with
+  `CGO_ENABLED=0` for all seven platforms. The compiler finds the shell in this order: `--shell`,
+  `$KRATE_SHELL`, next to the running `krate` executable, a build from a Krate checkout.
+- `krate native build` writes a runnable `dist-native/<os>-<arch>/<productName>` with `app/` next
+  to it when a shell is available, so a TypeScript-only app needs no Go toolchain to build and
+  package. `krate native build --release` falls back to the same layout without Go.
+- Window chrome: `native.window.titleBar` hidden and none now work on every OS, with drag regions
+  (`data-krate-drag`, `-webkit-app-region`, `app-region`), a native move and resize, double-press
+  maximize, `transparent`, Windows 11 `backdrop` (Mica, Mica Alt, Acrylic), `titleBarOverlay`, macOS
+  `vibrancy` and `trafficLightPosition`, document state, sheets, native tabs, the share menu
+  (new `share` permission), `bundle.macos.agent` (`LSUIElement`) with run-time dock control, Windows
+  thumbnail toolbar buttons and jump list tasks, through `@krate/app/chrome` and `sdk/chrome`. Linux
+  is tested; macOS and Windows are untested until the CI native job passes. See the Window chrome
+  page and `examples/native-chrome`.
+- `krate native doctor` reports the Go toolchain, the shell, the system webview (through the new
+  `krate-shell --doctor`), packaging and signing tools and the host runtime, and exits 1 when
+  something the config needs is missing.
+- Native plugins: a Go package plus a `krate-plugin.json` that ships reusable native capabilities.
+  `native.plugins` enables local directories, npm packages and Go modules; ops are called as
+  `plugin/<name>.<op>` (lowerCamel op names like the SDK ids, `info` or `cpuLoad`, bound to the exported Go
+  function by capitalizing the first letter or by the manifest's `go` field) through a generated, typed `krate/plugin/<name>` module (calls, streams,
+  signals) and gated by `plugin:<name>.<permission>`, which a build derives from the code, scopes
+  per window and shakes per op in release builds. The app runs under a per-app shell built with Go
+  (`krate native doctor` reports the toolchain as required). `krate native plugin init <name>`
+  scaffolds one; `examples/native-plugin` is a complete app. New diagnostics `KR7250` to `KR7257`.
+- Files: `native.fileAssociations` becomes macOS document types (with exported UTIs where macOS has
+  none), MSIX file type associations, NSIS ProgID and registry entries (removed on uninstall) and a
+  Linux `MimeType` with a shared-mime-info file in the deb, rpm and AppImage. `onOpenFile` and
+  `openedFiles` (`@krate/app/app`, Go `app.OnOpenFile`) deliver the files an app is launched with,
+  handed over by a second launch (apps with file associations take the single-instance lock
+  automatically) or sent by macOS, and grant them to the `fs` scope like a dialog pick;
+  `onFileDrop` (`@krate/app/window`, Go `window.OnFileDrop`) reports the real paths of files
+  dropped on a view while the page keeps its HTML5 drop events. `krate-shell` takes files after the
+  app directory. See `examples/native-files` and docs native/files.
+- Camera, microphone, screen capture and location with app-controlled permissions: the page's
+  `getUserMedia`, `getDisplayMedia` and geolocation requests go to the SDK (`@krate/app/media`,
+  Go `sdk/media`) instead of the engine's policy. A `native.media` policy per kind (`prompt`,
+  `allow`, `deny`), remembered decisions per app and per view, a request handler
+  (`onRequest`) and a native prompt decide; a window or view scope without the new `media` or
+  `location` permission is denied, and the build derives both from the UI code. An allowed request
+  also goes through the operating system's consent (macOS TCC, the Windows consent store, the Linux
+  Camera portal). `native.media.usage` writes the macOS usage descriptions, packaging adds the
+  device entitlements and MSIX capabilities, and `KR7290` warns when a description is missing.
+  `media.sources` lists screens and windows on macOS and Windows; no engine accepts a chosen source.
+- Native web contents controls per view: the print dialog and PDF output (`@krate/app/page`
+  `print`, `printToPdf`), find in page with match counts, zoom (Ctrl or Cmd plus, minus and 0 keep
+  working), a PNG capture of a view, downloads the page starts (`@krate/app/downloads`: a save
+  dialog or a configured folder, progress, completion and cancel events) and cookies and site data
+  (`@krate/app/cookies`). New permissions `page`, `downloads` and `cookies`; see [Web
+  contents](https://krate.js.org/docs/native/webcontents/). WebKit keeps no cookies for the app's
+  custom scheme, so the cookie calls take an http(s) URL on Linux and macOS.
+- Electron's advanced process features, where the system webviews allow them (docs native/processes):
+  worker processes (`native.workers`, `@krate/app/worker`, Go `sdk/worker`: a TypeScript module on Node, Bun
+  or Deno, a Go program or an executable, started by name, with per-worker narrowed SDK permissions, logs in
+  the app log, a restart policy and crash events, and two-way messages), message ports between views, windows
+  and workers (`@krate/app/port`: a channel's ends are handed to scopes that hold `port:receive`; the engines
+  cannot share a real `MessagePort`, so the port is shell-backed), offscreen rendering (`@krate/app/offscreen`:
+  a never-shown window plus PNG or BGRA snapshots from WebKitGTK, WKWebView and WebView2 at up to 60 a second
+  with dropped-frame counts; about 230 snapshots a second of an animated 800x600 page on the Linux sysroot),
+  automation (`native.automation`, dev and `native.debug` only: CDP on WebView2 with in-process commands, the
+  WebKit remote inspector on WebKitGTK, Safari inspection on WKWebView) and browser extensions
+  (`native.extensions`: WebView2 and macOS 15.4+, unsupported on WebKitGTK). New permissions `worker`, `port`,
+  `port:receive`, `offscreen`, `automation`, `extension`. See `examples/native-procs`.
+- Remote content: web pages in views and windows that cannot reach the app (`@krate/app/remote`, Go
+  `sdk/remote`, new permissions `remote`, `remote:intercept` and `remote:network`, derived from the code
+  like the other SDK ids). A remote view has its own web context, configuration or profile with no handler
+  for the app scheme, no bridge and an empty permission scope; it may navigate only to the origin it
+  started on and an allowlist (everything else opens in the system browser or is dropped, popups load in
+  place); permissions are denied and downloads cancelled. Storage is a partition: the default remote one
+  (never the app's), `persist:name` or an in-memory `name`. The app talks to a page only over an opt-in
+  message channel with origin checks in both directions. Declarative request rules per partition (block,
+  redirect, headers, with URL patterns and a request stream) with capability reporting, a user agent and
+  proxy per partition, certificate errors that end the load unless the app accepts the host, HTTP logins
+  answered by the app, and client certificates from PEM files on Linux. WebKitGTK is tested; WKWebView and
+  WebView2 compile and have GUI tests that CI runs. Windows has no per-partition proxy; subresource
+  redirects and headers are not possible on WebKit. See docs/native/remote and `examples/native-remote`.
+  A real find on the way: `@krate/app` modules that import another module and export a function under a
+  name the other declares (`onEvent`) were linked to the wrong function, so the remote module exports
+  `onRemoteEvent`.
+- Krate Native rows in the compatibility matrix (Linux verified, macOS and Windows untested) and
+  size, cold-start and memory budgets in `packages/native/budgets.json`.
+- Native OS integration SDK areas, each a Go package and a `@krate/app/<area>` module: `badge`
+  (app icon badge, progress and urgent flag: NSDockTile, ITaskbarList3, Unity LauncherEntry),
+  `screen` (displays, a window's display, centering, display changes), `power` (battery, idle,
+  suspend, resume, lock, sleep blockers), `login` (launch at login), `theme` (system light, dark and
+  high contrast, with native title bars following it) and `crash` (JSON crash reports for Go panics
+  and webview process crashes under the app's log directory, a crash event, and automatic view
+  reload). New permissions `badge`, `screen`, `power`, `theme` (granted by default) and
+  `power:inhibit`, `login`, `crash`. Linux is verified against private D-Bus buses, a GTK window and
+  the real shell; macOS and Windows are written and compiled, with GUI tests that CI runs.
+- `krate native check` and native builds warn about oversized images, large inlined `data:` URLs,
+  web fonts, compositing CSS effects and long lists without windowing (KR7270 to KR7274; thresholds
+  and a silence list in `native.lean`). Native builds no longer preload lazy chunks, ship no
+  script or config block on pages without client code, and write no `.br`/`.gz` siblings.
+  `krate native dev` has a Memory panel (PSS, private dirty, DOM nodes, JS heap where available).
+- Windows: clicking a toast after the app has quit starts it again. Toasts use protocol activation
+  with a per-app URL scheme (registered under `HKCU` at run time, by the NSIS installer and in the
+  MSIX manifest, now with `uap3:Protocol` so the URL reaches the executable); a new process hands the
+  click to the running instance or, when none runs, delivers it to the page as the first
+  notification event. The tray icon is verified to come back on `TaskbarCreated`.
+- Windows: the NSIS installer's WebView2 check follows Microsoft's registry locations, and
+  `native.bundle.windows.webview2` (`download`, `embed`, `fixed`, `none`, with `webview2Path`)
+  chooses how a missing runtime is handled. A shell that cannot find the runtime shows a message box
+  with the download link instead of exiting silently.
+- Deno host children: recent Deno versions need `unix:<socket path>` in `--allow-net` to listen on
+  the child's socket; the dev command now carries `{socket}`, which the shell fills in per run
+  (`deno compile` gets plain `--allow-net` for unix targets). A new end-to-end test runs Node, Bun and
+  Deno children through the real shell.
+- CI: the `native` job also runs on `ubuntu-24.04-arm` and `windows-11-arm`; tools with no arm64
+  build are skipped with a notice (`optional_runtimes`, `optional_tools`) and never fail
+  `KRATE_REQUIRE_E2E` falsely. Packaging smoke steps sign with throwaway keys (gpg, a self-signed
+  macOS identity in a temporary keychain, a self-signed Authenticode certificate) and verify them.
+- Fixed: `krate native sign` on Linux signed only the `.deb`; the `.rpm`, `.tar.gz` and AppImage names
+  were never matched. Found by signing the real packages with gpg in the new CI smoke step.
+- Native budgets accept entries for any platform (`darwin-arm64`, `windows-amd64`, ...) with the
+  same measured-plus-headroom rule and fail when a recorded entry is exceeded; platforms without
+  entries print a paste-ready `BUDGET-RECORD` block.
+- A top-level `viewTransitions` no longer reaches the desktop app (it hung the docs site's window on
+  WebKitGTK); `native.viewTransitions: "auto"` opts in.
+- Linux: request body streams are only touched on the main thread. WebKit shares their FormData
+  with the UI-side request and it is not thread safe; the old code crashed the process (SIGSEGV in
+  `gtk_main`) about once in a few hundred requests under load.
+
 ### Breaking
 
 - `outDir` values that are or contain the project root, pages directory or public directory
@@ -103,8 +281,51 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 - A guide to using shadcn/ui with Krate.
 - CI covers Node 24 and 26, and runs the install smoke test on Linux, macOS, Windows and Alpine.
 
+### Krate Native (experimental)
+
+Krate Native compiles a Krate app into a desktop app: the TSX UI runs in the system webview and
+host code runs in the native process. Names and options may change between releases.
+
+- `krate native init | check | dev | build | profile | package | sign | notarize | keygen`.
+  `build` writes an app directory for the prebuilt shell; `build --release [--target os/arch,...]`
+  links one executable per platform (`dist-native/<os>-<arch>/<productName>`, `report.json`) with
+  only the SDK areas the app reaches, Go host code registered in process and the UI in an embedded
+  archive. `--package` packages every target. `native.release.compile` and `native.release.pgo`
+  work, and `krate native profile` collects a CPU profile.
+- Host code in Go or marked TypeScript (`.host.ts` files, `// @host`, `@host` functions), called from the
+  UI as async functions, streams and signals, on QuickJS in the shell, or in child processes on
+  Node, Bun, Deno or (experimental) scriptc, with per-module islands. A release compiles each child
+  into an executable under `host/` next to the app. `@build` and `//krate:build` functions run
+  once during the build and their results are baked into the prerendered UI.
+- The SDK (`@krate/app/<area>` in the UI and host code, `sdk/<area>` in Go): files, SQLite,
+  key-value storage, secrets, network, windows, dialogs, clipboard, menus, tray, shortcuts,
+  notifications and updates, under permissions that the build derives from the code, checks
+  against the `native.permissions` allowlist (`KR7210`) and narrows per window.
+- Packaging and updates: icons, `.app`, `.zip`, `.dmg`, MSIX, NSIS, `.syso` resources, `.deb`,
+  `.rpm`, AppImage; code signing and notarization; an Ed25519-signed updater (`native.updater`,
+  `@krate/app/updater`, the `updater` permission).
+- New diagnostics `KR7200` to `KR7245`. Documentation under `/docs/native/`.
+
 ### Fixed
 
+- The generated types of a Go host signal say `T | undefined`, as for `@host` TypeScript signals: it
+  reads `undefined` until the host sends the first value, which pages typed as `T` crashed on.
+- An aliased export (`export { remoteOnEvent as onEvent }`) and another module's declared export of
+  the same name no longer meet in the page scope: the page's `onEvent` imported from one module
+  used to call the other one. The declaring module moves to a private name.
+- Two client navigations in quick succession no longer leave an unhandled "Transition was skipped"
+  rejection on the page: the router also handles the `ready` promise of a view transition the
+  newer navigation skipped.
+- Module constants are declared in the order their initializers need: the name after a dot
+  (`getClient().signal`) no longer counts as a read of a constant called `signal`. That false
+  dependency put `const signal = hostSignal.signal` from `@krate/app` before `hostSignal`, so
+  pages importing `@krate/app/window` threw on load (the `examples/native-views` views never
+  opened).
+- A named `async function` used as an event handler keeps `async` in the hydration code (it
+  was emitted as a plain function, so `await` was a syntax error).
+- A capitalized arrow constant imported by a page and used in a handler is declared once (the
+  page script declared it as both `var` and `function`, which does not parse), and an arrow
+  function that is an operand of `??`, `||` or another operator is parenthesized.
 - Binary data crosses between Go and the embedded QuickJS runtime as raw ArrayBuffer copies
   instead of base64 text encoded and decoded in JavaScript: request and response bodies
   (buffered and streamed), middleware responses, `fetch` request and response bodies,
@@ -184,6 +405,30 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
   identifier npm cannot use as a tag fails at the start, and a stable patch lower than `latest`
   no longer moves `latest`.
 - Compatibility matrix rows backed by CI tests read "Supported" instead of "Beta".
+
+### Security
+
+- Krate Native: a page could take over a permission scope by naming one of its views after the
+  window id `window.open` would hand out next. The window then shared the id, and closing it removed
+  the scope of that id, leaving the view with every permission of the app. Window ids now skip ids
+  that views hold, and an id is claimed atomically when it is chosen, so two concurrent `addView`
+  calls with one id can no longer make the losing call drop the winner's scope. See
+  `packages/native/SECURITY_REVIEW.md`.
+- Krate Native: a stream started from one view (window events, remote requests, media requests,
+  port messages, ...) could be opened by any other view, since stream ids are a counter; a view with
+  an empty scope could read what the producer emitted with the starter's permissions. A stream is now
+  bound to the native view that started it. Plugin signal gates now check the native view instead of
+  the `x-krate-window` header the page sets.
+- Krate Native: `startWorker(name, { env })` no longer accepts variables that change how a runtime or
+  the dynamic loader loads code (`NODE_OPTIONS`, `LD_PRELOAD`, `DYLD_*`, `BUN_*`, `DENO_*`, `PATH`,
+  ...) or the shell's own `KRATE_*`: a page with the `worker` permission could run arbitrary code with
+  `NODE_OPTIONS=--import=data:...`.
+- Krate Native: the prebuilt-shell distributable (`<productName>` with `app/` next to it) refuses
+  `--dev` (unless built with `native.debug`) and another app directory on its command line, which let
+  anyone who could start it run their own code or drive its pages under the app's signature,
+  keychain items and camera or microphone consent.
+- Krate Native: the single-instance socket falls back to a private `~/.krate-run` directory before the
+  shared temporary directory when the runtime directory path is too long.
 
 ### Known issues
 

@@ -82,6 +82,39 @@ type cliFlags struct {
 	Roots         []string
 	CPUProfile    string
 	MemProfile    string
+	NativeOut     string
+	Shell         string
+	WantShell     bool
+	GoHost        bool
+	Browser       bool
+	// DebugGo runs the Go host under Delve in `krate native dev`; DebugAddr
+	// is the address it listens on, DebugConfig names an editor to write a
+	// launch config for ("vscode"), DebugHost inspects the JavaScript host
+	// children (node, bun, deno).
+	DebugGo     bool
+	DebugAddr   string
+	DebugConfig string
+	DebugHost   bool
+	// Memory and Idle belong to `krate native profile --memory`.
+	Memory  bool
+	Idle    time.Duration
+	IdleSet bool
+	// TestGrep, TestWorkers and TestList belong to `krate native test`.
+	TestGrep    string
+	TestWorkers int
+	TestList    bool
+	// Release asks `krate native build` for compiled executables. Targets
+	// holds every --target value (comma-separated lists allowed).
+	Release bool
+	Targets []string
+	// Layout is "shell" (the prebuilt shell with a Go host child) or
+	// "executable" (one process), for `krate native build`; empty picks
+	// the executable for apps with Go host code.
+	Layout        string
+	Scriptc       bool
+	ScriptcFailOn string
+	Pkg           nativePkgFlags
+	Update        updateFlags
 }
 
 // exitHooks run, last registered first, before the process exits, so the run
@@ -175,6 +208,8 @@ func main() {
 		runConfig(flags, args)
 	case "plugin":
 		runPlugin(flags, args)
+	case "native":
+		runNative(flags, args)
 	case "init", "create":
 		// Handled by the @krate/core npm wrapper, which delegates to
 		// create-krate-app so the scaffold follows the same release channel.
@@ -273,6 +308,8 @@ func printCommandUsage(w io.Writer, cmd string) {
 	case "config":
 		fmt.Fprintf(w, "Usage: krate config [dir] [--mode <mode>] [--config <path>] [--schema]\n\n")
 		fmt.Fprintf(w, "Print the fully resolved configuration as JSON (--schema prints a JSON Schema).\n")
+	case "native":
+		printNativeUsage(w)
 	case "plugin":
 		fmt.Fprintf(w, "Usage: krate plugin add <package> [dir]\n\n")
 		fmt.Fprintf(w, "Manage Krate plugins.\n")
@@ -318,6 +355,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  explain   Explain a diagnostic code (krate explain KR7110)\n")
 	fmt.Fprintf(w, "  config    Print the fully resolved configuration\n")
 	fmt.Fprintf(w, "  plugin    Manage plugins (add <pkg>)\n")
+	fmt.Fprintf(w, "  native    Desktop target (experimental): check, init, dev, build, ...\n")
 	fmt.Fprintf(w, "  init      Scaffold a new project (alias: create; via the npm wrapper)\n")
 	fmt.Fprintf(w, "  mcp       Run the MCP server (Model Context Protocol; --http for HTTP)\n")
 	fmt.Fprintf(w, "  version   Print the version\n")
@@ -358,7 +396,8 @@ func parseFlags(args []string) (cliFlags, []string) {
 var valuedFlags = map[string]bool{
 	"--config": true, "--out-dir": true, "--target": true, "--mode": true,
 	"--report": true, "--token": true, "--root": true, "--cpuprofile": true,
-	"--memprofile": true, "--host": true, "--port": true,
+	"--memprofile": true, "--host": true, "--port": true, "--out": true, "--shell": true, "--layout": true,
+	"--scriptc-fail-on": true, "--idle": true, "--grep": true, "--workers": true, "--debug-addr": true, "--debug-config": true,
 }
 
 // parseFlagsChecked parses CLI flags, returning an error for malformed values
@@ -367,6 +406,11 @@ func parseFlagsChecked(args []string) (cliFlags, []string, error) {
 	var flags cliFlags
 	var remaining []string
 	for i := 0; i < len(args); i++ {
+		if handled, err := parsePkgFlag(&flags, args, &i); err != nil {
+			return flags, nil, err
+		} else if handled {
+			continue
+		}
 		if name, inline, hasInline := strings.Cut(args[i], "="); valuedFlags[name] {
 			val := inline
 			if !hasInline {
@@ -383,6 +427,40 @@ func parseFlagsChecked(args []string) (cliFlags, []string, error) {
 				flags.OutDir = val
 			case "--target":
 				flags.Target = val
+				for _, t := range strings.Split(val, ",") {
+					if t = strings.TrimSpace(t); t != "" {
+						flags.Targets = append(flags.Targets, t)
+					}
+				}
+			case "--out":
+				flags.NativeOut = val
+			case "--shell":
+				flags.Shell, flags.WantShell = val, true
+			case "--layout":
+				if val != "shell" && val != "executable" {
+					return flags, nil, fmt.Errorf("--layout must be shell or executable, got %q", val)
+				}
+				flags.Layout = val
+			case "--scriptc-fail-on":
+				flags.ScriptcFailOn = val
+			case "--grep":
+				flags.TestGrep = val
+			case "--workers":
+				n, err := strconv.Atoi(val)
+				if err != nil || n < 1 {
+					return flags, nil, fmt.Errorf("--workers needs a positive number, got %q", val)
+				}
+				flags.TestWorkers = n
+			case "--idle":
+				d, err := time.ParseDuration(val)
+				if err != nil || d < 0 {
+					return flags, nil, fmt.Errorf("--idle needs a duration such as 30s or 1m, got %q", val)
+				}
+				flags.Idle, flags.IdleSet = d, true
+			case "--debug-addr":
+				flags.DebugAddr = val
+			case "--debug-config":
+				flags.DebugConfig = val
 			case "--mode":
 				flags.Mode = val
 			case "--report":
@@ -407,6 +485,22 @@ func parseFlagsChecked(args []string) (cliFlags, []string, error) {
 			continue
 		}
 		switch {
+		case args[i] == "--browser":
+			flags.Browser = true
+		case args[i] == "--debug-go":
+			flags.DebugGo = true
+		case args[i] == "--debug-host":
+			flags.DebugHost = true
+		case args[i] == "--memory":
+			flags.Memory = true
+		case args[i] == "--list":
+			flags.TestList = true
+		case args[i] == "--release":
+			flags.Release = true
+		case args[i] == "--scriptc":
+			flags.Scriptc = true
+		case args[i] == "--go":
+			flags.GoHost = true
 		case args[i] == "--static-only":
 			flags.StaticOnly = true
 		case args[i] == "--watch":
@@ -1174,6 +1268,20 @@ func runCheck(flags cliFlags, args []string) {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%sCheck error:%s %v\n", cRed, cReset, err)
 		exit(1)
+	}
+
+	if cfg.Native != nil {
+		if res, pd := nativeCapabilities(root, cfg, flags); res != nil {
+			fmt.Printf("\n%s%s  Native capabilities%s\n%s", cBold, cCyan, cReset, indentLines(build.FormatNativeCapabilities(res, nativeAllow(cfg)), "  "))
+			if len(pd) > 0 {
+				errs := make([]error, len(pd))
+				for i, d := range pd {
+					errs[i] = d
+				}
+				fmt.Fprintf(os.Stderr, "%s\n\n%s%s  x Native permission check failed: %d error(s).%s\n", diag.FormatDiagnostics(errs), cBold, cRed, len(pd), cReset)
+				exit(1)
+			}
+		}
 	}
 
 	fopts := check.DefaultFormatOptions()

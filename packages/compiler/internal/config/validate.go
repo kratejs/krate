@@ -222,6 +222,12 @@ func (c *Config) Validate() (warnings []string, err error) {
 		warnings = append(warnings, "ssr.rendererPort equals devServer.port; choose a distinct port")
 	}
 
+	nw, nerr := c.validateNative()
+	if nerr != nil {
+		return nil, nerr
+	}
+	warnings = append(warnings, nw...)
+
 	return warnings, nil
 }
 

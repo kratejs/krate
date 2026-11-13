@@ -1,0 +1,14 @@
+import { createSignal } from '@krate/runtime';
+import { greet } from '../lib/greet.host';
+
+export default function Home() {
+  const [message, setMessage] = createSignal('');
+
+  return (
+    <main>
+      <h1>{{.Product}}</h1>
+      <button onClick={async () => setMessage(await greet('world'))}>Greet</button>
+      <p>{message()}</p>
+    </main>
+  );
+}

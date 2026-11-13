@@ -319,7 +319,8 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 				b.WriteString(sb.ExprJS)
 				b.WriteString(");\n")
 			case "expr":
-				if result.TrackSources && sb.Pos.Line > 0 && sb.File != "" {
+				marked := result.TrackSources && sb.Pos.Line > 0 && sb.File != ""
+				if marked {
 					b.WriteString(SrcMarkPrefix + itoa(len(result.SrcMarks)) + "*/")
 					result.SrcMarks = append(result.SrcMarks, SrcMark{File: sb.File, Line: sb.Pos.Line, Col: sb.Pos.Col})
 				}
@@ -327,7 +328,11 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 				b.WriteString(strconv.Quote(string(sb.SlotID)))
 				b.WriteString(",()=>")
 				b.WriteString(sb.ExprJS)
-				b.WriteString(");\n")
+				b.WriteString(");")
+				if marked {
+					b.WriteString(SrcMarkEnd)
+				}
+				b.WriteString("\n")
 			case "activity":
 				b.WriteString("kbindActivity(")
 				b.WriteString(strconv.Quote(string(sb.SlotID)))
@@ -353,7 +358,8 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 					prop += "Capture"
 				}
 			}
-			if result.TrackSources && h.Pos.Line > 0 && h.File != "" {
+			marked := result.TrackSources && h.Pos.Line > 0 && h.File != ""
+			if marked {
 				b.WriteString(SrcMarkPrefix + itoa(len(result.SrcMarks)) + "*/")
 				result.SrcMarks = append(result.SrcMarks, SrcMark{File: h.File, Line: h.Pos.Line, Col: h.Pos.Col})
 			}
@@ -363,7 +369,11 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 			b.WriteString(strconv.Quote(prop))
 			b.WriteString(",")
 			b.WriteString(h.Body)
-			b.WriteString(");\n")
+			b.WriteString(");")
+			if marked {
+				b.WriteString(SrcMarkEnd)
+			}
+			b.WriteString("\n")
 		}
 
 		// Attribute bindings: update the attribute on signal changes.

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
+	native "github.com/kratejs/krate/packages/native/jsruntime"
 )
 
 // Runtime option keys CompatDiagnostics accepts.
@@ -36,7 +37,7 @@ func CompatDiagnostics(scan CompatScan, root, option string) []diag.Diagnostic {
 	if option == CompatMiddlewareRuntime {
 		kind = "middleware"
 	}
-	ledger := Compat()
+	ledger := native.Compat()
 	lines := map[string][]string{}
 	seen := map[[2]string]bool{}
 	var out []diag.Diagnostic

@@ -1,0 +1,2129 @@
+{
+  "ids": [
+    {
+      "id": "krate/os.appDataDir",
+      "permission": "os:info",
+      "area": "os",
+      "module": "os",
+      "exports": [
+        "appDataDir"
+      ]
+    },
+    {
+      "id": "krate/os.cacheDir",
+      "permission": "os:info",
+      "area": "os",
+      "module": "os",
+      "exports": [
+        "cacheDir"
+      ]
+    },
+    {
+      "id": "krate/os.configDir",
+      "permission": "os:info",
+      "area": "os",
+      "module": "os",
+      "exports": [
+        "configDir"
+      ]
+    },
+    {
+      "id": "krate/os.logDir",
+      "permission": "os:info",
+      "area": "os",
+      "module": "os",
+      "exports": [
+        "logDir"
+      ]
+    },
+    {
+      "id": "krate/os.tempDir",
+      "permission": "os:info",
+      "area": "os",
+      "module": "os",
+      "exports": [
+        "tempDir"
+      ]
+    },
+    {
+      "id": "krate/os.info",
+      "permission": "os:info",
+      "area": "os",
+      "module": "os",
+      "exports": [
+        "info"
+      ]
+    },
+    {
+      "id": "krate/os.openExternal",
+      "permission": "shell:openExternal",
+      "area": "os",
+      "module": "os",
+      "exports": [
+        "openExternal"
+      ]
+    },
+    {
+      "id": "krate/os.secretSet",
+      "permission": "os:secrets",
+      "area": "os",
+      "module": "os",
+      "exports": [
+        "secretSet"
+      ]
+    },
+    {
+      "id": "krate/os.secretGet",
+      "permission": "os:secrets.read",
+      "area": "os",
+      "module": "os",
+      "exports": [
+        "secretGet"
+      ]
+    },
+    {
+      "id": "krate/os.secretDelete",
+      "permission": "os:secrets",
+      "area": "os",
+      "module": "os",
+      "exports": [
+        "secretDelete"
+      ]
+    },
+    {
+      "id": "krate/fs.readFile",
+      "permission": "fs:read",
+      "area": "fs",
+      "module": "fs",
+      "exports": [
+        "readFile"
+      ]
+    },
+    {
+      "id": "krate/fs.readText",
+      "permission": "fs:read",
+      "area": "fs",
+      "module": "fs",
+      "exports": [
+        "readText"
+      ]
+    },
+    {
+      "id": "krate/fs.readDir",
+      "permission": "fs:read",
+      "area": "fs",
+      "module": "fs",
+      "exports": [
+        "readDir"
+      ]
+    },
+    {
+      "id": "krate/fs.stat",
+      "permission": "fs:read",
+      "area": "fs",
+      "module": "fs",
+      "exports": [
+        "stat"
+      ]
+    },
+    {
+      "id": "krate/fs.exists",
+      "permission": "fs:read",
+      "area": "fs",
+      "module": "fs",
+      "exports": [
+        "exists"
+      ]
+    },
+    {
+      "id": "krate/fs.writeFile",
+      "permission": "fs",
+      "area": "fs",
+      "module": "fs",
+      "exports": [
+        "writeFile"
+      ]
+    },
+    {
+      "id": "krate/fs.writeText",
+      "permission": "fs",
+      "area": "fs",
+      "module": "fs",
+      "exports": [
+        "writeText"
+      ]
+    },
+    {
+      "id": "krate/fs.mkdir",
+      "permission": "fs",
+      "area": "fs",
+      "module": "fs",
+      "exports": [
+        "mkdir"
+      ]
+    },
+    {
+      "id": "krate/fs.remove",
+      "permission": "fs",
+      "area": "fs",
+      "module": "fs",
+      "exports": [
+        "remove"
+      ]
+    },
+    {
+      "id": "krate/fs.rename",
+      "permission": "fs",
+      "area": "fs",
+      "module": "fs",
+      "exports": [
+        "rename"
+      ]
+    },
+    {
+      "id": "krate/db.exec",
+      "permission": "db",
+      "area": "db",
+      "module": "db",
+      "exports": [
+        "exec"
+      ]
+    },
+    {
+      "id": "krate/db.query",
+      "permission": "db",
+      "area": "db",
+      "module": "db",
+      "exports": [
+        "query"
+      ]
+    },
+    {
+      "id": "krate/db.transaction",
+      "permission": "db",
+      "area": "db",
+      "module": "db",
+      "exports": [
+        "transaction"
+      ]
+    },
+    {
+      "id": "krate/kv.get",
+      "permission": "kv",
+      "area": "kv",
+      "module": "kv",
+      "exports": [
+        "get"
+      ]
+    },
+    {
+      "id": "krate/kv.set",
+      "permission": "kv",
+      "area": "kv",
+      "module": "kv",
+      "exports": [
+        "set"
+      ]
+    },
+    {
+      "id": "krate/kv.delete",
+      "permission": "kv",
+      "area": "kv",
+      "module": "kv",
+      "exports": [
+        "delete"
+      ]
+    },
+    {
+      "id": "krate/kv.keys",
+      "permission": "kv",
+      "area": "kv",
+      "module": "kv",
+      "exports": [
+        "keys"
+      ]
+    },
+    {
+      "id": "krate/updater.check",
+      "permission": "updater",
+      "area": "updater",
+      "module": "updater",
+      "exports": [
+        "check",
+        "update"
+      ]
+    },
+    {
+      "id": "krate/updater.download",
+      "permission": "updater",
+      "area": "updater",
+      "module": "updater",
+      "exports": [
+        "download",
+        "update"
+      ]
+    },
+    {
+      "id": "krate/updater.apply",
+      "permission": "updater",
+      "area": "updater",
+      "module": "updater",
+      "exports": [
+        "apply",
+        "update"
+      ]
+    },
+    {
+      "id": "krate/updater.relaunch",
+      "permission": "updater",
+      "area": "updater",
+      "module": "updater",
+      "exports": [
+        "relaunch"
+      ]
+    },
+    {
+      "id": "krate/updater.markHealthy",
+      "permission": "updater",
+      "area": "updater",
+      "module": "updater",
+      "exports": [
+        "markHealthy"
+      ]
+    },
+    {
+      "id": "krate/updater.status",
+      "permission": "updater",
+      "area": "updater",
+      "module": "updater",
+      "exports": [
+        "status"
+      ]
+    },
+    {
+      "id": "krate/updater.ackRollback",
+      "permission": "updater",
+      "area": "updater",
+      "module": "updater",
+      "exports": [
+        "ackRollback"
+      ]
+    },
+    {
+      "id": "krate/updater.setChannel",
+      "permission": "updater",
+      "area": "updater",
+      "module": "updater",
+      "exports": [
+        "setChannel"
+      ]
+    },
+    {
+      "id": "krate/permission.query",
+      "area": "permission",
+      "module": "permission",
+      "exports": [
+        "query"
+      ]
+    },
+    {
+      "id": "krate/window.open",
+      "permission": "window",
+      "area": "window",
+      "module": "window",
+      "exports": [
+        "open"
+      ]
+    },
+    {
+      "id": "krate/window.list",
+      "permission": "window",
+      "area": "window",
+      "module": "window",
+      "exports": [
+        "list"
+      ]
+    },
+    {
+      "id": "krate/window.state",
+      "permission": "window",
+      "area": "window",
+      "module": "window",
+      "exports": [
+        "Window",
+        "get",
+        "main",
+        "open"
+      ]
+    },
+    {
+      "id": "krate/window.close",
+      "permission": "window",
+      "area": "window",
+      "module": "window",
+      "exports": [
+        "Window",
+        "get",
+        "main",
+        "open"
+      ]
+    },
+    {
+      "id": "krate/window.setTitle",
+      "permission": "window",
+      "area": "window",
+      "module": "window",
+      "exports": [
+        "Window",
+        "get",
+        "main",
+        "open"
+      ]
+    },
+    {
+      "id": "krate/window.setSize",
+      "permission": "window",
+      "area": "window",
+      "module": "window",
+      "exports": [
+        "Window",
+        "get",
+        "main",
+        "open"
+      ]
+    },
+    {
+      "id": "krate/window.setPosition",
+      "permission": "window",
+      "area": "window",
+      "module": "window",
+      "exports": [
+        "Window",
+        "get",
+        "main",
+        "open"
+      ]
+    },
+    {
+      "id": "krate/window.setAlwaysOnTop",
+      "permission": "window",
+      "area": "window",
+      "module": "window",
+      "exports": [
+        "Window",
+        "get",
+        "main",
+        "open"
+      ]
+    },
+    {
+      "id": "krate/window.setFullscreen",
+      "permission": "window",
+      "area": "window",
+      "module": "window",
+      "exports": [
+        "Window",
+        "get",
+        "main",
+        "open"
+      ]
+    },
+    {
+      "id": "krate/window.setFrameless",
+      "permission": "window",
+      "area": "window",
+      "module": "window",
+      "exports": [
+        "Window",
+        "get",
+        "main",
+        "open"
+      ]
+    },
+    {
+      "id": "krate/window.minimize",
+      "permission": "window",
+      "area": "window",
+      "module": "window",
+      "exports": [
+        "Window",
+        "get",
+        "main",
+        "open"
+      ]
+    },
+    {
+      "id": "krate/window.maximize",
+      "permission": "window",
+      "area": "window",
+      "module": "window",
+      "exports": [
+        "Window",
+        "get",
+        "main",
+        "open"
+      ]
+    },
+    {
+      "id": "krate/window.restore",
+      "permission": "window",
+      "area": "window",
+      "module": "window",
+      "exports": [
+        "Window",
+        "get",
+        "main",
+        "open"
+      ]
+    },
+    {
+      "id": "krate/window.focus",
+      "permission": "window",
+      "area": "window",
+      "module": "window",
+      "exports": [
+        "Window",
+        "get",
+        "main",
+        "open"
+      ]
+    },
+    {
+      "id": "krate/window.show",
+      "permission": "window",
+      "area": "window",
+      "module": "window",
+      "exports": [
+        "Window",
+        "get",
+        "main",
+        "open"
+      ]
+    },
+    {
+      "id": "krate/window.hide",
+      "permission": "window",
+      "area": "window",
+      "module": "window",
+      "exports": [
+        "Window",
+        "get",
+        "main",
+        "open"
+      ]
+    },
+    {
+      "id": "krate/window.setPreventClose",
+      "permission": "window",
+      "area": "window",
+      "module": "window",
+      "exports": [
+        "Window",
+        "get",
+        "main",
+        "open"
+      ]
+    },
+    {
+      "id": "krate/window.navigate",
+      "permission": "window",
+      "area": "window",
+      "module": "window",
+      "exports": [
+        "Window",
+        "get",
+        "main",
+        "open"
+      ]
+    },
+    {
+      "id": "krate/window.events",
+      "permission": "window",
+      "area": "window",
+      "module": "window",
+      "exports": [
+        "Window",
+        "get",
+        "main",
+        "onEvent",
+        "open"
+      ]
+    },
+    {
+      "id": "krate/window.addView",
+      "permission": "window",
+      "area": "window",
+      "module": "window",
+      "exports": [
+        "Window",
+        "get",
+        "main",
+        "open"
+      ]
+    },
+    {
+      "id": "krate/window.removeView",
+      "permission": "window",
+      "area": "window",
+      "module": "window",
+      "exports": [
+        "View",
+        "Window",
+        "get",
+        "getView",
+        "main",
+        "open"
+      ]
+    },
+    {
+      "id": "krate/window.views",
+      "permission": "window",
+      "area": "window",
+      "module": "window",
+      "exports": [
+        "Window",
+        "get",
+        "main",
+        "open",
+        "views"
+      ]
+    },
+    {
+      "id": "krate/window.setLayout",
+      "permission": "window",
+      "area": "window",
+      "module": "window",
+      "exports": [
+        "Window",
+        "get",
+        "main",
+        "open"
+      ]
+    },
+    {
+      "id": "krate/window.layout",
+      "permission": "window",
+      "area": "window",
+      "module": "window",
+      "exports": [
+        "Window",
+        "get",
+        "main",
+        "open"
+      ]
+    },
+    {
+      "id": "krate/window.focusView",
+      "permission": "window",
+      "area": "window",
+      "module": "window",
+      "exports": [
+        "View",
+        "Window",
+        "get",
+        "getView",
+        "main",
+        "open"
+      ]
+    },
+    {
+      "id": "krate/window.navigateView",
+      "permission": "window",
+      "area": "window",
+      "module": "window",
+      "exports": [
+        "View",
+        "Window",
+        "get",
+        "getView",
+        "main",
+        "open"
+      ]
+    },
+    {
+      "id": "krate/window.postMessage",
+      "permission": "window",
+      "area": "window",
+      "module": "window",
+      "exports": [
+        "View",
+        "Window",
+        "get",
+        "getView",
+        "main",
+        "open"
+      ]
+    },
+    {
+      "id": "krate/window.viewEvents",
+      "permission": "window",
+      "area": "window",
+      "module": "window",
+      "exports": [
+        "onViewEvent"
+      ]
+    },
+    {
+      "id": "krate/window.fileDrops",
+      "permission": "window",
+      "area": "window",
+      "module": "window",
+      "exports": [
+        "onFileDrop"
+      ]
+    },
+    {
+      "id": "krate/window.thisView",
+      "permission": "window",
+      "area": "window",
+      "module": "window",
+      "exports": [
+        "onFileDrop"
+      ]
+    },
+    {
+      "id": "krate/dialog.openFile",
+      "permission": "dialog",
+      "area": "dialog",
+      "module": "dialog",
+      "exports": [
+        "openFile"
+      ]
+    },
+    {
+      "id": "krate/dialog.openFolder",
+      "permission": "dialog",
+      "area": "dialog",
+      "module": "dialog",
+      "exports": [
+        "openFolder"
+      ]
+    },
+    {
+      "id": "krate/dialog.saveFile",
+      "permission": "dialog",
+      "area": "dialog",
+      "module": "dialog",
+      "exports": [
+        "saveFile"
+      ]
+    },
+    {
+      "id": "krate/dialog.message",
+      "permission": "dialog",
+      "area": "dialog",
+      "module": "dialog",
+      "exports": [
+        "confirm",
+        "message"
+      ]
+    },
+    {
+      "id": "krate/clipboard.writeText",
+      "permission": "clipboard",
+      "area": "clipboard",
+      "module": "clipboard",
+      "exports": [
+        "writeText"
+      ]
+    },
+    {
+      "id": "krate/clipboard.writeImage",
+      "permission": "clipboard",
+      "area": "clipboard",
+      "module": "clipboard",
+      "exports": [
+        "writeImage"
+      ]
+    },
+    {
+      "id": "krate/clipboard.writeFiles",
+      "permission": "clipboard",
+      "area": "clipboard",
+      "module": "clipboard",
+      "exports": [
+        "writeFiles"
+      ]
+    },
+    {
+      "id": "krate/clipboard.clear",
+      "permission": "clipboard",
+      "area": "clipboard",
+      "module": "clipboard",
+      "exports": [
+        "clear"
+      ]
+    },
+    {
+      "id": "krate/clipboard.readText",
+      "permission": "clipboard:read",
+      "area": "clipboard",
+      "module": "clipboard",
+      "exports": [
+        "readText"
+      ]
+    },
+    {
+      "id": "krate/clipboard.readImage",
+      "permission": "clipboard:read",
+      "area": "clipboard",
+      "module": "clipboard",
+      "exports": [
+        "readImage"
+      ]
+    },
+    {
+      "id": "krate/clipboard.readFiles",
+      "permission": "clipboard:read",
+      "area": "clipboard",
+      "module": "clipboard",
+      "exports": [
+        "readFiles"
+      ]
+    },
+    {
+      "id": "krate/menu.setApp",
+      "permission": "menu",
+      "area": "menu",
+      "module": "menu",
+      "exports": [
+        "setApp"
+      ]
+    },
+    {
+      "id": "krate/menu.popup",
+      "permission": "menu",
+      "area": "menu",
+      "module": "menu",
+      "exports": [
+        "onContextMenu",
+        "popup"
+      ]
+    },
+    {
+      "id": "krate/menu.events",
+      "permission": "menu",
+      "area": "menu",
+      "module": "menu",
+      "exports": [
+        "onClick",
+        "onMenu"
+      ]
+    },
+    {
+      "id": "krate/tray.set",
+      "permission": "tray",
+      "area": "tray",
+      "module": "tray",
+      "exports": [
+        "set"
+      ]
+    },
+    {
+      "id": "krate/tray.remove",
+      "permission": "tray",
+      "area": "tray",
+      "module": "tray",
+      "exports": [
+        "remove"
+      ]
+    },
+    {
+      "id": "krate/tray.events",
+      "permission": "tray",
+      "area": "tray",
+      "module": "tray",
+      "exports": [
+        "onClick",
+        "onEvent"
+      ]
+    },
+    {
+      "id": "krate/shortcut.register",
+      "permission": "shortcut",
+      "area": "shortcut",
+      "module": "shortcut",
+      "exports": [
+        "register"
+      ]
+    },
+    {
+      "id": "krate/shortcut.unregister",
+      "permission": "shortcut",
+      "area": "shortcut",
+      "module": "shortcut",
+      "exports": [
+        "register"
+      ]
+    },
+    {
+      "id": "krate/shortcut.events",
+      "permission": "shortcut",
+      "area": "shortcut",
+      "module": "shortcut",
+      "exports": [
+        "register"
+      ]
+    },
+    {
+      "id": "krate/notify.send",
+      "permission": "notify",
+      "area": "notify",
+      "module": "notify",
+      "exports": [
+        "send"
+      ]
+    },
+    {
+      "id": "krate/notify.close",
+      "permission": "notify",
+      "area": "notify",
+      "module": "notify",
+      "exports": [
+        "close"
+      ]
+    },
+    {
+      "id": "krate/notify.events",
+      "permission": "notify",
+      "area": "notify",
+      "module": "notify",
+      "exports": [
+        "onAction",
+        "onEvent"
+      ]
+    },
+    {
+      "id": "krate/app.quit",
+      "permission": "app",
+      "area": "app",
+      "module": "app",
+      "exports": [
+        "quit"
+      ]
+    },
+    {
+      "id": "krate/app.relaunch",
+      "permission": "app",
+      "area": "app",
+      "module": "app",
+      "exports": [
+        "relaunch"
+      ]
+    },
+    {
+      "id": "krate/app.supports",
+      "permission": "app",
+      "area": "app",
+      "module": "app",
+      "exports": [
+        "supports"
+      ]
+    },
+    {
+      "id": "krate/app.events",
+      "permission": "app",
+      "area": "app",
+      "module": "app",
+      "exports": [
+        "onOpenURL",
+        "onSecondInstance"
+      ]
+    },
+    {
+      "id": "krate/app.openedFiles",
+      "permission": "app",
+      "area": "app",
+      "module": "app",
+      "exports": [
+        "onOpenFile",
+        "openedFiles"
+      ]
+    },
+    {
+      "id": "krate/app.openFileEvents",
+      "permission": "app",
+      "area": "app",
+      "module": "app",
+      "exports": [
+        "onOpenFile"
+      ]
+    },
+    {
+      "id": "krate/chrome.state",
+      "permission": "window",
+      "area": "chrome",
+      "module": "chrome",
+      "exports": [
+        "ChromeWindow",
+        "getChrome",
+        "mainChrome"
+      ]
+    },
+    {
+      "id": "krate/chrome.setTitleBar",
+      "permission": "window",
+      "area": "chrome",
+      "module": "chrome",
+      "exports": [
+        "ChromeWindow",
+        "getChrome",
+        "mainChrome"
+      ]
+    },
+    {
+      "id": "krate/chrome.setBackdrop",
+      "permission": "window",
+      "area": "chrome",
+      "module": "chrome",
+      "exports": [
+        "ChromeWindow",
+        "getChrome",
+        "mainChrome"
+      ]
+    },
+    {
+      "id": "krate/chrome.setVibrancy",
+      "permission": "window",
+      "area": "chrome",
+      "module": "chrome",
+      "exports": [
+        "ChromeWindow",
+        "getChrome",
+        "mainChrome"
+      ]
+    },
+    {
+      "id": "krate/chrome.setTitleBarOverlay",
+      "permission": "window",
+      "area": "chrome",
+      "module": "chrome",
+      "exports": [
+        "ChromeWindow",
+        "getChrome",
+        "mainChrome"
+      ]
+    },
+    {
+      "id": "krate/chrome.setTrafficLightPosition",
+      "permission": "window",
+      "area": "chrome",
+      "module": "chrome",
+      "exports": [
+        "ChromeWindow",
+        "getChrome",
+        "mainChrome"
+      ]
+    },
+    {
+      "id": "krate/chrome.startDrag",
+      "permission": "window",
+      "area": "chrome",
+      "module": "chrome",
+      "exports": [
+        "ChromeWindow",
+        "getChrome",
+        "mainChrome"
+      ]
+    },
+    {
+      "id": "krate/chrome.toggleMaximize",
+      "permission": "window",
+      "area": "chrome",
+      "module": "chrome",
+      "exports": [
+        "ChromeWindow",
+        "getChrome",
+        "mainChrome"
+      ]
+    },
+    {
+      "id": "krate/chrome.setDocumentEdited",
+      "permission": "window",
+      "area": "chrome",
+      "module": "chrome",
+      "exports": [
+        "ChromeWindow",
+        "getChrome",
+        "mainChrome"
+      ]
+    },
+    {
+      "id": "krate/chrome.setRepresentedFile",
+      "permission": "window",
+      "area": "chrome",
+      "module": "chrome",
+      "exports": [
+        "ChromeWindow",
+        "getChrome",
+        "mainChrome"
+      ]
+    },
+    {
+      "id": "krate/chrome.attachSheet",
+      "permission": "window",
+      "area": "chrome",
+      "module": "chrome",
+      "exports": [
+        "ChromeWindow",
+        "getChrome",
+        "mainChrome"
+      ]
+    },
+    {
+      "id": "krate/chrome.endSheet",
+      "permission": "window",
+      "area": "chrome",
+      "module": "chrome",
+      "exports": [
+        "ChromeWindow",
+        "getChrome",
+        "mainChrome"
+      ]
+    },
+    {
+      "id": "krate/chrome.setTabbing",
+      "permission": "window",
+      "area": "chrome",
+      "module": "chrome",
+      "exports": [
+        "ChromeWindow",
+        "getChrome",
+        "mainChrome"
+      ]
+    },
+    {
+      "id": "krate/chrome.mergeAllWindows",
+      "permission": "window",
+      "area": "chrome",
+      "module": "chrome",
+      "exports": [
+        "ChromeWindow",
+        "getChrome",
+        "mainChrome"
+      ]
+    },
+    {
+      "id": "krate/chrome.moveTabToNewWindow",
+      "permission": "window",
+      "area": "chrome",
+      "module": "chrome",
+      "exports": [
+        "ChromeWindow",
+        "getChrome",
+        "mainChrome"
+      ]
+    },
+    {
+      "id": "krate/chrome.tabs",
+      "permission": "window",
+      "area": "chrome",
+      "module": "chrome",
+      "exports": [
+        "ChromeWindow",
+        "getChrome",
+        "mainChrome"
+      ]
+    },
+    {
+      "id": "krate/chrome.setThumbButtons",
+      "permission": "window",
+      "area": "chrome",
+      "module": "chrome",
+      "exports": [
+        "ChromeWindow",
+        "getChrome",
+        "mainChrome"
+      ]
+    },
+    {
+      "id": "krate/chrome.share",
+      "permission": "share",
+      "area": "chrome",
+      "module": "chrome",
+      "exports": [
+        "share"
+      ]
+    },
+    {
+      "id": "krate/chrome.setJumpList",
+      "permission": "app",
+      "area": "chrome",
+      "module": "chrome",
+      "exports": [
+        "setJumpList"
+      ]
+    },
+    {
+      "id": "krate/chrome.clearJumpList",
+      "permission": "app",
+      "area": "chrome",
+      "module": "chrome",
+      "exports": [
+        "clearJumpList"
+      ]
+    },
+    {
+      "id": "krate/chrome.setActivationPolicy",
+      "permission": "app",
+      "area": "chrome",
+      "module": "chrome",
+      "exports": [
+        "setActivationPolicy"
+      ]
+    },
+    {
+      "id": "krate/chrome.setDockVisible",
+      "permission": "app",
+      "area": "chrome",
+      "module": "chrome",
+      "exports": [
+        "setDockVisible"
+      ]
+    },
+    {
+      "id": "krate/chrome.events",
+      "permission": "window",
+      "area": "chrome",
+      "module": "chrome",
+      "exports": [
+        "ChromeWindow",
+        "getChrome",
+        "mainChrome",
+        "onChromeEvent"
+      ]
+    },
+    {
+      "id": "krate/clipboard.write",
+      "permission": "clipboard",
+      "area": "clipboard",
+      "module": "clipboard",
+      "exports": [
+        "write"
+      ]
+    },
+    {
+      "id": "krate/clipboard.writeFormat",
+      "permission": "clipboard",
+      "area": "clipboard",
+      "module": "clipboard",
+      "exports": [
+        "writeFormat"
+      ]
+    },
+    {
+      "id": "krate/clipboard.readHtml",
+      "permission": "clipboard:read",
+      "area": "clipboard",
+      "module": "clipboard",
+      "exports": [
+        "readHtml"
+      ]
+    },
+    {
+      "id": "krate/clipboard.readRtf",
+      "permission": "clipboard:read",
+      "area": "clipboard",
+      "module": "clipboard",
+      "exports": [
+        "readRtf"
+      ]
+    },
+    {
+      "id": "krate/clipboard.formats",
+      "permission": "clipboard:read",
+      "area": "clipboard",
+      "module": "clipboard",
+      "exports": [
+        "formats"
+      ]
+    },
+    {
+      "id": "krate/clipboard.readFormat",
+      "permission": "clipboard:read",
+      "area": "clipboard",
+      "module": "clipboard",
+      "exports": [
+        "readFormat"
+      ]
+    },
+    {
+      "id": "krate/menu.setContextMenu",
+      "permission": "menu",
+      "area": "menu",
+      "module": "menu",
+      "exports": [
+        "setContextMenu"
+      ]
+    },
+    {
+      "id": "krate/menu.contextEvents",
+      "permission": "menu",
+      "area": "menu",
+      "module": "menu",
+      "exports": [
+        "onContext",
+        "onContextMenu"
+      ]
+    },
+    {
+      "id": "krate/media.policy",
+      "permission": "media",
+      "area": "media",
+      "module": "media",
+      "exports": [
+        "getPolicy"
+      ]
+    },
+    {
+      "id": "krate/media.setPolicy",
+      "permission": "media:manage",
+      "area": "media",
+      "module": "media",
+      "exports": [
+        "setPolicy"
+      ]
+    },
+    {
+      "id": "krate/media.decisions",
+      "permission": "media",
+      "area": "media",
+      "module": "media",
+      "exports": [
+        "decisions"
+      ]
+    },
+    {
+      "id": "krate/media.decide",
+      "permission": "media:manage",
+      "area": "media",
+      "module": "media",
+      "exports": [
+        "decide"
+      ]
+    },
+    {
+      "id": "krate/media.reset",
+      "permission": "media:manage",
+      "area": "media",
+      "module": "media",
+      "exports": [
+        "reset"
+      ]
+    },
+    {
+      "id": "krate/media.requests",
+      "permission": "media:manage",
+      "area": "media",
+      "module": "media",
+      "exports": [
+        "onRequest"
+      ]
+    },
+    {
+      "id": "krate/media.respond",
+      "permission": "media:manage",
+      "area": "media",
+      "module": "media",
+      "exports": [
+        "onRequest"
+      ]
+    },
+    {
+      "id": "krate/media.events",
+      "permission": "media:manage",
+      "area": "media",
+      "module": "media",
+      "exports": [
+        "onOutcome"
+      ]
+    },
+    {
+      "id": "krate/media.osStatus",
+      "permission": "media",
+      "area": "media",
+      "module": "media",
+      "exports": [
+        "osStatus"
+      ]
+    },
+    {
+      "id": "krate/media.osRequest",
+      "permission": "media:manage",
+      "area": "media",
+      "module": "media",
+      "exports": [
+        "osRequest"
+      ]
+    },
+    {
+      "id": "krate/media.sources",
+      "permission": "media:manage",
+      "area": "media",
+      "module": "media",
+      "exports": [
+        "sources"
+      ]
+    },
+    {
+      "id": "krate/media.chooseSource",
+      "permission": "media:manage",
+      "area": "media",
+      "module": "media",
+      "exports": [
+        "chooseSource"
+      ]
+    },
+    {
+      "id": "krate/page.print",
+      "permission": "page",
+      "area": "page",
+      "module": "page",
+      "exports": [
+        "print"
+      ]
+    },
+    {
+      "id": "krate/page.printToPdf",
+      "permission": "page",
+      "area": "page",
+      "module": "page",
+      "exports": [
+        "printToPdf"
+      ]
+    },
+    {
+      "id": "krate/page.find",
+      "permission": "page",
+      "area": "page",
+      "module": "page",
+      "exports": [
+        "find"
+      ]
+    },
+    {
+      "id": "krate/page.stopFind",
+      "permission": "page",
+      "area": "page",
+      "module": "page",
+      "exports": [
+        "stopFind"
+      ]
+    },
+    {
+      "id": "krate/page.findEvents",
+      "permission": "page",
+      "area": "page",
+      "module": "page",
+      "exports": [
+        "onFind"
+      ]
+    },
+    {
+      "id": "krate/page.zoom",
+      "permission": "page",
+      "area": "page",
+      "module": "page",
+      "exports": [
+        "zoom"
+      ]
+    },
+    {
+      "id": "krate/page.setZoom",
+      "permission": "page",
+      "area": "page",
+      "module": "page",
+      "exports": [
+        "setZoom"
+      ]
+    },
+    {
+      "id": "krate/page.capture",
+      "permission": "page",
+      "area": "page",
+      "module": "page",
+      "exports": [
+        "capture"
+      ]
+    },
+    {
+      "id": "krate/downloads.configure",
+      "permission": "downloads",
+      "area": "downloads",
+      "module": "downloads",
+      "exports": [
+        "configure"
+      ]
+    },
+    {
+      "id": "krate/downloads.list",
+      "permission": "downloads",
+      "area": "downloads",
+      "module": "downloads",
+      "exports": [
+        "list"
+      ]
+    },
+    {
+      "id": "krate/downloads.cancel",
+      "permission": "downloads",
+      "area": "downloads",
+      "module": "downloads",
+      "exports": [
+        "cancel"
+      ]
+    },
+    {
+      "id": "krate/downloads.events",
+      "permission": "downloads",
+      "area": "downloads",
+      "module": "downloads",
+      "exports": [
+        "onDone",
+        "onEvent"
+      ]
+    },
+    {
+      "id": "krate/cookies.list",
+      "permission": "cookies",
+      "area": "cookies",
+      "module": "cookies",
+      "exports": [
+        "list"
+      ]
+    },
+    {
+      "id": "krate/cookies.get",
+      "permission": "cookies",
+      "area": "cookies",
+      "module": "cookies",
+      "exports": [
+        "get"
+      ]
+    },
+    {
+      "id": "krate/cookies.set",
+      "permission": "cookies",
+      "area": "cookies",
+      "module": "cookies",
+      "exports": [
+        "set"
+      ]
+    },
+    {
+      "id": "krate/cookies.delete",
+      "permission": "cookies",
+      "area": "cookies",
+      "module": "cookies",
+      "exports": [
+        "delete"
+      ]
+    },
+    {
+      "id": "krate/cookies.clearSiteData",
+      "permission": "cookies",
+      "area": "cookies",
+      "module": "cookies",
+      "exports": [
+        "clearSiteData"
+      ]
+    },
+    {
+      "id": "krate/port.channel",
+      "permission": "port",
+      "area": "port",
+      "module": "port",
+      "exports": [
+        "createChannel"
+      ]
+    },
+    {
+      "id": "krate/port.transfer",
+      "permission": "port",
+      "area": "port",
+      "module": "port",
+      "exports": [
+        "transferPort"
+      ]
+    },
+    {
+      "id": "krate/port.post",
+      "permission": "port:receive",
+      "area": "port",
+      "module": "port",
+      "exports": [
+        "Port",
+        "createChannel",
+        "portFromId"
+      ]
+    },
+    {
+      "id": "krate/port.listen",
+      "permission": "port:receive",
+      "area": "port",
+      "module": "port",
+      "exports": [
+        "Port",
+        "createChannel",
+        "portFromId"
+      ]
+    },
+    {
+      "id": "krate/port.close",
+      "permission": "port:receive",
+      "area": "port",
+      "module": "port",
+      "exports": [
+        "Port",
+        "createChannel",
+        "portFromId"
+      ]
+    },
+    {
+      "id": "krate/worker.start",
+      "permission": "worker",
+      "area": "worker",
+      "module": "worker",
+      "exports": [
+        "startWorker"
+      ]
+    },
+    {
+      "id": "krate/worker.stop",
+      "permission": "worker",
+      "area": "worker",
+      "module": "worker",
+      "exports": [
+        "WorkerHandle",
+        "startWorker"
+      ]
+    },
+    {
+      "id": "krate/worker.list",
+      "permission": "worker",
+      "area": "worker",
+      "module": "worker",
+      "exports": [
+        "listWorkers"
+      ]
+    },
+    {
+      "id": "krate/worker.specs",
+      "permission": "worker",
+      "area": "worker",
+      "module": "worker",
+      "exports": [
+        "workerSpecs"
+      ]
+    },
+    {
+      "id": "krate/worker.post",
+      "permission": "worker",
+      "area": "worker",
+      "module": "worker",
+      "exports": [
+        "WorkerHandle",
+        "startWorker"
+      ]
+    },
+    {
+      "id": "krate/worker.events",
+      "permission": "worker",
+      "area": "worker",
+      "module": "worker",
+      "exports": [
+        "WorkerHandle",
+        "onWorkerEvent",
+        "startWorker"
+      ]
+    },
+    {
+      "id": "krate/worker.emit",
+      "area": "worker",
+      "module": "worker-host",
+      "exports": [
+        "postMessage"
+      ]
+    },
+    {
+      "id": "krate/offscreen.open",
+      "permission": "offscreen",
+      "area": "offscreen",
+      "module": "offscreen",
+      "exports": [
+        "openOffscreen"
+      ]
+    },
+    {
+      "id": "krate/offscreen.capture",
+      "permission": "offscreen",
+      "area": "offscreen",
+      "module": "offscreen",
+      "exports": [
+        "captureFrame"
+      ]
+    },
+    {
+      "id": "krate/offscreen.frames",
+      "permission": "offscreen",
+      "area": "offscreen",
+      "module": "offscreen",
+      "exports": [
+        "frames"
+      ]
+    },
+    {
+      "id": "krate/automation.endpoint",
+      "permission": "automation",
+      "area": "automation",
+      "module": "automation",
+      "exports": [
+        "automationEndpoint"
+      ]
+    },
+    {
+      "id": "krate/automation.cdp",
+      "permission": "automation",
+      "area": "automation",
+      "module": "automation",
+      "exports": [
+        "cdp"
+      ]
+    },
+    {
+      "id": "krate/automation.cdpEvents",
+      "permission": "automation",
+      "area": "automation",
+      "module": "automation",
+      "exports": [
+        "cdpEvents"
+      ]
+    },
+    {
+      "id": "krate/extension.declared",
+      "permission": "extension",
+      "area": "extension",
+      "module": "extension",
+      "exports": [
+        "declaredExtensions"
+      ]
+    },
+    {
+      "id": "krate/extension.list",
+      "permission": "extension",
+      "area": "extension",
+      "module": "extension",
+      "exports": [
+        "listExtensions"
+      ]
+    },
+    {
+      "id": "krate/extension.load",
+      "permission": "extension",
+      "area": "extension",
+      "module": "extension",
+      "exports": [
+        "loadExtension"
+      ]
+    },
+    {
+      "id": "krate/extension.remove",
+      "permission": "extension",
+      "area": "extension",
+      "module": "extension",
+      "exports": [
+        "removeExtension"
+      ]
+    },
+    {
+      "id": "krate/remote.open",
+      "permission": "remote",
+      "area": "remote",
+      "module": "remote",
+      "exports": [
+        "openWindow"
+      ]
+    },
+    {
+      "id": "krate/remote.addView",
+      "permission": "remote",
+      "area": "remote",
+      "module": "remote",
+      "exports": [
+        "addView"
+      ]
+    },
+    {
+      "id": "krate/remote.navigate",
+      "permission": "remote",
+      "area": "remote",
+      "module": "remote",
+      "exports": [
+        "navigate"
+      ]
+    },
+    {
+      "id": "krate/remote.post",
+      "permission": "remote",
+      "area": "remote",
+      "module": "remote",
+      "exports": [
+        "post"
+      ]
+    },
+    {
+      "id": "krate/remote.messages",
+      "permission": "remote",
+      "area": "remote",
+      "module": "remote",
+      "exports": [
+        "onMessage"
+      ]
+    },
+    {
+      "id": "krate/remote.events",
+      "permission": "remote",
+      "area": "remote",
+      "module": "remote",
+      "exports": [
+        "onRemoteEvent"
+      ]
+    },
+    {
+      "id": "krate/remote.capabilities",
+      "permission": "remote",
+      "area": "remote",
+      "module": "remote",
+      "exports": [
+        "capabilities"
+      ]
+    },
+    {
+      "id": "krate/remote.setRules",
+      "permission": "remote:intercept",
+      "area": "remote",
+      "module": "remote",
+      "exports": [
+        "setRules"
+      ]
+    },
+    {
+      "id": "krate/remote.requests",
+      "permission": "remote:intercept",
+      "area": "remote",
+      "module": "remote",
+      "exports": [
+        "onRequest"
+      ]
+    },
+    {
+      "id": "krate/remote.setUserAgent",
+      "permission": "remote:network",
+      "area": "remote",
+      "module": "remote",
+      "exports": [
+        "setUserAgent"
+      ]
+    },
+    {
+      "id": "krate/remote.setProxy",
+      "permission": "remote:network",
+      "area": "remote",
+      "module": "remote",
+      "exports": [
+        "setProxy"
+      ]
+    },
+    {
+      "id": "krate/remote.setClientCertificate",
+      "permission": "remote:network",
+      "area": "remote",
+      "module": "remote",
+      "exports": [
+        "setClientCertificate"
+      ]
+    },
+    {
+      "id": "krate/remote.clearData",
+      "permission": "remote:network",
+      "area": "remote",
+      "module": "remote",
+      "exports": [
+        "clearData"
+      ]
+    },
+    {
+      "id": "krate/remote.certificates",
+      "permission": "remote:network",
+      "area": "remote",
+      "module": "remote",
+      "exports": [
+        "onCertificateError"
+      ]
+    },
+    {
+      "id": "krate/remote.answerCertificate",
+      "permission": "remote:network",
+      "area": "remote",
+      "module": "remote",
+      "exports": [
+        "onCertificateError"
+      ]
+    },
+    {
+      "id": "krate/remote.auth",
+      "permission": "remote:network",
+      "area": "remote",
+      "module": "remote",
+      "exports": [
+        "onAuth"
+      ]
+    },
+    {
+      "id": "krate/remote.answerAuth",
+      "permission": "remote:network",
+      "area": "remote",
+      "module": "remote",
+      "exports": [
+        "onAuth"
+      ]
+    },
+    {
+      "id": "krate/badge.set",
+      "permission": "badge",
+      "area": "badge",
+      "module": "badge",
+      "exports": [
+        "clearBadge",
+        "setBadge"
+      ]
+    },
+    {
+      "id": "krate/badge.get",
+      "permission": "badge",
+      "area": "badge",
+      "module": "badge",
+      "exports": [
+        "getBadge"
+      ]
+    },
+    {
+      "id": "krate/badge.setProgress",
+      "permission": "badge",
+      "area": "badge",
+      "module": "badge",
+      "exports": [
+        "clearProgress",
+        "setProgress"
+      ]
+    },
+    {
+      "id": "krate/badge.progress",
+      "permission": "badge",
+      "area": "badge",
+      "module": "badge",
+      "exports": [
+        "getProgress"
+      ]
+    },
+    {
+      "id": "krate/badge.setUrgent",
+      "permission": "badge",
+      "area": "badge",
+      "module": "badge",
+      "exports": [
+        "setUrgent"
+      ]
+    },
+    {
+      "id": "krate/screen.list",
+      "permission": "screen",
+      "area": "screen",
+      "module": "screen",
+      "exports": [
+        "listDisplays"
+      ]
+    },
+    {
+      "id": "krate/screen.primary",
+      "permission": "screen",
+      "area": "screen",
+      "module": "screen",
+      "exports": [
+        "primaryDisplay"
+      ]
+    },
+    {
+      "id": "krate/screen.ofWindow",
+      "permission": "screen",
+      "area": "screen",
+      "module": "screen",
+      "exports": [
+        "displayOfWindow"
+      ]
+    },
+    {
+      "id": "krate/screen.centerWindow",
+      "permission": "screen",
+      "area": "screen",
+      "module": "screen",
+      "exports": [
+        "centerWindow"
+      ]
+    },
+    {
+      "id": "krate/screen.events",
+      "permission": "screen",
+      "area": "screen",
+      "module": "screen",
+      "exports": [
+        "onDisplaysChanged"
+      ]
+    },
+    {
+      "id": "krate/power.state",
+      "permission": "power",
+      "area": "power",
+      "module": "power",
+      "exports": [
+        "powerState"
+      ]
+    },
+    {
+      "id": "krate/power.idleTime",
+      "permission": "power",
+      "area": "power",
+      "module": "power",
+      "exports": [
+        "idleTime"
+      ]
+    },
+    {
+      "id": "krate/power.setIdleThreshold",
+      "permission": "power",
+      "area": "power",
+      "module": "power",
+      "exports": [
+        "setIdleThreshold"
+      ]
+    },
+    {
+      "id": "krate/power.preventSleep",
+      "permission": "power:inhibit",
+      "area": "power",
+      "module": "power",
+      "exports": [
+        "preventSleep"
+      ]
+    },
+    {
+      "id": "krate/power.allowSleep",
+      "permission": "power:inhibit",
+      "area": "power",
+      "module": "power",
+      "exports": [
+        "allowSleep"
+      ]
+    },
+    {
+      "id": "krate/power.events",
+      "permission": "power",
+      "area": "power",
+      "module": "power",
+      "exports": [
+        "onPower",
+        "onPowerEvent"
+      ]
+    },
+    {
+      "id": "krate/login.get",
+      "permission": "login",
+      "area": "login",
+      "module": "login",
+      "exports": [
+        "getLoginItem"
+      ]
+    },
+    {
+      "id": "krate/login.set",
+      "permission": "login",
+      "area": "login",
+      "module": "login",
+      "exports": [
+        "setLoginItem"
+      ]
+    },
+    {
+      "id": "krate/theme.get",
+      "permission": "theme",
+      "area": "theme",
+      "module": "theme",
+      "exports": [
+        "getTheme"
+      ]
+    },
+    {
+      "id": "krate/theme.set",
+      "permission": "theme",
+      "area": "theme",
+      "module": "theme",
+      "exports": [
+        "setTheme"
+      ]
+    },
+    {
+      "id": "krate/theme.events",
+      "permission": "theme",
+      "area": "theme",
+      "module": "theme",
+      "exports": [
+        "onThemeChange"
+      ]
+    },
+    {
+      "id": "krate/crash.list",
+      "permission": "crash",
+      "area": "crash",
+      "module": "crash",
+      "exports": [
+        "listCrashReports"
+      ]
+    },
+    {
+      "id": "krate/crash.read",
+      "permission": "crash",
+      "area": "crash",
+      "module": "crash",
+      "exports": [
+        "readCrashReport"
+      ]
+    },
+    {
+      "id": "krate/crash.delete",
+      "permission": "crash",
+      "area": "crash",
+      "module": "crash",
+      "exports": [
+        "deleteCrashReport"
+      ]
+    },
+    {
+      "id": "krate/crash.setAutoReload",
+      "permission": "crash",
+      "area": "crash",
+      "module": "crash",
+      "exports": [
+        "setCrashAutoReload"
+      ]
+    },
+    {
+      "id": "krate/crash.events",
+      "permission": "crash",
+      "area": "crash",
+      "module": "crash",
+      "exports": [
+        "onCrash"
+      ]
+    }
+  ]
+}

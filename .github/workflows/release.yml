@@ -74,6 +74,15 @@ jobs:
         env:
           KRATE_REQUIRE_E2E: "1"
 
+      - name: Verify native module
+        working-directory: packages/native
+        run: |
+          go build ./...
+          go vet ./...
+          go test -race -gcflags=all=-d=checkptr=0 -p 2 -timeout 20m ./...
+        env:
+          KRATE_REQUIRE_E2E: "1"
+
       - name: Install Chromium
         run: pnpm exec playwright install --with-deps chromium
 
@@ -104,16 +113,22 @@ jobs:
         run: node scripts/build-platform-packages.mjs
 
       # Re-run now that dist-platform/ exists, so the generated manifests are
-      # checked too (no platform package may declare bin).
+      # checked too (no platform package may declare bin, and each holds
+      # krate-shell next to krate).
       - name: Check generated platform packages
         run: pnpm run check:release
+
+      # Every package carries the compiler and the Krate Native shell
+      # (cross-compiled with CGO_ENABLED=0 from this Linux runner).
+      - name: Report platform package sizes
+        run: node scripts/report-platform-sizes.mjs
 
       # The step above leaves a dev binary in packages/core/bin. Publishing it
       # would make the wrapper run a non-executable, single-platform file.
       - name: Check @krate/core ships no compiler binary
         working-directory: packages/core
         run: |
-          if npm pack --dry-run --json | grep -E '"path": "bin/krate(\.exe)?"'; then
+          if npm pack --dry-run --json | grep -E '"path": "bin/krate(-shell)?(\.exe)?"'; then
             echo "@krate/core would publish a compiler binary" >&2
             exit 1
           fi

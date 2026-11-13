@@ -12,7 +12,7 @@ import (
 
 	"github.com/evanw/esbuild/pkg/api"
 	"github.com/kratejs/krate/packages/compiler/internal/astjson"
-	"github.com/kratejs/krate/packages/compiler/internal/jsruntime"
+	"github.com/kratejs/krate/packages/native/jsruntime"
 )
 
 // customRuleGlobal is the esbuild IIFE global that receives a custom rule

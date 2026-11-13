@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -131,9 +132,7 @@ func TestWatchDeletedPageIsDropped(t *testing.T) {
 	waitFor(t, "initial newp", func() bool {
 		return exists(filepath.Join(root, "dist", "newp", "index.html")) || exists(filepath.Join(root, "dist", "newp.html"))
 	})
-	if err := os.Remove(filepath.Join(root, "src", "pages", "newp.tsx")); err != nil {
-		t.Fatal(err)
-	}
+	removeWatched(t, filepath.Join(root, "src", "pages", "newp.tsx"))
 	select {
 	case ev := <-events:
 		if !ev.BuildOK {
@@ -163,9 +162,7 @@ func TestWatchMirrorsPublicDirectory(t *testing.T) {
 		d, _ := os.ReadFile(filepath.Join(root, "dist", "new.txt"))
 		return string(d) == "two"
 	})
-	if err := os.Remove(filepath.Join(root, "public", "new.txt")); err != nil {
-		t.Fatal(err)
-	}
+	removeWatched(t, filepath.Join(root, "public", "new.txt"))
 	waitFor(t, "deleted public file", func() bool { return !exists(filepath.Join(root, "dist", "new.txt")) })
 }
 
@@ -503,14 +500,29 @@ func TestWatchSegmentPages(t *testing.T) {
 		return strings.Contains(read("blog/index.html"), "ERRPAGE-v2") && strings.Contains(read("blog/500.html"), "ERRPAGE")
 	})
 
-	if err := os.Remove(filepath.Join(pages, "blog", "not-found.tsx")); err != nil {
-		t.Fatal(err)
-	}
+	removeWatched(t, filepath.Join(pages, "blog", "not-found.tsx"))
 	waitFor(t, "removed segment page output", func() bool { return !exists(filepath.Join(root, "dist", "blog", "404.html")) })
-	if err := os.Remove(filepath.Join(pages, "blog", "error.tsx")); err != nil {
-		t.Fatal(err)
-	}
+	removeWatched(t, filepath.Join(pages, "blog", "error.tsx"))
 	waitFor(t, "boundary removed from the pages below", func() bool {
 		return !strings.Contains(read("blog/index.html"), "ERRPAGE") && !exists(filepath.Join(root, "dist", "blog", "500.html"))
 	})
+}
+
+// removeWatched deletes a file the dev watcher may be reading. Windows refuses
+// to delete a file another process (here the rebuild the previous edit
+// started) has open, so there it retries for a few seconds; elsewhere one
+// attempt decides.
+func removeWatched(t *testing.T, path string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		err := os.Remove(path)
+		if err == nil {
+			return
+		}
+		if runtime.GOOS != "windows" || os.IsNotExist(err) || time.Now().After(deadline) {
+			t.Fatal(err)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }

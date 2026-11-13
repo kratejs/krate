@@ -1,0 +1,17 @@
+{
+  "name": "system-info",
+  "version": "0.1.0",
+  "description": "Operating system, CPU and memory information, and the CPU load as a stream.",
+  "krate": "0.5.0",
+  "go": "github.com/kratejs/krate-plugin-system-info",
+  "permissions": [
+    { "name": "read", "description": "read the operating system, CPU count and memory" },
+    { "name": "monitor", "description": "watch the CPU load over time" }
+  ],
+  "ops": [
+    { "name": "info", "permission": "read" },
+    { "name": "memory", "permission": "read" },
+    { "name": "cpuLoad", "go": "CPULoad", "permission": "monitor" },
+    { "name": "load", "permission": "monitor" }
+  ]
+}

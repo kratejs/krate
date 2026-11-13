@@ -49,7 +49,11 @@ var viewportMetaRe = regexp.MustCompile(`(?i)<meta[^>]+name\s*=\s*["']?viewport[
 // with nothing listening. The overlay takes the buffer and clears it.
 const devEarlyErrorsScript = `<script>(function(){var q=window.__KRATE_EARLY_ERRORS__=[];` +
 	`function k(e){if(window.__KRATE_EARLY_ERRORS__)q.push(e)}` +
-	`addEventListener("error",k);addEventListener("unhandledrejection",k)})()</script>` + "\n"
+	`addEventListener("error",k);addEventListener("error",function(e){if(e.target!==window)k(e)},true);addEventListener("unhandledrejection",k);` +
+	`var c=console,o=c.error;c.error=function(){try{if(window.__KRATE_EARLY_ERRORS__){var m=[].map.call(arguments,function(a){` +
+	`return a instanceof Error?a.message:typeof a==="string"?a:(function(){try{return JSON.stringify(a)}catch(_){return String(a)}})()}).join(" ");` +
+	`var e=[].filter.call(arguments,function(a){return a instanceof Error})[0];` +
+	`q.push({type:"console",message:m,stack:e&&e.stack})}}catch(_){}return o.apply(c,arguments)}})()</script>` + "\n"
 
 func generateHTML(bodyHTML, headHTML, scriptHTML, styleHTML string, cssFiles []string, jsFile, runtimeJSFile, route string, devMode bool, devBootstrap, runtimeHead, basePath string, modulePreloads ...string) string {
 	var b strings.Builder

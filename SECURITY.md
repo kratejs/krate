@@ -66,6 +66,6 @@ will not face legal action from us.
 - The `$esc()` sanitizer and `escapeHTML()` are security boundaries. Do not
   weaken them.
 - JS plugins run in QuickJS with a 32 MB memory limit, a 256 KB stack, and a
-  `30s` eval timeout (`internal/jsruntime/jsruntime.go`). Plugin file writes go
+  `30s` eval timeout (`packages/native/jsruntime/jsruntime.go`). Plugin file writes go
   through `pluginapi.WriteFileToRoot`, which rejects paths that escape the
   project root (`WithinRoot`). Preserve these guarantees.

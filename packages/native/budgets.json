@@ -1,0 +1,669 @@
+{
+  "comment": "Size, cold-start and memory budgets of Krate Native, checked by TestNativeBudgetSizes and TestNativeBudgetGUI in packages/compiler/internal/build. Each entry holds the value that was measured and the limit (measured plus headroom). Memory entries are bytes named set.role.metric (set is app, floor or appMinusFloor); only appMinusFloor entries fail a test, app and floor entries warn. To update after an intended change: run the tests with KRATE_UPDATE_BUDGETS=1 (see packages/native/BUDGETS.md), review the diff and commit it.",
+  "headroom": 0.25,
+  "measuredWith": "go1.26.1, CGO_ENABLED=0, -trimpath -s -w; linux-amd64 on a developer machine, linux-arm64, darwin-arm64, windows-amd64 and windows-arm64 on the GitHub-hosted CI runners (run 43344648942)",
+  "sizes": {
+    "linux-amd64": {
+      "goOnlyRelease": {
+        "measured": 8102153,
+        "max": 10127692
+      },
+      "nativeTasksRelease": {
+        "measured": 15233289,
+        "max": 19041612
+      },
+      "shell": {
+        "measured": 15790345,
+        "max": 19737932
+      },
+      "tsOnlyRelease": {
+        "measured": 15139081,
+        "max": 18923852
+      }
+    },
+    "windows-arm64": {
+      "goOnlyRelease": {
+        "measured": 9112576,
+        "max": 11390720
+      },
+      "nativeTasksRelease": {
+        "measured": 15976448,
+        "max": 19970560
+      },
+      "shell": {
+        "measured": 17065472,
+        "max": 21331840
+      },
+      "tsOnlyRelease": {
+        "measured": 15879168,
+        "max": 19848960
+      }
+    },
+    "windows-amd64": {
+      "goOnlyRelease": {
+        "measured": 9945600,
+        "max": 12432000
+      },
+      "nativeTasksRelease": {
+        "measured": 17099776,
+        "max": 21374720
+      },
+      "shell": {
+        "measured": 18304512,
+        "max": 22880640
+      },
+      "tsOnlyRelease": {
+        "measured": 17001472,
+        "max": 21251840
+      }
+    },
+    "darwin-arm64": {
+      "goOnlyRelease": {
+        "measured": 9215362,
+        "max": 11519203
+      },
+      "nativeTasksRelease": {
+        "measured": 16335858,
+        "max": 20419823
+      },
+      "shell": {
+        "measured": 17499282,
+        "max": 21874103
+      },
+      "tsOnlyRelease": {
+        "measured": 16218962,
+        "max": 20273703
+      }
+    },
+    "linux-arm64": {
+      "goOnlyRelease": {
+        "measured": 8978697,
+        "max": 11223372
+      },
+      "nativeTasksRelease": {
+        "measured": 15859977,
+        "max": 19824972
+      },
+      "shell": {
+        "measured": 17039625,
+        "max": 21299532
+      },
+      "tsOnlyRelease": {
+        "measured": 15794441,
+        "max": 19743052
+      }
+    }
+  },
+  "startup": {
+    "linux-amd64": {
+      "coldStartMs": {
+        "measured": 392,
+        "max": 490
+      }
+    },
+    "windows-arm64": {
+      "coldStartMs": {
+        "measured": 634,
+        "max": 793
+      }
+    },
+    "windows-amd64": {
+      "coldStartMs": {
+        "measured": 1009,
+        "max": 1262
+      }
+    },
+    "darwin-arm64": {
+      "coldStartMs": {
+        "measured": 2683,
+        "max": 3354
+      }
+    },
+    "linux-arm64": {
+      "coldStartMs": {
+        "measured": 799,
+        "max": 999
+      }
+    }
+  },
+  "memory": {
+    "linux-amd64": {
+      "app.shell.privateDirty": {
+        "measured": 55152640,
+        "max": 68940800
+      },
+      "app.shell.pss": {
+        "measured": 103089152,
+        "max": 128861440
+      },
+      "app.total.privateDirty": {
+        "measured": 178102272,
+        "max": 222627840
+      },
+      "app.total.pss": {
+        "measured": 342124544,
+        "max": 427655680
+      },
+      "app.webview:network.privateDirty": {
+        "measured": 7675904,
+        "max": 16064512
+      },
+      "app.webview:network.pss": {
+        "measured": 26105856,
+        "max": 42883072
+      },
+      "app.webview:web.privateDirty": {
+        "measured": 114593792,
+        "max": 143242240
+      },
+      "app.webview:web.pss": {
+        "measured": 212525056,
+        "max": 265656320
+      },
+      "appMinusFloor.shell.privateDirty": {
+        "measured": 18239488,
+        "max": 26628096
+      },
+      "appMinusFloor.shell.pss": {
+        "measured": 19607552,
+        "max": 36384768
+      },
+      "appMinusFloor.total.privateDirty": {
+        "measured": 35491840,
+        "max": 44364800
+      },
+      "appMinusFloor.total.pss": {
+        "measured": 50205696,
+        "max": 66982912
+      },
+      "appMinusFloor.webview:network.privateDirty": {
+        "measured": -4096,
+        "max": 8384512
+      },
+      "appMinusFloor.webview:network.pss": {
+        "measured": -441344,
+        "max": 16335872
+      },
+      "appMinusFloor.webview:web.privateDirty": {
+        "measured": 16510976,
+        "max": 24899584
+      },
+      "appMinusFloor.webview:web.pss": {
+        "measured": 30513152,
+        "max": 47290368
+      },
+      "floor.shell.privateDirty": {
+        "measured": 36839424,
+        "max": 46049280
+      },
+      "floor.shell.pss": {
+        "measured": 83481600,
+        "max": 104352000
+      },
+      "floor.total.privateDirty": {
+        "measured": 142610432,
+        "max": 178263040
+      },
+      "floor.total.pss": {
+        "measured": 291918848,
+        "max": 364898560
+      },
+      "floor.webview:network.privateDirty": {
+        "measured": 7680000,
+        "max": 16068608
+      },
+      "floor.webview:network.pss": {
+        "measured": 26443776,
+        "max": 43220992
+      },
+      "floor.webview:web.privateDirty": {
+        "measured": 98156544,
+        "max": 122695680
+      },
+      "floor.webview:web.pss": {
+        "measured": 182169600,
+        "max": 227712000
+      }
+    },
+    "windows-arm64": {
+      "app.shell.privateDirty": {
+        "measured": 57008128,
+        "max": 71260160
+      },
+      "app.shell.pss": {
+        "measured": 57008128,
+        "max": 73785344
+      },
+      "app.total.privateDirty": {
+        "measured": 167313408,
+        "max": 209141760
+      },
+      "app.total.pss": {
+        "measured": 167313408,
+        "max": 209141760
+      },
+      "app.webview:gpu.privateDirty": {
+        "measured": 17305600,
+        "max": 25694208
+      },
+      "app.webview:gpu.pss": {
+        "measured": 17305600,
+        "max": 34082816
+      },
+      "app.webview:other.privateDirty": {
+        "measured": 62099456,
+        "max": 77624320
+      },
+      "app.webview:other.pss": {
+        "measured": 62099456,
+        "max": 78876672
+      },
+      "app.webview:web.privateDirty": {
+        "measured": 30380032,
+        "max": 38768640
+      },
+      "app.webview:web.pss": {
+        "measured": 30380032,
+        "max": 47157248
+      },
+      "appMinusFloor.shell.privateDirty": {
+        "measured": 3563520,
+        "max": 11952128
+      },
+      "appMinusFloor.shell.pss": {
+        "measured": 3563520,
+        "max": 20340736
+      },
+      "appMinusFloor.total.privateDirty": {
+        "measured": 9035776,
+        "max": 17424384
+      },
+      "appMinusFloor.total.pss": {
+        "measured": 9035776,
+        "max": 25812992
+      },
+      "appMinusFloor.webview:gpu.privateDirty": {
+        "measured": -24576,
+        "max": 8364032
+      },
+      "appMinusFloor.webview:gpu.pss": {
+        "measured": -24576,
+        "max": 16752640
+      },
+      "appMinusFloor.webview:other.privateDirty": {
+        "measured": 888832,
+        "max": 9277440
+      },
+      "appMinusFloor.webview:other.pss": {
+        "measured": 888832,
+        "max": 17666048
+      },
+      "appMinusFloor.webview:web.privateDirty": {
+        "measured": 4907008,
+        "max": 13295616
+      },
+      "appMinusFloor.webview:web.pss": {
+        "measured": 4907008,
+        "max": 21684224
+      },
+      "floor.shell.privateDirty": {
+        "measured": 53469184,
+        "max": 66836480
+      },
+      "floor.shell.pss": {
+        "measured": 53469184,
+        "max": 70246400
+      },
+      "floor.total.privateDirty": {
+        "measured": 158867456,
+        "max": 198584320
+      },
+      "floor.total.pss": {
+        "measured": 158867456,
+        "max": 198584320
+      },
+      "floor.webview:gpu.privateDirty": {
+        "measured": 17317888,
+        "max": 25706496
+      },
+      "floor.webview:gpu.pss": {
+        "measured": 17317888,
+        "max": 34095104
+      },
+      "floor.webview:other.privateDirty": {
+        "measured": 62709760,
+        "max": 78387200
+      },
+      "floor.webview:other.pss": {
+        "measured": 62709760,
+        "max": 79486976
+      },
+      "floor.webview:web.privateDirty": {
+        "measured": 24010752,
+        "max": 32399360
+      },
+      "floor.webview:web.pss": {
+        "measured": 24010752,
+        "max": 40787968
+      }
+    },
+    "windows-amd64": {
+      "app.shell.privateDirty": {
+        "measured": 56918016,
+        "max": 71147520
+      },
+      "app.shell.pss": {
+        "measured": 56918016,
+        "max": 73695232
+      },
+      "app.total.privateDirty": {
+        "measured": 155181056,
+        "max": 193976320
+      },
+      "app.total.pss": {
+        "measured": 155181056,
+        "max": 193976320
+      },
+      "app.webview:gpu.privateDirty": {
+        "measured": 15093760,
+        "max": 23482368
+      },
+      "app.webview:gpu.pss": {
+        "measured": 15093760,
+        "max": 31870976
+      },
+      "app.webview:other.privateDirty": {
+        "measured": 56365056,
+        "max": 70456320
+      },
+      "app.webview:other.pss": {
+        "measured": 56365056,
+        "max": 73142272
+      },
+      "app.webview:web.privateDirty": {
+        "measured": 26927104,
+        "max": 35315712
+      },
+      "app.webview:web.pss": {
+        "measured": 26927104,
+        "max": 43704320
+      },
+      "appMinusFloor.shell.privateDirty": {
+        "measured": 3858432,
+        "max": 12247040
+      },
+      "appMinusFloor.shell.pss": {
+        "measured": 3858432,
+        "max": 20635648
+      },
+      "appMinusFloor.total.privateDirty": {
+        "measured": 7200768,
+        "max": 15589376
+      },
+      "appMinusFloor.total.pss": {
+        "measured": 7200768,
+        "max": 23977984
+      },
+      "appMinusFloor.webview:gpu.privateDirty": {
+        "measured": -8192,
+        "max": 8380416
+      },
+      "appMinusFloor.webview:gpu.pss": {
+        "measured": -8192,
+        "max": 16769024
+      },
+      "appMinusFloor.webview:other.privateDirty": {
+        "measured": -712704,
+        "max": 7675904
+      },
+      "appMinusFloor.webview:other.pss": {
+        "measured": -712704,
+        "max": 16064512
+      },
+      "appMinusFloor.webview:web.privateDirty": {
+        "measured": 3756032,
+        "max": 12144640
+      },
+      "appMinusFloor.webview:web.pss": {
+        "measured": 3756032,
+        "max": 20533248
+      },
+      "floor.shell.privateDirty": {
+        "measured": 53104640,
+        "max": 66380800
+      },
+      "floor.shell.pss": {
+        "measured": 53104640,
+        "max": 69881856
+      },
+      "floor.total.privateDirty": {
+        "measured": 145403904,
+        "max": 181754880
+      },
+      "floor.total.pss": {
+        "measured": 145403904,
+        "max": 181754880
+      },
+      "floor.webview:gpu.privateDirty": {
+        "measured": 15097856,
+        "max": 23486464
+      },
+      "floor.webview:gpu.pss": {
+        "measured": 15097856,
+        "max": 31875072
+      },
+      "floor.webview:other.privateDirty": {
+        "measured": 56770560,
+        "max": 70963200
+      },
+      "floor.webview:other.pss": {
+        "measured": 56770560,
+        "max": 73547776
+      },
+      "floor.webview:web.privateDirty": {
+        "measured": 20574208,
+        "max": 28962816
+      },
+      "floor.webview:web.pss": {
+        "measured": 20574208,
+        "max": 37351424
+      }
+    },
+    "darwin-arm64": {
+      "app.shell.privateDirty": {
+        "measured": 27889088,
+        "max": 36277696
+      },
+      "app.shell.pss": {
+        "measured": 27889088,
+        "max": 44666304
+      },
+      "app.total.privateDirty": {
+        "measured": 57400704,
+        "max": 71750880
+      },
+      "app.total.pss": {
+        "measured": 57400704,
+        "max": 74177920
+      },
+      "app.webview:network.privateDirty": {
+        "measured": 5801664,
+        "max": 14190272
+      },
+      "app.webview:network.pss": {
+        "measured": 5801664,
+        "max": 22578880
+      },
+      "app.webview:web.privateDirty": {
+        "measured": 23709952,
+        "max": 32098560
+      },
+      "app.webview:web.pss": {
+        "measured": 23709952,
+        "max": 40487168
+      },
+      "appMinusFloor.shell.privateDirty": {
+        "measured": -2703040,
+        "max": 5685568
+      },
+      "appMinusFloor.shell.pss": {
+        "measured": -2703040,
+        "max": 14074176
+      },
+      "appMinusFloor.total.privateDirty": {
+        "measured": 4178304,
+        "max": 12566912
+      },
+      "appMinusFloor.total.pss": {
+        "measured": 4178304,
+        "max": 20955520
+      },
+      "appMinusFloor.webview:network.privateDirty": {
+        "measured": -65536,
+        "max": 8323072
+      },
+      "appMinusFloor.webview:network.pss": {
+        "measured": -65536,
+        "max": 16711680
+      },
+      "appMinusFloor.webview:web.privateDirty": {
+        "measured": 6963264,
+        "max": 15351872
+      },
+      "appMinusFloor.webview:web.pss": {
+        "measured": 6963264,
+        "max": 23740480
+      },
+      "floor.shell.privateDirty": {
+        "measured": 31067072,
+        "max": 39455680
+      },
+      "floor.shell.pss": {
+        "measured": 31067072,
+        "max": 47844288
+      },
+      "floor.total.privateDirty": {
+        "measured": 53435136,
+        "max": 66793920
+      },
+      "floor.total.pss": {
+        "measured": 53435136,
+        "max": 70212352
+      },
+      "floor.webview:network.privateDirty": {
+        "measured": 5818048,
+        "max": 14206656
+      },
+      "floor.webview:network.pss": {
+        "measured": 5818048,
+        "max": 22595264
+      },
+      "floor.webview:web.privateDirty": {
+        "measured": 16615616,
+        "max": 25004224
+      },
+      "floor.webview:web.pss": {
+        "measured": 16615616,
+        "max": 33392832
+      }
+    },
+    "linux-arm64": {
+      "app.shell.privateDirty": {
+        "measured": 56627200,
+        "max": 70784000
+      },
+      "app.shell.pss": {
+        "measured": 102736896,
+        "max": 128421120
+      },
+      "app.total.privateDirty": {
+        "measured": 182628352,
+        "max": 228285440
+      },
+      "app.total.pss": {
+        "measured": 361738240,
+        "max": 452172800
+      },
+      "app.webview:network.privateDirty": {
+        "measured": 7933952,
+        "max": 16322560
+      },
+      "app.webview:network.pss": {
+        "measured": 45772800,
+        "max": 62550016
+      },
+      "app.webview:web.privateDirty": {
+        "measured": 118071296,
+        "max": 147589120
+      },
+      "app.webview:web.pss": {
+        "measured": 213937152,
+        "max": 267421440
+      },
+      "appMinusFloor.shell.privateDirty": {
+        "measured": 17350656,
+        "max": 25739264
+      },
+      "appMinusFloor.shell.pss": {
+        "measured": 18726912,
+        "max": 35504128
+      },
+      "appMinusFloor.total.privateDirty": {
+        "measured": 34496512,
+        "max": 43120640
+      },
+      "appMinusFloor.total.pss": {
+        "measured": 48402432,
+        "max": 65179648
+      },
+      "appMinusFloor.webview:network.privateDirty": {
+        "measured": -4096,
+        "max": 8384512
+      },
+      "appMinusFloor.webview:network.pss": {
+        "measured": -104448,
+        "max": 16672768
+      },
+      "appMinusFloor.webview:web.privateDirty": {
+        "measured": 17133568,
+        "max": 25522176
+      },
+      "appMinusFloor.webview:web.pss": {
+        "measured": 29779968,
+        "max": 46557184
+      },
+      "floor.shell.privateDirty": {
+        "measured": 39931904,
+        "max": 49914880
+      },
+      "floor.shell.pss": {
+        "measured": 84259840,
+        "max": 105324800
+      },
+      "floor.total.privateDirty": {
+        "measured": 148791296,
+        "max": 185989120
+      },
+      "floor.total.pss": {
+        "measured": 313996288,
+        "max": 392495360
+      },
+      "floor.webview:network.privateDirty": {
+        "measured": 7938048,
+        "max": 16326656
+      },
+      "floor.webview:network.pss": {
+        "measured": 45856768,
+        "max": 62633984
+      },
+      "floor.webview:web.privateDirty": {
+        "measured": 100921344,
+        "max": 126151680
+      },
+      "floor.webview:web.pss": {
+        "measured": 184153088,
+        "max": 230191360
+      }
+    }
+  }
+}

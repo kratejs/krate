@@ -488,6 +488,444 @@ Code that is highlighted in the browser (a `<Code>` whose text changes at run ti
 
 API routes and middleware run in Krate's embedded QuickJS runtime unless `ssr.apiRuntime` (or `ssr.middlewareRuntime`) selects `"node"`, `"bun"` or `"deno"`. The build scans the modules each route or middleware bundles and reports globals that runtime lacks, such as `TransformStream`, `WebSocket`, `Buffer` or `crypto.subtle.encrypt`, with the location of the first use in each file. Calling one throws a `NotSupportedError` carrying the same code at run time. Only global references count: an import or local variable of the same name, a `typeof X` check and code guarded by one are not reported. In a dependency the warning is reported once per package and API, since libraries often detect features before using them. Follow the hint (most APIs have a portable alternative), or select the Node runtime. A route that imports a `node:` builtin is served by Node automatically and is not scanned. The full list is in the [API runtime compatibility](/docs/reference/api-runtime-compat/) reference. This is a warning.
 
+### KR7170
+
+**Host code markers disagree**
+
+A native app decides what is host code (it runs in the native process, not the webview) from several sources: a `@host` decorator or a `"@host"` string at the top of a function body, a `// @host` comment on the first line of a file, a `.host.ts` / `.host.tsx` file name, the `hostFunctions` and `hostDirs` config entries, and `.go` files, which are always host code. Sources that name host code and something else for the same module conflict: a `.go` file cannot also carry a tier, and a host module cannot carry `// @server`, `// @runtime`, `// @static` or `// @client`, a tier file name, or a `serverComponents`, `runtimeComponents`, `serverDirs` or `runtimeDirs` entry. A function-level marker overrides the file for that function only, so `@client` on one function in a host file is allowed, but a decorator and a body string on one function must name the same thing. Remove one of the conflicting sources.
+
+### KR7171
+
+**`@host` on a component**
+
+Host code runs in the native process and is called from the UI as an async function. A component renders UI, so it cannot be host code. Keep the component in the webview and move the native work into a plain function marked `@host` that the component calls. For work that only needs to happen at build time, use `@server`.
+
+### KR7172
+
+**Inline host function captures component state**
+
+An `@host` function declared inside a component module is moved to the host process, so it cannot see the component's local variables, signals or props. It may use its own parameters, module-level imports, module-level host declarations and globals. Pass the value as an argument instead. The check covers identifiers declared inside an enclosing function; module-level non-host declarations are not checked.
+
+### KR7173
+
+**Host code in a web build**
+
+`@host` markers, `.host.ts` files, `hostFunctions` and `hostDirs` only mean something in a native build, where host code runs in the native process. A web build has no such process, so the marker would be silently ignored and the code would run in the browser or not at all. Remove the marker, or build with `krate native`.
+
+### KR7174
+
+**Request-time rendering in a native build**
+
+A native build has no server: every route is prerendered. `ssr.streaming`, `ppr`, and page exports such as `dynamic = "force-dynamic"`, `revalidate = N` or `config = { ssr / isr / streaming }` ask for rendering per request. Remove them, and load per-request data from host code (`@host` functions) at runtime.
+
+### KR7175
+
+**API route in a native build**
+
+A native app has no HTTP server, so routes under `src/api` have nothing to serve them. Move the logic into host code (a `.go` file or an `@host` function) and call it from the UI.
+
+### KR7176
+
+**Middleware in a native build**
+
+`middleware.ts` runs in front of a server's requests. A native app has no server, so it would never run. Remove it, and do the check in host code or in the UI.
+
+### KR7177
+
+**Runtime component in a native build**
+
+`@runtime` components render per request in a server sidecar. A native build renders every route once, ahead of time. Use `@server` for build-time rendering, or a client component that loads its data from host code. This covers `@runtime`, `// @runtime`, `.runtime` files, and the `runtimeComponents` and `runtimeDirs` config entries.
+
+### KR7178
+
+**Server action in a native build**
+
+`"use server"` actions are POSTed to a server. A native app has no server; call an `@host` function (or a Go function) from the UI instead.
+
+### KR7180
+
+**Go function signature cannot be a host call**
+
+A UI file imports an exported Go function and calls it as an async function. The bridge supports an optional first parameter `ctx krate.Ctx`, then the arguments, and one of these result shapes: nothing, `error`, `T`, `(T, error)`, `<-chan T` or `(<-chan T, error)`. A channel result makes the call a stream. Variadic functions, generic functions, a first parameter of `context.Context` (use `krate.Ctx`), `krate.Ctx` anywhere but first, send-only channels, and more than one non-error result are rejected. Change the signature, or wrap the function in one that has a supported shape.
+
+### KR7181
+
+**Go type has no wire mapping**
+
+Values cross the host boundary through generated encoders without reflection, so every parameter, result and field type must map to a wire type. Supported: bool, string, all int, uint and float kinds, `time.Time` (a `Date`), `[]byte` (a `Uint8Array`), structs, slices and arrays, `map[string]T` (also string-kinded named keys), pointers (`T | null`) and named types of these. Rejected: `any` and other interfaces, channels and funcs inside values, complex numbers, `uintptr`, unsafe pointers, maps with non-string keys, embedded pointers, and unexported named types (the generated glue lives in another package and cannot name them). The message gives the path to the offending parameter or field. Replace the type with a concrete one.
+
+### KR7182
+
+**Go package could not be loaded**
+
+The compiler type-checks the Go package behind a `.go` import with the Go toolchain (`go list -export`) and the standard `go/types` package. It failed: the `go` command is missing, the project has no `go.mod`, the package has compile errors, or it is `package main`. Fix the error shown, and check that `go build ./...` works in the project.
+
+### KR7183
+
+**Import from a .go file is not host code**
+
+In a native build a UI import from a `.go` file must name either a Go component (a function in a `*.server.go` / `*.runtime.go` file or marked `//krate:component`) or exported host code: a function with a supported signature, or a package-level variable created with `krate.NewSignal`. Types, constants, other variables, methods and unexported or missing names cannot be imported. Export a function that returns the value instead.
+
+### KR7184
+
+**Go type has a custom marshaler**
+
+A type with `MarshalJSON`, `UnmarshalJSON`, `MarshalText` or `UnmarshalText` encodes itself in a way the generated encoders cannot know, and they do not call encoding/json. Types such as `big.Int`, `netip.Addr` or `uuid.UUID` fall in this group. Convert the value to a plain type (a string, a number or a struct) in the exported function.
+
+### KR7185
+
+**Go import has no valid module id or output location**
+
+Each `.go` file imported by the UI gets a module id: its path relative to the project root without the extension (`src/lib/tasks.go` becomes `src/lib/tasks`), and host calls are named `<module id>.<Name>`. The file must exist inside the project, be a non-test `.go` file, and belong to the project's Go module, and the generated output directory must be inside that module so the glue can import the package.
+
+### KR7190
+
+**Host function parameter cannot cross the boundary**
+
+Arguments and results of a host function travel between the webview and the native process as data: strings, numbers, booleans, null, arrays, plain objects, Date, Map, Set and bytes. A parameter typed as a function, as a class you declared, or as a DOM type (`HTMLElement`, `Node`, `Event` and friends) can never be sent, so the call would fail at run time. Pass the plain data you need from it instead, for example the element's `value` or an id. The check only reads explicit parameter annotations and stays silent when it is not sure.
+
+### KR7191
+
+**Inline host function cannot be split out**
+
+An `@host` function inside a UI module is moved into the host bundle and replaced by a stub in the UI. That needs a name to register and call it by, so an anonymous default export cannot be split. Give the function a name, or move it to a `.host.ts` module.
+
+### KR7192
+
+**Host code failed to bundle**
+
+The host entry and the host modules it imports are bundled into one ES2020 script for the embedded host runtime. The bundler reported an error, usually an import that cannot be resolved, a syntax error, or syntax the bundle cannot express (top-level await in a script bundle).
+
+### KR7193
+
+**Host code uses an API the embedded runtime lacks**
+
+Host code runs on an embedded JavaScript runtime (QuickJS) by default. It has the ECMAScript built-ins and a small set of web APIs, but no Node built-in modules and no DOM. The build found a reference to an API the runtime does not provide, so the call would throw. Implement the work as a Go host function, or run the module on a full runtime with `native.host.islands`. A reference inside a feature check such as `typeof X !== "undefined"` is not reported.
+
+### KR7195
+
+**Import is not exported by the host module**
+
+UI code imports a name from a host module, but the module has no such export (or the export is marked for another tier). The stub that replaces the host module in the UI bundle only has the module's real exports, so the import would be undefined at run time.
+
+### KR7196
+
+**Host export is not callable from the UI**
+
+The UI can call host functions and read host signals. An export that is a plain value (a number, string, object or class) has no meaning across the boundary because the UI would get a copy that never changes. Export a function that returns the value, or a `hostSignal()` for a value that changes.
+
+### KR7200
+
+**@krate/app is not installed**
+
+A native app's UI calls host code through generated stubs, and the stubs import `@krate/app` (the host call client). The package is not resolvable from the project. Install it next to `@krate/core`: `npm i @krate/app`.
+
+### KR7201
+
+**Namespace import of a .go file**
+
+The compiler generates a binding for each name a UI file imports from a `.go` file, so it has to see the names. `import * as tasks from "./tasks.go"` and `export * from "./tasks.go"` hide them. Import the functions and signals by name: `import { List, Count } from "./tasks.go"`.
+
+### KR7202
+
+**Go module cannot build the Go host**
+
+The Go host binary is built inside the project's own Go module, next to the generated glue, so the module has to exist (`go.mod` at the project root) and require `github.com/kratejs/krate/packages/native`. Run `go get github.com/kratejs/krate/packages/native` in the project, or `krate native init --go` in an empty directory to get a working `go.mod`.
+
+### KR7203
+
+**Go host failed to compile**
+
+`go build` failed for the generated Go host program. The output of the Go command is shown. The packages the UI imports must compile for the target platform; check build constraints and cgo use when you build with `--target` for another operating system.
+
+### KR7204
+
+**Unknown native build target**
+
+`krate native build --target` takes `<os>/<arch>` where os is windows, linux or darwin (macos is accepted) and arch is amd64 or arm64, for example `--target linux/arm64`.
+
+### KR7205
+
+**krate native init cannot write its files**
+
+`krate native init` creates a small app in a directory. It refuses to overwrite an existing file, so run it in an empty directory or remove the files it names.
+
+### KR7210
+
+**Code uses an SDK permission that native.permissions does not allow**
+
+A native build works out the SDK permissions the app needs from the code (imports from `@krate/app/<area>` in UI and TypeScript host code, and `krate/<area>.<op>` ids) and writes them to app.json. `native.permissions` is an allowlist: when it is set, every permission the code needs must be listed there (`fs` also covers `fs:read`). The message names the import site and the permission. Add the permission to `native.permissions`, or remove the call.
+
+### KR7211
+
+**Release executable failed to compile**
+
+`krate native build --release` links the platform layer, the SDK, the app's Go host code and the UI assets into one executable with `go build`. The output of the Go command is shown. Check that the Go host packages compile for the target (`CGO_ENABLED=0`, so cgo packages cannot be used), and run `go mod tidy` in the project.
+
+### KR7212
+
+**The Go toolchain is required**
+
+Apps with Go host code always need `go` on PATH to build, and `native.release.compile: "always"` asks for a compiled release executable. Install Go (the version in the native module's go.mod), or for an app without Go host code set `native.release.compile` to "auto" or "never" to get the prebuilt-shell layout (`dist-native/app` next to `krate-shell`).
+
+### KR7213
+
+**Cannot determine the native module version**
+
+A release build of an app without Go code generates a small Go module that requires `github.com/kratejs/krate/packages/native`. Outside the Krate monorepo it needs the module version that matches this compiler. A development build of the compiler has none: set `KRATE_NATIVE_VERSION` (for example `v0.5.0`), or build from a release of `krate`.
+
+### KR7214
+
+**krate native profile cannot collect a profile**
+
+`krate native profile` builds the app (a release executable when Go is available), runs it with `KRATE_CPUPROFILE` set and copies the profile to `native.release.pgo` when the app exits. The message says which step failed: the app produced no profile (it must exit normally, for example by closing its window or sending SIGINT), or the profile could not be copied.
+
+### KR7220
+
+**Nothing to package**
+
+`krate native package` packages a built app. It looks in `dist-native/<os>-<arch>/` for a release executable (`krate native build --release`), and falls back to the prebuilt-shell layout (`dist-native/krate-shell` next to `dist-native/app/`, from `krate native build --shell auto`). Build first, or pass `--target <os>/<arch>` to package a different platform's output.
+
+### KR7221
+
+**A packaging tool is not installed**
+
+Most formats are written by the compiler itself (zip, tar.gz, .deb, .rpm, MSIX, .app). Some need a platform tool that cannot be replaced: `makensis` for an NSIS installer, `appimagetool` for an AppImage, `hdiutil` (macOS only) for a .dmg. Install the tool or pick another format with `--format`. On macOS without `hdiutil` the .app is delivered as a .zip.
+
+### KR7222
+
+**Unknown or unsupported package format**
+
+Formats by platform: macOS `app`, `zip`, `dmg`, `mas`; Windows `zip`, `nsis`, `msix`, `msix-store`; Linux `tar.gz`, `deb`, `rpm`, `appimage`, `flatpak`, `snap`. `native.bundle.windows.installer` takes `msix` or `nsis`; `native.bundle.linux.formats` takes `deb`, `rpm`, `appimage`, `flatpak` and `snap`.
+
+### KR7223
+
+**Application icon cannot be used**
+
+`native.icons` must name a PNG (or JPEG) file of at least 256x256 pixels; 1024x1024 gives sharp icons on every platform. The packager makes .icns, .ico and PNG sizes from it. Without `native.icons` a placeholder icon is generated.
+
+### KR7224
+
+**Signing tool not available**
+
+macOS signing needs `codesign` and runs on macOS only. Windows signing needs `signtool` (on Windows) or `osslsigncode` (anywhere). Linux package signatures need `gpg`. Sign on a machine that has the tool, or skip signing for development builds.
+
+### KR7225
+
+**Signing or notarization failed**
+
+The signing tool exited with an error; its output is shown with secrets removed. Common causes: the identity is not in the keychain, the certificate expired, the timestamp server is unreachable, or Apple rejected the submission (run `xcrun notarytool log <id>`).
+
+### KR7226
+
+**Notarization credentials missing**
+
+`krate native notarize` needs credentials: a keychain profile (`--keychain-profile` or `KRATE_NOTARY_PROFILE`, created with `xcrun notarytool store-credentials`), or an App Store Connect API key (`KRATE_NOTARY_KEY` file path, `KRATE_NOTARY_KEY_ID`, `KRATE_NOTARY_ISSUER`), or an Apple ID (`KRATE_NOTARY_APPLE_ID`, `KRATE_NOTARY_TEAM_ID`, `KRATE_NOTARY_PASSWORD` app-specific password). Prefer the profile or API key: a password on the command line is visible to other users.
+
+### KR7227
+
+**Updater signing key missing or invalid**
+
+Update files are signed with an Ed25519 key. `krate native keygen` creates the pair; put the public key in `native.updater.publicKey` and give the private key to `krate native package` as `KRATE_UPDATER_PRIVATE_KEY` (the base64 text) or `KRATE_UPDATER_PRIVATE_KEY_FILE` (a path). The private key must match the public key in the config.
+
+### KR7228
+
+**Writing a package failed**
+
+A package file or its staging directory could not be written. The message names the path and the operating system error.
+
+### KR7229
+
+**App metadata cannot be packaged**
+
+Packaging needs `native.appId` (reverse-DNS), `native.productName` and a semantic `native.version`; a MSIX package also needs `native.bundle.windows.publisher`. The message names the field and the value that was rejected.
+
+### KR7230
+
+**Host code imports a Node built-in on the QuickJS runtime**
+
+Host code runs on an embedded QuickJS runtime by default. It has the ECMAScript built-ins and a small set of web APIs, but no Node built-in modules, so an import of `node:fs`, `node:path` or any other built-in cannot work and the build refuses it. Run the host code on a full runtime with `native.host.runtime` set to `"node"`, `"bun"` or `"deno"`, or run only the module (or package) that needs the built-in there with `native.host.islands`, for example `{ "sharp": "node" }`. Go host functions are the third option.
+
+### KR7231
+
+**Host export reaches islands of different runtimes**
+
+`native.host.islands` assigns a package or path to a runtime, and a registered host export runs wherever the modules it imports run. When one export imports modules assigned to two different runtimes there is no process that can run it. Split the export so that each part imports one island, or move both modules to the same runtime.
+
+### KR7232
+
+**An islands entry matches no host code**
+
+An entry of `native.host.islands` names a package or path that no registered host export imports, so it changes nothing. Package names must match the import specifier's package (`sharp`, `@scope/name`); paths are relative to the project root and may use `*` and `**`.
+
+### KR7233
+
+**Host runtime not found or wrong version**
+
+A host child needs its runtime (Node, Bun or Deno): on PATH for development, or to build the executable that ships with the app. The runtime was not found, or its version does not match `native.host.version`. Install it, point `KRATE_NODE`, `KRATE_BUN` or `KRATE_DENO` at a binary, or change the pinned version. Release builds require `native.host.bundle` to be true.
+
+### KR7234
+
+**Compiling the host child failed**
+
+A release build turns each host child into a self-contained executable: a Node single executable application, `bun build --compile`, or `deno compile`. The tool failed; its output is in the message. Cross-compiling needs the target's runtime, which the tool downloads or you provide with `KRATE_NODE_<OS>_<ARCH>`.
+
+### KR7235
+
+**scriptc cannot compile this host code**
+
+With `native.host.runtime` set to `"scriptc"` the host code is compiled to a native executable that has no JavaScript engine, so code scriptc rejects fails the build; there is no fallback to an interpreter. The message carries scriptc's own diagnostic code (SC####) and hint. Rewrite the code as the hint suggests, move it to a Go host function, or run it on QuickJS or Node. `krate native check --scriptc` reports these without building.
+
+### KR7236
+
+**scriptc or its toolchain is missing**
+
+scriptc is not on PATH, or the linker it needs to build an executable is missing: clang on macOS and glibc Linux, zig on Windows and musl Linux and for cross-compiling. Install scriptc (`npm install -g scriptc`, Node 24 or later) and the linker, or use another host runtime.
+
+### KR7237
+
+**scriptc rejects the Krate host child runtime**
+
+The host code compiled, but scriptc rejected a line of the Krate host child runtime (packages/native/hostchild) that serves the call protocol. This is a limitation of the installed scriptc version, not of your code. Update scriptc, or use another host runtime.
+
+### KR7240
+
+**Build function called with non-literal arguments**
+
+A function marked `@build` (TypeScript) or `//krate:build` (Go) runs once during the native build and its result is baked into the app, so the compiler has to know every argument tuple while it builds. Only literal arguments are supported: strings, numbers, booleans, null, and arrays and objects of those. Each distinct call with literal arguments gets its own baked value. Pass a literal, or drop `@build` and call the function as an ordinary host function at run time.
+
+### KR7241
+
+**Build function used without being called**
+
+A build function is replaced by its baked values, which are looked up by the literal arguments of each call. Passing the function around, aliasing it, importing it as a namespace or re-exporting it hides the calls from the compiler. Call it directly where its value is needed: `const v = appVersion()`.
+
+### KR7242
+
+**Build function failed**
+
+A build function threw, rejected, never settled or returned an error while the native build ran it. TypeScript build functions run in a bare JavaScript VM without fetch, timers, the file system or locale-dependent methods; imports they use must be plain code. Fix the error shown, or remove the build marker if the function needs those capabilities at run time.
+
+### KR7243
+
+**Build function result cannot be baked**
+
+The value a build function returned is embedded in the app, so it has to be plain data: strings, finite numbers, booleans, null, arrays and plain objects, at most 8 MiB of JSON, nested at most 512 levels, with arrays of at most 1,000,000 elements. NaN, Infinity, cycles, functions, symbols, bigint, Date, Map, Set, binary data, class instances and unsettled promises are refused. Convert the value to plain data inside the function.
+
+### KR7244
+
+**Build marker on something that cannot be baked**
+
+`@build` and `//krate:build` apply to ordinary functions that return one value. They cannot mark components, generators or streams, signals, or functions that return a channel.
+
+### KR7245
+
+**Go build functions could not be evaluated**
+
+`//krate:build` functions are evaluated by compiling and running a small generated Go program in the project's Go module, so the Go toolchain has to be installed and the host packages must compile. The output of the Go command is shown.
+
+### KR7250
+
+**Plugin has no krate-plugin.json**
+
+Every entry of `native.plugins` names a directory, an npm package or a Go module that contains a `krate-plugin.json` next to its Go package. The compiler could not find one at the resolved location. Check the path or package name, install the package (npm i), or create the manifest with `krate native plugin init <name>`.
+
+### KR7251
+
+**Invalid plugin manifest**
+
+`krate-plugin.json` must be valid JSON with a `name` (lowercase words joined by hyphens, 2 to 40 characters), a `go` import path, optional `version`, `krate` (the minimum Krate version), `ts`, `permissions` (a list of `{name, description}`) and `ops` (a list of `{name, go, permission, manual}`). Op names are lowerCamel like the SDK ops (`info`, `cpuLoad`; the Go function is the name with its first letter upper-cased, or the op's `go` field); permission names are lowerCamel too, and an op's `permission` must be one the manifest declares. The message names the field.
+
+### KR7252
+
+**Duplicate plugin, op or permission**
+
+Plugin names, the ops of one plugin and the permissions of one plugin must each be unique, because an op is the host id `plugin/<name>.<op>` and a permission is `plugin:<name>.<permission>`. Rename one of the two, or remove the plugin that is listed twice in `native.plugins`.
+
+### KR7253
+
+**Plugin Go import path does not resolve**
+
+The `go` field of `krate-plugin.json` must be the import path of the plugin's Go package: the module path from the nearest `go.mod` plus the package's directory inside that module. The plugin also has to live in a Go module (its own `go.mod`, or the app's). For a `go:` plugin the module has to be downloadable (`go mod download`); give the version after an `@` or require it in the app's go.mod.
+
+### KR7254
+
+**Plugin needs a newer Krate**
+
+The plugin's `krate` field names the oldest Krate version it works with, and this compiler is older. Upgrade Krate (`npm i @krate/core@latest`) or use an older release of the plugin.
+
+### KR7255
+
+**Unknown or disallowed plugin permission**
+
+A plugin permission is written `plugin:<plugin>.<permission>` and has to be declared by an enabled plugin. It appears in `native.permissions` or `native.window.permissions` without such a plugin or declaration. A build derives the plugin permissions the code needs; list them in `native.permissions` only to restrict the app.
+
+### KR7256
+
+**Could not build the shell for the app's plugins**
+
+An app with native plugins runs under a shell that is built for it with the Go toolchain, because plugins are Go code linked into the shell process. The Go command failed or is missing. The output of `go build` is shown; the plugin's package has to compile for the target with CGO_ENABLED=0, and its module has to be resolvable (`go mod download`).
+
+### KR7257
+
+**Plugin op cannot be bound**
+
+Each op in `krate-plugin.json` (not marked `manual`) must be an exported function or an exported `*krate.Signal[T]` variable of the plugin's Go package, with a signature the host-call bindings support (see Go host code). The Go error is shown with the position in the plugin.
+
+### KR7270
+
+**Image much larger than its rendered size**
+
+An `<img>` has literal `width`/`height` (or an inline style size) that is several times smaller than the image file's pixel size. The webview decodes the whole bitmap and keeps it in memory, so a 2000 px photo shown at 100 px costs about 16 MB of decoded pixels for a 100 px picture. Resize the file to at most about twice its rendered size (the factor is `native.lean.imageRatio`, default 2). The check only runs when the file is a local PNG, JPEG, GIF or WebP and the rendered size is a literal.
+
+### KR7271
+
+**Large data: URL inlined into code or CSS**
+
+A base64 `data:` URL above the threshold (`native.lean.dataUriKb`, default 16 KiB) sits in a source or stylesheet file. It is parsed with the page, kept as a string, and decoded again for each use, so the bytes cost memory more than once. Put the asset in the public directory and reference it by URL; the shell serves it from the app bundle and the webview decodes it once.
+
+### KR7272
+
+**Web font where a system font stack would do**
+
+The project loads a web font (an `@font-face` rule with a font file, a Google Fonts or other font-service link, or an `@fontsource` import). Each family and weight costs the file, a parsed copy and shaped glyph caches in the web process. Icon fonts are not reported. This is a heuristic, not a measurement: it cannot know whether the design needs the typeface. Prefer `system-ui, -apple-system, "Segoe UI", sans-serif`, and keep a web font only when the brand needs it (silence this with `native.lean.ignore: ["KR7272"]`).
+
+### KR7273
+
+**CSS effect that forces compositing layers**
+
+`backdrop-filter`, a large `filter: blur()` (16 px or more) or a blur in an animated rule, a very large `box-shadow` on a tag or universal selector, and `will-change` on many elements each give the element its own GPU layer with its own backing store, and a backdrop-filter also needs the content behind it re-rendered. Layers are memory in the GPU process. Use them on a few elements at most, drop them from lists and repeated components, or use a solid or semi-transparent background instead.
+
+### KR7274
+
+**Long list rendered without windowing**
+
+A `.map()` renders a JSX element per item over an array with more than `native.lean.listItems` entries (default 100) known at build time, or over a value from host code, whose length the UI does not bound, and the file uses no windowing component or `.slice()`. Every item stays in the DOM, so memory grows with the list. Render only the visible window (a virtual list component), page the data with `.slice()`, or have host code return one page at a time.
+
+### KR7290
+
+**Media or location used without a macOS usage description**
+
+The UI code calls `getUserMedia`, `getDisplayMedia` or `navigator.geolocation`, and `native.media.usage` has no sentence for it. macOS ends a process that touches the camera, microphone or location when its Info.plist lacks `NSCameraUsageDescription`, `NSMicrophoneUsageDescription` or `NSLocationUsageDescription`, and it shows that sentence in its consent prompt. Packaging writes a generic sentence so the app does not crash, but a prompt that says why the app needs the device gets more yeses. Set `native.media.usage.camera`, `.microphone`, `.location` or `.screenCapture`. The check runs for builds that target macOS and only when the scan of the built UI finds the call; an API name built at run time is not found.
+
+### KR7300
+
+**Cannot merge a macOS universal app**
+
+`--arch universal` (or `--target darwin/universal`) merges a darwin/arm64 build and a darwin/amd64 build into one `.app`: the executable and every Mach-O file the two builds share (Go host children, compiled Node, Bun and Deno hosts) become universal files. Both builds must exist and must contain the same files. Build both with `krate native build --release --arch universal`. A host runtime tool that cannot produce the other architecture needs to be built on a machine that can, or switched off for the universal app.
+
+### KR7301
+
+**Store build configuration problem**
+
+A Mac App Store build (`--target mas`) needs `native.bundle.macos.mas.teamId` and a provisioning profile; a Microsoft Store build (`--format msix-store`) needs `native.bundle.windows.store.identityName`, `publisherId` and `publisherDisplayName` exactly as Partner Center shows them. The message names the field and the rule.
+
+### KR7302
+
+**Flatpak or Snap package cannot be generated**
+
+The Flatpak manifest, AppStream metadata and snapcraft.yaml are generated from `native.*` values; a value that breaks the format (an invalid license expression, a Flatpak runtime version that is not a number, an unknown Snap grade) is reported with the field and a hint.
+
 ## KR8xxx: islands, compiled packages and general React compatibility
 
 ### KR8001

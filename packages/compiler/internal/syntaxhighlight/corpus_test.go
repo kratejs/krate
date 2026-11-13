@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -75,6 +76,10 @@ var (
 
 // gatherCorpus lists candidate files by extension from the repository, the Go
 // modules it depends on, chroma's own samples and the vendored corpus.
+// scratchDir matches the name os.MkdirTemp gives a test's scratch directory:
+// a prefix and the random number it appends.
+var scratchDir = regexp.MustCompile(`^\.?[A-Za-z0-9_.-]+-[0-9]{6,}$`)
+
 func gatherCorpus(t *testing.T) map[string][]string {
 	t.Helper()
 	corpusOnce.Do(func() {
@@ -105,6 +110,12 @@ func gatherCorpus(t *testing.T) map[string][]string {
 					}
 					// The synced docs copy and this corpus are not independent samples.
 					if strings.HasSuffix(filepath.ToSlash(p), "internal/kratedocs/docs") {
+						return filepath.SkipDir
+					}
+					// Scratch projects other packages' tests create inside the
+					// repo (examples/.debugtest-123, .e2e-system-123,
+					// hostchild-e2e-123) and delete while this test runs.
+					if p != r && scratchDir.MatchString(d.Name()) {
 						return filepath.SkipDir
 					}
 					return nil

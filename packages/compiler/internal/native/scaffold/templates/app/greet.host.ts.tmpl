@@ -1,0 +1,5 @@
+// A .host.ts file is host code: it runs in the native process, not in the
+// webview. The UI imports and awaits its functions like any other.
+export async function greet(name: string): Promise<string> {
+  return `Hello, ${name}! This ran in the host.`;
+}

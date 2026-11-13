@@ -1,0 +1,25 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'" />
+    <title>Scratchpad</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Scratchpad</h1>
+      <textarea id="note" rows="14"></textarea>
+      <p>
+        <button id="open">Open...</button>
+        <button id="save-as">Save As...</button>
+        <button id="notify">Notify</button>
+      </p>
+      <p id="file"></p>
+      <p id="status"></p>
+      <p id="tray-status"></p>
+      <p id="notify-status"></p>
+    </main>
+    <script src="renderer.js"></script>
+  </body>
+</html>

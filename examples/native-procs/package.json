@@ -1,0 +1,11 @@
+{
+  "name": "krate-native-procs",
+  "private": true,
+  "type": "module",
+  "description": "Krate Native example: a worker process, message ports between views and a worker, offscreen frames and the automation endpoint.",
+  "dependencies": {
+    "@krate/app": "workspace:*",
+    "@krate/core": "workspace:*",
+    "@krate/runtime": "workspace:*"
+  }
+}

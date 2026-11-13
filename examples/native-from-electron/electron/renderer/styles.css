@@ -1,0 +1,4 @@
+:root[data-theme='light'] { --bg: #ffffff; --fg: #1a1a1a; }
+:root[data-theme='dark'] { --bg: #1e1e24; --fg: #ececf1; }
+body { margin: 0; padding: 16px; font-family: system-ui, sans-serif; background: var(--bg); color: var(--fg); }
+textarea { width: 100%; box-sizing: border-box; font: inherit; }

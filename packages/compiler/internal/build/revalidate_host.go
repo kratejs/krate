@@ -19,9 +19,9 @@ import (
 	"time"
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
-	"github.com/kratejs/krate/packages/compiler/internal/jsruntime"
 	"github.com/kratejs/krate/packages/compiler/internal/ogimage"
 	"github.com/kratejs/krate/packages/compiler/internal/rediscache"
+	"github.com/kratejs/krate/packages/native/jsruntime"
 )
 
 // internalSecretHeader carries the per-process secret on host <-> sidecar

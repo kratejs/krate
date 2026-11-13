@@ -1,0 +1,11 @@
+{
+  "name": "krate-native-chrome",
+  "private": true,
+  "type": "module",
+  "description": "Krate Native example: a window without a title bar, drawn by the page itself with drag regions, window buttons and the window chrome API.",
+  "dependencies": {
+    "@krate/app": "workspace:*",
+    "@krate/core": "workspace:*",
+    "@krate/runtime": "workspace:*"
+  }
+}

@@ -53,6 +53,17 @@ try {
       if (!a || a === document.body) return "";
       return (a.tagName + "|" + (a.getAttribute("role") || "") + "|" + (a.textContent || "").trim().slice(0, 24));
     });
+  // Focus moves after the component renders, which a slow runner can do a
+  // frame or two after the key press; wait for it rather than read once.
+  const focusIs = async (pred, message) => {
+    const deadline = Date.now() + 2000;
+    let a = await active();
+    while (!pred(a) && Date.now() < deadline) {
+      await page.waitForTimeout(25);
+      a = await active();
+    }
+    check(pred(a), `${message} (focus: ${a})`);
+  };
   const focusTrigger = (text) =>
     page.evaluate((t) => {
       const l = [...document.querySelectorAll("label[data-ka=t]")].find((x) => x.textContent.trim() === t && x.getClientRects().length);
@@ -100,13 +111,13 @@ try {
   check(await page.evaluate(() => !!document.activeElement.closest("[role=dialog]")), "Shift+Tab must stay inside the open dialog");
   await page.keyboard.press("Escape");
   check(!(await visible(".krate-dialog-content")), "Escape must close the dialog");
-  check((await active()).endsWith("Open dialog"), `focus must return to the trigger after Escape (got ${await active()})`);
+  await focusIs((a) => a.endsWith("Open dialog"), `focus must return to the trigger after Escape`);
   await page.keyboard.press("Space");
   check(await visible(".krate-dialog-content"), "Space must open the dialog");
-  check((await active()).includes("Close"), `focus must land on the Close button (got ${await active()})`);
+  await focusIs((a) => a.includes("Close"), `focus must land on the Close button`);
   await page.keyboard.press("Enter");
   check(!(await visible(".krate-dialog-content")), "Enter on Close must close the dialog");
-  check((await active()).endsWith("Open dialog"), "focus must return to the trigger after Close");
+  await focusIs((a) => a.endsWith("Open dialog"), "focus must return to the trigger after Close");
   // Pointer path still works without the keyboard.
   await page.locator("label.krate-dialog-trigger:visible").click();
   check(await visible(".krate-dialog-content"), "click must open the dialog");
@@ -118,32 +129,32 @@ try {
   const menuTrigger = await page.evaluate(() => document.activeElement.getAttribute("aria-haspopup"));
   check(menuTrigger === "menu", "menu trigger must advertise aria-haspopup=menu");
   await page.keyboard.press("Enter");
-  check((await active()).startsWith("LABEL|menuitem|Profile"), `Enter must open the menu and focus the first item (got ${await active()})`);
+  await focusIs((a) => a.startsWith("LABEL|menuitem|Profile"), `Enter must open the menu and focus the first item`);
   check(await page.evaluate(() => document.activeElement.closest("[role=menu]") !== null), "menu items live in role=menu");
   await page.keyboard.press("ArrowDown");
-  check((await active()).includes("Sign out"), "ArrowDown must move to the next item");
+  await focusIs((a) => a.includes("Sign out"), "ArrowDown must move to the next item");
   await page.keyboard.press("ArrowUp");
-  check((await active()).includes("Profile"), "ArrowUp must move to the previous item");
+  await focusIs((a) => a.includes("Profile"), "ArrowUp must move to the previous item");
   await page.keyboard.press("Escape");
-  check((await active()).endsWith("Open menu"), "Escape must close the menu and restore focus");
+  await focusIs((a) => a.endsWith("Open menu"), "Escape must close the menu and restore focus");
   await page.keyboard.press("ArrowDown");
-  check((await active()).includes("Profile"), "ArrowDown on the trigger must open the menu");
+  await focusIs((a) => a.includes("Profile"), "ArrowDown on the trigger must open the menu");
   await page.keyboard.press("Enter");
-  check((await active()).endsWith("Open menu"), "activating an item closes the menu and restores focus");
+  await focusIs((a) => a.endsWith("Open menu"), "activating an item closes the menu and restores focus");
 
   // Menu bar: Left/Right between menus.
   await focusTrigger("File");
   await page.keyboard.press("Enter");
   await page.keyboard.press("Escape");
   await page.keyboard.press("ArrowRight");
-  check((await active()).endsWith("Edit"), `ArrowRight must move to the next menubar trigger (got ${await active()})`);
+  await focusIs((a) => a.endsWith("Edit"), `ArrowRight must move to the next menubar trigger`);
 
   // Popover and AlertDialog-style disclosure keep keyboard parity.
   await focusTrigger("Open popover");
   await page.keyboard.press("Enter");
   check(await page.evaluate(() => !!document.activeElement.closest("[role=dialog]")), "popover focus moves into the popover");
   await page.keyboard.press("Escape");
-  check((await active()).endsWith("Open popover"), "Escape closes the popover and restores focus");
+  await focusIs((a) => a.endsWith("Open popover"), "Escape closes the popover and restores focus");
 
   // Navigation menu: a disclosure of links, not a role=menu.
   await focusTrigger("Getting Started");
@@ -151,10 +162,10 @@ try {
   check(nav.role === "button" && nav.popup === null, `navigation trigger is a plain disclosure button: ${JSON.stringify(nav)}`);
   await page.keyboard.press("Enter");
   check(await visible(".krate-navigation-menu-link"), "Enter opens the navigation menu");
-  check((await active()).includes("Getting Started"), "navigation trigger keeps focus after opening");
+  await focusIs((a) => a.includes("Getting Started"), "navigation trigger keeps focus after opening");
   await page.keyboard.press("Escape");
   check(!(await visible(".krate-navigation-menu-link")), "Escape closes the navigation menu");
-  check((await active()).endsWith("Getting Started"), "focus stays on the navigation trigger after Escape");
+  await focusIs((a) => a.endsWith("Getting Started"), "focus stays on the navigation trigger after Escape");
 
   // Accordion: Enter toggles, aria-expanded follows, focus is kept.
   await focusTrigger("Is it zero-JS?");
@@ -162,7 +173,7 @@ try {
   const acc = await page.evaluate(() => ({ expanded: document.activeElement.getAttribute("aria-expanded"), text: document.activeElement.textContent.trim() }));
   check(acc.expanded === "true" && acc.text.startsWith("Is it zero-JS?"), `accordion Enter keeps focus on the trigger: ${JSON.stringify(acc)}`);
   await page.keyboard.press("Space");
-  check((await active()).includes("Is it zero-JS?"), "accordion Space closes and keeps focus");
+  await focusIs((a) => a.includes("Is it zero-JS?"), "accordion Space closes and keeps focus");
 
   // Tabs: tablist owns tabs, roving tabindex, arrows select.
   const tabs = await page.evaluate(() => [...document.querySelectorAll("[role=tablist] > [role=tab]")].length);
@@ -171,7 +182,7 @@ try {
   await page.keyboard.press("ArrowRight");
   const sel = await page.evaluate(() => [...document.querySelectorAll("[role=tab]")].map((t) => t.getAttribute("aria-selected") + ":" + t.tabIndex).join(","));
   check(sel === "false:-1,true:0", `ArrowRight selects the next tab (roving tabindex): ${sel}`);
-  check((await active()).endsWith("B"), "focus follows the selected tab");
+  await focusIs((a) => a.endsWith("B"), "focus follows the selected tab");
 
   // Switch: a native checkbox with role=switch and an accessible name.
   const sw = page.getByRole("switch", { name: "Airplane mode" });
@@ -220,7 +231,7 @@ try {
   await page
     .waitForFunction(() => (document.activeElement?.textContent ?? "").endsWith("Open dialog"), null, { timeout: 2000 })
     .catch(() => {});
-  check((await active()).endsWith("Open dialog"), `Escape must restore focus to the trigger after a soft navigation (got ${await active()})`);
+  await focusIs((a) => a.endsWith("Open dialog"), `Escape must restore focus to the trigger after a soft navigation`);
 
   // Controlled and imperative open state.
   const errs2 = [];

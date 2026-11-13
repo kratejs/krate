@@ -58,6 +58,141 @@ importers:
         specifier: ^10.24.0
         version: 10.29.8
 
+  examples/native-chrome:
+    dependencies:
+      '@krate/app':
+        specifier: workspace:*
+        version: link:../../packages/app
+      '@krate/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@krate/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
+
+  examples/native-files:
+    dependencies:
+      '@krate/app':
+        specifier: workspace:*
+        version: link:../../packages/app
+      '@krate/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@krate/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
+
+  examples/native-page:
+    dependencies:
+      '@krate/app':
+        specifier: workspace:*
+        version: link:../../packages/app
+      '@krate/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@krate/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
+
+  examples/native-plugin:
+    dependencies:
+      '@krate/app':
+        specifier: workspace:*
+        version: link:../../packages/app
+      '@krate/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@krate/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
+
+  examples/native-remote:
+    dependencies:
+      '@krate/app':
+        specifier: workspace:*
+        version: link:../../packages/app
+      '@krate/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@krate/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
+
+  examples/native-tasks:
+    dependencies:
+      '@krate/app':
+        specifier: workspace:*
+        version: link:../../packages/app
+      '@krate/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@krate/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
+
+  examples/native-media:
+    dependencies:
+      '@krate/app':
+        specifier: workspace:*
+        version: link:../../packages/app
+      '@krate/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@krate/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
+
+  examples/native-views:
+    dependencies:
+      '@krate/app':
+        specifier: workspace:*
+        version: link:../../packages/app
+      '@krate/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@krate/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
+
+  examples/native-from-electron:
+    dependencies:
+      '@krate/app':
+        specifier: workspace:*
+        version: link:../../packages/app
+      '@krate/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@krate/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
+
+  examples/native-procs:
+    dependencies:
+      '@krate/app':
+        specifier: workspace:*
+        version: link:../../packages/app
+      '@krate/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@krate/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
+
+  packages/app:
+    devDependencies:
+      '@types/node':
+        specifier: ^26.2.0
+        version: 26.2.0
+      happy-dom:
+        specifier: ^20.14.5
+        version: 20.14.5
+      typescript:
+        specifier: ^5.5.0
+        version: 5.9.3
+      vitest:
+        specifier: ^5.0.3
+        version: 5.0.3(@types/node@26.2.0)(happy-dom@20.14.5)(vite@8.3.2(@types/node@26.2.0)(esbuild@0.28.2)(tsx@4.23.13))
+
   packages/base-docs-theme:
     dependencies:
       '@krate/plugin':

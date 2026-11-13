@@ -182,7 +182,11 @@ func Watch(b *Builder, debounceDelay time.Duration, hub *DevHub) error {
 		}
 		changed := uniqueStrings(pending)
 		pending = nil
-		b.processChanges(changed, hub)
+		if b.DevHandleChanges != nil {
+			b.DevHandleChanges(changed, hub)
+		} else {
+			b.processChanges(changed, hub)
+		}
 		printf("%s  Watching %s for changes...%s\n", cBlue, root, cReset)
 		return nil
 	}
