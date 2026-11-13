@@ -48,7 +48,7 @@ type localFontSpec struct {
 
 // localFontOut is the generated equivalent of one next/font/local call.
 type localFontOut struct {
-	class, variable, family, fallbackCSS, weight, style string
+	class, family, fallbackCSS, weight, style string
 }
 
 type localFonts struct {
