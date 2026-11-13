@@ -474,7 +474,7 @@ Each object returned by `generateStaticParams` becomes one page, so it needs a v
 
 **Root-relative URL on a plain tag ignores the base path**
 
-The site is served under a base path, but a plain `<a href="/x">` or `<img src="/x">` is emitted exactly as written, so the browser requests it from the domain root and misses the site. Use `<Link href="/x">` for pages, and `<Image>` or an import for images: both add the base path. If the URL really does belong outside the site, on the same domain (for example the marketing site at `/` while Krate is served under `/app`), mark the tag `data-krate-no-base` (`<a href="/pricing" data-krate-no-base>`) or write `<Link href="/pricing" basePath={false}>`: the URL is used as written, the router never takes the click over, and the warning goes away. Absolute URLs (`https://example.com/x`) are never changed and need no marker.
+The site is served under a base path, but a plain `<a href="/x">` or `<img src="/x">` is emitted exactly as written, so the browser requests it from the domain root and misses the site. Use `<Link href="/x">` for pages, and `<Image>` or an import for images: both add the base path. Write the full path only when the URL really does belong outside the site.
 
 ### KR7150
 
