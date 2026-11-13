@@ -447,7 +447,7 @@ func checkMemoryBudgets(t *testing.T, f *budgetFile, vals map[string]int64) {
 
 // TestNativeBudgetGUI measures the example release executable in a real
 // window: the time from process start to the first page's load event (the
-// median of three cold runs) and its memory after the page has loaded and
+// fastest of three cold runs) and its memory after the page has loaded and
 // settled, per process role, next to the floor (a blank page in the same
 // shell and window size). It runs under KRATE_NATIVE_GUI=1 on Linux (Xvfb is
 // enough). The executable is built with the krate_devcontrol tag, which the
@@ -490,7 +490,12 @@ func TestNativeBudgetGUI(t *testing.T) {
 		s.stop()
 	}
 	sort.Slice(starts, func(i, j int) bool { return starts[i] < starts[j] })
-	median := starts[len(starts)/2]
+	// The fastest run is checked: a shared runner's noise only ever makes a
+	// start slower (windows-11-arm once took 1.5s, 6.9s and 6.8s, likely a
+	// restart waiting for the previous WebView2 browser process), while a
+	// real regression slows every run.
+	fastest := starts[0]
+	t.Logf("cold start: fastest %d ms, median %d ms", fastest, starts[len(starts)/2])
 
 	// Memory: the app and the floor, each sampled after load plus 5 s.
 	floorDir := filepath.Join(work, "floor")
@@ -523,7 +528,7 @@ func TestNativeBudgetGUI(t *testing.T) {
 	if f.Startup == nil {
 		f.Startup = map[string]map[string]budgetEntry{}
 	}
-	budgetCheck(t, f, f.Startup, "startup", "coldStartMs", median, "ms", budgetScale(t))
+	budgetCheck(t, f, f.Startup, "startup", "coldStartMs", fastest, "ms", budgetScale(t))
 	checkMemoryBudgets(t, f, medianValues(runs))
 	flushBudgetRecord(t)
 	if os.Getenv("KRATE_UPDATE_BUDGETS") == "1" {

@@ -341,8 +341,10 @@ jobs:
         run: go build ./...
         working-directory: packages/compiler
 
+      # internal/build alone took 598s on windows-latest: the default 10m
+      # package timeout is too tight there.
       - name: Go test
-        run: go test ./...
+        run: go test -timeout 30m ./...
         working-directory: packages/compiler
         env:
           # The JS workspace and runtime dist are built above, so a missing E2E
@@ -350,7 +352,7 @@ jobs:
           KRATE_REQUIRE_E2E: "1"
 
       - name: Go test (native)
-        run: go test ./...
+        run: go test -timeout 30m ./...
         working-directory: packages/native
         env:
           KRATE_REQUIRE_E2E: "1"

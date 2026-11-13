@@ -10,7 +10,7 @@ fail when a measurement is over its limit.
 | `sizes.<platform>.goOnlyRelease` | release executable of an app with Go host code only | `TestNativeBudgetSizes` | Go |
 | `sizes.<platform>.tsOnlyRelease` | release executable of an app with TypeScript host code only (QuickJS linked) | `TestNativeBudgetSizes` | Go |
 | `sizes.<platform>.nativeTasksRelease` | release executable of `examples/native-tasks` | `TestNativeBudgetSizes` | Go, `pnpm install && pnpm build` |
-| `startup.<platform>.coldStartMs` | process start to the first page's load event of the `native-tasks` release executable, median of three runs, in ms | `TestNativeBudgetGUI` | `KRATE_NATIVE_GUI=1`, a display and WebKitGTK, or a macOS or Windows desktop |
+| `startup.<platform>.coldStartMs` | process start to the first page's load event of the `native-tasks` release executable, fastest of three runs, in ms | `TestNativeBudgetGUI` | `KRATE_NATIVE_GUI=1`, a display and WebKitGTK, or a macOS or Windows desktop |
 | `memory.<platform>.appMinusFloor.<role>.<metric>` | memory of the `native-tasks` release executable minus the floor, 5 s after the page loaded; **enforced** | `TestNativeBudgetGUI` | same |
 | `memory.<platform>.app.<role>.<metric>`, `...floor...` | the absolute values of the app and of the floor; **warn only** | `TestNativeBudgetGUI` | same |
 
