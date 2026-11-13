@@ -110,6 +110,10 @@ type Bundler struct {
 	serverDirs        []string
 	runtimeDirs       []string
 
+	// readLock, when set, holds a shared cached program against the
+	// builder's in-place transforms while the bundler copies it.
+	readLock func(*ast.Program) func()
+
 	// virtualModules maps a bare import specifier (e.g. "krate/content") to a
 	// generated file path on disk. Krate codegens these (content collections,
 	// route manifests) so pages can import build-time data without a real
@@ -213,6 +217,11 @@ type pathAlias struct {
 	prefix  string
 	targets []string
 }
+
+// SetProgramReadLock sets the function that holds a cached program against
+// concurrent in-place transforms (the builder's per-program lock) while the
+// bundler reads all of it; it returns the unlock function.
+func (b *Bundler) SetProgramReadLock(f func(*ast.Program) func()) { b.readLock = f }
 
 func New(root string) *Bundler {
 	return &Bundler{

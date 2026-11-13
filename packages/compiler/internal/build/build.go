@@ -2210,6 +2210,7 @@ func (b *Builder) importResolver() *bundler.ImportResolver {
 // component tiers, and virtual modules (codegen'd `krate/content`).
 func (b *Builder) newBundler() *bundler.Bundler {
 	bnd := bundler.New(b.Root)
+	bnd.SetProgramReadLock(b.readProgram)
 	bnd.SetPathAliases(b.cfgPathAliasPrefixes(), b.cfgPathAliasTargets(), b.Cfg.TSBaseDir)
 	bnd.SetBaseURL(b.Cfg.TSBaseURL)
 	bnd.SetServerComponents(b.Cfg.ServerComponents, b.Cfg.RuntimeComponents, b.Cfg.ServerDirs, b.Cfg.RuntimeDirs)

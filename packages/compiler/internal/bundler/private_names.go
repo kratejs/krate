@@ -472,7 +472,15 @@ func (b *Bundler) applyPrivateRenames(mod *Module, bindings, imports, exports ma
 			mod.Program = prog
 			return
 		}
-		mod.Program = cloneProgram(orig)
+		// Another page's build may be transforming the cached program in
+		// place (icons, images) while this copy is taken.
+		if b.readLock != nil {
+			unlock := b.readLock(orig)
+			mod.Program = cloneProgram(orig)
+			unlock()
+		} else {
+			mod.Program = cloneProgram(orig)
+		}
 	}
 	all := make(map[string]string, len(bindings)+len(imports)+len(exports))
 	for name := range renamableNames(mod.Program, func(n string) bool { _, ok := bindings[n]; return ok }) {
