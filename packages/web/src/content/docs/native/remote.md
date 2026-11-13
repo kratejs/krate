@@ -6,7 +6,7 @@ description: Show web pages in views and windows that cannot reach the app: own 
 
 # Remote content
 
-> **Preview.** Part of [Krate Native](/docs/native/). Linux (WebKitGTK) is tested.
+> **Experimental.** Part of [Krate Native](/docs/native/). Linux (WebKitGTK) is tested.
 > macOS (WKWebView) and Windows (WebView2) compile and have GUI tests that the CI
 > native job runs; until it passes they are `untested` in the
 > [compatibility matrix](/docs/guides/compatibility/).

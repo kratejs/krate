@@ -355,7 +355,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  explain   Explain a diagnostic code (krate explain KR7110)\n")
 	fmt.Fprintf(w, "  config    Print the fully resolved configuration\n")
 	fmt.Fprintf(w, "  plugin    Manage plugins (add <pkg>)\n")
-	fmt.Fprintf(w, "  native    Desktop target (preview): check, init, dev, build, ...\n")
+	fmt.Fprintf(w, "  native    Desktop target (experimental): check, init, dev, build, ...\n")
 	fmt.Fprintf(w, "  init      Scaffold a new project (alias: create; via the npm wrapper)\n")
 	fmt.Fprintf(w, "  mcp       Run the MCP server (Model Context Protocol; --http for HTTP)\n")
 	fmt.Fprintf(w, "  version   Print the version\n")

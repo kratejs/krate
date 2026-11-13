@@ -6,7 +6,7 @@ description: Run a function once during the native build and bake its result int
 
 # Build Functions
 
-> **Preview.** Part of [Krate Native](/docs/native/), which is under construction.
+> **Experimental.** Part of [Krate Native](/docs/native/), which is under construction.
 
 A **build function** is a host function that runs once while the app is
 built. Its result is baked into the app: UI code that calls it gets the value

@@ -6,7 +6,7 @@ description: Mark Go and TypeScript code that runs in the native process of a Kr
 
 # Host Code
 
-> **Preview.** Part of [Krate Native](/docs/native/), which is under construction.
+> **Experimental.** Part of [Krate Native](/docs/native/), which is under construction.
 
 **Host code** runs in the native process of a desktop app. **UI code** runs in
 the webview. UI code imports host code and calls it as async functions; the

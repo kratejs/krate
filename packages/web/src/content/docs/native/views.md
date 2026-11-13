@@ -6,7 +6,7 @@ description: Several webviews in one window as split panes with draggable divide
 
 # Views and split panes
 
-> **Preview.** Part of [Krate Native](/docs/native/). Views are tested on Linux
+> **Experimental.** Part of [Krate Native](/docs/native/). Views are tested on Linux
 > (WebKitGTK), macOS (`NSSplitView`) and Windows (several WebView2 controllers
 > in one window) by the CI native job; dragging a divider with a real pointer is
 > not tested on the last two.

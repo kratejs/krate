@@ -6,7 +6,7 @@ description: The Native SDK for windows, dialogs, clipboard, menus, tray, shortc
 
 # SDK: Windows, Dialogs and the Desktop
 
-> **Preview.** Part of [Krate Native](/docs/native/), which is under construction.
+> **Experimental.** Part of [Krate Native](/docs/native/), which is under construction.
 
 The UI half of the Native SDK covers everything that touches the desktop
 rather than data: windows, the menu bar, the tray, global shortcuts, file and

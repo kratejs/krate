@@ -6,7 +6,7 @@ description: Run a Krate Native app with hot reload - Go host restarts, TypeScri
 
 # Development with `krate native dev`
 
-> **Preview.** Part of [Krate Native](/docs/native/), which is under construction.
+> **Experimental.** Part of [Krate Native](/docs/native/), which is under construction.
 
 ```sh
 krate native dev [dir] [--browser] [--port <n>] [--shell <path>]

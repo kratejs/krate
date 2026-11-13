@@ -29,7 +29,7 @@ var nativeStubs = []string{}
 
 func printNativeUsage(w io.Writer) {
 	fmt.Fprintf(w, "Usage: krate native <command> [dir] [flags]\n\n")
-	fmt.Fprintf(w, "Build desktop apps from a Krate project (preview).\n\n")
+	fmt.Fprintf(w, "Build desktop apps from a Krate project (experimental).\n\n")
 	fmt.Fprintf(w, "Commands:\n")
 	fmt.Fprintf(w, "  check      Check host code placement and native target restrictions\n")
 	fmt.Fprintf(w, "  init       Create a native app in a directory (--go adds Go host code)\n")

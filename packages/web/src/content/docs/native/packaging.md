@@ -6,7 +6,7 @@ description: krate native package - installers and archives for macOS, Windows a
 
 # Packaging
 
-> **Preview.** Part of [Krate Native](/docs/native/), which is under construction.
+> **Experimental.** Part of [Krate Native](/docs/native/), which is under construction.
 
 ```sh
 krate native package [dir] [--target <os/arch>] [--format <list>] [--out <dir>]

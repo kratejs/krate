@@ -396,7 +396,7 @@ export interface NativeHostConfig {
   islands?: Record<string, "node" | "bun" | "deno" | "quickjs">;
 }
 
-/** The `native` block: desktop target settings (`krate native`). Preview. */
+/** The `native` block: desktop target settings (`krate native`). Experimental. */
 /** Permission names of the native SDK (packages/native/sdk/permission). */
 export type NativePermission =
   | "os:info"
@@ -887,7 +887,7 @@ export interface KrateConfig {
   hostFunctions?: string[];
   /** Native target: every module in these directories is host code. */
   hostDirs?: string[];
-  /** Desktop target settings (`krate native`). Preview. */
+  /** Desktop target settings (`krate native`). Experimental. */
   native?: NativeConfig;
   pathAliases?: Record<string, string[]>;
   tsBaseDir?: string;

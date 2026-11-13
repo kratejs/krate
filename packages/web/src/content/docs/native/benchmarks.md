@@ -6,7 +6,7 @@ description: Krate Native against Electron and Tauri on one small app - cold sta
 
 # Benchmarks
 
-> **Preview.** Part of [Krate Native](/docs/native/). The harness runs on Linux,
+> **Experimental.** Part of [Krate Native](/docs/native/). The harness runs on Linux,
 > macOS and Windows in CI. The numbers below were measured on Linux only, on a
 > shared developer machine (see [Caveats](#caveats)). Read them as a first data
 > point, not as a verdict.

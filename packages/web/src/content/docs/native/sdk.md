@@ -6,7 +6,7 @@ description: The Native SDK for files, SQLite, key-value storage, secrets, netwo
 
 # Native SDK: Data and System
 
-> **Preview.** Part of [Krate Native](/docs/native/), which is under construction.
+> **Experimental.** Part of [Krate Native](/docs/native/), which is under construction.
 > Ids and permission names are fixed; more may be added.
 
 The SDK is a set of Go packages under `packages/native/sdk`. Go host code

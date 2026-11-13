@@ -584,7 +584,7 @@ serverDirs: ["src/components/server"],
 runtimeDirs: ["src/components/runtime"],
 ```
 
-## Native (preview)
+## Native (experimental)
 
 ```typescript
 hostFunctions: ["addTask", "src/lib/db.ts"], // names or paths -> host code

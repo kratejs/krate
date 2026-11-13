@@ -6,7 +6,7 @@ description: What Krate Native guarantees screen readers and keyboard users on L
 
 # Accessibility
 
-> **Preview.** Part of [Krate Native](/docs/native/). The Linux checks run as GUI tests
+> **Experimental.** Part of [Krate Native](/docs/native/). The Linux checks run as GUI tests
 > through AT-SPI, the same bus Orca reads. On macOS the tests ask our own AppKit objects
 > through NSAccessibility, and read the AX tree when the test process is allowed to; on
 > Windows they read the UI Automation tree. The macOS and Windows tests run only in the CI

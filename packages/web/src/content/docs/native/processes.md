@@ -6,7 +6,7 @@ description: Worker processes, message ports, offscreen frames, DevTools automat
 
 # Workers, ports, offscreen rendering, automation and extensions
 
-> **Preview.** Part of [Krate Native](/docs/native/). The Linux (WebKitGTK)
+> **Experimental.** Part of [Krate Native](/docs/native/). The Linux (WebKitGTK)
 > paths are tested end to end through the real shell. The macOS (WKWebView) and
 > Windows (WebView2) paths are written and compiled, the vtable slots and
 > interface ids of WebView2 are checked against `WebView2.h`, and their GUI

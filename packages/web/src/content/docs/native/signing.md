@@ -6,7 +6,7 @@ description: krate native sign and notarize - macOS codesign and notarytool, Win
 
 # Signing and notarization
 
-> **Preview.** Part of [Krate Native](/docs/native/), which is under construction.
+> **Experimental.** Part of [Krate Native](/docs/native/), which is under construction.
 
 ```sh
 krate native package --sign [--notarize]     # sign while packaging

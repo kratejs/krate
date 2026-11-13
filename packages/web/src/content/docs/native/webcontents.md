@@ -6,7 +6,7 @@ description: Print and PDF, find in page, zoom, capturing a view, downloads and 
 
 # Web contents
 
-> **Preview.** Part of [Krate Native](/docs/native/). Linux (WebKitGTK) is the
+> **Experimental.** Part of [Krate Native](/docs/native/). Linux (WebKitGTK) is the
 > platform where this is tested. The macOS (WKWebView) and Windows (WebView2)
 > implementations are written against the platform APIs and have GUI tests that
 > run in CI, but nobody has run them on those systems yet.

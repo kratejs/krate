@@ -6,7 +6,7 @@ description: Run TypeScript host code on Node, Bun, Deno or scriptc instead of t
 
 # Host Runtimes
 
-> **Preview.** Part of [Krate Native](/docs/native/), which is under construction.
+> **Experimental.** Part of [Krate Native](/docs/native/), which is under construction.
 > `scriptc` is experimental.
 
 TypeScript [host code](/docs/native/host-code/) runs on an **embedded QuickJS**

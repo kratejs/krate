@@ -6,7 +6,7 @@ description: Ship reusable native capabilities as plugins: a Go package and a ma
 
 # Native Plugins
 
-> **Preview.** Part of [Krate Native](/docs/native/), which is under construction.
+> **Experimental.** Part of [Krate Native](/docs/native/), which is under construction.
 > Verified on Linux, macOS and Windows by the CI native job; see the [compatibility matrix](/docs/guides/compatibility/#krate-native).
 
 A plugin is reusable native code: a Go package that runs inside the shell

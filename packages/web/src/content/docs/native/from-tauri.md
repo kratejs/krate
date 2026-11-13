@@ -6,7 +6,7 @@ description: Move a Tauri v2 app to Krate Native - commands, events, capabilitie
 
 # Migrating from Tauri
 
-> **Preview.** Part of [Krate Native](/docs/native/), which is under construction.
+> **Experimental.** Part of [Krate Native](/docs/native/), which is under construction.
 > This guide describes what exists in this release. Where Krate Native has no
 > equivalent of a Tauri feature, the tables say so.
 

@@ -6,7 +6,7 @@ description: In-app updates for Krate Native apps - the signed update feed, krat
 
 # Updates
 
-> **Preview.** Part of [Krate Native](/docs/native/), which is under construction.
+> **Experimental.** Part of [Krate Native](/docs/native/), which is under construction.
 
 An app checks a JSON feed, downloads a file, verifies an Ed25519 signature
 against a public key built into the app, replaces its own files and restarts.

@@ -6,7 +6,7 @@ description: krate native test runs your app in the real shell and drives its pa
 
 # Testing your app
 
-> **Preview.** Part of [Krate Native](/docs/native/). The driver and the runner
+> **Experimental.** Part of [Krate Native](/docs/native/). The driver and the runner
 > are exercised on Linux (WebKitGTK). The macOS and Windows code paths compile
 > and run in the CI jobs of this repository, but have not been used by hand.
 

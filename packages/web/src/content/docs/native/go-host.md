@@ -6,7 +6,7 @@ description: Call exported Go functions, streams and signals from the UI of a Kr
 
 # Go Host Code
 
-> **Preview.** Part of [Krate Native](/docs/native/), which is under construction.
+> **Experimental.** Part of [Krate Native](/docs/native/), which is under construction.
 
 A `.go` file is always [host code](/docs/native/host-code/). The UI imports its
 exported functions and signals by name and calls them like async functions:

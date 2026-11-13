@@ -6,7 +6,7 @@ description: File associations, opening the files an app is launched with or han
 
 # Files and drag and drop
 
-> **Preview.** Part of [Krate Native](/docs/native/). Linux (WebKitGTK) is the
+> **Experimental.** Part of [Krate Native](/docs/native/). Linux (WebKitGTK) is the
 > platform where this is tested, including a real drag-and-drop between two
 > GTK windows and a second launch handing a file to the running app. The macOS
 > (`WKWebView`) and Windows (WebView2) implementations compile and their logic

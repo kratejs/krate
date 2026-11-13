@@ -6,7 +6,7 @@ description: The output of krate native build - the app directory layout and eve
 
 # The App Directory and app.json
 
-> **Preview.** Part of [Krate Native](/docs/native/), which is under construction.
+> **Experimental.** Part of [Krate Native](/docs/native/), which is under construction.
 > Field names are fixed; fields may be added.
 
 `krate native build` writes `dist-native/app/`:

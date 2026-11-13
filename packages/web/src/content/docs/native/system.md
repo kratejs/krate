@@ -6,7 +6,7 @@ description: Badges and progress, displays, power and idle, launch at login, the
 
 # SDK: OS Integration
 
-> **Preview.** Part of [Krate Native](/docs/native/), which is under construction.
+> **Experimental.** Part of [Krate Native](/docs/native/), which is under construction.
 
 Six SDK areas reach the parts of the operating system an app lives in rather
 than the window it draws. Each is a Go package for

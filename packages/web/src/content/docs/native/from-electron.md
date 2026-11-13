@@ -6,7 +6,7 @@ description: Move an Electron app to Krate Native - concepts, a full API mapping
 
 # Migrating from Electron
 
-> **Preview.** Part of [Krate Native](/docs/native/), which is under construction.
+> **Experimental.** Part of [Krate Native](/docs/native/), which is under construction.
 > This guide describes what exists in this release. Where Krate Native has no
 > equivalent of an Electron API, the table says so instead of suggesting a
 > workaround that does not exist.

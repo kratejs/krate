@@ -6,7 +6,7 @@ description: Custom title bars and drag regions, Mica, Acrylic and vibrancy, cap
 
 # Window chrome
 
-> **Preview.** Part of [Krate Native](/docs/native/). Linux (WebKitGTK) is the
+> **Experimental.** Part of [Krate Native](/docs/native/). Linux (WebKitGTK) is the
 > platform where this is tested: drag regions, frameless resizing and
 > transparency run in the GUI tests. The macOS and Windows code compiles, its
 > pure logic (hit testing, colors, command lines, the Info.plist) is unit-tested,

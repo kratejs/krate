@@ -6,7 +6,7 @@ description: Memory profiles, feature detection, Linux levers, shared web proces
 
 # Memory
 
-> **Preview.** Part of [Krate Native](/docs/native/). Linux (WebKitGTK) is the
+> **Experimental.** Part of [Krate Native](/docs/native/). Linux (WebKitGTK) is the
 > platform where the levers are written and measured. The macOS (WKWebView) and
 > Windows (WebView2) levers have unit-tested decision tables and run on every
 > window the CI native job opens on those systems; what they save is measured but

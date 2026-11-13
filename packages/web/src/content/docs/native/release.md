@@ -6,7 +6,7 @@ description: krate native build --release links one executable per platform with
 
 # Release builds, derived permissions and PGO
 
-> **Preview.** Part of [Krate Native](/docs/native/).
+> **Experimental.** Part of [Krate Native](/docs/native/).
 
 `krate native build` produces an app directory that the prebuilt `krate-shell`
 runs. `krate native build --release` produces **one executable per platform**

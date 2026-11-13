@@ -281,10 +281,10 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 - A guide to using shadcn/ui with Krate.
 - CI covers Node 24 and 26, and runs the install smoke test on Linux, macOS, Windows and Alpine.
 
-### Krate Native (preview)
+### Krate Native (experimental)
 
 Krate Native compiles a Krate app into a desktop app: the TSX UI runs in the system webview and
-host code runs in the native process. Names and options may change before release.
+host code runs in the native process. Names and options may change between releases.
 
 - `krate native init | check | dev | build | profile | package | sign | notarize | keygen`.
   `build` writes an app directory for the prebuilt shell; `build --release [--target os/arch,...]`

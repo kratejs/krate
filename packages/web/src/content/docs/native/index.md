@@ -1,18 +1,18 @@
 ---
-title: Krate Native (Preview)
+title: Krate Native (Experimental)
 order: 1
 description: Build a desktop app from a Krate project - TSX UI in a system webview, host code in Go or TypeScript.
 sidebar:
-  label: Native (Preview)
+  label: Native (Experimental)
   order: 6
   collapsible: true
 ---
 
-# Krate Native (Preview)
+# Krate Native (Experimental)
 
-> **Preview.** Krate Native is under construction. `krate native init`, `check`,
+> **Experimental.** Krate Native is experimental and under active development. `krate native init`, `check`,
 > `dev`, `build` (also `--release`), `profile`, `package`, `sign`, `notarize` and
-> `keygen` and `doctor` work today. Names and options may change before release.
+> `keygen` and `doctor` work today. Names, options and the SDK may change between releases, without a deprecation period.
 > Linux is the most tested platform. The CI native job also runs the shell, the plugin and packaging tests on macOS and Windows; what each feature has been tested with on each OS is in the [compatibility matrix](/docs/guides/compatibility/#krate-native), and manual-only checks (real key presses, tray clicks, notarization) are listed as limits there.
 
 Krate Native compiles a Krate app into a desktop app. The UI is TSX shown in the

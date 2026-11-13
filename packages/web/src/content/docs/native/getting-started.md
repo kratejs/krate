@@ -6,7 +6,7 @@ description: Create a Krate Native app with krate native init, build its app dir
 
 # Getting Started
 
-> **Preview.** Part of [Krate Native](/docs/native/), which is under construction.
+> **Experimental.** Part of [Krate Native](/docs/native/), which is under construction.
 
 ## Create an app
 

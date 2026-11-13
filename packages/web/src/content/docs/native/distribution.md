@@ -6,7 +6,7 @@ description: Universal macOS apps, Flatpak, Snap, the Mac App Store and the Micr
 
 # Stores and universal apps
 
-> **Preview.** Part of [Krate Native](/docs/native/), which is under construction.
+> **Experimental.** Part of [Krate Native](/docs/native/), which is under construction.
 
 [Packaging](/docs/native/packaging/) makes installers you host yourself. This
 page covers the other ways to reach users: one macOS app that runs natively on

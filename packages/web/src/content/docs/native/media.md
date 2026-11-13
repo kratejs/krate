@@ -6,7 +6,7 @@ description: Camera, microphone, screen capture and location in Krate Native app
 
 # Camera, microphone and location
 
-> **Preview.** Part of [Krate Native](/docs/native/). The Linux (WebKitGTK)
+> **Experimental.** Part of [Krate Native](/docs/native/). The Linux (WebKitGTK)
 > request path is tested end to end with mock capture devices. The macOS
 > (WKWebView) and Windows (WebView2) paths compile and their decision tables are
 > unit-tested, and the CI native job drives their request path, but nothing here
