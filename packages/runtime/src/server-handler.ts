@@ -146,6 +146,9 @@ export interface ActionEntry {
   export: string;
   file: string;
   source?: string;
+  /** A hoisted inline server action; `captures` names the sealed values it receives first. */
+  inline?: boolean;
+  captures?: string[];
 }
 
 /** Build data the compiler inlines into the server bundle. */
@@ -443,6 +446,48 @@ function resolveFlashSecret(option: string | undefined, target: DeployTarget): s
   return hex;
 }
 
+function decodeInlineValue(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(decodeInlineValue);
+  if (v && typeof v === "object") {
+    const o = v as Record<string, unknown>;
+    if (typeof o.$ === "string") {
+      if (o.$ === "u") return undefined;
+      if (o.$ === "n") return BigInt(o.v as string);
+      if (o.$ === "d") return new Date(o.v as string);
+      if (o.$ === "o") {
+        const wrapped: Record<string, unknown> = {};
+        for (const k of Object.keys(o.v as object)) wrapped[k] = decodeInlineValue((o.v as Record<string, unknown>)[k]);
+        return wrapped;
+      }
+    }
+    const out: Record<string, unknown> = {};
+    for (const k of Object.keys(o)) out[k] = decodeInlineValue(o[k]);
+    return out;
+  }
+  return v;
+}
+
+/**
+ * Opens the closure token of an inline server action: AES-256-GCM over the
+ * JSON of the captured values, authenticated against the action id, with the
+ * key derived from the action secret (the format the server renderer seals).
+ */
+export async function openInlineToken(token: unknown, entry: ActionEntry, secret: string): Promise<unknown[]> {
+  if (typeof token !== "string" || !token.startsWith("k1.")) throw new Error("missing closure token");
+  if (!secret) throw new Error("no action encryption key");
+  const b64 = token.slice(3).replace(/-/g, "+").replace(/_/g, "/");
+  const bin = atob(b64 + "=".repeat((4 - (b64.length % 4)) % 4));
+  const raw = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+  if (raw.length < 12 + 16) throw new Error("truncated closure token");
+  const enc = new TextEncoder();
+  const digest = await crypto.subtle.digest("SHA-256", enc.encode("krate-inline-action\0" + secret));
+  const key = await crypto.subtle.importKey("raw", digest, "AES-GCM", false, ["decrypt"]);
+  const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: raw.subarray(0, 12), additionalData: enc.encode(entry.id) }, key, raw.subarray(12));
+  const values = JSON.parse(new TextDecoder().decode(plain));
+  if (!Array.isArray(values) || values.length !== (entry.captures || []).length) throw new Error("closure token does not match the action");
+  return values.map(decodeInlineValue);
+}
+
 // Handler factory
 
 export function createKrateHandler(options: HandlerOptions): KrateHandler {
@@ -460,6 +505,10 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
   const staticOnly = new Set(data.staticOnlyRoutes.map(normalizeRoutePattern));
   const sha256Hex = options.sha256Hex || portableSha256Hex;
   const flashSecret = resolveFlashSecret(options.flashSecret, target);
+  // Inline-action values are sealed with KRATE_ACTION_SECRET; the key is never part of the bundle.
+  // A deployed handler never falls back to the build's local key file.
+  (globalThis as Record<symbol, unknown>)[Symbol.for("krate.action.deployed")] = true;
+  const actionSecret = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.KRATE_ACTION_SECRET || "";
   const segEntries = data.segments || [];
   const segPages = data.segmentPages || {};
   const segDirByRoute = new Map<string, string>();
@@ -1786,6 +1835,22 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
       }
     } catch {
       return withHeaders(rs, actionFail(400, "Invalid server action request body"));
+    }
+
+    if (entry.inline && entry.captures && entry.captures.length > 0) {
+      // A hoisted inline action: its closed-over values arrive sealed in a token
+      // (the first leading argument, or the URL query for JSON calls).
+      let token: unknown = typeof args[0] === "string" && args[0].startsWith("k1.") ? args.shift() : null;
+      if (!token) {
+        const q = leadingActionArgs(query.get("__krate_args"));
+        if (q && typeof q[0] === "string" && q[0].startsWith("k1.")) token = q[0];
+      }
+      try {
+        args.unshift(...(await openInlineToken(token, entry, actionSecret)));
+      } catch (e) {
+        console.error(`[krate] rejected closure data for server action ${entry.source || id}: ${(e as Error).message}`);
+        return withHeaders(rs, actionFail(400, "Invalid server action request"));
+      }
     }
 
     const ctx = makeActionContext(reqHeaders, id, rs.path);

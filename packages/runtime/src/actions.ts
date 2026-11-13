@@ -453,10 +453,26 @@ function formDataFor(form: HTMLFormElement, submitter: HTMLElement | null): Form
   return fd;
 }
 
-function stripActionURL(url: string): string {
-  // The no-JS leading-args query is only for native posts.
+/**
+ * Drops the query of a native action URL: the no-JS leading args and return
+ * path are only for native posts. The one exception is the sealed closure
+ * token of an inline server action (`k1.` prefix), which the server needs to
+ * rebuild the values the function closed over.
+ */
+export function stripActionURL(url: string): string {
   const i = url.indexOf('?');
-  return i < 0 ? url : url.slice(0, i);
+  if (i < 0) return url;
+  const base = url.slice(0, i);
+  try {
+    const raw = new URLSearchParams(url.slice(i + 1)).get(ACTION_ARGS_FIELD);
+    const leading = raw ? (JSON.parse(raw) as unknown) : null;
+    if (Array.isArray(leading) && typeof leading[0] === 'string' && leading[0].startsWith('k1.')) {
+      return base + '?' + ACTION_ARGS_FIELD + '=' + encodeURIComponent(JSON.stringify([leading[0]]));
+    }
+  } catch {
+    // not a token: strip like any native query
+  }
+  return base;
 }
 
 /**

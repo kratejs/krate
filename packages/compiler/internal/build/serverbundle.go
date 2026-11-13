@@ -89,6 +89,13 @@ func compileServerBundles(res *bundler.ImportResolver, results []*PageResult, ro
 			if locals := goComponentLocals(absSource, pageSrc, root); len(locals) > 0 {
 				pageSrc = annotateGoCalls(pageSrc, absSource, locals)
 			}
+			if hoisted, herr := hoistInlineActions(root, absSource, pageSrc); herr != nil {
+				fmt.Fprintf(os.Stderr, "  %sServer bundle error (%s):%s %v\n", cRed, page.SourcePath, cReset, herr)
+				fail(page, herr)
+				return
+			} else if hoisted != nil {
+				pageSrc = withInlineActionImport(hoisted.Source)
+			}
 			injectedSource := injectServerGlobals(pageSrc) + serverExportEntrySuffix(page.ServerExports, absSource) + metadataEntrySuffix(page.MetadataSegments, page.MetadataPageFiles, root)
 
 			// Compile with esbuild - use stdin so esbuild resolves relative imports
@@ -124,7 +131,7 @@ func compileServerBundles(res *bundler.ImportResolver, results []*PageResult, ro
 					"@krate/runtime",
 					"@krate/runtime/*",
 				},
-				Plugins: serverBundlePlugins(page, absSource, reactServerShimPlugin(), serverCSSPlugin(root), cbPlugin, unusedClientModulePlugin(), serverExportPlugin(page.ServerExports, absSource), goServerBundlePlugin(page.GoBaked, root), actionServerBundlePlugin(res, actionModules, actionBasePath), externalNodeModulesPlugin()),
+				Plugins: serverBundlePlugins(page, absSource, reactServerShimPlugin(), serverCSSPlugin(root), cbPlugin, unusedClientModulePlugin(), serverExportPlugin(page.ServerExports, absSource), goServerBundlePlugin(page.GoBaked, root), actionServerBundlePlugin(res, actionModules, actionBasePath), inlineActionPlugin(root, actionBasePath), externalNodeModulesPlugin()),
 				Stdin: &api.StdinOptions{
 					Loader:     api.LoaderTSX,
 					Contents:   injectedSource,

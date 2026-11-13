@@ -254,6 +254,70 @@ function makeActionContext(req, id, urlPath) {
   return { actionId: id, url: urlPath, method: 'POST', headers: req.headers, cookies, setCookies };
 }
 
+let inlineTokenKey = null;
+let nodeCrypto = null;
+
+// openInlineToken verifies and decrypts the closure token of an inline action
+// (AES-256-GCM, authenticated against the action id, see inline_actions.go).
+async function openInlineToken(token, entry) {
+  if (typeof token !== 'string' || !token.startsWith('k1.')) throw new Error('missing closure token');
+  if (!nodeCrypto) nodeCrypto = await import('node:crypto');
+  if (!inlineTokenKey) {
+    const secret = process.env.KRATE_ACTION_SECRET || loadActionManifest().key || '';
+    if (!secret) throw new Error('no action encryption key');
+    inlineTokenKey = nodeCrypto.createHash('sha256').update('krate-inline-action\0' + secret).digest();
+  }
+  const buf = Buffer.from(token.slice(3), 'base64url');
+  if (buf.length < 12 + 16) throw new Error('truncated closure token');
+  const decipher = nodeCrypto.createDecipheriv('aes-256-gcm', inlineTokenKey, buf.subarray(0, 12));
+  decipher.setAAD(Buffer.from(entry.id));
+  decipher.setAuthTag(buf.subarray(buf.length - 16));
+  const text = Buffer.concat([decipher.update(buf.subarray(12, buf.length - 16)), decipher.final()]).toString('utf8');
+  const values = JSON.parse(text);
+  if (!Array.isArray(values) || values.length !== entry.captures.length) throw new Error('closure token does not match the action');
+  return values.map(decodeInlineValue);
+}
+
+function decodeInlineValue(v) {
+  if (Array.isArray(v)) return v.map(decodeInlineValue);
+  if (v && typeof v === 'object') {
+    if (typeof v.$ === 'string') {
+      if (v.$ === 'u') return undefined;
+      if (v.$ === 'n') return BigInt(v.v);
+      if (v.$ === 'd') return new Date(v.v);
+      if (v.$ === 'o') {
+        const wrapped = {};
+        for (const k of Object.keys(v.v)) wrapped[k] = decodeInlineValue(v.v[k]);
+        return wrapped;
+      }
+    }
+    const out = {};
+    for (const k of Object.keys(v)) out[k] = decodeInlineValue(v[k]);
+    return out;
+  }
+  return v;
+}
+
+function describeActionValue(v) {
+  if (v === null) return 'null';
+  if (Array.isArray(v)) return 'an array';
+  return typeof v === 'undefined' ? 'undefined' : 'a ' + typeof v;
+}
+
+// checkActionExports runs once when an action module loads: an export built by
+// a wrapper (export const save = createAction(...)) can only be judged then.
+// Every non-function export is reported with its name; calls to it fail, the
+// module's other actions keep working.
+function checkActionExports(mod, loaded) {
+  for (const a of (loadActionManifest().actions || [])) {
+    if (a.file !== loaded.file) continue;
+    const value = a.export === 'default' ? (mod.default || mod[a.export]) : mod[a.export];
+    if (typeof value !== 'function') {
+      console.error('[krate] ' + (a.source || a.file) + ': export "' + a.export + '" is not a function (got ' + describeActionValue(value) + '). Every export of a "use server" module must be a function; a wrapper such as createAction(...) must return one.');
+    }
+  }
+}
+
 function leadingActionArgs(raw) {
   if (raw == null || raw === '') return [];
   try {
@@ -287,10 +351,15 @@ async function krateRunAction(req, urlPath, search) {
   let mod = actionModuleCache.get(file);
   if (!mod || HOT) {
     mod = await import(pathToFileURL(file).href + (HOT ? '?t=' + Date.now() : ''));
+    checkActionExports(mod, entry);
     if (!HOT) actionModuleCache.set(file, mod);
   }
   const fn = entry.export === 'default' ? (mod.default || mod[entry.export]) : mod[entry.export];
-  if (typeof fn !== 'function') return actionFail(500, 'Server action export is not a function');
+  if (typeof fn !== 'function') {
+    const what = 'Server action export "' + entry.export + '" of ' + (entry.source || entry.file) + ' is not a function (got ' + describeActionValue(mod[entry.export]) + ')';
+    console.error('[krate] ' + what + '. Every export of a "use server" module must be a function.');
+    return actionFail(500, HOT ? what : 'Server action failed');
+  }
 
   const fetchMode = String(req.headers.get('x-krate-action') || '') === 'fetch';
   const query = new URLSearchParams(search || '');
@@ -310,6 +379,24 @@ async function krateRunAction(req, urlPath, search) {
     }
   } catch {
     return actionFail(400, 'Invalid server action request body');
+  }
+
+  if (entry.inline && entry.captures && entry.captures.length > 0) {
+    // A hoisted inline action: its closed-over values arrive sealed in a token
+    // (the first leading argument, or the URL query for JSON calls).
+    let token = typeof args[0] === 'string' && args[0].startsWith('k1.') ? args.shift() : null;
+    if (!token) {
+      const q = leadingActionArgs(query.get('__krate_args'));
+      if (q && typeof q[0] === 'string' && q[0].startsWith('k1.')) token = q[0];
+    }
+    let captured = null;
+    try {
+      captured = await openInlineToken(token, entry);
+    } catch (e) {
+      console.error('[krate] rejected closure data for server action ' + (entry.source || id) + ': ' + ((e && e.message) || e));
+      return actionFail(400, 'Invalid server action request');
+    }
+    args.unshift(...captured);
   }
 
   const ctx = makeActionContext(req, id, urlPath);

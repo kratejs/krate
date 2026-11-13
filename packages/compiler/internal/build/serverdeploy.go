@@ -534,6 +534,13 @@ func BuildServerBundle(root string, cfg *config.Config, target string) (*deploy.
 		var am actionManifest
 		if json.Unmarshal(b, &am) == nil {
 			data.Actions = append(data.Actions, am.Actions...)
+			for _, a := range am.Actions {
+				if a.Inline && len(a.Captures) > 0 {
+					// The sealing key is a secret: it is never written into the bundle.
+					plan.Warnings = append(plan.Warnings, "inline server actions that capture values seal them with a key that is not written into the bundle; set KRATE_ACTION_SECRET (at least 16 characters) in the deployment's environment, the same on every instance")
+					break
+				}
+			}
 			seen := map[string]bool{}
 			for _, a := range am.Actions {
 				if seen[a.File] {

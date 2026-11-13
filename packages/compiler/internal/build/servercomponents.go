@@ -243,7 +243,7 @@ func serverExportPlugin(exports []ServerExport, pagePath string) api.Plugin {
 				if !ok {
 					return api.OnLoadResult{}, nil
 				}
-				data, err := os.ReadFile(args.Path)
+				data, err := readServerSource(pb.InitialOptions.AbsWorkingDir, args.Path)
 				if err != nil {
 					return api.OnLoadResult{}, err
 				}

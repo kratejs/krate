@@ -1542,8 +1542,9 @@ success. The React 19 hooks follow React's semantics:
   reverts to the latest state when it settles.
 - `requestFormReset(form)` resets a form after its pending action.
 
-Inline `"use server"` functions inside components are not supported
-(`KR7001`); move them into a `"use server"` module. See
+Inline `"use server"` functions inside server components are hoisted into
+generated server actions; in a `"use client"` module they are an error
+(`KR7001`). See
 [Server Actions](/docs/guides/server-actions/) for the module format, wire
 format, request context (`headers()`, `cookies()`, `redirect()`), runtime
 requirements, and security model.

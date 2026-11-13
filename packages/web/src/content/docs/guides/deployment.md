@@ -426,6 +426,20 @@ one instance wrote is accepted by the others. When it is not set:
   redirects, and the server logs a warning once), because serverless instances
   share no memory and a per-instance key would make the notice appear at random.
 
+### Inline action secret
+
+[Inline server actions](/docs/guides/server-actions/#inline-actions) that close
+over values seal those values with AES-256-GCM. Set `KRATE_ACTION_SECRET` (at
+least 16 characters, the same on every instance) so tokens survive a rebuild and
+open on any replica. The key is a secret and is never written into a deploy
+bundle: a deployed server (`krate deploy`, Vercel, Netlify, the Node bundle)
+reads it only from `KRATE_ACTION_SECRET` and rejects submissions without it, and
+the deploy plan warns when your project has inline actions that capture values.
+Only local `krate dev`, `krate serve` and `krate start` fall back to a key kept in
+`.krate/action-key` (copied into `.krate/actions/manifest.json`, never into
+`dist/`). The server renderer that seals the values needs Node built-ins, so
+inline actions that capture values are not available on the Cloudflare target.
+
 ### Health & readiness
 
 The server exposes two probes that stay at the root even under a `basePath`:

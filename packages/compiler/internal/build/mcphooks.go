@@ -17,7 +17,7 @@ type ActionInfo struct {
 // exported action with its stable ID, without compiling anything. Used by the
 // MCP list_actions and get_server_action_by_id tools.
 func (b *Builder) ListActions() ([]ActionInfo, error) {
-	files, err := discoverActionFiles(b.Root, b.Cfg.OutDir)
+	files, inlineFiles, err := discoverActionSources(b.Root, b.Cfg.OutDir)
 	if err != nil {
 		return nil, err
 	}
@@ -38,6 +38,23 @@ func (b *Builder) ListActions() ([]ActionInfo, error) {
 		}
 		for name, id := range exports {
 			out = append(out, ActionInfo{ID: id, Export: name, Source: rel})
+		}
+	}
+	for _, abs := range inlineFiles {
+		data, err := os.ReadFile(abs)
+		if err != nil {
+			continue
+		}
+		res, err := hoistInlineActions(b.Root, abs, string(data))
+		if err != nil || res == nil {
+			continue
+		}
+		rel, err := filepath.Rel(b.Root, abs)
+		if err != nil {
+			continue
+		}
+		for _, a := range res.Actions {
+			out = append(out, ActionInfo{ID: a.ID, Export: a.Export, Source: filepath.ToSlash(rel)})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {
