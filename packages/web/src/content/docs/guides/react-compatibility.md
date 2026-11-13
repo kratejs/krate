@@ -1092,6 +1092,13 @@ How it works:
 - Krate warns when the installed Preact is older than 10.20, which is the
   minimum version the island hooks and compat behavior are tested against.
 
+In an `async` page, layout or component the same packages render without a page
+island: stateless components (an icon) become plain HTML, stateful ones
+(a Radix checkbox) become `<krate-island>` boundaries rendered on the server
+and hydrated in place, and parts of a compound component such as
+`Dialog.Root` / `Dialog.Trigger` stay in one tree. See
+[Async Server Components](/docs/features/server-components/#compiled-react-packages-in-server-components).
+
 Two runtimes are involved at an island boundary: the page (Krate signals) and
 the island (Preact). Props crossing the boundary may be serializable values,
 bridged signal getters, or function references (handlers and setters).
@@ -1330,10 +1337,16 @@ for the whole project is not supported.
 Each limit below is either a build error or a documented behavior, never a
 silent failure in the browser:
 
-- **Layouts and server pages cannot host these hooks.** A layout, a template or
-  an `async` server page that (through its imports) calls a React-library hook
-  fails with `KR8013`, naming the package and the hook. Render the component
-  from a synchronous page instead, or use `createSignal` / `createResource`.
+- **Hooks need a client component.** A layout, a template or an `async` server
+  page or component that (through its imports) calls a React-library hook fails
+  with `KR8013`, naming the package and the hook. Add `"use client"` to the
+  module that calls it (it then hydrates as a client component inside the
+  server-rendered output), or use `createSignal` / `createResource`. Rendering
+  the library's *components* (icons, Radix primitives) from a server tree needs
+  no directive; see
+  [Compiled React packages in server components](/docs/features/server-components/#compiled-react-packages-in-server-components).
+  A static (synchronous) layout cannot host compiled components at all: make it
+  `async`.
 - **No bridge to Krate state from inside.** The island reads the page's
   signals only as props, and the page cannot read the island's store. Krate
   components that import the same store module do not see it.

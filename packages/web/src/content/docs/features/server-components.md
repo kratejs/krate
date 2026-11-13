@@ -121,6 +121,90 @@ export default async function Home() {
 - Pages without server components are unaffected: there, `"use client"`
   changes nothing and components compile through the normal Krate pipeline.
 
+## Compiled React packages in server components
+
+Components from npm packages built on React (lucide-react icons, Radix
+primitives, shadcn-style wrappers around them) work in async pages, async
+layouts and async components. Krate treats such a package like Next.js treats a
+package with a `"use client"` directive: its components are client boundaries
+in a server tree, rendered with Preact on the server and sent as HTML.
+
+```tsx
+import { Loader2 } from "lucide-react";
+import { Dialog } from "radix-ui";
+import { Checkbox } from "../components/ui/checkbox"; // wraps a Radix primitive
+
+export default async function Settings() {
+  const prefs = await loadPrefs();
+  return (
+    <main>
+      <Loader2 className="spin" />
+      <Checkbox defaultChecked={prefs.email} />
+      <Dialog.Root>
+        <Dialog.Trigger>Delete</Dialog.Trigger>
+        <Dialog.Portal><Dialog.Content>...</Dialog.Content></Dialog.Portal>
+      </Dialog.Root>
+    </main>
+  );
+}
+```
+
+- A component without state or effects (an icon) renders to plain HTML and
+  ships no JavaScript, in any tier.
+- A component with state or effects (a checkbox, a dialog) becomes a
+  `<krate-island>` that hydrates in the browser, like a `"use client"`
+  component. Its chunk is built from just the exports the page uses, so a
+  barrel such as lucide-react does not pull in every icon.
+- Parts of one compound component keep their context: `Dialog.Trigger` and
+  `Dialog.Content` written inside `Dialog.Root` render in the same Preact tree
+  as the root, so they hydrate and talk to each other. Server components
+  placed between the parts are rendered to HTML, so the parts on either side
+  of one no longer share a tree.
+- Props follow the `"use client"` rules: JSON-serializable values and server
+  actions, no inline functions (`[KR7111]`). Put handlers in a `"use client"`
+  wrapper, as in Next.js.
+- A local module that renders such components needs no directive unless it
+  uses hooks or event handlers. Calling a hook of an npm React library
+  (zustand, react-hook-form, swr, ...) outside a `"use client"` module is
+  `[KR8013]`.
+- The global `<Link>` works in server components, async layouts and inside
+  `"use client"` modules.
+
+The bundle cost is the Preact runtime (shared across pages) plus the chunks of
+the islands a page actually renders. A page with only icons and server
+components ships none of it.
+
+## Async layouts
+
+A layout may be `async`. It renders per request in the SSR sidecar, so it can
+await a session or flags and gate its subtree:
+
+```tsx
+// src/pages/admin/_layout.tsx
+import { redirect } from "@krate/runtime/server";
+
+export default async function AdminLayout({ children }) {
+  const user = await getSession();
+  if (user?.role !== "admin") redirect("/login");
+  return <section class="admin">{children}</section>;
+}
+```
+
+- `redirect()`, `notFound()`, `forbidden()`, `cookies()` and `headers()` work
+  in a layout exactly as in an async page, and stop the whole subtree.
+- The page and every layout between it and the outermost async layout render
+  per request as one tree. Layouts above the outermost async layout stay baked
+  into the static shell. Pages outside the async layout's directory stay static.
+- Every page under an async layout therefore renders per request (SSR, or ISR
+  when it sets `revalidate`), whether or not the page is itself async, and the
+  build prints which pages that applies to. Pages and layouts inside it follow
+  the server component rules: interactive parts go in `"use client"` modules
+  (`[KR7110]`).
+- A `template.tsx` or `error.tsx` between the page and an async layout is
+  `[KR7101]`: they hydrate in the browser. Put them above the async layout.
+- Layouts below an async layout are not kept mounted across client-side
+  navigation; the router replaces the whole request-time region.
+
 ## Server-only code
 
 Inside a server tree, hooks (`useState`, `useEffect`, `useContext`, ...),
@@ -198,7 +282,7 @@ export default async function Post({ params }) {
 
 | Pattern | Result |
 |---------|--------|
-| `async` layouts | Build error `[KR7101]`: move the fetching into an async child |
+| `template.tsx` or `error.tsx` below an async layout | Build error `[KR7101]` |
 | Server components with `output: "static"` | Build error `[KR7103]` |
 | Module-level `await` in a page rendered at build time | Build error `[KR7102]` |
 | `async` components in a `"use client"` module | Build error `[KR7113]` |

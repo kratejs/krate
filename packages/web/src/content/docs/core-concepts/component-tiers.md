@@ -47,7 +47,9 @@ The tier is resolved in this order (highest wins):
    ```
 6. **Default** -> client.
 
-An `async` component is always a runtime component, whatever else it says.
+An `async` component is always a runtime component, whatever else it says. That
+includes an `async` layout, which renders per request together with the page
+below it (see [Async layouts](/docs/features/server-components/#async-layouts)).
 
 Only one source may name a tier for a component. When two of them name different
 tiers the build fails with [KR7115](/docs/reference/diagnostics/#kr7115) instead of
@@ -224,6 +226,11 @@ whole body).
 Runtime components render on the server at request time - good for data that
 changes, without sending JavaScript to the browser. Named exports are fully
 supported, including arrow functions (`export const Live = () => ...`).
+
+Compiled React packages (lucide-react, Radix) can be rendered from the runtime
+tier: stateless components become HTML, stateful ones become client islands
+inside the server-rendered output (see
+[Compiled React packages in server components](/docs/features/server-components/#compiled-react-packages-in-server-components)).
 
 ## Why tiers matter
 

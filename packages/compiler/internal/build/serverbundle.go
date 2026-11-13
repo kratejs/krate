@@ -48,7 +48,7 @@ func compileServerBundles(res *bundler.ImportResolver, results []*PageResult, ro
 	var fatal []error
 	var mu sync.Mutex
 	fail := func(page *PageResult, err error) {
-		if !page.ServerPage && len(page.ServerExports) == 0 {
+		if !page.ServerPage && len(page.ServerExports) == 0 && len(page.ComposedLayouts) == 0 {
 			return
 		}
 		mu.Lock()
@@ -114,6 +114,14 @@ func compileServerBundles(res *bundler.ImportResolver, results []*PageResult, ro
 				return
 			}
 
+			stdinContents, stdinDir, stdinFile := injectedSource, filepath.Dir(absSource), filepath.Base(absSource)
+			var composed []api.Plugin
+			if len(page.ComposedLayouts) > 0 {
+				const pageModule = "krate-composed-page"
+				stdinContents = composedEntrySource(pageModule, page.ComposedLayouts)
+				composed = append(composed, composedLayoutPlugin(root, pageModule, injectedSource, filepath.Dir(absSource), page.ComposedLayouts))
+			}
+
 			result := esbuildBuild(api.BuildOptions{
 				AbsWorkingDir:   root,
 				Bundle:          true,
@@ -131,12 +139,12 @@ func compileServerBundles(res *bundler.ImportResolver, results []*PageResult, ro
 					"@krate/runtime",
 					"@krate/runtime/*",
 				},
-				Plugins: serverBundlePlugins(page, absSource, reactServerShimPlugin(), serverCSSPlugin(root), cbPlugin, unusedClientModulePlugin(), serverExportPlugin(page.ServerExports, absSource), goServerBundlePlugin(page.GoBaked, root), actionServerBundlePlugin(res, actionModules, actionBasePath), inlineActionPlugin(root, actionBasePath), externalNodeModulesPlugin()),
+				Plugins: serverBundlePlugins(page, absSource, append(composed, reactServerShimPlugin(), serverCSSPlugin(root), cbPlugin, unusedClientModulePlugin(), serverExportPlugin(page.ServerExports, absSource), goServerBundlePlugin(page.GoBaked, root), actionServerBundlePlugin(res, actionModules, actionBasePath), inlineActionPlugin(root, actionBasePath), externalNodeModulesPlugin())...),
 				Stdin: &api.StdinOptions{
 					Loader:     api.LoaderTSX,
-					Contents:   injectedSource,
-					ResolveDir: filepath.Dir(absSource),
-					Sourcefile: filepath.Base(absSource),
+					Contents:   stdinContents,
+					ResolveDir: stdinDir,
+					Sourcefile: stdinFile,
 				},
 			})
 
