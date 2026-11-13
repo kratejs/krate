@@ -608,7 +608,7 @@ export interface DeployConfig {
   /**
    * Cloudflare only: a module whose exports are merged into the generated
    * Worker (`scheduled`, `queue`, `email`, Durable Object classes). Defaults
-   * to `src/worker.ts` (or .js, .mjs, .mts) when it exists.
+   * to `src/cloudflare.ts` (or .js, .mjs, .mts) when it exists.
    */
   worker?: string;
 }

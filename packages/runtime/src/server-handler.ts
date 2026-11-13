@@ -277,7 +277,7 @@ function globalStore<T>(name: string): AsyncLocalStorage<T> {
 /**
  * Runs fn with the platform of a request (or of a Worker event such as a cron
  * trigger) published to getPlatform() / getCloudflareContext(). The generated
- * Cloudflare Worker wraps the exports of src/worker.ts with it.
+ * Cloudflare Worker wraps the exports of src/cloudflare.ts with it.
  */
 export function runWithPlatform<R>(target: DeployTarget, ctx: HandlerContext, fn: () => R): R {
   const platform: PlatformContext = {

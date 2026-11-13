@@ -72,8 +72,8 @@ async function req(path, init) {
 func TestCloudflarePlatformBindings(t *testing.T) {
 	root, cfg := serverlessProject(t, "serverless-cloudflare")
 	plan, _ := emitServerTarget(t, root, cfg, "cloudflare")
-	if !strings.HasSuffix(filepath.ToSlash(plan.WorkerModule), "src/worker.ts") {
-		t.Errorf("src/worker.ts must be picked up automatically, got %q", plan.WorkerModule)
+	if !strings.HasSuffix(filepath.ToSlash(plan.WorkerModule), "src/cloudflare.ts") {
+		t.Errorf("src/cloudflare.ts must be picked up automatically, got %q", plan.WorkerModule)
 	}
 	ids := actionIDs(t, root)
 	out := cloudflareScript(t, root, cfg, `
@@ -177,7 +177,7 @@ func TestCloudflareWorkerModuleConfig(t *testing.T) {
 	cfg.Deploy.Worker = "none"
 	plan, err := BuildServerBundle(root, cfg, "cloudflare")
 	if err == nil && plan.WorkerModule != "" {
-		t.Errorf(`deploy.worker "none" must skip src/worker.ts, got %q`, plan.WorkerModule)
+		t.Errorf(`deploy.worker "none" must skip src/cloudflare.ts, got %q`, plan.WorkerModule)
 	}
 }
 

@@ -237,12 +237,12 @@ generates has no bindings).
 
 #### Cron triggers, queues, email and Durable Objects
 
-Put the extra Worker exports in `src/worker.ts` (or point `deploy.worker` at another
+Put the extra Worker exports in `src/cloudflare.ts` (or point `deploy.worker` at another
 file). Its exports are merged into the generated Worker, which keeps Krate's `fetch`
 handler:
 
 ```ts
-// src/worker.ts
+// src/cloudflare.ts
 import { DurableObject } from "cloudflare:workers";
 
 export class Counter extends DurableObject {            // Durable Object classes: any named class export
@@ -277,9 +277,9 @@ tag = "v1"
 new_sqlite_classes = ["Counter"]
 ```
 
-Because `src/worker.ts` is picked up by name, a project that keeps a *browser* Web
-Worker there should rename it or set `deploy.worker: "none"`. The deploy prints a
-note when it merges a module.
+`src/cloudflare.ts` is picked up by name; set `deploy.worker: "none"` to skip it.
+The deploy prints a note when it merges a module. A browser Web Worker in
+`src/worker.ts` is never merged.
 
 #### URL form and the 404 page
 

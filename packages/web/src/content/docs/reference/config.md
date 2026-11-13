@@ -577,7 +577,7 @@ rejected.
 deploy: {
   target: "vercel",                  // netlify | vercel | cloudflare | gh-pages
   options: { cleanUrls: "true", trailingSlash: "false" },
-  worker: "src/worker.ts",           // cloudflare: module merged into the Worker (default src/worker.ts)
+  worker: "src/cloudflare.ts",       // cloudflare: module merged into the Worker (default src/cloudflare.ts)
 },
 ```
 
@@ -587,7 +587,7 @@ setting is mapped onto the host's own option where there is one.
 
 `deploy.worker` is the module whose exports are merged into the generated
 Cloudflare Worker: cron `scheduled`, `queue`, `email` handlers and Durable Object
-classes. Without it, `src/worker.ts` (or `.mts`, `.js`, `.mjs`) is used when it
+classes. Without it, `src/cloudflare.ts` (or `.mts`, `.js`, `.mjs`) is used when it
 exists; `deploy.worker: "none"` skips it. See
 [Cloudflare Workers](/docs/guides/deployment/#cloudflare-workers).
 

@@ -837,11 +837,12 @@ export default {
 
 // workerModuleNames are the file names, under src/, that carry the exports
 // merged into the Cloudflare Worker (see workerModuleFor).
-var workerModuleNames = []string{"worker.ts", "worker.mts", "worker.js", "worker.mjs"}
+var workerModuleNames = []string{"cloudflare.ts", "cloudflare.mts", "cloudflare.js", "cloudflare.mjs"}
 
 // workerModuleFor finds the module whose exports are merged into the
-// Cloudflare Worker: deploy.worker, or src/worker.ts (.mts, .js, .mjs) when
-// it exists. It returns "" on other targets and when there is none.
+// Cloudflare Worker: deploy.worker, or src/cloudflare.ts (.mts, .js, .mjs)
+// when it exists. The default is not src/worker.ts, which usually holds a
+// browser Web Worker. It returns "" on other targets and when there is none.
 func workerModuleFor(root string, cfg *config.Config, target string, plan *deploy.ServerPlan) (string, error) {
 	want := strings.TrimSpace(cfg.Deploy.Worker)
 	if want == "none" {
