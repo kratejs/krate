@@ -159,8 +159,12 @@ func packageSnap(o *Options, ic *Icon, ut *tree, res *Result) error {
 		res.note("no .snap: snapcraft builds on Linux only")
 		return nil
 	}
-	out := filepath.Join(o.OutDir, artifactName(m, p, ".snap"))
-	args := []string{"pack", "--output", out}
+	// snapcraft refuses an --output outside the project tree ("Cannot create
+	// packages outside of the project tree"): it packs into the project
+	// directory and the file is moved next to the other packages.
+	name := artifactName(m, p, ".snap")
+	out := filepath.Join(o.OutDir, name)
+	args := []string{"pack", "--output", name}
 	if os.Getenv("KRATE_SNAP_DESTRUCTIVE") == "1" {
 		// Build on this machine instead of in an LXD container (CI runners).
 		args = append(args, "--destructive-mode")
@@ -168,6 +172,9 @@ func packageSnap(o *Options, ic *Icon, ut *tree, res *Result) error {
 	if b, err := o.run(dir, nil, "snapcraft", args...); err != nil {
 		return fail(diag.CodeNativeSandboxPkg, yml, "snapcraft failed:\n"+indentLines(trimTail(string(b), 20)),
 			"snapcraft builds in LXD by default: run `lxd init --auto` first, or set KRATE_SNAP_DESTRUCTIVE=1 on an Ubuntu 24.04 machine")
+	}
+	if err := os.Rename(filepath.Join(dir, name), out); err != nil {
+		return fail(diag.CodeNativeSandboxPkg, yml, "snapcraft finished but its package could not be moved: "+err.Error(), "")
 	}
 	res.add(Artifact{Path: out, Format: "snap"})
 	return nil

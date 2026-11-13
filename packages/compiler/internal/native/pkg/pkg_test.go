@@ -71,6 +71,12 @@ func (f *fakeRunner) LookPath(n string) (string, error) {
 func (f *fakeRunner) GOOS() string { return f.goos }
 func (f *fakeRunner) Run(dir string, env []string, name string, args ...string) ([]byte, error) {
 	f.calls = append(f.calls, name+" "+strings.Join(args, " "))
+	if !f.fail[name] && name == "snapcraft" && len(args) >= 3 && args[0] == "pack" && args[1] == "--output" {
+		// snapcraft writes the package into the project directory.
+		if err := os.WriteFile(filepath.Join(dir, args[2]), []byte("snap"), 0o644); err != nil {
+			return nil, err
+		}
+	}
 	if f.fail[name] {
 		if o, ok := f.out[name]; ok {
 			return []byte(o), exec.ErrNotFound

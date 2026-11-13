@@ -288,6 +288,12 @@ func TestPackageSnap(t *testing.T) {
 	}
 	if a := find(t, res, "snap"); !strings.HasSuffix(a.Path, "acme-notes-1.2.0-linux-amd64.snap") {
 		t.Errorf("snap = %s", a.Path)
+	} else if _, err := os.Stat(a.Path); err != nil {
+		t.Errorf("the snap was not moved next to the packages: %v", err)
+	}
+	// The output is a name inside the project tree, not a path outside it.
+	if f := strings.Fields(r.calls[0]); len(f) < 4 || strings.ContainsRune(f[3], filepath.Separator) {
+		t.Errorf("snapcraft --output must be a file name in the project: %v", r.calls)
 	}
 	r.fail = map[string]bool{"snapcraft": true}
 	if _, err = Package(linuxOpts(t, sandboxMeta(t), r, "snap")); err == nil || !strings.Contains(err.Error(), "lxd init") {
