@@ -81,6 +81,12 @@ var regionClient = &http.Client{
 // newSidecarTransport builds a reverse-proxy transport with bounded dial and
 // response-header timeouts, so a hung upstream cannot pin a request forever.
 func newSidecarTransport() *http.Transport {
+	return newSidecarTransportTimeout(30 * time.Second)
+}
+
+// newSidecarTransportTimeout is newSidecarTransport with the given wait for
+// response headers, for the Node API sidecar whose routes may set maxDuration.
+func newSidecarTransportTimeout(header time.Duration) *http.Transport {
 	return &http.Transport{
 		Proxy:                 http.ProxyFromEnvironment,
 		DialContext:           (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
@@ -89,7 +95,7 @@ func newSidecarTransport() *http.Transport {
 		MaxIdleConnsPerHost:   128,
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   5 * time.Second,
-		ResponseHeaderTimeout: 30 * time.Second,
+		ResponseHeaderTimeout: header,
 	}
 }
 

@@ -269,6 +269,7 @@ type serverData struct {
 	SegmentPages    map[string]string         `json:"segmentPages"`
 	StaticPages     map[string]string         `json:"staticPages,omitempty"`
 	APIRoutes       []string                  `json:"apiRoutes"`
+	APIMaxDuration  map[string]int            `json:"apiMaxDuration,omitempty"`
 	MetaRoutes      []metaRouteEntry          `json:"metaRoutes,omitempty"`
 	Actions         []actionEntry             `json:"actions"`
 	HasMiddleware   bool                      `json:"hasMiddleware"`
@@ -523,6 +524,18 @@ func BuildServerBundle(root string, cfg *config.Config, target string) (*deploy.
 	sort.Strings(apiKeys)
 	for _, k := range apiKeys {
 		data.APIRoutes = append(data.APIRoutes, k)
+		if secs, warns := readAPIMaxDuration(keys[k]); secs > 0 || len(warns) > 0 {
+			printWarningsOnce(os.Stderr, warns)
+			if secs > 0 {
+				if data.APIMaxDuration == nil {
+					data.APIMaxDuration = map[string]int{}
+				}
+				data.APIMaxDuration[k] = secs
+				if secs > plan.MaxDuration {
+					plan.MaxDuration = secs
+				}
+			}
+		}
 		id := ident("api")
 		fmt.Fprintf(imports, "import * as %s from %s;\n", id, jsString(filepath.ToSlash(keys[k])))
 		fmt.Fprintf(apiMods, "  %s: %s,\n", jsString(k), id)

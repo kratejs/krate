@@ -175,6 +175,15 @@ func extendStreamDeadline(w http.ResponseWriter) {
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(streamWriteIdle))
 }
 
+// extendAPIWriteDeadline lets an API request that may legitimately run longer
+// than the server-wide WriteTimeout (a route with a long maxDuration) finish.
+func extendAPIWriteDeadline(w http.ResponseWriter, budget time.Duration) {
+	if budget+apiTimeoutGrace+10*time.Second <= serverWriteTimeout {
+		return
+	}
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(budget + apiTimeoutGrace + 10*time.Second))
+}
+
 // deadlineWriter extends the write deadline on every write and flushes, for
 // proxied streaming responses (SSE) through the API sidecar.
 type deadlineWriter struct {
@@ -262,6 +271,9 @@ func writeAPIFailure(w http.ResponseWriter, r *http.Request, f *jsruntime.APIFai
 		w.Header().Set("Allow", strings.Join(f.Allow, ", "))
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		_, _ = io.WriteString(w, `{"error":"Method Not Allowed"}`)
+	case http.StatusGatewayTimeout:
+		w.WriteHeader(http.StatusGatewayTimeout)
+		_, _ = io.WriteString(w, `{"error":"Gateway Timeout"}`)
 	default:
 		status := f.Status
 		if status < 400 {

@@ -29,6 +29,46 @@ function krateHandler(mod, method) {
   if (allow.length) return { status: 405, allow };
   return { status: 500, error: 'API route must export a handler function (GET, POST, etc. or default).' };
 }
+// Request budget: KRATE_API_TIMEOUT_MS unless the route's maxDuration (read by
+// the build into api-routes.json) says otherwise. A handler that has not
+// returned its Response by then is aborted (request.signal) and answered 504.
+const KRATE_API_TIMEOUT_MS = parseInt(process.env.KRATE_API_TIMEOUT_MS || '', 10) > 0 ? parseInt(process.env.KRATE_API_TIMEOUT_MS, 10) : 30000;
+let krateBudgets = null;
+let krateBudgetStamp = '';
+function krateRouteBudgetMs(apiDir, file) {
+  const metaPath = process.env.KRATE_API_ROUTE_META;
+  if (!metaPath) return KRATE_API_TIMEOUT_MS;
+  if (!krateBudgets || HOT) {
+    try {
+      const st = fs.statSync(metaPath);
+      const stamp = st.mtimeMs + ':' + st.size;
+      if (stamp !== krateBudgetStamp) {
+        const next = new Map();
+        for (const m of JSON.parse(fs.readFileSync(metaPath, 'utf8'))) {
+          if (m && typeof m.file === 'string' && m.maxDuration > 0) next.set(m.file, m.maxDuration * 1000);
+        }
+        krateBudgets = next;
+        krateBudgetStamp = stamp;
+      }
+    } catch {
+      if (!krateBudgets) krateBudgets = new Map();
+    }
+  }
+  const rel = path.relative(apiDir, file).split(path.sep).join('/');
+  return krateBudgets.get(rel.replace(/\.[^./]+$/, '.js')) || KRATE_API_TIMEOUT_MS;
+}
+function krateWithBudget(ms, ac, run) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      const err = new Error('API route exceeded its request budget of ' + ms / 1000 + 's (maxDuration or KRATE_API_TIMEOUT)');
+      err.krateTimeout = true;
+      reject(err);
+      try { ac.abort(err); } catch {}
+    }, ms);
+  });
+  return Promise.race([run(), timeout]).finally(() => clearTimeout(timer));
+}
 function krateErrorBody(err, where) {
   console.error('[krate] API error (' + where + '): ' + ((err && err.stack) || err));
   const msg = (err && err.message) || String(err);

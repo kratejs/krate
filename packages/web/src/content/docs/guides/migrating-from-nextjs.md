@@ -193,11 +193,14 @@ The first pass:
   generate size-adjusted fallbacks). A call with a computed option or an
   imported `src` stays on `next/font/local` and is reported as manual work;
   the other Geist fonts (`pixel`, `serif`, `*-non-variable`) are not mapped;
-- drops route segment config that only steers Vercel (`runtime`, `maxDuration`,
+- keeps `export const maxDuration = N` in API routes: Krate reads it as the
+  route's request timeout in seconds (default 30), in every runtime and deploy
+  target (see [Timeouts](/docs/features/api-routes/#timeouts)). It must be a
+  literal number; a computed value is reported as manual work. On a page it has
+  no meaning and is dropped;
+- drops the other route segment config that only steers Vercel (`runtime`,
   `preferredRegion`) with an info note per file and one aggregated warning, since
-  Krate self-hosts on Node. Krate has no per-route time limit: the API proxy
-  fails a handler that sends no headers within 30 seconds, so a `maxDuration`
-  above 30 is called out. `fetchCache` is kept and reported as one aggregated
+  Krate self-hosts on Node. `fetchCache` is kept and reported as one aggregated
   manual item (set the cache option on the `fetch` calls that relied on it);
 - creates `krate.config.ts` when the project has none, or merges missing
   Next-derived keys into an existing config (existing keys win);

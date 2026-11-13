@@ -206,7 +206,10 @@ func (w *apiWorker) run(ctx context.Context, routeID string, req APIRequest, sin
 
 	// Decoding a large base64 body inside the VM is slow; without binary
 	// transfer give such requests proportionally more time.
-	budget := apiTimeout()
+	budget := req.timeout
+	if budget <= 0 {
+		budget = apiTimeout()
+	}
 	if !rt.bin {
 		budget += time.Duration(len(req.Body)>>20) * 4 * time.Second
 	}
@@ -218,6 +221,9 @@ func (w *apiWorker) run(ctx context.Context, routeID string, req APIRequest, sin
 		_, _ = rt.Execute("__krate_abort()")
 		if errors.Is(err, context.Canceled) {
 			return &APIFailure{Status: 499, Message: "client closed request"}
+		}
+		if errors.Is(err, errBudget) {
+			return &APIFailure{Status: 504, Message: err.Error()}
 		}
 		return &APIFailure{Status: 500, Message: err.Error()}
 	}
