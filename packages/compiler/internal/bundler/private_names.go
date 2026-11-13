@@ -140,6 +140,10 @@ func (b *Bundler) isolatePrivateNames() {
 	// The entry keeps its names, then modules in bundle order.
 	sort.SliceStable(mods, func(i, j int) bool { return mods[i].IsEntry && !mods[j].IsEntry })
 
+	// The planning below reads cached programs that another page's build may
+	// be transforming in place (icons, images); hold them for reading until
+	// the renames are applied, which take their own copies.
+	unlock := b.readLockAll(mods)
 	dynamic := b.dynamicImportTargets(mods)
 	plan := b.planExportRenames(mods, dynamic)
 	b.warnExportCollisions(mods, plan.shared)
@@ -204,9 +208,33 @@ func (b *Bundler) isolatePrivateNames() {
 	}
 	// Importers of a renamed export ask for its new name.
 	named := plan.importerRewrites(b, mods)
+	unlock()
 	for _, mod := range mods {
 		if len(renames[mod.Path]) > 0 || len(imports[mod.Path]) > 0 || len(plan.renames[mod.Path]) > 0 || len(named[mod.Path]) > 0 {
 			b.applyPrivateRenames(mod, renames[mod.Path], imports[mod.Path], plan.renames[mod.Path], named[mod.Path])
+		}
+	}
+}
+
+// readLockAll holds every distinct program of mods for reading and returns
+// the release. Writers lock one program at a time, so holding several read
+// locks cannot deadlock.
+func (b *Bundler) readLockAll(mods []*Module) func() {
+	if b.readLock == nil {
+		return func() {}
+	}
+	seen := map[*ast.Program]bool{}
+	var unlocks []func()
+	for _, mod := range mods {
+		if mod.Program == nil || seen[mod.Program] {
+			continue
+		}
+		seen[mod.Program] = true
+		unlocks = append(unlocks, b.readLock(mod.Program))
+	}
+	return func() {
+		for i := len(unlocks) - 1; i >= 0; i-- {
+			unlocks[i]()
 		}
 	}
 }
