@@ -627,6 +627,25 @@ try {
     if (expected.test(errors[i])) errors.splice(i, 1);
   }
 
+  // JSX held in constants and passed as props: server-rendered, and intact
+  // after hydration and after the interactive receiver updates.
+  await page.goto(baseURL + "/jsx-values/", { waitUntil: "domcontentloaded" });
+  const jsxSSR = await page.evaluate(() => ({
+    list: document.querySelector("[data-testid=local-list]")?.textContent || "",
+    notice: document.querySelector("[data-testid=module-notice]")?.textContent || "",
+    intro: document.querySelector("[data-testid=prop-intro]")?.textContent || "",
+  }));
+  if (!jsxSSR.list.includes("Body of the second section.")) fail(`local JSX list not server-rendered: ${jsxSSR.list}`);
+  if (jsxSSR.notice !== "Module notice") fail(`module JSX constant not server-rendered: ${jsxSSR.notice}`);
+  if (jsxSSR.intro !== "Terms intro") fail(`JSX prop not server-rendered: ${jsxSSR.intro}`);
+  await page.waitForSelector("[data-testid=panel-inc]", { timeout: 8000 });
+  await page.waitForLoadState("networkidle");
+  await page.locator("[data-testid=panel-inc]").click();
+  await page.waitForTimeout(50);
+  if ((await page.locator("[data-testid=panel-inc]").textContent()) !== "1") fail("jsx-values counter did not update");
+  if ((await page.locator("[data-testid=prop-intro]").textContent()) !== "Terms intro") fail("JSX prop lost after update");
+  if (!((await page.locator("[data-testid=local-list]").textContent()) || "").includes("Body of the first section.")) fail("local JSX list lost after hydration");
+
   // React 19 actions: useActionState + useFormStatus + useOptimistic on the
   // server-action transport, without page reloads.
   let actions = { skipped: !actionsBase };

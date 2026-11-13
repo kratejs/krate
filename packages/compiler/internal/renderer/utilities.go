@@ -44,6 +44,22 @@ func hasJSX(expr ast.Expr) bool {
 				return true
 			}
 		}
+	case *ast.ParenExpr:
+		return hasJSX(e.Expr)
+	case *ast.TypeAssertion:
+		return hasJSX(e.Expr)
+	case *ast.ArrayExpr:
+		for _, el := range e.Elements {
+			if hasJSX(el) {
+				return true
+			}
+		}
+	case *ast.ObjectExpr:
+		for _, p := range e.Properties {
+			if p != nil && hasJSX(p.Value) {
+				return true
+			}
+		}
 	}
 	return false
 }

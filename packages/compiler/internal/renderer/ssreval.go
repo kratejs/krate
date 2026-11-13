@@ -35,6 +35,8 @@ type SSREval struct {
 	evaluating  map[string]bool
 	// frame is the scope of the root component being evaluated.
 	frame *jsvalue.Scope
+	// caller is the scope JSX-valued props are evaluated in.
+	caller *jsvalue.Scope
 
 	// basePath is the site base path <Link> adds to a root-relative href.
 	basePath string
@@ -336,6 +338,36 @@ func (e *SSREval) SetBindings(bindings map[string]jsvalue.Value) {
 	e.frame.Define("props", props)
 }
 
+// SetCallerValues records the caller's build-time values that JSX written in
+// the caller's scope (a JSX-valued prop) reads. Such JSX is evaluated in a
+// scope holding only these, never in the component's own, so a name both
+// define keeps the caller's meaning.
+func (e *SSREval) SetCallerValues(vals map[string]jsvalue.Value) {
+	e.caller = jsvalue.NewScope(e.module)
+	for name, v := range vals {
+		e.caller.Define(name, v)
+	}
+}
+
+// callerValue evaluates an expression written in the caller's scope.
+func (e *SSREval) callerValue(expr ast.Expr) jsvalue.Value {
+	if e.caller == nil {
+		return e.value(expr)
+	}
+	saved := e.in.Scope
+	e.in.Scope = e.caller
+	defer func() { e.in.Scope = saved }()
+	return e.value(expr)
+}
+
+// EvalCallerJSX renders an expression written in the caller's scope.
+func (e *SSREval) EvalCallerJSX(expr ast.Expr) string {
+	if expr == nil {
+		return ""
+	}
+	return e.renderValue(expr, e.callerValue(expr))
+}
+
 // ResolveJSXProps re-evaluates call-site props whose value is JSX (which the
 // IR const folder cannot represent) and binds the rendered markup.
 func (e *SSREval) ResolveJSXProps(attrs map[string]ast.Expr) {
@@ -351,10 +383,10 @@ func (e *SSREval) ResolveJSXProps(attrs map[string]ast.Expr) {
 	sort.Strings(names)
 	bindings := make(map[string]jsvalue.Value, len(names))
 	for _, name := range names {
-		if cur, ok := e.frame.Lookup(name); ok && !cur.IsUnknown() {
+		if cur, ok := e.frame.Lookup(name); ok && !cur.ContainsUnknown() {
 			continue
 		}
-		bindings[name] = e.value(attrs[name])
+		bindings[name] = e.callerValue(attrs[name])
 	}
 	e.SetBindings(bindings)
 }
@@ -568,7 +600,7 @@ func (e *SSREval) isBound(name string) bool {
 var nativeGlobals = map[string]bool{
 	"Date": true, "Math": true, "JSON": true, "String": true, "Number": true, "Boolean": true,
 	"Object": true, "Array": true, "parseInt": true, "parseFloat": true,
-	"isNaN": true, "isFinite": true,
+	"isNaN": true, "isFinite": true, "URL": true, "encodeURIComponent": true, "encodeURI": true, "decodeURIComponent": true,
 }
 
 // maybeDelegate evaluates a call/new rooted at a JS global built-in through the

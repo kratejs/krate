@@ -300,7 +300,10 @@ type componentCtx struct {
 	// propKeys holds the names the call site passed (nil outside a call
 	// site). localProps also holds locals and module constants, so a
 	// `props.X` read must not find an entry that is not one of these.
-	propKeys         map[string]bool
+	propKeys map[string]bool
+	// jsxProps holds the call-site props whose value is JSX (or holds it), so
+	// a `{props.X}` child can be rendered to markup for the server.
+	jsxProps         map[string]jsxProp
 	callSiteChildren []ast.JSXChild // call-site children of the current component
 	// restProps maps a rest (or whole-props) parameter name to the call-site
 	// attributes it collects (attr name -> expression). Used to expand

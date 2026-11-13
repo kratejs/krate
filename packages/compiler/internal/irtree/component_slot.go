@@ -245,6 +245,7 @@ func (b *builder) buildSSREvalComponentSlot(el *ast.JSXElement, childFn *ast.FnD
 			return id
 		}),
 		IsSSREval:        true,
+		SSREvalCaller:    callerScope(jsxAttrExprs(attrs), b.localProps),
 		CallSiteChildren: el.Children,
 		RestProps:        restProps(childFn, attrs),
 		RestPropsName:    fnRestParamName(childFn),
@@ -465,8 +466,15 @@ func (b *builder) installCallSiteInputs(el *ast.JSXElement, childFn *ast.FnDecl,
 	}
 	b.localFuncProps = funcProps
 	b.propKeys = make(map[string]bool, len(attrs))
-	for name := range attrs {
+	b.jsxProps = nil
+	for name, expr := range attrs {
 		b.propKeys[name] = true
+		if !b.isFuncReference(expr) && containsJSXNode(expr) {
+			if b.jsxProps == nil {
+				b.jsxProps = make(map[string]jsxProp)
+			}
+			b.jsxProps[name] = jsxProp{expr: expr, scope: callerScope([]ast.Expr{expr}, parentProps)}
+		}
 	}
 
 	switch {

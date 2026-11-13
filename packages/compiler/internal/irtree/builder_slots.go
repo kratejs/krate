@@ -1684,6 +1684,9 @@ func (b *builder) buildExprSlot(expr ast.Expr, parentID string) *ExprSlot {
 	// false/null/undefined render nothing); the emitter escapes it.
 	value := b.evalValueVolatile(expr)
 	initial, _ := childText(value)
+	if len(signals) == 0 {
+		b.warnHeadDeferred(expr, value)
+	}
 	slot := &ExprSlot{
 		ID:         id,
 		ExprSource: exprSource,
@@ -1692,6 +1695,9 @@ func (b *builder) buildExprSlot(expr ast.Expr, parentID string) *ExprSlot {
 		File:       b.sourceLoc(),
 		Pos:        expr.Pos(),
 		Unresolved: value.ContainsUnknown(),
+	}
+	if p, ok := b.jsxPropRead(expr); ok {
+		slot.PropJSX, slot.PropScope = p.expr, p.scope
 	}
 	// A value holding JSX renders as markup, not as escaped text.
 	if html, ok := renderChildValue(value); ok && html != escape.Text(initial) {
@@ -2960,6 +2966,9 @@ func (b *builder) buildAttrBinding(attr *ast.JSXAttr, elementID string) *AttrBin
 	exprSource := ""
 	if signalName == "" {
 		exprSource = b.bindLoopVars(generateExprJS(attr.Value, b.sigMap()))
+	}
+	if !b.referencesSignal(attr.Value) {
+		b.warnHeadDeferred(attr.Value, b.evalAttrConst(attr.Value))
 	}
 
 	return &AttrBinding{
