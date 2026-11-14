@@ -289,9 +289,11 @@ authenticated against the action id) that the form submits back, and the action
 runs with the original values. A token that was altered, or that belongs to a
 different action, is rejected with `400`.
 
-- Capturing values needs an **async server component** (the values are sealed
-  on each request). In a synchronous component an inline action can only close
-  over nothing, and the build reports [`KR7001`](#diagnostics) otherwise.
+- Capturing values needs a page that renders per request (the values are
+  sealed on each request): an async page or layout and the components they
+  render, sync or async, or a page that is SSR or ISR (for example
+  `dynamic = 'force-dynamic'`). On a prerendered page an inline action can only
+  close over nothing, and the build reports [`KR7001`](#diagnostics) otherwise.
 - Captured values must be strings, numbers, booleans, `null`, `undefined`,
   `bigint`, `Date`, or plain objects and arrays of those. A function, class
   instance, `Map`, symbol or circular value fails the render naming the
@@ -417,7 +419,7 @@ dispatched on the form (or `document`) and the error is logged.
 
 | Code | Meaning |
 | --- | --- |
-| `KR7001` | An inline `"use server"` function that cannot be hoisted: it is in a `"use client"` module or a class, uses `this`, or closes over values in a component that is not async. |
+| `KR7001` | An inline `"use server"` function that cannot be hoisted: it is in a `"use client"` module or a class, uses `this`, or closes over values in a prerendered page (a component is fine when its page renders per request). |
 | `KR7002` | `useFormStatus()` in a component that does not return a DOM element; its status stays idle. |
 | `KR7003` | `useActionState` initial state is not known at build time; the no-JS fallback sends `null`. |
 | `KR7004` | A `"use server"` module exports something that can never be a function (a literal, object, array or class). |
@@ -426,9 +428,9 @@ dispatched on the form (or `document`) and the error is logged.
 
 ## Limits
 
-- An inline action that closes over values must be defined in an async server
-  component (see [Inline actions](#inline-actions)); in a synchronous
-  component, or in a `"use client"` module, it is a build error (`KR7001`).
+- An inline action that closes over values needs a page that renders per
+  request (see [Inline actions](#inline-actions)); on a prerendered page, or in
+  a `"use client"` module, it is a build error (`KR7001`).
 - Every export in an action file must be a function when the module loads. Star
   re-exports are rejected with a build error.
 - A `useActionState` dispatch passed to a child component as a prop works with

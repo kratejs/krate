@@ -82,9 +82,23 @@ type Bundle struct {
 	DynImportFiles map[string]string // dynamic-import source path -> hashed site URL (/chunks/...)
 	Frontmatter    map[string]any    // .mdx frontmatter, if any
 	ActionImports  map[string]string // local binding -> server-action URL
+	// syncActionErrs are inline actions that capture values in a component
+	// that is not async; see SyncActionError.
+	syncActionErrs []error
 	// Resolver resolves imports with the build's tsconfig path aliases, for
 	// code that walks the module graph after bundling.
 	Resolver *ImportResolver
+}
+
+// SyncActionError reports the first inline "use server" function that captures
+// a value in a component that is not async (KR7001). That is fine when the
+// page renders per request, where the value is sealed; a caller that bakes the
+// bundle into prerendered HTML must raise it.
+func (b *Bundle) SyncActionError() error {
+	if len(b.syncActionErrs) == 0 {
+		return nil
+	}
+	return b.syncActionErrs[0]
 }
 
 type Bundler struct {
@@ -103,6 +117,7 @@ type Bundler struct {
 	actionBasePath    string
 	actionImports     map[string]string
 	actionErr         error
+	syncActionErrs    []error
 	pathAliases       []pathAlias
 	tsBaseDir         string
 	baseURL           string
@@ -469,6 +484,7 @@ func (b *Bundler) Bundle(entry string) (*Bundle, error) {
 	b.frontmatter = nil
 	b.actionImports = make(map[string]string)
 	b.actionErr = nil
+	b.syncActionErrs = nil
 
 	err := b.resolveModule(entry, true)
 	if err != nil {
@@ -521,6 +537,7 @@ func (b *Bundler) Bundle(entry string) (*Bundle, error) {
 		DynImportFiles: b.dynImports,
 		Frontmatter:    b.frontmatter,
 		ActionImports:  b.actionImports,
+		syncActionErrs: b.syncActionErrs,
 		Resolver:       b.ImportResolver(),
 	}, nil
 }

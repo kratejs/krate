@@ -399,6 +399,9 @@ host code runs in the native process. Names and options may change between relea
 - Inline `"use server"` actions declared inside a callback of an async server component (a `.map` row
   action capturing the row) no longer fail with KR7001. The error for a capture in a non-async component
   now names the variable, and a value that cannot be sealed reports the action's `file:line:col`.
+- Inline `"use server"` actions in a sync component (`function DeleteButton({ id })`) that captures a prop
+  now work when the page renders per request (async page or layout, `dynamic = 'force-dynamic'`, ISR or
+  SSR); KR7001 remains only for a prerendered page, with a message saying so.
 - `krate migrate nextjs` places the imports it adds (`after` from `@krate/runtime/server`, `lazy`, the
   NextResponse shim) below the file's directive prologue, so `"use server"` stays the first statement.
 - The `@radix-ui/react-slot` shim exports `createSlot` and `createSlottable`, which recent Radix

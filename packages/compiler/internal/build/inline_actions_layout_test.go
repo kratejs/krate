@@ -87,7 +87,18 @@ export default async function Layout({ children }: any) {
 func TestInlineActionNextCaptureShapes(t *testing.T) {
 	b, root := scProject(t, map[string]string{
 		"src/lib/db.ts": `export const db = { find: async (id: string) => ({ id, version: 7, at: new Date(0), tags: ["a", null] }) };`,
-		"src/pages/items/[id].tsx": `import { db } from "../../lib/db";
+		"src/components/DeleteButton.tsx": `export function DeleteButton({ id }: { id: string }) {
+  async function del() { 'use server'; return { deleted: id }; }
+  return <form action={del}><button>Delete</button></form>;
+}`,
+		"src/pages/dyn.tsx": `export const dynamic = 'force-dynamic';
+export default function Dyn({ searchParams }: any) {
+  const who = "sync-" + (searchParams?.q ?? "none");
+  async function hello() { 'use server'; return { hello: who }; }
+  return <form action={hello}><button>hi</button></form>;
+}`,
+		"src/pages/items/[id].tsx": `import { DeleteButton } from "../../components/DeleteButton";
+import { db } from "../../lib/db";
 export default async function Page({ params, searchParams }: any) {
   const { id } = await params;
   const { q } = await searchParams;
@@ -100,6 +111,7 @@ export default async function Page({ params, searchParams }: any) {
   const remove = async () => { 'use server'; return { removed: item.id }; };
   return <main>
     <form action={save}><input name="name" /><button>Save</button><button formAction={remove}>Delete</button></form>
+    <DeleteButton id={id} />
     <ul>{[1, 2].map((n) => <li key={n}><form action={async () => { 'use server'; return { row: [n, id] }; }}><button>row</button></form></li>)}</ul>
   </main>;
 }`,
@@ -120,12 +132,13 @@ export default async function Page({ params, searchParams }: any) {
 		t.Fatalf("page: %d\n%s", status, page)
 	}
 	urls := regexp.MustCompile(`(?:action|formaction)="([^"]*__krate_args=[^"]+)"`).FindAllStringSubmatch(page, -1)
-	if len(urls) != 4 {
-		t.Fatalf("want 4 sealed actions, got %d in\n%s", len(urls), page)
+	if len(urls) != 5 {
+		t.Fatalf("want 5 sealed actions, got %d in\n%s", len(urls), page)
 	}
 	want := []string{
 		`"saved":["p1","Bo","Item p1",7,"1970-01-01T00:00:00.000Z",["a",null],"hi"]`,
 		`"removed":"p1"`,
+		`"deleted":"p1"`,
 		`"row":[1,"p1"]`,
 		`"row":[2,"p1"]`,
 	}
@@ -143,5 +156,25 @@ export default async function Page({ params, searchParams }: any) {
 		if res.StatusCode != 200 || !strings.Contains(string(body), want[i]) {
 			t.Errorf("action %d: %d %s\nwant %s", i, res.StatusCode, body, want[i])
 		}
+	}
+
+	// A sync page that renders per request seals its own captures.
+	_, _, dyn := getBody(t, base+"/dyn/?q=x")
+	m := regexp.MustCompile(`action="([^"]*__krate_args=[^"]+)"`).FindStringSubmatch(dyn)
+	if m == nil {
+		t.Fatalf("sync dynamic page has no sealed action:\n%s", dyn)
+	}
+	req, _ := http.NewRequest(http.MethodPost, base+html.UnescapeString(m[1]), strings.NewReader("a=1"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("X-Krate-Action", "fetch")
+	req.Header.Set("Accept", "application/json")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(res.Body)
+	res.Body.Close()
+	if res.StatusCode != 200 || !strings.Contains(string(body), `"hello":"sync-x"`) {
+		t.Errorf("sync dynamic action: %d %s", res.StatusCode, body)
 	}
 }

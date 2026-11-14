@@ -2560,6 +2560,9 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 	if serverErr == nil && !serverPage {
 		serverErr = topLevelAwaitError(entryModule, extraPrograms)
 	}
+	if serverErr == nil && !serverPage && renderMode == RenderSSG {
+		serverErr = bundle.SyncActionError()
+	}
 	if serverErr != nil {
 		return nil, "", serverErr
 	}
@@ -3483,6 +3486,9 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	if err != nil {
 		return nil, "", nil, false, fmt.Errorf("bundling layout %s: %w", layoutPath, err)
 	}
+	if err := layoutBundle.SyncActionError(); err != nil {
+		return nil, "", nil, false, fmt.Errorf("bundling layout %s: %w", layoutPath, err)
+	}
 	// Every file the layout reads, including the modules of provider wrappers
 	// lifted out below, invalidates it when edited.
 	allLayoutDeps := layoutDepPaths(layoutPath, layoutBundle)
@@ -3846,7 +3852,7 @@ func (b *Builder) renderLoadingComponent(pagePath string) string {
 
 	bnd := b.newBundler()
 	bundle, err := bnd.Bundle(loadingPath)
-	if err != nil {
+	if err != nil || bundle.SyncActionError() != nil {
 		return ""
 	}
 	entryModule := findEntryModule(bundle.Modules)
