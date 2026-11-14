@@ -410,6 +410,8 @@ host code runs in the native process. Names and options may change between relea
 - JSX held in module-level or component-local constants, and JSX passed as a prop (single, array,
   reading the caller's values, into a stateful component), is rendered into the HTML. It used to come
   out as an empty slot or fail with `KR8352`.
+- A constant holding JSX, or an array or object of JSX, passed as a prop (`<Card body={intro} />`,
+  `<LegalDoc sections={sections} />`) is rendered into the HTML instead of failing with `KR8352`.
 - A `fetch(..., { cache: "no-store" })` in client code no longer turns the page into SSR.
 - SVG types accept `xmlns`, `xlink:*`, `xml:space`, filter and gradient elements and event handlers.
 - `<Head>` inside a component no longer throws `Head is not defined` on SSR pages, and Head content from

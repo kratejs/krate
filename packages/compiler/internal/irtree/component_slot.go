@@ -72,6 +72,7 @@ func (b *builder) buildComponentSlot(el *ast.JSXElement, parentID string) []Slot
 	defer leave()
 
 	b.addContextProps(attrs)
+	b.inlineJSXConstAttrs(attrs)
 	// CSS signal components must go through buildComponentNode so their
 	// analyzer is installed and triggers/panels are rewritten. A panels-only
 	// component has no signals/handlers and would otherwise take the SSREval
