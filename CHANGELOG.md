@@ -405,6 +405,8 @@ host code runs in the native process. Names and options may change between relea
   `cache` (memoizes by argument identity within one request), `use`, `useId`, `createElement`, `forwardRef`, `memo`,
   `startTransition`, `useTransition`, `useOptimistic` and `useActionState` from `react`; they failed the build with
   "No matching export".
+- A `"use client"` page under an async layout is a client boundary of the server tree (server-rendered with its initial
+  state, then hydrated) instead of failing the server bundle on `useState`.
 - The build summary counts every listed error: a page with several diagnostics counted once, so "30 error(s)"
   headed a log of 53.
 - Build-time `metadata`, `viewport`, `generateMetadata` and `generateStaticParams` evaluation runs only the

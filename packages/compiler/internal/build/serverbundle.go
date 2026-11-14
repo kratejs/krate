@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -99,6 +100,14 @@ func compileServerBundles(res *bundler.ImportResolver, results []*PageResult, ro
 				pageSrc = withInlineActionImport(hoisted.Source)
 			}
 			injectedSource := injectServerGlobals(pageSrc) + serverExportEntrySuffix(page.ServerExports, absSource) + metadataEntrySuffix(page.MetadataSegments, page.MetadataPageFiles, root)
+			clientPage := bundler.HasUseClientDirective(string(sourceData)) && hasBoundaryFor(page.ClientBoundaries, absSource)
+			if clientPage {
+				// A "use client" page is a client boundary of the server tree, like
+				// any other "use client" module: re-export the file so the boundary
+				// plugin serves its stub instead of the page evaluating its hooks.
+				q := strconv.Quote(filepath.ToSlash(absSource))
+				injectedSource = "export { default } from " + q + ";\nexport * from " + q + ";\n"
+			}
 
 			// Compile with esbuild - use stdin so esbuild resolves relative imports
 			// from the project root (AbsWorkingDir) rather than a temp file location
@@ -121,6 +130,11 @@ func compileServerBundles(res *bundler.ImportResolver, results []*PageResult, ro
 			if len(page.ComposedLayouts) > 0 {
 				const pageModule = "krate-composed-page"
 				stdinContents = composedEntrySource(pageModule, page.ComposedLayouts)
+				if clientPage {
+					// The page file is imported by path below; the entry must not
+					// share its identity.
+					stdinFile = "krate-composed-entry.tsx"
+				}
 				composed = append(composed, composedLayoutPlugin(root, pageModule, injectedSource, filepath.Dir(absSource), page.ComposedLayouts))
 			}
 
@@ -330,4 +344,15 @@ func serverBundlePlugins(page *PageResult, absSource string, plugins ...api.Plug
 		return plugins
 	}
 	return append([]api.Plugin{islandServerStubPlugin(page.IslandStubs, absSource)}, plugins...)
+}
+
+// hasBoundaryFor reports whether boundaries holds a client boundary for the
+// module at path.
+func hasBoundaryFor(boundaries []ClientBoundary, path string) bool {
+	for _, cb := range boundaries {
+		if cb.Spec == "" && sameFileIdentity(cb.SourcePath, path) {
+			return true
+		}
+	}
+	return false
 }

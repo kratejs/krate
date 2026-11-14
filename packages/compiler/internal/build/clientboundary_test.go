@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -232,4 +233,71 @@ export default async function Home() {
 export default async function Home() { await 1; return <main><A /></main>; }`,
 	})
 	wantCode(t, err, diag.CodeClientBoundaryExports, `export { A, B } from "./a"`)
+}
+
+// TestUseClientPageUnderAsyncLayoutIsABoundary builds a "use client" page
+// under an async layout: the server tree renders it as a client boundary (its
+// initial state is in the HTML, its chunk exists) instead of evaluating its
+// hooks, and with KRATE_BROWSER it hydrates.
+func TestUseClientPageUnderAsyncLayoutIsABoundary(t *testing.T) {
+	b, root := scProject(t, map[string]string{
+		"src/pages/(app)/_layout.tsx": `export default async function Layout({ children }: { children: any }) {
+  await Promise.resolve();
+  return <div id="shell">{children}</div>;
+}`,
+		"src/pages/(app)/settings.tsx": `"use client";
+import { useState, useEffect, useRef } from "react";
+export default function Settings() {
+  const [n, setN] = useState(5);
+  const ref = useRef(null);
+  useEffect(() => { document.title = "settings"; }, []);
+  return <main ref={ref}><button id="inc" onClick={() => setN(n + 1)}>Count: {n}</button></main>;
+}`,
+	})
+	withPreact(t, root)
+	e2eEnv(t)
+	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	base, err := startKrateServer(t, root, b.Cfg)
+	if err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+	status, _, html := getBody(t, base+"/settings/")
+	if status != 200 || !strings.Contains(html, `<div id="shell">`) || !strings.Contains(html, "<krate-island") || !regexp.MustCompile(`Count: (<!--[^>]*-->)*5`).MatchString(html) {
+		t.Fatalf("status %d, expected the layout around a server-rendered island with its initial state:\n%s", status, html)
+	}
+	chunks, _ := filepath.Glob(filepath.Join(b.Cfg.OutDir, "chunks", "*"))
+	if len(chunks) == 0 {
+		t.Fatalf("expected an island chunk under %s", b.Cfg.OutDir)
+	}
+	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
+	if browser == "" {
+		return
+	}
+	script, err := filepath.Abs(filepath.Join("testdata", "client_page_click.mjs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("node", script, base+"/settings/", browser).CombinedOutput()
+	if err != nil {
+		if strings.Contains(string(out), "Executable doesn't exist") {
+			requireE2E(t, "%s browser is not installed: %s", browser, out)
+		}
+		t.Fatalf("browser script failed: %v\n%s", err, out)
+	}
+	var res struct {
+		Before, After string
+		Errors        []string
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &res); err != nil {
+		t.Fatalf("parsing browser output: %v\n%s", err, out)
+	}
+	if res.Before != "Count: 5" || res.After != "Count: 6" || len(res.Errors) > 0 {
+		t.Fatalf("unexpected browser result: %+v", res)
+	}
 }
