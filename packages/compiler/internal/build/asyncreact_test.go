@@ -301,7 +301,7 @@ export default async function Only() { await Promise.resolve(); return <main><Lo
 // TestErrorBoundaryUnderAsyncLayout: a segment's error.tsx below an async
 // layout wraps the page per request. A page that renders is the normal page
 // inside the layout; a page that throws renders the boundary's UI inside the
-// layout (status 200, not the 500 page) and ships the boundary's client JS.
+// layout (status 500, no-store) and ships the boundary's client JS.
 func TestErrorBoundaryUnderAsyncLayout(t *testing.T) {
 	b, root := scProject(t, map[string]string{
 		"src/pages/(app)/_layout.tsx": `export default async function Layout({ children }: any) {
@@ -332,8 +332,11 @@ export default function Error({ error, reset }: any) {
 	if status != 200 || !strings.Contains(html, "<nav>hello ada</nav>") || !strings.Contains(html, "dashboard ok") || strings.Contains(html, "Something went wrong") {
 		t.Errorf("the page must render normally inside the layout: status %d\n%s", status, html)
 	}
-	status, _, html = getBody(t, base+"/dashboard/boom/")
-	if status != 200 || !strings.Contains(html, "<nav>hello ada</nav>") || !strings.Contains(html, "Something went wrong") {
+	status, header, html := getBody(t, base+"/dashboard/boom/")
+	if status != 500 || header.Get("Cache-Control") != "no-store" {
+		t.Errorf("a caught error must answer 500 with no-store, got %d %q", status, header.Get("Cache-Control"))
+	}
+	if !strings.Contains(html, "<nav>hello ada</nav>") || !strings.Contains(html, "Something went wrong") {
 		t.Errorf("a throwing page must render the boundary inside the layout: status %d\n%s", status, html)
 	}
 	if strings.Contains(html, "db down") {

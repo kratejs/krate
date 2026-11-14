@@ -202,7 +202,8 @@ export default async function AdminLayout({ children }) {
   (`[KR7110]`).
 - An `error.tsx` between the page and an async layout is the error boundary of
   that page, as in Next.js. When the page (or a layout below the boundary)
-  throws while rendering, the response is `200` with the error page rendered
+  throws while rendering, the response is `500` with `Cache-Control: no-store`
+  (so no CDN keeps it or crawler indexes it) and the error page rendered
   inside the async layout, and the error page hydrates so `reset` works
   (it reloads the page). The error prop is `{ name, message, digest }` with a
   generic message; the real error and its stack go to the server log with the

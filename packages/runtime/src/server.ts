@@ -6,6 +6,7 @@ import { withBase } from './base-path.js';
 import { highlight as highlightCode, trimSpace } from './highlight.js';
 import { accessDeniedStatus, isNotFoundSignal, redirectTarget } from './request-context.js';
 import { sha256Hex } from './sha256.js';
+import { markErrorCaught } from './cache-scope.js';
 
 export { getActionContext, headers, cookies, redirect } from './action-context.js';
 export type { ActionContext, ActionCookies, ActionCookieOptions } from './action-context.js';
@@ -210,7 +211,8 @@ function classFallback(type: any, instance: any, error: unknown): unknown {
  * renders `<fallback error={{ name, message, digest }} />` in their place.
  * notFound(), forbidden(), unauthorized() and redirect() signals pass through.
  * The visitor sees a generic message and a digest; the real error is logged
- * with the same digest.
+ * with the same digest. The render's scope records the catch, so the host
+ * answers 500 with no-store instead of a cacheable 200.
  */
 export class ServerErrorBoundary {
   props: { fallback: any; children?: JSXNode };
@@ -235,6 +237,7 @@ function describeBoundaryError(error: unknown) {
   const stack = (e && typeof e.stack === "string" && e.stack) || "";
   const digest = sha256Hex(message + "\n" + stack).slice(0, 10);
   console.error(`[krate] Error caught by an error boundary (digest ${digest}):`, error);
+  markErrorCaught();
   return { name: "Error", message: "Internal Server Error", digest };
 }
 

@@ -133,8 +133,8 @@ that fails hands the error to the next one up.
 
 Under an [async layout](/docs/features/server-components/#async-layouts) the
 page renders per request, so `error.tsx` catches on the server instead: a page
-that throws renders the error page inside the layout (status `200`, with a
-generic message and a `digest`), and `reset()` reloads the page.
+that throws renders the error page inside the layout (status `500` with
+`Cache-Control: no-store`, a generic message and a `digest`), and `reset()` reloads the page.
 
 `forbidden.tsx` (403) and `unauthorized.tsx` (401) work the same way for the
 `forbidden()` and `unauthorized()` calls; see

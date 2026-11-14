@@ -398,7 +398,7 @@ host code runs in the native process. Names and options may change between relea
 
 - An `error.tsx` below an async layout (the shape `krate migrate nextjs` produces for a Next.js route
   group) no longer fails the build with `KR7101`: it is the page's error boundary, rendering inside the
-  layout when the page throws. Only a `template.tsx` below an async layout still raises `KR7101`.
+  layout (status 500, no-store) when the page throws. Only a `template.tsx` below an async layout still raises `KR7101`.
 - `krate migrate nextjs` places the imports it adds (`after` from `@krate/runtime/server`, `lazy`, the
   NextResponse shim) below the file's directive prologue, so `"use server"` stays the first statement.
 - The `@radix-ui/react-slot` shim exports `createSlot` and `createSlottable`, which recent Radix
