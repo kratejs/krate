@@ -843,7 +843,8 @@ func hasClientChild(slots []SlotNode) bool {
 	for _, s := range slots {
 		switch v := s.(type) {
 		case *ComponentSlot:
-			if v.Component != nil && v.Component.Tier == TierClient {
+			// A static child can pass a value on to a hydrating grandchild.
+			if v.Component != nil && (v.Component.Tier == TierClient || hasClientChild(v.Component.Children)) {
 				return true
 			}
 		case *ConditionalSlot:
