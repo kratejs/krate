@@ -293,55 +293,100 @@ func starTargets(bundle *bundler.Bundle) func(mod *bundler.Module, src string) *
 	}
 }
 
-// addClientReached adds to clientMods the component modules of the server tree
-// that are reached through imports and re-exports from a "use client" module.
+// addClientReached adds to clientMods the component modules that a server
+// module imports through a "use client" module. As in Next.js the boundary is
+// the import path: `import { V } from "./viewer-barrel"` (a client module that
+// re-exports V from ./viewer) makes ./viewer's V a client component for that
+// server module, while a direct `import { V } from "./viewer"` stays a server
+// component.
 func (b *Builder) addClientReached(bundle *bundler.Bundle, ann *irtree.Annotations, clientMods map[string]*bundler.Module) {
 	rendered := map[string]bool{}
 	for _, src := range ann.ComponentSources {
 		if src != "" {
 			rendered[filepath.Clean(src)] = true
+			rendered[canonicalPath(src)] = true
 		}
 	}
 	target := starTargets(bundle)
-	visited := map[*bundler.Module]bool{}
-	var walk func(m *bundler.Module)
-	walk = func(m *bundler.Module) {
+	isClient := func(m *bundler.Module) bool {
+		_, ok := clientMods[filepath.Clean(m.Path)]
+		return ok
+	}
+	// declarer follows name through the re-exports of m to the module that
+	// declares it.
+	var declarer func(m *bundler.Module, name string, depth int) *bundler.Module
+	declarer = func(m *bundler.Module, name string, depth int) *bundler.Module {
+		if depth > 16 {
+			return nil
+		}
+		var stars []string
 		for _, stmt := range m.Program.Body {
-			var src string
-			switch st := stmt.(type) {
-			case *ast.ImportStmt:
-				src = st.Source
-			case *ast.ExportStmt:
-				src = st.ReexportSource
-			}
-			if src == "" {
+			exp, ok := stmt.(*ast.ExportStmt)
+			if !ok {
 				continue
 			}
-			t := target(m, src)
-			if t == nil || visited[t] || resolver.IsCompiledDependency(t.Path) {
+			if exp.ReexportSource == "" {
 				continue
 			}
-			visited[t] = true
-			if rendered[filepath.Clean(t.Path)] || rendered[canonicalPath(t.Path)] {
-				clientMods[filepath.Clean(t.Path)] = t
-				if resolved := canonicalPath(t.Path); resolved != filepath.Clean(t.Path) {
-					clientMods[resolved] = t
+			if exp.StarReexport && exp.Namespace == "" {
+				stars = append(stars, exp.ReexportSource)
+				continue
+			}
+			for _, n := range exp.ReexportNamed {
+				out := n.Remote
+				if out == "" {
+					out = n.Local
+				}
+				if out == name {
+					if t := target(m, exp.ReexportSource); t != nil {
+						return declarer(t, n.Local, depth+1)
+					}
+					return nil
 				}
 			}
-			walk(t)
+		}
+		for _, src := range stars {
+			if t := target(m, src); t != nil {
+				if d := declarer(t, name, depth+1); d != nil {
+					return d
+				}
+			}
+		}
+		return m
+	}
+	var found []*bundler.Module
+	for _, m := range bundle.Modules {
+		if m == nil || m.IsExternal || m.IsCSS || m.Program == nil || isClient(m) || resolver.IsCompiledDependency(m.Path) {
+			continue
+		}
+		for _, stmt := range m.Program.Body {
+			imp, ok := stmt.(*ast.ImportStmt)
+			if !ok {
+				continue
+			}
+			c := target(m, imp.Source)
+			if c == nil || !isClient(c) {
+				continue
+			}
+			names := []string{}
+			if imp.Default != "" {
+				names = append(names, "default")
+			}
+			for _, n := range imp.Named {
+				names = append(names, n.Remote)
+			}
+			for _, n := range names {
+				if d := declarer(c, n, 0); d != nil && d != c && rendered[filepath.Clean(d.Path)] {
+					found = append(found, d)
+				}
+			}
 		}
 	}
-	var roots []*bundler.Module
-	seen := map[*bundler.Module]bool{}
-	for _, m := range clientMods {
-		if !seen[m] {
-			seen[m] = true
-			roots = append(roots, m)
+	for _, d := range found {
+		clientMods[filepath.Clean(d.Path)] = d
+		if resolved := canonicalPath(d.Path); resolved != filepath.Clean(d.Path) {
+			clientMods[resolved] = d
 		}
-	}
-	for _, m := range roots {
-		visited[m] = true
-		walk(m)
 	}
 }
 

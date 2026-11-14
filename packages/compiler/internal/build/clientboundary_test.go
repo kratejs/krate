@@ -166,11 +166,13 @@ func TestClientModuleStarReexportExpandsRuntimeExports(t *testing.T) {
 	files := map[string]string{
 		"src/components/viewer/types.ts":   "export interface ViewerProps { label: string }\nexport type Mode = 'a' | 'b';\n",
 		"src/components/viewer/helpers.ts": "export function fmt(s: string) { return s.toUpperCase(); }\nexport const MAX = 3;\nexport default 1;\n",
+		"src/components/Button.tsx":        "export function Button({ text }: { text: string }) { return <i class=\"btn\">{text}</i>; }\n",
 		"src/components/viewer/viewer.tsx": `import { useState } from "react";
+import { Button } from "../Button";
 import type { ViewerProps } from "./types";
 export function Viewer({ label }: ViewerProps) {
   const [n, setN] = useState(0);
-  return <button id="v" onClick={() => setN(n + 1)}>{label}: {n}</button>;
+  return <button id="v" onClick={() => setN(n + 1)}>{label}: {n}<Button text="b" /></button>;
 }
 `,
 		"src/components/viewer/index.tsx": `"use client";
@@ -179,9 +181,10 @@ export * from './helpers';
 export { Viewer } from './viewer';
 `,
 		"src/pages/index.tsx": `import { Viewer } from "../components/viewer";
+import { Button } from "../components/Button";
 export default async function Home() {
   const label = await Promise.resolve("count");
-  return <main><Viewer label={label} /></main>;
+  return <main><Viewer label={label} /><Button text={label} /></main>;
 }`,
 	}
 	b, root := scProject(t, files)
@@ -204,6 +207,11 @@ export default async function Home() {
 		if src, _ := os.ReadFile(c); strings.Contains(string(src), "Viewer") && strings.Contains(string(src), "mount") {
 			hydrates = true
 		}
+	}
+	// The page's direct <Button> stays a server component: only the barrel and
+	// viewer.tsx are boundaries, Button has no chunk of its own.
+	if len(chunks) != 2 {
+		t.Errorf("expected two island chunks (barrel and Viewer), got %v", chunks)
 	}
 	if !hydrates {
 		t.Fatalf("no island chunk contains the Viewer component: %v", chunks)
