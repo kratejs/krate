@@ -396,6 +396,7 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- A component that holds state (`createSignal`, `useState`), passed as a JSX prop (`<Shell slot={<Probe />} />`), no longer fails the build with KR8352: it renders its initial state and hydrates like any other instance.
 - `krate migrate nextjs` places the imports it adds (`after` from `@krate/runtime/server`, `lazy`, the
   NextResponse shim) below the file's directive prologue, so `"use server"` stays the first statement.
 - The `@radix-ui/react-slot` shim exports `createSlot` and `createSlottable`, which recent Radix

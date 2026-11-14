@@ -1,8 +1,13 @@
 package build
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kratejs/krate/packages/compiler/internal/config"
 )
 
 func TestLocalJSXConstantsAndJSXProps(t *testing.T) {
@@ -188,5 +193,83 @@ export default function Terms() {
 		if !strings.Contains(html, w) {
 			t.Errorf("html misses %s:\n%s", w, html)
 		}
+	}
+}
+
+// A component that holds state, passed as a JSX prop, is a real component
+// instance: it renders its initial state and hydrates (KRATE_BROWSER checks
+// that it flips to the mounted value).
+func TestStatefulComponentPassedAsJSXProp(t *testing.T) {
+	repoRoot, err := repoRootPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "packages"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(repoRoot, "packages", "runtime"), filepath.Join(root, "packages", "runtime")); err != nil {
+		t.Skipf("cannot link the runtime package: %v", err)
+	}
+	for rel, content := range map[string]string{
+		"src/components/Probe.tsx": `import { createSignal, onMount } from '@krate/runtime';
+export default function Probe() {
+  const [v, setV] = createSignal('ssr');
+  onMount(() => setV('hydrated'));
+  return <span id="probe" class={v() === 'hydrated' ? 'probe is-on' : 'probe'} showIf={v() !== 'gone'}>{v()}</span>;
+}`,
+		"src/components/Shell.tsx": `export default function Shell({ slot }: { slot?: any }) {
+  return <div class="slot">{slot ?? null}</div>;
+}`,
+		"src/pages/_layout.tsx": `import Shell from '../components/Shell';
+import Probe from '../components/Probe';
+export default function L({ children }: { children: any }) {
+  return <><Shell slot={<Probe />} /><main>{children}</main></>;
+}`,
+		"src/pages/index.tsx": `export default function P() { return <h1>prop</h1>; }`,
+	} {
+		writeProjectFile(t, root, rel, content)
+	}
+	cfg := config.Default()
+	cfg.PagesDir = filepath.Join(root, "src", "pages")
+	cfg.OutDir = filepath.Join(root, "dist")
+	cfg.Minify = false
+	if err := New(root, cfg).BuildAll(); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	htmlBytes, err := os.ReadFile(filepath.Join(cfg.OutDir, "index.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(htmlBytes)
+	if !strings.Contains(html, `class="probe"`) && !strings.Contains(html, `class=probe`) {
+		t.Errorf("the slot does not render Probe:\n%s", html)
+	}
+	if !strings.Contains(html, ">ssr<") && !strings.Contains(html, ">ssr") {
+		t.Errorf("the slot does not render Probe's initial state:\n%s", html)
+	}
+
+	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
+	if browser == "" {
+		return
+	}
+	if _, err := exec.LookPath("node"); err != nil {
+		requireE2E(t, "node is not installed")
+	}
+	if err := exec.Command("node", "-e", "require.resolve('playwright')").Run(); err != nil {
+		requireE2E(t, "playwright is not installed (run pnpm install)")
+	}
+	script, err := filepath.Abs(filepath.Join("testdata", "jsx_prop_slot_browser.mjs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("node", script, cfg.OutDir, browser)
+	cmd.Env = append(os.Environ(), "NODE_PATH="+filepath.Join(repoRoot, "node_modules"))
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		if strings.Contains(string(out), "Executable doesn't exist") || strings.Contains(string(out), "browserType.launch") {
+			requireE2E(t, "%s browser is not installed: %s", browser, out)
+		}
+		t.Fatalf("browser check failed: %v\n%s", err, out)
 	}
 }

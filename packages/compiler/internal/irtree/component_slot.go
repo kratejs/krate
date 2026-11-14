@@ -273,7 +273,52 @@ func (b *builder) buildSSREvalComponentSlot(el *ast.JSXElement, childFn *ast.FnD
 	if ret := findReturnStmt(childFn.Body); ret != nil && ret.Value != nil {
 		childNode.ReturnSlots = b.discoverReturnSlots(childFn, childID, attrs, ret.Value)
 	}
+	// Components in a JSX prop are evaluated first (ResolveJSXProps), so their
+	// slots lead the queue the emitter matches by name.
+	if propSlots := b.buildJSXPropComponentSlots(attrs, string(childID)); len(propSlots) > 0 {
+		childNode.ReturnSlots = append(propSlots, childNode.ReturnSlots...)
+	}
 	return []SlotNode{&ComponentSlot{ID: childID, Component: childNode}}
+}
+
+// buildJSXPropComponentSlots builds, in the caller's scope, the client
+// components written inside JSX-valued call-site props (`slot={<Probe />}`).
+// SSREval renders the prop markup itself, which cannot run a component that
+// holds state, so the emitter emits these through the tree path instead and
+// they keep their hydration markers like call-site children.
+func (b *builder) buildJSXPropComponentSlots(attrs map[string]ast.Expr, parentID string) []SlotNode {
+	names := make([]string, 0, len(attrs))
+	for name, expr := range attrs {
+		if expr != nil && !b.isFuncReference(expr) && containsJSXNode(expr) {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	var out []SlotNode
+	for _, name := range names {
+		var els []*ast.JSXElement
+		WalkAST(attrs[name], func(n any) bool {
+			el, ok := n.(*ast.JSXElement)
+			if !ok {
+				return true
+			}
+			if el.Opening != nil && el.Opening.Name != "" && el.Opening.Name[0] >= 'A' && el.Opening.Name[0] <= 'Z' {
+				els = append(els, el)
+				return false
+			}
+			return true
+		})
+		for _, el := range els {
+			restoreExpansion := b.callerExpansion()
+			for _, slot := range b.buildSlotNodes(el, parentID) {
+				if cs, ok := slot.(*ComponentSlot); ok && cs.Component != nil && cs.Component.Tier == TierClient {
+					out = append(out, slot)
+				}
+			}
+			restoreExpansion()
+		}
+	}
+	return out
 }
 
 // useIDRow numbers the useId() calls of one keyed list row.

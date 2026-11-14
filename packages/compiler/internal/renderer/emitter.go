@@ -518,7 +518,6 @@ func (e *Emitter) emitSSREvaluated(node *irtree.ComponentNode) SlotOutput {
 		eval.SetBindings(node.SSREvalBindings)
 	}
 	eval.SetCallerValues(node.SSREvalCaller)
-	eval.ResolveJSXProps(node.SSREvalAttrs)
 	if e.IconResolver != nil {
 		eval.iconEmit = func(name string, attrs []*ast.JSXAttr) (string, bool) {
 			return e.IconResolver(name, attrs)
@@ -613,6 +612,10 @@ func (e *Emitter) emitSSREvaluated(node *irtree.ComponentNode) SlotOutput {
 		}
 		defer func() { eval.interactiveEmit = nil }()
 	}
+
+	// JSX props render after the interactive hook is set, so a client
+	// component inside one is emitted through the tree path.
+	eval.ResolveJSXProps(node.SSREvalAttrs)
 
 	// Run the component body (locals, if/else returns, loops) and render its
 	// return value.
