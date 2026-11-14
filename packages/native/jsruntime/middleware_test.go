@@ -96,3 +96,30 @@ export const config = { matcher: ["/dashboard/:path*", "/account", "/((?!api|_ne
 		}
 	}
 }
+
+func TestMiddlewareRenamedExportsDoNotClobberHelpers(t *testing.T) {
+	// esbuild output when a helper module owns a top-level config() and the
+	// middleware's own config is renamed config2.
+	m := newTestMiddleware(t, `
+function config() { return "ok=1"; }
+var config2 = { matcher: ["/locked"] };
+function middleware(request) {
+  if (!(request.headers.get("cookie") || "").includes(config())) return Response.redirect(new URL("/", request.url));
+}
+export {
+  config2 as config,
+  middleware
+};
+`)
+	r := m.Execute(MiddlewareRequest{URL: "http://h/locked", Path: "/locked"})
+	if r.Action != MiddlewareResponse || r.Status != 302 {
+		t.Fatalf("no cookie: %+v", r)
+	}
+	r = m.Execute(MiddlewareRequest{URL: "http://h/locked", Path: "/locked", Headers: map[string][]string{"Cookie": {"ok=1"}}})
+	if r.Action != MiddlewareContinue {
+		t.Fatalf("cookie: %+v", r)
+	}
+	if !m.HasMatcher() {
+		t.Fatal("renamed config export must supply the matcher")
+	}
+}
