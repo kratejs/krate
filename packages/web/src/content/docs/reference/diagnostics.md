@@ -1120,6 +1120,12 @@ A component without state (no createSignal, useState or other hook that holds st
 
 Tags inside `<Head>` (and `<title>`, `<meta>` and `<link>` rendered on their own) are written into the static HTML so crawlers and link previews see them. A call to an imported helper is evaluated at build time when it is plain code: string and template work, JSON, `URL`, `encodeURIComponent`, and calls to other functions of your project. This value is none of those (it reads the browser, the clock, `process.env`, an object built by a class, or something else the build cannot run), so the tag would only be completed in the browser and crawlers would see it empty. Compute it from plain values, pass it as a prop, or move the tag to a page whose metadata comes from `generateMetadata`.
 
+### KR8354
+
+**Component with state in a prop is rendered twice**
+
+A prop that holds JSX with a component that has state (`slot={<Probe />}`, where Probe uses createSignal or useState) is one component instance. The receiving component reads the prop in more than one place, but the instance can only be mounted in one of them, so the other copy shows the server markup without ever hydrating. Render the prop in one place, or give each place its own element (a separate prop for each place).
+
 ### KR8360
 
 **Component state resets when the condition flips**

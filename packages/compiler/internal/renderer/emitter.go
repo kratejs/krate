@@ -563,7 +563,6 @@ func (e *Emitter) emitSSREvaluated(node *irtree.ComponentNode) SlotOutput {
 		eval.SetBindings(node.SSREvalBindings)
 	}
 	eval.SetCallerValues(node.SSREvalCaller)
-	eval.ResolveJSXProps(node.SSREvalAttrs)
 	if e.IconResolver != nil {
 		eval.iconEmit = func(name string, attrs []*ast.JSXAttr) (string, bool) {
 			return e.IconResolver(name, attrs)
@@ -672,6 +671,10 @@ func (e *Emitter) emitSSREvaluated(node *irtree.ComponentNode) SlotOutput {
 		}
 		defer func() { eval.interactiveEmit = nil }()
 	}
+
+	// JSX props render after the interactive hook is set, so a client
+	// component inside one is emitted through the tree path.
+	eval.ResolveJSXProps(node.SSREvalAttrs)
 
 	// Run the component body (locals, if/else returns, loops) and render its
 	// return value.
@@ -1160,7 +1163,7 @@ func (e *Emitter) emitExprSlot(s *irtree.ExprSlot) SlotOutput {
 	if s.InitialHTML != "" {
 		body = s.InitialHTML
 	} else if s.PropJSX != nil {
-		if rendered, ok := e.renderPropJSX(s.PropJSX, s.PropScope); ok {
+		if rendered, ok := e.renderPropJSX(s.PropJSX, s.PropScope, s.PropSlots); ok {
 			body = rendered
 			s.Unresolved = false
 		}
@@ -1679,8 +1682,30 @@ func externalIslandKey(local string, offset int) string {
 // renderPropJSX renders the JSX a caller passed as a prop for the server
 // markup of a hydrated component. A value that needs the caller's scope (its
 // signals or locals) cannot be rendered here; hydration fills that slot.
-func (e *Emitter) renderPropJSX(expr ast.Expr, caller map[string]jsvalue.Value) (string, bool) {
+func (e *Emitter) renderPropJSX(expr ast.Expr, caller map[string]jsvalue.Value, slots []irtree.SlotNode) (string, bool) {
 	eval := NewSSREval(e.functions)
+	if len(slots) > 0 {
+		// A component that holds state renders its initial state from its
+		// slot; its hydration is not registered, the client re-creates the
+		// prop value into this slot. A second render of the same component
+		// has no slot left and is reported as an error by the evaluator.
+		used := map[string]int{}
+		queue := map[string][]*irtree.ComponentSlot{}
+		for _, s := range slots {
+			if cs, ok := s.(*irtree.ComponentSlot); ok && cs.Component != nil {
+				queue[cs.Component.Name] = append(queue[cs.Component.Name], cs)
+			}
+		}
+		eval.interactiveEmit = func(el *ast.JSXElement) (string, bool) {
+			q := queue[el.Opening.Name]
+			i := used[el.Opening.Name]
+			if i >= len(q) {
+				return "", false
+			}
+			used[el.Opening.Name] = i + 1
+			return e.emitComponentSlot(q[i]).HTML, true
+		}
+	}
 	eval.SetModuleConsts(e.moduleConsts)
 	eval.SetModuleRun(e.moduleRun)
 	eval.SetCallerValues(caller)
