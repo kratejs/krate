@@ -16,7 +16,9 @@ import fs from "node:fs";
 const full = process.env.EVENT !== "pull_request";
 
 const runners = {
-  "ubuntu-latest": { os: "ubuntu-latest", role: "primary" },
+  // Pinned, not ubuntu-latest: the snap smoke test builds a core24 snap in
+  // destructive mode, which snapcraft only allows on an Ubuntu 24.04 host.
+  "ubuntu-24.04": { os: "ubuntu-24.04", role: "primary" },
   "ubuntu-24.04-arm": { os: "ubuntu-24.04-arm", role: "thin" },
   "macos-latest": { os: "macos-latest", role: "platform" },
   "windows-latest": { os: "windows-latest", role: "platform" },
@@ -67,7 +69,7 @@ if (full) {
 }
 
 const matrix =
-  scope === "all" ? Object.values(runners) : scope === "linux" ? [runners["ubuntu-latest"]] : [];
+  scope === "all" ? Object.values(runners) : scope === "linux" ? [runners["ubuntu-24.04"]] : [];
 
 console.log(`full=${full} native=${scope}`);
 const out = process.env.GITHUB_OUTPUT;
