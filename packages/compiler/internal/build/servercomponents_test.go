@@ -3,6 +3,7 @@ package build
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -165,5 +166,31 @@ export default async function Show({ params }: { params: Promise<{ id: string }>
 		if !strings.Contains(html, want) {
 			t.Fatalf("expected %q (cache() memoizes within a request only):\n%s", want, html)
 		}
+	}
+}
+
+// TestBuildErrorCountMatchesListedErrors checks the "N error(s)" headline
+// against the diagnostics the aggregate lists: a page with two diagnostics
+// counts twice.
+func TestBuildErrorCountMatchesListedErrors(t *testing.T) {
+	bad := func(n int) string {
+		src := "import { lazy } from 'react';\nexport default function P() {\n"
+		for i := 0; i < n; i++ {
+			src += fmt.Sprintf("  const C%d = lazy(() => import('../c%d'));\n", i, i)
+		}
+		return src + "  return <main>x</main>;\n}\n"
+	}
+	b, _ := scProject(t, map[string]string{
+		"src/pages/a.tsx": bad(1), "src/pages/b.tsx": bad(1), "src/pages/c.tsx": bad(1), "src/pages/d.tsx": bad(2),
+		"src/pages/ok.tsx": `export default function P() { return <main>ok</main>; }`,
+	})
+	err := b.BuildAll()
+	if err == nil {
+		t.Fatal("expected the build to fail")
+	}
+	listed := strings.Count(err.Error(), "lazy() must be declared at the top level")
+	want := fmt.Sprintf("build failed: %d error(s)", listed)
+	if listed != 5 || !strings.HasPrefix(err.Error(), want) {
+		t.Fatalf("expected the headline %q over %d listed errors:\n%v", want, listed, err)
 	}
 }

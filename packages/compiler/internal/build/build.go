@@ -841,7 +841,7 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 		if len(pageErrs) > 0 {
 			// The pages exist; they failed. The pagesDir hint is only for an
 			// empty directory (below).
-			return nil, &multiError{summary: fmt.Sprintf("build failed: %d error(s)", len(pageErrs)), errs: pageErrs}
+			return nil, &multiError{summary: fmt.Sprintf("build failed: %d error(s)", countLeafErrors(pageErrs)), errs: pageErrs}
 		}
 		return nil, fmt.Errorf("no pages built successfully; check that pagesDir (%s) contains at least one page", b.Cfg.PagesDir)
 	}
@@ -903,7 +903,7 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 	// with a mix of good and bad pages still reports the errors (and the
 	// browser overlay shows them) instead of silently succeeding.
 	if len(pageErrs) > 0 {
-		return results, &multiError{summary: fmt.Sprintf("build failed: %d page error(s)", len(pageErrs)), errs: pageErrs}
+		return results, &multiError{summary: fmt.Sprintf("build failed: %d page error(s)", countLeafErrors(pageErrs)), errs: pageErrs}
 	}
 
 	return results, nil
@@ -1158,20 +1158,17 @@ func (b *Builder) BuildAll() error {
 	}()
 
 	var results []*PageResult
-	errorCount := 0
 	var failureMessages []string
 	var failureErrs []error
 	for _, err := range early.errs {
 		failureMessages = append(failureMessages, "  "+err.Error())
 		failureErrs = append(failureErrs, err)
-		errorCount++
 	}
 	// failOutput records a shipped file that could not be written.
 	failOutput := func(err error) {
 		fmt.Fprintf(os.Stderr, "\n  %sx Error:%s %v\n", cRed, cReset, err)
 		failureMessages = append(failureMessages, "  "+err.Error())
 		failureErrs = append(failureErrs, err)
-		errorCount++
 	}
 
 	for res := range resultsCh {
@@ -1180,7 +1177,6 @@ func (b *Builder) BuildAll() error {
 			fmt.Fprintf(os.Stderr, "\n  %sx Error (%s):%s %s\n", cRed, res.page, cReset, detail)
 			failureMessages = append(failureMessages, fmt.Sprintf("  %s: %s", res.page, detail))
 			failureErrs = append(failureErrs, res.err)
-			errorCount++
 			continue
 		}
 
@@ -1216,7 +1212,6 @@ func (b *Builder) BuildAll() error {
 		fmt.Fprintf(os.Stderr, "  %sx Error:%s %v\n", cRed, cReset, gspErr)
 		failureMessages = append(failureMessages, "  "+gspErr.Error())
 		failureErrs = append(failureErrs, gspErr)
-		errorCount++
 	}
 	if len(staticParamPages) > 0 {
 		printf("  %s*%s Building %d statically generated pages from generateStaticParams\n", cCyan, cReset, len(staticParamPages))
@@ -1227,7 +1222,6 @@ func (b *Builder) BuildAll() error {
 				fmt.Fprintf(os.Stderr, "  %sx Error:%s %v\n", cRed, cReset, msg)
 				failureMessages = append(failureMessages, "  "+msg)
 				failureErrs = append(failureErrs, fmt.Errorf("generateStaticParams page %s: %w", spp.OutPath, err))
-				errorCount++
 				continue
 			}
 			results = append(results, result)
@@ -1326,7 +1320,6 @@ func (b *Builder) BuildAll() error {
 		fmt.Fprintf(os.Stderr, "  %sIsland bundle error:%s %v\n", cRed, cReset, err)
 		failureMessages = append(failureMessages, "  islands: "+err.Error())
 		failureErrs = append(failureErrs, err)
-		errorCount++
 	}
 
 	// In-memory HTML generation + string swap + single disk write per page
@@ -1340,7 +1333,6 @@ func (b *Builder) BuildAll() error {
 			fmt.Fprintf(os.Stderr, "  %sx Checks:%s %v\n", cRed, cReset, err)
 			failureMessages = append(failureMessages, "  checks: "+err.Error())
 			failureErrs = append(failureErrs, err)
-			errorCount++
 		}
 	}
 
@@ -1349,7 +1341,6 @@ func (b *Builder) BuildAll() error {
 		fmt.Fprintf(os.Stderr, "  %sWorker bundle error:%s %v\n", cYellow, cReset, err)
 		failureMessages = append(failureMessages, "  workers: "+err.Error())
 		failureErrs = append(failureErrs, err)
-		errorCount++
 	}
 
 	// Compile and emit any registered dynamic-import chunks to /chunks/.
@@ -1357,7 +1348,6 @@ func (b *Builder) BuildAll() error {
 		fmt.Fprintf(os.Stderr, "  %sDynamic import chunk error:%s %v\n", cYellow, cReset, err)
 		failureMessages = append(failureMessages, "  chunks: "+err.Error())
 		failureErrs = append(failureErrs, err)
-		errorCount++
 	}
 
 	// publicFiles are the user's own static files; the build did not hash them,
@@ -1373,7 +1363,6 @@ func (b *Builder) BuildAll() error {
 				fmt.Fprintf(os.Stderr, "  %sPublic copy error:%s %v\n", cYellow, cReset, err)
 				failureMessages = append(failureMessages, "  public: "+err.Error())
 				failureErrs = append(failureErrs, err)
-				errorCount++
 			}
 		}
 	}
@@ -1390,20 +1379,17 @@ func (b *Builder) BuildAll() error {
 		fmt.Fprintf(os.Stderr, "  %sEndpoint error:%s %s\n", cRed, cReset, strings.ReplaceAll(diag.FormatDiagnostics([]error{err}), "\n", "\n    "))
 		failureMessages = append(failureMessages, "  endpoint: "+err.Error())
 		failureErrs = append(failureErrs, err)
-		errorCount++
 	}
 	if err := b.BuildAllAPI(); err != nil {
 		fmt.Fprintf(os.Stderr, "  %sAPI Build error:%s %v\n", cRed, cReset, err)
 		failureMessages = append(failureMessages, "  API: "+err.Error())
 		failureErrs = append(failureErrs, err)
-		errorCount++
 	}
 
 	if err := b.BuildMiddleware(); err != nil {
 		fmt.Fprintf(os.Stderr, "  %sMiddleware error:%s %v\n", cRed, cReset, err)
 		failureMessages = append(failureMessages, "  middleware: "+err.Error())
 		failureErrs = append(failureErrs, err)
-		errorCount++
 	}
 
 	// Write page manifest with SSR/ISR metadata
@@ -1428,7 +1414,6 @@ func (b *Builder) BuildAll() error {
 	for _, err := range serverBundleErrs {
 		failureMessages = append(failureMessages, "  "+err.Error())
 		failureErrs = append(failureErrs, err)
-		errorCount++
 	}
 	if len(serverBundles) > 0 {
 		printf("  %s*%s Compiled %d server bundles\n", cCyan, cReset, len(serverBundles))
@@ -1524,7 +1509,6 @@ func (b *Builder) BuildAll() error {
 		for _, pe := range perrs {
 			failureErrs = append(failureErrs, fmt.Errorf("%s", pe))
 		}
-		errorCount += len(perrs)
 	}
 
 	if b.diskCache != nil && b.diskCache.enabled && (b.Prof.Enabled() || b.Verbose) {
@@ -1534,9 +1518,9 @@ func (b *Builder) BuildAll() error {
 		b.Prof.Report(os.Stderr)
 	}
 
-	if errorCount > 0 {
+	if len(failureErrs) > 0 {
 		return &multiError{
-			summary: fmt.Sprintf("build failed: %d error(s):\n%s", errorCount, strings.Join(failureMessages, "\n")),
+			summary: fmt.Sprintf("build failed: %d error(s):\n%s", countLeafErrors(failureErrs), strings.Join(failureMessages, "\n")),
 			errs:    failureErrs,
 		}
 	}

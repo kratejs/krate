@@ -405,6 +405,8 @@ host code runs in the native process. Names and options may change between relea
   `cache` (memoizes by argument identity within one request), `use`, `useId`, `createElement`, `forwardRef`, `memo`,
   `startTransition`, `useTransition`, `useOptimistic` and `useActionState` from `react`; they failed the build with
   "No matching export".
+- The build summary counts every listed error: a page with several diagnostics counted once, so "30 error(s)"
+  headed a log of 53.
 - Build-time `metadata`, `viewport`, `generateMetadata` and `generateStaticParams` evaluation runs only the
   export and what it uses, not the whole page module: a page whose `metadata` is a call no longer loses its
   tags (KR7122) because another import touches `document` at module scope, reads `__dirname`, uses the `Link`
