@@ -180,7 +180,7 @@ export default async function Home() {
 // TestConfigDocAttrsUseJSXNames loads a real krate.config.ts, so the loader's
 // key handling is covered, and builds with JSX attribute names.
 func TestConfigDocAttrsUseJSXNames(t *testing.T) {
-	b, root := scProject(t, map[string]string{
+	_, root := scProject(t, map[string]string{
 		"krate.config.ts":     `export default { site: { htmlAttributes: { className: 'dark', lang: 'en' }, bodyAttributes: { className: 'min-h-screen' } } };`,
 		"src/pages/index.tsx": `export default function Home() { return <h1>home</h1>; }`,
 	})
@@ -190,8 +190,7 @@ func TestConfigDocAttrsUseJSXNames(t *testing.T) {
 	}
 	cfg.PagesDir = filepath.Join(root, "src", "pages")
 	cfg.OutDir = filepath.Join(root, "dist")
-	b = New(root, cfg)
-	if err := b.BuildAll(); err != nil {
+	if err := New(root, cfg).BuildAll(); err != nil {
 		t.Fatalf("BuildAll: %v", err)
 	}
 	data, err := os.ReadFile(filepath.Join(root, "dist", "index.html"))
