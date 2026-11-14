@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -197,8 +198,10 @@ export default function Terms() {
 }
 
 // A component that holds state, passed as a JSX prop, is a real component
-// instance: it renders its initial state and hydrates (KRATE_BROWSER checks
-// that it flips to the mounted value).
+// instance: it renders its initial state and hydrates, whether the receiver is
+// stateless (/a/) or has its own state, in a layout (/b/) or a page (/c/)
+// (KRATE_BROWSER checks Probe flips to the mounted value and the receiver's
+// own state still works).
 func TestStatefulComponentPassedAsJSXProp(t *testing.T) {
 	repoRoot, err := repoRootPath()
 	if err != nil {
@@ -221,12 +224,26 @@ export default function Probe() {
 		"src/components/Shell.tsx": `export default function Shell({ slot }: { slot?: any }) {
   return <div class="slot">{slot ?? null}</div>;
 }`,
-		"src/pages/_layout.tsx": `import Shell from '../components/Shell';
-import Probe from '../components/Probe';
+		"src/components/StateShell.tsx": `import { createSignal } from '@krate/runtime';
+export default function StateShell({ slot }: { slot?: any }) {
+  const [open, setOpen] = createSignal(false);
+  return <div><button id="tog" onClick={() => setOpen(!open())}>{open() ? 'open' : 'closed'}</button><div class="slot">{slot}</div></div>;
+}`,
+		"src/pages/(a)/_layout.tsx": `import Shell from '../../components/Shell';
+import Probe from '../../components/Probe';
 export default function L({ children }: { children: any }) {
   return <><Shell slot={<Probe />} /><main>{children}</main></>;
 }`,
-		"src/pages/index.tsx": `export default function P() { return <h1>prop</h1>; }`,
+		"src/pages/(a)/a.tsx": `export default function P() { return <h1>a</h1>; }`,
+		"src/pages/(b)/_layout.tsx": `import StateShell from '../../components/StateShell';
+import Probe from '../../components/Probe';
+export default function L({ children }: { children: any }) {
+  return <><StateShell slot={<Probe />} /><main>{children}</main></>;
+}`,
+		"src/pages/(b)/b.tsx": `export default function P() { return <h1>b</h1>; }`,
+		"src/pages/c.tsx": `import StateShell from '../components/StateShell';
+import Probe from '../components/Probe';
+export default function P() { return <main><StateShell slot={<Probe />} /></main>; }`,
 	} {
 		writeProjectFile(t, root, rel, content)
 	}
@@ -237,16 +254,15 @@ export default function L({ children }: { children: any }) {
 	if err := New(root, cfg).BuildAll(); err != nil {
 		t.Fatalf("build: %v", err)
 	}
-	htmlBytes, err := os.ReadFile(filepath.Join(cfg.OutDir, "index.html"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	html := string(htmlBytes)
-	if !strings.Contains(html, `class="probe"`) && !strings.Contains(html, `class=probe`) {
-		t.Errorf("the slot does not render Probe:\n%s", html)
-	}
-	if !strings.Contains(html, ">ssr<") && !strings.Contains(html, ">ssr") {
-		t.Errorf("the slot does not render Probe's initial state:\n%s", html)
+	routes := []struct{ path, toggles string }{{"/a/", "0"}, {"/b/", "1"}, {"/c/", "1"}}
+	for _, r := range routes {
+		htmlBytes, err := os.ReadFile(filepath.Join(cfg.OutDir, filepath.FromSlash(r.path), "index.html"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !regexp.MustCompile(`id="?probe"?[^>]*>(<!--[^>]*-->)?ssr<`).Match(htmlBytes) {
+			t.Errorf("%s does not render Probe's initial state:\n%s", r.path, htmlBytes)
+		}
 	}
 
 	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
@@ -263,13 +279,15 @@ export default function L({ children }: { children: any }) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("node", script, cfg.OutDir, browser)
-	cmd.Env = append(os.Environ(), "NODE_PATH="+filepath.Join(repoRoot, "node_modules"))
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		if strings.Contains(string(out), "Executable doesn't exist") || strings.Contains(string(out), "browserType.launch") {
-			requireE2E(t, "%s browser is not installed: %s", browser, out)
+	for _, r := range routes {
+		cmd := exec.Command("node", script, cfg.OutDir, browser, r.path, r.toggles)
+		cmd.Env = append(os.Environ(), "NODE_PATH="+filepath.Join(repoRoot, "node_modules"))
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			if strings.Contains(string(out), "Executable doesn't exist") || strings.Contains(string(out), "browserType.launch") {
+				requireE2E(t, "%s browser is not installed: %s", browser, out)
+			}
+			t.Errorf("browser check of %s failed: %v\n%s", r.path, err, out)
 		}
-		t.Fatalf("browser check failed: %v\n%s", err, out)
 	}
 }

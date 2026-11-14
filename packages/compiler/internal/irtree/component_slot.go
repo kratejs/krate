@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
+	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
 )
 
@@ -275,7 +276,7 @@ func (b *builder) buildSSREvalComponentSlot(el *ast.JSXElement, childFn *ast.FnD
 	}
 	// Components in a JSX prop are evaluated first (ResolveJSXProps), so their
 	// slots lead the queue the emitter matches by name.
-	if propSlots := b.buildJSXPropComponentSlots(attrs, string(childID)); len(propSlots) > 0 {
+	if propSlots := b.buildJSXPropComponentSlots(childFn, attrs, string(childID)); len(propSlots) > 0 {
 		childNode.ReturnSlots = append(propSlots, childNode.ReturnSlots...)
 	}
 	return []SlotNode{&ComponentSlot{ID: childID, Component: childNode}}
@@ -286,7 +287,7 @@ func (b *builder) buildSSREvalComponentSlot(el *ast.JSXElement, childFn *ast.FnD
 // SSREval renders the prop markup itself, which cannot run a component that
 // holds state, so the emitter emits these through the tree path instead and
 // they keep their hydration markers like call-site children.
-func (b *builder) buildJSXPropComponentSlots(attrs map[string]ast.Expr, parentID string) []SlotNode {
+func (b *builder) buildJSXPropComponentSlots(childFn *ast.FnDecl, attrs map[string]ast.Expr, parentID string) []SlotNode {
 	names := make([]string, 0, len(attrs))
 	for name, expr := range attrs {
 		if expr != nil && !b.isFuncReference(expr) && containsJSXNode(expr) {
@@ -308,6 +309,7 @@ func (b *builder) buildJSXPropComponentSlots(attrs map[string]ast.Expr, parentID
 			}
 			return true
 		})
+		before := len(out)
 		for _, el := range els {
 			restoreExpansion := b.callerExpansion()
 			for _, slot := range b.buildSlotNodes(el, parentID) {
@@ -317,8 +319,47 @@ func (b *builder) buildJSXPropComponentSlots(attrs map[string]ast.Expr, parentID
 			}
 			restoreExpansion()
 		}
+		if len(out) > before {
+			if n := countPropReads(childFn, name); n > 1 {
+				b.warnCompat(attrs[name].Pos(), diag.CodeJSXPropRenderedTwice,
+					"the `"+name+"` prop holds a component with state and <"+childFn.Name+"> renders it "+itoa(n)+" times; only one copy hydrates",
+					"render the prop in one place, or pass one element for each place")
+			}
+		}
 	}
 	return out
+}
+
+// countPropReads counts the reads of the prop called name in fn's body,
+// either as a bare (destructured) name or as props.name.
+func countPropReads(fn *ast.FnDecl, name string) int {
+	n := 0
+	var visit func(node any) bool
+	visit = func(node any) bool {
+		switch e := node.(type) {
+		case *ast.Identifier:
+			if e.Name == name {
+				n++
+			}
+		case *ast.MemberExpr:
+			if obj, ok := e.Object.(*ast.Identifier); ok && obj.Name == "props" {
+				if prop, ok := e.Property.(*ast.Identifier); ok && !e.Computed && prop.Name == name {
+					n++
+				}
+				return false
+			}
+			WalkAST(e.Object, visit)
+			if e.Computed {
+				WalkAST(e.Property, visit)
+			}
+			return false
+		}
+		return true
+	}
+	for _, stmt := range fn.Body {
+		WalkAST(stmt, visit)
+	}
+	return n
 }
 
 // useIDRow numbers the useId() calls of one keyed list row.
@@ -435,7 +476,11 @@ func (b *builder) buildClientComponentSlot(el *ast.JSXElement, childFn *ast.FnDe
 		// first and have other functions).
 		b.pendingLazy, b.pendingLazyFn = &lc, childFn
 	}
+	outerPropSlots := b.propExprSlots
+	b.propExprSlots = nil
 	childNode := b.buildComponentNode(childFn, string(childID))
+	propReaders := b.propExprSlots
+	b.propExprSlots = outerPropSlots
 	b.popComponentCtx()
 	childNode.ContextValues = b.activeContextMarkers()
 	b.warnSnapshotProps(el, childFn, childNode, live)
@@ -446,6 +491,13 @@ func (b *builder) buildClientComponentSlot(el *ast.JSXElement, childFn *ast.FnDe
 	}
 	childNode.CallSiteChildren = el.Children
 	childNode.CallSiteSlots = b.buildComponentCallSiteSlots(el, childFn, childID, provider, childNode.childrenContext)
+	if len(propReaders) > 0 {
+		if propSlots := b.buildJSXPropComponentSlots(childFn, attrs, string(childID)); len(propSlots) > 0 {
+			for _, s := range propReaders {
+				s.PropSlots = propSlots
+			}
+		}
+	}
 	b.completeSSREvalBindings(childNode, childFn, attrs)
 	b.registerChildProps(childNode, childFn)
 	b.checkScopePropReads(el, childFn, childNode, attrs)

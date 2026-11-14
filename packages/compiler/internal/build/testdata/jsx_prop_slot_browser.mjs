@@ -5,10 +5,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { chromium, firefox, webkit } from "playwright";
 
-const [root, browserName = "chromium"] = process.argv.slice(2);
+const [root, browserName = "chromium", route = "/", toggles = "0"] = process.argv.slice(2);
 const browserType = { chromium, firefox, webkit }[browserName];
 if (!root || !browserType) {
-  console.error("usage: jsx_prop_slot_browser.mjs <dist-root> [chromium|firefox|webkit]");
+  console.error("usage: jsx_prop_slot_browser.mjs <dist-root> [chromium|firefox|webkit] [route] [1 to click #tog]");
   process.exit(2);
 }
 const mime = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css" };
@@ -26,7 +26,7 @@ const server = http.createServer((req, res) => {
   });
 });
 await new Promise((r) => server.listen(0, "127.0.0.1", r));
-const url = `http://127.0.0.1:${server.address().port}/`;
+const url = `http://127.0.0.1:${server.address().port}${route}`;
 
 const browser = await browserType.launch();
 const failures = [];
@@ -43,6 +43,15 @@ try {
   }
   const cls = await page.getAttribute("#probe", "class");
   if (cls !== "probe is-on") failures.push("probe class is " + JSON.stringify(cls));
+  if (toggles === "1") {
+    await page.click("#tog");
+    try {
+      await page.waitForFunction(() => document.getElementById("tog")?.textContent === "open", null, { timeout: 5000 });
+    } catch {
+      failures.push("receiver text is " + JSON.stringify(await page.textContent("#tog")) + ", want \"open\"");
+    }
+    if ((await page.textContent("#probe")) !== "hydrated") failures.push("probe lost its state after the receiver re-rendered");
+  }
 } finally {
   await browser.close();
   server.close();

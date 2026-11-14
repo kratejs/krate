@@ -390,6 +390,9 @@ type builder struct {
 	// client components and are never emitted (a build-time evaluated
 	// component's own return JSX); warnings about rendered output are skipped.
 	locateOnly int
+	// propExprSlots collects the slots of the client component being built
+	// that read a JSX prop, to attach the prop's component slots afterwards.
+	propExprSlots []*ExprSlot
 	// useIDRow is the keyed list row being built. Components inside it take
 	// useId() values from one per-row sequence the runtime reproduces when it
 	// renders or adopts the row, so server and client ids agree.

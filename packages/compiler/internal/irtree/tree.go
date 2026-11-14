@@ -184,6 +184,9 @@ type ExprSlot struct {
 	PropJSX ast.Expr
 	// PropScope holds the caller's values PropJSX reads.
 	PropScope map[string]jsvalue.Value
+	// PropSlots are the client components inside PropJSX, built in the
+	// caller's scope, so the server markup holds their initial state.
+	PropSlots []SlotNode
 	Signals   []string
 	// File and Pos locate the expression in its source (hydration source maps).
 	File string
