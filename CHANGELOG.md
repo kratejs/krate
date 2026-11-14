@@ -405,7 +405,8 @@ host code runs in the native process. Names and options may change between relea
 - `lazy(() => import("./X").then((m) => m.X))` now builds like the `({ default: m.X })` form instead of
   failing with KR4001, and `krate migrate nextjs` drops the whole `next/dynamic` options object even
   when it contains `loading: () => <div>{...}</div>` or other nested braces.
-- A page whose `export const metadata` is a function call (`pageMetadata(...)`) and that has module-level JSX no longer
+- A page whose `export const metadata` is a function call (`pageMetadata(...)`) and that has
+  module-level JSX no longer
   fails build-time metadata evaluation with "React is not defined", so its `<title>` and meta tags are kept; the KR7122
   warning now names `metadata` or `generateMetadata` and points at the export's line.
 - A component-local `const` holding plain JSX (`const intro = <p>Hello <b>there</b></p>`) no longer
