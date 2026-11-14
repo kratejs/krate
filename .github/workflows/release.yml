@@ -161,7 +161,7 @@ jobs:
         run: >-
           node scripts/publish-packages.mjs "${{ steps.tag.outputs.dist_tag }}"
           packages/runtime packages/components packages/plugin packages/ts-plugin
-          packages/base-docs-theme packages/simple-docs-theme
+          packages/base-docs-theme packages/simple-docs-theme packages/auth
           packages/create-krate-app packages/create-krate-docs packages/core
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -222,6 +222,7 @@ jobs:
             printf -- '- `@krate/ts-plugin@%s`\n' "${VERSION}"
             printf -- '- `@krate/base-docs-theme@%s`\n' "${VERSION}"
             printf -- '- `@krate/simple-docs-theme@%s`\n' "${VERSION}"
+            printf -- '- `@krate/auth@%s`\n' "${VERSION}"
             printf -- '- `@krate/create-krate-app@%s`\n' "${VERSION}"
             printf -- '- `@krate/create-krate-docs@%s`\n' "${VERSION}"
             printf -- '- `@krate/core-win32-x64@%s`\n' "${VERSION}"
