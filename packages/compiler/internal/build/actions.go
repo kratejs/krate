@@ -523,6 +523,20 @@ func actionServerBundlePlugin(res *bundler.ImportResolver, modules map[string]ma
 	if len(modules) == 0 {
 		return api.Plugin{Name: "krate-actions-empty", Setup: func(api.PluginBuild) {}}
 	}
+	// esbuild may hand over resolve dirs through a symlinked project root
+	// (macOS /var is /private/var), so modules are also found by real path.
+	byReal := make(map[string]string, len(modules))
+	for path := range modules {
+		byReal[canonicalPath(path)] = path
+	}
+	lookup := func(target string) (string, bool) {
+		target = filepath.Clean(target)
+		if _, ok := modules[target]; ok {
+			return target, true
+		}
+		key, ok := byReal[canonicalPath(target)]
+		return key, ok
+	}
 	return api.Plugin{
 		Name: "krate-actions",
 		Setup: func(pb api.PluginBuild) {
@@ -535,10 +549,11 @@ func actionServerBundlePlugin(res *bundler.ImportResolver, modules map[string]ma
 				if target == "" {
 					return api.OnResolveResult{}, nil
 				}
-				if _, ok := modules[filepath.Clean(target)]; !ok {
+				key, ok := lookup(target)
+				if !ok {
 					return api.OnResolveResult{}, nil
 				}
-				return api.OnResolveResult{Path: filepath.Clean(target), Namespace: "krate-action"}, nil
+				return api.OnResolveResult{Path: key, Namespace: "krate-action"}, nil
 			})
 			pb.OnLoad(api.OnLoadOptions{Filter: `.*`, Namespace: "krate-action"}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
 				exports := modules[filepath.Clean(args.Path)]
