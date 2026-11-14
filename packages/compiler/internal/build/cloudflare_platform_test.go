@@ -248,14 +248,17 @@ console.log(JSON.stringify(results));
 					t.Errorf("%s %s: got %d %q, want %d %q", c.mode, p, got[p].Status, got[p].Loc, w[0], w[1])
 				}
 			}
-			// Unknown URLs at any depth answer with the 404 page whatever the
-			// Accept header says; "always" does not redirect them (as krate serve).
+			// Unknown URLs follow the page slash rule (always: 301 to the slash
+			// form, never: slashed form redirects), then answer with the 404 page
+			// whatever the Accept header says.
 			for _, p := range []string{"/nope", "/a/b/c", "/nope/", "/a/b/c/"} {
+				slashed := strings.HasSuffix(p, "/")
 				for _, kind := range []string{"#html", "#any"} {
 					r := got[p+kind]
-					if strings.HasSuffix(p, "/") && c.mode == "never" {
-						if r.Status != 301 {
-							t.Errorf("%s %s%s: got %d, want the slash redirect", c.mode, p, kind, r.Status)
+					redirect := (c.mode == "always" && !slashed) || (c.mode == "never" && slashed)
+					if redirect {
+						if r.Status != 301 || r.Loc == "" {
+							t.Errorf("%s %s%s: got %d %q, want the slash redirect", c.mode, p, kind, r.Status, r.Loc)
 						}
 						continue
 					}

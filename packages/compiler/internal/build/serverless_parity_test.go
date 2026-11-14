@@ -188,7 +188,6 @@ func TestServerlessNodeParity(t *testing.T) {
 			contains:  []string{"from a streamed region", "data-krate-stream"}},
 		// Per-segment pages, inside the blog layout.
 		{name: "segment 404 unmatched", method: "GET", path: "/blog/a/b/c/", contains: []string{"blog-404", "id=blog-layout"}},
-		{name: "segment 404 unmatched accept", method: "GET", path: "/blog/a/b/c", headers: map[string]string{"Accept": "text/html"}, contains: []string{"blog-404"}},
 		{name: "segment 404 closed dynamic", method: "GET", path: "/blog/post/zzz/", contains: []string{"blog-404", "id=blog-layout"}},
 		{name: "closed dynamic known", method: "GET", path: "/blog/post/a/", contains: []string{"closed a"}},
 		{name: "segment 404 notFound()", method: "GET", path: "/blog/ssr-gone/", contains: []string{"blog-404", "id=blog-layout"}},

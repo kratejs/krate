@@ -122,12 +122,12 @@ func TestSegmentPagesServe(t *testing.T) {
 	}
 
 	t.Run("static", func(t *testing.T) {
-		resp, _ := expect(t, "/nope", 404, []string{"p-root404", "root-nav"}, []string{"p-blog404"})
+		resp, _ := expect(t, "/nope/", 404, []string{"p-root404", "root-nav"}, []string{"p-blog404"})
 		if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
 			t.Errorf("content-type %q", ct)
 		}
-		expect(t, "/blog/zzz", 404, []string{"p-blog404", "blog-layout", "root-nav"}, []string{"p-root404"})
-		expect(t, "/blog/zzz/deeper/still", 404, []string{"p-blog404"}, nil)
+		expect(t, "/blog/zzz/", 404, []string{"p-blog404", "blog-layout", "root-nav"}, []string{"p-root404"})
+		expect(t, "/blog/zzz/deeper/still/", 404, []string{"p-blog404"}, nil)
 		expect(t, "/blog/", 200, []string{"blog-index"}, nil)
 		expect(t, "/blog/nope.html", 404, []string{"p-blog404"}, nil)
 	})
@@ -148,7 +148,7 @@ func TestSegmentPagesServe(t *testing.T) {
 	t.Run("route groups scope their pages", func(t *testing.T) {
 		expect(t, "/cart/", 404, []string{"p-cart404", "shop-layout"}, []string{"p-root404"})
 		// No route matches here, so no group page applies.
-		expect(t, "/cart/zzz", 404, []string{"p-root404"}, []string{"p-cart404"})
+		expect(t, "/cart/zzz/", 404, []string{"p-root404"}, []string{"p-cart404"})
 	})
 
 	digestRe := regexp.MustCompile(`"digest":"([0-9a-f]{10})"`)

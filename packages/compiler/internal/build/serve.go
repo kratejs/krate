@@ -1919,6 +1919,14 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 			}
 		}
 
+		// An unknown URL follows the same slash rule as a page and then 404s
+		// at its canonical form. Real files and pages never reach a 404 here.
+		if !strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/api" && !strings.HasPrefix(r.URL.Path, "/__krate") && !notFoundPageURL(r.URL.Path) && !hasHiddenSegment(r.URL.Path) && !staticRouteExists(absOut, r.URL.Path) && !staticDirExists(absOut, r.URL.Path) {
+			if redirectToCanonicalSlash(slashMode, w, r) {
+				return
+			}
+		}
+
 		// Only buffer document requests. Buffering every asset just to detect a
 		// missing one would retain whole images/videos/fonts in memory, and a
 		// site without segment pages has nothing to substitute.
@@ -3407,4 +3415,24 @@ func withEnv(base, extra map[string]string) map[string]string {
 		out[k] = v
 	}
 	return out
+}
+
+// hasHiddenSegment reports whether a URL path has a dot-prefixed segment.
+func hasHiddenSegment(p string) bool {
+	for _, seg := range strings.Split(p, "/") {
+		if strings.HasPrefix(seg, ".") {
+			return true
+		}
+	}
+	return false
+}
+
+// staticDirExists reports whether a URL path names a folder of the output.
+func staticDirExists(absOut, urlPath string) bool {
+	up, err := url.PathUnescape(urlPath)
+	if err != nil {
+		up = urlPath
+	}
+	fi, err := os.Stat(filepath.Join(absOut, filepath.FromSlash(path.Clean("/"+up))))
+	return err == nil && fi.IsDir()
 }

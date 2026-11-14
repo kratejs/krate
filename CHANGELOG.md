@@ -396,7 +396,7 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
-- Unknown extensionless URLs (`/nope`, `/a/b/c`) answer with the site's 404 page instead of a bare `404 page not found`, on the Cloudflare, Vercel, Netlify and node targets and in `krate serve`, whatever the request's `Accept` header says.
+- Unknown extensionless URLs (`/nope`, `/a/b/c`) answer with the site's 404 page instead of a bare `404 page not found`, on the Cloudflare, Vercel, Netlify and node targets and in `krate serve`, whatever the request's `Accept` header says; with `trailingSlash: "always"` an unknown `/nope` first redirects to `/nope/`, like a page.
 - `.ts`, `.mts` and `.cts` files are never lexed as JSX, so `a < b || c > d` in a plain TypeScript file
   (including a workspace package outside the project root) no longer fails the build.
 - `import "server-only"` works in every server context (build-time passes, metadata routes, middleware,

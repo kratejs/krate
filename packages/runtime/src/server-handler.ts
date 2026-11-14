@@ -975,6 +975,11 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
       if (inPlace && inPlace.status !== 404) served = inPlace;
     }
     if (served && served.status !== 404) return mergeStaticResponse(rs, served);
+    // An unknown URL follows the same slash rule as a page, then answers 404 at its canonical form.
+    if (p !== "/api" && !p.startsWith("/api/") && !p.startsWith("/__krate") && !p.split("/").some((seg) => seg.startsWith("."))) {
+      const slash = redirectToCanonicalSlash(rs);
+      if (slash) return slash;
+    }
     const page404 = wantsHTML ? errorPage(p, 404, { closed: closedPattern }) : null;
     if (page404) return custom404(rs, page404);
     return notFoundText(rs, true);
