@@ -37,7 +37,15 @@ export default function Home() {
         if ((d as { echo?: unknown }).echo) resolve(d);
       };
     });
-    await worker.postMessage({ op: 'echo', n: 7 });
+    // The handle's event stream opens in the background, and a slow runner
+    // has lost the one echo before it did: post until an echo arrives. A post
+    // that fails rejects and fails the step.
+    let echoedNow = false;
+    void echoed.then(() => (echoedNow = true), () => (echoedNow = true));
+    for (let i = 0; i < 8 && !echoedNow; i++) {
+      await worker.postMessage({ op: 'echo', n: 7 });
+      await Promise.race([echoed.catch(() => {}), new Promise((r) => setTimeout(r, 2000))]);
+    }
     out.worker = await echoed;
 
     mark('view-port');
