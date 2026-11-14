@@ -64,3 +64,45 @@ export default function Post({ params }: any) { return <h1>{params.slug}</h1>; }
 		t.Errorf("the layout's metadata must reach the home page:\n%s", home)
 	}
 }
+
+// A page whose metadata is a call and that holds module-level JSX (local or
+// imported) still gets its tags, and the JSX still renders.
+func TestCallMetadataWithModuleLevelJSX(t *testing.T) {
+	b, root := hooksProject(t, map[string]string{
+		"src/lib/seo.ts":          `export function pageMetadata(title: string, description: string) { return { title, description, openGraph: { title } }; }`,
+		"src/components/hero.tsx": `export const hero = <h1>Imported Hero</h1>;`,
+		"src/pages/about.tsx": `import { pageMetadata } from '../lib/seo';
+export const metadata = pageMetadata('About', 'About us');
+const hero = <h1>Local Hero</h1>;
+export default function About() { return <main>{hero}<p>Text</p></main>; }`,
+		"src/pages/team.tsx": `import { pageMetadata } from '../lib/seo';
+import { hero } from '../components/hero.tsx';
+export const metadata = pageMetadata('Team', 'Team page');
+export default function Team() { return <main>{hero}<p>Text</p></main>; }`,
+	})
+	if err := b.BuildAll(); err != nil {
+		t.Fatal(err)
+	}
+	for route, want := range map[string][2]string{
+		"about/index.html": {"About", "Local Hero"},
+		"team/index.html":  {"Team", "Imported Hero"},
+	} {
+		html := readMetaDist(t, root, route)
+		head := headOf(html)
+		for _, w := range []string{"<title>" + want[0] + "</title>", "name=description content=", "og:title content=" + want[0]} {
+			if !strings.Contains(head, w) {
+				t.Errorf("%s head lacks %q:\n%s", route, w, head)
+			}
+		}
+		if !strings.Contains(html, "<h1>"+want[1]+"</h1>") {
+			t.Errorf("%s lacks the hero JSX:\n%s", route, html)
+		}
+	}
+}
+
+func TestMetadataExportPositionNamesTheExport(t *testing.T) {
+	name, line, col, text := metadataExportPosition("import x from 'y';\n\nexport const metadata = f();\n")
+	if name != "metadata" || line != 3 || col != 1 || text != "export const metadata = f();" {
+		t.Errorf("got %q %d:%d %q", name, line, col, text)
+	}
+}
