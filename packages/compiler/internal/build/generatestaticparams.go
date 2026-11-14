@@ -722,6 +722,9 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	if serverErr == nil && !serverPage {
 		serverErr = topLevelAwaitError(entryModule, extraPrograms)
 	}
+	if serverErr == nil && !serverPage && renderMode == RenderSSG {
+		serverErr = bundle.SyncActionError()
+	}
 	if serverErr != nil {
 		return nil, "", serverErr
 	}

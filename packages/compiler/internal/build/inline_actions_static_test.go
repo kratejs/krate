@@ -10,7 +10,7 @@ import (
 // TestInlineServerActionStaticPage covers the build-time path: an inline
 // action that closes over nothing is an ordinary action reference, so a
 // synchronous page renders its form with the action URL like an imported
-// action. One that captures a value in a synchronous component, or any inline
+// action. One that captures a value in a prerendered page, or any inline
 // action in a "use client" module, is KR7001.
 func TestInlineServerActionStaticPage(t *testing.T) {
 	b, root := scProject(t, map[string]string{

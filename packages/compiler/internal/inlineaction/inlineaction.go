@@ -42,10 +42,13 @@ type Action struct {
 	Export   string
 	ID       string
 	Captures []string
-	// EnclosingAsync reports that the nearest enclosing function is async. Only
-	// there are captured values sealed per request.
+	// EnclosingAsync reports that some enclosing function is async, as in an
+	// async page whose list callback declares the action. Only there are
+	// captured values sealed per request.
 	EnclosingAsync bool
 	Pos            ast.Pos
+	// Loc is "file:line:col" of the action, for runtime error messages.
+	Loc string
 }
 
 // Options configures Hoist.
@@ -80,6 +83,9 @@ func Call(a *Action) string {
 	label := a.Name
 	if label == "" {
 		label = "an inline server action"
+	}
+	if a.Loc != "" {
+		label += " (" + a.Loc + ")"
 	}
 	labelJSON, _ := json.Marshal(label)
 	return fmt.Sprintf("__krateInlineAction(%q, [%s], %s, %s)", a.ID, strings.Join(a.Captures, ", "), names, labelJSON)
@@ -197,8 +203,8 @@ func (h *hoister) find() []candidate {
 			_, isMember := n.(*ast.ClassMember)
 			c := candidate{node: n, pos: pos, class: isMember}
 			c.scope = append(c.scope, stack...)
-			if len(asyncs) > 0 {
-				c.async = asyncs[len(asyncs)-1]
+			for _, a := range asyncs {
+				c.async = c.async || a
 			}
 			cands = append(cands, c)
 			return false
@@ -435,6 +441,7 @@ func (h *hoister) build(cands []candidate) (*Result, error) {
 			Name:           name,
 			EnclosingAsync: c.async,
 			Pos:            c.pos,
+			Loc:            fmt.Sprintf("%s:%d:%d", h.o.Rel, c.pos.Line, c.pos.Col),
 		}
 		suffix := identPart.ReplaceAllString(name, "_")
 		if suffix != "" {
