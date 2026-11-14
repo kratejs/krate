@@ -396,6 +396,7 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- Two modules that export the same name and are both re-exported by a barrel (`export { dup } from './a'`) keep their own binding: each importer calls its own `dup` instead of whichever module came last. `KR7116` now only reports clashes that cannot be renamed (`export *`, the page module, `import()`, "use client"/"use server" modules, alias exports).
 - KR7116 (a name exported by two modules that cannot be renamed) is reported once per build instead of on every page, names the importing modules, and no longer fires for a package export that is bundled apart from the project.
 - KR7101 no longer says "a error", and the diagnostic points at line 1, column 1 of the offending file instead of 0:0.
 - `site.htmlAttributes` and `site.bodyAttributes` accept JSX names: `className` is written as `class`, `htmlFor` as `for`.

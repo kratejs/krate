@@ -24,13 +24,16 @@ import (
 //
 // Named exports move too, by rewriting the modules that import them: the
 // importing specifier asks for the new name, and the local binding follows when
-// it had the old one. That is only safe when every consumer is visible as an
-// import of the module, so a module stays as it is, and the two modules that
-// export one name keep a warning (KR7116), when it is re-exported through a
-// barrel or `export *`, loaded with import(), or is a
-// "use client" or "use server" module, whose consumers read export names from
-// source. An ordinary import renames nothing: only a name that the bundle
-// imports from two modules is touched.
+// it had the old one. A named re-export (`export { x as y } from './m'`) keeps
+// the public name and points at the new binding; an importer of such a barrel
+// keeps asking for the public name and binds the new one locally. That is only
+// safe when every consumer is visible as an import or a named re-export of the
+// module, so a module stays as it is, and the modules that export one name
+// keep a warning (KR7116), when it is re-exported with `export *`, loaded with
+// import(), is the entry, is a "use client" or "use server" module, whose
+// consumers read export names from source, or exports the name under an alias.
+// An ordinary import renames nothing: only a name that the bundle imports from
+// two modules is touched.
 
 // PrivateNameMark separates a renamed binding from its module suffix.
 const PrivateNameMark = "$m"
@@ -207,11 +210,11 @@ func (b *Bundler) isolatePrivateNames() {
 		})
 	}
 	// Importers of a renamed export ask for its new name.
-	named := plan.importerRewrites(b, mods)
+	rewrites := plan.importerRewrites(b, mods)
 	unlock()
 	for _, mod := range mods {
-		if len(renames[mod.Path]) > 0 || len(imports[mod.Path]) > 0 || len(plan.renames[mod.Path]) > 0 || len(named[mod.Path]) > 0 {
-			b.applyPrivateRenames(mod, renames[mod.Path], imports[mod.Path], plan.renames[mod.Path], named[mod.Path])
+		if len(renames[mod.Path]) > 0 || len(imports[mod.Path]) > 0 || len(plan.renames[mod.Path]) > 0 || !rewrites[mod.Path].empty() {
+			b.applyPrivateRenames(mod, renames[mod.Path], imports[mod.Path], plan.renames[mod.Path], rewrites[mod.Path])
 		}
 	}
 }
@@ -264,28 +267,98 @@ type exportClash struct {
 	pkgOnly bool
 }
 
-// importerRewrites returns, per importing module, the named imports that must
+// moduleRewrites are the import and re-export specifiers of one module that
 // follow a renamed export.
-func (p exportPlan) importerRewrites(b *Bundler, mods []*Module) map[string]map[importKey]string {
-	out := map[string]map[importKey]string{}
+type moduleRewrites struct {
+	// named are named imports of the module that declares the renamed export:
+	// the specifier asks for the new name.
+	named map[importKey]string
+	// via are named imports of a barrel that re-exports it: the specifier keeps
+	// the public name and only the local binding changes.
+	via map[importKey]string
+	// reexports are `export { x } from` specifiers of the declaring module, by
+	// the name they ask for.
+	reexports map[importKey]string
+}
+
+func (r moduleRewrites) empty() bool {
+	return len(r.named) == 0 && len(r.via) == 0 && len(r.reexports) == 0
+}
+
+func (r moduleRewrites) key() string {
+	return namedKey(r.named) + "|" + namedKey(r.via) + "|" + namedKey(r.reexports)
+}
+
+// reexportOrigin follows named re-exports from path to the module that
+// declares name, and returns it with the name it has there.
+func (b *Bundler) reexportOrigin(byPath map[string]*Module, path, name string, depth int) (string, string) {
+	mod := byPath[path]
+	if mod == nil || depth > 16 {
+		return path, name
+	}
+	for _, stmt := range mod.Program.Body {
+		exp, ok := stmt.(*ast.ExportStmt)
+		if !ok || exp.ReexportSource == "" || exp.StarReexport || exp.Namespace != "" {
+			continue
+		}
+		for _, spec := range exp.ReexportNamed {
+			if spec.Remote == name {
+				return b.reexportOrigin(byPath, b.resolveImportForModule(path, strings.Trim(exp.ReexportSource, "\"'`")), spec.Local, depth+1)
+			}
+		}
+	}
+	return path, name
+}
+
+// importerRewrites returns, per module, the specifiers that must follow a
+// renamed export.
+func (p exportPlan) importerRewrites(b *Bundler, mods []*Module) map[string]moduleRewrites {
+	out := map[string]moduleRewrites{}
 	if len(p.renames) == 0 {
 		return out
 	}
+	byPath := make(map[string]*Module, len(mods))
 	for _, mod := range mods {
+		byPath[mod.Path] = mod
+	}
+	add := func(m map[importKey]string, k importKey, to string) map[importKey]string {
+		if m == nil {
+			m = map[importKey]string{}
+		}
+		m[k] = to
+		return m
+	}
+	for _, mod := range mods {
+		rw := out[mod.Path]
 		for _, stmt := range mod.Program.Body {
-			imp, ok := stmt.(*ast.ImportStmt)
-			if !ok || len(imp.Named) == 0 {
-				continue
-			}
-			target := b.resolveImportForModule(mod.Path, strings.Trim(imp.Source, "\"'`"))
-			for _, spec := range imp.Named {
-				if to, ok := p.renames[target][spec.Remote]; ok {
-					if out[mod.Path] == nil {
-						out[mod.Path] = map[importKey]string{}
+			switch st := stmt.(type) {
+			case *ast.ImportStmt:
+				target := b.resolveImportForModule(mod.Path, strings.Trim(st.Source, "\"'`"))
+				for _, spec := range st.Named {
+					origin, name := b.reexportOrigin(byPath, target, spec.Remote, 0)
+					to, ok := p.renames[origin][name]
+					switch {
+					case !ok:
+					case origin == target:
+						rw.named = add(rw.named, importKey{target, spec.Remote}, to)
+					default:
+						rw.via = add(rw.via, importKey{target, spec.Remote}, to)
 					}
-					out[mod.Path][importKey{target, spec.Remote}] = to
+				}
+			case *ast.ExportStmt:
+				if st.ReexportSource == "" || st.StarReexport || st.Namespace != "" {
+					continue
+				}
+				target := b.resolveImportForModule(mod.Path, strings.Trim(st.ReexportSource, "\"'`"))
+				for _, spec := range st.ReexportNamed {
+					if to, ok := p.renames[target][spec.Local]; ok {
+						rw.reexports = add(rw.reexports, importKey{target, spec.Local}, to)
+					}
 				}
 			}
+		}
+		if !rw.empty() {
+			out[mod.Path] = rw
 		}
 	}
 	return out
@@ -333,7 +406,7 @@ func (b *Bundler) planExportRenames(mods []*Module, dynamic map[string]bool) exp
 
 	imported := map[string]map[string]bool{}
 	importers := map[string]map[string]bool{} // name -> base names of importing modules
-	pinned := map[string]bool{}               // modules whose consumers are not all imports
+	pinned := map[string]bool{}               // modules whose consumers are not all rewritable
 	for _, mod := range mods {
 		locals := map[string]string{} // import local -> target module
 		for _, stmt := range mod.Program.Body {
@@ -364,7 +437,9 @@ func (b *Bundler) planExportRenames(mods []*Module, dynamic map[string]bool) exp
 					locals[st.Default] = target
 				}
 			case *ast.ExportStmt:
-				if st.ReexportSource != "" {
+				// A named re-export is rewritten to follow a rename; `export *`
+				// and `export * as` expose every name of the module as written.
+				if st.ReexportSource != "" && (st.StarReexport || st.Namespace != "") {
 					pinned[b.resolveImportForModule(mod.Path, strings.Trim(st.ReexportSource, "\"'`"))] = true
 				}
 			}
@@ -520,10 +595,10 @@ func (b *Bundler) warnExportCollisions(mods []*Module, clashes []exportClash) {
 // named are the named imports that ask for a renamed export. Cached programs are
 // shared between pages, so this happens on a copy, and the copy is kept for the
 // next page that needs the same renames.
-func (b *Bundler) applyPrivateRenames(mod *Module, bindings, imports, exports map[string]string, named map[importKey]string) {
+func (b *Bundler) applyPrivateRenames(mod *Module, bindings, imports, exports map[string]string, rw moduleRewrites) {
 	orig := mod.Program
 	shared := !mod.IsEntry && !mod.Rewritable
-	key := renameKey(bindings) + "|" + renameKey(imports) + "|" + renameKey(exports) + "|" + namedKey(named)
+	key := renameKey(bindings) + "|" + renameKey(imports) + "|" + renameKey(exports) + "|" + rw.key()
 	if shared {
 		if prog := b.cache.getRenamed(mod.Path, orig, key); prog != nil {
 			mod.Program = prog
@@ -551,10 +626,10 @@ func (b *Bundler) applyPrivateRenames(mod *Module, bindings, imports, exports ma
 	}
 	// A named import whose local binding is the old name follows the new one.
 	type specRewrite struct {
-		spec     *ast.NamedImport
-		to       string
-		rebinds  bool
-		oldLocal string
+		spec      *ast.NamedImport
+		to        string
+		rebinds   bool
+		viaBarrel bool // the barrel keeps the public name, so only the local moves
 	}
 	var rewrites []specRewrite
 	for _, stmt := range mod.Program.Body {
@@ -565,15 +640,19 @@ func (b *Bundler) applyPrivateRenames(mod *Module, bindings, imports, exports ma
 		target := b.resolveImportForModule(mod.Path, strings.Trim(imp.Source, "\"'`"))
 		for i := range imp.Named {
 			spec := &imp.Named[i]
-			to, ok := named[importKey{target, spec.Remote}]
+			to, ok := rw.named[importKey{target, spec.Remote}]
+			viaBarrel := false
 			if !ok {
-				continue
+				if to, ok = rw.via[importKey{target, spec.Remote}]; !ok {
+					continue
+				}
+				viaBarrel = true
 			}
 			local := spec.Local
 			if local == "" {
 				local = spec.Remote
 			}
-			rewrites = append(rewrites, specRewrite{spec: spec, to: to, rebinds: local == spec.Remote, oldLocal: local})
+			rewrites = append(rewrites, specRewrite{spec: spec, to: to, rebinds: local == spec.Remote, viaBarrel: viaBarrel})
 			if local == spec.Remote {
 				all[local] = to
 			}
@@ -603,6 +682,10 @@ func (b *Bundler) applyPrivateRenames(mod *Module, bindings, imports, exports ma
 		}
 	}
 	for _, r := range rewrites {
+		if r.viaBarrel {
+			r.spec.Local = r.to
+			continue
+		}
 		r.spec.Remote = r.to
 		if r.rebinds {
 			r.spec.Local = r.to

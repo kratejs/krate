@@ -83,7 +83,7 @@ func TestExportCollisionWarnsOncePerBuild(t *testing.T) {
 		"b.ts":                          "export function dup() { return 'B'; }\n",
 		"ca.ts":                         "import { dup } from './a';\nexport const ra = dup();\n",
 		"cb.ts":                         "import { dup } from './b';\nexport const rb = dup();\n",
-		"ab.ts":                         "export { dup as dupA } from './a';\nexport { dup as dupB } from './b';\nexport { ra } from './ca';\nexport { rb } from './cb';\n",
+		"ab.ts":                         "export * as A from './a';\nexport * as B from './b';\nexport { ra } from './ca';\nexport { rb } from './cb';\n",
 		"pkg.tsx":                       "import { run } from 'zod';\nimport { c } from './barrel';\nexport default function P() { return <p>{run()}{c}</p>; }\n",
 		"p1.tsx":                        "import { ra, rb } from './ab';\nexport default function P() { return <p>{ra}{rb}</p>; }\n",
 		"p2.tsx":                        "import { ra, rb } from './ab';\nexport default function P() { return <b>{ra}{rb}</b>; }\n",
