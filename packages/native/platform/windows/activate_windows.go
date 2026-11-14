@@ -122,14 +122,6 @@ func registerToastProtocol(scheme, productName string) error {
 	return nil
 }
 
-// deleteToastProtocol removes what registerToastProtocol wrote (tests).
-func deleteToastProtocol(scheme string) {
-	base := `Software\Classes\` + scheme
-	for _, sub := range []string{`\shell\open\command`, `\shell\open`, `\shell`, `\DefaultIcon`, ``} {
-		_ = registry.DeleteKey(registry.CURRENT_USER, base+sub)
-	}
-}
-
 // reportRuntimeFailure tells the user, in a message box, that the WebView2
 // Runtime is missing or broken, and offers the download page. A program built
 // for the GUI subsystem has no console to print to, so without this the app

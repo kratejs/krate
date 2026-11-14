@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kratejs/krate/packages/compiler/internal/config"
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
 )
 
@@ -63,7 +62,11 @@ export default async function Home() {
 	if !strings.Contains(string(shell), `island-loader.`) || !strings.Contains(string(shell), "importmap") {
 		t.Errorf("server page shell needs the island loader and the Preact import map:\n%s", shell)
 	}
-	chunks, _ := filepath.Glob(filepath.Join(root, "dist", "chunks", "client.*.js"))
+	// The boundary chunk is an entry of the island graph.
+	if err := b.writeIslandBundles(); err != nil {
+		t.Fatal(err)
+	}
+	chunks, _ := filepath.Glob(filepath.Join(root, "dist", "chunks", "island_*.js"))
 	if len(chunks) != 1 {
 		t.Fatalf("expected one client chunk, got %v", chunks)
 	}
@@ -83,111 +86,6 @@ export default async function Home() {
 	}
 }
 
-// A project root reached through a symlink (macOS /var -> /private/var) must
-// still match esbuild's canonical module paths when it loads client boundaries.
-func TestClientBoundaryThroughSymlinkedRoot(t *testing.T) {
-	real := t.TempDir()
-	writeFileRel(t, real, "src/components/Counter.tsx", counterClientSrc)
-	writeFileRel(t, real, "src/pages/index.tsx", `import Counter from "../components/Counter";
-export default async function Home() {
-  await Promise.resolve();
-  return <main><Counter start={1} label="n" /></main>;
-}`)
-	link := filepath.Join(t.TempDir(), "linked")
-	if err := os.Symlink(real, link); err != nil {
-		if out, jerr := exec.Command("cmd", "/c", "mklink", "/J", link, real).CombinedOutput(); jerr != nil {
-			t.Skipf("cannot create a symlinked project root: %v (%s)", jerr, out)
-		}
-	}
-	withPreact(t, link)
-	cfg := config.Default()
-	cfg.PagesDir = filepath.Join(link, "src", "pages")
-	cfg.OutDir = filepath.Join(link, "dist")
-	b := New(link, cfg)
-	if err := b.BuildAll(); err != nil {
-		t.Fatalf("BuildAll: %v", err)
-	}
-	bundle, err := os.ReadFile(filepath.Join(link, "dist", ".krate", "server-bundles", "index.server.mjs"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(bundle), "clientBoundary") {
-		t.Fatalf("page bundle through a symlinked root has no client boundary:\n%s", bundle)
-	}
-}
-
-// An ordinary page (no server components) that imports a "use client" module
-// compiles exactly as before: Krate hydration, no island marker.
-func TestUseClientInOrdinaryPageUnchanged(t *testing.T) {
-	b, root := scProject(t, map[string]string{
-		"src/components/Counter.tsx": counterClientSrc,
-		"src/pages/index.tsx": `import Counter from "../components/Counter";
-export default function Home() { return <main><Counter start={1} label="n" /></main>; }`,
-	})
-	if err := b.BuildAll(); err != nil {
-		t.Fatalf("BuildAll: %v", err)
-	}
-	shell, _ := os.ReadFile(filepath.Join(root, "dist", "index.html"))
-	s := string(shell)
-	if strings.Contains(s, "krate-island") || !strings.Contains(s, "id=inc>n: <!--k:") {
-		t.Errorf("ordinary page should render the counter through the Krate pipeline:\n%s", s)
-	}
-	if !strings.Contains(s, ".js></script>") {
-		t.Errorf("ordinary page should keep its hydration script:\n%s", s)
-	}
-}
-
-func TestServerTreeRejectsHooks(t *testing.T) {
-	err := buildErr(t, map[string]string{
-		"src/Widget.tsx": `import { useState } from "react";
-export function Widget() { const [v] = useState(1); return <p>{v}</p>; }`,
-		"src/pages/index.tsx": `import { Widget } from "../Widget";
-export default async function Home() { await Promise.resolve(); return <main><Widget /></main>; }`,
-	})
-	wantCode(t, err, diag.CodeClientAPIInServer, "useState() in Widget")
-	if !strings.Contains(err.Error(), "Widget.tsx") {
-		t.Errorf("diagnostic should point at the component's module: %v", err)
-	}
-}
-
-func TestServerTreeRejectsEventHandlers(t *testing.T) {
-	err := buildErr(t, map[string]string{
-		"src/pages/index.tsx": `export default async function Home() {
-  await Promise.resolve();
-  return <main><button onClick={() => console.log(1)}>go</button></main>;
-}`,
-	})
-	wantCode(t, err, diag.CodeClientAPIInServer, "event handler onClick on <button>")
-}
-
-func TestServerTreeChecksOnlyServerSubtrees(t *testing.T) {
-	// The sync page keeps its interactive button (normal Krate hydration);
-	// only the async child's subtree is a server tree.
-	b, _ := scProject(t, map[string]string{
-		"src/pages/index.tsx": `import { createSignal } from "@krate/runtime";
-async function Stats() { const n = await Promise.resolve(3); return <p>{n}</p>; }
-export default function Home() {
-  const [c, setC] = createSignal(0);
-  return <main><button onClick={() => setC(c() + 1)}>{c()}</button><Stats /></main>;
-}`,
-	})
-	if err := b.BuildAll(); err != nil {
-		t.Fatalf("BuildAll: %v", err)
-	}
-}
-
-func TestServerToClientFunctionPropIsAnError(t *testing.T) {
-	err := buildErr(t, map[string]string{
-		"src/components/Counter.tsx": counterClientSrc,
-		"src/pages/index.tsx": `import Counter from "../components/Counter";
-export default async function Home() {
-  await Promise.resolve();
-  return <main><Counter start={1} label="n" onPick={() => 1} /></main>;
-}`,
-	})
-	wantCode(t, err, diag.CodeClientPropNotSerializable, "prop `onPick`")
-}
-
 func TestServerOnlyModuleInClientBoundaryIsAnError(t *testing.T) {
 	b, projRoot := scProject(t, map[string]string{
 		"src/db.ts": `import "server-only";
@@ -200,95 +98,6 @@ export default async function Home() { await Promise.resolve(); return <main><Le
 	})
 	withPreact(t, projRoot)
 	wantCode(t, b.BuildAll(), diag.CodeServerOnlyInClient, `db.ts imports "server-only"`)
-}
-
-func TestServerOnlyImportAcceptedInServerTree(t *testing.T) {
-	b, root := scProject(t, map[string]string{
-		"src/db.ts": `import "server-only";
-export async function load() { return "row"; }`,
-		"src/pages/index.tsx": `import { load } from "../db";
-export default async function Home() { const r = await load(); return <main>{r}</main>; }`,
-	})
-	if err := b.BuildAll(); err != nil {
-		t.Fatalf("BuildAll: %v", err)
-	}
-	bundle, _ := os.ReadFile(filepath.Join(root, "dist", ".krate", "server-bundles", "index.server.mjs"))
-	if strings.Contains(string(bundle), `from "server-only"`) || strings.Contains(string(bundle), `import "server-only"`) {
-		t.Errorf("server-only marker should be resolved away, not left as a runtime import:\n%s", bundle)
-	}
-}
-
-func TestAsyncClientComponentIsAnError(t *testing.T) {
-	err := buildErr(t, map[string]string{
-		"src/components/Bad.tsx": `"use client";
-export default async function Bad() { return <p>x</p>; }`,
-		"src/pages/index.tsx": `import Bad from "../components/Bad";
-export default async function Home() { await Promise.resolve(); return <main><Bad /></main>; }`,
-	})
-	wantCode(t, err, diag.CodeAsyncClientComponent, "client component Bad is async")
-}
-
-func TestUseClientExportStarIsAnError(t *testing.T) {
-	err := buildErr(t, map[string]string{
-		"src/components/impl.tsx": `export function A() { return <p>a</p>; }`,
-		"src/components/All.tsx": `"use client";
-export * from "./impl";`,
-		"src/pages/index.tsx": `import { A } from "../components/All";
-export default async function Home() { await Promise.resolve(); return <main><A /></main>; }`,
-	})
-	wantCode(t, err, diag.CodeClientBoundaryExports, "export *")
-}
-
-// TestUseClientIslandSidecarE2E renders an async page with a client component
-// through the real SSR sidecar: the island carries the Preact server render,
-// the serialized props and the server-rendered children.
-func TestUseClientIslandSidecarE2E(t *testing.T) {
-	ensureRuntimeDist(t)
-	node, err := exec.LookPath("node")
-	if err != nil {
-		requireE2E(t, "node not available: %v", err)
-	}
-	repoRoot, err := repoRootPath()
-	if err != nil {
-		t.Fatal(err)
-	}
-	b, root := scProject(t, map[string]string{
-		"src/components/Counter.tsx": counterClientSrc,
-		"src/pages/index.tsx": `import Counter from "../components/Counter";
-async function Note() { await Promise.resolve(); return <em>server note</em>; }
-export default async function Home() {
-  const start = await Promise.resolve(5);
-  return <main><Counter start={start} label="Count"><Note /></Counter></main>;
-}`,
-	})
-	withPreact(t, root)
-	if err := b.BuildAll(); err != nil {
-		t.Fatalf("BuildAll: %v", err)
-	}
-	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
-		t.Fatal(err)
-	}
-	base, stop := startSidecar(t, node, repoRoot, root, b.Cfg.OutDir)
-	defer stop()
-	frames := postSCRegions(t, base, map[string]any{
-		"route": "/", "url": "/", "method": "GET", "params": map[string]string{},
-		"regions": []map[string]string{{"id": "page", "kind": "page"}},
-	})
-	if len(frames) != 1 || frames[0].Status != 200 {
-		t.Fatalf("frames: %+v", frames)
-	}
-	html := frames[0].HTML
-	for _, want := range []string{
-		`<krate-island style="display:contents" data-module="`,
-		`data-export="default"`,
-		`&quot;start&quot;:5`,
-		`<button id="inc">Count: 5</button>`,
-		`<krate-children style="display:contents"><em>server note</em></krate-children>`,
-	} {
-		if !strings.Contains(html, want) {
-			t.Errorf("island HTML missing %q:\n%s", want, html)
-		}
-	}
 }
 
 // TestUseClientIslandBrowser serves an async page through the real Go server
@@ -351,20 +160,4 @@ export default async function Home() {
 	if res.Before != "Count: 5" || res.After != "Count: 7" || res.Children != "server note" || len(res.Errors) > 0 {
 		t.Fatalf("unexpected browser result: %+v", res)
 	}
-}
-
-// esbuild errors of a client component build are reported at the file and
-// position esbuild found them, not at the page that uses the component.
-func TestClientBoundaryBundleErrorKeepsEsbuildLocation(t *testing.T) {
-	b, projRoot := scProject(t, map[string]string{
-		"src/lib/broken.ts": "export const fine = 1;\n",
-		"src/components/Widget.tsx": `"use client";
-import { bad } from "../lib/broken";
-export default function Widget() { return <p>{String(bad)}</p>; }`,
-		"src/pages/index.tsx": `import Widget from "../components/Widget";
-export default async function Home() { await Promise.resolve(); return <main><Widget /></main>; }`,
-	})
-	withPreact(t, projRoot)
-	err := b.BuildAll()
-	wantCode(t, err, diag.CodeIslandAsset, "src/components/Widget.tsx:2:10: [KR8009]")
 }

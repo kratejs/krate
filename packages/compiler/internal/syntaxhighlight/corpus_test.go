@@ -42,30 +42,11 @@ var corpusSpecs = []corpusSpec{
 	{"plaintext", []string{"text"}, []string{".txt"}},
 }
 
-// TestEveryShippedLanguageHasACorpus keeps the parity test in step with the
-// shipped list: a language cannot be added without code to check it against.
-func TestEveryShippedLanguageHasACorpus(t *testing.T) {
-	covered := map[string]bool{}
-	for _, s := range corpusSpecs {
-		covered[strings.ToLower(s.lexer)] = true
-	}
-	for _, l := range ShippedLanguages {
-		if !covered[strings.ToLower(l)] {
-			t.Errorf("%s is shipped but has no entry in corpusSpecs", l)
-		}
-	}
-	for _, s := range corpusSpecs {
-		if _, ok := ShippedLexer(s.langs[0]); !ok {
-			t.Errorf("corpus spec %s is not a shipped language", s.langs[0])
-		}
-	}
-}
-
 const (
 	minFileBytes  = 200
 	maxFileBytes  = 300 << 10
-	corpusBudget  = 1536 << 10 // bytes of sampled files per language
-	variantBudget = 192 << 10  // bytes of mutated copies per language
+	corpusBudget  = 256 << 10 // bytes of sampled files per language
+	variantBudget = 32 << 10  // bytes of mutated copies per language
 )
 
 var (

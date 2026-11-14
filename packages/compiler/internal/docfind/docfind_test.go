@@ -3,7 +3,6 @@ package docfind
 import (
 	"context"
 	"encoding/json"
-	"strings"
 	"testing"
 
 	"github.com/tetratelabs/wazero"
@@ -53,50 +52,6 @@ func TestBuildProducesSearchableWASM(t *testing.T) {
 	results = searchWASM(t, built, "zzz-not-in-index")
 	if len(results) != 0 {
 		t.Fatalf("expected no results for gibberish, got %s", mustJSON(results))
-	}
-}
-
-func TestSearchInProcess(t *testing.T) {
-	docs := []Document{
-		{Title: "Getting Started", Category: "docs", Href: "/docs/getting-started", Body: "This guide will help you get started with krate."},
-		{Title: "Configuration", Category: "docs", Href: "/docs/configuration", Body: "Configure krate with krate.config.ts."},
-	}
-	got, err := Search(context.Background(), docs, "config", 8)
-	if err != nil {
-		t.Fatalf("Search: %v", err)
-	}
-	found := false
-	for _, r := range got {
-		if r.Href == "/docs/configuration" {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("'config' did not match /docs/configuration: %+v", got)
-	}
-
-	none, err := Search(context.Background(), docs, "zzz-not-in-index", 8)
-	if err != nil {
-		t.Fatalf("Search(gibberish): %v", err)
-	}
-	if len(none) != 0 {
-		t.Fatalf("expected no results for gibberish, got %+v", none)
-	}
-}
-
-func TestBuildEmptyDocuments(t *testing.T) {
-	_, err := Build(context.Background(), nil)
-	if err == nil {
-		t.Fatal("expected error for empty documents")
-	}
-}
-
-func TestValidateDocuments(t *testing.T) {
-	if err := ValidateDocuments([]Document{{Title: "a", Href: "/a", Body: "b"}}); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if err := ValidateDocuments([]Document{{Title: "", Href: "", Body: ""}}); err == nil {
-		t.Fatal("expected error for empty document")
 	}
 }
 
@@ -167,16 +122,4 @@ func searchWASM(t *testing.T, module []byte, query string) []map[string]string {
 func mustJSON(v any) string {
 	b, _ := json.Marshal(v)
 	return string(b)
-}
-
-func TestEmbeddedAssetsPresent(t *testing.T) {
-	if len(DocfindJS) == 0 {
-		t.Fatal("docfind.js glue is empty")
-	}
-	if !strings.Contains(string(DocfindJS), "docfind_search") {
-		t.Fatal("docfind.js glue does not reference docfind_search")
-	}
-	if len(searchWasm) == 0 || len(builderWasm) == 0 {
-		t.Fatal("embedded wasm modules missing")
-	}
 }

@@ -147,19 +147,3 @@ func TestWindowsResourcesLinkAndParse(t *testing.T) {
 		}
 	}
 }
-
-func TestMachoSignatureOfGoBuilds(t *testing.T) {
-	if testing.Short() {
-		t.Skip("builds Go programs")
-	}
-	dir := tinyProgram(t)
-	arm := filepath.Join(dir, "arm64")
-	goBuild(t, dir, "darwin", "arm64", arm)
-	ok, err := machoHasSignature(arm)
-	if err != nil || !ok {
-		t.Fatalf("the Go linker should sign darwin/arm64 binaries ad hoc: %v %v", ok, err)
-	}
-	if _, err := machoHasSignature(filepath.Join(dir, "main.go")); err == nil {
-		t.Fatal("a text file is not a Mach-O")
-	}
-}

@@ -7,6 +7,8 @@
  * forwards runtime errors back to the dev server, and offers open-in-editor.
  */
 
+import { siteConfig } from './site-config.js';
+
 interface DevDiagnostic {
   file?: string;
   line?: number;
@@ -61,7 +63,7 @@ export function isNativeOrigin(): boolean {
 
 function devConfig(): Required<DevConfig> {
   const raw = (window as any).__KRATE_DEV__ as DevConfig | undefined;
-  const runtime = (window as any).__KRATE_CFG__ as DevConfig | undefined;
+  const runtime = siteConfig() as DevConfig;
   const native = isNativeOrigin();
   return {
     sse: raw?.sse ?? '/__krate/hotreload',

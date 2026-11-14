@@ -17,6 +17,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/fsutil"
 	irtree "github.com/kratejs/krate/packages/compiler/internal/irtree"
+	"github.com/kratejs/krate/packages/compiler/internal/resolver"
 )
 
 // Client boundaries ("use client").
@@ -37,13 +38,56 @@ type ClientBoundary struct {
 	SourcePath string   // absolute module path
 	Exports    []string // export names ("default" for the default export)
 	ChunkURL   string   // hydration chunk URL
+	// Spec is set for a package boundary: the bare specifier of a React-bound
+	// package whose components a server module imports. Entry then defines
+	// `__m` (the used exports) in place of importing SourcePath, ResolveDir is
+	// where the specifier resolves from, and Hydrate is false for a package
+	// whose components have no state or effects (icons), which ship no island.
+	Spec       string
+	Entry      string
+	ResolveDir string
+	Hydrate    bool
+	// Real marks a boundary that runs on real react and react-dom: a React
+	// reconciler library or a module that imports one. The server emits a
+	// fallback placeholder instead of rendering it (see realreact.go).
+	Real bool
+}
+
+// hydrates reports whether the boundary's components become islands.
+func (cb ClientBoundary) hydrates() bool { return cb.Real || cb.Spec == "" || cb.Hydrate }
+
+// anyBoundaryHydrates reports whether a page needs the island loader: some
+// boundary of it becomes an island.
+func anyBoundaryHydrates(boundaries []ClientBoundary) bool {
+	for _, cb := range boundaries {
+		if cb.hydrates() {
+			return true
+		}
+	}
+	return false
+}
+
+// entrySource is the module preamble that binds `__m`, the exports of the
+// boundary, for the client chunk and the server render module.
+func (cb ClientBoundary) entrySource() string {
+	if cb.Entry != "" {
+		return cb.Entry
+	}
+	return "import * as __m from " + strconv.Quote(cb.SourcePath) + ";\n"
+}
+
+func (cb ClientBoundary) resolveDir() string {
+	if cb.ResolveDir != "" {
+		return cb.ResolveDir
+	}
+	return filepath.Dir(cb.SourcePath)
 }
 
 // clientIslandLoaderJS mounts every <krate-island> that is not mounted yet
 // from its chunk. It is a classic script in a chunk file (not inline) so the
 // SPA router loads it when a soft navigation arrives on a page with islands,
 // and it is idempotent: it only touches islands it has not mounted.
-const clientIslandLoaderJS = `(function(){document.querySelectorAll("krate-island[data-src]:not([data-krate-island-mounted])").forEach(function(el){el.setAttribute("data-krate-island-mounted","");import(el.getAttribute("data-src")).then(function(m){m.mount(el)}).catch(function(e){console.error("krate client component:",e);el.setAttribute("data-krate-island-error","")})})})();`
+const clientIslandLoaderJS = `(function(){document.querySelectorAll("krate-island[data-src]:not([data-krate-island-mounted])").forEach(function(el){el.setAttribute("data-krate-island-mounted","");import(el.getAttribute("data-src")).then(function(m){return m.mount(el)}).catch(function(e){console.error("krate client component:",e);el.setAttribute("data-krate-island-error","")})})})();`
 
 // islandLoaderHTML writes the island loader chunk (once per content) and
 // returns the script tag that references it. The tag is deferred so a hard
@@ -63,8 +107,20 @@ func (b *Builder) islandLoaderHTML() (string, error) {
 // server-rendered children become a display:contents element holding the
 // HTML, and server action references become callable functions.
 const clientReviveJS = `
-function __krateRevive(v, h, call) {
-  if (Array.isArray(v)) return v.map(function (x) { return __krateRevive(x, h, call); });
+function __krateTree(n, h, call, comp) {
+  if (n === null || n === undefined || typeof n === "boolean") return null;
+  if (typeof n === "string" || typeof n === "number") return n;
+  if (Array.isArray(n)) return n.map(function (x) { return __krateTree(x, h, call, comp); });
+  if (n.$ === "h") return h("krate-children", { style: "display:contents", dangerouslySetInnerHTML: { __html: n.h } });
+  var kids = (n.c || []).map(function (x) { return __krateTree(x, h, call, comp); });
+  var props = __krateRevive(n.p || {}, h, call, comp);
+  if (n.$ === "e") return h.apply(null, [n.t, props].concat(kids));
+  var C = comp(n.m, n.e);
+  if (typeof C !== "function") throw new Error("client component " + n.e + " of " + n.m + " is not loaded");
+  return h.apply(null, [C, props].concat(kids));
+}
+function __krateRevive(v, h, call, comp) {
+  if (Array.isArray(v)) return v.map(function (x) { return __krateRevive(x, h, call, comp); });
   if (v && typeof v === "object") {
     if (typeof v.__krateAction === "string") {
       var url = v.__krateAction;
@@ -75,11 +131,20 @@ function __krateRevive(v, h, call) {
     var out = {};
     for (var k in v) {
       if (k === "__krateChildren") out.children = h("krate-children", { style: "display:contents", dangerouslySetInnerHTML: { __html: v[k] } });
-      else out[k] = __krateRevive(v[k], h, call);
+      else if (k === "__krateTree") out.children = __krateTree(v[k], h, call, comp);
+      else out[k] = __krateRevive(v[k], h, call, comp);
     }
     return out;
   }
   return v;
+}
+function __krateClientRefs(n, out) {
+  if (!n || typeof n !== "object") return out;
+  if (Array.isArray(n)) { n.forEach(function (x) { __krateClientRefs(x, out); }); return out; }
+  if (n.$ === "c") out.push({ m: n.m, e: n.e, s: n.s });
+  (n.c || []).forEach(function (x) { __krateClientRefs(x, out); });
+  if (n.p) for (var k in n.p) { if (k === "__krateTree") __krateClientRefs(n.p[k], out); }
+  return out;
 }
 `
 
@@ -127,10 +192,39 @@ func (b *Builder) prepareClientBoundaries(bundle *bundler.Bundle, ann *irtree.An
 		if mod == nil || mod.IsExternal || mod.IsCSS || mod.Program == nil {
 			continue
 		}
+		// A package's own "use client" modules are never bundled into the
+		// server bundle (packages stay external); the package boundaries of
+		// the modules that import it stand in for them.
+		if resolver.IsCompiledDependency(mod.Path) {
+			continue
+		}
 		if bundler.HasUseClientDirective(mod.SourceCode) {
 			clientMods[filepath.Clean(mod.Path)] = mod
 			if resolved := canonicalPath(mod.Path); resolved != filepath.Clean(mod.Path) {
 				clientMods[resolved] = mod
+			}
+		}
+	}
+	// A module that imports a real-React package is a client boundary too: it
+	// runs in the browser on real React, whether or not it says "use client".
+	realMods := map[string]bool{}
+	if bundle.Resolver != nil {
+		islands := b.detectReactIslandModules(bundle.Modules, bundle.Resolver.Resolve)
+		for _, mod := range bundle.Modules {
+			if mod == nil || mod.Program == nil || mod.IsEntry {
+				continue
+			}
+			// A "use client" module that renders a real-React module runs on
+			// real React as a whole, like one that imports the package.
+			if im, ok := islands[mod.Path]; ok && (im.Direct || im.Real && bundler.HasUseClientDirective(mod.SourceCode)) {
+				clientMods[filepath.Clean(mod.Path)] = mod
+				realMods[filepath.Clean(mod.Path)] = true
+				// The canonical spelling registered above must be real too, or
+				// a symlinked root (macOS /var) builds it as a Preact boundary.
+				if resolved := canonicalPath(mod.Path); resolved != filepath.Clean(mod.Path) {
+					clientMods[resolved] = mod
+					realMods[resolved] = true
+				}
 			}
 		}
 	}
@@ -151,6 +245,12 @@ func (b *Builder) prepareClientBoundaries(bundle *bundler.Bundle, ann *irtree.An
 		exports, err := clientModuleExports(mod)
 		if err != nil {
 			return nil, err
+		}
+		if realMods[p] {
+			cb := ClientBoundary{ModuleID: clientModuleID(b.Root, mod.Path), SourcePath: mod.Path, Exports: exports, Real: true}
+			cb.ChunkURL = b.registerRealBoundary(cb)
+			out = append(out, cb)
+			continue
 		}
 		if err := asyncClientComponentError(mod); err != nil {
 			return nil, err
@@ -288,7 +388,7 @@ func checkServerTree(ann *irtree.Annotations, roots []string, clientMods map[str
 		}
 		visited[name] = true
 		fn := ann.Functions[name]
-		if fn == nil || isClient(name) {
+		if fn == nil || isClient(name) || resolver.IsCompiledDependency(filepath.ToSlash(ann.ComponentSources[name])) {
 			return
 		}
 		file := filepath.Base(ann.ComponentSources[name])
@@ -377,29 +477,114 @@ func calleeName(e ast.Expr) string {
 	return ""
 }
 
+// clientChunkInfo is a built hydration chunk: its URL and whether its code
+// has state or effects (a stateless package component needs no island).
+type clientChunkInfo struct {
+	url      string
+	stateful bool
+}
+
+var statefulHookRe = regexp.MustCompile(`\buse(State|Reducer|Effect|LayoutEffect|InsertionEffect|SyncExternalStore|ImperativeHandle|Transition|Optimistic|ActionState|DeferredValue)\b|\b(Pure)?Component\b`)
+
+// boundaryLinkShim is the global <Link> of a page, for components that run on
+// Preact: client modules and the server render of package boundaries have no
+// Krate runtime, so a bare `Link` would be a ReferenceError there. It renders
+// the same anchor as the server renderer, which the router picks up.
+const boundaryLinkShim = `import { h } from "preact";
+function basePath() {
+  var c = globalThis.__KRATE_CFG__;
+  if (!c && typeof document !== "undefined") {
+    var el = document.getElementById("__krate_cfg__");
+    if (el) { try { c = globalThis.__KRATE_CFG__ = JSON.parse(el.textContent || "{}"); } catch (e) {} }
+  }
+  var bp = (c && c.basePath) || "";
+  if (!bp || bp === "/") return "";
+  return "/" + bp.replace(/^\/+|\/+$/g, "");
+}
+export function Link(props) {
+  var href = props.href || "";
+  var out = {};
+  for (var k in props) {
+    if (k !== "href" && k !== "prefetch" && k !== "replace" && k !== "scroll" && k !== "basePath" && k !== "children" && k !== "className") out[k] = props[k];
+  }
+  if (href) {
+    var bp = basePath();
+    out.href = bp && props.basePath !== false && href.charCodeAt(0) === 47 && href.charCodeAt(1) !== 47 ? bp + href : href;
+  }
+  var external = props.basePath === false || /^(https?:|mailto:|tel:|#|javascript:)/.test(href) || href.indexOf("//") === 0 || props.target === "_blank" || props.download !== undefined;
+  if (external) {
+    out["data-krate-external"] = "";
+    if (props.basePath === false) out["data-krate-no-base"] = "";
+  } else {
+    out["data-krate-link"] = "";
+    if (props.prefetch !== false) out["data-prefetch"] = "";
+    if (props.replace) out["data-krate-replace"] = "";
+    if (props.scroll === false) out["data-krate-scroll"] = "false";
+  }
+  if (props.target === "_blank" && props.rel === undefined) out.rel = "noopener noreferrer";
+  if (props.className) out.class = props.className;
+  return h("a", out, props.children);
+}
+`
+
+// boundaryShims writes the globals shim file (once per content) next to the
+// server bundles and returns its path for esbuild's inject option.
+func boundaryShims(dotKrate string) (string, error) {
+	if err := os.MkdirAll(dotKrate, 0755); err != nil {
+		return "", err
+	}
+	path := filepath.Join(dotKrate, "boundary-link."+hashContent([]byte(boundaryLinkShim))+".mjs")
+	if err := fsutil.WriteFileIfChanged(path, []byte(boundaryLinkShim), 0644); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
 // clientChunk builds (once per build) the hydration chunk of a "use client"
 // module and returns its URL. The chunk exports mount(el), called by
 // clientIslandLoaderHTML for each <krate-island> of the module.
 func (b *Builder) clientChunk(path string) (string, error) {
+	url, _, err := b.clientChunkFor(path, filepath.Dir(path), "import * as __m from "+strconv.Quote(path)+";\n")
+	return url, err
+}
+
+// clientChunkFor builds the hydration chunk of a boundary. entry is the module
+// preamble that binds `__m`, the exports components are looked up in by name
+// (dotted for members of a namespace export such as Radix's Dialog.Root).
+func (b *Builder) clientChunkFor(key, resolveDir, entry string) (string, bool, error) {
 	b.clientChunkMu.Lock()
 	defer b.clientChunkMu.Unlock()
-	if url, ok := b.clientChunks[path]; ok {
-		return url, nil
+	if info, ok := b.clientChunks[key]; ok {
+		return info.url, info.stateful, nil
 	}
 	if _, err := b.ensurePreactShared(); err != nil {
-		return "", diag.Diagnostic{
-			File:    path,
+		return "", false, diag.Diagnostic{
+			File:    key,
 			Message: "client component runtime could not be built: " + err.Error(),
 			Hint:    "\"use client\" components inside server components hydrate with Preact; install it with `pnpm add preact`, then rebuild",
 		}.WithCode(diag.CodeIslandAsset)
 	}
-	src := "import { h, hydrate } from \"preact\";\nimport * as __m from " + strconv.Quote(path) + ";\n" +
+	shim, err := boundaryShims(filepath.Join(b.Cfg.OutDir, ".krate"))
+	if err != nil {
+		return "", false, err
+	}
+	src := "import { h, hydrate } from \"preact\";\n" + entry +
 		clientReviveJS + clientActionCallJS + `
-export function mount(el) {
+function __resolve(name) {
+  return name.split(".").reduce(function (o, k) { return o == null ? o : o[k]; }, __m);
+}
+export function component(name) { return __resolve(name); }
+export async function mount(el) {
   var name = el.getAttribute("data-export");
-  var C = __m[name];
+  var C = __resolve(name);
   if (typeof C !== "function") throw new Error("client module " + el.getAttribute("data-module") + " has no component export " + name);
-  var props = __krateRevive(JSON.parse(el.getAttribute("data-props") || "{}"), h, __krateCallAction);
+  var raw = JSON.parse(el.getAttribute("data-props") || "{}");
+  var loaded = {};
+  loaded[el.getAttribute("data-module") + "#" + name] = C;
+  await Promise.all(__krateClientRefs(raw.__krateTree, []).map(function (r) {
+    return import(r.s).then(function (m) { loaded[r.m + "#" + r.e] = m.component(r.e); });
+  }));
+  var props = __krateRevive(raw, h, __krateCallAction, function (m, e) { return loaded[m + "#" + e]; });
   hydrate(h(C, props), el);
   el.setAttribute("data-krate-island-hydrated", "");
 }
@@ -407,7 +592,7 @@ export function mount(el) {
 	result := esbuildBuild(api.BuildOptions{
 		Stdin: &api.StdinOptions{
 			Contents:   src,
-			ResolveDir: filepath.Dir(path),
+			ResolveDir: resolveDir,
 			Sourcefile: "krate-client-boundary.js",
 			Loader:     api.LoaderJS,
 		},
@@ -425,26 +610,30 @@ export function mount(el) {
 		TsconfigRaw:       clientTsconfigRaw(b.Root),
 		Alias:             islandAlias(b.Root, false),
 		External:          []string{"preact", "preact/compat", "preact/hooks", "preact/jsx-runtime"},
+		Inject:            []string{shim},
 		Plugins:           []api.Plugin{clientOnlyMarkersPlugin(true), actionServerBundlePlugin(b.importResolver(), b.actionModules(), b.Cfg.BaseURLPath())},
 		LogLevel:          api.LogLevelSilent,
 	})
 	if len(result.Errors) > 0 || len(result.OutputFiles) == 0 {
-		return "", clientBuildError(b.Root, path, result.Errors)
+		return "", false, clientBuildError(b.Root, key, result.Errors)
 	}
 	out := result.OutputFiles[0].Contents
-	name := "chunks/client." + hashContent(out) + ".js"
-	if err := os.MkdirAll(filepath.Join(b.Cfg.OutDir, "chunks"), 0755); err != nil {
-		return "", err
+	// This build checks the module and tells whether it holds state. The
+	// chunk the page loads is built with the island entries (writeIslandBundles),
+	// so a library used by a boundary, an island and a layout is one module in
+	// the browser: sonner's toast() reaches the Toaster of another chunk.
+	name := b.islandEntryName(src, resolveDir)
+	b.setIslandEntries("client-boundary\x00"+key, []islandEntry{{Name: name, Source: src, ResolveDir: resolveDir, Boundary: true}})
+	info := clientChunkInfo{url: b.islandEntryURL(name), stateful: statefulHookRe.Match(out)}
+	if b.clientChunkText == nil {
+		b.clientChunkText = map[string]string{}
 	}
-	if err := fsutil.WriteFileIfChanged(filepath.Join(b.Cfg.OutDir, name), out, 0644); err != nil {
-		return "", err
-	}
-	url := assetHref(b.Cfg.BaseURLPath(), name)
+	b.clientChunkText[info.url] = string(out)
 	if b.clientChunks == nil {
-		b.clientChunks = map[string]string{}
+		b.clientChunks = map[string]clientChunkInfo{}
 	}
-	b.clientChunks[path] = url
-	return url, nil
+	b.clientChunks[key] = info
+	return info.url, info.stateful, nil
 }
 
 const serverOnlyMarker = "krate: server-only module in client bundle"
@@ -528,19 +717,28 @@ func (c *clientSSRImpls) build(cb ClientBoundary) error {
 	if err, ok := c.done[cb.SourcePath]; ok {
 		return err
 	}
-	src := "import { h } from \"preact\";\nimport renderToString from \"preact-render-to-string\";\nimport * as __m from " + strconv.Quote(cb.SourcePath) + ";\n" +
+	shim, err := boundaryShims(filepath.Dir(c.bundleDir))
+	if err != nil {
+		return err
+	}
+	src := "import { h } from \"preact\";\nimport renderToString from \"preact-render-to-string\";\n" + cb.entrySource() +
 		clientReviveJS + `
 function __krateServerAction() { throw new Error("a server action passed to a client component cannot be called while the server renders it"); }
+function __krateComp(m, e) {
+  var reg = globalThis.__krateClientImpls;
+  var hit = reg && reg.get(m + "#" + e);
+  return hit && hit.impl;
+}
 export const __krate_module = __m;
 export function __krate_render(C, props) {
-  return renderToString(h(C, __krateRevive(props, h, __krateServerAction)));
+  return renderToString(h(C, __krateRevive(props, h, __krateServerAction, __krateComp)));
 }
 `
-	plugin := islandRenderToStringPlugin(filepath.Dir(cb.SourcePath))
+	plugin := islandRenderToStringPlugin(cb.resolveDir())
 	result := esbuildBuild(api.BuildOptions{
 		Stdin: &api.StdinOptions{
 			Contents:   src,
-			ResolveDir: filepath.Dir(cb.SourcePath),
+			ResolveDir: cb.resolveDir(),
 			Sourcefile: "krate-client-ssr.js",
 			Loader:     api.LoaderJS,
 		},
@@ -550,16 +748,17 @@ export function __krate_render(C, props) {
 		Outfile:         c.implPath(cb),
 		Format:          api.FormatESModule,
 		Platform:        api.PlatformNode,
+		MainFields:      []string{"module", "main"},
 		Target:          api.ES2020,
 		JSX:             api.JSXAutomatic,
 		JSXImportSource: "preact",
 		TsconfigRaw:     clientTsconfigRaw(c.root),
 		Alias:           islandAlias(c.root, false),
 		External:        []string{"preact", "preact/compat", "preact/hooks", "preact/jsx-runtime"},
+		Inject:          []string{shim},
 		Plugins:         []api.Plugin{serverCSSPlugin(c.root), *plugin, clientOnlyMarkersPlugin(false), actionServerBundlePlugin(c.res, c.actions, c.basePath)},
 		LogLevel:        api.LogLevelSilent,
 	})
-	var err error
 	if len(result.Errors) > 0 {
 		err = clientBuildError(c.root, cb.SourcePath, result.Errors)
 	}
@@ -577,7 +776,7 @@ func clientBoundaryStub(cb ClientBoundary, implRel string) string {
 	sb.WriteString("import { clientBoundary as __krateCB } from \"@krate/runtime/server\";\n")
 	fmt.Fprintf(&sb, "import { __krate_module as __m, __krate_render as __r } from %s;\n", strconv.Quote(implRel))
 	for _, name := range cb.Exports {
-		wrapped := fmt.Sprintf("__krateCB(%s, %s, %s, __m[%s], __r)", strconv.Quote(cb.ModuleID), strconv.Quote(name), strconv.Quote(cb.ChunkURL), strconv.Quote(name))
+		wrapped := fmt.Sprintf("__krateCB(%s, %s, %s, __m[%s], __r, %t)", strconv.Quote(cb.ModuleID), strconv.Quote(name), strconv.Quote(cb.ChunkURL), strconv.Quote(name), cb.hydrates())
 		if name == "default" {
 			fmt.Fprintf(&sb, "export default %s;\n", wrapped)
 		} else {
@@ -593,9 +792,16 @@ func clientBoundaryStub(cb ClientBoundary, implRel string) string {
 // client-only markers to empty modules.
 func clientBoundaryPlugin(boundaries []ClientBoundary, impls *clientSSRImpls, outPath string) (api.Plugin, error) {
 	byPath := map[string]ClientBoundary{}
+	var pkgs []ClientBoundary
 	for _, cb := range boundaries {
-		if err := impls.build(cb); err != nil {
-			return api.Plugin{}, err
+		if !cb.Real {
+			if err := impls.build(cb); err != nil {
+				return api.Plugin{}, err
+			}
+		}
+		if cb.Spec != "" {
+			pkgs = append(pkgs, cb)
+			continue
 		}
 		byPath[filepath.Clean(cb.SourcePath)] = cb
 		if resolved := canonicalPath(cb.SourcePath); resolved != filepath.Clean(cb.SourcePath) {
@@ -607,7 +813,10 @@ func clientBoundaryPlugin(boundaries []ClientBoundary, impls *clientSSRImpls, ou
 		Name: "krate-client-boundaries",
 		Setup: func(pb api.PluginBuild) {
 			markers.Setup(pb)
-			if len(byPath) == 0 {
+			if len(pkgs) > 0 {
+				setupPackageBoundaries(pb, pkgs, outPath, impls)
+			}
+			if len(byPath) == 0 && len(pkgs) == 0 {
 				return
 			}
 			pb.OnResolve(api.OnResolveOptions{Filter: `\.ssr\.mjs$`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
@@ -628,6 +837,10 @@ func clientBoundaryPlugin(boundaries []ClientBoundary, impls *clientSSRImpls, ou
 				}
 				if !ok {
 					return api.OnLoadResult{}, nil
+				}
+				if cb.Real {
+					stub := realBoundaryStub(cb)
+					return api.OnLoadResult{Contents: &stub, Loader: api.LoaderJS, ResolveDir: filepath.Dir(args.Path)}, nil
 				}
 				rel, err := filepath.Rel(filepath.Dir(outPath), impls.implPath(cb))
 				if err != nil {
@@ -669,3 +882,42 @@ func clientTsconfigRaw(root string) string {
 	}
 	return string(out)
 }
+
+// setupPackageBoundaries makes the page's own modules import the boundary stub
+// of a React-bound package instead of the package, which the server bundle
+// otherwise leaves external. Modules inside node_modules and the render
+// modules under server-bundles/client/ are separate builds and never see it.
+func setupPackageBoundaries(pb api.PluginBuild, pkgs []ClientBoundary, outPath string, impls *clientSSRImpls) {
+	bySpec := map[string]ClientBoundary{}
+	var specs []string
+	for _, cb := range pkgs {
+		bySpec[cb.Spec] = cb
+		specs = append(specs, specFilterEscape.ReplaceAllStringFunc(cb.Spec, func(s string) string { return `\` + s }))
+	}
+	const ns = "krate-pkg-boundary"
+	pb.OnResolve(api.OnResolveOptions{Filter: "^(" + strings.Join(specs, "|") + ")$"}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+		if strings.Contains(filepath.ToSlash(args.Importer), "/node_modules/") {
+			return api.OnResolveResult{}, nil
+		}
+		return api.OnResolveResult{Path: args.Path, Namespace: ns}, nil
+	})
+	pb.OnLoad(api.OnLoadOptions{Filter: ".*", Namespace: ns}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
+		cb := bySpec[args.Path]
+		if cb.Real {
+			stub := realBoundaryStub(cb)
+			return api.OnLoadResult{Contents: &stub, Loader: api.LoaderJS, ResolveDir: filepath.Dir(outPath)}, nil
+		}
+		rel, err := filepath.Rel(filepath.Dir(outPath), impls.implPath(cb))
+		if err != nil {
+			return api.OnLoadResult{}, err
+		}
+		rel = filepath.ToSlash(rel)
+		if !strings.HasPrefix(rel, ".") {
+			rel = "./" + rel
+		}
+		stub := clientBoundaryStub(cb, rel)
+		return api.OnLoadResult{Contents: &stub, Loader: api.LoaderJS, ResolveDir: filepath.Dir(outPath)}, nil
+	})
+}
+
+var specFilterEscape = regexp.MustCompile(`[.*+?^${}()|\[\]\\/-]`)

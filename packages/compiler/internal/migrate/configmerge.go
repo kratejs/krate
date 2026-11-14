@@ -50,7 +50,7 @@ func mergeKrateConfig(root string, next nextConfigData) (PlannedFile, []string, 
 	}
 	var additions []string
 	var notes []string
-	for _, key := range []string{"basePath", "redirects", "rewrites", "headers", "images", "site"} {
+	for _, key := range []string{"basePath", "redirects", "rewrites", "headers", "images", "site", "head", "serverExternalPackages", "outputFileTracingIncludes"} {
 		value, ok := values[key]
 		if !ok {
 			continue
@@ -105,6 +105,15 @@ func nextConfigValues(next nextConfigData) map[string]any {
 	if len(next.Site) > 0 {
 		values["site"] = next.Site
 	}
+	if len(next.Head) > 0 {
+		values["head"] = next.Head
+	}
+	if len(next.ServerExternalPackages) > 0 {
+		values["serverExternalPackages"] = next.ServerExternalPackages
+	}
+	if len(next.OutputFileTracingIncludes) > 0 {
+		values["outputFileTracingIncludes"] = next.OutputFileTracingIncludes
+	}
 	return values
 }
 
@@ -114,7 +123,7 @@ func mergeJSONConfig(data []byte, values map[string]any) ([]byte, []string, erro
 		return nil, nil, err
 	}
 	var notes []string
-	for _, key := range []string{"basePath", "redirects", "rewrites", "headers", "images", "site"} {
+	for _, key := range []string{"basePath", "redirects", "rewrites", "headers", "images", "site", "head", "serverExternalPackages", "outputFileTracingIncludes"} {
 		value, ok := values[key]
 		if !ok {
 			continue

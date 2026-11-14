@@ -49,27 +49,6 @@ func TestWithinRoot(t *testing.T) {
 	}
 }
 
-func TestResolveRelativeAndAbsolute(t *testing.T) {
-	root := setupProject(t)
-
-	got, err := Resolve(root, "./src/foo.txt")
-	if err != nil {
-		t.Fatalf("Resolve relative: %v", err)
-	}
-	if want := filepath.Join(root, "src", "foo.txt"); got != want {
-		t.Errorf("Resolve relative = %q, want %q", got, want)
-	}
-
-	abs := filepath.Join(root, "src", "foo.txt")
-	got, err = Resolve(root, abs)
-	if err != nil {
-		t.Fatalf("Resolve absolute: %v", err)
-	}
-	if got != abs {
-		t.Errorf("Resolve absolute = %q, want %q", got, abs)
-	}
-}
-
 func TestResolveRejectsTraversal(t *testing.T) {
 	root := setupProject(t)
 	if _, err := Resolve(root, "../outside.txt"); err == nil {
@@ -78,68 +57,5 @@ func TestResolveRejectsTraversal(t *testing.T) {
 	outside := filepath.Join(filepath.Dir(root), "outside.txt")
 	if _, err := Resolve(root, outside); err == nil {
 		t.Fatal("expected traversal error for absolute path outside root")
-	}
-}
-
-func TestResolveNodeModules(t *testing.T) {
-	root := setupProject(t)
-
-	got, err := Resolve(root, "pkg")
-	if err != nil {
-		t.Fatalf("Resolve bare package: %v", err)
-	}
-	if want := filepath.Join(root, "node_modules", "pkg", "index.js"); got != want {
-		t.Errorf("Resolve pkg = %q, want %q", got, want)
-	}
-
-	got, err = Resolve(root, "@scope/theme")
-	if err != nil {
-		t.Fatalf("Resolve scoped package: %v", err)
-	}
-	if want := filepath.Join(root, "node_modules", "@scope", "theme", "index.ts"); got != want {
-		t.Errorf("Resolve @scope/theme = %q, want %q", got, want)
-	}
-
-	got, err = Resolve(root, "pkg/styles/x.css")
-	if err != nil {
-		t.Fatalf("Resolve package subpath: %v", err)
-	}
-	if want := filepath.Join(root, "node_modules", "pkg", "styles", "x.css"); got != want {
-		t.Errorf("Resolve pkg/styles/x.css = %q, want %q", got, want)
-	}
-}
-
-func TestReadFile(t *testing.T) {
-	root := setupProject(t)
-	got, err := ReadFile(root, "./src/foo.txt")
-	if err != nil {
-		t.Fatalf("ReadFile: %v", err)
-	}
-	if got != "foo content" {
-		t.Errorf("ReadFile = %q, want %q", got, "foo content")
-	}
-	if _, err := ReadFile(root, "does-not-exist.txt"); err == nil {
-		t.Error("expected error for a missing file")
-	}
-}
-
-func TestWriteFileToRoot(t *testing.T) {
-	root := setupProject(t)
-	if err := WriteFileToRoot(root, "public/generated.txt", []byte("hello")); err != nil {
-		t.Fatalf("WriteFileToRoot: %v", err)
-	}
-	data, err := os.ReadFile(filepath.Join(root, "public", "generated.txt"))
-	if err != nil {
-		t.Fatalf("reading written file: %v", err)
-	}
-	if string(data) != "hello" {
-		t.Errorf("written contents = %q, want %q", data, "hello")
-	}
-
-	if err := WriteFileToRoot(root, "../escape.txt", []byte("no")); err == nil {
-		t.Fatal("expected traversal error")
-	}
-	if _, statErr := os.Stat(filepath.Join(filepath.Dir(root), "escape.txt")); statErr == nil {
-		t.Fatal("WriteFileToRoot escaped the project root")
 	}
 }

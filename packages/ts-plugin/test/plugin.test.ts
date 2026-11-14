@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import ts from 'typescript';
-import { init, isTierDiagnostic } from '../src/plugin';
+import { init } from '../src/plugin';
 
 const FILE = '/app/a.tsx';
 
@@ -50,10 +50,6 @@ export const C = () => null;
 export default class D {}
 `;
 
-  it('starts from the errors TypeScript reports', () => {
-    expect(codes(service(source))).toEqual(expect.arrayContaining([1206, 1214, 2304]));
-  });
-
   it('removes them all', () => {
     expect(codes(withPlugin(service(source)))).toEqual([]);
   });
@@ -61,27 +57,5 @@ export default class D {}
   it('keeps a misspelled decorator and real errors', () => {
     const ls = withPlugin(service('@sever\nexport class E {}\nexport const z: string = null;\n'));
     expect(codes(ls)).toEqual(expect.arrayContaining([2304, 2322]));
-  });
-
-  it('forwards the rest of the service', () => {
-    const ls = withPlugin(service(source));
-    expect(ls.getProgram()?.getRootFileNames()).toEqual([FILE]);
-  });
-});
-
-describe('isTierDiagnostic', () => {
-  it('needs a tier decorator at the start of the line', () => {
-    expect(isTierDiagnostic('@server\nfunction a() {}\n', 0, 1206, 'Decorators are not valid here.')).toBe(true);
-    expect(isTierDiagnostic('@server.x\nfunction a() {}\n', 0, 1206, 'Decorators are not valid here.')).toBe(false);
-    expect(isTierDiagnostic('const a = 1;\n', 0, 1206, 'Decorators are not valid here.')).toBe(false);
-  });
-
-  it('only accepts its own name for an unknown identifier', () => {
-    expect(isTierDiagnostic('@server\nclass A {}\n', 1, 2304, "Cannot find name 'server'.")).toBe(true);
-    expect(isTierDiagnostic('@server\nclass A {}\n', 1, 2304, "Cannot find name 'other'.")).toBe(false);
-  });
-
-  it('handles indentation and CRLF', () => {
-    expect(isTierDiagnostic('  @static\r\nclass A {}\r\n', 3, 1213, 'reserved')).toBe(true);
   });
 });

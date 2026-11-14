@@ -574,7 +574,7 @@ func isStaticJSXValue(e ast.Expr) bool {
 }
 
 // linkLiteralAttrs are <Link> props the Link lowering inspects as literals.
-var linkLiteralAttrs = map[string]bool{"prefetch": true, "replace": true, "external": true, "scroll": true}
+var linkLiteralAttrs = map[string]bool{"prefetch": true, "replace": true, "external": true, "scroll": true, "basePath": true}
 
 func reactifyElement(el *ast.JSXElement, root bool) ast.Expr {
 	if el == nil || el.Opening == nil {

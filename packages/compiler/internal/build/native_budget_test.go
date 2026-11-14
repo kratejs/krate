@@ -34,6 +34,7 @@ const (
 // WebKit version and the runner. packages/native/BUDGETS.md says how to move
 // a limit.
 //
+//	KRATE_NATIVE_BUDGETS=1   run TestNativeBudgetSizes (GUI runs check TestNativeBudgetGUI)
 //	KRATE_UPDATE_BUDGETS=1   rewrite measured and max (measured plus headroom)
 //	                         of every entry the run measured
 //	KRATE_BUDGET_SCALE=2     multiply the cold-start limit (slower machines);
@@ -254,6 +255,9 @@ func goVersionString(t *testing.T) string {
 // stripped shell, a Go-only release, a TypeScript-only release and the
 // examples/native-tasks release.
 func TestNativeBudgetSizes(t *testing.T) {
+	if os.Getenv("KRATE_NATIVE_BUDGETS") != "1" {
+		t.Skip("set KRATE_NATIVE_BUDGETS=1 to check the native size budgets (CI full runs do)")
+	}
 	requireRelease(t)
 	f := loadBudgets(t)
 	sizes := map[string]int64{}

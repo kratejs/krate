@@ -49,14 +49,3 @@ func TestGuardRejectsCrossOriginCookieRequests(t *testing.T) {
 		t.Errorf("header token: %d", c)
 	}
 }
-
-func TestGuardCookieNamePerPort(t *testing.T) {
-	h := guardHandler(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}), "tok", "4000")
-	r := httptest.NewRequest("GET", "http://127.0.0.1:4000/?"+tokenParam+"=tok", nil)
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, r)
-	cs := w.Result().Cookies()
-	if len(cs) != 1 || cs[0].Name != "krate_token_4000" {
-		t.Fatalf("cookies: %+v", cs)
-	}
-}

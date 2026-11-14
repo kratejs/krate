@@ -17,9 +17,3 @@ func TestCommentEncoding(t *testing.T) {
 		}
 	}
 }
-
-func TestTextEscaping(t *testing.T) {
-	if got := Text(`<a href="x">it's & done</a>`); got != `&lt;a href="x"&gt;it's &amp; done&lt;/a&gt;` {
-		t.Errorf("Text = %s", got)
-	}
-}

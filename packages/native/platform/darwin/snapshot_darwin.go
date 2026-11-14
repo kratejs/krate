@@ -17,7 +17,7 @@ import (
 // outside every display: ordered in, so its page renders, but never visible.
 //
 // Written and compiled, not run on a real Mac by the author: the CI native
-// job runs TestGUIOffscreenSnapshot.
+// job runs it through the compiler's TestNativeE2EProcsGUI.
 
 var (
 	_ caps.ViewSnapshots    = (*App)(nil)

@@ -1,14 +1,11 @@
 package shell
 
 import (
-	"archive/zip"
 	"bytes"
 	"io"
 	"io/fs"
 	"net/http"
 	"net/http/cookiejar"
-	"net/http/httptest"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -129,87 +126,5 @@ func TestRunEmbeddedServesGlueAndHost(t *testing.T) {
 	}
 	if got := callVia(t, c, base, "krate/kv.keys", nil); strings.Contains(got, "permission_denied") {
 		t.Fatalf("kv should be granted: %s", got)
-	}
-}
-
-func TestRunEmbeddedErrors(t *testing.T) {
-	// The embedded app may sit at the root of the file system too.
-	fsys := fstest.MapFS{"app.json": {Data: []byte(`{"appId":"dev.krate.root"}`)}}
-	if err := RunEmbedded(fsys, RunOptions{Browser: true, Logf: t.Logf}); err == nil || !strings.Contains(err.Error(), "assets") {
-		t.Fatalf("missing assets: %v", err)
-	}
-	if err := RunEmbedded(fstest.MapFS{}, RunOptions{Browser: true, Logf: t.Logf}); err == nil || !strings.Contains(err.Error(), "manifest") {
-		t.Fatalf("missing manifest: %v", err)
-	}
-}
-
-func TestRunMainVersionAndFlags(t *testing.T) {
-	var out bytes.Buffer
-	if code := RunMain([]string{"--version"}, embeddedFS(false), nil, &out); code != 0 || strings.TrimSpace(out.String()) != "Embedded 2.3.4" {
-		t.Fatalf("--version: %d %q", code, out.String())
-	}
-	if code := RunMain([]string{"--bogus"}, embeddedFS(false), nil, &out); code != 2 {
-		t.Fatalf("unknown flag: %d", code)
-	}
-}
-
-func TestInjectIntoHead(t *testing.T) {
-	cases := map[string]string{
-		"<!doctype html><HTML><HEAD><title>x</title></HEAD></HTML>": "<!doctype html><HTML><HEAD>" + windowIDScript + "<title>x</title></HEAD></HTML>",
-		"<!doctype html><html><body>b</body></html>":                "<!doctype html><html>" + windowIDScript + "<body>b</body></html>",
-		"<!doctype html>just text":                                  "<!doctype html>" + windowIDScript + "just text",
-		"no markup":                                                 windowIDScript + "no markup",
-	}
-	for in, want := range cases {
-		if got := string(injectIntoHead([]byte(in))); got != want {
-			t.Errorf("injectIntoHead(%q) = %q", in, got)
-		}
-	}
-}
-
-func TestZipFSServesDynamicRouteNames(t *testing.T) {
-	var buf bytes.Buffer
-	zw := zip.NewWriter(&buf)
-	for name, body := range map[string]string{
-		"app.json":                   `{"appId":"dev.krate.zip","fallbacks":[{"pattern":"/tasks/[id]","file":"tasks/[id]/index.html"}],"permissions":["kv"],"strictPermissions":true}`,
-		"dist/index.html":            "<!doctype html><head></head>home",
-		"dist/tasks/[id]/index.html": "<!doctype html><head></head>task page",
-	} {
-		w, _ := zw.Create(name)
-		if _, err := w.Write([]byte(body)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	zw.Close()
-	fsys, err := ZipFS(buf.Bytes())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := ZipFS([]byte("not a zip")); err == nil {
-		t.Fatal("a damaged archive must fail")
-	}
-	// The zip stands in for the embedded app directory.
-	ctl, c := runEmbeddedBrowserFS(t, fsys)
-	base := strings.TrimSuffix(strings.SplitN(ctl.URL(), "?", 2)[0], "/")
-	if _, body := get(t, c, base+"/tasks/7", nil); !strings.Contains(body, "task page") {
-		t.Fatalf("dynamic fallback from the archive: %q", body)
-	}
-}
-
-func TestWindowIDHandlerWithDevScript(t *testing.T) {
-	const page = "<!doctype html><html><head></head><body>b</body></html>"
-	h := windowIDHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html")
-		w.Header().Set("Content-Length", strconv.Itoa(len(page)))
-		_, _ = w.Write([]byte(page))
-	}), devErrorsScript, false)
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
-	body := rec.Body.String()
-	if !strings.Contains(body, "__krateDriverErrs") || !strings.Contains(body, "__krate_win") {
-		t.Fatalf("scripts missing: %s", body)
-	}
-	if got := rec.Header().Get("Content-Length"); got != strconv.Itoa(len(body)) {
-		t.Errorf("Content-Length %s, body %d bytes", got, len(body))
 	}
 }

@@ -845,6 +845,7 @@ func (b *builder) buildLinkSlots(el *ast.JSXElement, parentID string) []SlotNode
 	ariaLabel := ""
 	id := ""
 	external := false
+	noBase := false
 	var forwarded []*ast.JSXAttr
 
 	for _, attr := range el.Opening.Attributes {
@@ -854,6 +855,7 @@ func (b *builder) buildLinkSlots(el *ast.JSXElement, parentID string) []SlotNode
 		}
 		if attr.Value == nil {
 			switch attr.Name {
+			case "basePath":
 			case "prefetch":
 				prefetch = true
 			case "replace":
@@ -877,6 +879,8 @@ func (b *builder) buildLinkSlots(el *ast.JSXElement, parentID string) []SlotNode
 			scroll = val != "false"
 		case "external":
 			external = val == "true"
+		case "basePath":
+			noBase = val == "false"
 		case "className":
 			className = val
 		case "target":
@@ -897,7 +901,9 @@ func (b *builder) buildLinkSlots(el *ast.JSXElement, parentID string) []SlotNode
 		}
 	}
 
-	local := !external && isLocalHref(href) && target != "_blank"
+	// basePath={false}: the URL belongs to another app on the host, so it is
+	// used as written and the router never takes it over.
+	local := !external && !noBase && isLocalHref(href) && target != "_blank"
 
 	var aAttrs []*ast.JSXAttr
 	aAttrs = append(aAttrs, &ast.JSXAttr{Name: "href", Value: &ast.Literal{Kind: ast.StringLit, Value: href}})
@@ -914,6 +920,9 @@ func (b *builder) buildLinkSlots(el *ast.JSXElement, parentID string) []SlotNode
 		}
 	} else {
 		aAttrs = append(aAttrs, &ast.JSXAttr{Name: "data-krate-external", Value: nil})
+		if noBase {
+			aAttrs = append(aAttrs, &ast.JSXAttr{Name: "data-krate-no-base", Value: nil})
+		}
 	}
 	if className != "" {
 		aAttrs = append(aAttrs, &ast.JSXAttr{Name: "class", Value: &ast.Literal{Kind: ast.StringLit, Value: className}})
@@ -937,7 +946,7 @@ func (b *builder) buildLinkSlots(el *ast.JSXElement, parentID string) []SlotNode
 		aAttrs = append(aAttrs, &ast.JSXAttr{Name: "id", Value: &ast.Literal{Kind: ast.StringLit, Value: id}})
 	}
 	aAttrs = append(aAttrs, forwarded...)
-	if h, ok := b.linkHrefWithBase(el); ok {
+	if h, ok := b.linkHrefWithBase(el); ok && !noBase {
 		aAttrs = SetHrefAttr(aAttrs, h)
 	}
 
@@ -1675,6 +1684,9 @@ func (b *builder) buildExprSlot(expr ast.Expr, parentID string) *ExprSlot {
 	// false/null/undefined render nothing); the emitter escapes it.
 	value := b.evalValueVolatile(expr)
 	initial, _ := childText(value)
+	if len(signals) == 0 {
+		b.warnHeadDeferred(expr, value)
+	}
 	slot := &ExprSlot{
 		ID:         id,
 		ExprSource: exprSource,
@@ -1683,6 +1695,9 @@ func (b *builder) buildExprSlot(expr ast.Expr, parentID string) *ExprSlot {
 		File:       b.sourceLoc(),
 		Pos:        expr.Pos(),
 		Unresolved: value.ContainsUnknown(),
+	}
+	if p, ok := b.jsxPropRead(expr); ok {
+		slot.PropJSX, slot.PropScope = p.expr, p.scope
 	}
 	// A value holding JSX renders as markup, not as escaped text.
 	if html, ok := renderChildValue(value); ok && html != escape.Text(initial) {
@@ -2302,6 +2317,10 @@ func (b *builder) resolveArrayLiteralExpr(expr ast.Expr) *ast.ArrayExpr {
 	// turn its elements back into literals for item substitution.
 	v := b.evalValue(mem.Object)
 	if !v.IsArray() || v.ContainsUnknown() {
+		// A module array holding JSX has no folded value; use its literal.
+		if arr, ok := b.resolveModuleJSX(mem.Object, 0).(*ast.ArrayExpr); ok && !arrayHasSpread(arr) {
+			return arr
+		}
 		return nil
 	}
 	arr, _ := jsvalue.ToAST(v).(*ast.ArrayExpr)
@@ -2947,6 +2966,9 @@ func (b *builder) buildAttrBinding(attr *ast.JSXAttr, elementID string) *AttrBin
 	exprSource := ""
 	if signalName == "" {
 		exprSource = b.bindLoopVars(generateExprJS(attr.Value, b.sigMap()))
+	}
+	if !b.referencesSignal(attr.Value) {
+		b.warnHeadDeferred(attr.Value, b.evalAttrConst(attr.Value))
 	}
 
 	return &AttrBinding{
@@ -4226,10 +4248,11 @@ func (b *builder) buildExternalComponentSlot(name string, el *ast.JSXElement) (S
 	if imp.Namespace && len(members) == 0 {
 		return nil, false
 	}
-	id := "island-" + strconv.Itoa(len(b.externals)+1)
+	id := "island-" + b.idPrefix + strconv.Itoa(len(b.externals)+1)
 	// client:visible / client:idle / client:load choose when the island mounts.
 	// They are directives for Krate, never props of the component.
 	hydrate := ""
+	fallback := clientFallbackText(el)
 	el, hydrate = splitClientDirective(el)
 	b.checkIslandScopeProps(el, root)
 	// Replace page-scope signal reads with island props and collect their value
@@ -4326,6 +4349,7 @@ func (b *builder) buildExternalComponentSlot(name string, el *ast.JSXElement) (S
 		Namespace: imp.Namespace, Props: props, Subtree: subtree, PropsJS: propsJS,
 		SSRPropsJS: ssrPropsJS, SSRPropsKnown: ssrKnown,
 		ReactIsland: imp.ReactIsland, ClientOnly: imp.ClientOnly, Hydrate: hydrate,
+		RealReact: imp.RealReact, Fallback: fallback,
 		File: b.ann.SourceFile, Line: el.Position.Line, Col: el.Position.Col, Offset: el.Position.Offset,
 	})
 	html := `<div data-krate-island="` + id + `" style="display:contents"></div>`
@@ -4343,6 +4367,23 @@ func clientDirectiveOf(el *ast.JSXElement) (*ast.JSXAttr, string) {
 		}
 	}
 	return nil, ""
+}
+
+// clientFallbackText returns the string literal of a `client:fallback`
+// attribute: the text a real-React island shows before it mounts.
+func clientFallbackText(el *ast.JSXElement) string {
+	if el == nil || el.Opening == nil {
+		return ""
+	}
+	for _, attr := range el.Opening.Attributes {
+		if attr == nil || attr.Spread || attr.Name != "client:fallback" {
+			continue
+		}
+		if lit, ok := attr.Value.(*ast.Literal); ok && lit.Kind == ast.StringLit {
+			return lit.Value
+		}
+	}
+	return ""
 }
 
 // splitClientDirective removes the `client:*` directive from an island root and

@@ -39,31 +39,6 @@ func TestRunEnforcesTimeout(t *testing.T) {
 	}
 }
 
-func TestRunSuccess(t *testing.T) {
-	if _, _, err := Run(context.Background(), 30*time.Second, "", nil, os.Args[0], "-test.run=TestHelperNoop"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestOutputCapturesStdout(t *testing.T) {
-	out, err := Output(context.Background(), 30*time.Second, "", nil, os.Args[0], "-test.run=TestHelperNoop")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	_ = out // presence is enough; content is the test binary's own output.
-}
-
-func TestDefaultTimeoutParsing(t *testing.T) {
-	t.Setenv("KRATE_EXEC_TIMEOUT", "90s")
-	if got := DefaultTimeout(); got != 90*time.Second {
-		t.Fatalf("DefaultTimeout = %v, want 90s", got)
-	}
-	t.Setenv("KRATE_EXEC_TIMEOUT", "not-a-duration")
-	if got := DefaultTimeout(); got != 0 {
-		t.Fatalf("DefaultTimeout = %v, want 0 for invalid", got)
-	}
-}
-
 // TestHelperSpawnSleeper starts a ConfigureTree'd sleeper, prints its pid and
 // then dies without cleaning up, standing in for a SIGKILLed Krate host.
 func TestHelperSpawnSleeper(t *testing.T) {

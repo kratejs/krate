@@ -140,6 +140,10 @@ func (b *Bundler) isolatePrivateNames() {
 	// The entry keeps its names, then modules in bundle order.
 	sort.SliceStable(mods, func(i, j int) bool { return mods[i].IsEntry && !mods[j].IsEntry })
 
+	// The planning below reads cached programs that another page's build may
+	// be transforming in place (icons, images); hold them for reading until
+	// the renames are applied, which take their own copies.
+	unlock := b.readLockAll(mods)
 	dynamic := b.dynamicImportTargets(mods)
 	plan := b.planExportRenames(mods, dynamic)
 	b.warnExportCollisions(mods, plan.shared)
@@ -204,9 +208,33 @@ func (b *Bundler) isolatePrivateNames() {
 	}
 	// Importers of a renamed export ask for its new name.
 	named := plan.importerRewrites(b, mods)
+	unlock()
 	for _, mod := range mods {
 		if len(renames[mod.Path]) > 0 || len(imports[mod.Path]) > 0 || len(plan.renames[mod.Path]) > 0 || len(named[mod.Path]) > 0 {
 			b.applyPrivateRenames(mod, renames[mod.Path], imports[mod.Path], plan.renames[mod.Path], named[mod.Path])
+		}
+	}
+}
+
+// readLockAll holds every distinct program of mods for reading and returns
+// the release. Writers lock one program at a time, so holding several read
+// locks cannot deadlock.
+func (b *Bundler) readLockAll(mods []*Module) func() {
+	if b.readLock == nil {
+		return func() {}
+	}
+	seen := map[*ast.Program]bool{}
+	var unlocks []func()
+	for _, mod := range mods {
+		if mod.Program == nil || seen[mod.Program] {
+			continue
+		}
+		seen[mod.Program] = true
+		unlocks = append(unlocks, b.readLock(mod.Program))
+	}
+	return func() {
+		for i := len(unlocks) - 1; i >= 0; i-- {
+			unlocks[i]()
 		}
 	}
 }
@@ -228,6 +256,9 @@ type exportPlan struct {
 type exportClash struct {
 	name  string
 	files []string
+	// pkgOnly is set when every module involved is inside node_modules: the
+	// page's author cannot rename those exports, so there is nothing to warn.
+	pkgOnly bool
 }
 
 // importerRewrites returns, per importing module, the named imports that must
@@ -399,7 +430,13 @@ func (b *Bundler) planExportRenames(mods []*Module, dynamic map[string]bool) exp
 				files = append(files, filepath.Base(mod.Path))
 			}
 			sort.Strings(files)
-			plan.shared = append(plan.shared, exportClash{name: name, files: files})
+			pkgOnly := true
+			for _, mod := range stuck {
+				if !inNodeModules(mod.Path) {
+					pkgOnly = false
+				}
+			}
+			plan.shared = append(plan.shared, exportClash{name: name, files: files, pkgOnly: pkgOnly})
 		}
 	}
 	return plan
@@ -448,6 +485,9 @@ func (b *Bundler) warnExportCollisions(mods []*Module, clashes []exportClash) {
 		return
 	}
 	for _, c := range clashes {
+		if c.pkgOnly {
+			continue
+		}
 		d := diag.Diagnostic{
 			File: entry.Path, Line: 1, Col: 1,
 			Message: "both " + strings.Join(c.files, " and ") + " export " + strconv.Quote(c.name) + ", and this page imports it from each",

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -196,14 +197,16 @@ func (b *Builder) buildIslands(owner string, exts []irtree.ExternalComponent, im
 		resolveDir = b.Root
 	}
 
-	if _, err := b.ensurePreactShared(); err != nil {
-		return "", "", nil, nil, diag.Diagnostic{
-			Message: "island runtime could not be built: " + err.Error(),
-			Hint:    "install Preact 10.20 or newer with `pnpm add preact`, then rebuild",
-		}.WithCode(diag.CodeIslandAsset)
-	}
-	if v := installedPreactVersion(b.Root); v != "" && versionLess(v, "10.20.0") {
-		fmt.Fprintf(os.Stderr, "  %sWarning:%s preact %s is older than 10.20.0; islands use hooks and compat APIs that older releases can break\n", cYellow, cReset, v)
+	if anyPreactIsland(exts) {
+		if _, err := b.ensurePreactShared(); err != nil {
+			return "", "", nil, nil, diag.Diagnostic{
+				Message: "island runtime could not be built: " + err.Error(),
+				Hint:    "install Preact 10.20 or newer with `pnpm add preact`, then rebuild",
+			}.WithCode(diag.CodeIslandAsset)
+		}
+		if v := installedPreactVersion(b.Root); v != "" && versionLess(v, "10.20.0") {
+			fmt.Fprintf(os.Stderr, "  %sWarning:%s preact %s is older than 10.20.0; islands use hooks and compat APIs that older releases can break\n", cYellow, cReset, v)
+		}
 	}
 	var boot strings.Builder
 	var importsJS strings.Builder
@@ -239,9 +242,17 @@ func (b *Builder) buildIslands(owner string, exts []irtree.ExternalComponent, im
 	}
 
 	chunkURL := map[string]string{}
-	var reactGroup []irtree.ExternalComponent
+	var reactGroup, realGroup []irtree.ExternalComponent
 	for _, e := range exts {
 		if e.Subtree == "" {
+			continue
+		}
+		if e.RealReact {
+			// Client-rendered on real React; the server emits the fallback.
+			realGroup = append(realGroup, e)
+			if fb := realFallbackHTML(e); fb != "" {
+				ssrHTML[e.ID] = fb
+			}
 			continue
 		}
 		used := islandImportsFor(e.Subtree, allImports)
@@ -285,6 +296,18 @@ func (b *Builder) buildIslands(owner string, exts []irtree.ExternalComponent, im
 		}
 		url := register(groupSrc)
 		for _, e := range reactGroup {
+			chunkURL[e.ID] = url
+		}
+	}
+	if len(realGroup) > 0 {
+		groupSrc := realIslandGroupSource(realGroup, allImports)
+		if err := b.buildRealIslandBundle(groupSrc, resolveDir, sink); err != nil {
+			return "", "", nil, nil, buildFailure(realGroup[0], err)
+		}
+		name := b.islandEntryName(groupSrc, resolveDir)
+		entries = append(entries, islandEntry{Name: name, Source: groupSrc, ResolveDir: resolveDir, Real: true})
+		url := b.islandEntryURL(name)
+		for _, e := range realGroup {
 			chunkURL[e.ID] = url
 		}
 	}
@@ -643,7 +666,7 @@ func (b *Builder) buildIslandBundle(src, resolveDir string, ssr bool, plugin *ap
 		JSXImportSource: "preact",
 		LogLevel:        api.LogLevelSilent,
 		Alias:           islandAlias(b.Root, ssr),
-		Plugins:         []api.Plugin{islandCSSPlugin(sink), islandJSXPlugin()},
+		Plugins:         []api.Plugin{islandCSSPlugin(sink), islandJSXPlugin(), islandTagsPlugin(b.Root, ssr), reconcilerGuardPlugin()},
 	}
 	if prov != nil {
 		opts.Plugins = append(opts.Plugins, islandEntryPlugin(nil, prov.virtualModules()))
@@ -690,7 +713,11 @@ func (b *Builder) buildIslandBundle(src, resolveDir string, ssr bool, plugin *ap
 // project tsconfig usually says `jsxImportSource: "@krate/runtime"`, which
 // esbuild applies to every module under it, so the JSX options are given per
 // module instead. A module's own `@jsxImportSource` pragma still wins.
-func islandJSXPlugin() api.Plugin {
+func islandJSXPlugin() api.Plugin { return islandJSXPluginFor("preact") }
+
+// islandJSXPluginFor is islandJSXPlugin for another JSX runtime package
+// ("react" for real-React islands).
+func islandJSXPluginFor(importSource string) api.Plugin {
 	return api.Plugin{
 		Name: "krate-island-jsx",
 		Setup: func(pb api.PluginBuild) {
@@ -706,12 +733,16 @@ func islandJSXPlugin() api.Plugin {
 				if strings.HasSuffix(args.Path, ".jsx") {
 					loader = api.LoaderJSX
 				}
-				res := api.Transform(tsstrip.BlankTierDecorators(args.Path, string(data)), api.TransformOptions{
+				source := string(data)
+				if importSource == "preact" {
+					source = injectIslandTags(source)
+				}
+				res := api.Transform(tsstrip.BlankTierDecorators(args.Path, source), api.TransformOptions{
 					Loader:          loader,
 					Sourcefile:      args.Path,
 					JSX:             api.JSXAutomatic,
-					JSXImportSource: "preact",
-					TsconfigRaw:     `{"compilerOptions":{"jsx":"react-jsx","jsxImportSource":"preact"}}`,
+					JSXImportSource: importSource,
+					TsconfigRaw:     `{"compilerOptions":{"jsx":"react-jsx","jsxImportSource":"` + importSource + `"}}`,
 					Target:          api.ES2020,
 					LogLevel:        api.LogLevelSilent,
 				})
@@ -804,16 +835,127 @@ func islandRenderToStringPlugin(resolveDir string) *api.Plugin {
 }
 
 // injectIslandSSR adds the server-rendered subtree to each island placeholder.
-func injectIslandSSR(html string, rendered map[string]string) string {
-	for id, inner := range rendered {
+// It returns the page HTML and the <Head> content the islands rendered, which
+// belongs in the document head.
+func injectIslandSSR(html string, rendered map[string]string) (string, string) {
+	ids := make([]string, 0, len(rendered))
+	for id := range rendered {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	var head strings.Builder
+	for _, id := range ids {
+		inner := rendered[id]
 		if inner == "" {
 			continue
 		}
+		inner, h := liftIslandHead(inner)
+		head.WriteString(h)
 		placeholder := `<div data-krate-island="` + id + `" style="display:contents"></div>`
 		replacement := `<div data-krate-island="` + id + `" data-krate-island-ssr style="display:contents">` + inner + `</div>`
 		html = strings.ReplaceAll(html, placeholder, replacement)
 	}
-	return html
+	return html, head.String()
+}
+
+const (
+	islandHeadOpen  = "<krate-head>"
+	islandHeadClose = "</krate-head>"
+)
+
+// liftIslandHead removes the <krate-head> wrappers an island's <Head> renders
+// from its server markup and returns them separately. Wrappers nest; the
+// content of the outermost one is kept, inner wrappers are dropped.
+func liftIslandHead(html string) (body, head string) {
+	if !strings.Contains(html, islandHeadOpen) {
+		return html, ""
+	}
+	var out, hb strings.Builder
+	i := 0
+	for i < len(html) {
+		open := strings.Index(html[i:], islandHeadOpen)
+		if open < 0 {
+			break
+		}
+		out.WriteString(html[i : i+open])
+		j := i + open + len(islandHeadOpen)
+		depth := 1
+		for depth > 0 && j < len(html) {
+			nextOpen := strings.Index(html[j:], islandHeadOpen)
+			nextClose := strings.Index(html[j:], islandHeadClose)
+			if nextClose < 0 {
+				hb.WriteString(html[j:])
+				j = len(html)
+				break
+			}
+			if nextOpen >= 0 && nextOpen < nextClose {
+				hb.WriteString(html[j : j+nextOpen])
+				j += nextOpen + len(islandHeadOpen)
+				depth++
+				continue
+			}
+			hb.WriteString(html[j : j+nextClose])
+			j += nextClose + len(islandHeadClose)
+			depth--
+		}
+		i = j
+	}
+	out.WriteString(html[min(i, len(html)):])
+	return out.String(), hb.String()
+}
+
+// islandTagNames are the compiler-provided tags an island module may use as
+// globals, the way a Krate component does.
+var islandTagNames = []string{"Head", "Suspense", "Script", "Style", "Link", "Image", "Icon", "SyntaxHighlight"}
+
+// injectIslandTags imports the tags a module uses and does not bind itself.
+func injectIslandTags(src string) string {
+	var names []string
+	for _, tag := range islandTagNames {
+		if !strings.Contains(src, "<"+tag) && !strings.Contains(src, tag+">") {
+			continue
+		}
+		if declaresBinding(src, tag) || importsBinding(src, tag) {
+			continue
+		}
+		names = append(names, tag)
+	}
+	if len(names) == 0 {
+		return src
+	}
+	return "import { " + strings.Join(names, ", ") + " } from \"krate-island-tags\"; " + src
+}
+
+// islandTagsPlugin serves the module injectIslandTags imports. In the client
+// bundle <Head> renders nothing: its content is lifted into the document head
+// at build time. In the server render it wraps its children in <krate-head>,
+// which liftIslandHead removes from the markup.
+func islandTagsPlugin(root string, ssr bool) api.Plugin {
+	const ns = "krate-island-tags"
+	head := "() => null"
+	if ssr {
+		head = "(p) => h(\"krate-head\", null, p.children)"
+	}
+	contents := `import { h, Fragment } from "preact";
+const none = () => null;
+export const Head = ` + head + `;
+export const Script = none, Style = none, Icon = none;
+export const Suspense = (p) => h(Fragment, null, p.children);
+export const SyntaxHighlight = (p) => h("pre", null, h("code", null, p.children));
+export const Link = (p) => { const { children, prefetch, replace, scroll, ...rest } = p; return h("a", rest, children); };
+export const Image = (p) => h("img", p);
+`
+	return api.Plugin{
+		Name: "krate-island-tags",
+		Setup: func(pb api.PluginBuild) {
+			pb.OnResolve(api.OnResolveOptions{Filter: `^krate-island-tags$`}, func(api.OnResolveArgs) (api.OnResolveResult, error) {
+				return api.OnResolveResult{Path: "krate-island-tags", Namespace: ns}, nil
+			})
+			pb.OnLoad(api.OnLoadOptions{Filter: `.*`, Namespace: ns}, func(api.OnLoadArgs) (api.OnLoadResult, error) {
+				return api.OnLoadResult{Contents: &contents, Loader: api.LoaderJS, ResolveDir: root}, nil
+			})
+		},
+	}
 }
 
 // ensurePreactShared builds the shared Preact chunks once per build and records
@@ -970,6 +1112,16 @@ func versionLess(a, b string) bool {
 	for i := 0; i < 3; i++ {
 		if av[i] != bv[i] {
 			return av[i] < bv[i]
+		}
+	}
+	return false
+}
+
+// anyPreactIsland reports whether any island of the page runs on Preact.
+func anyPreactIsland(exts []irtree.ExternalComponent) bool {
+	for _, e := range exts {
+		if !e.RealReact {
+			return true
 		}
 	}
 	return false

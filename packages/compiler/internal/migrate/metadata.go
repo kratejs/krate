@@ -52,7 +52,7 @@ var nextMetadataTypeNames = map[string]bool{
 func rewriteMetadataTypes(rep *Report) {
 	for i := range rep.Files {
 		f := &rep.Files[i]
-		if f.Kind != KindPage && f.Kind != KindLayout && f.Kind != KindAsset && f.Kind != KindMetadataRoute && f.Kind != KindNotFound && f.Kind != KindForbidden && f.Kind != KindUnauthorized && f.Kind != KindError {
+		if f.Kind != KindPage && f.Kind != KindLayout && f.Kind != KindAsset && f.Kind != KindModule && f.Kind != KindMetadataRoute && f.Kind != KindNotFound && f.Kind != KindForbidden && f.Kind != KindUnauthorized && f.Kind != KindError {
 			continue
 		}
 		src := string(f.Content)

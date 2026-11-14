@@ -6,9 +6,14 @@ order: 7
 
 # Metadata routes
 
-The Next.js metadata file conventions work as files in the pages directory. They
-run once at build time (on Node, with your project's environment) and write
-static files, so they work on every deploy target.
+The Next.js metadata file conventions work as files in the pages directory. By
+default they run once at build time (on Node, with your project's environment)
+and write static files, so they work on every deploy target. A `sitemap.ts`,
+`robots.ts` or `manifest.ts` can instead run per request (see
+[Per-request routes](#per-request-routes)).
+
+Imports work as they do on the server: `import "server-only"` is accepted, and a
+CommonJS dependency may `require` Node built-ins (the AWS SDK, `dotenv`).
 
 | File | Output |
 | --- | --- |
@@ -43,6 +48,44 @@ sitemap into `sitemap/<id>.xml` files; the function is then called once per id.
 
 A metadata file wins over the sitemap and robots plugins and the `robots` and
 `seo` config. The build says so (`KR7133`) so you can remove the one you no longer need.
+
+### Per-request routes
+
+Export `dynamic = "force-dynamic"` or a `revalidate` from `sitemap.ts`,
+`robots.ts` or `manifest.ts` and the file runs on the server when the URL is
+requested, not during the build. The build writes no `sitemap.xml` or
+`robots.txt` for it, so it needs no database access at build time and never goes
+stale.
+
+```ts
+// src/pages/robots.ts
+import { headers } from "@krate/runtime/server";
+
+export const dynamic = "force-dynamic";
+
+export default async function robots() {
+  const host = (await headers()).get("host");
+  return { rules: [{ userAgent: "*", allow: "/" }], sitemap: `https://${host}/sitemap.xml` };
+}
+```
+
+- `dynamic = "force-dynamic"` (or `revalidate = 0`) runs the function on every
+  request, with `headers()` and `cookies()` available. The response is not cached.
+- `revalidate = 3600` caches the result in memory for that many seconds per host
+  and path (each server instance keeps its own cache), then runs the function
+  again.
+- `dynamic = "force-static"`, `revalidate = false` and no export keep the build-time
+  behaviour.
+- A `sitemap.ts` with `generateSitemaps()` answers `/sitemap/<id>.xml` for the ids
+  it lists and 404 for any other.
+- The function runs on Node (the Node API sidecar of `krate serve` and `krate dev`,
+  or the portable server of the `node`, `vercel` and `netlify` targets), behind your
+  middleware. Like API routes, `krate dev` needs a restart to start the Node
+  sidecar when the first per-request route is added.
+- Static-only deploy targets (`gh-pages` and others without a server) refuse the
+  project and name these routes; `--static-only` publishes the pages without them.
+- A file in a dynamic segment (`blog/[slug]/sitemap.ts`) cannot answer a URL
+  per request and keeps running at build time (`KR7134`).
 
 ## opengraph-image and twitter-image
 
@@ -143,6 +186,7 @@ at build time with an `opengraph-image` file instead.
 `manifest`, `opengraph-image` and `twitter-image` modules move to the same
 segment of `src/pages` with `next/og` rewritten to `@krate/runtime/og`; static
 `robots.txt`, `sitemap.xml` and manifest files go to `public/`; static
-`opengraph-image.png` files are copied beside their page. `icon` and `apple-icon`
-files, and `opengraph-image.alt.txt` (export `alt` instead), are still listed as
-manual items.
+`opengraph-image.png` files are copied beside their page. Static `favicon.ico`,
+`icon.*` and `apple-icon.*` files go to `public/` and the root ones are linked from
+the generated `head` config. Dynamic `icon.tsx` and `apple-icon.tsx` modules, and
+`opengraph-image.alt.txt` (export `alt` instead), are still listed as manual items.

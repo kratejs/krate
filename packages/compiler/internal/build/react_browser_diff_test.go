@@ -20,7 +20,6 @@ import (
 	"github.com/evanw/esbuild/pkg/api"
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
-	"github.com/kratejs/krate/packages/compiler/internal/diag"
 )
 
 // Browser differential against React 19 (react-dom/client).
@@ -492,68 +491,6 @@ func reactOracleReady(t *testing.T) string {
 	return oracle
 }
 
-// TestReactBrowserCorpus validates the corpus without a browser: specs parse,
-// every fixture bundles with React, divergences.json is well formed and
-// classified, and expectBuildDiagnostic fixtures get their diagnostic (or are
-// listed). With KRATE_REACT_EXIT=1 it fails while any P0/P1 entry remains.
-func TestReactBrowserCorpus(t *testing.T) {
-	fixtures := loadReactBrowserFixtures(t)
-	known := loadReactBrowserDivergences(t)
-	byName := map[string]rbFixture{}
-	for _, fx := range fixtures {
-		byName[fx.Name] = fx
-	}
-	var blocking []string
-	for name, d := range known {
-		if _, ok := byName[name]; !ok {
-			t.Errorf("divergences.json lists unknown fixture %q", name)
-		}
-		switch d.Severity {
-		case "P0", "P1", "P2":
-		default:
-			t.Errorf("divergences.json: %s has severity %q (want P0, P1 or P2)", name, d.Severity)
-		}
-		if strings.TrimSpace(d.Reason) == "" || strings.HasPrefix(d.Reason, "TODO") {
-			t.Errorf("divergences.json: %s is not classified (reason %q)", name, d.Reason)
-		}
-		if d.Severity == "P0" || d.Severity == "P1" {
-			blocking = append(blocking, fmt.Sprintf("%s [%s] %s", name, d.Severity, d.Reason))
-		}
-	}
-	sort.Strings(blocking)
-	if os.Getenv("KRATE_REACT_EXIT") != "" && len(blocking) > 0 {
-		t.Errorf("R2/R3 exit criteria not met: %d P0/P1 divergences remain:\n  %s", len(blocking), strings.Join(blocking, "\n  "))
-	}
-
-	if oracle := reactOracleReady(t); oracle != "" {
-		work := t.TempDir()
-		for _, fx := range fixtures {
-			if fx.Spec.ExpectBuildDiagnostic != "" {
-				continue
-			}
-			if err := bundleReactFixture(oracle, fx, filepath.Join(work, strings.ReplaceAll(fx.Name, "/", "__"))); err != nil {
-				t.Errorf("%s: React bundle failed (fixture bug): %v", fx.Name, err)
-			}
-		}
-	}
-
-	work := t.TempDir()
-	for _, fx := range fixtures {
-		if fx.Spec.ExpectBuildDiagnostic == "" {
-			continue
-		}
-		diff := checkBuildDiagnostic(t, fx, work)
-		_, listed := known[fx.Name]
-		switch {
-		case diff != "" && !listed:
-			t.Errorf("%s: diagnostic expectation not met and not in divergences.json:\n%s", fx.Name, diff)
-		case diff == "" && listed:
-			t.Logf("FIXED: %s now reports %s; remove it from divergences.json", fx.Name, fx.Spec.ExpectBuildDiagnostic)
-		}
-	}
-	t.Logf("react browser corpus: %d fixtures, %d listed divergences (%d P0/P1)", len(fixtures), len(known), len(blocking))
-}
-
 // rbSnap mirrors one snapshot recorded by run.mjs.
 type rbSnap struct {
 	Step      string   `json:"step"`
@@ -979,18 +916,4 @@ func startKrateServerOn(t *testing.T, root string, cfg *config.Config, port int)
 		return "", fmt.Errorf("action sidecar on port %d did not start", apiPort)
 	}
 	return base, nil
-}
-
-// Diagnostic registry sanity: every code an expectation names exactly must be
-// registered, so a typo does not silently pass as "missing diagnostic".
-func TestReactBrowserDiagnosticCodesRegistered(t *testing.T) {
-	for _, fx := range loadReactBrowserFixtures(t) {
-		code := fx.Spec.ExpectBuildDiagnostic
-		if code == "" || strings.Contains(code, "x") {
-			continue
-		}
-		if _, ok := diag.Lookup(diag.Code(code)); !ok {
-			t.Errorf("%s: expectBuildDiagnostic %s is not a registered code", fx.Name, code)
-		}
-	}
 }

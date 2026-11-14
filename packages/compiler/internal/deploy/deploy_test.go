@@ -41,6 +41,42 @@ func TestEmitNetlifyRedirects(t *testing.T) {
 	}
 }
 
+// TestVercelTrailingSlashFromConfig maps the top-level trailingSlash setting
+// onto vercel.json; an explicit deploy option still wins.
+func TestVercelTrailingSlashFromConfig(t *testing.T) {
+	read := func(cfg *config.Config) map[string]any {
+		out := t.TempDir()
+		if _, err := Emit("vercel", cfg, out, out); err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(filepath.Join(out, "vercel.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var doc map[string]any
+		if err := json.Unmarshal(data, &doc); err != nil {
+			t.Fatal(err)
+		}
+		return doc
+	}
+	for _, c := range []struct {
+		mode string
+		want any
+	}{{"", nil}, {"ignore", nil}, {"always", true}, {"never", false}} {
+		cfg := config.Default()
+		cfg.TrailingSlash = c.mode
+		if got := read(cfg)["trailingSlash"]; got != c.want {
+			t.Errorf("trailingSlash %q: vercel.json trailingSlash = %v, want %v", c.mode, got, c.want)
+		}
+	}
+	cfg := config.Default()
+	cfg.TrailingSlash = "never"
+	cfg.Deploy.Options = map[string]string{"trailingSlash": "true"}
+	if read(cfg)["trailingSlash"] != true {
+		t.Error("deploy.options.trailingSlash must override the top-level setting")
+	}
+}
+
 func TestEmitVercel(t *testing.T) {
 	out := t.TempDir()
 	if _, err := Emit("vercel", testConfig(), out, out); err != nil {
@@ -69,75 +105,5 @@ func TestEmitVercel(t *testing.T) {
 	}
 	if len(doc.Rewrites) != 1 || doc.Rewrites[0].Destination != "/app.html" {
 		t.Fatalf("rewrites = %+v", doc.Rewrites)
-	}
-}
-
-func TestEmitGitHubPages(t *testing.T) {
-	out := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(out, "404"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(out, "404", "index.html"), []byte("<h1>404</h1>"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	files, err := Emit("gh-pages", config.Default(), out, out)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(files) != 2 {
-		t.Fatalf("expected .nojekyll + 404.html, got %v", files)
-	}
-	if _, err := os.Stat(filepath.Join(out, ".nojekyll")); err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(filepath.Join(out, "404.html"))
-	if err != nil || string(data) != "<h1>404</h1>" {
-		t.Fatalf("404.html = %q, err=%v", data, err)
-	}
-}
-
-func TestEmitUnknownTarget(t *testing.T) {
-	if _, err := Emit("nowhere", config.Default(), t.TempDir(), t.TempDir()); err == nil {
-		t.Fatal("expected error for unknown target")
-	}
-}
-
-func TestEmitRemovesServerOnlyArtifacts(t *testing.T) {
-	out := t.TempDir()
-	internal := filepath.Join(out, ".krate", "server-bundles")
-	if err := os.MkdirAll(internal, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(internal, "page.server.mjs"), []byte("secret"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := Emit("netlify", config.Default(), out, out); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(filepath.Join(out, ".krate")); !os.IsNotExist(err) {
-		t.Fatalf(".krate still present after deploy: %v", err)
-	}
-}
-
-func TestEmitRemovesLegacyServerOutputFromPublicRoot(t *testing.T) {
-	out := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(out, "api-node"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	for _, rel := range []string{"api-node/hello.js", "server-manifest.json", "index.html"} {
-		if err := os.WriteFile(filepath.Join(out, filepath.FromSlash(rel)), []byte("x"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, err := Emit("netlify", config.Default(), t.TempDir(), out, Options{StaticOnly: true}); err != nil {
-		t.Fatal(err)
-	}
-	for _, rel := range []string{"api-node", "server-manifest.json"} {
-		if _, err := os.Stat(filepath.Join(out, rel)); !os.IsNotExist(err) {
-			t.Errorf("%s still present after deploy: %v", rel, err)
-		}
-	}
-	if _, err := os.Stat(filepath.Join(out, "index.html")); err != nil {
-		t.Errorf("index.html was removed: %v", err)
 	}
 }

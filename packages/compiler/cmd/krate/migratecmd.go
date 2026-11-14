@@ -1,12 +1,16 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/internal/build"
+	"github.com/kratejs/krate/packages/compiler/internal/jseval"
 	"github.com/kratejs/krate/packages/compiler/internal/migrate"
 )
 
@@ -74,6 +78,15 @@ func runMigrateNext(flags cliFlags, args []string) {
 		return
 	}
 
+	if flags.Verify {
+		if missing := unresolvedKratePackages(rep); len(missing) > 0 {
+			fmt.Fprintf(os.Stderr, "%sCannot verify:%s %s does not resolve from %s, so nothing was written.\n", cRed, cReset, strings.Join(missing, ", "), rep.Root)
+			fmt.Fprintln(os.Stderr, "  Install the dependencies first: run with --update-package and install (npm/pnpm/yarn/bun install), then re-run with --apply --verify.")
+			fmt.Fprintln(os.Stderr, "  Or run --apply without --verify and run `krate build` once the packages are installed.")
+			os.Exit(1)
+		}
+	}
+
 	res, err := migrate.Apply(rep, migrate.ApplyOptions{Force: flags.Force})
 	if err != nil {
 		if flags.JSON {
@@ -122,10 +135,35 @@ func runMigrateNext(flags cliFlags, args []string) {
 
 	fmt.Printf("migrate: wrote %d file(s) from %s\n", len(res.Written), rep.Root)
 	fmt.Printf("  backup: %s\n", res.BackupDir)
+	if len(res.Moved) > 0 {
+		fmt.Printf("  moved aside into the backup: %s\n", strings.Join(res.Moved, ", "))
+	}
 	fmt.Printf("  rollback: krate migrate rollback %s\n", res.BackupDir)
 	if len(rep.Manual) > 0 {
 		printMigrationManual(rep)
 	}
+}
+
+// unresolvedKratePackages returns the @krate/* packages that verification will
+// need (the config's @krate/core plus any other package a generated file
+// imports) and that do not resolve from the project.
+func unresolvedKratePackages(rep *migrate.Report) []string {
+	need := map[string]bool{"@krate/core": true}
+	for _, f := range rep.Files {
+		for _, pkg := range []string{"@krate/runtime", "@krate/components"} {
+			if bytes.Contains(f.Content, []byte(pkg)) {
+				need[pkg] = true
+			}
+		}
+	}
+	var missing []string
+	for pkg := range need {
+		if _, err := jseval.ResolveKratePackage(rep.Root, pkg); err != nil {
+			missing = append(missing, pkg)
+		}
+	}
+	sort.Strings(missing)
+	return missing
 }
 
 func printMigrationPlan(rep *migrate.Report) {
@@ -154,6 +192,9 @@ func printMigrationPlan(rep *migrate.Report) {
 	}
 	for _, w := range rep.Warnings {
 		fmt.Printf("  warning: %s\n", w)
+	}
+	if len(rep.MoveAside) > 0 {
+		fmt.Printf("\n--apply moves the original Next route tree(s) into the backup so Krate does not build them twice: %s\n  `krate migrate rollback` moves them back.\n", strings.Join(rep.MoveAside, ", "))
 	}
 	printMigrationManual(rep)
 }

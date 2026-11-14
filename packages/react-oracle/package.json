@@ -2,7 +2,7 @@
   "name": "@krate/react-oracle",
   "version": "0.0.0",
   "private": true,
-  "description": "React 19 server renderer used as the oracle for the compiler differential test.",
+  "description": "React 19 server renderer used as the oracle for the compiler differential test, and the real React the real-React island tests run.",
   "license": "Apache-2.0",
   "type": "module",
   "engines": {
@@ -10,6 +10,7 @@
   },
   "devDependencies": {
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "react-reconciler": "^0.33.0"
   }
 }

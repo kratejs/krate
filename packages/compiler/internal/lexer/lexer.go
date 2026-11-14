@@ -10,6 +10,7 @@ package lexer
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -270,6 +271,8 @@ type Token struct {
 }
 
 type Lexer struct {
+	// noJSX makes every `<` a plain operator or type bracket (TS-only mode).
+	noJSX  bool
 	src    string
 	pos    int
 	start  int
@@ -334,6 +337,25 @@ type jsxFrame struct {
 
 func New(src string) *Lexer {
 	return &Lexer{src: src, tLine: 1, tCol: 1}
+}
+
+// NewTS returns a lexer that never opens JSX, for .ts/.mts/.cts sources where
+// `<` is a comparison, a type assertion or a type-parameter list.
+func NewTS(src string) *Lexer {
+	l := New(src)
+	l.noJSX = true
+	return l
+}
+
+// ForFile returns the lexer for a source file, chosen from its extension the
+// way tsc and esbuild do: .ts/.mts/.cts never contain JSX, everything else
+// (.tsx, .jsx, .js, .mjs, .cjs) keeps JSX enabled.
+func ForFile(path, src string) *Lexer {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".ts", ".mts", ".cts":
+		return NewTS(src)
+	}
+	return New(src)
 }
 
 // SplitLines splits src into lines using the same line terminators as the
@@ -993,6 +1015,9 @@ func (l *Lexer) lexJSXChildren() {
 // `<T extends X>`, `<T>(x: T) => T`) are ruled out so the lexer does not open
 // a tag frame and leak JSX-text state into the rest of the file.
 func (l *Lexer) atJSXTagStart() bool {
+	if l.noJSX {
+		return false
+	}
 	if l.inJSXChildren() {
 		return isIDStartAt(l.src, l.pos) || l.peek() == '>'
 	}

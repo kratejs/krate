@@ -21,21 +21,6 @@ const (
 
 var errBadOrigin = errors.New("darwin: request is not for " + OriginURL)
 
-// pathSanitizer drops characters that would make NSURL reject the string.
-var pathSanitizer = strings.NewReplacer(" ", "%20", "\n", "", "\r", "", "\t", "", "\x00", "")
-
-// appURL turns a route ("/", "/a?b=1#c", "a") into a full app URL. The input
-// is taken to be in URL form already (percent-encoded where needed).
-func appURL(path string) string {
-	if path == "" {
-		path = "/"
-	}
-	if path[0] != '/' {
-		path = "/" + path
-	}
-	return OriginURL + pathSanitizer.Replace(path)
-}
-
 // navAllowed is the navigation lock policy. Main-frame (or new-window)
 // navigations may only target the app origin; subframes may additionally load
 // inert about/blob/data documents.

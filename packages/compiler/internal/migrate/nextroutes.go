@@ -143,7 +143,11 @@ func rewriteNextNavigationImports(src string) (out string, rewrites []string, ma
 		return strings.Join(lines, "\n")
 	})
 	if out != src {
-		rewrites = append(rewrites, "rewrote next/navigation imports to "+signalModule+" and @krate/runtime")
+		mods := signalModule
+		if signalModule != "@krate/runtime" {
+			mods += " and @krate/runtime"
+		}
+		rewrites = append(rewrites, "rewrote next/navigation imports to "+mods)
 	}
 	if strings.Contains(out, "next/navigation") && nextNavigationImport.FindString(out) == "" {
 		// Namespace or default imports: point the whole module at the runtime.
@@ -213,42 +217,146 @@ func relativeModulePath(fromTarget, toTarget string) string {
 	return rel
 }
 
+// nextResponseShim is the NextResponse subset prepended to a route handler that
+// uses it. cookies mirrors Next's ResponseCookies: set/delete append
+// Set-Cookie headers, get/getAll/has read them back.
+const nextResponseShim = `function __krateCookieHeader(name: string, value: string, o: any = {}): string {
+  let s = encodeURIComponent(name) + "=" + encodeURIComponent(value);
+  s += "; Path=" + (o.path === undefined ? "/" : o.path);
+  if (o.domain) s += "; Domain=" + o.domain;
+  if (o.expires) s += "; Expires=" + new Date(o.expires).toUTCString();
+  if (typeof o.maxAge === "number") s += "; Max-Age=" + Math.floor(o.maxAge);
+  if (o.httpOnly) s += "; HttpOnly";
+  if (o.secure) s += "; Secure";
+  if (o.partitioned) s += "; Partitioned";
+  if (o.priority) s += "; Priority=" + o.priority;
+  if (o.sameSite) s += "; SameSite=" + (o.sameSite === true ? "Strict" : String(o.sameSite).charAt(0).toUpperCase() + String(o.sameSite).slice(1).toLowerCase());
+  return s;
+}
+
+function __krateWithCookies<T extends Response>(res: T): T {
+  const list = (): Array<{ name: string; value: string }> =>
+    res.headers.getSetCookie().map((c) => {
+      const first = c.split(";")[0];
+      const i = first.indexOf("=");
+      return { name: decodeURIComponent(first.slice(0, i)), value: decodeURIComponent(first.slice(i + 1)) };
+    });
+  const cookies = {
+    get: (name: string) => list().filter((c) => c.name === name).pop(),
+    getAll: (name?: string) => list().filter((c) => name === undefined || c.name === name),
+    has: (name: string) => list().some((c) => c.name === name),
+    set(name: any, value?: string, opts?: any) {
+      if (typeof name === "object") res.headers.append("set-cookie", __krateCookieHeader(name.name, name.value, name));
+      else res.headers.append("set-cookie", __krateCookieHeader(name, value as string, opts));
+      return cookies;
+    },
+    delete(name: any) {
+      const o = typeof name === "object" ? name : { name };
+      res.headers.append("set-cookie", __krateCookieHeader(o.name, "", { path: o.path, domain: o.domain, expires: new Date(0), maxAge: 0 }));
+      return cookies;
+    },
+  };
+  Object.defineProperty(res, "cookies", { value: cookies, enumerable: false });
+  return res;
+}
+
+const NextResponse = {
+  redirect: (url: string | URL, init?: number | ResponseInit) => {
+    const opts: ResponseInit = typeof init === "number" ? { status: init } : init || {};
+    const headers = new Headers(opts.headers);
+    headers.set("location", String(url));
+    return __krateWithCookies(new Response(null, { ...opts, status: opts.status || 307, headers }));
+  },
+  json: (body: any, init?: ResponseInit) => __krateWithCookies(Response.json(body, init)),
+};
+
+`
+
 // rewriteAPIServerSource maps the common Next route-handler helpers onto the
 // web Request/Response API used by Krate API routes.
 func rewriteAPIServerSource(src string) (string, []string, []string) {
 	var rewrites, manual []string
-	src = nextRequestType.ReplaceAllString(src, "Request")
+	if strings.Contains(src, "new NextResponse(") {
+		src = strings.ReplaceAll(src, "new NextResponse(", "new Response(")
+		rewrites = append(rewrites, "rewrote new NextResponse(...) to new Response(...)")
+	}
 	if strings.Contains(src, "NextResponse.rewrite") {
 		manual = append(manual, "NextResponse.rewrite needs a manual API response")
 	}
 	if strings.Contains(src, "NextResponse.next") {
 		manual = append(manual, "NextResponse.next has no API-route equivalent; return a Response")
 	}
-	for _, prop := range []string{".nextUrl", ".ip", ".geo", ".cookies"} {
+	for _, prop := range []string{".ip", ".geo"} {
 		if strings.Contains(src, "request"+prop) || strings.Contains(src, "req"+prop) {
 			manual = append(manual, "NextRequest"+prop+" is not available on a standard Request")
 		}
 	}
+	if requestCookieWrite.MatchString(src) {
+		manual = append(manual, "request.cookies is read-only in Krate (get, getAll, has); set or delete cookies on the response")
+	}
+	if requestCookiesRead.MatchString(src) {
+		rewrites = append(rewrites, "request.cookies (get, getAll, has) is provided by the Krate API runtime")
+	}
+	if requestNextURL.MatchString(src) {
+		rewrites = append(rewrites, "request.nextUrl (URL with basePath and clone()) is provided by the Krate API runtime")
+	}
 	importFailed := false
+	var runtimeImports []string
 	src = nextServerImport.ReplaceAllStringFunc(src, func(line string) string {
 		sub := nextServerImport.FindStringSubmatch(line)
 		if len(sub) != 2 {
 			return line
 		}
+		var unsupported, kept []string
 		for _, name := range strings.Split(sub[1], ",") {
-			n := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(name), "type "))
-			if n != "NextRequest" && n != "NextResponse" && n != "Request" && n != "" {
-				manual = append(manual, "next/server import contains unsupported helper "+n)
+			spec := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(name), "type "))
+			base, alias, hasAlias := strings.Cut(spec, " as ")
+			base = strings.TrimSpace(base)
+			switch base {
+			case "NextRequest", "Request", "":
+			case "NextResponse":
+				kept = append(kept, spec)
+			case "after", "unstable_after":
+				if hasAlias {
+					runtimeImports = append(runtimeImports, "after as "+strings.TrimSpace(alias))
+				} else if base == "unstable_after" {
+					runtimeImports = append(runtimeImports, "after as unstable_after")
+				} else {
+					runtimeImports = append(runtimeImports, "after")
+				}
+			default:
+				manual = append(manual, "next/server import contains unsupported helper "+base)
+				unsupported = append(unsupported, spec)
+				kept = append(kept, spec)
 				importFailed = true
-				return line
 			}
+		}
+		if len(unsupported) > 0 {
+			return "import { " + strings.Join(kept, ", ") + " } from \"next/server\";\n"
 		}
 		rewrites = append(rewrites, "removed next/server import")
 		return ""
 	})
-	if strings.Contains(src, "NextResponse") && !importFailed {
-		src = "const NextResponse = {\n  redirect: (url: string | URL, init?: ResponseInit) => {\n    const headers = new Headers(init && init.headers);\n    headers.set(\"location\", String(url));\n    return new Response(null, { status: (init && init.status) || 307, headers });\n  },\n  json: (body: any, init?: ResponseInit) => Response.json(body, init),\n};\n\n" + src
-		rewrites = append(rewrites, "added NextResponse API shim")
+	var header string
+	if nextRequestType.MatchString(src) {
+		src = nextRequestType.ReplaceAllString(src, "KrateRequest")
+		header += "import type { KrateRequest } from \"@krate/runtime/server\";\n"
+		rewrites = append(rewrites, "typed NextRequest as KrateRequest (cookies and nextUrl included)")
 	}
+	if len(runtimeImports) > 0 {
+		header += "import { " + strings.Join(runtimeImports, ", ") + " } from \"@krate/runtime/server\";\n"
+		rewrites = append(rewrites, "mapped next/server after() to @krate/runtime/server: it runs after the response is sent")
+	}
+	if strings.Contains(src, "NextResponse") && !importFailed {
+		header += "\n" + nextResponseShim
+		rewrites = append(rewrites, "added NextResponse API shim (json, redirect, cookies)")
+	}
+	src = header + src
 	return src, rewrites, manual
 }
+
+var (
+	requestCookieWrite = regexp.MustCompile(`\b(?:request|req)\.cookies\.(?:set|delete|clear)\s*\(`)
+	requestCookiesRead = regexp.MustCompile(`\b(?:request|req)\.cookies\b`)
+	requestNextURL     = regexp.MustCompile(`\b(?:request|req)\.nextUrl\b`)
+)

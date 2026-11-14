@@ -34,10 +34,19 @@ type ServerPlan struct {
 	AssetExts  []string
 	HasActions bool
 	HasAPI     bool
+	// MaxDuration is the longest `export const maxDuration` (seconds) of any
+	// API route, 0 when none sets one. One function serves every route, so
+	// platforms that configure a per-function limit get this value.
+	MaxDuration int
 	// UsesRevalidate reports revalidatePath/revalidateTag calls in the sources.
 	UsesRevalidate bool
 	// SharedCache is true when krate.config sets a shared cache adapter.
-	SharedCache     bool
+	SharedCache bool
+	// TrailingSlash is trailingSlash: "always", "never" or "ignore".
+	TrailingSlash string
+	// WorkerModule is the dist-relative or absolute path of the module merged
+	// into the Cloudflare Worker ("" when none); it is only reported.
+	WorkerModule    string
 	ShutdownTimeout int
 	Port            int
 	// Warnings are filled by Emit for the caller to print.
@@ -232,13 +241,17 @@ func emitVercelServer(cfg *config.Config, root, outDir string, plan *ServerPlan,
 	if err := put(filepath.Join(fnDir, "package.json"), []byte("{\"type\":\"module\"}\n")); err != nil {
 		return nil, err
 	}
-	vc, _ := json.MarshalIndent(map[string]any{
+	vcConf := map[string]any{
 		"runtime":                   "nodejs22.x",
 		"handler":                   "index.mjs",
 		"launcherType":              "Nodejs",
 		"shouldAddHelpers":          false,
 		"supportsResponseStreaming": true,
-	}, "", "  ")
+	}
+	if plan.MaxDuration > 0 {
+		vcConf["maxDuration"] = plan.MaxDuration
+	}
+	vc, _ := json.MarshalIndent(vcConf, "", "  ")
 	if err := put(filepath.Join(fnDir, ".vc-config.json"), append(vc, '\n')); err != nil {
 		return nil, err
 	}
@@ -272,6 +285,9 @@ func emitVercelServer(cfg *config.Config, root, outDir string, plan *ServerPlan,
 		src, dst = scopeRegex(base, r.Source, src), sitepath.Join(base, dst)
 		routes = append(routes, vcRoute{"src": src, "dest": dst, "check": true})
 	}
+	// The not-found page's own URLs answer 404 from the function, not 200 from
+	// the CDN's copy of the file.
+	routes = append(routes, vcRoute{"src": scopeRegex(base, "/404", `^/404(?:\.html|/)?$`), "dest": "/__krate"})
 	// The internal /__krate endpoints stay at the root; the API sits under the base.
 	routes = append(routes, vcRoute{"src": "^/__krate(?:/.*)?$", "dest": "/__krate"})
 	routes = append(routes, vcRoute{"src": scopeRegex(base, "/api", "^/api(?:/.*)?$"), "dest": "/__krate"})
@@ -314,6 +330,9 @@ func emitNetlifyServer(cfg *config.Config, root, outDir string, plan *ServerPlan
 		return nil, err
 	}
 	written = append(written, impl)
+	if plan.MaxDuration > 0 {
+		plan.Warnings = append(plan.Warnings, fmt.Sprintf("an API route sets maxDuration = %d: Krate's handler enforces it, but Netlify limits function run time by plan and the project cannot configure it, so Netlify may stop the function sooner", plan.MaxDuration))
+	}
 	fn := filepath.Join(root, "netlify", "functions", "krate.mjs")
 	wrapper := "// " + generatedMarker + " --target netlify`.\nimport handler from \"../server/krate-server.mjs\";\n\nexport default handler;\nexport const config = " + netlifyConfigLiteral(plan) + ";\n"
 	if err := writeGenerated(fn, []byte(wrapper), "the function"); err != nil {
@@ -379,7 +398,17 @@ func emitCloudflareServer(cfg *config.Config, root, outDir string, plan *ServerP
 		rel = "dist"
 	}
 	var first any = true
-	if !plan.HasMiddleware {
+	// trailingSlash "never" lets the platform drop the slash itself. "ignore"
+	// turns the platform's HTML handling off (it would redirect between /x and
+	// /x/) and the Worker serves the pages, so it has to run first.
+	htmlHandling := ""
+	switch plan.TrailingSlash {
+	case "never":
+		htmlHandling = "drop-trailing-slash"
+	case "ignore":
+		htmlHandling = "none"
+	}
+	if !plan.HasMiddleware && plan.TrailingSlash != "ignore" {
 		var pats []string
 		for _, g := range plan.ServerPaths {
 			g = sitepath.Join(cfg.BaseURLPath(), strings.ReplaceAll(g, "{,/}", ""))
@@ -392,23 +421,31 @@ func emitCloudflareServer(cfg *config.Config, root, outDir string, plan *ServerP
 		first = dedupe(pats)
 	}
 	name := sanitizeName(filepath.Base(root))
+	assets := map[string]any{
+		"directory":        filepath.ToSlash(rel),
+		"binding":          "ASSETS",
+		"run_worker_first": first,
+	}
+	if htmlHandling != "" {
+		assets["html_handling"] = htmlHandling
+	}
 	conf := map[string]any{
 		"name":                name,
 		"main":                ".krate/deploy/cloudflare/worker.mjs",
 		"compatibility_date":  "2025-09-01",
 		"compatibility_flags": []string{"nodejs_compat"},
-		"assets": map[string]any{
-			"directory":        filepath.ToSlash(rel),
-			"binding":          "ASSETS",
-			"run_worker_first": first,
-		},
+		"assets":              assets,
 	}
 	data, _ := json.MarshalIndent(conf, "", "  ")
 	text := "// " + generatedMarker + " --target cloudflare`.\n" + string(data) + "\n"
 	for _, existing := range []string{"wrangler.jsonc", "wrangler.json", "wrangler.toml"} {
 		p := filepath.Join(root, existing)
 		if _, err := os.Stat(p); err == nil && !isGenerated(p) {
-			plan.Warnings = append(plan.Warnings, existing+" exists and was not generated by krate; make sure it sets main = \".krate/deploy/cloudflare/worker.mjs\", compatibility_flags = [\"nodejs_compat\"] and assets { directory = \""+filepath.ToSlash(rel)+"\", binding = \"ASSETS\", run_worker_first = "+fmt.Sprint(first)+" }")
+			setting := "assets { directory = \"" + filepath.ToSlash(rel) + "\", binding = \"ASSETS\", run_worker_first = " + fmt.Sprint(first)
+			if htmlHandling != "" {
+				setting += ", html_handling = \"" + htmlHandling + "\""
+			}
+			plan.Warnings = append(plan.Warnings, existing+" exists and was not generated by krate; make sure it sets main = \".krate/deploy/cloudflare/worker.mjs\", compatibility_flags = [\"nodejs_compat\"] and "+setting+" }")
 			return append(written, redirectsAndHeaders(cfg, outDir)...), nil
 		}
 	}

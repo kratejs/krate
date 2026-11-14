@@ -625,33 +625,6 @@ func (st startTag) sanitized() string {
 	return out.String()
 }
 
-// sanitizeTag rebuilds a single SVG tag with unsafe attributes removed.
-// Tags that are not start tags are returned unchanged.
-func sanitizeTag(tag string) string {
-	if len(tag) < 2 || tag[0] != '<' || !isSVGAlpha(tag[1]) {
-		return tag
-	}
-	st, ok := parseStartTag(tag, 0)
-	if !ok {
-		return tag
-	}
-	return st.sanitized()
-}
-
-// dangerousURLValue reports whether an `href="..."`-style attribute carries an
-// executable/data: URL.
-func dangerousURLValue(attr string) bool {
-	eq := strings.IndexByte(attr, '=')
-	if eq < 0 {
-		return false
-	}
-	val := strings.TrimSpace(attr[eq+1:])
-	if len(val) >= 2 {
-		val = val[1 : len(val)-1]
-	}
-	return dangerousURL(val)
-}
-
 // dangerousURL reports whether a raw attribute value is a javascript: or data:
 // URL. The value is HTML-unescaped (browsers decode entities in attribute
 // values before resolving the URL) and scheme-checked.

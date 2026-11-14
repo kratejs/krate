@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"testing"
 
 	"github.com/kratejs/krate/packages/native/krate"
 	"github.com/kratejs/krate/packages/native/plugin"
@@ -127,59 +126,5 @@ func newGUIPlugin() *plugin.Plugin {
 			}
 			return nil
 		},
-	}
-}
-
-func TestGUIPlugins(t *testing.T) {
-	if guiCtl == nil {
-		t.Skip("set KRATE_NATIVE_GUI=1 to run GUI tests")
-	}
-	sink := guiSink
-	// Wait for the main page to load first: a script evaluated earlier is lost.
-	// Its report is left for the tests that expect it.
-	calls := sink.wait(t, "calls", nil)
-	sink.pending = append(sink.pending, calls)
-	if err := guiCtl.Eval("pluginFlow()"); err != nil {
-		t.Fatal(err)
-	}
-	rep := sink.wait(t, "plugin", nil)
-	if rep["error"] != nil {
-		t.Fatalf("plugin flow: %v", rep["error"])
-	}
-	if rep["hello"] != "hello from gt" {
-		t.Errorf("plugin op from the main window = %v", rep["hello"])
-	}
-	st := fmt.Sprint(rep["state"])
-	for _, want := range []string{"started=true", "dispatched=true", "created=main"} {
-		if !strings.Contains(st, want) {
-			t.Errorf("plugin state %q lacks %q", st, want)
-		}
-	}
-	if rep["opened"] == nil || rep["opened"] == "" {
-		t.Fatalf("window.open answered %v", rep["opened"])
-	}
-	sc := sink.wait(t, "scoped", nil)
-	if sc["error"] != nil {
-		t.Fatalf("scoped window: %v", sc["error"])
-	}
-	denied := func(what string, v any) {
-		t.Helper()
-		m, _ := v.(map[string]any)
-		e, _ := m["err"].(map[string]any)
-		if e == nil || e["code"] != "permission_denied" {
-			t.Errorf("%s in a window scoped to nothing: %v, want permission_denied", what, v)
-		}
-	}
-	denied("the gated plugin op", sc["plugin"])
-	denied("an SDK op", sc["sdk"])
-	// The page cannot widen its scope by naming the main window (or none) in
-	// x-krate-window: the shell binds the request to the native view.
-	denied("the gated plugin op with a forged main window id", sc["forged"])
-	denied("the gated plugin op with an empty window id", sc["forgedEmpty"])
-	if m, _ := sc["open"].(map[string]any); m == nil || m["ok"] != "open" {
-		t.Errorf("an ungated plugin op in the scoped window: %v", sc["open"])
-	}
-	if !strings.HasPrefix(fmt.Sprint(sc["window"]), "w") {
-		t.Errorf("scoped window id = %v", sc["window"])
 	}
 }

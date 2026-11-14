@@ -97,6 +97,28 @@ rules `<Head>` uses (see [Built-in components](/docs/features/built-in-component
 a tag replaces a baked tag with the same `name`, `property` or `http-equiv`, a
 `link rel="canonical"` replaces the canonical link, `og:image` may repeat.
 
+## Values inside `<Head>`
+
+Tags written in `<Head>` (and `<title>`, `<meta>` and `<link>` rendered on
+their own) are part of the static HTML, so their values are computed during the
+build. Calls to helpers imported from your project work when the helper is plain
+code: strings and templates, `JSON`, `URL`, `encodeURIComponent` and calls to
+other project functions.
+
+```tsx
+import { absoluteUrl, ogImage } from "../lib/seo";
+
+<Head>
+  <link rel="canonical" href={absoluteUrl("/pricing")} />
+  <meta property="og:image" content={ogImage("pricing")} />
+</Head>
+```
+
+A value the build cannot compute (it reads the browser, the clock, `process.env`
+or an object a class builds) is reported as warning KR8353, because crawlers would
+see the tag without it. Compute it from plain values, pass it as a prop, or use
+`generateMetadata`.
+
 ## Supported fields
 
 `title`, `description`, `applicationName`, `authors`, `generator`, `keywords`,

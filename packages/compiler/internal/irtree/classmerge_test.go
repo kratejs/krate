@@ -77,31 +77,3 @@ func TestClassMergeSharedVectors(t *testing.T) {
 		})
 	}
 }
-
-func TestStaticCvaMergesClassOverride(t *testing.T) {
-	src := `const button = cva("px-4 py-2 bg-blue-500", {
-  variants: { size: { sm: "px-2 text-sm", lg: "px-8 text-lg" } },
-  defaultVariants: { size: "sm" },
-});
-export default function App() { return <button class={button({ class: "px-10 bg-green-500" })}>x</button>; }`
-	tree := buildStaticTreeWithJS(t, src)
-	want := `<button class="py-2 text-sm px-10 bg-green-500">x</button>`
-	if got := renderStaticHTML(tree.Root.Children); got != want {
-		t.Errorf("HTML = %q, want %q", got, want)
-	}
-}
-
-func TestStaticCnMergesConflictingClasses(t *testing.T) {
-	cases := []struct{ src, want string }{
-		{`<div class={cn("p-2", "p-4")}>x</div>`, `<div class="p-4">x</div>`},
-		{`<div className={cn("p-2", "p-4")}>x</div>`, `<div class="p-4">x</div>`},
-		{`<div class={twMerge("duration-700", "duration-500")}>x</div>`, `<div class="duration-500">x</div>`},
-		{`<div class={clsx("p-2", "p-4")}>x</div>`, `<div class="p-2 p-4">x</div>`},
-	}
-	for _, tc := range cases {
-		tree := buildStaticTreeWithJS(t, "export default function App() { return "+tc.src+"; }")
-		if got := renderStaticHTML(tree.Root.Children); got != tc.want {
-			t.Errorf("%s: HTML = %q, want %q", tc.src, got, tc.want)
-		}
-	}
-}

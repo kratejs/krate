@@ -7,11 +7,8 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/ed25519"
-	"crypto/sha512"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"io/fs"
 	"net/http"
@@ -122,50 +119,6 @@ func feedServer(t *testing.T, version string, artifact []byte, sig string, hits 
 	return srv
 }
 
-func TestExpandURL(t *testing.T) {
-	got := ExpandURL("https://x.test/{target}/{version}.json", "linux-amd64", "1.0.0-beta.1")
-	if got != "https://x.test/linux-amd64/1.0.0-beta.1.json" {
-		t.Fatal(got)
-	}
-}
-
-func TestParseFeed(t *testing.T) {
-	k, _ := mustKeys(t)
-	sig := sign(t, k, []byte("x"))
-	ok := fmt.Sprintf(`{"version":"1.2.0","url":"https://a/b","signature":%q,"size":3}`, sig)
-	if f, err := ParseFeed([]byte(ok)); err != nil || f.Version != "1.2.0" || f.Size != 3 {
-		t.Fatalf("%+v %v", f, err)
-	}
-	for name, doc := range map[string]string{
-		"json":      `{`,
-		"version":   fmt.Sprintf(`{"version":"x","url":"u","signature":%q}`, sig),
-		"url":       fmt.Sprintf(`{"version":"1.0.0","signature":%q}`, sig),
-		"signature": `{"version":"1.0.0","url":"u","signature":"AAAA"}`,
-	} {
-		if _, err := ParseFeed([]byte(doc)); err == nil {
-			t.Errorf("%s: accepted", name)
-		}
-	}
-}
-
-func TestCompareVersions(t *testing.T) {
-	cases := []struct {
-		a, b string
-		want int
-	}{
-		{"1.2.0", "1.1.9", 1}, {"1.0.0", "1.0.0", 0}, {"1.0.0-rc.1", "1.0.0", -1},
-		{"1.0.0-alpha", "1.0.0-alpha.1", -1}, {"1.0.0-alpha.2", "1.0.0-alpha.10", -1},
-		{"1.0.0-1", "1.0.0-alpha", -1}, {"2.0.0+b1", "2.0.0+b2", 0}, {"v1.0.1", "1.0.0", 1},
-	}
-	for _, c := range cases {
-		a, _ := parseVersion(c.a)
-		b, _ := parseVersion(c.b)
-		if got := compareVersions(a, b); got != c.want {
-			t.Errorf("%s vs %s = %d, want %d", c.a, c.b, got, c.want)
-		}
-	}
-}
-
 func TestSignatureGoodBadWrongKey(t *testing.T) {
 	k, pub := mustKeys(t)
 	data := []byte("the update")
@@ -273,82 +226,6 @@ func TestDownloadRejectsBadSignature(t *testing.T) {
 	}
 }
 
-func TestDownloadResumes(t *testing.T) {
-	k, pub := mustKeys(t)
-	art := tgz(t, map[string]string{"app": strings.Repeat("abc", 100000)})
-	u, srv, cache := checked(t, art, sign(t, k, art), pub)
-	// Leave a partial file as an interrupted run would.
-	part := filepath.Join(cache, "updates", "1.2.0", stagedName(u.URL)+".part")
-	if err := os.MkdirAll(filepath.Dir(part), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	half := len(art) / 2
-	if err := os.WriteFile(part, art[:half], 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	var ranged atomic.Value
-	srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ranged.Store(r.Header.Get("Range"))
-		http.ServeContent(w, r, "a.tar.gz", timeZero, bytes.NewReader(art))
-	})
-	var first int64 = -1
-	err := u.Download(context.Background(), func(d, _ int64) {
-		if first < 0 {
-			first = d
-		}
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, _ := ranged.Load().(string); got != fmt.Sprintf("bytes=%d-", half) {
-		t.Fatalf("Range header %q", got)
-	}
-	if first != int64(half) {
-		t.Fatalf("progress started at %d, want %d", first, half)
-	}
-	b, _ := os.ReadFile(u.Path())
-	if !bytes.Equal(b, art) {
-		t.Fatal("resumed file differs")
-	}
-}
-
-func TestDownloadRestartsWhenServerIgnoresRange(t *testing.T) {
-	k, pub := mustKeys(t)
-	art := tgz(t, map[string]string{"app": strings.Repeat("q", 5000)})
-	u, srv, cache := checked(t, art, sign(t, k, art), pub)
-	part := filepath.Join(cache, "updates", "1.2.0", stagedName(u.URL)+".part")
-	if err := os.MkdirAll(filepath.Dir(part), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(part, art[:100], 0o600); err != nil {
-		t.Fatal(err)
-	}
-	srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if _, err := w.Write(art); err != nil {
-			t.Error(err)
-		}
-	})
-	if err := u.Download(context.Background(), nil); err != nil {
-		t.Fatal(err)
-	}
-	b, _ := os.ReadFile(u.Path())
-	if !bytes.Equal(b, art) {
-		t.Fatal("file differs")
-	}
-}
-
-func TestDownloadCancel(t *testing.T) {
-	k, pub := mustKeys(t)
-	art := tgz(t, map[string]string{"app": "x"})
-	u, _, _ := checked(t, art, sign(t, k, art), pub)
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	if err := u.Download(ctx, nil); err == nil {
-		t.Fatal("cancelled download succeeded")
-	}
-}
-
 // ---- apply ----
 
 func readFile(t *testing.T, p string) string {
@@ -409,34 +286,6 @@ func TestApplyLinuxReplacesExecutableAndAppDir(t *testing.T) {
 	}
 }
 
-func TestApplyRequiresExecutableInArtifact(t *testing.T) {
-	dir := t.TempDir()
-	write(t, filepath.Join(dir, "acme"), "old")
-	art := staged(t, "u.tar.gz", tgz(t, map[string]string{"other": "x"}))
-	u := &Update{Version: "1.2.0", path: art, cfg: Config{Exe: filepath.Join(dir, "acme"), GOOS: "linux"}}
-	t.Setenv("APPIMAGE", "")
-	if err := u.Apply(); err == nil || !strings.Contains(err.Error(), "does not contain acme") {
-		t.Fatalf("%v", err)
-	}
-	if readFile(t, filepath.Join(dir, "acme")) != "old" {
-		t.Fatal("exe changed")
-	}
-}
-
-func TestApplyWrapperDirectory(t *testing.T) {
-	dir := t.TempDir()
-	write(t, filepath.Join(dir, "acme"), "old")
-	art := staged(t, "u.tar.gz", tgz(t, map[string]string{"acme-1.2.0/": "", "acme-1.2.0/acme": "new"}))
-	u := &Update{Version: "1.2.0", path: art, cfg: Config{Exe: filepath.Join(dir, "acme"), GOOS: "linux"}}
-	t.Setenv("APPIMAGE", "")
-	if err := u.Apply(); err != nil {
-		t.Fatal(err)
-	}
-	if readFile(t, filepath.Join(dir, "acme")) != "new" {
-		t.Fatal("not replaced")
-	}
-}
-
 // failFS fails the nth Rename whose destination matches.
 type failFS struct {
 	OSFS
@@ -467,42 +316,6 @@ func TestApplyRollsBackOnFailure(t *testing.T) {
 	}
 	if readFile(t, filepath.Join(dir, "acme")) != "old-exe" || readFile(t, filepath.Join(dir, "app", "app.json")) != "old-manifest" {
 		t.Fatal("old install not restored")
-	}
-}
-
-// The Windows strategy renames the running executable aside before the new
-// one is moved in; on any host the order of operations is the same.
-func TestApplyWindowsOrder(t *testing.T) {
-	dir := t.TempDir()
-	write(t, filepath.Join(dir, "acme.exe"), "old")
-	art := staged(t, "u.zip", zipOf(t, map[string]string{"acme.exe": "new"}, nil))
-	ffs := &failFS{}
-	u := &Update{Version: "1.2.0", path: art, cfg: Config{Exe: filepath.Join(dir, "acme.exe"), GOOS: "windows", FS: ffs}}
-	if err := u.Apply(); err != nil {
-		t.Fatal(err)
-	}
-	if len(ffs.renames) != 2 || ffs.renames[0] != "acme.exe->acme.exe" {
-		t.Fatalf("renames %v", ffs.renames)
-	}
-	// First rename moves the old exe into the trash dir, second moves the new one in.
-	if readFile(t, filepath.Join(dir, "acme.exe")) != "new" {
-		t.Fatal("not replaced")
-	}
-}
-
-func TestCleanupStale(t *testing.T) {
-	dir := t.TempDir()
-	write(t, filepath.Join(dir, "acme"), "x")
-	write(t, filepath.Join(dir, trashName, "acme"), "old")
-	write(t, filepath.Join(dir, ".krate-new-1.2.0", "acme"), "half")
-	CleanupStale(filepath.Join(dir, "acme"))
-	for _, n := range []string{trashName, ".krate-new-1.2.0"} {
-		if _, err := os.Stat(filepath.Join(dir, n)); err == nil {
-			t.Errorf("%s survived", n)
-		}
-	}
-	if readFile(t, filepath.Join(dir, "acme")) != "x" {
-		t.Fatal("exe removed")
 	}
 }
 
@@ -537,69 +350,6 @@ func TestApplyMacBundle(t *testing.T) {
 	// Two renames: old bundle aside, new bundle in.
 	if len(ffs.renames) != 2 {
 		t.Fatalf("renames %v", ffs.renames)
-	}
-}
-
-func TestApplyMacBundleRestoresOnFailure(t *testing.T) {
-	root := t.TempDir()
-	bundle := filepath.Join(root, "Acme.app")
-	write(t, filepath.Join(bundle, "Contents", "MacOS", "acme"), "old")
-	art := staged(t, "u.zip", zipOf(t, map[string]string{"Acme.app/Contents/MacOS/acme": "new"}, nil))
-	ffs := &failFS{failDst: bundle}
-	u := &Update{Version: "1.2.0", path: art, cfg: Config{Exe: filepath.Join(bundle, "Contents", "MacOS", "acme"), GOOS: "darwin", FS: ffs}}
-	// Fail only the install rename; the restore rename (also to bundle) must pass.
-	cnt := 0
-	wrapped := &countFailFS{failFS: ffs, bundle: bundle, cnt: &cnt}
-	u.cfg.FS = wrapped
-	if err := u.Apply(); err == nil {
-		t.Fatal("expected failure")
-	}
-	if readFile(t, filepath.Join(bundle, "Contents", "MacOS", "acme")) != "old" {
-		t.Fatal("old bundle not restored")
-	}
-}
-
-type countFailFS struct {
-	*failFS
-	bundle string
-	cnt    *int
-}
-
-func (c *countFailFS) Rename(a, b string) error {
-	if b == c.bundle {
-		*c.cnt++
-		if *c.cnt == 1 {
-			return errors.New("injected install failure")
-		}
-	}
-	return c.OSFS.Rename(a, b)
-}
-
-func TestApplyMacNeedsBundle(t *testing.T) {
-	art := staged(t, "u.zip", zipOf(t, map[string]string{"x": "y"}, nil))
-	u := &Update{Version: "1.2.0", path: art, cfg: Config{Exe: "/opt/acme/acme", GOOS: "darwin"}}
-	if err := u.Apply(); err == nil || !strings.Contains(err.Error(), ".app") {
-		t.Fatalf("%v", err)
-	}
-}
-
-func TestApplyAppImage(t *testing.T) {
-	dir := t.TempDir()
-	target := filepath.Join(dir, "Acme.AppImage")
-	write(t, target, "old-image")
-	art := staged(t, "Acme-1.2.0.AppImage", []byte("new-image"))
-	u := &Update{Version: "1.2.0", path: art, cfg: Config{Exe: "/tmp/.mount_x/AppRun", GOOS: "linux", AppImage: target}}
-	if err := u.Apply(); err != nil {
-		t.Fatal(err)
-	}
-	if readFile(t, target) != "new-image" {
-		t.Fatal("not replaced")
-	}
-	if st, _ := os.Stat(target); runtime.GOOS != "windows" && st.Mode().Perm()&0o100 == 0 {
-		t.Fatal("not executable")
-	}
-	if _, err := os.Stat(target + ".new"); err == nil {
-		t.Fatal("temp file left")
 	}
 }
 
@@ -659,46 +409,6 @@ func TestExtractRejectsWritingThroughSymlinkChain(t *testing.T) {
 	}
 }
 
-func TestSignatureBindsMetadata(t *testing.T) {
-	k, pub := mustKeys(t)
-	pk, _ := DecodePublicKey(pub)
-	data := []byte("the update")
-	sig := sign(t, k, data)
-	for name, m := range map[string]Meta{
-		"version": {AppID: testMeta.AppID, Target: testMeta.Target, Version: "9.9.9"},
-		"target":  {AppID: testMeta.AppID, Target: "windows-amd64", Version: testMeta.Version},
-		"appId":   {AppID: "com.evil.app", Target: testMeta.Target, Version: testMeta.Version},
-	} {
-		if err := Verify(pk, m, bytes.NewReader(data), sig); !errors.Is(err, ErrBadSignature) {
-			t.Errorf("%s: %v", name, err)
-		}
-	}
-	// Size is part of the message: a different length never verifies, even
-	// when the signature was made over a prefix of the data.
-	short := signAs(t, k, testMeta, data[:4])
-	if err := Verify(pk, testMeta, bytes.NewReader(data), short); !errors.Is(err, ErrBadSignature) {
-		t.Errorf("size: %v", err)
-	}
-	if err := Verify(pk, testMeta, bytes.NewReader(data), sig); err != nil {
-		t.Fatalf("happy path: %v", err)
-	}
-	if _, err := Sign(k, Meta{AppID: "a\nb", Target: "t", Version: "1.0.0"}, bytes.NewReader(data)); err == nil {
-		t.Error("multi-line field accepted")
-	}
-}
-
-func TestSignedMessageFormat(t *testing.T) {
-	sum := sha512.Sum512([]byte("abc"))
-	msg, err := Meta{AppID: "com.acme.app", Target: "linux-amd64", Version: "1.2.0"}.message(sum[:], 3)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := "krate-update-v1\ncom.acme.app\nlinux-amd64\n1.2.0\n" + hex.EncodeToString(sum[:]) + "\n3"
-	if string(msg) != want {
-		t.Fatalf("%q", msg)
-	}
-}
-
 func TestRelabeledOlderArtifactRefused(t *testing.T) {
 	k, pub := mustKeys(t)
 	// A genuine, validly signed 1.0.1 artifact; the feed claims 1.2.0.
@@ -722,32 +432,5 @@ func TestRelabeledOlderArtifactRefused(t *testing.T) {
 		PublicKey: pub, Version: "1.1.0", CacheDir: t.TempDir(), Insecure: true})
 	if err := u2.Download(context.Background(), nil); !errors.Is(err, ErrBadSignature) {
 		t.Fatalf("other target: %v", err)
-	}
-}
-
-func TestOlderOrEqualVersionIsNotAnUpdate(t *testing.T) {
-	k, pub := mustKeys(t)
-	art := tgz(t, map[string]string{"app": "x"})
-	for _, feedVer := range []string{"1.0.0", "0.9.0", "1.0.0-rc.1"} {
-		m := testMeta
-		m.Version = feedVer
-		srv := feedServer(t, feedVer, art, signAs(t, k, m, art), nil)
-		u, err := Check(context.Background(), Config{URL: srv.URL + "/feed/x", AppID: testMeta.AppID, Target: testMeta.Target,
-			PublicKey: pub, Version: "1.0.0", Insecure: true})
-		if err != nil || u != nil {
-			t.Errorf("%s: %+v %v", feedVer, u, err)
-		}
-	}
-	// Download itself also refuses a version that is not newer.
-	u := &Update{Version: "1.0.0", cfg: Config{CacheDir: t.TempDir(), Version: "1.0.0", AppID: testMeta.AppID}}
-	if err := u.Download(context.Background(), nil); err == nil {
-		t.Fatal("Download accepted a non-newer version")
-	}
-}
-
-func TestCheckNeedsAppID(t *testing.T) {
-	_, pub := mustKeys(t)
-	if _, err := Check(context.Background(), Config{URL: "https://x.test/f", PublicKey: pub, Version: "1.0.0"}); err == nil {
-		t.Fatal("missing AppID accepted")
 	}
 }

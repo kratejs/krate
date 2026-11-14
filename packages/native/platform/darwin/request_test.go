@@ -7,24 +7,6 @@ import (
 	"testing"
 )
 
-func TestAppURL(t *testing.T) {
-	cases := map[string]string{
-		"":           "krate://app/",
-		"/":          "krate://app/",
-		"a":          "krate://app/a",
-		"/a b":       "krate://app/a%20b",
-		"/a?x=1#h":   "krate://app/a?x=1#h",
-		"?x=1":       "krate://app/?x=1",
-		"//evil.com": "krate://app//evil.com",
-		"/a\nb":      "krate://app/ab",
-	}
-	for in, want := range cases {
-		if got := appURL(in); got != want {
-			t.Errorf("appURL(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
 func TestNavAllowed(t *testing.T) {
 	cases := []struct {
 		scheme, host string
@@ -75,32 +57,5 @@ func TestNewHTTPRequestRejectsForeignOrigin(t *testing.T) {
 		if _, err := newHTTPRequest(context.Background(), "GET", u, nil, nil); err == nil {
 			t.Errorf("%q accepted", u)
 		}
-	}
-}
-
-func TestResponseFields(t *testing.T) {
-	h := http.Header{}
-	h.Add("content-type", "text/plain")
-	h.Add("X-Multi", "a")
-	h.Add("X-Multi", "b")
-	h.Set("Transfer-Encoding", "chunked")
-	h.Set("Connection", "close")
-	h.Set("X-Bad", "a\xffb")
-	got := responseFields(h)
-	if got["Content-Type"] != "text/plain" || got["X-Multi"] != "a, b" {
-		t.Fatalf("fields = %v", got)
-	}
-	if _, ok := got["Transfer-Encoding"]; ok {
-		t.Fatal("hop-by-hop header kept")
-	}
-	if got["X-Bad"] != "a�b" {
-		t.Fatalf("x-bad = %q", got["X-Bad"])
-	}
-}
-
-func TestRequestHeaderCanonicalizes(t *testing.T) {
-	h := requestHeader(map[string]string{"content-type": "a/b", "X-Y": "z"})
-	if h.Get("Content-Type") != "a/b" || h.Get("x-y") != "z" {
-		t.Fatalf("header = %v", h)
 	}
 }

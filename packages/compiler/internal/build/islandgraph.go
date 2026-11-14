@@ -27,6 +27,10 @@ type islandEntry struct {
 	// Virtual holds the generated modules the source imports by name
 	// (layout providers), keyed by their specifier.
 	Virtual map[string]islandVirtualModule
+	// Real marks a real-React entry, bundled by writeRealIslandBundles.
+	Real bool
+	// Boundary marks the hydration chunk of a client boundary.
+	Boundary bool
 }
 
 // islandVirtualModule is a generated module an island entry imports.
@@ -160,9 +164,20 @@ const islandVirtualPrefix = "krate-island-module:"
 // client-side navigation that loads another page's entry finds the store
 // modules it already evaluated.
 func (b *Builder) writeIslandBundles() error {
-	entries := b.allIslandEntries()
+	all := b.allIslandEntries()
 	chunksDir := filepath.Join(b.Cfg.OutDir, "chunks")
 	keep := map[string]bool{}
+	var entries, realEntries []islandEntry
+	for _, e := range all {
+		if e.Real {
+			realEntries = append(realEntries, e)
+		} else {
+			entries = append(entries, e)
+		}
+	}
+	if err := b.writeRealIslandBundles(realEntries, chunksDir, keep); err != nil {
+		return err
+	}
 	if len(entries) == 0 {
 		pruneIslandFiles(chunksDir, keep)
 		return nil
@@ -180,6 +195,20 @@ func (b *Builder) writeIslandBundles() error {
 	}
 	sink := &islandCSSSink{root: b.Root}
 	minify := b.shouldMinifyJS()
+	plugins := []api.Plugin{islandEntryPlugin(entries, virtual), islandCSSPlugin(sink), islandJSXPlugin(), islandTagsPlugin(b.Root, false), islandRequirePlugin(), reconcilerGuardPlugin()}
+	var injects []string
+	for _, e := range entries {
+		if !e.Boundary {
+			continue
+		}
+		shim, err := boundaryShims(filepath.Join(b.Cfg.OutDir, ".krate"))
+		if err != nil {
+			return err
+		}
+		injects = []string{shim}
+		plugins = append(plugins, clientOnlyMarkersPlugin(false), actionServerBundlePlugin(b.importResolver(), b.actionModules(), b.Cfg.BaseURLPath()))
+		break
+	}
 	result := esbuildBuild(api.BuildOptions{
 		AbsWorkingDir:       b.Root,
 		EntryPointsAdvanced: points,
@@ -200,7 +229,8 @@ func (b *Builder) writeIslandBundles() error {
 		LogLevel:            api.LogLevelSilent,
 		Alias:               islandAlias(b.Root, false),
 		External:            []string{"preact", "preact/compat", "preact/hooks", "preact/jsx-runtime"},
-		Plugins:             []api.Plugin{islandEntryPlugin(entries, virtual), islandCSSPlugin(sink), islandJSXPlugin(), islandRequirePlugin()},
+		Inject:              injects,
+		Plugins:             plugins,
 	})
 	if len(result.Errors) > 0 {
 		var msgs []string
@@ -260,7 +290,7 @@ func pruneIslandFiles(chunksDir string, keep map[string]bool) {
 		if f.IsDir() || keep[name] {
 			continue
 		}
-		if strings.HasPrefix(name, islandEntryPrefix) || strings.HasPrefix(name, islandSharedStem) {
+		if strings.HasPrefix(name, islandEntryPrefix) || strings.HasPrefix(name, islandSharedStem) || strings.HasPrefix(name, islandRealSharedStem) {
 			_ = os.Remove(filepath.Join(chunksDir, name))
 		}
 	}

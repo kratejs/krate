@@ -1,11 +1,13 @@
+//go:build windows
+
 package windows
 
 import "github.com/kratejs/krate/packages/native/platform/caps"
 
 // The split-pane arithmetic of a window with several WebView2 controllers.
-// This file has no Windows dependencies, so it is unit-tested on every OS; the
-// window procedure in views_windows.go feeds it mouse messages and applies
-// the rectangles it computes to the controllers.
+// This file has no Windows dependencies; the window procedure in
+// views_windows.go feeds it mouse messages and applies the rectangles it
+// computes to the controllers.
 
 const (
 	// dividerDIP is the thickness of a divider in device-independent pixels.

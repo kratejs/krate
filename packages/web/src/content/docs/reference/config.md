@@ -46,8 +46,15 @@ site: {
   twitter: "mysite",            // twitter:site handle (@ optional)
   themeColor: "#0b1020",
   locale: "en",                 // <html lang> + og:locale
+  htmlAttributes: { class: "dark" },       // attributes of every page's <html>
+  bodyAttributes: { class: "font-sans" },  // attributes of every page's <body>
 },
 ```
+
+`htmlAttributes` and `bodyAttributes` take strings, numbers and booleans (`true`
+writes a bare attribute, `false` and `null` drop it). Values are escaped. A page or
+a layout can add to them or replace single attributes with `<html>` and `<body>`
+elements inside `<Head>`; see [Document attributes](/docs/features/built-in-components/#document-attributes).
 
 `defineConfig` also accepts a function invoked with the build context, and
 `--mode <name>` selects the mode (and `.env.<mode>` files):
@@ -90,6 +97,22 @@ Each page gets one stylesheet (identical sheets share one hashed file), `@import
 and the merged stylesheet is minified when `minifyCSS` (or `minify`) is on.
 Tailwind generates CSS only for classes detected in the scanned sources, so
 unused utility classes never ship. There are no per-feature CSS config toggles.
+
+`@import` (and `url()`) may read `.css` files from the project root, from
+packages in `node_modules` (including pnpm workspace links whose target is a
+sibling package), and from the enclosing monorepo workspace root (the nearest
+parent with `pnpm-workspace.yaml` or a `package.json` with `workspaces`). A
+shared token file such as `@import "../../packages/tokens/tokens.css"` or
+`@import "@acme/tokens/tokens.css"` therefore works in a monorepo. Anything
+else is refused with a warning naming the resolved path; list extra
+directories explicitly:
+
+```typescript
+cssImportRoots: ["../shared-styles"], // relative to the project root, or absolute
+```
+
+In `krate dev`, edits to such files outside the project root rebuild the pages
+that import them (the file's directory is watched, not its subdirectories).
 
 ## Features
 
@@ -330,8 +353,9 @@ csp: {
 }
 ```
 
-The generated policy hashes the final (minified) document: inline `<script>` and
-`<style>` blocks, the inline speculation-rules script, and `style="..."`
+The generated policy hashes the final (minified) document: executable inline
+`<script>` and `<style>` blocks (JSON data blocks such as the site config never
+execute and are skipped), the inline speculation-rules script, and `style="..."`
 attributes (allowed with `'unsafe-hashes'` plus one SHA-256 hash per distinct
 value). Styles set at runtime through the CSSOM (`el.style.x = ...`) are not
 affected by CSP. When a CSP meta tag is present the client router does not
@@ -493,6 +517,43 @@ cross-document `@view-transition { navigation: auto }` rule so full-page loads
 morph too. Mark persistent chrome with `data-view-transition="name"` to morph it
 instead of cross-fading. Reduced-motion preferences are respected.
 
+Pages carry the router's settings in a JSON data block in `<head>`
+(`<script type="application/json" id="__krate_cfg__">`), and only when a setting
+differs from the defaults: a `basePath`, `viewTransitions: "off"`, or `krate dev`.
+A site on the defaults has no such block. The block is data, not code, so a strict
+`script-src 'self'` policy needs no allowance for it. With View Transitions on,
+the `@view-transition` rule is an inline `<style>` (a `style-src` policy needs
+`csp.enabled` hashing or `'unsafe-inline'` for it, or turn View Transitions off).
+
+## Trailing slash
+
+```typescript
+trailingSlash: "always", // "always" (default) | "never" | "ignore"
+```
+
+The URL form of pages, honoured the same way by `krate serve`/`krate start` and the
+`node`, `vercel`, `netlify` and `cloudflare` targets:
+
+- `"always"`: `/history` answers `301` to `/history/`.
+- `"never"`: `/history/` answers `301` to `/history` (the site root stays `/`).
+- `"ignore"`: no redirect in either direction; both URLs serve the page. Set it when
+  the platform or another layer owns canonicalization, or when you want to link
+  both forms.
+
+Files with an extension (`/feed.xml`), `/api/*` and the internal `/__krate/*` paths
+are never redirected. The setting changes what the servers answer, not what the
+build writes: canonical URLs, sitemap entries and generated links still use the
+slash form, so with `"never"` they point at URLs that redirect (write your own
+links and `seo` URLs without the slash). On the `cloudflare` target the generated
+`wrangler.jsonc` sets `assets.html_handling` to match (`drop-trailing-slash` for
+`"never"`; `"none"` plus `run_worker_first: true` for `"ignore"`, because then the
+Worker serves the pages from the assets). `krate deploy --target vercel` writes
+`trailingSlash` into `vercel.json` (`"always"` is `true`, `"never"` is `false`,
+`"ignore"` leaves it unset); `deploy.options.trailingSlash` still overrides it. On
+`vercel` and `netlify` the CDN serves prerendered pages before the function, so
+their URL form follows the platform's own setting; the function applies the mode to
+the pages it serves.
+
 ## Plugins
 
 ```typescript
@@ -555,7 +616,7 @@ extends: "./base.config.ts",
 
 Bases are merged underneath this config: objects deep-merge (this config wins),
 and additive arrays (`plugins`, `redirects`, `rewrites`, `serverComponents`,
-`runtimeComponents`, `serverDirs`, `runtimeDirs`, `hostFunctions`, `hostDirs`) concatenate. Duplicate
+`runtimeComponents`, `serverDirs`, `runtimeDirs`, `cssImportRoots`, `hostFunctions`, `hostDirs`) concatenate. Duplicate
 `plugins` are de-duped by name, with the extending config winning. Paths resolve
 relative to the extending config, then to `node_modules` (package presets -
 resolved via `package.json` `krate`, `exports`, `module`, or `main`). Cycles are
@@ -567,11 +628,19 @@ rejected.
 deploy: {
   target: "vercel",                  // netlify | vercel | cloudflare | gh-pages
   options: { cleanUrls: "true", trailingSlash: "false" },
+  worker: "src/cloudflare.ts",       // cloudflare: module merged into the Worker (default src/cloudflare.ts)
 },
 ```
 
 `krate deploy` uses this target unless `--target` is passed; the adapter options
-customize the generated host files.
+customize the generated host files. The top-level [`trailingSlash`](#trailing-slash)
+setting is mapped onto the host's own option where there is one.
+
+`deploy.worker` is the module whose exports are merged into the generated
+Cloudflare Worker: cron `scheduled`, `queue`, `email` handlers and Durable Object
+classes. Without it, `src/cloudflare.ts` (or `.mts`, `.js`, `.mjs`) is used when it
+exists; `deploy.worker: "none"` skips it. See
+[Cloudflare Workers](/docs/guides/deployment/#cloudflare-workers).
 
 ## i18n & versions
 
@@ -627,6 +696,21 @@ runtimeComponents: ["AuthCheck"],  // names -> @runtime
 serverDirs: ["src/components/server"],
 runtimeDirs: ["src/components/runtime"],
 ```
+
+## React islands
+
+```typescript
+react: {
+  islands: ["some-canvas-library"], // packages that must run on real React
+},
+```
+
+- **`islands`** - npm packages that must run on real `react` and
+  `react-dom`, not on Preact. A module that imports one becomes a
+  client-rendered real-React island. Packages that depend on
+  `react-reconciler`, `@react-three/fiber` or `react-konva` (`@react-three/drei`,
+  `react-konva`, ...) are detected without being listed. See
+  [Libraries built on a React reconciler](/docs/guides/react-compatibility/#libraries-built-on-a-react-reconciler-real-react-islands).
 
 ## Native (experimental)
 
@@ -860,6 +944,25 @@ they point outside the site. A literal value gives a
 [`KR7144`](/docs/reference/diagnostics/#kr7144) build warning: use `<Link>`, or
 `<Image>` or an import. A value computed at run time gets no warning.
 
+### Linking to the rest of the domain
+
+When Krate is one app of several on a domain (the marketing site at `/`, Krate
+at `/app`), links to the other apps must not get the base path. Use the
+explicit opt-out:
+
+```tsx
+<Link href="/pricing" basePath={false}>Pricing</Link>
+<a href="/blog" data-krate-no-base>Blog</a>
+<a href="https://example.com/pricing">Absolute URLs also work</a>
+```
+
+`basePath={false}` and `data-krate-no-base` use the URL as written, never
+rewrite it (at build time, in server renders and in the browser), and keep the
+click out of the client router, so it is a normal full-page navigation. They
+also silence `KR7144`. `<Link external>` is different: it only skips client
+navigation and still adds the base path, for in-site pages that must load
+normally. Config `redirects` use `basePath: false` the same way.
+
 `krate serve` and `krate dev` mount the site under the base path, and requests
 outside it are redirected in. Code behind the base path sees paths without it, and
 a root-relative `Location` it answers with gets the prefix on the way out. Config
@@ -906,6 +1009,44 @@ proxy of yours, `false` trusts none. See
 On `SIGINT`/`SIGTERM` the server stops accepting connections, lets in-flight
 requests finish for `shutdownTimeout` seconds (default 15), then stops its
 sidecars and exits with status 0. A second signal exits immediately.
+
+## Server packages, traced files and env directory
+
+```typescript
+serverExternalPackages: ["sharp", "@napi-rs/canvas"],  // stay in node_modules at run time
+outputFileTracingIncludes: {                           // extra files for the node deploy output
+  "*": ["assets/fonts/**", "workers/image.js"],
+  "/api/og": ["node_modules/@resvg/resvg-js-*/**"],
+},
+envDir: "../..",                                       // where .env files are read from
+```
+
+- `serverExternalPackages` lists npm packages that server bundles do not
+  bundle: API routes compiled for the embedded runtime (a route that imports one
+  becomes Node-only and runs on the Node sidecar) and the `node` deploy bundle,
+  which imports them from a `node_modules` it writes next to `server.mjs`.
+  A package that contains a native `.node` addon is detected and handled the
+  same way without being listed. Entries are package names, not paths. The
+  platform deploy targets (Vercel, Netlify, Cloudflare) bundle everything and
+  refuse a native addon with an error that names the package. See
+  [Self-hosting](/docs/guides/self-hosting/).
+- `outputFileTracingIncludes` maps a route key (kept for compatibility with
+  Next.js, any key works) to globs of project files that `krate deploy --target
+  node` copies next to `server.mjs` at their project-relative paths, and that
+  `--target docker` carries into the image. Globs are relative to the project
+  root (`*`, `?`, `[a-z]` and `**` are supported), may not be absolute or contain
+  `..`, and are checked against the project root when files are copied. Use it
+  for files that import tracing cannot see: a worker entry loaded by path, a
+  platform binary chosen by a computed `require`.
+- `envDir` is the directory the `.env`, `.env.<mode>`, `.env.local` and
+  `.env.<mode>.local` files are read from. A relative path resolves against the
+  project root and may point at a parent directory, such as a monorepo root; it
+  must exist. It applies to `krate dev`, `build`, `serve`, `start` and `deploy`,
+  to `krate.config.ts` itself (the config is evaluated again with the variables
+  from `envDir`) and to everything that reads `process.env` at build or serve
+  time. `KRATE_PUBLIC_*` values are still the only ones inlined into client code.
+  Changes to files in `envDir` outside the project are not watched by `krate
+  dev`; restart it.
 
 ## CORS
 

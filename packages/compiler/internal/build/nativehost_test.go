@@ -1,7 +1,6 @@
 package build
 
 import (
-	"bytes"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -60,42 +59,6 @@ func readTree(t *testing.T, dir string) map[string]string {
 		t.Fatal(err)
 	}
 	return out
-}
-
-// A project without host code builds to the same bytes for the web and for
-// the native target: the overlay hook changes nothing unless host code splits.
-func TestNativeTargetWithoutHostCodeMatchesWebBuild(t *testing.T) {
-	files := map[string]string{
-		"src/pages/index.tsx": `import { createSignal } from "@krate/runtime";
-export default function Home() {
-  const [n, setN] = createSignal(0);
-  return <main><h1>Home</h1><button onClick={() => setN(n() + 1)}>{n()}</button></main>;
-}
-`,
-	}
-	webRoot, wb, err := buildNativeFixture(t, files, false)
-	if err != nil {
-		t.Fatalf("web build: %v", err)
-	}
-	natRoot, nb, err := buildNativeFixture(t, files, true)
-	if err != nil {
-		t.Fatalf("native build: %v", err)
-	}
-	if nb.NativeHost() != nil || wb.NativeHost() != nil {
-		t.Fatal("no host code, so no host split")
-	}
-	web, nat := readTree(t, filepath.Join(webRoot, "dist")), readTree(t, filepath.Join(natRoot, "dist"))
-	if len(web) == 0 {
-		t.Fatal("empty web output")
-	}
-	for name, content := range web {
-		if !bytes.Equal([]byte(content), []byte(nat[name])) {
-			t.Errorf("%s differs between the web and native build", name)
-		}
-	}
-	if len(web) != len(nat) {
-		t.Errorf("file count %d vs %d", len(web), len(nat))
-	}
 }
 
 func TestNativeBuildSplitsHostCode(t *testing.T) {

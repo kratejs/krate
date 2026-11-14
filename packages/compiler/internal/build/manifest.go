@@ -28,6 +28,10 @@ type Manifest struct {
 	// Segments lists the directories that have their own not-found or error
 	// page (see LookupSegmentPage), sorted by key.
 	Segments []SegmentEntry `json:"segments,omitempty"`
+	// SegmentPages are the segment pages (404, 401, 403) that render per
+	// request. They are not routes: the renderer addresses each one by a
+	// synthetic route (see SegmentRoute) when the server needs it.
+	SegmentPages []PageMeta `json:"segmentPages,omitempty"`
 	// Middleware records whether the app has a middleware module. Nil means
 	// the build predates the record, so `krate serve` cannot tell "no
 	// middleware" from "middleware missing" and only warns.
@@ -53,6 +57,9 @@ type ManifestPage struct {
 	ServerComponents bool `json:"serverComponents,omitempty"`
 	// SegDir mirrors PageMeta.SegDir.
 	SegDir string `json:"segDir,omitempty"`
+	// Segment marks a segment page rendered per request. It answers only the
+	// requests the server hands it and is never matched against a URL.
+	Segment bool `json:"segment,omitempty"`
 }
 
 // ServerManifest is the on-disk format read by the Node.js renderer server.
@@ -73,8 +80,9 @@ func BuildManifest(results []*PageResult, cssFile string, runtimeJS string) *Man
 	}
 
 	for _, r := range results {
-		// Skip error pages (404/500) from manifest - they're served directly
-		if r.IsErrorPage {
+		// Error pages (404/500) are served directly and are not routes. One that
+		// renders per request is listed apart, for the renderer.
+		if r.IsErrorPage && !r.isDynamicSegment() {
 			continue
 		}
 		meta := PageMeta{
@@ -87,8 +95,12 @@ func BuildManifest(results []*PageResult, cssFile string, runtimeJS string) *Man
 
 			ServerComponents: len(r.ServerExports) > 0 || r.ServerPage,
 		}
-		m.Pages = append(m.Pages, meta)
-		m.Routes[meta.Route] = meta
+		if r.isDynamicSegment() {
+			m.SegmentPages = append(m.SegmentPages, meta)
+		} else {
+			m.Pages = append(m.Pages, meta)
+			m.Routes[meta.Route] = meta
+		}
 
 		// Record dynamic regions for this page (Suspense primaries + runtime
 		// components) so the sidecar knows which regions to render.
@@ -178,10 +190,10 @@ func WriteManifest(m *Manifest, outDir string, serverBundles map[string]string) 
 	}
 
 	// Write server manifest for Node.js renderer
-	serverPages := make([]ManifestPage, 0, len(m.Pages))
-	for _, p := range m.Pages {
+	serverPages := make([]ManifestPage, 0, len(m.Pages)+len(m.SegmentPages))
+	add := func(p PageMeta, segment bool) {
 		if p.Mode == RenderSSG {
-			continue // SSG pages don't need the server renderer
+			return // SSG pages don't need the server renderer
 		}
 		bundlePath := serverBundles[p.Source]
 		sp := ManifestPage{
@@ -193,8 +205,15 @@ func WriteManifest(m *Manifest, outDir string, serverBundles map[string]string) 
 
 			ServerComponents: p.ServerComponents,
 			SegDir:           p.SegDir,
+			Segment:          segment,
 		}
 		serverPages = append(serverPages, sp)
+	}
+	for _, p := range m.Pages {
+		add(p, false)
+	}
+	for _, p := range m.SegmentPages {
+		add(p, true)
 	}
 
 	if len(serverPages) > 0 {

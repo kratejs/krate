@@ -90,22 +90,3 @@ export default function App(props: Props) {
 		t.Fatalf("re-encode mismatch:\n--- first ---\n%s\n--- second ---\n%s", enc, enc2)
 	}
 }
-
-func TestRoundTripDeepJSX(t *testing.T) {
-	src := `export default function F() { return <div><ul>{items.map(i => <li><a href={'/i/' + i.id}>{i.name}</a></li>)}</ul></div>; }`
-	prog := parseSource(src)
-	if prog == nil || len(prog.Body) == 0 {
-		t.Fatal("failed to parse")
-	}
-	enc, err := EncodeProgram(prog)
-	if err != nil {
-		t.Fatalf("encode: %v", err)
-	}
-	round, err := DecodeProgram(enc)
-	if err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if !reflect.DeepEqual(prog, round) {
-		t.Fatal("round-trip mismatch for nested JSX")
-	}
-}

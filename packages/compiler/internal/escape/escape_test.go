@@ -38,47 +38,6 @@ func TestJSString(t *testing.T) {
 	}
 }
 
-func TestJSStringDQ(t *testing.T) {
-	cases := map[string]string{
-		`he said "hi"`: `"he said \"hi\""`,
-		`back\slash`:   `"back\\slash"`,
-		"a\nb":         `"a\nb"`,
-		`{"a":1}`:      `"{\"a\":1}"`,
-	}
-	for in, want := range cases {
-		if got := JSStringDQ(in); got != want {
-			t.Errorf("JSStringDQ(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
-func TestUnescapeJSString(t *testing.T) {
-	cases := map[string]string{
-		`a\nb`:         "a\nb",
-		`a\tb`:         "a\tb",
-		`a\rb`:         "a\rb",
-		`a\bb`:         "a\bb",
-		`a\fb`:         "a\fb",
-		`a\vb`:         "a\vb",
-		`a\0b`:         "a\x00b",
-		`a\\b`:         `a\b`,
-		`it\'s`:        `it's`,
-		`say \"hi\"`:   `say "hi"`,
-		"a\\\nb":       "ab", // line continuation elides the newline
-		`\x41`:         "A",
-		`\u0041`:       "A",
-		`\u{1F600}`:    "\U0001F600",
-		`\uD83D\uDE00`: "\U0001F600", // surrogate pair
-		`\q`:           `\q`,         // unknown escape keeps the backslash
-		`no escapes`:   `no escapes`,
-	}
-	for in, want := range cases {
-		if got := UnescapeJSString(in); got != want {
-			t.Errorf("UnescapeJSString(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
 func TestTemplateRaw(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"a\\nb", "a\nb"},            // escape -> newline

@@ -190,12 +190,6 @@ func splitImportant(val string) (core string, important bool) {
 	return strings.TrimSpace(val[:last]), true
 }
 
-// hasImportant reports whether a declaration value ends in `!important`.
-func hasImportant(val string) bool {
-	_, imp := splitImportant(val)
-	return imp
-}
-
 // stripCSSComments removes /* ... */ comments outside string literals. It is
 // used only to derive a declaration's property name/value for deduplication,
 // never for the emitted text (which keeps comments verbatim).

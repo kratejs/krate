@@ -183,14 +183,6 @@ func localeSwitchLinksWithLabels(locales []string, defaultLocale string, byLocal
 	return out
 }
 
-// versionSwitchLinks builds the VersionSwitcher entries for a page. Each entry
-// links to the SAME page in the target version when it exists; otherwise it
-// falls back to that version's root (its first page), so switching never lands
-// on the current version's page (the previous hardcoded "/docs/" fallback).
-func versionSwitchLinks(versions []string, currentVersion, locale, defaultLocale string, byVersion, rootByVersion map[string]string) []altLink {
-	return versionSwitchLinksWithLabels(versions, currentVersion, locale, defaultLocale, byVersion, rootByVersion, nil)
-}
-
 // versionSwitchLinksWithLabels is versionSwitchLinks with per-version display
 // labels (versions.labels) overriding the raw version code.
 func versionSwitchLinksWithLabels(versions []string, currentVersion, locale, defaultLocale string, byVersion, rootByVersion, labels map[string]string) []altLink {

@@ -7,6 +7,7 @@
 // loses the prefetch cache, saved scroll positions or the in-flight navigation.
 
 import { basePath, withBase } from './base-path.js';
+import { siteConfig, type KrateRuntimeConfig } from './site-config.js';
 
 /**
  * The shared runtime chunk is loaded once and must persist across SPA
@@ -16,18 +17,8 @@ import { basePath, withBase } from './base-path.js';
  */
 const RUNTIME_CHUNK_RE = /\/chunks\/runtime\.[^/]+\.js$/;
 
-/** Site config injected by the compiler (`window.__KRATE_CFG__`). */
-interface KrateRuntimeConfig {
-  basePath?: string;
-  viewTransitions?: boolean | 'auto';
-  /** Milliseconds a prefetched document stays fresh (default 30000). */
-  prefetchTTL?: number;
-  /** Set by `krate dev`: enables router dev warnings. */
-  dev?: boolean;
-}
-
 function runtimeConfig(): KrateRuntimeConfig {
-  return ((globalThis as any).__KRATE_CFG__ as KrateRuntimeConfig) || {};
+  return siteConfig();
 }
 
 /** Strips the base path from a pathname so route comparisons are consistent. */
@@ -689,6 +680,39 @@ function reconcileHeadMeta(doc: Document): void {
   });
 }
 
+// Attributes of <html> and <body> as the server sent them for the page on
+// screen. A swap changes only the attributes that differ between that page and
+// the next one, so a runtime change (a theme class set by a script) survives
+// navigation.
+type DocAttrSnapshot = { html: Record<string, string>; body: Record<string, string> };
+let docAttrSnap: DocAttrSnapshot | null = null;
+
+function attrsOf(el: Element | null): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (el) for (const a of Array.from(el.attributes)) out[a.name] = a.value;
+  return out;
+}
+
+function docAttrsOf(d: Document): DocAttrSnapshot {
+  return { html: attrsOf(d.documentElement), body: attrsOf(d.body) };
+}
+
+function reconcileDocAttrs(doc: Document): void {
+  const prev = docAttrSnap ?? docAttrsOf(document);
+  const next = docAttrsOf(doc);
+  const apply = (target: Element | null, before: Record<string, string>, after: Record<string, string>) => {
+    if (!target) return;
+    for (const name of new Set([...Object.keys(before), ...Object.keys(after)])) {
+      if (before[name] === after[name]) continue;
+      if (after[name] === undefined) target.removeAttribute(name);
+      else target.setAttribute(name, after[name]);
+    }
+  };
+  apply(document.documentElement, prev.html, next.html);
+  apply(document.body, prev.body, next.body);
+  docAttrSnap = next;
+}
+
 interface PendingScript {
   src: string;
   module: boolean;
@@ -1028,6 +1052,7 @@ async function commitDocument(loaded: LoadedDoc, req: NavRequest, seq: number): 
     interceptSnapshots.clear();
     sheets.commit();
     reconcileHeadMeta(doc);
+    reconcileDocAttrs(doc);
     applyViewTransitionNames(document);
   };
 
@@ -1863,6 +1888,7 @@ export function initRouter(): void {
   document.querySelectorAll('script[data-krate-boot]').forEach((s) => bootRan.add(s.textContent || ''));
   renderedPath = pathOf(location.href);
   currentChain = readRouteChain(document);
+  docAttrSnap = docAttrsOf(document);
   docPath = renderedPath;
   currentKey = entryKey(history.state) || newKey();
   if (entryKey(history.state) === undefined) {

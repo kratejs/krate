@@ -311,15 +311,3 @@ func headEndOf(doc string) int {
 	}
 	return strings.Index(lower, "<body")
 }
-
-// mergeHead merges the title and head tags into the head of a whole document.
-func mergeHead(doc, title, fragment string) string {
-	if title == "" && fragment == "" {
-		return doc
-	}
-	end := headEndOf(doc)
-	if end < 0 {
-		return doc
-	}
-	return mergeHeadSection(doc[:end], title, fragment) + doc[end:]
-}

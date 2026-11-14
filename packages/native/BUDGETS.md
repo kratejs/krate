@@ -56,7 +56,7 @@ Each entry has `measured` (what the last update saw) and `max` (`measured` plus
 
 ```sh
 cd packages/compiler
-go test ./internal/build -run TestNativeBudgetSizes -v
+KRATE_NATIVE_BUDGETS=1 go test ./internal/build -run TestNativeBudgetSizes -v
 
 # GUI budgets, on Linux under Xvfb (xvfb-run -a) or any display
 KRATE_NATIVE_GUI=1 go test ./internal/build -run TestNativeBudgetGUI -v

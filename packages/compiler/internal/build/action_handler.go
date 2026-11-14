@@ -64,7 +64,7 @@ func actionHandlerSegments(next http.Handler, limit int64, segs *segmentIndex) h
 		if !fetchMode && segs != nil {
 			// A native form post whose action called notFound(), forbidden() or
 			// unauthorized() gets the nearest segment page of the page it came from.
-			w = &actionFallbackWriter{ResponseWriter: w, segs: segs, from: ret}
+			w = &actionFallbackWriter{ResponseWriter: w, segs: segs, from: ret, req: r}
 		}
 		next.ServeHTTP(w, r)
 	}
@@ -77,6 +77,7 @@ type actionFallbackWriter struct {
 	http.ResponseWriter
 	segs    *segmentIndex
 	from    string
+	req     *http.Request
 	swapped bool
 }
 
@@ -96,7 +97,7 @@ func (w *actionFallbackWriter) WriteHeader(code int) {
 		}
 		if m, ok := w.segs.forURL(kind, urlPath, ""); ok {
 			h.Del("X-Krate-Fallback")
-			if respondSegment(w.ResponseWriter, w.segs, m, code, nil) {
+			if respondSegment(w.ResponseWriter, w.req, w.segs, m, code, nil) {
 				w.swapped = true
 				return
 			}

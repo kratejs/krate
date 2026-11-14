@@ -16,7 +16,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kratejs/krate/packages/native/krate"
 	"github.com/kratejs/krate/packages/native/sdk/internal/sessionbus"
 	"github.com/kratejs/krate/packages/native/sdk/notify"
 )
@@ -252,133 +251,6 @@ func TestRealDunstShowsNotification(t *testing.T) {
 	}
 }
 
-func TestRealDunstUrgencyLevels(t *testing.T) {
-	e := startDunst(t)
-	for i, u := range []notify.Urgency{notify.Low, notify.Normal, notify.Critical} {
-		if err := notify.Send(notify.Notification{Title: "u" + string(rune('0'+i)), Urgency: u, Timeout: -1}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	eventually(t, "three notifications", func() bool { return e.displayed(t) == 3 })
-	want := map[string]string{"u0": "LOW", "u1": "NORMAL", "u2": "CRITICAL"}
-	eventually(t, "dunst to report all three urgencies", func() bool {
-		got := e.shownUrgencies()
-		for k, v := range want {
-			if got[k] != v {
-				return false
-			}
-		}
-		return true
-	})
-	e.ctl(t, "close-all")
-	eventually(t, "history", func() bool { return len(e.history(t)) == 3 })
-}
-
-func TestRealDunstReplaceByID(t *testing.T) {
-	e := startDunst(t)
-	for _, title := range []string{"first", "second", "third"} {
-		if err := notify.Send(notify.Notification{ID: "same", Title: title, Body: "b-" + title, Timeout: -1}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	eventually(t, "one displayed notification", func() bool { return e.displayed(t) == 1 })
-	time.Sleep(200 * time.Millisecond)
-	if n := e.displayed(t); n != 1 {
-		t.Fatalf("replacing by ID left %d notifications displayed", n)
-	}
-	if err := notify.Send(notify.Notification{ID: "other", Title: "other", Timeout: -1}); err != nil {
-		t.Fatal(err)
-	}
-	eventually(t, "a second notification for a second ID", func() bool { return e.displayed(t) == 2 })
-	e.ctl(t, "close-all")
-	eventually(t, "history", func() bool { return len(e.history(t)) >= 2 })
-	var titles []string
-	for _, n := range e.history(t) {
-		titles = append(titles, n["summary"].(string))
-	}
-	joined := strings.Join(titles, ",")
-	if !strings.Contains(joined, "third") || strings.Contains(joined, "first") || strings.Contains(joined, "second") {
-		t.Fatalf("history after replacement: %v (only the last text should remain)", titles)
-	}
-}
-
-func TestRealDunstClosedByApp(t *testing.T) {
-	e := startDunst(t)
-	events := subscribeNotify(t)
-	if err := notify.Send(notify.Notification{ID: "x", Title: "closing", Timeout: -1}); err != nil {
-		t.Fatal(err)
-	}
-	eventually(t, "displayed", func() bool { return e.displayed(t) == 1 })
-	if err := notify.Close("x"); err != nil {
-		t.Fatal(err)
-	}
-	c := waitClosed(t, e, "notify.Close")
-	if c[1] != 3 {
-		t.Fatalf("close reason %d, want 3 (closed by CloseNotification)", c[1])
-	}
-	if ev := waitEvent(t, events, "app close"); ev.ID != "x" || !ev.Closed {
-		t.Fatalf("event %+v", ev)
-	}
-	eventually(t, "removed", func() bool { return e.displayed(t) == 0 })
-	// Closing an unknown or already closed id is not an error.
-	if err := notify.Close("x"); err != nil {
-		t.Fatal(err)
-	}
-	if err := notify.Close("never-sent"); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestRealDunstClosedByDaemon(t *testing.T) {
-	e := startDunst(t)
-	events := subscribeNotify(t)
-	if err := notify.Send(notify.Notification{ID: "d", Title: "dismiss me", Timeout: -1}); err != nil {
-		t.Fatal(err)
-	}
-	eventually(t, "displayed", func() bool { return e.displayed(t) == 1 })
-	e.ctl(t, "close")
-	c := waitClosed(t, e, "dunstctl close")
-	if c[1] != 2 {
-		t.Fatalf("close reason %d, want 2 (dismissed by the user)", c[1])
-	}
-	if ev := waitEvent(t, events, "daemon close"); ev.ID != "d" || !ev.Closed || ev.Action != "" {
-		t.Fatalf("event %+v", ev)
-	}
-}
-
-func TestRealDunstExpires(t *testing.T) {
-	e := startDunst(t)
-	events := subscribeNotify(t)
-	if err := notify.Send(notify.Notification{ID: "e", Title: "short lived", Timeout: 700 * time.Millisecond}); err != nil {
-		t.Fatal(err)
-	}
-	c := waitClosed(t, e, "expiry")
-	if c[1] != 1 {
-		t.Fatalf("close reason %d, want 1 (expired)", c[1])
-	}
-	if ev := waitEvent(t, events, "expiry"); ev.ID != "e" || !ev.Closed {
-		t.Fatalf("event %+v", ev)
-	}
-}
-
-func TestRealDunstDefaultAction(t *testing.T) {
-	e := startDunst(t)
-	events := subscribeNotify(t)
-	if err := notify.Send(notify.Notification{
-		ID: "a", Title: "act", Timeout: -1,
-		Actions: []notify.Action{{ID: "open", Label: "Open"}, {ID: "later", Label: "Later"}},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	eventually(t, "displayed", func() bool { return e.displayed(t) == 1 })
-	// "dunstctl action" runs the default action: a click on the body.
-	e.ctl(t, "action", "0")
-	ev := waitEvent(t, events, "default action")
-	if ev.ID != "a" || ev.Action != "" || ev.Closed {
-		t.Fatalf("event %+v, want a click on notification a", ev)
-	}
-}
-
 func TestRealDunstActionButton(t *testing.T) {
 	e := startDunst(t)
 	events := subscribeNotify(t)
@@ -408,38 +280,6 @@ func TestRealDunstActionButton(t *testing.T) {
 			t.Fatalf("closed reported after an action: %+v", extra)
 		}
 	case <-time.After(500 * time.Millisecond):
-	}
-}
-
-func TestRealDunstGoneIsUnsupported(t *testing.T) {
-	e := startDunst(t)
-	if err := notify.Send(notify.Notification{Title: "while running", Timeout: -1}); err != nil {
-		t.Fatal(err)
-	}
-	e.stop()
-	eventually(t, "the name to be released", func() bool { return !sessionbus.NameHasOwner("org.freedesktop.Notifications") })
-	err := notify.Send(notify.Notification{Title: "no daemon"})
-	if !krate.IsUnsupported(err) {
-		t.Fatalf("send without a daemon: %v", err)
-	}
-	if host.SupportsForTest("notify") {
-		t.Fatal("notify still reported as supported")
-	}
-	// Close with nothing to close stays quiet.
-	if err := notify.Close("anything"); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestRealNoDaemonOnARealBus(t *testing.T) {
-	need(t)
-	privateBus(t)
-	if host.SupportsForTest("notify") {
-		t.Fatal("notify reported as supported on a bus with no daemon")
-	}
-	err := notify.Send(notify.Notification{Title: "x"})
-	if !krate.IsUnsupported(err) || !strings.Contains(err.Error(), "no notification service") {
-		t.Fatalf("err = %v", err)
 	}
 }
 

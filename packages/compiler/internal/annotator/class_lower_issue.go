@@ -8,16 +8,6 @@ import (
 	irtree "github.com/kratejs/krate/packages/compiler/internal/irtree"
 )
 
-// classLoweringIssue reports the first construct that keeps a React class
-// component from being lowered, or nil when synthesizeClassComponent can
-// lower it. It does not mutate the class.
-func classLoweringIssue(class *ast.ClassDecl) *classIssue {
-	if class == nil || class.Name == "" || !isReactClassBase(class.SuperClass) {
-		return nil
-	}
-	return analyzeClass(class).issue
-}
-
 // collectClassRejections records, for every React class component in body,
 // the warning diagnostic positioned at the member that keeps it from being
 // lowered (reported where the component is used), whether it is an error

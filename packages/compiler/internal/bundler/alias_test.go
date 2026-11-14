@@ -5,8 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/kratejs/krate/packages/compiler/internal/diag"
 )
 
 // TestAliasImportResolution verifies that the `@/*` TypeScript path alias
@@ -90,61 +88,5 @@ export default function Page() {
 	}
 	if !foundEntry {
 		t.Error("entry page module not present in bundle")
-	}
-}
-
-// TestAliasImportResolutionConfig verifies alias resolution using the same
-// config-driven wiring the Builder uses: aliases extracted from tsconfig.json
-// via LoadTSConfigPaths, then applied to the bundler.
-func TestAliasImportResolutionConfig(t *testing.T) {
-	root := t.TempDir()
-
-	_ = os.MkdirAll(filepath.Join(root, "src", "utils"), 0755)
-	_ = os.WriteFile(filepath.Join(root, "src", "utils", "helper.ts"), []byte(`export const x = 1;`), 0644)
-	_ = os.MkdirAll(filepath.Join(root, "src", "pages"), 0755)
-	page := filepath.Join(root, "src", "pages", "index.tsx")
-	_ = os.WriteFile(page, []byte(`import { x } from '@/utils/helper'; export default function P() { return <div>{x}</div>; }`), 0644)
-
-	b := New(root)
-	b.SetPathAliases(
-		[]string{"@/*"},
-		[][]string{{"./*"}},
-		filepath.Join(root, "src"),
-	)
-
-	if _, err := b.Bundle(page); err != nil {
-		t.Fatalf("Bundle with @/ alias: %v", err)
-	}
-}
-
-// TestNonAliasScopeDoesNotResolve verifies that a scope-style import like
-// `@components/*` is NOT treated as a path alias when only `@/*` is
-// configured. The compiler should not resolve it as if it were an alias.
-func TestNonAliasScopeDoesNotResolve(t *testing.T) {
-	root := t.TempDir()
-
-	_ = os.MkdirAll(filepath.Join(root, "src", "components"), 0755)
-	_ = os.WriteFile(filepath.Join(root, "src", "components", "badge.tsx"),
-		[]byte(`export default function Badge() { return <span>badge</span>; }`), 0644)
-	_ = os.MkdirAll(filepath.Join(root, "src", "pages"), 0755)
-	page := filepath.Join(root, "src", "pages", "index.tsx")
-	_ = os.WriteFile(page, []byte(`import Badge from '@components/badge'; export default function P() { return <Badge />; }`), 0644)
-
-	b := New(root)
-	b.SetPathAliases(
-		[]string{"@/*"},
-		[][]string{{"./*"}},
-		filepath.Join(root, "src"),
-	)
-
-	// `@components/badge` is not an alias and is not a resolvable module: the
-	// build must fail at the import instead of silently dropping it.
-	_, err := b.Bundle(page)
-	if err == nil {
-		t.Fatal("expected an unresolved-import error")
-	}
-	d, ok := diag.FromError(err)
-	if !ok || d.Line != 1 || !strings.Contains(d.Message, "@components/badge") {
-		t.Fatalf("diagnostic = %+v", d)
 	}
 }

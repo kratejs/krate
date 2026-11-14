@@ -13,8 +13,7 @@ import (
 )
 
 // Several WKWebViews in one NSWindow, laid out as nested NSSplitViews.
-// TestGUIViews and the compiler's TestNativeE2EViewsGUI run it in CI on
-// macos-latest.
+// The compiler's TestNativeE2EViewsGUI runs it in CI on macos-latest.
 //
 // The layout tree and its arithmetic come from caps (pure Go, unit-tested).
 // NSSplitView draws the dividers and handles the drag. Minimum pane sizes are

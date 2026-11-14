@@ -204,13 +204,6 @@ func splitCandidate(tok string) (variants []string, base string) {
 	return variants, tok[start:]
 }
 
-// looksLikeUtility is the shape filter that keeps prose and code identifiers
-// out of the generator. After the variants are removed the base must be a
-// bare utility keyword, an arbitrary property (`[mask-type:alpha]`), or contain
-// a hyphen; dynamic prefixes (`bg-`), CSS variables (`--x`) and unbalanced
-// groups are rejected.
-func looksLikeUtility(tok string) bool { return looksLikeUtilityNames(tok, nil) }
-
 func looksLikeUtilityNames(tok string, names map[string]bool) bool {
 	if len(tok) == 0 || len(tok) > 300 {
 		return false

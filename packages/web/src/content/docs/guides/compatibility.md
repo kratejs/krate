@@ -10,7 +10,7 @@ This is the support contract for React compatibility. A surface is only marked
 supported or stable when the referenced tests pass. Known divergences are
 listed instead of silently hidden.
 
-Last verified: **2026-11-12**. See the [roadmap](/roadmap/) for phase
+Last verified: **2026-11-13**. See the [roadmap](/roadmap/) for phase
 status and the [React compatibility guide](/docs/guides/react-compatibility/)
 for usage.
 
@@ -50,8 +50,13 @@ for usage.
 | Next.js app corpus | Supported | n/a | n/a | Migration-ready |
 | Local components in islands | n/a | Supported | n/a | Supported |
 | npm React hook libraries (zustand, react-hook-form, SWR, TanStack Query, ...) | n/a | Supported | Supported | Run as Preact islands |
+| Compiled React packages in async pages, layouts and server components (lucide-react, Radix) | n/a | Supported | Supported | Client boundaries rendered with Preact |
 | CSS-in-JS (styled-components, emotion, MUI) | n/a | Partial | Partial | Client-only islands |
 | Island hydration control (client:visible, client:idle) | n/a | Supported | n/a | Astro-style directives |
+| Real-React islands (react-reconciler libraries) | n/a | Supported | n/a | Opt-in real React |
+| @react-three/fiber | n/a | Partial | n/a | Real-React island |
+| @react-three/drei | n/a | Partial | n/a | Real-React island |
+| react-konva | n/a | Partial | n/a | Real-React island |
 | SSR island hydration | n/a | Supported | Supported | Hydration-safe |
 | Supported Preact versions | n/a | Supported | n/a | 10.20 through current |
 | Browser differential corpus | Supported | n/a | n/a | No P0/P1 divergence |
@@ -59,6 +64,13 @@ for usage.
 | Serverless and Node deployment | n/a | n/a | Supported | Vercel, Netlify, Cloudflare and Node hosting |
 | Metadata routes and ImageResponse | Supported | n/a | Supported | Next.js sitemap.ts, robots.ts, manifest.ts, opengraph-image and twitter-image |
 | Code highlighting (build, request time, browser) | Supported | Supported | Supported | chroma parity |
+| sonner (toasts) | n/a | Supported | Supported | Run as Preact islands |
+| cmdk (command menu) | n/a | Supported | Supported | Run as Preact islands |
+| embla-carousel-react | n/a | Supported | Supported | Run as Preact islands |
+| @dnd-kit/core and @dnd-kit/sortable | n/a | Supported | Supported | Run as Preact islands |
+| @tanstack/react-table (v8) | n/a | Supported | Supported | Run as Preact islands |
+| next-themes | n/a | Supported | Supported | Run as Preact islands |
+| motion v12+ (motion/react) | n/a | Supported | Supported | Run as Preact islands |
 
 ## Krate Native
 
@@ -145,7 +157,7 @@ submission are listed as limits in the details.
 
 useState and useReducer lower to signals with React render snapshots (handlers and effects read the committed state, functional updaters the latest), Object.is bail-out, lazy initializers (inline or named), useReducer init, a stable dispatch, and React's update lanes (discrete events commit in a microtask, other updates in a later task).
 
-Evidence: `TestReactUseReducerBuild`, `TestRewriteReactUseReducer`, `TestRewriteReactNamespaceUseReducer`, `TestUseReducerLazyInitIsPreserved`, `TestLazyUseStateInitializerRunsOnce`, `TestStateLoweringUsesReactSemantics`, `browser:/react-effects/`
+Evidence: `TestReactUseReducerBuild`, `TestRewriteReactUseReducer`, `browser:/react-effects/`
 
 ### Hooks: effects and memo
 
@@ -160,7 +172,7 @@ Known limits:
 
 Diagnostics: `KR8360`
 
-Evidence: `TestRewriteReactEffectDepsAndMemo`, `TestRewriteReactEffectEmptyDepsMountOnce`, `TestEffectPhasesLowerToCreateEffectDeps`, `TestEffectWithoutDepsSynthesizesStateAndProps`, `TestHydrationDeclaresEffectOwners`, `TestFreshDepsReRunEveryRender`, `TestHookInLoopOrConditionWarns`, `TestSameTypeBranchesBuildOneInstance`, `TestBuildSameTypeBranchesOneInstance`, `browser:/react-effects/`, `browser:/react-branches/`
+Evidence: `TestEffectPhasesLowerToCreateEffectDeps`, `TestSameTypeBranchesBuildOneInstance`, `browser:/react-effects/`, `browser:/react-branches/`
 
 ### Context and refs
 
@@ -168,7 +180,7 @@ Evidence: `TestRewriteReactEffectDepsAndMemo`, `TestRewriteReactEffectEmptyDepsM
 
 Context resolves at the reader's position like React: Provider, React 19 <Ctx value>, Consumer render props, object defaults, nested and self-nesting providers, and providers around props.children; constant values fold at build time and state-driven values stay reactive. Object and callback refs (with React 19 cleanup functions), ref as a prop, forwardRef, createRef, useRef, and useImperativeHandle with deps attach before layout effects and detach on unmount.
 
-Evidence: `TestUseContextTranspile`, `TestCrossComponentDynamicContextTranspile`, `TestContextSelfNestingProviders`, `TestContextReact19ProviderAndConsumer`, `TestContextChildrenSeeComponentProvider`, `TestReactForwardRefCallback`, `TestReactCreateRefBinds`, `TestRefBindingsAndEffectOrder`, `browser:/react-events/`
+Evidence: `TestUseContextTranspile`, `TestContextReact19ProviderAndConsumer`, `browser:/react-events/`
 
 ### Transitions and deferred values
 
@@ -176,7 +188,7 @@ Evidence: `TestUseContextTranspile`, `TestCrossComponentDynamicContextTranspile`
 
 useTransition and startTransition support async actions: isPending stays true until the action, its awaited work and overlapping transitions settle, and a transition keeps revealed Suspense content. useDeferredValue (with React 19 initialValue) catches up in a later task; useSyncExternalStore follows the store by Object.is and unsubscribes on teardown. Updates after an await are ordinary updates, as in React 19.
 
-Evidence: `TestRewriteReactUseTransitionLowered`, `TestTransitionStarterLowering`, `TestDeferredValueAndExternalStoreLowering`, `TestRuntimeNeedsSuspense`, `browser:/react-suspense/`, `fixture:examples/src/pages/react-suspense.tsx`
+Evidence: `TestRewriteReactUseTransitionLowered`, `browser:/react-suspense/`, `fixture:examples/src/pages/react-suspense.tsx`
 
 ### Class components
 
@@ -184,7 +196,7 @@ Evidence: `TestRewriteReactUseTransitionLowered`, `TestTransitionStarterLowering
 
 Lowered onto a runtime instance with React 18 ordering: batched setState with callbacks, forceUpdate, componentDidMount/DidUpdate (props and state, children first)/WillUnmount on branch removal, shouldComponentUpdate, PureComponent, getDerivedStateFromProps, getSnapshotBeforeUpdate, defaultProps, contextType, accessors, private members, and instance refs. UNSAFE_componentWillMount, legacy context and other statics are rejected with KR3xxx diagnostics.
 
-Evidence: `TestClassComponentLowering`, `TestClassComponentLoweringEmit`, `TestClassLoweringIssueNamesMember`, `browser:/react-class/`, `fixture:examples/src/pages/react-class.tsx`
+Evidence: `TestClassComponentLowering`, `browser:/react-class/`, `fixture:examples/src/pages/react-class.tsx`
 
 ### Error boundaries
 
@@ -199,7 +211,7 @@ Known limits:
 
 Diagnostics: `KR3008`, `KR3009`
 
-Evidence: `TestBoundaryBuildTimeFallback`, `TestBuildTimeThrowWithoutBoundaryFails`, `TestClassBoundaryChildrenBranch`, `browser:/react-class/`, `browser:/react-demo/`
+Evidence: `browser:/react-class/`, `browser:/react-demo/`
 
 ### Per-segment not-found and error pages
 
@@ -210,12 +222,12 @@ Evidence: `TestBoundaryBuildTimeFallback`, `TestBuildTimeThrowWithoutBoundaryFai
 Known limits:
 
 - A page that throws while it is prerendered still fails the build (KR3010); the segment error page is not baked in as a build-time fallback.
-- Segment pages are always prerendered; request-time rendering modes on them are ignored with KR9003.
+- A 404, 403 or 401 page can render per request (ssr, async, runtime components) with its status; error pages are always prerendered and ignore request-time modes with KR9003.
 - In the server-rendered error page, error.message and error.digest are filled into the HTML before hydration; text derived from them at render time appears once the page hydrates.
 
 Diagnostics: `KR9001`, `KR9002`, `KR9003`
 
-Evidence: `TestLookupSegmentPageURLWalk`, `TestLookupSegmentPageRouteWalk`, `TestValidateSegmentPages`, `TestBuildWritesSegmentPagesAndManifest`, `TestSegmentPagesServe`, `TestSegmentPagesServeDev`, `TestWatchSegmentPages`, `TestNestedNotFoundBecomesSegmentPage`, `TestErrorBoundaryBecomesSegmentErrorPage`, `TestSegmentPagesBrowser`, `TestServerlessNodeParity`, `TestPlatformDeploysKeepSegmentPages`, `TestMigratedNextAppBrowser`, `browser:/r18/boundary_reset_state/`, `browser:/r18/boundary_fallback_throws/`
+Evidence: `TestBuildWritesSegmentPagesAndManifest`, `TestSegmentPagesServe`, `TestNestedNotFoundBecomesSegmentPage`, `TestServerlessNodeParity`, `TestPlatformDeploysKeepSegmentPages`, `TestSegmentPageRendersPerRequest`, `TestSegmentPageRendersPerRequestOnNodeTarget`, `browser:/r18/boundary_reset_state/`, `browser:/r18/boundary_fallback_throws/`
 
 ### Children, keys, and refs
 
@@ -230,7 +242,7 @@ Known limits:
 
 Diagnostics: `KR6001`, `KR6002`, `KR6003`
 
-Evidence: `TestReactChildrenMapSSR`, `TestReactCloneElementFold`, `TestReactKeyNotEmitted`, `TestEventHandlersUseReactPropNames`, `TestKeyedListKeyExtraction`, `TestKeyedRemount`, `TestListKeyDiagnostics`, `TestPlanMapCall`, `browser:/react-keys/`
+Evidence: `TestEventHandlersUseReactPropNames`, `TestKeyedListKeyExtraction`, `browser:/react-keys/`
 
 ### Events
 
@@ -245,7 +257,7 @@ Known limits:
 
 Diagnostics: `KR5001`, `KR5002`
 
-Evidence: `TestEventDelegationBubbles`, `TestNonBubblingEventUsesDirectListener`, `TestCaptureEventUsesCaptureListener`, `TestEventHandlersUseReactPropNames`, `TestEventAndRefDiagnostics`, `browser:/react-events/`, `browser:/react-demo/`
+Evidence: `TestEventDelegationBubbles`, `TestEventHandlersUseReactPropNames`, `browser:/react-events/`, `browser:/react-demo/`
 
 ### Forms and inputs
 
@@ -260,7 +272,7 @@ Known limits:
 
 Diagnostics: `KR5004`, `KR5005`, `KR5006`, `KR5007`
 
-Evidence: `TestFormValueUsesPropertyBinding`, `TestFormControlBindings`, `TestFormDiagnostics`, `browser:/react-forms/`, `browser:/react-events/`, `TestReactActionFormsCompile`, `browser:/react-actions/`, `browser:/react-demo/`
+Evidence: `TestFormControlBindings`, `browser:/react-forms/`, `browser:/react-events/`, `TestReactActionFormsCompile`, `browser:/react-actions/`, `browser:/react-demo/`
 
 ### Portals
 
@@ -268,7 +280,7 @@ Evidence: `TestFormValueUsesPropertyBinding`, `TestFormControlBindings`, `TestFo
 
 createPortal and Portal mount into document.body or a resolved container after hydration, follow conditional branches, unmount with their component, and bubble React events to the portal's React ancestors. Like React, portal content is not part of the server-rendered HTML.
 
-Evidence: `TestPortalRendersAndMounts`, `TestCreatePortalLowersToAnchor`, `TestCreatePortalDynamicContainer`
+Evidence: `TestPortalRendersAndMounts`
 
 ### Suspense
 
@@ -276,7 +288,7 @@ Evidence: `TestPortalRendersAndMounts`, `TestCreatePortalLowersToAnchor`, `TestC
 
 Boundaries show their fallback while use(promise), a resource or a lazy component inside is pending, reveal siblings together with React's 300ms reveal throttle, and nest independently (innermost wins). Content that cannot resolve at build time ships the fallback and hydrates into the content. A non-transition update that suspends hides the content in place and shows the fallback; a transition keeps the revealed content. lazy() (static import or a loader resolving to a local component) shows the fallback until its separately loaded hydration chunk or loader is ready. Matches React in the browser differential suspense fixtures.
 
-Evidence: `TestBuildSuspenseBoundaryStaticFallback`, `TestBuildSuspenseBoundaryRuntimePrimary`, `TestSuspenseUseRendersFallbackAndTemplatesContent`, `TestNestedSuspenseInnermostWins`, `TestLazyComponentGetsHydrationChunk`, `TestLazyLowersToImportAndMarker`, `TestUsePromiseLowersToGetter`, `browser:/react-suspense/`, `fixture:examples/src/pages/react-suspense.tsx`
+Evidence: `TestSuspenseUseRendersFallbackAndTemplatesContent`, `TestLazyLowersToImportAndMarker`, `browser:/react-suspense/`, `fixture:examples/src/pages/react-suspense.tsx`
 
 ### React 19 actions and forms
 
@@ -292,7 +304,7 @@ Known limits:
 
 Diagnostics: `KR7001`
 
-Evidence: `TestLowerUseActionState`, `TestReactBrowserDifferential`, `TestLowerUseFormStatusDestructured`, `TestLowerUseOptimistic`, `TestReactActionFormsCompile`, `browser:/react-actions/`
+Evidence: `TestLowerUseActionState`, `TestReactBrowserDifferential`, `TestReactActionFormsCompile`, `browser:/react-actions/`
 
 ### React 19.2: useId, useEffectEvent, Activity, ViewTransition
 
@@ -302,7 +314,7 @@ useId gives every component instance (children, nested children, lists, repeated
 
 Diagnostics: `KR8031`
 
-Evidence: `TestUseIdInChildComponents`, `TestUseIdInHydratedChildMatchesHTML`, `TestUseIdInDynamicListRowsIsNumberedPerRow`, `TestUseEffectEventIsLowered`, `TestActivityRendersChildrenAndHidesThem`, `TestActivityUnsupportedPropWarns`, `TestViewTransitionNamesItsChild`, `TestExperimentalReactNamesRenderTheirChildren`, `TestRewriteReact19Aliases`, `TestReact19Browser`
+Evidence: `TestReact19Browser`
 
 ### Custom elements
 
@@ -310,7 +322,7 @@ Evidence: `TestUseIdInChildComponents`, `TestUseIdInHydratedChildMatchesHTML`, `
 
 Strings and numbers render as attributes, true as an empty attribute and false is omitted. Objects, arrays and functions render no attribute on the server and are set as properties on the client, also when the element class is defined after the page loads. Components that render such props hydrate so the property is set.
 
-Evidence: `TestCustomElementPropsFollowReact19`, `TestCustomElementAttrs`, `TestReact19Browser`
+Evidence: `TestReact19Browser`
 
 ### Component tiers: client APIs, conflicts and higher-order components
 
@@ -320,15 +332,15 @@ A server, static or runtime component that uses state, effects or event handlers
 
 Diagnostics: `KR7110`, `KR7115`, `KR8030`
 
-Evidence: `TestBuildTimeTierRejectsClientAPIs`, `TestConflictingTiersFail`, `TestTierConflictRule`, `TestTierDecoratorOnHOCDefaultExport`, `TestHOCFromAnotherModuleIsApplied`, `TestUnresolvableHOCFailsTheBuild`
+Evidence: `TestBuildTimeTierRejectsClientAPIs`, `TestTierConflictRule`
 
 ### Server actions
 
 **Source:** Supported - **Islands:** n/a - **SSR:** Supported
 
-File-level "use server" modules compile to hashed POST endpoints with client proxies, bound arguments, no-JS form posts, SSR forms, registry validation, origin checks, body limits, and no-store responses. Enhanced forms return results without reloading; errors use a {message, digest} envelope; actions read headers() and cookies() and can redirect(). Inline "use server" functions are a coded build error (KR7001).
+File-level "use server" modules compile to hashed POST endpoints with client proxies, bound arguments, no-JS form posts, SSR forms, registry validation, origin checks, body limits, and no-store responses. Enhanced forms return results without reloading; errors use a {message, digest} envelope; actions read headers() and cookies() and can redirect(). Exports built by a wrapper (createAction(...)) are checked when the module loads. Inline "use server" functions in server components are hoisted into generated actions, with the values they close over sealed per request (async components); in a client module they are a coded build error (KR7001).
 
-Evidence: `TestPrepareActionsBuildsManifestAndBundle`, `TestRewriteActionImports`, `TestSameOriginActionRequest`, `TestActionSidecarTransport`, `TestActionHandlerSecurity`, `TestInlineUseServerIsCodedError`, `fixture:examples/src/pages/react-actions.tsx`, `browser:/react-actions/`
+Evidence: `TestPrepareActionsBuildsManifestAndBundle`, `TestRewriteActionImports`, `TestActionSidecarTransport`, `TestActionHandlerSecurity`, `TestWrapperBuiltActionsRunInSidecar`, `TestInlineServerActionsE2E`, `TestInlineServerActionStaticPage`, `fixture:examples/src/pages/react-actions.tsx`, `browser:/react-actions/`
 
 ### Data cache and revalidation
 
@@ -344,7 +356,7 @@ Known limits:
 
 Diagnostics: `KR8601`, `KR8602`, `KR8603`
 
-Evidence: `TestSegmentExportsRenderMode`, `TestDataCacheUsageInference`, `TestRevalidateHostAuth`, `TestRevalidateHostResolvesPathsAndFansOut`, `TestSSRInternalProxyLockdown`, `TestRevalidateTagAndPathE2E`, `TestRevalidateFansOutToWorkersE2E`, `TestActionRevalidationReadYourWritesE2E`, `TestAPIRouteRevalidationAndDataCacheE2E`, `TestQuickJSRouteUsesHostCache`
+Evidence: `TestRevalidateHostAuth`, `TestSSRInternalProxyLockdown`, `TestRevalidateTagAndPathE2E`
 
 ### Compiled React packages
 
@@ -352,7 +364,7 @@ Evidence: `TestSegmentExportsRenderMode`, `TestDataCacheUsageInference`, `TestRe
 
 Radix and other compiled packages run as Preact islands with live props, callbacks, portals, controlled primitives, per-island entries bundled with shared modules, server-rendered initial markup, hydration, and an island error boundary. Known Preact limits: an uncontrolled Radix Tooltip closes right after it opens, and a layer opened inside another layer's portal content dismisses the outer layer; both have documented workarounds.
 
-Evidence: `TestIslandSignalPropBridge`, `TestIslandLocalComponent`, `TestIslandSSRWithHooks`, `TestIslandSSREscapesTextProps`, `TestIslandSSRUnknownPropFallsBackClientOnly`, `TestIslandSSRModuleFailureFallsBackClientOnly`, `TestIslandSharedSignalAcrossIslands`, `TestIslandSSRArrayObjectProps`, `TestIslandLocalNamedImport`, `TestIslandPerIslandChunks`, `TestIslandChunksMinified`, `browser:/react-demo/`
+Evidence: `TestIslandSignalPropBridge`, `TestIslandLocalComponent`, `TestIslandSSREscapesTextProps`, `browser:/react-demo/`
 
 ### shadcn-style dashboard
 
@@ -378,7 +390,7 @@ Imported local React-compatible modules can be used as tags inside a compiled is
 
 Diagnostics: `KR8007`
 
-Evidence: `TestIslandLocalComponent`, `browser:/react-demo/`, `TestIslandSameFileLocalWarning`
+Evidence: `TestIslandLocalComponent`, `browser:/react-demo/`
 
 ### npm React hook libraries (zustand, react-hook-form, SWR, TanStack Query, ...)
 
@@ -388,7 +400,7 @@ A user module that calls a hook of an npm package built on React (or a store hoo
 
 Known limits:
 
-- A layout, template or server-rendered page cannot host these hooks; the build fails with KR8013.
+- A layout, template or server-rendered page cannot call these hooks outside a "use client" module; the build fails with KR8013. Their components (icons, Radix primitives) render in async pages, layouts and components as client boundaries.
 - A layout provider whose props read the layout's params, a signal or a state setter, or that renders markup of its own, cannot reach the islands (KR8015, KR8016).
 - State inside a component resets when its island unmounts on navigation; module-level state is kept.
 - A page that is itself such an island cannot take route props (KR8013) or use Krate-only APIs in the same module.
@@ -397,7 +409,24 @@ Known limits:
 
 Diagnostics: `KR8013`, `KR8015`, `KR8016`
 
-Evidence: `TestReactHookLibraryPageIsland`, `TestReactHookLibraryComponentIslands`, `TestReactHookLibraryPageForms`, `TestReactLibraryValueInPageMakesIsland`, `TestReactIslandModulesAreNotKrateSource`, `TestReactHookLibraryInLayoutDiagnostic`, `TestPreactCompatChunkHasDefaultExport`, `TestBrowserReactLibraryIslands`, `TestLayoutProvidersReachIslands`, `TestIslandModulesAreSharedAcrossPages`, `TestLayoutProviderDiagnostics`, `TestIslandChunksSurviveDiskCache`, `TestPerRequestPageIslandStubs`
+Evidence: `TestReactHookLibraryPageIsland`, `TestBrowserReactLibraryIslands`, `TestLayoutProvidersReachIslands`
+
+### Compiled React packages in async pages, layouts and server components (lucide-react, Radix)
+
+**Source:** n/a - **Islands:** Supported - **SSR:** Supported
+
+The components a server module imports from a package built on React are client boundaries: rendered with Preact on the server, plain HTML when they have no state or effects (an icon), a hydrating island otherwise. Parts of a compound component (Radix Dialog.Root with its Trigger and Content) stay in one Preact tree. Async layouts render per request with the page below them, so a layout can read a session and gate its subtree with redirect() or notFound(). Checked in Chromium against lucide-react 1.28 and radix-ui 1.6 (checkbox, dialog).
+
+Known limits:
+
+- Props follow the "use client" rules: serializable values and server actions, no inline functions.
+- A synchronous (static) layout cannot host compiled components; make it async (KR8013).
+- Server components placed between the parts of a compound component render to HTML, so the parts around one do not share a tree.
+- Only Chromium was run for the browser check.
+
+Diagnostics: `KR7101`, `KR8013`
+
+Evidence: `TestAsyncPageRendersCompiledReactComponents`, `TestCompiledReactComponentsBrowser`, `TestAsyncLayouts`
 
 ### CSS-in-JS (styled-components, emotion, MUI)
 
@@ -412,7 +441,7 @@ Known limits:
 
 Diagnostics: `KR8008`, `KR8014`
 
-Evidence: `TestReactCSSInJSIsland`, `TestBrowserReactLibraryIslands`
+Evidence: `TestBrowserReactLibraryIslands`
 
 ### Island hydration control (client:visible, client:idle)
 
@@ -422,7 +451,61 @@ client:visible and client:idle on an island's root tag defer mounting until the 
 
 Diagnostics: `KR8012`
 
-Evidence: `TestIslandClientDirectives`, `TestClientDirectiveOnNonIslandWarns`, `TestBrowserReactLibraryIslands`
+Evidence: `TestBrowserReactLibraryIslands`
+
+### Real-React islands (react-reconciler libraries)
+
+**Source:** n/a - **Islands:** Supported - **SSR:** n/a
+
+A user module that imports a package built on react-reconciler (detected from its dependencies) or listed in react.islands runs in a client-rendered island bundled with real react and react-dom, with no Preact alias in its subtree. The server emits a placeholder (client:fallback text). All islands of a page mount from one entry, and the pages of a site share one React chunk that only pages with such an island load. Signal props bridge in as for other islands.
+
+Known limits:
+
+- Client-rendered only: no server markup beyond the fallback text.
+- Adds react and react-dom (about 60 KB gzipped) plus the library to the pages that use it.
+- Layout providers are not applied; Krate components cannot be passed in as children (same-file ones are diagnosed with KR8007).
+- Async pages and layouts host them as client-rendered boundaries (props and children must be serializable); synchronous layouts cannot (KR8013).
+
+Evidence: `TestRealReactIsland`, `TestBrowserRealReactIsland`, `TestRealReactConfigPackage`, `TestReconcilerLibraryOnPreactIsland`, `TestRealReactInAsyncPages`
+
+### @react-three/fiber
+
+**Source:** n/a - **Islands:** Partial - **SSR:** n/a
+
+A module using Canvas, useFrame and the other fiber APIs runs as a real-React island (fiber depends on react-reconciler, so it is detected without configuration). Verified by hand: Canvas with a mesh renders a WebGL scene under three 0.170 and @react-three/fiber 9.8.
+
+Known limits:
+
+- The mechanism is tested in CI with a minimal react-reconciler renderer; the library itself was verified by hand in Chromium (@react-three/fiber 9.8, three 0.170, React 19.3) and is not installed in CI.
+- WebGL output is client-only; there is no server rendering.
+
+Evidence: `TestRealReactIsland`, `TestBrowserRealReactIsland`
+
+### @react-three/drei
+
+**Source:** n/a - **Islands:** Partial - **SSR:** n/a
+
+drei peer-depends on @react-three/fiber, so a module importing it runs as a real-React island with no configuration. Verified by hand: OrbitControls inside a fiber Canvas under @react-three/drei 10.7.
+
+Known limits:
+
+- The mechanism is tested in CI with a minimal react-reconciler renderer; the library itself was verified by hand in Chromium (@react-three/drei 10.7) and is not installed in CI.
+- Only OrbitControls was exercised; other helpers have not been tried.
+
+Evidence: `TestRealReactIsland`, `TestBrowserRealReactIsland`
+
+### react-konva
+
+**Source:** n/a - **Islands:** Partial - **SSR:** n/a
+
+react-konva depends on react-reconciler, so a module using Stage, Layer and the shape components runs as a real-React island with no configuration. Verified by hand: a Rect moves when island state changes under react-konva 19.3 and konva 9.3.
+
+Known limits:
+
+- The mechanism is tested in CI with a minimal react-reconciler renderer; the library itself was verified by hand in Chromium (react-konva 19.3, konva 9.3) and is not installed in CI.
+- The canvas is client-only; there is no server rendering.
+
+Evidence: `TestRealReactIsland`, `TestBrowserRealReactIsland`
 
 ### SSR island hydration
 
@@ -432,7 +515,7 @@ Islands with build-time-known props are server-rendered with Preact and hydrated
 
 Diagnostics: `KR8008`, `KR8009`
 
-Evidence: `TestIslandSignalPropBridge`, `TestIslandSSRWithHooks`, `TestIslandSSREscapesTextProps`, `TestIslandSSRUnknownPropFallsBackClientOnly`, `TestIslandSSRModuleFailureFallsBackClientOnly`, `TestIslandSharedSignalAcrossIslands`, `TestIslandSSRArrayObjectProps`, `TestIslandLocalNamedImport`, `TestIslandPerIslandChunks`, `TestIslandChunksMinified`, `browser:/react-demo/`, `TestIslandBundleFailureUsesKR8009`, `TestPerRequestPageIslandStubs`, `TestIslandChunksSurviveDiskCache`, `TestBrowserReactLibraryIslands`
+Evidence: `TestIslandSignalPropBridge`, `TestIslandSSREscapesTextProps`, `browser:/react-demo/`, `TestBrowserReactLibraryIslands`
 
 ### Supported Preact versions
 
@@ -452,7 +535,7 @@ Known limits:
 
 - Four P2 render-count/useId formatting differences remain documented in testdata/reactbrowser/divergences.json.
 
-Evidence: `TestReactBrowserDifferential`, `TestReactBrowserCorpus`, `ci:browser-conformance`
+Evidence: `TestReactBrowserDifferential`, `ci:browser-conformance`
 
 ### React 19 reference app
 
@@ -475,7 +558,7 @@ Known limits:
 - Legacy (req, res) API handlers, Go API routes, Go components, the API sidecar and community plugin serve hooks are not supported on serverless targets.
 - Cloudflare bundles fail at build time for Node built-ins outside nodejs_compat (fs, vm, net, child_process).
 
-Evidence: `TestServerlessNodeParity`, `TestVercelServerOutput`, `TestNetlifyServerOutput`, `TestCloudflareServerOutput`, `TestServerBundleHasNoSecrets`, `TestServerlessRefusesGoAndSidecars`, `TestCloudflareRefusesNodeBuiltins`, `TestServerlessNodeBrowser`, `TestPlatformDeploysKeepSegmentPages`, `TestNetlifyAndVercelWithoutMiddlewareStayStaticFirst`
+Evidence: `TestServerlessNodeParity`, `TestVercelServerOutput`, `TestCloudflareServerOutput`, `TestServerBundleHasNoSecrets`, `TestPlatformDeploysKeepSegmentPages`
 
 ### Metadata routes and ImageResponse
 
@@ -483,7 +566,7 @@ Evidence: `TestServerlessNodeParity`, `TestVercelServerOutput`, `TestNetlifyServ
 
 sitemap.ts, robots.ts and manifest.ts build sitemap.xml, robots.txt and manifest.webmanifest; opengraph-image and twitter-image files (including per-segment and per-generateStaticParams ones) build real PNGs from ImageResponse JSX with a pure Go renderer (flex layout, text and fonts, colours, gradients, images), and feed og:image and twitter:image. Anything the renderer cannot draw is a build error (KR7131). A file wins over a plugin (KR7133). Per-request ImageResponse works in Node API routes under krate start only; Workers and serverless functions have no renderer. krate migrate nextjs maps these files natively. Not supported: CSS grid, transform, filter, SVG, icon and apple-icon files, opengraph-image.alt.txt.
 
-Evidence: `TestMetadataRouteFilesBuild`, `TestImageResponseUnsupportedFailsTheBuild`, `TestMetadataRoutePluginOverrideIsSaid`, `TestImageResponsePerRequestOnTheHost`, `TestMetadataRoutesMigrateNatively`
+Evidence: `TestMetadataRouteFilesBuild`
 
 ### Code highlighting (build, request time, browser)
 
@@ -499,7 +582,7 @@ Known limits:
 
 Diagnostics: `KR7150`, `KR7151`
 
-Evidence: `TestParityCorpus`, `TestTranspiledRegexesMatchRegexp2`, `TestPatternOverrides`, `TestAdversarialInputs`, `TestRuleProfile`, `TestThemeCSSMatchesChromaPerMode`, `TestCodeThemeBrowser`, `TestDynamicCodeBrowser`, `TestSSRCodeHighlightingE2E`, `TestDynamicCodeShipsHighlighterOnlyWhereUsed`, `ci:code highlighting size budget`
+Evidence: `TestParityCorpus`, `TestTranspiledRegexesMatchRegexp2`, `TestAdversarialInputs`, `TestThemeCSSMatchesChromaPerMode`, `TestSSRCodeHighlightingE2E`, `ci:code highlighting size budget`
 
 ### Native: window and custom scheme
 
@@ -511,9 +594,9 @@ Known limits:
 
 - Linux GUI tests need a display and WebKitGTK 2.40 or newer (KRATE_NATIVE_GUI=1); CI runs them under Xvfb.
 - WebView2 on Windows needs the Evergreen runtime installed; krate native doctor reports it.
-- macOS and Windows: the CI native job runs the platform GUI tests on both (macOS TestScenario and TestTwoWindows, Windows TestGUIRoundTrip and TestGUITwoWindows: page load, request body echo, incremental streaming, secure context), TestGUIShell and TestNativeE2EGUI through a real WKWebView and WebView2. Blocking an in-window navigation to another origin has a real-window test on Windows (TestGUIRoundTrip) but none on macOS, where the navigation delegate is covered only by reading the code.
+- macOS and Windows: the CI native job runs the platform GUI tests on both (macOS TestScenario, Windows TestGUIRoundTrip: page load, request body echo, incremental streaming, secure context), TestGUIShell and TestNativeE2EGUI through a real WKWebView and WebView2. Blocking an in-window navigation to another origin has a real-window test on Windows (TestGUIRoundTrip) but none on macOS, where the navigation delegate is covered only by reading the code.
 
-Evidence: `TestGUIPage`, `TestGUINavigationLock`, `TestGUIShell`, `TestGUITwoWindows`, `TestStaticResolution`, `TestStaticRejectsTraversal`, `TestDefaultCSPShape`, `TestBrowserMode`, `TestNativeE2EGUI`
+Evidence: `TestGUIPage`, `TestGUINavigationLock`, `TestGUIShell`, `TestStaticResolution`, `TestStaticRejectsTraversal`, `TestDefaultCSPShape`, `TestBrowserMode`, `TestNativeE2EGUI`
 
 ### Native: streaming responses
 
@@ -525,7 +608,7 @@ Known limits:
 
 - macOS and Windows: incremental delivery through a real WKWebView and WebView2 is checked by the platform GUI tests (at least 3 reads spread over 100 ms), and the response writers (macOS task writer: panic before the header, cancel when the task stops; Windows: flush, abort, block buffer) have unit tests that run on both. A reader closed by the page cancelling a real request is driven through a real window on Linux only (TestGUIRequestAbort).
 
-Evidence: `TestServeStreamsChunks`, `TestServeCancelsWhenReaderCloses`, `TestServePanicBeforeHeadersIs500`, `TestStreamValuesThenEnd`, `TestStreamError`, `TestGUIRequestAbort`
+Evidence: `TestServeStreamsChunks`, `TestStreamValuesThenEnd`, `TestGUIRequestAbort`
 
 ### Native: host calls, streams and signals
 
@@ -537,7 +620,7 @@ Known limits:
 
 - The scheme package is pure Go and identical on every OS; its tests run on Linux, macOS and Windows in CI, and TestGUIShell sends calls, streams and signals from a real WKWebView and WebView2 to host code.
 
-Evidence: `TestInvoke`, `TestInvokeStreamAndSubscribe`, `TestSignalsReconnectGetsCurrentValue`, `TestBatchFastResultArrivesBeforeSlow`, `TestCancelByID`, `TestErrorMapping`, `TestConcurrencyIsBounded`, `TestEveryIDIsRegisteredAndGated`
+Evidence: `TestInvoke`, `TestBatchFastResultArrivesBeforeSlow`, `TestErrorMapping`, `TestEveryIDIsRegisteredAndGated`
 
 ### Native: Go host code
 
@@ -548,9 +631,9 @@ Go host code (functions, streams and signals in .go files next to the pages) run
 Known limits:
 
 - Needs the Go toolchain on the build machine (krate native doctor reports it).
-- macOS and Windows: the child process lifecycle, crash restart and reconnect (gohost tests) run on both in CI, TestGUIShell replaces the Go host binary and restarts the child in a real window, and TestNativeReleaseE2EGUI runs a release executable with Go host code. TestNativeReleaseExample (the browser variant) runs on Linux only. On Windows a running Go host binary cannot be replaced, so a Go edit under krate native dev reports that.
+- macOS and Windows: the child process lifecycle (TestChildLifecycle) runs on both in CI, TestGUIShell replaces the Go host binary and restarts the child in a real window, and TestNativeReleaseE2EGUI runs a release executable with Go host code. TestNativeReleaseE2EBrowser (the browser variant) runs on Linux only. On Windows a running Go host binary cannot be replaced, so a Go edit under krate native dev reports that.
 
-Evidence: `TestChildLifecycle`, `TestChildCrashAndRestart`, `TestRunInProcess`, `TestNativeReleaseExample`, `TestNativeReleaseGoOnlyHasNoQuickJSAndShakesTray`, `fixture:examples/native-tasks`
+Evidence: `TestChildLifecycle`, `fixture:examples/native-tasks`
 
 ### Native: TypeScript host code on QuickJS
 
@@ -561,9 +644,9 @@ TypeScript host code (*.host.ts files and @host functions) is bundled to one scr
 Known limits:
 
 - QuickJS is not Node: only the globals in the runtime compatibility ledger exist; code that needs more selects a node, bun or deno host.
-- macOS and Windows: the embedded QuickJS engine is pure Go and its tests (calls, timers, source-mapped stacks, the watchdog, the compatibility ledger) run on both in CI; TestNativeReleaseTSOnlyRuns builds and runs a TypeScript-only release executable there.
+- macOS and Windows: the embedded QuickJS engine is pure Go and its tests (calls, streams, the compatibility ledger, runaway recursion) run on both in CI. A TypeScript-only release executable is not run there.
 
-Evidence: `TestCalls`, `TestSourceMappedStack`, `TestWatchdog`, `TestTimers`, `TestCompatLedger`, `TestNativeReleaseTSOnlyRuns`, `fixture:examples/native-tasks`
+Evidence: `TestCalls`, `fixture:examples/native-tasks`
 
 ### Native: Node, Bun and Deno host children
 
@@ -573,13 +656,13 @@ TypeScript host code can run as a child process of the shell under Node, Bun or 
 
 Known limits:
 
-- Linux: Node, Bun and Deno children are run end to end through the real krate-shell in a window (TestNativeHostChildGUI: host call, host signal, stream, thrown error, binary and unicode arguments). Node and Bun release builds are verified; the Deno release command line (deno compile with plain --allow-net for unix targets) is unit tested only, and the Bun and Node compile tests skip when the tool is missing.
+- Linux: Node children run end to end through the real krate-shell (TestHostChildNode, TestNativeHostChildNodeEndToEnd); Bun and Deno children are covered by the hostchild call tests. Node and Bun release builds are verified; the Deno release command line (deno compile with plain --allow-net for unix targets) is not tested, and the Bun and Node compile tests skip when the tool is missing.
 - Deno must be recent enough to take unix:<path> in --allow-net (verified with 2.9.8); older versions reject the entry, and the dev command line is not adapted to them.
-- macOS: Node children run in CI (TestHostChildNode, TestNativeHostChildNodeEndToEnd and the hostchild tests on macos-latest) over a Unix socket. TestNativeHostChildGUI also runs Node, Bun and Deno through the real shell there; its first passing run on macos-latest is not confirmed yet.
-- Windows: Node, Bun and Deno cannot use AF_UNIX there, so the shell uses loopback TCP with a random token. The transport tests and the hostchild tests run on windows-latest, TestHostChildNode starts a Node child there, and TestNativeHostChildGUI runs the three runtimes through the real shell; its first passing run there is not confirmed yet.
+- macOS: Node children run in CI (TestHostChildNode, TestNativeHostChildNodeEndToEnd and the hostchild tests on macos-latest) over a Unix socket. Bun and Deno children are not run through the real shell there.
+- Windows: Node, Bun and Deno cannot use AF_UNIX there, so the shell uses loopback TCP with a random token. The transport tests (TestTCPHandshake, TestGuardEmptyTokenRejects) and the hostchild tests run on windows-latest, and TestHostChildNode starts a Node child there. Bun and Deno children are not run through the real shell there.
 - arm64: Bun and Deno publish no Windows on ARM builds, so the windows-11-arm CI job skips those two (KRATE_SKIP_RUNTIMES) and runs Node only; Linux arm64 and macOS run all three.
 
-Evidence: `TestHostChildNode`, `TestNativeHostChildNodeEndToEnd`, `TestNativeDevReloadsHostChild`, `TestDenoFlags`, `TestCommand`, `TestBuildReleaseNodeSEA`, `TestBuildReleaseBun`, `TestBuildReleaseDeno`, `TestReleaseBunCompiled`, `TestReleaseNodeSEA`, `TestTCPHandshake`, `TestParseRoundTrip`, `TestFor`, `TestChildTCPTransport`, `TestRunTCPToken`, `TestServeParentTCP`, `TestRemoteTCPSendsToken`, `TestNativeHostChildGUI`, `TestExpandSocketArgs`, `TestDenoCompileNetFlagPerTarget`
+Evidence: `TestHostChildNode`, `TestNativeHostChildNodeEndToEnd`, `TestReleaseBunCompiled`, `TestReleaseNodeSEA`, `TestTCPHandshake`, `TestRunTCPToken`, `TestRemoteTCPSendsToken`
 
 ### Native: SDK data areas (kv, db, fs, net, os)
 
@@ -592,7 +675,7 @@ Known limits:
 - Linux secrets use the freedesktop Secret Service over D-Bus (verified against a fake service); without a provider os.secret answers unsupported.
 - macOS and Windows: the key-value store, SQLite, scoped files, HTTP client and OS information tests run on both in CI. os.secret (Keychain on macOS, Credential Manager on Windows) and os.openExternal have no test on either: only the Linux Secret Service is exercised.
 
-Evidence: `TestGoAPI`, `TestTwoProcesses`, `TestWALAndPragmas`, `TestTraversalIsDenied`, `TestSymlinkEscapeIsDenied`, `TestClientTimeouts`, `TestSecretNotForwardedAcrossHosts`, `TestSecretServiceRoundTrip`, `TestInfo`, `TestUIDefaultsAndDenials`
+Evidence: `TestTwoProcesses`, `TestTraversalIsDenied`, `TestSymlinkEscapeIsDenied`, `TestSecretNotForwardedAcrossHosts`, `TestUIDefaultsAndDenials`
 
 ### Native: SDK windows
 
@@ -603,11 +686,11 @@ Extra windows on routes, title and size, fullscreen, maximize, minimize, framele
 Known limits:
 
 - Per-window permission scopes are enforced against the native webview a request came from (see native-view-identity). In browser mode the page's own x-krate-window header is the identity, so a script there can name another window's scope.
-- Wayland: a client cannot place windows or keep them above others, so SetPosition and SetAlwaysOnTop are accepted and ignored there and the capability report says unsupported. The GUI test packages also run under weston (GDK_BACKEND=wayland, weston nested on Xvfb); TestWaylandPlacementIsIgnored checks the ignored placement. Window position and always-on-top were verified on X11 only.
+- Wayland: a client cannot place windows or keep them above others, so SetPosition and SetAlwaysOnTop are accepted and ignored there and the capability report says unsupported. The GUI test packages run under weston (GDK_BACKEND=wayland, weston nested on Xvfb) on full CI runs; no test checks the ignored placement. Window position and always-on-top were verified on X11 only.
 - Fullscreen, maximize and minimize are verified with openbox on Xvfb (KRATE_NATIVE_WM=1), not on a full desktop environment.
 - macOS and Windows: window creation, title and size, two windows and per-window scopes bound to the webview run in CI (platform GUI tests, TestGUIScopedWindowCannotForgeAWiderScope). Fullscreen, maximize, minimize, frameless windows, window position, always-on-top and close-requested interception have no test on either OS.
 
-Evidence: `TestGUIWindowControls`, `TestGUIWindowOps`, `TestGUICloseRequested`, `TestGUITwoWindows`, `TestWindowOps`, `TestSecondWindowOnARoute`, `TestWindowOpenScopes`, `TestWindowScopeNarrowsCalls`, `TestWaylandPlacementIsIgnored`
+Evidence: `TestWindowOpenScopes`, `TestWindowScopeNarrowsCalls`
 
 ### Native: requests are bound to the webview they came from
 
@@ -619,9 +702,9 @@ Known limits:
 
 - Browser mode (krate native dev --browser) has no native webviews, so the page's x-krate-window header is the identity there and a script can send another window's id; scopes in browser mode only catch mistakes.
 - A scope limits what a page may ask the host to do; it does not isolate the page. Every window and view shares one origin, so pages of different scopes can read each other's localStorage and cookies.
-- macOS and Windows: TestGUIViews (platform layer) and TestGUIScopedWindowCannotForgeAWiderScope (shell) run in CI against a real WKWebView and WebView2 and check that requests are tagged with the view they came from and that the page header is ignored. On Windows the identity is the handler object registered for the view, not a pointer comparison of the sender.
+- macOS and Windows: TestGUIScopedWindowCannotForgeAWiderScope (shell) and TestNativeE2EViewsGUI run in CI against a real WKWebView and WebView2 and check that requests are tagged with the window or view they came from and that the page header is ignored. On Windows the identity is the handler object registered for the view, not a pointer comparison of the sender.
 
-Evidence: `TestIdentifyOverridesTheWindowHeader`, `TestIdentify`, `TestViewContext`, `TestScopedWindowCannotForgeAWiderScope`, `TestViewScopeIsBoundNatively`, `TestGUIScopedWindowCannotForgeAWiderScope`, `TestGUIViewIdentity`, `TestViewScopes`, `TestViewWindowMapping`, `TestGUIViews`
+Evidence: `TestIdentify`, `TestGUIScopedWindowCannotForgeAWiderScope`, `TestGUIViewIdentity`, `TestViewScopes`
 
 ### Native: views and split panes
 
@@ -632,13 +715,13 @@ A window can hold several webviews laid out as a tree of horizontal and vertical
 Known limits:
 
 - Divider drags on Linux are verified by calling gtk_paned_set_position, which is what the handle does, not by moving a real pointer.
-- macOS (nested NSSplitView, Auto Layout minimum sizes) and Windows (several WebView2 controllers in one HWND, dividers hit-tested in the window procedure) run TestGUIViews and TestNativeE2EViewsGUI in the CI native job, with the layout and drag arithmetic unit-tested on every OS. Divider drags on those two are not driven with a real pointer; the Windows splitter hit-testing and DPI scaling have unit tests (TestSplitterHitAndCursor, TestSplitterDrag, TestSplitterDPIScales). The WebView2 NavigationCompleted and WindowCloseRequested handler GUIDs are written from memory of WebView2.h; no platform test asserts the navigated or closed view events on Windows or macOS.
+- macOS (nested NSSplitView, Auto Layout minimum sizes) and Windows (several WebView2 controllers in one HWND, dividers hit-tested in the window procedure) run TestNativeE2EViewsGUI in the CI native job. Divider drags on those two are not driven with a real pointer, and the Windows splitter hit-testing and DPI scaling have no tests. The WebView2 NavigationCompleted and WindowCloseRequested handler GUIDs are written from memory of WebView2.h; no platform test asserts the navigated or closed view events on Windows or macOS.
 - On macOS a page's window.close() does not remove a secondary view (no closed event for it); Linux and Windows do.
 - Release applies to a whole window, not to one view. While a window is released, adding, removing or re-laying out its views fails.
 - A divider drag fires no event; read the ratios with layout().
 - Messages are JSON up to 1 MiB, not queued for a page that has not loaded, and carry the sender's view id only when the sender is a page.
 
-Evidence: `TestNativeE2EViewsGUI`, `TestArrangeTwoPanes`, `TestArrangeNestedCoversBounds`, `TestSplitSizesMinimums`, `TestMinSizePropagates`, `TestHitDividerAndDrag`, `TestValidate`, `TestSplitLeafAndRemove`, `TestRatiosAndMins`, `TestSplitterHitAndCursor`, `TestSplitterDrag`, `TestSplitterDPIScales`, `TestViewOps`, `TestViewEventsAreHeldUntilRegistered`, `TestGUIViewsTwoPane`, `TestGUIViewsNestedThreePane`, `TestGUIViewsReleaseRestore`, `TestGUIViewClosedByItsPage`, `TestGUIViewsMemory`, `TestViewMessagingEventsAndLayout`, `TestGUIViews`, `fixture:examples/native-views/src/pages/index.tsx`
+Evidence: `TestNativeE2EViewsGUI`, `fixture:examples/native-views/src/pages/index.tsx`
 
 ### Native: print, PDF, find, zoom and capture of a view
 
@@ -654,7 +737,7 @@ Known limits:
 - WebView2 PrintToPdf takes portrait paper dimensions with an orientation, as GTK does; that reading of the settings is untested on Windows.
 - macOS and Windows: untested. The code is written against the platform APIs, builds for both, and the same GUI tests run in CI on macos-latest and windows-latest.
 
-Evidence: `TestGUIPageZoom`, `TestGUIPageFind`, `TestGUIPageCapture`, `TestGUIPagePrintPDF`, `TestGUIPagePrintDialog`, `TestNativeE2EPageGUI`, `TestPageZoomPerView`, `TestPagePrintFindCapture`, `TestPageNeedsPermission`, `TestPDFOptionsResolve`, `TestZoomSteps`, `TestEncodePNGFromBGRA`, `TestFindTracker`, `TestFindScripts`, `fixture:examples/native-page/src/pages/index.tsx`
+Evidence: `TestNativeE2EPageGUI`, `TestPageNeedsPermission`, `fixture:examples/native-page/src/pages/index.tsx`
 
 ### Native: downloads started by the page
 
@@ -668,7 +751,7 @@ Known limits:
 - Downloads need the downloads area to be linked (the app imports @krate/app/downloads); otherwise the engine's default applies, and downloads of the app's own scheme do nothing.
 - Windows hands the app origin to WebView2's own download path, which has not been run.
 
-Evidence: `TestGUIPageDownloadCompletes`, `TestGUIPageDownloadDeclined`, `TestGUIPageDownloadCancel`, `TestGUIPageDownloadAttachmentAndBlob`, `TestGUIPageDownloads`, `TestSchemeDownloadCompletes`, `TestSchemeDownloadNames`, `TestSchemeDownloadFailures`, `TestSchemeDownloadCancel`, `TestUniqueName`, `TestSafeFileName`, `TestDownloadsPolicy`, `TestDownloadsEventsListCancel`, `TestNativeE2EPageGUI`
+Evidence: `TestSchemeDownloadCompletes`, `TestSafeFileName`, `TestNativeE2EPageGUI`
 
 ### Native: cookies and site data
 
@@ -682,7 +765,7 @@ Known limits:
 - An older WebView2 runtime without ICoreWebView2Profile2 can only clear cookies.
 - Windows on ARM: ClearBrowsingData never finished clearing DOM storage on the windows-11-arm runner's WebView2 and left the webview unusable, so on arm64 the app origin's DOM storage (local storage, IndexedDB, cache storage, service workers, file systems) is cleared through the DevTools protocol (Storage.clearDataForOrigin) instead; storage of other origins in the profile is not cleared there.
 
-Evidence: `TestGUIPageCookies`, `TestCookies`, `TestCookieDomainMatches`, `TestCookieOrigin`, `TestNativeE2EPageGUI`
+Evidence: `TestNativeE2EPageGUI`
 
 ### Native: remote views cannot reach the app
 
@@ -697,7 +780,7 @@ Known limits:
 - Opening needs a WebView2 runtime with ICoreWebView2Environment10 (profiles) on Windows.
 - macOS and Windows: untested. The same GUI tests (gui_remote_test.go) run in CI on macos-latest and windows-latest.
 
-Evidence: `TestGUIRemoteBasics`, `TestGUIRemoteCannotReachApp`, `TestGUIRemoteNavigationRules`, `TestGUIRemoteRedirectOffOrigin`, `TestGUIRemoteViewInAppWindow`, `TestRemoteDecide`, `TestRemoteDecideModes`, `TestRemoteResolveErrors`, `TestRemoteViewsHaveNoScope`, `TestRemoteNavigateAndPost`, `TestRemoteNeedsPermission`, `TestRemoteExternalOpenIsRateLimited`, `TestNativeE2ERemoteGUI`
+Evidence: `TestGUIRemoteCannotReachApp`, `TestRemoteDecide`, `TestRemoteResolveErrors`, `TestRemoteViewsHaveNoScope`, `TestRemoteNeedsPermission`, `TestNativeE2ERemoteGUI`
 
 ### Native: remote storage partitions
 
@@ -711,7 +794,7 @@ Known limits:
 - macOS before 14 has no named persistent data stores: persist:name answers unsupported and the default partition is in-memory.
 - Windows clears a profile through an open view of it.
 
-Evidence: `TestGUIRemotePartitions`, `TestPartitions`, `TestProfileName`, `TestNativeE2ERemoteGUI`
+Evidence: `TestNativeE2ERemoteGUI`
 
 ### Native: request rules for remote views
 
@@ -725,7 +808,7 @@ Known limits:
 - Block rules on WebKit follow the content-blocker regular expression subset.
 - macOS and Windows: untested. The same GUI tests (gui_remote_test.go) run in CI on macos-latest and windows-latest.
 
-Evidence: `TestGUIRemoteInterception`, `TestMatchURLPattern`, `TestEvalRules`, `TestRuleValidation`, `TestContentBlockerJSON`, `TestRemoteRulesAndNetwork`, `TestRemoteMessagesEventsAndRequests`
+Evidence: `TestGUIRemoteInterception`, `TestNativeE2ERemoteGUI`
 
 ### Native: remote user agent, proxy, certificates and logins
 
@@ -739,7 +822,7 @@ Known limits:
 - macOS reports every certificate error as untrusted.
 - macOS and Windows: untested. The same GUI tests (gui_remote_test.go) run in CI on macos-latest and windows-latest.
 
-Evidence: `TestGUIRemoteUserAgent`, `TestGUIRemoteProxy`, `TestGUIRemoteTLS`, `TestGUIRemoteAuth`, `TestGUIRemoteAuthCancelled`, `TestGUIRemoteClientCertificate`, `TestRemoteCertificatesAndAuth`, `TestProxyValidate`, `TestCertErrorNames`, `TestParseChallenge`
+Evidence: `TestGUIRemoteTLS`, `TestNativeE2ERemoteGUI`
 
 ### Native: remote message channel
 
@@ -747,7 +830,7 @@ Evidence: `TestGUIRemoteUserAgent`, `TestGUIRemoteProxy`, `TestGUIRemoteTLS`, `T
 
 The app and a remote page talk only through an opt-in channel: the page calls krateRemote.postMessage, the app gets the engine-reported origin; the app posts to a target origin and the page receives a message event with the app's origin. Messages carry a per-view token, so a frame that never ran the view's script cannot forge one.
 
-Evidence: `TestGUIRemoteMessages`, `TestParseRemoteMessage`, `TestScripts`, `TestNativeE2ERemoteGUI`
+Evidence: `TestNativeE2ERemoteGUI`
 
 ### Native: shared web process, release and background mode
 
@@ -762,7 +845,7 @@ Known limits:
 - The network process of WebKitGTK stays alive while the app runs, so a released Linux app still holds it.
 - Release destroys every webview of a window and restores them all with their routes and layout ratios; there is no per-view release.
 
-Evidence: `TestGUISharedWebProcess`, `TestGUIReleaseRestore`, `TestGUIKeepAlive`, `TestGUINavigateReleased`, `TestGUIMemoryPressureOnHide`, `TestGUIWindowsBackground`, `TestParseViewState`, `TestParkOnClose`, `TestQuitWhenEmpty`, `TestGUIViewsReleaseRestore`, `TestMemorySelectors`, `TestLeversAreGuardable`
+Evidence: `TestGUIReleaseRestore`
 
 ### Native: lean pages and the dev Memory panel
 
@@ -774,9 +857,9 @@ Known limits:
 
 - The checks are static: sizes set from CSS classes, values chosen at run time and data fetched later are not seen. The web font check is a heuristic.
 - WebKit has no JS heap size API, so the Memory panel shows the heap as unavailable on Linux and macOS and points at the web process row.
-- macOS and Windows: the checks are build-time and platform independent (their tests run on both in CI); TestGUIZMemoryPanel runs the dev Memory panel in the real webview on both. Per-process numbers on macOS and Windows come from the memory report of the CI native job, which is informational (see native-budgets).
+- macOS and Windows: the checks are build-time and platform independent (their tests run on both in CI). Per-process numbers on macOS and Windows come from the memory report of the full CI runs, which is informational (see native-budgets).
 
-Evidence: `TestNativePagesLoadOnlyWhatTheyUse`, `TestLeanOversizedImage`, `TestLeanDataURIThreshold`, `TestLeanWebFonts`, `TestLeanCompositing`, `TestLeanWillChangeEverywhere`, `TestLeanLongLists`, `TestMemoryBrowserMode`, `TestGUIZMemoryPanel`, `TestNativeBuildWritesNoPrecompressedAssets`, `TestNativeTargetDisablesViewTransitionsByDefault`, `TestNativeDocsSiteE2E`, `TestGUIRequestBodyStress`
+Evidence: `TestLeanOversizedImage`, `TestNativeDocsSiteE2E`, `TestGUIRequestBodyStress`
 
 ### Native: SDK dialogs, clipboard and menus
 
@@ -788,9 +871,9 @@ Known limits:
 
 - A native dialog cannot be clicked headlessly: the tests check that it is created with the right options and answer it programmatically.
 - Windows menu accelerators are shown but not active; Windows message boxes do not support custom button labels.
-- macOS and Windows: untested. No test creates a native dialog, reads or writes the clipboard or builds a menu there; the SDK logic tests (TestDialogRoundTrip, TestMenuEvents) use a fake platform. The macOS menu accelerator parsing (TestAccelKeyEquivalent) is unit tested.
+- macOS and Windows: untested. No test creates a native dialog, reads or writes the clipboard or builds a menu there.
 
-Evidence: `TestGUIDialogs`, `TestGUIClipboard`, `TestGUIMenus`, `TestDialogsAreCreatedWithTheRightOptions`, `TestClipboardThroughTheSDK`, `TestMenuClickReachesGoAndTheUI`, `TestDialogRoundTrip`, `TestMenuEvents`
+Evidence: `TestGUIMenus`, `TestNativeE2EFilesGUI`
 
 ### Native: rich clipboard formats
 
@@ -802,7 +885,7 @@ Known limits:
 
 - HTML is stored as given on Linux, without a charset declaration.
 
-Evidence: `TestGUIClipboardRich`, `TestCFHTMLOffsets`, `TestDecodeCFHTMLFromOtherProducers`, `TestDecodeClipboardText`, `TestFormatNameMaps`, `TestClipboardRichFormats`
+Evidence: `TestGUIClipboardRich`
 
 ### Native: webview context menu
 
@@ -813,10 +896,10 @@ native.window.contextMenu and menu.setContextMenu disable, replace (custom: even
 Known limits:
 
 - Spelling suggestions and Add to Dictionary are not exercised by any test: no spelling dictionary is available to the Linux test environment.
-- macOS and Windows: untested until TestGUIContextMenu passes in CI. Windows suggestions and Add to Dictionary are best effort.
+- macOS and Windows: untested; the context menu has a real-window test on Linux only (TestGUIContextMenuCustom). Windows suggestions and Add to Dictionary are best effort.
 - Inspect Element from a custom menu opens the inspector without selecting the element on WebKitGTK.
 
-Evidence: `TestGUIContextMenuCustom`, `TestGUIContextMenuNone`, `TestGUIContextMenuExtend`, `TestGUIContextCommands`, `TestContextMenuActionValues`, `TestContextMenuSDK`, `TestManifestContextMenu`, `TestParseContextHit`
+Evidence: `TestGUIContextMenuCustom`
 
 ### Native: debugging in krate native dev
 
@@ -830,7 +913,7 @@ Known limits:
 - A debugger has to attach again after a Go edit; breakpoints are not carried over.
 - Windows: untested (the child-wrapping test skips on the CI runner); the Delve integration tests pass on macOS and Windows in CI.
 
-Evidence: `TestNativeDebugGoHostGUI`, `TestNativeDebugGoHostRestart`, `TestChildWrap`, `TestDlvArgs`, `TestDlvDetachKillsTheProgram`, `TestFindDlvMissingHintsAtInstall`, `TestMergeLaunchJSON`, `TestResolveDebugAddr`
+Evidence: `TestNativeDebugGoHostRestart`
 
 ### Native: SDK notifications
 
@@ -841,11 +924,11 @@ Desktop notifications with actions. On Linux they use org.freedesktop.Notificati
 Known limits:
 
 - Verified against a real dunst daemon on a private session bus (text, icon, urgency, replacement by id, close from the app and from the daemon with the NotificationClosed reason, default action and action buttons, expiry, daemon gone) and against a fake service for protocol edge cases. Other daemons (GNOME Shell, KDE Plasma) were not run. Without a service that owns org.freedesktop.Notifications the call returns ErrUnsupported.
-- macOS: TestNotifyUnbundled and TestNotifyBundled run in CI on macos-latest (the unbundled process gets the ErrUnsupported that names the fix; the generated app bundle takes the real UNUserNotificationCenter path), and the bundle planning is unit tested. That a notification banner appears and that clicking it or its actions reaches the app are manual checks. It needs an app bundle with a bundle identifier; krate native dev runs the shell from a generated <appId>.dev bundle under .krate/dev. The first notification asks for permission and a refusal is a permission_denied error. Icon and Timeout are ignored, and critical urgency is only time-sensitive (the critical level needs an Apple entitlement).
-- Windows: the toast XML, ids and registry values are unit tested, TestToastXMLAcceptedByWinRT and TestToastDelegateInterfaces call the real WinRT on windows-latest, and TestGUIToast shows a toast there (it skips on a machine with notifications disabled). Clicking a toast and seeing the banner are manual checks. An unpackaged app registers its AppUserModelID under HKCU; a packaged app uses its package identity.
+- macOS: no CI test sends a notification there; the bundle planning and the UNUserNotificationCenter path are covered by reading the code. That a notification banner appears and that clicking it or its actions reaches the app are manual checks. It needs an app bundle with a bundle identifier; krate native dev runs the shell from a generated <appId>.dev bundle under .krate/dev. The first notification asks for permission and a refusal is a permission_denied error. Icon and Timeout are ignored, and critical urgency is only time-sensitive (the critical level needs an Apple entitlement).
+- Windows: no CI test shows a toast; the toast activation URI is tested (TestURIRoundTrip). Clicking a toast and seeing the banner are manual checks. An unpackaged app registers its AppUserModelID under HKCU; a packaged app uses its package identity.
 - Windows: a toast click uses protocol activation with a per-app URL scheme (HKCU registration for an unpackaged app, NSIS and MSIX registration too), not a COM activator. With the app running, the new process hands the click to it (WM_COPYDATA); with no instance, the click is kept and delivered when the page subscribes (the event that started the app). Unit tests cover the URL, the payload, the registry values and the manifest; the Windows CI job relaunches the test binary with the URL to prove both paths and checks the registration (first run pending), but a real click on a real toast, Action Center after a reboot and the packaged (MSIX) path are not confirmed. Windows has no per-toast timeout or urgency levels, and Show succeeding does not prove a banner was drawn (Focus assist and per-app settings can suppress it).
 
-Evidence: `TestNotifyOverDBus`, `TestNotifyWithoutServiceIsUnsupported`, `TestNotificationAndTrayWithFakeDesktopServices`, `TestBuildToastXML`, `TestBuildToastXMLVariants`, `TestPinterfaceIID`, `TestAUMIDFor`, `TestToastXMLAcceptedByWinRT`, `TestToastDelegateInterfaces`, `TestGUIToast`, `TestPlatformBackendClose`, `TestNotifyUnbundled`, `TestNotifyBundled`, `TestBundleProblem`, `TestNotifyEvent`, `TestPlatformNotifyAvailability`, `TestPrepareMacDevBundle`, `TestRealDunstShowsNotification`, `TestRealDunstUrgencyLevels`, `TestRealDunstReplaceByID`, `TestRealDunstClosedByApp`, `TestRealDunstClosedByDaemon`, `TestRealDunstExpires`, `TestRealDunstDefaultAction`, `TestRealDunstActionButton`, `TestRealDunstGoneIsUnsupported`, `TestRealNoDaemonOnARealBus`, `TestToastXMLProtocolActivation`, `TestPlatformNotifyLaunchEventWaitsForSubscriber`, `TestPublishRetainedWaitsForTheFirstSubscriber`, `TestActivationPayloadRoundTrip`, `TestSchemeIsStableAndValid`, `TestURIRoundTrip`, `TestGUIToastActivationFromASecondProcess`, `TestGUIToastProtocolRegistration`
+Evidence: `TestRealDunstShowsNotification`, `TestRealDunstActionButton`, `TestURIRoundTrip`
 
 ### Native: camera, microphone, screen capture and location permissions
 
@@ -860,7 +943,7 @@ Known limits:
 - Windows: implemented with PermissionRequested under a deferral and ScreenCaptureStarting (ICoreWebView2_27, absent from older runtimes, which leaves screen capture ungated), with SavesInProfile off so the runtime never answers from its profile. Run in CI on windows-latest; the test runs Chromium's fake devices. getUserMedia with audio and video raises two requests there.
 - Pointer lock, website data access and the other WebKitGTK request types, and the sensor, download, file and MIDI kinds of WebView2, are left to the engine.
 
-Evidence: `TestGUIPermissionCameraAllowAndDeny`, `TestGUIPermissionMicrophoneAndBoth`, `TestGUIPermissionNoHandlerDenies`, `TestGUIPermissionGeolocation`, `TestGUIPermissionScreenCapture`, `TestScopeWithoutPermissionDenies`, `TestPromptRemembersAnswers`, `TestViewScopedDecisionWinsOverApp`, `TestStorePersistsAppDecisionsOnly`, `TestHandlerStreamDecides`, `TestHandlerTimeoutDenies`, `TestMediaHandlerIsInstalledAndPolicyApplies`, `TestMediaPromptAndRememberedDecisions`, `TestMediaScopeAndPermissionGates`, `TestMediaRequestHandlerStream`, `TestNativeE2EMediaGUI`, `TestGUIPermissionDelegate`, `TestCaptureKinds`, `TestGUIPermissionCamera`, `TestPermissionKindOf`
+Evidence: `TestGUIPermissionNoHandlerDenies`, `TestScopeWithoutPermissionDenies`, `TestPromptRemembersAnswers`, `TestMediaScopeAndPermissionGates`, `TestNativeE2EMediaGUI`, `TestGUIPermissionDelegate`, `TestGUIPermissionCamera`
 
 ### Native: media permissions derived from the UI, usage descriptions and capabilities
 
@@ -872,7 +955,7 @@ Known limits:
 
 - The scan is textual: a call whose API name is built at run time is not found, and a library that mentions getUserMedia asks for the permission. The Info.plist, entitlements and MSIX output are unit-tested as text; no signed macOS app or MSIX package was run.
 
-Evidence: `TestScanUses`, `TestScanDirUsesReportsFirstSite`, `TestDevUsePermissions`, `TestNativeMediaMeta`, `TestMediaUsageDiagnostics`, `TestAddUsesJoinsTheDerivedPermissions`, `TestNativeMediaDerivedPermissions`, `TestNativeMediaValidation`, `TestInfoPlistUsageDescriptions`, `TestMacEntitlementsForDevices`, `TestMSIXDeviceCapabilities`, `TestApplyAppJSON`
+Evidence: `TestScanUses`, `TestMacEntitlementsForDevices`
 
 ### Native: operating system consent for camera, microphone, screen and location
 
@@ -885,7 +968,7 @@ Known limits:
 - Linux: outside a sandbox there is no consent switch for the camera or microphone, and the screen and location go through the ScreenCast portal and GeoClue inside WebKitGTK; only the Camera portal is driven by the SDK, and only against a fake portal in the tests.
 - macOS: screen recording reads as granted or not yet granted, and a grant takes effect after a restart. Windows: an unpackaged app cannot be shown a consent prompt, so osRequest only reports the state. Both run in CI on their OS, reading the state; no consent prompt is answered there.
 
-Evidence: `TestOSConsent`, `TestMediaOSConsentIDs`, `TestPortalCameraGrantAndDeny`, `TestPortalOutsideASandboxHasNoSwitch`, `TestPortalErrorsAndTimeout`, `TestPrivacyMappings`, `TestConsentStatus`, `TestGUIPrivacyAndSources`
+Evidence: `TestOSConsent`, `TestGUIPrivacyAndSources`, `TestNativeE2EMediaGUI`
 
 ### Native: screen and window capture sources
 
@@ -897,7 +980,7 @@ Known limits:
 
 - Linux has no list (media.sources returns unsupported, so the row is partial): WebKitGTK reaches the screen through the ScreenCast portal and PipeWire, whose picker is the only list. ScreenCaptureKit is not used on macOS. Window titles and thumbnails on macOS need the Screen Recording permission. The listing runs in CI on macOS and Windows.
 
-Evidence: `TestMediaSources`, `TestWindowSources`, `TestScaleKeepsAspectAndColor`, `TestPNGRoundTrip`, `TestBGRA`, `TestGUIPrivacyAndSources`
+Evidence: `TestMediaSources`, `TestGUIPrivacyAndSources`, `TestNativeE2EMediaGUI`
 
 ### Native: SDK tray and global shortcuts
 
@@ -908,13 +991,13 @@ A tray icon with a menu (StatusNotifierItem and dbusmenu on Linux with a legacy 
 Known limits:
 
 - The tray uses the StatusNotifierItem protocol when a StatusNotifier host exists and falls back to the legacy XEmbed system tray (GtkStatusIcon) when only an XEmbed tray manager owns _NET_SYSTEM_TRAY_S<screen> (X11 only). Stock GNOME with neither returns ErrUnsupported with a hint to install the AppIndicator extension. Verified against stalonetray (XEmbed, with real clicks and menu selection through XTEST) and against the Ayatana application indicator service as a real StatusNotifierWatcher and host; KDE Plasma, GNOME Shell with the extension and other panels were not run.
-- Linux shortcuts are verified on X11 (XGrabKey). On Wayland they need the org.freedesktop.portal.GlobalShortcuts portal, verified against a fake portal only (TestShortcutPortal), and return ErrUnsupported without it. No portal backend that implements GlobalShortcuts can run headless here: the GNOME backend needs a running gnome-shell/mutter session, the KDE backend needs KGlobalAccel in a Plasma session, the Hyprland and COSMIC backends are not packaged for Debian or Ubuntu, and xdg-desktop-portal-wlr does not implement the interface.
-- macOS: TestTrayItemAndMenu and TestHotKeyRegisterUnregister run in CI on macos-latest (a real NSStatusItem with its menu, and Carbon hot keys registered and released). Clicking the real status item and pressing a real hot key are manual checks (platform/darwin/MANUAL_TEST.md). With a tray menu any click opens the menu and is reported as click; right-click and double-click are only reported without a menu. Radio items show a checkmark. Single-tone gray icons become template images.
+- Linux shortcuts are verified on X11 (XGrabKey, TestGUIGlobalShortcut). On Wayland they need the org.freedesktop.portal.GlobalShortcuts portal, which no test exercises, and return ErrUnsupported without it. No portal backend that implements GlobalShortcuts can run headless here: the GNOME backend needs a running gnome-shell/mutter session, the KDE backend needs KGlobalAccel in a Plasma session, the Hyprland and COSMIC backends are not packaged for Debian or Ubuntu, and xdg-desktop-portal-wlr does not implement the interface.
+- macOS: TestTrayItemAndMenu runs in CI on macos-latest (a real NSStatusItem with its menu). Carbon hot keys have no test there. Clicking the real status item and pressing a real hot key are manual checks (platform/darwin/MANUAL_TEST.md). With a tray menu any click opens the menu and is reported as click; right-click and double-click are only reported without a menu. Radio items show a checkmark. Single-tone gray icons become template images.
 - macOS shortcuts use Carbon RegisterEventHotKey (no Accessibility permission). Keys are ANSI key positions, so other layouts differ, and macOS 15 ignores hot keys whose only modifiers are Option and/or Shift. A combination that is already registered is an error. Pressing a real hot key and clicking the real status item are manual checks (platform/darwin/MANUAL_TEST.md).
-- Windows: the key table, the NOTIFYICONDATAW layout, event decoding and icon scaling are unit tested, and on windows-latest TestGUITrayLifecycle adds, modifies and removes a tray icon (it skips when the runner desktop has no taskbar), TestGUIHotkeys registers hotkeys, and TestGUITrayTaskbarCreated plays an explorer restart (the icon is deleted behind the app's back, the real TaskbarCreated message is broadcast, and the icon must be modifiable again; first run pending). The icon's appearance, its menu behavior, a real explorer.exe restart and real key presses are manual checks. An elevated app is allowed to receive TaskbarCreated with ChangeWindowMessageFilterEx.
+- Windows: on windows-latest TestGUITrayLifecycle adds, modifies and removes a tray icon (it skips when the runner desktop has no taskbar). Hotkey registration and the TaskbarCreated recovery after an explorer restart have no tests. The icon's appearance, its menu behavior, a real explorer.exe restart and real key presses are manual checks. An elevated app is allowed to receive TaskbarCreated with ChangeWindowMessageFilterEx.
 - Windows: a shortcut another app or Windows holds fails with an 'already registered by another app' error; many Win+ combinations are reserved by the system. The tray menu has no accelerators and one icon per app.
 
-Evidence: `TestTrayOverDBus`, `TestTrayWithoutHostIsUnsupported`, `TestShortcutPortal`, `TestShortcutWaylandWithoutPortalIsUnsupported`, `TestGUIGlobalShortcut`, `TestShortcutAndSupports`, `TestVirtualKey`, `TestHotkeySpec`, `TestHotkeyError`, `TestHotkeyTable`, `TestNotifyIconDataLayout`, `TestTrayEventKind`, `TestPNGToIconBits`, `TestGUITrayLifecycle`, `TestGUIHotkeys`, `TestTrayItemAndMenu`, `TestHotKeyRegisterUnregister`, `TestToCarbon`, `TestCarbonStatusError`, `TestInspectTrayIcon`, `TestAccelKeyEquivalent`, `TestPlatformTrayIsUsed`, `TestParseCmdOrCtrl`, `TestRealStatusNotifierHost`, `TestRealXEmbedTray`, `TestRealNoTrayAtAll`, `TestTrayFallsBackToXEmbedWithoutAStatusNotifierHost`, `TestTrayPrefersStatusNotifierOverXEmbed`, `TestNoTrayAtAllNamesTheAppIndicatorExtension`, `TestGUITrayTaskbarCreated`
+Evidence: `TestGUIGlobalShortcut`, `TestGUITrayLifecycle`, `TestTrayItemAndMenu`
 
 ### Native: SDK app lifecycle
 
@@ -927,7 +1010,7 @@ Known limits:
 - URL scheme registration is a packaging step on macOS (Info.plist) and Windows (registry); the runtime code is shared.
 - macOS and Windows: single-instance locking, stale socket replacement and URL extraction from arguments run in CI on both. No test registers a scheme with the OS or opens a deep link there; the Linux .desktop entry has a test only on its own platform.
 
-Evidence: `TestSingleInstance`, `TestStaleSocketIsReplaced`, `TestURLsFromArgs`, `TestDesktopEntry`
+Evidence: `TestSingleInstance`
 
 ### Native: file associations
 
@@ -941,7 +1024,7 @@ Known limits:
 - An installed app is not made the default handler of a type another program owns, and the viewer role has no Windows equivalent.
 - macOS and Windows: untested. The same Go code is built for them (cross-compile checks in CI) and the CI native job runs go test on both, but no result of a run against a real WKWebView or WebView2 window has been confirmed.
 
-Evidence: `TestValidateNative`, `TestNativeFileAssociationsLoad`, `TestFileTypesDefaults`, `TestInfoPlistDocumentTypes`, `TestMacBundleHasTypeIcons`, `TestAppxManifestFileTypes`, `TestMSIXShipsTypeLogos`, `TestNSISFileAssociations`, `TestSharedMimeXML`, `TestDesktopFileMimeTypes`, `TestLinuxPackagesCarryTheMimeFile`, `TestAppImageCarriesTheMimeFile`, `TestRequireLinksAnAreaTheCodeNeverReaches`, `TestDesktopEntryFileTypes`
+Evidence: `TestInfoPlistDocumentTypes`, `TestRequireLinksAnAreaTheCodeNeverReaches`
 
 ### Native: opening files
 
@@ -954,7 +1037,7 @@ Known limits:
 - On Linux a first launch with a file and a second launch handing over another were run through the real shell and a real webview (TestNativeE2EFilesGUI); no desktop environment launched the app from a double click.
 - macOS: the delegate method is called by the test, not by Launch Services. Windows and Linux file-manager launches were not tried.
 
-Evidence: `TestFilesFromArgs`, `TestFileURLPaths`, `TestLaunchFilesAreOpenedAndGranted`, `TestOnOpenFileReplaysThenStreams`, `TestSecondInstanceOpensItsFiles`, `TestSystemOpenedURLsReachOnOpenURL`, `TestIsAppDir`, `TestDropLaunchServicesArgs`, `TestPathQueueHoldsUntilAHandlerIsSet`, `TestNativeE2EFilesGUI`, `TestGUIDelegateOpensFilesAndURLs`
+Evidence: `TestNativeE2EFilesGUI`
 
 ### Native: dropped file paths
 
@@ -969,7 +1052,7 @@ Known limits:
 - Windows: the injected script runs against the real WebView2 with a script-made File (which has no path); the COM walk that reads paths is tested with Go fakes of the WebView2.h layouts. A drag from Explorer was not tried and needs a WebView2 Runtime with ICoreWebView2WebMessageReceivedEventArgs2.
 - Windows: untested. The synthetic drop test skips on the windows-latest runner, so no drop into a real WebView2 window has been confirmed; macOS runs the drop tests against a real WKWebView in CI.
 
-Evidence: `TestGUIFileDropFromARealDrag`, `TestGUIFileDropHoverThenDrop`, `TestGUIFileDropWithoutHoverData`, `TestGUIFileDropForgetsAHoverThatLeft`, `TestGUIFileDropIgnoresWhatIsNotAFile`, `TestGUIFileDropWatchesTheRealView`, `TestParseURIList`, `TestPathsFromURIs`, `TestFileDropsReachTheViewAndAreGranted`, `TestInjectFileDropGoesThroughThePlatformHandler`, `TestNativeE2EFilesGUI`, `TestGUIWebViewWatchesDrops`, `TestGUIDropReadsFilePathsFromThePasteboard`, `TestDropShimInNode`, `TestParseDropMsg`, `TestDroppedFilesReadsPathsFromAdditionalObjects`, `TestGUISyntheticDropReachesTheHost`
+Evidence: `TestGUIFileDropFromARealDrag`, `TestNativeE2EFilesGUI`
 
 ### Native: release as a single executable
 
@@ -982,7 +1065,7 @@ Known limits:
 - TestNativeReleaseE2EGUI builds a release executable on macos-latest and windows-latest and drives it in a real window, and the release tests that need no window run there too. Cross-compiling to another OS is checked for the executable format only; such an executable is never launched.
 - Needs Go on the build machine; without it (native.release.compile auto) the build falls back to the prebuilt-shell layout.
 
-Evidence: `TestNativeReleaseDerivesPermissionsAndReport`, `TestNativeReleaseTSOnlyRuns`, `TestNativeReleaseGoOnlyHasNoQuickJSAndShakesTray`, `TestNativeReleaseCrossCompiles`, `TestNativeReleaseWindowsFlagsAndTargets`, `TestNativeReleaseExample`, `TestNativeReleaseE2EGUI`
+Evidence: `TestNativeReleaseDerivesPermissionsAndReport`, `TestNativeReleaseE2EGUI`
 
 ### Native: prebuilt shell for apps without Go
 
@@ -997,7 +1080,7 @@ Known limits:
 - Alpine (musl): the @krate/core-linux-x64-musl shell is linked with musl's loader (/lib/ld-musl-x86_64.so.1) instead of glibc's, so it starts and `krate-shell --doctor` runs; the install smoke test checks this on node:alpine in CI. A window needs WebKitGTK 4.1 from the distribution, which was not run on Alpine.
 - macOS and Windows: the lookup order, layout and packaging tests run in CI on both with a stand-in shell, and the install smoke test installs the @krate/core-<platform> package on macos-latest and windows-latest and runs its krate-shell --doctor. A dist-native build with the prebuilt shell is not launched there.
 
-Evidence: `TestFindPrebuiltShellOrder`, `TestLocateNativeShellOrder`, `TestAssembleShellDist`, `TestNativePrebuiltShellWithoutGo`, `TestDiscoverPrefersReport`
+Evidence: `TestLocateNativeShellOrder`, `TestNativePrebuiltShellWithoutGo`
 
 ### Native: krate native doctor
 
@@ -1007,9 +1090,9 @@ Reports the Go toolchain, the shell binary and its path, the system webview (Web
 
 Known limits:
 
-- The report logic is tested with injected probes for all three OSes. The real probes run in CI: TestBinaryDoctor runs krate-shell --doctor on all three OSes and the install smoke test runs it from the installed platform package on macos-latest and windows-latest. No test checks what the macOS and Windows probes report for a missing or too old webview.
+- The report logic is tested with injected probes (TestHealthyTypeScriptOnlyLinuxWithoutGo, TestGoRequiredForGoHostAndCompileAlways). The install smoke test runs krate-shell --doctor from the installed platform package on macos-latest and windows-latest. No test checks what the macOS and Windows probes report for a missing or too old webview.
 
-Evidence: `TestHealthyTypeScriptOnlyLinuxWithoutGo`, `TestGoRequiredForGoHostAndCompileAlways`, `TestWebviewMissingIsRequired`, `TestHostRuntimes`, `TestPackagingToolsPerOS`, `TestNativeDoctorCommand`, `TestBinaryDoctor`, `TestProbeShape`
+Evidence: `TestHealthyTypeScriptOnlyLinuxWithoutGo`, `TestGoRequiredForGoHostAndCompileAlways`
 
 ### Native: krate native test and the app driver
 
@@ -1024,7 +1107,7 @@ Known limits:
 - No --browser mode for tests; they drive the native shell.
 - The macOS and Windows runs happen only in the CI native job (a desktop session is needed); the per-OS data-directory isolation (HOME on macOS, APPDATA and LOCALAPPDATA on Windows) has not been tried by hand.
 
-Evidence: `TestNativeTestCommandGUI`, `TestFindNativeTests`, `TestBundleNativeTests`, `TestRunNativeTestRunsNodeWithEnvironment`, `TestNativeTestFlags`, `TestNativeTestListAndDiagnostics`, `TestServeControlDriverCommands`, `TestHostInjectMenuAndViews`, `TestHostInjectShortcut`, `fixture:examples/native-tasks/tests/tasks.native.test.ts`, `fixture:examples/native-views/tests/views.native.test.ts`
+Evidence: `TestRunNativeTestRunsNodeWithEnvironment`, `fixture:examples/native-tasks/tests/tasks.native.test.ts`, `fixture:examples/native-views/tests/views.native.test.ts`
 
 ### Native: migration guides and the worked Electron port
 
@@ -1038,7 +1121,7 @@ Known limits:
 - Native dialogs and notification banners cannot be clicked headlessly: the test calls the code behind the dialogs and accepts 'sent' or 'unsupported' for the notification and tray (Linux without a notification service or tray host answers unsupported).
 - The macOS and Windows runs happen only in the CI native job.
 
-Evidence: `TestNativeFromElectronGUI`, `fixture:examples/native-from-electron/tests/port.native.test.ts`
+Evidence: `fixture:examples/native-from-electron/tests/port.native.test.ts`
 
 ### Native: plugins
 
@@ -1048,12 +1131,12 @@ A plugin is a Go package plus a krate-plugin.json (name, Go import path, permiss
 
 Known limits:
 
-- The plugin runtime and the build are exercised on all three OSes: the shell GUI test (TestGUIPlugins), the compiler's plugin tests (the CI native job runs -run Plugin on macos-latest and windows-latest, including TestNativePluginDevBuild and TestNativePluginGUI), which build a per-app shell and check a granted call, a call denied to a window scoped to nothing and the lifecycle hooks, and TestNativeE2EPluginGUI, which runs examples/native-plugin in a window. The system-info example's own tests run on all three; its macOS CPU load (ps) and Windows (GetSystemTimes) readings are checked for shape, not for accuracy.
+- The plugin runtime and the build are exercised on all three OSes: TestNativePluginGUI builds a per-app shell and checks a granted call in a real window (the full CI runs add -run Plugin on macos-latest and windows-latest), TestNativePluginAllowlist checks the allowlist, and the shell and plugin package tests check namespaces and the permission gate. The system-info example's own tests run on all three on full runs; its macOS CPU load (ps) and Windows (GetSystemTimes) readings are checked for shape, not for accuracy.
 - Plugins are trusted Go code in the shell process; the namespace and permissions limit what a page can reach through them, not what the plugin does.
 - Plugin ops are callable from pages; TypeScript host code reaches them only by id (__krateHost.call). A go: plugin needs network or a populated module cache for the first build.
 - Editing a local plugin's Go code restarts native dev instead of hot-reloading it.
 
-Evidence: `TestInstallEnforcesNamespace`, `TestInstallRegistersGatedOps`, `TestSignalGate`, `TestLifecycle`, `TestParseManifestErrors`, `TestResolveDiagnostics`, `TestNativePluginsKey`, `TestPluginNamedImports`, `TestNativePluginDevBuild`, `TestNativePluginReleaseShakesOps`, `TestNativePluginReleaseWithGoHostCode`, `TestNativePluginScaffoldBuilds`, `TestNativePluginInit`, `TestGoRequiredForPlugins`, `TestGUIPlugins`, `TestNativePluginGUI`
+Evidence: `TestInstallEnforcesNamespace`, `TestInstallRegistersGatedOps`, `TestSignalGate`, `TestParseManifestErrors`, `TestPluginNamedImports`, `TestNativePluginGUI`
 
 ### Native: packaging formats
 
@@ -1066,9 +1149,9 @@ Known limits:
 - On Linux the .deb, .rpm and AppImage of examples/native-tasks are built, and the .deb contents and AppImage were launched and checked to serve the first page (scripts/native-smoke.mjs; the CI native job installs the .deb with dpkg and runs the AppImage). The .rpm is checked for structure and not installed.
 - macOS: the CI native job builds the .app, .zip and .dmg of examples/native-tasks, verifies and mounts the .dmg, copies the app out, checks its signature (ad hoc) and launches it (version, first page, window open for 8 seconds). Windows: it builds the .zip, the NSIS installer and the MSIX, runs the NSIS installer silently (registry entry, launch, uninstall) and installs the MSIX with Add-AppxPackage, signed with a test certificate. Dragging the .dmg to Applications, the installer UI and Start menu entries are manual checks; the NSIS installer needs makensis.
 - arm64 packages are built for linux/arm64, windows/arm64 and darwin/arm64 (deb and rpm architecture, MSIX ProcessorArchitecture, AppImage ARCH, Windows resources) and checked by unit tests; the CI native job also runs on ubuntu-24.04-arm and windows-11-arm, where the packaging steps run natively. Those two jobs have not run yet, and makensis, the Windows SDK and appimagetool may be missing on the Windows on ARM image (each is skipped with a notice, not failed).
-- WebView2: the registry check, the stand-in bootstrapper run and the message box are exercised by CI steps (scripts/native-smoke.mjs windows webview2, TestGUIRuntimeMissingMessageBox) that have not run on a real runner yet. The Fixed Version runtime loader path uses the runtime type value from open reimplementations of the loader and is not confirmed. An MSIX cannot declare the Evergreen runtime as a dependency (it is not a framework package), so an MSIX app relies on the runtime being present (Windows 11, current Edge) and on the message box.
+- WebView2: the registry check and the stand-in bootstrapper run are exercised by a full-run CI step (scripts/native-smoke.mjs windows webview2); the message box shown when the runtime is missing has no test. The Fixed Version runtime loader path uses the runtime type value from open reimplementations of the loader and is not confirmed. An MSIX cannot declare the Evergreen runtime as a dependency (it is not a framework package), so an MSIX app relies on the runtime being present (Windows 11, current Edge) and on the message box.
 
-Evidence: `TestLinuxTarGzAndDeb`, `TestRPM`, `TestAppImageNeedsTool`, `TestMacAppAndZip`, `TestMacDMGUsesHdiutilOnlyOnMac`, `TestWindowsZipAndNSIS`, `TestMSIXStructure`, `TestNativePackageEndToEnd`, `TestUpdateArtifactsAreSignedAndFeedWritten`, `TestNSISWebView2Download`, `TestNSISWebView2Embed`, `TestNSISWebView2NoneAndFixed`, `TestNSISRegistersTheToastScheme`, `TestMSIXDeclaresTheToastScheme`, `TestAddWebView2`, `TestGUIRuntimeMissingMessageBox`
+Evidence: `TestLinuxTarGzAndDeb`, `TestMacAppAndZip`, `TestWindowsZipAndNSIS`, `TestNativePackageEndToEnd`
 
 ### Native: signing and notarization
 
@@ -1081,7 +1164,7 @@ Known limits:
 - Unit tests replace the signing tools with stand-ins (command lines, ordering and secret redaction). The CI native job also signs for real with throwaway certificates (scripts/native-smoke.mjs): macOS ad hoc and with a self-signed identity in a temporary keychain (codesign --verify --deep --strict), Windows with a self-signed Authenticode certificate (signtool verify /pa), Linux packages with a generated gpg key (gpg --verify, and a tampered copy must fail). Ad hoc signing and the Windows test certificate ran green on macos-latest and windows-latest; the temporary-keychain identity, signtool verify /pa and the gpg step are new and their first CI run is pending.
 - Notarization needs an Apple Developer account and stays manual, as do Developer ID identities, certificates from a CA (EV or OV Authenticode), timestamps from a paid authority and hardware or cloud signing services.
 
-Evidence: `TestSignMacAppDeepSignsInnerFirst`, `TestSignMacAdHocAndEntitlements`, `TestSignMacOnlyOnMac`, `TestNotarize`, `TestSignWindows`, `TestSignLinuxGPG`, `TestPackageSignsBeforeArchiving`, `TestRedactCommand`, `TestSignLinuxArtifactsFindsEveryPackage`, `ci:native-smoke-sign`
+Evidence: `TestSignMacAppDeepSignsInnerFirst`, `ci:native-smoke-sign`
 
 ### Native: macOS universal apps
 
@@ -1091,10 +1174,10 @@ krate native build --release --arch universal compiles darwin/arm64 and darwin/a
 
 Known limits:
 
-- The fat Mach-O is written by Krate and read back with debug/macho on every OS (TestNativeUniversalMacApp merges real cross-compiled Go binaries). Running both slices (native, and x86_64 under Rosetta) and lipo -info are checked by that test on macOS only when KRATE_NATIVE_GUI=1 and lipo exist; that CI run is pending, so macOS stays untested.
+- The fat Mach-O is written by Krate and read back with debug/macho (TestPackageUniversalMacApp). Running both slices (native, and x86_64 under Rosetta) and lipo -info are checked by the universal app packaging step of the full CI runs on macos-latest only.
 - A Node host needs a node binary per architecture (KRATE_NODE_DARWIN_ARM64 / KRATE_NODE_DARWIN_AMD64); Bun and Deno cross-compile by themselves. The prebuilt-shell layout holds one platform, so a universal app needs the compiled-executable layout.
 
-Evidence: `TestWriteFatLayout`, `TestWriteFatRejects`, `TestMergeUniversalMergesMachOAndChecksTheRest`, `TestMergeUniversalDiagnostics`, `TestPackageUniversalMacApp`, `TestUniversalUpdateFeedTarget`, `TestNativeUniversalMacApp`, `TestNativeBuildUniversalCLI`, `TestResolveDistTargets`, `TestDetect`
+Evidence: `TestPackageUniversalMacApp`, `TestDetect`
 
 ### Native: Flatpak
 
@@ -1107,7 +1190,7 @@ Known limits:
 - The manifest, metainfo and portal calls are tested without Flatpak (command lines, files, a fake D-Bus). Building the bundle and running the app inside a real sandbox needs flatpak-builder and the GNOME runtime and has not been done; the first CI run of that step is pending. appstreamcli validation of the generated metainfo has not run on any machine yet.
 - Flathub prefers apps built from source; a prebuilt-binary submission is reviewed case by case, and screenshots must be added to the metainfo by hand.
 
-Evidence: `TestFlatpakFinishArgsFollowPermissions`, `TestFlatpakManifestShape`, `TestAppStreamMetainfo`, `TestPackageFlatpakWithoutTools`, `TestPackageFlatpakBuildsBundle`, `TestPackageFlatpakFailures`, `TestNativePackageFlatpakSnapCLI`, `TestOpenURICallsThePortal`, `TestPortalBackendSendsAndRoutesActions`, `TestItemBusName`, `TestDirsFollowSandboxXDG`, `TestUpdaterRefusesInsideAStore`
+Evidence: `TestFlatpakFinishArgsFollowPermissions`
 
 ### Native: Snap
 
@@ -1119,7 +1202,7 @@ Known limits:
 
 - The snapcraft.yaml is checked as text; building it with snapcraft and running the snap under strict confinement has not been done. The exact plugs a WebKitGTK app needs under strict confinement (for example for the tray) are unconfirmed.
 
-Evidence: `TestSnapcraftYAML`, `TestSnapName`, `TestPackageSnap`, `TestNativePackageFlatpakSnapCLI`, `TestDetect`
+Evidence: `TestDetect`
 
 ### Native: Mac App Store
 
@@ -1132,7 +1215,7 @@ Known limits:
 - The entitlements, Info.plist, tool command lines and failure cases are unit tested on any OS. TestNativeMASSandboxGUI signs the example ad hoc with the sandbox entitlement and runs its GUI flows inside the container on macOS; it passes in CI on macos-latest. Uploading to App Store Connect, a real distribution identity and App Store validation have not been tried.
 - Access to a file the user picked lasts for that run; security-scoped bookmarks are not used.
 
-Evidence: `TestMASEntitlementsFollowPermissions`, `TestEntitlementsPlistIsWellFormed`, `TestStripUpdaterJSON`, `TestPackageMASAdHocSignsWithSandbox`, `TestPackageMASRealIdentity`, `TestPackageMASRejects`, `TestPackageMASOffMacKeepsApp`, `TestNativeMASSandboxGUI`, `TestShortSocketDir`
+Evidence: `TestMASEntitlementsFollowPermissions`, `TestNativeMASSandboxGUI`
 
 ### Native: Microsoft Store
 
@@ -1144,7 +1227,7 @@ Known limits:
 
 - The bundle manifest offsets are consistent with the zip layout (tested), but neither makeappx nor the Windows App Certification Kit nor Partner Center has opened a package; the Windows column stays untested until a runner does (makeappx unbundle, Add-AppxPackage of a signed copy).
 
-Evidence: `TestStoreManifestUsesPartnerCenterIdentity`, `TestPackageStoreMSIX`, `TestStoreMetaValidation`, `TestCheckStoreMSIXFindsProblems`, `TestPackageStoreBundle`
+Evidence: `TestPackageStoreMSIX`
 
 ### Native: updater
 
@@ -1157,7 +1240,7 @@ Known limits:
 - The macOS bundle and Windows apply, delta and rollback steps are file-system logic tested on Linux (the delta and rollback tests run the macOS bundle and Windows wrapper layouts with GOOS overridden); replacing a running Windows executable has not been tried on Windows. scripts/native-smoke.mjs runs, for each OS, a real update 1.0.0 to 1.1.0 of an installed packaged app (TestSmokeUpdateInstalledApp, which must now be a delta), a confirmed healthy start, and a 1.1.0 build whose host exits early being rolled back on its second launch (TestSmokeRollbackState). The full update passed in the CI native job on Linux, macOS and Windows before deltas and rollback were added; the delta and rollback flows have run on Linux only so far.
 - First-start protection does not see a crash before the shell's start-up check runs (a loader error, a panic in a package init), and the first update from a version built without it is not protected. An installer-based install (NSIS, MSIX, deb, rpm) does not take delta updates or rollbacks: the updater replaces an install directory, a bundle or an AppImage.
 
-Evidence: `TestSignatureGoodBadWrongKey`, `TestCheck`, `TestDownloadVerifiesAndProgress`, `TestDownloadResumes`, `TestApplyLinuxReplacesExecutableAndAppDir`, `TestApplyRollsBackOnFailure`, `TestApplyAppImage`, `TestApplyMacBundle`, `TestApplyWindowsOrder`, `TestSmokeUpdateInstalledApp`, `TestDeltaUpdateEveryKind`, `TestDeltaFallsBackToFull`, `TestPatchRejectsHostilePaths`, `TestPatchSignatureBindsMeta`, `TestBsdiffRoundTrip`, `TestBucketIsStableAndSpread`, `TestRolloutIsMonotonic`, `TestCheckGatesOnRollout`, `TestDecideBoot`, `TestRollbackAfterFailedFirstStart`, `TestWatchdogTimeoutMakesNextLaunchRollBack`, `TestBootRollsBackAfterUnconfirmedStart`, `TestPackageWritesPatchesAndClientAppliesThem`, `TestSmokeRollbackState`
+Evidence: `TestSignatureGoodBadWrongKey`, `TestCheck`, `TestDownloadVerifiesAndProgress`, `TestApplyLinuxReplacesExecutableAndAppDir`, `TestApplyRollsBackOnFailure`, `TestApplyMacBundle`, `TestSmokeUpdateInstalledApp`, `TestDeltaUpdateEveryKind`, `TestPatchRejectsHostilePaths`, `TestPatchSignatureBindsMeta`, `TestBsdiffRoundTrip`, `TestCheckGatesOnRollout`, `TestRollbackAfterFailedFirstStart`, `TestWatchdogTimeoutMakesNextLaunchRollBack`, `TestBootRollsBackAfterUnconfirmedStart`, `TestSmokeRollbackState`
 
 ### Native: app icon badge and progress
 
@@ -1169,9 +1252,9 @@ Known limits:
 
 - Linux launchers show numbers only (other text is refused as unsupported) and no indeterminate state; the signal was verified with a listener on a private D-Bus session, not in a real dock.
 - macOS draws error and paused as normal progress.
-- macOS and Windows: the same Go code is built for them and the CI GUI tests TestGUIBadgeAndProgress set and read back what the OS allows; untested until CI has run them.
+- macOS and Windows: the same Go code is built for them; TestNativeE2ESystemGUI calls the badge API there and accepts a working call or an unsupported answer, so what the OS shows is not checked.
 
-Evidence: `TestBadgeLauncherEntryOverDBus`, `TestBadgeWithoutSessionBus`, `TestProgressValidate`, `TestBadgeImage`, `TestBGRAPremultiplied`, `TestTaskbarFlags`, `TestGUIBadgeAndProgress`
+Evidence: `TestNativeE2ESystemGUI`
 
 ### Native: displays
 
@@ -1182,9 +1265,9 @@ krate/screen.* lists displays (bounds, work area, scale, primary, refresh rate),
 Known limits:
 
 - Linux was run against Xvfb, which has one monitor; multi-monitor layouts are covered by the pure geometry tests, not a real second monitor.
-- Display change events are wired to GDK monitors-changed, NSApplicationDidChangeScreenParametersNotification and WM_DISPLAYCHANGE; only the Windows message path is driven by a test (TestGUIDisplays).
+- Display change events are wired to GDK monitors-changed, NSApplicationDidChangeScreenParametersNotification and WM_DISPLAYCHANGE; no test drives a display change.
 
-Evidence: `TestGUIDisplays`, `TestScreenOps`, `TestScreenPermissionAndUnsupported`, `TestDisplayForRect`, `TestCenterIn`, `TestTopLeftY`, `TestDisplayHelpers`
+Evidence: `TestNativeE2EProcsGUI`
 
 ### Native: power, idle and sleep blockers
 
@@ -1199,7 +1282,7 @@ Known limits:
 - Battery and idle events come from sampling every three seconds while an event stream is open.
 - macOS: untested (only the event tracker is tested there). Windows runs the GUI power test in CI. A real suspend was never tried on any OS.
 
-Evidence: `TestSampleFromServices`, `TestIdleFallsBackToLogind`, `TestBatteryFromSysfsWhenNoUPower`, `TestEventsFromLogindAndPolling`, `TestPreventSleepGnome`, `TestPreventSleepKDE`, `TestPreventSleepWithoutAnyService`, `TestTrackerBatteryEvents`, `TestTrackerIdleEvents`, `TestPowerThroughTheHost`, `TestGUIPowerMessages`
+Evidence: `TestNativeE2ESystemGUI`
 
 ### Native: launch at login
 
@@ -1213,7 +1296,7 @@ Known limits:
 - macOS: SMAppService needs a signed bundle and was never run; the LaunchAgent fallback writes the plist but does not call launchctl, so it takes effect at the next login.
 - macOS and Windows run the temp-HOME and temp-registry-key round trips in CI.
 
-Evidence: `TestAutostartRoundTrip`, `TestAutostartNeedsAppID`, `TestAutostartEntry`, `TestLoginThroughTheHost`, `TestLaunchAgentRoundTrip`, `TestRunKeyRoundTrip`, `TestGUILoginItemAnswersCleanly`
+Evidence: `TestNativeE2ESystemGUI`
 
 ### Native: system theme
 
@@ -1226,7 +1309,7 @@ Known limits:
 - Linux was tested against a fake portal and by reading back the GTK setting; whether a given desktop redraws its title bars is up to the window manager (client-side GTK decorations follow it).
 - macOS observes AppleInterfaceThemeChangedNotification, not KVO on effectiveAppearance.
 
-Evidence: `TestThemeFollowsThePortal`, `TestThemeFallsBackToGTKSettings`, `TestGUIWindowTheme`, `TestGUIThemeFollowsOverride`, `TestGUIThemeFollowsSettings`
+Evidence: `TestNativeE2ESystemGUI`
 
 ### Native: crash reports
 
@@ -1240,7 +1323,7 @@ Known limits:
 - Nothing is uploaded; the app reads the reports and sends them where it likes.
 - WKWebView does not say why its process ended, so macOS reports the reason as crashed.
 
-Evidence: `TestRealCrashBecomesAReport`, `TestCollectSkipsLiveProcessesAndEmptyLogs`, `TestWriteListReadDelete`, `TestIDsCannotEscapeTheDirectory`, `TestLimiter`, `TestWebviewCrashEventsReportsAndAutoReload`, `TestGUIWebviewCrash`, `TestNativeE2ESystemGUI`
+Evidence: `TestRealCrashBecomesAReport`, `TestIDsCannotEscapeTheDirectory`, `TestNativeE2ESystemGUI`
 
 ### Native: size, start-up and memory budgets
 
@@ -1254,7 +1337,7 @@ Known limits:
 - CI multiplies every cold-start limit by 3 (KRATE_BUDGET_SCALE): hosted runners vary a lot in start-up time. Memory limits are not scaled; only appMinusFloor entries fail the job.
 - darwin-amd64 (Intel Macs) has no hosted runner in the CI matrix and no entries, so it only reports.
 
-Evidence: `TestNativeBudgetSizes`, `TestNativeBudgetGUI`, `TestBudgetVerdictPerPlatform`, `TestEvalMemoryEnforcesRecordedEntries`, `TestBudgetRecordTextIsPasteable`
+Evidence: `TestNativeBudgetSizes`, `TestNativeBudgetGUI`
 
 ### Native: custom title bars, drag regions and transparency
 
@@ -1269,7 +1352,7 @@ Known limits:
 - Windows draws the caption buttons of a hidden title bar itself, over the extended frame, so the page must leave that corner clear; the WebView2 non-client region support needs a recent runtime and falls back to the page script without it.
 - CSS regions are read from style sheets as text: nesting and @import are not followed, and the nearest marked ancestor wins rather than CSS specificity.
 
-Evidence: `TestHandlerOps`, `TestHandlerNeedsAWindowWithChrome`, `TestInfo`, `TestWanted`, `TestScriptParsesAppRegionRules`, `TestHitTest`, `TestParseColor`, `TestChromeOptionsValidate`, `TestGUIChromeTitleBarStyles`, `TestGUIChromeRegionsFromScript`, `TestGUIChromeDragMovesTheWindow`, `TestGUIChromeDoublePressTogglesMaximize`, `TestGUIChromeEdgeResize`, `TestGUIChromeTransparent`, `TestNativeE2EChromeGUI`, `TestGUIChromeHiddenTitleBarHitTest`, `TestGUIChromeNoTitleBarHasNoButtons`, `TestGUIChromeClientAreaFillsTheWindow`, `TestGUIChromeNonClientRegionSupport`, `TestGUIChromeHiddenTitleBar`, `TestGUIChromeNoTitleBarHidesTheButtons`, `TestManifestChrome`, `TestNativeWindowChrome`, `TestChromeWindowOpenOptions`, `fixture:examples/native-chrome/src/pages/index.tsx`
+Evidence: `TestNativeE2EChromeGUI`, `fixture:examples/native-chrome/src/pages/index.tsx`
 
 ### Native: Mica, Acrylic, vibrancy, caption overlay and traffic lights
 
@@ -1283,7 +1366,7 @@ Known limits:
 - Backdrops need Windows 11 22H2 (build 22621); earlier builds reject them. A backdrop shows only where the page is transparent.
 - Vibrancy attaches the effect view to the window's frame view, below the content view, which AppKit allows but does not document.
 
-Evidence: `TestBackdropAndVibrancyTables`, `TestOverlayNormalize`, `TestBackdropAndCaptionColorBuilds`, `TestColorPacking`, `TestFrameMargins`, `TestNCHitInput`, `TestChromeVtables`, `TestGUIChromeBackdrop`, `TestGUIChromeTransparentWebView`, `TestGUIChromeOverlayNeedsHiddenTitleBar`, `TestGUIChromeVibrancy`, `TestGUIChromeVibrancyAtCreation`, `TestGUIChromeHiddenTitleBar`, `TestGUIChromeUnsupportedOnLinux`, `TestChromeUnsupportedWithoutPlatformSupport`
+Evidence: `TestNativeE2EChromeGUI`
 
 ### Native: tabs, sheets, document state, share menu, dock, thumbnail buttons and jump lists
 
@@ -1297,7 +1380,7 @@ Known limits:
 - Thumbnail buttons need Explorer to create the taskbar button; without a shell session they stay pending. The jump list is committed through ICustomDestinationList and checked by its return codes, not by reading the shell's list back.
 - A new-tab event is delivered through the window delegate's newWindowForTab: action, the way AppKit sends it from the tab bar's plus button.
 
-Evidence: `TestInfoPlistAgent`, `TestMetadataAgentFromConfig`, `TestValidateThumbButtons`, `TestValidateJumpTasks`, `TestQuoteArgs`, `TestQuoteArgsRoundTrip`, `TestShareItemsValidate`, `TestThumbButtonLayout`, `TestMakeThumb`, `TestThumbIDs`, `TestSplitCommand`, `TestChromeSheetsTabsThumbs`, `TestChromeAppLevel`, `TestChromeEvents`, `TestChromeRejectsBadArguments`, `TestChromePermissions`, `TestGUIChromeDocumentState`, `TestGUIChromeTabbing`, `TestGUIChromeSheet`, `TestGUIChromeActivationPolicy`, `TestGUIChromeShareValidates`, `TestGUIChromeThumbButtons`, `TestGUIChromeJumpList`
+Evidence: `TestQuoteArgsRoundTrip`, `TestNativeE2EChromeGUI`
 
 ### Native: worker processes
 
@@ -1311,7 +1394,7 @@ Known limits:
 - A release build ships worker scripts under host/workers next to the executable and needs Node, Bun or Deno on the user's machine for a TypeScript worker; a Go worker is compiled for the build machine's platform only.
 - Permissions narrow the SDK ids a worker can call; a worker is still an ordinary process with the user's file and network access.
 
-Evidence: `TestStartUnknownWorker`, `TestCrashRestartsOnFailure`, `TestNeverPolicyStaysStopped`, `TestGivesUpAfterMax`, `TestFailedRestartStartsAreRetried`, `TestMessagesBothWays`, `TestDecide`, `TestSpecValidate`, `TestWorkersNode`, `TestWorkerGo`, `TestParseManifestWorkers`, `TestNativeE2EProcsGUI`, `fixture:examples/native-procs/src/workers/echo.ts`
+Evidence: `TestCrashRestartsOnFailure`, `TestNativeE2EProcsGUI`, `fixture:examples/native-procs/src/workers/echo.ts`
 
 ### Native: message ports between views, windows and workers
 
@@ -1324,7 +1407,7 @@ Known limits:
 - The engines give two top-level webviews no way to share a real MessagePort, so a port is a shell-backed object, not a transferable MessagePort; inside one page the browser's MessageChannel is untouched.
 - The pure broker is tested on every OS; the page-to-page and page-to-worker round trips run in CI on Linux, macOS and Windows.
 
-Evidence: `TestPostIsDeliveredInOrderToTheOtherEnd`, `TestOnlyTheHolderMayUseAnEnd`, `TestTransferNeedsAReceiver`, `TestQueuedMessagesFollowTheEnd`, `TestTransferEndsTheOldListener`, `TestCloseDrainsThenReportsClosed`, `TestBackpressureAndLimits`, `TestDropOwnerClosesItsChannels`, `TestWorkersNode`, `TestNativeE2EProcsGUI`, `fixture:examples/native-procs/src/pages/peer.tsx`
+Evidence: `TestPostIsDeliveredInOrderToTheOtherEnd`, `TestOnlyTheHolderMayUseAnEnd`, `TestNativeE2EProcsGUI`, `fixture:examples/native-procs/src/pages/peer.tsx`
 
 ### Native: offscreen rendering
 
@@ -1338,7 +1421,7 @@ Known limits:
 - Windows and macOS run the capture and parked-window code in the CI native job.
 - An open offscreen window counts as a window: close it, or the app does not quit when the last visible window closes.
 
-Evidence: `TestGUIOffscreenSnapshot`, `TestGUISnapshotOfAMappedWindowAndErrors`, `TestEncodePNGKeepsColorsAndUnpremultiplies`, `TestRawBGRARemovesRowPadding`, `TestPacing`, `TestStreamPacesAndCountsDroppedFrames`, `TestStreamStopsWithTheContextAndReportsCaptureErrors`, `TestSnapshotFromPNG`, `TestNativeE2EProcsGUI`
+Evidence: `TestNativeE2EProcsGUI`
 
 ### Native: remote debugging and automation
 
@@ -1351,7 +1434,7 @@ Known limits:
 - Playwright and Puppeteer attach only to WebView2; they cannot drive WebKitGTK or WKWebView. Microsoft documents --remote-debugging-port with Edge WebDriver's DebuggerAddress for WebView2; attaching Playwright through connectOverCDP to the same port is standard Chromium CDP but was not run here.
 - The WebView2 CDP command and event code is checked against WebView2.h and compiled; it runs only in the CI native job.
 
-Evidence: `TestGUIOffscreenSnapshot`, `TestNativeE2EProcsGUI`, `TestProcsVtableSlots`
+Evidence: `TestNativeE2EProcsGUI`
 
 ### Native: browser extensions
 
@@ -1364,7 +1447,7 @@ Known limits:
 - Linux is unsupported by the engine.
 - WebView2 and macOS are written and compiled and never run by the author. On macOS the API's match patterns cover http, https and file pages, so a content script is not expected to run on the app's own krate:// pages.
 
-Evidence: `TestProcsVtableSlots`, `TestNativeE2EProcsGUI`
+Evidence: `TestNativeE2EProcsGUI`
 
 ### Native: accessibility of the shell's own UI
 
@@ -1381,7 +1464,80 @@ Known limits:
 - macOS: an alert is dismissed with Esc only through a button titled Cancel; the split divider is reachable by VoiceOver but not by a plain keyboard.
 - No screen reader (Orca, VoiceOver, Narrator, NVDA, JAWS) was used on any platform; web content inside the webview is exposed by the engine and not tested here.
 
-Evidence: `TestWindowIsNamedByItsTitle`, `TestWebviewReachableInEveryWindowConfiguration`, `TestOffscreenWindowIsNotExposed`, `TestAppMenuTree`, `TestAppMenuKeyboardAccess`, `TestContextMenuTreeAndEscape`, `TestMessageDialogTree`, `TestMessageDialogEscapeAndTabOrder`, `TestFileDialogIsNamedAndClosesWithEscape`, `TestSplitPanesAreReachableAndNamed`, `TestSplitDividerResizesFromTheKeyboard`, `TestFocusTraversalVisitsEveryView`, `TestRemoteViewIsReachable`, `TestItemPropsAlwaysNameTheIcon`, `TestMenuItemsCarryLabelsStatesAndShortcuts`, `TestTrayLabel`, `TestThumbButtonName`, `TestActionLabel`, `TestDragRegionLeavesControlsAlone`, `TestMessageBoxTextNamesTheMapping`, `TestGUIAccessibilityWindowIsNamedInEveryChrome`, `TestGUIAccessibilityOffscreenWindowIsHidden`, `TestGUIAccessibilityMenuBar`, `TestGUIAccessibilityTrayButtonIsNamed`, `TestGUIAccessibilitySplitViewRole`, `TestGUIAccessibilityAXWindows`, `TestGUIUIAWindowAndWebviewInEveryChrome`, `TestGUIUIAMenuBarIsNamedAndReachable`, `TestGUIUIAMessageBoxIsNamedAndShowsTheMapping`, `TestGUIUIAPopupMenuItemsAndEscape`
+Evidence: `TestWindowIsNamedByItsTitle`, `TestGUIAccessibilityWindowIsNamedInEveryChrome`, `TestGUIUIAWindowAndWebviewInEveryChrome`
+
+### sonner (toasts)
+
+**Source:** n/a - **Islands:** Supported - **SSR:** Supported
+
+A <Toaster /> in a static or an async layout and toast() called from a client component of an async or sync page show the toast, with one copy of sonner's store for the layout and the page, also after a client-side navigation (sonner 2.0.8). Checked in Chromium by TestBrowserEcosystemLibraries against the real package (the test needs KRATE_ECOSYSTEM_LIBS or KRATE_ECOSYSTEM_INSTALL=1 and is skipped otherwise).
+
+Known limits:
+
+- A layout that hosts an island is swapped on client-side navigation instead of being kept mounted, so toasts still on screen disappear when the page changes.
+- A static layout hosts the Toasters of sonner and react-hot-toast as islands (a fixed list); another library's component in a static layout is compiled by Krate and does not share state with islands. Async layouts have no such limit: their client boundaries are built in the island graph.
+- A plain function of a React package called from a module that is not an island (no "use client", not in an event handler) is bundled into the page script with its own copy of the package's state.
+
+Evidence: `TestBrowserEcosystemLibraries`, `TestLayoutToasterSharesStoreWithPageIslands`, `TestAsyncLayoutToasterSharesStore`, `fixture:packages/compiler/internal/build/testdata/ecosystem_libs`
+
+### cmdk (command menu)
+
+**Source:** n/a - **Islands:** Supported - **SSR:** Supported
+
+Command, Command.Input, Command.List, Command.Item and Command.Empty render, filter as you type and show the empty state (cmdk 1.1.1). Checked in Chromium by TestBrowserEcosystemLibraries against the real package (the test needs KRATE_ECOSYSTEM_LIBS or KRATE_ECOSYSTEM_INSTALL=1 and is skipped otherwise).
+
+Evidence: `TestBrowserEcosystemLibraries`, `fixture:packages/compiler/internal/build/testdata/ecosystem_libs`
+
+### embla-carousel-react
+
+**Source:** n/a - **Islands:** Supported - **SSR:** Supported
+
+useEmblaCarousel initializes on mount, reports its snap list and scrolls on api.scrollNext() (embla-carousel-react 8.6.0). Checked in Chromium by TestBrowserEcosystemLibraries against the real package (the test needs KRATE_ECOSYSTEM_LIBS or KRATE_ECOSYSTEM_INSTALL=1 and is skipped otherwise).
+
+Evidence: `TestBrowserEcosystemLibraries`, `fixture:packages/compiler/internal/build/testdata/ecosystem_libs`
+
+### @dnd-kit/core and @dnd-kit/sortable
+
+**Source:** n/a - **Islands:** Supported - **SSR:** Supported
+
+DndContext, SortableContext and useSortable with the pointer sensor reorder a list through a real drag (@dnd-kit/core 6.3.1, @dnd-kit/sortable 10.0.0, @dnd-kit/utilities 3.2.2). Checked in Chromium by TestBrowserEcosystemLibraries against the real package (the test needs KRATE_ECOSYSTEM_LIBS or KRATE_ECOSYSTEM_INSTALL=1 and is skipped otherwise).
+
+Evidence: `TestBrowserEcosystemLibraries`, `fixture:packages/compiler/internal/build/testdata/ecosystem_libs`
+
+### @tanstack/react-table (v8)
+
+**Source:** n/a - **Islands:** Supported - **SSR:** Supported
+
+useReactTable with the core and sorted row models, column helpers and flexRender render the table on the server and re-sort on a header click (8.21.3). The v9 API (react-table 9) was not checked. Checked in Chromium by TestBrowserEcosystemLibraries against the real package (the test needs KRATE_ECOSYSTEM_LIBS or KRATE_ECOSYSTEM_INSTALL=1 and is skipped otherwise).
+
+Evidence: `TestBrowserEcosystemLibraries`, `fixture:packages/compiler/internal/build/testdata/ecosystem_libs`
+
+### next-themes
+
+**Source:** n/a - **Islands:** Supported - **SSR:** Supported
+
+A ThemeProvider in a layout is lifted into the islands of its pages and useTheme in a client component switches the class on <html> and updates the theme state (next-themes 0.4.6). The provider's anti-flash script is part of each island's server markup. Checked in Chromium by TestBrowserEcosystemLibraries against the real package (the test needs KRATE_ECOSYSTEM_LIBS or KRATE_ECOSYSTEM_INSTALL=1 and is skipped otherwise).
+
+Known limits:
+
+- Each island renders its own ThemeProvider (the lifted chain wraps every island) and next-themes keeps its state in the provider, so the theme state is per island: setTheme in one island changes the class on <html> and the stored value but does not re-render useTheme in other islands (checked in Chromium with two islands).
+- The server markup renders the theme as undefined until the island hydrates, as it does with React.
+
+Diagnostics: `KR8016`
+
+Evidence: `TestBrowserEcosystemLibraries`, `TestLayoutProviderWithScriptIsLifted`, `fixture:packages/compiler/internal/build/testdata/ecosystem_libs`
+
+### motion v12+ (motion/react)
+
+**Source:** n/a - **Islands:** Supported - **SSR:** Supported
+
+motion.div with initial/animate/transition, and AnimatePresence with an exit animation, run and unmount their element (motion 14.14.0, imported from motion/react). The older framer-motion package and the vanilla Motion engine config key are separate rows. Checked in Chromium by TestBrowserEcosystemLibraries against the real package (the test needs KRATE_ECOSYSTEM_LIBS or KRATE_ECOSYSTEM_INSTALL=1 and is skipped otherwise).
+
+Known limits:
+
+- Building a page that imports motion/react logs the warning KR7116 (two motion-dom modules export scrapeMotionValuesFromProps); it does not affect the result.
+
+Evidence: `TestBrowserEcosystemLibraries`, `fixture:packages/compiler/internal/build/testdata/ecosystem_libs`
 
 ## How claims are verified
 

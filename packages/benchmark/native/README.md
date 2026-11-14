@@ -7,7 +7,6 @@ over the whole process tree, installer sizes and on-disk size.
 
 ```sh
 node packages/benchmark/native/bench.mjs --runs 5 --idle 5   # Linux: under xvfb-run -a
-node --test packages/benchmark/native/bench.test.mjs         # harness unit tests
 ```
 
 Results go to `results/native-bench-<os>-<arch>.{json,md}` (not committed).

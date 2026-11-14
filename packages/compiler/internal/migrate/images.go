@@ -68,6 +68,7 @@ func imagesConfig(e ast.Expr) (map[string]any, []string) {
 				}
 				host, _ := stringValue(prop(p, "hostname"))
 				if host == "" {
+					warnings = append(warnings, "next.config images.remotePatterns has an entry whose hostname is computed (for example from an environment variable) and was not translated")
 					continue
 				}
 				entry := map[string]string{"hostname": host}
@@ -85,6 +86,8 @@ func imagesConfig(e ast.Expr) (map[string]any, []string) {
 			for _, host := range vals {
 				patterns = append(patterns, map[string]string{"hostname": host})
 			}
+		} else {
+			warnings = append(warnings, "next.config images.domains is not a static string array and was not translated")
 		}
 	}
 	if len(patterns) > 0 {

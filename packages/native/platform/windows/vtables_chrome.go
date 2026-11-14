@@ -1,3 +1,5 @@
+//go:build windows
+
 package windows
 
 // Vtable layouts for the window chrome code. The WebView2 entries are

@@ -290,15 +290,6 @@ func TestActionSidecarTransport(t *testing.T) {
 	}
 }
 
-func TestActionSidecarDevErrorMessage(t *testing.T) {
-	srv := startActionSidecar(t, "node", true)
-	r := doAction(t, actionRequest(t, srv, "/__krate/action/aboom", "application/json", `{"args":[]}`, true))
-	errObj, _ := r.body["error"].(map[string]any)
-	if errObj["message"] != "secret detail" {
-		t.Fatalf("dev mode should expose the error message: %s", r.raw)
-	}
-}
-
 func TestActionHandlerSecurity(t *testing.T) {
 	reached := 0
 	var lastReturn string

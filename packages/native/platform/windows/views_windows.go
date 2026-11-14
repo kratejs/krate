@@ -10,8 +10,8 @@ import (
 	"github.com/kratejs/krate/packages/native/platform/caps"
 )
 
-// Several WebView2 controllers in one top-level window. TestGUIViews and the
-// compiler's TestNativeE2EViewsGUI run it in CI on windows-latest.
+// Several WebView2 controllers in one top-level window. The compiler's
+// TestNativeE2EViewsGUI runs it in CI on windows-latest.
 //
 // Every controller is created from the app's one ICoreWebView2Environment,
 // parented to the window's HWND, and given a rectangle by put_Bounds. The

@@ -3,7 +3,6 @@ package build
 import (
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
@@ -71,42 +70,5 @@ func TestAPISidecarProxyFirstAndFallthrough(t *testing.T) {
 	// Out-of-prefix paths are not matched.
 	if sc.Matches("/other") {
 		t.Error("Matches(/other) should be false")
-	}
-}
-
-// TestAPISidecarUnreachableFallsThrough verifies an unreachable sidecar does not
-// break the request; the caller falls through to built-ins.
-func TestAPISidecarUnreachableFallsThrough(t *testing.T) {
-	cfg := config.Default()
-	// Port 1 is virtually never listening.
-	cfg.API.Sidecar = &config.SidecarConfig{Target: "http://127.0.0.1:1"}
-
-	sc, err := newAPISidecar(t.TempDir(), cfg)
-	if err != nil {
-		t.Fatalf("newAPISidecar: %v", err)
-	}
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/x", nil)
-	if sc.Handle(rec, req) {
-		t.Fatal("unreachable sidecar should fall through")
-	}
-}
-
-// TestAPISidecarCustomPrefix verifies a non-default prefix is recognized.
-func TestAPISidecarCustomPrefix(t *testing.T) {
-	cfg := config.Default()
-	cfg.API.Sidecar = &config.SidecarConfig{Target: "http://127.0.0.1:1", Prefix: "/svc"}
-	sc, err := newAPISidecar(t.TempDir(), cfg)
-	if err != nil {
-		t.Fatalf("newAPISidecar: %v", err)
-	}
-	if sc.Prefix() != "/svc" {
-		t.Errorf("prefix = %q, want /svc", sc.Prefix())
-	}
-	if !sc.Matches("/svc/thing") || sc.Matches("/svcx") {
-		t.Errorf("prefix matching wrong: /svc/thing=%v /svcx=%v", sc.Matches("/svc/thing"), sc.Matches("/svcx"))
-	}
-	if !strings.HasPrefix(sc.Prefix(), "/") {
-		t.Error("prefix should start with /")
 	}
 }

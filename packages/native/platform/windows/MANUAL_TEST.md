@@ -24,9 +24,8 @@ set KRATE_NATIVE_GUI=1
 go test ./platform/windows -run GUI -count=1 -v
 ```
 
-Expected: three windows appear and close by themselves; all of
-TestGUIRoundTrip, TestGUIDispatchFromManyGoroutines and TestGUITwoWindows
-pass in well under 30 seconds. They assert, from inside the page:
+Expected: windows appear and close by themselves; all of TestGUIRoundTrip
+and TestGUIDispatchFromManyGoroutines pass in well under 30 seconds. They assert, from inside the page:
 
 - `location.origin` is `https://app.localhost` and `crypto.subtle` works
   (secure context),
@@ -39,33 +38,18 @@ pass in well under 30 seconds. They assert, from inside the page:
   page sees it; every other response is delivered whole (`msgstream.go`),
 - navigating the top-level page to `https://example.com/` is cancelled,
 - `/report` receives the results; 1000 goroutines calling Dispatch all run on
-  the main thread; two windows work side by side.
+  the main thread.
 
 Without `KRATE_NATIVE_GUI=1` the GUI tests are skipped.
 
-The same command also runs the tray, hotkey and toast tests
-(`TestGUITrayLifecycle`, `TestGUIHotkeys`, `TestGUIToast`):
+The same command also runs the tray test (`TestGUITrayLifecycle`): add, modify
+(tooltip, image, a tooltip over the 127 character limit, the stock icon), a
+rejected invalid PNG, click and double-click events (sent as the messages the
+shell would post), the `TaskbarCreated` re-add, delete, delete again, add again.
+It is skipped when there is no `Shell_TrayWnd`.
 
-- Tray: add, modify (tooltip, image, a tooltip over the 127 character limit,
-  the stock icon), a rejected invalid PNG, click and double-click events (sent
-  as the messages the shell would post), the `TaskbarCreated` re-add, delete,
-  delete again, add again. Skipped when there is no `Shell_TrayWnd`.
-- Hotkeys: register, duplicate combination (the error must say "already
-  registered by another app"), duplicate handle, unknown key, `WM_HOTKEY`
-  reaching the handler, unregister, register again, and a stale id being
-  ignored. It also injects the real key presses and logs whether they fired;
-  a locked or non-interactive desktop drops injected input, so that part never
-  fails the test.
-- Toast: `Notify` succeeds (skipped if notifications are turned off), the
-  AppUserModelID is registered with the app name, the toast is tracked, no
-  Failed event arrives, replacing by id, `CloseNotification`.
-
-Without a display, `go test ./platform/windows -count=1 -v` still runs
-`TestToastXMLAcceptedByWinRT` (the real WinRT XML parser accepts every toast
-the builder writes, including hostile text), `TestToastDelegateInterfaces`
-(the delegate objects answer `IAgileObject` and the right
-`TypedEventHandler` id and call back), `TestHStringRoundTrip` and
-`TestAUMIDRegistration`.
+Hotkeys and toasts have no automated test; section 2 lists the checks by hand.
+A toast the WinRT XML parser rejects shows up as an HRESULT from `Notify`.
 
 ## 2. Things the test does not cover
 
@@ -90,8 +74,9 @@ Check by hand with a small program (`platform.New`, `NewWindow`, `Run`):
 
 ## 2b. Views (split panes)
 
-`TestGUIViews` covers identity, layout and removal. By hand, from a program that
-calls `AddView`:
+The compiler's `TestNativeE2EViewsGUI` runs `examples/native-views` (request
+identity and messaging between views). By hand, from a program that calls
+`AddView`:
 
 - Two views side by side leave a 6 px gap; the pointer turns into the
   left-right (or up-down) arrows over it and dragging moves the divider. A pane
@@ -138,10 +123,8 @@ calls `AddView`:
 
 ## 2c. Files: open and drop
 
-`TestDroppedFilesReadsPathsFromAdditionalObjects` walks fake COM objects with
-the WebView2.h layouts, and `TestGUISyntheticDropReachesTheHost` proves the
-page script's `postMessageWithAdditionalObjects` reaches the host. A File made
-by script has no path, so a real path needs a person:
+No automated test drops files on Windows (a File made by script has no path),
+so a real drop needs a person:
 
 1. Install the NSIS or MSIX package of `examples/native-files`. Double-click a
    `.krnote` file: the app opens and lists it. Double-click another while it
@@ -166,8 +149,8 @@ by script has no path, so a real path needs a person:
 - No toast and no error: Focus assist or the per-app switch in Settings,
   System, Notifications. The error text from `Notify` says "turned off" when
   Windows reports it. `Show` succeeding does not prove a banner was drawn.
-- A toast is rejected with an HRESULT: the XML failed WinRT's parser; run
-  `TestToastXMLAcceptedByWinRT` and look at `buildToastXML` in `toast.go`.
+- A toast is rejected with an HRESULT: the XML failed WinRT's parser; look at
+  `buildToastXML` in `toast.go`.
 - A streamed response (signals, hmr, async iterables) never arrives: the
   fetch wrapper (`streamShim` in `msgstream.go`) was not injected or the web
   message channel failed; look for `add_WebMessageReceived` lines on stderr.
@@ -175,9 +158,8 @@ by script has no path, so a real path needs a person:
 
 ## Checks CI cannot make
 
-CI covers the message plumbing of these (TestGUITrayTaskbarCreated,
-TestGUIToastActivationFromASecondProcess, TestGUIRuntimeMissingMessageBox);
-a person still has to look at the real thing once per release:
+No CI test covers these; a person has to look at the real thing once per
+release:
 
 1. **Toast click after quit.** Run an app that shows a toast with a button,
    quit the app, then click the toast in the Action Center (or the button on

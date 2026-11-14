@@ -4,7 +4,9 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"path"
+	"path/filepath"
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
@@ -67,7 +69,13 @@ func rewriteTargetPath(p string) string {
 // without its trailing slash with a 301 to the slash form (query preserved),
 // matching what the static file server does for SSG pages. It reports whether
 // it wrote the response.
-func redirectToCanonicalSlash(w http.ResponseWriter, r *http.Request) bool {
+//
+// Only trailingSlash "always" (the default) redirects this way; "never" and
+// "ignore" serve the slashless URL in place.
+func redirectToCanonicalSlash(mode string, w http.ResponseWriter, r *http.Request) bool {
+	if mode != "always" {
+		return false
+	}
 	p := r.URL.Path
 	if p == "" || strings.HasSuffix(p, "/") || isFileLikePath(p) {
 		return false
@@ -85,6 +93,63 @@ func redirectToCanonicalSlash(w http.ResponseWriter, r *http.Request) bool {
 	w.Header().Set("Location", target)
 	w.WriteHeader(http.StatusMovedPermanently)
 	return true
+}
+
+// redirectToSlashless is the trailingSlash "never" counterpart: a GET/HEAD for
+// a page URL ending in a slash gets a 301 to the slashless URL (query kept).
+// It reports whether it wrote the response.
+func redirectToSlashless(mode string, w http.ResponseWriter, r *http.Request) bool {
+	if mode != "never" {
+		return false
+	}
+	p := r.URL.Path
+	if len(p) < 2 || !strings.HasSuffix(p, "/") || notFoundPageURL(p) {
+		return false
+	}
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		return false
+	}
+	trimmed := strings.TrimRight(p, "/")
+	if trimmed == "" || isFileLikePath(trimmed) || trimmed == "/api" || strings.HasPrefix(trimmed, "/api/") || strings.HasPrefix(trimmed, "/__krate") {
+		return false
+	}
+	// "../" keeps a last segment like "ftp:3232235777" from parsing as an
+	// absolute URL, and stays correct under a base path.
+	target := "../" + path.Base(trimmed)
+	if r.URL.RawQuery != "" {
+		target += "?" + r.URL.RawQuery
+	}
+	w.Header().Set("Location", target)
+	w.WriteHeader(http.StatusMovedPermanently)
+	return true
+}
+
+// serveIndexInPlace lets the file server answer a folder URL without its
+// trailing slash from the folder's index.html, instead of its own redirect to
+// the slash form. It is what trailingSlash "never" and "ignore" need.
+func serveIndexInPlace(absOut string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := r.URL.Path
+		if (r.Method == http.MethodGet || r.Method == http.MethodHead) && p != "" && !strings.HasSuffix(p, "/") && !isFileLikePath(p) {
+			index := filepath.Join(absOut, filepath.FromSlash(path.Clean("/"+p)), "index.html")
+			if fi, err := os.Stat(index); err == nil && fi.Mode().IsRegular() {
+				r2 := r.Clone(r.Context())
+				r2.URL.Path = p + "/"
+				if r2.URL.RawPath != "" {
+					r2.URL.RawPath += "/"
+				}
+				next.ServeHTTP(w, r2)
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// notFoundPageURL reports whether p is the URL of the not-found page itself.
+// Those answer 404 like any missing page, never the file with 200 or a redirect.
+func notFoundPageURL(p string) bool {
+	return p == "/404" || p == "/404/" || p == "/404.html"
 }
 
 // pageMethodAllowed enforces that page routes are read-only. OPTIONS answers

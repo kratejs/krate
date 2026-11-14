@@ -116,13 +116,16 @@ func init() {
 		},
 		CodeInfo{
 			Code:  CodeReactLibNotInIsland,
-			Title: "React library hook used where no island can run it",
+			Title: "React library component or hook used where no island can run it",
 			Explanation: "A component calls a hook of an npm React library (zustand, react-hook-form, swr, " +
-				"@tanstack/react-query, ...). Those hooks need React's render model, which Krate's lowered " +
-				"components do not have, so Krate runs the module that calls them as a Preact island. That is " +
-				"not possible for a layout or template, or for a server or runtime tier component. Move the " +
-				"component into its own module and render it from a page or client component, or replace the " +
-				"library with createSignal / createResource.",
+				"@tanstack/react-query, ...), or a static layout renders a compiled React component. " +
+				"Those need React's render model, which Krate's lowered components do not have, so Krate " +
+				"runs them on Preact: as an island in a page, and as a client boundary in a server-rendered " +
+				"page, layout or component (icons and other components without state render to plain " +
+				"HTML). A hook cannot be called from a server component: add \"use client\" to the module " +
+				"that calls it, or replace the library with createSignal / createResource. A layout that is " +
+				"baked into the static shell cannot host compiled components: make it async so it renders " +
+				"per request, or render them from a page.",
 		},
 		CodeInfo{
 			Code:  CodeCSSInJS,
@@ -150,7 +153,8 @@ func init() {
 				"context provider that can be moved into the islands: Krate renders the page content, and an island " +
 				"cannot sit inside markup that belongs to the layout. The layout keeps the component as it was and " +
 				"the islands of its pages do not see its context. Split the component into a provider that renders " +
-				"only its children and the markup, or put the provider inside the island's own module.",
+				"only its children and the markup, or put the provider inside the island's own module. A provider that adds " +
+				"only `<script>` elements next to its children (next-themes) is lifted.",
 		},
 		CodeInfo{
 			Code:  CodeClientDirective,

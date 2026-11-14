@@ -61,7 +61,7 @@ fix:
 | `KR5006` | Use `""` (or `false` for checked) instead of `undefined` so the field stays controlled. |
 | `KR6001` | Give each dynamic list row a stable `key`. |
 | `KR6002` | Make duplicate keys unique; do not rely on index fallback. |
-| `KR7001` | Move an inline `"use server"` function to a `"use server"` module. |
+| `KR7001` | Move an inline `"use server"` function out of the `"use client"` module (or make its component async if it captures values), or into a `"use server"` module. |
 | `KR8007` | Move the Krate component out of the Preact island subtree, or replace it with a React/Preact-compatible module. |
 
 `krate check` prints the same codes and hints against the built output. See the

@@ -37,6 +37,7 @@ const SrcMarkPrefix = "/*@k:"
 const SrcMarkEnd = "/*@k:end*/"
 
 type EmitResult struct {
+	strippedMeta *sync.Map
 	// TrackSources makes GenerateNewHydrationJS leave source markers.
 	TrackSources bool
 	SrcMarks     []SrcMark
@@ -202,6 +203,10 @@ type Emitter struct {
 	// goCollector accumulates build-time Go-component render requests from both
 	// the slot path and SSREval, so the whole page is rendered in one host call.
 	goCollector *goRenderCollector
+	// strippedMeta records the <Head> slots whose components lost their
+	// signatures as inert (shared with sub-emitters); walkMetaSlots drops the
+	// hydration markers of their head tags. Reactive head content keeps them.
+	strippedMeta *sync.Map
 }
 
 // goRenderCollector accumulates Go-component render requests and hands out
@@ -239,7 +244,7 @@ func (e *Emitter) Errors() []error {
 
 // NewEmitter creates a new emitter.
 func NewEmitter() *Emitter {
-	return &Emitter{goCollector: &goRenderCollector{}}
+	return &Emitter{goCollector: &goRenderCollector{}, strippedMeta: &sync.Map{}}
 }
 
 // Emit walks the ComponentTree and produces an EmitResult.
@@ -308,6 +313,7 @@ func (e *Emitter) Emit(tree *irtree.ComponentTree) *EmitResult {
 		UsedFuncs:        make(map[string]bool),
 		UsedCSS:          make(map[string]bool),
 		ListComponents:   listComponents,
+		strippedMeta:     e.strippedMeta,
 		Errors:           e.errs,
 		GoRenders:        append(output.GoRenders, e.goCollector.snapshot()...),
 		RuntimeChildren:  output.RuntimeChildren,
@@ -511,6 +517,7 @@ func (e *Emitter) emitSSREvaluated(node *irtree.ComponentNode) SlotOutput {
 	if node.SSREvalBindings != nil {
 		eval.SetBindings(node.SSREvalBindings)
 	}
+	eval.SetCallerValues(node.SSREvalCaller)
 	eval.ResolveJSXProps(node.SSREvalAttrs)
 	if e.IconResolver != nil {
 		eval.iconEmit = func(name string, attrs []*ast.JSXAttr) (string, bool) {
@@ -823,16 +830,55 @@ func goPropsJSON(props map[string]string, childrenHTML string) string {
 // emitMetaSlot - Head/Script/Style content routing
 func (e *Emitter) emitMetaSlot(s *irtree.MetaSlot) SlotOutput {
 	var out SlotOutput
+	head := strings.EqualFold(s.ComponentName, "Head") || s.ComponentName == irtree.HoistMeta
 	for _, child := range s.Children {
-		mergeSlotOutput(&out, e.emitSlotNode(child))
+		co := e.emitSlotNode(child)
+		if head && len(co.Signatures) > 0 && inertHeadOutput(co) {
+			e.strippedMeta.Store(s, true)
+			// <Head> children are routed into the document <head> by
+			// walkMetaSlots and never reach the body. A component there whose
+			// state nothing reads or changes (no handlers, effects or caller
+			// bindings) has nothing to hydrate, so it must not ship JavaScript
+			// for markup that is not in the page body. Reactive head content
+			// (a title bound to state) keeps its signatures and bindings.
+			co = SlotOutput{HeadHTML: co.HeadHTML, ScriptHTML: co.ScriptHTML, StyleHTML: co.StyleHTML}
+		}
+		mergeSlotOutput(&out, co)
 	}
-	// <Head> children are routed into the document <head> by walkMetaSlots; they
-	// must not also render into the body. <Script>/<Style> keep their body HTML
-	// (valid there, and captured separately into Script/Style fields).
-	if strings.EqualFold(s.ComponentName, "Head") || s.ComponentName == irtree.HoistMeta {
+	// <Script>/<Style> keep their body HTML (valid there, and captured
+	// separately into Script/Style fields).
+	if head {
 		out.HTML = ""
 	}
 	return out
+}
+
+// inertHeadOutput reports whether the output of a <Head> child can change
+// after the page loads: it has a handler, an effect, a ref, or a binding to a
+// caller's signal.
+func inertHeadOutput(o SlotOutput) bool {
+	if len(o.Orphans) > 0 {
+		return false
+	}
+	for _, sig := range o.Signatures {
+		if len(sig.Handlers) > 0 || len(sig.Effects) > 0 || len(sig.RefBindings) > 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// hydrationAttrRe matches the attributes the emitter adds to elements that
+// hydrate (data-k, data-kattr-*, data-kh, ...). Head tags do not hydrate.
+var hydrationAttrRe = regexp.MustCompile(`\s+data-k(?:attr-[\w-]+|c|b|h|ns)?="[^"]*"`)
+
+// headTagHTML is the markup of a <Head> child as it goes into the document
+// head: hydration markers are removed.
+func headTagHTML(s string) string {
+	if !strings.Contains(s, "data-k") {
+		return s
+	}
+	return hydrationAttrRe.ReplaceAllString(s, "")
 }
 
 // emitSlotNode - type-switch dispatch for SlotNode
@@ -925,6 +971,7 @@ func (e *Emitter) emitSlotsParallel(slots []irtree.SlotNode) SlotOutput {
 		sub.BasePath = e.BasePath
 		sub.GoComponents = e.GoComponents
 		sub.goCollector = e.goCollector
+		sub.strippedMeta = e.strippedMeta
 		// Propagate build-wide tables so SSREval in this branch folds cva
 		// variants and context defaults exactly like the sequential path.
 		sub.cvaFactories = e.cvaFactories
@@ -1012,6 +1059,11 @@ func (e *Emitter) emitExprSlot(s *irtree.ExprSlot) SlotOutput {
 	body := escape.Text(s.Initial)
 	if s.InitialHTML != "" {
 		body = s.InitialHTML
+	} else if s.PropJSX != nil {
+		if rendered, ok := e.renderPropJSX(s.PropJSX, s.PropScope); ok {
+			body = rendered
+			s.Unresolved = false
+		}
 	}
 	html := slotMarker(id) + body + slotEndMarker(id)
 	if s.Unresolved && s.Initial == "" && s.InitialHTML == "" {
@@ -1267,6 +1319,10 @@ func walkMetaSlots(node *irtree.ComponentNode, result *EmitResult) {
 			if meta, ok := child.(*irtree.MetaSlot); ok {
 				var childHTML strings.Builder
 				tmp := NewEmitter()
+				inert := false
+				if result.strippedMeta != nil {
+					_, inert = result.strippedMeta.Load(meta)
+				}
 				for _, c := range meta.Children {
 					out := tmp.emitSlotNode(c)
 					childHTML.WriteString(out.inlineHTML())
@@ -1276,11 +1332,18 @@ func walkMetaSlots(node *irtree.ComponentNode, result *EmitResult) {
 					// Hoisted React 19 metadata; identical elements (the same
 					// stylesheet or tag rendered twice) are emitted once.
 					html := childHTML.String()
+					if inert {
+						html = headTagHTML(html)
+					}
 					if !strings.Contains(result.HeadHTML, html) {
 						result.HeadHTML += html
 					}
 				case "head":
-					result.HeadHTML += childHTML.String()
+					if inert {
+						result.HeadHTML += headTagHTML(childHTML.String())
+					} else {
+						result.HeadHTML += childHTML.String()
+					}
 				case "script":
 					result.ScriptHTML += childHTML.String()
 				case "style":
@@ -1511,4 +1574,19 @@ func dropManagedElementBindings(sig *irtree.ComponentSignature, managed map[irtr
 
 func externalIslandKey(local string, offset int) string {
 	return local + "@" + strconv.Itoa(offset)
+}
+
+// renderPropJSX renders the JSX a caller passed as a prop for the server
+// markup of a hydrated component. A value that needs the caller's scope (its
+// signals or locals) cannot be rendered here; hydration fills that slot.
+func (e *Emitter) renderPropJSX(expr ast.Expr, caller map[string]jsvalue.Value) (string, bool) {
+	eval := NewSSREval(e.functions)
+	eval.SetModuleConsts(e.moduleConsts)
+	eval.SetModuleRun(e.moduleRun)
+	eval.SetCallerValues(caller)
+	html := eval.EvalCallerJSX(expr)
+	if len(eval.Errors()) > 0 {
+		return "", false
+	}
+	return html, true
 }

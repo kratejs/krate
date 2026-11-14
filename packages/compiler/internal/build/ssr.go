@@ -555,7 +555,7 @@ func (s *SSRServer) GetISRPages() []ISRPage {
 	}
 	var pages []ISRPage
 	for _, p := range s.manifest.Pages {
-		if p.Mode == "isr" {
+		if p.Mode == "isr" && !p.Segment {
 			reval := p.Revalidate
 			if reval <= 0 {
 				reval = 60
@@ -585,6 +585,9 @@ func (s *SSRServer) FindPageForRoute(urlPath string) (*ManifestPage, map[string]
 	})
 	for _, i := range order {
 		p := &s.manifest.Pages[i]
+		if p.Segment {
+			continue
+		}
 		if params, ok := matchRoute(urlPath, p.Route); ok {
 			if len(params) == 0 {
 				params = s.patternParams(p, urlPath)
@@ -593,6 +596,20 @@ func (s *SSRServer) FindPageForRoute(urlPath string) (*ManifestPage, map[string]
 		}
 	}
 	return nil, nil
+}
+
+// pageByRoute returns the manifest page with exactly this route, segment pages
+// included.
+func (s *SSRServer) pageByRoute(route string) *ManifestPage {
+	if s.manifest == nil {
+		return nil
+	}
+	for i := range s.manifest.Pages {
+		if s.manifest.Pages[i].Route == route {
+			return &s.manifest.Pages[i]
+		}
+	}
+	return nil
 }
 
 // patternParams returns the dynamic params of a pre-generated page (a
@@ -610,12 +627,6 @@ func (s *SSRServer) patternParams(page *ManifestPage, urlPath string) map[string
 		}
 	}
 	return nil
-}
-
-func (s *SSRServer) findRendererScript() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.findRendererScriptLocked()
 }
 
 // findRendererScriptLocked resolves the renderer script. The caller must hold

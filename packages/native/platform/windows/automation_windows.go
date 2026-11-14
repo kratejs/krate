@@ -20,8 +20,8 @@ import (
 // (chromium.connectOverCDP) and Puppeteer attach to, and
 // CallDevToolsProtocolMethod runs one method in process.
 //
-// Not run on a real Windows machine by the author: the CI native job runs
-// TestGUICDP.
+// Not run on a real Windows machine by the author: the CI native job runs it
+// through the compiler's TestNativeE2EProcsGUI.
 
 var (
 	_ caps.Automation       = (*App)(nil)

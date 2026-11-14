@@ -121,7 +121,7 @@ func (c *Config) Validate() (warnings []string, err error) {
 	if c.Server.TrustedProxies < 0 {
 		return nil, fmt.Errorf("server.trustedProxies must be >= 0, got %d", c.Server.TrustedProxies)
 	}
-	if c.Site != (SiteConfig{}) && c.SEO != (SEOConfig{}) {
+	if !c.Site.isZero() && c.SEO != (SEOConfig{}) {
 		warnings = append(warnings, "both `site` and `seo` are set; `site` wins - migrate to `site` and remove `seo`")
 	}
 	if c.GoAPI.Enabled != nil || c.GoAPI.Module != "" || len(c.GoAPI.Deps) > 0 || len(c.GoAPI.Replaces) > 0 || c.GoAPI.Tidy != nil {
@@ -137,6 +137,11 @@ func (c *Config) Validate() (warnings []string, err error) {
 		if sp := strings.TrimRight(c.siteURLPath(), "/"); sp != "" && bp != "/" && sp != strings.TrimRight(bp, "/") {
 			warnings = append(warnings, fmt.Sprintf("basePath %q differs from the path of the site URL (%q); basePath wins for routing and assets, so canonical URLs may not match where the site is served", bp, sp))
 		}
+	}
+	switch c.TrailingSlash {
+	case "", "always", "never", "ignore":
+	default:
+		return nil, fmt.Errorf("trailingSlash must be \"always\", \"never\" or \"ignore\", got %q", c.TrailingSlash)
 	}
 	switch c.Compat.ModeOrDefault() {
 	case "modern", "legacy", "hybrid":
@@ -226,6 +231,19 @@ func (c *Config) Validate() (warnings []string, err error) {
 
 	if c.SSR.RendererPort != 0 && c.SSR.RendererPort == c.DevServer.Port {
 		warnings = append(warnings, "ssr.rendererPort equals devServer.port; choose a distinct port")
+	}
+
+	for _, name := range c.ServerExternalPackages {
+		if name == "" || strings.HasPrefix(name, ".") || strings.HasPrefix(name, "/") || strings.Contains(name, "\\") {
+			return nil, fmt.Errorf("serverExternalPackages entries must be package names such as \"sharp\" or \"@napi-rs/canvas\", got %q", name)
+		}
+	}
+	for key, globs := range c.OutputFileTracingIncludes {
+		for _, g := range globs {
+			if err := checkTraceGlob(g); err != nil {
+				return nil, fmt.Errorf("outputFileTracingIncludes[%q]: %w", key, err)
+			}
+		}
 	}
 
 	nw, nerr := c.validateNative()

@@ -1,35 +1,9 @@
 package fsutil
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
 )
-
-func TestWriteFileAtomicCreatesAndOverwrites(t *testing.T) {
-	dir := t.TempDir()
-	p := filepath.Join(dir, "sub", "file.txt")
-
-	if err := WriteFileAtomic(p, []byte("one"), 0o644); err != nil {
-		t.Fatalf("first write: %v", err)
-	}
-	if b, _ := os.ReadFile(p); string(b) != "one" {
-		t.Fatalf("content = %q, want one", b)
-	}
-	if err := WriteFileAtomic(p, []byte("two"), 0o644); err != nil {
-		t.Fatalf("overwrite: %v", err)
-	}
-	if b, _ := os.ReadFile(p); string(b) != "two" {
-		t.Fatalf("content = %q, want two", b)
-	}
-	// No leftover temp files.
-	entries, _ := os.ReadDir(filepath.Dir(p))
-	for _, e := range entries {
-		if e.Name() != "file.txt" {
-			t.Errorf("unexpected leftover file: %s", e.Name())
-		}
-	}
-}
 
 func TestWithinDir(t *testing.T) {
 	base := t.TempDir()

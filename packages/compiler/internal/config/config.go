@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/internal/markdown"
@@ -253,6 +254,17 @@ func (c CacheConfig) Shared() bool {
 	return c.Adapter != "" && c.Adapter != "memory"
 }
 
+// ReactConfig controls the islands that run on real React instead of Preact.
+type ReactConfig struct {
+	// Islands lists npm packages that must run on real react and react-dom
+	// (libraries built on a React reconciler: @react-three/fiber, react-konva,
+	// and anything built on them). A module that imports one becomes a
+	// client-rendered island bundled with React. Packages that depend on
+	// react-reconciler, @react-three/fiber or react-konva are detected
+	// without being listed.
+	Islands []string `json:"islands,omitempty"`
+}
+
 type SSRConfig struct {
 	// RendererPort is the port for the Node.js SSR renderer server.
 	// If 0, defaults to DevServer.Port + 10 (dev) or 3100 (prod).
@@ -394,6 +406,72 @@ type SiteConfig struct {
 	Twitter       string `json:"twitter,omitempty"`
 	ThemeColor    string `json:"themeColor,omitempty"`
 	Locale        string `json:"locale,omitempty"`
+	// HTMLAttributes and BodyAttributes are set on every page's <html> and
+	// <body> element. A page or layout refines them with <html> and <body>
+	// elements inside <Head>.
+	HTMLAttributes AttrMap `json:"htmlAttributes,omitempty"`
+	BodyAttributes AttrMap `json:"bodyAttributes,omitempty"`
+}
+
+func (s SiteConfig) isZero() bool {
+	return s.URL == "" && s.Name == "" && s.Description == "" && s.Image == "" && s.TitleTemplate == "" &&
+		s.Twitter == "" && s.ThemeColor == "" && s.Locale == "" && len(s.HTMLAttributes) == 0 && len(s.BodyAttributes) == 0
+}
+
+// AttrMap is a set of HTML attributes. In the config a value is a string or a
+// number; true writes a bare attribute, false and null drop it.
+type AttrMap map[string]string
+
+// UnmarshalJSON reads an attribute object with string, number and boolean values.
+func (m *AttrMap) UnmarshalJSON(data []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return fmt.Errorf("expected an object of attributes: %w", err)
+	}
+	out, err := AttrMapFrom(raw)
+	if err != nil {
+		return err
+	}
+	*m = out
+	return nil
+}
+
+// AttrMapFrom converts a decoded config object into an AttrMap.
+func AttrMapFrom(raw map[string]interface{}) (AttrMap, error) {
+	out := AttrMap{}
+	for k, v := range raw {
+		if !validAttrName(k) {
+			return nil, fmt.Errorf("site attributes: %q is not a valid HTML attribute name (use names like class, lang or data-theme)", k)
+		}
+		switch t := v.(type) {
+		case string:
+			out[strings.ToLower(k)] = t
+		case float64:
+			out[strings.ToLower(k)] = strconv.FormatFloat(t, 'f', -1, 64)
+		case bool:
+			if t {
+				out[strings.ToLower(k)] = ""
+			}
+		case nil:
+		default:
+			return nil, fmt.Errorf("attribute %q must be a string, number or boolean", k)
+		}
+	}
+	return out, nil
+}
+
+func validAttrName(k string) bool {
+	if k == "" {
+		return false
+	}
+	for i := 0; i < len(k); i++ {
+		c := k[i]
+		alpha := c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c == '_' || c == ':'
+		if i == 0 && !alpha || !alpha && !(c >= '0' && c <= '9') && c != '-' && c != '.' {
+			return false
+		}
+	}
+	return true
 }
 
 // EffectiveSEO folds the `site` block over `seo` (site wins per field).
@@ -700,6 +778,26 @@ type Config struct {
 	Images      ImagesConfig    `json:"images,omitempty"`      // responsive-image pipeline
 	Deploy      DeployConfig    `json:"deploy,omitempty"`      // deploy adapter + options
 	Auth        AuthConfig      `json:"auth,omitempty"`        // authentication: providers, sessions, 2FA, passkeys
+	React       ReactConfig     `json:"react,omitempty"`       // real-React islands
+
+	// ServerExternalPackages lists npm packages that server bundles (API
+	// routes, the node deploy bundle) leave out of the bundle and load from
+	// node_modules at run time, like Next's serverExternalPackages. Packages
+	// that contain a native .node addon are detected and treated this way
+	// without being listed. A route that imports one runs on the Node sidecar.
+	ServerExternalPackages []string `json:"serverExternalPackages,omitempty"`
+
+	// OutputFileTracingIncludes maps a route key (or "*" for all) to globs of
+	// project files copied into the node deploy output next to server.mjs, for
+	// files that import tracing cannot see (a worker entry loaded by path, a
+	// platform binary chosen by a computed require). Globs are relative to the
+	// project root and must stay inside it.
+	OutputFileTracingIncludes map[string][]string `json:"outputFileTracingIncludes,omitempty"`
+
+	// EnvDir is the directory the .env files are read from (default: the
+	// project root). Relative paths resolve against the project root and may
+	// point at a parent directory, such as a monorepo root.
+	EnvDir string `json:"envDir,omitempty"`
 
 	// BasePath is the URL path prefix the whole site is served under (e.g.
 	// "/docs"). Empty takes the path of site.url; "/" forces the root. Read it
@@ -710,6 +808,12 @@ type Config struct {
 	// history navigation). Nil means enabled; false keeps normal full-page
 	// navigation and omits the router from the shared runtime.
 	SPA *bool `json:"spa,omitempty"`
+
+	// TrailingSlash is the page URL form every server honours (krate serve and
+	// start, the node, vercel, netlify and cloudflare targets): "always" ("" is
+	// the same) redirects /x to /x/, "never" redirects /x/ to /x, "ignore"
+	// serves both without redirecting. Read it through TrailingSlashMode.
+	TrailingSlash string `json:"trailingSlash,omitempty"`
 
 	// ViewTransitions controls the View Transitions API integration. "" or
 	// "auto" (default) enables it (same-document SPA morphs + a cross-document
@@ -742,6 +846,11 @@ type Config struct {
 	// Server directories: all components in these dirs are treated as @server.
 	// Paths are relative to project root (e.g. "src/components/server").
 	ServerDirs []string `json:"serverDirs,omitempty"`
+
+	// CSSImportRoots are extra directories (relative to the project root, or
+	// absolute) that stylesheets may @import and url() from, beyond the
+	// project root, node_modules and the enclosing monorepo workspace root.
+	CSSImportRoots []string `json:"cssImportRoots,omitempty"`
 
 	// Runtime directories: all components in these dirs are treated as @runtime.
 	// Paths are relative to project root (e.g. "src/components/runtime").
@@ -826,6 +935,16 @@ func (c *Config) MaxAPIBodyBytes() int64 {
 // SPAEnabled reports whether the client-side router is enabled (default true).
 func (c *Config) SPAEnabled() bool {
 	return c.SPA == nil || *c.SPA
+}
+
+// TrailingSlashMode returns trailingSlash as "always", "never" or "ignore";
+// an unset or unknown value is "always" (Validate rejects unknown ones).
+func (c *Config) TrailingSlashMode() string {
+	switch c.TrailingSlash {
+	case "never", "ignore":
+		return c.TrailingSlash
+	}
+	return "always"
 }
 
 // BaseURLPath returns the path the site is served under, normalized to either
@@ -1051,6 +1170,9 @@ func (c *Config) Resolve(root string) {
 	}
 	if !filepath.IsAbs(c.PublicDir) {
 		c.PublicDir = filepath.Join(root, c.PublicDir)
+	}
+	if c.EnvDir != "" && !filepath.IsAbs(c.EnvDir) {
+		c.EnvDir = filepath.Join(root, c.EnvDir)
 	}
 	// Fold the legacy goApi block into the unified go config once, so the rest
 	// of the codebase reads a single normalized field (c.Go).

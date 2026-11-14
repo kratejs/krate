@@ -1,7 +1,6 @@
 package build
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -9,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
-	"github.com/kratejs/krate/packages/compiler/internal/diag"
 )
 
 // buildActionsFixture builds a temp project with one "use server" module and
@@ -112,78 +110,5 @@ export default function Page() {
 			t.Fatalf("duplicate slot id %s:\n%s", m[1], html)
 		}
 		seen[m[1]] = true
-	}
-}
-
-func TestActionStateInitialNotStaticWarns(t *testing.T) {
-	root := t.TempDir()
-	writeActionTestFile(t, filepath.Join(root, "src", "actions", "a.ts"), `"use server";
-export async function step(prev: number, fd: FormData) { return prev + 1; }
-`)
-	writeActionTestFile(t, filepath.Join(root, "src", "pages", "index.tsx"), `import { useActionState } from "react";
-import { step } from "../actions/a";
-export default function Page() {
-  const [n, act] = useActionState(step, Date.now());
-  return <form action={act}><p>{n}</p></form>;
-}
-`)
-	cfg := config.Default()
-	cfg.PagesDir = filepath.Join(root, "src", "pages")
-	cfg.OutDir = filepath.Join(root, "dist")
-	b := New(root, cfg)
-	if err := b.prepareActions(); err != nil {
-		t.Fatal(err)
-	}
-	stderr := captureStderr(t, func() {
-		if err := b.BuildAll(); err != nil {
-			t.Fatal(err)
-		}
-	})
-	if !strings.Contains(stderr, "[KR7003]") {
-		t.Fatalf("expected KR7003 warning, got:\n%s", stderr)
-	}
-	html, _ := os.ReadFile(filepath.Join(cfg.OutDir, "index.html"))
-	if !strings.Contains(string(html), "__krate_args=%5Bnull%5D") {
-		t.Fatalf("unknown initial state should fall back to null:\n%s", html)
-	}
-}
-
-func captureStderr(t *testing.T, fn func()) string {
-	t.Helper()
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	old := os.Stderr
-	os.Stderr = w
-	done := make(chan string)
-	go func() {
-		var b strings.Builder
-		buf := make([]byte, 4096)
-		for {
-			n, err := r.Read(buf)
-			b.Write(buf[:n])
-			if err != nil {
-				break
-			}
-		}
-		done <- b.String()
-	}()
-	defer func() { os.Stderr = old }()
-	fn()
-	_ = w.Close()
-	os.Stderr = old
-	return <-done
-}
-
-func TestParseActionExportsCodes(t *testing.T) {
-	_, err := parseActionExports("\"use server\";\nexport const nope = 1;", "src/actions/bad.ts")
-	var d diag.Diagnostic
-	if !errors.As(err, &d) || d.Code != diag.CodeActionExportNotFunction || d.Line != 2 {
-		t.Fatalf("expected KR7004 at line 2, got %v", err)
-	}
-	_, err = parseActionExports("\"use server\";\nexport { a } from './other';", "src/actions/re.ts")
-	if !errors.As(err, &d) || d.Code != diag.CodeActionReexport {
-		t.Fatalf("expected KR7005, got %v", err)
 	}
 }

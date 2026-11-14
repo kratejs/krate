@@ -28,6 +28,10 @@ var Verbose bool
 // access to the Builder.
 var Current map[string]string
 
+// Dir, when set (the envDir config key), is read for .env files instead of the
+// project root. It may be outside the project, such as a monorepo root.
+var Dir string
+
 // loadedMode is the mode of the most recent Load call.
 var loadedMode atomic.Value // string
 
@@ -97,6 +101,9 @@ func Mode(defaultMode string) string {
 // merged result. Shell environment variables are never overridden by files.
 func Load(root, mode string) (map[string]string, error) {
 	loadedMode.Store(mode)
+	if Dir != "" {
+		root = Dir
+	}
 	merged := map[string]string{}
 	files := []string{
 		".env",

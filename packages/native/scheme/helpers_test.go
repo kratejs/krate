@@ -187,29 +187,3 @@ func parseErr(t testing.TB, d *wire.Decoder) *errInfo {
 	}
 	return e
 }
-
-func eventually(t testing.TB, what string, cond func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for !cond() {
-		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for %s", what)
-		}
-		time.Sleep(2 * time.Millisecond)
-	}
-}
-
-func recv[T any](t testing.TB, ch <-chan T, what string) T {
-	t.Helper()
-	select {
-	case v := <-ch:
-		return v
-	// Generous: CI runs this package under -race next to other packages,
-	// and a call once took over 5s to start there.
-	case <-time.After(15 * time.Second):
-		t.Fatalf("timed out waiting for %s", what)
-		panic("unreachable")
-	}
-}
-
-func bytesReader(b []byte) io.Reader { return bytes.NewReader(b) }

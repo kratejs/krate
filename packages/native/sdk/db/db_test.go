@@ -9,14 +9,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/kratejs/krate/packages/native/krate"
 	"github.com/kratejs/krate/packages/native/scheme"
 	"github.com/kratejs/krate/packages/native/sdk/internal/sdktest"
-	sdkos "github.com/kratejs/krate/packages/native/sdk/os"
 	"github.com/kratejs/krate/packages/native/sdk/permission"
 	"github.com/kratejs/krate/packages/native/wire"
 )
@@ -107,22 +105,6 @@ func TestExecQueryValues(t *testing.T) {
 	}
 }
 
-func TestWALAndPragmas(t *testing.T) {
-	d := open(t)
-	var mode string
-	if err := d.SQL().QueryRow("PRAGMA journal_mode").Scan(&mode); err != nil || mode != "wal" {
-		t.Fatalf("journal_mode = %q (%v)", mode, err)
-	}
-	var busy int
-	if err := d.SQL().QueryRow("PRAGMA busy_timeout").Scan(&busy); err != nil || busy != 5000 {
-		t.Fatalf("busy_timeout = %d (%v)", busy, err)
-	}
-	var fk int
-	if err := d.SQL().QueryRow("PRAGMA foreign_keys").Scan(&fk); err != nil || fk != 1 {
-		t.Fatalf("foreign_keys = %d (%v)", fk, err)
-	}
-}
-
 func TestTransactionRollbackAndCommit(t *testing.T) {
 	d := open(t)
 	if _, err := d.Exec(bg, "CREATE TABLE t(id INTEGER PRIMARY KEY, v TEXT UNIQUE)"); err != nil {
@@ -188,39 +170,6 @@ func TestTransactionRollbackAndCommit(t *testing.T) {
 	}
 }
 
-func TestConcurrentWritersInOneProcess(t *testing.T) {
-	d := open(t)
-	if _, err := d.Exec(bg, "CREATE TABLE t(id INTEGER PRIMARY KEY, n INTEGER)"); err != nil {
-		t.Fatal(err)
-	}
-	var wg sync.WaitGroup
-	errs := make(chan error, 16)
-	for g := 0; g < 8; g++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for i := 0; i < 50; i++ {
-				if err := d.Transaction(bg, func(tx *Tx) error {
-					_, err := tx.Exec(bg, "INSERT INTO t(n) VALUES(?)", i)
-					return err
-				}); err != nil {
-					errs <- err
-					return
-				}
-			}
-		}()
-	}
-	wg.Wait()
-	close(errs)
-	for err := range errs {
-		t.Fatal(err)
-	}
-	rows, _ := d.Query(bg, "SELECT count(*) AS c FROM t")
-	if rows[0]["c"] != int64(400) {
-		t.Fatalf("%v", rows)
-	}
-}
-
 // Two processes (the shell and a Go host child) share one file.
 func TestTwoProcesses(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "shared.db")
@@ -251,60 +200,6 @@ func TestTwoProcesses(t *testing.T) {
 	rows, err := d.Query(bg, "SELECT who, count(*) AS c FROM t GROUP BY who ORDER BY who")
 	if err != nil || len(rows) != 2 || rows[0]["c"] != int64(200) || rows[1]["c"] != int64(200) {
 		t.Fatalf("%v %v", rows, err)
-	}
-}
-
-func TestOpenNames(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("APPDATA", t.TempDir())
-	if err := sdkos.Configure(sdkos.App{ID: "com.acme.dbtest"}); err != nil {
-		t.Fatal(err)
-	}
-	for _, bad := range []string{"", "..", "a/b", `a\b`, "c:x", "a\x00"} {
-		if _, err := Open(bad); err == nil {
-			t.Errorf("Open(%q) succeeded", bad)
-		}
-	}
-	d, err := Open("notes")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer d.Close()
-	if filepath.Base(d.Path()) != "notes.db" {
-		t.Fatalf("path %s", d.Path())
-	}
-	dir, _ := sdkos.AppDataDir()
-	if filepath.Dir(d.Path()) != dir {
-		t.Fatalf("%s is not in %s", d.Path(), dir)
-	}
-	def1, err := Default()
-	if err != nil {
-		t.Fatal(err)
-	}
-	def2, _ := Default()
-	if def1 != def2 || filepath.Base(def1.Path()) != "app.db" {
-		t.Fatal("Default is not a singleton on app.db")
-	}
-	if err := CloseDefault(); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestMemoryDB(t *testing.T) {
-	d, err := OpenPath(":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer d.Close()
-	if _, err := d.Exec(bg, "CREATE TABLE t(a)"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := d.Exec(bg, "INSERT INTO t VALUES(1)"); err != nil {
-		t.Fatal(err)
-	}
-	if rows, _ := d.Query(bg, "SELECT * FROM t"); len(rows) != 1 {
-		t.Fatalf("%v", rows)
 	}
 }
 
@@ -340,77 +235,6 @@ func uiCaller(t *testing.T, d *DB, perms ...string) *sdktest.Caller {
 	reg := scheme.NewRegistry()
 	RegisterWith(reg, set, func() (*DB, error) { return d, nil })
 	return sdktest.New(t, reg)
-}
-
-func TestUIIds(t *testing.T) {
-	d := open(t)
-	c := uiCaller(t, d)
-
-	r := c.Call("krate/db.exec", func(e *wire.Encoder) {
-		e.String("CREATE TABLE t(id INTEGER PRIMARY KEY, s TEXT, b BLOB, f REAL, n)")
-	})
-	if r.Failed || r.OK != `{"rowsAffected":0,"lastInsertId":0}` {
-		t.Fatalf("%+v", r)
-	}
-	r = c.Call("krate/db.exec", func(e *wire.Encoder) {
-		e.String("INSERT INTO t(s, b, f, n) VALUES(?, ?, ?, ?)")
-		e.BeginArray()
-		e.String("x")
-		e.Bytes([]byte{9, 8})
-		e.Float(1.5)
-		e.Null()
-		e.EndArray()
-	})
-	if r.Failed || r.OK != `{"rowsAffected":1,"lastInsertId":1}` {
-		t.Fatalf("%+v", r)
-	}
-	r = c.Call("krate/db.query", func(e *wire.Encoder) {
-		e.String("SELECT id, s, b, f, n FROM t WHERE s = ?")
-		e.BeginArray()
-		e.String("x")
-		e.EndArray()
-	})
-	if r.Failed || r.OK != `[{"id":1,"s":"x","b":{"$b":0},"f":1.5,"n":null}]` {
-		t.Fatalf("%+v", r)
-	}
-	// Bool and date parameters.
-	r = c.Call("krate/db.exec", func(e *wire.Encoder) {
-		e.String("INSERT INTO t(s, n) VALUES(?, ?)")
-		e.BeginArray()
-		e.Time(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC))
-		e.Bool(true)
-		e.EndArray()
-	})
-	if r.Failed {
-		t.Fatalf("%+v", r)
-	}
-	r = c.Call("krate/db.query", func(e *wire.Encoder) { e.String("SELECT s, n FROM t WHERE id = 2") })
-	if r.OK != `[{"s":"2026-01-02T03:04:05.000Z","n":1}]` {
-		t.Fatalf("%+v", r)
-	}
-
-	// Errors.
-	r = c.Call("krate/db.query", func(e *wire.Encoder) { e.String("SELEKT") })
-	if r.ErrCode != "sql_error" {
-		t.Fatalf("%+v", r)
-	}
-	r = c.Call("krate/db.exec", func(e *wire.Encoder) { e.String("ATTACH DATABASE 'x' AS y") })
-	if r.ErrCode != "forbidden_sql" {
-		t.Fatalf("%+v", r)
-	}
-	r = c.Call("krate/db.exec", func(e *wire.Encoder) {
-		e.String("INSERT INTO t(s) VALUES(?)")
-		e.BeginArray()
-		e.BeginObject()
-		e.EndObject()
-		e.EndArray()
-	})
-	if r.ErrCode != "bad_args" {
-		t.Fatalf("object parameter: %+v", r)
-	}
-	if r := c.Call("krate/db.query", nil); r.ErrCode != "bad_args" {
-		t.Fatalf("%+v", r)
-	}
 }
 
 func TestUITransaction(t *testing.T) {

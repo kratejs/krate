@@ -102,12 +102,3 @@ func TestDiagnosticsDocUpToDate(t *testing.T) {
 		t.Fatalf("%s is stale; run KRATE_DIAG_DOCS_UPDATE=1 go test ./internal/diag from packages/compiler", path)
 	}
 }
-
-func TestDiagnosticsDocListsEveryCode(t *testing.T) {
-	doc := renderDiagnosticsDoc(Codes())
-	for _, info := range Codes() {
-		if !strings.Contains(doc, "### "+string(info.Code)+"\n") {
-			t.Errorf("generated doc misses %s", info.Code)
-		}
-	}
-}

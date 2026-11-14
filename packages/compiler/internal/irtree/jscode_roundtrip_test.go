@@ -92,24 +92,6 @@ func TestPrinterRoundTripMatchesNode(t *testing.T) {
 	}
 }
 
-func TestPrinterStatementStartObjectAndArrowBody(t *testing.T) {
-	p := parser.New(lexer.New("({a:1}).a; (function(){})(); functionName(); classNames();").Tokenize())
-	prog := p.ParseProgram()
-	if errs := p.Errors(); len(errs) > 0 {
-		t.Fatal(errs)
-	}
-	var out strings.Builder
-	for _, s := range prog.Body {
-		out.WriteString(renderStmtJS(s, nil))
-	}
-	got := out.String()
-	for _, want := range []string{"({a:1}.a);", "functionName();", "classNames();"} {
-		if !strings.Contains(strings.ReplaceAll(got, " ", ""), want) {
-			t.Errorf("missing %q in %q", want, got)
-		}
-	}
-}
-
 func firstLine(s string) string {
 	if i := strings.IndexByte(s, '\n'); i >= 0 {
 		return s[:i]

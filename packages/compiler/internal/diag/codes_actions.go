@@ -24,9 +24,11 @@ func init() {
 		CodeInfo{
 			Code:  CodeInlineUseServer,
 			Title: `Inline "use server" function`,
-			Explanation: `React allows a "use server" directive at the top of an async function inside a component. ` +
-				`Krate only supports file-level server actions: move the function into a module whose first ` +
-				`statement is "use server", export it, and import it where the form uses it.`,
+			Explanation: `A "use server" directive at the top of a function inside a component is hoisted into a server ` +
+				`action. It is rejected inside a "use client" module, in a class, when it uses this, and when it captures values from a ` +
+				`component that is not async (captured values are sent to the browser encrypted and need a per-request ` +
+				`render). Move the function into a module whose first statement is "use server" and import it, or ` +
+				`declare it inside an async server component.`,
 		},
 		CodeInfo{
 			Code:  CodeFormStatusNoElement,
@@ -43,14 +45,17 @@ func init() {
 				`into the URL at build time; when it cannot be evaluated the server receives null.`,
 		},
 		CodeInfo{
-			Code:        CodeActionExportNotFunction,
-			Title:       `"use server" module exports a non-function`,
-			Explanation: `Every export of a "use server" module becomes a public endpoint and must be an async function.`,
+			Code:  CodeActionExportNotFunction,
+			Title: `"use server" module exports a non-function`,
+			Explanation: `Every export of a "use server" module becomes a public endpoint and must be a function. ` +
+				`An export built by a wrapper call (export const save = createAction(...)) is accepted and checked ` +
+				`when the module loads; a literal, object, array or class can never be an action and is rejected at build time.`,
 		},
 		CodeInfo{
-			Code:        CodeActionReexport,
-			Title:       `"use server" module re-exports another module`,
-			Explanation: `Re-exports cannot be bundled as server actions. Import the function and re-declare it as an export.`,
+			Code:  CodeActionReexport,
+			Title: `"use server" module uses a star re-export`,
+			Explanation: `A star re-export (export * or export * as) cannot be turned into named endpoints. ` +
+				`Re-export the actions by name: export { save } from "./other".`,
 		},
 		CodeInfo{
 			Code:        CodeActionImportMissing,

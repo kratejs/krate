@@ -4,7 +4,9 @@ import (
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
+	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/escape"
+	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
 )
 
 // React 19 document metadata.
@@ -77,6 +79,8 @@ func (b *builder) hoistsMetadata(el *ast.JSXElement) bool {
 
 // buildHoistedMetadata builds a hoisted <title>/<meta>/<link>.
 func (b *builder) buildHoistedMetadata(el *ast.JSXElement, parentID string) []SlotNode {
+	b.metaDepth++
+	defer func() { b.metaDepth-- }()
 	if el.Opening.Name == "title" {
 		return []SlotNode{&MetaSlot{ComponentName: HoistMeta, Children: b.buildTitleSlots(el, parentID)}}
 	}
@@ -93,8 +97,10 @@ func (b *builder) buildTitleSlots(el *ast.JSXElement, parentID string) []SlotNod
 	if expr == nil {
 		return []SlotNode{&StaticHTML{HTML: "<title></title>"}}
 	}
-	text, _ := childText(b.evalValue(expr))
+	value := b.evalValue(expr)
+	text, _ := childText(value)
 	if !b.referencesSignal(expr) {
+		b.warnHeadDeferred(expr, value)
 		return []SlotNode{&StaticHTML{HTML: "<title>" + escape.Text(text) + "</title>"}}
 	}
 	id := b.assignSlotID(joinSlotID(parentID, b.nextElementTag("title", parentID)))
@@ -157,4 +163,15 @@ func WithoutAttr(el *ast.JSXElement, name string) *ast.JSXElement {
 	cloned := *el
 	cloned.Opening = &opening
 	return &cloned
+}
+
+// warnHeadDeferred reports a document-head value the build could not
+// evaluate. Hydration would fill it in, but a crawler reads the static HTML.
+func (b *builder) warnHeadDeferred(expr ast.Expr, v jsvalue.Value) {
+	if b.metaDepth == 0 || expr == nil || !v.ContainsUnknown() {
+		return
+	}
+	b.warnCompat(expr.Pos(), diag.CodeHeadValueDeferred,
+		"`"+generateExprJS(expr, nil)+"` in <Head> cannot be evaluated at build time ("+v.Reason()+"), so crawlers will not see it",
+		"compute it from plain values the build can run (strings, templates, URL, calls to project functions), or pass it as a prop")
 }

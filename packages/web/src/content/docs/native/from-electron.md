@@ -346,8 +346,7 @@ await page.fill('#note', 'hello');
 `tests/port.native.test.ts` does the same with `launch()` from
 `@krate/app/driver`, and also covers files, the menu, a second window, the tray
 and the notification. Run it with `krate native test` (on a headless Linux
-machine, `xvfb-run -a krate native test`). The compiler's own CI runs it as the
-GUI test `TestNativeFromElectronGUI`. Details in [Testing](#testing).
+machine, `xvfb-run -a krate native test`). Details in [Testing](#testing).
 
 ## API mapping
 

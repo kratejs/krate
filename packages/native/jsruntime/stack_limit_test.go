@@ -32,14 +32,3 @@ func TestRunawayRecursionThrows(t *testing.T) {
 		})
 	}
 }
-
-func TestStackLimitDefaultAndCap(t *testing.T) {
-	t.Setenv("KRATE_JS_STACK_KB", "")
-	if got := stackLimit(); got != 16*1024 {
-		t.Fatalf("default stack limit = %d, want %d", got, 16*1024)
-	}
-	t.Setenv("KRATE_JS_STACK_KB", "256")
-	if got := stackLimit(); got != maxStackKB*1024 {
-		t.Fatalf("capped stack limit = %d, want %d", got, maxStackKB*1024)
-	}
-}

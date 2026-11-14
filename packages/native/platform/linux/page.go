@@ -627,24 +627,6 @@ func (w *Window) PrintDialog(ref caps.ViewRef) (err error) {
 	return
 }
 
-// topLevelTitles lists the titles of the GTK top-level windows. For tests.
-func (a *App) topLevelTitles() (titles []string, wins []uintptr) {
-	a.callMain(func() {
-		if a.pg.toplevels == nil {
-			return
-		}
-		l := a.pg.toplevels()
-		for _, p := range a.slistPtrs0(l) {
-			titles = append(titles, goString(a.api.gtkWindowGetTitle(p)))
-			wins = append(wins, p)
-		}
-		if a.pg.glistFree != nil {
-			a.pg.glistFree(l)
-		}
-	})
-	return
-}
-
 // slistPtrs0 reads a GList (or GSList: both start with data and next) without
 // freeing it.
 func (a *App) slistPtrs0(list uintptr) []uintptr {

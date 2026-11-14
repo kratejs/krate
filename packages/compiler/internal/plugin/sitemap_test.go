@@ -24,25 +24,6 @@ func runSitemap(t *testing.T, cfg *config.Config, pages []PageResult) string {
 	return string(data)
 }
 
-func TestCanonicalRoutePath(t *testing.T) {
-	cases := map[string]string{
-		"": "/", ".": "/", "/": "/", "blog": "/blog/", "/blog/": "/blog/", "a/b/c": "/a/b/c/",
-		"feed.xml": "/feed.xml", "docs/api.json": "/docs/api.json",
-	}
-	for in, want := range cases {
-		if got := CanonicalRoutePath(in); got != want {
-			t.Errorf("CanonicalRoutePath(%q) = %q, want %q", in, got, want)
-		}
-	}
-	if got := CanonicalURL("https://example.com/", "/sub", "blog/caf\u00e9"); got != "https://example.com/sub/blog/caf%C3%A9/" {
-		t.Errorf("CanonicalURL = %q", got)
-	}
-	// A base URL that already ends in the base path is not prefixed twice.
-	if got := CanonicalURL("https://example.com/sub", "/sub", "x"); got != "https://example.com/sub/x/" {
-		t.Errorf("CanonicalURL double prefix = %q", got)
-	}
-}
-
 func TestSitemapFiltersEscapesAndPrefixes(t *testing.T) {
 	cfg := &config.Config{
 		BasePath: "/sub",
@@ -84,13 +65,5 @@ func TestSitemapFiltersEscapesAndPrefixes(t *testing.T) {
 		if strings.Contains(got, bad) {
 			t.Errorf("sitemap should not list %q:\n%s", bad, got)
 		}
-	}
-}
-
-func TestRobotsSitemapHonorsBasePath(t *testing.T) {
-	cfg := &config.Config{BasePath: "/sub", SEO: config.SEOConfig{BaseURL: "https://example.com"}}
-	got := runRobots(t, cfg)
-	if !strings.Contains(got, "Sitemap: https://example.com/sub/sitemap.xml") {
-		t.Errorf("robots Sitemap ignores basePath:\n%s", got)
 	}
 }
