@@ -350,3 +350,46 @@ export default function Error({ error, reset }: any) {
 		t.Errorf("boundary island chunk %s: status %d\n%s", m[1], status, js)
 	}
 }
+
+// TestAsyncLayoutAndPageShareAPackageBoundary: an async layout and the pages
+// under it import different icons from lucide-react. The page's server bundle
+// carries one package boundary per tree for that specifier; they must be
+// served as one module, or the build fails with `No matching export in
+// "krate-pkg-boundary:lucide-react"` for the icons of whichever tree lost.
+func TestAsyncLayoutAndPageShareAPackageBoundary(t *testing.T) {
+	b, root := scProject(t, map[string]string{
+		"src/pages/_layout.tsx": `import { Download } from "lucide-react";
+export default async function Layout({ children }: any) {
+  await Promise.resolve();
+  return <div><Download id="dl" />{children}</div>;
+}`,
+		"src/pages/index.tsx": `import { ArrowLeft, Rocket } from "lucide-react";
+export default function Home() { return <main><ArrowLeft id="back" /><Rocket id="rocket" /></main>; }`,
+		"src/pages/other.tsx": `import { Download, Heart } from "lucide-react";
+export default function Other() { return <main><Heart id="heart" /><Download id="dl2" /></main>; }`,
+	})
+	withPreact(t, root)
+	linkReactPackages(t, root)
+	e2eEnv(t)
+	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	base, err := startKrateServer(t, root, b.Cfg)
+	if err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+	for path, ids := range map[string][]string{"/": {"dl", "back", "rocket"}, "/other/": {"dl", "dl2", "heart"}} {
+		_, _, html := getBody(t, base+path)
+		for _, id := range ids {
+			if !regexp.MustCompile(`<svg [^>]*id="` + id + `"`).MatchString(html) {
+				t.Errorf("%s: icon %q did not render:\n%s", path, id, html)
+			}
+		}
+		if strings.Contains(html, "krate-island") {
+			t.Errorf("%s: stateless icons must not become islands:\n%s", path, html)
+		}
+	}
+}

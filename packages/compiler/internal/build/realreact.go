@@ -437,18 +437,32 @@ func (b *Builder) registerRealBoundary(cb ClientBoundary) string {
 // children always sent as a tree and the `client:fallback` prop as the markup.
 func realBoundaryStub(cb ClientBoundary) string {
 	var sb strings.Builder
-	sb.WriteString("import { clientBoundary as __krateCB } from \"@krate/runtime/server\";\n")
-	sb.WriteString("const __fallback = (C, p) => { const f = p && p[\"client:fallback\"]; return typeof f === \"string\" ? f.replace(/&/g, \"&amp;\").replace(/</g, \"&lt;\").replace(/>/g, \"&gt;\") : \"\"; };\n")
+	sb.WriteString(boundaryStubHeader)
+	realBoundaryExports(&sb, cb, nil)
+	return sb.String()
+}
+
+// realBoundaryExports writes the exports of a real-React boundary, skipping
+// the names already in seen.
+func realBoundaryExports(sb *strings.Builder, cb ClientBoundary, seen map[string]bool) {
+	if !strings.Contains(sb.String(), "__fallback =") {
+		sb.WriteString("const __fallback = (C, p) => { const f = p && p[\"client:fallback\"]; return typeof f === \"string\" ? f.replace(/&/g, \"&amp;\").replace(/</g, \"&lt;\").replace(/>/g, \"&gt;\") : \"\"; };\n")
+	}
 	for _, name := range cb.Exports {
+		if seen[name] {
+			continue
+		}
+		if seen != nil {
+			seen[name] = true
+		}
 		wrapped := fmt.Sprintf("__krateCB(%s, %s, %s, function %s() { return null; }, __fallback, true, true)",
 			strconv.Quote(cb.ModuleID), strconv.Quote(name), strconv.Quote(cb.ChunkURL), stubFuncName(name))
 		if name == "default" {
-			fmt.Fprintf(&sb, "export default %s;\n", wrapped)
+			fmt.Fprintf(sb, "export default %s;\n", wrapped)
 		} else {
-			fmt.Fprintf(&sb, "export const %s = %s;\n", name, wrapped)
+			fmt.Fprintf(sb, "export const %s = %s;\n", name, wrapped)
 		}
 	}
-	return sb.String()
 }
 
 // stubFuncName is a valid function name for an export (the name shows up in
