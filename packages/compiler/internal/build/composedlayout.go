@@ -40,6 +40,8 @@ type layoutCut struct {
 	CSS        string
 	Deps       []string
 	Boundaries []ClientBoundary
+	// Actions is true when a layout uses server actions.
+	Actions bool
 }
 
 var asyncLayoutMemo sync.Map // layout path -> bool, cleared per build
@@ -101,6 +103,7 @@ func (b *Builder) prepareLayoutCut(page string) (*layoutCut, error) {
 			return nil, err
 		}
 		cut.Deps = append(cut.Deps, layoutDepPaths(layoutPath, bundle)...)
+		cut.Actions = cut.Actions || bundleHasActions(bundle)
 		cut.CSS = bundle.CSS + cut.CSS
 		b.modCSS.store(layoutPath, bundle.CSSModules)
 		mod := findEntryModule(bundle.Modules)

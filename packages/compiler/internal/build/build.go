@@ -134,6 +134,9 @@ type PageResult struct {
 	// page that renders server components. The page server bundle wraps their
 	// exports in client boundaries (clientboundary.go).
 	ClientBoundaries []ClientBoundary
+	// ServerActions is true when the page (or an async layout around it) can
+	// render a server action form, which the runtime enhances.
+	ServerActions bool
 	// ComposedLayouts are the async layouts (and the layouts inside them) the
 	// page server bundle renders around the page, innermost first.
 	ComposedLayouts []string
@@ -2867,6 +2870,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 			MetadataSegments:  metaSegs,
 			MetadataPageFiles: metaPageFiles,
 			ClientBoundaries:  clientBoundaries,
+			ServerActions:     pageHasServerActions(bundle, layoutCut),
 			ComposedLayouts:   layoutCutLayouts(layoutCut),
 		}, bundle.CSS, nil
 	}
@@ -2920,7 +2924,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 	// Request-time pages are rendered by the server, which highlights their
 	// code itself; only static pages highlight in the browser.
 	browserHighlight := renderMode == RenderSSG && strings.Contains(emitResult.HTML, highlightMarkup)
-	needsHydrate := len(emitResult.Signatures) > 0 || islandJS != "" || islandBoot != "" || strings.Contains(emitResult.HTML, "data-krate-portal") || browserHighlight
+	needsHydrate := (len(emitResult.Signatures) > 0 && !requestTimeInert(renderMode, emitResult.Signatures)) || islandJS != "" || islandBoot != "" || strings.Contains(emitResult.HTML, "data-krate-portal") || browserHighlight
 	// Client-side JS scanned by CSS DCE for classes applied after hydration.
 	dceJS := append(lazyChunkSources(emitResult.LazyChunks), islandJS)
 	dceJS = append(dceJS, b.clientChunkSources(clientBoundaries)...)
@@ -3075,6 +3079,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 		MetadataSegments:  metaSegs,
 		MetadataPageFiles: metaPageFiles,
 		ClientBoundaries:  clientBoundaries,
+		ServerActions:     pageHasServerActions(bundle, layoutCut),
 		ComposedLayouts:   layoutCutLayouts(layoutCut),
 	}
 	if renderMode != RenderSSG {

@@ -396,6 +396,12 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- A page rendered per request (SSR, ISR, an async page, the SSR 404/403/401 page) that has no state, event
+  handler, client island or server action form loads no runtime and no hydration script, as in rc.2; and
+  expressions on such a page that read no signal are no longer re-run in the browser, so server code
+  (`return env`, process env reads) stops reaching the client script and blanking server-rendered text.
+- A component-local `const` with a build-time value (`const label = 'x' + 'y'`) no longer makes a fully static
+  page ship the runtime; it is baked into the HTML like a module-scope constant.
 - `.ts`, `.mts` and `.cts` files are never lexed as JSX, so `a < b || c > d` in a plain TypeScript file
   (including a workspace package outside the project root) no longer fails the build.
 - `import "server-only"` works in every server context (build-time passes, metadata routes, middleware,
