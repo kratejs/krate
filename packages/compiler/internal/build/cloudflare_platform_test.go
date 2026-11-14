@@ -274,6 +274,16 @@ console.log(JSON.stringify(results));
 					t.Errorf("%s %s: got %d %q, want the 404 page with status 404", c.mode, p, got[p].Status, got[p].Body)
 				}
 			}
+			// The 404 page renders per request (ssr) from server values, but it
+			// has nothing interactive: no runtime, no hydration, no server code.
+			for _, p := range []string{"/nope#html", "/nope/#html", "/404"} {
+				if got[p].Status != 404 {
+					continue
+				}
+				if b := got[p].Body; !strings.Contains(b, "<p>module-db</p>") || strings.Contains(b, "<script") || strings.Contains(b, "return e") {
+					t.Errorf("%s %s: the SSR 404 page must render the server value and ship no script:\n%s", c.mode, p, b)
+				}
+			}
 		})
 	}
 }

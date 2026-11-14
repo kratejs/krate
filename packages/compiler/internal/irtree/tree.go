@@ -512,6 +512,9 @@ type ComponentNode struct {
 	// strings); they are merged into SSREvalBindings so SSR-evaluated components
 	// resolve local variables such as `const classes = cn(cva(...))`.
 	LocalVars map[string]jsvalue.Value
+	// JSXLocals names locals initialised with JSX; they have no build-time
+	// value but are rendered into the HTML where they are read.
+	JSXLocals map[string]bool
 	// RestProps holds the call-site attributes collected by the component's
 	// rest parameter (e.g. `{ className, ...props }`), so SSREval can expand a
 	// `{...props}` spread on an intrinsic element. RestPropsName is that

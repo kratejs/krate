@@ -360,7 +360,8 @@ attributes (allowed with `'unsafe-hashes'` plus one SHA-256 hash per distinct
 value). Styles set at runtime through the CSSOM (`el.style.x = ...`) are not
 affected by CSP. When a CSP meta tag is present the client router does not
 inject its runtime speculation-rules script (it would be blocked) and uses its
-JS link prefetching instead.
+JS link prefetching instead. A CSP sent as an HTTP header cannot be seen from
+the page, so there the router removes the script as soon as the browser blocks it.
 
 ## Markdown
 
