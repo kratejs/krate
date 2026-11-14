@@ -118,6 +118,16 @@ export default async function Home() {
   prop name otherwise.
 - `children` passed from a server component are rendered on the server and
   inserted as HTML inside the client component.
+- Only what a client component imports and uses goes to the browser, as in
+  Next.js. A server helper (database client, `node:crypto`, a native
+  package) that sits in the same barrel as the component, or in a module the
+  component never calls, stays out of the client chunks. If client code does
+  use Node built-ins or a `.node` addon, the build stops with
+  [KR8009](/docs/reference/diagnostics/#kr8009).
+- `lazy(() => import("./heavy"))` in a server component renders the module on
+  the server, in place; no browser chunk is made for it. `process.env` reads
+  in modules only the server tree uses are real, so [KR8310](/docs/reference/diagnostics/#kr8310)
+  only fires for modules a client component bundles.
 - Pages without server components are unaffected: there, `"use client"`
   changes nothing and components compile through the normal Krate pipeline.
 

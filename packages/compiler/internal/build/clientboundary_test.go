@@ -2,6 +2,8 @@ package build
 
 import (
 	"encoding/json"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -232,4 +234,105 @@ export default async function Home() {
 export default async function Home() { await 1; return <main><A /></main>; }`,
 	})
 	wantCode(t, err, diag.CodeClientBoundaryExports, `export { A, B } from "./a"`)
+}
+
+// TestServerOnlyCodeStaysOutOfClientBundles builds a page whose server tree
+// uses Node-only code (a native package, node:crypto) and whose client
+// component comes through a barrel that also re-exports a server helper and a
+// lazy server component. Like Next.js, the browser bundles hold only what the
+// client component imports; server-only modules neither enter them nor
+// warn about process.env.
+func TestServerOnlyCodeStaysOutOfClientBundles(t *testing.T) {
+	b, root := scProject(t, map[string]string{
+		"node_modules/nativepkg/package.json": `{"name":"nativepkg","version":"1.0.0","main":"index.js"}`,
+		"node_modules/nativepkg/index.js": `const fs = require("node:fs");
+let addon = "";
+try { addon = require("./addon.node"); } catch (e) { addon = "noaddon"; }
+module.exports = { draw: function () { return "drawn-" + typeof fs.readFileSync + addon; } };`,
+		"node_modules/nativepkg/addon.node": "not a real binary",
+		"src/server/lib.ts": `import { createHash } from "node:crypto";
+import { draw } from "nativepkg";
+export const SECRET = process.env.SECRET;
+export function hashIt(s: string) { return createHash("sha1").update(s).digest("hex").slice(0, 8) + draw(); }`,
+		"src/components/Counter.tsx": `"use client";
+import { useState } from "react";
+import { Label } from "./ui";
+export function Counter({ start }: any) {
+  const [n, setN] = useState(start);
+  return <button id="inc" onClick={() => setN(n + 1)}><Label>Count: </Label>{n}{process.env.NEXT_PUBLIC_X}</button>;
+}`,
+		"src/components/ui/Label.tsx": `export function Label({ children }: any) { return <b>{children}</b>; }`,
+		"src/components/ui/util.ts": `import { lazy } from "react";
+import { hashIt } from "../../server/lib";
+export const Draw = lazy(() => import("../../draw-sources"));
+export function serverUtil() { return hashIt("a"); }`,
+		"src/components/ui/index.ts": `export { Label } from "./Label";
+export { serverUtil, Draw } from "./util";`,
+		"src/components/index.ts": `export { Counter } from "./Counter";
+export { serverUtil, Draw } from "./ui";`,
+		"src/draw-sources.tsx": `import { draw } from "nativepkg";
+export default function DrawSources() { return <p id="ds">{draw()}</p>; }`,
+		"src/pages/index.tsx": `import { Counter, Draw, serverUtil } from "../components";
+import { SECRET } from "../server/lib";
+export default async function Home() {
+  await Promise.resolve();
+  return <main><i id="h">{serverUtil()}{String(SECRET)}</i><Counter start={5} /><Draw /></main>;
+}`,
+	})
+	withPreact(t, root)
+	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
+		t.Fatal(err)
+	}
+	out, err := captureOutput(b.BuildAll)
+	if err != nil {
+		t.Fatalf("BuildAll: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "components/Counter.tsx") || !strings.Contains(out, "process.env.NEXT_PUBLIC_X") {
+		t.Errorf("the client component's environment read should warn (KR8310):\n%s", out)
+	}
+	if strings.Contains(out, "server/lib.ts") {
+		t.Errorf("a server-only module's environment read must not warn:\n%s", out)
+	}
+	var js []string
+	_ = filepath.WalkDir(filepath.Join(root, "dist"), func(p string, d os.DirEntry, err error) error {
+		if err == nil && !d.IsDir() && strings.HasSuffix(p, ".js") && !strings.Contains(filepath.ToSlash(p), "/.krate/") {
+			js = append(js, p)
+		}
+		return nil
+	})
+	var counterChunks int
+	for _, p := range js {
+		data, _ := os.ReadFile(p)
+		for _, bad := range []string{"nativepkg", "node:", "addon.node", "createHash", "readFileSync", "hashIt", "drawn-"} {
+			if strings.Contains(string(data), bad) {
+				t.Errorf("%s holds server-only code (%q)", filepath.Base(p), bad)
+			}
+		}
+		if strings.Contains(string(data), "Count: ") {
+			counterChunks++
+		}
+	}
+	if counterChunks != 1 {
+		t.Errorf("expected the client component in one browser chunk, found %d among %v", counterChunks, js)
+	}
+	if _, err := exec.LookPath("node"); err != nil {
+		requireE2E(t, "node is not installed")
+		return
+	}
+	ensureRuntimeDist(t)
+	base, err := startKrateServer(t, root, b.Cfg)
+	if err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+	resp, err := http.Get(base + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	for _, want := range []string{`id="ds"`, "drawn-function", "<krate-island", "<b>Count: </b>5"} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("rendered page misses %q:\n%s", want, body)
+		}
+	}
 }

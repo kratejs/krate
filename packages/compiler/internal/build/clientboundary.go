@@ -631,6 +631,9 @@ func calleeName(e ast.Expr) string {
 type clientChunkInfo struct {
 	url      string
 	stateful bool
+	// inputs are the source files that ended up in the chunk (absolute,
+	// cleaned); tree shaking leaves out the rest of the import graph.
+	inputs map[string]bool
 }
 
 var statefulHookRe = regexp.MustCompile(`\buse(State|Reducer|Effect|LayoutEffect|InsertionEffect|SyncExternalStore|ImperativeHandle|Transition|Optimistic|ActionState|DeferredValue)\b|\b(Pure)?Component\b`)
@@ -738,6 +741,7 @@ export async function mount(el) {
   el.setAttribute("data-krate-island-hydrated", "");
 }
 `
+	guard := b.newUnavailableGuard()
 	result := esbuildBuild(api.BuildOptions{
 		Stdin: &api.StdinOptions{
 			Contents:   src,
@@ -760,9 +764,11 @@ export async function mount(el) {
 		Alias:             islandAlias(b.Root, false),
 		External:          []string{"preact", "preact/compat", "preact/hooks", "preact/jsx-runtime"},
 		Inject:            []string{shim},
-		Plugins:           []api.Plugin{clientOnlyMarkersPlugin(true), actionServerBundlePlugin(b.importResolver(), b.actionModules(), b.Cfg.BaseURLPath())},
+		Metafile:          true,
+		Plugins:           []api.Plugin{purePrunePlugin(b.Root), guard.plugin(), clientOnlyMarkersPlugin(true), actionServerBundlePlugin(b.importResolver(), b.actionModules(), b.Cfg.BaseURLPath())},
 		LogLevel:          api.LogLevelSilent,
 	})
+	result.Errors = append(result.Errors, guard.errors(result.OutputFiles)...)
 	if len(result.Errors) > 0 || len(result.OutputFiles) == 0 {
 		return "", false, clientBuildError(b.Root, key, result.Errors)
 	}
@@ -773,7 +779,7 @@ export async function mount(el) {
 	// the browser: sonner's toast() reaches the Toaster of another chunk.
 	name := b.islandEntryName(src, resolveDir)
 	b.setIslandEntries("client-boundary\x00"+key, []islandEntry{{Name: name, Source: src, ResolveDir: resolveDir, Boundary: true}})
-	info := clientChunkInfo{url: b.islandEntryURL(name), stateful: statefulHookRe.Match(out)}
+	info := clientChunkInfo{url: b.islandEntryURL(name), stateful: statefulHookRe.Match(out), inputs: metafileInputs(b.Root, result.Metafile)}
 	if b.clientChunkText == nil {
 		b.clientChunkText = map[string]string{}
 	}
@@ -884,6 +890,7 @@ export function __krate_render(C, props) {
 }
 `
 	plugin := islandRenderToStringPlugin(cb.resolveDir())
+	guard := &unavailableGuard{root: c.root, nodeRuntime: true, msgs: map[string]string{}}
 	result := esbuildBuild(api.BuildOptions{
 		Stdin: &api.StdinOptions{
 			Contents:   src,
@@ -905,9 +912,15 @@ export function __krate_render(C, props) {
 		Alias:           islandAlias(c.root, false),
 		External:        []string{"preact", "preact/compat", "preact/hooks", "preact/jsx-runtime"},
 		Inject:          []string{shim},
-		Plugins:         []api.Plugin{serverCSSPlugin(c.root), *plugin, clientOnlyMarkersPlugin(false), actionServerBundlePlugin(c.res, c.actions, c.basePath)},
+		Plugins:         []api.Plugin{purePrunePlugin(c.root), guard.plugin(), serverCSSPlugin(c.root), *plugin, clientOnlyMarkersPlugin(false), actionServerBundlePlugin(c.res, c.actions, c.basePath)},
 		LogLevel:        api.LogLevelSilent,
 	})
+	if len(result.Errors) == 0 {
+		// Write is on, so the output is on disk: check it there.
+		if data, rerr := os.ReadFile(c.implPath(cb)); rerr == nil {
+			result.Errors = append(result.Errors, guard.errors([]api.OutputFile{{Contents: data}})...)
+		}
+	}
 	if len(result.Errors) > 0 {
 		err = clientBuildError(c.root, cb.SourcePath, result.Errors)
 	}
@@ -1070,3 +1083,28 @@ func setupPackageBoundaries(pb api.PluginBuild, pkgs []ClientBoundary, outPath s
 }
 
 var specFilterEscape = regexp.MustCompile(`[.*+?^${}()|\[\]\\/-]`)
+
+// metafileInputs lists the source files with code in the build's output.
+func metafileInputs(root, metafile string) map[string]bool {
+	var meta struct {
+		Outputs map[string]struct {
+			Inputs map[string]struct {
+				BytesInOutput int `json:"bytesInOutput"`
+			} `json:"inputs"`
+		} `json:"outputs"`
+	}
+	if metafile == "" || json.Unmarshal([]byte(metafile), &meta) != nil {
+		return nil
+	}
+	out := map[string]bool{}
+	for _, o := range meta.Outputs {
+		for in, v := range o.Inputs {
+			if v.BytesInOutput > 0 && !strings.Contains(in, ":") {
+				p := filepath.Join(root, filepath.FromSlash(in))
+				out[filepath.Clean(p)] = true
+				out[canonicalPath(p)] = true
+			}
+		}
+	}
+	return out
+}

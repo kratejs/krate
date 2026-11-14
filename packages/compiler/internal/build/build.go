@@ -2383,6 +2383,10 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 			bundle.Modules[i] = &noted
 		}
 	}
+	// Environment reads are only a problem in code that reaches the browser
+	// or a static page, which a server page's tree does not (see
+	// releaseEnvWarnings).
+	envPending := holdEnvWarnings(bundle)
 	printModuleWarnings(os.Stderr, bundle.Modules)
 	var pageWarnings []diag.Diagnostic
 	for _, m := range bundle.Modules {
@@ -2597,6 +2601,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 			clientBoundaries = mergeBoundaries(clientBoundaries, layoutCut.Boundaries)
 		}
 	}
+	pageWarnings = append(pageWarnings, b.releaseEnvWarnings(envPending, bundle, clientBoundaries, serverPage)...)
 	var (
 		tree       *irtree.ComponentTree
 		emitResult *renderer.EmitResult

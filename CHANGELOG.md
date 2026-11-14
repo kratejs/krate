@@ -401,6 +401,16 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- A "use client" component no longer drags server-only code into the browser through a barrel: a project
+  module with only declarations at its top level that nothing in the client component uses (a server helper
+  re-exported next to the component, a `lazy()` of a server module) is dropped from the client chunks, and
+  Node built-ins and native `.node` addons fail the build (KR8009) only when code a client component reaches
+  actually uses them, not while the bundler scans an unused re-export.
+- `lazy(() => import("./x"))` inside an async page or server component renders the module on the server (the
+  build stopped with "No matching export for import lazy"), so a server-only module can be loaded that way and
+  no browser chunk is made for it.
+- KR8310 (`process.env` read that is undefined in the browser) no longer fires for modules of an async page's
+  server tree that no client component bundles; it still fires for the client components and for synchronous pages.
 - Build-time `metadata`, `viewport`, `generateMetadata` and `generateStaticParams` evaluation runs only the
   export and what it uses, not the whole page module: a page whose `metadata` is a call no longer loses its
   tags (KR7122) because another import touches `document` at module scope, reads `__dirname`, uses the `Link`
