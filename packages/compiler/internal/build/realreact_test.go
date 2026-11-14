@@ -316,16 +316,10 @@ func TestReconcilerLibraryOnPreactIsland(t *testing.T) {
 	}
 }
 
-// TestRealReactIslandServerOnlyCode: a real-React island that imports two
-// constants from a server module (which uses node:crypto elsewhere) and a
-// function from a "use server" module builds like a Preact island does. The
-// unused built-in import is dropped, the action module becomes a reference to
-// the action endpoint (its body and the lazily imported queue module stay on
-// the server), and a genuine built-in use still fails at its real position.
-func TestRealReactIslandServerOnlyCode(t *testing.T) {
-	root := t.TempDir()
-	cfg := setupIslandProject(t, root, true)
-	realReactFixture(t, root)
+// realReactServerOnlyFiles writes the server modules and the island of
+// TestRealReactIslandServerOnlyCode.
+func realReactServerOnlyFiles(t *testing.T, root string) {
+	t.Helper()
 	writeProjectFile(t, root, "src/server/lib.ts", `import { createHash } from 'node:crypto';
 export const WIDTH = 60;
 export function keyOf(s: string) { return createHash('sha1').update(s).digest('hex'); }
@@ -365,6 +359,19 @@ export default function Scene() {
 	writeProjectFile(t, root, "src/pages/index.tsx", `import Scene from '../components/Scene';
 export default function Page() { return <main><Scene /></main>; }
 `)
+}
+
+// TestRealReactIslandServerOnlyCode: a real-React island that imports two
+// constants from a server module (which uses node:crypto elsewhere) and a
+// function from a "use server" module builds like a Preact island does. The
+// unused built-in import is dropped, the action module becomes a reference to
+// the action endpoint (its body and the lazily imported queue module stay on
+// the server), and a genuine built-in use still fails at its real position.
+func TestRealReactIslandServerOnlyCode(t *testing.T) {
+	root := t.TempDir()
+	cfg := setupIslandProject(t, root, true)
+	realReactFixture(t, root)
+	realReactServerOnlyFiles(t, root)
 	out, err := captureOutput(func() error { return New(root, cfg).BuildAll() })
 	if err != nil {
 		t.Fatalf("BuildAll: %v\n%s", err, out)
