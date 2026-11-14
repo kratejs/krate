@@ -1151,7 +1151,7 @@ func streamRegionPageModeSC(ctx context.Context, w http.ResponseWriter, flusher 
 		if res.noStore || res.renderErr != "" {
 			w.Header().Set("Cache-Control", "private, no-store")
 			w.Header().Del("X-Krate-Cache")
-		} else {
+		} else if w.Header().Get("Cache-Control") == "" {
 			if revalidate <= 0 {
 				revalidate = defaultISRRevalidate
 			}
@@ -2175,7 +2175,8 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
-		if !isISR {
+		// A Cache-Control that middleware or a headers rule set wins over the default.
+		if !isISR && w.Header().Get("Cache-Control") == "" {
 			w.Header().Set("Cache-Control", "no-store")
 		}
 		reval := 0

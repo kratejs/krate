@@ -568,6 +568,16 @@ host code runs in the native process. Names and options may change between relea
   identifier npm cannot use as a tag fails at the start, and a stable patch lower than `latest`
   no longer moves `latest`.
 - Compatibility matrix rows backed by CI tests read "Supported" instead of "Beta".
+- `site.htmlAttributes: { className: 'dark' }` (and `bodyAttributes`) written in `krate.config.ts` now
+  emits `class="dark"`; the config loader lowercased the key to `classname` before the JSX name was mapped.
+- A `Cache-Control` set by middleware or a `headers` rule is kept on pages rendered per request instead of
+  being replaced by `no-store` (`krate serve` and the Cloudflare, Vercel, Netlify and node targets). The
+  default stays `no-store`, and error pages, renders that read request state and actions keep it forced.
+- `krate migrate nextjs` lists `preact` as a manual item with the exact install command when the app uses
+  React and does not depend on it (`--update-package` adds it), instead of leaving the first build to stop
+  with KR8009.
+- KR7116 (two modules export the same name and it cannot be renamed) is reported once per build as the
+  changelog says; it was reported again for every page whose set of importing modules differed.
 
 ### Security
 
