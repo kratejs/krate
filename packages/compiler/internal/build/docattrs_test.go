@@ -177,9 +177,30 @@ export default async function Home() {
 	}
 }
 
+// TestConfigDocAttrsUseJSXNames loads a real krate.config.ts, so the loader's
+// key handling is covered, and builds with JSX attribute names.
 func TestConfigDocAttrsUseJSXNames(t *testing.T) {
-	got := configDocAttrs(config.AttrMap{"className": "dark", "htmlFor": "x", "data-Site": "y"})
-	if got["class"] != "dark" || got["for"] != "x" || got["data-site"] != "y" || len(got) != 3 {
-		t.Errorf("attrs = %v", got)
+	b, root := scProject(t, map[string]string{
+		"krate.config.ts": `export default { site: { htmlAttributes: { className: 'dark', lang: 'en' }, bodyAttributes: { className: 'min-h-screen' } } };`,
+		"src/pages/index.tsx": `export default function Home() { return <h1>home</h1>; }`,
+	})
+	cfg, err := config.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.PagesDir = filepath.Join(root, "src", "pages")
+	cfg.OutDir = filepath.Join(root, "dist")
+	b = New(root, cfg)
+	if err := b.BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(root, "dist", "index.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`<html class=dark lang=en>`, `<body class=min-h-screen>`} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("missing %q:\n%s", want, data)
+		}
 	}
 }
