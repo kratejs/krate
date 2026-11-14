@@ -79,7 +79,7 @@ func TestSegmentPageRendersPerRequest(t *testing.T) {
 	}
 
 	// An unmatched URL.
-	status, header, html := getWith(t, base+"/nope", map[string]string{"x-site": "alpha"})
+	status, header, html := getWith(t, base+"/nope/", map[string]string{"x-site": "alpha"})
 	if status != 404 || !strings.Contains(html, "missing for alpha") || !strings.Contains(html, "<title>Missing alpha</title>") {
 		t.Fatalf("status %d (want 404 with the request's header):\n%s", status, html)
 	}
@@ -87,7 +87,7 @@ func TestSegmentPageRendersPerRequest(t *testing.T) {
 		t.Errorf("Cache-Control = %q", header.Get("Cache-Control"))
 	}
 	// Another request gets its own render.
-	if _, _, html = getWith(t, base+"/nope", map[string]string{"x-site": "beta"}); !strings.Contains(html, "missing for beta") {
+	if _, _, html = getWith(t, base+"/nope/", map[string]string{"x-site": "beta"}); !strings.Contains(html, "missing for beta") {
 		t.Errorf("each request renders on its own:\n%s", html)
 	}
 	// A route whose render calls notFound(): the nearest 404 page of its directory.

@@ -965,7 +965,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
       }
     }
 
-    const wantsHTML = isHTMLDocRequest(p) || (rs.headers.get("accept") || "").includes("text/html");
+    const wantsHTML = isHTMLDocRequest(p) || extName(p) === "" || (rs.headers.get("accept") || "").includes("text/html");
     // Conditional headers dropped by an outer layer (flash notices) must not reach the file server.
     const sreq = rs.headers === rs.request.headers ? rs.request : new Request(rs.request.url, { method: rs.request.method, headers: rs.headers });
     let served = staticLayer ? await staticLayer.serve(sreq, p) : null;
@@ -975,6 +975,11 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
       if (inPlace && inPlace.status !== 404) served = inPlace;
     }
     if (served && served.status !== 404) return mergeStaticResponse(rs, served);
+    // An unknown URL follows the same slash rule as a page, then answers 404 at its canonical form.
+    if (p !== "/api" && !p.startsWith("/api/") && !p.startsWith("/__krate") && !p.split("/").some((seg) => seg.startsWith("."))) {
+      const slash = redirectToCanonicalSlash(rs);
+      if (slash) return slash;
+    }
     const page404 = wantsHTML ? errorPage(p, 404, { closed: closedPattern }) : null;
     if (page404) return custom404(rs, page404);
     return notFoundText(rs, true);
