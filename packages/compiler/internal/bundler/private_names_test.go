@@ -3,6 +3,7 @@ package bundler
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
@@ -68,7 +69,7 @@ func TestPrivateNamesAreIsolated(t *testing.T) {
 	}
 }
 
-func TestExportCollisionWarnsOnlyForPageImports(t *testing.T) {
+func TestExportCollisionWarnsOncePerBuild(t *testing.T) {
 	dir := t.TempDir()
 	files := map[string]string{
 		"node_modules/zod/package.json": `{"name":"zod","main":"index.js"}`,
@@ -78,11 +79,14 @@ func TestExportCollisionWarnsOnlyForPageImports(t *testing.T) {
 		"values.ts":                     "export function mergeValues() { return 2; }\n",
 		"consumer.ts":                   "import { mergeValues } from './values';\nexport const c = mergeValues();\n",
 		"barrel.ts":                     "export { mergeValues } from './values';\nexport { c } from './consumer';\n",
-		"a.ts":                          "export function dup() { return 1; }\n",
-		"b.ts":                          "export function dup() { return 2; }\n",
-		"ab.ts":                         "export { dup } from './a';\nexport { dup as dup2 } from './b';\n",
-		"clean.tsx":                     "import { run } from 'zod';\nimport { c } from './barrel';\nexport default function P() { return <p>{run()}{c}</p>; }\n",
-		"clash.tsx":                     "import { dup } from './a';\nimport { dup as dupB } from './b';\nimport './ab';\nexport default function P() { return <p>{dup()}{dupB()}</p>; }\n",
+		"a.ts":                          "export function dup() { return 'A'; }\n",
+		"b.ts":                          "export function dup() { return 'B'; }\n",
+		"ca.ts":                         "import { dup } from './a';\nexport const ra = dup();\n",
+		"cb.ts":                         "import { dup } from './b';\nexport const rb = dup();\n",
+		"ab.ts":                         "export { dup as dupA } from './a';\nexport { dup as dupB } from './b';\nexport { ra } from './ca';\nexport { rb } from './cb';\n",
+		"pkg.tsx":                       "import { run } from 'zod';\nimport { c } from './barrel';\nexport default function P() { return <p>{run()}{c}</p>; }\n",
+		"p1.tsx":                        "import { ra, rb } from './ab';\nexport default function P() { return <p>{ra}{rb}</p>; }\n",
+		"p2.tsx":                        "import { ra, rb } from './ab';\nexport default function P() { return <b>{ra}{rb}</b>; }\n",
 	}
 	for name, src := range files {
 		p := filepath.Join(dir, filepath.FromSlash(name))
@@ -93,25 +97,32 @@ func TestExportCollisionWarnsOnlyForPageImports(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	count := func(page string) int {
-		bundle, err := New(dir).Bundle(filepath.Join(dir, page))
+	cache := NewModuleCache()
+	warnings := func(page string) []string {
+		b := New(dir)
+		b.SetModuleCache(cache)
+		bundle, err := b.Bundle(filepath.Join(dir, page))
 		if err != nil {
 			t.Fatal(err)
 		}
-		n := 0
+		var out []string
 		for _, m := range bundle.Modules {
 			for _, d := range m.Diagnostics {
 				if d.Code == diag.CodeExportCollision {
-					n++
+					out = append(out, d.Message)
 				}
 			}
 		}
-		return n
+		return out
 	}
-	if n := count("clean.tsx"); n != 0 {
-		t.Errorf("the page imports mergeValues from neither module, got %d warnings", n)
+	if w := warnings("pkg.tsx"); len(w) != 0 {
+		t.Errorf("a package export is bundled apart from the project's, got %v", w)
 	}
-	if n := count("clash.tsx"); n != 1 {
-		t.Errorf("the page imports dup from two modules, want 1 warning, got %d", n)
+	w := warnings("p1.tsx")
+	if len(w) != 1 || !strings.Contains(w[0], "ca.ts, cb.ts") {
+		t.Errorf("want one warning naming the importers, got %v", w)
+	}
+	if w := warnings("p2.tsx"); len(w) != 0 {
+		t.Errorf("the same clash must not warn again on the next page, got %v", w)
 	}
 }

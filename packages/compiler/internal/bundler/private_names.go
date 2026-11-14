@@ -256,8 +256,11 @@ type exportPlan struct {
 type exportClash struct {
 	name  string
 	files []string
-	// pkgOnly is set when every module involved is inside node_modules: the
-	// page's author cannot rename those exports, so there is nothing to warn.
+	// importers are the modules that import the name from one of files.
+	importers []string
+	// pkgOnly is set when a module involved is inside node_modules: the
+	// build bundles a package apart from the project's modules, so its
+	// export never meets a project module's, and the author cannot rename it.
 	pkgOnly bool
 }
 
@@ -329,7 +332,8 @@ func (b *Bundler) planExportRenames(mods []*Module, dynamic map[string]bool) exp
 	}
 
 	imported := map[string]map[string]bool{}
-	pinned := map[string]bool{} // modules whose consumers are not all imports
+	importers := map[string]map[string]bool{} // name -> base names of importing modules
+	pinned := map[string]bool{}               // modules whose consumers are not all imports
 	for _, mod := range mods {
 		locals := map[string]string{} // import local -> target module
 		for _, stmt := range mod.Program.Body {
@@ -340,14 +344,15 @@ func (b *Bundler) planExportRenames(mods []*Module, dynamic map[string]bool) exp
 				// original names (build.exportBindings).
 				target := b.resolveImportForModule(mod.Path, strings.Trim(st.Source, "\"'`"))
 				for _, spec := range st.Named {
-					// Only the page's own imports count for the warning: a
-					// module deep in the graph importing a name says nothing
-					// about what the page imports.
-					if mod.IsEntry && owners[spec.Remote][target] {
+					if owners[spec.Remote][target] {
 						if imported[spec.Remote] == nil {
 							imported[spec.Remote] = map[string]bool{}
 						}
 						imported[spec.Remote][target] = true
+						if importers[spec.Remote] == nil {
+							importers[spec.Remote] = map[string]bool{}
+						}
+						importers[spec.Remote][filepath.Base(mod.Path)] = true
 					}
 					local := spec.Local
 					if local == "" {
@@ -433,13 +438,18 @@ func (b *Bundler) planExportRenames(mods []*Module, dynamic map[string]bool) exp
 				files = append(files, filepath.Base(mod.Path))
 			}
 			sort.Strings(files)
-			pkgOnly := true
+			pkgOnly := false
 			for _, mod := range stuck {
-				if !inNodeModules(mod.Path) {
-					pkgOnly = false
+				if inNodeModules(mod.Path) {
+					pkgOnly = true
 				}
 			}
-			plan.shared = append(plan.shared, exportClash{name: name, files: files, pkgOnly: pkgOnly})
+			var by []string
+			for f := range importers[name] {
+				by = append(by, f)
+			}
+			sort.Strings(by)
+			plan.shared = append(plan.shared, exportClash{name: name, files: files, importers: by, pkgOnly: pkgOnly})
 		}
 	}
 	return plan
@@ -474,9 +484,10 @@ func ownsExports(mod *Module) bool {
 	return isAction
 }
 
-// warnExportCollisions reports a name that the page imports from several modules
-// which all export it and could not be told apart, on the entry module so it
-// reaches the page's warnings.
+// warnExportCollisions reports a name that several modules export, that cannot
+// be renamed, and that the bundle imports from more than one of them, on the
+// entry module so it reaches the page's warnings. A clash is reported once per
+// build: the shared cache remembers which ones were.
 func (b *Bundler) warnExportCollisions(mods []*Module, clashes []exportClash) {
 	var entry *Module
 	for _, mod := range mods {
@@ -491,9 +502,12 @@ func (b *Bundler) warnExportCollisions(mods []*Module, clashes []exportClash) {
 		if c.pkgOnly {
 			continue
 		}
+		if b.cache != nil && !b.cache.firstWarning(c.name+"|"+strings.Join(c.files, ",")+"|"+strings.Join(c.importers, ",")) {
+			continue
+		}
 		d := diag.Diagnostic{
 			File: entry.Path, Line: 1, Col: 1,
-			Message: "both " + strings.Join(c.files, " and ") + " export " + strconv.Quote(c.name) + ", and this page imports it from each",
+			Message: strings.Join(c.files, " and ") + " both export " + strconv.Quote(c.name) + " and cannot be renamed, so " + strings.Join(c.importers, ", ") + " may read the wrong one",
 			Hint:    "modules on a page share one namespace, so both imports resolve to the same declaration; rename one of the exports",
 		}
 		d.Code, d.Severity = diag.CodeExportCollision, diag.SeverityWarning
