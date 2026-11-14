@@ -315,9 +315,9 @@ func reactServerShimPlugin() api.Plugin {
 				return api.OnResolveResult{Path: "react", Namespace: "krate-react-shim"}, nil
 			})
 			b.OnLoad(api.OnLoadOptions{Filter: `.*`, Namespace: "krate-react-shim"}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
-				contents := "import { Suspense, Fragment, createSignal, createEffect, createMemo, onCleanup, onMount } from '@krate/runtime/server';\n" +
-					"export { Suspense, Fragment, createSignal, createEffect, createMemo, onCleanup, onMount };\n" +
-					"export default { Suspense, Fragment };\n"
+				contents := "import { Suspense, Fragment, lazy, createSignal, createEffect, createMemo, onCleanup, onMount } from '@krate/runtime/server';\n" +
+					"export { Suspense, Fragment, lazy, createSignal, createEffect, createMemo, onCleanup, onMount };\n" +
+					"export default { Suspense, Fragment, lazy };\n"
 				return api.OnLoadResult{Contents: &contents, Loader: api.LoaderJS, ResolveDir: ""}, nil
 			})
 		},
