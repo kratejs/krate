@@ -396,6 +396,13 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- Build-time `metadata`, `viewport`, `generateMetadata` and `generateStaticParams` evaluation runs only the
+  export and what it uses, not the whole page module: a page whose `metadata` is a call no longer loses its
+  tags (KR7122) because another import touches `document` at module scope, reads `__dirname`, uses the `Link`
+  global or pulls in a native addon (packages in `serverExternalPackages` and native addons stay external on
+  the Node fallback). A KR7122 from a layout is reported at the layout's export, never at `0:0`. An
+  out-of-memory or crash inside the embedded JavaScript engine (default heap raised to 128 MB,
+  `KRATE_JS_MEMORY_MB`) is now an error for that page instead of killing the build.
 - Inline `"use server"` actions declared inside a callback of an async server component (a `.map` row
   action capturing the row) no longer fail with KR7001. The error for a capture in a non-async component
   now names the variable, and a value that cannot be sealed reports the action's `file:line:col`.
