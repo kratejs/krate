@@ -890,7 +890,7 @@ export function __krate_render(C, props) {
 }
 `
 	plugin := islandRenderToStringPlugin(cb.resolveDir())
-	guard := &unavailableGuard{root: c.root, nodeRuntime: true, msgs: map[string]string{}}
+	guard := &unavailableGuard{root: c.root, nodeRuntime: true, msgs: map[string]api.Message{}}
 	result := esbuildBuild(api.BuildOptions{
 		Stdin: &api.StdinOptions{
 			Contents:   src,

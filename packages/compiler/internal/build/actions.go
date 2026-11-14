@@ -558,6 +558,7 @@ func actionProxyModule(exports map[string]string, basePath string) string {
 	b.WriteString("const __krateActionURLBase = ")
 	b.Write(baseJSON)
 	b.WriteString(";\n")
+	b.WriteString(clientActionCallJS)
 	b.WriteString(`function __krateActionProxy(id, bound) {
   bound = bound || [];
   function action() {
@@ -565,6 +566,7 @@ func actionProxyModule(exports map[string]string, basePath string) string {
     if (typeof window !== "undefined" && typeof window.__krateAction === "function") {
       return window.__krateAction(id).apply(null, args);
     }
+    if (typeof window !== "undefined") return __krateCallAction(action.actionUrl, args);
     return Promise.reject(new Error("Server action cannot run during SSR"));
   }
   action.actionUrl = __krateActionURLBase + "/__krate/action/" + id;

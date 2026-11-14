@@ -315,3 +315,92 @@ func TestReconcilerLibraryOnPreactIsland(t *testing.T) {
 		t.Fatalf("want a build error that names react.islands, got %v", err)
 	}
 }
+
+// TestRealReactIslandServerOnlyCode: a real-React island that imports two
+// constants from a server module (which uses node:crypto elsewhere) and a
+// function from a "use server" module builds like a Preact island does. The
+// unused built-in import is dropped, the action module becomes a reference to
+// the action endpoint (its body and the lazily imported queue module stay on
+// the server), and a genuine built-in use still fails at its real position.
+func TestRealReactIslandServerOnlyCode(t *testing.T) {
+	root := t.TempDir()
+	cfg := setupIslandProject(t, root, true)
+	realReactFixture(t, root)
+	writeProjectFile(t, root, "src/server/lib.ts", `import { createHash } from 'node:crypto';
+export const WIDTH = 60;
+export function keyOf(s: string) { return createHash('sha1').update(s).digest('hex'); }
+`)
+	writeProjectFile(t, root, "src/server/actions.ts", `'use server';
+import { createHash } from 'node:crypto';
+import { logSave } from './log';
+export async function saveDraft(text: string) {
+	const id = createHash('sha256').update(text).digest('hex').slice(0, 8);
+	await logSave(id);
+	return id;
+}
+`)
+	writeProjectFile(t, root, "src/server/log.ts", `export async function logSave(id: string) {
+	const { enqueue } = await import('./queues');
+	await enqueue(id);
+}
+`)
+	writeProjectFile(t, root, "src/server/queues.ts", `import { appendFile } from 'node:fs/promises';
+export async function enqueue(id: string) { await appendFile('queue.log', id + '\n'); }
+`)
+	writeProjectFile(t, root, "src/components/Scene.tsx", `'use client';
+import { useState } from 'react';
+import { Canvas, Rect } from 'fake-canvas';
+import { WIDTH } from '../server/lib';
+import { saveDraft } from '../server/actions';
+export default function Scene() {
+	const [id, setId] = useState('');
+	return (
+		<div>
+			<button id="save" onClick={async () => setId(await saveDraft('hello'))}>save {id}</button>
+			<Canvas id="cv" width={WIDTH} height={20}><Rect x={0} y={0} w={5} h={5} fill="red" /></Canvas>
+		</div>
+	);
+}
+`)
+	writeProjectFile(t, root, "src/pages/index.tsx", `import Scene from '../components/Scene';
+export default function Page() { return <main><Scene /></main>; }
+`)
+	out, err := captureOutput(func() error { return New(root, cfg).BuildAll() })
+	if err != nil {
+		t.Fatalf("BuildAll: %v\n%s", err, out)
+	}
+	if strings.Contains(out, "KR8") {
+		t.Fatalf("unexpected diagnostics:\n%s", out)
+	}
+	var code strings.Builder
+	chunks, _ := filepath.Glob(filepath.Join(cfg.OutDir, "chunks", "*.js"))
+	for _, f := range chunks {
+		code.WriteString(readBuilt(t, f))
+	}
+	for _, bad := range []string{"node:", "createHash", "appendFile", "queue.log", "keyOf"} {
+		if strings.Contains(code.String(), bad) {
+			t.Errorf("a browser chunk holds server-only code (%q)", bad)
+		}
+	}
+	if !strings.Contains(code.String(), "/__krate/action/") || !strings.Contains(code.String(), "x-krate-action") {
+		t.Errorf("the island must call the action through the action endpoint")
+	}
+
+	// The same island using the built-in itself must still fail, at the
+	// position of the import.
+	writeProjectFile(t, root, "src/components/Scene.tsx", `'use client';
+import { Canvas, Rect } from 'fake-canvas';
+import { keyOf } from '../server/lib';
+export default function Scene() {
+	return <Canvas id="cv" width={20} height={20}><Rect x={0} y={0} w={5} h={5} fill={keyOf('a')} /></Canvas>;
+}
+`)
+	_, err = captureOutput(func() error { return New(root, cfg).BuildAll() })
+	if err == nil {
+		t.Fatal("a real-React island that calls a Node built-in must fail the build")
+	}
+	got := strings.ReplaceAll(err.Error(), `\`, "/")
+	if !strings.Contains(got, "KR8009") || !strings.Contains(got, `src/server/lib.ts:1:`) || strings.Contains(got, ":0:0") {
+		t.Errorf("want KR8009 at src/server/lib.ts:1:N, got:\n%s", got)
+	}
+}

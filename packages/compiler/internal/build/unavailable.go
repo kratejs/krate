@@ -2,6 +2,7 @@ package build
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -32,19 +33,44 @@ type unavailableGuard struct {
 	// normally and only native addons, which esbuild cannot load, are stubbed.
 	nodeRuntime bool
 	mu          sync.Mutex
-	msgs        map[string]string // stub key -> error text
+	msgs        map[string]api.Message // stub key -> error
 }
 
 func (b *Builder) newUnavailableGuard() *unavailableGuard {
-	return &unavailableGuard{root: b.Root, msgs: map[string]string{}}
+	return &unavailableGuard{root: b.Root, msgs: map[string]api.Message{}}
 }
 
-func (g *unavailableGuard) note(key, text string) {
+func (g *unavailableGuard) note(key string, msg api.Message) {
 	g.mu.Lock()
 	if _, ok := g.msgs[key]; !ok {
-		g.msgs[key] = text
+		g.msgs[key] = msg
 	}
 	g.mu.Unlock()
+}
+
+// importMessage is the error for an import of a Node built-in. It points at
+// the import specifier in the importing file when it can be found there.
+func (g *unavailableGuard) importMessage(importer, spec string) api.Message {
+	text := fmt.Sprintf("Could not resolve %q: Node built-ins do not exist in the browser", spec)
+	if data, err := os.ReadFile(importer); err == nil {
+		src := string(data)
+		for _, q := range []string{`"`, `'`} {
+			i := strings.Index(src, q+spec+q)
+			if i < 0 {
+				continue
+			}
+			line := 1 + strings.Count(src[:i], "\n")
+			lineStart := strings.LastIndex(src[:i], "\n") + 1
+			lineEnd := len(src)
+			if j := strings.Index(src[i:], "\n"); j >= 0 {
+				lineEnd = i + j
+			}
+			return api.Message{Text: text, Location: &api.Location{
+				File: importer, Line: line, Column: i - lineStart, LineText: strings.TrimRight(src[lineStart:lineEnd], "\r"),
+			}}
+		}
+	}
+	return api.Message{Text: g.rel(importer) + ": " + text}
 }
 
 func (g *unavailableGuard) rel(path string) string {
@@ -73,15 +99,18 @@ func (g *unavailableGuard) plugin() api.Plugin {
 						return api.OnResolveResult{}, nil
 					}
 				}
-				g.note(args.Path, fmt.Sprintf("%s: Could not resolve %q: Node built-ins do not exist in the browser", g.rel(args.Importer), args.Path))
-				return api.OnResolveResult{Path: args.Path, Namespace: "krate-unavailable"}, nil
+				// One stub per importer, so a stub that survives names the
+				// file that really reaches it.
+				key := args.Importer + "|" + args.Path
+				g.note(key, g.importMessage(args.Importer, args.Path))
+				return api.OnResolveResult{Path: key, Namespace: "krate-unavailable", SideEffects: api.SideEffectsFalse}, nil
 			})
 			pb.OnLoad(api.OnLoadOptions{Filter: `.*`, Namespace: "krate-unavailable"}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
 				src := unavailableStub(args.Path)
 				return api.OnLoadResult{Contents: &src, Loader: api.LoaderJS}, nil
 			})
 			pb.OnLoad(api.OnLoadOptions{Filter: `\.node$`}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
-				g.note(args.Path, fmt.Sprintf("%s: native addon %s cannot run in the browser", g.rel(args.Path), filepath.Base(args.Path)))
+				g.note(args.Path, api.Message{Text: fmt.Sprintf("%s: native addon %s cannot run in the browser", g.rel(args.Path), filepath.Base(args.Path))})
 				src := unavailableStub(args.Path)
 				return api.OnLoadResult{Contents: &src, Loader: api.LoaderJS}, nil
 			})
@@ -106,7 +135,7 @@ func (g *unavailableGuard) errors(files []api.OutputFile) []api.Message {
 		needle := unavailableMarker + hashContent([]byte(k))
 		for _, f := range files {
 			if strings.Contains(string(f.Contents), needle) {
-				out = append(out, api.Message{Text: g.msgs[k]})
+				out = append(out, g.msgs[k])
 				break
 			}
 		}
@@ -115,7 +144,9 @@ func (g *unavailableGuard) errors(files []api.OutputFile) []api.Message {
 }
 
 func unavailableStub(key string) string {
-	return "throw new Error(\"" + unavailableMarker + hashContent([]byte(key)) + "\");\n"
+	// module.exports makes it a CommonJS module, so a named import of it is a
+	// property read that keeps the stub only when code really uses it.
+	return "module.exports = {};\nthrow new Error(\"" + unavailableMarker + hashContent([]byte(key)) + "\");\n"
 }
 
 // liveOutputs returns the output files a code-split build keeps alive: the
