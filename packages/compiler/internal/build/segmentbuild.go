@@ -90,6 +90,42 @@ func errorBoundarySource(spec, id string) string {
 		"}\n"
 }
 
+// errorFallbackSource is the generated client component a request-time error
+// boundary renders when its page throws. The content it replaced came from the
+// server, so reset() reloads the page.
+func errorFallbackSource(spec string) string {
+	return "'use client';\n" +
+		"import ErrorPage from " + fmt.Sprintf("%q", spec) + ";\n\n" +
+		"export default function KrateBoundaryFallback(props: any) {\n" +
+		"  return <ErrorPage error={props.error} reset={() => location.reload()} />;\n" +
+		"}\n"
+}
+
+// serverBoundarySource is the generated layout that makes a segment's error.tsx
+// the error boundary of a page that renders per request (under an async
+// layout). Unlike errorBoundarySource it runs only in the SSR sidecar.
+func serverBoundarySource() string {
+	return "import { ServerErrorBoundary } from \"@krate/runtime/server\";\n" +
+		"import Fallback from \"./fallback\";\n\n" +
+		"export default function KrateServerBoundary(props: any) {\n" +
+		"  return <ServerErrorBoundary fallback={Fallback}>{props.children}</ServerErrorBoundary>;\n" +
+		"}\n"
+}
+
+// serverBoundaryLayout returns the generated request-time boundary layout for
+// an error.tsx.
+func (b *Builder) serverBoundaryLayout(errFile string) (string, error) {
+	path := b.segmentGenPath(errFile, "server-boundary")
+	fallback := b.segmentGenPath(errFile, "fallback")
+	if err := b.writeSegmentGen(fallback, errorFallbackSource(importSpec(fallback, errFile))); err != nil {
+		return "", fmt.Errorf("writing generated error fallback for %s: %w", errFile, err)
+	}
+	if err := b.writeSegmentGen(path, serverBoundarySource()); err != nil {
+		return "", fmt.Errorf("writing generated server error boundary for %s: %w", errFile, err)
+	}
+	return path, nil
+}
+
 // errorPageSource is the generated entry for the server-rendered error page.
 // The static variant bakes placeholders into the HTML, which the server
 // replaces per request; a page whose error component needs client code uses
