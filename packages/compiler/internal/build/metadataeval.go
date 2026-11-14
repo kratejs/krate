@@ -146,9 +146,6 @@ func (b *Builder) evalMetadata(page string, segs []metaSegment, pageFiles string
 		Env:           b.scriptEnv(),
 		Await:         true,
 		ResolveImport: resolve,
-
-		// Module-level JSX in the page chain compiles without React in scope.
-		JSXImportSource: "@krate/runtime/server",
 	})
 	if eerr == nil {
 		if out, perr := parse(raw); perr == nil {
@@ -183,9 +180,8 @@ func anyErrors(rs []metadataResult) bool {
 // ESM and runs it with the configured runtime, returning its stdout.
 func (b *Builder) runBootstrapBundle(abs, source, prefix string, bnd *bundler.Bundler) ([]byte, error) {
 	jsxSource := ""
-	if prefix == "imageroute" || prefix == "metaroute" || prefix == "metadata" {
-		// opengraph-image.tsx and pages with module-level JSX build their
-		// element trees with the server JSX runtime, not React.
+	if prefix == "imageroute" || prefix == "metaroute" {
+		// opengraph-image.tsx builds its element tree with the server JSX runtime.
 		jsxSource = "@krate/runtime/server"
 	}
 	resolve := func(importer, spec string) (string, bool) {
