@@ -1033,7 +1033,8 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
 
     rs.res.set("Content-Type", "text/html; charset=utf-8");
     rs.res.set("X-Content-Type-Options", "nosniff");
-    if (!isISR) rs.res.set("Cache-Control", "no-store");
+    // A Cache-Control that middleware or a headers rule already set wins over the default.
+    if (!isISR && !rs.res.has("Cache-Control")) rs.res.set("Cache-Control", "no-store");
     let reval = 0;
     if (isISR) {
       reval = page.revalidate && page.revalidate > 0 ? page.revalidate : 60;
@@ -1227,7 +1228,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
       if (noStore || renderErr) {
         rs.res.set("Cache-Control", "private, no-store");
         rs.res.delete("X-Krate-Cache");
-      } else {
+      } else if (!rs.res.has("Cache-Control")) {
         const r = revalidate > 0 ? revalidate : 60;
         rs.res.set("Cache-Control", `public, s-maxage=${r}, stale-while-revalidate=${2 * r}`);
       }

@@ -225,3 +225,41 @@ func TestServeW5Behaviors(t *testing.T) {
 		}
 	})
 }
+
+// TestMiddlewareCacheControlWinsOnSSRPages: a Cache-Control that middleware sets
+// on a request-time page replaces Krate's no-store default.
+func TestMiddlewareCacheControlWinsOnSSRPages(t *testing.T) {
+	e2eEnv(t)
+	b, root := scProject(t, map[string]string{
+		"src/pages/index.tsx": `export default async function Home() {
+  await Promise.resolve();
+  return <h1>ssr</h1>;
+}`,
+		"src/pages/plain.tsx": `export default async function Plain() {
+  await Promise.resolve();
+  return <h1>plain</h1>;
+}`,
+		"middleware.ts": `export function middleware(request: Request) {
+  const headers: Record<string, string> = { "x-middleware-next": "1" };
+  if (new URL(request.url).pathname === "/") headers["cache-control"] = "public, s-maxage=60";
+  return new Response(null, { headers });
+}
+export const config = { matcher: ["/", "/plain", "/plain/"] };`,
+	})
+	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	base, err := startKrateServer(t, root, b.Cfg)
+	if err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+	if _, h, body := getBody(t, base+"/"); h.Get("Cache-Control") != "public, s-maxage=60" || !strings.Contains(body, "ssr") {
+		t.Errorf("middleware Cache-Control = %q:\n%s", h.Get("Cache-Control"), body)
+	}
+	if _, h, _ := getBody(t, base+"/plain/"); h.Get("Cache-Control") != "no-store" {
+		t.Errorf("default Cache-Control = %q, want no-store", h.Get("Cache-Control"))
+	}
+}

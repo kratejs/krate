@@ -274,3 +274,40 @@ describe("per-request metadata routes", () => {
     expect((await handler(new Request("http://localhost/robots.txt", { method: "POST" }))).status).not.toBe(200);
   });
 });
+
+describe("Cache-Control on request-time pages", () => {
+  const shell = "<html><head><title>t</title></head><body><!--suspense:page-->baked<!--/suspense:page--></body></html>";
+  const mk = (target: "node" | "vercel" | "cloudflare") =>
+    createKrateHandler({
+      target,
+      data: data({
+        hasMiddleware: true,
+        pages: [
+          { route: "/cached", mode: "ssr", bundlePath: "page" },
+          { route: "/plain", mode: "ssr", bundlePath: "page" },
+        ],
+        allPages: [{ route: "/cached", mode: "ssr" }, { route: "/plain", mode: "ssr" }],
+        shells: { "/cached": shell, "/plain": shell },
+      }),
+      modules: {
+        pages: { page: { default: () => jsx("main", { children: "ssr" }) } },
+        middleware: {
+          middleware: (req: Request) => {
+            const headers: Record<string, string> = { "x-middleware-next": "1" };
+            if (new URL(req.url).pathname.startsWith("/cached")) headers["cache-control"] = "public, s-maxage=60";
+            return new Response(null, { headers });
+          },
+        },
+      },
+    });
+
+  it("lets middleware set it and defaults to no-store", async () => {
+    for (const target of ["node", "cloudflare", "vercel"] as const) {
+      const h = mk(target);
+      const cached = await h(new Request("http://localhost/cached/"));
+      expect(cached.headers.get("cache-control"), target).toBe("public, s-maxage=60");
+      expect(await cached.text()).toContain("ssr");
+      expect((await h(new Request("http://localhost/plain/"))).headers.get("cache-control"), target).toBe("no-store");
+    }
+  });
+});
