@@ -15,7 +15,6 @@ const (
 var (
 	fontGoogleImport = regexp.MustCompile(`import\s+(?:type\s+)?\{([^}]*)\}\s+from\s+["']next/font/google["']`)
 	fontLocalImport  = regexp.MustCompile(`import\s+([A-Za-z_$][\w$]*)\s+from\s+["']next/font/local["']\s*;?[ \t]*\r?\n?`)
-	useDirective     = regexp.MustCompile(`^\s*["']use (?:client|server)["']\s*;?[ \t]*\r?\n`)
 )
 
 // migrateNextFonts rewrites next/font imports. Google fonts go through a
@@ -120,13 +119,66 @@ func migrateNextFonts(rep *Report, root string) {
 	}
 }
 
-// insertImportAfterDirective adds line to the top of src, below a leading
-// "use client" or "use server" directive.
+// insertImportAfterDirective adds line to the top of src, below any directive
+// prologue ("use client", "use server", "use strict"), so a directive stays the
+// first statement.
 func insertImportAfterDirective(src, line string) string {
-	if m := useDirective.FindString(src); m != "" {
-		return src[:len(m)] + line + src[len(m):]
+	at := directivePrologueEnd(src)
+	return src[:at] + line + src[at:]
+}
+
+// directivePrologueEnd returns the offset just past the last directive line at
+// the top of src, skipping comments and blank lines before and between them.
+// It returns 0 when src has no directive.
+func directivePrologueEnd(src string) int {
+	end, i := 0, 0
+	for i < len(src) {
+		switch {
+		case src[i] == ' ' || src[i] == '\t' || src[i] == '\r' || src[i] == '\n':
+			i++
+		case strings.HasPrefix(src[i:], "//"):
+			n := strings.IndexByte(src[i:], '\n')
+			if n < 0 {
+				return end
+			}
+			i += n + 1
+		case strings.HasPrefix(src[i:], "/*"):
+			n := strings.Index(src[i+2:], "*/")
+			if n < 0 {
+				return end
+			}
+			i += n + 4
+		case src[i] == '"' || src[i] == '\'':
+			q := src[i]
+			j := i + 1
+			for j < len(src) && src[j] != q && src[j] != '\n' && src[j] != '\\' {
+				j++
+			}
+			if j >= len(src) || src[j] != q {
+				return end
+			}
+			j++
+			for j < len(src) && (src[j] == ' ' || src[j] == '\t') {
+				j++
+			}
+			if j < len(src) && src[j] == ';' {
+				j++
+			}
+			for j < len(src) && (src[j] == ' ' || src[j] == '\t' || src[j] == '\r') {
+				j++
+			}
+			if j < len(src) && src[j] != '\n' {
+				return end
+			}
+			if j < len(src) {
+				j++
+			}
+			end, i = j, j
+		default:
+			return end
+		}
 	}
-	return line + src
+	return end
 }
 
 func fontSlug(name string) string {

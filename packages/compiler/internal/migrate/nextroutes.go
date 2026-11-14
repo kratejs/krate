@@ -188,7 +188,7 @@ func rewriteNextDynamic(src string) (string, bool) {
 	src = nextDynamicArgs.ReplaceAllString(src, "lazy($1)")
 	src = nextDynamicCall.ReplaceAllString(src, "lazy(")
 	if !lazyImport.MatchString(src) {
-		src = "import { lazy } from \"react\";\n" + src
+		src = insertImportAfterDirective(src, "import { lazy } from \"react\";\n")
 	}
 	p := parser.New(lexer.New(src).Tokenize())
 	if prog := p.ParseProgram(); prog == nil || len(p.Errors()) > 0 {
@@ -351,7 +351,7 @@ func rewriteAPIServerSource(src string) (string, []string, []string) {
 		header += "\n" + nextResponseShim
 		rewrites = append(rewrites, "added NextResponse API shim (json, redirect, cookies)")
 	}
-	src = header + src
+	src = insertImportAfterDirective(src, header)
 	return src, rewrites, manual
 }
 
