@@ -396,6 +396,8 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- A component that renders `{children}` in more than one place (`<Shell twice><Probe /></Shell>`) gives
+  each copy its own hydration keys, so every copy hydrates instead of only the last one.
 - `krate migrate nextjs` places the imports it adds (`after` from `@krate/runtime/server`, `lazy`, the
   NextResponse shim) below the file's directive prologue, so `"use server"` stays the first statement.
 - The `@radix-ui/react-slot` shim exports `createSlot` and `createSlottable`, which recent Radix

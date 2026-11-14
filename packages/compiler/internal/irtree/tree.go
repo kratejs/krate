@@ -530,6 +530,12 @@ type ComponentNode struct {
 	// with properly-rendered (and hydrated) child component output.
 	CallSiteSlots []SlotNode
 
+	// CallSiteCopyStarts holds, for a component whose body renders
+	// `{children}` more than once, the offsets in CallSiteSlots where each
+	// extra copy of the call-site slots starts. Every copy has its own
+	// hydration keys; copy 0 is CallSiteSlots[:first offset].
+	CallSiteCopyStarts []int
+
 	// CallSiteChildrenText holds the compile-time text of the call-site
 	// children when they are fully static (e.g. the template literal passed to
 	// <Code>{`...`}</Code>). SSREval uses it so <SyntaxHighlight> can chroma-

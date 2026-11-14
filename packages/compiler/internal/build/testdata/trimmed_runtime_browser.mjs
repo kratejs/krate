@@ -76,6 +76,10 @@ const checks = {
     await settle();
     expect("portal closed again", await page.locator("body > #modal").count(), 0);
   },
+  async twice(page, text, settle) {
+    expect("first copy hydrated", await text("#first .probe"), "hydrated");
+    expect("second copy hydrated", await text("#second .probe"), "hydrated");
+  },
   async suspense(page, text, settle) {
     expect("suspense initial", await text("#sus"), "count0");
     await page.click("#inc");

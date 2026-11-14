@@ -456,14 +456,59 @@ func (e *Emitter) emitStatic(node *irtree.ComponentNode) SlotOutput {
 	// The placeholder sits in a hoisted <template> when it is inside the
 	// hidden branch of a conditional, so templates are spliced as well.
 	if (strings.Contains(out.HTML, "<!--__children__-->") || strings.Contains(out.Templates, "<!--__children__-->")) && len(node.CallSiteSlots) > 0 {
-		callSiteOut := e.emitSlotsParallel(node.CallSiteSlots)
-		html := callSiteOut.HTML
-		callSiteOut.HTML = ""
-		out.HTML = strings.ReplaceAll(out.HTML, "<!--__children__-->", html)
-		out.Templates = strings.ReplaceAll(out.Templates, "<!--__children__-->", html)
+		callSiteOut, _ := e.spliceCallSiteChildren(&out, node)
 		mergeSlotOutput(&out, callSiteOut)
 	}
 	return out
+}
+
+// spliceCallSiteChildren replaces the children placeholders in out with the
+// rendered call-site children of node. A component that renders `{children}`
+// more than once has one copy of the slots per placeholder, each with its own
+// hydration keys; placeholders beyond the copies reuse the last one, and copies
+// with no placeholder are not emitted. It returns the merged output of the
+// emitted copies (HTML cleared) and the slots of those copies.
+func (e *Emitter) spliceCallSiteChildren(out *SlotOutput, node *irtree.ComponentNode) (SlotOutput, []irtree.SlotNode) {
+	const placeholder = "<!--__children__-->"
+	copies := [][]irtree.SlotNode{node.CallSiteSlots}
+	if len(node.CallSiteCopyStarts) > 0 {
+		copies = nil
+		prev := 0
+		for _, start := range append(append([]int{}, node.CallSiteCopyStarts...), len(node.CallSiteSlots)) {
+			copies = append(copies, node.CallSiteSlots[prev:start])
+			prev = start
+		}
+	}
+	used := min(max(strings.Count(out.HTML, placeholder)+strings.Count(out.Templates, placeholder), 1), len(copies))
+	var merged SlotOutput
+	var htmls []string
+	var slots []irtree.SlotNode
+	for _, c := range copies[:used] {
+		o := e.emitSlotsParallel(c)
+		htmls = append(htmls, o.HTML)
+		o.HTML = ""
+		mergeSlotOutput(&merged, o)
+		slots = append(slots, c...)
+	}
+	n := 0
+	replace := func(s string) string {
+		var b strings.Builder
+		for {
+			i := strings.Index(s, placeholder)
+			if i < 0 {
+				break
+			}
+			b.WriteString(s[:i])
+			b.WriteString(htmls[min(n, len(htmls)-1)])
+			n++
+			s = s[i+len(placeholder):]
+		}
+		b.WriteString(s)
+		return b.String()
+	}
+	out.HTML = replace(out.HTML)
+	out.Templates = replace(out.Templates)
+	return merged, slots
 }
 
 // emitSSREvaluated - prop-driven components evaluated at build time
@@ -657,16 +702,14 @@ func (e *Emitter) emitClient(node *irtree.ComponentNode) SlotOutput {
 
 	mergeSlotOutput(&out, e.emitSlotsParallel(node.Children))
 	ownCount := len(out.Signatures)
+	callSiteSlots := node.CallSiteSlots
 
 	// Replace {props.children} placeholder with rendered call site children.
 	// This ensures interactive sub-components nested inside signal components
 	// retain their data-k/data-kh hydration markers.
 	if (strings.Contains(out.HTML, "<!--__children__-->") || strings.Contains(out.Templates, "<!--__children__-->")) && len(node.CallSiteSlots) > 0 {
-		callSiteOut := e.emitSlotsParallel(node.CallSiteSlots)
-		html := callSiteOut.HTML
-		callSiteOut.HTML = ""
-		out.HTML = strings.ReplaceAll(out.HTML, "<!--__children__-->", html)
-		out.Templates = strings.ReplaceAll(out.Templates, "<!--__children__-->", html)
+		callSiteOut, usedSlots := e.spliceCallSiteChildren(&out, node)
+		callSiteSlots = usedSlots
 		if cond, branch, ok := childrenPlaceholderCond(node.Children); ok {
 			claimCond(callSiteOut.Signatures, cond, branch)
 		}
@@ -688,12 +731,12 @@ func (e *Emitter) emitClient(node *irtree.ComponentNode) SlotOutput {
 	// "Off"} text) reference the CALLER's signals, not this component's scope,
 	// so they're collected as orphans and attached to the owning signature
 	// during post-processing in Emit().
-	if len(node.CallSiteSlots) > 0 {
+	if len(callSiteSlots) > 0 {
 		owner := irtree.SlotID("")
 		if len(e.clientStack) > 1 {
 			owner = e.clientStack[len(e.clientStack)-2]
 		}
-		for _, b := range collectSlotBindings(node.CallSiteSlots) {
+		for _, b := range collectSlotBindings(callSiteSlots) {
 			out.Orphans = append(out.Orphans, orphanBinding{owner: owner, bind: b})
 		}
 	}

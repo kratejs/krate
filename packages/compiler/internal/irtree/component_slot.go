@@ -401,6 +401,7 @@ func (b *builder) buildClientComponentSlot(el *ast.JSXElement, childFn *ast.FnDe
 	}
 	childNode.CallSiteChildren = el.Children
 	childNode.CallSiteSlots = b.buildComponentCallSiteSlots(el, childFn, childID, provider, childNode.childrenContext)
+	b.buildRepeatedChildrenCopies(childNode, childFn, el, childID, provider)
 	b.completeSSREvalBindings(childNode, childFn, attrs)
 	b.registerChildProps(childNode, childFn)
 	b.checkScopePropReads(el, childFn, childNode, attrs)
@@ -527,6 +528,50 @@ func (b *builder) buildComponentCallSiteSlots(el *ast.JSXElement, childFn *ast.F
 		b.contextScopes[provider.ctx] = provider.ref
 	}
 	return b.buildCallSiteChildSlots(el.Children, string(childID))
+}
+
+// maxChildrenCopies caps how many instances of the call-site children one
+// component renders; further placeholders reuse the last copy.
+const maxChildrenCopies = 8
+
+// buildRepeatedChildrenCopies builds one extra copy of the call-site children
+// for every further `{children}` placeholder in the component's body, so each
+// rendered instance gets its own hydration keys (React mounts children rendered
+// twice as two instances). Copies are appended to node.CallSiteSlots and their
+// start offsets recorded in CallSiteCopyStarts. Children with nothing to
+// hydrate render identically each time and need no copy.
+func (b *builder) buildRepeatedChildrenCopies(node *ComponentNode, fn *ast.FnDecl, el *ast.JSXElement, id SlotID, provider scopeProvider) {
+	n := min(childrenPlaceholderCount(fn), maxChildrenCopies)
+	if n < 2 {
+		return
+	}
+	hydrates := false
+	for _, s := range node.CallSiteSlots {
+		if _, static := s.(*StaticHTML); !static {
+			hydrates = true
+			break
+		}
+	}
+	if !hydrates {
+		return
+	}
+	for i := 1; i < n; i++ {
+		node.CallSiteCopyStarts = append(node.CallSiteCopyStarts, len(node.CallSiteSlots))
+		node.CallSiteSlots = append(node.CallSiteSlots, b.buildComponentCallSiteSlots(el, fn, id, provider, node.childrenContext)...)
+	}
+}
+
+// childrenPlaceholderCount counts the `{children}` / `{props.children}`
+// containers in fn's body.
+func childrenPlaceholderCount(fn *ast.FnDecl) int {
+	count := 0
+	WalkAST(fn.Body, func(n any) bool {
+		if ec, ok := n.(*ast.JSXExprContainer); ok && ec.Expression != nil && isChildrenPlaceholderExpr(ec.Expression) {
+			count++
+		}
+		return true
+	})
+	return count
 }
 
 // completeSSREvalBindings gives an auto-promoted SSR-evaluated component the
