@@ -53,6 +53,33 @@ func (e *multiError) Unwrap() []error {
 	return e.errs
 }
 
+// countLeafErrors counts the individual errors behind errs: a page whose
+// build produced several diagnostics (an errors.Join, a renderError) lists each
+// one, so the "N error(s)" headline has to count them too.
+func countLeafErrors(errs []error) int {
+	n := 0
+	for _, err := range errs {
+		n += leafErrors(err)
+	}
+	return n
+}
+
+func leafErrors(err error) int {
+	switch u := err.(type) {
+	case nil:
+		return 0
+	case interface{ Unwrap() []error }:
+		if n := countLeafErrors(u.Unwrap()); n > 0 {
+			return n
+		}
+	case interface{ Unwrap() error }:
+		if inner := u.Unwrap(); inner != nil {
+			return leafErrors(inner)
+		}
+	}
+	return 1
+}
+
 // BuildErrorSummary is the text the CLI prints after a failed build. The
 // builder prints each failure as it happens, so an aggregate error is reduced
 // to its headline ("build failed: 2 error(s)") instead of repeating every

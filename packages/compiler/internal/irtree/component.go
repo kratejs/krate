@@ -421,6 +421,15 @@ func (b *builder) foldLocals(fn *ast.FnDecl, node *ComponentNode) *localFold {
 			}
 		}
 	}
+	for name, init := range fold.inits {
+		switch init.(type) {
+		case *ast.JSXElement, *ast.JSXFragment:
+			if node.JSXLocals == nil {
+				node.JSXLocals = make(map[string]bool)
+			}
+			node.JSXLocals[name] = true
+		}
+	}
 	if len(fold.callables) > 0 {
 		if b.localProps == nil {
 			b.localProps = make(valueMap, len(fold.callables))
@@ -857,8 +866,19 @@ func foldedVarDecl(node *ComponentNode, v string) bool {
 	if end == 0 || end == len(rest) || rest[end] != '=' {
 		return false
 	}
-	_, folded := node.LocalVars[rest[:end]]
-	return folded
+	if _, folded := node.LocalVars[rest[:end]]; folded {
+		return true
+	}
+	return node.JSXLocals[rest[:end]] && inertJSXVar(rest[end+1:])
+}
+
+var interactiveJSXRe = regexp.MustCompile(`=>|\bfunction\b|\bon[A-Z]\w*\s*:|\bref\s*:|\.\.\.|\bh\(\s*[A-Z]`)
+
+// inertJSXVar reports whether the JS of a local that holds JSX has nothing a
+// browser could run: no handlers, refs, spreads, functions or components. The
+// JSX is rendered into the HTML at its use sites, so the var is not needed.
+func inertJSXVar(js string) bool {
+	return !interactiveJSXRe.MatchString(js)
 }
 
 // hasClientChild reports whether a hydrating component is nested anywhere in

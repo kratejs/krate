@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -99,6 +100,14 @@ func compileServerBundles(res *bundler.ImportResolver, results []*PageResult, ro
 				pageSrc = withInlineActionImport(hoisted.Source)
 			}
 			injectedSource := injectServerGlobals(pageSrc) + serverExportEntrySuffix(page.ServerExports, absSource) + metadataEntrySuffix(page.MetadataSegments, page.MetadataPageFiles, root)
+			clientPage := bundler.HasUseClientDirective(string(sourceData)) && hasBoundaryFor(page.ClientBoundaries, absSource)
+			if clientPage {
+				// A "use client" page is a client boundary of the server tree, like
+				// any other "use client" module: re-export the file so the boundary
+				// plugin serves its stub instead of the page evaluating its hooks.
+				q := strconv.Quote(filepath.ToSlash(absSource))
+				injectedSource = "export { default } from " + q + ";\nexport * from " + q + ";\n"
+			}
 
 			// Compile with esbuild - use stdin so esbuild resolves relative imports
 			// from the project root (AbsWorkingDir) rather than a temp file location
@@ -121,6 +130,11 @@ func compileServerBundles(res *bundler.ImportResolver, results []*PageResult, ro
 			if len(page.ComposedLayouts) > 0 {
 				const pageModule = "krate-composed-page"
 				stdinContents = composedEntrySource(pageModule, page.ComposedLayouts)
+				if clientPage {
+					// The page file is imported by path below; the entry must not
+					// share its identity.
+					stdinFile = "krate-composed-entry.tsx"
+				}
 				composed = append(composed, composedLayoutPlugin(root, pageModule, injectedSource, filepath.Dir(absSource), page.ComposedLayouts))
 			}
 
@@ -301,12 +315,12 @@ func serverRuntimeTagsPlugin() api.Plugin {
 }
 
 // reactServerShimPlugin maps `import { Suspense } from "react"` in a server
-// bundle onto Krate's server Suspense. Without it the bare import stays
+// bundle onto @krate/runtime/react-server. Without it the bare import stays
 // external and fails at load time (ERR_MODULE_NOT_FOUND) unless react happens
-// to be installed. Only the names Krate's server renderer implements are
-// exported, so any other React import fails the build with esbuild's "no
-// matching export" error instead of resolving to something that silently
-// behaves differently.
+// to be installed. That module only exports the names that have the same
+// meaning while a server renders (Suspense, cache, no-op effects, ...), so any
+// other React import fails the build with esbuild's "no matching export"
+// error instead of resolving to something that silently behaves differently.
 func reactServerShimPlugin() api.Plugin {
 	return api.Plugin{
 		Name: "krate-react-server-shim",
@@ -315,9 +329,8 @@ func reactServerShimPlugin() api.Plugin {
 				return api.OnResolveResult{Path: "react", Namespace: "krate-react-shim"}, nil
 			})
 			b.OnLoad(api.OnLoadOptions{Filter: `.*`, Namespace: "krate-react-shim"}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
-				contents := "import { Suspense, Fragment, createSignal, createEffect, createMemo, onCleanup, onMount } from '@krate/runtime/server';\n" +
-					"export { Suspense, Fragment, createSignal, createEffect, createMemo, onCleanup, onMount };\n" +
-					"export default { Suspense, Fragment };\n"
+				contents := "export * from '@krate/runtime/react-server';\n" +
+					"export { default } from '@krate/runtime/react-server';\n"
 				return api.OnLoadResult{Contents: &contents, Loader: api.LoaderJS, ResolveDir: ""}, nil
 			})
 		},
@@ -331,4 +344,15 @@ func serverBundlePlugins(page *PageResult, absSource string, plugins ...api.Plug
 		return plugins
 	}
 	return append([]api.Plugin{islandServerStubPlugin(page.IslandStubs, absSource)}, plugins...)
+}
+
+// hasBoundaryFor reports whether boundaries holds a client boundary for the
+// module at path.
+func hasBoundaryFor(boundaries []ClientBoundary, path string) bool {
+	for _, cb := range boundaries {
+		if cb.Spec == "" && sameFileIdentity(cb.SourcePath, path) {
+			return true
+		}
+	}
+	return false
 }

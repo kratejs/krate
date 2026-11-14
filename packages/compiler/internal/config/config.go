@@ -445,12 +445,12 @@ func AttrMapFrom(raw map[string]interface{}) (AttrMap, error) {
 		}
 		switch t := v.(type) {
 		case string:
-			out[strings.ToLower(k)] = t
+			out[k] = t
 		case float64:
-			out[strings.ToLower(k)] = strconv.FormatFloat(t, 'f', -1, 64)
+			out[k] = strconv.FormatFloat(t, 'f', -1, 64)
 		case bool:
 			if t {
-				out[strings.ToLower(k)] = ""
+				out[k] = ""
 			}
 		case nil:
 		default:

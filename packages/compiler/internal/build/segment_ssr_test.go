@@ -217,9 +217,14 @@ func TestComponentLocalConstShipsNoRuntime(t *testing.T) {
   const label = 'x' + 'y';
   return <p>{label}</p>;
 }`,
+		"src/pages/jsx.tsx": `export default function Page() { const intro = <p>Hello <b>there</b></p>; return <main>{intro}</main>; }`,
 	})
 	html := readDistPage(t, root, "index.html")
 	if !strings.Contains(html, "<p>xy</p>") || strings.Contains(html, "<script") {
 		t.Errorf("a component-local constant must leave the page static:\n%s", html)
+	}
+	html = readDistPage(t, root, "jsx/index.html")
+	if !strings.Contains(html, "<p>Hello <b>there</b></p>") || strings.Contains(html, "<script") {
+		t.Errorf("a component-local JSX constant must leave the page static:\n%s", html)
 	}
 }

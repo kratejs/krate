@@ -783,6 +783,9 @@ type regionFrame struct {
 	// NoStore is set when the render read request state (headers/cookies) or
 	// otherwise opted out of caching. The page response must not be public.
 	NoStore bool `json:"noStore,omitempty"`
+	// ErrorCaught is set when an error boundary rendered its fallback in the
+	// region: the response is a 500 that must never be cached.
+	ErrorCaught bool `json:"errorCaught,omitempty"`
 	// Fatal marks a failed render that has no usable baked content (an async
 	// server component): the response must be an error, not the shell.
 	Fatal bool `json:"fatal,omitempty"`
@@ -820,6 +823,9 @@ type regionPageResult struct {
 	// noStore is true when any region read request state or otherwise opted
 	// out of caching. The page response must not be publicly cacheable.
 	noStore bool
+	// errorCaught is true when an error boundary rendered its fallback: the
+	// body is the page with the fallback, answered with a 500 and no-store.
+	errorCaught bool
 	// errStack and errDigest describe the failed render behind renderErr.
 	errStack  string
 	errDigest string
@@ -1151,12 +1157,21 @@ func streamRegionPageModeSC(ctx context.Context, w http.ResponseWriter, flusher 
 		if res.noStore || res.renderErr != "" {
 			w.Header().Set("Cache-Control", "private, no-store")
 			w.Header().Del("X-Krate-Cache")
-		} else {
+		} else if w.Header().Get("Cache-Control") == "" {
 			if revalidate <= 0 {
 				revalidate = defaultISRRevalidate
 			}
 			w.Header().Set("Cache-Control", fmt.Sprintf("public, s-maxage=%d, stale-while-revalidate=%d", revalidate, 2*revalidate))
 		}
+	}
+
+	// An error boundary's fallback is an error response: a 500 that no cache
+	// may keep, whatever the route or middleware set.
+	if res.errorCaught {
+		w.Header().Set("X-Krate-Error", "render")
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Del("X-Krate-Cache")
+		w.WriteHeader(http.StatusInternalServerError)
 	}
 
 	// The caller owns Content-Type and the no-store header for non-ISR pages.
@@ -1268,6 +1283,9 @@ func fetchNodeRegions(ctx context.Context, ssrPort int, route string, params, qu
 			}
 			if frame.NoStore {
 				res.noStore = true
+			}
+			if frame.ErrorCaught {
+				res.errorCaught = true
 			}
 			if frame.ID == "page" {
 				res.isISR = frame.CacheStatus != ""
@@ -2175,7 +2193,8 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
-		if !isISR {
+		// A Cache-Control that middleware or a headers rule set wins over the default.
+		if !isISR && w.Header().Get("Cache-Control") == "" {
 			w.Header().Set("Cache-Control", "no-store")
 		}
 		reval := 0

@@ -116,7 +116,7 @@ var hookCallRe = regexp.MustCompile(`\buse[A-Z]\w*\(`)
 
 // requestTimeInert reports whether the hydration of a page rendered per
 // request would only re-evaluate expressions that read no signal. The server
-// renders those with the real request, server-only values included, so
+// renders those (attribute values too) with the real request, server-only values included, so
 // running them again in the browser would show nothing or something else, and
 // would ship the server code that computes them. Such a page needs no
 // hydration.
@@ -127,9 +127,14 @@ func requestTimeInert(mode RenderMode, sigs []irtree.ComponentSignature) bool {
 	for _, sig := range sigs {
 		if len(sig.Signals) > 0 || len(sig.Handlers) > 0 || len(sig.RefBindings) > 0 ||
 			len(sig.Effects) > 0 || len(sig.Memos) > 0 || len(sig.FuncPropAliases) > 0 ||
-			len(sig.IslandBoot) > 0 || len(sig.BodyUses) > 0 || len(sig.AttrBindings) > 0 ||
+			len(sig.IslandBoot) > 0 || len(sig.BodyUses) > 0 ||
 			sig.Lazy || sig.Class {
 			return false
+		}
+		for _, a := range sig.AttrBindings {
+			if a.SignalName != "" || hookCallRe.MatchString(a.ExprSource) {
+				return false
+			}
 		}
 		for _, list := range [][]string{sig.ExtraVars, sig.PreSignalVars} {
 			for _, v := range list {

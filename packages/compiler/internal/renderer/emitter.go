@@ -456,14 +456,59 @@ func (e *Emitter) emitStatic(node *irtree.ComponentNode) SlotOutput {
 	// The placeholder sits in a hoisted <template> when it is inside the
 	// hidden branch of a conditional, so templates are spliced as well.
 	if (strings.Contains(out.HTML, "<!--__children__-->") || strings.Contains(out.Templates, "<!--__children__-->")) && len(node.CallSiteSlots) > 0 {
-		callSiteOut := e.emitSlotsParallel(node.CallSiteSlots)
-		html := callSiteOut.HTML
-		callSiteOut.HTML = ""
-		out.HTML = strings.ReplaceAll(out.HTML, "<!--__children__-->", html)
-		out.Templates = strings.ReplaceAll(out.Templates, "<!--__children__-->", html)
+		callSiteOut, _ := e.spliceCallSiteChildren(&out, node)
 		mergeSlotOutput(&out, callSiteOut)
 	}
 	return out
+}
+
+// spliceCallSiteChildren replaces the children placeholders in out with the
+// rendered call-site children of node. A component that renders `{children}`
+// more than once has one copy of the slots per placeholder, each with its own
+// hydration keys; placeholders beyond the copies reuse the last one, and copies
+// with no placeholder are not emitted. It returns the merged output of the
+// emitted copies (HTML cleared) and the slots of those copies.
+func (e *Emitter) spliceCallSiteChildren(out *SlotOutput, node *irtree.ComponentNode) (SlotOutput, []irtree.SlotNode) {
+	const placeholder = "<!--__children__-->"
+	copies := [][]irtree.SlotNode{node.CallSiteSlots}
+	if len(node.CallSiteCopyStarts) > 0 {
+		copies = nil
+		prev := 0
+		for _, start := range append(append([]int{}, node.CallSiteCopyStarts...), len(node.CallSiteSlots)) {
+			copies = append(copies, node.CallSiteSlots[prev:start])
+			prev = start
+		}
+	}
+	used := min(max(strings.Count(out.HTML, placeholder)+strings.Count(out.Templates, placeholder), 1), len(copies))
+	var merged SlotOutput
+	var htmls []string
+	var slots []irtree.SlotNode
+	for _, c := range copies[:used] {
+		o := e.emitSlotsParallel(c)
+		htmls = append(htmls, o.HTML)
+		o.HTML = ""
+		mergeSlotOutput(&merged, o)
+		slots = append(slots, c...)
+	}
+	n := 0
+	replace := func(s string) string {
+		var b strings.Builder
+		for {
+			i := strings.Index(s, placeholder)
+			if i < 0 {
+				break
+			}
+			b.WriteString(s[:i])
+			b.WriteString(htmls[min(n, len(htmls)-1)])
+			n++
+			s = s[i+len(placeholder):]
+		}
+		b.WriteString(s)
+		return b.String()
+	}
+	out.HTML = replace(out.HTML)
+	out.Templates = replace(out.Templates)
+	return merged, slots
 }
 
 // emitSSREvaluated - prop-driven components evaluated at build time
@@ -518,7 +563,6 @@ func (e *Emitter) emitSSREvaluated(node *irtree.ComponentNode) SlotOutput {
 		eval.SetBindings(node.SSREvalBindings)
 	}
 	eval.SetCallerValues(node.SSREvalCaller)
-	eval.ResolveJSXProps(node.SSREvalAttrs)
 	if e.IconResolver != nil {
 		eval.iconEmit = func(name string, attrs []*ast.JSXAttr) (string, bool) {
 			return e.IconResolver(name, attrs)
@@ -532,9 +576,22 @@ func (e *Emitter) emitSSREvaluated(node *irtree.ComponentNode) SlotOutput {
 	// hydration markers. SSREval is only used to evaluate the component's own
 	// return statement, whose {props.children} placeholder is replaced with
 	// this HTML via the "children" binding.
-	if len(node.Children) > 0 {
+	firstCopy := node.Children
+	var extraCopies [][]irtree.SlotNode
+	if len(node.ChildCopyStarts) > 0 {
+		firstCopy = node.Children[:node.ChildCopyStarts[0]]
+		for i, start := range node.ChildCopyStarts {
+			end := len(node.Children)
+			if i+1 < len(node.ChildCopyStarts) {
+				end = node.ChildCopyStarts[i+1]
+			}
+			extraCopies = append(extraCopies, node.Children[start:end])
+		}
+	}
+	var firstCopyHTML string
+	if len(firstCopy) > 0 {
 		var childrenHTML strings.Builder
-		childrenOut := e.emitSlotsParallel(node.Children)
+		childrenOut := e.emitSlotsParallel(firstCopy)
 		childrenHTML.WriteString(childrenOut.HTML)
 		sigs = append(sigs, childrenOut.Signatures...)
 		out.Orphans = append(out.Orphans, childrenOut.Orphans...)
@@ -552,7 +609,8 @@ func (e *Emitter) emitSSREvaluated(node *irtree.ComponentNode) SlotOutput {
 		if len(e.clientStack) > 0 {
 			owner = e.clientStack[len(e.clientStack)-1]
 		}
-		out.Orphans = append(out.Orphans, collectChildrenOrphans(node.Children, owner)...)
+		out.Orphans = append(out.Orphans, collectChildrenOrphans(firstCopy, owner)...)
+		firstCopyHTML = childrenHTML.String()
 		if childrenHTML.Len() > 0 {
 			// Children were rendered through the slot pipeline (text escaped,
 			// elements hydrated), so they bind as a JSX value injected raw.
@@ -614,9 +672,14 @@ func (e *Emitter) emitSSREvaluated(node *irtree.ComponentNode) SlotOutput {
 		defer func() { eval.interactiveEmit = nil }()
 	}
 
+	// JSX props render after the interactive hook is set, so a client
+	// component inside one is emitted through the tree path.
+	eval.ResolveJSXProps(node.SSREvalAttrs)
+
 	// Run the component body (locals, if/else returns, loops) and render its
 	// return value.
 	html := eval.EvalComponentBody(node.Fn)
+	html = e.swapRepeatedChildren(html, firstCopyHTML, extraCopies, &out, &sigs)
 	e.errs = append(e.errs, eval.Errors()...)
 	out.HeadHTML += eval.HeadHTML
 	out.ScriptHTML += eval.ScriptHTML
@@ -625,6 +688,48 @@ func (e *Emitter) emitSSREvaluated(node *irtree.ComponentNode) SlotOutput {
 	out.Signatures = sigs
 
 	return out
+}
+
+// swapRepeatedChildren gives each further occurrence of the rendered first
+// copy of the call-site children in html (a component that renders
+// `{children}` more than once) the markup of its own copy, which carries its
+// own hydration keys. Copies with no matching occurrence are not emitted, so
+// they add no client code. Occurrences beyond the copies keep the first copy.
+func (e *Emitter) swapRepeatedChildren(html, first string, copies [][]irtree.SlotNode, out *SlotOutput, sigs *[]irtree.ComponentSignature) string {
+	if first == "" || len(copies) == 0 {
+		return html
+	}
+	owner := irtree.SlotID("")
+	if len(e.clientStack) > 0 {
+		owner = e.clientStack[len(e.clientStack)-1]
+	}
+	var b strings.Builder
+	rest := html
+	for used := 0; ; used++ {
+		i := strings.Index(rest, first)
+		if i < 0 {
+			break
+		}
+		b.WriteString(rest[:i])
+		rest = rest[i+len(first):]
+		if used == 0 || used > len(copies) {
+			b.WriteString(first)
+			continue
+		}
+		c := e.emitSlotsParallel(copies[used-1])
+		*sigs = append(*sigs, c.Signatures...)
+		out.Orphans = append(out.Orphans, c.Orphans...)
+		out.Orphans = append(out.Orphans, collectChildrenOrphans(copies[used-1], owner)...)
+		out.HeadHTML += c.HeadHTML
+		out.ScriptHTML += c.ScriptHTML
+		out.StyleHTML += c.StyleHTML
+		out.Templates += c.Templates
+		out.GoRenders = append(out.GoRenders, c.GoRenders...)
+		out.RuntimeChildren = mergeRuntimeChildren(out.RuntimeChildren, c.RuntimeChildren)
+		b.WriteString(c.HTML)
+	}
+	b.WriteString(rest)
+	return b.String()
 }
 
 // findReturnStmtIn finds the render return of a function body. Early-return
@@ -657,16 +762,14 @@ func (e *Emitter) emitClient(node *irtree.ComponentNode) SlotOutput {
 
 	mergeSlotOutput(&out, e.emitSlotsParallel(node.Children))
 	ownCount := len(out.Signatures)
+	callSiteSlots := node.CallSiteSlots
 
 	// Replace {props.children} placeholder with rendered call site children.
 	// This ensures interactive sub-components nested inside signal components
 	// retain their data-k/data-kh hydration markers.
 	if (strings.Contains(out.HTML, "<!--__children__-->") || strings.Contains(out.Templates, "<!--__children__-->")) && len(node.CallSiteSlots) > 0 {
-		callSiteOut := e.emitSlotsParallel(node.CallSiteSlots)
-		html := callSiteOut.HTML
-		callSiteOut.HTML = ""
-		out.HTML = strings.ReplaceAll(out.HTML, "<!--__children__-->", html)
-		out.Templates = strings.ReplaceAll(out.Templates, "<!--__children__-->", html)
+		callSiteOut, usedSlots := e.spliceCallSiteChildren(&out, node)
+		callSiteSlots = usedSlots
 		if cond, branch, ok := childrenPlaceholderCond(node.Children); ok {
 			claimCond(callSiteOut.Signatures, cond, branch)
 		}
@@ -688,12 +791,12 @@ func (e *Emitter) emitClient(node *irtree.ComponentNode) SlotOutput {
 	// "Off"} text) reference the CALLER's signals, not this component's scope,
 	// so they're collected as orphans and attached to the owning signature
 	// during post-processing in Emit().
-	if len(node.CallSiteSlots) > 0 {
+	if len(callSiteSlots) > 0 {
 		owner := irtree.SlotID("")
 		if len(e.clientStack) > 1 {
 			owner = e.clientStack[len(e.clientStack)-2]
 		}
-		for _, b := range collectSlotBindings(node.CallSiteSlots) {
+		for _, b := range collectSlotBindings(callSiteSlots) {
 			out.Orphans = append(out.Orphans, orphanBinding{owner: owner, bind: b})
 		}
 	}
@@ -1060,7 +1163,7 @@ func (e *Emitter) emitExprSlot(s *irtree.ExprSlot) SlotOutput {
 	if s.InitialHTML != "" {
 		body = s.InitialHTML
 	} else if s.PropJSX != nil {
-		if rendered, ok := e.renderPropJSX(s.PropJSX, s.PropScope); ok {
+		if rendered, ok := e.renderPropJSX(s.PropJSX, s.PropScope, s.PropSlots); ok {
 			body = rendered
 			s.Unresolved = false
 		}
@@ -1579,8 +1682,30 @@ func externalIslandKey(local string, offset int) string {
 // renderPropJSX renders the JSX a caller passed as a prop for the server
 // markup of a hydrated component. A value that needs the caller's scope (its
 // signals or locals) cannot be rendered here; hydration fills that slot.
-func (e *Emitter) renderPropJSX(expr ast.Expr, caller map[string]jsvalue.Value) (string, bool) {
+func (e *Emitter) renderPropJSX(expr ast.Expr, caller map[string]jsvalue.Value, slots []irtree.SlotNode) (string, bool) {
 	eval := NewSSREval(e.functions)
+	if len(slots) > 0 {
+		// A component that holds state renders its initial state from its
+		// slot; its hydration is not registered, the client re-creates the
+		// prop value into this slot. A second render of the same component
+		// has no slot left and is reported as an error by the evaluator.
+		used := map[string]int{}
+		queue := map[string][]*irtree.ComponentSlot{}
+		for _, s := range slots {
+			if cs, ok := s.(*irtree.ComponentSlot); ok && cs.Component != nil {
+				queue[cs.Component.Name] = append(queue[cs.Component.Name], cs)
+			}
+		}
+		eval.interactiveEmit = func(el *ast.JSXElement) (string, bool) {
+			q := queue[el.Opening.Name]
+			i := used[el.Opening.Name]
+			if i >= len(q) {
+				return "", false
+			}
+			used[el.Opening.Name] = i + 1
+			return e.emitComponentSlot(q[i]).HTML, true
+		}
+	}
 	eval.SetModuleConsts(e.moduleConsts)
 	eval.SetModuleRun(e.moduleRun)
 	eval.SetCallerValues(caller)

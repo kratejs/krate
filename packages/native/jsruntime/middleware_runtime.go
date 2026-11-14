@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"sync"
 )
 
@@ -154,13 +156,22 @@ func (m *MiddlewareRuntime) newWorker() (*mwWorker, error) {
 	if _, err := rt.EvalBytecode(bc); err != nil {
 		return fail(err)
 	}
-	if _, err := rt.Execute(stripExports(string(code)) + "\n;void 0;"); err != nil {
+	if _, err := rt.Execute(stripExports(captureExportMap(string(code))) + "\n;void 0;"); err != nil {
 		return fail(fmt.Errorf("failed to execute middleware.js: %w", err))
 	}
-	v, err := rt.Execute(`__krate_mw_init(
-		typeof middleware === 'function' ? middleware : (typeof middleware === 'object' && middleware && typeof middleware.middleware === 'function' ? middleware.middleware : (typeof __default === 'function' ? __default : null)),
-		typeof config === 'undefined' ? undefined : config,
-		typeof matcher === 'undefined' ? undefined : matcher)`)
+	v, err := rt.Execute(`(function () {
+		var ex = typeof __krate_exports === 'object' && __krate_exports ? __krate_exports : {
+			middleware: typeof middleware === 'undefined' ? undefined : middleware,
+			config: typeof config === 'undefined' ? undefined : config,
+			matcher: typeof matcher === 'undefined' ? undefined : matcher,
+			default: typeof __default === 'undefined' ? undefined : __default
+		};
+		var mw = ex.middleware;
+		return __krate_mw_init(
+			typeof mw === 'function' ? mw : (typeof mw === 'object' && mw && typeof mw.middleware === 'function' ? mw.middleware : (typeof ex.default === 'function' ? ex.default : null)),
+			ex.config,
+			ex.matcher);
+	})()`)
 	if err != nil {
 		return fail(err)
 	}
@@ -349,4 +360,28 @@ func LoadMiddlewareRuntime(root string) *MiddlewareRuntime {
 		return nil
 	}
 	return rt
+}
+
+var exportBlockRe = regexp.MustCompile(`export\s*\{([^}]*)\}\s*;?`)
+
+// captureExportMap rewrites the bundle's export clause into a
+// __krate_exports object keyed by exported name. Reading exports by their
+// local names is wrong when the bundler renamed one (config2 as config)
+// because a helper module may own a different top-level binding called config.
+func captureExportMap(code string) string {
+	loc := exportBlockRe.FindStringSubmatchIndex(code)
+	if loc == nil {
+		return code
+	}
+	var props []string
+	for _, part := range strings.Split(code[loc[2]:loc[3]], ",") {
+		fields := strings.Fields(part)
+		switch {
+		case len(fields) == 1:
+			props = append(props, fields[0]+": "+fields[0])
+		case len(fields) == 3 && fields[1] == "as":
+			props = append(props, fields[2]+": "+fields[0])
+		}
+	}
+	return code[:loc[0]] + "var __krate_exports = {" + strings.Join(props, ", ") + "};" + code[loc[1]:]
 }

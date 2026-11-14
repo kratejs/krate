@@ -155,7 +155,8 @@ func (c *reactCtx) lowerLazyDecls(prog *ast.Program) {
 				c.susp.reported[call] = true
 				c.report(call.Position, diag.SeverityError, diag.CodeLazyLoader,
 					"lazy() needs a loader of the form () => import(\"./Component\")",
-					"pass a static import with a string literal path, e.g. const Chart = lazy(() => import(\"./Chart\"))")
+					"pass a static import with a string literal path, e.g. const Chart = lazy(() => import(\"./Chart\")); "+
+						"for a named export use .then((m) => m.Chart) or .then((m) => ({ default: m.Chart }))")
 				keep = append(keep, d)
 				continue
 			}
@@ -210,8 +211,9 @@ func (c *reactCtx) lazyCall(init ast.Expr) *ast.CallExpr {
 }
 
 // lazyImportSpec extracts the module specifier and export name from
-// `lazy(() => import("./X"))` or
-// `lazy(() => import("./X").then((m) => ({ default: m.Named })))`.
+// `lazy(() => import("./X"))`,
+// `lazy(() => import("./X").then((m) => ({ default: m.Named })))` or
+// `lazy(() => import("./X").then((m) => m.Named))`.
 func lazyImportSpec(call *ast.CallExpr) (spec, remote string, ok bool) {
 	if len(call.Args) != 1 {
 		return "", "", false
@@ -227,7 +229,7 @@ func lazyImportSpec(call *ast.CallExpr) (spec, remote string, ok bool) {
 	if spec, ok := dynamicImportSpec(body); ok {
 		return spec, "default", true
 	}
-	// import("./X").then((m) => ({ default: m.Named }))
+	// import("./X").then(mapper)
 	then, ok := body.(*ast.CallExpr)
 	if !ok || len(then.Args) != 1 {
 		return "", "", false
@@ -247,19 +249,23 @@ func lazyImportSpec(call *ast.CallExpr) (spec, remote string, ok bool) {
 	if !ok || len(mapper.Params) != 1 || mapper.Params[0] == nil {
 		return "", "", false
 	}
-	obj, ok := arrowReturn(mapper).(*ast.ObjectExpr)
-	if !ok || len(obj.Properties) != 1 || obj.Properties[0] == nil || obj.Properties[0].Key != "default" {
+	// (m) => m.Named is the same as (m) => ({ default: m.Named }).
+	val := arrowReturn(mapper)
+	if obj, isObj := val.(*ast.ObjectExpr); isObj {
+		if len(obj.Properties) != 1 || obj.Properties[0] == nil || obj.Properties[0].Key != "default" {
+			return "", "", false
+		}
+		val = obj.Properties[0].Value
+	}
+	pick, ok := val.(*ast.MemberExpr)
+	if !ok || pick.Computed {
 		return "", "", false
 	}
-	val, ok := obj.Properties[0].Value.(*ast.MemberExpr)
-	if !ok || val.Computed {
-		return "", "", false
-	}
-	base, ok := val.Object.(*ast.Identifier)
+	base, ok := pick.Object.(*ast.Identifier)
 	if !ok || base.Name != mapper.Params[0].Name {
 		return "", "", false
 	}
-	name, ok := val.Property.(*ast.Identifier)
+	name, ok := pick.Property.(*ast.Identifier)
 	if !ok {
 		return "", "", false
 	}

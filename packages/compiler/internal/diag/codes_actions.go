@@ -25,9 +25,9 @@ func init() {
 			Code:  CodeInlineUseServer,
 			Title: `Inline "use server" function`,
 			Explanation: `A "use server" directive at the top of a function inside a component is hoisted into a server ` +
-				`action. It is rejected inside a "use client" module, in a class, when it uses this, and when it captures values from a ` +
-				`component that is not async (captured values are sent to the browser encrypted and need a per-request ` +
-				`render). Move the function into a module whose first statement is "use server" and import it, or ` +
+				`action. It is rejected inside a "use client" module, in a class, when it uses this, and when it captures values in a ` +
+				`page that is prerendered (captured values are sent to the browser encrypted and need a per-request ` +
+				`render, as in an async or dynamic page). Move the function into a module whose first statement is "use server" and import it, or ` +
 				`declare it inside an async server component.`,
 		},
 		CodeInfo{

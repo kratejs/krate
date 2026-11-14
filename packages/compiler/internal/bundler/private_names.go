@@ -562,7 +562,8 @@ func ownsExports(mod *Module) bool {
 // warnExportCollisions reports a name that several modules export, that cannot
 // be renamed, and that the bundle imports from more than one of them, on the
 // entry module so it reaches the page's warnings. A clash is reported once per
-// build: the shared cache remembers which ones were.
+// build, whichever page bundles it first: the shared cache remembers which ones
+// were, keyed on the name and the exporting modules (the importers differ by page).
 func (b *Bundler) warnExportCollisions(mods []*Module, clashes []exportClash) {
 	var entry *Module
 	for _, mod := range mods {
@@ -577,7 +578,7 @@ func (b *Bundler) warnExportCollisions(mods []*Module, clashes []exportClash) {
 		if c.pkgOnly {
 			continue
 		}
-		if b.cache != nil && !b.cache.firstWarning(c.name+"|"+strings.Join(c.files, ",")+"|"+strings.Join(c.importers, ",")) {
+		if b.cache != nil && !b.cache.firstWarning(c.name+"|"+strings.Join(c.files, ",")) {
 			continue
 		}
 		d := diag.Diagnostic{

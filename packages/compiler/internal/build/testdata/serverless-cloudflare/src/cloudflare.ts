@@ -16,8 +16,11 @@ export default {
   async queue(batch: { messages: unknown[] }) {
     (globalThis as any).__queued = batch.messages.length;
   },
-  // Krate's own fetch handler stays; this one is ignored.
-  async fetch() {
-    return new Response("not krate");
+  // Wraps Krate's handler; next() renders the request.
+  async fetch(request: Request, _env: unknown, _ctx: unknown, next: (r?: Request) => Promise<Response>) {
+    const res = await next(request);
+    const out = new Response(res.body, res);
+    out.headers.set("x-worker-hook", "1");
+    return out;
   },
 };

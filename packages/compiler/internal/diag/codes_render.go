@@ -20,6 +20,9 @@ const (
 	// CodeModuleValueUnknown: a module value that top-level code changes in a
 	// way the build cannot run, read by a component rendered at build time.
 	CodeModuleValueUnknown Code = "KR8322"
+	// CodeChildrenRepeated: children with client state rendered more times than
+	// the build can give each its own instance.
+	CodeChildrenRepeated Code = "KR8323"
 )
 
 func init() {
@@ -90,6 +93,17 @@ func init() {
 				"component that hydrates reads it at run time. A component rendered at build time has no run time, " +
 				"so the build fails. Make the top-level code plain, compute the value in one expression, or move " +
 				"the reading component to one with client state.",
+		},
+		CodeInfo{
+			Code:  CodeChildrenRepeated,
+			Title: "Children with client state rendered more than once",
+			Explanation: "A component that renders `{children}` in several places mounts one instance of the " +
+				"children for each place, and the build gives each instance its own hydration keys. That works " +
+				"for up to 8 placeholders written out in the component body. When the placeholder sits in a loop " +
+				"or an array callback (`items.map(() => <li>{children}</li>)`), or there are more than 8, the " +
+				"copies share one set of keys, so state, event handlers and bindings in the children only " +
+				"work for one of them. Render a component per item that owns its state, pass the data instead " +
+				"of children, or move the state up out of the children.",
 		},
 	)
 }

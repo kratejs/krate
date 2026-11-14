@@ -551,6 +551,7 @@ component calling it outside any `<Suspense>` gets warning KR4008.
 ```tsx
 const Chart = lazy(() => import('./Chart'));
 const Panel = lazy(() => import('./panels').then((m) => ({ default: m.Panel })));
+const Editor = lazy(() => import('./editor').then((m) => m.Editor));
 ```
 
 Krate renders the HTML of a lazy component at build time like any other

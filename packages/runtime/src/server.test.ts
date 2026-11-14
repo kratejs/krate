@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { clientBoundary, jsx, renderToString, renderToStringAsync } from './server';
+import { clientBoundary, jsx, lazy, renderToString, renderToStringAsync } from './server';
 
 describe('renderToString', () => {
   it('renders nested elements and escapes text', () => {
@@ -91,5 +91,18 @@ describe('clientBoundary', () => {
     const Box = clientBoundary('m6', 'Box', '/c.js', function Box() { return null; }, render) as any;
     const html = await renderToStringAsync(jsx(Box, { children: jsx('b', { children: 'note' }) }));
     expect(html).toContain('__krateChildren');
+  });
+});
+
+describe('lazy', () => {
+  it('renders the loaded component in place on the server', async () => {
+    const Draw = lazy(() => Promise.resolve({ default: (p: { n: number; children?: unknown }) => jsx('p', { id: 'd', children: ['n=' + p.n, p.children] }) }));
+    const html = await renderToStringAsync(jsx('main', { children: jsx(Draw, { n: 2, children: jsx('b', { children: 'kid' }) }) }));
+    expect(html).toBe('<main><p id="d">n=2<b>kid</b></p></main>');
+  });
+
+  it('accepts a loader that resolves to the component itself', async () => {
+    const Hi = lazy(() => Promise.resolve(() => jsx('i', { children: 'hi' })));
+    expect(await renderToStringAsync(jsx(Hi, {}))).toBe('<i>hi</i>');
   });
 });

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -156,6 +157,8 @@ func extractParamNames(pagePath, pagesDir string) []string {
 	return params
 }
 
+var gspExportRe = regexp.MustCompile(`(?m)^\s*export\s+(?:async\s+)?function\s*\*?\s*generateStaticParams\b`)
+
 // hasGenerateStaticParams checks if the program exports a generateStaticParams function.
 func hasGenerateStaticParams(prog *ast.Program) bool {
 	for _, stmt := range prog.Body {
@@ -184,13 +187,27 @@ func (b *Builder) executeGenerateStaticParams(pagePath string, bnd *bundler.Bund
 		return nil, err
 	}
 
-	if raw, eerr := b.gspEmbedded(abs, bnd); eerr == nil {
+	// Only generateStaticParams and what it depends on need to run; the page's
+	// component tree and its imports stay out unless the closure cannot be cut.
+	if sl, ok := sliceModule(abs, []string{"generateStaticParams"}); ok {
+		virtual := map[string]string{sl.Path: sl.Source}
+		if sets, err := b.runStaticParams(abs, sl.Path, bnd, virtual); err == nil {
+			return sets, nil
+		}
+	}
+	return b.runStaticParams(abs, abs, bnd, nil)
+}
+
+// runStaticParams evaluates generateStaticParams of the module at target (the
+// page or a slice of it) on the embedded engine, then on the configured runtime.
+func (b *Builder) runStaticParams(abs, target string, bnd *bundler.Bundler, virtual map[string]string) ([]map[string]string, error) {
+	if raw, eerr := b.gspEmbedded(abs, target, bnd, virtual); eerr == nil {
 		if sets, perr := parseParamSets(raw); perr == nil {
 			return sets, nil
 		}
 	}
 
-	output, err := b.runGSPBundle(abs, bnd)
+	output, err := b.runGSPBundle(abs, target, bnd, virtual)
 	if err != nil {
 		return nil, fmt.Errorf("generateStaticParams execution: %w", err)
 	}
@@ -200,8 +217,8 @@ func (b *Builder) executeGenerateStaticParams(pagePath string, bnd *bundler.Bund
 // runGSPBundle bundles the generateStaticParams bootstrap to ESM JavaScript and
 // runs it with the configured runtime. Bundling with esbuild preserves TSX,
 // path aliases, and krate/* resolution while avoiding tsx entirely.
-func (b *Builder) runGSPBundle(abs string, bnd *bundler.Bundler) ([]byte, error) {
-	bootstrap := gspBootstrapJS(filepath.ToSlash(abs))
+func (b *Builder) runGSPBundle(abs, target string, bnd *bundler.Bundler, virtual map[string]string) ([]byte, error) {
+	bootstrap := gspBootstrapJS(filepath.ToSlash(target))
 	resolve := func(importer, spec string) (string, bool) {
 		if bnd != nil {
 			if p := bnd.Resolve(importer, spec); p != "" {
@@ -210,12 +227,15 @@ func (b *Builder) runGSPBundle(abs string, bnd *bundler.Bundler) ([]byte, error)
 		}
 		return "", false
 	}
-	js, err := jseval.Bundle(jseval.Options{
+	js, err := b.bundleExternalizingNative(jseval.Options{
 		Source:        bootstrap,
 		ResolveDir:    filepath.Dir(abs),
 		Sourcefile:    "krate-gsp-bootstrap.ts",
 		Loader:        api.LoaderTS,
 		ResolveImport: resolve,
+		VirtualFiles:  virtual,
+
+		SourceTransform: b.serverGlobalsTransform,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("bundling bootstrap: %w", err)
@@ -269,12 +289,12 @@ func (b *Builder) runGSPBundle(abs string, bnd *bundler.Bundler) ([]byte, error)
 // gspEmbedded evaluates the page's generateStaticParams on the embedded
 // esbuild+QuickJS runtime and returns its JSON result. bnd is consulted to
 // resolve imports esbuild can't see (krate/content, path aliases).
-func (b *Builder) gspEmbedded(abs string, bnd *bundler.Bundler) (json.RawMessage, error) {
+func (b *Builder) gspEmbedded(abs, target string, bnd *bundler.Bundler, virtual map[string]string) (json.RawMessage, error) {
 	entry := fmt.Sprintf(`import * as mod from %q;
 const fn = mod.generateStaticParams || (mod.default && mod.default.generateStaticParams);
 if (typeof fn !== "function") { throw new Error("generateStaticParams is not a function"); }
 Promise.resolve(fn()).then(function (r) { globalThis.%s = r; }, function () {});
-`, filepath.ToSlash(abs), jseval.ResultGlobal)
+`, filepath.ToSlash(target), jseval.ResultGlobal)
 
 	resolve := func(importer, spec string) (string, bool) {
 		if bnd != nil {
@@ -291,6 +311,9 @@ Promise.resolve(fn()).then(function (r) { globalThis.%s = r; }, function () {});
 		Env:           b.scriptEnv(),
 		Await:         true,
 		ResolveImport: resolve,
+		VirtualFiles:  virtual,
+
+		SourceTransform: b.serverGlobalsTransform,
 	})
 }
 
@@ -320,8 +343,9 @@ if (typeof fn !== 'function') {
   process.stderr.write('generateStaticParams is not a function\n');
   process.exit(1);
 }
-const result = await fn();
-console.log(JSON.stringify(result));
+(async () => {
+  console.log(JSON.stringify(await fn()));
+})().catch((err) => { console.error(err); process.exit(1); });
 `,
 		importPath,
 	)
@@ -471,20 +495,23 @@ func (b *Builder) resolveStaticParamsPageOnce(page string) staticParamsResolutio
 func (b *Builder) resolveStaticParamsPage(page string) staticParamsResolution {
 	var res staticParamsResolution
 
+	// Only the page's own exports matter here: bundling its component tree
+	// (which can use features the page build alone handles) is not needed to
+	// run generateStaticParams.
+	data, err := os.ReadFile(page)
+	if err != nil || !isSourceFile(page) {
+		return res
+	}
+	if prog, perr := parseSourceFile(page, data); perr == nil {
+		if !hasGenerateStaticParams(prog) {
+			return res
+		}
+	} else if !gspExportRe.Match(data) {
+		// The parser rejects some syntax the page build rewrites first (tier
+		// decorators); the export still shows in the text.
+		return res
+	}
 	bnd := b.newBundler()
-	bundle, err := bnd.Bundle(page)
-	if err != nil {
-		res.errs = append(res.errs, fmt.Sprintf("failed to bundle %s for generateStaticParams: %v", page, err))
-		return res
-	}
-
-	entryModule := findEntryModule(bundle.Modules)
-	if entryModule == nil || entryModule.Program == nil {
-		return res
-	}
-	if !hasGenerateStaticParams(entryModule.Program) {
-		return res
-	}
 	res.note = true
 
 	paramSets, err := b.executeGenerateStaticParams(page, bnd)
@@ -721,6 +748,9 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	serverPage, serverErr := b.applyServerComponentMode(spp.PagePath, entryModule, ann, strings.EqualFold(b.Cfg.Output, "static"), layoutCut, &renderMode, &revalidate)
 	if serverErr == nil && !serverPage {
 		serverErr = topLevelAwaitError(entryModule, extraPrograms)
+	}
+	if serverErr == nil && !serverPage && renderMode == RenderSSG {
+		serverErr = bundle.SyncActionError()
 	}
 	if serverErr != nil {
 		return nil, "", serverErr

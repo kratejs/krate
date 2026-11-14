@@ -1698,6 +1698,7 @@ func (b *builder) buildExprSlot(expr ast.Expr, parentID string) *ExprSlot {
 	}
 	if p, ok := b.jsxPropRead(expr); ok {
 		slot.PropJSX, slot.PropScope = p.expr, p.scope
+		b.propExprSlots = append(b.propExprSlots, slot)
 	}
 	// A value holding JSX renders as markup, not as escaped text.
 	if html, ok := renderChildValue(value); ok && html != escape.Text(initial) {

@@ -249,7 +249,7 @@ func (b *Builder) buildDataRoute(f metaRouteFile, bnd *bundler.Bundler) error {
 	if err != nil {
 		return err
 	}
-	out, err := b.runBootstrapBundle(abs, dataRouteBootstrap(abs, f.Kind), "metaroute", bnd)
+	out, err := b.runBootstrapBundle(abs, dataRouteBootstrap(abs, f.Kind), "metaroute", bnd, nil)
 	if err != nil {
 		return b.routeErr(f, "running "+filepath.Base(f.Path)+" failed: "+err.Error(), "the file runs once at build time on Node with the project's environment; it must default-export a function (or a value) shaped like Next.js's MetadataRoute."+titleCase(string(f.Kind)))
 	}
@@ -363,7 +363,7 @@ func (b *Builder) buildImageRoute(f metaRouteFile, pages []string, bnd *bundler.
 		printWarningsOnce(os.Stderr, []diag.Diagnostic{d})
 		return nil
 	}
-	out, err := b.runBootstrapBundle(abs, imageRouteBootstrap(abs, b.Root, sets), "imageroute", bnd)
+	out, err := b.runBootstrapBundle(abs, imageRouteBootstrap(abs, b.Root, sets), "imageroute", bnd, nil)
 	if err != nil {
 		return b.routeErr(f, "running "+filepath.Base(f.Path)+" failed: "+err.Error(), "the file runs once per generateStaticParams entry at build time on Node; its default export (a function) must return new ImageResponse(<jsx />, { width, height })")
 	}

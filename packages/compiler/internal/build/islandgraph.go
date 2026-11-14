@@ -195,7 +195,8 @@ func (b *Builder) writeIslandBundles() error {
 	}
 	sink := &islandCSSSink{root: b.Root}
 	minify := b.shouldMinifyJS()
-	plugins := []api.Plugin{islandEntryPlugin(entries, virtual), islandCSSPlugin(sink), islandJSXPlugin(), islandTagsPlugin(b.Root, false), islandRequirePlugin(), reconcilerGuardPlugin()}
+	guard := b.newUnavailableGuard()
+	plugins := []api.Plugin{purePrunePlugin(b.Root), guard.plugin(), islandEntryPlugin(entries, virtual), islandCSSPlugin(sink), islandJSXPlugin(), islandTagsPlugin(b.Root, false), islandRequirePlugin(), reconcilerGuardPlugin()}
 	var injects []string
 	for _, e := range entries {
 		if !e.Boundary {
@@ -232,6 +233,15 @@ func (b *Builder) writeIslandBundles() error {
 		Inject:              injects,
 		Plugins:             plugins,
 	})
+	outputs := result.OutputFiles
+	if len(result.Errors) == 0 {
+		names := make([]string, len(points))
+		for i, p := range points {
+			names[i] = p.OutputPath
+		}
+		outputs = liveOutputs(outputs, names)
+	}
+	result.Errors = append(result.Errors, guard.errors(outputs)...)
 	if len(result.Errors) > 0 {
 		var msgs []string
 		for _, e := range result.Errors {
@@ -243,6 +253,7 @@ func (b *Builder) writeIslandBundles() error {
 		}
 		return fmt.Errorf("bundling island chunks:\n%s", strings.Join(msgs, "\n"))
 	}
+	result.OutputFiles = outputs
 	// Shared chunk names are upper-case; the cache policy recognizes
 	// content-hashed names by their lower-case hash.
 	rename := map[string]string{}

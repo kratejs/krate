@@ -246,6 +246,9 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 			Hint:   "re-run with --update-package, or install @krate/core and change dev/build/serve scripts manually",
 		})
 	}
+	if !opts.UpdatePackage {
+		planPreactDependency(abs, rep)
+	}
 	if hasApp {
 		rep.Detected = append(rep.Detected, appPrefix+"/")
 		if err := scanNextApp(abs, appDir, appPrefix, rep); err != nil {
@@ -955,7 +958,7 @@ func packagePlan(root, krateVersion string) (PlannedFile, bool) {
 			added = append(added, dep+"@"+spec)
 		}
 	}
-	if _, ok := deps["preact"]; !ok {
+	if !hasDependency(pkg, "preact") {
 		// Optional for apps without compiled islands, but required by the island
 		// runtime the migrator may copy in.
 		deps["preact"] = "^10.20.0"
@@ -1395,4 +1398,48 @@ func nextRootHas(appDir, name string) bool {
 		}
 	}
 	return false
+}
+
+const preactRange = "^10.20.0"
+
+// hasDependency reports whether package.json lists name in dependencies or
+// devDependencies.
+func hasDependency(pkg map[string]any, name string) bool {
+	for _, key := range []string{"dependencies", "devDependencies"} {
+		if m, ok := pkg[key].(map[string]any); ok {
+			if _, ok := m[name]; ok {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// planPreactDependency lists Preact as a manual item when the app runs on React
+// and does not depend on Preact. Krate runs React component packages and "use
+// client" components as Preact islands, and the build stops with KR8009 when
+// Preact is missing. --update-package adds it to package.json instead.
+func planPreactDependency(root string, rep *Report) {
+	data, err := os.ReadFile(filepath.Join(root, "package.json"))
+	if err != nil {
+		return
+	}
+	var pkg map[string]any
+	if json.Unmarshal(data, &pkg) != nil || !hasDependency(pkg, "react") || hasDependency(pkg, "preact") {
+		return
+	}
+	install := "npm install preact@" + preactRange
+	switch {
+	case fileExists(filepath.Join(root, "pnpm-lock.yaml")):
+		install = "pnpm add preact@" + preactRange
+	case fileExists(filepath.Join(root, "yarn.lock")):
+		install = "yarn add preact@" + preactRange
+	case fileExists(filepath.Join(root, "bun.lock")) || fileExists(filepath.Join(root, "bun.lockb")):
+		install = "bun add preact@" + preactRange
+	}
+	rep.Manual = append(rep.Manual, ManualItem{
+		Source: "package.json",
+		Reason: "React component packages and \"use client\" components run as Preact islands, and the build fails with KR8009 when preact is not installed",
+		Hint:   "run `" + install + "` (--update-package adds it to package.json)",
+	})
 }
