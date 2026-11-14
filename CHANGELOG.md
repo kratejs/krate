@@ -401,6 +401,7 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- A server module that uses a React package as a namespace value (`import * as Icons from "lucide-react"; Icons[name]`) now gets every export of the package through the boundary instead of an empty namespace; a package whose exports cannot be listed is a build error.
 - A page that imports a component from a React package and uses it other than as a JSX tag (`icon={Download}`, `[{ icon: Rocket }]`, `Icon.displayName`) no longer fails with `No matching export in "krate-pkg-boundary:..."`; the package boundary now exports every named import.
 - A page under an async layout no longer fails with `No matching export in "krate-pkg-boundary:lucide-react"` when the layout and the page import different icons (or other components) from the same React package; the page and its layouts now share one package boundary with the union of their exports.
 - Build-time `metadata`, `viewport`, `generateMetadata` and `generateStaticParams` evaluation runs only the

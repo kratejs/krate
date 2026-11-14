@@ -368,6 +368,14 @@ export default async function Layout({ children }: any) {
 export default function Home() { return <main><ArrowLeft id="back" /><Rocket id="rocket" /></main>; }`,
 		"src/pages/other.tsx": `import { Download, Heart } from "lucide-react";
 export default function Other() { return <main><Heart id="heart" /><Download id="dl2" /></main>; }`,
+		"src/pages/dynamic.tsx": `import * as Icons from "lucide-react";
+import { icons } from "lucide-react";
+export default function Dynamic() {
+  const A = (Icons as any)["Rocket"];
+  const B = (Icons as any)["Anchor"];
+  const C = (icons as any)["Heart"];
+  return <main><A id="dyn-a" /><B id="dyn-b" /><C id="dyn-c" /></main>;
+}`,
 		"src/pages/values.tsx": `import { Download, Rocket, Star } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 const items: { icon: LucideIcon }[] = [{ icon: Rocket }];
@@ -391,14 +399,16 @@ export default function Values() {
 	if err != nil {
 		t.Fatalf("serve: %v", err)
 	}
-	for path, ids := range map[string][]string{"/": {"dl", "back", "rocket"}, "/other/": {"dl", "dl2", "heart"}, "/values/": {"dl", "item", "slot"}} {
+	for path, ids := range map[string][]string{"/": {"dl", "back", "rocket"}, "/other/": {"dl", "dl2", "heart"}, "/values/": {"dl", "item", "slot"}, "/dynamic/": {"dl", "dyn-a", "dyn-b", "dyn-c"}} {
 		_, _, html := getBody(t, base+path)
 		for _, id := range ids {
 			if !regexp.MustCompile(`<svg [^>]*id="` + id + `"`).MatchString(html) {
 				t.Errorf("%s: icon %q did not render:\n%s", path, id, html)
 			}
 		}
-		if strings.Contains(html, "krate-island") {
+		// A namespace boundary covers every export of the package, hooks
+		// included, so its icons hydrate as islands.
+		if path != "/dynamic/" && strings.Contains(html, "krate-island") {
 			t.Errorf("%s: stateless icons must not become islands:\n%s", path, html)
 		}
 	}
