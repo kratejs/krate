@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -285,5 +286,61 @@ console.log(JSON.stringify(results));
 				}
 			}
 		})
+	}
+}
+
+func TestCloudflareEdgeCacheAndFetchHook(t *testing.T) {
+	probes := `
+const store = new Map();
+globalThis.caches = { default: {
+  match: async (r) => { const hit = store.get(r.url); return hit ? hit.clone() : undefined; },
+  put: async (r, res) => { store.set(r.url, res); },
+} };
+async function get(path, init) {
+  const res = await worker.fetch(new Request('https://example.test' + path, init), env, ctx);
+  await Promise.all(waited);
+  return { status: res.status, edge: res.headers.get('x-krate-edge-cache'), hook: res.headers.get('x-worker-hook'), body: await res.text() };
+}
+const n = (r) => /id="n">(\d+)</.exec(r.body)[1];
+const pub1 = await get('/edge-public/', { headers: { accept: 'text/html' } });
+const pub2 = await get('/edge-public/', { headers: { accept: 'text/html' } });
+results.pub = [pub1.edge, pub2.edge, n(pub1) === n(pub2), pub1.hook, pub2.hook];
+results.nostore = [(await get('/edge-nostore/')).edge, (await get('/edge-nostore/')).edge];
+results.cookie = [(await get('/edge-cookie/')).edge, (await get('/edge-cookie/')).edge];
+await get('/edge-public/', { headers: { cookie: 'krate-auth.session-token=x' } });
+await get('/edge-public/', { headers: { authorization: 'Bearer x' } });
+results.stored = [...store.keys()];
+console.log(JSON.stringify(results));
+`
+	for _, on := range []bool{true, false} {
+		root, cfg := serverlessProject(t, "serverless-cloudflare")
+		if on {
+			cfg.Deploy.Cloudflare = &config.CloudflareDeployConfig{Cache: true}
+		}
+		emitServerTarget(t, root, cfg, "cloudflare")
+		out := strings.Split(strings.TrimSpace(cloudflareScript(t, root, cfg, probes)), "\n")
+		var got struct {
+			Pub, Nostore, Cookie []interface{}
+			Stored               []string
+		}
+		if err := json.Unmarshal([]byte(out[len(out)-1]), &got); err != nil {
+			t.Fatalf("parsing %q: %v", out, err)
+		}
+		wantPub := []interface{}{nil, nil, false, "1", "1"}
+		wantStored := 0
+		if on {
+			wantPub, wantStored = []interface{}{"MISS", "HIT", true, "1", "1"}, 1
+		}
+		if !reflect.DeepEqual(got.Pub, wantPub) {
+			t.Errorf("cache=%v: public page = %v, want %v", on, got.Pub, wantPub)
+		}
+		for name, v := range map[string][]interface{}{"no-store": got.Nostore, "set-cookie": got.Cookie} {
+			if on && !reflect.DeepEqual(v, []interface{}{"MISS", "MISS"}) || !on && !reflect.DeepEqual(v, []interface{}{nil, nil}) {
+				t.Errorf("cache=%v: %s page = %v, must never be served from the cache", on, name, v)
+			}
+		}
+		if len(got.Stored) != wantStored {
+			t.Errorf("cache=%v: stored %v, want %d entry (credentialed requests must not be stored)", on, got.Stored, wantStored)
+		}
 	}
 }

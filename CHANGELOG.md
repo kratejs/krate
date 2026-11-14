@@ -237,6 +237,11 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Added
 
+- Cloudflare: `deploy.cloudflare.cache: true` stores cacheable SSR responses (200 GET with a public
+  `Cache-Control`, no `Set-Cookie`, no credentials) in `caches.default` and marks them with
+  `X-Krate-Edge-Cache: HIT|MISS`. A `fetch(request, env, ctx, next)` on the default export of
+  `src/cloudflare.ts` (or `deploy.worker`) now wraps Krate's handler; it used to be ignored, so a module
+  that exported an unrelated `fetch` must remove it.
 - Async layouts: `_layout.tsx` may be async, read the session or database, and call `redirect()` or
   `notFound()` to guard its subtree.
 - Compiled React components (lucide icons, Radix and shadcn primitives) render inside async pages and

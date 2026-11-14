@@ -259,9 +259,9 @@ export default {                                         // handlers: scheduled,
 
 A named export called `scheduled`, `queue`, `email`, `tail` or `tailStream` works too.
 Handlers run with the same platform as a request, so `getCloudflareContext()` and
-`process.env` string bindings work inside them. Krate's `fetch` always wins: a
-`fetch` in this module is ignored. Name the Durable Object, queue and cron settings
-in your wrangler file:
+`process.env` string bindings work inside them. A `fetch` on the default export is a
+wrapper around Krate's handler (see [Wrapping `fetch`](#wrapping-fetch)). Name the
+Durable Object, queue and cron settings in your wrangler file:
 
 ```toml
 # wrangler.toml
@@ -280,6 +280,59 @@ new_sqlite_classes = ["Counter"]
 `src/cloudflare.ts` is picked up by name; set `deploy.worker: "none"` to skip it.
 The deploy prints a note when it merges a module. A browser Web Worker in
 `src/worker.ts` is never merged.
+
+#### Wrapping `fetch`
+
+If the default export of the Worker module has a `fetch(request, env, ctx, next)`
+method, the generated Worker calls it for every request that reaches the Worker, with
+`next` set to Krate's own handler. Call `next()` (or `next(otherRequest)`) to render,
+and change the request or response around it: add headers, cache your own way, or
+answer some requests yourself. A named `fetch` export is not used.
+
+```ts
+// src/cloudflare.ts
+export default {
+  async fetch(request, env, ctx, next) {
+    const res = await next(request);
+    const out = new Response(res.body, res);
+    out.headers.set("x-served-by", "krate");
+    return out;
+  },
+};
+```
+
+`getCloudflareContext()` and `getPlatform()` work inside it. Without a `fetch`
+method nothing changes. A module that used to export a `fetch` that was silently
+ignored now has it called, so remove it or make it call `next`.
+
+#### Edge cache for SSR pages
+
+`deploy.cloudflare.cache: true` makes the Worker use the Cloudflare cache
+(`caches.default`) for server-rendered responses:
+
+```ts
+// krate.config.ts
+export default { deploy: { target: "cloudflare", cloudflare: { cache: true } } };
+```
+
+A GET or HEAD request is looked up first; a hit is returned without rendering. After a
+render, the response is stored (with `ctx.waitUntil`) only when all of these hold:
+
+- the method is GET and the status is 200;
+- `Cache-Control` is present, has no `no-store`, `no-cache` or `private`, and has
+  `public` or a `max-age`/`s-maxage` above 0 (set it from middleware or a `headers`
+  rule, see [the `Cache-Control` header of a page](/docs/guides/caching-and-revalidation/#the-cache-control-header-of-a-page));
+- the response has no `Set-Cookie` and no `Vary: *`;
+- the request has no `Authorization` header and no cookie whose name contains
+  `session`, `auth`, `token`, `sid`, `jwt` or `csrf`.
+
+Never looked up or stored: `/__krate/*` (server actions and framework endpoints),
+non-GET methods, `Range` requests, and paths whose last segment has a file extension
+(static assets, which `env.ASSETS` already serves). `/api/*` is cached only when the
+route's own response says `public`. Eligible requests carry an `X-Krate-Edge-Cache:
+HIT` or `MISS` header. Entries expire by their `Cache-Control`; nothing purges them on
+`revalidatePath`, so keep `s-maxage` short or purge with the Cloudflare API. The cache
+sits inside a `fetch` wrapper, so the wrapper sees both hits and misses.
 
 #### URL form and the 404 page
 

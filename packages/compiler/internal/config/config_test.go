@@ -174,7 +174,7 @@ func TestLoadTSConfigPathsWithAliases(t *testing.T) {
 // hard error.
 func TestTrailingSlashAndDeployWorkerConfig(t *testing.T) {
 	root := t.TempDir()
-	src := `export default { trailingSlash: "never", deploy: { target: "cloudflare", worker: "src/edge.ts" } };`
+	src := `export default { trailingSlash: "never", deploy: { target: "cloudflare", worker: "src/edge.ts", cloudflare: { cache: true } } };`
 	if err := os.WriteFile(filepath.Join(root, "krate.config.ts"), []byte(src), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -184,6 +184,9 @@ func TestTrailingSlashAndDeployWorkerConfig(t *testing.T) {
 	}
 	if cfg.TrailingSlashMode() != "never" || cfg.Deploy.Worker != "src/edge.ts" {
 		t.Errorf("trailingSlash %q, deploy.worker %q", cfg.TrailingSlashMode(), cfg.Deploy.Worker)
+	}
+	if !cfg.Deploy.CloudflareCache() || Default().Deploy.CloudflareCache() {
+		t.Errorf("deploy.cloudflare.cache must load and default to off")
 	}
 	if got := Default().TrailingSlashMode(); got != "always" {
 		t.Errorf("default mode = %q, want always", got)
