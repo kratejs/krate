@@ -396,6 +396,13 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- A component-local `const` holding plain JSX (`const intro = <p>Hello <b>there</b></p>`) no longer
+  makes a static page ship the runtime and an empty hydration script; JSX with handlers, refs,
+  spreads or components still hydrates.
+- An SSR 404 page (and any page rendered per request) whose dynamic attributes read server values
+  (`href={env.HOME}`, `className={...}`) no longer loads the runtime and a hydration script that
+  carried the server code, including on Cloudflare. The router also removes its inline
+  speculation-rules script when a header CSP blocks it.
 - `krate migrate nextjs` places the imports it adds (`after` from `@krate/runtime/server`, `lazy`, the
   NextResponse shim) below the file's directive prologue, so `"use server"` stays the first statement.
 - The `@radix-ui/react-slot` shim exports `createSlot` and `createSlottable`, which recent Radix

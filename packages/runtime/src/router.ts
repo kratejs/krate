@@ -500,6 +500,15 @@ function setupSpeculationRules(): void {
         },
       ],
     });
+    // A CSP sent as a header cannot be read from here: when it blocks the
+    // inline script, drop it and leave prefetching to the JS path.
+    const onViolation = (e: any): void => {
+      if (e && e.blockedURI === 'inline' && /^script-src/.test(String(e.effectiveDirective || e.violatedDirective || ''))) {
+        script.remove();
+        document.removeEventListener('securitypolicyviolation', onViolation);
+      }
+    };
+    document.addEventListener('securitypolicyviolation', onViolation);
     document.head.appendChild(script);
   } catch {
     /* ignore */
