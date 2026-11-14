@@ -422,4 +422,53 @@ export default function L({ children }: { children: any }) {
 		requireE2E(t, "playwright is not installed (run pnpm install)")
 	}
 	runTrimmedBrowserScript(t, repoRoot, browser, "twice", outDir)
+
+	// A component without signals is evaluated at build time; copies of
+	// children holding a handler still get their own keys.
+	evalDir := buildTrimmedProject(t, repoRoot, map[string]string{
+		"index.tsx": `import { createSignal } from '@krate/runtime';
+function Shell({ children, label }: { children?: any; label: string }) {
+  return <section><h2>{label}</h2><div id="first">{children}</div><div id="second">{children}</div></section>;
+}
+export default function P() {
+  const [n, setN] = createSignal(0);
+  return <Shell label="x"><button class={n() > 0 ? 'on' : ''} onClick={() => setN(n() + 1)}>go</button></Shell>;
+}
+`,
+	})
+	evalHTML, err := os.ReadFile(filepath.Join(evalDir, "index.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys := regexp.MustCompile(`data-k="?(k:[^" >-]+)`).FindAllStringSubmatch(string(evalHTML), -1)
+	if len(keys) != 2 || keys[0][1] == keys[1][1] {
+		t.Errorf("want two distinct hydration keys, got %v in\n%s", keys, evalHTML)
+	}
+	runTrimmedBrowserScript(t, repoRoot, browser, "twiceEval", evalDir)
+}
+
+// Children rendered once per loop iteration share one set of keys, which is
+// reported instead of leaving all but one copy dead.
+func TestChildrenRenderedInALoopIsReported(t *testing.T) {
+	repoRoot, err := repoRootPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, _ := captureOutput(func() error {
+		buildTrimmedProject(t, repoRoot, map[string]string{
+			"index.tsx": `import { createSignal } from '@krate/runtime';
+function List({ children }: { children?: any }) {
+  return <ul>{[1, 2].map((i) => <li key={i}>{children}</li>)}</ul>;
+}
+export default function P() {
+  const [n, setN] = createSignal(0);
+  return <List><button onClick={() => setN(n() + 1)}>go</button></List>;
+}
+`,
+		})
+		return nil
+	})
+	if !strings.Contains(out, "KR8323") || !strings.Contains(out, "once per iteration in <List>") {
+		t.Errorf("expected a KR8323 warning:\n%s", out)
+	}
 }

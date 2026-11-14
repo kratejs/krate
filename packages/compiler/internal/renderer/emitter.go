@@ -577,9 +577,22 @@ func (e *Emitter) emitSSREvaluated(node *irtree.ComponentNode) SlotOutput {
 	// hydration markers. SSREval is only used to evaluate the component's own
 	// return statement, whose {props.children} placeholder is replaced with
 	// this HTML via the "children" binding.
-	if len(node.Children) > 0 {
+	firstCopy := node.Children
+	var extraCopies [][]irtree.SlotNode
+	if len(node.ChildCopyStarts) > 0 {
+		firstCopy = node.Children[:node.ChildCopyStarts[0]]
+		for i, start := range node.ChildCopyStarts {
+			end := len(node.Children)
+			if i+1 < len(node.ChildCopyStarts) {
+				end = node.ChildCopyStarts[i+1]
+			}
+			extraCopies = append(extraCopies, node.Children[start:end])
+		}
+	}
+	var firstCopyHTML string
+	if len(firstCopy) > 0 {
 		var childrenHTML strings.Builder
-		childrenOut := e.emitSlotsParallel(node.Children)
+		childrenOut := e.emitSlotsParallel(firstCopy)
 		childrenHTML.WriteString(childrenOut.HTML)
 		sigs = append(sigs, childrenOut.Signatures...)
 		out.Orphans = append(out.Orphans, childrenOut.Orphans...)
@@ -597,7 +610,8 @@ func (e *Emitter) emitSSREvaluated(node *irtree.ComponentNode) SlotOutput {
 		if len(e.clientStack) > 0 {
 			owner = e.clientStack[len(e.clientStack)-1]
 		}
-		out.Orphans = append(out.Orphans, collectChildrenOrphans(node.Children, owner)...)
+		out.Orphans = append(out.Orphans, collectChildrenOrphans(firstCopy, owner)...)
+		firstCopyHTML = childrenHTML.String()
 		if childrenHTML.Len() > 0 {
 			// Children were rendered through the slot pipeline (text escaped,
 			// elements hydrated), so they bind as a JSX value injected raw.
@@ -662,6 +676,7 @@ func (e *Emitter) emitSSREvaluated(node *irtree.ComponentNode) SlotOutput {
 	// Run the component body (locals, if/else returns, loops) and render its
 	// return value.
 	html := eval.EvalComponentBody(node.Fn)
+	html = e.swapRepeatedChildren(html, firstCopyHTML, extraCopies, &out, &sigs)
 	e.errs = append(e.errs, eval.Errors()...)
 	out.HeadHTML += eval.HeadHTML
 	out.ScriptHTML += eval.ScriptHTML
@@ -670,6 +685,48 @@ func (e *Emitter) emitSSREvaluated(node *irtree.ComponentNode) SlotOutput {
 	out.Signatures = sigs
 
 	return out
+}
+
+// swapRepeatedChildren gives each further occurrence of the rendered first
+// copy of the call-site children in html (a component that renders
+// `{children}` more than once) the markup of its own copy, which carries its
+// own hydration keys. Copies with no matching occurrence are not emitted, so
+// they add no client code. Occurrences beyond the copies keep the first copy.
+func (e *Emitter) swapRepeatedChildren(html, first string, copies [][]irtree.SlotNode, out *SlotOutput, sigs *[]irtree.ComponentSignature) string {
+	if first == "" || len(copies) == 0 {
+		return html
+	}
+	owner := irtree.SlotID("")
+	if len(e.clientStack) > 0 {
+		owner = e.clientStack[len(e.clientStack)-1]
+	}
+	var b strings.Builder
+	rest := html
+	for used := 0; ; used++ {
+		i := strings.Index(rest, first)
+		if i < 0 {
+			break
+		}
+		b.WriteString(rest[:i])
+		rest = rest[i+len(first):]
+		if used == 0 || used > len(copies) {
+			b.WriteString(first)
+			continue
+		}
+		c := e.emitSlotsParallel(copies[used-1])
+		*sigs = append(*sigs, c.Signatures...)
+		out.Orphans = append(out.Orphans, c.Orphans...)
+		out.Orphans = append(out.Orphans, collectChildrenOrphans(copies[used-1], owner)...)
+		out.HeadHTML += c.HeadHTML
+		out.ScriptHTML += c.ScriptHTML
+		out.StyleHTML += c.StyleHTML
+		out.Templates += c.Templates
+		out.GoRenders = append(out.GoRenders, c.GoRenders...)
+		out.RuntimeChildren = mergeRuntimeChildren(out.RuntimeChildren, c.RuntimeChildren)
+		b.WriteString(c.HTML)
+	}
+	b.WriteString(rest)
+	return b.String()
 }
 
 // findReturnStmtIn finds the render return of a function body. Early-return

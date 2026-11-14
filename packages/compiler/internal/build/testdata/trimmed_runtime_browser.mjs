@@ -80,6 +80,16 @@ const checks = {
     expect("first copy hydrated", await text("#first .probe"), "hydrated");
     expect("second copy hydrated", await text("#second .probe"), "hydrated");
   },
+  async twiceEval(page, text, settle) {
+    await page.click("#first button");
+    await settle();
+    expect("first copy responds", await page.locator("#first button").getAttribute("class"), "on");
+    expect("second copy follows", await page.locator("#second button").getAttribute("class"), "on");
+    await page.reload({ waitUntil: "networkidle" });
+    await page.click("#second button");
+    await settle();
+    expect("second copy responds", await page.locator("#first button").getAttribute("class"), "on");
+  },
   async suspense(page, text, settle) {
     expect("suspense initial", await text("#sus"), "count0");
     await page.click("#inc");

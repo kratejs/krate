@@ -525,6 +525,10 @@ type ComponentNode struct {
 	// are used to fill {props.children} slots in emitClient.
 	CallSiteChildren []ast.JSXChild
 
+	// ChildCopyStarts is CallSiteCopyStarts for an SSREval component, whose
+	// call-site slots are Children.
+	ChildCopyStarts []int
+
 	// CallSiteSlots stores the tree-processed call site children.
 	// These are used by emitClient to replace <!--__children__--> placeholders
 	// with properly-rendered (and hydrated) child component output.
