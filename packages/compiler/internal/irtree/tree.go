@@ -184,6 +184,9 @@ type ExprSlot struct {
 	PropJSX ast.Expr
 	// PropScope holds the caller's values PropJSX reads.
 	PropScope map[string]jsvalue.Value
+	// PropSlots are the client components inside PropJSX, built in the
+	// caller's scope, so the server markup holds their initial state.
+	PropSlots []SlotNode
 	Signals   []string
 	// File and Pos locate the expression in its source (hydration source maps).
 	File string
@@ -528,10 +531,20 @@ type ComponentNode struct {
 	// are used to fill {props.children} slots in emitClient.
 	CallSiteChildren []ast.JSXChild
 
+	// ChildCopyStarts is CallSiteCopyStarts for an SSREval component, whose
+	// call-site slots are Children.
+	ChildCopyStarts []int
+
 	// CallSiteSlots stores the tree-processed call site children.
 	// These are used by emitClient to replace <!--__children__--> placeholders
 	// with properly-rendered (and hydrated) child component output.
 	CallSiteSlots []SlotNode
+
+	// CallSiteCopyStarts holds, for a component whose body renders
+	// `{children}` more than once, the offsets in CallSiteSlots where each
+	// extra copy of the call-site slots starts. Every copy has its own
+	// hydration keys; copy 0 is CallSiteSlots[:first offset].
+	CallSiteCopyStarts []int
 
 	// CallSiteChildrenText holds the compile-time text of the call-site
 	// children when they are fully static (e.g. the template literal passed to

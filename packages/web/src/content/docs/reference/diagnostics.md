@@ -1078,6 +1078,12 @@ Client code and statically rendered pages cannot read process.env or import.meta
 
 A module-level value that later top-level code changes (`const items = []` followed by `for (...) items.push(x)`, an assignment, a property write, `Object.assign`, or a call to a function of the module that does one of these) is evaluated at build time by running that code in order. When a statement cannot be run there (it reads the browser, the clock, an imported function or anything else unknown), the value stays unknown rather than keeping its initial value. A component that hydrates reads it at run time. A component rendered at build time has no run time, so the build fails. Make the top-level code plain, compute the value in one expression, or move the reading component to one with client state.
 
+### KR8323
+
+**Children with client state rendered more than once**
+
+A component that renders `{children}` in several places mounts one instance of the children for each place, and the build gives each instance its own hydration keys. That works for up to 8 placeholders written out in the component body. When the placeholder sits in a loop or an array callback (`items.map(() => <li>{children}</li>)`), or there are more than 8, the copies share one set of keys, so state, event handlers and bindings in the children only work for one of them. Render a component per item that owns its state, pass the data instead of children, or move the state up out of the children.
+
 ### KR8330
 
 **CSS scope handle is read by code that runs in the browser**
@@ -1113,6 +1119,12 @@ A component without state (no createSignal, useState or other hook that holds st
 **Head value cannot be evaluated at build time**
 
 Tags inside `<Head>` (and `<title>`, `<meta>` and `<link>` rendered on their own) are written into the static HTML so crawlers and link previews see them. A call to an imported helper is evaluated at build time when it is plain code: string and template work, JSON, `URL`, `encodeURIComponent`, and calls to other functions of your project. This value is none of those (it reads the browser, the clock, `process.env`, an object built by a class, or something else the build cannot run), so the tag would only be completed in the browser and crawlers would see it empty. Compute it from plain values, pass it as a prop, or move the tag to a page whose metadata comes from `generateMetadata`.
+
+### KR8354
+
+**Component with state in a prop is rendered twice**
+
+A prop that holds JSX with a component that has state (`slot={<Probe />}`, where Probe uses createSignal or useState) is one component instance. The receiving component reads the prop in more than one place, but the instance can only be mounted in one of them, so the other copy shows the server markup without ever hydrating. Render the prop in one place, or give each place its own element (a separate prop for each place).
 
 ### KR8360
 

@@ -12,6 +12,9 @@ const (
 	CodeBuildTimeUnknown Code = "KR8352"
 	// CodeHeadValueDeferred: a <Head> value the build could not evaluate.
 	CodeHeadValueDeferred Code = "KR8353"
+	// CodeJSXPropRenderedTwice: a JSX prop holding a component with state that
+	// the receiving component renders in more than one place.
+	CodeJSXPropRenderedTwice Code = "KR8354"
 )
 
 func init() {
@@ -61,6 +64,15 @@ func init() {
 				"the build cannot run), so the tag would only be completed in the browser and crawlers would " +
 				"see it empty. Compute it from plain values, pass it as a prop, or move the tag to a page whose " +
 				"metadata comes from `generateMetadata`.",
+		},
+		CodeInfo{
+			Code:  CodeJSXPropRenderedTwice,
+			Title: "Component with state in a prop is rendered twice",
+			Explanation: "A prop that holds JSX with a component that has state (`slot={<Probe />}`, where Probe uses " +
+				"createSignal or useState) is one component instance. The receiving component reads the prop in more " +
+				"than one place, but the instance can only be mounted in one of them, so the other copy shows the " +
+				"server markup without ever hydrating. Render the prop in one place, or give each place its own " +
+				"element (a separate prop for each place).",
 		},
 	)
 }
