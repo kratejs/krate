@@ -166,8 +166,7 @@ func TestClientModuleStarReexportExpandsRuntimeExports(t *testing.T) {
 	files := map[string]string{
 		"src/components/viewer/types.ts":   "export interface ViewerProps { label: string }\nexport type Mode = 'a' | 'b';\n",
 		"src/components/viewer/helpers.ts": "export function fmt(s: string) { return s.toUpperCase(); }\nexport const MAX = 3;\nexport default 1;\n",
-		"src/components/viewer/viewer.tsx": `"use client";
-import { useState } from "react";
+		"src/components/viewer/viewer.tsx": `import { useState } from "react";
 import type { ViewerProps } from "./types";
 export function Viewer({ label }: ViewerProps) {
   const [n, setN] = useState(0);
@@ -197,8 +196,17 @@ export default async function Home() {
 	if err := b.writeIslandBundles(); err != nil {
 		t.Fatal(err)
 	}
-	if chunks, _ := filepath.Glob(filepath.Join(root, "dist", "chunks", "island_*.js")); len(chunks) == 0 {
-		t.Fatal("expected client island chunks")
+	// viewer.tsx has no directive: a "use client" module imports it, so it is
+	// client code and hydrates in its own island chunk.
+	chunks, _ := filepath.Glob(filepath.Join(root, "dist", "chunks", "island_*.js"))
+	hydrates := false
+	for _, c := range chunks {
+		if src, _ := os.ReadFile(c); strings.Contains(string(src), "Viewer") && strings.Contains(string(src), "mount") {
+			hydrates = true
+		}
+	}
+	if !hydrates {
+		t.Fatalf("no island chunk contains the Viewer component: %v", chunks)
 	}
 	bundle, _ := os.ReadFile(filepath.Join(root, "dist", ".krate", "server-bundles", "index.server.mjs"))
 	for _, want := range []string{`"Viewer"`, `"fmt"`, `"MAX"`} {

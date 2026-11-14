@@ -228,6 +228,12 @@ func (b *Builder) prepareClientBoundaries(bundle *bundler.Bundle, ann *irtree.An
 			}
 		}
 	}
+	// As in Next.js, "use client" marks a boundary: a component module that a
+	// client module imports or re-exports is client code too, even without its
+	// own directive. Only modules a server component renders become boundaries.
+	if len(clientMods) > 0 {
+		b.addClientReached(bundle, ann, clientMods)
+	}
 	if errs := checkServerTree(ann, roots, clientMods, bundle.ActionImports); len(errs) > 0 {
 		return nil, errs[0]
 	}
@@ -284,6 +290,58 @@ func starTargets(bundle *bundler.Bundle) func(mod *bundler.Module, src string) *
 			return m
 		}
 		return byPath[canonicalPath(resolved)]
+	}
+}
+
+// addClientReached adds to clientMods the component modules of the server tree
+// that are reached through imports and re-exports from a "use client" module.
+func (b *Builder) addClientReached(bundle *bundler.Bundle, ann *irtree.Annotations, clientMods map[string]*bundler.Module) {
+	rendered := map[string]bool{}
+	for _, src := range ann.ComponentSources {
+		if src != "" {
+			rendered[filepath.Clean(src)] = true
+		}
+	}
+	target := starTargets(bundle)
+	visited := map[*bundler.Module]bool{}
+	var walk func(m *bundler.Module)
+	walk = func(m *bundler.Module) {
+		for _, stmt := range m.Program.Body {
+			var src string
+			switch st := stmt.(type) {
+			case *ast.ImportStmt:
+				src = st.Source
+			case *ast.ExportStmt:
+				src = st.ReexportSource
+			}
+			if src == "" {
+				continue
+			}
+			t := target(m, src)
+			if t == nil || visited[t] || resolver.IsCompiledDependency(t.Path) {
+				continue
+			}
+			visited[t] = true
+			if rendered[filepath.Clean(t.Path)] || rendered[canonicalPath(t.Path)] {
+				clientMods[filepath.Clean(t.Path)] = t
+				if resolved := canonicalPath(t.Path); resolved != filepath.Clean(t.Path) {
+					clientMods[resolved] = t
+				}
+			}
+			walk(t)
+		}
+	}
+	var roots []*bundler.Module
+	seen := map[*bundler.Module]bool{}
+	for _, m := range clientMods {
+		if !seen[m] {
+			seen[m] = true
+			roots = append(roots, m)
+		}
+	}
+	for _, m := range roots {
+		visited[m] = true
+		walk(m)
 	}
 }
 
