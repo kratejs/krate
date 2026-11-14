@@ -23,6 +23,13 @@ jobs:
         with:
           go-version-file: packages/compiler/go.mod
 
+      # TestNativeDebugGoHostRestart drives a real dlv session; under
+      # KRATE_REQUIRE_E2E (Verify compiler) a missing dlv is a failure.
+      - name: Install Delve
+        run: |
+          go install github.com/go-delve/delve/cmd/dlv@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
