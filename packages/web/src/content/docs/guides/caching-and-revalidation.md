@@ -114,6 +114,10 @@ state such as cookies or headers (`private, no-store`), and server action
 responses. The rule is the same in `krate serve` and on the Cloudflare, Vercel,
 Netlify and node targets.
 
+On Cloudflare, `deploy.cloudflare.cache: true` stores such responses in
+`caches.default`, and a `fetch` wrapper in `src/cloudflare.ts` can do your own
+caching. See [Edge cache for SSR pages](/docs/guides/deployment/#edge-cache-for-ssr-pages).
+
 ## Caching data
 
 ### `fetch` options
