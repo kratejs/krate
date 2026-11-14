@@ -146,6 +146,9 @@ func (b *Builder) evalMetadata(page string, segs []metaSegment, pageFiles string
 		Env:           b.scriptEnv(),
 		Await:         true,
 		ResolveImport: resolve,
+
+		// Module-level JSX in the page chain compiles without React in scope.
+		JSXImportSource: "@krate/runtime/server",
 	})
 	if eerr == nil {
 		if out, perr := parse(raw); perr == nil {
@@ -180,8 +183,9 @@ func anyErrors(rs []metadataResult) bool {
 // ESM and runs it with the configured runtime, returning its stdout.
 func (b *Builder) runBootstrapBundle(abs, source, prefix string, bnd *bundler.Bundler) ([]byte, error) {
 	jsxSource := ""
-	if prefix == "imageroute" || prefix == "metaroute" {
-		// opengraph-image.tsx builds its element tree with the server JSX runtime.
+	if prefix == "imageroute" || prefix == "metaroute" || prefix == "metadata" {
+		// opengraph-image.tsx and pages with module-level JSX build their
+		// element trees with the server JSX runtime, not React.
 		jsxSource = "@krate/runtime/server"
 	}
 	resolve := func(importer, spec string) (string, bool) {
@@ -325,8 +329,9 @@ func (b *Builder) pageMetadataHeadFor(page, source string, requestTime bool, par
 		metadataCache.Store(metadataKey{page, paramsKey(params)}, r)
 	}
 	for _, msg := range r.Errors {
-		b.warnMetadata(page, "generateMetadata could not be evaluated at build time: "+msg,
-			"the tags of this segment were left out; render the page per request (`export const dynamic = \"force-dynamic\"`) so generateMetadata runs with the request, or fix the error")
+		name, line, col, text := metadataExportPosition(source)
+		b.warnMetadata(page, line, col, text, name+" could not be evaluated at build time: "+msg,
+			"the tags of this segment were left out; render the page per request (`export const dynamic = \"force-dynamic\"`) so "+name+" runs with the request, or fix the error")
 	}
 	if r.Tags == "" {
 		return ""
@@ -334,13 +339,40 @@ func (b *Builder) pageMetadataHeadFor(page, source string, requestTime bool, par
 	return metadataTagsToHTML(r.Tags)
 }
 
-func (b *Builder) warnMetadata(page, msg, hint string) {
+// metadataExportPosition names the export a failed evaluation belongs to and
+// where it is declared: generateMetadata only when that is all the page has,
+// otherwise metadata. A zero line means the export was not found in source.
+func metadataExportPosition(source string) (name string, line, col int, text string) {
+	hasMeta, hasFn := moduleMetadataExports(source)
+	re := metadataExportRe
+	name = "metadata"
+	if hasFn && !hasMeta {
+		name, re = "generateMetadata", generateMetadataRe
+	}
+	loc := re.FindStringIndex(source)
+	if loc == nil {
+		return name, 0, 0, ""
+	}
+	start := loc[0] + len(source[loc[0]:loc[1]]) - len(strings.TrimLeft(source[loc[0]:loc[1]], " \t\r\n"))
+	line = strings.Count(source[:start], "\n") + 1
+	lineStart := strings.LastIndex(source[:start], "\n") + 1
+	end := strings.IndexByte(source[start:], '\n')
+	if end < 0 {
+		end = len(source) - start
+	}
+	return name, line, start - lineStart + 1, strings.TrimRight(source[lineStart:start+end], "\r")
+}
+
+func (b *Builder) warnMetadata(page string, line, col int, srcLine, msg, hint string) {
 	rel := page
 	if r, err := filepath.Rel(b.Root, page); err == nil {
 		rel = filepath.ToSlash(r)
 	}
 	printWarningsOnce(os.Stderr, []diag.Diagnostic{{
 		File:     rel,
+		Line:     line,
+		Col:      col,
+		Source:   srcLine,
 		Severity: diag.SeverityWarning,
 		Code:     diag.CodeMetadataNotStatic,
 		Message:  msg,

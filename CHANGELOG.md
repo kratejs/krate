@@ -405,6 +405,9 @@ host code runs in the native process. Names and options may change between relea
 - `lazy(() => import("./X").then((m) => m.X))` now builds like the `({ default: m.X })` form instead of
   failing with KR4001, and `krate migrate nextjs` drops the whole `next/dynamic` options object even
   when it contains `loading: () => <div>{...}</div>` or other nested braces.
+- A page whose `export const metadata` is a function call (`pageMetadata(...)`) and that has module-level JSX no longer
+  fails build-time metadata evaluation with "React is not defined", so its `<title>` and meta tags are kept; the KR7122
+  warning now names `metadata` or `generateMetadata` and points at the export's line.
 - `krate migrate nextjs` places the imports it adds (`after` from `@krate/runtime/server`, `lazy`, the
   NextResponse shim) below the file's directive prologue, so `"use server"` stays the first statement.
 - The `@radix-ui/react-slot` shim exports `createSlot` and `createSlottable`, which recent Radix
