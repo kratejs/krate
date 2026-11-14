@@ -396,6 +396,9 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- Inline `"use server"` actions declared inside a callback of an async server component (a `.map` row
+  action capturing the row) no longer fail with KR7001. The error for a capture in a non-async component
+  now names the variable, and a value that cannot be sealed reports the action's `file:line:col`.
 - `krate migrate nextjs` places the imports it adds (`after` from `@krate/runtime/server`, `lazy`, the
   NextResponse shim) below the file's directive prologue, so `"use server"` stays the first statement.
 - The `@radix-ui/react-slot` shim exports `createSlot` and `createSlottable`, which recent Radix

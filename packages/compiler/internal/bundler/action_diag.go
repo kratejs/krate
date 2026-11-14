@@ -64,8 +64,8 @@ func (b *Bundler) hoistInlineActions(path, abs, src string) (string, bool) {
 			name = "this function"
 		}
 		_ = b.setActionError(diag.New(path, a.Pos.Line, a.Pos.Col,
-			fmt.Sprintf("inline \"use server\" function %s closes over %s, which needs an async server component", name, strings.Join(a.Captures, ", ")),
-			"declare the function inside an async server component, or move it into a module whose first statement is \"use server\" and pass the values as arguments",
+			fmt.Sprintf("inline \"use server\" function %s captures %s from a component that is not async, so the value cannot be sealed per request", name, strings.Join(a.Captures, ", ")),
+			"make the enclosing component async, or move the function into a module whose first statement is \"use server\" and pass the values as arguments",
 			lineOf(src, a.Pos.Line)).WithCode(diag.CodeInlineUseServer))
 	}
 	return res.Source, true

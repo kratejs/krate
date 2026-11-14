@@ -233,6 +233,7 @@ function describe(v) {
   if (typeof v === "function") return "a function";
   if (typeof v === "symbol") return "a symbol";
   if (typeof v === "number") return "the number " + v;
+  if (v && typeof v.then === "function") return "a Promise (await it before the action is declared)";
   const proto = v && Object.getPrototypeOf(v);
   return (proto && proto.constructor && proto.constructor.name) ? "a " + proto.constructor.name + " instance" : "a non-plain object";
 }
