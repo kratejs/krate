@@ -922,17 +922,58 @@ export function __krate_render(C, props) {
 // every export wrapped by clientBoundary around its server render module.
 func clientBoundaryStub(cb ClientBoundary, implRel string) string {
 	var sb strings.Builder
-	sb.WriteString("import { clientBoundary as __krateCB } from \"@krate/runtime/server\";\n")
-	fmt.Fprintf(&sb, "import { __krate_module as __m, __krate_render as __r } from %s;\n", strconv.Quote(implRel))
+	sb.WriteString(boundaryStubHeader)
+	writeClientBoundaryExports(&sb, cb, implRel, "", nil)
+	return sb.String()
+}
+
+const boundaryStubHeader = "import { clientBoundary as __krateCB } from \"@krate/runtime/server\";\n"
+
+// writeClientBoundaryExports writes the exports of one boundary. suffix keeps
+// the impl bindings of several boundaries in one module apart, and names
+// already in seen are skipped.
+func writeClientBoundaryExports(sb *strings.Builder, cb ClientBoundary, implRel, suffix string, seen map[string]bool) {
+	fmt.Fprintf(sb, "import { __krate_module as __m%s, __krate_render as __r%s } from %s;\n", suffix, suffix, strconv.Quote(implRel))
 	for _, name := range cb.Exports {
-		wrapped := fmt.Sprintf("__krateCB(%s, %s, %s, __m[%s], __r, %t)", strconv.Quote(cb.ModuleID), strconv.Quote(name), strconv.Quote(cb.ChunkURL), strconv.Quote(name), cb.hydrates())
+		if seen[name] {
+			continue
+		}
+		if seen != nil {
+			seen[name] = true
+		}
+		wrapped := fmt.Sprintf("__krateCB(%s, %s, %s, __m%s[%s], __r%s, %t)", strconv.Quote(cb.ModuleID), strconv.Quote(name), strconv.Quote(cb.ChunkURL), suffix, strconv.Quote(name), suffix, cb.hydrates())
 		if name == "default" {
-			fmt.Fprintf(&sb, "export default %s;\n", wrapped)
+			fmt.Fprintf(sb, "export default %s;\n", wrapped)
 		} else {
-			fmt.Fprintf(&sb, "export const %s = %s;\n", name, wrapped)
+			fmt.Fprintf(sb, "export const %s = %s;\n", name, wrapped)
 		}
 	}
-	return sb.String()
+}
+
+// packageBoundaryStub is the module a React-bound package specifier resolves
+// to. A page can carry several boundaries for one specifier (its own and its
+// async layouts', each with the exports that tree uses); the module exports
+// the union, the first boundary winning a name.
+func packageBoundaryStub(cbs []ClientBoundary, outPath string, impls *clientSSRImpls) (string, error) {
+	var sb strings.Builder
+	sb.WriteString(boundaryStubHeader)
+	seen := map[string]bool{}
+	for i, cb := range cbs {
+		if cb.Real {
+			realBoundaryExports(&sb, cb, seen)
+			continue
+		}
+		rel, err := filepath.Rel(filepath.Dir(outPath), impls.implPath(cb))
+		if err != nil {
+			return "", err
+		}
+		rel = filepath.ToSlash(rel)
+		if !strings.HasPrefix(rel, ".") {
+			rel = "./" + rel
+		}
+		writeClientBoundaryExports(&sb, cb, rel, strconv.Itoa(i), seen)
+	}
+	return sb.String(), nil
 }
 
 // clientBoundaryPlugin swaps "use client" modules for their boundary stubs in
@@ -1037,11 +1078,13 @@ func clientTsconfigRaw(root string) string {
 // otherwise leaves external. Modules inside node_modules and the render
 // modules under server-bundles/client/ are separate builds and never see it.
 func setupPackageBoundaries(pb api.PluginBuild, pkgs []ClientBoundary, outPath string, impls *clientSSRImpls) {
-	bySpec := map[string]ClientBoundary{}
+	bySpec := map[string][]ClientBoundary{}
 	var specs []string
 	for _, cb := range pkgs {
-		bySpec[cb.Spec] = cb
-		specs = append(specs, specFilterEscape.ReplaceAllStringFunc(cb.Spec, func(s string) string { return `\` + s }))
+		if len(bySpec[cb.Spec]) == 0 {
+			specs = append(specs, specFilterEscape.ReplaceAllStringFunc(cb.Spec, func(s string) string { return `\` + s }))
+		}
+		bySpec[cb.Spec] = append(bySpec[cb.Spec], cb)
 	}
 	const ns = "krate-pkg-boundary"
 	pb.OnResolve(api.OnResolveOptions{Filter: "^(" + strings.Join(specs, "|") + ")$"}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
@@ -1051,20 +1094,10 @@ func setupPackageBoundaries(pb api.PluginBuild, pkgs []ClientBoundary, outPath s
 		return api.OnResolveResult{Path: args.Path, Namespace: ns}, nil
 	})
 	pb.OnLoad(api.OnLoadOptions{Filter: ".*", Namespace: ns}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
-		cb := bySpec[args.Path]
-		if cb.Real {
-			stub := realBoundaryStub(cb)
-			return api.OnLoadResult{Contents: &stub, Loader: api.LoaderJS, ResolveDir: filepath.Dir(outPath)}, nil
-		}
-		rel, err := filepath.Rel(filepath.Dir(outPath), impls.implPath(cb))
+		stub, err := packageBoundaryStub(bySpec[args.Path], outPath, impls)
 		if err != nil {
 			return api.OnLoadResult{}, err
 		}
-		rel = filepath.ToSlash(rel)
-		if !strings.HasPrefix(rel, ".") {
-			rel = "./" + rel
-		}
-		stub := clientBoundaryStub(cb, rel)
 		return api.OnLoadResult{Contents: &stub, Loader: api.LoaderJS, ResolveDir: filepath.Dir(outPath)}, nil
 	})
 }
