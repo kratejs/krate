@@ -396,6 +396,9 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- `lazy(() => import("./X").then((m) => m.X))` now builds like the `({ default: m.X })` form instead of
+  failing with KR4001, and `krate migrate nextjs` drops the whole `next/dynamic` options object even
+  when it contains `loading: () => <div>{...}</div>` or other nested braces.
 - `krate migrate nextjs` places the imports it adds (`after` from `@krate/runtime/server`, `lazy`, the
   NextResponse shim) below the file's directive prologue, so `"use server"` stays the first statement.
 - The `@radix-ui/react-slot` shim exports `createSlot` and `createSlottable`, which recent Radix

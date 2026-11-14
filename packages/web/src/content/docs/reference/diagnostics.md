@@ -150,7 +150,7 @@ Krate lowers class components declared at module top level (`class X extends Com
 
 **lazy() loader is not a static import()**
 
-Krate code-splits lazy components at build time, so the loader must be `() => import("./Component")` with a string literal path (optionally `.then((m) => ({ default: m.Named }))`). Computed paths and other loaders cannot be resolved.
+Krate code-splits lazy components at build time, so the loader must be `() => import("./Component")` with a string literal path (optionally `.then((m) => m.Named)` or `.then((m) => ({ default: m.Named }))` for a named export). Computed paths and other loaders cannot be resolved.
 
 ### KR4002
 

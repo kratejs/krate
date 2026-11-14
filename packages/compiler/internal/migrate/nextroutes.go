@@ -175,7 +175,6 @@ func hasUseClientDirective(src string) bool {
 
 var (
 	nextDynamicCall   = regexp.MustCompile(`\bdynamic\s*\(`)
-	nextDynamicArgs   = regexp.MustCompile(`(?s)\bdynamic\s*\(\s*((?:\(\)\s*=>\s*)?import\([^)]*\)[^,]*?)\s*,\s*\{[^}]*\}\s*\)`)
 	nextDynamicImport = regexp.MustCompile(`(?m)^[ \t]*import[ \t]+dynamic[ \t]+from[ \t]+["']next/dynamic["'][ \t]*;?[ \t]*\r?\n?`)
 	lazyImport        = regexp.MustCompile(`import\s*\{[^}]*\blazy\b[^}]*\}\s*from\s*["']react["']`)
 )
@@ -185,7 +184,7 @@ func rewriteNextDynamic(src string) (string, bool) {
 		return "", false
 	}
 	src = nextDynamicImport.ReplaceAllString(src, "")
-	src = nextDynamicArgs.ReplaceAllString(src, "lazy($1)")
+	src = dropDynamicOptions(src)
 	src = nextDynamicCall.ReplaceAllString(src, "lazy(")
 	if !lazyImport.MatchString(src) {
 		src = insertImportAfterDirective(src, "import { lazy } from \"react\";\n")
@@ -195,6 +194,65 @@ func rewriteNextDynamic(src string) (string, bool) {
 		return "", false
 	}
 	return src, true
+}
+
+// dropDynamicOptions removes the options argument of every dynamic(loader,
+// options) call, whatever the options contain (nested braces, JSX).
+func dropDynamicOptions(src string) string {
+	var out strings.Builder
+	pos := 0
+	for _, loc := range nextDynamicCall.FindAllStringIndex(src, -1) {
+		if loc[0] < pos {
+			continue
+		}
+		comma, end := topLevelArgs(src, loc[1])
+		if comma < 0 {
+			continue
+		}
+		out.WriteString(src[pos:comma])
+		pos = end
+	}
+	out.WriteString(src[pos:])
+	return out.String()
+}
+
+// topLevelArgs scans the arguments of a call whose "(" ends at start. It
+// returns the index of the comma that starts the second argument and of the
+// closing ")", or -1 when the call has a single argument or is unbalanced.
+func topLevelArgs(src string, start int) (comma, end int) {
+	comma = -1
+	depth := 0
+	for i := start; i < len(src); i++ {
+		switch c := src[i]; c {
+		case '(', '[', '{':
+			depth++
+		case ']', '}':
+			depth--
+		case ')':
+			if depth == 0 {
+				if comma < 0 {
+					return -1, -1
+				}
+				return comma, i
+			}
+			depth--
+		case ',':
+			if depth == 0 && comma < 0 {
+				comma = i
+			}
+		case '"', '\'', '`':
+			// Skip the literal; an unmatched quote (JSX text) is plain text.
+			for j := i + 1; j < len(src) && (c == '`' || src[j] != '\n'); j++ {
+				if src[j] == '\\' {
+					j++
+				} else if src[j] == c {
+					i = j
+					break
+				}
+			}
+		}
+	}
+	return -1, -1
 }
 
 func replaceModule(src, module, replacement string) string {
