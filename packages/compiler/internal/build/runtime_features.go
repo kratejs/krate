@@ -63,7 +63,7 @@ func runtimeScanText(results []*PageResult) string {
 		sb.WriteByte('\n')
 		// HTML produced per request can render forms and client components
 		// the build never saw: such a page keeps the whole runtime.
-		if r.Mode != RenderSSG || r.ServerPage || len(r.Regions) > 0 {
+		if perRequestClientCode(r) {
 			sb.WriteString(" " + islandMarkup + " " + actionsMarkup + " ")
 		}
 		// Client components load as separate modules that may call any API.

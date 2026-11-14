@@ -628,3 +628,26 @@ func isUseServerFile(path string) bool {
 	src := strings.TrimSpace(string(buf[:n]))
 	return strings.HasPrefix(src, "\"use server\"") || strings.HasPrefix(src, "'use server'")
 }
+
+// bundleHasActions reports whether a module graph imports a server action or
+// declares an inline one.
+func bundleHasActions(bundle *bundler.Bundle) bool {
+	if bundle == nil {
+		return false
+	}
+	if len(bundle.ActionImports) > 0 {
+		return true
+	}
+	for _, m := range bundle.Modules {
+		if m != nil && inlineaction.Has(m.SourceCode) {
+			return true
+		}
+	}
+	return false
+}
+
+// pageHasServerActions reports whether a page, or an async layout rendered
+// around it, can emit a server action form.
+func pageHasServerActions(bundle *bundler.Bundle, cut *layoutCut) bool {
+	return bundleHasActions(bundle) || (cut != nil && cut.Actions)
+}
