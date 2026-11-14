@@ -355,6 +355,8 @@ export default async function Home() {
 	if err != nil {
 		t.Fatalf("BuildAll: %v\n%s", err, out)
 	}
+	// Diagnostics print native paths; compare with forward slashes.
+	out = strings.ReplaceAll(out, `\`, "/")
 	if !strings.Contains(out, "components/Counter.tsx") || !strings.Contains(out, "process.env.NEXT_PUBLIC_X") {
 		t.Errorf("the client component's environment read should warn (KR8310):\n%s", out)
 	}
