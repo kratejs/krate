@@ -301,12 +301,12 @@ func serverRuntimeTagsPlugin() api.Plugin {
 }
 
 // reactServerShimPlugin maps `import { Suspense } from "react"` in a server
-// bundle onto Krate's server Suspense. Without it the bare import stays
+// bundle onto @krate/runtime/react-server. Without it the bare import stays
 // external and fails at load time (ERR_MODULE_NOT_FOUND) unless react happens
-// to be installed. Only the names Krate's server renderer implements are
-// exported, so any other React import fails the build with esbuild's "no
-// matching export" error instead of resolving to something that silently
-// behaves differently.
+// to be installed. That module only exports the names that have the same
+// meaning while a server renders (Suspense, cache, no-op effects, ...), so any
+// other React import fails the build with esbuild's "no matching export"
+// error instead of resolving to something that silently behaves differently.
 func reactServerShimPlugin() api.Plugin {
 	return api.Plugin{
 		Name: "krate-react-server-shim",
@@ -315,9 +315,8 @@ func reactServerShimPlugin() api.Plugin {
 				return api.OnResolveResult{Path: "react", Namespace: "krate-react-shim"}, nil
 			})
 			b.OnLoad(api.OnLoadOptions{Filter: `.*`, Namespace: "krate-react-shim"}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
-				contents := "import { Suspense, Fragment, createSignal, createEffect, createMemo, onCleanup, onMount } from '@krate/runtime/server';\n" +
-					"export { Suspense, Fragment, createSignal, createEffect, createMemo, onCleanup, onMount };\n" +
-					"export default { Suspense, Fragment };\n"
+				contents := "export * from '@krate/runtime/react-server';\n" +
+					"export { default } from '@krate/runtime/react-server';\n"
 				return api.OnLoadResult{Contents: &contents, Loader: api.LoaderJS, ResolveDir: ""}, nil
 			})
 		},

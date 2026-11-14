@@ -62,6 +62,10 @@
       "types": "./dist/react.d.ts",
       "default": "./dist/react.js"
     },
+    "./react-server": {
+      "types": "./dist/react-server.d.ts",
+      "default": "./dist/react-server.js"
+    },
     "./react/jsx-runtime": {
       "types": "./dist/react-jsx-runtime.d.ts",
       "default": "./dist/react-jsx-runtime.js"
