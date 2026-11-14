@@ -410,6 +410,11 @@ host code runs in the native process. Names and options may change between relea
   (`return env`, process env reads) stops reaching the client script and blanking server-rendered text.
 - A component-local `const` with a build-time value (`const label = 'x' + 'y'`) no longer makes a fully static
   page ship the runtime; it is baked into the HTML like a module-scope constant.
+- Two modules that export the same name and are both re-exported by a barrel (`export { dup } from './a'`) keep their own binding: each importer calls its own `dup` instead of whichever module came last. `KR7116` now only reports clashes that cannot be renamed (`export *`, the page module, `import()`, "use client"/"use server" modules, alias exports).
+- KR7116 (a name exported by two modules that cannot be renamed) is reported once per build instead of on every page, names the importing modules, and no longer fires for a package export that is bundled apart from the project.
+- KR7101 no longer says "a error", and the diagnostic points at line 1, column 1 of the offending file instead of 0:0.
+- `site.htmlAttributes` and `site.bodyAttributes` accept JSX names: `className` is written as `class`, `htmlFor` as `for`.
+- The build-time `data-krate-no-base` marker (from `<Link basePath={false}>` or a plain anchor) is no longer left in the emitted HTML; the link stays unprefixed.
 - `.ts`, `.mts` and `.cts` files are never lexed as JSX, so `a < b || c > d` in a plain TypeScript file
   (including a workspace package outside the project root) no longer fails the build.
 - `import "server-only"` works in every server context (build-time passes, metadata routes, middleware,
