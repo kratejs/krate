@@ -28,18 +28,24 @@ func externalsProjectAt(t *testing.T, files map[string]string, sub string, mutat
 	}
 	ensureHandlerDist(t)
 	top := t.TempDir()
+	links := map[string]string{}
 	for rel, content := range files {
 		p := filepath.Join(top, filepath.FromSlash(rel))
 		if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
 			t.Fatal(err)
 		}
 		if target, ok := strings.CutPrefix(content, "symlink:"); ok {
-			if err := os.Symlink(filepath.Join(top, filepath.FromSlash(target)), p); err != nil {
-				t.Fatal(err)
-			}
+			links[p] = filepath.Join(top, filepath.FromSlash(target))
 			continue
 		}
 		if err := os.WriteFile(p, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Links go last: on Windows a link made before its target directory
+	// exists is a file link, which cannot be read as a directory.
+	for p, target := range links {
+		if err := os.Symlink(target, p); err != nil {
 			t.Fatal(err)
 		}
 	}
