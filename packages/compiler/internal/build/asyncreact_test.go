@@ -352,7 +352,8 @@ export default function Error({ error, reset }: any) {
 }
 
 // TestAsyncLayoutAndPageShareAPackageBoundary: an async layout and the pages
-// under it import different icons from lucide-react. The page's server bundle
+// under it import different icons from lucide-react, some of them used as
+// values (a prop, an array, a member read) instead of JSX tags. The page's server bundle
 // carries one package boundary per tree for that specifier; they must be
 // served as one module, or the build fails with `No matching export in
 // "krate-pkg-boundary:lucide-react"` for the icons of whichever tree lost.
@@ -367,6 +368,15 @@ export default async function Layout({ children }: any) {
 export default function Home() { return <main><ArrowLeft id="back" /><Rocket id="rocket" /></main>; }`,
 		"src/pages/other.tsx": `import { Download, Heart } from "lucide-react";
 export default function Other() { return <main><Heart id="heart" /><Download id="dl2" /></main>; }`,
+		"src/pages/values.tsx": `import { Download, Rocket, Star } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+const items: { icon: LucideIcon }[] = [{ icon: Rocket }];
+const label = Star.displayName;
+function Slot(props: { icon: LucideIcon }) { return <props.icon id="slot" />; }
+export default function Values() {
+  const item = items[0];
+  return <main><item.icon id="item" /><Slot icon={Download} /><i id="label">{String(label)}</i></main>;
+}`,
 	})
 	withPreact(t, root)
 	linkReactPackages(t, root)
@@ -381,7 +391,7 @@ export default function Other() { return <main><Heart id="heart" /><Download id=
 	if err != nil {
 		t.Fatalf("serve: %v", err)
 	}
-	for path, ids := range map[string][]string{"/": {"dl", "back", "rocket"}, "/other/": {"dl", "dl2", "heart"}} {
+	for path, ids := range map[string][]string{"/": {"dl", "back", "rocket"}, "/other/": {"dl", "dl2", "heart"}, "/values/": {"dl", "item", "slot"}} {
 		_, _, html := getBody(t, base+path)
 		for _, id := range ids {
 			if !regexp.MustCompile(`<svg [^>]*id="` + id + `"`).MatchString(html) {

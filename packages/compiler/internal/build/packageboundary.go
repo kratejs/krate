@@ -221,16 +221,15 @@ func (b *Builder) collectPackageComponents(m *bundler.Module, resolve func(impor
 				add(src, member)
 			}
 		}
+		// Every named import is an export of the boundary: the page's bundle
+		// imports the specifier's boundary module, so a name used other than
+		// as a tag (`Icon.displayName`, `Icon()`, `typeof Icon`) must exist too.
 		for _, n := range imp.Named {
-			local := n.Local
-			if local == "" {
-				local = n.Remote
+			remote := n.Remote
+			if remote == "" {
+				remote = n.Local
 			}
-			if isComponent(local) {
-				remote := n.Remote
-				if remote == "" {
-					remote = local
-				}
+			if remote != "" {
 				add(src, bundler.OriginalName(remote))
 			}
 		}
