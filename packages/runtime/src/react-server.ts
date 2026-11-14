@@ -9,10 +9,10 @@
  * here (useState, useRef, createContext, ...) are not exported, so importing
  * them fails the build instead of silently misbehaving.
  */
-import { Suspense, Fragment, jsx, createSignal, createEffect, createMemo, onCleanup, onMount } from './server.js';
+import { Suspense, Fragment, jsx, lazy, createSignal, createEffect, createMemo, onCleanup, onMount } from './server.js';
 import { currentRenderScope, type CacheScope } from './cache-scope.js';
 
-export { Suspense, Fragment, createSignal, createEffect, createMemo, onCleanup, onMount };
+export { Suspense, Fragment, lazy, createSignal, createEffect, createMemo, onCleanup, onMount };
 
 type AnyFn = (...args: any[]) => any;
 
@@ -136,6 +136,6 @@ export function cache<F extends AnyFn>(fn: F): F {
 }
 
 export default {
-  Suspense, Fragment, createElement, forwardRef, memo, cache, use, useId, startTransition, useTransition,
+  Suspense, Fragment, lazy, createElement, forwardRef, memo, cache, use, useId, startTransition, useTransition,
   useOptimistic, useActionState, useEffect, useLayoutEffect, useInsertionEffect,
 };

@@ -477,6 +477,26 @@ export function Suspense(props: SuspenseProps): JSXNode {
 
 (Suspense as any).__krateSuspense = true;
 
+/**
+ * lazy() in a server tree: the loader's module is imported while the page
+ * renders and its component renders in place. Nothing is code-split to the
+ * browser, so a server-only module can be loaded this way.
+ */
+export function lazy<P = Record<string, any>>(
+  loader: () => Promise<{ default: (props: P) => unknown } | ((props: P) => unknown)>,
+): (props: P & { children?: JSXNode }) => Promise<JSXNode> {
+  let loaded: Promise<unknown> | undefined;
+  return async function Lazy(props) {
+    loaded ??= Promise.resolve(loader());
+    const mod: any = await loaded;
+    const C = typeof mod === "function" ? mod : mod?.default;
+    if (typeof C !== "function") {
+      throw new Error("lazy(): the loader did not resolve to a component; export it as the module's default or return it from .then()");
+    }
+    return jsx(C, props as Record<string, any>);
+  };
+}
+
 // Client boundaries ("use client" modules inside a server tree)
 
 type ClientRender = (component: unknown, props: Record<string, unknown>, childrenHTML: string | null) => string;
