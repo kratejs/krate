@@ -8,9 +8,10 @@ const notes: string[] = [];
 
 export async function addNote(text: string): Promise<number> {
   notes.push(text);
-  noteCount.set(notes.length);
   // The same import the UI uses; here it runs in-process, with no HTTP.
   await kv.set('last-note', text);
+  // After the write, so a page that sees the count can read the note.
+  noteCount.set(notes.length);
   return notes.length;
 }
 
