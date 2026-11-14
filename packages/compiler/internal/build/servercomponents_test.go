@@ -3,6 +3,7 @@ package build
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -108,5 +109,88 @@ func TestAsyncLayoutBelowTemplateDiagnostic(t *testing.T) {
 	}
 	if d.Line != 1 || d.Col != 1 {
 		t.Errorf("position %d:%d, want 1:1", d.Line, d.Col)
+	}
+}
+
+// TestServerBundleReactShimEffectsAndCache covers the server bundle's stand-in
+// for `react`: useEffect (called in a server page and in a "use client" child)
+// is a no-op while rendering, and cache() memoizes per request.
+func TestServerBundleReactShimEffectsAndCache(t *testing.T) {
+	b, root := scProject(t, map[string]string{
+		"src/components/Redirector.tsx": `"use client";
+import { useEffect, useLayoutEffect } from "react";
+export function Redirector() {
+  useEffect(() => { document.title = "x"; }, []);
+  useLayoutEffect(() => {}, []);
+  return <p id="redir">redirecting</p>;
+}`,
+		"src/pages/signin/done.tsx": `import { useEffect } from "react";
+import { Redirector } from "../../components/Redirector";
+export default async function Done() {
+  await Promise.resolve();
+  useEffect(() => { (globalThis as any).__effectRan = true; }, []);
+  return <main><Redirector /><p id="ran">{String((globalThis as any).__effectRan === true)}</p></main>;
+}`,
+		"src/pages/showcase/[id].tsx": `import { cache } from "react";
+const getItem = cache(async (id: string) => {
+  const g = globalThis as any;
+  g.__runs = (g.__runs || 0) + 1;
+  return { id, runs: g.__runs };
+});
+export default async function Show({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const a = await getItem(id);
+  const b = await getItem(id);
+  return <main><p id="r">runs:{a.runs}:{b.runs}</p></main>;
+}`,
+	})
+	withPreact(t, root)
+	e2eEnv(t)
+	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	base, err := startKrateServer(t, root, b.Cfg)
+	if err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+	_, _, html := getBody(t, base+"/signin/done/")
+	if !strings.Contains(html, "redirecting") || !strings.Contains(html, `<p id="ran">false</p>`) {
+		t.Fatalf("expected the page with a no-op server effect:\n%s", html)
+	}
+	// One run per request: the second request starts a new cache scope.
+	for _, want := range []string{"runs:1:1", "runs:2:2"} {
+		_, _, html = getBody(t, base+"/showcase/7/")
+		if !strings.Contains(html, want) {
+			t.Fatalf("expected %q (cache() memoizes within a request only):\n%s", want, html)
+		}
+	}
+}
+
+// TestBuildErrorCountMatchesListedErrors checks the "N error(s)" headline
+// against the diagnostics the aggregate lists: a page with two diagnostics
+// counts twice.
+func TestBuildErrorCountMatchesListedErrors(t *testing.T) {
+	bad := func(n int) string {
+		src := "import { lazy } from 'react';\nexport default function P() {\n"
+		for i := 0; i < n; i++ {
+			src += fmt.Sprintf("  const C%d = lazy(() => import('../c%d'));\n", i, i)
+		}
+		return src + "  return <main>x</main>;\n}\n"
+	}
+	b, _ := scProject(t, map[string]string{
+		"src/pages/a.tsx": bad(1), "src/pages/b.tsx": bad(1), "src/pages/c.tsx": bad(1), "src/pages/d.tsx": bad(2),
+		"src/pages/ok.tsx": `export default function P() { return <main>ok</main>; }`,
+	})
+	err := b.BuildAll()
+	if err == nil {
+		t.Fatal("expected the build to fail")
+	}
+	listed := strings.Count(err.Error(), "lazy() must be declared at the top level")
+	want := fmt.Sprintf("build failed: %d error(s)", listed)
+	if listed != 5 || !strings.HasPrefix(err.Error(), want) {
+		t.Fatalf("expected the headline %q over %d listed errors:\n%v", want, listed, err)
 	}
 }
