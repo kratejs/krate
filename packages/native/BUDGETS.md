@@ -11,7 +11,7 @@ fail when a measurement is over its limit.
 | `sizes.<platform>.tsOnlyRelease` | release executable of an app with TypeScript host code only (QuickJS linked) | `TestNativeBudgetSizes` | Go |
 | `sizes.<platform>.nativeTasksRelease` | release executable of `examples/native-tasks` | `TestNativeBudgetSizes` | Go, `pnpm install && pnpm build` |
 | `startup.<platform>.coldStartMs` | process start to the first page's load event of the `native-tasks` release executable, fastest of three runs, in ms | `TestNativeBudgetGUI` | `KRATE_NATIVE_GUI=1`, a display and WebKitGTK, or a macOS or Windows desktop |
-| `memory.<platform>.appMinusFloor.<role>.<metric>` | memory of the `native-tasks` release executable minus the floor, 5 s after the page loaded; **enforced** | `TestNativeBudgetGUI` | same |
+| `memory.<platform>.appMinusFloor.<role>.<metric>` | memory of the `native-tasks` release executable minus the floor, 5 s after the page loaded; **enforced** for `privateDirty`, PSS warns | `TestNativeBudgetGUI` | same |
 | `memory.<platform>.app.<role>.<metric>`, `...floor...` | the absolute values of the app and of the floor; **warn only** | `TestNativeBudgetGUI` | same |
 
 Memory is measured with `packages/native/memstat` through the shell's `memory`
@@ -31,8 +31,11 @@ value.
 Memory limits are `measured` plus the headroom, but never closer than 8 MiB
 (private dirty) or 16 MiB (PSS) to it: single runs on a loaded machine vary by
 more than 25 percent of a small delta. An absolute value over its limit prints a
-warning (and a GitHub Actions `::warning::` line); an `appMinusFloor` value over
-its limit fails the test. A role that was not measured counts 0.
+warning (and a GitHub Actions `::warning::` line), and so does an
+`appMinusFloor` PSS value: PSS splits shared library pages between whichever
+processes map them, so the difference between two process trees moves by tens
+of MB with no change in what either holds. An `appMinusFloor` private dirty
+value over its limit fails the test. A role that was not measured counts 0.
 
 Only `linux-amd64` has entries so far, but the machinery accepts any
 `<goos>-<goarch>` key (`darwin-arm64`, `windows-amd64`, `windows-arm64`,

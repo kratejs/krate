@@ -1334,7 +1334,7 @@ packages/native/budgets.json limits the stripped shell, Go-only, TypeScript-only
 Known limits:
 
 - linux-amd64 was measured on a developer machine; linux-arm64, darwin-arm64, windows-amd64 and windows-arm64 were recorded from one green CI run on the GitHub-hosted runners, so they describe those runners rather than typical user machines.
-- CI multiplies every cold-start limit by 3 (KRATE_BUDGET_SCALE): hosted runners vary a lot in start-up time. Memory limits are not scaled; only appMinusFloor entries fail the job.
+- CI multiplies every cold-start limit by 3 (KRATE_BUDGET_SCALE): hosted runners vary a lot in start-up time. Memory limits are not scaled; only appMinusFloor private dirty entries fail the job; PSS moves with how shared pages are split and only warns.
 - darwin-amd64 (Intel Macs) has no hosted runner in the CI matrix and no entries, so it only reports.
 
 Evidence: `TestNativeBudgetSizes`, `TestNativeBudgetGUI`

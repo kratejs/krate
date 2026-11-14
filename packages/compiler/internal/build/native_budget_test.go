@@ -378,7 +378,7 @@ type memResult struct {
 	value    int64
 	entry    budgetEntry
 	over     bool
-	enforced bool // appMinusFloor entries fail the test, absolute ones warn
+	enforced bool // see memEnforced
 }
 
 // evalMemory compares measured values with a platform's entries. Names that
@@ -393,7 +393,7 @@ func evalMemory(entries map[string]budgetEntry, vals map[string]int64) []memResu
 	for _, name := range names {
 		e := entries[name]
 		v := vals[name]
-		out = append(out, memResult{name: name, value: v, entry: e, over: v > e.Max, enforced: strings.HasPrefix(name, "appMinusFloor.")})
+		out = append(out, memResult{name: name, value: v, entry: e, over: v > e.Max, enforced: memEnforced(name)})
 	}
 	return out
 }
@@ -402,6 +402,16 @@ func evalMemory(entries map[string]budgetEntry, vals map[string]int64) []memResu
 // update mode, replaces the platform's memory entries). Only appMinusFloor
 // entries fail the test; the absolute ones warn. A platform other than
 // linux-amd64 with no memory entries only reports (see budgetRecordText).
+// memEnforced reports whether a memory value over its limit fails the test.
+// Only appMinusFloor private dirty does: absolute values move with the WebKit
+// version and the runner, and a PSS difference between two process trees
+// moves with how shared library pages happen to be split (the network
+// process, which runs no app code, swung by 30 MB of PSS between runs with
+// its private dirty unchanged). Those warn.
+func memEnforced(name string) bool {
+	return strings.HasPrefix(name, "appMinusFloor.") && strings.HasSuffix(name, ".privateDirty")
+}
+
 func checkMemoryBudgets(t *testing.T, f *budgetFile, vals map[string]int64) {
 	t.Helper()
 	plat := budgetPlatform()
@@ -443,7 +453,7 @@ func checkMemoryBudgets(t *testing.T, f *budgetFile, vals map[string]int64) {
 		if r.enforced {
 			t.Errorf("%s. If the growth is intended, update the budget (KRATE_UPDATE_BUDGETS=1, see packages/native/BUDGETS.md)", msg)
 		} else {
-			t.Logf("WARNING: %s (absolute values move with the WebKit version and the runner, so this only warns)", msg)
+			t.Logf("WARNING: %s (only appMinusFloor private dirty fails; see memEnforced)", msg)
 			fmt.Printf("::warning::%s\n", msg)
 		}
 	}
