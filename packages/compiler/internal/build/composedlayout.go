@@ -76,7 +76,9 @@ func (b *Builder) asyncLayoutCut(page string) (*layoutCut, error) {
 		if rb.Kind != "layout" {
 			return nil, diag.Diagnostic{
 				File:    rb.src(),
-				Message: filepath.Base(rb.src()) + " sits below the async layout " + filepath.Base(stack[cut].Path) + ", which renders per request; a " + rb.Kind + " cannot run inside it",
+				Line:    1,
+				Col:     1,
+				Message: filepath.Base(rb.src()) + " sits below the async layout " + filepath.Base(stack[cut].Path) + ", which renders per request; " + withArticle(rb.Kind) + " cannot run inside it",
 				Hint:    "move the " + rb.Kind + " above the async layout, or make the layout synchronous and fetch data in an async child component",
 			}.WithCode(diag.CodeAsyncLayout)
 		}
@@ -227,4 +229,12 @@ func layoutCutLayouts(cut *layoutCut) []string {
 		return nil
 	}
 	return cut.Layouts
+}
+
+// withArticle prefixes a route block kind with "a" or "an".
+func withArticle(kind string) string {
+	if kind != "" && strings.ContainsRune("aeiou", rune(kind[0])) {
+		return "an " + kind
+	}
+	return "a " + kind
 }
