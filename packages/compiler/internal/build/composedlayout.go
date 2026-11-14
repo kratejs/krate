@@ -75,16 +75,26 @@ func (b *Builder) asyncLayoutCut(page string) (*layoutCut, error) {
 	}
 	out := &layoutCut{Covered: cut + 1}
 	for _, rb := range stack[:cut+1] {
-		if rb.Kind != "layout" {
+		if rb.Kind == "template" {
 			return nil, diag.Diagnostic{
 				File:    rb.src(),
 				Line:    1,
 				Col:     1,
-				Message: filepath.Base(rb.src()) + " sits below the async layout " + filepath.Base(stack[cut].Path) + ", which renders per request; " + withArticle(rb.Kind) + " cannot run inside it",
-				Hint:    "move the " + rb.Kind + " above the async layout, or make the layout synchronous and fetch data in an async child component",
+				Message: filepath.Base(rb.src()) + " sits below the async layout " + filepath.Base(stack[cut].Path) + ", which renders per request; a template hydrates in the browser and cannot run inside it",
+				Hint:    "move the template above the async layout, or make the layout synchronous and fetch data in an async child component",
 			}.WithCode(diag.CodeAsyncLayout)
 		}
-		out.Layouts = append(out.Layouts, rb.Path)
+		path := rb.Path
+		if rb.Kind == "error" {
+			// The page renders per request here, so the segment's error.tsx
+			// catches on the server instead of through the client boundary.
+			gen, err := b.serverBoundaryLayout(rb.src())
+			if err != nil {
+				return nil, diag.Diagnostic{File: rb.src(), Line: 1, Col: 1, Message: err.Error(), Hint: "check that .krate is writable"}
+			}
+			path = gen
+		}
+		out.Layouts = append(out.Layouts, path)
 	}
 	return out, nil
 }
@@ -232,12 +242,4 @@ func layoutCutLayouts(cut *layoutCut) []string {
 		return nil
 	}
 	return cut.Layouts
-}
-
-// withArticle prefixes a route block kind with "a" or "an".
-func withArticle(kind string) string {
-	if kind != "" && strings.ContainsRune("aeiou", rune(kind[0])) {
-		return "an " + kind
-	}
-	return "a " + kind
 }

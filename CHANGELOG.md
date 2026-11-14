@@ -237,6 +237,11 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Added
 
+- Cloudflare: `deploy.cloudflare.cache: true` stores cacheable SSR responses (200 GET with a public
+  `Cache-Control`, no `Set-Cookie`, no credentials) in `caches.default` and marks them with
+  `X-Krate-Edge-Cache: HIT|MISS`. A `fetch(request, env, ctx, next)` on the default export of
+  `src/cloudflare.ts` (or `deploy.worker`) now wraps Krate's handler; it used to be ignored, so a module
+  that exported an unrelated `fetch` must remove it.
 - Async layouts: `_layout.tsx` may be async, read the session or database, and call `redirect()` or
   `notFound()` to guard its subtree.
 - Compiled React components (lucide icons, Radix and shadcn primitives) render inside async pages and
@@ -396,6 +401,67 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- Server pages and components can import `useEffect`, `useLayoutEffect`, `useInsertionEffect` (no-ops while rendering),
+  `cache` (memoizes by argument identity within one request), `use`, `useId`, `createElement`, `forwardRef`, `memo`,
+  `startTransition`, `useTransition`, `useOptimistic` and `useActionState` from `react`; they failed the build with
+  "No matching export".
+- A `"use client"` page under an async layout is a client boundary of the server tree (server-rendered with its initial
+  state, then hydrated) instead of failing the server bundle on `useState`.
+- The build summary counts every listed error: a page with several diagnostics counted once, so "30 error(s)"
+  headed a log of 53.
+- A server module that uses a React package as a namespace value (`import * as Icons from "lucide-react"; Icons[name]`) now gets every export of the package through the boundary instead of an empty namespace; a package whose exports cannot be listed is a build error.
+- A page that imports a component from a React package and uses it other than as a JSX tag (`icon={Download}`, `[{ icon: Rocket }]`, `Icon.displayName`) no longer fails with `No matching export in "krate-pkg-boundary:..."`; the package boundary now exports every named import.
+- A page under an async layout no longer fails with `No matching export in "krate-pkg-boundary:lucide-react"` when the layout and the page import different icons (or other components) from the same React package; the page and its layouts now share one package boundary with the union of their exports.
+- A "use client" component no longer drags server-only code into the browser through a barrel: a project
+  module with only declarations at its top level that nothing in the client component uses (a server helper
+  re-exported next to the component, a `lazy()` of a server module) is dropped from the client chunks, and
+  Node built-ins and native `.node` addons fail the build (KR8009) only when code a client component reaches
+  actually uses them, not while the bundler scans an unused re-export.
+- `lazy(() => import("./x"))` inside an async page or server component renders the module on the server (the
+  build stopped with "No matching export for import lazy"), so a server-only module can be loaded that way and
+  no browser chunk is made for it.
+- KR8310 (`process.env` read that is undefined in the browser) no longer fires for modules of an async page's
+  server tree that no client component bundles; it still fires for the client components and for synchronous pages.
+- Build-time `metadata`, `viewport`, `generateMetadata` and `generateStaticParams` evaluation runs only the
+  export and what it uses, not the whole page module: a page whose `metadata` is a call no longer loses its
+  tags (KR7122) because another import touches `document` at module scope, reads `__dirname`, uses the `Link`
+  global or pulls in a native addon (packages in `serverExternalPackages` and native addons stay external on
+  the Node fallback). A KR7122 from a layout is reported at the layout's export, never at `0:0`. An
+  out-of-memory or crash inside the embedded JavaScript engine (default heap raised to 128 MB,
+  `KRATE_JS_MEMORY_MB`) is now an error for that page instead of killing the build.
+- `export * from "./x"` in a `"use client"` module no longer fails with KR7114 when `./x` is a local module: it is expanded into the target's runtime exports (a types-only target contributes none), and a component imported through a `"use client"` module (a barrel re-exporting a directive-less file) is a client component for that import, as in Next.js. The remaining KR7114 case (a package or a cycle) prints its hint without doubled quotes.
+- Inline `"use server"` actions declared inside a callback of an async server component (a `.map` row
+  action capturing the row) no longer fail with KR7001. The error for a capture in a non-async component
+  now names the variable, and a value that cannot be sealed reports the action's `file:line:col`.
+- Inline `"use server"` actions in a sync component (`function DeleteButton({ id })`) that captures a prop
+  now work when the page renders per request (async page or layout, `dynamic = 'force-dynamic'`, ISR or
+  SSR); KR7001 remains only for a prerendered page, with a message saying so.
+- `lazy(() => import("./X").then((m) => m.X))` now builds like the `({ default: m.X })` form instead of
+  failing with KR4001, and `krate migrate nextjs` drops the whole `next/dynamic` options object even
+  when it contains `loading: () => <div>{...}</div>` or other nested braces.
+- A page whose `export const metadata` is a function call (`pageMetadata(...)`) and that has
+  module-level JSX no longer
+  fails build-time metadata evaluation with "React is not defined", so its `<title>` and meta tags are kept; the KR7122
+  warning now names `metadata` or `generateMetadata` and points at the export's line.
+- A component-local `const` holding plain JSX (`const intro = <p>Hello <b>there</b></p>`) no longer
+  makes a static page ship the runtime and an empty hydration script; JSX with handlers, refs,
+  spreads or components still hydrates.
+- An SSR 404 page (and any page rendered per request) whose dynamic attributes read server values
+  (`href={env.HOME}`, `className={...}`) no longer loads the runtime and a hydration script that
+  carried the server code, including on Cloudflare. The router also removes its inline
+  speculation-rules script when a header CSP blocks it.
+- An `error.tsx` below an async layout (the shape `krate migrate nextjs` produces for a Next.js route
+  group) no longer fails the build with `KR7101`: it is the page's error boundary, rendering inside the
+  layout (status 500, no-store) when the page throws. Only a `template.tsx` below an async layout still raises `KR7101`.
+- Middleware keeps working when a module it imports has a top-level `config` (or `middleware`) of its own:
+  the embedded runtime now reads the bundle's export map instead of global names, so a renamed export no
+  longer overwrites the helper and answers 503 "not a function".
+- A component that renders `{children}` in more than one place (`<Shell twice><Probe /></Shell>`) gives
+  each copy its own hydration keys, so every copy hydrates instead of only the last one.
+  Children with client state rendered once per loop iteration, or more than 8 times, now report
+  warning KR8323 instead of silently hydrating only one copy.
+- A component that holds state (`createSignal`, `useState`), passed as a JSX prop (`<Shell slot={<Probe />} />`), no longer fails the build with KR8352: it renders its initial state and hydrates like any other instance.
+- A JSX prop that holds a component with state (`trigger={<Button />}`) now renders that component's initial state into the server HTML when the receiving component has state of its own too; a prop the receiver renders in two places warns with KR8354, since only one copy can hydrate.
 - `krate migrate nextjs` places the imports it adds (`after` from `@krate/runtime/server`, `lazy`, the
   NextResponse shim) below the file's directive prologue, so `"use server"` stays the first statement.
 - The `@radix-ui/react-slot` shim exports `createSlot` and `createSlottable`, which recent Radix
@@ -556,6 +622,16 @@ host code runs in the native process. Names and options may change between relea
   identifier npm cannot use as a tag fails at the start, and a stable patch lower than `latest`
   no longer moves `latest`.
 - Compatibility matrix rows backed by CI tests read "Supported" instead of "Beta".
+- `site.htmlAttributes: { className: 'dark' }` (and `bodyAttributes`) written in `krate.config.ts` now
+  emits `class="dark"`; the config loader lowercased the key to `classname` before the JSX name was mapped.
+- A `Cache-Control` set by middleware or a `headers` rule is kept on pages rendered per request instead of
+  being replaced by `no-store` (`krate serve` and the Cloudflare, Vercel, Netlify and node targets). The
+  default stays `no-store`, and error pages, renders that read request state and actions keep it forced.
+- `krate migrate nextjs` lists `preact` as a manual item with the exact install command when the app uses
+  React and does not depend on it (`--update-package` adds it), instead of leaving the first build to stop
+  with KR8009.
+- KR7116 (two modules export the same name and it cannot be renamed) is reported once per build as the
+  changelog says; it was reported again for every page whose set of importing modules differed.
 
 ### Security
 

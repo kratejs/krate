@@ -118,6 +118,16 @@ export default async function Home() {
   prop name otherwise.
 - `children` passed from a server component are rendered on the server and
   inserted as HTML inside the client component.
+- Only what a client component imports and uses goes to the browser, as in
+  Next.js. A server helper (database client, `node:crypto`, a native
+  package) that sits in the same barrel as the component, or in a module the
+  component never calls, stays out of the client chunks. If client code does
+  use Node built-ins or a `.node` addon, the build stops with
+  [KR8009](/docs/reference/diagnostics/#kr8009).
+- `lazy(() => import("./heavy"))` in a server component renders the module on
+  the server, in place; no browser chunk is made for it. `process.env` reads
+  in modules only the server tree uses are real, so [KR8310](/docs/reference/diagnostics/#kr8310)
+  only fires for modules a client component bundles.
 - Pages without server components are unaffected: there, `"use client"`
   changes nothing and components compile through the normal Krate pipeline.
 
@@ -200,8 +210,18 @@ export default async function AdminLayout({ children }) {
   build prints which pages that applies to. Pages and layouts inside it follow
   the server component rules: interactive parts go in `"use client"` modules
   (`[KR7110]`).
-- A `template.tsx` or `error.tsx` between the page and an async layout is
-  `[KR7101]`: they hydrate in the browser. Put them above the async layout.
+- An `error.tsx` between the page and an async layout is the error boundary of
+  that page, as in Next.js. When the page (or a layout below the boundary)
+  throws while rendering, the response is `500` with `Cache-Control: no-store`
+  (so no CDN keeps it or crawler indexes it) and the error page rendered
+  inside the async layout, and the error page hydrates so `reset` works
+  (it reloads the page). The error prop is `{ name, message, digest }` with a
+  generic message; the real error and its stack go to the server log with the
+  same digest. `redirect()`, `notFound()`, `forbidden()` and `unauthorized()`
+  are not caught. The async layout itself sits outside the boundary: if it
+  throws, the error goes to the next `error.tsx` above it (or the `500` page).
+- A `template.tsx` between the page and an async layout is `[KR7101]`: it
+  hydrates in the browser. Put it above the async layout.
 - Layouts below an async layout are not kept mounted across client-side
   navigation; the router replaces the whole request-time region.
 

@@ -1033,7 +1033,8 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
 
     rs.res.set("Content-Type", "text/html; charset=utf-8");
     rs.res.set("X-Content-Type-Options", "nosniff");
-    if (!isISR) rs.res.set("Cache-Control", "no-store");
+    // A Cache-Control that middleware or a headers rule already set wins over the default.
+    if (!isISR && !rs.res.has("Cache-Control")) rs.res.set("Cache-Control", "no-store");
     let reval = 0;
     if (isISR) {
       reval = page.revalidate && page.revalidate > 0 ? page.revalidate : 60;
@@ -1082,6 +1083,8 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     /** <Head> tags (meta, link, script) the region rendered. */
     head?: string;
     noStore?: boolean;
+    /** An error boundary rendered its fallback: answer 500, uncacheable. */
+    errorCaught?: boolean;
     fatal?: boolean;
   }
 
@@ -1144,6 +1147,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     let errStack = "";
     let errDigest = "";
     let noStore = false;
+    let errorCaught = false;
     for (const frame of await Promise.all(pending)) {
       switch (frame.type) {
         case "region": {
@@ -1155,6 +1159,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
             continue;
           }
           if (frame.noStore) noStore = true;
+          if (frame.errorCaught) errorCaught = true;
           if (id === "page") {
             isISRFrame = !!frame.cacheStatus;
             cacheStatus = frame.cacheStatus || "";
@@ -1223,11 +1228,17 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
       rs.res.set("X-Krate-Error", "render");
     }
     if (isISR && isISRFrame && cacheStatus) rs.res.set("X-Krate-Cache", cacheStatus.toUpperCase());
-    if (isISR) {
+    if (errorCaught) {
+      // The fallback is an error response: no CDN may keep it, whatever cache
+      // headers the route or middleware set.
+      rs.res.set("X-Krate-Error", "render");
+      rs.res.delete("X-Krate-Cache");
+      rs.res.set("Cache-Control", "no-store");
+    } else if (isISR) {
       if (noStore || renderErr) {
         rs.res.set("Cache-Control", "private, no-store");
         rs.res.delete("X-Krate-Cache");
-      } else {
+      } else if (!rs.res.has("Cache-Control")) {
         const r = revalidate > 0 ? revalidate : 60;
         rs.res.set("Cache-Control", `public, s-maxage=${r}, stale-while-revalidate=${2 * r}`);
       }
@@ -1256,7 +1267,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
       }
       html = mergeHead(html, title, head);
     }
-    return finish(rs, segmentStatus || 200, html);
+    return finish(rs, errorCaught ? 500 : segmentStatus || 200, html);
   }
 
   // A <Head> inside a streamed Suspense region renders after the head of the

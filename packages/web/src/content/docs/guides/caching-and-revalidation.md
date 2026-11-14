@@ -91,6 +91,33 @@ page that is pinned static (`force-static`, `revalidate = false`,
 `output: "static"`) but reads tagged, timed or no-store data gets warning
 `KR8602`: its HTML is baked once and nothing can refresh it.
 
+### The `Cache-Control` header of a page
+
+A page rendered per request answers with `Cache-Control: no-store` unless
+something set the header first. A `Cache-Control` that middleware sets
+(`NextResponse.next({ headers })` or `response.headers.set(...)`) or that a
+`headers` rule in `krate.config` matches is kept, so an app can let a CDN cache
+a request-time page:
+
+```ts
+export function middleware() {
+  const res = NextResponse.next();
+  res.headers.set('Cache-Control', 'public, s-maxage=60');
+  return res;
+}
+```
+
+An ISR page gets `public, s-maxage=<revalidate>` by default and the same rule
+applies. Krate keeps `no-store` where caching would be wrong: error, 404 and
+403 pages, a 503 while the renderer is down, an ISR render that read request
+state such as cookies or headers (`private, no-store`), and server action
+responses. The rule is the same in `krate serve` and on the Cloudflare, Vercel,
+Netlify and node targets.
+
+On Cloudflare, `deploy.cloudflare.cache: true` stores such responses in
+`caches.default`, and a `fetch` wrapper in `src/cloudflare.ts` can do your own
+caching. See [Edge cache for SSR pages](/docs/guides/deployment/#edge-cache-for-ssr-pages).
+
 ## Caching data
 
 ### `fetch` options

@@ -4,6 +4,9 @@
 import { ATTR_ALIASES } from './htmlspec-attributes.js';
 import { withBase } from './base-path.js';
 import { highlight as highlightCode, trimSpace } from './highlight.js';
+import { accessDeniedStatus, isNotFoundSignal, redirectTarget } from './request-context.js';
+import { sha256Hex } from './sha256.js';
+import { markErrorCaught } from './cache-scope.js';
 
 export { getActionContext, headers, cookies, redirect } from './action-context.js';
 export type { ActionContext, ActionCookies, ActionCookieOptions } from './action-context.js';
@@ -200,6 +203,42 @@ function classFallback(type: any, instance: any, error: unknown): unknown {
     // A throwing componentDidCatch must not hide the original render error.
   }
   return instance.render();
+}
+
+/**
+ * ServerErrorBoundary is the request-time form of a segment's error.tsx under
+ * an async layout: it renders `children`, and when rendering them throws it
+ * renders `<fallback error={{ name, message, digest }} />` in their place.
+ * notFound(), forbidden(), unauthorized() and redirect() signals pass through.
+ * The visitor sees a generic message and a digest; the real error is logged
+ * with the same digest. The render's scope records the catch, so the host
+ * answers 500 with no-store instead of a cacheable 200.
+ */
+export class ServerErrorBoundary {
+  props: { fallback: any; children?: JSXNode };
+  state: { error: unknown } = { error: undefined };
+  constructor(props: { fallback: any; children?: JSXNode }) {
+    this.props = props;
+  }
+  static getDerivedStateFromError(error: unknown) {
+    if (isNotFoundSignal(error) || accessDeniedStatus(error) || redirectTarget(error)) throw error;
+    return { error: describeBoundaryError(error) };
+  }
+  render(): JSXNode {
+    const err = this.state.error as { name: string; message: string; digest: string } | undefined;
+    if (!err) return this.props.children as JSXNode;
+    return jsx(this.props.fallback, { error: err }) as JSXNode;
+  }
+}
+
+function describeBoundaryError(error: unknown) {
+  const e = error as any;
+  const message = (e && e.message) || String(error);
+  const stack = (e && typeof e.stack === "string" && e.stack) || "";
+  const digest = sha256Hex(message + "\n" + stack).slice(0, 10);
+  console.error(`[krate] Error caught by an error boundary (digest ${digest}):`, error);
+  markErrorCaught();
+  return { name: "Error", message: "Internal Server Error", digest };
 }
 
 function renderNode(node: JSXNode): string {
@@ -437,6 +476,26 @@ export function Suspense(props: SuspenseProps): JSXNode {
 }
 
 (Suspense as any).__krateSuspense = true;
+
+/**
+ * lazy() in a server tree: the loader's module is imported while the page
+ * renders and its component renders in place. Nothing is code-split to the
+ * browser, so a server-only module can be loaded this way.
+ */
+export function lazy<P = Record<string, any>>(
+  loader: () => Promise<{ default: (props: P) => unknown } | ((props: P) => unknown)>,
+): (props: P & { children?: JSXNode }) => Promise<JSXNode> {
+  let loaded: Promise<unknown> | undefined;
+  return async function Lazy(props) {
+    loaded ??= Promise.resolve(loader());
+    const mod: any = await loaded;
+    const C = typeof mod === "function" ? mod : mod?.default;
+    if (typeof C !== "function") {
+      throw new Error("lazy(): the loader did not resolve to a component; export it as the module's default or return it from .then()");
+    }
+    return jsx(C, props as Record<string, any>);
+  };
+}
 
 // Client boundaries ("use client" modules inside a server tree)
 

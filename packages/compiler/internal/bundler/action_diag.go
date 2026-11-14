@@ -18,7 +18,9 @@ import (
 //
 // An action that closes over nothing becomes an ordinary action reference and
 // renders like an imported one. One that captures values needs an async server
-// component, where each request seals the values; elsewhere it is KR7001.
+// render, where each request seals the values. A capture in a component that
+// is not async is reported through Bundle.SyncActionError, which the build
+// raises only when the page is prerendered.
 func (b *Bundler) hoistInlineActions(path, abs, src string) (string, bool) {
 	if !inlineaction.Has(src) {
 		return src, false
@@ -63,9 +65,9 @@ func (b *Bundler) hoistInlineActions(path, abs, src string) (string, bool) {
 		if name == "" {
 			name = "this function"
 		}
-		_ = b.setActionError(diag.New(path, a.Pos.Line, a.Pos.Col,
-			fmt.Sprintf("inline \"use server\" function %s closes over %s, which needs an async server component", name, strings.Join(a.Captures, ", ")),
-			"declare the function inside an async server component, or move it into a module whose first statement is \"use server\" and pass the values as arguments",
+		b.syncActionErrs = append(b.syncActionErrs, diag.New(path, a.Pos.Line, a.Pos.Col,
+			fmt.Sprintf("inline \"use server\" function %s captures %s, but the page is prerendered, so the value cannot be sealed per request", name, strings.Join(a.Captures, ", ")),
+			"make the page render per request (an async page or layout, `export const dynamic = 'force-dynamic'`, or a revalidate), pass the value through a hidden form field, or move the function into a module whose first statement is \"use server\" and pass the values as arguments",
 			lineOf(src, a.Pos.Line)).WithCode(diag.CodeInlineUseServer))
 	}
 	return res.Source, true

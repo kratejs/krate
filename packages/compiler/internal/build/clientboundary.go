@@ -228,6 +228,12 @@ func (b *Builder) prepareClientBoundaries(bundle *bundler.Bundle, ann *irtree.An
 			}
 		}
 	}
+	// As in Next.js, "use client" marks a boundary: a component module that a
+	// client module imports or re-exports is client code too, even without its
+	// own directive. Only modules a server component renders become boundaries.
+	if len(clientMods) > 0 {
+		b.addClientReached(bundle, ann, clientMods)
+	}
 	if errs := checkServerTree(ann, roots, clientMods, bundle.ActionImports); len(errs) > 0 {
 		return nil, errs[0]
 	}
@@ -242,7 +248,7 @@ func (b *Builder) prepareClientBoundaries(bundle *bundler.Bundle, ann *irtree.An
 	var out []ClientBoundary
 	for _, p := range paths {
 		mod := clientMods[p]
-		exports, err := clientModuleExports(mod)
+		exports, err := clientModuleExports(mod, starTargets(bundle))
 		if err != nil {
 			return nil, err
 		}
@@ -264,8 +270,131 @@ func (b *Builder) prepareClientBoundaries(bundle *bundler.Bundle, ann *irtree.An
 	return out, nil
 }
 
-// clientModuleExports lists the export names of a "use client" module.
-func clientModuleExports(mod *bundler.Module) ([]string, error) {
+// starTargets returns a lookup from an `export *` source, as written in mod,
+// to the bundled module it resolves to (nil when it is not in the bundle).
+func starTargets(bundle *bundler.Bundle) func(mod *bundler.Module, src string) *bundler.Module {
+	byPath := map[string]*bundler.Module{}
+	for _, m := range bundle.Modules {
+		if m != nil && !m.IsExternal && m.Program != nil {
+			byPath[filepath.Clean(m.Path)] = m
+			byPath[canonicalPath(m.Path)] = m
+		}
+	}
+	return func(mod *bundler.Module, src string) *bundler.Module {
+		src = strings.Trim(src, "\"'`")
+		resolved := bundle.Resolver.Resolve(mod.Path, src)
+		if resolved == "" {
+			return nil
+		}
+		if m := byPath[filepath.Clean(resolved)]; m != nil {
+			return m
+		}
+		return byPath[canonicalPath(resolved)]
+	}
+}
+
+// addClientReached adds to clientMods the component modules that a server
+// module imports through a "use client" module. As in Next.js the boundary is
+// the import path: `import { V } from "./viewer-barrel"` (a client module that
+// re-exports V from ./viewer) makes ./viewer's V a client component for that
+// server module, while a direct `import { V } from "./viewer"` stays a server
+// component.
+func (b *Builder) addClientReached(bundle *bundler.Bundle, ann *irtree.Annotations, clientMods map[string]*bundler.Module) {
+	rendered := map[string]bool{}
+	for _, src := range ann.ComponentSources {
+		if src != "" {
+			rendered[filepath.Clean(src)] = true
+			rendered[canonicalPath(src)] = true
+		}
+	}
+	target := starTargets(bundle)
+	isClient := func(m *bundler.Module) bool {
+		_, ok := clientMods[filepath.Clean(m.Path)]
+		return ok
+	}
+	// declarer follows name through the re-exports of m to the module that
+	// declares it.
+	var declarer func(m *bundler.Module, name string, depth int) *bundler.Module
+	declarer = func(m *bundler.Module, name string, depth int) *bundler.Module {
+		if depth > 16 {
+			return nil
+		}
+		var stars []string
+		for _, stmt := range m.Program.Body {
+			exp, ok := stmt.(*ast.ExportStmt)
+			if !ok {
+				continue
+			}
+			if exp.ReexportSource == "" {
+				continue
+			}
+			if exp.StarReexport && exp.Namespace == "" {
+				stars = append(stars, exp.ReexportSource)
+				continue
+			}
+			for _, n := range exp.ReexportNamed {
+				out := n.Remote
+				if out == "" {
+					out = n.Local
+				}
+				if out == name {
+					if t := target(m, exp.ReexportSource); t != nil {
+						return declarer(t, n.Local, depth+1)
+					}
+					return nil
+				}
+			}
+		}
+		for _, src := range stars {
+			if t := target(m, src); t != nil {
+				if d := declarer(t, name, depth+1); d != nil {
+					return d
+				}
+			}
+		}
+		return m
+	}
+	var found []*bundler.Module
+	for _, m := range bundle.Modules {
+		if m == nil || m.IsExternal || m.IsCSS || m.Program == nil || isClient(m) || resolver.IsCompiledDependency(m.Path) {
+			continue
+		}
+		for _, stmt := range m.Program.Body {
+			imp, ok := stmt.(*ast.ImportStmt)
+			if !ok {
+				continue
+			}
+			c := target(m, imp.Source)
+			if c == nil || !isClient(c) {
+				continue
+			}
+			names := []string{}
+			if imp.Default != "" {
+				names = append(names, "default")
+			}
+			for _, n := range imp.Named {
+				names = append(names, n.Remote)
+			}
+			for _, n := range names {
+				if d := declarer(c, n, 0); d != nil && d != c && rendered[filepath.Clean(d.Path)] {
+					found = append(found, d)
+				}
+			}
+		}
+	}
+	for _, d := range found {
+		clientMods[filepath.Clean(d.Path)] = d
+		if resolved := canonicalPath(d.Path); resolved != filepath.Clean(d.Path) {
+			clientMods[resolved] = d
+		}
+	}
+}
+
+// clientModuleExports lists the export names of a "use client" module. An
+// `export *` is expanded into the runtime exports of its target (types are
+// already erased by the parser); it is an error only when the target cannot
+// be found in the bundle, such as a package, or is part of a cycle.
+func clientModuleExports(mod *bundler.Module, target func(*bundler.Module, string) *bundler.Module) ([]string, error) {
 	seen := map[string]bool{}
 	var names []string
 	add := func(n string) {
@@ -274,46 +403,66 @@ func clientModuleExports(mod *bundler.Module) ([]string, error) {
 			names = append(names, n)
 		}
 	}
-	for _, stmt := range mod.Program.Body {
-		exp, ok := stmt.(*ast.ExportStmt)
-		if !ok {
-			continue
-		}
-		if exp.Default {
-			add("default")
-			continue
-		}
-		if exp.StarReexport && exp.Namespace == "" {
-			return nil, diag.New(mod.Path, exp.Position.Line, exp.Position.Col,
-				"`export *` in a \"use client\" module cannot be wrapped as a client boundary",
-				"list the re-exported names explicitly: export { A, B } from \""+exp.ReexportSource+"\"",
-				lineOf(mod.SourceCode, exp.Position.Line)).WithCode(diag.CodeClientBoundaryExports)
-		}
-		add(exp.Namespace)
-		switch d := exp.Declaration.(type) {
-		case *ast.FnDecl:
-			add(d.Name)
-		case *ast.ClassDecl:
-			add(d.Name)
-		case *ast.VarStmt:
-			for _, v := range d.Decls {
-				add(v.Name)
+	visiting := map[*bundler.Module]bool{}
+	var collect func(m *bundler.Module, star bool) error
+	collect = func(m *bundler.Module, star bool) error {
+		visiting[m] = true
+		defer delete(visiting, m)
+		for _, stmt := range m.Program.Body {
+			exp, ok := stmt.(*ast.ExportStmt)
+			if !ok {
+				continue
+			}
+			if exp.Default {
+				if !star {
+					add("default")
+				}
+				continue
+			}
+			if exp.StarReexport && exp.Namespace == "" {
+				t := target(m, exp.ReexportSource)
+				if t == nil || visiting[t] {
+					src := strings.Trim(exp.ReexportSource, "\"'`")
+					return diag.New(m.Path, exp.Position.Line, exp.Position.Col,
+						"`export *` in a \"use client\" module cannot be wrapped as a client boundary",
+						"list the re-exported names explicitly: export { A, B } from \""+src+"\"",
+						lineOf(m.SourceCode, exp.Position.Line)).WithCode(diag.CodeClientBoundaryExports)
+				}
+				if err := collect(t, true); err != nil {
+					return err
+				}
+				continue
+			}
+			add(exp.Namespace)
+			switch d := exp.Declaration.(type) {
+			case *ast.FnDecl:
+				add(d.Name)
+			case *ast.ClassDecl:
+				add(d.Name)
+			case *ast.VarStmt:
+				for _, v := range d.Decls {
+					add(v.Name)
+				}
+			}
+			for _, n := range exp.Named {
+				if n.Remote != "" {
+					add(n.Remote)
+				} else {
+					add(n.Local)
+				}
+			}
+			for _, n := range exp.ReexportNamed {
+				if n.Remote != "" {
+					add(n.Remote)
+				} else {
+					add(n.Local)
+				}
 			}
 		}
-		for _, n := range exp.Named {
-			if n.Remote != "" {
-				add(n.Remote)
-			} else {
-				add(n.Local)
-			}
-		}
-		for _, n := range exp.ReexportNamed {
-			if n.Remote != "" {
-				add(n.Remote)
-			} else {
-				add(n.Local)
-			}
-		}
+		return nil
+	}
+	if err := collect(mod, false); err != nil {
+		return nil, err
 	}
 	return names, nil
 }
@@ -482,6 +631,9 @@ func calleeName(e ast.Expr) string {
 type clientChunkInfo struct {
 	url      string
 	stateful bool
+	// inputs are the source files that ended up in the chunk (absolute,
+	// cleaned); tree shaking leaves out the rest of the import graph.
+	inputs map[string]bool
 }
 
 var statefulHookRe = regexp.MustCompile(`\buse(State|Reducer|Effect|LayoutEffect|InsertionEffect|SyncExternalStore|ImperativeHandle|Transition|Optimistic|ActionState|DeferredValue)\b|\b(Pure)?Component\b`)
@@ -589,6 +741,7 @@ export async function mount(el) {
   el.setAttribute("data-krate-island-hydrated", "");
 }
 `
+	guard := b.newUnavailableGuard()
 	result := esbuildBuild(api.BuildOptions{
 		Stdin: &api.StdinOptions{
 			Contents:   src,
@@ -611,9 +764,11 @@ export async function mount(el) {
 		Alias:             islandAlias(b.Root, false),
 		External:          []string{"preact", "preact/compat", "preact/hooks", "preact/jsx-runtime"},
 		Inject:            []string{shim},
-		Plugins:           []api.Plugin{clientOnlyMarkersPlugin(true), actionServerBundlePlugin(b.importResolver(), b.actionModules(), b.Cfg.BaseURLPath())},
+		Metafile:          true,
+		Plugins:           []api.Plugin{purePrunePlugin(b.Root), guard.plugin(), clientOnlyMarkersPlugin(true), actionServerBundlePlugin(b.importResolver(), b.actionModules(), b.Cfg.BaseURLPath())},
 		LogLevel:          api.LogLevelSilent,
 	})
+	result.Errors = append(result.Errors, guard.errors(result.OutputFiles)...)
 	if len(result.Errors) > 0 || len(result.OutputFiles) == 0 {
 		return "", false, clientBuildError(b.Root, key, result.Errors)
 	}
@@ -624,7 +779,7 @@ export async function mount(el) {
 	// the browser: sonner's toast() reaches the Toaster of another chunk.
 	name := b.islandEntryName(src, resolveDir)
 	b.setIslandEntries("client-boundary\x00"+key, []islandEntry{{Name: name, Source: src, ResolveDir: resolveDir, Boundary: true}})
-	info := clientChunkInfo{url: b.islandEntryURL(name), stateful: statefulHookRe.Match(out)}
+	info := clientChunkInfo{url: b.islandEntryURL(name), stateful: statefulHookRe.Match(out), inputs: metafileInputs(b.Root, result.Metafile)}
 	if b.clientChunkText == nil {
 		b.clientChunkText = map[string]string{}
 	}
@@ -735,6 +890,7 @@ export function __krate_render(C, props) {
 }
 `
 	plugin := islandRenderToStringPlugin(cb.resolveDir())
+	guard := &unavailableGuard{root: c.root, nodeRuntime: true, msgs: map[string]string{}}
 	result := esbuildBuild(api.BuildOptions{
 		Stdin: &api.StdinOptions{
 			Contents:   src,
@@ -756,9 +912,15 @@ export function __krate_render(C, props) {
 		Alias:           islandAlias(c.root, false),
 		External:        []string{"preact", "preact/compat", "preact/hooks", "preact/jsx-runtime"},
 		Inject:          []string{shim},
-		Plugins:         []api.Plugin{serverCSSPlugin(c.root), *plugin, clientOnlyMarkersPlugin(false), actionServerBundlePlugin(c.res, c.actions, c.basePath)},
+		Plugins:         []api.Plugin{purePrunePlugin(c.root), guard.plugin(), serverCSSPlugin(c.root), *plugin, clientOnlyMarkersPlugin(false), actionServerBundlePlugin(c.res, c.actions, c.basePath)},
 		LogLevel:        api.LogLevelSilent,
 	})
+	if len(result.Errors) == 0 {
+		// Write is on, so the output is on disk: check it there.
+		if data, rerr := os.ReadFile(c.implPath(cb)); rerr == nil {
+			result.Errors = append(result.Errors, guard.errors([]api.OutputFile{{Contents: data}})...)
+		}
+	}
 	if len(result.Errors) > 0 {
 		err = clientBuildError(c.root, cb.SourcePath, result.Errors)
 	}
@@ -773,17 +935,58 @@ export function __krate_render(C, props) {
 // every export wrapped by clientBoundary around its server render module.
 func clientBoundaryStub(cb ClientBoundary, implRel string) string {
 	var sb strings.Builder
-	sb.WriteString("import { clientBoundary as __krateCB } from \"@krate/runtime/server\";\n")
-	fmt.Fprintf(&sb, "import { __krate_module as __m, __krate_render as __r } from %s;\n", strconv.Quote(implRel))
+	sb.WriteString(boundaryStubHeader)
+	writeClientBoundaryExports(&sb, cb, implRel, "", nil)
+	return sb.String()
+}
+
+const boundaryStubHeader = "import { clientBoundary as __krateCB } from \"@krate/runtime/server\";\n"
+
+// writeClientBoundaryExports writes the exports of one boundary. suffix keeps
+// the impl bindings of several boundaries in one module apart, and names
+// already in seen are skipped.
+func writeClientBoundaryExports(sb *strings.Builder, cb ClientBoundary, implRel, suffix string, seen map[string]bool) {
+	fmt.Fprintf(sb, "import { __krate_module as __m%s, __krate_render as __r%s } from %s;\n", suffix, suffix, strconv.Quote(implRel))
 	for _, name := range cb.Exports {
-		wrapped := fmt.Sprintf("__krateCB(%s, %s, %s, __m[%s], __r, %t)", strconv.Quote(cb.ModuleID), strconv.Quote(name), strconv.Quote(cb.ChunkURL), strconv.Quote(name), cb.hydrates())
+		if seen[name] {
+			continue
+		}
+		if seen != nil {
+			seen[name] = true
+		}
+		wrapped := fmt.Sprintf("__krateCB(%s, %s, %s, __m%s[%s], __r%s, %t)", strconv.Quote(cb.ModuleID), strconv.Quote(name), strconv.Quote(cb.ChunkURL), suffix, strconv.Quote(name), suffix, cb.hydrates())
 		if name == "default" {
-			fmt.Fprintf(&sb, "export default %s;\n", wrapped)
+			fmt.Fprintf(sb, "export default %s;\n", wrapped)
 		} else {
-			fmt.Fprintf(&sb, "export const %s = %s;\n", name, wrapped)
+			fmt.Fprintf(sb, "export const %s = %s;\n", name, wrapped)
 		}
 	}
-	return sb.String()
+}
+
+// packageBoundaryStub is the module a React-bound package specifier resolves
+// to. A page can carry several boundaries for one specifier (its own and its
+// async layouts', each with the exports that tree uses); the module exports
+// the union, the first boundary winning a name.
+func packageBoundaryStub(cbs []ClientBoundary, outPath string, impls *clientSSRImpls) (string, error) {
+	var sb strings.Builder
+	sb.WriteString(boundaryStubHeader)
+	seen := map[string]bool{}
+	for i, cb := range cbs {
+		if cb.Real {
+			realBoundaryExports(&sb, cb, seen)
+			continue
+		}
+		rel, err := filepath.Rel(filepath.Dir(outPath), impls.implPath(cb))
+		if err != nil {
+			return "", err
+		}
+		rel = filepath.ToSlash(rel)
+		if !strings.HasPrefix(rel, ".") {
+			rel = "./" + rel
+		}
+		writeClientBoundaryExports(&sb, cb, rel, strconv.Itoa(i), seen)
+	}
+	return sb.String(), nil
 }
 
 // clientBoundaryPlugin swaps "use client" modules for their boundary stubs in
@@ -888,11 +1091,13 @@ func clientTsconfigRaw(root string) string {
 // otherwise leaves external. Modules inside node_modules and the render
 // modules under server-bundles/client/ are separate builds and never see it.
 func setupPackageBoundaries(pb api.PluginBuild, pkgs []ClientBoundary, outPath string, impls *clientSSRImpls) {
-	bySpec := map[string]ClientBoundary{}
+	bySpec := map[string][]ClientBoundary{}
 	var specs []string
 	for _, cb := range pkgs {
-		bySpec[cb.Spec] = cb
-		specs = append(specs, specFilterEscape.ReplaceAllStringFunc(cb.Spec, func(s string) string { return `\` + s }))
+		if len(bySpec[cb.Spec]) == 0 {
+			specs = append(specs, specFilterEscape.ReplaceAllStringFunc(cb.Spec, func(s string) string { return `\` + s }))
+		}
+		bySpec[cb.Spec] = append(bySpec[cb.Spec], cb)
 	}
 	const ns = "krate-pkg-boundary"
 	pb.OnResolve(api.OnResolveOptions{Filter: "^(" + strings.Join(specs, "|") + ")$"}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
@@ -902,22 +1107,37 @@ func setupPackageBoundaries(pb api.PluginBuild, pkgs []ClientBoundary, outPath s
 		return api.OnResolveResult{Path: args.Path, Namespace: ns}, nil
 	})
 	pb.OnLoad(api.OnLoadOptions{Filter: ".*", Namespace: ns}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
-		cb := bySpec[args.Path]
-		if cb.Real {
-			stub := realBoundaryStub(cb)
-			return api.OnLoadResult{Contents: &stub, Loader: api.LoaderJS, ResolveDir: filepath.Dir(outPath)}, nil
-		}
-		rel, err := filepath.Rel(filepath.Dir(outPath), impls.implPath(cb))
+		stub, err := packageBoundaryStub(bySpec[args.Path], outPath, impls)
 		if err != nil {
 			return api.OnLoadResult{}, err
 		}
-		rel = filepath.ToSlash(rel)
-		if !strings.HasPrefix(rel, ".") {
-			rel = "./" + rel
-		}
-		stub := clientBoundaryStub(cb, rel)
 		return api.OnLoadResult{Contents: &stub, Loader: api.LoaderJS, ResolveDir: filepath.Dir(outPath)}, nil
 	})
 }
 
 var specFilterEscape = regexp.MustCompile(`[.*+?^${}()|\[\]\\/-]`)
+
+// metafileInputs lists the source files with code in the build's output.
+func metafileInputs(root, metafile string) map[string]bool {
+	var meta struct {
+		Outputs map[string]struct {
+			Inputs map[string]struct {
+				BytesInOutput int `json:"bytesInOutput"`
+			} `json:"inputs"`
+		} `json:"outputs"`
+	}
+	if metafile == "" || json.Unmarshal([]byte(metafile), &meta) != nil {
+		return nil
+	}
+	out := map[string]bool{}
+	for _, o := range meta.Outputs {
+		for in, v := range o.Inputs {
+			if v.BytesInOutput > 0 && !strings.Contains(in, ":") {
+				p := filepath.Join(root, filepath.FromSlash(in))
+				out[filepath.Clean(p)] = true
+				out[canonicalPath(p)] = true
+			}
+		}
+	}
+	return out
+}

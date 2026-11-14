@@ -150,7 +150,7 @@ Krate lowers class components declared at module top level (`class X extends Com
 
 **lazy() loader is not a static import()**
 
-Krate code-splits lazy components at build time, so the loader must be `() => import("./Component")` with a string literal path (optionally `.then((m) => ({ default: m.Named }))`). Computed paths and other loaders cannot be resolved.
+Krate code-splits lazy components at build time, so the loader must be `() => import("./Component")` with a string literal path (optionally `.then((m) => m.Named)` or `.then((m) => ({ default: m.Named }))` for a named export). Computed paths and other loaders cannot be resolved.
 
 ### KR4002
 
@@ -270,7 +270,7 @@ A map callback returns a keyed element on some paths and an unkeyed one on other
 
 **Inline "use server" function**
 
-A "use server" directive at the top of a function inside a component is hoisted into a server action. It is rejected inside a "use client" module, in a class, when it uses this, and when it captures values from a component that is not async (captured values are sent to the browser encrypted and need a per-request render). Move the function into a module whose first statement is "use server" and import it, or declare it inside an async server component.
+A "use server" directive at the top of a function inside a component is hoisted into a server action. It is rejected inside a "use client" module, in a class, when it uses this, and when it captures values in a page that is prerendered (captured values are sent to the browser encrypted and need a per-request render, as in an async or dynamic page). Move the function into a module whose first statement is "use server" and import it, or declare it inside an async server component.
 
 ### KR7002
 
@@ -306,7 +306,7 @@ The import names an export that the "use server" module does not declare.
 
 **Async layout cannot be used here**
 
-An async layout renders per request in the SSR sidecar, with the page and the layouts inside it, instead of being baked into the static shell. It can await data and gate its subtree with redirect() or notFound(). It cannot sit above a template.tsx or error.tsx in the same route (they hydrate in the browser), and a layout that is baked at build time for another reason (an intercepting or segment route) cannot be async. Move the template or error boundary above the async layout, or make the layout synchronous and fetch data in an async child component.
+An async layout renders per request in the SSR sidecar, with the page and the layouts inside it, instead of being baked into the static shell. It can await data and gate its subtree with redirect() or notFound(). An error.tsx below it is the error boundary of the page and renders on the server when the page throws. It cannot sit above a template.tsx in the same route (a template hydrates in the browser), and a layout that is baked at build time for another reason (an intercepting or segment route) cannot be async. Move the template above the async layout, or make the layout synchronous and fetch data in an async child component.
 
 ### KR7102
 
@@ -360,7 +360,7 @@ Components in a `"use client"` module run in the browser and cannot be async. Mo
 
 **Client module exports cannot be listed**
 
-Krate wraps each export of a `"use client"` module in a client boundary, so it must know the export names. `export * from` cannot be enumerated: list the re-exported names explicitly (`export { A, B } from "./x"`).
+Krate wraps each export of a `"use client"` module in a client boundary, so it must know the export names. `export * from` a local module is expanded into that module's runtime exports; one that cannot be enumerated (a package, or a cycle of `export *`) must list the re-exported names explicitly (`export { A, B } from "./x"`).
 
 ### KR7115
 
@@ -1078,6 +1078,12 @@ Client code and statically rendered pages cannot read process.env or import.meta
 
 A module-level value that later top-level code changes (`const items = []` followed by `for (...) items.push(x)`, an assignment, a property write, `Object.assign`, or a call to a function of the module that does one of these) is evaluated at build time by running that code in order. When a statement cannot be run there (it reads the browser, the clock, an imported function or anything else unknown), the value stays unknown rather than keeping its initial value. A component that hydrates reads it at run time. A component rendered at build time has no run time, so the build fails. Make the top-level code plain, compute the value in one expression, or move the reading component to one with client state.
 
+### KR8323
+
+**Children with client state rendered more than once**
+
+A component that renders `{children}` in several places mounts one instance of the children for each place, and the build gives each instance its own hydration keys. That works for up to 8 placeholders written out in the component body. When the placeholder sits in a loop or an array callback (`items.map(() => <li>{children}</li>)`), or there are more than 8, the copies share one set of keys, so state, event handlers and bindings in the children only work for one of them. Render a component per item that owns its state, pass the data instead of children, or move the state up out of the children.
+
 ### KR8330
 
 **CSS scope handle is read by code that runs in the browser**
@@ -1113,6 +1119,12 @@ A component without state (no createSignal, useState or other hook that holds st
 **Head value cannot be evaluated at build time**
 
 Tags inside `<Head>` (and `<title>`, `<meta>` and `<link>` rendered on their own) are written into the static HTML so crawlers and link previews see them. A call to an imported helper is evaluated at build time when it is plain code: string and template work, JSON, `URL`, `encodeURIComponent`, and calls to other functions of your project. This value is none of those (it reads the browser, the clock, `process.env`, an object built by a class, or something else the build cannot run), so the tag would only be completed in the browser and crawlers would see it empty. Compute it from plain values, pass it as a prop, or move the tag to a page whose metadata comes from `generateMetadata`.
+
+### KR8354
+
+**Component with state in a prop is rendered twice**
+
+A prop that holds JSX with a component that has state (`slot={<Probe />}`, where Probe uses createSignal or useState) is one component instance. The receiving component reads the prop in more than one place, but the instance can only be mounted in one of them, so the other copy shows the server markup without ever hydrating. Render the prop in one place, or give each place its own element (a separate prop for each place).
 
 ### KR8360
 

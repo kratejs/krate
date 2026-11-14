@@ -1,11 +1,13 @@
 package build
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 
+	"github.com/evanw/esbuild/pkg/api"
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/bundler"
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
@@ -35,13 +37,19 @@ type pkgBoundarySpec struct {
 	resolveDir string
 	exports    map[string]bool
 	real       bool
+	// whole is set when a module uses the package as a namespace value
+	// (`Icons[name]`, `Object.keys(Icons)`): every export is then a boundary export.
+	whole bool
 }
 
 // packageBoundaryEntry is the JS preamble that defines `__m`, an object of
 // exactly the exports a page uses, so a barrel such as lucide-react is
 // tree-shaken down to the icons in use.
-func packageBoundaryEntry(spec string, exports []string) string {
+func packageBoundaryEntry(spec string, exports []string, whole bool) string {
 	var imports, props []string
+	if whole {
+		return "import * as __ns from " + strconv.Quote(spec) + ";\nconst __m = { ...__ns };\n"
+	}
 	for i, name := range exports {
 		local := "__e" + strconv.Itoa(i)
 		if name == "default" {
@@ -84,9 +92,24 @@ func (b *Builder) preparePackageBoundaries(mods []*bundler.Module, resolve func(
 		for e := range sp.exports {
 			exports = append(exports, e)
 		}
+		if sp.whole {
+			all, err := b.packageExportNames(sp.spec, sp.resolveDir)
+			if err != nil {
+				return nil, err
+			}
+			seen := map[string]bool{}
+			for _, e := range exports {
+				seen[e] = true
+			}
+			for _, e := range all {
+				if !seen[e] {
+					exports = append(exports, e)
+				}
+			}
+		}
 		sort.Strings(exports)
 		id := "c" + hashContent([]byte(sp.spec+"\x00"+strings.Join(exports, "\x00")))
-		entry := packageBoundaryEntry(sp.spec, exports)
+		entry := packageBoundaryEntry(sp.spec, exports, sp.whole)
 		if sp.real {
 			cb := ClientBoundary{ModuleID: id, SourcePath: id, Spec: sp.spec, Exports: exports, Entry: entry, ResolveDir: sp.resolveDir, Real: true}
 			cb.ChunkURL = b.registerRealBoundary(cb)
@@ -204,7 +227,9 @@ func (b *Builder) collectPackageComponents(m *bundler.Module, resolve func(impor
 			sp = &pkgBoundarySpec{spec: src, resolveDir: filepath.Dir(m.Path), exports: map[string]bool{}, real: b.isRealReactPackage(packageNameOf(src))}
 			specs[src] = sp
 		}
-		sp.exports[export] = true
+		if export != "" {
+			sp.exports[export] = true
+		}
 	}
 	for _, imp := range imports {
 		src := strings.Trim(imp.Source, "\"'")
@@ -214,6 +239,11 @@ func (b *Builder) collectPackageComponents(m *bundler.Module, resolve func(impor
 		if imp.Default != "" && isComponent(imp.Default) {
 			add(src, "default")
 		}
+		if imp.Namespace != "" && bareNS[imp.Namespace] {
+			// The namespace is used as a value, so any export may be read.
+			add(src, "")
+			specs[src].whole = true
+		}
 		if imp.Namespace != "" && !bareNS[imp.Namespace] {
 			// `import * as Dialog from "@radix-ui/react-dialog"`: the members the
 			// module reads are the exports; each is a component or a namespace.
@@ -221,16 +251,15 @@ func (b *Builder) collectPackageComponents(m *bundler.Module, resolve func(impor
 				add(src, member)
 			}
 		}
+		// Every named import is an export of the boundary: the page's bundle
+		// imports the specifier's boundary module, so a name used other than
+		// as a tag (`Icon.displayName`, `Icon()`, `typeof Icon`) must exist too.
 		for _, n := range imp.Named {
-			local := n.Local
-			if local == "" {
-				local = n.Remote
+			remote := n.Remote
+			if remote == "" {
+				remote = n.Local
 			}
-			if isComponent(local) {
-				remote := n.Remote
-				if remote == "" {
-					remote = local
-				}
+			if remote != "" {
 				add(src, bundler.OriginalName(remote))
 			}
 		}
@@ -370,4 +399,46 @@ func serverPageIslandError(islands map[string]*reactIslandModule, mods []*bundle
 		}.WithCode(diag.CodeReactLibNotInIsland)
 	}
 	return nil
+}
+
+// packageExportNames lists the runtime export names of a package entry as
+// esbuild resolves them (`export *` chains and aliased re-exports included).
+// A package whose exports cannot be listed, such as a CommonJS one, is an
+// error: a namespace boundary would otherwise be empty.
+func (b *Builder) packageExportNames(spec, resolveDir string) ([]string, error) {
+	res := esbuildBuild(api.BuildOptions{
+		Stdin:         &api.StdinOptions{Contents: "export * from " + strconv.Quote(spec) + ";\n", ResolveDir: resolveDir, Sourcefile: "krate-package-exports.js", Loader: api.LoaderJS},
+		AbsWorkingDir: b.Root,
+		Bundle:        true,
+		Write:         false,
+		Metafile:      true,
+		Outdir:        filepath.Join(b.Root, ".krate", "pkg-exports"),
+		Format:        api.FormatESModule,
+		Platform:      api.PlatformBrowser,
+		External:      []string{"react", "react/*", "react-dom", "react-dom/*", "preact", "preact/*"},
+		Alias:         islandAlias(b.Root, false),
+		LogLevel:      api.LogLevelSilent,
+	})
+	var names []string
+	if len(res.Errors) == 0 && res.Metafile != "" {
+		var meta struct {
+			Outputs map[string]struct {
+				Exports []string `json:"exports"`
+			} `json:"outputs"`
+		}
+		if json.Unmarshal([]byte(res.Metafile), &meta) == nil {
+			for _, o := range meta.Outputs {
+				names = append(names, o.Exports...)
+			}
+		}
+	}
+	if len(names) == 0 {
+		return nil, diag.Diagnostic{
+			File:    spec,
+			Message: "`" + spec + "` is used as a namespace value in a server module, but its exports cannot be listed to build a client boundary for it",
+			Hint:    "import the components you use by name (import { A, B } from \"" + spec + "\") or move the dynamic lookup into a \"use client\" component",
+		}
+	}
+	sort.Strings(names)
+	return names, nil
 }

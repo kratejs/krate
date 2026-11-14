@@ -65,7 +65,11 @@ func captureStderrFile(t *testing.T) func() string {
 	}
 	old := os.Stderr
 	os.Stderr = f
-	t.Cleanup(func() { os.Stderr = old })
+	// Closed before t.TempDir removes it: Windows cannot delete an open file.
+	t.Cleanup(func() {
+		os.Stderr = old
+		_ = f.Close()
+	})
 	return func() string {
 		data, _ := os.ReadFile(f.Name())
 		return string(data)

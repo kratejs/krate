@@ -644,6 +644,7 @@ func esbuildRelFile(root, base, file string) string {
 }
 
 func (b *Builder) buildIslandBundle(src, resolveDir string, ssr bool, plugin *api.Plugin, sink *islandCSSSink, prov *islandProviders) ([]byte, error) {
+	guard := b.newUnavailableGuard()
 	opts := api.BuildOptions{
 		Stdin: &api.StdinOptions{
 			Contents:   src,
@@ -666,7 +667,7 @@ func (b *Builder) buildIslandBundle(src, resolveDir string, ssr bool, plugin *ap
 		JSXImportSource: "preact",
 		LogLevel:        api.LogLevelSilent,
 		Alias:           islandAlias(b.Root, ssr),
-		Plugins:         []api.Plugin{islandCSSPlugin(sink), islandJSXPlugin(), islandTagsPlugin(b.Root, ssr), reconcilerGuardPlugin()},
+		Plugins:         []api.Plugin{purePrunePlugin(b.Root), guard.plugin(), islandCSSPlugin(sink), islandJSXPlugin(), islandTagsPlugin(b.Root, ssr), reconcilerGuardPlugin()},
 	}
 	if prov != nil {
 		opts.Plugins = append(opts.Plugins, islandEntryPlugin(nil, prov.virtualModules()))
@@ -683,6 +684,7 @@ func (b *Builder) buildIslandBundle(src, resolveDir string, ssr bool, plugin *ap
 		opts.Plugins = append(opts.Plugins, islandRequirePlugin())
 	}
 	result := esbuildBuild(opts)
+	result.Errors = append(result.Errors, guard.errors(result.OutputFiles)...)
 	if len(result.Errors) > 0 {
 		var msgs []string
 		var loc *bundleLocation

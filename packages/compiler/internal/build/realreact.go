@@ -232,7 +232,7 @@ func realIslandMountBlock(e irtree.ExternalComponent) string {
 // realReactOptions returns the esbuild options shared by the validation build
 // and the site-wide build of real-React islands: react and react-dom resolve to
 // the project's copy (never the Preact alias), and only one copy is bundled.
-func (b *Builder) realReactOptions(sink *islandCSSSink) api.BuildOptions {
+func (b *Builder) realReactOptions(sink *islandCSSSink, guard *unavailableGuard) api.BuildOptions {
 	minify := b.shouldMinifyJS()
 	env := "\"production\""
 	if b.DevMode {
@@ -251,7 +251,7 @@ func (b *Builder) realReactOptions(sink *islandCSSSink) api.BuildOptions {
 		JSXImportSource:   "react",
 		LogLevel:          api.LogLevelSilent,
 		Define:            map[string]string{"process.env.NODE_ENV": env},
-		Plugins:           []api.Plugin{islandCSSPlugin(sink), islandJSXPluginFor("react")},
+		Plugins:           []api.Plugin{purePrunePlugin(b.Root), guard.plugin(), islandCSSPlugin(sink), islandJSXPluginFor("react")},
 	}
 	alias := map[string]string{}
 	for _, name := range []string{"react", "react-dom"} {
@@ -277,9 +277,11 @@ func (b *Builder) realReactMissing(joined string) *bundleError {
 // errors with the page's source location and to collect imported stylesheets.
 // The output is discarded: the shipped chunks come from writeRealIslandBundles.
 func (b *Builder) buildRealIslandBundle(src, resolveDir string, sink *islandCSSSink) error {
-	opts := b.realReactOptions(sink)
+	guard := b.newUnavailableGuard()
+	opts := b.realReactOptions(sink, guard)
 	opts.Stdin = &api.StdinOptions{Contents: src, ResolveDir: resolveDir, Sourcefile: "krate-island.tsx", Loader: api.LoaderTSX}
 	result := esbuildBuild(opts)
+	result.Errors = append(result.Errors, guard.errors(result.OutputFiles)...)
 	if len(result.Errors) == 0 {
 		return nil
 	}
@@ -318,7 +320,8 @@ func (b *Builder) writeRealIslandBundles(entries []islandEntry, chunksDir string
 		points = append(points, api.EntryPoint{InputPath: "krate-island-entry:" + e.Name, OutputPath: e.Name})
 	}
 	sink := &islandCSSSink{root: b.Root}
-	opts := b.realReactOptions(sink)
+	guard := b.newUnavailableGuard()
+	opts := b.realReactOptions(sink, guard)
 	opts.EntryPointsAdvanced = points
 	opts.Outdir = chunksDir
 	opts.EntryNames = "[name]"
@@ -326,6 +329,14 @@ func (b *Builder) writeRealIslandBundles(entries []islandEntry, chunksDir string
 	opts.Splitting = true
 	opts.Plugins = append([]api.Plugin{islandEntryPlugin(entries, virtual)}, opts.Plugins...)
 	result := esbuildBuild(opts)
+	if len(result.Errors) == 0 {
+		names := make([]string, len(points))
+		for i, p := range points {
+			names[i] = p.OutputPath
+		}
+		result.OutputFiles = liveOutputs(result.OutputFiles, names)
+	}
+	result.Errors = append(result.Errors, guard.errors(result.OutputFiles)...)
 	if len(result.Errors) > 0 {
 		var msgs []string
 		for _, e := range result.Errors {
@@ -437,18 +448,32 @@ func (b *Builder) registerRealBoundary(cb ClientBoundary) string {
 // children always sent as a tree and the `client:fallback` prop as the markup.
 func realBoundaryStub(cb ClientBoundary) string {
 	var sb strings.Builder
-	sb.WriteString("import { clientBoundary as __krateCB } from \"@krate/runtime/server\";\n")
-	sb.WriteString("const __fallback = (C, p) => { const f = p && p[\"client:fallback\"]; return typeof f === \"string\" ? f.replace(/&/g, \"&amp;\").replace(/</g, \"&lt;\").replace(/>/g, \"&gt;\") : \"\"; };\n")
+	sb.WriteString(boundaryStubHeader)
+	realBoundaryExports(&sb, cb, nil)
+	return sb.String()
+}
+
+// realBoundaryExports writes the exports of a real-React boundary, skipping
+// the names already in seen.
+func realBoundaryExports(sb *strings.Builder, cb ClientBoundary, seen map[string]bool) {
+	if !strings.Contains(sb.String(), "__fallback =") {
+		sb.WriteString("const __fallback = (C, p) => { const f = p && p[\"client:fallback\"]; return typeof f === \"string\" ? f.replace(/&/g, \"&amp;\").replace(/</g, \"&lt;\").replace(/>/g, \"&gt;\") : \"\"; };\n")
+	}
 	for _, name := range cb.Exports {
+		if seen[name] {
+			continue
+		}
+		if seen != nil {
+			seen[name] = true
+		}
 		wrapped := fmt.Sprintf("__krateCB(%s, %s, %s, function %s() { return null; }, __fallback, true, true)",
 			strconv.Quote(cb.ModuleID), strconv.Quote(name), strconv.Quote(cb.ChunkURL), stubFuncName(name))
 		if name == "default" {
-			fmt.Fprintf(&sb, "export default %s;\n", wrapped)
+			fmt.Fprintf(sb, "export default %s;\n", wrapped)
 		} else {
-			fmt.Fprintf(&sb, "export const %s = %s;\n", name, wrapped)
+			fmt.Fprintf(sb, "export const %s = %s;\n", name, wrapped)
 		}
 	}
-	return sb.String()
 }
 
 // stubFuncName is a valid function name for an export (the name shows up in

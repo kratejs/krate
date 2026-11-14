@@ -78,4 +78,11 @@ func TestMigratedImportsStayBelowDirectives(t *testing.T) {
 	if !ok || !strings.HasPrefix(out, "// header\n\"use client\";\n'use strict';\nimport { lazy } from \"react\";\n") {
 		t.Errorf("lazy import is not below the directives (ok=%v):\n%s", ok, out)
 	}
+
+	named := "import dynamic from 'next/dynamic';\nconst A = dynamic(() => import('./A').then((m) => m.A), {\n  ssr: false,\n  loading: () => <div>{'x'}</div>,\n});\nconst B = dynamic(() => import('./B').then(m => ({ default: m.B })), { ssr: false });\n"
+	out, ok = rewriteNextDynamic(named)
+	if !ok || !strings.Contains(out, "const A = lazy(() => import('./A').then((m) => m.A));\n") ||
+		!strings.Contains(out, "const B = lazy(() => import('./B').then(m => ({ default: m.B })));\n") {
+		t.Errorf("named-export dynamic() options not dropped (ok=%v):\n%s", ok, out)
+	}
 }

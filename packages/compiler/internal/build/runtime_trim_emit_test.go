@@ -326,6 +326,14 @@ func TestTrimmedRuntimeBrowser(t *testing.T) {
 
 func runTrimmedBrowser(t *testing.T, repoRoot, browser, mode, pageSrc string) {
 	t.Helper()
+	outDir := buildTrimmedProject(t, repoRoot, map[string]string{"index.tsx": pageSrc})
+	runTrimmedBrowserScript(t, repoRoot, browser, mode, outDir)
+}
+
+// buildTrimmedProject builds the given pages (path under src/pages to source)
+// and returns the output directory.
+func buildTrimmedProject(t *testing.T, repoRoot string, pages map[string]string) string {
+	t.Helper()
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, "packages"), 0755); err != nil {
 		t.Fatal(err)
@@ -333,11 +341,8 @@ func runTrimmedBrowser(t *testing.T, repoRoot, browser, mode, pageSrc string) {
 	if err := os.Symlink(filepath.Join(repoRoot, "packages", "runtime"), filepath.Join(root, "packages", "runtime")); err != nil {
 		t.Skipf("cannot link the runtime package: %v", err)
 	}
-	if err := os.MkdirAll(filepath.Join(root, "src", "pages"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "src", "pages", "index.tsx"), []byte(pageSrc), 0644); err != nil {
-		t.Fatal(err)
+	for name, src := range pages {
+		writeProjectFile(t, root, filepath.Join("src", "pages", name), src)
 	}
 	cfg := config.Default()
 	cfg.PagesDir = filepath.Join(root, "src", "pages")
@@ -345,11 +350,16 @@ func runTrimmedBrowser(t *testing.T, repoRoot, browser, mode, pageSrc string) {
 	if err := New(root, cfg).BuildAll(); err != nil {
 		t.Fatalf("BuildAll: %v", err)
 	}
+	return cfg.OutDir
+}
+
+func runTrimmedBrowserScript(t *testing.T, repoRoot, browser, mode, outDir string) {
+	t.Helper()
 	script, err := filepath.Abs(filepath.Join("testdata", "trimmed_runtime_browser.mjs"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("node", script, cfg.OutDir, browser, mode)
+	cmd := exec.Command("node", script, outDir, browser, mode)
 	cmd.Env = append(os.Environ(), "NODE_PATH="+filepath.Join(repoRoot, "node_modules"))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -359,4 +369,106 @@ func runTrimmedBrowser(t *testing.T, repoRoot, browser, mode, pageSrc string) {
 		t.Fatalf("trimmed runtime browser checks failed: %v\n%s", err, out)
 	}
 	t.Log(string(out))
+}
+
+// A layout that renders `{children}` in two places mounts two instances, so
+// each copy gets its own hydration keys and both hydrate in the browser.
+func TestChildrenRenderedTwiceHydrateBothCopies(t *testing.T) {
+	repoRoot, err := repoRootPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	outDir := buildTrimmedProject(t, repoRoot, map[string]string{
+		"_layout.tsx": `import { createSignal, onMount } from '@krate/runtime';
+function Probe() {
+  const [v, setV] = createSignal('ssr');
+  onMount(() => setV('hydrated'));
+  return <span class={v() === 'hydrated' ? 'probe is-on' : 'probe'} showIf={v() !== 'gone'}>{v()}</span>;
+}
+function Shell({ children }: { children?: any }) {
+  return <div><div id="first">{children}</div><div id="second">{children}</div></div>;
+}
+export default function L({ children }: { children: any }) {
+  return <><Shell><Probe /></Shell><main>{children}</main></>;
+}
+`,
+		"index.tsx": `export default function P() { return <h1>twice</h1>; }
+`,
+	})
+	html, err := os.ReadFile(filepath.Join(outDir, "index.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, m := range regexp.MustCompile(`(?:data-k="?|<!--)(k:[^" >-]+)`).FindAllStringSubmatch(string(html), -1) {
+		if seen[m[1]] {
+			t.Errorf("hydration key %s appears more than once in the page", m[1])
+		}
+		seen[m[1]] = true
+	}
+	if len(seen) == 0 {
+		t.Fatalf("no hydration keys found in the page:\n%s", html)
+	}
+
+	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
+	if browser == "" {
+		t.Log("set KRATE_BROWSER=chromium|firefox|webkit to also hydrate the page in a browser")
+		return
+	}
+	if _, err := exec.LookPath("node"); err != nil {
+		requireE2E(t, "node is not installed")
+	}
+	if err := exec.Command("node", "-e", "require.resolve('playwright')").Run(); err != nil {
+		requireE2E(t, "playwright is not installed (run pnpm install)")
+	}
+	runTrimmedBrowserScript(t, repoRoot, browser, "twice", outDir)
+
+	// A component without signals is evaluated at build time; copies of
+	// children holding a handler still get their own keys.
+	evalDir := buildTrimmedProject(t, repoRoot, map[string]string{
+		"index.tsx": `import { createSignal } from '@krate/runtime';
+function Shell({ children, label }: { children?: any; label: string }) {
+  return <section><h2>{label}</h2><div id="first">{children}</div><div id="second">{children}</div></section>;
+}
+export default function P() {
+  const [n, setN] = createSignal(0);
+  return <Shell label="x"><button class={n() > 0 ? 'on' : ''} onClick={() => setN(n() + 1)}>go</button></Shell>;
+}
+`,
+	})
+	evalHTML, err := os.ReadFile(filepath.Join(evalDir, "index.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys := regexp.MustCompile(`data-k="?(k:[^" >-]+)`).FindAllStringSubmatch(string(evalHTML), -1)
+	if len(keys) != 2 || keys[0][1] == keys[1][1] {
+		t.Errorf("want two distinct hydration keys, got %v in\n%s", keys, evalHTML)
+	}
+	runTrimmedBrowserScript(t, repoRoot, browser, "twiceEval", evalDir)
+}
+
+// Children rendered once per loop iteration share one set of keys, which is
+// reported instead of leaving all but one copy dead.
+func TestChildrenRenderedInALoopIsReported(t *testing.T) {
+	repoRoot, err := repoRootPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, _ := captureOutput(func() error {
+		buildTrimmedProject(t, repoRoot, map[string]string{
+			"index.tsx": `import { createSignal } from '@krate/runtime';
+function List({ children }: { children?: any }) {
+  return <ul>{[1, 2].map((i) => <li key={i}>{children}</li>)}</ul>;
+}
+export default function P() {
+  const [n, setN] = createSignal(0);
+  return <List><button onClick={() => setN(n() + 1)}>go</button></List>;
+}
+`,
+		})
+		return nil
+	})
+	if !strings.Contains(out, "KR8323") || !strings.Contains(out, "once per iteration in <List>") {
+		t.Errorf("expected a KR8323 warning:\n%s", out)
+	}
 }

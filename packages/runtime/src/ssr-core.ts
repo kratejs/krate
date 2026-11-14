@@ -105,6 +105,8 @@ export interface RenderResponse {
   digest?: string;
   stack?: string;
   noStore?: boolean;
+  /** An error boundary caught a render error; html is its fallback and the answer is a 500. */
+  errorCaught?: boolean;
 }
 // ISR Cache (variant-aware, SWR, persisted)
 
@@ -646,6 +648,12 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
         status: 200,
         noStore: scope.noStore || invalidated,
       };
+      if (scope.errorCaught) {
+        // An error boundary rendered its fallback: the page is an error
+        // response, so it is never cached (scope.noStore keeps it out of ISR).
+        response.errorCaught = true;
+        response.noStore = true;
+      }
 
       // An uncacheable read (no-store) keeps the render out of the ISR cache, and
       // a revalidation that landed mid-render means the HTML may be stale.
@@ -1079,6 +1087,7 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
     if (result.digest) frame.digest = result.digest;
     if (result.stack) frame.stack = result.stack;
     if (result.noStore) frame.noStore = true;
+    if (result.errorCaught) frame.errorCaught = true;
     if (page.serverComponents && frame.status >= 500) frame.fatal = true;
     // The page's <Head> children (title, meta, link, script) render in place;
     // they move to the head of the response, so they are taken out of the body

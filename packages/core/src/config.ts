@@ -620,6 +620,15 @@ export interface DeployConfig {
    * to `src/cloudflare.ts` (or .js, .mjs, .mts) when it exists.
    */
   worker?: string;
+  /** Options for the cloudflare target only. */
+  cloudflare?: {
+    /**
+     * Store cacheable SSR responses in `caches.default`: GET pages whose
+     * response is a 200 with `public` or a positive `max-age`/`s-maxage` in
+     * `Cache-Control`, no `Set-Cookie`, and a request without credentials.
+     */
+    cache?: boolean;
+  };
 }
 
 /** One user-agent group in a robots.txt (`robots({ rules: [...] })`). */

@@ -29,6 +29,8 @@ export interface CacheScope {
   revalidate: number;
   /** True when a read opted out of caching (no-store, revalidate 0, unstable_noStore). */
   noStore: boolean;
+  /** True when an error boundary caught a render error (the response is a 500 and uncacheable). */
+  errorCaught?: boolean;
 }
 
 /** Minimal AsyncLocalStorage shape (the Node class satisfies it). */
@@ -243,6 +245,15 @@ export function recordCacheRead(tags: readonly string[] | undefined, revalidate:
 export function markNoStore(): void {
   const scope = currentRenderScope();
   if (scope) scope.noStore = true;
+}
+
+/** Marks the current render as having shown an error boundary's UI. */
+export function markErrorCaught(): void {
+  const scope = currentRenderScope();
+  if (scope) {
+    scope.errorCaught = true;
+    scope.noStore = true;
+  }
 }
 
 // Data cache access. In QuickJS the Go host owns the cache (shared by every

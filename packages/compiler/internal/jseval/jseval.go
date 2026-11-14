@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime/debug"
 	"strings"
 
 	"github.com/evanw/esbuild/pkg/api"
@@ -51,7 +52,24 @@ type Options struct {
 	// JSXImportSource, when set, compiles JSX with the automatic runtime from
 	// that package (for example "@krate/runtime/server"), ignoring tsconfig.
 	JSXImportSource string
+	// VirtualFiles maps absolute paths to module source that does not exist on
+	// disk. An import of such a path loads the given source, and its own
+	// imports resolve relative to that path as if the file were real.
+	VirtualFiles map[string]string
+	// External lists esbuild external patterns (package names, "pkg/*") that
+	// stay unbundled.
+	External []string
+	// Plugins are extra esbuild plugins, run after the built-in ones.
+	Plugins []api.Plugin
+	// SourceTransform, when set, rewrites the source of every JS/TS file the
+	// bundle loads from disk (path is absolute) before it is compiled.
+	SourceTransform func(path, src string) string
 }
+
+// defaultMemoryLimit is the QuickJS heap limit of one evaluation. Bundled page
+// modules and their dependencies need far more than the 32 MiB the runtime
+// allows request handlers; KRATE_JS_MEMORY_MB overrides it.
+const defaultMemoryLimit = 128 << 20
 
 // Eval bundles the entry (resolving imports) and runs it in the embedded QuickJS
 // runtime, returning the JSON value assigned to globalThis.__krateEvalResult.
@@ -68,8 +86,37 @@ func Eval(opts Options) (out json.RawMessage, err error) {
 	if err != nil {
 		return nil, err
 	}
+	err = guardFaults(func() (rerr error) {
+		out, rerr = run(opts, bundle)
+		return rerr
+	})
+	return out, err
+}
 
-	rt, err := jsruntime.New()
+// guardFaults runs fn and turns a crash of the embedded engine into an error.
+//
+// QuickJS can corrupt its heap when an allocation fails while it builds the
+// out-of-memory error (a use-after-free in js_free_shape, reached from
+// JS_ThrowOutOfMemory). That surfaces as a fault in the transpiled engine,
+// which Go treats as fatal unless the goroutine asks for a panic instead. The
+// runtime is discarded after the call, so the damage stays inside it.
+func guardFaults(fn func() error) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("the embedded JavaScript engine crashed (it probably ran out of memory; KRATE_JS_MEMORY_MB raises the limit): %w", safe.Recover(r))
+		}
+	}()
+	defer debug.SetPanicOnFault(debug.SetPanicOnFault(true))
+	return fn()
+}
+
+// run executes the bundled entry in a fresh runtime and returns its result.
+func run(opts Options, bundle string) (json.RawMessage, error) {
+	rtOpts := jsruntime.Options{}
+	if os.Getenv("KRATE_JS_MEMORY_MB") == "" {
+		rtOpts.MemoryLimit = defaultMemoryLimit
+	}
+	rt, err := jsruntime.NewWithOptions(rtOpts)
 	if err != nil {
 		return nil, fmt.Errorf("creating JS runtime: %w", err)
 	}
@@ -98,7 +145,7 @@ func Eval(opts Options) (out json.RawMessage, err error) {
 	}
 	s, _ := res.(string)
 	if s == "" || s == "null" {
-		return nil, fmt.Errorf("entry produced no %s", ResultGlobal)
+		return nil, fmt.Errorf("entry produced no %s (the module may have run out of memory; KRATE_JS_MEMORY_MB raises the limit)", ResultGlobal)
 	}
 	return json.RawMessage(s), nil
 }
@@ -139,14 +186,23 @@ func bundle(opts Options, node bool) (string, error) {
 	if loader == api.LoaderNone {
 		loader = api.LoaderTS
 	}
-	plugins := []api.Plugin{MarkerPackagesPlugin()}
+	var plugins []api.Plugin
+	virtual := map[string]string{}
+	for p, src := range opts.VirtualFiles {
+		virtual[filepath.Clean(p)] = src
+	}
+	if len(virtual) > 0 {
+		plugins = append(plugins, virtualFilesPlugin(virtual))
+	}
+	plugins = append(plugins, MarkerPackagesPlugin())
 	if opts.NodeShims {
 		plugins = append(plugins, nodeShimPlugin())
 	}
 	if opts.ResolveImport != nil {
 		plugins = append(plugins, resolveForwarder(opts.ResolveImport))
 	}
-	plugins = append(plugins, krateResolver(), importMetaPreserver(opts.NodeShims))
+	plugins = append(plugins, krateResolver(), importMetaPreserver(opts.NodeShims || node, virtual, opts.SourceTransform))
+	plugins = append(plugins, opts.Plugins...)
 	buildOpts := api.BuildOptions{
 		Stdin: &api.StdinOptions{
 			Contents:   opts.Source,
@@ -160,6 +216,7 @@ func bundle(opts Options, node bool) (string, error) {
 		Write:    false,
 		LogLevel: api.LogLevelSilent,
 		Plugins:  plugins,
+		External: opts.External,
 	}
 	if opts.JSXImportSource != "" {
 		buildOpts.JSX = api.JSXAutomatic
@@ -203,7 +260,7 @@ func bundle(opts Options, node bool) (string, error) {
 // literal of that file's own file:// URL, so bundling every module together does
 // not collapse their URLs onto the bundle's location. Plugin and theme factories
 // rely on this to point the compiler back at their real source on disk.
-func importMetaPreserver(nodeShims bool) api.Plugin {
+func importMetaPreserver(nodeShims bool, virtual map[string]string, transform func(path, src string) string) api.Plugin {
 	return api.Plugin{
 		Name: "krate-preserve-import-meta",
 		Setup: func(pb api.PluginBuild) {
@@ -220,11 +277,17 @@ func importMetaPreserver(nodeShims bool) api.Plugin {
 				if args.Namespace != "file" {
 					return api.OnLoadResult{}, nil
 				}
-				data, err := os.ReadFile(args.Path)
-				if err != nil {
-					return api.OnLoadResult{}, nil
+				src, isVirtual := virtual[filepath.Clean(args.Path)]
+				if !isVirtual {
+					data, err := os.ReadFile(args.Path)
+					if err != nil {
+						return api.OnLoadResult{}, nil
+					}
+					src = string(data)
+					if transform != nil {
+						src = transform(args.Path, src)
+					}
 				}
-				src := string(data)
 				if strings.Contains(src, importMetaURL) {
 					src = rewriteImportMetaURL(src, fmt.Sprintf("%q", fileURL(args.Path)))
 				}
@@ -234,6 +297,26 @@ func importMetaPreserver(nodeShims bool) api.Plugin {
 					contents = injectDirnameVars(args.Path, contents)
 				}
 				return api.OnLoadResult{Contents: &contents, Loader: loaderForPath(args.Path)}, nil
+			})
+		},
+	}
+}
+
+// virtualFilesPlugin resolves the absolute paths of files that exist only in
+// memory; importMetaPreserver loads them.
+func virtualFilesPlugin(virtual map[string]string) api.Plugin {
+	return api.Plugin{
+		Name: "krate-virtual-files",
+		Setup: func(pb api.PluginBuild) {
+			pb.OnResolve(api.OnResolveOptions{Filter: `.*`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+				if !filepath.IsAbs(args.Path) {
+					return api.OnResolveResult{}, nil
+				}
+				p := filepath.Clean(args.Path)
+				if _, ok := virtual[p]; !ok {
+					return api.OnResolveResult{}, nil
+				}
+				return api.OnResolveResult{Path: p, Namespace: "file"}, nil
 			})
 		},
 	}

@@ -360,7 +360,8 @@ attributes (allowed with `'unsafe-hashes'` plus one SHA-256 hash per distinct
 value). Styles set at runtime through the CSSOM (`el.style.x = ...`) are not
 affected by CSP. When a CSP meta tag is present the client router does not
 inject its runtime speculation-rules script (it would be blocked) and uses its
-JS link prefetching instead.
+JS link prefetching instead. A CSP sent as an HTTP header cannot be seen from
+the page, so there the router removes the script as soon as the browser blocks it.
 
 ## Markdown
 
@@ -643,7 +644,8 @@ setting is mapped onto the host's own option where there is one.
 `deploy.worker` is the module whose exports are merged into the generated
 Cloudflare Worker: cron `scheduled`, `queue`, `email` handlers and Durable Object
 classes. Without it, `src/cloudflare.ts` (or `.mts`, `.js`, `.mjs`) is used when it
-exists; `deploy.worker: "none"` skips it. See
+exists; `deploy.worker: "none"` skips it. `deploy.cloudflare.cache: true` stores
+cacheable SSR responses in `caches.default`. See
 [Cloudflare Workers](/docs/guides/deployment/#cloudflare-workers).
 
 ## i18n & versions
