@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // WriteFileIfChanged writes data to path only when the existing contents
@@ -53,11 +54,27 @@ func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
 		_ = os.Remove(tmpName)
 		return err
 	}
-	if err := os.Rename(tmpName, path); err != nil {
-		_ = os.Remove(tmpName)
-		return err
+	return renameOver(tmpName, path, data)
+}
+
+// renameOver moves tmp onto path. On Windows a rename fails while another
+// writer is replacing the same file, which happens when parallel page builds
+// write one content-hashed chunk. When path then holds data the other writer
+// won and the write is done; otherwise the rename is retried briefly.
+func renameOver(tmp, path string, data []byte) error {
+	var err error
+	for attempt := 0; attempt < 10; attempt++ {
+		if err = os.Rename(tmp, path); err == nil {
+			return nil
+		}
+		if existing, rerr := os.ReadFile(path); rerr == nil && bytes.Equal(existing, data) {
+			_ = os.Remove(tmp)
+			return nil
+		}
+		time.Sleep(time.Duration(attempt+1) * 5 * time.Millisecond)
 	}
-	return nil
+	_ = os.Remove(tmp)
+	return err
 }
 
 // WithinDir reports whether target is base itself or lies inside it. Both paths
