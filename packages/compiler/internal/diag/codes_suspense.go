@@ -27,7 +27,7 @@ func init() {
 			Title: "lazy() loader is not a static import()",
 			Explanation: "Krate code-splits lazy components at build time, so the loader must be " +
 				"`() => import(\"./Component\")` with a string literal path (optionally " +
-				"`.then((m) => ({ default: m.Named }))`). Computed paths and other loaders cannot be resolved.",
+				"`.then((m) => m.Named)` or `.then((m) => ({ default: m.Named }))` for a named export). Computed paths and other loaders cannot be resolved.",
 		},
 		CodeInfo{
 			Code:  CodeLazyPlacement,

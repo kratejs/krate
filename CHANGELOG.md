@@ -402,6 +402,9 @@ host code runs in the native process. Names and options may change between relea
 - Inline `"use server"` actions in a sync component (`function DeleteButton({ id })`) that captures a prop
   now work when the page renders per request (async page or layout, `dynamic = 'force-dynamic'`, ISR or
   SSR); KR7001 remains only for a prerendered page, with a message saying so.
+- `lazy(() => import("./X").then((m) => m.X))` now builds like the `({ default: m.X })` form instead of
+  failing with KR4001, and `krate migrate nextjs` drops the whole `next/dynamic` options object even
+  when it contains `loading: () => <div>{...}</div>` or other nested braces.
 - `krate migrate nextjs` places the imports it adds (`after` from `@krate/runtime/server`, `lazy`, the
   NextResponse shim) below the file's directive prologue, so `"use server"` stays the first statement.
 - The `@radix-ui/react-slot` shim exports `createSlot` and `createSlottable`, which recent Radix
