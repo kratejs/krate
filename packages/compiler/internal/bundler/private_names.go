@@ -340,7 +340,10 @@ func (b *Bundler) planExportRenames(mods []*Module, dynamic map[string]bool) exp
 				// original names (build.exportBindings).
 				target := b.resolveImportForModule(mod.Path, strings.Trim(st.Source, "\"'`"))
 				for _, spec := range st.Named {
-					if owners[spec.Remote][target] {
+					// Only the page's own imports count for the warning: a
+					// module deep in the graph importing a name says nothing
+					// about what the page imports.
+					if mod.IsEntry && owners[spec.Remote][target] {
 						if imported[spec.Remote] == nil {
 							imported[spec.Remote] = map[string]bool{}
 						}
@@ -471,7 +474,7 @@ func ownsExports(mod *Module) bool {
 	return isAction
 }
 
-// warnExportCollisions reports a name that is imported from several modules
+// warnExportCollisions reports a name that the page imports from several modules
 // which all export it and could not be told apart, on the entry module so it
 // reaches the page's warnings.
 func (b *Bundler) warnExportCollisions(mods []*Module, clashes []exportClash) {
