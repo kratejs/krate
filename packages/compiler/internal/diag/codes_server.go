@@ -171,8 +171,9 @@ func init() {
 			Code:  CodeClientBoundaryExports,
 			Title: "Client module exports cannot be listed",
 			Explanation: "Krate wraps each export of a `\"use client\"` module in a client boundary, so it must " +
-				"know the export names. `export * from` cannot be enumerated: list the re-exported names " +
-				"explicitly (`export { A, B } from \"./x\"`).",
+				"know the export names. `export * from` a local module is expanded into that module's runtime " +
+				"exports; one that cannot be enumerated (a package, or a cycle of `export *`) must list the " +
+				"re-exported names explicitly (`export { A, B } from \"./x\"`).",
 		},
 	)
 }

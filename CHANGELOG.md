@@ -396,6 +396,7 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- `export * from "./x"` in a `"use client"` module no longer fails with KR7114 when `./x` is a local module: it is expanded into the target's runtime exports (a types-only target contributes none). The remaining KR7114 case (a package or a cycle) prints its hint without doubled quotes.
 - Inline `"use server"` actions declared inside a callback of an async server component (a `.map` row
   action capturing the row) no longer fail with KR7001. The error for a capture in a non-async component
   now names the variable, and a value that cannot be sealed reports the action's `file:line:col`.
