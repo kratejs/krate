@@ -396,6 +396,10 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- `krate migrate nextjs` places the imports it adds (`after` from `@krate/runtime/server`, `lazy`, the
+  NextResponse shim) below the file's directive prologue, so `"use server"` stays the first statement.
+- The `@radix-ui/react-slot` shim exports `createSlot` and `createSlottable`, which recent Radix
+  collection, primitive and dialog packages import.
 - `.ts`, `.mts` and `.cts` files are never lexed as JSX, so `a < b || c > d` in a plain TypeScript file
   (including a workspace package outside the project root) no longer fails the build.
 - `import "server-only"` works in every server context (build-time passes, metadata routes, middleware,
