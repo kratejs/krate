@@ -396,6 +396,10 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- KR7116 (a name exported by two modules) now warns only when the page itself imports the name from each, not for imports deep inside a package.
+- KR7101 no longer says "a error", and the diagnostic points at line 1, column 1 of the offending file instead of 0:0.
+- `site.htmlAttributes` and `site.bodyAttributes` accept JSX names: `className` is written as `class`, `htmlFor` as `for`.
+- The build-time `data-krate-no-base` marker (from `<Link basePath={false}>` or a plain anchor) is no longer left in the emitted HTML; the link stays unprefixed.
 - `.ts`, `.mts` and `.cts` files are never lexed as JSX, so `a < b || c > d` in a plain TypeScript file
   (including a workspace package outside the project root) no longer fails the build.
 - `import "server-only"` works in every server context (build-time passes, metadata routes, middleware,
