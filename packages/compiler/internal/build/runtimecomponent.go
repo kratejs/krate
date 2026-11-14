@@ -73,7 +73,7 @@ function Head(p){return jsx('head',p);}
 function Suspense(p){return p.children;}
 function Script(){return'';}
 function Style(){return'';}
-function Link(p){p=p||{};var attrs={};for(var k in p)attrs[k]=p[k];var href=p.href||'';var base=(globalThis.__KRATE_CFG__||{}).basePath||'';if(base&&/^\/(?!\/)/.test(href))attrs.href=base+href;var ext=/^(https?:|mailto:|tel:|#|javascript:|\/\/)/.test(href)||p.target==='_blank'||p.download!==undefined;if(ext){attrs['data-krate-external']='';}else{attrs['data-krate-link']='';if(p.prefetch!==false)attrs['data-prefetch']='';if(p.replace)attrs['data-krate-replace']='';if(p.scroll===false)attrs['data-krate-scroll']='false';}if(p.target==='_blank'&&!p.rel)attrs.rel='noopener noreferrer';return jsx('a',attrs);}
+function Link(p){p=p||{};var attrs={};for(var k in p)attrs[k]=p[k];var href=p.href||'';var base=(globalThis.__KRATE_CFG__||{}).basePath||'';var nb=p.basePath===false;delete attrs.basePath;if(base&&!nb&&/^\/(?!\/)/.test(href))attrs.href=base+href;var ext=nb||/^(https?:|mailto:|tel:|#|javascript:|\/\/)/.test(href)||p.target==='_blank'||p.download!==undefined;if(ext){attrs['data-krate-external']='';if(nb)attrs['data-krate-no-base']='';}else{attrs['data-krate-link']='';if(p.prefetch!==false)attrs['data-prefetch']='';if(p.replace)attrs['data-krate-replace']='';if(p.scroll===false)attrs['data-krate-scroll']='false';}if(p.target==='_blank'&&!p.rel)attrs.rel='noopener noreferrer';return jsx('a',attrs);}
 function Image(p){return jsx('img',p);}
 function Icon(){return'';}
 function useRef(initial){return{current:initial===undefined?null:initial};}
@@ -306,6 +306,7 @@ globalThis.__krate_render = function(__propsJSON) {
 					})
 				},
 			},
+			serverGlobalsPlugin(root),
 		},
 	})
 

@@ -220,9 +220,78 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
   backups, so `--apply` needs `--force` when any are planned.
 - `krate migrate nextjs` no longer writes `NEXT_PUBLIC_*` values from `.env*` into source. It
   renames the reads to `KRATE_PUBLIC_*` and lists the variables to set for the build.
+- Pages under an async layout render per request: an async `_layout.tsx` and everything below it
+  run at request time, so a static page beneath one becomes server-rendered (the build lists each).
+  `KR7101` now means a `template.tsx` or `error.tsx` below an async layout, and `KR8013` fires only for
+  a React-library hook outside `"use client"` or a compiled component in a synchronous static layout.
+- Node server bundles (API routes, server actions, SSR pages, per-request metadata routes) now bundle
+  every import that resolves outside `node_modules` (workspace packages, tsconfig `paths` such as `@/`)
+  instead of leaving it external, where plain Node could not load it.
+- Deployed servers read the key that seals inline server-action arguments only from
+  `KRATE_ACTION_SECRET`; it is never written into a deploy bundle. Set it in the deployment's
+  environment when inline actions capture values (the deploy warns).
+- A QuickJS API route that times out returns 504 instead of 500, and `request.signal` is aborted.
+- Page config moved from an inline `window.__KRATE_CFG__` script to a
+  `<script type="application/json" id="__krate_cfg__">` block, written only when needed. Code that read
+  `window.__KRATE_CFG__` must read the block.
 
 ### Added
 
+- Async layouts: `_layout.tsx` may be async, read the session or database, and call `redirect()` or
+  `notFound()` to guard its subtree.
+- Compiled React components (lucide icons, Radix and shadcn primitives) render inside async pages and
+  layouts: stateless ones become HTML with no JavaScript, stateful ones are server-rendered and hydrated
+  as islands. One copy of each package is shared by every island and boundary on a page, so module
+  stores (sonner's `toast()` with a layout `<Toaster />`, zustand, jotai) are page singletons. A
+  `ThemeProvider` that only adds a `<script>` is lifted out of a layout.
+- Real-React islands for libraries built on `react-reconciler` (`@react-three/fiber`, drei,
+  `react-konva`): detected automatically or listed in `react.islands`, client-rendered with
+  `client:fallback` text, and bundled with the project's own `react` and `react-dom` only on pages that
+  use them. `"use client"` modules that import such a library run on real React.
+- Server actions: exports built by a wrapper (`export const save = createAction(...)`), default and
+  renamed exports and named re-exports; each export is checked to be a function when the module loads.
+  Inline `"use server"` functions in server components and async layouts are hoisted into action
+  modules, and the values they capture are sealed (AES-256-GCM, bound to the action) in the action URL.
+- Metadata routes (`robots.ts`, `sitemap.ts`, `manifest.ts`) with `dynamic = "force-dynamic"` or
+  `revalidate` run per request on `krate serve`, dev and the node, vercel and netlify targets, with
+  `headers()` and `cookies()`. `KR7134` warns when that is set inside a dynamic segment.
+- `serverExternalPackages`: packages kept external in Node server bundles. A `.node` native addon is
+  detected and its package made external automatically, and the route runs on the Node sidecar.
+- `krate deploy --target node` traces external packages (with their dependencies and the installed
+  platform binary) into a minimal `node_modules` next to `server.mjs`, and `outputFileTracingIncludes`
+  copies files the server reads at runtime. See the new self-hosting guide.
+- `envDir` loads `.env` files from another directory, such as a monorepo root.
+- `export const maxDuration = N` in an API route sets its timeout on every runtime, the Vercel function
+  config included (default 30 s).
+- `after()` from `@krate/runtime/server` runs work after the response is sent (`waitUntil` on serverless
+  targets). `request.nextUrl` is available in API routes on every runtime.
+- `@krate/runtime/testing`: `callRoute` and `runAction` call an API route or server action in a unit
+  test without a server. See the new testing guide.
+- Cloudflare: `import { env } from "cloudflare:workers"` and `getPlatform()` / `getCloudflareContext()`
+  reach every binding and `ctx` per request; the exports of `src/cloudflare.ts` (or `deploy.worker`),
+  such as `scheduled`, `queue` and Durable Object classes, are merged into the generated Worker.
+- `trailingSlash: "always" | "never" | "ignore"`, honoured by `krate serve` and every server target.
+- `cssImportRoots`, and CSS `@import` of `.css` files inside the workspace root or through
+  `node_modules`, so a sibling monorepo package can share tokens.
+- `<Link basePath={false}>` and `<a data-krate-no-base>` link to pages outside the base path; the
+  `KR7144` hint points at them.
+- `<html>` and `<body>` attributes: `site.htmlAttributes` and `site.bodyAttributes` in the config, and
+  `<html className="dark" />` / `<body className="..." />` inside `<Head>` per layout or page (merged
+  site, layouts, page; per request on SSR pages). The Next migrator moves root-layout `<html>` and
+  `<body>` attributes there.
+- `Head`, `Link`, `Image`, `Script`, `Style`, `Icon`, `Suspense` and `SyntaxHighlight` are exported from
+  `@krate/runtime` and work in any component module, islands included.
+- A 404, 403 or 401 page that is SSR, async or uses runtime components renders per request with its
+  status on `krate serve`, dev and the server targets; `output: "static"` still prerenders it.
+- `KR8353` warns when a `<Head>` value cannot be computed at build time, so crawlers would not see it.
+  Head values may use `URL` and `encodeURIComponent`.
+- `krate migrate nextjs` maps `next/font/local` and the `geist` fonts, keeps `maxDuration` in API
+  routes, drops `runtime` and `preferredRegion`, maps `after()`, types `NextRequest` and adds cookie
+  methods to the `NextResponse` shim, and translates `serverExternalPackages` and
+  `outputFileTracingIncludes`.
+- Compatibility matrix rows for sonner, cmdk, embla-carousel-react, @dnd-kit, @tanstack/react-table,
+  next-themes and `motion/react` (tested in Chromium with the real packages), and for the real-React
+  libraries.
 - The embedded QuickJS runtime installs each group of Web APIs the first time code reads one of
   its globals, so creating a VM costs about 1.4 ms instead of 3.2 ms. Config and
   Tailwind evaluation, `generateStaticParams`, metadata and isolation-mode API requests get
@@ -315,6 +384,23 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- `.ts`, `.mts` and `.cts` files are never lexed as JSX, so `a < b || c > d` in a plain TypeScript file
+  (including a workspace package outside the project root) no longer fails the build.
+- `import "server-only"` works in every server context (build-time passes, metadata routes, middleware,
+  actions, route handlers), and CommonJS dependencies that `require` Node built-ins load in Node bundles
+  through a `createRequire` banner.
+- One build reports every server-action (`KR7004`), metadata-route (`KR7130`) and page error instead of
+  stopping at the first.
+- JSX held in module-level or component-local constants, and JSX passed as a prop (single, array,
+  reading the caller's values, into a stateful component), is rendered into the HTML. It used to come
+  out as an empty slot or fail with `KR8352`.
+- A `fetch(..., { cache: "no-store" })` in client code no longer turns the page into SSR.
+- SVG types accept `xmlns`, `xlink:*`, `xml:space`, filter and gradient elements and event handlers.
+- `<Head>` inside a component no longer throws `Head is not defined` on SSR pages, and Head content from
+  island components reaches prerendered pages (the last `<title>` wins, as at request time).
+- A prerendered page whose only stateful component sits in `<Head>` ships no hydration JavaScript.
+- `/404` and `/404.html` answer with the 404 page and status 404 instead of redirecting.
+- A symlinked workspace package with TypeScript source loads in the Node server output.
 - The generated types of a Go host signal say `T | undefined`, as for `@host` TypeScript signals: it
   reads `undefined` until the host sends the first value, which pages typed as `T` crashed on.
 - An aliased export (`export { remoteOnEvent as onEvent }`) and another module's declared export of

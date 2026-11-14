@@ -11,6 +11,7 @@ import {
   installActionForms,
   isServerAction,
   setActionTransitionRunner,
+  stripActionURL,
 } from './actions.js';
 
 
@@ -61,6 +62,21 @@ describe('form actions', () => {
     expect(init.body).toBeInstanceOf(FormData);
     expect((init.body as FormData).get('text')).toBe('hi');
     expect(getFormStatus(form).pending).toBe(false);
+  });
+
+  it('keeps only the sealed closure token of an inline action in the posted URL', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ ok: true, result: null }));
+    vi.stubGlobal('fetch', fetchMock);
+    const args = encodeURIComponent(JSON.stringify(['k1.AbC_-123']));
+    const form = makeForm(
+      `<form action="/__krate/action/a1?__krate_args=${args}&__krate_return=%2Fx" method="post" data-krate-action></form>`,
+    );
+    submit(form);
+    await tick();
+    await tick();
+    const [url] = fetchMock.mock.calls[0] as unknown as [string];
+    expect(url.replace(/^https?:\/\/[^/]+/, '')).toBe(`/__krate/action/a1?__krate_args=${args}`);
+    expect(stripActionURL('/__krate/action/a2?__krate_args=%5B%7B%22n%22%3A1%7D%5D&__krate_return=%2Fx')).toBe('/__krate/action/a2');
   });
 });
 

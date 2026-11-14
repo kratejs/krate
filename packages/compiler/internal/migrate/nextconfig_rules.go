@@ -408,12 +408,12 @@ type keyNote struct {
 // otherKeyNotes covers next.config keys the migrator does not translate.
 var otherKeyNotes = map[string]keyNote{
 	"transpilePackages":           {true, "transpilePackages is not translated", "Krate has no transpilePackages key; run krate build and check that each listed package resolves, and report packages that do not"},
-	"serverExternalPackages":      {true, "serverExternalPackages is not translated", "no Krate equivalent yet: the node deploy target bundles server code into one server.mjs (see the Deployment guide), so a package that cannot be bundled needs manual handling"},
-	"outputFileTracingIncludes":   {true, "outputFileTracingIncludes is not translated", "no Krate equivalent: files read at runtime are not traced, so copy them next to the deployed server yourself (see the Deployment guide)"},
+	"serverExternalPackages":      {true, "serverExternalPackages is not translated", "the value is computed; set serverExternalPackages in krate.config.ts to the same package names (see the Config Reference)"},
+	"outputFileTracingIncludes":   {true, "outputFileTracingIncludes is not translated", "the value is computed or leaves the project; set outputFileTracingIncludes in krate.config.ts with project-relative globs (see the Config Reference)"},
 	"outputFileTracingExcludes":   {true, "outputFileTracingExcludes is not translated", "no Krate equivalent yet"},
 	"outputFileTracingRoot":       {true, "outputFileTracingRoot is not translated", "no Krate equivalent yet; a Krate project builds from its own root"},
 	"i18n":                        {true, "i18n routing is not translated", "Krate's i18n key is docs-scoped; for app pages use a [locale] dynamic segment (see Internationalization)"},
-	"trailingSlash":               {true, "trailingSlash is not translated", "set deploy.options.trailingSlash in krate.config.ts for static hosts (see Deploy in the config reference)"},
+	"trailingSlash":               {true, "trailingSlash is not translated", "set trailingSlash in krate.config.ts: \"always\" matches trailingSlash: true, \"never\" matches Next.js' default of false, \"ignore\" serves both (see Trailing slash in the config reference)"},
 	"assetPrefix":                 {true, "assetPrefix is not translated", "no Krate equivalent yet; basePath serves the site under a sub-path"},
 	"distDir":                     {true, "distDir is not translated", "set outDir in krate.config.ts (default dist)"},
 	"webpack":                     {true, "the webpack hook is not translated", "Krate has no webpack hook; custom build steps go in a plugin (see Plugins)"},
@@ -446,8 +446,11 @@ var otherKeyNotes = map[string]keyNote{
 
 // translateOtherKeys reports every top-level key the migrator does not
 // translate, with a key-specific hint.
-func translateOtherKeys(file string, obj *ast.ObjectExpr, notes *nextConfigNotes) {
+func translateOtherKeys(file string, obj *ast.ObjectExpr, notes *nextConfigNotes, skip map[string]bool) {
 	handled := map[string]bool{"basePath": true, "redirects": true, "rewrites": true, "headers": true, "images": true, "env": true}
+	for k := range skip {
+		handled[k] = true
+	}
 	var keys []string
 	for _, p := range obj.Properties {
 		if p == nil || p.Spread || p.Computed || handled[p.Key] {
@@ -487,7 +490,7 @@ func outputNote(file string, v ast.Expr) ManualItem {
 	mode, _ := stringValue(v)
 	switch mode {
 	case "standalone":
-		return ManualItem{Source: file, Reason: "output: 'standalone' is not translated", Hint: "use krate deploy --target node (dist/.krate/server/server.mjs, no node_modules needed) or --target docker for a self-hosted server"}
+		return ManualItem{Source: file, Reason: "output: 'standalone' is not translated", Hint: "use krate deploy --target node (dist/.krate/server holds server.mjs plus a minimal node_modules for external packages) or --target docker for a self-hosted server (see the Self-hosting guide)"}
 	case "export":
 		return ManualItem{Source: file, Reason: "output: 'export' is not translated", Hint: "set output: \"static\" in krate.config.ts (see Output mode in the config reference)"}
 	}

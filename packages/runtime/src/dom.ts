@@ -296,6 +296,7 @@ function setAttr(el: Element, key: string, value: unknown): void {
 
 /** A built-in <Link> lowers to these props; plain anchors are left as written. */
 function isLinkProps(props: Record<string, unknown>): boolean {
+  if ('data-krate-no-base' in props) return false;
   return 'data-krate-link' in props || 'data-krate-external' in props;
 }
 
@@ -340,7 +341,7 @@ export function krateSpread(el: Element, get: () => Record<string, unknown> | nu
       for (const key of Object.keys(props)) {
         if (key === 'children' || key === 'key' || key === 'dangerouslySetInnerHTML') continue;
         next.add(key);
-        const isLink = key === 'href' && (isLinkProps(props) || el.hasAttribute('data-krate-link'));
+        const isLink = key === 'href' && (isLinkProps(props) || (el.hasAttribute('data-krate-link') && !('data-krate-no-base' in props)));
         setAttr(el, key, isLink ? linkHref(props[key]) : props[key]);
       }
       const prev = spreadKeys.get(el);

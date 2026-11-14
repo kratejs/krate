@@ -228,6 +228,15 @@ export interface SiteConfig {
   twitter?: string;
   themeColor?: string;
   locale?: string;
+  /**
+   * Attributes set on every page's `<html>` element, e.g. `{ class: "dark" }`.
+   * A string or number writes `name="value"`, `true` a bare attribute; `false`
+   * and `null` drop it. A page or layout refines them with `<html>` inside
+   * `<Head>`.
+   */
+  htmlAttributes?: Record<string, string | number | boolean | null>;
+  /** Attributes set on every page's `<body>` element; see `htmlAttributes`. */
+  bodyAttributes?: Record<string, string | number | boolean | null>;
 }
 
 export interface RobotsConfig {
@@ -605,6 +614,12 @@ export interface DeployConfig {
   target?: "netlify" | "vercel" | "cloudflare" | "gh-pages";
   /** Adapter-specific options (e.g. vercel: cleanUrls, trailingSlash). */
   options?: Record<string, string>;
+  /**
+   * Cloudflare only: a module whose exports are merged into the generated
+   * Worker (`scheduled`, `queue`, `email`, Durable Object classes). Defaults
+   * to `src/cloudflare.ts` (or .js, .mjs, .mts) when it exists.
+   */
+  worker?: string;
 }
 
 /** One user-agent group in a robots.txt (`robots({ rules: [...] })`). */
@@ -805,6 +820,13 @@ export interface KrateConfig {
    */
   viewTransitions?: boolean | "auto" | "off";
   /**
+   * Page URL form, honoured by `krate serve`/`start` and the node, vercel,
+   * netlify and cloudflare targets. `"always"` (default) redirects `/x` to
+   * `/x/`, `"never"` redirects `/x/` to `/x`, `"ignore"` serves both without a
+   * redirect.
+   */
+  trailingSlash?: "always" | "never" | "ignore";
+  /**
    * Partial prerendering: cache dynamic regions on non-ISR pages with
    * stale-while-revalidate. `true` uses the default window; an object sets it.
    * Only enable for regions that do NOT depend on per-request cookies/sessions.
@@ -887,6 +909,12 @@ export interface KrateConfig {
   hostFunctions?: string[];
   /** Native target: every module in these directories is host code. */
   hostDirs?: string[];
+  /**
+   * Extra directories stylesheets may `@import` and `url()` from, beyond the
+   * project root, node_modules and the enclosing monorepo workspace root.
+   * Relative to the project root, or absolute.
+   */
+  cssImportRoots?: string[];
   /** Desktop target settings (`krate native`). Experimental. */
   native?: NativeConfig;
   pathAliases?: Record<string, string[]>;

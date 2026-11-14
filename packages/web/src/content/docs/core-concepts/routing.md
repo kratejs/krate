@@ -78,6 +78,13 @@ layout. Layouts receive their page content through `{children}`, which must be
 rendered exactly once. A layout that fails to build (or has no default export)
 fails the build; one that never renders `{children}` is reported as a warning.
 
+### Async layouts
+
+A layout can be `async` to await a session or feature flags, and can call
+`redirect()` or `notFound()` to gate every page below it. Pages under an async
+layout render per request; layouts above it stay static. See
+[Async layouts](/docs/features/server-components/#async-layouts).
+
 ### Layout persistence
 
 On a client-side navigation the router compares the layouts of the current
@@ -235,8 +242,32 @@ that URL gets the nearest page outside any group. Two groups cannot both define
 the page of the same URL directory.
 
 Segment pages are prerendered once (`blog/404.html`, `blog/500.html`) and picked
-per request from the `segments` map in the build manifest; request-time
-rendering modes on them are ignored (`KR9003`). They are `noindex` by default
+per request from the `segments` map in the build manifest. A not-found,
+forbidden or unauthorized page can instead render per request: give it
+`export const config = { ssr: true }` (or make it `async`, or use a runtime
+component) and it is rendered for every request that lands on it, with the
+status of its role, so it can read cookies, headers and request-time
+configuration:
+
+```tsx
+// src/pages/404.tsx
+import { headers } from "@krate/runtime/server";
+
+export const config = { ssr: true };
+
+export default async function NotFound() {
+  const host = (await headers()).get("host");
+  return <h1>Nothing at {host}</h1>;
+}
+```
+
+A page that renders per request is never cached, and its shell is not a URL of
+the site. If its render fails, or calls `notFound()` itself, the baked shell
+(rendered at build time without request data) answers instead. This works on
+`krate start`, `krate dev` and the node, Vercel and Netlify handlers, and not
+with `output: "static"`, which prerenders every page. Error pages
+(`error.tsx`, `500.tsx`) are always prerendered, because they answer while the
+app is failing; an `ssr` mode there is ignored (`KR9003`). Segment pages are `noindex` by default
 (a `robots` meta you set yourself wins), carry no canonical link, and are left
 out of the sitemap, the route list and `krate types`. `krate inspect` and the
 MCP `explain` tool list each route's nearest not-found and error page.
@@ -373,7 +404,9 @@ The router handles:
 - **GET forms** - submitted client-side (opt out with `data-krate-reload`).
 
 `<Link>` supports `prefetch={false}`, `replace`, `scroll={false}`, and
-`target="_blank"` (which auto-adds `rel="noopener noreferrer"`). After
+`target="_blank"` (which auto-adds `rel="noopener noreferrer"`), and
+`basePath={false}` for a URL served outside the site's base path (see
+[Base path](/docs/reference/config/#base-path)). After
 navigation the link matching the current path gets `aria-current="page"`.
 Programmatic navigation, events and error handling are documented in the
 [runtime API reference](/docs/reference/runtime-api/#spa-router).

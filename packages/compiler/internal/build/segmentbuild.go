@@ -201,6 +201,18 @@ func (b *Builder) addSegmentsToManifest(m *Manifest, results []*PageResult) {
 		}
 	}
 	m.Segments = segmentEntries(pages, b.Cfg.PagesDir)
+	for _, r := range results {
+		if r == nil || !r.isDynamicSegment() || r.Page == "" {
+			continue
+		}
+		kind, _ := segmentKindOfFile(r.Page)
+		key := segmentDirKey(r.Page, b.Cfg.PagesDir)
+		for i := range m.Segments {
+			if m.Segments[i].Key == key {
+				m.Segments[i].Dynamic = append(m.Segments[i].Dynamic, kind)
+			}
+		}
+	}
 	for i := range m.Pages {
 		m.Pages[i].SegDir = routeSegDir(b.Root, b.Cfg.PagesDir, m.Pages[i].Source)
 		m.Routes[m.Pages[i].Route] = m.Pages[i]

@@ -287,7 +287,7 @@ func checkBasePathURL(el *ast.JSXElement, base string, report eventFormReporter)
 	var name, hint string
 	switch el.Opening.Name {
 	case "a":
-		name, hint = "href", "use <Link> for a page on this site: it adds the base path"
+		name, hint = "href", "use <Link> for a page on this site: it adds the base path; for a page served outside this site on the same domain, add data-krate-no-base (or use <Link basePath={false}>)"
 	case "img":
 		name, hint = "src", "use <Image> or import the file: both add the base path"
 	default:
@@ -297,7 +297,7 @@ func checkBasePathURL(el *ast.JSXElement, base string, report eventFormReporter)
 	for _, attr := range el.Opening.Attributes {
 		switch {
 		case attr.Spread:
-		case attr.Name == "data-krate-link", attr.Name == "data-krate-external":
+		case attr.Name == "data-krate-link", attr.Name == "data-krate-external", attr.Name == "data-krate-no-base":
 			return
 		case attr.Name == name:
 			target = attr

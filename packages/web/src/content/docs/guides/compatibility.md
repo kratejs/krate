@@ -10,7 +10,7 @@ This is the support contract for React compatibility. A surface is only marked
 supported or stable when the referenced tests pass. Known divergences are
 listed instead of silently hidden.
 
-Last verified: **2026-11-12**. See the [roadmap](/roadmap/) for phase
+Last verified: **2026-11-13**. See the [roadmap](/roadmap/) for phase
 status and the [React compatibility guide](/docs/guides/react-compatibility/)
 for usage.
 
@@ -50,8 +50,13 @@ for usage.
 | Next.js app corpus | Supported | n/a | n/a | Migration-ready |
 | Local components in islands | n/a | Supported | n/a | Supported |
 | npm React hook libraries (zustand, react-hook-form, SWR, TanStack Query, ...) | n/a | Supported | Supported | Run as Preact islands |
+| Compiled React packages in async pages, layouts and server components (lucide-react, Radix) | n/a | Supported | Supported | Client boundaries rendered with Preact |
 | CSS-in-JS (styled-components, emotion, MUI) | n/a | Partial | Partial | Client-only islands |
 | Island hydration control (client:visible, client:idle) | n/a | Supported | n/a | Astro-style directives |
+| Real-React islands (react-reconciler libraries) | n/a | Supported | n/a | Opt-in real React |
+| @react-three/fiber | n/a | Partial | n/a | Real-React island |
+| @react-three/drei | n/a | Partial | n/a | Real-React island |
+| react-konva | n/a | Partial | n/a | Real-React island |
 | SSR island hydration | n/a | Supported | Supported | Hydration-safe |
 | Supported Preact versions | n/a | Supported | n/a | 10.20 through current |
 | Browser differential corpus | Supported | n/a | n/a | No P0/P1 divergence |
@@ -59,6 +64,13 @@ for usage.
 | Serverless and Node deployment | n/a | n/a | Supported | Vercel, Netlify, Cloudflare and Node hosting |
 | Metadata routes and ImageResponse | Supported | n/a | Supported | Next.js sitemap.ts, robots.ts, manifest.ts, opengraph-image and twitter-image |
 | Code highlighting (build, request time, browser) | Supported | Supported | Supported | chroma parity |
+| sonner (toasts) | n/a | Supported | Supported | Run as Preact islands |
+| cmdk (command menu) | n/a | Supported | Supported | Run as Preact islands |
+| embla-carousel-react | n/a | Supported | Supported | Run as Preact islands |
+| @dnd-kit/core and @dnd-kit/sortable | n/a | Supported | Supported | Run as Preact islands |
+| @tanstack/react-table (v8) | n/a | Supported | Supported | Run as Preact islands |
+| next-themes | n/a | Supported | Supported | Run as Preact islands |
+| motion v12+ (motion/react) | n/a | Supported | Supported | Run as Preact islands |
 
 ## Krate Native
 
@@ -210,12 +222,12 @@ Evidence: `browser:/react-class/`, `browser:/react-demo/`
 Known limits:
 
 - A page that throws while it is prerendered still fails the build (KR3010); the segment error page is not baked in as a build-time fallback.
-- Segment pages are always prerendered; request-time rendering modes on them are ignored with KR9003.
+- A 404, 403 or 401 page can render per request (ssr, async, runtime components) with its status; error pages are always prerendered and ignore request-time modes with KR9003.
 - In the server-rendered error page, error.message and error.digest are filled into the HTML before hydration; text derived from them at render time appears once the page hydrates.
 
 Diagnostics: `KR9001`, `KR9002`, `KR9003`
 
-Evidence: `TestBuildWritesSegmentPagesAndManifest`, `TestSegmentPagesServe`, `TestNestedNotFoundBecomesSegmentPage`, `TestServerlessNodeParity`, `TestPlatformDeploysKeepSegmentPages`, `browser:/r18/boundary_reset_state/`, `browser:/r18/boundary_fallback_throws/`
+Evidence: `TestBuildWritesSegmentPagesAndManifest`, `TestSegmentPagesServe`, `TestNestedNotFoundBecomesSegmentPage`, `TestServerlessNodeParity`, `TestPlatformDeploysKeepSegmentPages`, `TestSegmentPageRendersPerRequest`, `TestSegmentPageRendersPerRequestOnNodeTarget`, `browser:/r18/boundary_reset_state/`, `browser:/r18/boundary_fallback_throws/`
 
 ### Children, keys, and refs
 
@@ -326,9 +338,9 @@ Evidence: `TestBuildTimeTierRejectsClientAPIs`, `TestTierConflictRule`
 
 **Source:** Supported - **Islands:** n/a - **SSR:** Supported
 
-File-level "use server" modules compile to hashed POST endpoints with client proxies, bound arguments, no-JS form posts, SSR forms, registry validation, origin checks, body limits, and no-store responses. Enhanced forms return results without reloading; errors use a {message, digest} envelope; actions read headers() and cookies() and can redirect(). Inline "use server" functions are a coded build error (KR7001).
+File-level "use server" modules compile to hashed POST endpoints with client proxies, bound arguments, no-JS form posts, SSR forms, registry validation, origin checks, body limits, and no-store responses. Enhanced forms return results without reloading; errors use a {message, digest} envelope; actions read headers() and cookies() and can redirect(). Exports built by a wrapper (createAction(...)) are checked when the module loads. Inline "use server" functions in server components are hoisted into generated actions, with the values they close over sealed per request (async components); in a client module they are a coded build error (KR7001).
 
-Evidence: `TestPrepareActionsBuildsManifestAndBundle`, `TestRewriteActionImports`, `TestActionSidecarTransport`, `TestActionHandlerSecurity`, `fixture:examples/src/pages/react-actions.tsx`, `browser:/react-actions/`
+Evidence: `TestPrepareActionsBuildsManifestAndBundle`, `TestRewriteActionImports`, `TestActionSidecarTransport`, `TestActionHandlerSecurity`, `TestWrapperBuiltActionsRunInSidecar`, `TestInlineServerActionsE2E`, `TestInlineServerActionStaticPage`, `fixture:examples/src/pages/react-actions.tsx`, `browser:/react-actions/`
 
 ### Data cache and revalidation
 
@@ -388,7 +400,7 @@ A user module that calls a hook of an npm package built on React (or a store hoo
 
 Known limits:
 
-- A layout, template or server-rendered page cannot host these hooks; the build fails with KR8013.
+- A layout, template or server-rendered page cannot call these hooks outside a "use client" module; the build fails with KR8013. Their components (icons, Radix primitives) render in async pages, layouts and components as client boundaries.
 - A layout provider whose props read the layout's params, a signal or a state setter, or that renders markup of its own, cannot reach the islands (KR8015, KR8016).
 - State inside a component resets when its island unmounts on navigation; module-level state is kept.
 - A page that is itself such an island cannot take route props (KR8013) or use Krate-only APIs in the same module.
@@ -398,6 +410,23 @@ Known limits:
 Diagnostics: `KR8013`, `KR8015`, `KR8016`
 
 Evidence: `TestReactHookLibraryPageIsland`, `TestBrowserReactLibraryIslands`, `TestLayoutProvidersReachIslands`
+
+### Compiled React packages in async pages, layouts and server components (lucide-react, Radix)
+
+**Source:** n/a - **Islands:** Supported - **SSR:** Supported
+
+The components a server module imports from a package built on React are client boundaries: rendered with Preact on the server, plain HTML when they have no state or effects (an icon), a hydrating island otherwise. Parts of a compound component (Radix Dialog.Root with its Trigger and Content) stay in one Preact tree. Async layouts render per request with the page below them, so a layout can read a session and gate its subtree with redirect() or notFound(). Checked in Chromium against lucide-react 1.28 and radix-ui 1.6 (checkbox, dialog).
+
+Known limits:
+
+- Props follow the "use client" rules: serializable values and server actions, no inline functions.
+- A synchronous (static) layout cannot host compiled components; make it async (KR8013).
+- Server components placed between the parts of a compound component render to HTML, so the parts around one do not share a tree.
+- Only Chromium was run for the browser check.
+
+Diagnostics: `KR7101`, `KR8013`
+
+Evidence: `TestAsyncPageRendersCompiledReactComponents`, `TestCompiledReactComponentsBrowser`, `TestAsyncLayouts`
 
 ### CSS-in-JS (styled-components, emotion, MUI)
 
@@ -423,6 +452,60 @@ client:visible and client:idle on an island's root tag defer mounting until the 
 Diagnostics: `KR8012`
 
 Evidence: `TestBrowserReactLibraryIslands`
+
+### Real-React islands (react-reconciler libraries)
+
+**Source:** n/a - **Islands:** Supported - **SSR:** n/a
+
+A user module that imports a package built on react-reconciler (detected from its dependencies) or listed in react.islands runs in a client-rendered island bundled with real react and react-dom, with no Preact alias in its subtree. The server emits a placeholder (client:fallback text). All islands of a page mount from one entry, and the pages of a site share one React chunk that only pages with such an island load. Signal props bridge in as for other islands.
+
+Known limits:
+
+- Client-rendered only: no server markup beyond the fallback text.
+- Adds react and react-dom (about 60 KB gzipped) plus the library to the pages that use it.
+- Layout providers are not applied; Krate components cannot be passed in as children (same-file ones are diagnosed with KR8007).
+- Async pages and layouts host them as client-rendered boundaries (props and children must be serializable); synchronous layouts cannot (KR8013).
+
+Evidence: `TestRealReactIsland`, `TestBrowserRealReactIsland`, `TestRealReactConfigPackage`, `TestReconcilerLibraryOnPreactIsland`, `TestRealReactInAsyncPages`
+
+### @react-three/fiber
+
+**Source:** n/a - **Islands:** Partial - **SSR:** n/a
+
+A module using Canvas, useFrame and the other fiber APIs runs as a real-React island (fiber depends on react-reconciler, so it is detected without configuration). Verified by hand: Canvas with a mesh renders a WebGL scene under three 0.170 and @react-three/fiber 9.8.
+
+Known limits:
+
+- The mechanism is tested in CI with a minimal react-reconciler renderer; the library itself was verified by hand in Chromium (@react-three/fiber 9.8, three 0.170, React 19.3) and is not installed in CI.
+- WebGL output is client-only; there is no server rendering.
+
+Evidence: `TestRealReactIsland`, `TestBrowserRealReactIsland`
+
+### @react-three/drei
+
+**Source:** n/a - **Islands:** Partial - **SSR:** n/a
+
+drei peer-depends on @react-three/fiber, so a module importing it runs as a real-React island with no configuration. Verified by hand: OrbitControls inside a fiber Canvas under @react-three/drei 10.7.
+
+Known limits:
+
+- The mechanism is tested in CI with a minimal react-reconciler renderer; the library itself was verified by hand in Chromium (@react-three/drei 10.7) and is not installed in CI.
+- Only OrbitControls was exercised; other helpers have not been tried.
+
+Evidence: `TestRealReactIsland`, `TestBrowserRealReactIsland`
+
+### react-konva
+
+**Source:** n/a - **Islands:** Partial - **SSR:** n/a
+
+react-konva depends on react-reconciler, so a module using Stage, Layer and the shape components runs as a real-React island with no configuration. Verified by hand: a Rect moves when island state changes under react-konva 19.3 and konva 9.3.
+
+Known limits:
+
+- The mechanism is tested in CI with a minimal react-reconciler renderer; the library itself was verified by hand in Chromium (react-konva 19.3, konva 9.3) and is not installed in CI.
+- The canvas is client-only; there is no server rendering.
+
+Evidence: `TestRealReactIsland`, `TestBrowserRealReactIsland`
 
 ### SSR island hydration
 
@@ -1382,6 +1465,79 @@ Known limits:
 - No screen reader (Orca, VoiceOver, Narrator, NVDA, JAWS) was used on any platform; web content inside the webview is exposed by the engine and not tested here.
 
 Evidence: `TestWindowIsNamedByItsTitle`, `TestGUIAccessibilityWindowIsNamedInEveryChrome`, `TestGUIUIAWindowAndWebviewInEveryChrome`
+
+### sonner (toasts)
+
+**Source:** n/a - **Islands:** Supported - **SSR:** Supported
+
+A <Toaster /> in a static or an async layout and toast() called from a client component of an async or sync page show the toast, with one copy of sonner's store for the layout and the page, also after a client-side navigation (sonner 2.0.8). Checked in Chromium by TestBrowserEcosystemLibraries against the real package (the test needs KRATE_ECOSYSTEM_LIBS or KRATE_ECOSYSTEM_INSTALL=1 and is skipped otherwise).
+
+Known limits:
+
+- A layout that hosts an island is swapped on client-side navigation instead of being kept mounted, so toasts still on screen disappear when the page changes.
+- A static layout hosts the Toasters of sonner and react-hot-toast as islands (a fixed list); another library's component in a static layout is compiled by Krate and does not share state with islands. Async layouts have no such limit: their client boundaries are built in the island graph.
+- A plain function of a React package called from a module that is not an island (no "use client", not in an event handler) is bundled into the page script with its own copy of the package's state.
+
+Evidence: `TestBrowserEcosystemLibraries`, `TestLayoutToasterSharesStoreWithPageIslands`, `TestAsyncLayoutToasterSharesStore`, `fixture:packages/compiler/internal/build/testdata/ecosystem_libs`
+
+### cmdk (command menu)
+
+**Source:** n/a - **Islands:** Supported - **SSR:** Supported
+
+Command, Command.Input, Command.List, Command.Item and Command.Empty render, filter as you type and show the empty state (cmdk 1.1.1). Checked in Chromium by TestBrowserEcosystemLibraries against the real package (the test needs KRATE_ECOSYSTEM_LIBS or KRATE_ECOSYSTEM_INSTALL=1 and is skipped otherwise).
+
+Evidence: `TestBrowserEcosystemLibraries`, `fixture:packages/compiler/internal/build/testdata/ecosystem_libs`
+
+### embla-carousel-react
+
+**Source:** n/a - **Islands:** Supported - **SSR:** Supported
+
+useEmblaCarousel initializes on mount, reports its snap list and scrolls on api.scrollNext() (embla-carousel-react 8.6.0). Checked in Chromium by TestBrowserEcosystemLibraries against the real package (the test needs KRATE_ECOSYSTEM_LIBS or KRATE_ECOSYSTEM_INSTALL=1 and is skipped otherwise).
+
+Evidence: `TestBrowserEcosystemLibraries`, `fixture:packages/compiler/internal/build/testdata/ecosystem_libs`
+
+### @dnd-kit/core and @dnd-kit/sortable
+
+**Source:** n/a - **Islands:** Supported - **SSR:** Supported
+
+DndContext, SortableContext and useSortable with the pointer sensor reorder a list through a real drag (@dnd-kit/core 6.3.1, @dnd-kit/sortable 10.0.0, @dnd-kit/utilities 3.2.2). Checked in Chromium by TestBrowserEcosystemLibraries against the real package (the test needs KRATE_ECOSYSTEM_LIBS or KRATE_ECOSYSTEM_INSTALL=1 and is skipped otherwise).
+
+Evidence: `TestBrowserEcosystemLibraries`, `fixture:packages/compiler/internal/build/testdata/ecosystem_libs`
+
+### @tanstack/react-table (v8)
+
+**Source:** n/a - **Islands:** Supported - **SSR:** Supported
+
+useReactTable with the core and sorted row models, column helpers and flexRender render the table on the server and re-sort on a header click (8.21.3). The v9 API (react-table 9) was not checked. Checked in Chromium by TestBrowserEcosystemLibraries against the real package (the test needs KRATE_ECOSYSTEM_LIBS or KRATE_ECOSYSTEM_INSTALL=1 and is skipped otherwise).
+
+Evidence: `TestBrowserEcosystemLibraries`, `fixture:packages/compiler/internal/build/testdata/ecosystem_libs`
+
+### next-themes
+
+**Source:** n/a - **Islands:** Supported - **SSR:** Supported
+
+A ThemeProvider in a layout is lifted into the islands of its pages and useTheme in a client component switches the class on <html> and updates the theme state (next-themes 0.4.6). The provider's anti-flash script is part of each island's server markup. Checked in Chromium by TestBrowserEcosystemLibraries against the real package (the test needs KRATE_ECOSYSTEM_LIBS or KRATE_ECOSYSTEM_INSTALL=1 and is skipped otherwise).
+
+Known limits:
+
+- Each island renders its own ThemeProvider (the lifted chain wraps every island) and next-themes keeps its state in the provider, so the theme state is per island: setTheme in one island changes the class on <html> and the stored value but does not re-render useTheme in other islands (checked in Chromium with two islands).
+- The server markup renders the theme as undefined until the island hydrates, as it does with React.
+
+Diagnostics: `KR8016`
+
+Evidence: `TestBrowserEcosystemLibraries`, `TestLayoutProviderWithScriptIsLifted`, `fixture:packages/compiler/internal/build/testdata/ecosystem_libs`
+
+### motion v12+ (motion/react)
+
+**Source:** n/a - **Islands:** Supported - **SSR:** Supported
+
+motion.div with initial/animate/transition, and AnimatePresence with an exit animation, run and unmount their element (motion 14.14.0, imported from motion/react). The older framer-motion package and the vanilla Motion engine config key are separate rows. Checked in Chromium by TestBrowserEcosystemLibraries against the real package (the test needs KRATE_ECOSYSTEM_LIBS or KRATE_ECOSYSTEM_INSTALL=1 and is skipped otherwise).
+
+Known limits:
+
+- Building a page that imports motion/react logs the warning KR7116 (two motion-dom modules export scrapeMotionValuesFromProps); it does not affect the result.
+
+Evidence: `TestBrowserEcosystemLibraries`, `fixture:packages/compiler/internal/build/testdata/ecosystem_libs`
 
 ## How claims are verified
 

@@ -41,6 +41,52 @@ func TestServerFeaturesBlockStaticTargets(t *testing.T) {
 	}
 }
 
+func TestEmitDockerfileCopiesTraceIncludes(t *testing.T) {
+	root := t.TempDir()
+	out := filepath.Join(root, "dist")
+	_ = os.MkdirAll(out, 0o755)
+	cfg := config.Default()
+	cfg.OutputFileTracingIncludes = map[string][]string{
+		"/api/og": {"assets/fonts/**", "workers/image.js"},
+		"*":       {"node_modules/@resvg/resvg-js-*/**", "**/*.wasm"},
+	}
+	if _, err := Emit("docker", cfg, root, out); err != nil {
+		t.Fatal(err)
+	}
+	df, _ := os.ReadFile(filepath.Join(root, "Dockerfile"))
+	text := string(df)
+	if !strings.Contains(text, `for p in 'assets/fonts' 'workers/image.js'; do`) || !strings.Contains(text, `cp -a --parents "$p" /tmp/runtime/`) {
+		t.Errorf("runtime-read files must be copied into the runtime stage:\n%s", text)
+	}
+	if strings.Contains(text, "'node_modules") {
+		t.Errorf("node_modules globs are covered by the installed packages:\n%s", text)
+	}
+	if !strings.Contains(text, `glob "**/*.wasm" has no leading directory`) {
+		t.Errorf("a glob without a leading directory must be flagged:\n%s", text)
+	}
+}
+
+// A robots.ts or sitemap.ts that runs per request needs a server: a static
+// target refuses it and names the cause instead of publishing no robots.txt.
+func TestPerRequestMetadataRoutesBlockStaticTargets(t *testing.T) {
+	root := t.TempDir()
+	out := filepath.Join(root, "dist")
+	meta := filepath.Join(out, ".krate", "api-node", "__krate_meta")
+	if err := os.MkdirAll(meta, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(meta, "robots.js"), []byte("//"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	feats := ServerFeatures(root, out)
+	if len(feats) != 1 || !strings.Contains(feats[0], "metadata routes") {
+		t.Fatalf("features = %v, want only the metadata routes", feats)
+	}
+	if _, err := Emit("gh-pages", config.Default(), root, out); err == nil || !strings.Contains(err.Error(), "metadata routes") {
+		t.Errorf("gh-pages: expected the error to name the metadata routes, got %v", err)
+	}
+}
+
 func TestEmitDockerfile(t *testing.T) {
 	root := t.TempDir()
 	out := filepath.Join(root, "dist")

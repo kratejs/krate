@@ -172,8 +172,13 @@ EXPOSE 3000
 CMD ["node", "dist/.krate/server/server.mjs"]
 ```
 
-Everything the server needs is inside the bundle, so no `node_modules` is
-required at runtime.
+Everything Krate can see is inside the bundle, so a project without native
+packages needs no `node_modules` at runtime. Packages with native addons (or
+listed in `serverExternalPackages`) stay external: the build copies them, with
+their dependencies, into `dist/.krate/server/node_modules`, and
+`outputFileTracingIncludes` copies extra files next to `server.mjs`. See
+[Self-hosting](/docs/guides/self-hosting/) for the full standalone story,
+workspace packages, process model, systemd and reverse proxies.
 
 ### What each platform really supports
 
@@ -191,6 +196,98 @@ required at runtime.
   are printed. There is no filesystem on Workers: a route or action that imports
   a Node built-in outside `nodejs_compat` (`fs`, `vm`, `child_process`, `net`...)
   **fails at bundle time** naming the module and the importing file.
+
+### Cloudflare Workers
+
+Pages, API routes, server actions and middleware reach the Worker's `env` (D1, KV,
+R2, Durable Object bindings, secrets, vars), its `ctx` and `request.cf` in either of
+two ways:
+
+```ts
+// 1. Cloudflare's own module. Krate leaves `cloudflare:*` imports external on this
+//    target, so it is the real workerd module.
+import { env } from "cloudflare:workers";
+
+export async function GET() {
+  const row = await env.DB.prepare("select 1 as ok").first();
+  return Response.json(row);
+}
+
+// 2. Krate's per-request accessor, from @krate/runtime/server.
+import { getCloudflareContext, getPlatform } from "@krate/runtime/server";
+
+const { env, ctx, cf } = getCloudflareContext();   // throws outside a Worker request
+ctx.waitUntil(logVisit(env.DB, cf?.country));
+const platform = getPlatform();                    // { target, env, ctx, cf }; env is {} off Cloudflare
+```
+
+`getPlatform()` also works on the other targets and in `krate dev` (where `env` is
+empty and `target` is `"none"`), so shared code can ask for a binding and fall back.
+Type your bindings by augmenting `KrateCloudflareEnv` from `@krate/runtime/server`.
+`after()` is backed by `ctx.waitUntil` there. Only the string bindings are copied
+into `process.env`; D1, KV, R2 and Durable Object bindings stay on `env`.
+
+`cloudflare:workers` exists only on a Worker. `krate deploy --target node`, `vercel`
+and `netlify` fail the bundle when any code imports a `cloudflare:*` module, naming
+the importing file, and `krate dev` and `krate serve` give the `env` import a stand-in
+that reads the same (empty) platform and names the missing binding when you use one.
+Bindings themselves are declared in your own `wrangler.toml` or `wrangler.jsonc`
+(`krate deploy` then leaves it alone and prints the settings it needs; the one it
+generates has no bindings).
+
+#### Cron triggers, queues, email and Durable Objects
+
+Put the extra Worker exports in `src/cloudflare.ts` (or point `deploy.worker` at another
+file). Its exports are merged into the generated Worker, which keeps Krate's `fetch`
+handler:
+
+```ts
+// src/cloudflare.ts
+import { DurableObject } from "cloudflare:workers";
+
+export class Counter extends DurableObject {            // Durable Object classes: any named class export
+  async increment() { /* ... */ }
+}
+
+export default {                                         // handlers: scheduled, queue, email, tail
+  async scheduled(controller, env, ctx) {
+    ctx.waitUntil(refreshFeeds(env));
+  },
+  async queue(batch, env) { /* ... */ },
+};
+```
+
+A named export called `scheduled`, `queue`, `email`, `tail` or `tailStream` works too.
+Handlers run with the same platform as a request, so `getCloudflareContext()` and
+`process.env` string bindings work inside them. Krate's `fetch` always wins: a
+`fetch` in this module is ignored. Name the Durable Object, queue and cron settings
+in your wrangler file:
+
+```toml
+# wrangler.toml
+[triggers]
+crons = ["*/15 * * * *"]
+
+[[durable_objects.bindings]]
+name = "COUNTER"
+class_name = "Counter"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Counter"]
+```
+
+`src/cloudflare.ts` is picked up by name; set `deploy.worker: "none"` to skip it.
+The deploy prints a note when it merges a module. A browser Web Worker in
+`src/worker.ts` is never merged.
+
+#### URL form and the 404 page
+
+`trailingSlash` (`"always"`, `"never"` or `"ignore"`, see the
+[config reference](/docs/reference/config/#trailing-slash)) is applied by the Worker
+and written into `assets.html_handling` of the generated `wrangler.jsonc`. The
+not-found page's own URLs, `/404` and `/404.html`, answer `404` (with that page) on
+every target; they are never redirected to the asset.
 
 ### Environment variables
 
@@ -397,9 +494,10 @@ the table says "client address"; a chain a visitor wrote, a `Forwarded` header o
 an `x-forwarded-host` on Netlify or Cloudflare (where nothing sets it) never
 reaches your code. Set `trustProxy: true` only when a proxy of yours sits in front
 of the platform and sets those headers; `trustedProxies` applies to `krate start`
-and the Node target, not to the serverless platforms. The Node target
+only, not to the serverless platforms or the Node target. The Node target
 (`server.mjs`) trusts forwarded headers only with `trustProxy: true`, like
-`krate start`. The platform headers above come from each platform's
+`krate start`, but passes `x-forwarded-for` on as the proxy delivered it (see
+[Self-hosting](/docs/guides/self-hosting/#behind-a-reverse-proxy)). The platform headers above come from each platform's
 documentation; Netlify does not document `x-nf-client-connection-ip` on the page
 about functions, so check that header on your site before you rely on it.
 
@@ -419,6 +517,20 @@ one instance wrote is accepted by the others. When it is not set:
 - Vercel, Netlify and Cloudflare carry no flash state at all (the action still
   redirects, and the server logs a warning once), because serverless instances
   share no memory and a per-instance key would make the notice appear at random.
+
+### Inline action secret
+
+[Inline server actions](/docs/guides/server-actions/#inline-actions) that close
+over values seal those values with AES-256-GCM. Set `KRATE_ACTION_SECRET` (at
+least 16 characters, the same on every instance) so tokens survive a rebuild and
+open on any replica. The key is a secret and is never written into a deploy
+bundle: a deployed server (`krate deploy`, Vercel, Netlify, the Node bundle)
+reads it only from `KRATE_ACTION_SECRET` and rejects submissions without it, and
+the deploy plan warns when your project has inline actions that capture values.
+Only local `krate dev`, `krate serve` and `krate start` fall back to a key kept in
+`.krate/action-key` (copied into `.krate/actions/manifest.json`, never into
+`dist/`). The server renderer that seals the values needs Node built-ins, so
+inline actions that capture values are not available on the Cloudflare target.
 
 ### Health & readiness
 

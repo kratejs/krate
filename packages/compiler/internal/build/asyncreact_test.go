@@ -1,0 +1,298 @@
+package build
+
+import (
+	"encoding/json"
+	"io"
+	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// linkReactPackages makes the examples' real lucide-react and radix-ui
+// packages (and the helpers shadcn components use) resolvable from a test
+// project, skipping when the examples are not installed.
+func linkReactPackages(t *testing.T, root string) {
+	t.Helper()
+	repo, err := repoRootPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(repo, "examples", "node_modules")
+	if _, err := os.Stat(filepath.Join(src, "lucide-react")); err != nil {
+		requireE2E(t, "examples dependencies not installed: %v", err)
+		t.Skip("examples dependencies not installed")
+	}
+	for _, name := range []string{"lucide-react", "radix-ui"} {
+		if err := os.Symlink(filepath.Join(src, name), filepath.Join(root, "node_modules", name)); err != nil {
+			t.Skipf("cannot link %s: %v", name, err)
+		}
+	}
+}
+
+// shadcnCheckbox is a shadcn-style wrapper: a plain module (no "use client")
+// that renders a Radix primitive.
+const shadcnCheckbox = `import * as React from "react"
+import { Checkbox as CheckboxPrimitive } from "radix-ui"
+
+function Checkbox({ ...props }: React.ComponentProps<typeof CheckboxPrimitive.Root>) {
+  return (
+    <CheckboxPrimitive.Root data-slot="checkbox" {...props}>
+      <CheckboxPrimitive.Indicator>v</CheckboxPrimitive.Indicator>
+    </CheckboxPrimitive.Root>
+  )
+}
+export { Checkbox }
+`
+
+// asyncReactProject is a project whose async page renders compiled React
+// components: an icon (stateless), a Radix checkbox, a Radix dialog (compound)
+// and the global Link.
+func asyncReactProject(t *testing.T) (*Builder, string) {
+	t.Helper()
+	b, root := scProject(t, map[string]string{
+		"src/components/checkbox.tsx": shadcnCheckbox,
+		"src/components/icons.ts":     `export { Check } from "lucide-react";`,
+		"src/components/switch.tsx": `import * as Radix from "radix-ui";
+export function Switch(props: any) {
+  return <Radix.Switch.Root {...props}><Radix.Switch.Thumb /></Radix.Switch.Root>;
+}`,
+		"src/pages/index.tsx": `import { Loader2 } from "lucide-react";
+import { Dialog } from "radix-ui";
+import { Checkbox } from "../components/checkbox";
+import { Check } from "../components/icons";
+import { Switch } from "../components/switch";
+
+export default async function Home() {
+  const who = await Promise.resolve("ada");
+  return (
+    <main>
+      <p id="who">hello {who}</p>
+      <Loader2 id="spinner" />
+      <Checkbox id="cb" />
+      <Check id="check" />
+      <Switch id="sw" />
+      <Dialog.Root>
+        <Dialog.Trigger id="open">Open</Dialog.Trigger>
+        <Dialog.Portal>
+          <Dialog.Content>
+            <Dialog.Title>Hello dialog</Dialog.Title>
+            <Dialog.Description>Dialog body</Dialog.Description>
+            <Dialog.Close id="close">Close</Dialog.Close>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+      <Link href="/other">other</Link>
+    </main>
+  );
+}`,
+	})
+	withPreact(t, root)
+	linkReactPackages(t, root)
+	e2eEnv(t)
+	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
+		t.Fatal(err)
+	}
+	return b, root
+}
+
+func getBody(t *testing.T, url string) (int, http.Header, string) {
+	t.Helper()
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	resp, err := client.Get(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, resp.Header, string(data)
+}
+
+// TestAsyncPageRendersCompiledReactComponents is the KR8013 case of the gap
+// report: an async page uses a lucide-react icon, a shadcn-style Radix
+// checkbox and Radix dialog parts, and the global Link. The icon is plain
+// HTML, the stateful components are islands rendered by the server first.
+func TestAsyncPageRendersCompiledReactComponents(t *testing.T) {
+	b, root := asyncReactProject(t)
+	if err := b.BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	base, err := startKrateServer(t, root, b.Cfg)
+	if err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+	status, _, html := getBody(t, base+"/")
+	if status != 200 {
+		t.Fatalf("status %d:\n%s", status, html)
+	}
+	if strings.Contains(html, "[object Object]") {
+		t.Fatalf("a compiled component rendered as a tag name:\n%s", html)
+	}
+	for _, want := range []string{
+		`hello ada`,
+		`<svg `, `id="spinner"`, `lucide-loader-circle`,
+		`role="checkbox"`, `data-slot="checkbox"`, `role="switch"`, `id="check"`,
+		`<a href="/other" data-krate-link data-prefetch>other</a>`,
+		`id="open"`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("response is missing %q:\n%s", want, html)
+		}
+	}
+	// The icon is not inside an island: it needs no JavaScript.
+	if i := strings.Index(html, `id="spinner"`); i < 0 || strings.LastIndex(html[:i], "<krate-island") > strings.LastIndex(html[:i], "</krate-island>") {
+		t.Errorf("the stateless icon must not be wrapped in an island:\n%s", html)
+	}
+	// The checkbox, the switch and the dialog are islands, and the dialog
+	// parts share one.
+	if n := strings.Count(html, "<krate-island"); n != 3 {
+		t.Errorf("expected 3 islands (checkbox, switch, dialog), got %d:\n%s", n, html)
+	}
+}
+
+// TestCompiledReactComponentsBrowser hydrates the page above in a browser:
+// the Radix checkbox toggles, the dialog opens through its trigger (the
+// trigger and the content share the dialog's context) and closes again.
+func TestCompiledReactComponentsBrowser(t *testing.T) {
+	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
+	if browser == "" {
+		t.Skip("set KRATE_BROWSER=chromium|firefox|webkit to run the compiled island browser test")
+	}
+	if err := exec.Command("node", "-e", "require.resolve('playwright')").Run(); err != nil {
+		requireE2E(t, "playwright is not installed (run pnpm install)")
+	}
+	b, root := asyncReactProject(t)
+	if err := b.BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	base, err := startKrateServer(t, root, b.Cfg)
+	if err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+	script, err := filepath.Abs(filepath.Join("testdata", "compiled_island_click.mjs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("node", script, base+"/", browser).CombinedOutput()
+	if err != nil {
+		if strings.Contains(string(out), "Executable doesn't exist") {
+			requireE2E(t, "%s browser is not installed: %s", browser, out)
+		}
+		t.Fatalf("browser script failed: %v\n%s", err, out)
+	}
+	var res struct {
+		Before, After, Title string
+		IconInIsland         bool
+		IconCount            int
+		Errors               []string
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &res); err != nil {
+		t.Fatalf("parsing browser output: %v\n%s", err, out)
+	}
+	if res.Before != "false" || res.After != "true" || res.Title != "Hello dialog" || res.IconInIsland || res.IconCount != 2 || len(res.Errors) > 0 {
+		t.Fatalf("unexpected browser result: %+v", res)
+	}
+}
+
+// TestAsyncLayouts covers R3: an async layout awaits data and renders its
+// children for an async page and a synchronous one; a nested async layout
+// gates its subtree with redirect(); pages outside stay static.
+func TestAsyncLayouts(t *testing.T) {
+	b, root := scProject(t, map[string]string{
+		"src/pages/app/_layout.tsx": `import { Loader2 } from "lucide-react";
+export default async function Layout({ children }: any) {
+  const user = await Promise.resolve({ name: "ada" });
+  return <div class="shell"><nav>hello {user.name} <Link href="/about">about</Link> <Loader2 /></nav>{children}</div>;
+}`,
+		"src/pages/app/index.tsx": `export default function Page() { return <main>app home</main>; }`,
+		"src/pages/app/data.tsx":  `export default async function Page() { await Promise.resolve(); return <main>app data</main>; }`,
+		"src/pages/app/admin/_layout.tsx": `import { redirect } from "@krate/runtime/server";
+export default async function Layout({ children }: any) {
+  const role = await Promise.resolve("guest");
+  if (role !== "admin") redirect("/app");
+  return <section>{children}</section>;
+}`,
+		"src/pages/app/admin/index.tsx": `export default function Page() { return <main>admin</main>; }`,
+		"src/pages/about.tsx":           `export default function Page() { return <main id="about">about page</main>; }`,
+	})
+	withPreact(t, root)
+	linkReactPackages(t, root)
+	e2eEnv(t)
+	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	m := readManifest(t, root)
+	if p, ok := manifestPage(m, "/about"); !ok || p.Mode != RenderSSG {
+		t.Errorf("a page outside the async layout must stay static, got %+v (found %v)", p, ok)
+	}
+	if static, err := os.ReadFile(filepath.Join(root, "dist", "about", "index.html")); err != nil || !strings.Contains(string(static), "about page") {
+		t.Errorf("the static page must be baked into its file: %v", err)
+	}
+	base, err := startKrateServer(t, root, b.Cfg)
+	if err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+	for _, path := range []string{"/app/", "/app/data/"} {
+		status, _, html := getBody(t, base+path)
+		if status != 200 || !strings.Contains(html, `<nav>hello ada <a href="/about" data-krate-link data-prefetch>about</a> <svg `) {
+			t.Errorf("%s: status %d, the async layout did not render around the page:\n%s", path, status, html)
+		}
+	}
+	if _, _, html := getBody(t, base+"/app/"); !strings.Contains(html, "app home") {
+		t.Errorf("the layout dropped its children:\n%s", html)
+	}
+	status, header, html := getBody(t, base+"/app/admin/")
+	if status != 302 && status != 307 || header.Get("Location") != "/app" {
+		t.Errorf("the nested layout must redirect a guest: status %d location %q\n%s", status, header.Get("Location"), html)
+	}
+	if strings.Contains(html, "admin") {
+		t.Errorf("the gated page must not render:\n%s", html)
+	}
+}
+
+// TestStatelessCompiledComponentsShipNoIslandJS: a page whose compiled
+// components are all stateless (an icon) loads no island JavaScript, and an
+// async child component of a static page renders a compiled component too.
+func TestStatelessCompiledComponentsShipNoIslandJS(t *testing.T) {
+	b, root := scProject(t, map[string]string{
+		"src/components/UserNav.tsx": `import { Loader2 } from "lucide-react";
+export async function UserNav() {
+  const name = await Promise.resolve("ada");
+  return <nav id="nav">{name} <Loader2 /></nav>;
+}`,
+		"src/pages/index.tsx": `import { UserNav } from "../components/UserNav";
+export default function Home() { return <main><h1>static home</h1><UserNav /></main>; }`,
+		"src/pages/only.tsx": `import { Loader2 } from "lucide-react";
+export default async function Only() { await Promise.resolve(); return <main><Loader2 id="only" /></main>; }`,
+	})
+	withPreact(t, root)
+	linkReactPackages(t, root)
+	e2eEnv(t)
+	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	base, err := startKrateServer(t, root, b.Cfg)
+	if err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+	_, _, only := getBody(t, base+"/only/")
+	if !strings.Contains(only, `id="only"`) || !strings.Contains(only, "<svg ") {
+		t.Errorf("the icon did not render:\n%s", only)
+	}
+	if strings.Contains(only, "krate-island") || strings.Contains(only, "island-loader") {
+		t.Errorf("a stateless icon must ship no island code:\n%s", only)
+	}
+	_, _, home := getBody(t, base+"/")
+	if !strings.Contains(home, "static home") || !strings.Contains(home, `<nav id="nav">ada <svg `) {
+		t.Errorf("the async child of a static page did not render its icon:\n%s", home)
+	}
+}

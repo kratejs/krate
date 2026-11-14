@@ -13,6 +13,23 @@ import (
 	"sync"
 )
 
+type regionURLKey struct{}
+
+// withRegionURL makes a region render see url as the request URL instead of its
+// route. A request-time segment page (404) renders for the URL that missed, not
+// for its own synthetic route.
+func withRegionURL(ctx context.Context, url string) context.Context {
+	return context.WithValue(ctx, regionURLKey{}, url)
+}
+
+// regionURL is the URL a region render receives for route.
+func regionURL(ctx context.Context, route string) string {
+	if u, ok := ctx.Value(regionURLKey{}).(string); ok && u != "" {
+		return u
+	}
+	return route
+}
+
 type regionFrameEvent struct {
 	frame regionFrame
 	err   error
@@ -152,7 +169,7 @@ func streamSiblingRegions(ctx context.Context, w http.ResponseWriter, flusher ht
 func streamNodeRegionEvents(ctx context.Context, ssrPort int, route string, params, query, headers map[string]string, regionList []map[string]string, internalSecret string, out chan<- regionFrameEvent) {
 	reqBody, _ := json.Marshal(map[string]interface{}{
 		"route":   route,
-		"url":     route,
+		"url":     regionURL(ctx, route),
 		"method":  "GET",
 		"headers": headers,
 		"params":  params,

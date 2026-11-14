@@ -14,6 +14,8 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/deploy"
 	"github.com/kratejs/krate/packages/compiler/internal/fsutil"
 	"github.com/kratejs/krate/packages/compiler/internal/gohost"
+	"github.com/kratejs/krate/packages/compiler/internal/jseval"
+	"github.com/kratejs/krate/packages/compiler/internal/pluginapi"
 )
 
 // serverDeployDir holds the generated server entries under <out>/.krate.
@@ -141,6 +143,8 @@ type handlerConfig struct {
 	Security        handlerSecurity     `json:"security"`
 	CORS            handlerCORS         `json:"cors"`
 	SSR             handlerSSR          `json:"ssr"`
+	// TrailingSlash is trailingSlash: "always", "never" or "ignore".
+	TrailingSlash string `json:"trailingSlash"`
 	// Cache is the shared cache setting without its URL: the bundle never
 	// contains a secret, the URL comes from the environment at run time.
 	Cache *handlerCache `json:"cache,omitempty"`
@@ -200,6 +204,7 @@ func buildHandlerConfig(cfg *config.Config) handlerConfig {
 	c := cfg.CORS
 	hc := handlerConfig{
 		BasePath:        cfg.BaseURLPath(),
+		TrailingSlash:   cfg.TrailingSlashMode(),
 		TrustProxy:      trustProxyOf(cfg),
 		MaxBodyBytes:    cfg.MaxBodyBytes(),
 		MaxAPIBodyBytes: cfg.MaxAPIBodyBytes(),
@@ -268,6 +273,8 @@ type serverData struct {
 	SegmentPages    map[string]string         `json:"segmentPages"`
 	StaticPages     map[string]string         `json:"staticPages,omitempty"`
 	APIRoutes       []string                  `json:"apiRoutes"`
+	APIMaxDuration  map[string]int            `json:"apiMaxDuration,omitempty"`
+	MetaRoutes      []metaRouteEntry          `json:"metaRoutes,omitempty"`
 	Actions         []actionEntry             `json:"actions"`
 	HasMiddleware   bool                      `json:"hasMiddleware"`
 }
@@ -279,6 +286,9 @@ type serverPage struct {
 	BundlePath       string `json:"bundlePath"`
 	ServerComponents bool   `json:"serverComponents,omitempty"`
 	SegDir           string `json:"segDir"`
+	// Segment marks a segment page rendered per request; it is addressed by
+	// its synthetic route and never matched against a URL.
+	Segment bool `json:"segment,omitempty"`
 }
 
 type serverRegion struct {
@@ -442,7 +452,7 @@ func BuildServerBundle(root string, cfg *config.Config, target string) (*deploy.
 
 	pageMods := &strings.Builder{}
 	for _, p := range sm.Pages {
-		data.Pages = append(data.Pages, serverPage{Route: p.Route, Mode: p.Mode, Revalidate: p.Revalidate, BundlePath: p.BundlePath, ServerComponents: p.ServerComponents, SegDir: p.SegDir})
+		data.Pages = append(data.Pages, serverPage{Route: p.Route, Mode: p.Mode, Revalidate: p.Revalidate, BundlePath: p.BundlePath, ServerComponents: p.ServerComponents, SegDir: p.SegDir, Segment: p.Segment})
 		rel := strings.Trim(strings.TrimPrefix(p.Route, "/"), "/")
 		shellPath := filepath.Join(outDir, filepath.FromSlash(rel), "index.html")
 		if rel == "" {
@@ -503,6 +513,17 @@ func BuildServerBundle(root string, cfg *config.Config, target string) (*deploy.
 	if err != nil {
 		return nil, fmt.Errorf("scanning API routes: %w", err)
 	}
+	// Per-request metadata routes (robots.ts, sitemap.ts) are API routes whose
+	// generated entry lives under .krate/gen; the handler maps their URLs.
+	for _, e := range loadMetaRoutes(outDir) {
+		keys[e.Key] = filepath.Join(root, filepath.FromSlash(e.Source))
+		data.MetaRoutes = append(data.MetaRoutes, e)
+		if e.Path != "" {
+			plan.ServerPaths = append(plan.ServerPaths, e.Path)
+		} else {
+			plan.ServerPaths = append(plan.ServerPaths, e.Prefix+"*")
+		}
+	}
 	apiKeys := make([]string, 0, len(keys))
 	for k := range keys {
 		apiKeys = append(apiKeys, k)
@@ -510,6 +531,18 @@ func BuildServerBundle(root string, cfg *config.Config, target string) (*deploy.
 	sort.Strings(apiKeys)
 	for _, k := range apiKeys {
 		data.APIRoutes = append(data.APIRoutes, k)
+		if secs, warns := readAPIMaxDuration(keys[k]); secs > 0 || len(warns) > 0 {
+			printWarningsOnce(os.Stderr, warns)
+			if secs > 0 {
+				if data.APIMaxDuration == nil {
+					data.APIMaxDuration = map[string]int{}
+				}
+				data.APIMaxDuration[k] = secs
+				if secs > plan.MaxDuration {
+					plan.MaxDuration = secs
+				}
+			}
+		}
 		id := ident("api")
 		fmt.Fprintf(imports, "import * as %s from %s;\n", id, jsString(filepath.ToSlash(keys[k])))
 		fmt.Fprintf(apiMods, "  %s: %s,\n", jsString(k), id)
@@ -521,6 +554,13 @@ func BuildServerBundle(root string, cfg *config.Config, target string) (*deploy.
 		var am actionManifest
 		if json.Unmarshal(b, &am) == nil {
 			data.Actions = append(data.Actions, am.Actions...)
+			for _, a := range am.Actions {
+				if a.Inline && len(a.Captures) > 0 {
+					// The sealing key is a secret: it is never written into the bundle.
+					plan.Warnings = append(plan.Warnings, "inline server actions that capture values seal them with a key that is not written into the bundle; set KRATE_ACTION_SECRET (at least 16 characters) in the deployment's environment, the same on every instance")
+					break
+				}
+			}
 			seen := map[string]bool{}
 			for _, a := range am.Actions {
 				if seen[a.File] {
@@ -602,13 +642,25 @@ func BuildServerBundle(root string, cfg *config.Config, target string) (*deploy.
 		pageMods.String(), runtimeMods.String(), apiMods.String(), actionMods.String(), mwExpr)
 	fmt.Fprintf(body, "%s\nconst data = %s;\nconst __cache = %s;\n", modules, string(dataJSON), cacheExpr)
 
-	entry := serverEntry(target, imports.String(), body.String())
+	plan.TrailingSlash = cfg.TrailingSlashMode()
+	workerModule, err := workerModuleFor(root, cfg, target, plan)
+	if err != nil {
+		return nil, err
+	}
+	plan.WorkerModule = workerModule
+	entry := serverEntry(target, imports.String(), body.String(), workerModule)
 	outFile := filepath.Join(outDir, ".krate", serverDeployDir, serverEntryName(target))
 	if err := os.MkdirAll(filepath.Dir(outFile), 0755); err != nil {
 		return nil, err
 	}
-	if err := bundleServerEntry(root, cfg, target, entry, outFile); err != nil {
+	externals, err := bundleServerEntry(root, cfg, target, entry, outFile)
+	if err != nil {
 		return nil, err
+	}
+	if target == "node" {
+		if err := traceNodeServer(root, cfg, filepath.Dir(outFile), externals, plan); err != nil {
+			return nil, err
+		}
 	}
 	plan.Bundle = outFile
 	return plan, nil
@@ -705,7 +757,7 @@ func serverEntryName(target string) string {
 }
 
 // serverEntry generates the bundle entry for a target.
-func serverEntry(target, imports, body string) string {
+func serverEntry(target, imports, body, workerModule string) string {
 	var b strings.Builder
 	b.WriteString("// Generated by `krate deploy`. Do not edit.\n")
 	b.WriteString(imports)
@@ -736,24 +788,96 @@ export default async (request, context) => handler(request, { waitUntil: context
 		// Workers do not rewrite a client's X-Forwarded-Host/Proto and request.url
 		// is already the public URL, so forwarded headers are trusted only when
 		// server.trustProxy says a proxy of yours sits in front of the Worker.
-		b.WriteString("import { createKrateHandler } from '@krate/runtime/server-handler';\nimport { createAssetsStaticLayer } from '@krate/runtime/assets-static';\n")
+		b.WriteString("import { createKrateHandler, runWithPlatform } from '@krate/runtime/server-handler';\nimport { createAssetsStaticLayer } from '@krate/runtime/assets-static';\n")
+		namedExports, defaultExport := "{}", "undefined"
+		if workerModule != "" {
+			fmt.Fprintf(&b, "import * as __worker from %s;\nexport * from %s;\n", jsString(workerModule), jsString(workerModule))
+			namedExports, defaultExport = "__worker", "__worker.default"
+		}
 		b.WriteString(body)
+		fmt.Fprintf(&b, "const __WORKER_NAMED__ = %s;\nconst __WORKER_DEFAULT__ = %s;\n", namedExports, defaultExport)
 		b.WriteString(`let handler;
+let __ready = false;
+const __handlerNames = ['scheduled', 'queue', 'email', 'tail', 'tailStream', 'trace', 'test'];
+const __ctxOf = (ctx) => ({
+  waitUntil: (p) => { if (ctx && ctx.waitUntil) ctx.waitUntil(p); },
+  passThroughOnException: ctx && ctx.passThroughOnException ? () => ctx.passThroughOnException() : undefined,
+});
+function __init(env) {
+  if (__ready) return;
+  __ready = true;
+  // Bindings that are plain strings become process.env (secrets and vars).
+  const proc = globalThis.process || (globalThis.process = { env: {} });
+  proc.env = proc.env || {};
+  for (const [k, v] of Object.entries(env || {})) if (typeof v === 'string' && !(k in proc.env)) proc.env[k] = v;
+}
+// Handlers from the worker module run with the same platform as a request.
+const __wrap = (fn) => function (event, env, ctx) {
+  __init(env);
+  return runWithPlatform('cloudflare', { env, ...__ctxOf(ctx) }, () => fn.call(this, event, env, ctx));
+};
+const __extra = {};
+if (typeof __WORKER_DEFAULT__ === 'function') throw new Error('krate: the default export of the worker module must be an object of handlers ({ scheduled, queue, email }), not a class or function');
+const __own = __WORKER_DEFAULT__ || {};
+for (const name of __handlerNames) {
+  const fn = typeof __WORKER_NAMED__[name] === 'function' ? __WORKER_NAMED__[name] : typeof __own[name] === 'function' ? __own[name] : null;
+  if (fn) __extra[name] = __wrap(fn);
+}
 export default {
+  ...__extra,
   async fetch(request, env, ctx) {
+    __init(env);
     if (!handler) {
-      // Bindings that are plain strings become process.env (secrets and vars).
-      const proc = globalThis.process || (globalThis.process = { env: {} });
-      proc.env = proc.env || {};
-      for (const [k, v] of Object.entries(env || {})) if (typeof v === 'string' && !(k in proc.env)) proc.env[k] = v;
-      handler = createKrateHandler({ target: 'cloudflare', data, modules, cache: __cache, static: env && env.ASSETS ? createAssetsStaticLayer(env.ASSETS) : undefined });
+      handler = createKrateHandler({ target: 'cloudflare', data, modules, cache: __cache, static: env && env.ASSETS ? createAssetsStaticLayer(env.ASSETS, { directoryIndex: data.config.trailingSlash === 'ignore' }) : undefined });
     }
-    return handler(request, { waitUntil: (p) => ctx.waitUntil(p) });
+    return handler(request, { ...__ctxOf(ctx), env, cf: request.cf });
   },
 };
 `)
 	}
 	return b.String()
+}
+
+// workerModuleNames are the file names, under src/, that carry the exports
+// merged into the Cloudflare Worker (see workerModuleFor).
+var workerModuleNames = []string{"cloudflare.ts", "cloudflare.mts", "cloudflare.js", "cloudflare.mjs"}
+
+// workerModuleFor finds the module whose exports are merged into the
+// Cloudflare Worker: deploy.worker, or src/cloudflare.ts (.mts, .js, .mjs)
+// when it exists. The default is not src/worker.ts, which usually holds a
+// browser Web Worker. It returns "" on other targets and when there is none.
+func workerModuleFor(root string, cfg *config.Config, target string, plan *deploy.ServerPlan) (string, error) {
+	want := strings.TrimSpace(cfg.Deploy.Worker)
+	if want == "none" {
+		return "", nil
+	}
+	if target != "cloudflare" {
+		if want != "" {
+			plan.Warnings = append(plan.Warnings, fmt.Sprintf("deploy.worker (%s) only applies to the cloudflare target; it is ignored for %s", want, target))
+		}
+		return "", nil
+	}
+	if want != "" {
+		abs := filepath.Join(root, filepath.FromSlash(want))
+		if filepath.IsAbs(want) {
+			abs = filepath.Clean(want)
+		}
+		if !pluginapi.WithinRootEval(root, abs) {
+			return "", fmt.Errorf("deploy.worker %q is outside the project root", want)
+		}
+		if !regularFileExists(abs) {
+			return "", fmt.Errorf("deploy.worker %q does not exist (looked for %s); point it at the module that exports scheduled, queue, email or Durable Object classes", want, abs)
+		}
+		return filepath.ToSlash(abs), nil
+	}
+	for _, name := range workerModuleNames {
+		abs := filepath.Join(root, "src", name)
+		if regularFileExists(abs) {
+			plan.Warnings = append(plan.Warnings, fmt.Sprintf("merging the exports of src/%s into the Worker (set deploy.worker to another file, or \"none\" to skip it)", name))
+			return filepath.ToSlash(abs), nil
+		}
+	}
+	return "", nil
 }
 
 // resolveRuntimePackage locates @krate/runtime the way page bundles resolve it.
@@ -856,6 +980,30 @@ func builtinGuardPlugin(target string) api.Plugin {
 	}
 }
 
+// cloudflareModulesPlugin decides what `cloudflare:*` imports become in the
+// deploy bundle. Earlier build passes leave `cloudflare:workers` as the
+// runtime shim specifier (jseval.CloudflareShimSpecifier) and other
+// `cloudflare:` modules external. On the cloudflare target they all resolve to
+// the real workerd modules; any other target fails the bundle, naming the
+// importer, because the module does not exist there.
+func cloudflareModulesPlugin(root, target string) api.Plugin {
+	return api.Plugin{
+		Name: "krate-cloudflare-modules",
+		Setup: func(b api.PluginBuild) {
+			b.OnResolve(api.OnResolveOptions{Filter: `^(cloudflare:.+|@krate/runtime/cloudflare-workers)$`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+				name := args.Path
+				if name == jseval.CloudflareShimSpecifier {
+					name = "cloudflare:workers"
+				}
+				if target == "cloudflare" {
+					return api.OnResolveResult{Path: name, External: true}, nil
+				}
+				return api.OnResolveResult{}, fmt.Errorf("%q is imported by %s, but it exists only on the cloudflare target (this deploy is for %s): Cloudflare bindings are not available there. Read them through getPlatform() from @krate/runtime/server in code that also runs elsewhere, or deploy with --target cloudflare", name, relOr(root, args.Importer), target)
+			})
+		},
+	}
+}
+
 // nodeOnlyRuntimeModules are @krate/runtime files that need Node built-ins and
 // are reached only through dynamic imports: the Redis cache adapter (node:net,
 // node:tls via resp.js) and the ImageResponse local image reader (node:fs).
@@ -895,10 +1043,13 @@ func pathWithin(dir, p string) bool {
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
-func bundleServerEntry(root string, cfg *config.Config, target, entry, outFile string) error {
+// bundleServerEntry bundles the generated entry. For the node target it also
+// returns the packages left external, which must be installed next to the
+// bundle (see serverTrace).
+func bundleServerEntry(root string, cfg *config.Config, target, entry, outFile string) ([]string, error) {
 	rt, err := runtimePlugin(root)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	entry = strings.NewReplacer("__SHUTDOWN__", fmt.Sprint(cfg.Server.ShutdownTimeout), "__PORT__", fmt.Sprint(cfg.ServerPort())).Replace(entry)
 	opts := api.BuildOptions{
@@ -909,7 +1060,7 @@ func bundleServerEntry(root string, cfg *config.Config, target, entry, outFile s
 		Outfile:       outFile,
 		Write:         true,
 		LogLevel:      api.LogLevelSilent,
-		Plugins:       []api.Plugin{rt, builtinGuardPlugin(target)},
+		Plugins:       []api.Plugin{cloudflareModulesPlugin(root, target), rt, jseval.MarkerPackagesPlugin(), builtinGuardPlugin(target)},
 		Stdin: &api.StdinOptions{
 			Loader:     api.LoaderJS,
 			Contents:   entry,
@@ -938,7 +1089,20 @@ func bundleServerEntry(root string, cfg *config.Config, target, entry, outFile s
 		}
 		opts.Banner = map[string]string{"js": "import { createRequire as __krateCreateRequire } from 'node:module'; const require = __krateCreateRequire(" + anchor + ");"}
 	}
-	res := esbuildBuild(opts)
+	opts.Metafile = true
+	var res api.BuildResult
+	var detected []string
+	if target == "node" {
+		res, detected = buildExternalizingNative(opts, cfg.ServerExternalPackages)
+	} else {
+		opts.Plugins = append(opts.Plugins, nativeAddonPlugin(&nativeAddons{}, func(pkg, file string) string {
+			if pkg == "" {
+				return fmt.Sprintf("%s is a native addon and cannot be bundled for %s", file, target)
+			}
+			return fmt.Sprintf("package %q contains a native addon (%s), which the %s target cannot run: it bundles all code into one file. Deploy with --target node or docker (they keep native packages in node_modules)", pkg, filepath.Base(file), target)
+		}))
+		res = esbuildBuild(opts)
+	}
 	if len(res.Errors) > 0 {
 		var msgs []string
 		for _, e := range res.Errors {
@@ -948,7 +1112,47 @@ func bundleServerEntry(root string, cfg *config.Config, target, entry, outFile s
 			}
 			msgs = append(msgs, m)
 		}
-		return fmt.Errorf("server bundle for %s failed:\n  %s", target, strings.Join(msgs, "\n  "))
+		return nil, fmt.Errorf("server bundle for %s failed:\n  %s", target, strings.Join(msgs, "\n  "))
+	}
+	if target != "node" {
+		return nil, nil
+	}
+	pkgs := map[string]bool{}
+	for _, p := range externalPackagesFromMetafile(res.Metafile) {
+		pkgs[p] = true
+	}
+	for _, p := range append(detected, cfg.ServerExternalPackages...) {
+		pkgs[p] = true
+	}
+	out := make([]string, 0, len(pkgs))
+	for p := range pkgs {
+		out = append(out, p)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// traceNodeServer makes the node target's server directory self-contained: the
+// packages the bundle imports at run time go into node_modules next to
+// server.mjs, and the outputFileTracingIncludes files are copied beside it.
+func traceNodeServer(root string, cfg *config.Config, serverDir string, externals []string, plan *deploy.ServerPlan) error {
+	nm := filepath.Join(serverDir, "node_modules")
+	if err := os.RemoveAll(nm); err != nil {
+		return err
+	}
+	if len(externals) > 0 {
+		tr := newServerTrace(nm)
+		tr.AddPackages(root, externals)
+		plan.Warnings = append(plan.Warnings, tr.Warnings...)
+	}
+	if len(cfg.OutputFileTracingIncludes) > 0 {
+		_, unmatched, err := copyTraceIncludes(root, cfg.OutputFileTracingIncludes, serverDir)
+		if err != nil {
+			return err
+		}
+		for _, g := range unmatched {
+			plan.Warnings = append(plan.Warnings, fmt.Sprintf("outputFileTracingIncludes %q matched no files under %s", g, root))
+		}
 	}
 	return nil
 }

@@ -270,7 +270,7 @@ A map callback returns a keyed element on some paths and an unkeyed one on other
 
 **Inline "use server" function**
 
-React allows a "use server" directive at the top of an async function inside a component. Krate only supports file-level server actions: move the function into a module whose first statement is "use server", export it, and import it where the form uses it.
+A "use server" directive at the top of a function inside a component is hoisted into a server action. It is rejected inside a "use client" module, in a class, when it uses this, and when it captures values from a component that is not async (captured values are sent to the browser encrypted and need a per-request render). Move the function into a module whose first statement is "use server" and import it, or declare it inside an async server component.
 
 ### KR7002
 
@@ -288,13 +288,13 @@ A form whose action is a useActionState dispatch around a server action still po
 
 **"use server" module exports a non-function**
 
-Every export of a "use server" module becomes a public endpoint and must be an async function.
+Every export of a "use server" module becomes a public endpoint and must be a function. An export built by a wrapper call (export const save = createAction(...)) is accepted and checked when the module loads; a literal, object, array or class can never be an action and is rejected at build time.
 
 ### KR7005
 
-**"use server" module re-exports another module**
+**"use server" module uses a star re-export**
 
-Re-exports cannot be bundled as server actions. Import the function and re-declare it as an export.
+A star re-export (export * or export * as) cannot be turned into named endpoints. Re-export the actions by name: export { save } from "./other".
 
 ### KR7006
 
@@ -304,9 +304,9 @@ The import names an export that the "use server" module does not declare.
 
 ### KR7101
 
-**Async layouts are not supported**
+**Async layout cannot be used here**
 
-Layouts are baked into the static page shell at build time, so they cannot await data. Keep the layout synchronous and move the data fetching into an async child component (a server component), which renders per request.
+An async layout renders per request in the SSR sidecar, with the page and the layouts inside it, instead of being baked into the static shell. It can await data and gate its subtree with redirect() or notFound(). It cannot sit above a template.tsx or error.tsx in the same route (they hydrate in the browser), and a layout that is baked at build time for another reason (an intercepting or segment route) cannot be async. Move the template or error boundary above the async layout, or make the layout synchronous and fetch data in an async child component.
 
 ### KR7102
 
@@ -439,6 +439,12 @@ An `opengraph-image` or `twitter-image` file inside a dynamic segment (`blog/[sl
 **A metadata file replaces a plugin or config output**
 
 `sitemap.ts` or `robots.ts` defines the file, so the sitemap or robots plugin (and the `robots` and `seo` config that feed it) did not write its own. The metadata file wins. Remove one of them to silence this warning. This is a warning.
+
+### KR7134
+
+**dynamic or revalidate on a metadata route that cannot run per request**
+
+A `sitemap.ts`, `robots.ts` or `manifest.ts` that exports `dynamic = "force-dynamic"` or a `revalidate` runs per request on the server. This one sits in a dynamic segment (`blog/[slug]/`), where a per-request route has no URL to answer, so it still runs once at build time and the export is ignored. Move the file to a static directory or remove the export. This is a warning.
 
 ### KR7140
 
@@ -1002,9 +1008,9 @@ The compiler could not compute the value of this expression while building the p
 
 ### KR8013
 
-**React library hook used where no island can run it**
+**React library component or hook used where no island can run it**
 
-A component calls a hook of an npm React library (zustand, react-hook-form, swr, @tanstack/react-query, ...). Those hooks need React's render model, which Krate's lowered components do not have, so Krate runs the module that calls them as a Preact island. That is not possible for a layout or template, or for a server or runtime tier component. Move the component into its own module and render it from a page or client component, or replace the library with createSignal / createResource.
+A component calls a hook of an npm React library (zustand, react-hook-form, swr, @tanstack/react-query, ...), or a static layout renders a compiled React component. Those need React's render model, which Krate's lowered components do not have, so Krate runs them on Preact: as an island in a page, and as a client boundary in a server-rendered page, layout or component (icons and other components without state render to plain HTML). A hook cannot be called from a server component: add "use client" to the module that calls it, or replace the library with createSignal / createResource. A layout that is baked into the static shell cannot host compiled components: make it async so it renders per request, or render them from a page.
 
 ### KR8014
 
@@ -1022,7 +1028,7 @@ A layout wraps `{children}` in a component of a React library (a `QueryClientPro
 
 **Layout provider renders markup around its children**
 
-A component a layout wraps around `{children}` renders elements of its own, so it is not a context provider that can be moved into the islands: Krate renders the page content, and an island cannot sit inside markup that belongs to the layout. The layout keeps the component as it was and the islands of its pages do not see its context. Split the component into a provider that renders only its children and the markup, or put the provider inside the island's own module.
+A component a layout wraps around `{children}` renders elements of its own, so it is not a context provider that can be moved into the islands: Krate renders the page content, and an island cannot sit inside markup that belongs to the layout. The layout keeps the component as it was and the islands of its pages do not see its context. Split the component into a provider that renders only its children and the markup, or put the provider inside the island's own module. A provider that adds only `<script>` elements next to its children (next-themes) is lifted.
 
 ### KR8030
 
@@ -1100,7 +1106,13 @@ The build empties outDir before it writes the site, and `krate clean` deletes it
 
 **Value needed at build time is unknown**
 
-A component without state (no createSignal, useState or other hook that holds state) is rendered to static HTML while the site is built, so every value it renders has to be known then: a prop, a local variable, or a module constant. This expression is none of those, for example it names an identifier that is not defined where the component renders (`unresolved identifier x`), reads the clock or the browser, or calls a function the build cannot run. There is no run time to fall back on, so the build fails instead of printing a guess. Define or import the name, pass the value as a prop, or give the component state so it hydrates in the browser. A value that differs per request belongs in a `*.runtime.tsx` component.
+A component without state (no createSignal, useState or other hook that holds state) is rendered to static HTML while the site is built, so every value it renders has to be known then: a prop, a local variable, or a module constant. This expression is none of those, for example it names an identifier that is not defined where the component renders (`unresolved identifier x`), reads the clock or the browser, or calls a function the build cannot run. A constant that holds JSX (an array of sections whose `body` is a fragment) is known, and so is JSX passed as a prop: both are rendered to HTML at build time. There is no run time to fall back on, so the build fails instead of printing a guess. Define or import the name, pass the value as a prop, or give the component state so it hydrates in the browser. A value that differs per request belongs in a `*.runtime.tsx` component.
+
+### KR8353
+
+**Head value cannot be evaluated at build time**
+
+Tags inside `<Head>` (and `<title>`, `<meta>` and `<link>` rendered on their own) are written into the static HTML so crawlers and link previews see them. A call to an imported helper is evaluated at build time when it is plain code: string and template work, JSON, `URL`, `encodeURIComponent`, and calls to other functions of your project. This value is none of those (it reads the browser, the clock, `process.env`, an object built by a class, or something else the build cannot run), so the tag would only be completed in the browser and crawlers would see it empty. Compute it from plain values, pass it as a prop, or move the tag to a page whose metadata comes from `generateMetadata`.
 
 ### KR8360
 
@@ -1112,7 +1124,7 @@ A component without state (no createSignal, useState or other hook that holds st
 
 **Unsupported page segment export value**
 
-Krate reads the Next.js-style page exports `export const revalidate` (a constant number of seconds, 0 for per-request rendering, or false to cache indefinitely) and `export const dynamic` ("auto", "force-dynamic", "force-static" or "error") at build time. The value could not be read statically or is not one of the supported values, so it is ignored. Write a literal value.
+Krate reads the Next.js-style page exports `export const revalidate` (a constant number of seconds, 0 for per-request rendering, or false to cache indefinitely) and `export const dynamic` ("auto", "force-dynamic", "force-static" or "error") at build time. The value could not be read statically or is not one of the supported values, so it is ignored. Write a literal value. The same code covers `export const maxDuration` in an API route, which must be a constant positive whole number of seconds (at most 3600); otherwise the route keeps the default API timeout.
 
 ### KR8602
 
@@ -1190,9 +1202,9 @@ Two files define the same role for one URL directory: 404.tsx and not-found.tsx,
 
 ### KR9003
 
-**Segment page ignores request-time rendering**
+**Error page ignores request-time rendering**
 
-Segment pages (404.tsx, not-found.tsx, error.tsx, 500.tsx) are prerendered once and written to the output; the server picks the right file per request. A request-time mode (ssr, isr, streaming, runtime components, async server components) on such a page is ignored. Read request data in the page's client code, or link to a normal route.
+An error page (error.tsx, 500.tsx) answers while the app is failing, so it is prerendered once and never depends on the renderer. A request-time mode (ssr, isr, streaming, runtime components, async server components) on it is ignored. Read request data in the page's client code. A not-found, forbidden or unauthorized page (404.tsx, 403.tsx, 401.tsx) can render per request instead.
 
 ## See also
 

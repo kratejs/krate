@@ -504,6 +504,16 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 			return err
 		}
 		cfg.Images = ic
+	case "react":
+		data, err := json.Marshal(val)
+		if err != nil {
+			return err
+		}
+		var rc ReactConfig
+		if err := json.Unmarshal(data, &rc); err != nil {
+			return err
+		}
+		cfg.React = rc
 	case "deploy":
 		data, err := json.Marshal(val)
 		if err != nil {
@@ -666,6 +676,20 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 		for k, v := range m {
 			s, _ := v.(string)
 			switch k {
+			case "htmlAttributes", "bodyAttributes":
+				obj, ok := v.(map[string]interface{})
+				if !ok {
+					return fmt.Errorf("site.%s: expected an object of attributes, got %T", k, v)
+				}
+				attrs, err := AttrMapFrom(obj)
+				if err != nil {
+					return fmt.Errorf("site.%s: %w", k, err)
+				}
+				if k == "htmlAttributes" {
+					cfg.Site.HTMLAttributes = attrs
+				} else {
+					cfg.Site.BodyAttributes = attrs
+				}
 			case "url":
 				cfg.Site.URL = s
 			case "name":
@@ -718,6 +742,8 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 		cfg.RuntimeComponents = configStrings(cfg.RuntimeComponents, val)
 	case "serverDirs":
 		cfg.ServerDirs = configStrings(cfg.ServerDirs, val)
+	case "cssImportRoots":
+		cfg.CSSImportRoots = configStrings(cfg.CSSImportRoots, val)
 	case "runtimeDirs":
 		cfg.RuntimeDirs = configStrings(cfg.RuntimeDirs, val)
 	case "hostFunctions":

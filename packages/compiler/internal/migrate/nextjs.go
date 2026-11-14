@@ -261,7 +261,7 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 	planMiddleware(abs, rep)
 	planInstrumentation(abs, rep)
 	linkRelativeImports(rep)
-	migrateNextFonts(rep)
+	migrateNextFonts(rep, abs)
 	rewriteNextModuleImports(rep, abs)
 	warnClientBoundaryRuntime(rep)
 	rewritePublicEnv(rep, readPublicEnv(abs), nextCfg.Env)
@@ -325,6 +325,7 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 		rep.Manual = append(rep.Manual, ManualItem{Source: "tsconfig.json", Reason: note, Hint: "set jsxImportSource to @krate/runtime and include .krate/types"})
 	}
 	dedupeTargets(rep)
+	aggregateSegmentConfig(rep)
 	for i := range rep.Files {
 		if fileExists(filepath.Join(abs, filepath.FromSlash(rep.Files[i].Target))) {
 			rep.Files[i].Conflict = true
@@ -590,8 +591,6 @@ func applyManual(src string, kind FileKind) []string {
 		{"export async function generateViewport", "generateViewport is not supported; export a static `viewport` object or set the viewport meta in <Head>"},
 		{"getStaticProps", "getStaticProps is not supported; use build-time data or createResource"},
 		{"getServerSideProps", "getServerSideProps is not supported; use a server render mode or createResource"},
-		{"from 'next/server'", "next/server request/response helpers need a Request/Response migration"},
-		{`from "next/server"`, "next/server request/response helpers need a Request/Response migration"},
 		{"from 'next/legacy/image'", "next/legacy/image needs a manual Image migration"},
 		{`from "next/legacy/image"`, "next/legacy/image needs a manual Image migration"},
 	}
@@ -600,10 +599,18 @@ func applyManual(src string, kind FileKind) []string {
 			out = append(out, c.reason)
 		}
 	}
-	if kind == KindLayout && asyncDefaultExport.MatchString(src) {
-		out = append(out, "async layouts are not supported (KR7101); move the data fetching into an async child component")
+	if kind != KindAPI && kind != KindModule && (strings.Contains(src, "from 'next/server'") || strings.Contains(src, `from "next/server"`)) {
+		out = append(out, "next/server request/response helpers need a Request/Response migration")
 	}
 	for _, m := range segmentConfigExport.FindAllStringSubmatch(src, -1) {
+		if m[1] == "maxDuration" && kind == KindAPI {
+			if keptMaxDuration.MatchString(src) {
+				continue
+			}
+			// Krate reads it, but only as a literal number of seconds.
+			out = append(out, "export const maxDuration must be a literal number of seconds for Krate to apply it as the route's request timeout; the default of 30s applies otherwise")
+			continue
+		}
 		out = append(out, "route segment config "+m[1]+" has no Krate equivalent and was left in place")
 	}
 	if useCacheDirective.MatchString(src) {
@@ -615,6 +622,7 @@ func applyManual(src string, kind FileKind) []string {
 var (
 	asyncDefaultExport  = regexp.MustCompile(`export\s+default\s+async\b`)
 	segmentConfigExport = regexp.MustCompile(`(?m)^export\s+const\s+(fetchCache|runtime|preferredRegion|maxDuration)\b`)
+	keptMaxDuration     = regexp.MustCompile(`(?m)^export\s+const\s+maxDuration\s*=\s*\d+\s*(?:as\s+const\s*)?;?[ \t]*\r?$`)
 	useCacheDirective   = regexp.MustCompile(`(?m)^\s*["']use cache(?::[a-z-]+)?["']`)
 )
 
@@ -630,7 +638,7 @@ func rewriteNextSource(src string, kind FileKind) (string, []string, []string) {
 	if kind == KindLayout {
 		if body, ok := stripDocumentShell(src); ok {
 			src = body
-			rewrites = append(rewrites, "replaced <html>/<body> document shell; move html attributes to site config")
+			rewrites = append(rewrites, "removed the <html>/<body> document shell; their attributes (lang, className, ...) moved into <Head> as <html> and <body> elements")
 		} else if strings.Contains(src, "<html") || strings.Contains(src, "<body") {
 			manual = append(manual, "root layout document shell could not be rewritten automatically")
 		}
@@ -645,6 +653,8 @@ func rewriteNextSource(src string, kind FileKind) (string, []string, []string) {
 			rewrites = append(rewrites, "kept a non-default "+module+" import for manual review")
 		}
 	}
+	src, dropped := dropSegmentConfig(src, kind)
+	rewrites = append(rewrites, dropped...)
 	manual = append(manual, applyManual(src, kind)...)
 	notes, layoutManual := segmentConfigNotes(src, kind)
 	rewrites = append(rewrites, notes...)

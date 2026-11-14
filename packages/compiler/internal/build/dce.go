@@ -65,6 +65,13 @@ func (b *Builder) pageCSSAfterDCE(renderMode RenderMode, cssText string, modules
 func (b *Builder) clientChunkSources(boundaries []ClientBoundary) []string {
 	var out []string
 	for _, cb := range boundaries {
+		b.clientChunkMu.Lock()
+		text, ok := b.clientChunkText[cb.ChunkURL]
+		b.clientChunkMu.Unlock()
+		if ok {
+			out = append(out, text)
+			continue
+		}
 		i := strings.LastIndex(cb.ChunkURL, "chunks/")
 		if i < 0 {
 			continue

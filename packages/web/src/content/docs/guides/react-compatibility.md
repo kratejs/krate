@@ -745,7 +745,11 @@ Elements and attributes are serialized with the same rules as
   and the namespaced SVG attributes `xlinkHref` -> `xlink:href`,
   `xmlnsXlink` -> `xmlns:xlink`, `xmlLang`, `xmlSpace`. SVG names that are
   already camelCase in SVG (`viewBox`, `markerHeight`, `preserveAspectRatio`)
-  are kept as written.
+  are kept as written. The JSX types accept both spellings (`xlinkHref` and
+  `xlink:href`, `xmlSpace` and `xml:space`), the `xmlns` declarations, all SVG
+  elements (`defs`, `linearGradient`, `clipPath`, `filter`, `fe*`, ...) and
+  event handlers on SVG elements, so SVG pasted from Figma, Illustrator or
+  Inkscape typechecks as is.
 - **Boolean attributes** (`disabled`, `checked`, `hidden`, `readOnly`, ...)
   render bare when truthy and are omitted when `false`, `null` or
   `undefined`. `hidden="until-found"` is kept. `translate` is enumerated
@@ -1092,6 +1096,13 @@ How it works:
 - Krate warns when the installed Preact is older than 10.20, which is the
   minimum version the island hooks and compat behavior are tested against.
 
+In an `async` page, layout or component the same packages render without a page
+island: stateless components (an icon) become plain HTML, stateful ones
+(a Radix checkbox) become `<krate-island>` boundaries rendered on the server
+and hydrated in place, and parts of a compound component such as
+`Dialog.Root` / `Dialog.Trigger` stay in one tree. See
+[Async Server Components](/docs/features/server-components/#compiled-react-packages-in-server-components).
+
 Two runtimes are involved at an island boundary: the page (Krate signals) and
 the island (Preact). Props crossing the boundary may be serializable values,
 bridged signal getters, or function references (handlers and setters).
@@ -1192,9 +1203,21 @@ interaction it was clicked or typed into.
 | usehooks-ts | works: `useCounter`, `useToggle` | 3.1.1 |
 | recharts, Headless UI | work (they need `import React from "react"`) | 2.15.4, 2.2.10 |
 | framer-motion | works: `motion.*` and `useAnimation` | 11.18.2 |
+| motion (`motion/react`, v12 and later) | works: `motion.*` with `initial`/`animate`/`transition`, `AnimatePresence` with an exit animation. Building logs the warning KR7116, which does not affect the result | 14.14.0 |
+| cmdk | works: `Command`, `Command.Input`, `Command.List`, `Command.Item` filtering as you type, `Command.Empty` | 1.1.1 |
+| embla-carousel-react | works: `useEmblaCarousel`, snap list, `scrollNext()` | 8.6.0 |
+| @dnd-kit | works: `DndContext`, `SortableContext`, `useSortable` with the pointer sensor, reordering through a real drag | core 6.3.1, sortable 10.0.0 |
+| next-themes | works: `ThemeProvider` in the root layout and `useTheme` in a client component switch the `<html>` class and theme state; the theme state is per island (see below) | 0.4.6 |
+| sonner | works: `<Toaster />` in a static or async layout and `toast()` from a client component of a page, one store; toasts on screen are dropped by a client-side navigation | 2.0.8 |
 | styled-components, `@emotion/styled`, emotion `css` prop, MUI `Button` | work, client-only (see below); a `ThemeProvider` in a layout reaches them | 6.6.0, 11.14.1, 11.14.0, 9.5.0 |
 
-These were run by hand against the real packages. The repository tests run
+These were run by hand against the real packages. `TestBrowserEcosystemLibraries`
+repeats the checks for motion, cmdk, embla-carousel-react, @dnd-kit,
+TanStack Table, next-themes and sonner against the pinned versions in
+`packages/compiler/internal/build/testdata/ecosystem_libs/package.json`; it is
+skipped unless `KRATE_BROWSER` is set and either `KRATE_ECOSYSTEM_LIBS` points
+at a `node_modules` directory holding them or `KRATE_ECOSYSTEM_INSTALL=1` lets
+it run `npm install`. The other repository tests run
 stand-ins with the same import shapes (default `import React`, namespace
 import, `require("react")`) and the same behavior (a store with module-level
 state, a query client with a context provider, a theme provider), because the
@@ -1261,10 +1284,70 @@ context, and the island hydrates onto it.
 - **No markup of its own.** A lifted wrapper must render only its children. One
   that adds elements (a `<div>` around them) cannot move into the islands, since
   Krate renders the page content; the wrapper then stays in the layout and the
-  build reports `KR8016`.
+  build reports `KR8016`. Scripts are the exception: a provider that adds a
+  `<script>` next to its children (next-themes' anti-flash script) is lifted,
+  and the script is part of every island's server markup.
 - **Layout components stay Krate's.** Krate components in the layout still
   cannot read the provider's context, and a hook of a React library called
   inside the layout is still `KR8013`.
+
+### Islands in a layout
+
+A static layout can render islands itself: a component of a client module of
+the project (a `"use client"` wrapper around a library's component), or the
+component of a package whose module-level state is shared with plain function
+calls (sonner's and react-hot-toast's `<Toaster />`). The layout emits a
+placeholder for each, and the pages under it build the island chunks together
+with their own, so the layout's island and the islands of the page use one
+copy of the library:
+
+```tsx
+// src/pages/_layout.tsx
+import { Toaster } from "sonner";
+
+export default function Layout({ children }) {
+  return <>{children}<Toaster richColors /></>;
+}
+
+// src/components/SaveButton.tsx
+"use client";
+import { toast } from "sonner";
+
+export default function SaveButton() {
+  return <button onClick={() => toast("Saved")}>Save</button>;
+}
+```
+
+A client module that calls a plain function of a React package (`toast()`) runs
+as an island too, so it shares the library with the layout's island. Rules:
+
+- Props of a layout island must be constants or imports; one that reads the
+  layout's own state is reported.
+- A layout that hosts an island is replaced on a client-side navigation instead
+  of being kept mounted, so anything the island holds (toasts on screen) is
+  lost when the page changes.
+- An async layout (one that loads the session, say) needs nothing special:
+  its `<Toaster />` and the `"use client"` components of its async and sync
+  pages are client boundaries, built in the same code-split graph as the
+  islands, so `toast()` reaches the Toaster. Checked in Chromium with an async
+  root layout, an async page and a sync page.
+- A static layout renders a component of a React package itself (compiled by
+  Krate, not as an island) except for `sonner` and `react-hot-toast`, which
+  are hosted as islands because their `<Toaster />` shares a store with
+  `toast()`. For another library whose component must share module state with
+  calls from pages, wrap it in a `"use client"` component of your own: a
+  wrapper is hosted whatever it renders.
+- A plain function of a React package called outside a `"use client"` module
+  and outside an event handler (in an effect of a module without the
+  directive) is bundled into the page script with its own copy of the
+  package; put the call in a `"use client"` module.
+- `ThemeProvider` from next-themes in a layout is lifted like any provider,
+  and every island renders its own copy of it. next-themes keeps its state in
+  the provider, not in a module, so it is not shared: with two islands calling
+  `useTheme`, `setTheme` in one updates `<html>` and the stored theme, but the
+  other island shows its old value until it re-renders for another reason.
+  Keep the theme controls and their display in one island, or read the theme
+  from the `<html>` class.
 
 ### State across navigation
 
@@ -1318,10 +1401,16 @@ for the whole project is not supported.
 Each limit below is either a build error or a documented behavior, never a
 silent failure in the browser:
 
-- **Layouts and server pages cannot host these hooks.** A layout, a template or
-  an `async` server page that (through its imports) calls a React-library hook
-  fails with `KR8013`, naming the package and the hook. Render the component
-  from a synchronous page instead, or use `createSignal` / `createResource`.
+- **Hooks need a client component.** A layout, a template or an `async` server
+  page or component that (through its imports) calls a React-library hook fails
+  with `KR8013`, naming the package and the hook. Add `"use client"` to the
+  module that calls it (it then hydrates as a client component inside the
+  server-rendered output), or use `createSignal` / `createResource`. Rendering
+  the library's *components* (icons, Radix primitives) from a server tree needs
+  no directive; see
+  [Compiled React packages in server components](/docs/features/server-components/#compiled-react-packages-in-server-components).
+  A static (synchronous) layout cannot host compiled components at all: make it
+  `async`.
 - **No bridge to Krate state from inside.** The island reads the page's
   signals only as props, and the page cannot read the island's store. Krate
   components that import the same store module do not see it.
@@ -1336,6 +1425,125 @@ silent failure in the browser:
 - **No islands in layouts.** A layout is rendered by Krate and persists across
   pages; a React-library island has to be rendered by a page. (Providers are
   the exception, see [Providers in layouts](#providers-in-layouts).)
+
+## Libraries built on a React reconciler (real-React islands)
+
+`@react-three/fiber`, `@react-three/drei`, `react-konva` and similar libraries
+draw through `react-reconciler`, React's renderer API. Preact does not have it,
+so these libraries cannot run on the Preact islands above. A module that uses
+one runs in a **real-React island** instead: an island bundled with `react`
+and `react-dom` themselves, with no Preact alias anywhere in its subtree.
+
+```tsx
+// src/components/Viewer.tsx
+import { Canvas } from '@react-three/fiber';
+import { OrbitControls } from '@react-three/drei';
+
+export default function Viewer({ color }: { color: string }) {
+  return (
+    <Canvas>
+      <mesh><boxGeometry /><meshStandardMaterial color={color} /></mesh>
+      <OrbitControls />
+    </Canvas>
+  );
+}
+```
+
+```tsx
+// src/pages/model.tsx
+import Viewer from '../components/Viewer';
+
+export default function Page() {
+  return <Viewer client:visible client:fallback="Loading 3D viewer..." color="#c33" />;
+}
+```
+
+### How a module opts in
+
+Krate does not need a directive on every tag: the requirement belongs to the
+package, so the build decides from the module's imports, the same way it
+detects React-library hooks.
+
+- A package that depends on (or has a peer dependency on) `react-reconciler`,
+  `@react-three/fiber` or `react-konva` needs real React. That covers
+  `@react-three/fiber`, `@react-three/drei`, `react-konva` and the libraries
+  built on them. Nothing needs to be configured.
+- Any other package can be added in `krate.config.ts`:
+
+  ```typescript
+  react: { islands: ["some-canvas-library"] },
+  ```
+
+A user module that imports such a package becomes a real-React island, and so
+does every island module that imports it. Using the component as a tag in a page
+renders the island there. A reconciler library used as a tag directly in a page
+(`<Canvas>` imported in the page itself) is an island too. A library that pulls
+in `react-reconciler` without being listed fails the Preact island build and the
+message names `react: { islands: [...] }`.
+
+### `"use client"` modules
+
+The usual Next way works unchanged: a `"use client"` module that imports a
+reconciler library (`"use client"; import { Canvas } from "@react-three/fiber"`)
+is a real-React island, whether a sync page, an async page, an async layout or
+another `"use client"` component imports it. Everything inside the module
+(its own hooks, effects and the other components it imports) runs on real
+React. A `"use client"` parent that renders such a component becomes a real-React
+island as a whole; Krate does not nest a real-React root inside a Preact island,
+because the two runtimes cannot share a tree.
+
+### Rendering
+
+A real-React island is **client-rendered**. Server-rendering a WebGL or canvas
+tree is not meaningful, so the server emits only the placeholder. Put
+`client:fallback="text"` on the tag to render a text fallback there until
+React mounts it (escaped, text only). To reserve space, wrap the tag in an
+element with a fixed size. `client:load`, `client:idle` and `client:visible`
+work as for other islands, so a heavy viewer below the fold is fetched only
+when it nears the viewport. Both directives are removed at build time and
+never reach the component.
+
+### Props and children
+
+- Props are serialized like any other island: literals, bridged signal getters
+  (the island re-renders when the signal changes) and function references.
+- The island is one React tree. `children` and nested tags in the island's JSX
+  (`<Canvas><mesh/></Canvas>`) are compiled for React inside it, and may use
+  elements, components imported from packages and imported local modules.
+- **Krate components cannot be passed in.** A same-file Krate function used
+  inside the island, or JSX built by a Krate component and handed to a prop,
+  cannot cross the boundary; the build reports the same-file case (`KR8007`).
+  Move the component into its own module (it is then bundled and run on React)
+  or render it outside the island.
+- The island cannot read Krate signals, only the props the page passes in, and
+  Krate cannot read the island's state.
+- Providers a layout wraps around its children are not applied to a real-React
+  island. Render the provider inside the island's own module.
+- A page that is itself a real-React island, and a synchronous layout, follow
+  the limits of the other React-library islands (`KR8013`).
+- **In `async` pages and layouts** a real-React component also works, used
+  directly (`<Canvas>` from the library) or through a wrapper module. It never
+  goes through the Preact boundary path: the server sends a `<krate-island>`
+  with the `client:fallback` text, the serialized props and the children as an
+  element tree, and the browser mounts it with `react-dom`. Props must be
+  serializable (as for any client component); children may be host elements and
+  other real-React components, with serializable props.
+
+### What it costs
+
+Real React is not part of Krate's runtime, and the 25 KB counter-page figure
+does not include it. The cost is paid only by pages that load a real-React
+island, as one shared chunk of `react`, `react-dom` and the libraries, cached
+across those pages: React plus `react-dom` is roughly 60 KB gzipped for the
+client renderer, and `react-reconciler` libraries add their own weight (Three.js
+is several hundred KB). Pages without such an island load none of it, and
+`krate check` counts the island bytes against the page budget. All real-React
+islands of a page mount from one entry, and the pages of a site share the
+React chunk, so a second viewer page adds only its own code.
+
+The project must have `react` and `react-dom` (18.3 or newer, 19 recommended)
+installed; the build says so if they are missing. Both resolve to the project's
+copy, so a reconciler library and the island share one React.
 
 ## Events, forms and refs
 
@@ -1456,8 +1664,10 @@ observed in a browser. The browser conformance suite (`/react-events/` in
 
 ## What is not supported
 
-- **Running React itself.** There is no React runtime; compiled packages run
-  through Preact islands, not React.
+- **Running React itself in a page.** There is no React runtime; compiled
+  packages run through Preact islands, not React. The exception is a
+  [real-React island](#libraries-built-on-a-react-reconciler-real-react-islands),
+  for libraries built on a React reconciler.
 - **React libraries' hooks in lowered source components.** `zustand`,
   `react-hook-form`, `swr` and `@tanstack/react-query` hooks need React's render
   model, so the module that calls them is run as a Preact island instead (see
@@ -1530,8 +1740,9 @@ success. The React 19 hooks follow React's semantics:
   reverts to the latest state when it settles.
 - `requestFormReset(form)` resets a form after its pending action.
 
-Inline `"use server"` functions inside components are not supported
-(`KR7001`); move them into a `"use server"` module. See
+Inline `"use server"` functions inside server components are hoisted into
+generated server actions; in a `"use client"` module they are an error
+(`KR7001`). See
 [Server Actions](/docs/guides/server-actions/) for the module format, wire
 format, request context (`headers()`, `cookies()`, `redirect()`), runtime
 requirements, and security model.

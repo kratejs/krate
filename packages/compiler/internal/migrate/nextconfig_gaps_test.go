@@ -225,12 +225,10 @@ export default {
   experimental: { authInterrupts: true, ppr: true, turbo: {} },
 };`})
 	for key, hint := range map[string]string{
-		"loadEnvConfig":             "project root only",
-		"output: 'standalone'":      "--target node",
-		"transpilePackages":         "transpilePackages",
-		"serverExternalPackages":    "no Krate equivalent",
-		"outputFileTracingIncludes": "no Krate equivalent",
-		"experimental.ppr":          "ppr",
+		"loadEnvConfig":        "project root only",
+		"output: 'standalone'": "--target node",
+		"transpilePackages":    "transpilePackages",
+		"experimental.ppr":     "ppr",
 	} {
 		var found *ManualItem
 		for i := range rep.Manual {
@@ -245,6 +243,14 @@ export default {
 		if !strings.Contains(found.Hint, hint) {
 			t.Errorf("hint for %s = %q, want it to contain %q", key, found.Hint, hint)
 		}
+	}
+	body := configBody(t, rep)
+	if !strings.Contains(body, `"serverExternalPackages"`) || !strings.Contains(body, `"sharp"`) ||
+		!strings.Contains(body, `"outputFileTracingIncludes"`) || !strings.Contains(body, `"data/**"`) {
+		t.Errorf("serverExternalPackages and outputFileTracingIncludes must be carried over:\n%s", body)
+	}
+	if hasManual(rep, "next.config.ts", "serverExternalPackages") || hasManual(rep, "next.config.ts", "outputFileTracingIncludes") {
+		t.Errorf("translated keys must not also be manual items: %+v", rep.Manual)
 	}
 	if !hasWarning(rep, "reactStrictMode") || !hasWarning(rep, "experimental.turbo") {
 		t.Errorf("informational warnings missing: %+v", rep.Warnings)

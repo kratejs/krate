@@ -166,6 +166,30 @@ type SegmentEntry struct {
 	Error        string `json:"error,omitempty"`
 	Forbidden    string `json:"forbidden,omitempty"`
 	Unauthorized string `json:"unauthorized,omitempty"`
+	// Dynamic lists the roles whose page renders per request ("notFound",
+	// "forbidden", "unauthorized"). Their files hold the baked shell of an SSR
+	// page, not a finished document.
+	Dynamic []SegmentKind `json:"dynamic,omitempty"`
+}
+
+// dynamic reports whether the entry's page of a kind renders per request.
+func (e SegmentEntry) dynamic(kind SegmentKind) bool {
+	for _, k := range e.Dynamic {
+		if k == kind {
+			return true
+		}
+	}
+	return false
+}
+
+// SegmentRoute is the route the renderer knows a request-time segment page by:
+// the page's asset directory ("/__404", "/blog/__404"). It is not a URL the
+// server answers.
+func SegmentRoute(key string, kind SegmentKind) string {
+	if key == "" {
+		return "/" + kind.assetDirName()
+	}
+	return "/" + key + "/" + kind.assetDirName()
 }
 
 // page returns the output path for a kind.
@@ -215,6 +239,9 @@ type SegmentMatch struct {
 	// Params holds the values of dynamic segments in the entry's directory
 	// when it was matched against a URL ("" for the other lookup mode).
 	Params map[string]string
+	// Route is set when the page renders per request: the route the renderer
+	// knows it by (SegmentRoute).
+	Route string
 }
 
 // LookupSegmentPage returns the nearest segment page of a kind.
@@ -238,7 +265,7 @@ func LookupSegmentPage(entries []SegmentEntry, kind SegmentKind, urlPath string,
 		dir := segDir
 		for {
 			if e, ok := byKey[dir]; ok && e.page(kind) != "" {
-				return SegmentMatch{File: e.page(kind), Key: e.Key}, true
+				return e.match(kind, nil), true
 			}
 			if dir == "" {
 				return SegmentMatch{}, false
@@ -268,7 +295,16 @@ func LookupSegmentPage(entries []SegmentEntry, kind SegmentKind, urlPath string,
 	if best == nil {
 		return SegmentMatch{}, false
 	}
-	return SegmentMatch{File: best.page(kind), Key: best.Key, Params: bestParams}, true
+	return best.match(kind, bestParams), true
+}
+
+// match builds the lookup result for the entry's page of a kind.
+func (e SegmentEntry) match(kind SegmentKind, params map[string]string) SegmentMatch {
+	m := SegmentMatch{File: e.page(kind), Key: e.Key, Params: params}
+	if e.dynamic(kind) {
+		m.Route = SegmentRoute(e.Key, kind)
+	}
+	return m
 }
 
 // matchRoutePrefix reports whether pattern matches the leading segments of

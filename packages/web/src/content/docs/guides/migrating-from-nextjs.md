@@ -109,10 +109,12 @@ The first pass:
   module, so a helper that builds static headers can be imported there; values
   that depend on the request, such as a CSP nonce, belong in `middleware.ts`.
   Every other `next.config` key gets its own item with a hint instead of one
-  generic warning: `transpilePackages`, `output: 'standalone'`,
-  `serverExternalPackages`, `outputFileTracingIncludes`, computed
+  generic warning: `transpilePackages`, `output: 'standalone'`, computed
   `images.remotePatterns` or `env`, `experimental` flags, and a
-  `loadEnvConfig(...)` call (Krate loads `.env*` from the project root only).
+  `loadEnvConfig(...)` call (point `envDir` at the directory that holds the
+  `.env*` files). A static `serverExternalPackages` list and static
+  `outputFileTracingIncludes` globs are carried over to the Krate keys of the
+  same name (see [Self-hosting](/docs/guides/self-hosting/)); computed ones get an item.
   An `async` page keeps `async` and its wrapper is `async` too, so the
   page renders per request;
 - keeps `export const revalidate`, `dynamic` and `dynamicParams` on pages, which
@@ -137,10 +139,17 @@ The first pass:
   handler at the app root (`app/route.ts`) is a manual item, because a rewrite
   for `/` would shadow the home page. Deploy targets that do not run the Krate
   server may not apply the rewrite;
-- flags inline `"use server"` functions (a directive inside a function body, the
-  Auth.js `signOut` pattern) as manual work, because the build rejects them with
-  `KR7001`; move each into a module whose first statement is `"use server"`;
-- strips root-layout `<html>`/`<body>` wrappers;
+- leaves inline `"use server"` functions (a directive inside a function body, the
+  Auth.js `signOut` pattern) as they are: the build hoists them into server
+  actions, sealing the values they close over (see
+  [Server Actions](/docs/guides/server-actions/#inline-actions)). One inside a
+  `"use client"` module is flagged as manual work, because it fails the build
+  with `KR7001` there as it does in Next.js;
+- strips root-layout `<html>`/`<body>` wrappers and carries their attributes (`lang`,
+  `className`, `data-*`, ...) into a `<Head>` with `<html>` and `<body>` elements, which
+  set the attributes of the document elements (see
+  [Document attributes](/docs/features/built-in-components/#document-attributes));
+  `suppressHydrationWarning` is dropped;
 - maps `forbidden.tsx` to `403.tsx` and `unauthorized.tsx` to `401.tsx` (the
   Next.js 15.1 `authInterrupts` pages), and drops the `experimental.authInterrupts`
   flag, because `forbidden()` and `unauthorized()` always work;
@@ -164,7 +173,39 @@ The first pass:
   listed as manual work. `next/headers` and `next/cache` map to
   `@krate/runtime/server`, rewrites common `next/server` API helpers, and maps
   simple `next/dynamic` loaders to React `lazy()`;
-- maps `next/font/google` to a generated helper and Google Fonts CSS;
+- keeps `NextRequest` features in route handlers: the `Request` has
+  `request.cookies` (`get`, `getAll`, `has`, read-only) and `request.nextUrl`
+  (a `URL` with `searchParams`, `pathname`, `basePath` and `clone()`; the
+  pathname never includes the base path), and the handler is typed as
+  `KrateRequest` from `@krate/runtime/server`. `NextResponse.json` and
+  `NextResponse.redirect` come from a small generated shim whose responses carry
+  `cookies.set/delete/get/getAll/has`. `after()` from `next/server` becomes
+  `after` from `@krate/runtime/server` and runs once the response is sent (see
+  [API routes](/docs/features/api-routes/#after-the-response)). Only what is
+  left is manual work: `request.cookies.set/delete`, `request.ip`,
+  `request.geo`, `NextResponse.rewrite/next`, and other `next/server` helpers
+  such as `userAgent`;
+- maps `next/font/google` to a generated helper and Google Fonts CSS, and
+  `next/font/local` plus `geist/font/sans` and `geist/font/mono` to self-hosted
+  `@font-face` CSS: each `localFont({ src, weight, style, variable, display,
+  declarations, fallback })` call (a single `src` or an array of `{ path, weight,
+  style }`, all literals) is replaced by an inline `{ className, variable, style }`
+  object, the font files are copied to `public/migrated-fonts/`, and the rules go
+  to `src/migrated/next-fonts.css`, which the file imports. `GeistSans` and
+  `GeistMono` use the variable font files shipped in the installed `geist`
+  package. `adjustFontFallback` and `preload` are ignored (Krate does not
+  generate size-adjusted fallbacks). A call with a computed option or an
+  imported `src` stays on `next/font/local` and is reported as manual work;
+  the other Geist fonts (`pixel`, `serif`, `*-non-variable`) are not mapped;
+- keeps `export const maxDuration = N` in API routes: Krate reads it as the
+  route's request timeout in seconds (default 30), in every runtime and deploy
+  target (see [Timeouts](/docs/features/api-routes/#timeouts)). It must be a
+  literal number; a computed value is reported as manual work. On a page it has
+  no meaning and is dropped;
+- drops the other route segment config that only steers Vercel (`runtime`,
+  `preferredRegion`) with an info note per file and one aggregated warning, since
+  Krate self-hosts on Node. `fetchCache` is kept and reported as one aggregated
+  manual item (set the cache option on the `fetch` calls that relied on it);
 - creates `krate.config.ts` when the project has none, or merges missing
   Next-derived keys into an existing config (existing keys win);
 - merges/generates `tsconfig.json` for Krate JSX and route types;
@@ -217,11 +258,10 @@ Router fixture also runs the browser conformance suite.
 
 The migrator intentionally reports manual work instead of guessing:
 async/class page defaults with `generateMetadata`, `getStaticProps`/
-`getServerSideProps`, middleware response rewrites, local font files, async
+`getServerSideProps`, middleware response rewrites, local font files with computed options, async
 layouts (move the data fetching into an async child component), `next/cache`
 exports without an equivalent (`updateTag`, `cacheLife`, `cacheTag`, `"use cache"`),
-route segment config without an equivalent (`runtime`, `preferredRegion`,
-`fetchCache`, `maxDuration`), a `default.tsx` outside a parallel-route slot, nested
+`fetchCache` route segment config, a `default.tsx` outside a parallel-route slot, nested
 `not-found`, unresolved relative imports, and function/plugin
 `next.config.*` files (or keys of one) are not rewritten automatically. Resolve those before
 running `krate build`. `useSelectedLayoutSegment(s)` count from the layout whose

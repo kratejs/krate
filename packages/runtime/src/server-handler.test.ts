@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from "vitest";
-import { createKrateHandler, type HandlerConfig, type KrateServerData } from "./server-handler.js";
+import { createKrateHandler, matchMetaRoute, type HandlerConfig, type KrateServerData } from "./server-handler.js";
 import { jsx } from "./server.js";
 
 const config: HandlerConfig = {
@@ -81,6 +81,44 @@ describe("createKrateHandler", () => {
     expect(await ok.json()).toEqual({ ok: true, result: { sum: 5 } });
     const bad = await get("/__krate/action/act1", { method: "POST", headers: { ...headers, "sec-fetch-site": "cross-site" }, body: "{}" });
     expect(bad.status).toBe(403);
+  });
+});
+
+describe("API maxDuration", () => {
+  const sleep = (ms: number, signal: AbortSignal) =>
+    new Promise<boolean>((resolve) => {
+      const t = setTimeout(() => resolve(false), ms);
+      signal.addEventListener("abort", () => (clearTimeout(t), resolve(true)), { once: true });
+    });
+  let sawAbort = false;
+  const mods = {
+    ...modules,
+    api: {
+      ...modules.api,
+      slow: { GET: async (r: Request) => ((sawAbort = await sleep(2000, r.signal)), Response.json({ late: true })) },
+      ok: { GET: async (r: Request) => (await sleep(50, r.signal), Response.json({ done: true })) },
+    },
+  };
+  const h = createKrateHandler({
+    target: "node",
+    data: data({ hasMiddleware: false, apiRoutes: ["slow", "ok"], apiMaxDuration: { slow: 0.1, ok: 5 } }),
+    modules: mods,
+  });
+  const get = (path: string) => h(new Request("http://localhost" + path));
+
+  it("answers 504 and aborts request.signal at the deadline", async () => {
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    const r = await get("/api/slow");
+    expect(r.status).toBe(504);
+    expect(await r.json()).toEqual({ error: "Gateway Timeout" });
+    expect(sawAbort).toBe(true);
+    err.mockRestore();
+  });
+
+  it("lets a handler that finishes inside its budget through", async () => {
+    const r = await get("/api/ok");
+    expect(r.status).toBe(200);
+    expect(await r.json()).toEqual({ done: true });
   });
 });
 
@@ -202,5 +240,37 @@ describe("middleware exports", () => {
     expect((await run({ other: 1 })).status).toBe(503);
     expect((await run(undefined)).status).toBe(503);
     error.mockRestore();
+  });
+});
+
+describe("per-request metadata routes", () => {
+  const metaRoutes = [
+    { path: "/robots.txt", key: "__krate_meta/robots" },
+    { prefix: "/sitemap/", suffix: ".xml", key: "__krate_meta/sitemap/[id]" },
+  ];
+
+  it("maps public URLs to API route keys", () => {
+    expect(matchMetaRoute(metaRoutes, "/robots.txt")).toBe("__krate_meta/robots");
+    expect(matchMetaRoute(metaRoutes, "/sitemap/3.xml")).toBe("__krate_meta/sitemap/3");
+    for (const p of ["/sitemap/.xml", "/sitemap/a/b.xml", "/robots.txt/x", "/other"]) expect(matchMetaRoute(metaRoutes, p)).toBe("");
+    expect(matchMetaRoute(undefined, "/robots.txt")).toBe("");
+  });
+
+  it("serves them through the API handler after middleware", async () => {
+    const handler = createKrateHandler({
+      target: "node",
+      data: data({ metaRoutes, apiRoutes: ["__krate_meta/robots", "__krate_meta/sitemap/[id]"], hasMiddleware: false }),
+      modules: {
+        api: {
+          "__krate_meta/robots": { GET: (r: Request) => new Response("User-agent: *\n# " + new URL(r.url).pathname, { headers: { "content-type": "text/plain" } }) },
+          "__krate_meta/sitemap/[id]": { GET: (_r: Request, ctx: any) => new Response("sitemap " + ctx.params.id) },
+        },
+      },
+    });
+    const robots = await handler(new Request("http://localhost/robots.txt"));
+    expect(robots.status).toBe(200);
+    expect(await robots.text()).toContain("User-agent: *");
+    expect(await (await handler(new Request("http://localhost/sitemap/7.xml"))).text()).toBe("sitemap 7");
+    expect((await handler(new Request("http://localhost/robots.txt", { method: "POST" }))).status).not.toBe(200);
   });
 });

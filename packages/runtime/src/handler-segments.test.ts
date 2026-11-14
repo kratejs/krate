@@ -1,6 +1,19 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { fillServerError, newServerError } from "./handler-segments.js";
+import { fillServerError, lookupSegmentPage, newServerError, segmentRoute } from "./handler-segments.js";
+
+describe("request-time segment pages", () => {
+  it("names the renderer route of a dynamic entry and only of that role", () => {
+    const entries = [
+      { key: "", dir: "", notFound: "404.html", error: "500.html", dynamic: ["notFound" as const] },
+      { key: "blog", dir: "blog", notFound: "blog/404.html" },
+    ];
+    expect(lookupSegmentPage(entries, "notFound", "/x", false, "")).toEqual({ file: "404.html", key: "", params: {}, route: "/__404" });
+    expect(lookupSegmentPage(entries, "error", "/x", false, "")?.route).toBeUndefined();
+    expect(lookupSegmentPage(entries, "notFound", "/blog/x", true, "blog")?.route).toBeUndefined();
+    expect(segmentRoute("shop/blog", "unauthorized")).toBe("/shop/blog/__401");
+  });
+});
 
 describe("error prop", () => {
   it("is sanitized in production and escaped into the page", () => {

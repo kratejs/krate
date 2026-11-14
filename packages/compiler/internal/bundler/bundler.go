@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
@@ -137,6 +138,10 @@ type Bundler struct {
 
 	// twImports controls how `@import "tailwindcss"` is treated in CSS.
 	twImports css.TailwindImportMode
+	// cssImportRoots are the configured extra directories CSS may import from.
+	cssImportRoots []string
+	wsRootOnce     sync.Once
+	wsRoot         string
 
 	// mdCfg is the markdown configuration for .md/.mdx modules. The zero
 	// value (mdSet false) means markdown.DefaultConfig().
@@ -392,7 +397,7 @@ func (b *Bundler) unresolvedImportError(mod *Module, imp string) error {
 	if resolver.IsCompiledDependency(mod.Path) {
 		return nil
 	}
-	if reactCompatSpecifier(imp) != "" || strings.HasPrefix(imp, "node:") {
+	if reactCompatSpecifier(imp) != "" || strings.HasPrefix(imp, "node:") || strings.HasPrefix(imp, "cloudflare:") {
 		return nil
 	}
 	// The client runtime is shipped by the compiler (window globals), so its
@@ -798,6 +803,7 @@ func (b *Bundler) resolveTSXModule(path, abs string, mtime time.Time, size int64
 	// TypeScript is stripped by esbuild first; positions in the AST and in
 	// diagnostics refer to the original src. SourceCode stays the original so
 	// comment directives (`// @server`) are still seen.
+	src, inlineChanged := b.hoistInlineActions(path, abs, src)
 	prog, errs := tsstrip.Parse(path, src, b.tsOpts)
 	if len(errs) > 0 {
 		return &parseError{summary: parser.FormatDiagnostics(errs), errs: errs}
@@ -812,8 +818,8 @@ func (b *Bundler) resolveTSXModule(path, abs string, mtime time.Time, size int64
 		// Third-party packages cannot act on these hints; keep builds quiet.
 		reactDiags = nil
 	}
-	b.checkInlineUseServer(prog, path, src)
 	_, actionChanged := b.rewriteActionImports(prog, abs)
+	actionChanged = actionChanged || inlineChanged
 
 	if err := checkTierConflicts(prog, path, src, b.serverComponents, b.runtimeComponents, b.serverDirs, b.runtimeDirs); err != nil {
 		return err

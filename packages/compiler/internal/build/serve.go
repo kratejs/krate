@@ -325,9 +325,13 @@ const server = http.createServer(async (req, res) => {
         }));
 
         const revalidateScope = newRevalidateScope('api');
-        const response = await REVALIDATE_STORE.run(revalidateScope, () => methodHandler(request, { params: routeParamsValue }));
+        res.once('finish', () => { krateRunAfter(revalidateScope); });
         // revalidatePath/revalidateTag calls are applied before responding.
-        await flushRevalidate(revalidateScope);
+        const response = await krateWithBudget(krateRouteBudgetMs(API_DIR, targetFile), ac, async () => {
+          const out = await REVALIDATE_STORE.run(revalidateScope, () => methodHandler(request, { params: routeParamsValue }));
+          await flushRevalidate(revalidateScope);
+          return out;
+        });
 
         if (response instanceof Response || (response && typeof response.status === 'number' && typeof response.headers === 'object')) {
           res.statusCode = response.status;
@@ -382,6 +386,13 @@ const server = http.createServer(async (req, res) => {
     }
   } catch (err) {
     if (res.headersSent) { res.destroy(err); return; }
+    if (err && err.krateTimeout) {
+      console.error('[krate] ' + err.message + ': ' + req.method + ' ' + req.url);
+      res.statusCode = 504;
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Cache-Control', 'no-store');
+      return res.end('{"error":"Gateway Timeout"}');
+    }
     const fallback = krateHTTPFallback(err);
     res.statusCode = fallback || 500;
     res.setHeader('Content-Type', 'application/json');
@@ -707,13 +718,25 @@ Bun.serve({
     const routeParamsValue = routeParams(file, clean);
     try {
       const revalidateScope = newRevalidateScope('api');
-      const request = krateAttach(req);
-      const out = await REVALIDATE_STORE.run(revalidateScope, async () => ((fn.length >= 2 && !namedHandler) ? legacyInvoke(fn, req, url) : toResponse(await fn(request, { params: routeParamsValue }))));
+      const ac = new AbortController();
+      const request = (fn.length >= 2 && !namedHandler) ? krateAttach(req) : krateAttach(new Request(req, { signal: AbortSignal.any([req.signal, ac.signal]) }));
       // revalidatePath/revalidateTag calls are applied before responding.
-      await flushRevalidate(revalidateScope);
+      const out = await krateWithBudget(krateRouteBudgetMs(API_DIR, file), ac, async () => {
+        const r = await REVALIDATE_STORE.run(revalidateScope, async () => ((fn.length >= 2 && !namedHandler) ? legacyInvoke(fn, req, url) : toResponse(await fn(request, { params: routeParamsValue }))));
+        await flushRevalidate(revalidateScope);
+        return r;
+      });
+      // after() tasks start once the handler has returned the response.
+      setTimeout(() => { krateRunAfter(revalidateScope); }, 0);
       if (picked.headOnly) return new Response(null, { status: out.status, headers: out.headers });
       return out;
     } catch (e) {
+      if (e && e.krateTimeout) {
+        console.error('[krate] ' + e.message + ': ' + req.method + ' ' + urlPath);
+        const r = json({ error: 'Gateway Timeout' }, 504);
+        r.headers.set('Cache-Control', 'no-store');
+        return r;
+      }
       const fallback = krateHTTPFallback(e);
       if (fallback) { const r = json({ error: KRATE_FALLBACK_LABEL[fallback] }, fallback); r.headers.set('Cache-Control', 'no-store'); return r; }
       return json(krateErrorBody(e, req.method + ' ' + urlPath), 500);
@@ -981,7 +1004,7 @@ func streamRegionPageModeSC(ctx context.Context, w http.ResponseWriter, flusher 
 	regionList := make([]map[string]string, 0, len(all))
 	var goReq []goRenderRegion
 	reqCtx, _ := json.Marshal(map[string]any{
-		"method": "GET", "url": route, "params": params, "query": query, "headers": headers,
+		"method": "GET", "url": regionURL(ctx, route), "params": params, "query": query, "headers": headers,
 	})
 	for _, b := range all {
 		if gr, ok := goRenders[b.id]; ok {
@@ -1087,7 +1110,19 @@ func streamRegionPageModeSC(ctx context.Context, w http.ResponseWriter, flusher 
 		}
 		if end := headEndOf(shell); end >= 0 && (len(roots) == 0 || roots[0].openStart >= end) {
 			headEnd = end
-			headSection = mergeHeadSection(shell[:end], title, head)
+			head, htmlAttrs, bodyAttrs := splitDocTags(head, true)
+			headSection = setStartTagAttrs(mergeHeadSection(shell[:end], title, head), "html", htmlAttrs)
+			// The <body> start tag follows the head; when it sits before the
+			// first region it joins the rewritten section.
+			if len(bodyAttrs) > 0 {
+				if at := startTagIndex(shell[end:], "body"); at >= 0 {
+					bodyEnd := end + htmlTagEnd(shell[end:], at)
+					if len(roots) == 0 || roots[0].openStart >= bodyEnd {
+						headSection += setStartTagAttrs(shell[end:bodyEnd], "body", bodyAttrs)
+						headEnd = bodyEnd
+					}
+				}
+			}
 		}
 	}
 	writeShell := func(lo, hi int) {
@@ -1173,7 +1208,7 @@ func streamRegionPageModeSC(ctx context.Context, w http.ResponseWriter, flusher 
 func fetchNodeRegions(ctx context.Context, ssrPort int, route string, params, query, headers map[string]string, regionList []map[string]string, regionHTML map[string]string, res *regionPageResult, internalSecret string) error {
 	reqBody, _ := json.Marshal(map[string]interface{}{
 		"route":   route,
-		"url":     route,
+		"url":     regionURL(ctx, route),
 		"method":  "GET",
 		"headers": headers,
 		"params":  params,
@@ -1398,6 +1433,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	middlewarePath := filepath.Join(root, ".krate", "middleware.js")
 	apiRTOption := strings.ToLower(cfg.SSR.APIRuntime)
 	nodeOnlyRoutes := loadNodeOnlyAPIRoutes(root)
+	apiBudgets := apiRouteBudgets(root)
 	nodeWorkers := cfg.SSR.NodeWorkers
 	if nodeWorkers <= 0 {
 		nodeWorkers = jsruntime.DefaultAPIWorkers()
@@ -1460,7 +1496,10 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 					fmt.Sprintf("KRATE_API_HOT=%d", boolToInt(hub != nil)),
 					fmt.Sprintf("KRATE_API_DEV=%d", boolToInt(hub != nil)),
 					fmt.Sprintf("KRATE_ACTION_MAX_BODY=%d", apiBodyLimit),
+					fmt.Sprintf("KRATE_API_TIMEOUT_MS=%d", jsruntime.APITimeout().Milliseconds()),
+					"KRATE_API_ROUTE_META="+filepath.Join(root, ".krate", "api-routes.json"),
 					fmt.Sprintf("KRATE_PARENT_PID=%d", os.Getpid()),
+					"KRATE_BASE_PATH="+cfg.BaseURLPath(),
 				)
 				cmd.Env = append(cmd.Env, revalHost.EnvList()...)
 				if cacheRuntime != "" {
@@ -1574,6 +1613,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 			isolation := cfg.SSR.APIIsolation || hub != nil
 			apiRT.SetPool(cfg.SSR.APIWorkers, isolation)
 			apiRT.SetFeatures(loadAPIRouteFeatures(root))
+			apiRT.SetRouteTimeouts(apiBudgets)
 		}
 	}
 
@@ -1587,7 +1627,13 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		baseDirector(r)
 		r.Header.Set(internalSecretHeader, revalHost.secret)
 	}
-	apiProxy.Transport = newSidecarTransport()
+	apiHeaderWait := longestAPIBudget(apiBudgets) + apiTimeoutGrace
+	if hub != nil && apiHeaderWait < 10*time.Minute {
+		// The sidecar enforces each route's budget; dev may add a longer one
+		// after the server started.
+		apiHeaderWait = 10 * time.Minute
+	}
+	apiProxy.Transport = newSidecarTransportTimeout(apiHeaderWait)
 
 	// Optional user-provided API sidecar. Requests it owns are forwarded first;
 	// a 404 falls through to the built-in Go/TS/QuickJS routes below.
@@ -1645,14 +1691,25 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		},
 	}
 
+	// Segment pages: the nearest 404/500 page for a request (see segments.go).
+	segs := newSegmentIndex(absOut)
 	if hasActions {
-		mux.Handle("/__krate/action/", loggingMiddleware(gate.wrap(http.HandlerFunc(actionHandlerSegments(apiProxy, apiBodyLimit, newSegmentIndex(absOut))))))
+		mux.Handle("/__krate/action/", loggingMiddleware(gate.wrap(http.HandlerFunc(actionHandlerSegments(apiProxy, apiBodyLimit, segs)))))
 	}
 
 	apiHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Body != nil {
 			r.Body = http.MaxBytesReader(w, r.Body, apiBodyLimit)
 		}
+		budgets := apiBudgets
+		if hub != nil {
+			// A dev rebuild can change a route's maxDuration.
+			budgets = apiRouteBudgets(root)
+			if apiRT != nil {
+				apiRT.SetRouteTimeouts(budgets)
+			}
+		}
+		extendAPIWriteDeadline(w, longestAPIBudget(budgets))
 
 		// Custom sidecar first (default /api prefix): owns the routes it
 		// responds to; a 404 falls through to the built-ins.
@@ -1736,8 +1793,6 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		}
 	}
 
-	// Segment pages: the nearest 404/500 page for a request (see segments.go).
-	segs := newSegmentIndex(absOut)
 	devMode := hub != nil
 
 	// Scan for dynamic routes ([param] directories) in the output
@@ -1771,11 +1826,27 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		}, fileServer)
 	}
 
+	// trailingSlash "never" and "ignore" serve /x from x/index.html in place
+	// rather than through the file server's redirect to /x/.
+	slashMode := cfg.TrailingSlashMode()
+	if slashMode != "always" {
+		staticServer = serveIndexInPlace(absOut, staticServer)
+	}
+
 	handlerWith404 := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Server-only build artifacts live under dist/.krate. Never serve them
 		// from the static handler; they contain bundles, the renderer, and the
 		// persisted ISR cache.
 		if isInternalOutputPath(r.URL.Path) {
+			http.NotFound(w, r)
+			return
+		}
+		// The not-found page's own URLs answer 404 (with that page), not 200
+		// with the file or a redirect.
+		if notFoundPageURL(r.URL.Path) {
+			if m, ok := segs.forURL(SegmentNotFound, r.URL.Path, ""); ok && respondSegment(w, r, segs, m, http.StatusNotFound, nil) {
+				return
+			}
 			http.NotFound(w, r)
 			return
 		}
@@ -1830,7 +1901,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 					continue
 				}
 				if params, ok := matchDynamicRoute(r.URL.Path, dr.pattern); ok {
-					if redirectToCanonicalSlash(w, r) {
+					if redirectToCanonicalSlash(slashMode, w, r) {
 						return
 					}
 					templatePath := filepath.Join(dr.dir, "index.html")
@@ -1859,7 +1930,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		buf := &captureResponse{status: http.StatusOK}
 		staticServer.ServeHTTP(buf, r)
 		if buf.status == http.StatusNotFound {
-			if m, ok := segs.forURL(SegmentNotFound, r.URL.Path, closedPattern); ok && respondSegment(w, segs, m, http.StatusNotFound, nil) {
+			if m, ok := segs.forURL(SegmentNotFound, r.URL.Path, closedPattern); ok && respondSegment(w, r, segs, m, http.StatusNotFound, nil) {
 				return
 			}
 		}
@@ -2061,7 +2132,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		}
 		// SSG pages answer /x with a 301 to /x/; request-time pages use the
 		// same single canonical form.
-		if redirectToCanonicalSlash(w, r) {
+		if redirectToCanonicalSlash(slashMode, w, r) {
 			return
 		}
 		isISR := page.Mode == RenderISR.String()
@@ -2150,7 +2221,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 			fmt.Fprintf(os.Stderr, "  %sRender error (%s) [digest %s]:%s %s\n", cRed, route, srvErr.Digest, cReset, rr.fatalErr)
 			w.Header().Set("X-Krate-Error", "render")
 			w.Header().Del("X-Krate-Cache")
-			if hasErrPage && respondSegment(w, segs, errMatch, http.StatusInternalServerError, &srvErr) {
+			if hasErrPage && respondSegment(w, r, segs, errMatch, http.StatusInternalServerError, &srvErr) {
 				return
 			}
 			w.Header().Set("Cache-Control", "no-store")
@@ -2187,7 +2258,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 				// notFound() or an unmatched variant: the page nearest to the route,
 				// never cached as a success.
 				w.Header().Del("X-Krate-Cache")
-				if m, ok := segs.forRoute(SegmentNotFound, r.URL.Path, page.SegDir); ok && respondSegment(w, segs, m, http.StatusNotFound, nil) {
+				if m, ok := segs.forRoute(SegmentNotFound, r.URL.Path, page.SegDir); ok && respondSegment(w, r, segs, m, http.StatusNotFound, nil) {
 					return
 				}
 				w.Header().Set("Cache-Control", "no-store")
@@ -2230,12 +2301,19 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	}
 
 	// Redirect/rewrite middleware - applies config-based URL transformations
+	metaRoutes := newMetaRouteLoader(absOut, hub != nil)
 	var redirectRewriteHandler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 
 		// Check redirects first. Under a base path, basePath: false rules were
 		// already matched against the full path by basePathMiddleware.
 		if serveConfigRedirect(w, r, path, insideRedirects) {
+			return
+		}
+
+		// trailingSlash "never": /x/ goes to /x, judged on the requested URL
+		// before a rewrite maps it onto another internal path.
+		if redirectToSlashless(slashMode, w, r) {
 			return
 		}
 
@@ -2260,8 +2338,83 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 			}
 		}
 
+		// A dynamic metadata route (robots.ts, sitemap.ts) is an API route on
+		// the Node sidecar, reached through its public URL.
+		if r.Method == http.MethodGet || r.Method == http.MethodHead {
+			if key, ok := metaRoutes.get().match(r.URL.Path); ok {
+				r.URL.Path = "/api/" + key
+				r.URL.RawPath = ""
+				apiProxy.ServeHTTP(newDeadlineWriter(w), r)
+				return
+			}
+		}
+
 		ssrPageHandler.ServeHTTP(w, r)
 	})
+
+	// Segment pages that render per request (a 404, 403 or 401 page with
+	// `ssr`): the shell was baked like an SSR page's, and the region render
+	// runs for the request that missed, answering with the segment's status.
+	segs.render = func(w http.ResponseWriter, r *http.Request, m SegmentMatch, status int) bool {
+		if m.Route == "" || !ssr.HasManifest() {
+			return false
+		}
+		page := ssr.pageByRoute(m.Route)
+		if page == nil {
+			return false
+		}
+		headers := make(map[string]string)
+		for k, v := range r.Header {
+			if len(v) > 0 {
+				headers[k] = v[0]
+			}
+		}
+		query := make(map[string]string)
+		for k, v := range r.URL.Query() {
+			if len(v) > 0 {
+				query[k] = v[0]
+			}
+		}
+		params := m.Params
+		if params == nil {
+			params = map[string]string{}
+		}
+		var renderGo func([]goRenderRegion) (map[string]string, error)
+		if goAPI != nil && goAPI.Active() {
+			requestCtx := r.Context()
+			renderGo = func(regions []goRenderRegion) (map[string]string, error) {
+				return goAPI.RenderContext(requestCtx, regions)
+			}
+		}
+		regionPort := 0
+		if ssrStarted {
+			regionPort = ssrPort
+		}
+		flusher, _ := w.(http.Flusher)
+		sw := &forcedStatusWriter{ResponseWriter: w, status: status}
+		h := w.Header()
+		h.Set("Content-Type", "text/html; charset=utf-8")
+		h.Set("Cache-Control", "no-store")
+		h.Del("Content-Length")
+		h.Del("Content-Encoding")
+		h.Del("Etag")
+		h.Del("Last-Modified")
+		ctx := withRegionURL(r.Context(), r.URL.Path)
+		rr := streamRegionPageModeSC(ctx, sw, flusher, regionShells, absOut, m.Route, regionPort, params, query, headers, goRegionsByRoute[m.Route], renderGo, false, 0, ssr.InternalSecret(), false, page.ServerComponents, false)
+		if !rr.served || rr.unavailable != "" || rr.fatalErr != "" || rr.notFound || rr.denied != 0 || rr.redirect != "" {
+			// Nothing was written: the baked shell answers instead.
+			if rr.unavailable != "" {
+				fmt.Fprintf(os.Stderr, "  %sSegment page renderer unavailable (%s):%s %s\n", cYellow, m.Route, cReset, rr.unavailable)
+			} else if rr.fatalErr != "" {
+				fmt.Fprintf(os.Stderr, "  %sSegment page render error (%s):%s %s\n", cRed, m.Route, cReset, rr.fatalErr)
+			}
+			return false
+		}
+		if rr.renderErr != "" {
+			fmt.Fprintf(os.Stderr, "  %sSegment page region error (%s):%s %s\n", cYellow, m.Route, cReset, rr.renderErr)
+		}
+		return true
+	}
 
 	// User middleware handler for pages (also wraps /api and server actions
 	// above).
@@ -2829,6 +2982,8 @@ func sanitizeRedirectTarget(configured, out string) string {
 // isInternalOutputPath reports whether a request targets Krate's server-only
 // output directory. It normalizes slash/backslash and repeated separators so
 // encoded or Windows-shaped paths cannot slip past.
+var segmentShellPathRe = regexp.MustCompile(`(^|/)__(401|403|404|500)(/(index\.html)?)?$`)
+
 func isInternalOutputPath(urlPath string) bool {
 	if decoded, err := url.PathUnescape(urlPath); err == nil {
 		urlPath = decoded
@@ -2836,6 +2991,11 @@ func isInternalOutputPath(urlPath string) bool {
 	p := strings.ReplaceAll(urlPath, "\\", "/")
 	p = path.Clean("/" + p)
 	if p == "/.krate" || strings.HasPrefix(p, "/.krate/") {
+		return true
+	}
+	// The shell of a segment page that renders per request is not a page of
+	// the site (its hydration script, next to it, is public).
+	if segmentShellPathRe.MatchString(p) {
 		return true
 	}
 	// Defense in depth: where older builds wrote server-only files into the

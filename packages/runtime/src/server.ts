@@ -8,6 +8,10 @@ import { highlight as highlightCode, trimSpace } from './highlight.js';
 export { getActionContext, headers, cookies, redirect } from './action-context.js';
 export type { ActionContext, ActionCookies, ActionCookieOptions } from './action-context.js';
 export { revalidatePath, revalidateTag, unstable_cache, unstable_noStore } from './cache.js';
+export { after } from './after.js';
+export { getPlatform, getCloudflareContext } from './platform.js';
+export type { PlatformContext, PlatformTarget, PlatformExecutionContext, CloudflareContext, KrateCloudflareEnv } from './platform.js';
+export type { AfterTask, KrateRequest, KrateRequestCookies, KrateNextURL } from './after.js';
 export type { RevalidatePathType, UnstableCacheOptions } from './cache.js';
 export { getRequestContext, notFound, forbidden, unauthorized } from './request-context.js';
 export {
@@ -487,12 +491,109 @@ function clientPropError(path: string, component: string, what: string, hint?: s
   );
 }
 
+type ClientRef = { moduleId: string; exportName: string; src: string; impl: unknown; hydrate: boolean };
+
+function clientRegistry(): Map<string, ClientRef> {
+  const g = globalThis as any;
+  return (g.__krateClientImpls ??= new Map<string, ClientRef>());
+}
+
+function clientRefOf(type: unknown): ClientRef | undefined {
+  return typeof type === "function" ? (type as any).__krateClient : undefined;
+}
+
+// hasClientElement reports whether a children value holds a client boundary
+// element reachable through host elements and arrays. Server components stop
+// the walk: they render to HTML on their own.
+function hasClientElement(node: unknown): boolean {
+  if (node == null || typeof node !== "object") return false;
+  if (Array.isArray(node)) return node.some(hasClientElement);
+  if (!isElement(node)) return false;
+  if (clientRefOf(node.type)) return true;
+  return typeof node.type === "string" && node.children.some(hasClientElement);
+}
+
+type FlightCtx = { hydrate: boolean; component: string };
+
+function flightProps(props: Record<string, unknown>, ctx: FlightCtx): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(props)) {
+    if (k === "key" || k === "children") continue;
+    const sv = serializeClientProp(v, k, ctx.component);
+    if (sv !== undefined) out[k] = sv;
+  }
+  return out;
+}
+
+// toFlight turns the children of a client boundary into a serializable tree
+// that keeps nested client components as components, so they render inside the
+// parent's Preact tree and share its context (Radix Dialog.Root with its
+// Trigger and Content). Everything else is host markup or server-rendered HTML.
+async function toFlight(node: unknown, ctx: FlightCtx): Promise<unknown[]> {
+  if (isThenable(node)) return toFlight(await node, ctx);
+  if (node == null || typeof node === "boolean") return [];
+  if (typeof node === "string" || typeof node === "number") return [node];
+  if (Array.isArray(node)) {
+    const out: unknown[] = [];
+    for (const n of node) out.push(...(await toFlight(n, ctx)));
+    return out;
+  }
+  if (typeof node !== "object") return [];
+  if ("__raw" in (node as any)) return [{ $: "h", h: (node as RawHTML).__raw }];
+  if (!isElement(node)) return [];
+  const { type, props, children } = node;
+  if (typeof type === "string") {
+    return [{ $: "e", t: type, p: flightProps(props, ctx), c: await toFlight(children, ctx) }];
+  }
+  if (type === Link) {
+    return [{ $: "e", t: "a", p: linkAttributes({ ...props, children }), c: await toFlight(children, ctx) }];
+  }
+  const ref = clientRefOf(type);
+  if (ref) {
+    if (ref.hydrate) ctx.hydrate = true;
+    const nested = { ...ctx, component: ref.exportName };
+    const c = await toFlight(children, nested);
+    if (nested.hydrate) ctx.hydrate = true;
+    return [{ $: "c", m: ref.moduleId, e: ref.exportName, s: ref.src, p: flightProps(props, nested), c }];
+  }
+  return [{ $: "h", h: await renderToStringAsync(node) }];
+}
+
+function wrapClientNamespace(
+  moduleId: string,
+  exportName: string,
+  src: string,
+  ns: Record<string, unknown>,
+  render: ClientRender,
+  hydrate: boolean,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(ns)) {
+    const v = ns[key];
+    const isComponentName = /^[A-Z]/.test(key);
+    if (isComponentName && typeof v === "function") {
+      out[key] = clientBoundary(moduleId, `${exportName}.${key}`, src, v, render, hydrate);
+    } else if (isComponentName && v && typeof v === "object" && !Array.isArray(v)) {
+      out[key] = wrapClientNamespace(moduleId, `${exportName}.${key}`, src, v as Record<string, unknown>, render, hydrate);
+    } else {
+      out[key] = v;
+    }
+  }
+  return out;
+}
+
 /**
- * clientBoundary wraps an export of a `"use client"` module for the server
- * bundle of a page that renders server components. The server renders the
- * component's initial HTML (render) into a <krate-island> marker carrying its
+ * clientBoundary wraps an export of a `"use client"` module, or a component
+ * of a React package, for the server bundle of a page that renders server
+ * components. The server renders the component's initial HTML (render) and,
+ * when it hydrates, puts it in a <krate-island> marker carrying its
  * serialized props; the per-module client chunk at src hydrates it in the
- * browser. Children are rendered on the server and passed as HTML.
+ * browser. A component without state or effects (hydrate false, an icon)
+ * is plain HTML. Children are rendered on the server and passed as HTML, or,
+ * when they hold client components of their own, as a tree that keeps those
+ * components in the same Preact tree. A namespace export (Radix's Dialog) is
+ * wrapped member by member. With `flight` the children always travel as a
+ * tree (a real-React island rebuilds them as elements, not HTML).
  */
 export function clientBoundary(
   moduleId: string,
@@ -500,7 +601,12 @@ export function clientBoundary(
   src: string,
   impl: unknown,
   render: ClientRender,
+  hydrate = true,
+  flight = false,
 ): unknown {
+  if (impl && typeof impl === "object" && !Array.isArray(impl)) {
+    return wrapClientNamespace(moduleId, exportName, src, impl as Record<string, unknown>, render, hydrate);
+  }
   if (typeof impl !== "function") return impl;
   const name = (impl as any).displayName || (impl as any).name || exportName;
   const Boundary = async (props: Record<string, any>) => {
@@ -512,15 +618,27 @@ export function clientBoundary(
       if (sv !== undefined) data[k] = sv;
     }
     const hasChildren = children != null && !(Array.isArray(children) && children.length === 0);
-    const childrenHTML = hasChildren ? await renderToStringAsync(children) : null;
-    if (childrenHTML !== null) data.__krateChildren = childrenHTML;
+    let hydrates = hydrate;
+    let childrenHTML: string | null = null;
+    if (hasChildren && (flight || hasClientElement(children))) {
+      const ctx: FlightCtx = { hydrate: false, component: exportName };
+      data.__krateTree = await toFlight(children, ctx);
+      if (ctx.hydrate) hydrates = true;
+    } else if (hasChildren) {
+      childrenHTML = await renderToStringAsync(children);
+      data.__krateChildren = childrenHTML;
+    }
     const html = render(impl, data, childrenHTML);
+    if (!hydrates) return raw(html);
     return raw(
       `<krate-island style="display:contents" data-module="${escapeHTML(moduleId)}" data-export="${escapeHTML(exportName)}" ` +
         `data-src="${escapeHTML(src)}" data-props="${escapeHTML(JSON.stringify(data))}">${html}</krate-island>`,
     );
   };
   Object.defineProperty(Boundary, "name", { value: name });
+  const ref: ClientRef = { moduleId, exportName, src, impl, hydrate };
+  (Boundary as any).__krateClient = ref;
+  clientRegistry().set(`${moduleId}#${exportName}`, ref);
   return Boundary;
 }
 
@@ -550,6 +668,41 @@ export function Style(props: { children?: string }): JSXNode {
   return `<style>${props.children ?? ""}</style>`;
 }
 
+// linkAttributes computes the attributes of a <Link> anchor. An empty string
+// stands for a boolean attribute.
+function linkAttributes(props: Record<string, any>): Record<string, string> {
+  const { href = "", prefetch, replace, scroll, basePath: noBase, children: _children, ...rest } = props;
+  const attrs: Record<string, string> = {};
+  // basePath={false}: the URL belongs to another app on the host.
+  const outside = noBase === false;
+  if (href) attrs.href = outside ? href : withBase(href);
+
+  const external =
+    outside ||
+    /^(https?:|mailto:|tel:|#|javascript:)/.test(href) ||
+    href.startsWith("//") ||
+    rest.target === "_blank" ||
+    rest.download !== undefined;
+
+  if (external) {
+    attrs["data-krate-external"] = "";
+    if (outside) attrs["data-krate-no-base"] = "";
+  } else {
+    attrs["data-krate-link"] = "";
+    if (prefetch !== false) attrs["data-prefetch"] = "";
+    if (replace) attrs["data-krate-replace"] = "";
+    if (scroll === false) attrs["data-krate-scroll"] = "false";
+  }
+
+  for (const key of ["target", "rel", "title", "id", "aria-label"]) {
+    const v = rest[key];
+    if (v !== undefined && v !== null) attrs[key] = String(v);
+  }
+  if (rest.target === "_blank" && rest.rel === undefined) attrs.rel = "noopener noreferrer";
+  if (rest.className) attrs.class = String(rest.className);
+  return attrs;
+}
+
 // Link - renders an <a> tag wired for SPA navigation (server renderer).
 export function Link(props: {
   href?: string;
@@ -559,33 +712,10 @@ export function Link(props: {
   children?: JSXNode;
   [key: string]: any;
 }): JSXNode {
-  const { href = "", prefetch, replace, scroll, children, ...rest } = props;
-  const attrs: string[] = [];
-  if (href) attrs.push(`href="${escapeHTML(withBase(href))}"`);
-
-  const external =
-    /^(https?:|mailto:|tel:|#|javascript:)/.test(href) ||
-    href.startsWith("//") ||
-    rest.target === "_blank" ||
-    rest.download !== undefined;
-
-  if (external) {
-    attrs.push("data-krate-external");
-  } else {
-    attrs.push("data-krate-link");
-    if (prefetch !== false) attrs.push("data-prefetch");
-    if (replace) attrs.push("data-krate-replace");
-    if (scroll === false) attrs.push('data-krate-scroll="false"');
-  }
-
-  for (const key of ["target", "rel", "title", "id", "aria-label"]) {
-    const v = rest[key];
-    if (v !== undefined && v !== null) attrs.push(`${key}="${escapeHTML(String(v))}"`);
-  }
-  if (rest.target === "_blank" && rest.rel === undefined) attrs.push('rel="noopener noreferrer"');
-  if (rest.className) attrs.push(`class="${escapeHTML(String(rest.className))}"`);
-
-  const inner = children != null ? renderNode(children) : "";
+  const attrs = Object.entries(linkAttributes(props)).map(([k, v]) =>
+    v === "" ? k : `${k}="${escapeHTML(v)}"`,
+  );
+  const inner = props.children != null ? renderNode(props.children) : "";
   return raw(`<a ${attrs.join(" ")}>${inner}</a>`);
 }
 

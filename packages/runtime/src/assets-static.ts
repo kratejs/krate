@@ -8,7 +8,17 @@ export interface AssetFetcher {
   fetch(request: Request): Promise<Response>;
 }
 
-export function createAssetsStaticLayer(assets: AssetFetcher): StaticLayer {
+export interface AssetsStaticOptions {
+  /**
+   * Ask for a folder's index.html file by name. The generated wrangler config
+   * sets assets.html_handling to "none" for trailingSlash "ignore", so the
+   * platform no longer maps /x and /x/ to x/index.html or redirects between
+   * them; the layer does that mapping itself and both URLs serve the page.
+   */
+  directoryIndex?: boolean;
+}
+
+export function createAssetsStaticLayer(assets: AssetFetcher, options: AssetsStaticOptions = {}): StaticLayer {
   const probe = async (url: string, path: string): Promise<boolean> => {
     const u = new URL(url);
     u.pathname = path;
@@ -29,7 +39,14 @@ export function createAssetsStaticLayer(assets: AssetFetcher): StaticLayer {
     },
     async serve(request, urlPath) {
       origin = new URL(request.url).origin;
-      void urlPath;
+      if (options.directoryIndex && extName(urlPath) === "") {
+        const rel = urlPath.replace(/^\/+|\/+$/g, "");
+        const u = new URL(request.url);
+        u.pathname = rel === "" ? "/index.html" : "/" + rel + "/index.html";
+        const indexed = await assets.fetch(new Request(u.toString(), request));
+        // A file without an extension (and no folder of that name) is still served as itself.
+        if (indexed.status !== 404) return indexed;
+      }
       const res = await assets.fetch(request);
       return res.status === 404 ? null : res;
     },

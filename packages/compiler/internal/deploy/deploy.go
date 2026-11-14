@@ -41,9 +41,14 @@ func ServerFeatures(root, outDir string) []string {
 			out = append(out, "SSR/ISR/streaming pages")
 		}
 	}
+	// metaDir holds the per-request robots.ts/sitemap.ts/manifest.ts routes.
+	const metaDir = "__krate_meta"
 	hasFiles := func(dir string) bool {
 		n := 0
-		_ = filepath.WalkDir(dir, func(_ string, d os.DirEntry, err error) error {
+		_ = filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
+			if err == nil && d.IsDir() && d.Name() == metaDir {
+				return filepath.SkipDir
+			}
 			if err == nil && !d.IsDir() {
 				n++
 			}
@@ -53,6 +58,9 @@ func ServerFeatures(root, outDir string) []string {
 	}
 	if hasFiles(serverOut("api")) || hasFiles(serverOut("api-node")) || fileExists(gohost.RoutesManifestPath(root)) {
 		out = append(out, "API routes")
+	}
+	if dirExists(filepath.Join(serverOut("api-node"), metaDir)) {
+		out = append(out, "per-request metadata routes (robots.ts, sitemap.ts or manifest.ts with dynamic or revalidate)")
 	}
 	if data, err := os.ReadFile(filepath.Join(root, ".krate", "actions", "manifest.json")); err == nil {
 		var m struct {
@@ -294,6 +302,17 @@ func emitVercel(cfg *config.Config, root, outDir string) ([]string, error) {
 	if v, ok := cfg.Deploy.Options["cleanUrls"]; ok {
 		doc["cleanUrls"] = strings.EqualFold(v, "true")
 	}
+	// The top-level trailingSlash setting maps onto Vercel's: "always" is true,
+	// "never" is false and "ignore" leaves it unset (both forms serve). An
+	// explicit deploy option still wins.
+	switch cfg.TrailingSlashMode() {
+	case "never":
+		doc["trailingSlash"] = false
+	default:
+		if cfg.TrailingSlash == "always" {
+			doc["trailingSlash"] = true
+		}
+	}
 	if v, ok := cfg.Deploy.Options["trailingSlash"]; ok {
 		doc["trailingSlash"] = strings.EqualFold(v, "true")
 	}
@@ -468,6 +487,15 @@ func emitDocker(cfg *config.Config, root, outDir string) ([]string, error) {
 	fmt.Fprintf(&b, "    mkdir -p \"/tmp/runtime/%s\" && cp -a \"%s/.\" \"/tmp/runtime/%s/\" \\\n", rel, rel, rel)
 	b.WriteString(" && if [ -d .krate ]; then mkdir -p /tmp/runtime/.krate && cp -a .krate/. /tmp/runtime/.krate/ \\\n")
 	b.WriteString("      && rm -rf /tmp/runtime/.krate/cache /tmp/runtime/.krate/types /tmp/runtime/.krate/config.schema.json /tmp/runtime/.krate/segments /tmp/runtime/.krate/goext; fi\n")
+	if dirs, skipped := traceIncludeDirs(cfg.OutputFileTracingIncludes); len(dirs) > 0 || len(skipped) > 0 {
+		b.WriteString("# outputFileTracingIncludes: runtime-read project files (the leading directory of each glob).\n")
+		for _, g := range skipped {
+			fmt.Fprintf(&b, "# glob %q has no leading directory: copy what it matches into the runtime stage yourself.\n", g)
+		}
+		if len(dirs) > 0 {
+			b.WriteString("RUN for p in " + strings.Join(dirs, " ") + "; do if [ -e \"$p\" ]; then cp -a --parents \"$p\" /tmp/runtime/; fi; done\n")
+		}
+	}
 	b.WriteString("\n")
 	b.WriteString("FROM node:22-bookworm-slim\n")
 	b.WriteString("ENV NODE_ENV=production\n")

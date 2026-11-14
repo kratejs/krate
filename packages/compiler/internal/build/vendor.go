@@ -182,7 +182,14 @@ func (b *Builder) vendorPreamble(used []vendorImport) (string, error) {
 	if b.DevMode {
 		mode = "development"
 	}
+	// A package built on React (a toast helper, a motion utility) imports
+	// react at load time; it runs on Preact's compat layer like the islands.
+	var alias map[string]string
+	if findPreactDir(b.Root) != "" {
+		alias = islandAlias(b.Root, true)
+	}
 	res := esbuildBuild(api.BuildOptions{
+		Alias:             alias,
 		Stdin:             &api.StdinOptions{Contents: src.String(), ResolveDir: b.Root, Sourcefile: "krate-vendor.js", Loader: api.LoaderJS},
 		Bundle:            true,
 		Write:             false,

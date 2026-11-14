@@ -660,7 +660,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 			}
 			entryModule = rewritten
 			reactIslandImps = append(reactIslandImps, irtree.ExternalImport{
-				Source: rewritten.Path, Local: reactIslandPageLocal, Default: true, ReactIsland: true, ClientOnly: im.ClientOnly,
+				Source: rewritten.Path, Local: reactIslandPageLocal, Default: true, ReactIsland: true, ClientOnly: im.ClientOnly, RealReact: im.Real,
 			})
 		}
 	}
@@ -671,7 +671,11 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		}
 	}
 	pageDeps = append(pageDeps, bundle.CSSDeps...)
-	if len(reactIslands) > 0 {
+	layoutCut, cutErr := b.prepareLayoutCut(spp.PagePath)
+	if cutErr != nil {
+		return nil, "", cutErr
+	}
+	if len(reactIslands) > 0 && !entryIsAsync(entryModule.Program) && layoutCut == nil {
 		bundle.Modules = krateSideModules(bundle.Modules, entryModule, reactIslands, bnd.Resolve)
 	}
 
@@ -690,7 +694,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	if err := b.ensureTransformedModules(bundle.Modules); err != nil {
 		return nil, "", err
 	}
-	renderMode, revalidate, _ := resolvePageRenderMode(spp.PagePath, entryModule, bundle.Modules)
+	renderMode, revalidate, _ := resolvePageRenderMode(spp.PagePath, entryModule, bundle.Modules, b.importResolver().Resolve)
 
 	// Global streaming override: if configured, all *static* pages stream.
 	// Explicit ssr/isr opts win - forcing them to streaming would silently
@@ -714,19 +718,26 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	annotator.MergeModuleFunctions(ann, extraPrograms)
 	annotator.MergeImportAliases(ann, extraPrograms, annotator.ModuleSource{Program: entryModule.Program, Path: entryModule.Path, RawSource: entryModule.SourceCode, Resolver: bundle.Resolver})
 	annotator.ReclassifyTiers(ann, b.Cfg)
-	serverPage, serverErr := b.applyServerComponentMode(spp.PagePath, entryModule, ann, strings.EqualFold(b.Cfg.Output, "static"), &renderMode, &revalidate)
+	serverPage, serverErr := b.applyServerComponentMode(spp.PagePath, entryModule, ann, strings.EqualFold(b.Cfg.Output, "static"), layoutCut, &renderMode, &revalidate)
 	if serverErr == nil && !serverPage {
 		serverErr = topLevelAwaitError(entryModule, extraPrograms)
 	}
 	if serverErr != nil {
 		return nil, "", serverErr
 	}
-	if serverPage && len(reactIslands) > 0 {
-		return nil, "", reactIslandDiag(firstReactIsland(reactIslands), "a server-rendered page")
-	}
 	clientBoundaries, cbErr := b.prepareClientBoundaries(bundle, ann, serverPage)
 	if cbErr != nil {
 		return nil, "", cbErr
+	}
+	if serverPage || len(serverComponentNames(ann)) > 0 {
+		pkgBoundaries, pbErr := b.serverTreeBoundaries(bundle, reactIslands, bnd.Resolve, serverPage)
+		if pbErr != nil {
+			return nil, "", pbErr
+		}
+		clientBoundaries = append(clientBoundaries, pkgBoundaries...)
+		if layoutCut != nil {
+			clientBoundaries = mergeBoundaries(clientBoundaries, layoutCut.Boundaries)
+		}
 	}
 	var (
 		tree       *irtree.ComponentTree
@@ -734,6 +745,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		goBaked    map[string]string
 	)
 	externalByLocal, externalImports, localImports := entryExternalImports(entryModule.Program)
+	b.markRealReactImports(externalByLocal, externalImports, filepath.Dir(entryModule.Path))
 	for _, imp := range reactIslandImps {
 		if _, dup := externalByLocal[imp.Local]; dup {
 			kept := externalImports[:0]
@@ -771,6 +783,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		emitter.CodeTheme = b.Cfg.Markdown.CodeTheme
 		emitResult = emitter.Emit(tree)
 		renderer.EmitMeta(tree, emitResult)
+		emitResult.HeadHTML = dedupeHeadLast(emitResult.HeadHTML)
 
 		if len(emitResult.Errors) > 0 {
 			return nil, "", renderErrors(spp.PagePath, emitResult.Errors)
@@ -788,7 +801,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		}
 	}
 
-	if len(clientBoundaries) > 0 {
+	if anyBoundaryHydrates(clientBoundaries) {
 		loader, lerr := b.islandLoaderHTML()
 		if lerr != nil {
 			return nil, "", lerr
@@ -841,7 +854,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	}
 
 	var deps []string
-	layoutCSS, layoutFiles, _, routeChain, layoutErr := b.applyLayoutStack(spp.PagePath, emitResult)
+	layoutCSS, layoutFiles, _, routeChain, layoutErr := b.applyLayoutStack(spp.PagePath, emitResult, layoutCut)
 	if layoutErr != nil {
 		return nil, "", layoutErr
 	}
@@ -863,14 +876,19 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	hydrationJS := ""
 	hasJS := false
 	var pageProviders *islandProviders
-	if len(tree.ExternalComponents) > 0 {
+	pageIslands := tree.ExternalComponents
+	if layoutExts, layoutImps := b.layoutIslandsFor(spp.PagePath); len(layoutExts) > 0 {
+		pageIslands = append(append([]irtree.ExternalComponent(nil), layoutExts...), pageIslands...)
+		externalImports = append(append([]irtree.ExternalImport(nil), externalImports...), layoutImps...)
+	}
+	if len(pageIslands) > 0 {
 		pageProviders = b.pageProviders(spp.PagePath)
 	}
 	// Every generated page owns its island entries: the template and each
 	// param entry share a source file, and one owner would keep only the last.
 	islandBoot, islandJS, islandSSR, islandStyles, islandErr := b.buildIslands(
 		spp.PagePath+"\x00"+spp.OutPath,
-		tree.ExternalComponents,
+		pageIslands,
 		externalImports,
 		entryLocalImports(entryModule.Program),
 		filepath.Dir(entryModule.Path),
@@ -888,7 +906,9 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	}
 	b.recordDeps(spp.PagePath, deps)
 	if len(islandSSR) > 0 {
-		emitResult.HTML = injectIslandSSR(emitResult.HTML, islandSSR)
+		var islandHead string
+		emitResult.HTML, islandHead = injectIslandSSR(emitResult.HTML, islandSSR)
+		emitResult.HeadHTML = islandHead + emitResult.HeadHTML
 	}
 	emitResult.IslandBootJS = islandBoot
 	needsHydrate := len(emitResult.Signatures) > 0 || islandJS != "" || islandBoot != "" || strings.Contains(emitResult.HTML, "data-krate-portal")
@@ -971,6 +991,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		MetadataSegments:  metaSegs,
 		MetadataPageFiles: metaPageFiles,
 		ClientBoundaries:  clientBoundaries,
+		ComposedLayouts:   layoutCutLayouts(layoutCut),
 	}
 	if renderMode != RenderSSG {
 		result.IslandStubs = newIslandServerStubs(entryModule.Program, tree.ExternalComponents, islandSSR)

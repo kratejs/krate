@@ -151,6 +151,7 @@ var additiveArrayKeys = map[string]bool{
 	"serverComponents":  true,
 	"runtimeComponents": true,
 	"serverDirs":        true,
+	"cssImportRoots":    true,
 	"runtimeDirs":       true,
 	"hostFunctions":     true,
 	"hostDirs":          true,

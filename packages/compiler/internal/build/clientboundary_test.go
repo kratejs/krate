@@ -62,7 +62,11 @@ export default async function Home() {
 	if !strings.Contains(string(shell), `island-loader.`) || !strings.Contains(string(shell), "importmap") {
 		t.Errorf("server page shell needs the island loader and the Preact import map:\n%s", shell)
 	}
-	chunks, _ := filepath.Glob(filepath.Join(root, "dist", "chunks", "client.*.js"))
+	// The boundary chunk is an entry of the island graph.
+	if err := b.writeIslandBundles(); err != nil {
+		t.Fatal(err)
+	}
+	chunks, _ := filepath.Glob(filepath.Join(root, "dist", "chunks", "island_*.js"))
 	if len(chunks) != 1 {
 		t.Fatalf("expected one client chunk, got %v", chunks)
 	}

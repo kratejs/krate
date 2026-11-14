@@ -330,7 +330,7 @@ func goServerBundlePlugin(baked map[string]string, root string) api.Plugin {
 			// Go component are annotated too, so their call sites can inline baked
 			// HTML. Project files are the only ones loaded (packages are external).
 			pb.OnLoad(api.OnLoadOptions{Filter: `\.[jt]sx?$`, Namespace: "file"}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
-				data, err := os.ReadFile(args.Path)
+				data, err := readServerSource(pb.InitialOptions.AbsWorkingDir, args.Path)
 				if err != nil {
 					return api.OnLoadResult{}, err
 				}

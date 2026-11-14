@@ -31,6 +31,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/gotsgen"
 	"github.com/kratejs/krate/packages/compiler/internal/icons"
 	"github.com/kratejs/krate/packages/compiler/internal/irtree"
+	"github.com/kratejs/krate/packages/compiler/internal/jseval"
 	jscompat "github.com/kratejs/krate/packages/compiler/internal/jsruntime"
 	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
 	"github.com/kratejs/krate/packages/compiler/internal/native/bake"
@@ -45,6 +46,12 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/tsstrip"
 	"github.com/kratejs/krate/packages/native/jsruntime"
 )
+
+// isDynamicSegment reports whether a segment page (404, 401, 403) renders per
+// request instead of being prerendered.
+func (r *PageResult) isDynamicSegment() bool {
+	return r.IsErrorPage && r.Mode != RenderSSG
+}
 
 type PageResult struct {
 	Page     string
@@ -127,6 +134,9 @@ type PageResult struct {
 	// page that renders server components. The page server bundle wraps their
 	// exports in client boundaries (clientboundary.go).
 	ClientBoundaries []ClientBoundary
+	// ComposedLayouts are the async layouts (and the layouts inside them) the
+	// page server bundle renders around the page, innermost first.
+	ComposedLayouts []string
 	// IslandStubs replaces the islands of a page rendered per request in its
 	// server bundle (nil for static pages and pages without islands).
 	IslandStubs *islandServerStubs
@@ -321,7 +331,10 @@ type Builder struct {
 	// clientChunkMu guards clientChunks: "use client" module path -> URL of
 	// its hydration chunk, built once per build (clientboundary.go).
 	clientChunkMu sync.Mutex
-	clientChunks  map[string]string
+	clientChunks  map[string]clientChunkInfo
+	// clientChunkText is the standalone build of each boundary chunk, by URL,
+	// for the CSS pass that scans client code.
+	clientChunkText map[string]string
 
 	// actions holds the discovered `"use server"` modules and their compiled
 	// bundles for this build. It is refreshed by prepareActions before pages.
@@ -352,14 +365,27 @@ func (b *Builder) viewTransitionsOff() bool {
 	return b.Cfg.ViewTransitions == "off"
 }
 
-var nativeCfgScriptRe = regexp.MustCompile(`<script>window\.__KRATE_CFG__=[^<]*;</script>\n?`)
+// cfgBlockID is the id of the JSON data block that carries the site runtime
+// config; the runtime copies it into globalThis.__KRATE_CFG__ (see
+// packages/runtime/src/site-config.ts).
+const cfgBlockID = "__krate_cfg__"
+
+var nativeCfgScriptRe = regexp.MustCompile(`<script type="application/json" id="` + cfgBlockID + `">[^<]*</script>\n?`)
 
 // runtimeCommonHead returns the per-page <head> extras: the site runtime config
-// (window.__KRATE_CFG__) for the SPA router, and the View Transitions CSS when
-// enabled. Emitted on every page (production and dev).
+// for the SPA router, and the View Transitions CSS when enabled. Emitted on
+// every page (production and dev).
+//
+// The config is a non-executing JSON data block, so a strict script-src
+// policy needs no allowance for it. It is written only when it carries
+// something the runtime cannot assume: a base path, View Transitions turned
+// off, or the dev flag. The defaults need no block at all.
 func (b *Builder) runtimeCommonHead() string {
 	var sb strings.Builder
-	cfg := map[string]interface{}{"basePath": b.Cfg.BaseURLPath()}
+	cfg := map[string]interface{}{}
+	if bp := b.Cfg.BaseURLPath(); bp != "" {
+		cfg["basePath"] = bp
+	}
 	if b.DevMode {
 		// Enables the SPA router's dev warnings (e.g. a layout it could not keep mounted).
 		cfg["dev"] = true
@@ -367,13 +393,14 @@ func (b *Builder) runtimeCommonHead() string {
 	off := b.viewTransitionsOff()
 	if off {
 		cfg["viewTransitions"] = false
-	} else {
-		cfg["viewTransitions"] = "auto"
 	}
-	if data, err := json.Marshal(cfg); err == nil {
-		sb.WriteString("<script>window.__KRATE_CFG__=")
-		sb.Write(data)
-		sb.WriteString(";</script>\n")
+	if len(cfg) > 0 {
+		// json.Marshal escapes "<", so a value can never close the block.
+		if data, err := json.Marshal(cfg); err == nil {
+			sb.WriteString(`<script type="application/json" id="` + cfgBlockID + `">`)
+			sb.Write(data)
+			sb.WriteString("</script>\n")
+		}
 	}
 	if !off {
 		sb.WriteString("<style>@view-transition{navigation:auto}")
@@ -939,8 +966,11 @@ func (b *Builder) BuildAll() error {
 	b.twMu.Lock()
 	b.twPages = nil
 	b.twMu.Unlock()
+	// Passes before page bundling keep going on failure so one build shows
+	// every error class (see passErrors).
+	var early passErrors
 	if err := b.prepareActions(); err != nil {
-		return err
+		early.add("Server action error", err)
 	}
 
 	if err := writeConfigSchema(b.Root); err != nil {
@@ -952,15 +982,13 @@ func (b *Builder) BuildAll() error {
 		return fmt.Errorf("finding pages: %w", err)
 	}
 	if err := validateRouteTree(pages, b.Cfg.PagesDir); err != nil {
-		return err
+		return early.finish(err)
 	}
 	// Metadata routes (sitemap, robots, manifest, opengraph-image) run first:
-	// the pages' <head> carries the image URLs they produce.
-	if errs := b.buildMetadataRoutes(pages); len(errs) > 0 {
-		for _, err := range errs {
-			fmt.Fprintf(os.Stderr, "  %sMetadata route error:%s %s\n", cRed, cReset, strings.ReplaceAll(diag.FormatDiagnostics([]error{err}), "\n", "\n    "))
-		}
-		return errors.Join(errs...)
+	// the pages' <head> carries the image URLs they produce. A failing route
+	// only leaves its own output (and image URLs) out.
+	for _, err := range b.buildMetadataRoutes(pages) {
+		early.add("Metadata route error", err)
 	}
 	// Intercepting slot pages are built as fragments the SPA router swaps
 	// into their slot (see parallel.go).
@@ -1079,13 +1107,13 @@ func (b *Builder) BuildAll() error {
 		for _, ve := range cres.Validation {
 			fmt.Fprintf(os.Stderr, "  %sContent error:%s %v\n", cRed, cReset, ve)
 		}
-		return &ContentValidationError{Errors: cres.Validation}
+		return early.finish(&ContentValidationError{Errors: cres.Validation})
 	}
 
 	// Build the Go host (API routes + components) before pages, so pages that
 	// import Go components can render them through the host at build time.
 	if err := b.BuildAllGoAPI(); err != nil {
-		return err
+		return early.finish(err)
 	}
 
 	if err := b.contextErr(); err != nil {
@@ -1130,6 +1158,11 @@ func (b *Builder) BuildAll() error {
 	errorCount := 0
 	var failureMessages []string
 	var failureErrs []error
+	for _, err := range early.errs {
+		failureMessages = append(failureMessages, "  "+err.Error())
+		failureErrs = append(failureErrs, err)
+		errorCount++
+	}
 	// failOutput records a shipped file that could not be written.
 	failOutput := func(err error) {
 		fmt.Fprintf(os.Stderr, "\n  %sx Error:%s %v\n", cRed, cReset, err)
@@ -1585,7 +1618,14 @@ func (b *Builder) inlineImports(cssText string) string {
 			b.warnTailwindOff("", d)
 		}
 	}
-	return css.InlineImportsWith(cssText, b.Root, css.ImportOptions{Root: b.Root, Tailwind: b.tailwindImportMode()})
+	bnd := bundler.New(b.Root)
+	bnd.SetCSSImportRoots(b.Cfg.CSSImportRoots)
+	return css.InlineImportsWith(cssText, b.Root, css.ImportOptions{
+		Root:       b.Root,
+		AllowRoots: bnd.CSSImportRoots(),
+		Resolve:    bundler.ResolveCSSSpecifier,
+		Tailwind:   b.tailwindImportMode(),
+	})
 }
 
 // tailwindOptions builds the Tailwind options from config.
@@ -2010,7 +2050,7 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 				pageDir = filepath.Join(b.Cfg.OutDir, r.OutName)
 			}
 
-			if !r.IsErrorPage {
+			if !r.IsErrorPage || r.isDynamicSegment() {
 				if err := os.MkdirAll(pageDir, 0755); err != nil {
 					b.pluginFailed(fmt.Errorf("creating page dir %s: %w", pageDir, err))
 					return
@@ -2021,6 +2061,11 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 			// first <title>/meta/canonical per key wins; site.titleTemplate
 			// shapes the document title the same way it shapes og:title.
 			r.HeadHTML = templateHeadTitle(dedupeHead(r.HeadHTML), b.Cfg.SEO)
+			// <html> and <body> elements in <Head> are attributes of the
+			// document elements, not head content. The page's come before
+			// its layouts', so the first one wins.
+			var headHTMLAttrs, headBodyAttrs docAttrs
+			r.HeadHTML, headHTMLAttrs, headBodyAttrs = splitDocTags(r.HeadHTML, false)
 
 			// 1. Construct structural HTML wrapper in memory.
 			// Site-global stylesheets (e.g. Tailwind) are linked first, then
@@ -2103,13 +2148,19 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 			finish := func(h string) string {
 				// 1. Document language: per-page lang wins (e.g. docs locales),
 				// then site.locale; otherwise the default "en" stands.
-				lang := r.Lang
-				if lang == "" {
-					lang = b.Cfg.SEO.Locale
+				// Document attributes: site.locale, then site.htmlAttributes,
+				// then <html> in <Head>; the page's own `lang` export wins.
+				site := b.Cfg.Site
+				htmlAttrs := docAttrs{}
+				if loc := b.Cfg.SEO.Locale; loc != "" {
+					htmlAttrs["lang"] = loc
 				}
-				if lang != "" {
-					h = strings.Replace(h, "<html lang=\"en\">", "<html lang=\""+escape.HTMLAttr(lang)+"\">", 1)
+				htmlAttrs = mergeDocAttrs(mergeDocAttrs(htmlAttrs, configDocAttrs(site.HTMLAttributes)), headHTMLAttrs)
+				if r.Lang != "" {
+					htmlAttrs["lang"] = r.Lang
 				}
+				h = setStartTagAttrs(h, "html", htmlAttrs)
+				h = setStartTagAttrs(h, "body", mergeDocAttrs(configDocAttrs(site.BodyAttributes), headBodyAttrs))
 				// 1b. Site-wide <head> injection (head + analytics), added before
 				// CSP so inline analytics scripts get hash-allow-listed.
 				if tags := b.globalHeadHTML(h); tags != "" {
@@ -2165,6 +2216,14 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 				b.pluginFailed(fmt.Errorf("writing %s: %w", htmlPath, err))
 				return
 			}
+			if r.isDynamicSegment() {
+				// The renderer addresses the page as a route: its shell sits
+				// where a route's index.html would.
+				if err := fsutil.WriteFileIfChanged(filepath.Join(pageDir, "index.html"), []byte(html), 0644); err != nil {
+					b.pluginFailed(fmt.Errorf("writing the shell of %s: %w", r.Page, err))
+					return
+				}
+			}
 			if legacyHTML != "" {
 				if err := fsutil.WriteFileIfChanged(filepath.Join(pageDir, "index.legacy.html"), []byte(finish(legacyHTML)), 0644); err != nil {
 					b.pluginFailed(fmt.Errorf("writing legacy document for %s: %w", r.Page, err))
@@ -2213,6 +2272,7 @@ func (b *Builder) newBundler() *bundler.Bundler {
 	bnd.SetProgramReadLock(b.readProgram)
 	bnd.SetPathAliases(b.cfgPathAliasPrefixes(), b.cfgPathAliasTargets(), b.Cfg.TSBaseDir)
 	bnd.SetBaseURL(b.Cfg.TSBaseURL)
+	bnd.SetCSSImportRoots(b.Cfg.CSSImportRoots)
 	bnd.SetServerComponents(b.Cfg.ServerComponents, b.Cfg.RuntimeComponents, b.Cfg.ServerDirs, b.Cfg.RuntimeDirs)
 	bnd.SetTSOptions(tsstrip.Options{
 		ExperimentalDecorators:  b.Cfg.TSCompilerOptions.ExperimentalDecorators,
@@ -2349,7 +2409,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 			}
 			entryModule = rewritten
 			reactIslandImps = append(reactIslandImps, irtree.ExternalImport{
-				Source: rewritten.Path, Local: reactIslandPageLocal, Default: true, ReactIsland: true, ClientOnly: im.ClientOnly,
+				Source: rewritten.Path, Local: reactIslandPageLocal, Default: true, ReactIsland: true, ClientOnly: im.ClientOnly, RealReact: im.Real,
 			})
 		}
 	}
@@ -2367,7 +2427,11 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 	// The modules an island bundles for Preact are not Krate source from here
 	// on: the lowering, module-state and vendor passes would try to compile
 	// their hooks and initializers. Their files stay in deps above.
-	if len(reactIslands) > 0 {
+	layoutCut, cutErr := b.prepareLayoutCut(page)
+	if cutErr != nil {
+		return nil, "", cutErr
+	}
+	if len(reactIslands) > 0 && !entryIsAsync(entryModule.Program) && layoutCut == nil {
 		bundle.Modules = krateSideModules(bundle.Modules, entryModule, reactIslands, bnd.Resolve)
 	}
 
@@ -2392,7 +2456,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 
 	// Detect rendering mode (SSR/ISR/Streaming) from AST exports + <Suspense>
 	// usage, falling back to the page's data-cache reads (tagged/timed fetch).
-	renderMode, revalidate, dataUsage := resolvePageRenderMode(page, entryModule, bundle.Modules)
+	renderMode, revalidate, dataUsage := resolvePageRenderMode(page, entryModule, bundle.Modules, bnd.Resolve)
 	explicitStatic := renderMode == RenderSSG
 	declaredMode := renderMode
 	pageLang := detectPageLang(entryModule.Program)
@@ -2450,17 +2514,28 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 	pageBase := strings.TrimSuffix(filepath.Base(page), filepath.Ext(page))
 	isSegment := isSegmentPageBase(pageBase)
 	if isSegment && renderMode != RenderSSG {
-		// Segment pages are prerendered once and picked per request by the
-		// server, so a request-time mode cannot apply to them.
-		if declaredMode != RenderSSG || importsRuntimeComponent(bundle.Modules) {
-			d := diag.New(page, 1, 1, filepath.Base(page)+" is a segment page and is always prerendered; its "+renderMode.String()+" rendering mode is ignored",
-				"read request data in client code, or use a normal route for request-time content", "").WithCode(diag.CodeSegmentRequestMode)
-			d.Severity = diag.SeverityWarning
-			printWarningsOnce(os.Stderr, []diag.Diagnostic{d})
-			pageWarnings = append(pageWarnings, d)
+		segKind, _ := segmentKindOfFile(page)
+		if segKind != SegmentError {
+			// A not-found, forbidden or unauthorized page that asks for
+			// request-time rendering is rendered per request with its status.
+			// ISR makes no sense for a response that is never cached.
+			if renderMode == RenderISR {
+				renderMode = RenderSSR
+			}
+			revalidate = 0
+		} else {
+			// An error page answers while the app is failing, so it never
+			// depends on the renderer: it is prerendered once.
+			if declaredMode != RenderSSG || importsRuntimeComponent(bundle.Modules) {
+				d := diag.New(page, 1, 1, filepath.Base(page)+" is an error page and is always prerendered; its "+renderMode.String()+" rendering mode is ignored",
+					"read request data in client code; only 404, 401 and 403 pages can render per request", "").WithCode(diag.CodeSegmentRequestMode)
+				d.Severity = diag.SeverityWarning
+				printWarningsOnce(os.Stderr, []diag.Diagnostic{d})
+				pageWarnings = append(pageWarnings, d)
+			}
+			renderMode = RenderSSG
+			revalidate = 0
 		}
-		renderMode = RenderSSG
-		revalidate = 0
 	}
 
 	isDynRoute := isDynamicRoute(page, b.Cfg.PagesDir)
@@ -2478,7 +2553,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 	annotator.MergeImportAliases(ann, extraPrograms, annotator.ModuleSource{Program: entryModule.Program, Path: entryModule.Path, RawSource: entryModule.SourceCode, Resolver: bundle.Resolver})
 	// Re-classify tiers for any newly discovered components
 	annotator.ReclassifyTiers(ann, b.Cfg)
-	serverPage, serverErr := b.applyServerComponentMode(page, entryModule, ann, staticMode, &renderMode, &revalidate)
+	serverPage, serverErr := b.applyServerComponentMode(page, entryModule, ann, staticMode, layoutCut, &renderMode, &revalidate)
 	if serverErr == nil && !serverPage {
 		serverErr = topLevelAwaitError(entryModule, extraPrograms)
 	}
@@ -2498,9 +2573,6 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 			}
 		}
 	}
-	if serverPage && len(reactIslands) > 0 {
-		return nil, "", reactIslandDiag(firstReactIsland(reactIslands), "a server-rendered page")
-	}
 	if errs := annotator.CheckInteractiveTierComponents(ann, bundle.ActionImports); len(errs) > 0 {
 		return nil, "", errs[0]
 	}
@@ -2508,6 +2580,16 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 	clientBoundaries, cbErr := b.prepareClientBoundaries(bundle, ann, serverPage)
 	if cbErr != nil {
 		return nil, "", cbErr
+	}
+	if serverPage || len(serverComponentNames(ann)) > 0 {
+		pkgBoundaries, pbErr := b.serverTreeBoundaries(bundle, reactIslands, bnd.Resolve, serverPage)
+		if pbErr != nil {
+			return nil, "", pbErr
+		}
+		clientBoundaries = append(clientBoundaries, pkgBoundaries...)
+		if layoutCut != nil {
+			clientBoundaries = mergeBoundaries(clientBoundaries, layoutCut.Boundaries)
+		}
 	}
 	var (
 		tree       *irtree.ComponentTree
@@ -2517,6 +2599,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 		regions    []Region
 	)
 	externalByLocal, externalImports, localImports := entryExternalImports(entryModule.Program)
+	b.markRealReactImports(externalByLocal, externalImports, filepath.Dir(entryModule.Path))
 	// A path alias ("@/components/X") looks like a package scope, so the page's
 	// own import list already holds it as a package binding; the island
 	// binding replaces it.
@@ -2598,6 +2681,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 			return t, em.Emit(t)
 		})
 		renderer.EmitMeta(tree, emitResult)
+		emitResult.HeadHTML = dedupeHeadLast(emitResult.HeadHTML)
 		warnings := emitResult.Warnings
 		if isDynRoute {
 			warnings = withoutTemplateSlotWarnings(warnings)
@@ -2623,7 +2707,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 		}
 	}
 	stopCompile()
-	if len(clientBoundaries) > 0 {
+	if anyBoundaryHydrates(clientBoundaries) {
 		loader, lerr := b.islandLoaderHTML()
 		if lerr != nil {
 			return nil, "", lerr
@@ -2706,7 +2790,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 		fragmentInfo = fragmentInfoScript(intercept.Slot.Key, scope, intercept.Page.Target)
 	} else {
 		var layoutErr error
-		layoutCSS, layoutFiles, layoutHasSignals, routeChain, layoutErr = b.applyLayoutStack(page, emitResult)
+		layoutCSS, layoutFiles, layoutHasSignals, routeChain, layoutErr = b.applyLayoutStack(page, emitResult, layoutCut)
 		if layoutErr != nil {
 			return nil, "", layoutErr
 		}
@@ -2783,10 +2867,11 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 			MetadataSegments:  metaSegs,
 			MetadataPageFiles: metaPageFiles,
 			ClientBoundaries:  clientBoundaries,
+			ComposedLayouts:   layoutCutLayouts(layoutCut),
 		}, bundle.CSS, nil
 	}
 
-	if !isSegment {
+	if !isSegment || renderMode != RenderSSG {
 		if err := os.MkdirAll(pageDir, 0755); err != nil {
 			return nil, "", fmt.Errorf("creating page dir: %w", err)
 		}
@@ -2797,12 +2882,18 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 	var jsBytes []byte
 	hasJS := false
 	var pageProviders *islandProviders
-	if len(tree.ExternalComponents) > 0 {
+	pageIslands := tree.ExternalComponents
+	layoutExts, layoutImps := b.layoutIslandsFor(page)
+	if len(layoutExts) > 0 {
+		pageIslands = append(append([]irtree.ExternalComponent(nil), layoutExts...), pageIslands...)
+		externalImports = append(append([]irtree.ExternalImport(nil), externalImports...), layoutImps...)
+	}
+	if len(pageIslands) > 0 {
 		pageProviders = b.pageProviders(page)
 	}
 	islandBoot, islandJS, islandSSR, islandStyles, islandErr := b.buildIslands(
 		page,
-		tree.ExternalComponents,
+		pageIslands,
 		externalImports,
 		entryLocalImports(entryModule.Program),
 		filepath.Dir(entryModule.Path),
@@ -2821,7 +2912,9 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 		deps = append(deps, islandStyles.Deps...)
 	}
 	if len(islandSSR) > 0 {
-		emitResult.HTML = injectIslandSSR(emitResult.HTML, islandSSR)
+		var islandHead string
+		emitResult.HTML, islandHead = injectIslandSSR(emitResult.HTML, islandSSR)
+		emitResult.HeadHTML = islandHead + emitResult.HeadHTML
 	}
 	emitResult.IslandBootJS = islandBoot
 	// Request-time pages are rendered by the server, which highlights their
@@ -2982,6 +3075,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 		MetadataSegments:  metaSegs,
 		MetadataPageFiles: metaPageFiles,
 		ClientBoundaries:  clientBoundaries,
+		ComposedLayouts:   layoutCutLayouts(layoutCut),
 	}
 	if renderMode != RenderSSG {
 		result.IslandStubs = newIslandServerStubs(entryModule.Program, tree.ExternalComponents, islandSSR)
@@ -3216,6 +3310,8 @@ type layoutEmitCacheEntry struct {
 	// providers are the provider wrappers lifted out of the layout for the
 	// islands of its pages (nil when there are none).
 	providers *layoutProviders
+	// islands are the React islands the layout hosts (nil when there are none).
+	islands *layoutIslands
 }
 
 // layoutIDPrefix returns a stable, collision-free namespace for a layout's
@@ -3266,6 +3362,7 @@ func (b *Builder) resetBuildCaches() {
 	b.modCSS.clear()
 	loadingEmitCache.Clear()
 	layoutCache.Clear()
+	asyncLayoutMemo.Clear()
 	routeDirSigCache.Clear()
 	interceptCache.Clear()
 	slotCache.Clear()
@@ -3284,6 +3381,7 @@ func (b *Builder) resetBuildCaches() {
 	// to a "use client" module or its imports.
 	b.clientChunkMu.Lock()
 	b.clientChunks = nil
+	b.clientChunkText = nil
 	b.clientChunkMu.Unlock()
 	// Filesystem-existence and import-resolution memos are per-build: a file
 	// added/removed between dev rebuilds must not be served from a stale entry.
@@ -3336,6 +3434,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 		entry := cached.(*layoutEmitCacheEntry)
 		if layoutCacheFresh(entry) {
 			layoutProviderCache.Store(layoutPath, entry.providers)
+			layoutIslandCache.Store(layoutPath, entry.islands)
 			return &renderer.EmitResult{
 				HTML:           strings.Replace(entry.html, "<!--__children__-->", content, -1),
 				HeadHTML:       entry.headHTML,
@@ -3408,8 +3507,17 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 		}
 	}
 	layoutProviderCache.Store(layoutPath, lifted)
+	var hostedImports []irtree.ExternalImport
+	layoutIslandCache.Store(layoutPath, nil)
 	if islands := b.detectReactIslandModules(layoutBundle.Modules, bnd.Resolve); len(islands) > 0 {
-		return nil, "", nil, false, reactIslandDiag(firstReactIsland(islands), "a layout")
+		lm := findEntryModule(layoutBundle.Modules)
+		if lm == nil || islands[lm.Path] != nil || layoutIslandImports(layoutBundle.Modules, islands, bnd.Resolve) == nil {
+			return nil, "", nil, false, reactIslandDiag(firstReactIsland(islands), "a layout")
+		}
+		hostedImports = layoutIslandImports(layoutBundle.Modules, islands, bnd.Resolve)
+		layoutBundle.Modules = krateSideModules(layoutBundle.Modules, lm, islands, bnd.Resolve)
+	} else {
+		hostedImports = layoutIslandImports(layoutBundle.Modules, nil, bnd.Resolve)
 	}
 	layoutVendorImports.Store(layoutPath, collectVendorImports(layoutBundle))
 	printModuleWarnings(os.Stderr, layoutBundle.Modules)
@@ -3472,10 +3580,24 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	applyModuleBindings(&opts, layoutModule.Path, layoutModule.Program, extraLayoutPrograms)
 	opts.GoComponents = b.collectGoComponents(layoutBundle, b.Root)
 	opts.ActionURLs = layoutBundle.ActionImports
+	if len(hostedImports) > 0 {
+		opts.ExternalImports = map[string]irtree.ExternalImport{}
+		for _, imp := range hostedImports {
+			opts.ExternalImports[imp.Local] = imp
+		}
+	}
 	tree := b.buildTree(layoutModule.Program, ann, opts)
 	if len(tree.Errors) > 0 {
 		return nil, "", nil, false, renderErrors(layoutPath, tree.Errors)
 	}
+	var hosted *layoutIslands
+	if len(tree.ExternalComponents) > 0 {
+		if err := checkLayoutIslands(tree.ExternalComponents); err != nil {
+			return nil, "", nil, false, err
+		}
+		hosted = &layoutIslands{Exts: tree.ExternalComponents, Imports: hostedImports}
+	}
+	layoutIslandCache.Store(layoutPath, hosted)
 	emitter := renderer.NewEmitter()
 	emitter.CodeTheme = b.Cfg.Markdown.CodeTheme
 	emitter.IconResolver = b.iconResolver
@@ -3484,6 +3606,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	emitter.GoComponents = opts.GoComponents
 	emitResult := emitter.Emit(tree)
 	renderer.EmitMeta(tree, emitResult)
+	emitResult.HeadHTML = dedupeHeadLast(emitResult.HeadHTML)
 	if len(emitResult.GoRenders) > 0 {
 		rendered, gerr := b.renderGoComponents(emitResult.GoRenders)
 		if gerr != nil {
@@ -3529,6 +3652,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 		deps:           layoutDeps,
 		depTimes:       modTimesOf(layoutDeps),
 		providers:      lifted,
+		islands:        hosted,
 	})
 
 	// Inject page content at {children} slot
@@ -3923,12 +4047,15 @@ func isRouteGroup(seg string) bool {
 // build fails the page with a diagnostic. Returns the CSS contributed by the
 // boundaries, the files used (page dependencies), whether any uses CSS
 // signals, and the route chain (outermost first).
-func (b *Builder) applyLayoutStack(page string, emitResult *renderer.EmitResult) (string, []string, bool, []routeChainEntry, error) {
+func (b *Builder) applyLayoutStack(page string, emitResult *renderer.EmitResult, cut *layoutCut) (string, []string, bool, []routeChainEntry, error) {
 	var css string
 	var used []string
 	hasSignals := false
 	var chain []routeChainEntry
-	for _, rb := range b.routeStack(page) {
+	if cut != nil {
+		css, used = cut.CSS, append(used, cut.Deps...)
+	}
+	for _, rb := range b.bakedRouteStack(page, cut) {
 		id := b.layoutIDPrefix(rb.Path)
 		open, end := "<!--kl:"+id+"-->", "<!--/kl:"+id+"-->"
 		var slotCSS string
@@ -3950,6 +4077,9 @@ func (b *Builder) applyLayoutStack(page string, emitResult *renderer.EmitResult)
 			}
 		}
 		entry := routeChainEntry{ID: id, Kind: rb.Kind, Depth: routeDepth(rb.Dir, b.Cfg.PagesDir), File: relPath}
+		if layoutHostsIslands(rb.Path) {
+			entry.Why = "the " + rb.Kind + " hosts React islands, which are mounted again on every navigation"
+		}
 		switch n := strings.Count(layoutRes.HTML, open); {
 		case n == 0:
 			b.printRouteWarning(diag.Diagnostic{
@@ -4171,7 +4301,7 @@ func (b *Builder) BuildMiddleware() error {
 	_ = os.MkdirAll(outDir, 0755)
 	outPath := filepath.Join(outDir, "middleware.js")
 
-	result := esbuildBuild(api.BuildOptions{
+	mwOpts := api.BuildOptions{
 		EntryPoints: []string{middlewarePath},
 		Outdir:      outDir,
 		Bundle:      true,
@@ -4180,13 +4310,20 @@ func (b *Builder) BuildMiddleware() error {
 		Write:       false,
 		LogLevel:    api.LogLevelError,
 		Metafile:    true,
-	})
+		Plugins:     []api.Plugin{jseval.MarkerPackagesPlugin()},
+	}
+	// The embedded engine has no node:module; a Node-family runtime needs the
+	// createRequire banner for CommonJS dependencies.
+	if !embeddedRuntime(b.Cfg.SSR.MiddlewareRuntime) {
+		jseval.ApplyNodeESM(&mwOpts)
+	}
+	result := esbuildBuild(mwOpts)
 
 	if len(result.Errors) > 0 {
 		for _, e := range result.Errors {
-			fmt.Fprintf(os.Stderr, "  %sMiddleware error:%s %s\n", cRed, cReset, e.Text)
+			fmt.Fprintf(os.Stderr, "  %sMiddleware error:%s %s\n", cRed, cReset, nativeAddonHint(e.Text))
 		}
-		return fmt.Errorf("middleware build failed: %s", result.Errors[0].Text)
+		return fmt.Errorf("middleware build failed: %s", nativeAddonHint(result.Errors[0].Text))
 	}
 
 	if len(result.OutputFiles) == 0 {
@@ -5059,6 +5196,9 @@ type apiRouteMeta struct {
 	// the route's sources reference, for an embedded-runtime route. Absent
 	// means unknown, so the runtime must load everything.
 	Features *[]string `json:"features,omitempty"`
+	// MaxDuration is the route's `export const maxDuration` in seconds (0
+	// when absent): its request budget instead of the 30s default.
+	MaxDuration int `json:"maxDuration,omitempty"`
 }
 
 func (b *Builder) compileSingleRoute(file string, apiSrcDir string) (apiRouteMeta, error) {
@@ -5088,6 +5228,7 @@ func (b *Builder) compileSingleRoute(file string, apiSrcDir string) (apiRouteMet
 		Platform:    api.PlatformNode,
 		Format:      api.FormatIIFE,
 		GlobalName:  "__krate_route",
+		Plugins:     []api.Plugin{jseval.MarkerPackagesPlugin()},
 		Outfile:     quickjsPath,
 		Write:       true,
 		Sourcemap:   sourceMapMode(b.Cfg.Sourcemap),
@@ -5100,7 +5241,7 @@ func (b *Builder) compileSingleRoute(file string, apiSrcDir string) (apiRouteMet
 		Bundle:      true,
 		Platform:    api.PlatformNode,
 		Format:      api.FormatESModule,
-		Packages:    api.PackagesExternal,
+		Plugins:     []api.Plugin{jseval.MarkerPackagesPlugin(), externalNodeModulesPlugin()},
 		Outfile:     nodePath,
 		Write:       true,
 		Sourcemap:   sourceMapMode(b.Cfg.Sourcemap),
@@ -5116,7 +5257,9 @@ func (b *Builder) compileSingleRoute(file string, apiSrcDir string) (apiRouteMet
 		nodeOpts.MinifySyntax = true
 	}
 
-	quickjsResult := esbuildBuild(quickjsOpts)
+	// Packages with native addons (and serverExternalPackages) stay external
+	// here, which marks the route Node-only below.
+	quickjsResult, _ := buildExternalizingNative(quickjsOpts, b.Cfg.ServerExternalPackages)
 	if len(quickjsResult.Errors) > 0 {
 		return apiRouteMeta{}, fmt.Errorf("esbuild compilation failed:\n%s", formatEsbuildErrors(quickjsResult.Errors))
 	}
@@ -5126,6 +5269,9 @@ func (b *Builder) compileSingleRoute(file string, apiSrcDir string) (apiRouteMet
 	}
 
 	meta := apiRouteMeta{File: filepath.ToSlash(outName)}
+	var durWarnings []diag.Diagnostic
+	meta.MaxDuration, durWarnings = readAPIMaxDuration(file)
+	printWarningsOnce(os.Stderr, durWarnings)
 
 	// Node-only = imports still external after bundling (node builtins / native
 	// deps the embedded runtime cannot provide). Package deps that bundle cleanly

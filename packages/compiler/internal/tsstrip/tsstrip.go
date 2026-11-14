@@ -533,7 +533,7 @@ func Parse(path, src string, opts Options) (*ast.Program, []error) {
 
 func parseSource(path, src string, opts Options) (*ast.Program, []error) {
 	if !Applies(path) {
-		p := parser.New(lexer.New(src).Tokenize())
+		p := parser.New(lexer.ForFile(path, src).Tokenize())
 		p.Filename = path
 		p.SetSource(src)
 		prog := p.ParseProgram()
@@ -548,7 +548,7 @@ func parseSource(path, src string, opts Options) (*ast.Program, []error) {
 		}
 		return nil, []error{err}
 	}
-	p := parser.New(lexer.New(res.Code).Tokenize())
+	p := parser.New(lexer.ForFile(path, res.Code).Tokenize())
 	p.Filename = path
 	p.SetSource(res.Code)
 	prog := p.ParseProgram()

@@ -150,14 +150,76 @@ func (b *Bundler) insideRootOrPackage(abs string) bool {
 		!strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return true
 	}
-	return strings.Contains(filepath.ToSlash(abs), "/node_modules/")
+	if strings.Contains(filepath.ToSlash(abs), "/node_modules/") {
+		return true
+	}
+	for _, r := range b.CSSImportRoots() {
+		if rel, err := filepath.Rel(r, abs); err == nil && rel != ".." &&
+			!strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
 }
 
-// resolveCSSSpecifier resolves a bare @import specifier ("pkg/dist/x.css",
+// SetCSSImportRoots sets the configured extra directories CSS may import from
+// (cssImportRoots). Relative entries resolve against the project root.
+func (b *Bundler) SetCSSImportRoots(roots []string) {
+	b.cssImportRoots = nil
+	for _, r := range roots {
+		if r == "" {
+			continue
+		}
+		if !filepath.IsAbs(r) {
+			r = filepath.Join(b.root, filepath.FromSlash(r))
+		}
+		b.cssImportRoots = append(b.cssImportRoots, filepath.Clean(r))
+	}
+}
+
+// CSSImportRoots returns the directories outside the project root that CSS
+// @import and url() may read from: the enclosing workspace root and the
+// configured cssImportRoots.
+func (b *Bundler) CSSImportRoots() []string {
+	roots := append([]string(nil), b.cssImportRoots...)
+	b.wsRootOnce.Do(func() { b.wsRoot = WorkspaceRoot(b.root) })
+	if ws := b.wsRoot; ws != "" {
+		roots = append(roots, ws)
+	}
+	return roots
+}
+
+// WorkspaceRoot returns the nearest directory at or above start that declares a
+// monorepo workspace (pnpm-workspace.yaml, or package.json with "workspaces"),
+// or "" when there is none. A git root alone does not count: it says nothing
+// about which sibling directories are meant to be shared.
+func WorkspaceRoot(start string) string {
+	dir := start
+	for {
+		if fileIsRegular(filepath.Join(dir, "pnpm-workspace.yaml")) {
+			return dir
+		}
+		if data, err := os.ReadFile(filepath.Join(dir, "package.json")); err == nil {
+			var pj struct {
+				Workspaces json.RawMessage `json:"workspaces"`
+			}
+			if json.Unmarshal(data, &pj) == nil && len(pj.Workspaces) > 0 && string(pj.Workspaces) != "null" {
+				return dir
+			}
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
+}
+
+// ResolveCSSSpecifier resolves a bare @import specifier ("pkg/dist/x.css",
 // "@scope/pkg") through node_modules. A package's "style" field is honoured
 // for a bare package name; subpaths use package.json exports when they point
 // at a stylesheet, else the literal path.
-func (b *Bundler) resolveCSSSpecifier(spec, fromDir string) string {
+func ResolveCSSSpecifier(spec, fromDir string) string {
 	pkg, sub := splitPackageSpec(spec)
 	if pkg == "" {
 		return ""
@@ -295,8 +357,9 @@ func (b *Bundler) resolveCSSModule(path, abs string, mtime time.Time, size int64
 	cs.checkSyntax(abs, string(data))
 	text := css.Balance(cs.rewriteURLs(string(data), dir))
 	text = css.InlineImportsWith(text, dir, css.ImportOptions{
-		Root:    b.root,
-		Resolve: b.resolveCSSSpecifier,
+		Root:       b.root,
+		AllowRoots: b.CSSImportRoots(),
+		Resolve:    ResolveCSSSpecifier,
 		// An imported sheet is balanced before it is spliced in, so it cannot
 		// swallow the rest of the importing sheet.
 		RewriteURLs: func(c, d string) string {

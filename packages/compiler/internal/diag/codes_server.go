@@ -3,7 +3,7 @@ package diag
 // Async server components and RSC boundaries (KR71xx, part of the KR7xxx
 // server range).
 const (
-	// CodeAsyncLayout: a layout is an async function.
+	// CodeAsyncLayout: an async layout used where it cannot render per request.
 	CodeAsyncLayout Code = "KR7101"
 	// CodeBuildTimeAwait: `await` reached the build-time evaluator.
 	CodeBuildTimeAwait Code = "KR7102"
@@ -93,10 +93,14 @@ func init() {
 		},
 		CodeInfo{
 			Code:  CodeAsyncLayout,
-			Title: "Async layouts are not supported",
-			Explanation: "Layouts are baked into the static page shell at build time, so they cannot await " +
-				"data. Keep the layout synchronous and move the data fetching into an async child " +
-				"component (a server component), which renders per request.",
+			Title: "Async layout cannot be used here",
+			Explanation: "An async layout renders per request in the SSR sidecar, with the page and the " +
+				"layouts inside it, instead of being baked into the static shell. It can await data and " +
+				"gate its subtree with redirect() or notFound(). It cannot sit above a template.tsx or " +
+				"error.tsx in the same route (they hydrate in the browser), and a layout that is baked at " +
+				"build time for another reason (an intercepting or segment route) cannot be async. Move " +
+				"the template or error boundary above the async layout, or make the layout synchronous and " +
+				"fetch data in an async child component.",
 		},
 		CodeInfo{
 			Code:  CodeBuildTimeAwait,

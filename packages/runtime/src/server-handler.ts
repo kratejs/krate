@@ -20,6 +20,8 @@ import {
   type RenderRequest,
   type SSRCore,
 } from "./ssr-core.js";
+import { runAfterTasks } from "./after.js";
+import { platformWaitUntil, type PlatformContext } from "./platform.js";
 import { cacheRuntime, installRenderStore, patchFetch, type RevalidateScope } from "./cache-scope.js";
 import {
   allSuspense,
@@ -99,6 +101,8 @@ export interface HandlerConfig {
   security: { nosniff: boolean; frameOptions: string; referrerPolicy: string; permissionsPolicy: string; hsts: string; csp: string };
   cors: { enabled: boolean; origins: string[]; methods: string[]; headers: string[]; credentials: boolean; maxAge: number };
   ssr: { timeout: number; maxCacheSize: number; ppr: boolean; pprRevalidate: number };
+  /** Page URL form: "always" (default) redirects /x to /x/, "never" redirects /x/ to /x, "ignore" serves both. */
+  trailingSlash?: "always" | "never" | "ignore";
 }
 
 export interface HandlerPage {
@@ -110,6 +114,36 @@ export interface HandlerPage {
   serverComponents?: boolean;
   /** Source directory relative to the pages root, route groups kept (segment page lookup). */
   segDir?: string;
+  /** A segment page that renders per request: reached through its synthetic route, never a URL. */
+  segment?: boolean;
+}
+
+/**
+ * A per-request metadata route. `path` is an exact URL; `prefix` and `suffix`
+ * match /sitemap/<id>.xml, where `key` ends in "/[id]".
+ */
+export interface MetaRoute {
+  path?: string;
+  prefix?: string;
+  suffix?: string;
+  key: string;
+}
+
+/** The API route key serving URL path p, or "" when no metadata route does. */
+export function matchMetaRoute(routes: MetaRoute[] | undefined, p: string): string {
+  for (const r of routes || []) {
+    if (r.path) {
+      if (p === r.path) return r.key;
+      continue;
+    }
+    const prefix = r.prefix || "";
+    const suffix = r.suffix || "";
+    if (p.length <= prefix.length + suffix.length || !p.startsWith(prefix) || !p.endsWith(suffix)) continue;
+    const id = p.slice(prefix.length, p.length - suffix.length);
+    if (/[\/\\]/.test(id) || id === "." || id === "..") continue;
+    return r.key.replace(/\[id\]$/, "") + id;
+  }
+  return "";
 }
 
 export interface ActionEntry {
@@ -117,6 +151,9 @@ export interface ActionEntry {
   export: string;
   file: string;
   source?: string;
+  /** A hoisted inline server action; `captures` names the sealed values it receives first. */
+  inline?: boolean;
+  captures?: string[];
 }
 
 /** Build data the compiler inlines into the server bundle. */
@@ -144,6 +181,17 @@ export interface KrateServerData {
   staticPages?: Record<string, string>;
   /** API route keys: file path under the API dir without extension ("items/[id]"). */
   apiRoutes: string[];
+  /**
+   * Per-route request budgets in seconds (`export const maxDuration`), keyed
+   * like apiRoutes. A handler still running at the deadline is aborted
+   * (request.signal) and the request answered 504.
+   */
+  apiMaxDuration?: Record<string, number>;
+  /**
+   * Metadata routes (robots.ts, sitemap.ts, manifest.ts) that run per request:
+   * a public URL served by the API route `key`.
+   */
+  metaRoutes?: MetaRoute[];
   actions: ActionEntry[];
   hasMiddleware: boolean;
 }
@@ -174,6 +222,12 @@ export interface StaticLayer {
 export interface HandlerContext {
   /** Keeps the instance alive for work that outlives the response. */
   waitUntil?(work: Promise<unknown>): void;
+  /** Cloudflare only: let the request fall through to the origin when the Worker throws. */
+  passThroughOnException?(): void;
+  /** The platform's bindings (the Worker `env` on cloudflare), reachable from page code through getPlatform(). */
+  env?: unknown;
+  /** Cloudflare's `request.cf` properties. */
+  cf?: Record<string, unknown>;
 }
 
 export interface HandlerOptions {
@@ -220,6 +274,27 @@ function globalStore<T>(name: string): AsyncLocalStorage<T> {
   const g = globalThis as Record<symbol, unknown>;
   if (!g[key]) g[key] = new AsyncLocalStorage<T>();
   return g[key] as AsyncLocalStorage<T>;
+}
+
+/**
+ * Runs fn with the platform of a request (or of a Worker event such as a cron
+ * trigger) published to getPlatform() / getCloudflareContext(). The generated
+ * Cloudflare Worker wraps the exports of src/cloudflare.ts with it.
+ */
+export function runWithPlatform<R>(target: DeployTarget, ctx: HandlerContext, fn: () => R): R {
+  const platform: PlatformContext = {
+    target,
+    env: ctx.env && typeof ctx.env === "object" ? (ctx.env as Record<string, unknown>) : {},
+    ctx: {
+      waitUntil: (work) => {
+        if (ctx.waitUntil) ctx.waitUntil(work);
+        else void Promise.resolve(work).catch(() => {});
+      },
+      passThroughOnException: ctx.passThroughOnException ? () => ctx.passThroughOnException!() : undefined,
+    },
+    cf: ctx.cf,
+  };
+  return globalStore<PlatformContext>("krate.platform.store").run(platform, fn);
 }
 
 function safeDecode(p: string): string {
@@ -328,7 +403,7 @@ function requestCookiesOf(headers: Headers): Map<string, string> {
   return jar;
 }
 
-function attachCookies(request: Request): Request {
+function attachCookies(request: Request, basePath = ""): Request {
   try {
     const jar = requestCookiesOf(request.headers);
     Object.defineProperty(request, "cookies", {
@@ -339,10 +414,19 @@ function attachCookies(request: Request): Request {
       },
       enumerable: false,
     });
+    Object.defineProperty(request, "nextUrl", { value: makeNextUrl(request.url, basePath), enumerable: false });
   } catch {
     // frozen request objects keep working without the cookies accessor
   }
   return request;
+}
+
+/** A URL carrying Next's NextURL extras: basePath (pathname never includes it) and clone(). */
+function makeNextUrl(href: string, basePath: string): URL {
+  const u = new URL(href);
+  Object.defineProperty(u, "basePath", { value: basePath, enumerable: false });
+  Object.defineProperty(u, "clone", { value: () => makeNextUrl(u.href, basePath), enumerable: false });
+  return u;
 }
 
 const sleepMicrotask = () => Promise.resolve();
@@ -400,6 +484,48 @@ function resolveFlashSecret(option: string | undefined, target: DeployTarget): s
   return hex;
 }
 
+function decodeInlineValue(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(decodeInlineValue);
+  if (v && typeof v === "object") {
+    const o = v as Record<string, unknown>;
+    if (typeof o.$ === "string") {
+      if (o.$ === "u") return undefined;
+      if (o.$ === "n") return BigInt(o.v as string);
+      if (o.$ === "d") return new Date(o.v as string);
+      if (o.$ === "o") {
+        const wrapped: Record<string, unknown> = {};
+        for (const k of Object.keys(o.v as object)) wrapped[k] = decodeInlineValue((o.v as Record<string, unknown>)[k]);
+        return wrapped;
+      }
+    }
+    const out: Record<string, unknown> = {};
+    for (const k of Object.keys(o)) out[k] = decodeInlineValue(o[k]);
+    return out;
+  }
+  return v;
+}
+
+/**
+ * Opens the closure token of an inline server action: AES-256-GCM over the
+ * JSON of the captured values, authenticated against the action id, with the
+ * key derived from the action secret (the format the server renderer seals).
+ */
+export async function openInlineToken(token: unknown, entry: ActionEntry, secret: string): Promise<unknown[]> {
+  if (typeof token !== "string" || !token.startsWith("k1.")) throw new Error("missing closure token");
+  if (!secret) throw new Error("no action encryption key");
+  const b64 = token.slice(3).replace(/-/g, "+").replace(/_/g, "/");
+  const bin = atob(b64 + "=".repeat((4 - (b64.length % 4)) % 4));
+  const raw = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+  if (raw.length < 12 + 16) throw new Error("truncated closure token");
+  const enc = new TextEncoder();
+  const digest = await crypto.subtle.digest("SHA-256", enc.encode("krate-inline-action\0" + secret));
+  const key = await crypto.subtle.importKey("raw", digest, "AES-GCM", false, ["decrypt"]);
+  const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: raw.subarray(0, 12), additionalData: enc.encode(entry.id) }, key, raw.subarray(12));
+  const values = JSON.parse(new TextDecoder().decode(plain));
+  if (!Array.isArray(values) || values.length !== (entry.captures || []).length) throw new Error("closure token does not match the action");
+  return values.map(decodeInlineValue);
+}
+
 // Handler factory
 
 export function createKrateHandler(options: HandlerOptions): KrateHandler {
@@ -417,6 +543,10 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
   const staticOnly = new Set(data.staticOnlyRoutes.map(normalizeRoutePattern));
   const sha256Hex = options.sha256Hex || portableSha256Hex;
   const flashSecret = resolveFlashSecret(options.flashSecret, target);
+  // Inline-action values are sealed with KRATE_ACTION_SECRET; the key is never part of the bundle.
+  // A deployed handler never falls back to the build's local key file.
+  (globalThis as Record<symbol, unknown>)[Symbol.for("krate.action.deployed")] = true;
+  const actionSecret = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.KRATE_ACTION_SECRET || "";
   const segEntries = data.segments || [];
   const segPages = data.segmentPages || {};
   const segDirByRoute = new Map<string, string>();
@@ -468,7 +598,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
   const instanceId = Math.random().toString(36).slice(2) + Date.now().toString(36);
 
   // Pages: most specific route first, like SSRServer.FindPageForRoute.
-  const pagesBySpecificity = [...data.pages].sort((a, b) => compareRouteSpecificity(a.route, b.route));
+  const pagesBySpecificity = data.pages.filter((p) => !p.segment).sort((a, b) => compareRouteSpecificity(a.route, b.route));
   const manifest = { pages: data.pages as ManifestPage[], regions: data.regions };
   const core: SSRCore = createSSRCore({
     manifest,
@@ -489,7 +619,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     ppr: cfg.ssr.ppr,
     pprRevalidate: cfg.ssr.pprRevalidate,
     background: (p) => {
-      if (latestWaitUntil) latestWaitUntil(p);
+      if (!platformWaitUntil(p) && latestWaitUntil) latestWaitUntil(p);
     },
   });
 
@@ -569,7 +699,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     if (matchers && !matchers.some((re) => re.test(p))) return null;
     let result: any;
     try {
-      const request = attachCookies(new Request(fullURL(rs), { method: rs.method, headers: new Headers(rs.request.headers) }));
+      const request = attachCookies(new Request(fullURL(rs), { method: rs.method, headers: new Headers(rs.request.headers) }), basePath);
       result = await handler(request);
     } catch (e) {
       return middlewareFailed(rs, e);
@@ -748,7 +878,34 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     return staticLayer.exists(p);
   }
 
+  /** trailingSlash: "always" (default) sends /x to /x/, "never" sends /x/ to /x, "ignore" serves both. */
+  const slashMode = cfg.trailingSlash || "always";
+
+  /** The /404 and /404.html URLs of the not-found page itself answer 404, never the file or a redirect to it. */
+  function notFoundPageURL(p: string): boolean {
+    return p === "/404" || p === "/404/" || p === "/404.html";
+  }
+
+  async function answerNotFoundPageURL(rs: ReqState): Promise<Response> {
+    const page = errorPage(rs.path, 404);
+    if (page) return custom404(rs, page);
+    return notFoundText(rs, true);
+  }
+
+  /** trailingSlash "never": a page URL ending in a slash redirects to the slashless URL. */
+  function redirectToSlashless(rs: ReqState): Response | null {
+    const p = rs.path;
+    if (slashMode !== "never" || p.length < 2 || !p.endsWith("/") || notFoundPageURL(p)) return null;
+    if (rs.method !== "GET" && rs.method !== "HEAD") return null;
+    const trimmed = p.replace(/\/+$/, "");
+    if (trimmed === "" || isFileLikePath(trimmed) || trimmed === "/api" || trimmed.startsWith("/api/") || trimmed.startsWith("/__krate")) return null;
+    // "../" keeps a segment such as "ftp:3232235777" from parsing as an absolute URL.
+    rs.res.set("Location", "../" + baseName(trimmed) + (rs.search || ""));
+    return finish(rs, 301, null);
+  }
+
   function redirectToCanonicalSlash(rs: ReqState): Response | null {
+    if (slashMode !== "always") return null;
     const p = rs.path;
     if (p === "" || p.endsWith("/") || isFileLikePath(p)) return null;
     if (rs.method !== "GET" && rs.method !== "HEAD") return null;
@@ -760,7 +917,12 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
   }
 
   /** Answers 404 with a not-found page; segment pages are never cached. */
-  function custom404(rs: ReqState, page: ErrorPage, status: 401 | 403 | 404 = 404): Response {
+  async function custom404(rs: ReqState, page: ErrorPage, status: 401 | 403 | 404 = 404): Promise<Response> {
+    if (page.match && page.match.route) {
+      // A page that renders per request: the baked file is only its shell.
+      const rendered = await renderSegmentPage404(rs, page.match, status);
+      if (rendered) return rendered;
+    }
     rs.res.set("Content-Type", "text/html; charset=utf-8");
     rs.res.delete("Cache-Control");
     rs.res.delete("Etag");
@@ -770,7 +932,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
   }
 
   /** The 403 or 401 response of a request whose render called forbidden() or unauthorized(). */
-  function accessDenied(rs: ReqState, status: 401 | 403, route?: { segDir?: string; closed?: string }): Response {
+  async function accessDenied(rs: ReqState, status: 401 | 403, route?: { segDir?: string; closed?: string }): Promise<Response> {
     rs.res.delete("X-Krate-Cache");
     const page = errorPage(rs.path, status, route);
     if (page) return custom404(rs, page, status);
@@ -782,6 +944,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
   async function staticHandler(rs: ReqState): Promise<Response> {
     const p = rs.path;
     if (isInternalOutputPath(p)) return notFoundText(rs);
+    if (notFoundPageURL(p)) return answerNotFoundPageURL(rs);
     if (p.endsWith(".map")) rs.res.set("Content-Type", "application/json; charset=utf-8");
     rs.res.set("Cache-Control", staticCacheControl(p, hashed));
 
@@ -805,7 +968,12 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     const wantsHTML = isHTMLDocRequest(p) || (rs.headers.get("accept") || "").includes("text/html");
     // Conditional headers dropped by an outer layer (flash notices) must not reach the file server.
     const sreq = rs.headers === rs.request.headers ? rs.request : new Request(rs.request.url, { method: rs.request.method, headers: rs.headers });
-    const served = staticLayer ? await staticLayer.serve(sreq, p) : null;
+    let served = staticLayer ? await staticLayer.serve(sreq, p) : null;
+    if (staticLayer && served && slashMode !== "always" && !p.endsWith("/") && [301, 302, 307, 308].includes(served.status)) {
+      // A layer answers a folder URL with a redirect to its slash form; the other modes serve the index in place.
+      const inPlace = await staticLayer.serve(sreq, p + "/");
+      if (inPlace && inPlace.status !== 404) served = inPlace;
+    }
     if (served && served.status !== 404) return mergeStaticResponse(rs, served);
     const page404 = wantsHTML ? errorPage(p, 404, { closed: closedPattern }) : null;
     if (page404) return custom404(rs, page404);
@@ -841,6 +1009,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
   async function pageHandler(rs: ReqState): Promise<Response> {
     const denied = pageMethodAllowed(rs);
     if (denied) return denied;
+    if (notFoundPageURL(rs.path)) return answerNotFoundPageURL(rs);
     if (data.pages.length === 0) return staticHandler(rs);
 
     let route = requestRoute(rs.path);
@@ -876,6 +1045,19 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     const baked = data.shells[route];
     if (baked !== undefined) return finish(rs, 200, baked);
     return staticHandler(rs);
+  }
+
+  /** Renders a segment page that renders per request, with the status of its role. Null: the baked shell answers. */
+  async function renderSegmentPage404(rs: ReqState, m: SegmentMatch, status: number): Promise<Response | null> {
+    const route = m.route || "";
+    const page = data.pages.find((p) => p.route === route);
+    const shell = loadShell(route);
+    if (!page || !shell || !shell.ok) return null;
+    rs.res.set("Content-Type", "text/html; charset=utf-8");
+    rs.res.set("Cache-Control", "no-store");
+    rs.res.delete("Etag");
+    rs.res.delete("Last-Modified");
+    return servePageRegions(rs, shell, page, route, m.params || {}, queryOf(rs), headerMap(rs), false, 0, false, status);
   }
 
   interface Frame {
@@ -932,9 +1114,11 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     isISR: boolean,
     revalidate: number,
     outOfOrder: boolean,
+    segmentStatus = 0,
   ): Promise<Response | null> {
     let shell = shellInfo.shell;
-    const renderReq: RenderRequest = { route, url: route, method: "GET", headers, params, query };
+    // A segment page renders for the URL that missed, not for its own route.
+    const renderReq: RenderRequest = { route, url: segmentStatus ? rs.path : route, method: "GET", headers, params, query };
     const pending = startRegionRenders(page, route, shellInfo, renderReq);
 
     if (outOfOrder && !isISR && canStreamOutOfOrder(shellInfo.all) && (!page.serverComponents || allSuspense(shellInfo.all))) {
@@ -998,6 +1182,11 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
       }
     }
 
+    // A segment page that failed, or asked for another answer, leaves the response to its baked shell.
+    if (segmentStatus && (renderErr || fatalErr || notFound || denied || redirect)) {
+      if (renderErr) console.error(`[krate] Segment page render error (${route}): ${renderErr}`);
+      return null;
+    }
     // A segment error page makes any failed render answer with that page
     // instead of the baked body (build/serve.go failOnRenderErr).
     const routeRef = { segDir: page.segDir !== undefined ? page.segDir : "" };
@@ -1062,7 +1251,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
       }
       html = mergeHead(html, title, head);
     }
-    return finish(rs, 200, html);
+    return finish(rs, segmentStatus || 200, html);
   }
 
   // A <Head> inside a streamed Suspense region renders after the head of the
@@ -1266,6 +1455,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
       return finish(rs, 405, '{"error":"Method Not Allowed"}');
     }
     if (status === 413) return finish(rs, 413, '{"error":"Request Entity Too Large"}');
+    if (status === 504) return finish(rs, 504, '{"error":"Gateway Timeout"}');
     return finish(rs, status < 400 ? 500 : status, '{"error":"Internal Server Error"}');
   }
 
@@ -1476,18 +1666,57 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
       console.error(`[krate] API route ${file} uses the legacy (req, res) handler, which the portable server does not support; export named handlers (GET, POST, ...) that take a Request and return a Response.`);
       return apiFailure(rs, 500);
     }
+    const budgetSec = (data.apiMaxDuration && data.apiMaxDuration[file]) || 0;
+    const abort = budgetSec ? new AbortController() : undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
+      let signal = rs.request.signal;
+      if (abort) {
+        const upstream = rs.request.signal;
+        if (upstream) {
+          if (upstream.aborted) abort.abort(upstream.reason);
+          else upstream.addEventListener("abort", () => abort.abort(upstream.reason), { once: true });
+        }
+        signal = abort.signal;
+      }
       const request = attachCookies(
         new Request(fullURL(rs), {
           method: rs.method,
           headers: new Headers(rs.request.headers),
           body: body && body.byteLength > 0 ? (body as unknown as BodyInit) : undefined,
-          signal: rs.request.signal,
+          signal,
         }),
+        basePath,
       );
       const scope: RevalidateScope = { kind: "api", paths: [], tags: [] };
-      const out = await revalidateStore.run(scope, async () => toResponse(await fn(request, { params: apiRouteParams(file, rs.path) })));
-      await flushRevalidate(scope);
+      const work = async () => {
+        const res = await revalidateStore.run(scope, async () => toResponse(await fn(request, { params: apiRouteParams(file, rs.path) })));
+        await flushRevalidate(scope);
+        return res;
+      };
+      let out: Response;
+      if (abort) {
+        const deadline = new Promise<never>((_, reject) => {
+          timer = setTimeout(() => {
+            const err = new Error(`API route exceeded its maxDuration of ${budgetSec}s`);
+            (err as any).krateTimeout = true;
+            reject(err);
+            abort.abort(err);
+          }, budgetSec * 1000);
+        });
+        out = await Promise.race([work(), deadline]);
+      } else {
+        out = await work();
+      }
+      if (scope.after && scope.after.length > 0) {
+        // after() tasks start once this handler has returned the response.
+        const later = new Promise<void>((resolve) => setTimeout(resolve, 0)).then(async () => {
+          await revalidateStore.run(scope, () => runAfterTasks(scope));
+          await flushRevalidate(scope).catch((e) => console.error(`[krate] revalidation after() failed: ${e}`));
+        });
+        const keepAlive = rs.ctx.waitUntil ? rs.ctx.waitUntil.bind(rs.ctx) : latestWaitUntil;
+        if (keepAlive) keepAlive(later);
+      }
       writeHeaderPairs(rs.res, headerPairs(out.headers));
       const status = out.status < 100 || out.status > 999 ? 502 : out.status;
       if (headOnly || rs.method === "HEAD" || !out.body || NO_BODY_STATUS.has(status)) {
@@ -1496,6 +1725,10 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
       }
       return new Response(out.body, { status, headers: rs.res });
     } catch (err) {
+      if (err && (err as any).krateTimeout) {
+        console.error(`[krate] ${(err as Error).message}: ${rs.method} ${rs.path}`);
+        return apiFailure(rs, 504);
+      }
       // notFound(), forbidden() and unauthorized() end the request with that status.
       const fallback = httpFallbackStatus(err);
       if (fallback === 403 || fallback === 401) return apiFailure(rs, fallback);
@@ -1506,6 +1739,8 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
       }
       console.error(`[krate] API error (${rs.method} ${rs.path}): ${(err && (err as any).stack) || err}`);
       return apiFailure(rs, 500);
+    } finally {
+      if (timer) clearTimeout(timer);
     }
   }
 
@@ -1736,6 +1971,22 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
       return withHeaders(rs, actionFail(400, "Invalid server action request body"));
     }
 
+    if (entry.inline && entry.captures && entry.captures.length > 0) {
+      // A hoisted inline action: its closed-over values arrive sealed in a token
+      // (the first leading argument, or the URL query for JSON calls).
+      let token: unknown = typeof args[0] === "string" && args[0].startsWith("k1.") ? args.shift() : null;
+      if (!token) {
+        const q = leadingActionArgs(query.get("__krate_args"));
+        if (q && typeof q[0] === "string" && q[0].startsWith("k1.")) token = q[0];
+      }
+      try {
+        args.unshift(...(await openInlineToken(token, entry, actionSecret)));
+      } catch (e) {
+        console.error(`[krate] rejected closure data for server action ${entry.source || id}: ${(e as Error).message}`);
+        return withHeaders(rs, actionFail(400, "Invalid server action request"));
+      }
+    }
+
     const ctx = makeActionContext(reqHeaders, id, rs.path);
     const scope: RevalidateScope = { kind: "action", paths: [], tags: [] };
     let result: any;
@@ -1860,6 +2111,9 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     return flashNotice(rs, async (rs2) => {
       const blocked = await runMiddleware(rs2);
       if (blocked) return blocked;
+      // Checked on the requested URL, before a rewrite changes the internal path.
+      const slashless = redirectToSlashless(rs2);
+      if (slashless) return slashless;
       return redirectRewriteHandler(rs2);
     });
   }
@@ -1886,6 +2140,15 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
       const blocked = await runMiddleware(rs);
       if (blocked) return blocked;
       return actionHandler(rs);
+    }
+    if (data.metaRoutes && (rs.method === "GET" || rs.method === "HEAD")) {
+      const key = matchMetaRoute(data.metaRoutes, p);
+      if (key) {
+        const blocked = await runMiddleware(rs);
+        if (blocked) return blocked;
+        rs.path = "/api/" + key;
+        return apiHandler(rs);
+      }
     }
     return pageChain(rs);
   }
@@ -1933,7 +2196,12 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     return null;
   }
 
-  return async function handle(request: Request, ctx: HandlerContext = {}): Promise<Response> {
+  return function handle(request: Request, ctx: HandlerContext = {}): Promise<Response> {
+    // Every page, API route, action and middleware of the request sees the same platform.
+    return runWithPlatform(target, ctx, () => handleRequest(request, ctx));
+  };
+
+  async function handleRequest(request: Request, ctx: HandlerContext): Promise<Response> {
     if (ctx.waitUntil) latestWaitUntil = ctx.waitUntil.bind(ctx);
     request = sanitizeForwarded(request);
     const url = new URL(request.url);
@@ -1986,7 +2254,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
       }
       return httpError(rs, "Internal Server Error", 500);
     }
-  };
+  }
 }
 
 export { isDynamicPattern };

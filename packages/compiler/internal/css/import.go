@@ -16,6 +16,9 @@ type ImportOptions struct {
 	// (files found through Resolve inside a node_modules directory are also
 	// allowed). Empty means the base directory passed to InlineImportsWith.
 	Root string
+	// AllowRoots are extra directories (a monorepo workspace root, configured
+	// cssImportRoots) whose .css files may be imported from outside Root.
+	AllowRoots []string
 	// Resolve maps a specifier that is not a file relative to the importing
 	// file (for example a package path) to an absolute file, or "".
 	Resolve func(spec, fromDir string) string
@@ -78,6 +81,9 @@ func hasImport(css string) bool {
 
 type importer struct {
 	opts ImportOptions
+	// viaPackage is set by locate when the file was found by Resolve, i.e.
+	// through a package specifier rather than a path.
+	viaPackage bool
 }
 
 func (st *importer) warn(format string, args ...any) {
@@ -201,7 +207,7 @@ func (st *importer) expand(stmt importStmt, dir string, chain []string, depth in
 		return "", nil, true
 	}
 	if !st.allowed(abs) {
-		st.warn("@import %q resolves outside the project root and was not inlined", stmt.target)
+		st.warn("@import %q resolves to %s, outside the project root and the allowed import roots, and was not inlined (add its directory to cssImportRoots in krate.config, or import it through a package in node_modules)", stmt.target, abs)
 		return "", nil, true
 	}
 	for _, a := range chain {
@@ -260,6 +266,7 @@ func (st *importer) conditionHoisted(h string, outer importStmt) string {
 
 // locate finds the file an @import target refers to, warning when none exists.
 func (st *importer) locate(target, dir string) string {
+	st.viaPackage = false
 	t := strings.TrimPrefix(target, "~")
 	if filepath.IsAbs(filepath.FromSlash(t)) {
 		t = filepath.FromSlash(t)
@@ -278,6 +285,7 @@ func (st *importer) locate(target, dir string) string {
 	}
 	if st.opts.Resolve != nil {
 		if p := st.opts.Resolve(t, dir); p != "" {
+			st.viaPackage = !hasDotDotSegment(t)
 			return p
 		}
 	}
@@ -289,7 +297,41 @@ func (st *importer) allowed(abs string) bool {
 	if withinPath(st.opts.Root, abs) {
 		return true
 	}
-	return strings.Contains(filepath.ToSlash(abs), "/node_modules/")
+	if strings.Contains(filepath.ToSlash(abs), "/node_modules/") {
+		return true
+	}
+	// A package specifier that resolved through a node_modules link (a pnpm
+	// workspace package) may land outside the root; the specifier itself
+	// cannot traverse, so the link is the only way out.
+	if st.viaPackage {
+		return true
+	}
+	if !strings.EqualFold(filepath.Ext(abs), ".css") {
+		return false
+	}
+	real, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return false
+	}
+	for _, r := range st.opts.AllowRoots {
+		rr, err := filepath.EvalSymlinks(r)
+		if err != nil {
+			continue
+		}
+		if withinPath(rr, real) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasDotDotSegment(spec string) bool {
+	for _, seg := range strings.Split(filepath.ToSlash(spec), "/") {
+		if seg == ".." {
+			return true
+		}
+	}
+	return false
 }
 
 func fileExists(p string) bool {

@@ -61,6 +61,35 @@ elements and **no list runtime, list markers, or `kbindList` call**. A list is
 kept dynamic only when its source is signal-backed or otherwise unknown at
 build time.
 
+## JSX held in constants and props
+
+An array or object that holds JSX is rendered to HTML at build time wherever a
+component reads it, whether the constant is declared in the module (before or
+after the component) or inside the component:
+
+```tsx
+const sections = [
+  { id: "terms", title: "Terms", body: (<><p>Be kind.</p></>) },
+  { id: "privacy", title: "Privacy", body: <p>We keep little.</p> },
+];
+
+<main>
+  {sections.map(s => <section key={s.id}><h2>{s.title}</h2>{s.body}</section>)}
+</main>
+```
+
+The same goes for a JSX element passed as a prop (`<Hero intro={<p>Welcome</p>} />`,
+read as `props.intro` or a destructured `intro`), including arrays and
+conditionals of JSX, when the receiving component is in another module and when
+it has state. The server HTML contains the markup, and hydration keeps it.
+
+A constant is inlined only when every name it uses means the same thing where it
+is read. If a component parameter, a local, a `.map()` callback parameter or a
+signal hides one of those names, the constant is not inlined and its content is
+filled in when the page hydrates. A `let` is treated like a `const` only while
+nothing assigns to it. A JSX prop that reads the caller's own values is evaluated
+in the caller's scope, so a callee parameter with the same name does not change it.
+
 ## Element types held in variables
 
 `<Tag>` where `Tag` is a variable renders the element it names when the build

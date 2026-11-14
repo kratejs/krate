@@ -199,7 +199,7 @@ func collectExportNames(file string, names, seen map[string]bool, depth int) boo
 	if err != nil {
 		return false
 	}
-	p := parser.New(lexer.New(string(data)).Tokenize())
+	p := parser.New(lexer.ForFile(file, string(data)).Tokenize())
 	p.Filename = file
 	prog := p.ParseProgram()
 	if len(p.Errors()) > 0 {

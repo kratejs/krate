@@ -153,6 +153,19 @@ func TestVercelServerOutput(t *testing.T) {
 	if !sawFS || !sawFallback {
 		t.Errorf("routes need a filesystem handle followed by a function fallback: %s", data)
 	}
+	// /404 and /404.html reach the function before the CDN's copy of the file.
+	notFoundRoute, fsIndex := -1, -1
+	for i, r := range conf.Routes {
+		if src, _ := r["src"].(string); src == `^/404(?:\.html|/)?$` {
+			notFoundRoute = i
+		}
+		if r["handle"] == "filesystem" {
+			fsIndex = i
+		}
+	}
+	if notFoundRoute < 0 || notFoundRoute > fsIndex {
+		t.Errorf("a route for /404 and /404.html must precede the filesystem handle: %s", data)
+	}
 	var vc map[string]interface{}
 	data, _ = os.ReadFile(filepath.Join(out, "functions", "__krate.func", ".vc-config.json"))
 	if err := json.Unmarshal(data, &vc); err != nil || vc["runtime"] == nil || vc["handler"] != "index.mjs" || vc["launcherType"] != "Nodejs" {
@@ -323,5 +336,33 @@ func TestPlatformDeploysKeepSegmentPages(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestServerlessMaxDurationPlatformConfig(t *testing.T) {
+	root, cfg := serverlessProject(t, "serverless")
+	if err := os.WriteFile(filepath.Join(root, "src", "api", "export.ts"), []byte("export const maxDuration = 45;\nexport function GET() { return Response.json({ ok: true }); }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	plan, _ := emitServerTarget(t, root, cfg, "vercel")
+	if plan.MaxDuration != 45 {
+		t.Fatalf("plan.MaxDuration = %d, want 45", plan.MaxDuration)
+	}
+	var vc map[string]interface{}
+	data, _ := os.ReadFile(filepath.Join(root, ".vercel", "output", "functions", "__krate.func", ".vc-config.json"))
+	if err := json.Unmarshal(data, &vc); err != nil || vc["maxDuration"] != float64(45) {
+		t.Errorf(".vc-config.json must carry maxDuration 45: %v %s", err, data)
+	}
+	bundle, _ := os.ReadFile(filepath.Join(root, ".vercel", "output", "functions", "__krate.func", "index.mjs"))
+	if !regexp.MustCompile(`apiMaxDuration\W+export\W+45\b`).Match(bundle) {
+		t.Error("the server bundle must carry the per-route budgets for the handler")
+	}
+	nplan, _ := emitServerTarget(t, root, cfg, "netlify")
+	warned := false
+	for _, w := range nplan.Warnings {
+		warned = warned || strings.Contains(w, "maxDuration = 45")
+	}
+	if !warned {
+		t.Errorf("netlify must warn that its function limit is not configurable: %v", nplan.Warnings)
 	}
 }
