@@ -228,6 +228,12 @@ func (b *Builder) prepareClientBoundaries(bundle *bundler.Bundle, ann *irtree.An
 			}
 		}
 	}
+	// As in Next.js, "use client" marks a boundary: a component module that a
+	// client module imports or re-exports is client code too, even without its
+	// own directive. Only modules a server component renders become boundaries.
+	if len(clientMods) > 0 {
+		b.addClientReached(bundle, ann, clientMods)
+	}
 	if errs := checkServerTree(ann, roots, clientMods, bundle.ActionImports); len(errs) > 0 {
 		return nil, errs[0]
 	}
@@ -242,7 +248,7 @@ func (b *Builder) prepareClientBoundaries(bundle *bundler.Bundle, ann *irtree.An
 	var out []ClientBoundary
 	for _, p := range paths {
 		mod := clientMods[p]
-		exports, err := clientModuleExports(mod)
+		exports, err := clientModuleExports(mod, starTargets(bundle))
 		if err != nil {
 			return nil, err
 		}
@@ -264,8 +270,131 @@ func (b *Builder) prepareClientBoundaries(bundle *bundler.Bundle, ann *irtree.An
 	return out, nil
 }
 
-// clientModuleExports lists the export names of a "use client" module.
-func clientModuleExports(mod *bundler.Module) ([]string, error) {
+// starTargets returns a lookup from an `export *` source, as written in mod,
+// to the bundled module it resolves to (nil when it is not in the bundle).
+func starTargets(bundle *bundler.Bundle) func(mod *bundler.Module, src string) *bundler.Module {
+	byPath := map[string]*bundler.Module{}
+	for _, m := range bundle.Modules {
+		if m != nil && !m.IsExternal && m.Program != nil {
+			byPath[filepath.Clean(m.Path)] = m
+			byPath[canonicalPath(m.Path)] = m
+		}
+	}
+	return func(mod *bundler.Module, src string) *bundler.Module {
+		src = strings.Trim(src, "\"'`")
+		resolved := bundle.Resolver.Resolve(mod.Path, src)
+		if resolved == "" {
+			return nil
+		}
+		if m := byPath[filepath.Clean(resolved)]; m != nil {
+			return m
+		}
+		return byPath[canonicalPath(resolved)]
+	}
+}
+
+// addClientReached adds to clientMods the component modules that a server
+// module imports through a "use client" module. As in Next.js the boundary is
+// the import path: `import { V } from "./viewer-barrel"` (a client module that
+// re-exports V from ./viewer) makes ./viewer's V a client component for that
+// server module, while a direct `import { V } from "./viewer"` stays a server
+// component.
+func (b *Builder) addClientReached(bundle *bundler.Bundle, ann *irtree.Annotations, clientMods map[string]*bundler.Module) {
+	rendered := map[string]bool{}
+	for _, src := range ann.ComponentSources {
+		if src != "" {
+			rendered[filepath.Clean(src)] = true
+			rendered[canonicalPath(src)] = true
+		}
+	}
+	target := starTargets(bundle)
+	isClient := func(m *bundler.Module) bool {
+		_, ok := clientMods[filepath.Clean(m.Path)]
+		return ok
+	}
+	// declarer follows name through the re-exports of m to the module that
+	// declares it.
+	var declarer func(m *bundler.Module, name string, depth int) *bundler.Module
+	declarer = func(m *bundler.Module, name string, depth int) *bundler.Module {
+		if depth > 16 {
+			return nil
+		}
+		var stars []string
+		for _, stmt := range m.Program.Body {
+			exp, ok := stmt.(*ast.ExportStmt)
+			if !ok {
+				continue
+			}
+			if exp.ReexportSource == "" {
+				continue
+			}
+			if exp.StarReexport && exp.Namespace == "" {
+				stars = append(stars, exp.ReexportSource)
+				continue
+			}
+			for _, n := range exp.ReexportNamed {
+				out := n.Remote
+				if out == "" {
+					out = n.Local
+				}
+				if out == name {
+					if t := target(m, exp.ReexportSource); t != nil {
+						return declarer(t, n.Local, depth+1)
+					}
+					return nil
+				}
+			}
+		}
+		for _, src := range stars {
+			if t := target(m, src); t != nil {
+				if d := declarer(t, name, depth+1); d != nil {
+					return d
+				}
+			}
+		}
+		return m
+	}
+	var found []*bundler.Module
+	for _, m := range bundle.Modules {
+		if m == nil || m.IsExternal || m.IsCSS || m.Program == nil || isClient(m) || resolver.IsCompiledDependency(m.Path) {
+			continue
+		}
+		for _, stmt := range m.Program.Body {
+			imp, ok := stmt.(*ast.ImportStmt)
+			if !ok {
+				continue
+			}
+			c := target(m, imp.Source)
+			if c == nil || !isClient(c) {
+				continue
+			}
+			names := []string{}
+			if imp.Default != "" {
+				names = append(names, "default")
+			}
+			for _, n := range imp.Named {
+				names = append(names, n.Remote)
+			}
+			for _, n := range names {
+				if d := declarer(c, n, 0); d != nil && d != c && rendered[filepath.Clean(d.Path)] {
+					found = append(found, d)
+				}
+			}
+		}
+	}
+	for _, d := range found {
+		clientMods[filepath.Clean(d.Path)] = d
+		if resolved := canonicalPath(d.Path); resolved != filepath.Clean(d.Path) {
+			clientMods[resolved] = d
+		}
+	}
+}
+
+// clientModuleExports lists the export names of a "use client" module. An
+// `export *` is expanded into the runtime exports of its target (types are
+// already erased by the parser); it is an error only when the target cannot
+// be found in the bundle, such as a package, or is part of a cycle.
+func clientModuleExports(mod *bundler.Module, target func(*bundler.Module, string) *bundler.Module) ([]string, error) {
 	seen := map[string]bool{}
 	var names []string
 	add := func(n string) {
@@ -274,46 +403,66 @@ func clientModuleExports(mod *bundler.Module) ([]string, error) {
 			names = append(names, n)
 		}
 	}
-	for _, stmt := range mod.Program.Body {
-		exp, ok := stmt.(*ast.ExportStmt)
-		if !ok {
-			continue
-		}
-		if exp.Default {
-			add("default")
-			continue
-		}
-		if exp.StarReexport && exp.Namespace == "" {
-			return nil, diag.New(mod.Path, exp.Position.Line, exp.Position.Col,
-				"`export *` in a \"use client\" module cannot be wrapped as a client boundary",
-				"list the re-exported names explicitly: export { A, B } from \""+exp.ReexportSource+"\"",
-				lineOf(mod.SourceCode, exp.Position.Line)).WithCode(diag.CodeClientBoundaryExports)
-		}
-		add(exp.Namespace)
-		switch d := exp.Declaration.(type) {
-		case *ast.FnDecl:
-			add(d.Name)
-		case *ast.ClassDecl:
-			add(d.Name)
-		case *ast.VarStmt:
-			for _, v := range d.Decls {
-				add(v.Name)
+	visiting := map[*bundler.Module]bool{}
+	var collect func(m *bundler.Module, star bool) error
+	collect = func(m *bundler.Module, star bool) error {
+		visiting[m] = true
+		defer delete(visiting, m)
+		for _, stmt := range m.Program.Body {
+			exp, ok := stmt.(*ast.ExportStmt)
+			if !ok {
+				continue
+			}
+			if exp.Default {
+				if !star {
+					add("default")
+				}
+				continue
+			}
+			if exp.StarReexport && exp.Namespace == "" {
+				t := target(m, exp.ReexportSource)
+				if t == nil || visiting[t] {
+					src := strings.Trim(exp.ReexportSource, "\"'`")
+					return diag.New(m.Path, exp.Position.Line, exp.Position.Col,
+						"`export *` in a \"use client\" module cannot be wrapped as a client boundary",
+						"list the re-exported names explicitly: export { A, B } from \""+src+"\"",
+						lineOf(m.SourceCode, exp.Position.Line)).WithCode(diag.CodeClientBoundaryExports)
+				}
+				if err := collect(t, true); err != nil {
+					return err
+				}
+				continue
+			}
+			add(exp.Namespace)
+			switch d := exp.Declaration.(type) {
+			case *ast.FnDecl:
+				add(d.Name)
+			case *ast.ClassDecl:
+				add(d.Name)
+			case *ast.VarStmt:
+				for _, v := range d.Decls {
+					add(v.Name)
+				}
+			}
+			for _, n := range exp.Named {
+				if n.Remote != "" {
+					add(n.Remote)
+				} else {
+					add(n.Local)
+				}
+			}
+			for _, n := range exp.ReexportNamed {
+				if n.Remote != "" {
+					add(n.Remote)
+				} else {
+					add(n.Local)
+				}
 			}
 		}
-		for _, n := range exp.Named {
-			if n.Remote != "" {
-				add(n.Remote)
-			} else {
-				add(n.Local)
-			}
-		}
-		for _, n := range exp.ReexportNamed {
-			if n.Remote != "" {
-				add(n.Remote)
-			} else {
-				add(n.Local)
-			}
-		}
+		return nil
+	}
+	if err := collect(mod, false); err != nil {
+		return nil, err
 	}
 	return names, nil
 }

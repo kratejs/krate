@@ -161,3 +161,75 @@ export default async function Home() {
 		t.Fatalf("unexpected browser result: %+v", res)
 	}
 }
+
+func TestClientModuleStarReexportExpandsRuntimeExports(t *testing.T) {
+	files := map[string]string{
+		"src/components/viewer/types.ts":   "export interface ViewerProps { label: string }\nexport type Mode = 'a' | 'b';\n",
+		"src/components/viewer/helpers.ts": "export function fmt(s: string) { return s.toUpperCase(); }\nexport const MAX = 3;\nexport default 1;\n",
+		"src/components/Button.tsx":        "export function Button({ text }: { text: string }) { return <i class=\"btn\">{text}</i>; }\n",
+		"src/components/viewer/viewer.tsx": `import { useState } from "react";
+import { Button } from "../Button";
+import type { ViewerProps } from "./types";
+export function Viewer({ label }: ViewerProps) {
+  const [n, setN] = useState(0);
+  return <button id="v" onClick={() => setN(n + 1)}>{label}: {n}<Button text="b" /></button>;
+}
+`,
+		"src/components/viewer/index.tsx": `"use client";
+export * from './types';
+export * from './helpers';
+export { Viewer } from './viewer';
+`,
+		"src/pages/index.tsx": `import { Viewer } from "../components/viewer";
+import { Button } from "../components/Button";
+export default async function Home() {
+  const label = await Promise.resolve("count");
+  return <main><Viewer label={label} /><Button text={label} /></main>;
+}`,
+	}
+	b, root := scProject(t, files)
+	withPreact(t, root)
+	if err := b.BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	shell, _ := os.ReadFile(filepath.Join(root, "dist", "index.html"))
+	if !strings.Contains(string(shell), "island-loader.") {
+		t.Errorf("page shell should load the island loader:\n%s", shell)
+	}
+	if err := b.writeIslandBundles(); err != nil {
+		t.Fatal(err)
+	}
+	// viewer.tsx has no directive: a "use client" module imports it, so it is
+	// client code and hydrates in its own island chunk.
+	chunks, _ := filepath.Glob(filepath.Join(root, "dist", "chunks", "island_*.js"))
+	hydrates := false
+	for _, c := range chunks {
+		if src, _ := os.ReadFile(c); strings.Contains(string(src), "Viewer") && strings.Contains(string(src), "mount") {
+			hydrates = true
+		}
+	}
+	// The page's direct <Button> stays a server component: only the barrel and
+	// viewer.tsx are boundaries, Button has no chunk of its own.
+	if len(chunks) != 2 {
+		t.Errorf("expected two island chunks (barrel and Viewer), got %v", chunks)
+	}
+	if !hydrates {
+		t.Fatalf("no island chunk contains the Viewer component: %v", chunks)
+	}
+	bundle, _ := os.ReadFile(filepath.Join(root, "dist", ".krate", "server-bundles", "index.server.mjs"))
+	for _, want := range []string{`"Viewer"`, `"fmt"`, `"MAX"`} {
+		if !strings.Contains(string(bundle), want) {
+			t.Errorf("page bundle missing expanded export %s:\n%s", want, bundle)
+		}
+	}
+
+	// A cycle of star re-exports cannot be expanded: the hint names the source
+	// once, with a single pair of quotes.
+	err := buildErr(t, map[string]string{
+		"src/components/a.tsx": "\"use client\";\nexport * from './b';\nexport function A() { return <i>a</i>; }\n",
+		"src/components/b.tsx": "export * from './a';\nexport const B = 1;\n",
+		"src/pages/index.tsx": `import { A } from "../components/a";
+export default async function Home() { await 1; return <main><A /></main>; }`,
+	})
+	wantCode(t, err, diag.CodeClientBoundaryExports, `export { A, B } from "./a"`)
+}

@@ -403,6 +403,7 @@ host code runs in the native process. Names and options may change between relea
   the Node fallback). A KR7122 from a layout is reported at the layout's export, never at `0:0`. An
   out-of-memory or crash inside the embedded JavaScript engine (default heap raised to 128 MB,
   `KRATE_JS_MEMORY_MB`) is now an error for that page instead of killing the build.
+- `export * from "./x"` in a `"use client"` module no longer fails with KR7114 when `./x` is a local module: it is expanded into the target's runtime exports (a types-only target contributes none), and a component imported through a `"use client"` module (a barrel re-exporting a directive-less file) is a client component for that import, as in Next.js. The remaining KR7114 case (a package or a cycle) prints its hint without doubled quotes.
 - Inline `"use server"` actions declared inside a callback of an async server component (a `.map` row
   action capturing the row) no longer fail with KR7001. The error for a capture in a non-async component
   now names the variable, and a value that cannot be sealed reports the action's `file:line:col`.
