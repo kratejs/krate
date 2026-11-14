@@ -1,6 +1,7 @@
 package irtree
 
 import (
+	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"sort"
 	"strconv"
 	"strings"
@@ -266,6 +267,9 @@ func (b *builder) buildSSREvalComponentSlot(el *ast.JSXElement, childFn *ast.FnD
 	restoreExpansion := b.callerExpansion()
 	restoreCSS := b.enterCSSChildren(childFn)
 	childNode.Children = b.buildCallSiteChildSlots(el.Children, string(childID))
+	b.buildRepeatedChildrenCopies(childFn.Name, childFn, &childNode.Children, &childNode.ChildCopyStarts, func() []SlotNode {
+		return b.buildCallSiteChildSlots(el.Children, string(childID))
+	})
 	restoreCSS()
 	restoreExpansion()
 	b.callSiteChildren = savedCS
@@ -401,6 +405,9 @@ func (b *builder) buildClientComponentSlot(el *ast.JSXElement, childFn *ast.FnDe
 	}
 	childNode.CallSiteChildren = el.Children
 	childNode.CallSiteSlots = b.buildComponentCallSiteSlots(el, childFn, childID, provider, childNode.childrenContext)
+	b.buildRepeatedChildrenCopies(childFn.Name, childFn, &childNode.CallSiteSlots, &childNode.CallSiteCopyStarts, func() []SlotNode {
+		return b.buildComponentCallSiteSlots(el, childFn, childID, provider, childNode.childrenContext)
+	})
 	b.completeSSREvalBindings(childNode, childFn, attrs)
 	b.registerChildProps(childNode, childFn)
 	b.checkScopePropReads(el, childFn, childNode, attrs)
@@ -527,6 +534,129 @@ func (b *builder) buildComponentCallSiteSlots(el *ast.JSXElement, childFn *ast.F
 		b.contextScopes[provider.ctx] = provider.ref
 	}
 	return b.buildCallSiteChildSlots(el.Children, string(childID))
+}
+
+// maxChildrenCopies caps how many instances of the call-site children one
+// component renders; further placeholders are reported (KR8360).
+const maxChildrenCopies = 8
+
+// buildRepeatedChildrenCopies builds one extra copy of the call-site children
+// for every further `{children}` placeholder in the component's body, so each
+// rendered instance gets its own hydration keys (React mounts children rendered
+// twice as two instances). build makes one copy. The copies are appended to
+// *slots and their start offsets recorded in *starts. Children with nothing to
+// hydrate render identically each time and need no copy. A placeholder that
+// renders more than once from a single place (inside a loop) or beyond the cap
+// cannot get its own copy and is reported.
+func (b *builder) buildRepeatedChildrenCopies(name string, fn *ast.FnDecl, slots *[]SlotNode, starts *[]int, build func() []SlotNode) {
+	refs := childrenPlaceholders(fn)
+	if len(refs) == 0 || (len(refs) < 2 && !refs[0].loop) {
+		return
+	}
+	hydrates := false
+	for _, s := range *slots {
+		if h, static := s.(*StaticHTML); !static || strings.Contains(h.HTML, "data-k") {
+			hydrates = true
+			break
+		}
+	}
+	if !hydrates {
+		return
+	}
+	for _, r := range refs {
+		if r.loop {
+			b.warnChildrenRepeated(fn.Name, r.pos, "children with client state are rendered once per iteration in <"+name+">",
+				"each copy needs its own instance: render a component per item with its own state, or move the state up out of the children")
+			break
+		}
+	}
+	if len(refs) > maxChildrenCopies {
+		b.warnChildrenRepeated(fn.Name, refs[maxChildrenCopies].pos, "children with client state are rendered "+itoa(len(refs))+" times in <"+name+">, more than the "+itoa(maxChildrenCopies)+" copies that get their own instance",
+			"each copy needs its own instance: render a component per copy, or move the state up out of the children")
+	}
+	for i := 1; i < min(len(refs), maxChildrenCopies); i++ {
+		*starts = append(*starts, len(*slots))
+		*slots = append(*slots, build()...)
+	}
+}
+
+// warnChildrenRepeated reports KR8323 at a position in component fn, which
+// may live in another file than the one being built.
+func (b *builder) warnChildrenRepeated(fn string, pos ast.Pos, msg, hint string) {
+	if b.locateOnly > 0 {
+		return
+	}
+	file, raw := "", ""
+	if b.ann != nil {
+		file, raw = b.ann.ComponentSources[fn], b.ann.ComponentRaw[fn]
+		if file == "" {
+			file = b.ann.SourceFile
+		}
+	}
+	d := diag.New(file, pos.Line, pos.Col, msg, hint, sourceLine(raw, pos.Line))
+	d.Severity = diag.SeverityWarning
+	d = d.WithCode(diag.CodeChildrenRepeated)
+	for _, w := range b.warnings {
+		if w.Code == d.Code && w.File == d.File && w.Line == d.Line && w.Col == d.Col {
+			return
+		}
+	}
+	b.warnings = append(b.warnings, d)
+}
+
+// childrenRef is one `{children}` placeholder in a component body.
+type childrenRef struct {
+	pos  ast.Pos
+	loop bool // rendered once per iteration of a loop or array callback
+}
+
+var iterationMethods = map[string]bool{"map": true, "flatMap": true, "forEach": true, "reduce": true, "filter": true}
+
+// childrenPlaceholders lists the `{children}` / `{props.children}` containers
+// in fn's body in source order.
+func childrenPlaceholders(fn *ast.FnDecl) []childrenRef {
+	inLoop := map[*ast.JSXExprContainer]bool{}
+	markLoop := func(node any) {
+		WalkAST(node, func(n any) bool {
+			if ec, ok := n.(*ast.JSXExprContainer); ok {
+				inLoop[ec] = true
+			}
+			return true
+		})
+	}
+	var refs []childrenRef
+	WalkAST(fn.Body, func(n any) bool {
+		switch t := n.(type) {
+		case *ast.ForStmt, *ast.ForInStmt, *ast.WhileStmt, *ast.DoWhileStmt:
+			markLoop(t)
+		case *ast.CallExpr:
+			if m, ok := t.Callee.(*ast.MemberExpr); ok {
+				if id, ok := m.Property.(*ast.Identifier); ok && iterationMethods[id.Name] {
+					markLoop(t.Args)
+				}
+			}
+		}
+		return true
+	})
+	// The placeholder expression carries no position; the element or fragment
+	// holding it does.
+	addRefs := func(pos ast.Pos, children []ast.JSXChild) {
+		for _, c := range children {
+			if ec, ok := c.(*ast.JSXExprContainer); ok && ec.Expression != nil && isChildrenPlaceholderExpr(ec.Expression) {
+				refs = append(refs, childrenRef{pos: pos, loop: inLoop[ec]})
+			}
+		}
+	}
+	WalkAST(fn.Body, func(n any) bool {
+		switch t := n.(type) {
+		case *ast.JSXElement:
+			addRefs(t.Position, t.Children)
+		case *ast.JSXFragment:
+			addRefs(t.Position, t.Children)
+		}
+		return true
+	})
+	return refs
 }
 
 // completeSSREvalBindings gives an auto-promoted SSR-evaluated component the
