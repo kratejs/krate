@@ -1922,7 +1922,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		// Only buffer document requests. Buffering every asset just to detect a
 		// missing one would retain whole images/videos/fonts in memory, and a
 		// site without segment pages has nothing to substitute.
-		if entries, _ := segs.load(); len(entries) == 0 || (!isHTMLDocRequest(r.URL.Path) && !strings.Contains(r.Header.Get("Accept"), "text/html")) {
+		if entries, _ := segs.load(); len(entries) == 0 || (!isHTMLDocRequest(r.URL.Path) && path.Ext(r.URL.Path) != "" && !strings.Contains(r.Header.Get("Accept"), "text/html")) {
 			staticServer.ServeHTTP(w, r)
 			return
 		}

@@ -540,6 +540,9 @@ The URL form of pages, honoured the same way by `krate serve`/`krate start` and 
   the platform or another layer owns canonicalization, or when you want to link
   both forms.
 
+A URL that matches no page is never redirected: `/nope` answers `404` with the site's
+404 page in every mode (also for requests that do not accept HTML), at any depth.
+
 Files with an extension (`/feed.xml`), `/api/*` and the internal `/__krate/*` paths
 are never redirected. The setting changes what the servers answer, not what the
 build writes: canonical URLs, sitemap entries and generated links still use the
