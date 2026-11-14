@@ -63,3 +63,19 @@ console.log(JSON.stringify({
 		}
 	}
 }
+
+// TestMigratedImportsStayBelowDirectives checks that imports the migrator adds
+// land after the directive prologue, so "use server" stays the first statement.
+func TestMigratedImportsStayBelowDirectives(t *testing.T) {
+	actions := "'use server';\nimport { after } from 'next/server';\nimport { db } from '../db';\nexport async function markRead(id: string) { after(() => log(id)); await db.markRead(id); }\n"
+	out, _, _ := rewriteAPIServerSource(actions)
+	if !strings.HasPrefix(out, "'use server';\nimport { after } from \"@krate/runtime/server\";") {
+		t.Errorf("after import is not below the directive:\n%s", out)
+	}
+
+	dyn := "// header\n\"use client\";\n'use strict';\nimport dynamic from 'next/dynamic';\nconst Chart = dynamic(() => import('./chart'));\nexport default Chart;\n"
+	out, ok := rewriteNextDynamic(dyn)
+	if !ok || !strings.HasPrefix(out, "// header\n\"use client\";\n'use strict';\nimport { lazy } from \"react\";\n") {
+		t.Errorf("lazy import is not below the directives (ok=%v):\n%s", ok, out)
+	}
+}

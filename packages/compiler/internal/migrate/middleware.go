@@ -111,14 +111,14 @@ func rewriteNextMiddleware(src string) (string, []string, []string) {
 	}
 	if strings.Contains(src, "NextResponse") && !importFailed {
 		// Keep a tiny shim for NextResponse.next() or unusual helper usage.
-		src = "const NextResponse = {\n  redirect: (url: string | URL, init?: ResponseInit) => Response.redirect(url, init),\n  json: (body: any, init?: ResponseInit) => Response.json(body, init),\n  next: () => undefined,\n};\n\n" + src
+		src = insertImportAfterDirective(src, "const NextResponse = {\n  redirect: (url: string | URL, init?: ResponseInit) => Response.redirect(url, init),\n  json: (body: any, init?: ResponseInit) => Response.json(body, init),\n  next: () => undefined,\n};\n\n")
 		rewrites = append(rewrites, "added NextResponse shim")
 	}
 	if !strings.Contains(src, "NextResponse") {
 		rewrites = append(rewrites, "rewrote NextRequest to Request and NextResponse helpers to Response")
 	}
 	if needHelpers {
-		src = `function __krateCookieJar(request: Request) {
+		src = insertImportAfterDirective(src, `function __krateCookieJar(request: Request) {
   const values = new Map<string, string>();
   for (const part of (request.headers.get("cookie") || "").split(";")) {
     const i = part.indexOf("=");
@@ -142,7 +142,7 @@ function __krateGeo(request: Request) {
   };
 }
 
-` + src
+`)
 		rewrites = append(rewrites, "added cookie/IP/geo request shims")
 	}
 	if matcherFound {
