@@ -58,7 +58,11 @@ export default async function Post({ params }: { params: Promise<{ slug: string 
 
 At build time the chain runs in the embedded JavaScript engine and falls back to
 Node when it needs `fetch` or a Node built-in (the `ssrRuntime` or `runtime` setting, as for
-`generateStaticParams`). On a request-time page the build bakes nothing from a chain
+`generateStaticParams`). Only the `metadata`, `viewport` and `generateMetadata` exports
+of each file run, with what they use (the imports and module-level values they refer
+to), not the page component or the rest of the module; a module that cannot be cut
+that way (a `let` that other top-level code changes) runs whole. `generateStaticParams`
+is evaluated the same way. On a request-time page the build bakes nothing from a chain
 that has a `generateMetadata`: the renderer resolves the whole chain per request, so
 the layout and page parts always agree.
 
