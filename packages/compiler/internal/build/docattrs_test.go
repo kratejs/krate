@@ -181,7 +181,7 @@ export default async function Home() {
 // key handling is covered, and builds with JSX attribute names.
 func TestConfigDocAttrsUseJSXNames(t *testing.T) {
 	b, root := scProject(t, map[string]string{
-		"krate.config.ts": `export default { site: { htmlAttributes: { className: 'dark', lang: 'en' }, bodyAttributes: { className: 'min-h-screen' } } };`,
+		"krate.config.ts":     `export default { site: { htmlAttributes: { className: 'dark', lang: 'en' }, bodyAttributes: { className: 'min-h-screen' } } };`,
 		"src/pages/index.tsx": `export default function Home() { return <h1>home</h1>; }`,
 	})
 	cfg, err := config.Load(root)
