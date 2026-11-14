@@ -108,7 +108,7 @@ func (w *apiWorker) ensure(routeID, code string, version int64) error {
 	if _, err := w.rt.Execute("globalThis.__krate_route = undefined;"); err != nil {
 		return err
 	}
-	if _, err := w.rt.Execute(code); err != nil {
+	if _, err := w.rt.Execute(code + "\n;void 0;"); err != nil {
 		return err
 	}
 	if _, err := w.rt.Execute(apiRegisterJS(routeID)); err != nil {

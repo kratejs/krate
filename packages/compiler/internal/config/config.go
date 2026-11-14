@@ -777,6 +777,7 @@ type Config struct {
 	Headers     []HeaderRule    `json:"headers,omitempty"`     // custom response headers
 	Images      ImagesConfig    `json:"images,omitempty"`      // responsive-image pipeline
 	Deploy      DeployConfig    `json:"deploy,omitempty"`      // deploy adapter + options
+	Auth        AuthConfig      `json:"auth,omitempty"`        // authentication: providers, sessions, 2FA, passkeys
 	React       ReactConfig     `json:"react,omitempty"`       // real-React islands
 
 	// ServerExternalPackages lists npm packages that server bundles (API

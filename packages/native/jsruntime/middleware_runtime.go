@@ -154,7 +154,7 @@ func (m *MiddlewareRuntime) newWorker() (*mwWorker, error) {
 	if _, err := rt.EvalBytecode(bc); err != nil {
 		return fail(err)
 	}
-	if _, err := rt.Execute(stripExports(string(code)) + "\n"); err != nil {
+	if _, err := rt.Execute(stripExports(string(code)) + "\n;void 0;"); err != nil {
 		return fail(fmt.Errorf("failed to execute middleware.js: %w", err))
 	}
 	v, err := rt.Execute(`__krate_mw_init(

@@ -105,7 +105,8 @@ fail the middleware with an explanatory error.
 
 ## Use cases
 
-- **Auth** - redirect unauthenticated users.
+- **Auth** - redirect unauthenticated users. `@krate/auth` does this from
+  `auth.protect` rules, see [Authentication](/docs/features/authentication/).
 - **Bot detection** - serve a custom response to known bots.
 - **A/B testing** - rewrite requests to different variants.
 - **Header injection** - set security headers per route.

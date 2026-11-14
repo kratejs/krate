@@ -474,6 +474,16 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 			return err
 		}
 		cfg.Head = hc
+	case "auth":
+		data, err := json.Marshal(val)
+		if err != nil {
+			return err
+		}
+		var ac AuthConfig
+		if err := json.Unmarshal(data, &ac); err != nil {
+			return fmt.Errorf("auth: %w", err)
+		}
+		cfg.Auth = ac
 	case "security":
 		data, err := json.Marshal(val)
 		if err != nil {

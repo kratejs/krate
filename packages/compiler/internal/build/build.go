@@ -4312,6 +4312,7 @@ func (b *Builder) BuildMiddleware() error {
 		Metafile:    true,
 		Plugins:     []api.Plugin{jseval.MarkerPackagesPlugin()},
 	}
+	withAuthConfig(&mwOpts, b.Cfg)
 	// The embedded engine has no node:module; a Node-family runtime needs the
 	// createRequire banner for CommonJS dependencies.
 	if !embeddedRuntime(b.Cfg.SSR.MiddlewareRuntime) {
@@ -5257,6 +5258,8 @@ func (b *Builder) compileSingleRoute(file string, apiSrcDir string) (apiRouteMet
 		nodeOpts.MinifySyntax = true
 	}
 
+	withAuthConfig(&quickjsOpts, b.Cfg)
+	withAuthConfig(&nodeOpts, b.Cfg)
 	// Packages with native addons (and serverExternalPackages) stay external
 	// here, which marks the route Node-only below.
 	quickjsResult, _ := buildExternalizingNative(quickjsOpts, b.Cfg.ServerExternalPackages)

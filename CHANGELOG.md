@@ -292,6 +292,18 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 - Compatibility matrix rows for sonner, cmdk, embla-carousel-react, @dnd-kit, @tanstack/react-table,
   next-themes and `motion/react` (tested in Chromium with the real packages), and for the real-React
   libraries.
+- `@krate/auth`: authentication in the style of NextAuth, configured from the new `auth` key in
+  `krate.config.ts`. 56 built-in OAuth and OpenID Connect providers, credentials, email magic
+  links and Resend, JWT or database sessions, a Drizzle adapter for SQLite, PostgreSQL and MySQL,
+  TOTP two-factor authentication with backup codes, passkeys (ES256, EdDSA and RS256), route
+  protection from `auth.protect` rules, and a browser client. It runs in the embedded runtime, so
+  API routes and middleware need no Node.js process.
+- `auth` is validated at load time: unknown keys warn, invalid values fail the build, secrets in
+  provider options are rejected with a pointer to `AUTH_<PROVIDER>_SECRET`, and database
+  sessions, two-factor authentication and passkeys fail without `auth.adapter.dialect`.
+- The serializable part of `auth` is delivered to API routes, server actions and middleware as
+  `globalThis.__KRATE_AUTH_CONFIG__`, so packages that stay external in the Node sidecar read it
+  too.
 - The embedded QuickJS runtime installs each group of Web APIs the first time code reads one of
   its globals, so creating a VM costs about 1.4 ms instead of 3.2 ms. Config and
   Tailwind evaluation, `generateStaticParams`, metadata and isolation-mode API requests get
@@ -401,6 +413,8 @@ host code runs in the native process. Names and options may change between relea
 - A prerendered page whose only stateful component sits in `<Head>` ships no hydration JavaScript.
 - `/404` and `/404.html` answer with the 404 page and status 404 instead of redirecting.
 - A symlinked workspace package with TypeScript source loads in the Node server output.
+- A middleware or API bundle whose last top-level statement evaluates to a BigInt no longer fails
+  to load with "Do not know how to serialize a BigInt". Bundled crypto libraries produce one.
 - The generated types of a Go host signal say `T | undefined`, as for `@host` TypeScript signals: it
   reads `undefined` until the host sends the first value, which pages typed as `T` crashed on.
 - An aliased export (`export { remoteOnEvent as onEvent }`) and another module's declared export of

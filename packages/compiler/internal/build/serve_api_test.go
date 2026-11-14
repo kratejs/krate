@@ -70,3 +70,18 @@ func TestMiddlewareGateStaticExtensionBypass(t *testing.T) {
 		t.Errorf("with no static layer middleware must always run, got %d", code)
 	}
 }
+
+func TestMiddlewareCompletionValueIsDiscarded(t *testing.T) {
+	g := newGate(t, `
+export function middleware(request) {
+  return new Response("teapot", { status: 418 });
+}
+123456789012345678901234567890n;
+`, false)
+	h := g.wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, "page") }))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "http://example.com/x", nil))
+	if rec.Code != 418 {
+		t.Fatalf("a trailing BigInt expression must not break loading the middleware: %d %q", rec.Code, rec.Body)
+	}
+}

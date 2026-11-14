@@ -123,3 +123,25 @@ function GET(request) { n++; return Response.json({ n: n }); }`
 		}
 	}
 }
+
+// TestAPIRouteCompletionValueIsDiscarded guards against a bundle whose last
+// evaluated statement yields a value the host cannot marshal (a BigInt, which
+// bundled crypto libraries produce at the top level).
+func TestAPIRouteCompletionValueIsDiscarded(t *testing.T) {
+	apiDir := filepath.Join(t.TempDir(), "api")
+	_ = os.MkdirAll(apiDir, 0755)
+	routeCode := `
+function GET(request) {
+	return { status: 200, text: function() { return 'ok'; } };
+}
+123456789012345678901234567890n;
+`
+	_ = os.WriteFile(filepath.Join(apiDir, "big.js"), []byte(routeCode), 0644)
+
+	rt := NewAPIRouteRuntime(apiDir)
+	defer rt.Close()
+	result := rt.Execute(APIRequest{Method: "GET", Path: "/api/big"})
+	if result.Status != 200 || string(result.Body) != "ok" {
+		t.Fatalf("status %d body %q error %q", result.Status, result.Body, result.Error)
+	}
+}

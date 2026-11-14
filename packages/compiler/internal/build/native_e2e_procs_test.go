@@ -63,7 +63,9 @@ func TestNativeE2EProcsGUI(t *testing.T) {
 	}
 	t.Logf("page result: %s", res)
 	if strings.HasPrefix(res, "ERROR") {
-		var prog string
+		var errs, prog string
+		_ = s.query(`JSON.stringify(globalThis.__krateErrs ?? [], (k, v) => v instanceof Error ? String(v) + " " + v.stack : v)`, &errs)
+		t.Logf("page errors: %s", errs)
 		_ = s.query(`globalThis.__step ?? ""`, &prog)
 		t.Fatalf("%s (in step %q)", res, prog)
 	}
