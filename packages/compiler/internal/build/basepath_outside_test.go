@@ -46,12 +46,15 @@ func TestBasePathOutsideLinks(t *testing.T) {
 	html := string(data)
 	for _, want := range []string{
 		`<a data-krate-link data-prefetch href=/app/in-site>`,
-		`<a href=/pricing data-krate-external data-krate-no-base>outside-link`,
-		`<a href=/blog data-krate-no-base=true>outside-anchor`,
+		`<a href=/pricing data-krate-external>outside-link`,
+		`<a href=/blog>outside-anchor`,
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("missing %q in:\n%s", want, html)
 		}
+	}
+	if strings.Contains(html, "data-krate-no-base") {
+		t.Errorf("the build-time marker must not be emitted:\n%s", html)
 	}
 	if strings.Contains(html, "basePath") && strings.Contains(html, "basepath=") {
 		t.Errorf("basePath prop leaked onto the anchor:\n%s", html)

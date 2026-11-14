@@ -948,7 +948,8 @@ only writes files into `src/components/ui` and installs packages.
 **What runs where.** Components with no Radix primitive (`Button`, `Card`,
 `Badge`, `Input`, `Textarea`, `Table`, ...) compile like any other Krate source
 and ship no JavaScript. `asChild` works for them too: `import { Slot } from
-"radix-ui"` (and `@radix-ui/react-slot`) is Krate's own Slot.
+"radix-ui"` (and `@radix-ui/react-slot`, including `createSlot` and
+`createSlottable`) is Krate's own Slot.
 
 Components built on a Radix primitive (`Dialog`, `DropdownMenu`, `Tabs`,
 `Accordion`, `Select`, `Tooltip`, `Checkbox`, `Switch`, `Popover`, ...) run as

@@ -176,3 +176,10 @@ export default async function Home() {
 		t.Errorf("html/body tags must not remain in the document body:\n%s", html)
 	}
 }
+
+func TestConfigDocAttrsUseJSXNames(t *testing.T) {
+	got := configDocAttrs(config.AttrMap{"className": "dark", "htmlFor": "x", "data-Site": "y"})
+	if got["class"] != "dark" || got["for"] != "x" || got["data-site"] != "y" || len(got) != 3 {
+		t.Errorf("attrs = %v", got)
+	}
+}

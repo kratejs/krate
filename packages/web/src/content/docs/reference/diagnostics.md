@@ -372,7 +372,7 @@ Krate wraps each export of a `"use client"` module in a client boundary, so it m
 
 **One name imported from two modules**
 
-Two modules export the same name and a page imports it from both, for example `import { Card as A } from "./a"` and `import { Card as B } from "./b"`. Modules on a page share one namespace, so Krate gives one of the exports a private name and rewrites the imports to match, and this is not reported. It is reported when neither module can be renamed because something reads export names from source: a re-export (`export { Card } from`, `export *`, or an import followed by an export), a namespace import (`import * as ns`), an `import()`, or a "use client" or "use server" module. Both imports then resolve to one declaration and the page shows the wrong output. Rename one of the exports. Private names and default exports do not have this problem. This is a warning.
+Two modules export the same name and a page imports it from both, for example `import { Card as A } from "./a"` and `import { Card as B } from "./b"`. Modules on a page share one namespace, so Krate gives one of the exports a private name and rewrites the imports to match, and this is not reported. A named re-export (`export { Card } from`) is rewritten to follow the rename too. It is reported when neither module can be renamed because something reads export names from source: `export *` or `export * as`, an import followed by an export, the page's own module, an `import()`, a "use client" or "use server" module, or an alias export (`export { x as Card }`). Both imports then resolve to one declaration and the page shows the wrong output. Rename one of the exports. Private names and default exports do not have this problem. This is a warning.
 
 ### KR7120
 

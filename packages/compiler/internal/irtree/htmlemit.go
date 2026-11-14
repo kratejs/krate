@@ -95,6 +95,11 @@ func StyleCSS(expr ast.Expr, eval ValueFunc) (string, bool) {
 // handlers and dangerouslySetInnerHTML. unknownText supplies the text used
 // when the value is not known at build time.
 func RenderAttr(tag string, attr *ast.JSXAttr, eval ValueFunc, unknownText func(ast.Expr) string) string {
+	// A build-time marker: the href is already left unprefixed, and the
+	// browser runtime reads the marker from props, never from the DOM.
+	if attr.Name == "data-krate-no-base" {
+		return ""
+	}
 	if attr.Name == "style" {
 		css, ok := StyleCSS(attr.Value, eval)
 		if !ok {

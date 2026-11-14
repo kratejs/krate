@@ -241,6 +241,25 @@ type jsxProp struct {
 	scope map[string]jsvalue.Value
 }
 
+// inlineJSXConstAttrs replaces attributes that read a constant holding JSX
+// (`body={intro}`, `sections={sections}`) with the constant's own JSX, so they
+// are handled like JSX written in the attribute.
+func (b *builder) inlineJSXConstAttrs(attrs map[string]ast.Expr) {
+	for name, expr := range attrs {
+		switch unwrapTypeWrappers(expr).(type) {
+		case *ast.Identifier, *ast.MemberExpr:
+		default:
+			continue
+		}
+		if b.isFuncReference(expr) {
+			continue
+		}
+		if resolved := b.resolveModuleJSX(expr, 0); resolved != nil && containsJSXNode(resolved) {
+			attrs[name] = resolved
+		}
+	}
+}
+
 // jsxAttrExprs returns the attribute expressions that hold JSX.
 func jsxAttrExprs(attrs map[string]ast.Expr) []ast.Expr {
 	var out []ast.Expr

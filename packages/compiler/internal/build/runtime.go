@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
+	irtree "github.com/kratejs/krate/packages/compiler/internal/irtree"
 	"github.com/kratejs/krate/packages/compiler/internal/renderer"
 )
 
@@ -78,13 +80,14 @@ func runtimeNeedsCompat(results []*PageResult) bool {
 }
 
 // pageNeedsRuntime reports whether a page's document must load the shared
-// runtime chunk. A page that renders once at build time, has no hydration
-// script, no client islands and no server action forms never calls into the
-// runtime, so it ships none even when other pages of the site do. Pages whose
-// HTML is produced per request (SSR, ISR, streaming, regions) always get it:
-// the build cannot see what they render. The SPA router is started by a page's
-// hydration script, so a static page has no router to lose; one already loaded
-// by an earlier page stays in memory across client-side navigations.
+// runtime chunk. A page that has no hydration script, no client islands and no
+// server action forms never calls into the runtime, so it ships none even when
+// other pages of the site do. That holds for pages rendered per request (SSR,
+// ISR) too: what they render is known from their module graph, so a page whose
+// graph has no client code stays script-free. Streaming pages and pages with
+// runtime-component regions always get it. The SPA router is started by a
+// page's hydration script, so such a page has no router to lose; one already
+// loaded by an earlier page stays in memory across client-side navigations.
 func pageNeedsRuntime(r *PageResult) bool {
 	if r == nil {
 		return false
@@ -92,12 +95,51 @@ func pageNeedsRuntime(r *PageResult) bool {
 	if r.HasJS || r.JSFile != "" || r.HydrationJS != "" {
 		return true
 	}
-	if r.Mode != RenderSSG || r.ServerPage || len(r.Regions) > 0 {
+	if perRequestClientCode(r) {
 		return true
 	}
 	return strings.Contains(r.HTML, "<"+islandMarkup) ||
 		strings.Contains(r.HTML, actionsMarkup) ||
 		strings.Contains(r.HTML, "/__krate/action/")
+}
+
+// perRequestClientCode reports whether the HTML a page produces per request
+// can carry client code the build never saw: streamed or runtime regions, an
+// island that hydrates, or a server action form.
+func perRequestClientCode(r *PageResult) bool {
+	return r.Mode == RenderStreaming || len(r.Regions) > 0 ||
+		anyBoundaryHydrates(r.ClientBoundaries) || r.ServerActions
+}
+
+// hookCallRe matches a call to a hook: client code that may have effects.
+var hookCallRe = regexp.MustCompile(`\buse[A-Z]\w*\(`)
+
+// requestTimeInert reports whether the hydration of a page rendered per
+// request would only re-evaluate expressions that read no signal. The server
+// renders those with the real request, server-only values included, so
+// running them again in the browser would show nothing or something else, and
+// would ship the server code that computes them. Such a page needs no
+// hydration.
+func requestTimeInert(mode RenderMode, sigs []irtree.ComponentSignature) bool {
+	if mode != RenderSSR && mode != RenderISR {
+		return false
+	}
+	for _, sig := range sigs {
+		if len(sig.Signals) > 0 || len(sig.Handlers) > 0 || len(sig.RefBindings) > 0 ||
+			len(sig.Effects) > 0 || len(sig.Memos) > 0 || len(sig.FuncPropAliases) > 0 ||
+			len(sig.IslandBoot) > 0 || len(sig.BodyUses) > 0 || len(sig.AttrBindings) > 0 ||
+			sig.Lazy || sig.Class {
+			return false
+		}
+		for _, list := range [][]string{sig.ExtraVars, sig.PreSignalVars} {
+			for _, v := range list {
+				if hookCallRe.MatchString(v) {
+					return false
+				}
+			}
+		}
+	}
+	return true
 }
 
 // loadDevBundleFromDisk loads the dev-only overlay/toolbar bundle

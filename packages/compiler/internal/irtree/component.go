@@ -2,6 +2,7 @@ package irtree
 
 import (
 	"maps"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -790,10 +791,111 @@ func needsNoClientJS(node *ComponentNode, fn *ast.FnDecl, funcProps map[string]b
 	_, _, providesScope := providedScopeContext(fn)
 	return !slotsHaveExpr(node.Children, paramBindingSet(fn), funcProps) &&
 		len(node.Signals) == 0 && len(node.Effects) == 0 &&
-		len(node.Memos) == 0 && len(node.ExtraVars) == 0 &&
-		len(node.PreSignalVars) == 0 &&
+		len(node.Memos) == 0 && onlyFoldedVars(node, paramBindingSet(fn)) &&
 		len(node.Handlers) == 0 && len(node.AttrBindings) == 0 &&
 		len(node.RefBindings) == 0 && !hasComponentRef && !providesScope
+}
+
+// onlyFoldedVars reports whether the component declares nothing the hydration
+// scope needs: no body vars, or only vars whose value was folded at build time
+// (they are baked into the HTML, so a hydration script would only repeat
+// them) in a component without a hydrating child, which may read them. It
+// drops the vars when it holds.
+func onlyFoldedVars(node *ComponentNode, params map[string]bool) bool {
+	if len(node.ExtraVars) == 0 && len(node.PreSignalVars) == 0 {
+		return true
+	}
+	if hasClientChild(node.Children) {
+		return false
+	}
+	for _, list := range [][]string{node.ExtraVars, node.PreSignalVars} {
+		for _, v := range list {
+			if !foldedVarDecl(node, v) || readsLiveValue(v, params) {
+				return false
+			}
+		}
+	}
+	node.ExtraVars, node.PreSignalVars = nil, nil
+	return true
+}
+
+var (
+	callNameRe  = regexp.MustCompile(`([A-Za-z_$][\w$]*)\s*\(`)
+	identNameRe = regexp.MustCompile(`[A-Za-z_$][\w$]*`)
+)
+
+// readsLiveValue reports whether a var declaration reads something that can
+// change after the build: a hook (use(Context) folds to the context default,
+// not the provider's value) or a prop of the component.
+func readsLiveValue(v string, params map[string]bool) bool {
+	for _, m := range callNameRe.FindAllStringSubmatch(v, -1) {
+		if m[1] == "use" || isHookCallee(m[1]) {
+			return true
+		}
+	}
+	_, init, _ := strings.Cut(v, "=")
+	for _, id := range identNameRe.FindAllString(init, -1) {
+		if id == "props" || params[id] {
+			return true
+		}
+	}
+	return false
+}
+
+// foldedVarDecl reports whether v is a `var name=...` declaration of a local
+// with a build-time value.
+func foldedVarDecl(node *ComponentNode, v string) bool {
+	v = strings.TrimSuffix(strings.TrimPrefix(v, PureVarBegin), PureVarEnd)
+	rest, ok := strings.CutPrefix(v, "var ")
+	if !ok {
+		return false
+	}
+	end := 0
+	for end < len(rest) && isIdentChar(rest[end]) {
+		end++
+	}
+	if end == 0 || end == len(rest) || rest[end] != '=' {
+		return false
+	}
+	_, folded := node.LocalVars[rest[:end]]
+	return folded
+}
+
+// hasClientChild reports whether a hydrating component is nested anywhere in
+// slots.
+func hasClientChild(slots []SlotNode) bool {
+	for _, s := range slots {
+		switch v := s.(type) {
+		case *ComponentSlot:
+			// A static child can pass a value on to a hydrating grandchild.
+			if v.Component != nil && (v.Component.Tier == TierClient || hasClientChild(v.Component.Children)) {
+				return true
+			}
+		case *ConditionalSlot:
+			if hasClientChild(v.Consequent) || hasClientChild(v.Alternate) {
+				return true
+			}
+		case *ListSlot:
+			for _, it := range v.Items {
+				if it != nil && hasClientChild(it.Contents) {
+					return true
+				}
+			}
+		case *SuspenseSlot:
+			if hasClientChild(v.Fallback) || hasClientChild(v.Resolved) || (v.Primary != nil && v.Primary.Tier == TierClient) {
+				return true
+			}
+		case *GoComponentSlot:
+			if hasClientChild(v.Children) {
+				return true
+			}
+		case *MetaSlot:
+			if hasClientChild(v.Children) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // readsFuncProp reports whether src reads one of the function props, as a

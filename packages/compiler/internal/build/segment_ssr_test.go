@@ -3,6 +3,7 @@ package build
 import (
 	"io"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -79,7 +80,7 @@ func TestSegmentPageRendersPerRequest(t *testing.T) {
 	}
 
 	// An unmatched URL.
-	status, header, html := getWith(t, base+"/nope", map[string]string{"x-site": "alpha"})
+	status, header, html := getWith(t, base+"/nope/", map[string]string{"x-site": "alpha"})
 	if status != 404 || !strings.Contains(html, "missing for alpha") || !strings.Contains(html, "<title>Missing alpha</title>") {
 		t.Fatalf("status %d (want 404 with the request's header):\n%s", status, html)
 	}
@@ -87,7 +88,7 @@ func TestSegmentPageRendersPerRequest(t *testing.T) {
 		t.Errorf("Cache-Control = %q", header.Get("Cache-Control"))
 	}
 	// Another request gets its own render.
-	if _, _, html = getWith(t, base+"/nope", map[string]string{"x-site": "beta"}); !strings.Contains(html, "missing for beta") {
+	if _, _, html = getWith(t, base+"/nope/", map[string]string{"x-site": "beta"}); !strings.Contains(html, "missing for beta") {
 		t.Errorf("each request renders on its own:\n%s", html)
 	}
 	// A route whose render calls notFound(): the nearest 404 page of its directory.
@@ -147,5 +148,78 @@ func TestSegmentErrorPageStaysPrerendered(t *testing.T) {
 		if e.Key == "" && len(e.Dynamic) != 1 {
 			t.Errorf("only the 404 page is dynamic: %+v", e)
 		}
+	}
+}
+
+// runtimeScriptProject builds files in a project that can load the built
+// runtime, so a page that needs it shows a script (a project without the
+// runtime would pass every "ships no script" check).
+func runtimeScriptProject(t *testing.T, files map[string]string) string {
+	t.Helper()
+	b, root := scProject(t, files)
+	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(root)
+	if err := b.BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	return root
+}
+
+func readDistPage(t *testing.T, root, name string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(root, "dist", filepath.FromSlash(name)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
+// TestRequestTimePagesShipNoRuntime: a page rendered per request that has
+// nothing interactive, the SSR 404 page included, loads no runtime and no
+// hydration script, and server-only code in it never reaches the browser. A
+// page with state still hydrates.
+func TestRequestTimePagesShipNoRuntime(t *testing.T) {
+	root := runtimeScriptProject(t, map[string]string{
+		"src/lib/env.ts": `export function readEnv() { const env = { A: process.env.A }; return env; }`,
+		"src/pages/index.tsx": `import { createSignal } from "@krate/runtime";
+export default function Home() { const [n, setN] = createSignal(0); return <button onClick={() => setN(n() + 1)}>{n()}</button>; }`,
+		"src/pages/dyn.tsx": `import { readEnv } from "../lib/env";
+export const dynamic = "force-dynamic";
+export default function Dyn() { const e = readEnv(); return <p>{e.A}</p>; }`,
+		"src/pages/who.tsx": `import { headers } from "@krate/runtime/server";
+export default async function Who() { const h = await headers(); return <p>{h.get("x-who")}</p>; }`,
+		"src/pages/404.tsx": `import { readEnv } from "../lib/env";
+export const config = { ssr: true };
+export default function NotFound() { const e = readEnv(); return <main><h1>404 {e.A}</h1></main>; }`,
+	})
+	if html := readDistPage(t, root, "index.html"); !strings.Contains(html, "<script src") {
+		t.Fatalf("a page with state must hydrate:\n%s", html)
+	}
+	for _, name := range []string{"dyn/index.html", "who/index.html", "404.html"} {
+		if html := readDistPage(t, root, name); strings.Contains(html, "<script") {
+			t.Errorf("%s: a non-interactive page rendered per request must ship no script:\n%s", name, html)
+		}
+	}
+	for _, dir := range []string{"dyn", "who", "__404"} {
+		if files, _ := filepath.Glob(filepath.Join(root, "dist", dir, "*.js")); len(files) > 0 {
+			t.Errorf("%s: no hydration script expected, got %v", dir, files)
+		}
+	}
+}
+
+// TestComponentLocalConstShipsNoRuntime: a local constant with a build-time
+// value is baked into the HTML like a module-scope one.
+func TestComponentLocalConstShipsNoRuntime(t *testing.T) {
+	root := runtimeScriptProject(t, map[string]string{
+		"src/pages/index.tsx": `export default function Page() {
+  const label = 'x' + 'y';
+  return <p>{label}</p>;
+}`,
+	})
+	html := readDistPage(t, root, "index.html")
+	if !strings.Contains(html, "<p>xy</p>") || strings.Contains(html, "<script") {
+		t.Errorf("a component-local constant must leave the page static:\n%s", html)
 	}
 }

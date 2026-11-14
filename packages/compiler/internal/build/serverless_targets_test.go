@@ -96,7 +96,10 @@ func checkHandlerResults(t *testing.T, out string) {
 	if r["template"].Status != 200 || !strings.Contains(r["template"].Body, "zzz") {
 		t.Errorf("template: %+v", r["template"])
 	}
-	for _, k := range []string{"segNotFound", "segMissNoSlash", "segGone"} {
+	if r["segMissNoSlash"].Status != 301 || r["segMissNoSlash"].Loc != "./c/" {
+		t.Errorf("an unknown slashless URL redirects to its slash form first: %+v", r["segMissNoSlash"])
+	}
+	for _, k := range []string{"segNotFound", "segGone"} {
 		if r[k].Status != 404 || !strings.Contains(r[k].Body, "blog-404") || !strings.Contains(r[k].Body, "id=blog-layout") || r[k].Cc != "no-store" {
 			t.Errorf("%s must render blog's own 404 inside its layout: %+v", k, r[k])
 		}

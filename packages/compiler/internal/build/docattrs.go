@@ -8,6 +8,7 @@ import (
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
 	"github.com/kratejs/krate/packages/compiler/internal/escape"
+	"github.com/kratejs/krate/packages/compiler/internal/htmlspec"
 )
 
 // Attributes of the document's <html> and <body> elements.
@@ -184,14 +185,15 @@ func setStartTagAttrs(doc, name string, attrs docAttrs) string {
 	return doc[:at] + "<" + name + renderTagAttrs(merged) + ">" + doc[end:]
 }
 
-// configDocAttrs converts a config attribute map.
+// configDocAttrs converts a config attribute map. Names follow the JSX
+// spelling (className is class, htmlFor is for).
 func configDocAttrs(m config.AttrMap) docAttrs {
 	if len(m) == 0 {
 		return nil
 	}
 	out := docAttrs{}
 	for k, v := range m {
-		out[strings.ToLower(k)] = v
+		out[strings.ToLower(htmlspec.AttrName(k))] = v
 	}
 	return out
 }

@@ -49,6 +49,21 @@ type ModuleCache struct {
 	assets   map[string]*assetEntry
 	res      *resolverMemo
 	renamed  map[string]*renamedEntry
+	warned   map[string]bool
+}
+
+// firstWarning reports whether key has not been seen before, and records it.
+func (c *ModuleCache) firstWarning(key string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.warned[key] {
+		return false
+	}
+	if c.warned == nil {
+		c.warned = map[string]bool{}
+	}
+	c.warned[key] = true
+	return true
 }
 
 // renamedEntry holds copies of one parsed module with private names renamed,

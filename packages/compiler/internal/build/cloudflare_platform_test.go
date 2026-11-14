@@ -184,6 +184,10 @@ func TestCloudflareWorkerModuleConfig(t *testing.T) {
 func TestCloudflareTrailingSlashAndNotFoundPage(t *testing.T) {
 	probes := `
 for (const p of ['/history', '/history/', '/about', '/about/', '/404', '/404/', '/404.html']) results[p] = await req(p, { headers: { accept: 'text/html' } });
+for (const p of ['/nope', '/a/b/c', '/nope/', '/a/b/c/']) {
+  results[p + '#html'] = await req(p, { headers: { accept: 'text/html' } });
+  results[p + '#any'] = await req(p, { headers: { accept: '*/*' } });
+}
 console.log(JSON.stringify(results));
 `
 	type res struct {
@@ -242,6 +246,25 @@ console.log(JSON.stringify(results));
 			for p, w := range c.want {
 				if got[p].Status != w[0].(int) || got[p].Loc != w[1].(string) {
 					t.Errorf("%s %s: got %d %q, want %d %q", c.mode, p, got[p].Status, got[p].Loc, w[0], w[1])
+				}
+			}
+			// Unknown URLs follow the page slash rule (always: 301 to the slash
+			// form, never: slashed form redirects), then answer with the 404 page
+			// whatever the Accept header says.
+			for _, p := range []string{"/nope", "/a/b/c", "/nope/", "/a/b/c/"} {
+				slashed := strings.HasSuffix(p, "/")
+				for _, kind := range []string{"#html", "#any"} {
+					r := got[p+kind]
+					redirect := (c.mode == "always" && !slashed) || (c.mode == "never" && slashed)
+					if redirect {
+						if r.Status != 301 || r.Loc == "" {
+							t.Errorf("%s %s%s: got %d %q, want the slash redirect", c.mode, p, kind, r.Status, r.Loc)
+						}
+						continue
+					}
+					if r.Status != 404 || !strings.Contains(r.Body, "custom-404") {
+						t.Errorf("%s %s%s: got %d %q, want the 404 page with status 404", c.mode, p, kind, r.Status, r.Body)
+					}
 				}
 			}
 			// The not-found page's own URLs are a 404 with that page, never a

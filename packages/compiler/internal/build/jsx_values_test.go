@@ -149,3 +149,44 @@ export default function Page() {
 		})
 	}
 }
+
+func TestJSXHeldInConstPassedAsProp(t *testing.T) {
+	html, _, err := buildKrateProject(t, map[string]string{
+		"src/components/LegalDoc.tsx": `export default function LegalDoc({ title, sections }: { title: string; sections: { id: string; heading: string; body: any }[] }) {
+  return (
+    <article>
+      <h1>{title}</h1>
+      {sections.map((s) => (
+        <section id={s.id}><h2>{s.heading}</h2>{s.body}</section>
+      ))}
+    </article>
+  );
+}`,
+		"src/components/Card.tsx": `export default function Card({ body, content }: { body?: any; content?: any }) {
+  return <div class="card">{body}{content && content.a}</div>;
+}`,
+		"src/pages/index.tsx": `import LegalDoc from '../components/LegalDoc';
+import Card from '../components/Card';
+const sections = [
+  { id: 'use', heading: 'Use', body: <>You may use <strong>this</strong> site.</> },
+  { id: 'privacy', heading: 'Privacy', body: <p>We keep little data.</p> },
+];
+const intro = <p>Hello</p>;
+export default function Terms() {
+  const parts = { a: <b>A</b> };
+  return <main><LegalDoc title="Terms" sections={sections} /><Card body={intro} content={parts} /></main>;
+}`,
+	})
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	for _, w := range []string{
+		`<section id="use"><h2>Use</h2>You may use <strong>this</strong> site.</section>`,
+		`<section id="privacy"><h2>Privacy</h2><p>We keep little data.</p></section>`,
+		`<div class="card"><p>Hello</p><b>A</b></div>`,
+	} {
+		if !strings.Contains(html, w) {
+			t.Errorf("html misses %s:\n%s", w, html)
+		}
+	}
+}
