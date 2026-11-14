@@ -401,6 +401,13 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- Real-React islands (react-three-fiber and other reconciler libraries) no longer bundle server-only code. A
+  `"use server"` module imported by a client component becomes a reference that posts to the action endpoint
+  (its body and what it imports stay on the server), and an unused import of a Node built-in is dropped, as in
+  Preact islands. A Node built-in a client component really uses still fails with KR8009, now at the file,
+  line and column of the import instead of the island's tag.
+- A page can import a `"use server"` function through a barrel file (`export { saveDraft } from "./actions"`)
+  without bundling the action's code into the browser; the build used to fail on the action's Node imports.
 - Server pages and components can import `useEffect`, `useLayoutEffect`, `useInsertionEffect` (no-ops while rendering),
   `cache` (memoizes by argument identity within one request), `use`, `useId`, `createElement`, `forwardRef`, `memo`,
   `startTransition`, `useTransition`, `useOptimistic` and `useActionState` from `react`; they failed the build with

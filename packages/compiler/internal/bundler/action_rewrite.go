@@ -40,6 +40,14 @@ func (b *Bundler) rewriteActionImports(prog *ast.Program, abs string) (map[strin
 
 	var body []ast.Stmt
 	for _, stmt := range prog.Body {
+		if exp, ok := stmt.(*ast.ExportStmt); ok && exp.ReexportSource != "" {
+			if repl, ok := b.rewriteActionReexport(exp, abs); ok {
+				changed = true
+				handled[trimImportSource(exp.ReexportSource)] = true
+				body = append(body, repl...)
+				continue
+			}
+		}
 		imp, ok := stmt.(*ast.ImportStmt)
 		if !ok || imp.Source == "" {
 			body = append(body, stmt)
@@ -111,6 +119,58 @@ func (b *Bundler) rewriteActionImports(prog *ast.Program, abs string) (map[strin
 	}
 	prog.Body = body
 	return handled, changed
+}
+
+// rewriteActionReexport replaces `export { a as b } from "./actions"` and
+// `export * from "./actions"` of a `"use server"` module (a barrel file) with
+// proxy constants that are exported under the same names, so the action source
+// does not enter the module graph through the barrel.
+func (b *Bundler) rewriteActionReexport(exp *ast.ExportStmt, abs string) ([]ast.Stmt, bool) {
+	src := trimImportSource(exp.ReexportSource)
+	exports, ok := b.actionModules[filepath.Clean(b.resolveImportForModule(abs, src))]
+	if !ok || exp.Namespace != "" {
+		return nil, false
+	}
+	pairs := exp.ReexportNamed
+	if exp.StarReexport {
+		names := make([]string, 0, len(exports))
+		for name := range exports {
+			if name != "default" {
+				names = append(names, name)
+			}
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			pairs = append(pairs, ast.NamedExport{Local: name, Remote: name})
+		}
+	}
+	var out []ast.Stmt
+	for _, n := range pairs {
+		remote := n.Remote
+		if remote == "" {
+			remote = n.Local
+		}
+		id, ok := exports[n.Local]
+		if !ok {
+			_ = b.setActionError(diag.New(abs, exp.Position.Line, exp.Position.Col,
+				fmt.Sprintf("re-exports %q from the server action module %s, but it is not exported", n.Local, src),
+				fmt.Sprintf("export an async function named %q from that file", n.Local), "").WithCode(diag.CodeActionImportMissing))
+			return nil, false
+		}
+		local := "__krateReexport_" + remote
+		if remote == "default" {
+			local = "__krateReexport_default"
+		}
+		if n.Local != "default" && remote != "default" {
+			if err := b.noteActionImport(local, actionURL(b.actionBasePath, id)); err != nil {
+				return nil, false
+			}
+		}
+		out = append(out,
+			&ast.VarStmt{Position: exp.Position, Kind: ast.VarConst, Decls: []*ast.VarDecl{{Name: local, Init: b.actionProxy(id)}}},
+			&ast.ExportStmt{Position: exp.Position, Named: []ast.NamedExport{{Local: local, Remote: remote}}})
+	}
+	return out, true
 }
 
 func (b *Bundler) actionProxy(id string) ast.Expr {

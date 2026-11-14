@@ -251,7 +251,9 @@ func (b *Builder) realReactOptions(sink *islandCSSSink, guard *unavailableGuard)
 		JSXImportSource:   "react",
 		LogLevel:          api.LogLevelSilent,
 		Define:            map[string]string{"process.env.NODE_ENV": env},
-		Plugins:           []api.Plugin{purePrunePlugin(b.Root), guard.plugin(), islandCSSPlugin(sink), islandJSXPluginFor("react")},
+		// The action plugin comes first so a "use server" module is never decided by
+		// the pure-module plugin (which also backs off when another plugin claims it).
+		Plugins: []api.Plugin{actionServerBundlePlugin(b.importResolver(), b.actionModules(), b.Cfg.BaseURLPath()), purePrunePlugin(b.Root), guard.plugin(), islandCSSPlugin(sink), islandJSXPluginFor("react")},
 	}
 	alias := map[string]string{}
 	for _, name := range []string{"react", "react-dom"} {

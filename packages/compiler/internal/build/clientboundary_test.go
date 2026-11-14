@@ -406,3 +406,63 @@ export default async function Home() {
 		}
 	}
 }
+
+// TestUseServerBodyStaysOutOfClientChunks: a "use client" Preact component
+// imports a side-effect-free "use server" module directly, through a barrel,
+// from a static page and from an async page. The browser gets the action
+// reference only; the action's body, its secret and node:crypto stay out of
+// every emitted file.
+func TestUseServerBodyStaysOutOfClientChunks(t *testing.T) {
+	client := func(imp string) string {
+		return `"use client";
+import { useState } from "react";
+import { saveDraft } from "` + imp + `";
+export function Save() {
+  const [id, setId] = useState("");
+  return <button id="save" onClick={async () => setId(await saveDraft("hello"))}>save {id}</button>;
+}
+`
+	}
+	b, root := scProject(t, map[string]string{
+		"src/server/actions.ts": `'use server';
+import { createHash } from "node:crypto";
+export async function saveDraft(text: string) {
+  return createHash("sha256").update(text + "TOPSECRET-4711").digest("hex").slice(0, 8);
+}
+`,
+		"src/components/index.ts":    `export { saveDraft } from "../server/actions";` + "\n",
+		"src/components/Direct.tsx":  client("../server/actions"),
+		"src/components/Barrel.tsx":  client("./index"),
+		"src/pages/direct.tsx":       "import { Save } from \"../components/Direct\";\nexport default function P() { return <main><Save /></main>; }\n",
+		"src/pages/barrel.tsx":       "import { Save } from \"../components/Barrel\";\nexport default function P() { return <main><Save /></main>; }\n",
+		"src/pages/direct-async.tsx": "import { Save } from \"../components/Direct\";\nexport default async function P() { await Promise.resolve(); return <main><Save /></main>; }\n",
+		"src/pages/barrel-async.tsx": "import { Save } from \"../components/Barrel\";\nexport default async function P() { await Promise.resolve(); return <main><Save /></main>; }\n",
+	})
+	withPreact(t, root)
+	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
+		t.Fatal(err)
+	}
+	out, err := captureOutput(b.BuildAll)
+	if err != nil {
+		t.Fatalf("BuildAll: %v\n%s", err, out)
+	}
+	var withAction int
+	_ = filepath.WalkDir(filepath.Join(root, "dist"), func(p string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !(strings.HasSuffix(p, ".js") || strings.HasSuffix(p, ".html")) || strings.Contains(filepath.ToSlash(p), "/.krate/") {
+			return nil
+		}
+		data, _ := os.ReadFile(p)
+		for _, bad := range []string{"TOPSECRET", "createHash", "node:"} {
+			if strings.Contains(string(data), bad) {
+				t.Errorf("%s holds server-only code (%q)", p, bad)
+			}
+		}
+		if strings.Contains(string(data), "/__krate/action/") || strings.Contains(string(data), "__krateAction") {
+			withAction++
+		}
+		return nil
+	})
+	if withAction < 4 {
+		t.Errorf("every page must reference the action, only %d files do", withAction)
+	}
+}
