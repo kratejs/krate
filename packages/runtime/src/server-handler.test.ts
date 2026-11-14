@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from "vitest";
 import { createKrateHandler, matchMetaRoute, type HandlerConfig, type KrateServerData } from "./server-handler.js";
-import { jsx } from "./server.js";
+import { jsx, ServerErrorBoundary } from "./server.js";
 
 const config: HandlerConfig = {
   basePath: "",
@@ -309,5 +309,66 @@ describe("Cache-Control on request-time pages", () => {
       expect(await cached.text()).toContain("ssr");
       expect((await h(new Request("http://localhost/plain/"))).headers.get("cache-control"), target).toBe("no-store");
     }
+  });
+});
+
+describe("error boundary under a request-time page", () => {
+  const shell = "<html><head><title>t</title></head><body><!--suspense:page-->baked<!--/suspense:page--></body></html>";
+  const boom = async () => {
+    throw new Error("db down");
+  };
+  const h = createKrateHandler({
+    target: "node",
+    data: data({
+      hasMiddleware: false,
+      pages: [{ route: "/boom", mode: "ssr", bundlePath: "boom" }],
+      allPages: [{ route: "/boom", mode: "ssr" }],
+      shells: { "/boom": shell },
+    }),
+    modules: {
+      pages: {
+        boom: {
+          default: () =>
+            jsx("div", {
+              children: jsx(ServerErrorBoundary, { fallback: (p: any) => jsx("p", { children: "failed " + p.error.digest }), children: jsx(boom, {}) }),
+            }),
+        },
+      },
+    },
+  });
+
+  it("answers 500 with no-store and the fallback in place", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const r = await h(new Request("http://localhost/boom/"));
+    const body = await r.text();
+    expect(r.status).toBe(500);
+    expect(r.headers.get("cache-control")).toBe("no-store");
+    expect(body).toMatch(/<p>failed [0-9a-f]{10}<\/p>/);
+    expect(body).not.toContain("db down");
+  });
+
+  it("keeps no-store when middleware asked for public caching", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const cached = createKrateHandler({
+      target: "cloudflare",
+      data: data({
+        hasMiddleware: true,
+        pages: [{ route: "/boom", mode: "ssr", bundlePath: "boom" }],
+        allPages: [{ route: "/boom", mode: "ssr" }],
+        shells: { "/boom": shell },
+      }),
+      modules: {
+        pages: {
+          boom: {
+            default: () =>
+              jsx("div", { children: jsx(ServerErrorBoundary, { fallback: () => jsx("p", { children: "failed" }), children: jsx(boom, {}) }) }),
+          },
+        },
+        middleware: { middleware: () => new Response(null, { headers: { "x-middleware-next": "1", "cache-control": "public, s-maxage=60" } }) },
+      },
+    });
+    const r = await cached(new Request("http://localhost/boom/"));
+    expect(r.status).toBe(500);
+    expect(r.headers.get("cache-control")).toBe("no-store");
   });
 });

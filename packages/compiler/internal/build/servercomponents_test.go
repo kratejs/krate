@@ -92,18 +92,18 @@ func TestAsyncPageIsServerRendered(t *testing.T) {
 	}
 }
 
-func TestAsyncLayoutBelowErrorBoundaryDiagnostic(t *testing.T) {
+func TestAsyncLayoutBelowTemplateDiagnostic(t *testing.T) {
 	b, root := scProject(t, map[string]string{
-		"src/pages/app/_layout.tsx": `export default async function Layout({ children }: any) { await Promise.resolve(); return <div>{children}</div>; }`,
-		"src/pages/app/error.tsx":   `export default function Err() { return <p>oops</p>; }`,
-		"src/pages/app/index.tsx":   `export default function Page() { return <main>x</main>; }`,
+		"src/pages/app/_layout.tsx":  `export default async function Layout({ children }: any) { await Promise.resolve(); return <div>{children}</div>; }`,
+		"src/pages/app/template.tsx": `export default function Tpl({ children }: any) { return <section>{children}</section>; }`,
+		"src/pages/app/index.tsx":    `export default function Page() { return <main>x</main>; }`,
 	})
 	_, err := b.asyncLayoutCut(filepath.Join(root, "src", "pages", "app", "index.tsx"))
 	var d diag.Diagnostic
 	if !errors.As(err, &d) {
 		t.Fatalf("want a diagnostic, got %v", err)
 	}
-	if strings.Contains(d.Message, "a error") || !strings.Contains(d.Message, "an error cannot run") {
+	if !strings.Contains(d.Message, "template.tsx sits below the async layout") {
 		t.Errorf("message grammar: %q", d.Message)
 	}
 	if d.Line != 1 || d.Col != 1 {

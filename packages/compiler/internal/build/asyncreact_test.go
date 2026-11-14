@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -294,5 +295,58 @@ export default async function Only() { await Promise.resolve(); return <main><Lo
 	_, _, home := getBody(t, base+"/")
 	if !strings.Contains(home, "static home") || !strings.Contains(home, `<nav id="nav">ada <svg `) {
 		t.Errorf("the async child of a static page did not render its icon:\n%s", home)
+	}
+}
+
+// TestErrorBoundaryUnderAsyncLayout: a segment's error.tsx below an async
+// layout wraps the page per request. A page that renders is the normal page
+// inside the layout; a page that throws renders the boundary's UI inside the
+// layout (status 500, no-store) and ships the boundary's client JS.
+func TestErrorBoundaryUnderAsyncLayout(t *testing.T) {
+	b, root := scProject(t, map[string]string{
+		"src/pages/(app)/_layout.tsx": `export default async function Layout({ children }: any) {
+  const user = await Promise.resolve({ name: "ada" });
+  return <div class="shell"><nav>hello {user.name}</nav>{children}</div>;
+}`,
+		"src/pages/(app)/dashboard/error.tsx": `'use client';
+export default function Error({ error, reset }: any) {
+  return <div><p>Something went wrong</p><button onClick={() => reset()}>Try again</button></div>;
+}`,
+		"src/pages/(app)/dashboard/index.tsx": `export default function Page() { return <main>dashboard ok</main>; }`,
+		"src/pages/(app)/dashboard/boom.tsx":  `export default async function Page() { await Promise.resolve(); throw new Error("db down"); }`,
+	})
+	withPreact(t, root)
+	linkReactPackages(t, root)
+	e2eEnv(t)
+	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	base, err := startKrateServer(t, root, b.Cfg)
+	if err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+	status, _, html := getBody(t, base+"/dashboard/")
+	if status != 200 || !strings.Contains(html, "<nav>hello ada</nav>") || !strings.Contains(html, "dashboard ok") || strings.Contains(html, "Something went wrong") {
+		t.Errorf("the page must render normally inside the layout: status %d\n%s", status, html)
+	}
+	status, header, html := getBody(t, base+"/dashboard/boom/")
+	if status != 500 || header.Get("Cache-Control") != "no-store" {
+		t.Errorf("a caught error must answer 500 with no-store, got %d %q", status, header.Get("Cache-Control"))
+	}
+	if !strings.Contains(html, "<nav>hello ada</nav>") || !strings.Contains(html, "Something went wrong") {
+		t.Errorf("a throwing page must render the boundary inside the layout: status %d\n%s", status, html)
+	}
+	if strings.Contains(html, "db down") {
+		t.Errorf("the error message must not leak into the page:\n%s", html)
+	}
+	m := regexp.MustCompile(`data-src="([^"]+)"`).FindStringSubmatch(html)
+	if m == nil || !strings.Contains(html, "&quot;digest&quot;") {
+		t.Fatalf("the boundary must hydrate as an island with a sanitized error:\n%s", html)
+	}
+	if status, _, js := getBody(t, base+m[1]); status != 200 || !strings.Contains(js, "location.reload()") {
+		t.Errorf("boundary island chunk %s: status %d\n%s", m[1], status, js)
 	}
 }

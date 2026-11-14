@@ -97,10 +97,11 @@ func init() {
 			Title: "Async layout cannot be used here",
 			Explanation: "An async layout renders per request in the SSR sidecar, with the page and the " +
 				"layouts inside it, instead of being baked into the static shell. It can await data and " +
-				"gate its subtree with redirect() or notFound(). It cannot sit above a template.tsx or " +
-				"error.tsx in the same route (they hydrate in the browser), and a layout that is baked at " +
-				"build time for another reason (an intercepting or segment route) cannot be async. Move " +
-				"the template or error boundary above the async layout, or make the layout synchronous and " +
+				"gate its subtree with redirect() or notFound(). An error.tsx below it is the error boundary " +
+				"of the page and renders on the server when the page throws. It cannot sit above a " +
+				"template.tsx in the same route (a template hydrates in the browser), and a layout that is " +
+				"baked at build time for another reason (an intercepting or segment route) cannot be " +
+				"async. Move the template above the async layout, or make the layout synchronous and " +
 				"fetch data in an async child component.",
 		},
 		CodeInfo{
