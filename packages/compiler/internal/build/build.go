@@ -2584,6 +2584,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 		if layoutCut != nil {
 			clientBoundaries = mergeBoundaries(clientBoundaries, layoutCut.Boundaries)
 		}
+		keepClientDynImports(bundle, clientBoundaries, entryModule.Path, serverPage)
 	}
 	pageWarnings = append(pageWarnings, b.releaseEnvWarnings(envPending, bundle, clientBoundaries, serverPage)...)
 	var (

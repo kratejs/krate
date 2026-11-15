@@ -1183,3 +1183,59 @@ func preactRequirePlugin() api.Plugin {
 		},
 	}
 }
+
+// keepClientDynImports drops from bundle.DynImportFiles the lazy imports that
+// no browser code reaches. In a page with a server tree, only the client
+// boundaries (and, for a page that still hydrates, the entry) ship to the
+// browser; a dynamic import in a module only the server tree reaches stays a
+// server-side import and must not be compiled as a browser chunk.
+func keepClientDynImports(bundle *bundler.Bundle, boundaries []ClientBoundary, entry string, serverPage bool) {
+	if len(bundle.DynImportFiles) == 0 || bundle.Resolver == nil {
+		return
+	}
+	byPath := map[string]*bundler.Module{}
+	for _, m := range bundle.Modules {
+		if m != nil && !m.IsExternal && m.Program != nil {
+			byPath[filepath.Clean(m.Path)] = m
+		}
+	}
+	reached := map[string]bool{}
+	var walk func(path string)
+	walk = func(path string) {
+		path = filepath.Clean(path)
+		if reached[path] {
+			return
+		}
+		reached[path] = true
+		m := byPath[path]
+		if m == nil {
+			return
+		}
+		for _, spec := range m.Imports {
+			if r := bundle.Resolver.Resolve(m.Path, spec); r != "" {
+				walk(r)
+			}
+		}
+	}
+	for _, cb := range boundaries {
+		walk(cb.SourcePath)
+	}
+	if !serverPage {
+		walk(entry)
+	}
+	kept := make(map[string]string, len(bundle.DynImportFiles))
+	for src, url := range bundle.DynImportFiles {
+		ok := false
+		sites := bundle.DynImportSites[src]
+		for _, site := range sites {
+			if reached[filepath.Clean(site)] {
+				ok = true
+				break
+			}
+		}
+		if ok {
+			kept[src] = url
+		}
+	}
+	bundle.DynImportFiles = kept
+}

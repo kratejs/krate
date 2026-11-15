@@ -220,19 +220,25 @@ func (b *Bundler) isolatePrivateNames() {
 }
 
 // readLockAll holds every distinct program of mods for reading and returns
-// the release. Writers lock one program at a time, so holding several read
-// locks cannot deadlock.
+// the release. The locks are taken in path order: two bundles that took them in
+// their own module order could each hold one program and wait for the other's
+// while writers queued on both, which blocks new readers.
 func (b *Bundler) readLockAll(mods []*Module) func() {
 	if b.readLock == nil {
 		return func() {}
 	}
 	seen := map[*ast.Program]bool{}
-	var unlocks []func()
+	var progs []*Module
 	for _, mod := range mods {
 		if mod.Program == nil || seen[mod.Program] {
 			continue
 		}
 		seen[mod.Program] = true
+		progs = append(progs, mod)
+	}
+	sort.SliceStable(progs, func(i, j int) bool { return progs[i].Path < progs[j].Path })
+	var unlocks []func()
+	for _, mod := range progs {
 		unlocks = append(unlocks, b.readLock(mod.Program))
 	}
 	return func() {
@@ -507,7 +513,7 @@ func (b *Bundler) planExportRenames(mods []*Module, dynamic map[string]bool) exp
 			}
 			plan.renames[mod.Path][name] = name + b.privateSuffix(mod.Path)
 		}
-		if len(stuck) > 1 && len(imported[name]) > 1 {
+		if len(stuck) > 1 && len(imported[name]) > 1 && distinctFiles(stuck) > 1 {
 			var files []string
 			for _, mod := range stuck {
 				files = append(files, filepath.Base(mod.Path))
@@ -528,6 +534,21 @@ func (b *Bundler) planExportRenames(mods []*Module, dynamic map[string]bool) exp
 		}
 	}
 	return plan
+}
+
+// distinctFiles counts the files behind mods. A workspace package reached
+// through its real path and through a symlink is two modules but one file, so
+// its exports do not clash with themselves.
+func distinctFiles(mods []*Module) int {
+	files := map[string]bool{}
+	for _, mod := range mods {
+		p := mod.Path
+		if real, err := filepath.EvalSymlinks(p); err == nil {
+			p = real
+		}
+		files[p] = true
+	}
+	return len(files)
 }
 
 func inNodeModules(path string) bool {

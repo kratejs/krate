@@ -285,7 +285,7 @@ func (b *Builder) collectPackageComponents(m *bundler.Module, resolve func(impor
 // is KR8013.
 func (b *Builder) serverTreeBoundaries(bundle *bundler.Bundle, islands map[string]*reactIslandModule, resolve func(importer, spec string) string, serverPage bool) ([]ClientBoundary, error) {
 	if serverPage {
-		if err := serverPageIslandError(islands, bundle.Modules, "a server-rendered page"); err != nil {
+		if err := serverPageIslandError(islands, bundle.Modules, resolve, "a server-rendered page"); err != nil {
 			return nil, err
 		}
 	}
@@ -375,12 +375,43 @@ func reactIslandTagOnly(m *reactIslandModule) bool {
 // serverPageIslandError returns the KR8013 error of a server-rendered page
 // whose modules need React's render model in a way boundaries cannot give:
 // a hook of a React library called outside a "use client" module.
-func serverPageIslandError(islands map[string]*reactIslandModule, mods []*bundler.Module, where string) error {
+func serverPageIslandError(islands map[string]*reactIslandModule, mods []*bundler.Module, resolve func(importer, spec string) string, where string) error {
 	clientPaths := map[string]bool{}
+	byPath := map[string]*bundler.Module{}
+	var entries []*bundler.Module
 	for _, m := range mods {
-		if m != nil && m.Program != nil && !m.IsExternal && bundler.HasUseClientDirective(m.SourceCode) {
+		if m == nil || m.Program == nil || m.IsExternal {
+			continue
+		}
+		byPath[filepath.Clean(m.Path)] = m
+		if m.IsEntry {
+			entries = append(entries, m)
+		}
+		if bundler.HasUseClientDirective(m.SourceCode) {
 			clientPaths[m.Path] = true
 		}
+	}
+	// As in Next.js, a module without a directive that is only imported
+	// through "use client" modules is client code. Only a module the server
+	// tree reaches without crossing a client module can be a server hook call.
+	serverReached := map[string]bool{}
+	var walk func(m *bundler.Module)
+	walk = func(m *bundler.Module) {
+		p := filepath.Clean(m.Path)
+		if serverReached[p] || (clientPaths[m.Path] && !m.IsEntry) {
+			return
+		}
+		serverReached[p] = true
+		for _, spec := range m.Imports {
+			if r := resolve(m.Path, spec); r != "" {
+				if next := byPath[filepath.Clean(r)]; next != nil {
+					walk(next)
+				}
+			}
+		}
+	}
+	for _, e := range entries {
+		walk(e)
 	}
 	paths := make([]string, 0, len(islands))
 	for p := range islands {
@@ -390,6 +421,9 @@ func serverPageIslandError(islands map[string]*reactIslandModule, mods []*bundle
 	for _, p := range paths {
 		im := islands[p]
 		if clientPaths[p] || reactIslandTagOnly(im) || im.Direct {
+			continue
+		}
+		if len(entries) > 0 && !serverReached[filepath.Clean(p)] {
 			continue
 		}
 		return diag.Diagnostic{
