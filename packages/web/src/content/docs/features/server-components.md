@@ -124,6 +124,16 @@ export default async function Home() {
   holds JSX, such as `userMenu={<UserMenu user={user} />}` or an array of
   elements (a slot), and a client component inside a slot becomes its own
   island. JSX nested inside a plain object cannot be sent.
+- The child of a client component with `asChild` (a Radix `Slot`, as in a
+  shadcn `<DropdownMenuTrigger asChild><Button>...</Button></DropdownMenuTrigger>`)
+  arrives as an element it can clone, as in Next.js, so the trigger's
+  handlers, ref and ARIA props land on the button. A server component at the
+  top of that child (a directive-less `Button`) is run on the server to the
+  element it renders, and client components in its output (an `Avatar`)
+  render inside the same island instead of as islands of their own. Server
+  components deeper inside it are still sent as HTML. A child that can only
+  be sent as HTML (raw HTML) cannot receive props; the server logs a warning
+  naming the component.
 - Context from a client component reaches the client components inside its
   server children, as in Next.js. A root layout that renders
   `<Providers>{children}</Providers>` (a `"use client"` module with a theme,
