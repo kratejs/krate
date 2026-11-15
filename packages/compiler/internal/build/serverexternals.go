@@ -106,6 +106,14 @@ func externalNodeModulesPlugin() api.Plugin {
 		Name: "krate-external-node-modules",
 		Setup: func(b api.PluginBuild) {
 			jseval.RegisterCloudflareImports(b)
+			// Krate renders without react-dom: the resource hints and flushSync
+			// of its server module stand in for it.
+			b.OnResolve(api.OnResolveOptions{Filter: `^react-dom$`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+				if args.Kind == api.ResolveJSRequireCall {
+					return api.OnResolveResult{}, nil
+				}
+				return api.OnResolveResult{Path: "@krate/runtime/hints", External: true}, nil
+			})
 			b.OnResolve(api.OnResolveOptions{Filter: `^[^./]`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
 				if args.PluginData == marker || strings.Contains(args.Path, ":") {
 					return api.OnResolveResult{}, nil

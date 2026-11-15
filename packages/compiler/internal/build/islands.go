@@ -17,6 +17,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/fsutil"
 	"github.com/kratejs/krate/packages/compiler/internal/irtree"
+	"github.com/kratejs/krate/packages/compiler/internal/resolver"
 	"github.com/kratejs/krate/packages/compiler/internal/tsstrip"
 	"github.com/kratejs/krate/packages/native/jsruntime"
 )
@@ -667,7 +668,7 @@ func (b *Builder) buildIslandBundle(src, resolveDir string, ssr bool, plugin *ap
 		JSXImportSource: "preact",
 		LogLevel:        api.LogLevelSilent,
 		Alias:           islandAlias(b.Root, ssr),
-		Plugins:         []api.Plugin{purePrunePlugin(b.Root), guard.plugin(), islandCSSPlugin(sink), islandJSXPlugin(), islandTagsPlugin(b.Root, ssr), reconcilerGuardPlugin()},
+		Plugins:         []api.Plugin{purePrunePlugin(b.Root), guard.plugin(), islandCSSPlugin(sink), islandJSXPlugin(), islandTagsPlugin(b.Root, ssr), reconcilerGuardPlugin(), reactDOMHintsPlugin(b.Root)},
 	}
 	if prov != nil {
 		opts.Plugins = append(opts.Plugins, islandEntryPlugin(nil, prov.virtualModules()))
@@ -753,6 +754,39 @@ func islandJSXPluginFor(importSource string) api.Plugin {
 				}
 				code := string(res.Code)
 				return api.OnLoadResult{Contents: &code, Loader: api.LoaderJS, ResolveDir: filepath.Dir(args.Path), Warnings: res.Warnings}, nil
+			})
+		},
+	}
+}
+
+// reactDOMHintsPlugin gives `react-dom` imports of Preact builds the React 19
+// resource hints (preload, preinit, preconnect, prefetchDNS, preloadModule,
+// preinitModule) next to everything preact/compat provides. In the browser they
+// add the tag to the head; while the server renders they record it for the
+// head of the response. require() calls are left to islandRequirePlugin.
+func reactDOMHintsPlugin(root string) api.Plugin {
+	return api.Plugin{
+		Name: "krate-react-dom-hints",
+		Setup: func(pb api.PluginBuild) {
+			pb.OnResolve(api.OnResolveOptions{Filter: `^react-dom$`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+				if args.Kind == api.ResolveJSRequireCall {
+					return api.OnResolveResult{}, nil
+				}
+				return api.OnResolveResult{Path: "react-dom", Namespace: "krate-react-dom"}, nil
+			})
+			pb.OnLoad(api.OnLoadOptions{Filter: `.*`, Namespace: "krate-react-dom"}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
+				names := []string{"preload", "preinit", "preconnect", "prefetchDNS", "preloadModule", "preinitModule"}
+				list := strings.Join(names, ", ")
+				contents := "export * from \"preact/compat\";\nimport __compat from \"preact/compat\";\n"
+				if hints := resolver.NodeModule(root, "@krate/runtime/hints"); hints != "" {
+					contents += "import { " + list + " } from " + strconv.Quote(filepath.ToSlash(hints)) + ";\nexport { " + list + " };\n"
+				} else {
+					for _, n := range names {
+						contents += "export function " + n + "() {}\n"
+					}
+				}
+				contents += "export default { ...__compat, " + list + " };\n"
+				return api.OnLoadResult{Contents: &contents, Loader: api.LoaderJS, ResolveDir: root}, nil
 			})
 		},
 	}

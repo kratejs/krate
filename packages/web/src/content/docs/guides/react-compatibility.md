@@ -111,7 +111,7 @@ export default function Counter() {
 | `cache` | identity: Krate renders each page once |
 | `flushSync` | `flushSync(fn)` is `fn()`: state changes already apply synchronously |
 | `useFormState` (react-dom) | `useActionState` |
-| `preload`, `preinit`, `preconnect`, `prefetchDNS`, `preloadModule`, `preinitModule` (react-dom) | add the `<link>` or `<script>` to the document head once, on the client |
+| `preload`, `preinit`, `preconnect`, `prefetchDNS`, `preloadModule`, `preinitModule` (react-dom) | add the `<link>` or `<script>` to the document head once: in the browser directly, on the server as a tag in the `<head>` of the response (deduplicated, also from client components the server renders) |
 | `version`, `captureOwnerStack` | `"19.2.0"` and `null` (as in production React) |
 | custom element props | strings, numbers and booleans are attributes; objects, arrays and functions are properties (see [Custom elements](#custom-elements)) |
 

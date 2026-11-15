@@ -527,7 +527,7 @@ function serializeClientProp(v: unknown, path: string, component: string): unkno
   if (Array.isArray(v)) return v.map((x, i) => serializeClientProp(x, `${path}[${i}]`, component));
   if (typeof v === "object") {
     if (isElement(v) || "__raw" in (v as any)) {
-      throw clientPropError(path, component, "JSX", "only `children` can carry server-rendered JSX into a client component");
+      throw clientPropError(path, component, "JSX", "pass JSX as a prop value, an array of JSX, or as children; JSX nested inside an object cannot be sent to a client component");
     }
     const proto = Object.getPrototypeOf(v);
     if (proto !== Object.prototype && proto !== null) throw clientPropError(path, component, describeValue(v));
@@ -574,11 +574,34 @@ function hasClientElement(node: unknown): boolean {
 
 type FlightCtx = { hydrate: boolean; component: string };
 
-function flightProps(props: Record<string, unknown>, ctx: FlightCtx): Record<string, unknown> {
+// isSlotValue reports whether a prop holds server-rendered JSX (an element, raw
+// HTML, or an array containing either). Such a prop is a slot: it is rendered
+// on the server and revived on the client like `children`.
+function isSlotValue(v: unknown): boolean {
+  if (Array.isArray(v)) return v.some(isSlotValue);
+  return v != null && typeof v === "object" && (isElement(v) || "__raw" in (v as any));
+}
+
+// slotProp renders a JSX-valued prop. A slot without client components of its
+// own travels as HTML; one with them (or any slot when tree is set) travels as
+// a tree that keeps those components in the island's Preact tree.
+async function slotProp(v: unknown, ctx: FlightCtx, tree: boolean): Promise<unknown> {
+  if (tree || hasClientElement(v)) {
+    const nested: FlightCtx = { hydrate: false, component: ctx.component };
+    const out = await toFlight(v, nested);
+    if (nested.hydrate) ctx.hydrate = true;
+    return { __krateSlotTree: out };
+  }
+  return { __krateSlotHTML: await renderToStringAsync(v) };
+}
+
+// clientProps serializes the props of a client component, rendering the
+// JSX-valued ones (any name, not only `children`) as slots.
+async function clientProps(props: Record<string, unknown>, ctx: FlightCtx, tree: boolean): Promise<Record<string, unknown>> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(props)) {
     if (k === "key" || k === "children") continue;
-    const sv = serializeClientProp(v, k, ctx.component);
+    const sv = isSlotValue(v) ? await slotProp(v, ctx, tree) : serializeClientProp(v, k, ctx.component);
     if (sv !== undefined) out[k] = sv;
   }
   return out;
@@ -602,7 +625,7 @@ async function toFlight(node: unknown, ctx: FlightCtx): Promise<unknown[]> {
   if (!isElement(node)) return [];
   const { type, props, children } = node;
   if (typeof type === "string") {
-    return [{ $: "e", t: type, p: flightProps(props, ctx), c: await toFlight(children, ctx) }];
+    return [{ $: "e", t: type, p: await clientProps(props, ctx, true), c: await toFlight(children, ctx) }];
   }
   if (type === Link) {
     return [{ $: "e", t: "a", p: linkAttributes({ ...props, children }), c: await toFlight(children, ctx) }];
@@ -613,7 +636,7 @@ async function toFlight(node: unknown, ctx: FlightCtx): Promise<unknown[]> {
     const nested = { ...ctx, component: ref.exportName };
     const c = await toFlight(children, nested);
     if (nested.hydrate) ctx.hydrate = true;
-    return [{ $: "c", m: ref.moduleId, e: ref.exportName, s: ref.src, p: flightProps(props, nested), c }];
+    return [{ $: "c", m: ref.moduleId, e: ref.exportName, s: ref.src, p: await clientProps(props, nested, true), c }];
   }
   return [{ $: "h", h: await renderToStringAsync(node) }];
 }
@@ -670,14 +693,10 @@ export function clientBoundary(
   const name = (impl as any).displayName || (impl as any).name || exportName;
   const Boundary = async (props: Record<string, any>) => {
     const { children, ...rest } = props || {};
-    const data: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(rest)) {
-      if (k === "key") continue;
-      const sv = serializeClientProp(v, k, name);
-      if (sv !== undefined) data[k] = sv;
-    }
+    const slotCtx: FlightCtx = { hydrate: false, component: name };
+    const data = await clientProps(rest, slotCtx, flight);
     const hasChildren = children != null && !(Array.isArray(children) && children.length === 0);
-    let hydrates = hydrate;
+    let hydrates = hydrate || slotCtx.hydrate;
     let childrenHTML: string | null = null;
     if (hasChildren && (flight || hasClientElement(children))) {
       const ctx: FlightCtx = { hydrate: false, component: exportName };

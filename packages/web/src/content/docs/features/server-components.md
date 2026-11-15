@@ -113,11 +113,14 @@ export default async function Home() {
   project needs `preact` installed (`pnpm add preact`).
 - Props must be JSON-serializable: strings, numbers, booleans, `null`, plain
   objects and arrays. Server actions may be passed and stay callable. A
-  function, class instance (including `Date`), symbol or JSX prop fails the
-  build when it is written inline (`[KR7111]`) and fails the request with the
-  prop name otherwise.
+  function, class instance (including `Date`) or symbol fails the build when it
+  is written inline (`[KR7111]`) and fails the request with the prop name
+  otherwise.
 - `children` passed from a server component are rendered on the server and
-  inserted as HTML inside the client component.
+  inserted as HTML inside the client component. So is any other prop that
+  holds JSX, such as `userMenu={<UserMenu user={user} />}` or an array of
+  elements (a slot), and a client component inside a slot becomes its own
+  island. JSX nested inside a plain object cannot be sent.
 - Only what a client component imports and uses goes to the browser, as in
   Next.js. A server helper (database client, `node:crypto`, a native
   package) that sits in the same barrel as the component, or in a module the

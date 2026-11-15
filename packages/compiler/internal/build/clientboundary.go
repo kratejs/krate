@@ -128,6 +128,8 @@ function __krateRevive(v, h, call, comp) {
       fn.actionUrl = url;
       return fn;
     }
+    if (typeof v.__krateSlotHTML === "string") return h("krate-children", { style: "display:contents", dangerouslySetInnerHTML: { __html: v.__krateSlotHTML } });
+    if (v.__krateSlotTree) { var slot = __krateTree(v.__krateSlotTree, h, call, comp); return slot.length === 1 ? slot[0] : slot; }
     var out = {};
     for (var k in v) {
       if (k === "__krateChildren") out.children = h("krate-children", { style: "display:contents", dangerouslySetInnerHTML: { __html: v[k] } });
@@ -143,7 +145,17 @@ function __krateClientRefs(n, out) {
   if (Array.isArray(n)) { n.forEach(function (x) { __krateClientRefs(x, out); }); return out; }
   if (n.$ === "c") out.push({ m: n.m, e: n.e, s: n.s });
   (n.c || []).forEach(function (x) { __krateClientRefs(x, out); });
-  if (n.p) for (var k in n.p) { if (k === "__krateTree") __krateClientRefs(n.p[k], out); }
+  if (n.p) for (var k in n.p) { __krateSlotRefs(n.p[k], k, out); }
+  return out;
+}
+function __krateSlotRefs(v, k, out) {
+  if (k === "__krateTree") __krateClientRefs(v, out);
+  else if (v && typeof v === "object" && v.__krateSlotTree) __krateClientRefs(v.__krateSlotTree, out);
+  return out;
+}
+function __krateRootRefs(raw) {
+  var out = [];
+  for (var k in raw) __krateSlotRefs(raw[k], k, out);
   return out;
 }
 `
@@ -733,7 +745,7 @@ export async function mount(el) {
   var raw = JSON.parse(el.getAttribute("data-props") || "{}");
   var loaded = {};
   loaded[el.getAttribute("data-module") + "#" + name] = C;
-  await Promise.all(__krateClientRefs(raw.__krateTree, []).map(function (r) {
+  await Promise.all(__krateRootRefs(raw).map(function (r) {
     return import(r.s).then(function (m) { loaded[r.m + "#" + r.e] = m.component(r.e); });
   }));
   var props = __krateRevive(raw, h, __krateCallAction, function (m, e) { return loaded[m + "#" + e]; });
@@ -765,7 +777,7 @@ export async function mount(el) {
 		External:          []string{"preact", "preact/compat", "preact/hooks", "preact/jsx-runtime"},
 		Inject:            []string{shim},
 		Metafile:          true,
-		Plugins:           []api.Plugin{purePrunePlugin(b.Root), guard.plugin(), clientOnlyMarkersPlugin(true), actionServerBundlePlugin(b.importResolver(), b.actionModules(), b.Cfg.BaseURLPath())},
+		Plugins:           []api.Plugin{purePrunePlugin(b.Root), guard.plugin(), clientOnlyMarkersPlugin(true), actionServerBundlePlugin(b.importResolver(), b.actionModules(), b.Cfg.BaseURLPath()), reactDOMHintsPlugin(b.Root)},
 		LogLevel:          api.LogLevelSilent,
 	})
 	result.Errors = append(result.Errors, guard.errors(result.OutputFiles)...)
@@ -912,7 +924,7 @@ export function __krate_render(C, props) {
 		Alias:           islandAlias(c.root, false),
 		External:        []string{"preact", "preact/compat", "preact/hooks", "preact/jsx-runtime"},
 		Inject:          []string{shim},
-		Plugins:         []api.Plugin{purePrunePlugin(c.root), guard.plugin(), serverCSSPlugin(c.root), *plugin, clientOnlyMarkersPlugin(false), actionServerBundlePlugin(c.res, c.actions, c.basePath)},
+		Plugins:         []api.Plugin{purePrunePlugin(c.root), guard.plugin(), serverCSSPlugin(c.root), *plugin, clientOnlyMarkersPlugin(false), actionServerBundlePlugin(c.res, c.actions, c.basePath), reactDOMHintsPlugin(c.root)},
 		LogLevel:        api.LogLevelSilent,
 	})
 	if len(result.Errors) == 0 {

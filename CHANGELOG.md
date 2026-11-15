@@ -401,6 +401,17 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- React 19 `react-dom` resource hints (`preload`, `preinit`, `preconnect`, `prefetchDNS`, `preloadModule`,
+  `preinitModule`) work in server bundles and in client components rendered by the server: the tags go into the
+  `<head>` of the response once each, and in the browser they are added to the document head if missing. A
+  server module that imported `react-dom` used to fail with `ERR_MODULE_NOT_FOUND` and a client component with
+  `'preact/compat' does not provide an export named 'preload'`, which made every page that called them return 500.
+- A server component can pass JSX in any prop of a client component (`userMenu={<UserMenu />}`, an array of
+  elements, a client component inside the slot), not only as `children`. The slot is rendered on the server,
+  appears in the server HTML and hydrates with the island.
+- An `error.tsx` under an async layout is prerendered without that layout, as every error page is, instead of
+  being rendered per request with no `error` prop (`Cannot read properties of undefined (reading 'digest')`). The
+  error page also receives `retry` next to `reset`.
 - A client component or real-React island in a project under a symlinked path (macOS `/var` is
   `/private/var`) gets action references for its `"use server"` imports instead of their server code.
 - Real-React islands (react-three-fiber and other reconciler libraries) no longer bundle server-only code. A
