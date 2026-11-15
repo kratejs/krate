@@ -111,11 +111,14 @@ export default async function Home() {
 - Client components run with React semantics through Preact (the same engine
   as [external React islands](/docs/guides/react-compatibility/)), so the
   project needs `preact` installed (`pnpm add preact`).
-- Props must be JSON-serializable: strings, numbers, booleans, `null`, plain
-  objects and arrays. Server actions may be passed and stay callable. A
-  function, class instance (including `Date`) or symbol fails the build when it
-  is written inline (`[KR7111]`) and fails the request with the prop name
-  otherwise.
+- Props must be serializable, as in React Server Components: strings, numbers
+  (including `NaN`, `Infinity` and `-0`), booleans, `null`, `undefined`,
+  `bigint`, `Date`, `Map`, `Set`, typed arrays, `ArrayBuffer`, `DataView`,
+  `Symbol.for` symbols, plain objects and arrays. They arrive in the client
+  component as the same types, so a database row can be passed as it is.
+  Server actions may be passed and stay callable. A function, class instance
+  or unregistered symbol fails the build when it is written inline (`[KR7111]`)
+  and fails the request with the prop name otherwise.
 - `children` passed from a server component are rendered on the server and
   inserted as HTML inside the client component. So is any other prop that
   holds JSX, such as `userMenu={<UserMenu user={user} />}` or an array of
@@ -173,7 +176,7 @@ export default async function Settings() {
   as the root, so they hydrate and talk to each other. Server components
   placed between the parts are rendered to HTML, so the parts on either side
   of one no longer share a tree.
-- Props follow the `"use client"` rules: JSON-serializable values and server
+- Props follow the `"use client"` rules: serializable values (see above) and server
   actions, no inline functions (`[KR7111]`). Put handlers in a `"use client"`
   wrapper, as in Next.js.
 - A local module that renders such components needs no directive unless it

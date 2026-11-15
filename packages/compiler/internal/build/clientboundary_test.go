@@ -165,6 +165,104 @@ export default async function Home() {
 	}
 }
 
+const flightPropsClientSrc = `"use client";
+import { useEffect, useState } from "react";
+function describe(p: any) {
+  return JSON.stringify([
+    p.row.createdAt instanceof Date, p.row.createdAt.toISOString(), String(p.row.bad.getTime()),
+    typeof p.row.big, String(p.row.big), p.tags.get("a").has(2), p.tags instanceof Map, p.tags.get("a") instanceof Set,
+    "gone" in p.row && p.row.gone === undefined, Object.is(p.row.nan, NaN), Object.is(p.row.neg, -0), p.row.inf,
+    p.row.fake.__krateT, p.row.list[1] === undefined, p.row.bytes instanceof Uint8Array && p.row.bytes[2], p.sym === Symbol.for("s"),
+  ]);
+}
+export default function Row(p: any) {
+  const [seen, setSeen] = useState("");
+  useEffect(() => setSeen(describe(p)), []);
+  return <div><p id="ssr">{describe(p)}</p><p id="client" data-ready={seen ? "1" : undefined}>{seen}</p></div>;
+}
+`
+
+// TestClientPropsCarryFlightTypes sends a Drizzle-like row (Date, BigInt, Map,
+// Set, undefined, NaN, ...) from an async server page to a client component
+// and checks the server render and, with KRATE_BROWSER set, the hydrated client.
+func TestClientPropsCarryFlightTypes(t *testing.T) {
+	if !canStopInProcessServer {
+		t.Skip("in-process server needs a unix host")
+	}
+	ensureRuntimeDist(t)
+	if _, err := exec.LookPath("node"); err != nil {
+		requireE2E(t, "node is not installed")
+	}
+	b, root := scProject(t, map[string]string{
+		"src/components/Row.tsx": flightPropsClientSrc,
+		"src/pages/index.tsx": `import Row from "../components/Row";
+export default async function Home() {
+  const row = await Promise.resolve({
+    createdAt: new Date("2024-01-02T03:04:05Z"), bad: new Date("nope"), big: 12345678901234567890n,
+    gone: undefined, nan: NaN, neg: -0, inf: Infinity, list: [1, undefined, 3],
+    fake: { __krateT: "D", v: 5 }, bytes: new Uint8Array([7, 8, 9]),
+  });
+  const tags = new Map([["a", new Set([1, 2])]]);
+  return <main><Row row={row} tags={tags} sym={Symbol.for("s")} /></main>;
+}`,
+	})
+	withPreact(t, root)
+	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	base, err := startKrateServer(t, root, b.Cfg)
+	if err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+	const want = `[true,"2024-01-02T03:04:05.000Z","NaN","bigint","12345678901234567890",true,true,true,true,true,true,null,"D",true,9,true]`
+	resp, err := http.Get(base + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	html, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("status %d:\n%s", resp.StatusCode, html)
+	}
+	// JSON.stringify turns Infinity into null, which is what the want shows.
+	if !strings.Contains(string(html), `<p id="ssr">`+strings.ReplaceAll(want, `"`, "&quot;")+`</p>`) &&
+		!strings.Contains(string(html), `<p id="ssr">`+want+`</p>`) {
+		t.Fatalf("server render lacks the revived values %s:\n%s", want, html)
+	}
+	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
+	if browser == "" {
+		return
+	}
+	if err := exec.Command("node", "-e", "require.resolve('playwright')").Run(); err != nil {
+		requireE2E(t, "playwright is not installed (run pnpm install)")
+	}
+	script, err := filepath.Abs(filepath.Join("testdata", "client_flight_props.mjs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("node", script, base+"/", browser).CombinedOutput()
+	if err != nil {
+		if strings.Contains(string(out), "Executable doesn't exist") {
+			requireE2E(t, "%s browser is not installed: %s", browser, out)
+		}
+		t.Fatalf("browser script failed: %v\n%s", err, out)
+	}
+	var res struct {
+		Client, SsrLike string
+		Errors          []string
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &res); err != nil {
+		t.Fatalf("parsing browser output: %v\n%s", err, out)
+	}
+	if res.Client != want || res.SsrLike != want || len(res.Errors) > 0 {
+		t.Fatalf("hydrated client saw %+v, want %s", res, want)
+	}
+}
+
 func TestClientModuleStarReexportExpandsRuntimeExports(t *testing.T) {
 	files := map[string]string{
 		"src/components/viewer/types.ts":   "export interface ViewerProps { label: string }\nexport type Mode = 'a' | 'b';\n",
