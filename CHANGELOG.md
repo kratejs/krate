@@ -433,6 +433,15 @@ host code runs in the native process. Names and options may change between relea
   (`src/lib/store.ts -> zustand/esm/index.mjs -> "react"`). On a page with client boundaries every module was first
   treated as reaching React, because the Preact bundle injects a file the real-React bundle does not; a module whose
   imports never reach React is now shared there too, and is never reported.
+- A shared island chunk no longer evaluates a module in an import cycle before the module it reads at its top level
+  (`TypeError: he is not iterable` on every page with islands). Code splitting orders the files of a chunk by their distance
+  from an entry, so a chunk shared by Preact and real-React islands could enter a cycle such as
+  `fx-kinds -> template -> fx-stack -> fx-kinds` at another module than each island bundle did. Modules in an import cycle
+  now stay in each island bundle, as before the shared chunks; `KR8017` names the cycle when such a module keeps state.
+  Type-only imports were never part of it: esbuild drops them before it orders modules.
+- A module that mentions `Link` (or another compiler-provided tag) only in a comment, a string, an object key, a member
+  name or a type is shared between Preact and real-React islands again. Only a free reference to the name, which the
+  injected tag would resolve, keeps a module in each bundle.
 - A CSS `@import` of a local stylesheet that does not exist (for example `@import './missing.css'`) now fails
   the build with the file, line and column (KR7145) instead of being shipped as written and 404ing in the
   browser. Remote `@import url(https://...)` is unchanged.

@@ -160,13 +160,69 @@ func (c *islandShareCheck) ownReason(p string) string {
 		}
 	}
 	if c.globals != nil && !strings.Contains(p, "/node_modules/") {
-		if data, err := os.ReadFile(filepath.FromSlash(p)); err == nil {
-			if m := c.globals.Find(data); m != nil {
-				return "uses the compiler-provided " + string(m) + ", which differs between the two kinds of island"
-			}
+		if name := freeGlobalUse(filepath.FromSlash(p), c.globals); name != "" {
+			return "uses the compiler-provided " + name + ", which differs between the two kinds of island"
 		}
 	}
 	return ""
+}
+
+// freeGlobalUse returns the first of the names that the module at path
+// references as a free identifier, which an inject file then provides. A
+// comment, a string, an object key, a member name (x.Link), a type and a
+// name the module declares or imports at top level are not uses.
+func freeGlobalUse(path string, names *regexp.Regexp) string {
+	data, err := os.ReadFile(path)
+	if err != nil || !names.Match(data) {
+		return ""
+	}
+	prog, errs := tsstrip.Parse(path, string(data), tsstrip.Options{})
+	if len(errs) > 0 || prog == nil {
+		// Unparsable: assume the worst, as a copy per flavour is always safe.
+		return string(names.Find(data))
+	}
+	declared := map[string]bool{}
+	for _, stmt := range prog.Body {
+		if ex, ok := stmt.(*ast.ExportStmt); ok && ex.Declaration != nil {
+			stmt = ex.Declaration
+		}
+		switch d := stmt.(type) {
+		case *ast.ImportStmt:
+			declared[d.Default] = true
+			declared[d.Namespace] = true
+			for _, n := range d.Named {
+				declared[n.Local] = true
+			}
+		case *ast.FnDecl:
+			declared[d.Name] = true
+		case *ast.ClassDecl:
+			declared[d.Name] = true
+		case *ast.VarStmt:
+			for _, v := range d.Decls {
+				declared[v.Name] = true
+				for _, n := range v.Names {
+					declared[n] = true
+				}
+			}
+		}
+	}
+	skip := map[ast.Expr]bool{}
+	found := ""
+	walkProgramExprs(prog, func(e ast.Expr) bool {
+		switch v := e.(type) {
+		case *ast.MemberExpr:
+			if !v.Computed {
+				skip[v.Property] = true
+			}
+		case *ast.Identifier:
+			if !skip[e] && !declared[v.Name] && names.MatchString(v.Name) && names.FindString(v.Name) == v.Name {
+				found = v.Name
+				return false
+			}
+		}
+		return true
+	})
+	return found
 }
 
 // firstImportDifference returns the first specifier the two import lists of a
@@ -199,6 +255,132 @@ func firstImportDifference(a, b []islandMetaImport) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// settle removes every module whose imports reach one that cannot be shared,
+// and every module in an import cycle, until nothing changes.
+func (c *islandShareCheck) settle() {
+	for {
+		c.close()
+		if !c.pinCycles() {
+			return
+		}
+	}
+}
+
+// pinCycles marks the shareable modules that are in an import cycle as not
+// shareable and reports whether it marked any. Code splitting orders the
+// files of a chunk by their distance from an entry point, so a shared chunk
+// can enter a cycle at another module than the island bundle did and
+// evaluate a module before one it reads at its top level (a spread of an
+// array that is still undefined). An acyclic graph runs in a valid order
+// whichever module comes first.
+func (c *islandShareCheck) pinCycles() bool {
+	succ := func(p string) []string {
+		var out []string
+		for _, imp := range c.graphs[0][p].imports {
+			if imp.Kind == "import-statement" && !syntheticImport(imp) && !imp.External && c.ok[imp.Path] {
+				out = append(out, imp.Path)
+			}
+		}
+		return out
+	}
+	keys := make([]string, 0, len(c.ok))
+	for p := range c.ok {
+		keys = append(keys, p)
+	}
+	sort.Strings(keys)
+	// Tarjan's strongly connected components.
+	index := map[string]int{}
+	low := map[string]int{}
+	onStack := map[string]bool{}
+	var stack []string
+	var sccs [][]string
+	next := 0
+	var strong func(v string)
+	strong = func(v string) {
+		index[v], low[v] = next, next
+		next++
+		stack = append(stack, v)
+		onStack[v] = true
+		for _, w := range succ(v) {
+			if _, seen := index[w]; !seen {
+				strong(w)
+				low[v] = min(low[v], low[w])
+			} else if onStack[w] {
+				low[v] = min(low[v], index[w])
+			}
+		}
+		if low[v] == index[v] {
+			var comp []string
+			for {
+				w := stack[len(stack)-1]
+				stack = stack[:len(stack)-1]
+				onStack[w] = false
+				comp = append(comp, w)
+				if w == v {
+					break
+				}
+			}
+			sccs = append(sccs, comp)
+		}
+	}
+	for _, k := range keys {
+		if _, seen := index[k]; !seen {
+			strong(k)
+		}
+	}
+	pinned := false
+	for _, comp := range sccs {
+		self := false
+		if len(comp) == 1 {
+			for _, w := range succ(comp[0]) {
+				self = self || w == comp[0]
+			}
+			if !self {
+				continue
+			}
+		}
+		in := map[string]bool{}
+		for _, m := range comp {
+			in[m] = true
+		}
+		for _, m := range comp {
+			reason := "in an import cycle (" + c.cycleThrough(m, in) + "), which a shared chunk may evaluate in another order"
+			c.own[m] = reason
+			delete(c.ok, m)
+			pinned = true
+		}
+	}
+	return pinned
+}
+
+// cycleThrough spells the shortest import cycle from m back to m within the
+// component in.
+func (c *islandShareCheck) cycleThrough(m string, in map[string]bool) string {
+	parent := map[string]string{}
+	queue := []string{m}
+	for len(queue) > 0 {
+		p := queue[0]
+		queue = queue[1:]
+		for _, imp := range c.graphs[0][p].imports {
+			if imp.Kind != "import-statement" || syntheticImport(imp) || imp.External || !in[imp.Path] {
+				continue
+			}
+			if imp.Path == m {
+				parts := []string{c.display(m)}
+				for q := p; q != m; q = parent[q] {
+					parts = append([]string{c.display(q)}, parts...)
+				}
+				return c.display(m) + " -> " + strings.Join(parts, " -> ")
+			}
+			if _, seen := parent[imp.Path]; !seen && imp.Path != m {
+				parent[imp.Path] = p
+				queue = append(queue, imp.Path)
+			}
+		}
+	}
+	return c.display(m)
 }
 
 // close removes every module whose imports reach one that cannot be shared.
@@ -275,7 +457,7 @@ func planSharedIslandModules(root string, metas []*islandMetafile, globals []str
 	c := newIslandShareCheck(root, metas, globals)
 	graphs := c.graphs
 	for {
-		c.close()
+		c.settle()
 		// A module a graph reaches from outside the shared set is imported
 		// from its chunk; that needs ESM and static or dynamic imports.
 		bad := false
@@ -814,6 +996,7 @@ func (b *Builder) warnDuplicatedIslandModules(metas []*islandMetafile, globals [
 		return
 	}
 	c := newIslandShareCheck(b.Root, metas, globals)
+	c.settle()
 	var ds []diag.Diagnostic
 	var paths []string
 	root, out := canonicalPath(b.Root), canonicalPath(b.Cfg.OutDir)

@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -69,6 +70,40 @@ export const bump = () => ++wsCount;
 	if err := os.Symlink(filepath.Join(root, "packages", "ws-shared"), filepath.Join(root, "node_modules", "@ws", "shared")); err != nil {
 		t.Skipf("cannot link the workspace package: %v", err)
 	}
+	// A workspace package whose b.ts imports a type back from a.ts: no
+	// runtime cycle, shared, and a.ts runs after b.ts.
+	writeProjectFile(t, root, "packages/ws-order/package.json", `{"name":"@ws/order","version":"1.0.0","main":"src/index.ts"}`)
+	writeProjectFile(t, root, "packages/ws-order/src/index.ts", "export * from './a';\nexport * from './b';\n")
+	writeProjectFile(t, root, "packages/ws-order/src/a.ts", "import { B } from './b';\nexport type T = string;\nexport const A = [...B];\n")
+	writeProjectFile(t, root, "packages/ws-order/src/b.ts", "import type { T } from './a';\nexport const B: T[] = ['x'];\n")
+	if err := os.Symlink(filepath.Join(root, "packages", "ws-order"), filepath.Join(root, "node_modules", "@ws", "order")); err != nil {
+		t.Skipf("cannot link the workspace package: %v", err)
+	}
+	// A real cycle (b-kinds -> template -> a-stack -> b-kinds) where a-stack
+	// spreads an array of b-kinds at its top level, as fx-stack and fx-kinds
+	// do in a real app. Each island bundle runs b-kinds first. A shared chunk
+	// of the cycle ran a-stack first (a TypeError: EXTRA is not iterable), so
+	// a module in a cycle is never shared.
+	writeProjectFile(t, root, "src/lib/cyc/b-kinds.ts", `import { tpl } from './template';
+export const EXTRA = ['bevel'];
+export const viaTemplate = () => tpl();
+`)
+	writeProjectFile(t, root, "src/lib/cyc/template.ts", `import { stackKinds } from './a-stack';
+export const tpl = () => stackKinds();
+`)
+	writeProjectFile(t, root, "src/lib/cyc/a-stack.ts", `import { EXTRA } from './b-kinds';
+export const KINDS = ['kind-shadow', ...EXTRA];
+export const stackKinds = () => KINDS;
+`)
+	// The word Link in a comment, a type, a string, an object key and a member
+	// name, none of them the compiler-provided Link the boundary shim injects.
+	writeProjectFile(t, root, "src/lib/links.ts", `/** Link a number property to a colour. */
+export type Link = { to: string };
+const desc = 'Link layer properties to an option.';
+const o = { Link: 1 };
+let linkCount = 0;
+export const linked = (l?: Link) => (desc && o.Link && !l ? ++linkCount : 0);
+`)
 	writeProjectFile(t, root, "src/lib/use-hits.ts", `import { useHits } from './hits';
 let uses = 0;
 export function useCountedHits() {
@@ -88,17 +123,22 @@ import { useEffect, useState } from 'react';
 import { Canvas, Rect } from 'fake-canvas';
 import tag, { used } from 'neutrallib';
 import { bump } from '@ws/shared';
+import { A } from '@ws/order';
+import { KINDS } from '../lib/cyc/a-stack';
+import { EXTRA, viaTemplate } from '../lib/cyc/b-kinds';
+import { linked } from '../lib/links';
 import { next } from '../lib/counter';
 import { tally } from '../lib/tally';
 import { useCountedHits } from '../lib/use-hits';
 export default function Scene() {
 	const [n, setN] = useState('0');
 	useCountedHits();
-	useEffect(() => { setN(next() + ',' + tally() + ',' + bump()); }, []);
+	useEffect(() => { setN(next() + ',' + tally() + ',' + bump() + ',' + linked()); }, []);
 	return (
 		<div>
 			<Canvas id="cv" width={20} height={20}><Rect x={0} y={0} w={5} h={5} fill="red" /></Canvas>
 			<p id="real">{n}</p>
+			<p id="real-extra">{JSON.stringify(A) + '|' + KINDS.join(',') + '|' + EXTRA.length + '|' + viaTemplate().length}</p>
 			<i hidden>{used() + tag()}</i>
 		</div>
 	);
@@ -120,14 +160,23 @@ export function useOnce(fn) {
 	writeProjectFile(t, root, "src/components/Count.tsx", directive+`import { useOnce } from 'countlib';
 import { used } from 'neutrallib';
 import { bump } from '@ws/shared';
+import { A } from '@ws/order';
+import { KINDS } from '../lib/cyc/a-stack';
+import { EXTRA, viaTemplate } from '../lib/cyc/b-kinds';
+import { linked } from '../lib/links';
 import { next } from '../lib/counter';
 import { tally } from '../lib/tally';
 import { useCountedHits } from '../lib/use-hits';
-const all = () => next() + ',' + tally() + ',' + bump();
+const all = () => next() + ',' + tally() + ',' + bump() + ',' + linked();
 export default function Count() {
 	useCountedHits();
 	const n = useOnce(all);
-	return <p id="preact" data-used={used()}>{n}</p>;
+	return (
+		<div>
+			<p id="preact" data-used={used()}>{n}</p>
+			<p id="preact-extra">{JSON.stringify(A) + '|' + KINDS.join(',') + '|' + EXTRA.length + '|' + viaTemplate().length}</p>
+		</div>
+	);
 }
 `)
 	writeProjectFile(t, root, "src/pages/index.tsx", `import Scene from '../components/Scene';
@@ -171,7 +220,7 @@ func checkSharedChunks(t *testing.T, cfg *config.Config, out string) {
 	chunks, _ := filepath.Glob(filepath.Join(cfg.OutDir, "chunks", "*.js"))
 	var importers []string
 	marks := map[string][]string{}
-	all := []string{"shared-counter-mark", "neutral-used-mark", "neutral-default-mark", "neutral-unused-mark", "counter-spare-mark", "++n", "++wsCount"}
+	all := []string{"shared-counter-mark", "neutral-used-mark", "neutral-default-mark", "neutral-unused-mark", "counter-spare-mark", "++n", "++wsCount", "++linkCount", "kind-shadow"}
 	for _, c := range chunks {
 		text := readBuilt(t, c)
 		for _, m := range all {
@@ -185,12 +234,23 @@ func checkSharedChunks(t *testing.T, cfg *config.Config, out string) {
 	}
 	// counter.ts (no imports), tally.ts (a sibling with no imports), the
 	// workspace package and an npm library both import directly.
-	for _, m := range []string{"shared-counter-mark", "++n", "++wsCount", "neutral-used-mark", "neutral-default-mark"} {
+	// links.ts mentions Link only in a comment, a type, a string, an object
+	// key and a member name, so it is shared even where the shim is injected.
+	for _, m := range []string{"shared-counter-mark", "++n", "++wsCount", "++linkCount", "neutral-used-mark", "neutral-default-mark"} {
 		if len(marks[m]) != 1 || !strings.HasPrefix(marks[m][0], "isn") {
 			t.Errorf("%q should ship once, in a shared isn chunk; found in %v", m, marks[m])
 		} else if marks[m][0] != strings.ToLower(marks[m][0]) {
 			t.Errorf("shared chunk name is not lower-case: %s", marks[m][0])
 		}
+	}
+	// The cycle stays in each island bundle: never in a shared chunk.
+	for _, f := range marks["kind-shadow"] {
+		if strings.HasPrefix(f, "isn") {
+			t.Errorf("a module in an import cycle was put in shared chunk %s", f)
+		}
+	}
+	if len(marks["kind-shadow"]) < 2 {
+		t.Errorf("want the cycle bundled for each kind of island, found in %v", marks["kind-shadow"])
 	}
 	// One Preact and one real-React chunk at least.
 	if len(importers) < 2 {
@@ -210,7 +270,7 @@ func checkSharedChunks(t *testing.T, cfg *config.Config, out string) {
 			t.Errorf("want KR8017 output to contain %q, got:\n%s", want, out)
 		}
 	}
-	for _, bad := range []string{"counter.ts is bundled twice", "tally.ts is bundled twice", "tally-base.ts is bundled twice", "ws-shared", `("")`, `-> ""`} {
+	for _, bad := range []string{"counter.ts is bundled twice", "tally.ts is bundled twice", "tally-base.ts is bundled twice", "links.ts", "ws-shared", "ws-order", `("")`, `-> ""`} {
 		if strings.Contains(out, bad) {
 			t.Errorf("KR8017 output must not contain %q:\n%s", bad, out)
 		}
@@ -359,5 +419,71 @@ func TestIslandShareCheckChains(t *testing.T) {
 	}
 	if _, react := c.chain(key("src/store.ts")); !react {
 		t.Error("the zustand chain ends at react")
+	}
+}
+
+func TestFreeGlobalUse(t *testing.T) {
+	root := t.TempDir()
+	names := regexp.MustCompile(`\b(Link|Image)\b`)
+	for src, want := range map[string]string{
+		"/** Link a property. */\nexport const a = 1;\n":                            "",
+		"export const s = 'Link layer properties';\n":                               "",
+		"export const o = { Link: 1 };\nexport const v = o.Link;\n":                 "",
+		"export type Link = { to: string };\nexport const f = (l: Link) => l.to;\n": "",
+		"import { Link } from './tags';\nexport const C = Link;\n":                  "",
+		"function Link() {}\nexport const C = Link;\n":                              "",
+		"export const C = Link;\n":                                                  "Link",
+		"export const tags = { Link };\n":                                           "Link",
+		"export const make = () => [Image];\n":                                      "Image",
+	} {
+		p := filepath.Join(root, "m.ts")
+		if err := os.WriteFile(p, []byte(src), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if got := freeGlobalUse(p, names); got != want {
+			t.Errorf("freeGlobalUse(%q) = %q, want %q", src, got, want)
+		}
+	}
+}
+
+// TestIslandShareCheckCycle: modules in an import cycle are never shared,
+// and a module that imports one is reported with the cycle.
+func TestIslandShareCheckCycle(t *testing.T) {
+	root := t.TempDir()
+	imp := func(path, spec string) islandMetaImport {
+		return islandMetaImport{Path: path, Kind: "import-statement", Original: spec}
+	}
+	type in = struct {
+		Format  string             `json:"format"`
+		Imports []islandMetaImport `json:"imports"`
+	}
+	graph := func() *islandMetafile {
+		return &islandMetafile{Inputs: map[string]in{
+			"src/kinds.ts":    {Format: "esm", Imports: []islandMetaImport{imp("src/template.ts", "./template")}},
+			"src/template.ts": {Format: "esm", Imports: []islandMetaImport{imp("src/stack.ts", "./stack")}},
+			"src/stack.ts":    {Format: "esm", Imports: []islandMetaImport{imp("src/kinds.ts", "./kinds")}},
+			"src/user.ts":     {Format: "esm", Imports: []islandMetaImport{imp("src/stack.ts", "./stack")}},
+			"src/plain.ts":    {Format: "esm"},
+			"src/island.tsx":  {Format: "esm", Imports: []islandMetaImport{imp("src/user.ts", "./user"), imp("src/plain.ts", "./plain")}},
+		}}
+	}
+	metas := []*islandMetafile{graph(), graph()}
+	metas[1].Inputs["src/island.tsx"] = in{Format: "esm", Imports: append(metas[1].Inputs["src/island.tsx"].Imports, islandMetaImport{Path: "preact/compat", Kind: "import-statement", Original: "react", External: true})}
+	plan := planSharedIslandModules(root, metas, nil)
+	key := func(p string) string { return canonicalMetaKey(root, p) }
+	if !plan.shared[key("src/plain.ts")] {
+		t.Error("plain.ts is not in a cycle and should be shared")
+	}
+	for _, p := range []string{"src/kinds.ts", "src/template.ts", "src/stack.ts", "src/user.ts"} {
+		if plan.shared[key(p)] {
+			t.Errorf("%s is in or reaches an import cycle and must not be shared", p)
+		}
+	}
+	c := newIslandShareCheck(root, metas, nil)
+	c.settle()
+	got, _ := c.chain(key("src/user.ts"))
+	want := "src/user.ts -> src/stack.ts (in an import cycle (src/stack.ts -> src/kinds.ts -> src/template.ts -> src/stack.ts)"
+	if !strings.HasPrefix(got, want) {
+		t.Errorf("chain = %q, want prefix %q", got, want)
 	}
 }
