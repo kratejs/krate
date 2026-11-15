@@ -443,10 +443,16 @@ func (c *islandShareCheck) display(key string) string {
 		return key[i+len("/node_modules/"):]
 	}
 	abs := filepath.FromSlash(key)
-	if root := canonicalPath(c.root); withinDir(root, abs) {
-		return canonicalRel(root, abs)
+	for _, root := range []string{canonicalPath(c.root), c.root} {
+		if withinDir(root, abs) {
+			return canonicalRel(root, abs)
+		}
 	}
-	return canonicalRel(c.root, abs)
+	// A workspace package next to the app: relative to it (../shared/x.ts).
+	if rel, err := filepath.Rel(canonicalPath(c.root), abs); err == nil {
+		return filepath.ToSlash(rel)
+	}
+	return filepath.ToSlash(abs)
 }
 
 // planSharedIslandModules finds the modules two graphs can share: script

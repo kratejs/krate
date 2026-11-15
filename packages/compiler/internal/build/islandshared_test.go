@@ -481,6 +481,9 @@ func TestIslandShareCheckCycle(t *testing.T) {
 	}
 	c := newIslandShareCheck(root, metas, nil)
 	c.settle()
+	if got := c.display(filepath.ToSlash(filepath.Join(canonicalPath(filepath.Dir(root)), "shared", "src", "index.ts"))); got != "../shared/src/index.ts" {
+		t.Errorf("a workspace package next to the app displays as %q, want ../shared/src/index.ts", got)
+	}
 	got, _ := c.chain(key("src/user.ts"))
 	want := "src/user.ts -> src/stack.ts (in an import cycle (src/stack.ts -> src/kinds.ts -> src/template.ts -> src/stack.ts)"
 	if !strings.HasPrefix(got, want) {
