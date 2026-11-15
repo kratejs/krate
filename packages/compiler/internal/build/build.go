@@ -4320,6 +4320,18 @@ func (b *Builder) BuildMiddleware() error {
 	}
 	result := esbuildBuild(mwOpts)
 
+	// A bundle that still imports Node built-ins or packages cannot load in
+	// the embedded engine, so it is built for the Node sidecar instead.
+	nodeOnly := false
+	if len(result.Errors) == 0 && embeddedRuntime(b.Cfg.SSR.MiddlewareRuntime) {
+		if ext := externalImports(result.Metafile); len(ext) > 0 {
+			nodeOnly = true
+			printf("  %s> Middleware%s imports %s, so it runs in the Node sidecar (set ssr.middlewareRuntime to \"node\" to silence this)\n", cYellow, cReset, strings.Join(ext, ", "))
+			jseval.ApplyNodeESM(&mwOpts)
+			result = esbuildBuild(mwOpts)
+		}
+	}
+
 	if len(result.Errors) > 0 {
 		for _, e := range result.Errors {
 			fmt.Fprintf(os.Stderr, "  %sMiddleware error:%s %s\n", cRed, cReset, nativeAddonHint(e.Text))
@@ -4340,13 +4352,17 @@ func (b *Builder) BuildMiddleware() error {
 	if err := fsutil.WriteFileAtomic(outPath, result.OutputFiles[0].Contents, 0644); err != nil {
 		return fmt.Errorf("writing middleware: %w", err)
 	}
+	if nodeOnly {
+		b.setRuntimeCompatWarnings("middleware", nil)
+		return writeMiddlewareMeta(b.Root, nil, true)
+	}
 	if !embeddedRuntime(b.Cfg.SSR.MiddlewareRuntime) {
 		b.setRuntimeCompatWarnings("middleware", nil)
 		_ = os.Remove(middlewareMetaPath(b.Root))
 		return nil
 	}
 	features := b.scanRuntimeCompat("middleware", result.Metafile, jscompat.CompatMiddlewareRuntime)
-	if err := writeMiddlewareMeta(b.Root, features); err != nil {
+	if err := writeMiddlewareMeta(b.Root, features, false); err != nil {
 		return fmt.Errorf("writing middleware metadata: %w", err)
 	}
 	return nil

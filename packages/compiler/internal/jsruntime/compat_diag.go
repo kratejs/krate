@@ -61,6 +61,9 @@ func CompatDiagnostics(scan CompatScan, root, option string) []diag.Diagnostic {
 		if option == CompatMiddlewareRuntime {
 			hint = strings.ReplaceAll(hint, CompatAPIRuntime, CompatMiddlewareRuntime)
 		}
+		if hint != "" && !strings.Contains(hint, option) {
+			hint += " (or set " + option + ` to "node" in krate.config.ts)`
+		}
 		rel := relToRoot(root, r.File)
 		if _, ok := lines[r.File]; !ok {
 			if data, err := os.ReadFile(r.File); err == nil {

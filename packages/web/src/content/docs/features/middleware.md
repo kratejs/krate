@@ -97,7 +97,12 @@ fail the middleware with an explanatory error.
   (or `"bun"` / `"deno"`) to run it in the sidecar instead. The embedded
   runtime has the same Web APIs as [API routes](/docs/reference/api-runtime-compat/),
   and the build warns with [`KR7160`](/docs/reference/diagnostics/#kr7160) when
-  middleware uses one it lacks.
+  middleware uses one it lacks. A middleware that imports a Node built-in or a
+  database driver cannot run there at all: the build then compiles it for the
+  Node sidecar on its own, and `krate migrate nextjs` writes
+  `ssr.middlewareRuntime: "node"` for such a middleware. If a middleware fails
+  to load, `krate start` refuses to start (the Node sidecar and the serverless
+  handler answer 503) instead of serving without it.
 - In `krate dev`, the module is reloaded whenever `.krate/middleware.js`
   changes (and picked up if you add it while the server runs).
 - Combined with [redirects & rewrites](/docs/features/redirects-rewrites/),

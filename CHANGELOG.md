@@ -411,6 +411,12 @@ host code runs in the native process. Names and options may change between relea
 - A bundled CommonJS dependency of a client component (such as Next's `next/script`) that calls
   `require("react/jsx-runtime")` no longer crashes server rendering with `Dynamic require of
   "preact/jsx-runtime" is not supported`; React and Preact requires share the one Preact instance.
+- A middleware that imports Node built-ins or a database driver no longer makes `krate start` serve with no
+  middleware: the build compiles it for the Node sidecar (QuickJS rejected the bundle's `import` lines as
+  `SyntaxError: expecting '('`), a middleware that still fails to load stops startup instead of being skipped,
+  `krate migrate nextjs` sets `ssr.middlewareRuntime: "node"` for it, and every KR7160 middleware hint names
+  that setting.
+
 - A client component or real-React island in a project under a symlinked path (macOS `/var` is
   `/private/var`) gets action references for its `"use server"` imports instead of their server code.
 - Real-React islands (react-three-fiber and other reconciler libraries) no longer bundle server-only code. A
