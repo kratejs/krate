@@ -1058,9 +1058,10 @@ func (e *SSREval) childrenHTML() string {
 	return ""
 }
 
-// mergeSlotChildrenHTML merges the Slot's attributes into the opening tag of
-// already-rendered children HTML (the forwarded `children` binding case). It
-// injects the class into the first element.
+// mergeSlotChildrenHTML merges the Slot's attributes (explicit and spread)
+// into the opening tag of already-rendered children HTML (the forwarded
+// `children` binding case). The child's own attributes win; classes join with
+// the Slot's first.
 func (e *SSREval) mergeSlotChildrenHTML(slot *ast.JSXElement, html string) (string, bool) {
 	start := strings.IndexByte(html, '<')
 	if start < 0 || start+1 >= len(html) {
@@ -1076,38 +1077,120 @@ func (e *SSREval) mergeSlotChildrenHTML(slot *ast.JSXElement, html string) (stri
 	}
 	end += start
 
-	cls := ""
+	var slotAttrs []*ast.JSXAttr
 	for _, a := range slot.Opening.Attributes {
-		if a.Spread || isSlotOnlyAttr(a.Name) {
+		if !a.Spread && isSlotOnlyAttr(a.Name) {
 			continue
 		}
-		if a.Name == "class" || a.Name == "className" {
-			if v := e.value(a.Value); !v.IsNullish() && !v.IsUnknown() {
-				cls = v.ToString()
-			}
+		if !a.Spread && a.Name == "className" {
+			a = &ast.JSXAttr{Position: a.Position, Name: "class", Value: a.Value}
 		}
+		slotAttrs = append(slotAttrs, a)
 	}
-	if cls == "" {
+	probe := e.renderElement(&ast.JSXElement{
+		Position: slot.Position,
+		Opening:  &ast.JSXOpening{Name: "div", Attributes: slotAttrs},
+		Closing:  &ast.JSXClosing{Name: "div"},
+	}, "div")
+	probeEnd := strings.IndexByte(probe, '>')
+	if probeEnd < 0 {
 		return html, true
 	}
-	// Merge into an existing class attribute if present, else add one.
-	openTag := html[start : end+1]
-	if idx := indexClassAttr(openTag); idx >= 0 {
-		insertAt := start + idx
-		return html[:insertAt] + escape.HTML(cls) + " " + html[insertAt:], true
+	slotTag := splitTagAttrs(probe[len("<div"):probeEnd])
+	if len(slotTag.attrs) == 0 {
+		return html, true
 	}
-	return html[:end] + ` class="` + escape.HTML(cls) + `"` + html[end:], true
-}
 
-// indexClassAttr returns the offset just after the opening quote of a
-// class="..." attribute in an opening tag, or -1.
-func indexClassAttr(tag string) int {
-	for _, key := range []string{` class="`, ` class='`} {
-		if i := strings.Index(tag, key); i >= 0 {
-			return i + len(key)
+	tag := html[start+1 : end]
+	nameEnd := strings.IndexAny(tag, " \t\r\n/")
+	if nameEnd < 0 {
+		nameEnd = len(tag)
+	}
+	child := splitTagAttrs(tag[nameEnd:])
+	have := map[string]int{}
+	for i, a := range child.attrs {
+		have[a.name] = i
+	}
+	var extra strings.Builder
+	for _, a := range slotTag.attrs {
+		i, dup := have[a.name]
+		switch {
+		case !dup:
+			extra.WriteString(" " + a.raw)
+		case a.name == "class":
+			c := &child.attrs[i]
+			c.raw = `class="` + a.value + " " + c.value + `"`
+			c.value = a.value + " " + c.value
 		}
 	}
-	return -1
+	var b strings.Builder
+	b.WriteString(html[:start+1])
+	b.WriteString(tag[:nameEnd])
+	for _, a := range child.attrs {
+		b.WriteString(" " + a.raw)
+	}
+	b.WriteString(extra.String())
+	b.WriteString(child.tail)
+	b.WriteString(html[end:])
+	return b.String(), true
+}
+
+type tagAttr struct{ name, value, raw string }
+
+type tagAttrs struct {
+	attrs []tagAttr
+	tail  string
+}
+
+// splitTagAttrs splits the attribute text of an opening tag (everything after
+// the tag name) into attributes, quoted or not. A trailing "/" is kept as tail.
+func splitTagAttrs(s string) tagAttrs {
+	var out tagAttrs
+	i := 0
+	for i < len(s) {
+		for i < len(s) && strings.ContainsRune(" \t\r\n", rune(s[i])) {
+			i++
+		}
+		if i >= len(s) {
+			break
+		}
+		if s[i] == '/' {
+			out.tail = " " + strings.TrimSpace(s[i:])
+			break
+		}
+		j := i
+		for j < len(s) && !strings.ContainsRune(" \t\r\n=/>", rune(s[j])) {
+			j++
+		}
+		a := tagAttr{name: s[i:j]}
+		k := j
+		if k < len(s) && s[k] == '=' {
+			k++
+			if k < len(s) && (s[k] == '"' || s[k] == '\'') {
+				q := s[k]
+				m := strings.IndexByte(s[k+1:], q)
+				if m < 0 {
+					m = len(s) - k - 1
+				}
+				a.value = s[k+1 : k+1+m]
+				k += m + 2
+			} else {
+				m := k
+				for m < len(s) && !strings.ContainsRune(" \t\r\n>", rune(s[m])) {
+					m++
+				}
+				a.value = s[k:m]
+				k = m
+			}
+		}
+		if k > len(s) {
+			k = len(s)
+		}
+		a.raw = strings.TrimSpace(s[i:k])
+		out.attrs = append(out.attrs, a)
+		i = k
+	}
+	return out
 }
 
 // isSlotOnlyAttr reports attributes consumed by Slot itself, not forwarded.

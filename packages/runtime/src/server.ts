@@ -137,7 +137,7 @@ function base64url(s: string): string {
 type JSXNode = string | number | boolean | null | undefined | JSXNode[] | JSXElement | RawHTML;
 
 interface JSXElement {
-  type: string | Function;
+  type: string | Function | object | symbol;
   props: Record<string, any>;
   children: JSXNode[];
 }
@@ -146,7 +146,7 @@ export function Fragment(_props: { children?: JSXNode }): JSXNode {
   return _props.children ?? [];
 }
 
-export function jsx(type: string | Function, props: Record<string, any>, _key?: string): JSXElement {
+export function jsx(type: string | Function | object | symbol, props: Record<string, any>, _key?: string): JSXElement {
   const { children, ...rest } = props ?? {};
   const childArray = Array.isArray(children)
     ? children.flat(Infinity)
@@ -192,6 +192,174 @@ function asyncInSyncRender(where: string): Error {
 
 function isClassComponent(fn: any): boolean {
   return typeof fn === "function" && fn.prototype && typeof fn.prototype.render === "function";
+}
+
+// React element types that are objects or symbols rather than functions. A
+// package compiled for React (Radix's Slot is a forwardRef) hands these to a
+// dynamic tag (`const Comp = asChild ? Slot.Root : "button"`), so the server
+// renderer must run them as components instead of printing them as a tag name.
+const R_ELEMENT = [Symbol.for("react.element"), Symbol.for("react.transitional.element")];
+const R_FORWARD_REF = Symbol.for("react.forward_ref");
+const R_MEMO = Symbol.for("react.memo");
+const R_LAZY = Symbol.for("react.lazy");
+const R_PROVIDER = Symbol.for("react.provider");
+const R_CONTEXT = Symbol.for("react.context");
+const R_CONSUMER = Symbol.for("react.consumer");
+const R_FRAGMENT = Symbol.for("react.fragment");
+const R_SUSPENSE = Symbol.for("react.suspense");
+
+type ForeignContext = { _currentValue?: unknown; _context?: ForeignContext; Provider?: unknown; Consumer?: unknown };
+
+const exoticCache = new WeakMap<object, Function>();
+
+function describeType(type: unknown): string {
+  if (typeof type === "symbol") return type.toString();
+  if (type && typeof type === "object") {
+    const t = type as any;
+    const tag = typeof t.$$typeof === "symbol" ? t.$$typeof.toString() : undefined;
+    return tag ? `an object (${tag})` : "an object";
+  }
+  return String(type);
+}
+
+function notRenderable(type: unknown): Error {
+  return new Error(
+    `Cannot render an element whose type is ${describeType(type)}. A server render can run strings, ` +
+      `function and class components, and React forwardRef, memo, lazy and context types; ` +
+      `pass a component or an HTML tag name instead.`,
+  );
+}
+
+// isSlotType reports Radix's Slot (createSlot names it `<owner>.Slot`). Its
+// own render clones React elements and cannot work on Krate's, so the server
+// uses ServerSlot for it.
+function isSlotType(type: any): boolean {
+  return typeof type.displayName === "string" && /(^|\.)Slot$/.test(type.displayName);
+}
+
+function childElements(children: unknown[]): unknown[] {
+  return children.filter((c) => c != null && c !== false && !(typeof c === "string" && c.trim() === ""));
+}
+
+function mergeSlotProps(slot: Record<string, any>, child: Record<string, any>): Record<string, any> {
+  const out: Record<string, any> = { ...slot, ...child };
+  for (const key of Object.keys(child)) {
+    const sv = slot[key];
+    const cv = child[key];
+    if (/^on[A-Z]/.test(key) && typeof sv === "function" && typeof cv === "function") {
+      out[key] = (...args: unknown[]) => {
+        cv(...args);
+        sv(...args);
+      };
+    } else if (key === "style" && sv && cv && typeof sv === "object" && typeof cv === "object") {
+      out[key] = { ...sv, ...cv };
+    } else if ((key === "className" || key === "class") && sv && cv) {
+      out[key] = `${sv} ${cv}`;
+    }
+  }
+  return out;
+}
+
+// ServerSlot is Radix's Slot for the server: it renders its single child
+// element with the Slot's own props merged onto it (the child wins, class
+// names join, handlers compose).
+function ServerSlot(allProps: Record<string, any>): JSXNode {
+  const { children, ref: _ref, ...slotProps } = allProps;
+  const kids = childElements(Array.isArray(children) ? children.flat(Infinity) : children == null ? [] : [children]);
+  const child = kids.length === 1 ? normalizeNode(kids[0]) : undefined;
+  if (!isElement(child)) return kids as JSXNode;
+  return { type: child.type, props: mergeSlotProps(slotProps, child.props), children: child.children };
+}
+
+// toReactElement converts a React element object (made by a package's own
+// React) into Krate's element shape.
+function isReactElement(v: unknown): v is { type: unknown; props: Record<string, any> } {
+  return v != null && typeof v === "object" && R_ELEMENT.includes((v as any).$$typeof);
+}
+
+function normalizeNode(node: unknown): unknown {
+  if (!isReactElement(node)) return node;
+  const { children, ref: _ref, ...rest } = node.props ?? {};
+  const kids = Array.isArray(children) ? children.flat(Infinity) : children != null ? [children] : [];
+  return { type: node.type, props: rest, children: kids };
+}
+
+function foreignContext(type: any): { ctx: ForeignContext; provider: boolean } {
+  if (type.$$typeof === R_PROVIDER) return { ctx: type._context, provider: true };
+  if (type.$$typeof === R_CONSUMER) return { ctx: type._context, provider: false };
+  if (type._context) return { ctx: type._context, provider: false };
+  return { ctx: type, provider: type.Provider === type };
+}
+
+// withContextValue renders under a foreign Provider: consumers below read the
+// value while its children are resolved.
+function scopedContextFn(ctx: ForeignContext, provider: boolean): Function {
+  if (provider) {
+    const Provider = (props: Record<string, any>) => props.children;
+    (Provider as any).__krateForeignProvider = ctx;
+    return Provider;
+  }
+  const Consumer = (props: Record<string, any>) => consumerChild(props)(ctx._currentValue);
+  (Consumer as any).__krateForeignConsumer = ctx;
+  return Consumer;
+}
+
+function consumerChild(props: Record<string, any>): (value: unknown) => unknown {
+  const render = Array.isArray(props.children) && props.children.length === 1 ? props.children[0] : props.children;
+  if (typeof render !== "function") throw new Error("A context Consumer needs a function as its child.");
+  return render;
+}
+
+// ContextValues holds the foreign Provider values in scope for an async
+// resolve. Sibling subtrees resolve in parallel, so the values travel with the
+// walk instead of living on the context object.
+type ContextValues = ReadonlyMap<ForeignContext, unknown>;
+
+// exoticType resolves a non-string, non-function element type to something
+// the renderer can run. A pending React.lazy throws its promise.
+function exoticType(type: any): string | Function {
+  if (typeof type === "string" || typeof type === "function") return type;
+  if (type === R_FRAGMENT || type === R_SUSPENSE) return Fragment;
+  if (type == null || typeof type !== "object") throw notRenderable(type);
+  switch (type.$$typeof) {
+    case R_MEMO:
+      return exoticType(type.type);
+    case R_LAZY:
+      return exoticType(type._init(type._payload));
+    case R_FORWARD_REF: {
+      let fn = exoticCache.get(type);
+      if (!fn) {
+        fn = isSlotType(type) ? ServerSlot : (props: Record<string, any>) => type.render(props, props.ref ?? null);
+        exoticCache.set(type, fn);
+      }
+      return fn;
+    }
+    case R_PROVIDER:
+    case R_CONSUMER:
+    case R_CONTEXT: {
+      let fn = exoticCache.get(type);
+      if (!fn) {
+        const { ctx, provider } = foreignContext(type);
+        fn = scopedContextFn(ctx, provider);
+        exoticCache.set(type, fn);
+      }
+      return fn;
+    }
+  }
+  throw notRenderable(type);
+}
+
+// runForeignProvider evaluates `run` with a foreign Provider's value in place.
+function withProviderValue<T>(fn: Function, props: Record<string, any>, run: () => T): T {
+  const ctx = (fn as any).__krateForeignProvider as ForeignContext | undefined;
+  if (!ctx) return run();
+  const prev = ctx._currentValue;
+  ctx._currentValue = props.value;
+  try {
+    return run();
+  } finally {
+    ctx._currentValue = prev;
+  }
 }
 
 function classFallback(type: any, instance: any, error: unknown): unknown {
@@ -249,6 +417,7 @@ function renderNode(node: JSXNode): string {
   if (typeof node === "boolean") return "";
   if (Array.isArray(node)) return node.map(renderNode).join("");
   if (typeof node === "object" && "__raw" in node) return (node as RawHTML).__raw;
+  if (isReactElement(node)) return renderElement(normalizeNode(node) as JSXElement);
   if (typeof node === "object" && "type" in node) return renderElement(node as JSXElement);
   return "";
 }
@@ -348,36 +517,52 @@ function isJSXValue(v: unknown): boolean {
 // render their children eagerly (marked __krateEagerChildren, e.g. Link) get
 // their children and JSX-valued props resolved first, so an async component
 // passed as a child still renders.
-async function resolveTree(node: unknown): Promise<JSXNode> {
-  if (isThenable(node)) return resolveTree(await node);
+async function resolveTree(node: unknown, vals?: ContextValues): Promise<JSXNode> {
+  if (isThenable(node)) return resolveTree(await node, vals);
   if (node == null || typeof node !== "object") return node as JSXNode;
-  if (Array.isArray(node)) return Promise.all(node.map(resolveTree));
+  if (Array.isArray(node)) return Promise.all(node.map((n) => resolveTree(n, vals)));
   if ("__raw" in (node as any)) return node as RawHTML;
+  if (isReactElement(node)) node = normalizeNode(node);
   if (!isElement(node)) return node as JSXNode;
   const { type, props, children } = node;
-  if (typeof type !== "function") {
-    return { type, props, children: (await Promise.all(children.map(resolveTree))) as JSXNode[] };
+  if (typeof type === "string") {
+    return { type, props, children: (await Promise.all(children.map((n) => resolveTree(n, vals)))) as JSXNode[] };
   }
-  const fn = type as any;
-  if (fn.__krateSuspense) return resolveTree(children);
+  let fn: any = type;
+  while (typeof fn !== "function") {
+    try {
+      fn = exoticType(fn);
+    } catch (e) {
+      if (!isThenable(e)) throw e;
+      await e;
+    }
+  }
+  if (fn.__krateSuspense) return resolveTree(children, vals);
   let callProps: Record<string, any> = { ...props, children };
   if (fn.__krateEagerChildren) {
     const entries = await Promise.all(
-      Object.entries(props).map(async ([k, v]) => [k, isJSXValue(v) ? await resolveTree(v) : v] as const),
+      Object.entries(props).map(async ([k, v]) => [k, isJSXValue(v) ? await resolveTree(v, vals) : v] as const),
     );
-    callProps = { ...Object.fromEntries(entries), children: await resolveTree(children) };
+    callProps = { ...Object.fromEntries(entries), children: await resolveTree(children, vals) };
   }
   if (isClassComponent(fn)) {
     const instance = new fn(callProps);
     try {
-      return await resolveTree(instance.render());
+      return await resolveTree(instance.render(), vals);
     } catch (error) {
-      return resolveTree(classFallback(fn, instance, error));
+      return resolveTree(classFallback(fn, instance, error), vals);
     }
+  }
+  if (fn.__krateForeignConsumer) {
+    const ctx = fn.__krateForeignConsumer as ForeignContext;
+    return resolveTree(consumerChild(callProps)(vals?.has(ctx) ? vals.get(ctx) : ctx._currentValue), vals);
   }
   let out: unknown = fn(callProps);
   if (isThenable(out)) out = await out;
-  return resolveTree(out);
+  if (fn.__krateForeignProvider) {
+    return resolveTree(out, new Map(vals).set(fn.__krateForeignProvider as ForeignContext, props.value));
+  }
+  return resolveTree(out, vals);
 }
 
 // rawTextContent renders the children of <script>/<style>: their text is raw
@@ -398,6 +583,16 @@ function renderElement(el: JSXElement): string {
   const { type, props, children } = el;
 
   // Component
+  if (typeof type !== "string" && typeof type !== "function") {
+    let fn: any;
+    try {
+      fn = exoticType(type);
+    } catch (e) {
+      if (isThenable(e)) throw asyncInSyncRender("A lazy component");
+      throw e;
+    }
+    return renderElement({ type: fn, props, children });
+  }
   if (typeof type === "function") {
     if (isClassComponent(type)) {
       const instance = new (type as any)({ ...props, children });
@@ -409,11 +604,11 @@ function renderElement(el: JSXElement): string {
     }
     const result = type({ ...props, children });
     if (isThenable(result)) throw asyncInSyncRender(`<${componentName(type)}>`);
-    return renderNode(result);
+    return withProviderValue(type, props, () => renderNode(result));
   }
 
   // HTML element
-  const tag = type;
+  const tag = type as string;
   const renderProps =
     tag === "form" && isServerAction(props.action) && props.method == null
       ? { ...props, method: "post" }
@@ -778,6 +973,19 @@ function linkAttributes(props: Record<string, any>): Record<string, string> {
   }
   if (rest.target === "_blank" && rest.rel === undefined) attrs.rel = "noopener noreferrer";
   if (rest.className) attrs.class = String(rest.className);
+  // Every other attribute reaches the anchor, so data-*, aria-*, class and
+  // style that a Slot (asChild) merges onto a Link are not lost.
+  for (const [key, v] of Object.entries(rest)) {
+    const name = ATTR_ALIASES[key] || key;
+    if (name in attrs || v == null || v === false || typeof v === "function") continue;
+    if (key === "key" || key === "ref" || key === "className" || key === "dangerouslySetInnerHTML" || key.startsWith("on") || key.startsWith("__")) continue;
+    if (key === "style" && typeof v === "object") {
+      const css = styleString(v as Record<string, unknown>);
+      if (css) attrs.style = css;
+      continue;
+    }
+    attrs[name] = v === true ? "" : String(v);
+  }
   return attrs;
 }
 

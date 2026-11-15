@@ -106,3 +106,27 @@ describe('lazy', () => {
     expect(await renderToStringAsync(jsx(Hi, {}))).toBe('<i>hi</i>');
   });
 });
+
+describe('React element types on the server', () => {
+  const forwardRef = (render: (p: any, ref: any) => any) => ({ $$typeof: Symbol.for('react.forward_ref'), render });
+
+  it('runs forwardRef, memo and Slot types, in sync and async renders', async () => {
+    const Fwd = forwardRef((p, ref) => jsx('b', { 'data-ref': String(ref), children: p.children }));
+    const Memo = { $$typeof: Symbol.for('react.memo'), type: Fwd };
+    const Slot = Object.assign(forwardRef(() => null), { displayName: 'Slot.Slot' });
+    const tree = jsx('div', {
+      children: [
+        jsx(Memo, { children: 'm' }),
+        jsx(Slot, { className: 'x', 'data-slot': 'button', children: jsx('a', { className: 'y', href: '/h', children: 'go' }) }),
+      ],
+    });
+    const want = '<div><b data-ref="null">m</b><a class="x y" data-slot="button" href="/h">go</a></div>';
+    expect(renderToString(tree)).toBe(want);
+    expect(await renderToStringAsync(tree)).toBe(want);
+  });
+
+  it('rejects an unknown element type instead of printing it as a tag', async () => {
+    expect(() => renderToString(jsx({ nope: 1 } as any, {}))).toThrow(/Cannot render an element whose type is an object/);
+    await expect(renderToStringAsync(jsx({ $$typeof: Symbol.for('react.portal') } as any, {}))).rejects.toThrow(/react\.portal/);
+  });
+});
