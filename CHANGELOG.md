@@ -417,6 +417,10 @@ host code runs in the native process. Names and options may change between relea
   through a variable tag or as `Slot.Root`, and Radix's `Slot` merges its props onto the child. Any other object or symbol type is a
   render error instead of a bogus tag. `<Link>` on the server now forwards `data-*`, `aria-*`, `style` and other attributes to the
   anchor, and a build-time `Slot` around forwarded children keeps all of its attributes, not only the class.
+- Props sent from a server component to a client component can be a `Date`, `Map`, `Set`, `bigint`, `undefined`,
+  `NaN`, `Infinity`, `-0`, a typed array, `ArrayBuffer`, `DataView` or a `Symbol.for` symbol, as with React
+  Flight. The client component (and its server render) receives the same type, so Drizzle rows no longer fail
+  with "is an instance of Date". Class instances and functions are still rejected.
 - Builds of large apps with many client components are about twice as fast: the client-boundary pass resolved
   the real path of every module once per client module. Real paths are now cached for the duration of a build.
 - `krate migrate nextjs`: a route segment named like a Krate special file (`app/auth/error/page.tsx`,

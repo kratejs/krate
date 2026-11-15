@@ -119,9 +119,32 @@ function __krateTree(n, h, call, comp) {
   if (typeof C !== "function") throw new Error("client component " + n.e + " of " + n.m + " is not loaded");
   return h.apply(null, [C, props].concat(kids));
 }
+function __krateBytes(b) {
+  var s = atob(b), u = new Uint8Array(s.length);
+  for (var i = 0; i < s.length; i++) u[i] = s.charCodeAt(i);
+  return u;
+}
+function __krateTagged(v, h, call, comp) {
+  var r = function (x) { return __krateRevive(x, h, call, comp); };
+  switch (v.__krateT) {
+    case "U": return undefined;
+    case "D": return new Date(v.v === null ? NaN : v.v);
+    case "B": return BigInt(v.v);
+    case "N": return v.v === "-0" ? -0 : v.v === "NaN" ? NaN : v.v === "Infinity" ? Infinity : -Infinity;
+    case "Y": return Symbol.for(v.v);
+    case "M": return new Map(v.v.map(function (e) { return [r(e[0]), r(e[1])]; }));
+    case "S": return new Set(v.v.map(r));
+    case "A": return __krateBytes(v.v).buffer;
+    case "V": return new DataView(__krateBytes(v.v).buffer);
+    case "T": { var u = __krateBytes(v.v.b); return new globalThis[v.v.n](u.buffer, 0, u.length / globalThis[v.v.n].BYTES_PER_ELEMENT); }
+    case "O": { var o = {}; for (var k in v.v) o[k] = r(v.v[k]); return o; }
+  }
+  return v;
+}
 function __krateRevive(v, h, call, comp) {
   if (Array.isArray(v)) return v.map(function (x) { return __krateRevive(x, h, call, comp); });
   if (v && typeof v === "object") {
+    if (typeof v.__krateT === "string") return __krateTagged(v, h, call, comp);
     if (typeof v.__krateAction === "string") {
       var url = v.__krateAction;
       var fn = function () { return call(url, Array.prototype.slice.call(arguments)); };
