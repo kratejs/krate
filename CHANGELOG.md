@@ -421,6 +421,10 @@ host code runs in the native process. Names and options may change between relea
   `NaN`, `Infinity`, `-0`, a typed array, `ArrayBuffer`, `DataView` or a `Symbol.for` symbol, as with React
   Flight. The client component (and its server render) receives the same type, so Drizzle rows no longer fail
   with "is an instance of Date". Class instances and functions are still rejected.
+- Client components and islands that call `React.useOptimistic`, `React.useActionState`, `React.use` or
+  `useFormStatus` from `react-dom` no longer fail with `useOptimistic is not a function` (HTTP 500 on SSR):
+  the `react` that Preact-based code receives now provides the React 19 hooks `preact/compat` lacks, and
+  async `startTransition`/`useTransition` keep optimistic updates applied until the action settles.
 - Builds of large apps with many client components are about twice as fast: the client-boundary pass resolved
   the real path of every module once per client module. Real paths are now cached for the duration of a build.
 - `krate migrate nextjs`: a route segment named like a Krate special file (`app/auth/error/page.tsx`,

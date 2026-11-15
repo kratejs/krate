@@ -196,7 +196,7 @@ func (b *Builder) writeIslandBundles() error {
 	sink := &islandCSSSink{root: b.Root}
 	minify := b.shouldMinifyJS()
 	guard := b.newUnavailableGuard()
-	plugins := []api.Plugin{purePrunePlugin(b.Root), guard.plugin(), islandEntryPlugin(entries, virtual), islandCSSPlugin(sink), islandJSXPlugin(), islandTagsPlugin(b.Root, false), islandRequirePlugin(), reconcilerGuardPlugin(), reactDOMHintsPlugin(b.Root), routerHooksPlugin(b.Root)}
+	plugins := []api.Plugin{purePrunePlugin(b.Root), guard.plugin(), islandEntryPlugin(entries, virtual), islandCSSPlugin(sink), islandJSXPlugin(), islandTagsPlugin(b.Root, false), islandRequirePlugin(), reconcilerGuardPlugin(), reactDOMHintsPlugin(b.Root), reactCompatPlugin(b.Root), routerHooksPlugin(b.Root)}
 	var injects []string
 	for _, e := range entries {
 		if !e.Boundary {

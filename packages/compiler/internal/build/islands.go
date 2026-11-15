@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -668,7 +669,7 @@ func (b *Builder) buildIslandBundle(src, resolveDir string, ssr bool, plugin *ap
 		JSXImportSource: "preact",
 		LogLevel:        api.LogLevelSilent,
 		Alias:           islandAlias(b.Root, ssr),
-		Plugins:         []api.Plugin{purePrunePlugin(b.Root), guard.plugin(), islandCSSPlugin(sink), islandJSXPlugin(), islandTagsPlugin(b.Root, ssr), reconcilerGuardPlugin(), reactDOMHintsPlugin(b.Root), routerHooksPlugin(b.Root)},
+		Plugins:         []api.Plugin{purePrunePlugin(b.Root), guard.plugin(), islandCSSPlugin(sink), islandJSXPlugin(), islandTagsPlugin(b.Root, ssr), reconcilerGuardPlugin(), reactDOMHintsPlugin(b.Root), reactCompatPlugin(b.Root), routerHooksPlugin(b.Root)},
 	}
 	if prov != nil {
 		opts.Plugins = append(opts.Plugins, islandEntryPlugin(nil, prov.virtualModules()))
@@ -772,7 +773,7 @@ func reactDOMHintsPlugin(root string) api.Plugin {
 				if args.Kind == api.ResolveJSRequireCall {
 					return api.OnResolveResult{}, nil
 				}
-				return api.OnResolveResult{Path: "react-dom", Namespace: "krate-react-dom"}, nil
+				return api.OnResolveResult{Path: "react-dom", Namespace: "krate-react-dom", PluginData: mentions(args.Importer, reactDOMExtraRe)}, nil
 			})
 			pb.OnLoad(api.OnLoadOptions{Filter: `.*`, Namespace: "krate-react-dom"}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
 				names := []string{"preload", "preinit", "preconnect", "prefetchDNS", "preloadModule", "preinitModule"}
@@ -784,6 +785,86 @@ func reactDOMHintsPlugin(root string) api.Plugin {
 					for _, n := range names {
 						contents += "export function " + n + "() {}\n"
 					}
+				}
+				extra := ""
+				if withExtras, _ := args.PluginData.(bool); withExtras {
+					extra = reactCompatDOMExtras(root, &contents)
+				}
+				contents += "export default { ...__compat, " + list + extra + " };\n"
+				return api.OnLoadResult{Contents: &contents, Loader: api.LoaderJS, ResolveDir: root}, nil
+			})
+		},
+	}
+}
+
+var (
+	reactExtraRe    = regexp.MustCompile(`\b(useOptimistic|useActionState|useFormState|useEffectEvent|startTransition|useTransition)\b|\b(use|cache)\s*[(,}]|\.(use|cache)\b`)
+	reactDOMExtraRe = regexp.MustCompile(`\b(useFormStatus|useFormState|requestFormReset)\b`)
+)
+
+// mentions reports whether the source file at path matches re. Paths that are
+// not files (virtual modules, stdin) never match.
+func mentions(path string, re *regexp.Regexp) bool {
+	if !filepath.IsAbs(path) {
+		return false
+	}
+	src, err := os.ReadFile(path)
+	return err == nil && re.Match(src)
+}
+
+// reactCompatExtraNames are the React 19 APIs preact/compat lacks, plus the
+// ones whose compat versions cannot join an async action.
+var reactCompatExtraNames = []string{"useOptimistic", "useActionState", "use", "cache", "useEffectEvent", "startTransition", "useTransition"}
+
+// reactCompatDOMExtras appends the react-dom additions (useFormStatus,
+// useFormState, requestFormReset) to the virtual react-dom module source and
+// returns the extra default-export members. It returns "" when the runtime
+// package does not ship the compat additions.
+func reactCompatDOMExtras(root string, contents *string) string {
+	mod := resolver.NodeModule(root, "@krate/runtime/react-compat")
+	if mod == "" {
+		return ""
+	}
+	const names = "useFormStatus, useFormState, requestFormReset"
+	*contents += "import * as __cns from \"preact/compat\";\nimport { options as __opts } from \"preact\";\n" +
+		"import { createReactCompatExtras as __mk } from " + strconv.Quote(filepath.ToSlash(mod)) + ";\n" +
+		"const __x = /* @__PURE__ */ __mk(__cns, __opts);\n" +
+		"export const useFormStatus = __x.useFormStatus, useFormState = __x.useFormState, requestFormReset = __x.requestFormReset;\n"
+	return ", " + names
+}
+
+// reactCompatPlugin gives `react` imports of Preact builds the React 19 APIs
+// preact/compat lacks (useOptimistic, useActionState, use, cache, ...) next to
+// everything it provides, on the same Preact instance. require() calls are
+// left to the require plugins.
+func reactCompatPlugin(root string) api.Plugin {
+	const ns = "krate-react-compat"
+	return api.Plugin{
+		Name: ns,
+		Setup: func(pb api.PluginBuild) {
+			mod := ""
+			pb.OnResolve(api.OnResolveOptions{Filter: `^react$`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+				if args.Kind == api.ResolveJSRequireCall {
+					return api.OnResolveResult{}, nil
+				}
+				if mod == "" {
+					mod = resolver.NodeModule(root, "@krate/runtime/react-compat")
+				}
+				// Only modules that name one of the additions take them: the
+				// factory would otherwise ship, and look stateful, in every chunk.
+				if mod == "" || !mentions(args.Importer, reactExtraRe) {
+					return api.OnResolveResult{}, nil
+				}
+				return api.OnResolveResult{Path: "react", Namespace: ns}, nil
+			})
+			pb.OnLoad(api.OnLoadOptions{Filter: `.*`, Namespace: ns}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
+				list := strings.Join(reactCompatExtraNames, ", ")
+				contents := "export * from \"preact/compat\";\nimport * as __cns from \"preact/compat\";\nimport __compat from \"preact/compat\";\n" +
+					"import { options as __opts } from \"preact\";\n" +
+					"import { createReactCompatExtras as __mk } from " + strconv.Quote(filepath.ToSlash(mod)) + ";\n" +
+					"const __x = /* @__PURE__ */ __mk(__cns, __opts);\n"
+				for _, n := range reactCompatExtraNames {
+					contents += "export const " + n + " = __x." + n + ";\n"
 				}
 				contents += "export default { ...__compat, " + list + " };\n"
 				return api.OnLoadResult{Contents: &contents, Loader: api.LoaderJS, ResolveDir: root}, nil

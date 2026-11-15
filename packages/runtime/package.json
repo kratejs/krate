@@ -42,6 +42,10 @@
       "types": "./dist/hints.d.ts",
       "default": "./dist/hints.js"
     },
+    "./react-compat": {
+      "types": "./dist/react-compat.d.ts",
+      "default": "./dist/react-compat.js"
+    },
     "./navigation-react": {
       "types": "./dist/navigation-react.d.ts",
       "default": "./dist/navigation-react.js"

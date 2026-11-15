@@ -801,7 +801,7 @@ export async function mount(el) {
 		External:          []string{"preact", "preact/compat", "preact/hooks", "preact/jsx-runtime"},
 		Inject:            []string{shim},
 		Metafile:          true,
-		Plugins:           []api.Plugin{purePrunePlugin(b.Root), guard.plugin(), clientOnlyMarkersPlugin(true), actionServerBundlePlugin(b.importResolver(), b.actionModules(), b.Cfg.BaseURLPath()), reactDOMHintsPlugin(b.Root), routerHooksPlugin(b.Root)},
+		Plugins:           []api.Plugin{purePrunePlugin(b.Root), guard.plugin(), clientOnlyMarkersPlugin(true), actionServerBundlePlugin(b.importResolver(), b.actionModules(), b.Cfg.BaseURLPath()), reactDOMHintsPlugin(b.Root), reactCompatPlugin(b.Root), routerHooksPlugin(b.Root)},
 		LogLevel:          api.LogLevelSilent,
 	})
 	result.Errors = append(result.Errors, guard.errors(result.OutputFiles)...)
@@ -948,7 +948,7 @@ export function __krate_render(C, props) {
 		Alias:           islandAlias(c.root, false),
 		External:        []string{"preact", "preact/compat", "preact/hooks", "preact/jsx-runtime"},
 		Inject:          []string{shim},
-		Plugins:         []api.Plugin{purePrunePlugin(c.root), guard.plugin(), serverCSSPlugin(c.root), *plugin, clientOnlyMarkersPlugin(false), actionServerBundlePlugin(c.res, c.actions, c.basePath), pathAliasPlugin(c.res), reactDOMHintsPlugin(c.root), routerHooksPlugin(c.root), preactRequirePlugin()},
+		Plugins:         []api.Plugin{purePrunePlugin(c.root), guard.plugin(), serverCSSPlugin(c.root), *plugin, clientOnlyMarkersPlugin(false), actionServerBundlePlugin(c.res, c.actions, c.basePath), pathAliasPlugin(c.res), reactDOMHintsPlugin(c.root), reactCompatPlugin(c.root), routerHooksPlugin(c.root), preactRequirePlugin()},
 		LogLevel:        api.LogLevelSilent,
 	})
 	if len(result.Errors) == 0 {

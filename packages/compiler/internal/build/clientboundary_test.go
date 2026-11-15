@@ -710,3 +710,106 @@ export default async function Home() {
 		}
 	}
 }
+
+// TestUseClientReact19HooksBrowser runs a "use client" component that calls
+// React 19 hooks preact/compat lacks, through a namespace import and named
+// imports, against a real server action: SSR renders the initial state, a
+// click applies an optimistic update that settles after the action, and a
+// form bound to useActionState reports its pending status through
+// useFormStatus. Requires KRATE_BROWSER.
+func TestUseClientReact19HooksBrowser(t *testing.T) {
+	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
+	if browser == "" {
+		t.Skip("set KRATE_BROWSER=chromium|firefox|webkit to run the client hooks browser test")
+	}
+	if !canStopInProcessServer {
+		t.Skip("in-process server needs a unix host")
+	}
+	ensureRuntimeDist(t)
+	if _, err := exec.LookPath("node"); err != nil {
+		requireE2E(t, "node is not installed")
+	}
+	if err := exec.Command("node", "-e", "require.resolve('playwright')").Run(); err != nil {
+		requireE2E(t, "playwright is not installed (run pnpm install)")
+	}
+	b, root := scProject(t, map[string]string{
+		"src/actions.ts": `"use server";
+let n = 0;
+export async function bump() { await new Promise((r) => setTimeout(r, 400)); return ++n; }`,
+		"src/components/Panel.tsx": `"use client";
+import * as React from "react";
+import { use, useOptimistic } from "react";
+import { useFormStatus } from "react-dom";
+import { bump } from "../actions";
+const Ctx = React.createContext("ctx-default");
+function Submit() {
+  const { pending } = useFormStatus();
+  return <button id="submit" disabled={pending}>{pending ? "saving" : "save"}</button>;
+}
+export default function Panel({ count }: { count: number }) {
+  const [opt, addOpt] = React.useOptimistic(count, (s: number, d: number) => s + d);
+  const [named] = useOptimistic(count);
+  const [state, formAction] = React.useActionState(async (prev: number) => { await bump(); return prev + 1; }, 0);
+  const ctx = React.use(Ctx);
+  return (
+    <div>
+      <button id="go" onClick={() => React.startTransition(async () => { addOpt(1); await bump(); })}>go</button>
+      <p id="opt">opt {opt}</p>
+      <p id="named">named {named} {typeof use}</p>
+      <p id="ctx">{ctx}</p>
+      <form action={formAction}><Submit /></form>
+      <p id="state">state {state}</p>
+    </div>
+  );
+}`,
+		"src/pages/index.tsx": `import Panel from "../components/Panel";
+export default async function Home() {
+  const count = await Promise.resolve(5);
+  return <main><Panel count={count} /></main>;
+}`,
+	})
+	withPreact(t, root)
+	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	base, err := startKrateServer(t, root, b.Cfg)
+	if err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+	resp, err := http.Get(base + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	html, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	for _, want := range []string{"opt 5", "named 5 function", "ctx-default", "state 0", ">save<"} {
+		if !strings.Contains(string(html), want) {
+			t.Errorf("server HTML missing %q:\n%s", want, html)
+		}
+	}
+	script, err := filepath.Abs(filepath.Join("testdata", "client_react19_hooks.mjs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("node", script, base+"/", browser).CombinedOutput()
+	if err != nil {
+		if strings.Contains(string(out), "Executable doesn't exist") {
+			requireE2E(t, "%s browser is not installed: %s", browser, out)
+		}
+		t.Fatalf("browser script failed: %v\n%s", err, out)
+	}
+	var res struct {
+		Before, During, Settled, Status, State string
+		Errors                                 []string
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &res); err != nil {
+		t.Fatalf("parsing browser output: %v\n%s", err, out)
+	}
+	if res.Before != "opt 5" || res.During != "opt 6" || res.Settled != "opt 5" || res.Status != "saving" || res.State != "state 1" || len(res.Errors) > 0 {
+		t.Fatalf("unexpected browser result: %+v", res)
+	}
+}
