@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/evanw/esbuild/pkg/api"
 	"github.com/kratejs/krate/packages/compiler/ast"
@@ -842,14 +843,13 @@ func reactCompatPlugin(root string) api.Plugin {
 	return api.Plugin{
 		Name: ns,
 		Setup: func(pb api.PluginBuild) {
-			mod := ""
+			// esbuild runs OnResolve callbacks concurrently: resolve once.
+			modOnce := sync.OnceValue(func() string { return resolver.NodeModule(root, "@krate/runtime/react-compat") })
 			pb.OnResolve(api.OnResolveOptions{Filter: `^react$`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
 				if args.Kind == api.ResolveJSRequireCall {
 					return api.OnResolveResult{}, nil
 				}
-				if mod == "" {
-					mod = resolver.NodeModule(root, "@krate/runtime/react-compat")
-				}
+				mod := modOnce()
 				// Only modules that name one of the additions take them: the
 				// factory would otherwise ship, and look stateful, in every chunk.
 				if mod == "" || !mentions(args.Importer, reactExtraRe) {
@@ -858,6 +858,7 @@ func reactCompatPlugin(root string) api.Plugin {
 				return api.OnResolveResult{Path: "react", Namespace: ns}, nil
 			})
 			pb.OnLoad(api.OnLoadOptions{Filter: `.*`, Namespace: ns}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
+				mod := modOnce()
 				list := strings.Join(reactCompatExtraNames, ", ")
 				contents := "export * from \"preact/compat\";\nimport * as __cns from \"preact/compat\";\nimport __compat from \"preact/compat\";\n" +
 					"import { options as __opts } from \"preact\";\n" +
@@ -884,16 +885,14 @@ func routerHooksPlugin(root string) api.Plugin {
 	return api.Plugin{
 		Name: ns,
 		Setup: func(pb api.PluginBuild) {
-			var factory string
+			// esbuild runs OnResolve callbacks concurrently: resolve once.
+			factoryOnce := sync.OnceValue(func() string { return resolver.NodeModule(root, "@krate/runtime/navigation-react") })
 			pb.OnResolve(api.OnResolveOptions{Filter: `^@krate/runtime$`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
 				// The virtual module re-exports the real entry.
 				if args.Namespace == ns || args.Kind == api.ResolveJSRequireCall {
 					return api.OnResolveResult{}, nil
 				}
-				if factory == "" {
-					factory = resolver.NodeModule(root, "@krate/runtime/navigation-react")
-				}
-				if factory == "" {
+				if factoryOnce() == "" {
 					return api.OnResolveResult{}, nil
 				}
 				return api.OnResolveResult{Path: "@krate/runtime", Namespace: ns}, nil
@@ -902,7 +901,7 @@ func routerHooksPlugin(root string) api.Plugin {
 				names := []string{"usePathname", "useSearchParams", "useParams", "useRouter", "useSelectedLayoutSegment", "useSelectedLayoutSegments"}
 				contents := "export * from \"@krate/runtime\";\n" +
 					"import { useSyncExternalStore as __uses } from \"react\";\n" +
-					"import { createValueNavigationHooks as __mk } from " + strconv.Quote(filepath.ToSlash(factory)) + ";\n" +
+					"import { createValueNavigationHooks as __mk } from " + strconv.Quote(filepath.ToSlash(factoryOnce())) + ";\n" +
 					"const __h = __mk(__uses);\n"
 				for _, n := range names {
 					contents += "export const " + n + " = __h." + n + ";\n"
