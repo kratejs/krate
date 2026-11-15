@@ -412,6 +412,12 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- `usePathname()`, `useSearchParams()`, `useParams()` and `useRouter()` return plain values (a string,
+  a `URLSearchParams`, an object, a router) in every React-model client component: a `"use client"`
+  module under a server component, an island that uses an npm React package, and real-React islands.
+  They returned signal getters there, so `pathname.startsWith(...)` and `searchParams.get(...)` threw
+  `is not a function` and the active nav item and filters stayed broken. These components now re-render
+  on client navigation.
 - Server bundles (`krate start`, SSR and ISR pages) apply the project's tsconfig `paths`, including
   ones inherited through `extends`, so `@/components/x` imports no longer stay as bare package imports
   that fail with `ERR_MODULE_NOT_FOUND` and answer 500.
