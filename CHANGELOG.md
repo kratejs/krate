@@ -439,6 +439,10 @@ host code runs in the native process. Names and options may change between relea
   `fx-kinds -> template -> fx-stack -> fx-kinds` at another module than each island bundle did. Modules in an import cycle
   now stay in each island bundle, as before the shared chunks; `KR8017` names the cycle when such a module keeps state.
   Type-only imports were never part of it: esbuild drops them before it orders modules.
+- A dynamic `import()` in a module that runs only in an island no longer also gets a standalone chunk. The island
+  bundles already split it into their own chunks, which import the modules the island loaded (one instance of each).
+  But the page build wrote a second, self-contained copy with every dependency inlined (1.6 MB for a three.js
+  module) that nothing ever requested. A dynamic-import chunk is now written only when the page's own script loads it.
 - A module that mentions `Link` (or another compiler-provided tag) only in a comment, a string, an object key, a member
   name or a type is shared between Preact and real-React islands again. Only a free reference to the name, which the
   injected tag would resolve, keeps a module in each bundle.

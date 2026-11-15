@@ -1551,7 +1551,10 @@ bundled **once**, into a shared chunk both import, so there is one instance of
 it on the page: a cache, a promise that dedupes a fetch, an event emitter or a
 store made with `zustand/vanilla` holds one value for both kinds of island. The
 chunk exports only what the islands import from it, so a large library both
-reach is still tree shaken.
+reach is still tree shaken. A module an island loads with `import()` is split into the
+island bundle too and imports the modules the island already loaded, so it
+shares their instances (and the shared chunk when both kinds of island load
+it).
 
 A module that imports React, or a library built on it (a zustand `create`
 store, a module that calls `createContext`), needs a copy for each kind of

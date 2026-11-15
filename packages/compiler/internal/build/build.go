@@ -3030,7 +3030,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 		return nil, "", fmt.Errorf("writing assets for %s: %w", page, err)
 	}
 	b.registerWorkers(bundle.WorkerFiles, bundle.WorkerEsm)
-	b.registerDynamicChunks(bundle.DynImportFiles)
+	b.registerDynamicChunks(referencedDynamicChunks(bundle.DynImportFiles, hydrationJS))
 
 	printResult(outName, jsFile, pageBase)
 
@@ -3130,7 +3130,7 @@ func (b *Builder) tryDiskReplay(page string) (*PageResult, string, bool) {
 		}
 	}
 	b.registerWorkers(e.WorkerFiles, trueSet(e.WorkerEsm))
-	b.registerDynamicChunks(e.DynImports)
+	b.registerDynamicChunks(referencedDynamicChunks(e.DynImports, string(e.JSBytes)))
 	b.setIslandEntries(page, e.IslandEntries)
 	b.recordDeps(page, e.Deps)
 	c.markHit()
@@ -4611,6 +4611,24 @@ func sourceMapMode(enabled bool) api.SourceMap {
 		return api.SourceMapLinked
 	}
 	return api.SourceMapNone
+}
+
+// referencedDynamicChunks keeps the dynamic-import chunks the page script js
+// loads. The page bundler also sees an import() inside a module that runs only
+// in an island; the island bundles code-split that import() themselves, so a
+// standalone chunk for it (with its own copy of every dependency and of their
+// module state) would be written but never requested.
+func referencedDynamicChunks(files map[string]string, js string) map[string]string {
+	if len(files) == 0 {
+		return files
+	}
+	out := make(map[string]string, len(files))
+	for src, url := range files {
+		if js != "" && strings.Contains(js, url[strings.LastIndex(url, "/")+1:]) {
+			out[src] = url
+		}
+	}
+	return out
 }
 
 // registerDynamicChunks collects dynamic-import chunk registrations from a page
