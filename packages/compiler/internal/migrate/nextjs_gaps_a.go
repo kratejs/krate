@@ -330,6 +330,7 @@ func planMoveAside(abs string, trees []string, rep *Report) {
 			continue
 		}
 		rep.MoveAside = append(rep.MoveAside, tree)
+		warnOutsideReferences(abs, tree, rep)
 		var left []string
 		_ = filepath.WalkDir(filepath.Join(abs, filepath.FromSlash(tree)), func(p string, d fs.DirEntry, err error) error {
 			if err != nil {

@@ -2,6 +2,7 @@ package migrate
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -248,5 +249,27 @@ func TestMigrateKeepsNextURLFormAndTailwind(t *testing.T) {
 	}
 	if hasManual(rep, "next.config.ts", "trailingSlash") {
 		t.Errorf("trailingSlash is translated now: %+v", rep.Manual)
+	}
+}
+
+func TestMovedAppFilesReferencedByWorkspaceSiblingAreReported(t *testing.T) {
+	ws := t.TempDir()
+	writeNextFile(t, ws, "pnpm-workspace.yaml", "packages:\n  - packages/*\n")
+	writeNextFile(t, ws, "packages/web/package.json", `{"dependencies":{"next":"16.0.0"}}`)
+	writeNextFile(t, ws, "packages/web/src/app/page.tsx", `export default function P() { return <main/>; }`)
+	writeNextFile(t, ws, "packages/web/src/app/tokens.css", ":root { --a: 1; }\n")
+	writeNextFile(t, ws, "packages/static-site/src/styles.css", "body { margin: 0; }\n@import '../../web/src/app/tokens.css';\n")
+	rep, err := ScanNext(filepath.Join(ws, "packages", "web"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, m := range rep.Manual {
+		if strings.Contains(m.Reason, "packages/static-site/src/styles.css:2") && strings.Contains(m.Reason, "src/migrated/app/tokens.css") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("sibling stylesheet reference not reported: %+v", rep.Manual)
 	}
 }
