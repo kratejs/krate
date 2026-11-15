@@ -232,7 +232,7 @@ func realIslandMountBlock(e irtree.ExternalComponent) string {
 // realReactOptions returns the esbuild options shared by the validation build
 // and the site-wide build of real-React islands: react and react-dom resolve to
 // the project's copy (never the Preact alias), and only one copy is bundled.
-func (b *Builder) realReactOptions(sink *islandCSSSink, guard *unavailableGuard) api.BuildOptions {
+func (b *Builder) realReactOptions(sink *islandCSSSink, guard *unavailableGuard) (api.BuildOptions, error) {
 	minify := b.shouldMinifyJS()
 	opts := api.BuildOptions{
 		Bundle:            true,
@@ -260,7 +260,8 @@ func (b *Builder) realReactOptions(sink *islandCSSSink, guard *unavailableGuard)
 	if len(alias) > 0 {
 		opts.Alias = alias
 	}
-	return opts
+	err := withContextKeys(&opts, b.Root, filepath.Join(b.Cfg.OutDir, ".krate"))
+	return opts, err
 }
 
 // realReactMissing is the message for a project without react or react-dom.
@@ -276,7 +277,10 @@ func (b *Builder) realReactMissing(joined string) *bundleError {
 // The output is discarded: the shipped chunks come from writeRealIslandBundles.
 func (b *Builder) buildRealIslandBundle(src, resolveDir string, sink *islandCSSSink) error {
 	guard := b.newUnavailableGuard()
-	opts := b.realReactOptions(sink, guard)
+	opts, err := b.realReactOptions(sink, guard)
+	if err != nil {
+		return err
+	}
 	opts.Stdin = &api.StdinOptions{Contents: src, ResolveDir: resolveDir, Sourcefile: "krate-island.tsx", Loader: api.LoaderTSX}
 	result := esbuildBuild(opts)
 	result.Errors = append(result.Errors, guard.errors(result.OutputFiles)...)
@@ -319,7 +323,10 @@ func (b *Builder) writeRealIslandBundles(entries []islandEntry, chunksDir string
 	}
 	sink := &islandCSSSink{root: b.Root}
 	guard := b.newUnavailableGuard()
-	opts := b.realReactOptions(sink, guard)
+	opts, err := b.realReactOptions(sink, guard)
+	if err != nil {
+		return err
+	}
 	opts.EntryPointsAdvanced = points
 	opts.Outdir = chunksDir
 	opts.EntryNames = "[name]"
@@ -424,7 +431,7 @@ export async function mount(el) {
   }));
   var props = __krateRevive(raw, React.createElement, __krateCallAction, function (m, e) { return loaded[m + "#" + e]; });
   var root = createRoot(el);
-  root.render(React.createElement(C, props));
+  root.render(__krateInScope(el, React.createElement(C, props)));
   (globalThis.__krate_island_cleanups ||= []).push(function () { root.unmount(); });
   el.setAttribute("data-krate-island-hydrated", "");
 }
@@ -434,7 +441,7 @@ export async function mount(el) {
 // site-wide real-React bundle and returns its URL.
 func (b *Builder) registerRealBoundary(cb ClientBoundary) string {
 	src := "import * as React from \"react\";\nimport { createRoot } from \"react-dom/client\";\n" +
-		cb.entrySource() + clientReviveJS + clientActionCallJS + realBoundaryChunkJS
+		cb.entrySource() + clientReviveJS + clientActionCallJS + reactSlotJS + realBoundaryChunkJS
 	dir := cb.resolveDir()
 	name := b.islandEntryName(src, dir)
 	b.setIslandEntries("realboundary:"+cb.ModuleID, []islandEntry{{Name: name, Source: src, ResolveDir: dir, Real: true}})

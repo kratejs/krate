@@ -1120,6 +1120,45 @@ export const Image = (p) => h("img", p);
 	}
 }
 
+// preactEffectOrderJS makes the browser's Preact run passive effects in
+// React's order. React flushes the useEffect callbacks of earlier commits
+// before it renders again; Preact runs them after the next frame, and early
+// only for a component that re-renders itself. A re-render that a layout
+// effect starts (in the same pass) then runs a child's effects before a
+// parent's from the commit before: Radix's Tooltip content subscribes to
+// "tooltip.open" before the Tooltip announces its own opening, and closes at
+// once. After each commit, the next component render first flushes the queue
+// (Preact hands it to options.requestAnimationFrame). __c and __r are Preact's
+// commit and render hooks, which preact/hooks itself uses.
+const preactEffectOrderJS = `
+import { options as __o } from "preact";
+var __pending = null, __committed = false;
+var __raf = __o.requestAnimationFrame, __commit = __o.__c, __render = __o.__r;
+function __afterFrame(cb) {
+  if (__raf) return __raf(cb);
+  var t, r;
+  var done = function () { clearTimeout(t); if (r) cancelAnimationFrame(r); setTimeout(cb); };
+  t = setTimeout(done, 35);
+  if (typeof requestAnimationFrame == "function") r = requestAnimationFrame(done);
+}
+__o.requestAnimationFrame = function (flush) {
+  __pending = flush;
+  __afterFrame(function () { if (__pending === flush) __pending = null; flush(); });
+};
+__o.__c = function (vnode, queue) {
+  if (__commit) __commit(vnode, queue);
+  __committed = true;
+};
+__o.__r = function (vnode) {
+  if (__committed) {
+    __committed = false;
+    var flush = __pending;
+    __pending = null;
+    if (flush) flush();
+  }
+  if (__render) __render(vnode);
+};`
+
 // ensurePreactShared builds the shared Preact chunks once per build and records
 // the import map. Each specifier is a standalone ESM module; cross-specifier
 // imports stay bare and are resolved by the import map.
@@ -1161,6 +1200,9 @@ func (b *Builder) ensurePreactShared() (map[string]string, error) {
 			})
 		}
 		contents := fmt.Sprintf("export * from %q;", s.name)
+		if s.name == "preact/hooks" {
+			contents += preactEffectOrderJS
+		}
 		if s.name == "preact/compat" {
 			// preact/compat re-exports preact/hooks, which is externalized here.
 			// esbuild cannot enumerate an external module's exports, so the

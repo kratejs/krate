@@ -210,7 +210,7 @@ func (b *Builder) writeIslandBundles() error {
 		plugins = append(plugins, clientOnlyMarkersPlugin(false), actionServerBundlePlugin(b.importResolver(), b.actionModules(), b.Cfg.BaseURLPath()))
 		break
 	}
-	result := esbuildBuild(api.BuildOptions{
+	opts := api.BuildOptions{
 		AbsWorkingDir:       b.Root,
 		EntryPointsAdvanced: points,
 		Outdir:              chunksDir,
@@ -233,7 +233,11 @@ func (b *Builder) writeIslandBundles() error {
 		Inject:              injects,
 		Plugins:             plugins,
 		Define:              b.clientEnvDefines(),
-	})
+	}
+	if err := withContextKeys(&opts, b.Root, filepath.Join(b.Cfg.OutDir, ".krate")); err != nil {
+		return err
+	}
+	result := esbuildBuild(opts)
 	outputs := result.OutputFiles
 	if len(result.Errors) == 0 {
 		names := make([]string, len(points))

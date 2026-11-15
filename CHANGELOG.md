@@ -422,6 +422,15 @@ host code runs in the native process. Names and options may change between relea
 - `krate migrate nextjs` reports a manual item for every file elsewhere in the workspace (a sibling
   package's stylesheet or module) that points into the `src/app` tree it moves aside, naming the file, line
   and new path, instead of silently breaking that package.
+- Client components inside the server children of a `"use client"` provider now see its context, as in Next.js: a root layout
+  that renders `<Providers>{children}</Providers>` with Radix's `TooltipProvider` no longer makes a page's `Tooltip` throw
+  `` `Tooltip` must be used within `TooltipProvider` ``. Nested Preact islands mount under the provider's instances, real-React islands
+  get their own copy of each context with the provider's value (and its updates), and the server renders nested components inside
+  the context instead of failing the request.
+- Passive effects in Preact islands run in React's order: the effects of a commit run before the next render starts, also when a
+  layout effect schedules it. Radix `Tooltip` (1.2 and later) in a Preact island no longer closes the moment it opens.
+- A real-React client component (one that reaches a reconciler library) that receives server-rendered children no longer fails
+  with React error #62: the children's wrapper element now gets its `display: contents` style as an object.
 - The HTML minifier keeps white space inside a `<pre>` after a stray end tag the parser ignores (`<p>a<pre>b</p>  `):
   `<pre>` closes the open `<p>`, so the `</p>` closes nothing and the text after it is still preformatted.
 - The build plugins that give client code React 19 hooks and value-returning router hooks no longer race when

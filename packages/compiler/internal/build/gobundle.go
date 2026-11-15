@@ -268,7 +268,7 @@ func parseProgram(path, src string) *ast.Program {
 // loaderForExt maps a JS/TS file extension to an esbuild loader.
 func loaderForExt(path string) api.Loader {
 	switch filepath.Ext(path) {
-	case ".ts":
+	case ".ts", ".mts", ".cts":
 		return api.LoaderTS
 	case ".tsx":
 		return api.LoaderTSX
