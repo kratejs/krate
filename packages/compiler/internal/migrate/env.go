@@ -26,20 +26,10 @@ func krateEnvName(key string) string {
 // readPublicEnv lists which .env files define each NEXT_PUBLIC_* variable.
 // Only names are kept: values are never read into the plan, because the files
 // belong to the developer's machine and may hold development URLs or keys.
-func readPublicEnv(root, envDir string) map[string][]string {
+func readPublicEnv(root string) map[string][]string {
 	out := map[string][]string{}
-	dirs := []string{""}
-	if envDir != "" {
-		dirs = append(dirs, envDir)
-	}
-	var names []string
-	for _, dir := range dirs {
-		for _, name := range []string{".env", ".env.local", ".env.development", ".env.development.local", ".env.production", ".env.production.local"} {
-			names = append(names, filepath.ToSlash(filepath.Join(dir, name)))
-		}
-	}
-	for _, name := range names {
-		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(name)))
+	for _, name := range []string{".env", ".env.local", ".env.development", ".env.development.local", ".env.production", ".env.production.local"} {
+		data, err := os.ReadFile(filepath.Join(root, name))
 		if err != nil {
 			continue
 		}
@@ -68,7 +58,6 @@ func readPublicEnv(root, envDir string) map[string][]string {
 // into every bundle; their reads get the same treatment. No value is ever
 // written into the migrated source.
 func rewritePublicEnv(rep *Report, defined map[string][]string, cfgEnv map[string]string) {
-	outside := false
 	used := map[string]bool{}
 	for i := range rep.Files {
 		f := &rep.Files[i]
@@ -123,9 +112,6 @@ func rewritePublicEnv(rep *Report, defined map[string][]string, cfgEnv map[strin
 	for _, k := range keys {
 		part := k + " -> " + krateEnvName(k)
 		if files := defined[k]; len(files) > 0 {
-			for _, f := range files {
-				outside = outside || strings.HasPrefix(f, "../")
-			}
 			part += " (defined in " + strings.Join(files, ", ") + ")"
 		} else if _, ok := cfgEnv[k]; ok {
 			part += " (set in next.config env)"
@@ -134,13 +120,9 @@ func rewritePublicEnv(rep *Report, defined map[string][]string, cfgEnv map[strin
 		}
 		parts = append(parts, part)
 	}
-	hint := "Krate inlines only KRATE_PUBLIC_* at build time (process.env.KRATE_PUBLIC_NAME). Rename them in your .env files or set them in the build environment; values were not written into source"
-	if outside {
-		hint += ". Files outside the project (envDir) are never edited: they may be shared with other apps that still read NEXT_PUBLIC_*, so add the KRATE_PUBLIC_* names next to them instead of renaming"
-	}
 	rep.Manual = append(rep.Manual, ManualItem{
 		Source: "environment",
 		Reason: "public environment variables are not copied; rename or set them for the Krate build: " + strings.Join(parts, "; "),
-		Hint:   hint,
+		Hint:   "Krate inlines only KRATE_PUBLIC_* at build time (process.env.KRATE_PUBLIC_NAME). Rename them in your .env files or set them in the build environment; values were not written into source",
 	})
 }

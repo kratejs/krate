@@ -272,7 +272,7 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 	rewriteNextModuleImports(rep, abs)
 	migrateNextAuth(rep, abs)
 	warnClientBoundaryRuntime(rep)
-	rewritePublicEnv(rep, readPublicEnv(abs, nextCfg.EnvDir), nextCfg.Env)
+	rewritePublicEnv(rep, readPublicEnv(abs), nextCfg.Env)
 	rewriteMetadataTypes(rep)
 	rewriteTestImports(rep)
 	flagInlineUseServer(rep)
