@@ -11,11 +11,11 @@ function hashToken(ctx: RequestContext, token: string): string {
   return sha256Hex(`${token}${ctx.secret}`);
 }
 
-export async function startEmail(ctx: RequestContext, provider: EmailConfig): Promise<Response> {
+export async function startEmail(ctx: RequestContext, provider: EmailConfig, direct?: Record<string, string>): Promise<Response> {
   const adapter = ctx.config.adapter;
   if (!adapter?.createVerificationToken) throw new AuthError("Configuration", "the email provider needs an adapter with verification tokens", 500);
-  const body = await parseBody(ctx.request);
-  assertCsrf(ctx, body.csrfToken);
+  const body = direct ?? (await parseBody(ctx.request));
+  if (!direct) assertCsrf(ctx, body.csrfToken);
   let identifier: string;
   try {
     identifier = (provider.normalizeIdentifier ?? ((v: string) => v.trim().toLowerCase()))(body.email ?? "");

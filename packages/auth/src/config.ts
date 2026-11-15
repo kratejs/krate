@@ -95,7 +95,8 @@ export function resolveConfig(options: AuthOptions = {}, declarative: Declarativ
   const debug = options.debug ?? declarative.debug ?? readEnv("AUTH_DEBUG") === "true";
   const logger = makeLogger(debug, options.logger);
 
-  const programmatic = options.providers ?? [];
+  // Auth.js lets an app list a provider factory without calling it.
+  const programmatic = (options.providers ?? []).map((p) => (typeof p === "function" ? p() : p));
   const taken = new Set(programmatic.map((p) => p.id));
   const fromConfig: Provider[] = [];
   for (const decl of declarative.providers ?? []) {

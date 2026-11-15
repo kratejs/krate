@@ -1706,7 +1706,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
       );
       const scope: RevalidateScope = { kind: "api", paths: [], tags: [] };
       const work = async () => {
-        const res = await revalidateStore.run(scope, async () => toResponse(await fn(request, { params: apiRouteParams(file, rs.path) })));
+        const res = await revalidateStore.run(scope, () => runRoute(request, async () => toResponse(await fn(request, { params: apiRouteParams(file, rs.path) }))));
         await flushRevalidate(scope);
         return res;
       };
@@ -1830,12 +1830,46 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     return { actionId: id, url: urlPath, method: "POST", headers, cookies, setCookies };
   }
 
+  // Runs an API route inside the action store so headers(), cookies() and
+  // redirect() work in it like in a server action: cookies it sets are added to
+  // the response and a redirect() signal becomes a 307.
+  async function runRoute(request: Request, run: () => Promise<Response>): Promise<Response> {
+    const ctx = makeActionContext(request.headers, "", new URL(request.url).pathname);
+    ctx.method = request.method;
+    let out: Response;
+    try {
+      out = await actionStore.run(ctx, run);
+    } catch (e: any) {
+      if (!e || typeof e.__krateRedirect !== "string") throw e;
+      out = new Response(null, { status: 307, headers: { location: e.__krateRedirect, "cache-control": "no-store" } });
+    }
+    if (ctx.setCookies.length > 0) {
+      const h = new Headers(out.headers);
+      for (const c of ctx.setCookies) h.append("set-cookie", c);
+      out = new Response(out.body, { status: out.status, statusText: out.statusText, headers: h });
+    }
+    return out;
+  }
+
   function safeActionRedirect(value: unknown): string {
     if (typeof value !== "string") return "";
     const to = value.trim();
     if (!to || to.charAt(0) !== "/" || to.charAt(1) === "/" || to.indexOf("\\") !== -1) return "";
     if (/[\u0000-\u001f\u007f]/.test(to)) return "";
     return to;
+  }
+
+  // An absolute http(s) URL from a redirect() signal that marked itself external
+  // (the OAuth redirect of @krate/auth signIn()). A redirect returned in an
+  // action's result is never external.
+  function safeExternalRedirect(value: unknown): string {
+    if (typeof value !== "string" || /[\u0000-\u001f\u007f\\]/.test(value)) return "";
+    try {
+      const u = new URL(value.trim());
+      return u.protocol === "https:" || u.protocol === "http:" ? u.href : "";
+    } catch {
+      return "";
+    }
   }
 
   function sanitizeActionReturn(value: string, rs: ReqState): string {
@@ -2007,13 +2041,16 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     const scope: RevalidateScope = { kind: "action", paths: [], tags: [] };
     let result: any;
     let redirect = "";
+    let external = false;
     let failure: any = null;
     let fallback: 401 | 403 | 404 | 0 = 0;
     try {
       result = await revalidateStore.run(scope, () => actionStore.run(ctx, () => fn(...args)));
     } catch (e: any) {
-      if (e && typeof e.__krateRedirect === "string") redirect = e.__krateRedirect;
-      else if ((fallback = httpFallbackStatus(e))) failure = null;
+      if (e && typeof e.__krateRedirect === "string") {
+        redirect = e.__krateRedirect;
+        external = e.__krateRedirectExternal === true;
+      } else if ((fallback = httpFallbackStatus(e))) failure = null;
       else failure = e === undefined ? new Error("undefined") : e;
     }
     let revalidation: { paths: unknown[]; tags: string[] } | null = null;
@@ -2023,12 +2060,13 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
       if (!failure) failure = e;
     }
     if (!redirect && result && typeof result === "object" && typeof result.redirect === "string") redirect = result.redirect;
-    redirect = safeActionRedirect(redirect);
+    redirect = external ? safeExternalRedirect(redirect) : safeActionRedirect(redirect);
     if (fallback && !failure) return withHeaders(rs, actionFallback(rs, fallback, fetchMode, ctx.setCookies, reqHeaders.get("x-krate-return") || ""));
     let body = "";
     if (!failure && fetchMode) {
       const envelope: Record<string, unknown> = { ok: true, result: result === undefined ? null : result };
       if (redirect) envelope.redirect = redirect;
+      if (redirect && external) envelope.external = true;
       if (revalidation) {
         envelope.revalidated = true;
         envelope.revalidation = revalidation;

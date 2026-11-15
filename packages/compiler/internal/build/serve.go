@@ -328,7 +328,7 @@ const server = http.createServer(async (req, res) => {
         res.once('finish', () => { krateRunAfter(revalidateScope); });
         // revalidatePath/revalidateTag calls are applied before responding.
         const response = await krateWithBudget(krateRouteBudgetMs(API_DIR, targetFile), ac, async () => {
-          const out = await REVALIDATE_STORE.run(revalidateScope, () => methodHandler(request, { params: routeParamsValue }));
+          const out = await REVALIDATE_STORE.run(revalidateScope, () => krateRunRoute(request, () => methodHandler(request, { params: routeParamsValue })));
           await flushRevalidate(revalidateScope);
           return out;
         });
@@ -722,7 +722,7 @@ Bun.serve({
       const request = (fn.length >= 2 && !namedHandler) ? krateAttach(req) : krateAttach(new Request(req, { signal: AbortSignal.any([req.signal, ac.signal]) }));
       // revalidatePath/revalidateTag calls are applied before responding.
       const out = await krateWithBudget(krateRouteBudgetMs(API_DIR, file), ac, async () => {
-        const r = await REVALIDATE_STORE.run(revalidateScope, async () => ((fn.length >= 2 && !namedHandler) ? legacyInvoke(fn, req, url) : toResponse(await fn(request, { params: routeParamsValue }))));
+        const r = await REVALIDATE_STORE.run(revalidateScope, async () => ((fn.length >= 2 && !namedHandler) ? legacyInvoke(fn, req, url) : krateRunRoute(request, async () => toResponse(await fn(request, { params: routeParamsValue })))));
         await flushRevalidate(revalidateScope);
         return r;
       });

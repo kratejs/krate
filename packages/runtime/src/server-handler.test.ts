@@ -29,8 +29,8 @@ function data(extra: Partial<KrateServerData> = {}): KrateServerData {
     hashedAssets: [],
     html404: "<h1>custom 404</h1>",
     html500: "",
-    apiRoutes: ["hello", "items/[id]"],
-    actions: [{ id: "act1", export: "add", file: "acts" }],
+    apiRoutes: ["hello", "items/[id]", "scope"],
+    actions: [{ id: "act1", export: "add", file: "acts" }, { id: "act2", export: "oauth", file: "acts" }],
     hasMiddleware: true,
     ...extra,
   };
@@ -42,8 +42,22 @@ const modules = {
   api: {
     hello: { GET: () => Response.json({ ok: true }), POST: async (r: Request) => new Response(await r.text(), { status: 201 }) },
     "items/[id]": { GET: (_r: Request, ctx: any) => Response.json(ctx.params) },
+    scope: {
+      GET: () => {
+        const store = (globalThis as Record<symbol, any>)[Symbol.for("krate.action.store")].getStore();
+        store.cookies.set("flow", "1", { maxAge: 900 });
+        throw Object.assign(new Error("r"), { __krateRedirect: "https://provider.example/auth", __krateRedirectExternal: true });
+      },
+    },
   },
-  actions: { acts: { add: (a: number, b: number) => ({ sum: a + b }) } },
+  actions: {
+    acts: {
+      add: (a: number, b: number) => ({ sum: a + b }),
+      oauth: () => {
+        throw Object.assign(new Error("r"), { __krateRedirect: "https://provider.example/auth", __krateRedirectExternal: true });
+      },
+    },
+  },
   middleware: {
     middleware: (req: Request) => {
       if (new URL(req.url).pathname === "/blocked") return new Response("no", { status: 403 });
@@ -73,6 +87,16 @@ describe("createKrateHandler", () => {
     expect(r.status).toBe(405);
     expect(r.headers.get("allow")).toBe("GET, POST, HEAD, OPTIONS");
     expect((await get("/api/hello", { method: "POST", body: "abc" })).status).toBe(201);
+  });
+
+  it("route handlers get the action scope, and external redirect signals are followed", async () => {
+    const r = await get("/api/scope");
+    expect(r.status).toBe(307);
+    expect(r.headers.get("location")).toBe("https://provider.example/auth");
+    expect(r.headers.get("set-cookie")).toContain("flow=1");
+    const headers = { "content-type": "application/json", "x-krate-action": "fetch", "sec-fetch-site": "same-origin" };
+    const act = await (await get("/__krate/action/act2", { method: "POST", headers, body: '{"args":[]}' })).json();
+    expect(act).toMatchObject({ ok: true, redirect: "https://provider.example/auth", external: true });
   });
 
   it("runs server actions and rejects cross-site posts", async () => {
