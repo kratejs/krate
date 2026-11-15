@@ -50,7 +50,7 @@ func mergeKrateConfig(root string, next nextConfigData) (PlannedFile, []string, 
 	}
 	var additions []string
 	var notes []string
-	for _, key := range []string{"basePath", "redirects", "rewrites", "headers", "images", "site", "head", "serverExternalPackages", "outputFileTracingIncludes", "ssr"} {
+	for _, key := range []string{"basePath", "redirects", "rewrites", "headers", "images", "site", "head", "serverExternalPackages", "outputFileTracingIncludes", "ssr", "trailingSlash", "tailwind"} {
 		value, ok := values[key]
 		if !ok {
 			continue
@@ -86,7 +86,10 @@ func mergeKrateConfig(root string, next nextConfigData) (PlannedFile, []string, 
 }
 
 func nextConfigValues(next nextConfigData) map[string]any {
-	values := map[string]any{}
+	values := map[string]any{"trailingSlash": trailingSlashValue(next)}
+	if next.Tailwind {
+		values["tailwind"] = map[string]any{"enabled": true}
+	}
 	if next.BasePath != "" {
 		values["basePath"] = next.BasePath
 	}
@@ -126,7 +129,7 @@ func mergeJSONConfig(data []byte, values map[string]any) ([]byte, []string, erro
 		return nil, nil, err
 	}
 	var notes []string
-	for _, key := range []string{"basePath", "redirects", "rewrites", "headers", "images", "site", "head", "serverExternalPackages", "outputFileTracingIncludes", "ssr"} {
+	for _, key := range []string{"basePath", "redirects", "rewrites", "headers", "images", "site", "head", "serverExternalPackages", "outputFileTracingIncludes", "ssr", "trailingSlash", "tailwind"} {
 		value, ok := values[key]
 		if !ok {
 			continue

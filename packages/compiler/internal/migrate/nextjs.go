@@ -203,6 +203,7 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 
 	rep := &Report{Root: abs, Framework: nextFramework}
 	var nextCfg nextConfigData
+	nextCfg.Tailwind = usesTailwindPostCSS(abs)
 	nextConfigStatic := false
 	if nextConfig != "" {
 		rep.Detected = append(rep.Detected, filepath.Base(nextConfig))
@@ -211,6 +212,7 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 			rep.Warnings = append(rep.Warnings, filepath.Base(nextConfig)+": "+w)
 		}
 		if ok {
+			data.Tailwind = nextCfg.Tailwind
 			nextCfg = data
 			nextConfigStatic = true
 			rep.Warnings = append(rep.Warnings, "translated static next.config redirects/rewrites/headers/basePath/images; every key or rule left out is listed separately")

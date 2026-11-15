@@ -443,6 +443,21 @@ host code runs in the native process. Names and options may change between relea
 - An `error.tsx` under an async layout is prerendered without that layout, as every error page is, instead of
   being rendered per request with no `error` prop (`Cannot read properties of undefined (reading 'digest')`). The
   error page also receives `retry` next to `reset`.
+- `krate migrate nextjs` converts `next/script`: `afterInteractive` becomes a deferred `<Script>`, `lazyOnload` an
+  async one, `beforeInteractive` a `<script>` in `<Head>` (inline children, `id`, `src` and `data-*` kept);
+  `strategy="worker"`, a computed strategy and `onLoad`/`onReady`/`onError` handlers become manual items, and Next's
+  client `script.js` no longer reaches the bundle.
+- `krate migrate nextjs` also rewrites `after` (and `unstable_after`) from `next/server` in page, layout and module
+  files, whether imported alone, combined with other `next/server` names or aliased, to `@krate/runtime/server`.
+- `krate migrate nextjs` converts `dynamic<Props>(() => import(...), { ssr: false, loading })`, including the type
+  argument: the result is a lazy component behind a client-mount gate, so the server markup is the `loading`
+  fallback and the browser mounts the component from its own chunk (no more `dynamic is not defined`).
+- The middleware matcher that `krate migrate nextjs` generates only rewrites path-to-regexp parameters (`/:name`,
+  `(regex)`, `*`, `+`, `?`) and leaves regex groups such as `(?!...)` and `(?:png|jpe?g)` alone, so Next's default
+  matcher no longer throws `Invalid regular expression` (every request answered 503).
+- `krate migrate nextjs` writes `trailingSlash: "never"` (Next's URL form; `"always"` when `next.config` sets
+  `trailingSlash: true`) and `tailwind: { enabled: true }` when `postcss.config` runs Tailwind. KR7140 now carries the
+  file, line and column of the Tailwind directive instead of `0:0`.
 - A client component or real-React island in a project under a symlinked path (macOS `/var` is
   `/private/var`) gets action references for its `"use server"` imports instead of their server code.
 - Real-React islands (react-three-fiber and other reconciler libraries) no longer bundle server-only code. A
