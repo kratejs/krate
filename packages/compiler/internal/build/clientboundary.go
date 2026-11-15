@@ -87,7 +87,11 @@ func (cb ClientBoundary) resolveDir() string {
 // from its chunk. It is a classic script in a chunk file (not inline) so the
 // SPA router loads it when a soft navigation arrives on a page with islands,
 // and it is idempotent: it only touches islands it has not mounted.
-const clientIslandLoaderJS = `(function(){document.querySelectorAll("krate-island[data-src]:not([data-krate-island-mounted])").forEach(function(el){el.setAttribute("data-krate-island-mounted","");import(el.getAttribute("data-src")).then(function(m){return m.mount(el)}).catch(function(e){console.error("krate client component:",e);el.setAttribute("data-krate-island-error","")})})})();`
+//
+// An island inside another island's server children mounts after it, so it
+// finds the context the outer island provides there (see islandcontext.go).
+// The chunks still load in parallel.
+const clientIslandLoaderJS = `(function(){document.querySelectorAll("krate-island[data-src]:not([data-krate-island-mounted])").forEach(function(el){el.setAttribute("data-krate-island-mounted","");var up=el.parentElement&&el.parentElement.closest("krate-island[data-krate-island-mounted]");var ready=up&&up.__krateMount?up.__krateMount.catch(function(){}):null;el.__krateMount=Promise.all([import(el.getAttribute("data-src")),ready]).then(function(r){return r[0].mount(el)}).catch(function(e){console.error("krate client component:",e);el.setAttribute("data-krate-island-error","")})})})();`
 
 // islandLoaderHTML writes the island loader chunk (once per content) and
 // returns the script tag that references it. The tag is deferred so a hard
@@ -105,13 +109,14 @@ func (b *Builder) islandLoaderHTML() (string, error) {
 
 // clientReviveJS turns serialized island props back into component props:
 // server-rendered children become a display:contents element holding the
-// HTML, and server action references become callable functions.
+// HTML (made by the chunk's own __krateSlot), and server action references
+// become callable functions.
 const clientReviveJS = `
 function __krateTree(n, h, call, comp) {
   if (n === null || n === undefined || typeof n === "boolean") return null;
   if (typeof n === "string" || typeof n === "number") return n;
   if (Array.isArray(n)) return n.map(function (x) { return __krateTree(x, h, call, comp); });
-  if (n.$ === "h") return h("krate-children", { style: "display:contents", dangerouslySetInnerHTML: { __html: n.h } });
+  if (n.$ === "h") return __krateSlot(h, n.h);
   var kids = (n.c || []).map(function (x) { return __krateTree(x, h, call, comp); });
   var props = __krateRevive(n.p || {}, h, call, comp);
   if (n.$ === "e") return h.apply(null, [n.t, props].concat(kids));
@@ -151,11 +156,11 @@ function __krateRevive(v, h, call, comp) {
       fn.actionUrl = url;
       return fn;
     }
-    if (typeof v.__krateSlotHTML === "string") return h("krate-children", { style: "display:contents", dangerouslySetInnerHTML: { __html: v.__krateSlotHTML } });
+    if (typeof v.__krateSlotHTML === "string") return __krateSlot(h, v.__krateSlotHTML);
     if (v.__krateSlotTree) { var slot = __krateTree(v.__krateSlotTree, h, call, comp); return slot.length === 1 ? slot[0] : slot; }
     var out = {};
     for (var k in v) {
-      if (k === "__krateChildren") out.children = h("krate-children", { style: "display:contents", dangerouslySetInnerHTML: { __html: v[k] } });
+      if (k === "__krateChildren") out.children = __krateSlot(h, v[k]);
       else if (k === "__krateTree") out.children = __krateTree(v[k], h, call, comp);
       else out[k] = __krateRevive(v[k], h, call, comp);
     }
@@ -757,7 +762,7 @@ func (b *Builder) clientChunkFor(key, resolveDir, entry string) (string, bool, e
 		return "", false, err
 	}
 	src := "import { h, hydrate } from \"preact\";\n" + entry +
-		clientReviveJS + clientActionCallJS + `
+		clientReviveJS + clientActionCallJS + preactSlotJS + `
 function __resolve(name) {
   return name.split(".").reduce(function (o, k) { return o == null ? o : o[k]; }, __m);
 }
@@ -773,12 +778,12 @@ export async function mount(el) {
     return import(r.s).then(function (m) { loaded[r.m + "#" + r.e] = m.component(r.e); });
   }));
   var props = __krateRevive(raw, h, __krateCallAction, function (m, e) { return loaded[m + "#" + e]; });
-  hydrate(h(C, props), el);
+  hydrate(__krateInScope(el, h(C, props)), el);
   el.setAttribute("data-krate-island-hydrated", "");
 }
 `
 	guard := b.newUnavailableGuard()
-	result := esbuildBuild(api.BuildOptions{
+	opts := api.BuildOptions{
 		Stdin: &api.StdinOptions{
 			Contents:   src,
 			ResolveDir: resolveDir,
@@ -803,7 +808,11 @@ export async function mount(el) {
 		Metafile:          true,
 		Plugins:           []api.Plugin{purePrunePlugin(b.Root), guard.plugin(), clientOnlyMarkersPlugin(true), actionServerBundlePlugin(b.importResolver(), b.actionModules(), b.Cfg.BaseURLPath()), reactDOMHintsPlugin(b.Root), reactCompatPlugin(b.Root), routerHooksPlugin(b.Root)},
 		LogLevel:          api.LogLevelSilent,
-	})
+	}
+	if err := withContextKeys(&opts, b.Root, filepath.Join(b.Cfg.OutDir, ".krate")); err != nil {
+		return "", false, err
+	}
+	result := esbuildBuild(opts)
 	result.Errors = append(result.Errors, guard.errors(result.OutputFiles)...)
 	if len(result.Errors) > 0 || len(result.OutputFiles) == 0 {
 		return "", false, clientBuildError(b.Root, key, result.Errors)
@@ -913,7 +922,7 @@ func (c *clientSSRImpls) build(cb ClientBoundary) error {
 		return err
 	}
 	src := "import { h } from \"preact\";\nimport renderToString from \"preact-render-to-string\";\n" + cb.entrySource() +
-		clientReviveJS + `
+		clientReviveJS + ssrSlotJS + `
 function __krateServerAction() { throw new Error("a server action passed to a client component cannot be called while the server renders it"); }
 function __krateComp(m, e) {
   var reg = globalThis.__krateClientImpls;
@@ -921,13 +930,20 @@ function __krateComp(m, e) {
   return hit && hit.impl;
 }
 export const __krate_module = __m;
-export function __krate_render(C, props) {
-  return renderToString(h(C, __krateRevive(props, h, __krateServerAction, __krateComp)));
+// fwd holds the context values of the slot this component renders in; capture
+// receives the values in scope at each of its own slots, by slot token.
+export function __krate_render(C, props, _children, fwd, capture) {
+  __krateCapture = capture || null;
+  try {
+    return renderToString(__krateProvide(h, h(C, __krateRevive(props, h, __krateServerAction, __krateComp)), fwd));
+  } finally {
+    __krateCapture = null;
+  }
 }
 `
 	plugin := islandRenderToStringPlugin(cb.resolveDir())
 	guard := &unavailableGuard{root: c.root, nodeRuntime: true, msgs: map[string]api.Message{}}
-	result := esbuildBuild(api.BuildOptions{
+	opts := api.BuildOptions{
 		Stdin: &api.StdinOptions{
 			Contents:   src,
 			ResolveDir: cb.resolveDir(),
@@ -950,7 +966,11 @@ export function __krate_render(C, props) {
 		Inject:          []string{shim},
 		Plugins:         []api.Plugin{purePrunePlugin(c.root), guard.plugin(), serverCSSPlugin(c.root), *plugin, clientOnlyMarkersPlugin(false), actionServerBundlePlugin(c.res, c.actions, c.basePath), pathAliasPlugin(c.res), reactDOMHintsPlugin(c.root), reactCompatPlugin(c.root), routerHooksPlugin(c.root), preactRequirePlugin()},
 		LogLevel:        api.LogLevelSilent,
-	})
+	}
+	if err := withContextKeys(&opts, c.root, filepath.Dir(c.bundleDir)); err != nil {
+		return err
+	}
+	result := esbuildBuild(opts)
 	if len(result.Errors) == 0 {
 		// Write is on, so the output is on disk: check it there.
 		if data, rerr := os.ReadFile(c.implPath(cb)); rerr == nil {

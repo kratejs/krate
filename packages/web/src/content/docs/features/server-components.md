@@ -124,6 +124,18 @@ export default async function Home() {
   holds JSX, such as `userMenu={<UserMenu user={user} />}` or an array of
   elements (a slot), and a client component inside a slot becomes its own
   island. JSX nested inside a plain object cannot be sent.
+- Context from a client component reaches the client components inside its
+  server children, as in Next.js. A root layout that renders
+  `<Providers>{children}</Providers>` (a `"use client"` module with a theme,
+  a Radix `TooltipProvider` or a query client) gives every client component
+  of the page that context, also across server components in between, and a
+  provider whose value is state updates them when it changes. The server
+  renders them inside the same context. Each nested component is still its
+  own island: one on Preact shares the provider's instances, and a real-React
+  island (one that reaches a reconciler library such as `@react-three/fiber`)
+  gets its own copy of each context with the provider's current value. Not
+  carried: context from a provider that is itself a real-React island, and,
+  into real-React islands, contexts created while rendering.
 - Only what a client component imports and uses goes to the browser, as in
   Next.js. A server helper (database client, `node:crypto`, a native
   package) that sits in the same barrel as the component, or in a module the
@@ -175,7 +187,7 @@ export default async function Settings() {
   `Dialog.Content` written inside `Dialog.Root` render in the same Preact tree
   as the root, so they hydrate and talk to each other. Server components
   placed between the parts are rendered to HTML, so the parts on either side
-  of one no longer share a tree.
+  of one become separate islands, which still see the root's context.
 - Props follow the `"use client"` rules: serializable values (see above) and server
   actions, no inline functions (`[KR7111]`). Put handlers in a `"use client"`
   wrapper, as in Next.js.

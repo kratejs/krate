@@ -210,7 +210,7 @@ func (b *Builder) writeIslandBundles() error {
 		plugins = append(plugins, clientOnlyMarkersPlugin(false), actionServerBundlePlugin(b.importResolver(), b.actionModules(), b.Cfg.BaseURLPath()))
 		break
 	}
-	result := esbuildBuild(api.BuildOptions{
+	opts := api.BuildOptions{
 		AbsWorkingDir:       b.Root,
 		EntryPointsAdvanced: points,
 		Outdir:              chunksDir,
@@ -232,7 +232,11 @@ func (b *Builder) writeIslandBundles() error {
 		External:            []string{"preact", "preact/compat", "preact/hooks", "preact/jsx-runtime"},
 		Inject:              injects,
 		Plugins:             plugins,
-	})
+	}
+	if err := withContextKeys(&opts, b.Root, filepath.Join(b.Cfg.OutDir, ".krate")); err != nil {
+		return err
+	}
+	result := esbuildBuild(opts)
 	outputs := result.OutputFiles
 	if len(result.Errors) == 0 {
 		names := make([]string, len(points))

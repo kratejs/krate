@@ -558,7 +558,8 @@ async function resolveTree(node: unknown, vals?: ContextValues): Promise<JSXNode
     const ctx = fn.__krateForeignConsumer as ForeignContext;
     return resolveTree(consumerChild(callProps)(vals?.has(ctx) ? vals.get(ctx) : ctx._currentValue), vals);
   }
-  let out: unknown = fn(callProps);
+  // A client boundary also gets the context values in scope (slotValues).
+  let out: unknown = fn.__krateClient ? fn(callProps, vals) : fn(callProps);
   if (isThenable(out)) out = await out;
   if (fn.__krateForeignProvider) {
     return resolveTree(out, new Map(vals).set(fn.__krateForeignProvider as ForeignContext, props.value));
@@ -695,7 +696,46 @@ export function lazy<P = Record<string, any>>(
 
 // Client boundaries ("use client" modules inside a server tree)
 
-type ClientRender = (component: unknown, props: Record<string, unknown>, childrenHTML: string | null) => string;
+// fwd is the context forwarded into the slot the component renders in; the
+// render records the values in scope at each of its own slots in capture, by
+// slot token (see islandcontext.go in the compiler).
+type ClientRender = (
+  component: unknown,
+  props: Record<string, unknown>,
+  childrenHTML: string | null,
+  fwd?: SlotValues,
+  capture?: Record<string, SlotValues>,
+) => string;
+
+type SlotValues = { k: string; v: unknown }[];
+
+// slotValues is the ContextValues entry holding the client context forwarded
+// into a server-rendered slot of a client component: nested client
+// components render inside it, as they would in one React tree.
+const slotValues: ForeignContext = {};
+
+// A deferred slot is server-rendered HTML a client component receives (its
+// children, a JSX prop, a server component in a children tree). It renders
+// after the component, inside the context the component provides there.
+type DeferredSlot = { token: string; node: unknown; done: (html: string) => void };
+
+let slotSeq = 0;
+
+function deferSlot(ctx: FlightCtx, node: unknown, done: (html: string) => void): string {
+  slotSeq = (slotSeq + 1) % 1e9;
+  const token = `<!--krate-slot:${slotSeq}:${Math.random().toString(36).slice(2)}-->`;
+  ctx.slots.push({ token, node, done });
+  return token;
+}
+
+// mergeSlotValues layers the values a component provides at a slot over the
+// ones forwarded into the component.
+function mergeSlotValues(outer: SlotValues | undefined, own: SlotValues | undefined): SlotValues | undefined {
+  if (!own) return outer;
+  if (!outer || outer.length === 0) return own;
+  const keys = new Set(own.map((e) => e.k));
+  return outer.filter((e) => !keys.has(e.k)).concat(own);
+}
 
 const flightIsAction = (v: unknown): string | undefined => (isServerAction(v) ? (v as any).actionUrl : undefined);
 const flightIsJSX = (v: unknown): boolean => isElement(v) || "__raw" in (v as any);
@@ -745,7 +785,7 @@ function hasClientElement(node: unknown): boolean {
   return typeof node.type === "string" && node.children.some(hasClientElement);
 }
 
-type FlightCtx = { hydrate: boolean; component: string };
+type FlightCtx = { hydrate: boolean; component: string; slots: DeferredSlot[] };
 
 // isSlotValue reports whether a prop holds server-rendered JSX (an element, raw
 // HTML, or an array containing either). Such a prop is a slot: it is rendered
@@ -760,12 +800,14 @@ function isSlotValue(v: unknown): boolean {
 // a tree that keeps those components in the island's Preact tree.
 async function slotProp(v: unknown, ctx: FlightCtx, tree: boolean): Promise<unknown> {
   if (tree || hasClientElement(v)) {
-    const nested: FlightCtx = { hydrate: false, component: ctx.component };
+    const nested: FlightCtx = { hydrate: false, component: ctx.component, slots: ctx.slots };
     const out = await toFlight(v, nested);
     if (nested.hydrate) ctx.hydrate = true;
     return { __krateSlotTree: out };
   }
-  return { __krateSlotHTML: await renderToStringAsync(v) };
+  const slot = { __krateSlotHTML: "" };
+  slot.__krateSlotHTML = deferSlot(ctx, v, (html) => (slot.__krateSlotHTML = html));
+  return slot;
 }
 
 // clientProps serializes the props of a client component, rendering the
@@ -811,7 +853,9 @@ async function toFlight(node: unknown, ctx: FlightCtx): Promise<unknown[]> {
     if (nested.hydrate) ctx.hydrate = true;
     return [{ $: "c", m: ref.moduleId, e: ref.exportName, s: ref.src, p: await clientProps(props, nested, true), c }];
   }
-  return [{ $: "h", h: await renderToStringAsync(node) }];
+  const slot = { $: "h", h: "" };
+  slot.h = deferSlot(ctx, node, (html) => (slot.h = html));
+  return [slot];
 }
 
 function wrapClientNamespace(
@@ -864,22 +908,34 @@ export function clientBoundary(
   }
   if (typeof impl !== "function") return impl;
   const name = (impl as any).displayName || (impl as any).name || exportName;
-  const Boundary = async (props: Record<string, any>) => {
+  const Boundary = async (props: Record<string, any>, vals?: ContextValues) => {
     const { children, ...rest } = props || {};
-    const slotCtx: FlightCtx = { hydrate: false, component: name };
+    const slots: DeferredSlot[] = [];
+    const slotCtx: FlightCtx = { hydrate: false, component: name, slots };
     const data = await clientProps(rest, slotCtx, flight);
     const hasChildren = children != null && !(Array.isArray(children) && children.length === 0);
     let hydrates = hydrate || slotCtx.hydrate;
-    let childrenHTML: string | null = null;
     if (hasChildren && (flight || hasClientElement(children))) {
-      const ctx: FlightCtx = { hydrate: false, component: exportName };
+      const ctx: FlightCtx = { hydrate: false, component: exportName, slots };
       data.__krateTree = await toFlight(children, ctx);
       if (ctx.hydrate) hydrates = true;
     } else if (hasChildren) {
-      childrenHTML = await renderToStringAsync(children);
-      data.__krateChildren = childrenHTML;
+      data.__krateChildren = deferSlot(slotCtx, children, (html) => (data.__krateChildren = html));
     }
-    const html = render(impl, data, childrenHTML);
+    const fwd = vals?.get(slotValues) as SlotValues | undefined;
+    const capture: Record<string, SlotValues> = {};
+    let html = render(impl, data, null, fwd, capture);
+    const rendered = await Promise.all(
+      slots.map(async (s) => {
+        const scope = mergeSlotValues(fwd, capture[s.token]);
+        const inner = scope ? new Map(vals).set(slotValues, scope) : vals;
+        return renderNode(await resolveTree(s.node, inner));
+      }),
+    );
+    slots.forEach((s, i) => {
+      s.done(rendered[i]);
+      html = html.split(s.token).join(rendered[i]);
+    });
     if (!hydrates) return raw(html);
     return raw(
       `<krate-island style="display:contents" data-module="${escapeHTML(moduleId)}" data-export="${escapeHTML(exportName)}" ` +
