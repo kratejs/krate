@@ -481,3 +481,31 @@ export function SignOut() {
 		t.Fatalf("inline action in a shared module not flagged: %+v", rep.Manual)
 	}
 }
+
+func TestMiddlewareImportingADatabaseDriverSelectsTheNodeRuntime(t *testing.T) {
+	root := gapsProject(t, map[string]string{
+		"src/app/page.tsx": `export default function P() { return <main/>; }`,
+		"tsconfig.json":    `{"compilerOptions":{"baseUrl":".","paths":{"@/*":["./src/*"]}}}`,
+		"src/proxy.ts": `import { NextResponse } from "next/server";
+import { maintenanceOn } from "@/server/maintenance";
+export async function proxy(request: Request) {
+  if (await maintenanceOn()) return new NextResponse("down", { status: 503 });
+  return NextResponse.next();
+}
+`,
+		"src/server/maintenance.ts":          "import pg from \"pgdriver\";\nexport async function maintenanceOn() { return pg.connect() }\n",
+		"node_modules/pgdriver/package.json": `{"name":"pgdriver","version":"1.0.0","type":"module","main":"index.js"}`,
+		"node_modules/pgdriver/index.js":     "import net from \"net\";\nexport default { connect: () => net.isIP(\"1.1.1.1\") };\n",
+	})
+	rep, err := ScanNext(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := findPlan(rep, "krate.config.ts")
+	if cfg == nil || !strings.Contains(string(cfg.Content), `"middlewareRuntime": "node"`) {
+		t.Fatalf("krate.config.ts does not select the node middleware runtime: %+v", cfg)
+	}
+	if !strings.Contains(strings.Join(rep.Warnings, "\n"), `imports net`) {
+		t.Errorf("no warning names the reason: %v", rep.Warnings)
+	}
+}

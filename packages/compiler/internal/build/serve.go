@@ -1427,13 +1427,22 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	// Load embedded middleware runtime if configured (default: quickjs)
 	var middlewareRT *jsruntime.MiddlewareRuntime
 	middlewareRTOption := strings.ToLower(cfg.SSR.MiddlewareRuntime)
+	if embeddedRuntime(middlewareRTOption) && readMiddlewareNodeOnly(root) {
+		// The build found imports the embedded engine cannot load; the Node
+		// sidecar runs the middleware.
+		middlewareRTOption = "node"
+	}
 	if embeddedRuntime(middlewareRTOption) {
 		if hub != nil {
 			// Dev reloads the module whenever .krate/middleware.js changes (and
 			// picks it up if it is added after startup).
 			middlewareRT = jsruntime.NewLazyMiddlewareRuntime(filepath.Join(root, ".krate", "middleware.js"))
 		} else {
-			middlewareRT = jsruntime.LoadMiddlewareRuntime(root)
+			// A middleware that cannot load must stop startup: serving
+			// without it would skip auth and maintenance gates.
+			if middlewareRT, err = jsruntime.LoadMiddlewareRuntime(root); err != nil {
+				return fmt.Errorf("middleware failed to load: %w\n  hint: set ssr.middlewareRuntime to \"node\" in krate.config.ts if it imports Node built-ins or a database driver", err)
+			}
 		}
 		if middlewareRT != nil {
 			middlewareRT.SetEnv(serverEnv)

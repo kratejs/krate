@@ -89,3 +89,50 @@ func TestNodeSidecarMiddlewareLoadErrorFailsClosed(t *testing.T) {
 		t.Errorf("load failure answered %s, want an error envelope", raw)
 	}
 }
+
+// A middleware the embedded engine cannot load must stop startup, never be
+// served around (that would skip the auth and maintenance gates).
+func TestServeRefusesWhenMiddlewareCannotLoad(t *testing.T) {
+	root, out := guardProject(t, true, "true")
+	src := "import { randomUUID } from \"node:crypto\";\nexport function middleware() { return randomUUID(); }\n"
+	if err := os.WriteFile(filepath.Join(root, ".krate", "middleware.js"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.OutDir = out
+	done := make(chan error, 1)
+	go func() { done <- Serve(root, cfg, time.Now()) }()
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "middleware failed to load") || !strings.Contains(err.Error(), "ssr.middlewareRuntime") {
+			t.Fatalf("Serve error = %v, want a middleware load failure with a hint", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Serve started without its middleware")
+	}
+}
+
+// A middleware that imports Node built-ins is built for the Node sidecar and
+// recorded as such, instead of shipping a bundle QuickJS rejects.
+func TestBuildMiddlewareWithNodeImportsTargetsTheSidecar(t *testing.T) {
+	b, root := compatProject(t, map[string]string{
+		"middleware.ts": `import { randomUUID } from "node:crypto";
+export function middleware() {
+  return new Response(randomUUID());
+}
+`,
+	}, nil)
+	if err := b.BuildMiddleware(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(root, ".krate", "middleware.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "__krateCreateRequire") {
+		t.Errorf("sidecar bundle lacks the createRequire banner:\n%.300s", data)
+	}
+	if !readMiddlewareNodeOnly(root) {
+		t.Error("middleware.json does not record nodeOnly")
+	}
+}

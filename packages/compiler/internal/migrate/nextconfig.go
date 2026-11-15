@@ -29,6 +29,9 @@ type nextConfigData struct {
 	// the same name to the Krate config keys of the same name.
 	ServerExternalPackages    []string            `json:"serverExternalPackages,omitempty"`
 	OutputFileTracingIncludes map[string][]string `json:"outputFileTracingIncludes,omitempty"`
+	// MiddlewareRuntime is "node" when the middleware cannot run in the
+	// embedded runtime; it becomes ssr.middlewareRuntime.
+	MiddlewareRuntime string `json:"-"`
 }
 
 type nextRedirect struct {
@@ -371,6 +374,9 @@ func configJSON(entry string, next nextConfigData) []byte {
 	}
 	if len(next.OutputFileTracingIncludes) > 0 {
 		opts["outputFileTracingIncludes"] = next.OutputFileTracingIncludes
+	}
+	if next.MiddlewareRuntime != "" {
+		opts["ssr"] = map[string]any{"middlewareRuntime": next.MiddlewareRuntime}
 	}
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)

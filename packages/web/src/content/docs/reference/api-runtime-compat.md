@@ -237,7 +237,7 @@ The Node globals the embedded runtime provides outside the prelude (process.env,
 | `__dirname` | Not supported | Bundled routes have no module file path. | Set ssr.apiRuntime to "node" in krate.config.ts. |  |
 | `__filename` | Not supported | Bundled routes have no module file path. | Set ssr.apiRuntime to "node" in krate.config.ts. |  |
 | `require` | Partial | A run-time require() resolves only "fs" (readFileSync and readFile, utf-8) and "path" (join, resolve, basename, dirname, extname); static requires are bundled at build time. |  | `TestCompatLedgerBehavior/require` |
-| `node:*` | By design | An API route that imports a node: builtin (or anything else esbuild leaves external) is marked nodeOnly in .krate/api-routes.json and served by the Node sidecar, so it is not scanned for this ledger. | Nothing to do: the route runs on Node automatically. Middleware has no such fallback; set ssr.middlewareRuntime to "node" if it needs Node modules. | `TestAPIRouteNodeBuiltinIsNodeOnly` |
+| `node:*` | By design | An API route that imports a node: builtin (or anything else esbuild leaves external) is marked nodeOnly in .krate/api-routes.json and served by the Node sidecar, so it is not scanned for this ledger. A middleware that does so is built for the Node sidecar and recorded as nodeOnly in .krate/middleware.json. | Nothing to do: the route or middleware runs on Node automatically. Set ssr.middlewareRuntime to "node" to make that explicit. | `TestAPIRouteNodeBuiltinIsNodeOnly` |
 
 ## Engine built-ins
 

@@ -401,6 +401,12 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- A middleware that imports Node built-ins or a database driver no longer makes `krate start` serve with no
+  middleware: the build compiles it for the Node sidecar (QuickJS rejected the bundle's `import` lines as
+  `SyntaxError: expecting '('`), a middleware that still fails to load stops startup instead of being skipped,
+  `krate migrate nextjs` sets `ssr.middlewareRuntime: "node"` for it, and every KR7160 middleware hint names
+  that setting.
+
 - A client component or real-React island in a project under a symlinked path (macOS `/var` is
   `/private/var`) gets action references for its `"use server"` imports instead of their server code.
 - Real-React islands (react-three-fiber and other reconciler libraries) no longer bundle server-only code. A
