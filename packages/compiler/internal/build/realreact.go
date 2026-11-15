@@ -234,10 +234,6 @@ func realIslandMountBlock(e irtree.ExternalComponent) string {
 // the project's copy (never the Preact alias), and only one copy is bundled.
 func (b *Builder) realReactOptions(sink *islandCSSSink, guard *unavailableGuard) api.BuildOptions {
 	minify := b.shouldMinifyJS()
-	env := "\"production\""
-	if b.DevMode {
-		env = "\"development\""
-	}
 	opts := api.BuildOptions{
 		Bundle:            true,
 		Write:             false,
@@ -250,7 +246,7 @@ func (b *Builder) realReactOptions(sink *islandCSSSink, guard *unavailableGuard)
 		JSX:               api.JSXAutomatic,
 		JSXImportSource:   "react",
 		LogLevel:          api.LogLevelSilent,
-		Define:            map[string]string{"process.env.NODE_ENV": env},
+		Define:            b.clientEnvDefines(),
 		// The action plugin comes first so a "use server" module is never decided by
 		// the pure-module plugin (which also backs off when another plugin claims it).
 		Plugins: []api.Plugin{actionServerBundlePlugin(b.importResolver(), b.actionModules(), b.Cfg.BaseURLPath()), purePrunePlugin(b.Root), guard.plugin(), islandCSSPlugin(sink), islandJSXPluginFor("react"), reactIslandTagsPlugin(b.Root), routerHooksPlugin(b.Root)},

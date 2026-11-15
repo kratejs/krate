@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/internal/bundler"
@@ -59,6 +60,22 @@ func (b *Builder) publicEnvDefines() map[string]string {
 			add(k, v)
 		}
 	}
+	return defs
+}
+
+// clientEnvDefines is publicEnvDefines plus an empty process.env, for esbuild
+// bundles that ship to the browser: set KRATE_PUBLIC_* values and NODE_ENV are
+// inlined, and every other process.env read (project or library code) yields
+// undefined instead of throwing because process does not exist.
+func (b *Builder) clientEnvDefines() map[string]string {
+	defs := b.publicEnvDefines()
+	defs["process.env"] = "{}"
+	return defs
+}
+
+func (b *Builder) vendorDefines(mode string) map[string]string {
+	defs := b.clientEnvDefines()
+	defs["process.env.NODE_ENV"] = strconv.Quote(mode)
 	return defs
 }
 

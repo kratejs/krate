@@ -412,6 +412,10 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- An unset `process.env.X` in browser code (Preact and real-React islands, client boundaries, lazy chunks, workers and
+  library code such as polygon-clipping) reads as `undefined` instead of throwing `ReferenceError: process is not
+  defined`; a bare `process.env` and `process.env[name]` work too. Set `KRATE_PUBLIC_*` values and `NODE_ENV` are still
+  inlined.
 - The HTML minifier keeps white space inside a `<pre>` after a stray end tag the parser ignores (`<p>a<pre>b</p>  `):
   `<pre>` closes the open `<p>`, so the `</p>` closes nothing and the text after it is still preformatted.
 - The build plugins that give client code React 19 hooks and value-returning router hooks no longer race when

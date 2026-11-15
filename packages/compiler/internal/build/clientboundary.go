@@ -796,6 +796,7 @@ export async function mount(el) {
 		Target:            api.ES2020,
 		JSX:               api.JSXAutomatic,
 		JSXImportSource:   "preact",
+		Define:            b.clientEnvDefines(),
 		TsconfigRaw:       clientTsconfigRaw(b.Root),
 		Alias:             islandAlias(b.Root, false),
 		External:          []string{"preact", "preact/compat", "preact/hooks", "preact/jsx-runtime"},
