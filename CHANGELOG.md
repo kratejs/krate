@@ -412,6 +412,14 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- `krate migrate nextjs`: `NextResponse` in a migrated middleware is now a `Response` subclass, so
+  `new NextResponse(html, { status: 404 })` works, and `NextResponse.next({ request: { headers } })`,
+  `next({ headers })` and `rewrite(url)` are mapped instead of dropped. Middleware can continue with changed
+  request headers (`x-middleware-override-headers` and `x-middleware-request-<name>`, as in Next.js) in the
+  embedded, Node and serverless runtimes, and layouts see them through `headers()`. A middleware rewrite no
+  longer triggers the `trailingSlash: "never"` redirect.
+- `krate migrate nextjs`: the public env report looks for `NEXT_PUBLIC_*` definitions in `envDir` (from
+  `loadEnvConfig`) as well as the project, instead of saying "no .env definition found".
 - Builds of large apps with many client components are about twice as fast: the client-boundary pass resolved
   the real path of every module once per client module. Real paths are now cached for the duration of a build.
 - `krate migrate nextjs`: a route segment named like a Krate special file (`app/auth/error/page.tsx`,
