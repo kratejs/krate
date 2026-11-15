@@ -312,7 +312,7 @@ export interface RateLimitOptions {
 
 export interface AuthOptions {
   secret?: Secret;
-  providers?: Provider[];
+  providers?: Array<Provider | (() => Provider)>;
   adapter?: Adapter;
   basePath?: string;
   trustHost?: boolean;

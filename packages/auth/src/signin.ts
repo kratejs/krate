@@ -157,9 +157,9 @@ export async function finalizeSignIn(ctx: RequestContext, jar: ResponseCookies, 
   }
 }
 
-export async function handleCredentials(ctx: RequestContext, provider: CredentialsConfig): Promise<Response> {
-  const body = await parseBody(ctx.request);
-  assertCsrf(ctx, body.csrfToken);
+export async function handleCredentials(ctx: RequestContext, provider: CredentialsConfig, direct?: Record<string, string>): Promise<Response> {
+  const body = direct ?? (await parseBody(ctx.request));
+  if (!direct) assertCsrf(ctx, body.csrfToken);
   const identifier = body.email ?? body.username ?? body.identifier;
   limit(ctx, "credentials", identifier);
   const submitted: Record<string, string> = {};
@@ -177,9 +177,9 @@ export async function handleCredentials(ctx: RequestContext, provider: Credentia
   return completeSignIn(ctx, { user, account, method: "pwd", callbackUrl: body.callbackUrl, credentials: submitted });
 }
 
-export async function handleSignOut(ctx: RequestContext): Promise<Response> {
-  const body = await parseBody(ctx.request);
-  assertCsrf(ctx, body.csrfToken);
+export async function handleSignOut(ctx: RequestContext, direct?: Record<string, string>): Promise<Response> {
+  const body = direct ?? (await parseBody(ctx.request));
+  if (!direct) assertCsrf(ctx, body.csrfToken);
   const jar = new ResponseCookies();
   const state = await destroySession(ctx, jar);
   if (ctx.config.events.signOut) await ctx.config.events.signOut({ session: state.session, token: state.token });

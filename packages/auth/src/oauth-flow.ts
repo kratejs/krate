@@ -59,9 +59,11 @@ function checkCookieOptions(provider: OAuthConfig, base: CookieSpec): CookieOpti
   return base.options;
 }
 
-export async function startOAuth(ctx: RequestContext, provider: OAuthConfig): Promise<Response> {
-  const body = await parseBody(ctx.request);
-  assertCsrf(ctx, body.csrfToken);
+// direct: a server-side signIn() call, trusted like the app's own code (no form
+// body, no CSRF token).
+export async function startOAuth(ctx: RequestContext, provider: OAuthConfig, direct?: { callbackUrl?: string; params?: Record<string, string> }): Promise<Response> {
+  const body = direct ? { callbackUrl: direct.callbackUrl } : await parseBody(ctx.request);
+  if (!direct) assertCsrf(ctx, (body as Record<string, string>).csrfToken);
   limit(ctx, "oauth-start");
   if (!provider.clientId) throw new AuthError("Configuration", `missing client id for ${provider.id} (set AUTH_${provider.id.toUpperCase().replace(/[^A-Z0-9]+/g, "_")}_ID)`, 500);
   const resolved = await discover(provider);
@@ -72,6 +74,7 @@ export async function startOAuth(ctx: RequestContext, provider: OAuthConfig): Pr
   const callbackUrl = await resolveCallbackUrl(ctx, body.callbackUrl);
 
   for (const [k, v] of Object.entries(resolved.authorization.params ?? {})) url.searchParams.set(k, v);
+  for (const [k, v] of Object.entries(direct?.params ?? {})) url.searchParams.set(k, v);
   url.searchParams.set("response_type", "code");
   url.searchParams.set("client_id", provider.clientId);
   url.searchParams.set("redirect_uri", callbackUri(ctx, resolved));
@@ -145,6 +148,14 @@ export function decodeIdToken(idToken: string): Record<string, any> {
   const parts = idToken.split(".");
   if (parts.length !== 3) throw new AuthError("OAuthCallback", "id_token is malformed", 502);
   return JSON.parse(b64urlDecodeString(parts[1]!)) as Record<string, any>;
+}
+
+// RFC 9207: an iss callback parameter must match the provider's issuer. Without
+// a configured issuer there is nothing to compare against, and a missing iss is fine.
+function checkIssuerParam(provider: OAuthConfig, iss: string | null): void {
+  if (!iss || !provider.issuer || provider.skipIssuerCheck) return;
+  const normalize = (v: string) => v.replace(/\/+$/, "");
+  if (normalize(iss) !== normalize(provider.issuer)) throw new AuthError("OAuthCallback", `callback iss does not match the issuer of ${provider.id}`, 502);
 }
 
 function validateIdToken(provider: OAuthConfig, claims: Record<string, any>, nonce: string | undefined): void {
@@ -239,6 +250,7 @@ export async function finishOAuth(ctx: RequestContext, provider: OAuthConfig): P
   let profileUser: User;
   try {
     resolved = await discover(provider);
+    checkIssuerParam(resolved, params.get("iss"));
     tokens = await exchangeCode(ctx, resolved, code, verifier);
     profile = await fetchProfile(resolved, tokens, nonce, Boolean(provider.userinfo?.url));
     profileUser = await (resolved.profile ?? ((p: Record<string, any>) => ({ id: p.sub ?? p.id })))(profile, tokens);

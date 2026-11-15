@@ -145,3 +145,32 @@ function GET(request) {
 		t.Fatalf("status %d body %q error %q", result.Status, result.Body, result.Error)
 	}
 }
+
+// A route runs in the same request scope as the Node sidecar: cookies set
+// through the action store reach the response and a thrown redirect signal
+// answers 307 (what @krate/auth signIn() relies on).
+func TestAPIRouteRequestScope(t *testing.T) {
+	apiDir := filepath.Join(t.TempDir(), "api")
+	_ = os.MkdirAll(apiDir, 0755)
+	routeCode := `
+export async function GET(request) {
+	const scope = globalThis[Symbol.for('krate.action.store')].getStore();
+	scope.cookies.set('flow', scope.cookies.get('sid').value + '!', { maxAge: 900 });
+	await Promise.resolve();
+	throw Object.assign(new Error('r'), { __krateRedirect: 'https://provider.example/authorize', __krateRedirectExternal: true });
+}
+`
+	_ = os.WriteFile(filepath.Join(apiDir, "scope.js"), []byte(routeCode), 0644)
+
+	rt := NewAPIRouteRuntime(apiDir)
+	result := rt.Execute(APIRequest{Method: "GET", Path: "/api/scope", URL: "http://localhost:3000/api/scope", Headers: map[string][]string{"Cookie": {"sid=abc"}}})
+	if result.Status != 307 {
+		t.Fatalf("status = %d (%s), want 307", result.Status, result.Error)
+	}
+	if got := result.Headers["location"]; len(got) == 0 || got[0] != "https://provider.example/authorize" {
+		t.Errorf("Location = %v", result.Headers)
+	}
+	if got := result.Headers["set-cookie"]; len(got) == 0 || got[0] != "flow=abc!; Path=/; Max-Age=900; HttpOnly; SameSite=Lax" {
+		t.Errorf("Set-Cookie = %v", result.Headers)
+	}
+}

@@ -55,6 +55,8 @@ interface Envelope {
   ok?: boolean;
   result?: unknown;
   redirect?: string;
+  /** The redirect is an absolute URL (an OAuth provider), followed with a full navigation. */
+  external?: boolean;
   revalidated?: boolean;
   revalidation?: { paths?: Array<{ path: string; type: string }>; tags?: string[] };
   error?: { message?: string; digest?: string } | string;
@@ -76,6 +78,12 @@ function navigateTo(url: string): void {
   const nav = (globalThis as { navigate?: (u: string) => unknown }).navigate;
   if (typeof nav === 'function') nav(safe);
   else if (typeof location !== 'undefined') location.assign(withBase(safe));
+}
+
+/** Follows an absolute http(s) redirect the server marked external. */
+function navigateExternal(url: string): void {
+  if (typeof location === 'undefined' || !/^https?:\/\//i.test(url)) return;
+  location.assign(url);
 }
 
 /** Only same-origin absolute paths are followed after an action. */
@@ -147,7 +155,8 @@ export async function callServerAction(url: string, args: unknown[]): Promise<un
   if (payload.revalidated) dispatchRevalidate(payload.revalidation);
   if (typeof payload.redirect === 'string' && payload.redirect) {
     redirectsFollowed++;
-    navigateTo(payload.redirect);
+    if (payload.external) navigateExternal(payload.redirect);
+    else navigateTo(payload.redirect);
   }
   return payload.result;
 }

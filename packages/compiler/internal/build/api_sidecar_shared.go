@@ -102,6 +102,27 @@ function krateAttach(request) {
   try { Object.defineProperty(request, 'nextUrl', { value: krateNextUrl(request.url), enumerable: false }); } catch {}
   return request;
 }
+// krateRunRoute runs an API route handler inside the action store, so headers(),
+// cookies() and redirect() work in it like in a server action: cookies it sets
+// are added to the response and a redirect() signal becomes a 307.
+async function krateRunRoute(request, run) {
+  const ctx = makeActionContext(request, '', new URL(request.url).pathname);
+  ctx.method = request.method;
+  let out;
+  try {
+    out = await ACTION_STORE.run(ctx, run);
+  } catch (e) {
+    if (!e || typeof e.__krateRedirect !== 'string') throw e;
+    const h = new Headers({ location: e.__krateRedirect, 'cache-control': 'no-store' });
+    out = new Response(null, { status: 307, headers: h });
+  }
+  if (ctx.setCookies.length > 0 && out && typeof out === 'object' && typeof out.status === 'number' && out.headers) {
+    const h = new Headers(out.headers);
+    for (const c of ctx.setCookies) h.append('set-cookie', c);
+    out = new Response(out.body, { status: out.status, statusText: out.statusText, headers: h });
+  }
+  return out;
+}
 function krateHeaderPairs(headers) {
   const pairs = [];
   const cookies = typeof headers.getSetCookie === 'function' ? headers.getSetCookie() : [];

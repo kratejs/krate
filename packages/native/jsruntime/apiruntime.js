@@ -37,6 +37,37 @@
     };
   }
 
+  // The request scope of the running handler, published on the same global as
+  // the Node sidecar's action store so headers(), cookies(), redirect() and
+  // @krate/auth read it. A VM runs one request at a time, so one slot is enough.
+  function serializeCookie(name, value, o) {
+    o = o || {};
+    var s = String(name) + '=' + encodeURIComponent(String(value));
+    s += '; Path=' + (o.path === undefined ? '/' : String(o.path));
+    if (o.domain) s += '; Domain=' + o.domain;
+    if (typeof o.maxAge === 'number' && isFinite(o.maxAge)) s += '; Max-Age=' + Math.floor(o.maxAge);
+    if (o.expires instanceof Date) s += '; Expires=' + o.expires.toUTCString();
+    if (o.httpOnly !== false) s += '; HttpOnly';
+    var same = o.sameSite === undefined ? 'Lax' : o.sameSite;
+    var sameText = same ? (same === true ? 'Strict' : String(same).replace(/[^A-Za-z]/g, '')) : '';
+    if (o.secure || sameText.toLowerCase() === 'none') s += '; Secure';
+    if (sameText) s += '; SameSite=' + sameText;
+    return s;
+  }
+  function makeScope(request) {
+    var jar = parseCookies(request.headers.get('cookie'));
+    var setCookies = [];
+    var cookies = {
+      get: function (name) { return jar.has(String(name)) ? { name: String(name), value: jar.get(String(name)) } : undefined; },
+      getAll: function () { var out = []; jar.forEach(function (v, k) { out.push({ name: k, value: v }); }); return out; },
+      has: function (name) { return jar.has(String(name)); },
+      set: function (name, value, opts) { setCookies.push(serializeCookie(name, value, opts)); jar.set(String(name), String(value)); },
+      delete: function (name, opts) { setCookies.push(serializeCookie(name, '', Object.assign({}, opts, { maxAge: 0 }))); jar.delete(String(name)); }
+    };
+    return { actionId: '', url: new URL(request.url).pathname, method: request.method, headers: request.headers, cookies: cookies, setCookies: setCookies };
+  }
+  G[Symbol.for('krate.action.store')] = { getStore: function () { return S.scope; } };
+
   // makeRequest builds a web Request from the Go envelope. The body is read
   // from the host on first use.
   // nextUrl is request.nextUrl: the URL with NextURL's basePath and clone().
@@ -84,6 +115,10 @@
   }
   function fail(e) {
     if (S.phase !== 'pending') return;
+    if (e && typeof e === 'object' && typeof e.__krateRedirect === 'string') {
+      setHead(307, '', [['location', e.__krateRedirect], ['cache-control', 'no-store']], null);
+      return;
+    }
     var fb = fallbackStatus(e);
     if (fb) {
       setHead(fb, '', [['content-type', 'application/json'], ['cache-control', 'no-store']], { str: JSON.stringify({ error: FALLBACK_LABEL[fb] }) });
@@ -97,6 +132,10 @@
   function headPairs(h) { return h._pairs(); }
 
   function setHead(status, statusText, headers, body) {
+    if (S.scope && S.scope.setCookies.length) {
+      headers = headers.slice();
+      S.scope.setCookies.forEach(function (c) { headers.push(['set-cookie', c]); });
+    }
     S.phase = 'ready';
     S.head = { status: status, statusText: statusText || '', headers: headers };
     if (body && body.stream) { S.reader = body.stream.getReader(); S.head.stream = true; }
@@ -269,6 +308,7 @@
         return '';
       }
       var request = G.__krate_make_request(raw);
+      S.scope = makeScope(request);
       abortController = { signal: request.signal };
       var ctxArg = { params: raw.params || {} };
       Promise.resolve().then(function () { return fn(request, ctxArg); }).then(settle, fail);

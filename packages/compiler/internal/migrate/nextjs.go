@@ -270,6 +270,7 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 	linkRelativeImports(rep)
 	migrateNextFonts(rep, abs)
 	rewriteNextModuleImports(rep, abs)
+	migrateNextAuth(rep, abs)
 	warnClientBoundaryRuntime(rep)
 	rewritePublicEnv(rep, readPublicEnv(abs), nextCfg.Env)
 	rewriteMetadataTypes(rep)
@@ -960,7 +961,11 @@ func packagePlan(root, krateVersion string) (PlannedFile, bool) {
 		spec = "^" + v
 	}
 	var added []string
-	for _, dep := range []string{"@krate/core", "@krate/runtime", "@krate/components"} {
+	wanted := []string{"@krate/core", "@krate/runtime", "@krate/components"}
+	if hasDependency(pkg, "next-auth") {
+		wanted = append(wanted, "@krate/auth")
+	}
+	for _, dep := range wanted {
 		if _, ok := deps[dep]; !ok {
 			deps[dep] = spec
 			added = append(added, dep+"@"+spec)

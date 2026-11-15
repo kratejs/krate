@@ -69,6 +69,15 @@ function endpoint(
   return typeof value === "string" ? { url: value } : { ...value };
 }
 
+// A user override keeps the provider's own URL when it only sets params, and its
+// params are merged over the provider's, like Auth.js.
+function mergeEndpoint(base: ReturnType<typeof endpoint>, over: ReturnType<typeof endpoint>): ReturnType<typeof endpoint> {
+  const out = { ...base, ...over };
+  if (base.params || over.params) out.params = { ...(base.params ?? {}), ...(over.params ?? {}) };
+  if (out.url === undefined) delete out.url;
+  return out;
+}
+
 export function defineOAuthProvider(spec: OAuthSpec): (options?: OAuthUserOptions) => OAuthConfig {
   return (userOptions: OAuthUserOptions = {}): OAuthConfig => {
     const env = envCredentials(spec.id);
@@ -78,10 +87,11 @@ export function defineOAuthProvider(spec: OAuthSpec): (options?: OAuthUserOption
       clientSecret: userOptions.clientSecret ?? env.clientSecret,
       issuer: userOptions.issuer ?? env.issuer,
     };
-    const authorization = endpoint(userOptions.authorization ?? resolve(spec.authorization, options));
-    const tokenEndpoint = endpoint(userOptions.token ?? resolve(spec.token, options));
-    const userinfo = endpoint(userOptions.userinfo ?? resolve(spec.userinfo, options));
-    const scope = userOptions.scope ?? spec.scope;
+    const userAuthorization = endpoint(userOptions.authorization);
+    const authorization = mergeEndpoint(endpoint(resolve(spec.authorization, options)), userAuthorization);
+    const tokenEndpoint = mergeEndpoint(endpoint(resolve(spec.token, options)), endpoint(userOptions.token));
+    const userinfo = mergeEndpoint(endpoint(resolve(spec.userinfo, options)), endpoint(userOptions.userinfo));
+    const scope = userOptions.scope ?? userAuthorization.params?.scope ?? spec.scope;
     if (scope) authorization.params = { ...(authorization.params ?? {}), scope };
     const issuer = options.issuer ?? resolve(spec.issuer, options);
     const wellKnown = userOptions.wellKnown ?? resolve(spec.wellKnown, options);

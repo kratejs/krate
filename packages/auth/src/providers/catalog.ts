@@ -99,6 +99,8 @@ export const bitbucket = defineOAuthProvider({
 export const discord = defineOAuthProvider({
   id: "discord",
   name: "Discord",
+  // Plain OAuth: an issuer only validates the RFC 9207 iss callback parameter.
+  type: "oauth",
   authorization: "https://discord.com/api/oauth2/authorize",
   token: "https://discord.com/api/oauth2/token",
   userinfo: "https://discord.com/api/users/@me",

@@ -28,6 +28,8 @@ export async function step(prev, fd) { return prev + Number(fd.get('n')); }
 export async function boom() { throw new Error('secret detail'); }
 export async function go() { const e = new Error('r'); e.__krateRedirect = '/after'; throw e; }
 export async function back() { return { redirect: '/r' }; }
+export async function ext() { const e = new Error('r'); e.__krateRedirect = 'https://provider.example/authorize?s=1'; e.__krateRedirectExternal = true; throw e; }
+export async function extBad() { return { redirect: 'https://evil.example/' }; }
 export async function ctx() {
   const c = globalThis[Symbol.for('krate.action.store')].getStore();
   c.cookies.set('seen', 'yes');
@@ -54,7 +56,7 @@ func startActionSidecar(t *testing.T, runtime string, hot bool) *httptest.Server
 		t.Fatal(err)
 	}
 	var entries []actionEntry
-	for _, name := range []string{"echo", "step", "boom", "go", "back", "ctx"} {
+	for _, name := range []string{"echo", "step", "boom", "go", "back", "ctx", "ext", "extBad"} {
 		entries = append(entries, actionEntry{ID: "a" + name, Export: name, File: "test.mjs", Source: "src/actions/test.ts"})
 	}
 	manifest, _ := json.Marshal(actionManifest{Actions: entries})
@@ -262,6 +264,16 @@ func TestActionSidecarTransport(t *testing.T) {
 			r = doAction(t, actionRequest(t, srv, "/__krate/action/aback", "application/x-www-form-urlencoded", "", false))
 			if r.status != http.StatusSeeOther || r.header.Get("Location") != "/r" {
 				t.Fatalf("returned redirect: %d %v", r.status, r.header)
+			}
+
+			// An external redirect only comes from a signal that marks itself external.
+			r = doAction(t, actionRequest(t, srv, "/__krate/action/aext", "application/json", `{"args":[]}`, true))
+			if r.body["redirect"] != "https://provider.example/authorize?s=1" || r.body["external"] != true {
+				t.Fatalf("external redirect: %s", r.raw)
+			}
+			r = doAction(t, actionRequest(t, srv, "/__krate/action/aextBad", "application/json", `{"args":[]}`, true))
+			if r.body["redirect"] != nil || r.body["external"] != nil {
+				t.Fatalf("a returned off-site redirect must be dropped: %s", r.raw)
 			}
 
 			// Request context: headers, cookies, Set-Cookie.
