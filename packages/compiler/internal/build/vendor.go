@@ -201,7 +201,7 @@ func (b *Builder) vendorPreamble(used []vendorImport) (string, error) {
 		MinifyWhitespace:  minify,
 		MinifyIdentifiers: minify,
 		MinifySyntax:      minify,
-		Define:            map[string]string{"process.env.NODE_ENV": strconv.Quote(mode)},
+		Define:            b.vendorDefines(mode),
 		LogLevel:          api.LogLevelSilent,
 		Charset:           api.CharsetUTF8,
 		Plugins: []api.Plugin{{

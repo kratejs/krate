@@ -232,6 +232,7 @@ func (b *Builder) writeIslandBundles() error {
 		External:            []string{"preact", "preact/compat", "preact/hooks", "preact/jsx-runtime"},
 		Inject:              injects,
 		Plugins:             plugins,
+		Define:              b.clientEnvDefines(),
 	})
 	outputs := result.OutputFiles
 	if len(result.Errors) == 0 {

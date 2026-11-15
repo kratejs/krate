@@ -4582,6 +4582,7 @@ func (b *Builder) writeWorkerBundles() error {
 			Loader:           map[string]api.Loader{ext: loader},
 			MinifyWhitespace: b.Cfg.ShouldMinifyJS(),
 			Sourcemap:        sourceMapMode(b.Cfg.Sourcemap),
+			Define:           b.clientEnvDefines(),
 			LogLevel:         api.LogLevelSilent,
 		})
 		if len(result.Errors) > 0 {
@@ -4682,6 +4683,7 @@ func (b *Builder) writeDynamicChunkBundles() error {
 			Loader:           map[string]api.Loader{ext: loader},
 			MinifyWhitespace: b.Cfg.ShouldMinifyJS(),
 			Sourcemap:        sourceMapMode(b.Cfg.Sourcemap),
+			Define:           b.clientEnvDefines(),
 			LogLevel:         api.LogLevelSilent,
 		})
 		if len(result.Errors) > 0 {

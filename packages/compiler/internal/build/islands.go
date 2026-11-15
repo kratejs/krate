@@ -669,6 +669,7 @@ func (b *Builder) buildIslandBundle(src, resolveDir string, ssr bool, plugin *ap
 		JSX:             api.JSXAutomatic,
 		JSXImportSource: "preact",
 		LogLevel:        api.LogLevelSilent,
+		Define:          b.clientEnvDefines(),
 		Alias:           islandAlias(b.Root, ssr),
 		Plugins:         []api.Plugin{purePrunePlugin(b.Root), guard.plugin(), islandCSSPlugin(sink), islandJSXPlugin(), islandTagsPlugin(b.Root, ssr), reconcilerGuardPlugin(), reactDOMHintsPlugin(b.Root), reactCompatPlugin(b.Root), routerHooksPlugin(b.Root)},
 	}
@@ -1189,6 +1190,7 @@ export default __compat;`
 			Platform:          api.PlatformBrowser,
 			Target:            api.ES2020,
 			Plugins:           plugins,
+			Define:            b.clientEnvDefines(),
 			LogLevel:          api.LogLevelSilent,
 		})
 		if len(result.Errors) > 0 || len(result.OutputFiles) == 0 {
