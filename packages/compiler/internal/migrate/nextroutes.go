@@ -29,7 +29,7 @@ func rewriteNextModuleImports(rep *Report, root string) {
 			}
 		}
 		if strings.Contains(src, "next/dynamic") {
-			if rewritten, items, ok := rewriteNextDynamic(src); ok {
+			if rewritten, items, ok := rewriteNextDynamic(src, isTSSource(f.Source)); ok {
 				src = rewritten
 				f.Rewrites = append(f.Rewrites, "rewrote next/dynamic to React lazy (ssr: false renders the loading fallback on the server and mounts the component in the browser)")
 				for _, item := range items {
@@ -196,6 +196,8 @@ var (
 	reactNamedImport  = regexp.MustCompile(`import\s*\{([^}]*)\}\s*from\s*["']react["']`)
 	dynamicDecl       = regexp.MustCompile(`^(?:export[ \t]+)?(?:const|let|var)[ \t]+([A-Za-z_$][\w$]*)`)
 	dynamicOptionKey  = regexp.MustCompile(`(?s)^\s*([A-Za-z_$][\w$]*)\s*(?::\s*(.*))?$`)
+	thenBareComponent = regexp.MustCompile(`(?s)^(import\(.*?\))\.then\(\s*\(\s*([A-Za-z_$][\w$]*)?\s*\)\s*=>\s*([A-Za-z_$][\w$]*)\s*\)$`)
+	thenPickExport    = regexp.MustCompile(`(?s)^(import\(.*?\))\.then\(\s*\(?\s*([A-Za-z_$][\w$]*)\s*\)?\s*=>\s*([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*)\s*\)$`)
 	arrowNoParams     = regexp.MustCompile(`(?s)^(?:async\s+)?\(\s*\)\s*=>\s*(.*)$`)
 )
 
@@ -336,19 +338,23 @@ func dynamicOptions(text string) (props map[string]string, ok bool) {
 // `ssr: false` becomes a component that renders its loading fallback on the
 // server and mounts the lazy component in the browser. manual lists options
 // that were dropped without an equivalent.
-func rewriteNextDynamic(src string) (out string, manual []string, ok bool) {
+func rewriteNextDynamic(src string, ts bool) (out string, manual []string, ok bool) {
 	if !nextDynamicImport.MatchString(src) {
 		return "", nil, false
 	}
 	src = nextDynamicImport.ReplaceAllString(src, "")
 	need := map[string]bool{"lazy": true}
 	from, n := 0, 0
+	wrapped := false
 	for {
 		c, found := findDynamicCall(src, from)
 		if !found {
 			break
 		}
 		repl, hoist, hoistAt, items, gated := buildDynamic(src, c, n)
+		if strings.Contains(repl+hoist, lazyModuleHelper+")") {
+			wrapped = true
+		}
 		manual = append(manual, items...)
 		if gated {
 			n++
@@ -375,6 +381,9 @@ func rewriteNextDynamic(src string) (out string, manual []string, ok bool) {
 	if len(names) > 0 {
 		src = insertImportAfterDirective(src, "import { "+strings.Join(names, ", ")+" } from \"react\";\n")
 	}
+	if wrapped && !strings.Contains(src, "function "+lazyModuleHelper+"(") {
+		src = strings.TrimRight(src, "\n") + "\n\n" + lazyModuleHelperSource(ts)
+	}
 	p := parser.New(lexer.New(src).Tokenize())
 	if prog := p.ParseProgram(); prog == nil || len(p.Errors()) > 0 {
 		return "", nil, false
@@ -382,10 +391,57 @@ func rewriteNextDynamic(src string) (out string, manual []string, ok bool) {
 	return src, manual, true
 }
 
+const lazyModuleHelper = "asLazyModule"
+
+// lazyModuleHelperSource declares the helper that gives lazy() the
+// { default: Component } shape. Next's dynamic() also accepts a loader that
+// resolves straight to a component, which lazy() rejects at render time.
+func lazyModuleHelperSource(ts bool) string {
+	param := "m"
+	if ts {
+		param = "m: any"
+	}
+	return "// next/dynamic accepts a module or a bare component; lazy() needs { default }.\n" +
+		"function " + lazyModuleHelper + "(" + param + ") {\n" +
+		"  return m && typeof m === \"object\" && \"default\" in m ? m : { default: m };\n" +
+		"}\n"
+}
+
+// lazyLoader returns the lazy() argument for a dynamic() loader. A bare
+// `() => import(...)` already resolves to a module and is kept; any loader
+// that post-processes the import (.then) or is not an inline arrow is
+// normalized through the helper.
+func lazyLoader(loader string) string {
+	l := strings.TrimSpace(loader)
+	m := arrowNoParams.FindStringSubmatch(l)
+	if m == nil || strings.HasPrefix(l, "async") {
+		return "() => (" + l + ")().then(" + lazyModuleHelper + ")"
+	}
+	body := strings.TrimSpace(m[1])
+	if !strings.HasPrefix(body, "import(") {
+		return "() => (" + l + ")().then(" + lazyModuleHelper + ")"
+	}
+	if !strings.Contains(body, ".then(") || strings.Contains(body, "default") {
+		return l
+	}
+	if bare := thenBareComponent.FindStringSubmatch(body); bare != nil && bare[2] != bare[3] {
+		return "() => " + bare[1] + ".then(() => ({ default: " + bare[3] + " }))"
+	}
+	if pick := thenPickExport.FindStringSubmatch(body); pick != nil && pick[2] == pick[3] {
+		// The common named-export form keeps the shape Krate compiles statically.
+		return "() => " + pick[1] + ".then((" + pick[2] + ") => ({ default: " + pick[2] + "." + pick[4] + " }))"
+	}
+	return "() => " + body + ".then(" + lazyModuleHelper + ")"
+}
+
+func isTSSource(path string) bool {
+	return strings.HasSuffix(path, ".ts") || strings.HasSuffix(path, ".tsx")
+}
+
 // buildDynamic returns the replacement for one call. For an ssr:false call it
 // also returns a module-level declaration (hoist) to insert at hoistAt.
 func buildDynamic(src string, c dynamicCall, n int) (repl, hoist string, hoistAt int, manual []string, gated bool) {
-	lazyCall := "lazy" + c.typeArgs + "(" + c.loader + ")"
+	lazyCall := "lazy" + c.typeArgs + "(" + lazyLoader(c.loader) + ")"
 	props, isObj := dynamicOptions(c.options)
 	if !c.hasOptions {
 		return lazyCall, "", 0, nil, false
