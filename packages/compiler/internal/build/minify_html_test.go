@@ -124,6 +124,8 @@ func FuzzMinifyHTML(f *testing.F) {
 		`<!--k:1--><span>x</span><!--/k:1-->`,
 		`<script><!-- <script> </script> --> </script>`,
 		`<table> <tr> <td> a </td> </tr> </table>`,
+		// <pre> implicitly closes the <p>, so the </p> after it closes nothing.
+		"000000000000<p>00000<pre>0000000000</p>  ",
 	}
 	for _, s := range seeds {
 		f.Add(s)

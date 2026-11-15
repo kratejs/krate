@@ -412,6 +412,8 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- The HTML minifier keeps white space inside a `<pre>` after a stray end tag the parser ignores (`<p>a<pre>b</p>  `):
+  `<pre>` closes the open `<p>`, so the `</p>` closes nothing and the text after it is still preformatted.
 - The build plugins that give client code React 19 hooks and value-returning router hooks no longer race when
   esbuild resolves modules in parallel (a data race under `go test -race`).
 - A server-rendered shadcn `<Button asChild>` no longer emits `<[object Object] ...>`. The server renderer now runs element types
