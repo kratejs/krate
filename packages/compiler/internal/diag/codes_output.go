@@ -12,6 +12,8 @@ const (
 	CodeMiddlewareExport Code = "KR7143"
 	// CodeBasePathURL: a plain tag with a root-relative URL under a base path.
 	CodeBasePathURL Code = "KR7144"
+	// CodeCSSImportMissing: an @import of a local stylesheet that does not exist.
+	CodeCSSImportMissing Code = "KR7145"
 )
 
 func init() {
@@ -33,6 +35,16 @@ func init() {
 				"The warning appears once per build when a `tailwind.config.{ts,js,mjs}` file exists or one of those " +
 				"directives is found. Enable Tailwind, or delete the config file and directives if you do not use it. " +
 				"This is a warning.",
+		},
+		CodeInfo{
+			Code:  CodeCSSImportMissing,
+			Title: "CSS @import points at a file that does not exist",
+			Explanation: "A relative or package `@import` in a stylesheet could not be resolved, for example " +
+				"`@import './missing.css'` after the file was moved or deleted. Krate cannot inline it, and emitting " +
+				"it as written would make the browser request a URL that 404s, so the build fails with the file, " +
+				"line and column. Fix the path or restore the file. Remote `@import url(https://...)` statements " +
+				"are passed through unchanged, and imports outside the project root keep their separate warning " +
+				"(see `cssImportRoots`). This is an error.",
 		},
 		CodeInfo{
 			Code:  CodeCSSSyntax,

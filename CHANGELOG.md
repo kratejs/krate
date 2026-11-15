@@ -416,6 +416,12 @@ host code runs in the native process. Names and options may change between relea
   library code such as polygon-clipping) reads as `undefined` instead of throwing `ReferenceError: process is not
   defined`; a bare `process.env` and `process.env[name]` work too. Set `KRATE_PUBLIC_*` values and `NODE_ENV` are still
   inlined.
+- A CSS `@import` of a local stylesheet that does not exist (for example `@import './missing.css'`) now fails
+  the build with the file, line and column (KR7145) instead of being shipped as written and 404ing in the
+  browser. Remote `@import url(https://...)` is unchanged.
+- `krate migrate nextjs` reports a manual item for every file elsewhere in the workspace (a sibling
+  package's stylesheet or module) that points into the `src/app` tree it moves aside, naming the file, line
+  and new path, instead of silently breaking that package.
 - The HTML minifier keeps white space inside a `<pre>` after a stray end tag the parser ignores (`<p>a<pre>b</p>  `):
   `<pre>` closes the open `<p>`, so the `</p>` closes nothing and the text after it is still preformatted.
 - The build plugins that give client code React 19 hooks and value-returning router hooks no longer race when

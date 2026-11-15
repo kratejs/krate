@@ -356,7 +356,13 @@ func (b *Bundler) resolveCSSModule(path, abs string, mtime time.Time, size int64
 	// url() references rewritten relative to itself before it is spliced in.
 	cs.checkSyntax(abs, string(data))
 	text := css.Balance(cs.rewriteURLs(string(data), dir))
+	var missing *css.MissingImport
 	text = css.InlineImportsWith(text, dir, css.ImportOptions{
+		Missing: func(m css.MissingImport) {
+			if missing == nil {
+				missing = &m
+			}
+		},
 		Root:       b.root,
 		AllowRoots: b.CSSImportRoots(),
 		Resolve:    ResolveCSSSpecifier,
@@ -370,6 +376,22 @@ func (b *Bundler) resolveCSSModule(path, abs string, mtime time.Time, size int64
 		Warn:     cs.warn,
 		Tailwind: b.twImports,
 	})
+	if missing != nil {
+		file := missing.From
+		if file == "" {
+			file = abs
+		}
+		if rel, err := filepath.Rel(b.root, file); err == nil && !strings.HasPrefix(rel, "..") {
+			file = filepath.ToSlash(rel)
+		}
+		return diag.Diagnostic{
+			File:    file,
+			Line:    missing.Line,
+			Col:     missing.Col,
+			Message: missing.Msg,
+			Hint:    "fix the path, or restore the file if it was moved (for example by `krate migrate`); a relative @import that does not resolve would otherwise be shipped as written and 404 in the browser",
+		}.WithCode(diag.CodeCSSImportMissing)
+	}
 
 	isModule := strings.Contains(path, ".module.")
 	entry := &cssEntry{mtime: mtime, size: size, isModule: isModule, assets: cs.assets}

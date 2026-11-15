@@ -30,11 +30,24 @@ type ImportOptions struct {
 	OnRead func(path string)
 	// Warn receives a message for every import that could not be honoured.
 	Warn func(msg string)
+	// Missing, when set, receives a local import whose file does not exist
+	// instead of Warn, so the caller can fail the build.
+	Missing func(m MissingImport)
 	// Tailwind says how `@import "tailwindcss"` and `tailwindcss/*` are
 	// treated: TailwindResolve (default) resolves them like any package,
 	// TailwindKeep leaves them for the Tailwind directive pass, and
 	// TailwindOff leaves them and warns that Tailwind is not enabled.
 	Tailwind TailwindImportMode
+}
+
+// MissingImport describes an @import of a local stylesheet that was not found.
+type MissingImport struct {
+	Target string
+	// From is the importing file ("" for the entry sheet passed in).
+	From string
+	// Line and Col locate the statement in the importing file.
+	Line, Col int
+	Msg       string
 }
 
 // TailwindImportMode selects the handling of Tailwind package imports.
@@ -84,6 +97,18 @@ type importer struct {
 	// viaPackage is set by locate when the file was found by Resolve, i.e.
 	// through a package specifier rather than a path.
 	viaPackage bool
+	// pos and from locate the statement being expanded, for MissingImport.
+	line, col int
+	from      string
+}
+
+func (st *importer) missing(target, format string, args ...any) {
+	msg := fmt.Sprintf(format, args...)
+	if st.opts.Missing != nil {
+		st.opts.Missing(MissingImport{Target: target, From: st.from, Line: st.line, Col: st.col, Msg: msg})
+		return
+	}
+	st.warn("%s", msg)
 }
 
 func (st *importer) warn(format string, args ...any) {
@@ -169,8 +194,13 @@ func (st *importer) inline(css, dir string, chain []string, depth int) (string, 
 				continue
 			}
 			out.WriteString(css[last:i])
+			st.line, st.col = 1+strings.Count(css[:i], "\n"), i-strings.LastIndex(css[:i], "\n")
 			last = end
 			i = end
+			st.from = ""
+			if len(chain) > 0 {
+				st.from = chain[len(chain)-1]
+			}
 			body, hs, keep := st.expand(stmt, dir, chain, depth)
 			hoisted = append(hoisted, hs...)
 			if keep {
@@ -273,7 +303,7 @@ func (st *importer) locate(target, dir string) string {
 		if fileExists(t) {
 			return filepath.Clean(t)
 		}
-		st.warn("@import %q not found", target)
+		st.missing(target, "@import %q not found", target)
 		return ""
 	}
 	if strings.HasPrefix(t, "/") {
@@ -289,7 +319,7 @@ func (st *importer) locate(target, dir string) string {
 			return p
 		}
 	}
-	st.warn("@import %q not found (looked relative to %s and in node_modules)", target, dir)
+	st.missing(target, "@import %q not found (looked relative to %s and in node_modules)", target, dir)
 	return ""
 }
 
