@@ -436,6 +436,11 @@ host code runs in the native process. Names and options may change between relea
 - `krate migrate nextjs` reports a manual item for every file elsewhere in the workspace (a sibling
   package's stylesheet or module) that points into the `src/app` tree it moves aside, naming the file, line
   and new path, instead of silently breaking that package.
+- `asChild` on a client component now works when its child comes from server JSX, as in Next.js: a shadcn account menu
+  (`<DropdownMenuTrigger asChild><Button><Avatar />...</Button></DropdownMenuTrigger>` with a directive-less `Button`) opens on
+  click and the button gets `aria-haspopup`, `aria-expanded` and the trigger's handlers. The child travels as an element tree with
+  the server component at its top rendered to its element, so Radix's `Slot` can clone it, and a client component inside it (the
+  `Avatar`) renders in the same island instead of as a separate island. A child that can only be sent as HTML logs a warning.
 - Client components inside the server children of a `"use client"` provider now see its context, as in Next.js: a root layout
   that renders `<Providers>{children}</Providers>` with Radix's `TooltipProvider` no longer makes a page's `Tooltip` throw
   `` `Tooltip` must be used within `TooltipProvider` ``. Nested Preact islands mount under the provider's instances, real-React islands

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { clientBoundary, jsx, lazy, renderToString, renderToStringAsync } from './server';
 
 describe('renderToString', () => {
@@ -91,6 +91,61 @@ describe('clientBoundary', () => {
     const Box = clientBoundary('m6', 'Box', '/c.js', function Box() { return null; }, render) as any;
     const html = await renderToStringAsync(jsx(Box, { children: jsx('b', { children: 'note' }) }));
     expect(html).toContain('__krateChildren');
+  });
+
+  const propsOf = (html: string) =>
+    JSON.parse(html.match(/data-props="([^"]*)"/)![1].replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#39;/g, "'").replace(/&amp;/g, '&'));
+
+  it('hands an asChild component its server-component child as an element it can clone', async () => {
+    const Trigger = clientBoundary('m8', 'Trigger', '/c.js', function Trigger() { return null; }, render) as any;
+    const Avatar = clientBoundary('m9', 'Avatar', '/a.js', function Avatar() { return null; }, render) as any;
+    async function Button(p: any) {
+      await Promise.resolve();
+      return jsx('button', { 'data-slot': 'button', ...p });
+    }
+    const html = await renderToStringAsync(
+      jsx(Trigger, { asChild: true, children: jsx(Button, { 'aria-label': 'Account', children: [jsx(Avatar, { n: 1 }), 'Ada'] }) }),
+    );
+    const data = propsOf(html);
+    expect(data.__krateChildren).toBeUndefined();
+    expect(data.__krateTree).toEqual([
+      {
+        $: 'e', t: 'button', p: { 'data-slot': 'button', 'aria-label': 'Account' },
+        c: [{ $: 'c', m: 'm9', e: 'Avatar', s: '/a.js', p: { n: 1 }, c: [] }, 'Ada'],
+      },
+    ]);
+    expect(html.match(/<krate-island/g)).toHaveLength(1);
+  });
+
+  it('runs the server child of an asChild component nested in a client tree', async () => {
+    const ns = clientBoundary('m10', 'Menu', '/c.js', { Root() { return null; }, Trigger() { return null; } }, render) as any;
+    const Inner = () => jsx('b', { children: 'deep' });
+    const Button = (p: any) => jsx('button', { id: 'b', children: [jsx(Inner, {}), p.children] });
+    const html = await renderToStringAsync(
+      jsx(ns.Root, { children: jsx(ns.Trigger, { asChild: true, children: jsx(Button, { children: 'go' }) }) }),
+    );
+    const [trigger] = propsOf(html).__krateTree;
+    expect(trigger.p).toEqual({ asChild: true });
+    // Only the top of the child is run; deeper server components stay HTML.
+    expect(trigger.c).toEqual([{ $: 'e', t: 'button', p: { id: 'b' }, c: [{ $: 'h', h: '<b>deep</b>' }, 'go'] }]);
+  });
+
+  it('keeps server children as HTML without asChild', async () => {
+    const ns = clientBoundary('m11', 'Menu', '/c.js', { Root() { return null; }, Trigger() { return null; } }, render) as any;
+    const Button = () => jsx('button', { children: 'go' });
+    const html = await renderToStringAsync(jsx(ns.Root, { children: jsx(ns.Trigger, { children: jsx(Button, {}) }) }));
+    expect(propsOf(html).__krateTree[0].c).toEqual([{ $: 'h', h: '<button>go</button>' }]);
+  });
+
+  it('warns when an asChild child can only be sent as HTML', async () => {
+    const Trigger = clientBoundary('m12', 'RawTrigger', '/c.js', function RawTrigger() { return null; }, render) as any;
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      await renderToStringAsync(jsx(Trigger, { asChild: true, children: { __raw: '<a>x</a>' } }));
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('<RawTrigger asChild> received a child rendered to HTML'));
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 

@@ -161,7 +161,7 @@ function __krateRevive(v, h, call, comp) {
     var out = {};
     for (var k in v) {
       if (k === "__krateChildren") out.children = __krateSlot(h, v[k]);
-      else if (k === "__krateTree") out.children = __krateTree(v[k], h, call, comp);
+      else if (k === "__krateTree") { var kids = __krateTree(v[k], h, call, comp); out.children = kids.length === 1 ? kids[0] : kids; }
       else out[k] = __krateRevive(v[k], h, call, comp);
     }
     return out;
