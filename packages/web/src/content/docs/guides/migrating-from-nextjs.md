@@ -225,6 +225,17 @@ The first pass:
   `__tests__`) are kept in `src/migrated/` next to their modules, and their
   relative imports of migrated routes (`./page`) are re-pointed at
   `src/pages/`; with the originals moved aside each test runs once;
+- ports next-auth v5 to [`@krate/auth`](/docs/features/authentication/#coming-from-nextauth)
+  when it finds a `NextAuth({...})` config (an object, or a function returning one): the
+  import becomes `defineAuth` from `@krate/auth`, `next-auth/providers/*` imports become the
+  matching `@krate/auth` providers, `next-auth/react` becomes `@krate/auth/client`, and
+  `cookies: { prefix: "authjs" }` is added so the existing `authjs.*` cookies and database
+  sessions keep working. `handlers`, `auth`, `signIn` and `signOut` keep their names, so
+  the `[...nextauth]` route, server actions and server components need no edits, and
+  `@auth/drizzle-adapter` is kept as is. `--update-package` adds `@krate/auth`. A provider,
+  option, callback, cookie override, `getToken`, `useSession` or `auth(handler)` wrapper
+  with no `@krate/auth` equivalent is listed as manual work with what to do instead, and
+  next-auth is never left to fail at run time as an unresolved import;
 - warns about script files at the project root and directly under `src/` that
   the plan neither copies nor rewrites (`auth.ts`, a stray `proxy.mjs`, ...), skipping
   `*.config.*`, `*.d.ts` and test files, so nothing is dropped without a trace;

@@ -237,6 +237,17 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Added
 
+- `@krate/auth`: `auth.signIn(provider, { redirectTo })` and `auth.signOut({ redirectTo })` for server
+  actions and route handlers (same flow and cookies as the CSRF-protected endpoints, then a redirect;
+  `redirect: false` returns the URL), and `auth.auth()` with no argument reads the session of the current
+  server component, action or route handler. API route handlers now run in the request scope that
+  `headers()`, `cookies()` and `redirect()` read, on the Node and the embedded runtime, and a server action
+  may redirect to an absolute URL with a thrown `redirect()` signal. `defineAuth` accepts a function that
+  returns the options, and a provider factory listed without being called.
+- `krate migrate nextjs` ports next-auth v5 to `@krate/auth`: `NextAuth(...)` becomes `defineAuth(...)`,
+  `next-auth/providers/*` and `next-auth/react` imports are rewritten, `cookies.prefix: "authjs"` keeps the
+  Auth.js cookie names (and database sessions) working, and `@auth/drizzle-adapter` is kept. Whatever has no
+  equivalent is a manual item that says what to do, so next-auth is never left to fail at run time.
 - Cloudflare: `deploy.cloudflare.cache: true` stores cacheable SSR responses (200 GET with a public
   `Cache-Control`, no `Set-Cookie`, no credentials) in `caches.default` and marks them with
   `X-Krate-Edge-Cache: HIT|MISS`. A `fetch(request, env, ctx, next)` on the default export of
@@ -401,6 +412,10 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- `@krate/auth` Discord with `issuer: "https://discord.com"` stays plain OAuth and checks the RFC 9207 `iss`
+  callback parameter against the issuer (a missing `iss` is accepted); a provider option such as
+  `authorization: { params: { scope } }` keeps the provider's own URL and scope override instead of
+  dropping the endpoint or being overwritten by the default scope.
 - A client component or real-React island in a project under a symlinked path (macOS `/var` is
   `/private/var`) gets action references for its `"use server"` imports instead of their server code.
 - Real-React islands (react-three-fiber and other reconciler libraries) no longer bundle server-only code. A
