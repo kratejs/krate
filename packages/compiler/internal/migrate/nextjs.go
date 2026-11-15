@@ -427,7 +427,7 @@ func scanNextApp(root, appDir, prefix string, rep *Report) error {
 		switch base {
 		case "page":
 			target := routeFile("src/pages", fsRoute, ext)
-			if isSlotRoute(fsRoute) || (scoped[fsRoute] && fsRoute != "." && fsRoute != "") {
+			if isSlotRoute(fsRoute) || (scoped[fsRoute] && fsRoute != "." && fsRoute != "") || reservedRouteSegment(fsRoute) {
 				target = "src/pages/" + fsRoute + "/index" + ext
 			}
 			rep.Files = append(rep.Files, planned(root, source, target, KindPage, ext, rep))
@@ -778,6 +778,24 @@ func isInterceptingSegment(seg string) bool {
 // parallel-route slot.
 func isSlotRoute(fsRoute string) bool {
 	return strings.HasPrefix(path.Base(fsRoute), "@")
+}
+
+// reservedPageBases are the file base names Krate treats as special files
+// rather than pages. A route segment with one of these names keeps its page
+// in the directory (error/index.tsx), which Krate routes as a normal page.
+var reservedPageBases = map[string]bool{
+	"error": true, "loading": true, "not-found": true, "layout": true, "_layout": true,
+	"template": true, "_template": true, "404": true, "500": true, "403": true, "401": true,
+	"forbidden": true, "unauthorized": true, "index": true,
+}
+
+// reservedRouteSegment reports whether the last directory of a Krate route
+// has a name Krate reserves for a special file.
+func reservedRouteSegment(fsRoute string) bool {
+	if fsRoute == "." || fsRoute == "" {
+		return false
+	}
+	return reservedPageBases[path.Base(fsRoute)]
 }
 
 func routeFile(base, route, ext string) string {

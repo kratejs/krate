@@ -35,6 +35,9 @@ type nextConfigData struct {
 	// TrailingSlash is "always" when next.config sets trailingSlash: true and
 	// "never" otherwise (Next's URL form).
 	TrailingSlash string `json:"trailingSlash,omitempty"`
+	// EnvDir is the relative directory loadEnvConfig(...) reads .env files
+	// from; it becomes envDir. Empty when absent or the project root.
+	EnvDir string `json:"-"`
 	// Tailwind is true when the project's PostCSS config runs Tailwind.
 	Tailwind bool `json:"-"`
 }
@@ -173,12 +176,17 @@ func readNextConfig(path string) (data nextConfigData, notes nextConfigNotes, ok
 			})
 		}
 	}
-	if loadEnvConfigCall.MatchString(rc.src) {
-		notes.Manual = append(notes.Manual, ManualItem{
-			Source: file,
-			Reason: "loadEnvConfig(...) is called in next.config; the .env files it loads are not read by Krate",
-			Hint:   "Krate loads .env, .env.<mode>, .env.local and .env.<mode>.local from the project root only (select the mode with --mode); set envDir in krate.config.ts to the directory that holds them (for example envDir: \"../..\" for a monorepo root), or export the variables in the shell",
-		})
+	if loc := loadEnvConfigCall.FindStringIndex(rc.src); loc != nil {
+		dir, ok := staticEnvDir(rc.src[loc[1]:])
+		if ok {
+			out.EnvDir = dir
+		} else {
+			notes.Manual = append(notes.Manual, ManualItem{
+				Source: file,
+				Reason: "loadEnvConfig(...) is called in next.config with a path that could not be resolved statically; the .env files it loads are not read by Krate",
+				Hint:   "Krate loads .env, .env.<mode>, .env.local and .env.<mode>.local from the project root only (select the mode with --mode); set envDir in krate.config.ts to the directory that holds them (for example envDir: \"../..\" for a monorepo root), or export the variables in the shell",
+			})
+		}
 	}
 	translateOtherKeys(file, obj, &notes, serverFileKeys(obj, &out))
 	return out, notes, true
@@ -367,6 +375,9 @@ func configJSON(entry string, next nextConfigData) []byte {
 	}
 	if v := trailingSlashValue(next); v != "" {
 		opts["trailingSlash"] = v
+	}
+	if next.EnvDir != "" {
+		opts["envDir"] = next.EnvDir
 	}
 	if next.Tailwind {
 		opts["tailwind"] = map[string]any{"enabled": true}

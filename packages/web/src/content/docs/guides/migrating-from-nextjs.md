@@ -111,8 +111,10 @@ The first pass:
   Every other `next.config` key gets its own item with a hint instead of one
   generic warning: `transpilePackages`, `output: 'standalone'`, computed
   `images.remotePatterns` or `env`, `experimental` flags, and a
-  `loadEnvConfig(...)` call (point `envDir` at the directory that holds the
-  `.env*` files). A static `serverExternalPackages` list and static
+  `loadEnvConfig(...)` call whose path is not static. When the path is static
+  (a literal, `path.resolve(__dirname, '../..')`, `join(process.cwd(), '..', '..')`,
+  `fileURLToPath(new URL('../..', import.meta.url))`), the migration writes the
+  matching `envDir` and there is no item. A static `serverExternalPackages` list and static
   `outputFileTracingIncludes` globs are carried over to the Krate keys of the
   same name (see [Self-hosting](/docs/guides/self-hosting/)); computed ones get an item.
   An `async` page keeps `async` and its wrapper is `async` too, so the
@@ -162,7 +164,10 @@ The first pass:
   `<html>` and `<body>` it renders; Krate's root layout provides them), or a
   manual item when a root `error.tsx` exists too. A directory that has a layout,
   template, loading, error or not-found file keeps its page in that directory
-  (`dashboard/index.tsx`) so those files wrap it;
+  (`dashboard/index.tsx`) so those files wrap it. A route segment named like a
+  Krate special file (`error`, `loading`, `not-found`, `layout`, `template`,
+  `404`, `500`, `403`, `401`, `forbidden`, `unauthorized`, `index`) also keeps its
+  page in the directory (`auth/error/index.tsx`), so `/auth/error` stays a page;
 - maps `next/navigation` onto the runtime: `usePathname`, `useParams`,
   `useSearchParams`, `useRouter` and `useSelectedLayoutSegment(s)` come from
   `@krate/runtime` (see [Router hooks](/docs/reference/runtime-api/#router-hooks)),
