@@ -476,6 +476,12 @@ Each object returned by `generateStaticParams` becomes one page, so it needs a v
 
 The site is served under a base path, but a plain `<a href="/x">` or `<img src="/x">` is emitted exactly as written, so the browser requests it from the domain root and misses the site. Use `<Link href="/x">` for pages, and `<Image>` or an import for images: both add the base path. Write the full path only when the URL really does belong outside the site.
 
+### KR7145
+
+**CSS @import points at a file that does not exist**
+
+A relative or package `@import` in a stylesheet could not be resolved, for example `@import './missing.css'` after the file was moved or deleted. Krate cannot inline it, and emitting it as written would make the browser request a URL that 404s, so the build fails with the file, line and column. Fix the path or restore the file. Remote `@import url(https://...)` statements are passed through unchanged, and imports outside the project root keep their separate warning (see `cssImportRoots`). This is an error.
+
 ### KR7150
 
 **Unknown code theme**
