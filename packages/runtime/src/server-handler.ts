@@ -708,12 +708,17 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     let next = false;
     let rewrite = "";
     const hdrs: Array<[string, string]> = [];
+    let keep: Set<string> | null = null;
+    const vals = new Map<string, string>();
     for (const [k, v] of headerPairs(result.headers)) {
       if (k === "x-middleware-next") next = true;
       else if (k === "x-middleware-rewrite") rewrite = v;
+      else if (k === "x-middleware-override-headers") keep = new Set(v.split(",").map((n) => n.trim().toLowerCase()).filter(Boolean));
+      else if (k.startsWith("x-middleware-request-")) vals.set(k.slice("x-middleware-request-".length), v);
       else hdrs.push([k, v]);
     }
     if (next || rewrite) {
+      if (keep) overrideRequestHeaders(rs, keep, vals);
       writeHeaderPairs(rs.res, hdrs);
       if (rewrite) applyRewrite(rs, rewrite);
       return null;
@@ -723,6 +728,21 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     let status = result.status;
     if (status < 100 || status > 999) status = 500;
     return finish(rs, status, rs.method === "HEAD" || !body ? null : body);
+  }
+
+  /** NextResponse.next({ request: { headers } }): the downstream request keeps only the listed headers, with the given values. */
+  function overrideRequestHeaders(rs: ReqState, keep: Set<string>, vals: Map<string, string>): void {
+    const edit = (h: Headers): Headers => {
+      const out = new Headers();
+      h.forEach((v, k) => {
+        if (keep.has(k.toLowerCase())) out.set(k, v);
+      });
+      for (const [k, v] of vals) if (keep.has(k) && k !== "host") out.set(k, v);
+      return out;
+    };
+    const shared = rs.headers === rs.request.headers;
+    rs.request = new Request(rs.request, { headers: edit(rs.request.headers) });
+    rs.headers = shared ? rs.request.headers : edit(rs.headers);
   }
 
   function middlewareFailed(rs: ReqState, err: unknown): Response {
@@ -893,8 +913,8 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
   }
 
   /** trailingSlash "never": a page URL ending in a slash redirects to the slashless URL. */
-  function redirectToSlashless(rs: ReqState): Response | null {
-    const p = rs.path;
+  function redirectToSlashless(rs: ReqState, requested: string = rs.path): Response | null {
+    const p = requested;
     if (slashMode !== "never" || p.length < 2 || !p.endsWith("/") || notFoundPageURL(p)) return null;
     if (rs.method !== "GET" && rs.method !== "HEAD") return null;
     const trimmed = p.replace(/\/+$/, "");
@@ -2163,10 +2183,11 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
 
   async function pageChain(rs: ReqState): Promise<Response> {
     return flashNotice(rs, async (rs2) => {
+      const requested = rs2.path;
       const blocked = await runMiddleware(rs2);
       if (blocked) return blocked;
       // Checked on the requested URL, before a rewrite changes the internal path.
-      const slashless = redirectToSlashless(rs2);
+      const slashless = redirectToSlashless(rs2, requested);
       if (slashless) return slashless;
       return redirectRewriteHandler(rs2);
     });

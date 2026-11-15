@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
@@ -29,12 +30,13 @@ func plannedMiddleware(root, source string, rep *Report) PlannedFile {
 }
 
 var (
-	nextServerImport = regexp.MustCompile(`(?m)^[ \t]*import[ \t]+(?:type[ \t]+)?\{([^}]*)\}[ \t]*from[ \t]+["']next/server["'][ \t]*;?[ \t]*\r?\n?`)
-	nextRequestType  = regexp.MustCompile(`\bNextRequest\b`)
-	middlewareExport = regexp.MustCompile(`export\s+(async\s+)?function\s+middleware\b`)
-	requestCookies   = regexp.MustCompile(`\brequest\.cookies\b`)
-	requestGeo       = regexp.MustCompile(`\brequest\.geo\b`)
-	requestIP        = regexp.MustCompile(`\brequest\.ip\b`)
+	nextServerImport      = regexp.MustCompile(`(?m)^[ \t]*import[ \t]+(?:type[ \t]+)?\{([^}]*)\}[ \t]*from[ \t]+["']next/server["'][ \t]*;?[ \t]*\r?\n?`)
+	nextRequestType       = regexp.MustCompile(`\bNextRequest\b`)
+	middlewareExport      = regexp.MustCompile(`export\s+(async\s+)?function\s+middleware\b`)
+	requestCookies        = regexp.MustCompile(`\brequest\.cookies\b`)
+	requestGeo            = regexp.MustCompile(`\brequest\.geo\b`)
+	requestCookieMutation = regexp.MustCompile(`\brequest\.cookies\.(?:set|delete|clear)\s*\(`)
+	requestIP             = regexp.MustCompile(`\brequest\.ip\b`)
 )
 
 // rewriteNextMiddleware maps Next's Request/Response helpers onto the web
@@ -50,13 +52,8 @@ func rewriteNextMiddleware(src string) (string, []string, []string) {
 		manual = append(manual, "arrow-function proxy needs a manual wrapper: export it as middleware")
 	}
 	src = nextRequestType.ReplaceAllString(src, "Request")
-	src = strings.ReplaceAll(src, "NextResponse.redirect(", "Response.redirect(")
-	src = strings.ReplaceAll(src, "NextResponse.json(", "Response.json(")
-	if strings.Contains(src, "NextResponse.rewrite") {
-		manual = append(manual, "NextResponse.rewrite has no direct Krate middleware equivalent")
-	}
-	if strings.Contains(src, "NextResponse.next") {
-		manual = append(manual, "NextResponse.next() was shimmed to continue, but response-header mutation on it needs manual review")
+	for _, m := range requestCookieMutation.FindAllStringIndex(src, -1) {
+		manual = append(manual, "request.cookies is read-only in migrated middleware (get, getAll, has); set or delete the cookie on the response (line "+strconv.Itoa(1+strings.Count(src[:m[0]], "\n"))+")")
 	}
 	if strings.Contains(src, "nextUrl.clone") {
 		manual = append(manual, "request.nextUrl.clone() needs manual migration")
@@ -111,8 +108,8 @@ func rewriteNextMiddleware(src string) (string, []string, []string) {
 	}
 	if strings.Contains(src, "NextResponse") && !importFailed {
 		// Keep a tiny shim for NextResponse.next() or unusual helper usage.
-		src = insertImportAfterDirective(src, "const NextResponse = {\n  redirect: (url: string | URL, init?: ResponseInit) => Response.redirect(url, init),\n  json: (body: any, init?: ResponseInit) => Response.json(body, init),\n  next: () => undefined,\n};\n\n")
-		rewrites = append(rewrites, "added NextResponse shim")
+		src = insertImportAfterDirective(src, middlewareResponseShim)
+		rewrites = append(rewrites, "added NextResponse shim (redirect, json, next, rewrite, new NextResponse, cookies, request header overrides)")
 	}
 	if !strings.Contains(src, "NextResponse") {
 		rewrites = append(rewrites, "rewrote NextRequest to Request and NextResponse helpers to Response")
@@ -316,3 +313,48 @@ export function middleware(request: Request) {
 	src += helper
 	return src, true
 }
+
+// middlewareResponseShim is a Response subclass with Next's static helpers.
+// next() and rewrite() answer with the x-middleware-* headers Krate middleware
+// understands, including x-middleware-override-headers and
+// x-middleware-request-<name> for NextResponse.next({ request: { headers } }).
+const middlewareResponseShim = nextResponseCookieHelpers + `function __krateContinue(key: string, value: string, init?: any): NextResponse {
+  const headers = new Headers(init && init.headers);
+  headers.set(key, value);
+  const reqHeaders = init && init.request && init.request.headers;
+  if (reqHeaders) {
+    const names: string[] = [];
+    new Headers(reqHeaders).forEach((v: string, k: string) => {
+      names.push(k);
+      headers.set("x-middleware-request-" + k, v);
+    });
+    headers.set("x-middleware-override-headers", names.join(","));
+  }
+  return new NextResponse(null, { headers });
+}
+
+class NextResponse extends Response {
+  constructor(body?: BodyInit | null, init?: ResponseInit) {
+    super(body, init);
+    __krateWithCookies(this);
+  }
+  static redirect(url: string | URL, init?: number | ResponseInit): NextResponse {
+    const opts: ResponseInit = typeof init === "number" ? { status: init } : init || {};
+    const headers = new Headers(opts.headers);
+    headers.set("location", String(url));
+    return new NextResponse(null, { ...opts, status: opts.status || 307, headers });
+  }
+  static json(body: any, init?: ResponseInit): NextResponse {
+    const headers = new Headers(init && init.headers);
+    if (!headers.has("content-type")) headers.set("content-type", "application/json");
+    return new NextResponse(JSON.stringify(body), { ...init, headers });
+  }
+  static next(init?: any): NextResponse {
+    return __krateContinue("x-middleware-next", "1", init);
+  }
+  static rewrite(url: string | URL, init?: any): NextResponse {
+    return __krateContinue("x-middleware-rewrite", String(url), init);
+  }
+}
+
+`

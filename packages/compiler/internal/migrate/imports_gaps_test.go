@@ -224,6 +224,33 @@ export const s = process.env.SECRET_TOKEN;`)
 	}
 }
 
+// A monorepo app loads its .env files from the workspace root through
+// loadEnvConfig; the variables defined there count as defined.
+func TestPublicEnvLookedUpInEnvDir(t *testing.T) {
+	base := t.TempDir()
+	root := filepath.Join(base, "apps", "web")
+	writeNextFile(t, base, ".env", "NEXT_PUBLIC_UMAMI_URL=https://stats.example.com\n")
+	writeNextFile(t, root, "package.json", `{"dependencies":{"next":"16.0.0"}}`)
+	writeNextFile(t, root, "next.config.ts", "import { loadEnvConfig } from '@next/env';\nloadEnvConfig(path.resolve(__dirname, '../..'));\nexport default {};\n")
+	writeNextFile(t, root, "app/page.tsx", `export default function P() { return <p>{process.env.NEXT_PUBLIC_UMAMI_URL}</p>; }`)
+	rep, err := ScanNext(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var item *ManualItem
+	for i := range rep.Manual {
+		if strings.Contains(rep.Manual[i].Reason, "public environment variables") {
+			item = &rep.Manual[i]
+		}
+	}
+	if item == nil {
+		t.Fatalf("no env manual item: %+v", rep.Manual)
+	}
+	if !strings.Contains(item.Reason, "NEXT_PUBLIC_UMAMI_URL -> KRATE_PUBLIC_UMAMI_URL (defined in ../../.env)") || strings.Contains(item.Reason, "stats.example.com") {
+		t.Errorf("env item should find the variable in envDir: %s", item.Reason)
+	}
+}
+
 func TestNextConfigEnvKeysRenamedWithoutValues(t *testing.T) {
 	root := t.TempDir()
 	writeNextFile(t, root, "package.json", `{"dependencies":{"next":"16.0.0"}}`)

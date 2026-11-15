@@ -123,8 +123,10 @@ The first pass:
   Krate honors, and notes in the plan what each does (ISR, SSR, 404 for unlisted
   params); the same exports in a layout are manual work;
 - rewrites `middleware.ts` to the standard `Request`/`Response` API, including a
-  small `NextResponse` shim, static/local matcher checks, and cookie/IP/geo
-  helpers; computed `config.matcher` arrays are checked at runtime. The Next.js 16
+  `NextResponse` class (a `Response` subclass: `new NextResponse(body, init)`,
+  `redirect`, `json`, `next`, `rewrite`, `cookies`; `next({ request: { headers } })`
+  reaches layouts through `headers()`), static/local matcher checks, and
+  cookie/IP/geo helpers; computed `config.matcher` arrays are checked at runtime. The Next.js 16
   `proxy.ts` (root or `src/`, a `proxy` function or a default export) is migrated
   the same way and written to `middleware.ts`, the name Krate loads (`--apply`
   moves the original `proxy.ts` into the backup); when both files exist only
@@ -209,7 +211,7 @@ The first pass:
   `after` from `@krate/runtime/server` and runs once the response is sent (see
   [API routes](/docs/features/api-routes/#after-the-response)). Only what is
   left is manual work: `request.cookies.set/delete`, `request.ip`,
-  `request.geo`, `NextResponse.rewrite/next`, and other `next/server` helpers
+  `request.geo`, `NextResponse.rewrite/next` in route handlers, and other `next/server` helpers
   such as `userAgent`;
 - maps `next/font/google` to a generated helper and Google Fonts CSS, and
   `next/font/local` plus `geist/font/sans` and `geist/font/mono` to self-hosted

@@ -548,7 +548,9 @@ func relativeModulePath(fromTarget, toTarget string) string {
 // nextResponseShim is the NextResponse subset prepended to a route handler that
 // uses it. cookies mirrors Next's ResponseCookies: set/delete append
 // Set-Cookie headers, get/getAll/has read them back.
-const nextResponseShim = `function __krateCookieHeader(name: string, value: string, o: any = {}): string {
+const nextResponseShim = nextResponseCookieHelpers + nextResponseRouteObject
+
+const nextResponseCookieHelpers = `function __krateCookieHeader(name: string, value: string, o: any = {}): string {
   let s = encodeURIComponent(name) + "=" + encodeURIComponent(value);
   s += "; Path=" + (o.path === undefined ? "/" : o.path);
   if (o.domain) s += "; Domain=" + o.domain;
@@ -588,7 +590,9 @@ function __krateWithCookies<T extends Response>(res: T): T {
   return res;
 }
 
-const NextResponse = {
+`
+
+const nextResponseRouteObject = `const NextResponse = {
   redirect: (url: string | URL, init?: number | ResponseInit) => {
     const opts: ResponseInit = typeof init === "number" ? { status: init } : init || {};
     const headers = new Headers(opts.headers);

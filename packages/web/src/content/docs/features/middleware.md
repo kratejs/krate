@@ -37,6 +37,27 @@ letting requests through.
 | `Response` with an `x-middleware-rewrite: /other` header | Continues, serving the page at `/other` (the browser URL does not change) |
 | `undefined` / `null` | Continues to the page handler |
 
+A pass-through response can also change the request the page, API route or
+action sees, with the headers Next.js uses for
+`NextResponse.next({ request: { headers } })`: `x-middleware-override-headers`
+lists the request headers to keep (comma separated, all others are removed) and
+`x-middleware-request-<name>` carries the value of each. Layouts read them with
+`headers()`. These headers never reach the client.
+
+```typescript
+export function middleware(request: Request) {
+  const url = new URL(request.url);
+  return new Response(null, {
+    headers: {
+      "x-middleware-next": "1",
+      "x-middleware-override-headers": "cookie,x-site-url",
+      "x-middleware-request-cookie": request.headers.get("cookie") ?? "",
+      "x-middleware-request-x-site-url": url.pathname + url.search,
+    },
+  });
+}
+```
+
 `async` middleware is supported. A thrown error (or a rejected promise) fails
 closed with `503 middleware failed` and is logged with its message; in dev the
 message is included in the response body.

@@ -452,14 +452,61 @@ func (g *middlewareGate) apply(w http.ResponseWriter, r *http.Request, next http
 		if g.dev {
 			clearServerCrash("Middleware")
 		}
-		writeHeaderPairs(w.Header(), res.Headers)
+		writeHeaderPairs(w.Header(), applyRequestOverrides(r, res.Headers))
 		if res.Rewrite != "" {
+			r = r.WithContext(context.WithValue(r.Context(), requestedPathKey{}, requestedPath(r)))
 			applyRewrite(r, res.Rewrite)
 		}
 		next.ServeHTTP(w, r)
 	default:
 		next.ServeHTTP(w, r)
 	}
+}
+
+const (
+	mwOverrideHeaders = "x-middleware-override-headers"
+	mwRequestPrefix   = "x-middleware-request-"
+)
+
+// applyRequestOverrides applies Next's request-header override protocol that
+// NextResponse.next({ request: { headers } }) produces: the override list
+// names the headers the downstream request keeps, and each value comes from an
+// x-middleware-request-<name> header. It returns the response headers without
+// the protocol headers, which never reach the client.
+func applyRequestOverrides(r *http.Request, pairs [][2]string) [][2]string {
+	var keep map[string]bool
+	vals := map[string]string{}
+	out := make([][2]string, 0, len(pairs))
+	for _, p := range pairs {
+		k := strings.ToLower(p[0])
+		switch {
+		case k == mwOverrideHeaders:
+			keep = map[string]bool{}
+			for _, n := range strings.Split(p[1], ",") {
+				if n = strings.ToLower(strings.TrimSpace(n)); n != "" {
+					keep[n] = true
+				}
+			}
+		case strings.HasPrefix(k, mwRequestPrefix):
+			vals[strings.TrimPrefix(k, mwRequestPrefix)] = p[1]
+		default:
+			out = append(out, p)
+		}
+	}
+	if keep == nil {
+		return out
+	}
+	for name := range r.Header {
+		if !keep[strings.ToLower(name)] {
+			delete(r.Header, name)
+		}
+	}
+	for name, v := range vals {
+		if keep[name] && name != "host" {
+			r.Header.Set(name, v)
+		}
+	}
+	return out
 }
 
 // applyRewrite points the request at another path (x-middleware-rewrite).

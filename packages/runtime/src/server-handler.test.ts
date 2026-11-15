@@ -29,7 +29,7 @@ function data(extra: Partial<KrateServerData> = {}): KrateServerData {
     hashedAssets: [],
     html404: "<h1>custom 404</h1>",
     html500: "",
-    apiRoutes: ["hello", "items/[id]", "scope"],
+    apiRoutes: ["hello", "items/[id]", "scope", "who"],
     actions: [{ id: "act1", export: "add", file: "acts" }, { id: "act2", export: "oauth", file: "acts" }],
     hasMiddleware: true,
     ...extra,
@@ -42,6 +42,7 @@ const modules = {
   api: {
     hello: { GET: () => Response.json({ ok: true }), POST: async (r: Request) => new Response(await r.text(), { status: 201 }) },
     "items/[id]": { GET: (_r: Request, ctx: any) => Response.json(ctx.params) },
+    who: { GET: (r: Request) => Response.json({ url: r.headers.get("x-dd-url"), dropped: r.headers.get("x-drop") }) },
     scope: {
       GET: () => {
         const store = (globalThis as Record<symbol, any>)[Symbol.for("krate.action.store")].getStore();
@@ -61,6 +62,11 @@ const modules = {
   middleware: {
     middleware: (req: Request) => {
       if (new URL(req.url).pathname === "/blocked") return new Response("no", { status: 403 });
+      if (new URL(req.url).pathname === "/api/who") {
+        return new Response(null, {
+          headers: { "x-middleware-next": "1", "x-middleware-override-headers": "x-dd-url", "x-middleware-request-x-dd-url": "/api/who?a=1" },
+        });
+      }
       return new Response(null, { headers: { "x-middleware-next": "1", "x-mw": "1" } });
     },
     config: { matcher: ["/blocked", "/api/:path*", "/live"] },
@@ -78,6 +84,13 @@ describe("createKrateHandler", () => {
     expect(r.headers.get("x-frame-options")).toBe("DENY");
     expect(r.headers.get("permissions-policy")).toBeNull();
     expect((await get("/new")).headers.get("x-rule")).toBe("yes");
+  });
+
+  it("middleware request header overrides reach the route and stay off the response", async () => {
+    const r = await get("/api/who", { headers: { "x-drop": "secret" } });
+    expect(await r.json()).toEqual({ url: "/api/who?a=1", dropped: null });
+    expect(r.headers.get("x-middleware-override-headers")).toBeNull();
+    expect(r.headers.get("x-middleware-request-x-dd-url")).toBeNull();
   });
 
   it("routes API requests with 404, 405 and params", async () => {
