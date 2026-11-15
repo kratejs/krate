@@ -172,6 +172,17 @@ React's `Component`/`PureComponent` from `@krate/runtime/react`, rendered with
 `createElement` at runtime, use the same instance controller. Compiled npm
 packages run on Preact inside islands and keep Preact's class semantics.
 
+Code that runs on Preact (a `"use client"` module, an island, an npm package)
+gets the React 19 APIs Preact's compat layer lacks from `react`:
+`useOptimistic`, `useActionState`, `use` (promises and context), `cache` and
+`useEffectEvent`, plus `useFormStatus`, `useFormState` and `requestFormReset`
+from `react-dom`. `startTransition` and `useTransition` accept async functions
+and keep optimistic updates applied until the promise settles. A function
+passed as `<form action>` or `formAction` runs on submit with the form data and
+resets the form on success. `useFormStatus` reads the status of a form that the
+same Preact tree renders, not of a form rendered by a server component around
+the island, and `use(context)` must be called unconditionally.
+
 ### Error boundaries
 
 A class with `static getDerivedStateFromError(error)` and/or
