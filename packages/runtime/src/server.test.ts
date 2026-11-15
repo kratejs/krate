@@ -37,6 +37,14 @@ describe('clientBoundary', () => {
   // The render callback stands in for the Preact render module: it echoes the
   // serialized props so the test sees exactly what travels to the client.
   const render = (_c: unknown, props: Record<string, unknown>) => `<i>${JSON.stringify(props)}</i>`;
+  // propsOf reads the props of the first island (its JSON script).
+  const propsOf = (html: string) => JSON.parse(html.match(/<script type="application\/json" data-krate-props>(.*?)<\/script>/s)![1]);
+  // slotRender renders like the Preact module: each slot token (children, a
+  // JSX prop) inside the component's own markup, where the slot element goes.
+  const slotRender = (_c: unknown, props: Record<string, any>) => {
+    const slot = (v: unknown) => (typeof v === 'string' ? v : v && typeof v === 'object' && typeof (v as any).__krateSlotHTML === 'string' ? (v as any).__krateSlotHTML : '');
+    return `<div>${slot(props.menu)}${slot(props.__krateChildren)}</div>`;
+  };
 
   it('renders a stateless component as plain HTML without an island', async () => {
     const Icon = clientBoundary('m1', 'Icon', '/c.js', function Icon() { return null; }, render, false) as any;
@@ -72,8 +80,7 @@ describe('clientBoundary', () => {
     const html = await renderToStringAsync(
       jsx(ns.Root, { children: [jsx('div', { children: jsx(ns.Trigger, { id: 't', children: 'Open' }) })] }),
     );
-    const attr = html.match(/data-props="([^"]*)"/)![1].replace(/&quot;/g, '"');
-    const data = JSON.parse(attr);
+    const data = propsOf(html);
     expect(data.__krateChildren).toBeUndefined();
     expect(data.__krateTree).toEqual([
       { $: 'e', t: 'div', p: {}, c: [{ $: 'c', m: 'm4', e: 'Dialog.Trigger', s: '/c.js', p: { id: 't' }, c: ['Open'] }] },
@@ -87,14 +94,56 @@ describe('clientBoundary', () => {
     expect(html).toContain('<krate-island');
   });
 
-  it('sends server-only children as HTML', async () => {
-    const Box = clientBoundary('m6', 'Box', '/c.js', function Box() { return null; }, render) as any;
+  it('adopts server children it rendered instead of sending them again as HTML', async () => {
+    const Box = clientBoundary('m6', 'Box', '/c.js', function Box() { return null; }, slotRender) as any;
     const html = await renderToStringAsync(jsx(Box, { children: jsx('b', { children: 'note' }) }));
-    expect(html).toContain('__krateChildren');
+    expect(html.match(/<b>note<\/b>/g)).toHaveLength(1);
+    const data = propsOf(html);
+    expect(Object.keys(data)).toEqual(['__krateChildren']);
+    expect(data.__krateChildren).toEqual({ __krateSlotRef: expect.stringMatching(/^[0-9a-z]+$/) });
+    expect(html).not.toContain('data-props=');
+    expect(html).toMatch(/^<script type="application\/json" data-krate-props>[^<]*<\/script><krate-island /);
   });
 
-  const propsOf = (html: string) =>
-    JSON.parse(html.match(/data-props="([^"]*)"/)![1].replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#39;/g, "'").replace(/&amp;/g, '&'));
+  it('sends server children as HTML when the component did not render them', async () => {
+    const Closed = clientBoundary('m13', 'Closed', '/c.js', function Closed() { return null; }, () => '<div></div>') as any;
+    const html = await renderToStringAsync(jsx(Closed, { children: jsx('b', { children: 'later' }), menu: jsx('i', { children: 'm' }) }));
+    expect(propsOf(html)).toEqual({ menu: { __krateSlotHTML: '<i>m</i>' }, __krateChildren: '<b>later</b>' });
+  });
+
+  it('adopts a JSX prop slot it rendered', async () => {
+    const Shell = clientBoundary('m14', 'Shell', '/c.js', function Shell() { return null; }, slotRender) as any;
+    const html = await renderToStringAsync(jsx(Shell, { menu: jsx('a', { id: 'who', children: 'Ada' }) }));
+    expect(html.match(/id="who"/g)).toHaveLength(1);
+    expect(propsOf(html).menu).toEqual({ __krateSlotRef: expect.stringMatching(/^[0-9a-z]+$/) });
+  });
+
+  it('puts the props of an island nested under client providers in the document once', async () => {
+    const Providers = clientBoundary('m15', 'Providers', '/p.js', function Providers() { return null; }, slotRender) as any;
+    const Frame = clientBoundary('m16', 'Frame', '/f.js', function Frame() { return null; }, slotRender) as any;
+    const Grid = clientBoundary('m17', 'Grid', '/g.js', function Grid() { return null; }, () => '<ul></ul>') as any;
+    const big = 'x'.repeat(50_000);
+    async function Outer(p: any) { await Promise.resolve(); return jsx('section', { children: p.children }); }
+    const AppShell = (p: any) => jsx(Frame, { menu: jsx('a', { children: 'menu' }), children: p.children });
+    async function Inner() { await Promise.resolve(); return jsx('article', { children: jsx(Grid, { rows: big }) }); }
+    const html = await renderToStringAsync(
+      jsx(Providers, { children: jsx(AppShell, { children: jsx(Outer, { children: jsx(Inner, {}) }) }) }),
+    );
+    expect(html.split(big)).toHaveLength(2);
+    expect(html.match(/<krate-island/g)).toHaveLength(3);
+    expect(html.match(/data-krate-props/g)).toHaveLength(3);
+    expect(html.match(/>menu</g)).toHaveLength(1);
+    expect(html.length).toBeLessThan(big.length + 2_000);
+  });
+
+  it('escapes props so a value cannot end the props script', async () => {
+    const Box = clientBoundary('m18', 'Box', '/c.js', function Box() { return null; }, () => '<p></p>') as any;
+    const evil = '</script><script>alert(1)</script><!-- -->';
+    const html = await renderToStringAsync(jsx(Box, { s: evil }));
+    expect(html.match(/<\/script>/g)).toHaveLength(1);
+    expect(html).not.toContain('<!--');
+    expect(propsOf(html).s).toBe(evil);
+  });
 
   it('hands an asChild component its server-component child as an element it can clone', async () => {
     const Trigger = clientBoundary('m8', 'Trigger', '/c.js', function Trigger() { return null; }, render) as any;
@@ -126,15 +175,21 @@ describe('clientBoundary', () => {
     );
     const [trigger] = propsOf(html).__krateTree;
     expect(trigger.p).toEqual({ asChild: true });
-    // Only the top of the child is run; deeper server components stay HTML.
-    expect(trigger.c).toEqual([{ $: 'e', t: 'button', p: { id: 'b' }, c: [{ $: 'h', h: '<b>deep</b>' }, 'go'] }]);
+    // Only the top of the child is run; deeper server components stay
+    // server-rendered, adopted from the document by id.
+    expect(trigger.c).toEqual([{ $: 'e', t: 'button', p: { id: 'b' }, c: [{ $: 'h', r: expect.any(String) }, 'go'] }]);
+    expect(html.match(/<b>deep<\/b>/g)).toHaveLength(1);
   });
 
   it('keeps server children as HTML without asChild', async () => {
     const ns = clientBoundary('m11', 'Menu', '/c.js', { Root() { return null; }, Trigger() { return null; } }, render) as any;
     const Button = () => jsx('button', { children: 'go' });
     const html = await renderToStringAsync(jsx(ns.Root, { children: jsx(ns.Trigger, { children: jsx(Button, {}) }) }));
-    expect(propsOf(html).__krateTree[0].c).toEqual([{ $: 'h', h: '<button>go</button>' }]);
+    expect(propsOf(html).__krateTree[0].c).toEqual([{ $: 'h', r: expect.any(String) }]);
+    // A tree slot the component did not render travels as HTML.
+    const Closed = clientBoundary('m19', 'Menu', '/c.js', { Root() { return null; }, Trigger() { return null; } }, () => '<div></div>') as any;
+    const closed = await renderToStringAsync(jsx(Closed.Root, { children: jsx(Closed.Trigger, { children: jsx(Button, {}) }) }));
+    expect(propsOf(closed).__krateTree[0].c).toEqual([{ $: 'h', h: '<button>go</button>' }]);
   });
 
   it('warns when an asChild child can only be sent as HTML', async () => {

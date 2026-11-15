@@ -131,17 +131,53 @@ export function __krateScopeSubscribe(s) {
 // plus a watcher per forwarded context, which keeps the slot's scope current
 // for real-React islands inside it. It also defines the root that nested
 // Preact islands mount under.
+//
+// A slot with an id (r) is already in the document: the server rendered it in
+// <krate-children data-krate-slot=id>. Hydration leaves those nodes in place
+// (Preact never diffs inside dangerouslySetInnerHTML, and an unchanged empty
+// __html is not re-applied on re-render). Before hydrating, mount collects the
+// nodes of each of the island's server slots (__krateServerSlots); a slot
+// element created later (a hide and show, or a hydration mismatch) takes
+// back those nodes, so nested islands keep their state. When every copy is
+// in use (the slot rendered once more than the server did), it gets a clone.
 const preactSlotJS = `
 import { useContext as __krateUseContext } from "preact/hooks";
-function __krateSlot(h, html) { return h(__KrateSlot, { html: html, scope: { ctx: null, vals: [], subs: [] } }); }
+var __krateSlotPool = null;
+function __krateServerSlots(el) {
+  var pool = {};
+  el.querySelectorAll("krate-children[data-krate-slot]").forEach(function (c) {
+    if (c.closest("krate-island") !== el) return;
+    var id = c.getAttribute("data-krate-slot");
+    (pool[id] = pool[id] || []).push(Array.prototype.slice.call(c.childNodes));
+  });
+  return pool;
+}
+function __krateAdopt(el, sets) {
+  if (!sets || !sets.length || el.firstChild) return;
+  var free = null;
+  for (var i = 0; i < sets.length && !free; i++) {
+    var n = sets[i][0];
+    if (n && !(n.isConnected && n.parentNode !== el)) free = sets[i];
+  }
+  if (free) free.forEach(function (n) { el.appendChild(n); });
+  else sets[0].forEach(function (n) { el.appendChild(n.cloneNode(true)); });
+}
+function __krateSlot(h, html, r) {
+  return h(__KrateSlot, { html: html, r: r, pool: r != null && __krateSlotPool ? __krateSlotPool[r] : null, scope: { ctx: null, vals: [], subs: [] } });
+}
 function __KrateSlot(p, map) {
   var s = p.scope, f = __krateForwarded(map), keep = {};
   s.ctx = map;
   f.forEach(function (e) { keep[e.k] = 1; });
   var kept = s.vals.filter(function (e) { return keep[e.k]; });
   if (kept.length !== s.vals.length) __krateScopeSet(s, kept);
-  var slot = h("krate-children", { key: "", style: "display:contents", dangerouslySetInnerHTML: { __html: p.html }, ref: function (el) { if (el) el.__krateScope = s; } });
-  return [slot].concat(f.map(function (e) { return h(__KrateWatch, { key: e.k, k: e.k, c: e.c, s: s }); }));
+  var attrs = { key: "", style: "display:contents", dangerouslySetInnerHTML: { __html: p.r != null ? "" : p.html }, ref: function (el) {
+    if (!el) return;
+    el.__krateScope = s;
+    if (p.r != null) __krateAdopt(el, p.pool);
+  } };
+  if (p.r != null) attrs["data-krate-slot"] = p.r;
+  return [h("krate-children", attrs)].concat(f.map(function (e) { return h(__KrateWatch, { key: e.k, k: e.k, c: e.c, s: s }); }));
 }
 function __KrateWatch(p) {
   __krateScopePut(p.s, p.k, __krateUseContext(p.c));
@@ -160,7 +196,7 @@ function __krateInScope(el, node) {
 
 // reactSlotJS is the HTML slot and scoped root of a real-React island chunk.
 const reactSlotJS = `
-function __krateSlot(h, html) { return h("krate-children", { style: { display: "contents" }, dangerouslySetInnerHTML: { __html: html } }); }
+function __krateSlot(h, html) { return h("krate-children", { style: { display: "contents" }, dangerouslySetInnerHTML: { __html: html || "" } }); }
 function __KrateScopeRoot(p) {
   var s = p.s;
   var sub = React.useMemo(function () { return __krateScopeSubscribe(s); }, [s]);
@@ -175,15 +211,19 @@ function __krateInScope(el, node) {
 
 // ssrSlotJS is the HTML slot of a server render module: it records the
 // forwarded context values at the slot's token for the server children that
-// render into it.
+// render into it, and marks the slot element with the token's id so the
+// browser can adopt what the server renders there.
 const ssrSlotJS = `
 var __krateCapture = null;
 function __krateSlot(h, html) { return h(__KrateSlot, { html: html }); }
 function __KrateSlot(p, map) {
-  if (__krateCapture && p.html.indexOf("<!--krate-slot:") === 0) {
-    __krateCapture[p.html] = __krateForwarded(map).map(function (e) { return { k: e.k, v: e.p.props.value }; });
+  var attrs = { style: "display:contents", dangerouslySetInnerHTML: { __html: p.html } };
+  var m = /^<!--krate-slot:([0-9a-z]+)-->$/.exec(p.html);
+  if (m) {
+    attrs["data-krate-slot"] = m[1];
+    if (__krateCapture) __krateCapture[p.html] = __krateForwarded(map).map(function (e) { return { k: e.k, v: e.p.props.value }; });
   }
-  return h("krate-children", { style: "display:contents", dangerouslySetInnerHTML: { __html: p.html } });
+  return h("krate-children", attrs);
 }
 `
 

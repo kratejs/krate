@@ -343,7 +343,7 @@ export default function Error({ error, reset }: any) {
 		t.Errorf("the error message must not leak into the page:\n%s", html)
 	}
 	m := regexp.MustCompile(`data-src="([^"]+)"`).FindStringSubmatch(html)
-	if m == nil || !strings.Contains(html, "&quot;digest&quot;") {
+	if m == nil || !strings.Contains(html, `"digest":`) {
 		t.Fatalf("the boundary must hydrate as an island with a sanitized error:\n%s", html)
 	}
 	if status, _, js := getBody(t, base+m[1]); status != 200 || !strings.Contains(js, "location.reload()") {

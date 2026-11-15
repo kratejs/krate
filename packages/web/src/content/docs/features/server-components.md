@@ -84,8 +84,9 @@ synchronous `renderToString` throws if it meets a Promise.
 
 A module that starts with `"use client"` is a client boundary. When a server
 component renders one of its exports, the server renders its initial HTML
-into a `<krate-island>` element with the serialized props, and a small
-per-module chunk hydrates it in the browser:
+into a `<krate-island>` element, with the serialized props in a
+`<script type="application/json">` just before it, and a small per-module
+chunk hydrates it in the browser:
 
 ```tsx
 // src/components/Counter.tsx
@@ -119,11 +120,19 @@ export default async function Home() {
   Server actions may be passed and stay callable. A function, class instance
   or unregistered symbol fails the build when it is written inline (`[KR7111]`)
   and fails the request with the prop name otherwise.
-- `children` passed from a server component are rendered on the server and
-  inserted as HTML inside the client component. So is any other prop that
-  holds JSX, such as `userMenu={<UserMenu user={user} />}` or an array of
-  elements (a slot), and a client component inside a slot becomes its own
-  island. JSX nested inside a plain object cannot be sent.
+- `children` passed from a server component are rendered on the server, in
+  place, inside the client component's HTML. So is any other prop that holds
+  JSX, such as `userMenu={<UserMenu user={user} />}` or an array of elements
+  (a slot), and a client component inside a slot becomes its own island. The
+  props carry only a reference to each slot: when the client component
+  hydrates it adopts the server-rendered nodes where it renders the slot, so
+  the children are in the page once, re-renders leave them in place, and a
+  slot the component hides and shows again gets the same nodes back (with
+  any islands inside them still running). A slot the server did not render,
+  such as the content of a closed dialog, is sent as HTML in the props, and
+  so are the server parts of a real-React island's children, since nothing
+  renders them on the server. Each island's props are in the document once,
+  however deep it is nested. JSX nested inside a plain object cannot be sent.
 - The child of a client component with `asChild` (a Radix `Slot`, as in a
   shadcn `<DropdownMenuTrigger asChild><Button>...</Button></DropdownMenuTrigger>`)
   arrives as an element it can clone, as in Next.js, so the trigger's

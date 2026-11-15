@@ -370,7 +370,7 @@ export async function mount(el) {
   var name = el.getAttribute("data-export");
   var C = __resolve(name);
   if (C == null) throw new Error("real-React module " + el.getAttribute("data-module") + " has no component export " + name);
-  var raw = JSON.parse(el.getAttribute("data-props") || "{}");
+  var raw = __krateProps(el);
   delete raw["client:fallback"];
   var loaded = {};
   loaded[el.getAttribute("data-module") + "#" + name] = C;

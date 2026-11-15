@@ -726,14 +726,21 @@ const slotValues: ForeignContext = {};
 // A deferred slot is server-rendered HTML a client component receives (its
 // children, a JSX prop, a server component in a children tree). It renders
 // after the component, inside the context the component provides there.
-type DeferredSlot = { token: string; node: unknown; done: (html: string) => void; vals?: ContextValues };
+//
+// The server render module puts a slot in a <krate-children data-krate-slot=id>
+// element. A slot the component rendered is then already in the document, so
+// its props carry only the id and the browser adopts the server-rendered
+// nodes in place (done gets null). A slot the server did not render (closed
+// dialog content, a real-React island's tree) travels as HTML (done gets it).
+type DeferredSlot = { token: string; id: string; node: unknown; done: (html: string | null) => void; vals?: ContextValues };
 
 let slotSeq = 0;
 
-function deferSlot(ctx: FlightCtx, node: unknown, done: (html: string) => void): string {
+function deferSlot(ctx: FlightCtx, node: unknown, done: (html: string | null, id: string) => void): string {
   slotSeq = (slotSeq + 1) % 1e9;
-  const token = `<!--krate-slot:${slotSeq}:${Math.random().toString(36).slice(2)}-->`;
-  ctx.slots.push({ token, node, done, vals: ctx.vals });
+  const id = slotSeq.toString(36) + Math.random().toString(36).slice(2, 8);
+  const token = `<!--krate-slot:${id}-->`;
+  ctx.slots.push({ token, id, node, done: (html) => done(html, id), vals: ctx.vals });
   return token;
 }
 
@@ -816,8 +823,14 @@ async function slotProp(v: unknown, ctx: FlightCtx, tree: boolean): Promise<unkn
     if (nested.hydrate) ctx.hydrate = true;
     return { __krateSlotTree: out };
   }
-  const slot = { __krateSlotHTML: "" };
-  slot.__krateSlotHTML = deferSlot(ctx, v, (html) => (slot.__krateSlotHTML = html));
+  const slot: Record<string, string> = { __krateSlotHTML: "" };
+  slot.__krateSlotHTML = deferSlot(ctx, v, (html, id) => {
+    if (html !== null) slot.__krateSlotHTML = html;
+    else {
+      delete slot.__krateSlotHTML;
+      slot.__krateSlotRef = id;
+    }
+  });
   return slot;
 }
 
@@ -853,7 +866,7 @@ async function toFlight(node: unknown, ctx: FlightCtx, inline = false): Promise<
     return out;
   }
   if (typeof node !== "object") return [];
-  if ("__raw" in (node as any)) return [{ $: "h", h: (node as RawHTML).__raw }];
+  if ("__raw" in (node as any)) return [htmlSlot(ctx, node)];
   if (inline && isReactElement(node)) node = normalizeNode(node);
   if (!isElement(node)) return [];
   const { type, props, children } = node;
@@ -879,9 +892,28 @@ async function toFlight(node: unknown, ctx: FlightCtx, inline = false): Promise<
     if (nested.hydrate) ctx.hydrate = true;
     return out;
   }
-  const slot = { $: "h", h: "" };
-  slot.h = deferSlot(ctx, node, (html) => (slot.h = html));
-  return [slot];
+  return [htmlSlot(ctx, node)];
+}
+
+// htmlSlot is a server-rendered part of a children tree: { $: "h", h: html },
+// or { $: "h", r: id } once the component has rendered it into the document.
+function htmlSlot(ctx: FlightCtx, node: unknown): Record<string, string> {
+  const slot: Record<string, string> = { $: "h", h: "" };
+  slot.h = deferSlot(ctx, node, (html, id) => {
+    if (html !== null) slot.h = html;
+    else {
+      delete slot.h;
+      slot.r = id;
+    }
+  });
+  return slot;
+}
+
+// propsScript is the JSON script that carries an island's props, placed just
+// before its <krate-island>. Every "<" is escaped, so no "</script" or "<!--"
+// in a value can end the script or open a comment.
+function propsScript(data: unknown): string {
+  return `<script type="application/json" data-krate-props>${JSON.stringify(data).replace(/</g, "\\u003c")}</script>`;
 }
 
 const warnedUncloneable = new Set<string>();
@@ -926,12 +958,13 @@ function wrapClientNamespace(
  * clientBoundary wraps an export of a `"use client"` module, or a component
  * of a React package, for the server bundle of a page that renders server
  * components. The server renders the component's initial HTML (render) and,
- * when it hydrates, puts it in a <krate-island> marker carrying its
- * serialized props; the per-module client chunk at src hydrates it in the
- * browser. A component without state or effects (hydrate false, an icon)
- * is plain HTML. Children are rendered on the server and passed as HTML, or,
- * when they hold client components of their own, as a tree that keeps those
- * components in the same Preact tree. The children of an asChild component
+ * when it hydrates, puts it in a <krate-island> marker preceded by a JSON
+ * script with its serialized props; the per-module client chunk at src
+ * hydrates it in the browser. A component without state or effects (hydrate
+ * false, an icon) is plain HTML. Children are rendered on the server into the
+ * component's HTML and adopted there by the browser (see DeferredSlot), or,
+ * when they hold client components of their own, sent as a tree that keeps
+ * those components in the same Preact tree. The children of an asChild component
  * always travel as a tree, with a server component at the top of a child run
  * to the element it renders, so the component's Slot can clone it. A
  * namespace export (Radix's Dialog) is wrapped member by member. With `flight` the children always travel as a
@@ -966,7 +999,7 @@ export function clientBoundary(
       if (ctx.hydrate) hydrates = true;
       if (asChild) warnUncloneable(exportName, data.__krateTree as unknown[]);
     } else if (hasChildren) {
-      data.__krateChildren = deferSlot(slotCtx, children, (html) => (data.__krateChildren = html));
+      data.__krateChildren = deferSlot(slotCtx, children, (html, id) => (data.__krateChildren = html ?? { __krateSlotRef: id }));
     }
     const fwd = vals?.get(slotValues) as SlotValues | undefined;
     const capture: Record<string, SlotValues> = {};
@@ -979,14 +1012,18 @@ export function clientBoundary(
         return renderNode(await resolveTree(s.node, inner));
       }),
     );
+    // A slot whose token is in the render is in the document: the browser
+    // adopts those nodes, so they are not sent again inside the props.
+    const placed = slots.map((s) => html.includes(s.token));
     slots.forEach((s, i) => {
-      s.done(rendered[i]);
+      s.done(placed[i] ? null : rendered[i]);
       html = html.split(s.token).join(rendered[i]);
     });
     if (!hydrates) return raw(html);
     return raw(
-      `<krate-island style="display:contents" data-module="${escapeHTML(moduleId)}" data-export="${escapeHTML(exportName)}" ` +
-        `data-src="${escapeHTML(src)}" data-props="${escapeHTML(JSON.stringify(data))}">${html}</krate-island>`,
+      propsScript(data) +
+        `<krate-island style="display:contents" data-module="${escapeHTML(moduleId)}" data-export="${escapeHTML(exportName)}" ` +
+        `data-src="${escapeHTML(src)}">${html}</krate-island>`,
     );
   };
   Object.defineProperty(Boundary, "name", { value: name });

@@ -412,6 +412,15 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- Client components inside server components no longer ship their server children again inside their props. The
+  children (and JSX-valued props such as `userMenu={<UserMenu />}`) were rendered into the page and also sent as an HTML
+  string in the island's `data-props`, nested once per enclosing client component, so a page under a root
+  `<Providers>{children}</Providers>` carried its whole body two or three times (2-7x the HTML of the same page on
+  Next.js). The browser now adopts the server-rendered nodes in place, a slot is sent as HTML only when the component
+  did not render it on the server (closed dialog content, real-React islands), and props travel in a
+  `<script type="application/json">` before each `<krate-island>` instead of an entity-escaped attribute. Each island's
+  props are in the document once at any depth; nested islands keep the provider's context, and server children hidden
+  and shown again by their client parent keep their nodes and state.
 - A `ref` on a function component without `forwardRef` reaches its element in Preact islands, as in React 19: the ref
   is passed as an ordinary prop instead of binding to the Preact component instance. Radix `asChild` triggers
   (`TooltipTrigger`, `DropdownMenuTrigger`, `DialogTrigger`, `PopoverTrigger`) around shadcn-style components no longer

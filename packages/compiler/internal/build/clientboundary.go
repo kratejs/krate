@@ -26,10 +26,11 @@ import (
 // as inert server markup. In the page server bundle each of its exports is
 // wrapped by clientBoundary (@krate/runtime/server): the server renders the
 // component's initial HTML with Preact (React semantics, like external
-// islands) into <krate-island data-module data-export data-src data-props>,
-// and the module's client chunk hydrates that element in the browser with the
-// same serialized props. Children passed from the server are rendered on the
-// server and travel as HTML. Pages without server components are untouched:
+// islands) into <krate-island data-module data-export data-src>, preceded by
+// a JSON script with its serialized props, and the module's client chunk
+// hydrates that element in the browser with the same props. Children passed
+// from the server are rendered on the server inside the component's HTML; the
+// browser adopts those nodes in place rather than receiving them again. Pages without server components are untouched:
 // their "use client" modules compile through the normal Krate pipeline.
 
 // ClientBoundary is one "use client" module of a server-component page.
@@ -108,15 +109,17 @@ func (b *Builder) islandLoaderHTML() (string, error) {
 }
 
 // clientReviveJS turns serialized island props back into component props:
-// server-rendered children become a display:contents element holding the
-// HTML (made by the chunk's own __krateSlot), and server action references
-// become callable functions.
+// server-rendered children become a display:contents element (made by the
+// chunk's own __krateSlot) that adopts the server-rendered nodes already in
+// the document ({__krateSlotRef}, {$: "h", r}) or holds the HTML the props
+// carry, and server action references become callable functions. Props are
+// read from the JSON script before the island (data-props on older output).
 const clientReviveJS = `
 function __krateTree(n, h, call, comp) {
   if (n === null || n === undefined || typeof n === "boolean") return null;
   if (typeof n === "string" || typeof n === "number") return n;
   if (Array.isArray(n)) return n.map(function (x) { return __krateTree(x, h, call, comp); });
-  if (n.$ === "h") return __krateSlot(h, n.h);
+  if (n.$ === "h") return n.r != null ? __krateSlot(h, "", n.r) : __krateSlot(h, n.h);
   var kids = (n.c || []).map(function (x) { return __krateTree(x, h, call, comp); });
   var props = __krateRevive(n.p || {}, h, call, comp);
   if (n.$ === "e") return h.apply(null, [n.t, props].concat(kids));
@@ -157,10 +160,11 @@ function __krateRevive(v, h, call, comp) {
       return fn;
     }
     if (typeof v.__krateSlotHTML === "string") return __krateSlot(h, v.__krateSlotHTML);
+    if (typeof v.__krateSlotRef === "string") return __krateSlot(h, "", v.__krateSlotRef);
     if (v.__krateSlotTree) { var slot = __krateTree(v.__krateSlotTree, h, call, comp); return slot.length === 1 ? slot[0] : slot; }
     var out = {};
     for (var k in v) {
-      if (k === "__krateChildren") out.children = __krateSlot(h, v[k]);
+      if (k === "__krateChildren") out.children = typeof v[k] === "string" ? __krateSlot(h, v[k]) : __krateSlot(h, "", v[k] && v[k].__krateSlotRef);
       else if (k === "__krateTree") { var kids = __krateTree(v[k], h, call, comp); out.children = kids.length === 1 ? kids[0] : kids; }
       else out[k] = __krateRevive(v[k], h, call, comp);
     }
@@ -180,6 +184,11 @@ function __krateSlotRefs(v, k, out) {
   if (k === "__krateTree") __krateClientRefs(v, out);
   else if (v && typeof v === "object" && v.__krateSlotTree) __krateClientRefs(v.__krateSlotTree, out);
   return out;
+}
+function __krateProps(el) {
+  if (el.hasAttribute("data-props")) return JSON.parse(el.getAttribute("data-props") || "{}");
+  var s = el.previousElementSibling;
+  return s && s.localName === "script" && s.hasAttribute("data-krate-props") ? JSON.parse(s.textContent || "{}") : {};
 }
 function __krateRootRefs(raw) {
   var out = [];
@@ -771,13 +780,19 @@ export async function mount(el) {
   var name = el.getAttribute("data-export");
   var C = __resolve(name);
   if (typeof C !== "function") throw new Error("client module " + el.getAttribute("data-module") + " has no component export " + name);
-  var raw = JSON.parse(el.getAttribute("data-props") || "{}");
+  var raw = __krateProps(el);
   var loaded = {};
   loaded[el.getAttribute("data-module") + "#" + name] = C;
   await Promise.all(__krateRootRefs(raw).map(function (r) {
     return import(r.s).then(function (m) { loaded[r.m + "#" + r.e] = m.component(r.e); });
   }));
-  var props = __krateRevive(raw, h, __krateCallAction, function (m, e) { return loaded[m + "#" + e]; });
+  __krateSlotPool = __krateServerSlots(el);
+  var props;
+  try {
+    props = __krateRevive(raw, h, __krateCallAction, function (m, e) { return loaded[m + "#" + e]; });
+  } finally {
+    __krateSlotPool = null;
+  }
   hydrate(__krateInScope(el, h(C, props)), el);
   el.setAttribute("data-krate-island-hydrated", "");
 }
