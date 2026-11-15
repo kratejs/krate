@@ -416,6 +416,11 @@ host code runs in the native process. Names and options may change between relea
   `<pre>` closes the open `<p>`, so the `</p>` closes nothing and the text after it is still preformatted.
 - The build plugins that give client code React 19 hooks and value-returning router hooks no longer race when
   esbuild resolves modules in parallel (a data race under `go test -race`).
+- `<Link>`, `<Image>` and the other compiler-provided tags no longer throw `ReferenceError: Link is not defined` in real-React
+  islands (anything that reaches a reconciler library such as `@react-three/fiber`). The island bundle now gets React versions
+  of the tags for the ones a module uses without importing them, as Preact islands already did. `Link` emits the attributes of
+  Krate's compiled `<Link>` (base path, `data-krate-link`, `data-prefetch`, `replace`, `scroll`, external links), navigates on the
+  client through the router and starts the router on a page whose only client code is islands.
 - A server-rendered shadcn `<Button asChild>` no longer emits `<[object Object] ...>`. The server renderer now runs element types
   that are React objects (`forwardRef`, `memo`, `lazy`, context Provider and Consumer) as components, whether they are used directly,
   through a variable tag or as `Slot.Root`, and Radix's `Slot` merges its props onto the child. Any other object or symbol type is a

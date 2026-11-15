@@ -741,6 +741,8 @@ func islandJSXPluginFor(importSource string) api.Plugin {
 				source := string(data)
 				if importSource == "preact" {
 					source = injectIslandTags(source)
+				} else if importSource == "react" {
+					source = injectIslandTagsFrom(source, reactIslandTagsSpec)
 				}
 				res := api.Transform(tsstrip.BlankTierDecorators(args.Path, source), api.TransformOptions{
 					Loader:          loader,
@@ -1065,7 +1067,10 @@ func liftIslandHead(html string) (body, head string) {
 var islandTagNames = []string{"Head", "Suspense", "Script", "Style", "Link", "Image", "Icon", "SyntaxHighlight"}
 
 // injectIslandTags imports the tags a module uses and does not bind itself.
-func injectIslandTags(src string) string {
+func injectIslandTags(src string) string { return injectIslandTagsFrom(src, "krate-island-tags") }
+
+// injectIslandTagsFrom is injectIslandTags importing from another module.
+func injectIslandTagsFrom(src, spec string) string {
 	var names []string
 	for _, tag := range islandTagNames {
 		if !strings.Contains(src, "<"+tag) && !strings.Contains(src, tag+">") {
@@ -1079,7 +1084,7 @@ func injectIslandTags(src string) string {
 	if len(names) == 0 {
 		return src
 	}
-	return "import { " + strings.Join(names, ", ") + " } from \"krate-island-tags\"; " + src
+	return "import { " + strings.Join(names, ", ") + " } from \"" + spec + "\"; " + src
 }
 
 // islandTagsPlugin serves the module injectIslandTags imports. In the client

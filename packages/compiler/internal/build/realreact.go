@@ -253,7 +253,7 @@ func (b *Builder) realReactOptions(sink *islandCSSSink, guard *unavailableGuard)
 		Define:            map[string]string{"process.env.NODE_ENV": env},
 		// The action plugin comes first so a "use server" module is never decided by
 		// the pure-module plugin (which also backs off when another plugin claims it).
-		Plugins: []api.Plugin{actionServerBundlePlugin(b.importResolver(), b.actionModules(), b.Cfg.BaseURLPath()), purePrunePlugin(b.Root), guard.plugin(), islandCSSPlugin(sink), islandJSXPluginFor("react"), routerHooksPlugin(b.Root)},
+		Plugins: []api.Plugin{actionServerBundlePlugin(b.importResolver(), b.actionModules(), b.Cfg.BaseURLPath()), purePrunePlugin(b.Root), guard.plugin(), islandCSSPlugin(sink), islandJSXPluginFor("react"), reactIslandTagsPlugin(b.Root), routerHooksPlugin(b.Root)},
 	}
 	alias := map[string]string{}
 	for _, name := range []string{"react", "react-dom"} {
@@ -500,4 +500,88 @@ func realModulePaths(mods []*bundler.Module, islands map[string]*reactIslandModu
 		}
 	}
 	return skip
+}
+
+// reactIslandTagsSpec is the module that gives real-React islands the
+// compiler-provided tags (Link, Image, ...) they use as globals.
+const reactIslandTagsSpec = "krate-island-tags-react"
+
+// reactIslandTagsSource implements the tags on the bundle's own react. Link
+// emits the attributes of Krate's compiled <Link>; the router's delegated
+// click, hover and focus handlers on the document do the navigation and
+// prefetching, so they work for anchors React renders later. The base path is
+// read per render from the config the page head carries.
+const reactIslandTagsSource = `import * as React from "react";
+const h = React.createElement;
+const none = () => null;
+export const Head = none, Script = none, Style = none, Icon = none;
+export const Suspense = React.Suspense;
+export const SyntaxHighlight = (p) => h("pre", null, h("code", null, p.children));
+function basePath() {
+  var bp = (globalThis.__KRATE_CFG__ || {}).basePath || "";
+  if (!bp || bp === "/") return "";
+  return "/" + bp.replace(/^\/+|\/+$/g, "");
+}
+var routerStarted = false;
+// A page whose only client code is islands never ran its own hydration
+// script, which is what starts the router. Start it once the first internal
+// link mounts (initRouter is a no-op where the router is already running).
+function startRouter() {
+  if (routerStarted) return;
+  routerStarted = true;
+  var g = globalThis;
+  if (typeof g.reinitRouter === "function") g.reinitRouter();
+  else if (typeof g.initRouter === "function") g.initRouter();
+}
+export const Link = React.forwardRef(function Link(p, ref) {
+  var { children, href, prefetch, replace, scroll, basePath: noBase, legacyBehavior, passHref, shallow, locale, as, ...rest } = p;
+  if (href && typeof href === "object") href = (href.pathname || "") + (href.search || "") + (href.hash || "");
+  href = href == null ? "" : String(href);
+  var outside = noBase === false;
+  var attrs = rest;
+  var bp = basePath();
+  attrs.href = bp && !outside && /^\/(?!\/)/.test(href) ? bp + href : href;
+  var external = outside || /^(https?:|mailto:|tel:|#|javascript:|\/\/)/.test(href) || rest.target === "_blank" || rest.download !== undefined;
+  if (external) {
+    attrs["data-krate-external"] = "";
+    if (outside) attrs["data-krate-no-base"] = "";
+  } else {
+    attrs["data-krate-link"] = "";
+    if (prefetch !== false) attrs["data-prefetch"] = "";
+    if (replace) attrs["data-krate-replace"] = "";
+    if (scroll === false) attrs["data-krate-scroll"] = "false";
+  }
+  if (rest.target === "_blank" && !rest.rel) attrs.rel = "noopener noreferrer";
+  if (ref) attrs.ref = ref;
+  var internal = !external;
+  React.useEffect(function () { if (internal) startRouter(); }, [internal]);
+  return h("a", attrs, children);
+});
+export const Image = React.forwardRef(function Image(p, ref) {
+  var { fill, priority, quality, placeholder, blurDataURL, unoptimized, loader, onLoadingComplete, overrideSrc, layout, objectFit, objectPosition, lazyBoundary, ...rest } = p;
+  var src = rest.src;
+  if (src && typeof src === "object") rest.src = src.src;
+  if (fill) rest.style = Object.assign({ position: "absolute", inset: 0, width: "100%", height: "100%" }, rest.style);
+  if (priority && rest.loading === undefined) rest.loading = "eager";
+  if (ref) rest.ref = ref;
+  return h("img", rest);
+});
+`
+
+// reactIslandTagsPlugin serves reactIslandTagsSource. It holds no per-build
+// state, so esbuild may call its callbacks from any goroutine.
+func reactIslandTagsPlugin(root string) api.Plugin {
+	const ns = "krate-island-tags-react"
+	contents := reactIslandTagsSource
+	return api.Plugin{
+		Name: ns,
+		Setup: func(pb api.PluginBuild) {
+			pb.OnResolve(api.OnResolveOptions{Filter: `^krate-island-tags-react$`}, func(api.OnResolveArgs) (api.OnResolveResult, error) {
+				return api.OnResolveResult{Path: ns, Namespace: ns}, nil
+			})
+			pb.OnLoad(api.OnLoadOptions{Filter: `.*`, Namespace: ns}, func(api.OnLoadArgs) (api.OnLoadResult, error) {
+				return api.OnLoadResult{Contents: &contents, Loader: api.LoaderJS, ResolveDir: root}, nil
+			})
+		},
+	}
 }
