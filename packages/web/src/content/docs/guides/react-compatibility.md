@@ -111,7 +111,7 @@ export default function Counter() {
 | `cache` | identity: Krate renders each page once |
 | `flushSync` | `flushSync(fn)` is `fn()`: state changes already apply synchronously |
 | `useFormState` (react-dom) | `useActionState` |
-| `preload`, `preinit`, `preconnect`, `prefetchDNS`, `preloadModule`, `preinitModule` (react-dom) | add the `<link>` or `<script>` to the document head once: in the browser directly, on the server as a tag in the `<head>` of the response (deduplicated, also from client components the server renders) |
+| `preload`, `preinit`, `preconnect`, `prefetchDNS`, `preloadModule`, `preinitModule` (react-dom) | add the `<link>` or `<script>` to the document head once per URL: on the server as a tag in the `<head>` of the response (also from islands and client components the server renders), in the browser only when the document does not have it yet (see [Resource hints](#resource-hints)) |
 | `version`, `captureOwnerStack` | `"19.2.0"` and `null` (as in production React) |
 | custom element props | strings, numbers and booleans are attributes; objects, arrays and functions are properties (see [Custom elements](#custom-elements)) |
 
@@ -1508,13 +1508,37 @@ because the two runtimes cannot share a tree.
 ### Rendering
 
 A real-React island is **client-rendered**. Server-rendering a WebGL or canvas
-tree is not meaningful, so the server emits only the placeholder. Put
+tree is not meaningful, so the server emits only the placeholder (and the
+[resource hints](#resource-hints) the island calls). Put
 `client:fallback="text"` on the tag to render a text fallback there until
 React mounts it (escaped, text only). To reserve space, wrap the tag in an
 element with a fixed size. `client:load`, `client:idle` and `client:visible`
 work as for other islands, so a heavy viewer below the fold is fetched only
 when it nears the viewport. Both directives are removed at build time and
 never reach the component.
+
+### Resource hints
+
+A `preload()` (or `preinit`, `preconnect`, ...) that a real-React island or
+client component calls while it renders still reaches the `<head>` of the
+server HTML, as in Next.js, so the browser starts the request while it parses
+the page and a later `fetch()` of the same URL (with matching `crossOrigin`)
+reuses it. The server does not render the island, so the build renders it once
+with `react-dom/server`, only to record its hints: the markup is discarded and
+a render error is ignored (hints called before the error are kept). npm
+packages other than React are replaced by inert stand-ins for that render
+(three.js and canvas libraries do not run), so it reaches the hint calls of
+your own modules and workspace packages. In the browser react-dom finds the
+`<link>` and adds nothing.
+
+The build render has the island's build-time props, and a client boundary on
+an async page renders without props, so it collects hints whose URL is a
+constant or comes from module code (`preload(WASM_URL, { as: "fetch" })`). A
+hint whose URL comes from request data, state, an effect or an event handler
+is added in the browser after hydration only, and so is one that a library
+calls; one built from a missing prop (`"/img/undefined.png"`) is dropped.
+Project code that throws at import time outside a browser yields no hints. Set `KRATE_NO_REAL_HINTS=1` to skip the build
+render.
 
 ### Props and children
 

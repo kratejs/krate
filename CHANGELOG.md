@@ -421,6 +421,15 @@ host code runs in the native process. Names and options may change between relea
   `<script type="application/json">` before each `<krate-island>` instead of an entity-escaped attribute. Each island's
   props are in the document once at any depth; nested islands keep the provider's context, and server children hidden
   and shown again by their client parent keep their nodes and state.
+- react-dom resource hints (`preload`, `preinit`, `preconnect`, `prefetchDNS`, `preloadModule`, `preinitModule`) called
+  while a client component renders reach the `<head>` of the server HTML, once per URL, for Preact islands on static
+  and force-dynamic pages (before, the build-time render dropped them) and for real-React islands and client
+  boundaries, which the server does not render: the build renders each once with react-dom/server only to record its
+  hints (with the island's build-time props, a boundary without props, npm packages other than React stubbed out;
+  errors are ignored). In the browser a hint whose `<link>` is already in the document adds nothing, so a file the
+  page also `fetch`es is requested once instead of twice (with Chrome's "preloaded but not used" warning).
+  `crossOrigin` is written as React writes it (`crossorigin=""` or `"use-credentials"`). `KRATE_NO_REAL_HINTS=1`
+  turns the build-time render off.
 - A `ref` on a function component without `forwardRef` reaches its element in Preact islands, as in React 19: the ref
   is passed as an ordinary prop instead of binding to the Preact component instance. Radix `asChild` triggers
   (`TooltipTrigger`, `DropdownMenuTrigger`, `DialogTrigger`, `PopoverTrigger`) around shadcn-style components no longer

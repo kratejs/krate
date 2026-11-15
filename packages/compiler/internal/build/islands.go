@@ -253,7 +253,8 @@ func (b *Builder) buildIslands(owner string, exts []irtree.ExternalComponent, im
 		if e.RealReact {
 			// Client-rendered on real React; the server emits the fallback.
 			realGroup = append(realGroup, e)
-			if fb := realFallbackHTML(e); fb != "" {
+			fb := realFallbackHTML(e) + realHintsHead(b.realIslandHints(e, islandImportsFor(e.Subtree, allImports), resolveDir))
+			if fb != "" {
 				ssrHTML[e.ID] = fb
 			}
 			continue
@@ -511,11 +512,17 @@ func (b *Builder) islandSSRSource(e irtree.ExternalComponent, imports []irtree.E
 		props = "{}"
 	}
 	fmt.Fprintf(&src, "\nconst props = %s;\n", props)
-	src.WriteString("globalThis.__krate_island_html = \"\";\nglobalThis.__krate_island_ssr_error = \"\";\ntry { globalThis.__krate_island_html = renderToString(")
+	src.WriteString("globalThis.__krate_island_html = \"\";\nglobalThis.__krate_island_ssr_error = \"\";\nglobalThis.__krate_island_hints = new Set();\ntry { globalThis.__krate_island_html = renderToString(")
 	src.WriteString(prov.wrapExprJS(e.Subtree))
 	src.WriteString("); } catch (e) { globalThis.__krate_island_ssr_error = String((e && (e.name ? e.name + \": \" : \"\") + (e.message || e)) || e) + \"\\n\" + String((e && e.stack) || \"\"); }\n")
+	src.WriteString(islandHintsHeadJS)
 	return src.String()
 }
+
+// islandHintsHeadJS appends the resource hints (react-dom preload, preinit,
+// ...) the server render recorded, each in its own <krate-head> wrapper, so
+// they reach the page head like a <Head> tag and repeat only once per page.
+const islandHintsHeadJS = "for (const t of globalThis.__krate_island_hints) globalThis.__krate_island_html += \"<krate-head>\" + t + \"</krate-head>\";\n"
 
 // islandAlias maps React to the project's single Preact installation. Server
 // rendering uses absolute module paths so packages inside node_modules and the
@@ -996,6 +1003,8 @@ func islandRenderToStringPlugin(resolveDir string) *api.Plugin {
 // injectIslandSSR adds the server-rendered subtree to each island placeholder.
 // It returns the page HTML and the <Head> content the islands rendered, which
 // belongs in the document head.
+// Head content repeated across islands (the same resource hint, the same
+// <Head> tags) is kept once.
 func injectIslandSSR(html string, rendered map[string]string) (string, string) {
 	ids := make([]string, 0, len(rendered))
 	for id := range rendered {
@@ -1003,13 +1012,23 @@ func injectIslandSSR(html string, rendered map[string]string) (string, string) {
 	}
 	sort.Strings(ids)
 	var head strings.Builder
+	seen := map[string]bool{}
 	for _, id := range ids {
 		inner := rendered[id]
 		if inner == "" {
 			continue
 		}
-		inner, h := liftIslandHead(inner)
-		head.WriteString(h)
+		inner, blocks := liftIslandHeadBlocks(inner)
+		for _, h := range blocks {
+			if !seen[h] {
+				seen[h] = true
+				head.WriteString(h)
+			}
+		}
+		if inner == "" {
+			// Only head content: the island has no server markup.
+			continue
+		}
 		placeholder := `<div data-krate-island="` + id + `" style="display:contents"></div>`
 		replacement := `<div data-krate-island="` + id + `" data-krate-island-ssr style="display:contents">` + inner + `</div>`
 		html = strings.ReplaceAll(html, placeholder, replacement)
@@ -1026,8 +1045,15 @@ const (
 // from its server markup and returns them separately. Wrappers nest; the
 // content of the outermost one is kept, inner wrappers are dropped.
 func liftIslandHead(html string) (body, head string) {
+	body, blocks := liftIslandHeadBlocks(html)
+	return body, strings.Join(blocks, "")
+}
+
+// liftIslandHeadBlocks is liftIslandHead returning the content of each
+// outermost wrapper separately.
+func liftIslandHeadBlocks(html string) (body string, blocks []string) {
 	if !strings.Contains(html, islandHeadOpen) {
-		return html, ""
+		return html, nil
 	}
 	var out, hb strings.Builder
 	i := 0
@@ -1057,10 +1083,14 @@ func liftIslandHead(html string) (body, head string) {
 			j += nextClose + len(islandHeadClose)
 			depth--
 		}
+		if hb.Len() > 0 {
+			blocks = append(blocks, hb.String())
+			hb.Reset()
+		}
 		i = j
 	}
 	out.WriteString(html[min(i, len(html)):])
-	return out.String(), hb.String()
+	return out.String(), blocks
 }
 
 // islandTagNames are the compiler-provided tags an island module may use as
