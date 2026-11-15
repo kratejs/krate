@@ -412,6 +412,8 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- Builds of large apps with many client components are about twice as fast: the client-boundary pass resolved
+  the real path of every module once per client module. Real paths are now cached for the duration of a build.
 - Server bundles (`krate start`, SSR and ISR pages) apply the project's tsconfig `paths`, including
   ones inherited through `extends`, so `@/components/x` imports no longer stay as bare package imports
   that fail with `ERR_MODULE_NOT_FOUND` and answer 500.

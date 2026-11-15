@@ -742,6 +742,7 @@ func (b *Builder) printReactiveDiags(diags []reactive.Diagnostic) {
 // BuildPages rebuilds only the specified pages (by source path).
 // Unlike BuildAll, it does NOT clean the output directory.
 func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
+	resetCanonicalCache()
 	if len(pages) == 0 {
 		return nil, nil
 	}
@@ -936,6 +937,7 @@ func (b *Builder) guardOutDir() error {
 
 func (b *Builder) BuildAll() error {
 	defer b.phase("build:total")()
+	resetCanonicalCache()
 	if err := b.contextErr(); err != nil {
 		return err
 	}

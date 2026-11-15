@@ -258,9 +258,10 @@ func (b *Builder) prepareClientBoundaries(bundle *bundler.Bundle, ann *irtree.An
 	}
 	sort.Strings(paths)
 	var out []ClientBoundary
+	target := starTargets(bundle)
 	for _, p := range paths {
 		mod := clientMods[p]
-		exports, err := clientModuleExports(mod, starTargets(bundle))
+		exports, err := clientModuleExports(mod, target)
 		if err != nil {
 			return nil, err
 		}
