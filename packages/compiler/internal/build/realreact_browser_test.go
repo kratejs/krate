@@ -1,6 +1,8 @@
 package build
 
 import (
+	"github.com/kratejs/krate/packages/compiler/internal/config"
+	"github.com/kratejs/krate/packages/compiler/internal/migrate"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -450,6 +452,114 @@ export default function Page() {
 		t.Fatalf("BuildAll: %v\n%s", err, out)
 	}
 	base, err := startKrateServer(t, root, b.Cfg)
+	if err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+	out, err := exec.Command("node", script, browser, base).CombinedOutput()
+	if err != nil {
+		if strings.Contains(string(out), "Executable doesn't exist") || strings.Contains(string(out), "browserType.launch") {
+			requireE2E(t, "%s browser is not installed: %s", browser, out)
+		}
+		t.Fatalf("browser checks failed: %v\n%s", err, out)
+	}
+}
+
+// TestBrowserMigratedDynamicLoaders migrates next/dynamic calls whose loader
+// resolves to a named export, to a bare component, or to a default export, and
+// renders them in a Preact island and a real-React island: lazy() needs a
+// { default } module, so migrate normalizes the loader result.
+func TestBrowserMigratedDynamicLoaders(t *testing.T) {
+	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
+	if browser == "" {
+		t.Skip("set KRATE_BROWSER=chromium|firefox|webkit to run browser checks")
+	}
+	if _, err := exec.LookPath("node"); err != nil {
+		requireE2E(t, "node is not installed")
+	}
+	if err := exec.Command("node", "-e", "require.resolve('playwright')").Run(); err != nil {
+		requireE2E(t, "playwright is not installed (run pnpm install)")
+	}
+	script, err := filepath.Abs(filepath.Join("testdata", "browser_dynamic_lazy.mjs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo, err := repoRootPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	e2eEnv(t)
+	realReactFixtureFrom(t, root, repo)
+	writeProjectFile(t, root, "node_modules/envlib/package.json", `{"name":"envlib","version":"1.0.0","main":"index.js","peerDependencies":{"react":"^19.0.0"}}`)
+	writeProjectFile(t, root, "node_modules/envlib/index.js", `import { jsx } from 'react/jsx-runtime';
+import { useState } from 'react';
+export function useCount() {
+	const [n] = useState(1);
+	return n;
+}
+`)
+	// The dynamic() calls live in the island modules themselves, so React's
+	// own lazy() runs them.
+	island := func(imports, lead, kind string) string {
+		return `'use client';
+import dynamic from 'next/dynamic';
+import { Suspense } from 'react';
+` + imports + `
+const Named = dynamic(() => import('./pane').then((m) => m.NamedPane));
+const Plain = dynamic(() => import('./y'));
+function BarePane() { return <i id="bare-` + kind + `">BARE</i>; }
+const Bare = dynamic(() => import('./x').then(() => BarePane));
+
+export default function Island() {
+	return (
+		<div>
+			` + lead + `
+			<Suspense fallback={null}>
+				<Bare />
+				<Named kind="` + kind + `" />
+				<Plain kind="` + kind + `" />
+			</Suspense>
+		</div>
+	);
+}
+`
+	}
+	for rel, content := range map[string]string{
+		"package.json":       `{"name":"dyn","private":true,"dependencies":{"next":"16.0.0","react":"19.0.0"}}`,
+		"src/app/layout.tsx": `export default function RootLayout({ children }) { return <html><body>{children}</body></html>; }`,
+		"src/app/page.tsx": `import Real from '../components/Real';
+import Pre from '../components/Pre';
+export default function Home() { return <main><Real /><Pre /></main>; }`,
+		"src/components/pane.tsx": `export function NamedPane({ kind }: { kind: string }) { return <b id={'named-' + kind}>NAMED</b>; }`,
+		"src/components/x.ts":     `export const unused = 1;`,
+		"src/components/y.tsx":    `export default function Y({ kind }: { kind: string }) { return <u id={'default-' + kind}>DEFAULT</u>; }`,
+		"src/components/Real.tsx": island("import { Canvas, Rect } from 'fake-canvas';", `<Canvas id="cv" width={20} height={20}><Rect x={0} y={0} w={5} h={5} fill="red" /></Canvas>`, "real"),
+		"src/components/Pre.tsx":  island("import { useCount } from 'envlib';", `<p id="plain">{useCount()}</p>`, "preact"),
+	} {
+		writeFileRel(t, root, rel, content)
+	}
+	rep, err := migrate.ScanNext(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := migrate.Apply(rep, migrate.ApplyOptions{Force: true}); err != nil {
+		t.Fatal(err)
+	}
+	prepareMigratedRuntime(t, root)
+	t.Chdir(root)
+	cfg, err := config.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := New(root, cfg)
+	b.SkipQualityChecks = true
+	if out, err := captureOutput(func() error { return b.BuildAll() }); err != nil {
+		t.Fatalf("BuildAll: %v\n%s", err, out)
+	}
+	if !canStopInProcessServer {
+		t.Skip("cannot stop an in-process server on this platform")
+	}
+	base, err := startKrateServer(t, root, cfg)
 	if err != nil {
 		t.Fatalf("serve: %v", err)
 	}

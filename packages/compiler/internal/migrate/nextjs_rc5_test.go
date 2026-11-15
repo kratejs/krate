@@ -273,3 +273,37 @@ func TestMovedAppFilesReferencedByWorkspaceSiblingAreReported(t *testing.T) {
 		t.Fatalf("sibling stylesheet reference not reported: %+v", rep.Manual)
 	}
 }
+
+func TestMigrateDynamicNormalizesLoaderResult(t *testing.T) {
+	src := "import dynamic from 'next/dynamic';\n" +
+		"const Named = dynamic(() => import('./pane').then((m) => m.ThreeDPane));\n" +
+		"const Ident = dynamic(() => import('./z').then(() => ZPane));\n" +
+		"const Bare = dynamic(() => import('./x').then(() => () => null));\n" +
+		"const Plain = dynamic(() => import('./y'));\n" +
+		"export default function P() { return <main><Named /><Bare /><Plain /></main>; }\n"
+	out, _, ok := rewriteNextDynamic(src, true)
+	if !ok {
+		t.Fatalf("rewrite failed:\n%s", out)
+	}
+	for _, want := range []string{
+		"const Named = lazy(() => import('./pane').then((m) => ({ default: m.ThreeDPane })));\n",
+		"const Bare = lazy(() => import('./x').then(() => () => null).then(asLazyModule));\n",
+		"const Ident = lazy(() => import('./z').then(() => ({ default: ZPane })));\n",
+		"const Plain = lazy(() => import('./y'));\n",
+		"function asLazyModule(m: any) {\n  return m && typeof m === \"object\" && \"default\" in m ? m : { default: m };\n}\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q:\n%s", want, out)
+		}
+	}
+	if n := strings.Count(out, "function asLazyModule"); n != 1 {
+		t.Errorf("helper declared %d times:\n%s", n, out)
+	}
+	if again, _, ok := rewriteNextDynamic(out, true); ok && again != out {
+		t.Errorf("second run changed the output:\n%s", again)
+	}
+	js, _, _ := rewriteNextDynamic(src, false)
+	if !strings.Contains(js, "function asLazyModule(m) {") {
+		t.Errorf("a .js source must not get a type annotation:\n%s", js)
+	}
+}

@@ -179,7 +179,12 @@ The first pass:
   `unstable_rethrow`, `useServerInsertedHTML`) stay on `next/navigation` and are
   listed as manual work. `next/headers` and `next/cache` map to
   `@krate/runtime/server`, rewrites common `next/server` API helpers, and maps
-  `next/dynamic` loaders to React `lazy()`. A `dynamic(() => import('./x'),
+  `next/dynamic` loaders to React `lazy()`. Next accepts a loader that resolves
+  to a module or straight to a component, but `lazy()` needs `{ default }`, so
+  `.then((m) => m.Pane)` becomes `.then((m) => ({ default: m.Pane }))`,
+  `.then(() => Pane)` becomes `.then(() => ({ default: Pane }))`, and any other
+  loader that post-processes the import is wrapped in a small `asLazyModule`
+  helper added to the file. A `dynamic(() => import('./x'),
   { ssr: false, loading })` call (with or without a type argument,
   `dynamic<Props>(...)`) becomes a module-level `lazy()` plus a component that
   renders the `loading` fallback until it has mounted in the browser, then the

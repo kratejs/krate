@@ -416,6 +416,11 @@ host code runs in the native process. Names and options may change between relea
   is passed as an ordinary prop instead of binding to the Preact component instance. Radix `asChild` triggers
   (`TooltipTrigger`, `DropdownMenuTrigger`, `DialogTrigger`, `PopoverTrigger`) around shadcn-style components no longer
   throw `getBoundingClientRect is not a function` or `addEventListener is not a function`, on Preact 10 and 11.
+- `krate migrate nextjs` gives `lazy()` the `{ default }` module it needs when a `next/dynamic` loader resolves
+  to a named export or straight to a component, which Next allows: `.then((m) => m.Pane)` becomes
+  `.then((m) => ({ default: m.Pane }))`, `.then(() => Pane)` becomes `.then(() => ({ default: Pane }))`, and
+  other `.then(...)` loaders go through an `asLazyModule` helper added to the file. Before, such loaders failed
+  with `Minified React error #306` in real-React islands.
 - An unset `process.env.X` in browser code (Preact and real-React islands, client boundaries, lazy chunks, workers and
   library code such as polygon-clipping) reads as `undefined` instead of throwing `ReferenceError: process is not
   defined`; a bare `process.env` and `process.env[name]` work too. Set `KRATE_PUBLIC_*` values and `NODE_ENV` are still
