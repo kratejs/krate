@@ -1542,6 +1542,27 @@ never reach the component.
   serializable (as for any client component); children may be host elements and
   other real-React components, with serializable props.
 
+### Modules shared with Preact islands
+
+Preact islands and real-React islands are bundled separately, because `react`
+is preact/compat in one and the project's React in the other. A module both
+reach that does not depend on React, directly or through its imports, is
+bundled **once**, into a shared chunk both import, so there is one instance of
+it on the page: a cache, a promise that dedupes a fetch, an event emitter or a
+store made with `zustand/vanilla` holds one value for both kinds of island. The
+chunk exports only what the islands import from it, so a large library both
+reach is still tree shaken.
+
+A module that imports React, or a library built on it (a zustand `create`
+store, a module that calls `createContext`), needs a copy for each kind of
+island, and the copies do not share module-level state. The build reports such
+a module when it declares state (a `let` or `var`, an object made with `new`,
+or a store) with `KR8017`, naming the file and the import that ties it to
+React. Keep the state in a module without React and import it from the hook
+module. Contexts are the exception: a context from a provider in a layout
+reaches both kinds of island (see
+[server components](/docs/features/server-components/)).
+
 ### What it costs
 
 Real React is not part of Krate's runtime, and the 25 KB counter-page figure

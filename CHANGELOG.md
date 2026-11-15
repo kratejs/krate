@@ -416,6 +416,11 @@ host code runs in the native process. Names and options may change between relea
   library code such as polygon-clipping) reads as `undefined` instead of throwing `ReferenceError: process is not
   defined`; a bare `process.env` and `process.env[name]` work too. Set `KRATE_PUBLIC_*` values and `NODE_ENV` are still
   inlined.
+- A module that both Preact islands and real-React islands import, and that does not depend on React (for example a
+  cache with `let attempt: Promise<boolean> | null` that dedupes a fetch), is bundled once into a shared `isn_*` chunk that
+  both import, instead of once per island bundle, so its module-level state is shared and the fetch runs once. The chunk
+  re-exports only what the islands use, so a library both reach stays tree shaken. A duplicated module that keeps state
+  because it imports React (a zustand `create` store) is reported with `KR8017`.
 - A CSS `@import` of a local stylesheet that does not exist (for example `@import './missing.css'`) now fails
   the build with the file, line and column (KR7145) instead of being shipped as written and 404ing in the
   browser. Remote `@import url(https://...)` is unchanged.

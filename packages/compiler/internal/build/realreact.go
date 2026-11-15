@@ -15,7 +15,6 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/bundler"
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/escape"
-	"github.com/kratejs/krate/packages/compiler/internal/fsutil"
 	"github.com/kratejs/krate/packages/compiler/internal/irtree"
 )
 
@@ -274,7 +273,7 @@ func (b *Builder) realReactMissing(joined string) *bundleError {
 
 // buildRealIslandBundle bundles one page's real-React islands once to surface
 // errors with the page's source location and to collect imported stylesheets.
-// The output is discarded: the shipped chunks come from writeRealIslandBundles.
+// The output is discarded: the shipped chunks come from writeIslandBundles.
 func (b *Builder) buildRealIslandBundle(src, resolveDir string, sink *islandCSSSink) error {
 	guard := b.newUnavailableGuard()
 	opts, err := b.realReactOptions(sink, guard)
@@ -307,12 +306,9 @@ func (b *Builder) buildRealIslandBundle(src, resolveDir string, sink *islandCSSS
 	return &bundleError{Loc: loc, Msg: "bundling real-React island:\n" + joined}
 }
 
-// writeRealIslandBundles bundles every registered real-React island entry into
-// /chunks with code splitting and records the written names in keep.
-func (b *Builder) writeRealIslandBundles(entries []islandEntry, chunksDir string, keep map[string]bool) error {
-	if len(entries) == 0 {
-		return nil
-	}
+// realIslandFlavour returns the build of every registered real-React island
+// entry, bundled into /chunks with code splitting.
+func (b *Builder) realIslandFlavour(entries []islandEntry, chunksDir string) (*islandFlavour, error) {
 	virtual := map[string]islandVirtualModule{}
 	points := make([]api.EntryPoint, 0, len(entries))
 	for _, e := range entries {
@@ -325,68 +321,20 @@ func (b *Builder) writeRealIslandBundles(entries []islandEntry, chunksDir string
 	guard := b.newUnavailableGuard()
 	opts, err := b.realReactOptions(sink, guard)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	opts.AbsWorkingDir = b.Root
 	opts.EntryPointsAdvanced = points
 	opts.Outdir = chunksDir
 	opts.EntryNames = "[name]"
 	opts.ChunkNames = islandRealSharedStem + "[hash]"
 	opts.Splitting = true
 	opts.Plugins = append([]api.Plugin{islandEntryPlugin(entries, virtual)}, opts.Plugins...)
-	result := esbuildBuild(opts)
-	if len(result.Errors) == 0 {
-		names := make([]string, len(points))
-		for i, p := range points {
-			names[i] = p.OutputPath
-		}
-		result.OutputFiles = liveOutputs(result.OutputFiles, names)
+	names := make([]string, len(points))
+	for i, p := range points {
+		names[i] = p.OutputPath
 	}
-	result.Errors = append(result.Errors, guard.errors(result.OutputFiles)...)
-	if len(result.Errors) > 0 {
-		var msgs []string
-		for _, e := range result.Errors {
-			if e.Location != nil {
-				msgs = append(msgs, fmt.Sprintf("%s:%d:%d: %s", b.esbuildFile(e.Location.File), e.Location.Line, e.Location.Column+1, e.Text))
-			} else {
-				msgs = append(msgs, e.Text)
-			}
-		}
-		joined := strings.Join(msgs, "\n")
-		if be := b.realReactMissing(joined); be != nil {
-			return be
-		}
-		return fmt.Errorf("bundling real-React island chunks:\n%s", joined)
-	}
-	rename := map[string]string{}
-	for _, f := range result.OutputFiles {
-		base := filepath.Base(f.Path)
-		if strings.HasPrefix(base, islandRealSharedStem) {
-			rename[base] = strings.ToLower(base)
-		}
-	}
-	if err := os.MkdirAll(chunksDir, 0755); err != nil {
-		return fmt.Errorf("creating chunks dir: %w", err)
-	}
-	for _, f := range result.OutputFiles {
-		base := filepath.Base(f.Path)
-		if strings.HasSuffix(base, ".map") {
-			continue
-		}
-		data := string(f.Contents)
-		for from, to := range rename {
-			if from != to {
-				data = strings.ReplaceAll(data, from, to)
-			}
-		}
-		if to, ok := rename[base]; ok {
-			base = to
-		}
-		keep[base] = true
-		if err := fsutil.WriteFileIfChanged(filepath.Join(chunksDir, base), []byte(data), 0644); err != nil {
-			return fmt.Errorf("writing real-React island chunk: %w", err)
-		}
-	}
-	return nil
+	return &islandFlavour{real: true, opts: opts, names: names, guard: guard, stem: islandRealSharedStem}, nil
 }
 
 // reconcilerGuardPlugin fails a Preact island bundle that pulls in

@@ -24,6 +24,9 @@ const (
 	CodeLayoutProvider Code = "KR8015"
 	// CodeProviderDOM: a provider in a layout renders markup of its own.
 	CodeProviderDOM Code = "KR8016"
+	// CodeIslandModuleDuplicated: a module with module-level state is bundled
+	// for both Preact and real-React islands.
+	CodeIslandModuleDuplicated Code = "KR8017"
 )
 
 func init() {
@@ -155,6 +158,18 @@ func init() {
 				"the islands of its pages do not see its context. Split the component into a provider that renders " +
 				"only its children and the markup, or put the provider inside the island's own module. A provider that adds " +
 				"only `<script>` elements next to its children (next-themes) is lifted.",
+		},
+		CodeInfo{
+			Code:  CodeIslandModuleDuplicated,
+			Title: "Module state is not shared between Preact and real-React islands",
+			Explanation: "Preact islands and real-React islands (those that use a library built on react-reconciler, " +
+				"such as @react-three/fiber) are bundled separately, because `react` means preact/compat in one and " +
+				"the project's React in the other. A module both reach that does not depend on React is bundled once " +
+				"into a shared chunk, so both see one instance. A module that imports React, directly or through its " +
+				"imports, needs a copy for each, and this module also declares module-level state (a `let` or `var`, " +
+				"an object made with `new`, or a store such as zustand's `create`), so the two copies keep separate " +
+				"state: a cache fills twice, a store has two values. Move the state into a module that does not import " +
+				"React, for example a store made with `zustand/vanilla` that a hook module wraps. This is a warning.",
 		},
 		CodeInfo{
 			Code:  CodeClientDirective,
