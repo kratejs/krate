@@ -412,6 +412,8 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- The build plugins that give client code React 19 hooks and value-returning router hooks no longer race when
+  esbuild resolves modules in parallel (a data race under `go test -race`).
 - A server-rendered shadcn `<Button asChild>` no longer emits `<[object Object] ...>`. The server renderer now runs element types
   that are React objects (`forwardRef`, `memo`, `lazy`, context Provider and Consumer) as components, whether they are used directly,
   through a variable tag or as `Slot.Root`, and Radix's `Slot` merges its props onto the child. Any other object or symbol type is a
@@ -431,8 +433,6 @@ host code runs in the native process. Names and options may change between relea
   request headers (`x-middleware-override-headers` and `x-middleware-request-<name>`, as in Next.js) in the
   embedded, Node and serverless runtimes, and layouts see them through `headers()`. A middleware rewrite no
   longer triggers the `trailingSlash: "never"` redirect.
-- `krate migrate nextjs`: the public env report looks for `NEXT_PUBLIC_*` definitions in `envDir` (from
-  `loadEnvConfig`) as well as the project, instead of saying "no .env definition found".
 - Builds of large apps with many client components are about twice as fast: the client-boundary pass resolved
   the real path of every module once per client module. Real paths are now cached for the duration of a build.
 - `krate migrate nextjs`: a route segment named like a Krate special file (`app/auth/error/page.tsx`,
