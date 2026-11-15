@@ -29,6 +29,11 @@ type nextConfigData struct {
 	// the same name to the Krate config keys of the same name.
 	ServerExternalPackages    []string            `json:"serverExternalPackages,omitempty"`
 	OutputFileTracingIncludes map[string][]string `json:"outputFileTracingIncludes,omitempty"`
+	// TrailingSlash is "always" when next.config sets trailingSlash: true and
+	// "never" otherwise (Next's URL form).
+	TrailingSlash string `json:"trailingSlash,omitempty"`
+	// Tailwind is true when the project's PostCSS config runs Tailwind.
+	Tailwind bool `json:"-"`
 }
 
 type nextRedirect struct {
@@ -102,6 +107,15 @@ func readNextConfig(path string) (data nextConfigData, notes nextConfigNotes, ok
 			out.BasePath = s
 		} else {
 			notes.Manual = append(notes.Manual, ManualItem{Source: file, Reason: "basePath is computed and was not translated", Hint: "set basePath in krate.config.ts (see Base path in the config reference)"})
+		}
+	}
+	if v := prop(obj, "trailingSlash"); v != nil {
+		if on, ok := boolValue(v); ok {
+			if on {
+				out.TrailingSlash = "always"
+			}
+		} else {
+			notes.Manual = append(notes.Manual, ManualItem{Source: file, Reason: "trailingSlash is computed and was not translated", Hint: "set trailingSlash in krate.config.ts: \"always\" matches trailingSlash: true, \"never\" matches Next.js' default of false"})
 		}
 	}
 	if v := prop(obj, "redirects"); v != nil {
@@ -348,6 +362,12 @@ func configJSON(entry string, next nextConfigData) []byte {
 	if len(next.Head) > 0 {
 		opts["head"] = next.Head
 	}
+	if v := trailingSlashValue(next); v != "" {
+		opts["trailingSlash"] = v
+	}
+	if next.Tailwind {
+		opts["tailwind"] = map[string]any{"enabled": true}
+	}
 	if next.BasePath != "" {
 		opts["basePath"] = next.BasePath
 	}
@@ -398,4 +418,25 @@ func staticStringMap(e ast.Expr) (map[string]string, bool) {
 		out[p.Key] = s
 	}
 	return out, true
+}
+
+// trailingSlashValue is the trailingSlash setting to write: Next serves
+// /store (no slash) unless next.config sets trailingSlash: true.
+func trailingSlashValue(next nextConfigData) string {
+	if next.TrailingSlash == "always" {
+		return "always"
+	}
+	return "never"
+}
+
+var postcssTailwind = regexp.MustCompile(`@tailwindcss/postcss|\btailwindcss\b`)
+
+// usesTailwindPostCSS reports whether a root postcss.config file runs Tailwind.
+func usesTailwindPostCSS(root string) bool {
+	for _, name := range []string{"postcss.config.mjs", "postcss.config.js", "postcss.config.cjs", "postcss.config.ts", "postcss.config.mts", "postcss.config.cts"} {
+		if data, err := os.ReadFile(filepath.Join(root, name)); err == nil && postcssTailwind.Match(data) {
+			return true
+		}
+	}
+	return false
 }

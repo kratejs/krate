@@ -172,7 +172,28 @@ The first pass:
   `unstable_rethrow`, `useServerInsertedHTML`) stay on `next/navigation` and are
   listed as manual work. `next/headers` and `next/cache` map to
   `@krate/runtime/server`, rewrites common `next/server` API helpers, and maps
-  simple `next/dynamic` loaders to React `lazy()`;
+  `next/dynamic` loaders to React `lazy()`. A `dynamic(() => import('./x'),
+  { ssr: false, loading })` call (with or without a type argument,
+  `dynamic<Props>(...)`) becomes a module-level `lazy()` plus a component that
+  renders the `loading` fallback until it has mounted in the browser, then the
+  lazy component: the page HTML holds the fallback, the component lives in its
+  own `lazy-*.js` chunk and the build still renders it once, hidden, so a viewer
+  that touches `window` while rendering needs a real-React island (see
+  [React compatibility](/docs/guides/react-compatibility/#libraries-built-on-a-react-reconciler-real-react-islands))
+  or a guard. A `loading` that is not an arrow function returning JSX or a
+  component name, and `ssr: false` outside a top-level `const`, are manual items;
+- converts `next/script`: `<Script strategy="afterInteractive">` (the default)
+  becomes a Krate `<Script defer>`, `lazyOnload` an `async` one and
+  `beforeInteractive` a `<script>` inside `<Head>`; `src`, `id`, `data-*`
+  attributes and inline children are kept. `strategy="worker"` and computed
+  strategies are loaded deferred on the main thread and listed as manual items,
+  as are `onLoad`, `onReady` and `onError` handlers, which a static `<script>`
+  cannot run. `after()` from `next/server` becomes `after` from
+  `@krate/runtime/server` in pages and layouts as well as route handlers;
+- writes `trailingSlash: "never"` into `krate.config.ts` (Next's URL form: `/store`
+  answers 200, `/store/` redirects), or `"always"` when `next.config` sets
+  `trailingSlash: true`, and `tailwind: { enabled: true }` when `postcss.config.*`
+  uses `@tailwindcss/postcss` or `tailwindcss`;
 - keeps `NextRequest` features in route handlers: the `Request` has
   `request.cookies` (`get`, `getAll`, `has`, read-only) and `request.nextUrl`
   (a `URL` with `searchParams`, `pathname`, `basePath` and `clone()`; the

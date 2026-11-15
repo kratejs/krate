@@ -238,6 +238,21 @@ func resolveMatcherArray(e ast.Expr, prog *ast.Program, seen map[string]bool) (*
 
 var configExport = regexp.MustCompile(`(?s)export\s+const\s+config\s*(?::[^=]+)?=\s*\{`)
 
+// matcherShim tests a pathname against a Next matcher. Only path-to-regexp
+// parameters (/:name, with a custom (regex) and a * + ? modifier) are
+// rewritten; a regex group such as (?:png|jpe?g) is left as written.
+const matcherShim = `function __krateMatcher(pattern: string, pathname: string): boolean {
+  const source = pattern.replace(/\/:[A-Za-z_]\w*(\((?:\\.|[^()\\])*\))?([*+?])?/g, (_m: string, custom?: string, mod?: string) => {
+    const seg = custom || "[^/]+";
+    if (mod === "*") return "(?:/" + seg + ")*";
+    if (mod === "+") return "(?:/" + seg + ")+";
+    if (mod === "?") return "(?:/" + seg + ")?";
+    return "/" + seg;
+  });
+  return new RegExp("^" + source + "$").test(pathname);
+}
+`
+
 func wrapMiddlewareMatchersDynamic(src string) (string, bool) {
 	if !middlewareExport.MatchString(src) {
 		return "", false
@@ -245,10 +260,7 @@ func wrapMiddlewareMatchersDynamic(src string) (string, bool) {
 	src = middlewareExport.ReplaceAllString(src, "${1}function __krateNextMiddleware")
 	helper := `
 const __krateMatchers = (typeof config !== "undefined" && Array.isArray(config.matcher)) ? config.matcher : [];
-function __krateMatcher(pattern: string, pathname: string): boolean {
-  let source = pattern.replace(/:[^/]+?\*/g, ".*").replace(/:[^/]+/g, "[^/]+");
-  return new RegExp("^" + source + "$").test(pathname);
-}
+` + matcherShim + `
 export function middleware(request: Request) {
   const pathname = new URL(request.url).pathname;
   if (__krateMatchers.length && !__krateMatchers.some((m: string) => __krateMatcher(m, pathname))) return;
@@ -294,10 +306,7 @@ func wrapMiddlewareMatchers(src string, matchers []string) (string, bool) {
 	}
 	helper := `
 const __krateMatchers = ` + string(quoted) + `;
-function __krateMatcher(pattern: string, pathname: string): boolean {
-  let source = pattern.replace(/:[^/]+?\*/g, ".*").replace(/:[^/]+/g, "[^/]+");
-  return new RegExp("^" + source + "$").test(pathname);
-}
+` + matcherShim + `
 export function middleware(request: Request) {
   const pathname = new URL(request.url).pathname;
   if (!__krateMatchers.some((m: string) => __krateMatcher(m, pathname))) return;
