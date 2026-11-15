@@ -61,7 +61,7 @@ func newIslandServerStubs(prog *ast.Program, exts []irtree.ExternalComponent, ht
 		roots[e.Local] = true
 		st.Attrs = append(st.Attrs, islandStubAttr{Offset: e.Offset, ID: e.ID})
 		if h := html[e.ID]; h != "" {
-			st.HTML[e.ID] = h
+			st.HTML[e.ID] = requestHeadMarkers(h)
 		}
 	}
 	if len(roots) == 0 {
@@ -120,6 +120,18 @@ func newIslandServerStubs(prog *ast.Program, exts []irtree.ExternalComponent, ht
 		return nil
 	}
 	return st
+}
+
+// requestHeadMarkers turns the <krate-head> wrappers of build-time island
+// markup (its <Head> tags and resource hints) into the comment markers of a
+// request-time <Head>, which the server renderer moves into the head of the
+// response (head-tags.ts takeHead).
+func requestHeadMarkers(html string) string {
+	body, blocks := liftIslandHeadBlocks(html)
+	if len(blocks) == 0 {
+		return html
+	}
+	return body + "<!--krate-head-->" + strings.Join(blocks, "") + "<!--/krate-head-->"
 }
 
 // applyAttrs puts the id of each island on its root tag in the page source.

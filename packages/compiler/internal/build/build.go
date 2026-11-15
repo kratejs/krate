@@ -314,6 +314,9 @@ type Builder struct {
 	shippedWarned sync.Map
 	// gspMemo caches one resolveStaticParamsPage result per page per build.
 	gspMemo sync.Map
+	// realHintsMemo holds the resource hints of each real-React component the
+	// build rendered for them, by hints entry source (see realhints.go).
+	realHintsMemo sync.Map
 	// progIconDiags holds the unresolved <Icon> diagnostics of each program.
 	progIconDiags sync.Map
 	// progImageDiags holds the <Image> diagnostics of each transformed program.
@@ -3373,6 +3376,7 @@ func (b *Builder) resetBuildCaches() {
 	b.collectionSites = sync.Map{}
 	b.templateCovered = sync.Map{}
 	b.gspMemo = sync.Map{}
+	b.realHintsMemo = sync.Map{}
 	b.paramBindings = sync.Map{}
 	b.shippedWarned = sync.Map{}
 	// Go component parses are per-build.

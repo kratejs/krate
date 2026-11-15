@@ -51,6 +51,9 @@ type ClientBoundary struct {
 	// reconciler library or a module that imports one. The server emits a
 	// fallback placeholder instead of rendering it (see realreact.go).
 	Real bool
+	// Hints are the resource hint tags of each export of a real-React
+	// boundary, collected at build time (see realhints.go).
+	Hints map[string][]string
 }
 
 // hydrates reports whether the boundary's components become islands.
@@ -296,6 +299,7 @@ func (b *Builder) prepareClientBoundaries(bundle *bundler.Bundle, ann *irtree.An
 		if realMods[p] {
 			cb := ClientBoundary{ModuleID: clientModuleID(b.Root, mod.Path), SourcePath: mod.Path, Exports: exports, Real: true}
 			cb.ChunkURL = b.registerRealBoundary(cb)
+			cb.Hints = b.realBoundaryHints(cb)
 			out = append(out, cb)
 			continue
 		}

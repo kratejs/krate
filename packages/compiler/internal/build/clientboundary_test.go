@@ -698,12 +698,12 @@ export default async function Home() {
 	}
 	head := html[:strings.Index(html, "</head>")]
 	for _, want := range []string{
-		`<link rel="preload" href="/model.glb" as="fetch" crossorigin="anonymous" fetchpriority="high">`,
-		`<link rel="preconnect" href="https://cdn.example.com" crossorigin="anonymous">`,
+		`<link rel="preload" href="/model.glb" as="fetch" crossorigin="" fetchpriority="high">`,
+		`<link rel="preconnect" href="https://cdn.example.com" crossorigin="">`,
 		`<link rel="dns-prefetch" href="https://dns.example.com">`,
 		`<link rel="stylesheet" href="/app.css">`,
 		`<link rel="modulepreload" href="/mod.js">`,
-		`<link rel="preload" href="/m.wasm" as="fetch" crossorigin="anonymous" type="application/wasm">`,
+		`<link rel="preload" href="/m.wasm" as="fetch" crossorigin="" type="application/wasm">`,
 	} {
 		if strings.Count(head, want) != 1 {
 			t.Errorf("head must hold %s once:\n%s", want, head)

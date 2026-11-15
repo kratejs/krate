@@ -419,8 +419,15 @@ func realBoundaryExports(sb *strings.Builder, cb ClientBoundary, seen map[string
 		if seen != nil {
 			seen[name] = true
 		}
-		wrapped := fmt.Sprintf("__krateCB(%s, %s, %s, function %s() { return null; }, __fallback, true, true)",
-			strconv.Quote(cb.ModuleID), strconv.Quote(name), strconv.Quote(cb.ChunkURL), stubFuncName(name))
+		render := "__fallback"
+		if tags := cb.Hints[name]; len(tags) > 0 {
+			if !strings.Contains(sb.String(), "__krateHintTags }") {
+				sb.WriteString("import { krateHintTags as __krateHintTags } from \"@krate/runtime/hints\";\n")
+			}
+			render = realBoundaryHintsJS(tags)
+		}
+		wrapped := fmt.Sprintf("__krateCB(%s, %s, %s, function %s() { return null; }, %s, true, true)",
+			strconv.Quote(cb.ModuleID), strconv.Quote(name), strconv.Quote(cb.ChunkURL), stubFuncName(name), render)
 		if name == "default" {
 			fmt.Fprintf(sb, "export default %s;\n", wrapped)
 		} else {
