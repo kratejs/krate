@@ -300,7 +300,7 @@ func (b *Builder) buildDynamicDataRoute(f metaRouteFile, revalidate int) (metaRo
 		Bundle:        true,
 		Platform:      api.PlatformNode,
 		Format:        api.FormatESModule,
-		Plugins:       []api.Plugin{jseval.MarkerPackagesPlugin(), externalNodeModulesPlugin()},
+		Plugins:       []api.Plugin{jseval.MarkerPackagesPlugin(), externalNodeModulesPlugin(outPath)},
 		Outfile:       outPath,
 		Write:         true,
 		Sourcemap:     sourceMapMode(b.Cfg.Sourcemap),

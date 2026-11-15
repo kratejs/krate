@@ -912,7 +912,7 @@ export function __krate_render(C, props) {
 		Alias:           islandAlias(c.root, false),
 		External:        []string{"preact", "preact/compat", "preact/hooks", "preact/jsx-runtime"},
 		Inject:          []string{shim},
-		Plugins:         []api.Plugin{purePrunePlugin(c.root), guard.plugin(), serverCSSPlugin(c.root), *plugin, clientOnlyMarkersPlugin(false), actionServerBundlePlugin(c.res, c.actions, c.basePath)},
+		Plugins:         []api.Plugin{purePrunePlugin(c.root), guard.plugin(), serverCSSPlugin(c.root), *plugin, clientOnlyMarkersPlugin(false), actionServerBundlePlugin(c.res, c.actions, c.basePath), pathAliasPlugin(c.res), preactRequirePlugin()},
 		LogLevel:        api.LogLevelSilent,
 	})
 	if len(result.Errors) == 0 {
@@ -1140,4 +1140,46 @@ func metafileInputs(root, metafile string) map[string]bool {
 		}
 	}
 	return out
+}
+
+// preactRequireTargets maps the React specifiers a bundled CommonJS module may
+// require() to the Preact module that stands in for them (the same mapping as
+// islandAlias, which only covers import statements).
+var preactRequireTargets = map[string]string{
+	"react":                 "preact/compat",
+	"react-dom":             "preact/compat",
+	"react-dom/client":      "preact/compat",
+	"react/jsx-runtime":     "preact/jsx-runtime",
+	"react/jsx-dev-runtime": "preact/jsx-runtime",
+	"preact":                "preact",
+	"preact/compat":         "preact/compat",
+	"preact/hooks":          "preact/hooks",
+	"preact/jsx-runtime":    "preact/jsx-runtime",
+}
+
+// preactRequirePlugin turns require() of React or Preact in a bundled CommonJS
+// module into a small ESM wrapper over the external Preact module. A plain
+// external require would load Preact's CommonJS build, a second copy next to
+// the ESM one the rest of the bundle imports, with its own hook state.
+func preactRequirePlugin() api.Plugin {
+	const ns = "krate-preact-require"
+	return api.Plugin{
+		Name: "krate-preact-require",
+		Setup: func(b api.PluginBuild) {
+			b.OnResolve(api.OnResolveOptions{Filter: `^(react|react-dom|react-dom/client|react/jsx-runtime|react/jsx-dev-runtime|preact|preact/compat|preact/hooks|preact/jsx-runtime)$`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+				if args.Kind != api.ResolveJSRequireCall {
+					return api.OnResolveResult{}, nil
+				}
+				return api.OnResolveResult{Path: preactRequireTargets[args.Path], Namespace: ns}, nil
+			})
+			b.OnLoad(api.OnLoadOptions{Filter: `.*`, Namespace: ns}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
+				q := strconv.Quote(args.Path)
+				src := "export * from " + q + ";\n"
+				if args.Path == "preact/compat" {
+					src += "export { default } from " + q + ";\n"
+				}
+				return api.OnLoadResult{Contents: &src, Loader: api.LoaderJS}, nil
+			})
+		},
+	}
 }

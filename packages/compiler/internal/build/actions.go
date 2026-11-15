@@ -170,7 +170,7 @@ func (b *Builder) compileActionModule(dir string, mod *actionModule) error {
 		Bundle:        true,
 		Format:        api.FormatESModule,
 		Platform:      api.PlatformNode,
-		Plugins:       []api.Plugin{jseval.MarkerPackagesPlugin(), externalNodeModulesPlugin()},
+		Plugins:       []api.Plugin{jseval.MarkerPackagesPlugin(), externalNodeModulesPlugin(outPath)},
 		Outfile:       outPath,
 		Write:         true,
 		Sourcemap:     sourceMapMode(b.Cfg.Sourcemap),

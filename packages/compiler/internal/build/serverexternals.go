@@ -3,12 +3,14 @@ package build
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 
 	"github.com/evanw/esbuild/pkg/api"
+	"github.com/kratejs/krate/packages/compiler/internal/bundler"
 	"github.com/kratejs/krate/packages/compiler/internal/jseval"
 )
 
@@ -95,13 +97,80 @@ func nativeAddonPlugin(found *nativeAddons, explain func(pkg, file string) strin
 	}
 }
 
+// pathAliasPlugin resolves tsconfig path aliases ("@/components") for bundles
+// that set TsconfigRaw, which makes esbuild ignore the project's tsconfig.json.
+// It must come before externalNodeModulesPlugin, which would otherwise take an
+// alias for an npm package. Importers inside node_modules are left alone.
+func pathAliasPlugin(res *bundler.ImportResolver) api.Plugin {
+	return api.Plugin{
+		Name: "krate-path-alias",
+		Setup: func(b api.PluginBuild) {
+			b.OnResolve(api.OnResolveOptions{Filter: `^[^./]`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+				if strings.Contains(filepath.ToSlash(args.Importer), "/node_modules/") {
+					return api.OnResolveResult{}, nil
+				}
+				if p := res.ResolveAlias(args.Path); p != "" {
+					return api.OnResolveResult{Path: p}, nil
+				}
+				return api.OnResolveResult{}, nil
+			})
+		},
+	}
+}
+
+// packageRootOf is the directory of the package a file inside node_modules
+// belongs to, or "" when the file is not inside one.
+func packageRootOf(path string) string {
+	p := filepath.ToSlash(path)
+	i := strings.LastIndex(p, "/node_modules/")
+	if i < 0 {
+		return ""
+	}
+	name := ownerPackage(path)
+	if name == "" {
+		return ""
+	}
+	return filepath.FromSlash(p[:i+len("/node_modules/")] + name)
+}
+
+// visibleFrom reports whether Node, importing the bare package name from a file
+// in dir, would load the package installed at pkgRoot. A workspace package's
+// own dependencies live in its node_modules, which is not on the path of an
+// output directory that belongs to another package.
+func visibleFrom(dir, pkgRoot string) bool {
+	name := ownerPackage(filepath.Join(pkgRoot, "x"))
+	want, err := filepath.EvalSymlinks(pkgRoot)
+	if err != nil || name == "" {
+		return true
+	}
+	dir, err = filepath.Abs(dir)
+	if err != nil {
+		return true
+	}
+	for {
+		if got, err := filepath.EvalSymlinks(filepath.Join(dir, "node_modules", filepath.FromSlash(name))); err == nil && got == want {
+			return true
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return false
+		}
+		dir = parent
+	}
+}
+
 // externalNodeModulesPlugin is api.PackagesExternal that still bundles source:
 // a bare import that resolves to a file outside node_modules (a workspace
 // package symlinked into node_modules, or a tsconfig path alias) is bundled,
 // because Node could not load its TypeScript source at run time. Imports that
-// resolve into node_modules, built-ins and unresolvable names stay external.
-func externalNodeModulesPlugin() api.Plugin {
+// resolve into node_modules and built-ins stay external. A package that Node
+// could not find from outFile (a dependency of a workspace package, which pnpm
+// installs only under that package) is imported by the file URL of the file
+// esbuild resolved, so the bundle loads it from where it is installed. A bare
+// import that does not resolve is left to esbuild, which reports it.
+func externalNodeModulesPlugin(outFile string) api.Plugin {
 	const marker = "krate-external-check"
+	outDir := filepath.Dir(outFile)
 	return api.Plugin{
 		Name: "krate-external-node-modules",
 		Setup: func(b api.PluginBuild) {
@@ -117,16 +186,31 @@ func externalNodeModulesPlugin() api.Plugin {
 					Kind:       args.Kind,
 					PluginData: marker,
 				})
-				if len(r.Errors) > 0 || r.External {
+				if r.External {
 					return api.OnResolveResult{Path: args.Path, External: true}, nil
 				}
+				if len(r.Errors) > 0 {
+					return api.OnResolveResult{}, nil
+				}
 				if strings.Contains(filepath.ToSlash(r.Path), "/node_modules/") {
+					if root := packageRootOf(r.Path); root != "" && outFile != "" && !visibleFrom(outDir, root) {
+						return api.OnResolveResult{Path: fileURL(r.Path), External: true}, nil
+					}
 					return api.OnResolveResult{Path: args.Path, External: true}, nil
 				}
 				return api.OnResolveResult{Path: r.Path, Namespace: r.Namespace}, nil
 			})
 		},
 	}
+}
+
+// fileURL is the file: URL of an absolute path.
+func fileURL(path string) string {
+	p := filepath.ToSlash(path)
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	return (&url.URL{Scheme: "file", Path: p}).String()
 }
 
 func externalPatterns(pkgs []string) []string {

@@ -5242,7 +5242,7 @@ func (b *Builder) compileSingleRoute(file string, apiSrcDir string) (apiRouteMet
 		Bundle:      true,
 		Platform:    api.PlatformNode,
 		Format:      api.FormatESModule,
-		Plugins:     []api.Plugin{jseval.MarkerPackagesPlugin(), externalNodeModulesPlugin()},
+		Plugins:     []api.Plugin{jseval.MarkerPackagesPlugin(), externalNodeModulesPlugin(nodePath)},
 		Outfile:     nodePath,
 		Write:       true,
 		Sourcemap:   sourceMapMode(b.Cfg.Sourcemap),
