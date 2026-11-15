@@ -401,6 +401,21 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- A lazy `import()` in a module that only server code reaches (an API route, an async server page, a
+  server component) no longer becomes a browser chunk, so a `await import('@/server/queues')` that pulls
+  in Node modules no longer stops the build with "dynamic import chunk error".
+- KR8013 is no longer reported for a module without a directive that is imported only through
+  `"use client"` modules; as in Next.js it is client code. Only a hook call the server tree reaches
+  without crossing a client module is an error.
+- KR7116 is no longer reported for one file that the build reaches under two paths (a workspace package
+  linked through `node_modules` and also read by its real path); it listed every export of such a file
+  as clashing with itself, 205 warnings for one migrated monorepo.
+- Build-time evaluation of `metadata`, `generateStaticParams` and endpoint modules resolves npm packages with
+  the Node conditions, so a package with a `browser` entry that throws without a window (such as
+  `node-abort-controller`) no longer fails the layout's metadata with KR7122.
+- A build with many pages could hang for good while planning private-name renames: bundles took the read
+  locks of the shared module programs in different orders and deadlocked against a queued transform. The
+  locks are taken in path order now.
 - A client component or real-React island in a project under a symlinked path (macOS `/var` is
   `/private/var`) gets action references for its `"use server"` imports instead of their server code.
 - Real-React islands (react-three-fiber and other reconciler libraries) no longer bundle server-only code. A

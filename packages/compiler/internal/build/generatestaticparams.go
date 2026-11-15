@@ -221,7 +221,7 @@ func (b *Builder) runGSPBundle(abs, target string, bnd *bundler.Bundler, virtual
 	bootstrap := gspBootstrapJS(filepath.ToSlash(target))
 	resolve := func(importer, spec string) (string, bool) {
 		if bnd != nil {
-			if p := bnd.Resolve(importer, spec); p != "" {
+			if p := bnd.ResolveForNode(importer, spec); p != "" {
 				return p, true
 			}
 		}
@@ -298,7 +298,7 @@ Promise.resolve(fn()).then(function (r) { globalThis.%s = r; }, function () {});
 
 	resolve := func(importer, spec string) (string, bool) {
 		if bnd != nil {
-			if p := bnd.Resolve(importer, spec); p != "" {
+			if p := bnd.ResolveForNode(importer, spec); p != "" {
 				return p, true
 			}
 		}
