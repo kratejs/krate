@@ -2422,7 +2422,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 	if cutErr != nil {
 		return nil, "", cutErr
 	}
-	if len(reactIslands) > 0 && !entryIsAsync(entryModule.Program) && layoutCut == nil {
+	if len(reactIslands) > 0 && !entryIsAsync(entryModule.Program) && (layoutCut == nil || layoutCut.Dropped) {
 		bundle.Modules = krateSideModules(bundle.Modules, entryModule, reactIslands, bnd.Resolve)
 	}
 

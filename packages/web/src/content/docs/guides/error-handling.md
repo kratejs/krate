@@ -135,6 +135,9 @@ Under an [async layout](/docs/features/server-components/#async-layouts) the
 page renders per request, so `error.tsx` catches on the server instead: a page
 that throws renders the error page inside the layout (status `500` with
 `Cache-Control: no-store`, a generic message and a `digest`), and `reset()` reloads the page.
+`retry` is the same function under another name. When the async layout itself
+fails, the error page is the prerendered one, built without that layout, so it
+never depends on the renderer.
 
 `forbidden.tsx` (403) and `unauthorized.tsx` (401) work the same way for the
 `forbidden()` and `unauthorized()` calls; see
