@@ -215,7 +215,7 @@ export default {
 
 func TestNextConfigPerKeyReports(t *testing.T) {
 	rep := scanConfig(t, map[string]string{"next.config.ts": `import { loadEnvConfig } from '@next/env';
-loadEnvConfig('../..');
+loadEnvConfig(process.env.ENV_ROOT);
 export default {
   output: 'standalone',
   transpilePackages: ['@acme/ui'],

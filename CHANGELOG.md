@@ -412,6 +412,14 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- `krate migrate nextjs`: a route segment named like a Krate special file (`app/auth/error/page.tsx`,
+  `loading`, `not-found`, `404`, `500`, `template` and the others) now migrates to `<segment>/index.tsx`
+  instead of `error.tsx`, which Krate treated as a segment error boundary and failed the build.
+- `krate migrate nextjs`: a `loadEnvConfig(path)` call in `next.config` with a static path (a literal,
+  `path.resolve(__dirname, '../..')`, `join(process.cwd(), '..', '..')`, `fileURLToPath(new URL(...))`)
+  now writes the matching `envDir`, so a monorepo-root `.env` is read; only a path that cannot be
+  resolved statically stays a manual item.
+
 - Server bundles (`krate start`, SSR and ISR pages) apply the project's tsconfig `paths`, including
   ones inherited through `extends`, so `@/components/x` imports no longer stay as bare package imports
   that fail with `ERR_MODULE_NOT_FOUND` and answer 500.
