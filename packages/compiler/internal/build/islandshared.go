@@ -60,8 +60,8 @@ type islandMetaImport struct {
 // a Windows drive letter is not one.
 var metaNamespaceRe = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]+:`)
 
-// neutralKey turns a metafile input path into the key the shared-module
-// plugin computes from an OnResolve importer.
+// neutralKey turns a metafile path into an absolute slash path (or keeps a
+// plugin namespace path as it is).
 func neutralKey(root, p string) string {
 	if strings.HasPrefix(p, "(") || metaNamespaceRe.MatchString(p) {
 		return p
@@ -82,9 +82,12 @@ func neutralEdgeKey(importer, spec string) string {
 	return importer + "\x00" + spec
 }
 
+// neutralImporterKey is the canonical key of an OnResolve importer: esbuild
+// names a file by its real path, while metafile paths are relative to the
+// project root, which may be a symlink.
 func neutralImporterKey(args api.OnResolveArgs) string {
 	if args.Namespace == "file" || args.Namespace == "" {
-		return filepath.ToSlash(filepath.Clean(args.Importer))
+		return filepath.ToSlash(canonicalPath(args.Importer))
 	}
 	return args.Namespace + ":" + args.Importer
 }
@@ -103,17 +106,9 @@ type islandSharePlan struct {
 // shareable too. A module a graph reaches directly must be ESM and imported
 // by import statements or import(), so the graph can import it from a chunk.
 func planSharedIslandModules(root string, metas []*islandMetafile) islandSharePlan {
-	type node struct {
-		format  string
-		imports []islandMetaImport
-	}
-	graphs := make([]map[string]node, len(metas))
+	graphs := make([]map[string]metaNode, len(metas))
 	for i, m := range metas {
-		g := map[string]node{}
-		for p, in := range m.Inputs {
-			g[p] = node{format: in.Format, imports: in.Imports}
-		}
-		graphs[i] = g
+		graphs[i] = canonicalGraph(root, m)
 	}
 	ok := map[string]bool{}
 	for p, n := range graphs[0] {
@@ -157,7 +152,7 @@ func planSharedIslandModules(root string, metas []*islandMetafile) islandSharePl
 					continue
 				}
 				for _, imp := range n.imports {
-					if !ok[imp.Path] {
+					if !ok[imp.Path] || syntheticImport(imp) {
 						continue
 					}
 					if graphs[0][imp.Path].format != "esm" || imp.Kind != "import-statement" && imp.Kind != "dynamic-import" {
@@ -176,7 +171,7 @@ func planSharedIslandModules(root string, metas []*islandMetafile) islandSharePl
 		return plan
 	}
 	for p := range ok {
-		plan.shared[neutralKey(root, p)] = true
+		plan.shared[p] = true
 	}
 	boundary := map[string]bool{}
 	for i, g := range graphs {
@@ -186,10 +181,9 @@ func planSharedIslandModules(root string, metas []*islandMetafile) islandSharePl
 				continue
 			}
 			for _, imp := range n.imports {
-				if ok[imp.Path] {
-					key := neutralKey(root, imp.Path)
-					edges[neutralEdgeKey(neutralKey(root, p), imp.Original)] = key
-					boundary[key] = true
+				if ok[imp.Path] && !syntheticImport(imp) {
+					edges[neutralEdgeKey(p, imp.Original)] = imp.Path
+					boundary[imp.Path] = true
 				}
 			}
 		}
@@ -200,6 +194,37 @@ func planSharedIslandModules(root string, metas []*islandMetafile) islandSharePl
 	}
 	sort.Strings(plan.boundary)
 	return plan
+}
+
+// metaNode is one module of a graph, keyed by its canonical path: the two
+// graphs may reach one file by different paths (a symlinked directory, or
+// macOS's /var and /private/var).
+type metaNode struct {
+	format  string
+	imports []islandMetaImport // Path is canonical, except for externals
+}
+
+func canonicalMetaKey(root, p string) string {
+	k := neutralKey(root, p)
+	if strings.HasPrefix(k, "(") || metaNamespaceRe.MatchString(k) {
+		return k
+	}
+	return filepath.ToSlash(canonicalPath(filepath.FromSlash(k)))
+}
+
+func canonicalGraph(root string, m *islandMetafile) map[string]metaNode {
+	g := make(map[string]metaNode, len(m.Inputs))
+	for p, in := range m.Inputs {
+		imports := make([]islandMetaImport, len(in.Imports))
+		for i, imp := range in.Imports {
+			if !imp.External {
+				imp.Path = canonicalMetaKey(root, imp.Path)
+			}
+			imports[i] = imp
+		}
+		g[canonicalMetaKey(root, p)] = metaNode{format: in.Format, imports: imports}
+	}
+	return g
 }
 
 // syntheticImport reports an import esbuild adds for a define or an inject
@@ -370,7 +395,7 @@ const islandNeutralEntryPrefix = "isn_"
 // it is revalidated, never cached as immutable.
 func neutralEntryName(root, key string) string {
 	rel := key
-	if r, err := filepath.Rel(root, filepath.FromSlash(key)); err == nil {
+	if r, err := filepath.Rel(canonicalPath(root), filepath.FromSlash(key)); err == nil {
 		rel = filepath.ToSlash(r)
 	}
 	sum := sha256.Sum256([]byte(rel))
@@ -619,27 +644,28 @@ func (b *Builder) warnDuplicatedIslandModules(metas []*islandMetafile) {
 	if len(metas) < 2 {
 		return
 	}
+	graphs := make([]map[string]metaNode, len(metas))
+	for i, m := range metas {
+		graphs[i] = canonicalGraph(b.Root, m)
+	}
 	var ds []diag.Diagnostic
 	var paths []string
-	for p := range metas[0].Inputs {
-		if strings.HasPrefix(p, "(") || metaNamespaceRe.MatchString(p) || !neutralScriptExts[strings.ToLower(filepath.Ext(p))] {
+	root, out := canonicalPath(b.Root), canonicalPath(b.Cfg.OutDir)
+	for key := range graphs[0] {
+		if strings.HasPrefix(key, "(") || metaNamespaceRe.MatchString(key) || !neutralScriptExts[strings.ToLower(filepath.Ext(key))] {
 			continue
 		}
 		both := true
-		for _, m := range metas[1:] {
-			if _, ok := m.Inputs[p]; !ok {
+		for _, g := range graphs[1:] {
+			if _, ok := g[key]; !ok {
 				both = false
 				break
 			}
 		}
-		if !both {
-			continue
-		}
-		abs := filepath.FromSlash(neutralKey(b.Root, p))
+		abs := filepath.FromSlash(key)
 		// Generated files (the context-key runtime) keep one copy per
 		// flavour on purpose.
-		if strings.Contains(filepath.ToSlash(abs), "/node_modules/") || !withinDir(canonicalPath(b.Root), canonicalPath(abs)) ||
-			withinDir(canonicalPath(b.Cfg.OutDir), canonicalPath(abs)) {
+		if !both || strings.Contains(key, "/node_modules/") || !withinDir(root, abs) || withinDir(out, abs) {
 			continue
 		}
 		paths = append(paths, abs)
@@ -650,7 +676,7 @@ func (b *Builder) warnDuplicatedIslandModules(metas []*islandMetafile) {
 		if !ok {
 			continue
 		}
-		reason := duplicateReason(b.Root, metas, abs)
+		reason := duplicateReason(graphs, filepath.ToSlash(abs))
 		ds = append(ds, diag.Diagnostic{
 			File:     abs,
 			Line:     pos.Line,
@@ -658,7 +684,7 @@ func (b *Builder) warnDuplicatedIslandModules(metas []*islandMetafile) {
 			Severity: diag.SeverityWarning,
 			Code:     diag.CodeIslandModuleDuplicated,
 			Message: fmt.Sprintf("%s is bundled twice, once for the Preact islands and once for the real-React islands, because %s; %s here is not shared between the two copies",
-				b.relPath(abs), reason, what),
+				canonicalRel(root, abs), reason, what),
 			Hint: "keep the state in a module that does not import React (directly or through its imports): Krate bundles such a module once for both kinds of island",
 		})
 	}
@@ -667,17 +693,20 @@ func (b *Builder) warnDuplicatedIslandModules(metas []*islandMetafile) {
 	}
 }
 
+func canonicalRel(root, abs string) string {
+	if rel, err := filepath.Rel(root, abs); err == nil && withinDir(root, abs) {
+		return filepath.ToSlash(rel)
+	}
+	return filepath.ToSlash(abs)
+}
+
 // duplicateReason names the first import of a module that keeps it out of
 // the shared chunks.
-func duplicateReason(root string, metas []*islandMetafile, abs string) string {
-	key := filepath.ToSlash(abs)
+func duplicateReason(graphs []map[string]metaNode, key string) string {
 	var imports [][]islandMetaImport
-	for _, m := range metas {
-		for p, in := range m.Inputs {
-			if neutralKey(root, p) == key {
-				imports = append(imports, in.Imports)
-				break
-			}
+	for _, g := range graphs {
+		if n, ok := g[key]; ok {
+			imports = append(imports, n.imports)
 		}
 	}
 	if len(imports) < 2 {
