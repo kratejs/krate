@@ -65,6 +65,41 @@ function routeState(): () => RouteSnapshot {
   return read;
 }
 
+/**
+ * An external store of the route for React-model components (Preact compat and
+ * real React islands), which read hook results as plain values and re-render
+ * when the URL changes. The snapshot object only changes with the route.
+ */
+export function krateRouteStore(): { subscribe: (cb: () => void) => () => void; getSnapshot: () => RouteSnapshot } {
+  let last: RouteSnapshot | null = null;
+  const getSnapshot = (): RouteSnapshot => {
+    const next = snapshot();
+    if (last && last.pathname === next.pathname && last.search === next.search && last.route === next.route) return last;
+    last = next;
+    return next;
+  };
+  const subscribe = (cb: () => void): (() => void) => {
+    const off = subscribeNavigation(cb);
+    // The router swaps the document before it emits the final status.
+    if (typeof window !== 'undefined') window.addEventListener('krate:navigate-end', cb);
+    return () => {
+      off();
+      if (typeof window !== 'undefined') window.removeEventListener('krate:navigate-end', cb);
+    };
+  };
+  return { subscribe, getSnapshot };
+}
+
+/** The params a route pattern matches in a pathname (see useParams). */
+export function krateMatchParams(route: string, pathname: string): Record<string, string | string[]> {
+  return matchRouteParams(route, pathname);
+}
+
+/** The path segments below depth (see useSelectedLayoutSegments). */
+export function krateLayoutSegments(pathname: string, depth?: number): string[] {
+  return pathname.split('/').filter(Boolean).map(safeDecode).slice(typeof depth === 'number' ? depth : 0);
+}
+
 /** Test hook: forgets the shared snapshot so the next hook call reads the URL again. */
 export function krateResetNavigation(): void {
   state = null;

@@ -42,6 +42,10 @@
       "types": "./dist/hints.d.ts",
       "default": "./dist/hints.js"
     },
+    "./navigation-react": {
+      "types": "./dist/navigation-react.d.ts",
+      "default": "./dist/navigation-react.js"
+    },
     "./cache": {
       "types": "./dist/cache.d.ts",
       "default": "./dist/cache.js"

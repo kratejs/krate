@@ -668,7 +668,7 @@ func (b *Builder) buildIslandBundle(src, resolveDir string, ssr bool, plugin *ap
 		JSXImportSource: "preact",
 		LogLevel:        api.LogLevelSilent,
 		Alias:           islandAlias(b.Root, ssr),
-		Plugins:         []api.Plugin{purePrunePlugin(b.Root), guard.plugin(), islandCSSPlugin(sink), islandJSXPlugin(), islandTagsPlugin(b.Root, ssr), reconcilerGuardPlugin(), reactDOMHintsPlugin(b.Root)},
+		Plugins:         []api.Plugin{purePrunePlugin(b.Root), guard.plugin(), islandCSSPlugin(sink), islandJSXPlugin(), islandTagsPlugin(b.Root, ssr), reconcilerGuardPlugin(), reactDOMHintsPlugin(b.Root), routerHooksPlugin(b.Root)},
 	}
 	if prov != nil {
 		opts.Plugins = append(opts.Plugins, islandEntryPlugin(nil, prov.virtualModules()))
@@ -786,6 +786,46 @@ func reactDOMHintsPlugin(root string) api.Plugin {
 					}
 				}
 				contents += "export default { ...__compat, " + list + " };\n"
+				return api.OnLoadResult{Contents: &contents, Loader: api.LoaderJS, ResolveDir: root}, nil
+			})
+		},
+	}
+}
+
+// routerHooksPlugin gives React-model bundles (Preact compat islands, client
+// boundaries, real-React islands) value-returning router hooks. The hooks of
+// @krate/runtime return getters for Krate-compiled components; a React-model
+// component reads usePathname() as a string and useSearchParams() as a
+// URLSearchParams, and must re-render when the URL changes. The bundle's own
+// React supplies useSyncExternalStore.
+func routerHooksPlugin(root string) api.Plugin {
+	const ns = "krate-router-hooks"
+	return api.Plugin{
+		Name: ns,
+		Setup: func(pb api.PluginBuild) {
+			var factory string
+			pb.OnResolve(api.OnResolveOptions{Filter: `^@krate/runtime$`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+				// The virtual module re-exports the real entry.
+				if args.Namespace == ns || args.Kind == api.ResolveJSRequireCall {
+					return api.OnResolveResult{}, nil
+				}
+				if factory == "" {
+					factory = resolver.NodeModule(root, "@krate/runtime/navigation-react")
+				}
+				if factory == "" {
+					return api.OnResolveResult{}, nil
+				}
+				return api.OnResolveResult{Path: "@krate/runtime", Namespace: ns}, nil
+			})
+			pb.OnLoad(api.OnLoadOptions{Filter: `.*`, Namespace: ns}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
+				names := []string{"usePathname", "useSearchParams", "useParams", "useRouter", "useSelectedLayoutSegment", "useSelectedLayoutSegments"}
+				contents := "export * from \"@krate/runtime\";\n" +
+					"import { useSyncExternalStore as __uses } from \"react\";\n" +
+					"import { createValueNavigationHooks as __mk } from " + strconv.Quote(filepath.ToSlash(factory)) + ";\n" +
+					"const __h = __mk(__uses);\n"
+				for _, n := range names {
+					contents += "export const " + n + " = __h." + n + ";\n"
+				}
 				return api.OnLoadResult{Contents: &contents, Loader: api.LoaderJS, ResolveDir: root}, nil
 			})
 		},
