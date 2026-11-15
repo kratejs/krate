@@ -429,7 +429,10 @@ host code runs in the native process. Names and options may change between relea
   cache with `let attempt: Promise<boolean> | null` that dedupes a fetch), is bundled once into a shared `isn_*` chunk that
   both import, instead of once per island bundle, so its module-level state is shared and the fetch runs once. The chunk
   re-exports only what the islands use, so a library both reach stays tree shaken. A duplicated module that keeps state
-  because it imports React (a zustand `create` store) is reported with `KR8017`.
+  because its imports reach React (a zustand `create` store) is reported with `KR8017`, which names the import chain
+  (`src/lib/store.ts -> zustand/esm/index.mjs -> "react"`). On a page with client boundaries every module was first
+  treated as reaching React, because the Preact bundle injects a file the real-React bundle does not; a module whose
+  imports never reach React is now shared there too, and is never reported.
 - A CSS `@import` of a local stylesheet that does not exist (for example `@import './missing.css'`) now fails
   the build with the file, line and column (KR7145) instead of being shipped as written and 404ing in the
   browser. Remote `@import url(https://...)` is unchanged.

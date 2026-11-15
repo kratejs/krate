@@ -12,9 +12,14 @@ import (
 )
 
 // sharedCounterProject writes a page with a Preact island and a real-React
-// island that both import src/lib/counter.ts (module-level state, no React)
-// and src/lib/hits.ts (module-level state and React).
-func sharedCounterProject(t *testing.T) (string, *config.Config) {
+// island that both import modules with module-level state and no React:
+// src/lib/counter.ts (no imports), src/lib/tally.ts (imports a sibling with no
+// imports) and the workspace package @ws/shared (no React dependency); and
+// modules with state that do reach React: src/lib/hits.ts (imports react) and
+// src/lib/use-hits.ts (through hits.ts). With boundary the page is async and
+// both components are "use client" boundaries, so the Preact graph also
+// injects the boundary shim into every module.
+func sharedCounterProject(t *testing.T, boundary bool) (string, *config.Config) {
 	t.Helper()
 	repo, err := repoRootPath()
 	if err != nil {
@@ -48,6 +53,29 @@ export function spare() { return 'counter-spare-mark'; }
 export function unused() { return 'neutral-unused-mark'; }
 export default function tag() { return 'neutral-default-mark'.length; }
 `)
+	writeProjectFile(t, root, "src/lib/tally-base.ts", `export const start = 0;
+`)
+	writeProjectFile(t, root, "src/lib/tally.ts", `import { start } from './tally-base';
+let n = start;
+export const tally = () => ++n;
+`)
+	writeProjectFile(t, root, "packages/ws-shared/package.json", `{"name":"@ws/shared","version":"1.0.0","type":"module","main":"index.js"}`)
+	writeProjectFile(t, root, "packages/ws-shared/index.js", `let wsCount = 0;
+export const bump = () => ++wsCount;
+`)
+	if err := os.MkdirAll(filepath.Join(root, "node_modules", "@ws"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, "packages", "ws-shared"), filepath.Join(root, "node_modules", "@ws", "shared")); err != nil {
+		t.Skipf("cannot link the workspace package: %v", err)
+	}
+	writeProjectFile(t, root, "src/lib/use-hits.ts", `import { useHits } from './hits';
+let uses = 0;
+export function useCountedHits() {
+	uses++;
+	return useHits();
+}
+`)
 	writeProjectFile(t, root, "src/lib/hits.ts", `import { useState } from 'react';
 let hits = 0;
 export function useHits() {
@@ -59,12 +87,14 @@ export function useHits() {
 import { useEffect, useState } from 'react';
 import { Canvas, Rect } from 'fake-canvas';
 import tag, { used } from 'neutrallib';
+import { bump } from '@ws/shared';
 import { next } from '../lib/counter';
-import { useHits } from '../lib/hits';
+import { tally } from '../lib/tally';
+import { useCountedHits } from '../lib/use-hits';
 export default function Scene() {
-	const [n, setN] = useState(0);
-	useHits();
-	useEffect(() => { setN(next()); }, []);
+	const [n, setN] = useState('0');
+	useCountedHits();
+	useEffect(() => { setN(next() + ',' + tally() + ',' + bump()); }, []);
 	return (
 		<div>
 			<Canvas id="cv" width={20} height={20}><Rect x={0} y={0} w={5} h={5} fill="red" /></Canvas>
@@ -83,45 +113,68 @@ export function useOnce(fn) {
 	return v;
 }
 `)
-	writeProjectFile(t, root, "src/components/Count.tsx", `import { useOnce } from 'countlib';
+	directive, async := "", ""
+	if boundary {
+		directive, async = "'use client';\n", "async "
+	}
+	writeProjectFile(t, root, "src/components/Count.tsx", directive+`import { useOnce } from 'countlib';
 import { used } from 'neutrallib';
+import { bump } from '@ws/shared';
 import { next } from '../lib/counter';
-import { useHits } from '../lib/hits';
+import { tally } from '../lib/tally';
+import { useCountedHits } from '../lib/use-hits';
+const all = () => next() + ',' + tally() + ',' + bump();
 export default function Count() {
-	useHits();
-	const n = useOnce(next);
+	useCountedHits();
+	const n = useOnce(all);
 	return <p id="preact" data-used={used()}>{n}</p>;
 }
 `)
 	writeProjectFile(t, root, "src/pages/index.tsx", `import Scene from '../components/Scene';
 import Count from '../components/Count';
-export default function Page() { return <main><h1>home</h1><Scene /><Count /></main>; }
+export default `+async+`function Page() { return <main><h1>home</h1><Scene /><Count /></main>; }
 `)
 	return root, cfg
 }
 
-// TestIslandModuleSharedAcrossFlavours: a module a Preact island and a
-// real-React island both import, with no React in it, ships once, in a shared
-// chunk both import; a stateful module that imports React is reported.
+// TestIslandModuleSharedAcrossFlavours: modules a Preact island and a
+// real-React island both import, with no React anywhere in their imports, ship
+// once, in shared chunks both import, and are not reported; a stateful module
+// that reaches React is reported with its import chain.
 func TestIslandModuleSharedAcrossFlavours(t *testing.T) {
 	if _, err := exec.LookPath("node"); err != nil {
 		requireE2E(t, "node is not installed")
 	}
-	root, cfg := sharedCounterProject(t)
-	out, err := captureOutput(func() error { return New(root, cfg).BuildAll() })
-	if err != nil {
-		t.Fatalf("BuildAll: %v\n%s", err, out)
+	for _, boundary := range []bool{false, true} {
+		name := "islands"
+		if boundary {
+			name = "client boundaries"
+		}
+		t.Run(name, func(t *testing.T) {
+			root, cfg := sharedCounterProject(t, boundary)
+			out, err := captureOutput(func() error { return New(root, cfg).BuildAll() })
+			if err != nil {
+				t.Fatalf("BuildAll: %v\n%s", err, out)
+			}
+			if boundary {
+				if shims, _ := filepath.Glob(filepath.Join(cfg.OutDir, ".krate", "boundary-link.*.mjs")); len(shims) == 0 {
+					t.Fatal("the page has no client boundary, so the case it covers is not exercised")
+				}
+			}
+			checkSharedChunks(t, cfg, out)
+		})
 	}
+}
+
+func checkSharedChunks(t *testing.T, cfg *config.Config, out string) {
+	t.Helper()
 	chunks, _ := filepath.Glob(filepath.Join(cfg.OutDir, "chunks", "*.js"))
-	var holders []string
 	var importers []string
 	marks := map[string][]string{}
+	all := []string{"shared-counter-mark", "neutral-used-mark", "neutral-default-mark", "neutral-unused-mark", "counter-spare-mark", "++n", "++wsCount"}
 	for _, c := range chunks {
 		text := readBuilt(t, c)
-		if strings.Contains(text, "shared-counter-mark") {
-			holders = append(holders, filepath.Base(c))
-		}
-		for _, m := range []string{"neutral-used-mark", "neutral-default-mark", "neutral-unused-mark", "counter-spare-mark"} {
+		for _, m := range all {
 			if strings.Contains(text, m) {
 				marks[m] = append(marks[m], filepath.Base(c))
 			}
@@ -130,36 +183,43 @@ func TestIslandModuleSharedAcrossFlavours(t *testing.T) {
 			importers = append(importers, filepath.Base(c))
 		}
 	}
-	if len(holders) != 1 || !strings.HasPrefix(holders[0], "isn") {
-		t.Fatalf("counter.ts should ship once, in a shared isn chunk; found in %v", holders)
-	}
-	if holders[0] != strings.ToLower(holders[0]) {
-		t.Errorf("shared chunk name is not lower-case: %s", holders[0])
+	// counter.ts (no imports), tally.ts (a sibling with no imports), the
+	// workspace package and an npm library both import directly.
+	for _, m := range []string{"shared-counter-mark", "++n", "++wsCount", "neutral-used-mark", "neutral-default-mark"} {
+		if len(marks[m]) != 1 || !strings.HasPrefix(marks[m][0], "isn") {
+			t.Errorf("%q should ship once, in a shared isn chunk; found in %v", m, marks[m])
+		} else if marks[m][0] != strings.ToLower(marks[m][0]) {
+			t.Errorf("shared chunk name is not lower-case: %s", marks[m][0])
+		}
 	}
 	// One Preact and one real-React chunk at least.
 	if len(importers) < 2 {
-		t.Errorf("want both island bundles to import %s, importers: %v", holders[0], importers)
-	}
-	for _, m := range []string{"neutral-used-mark", "neutral-default-mark"} {
-		if len(marks[m]) != 1 || !strings.HasPrefix(marks[m][0], "isn") {
-			t.Errorf("%s should ship once, in a shared chunk; found in %v", m, marks[m])
-		}
+		t.Errorf("want both island bundles to import the shared chunks, importers: %v", importers)
 	}
 	for _, m := range []string{"neutral-unused-mark", "counter-spare-mark"} {
 		if len(marks[m]) > 0 {
 			t.Errorf("an export no island uses was not tree shaken: %s in %v", m, marks[m])
 		}
 	}
-	if !strings.Contains(out, "KR8017") || !strings.Contains(out, "src/lib/hits.ts") {
-		t.Errorf("want a KR8017 warning naming src/lib/hits.ts, got:\n%s", out)
+	for _, want := range []string{
+		`src/lib/hits.ts is bundled twice`,
+		`src/lib/hits.ts -> "react"`,
+		`src/lib/use-hits.ts -> src/lib/hits.ts -> "react"`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("want KR8017 output to contain %q, got:\n%s", want, out)
+		}
 	}
-	if strings.Contains(out, "src/lib/counter.ts is bundled twice") {
-		t.Errorf("counter.ts is shared and must not be reported:\n%s", out)
+	for _, bad := range []string{"counter.ts is bundled twice", "tally.ts is bundled twice", "tally-base.ts is bundled twice", "ws-shared", `("")`, `-> ""`} {
+		if strings.Contains(out, bad) {
+			t.Errorf("KR8017 output must not contain %q:\n%s", bad, out)
+		}
 	}
 }
 
-// TestBrowserIslandModuleSharedAcrossFlavours: both islands call next() from
-// the shared module once, so between them they see 1 and 2.
+// TestBrowserIslandModuleSharedAcrossFlavours: both islands call next(),
+// tally() and bump() from the shared modules once, so between them they see
+// 1,1,1 and 2,2,2.
 func TestBrowserIslandModuleSharedAcrossFlavours(t *testing.T) {
 	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
 	if browser == "" {
@@ -175,23 +235,31 @@ func TestBrowserIslandModuleSharedAcrossFlavours(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	root, cfg := sharedCounterProject(t)
-	if out, err := captureOutput(func() error { return New(root, cfg).BuildAll() }); err != nil {
-		t.Fatalf("BuildAll: %v\n%s", err, out)
-	}
 	if !canStopInProcessServer {
 		t.Skip("cannot stop an in-process server on this platform")
 	}
-	base, err := startKrateServer(t, root, cfg)
-	if err != nil {
-		t.Fatalf("serve: %v", err)
-	}
-	out, err := exec.Command("node", script, browser, base).CombinedOutput()
-	if err != nil {
-		if strings.Contains(string(out), "Executable doesn't exist") || strings.Contains(string(out), "browserType.launch") {
-			requireE2E(t, "%s browser is not installed: %s", browser, out)
+	for _, boundary := range []bool{false, true} {
+		name := "islands"
+		if boundary {
+			name = "client boundaries"
 		}
-		t.Fatalf("browser checks failed: %v\n%s", err, out)
+		t.Run(name, func(t *testing.T) {
+			root, cfg := sharedCounterProject(t, boundary)
+			if out, err := captureOutput(func() error { return New(root, cfg).BuildAll() }); err != nil {
+				t.Fatalf("BuildAll: %v\n%s", err, out)
+			}
+			base, err := startKrateServer(t, root, cfg)
+			if err != nil {
+				t.Fatalf("serve: %v", err)
+			}
+			out, err := exec.Command("node", script, browser, base).CombinedOutput()
+			if err != nil {
+				if strings.Contains(string(out), "Executable doesn't exist") || strings.Contains(string(out), "browserType.launch") {
+					requireE2E(t, "%s browser is not installed: %s", browser, out)
+				}
+				t.Fatalf("browser checks failed: %v\n%s", err, out)
+			}
+		})
 	}
 }
 
@@ -219,5 +287,77 @@ func TestSharedImportsUsed(t *testing.T) {
 	}
 	if e := used["/p/e.ts"]; e != nil {
 		t.Errorf("a module no graph imports needs no chunk: %+v", e)
+	}
+}
+
+// TestIslandShareCheckChains: the Preact graph injects a shim into every
+// module (a page with client boundaries), which must not stop React-free
+// modules from being shared; the reasons name the real import chain.
+func TestIslandShareCheckChains(t *testing.T) {
+	root := t.TempDir()
+	writeProjectFile(t, root, "src/uses-link.ts", "export const L = Link;\n")
+	imp := func(path, spec string) islandMetaImport {
+		return islandMetaImport{Path: path, Kind: "import-statement", Original: spec}
+	}
+	synth := func(path string) islandMetaImport {
+		return islandMetaImport{Path: path, Kind: "import-statement", External: true}
+	}
+	type in = struct {
+		Format  string             `json:"format"`
+		Imports []islandMetaImport `json:"imports"`
+	}
+	graph := func(preact bool) *islandMetafile {
+		react := imp("node_modules/react/index.js", "react")
+		if preact {
+			react = islandMetaImport{Path: "preact/compat", Kind: "import-statement", Original: "react", External: true}
+		}
+		m := &islandMetafile{Inputs: map[string]in{
+			"src/protection.ts":              {Format: "esm", Imports: []islandMetaImport{imp("src/wasm-kdf.ts", "./wasm-kdf"), imp("src/generated.ts", "@/generated")}},
+			"src/wasm-kdf.ts":                {Format: "esm"},
+			"src/generated.ts":               {Format: "esm"},
+			"src/store.ts":                   {Format: "esm", Imports: []islandMetaImport{imp("node_modules/zustand/index.mjs", "zustand")}},
+			"node_modules/zustand/index.mjs": {Format: "esm", Imports: []islandMetaImport{react}},
+			"src/uses-cjs.ts":                {Format: "esm", Imports: []islandMetaImport{imp("node_modules/cjs/index.js", "cjs")}},
+			"node_modules/cjs/index.js":      {Format: "cjs"},
+			"src/uses-link.ts":               {Format: "esm"},
+			"src/island.tsx":                 {Format: "esm", Imports: []islandMetaImport{react, imp("src/protection.ts", "./protection"), imp("src/store.ts", "./store"), imp("node_modules/cjs/index.js", "cjs"), imp("src/uses-link.ts", "./uses-link")}},
+		}}
+		if !preact {
+			m.Inputs["node_modules/react/index.js"] = in{Format: "cjs"}
+		}
+		for p, v := range m.Inputs {
+			v.Imports = append(v.Imports, synth("/x/.krate/context-keys.mjs"))
+			if preact {
+				v.Imports = append(v.Imports, synth("/x/.krate/boundary-link.mjs"))
+			}
+			m.Inputs[p] = v
+		}
+		return m
+	}
+	metas := []*islandMetafile{graph(false), graph(true)}
+	plan := planSharedIslandModules(root, metas, []string{"Link"})
+	key := func(p string) string { return canonicalMetaKey(root, p) }
+	for _, p := range []string{"src/protection.ts", "src/wasm-kdf.ts", "src/generated.ts"} {
+		if !plan.shared[key(p)] {
+			t.Errorf("%s reaches no React and should be shared", p)
+		}
+	}
+	for _, p := range []string{"src/store.ts", "node_modules/cjs/index.js", "src/uses-cjs.ts", "src/uses-link.ts", "src/island.tsx"} {
+		if plan.shared[key(p)] {
+			t.Errorf("%s must not be shared", p)
+		}
+	}
+	c := newIslandShareCheck(root, metas, []string{"Link"})
+	c.close()
+	for p, want := range map[string]string{
+		"src/store.ts":     `src/store.ts -> zustand/index.mjs -> "react"`,
+		"src/uses-link.ts": `src/uses-link.ts (uses the compiler-provided Link`,
+	} {
+		if got, _ := c.chain(key(p)); !strings.HasPrefix(got, want) {
+			t.Errorf("chain of %s = %q, want prefix %q", p, got, want)
+		}
+	}
+	if _, react := c.chain(key("src/store.ts")); !react {
+		t.Error("the zustand chain ends at react")
 	}
 }

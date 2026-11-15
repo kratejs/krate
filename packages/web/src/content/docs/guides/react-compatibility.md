@@ -1557,8 +1557,8 @@ A module that imports React, or a library built on it (a zustand `create`
 store, a module that calls `createContext`), needs a copy for each kind of
 island, and the copies do not share module-level state. The build reports such
 a module when it declares state (a `let` or `var`, an object made with `new`,
-or a store) with `KR8017`, naming the file and the import that ties it to
-React. Keep the state in a module without React and import it from the hook
+or a store) with `KR8017`, naming the file and the import chain that reaches
+React (`src/lib/store.ts -> zustand/esm/index.mjs -> "react"`). Keep the state in a module without React and import it from the hook
 module. Contexts are the exception: a context from a provider in a layout
 reaches both kinds of island (see
 [server components](/docs/features/server-components/)).

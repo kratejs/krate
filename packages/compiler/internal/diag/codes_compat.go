@@ -166,7 +166,8 @@ func init() {
 				"such as @react-three/fiber) are bundled separately, because `react` means preact/compat in one and " +
 				"the project's React in the other. A module both reach that does not depend on React is bundled once " +
 				"into a shared chunk, so both see one instance. A module that imports React, directly or through its " +
-				"imports, needs a copy for each, and this module also declares module-level state (a `let` or `var`, " +
+				"imports, needs a copy for each; the message names the import chain that reaches React " +
+				"(`src/a.ts -> src/b.ts -> \"react\"`). This module also declares module-level state (a `let` or `var`, " +
 				"an object made with `new`, or a store such as zustand's `create`), so the two copies keep separate " +
 				"state: a cache fills twice, a store has two values. Move the state into a module that does not import " +
 				"React, for example a store made with `zustand/vanilla` that a hook module wraps. This is a warning.",
