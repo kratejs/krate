@@ -1007,6 +1007,19 @@ func NewImportResolver(prefixes []string, targets [][]string, tsBaseDir string) 
 	return &ImportResolver{aliases: buildPathAliases(prefixes, targets), baseDir: tsBaseDir}
 }
 
+// ResolveAlias resolves imp through the tsconfig path aliases only, or returns
+// "" when no alias matches or its target does not exist.
+func (r *ImportResolver) ResolveAlias(imp string) string {
+	if r == nil || len(r.aliases) == 0 || r.baseDir == "" || strings.HasPrefix(imp, ".") {
+		return ""
+	}
+	exists := resolver.Exists
+	if resolverCacheEnabled {
+		exists = memoizedExists
+	}
+	return resolvePathAlias(imp, r.aliases, r.baseDir, exists)
+}
+
 // Resolve resolves imp as imported from importer, or returns "".
 func (r *ImportResolver) Resolve(importer, imp string) string {
 	exists := resolver.Exists

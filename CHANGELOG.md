@@ -401,6 +401,16 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- Server bundles (`krate start`, SSR and ISR pages) apply the project's tsconfig `paths`, including
+  ones inherited through `extends`, so `@/components/x` imports no longer stay as bare package imports
+  that fail with `ERR_MODULE_NOT_FOUND` and answer 500.
+- A package that only a workspace package depends on (pnpm installs `@aws-sdk/client-s3` under
+  `packages/storage/node_modules`) now loads in server bundles, server actions and Node API routes: when
+  Node could not find the package from the output directory, the bundle imports the file that was resolved.
+  An import that does not resolve at all is reported by the build instead of being left for run time.
+- A bundled CommonJS dependency of a client component (such as Next's `next/script`) that calls
+  `require("react/jsx-runtime")` no longer crashes server rendering with `Dynamic require of
+  "preact/jsx-runtime" is not supported`; React and Preact requires share the one Preact instance.
 - A client component or real-React island in a project under a symlinked path (macOS `/var` is
   `/private/var`) gets action references for its `"use server"` imports instead of their server code.
 - Real-React islands (react-three-fiber and other reconciler libraries) no longer bundle server-only code. A
