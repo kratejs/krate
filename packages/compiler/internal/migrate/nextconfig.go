@@ -29,6 +29,17 @@ type nextConfigData struct {
 	// the same name to the Krate config keys of the same name.
 	ServerExternalPackages    []string            `json:"serverExternalPackages,omitempty"`
 	OutputFileTracingIncludes map[string][]string `json:"outputFileTracingIncludes,omitempty"`
+	// MiddlewareRuntime is "node" when the middleware cannot run in the
+	// embedded runtime; it becomes ssr.middlewareRuntime.
+	MiddlewareRuntime string `json:"-"`
+	// TrailingSlash is "always" when next.config sets trailingSlash: true and
+	// "never" otherwise (Next's URL form).
+	TrailingSlash string `json:"trailingSlash,omitempty"`
+	// EnvDir is the relative directory loadEnvConfig(...) reads .env files
+	// from; it becomes envDir. Empty when absent or the project root.
+	EnvDir string `json:"-"`
+	// Tailwind is true when the project's PostCSS config runs Tailwind.
+	Tailwind bool `json:"-"`
 }
 
 type nextRedirect struct {
@@ -104,6 +115,15 @@ func readNextConfig(path string) (data nextConfigData, notes nextConfigNotes, ok
 			notes.Manual = append(notes.Manual, ManualItem{Source: file, Reason: "basePath is computed and was not translated", Hint: "set basePath in krate.config.ts (see Base path in the config reference)"})
 		}
 	}
+	if v := prop(obj, "trailingSlash"); v != nil {
+		if on, ok := boolValue(v); ok {
+			if on {
+				out.TrailingSlash = "always"
+			}
+		} else {
+			notes.Manual = append(notes.Manual, ManualItem{Source: file, Reason: "trailingSlash is computed and was not translated", Hint: "set trailingSlash in krate.config.ts: \"always\" matches trailingSlash: true, \"never\" matches Next.js' default of false"})
+		}
+	}
 	if v := prop(obj, "redirects"); v != nil {
 		rules, items, reason := rc.redirects(v)
 		if reason != "" {
@@ -156,12 +176,17 @@ func readNextConfig(path string) (data nextConfigData, notes nextConfigNotes, ok
 			})
 		}
 	}
-	if loadEnvConfigCall.MatchString(rc.src) {
-		notes.Manual = append(notes.Manual, ManualItem{
-			Source: file,
-			Reason: "loadEnvConfig(...) is called in next.config; the .env files it loads are not read by Krate",
-			Hint:   "Krate loads .env, .env.<mode>, .env.local and .env.<mode>.local from the project root only (select the mode with --mode); set envDir in krate.config.ts to the directory that holds them (for example envDir: \"../..\" for a monorepo root), or export the variables in the shell",
-		})
+	if loc := loadEnvConfigCall.FindStringIndex(rc.src); loc != nil {
+		dir, ok := staticEnvDir(rc.src[loc[1]:])
+		if ok {
+			out.EnvDir = dir
+		} else {
+			notes.Manual = append(notes.Manual, ManualItem{
+				Source: file,
+				Reason: "loadEnvConfig(...) is called in next.config with a path that could not be resolved statically; the .env files it loads are not read by Krate",
+				Hint:   "Krate loads .env, .env.<mode>, .env.local and .env.<mode>.local from the project root only (select the mode with --mode); set envDir in krate.config.ts to the directory that holds them (for example envDir: \"../..\" for a monorepo root), or export the variables in the shell",
+			})
+		}
 	}
 	translateOtherKeys(file, obj, &notes, serverFileKeys(obj, &out))
 	return out, notes, true
@@ -348,6 +373,15 @@ func configJSON(entry string, next nextConfigData) []byte {
 	if len(next.Head) > 0 {
 		opts["head"] = next.Head
 	}
+	if v := trailingSlashValue(next); v != "" {
+		opts["trailingSlash"] = v
+	}
+	if next.EnvDir != "" {
+		opts["envDir"] = next.EnvDir
+	}
+	if next.Tailwind {
+		opts["tailwind"] = map[string]any{"enabled": true}
+	}
 	if next.BasePath != "" {
 		opts["basePath"] = next.BasePath
 	}
@@ -371,6 +405,9 @@ func configJSON(entry string, next nextConfigData) []byte {
 	}
 	if len(next.OutputFileTracingIncludes) > 0 {
 		opts["outputFileTracingIncludes"] = next.OutputFileTracingIncludes
+	}
+	if next.MiddlewareRuntime != "" {
+		opts["ssr"] = map[string]any{"middlewareRuntime": next.MiddlewareRuntime}
 	}
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
@@ -398,4 +435,25 @@ func staticStringMap(e ast.Expr) (map[string]string, bool) {
 		out[p.Key] = s
 	}
 	return out, true
+}
+
+// trailingSlashValue is the trailingSlash setting to write: Next serves
+// /store (no slash) unless next.config sets trailingSlash: true.
+func trailingSlashValue(next nextConfigData) string {
+	if next.TrailingSlash == "always" {
+		return "always"
+	}
+	return "never"
+}
+
+var postcssTailwind = regexp.MustCompile(`@tailwindcss/postcss|\btailwindcss\b`)
+
+// usesTailwindPostCSS reports whether a root postcss.config file runs Tailwind.
+func usesTailwindPostCSS(root string) bool {
+	for _, name := range []string{"postcss.config.mjs", "postcss.config.js", "postcss.config.cjs", "postcss.config.ts", "postcss.config.mts", "postcss.config.cts"} {
+		if data, err := os.ReadFile(filepath.Join(root, name)); err == nil && postcssTailwind.Match(data) {
+			return true
+		}
+	}
+	return false
 }

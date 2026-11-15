@@ -293,6 +293,22 @@ export async function GET(request: Request) {
 }
 ```
 
+In a server component, a server action or a route handler, call `auth()` with no
+argument: it reads the session of the request being served, like Auth.js `auth()`.
+In a server action or a route handler it also refreshes a database session
+cookie that is due. The `auth.auth(request)` form keeps working everywhere else
+(API routes on the embedded runtime that receive a `Request`, middleware).
+
+```typescript
+import { auth } from "../auth";
+
+export default async function Account() {
+  const session = await auth.auth();
+  if (!session) return <a href="/signin">Sign in</a>;
+  return <p>{session.user.email}</p>;
+}
+```
+
 The session has the shape `{ user: { id, name, email, image, role?,
 twoFactorEnabled? }, expires }`. Add your own fields with callbacks:
 
@@ -321,6 +337,50 @@ export const auth = defineAuth({
 Events (`signIn`, `signOut`, `createUser`, `updateUser`, `linkAccount`,
 `session`, `twoFactorEnabled`, `twoFactorDisabled`, `passkeyRegistered`) are
 passed to `events` for side effects such as audit logs.
+
+## Signing in and out on the server
+
+`auth.signIn(provider, { redirectTo })` and `auth.signOut({ redirectTo })` run
+the same flow as the CSRF-protected `POST /api/auth/signin/:provider` and
+`POST /api/auth/signout`, from a server action or a route handler (the server
+action origin check replaces the CSRF token). They set the same cookies, then
+redirect: an OAuth sign-in redirects to the provider, a sign-out clears the
+session cookie and redirects to `redirectTo`.
+
+```typescript
+// src/api/signin/discord.ts
+import { auth } from "../../auth";
+
+export async function GET() {
+  await auth.signIn("discord", { redirectTo: "/dashboard" });
+}
+```
+
+```tsx
+function SignOutButton() {
+  async function signOutAction() {
+    "use server";
+    await auth.signOut({ redirectTo: "/" });
+  }
+  return <form action={signOutAction}><button>Sign out</button></form>;
+}
+```
+
+- Both throw Krate's redirect signal, so code after the `await` does not run.
+  Pass `redirect: false` to get the target URL back instead.
+- `signIn()` also takes the credentials or email fields
+  (`signIn("credentials", { email, password, redirectTo })`) and, as a third
+  argument, extra authorization parameters (`{ prompt: "consent" }`).
+- A call with no provider redirects to `pages.signIn`.
+- They need the request scope Krate sets up for server actions and route
+  handlers on the Node and embedded runtimes; a server component can only read
+  (`auth()`). Elsewhere, pass nothing and use the [browser client](#browser-client).
+- A server action may redirect to an absolute URL this way (the provider). A
+  redirect a server action only returns (`{ redirect }`) must still be a path of
+  your site.
+
+`callbacks.signIn` runs after the user and account rows exist (Auth.js runs it
+first), so a denied sign-in leaves the row behind and creates no session.
 
 ## Database adapter
 
@@ -564,15 +624,27 @@ All paths are relative to `basePath`. Requests that send a JSON body, an
 | NextAuth | Krate |
 |----------|-------|
 | `NextAuth({ ... })` in `auth.ts` | `defineAuth({ ... })`, with data options in `krate.config.ts` |
-| `export const { handlers, auth, signIn, signOut } = NextAuth(...)` | `auth.handlers`, `auth.auth(request)`, `auth.middleware`. Sign-in and sign-out run from `@krate/auth/client` |
+| `export const { handlers, auth, signIn, signOut } = NextAuth(...)` | The same line with `defineAuth(...)`: `handlers`, `auth()`, `signIn()` and `signOut()` keep their names and work in server components, actions and route handlers. `defineAuth` also takes a function that returns the options, evaluated on first use |
+| `next-auth/providers/discord` | `discord` from `@krate/auth`. A provider listed without being called (`providers: [GitHub]`) works as in Auth.js |
+| `next-auth/react` | `@krate/auth/client`: `signIn`, `signOut`, `getSession`, `getCsrfToken`, `getProviders`. `useSession` and `SessionProvider` have no equivalent |
 | `app/api/auth/[...nextauth]/route.ts` | `src/api/auth/[...all].ts` |
 | `middleware.ts` with `export { auth as middleware }` | `export function middleware(request) { return auth.middleware(request); }` |
 | `@auth/drizzle-adapter` | `DrizzleAdapter(db, createSqliteSchema())` |
 | `AUTH_SECRET`, `AUTH_GITHUB_ID` | The same names |
-| `callbacks`, `events`, `pages`, `session`, `cookies` | The same shapes |
+| `callbacks`, `events`, `pages`, `session` | The same shapes |
+| Auth.js cookie names (`authjs.session-token`, `__Secure-authjs.session-token`, `__Host-authjs.csrf-token`, `authjs.callback-url`, `authjs.pkce.code_verifier`, `authjs.state`) | `cookies: { prefix: "authjs" }` produces exactly these names. Without it the prefix is `krate-auth` |
+| `cookies: { sessionToken: { name } }` per-cookie overrides, `theme`, `useSecureCookies` | Not supported. Use `cookies.prefix` and `cookies.secure` |
+| Discord `issuer: "https://discord.com"` | Supported: Discord stays plain OAuth and the RFC 9207 `iss` callback parameter is checked against the issuer when both are present |
 
-Differences to know: the session token is an encrypted JWT like NextAuth's,
-but not byte-compatible, so existing sessions end when you switch. The
+`krate migrate nextjs` does this port for you, see
+[Migrating from Next.js](/docs/guides/migrating-from-nextjs/). Keep
+`@auth/drizzle-adapter` when your tables already exist: it implements the
+`Adapter` interface `defineAuth` expects, and with `cookies.prefix: "authjs"`
+existing database sessions keep working.
+
+Differences to know: with the JWT strategy the session token is an encrypted
+JWT like NextAuth's, but not byte-compatible, so existing JWT sessions end when
+you switch. The
 database tables are named like the Auth.js ones with `authenticators`
 for passkeys and `twoFactors` added, and `users` gains `role` and
 `twoFactorEnabled`.

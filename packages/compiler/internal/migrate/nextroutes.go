@@ -3,6 +3,7 @@ package migrate
 import (
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/internal/lexer"
@@ -28,15 +29,31 @@ func rewriteNextModuleImports(rep *Report, root string) {
 			}
 		}
 		if strings.Contains(src, "next/dynamic") {
-			hadOptions := strings.Contains(src, "ssr:") || strings.Contains(src, "loading:")
-			if rewritten, ok := rewriteNextDynamic(src); ok {
+			if rewritten, items, ok := rewriteNextDynamic(src, isTSSource(f.Source)); ok {
 				src = rewritten
-				f.Rewrites = append(f.Rewrites, "rewrote next/dynamic to React lazy")
-				if hadOptions {
-					rep.Manual = append(rep.Manual, ManualItem{Source: f.Source, Reason: "next/dynamic ssr/loading options were ignored; use Suspense for a fallback", Hint: "verify lazy loading behavior"})
+				f.Rewrites = append(f.Rewrites, "rewrote next/dynamic to React lazy (ssr: false renders the loading fallback on the server and mounts the component in the browser)")
+				for _, item := range items {
+					rep.Manual = append(rep.Manual, ManualItem{Source: f.Source, Reason: item, Hint: "verify lazy loading behavior"})
 				}
 			} else {
 				rep.Manual = append(rep.Manual, ManualItem{Source: f.Source, Reason: "next/dynamic import could not be rewritten automatically", Hint: "declare a lazy component with React lazy()"})
+			}
+		}
+		if strings.Contains(src, "next/script") {
+			rewritten, rewrites, items := rewriteNextScript(src)
+			src = rewritten
+			f.Rewrites = append(f.Rewrites, rewrites...)
+			for _, item := range items {
+				rep.Manual = append(rep.Manual, ManualItem{Source: f.Source, Reason: item, Hint: "see the next/script section of the migration guide"})
+			}
+		}
+		if f.Kind != KindAPI && f.Kind != KindMiddleware && strings.Contains(src, "next/server") {
+			if rewritten, ok := rewriteNextServerAfter(src); ok {
+				src = rewritten
+				f.Rewrites = append(f.Rewrites, "mapped next/server after() to @krate/runtime/server: it runs after the response is sent")
+				if !strings.Contains(src, "next/server") {
+					dropManual(rep, f.Source, "next/server request/response helpers need a Request/Response migration")
+				}
 			}
 		}
 		if strings.Contains(src, "next/cache") {
@@ -174,47 +191,356 @@ func hasUseClientDirective(src string) bool {
 }
 
 var (
-	nextDynamicCall   = regexp.MustCompile(`\bdynamic\s*\(`)
+	nextDynamicWord   = regexp.MustCompile(`\bdynamic\b`)
 	nextDynamicImport = regexp.MustCompile(`(?m)^[ \t]*import[ \t]+dynamic[ \t]+from[ \t]+["']next/dynamic["'][ \t]*;?[ \t]*\r?\n?`)
-	lazyImport        = regexp.MustCompile(`import\s*\{[^}]*\blazy\b[^}]*\}\s*from\s*["']react["']`)
+	reactNamedImport  = regexp.MustCompile(`import\s*\{([^}]*)\}\s*from\s*["']react["']`)
+	dynamicDecl       = regexp.MustCompile(`^(?:export[ \t]+)?(?:const|let|var)[ \t]+([A-Za-z_$][\w$]*)`)
+	dynamicOptionKey  = regexp.MustCompile(`(?s)^\s*([A-Za-z_$][\w$]*)\s*(?::\s*(.*))?$`)
+	thenBareComponent = regexp.MustCompile(`(?s)^(import\(.*?\))\.then\(\s*\(\s*([A-Za-z_$][\w$]*)?\s*\)\s*=>\s*([A-Za-z_$][\w$]*)\s*\)$`)
+	thenPickExport    = regexp.MustCompile(`(?s)^(import\(.*?\))\.then\(\s*\(?\s*([A-Za-z_$][\w$]*)\s*\)?\s*=>\s*([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*)\s*\)$`)
+	arrowNoParams     = regexp.MustCompile(`(?s)^(?:async\s+)?\(\s*\)\s*=>\s*(.*)$`)
 )
 
-func rewriteNextDynamic(src string) (string, bool) {
+// dynamicCall is one dynamic(loader, options) call found in a source file.
+type dynamicCall struct {
+	start, end int // call span, from "dynamic" to just after ")"
+	typeArgs   string
+	loader     string
+	options    string
+	hasOptions bool
+}
+
+// findDynamicCall returns the first dynamic(...) or dynamic<T>(...) call at or
+// after from. ok is false when there is none.
+func findDynamicCall(src string, from int) (c dynamicCall, ok bool) {
+	for _, loc := range nextDynamicWord.FindAllStringIndex(src[from:], -1) {
+		start := from + loc[0]
+		if start > 0 && (src[start-1] == '.' || src[start-1] == '$') {
+			continue
+		}
+		i := start + len("dynamic")
+		for i < len(src) && (src[i] == ' ' || src[i] == '\t') {
+			i++
+		}
+		var typeArgs string
+		if i < len(src) && src[i] == '<' {
+			j := skipTypeArgs(src, i)
+			if j < 0 {
+				continue
+			}
+			typeArgs = src[i:j]
+			i = j
+			for i < len(src) && (src[i] == ' ' || src[i] == '\t') {
+				i++
+			}
+		}
+		if i >= len(src) || src[i] != '(' {
+			continue
+		}
+		comma, end := topLevelArgs(src, i+1)
+		c = dynamicCall{start: start, typeArgs: typeArgs}
+		if comma < 0 {
+			// One argument, or unbalanced: find the closing paren.
+			depthEnd := matchParen(src, i)
+			if depthEnd < 0 {
+				continue
+			}
+			c.end = depthEnd + 1
+			c.loader = strings.TrimSpace(src[i+1 : depthEnd])
+			return c, true
+		}
+		c.end = end + 1
+		c.loader = strings.TrimSpace(src[i+1 : comma])
+		c.options = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(src[comma+1:end]), ","))
+		c.hasOptions = true
+		return c, true
+	}
+	return dynamicCall{}, false
+}
+
+// skipTypeArgs returns the index after the ">" that closes the "<" at i, or -1.
+// The ">" of an arrow type does not close it.
+func skipTypeArgs(src string, i int) int {
+	depth := 0
+	for j := i; j < len(src); j++ {
+		switch src[j] {
+		case '<':
+			depth++
+		case '>':
+			if j > 0 && src[j-1] == '=' {
+				continue
+			}
+			depth--
+			if depth == 0 {
+				return j + 1
+			}
+		case ';':
+			return -1
+		}
+	}
+	return -1
+}
+
+// dynamicOptions splits the top-level properties of an options object literal
+// into key and value text. ok is false when it is not a plain object literal.
+func dynamicOptions(text string) (props map[string]string, ok bool) {
+	t := strings.TrimSpace(text)
+	if len(t) < 2 || t[0] != '{' || t[len(t)-1] != '}' {
+		return nil, false
+	}
+	body := t[1 : len(t)-1]
+	props = map[string]string{}
+	depth, start := 0, 0
+	flush := func(end int) bool {
+		part := strings.TrimSpace(body[start:end])
+		if part == "" {
+			return true
+		}
+		m := dynamicOptionKey.FindStringSubmatch(part)
+		if m == nil {
+			return false
+		}
+		val := strings.TrimSpace(m[2])
+		if val == "" {
+			val = m[1]
+		}
+		props[m[1]] = val
+		return true
+	}
+	for i := 0; i < len(body); i++ {
+		switch c := body[i]; c {
+		case '(', '[', '{':
+			depth++
+		case ')', ']', '}':
+			depth--
+		case ',':
+			if depth == 0 {
+				if !flush(i) {
+					return nil, false
+				}
+				start = i + 1
+			}
+		case '"', '\'', '`':
+			for i++; i < len(body) && body[i] != c; i++ {
+				if body[i] == '\\' {
+					i++
+				}
+			}
+		}
+	}
+	if !flush(len(body)) {
+		return nil, false
+	}
+	return props, true
+}
+
+// rewriteNextDynamic maps next/dynamic onto React lazy(). A call with
+// `ssr: false` becomes a component that renders its loading fallback on the
+// server and mounts the lazy component in the browser. manual lists options
+// that were dropped without an equivalent.
+func rewriteNextDynamic(src string, ts bool) (out string, manual []string, ok bool) {
 	if !nextDynamicImport.MatchString(src) {
-		return "", false
+		return "", nil, false
 	}
 	src = nextDynamicImport.ReplaceAllString(src, "")
-	src = dropDynamicOptions(src)
-	src = nextDynamicCall.ReplaceAllString(src, "lazy(")
-	if !lazyImport.MatchString(src) {
-		src = insertImportAfterDirective(src, "import { lazy } from \"react\";\n")
+	need := map[string]bool{"lazy": true}
+	from, n := 0, 0
+	wrapped := false
+	for {
+		c, found := findDynamicCall(src, from)
+		if !found {
+			break
+		}
+		repl, hoist, hoistAt, items, gated := buildDynamic(src, c, n)
+		if strings.Contains(repl+hoist, lazyModuleHelper+")") {
+			wrapped = true
+		}
+		manual = append(manual, items...)
+		if gated {
+			n++
+			need["useState"], need["useEffect"] = true, true
+			src = src[:hoistAt] + hoist + src[hoistAt:c.start] + repl + src[c.end:]
+			from = c.start + len(hoist) + len(repl)
+			continue
+		}
+		src = src[:c.start] + repl + src[c.end:]
+		from = c.start + len(repl)
+	}
+	var names []string
+	have := map[string]bool{}
+	for _, m := range reactNamedImport.FindAllStringSubmatch(src, -1) {
+		for _, name := range strings.Split(m[1], ",") {
+			have[strings.TrimSpace(name)] = true
+		}
+	}
+	for _, name := range []string{"lazy", "useEffect", "useState"} {
+		if need[name] && !have[name] {
+			names = append(names, name)
+		}
+	}
+	if len(names) > 0 {
+		src = insertImportAfterDirective(src, "import { "+strings.Join(names, ", ")+" } from \"react\";\n")
+	}
+	if wrapped && !strings.Contains(src, "function "+lazyModuleHelper+"(") {
+		src = strings.TrimRight(src, "\n") + "\n\n" + lazyModuleHelperSource(ts)
 	}
 	p := parser.New(lexer.New(src).Tokenize())
 	if prog := p.ParseProgram(); prog == nil || len(p.Errors()) > 0 {
-		return "", false
+		return "", nil, false
 	}
-	return src, true
+	return src, manual, true
 }
 
-// dropDynamicOptions removes the options argument of every dynamic(loader,
-// options) call, whatever the options contain (nested braces, JSX).
-func dropDynamicOptions(src string) string {
-	var out strings.Builder
-	pos := 0
-	for _, loc := range nextDynamicCall.FindAllStringIndex(src, -1) {
-		if loc[0] < pos {
-			continue
-		}
-		comma, end := topLevelArgs(src, loc[1])
-		if comma < 0 {
-			continue
-		}
-		out.WriteString(src[pos:comma])
-		pos = end
+const lazyModuleHelper = "asLazyModule"
+
+// lazyModuleHelperSource declares the helper that gives lazy() the
+// { default: Component } shape. Next's dynamic() also accepts a loader that
+// resolves straight to a component, which lazy() rejects at render time.
+func lazyModuleHelperSource(ts bool) string {
+	param := "m"
+	if ts {
+		param = "m: any"
 	}
-	out.WriteString(src[pos:])
-	return out.String()
+	return "// next/dynamic accepts a module or a bare component; lazy() needs { default }.\n" +
+		"function " + lazyModuleHelper + "(" + param + ") {\n" +
+		"  return m && typeof m === \"object\" && \"default\" in m ? m : { default: m };\n" +
+		"}\n"
 }
+
+// lazyLoader returns the lazy() argument for a dynamic() loader. A bare
+// `() => import(...)` already resolves to a module and is kept; any loader
+// that post-processes the import (.then) or is not an inline arrow is
+// normalized through the helper.
+func lazyLoader(loader string) string {
+	l := strings.TrimSpace(loader)
+	m := arrowNoParams.FindStringSubmatch(l)
+	if m == nil || strings.HasPrefix(l, "async") {
+		return "() => (" + l + ")().then(" + lazyModuleHelper + ")"
+	}
+	body := strings.TrimSpace(m[1])
+	if !strings.HasPrefix(body, "import(") {
+		return "() => (" + l + ")().then(" + lazyModuleHelper + ")"
+	}
+	if !strings.Contains(body, ".then(") || strings.Contains(body, "default") {
+		return l
+	}
+	if bare := thenBareComponent.FindStringSubmatch(body); bare != nil && bare[2] != bare[3] {
+		return "() => " + bare[1] + ".then(() => ({ default: " + bare[3] + " }))"
+	}
+	if pick := thenPickExport.FindStringSubmatch(body); pick != nil && pick[2] == pick[3] {
+		// The common named-export form keeps the shape Krate compiles statically.
+		return "() => " + pick[1] + ".then((" + pick[2] + ") => ({ default: " + pick[2] + "." + pick[4] + " }))"
+	}
+	return "() => " + body + ".then(" + lazyModuleHelper + ")"
+}
+
+func isTSSource(path string) bool {
+	return strings.HasSuffix(path, ".ts") || strings.HasSuffix(path, ".tsx")
+}
+
+// buildDynamic returns the replacement for one call. For an ssr:false call it
+// also returns a module-level declaration (hoist) to insert at hoistAt.
+func buildDynamic(src string, c dynamicCall, n int) (repl, hoist string, hoistAt int, manual []string, gated bool) {
+	lazyCall := "lazy" + c.typeArgs + "(" + lazyLoader(c.loader) + ")"
+	props, isObj := dynamicOptions(c.options)
+	if !c.hasOptions {
+		return lazyCall, "", 0, nil, false
+	}
+	if !isObj {
+		return lazyCall, "", 0, []string{"next/dynamic options are not an object literal and were ignored; use a client-mounted wrapper for ssr: false"}, false
+	}
+	if props["ssr"] != "false" {
+		if _, has := props["loading"]; has {
+			manual = append(manual, "next/dynamic loading option was ignored; show a fallback with Suspense")
+		}
+		return lazyCall, "", 0, manual, false
+	}
+	stmt, name, ok := dynamicStatement(src, c.start)
+	if !ok {
+		return lazyCall, "", 0, []string{"next/dynamic with ssr: false is not declared at the top level of the module and was converted to a plain lazy(); move it to a module-level const"}, false
+	}
+	lazyName := name + "Lazy"
+	if name == "" {
+		lazyName = "KrateLazy" + strconv.Itoa(n+1)
+	}
+	fallback := "null"
+	if l, has := props["loading"]; has {
+		var items []string
+		fallback, items = dynamicFallback(l)
+		manual = append(manual, items...)
+	}
+	propsType := "any"
+	if c.typeArgs != "" {
+		propsType = strings.TrimSpace(c.typeArgs[1 : len(c.typeArgs)-1])
+	}
+	hoist = "const " + lazyName + " = " + lazyCall + ";\n"
+	repl = "(props: " + propsType + ") => {\n" +
+		"  const [mounted, setMounted] = useState(false);\n" +
+		"  useEffect(() => { setMounted(true); }, []);\n" +
+		"  return mounted ? <" + lazyName + " {...props} /> : " + fallback + ";\n}"
+	return repl, hoist, stmt, manual, true
+}
+
+// dynamicFallback turns the loading option into a JSX expression.
+func dynamicFallback(loading string) (expr string, manual []string) {
+	l := strings.TrimSpace(loading)
+	if m := arrowNoParams.FindStringSubmatch(l); m != nil {
+		body := strings.TrimSpace(m[1])
+		if !strings.HasPrefix(body, "{") {
+			return body, nil
+		}
+	}
+	if regexp.MustCompile(`^[A-Z][\w$]*$`).MatchString(l) {
+		return "<" + l + " />", nil
+	}
+	return "null", []string{"next/dynamic loading is not an arrow function returning JSX or a component name and was replaced by null; render your fallback in the wrapper"}
+}
+
+// dynamicStatement finds the start of the top-level declaration that holds the
+// call at idx (above its leading comment) and the declared name.
+func dynamicStatement(src string, idx int) (at int, name string, ok bool) {
+	lineStart := strings.LastIndexByte(src[:idx], '\n') + 1
+	for !isLetter(src[lineStart]) {
+		if lineStart == 0 {
+			return 0, "", false
+		}
+		lineStart = strings.LastIndexByte(src[:lineStart-1], '\n') + 1
+	}
+	rest := src[lineStart:idx]
+	m := dynamicDecl.FindStringSubmatch(rest)
+	isDefault := strings.HasPrefix(rest, "export default")
+	if m == nil && !isDefault {
+		return 0, "", false
+	}
+	depth := 0
+	for i := 0; i < len(rest); i++ {
+		switch rest[i] {
+		case '(', '[', '{':
+			depth++
+		case ')', ']', '}':
+			depth--
+		}
+	}
+	if depth != 0 {
+		return 0, "", false
+	}
+	if m != nil {
+		name = m[1]
+	}
+	at = lineStart
+	for at > 0 {
+		prevStart := strings.LastIndexByte(src[:at-1], '\n') + 1
+		prev := strings.TrimSpace(src[prevStart:at])
+		if strings.HasPrefix(prev, "*") || strings.HasPrefix(prev, "/*") || strings.HasPrefix(prev, "//") {
+			at = prevStart
+			continue
+		}
+		break
+	}
+	return at, name, true
+}
+
+func isLetter(b byte) bool { return b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' }
 
 // topLevelArgs scans the arguments of a call whose "(" ends at start. It
 // returns the index of the comma that starts the second argument and of the
@@ -278,7 +604,9 @@ func relativeModulePath(fromTarget, toTarget string) string {
 // nextResponseShim is the NextResponse subset prepended to a route handler that
 // uses it. cookies mirrors Next's ResponseCookies: set/delete append
 // Set-Cookie headers, get/getAll/has read them back.
-const nextResponseShim = `function __krateCookieHeader(name: string, value: string, o: any = {}): string {
+const nextResponseShim = nextResponseCookieHelpers + nextResponseRouteObject
+
+const nextResponseCookieHelpers = `function __krateCookieHeader(name: string, value: string, o: any = {}): string {
   let s = encodeURIComponent(name) + "=" + encodeURIComponent(value);
   s += "; Path=" + (o.path === undefined ? "/" : o.path);
   if (o.domain) s += "; Domain=" + o.domain;
@@ -318,7 +646,9 @@ function __krateWithCookies<T extends Response>(res: T): T {
   return res;
 }
 
-const NextResponse = {
+`
+
+const nextResponseRouteObject = `const NextResponse = {
   redirect: (url: string | URL, init?: number | ResponseInit) => {
     const opts: ResponseInit = typeof init === "number" ? { status: init } : init || {};
     const headers = new Headers(opts.headers);
@@ -418,3 +748,59 @@ var (
 	requestCookiesRead = regexp.MustCompile(`\b(?:request|req)\.cookies\b`)
 	requestNextURL     = regexp.MustCompile(`\b(?:request|req)\.nextUrl\b`)
 )
+
+// rewriteNextServerAfter moves after (and unstable_after) out of a value
+// import from next/server into @krate/runtime/server, keeping every other
+// name where it was. Type-only imports are left alone.
+func rewriteNextServerAfter(src string) (string, bool) {
+	changed := false
+	out := nextServerImport.ReplaceAllStringFunc(src, func(line string) string {
+		sub := nextServerImport.FindStringSubmatch(line)
+		if len(sub) != 2 || strings.HasPrefix(strings.TrimSpace(line), "import type") {
+			return line
+		}
+		var kept, moved []string
+		for _, name := range strings.Split(sub[1], ",") {
+			spec := strings.TrimSpace(name)
+			if spec == "" {
+				continue
+			}
+			base, alias, hasAlias := strings.Cut(strings.TrimSpace(strings.TrimPrefix(spec, "type ")), " as ")
+			base = strings.TrimSpace(base)
+			if base != "after" && base != "unstable_after" || strings.HasPrefix(spec, "type ") {
+				kept = append(kept, spec)
+				continue
+			}
+			switch {
+			case hasAlias:
+				moved = append(moved, "after as "+strings.TrimSpace(alias))
+			case base == "unstable_after":
+				moved = append(moved, "after as unstable_after")
+			default:
+				moved = append(moved, "after")
+			}
+		}
+		if len(moved) == 0 {
+			return line
+		}
+		changed = true
+		res := "import { " + strings.Join(moved, ", ") + " } from \"@krate/runtime/server\";\n"
+		if len(kept) > 0 {
+			res = "import { " + strings.Join(kept, ", ") + " } from \"next/server\";\n" + res
+		}
+		return res
+	})
+	return out, changed
+}
+
+// dropManual removes the manual items of source with exactly this reason.
+func dropManual(rep *Report, source, reason string) {
+	kept := rep.Manual[:0]
+	for _, m := range rep.Manual {
+		if m.Source == source && m.Reason == reason {
+			continue
+		}
+		kept = append(kept, m)
+	}
+	rep.Manual = kept
+}

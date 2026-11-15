@@ -89,6 +89,8 @@ type Report struct {
 
 	apiRewrites []nextRewrite
 	headLinks   []string
+	// middlewareNode lists why the middleware needs ssr.middlewareRuntime "node".
+	middlewareNode []string
 }
 
 // Route is the route inventory the migration will produce.
@@ -201,6 +203,7 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 
 	rep := &Report{Root: abs, Framework: nextFramework}
 	var nextCfg nextConfigData
+	nextCfg.Tailwind = usesTailwindPostCSS(abs)
 	nextConfigStatic := false
 	if nextConfig != "" {
 		rep.Detected = append(rep.Detected, filepath.Base(nextConfig))
@@ -209,6 +212,7 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 			rep.Warnings = append(rep.Warnings, filepath.Base(nextConfig)+": "+w)
 		}
 		if ok {
+			data.Tailwind = nextCfg.Tailwind
 			nextCfg = data
 			nextConfigStatic = true
 			rep.Warnings = append(rep.Warnings, "translated static next.config redirects/rewrites/headers/basePath/images; every key or rule left out is listed separately")
@@ -266,6 +270,7 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 	linkRelativeImports(rep)
 	migrateNextFonts(rep, abs)
 	rewriteNextModuleImports(rep, abs)
+	migrateNextAuth(rep, abs)
 	warnClientBoundaryRuntime(rep)
 	rewritePublicEnv(rep, readPublicEnv(abs), nextCfg.Env)
 	rewriteMetadataTypes(rep)
@@ -276,6 +281,10 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 	pruneUnchangedModules(rep)
 	addAPIRewrites(&nextCfg, rep)
 	nextCfg.Head = append(nextCfg.Head, rep.headLinks...)
+	if len(rep.middlewareNode) > 0 {
+		nextCfg.MiddlewareRuntime = "node"
+		rep.Warnings = append(rep.Warnings, "the middleware "+strings.Join(rep.middlewareNode, ", ")+", which the embedded runtime cannot run: set ssr.middlewareRuntime to \"node\"")
+	}
 	var trees []string
 	if hasApp {
 		trees = append(trees, appPrefix)
@@ -302,7 +311,7 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 			}
 		}
 		rep.Files = append(rep.Files, PlannedFile{Kind: KindConfig, Target: "krate.config.ts", Content: configJSON(entry, nextCfg)})
-	} else if nextConfigStatic || len(nextCfg.Site) > 0 || len(nextCfg.Rewrites) > 0 || len(nextCfg.Head) > 0 {
+	} else if nextConfigStatic || len(nextCfg.Site) > 0 || len(nextCfg.Rewrites) > 0 || len(nextCfg.Head) > 0 || nextCfg.MiddlewareRuntime != "" {
 		merged, notes, err := mergeKrateConfig(abs, nextCfg)
 		if err != nil {
 			rep.Manual = append(rep.Manual, ManualItem{
@@ -418,7 +427,7 @@ func scanNextApp(root, appDir, prefix string, rep *Report) error {
 		switch base {
 		case "page":
 			target := routeFile("src/pages", fsRoute, ext)
-			if isSlotRoute(fsRoute) || (scoped[fsRoute] && fsRoute != "." && fsRoute != "") {
+			if isSlotRoute(fsRoute) || (scoped[fsRoute] && fsRoute != "." && fsRoute != "") || reservedRouteSegment(fsRoute) {
 				target = "src/pages/" + fsRoute + "/index" + ext
 			}
 			rep.Files = append(rep.Files, planned(root, source, target, KindPage, ext, rep))
@@ -771,6 +780,24 @@ func isSlotRoute(fsRoute string) bool {
 	return strings.HasPrefix(path.Base(fsRoute), "@")
 }
 
+// reservedPageBases are the file base names Krate treats as special files
+// rather than pages. A route segment with one of these names keeps its page
+// in the directory (error/index.tsx), which Krate routes as a normal page.
+var reservedPageBases = map[string]bool{
+	"error": true, "loading": true, "not-found": true, "layout": true, "_layout": true,
+	"template": true, "_template": true, "404": true, "500": true, "403": true, "401": true,
+	"forbidden": true, "unauthorized": true, "index": true,
+}
+
+// reservedRouteSegment reports whether the last directory of a Krate route
+// has a name Krate reserves for a special file.
+func reservedRouteSegment(fsRoute string) bool {
+	if fsRoute == "." || fsRoute == "" {
+		return false
+	}
+	return reservedPageBases[path.Base(fsRoute)]
+}
+
 func routeFile(base, route, ext string) string {
 	if route == "." || route == "" {
 		return base + "/index" + ext
@@ -952,7 +979,11 @@ func packagePlan(root, krateVersion string) (PlannedFile, bool) {
 		spec = "^" + v
 	}
 	var added []string
-	for _, dep := range []string{"@krate/core", "@krate/runtime", "@krate/components"} {
+	wanted := []string{"@krate/core", "@krate/runtime", "@krate/components"}
+	if hasDependency(pkg, "next-auth") {
+		wanted = append(wanted, "@krate/auth")
+	}
+	for _, dep := range wanted {
 		if _, ok := deps[dep]; !ok {
 			deps[dep] = spec
 			added = append(added, dep+"@"+spec)

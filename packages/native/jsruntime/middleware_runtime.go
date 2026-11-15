@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -155,6 +156,9 @@ func (m *MiddlewareRuntime) newWorker() (*mwWorker, error) {
 	}
 	if _, err := rt.EvalBytecode(bc); err != nil {
 		return fail(err)
+	}
+	if specs := staticImports(string(code)); len(specs) > 0 {
+		return fail(fmt.Errorf("middleware.js imports %s, which the embedded runtime cannot load\n  hint: set ssr.middlewareRuntime to \"node\" in krate.config.ts", strings.Join(specs, ", ")))
 	}
 	if _, err := rt.Execute(stripExports(captureExportMap(string(code))) + "\n;void 0;"); err != nil {
 		return fail(fmt.Errorf("failed to execute middleware.js: %w", err))
@@ -347,19 +351,15 @@ func MiddlewarePath(root string) string {
 	return ""
 }
 
-// LoadMiddlewareRuntime loads the middleware.js and returns a runtime, or nil
-// if there is no middleware or it failed to load (the error is reported).
-func LoadMiddlewareRuntime(root string) *MiddlewareRuntime {
+// LoadMiddlewareRuntime loads the middleware.js and returns a runtime. It
+// returns nil and no error when there is no middleware; a middleware that
+// exists but fails to load is an error the caller must not ignore.
+func LoadMiddlewareRuntime(root string) (*MiddlewareRuntime, error) {
 	p := MiddlewarePath(root)
 	if p == "" {
-		return nil
+		return nil, nil
 	}
-	rt, err := NewMiddlewareRuntime(p)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "  !Middleware load error: %s\n", err)
-		return nil
-	}
-	return rt
+	return NewMiddlewareRuntime(p)
 }
 
 var exportBlockRe = regexp.MustCompile(`export\s*\{([^}]*)\}\s*;?`)
@@ -384,4 +384,21 @@ func captureExportMap(code string) string {
 		}
 	}
 	return code[:loc[0]] + "var __krate_exports = {" + strings.Join(props, ", ") + "};" + code[loc[1]:]
+}
+
+var staticImportRe = regexp.MustCompile(`(?m)^import\s*(?:[^;"'\n]*?\sfrom\s*)?["']([^"']+)["']`)
+
+// staticImports lists the module specifiers of top-level import statements in
+// a bundle. The embedded engine runs a script, so any of them is a syntax
+// error there (a bundle only keeps them for Node built-ins and externals).
+func staticImports(code string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, m := range staticImportRe.FindAllStringSubmatch(code, -1) {
+		if !seen[m[1]] {
+			seen[m[1]] = true
+			out = append(out, strconv.Quote(m[1]))
+		}
+	}
+	return out
 }

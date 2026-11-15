@@ -343,7 +343,7 @@ export default function Error({ error, reset }: any) {
 		t.Errorf("the error message must not leak into the page:\n%s", html)
 	}
 	m := regexp.MustCompile(`data-src="([^"]+)"`).FindStringSubmatch(html)
-	if m == nil || !strings.Contains(html, "&quot;digest&quot;") {
+	if m == nil || !strings.Contains(html, `"digest":`) {
 		t.Fatalf("the boundary must hydrate as an island with a sanitized error:\n%s", html)
 	}
 	if status, _, js := getBody(t, base+m[1]); status != 200 || !strings.Contains(js, "location.reload()") {
@@ -410,6 +410,126 @@ export default function Values() {
 		// included, so its icons hydrate as islands.
 		if path != "/dynamic/" && strings.Contains(html, "krate-island") {
 			t.Errorf("%s: stateless icons must not become islands:\n%s", path, html)
+		}
+	}
+}
+
+// shadcnButton is shadcn's Button: no directive, and a dynamic tag that is
+// Radix's Slot.Root (a forwardRef object) when asChild is set.
+const shadcnButton = `import * as React from "react"
+import { Slot } from "radix-ui"
+
+function Button({ className, variant = "default", asChild = false, ...props }: any) {
+  const Comp = asChild ? Slot.Root : "button"
+  return <Comp data-slot="button" data-variant={variant} className={"btn " + (className ?? "")} {...props} />
+}
+export { Button }
+`
+
+// TestServerPageButtonAsChild: a server page (async and static) renders a
+// directive-less Button asChild around a Link. The Slot's props merge onto the
+// link; the tag is never "[object Object]".
+func TestServerPageButtonAsChild(t *testing.T) {
+	b, root := scProject(t, map[string]string{
+		"src/components/button.tsx": shadcnButton,
+		"src/pages/index.tsx": `import { Button } from "../components/button";
+export default async function Home() {
+  await Promise.resolve();
+  return <main><Button asChild variant="ghost" className="group"><Link href="/other">go</Link></Button><Button id="plain">plain</Button></main>;
+}`,
+		"src/pages/static.tsx": `import { Button } from "../components/button";
+export default function Static() {
+  return <main><Button asChild variant="ghost" className="group"><Link href="/other">go</Link></Button></main>;
+}`,
+	})
+	withPreact(t, root)
+	linkReactPackages(t, root)
+	e2eEnv(t)
+	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	base, err := startKrateServer(t, root, b.Cfg)
+	if err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+	for _, path := range []string{"/", "/static/"} {
+		_, _, html := getBody(t, base+path)
+		if strings.Contains(html, "[object Object]") {
+			t.Errorf("%s: a component rendered as a tag name:\n%s", path, html)
+		}
+		a := regexp.MustCompile(`<a [^>]*>`).FindString(html)
+		a = strings.ReplaceAll(a, `"`, "")
+		for _, want := range []string{"href=/other", "data-slot=button", "data-variant=ghost", "class=btn group"} {
+			if !strings.Contains(a, want) {
+				t.Errorf("%s: the Slot did not merge %q onto the link %q:\n%s", path, want, a, html)
+			}
+		}
+	}
+}
+
+// TestServerPageForwardRefMemoLazyTypes: element types that are React objects
+// (a memo around a forwardRef, a lazy, a context provider and consumer) run as
+// components on an async page, directly and through a variable tag.
+func TestServerPageForwardRefMemoLazyTypes(t *testing.T) {
+	b, root := scProject(t, map[string]string{
+		"src/components/exotic.tsx": `const Fwd: any = { $$typeof: Symbol.for("react.forward_ref"), render: (p: any, ref: any) => <b id="fwd" data-ref={String(ref)}>{p.children}</b> };
+export const Memo: any = { $$typeof: Symbol.for("react.memo"), type: Fwd };
+let done: any;
+const payload: any = { status: 0, then: undefined };
+export const Lazy: any = {
+  $$typeof: Symbol.for("react.lazy"),
+  _payload: payload,
+  _init(p: any) {
+    if (done) return done;
+    throw Promise.resolve().then(() => { done = (props: any) => <i id="lazy">{props.children}</i>; });
+  },
+};
+const Ctx: any = { $$typeof: Symbol.for("react.context"), _currentValue: "default" };
+Ctx.Provider = Ctx;
+Ctx.Consumer = { $$typeof: Symbol.for("react.consumer"), _context: Ctx };
+export { Ctx };
+`,
+		"src/pages/index.tsx": `import { Memo, Lazy, Ctx } from "../components/exotic";
+export default async function Home() {
+  await Promise.resolve();
+  const Pick: any = Memo;
+  const Tag: any = false ? "div" : Pick;
+  return (
+    <main>
+      <Memo>direct</Memo>
+      <Tag>variable</Tag>
+      <Lazy>late</Lazy>
+      <Ctx.Provider value="provided"><Ctx.Consumer>{(v: string) => <u id="ctx">{v}</u>}</Ctx.Consumer></Ctx.Provider>
+      <Ctx.Consumer>{(v: string) => <u id="ctx2">{v}</u>}</Ctx.Consumer>
+    </main>
+  );
+}`,
+	})
+	e2eEnv(t)
+	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	base, err := startKrateServer(t, root, b.Cfg)
+	if err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+	_, _, html := getBody(t, base+"/")
+	if strings.Contains(html, "[object Object]") {
+		t.Fatalf("a component rendered as a tag name:\n%s", html)
+	}
+	html = strings.ReplaceAll(html, `"`, "")
+	for _, want := range []string{
+		"<b id=fwd data-ref=null>direct</b>", "<b id=fwd data-ref=null>variable</b>",
+		"<i id=lazy>late</i>", "<u id=ctx>provided</u>", "<u id=ctx2>default</u>",
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("response is missing %q:\n%s", want, html)
 		}
 	}
 }

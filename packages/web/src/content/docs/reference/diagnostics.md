@@ -476,6 +476,12 @@ Each object returned by `generateStaticParams` becomes one page, so it needs a v
 
 The site is served under a base path, but a plain `<a href="/x">` or `<img src="/x">` is emitted exactly as written, so the browser requests it from the domain root and misses the site. Use `<Link href="/x">` for pages, and `<Image>` or an import for images: both add the base path. Write the full path only when the URL really does belong outside the site.
 
+### KR7145
+
+**CSS @import points at a file that does not exist**
+
+A relative or package `@import` in a stylesheet could not be resolved, for example `@import './missing.css'` after the file was moved or deleted. Krate cannot inline it, and emitting it as written would make the browser request a URL that 404s, so the build fails with the file, line and column. Fix the path or restore the file. Remote `@import url(https://...)` statements are passed through unchanged, and imports outside the project root keep their separate warning (see `cssImportRoots`). This is an error.
+
 ### KR7150
 
 **Unknown code theme**
@@ -1029,6 +1035,12 @@ A layout wraps `{children}` in a component of a React library (a `QueryClientPro
 **Layout provider renders markup around its children**
 
 A component a layout wraps around `{children}` renders elements of its own, so it is not a context provider that can be moved into the islands: Krate renders the page content, and an island cannot sit inside markup that belongs to the layout. The layout keeps the component as it was and the islands of its pages do not see its context. Split the component into a provider that renders only its children and the markup, or put the provider inside the island's own module. A provider that adds only `<script>` elements next to its children (next-themes) is lifted.
+
+### KR8017
+
+**Module state is not shared between Preact and real-React islands**
+
+Preact islands and real-React islands (those that use a library built on react-reconciler, such as @react-three/fiber) are bundled separately, because `react` means preact/compat in one and the project's React in the other. A module both reach that does not depend on React is bundled once into a shared chunk, so both see one instance. A module that imports React, directly or through its imports, needs a copy for each; the message names the import chain that reaches React (`src/a.ts -> src/b.ts -> "react"`). This module also declares module-level state (a `let` or `var`, an object made with `new`, or a store such as zustand's `create`), so the two copies keep separate state: a cache fills twice, a store has two values. Move the state into a module that does not import React, for example a store made with `zustand/vanilla` that a hook module wraps. This is a warning.
 
 ### KR8030
 

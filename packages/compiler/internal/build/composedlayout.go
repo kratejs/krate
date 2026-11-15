@@ -1,6 +1,7 @@
 package build
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -42,6 +43,9 @@ type layoutCut struct {
 	Boundaries []ClientBoundary
 	// Actions is true when a layout uses server actions.
 	Actions bool
+	// Dropped marks the cut of a segment error page: the covered layouts are
+	// left out and the page is prerendered inside the baked layouts only.
+	Dropped bool
 }
 
 var asyncLayoutMemo sync.Map // layout path -> bool, cleared per build
@@ -106,6 +110,12 @@ func (b *Builder) prepareLayoutCut(page string) (*layoutCut, error) {
 	cut, err := b.asyncLayoutCut(page)
 	if err != nil || cut == nil {
 		return nil, err
+	}
+	if kind, ok := segmentKindOfFile(page); ok && kind == SegmentError {
+		// An error page answers while the app is failing, so it is prerendered
+		// and never depends on the renderer or on a layout that awaits data.
+		fmt.Fprintf(os.Stderr, "  %s*%s %s is prerendered without the async layout %s\n", cCyan, cReset, filepath.Base(page), filepath.Base(cut.Layouts[len(cut.Layouts)-1]))
+		return &layoutCut{Covered: cut.Covered, Dropped: true}, nil
 	}
 	seen := map[string]bool{}
 	for _, layoutPath := range cut.Layouts {

@@ -145,14 +145,57 @@ type middlewareMeta struct {
 	// Features lists the compat ledger features the middleware sources
 	// reference; absent means unknown (load everything).
 	Features *[]string `json:"features,omitempty"`
+	// NodeOnly is set when the bundle imports Node built-ins or packages and
+	// so only the Node sidecar can run it.
+	NodeOnly bool `json:"nodeOnly,omitempty"`
+}
+
+// readMiddlewareNodeOnly reports whether the build recorded that the
+// middleware must run in the Node sidecar.
+func readMiddlewareNodeOnly(root string) bool {
+	data, err := os.ReadFile(middlewareMetaPath(root))
+	if err != nil {
+		return false
+	}
+	var m middlewareMeta
+	return json.Unmarshal(data, &m) == nil && m.NodeOnly
+}
+
+// externalImports lists the distinct specifiers a bundle still imports at
+// load time, from its esbuild metafile.
+func externalImports(metafile string) []string {
+	var meta struct {
+		Outputs map[string]struct {
+			Imports []struct {
+				Path     string `json:"path"`
+				External bool   `json:"external"`
+				Kind     string `json:"kind"`
+			} `json:"imports"`
+		} `json:"outputs"`
+	}
+	if json.Unmarshal([]byte(metafile), &meta) != nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, o := range meta.Outputs {
+		for _, imp := range o.Imports {
+			if imp.External && imp.Kind == "import-statement" && !seen[imp.Path] {
+				seen[imp.Path] = true
+				out = append(out, imp.Path)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 func middlewareMetaPath(root string) string {
 	return filepath.Join(root, ".krate", "middleware.json")
 }
 
-func writeMiddlewareMeta(root string, features *[]string) error {
-	data, err := json.MarshalIndent(middlewareMeta{Features: features}, "", "  ")
+func writeMiddlewareMeta(root string, features *[]string, nodeOnly bool) error {
+	data, err := json.MarshalIndent(middlewareMeta{Features: features, NodeOnly: nodeOnly}, "", "  ")
 	if err != nil {
 		return err
 	}

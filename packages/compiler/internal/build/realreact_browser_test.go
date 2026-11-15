@@ -1,6 +1,8 @@
 package build
 
 import (
+	"github.com/kratejs/krate/packages/compiler/internal/config"
+	"github.com/kratejs/krate/packages/compiler/internal/migrate"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -66,4 +68,506 @@ func TestBrowserRealReactIsland(t *testing.T) {
 		t.Fatalf("browser checks failed: %v\n%s", err, out)
 	}
 	t.Logf("%s", out)
+}
+
+// TestBrowserRealReactIslandTags: a real-React island that uses <Link> and
+// <Image> without importing them (the way migrate leaves a Next.js module)
+// hydrates without console errors, and clicking the link navigates on the
+// client: a marker set on window survives the navigation.
+func TestBrowserRealReactIslandTags(t *testing.T) {
+	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
+	if browser == "" {
+		t.Skip("set KRATE_BROWSER=chromium|firefox|webkit to run browser checks")
+	}
+	if _, err := exec.LookPath("node"); err != nil {
+		requireE2E(t, "node is not installed")
+	}
+	if err := exec.Command("node", "-e", "require.resolve('playwright')").Run(); err != nil {
+		requireE2E(t, "playwright is not installed (run pnpm install)")
+	}
+	script, err := filepath.Abs(filepath.Join("testdata", "browser_real_react_tags.mjs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo, err := repoRootPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(repo, "packages", "runtime", "dist", "krate-runtime.js")); err != nil {
+		requireE2E(t, "the runtime package is not built: %v", err)
+	}
+	root := t.TempDir()
+	cfg := setupIslandProject(t, root, true)
+	e2eEnv(t)
+	if err := os.MkdirAll(filepath.Join(root, "node_modules", "@krate"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
+		t.Skipf("cannot link the runtime package: %v", err)
+	}
+	realReactFixtureFrom(t, root, repo)
+	t.Chdir(root)
+	writeProjectFile(t, root, "src/components/Scene.tsx", `'use client';
+import { Canvas, Rect } from 'fake-canvas';
+export default function Scene() {
+	return (
+		<div>
+			<Link href="/other" id="go" className="nav">other</Link>
+			<Link href="https://example.com/x" id="ext">external</Link>
+			<Image src="/a.png" alt="pic" width={10} height={10} priority id="pic" />
+			<Canvas id="cv" width={20} height={20}><Rect x={0} y={0} w={5} h={5} fill="red" /></Canvas>
+		</div>
+	);
+}
+`)
+	writeProjectFile(t, root, "src/pages/index.tsx", `import Scene from '../components/Scene';
+export default function Page() { return <main><h1>home</h1><Scene /></main>; }
+`)
+	writeProjectFile(t, root, "src/pages/other.tsx", `export default function Page() { return <main><h1 id="other">other page</h1></main>; }
+`)
+	writeProjectFile(t, root, "public/a.png", "\x89PNG\r\n\x1a\n")
+	if out, err := captureOutput(func() error { return New(root, cfg).BuildAll() }); err != nil {
+		t.Fatalf("BuildAll: %v\n%s", err, out)
+	}
+	if !canStopInProcessServer {
+		t.Skip("cannot stop an in-process server on this platform")
+	}
+	base, err := startKrateServer(t, root, cfg)
+	if err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+	out, err := exec.Command("node", script, browser, base).CombinedOutput()
+	if err != nil {
+		if strings.Contains(string(out), "Executable doesn't exist") || strings.Contains(string(out), "browserType.launch") {
+			requireE2E(t, "%s browser is not installed: %s", browser, out)
+		}
+		t.Fatalf("browser checks failed: %v\n%s", err, out)
+	}
+}
+
+// TestBrowserClientProcessEnv: an unset process.env read in island code (a
+// Preact island and a real-React island, project code and a library) yields
+// undefined instead of throwing "process is not defined"; a set
+// KRATE_PUBLIC_ value is inlined, and no raw process.env is left in a chunk.
+func TestBrowserClientProcessEnv(t *testing.T) {
+	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
+	if browser == "" {
+		t.Skip("set KRATE_BROWSER=chromium|firefox|webkit to run browser checks")
+	}
+	if _, err := exec.LookPath("node"); err != nil {
+		requireE2E(t, "node is not installed")
+	}
+	if err := exec.Command("node", "-e", "require.resolve('playwright')").Run(); err != nil {
+		requireE2E(t, "playwright is not installed (run pnpm install)")
+	}
+	script, err := filepath.Abs(filepath.Join("testdata", "browser_process_env.mjs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo, err := repoRootPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(repo, "packages", "runtime", "dist", "krate-runtime.js")); err != nil {
+		requireE2E(t, "the runtime package is not built: %v", err)
+	}
+	root := t.TempDir()
+	cfg := setupIslandProject(t, root, true)
+	e2eEnv(t)
+	t.Setenv("KRATE_PUBLIC_Y", "yval")
+	if err := os.MkdirAll(filepath.Join(root, "node_modules", "@krate"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
+		t.Skipf("cannot link the runtime package: %v", err)
+	}
+	realReactFixtureFrom(t, root, repo)
+	t.Chdir(root)
+	writeProjectFile(t, root, "node_modules/envlib/package.json", `{"name":"envlib","version":"1.0.0","main":"index.js"}`)
+	writeProjectFile(t, root, "node_modules/envlib/index.js", `import { jsx } from 'react/jsx-runtime';
+import { useState } from 'react';
+export function libRead() {
+	return process.env.ENVLIB_MAX || 'lib-fallback';
+}
+export function Plain(props) {
+	const [n] = useState(1);
+	return jsx('p', { id: 'plain', children: props.text + n + '|' + libRead() + '|' + (process.env.KRATE_PUBLIC_Y || 'y-fallback') });
+}
+`)
+	writeProjectFile(t, root, "src/lib/reads.ts", `import { libRead } from 'envlib';
+export function reads(name: string) {
+	return [
+		process.env.KRATE_PUBLIC_X || 'x-fallback',
+		process.env.FOO || 'foo-fallback',
+		process.env[name] || 'dyn-fallback',
+		process.env.KRATE_PUBLIC_Y || 'y-fallback',
+		libRead(),
+		typeof process === 'undefined' ? 'no-process' : 'has-process',
+	].join('|');
+}
+`)
+	writeProjectFile(t, root, "src/components/Scene.tsx", `'use client';
+import { Canvas, Rect } from 'fake-canvas';
+import { reads } from '../lib/reads';
+export default function Scene() {
+	return (
+		<div>
+			<Canvas id="cv" width={20} height={20}><Rect x={0} y={0} w={5} h={5} fill="red" /></Canvas>
+			<p id="real">{reads('BAR')}</p>
+		</div>
+	);
+}
+`)
+	writeProjectFile(t, root, "src/pages/index.tsx", `import Scene from '../components/Scene';
+import { Plain } from 'envlib';
+export default function Page() { return <main><h1>home</h1><Scene /><Plain text="p" /></main>; }
+`)
+	if out, err := captureOutput(func() error { return New(root, cfg).BuildAll() }); err != nil {
+		t.Fatalf("BuildAll: %v\n%s", err, out)
+	}
+	chunks, _ := filepath.Glob(filepath.Join(cfg.OutDir, "chunks", "*.js"))
+	if len(chunks) == 0 {
+		t.Fatal("no chunks were emitted")
+	}
+	for _, c := range chunks {
+		if strings.Contains(strings.ReplaceAll(readBuilt(t, c), "<define:process.env>", ""), "process.env") {
+			t.Errorf("raw process.env left in %s", filepath.Base(c))
+		}
+	}
+	if !canStopInProcessServer {
+		t.Skip("cannot stop an in-process server on this platform")
+	}
+	base, err := startKrateServer(t, root, cfg)
+	if err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+	out, err := exec.Command("node", script, browser, base).CombinedOutput()
+	if err != nil {
+		if strings.Contains(string(out), "Executable doesn't exist") || strings.Contains(string(out), "browserType.launch") {
+			requireE2E(t, "%s browser is not installed: %s", browser, out)
+		}
+		t.Fatalf("browser checks failed: %v\n%s", err, out)
+	}
+}
+
+// TestBrowserIslandContextFromLayoutProvider: an async layout wraps the page
+// in a "use client" provider (Radix's TooltipProvider and a counter context
+// it owns). The page's server children hold a Preact and a real-React client
+// component that both use Radix Tooltip and the counter. As in Next.js, both
+// see the provider's context: the server renders the Preact one inside it,
+// both tooltips open on hover, and a click in the provider updates both.
+func TestBrowserIslandContextFromLayoutProvider(t *testing.T) {
+	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
+	if browser == "" {
+		t.Skip("set KRATE_BROWSER=chromium|firefox|webkit to run browser checks")
+	}
+	if err := exec.Command("node", "-e", "require.resolve('playwright')").Run(); err != nil {
+		requireE2E(t, "playwright is not installed (run pnpm install)")
+	}
+	script, err := filepath.Abs(filepath.Join("testdata", "browser_island_context.mjs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	radix, err := filepath.Abs(filepath.Join("..", "..", "..", "..", "examples", "node_modules", "radix-ui"))
+	if err == nil {
+		radix, err = filepath.EvalSymlinks(radix)
+	}
+	if err != nil {
+		requireE2E(t, "radix-ui is not installed for the examples (run pnpm install): %v", err)
+	}
+	b, root := scProject(t, map[string]string{
+		"src/components/count.tsx": `'use client';
+import { createContext, useContext, useState } from 'react';
+const CountContext = createContext<{ n: number; bump: () => void } | null>(null);
+export function CountProvider({ children }: { children: any }) {
+  const [n, setN] = useState(0);
+  return <CountContext.Provider value={{ n, bump: () => setN((v) => v + 1) }}>{children}</CountContext.Provider>;
+}
+export function useCount() {
+  const c = useContext(CountContext);
+  if (!c) throw new Error('useCount must be used within CountProvider');
+  return c;
+}
+export function BumpButton() {
+  const { n, bump } = useCount();
+  return <button id="bump" onClick={bump}>bump {n}</button>;
+}
+`,
+		"src/components/providers.tsx": `'use client';
+import { Tooltip } from 'radix-ui';
+import { CountProvider, BumpButton } from './count';
+export function Providers({ children }: { children: any }) {
+  return <CountProvider><Tooltip.Provider delayDuration={150}><BumpButton />{children}</Tooltip.Provider></CountProvider>;
+}
+`,
+		"src/components/tip.tsx": `import { Tooltip } from 'radix-ui';
+export function Tip({ id }: { id: string }) {
+  return (
+    <Tooltip.Root>
+      <Tooltip.Trigger id={id + '-trigger'}>{id}</Tooltip.Trigger>
+      <Tooltip.Portal><Tooltip.Content id={id + '-content'}>{id} tip</Tooltip.Content></Tooltip.Portal>
+    </Tooltip.Root>
+  );
+}
+`,
+		"src/components/PreactTip.tsx": `'use client';
+import { useCount } from './count';
+import { Tip } from './tip';
+export function PreactTip() {
+  return <div><span id="preact-n">{useCount().n}</span><Tip id="preact" /></div>;
+}
+`,
+		"src/components/RealTip.tsx": `'use client';
+import { Canvas } from 'fake-canvas';
+import { useCount } from './count';
+import { Tip } from './tip';
+export function RealTip() {
+  return <div><span id="real-n">{useCount().n}</span><Tip id="real" /><Canvas id="cv" width={4} height={4} /></div>;
+}
+`,
+		"src/pages/_layout.tsx": `import { Providers } from '../components/providers';
+export default async function Layout({ children }: { children: any }) {
+  await Promise.resolve();
+  return <div id="shell"><Providers>{children}</Providers></div>;
+}
+`,
+		"src/pages/index.tsx": `import { PreactTip } from '../components/PreactTip';
+import { RealTip } from '../components/RealTip';
+async function Section({ children }: { children: any }) {
+  await Promise.resolve();
+  return <section>{children}</section>;
+}
+export default async function Page() {
+  await Promise.resolve();
+  return <main><Section><PreactTip /></Section><RealTip /></main>;
+}
+`,
+	})
+	withPreact(t, root)
+	realReactFixture(t, root)
+	if err := os.Symlink(radix, filepath.Join(root, "node_modules", "radix-ui")); err != nil {
+		t.Skipf("cannot link radix-ui: %v", err)
+	}
+	e2eEnv(t)
+	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := captureOutput(func() error { return b.BuildAll() }); err != nil {
+		t.Fatalf("BuildAll: %v\n%s", err, out)
+	}
+	base, err := startKrateServer(t, root, b.Cfg)
+	if err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+	status, _, html := getBody(t, base+"/")
+	if status != 200 || !strings.Contains(html, `<span id="preact-n">0</span>`) || !strings.Contains(html, `id="preact-trigger"`) {
+		t.Fatalf("the server must render the nested Preact component inside the provider (status %d):\n%s", status, html)
+	}
+	out, err := exec.Command("node", script, browser, base).CombinedOutput()
+	if err != nil {
+		if strings.Contains(string(out), "Executable doesn't exist") || strings.Contains(string(out), "browserType.launch") {
+			requireE2E(t, "%s browser is not installed: %s", browser, out)
+		}
+		t.Fatalf("browser checks failed: %v\n%s", err, out)
+	}
+}
+
+// TestBrowserIslandFunctionComponentRef: React 19 hands ref to a function
+// component as a prop. A Preact island wraps a no-forwardRef Button in real
+// Radix asChild triggers (tooltip, dropdown menu, dialog); each must open
+// without errors, and a useRef on the Button must be the button element.
+func TestBrowserIslandFunctionComponentRef(t *testing.T) {
+	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
+	if browser == "" {
+		t.Skip("set KRATE_BROWSER=chromium|firefox|webkit to run browser checks")
+	}
+	if err := exec.Command("node", "-e", "require.resolve('playwright')").Run(); err != nil {
+		requireE2E(t, "playwright is not installed (run pnpm install)")
+	}
+	script, err := filepath.Abs(filepath.Join("testdata", "browser_island_refs.mjs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	radix, err := filepath.Abs(filepath.Join("..", "..", "..", "..", "examples", "node_modules", "radix-ui"))
+	if err == nil {
+		radix, err = filepath.EvalSymlinks(radix)
+	}
+	if err != nil {
+		requireE2E(t, "radix-ui is not installed for the examples (run pnpm install): %v", err)
+	}
+	b, root := scProject(t, map[string]string{
+		"src/components/Kit.tsx": `'use client';
+import { useEffect, useRef, useState } from 'react';
+import { Tooltip, DropdownMenu, Dialog } from 'radix-ui';
+function Button(props: any) {
+  return <button {...props} />;
+}
+export function Kit() {
+  const ref = useRef<HTMLButtonElement | null>(null);
+  const [kind, setKind] = useState('pending');
+  useEffect(() => {
+    setKind(ref.current instanceof HTMLButtonElement ? 'button' : 'not-a-button');
+  }, []);
+  return (
+    <div>
+      <span id="ref-kind">{kind}</span>
+      <Button ref={ref} id="plain">plain</Button>
+      <Tooltip.Provider delayDuration={50}>
+        <Tooltip.Root>
+          <Tooltip.Trigger asChild><Button id="tip-trigger">tip</Button></Tooltip.Trigger>
+          <Tooltip.Portal><Tooltip.Content>tip text</Tooltip.Content></Tooltip.Portal>
+        </Tooltip.Root>
+      </Tooltip.Provider>
+      <DropdownMenu.Root>
+        <DropdownMenu.Trigger asChild><Button id="menu-trigger">menu</Button></DropdownMenu.Trigger>
+        <DropdownMenu.Portal><DropdownMenu.Content><DropdownMenu.Item>one</DropdownMenu.Item></DropdownMenu.Content></DropdownMenu.Portal>
+      </DropdownMenu.Root>
+      <Dialog.Root>
+        <Dialog.Trigger asChild><Button id="dialog-trigger">dialog</Button></Dialog.Trigger>
+        <Dialog.Portal>
+          <Dialog.Overlay />
+          <Dialog.Content><Dialog.Title>Title</Dialog.Title><Dialog.Description>Body</Dialog.Description><Dialog.Close>close</Dialog.Close></Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+    </div>
+  );
+}
+`,
+		"src/pages/index.tsx": `import { Kit } from '../components/Kit';
+export default function Page() {
+  return <main><Kit /></main>;
+}
+`,
+	})
+	withPreact(t, root)
+	realReactFixture(t, root)
+	if err := os.Symlink(radix, filepath.Join(root, "node_modules", "radix-ui")); err != nil {
+		t.Skipf("cannot link radix-ui: %v", err)
+	}
+	e2eEnv(t)
+	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := captureOutput(func() error { return b.BuildAll() }); err != nil {
+		t.Fatalf("BuildAll: %v\n%s", err, out)
+	}
+	base, err := startKrateServer(t, root, b.Cfg)
+	if err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+	out, err := exec.Command("node", script, browser, base).CombinedOutput()
+	if err != nil {
+		if strings.Contains(string(out), "Executable doesn't exist") || strings.Contains(string(out), "browserType.launch") {
+			requireE2E(t, "%s browser is not installed: %s", browser, out)
+		}
+		t.Fatalf("browser checks failed: %v\n%s", err, out)
+	}
+}
+
+// TestBrowserMigratedDynamicLoaders migrates next/dynamic calls whose loader
+// resolves to a named export, to a bare component, or to a default export, and
+// renders them in a Preact island and a real-React island: lazy() needs a
+// { default } module, so migrate normalizes the loader result.
+func TestBrowserMigratedDynamicLoaders(t *testing.T) {
+	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
+	if browser == "" {
+		t.Skip("set KRATE_BROWSER=chromium|firefox|webkit to run browser checks")
+	}
+	if _, err := exec.LookPath("node"); err != nil {
+		requireE2E(t, "node is not installed")
+	}
+	if err := exec.Command("node", "-e", "require.resolve('playwright')").Run(); err != nil {
+		requireE2E(t, "playwright is not installed (run pnpm install)")
+	}
+	script, err := filepath.Abs(filepath.Join("testdata", "browser_dynamic_lazy.mjs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo, err := repoRootPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	e2eEnv(t)
+	realReactFixtureFrom(t, root, repo)
+	writeProjectFile(t, root, "node_modules/envlib/package.json", `{"name":"envlib","version":"1.0.0","main":"index.js","peerDependencies":{"react":"^19.0.0"}}`)
+	writeProjectFile(t, root, "node_modules/envlib/index.js", `import { jsx } from 'react/jsx-runtime';
+import { useState } from 'react';
+export function useCount() {
+	const [n] = useState(1);
+	return n;
+}
+`)
+	// The dynamic() calls live in the island modules themselves, so React's
+	// own lazy() runs them.
+	island := func(imports, lead, kind string) string {
+		return `'use client';
+import dynamic from 'next/dynamic';
+import { Suspense } from 'react';
+` + imports + `
+const Named = dynamic(() => import('./pane').then((m) => m.NamedPane));
+const Plain = dynamic(() => import('./y'));
+function BarePane() { return <i id="bare-` + kind + `">BARE</i>; }
+const Bare = dynamic(() => import('./x').then(() => BarePane));
+
+export default function Island() {
+	return (
+		<div>
+			` + lead + `
+			<Suspense fallback={null}>
+				<Bare />
+				<Named kind="` + kind + `" />
+				<Plain kind="` + kind + `" />
+			</Suspense>
+		</div>
+	);
+}
+`
+	}
+	for rel, content := range map[string]string{
+		"package.json":       `{"name":"dyn","private":true,"dependencies":{"next":"16.0.0","react":"19.0.0"}}`,
+		"src/app/layout.tsx": `export default function RootLayout({ children }) { return <html><body>{children}</body></html>; }`,
+		"src/app/page.tsx": `import Real from '../components/Real';
+import Pre from '../components/Pre';
+export default function Home() { return <main><Real /><Pre /></main>; }`,
+		"src/components/pane.tsx": `export function NamedPane({ kind }: { kind: string }) { return <b id={'named-' + kind}>NAMED</b>; }`,
+		"src/components/x.ts":     `export const unused = 1;`,
+		"src/components/y.tsx":    `export default function Y({ kind }: { kind: string }) { return <u id={'default-' + kind}>DEFAULT</u>; }`,
+		"src/components/Real.tsx": island("import { Canvas, Rect } from 'fake-canvas';", `<Canvas id="cv" width={20} height={20}><Rect x={0} y={0} w={5} h={5} fill="red" /></Canvas>`, "real"),
+		"src/components/Pre.tsx":  island("import { useCount } from 'envlib';", `<p id="plain">{useCount()}</p>`, "preact"),
+	} {
+		writeFileRel(t, root, rel, content)
+	}
+	rep, err := migrate.ScanNext(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := migrate.Apply(rep, migrate.ApplyOptions{Force: true}); err != nil {
+		t.Fatal(err)
+	}
+	prepareMigratedRuntime(t, root)
+	t.Chdir(root)
+	cfg, err := config.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := New(root, cfg)
+	b.SkipQualityChecks = true
+	if out, err := captureOutput(func() error { return b.BuildAll() }); err != nil {
+		t.Fatalf("BuildAll: %v\n%s", err, out)
+	}
+	if !canStopInProcessServer {
+		t.Skip("cannot stop an in-process server on this platform")
+	}
+	base, err := startKrateServer(t, root, cfg)
+	if err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+	out, err := exec.Command("node", script, browser, base).CombinedOutput()
+	if err != nil {
+		if strings.Contains(string(out), "Executable doesn't exist") || strings.Contains(string(out), "browserType.launch") {
+			requireE2E(t, "%s browser is not installed: %s", browser, out)
+		}
+		t.Fatalf("browser checks failed: %v\n%s", err, out)
+	}
 }

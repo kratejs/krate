@@ -111,7 +111,7 @@ export default function Counter() {
 | `cache` | identity: Krate renders each page once |
 | `flushSync` | `flushSync(fn)` is `fn()`: state changes already apply synchronously |
 | `useFormState` (react-dom) | `useActionState` |
-| `preload`, `preinit`, `preconnect`, `prefetchDNS`, `preloadModule`, `preinitModule` (react-dom) | add the `<link>` or `<script>` to the document head once, on the client |
+| `preload`, `preinit`, `preconnect`, `prefetchDNS`, `preloadModule`, `preinitModule` (react-dom) | add the `<link>` or `<script>` to the document head once per URL: on the server as a tag in the `<head>` of the response (also from islands and client components the server renders), in the browser only when the document does not have it yet (see [Resource hints](#resource-hints)) |
 | `version`, `captureOwnerStack` | `"19.2.0"` and `null` (as in production React) |
 | custom element props | strings, numbers and booleans are attributes; objects, arrays and functions are properties (see [Custom elements](#custom-elements)) |
 
@@ -171,6 +171,17 @@ as logging, run fewer times than in React.
 React's `Component`/`PureComponent` from `@krate/runtime/react`, rendered with
 `createElement` at runtime, use the same instance controller. Compiled npm
 packages run on Preact inside islands and keep Preact's class semantics.
+
+Code that runs on Preact (a `"use client"` module, an island, an npm package)
+gets the React 19 APIs Preact's compat layer lacks from `react`:
+`useOptimistic`, `useActionState`, `use` (promises and context), `cache` and
+`useEffectEvent`, plus `useFormStatus`, `useFormState` and `requestFormReset`
+from `react-dom`. `startTransition` and `useTransition` accept async functions
+and keep optimistic updates applied until the promise settles. A function
+passed as `<form action>` or `formAction` runs on submit with the form data and
+resets the form on success. `useFormStatus` reads the status of a form that the
+same Preact tree renders, not of a form rendered by a server component around
+the island, and `use(context)` must be called unconditionally.
 
 ### Error boundaries
 
@@ -876,10 +887,11 @@ only writes files into `src/components/ui` and installs packages.
    pnpm add class-variance-authority clsx tailwind-merge lucide-react radix-ui preact
    ```
 
-   `preact` is required as soon as one component is built on Radix (see below),
-   and it must be Preact 11 or newer: current shadcn components pass `ref` as an
-   ordinary prop, as React 19 does, and Preact 10 does not deliver it to function
-   components (a Dialog fails when it opens). You do not need
+   `preact` is required as soon as one component is built on Radix (see below).
+   Current shadcn components pass `ref` as an ordinary prop, as React 19 does;
+   Krate delivers `ref` to function components as a prop on Preact 10 as well
+   (a ref on a function component without `forwardRef` reaches its element, not
+   a component instance). You do not need
    `preact-render-to-string`; Krate bundles its own.
 
 2. **Write `components.json`** in the project root (the `new-york` style, no RSC,
@@ -1042,8 +1054,7 @@ a `Dialog` (with the controlled wrapper) work.
 
 Tested and working: Dialog, Sheet, DropdownMenu, ContextMenu, Menubar,
 NavigationMenu, Popover, HoverCard, Select, Tabs, Accordion, Collapsible,
-Checkbox and Switch. In a project on Preact 10, shadcn's own components fail
-because they pass `ref` as a prop, which is why Preact 11 is required.
+Checkbox and Switch, on Preact 10 and 11.
 
 ## Compiled React packages (islands)
 
@@ -1497,13 +1508,37 @@ because the two runtimes cannot share a tree.
 ### Rendering
 
 A real-React island is **client-rendered**. Server-rendering a WebGL or canvas
-tree is not meaningful, so the server emits only the placeholder. Put
+tree is not meaningful, so the server emits only the placeholder (and the
+[resource hints](#resource-hints) the island calls). Put
 `client:fallback="text"` on the tag to render a text fallback there until
 React mounts it (escaped, text only). To reserve space, wrap the tag in an
 element with a fixed size. `client:load`, `client:idle` and `client:visible`
 work as for other islands, so a heavy viewer below the fold is fetched only
 when it nears the viewport. Both directives are removed at build time and
 never reach the component.
+
+### Resource hints
+
+A `preload()` (or `preinit`, `preconnect`, ...) that a real-React island or
+client component calls while it renders still reaches the `<head>` of the
+server HTML, as in Next.js, so the browser starts the request while it parses
+the page and a later `fetch()` of the same URL (with matching `crossOrigin`)
+reuses it. The server does not render the island, so the build renders it once
+with `react-dom/server`, only to record its hints: the markup is discarded and
+a render error is ignored (hints called before the error are kept). npm
+packages other than React are replaced by inert stand-ins for that render
+(three.js and canvas libraries do not run), so it reaches the hint calls of
+your own modules and workspace packages. In the browser react-dom finds the
+`<link>` and adds nothing.
+
+The build render has the island's build-time props, and a client boundary on
+an async page renders without props, so it collects hints whose URL is a
+constant or comes from module code (`preload(WASM_URL, { as: "fetch" })`). A
+hint whose URL comes from request data, state, an effect or an event handler
+is added in the browser after hydration only, and so is one that a library
+calls; one built from a missing prop (`"/img/undefined.png"`) is dropped.
+Project code that throws at import time outside a browser yields no hints. Set `KRATE_NO_REAL_HINTS=1` to skip the build
+render.
 
 ### Props and children
 
@@ -1530,6 +1565,30 @@ never reach the component.
   element tree, and the browser mounts it with `react-dom`. Props must be
   serializable (as for any client component); children may be host elements and
   other real-React components, with serializable props.
+
+### Modules shared with Preact islands
+
+Preact islands and real-React islands are bundled separately, because `react`
+is preact/compat in one and the project's React in the other. A module both
+reach that does not depend on React, directly or through its imports, is
+bundled **once**, into a shared chunk both import, so there is one instance of
+it on the page: a cache, a promise that dedupes a fetch, an event emitter or a
+store made with `zustand/vanilla` holds one value for both kinds of island. The
+chunk exports only what the islands import from it, so a large library both
+reach is still tree shaken. A module an island loads with `import()` is split into the
+island bundle too and imports the modules the island already loaded, so it
+shares their instances (and the shared chunk when both kinds of island load
+it).
+
+A module that imports React, or a library built on it (a zustand `create`
+store, a module that calls `createContext`), needs a copy for each kind of
+island, and the copies do not share module-level state. The build reports such
+a module when it declares state (a `let` or `var`, an object made with `new`,
+or a store) with `KR8017`, naming the file and the import chain that reaches
+React (`src/lib/store.ts -> zustand/esm/index.mjs -> "react"`). Keep the state in a module without React and import it from the hook
+module. Contexts are the exception: a context from a provider in a layout
+reaches both kinds of island (see
+[server components](/docs/features/server-components/)).
 
 ### What it costs
 

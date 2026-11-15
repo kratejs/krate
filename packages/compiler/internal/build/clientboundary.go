@@ -26,10 +26,11 @@ import (
 // as inert server markup. In the page server bundle each of its exports is
 // wrapped by clientBoundary (@krate/runtime/server): the server renders the
 // component's initial HTML with Preact (React semantics, like external
-// islands) into <krate-island data-module data-export data-src data-props>,
-// and the module's client chunk hydrates that element in the browser with the
-// same serialized props. Children passed from the server are rendered on the
-// server and travel as HTML. Pages without server components are untouched:
+// islands) into <krate-island data-module data-export data-src>, preceded by
+// a JSON script with its serialized props, and the module's client chunk
+// hydrates that element in the browser with the same props. Children passed
+// from the server are rendered on the server inside the component's HTML; the
+// browser adopts those nodes in place rather than receiving them again. Pages without server components are untouched:
 // their "use client" modules compile through the normal Krate pipeline.
 
 // ClientBoundary is one "use client" module of a server-component page.
@@ -51,6 +52,9 @@ type ClientBoundary struct {
 	// reconciler library or a module that imports one. The server emits a
 	// fallback placeholder instead of rendering it (see realreact.go).
 	Real bool
+	// Hints are the resource hint tags of each export of a real-React
+	// boundary, collected at build time (see realhints.go).
+	Hints map[string][]string
 }
 
 // hydrates reports whether the boundary's components become islands.
@@ -87,7 +91,11 @@ func (cb ClientBoundary) resolveDir() string {
 // from its chunk. It is a classic script in a chunk file (not inline) so the
 // SPA router loads it when a soft navigation arrives on a page with islands,
 // and it is idempotent: it only touches islands it has not mounted.
-const clientIslandLoaderJS = `(function(){document.querySelectorAll("krate-island[data-src]:not([data-krate-island-mounted])").forEach(function(el){el.setAttribute("data-krate-island-mounted","");import(el.getAttribute("data-src")).then(function(m){return m.mount(el)}).catch(function(e){console.error("krate client component:",e);el.setAttribute("data-krate-island-error","")})})})();`
+//
+// An island inside another island's server children mounts after it, so it
+// finds the context the outer island provides there (see islandcontext.go).
+// The chunks still load in parallel.
+const clientIslandLoaderJS = `(function(){document.querySelectorAll("krate-island[data-src]:not([data-krate-island-mounted])").forEach(function(el){el.setAttribute("data-krate-island-mounted","");var up=el.parentElement&&el.parentElement.closest("krate-island[data-krate-island-mounted]");var ready=up&&up.__krateMount?up.__krateMount.catch(function(){}):null;el.__krateMount=Promise.all([import(el.getAttribute("data-src")),ready]).then(function(r){return r[0].mount(el)}).catch(function(e){console.error("krate client component:",e);el.setAttribute("data-krate-island-error","")})})})();`
 
 // islandLoaderHTML writes the island loader chunk (once per content) and
 // returns the script tag that references it. The tag is deferred so a hard
@@ -104,14 +112,17 @@ func (b *Builder) islandLoaderHTML() (string, error) {
 }
 
 // clientReviveJS turns serialized island props back into component props:
-// server-rendered children become a display:contents element holding the
-// HTML, and server action references become callable functions.
+// server-rendered children become a display:contents element (made by the
+// chunk's own __krateSlot) that adopts the server-rendered nodes already in
+// the document ({__krateSlotRef}, {$: "h", r}) or holds the HTML the props
+// carry, and server action references become callable functions. Props are
+// read from the JSON script before the island (data-props on older output).
 const clientReviveJS = `
 function __krateTree(n, h, call, comp) {
   if (n === null || n === undefined || typeof n === "boolean") return null;
   if (typeof n === "string" || typeof n === "number") return n;
   if (Array.isArray(n)) return n.map(function (x) { return __krateTree(x, h, call, comp); });
-  if (n.$ === "h") return h("krate-children", { style: "display:contents", dangerouslySetInnerHTML: { __html: n.h } });
+  if (n.$ === "h") return n.r != null ? __krateSlot(h, "", n.r) : __krateSlot(h, n.h);
   var kids = (n.c || []).map(function (x) { return __krateTree(x, h, call, comp); });
   var props = __krateRevive(n.p || {}, h, call, comp);
   if (n.$ === "e") return h.apply(null, [n.t, props].concat(kids));
@@ -119,19 +130,45 @@ function __krateTree(n, h, call, comp) {
   if (typeof C !== "function") throw new Error("client component " + n.e + " of " + n.m + " is not loaded");
   return h.apply(null, [C, props].concat(kids));
 }
+function __krateBytes(b) {
+  var s = atob(b), u = new Uint8Array(s.length);
+  for (var i = 0; i < s.length; i++) u[i] = s.charCodeAt(i);
+  return u;
+}
+function __krateTagged(v, h, call, comp) {
+  var r = function (x) { return __krateRevive(x, h, call, comp); };
+  switch (v.__krateT) {
+    case "U": return undefined;
+    case "D": return new Date(v.v === null ? NaN : v.v);
+    case "B": return BigInt(v.v);
+    case "N": return v.v === "-0" ? -0 : v.v === "NaN" ? NaN : v.v === "Infinity" ? Infinity : -Infinity;
+    case "Y": return Symbol.for(v.v);
+    case "M": return new Map(v.v.map(function (e) { return [r(e[0]), r(e[1])]; }));
+    case "S": return new Set(v.v.map(r));
+    case "A": return __krateBytes(v.v).buffer;
+    case "V": return new DataView(__krateBytes(v.v).buffer);
+    case "T": { var u = __krateBytes(v.v.b); return new globalThis[v.v.n](u.buffer, 0, u.length / globalThis[v.v.n].BYTES_PER_ELEMENT); }
+    case "O": { var o = {}; for (var k in v.v) o[k] = r(v.v[k]); return o; }
+  }
+  return v;
+}
 function __krateRevive(v, h, call, comp) {
   if (Array.isArray(v)) return v.map(function (x) { return __krateRevive(x, h, call, comp); });
   if (v && typeof v === "object") {
+    if (typeof v.__krateT === "string") return __krateTagged(v, h, call, comp);
     if (typeof v.__krateAction === "string") {
       var url = v.__krateAction;
       var fn = function () { return call(url, Array.prototype.slice.call(arguments)); };
       fn.actionUrl = url;
       return fn;
     }
+    if (typeof v.__krateSlotHTML === "string") return __krateSlot(h, v.__krateSlotHTML);
+    if (typeof v.__krateSlotRef === "string") return __krateSlot(h, "", v.__krateSlotRef);
+    if (v.__krateSlotTree) { var slot = __krateTree(v.__krateSlotTree, h, call, comp); return slot.length === 1 ? slot[0] : slot; }
     var out = {};
     for (var k in v) {
-      if (k === "__krateChildren") out.children = h("krate-children", { style: "display:contents", dangerouslySetInnerHTML: { __html: v[k] } });
-      else if (k === "__krateTree") out.children = __krateTree(v[k], h, call, comp);
+      if (k === "__krateChildren") out.children = typeof v[k] === "string" ? __krateSlot(h, v[k]) : __krateSlot(h, "", v[k] && v[k].__krateSlotRef);
+      else if (k === "__krateTree") { var kids = __krateTree(v[k], h, call, comp); out.children = kids.length === 1 ? kids[0] : kids; }
       else out[k] = __krateRevive(v[k], h, call, comp);
     }
     return out;
@@ -143,7 +180,22 @@ function __krateClientRefs(n, out) {
   if (Array.isArray(n)) { n.forEach(function (x) { __krateClientRefs(x, out); }); return out; }
   if (n.$ === "c") out.push({ m: n.m, e: n.e, s: n.s });
   (n.c || []).forEach(function (x) { __krateClientRefs(x, out); });
-  if (n.p) for (var k in n.p) { if (k === "__krateTree") __krateClientRefs(n.p[k], out); }
+  if (n.p) for (var k in n.p) { __krateSlotRefs(n.p[k], k, out); }
+  return out;
+}
+function __krateSlotRefs(v, k, out) {
+  if (k === "__krateTree") __krateClientRefs(v, out);
+  else if (v && typeof v === "object" && v.__krateSlotTree) __krateClientRefs(v.__krateSlotTree, out);
+  return out;
+}
+function __krateProps(el) {
+  if (el.hasAttribute("data-props")) return JSON.parse(el.getAttribute("data-props") || "{}");
+  var s = el.previousElementSibling;
+  return s && s.localName === "script" && s.hasAttribute("data-krate-props") ? JSON.parse(s.textContent || "{}") : {};
+}
+function __krateRootRefs(raw) {
+  var out = [];
+  for (var k in raw) __krateSlotRefs(raw[k], k, out);
   return out;
 }
 `
@@ -246,15 +298,17 @@ func (b *Builder) prepareClientBoundaries(bundle *bundler.Bundle, ann *irtree.An
 	}
 	sort.Strings(paths)
 	var out []ClientBoundary
+	target := starTargets(bundle)
 	for _, p := range paths {
 		mod := clientMods[p]
-		exports, err := clientModuleExports(mod, starTargets(bundle))
+		exports, err := clientModuleExports(mod, target)
 		if err != nil {
 			return nil, err
 		}
 		if realMods[p] {
 			cb := ClientBoundary{ModuleID: clientModuleID(b.Root, mod.Path), SourcePath: mod.Path, Exports: exports, Real: true}
 			cb.ChunkURL = b.registerRealBoundary(cb)
+			cb.Hints = b.realBoundaryHints(cb)
 			out = append(out, cb)
 			continue
 		}
@@ -721,7 +775,7 @@ func (b *Builder) clientChunkFor(key, resolveDir, entry string) (string, bool, e
 		return "", false, err
 	}
 	src := "import { h, hydrate } from \"preact\";\n" + entry +
-		clientReviveJS + clientActionCallJS + `
+		clientReviveJS + clientActionCallJS + preactSlotJS + `
 function __resolve(name) {
   return name.split(".").reduce(function (o, k) { return o == null ? o : o[k]; }, __m);
 }
@@ -730,19 +784,25 @@ export async function mount(el) {
   var name = el.getAttribute("data-export");
   var C = __resolve(name);
   if (typeof C !== "function") throw new Error("client module " + el.getAttribute("data-module") + " has no component export " + name);
-  var raw = JSON.parse(el.getAttribute("data-props") || "{}");
+  var raw = __krateProps(el);
   var loaded = {};
   loaded[el.getAttribute("data-module") + "#" + name] = C;
-  await Promise.all(__krateClientRefs(raw.__krateTree, []).map(function (r) {
+  await Promise.all(__krateRootRefs(raw).map(function (r) {
     return import(r.s).then(function (m) { loaded[r.m + "#" + r.e] = m.component(r.e); });
   }));
-  var props = __krateRevive(raw, h, __krateCallAction, function (m, e) { return loaded[m + "#" + e]; });
-  hydrate(h(C, props), el);
+  __krateSlotPool = __krateServerSlots(el);
+  var props;
+  try {
+    props = __krateRevive(raw, h, __krateCallAction, function (m, e) { return loaded[m + "#" + e]; });
+  } finally {
+    __krateSlotPool = null;
+  }
+  hydrate(__krateInScope(el, h(C, props)), el);
   el.setAttribute("data-krate-island-hydrated", "");
 }
 `
 	guard := b.newUnavailableGuard()
-	result := esbuildBuild(api.BuildOptions{
+	opts := api.BuildOptions{
 		Stdin: &api.StdinOptions{
 			Contents:   src,
 			ResolveDir: resolveDir,
@@ -760,14 +820,19 @@ export async function mount(el) {
 		Target:            api.ES2020,
 		JSX:               api.JSXAutomatic,
 		JSXImportSource:   "preact",
+		Define:            b.clientEnvDefines(),
 		TsconfigRaw:       clientTsconfigRaw(b.Root),
 		Alias:             islandAlias(b.Root, false),
 		External:          []string{"preact", "preact/compat", "preact/hooks", "preact/jsx-runtime"},
 		Inject:            []string{shim},
 		Metafile:          true,
-		Plugins:           []api.Plugin{purePrunePlugin(b.Root), guard.plugin(), clientOnlyMarkersPlugin(true), actionServerBundlePlugin(b.importResolver(), b.actionModules(), b.Cfg.BaseURLPath())},
+		Plugins:           []api.Plugin{purePrunePlugin(b.Root), guard.plugin(), clientOnlyMarkersPlugin(true), actionServerBundlePlugin(b.importResolver(), b.actionModules(), b.Cfg.BaseURLPath()), reactDOMHintsPlugin(b.Root), reactCompatPlugin(b.Root), routerHooksPlugin(b.Root)},
 		LogLevel:          api.LogLevelSilent,
-	})
+	}
+	if err := withContextKeys(&opts, b.Root, filepath.Join(b.Cfg.OutDir, ".krate")); err != nil {
+		return "", false, err
+	}
+	result := esbuildBuild(opts)
 	result.Errors = append(result.Errors, guard.errors(result.OutputFiles)...)
 	if len(result.Errors) > 0 || len(result.OutputFiles) == 0 {
 		return "", false, clientBuildError(b.Root, key, result.Errors)
@@ -877,7 +942,7 @@ func (c *clientSSRImpls) build(cb ClientBoundary) error {
 		return err
 	}
 	src := "import { h } from \"preact\";\nimport renderToString from \"preact-render-to-string\";\n" + cb.entrySource() +
-		clientReviveJS + `
+		clientReviveJS + ssrSlotJS + `
 function __krateServerAction() { throw new Error("a server action passed to a client component cannot be called while the server renders it"); }
 function __krateComp(m, e) {
   var reg = globalThis.__krateClientImpls;
@@ -885,13 +950,20 @@ function __krateComp(m, e) {
   return hit && hit.impl;
 }
 export const __krate_module = __m;
-export function __krate_render(C, props) {
-  return renderToString(h(C, __krateRevive(props, h, __krateServerAction, __krateComp)));
+// fwd holds the context values of the slot this component renders in; capture
+// receives the values in scope at each of its own slots, by slot token.
+export function __krate_render(C, props, _children, fwd, capture) {
+  __krateCapture = capture || null;
+  try {
+    return renderToString(__krateProvide(h, h(C, __krateRevive(props, h, __krateServerAction, __krateComp)), fwd));
+  } finally {
+    __krateCapture = null;
+  }
 }
 `
 	plugin := islandRenderToStringPlugin(cb.resolveDir())
 	guard := &unavailableGuard{root: c.root, nodeRuntime: true, msgs: map[string]api.Message{}}
-	result := esbuildBuild(api.BuildOptions{
+	opts := api.BuildOptions{
 		Stdin: &api.StdinOptions{
 			Contents:   src,
 			ResolveDir: cb.resolveDir(),
@@ -912,9 +984,13 @@ export function __krate_render(C, props) {
 		Alias:           islandAlias(c.root, false),
 		External:        []string{"preact", "preact/compat", "preact/hooks", "preact/jsx-runtime"},
 		Inject:          []string{shim},
-		Plugins:         []api.Plugin{purePrunePlugin(c.root), guard.plugin(), serverCSSPlugin(c.root), *plugin, clientOnlyMarkersPlugin(false), actionServerBundlePlugin(c.res, c.actions, c.basePath)},
+		Plugins:         []api.Plugin{purePrunePlugin(c.root), guard.plugin(), serverCSSPlugin(c.root), *plugin, clientOnlyMarkersPlugin(false), actionServerBundlePlugin(c.res, c.actions, c.basePath), pathAliasPlugin(c.res), reactDOMHintsPlugin(c.root), reactCompatPlugin(c.root), routerHooksPlugin(c.root), preactRequirePlugin()},
 		LogLevel:        api.LogLevelSilent,
-	})
+	}
+	if err := withContextKeys(&opts, c.root, filepath.Dir(c.bundleDir)); err != nil {
+		return err
+	}
+	result := esbuildBuild(opts)
 	if len(result.Errors) == 0 {
 		// Write is on, so the output is on disk: check it there.
 		if data, rerr := os.ReadFile(c.implPath(cb)); rerr == nil {
@@ -1140,4 +1216,102 @@ func metafileInputs(root, metafile string) map[string]bool {
 		}
 	}
 	return out
+}
+
+// preactRequireTargets maps the React specifiers a bundled CommonJS module may
+// require() to the Preact module that stands in for them (the same mapping as
+// islandAlias, which only covers import statements).
+var preactRequireTargets = map[string]string{
+	"react":                 "preact/compat",
+	"react-dom":             "preact/compat",
+	"react-dom/client":      "preact/compat",
+	"react/jsx-runtime":     "preact/jsx-runtime",
+	"react/jsx-dev-runtime": "preact/jsx-runtime",
+	"preact":                "preact",
+	"preact/compat":         "preact/compat",
+	"preact/hooks":          "preact/hooks",
+	"preact/jsx-runtime":    "preact/jsx-runtime",
+}
+
+// preactRequirePlugin turns require() of React or Preact in a bundled CommonJS
+// module into a small ESM wrapper over the external Preact module. A plain
+// external require would load Preact's CommonJS build, a second copy next to
+// the ESM one the rest of the bundle imports, with its own hook state.
+func preactRequirePlugin() api.Plugin {
+	const ns = "krate-preact-require"
+	return api.Plugin{
+		Name: "krate-preact-require",
+		Setup: func(b api.PluginBuild) {
+			b.OnResolve(api.OnResolveOptions{Filter: `^(react|react-dom|react-dom/client|react/jsx-runtime|react/jsx-dev-runtime|preact|preact/compat|preact/hooks|preact/jsx-runtime)$`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+				if args.Kind != api.ResolveJSRequireCall {
+					return api.OnResolveResult{}, nil
+				}
+				return api.OnResolveResult{Path: preactRequireTargets[args.Path], Namespace: ns}, nil
+			})
+			b.OnLoad(api.OnLoadOptions{Filter: `.*`, Namespace: ns}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
+				q := strconv.Quote(args.Path)
+				src := "export * from " + q + ";\n"
+				if args.Path == "preact/compat" {
+					src += "export { default } from " + q + ";\n"
+				}
+				return api.OnLoadResult{Contents: &src, Loader: api.LoaderJS}, nil
+			})
+		},
+	}
+}
+
+// keepClientDynImports drops from bundle.DynImportFiles the lazy imports that
+// no browser code reaches. In a page with a server tree, only the client
+// boundaries (and, for a page that still hydrates, the entry) ship to the
+// browser; a dynamic import in a module only the server tree reaches stays a
+// server-side import and must not be compiled as a browser chunk.
+func keepClientDynImports(bundle *bundler.Bundle, boundaries []ClientBoundary, entry string, serverPage bool) {
+	if len(bundle.DynImportFiles) == 0 || bundle.Resolver == nil {
+		return
+	}
+	byPath := map[string]*bundler.Module{}
+	for _, m := range bundle.Modules {
+		if m != nil && !m.IsExternal && m.Program != nil {
+			byPath[filepath.Clean(m.Path)] = m
+		}
+	}
+	reached := map[string]bool{}
+	var walk func(path string)
+	walk = func(path string) {
+		path = filepath.Clean(path)
+		if reached[path] {
+			return
+		}
+		reached[path] = true
+		m := byPath[path]
+		if m == nil {
+			return
+		}
+		for _, spec := range m.Imports {
+			if r := bundle.Resolver.Resolve(m.Path, spec); r != "" {
+				walk(r)
+			}
+		}
+	}
+	for _, cb := range boundaries {
+		walk(cb.SourcePath)
+	}
+	if !serverPage {
+		walk(entry)
+	}
+	kept := make(map[string]string, len(bundle.DynImportFiles))
+	for src, url := range bundle.DynImportFiles {
+		ok := false
+		sites := bundle.DynImportSites[src]
+		for _, site := range sites {
+			if reached[filepath.Clean(site)] {
+				ok = true
+				break
+			}
+		}
+		if ok {
+			kept[src] = url
+		}
+	}
+	bundle.DynImportFiles = kept
 }

@@ -165,6 +165,104 @@ export default async function Home() {
 	}
 }
 
+const flightPropsClientSrc = `"use client";
+import { useEffect, useState } from "react";
+function describe(p: any) {
+  return JSON.stringify([
+    p.row.createdAt instanceof Date, p.row.createdAt.toISOString(), String(p.row.bad.getTime()),
+    typeof p.row.big, String(p.row.big), p.tags.get("a").has(2), p.tags instanceof Map, p.tags.get("a") instanceof Set,
+    "gone" in p.row && p.row.gone === undefined, Object.is(p.row.nan, NaN), Object.is(p.row.neg, -0), p.row.inf,
+    p.row.fake.__krateT, p.row.list[1] === undefined, p.row.bytes instanceof Uint8Array && p.row.bytes[2], p.sym === Symbol.for("s"),
+  ]);
+}
+export default function Row(p: any) {
+  const [seen, setSeen] = useState("");
+  useEffect(() => setSeen(describe(p)), []);
+  return <div><p id="ssr">{describe(p)}</p><p id="client" data-ready={seen ? "1" : undefined}>{seen}</p></div>;
+}
+`
+
+// TestClientPropsCarryFlightTypes sends a Drizzle-like row (Date, BigInt, Map,
+// Set, undefined, NaN, ...) from an async server page to a client component
+// and checks the server render and, with KRATE_BROWSER set, the hydrated client.
+func TestClientPropsCarryFlightTypes(t *testing.T) {
+	if !canStopInProcessServer {
+		t.Skip("in-process server needs a unix host")
+	}
+	ensureRuntimeDist(t)
+	if _, err := exec.LookPath("node"); err != nil {
+		requireE2E(t, "node is not installed")
+	}
+	b, root := scProject(t, map[string]string{
+		"src/components/Row.tsx": flightPropsClientSrc,
+		"src/pages/index.tsx": `import Row from "../components/Row";
+export default async function Home() {
+  const row = await Promise.resolve({
+    createdAt: new Date("2024-01-02T03:04:05Z"), bad: new Date("nope"), big: 12345678901234567890n,
+    gone: undefined, nan: NaN, neg: -0, inf: Infinity, list: [1, undefined, 3],
+    fake: { __krateT: "D", v: 5 }, bytes: new Uint8Array([7, 8, 9]),
+  });
+  const tags = new Map([["a", new Set([1, 2])]]);
+  return <main><Row row={row} tags={tags} sym={Symbol.for("s")} /></main>;
+}`,
+	})
+	withPreact(t, root)
+	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	base, err := startKrateServer(t, root, b.Cfg)
+	if err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+	const want = `[true,"2024-01-02T03:04:05.000Z","NaN","bigint","12345678901234567890",true,true,true,true,true,true,null,"D",true,9,true]`
+	resp, err := http.Get(base + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	html, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("status %d:\n%s", resp.StatusCode, html)
+	}
+	// JSON.stringify turns Infinity into null, which is what the want shows.
+	if !strings.Contains(string(html), `<p id="ssr">`+strings.ReplaceAll(want, `"`, "&quot;")+`</p>`) &&
+		!strings.Contains(string(html), `<p id="ssr">`+want+`</p>`) {
+		t.Fatalf("server render lacks the revived values %s:\n%s", want, html)
+	}
+	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
+	if browser == "" {
+		return
+	}
+	if err := exec.Command("node", "-e", "require.resolve('playwright')").Run(); err != nil {
+		requireE2E(t, "playwright is not installed (run pnpm install)")
+	}
+	script, err := filepath.Abs(filepath.Join("testdata", "client_flight_props.mjs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("node", script, base+"/", browser).CombinedOutput()
+	if err != nil {
+		if strings.Contains(string(out), "Executable doesn't exist") {
+			requireE2E(t, "%s browser is not installed: %s", browser, out)
+		}
+		t.Fatalf("browser script failed: %v\n%s", err, out)
+	}
+	var res struct {
+		Client, SsrLike string
+		Errors          []string
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &res); err != nil {
+		t.Fatalf("parsing browser output: %v\n%s", err, out)
+	}
+	if res.Client != want || res.SsrLike != want || len(res.Errors) > 0 {
+		t.Fatalf("hydrated client saw %+v, want %s", res, want)
+	}
+}
+
 func TestClientModuleStarReexportExpandsRuntimeExports(t *testing.T) {
 	files := map[string]string{
 		"src/components/viewer/types.ts":   "export interface ViewerProps { label: string }\nexport type Mode = 'a' | 'b';\n",
@@ -464,5 +562,254 @@ export async function saveDraft(text: string) {
 	})
 	if withAction < 4 {
 		t.Errorf("every page must reference the action, only %d files do", withAction)
+	}
+}
+
+// TestJSXPropsReachClientComponent: a server component passes JSX in props
+// other than children (a slot, an array of elements, a client component in a
+// slot) to a client component. The slots render on the server, are in the SSR
+// HTML, and survive hydration in a browser (KRATE_BROWSER).
+func TestJSXPropsReachClientComponent(t *testing.T) {
+	e2eEnv(t)
+	b, root := scProject(t, map[string]string{
+		"src/components/Shell.tsx": `"use client";
+import { useState } from "react";
+export default function Shell({ userMenu, tools, children }: any) {
+  const [open, setOpen] = useState(false);
+  return <div id="shell"><button id="toggle" onClick={() => setOpen(!open)}>{open ? "open" : "closed"}</button><div id="menu">{userMenu}</div><ul id="tools">{tools}</ul><div id="body">{children}</div></div>;
+}`,
+		"src/components/Like.tsx": `"use client";
+import { useState } from "react";
+export default function Like() {
+  const [n, setN] = useState(0);
+  return <li><button id="like" onClick={() => setN(n + 1)}>likes {n}</button></li>;
+}`,
+		"src/pages/index.tsx": `import Shell from "../components/Shell";
+import Like from "../components/Like";
+async function UserMenu({ name }: { name: string }) { await Promise.resolve(); return <span id="who">{name}</span>; }
+export default async function Home() {
+  const name = await Promise.resolve("Ada");
+  return <Shell userMenu={<UserMenu name={name} />} tools={[<li key="a">tool a</li>, <Like key="b" />]}><p>page body</p></Shell>;
+}`,
+	})
+	withPreact(t, root)
+	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	base, err := startKrateServer(t, root, b.Cfg)
+	if err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+	resp, err := http.Get(base + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	html := string(data)
+	if resp.StatusCode != 200 || !strings.Contains(html, `<span id="who">Ada</span>`) || !strings.Contains(html, "tool a") || !strings.Contains(html, "likes 0") || !strings.Contains(html, "page body") {
+		t.Fatalf("status %d, the slots must be in the server HTML:\n%s", resp.StatusCode, html)
+	}
+	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
+	if browser == "" {
+		return
+	}
+	if !canStopInProcessServer {
+		t.Skip("in-process server needs a unix host")
+	}
+	if err := exec.Command("node", "-e", "require.resolve('playwright')").Run(); err != nil {
+		requireE2E(t, "playwright is not installed (run pnpm install)")
+	}
+	script, err := filepath.Abs(filepath.Join("testdata", "client_island_slots.mjs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("node", script, base+"/", browser).CombinedOutput()
+	if err != nil {
+		if strings.Contains(string(out), "Executable doesn't exist") {
+			requireE2E(t, "%s browser is not installed: %s", browser, out)
+		}
+		t.Fatalf("browser script failed: %v\n%s", err, out)
+	}
+	var res struct {
+		Who, Tools, Body string
+		Errors           []string
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &res); err != nil {
+		t.Fatalf("parsing browser output: %v\n%s", err, out)
+	}
+	if res.Who != "Ada" || !strings.Contains(res.Tools, "tool a") || res.Body != "page body" || len(res.Errors) > 0 {
+		t.Fatalf("unexpected browser result: %+v", res)
+	}
+}
+
+// TestReactDOMResourceHints: react-dom's preload, preconnect, preinit and
+// preloadModule work in a server component and in a client component that the
+// server renders, and put their tags (once each) in the head of the response.
+func TestReactDOMResourceHints(t *testing.T) {
+	e2eEnv(t)
+	b, root := scProject(t, map[string]string{
+		"src/server/hints.ts": `import "server-only";
+import { preload, preconnect, preinit, preloadModule, prefetchDNS } from "react-dom";
+export function hintModel(url: string) {
+  preload(url, { as: "fetch", crossOrigin: "anonymous", fetchPriority: "high" });
+  preload(url, { as: "fetch", crossOrigin: "anonymous", fetchPriority: "high" });
+  preconnect("https://cdn.example.com", { crossOrigin: "anonymous" });
+  prefetchDNS("https://dns.example.com");
+  preinit("/app.css", { as: "style" });
+  preloadModule("/mod.js");
+}`,
+		"src/components/wasm-hint.ts": `import { preload } from "react-dom";
+export function hintWasm() { preload("/m.wasm", { as: "fetch", crossOrigin: "anonymous", type: "application/wasm" }); }`,
+		"src/components/Grid.tsx": `"use client";
+import { useState } from "react";
+import { hintWasm } from "./wasm-hint";
+export default function Grid() {
+  hintWasm();
+  const [n, setN] = useState(0);
+  return <button id="g" onClick={() => setN(n + 1)}>grid {n}</button>;
+}`,
+		"src/pages/index.tsx": `import Grid from "../components/Grid";
+import { hintModel } from "../server/hints";
+export default async function Home() {
+  await Promise.resolve();
+  hintModel("/model.glb");
+  return <main><Grid /></main>;
+}`,
+	})
+	withPreact(t, root)
+	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	base, err := startKrateServer(t, root, b.Cfg)
+	if err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+	status, _, html := getWith(t, base+"/", nil)
+	if status != 200 {
+		t.Fatalf("status %d:\n%.800s", status, html)
+	}
+	head := html[:strings.Index(html, "</head>")]
+	for _, want := range []string{
+		`<link rel="preload" href="/model.glb" as="fetch" crossorigin="" fetchpriority="high">`,
+		`<link rel="preconnect" href="https://cdn.example.com" crossorigin="">`,
+		`<link rel="dns-prefetch" href="https://dns.example.com">`,
+		`<link rel="stylesheet" href="/app.css">`,
+		`<link rel="modulepreload" href="/mod.js">`,
+		`<link rel="preload" href="/m.wasm" as="fetch" crossorigin="" type="application/wasm">`,
+	} {
+		if strings.Count(head, want) != 1 {
+			t.Errorf("head must hold %s once:\n%s", want, head)
+		}
+	}
+}
+
+// TestUseClientReact19HooksBrowser runs a "use client" component that calls
+// React 19 hooks preact/compat lacks, through a namespace import and named
+// imports, against a real server action: SSR renders the initial state, a
+// click applies an optimistic update that settles after the action, and a
+// form bound to useActionState reports its pending status through
+// useFormStatus. Requires KRATE_BROWSER.
+func TestUseClientReact19HooksBrowser(t *testing.T) {
+	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
+	if browser == "" {
+		t.Skip("set KRATE_BROWSER=chromium|firefox|webkit to run the client hooks browser test")
+	}
+	if !canStopInProcessServer {
+		t.Skip("in-process server needs a unix host")
+	}
+	ensureRuntimeDist(t)
+	if _, err := exec.LookPath("node"); err != nil {
+		requireE2E(t, "node is not installed")
+	}
+	if err := exec.Command("node", "-e", "require.resolve('playwright')").Run(); err != nil {
+		requireE2E(t, "playwright is not installed (run pnpm install)")
+	}
+	b, root := scProject(t, map[string]string{
+		"src/actions.ts": `"use server";
+let n = 0;
+export async function bump() { await new Promise((r) => setTimeout(r, 400)); return ++n; }`,
+		"src/components/Panel.tsx": `"use client";
+import * as React from "react";
+import { use, useOptimistic } from "react";
+import { useFormStatus } from "react-dom";
+import { bump } from "../actions";
+const Ctx = React.createContext("ctx-default");
+function Submit() {
+  const { pending } = useFormStatus();
+  return <button id="submit" disabled={pending}>{pending ? "saving" : "save"}</button>;
+}
+export default function Panel({ count }: { count: number }) {
+  const [opt, addOpt] = React.useOptimistic(count, (s: number, d: number) => s + d);
+  const [named] = useOptimistic(count);
+  const [state, formAction] = React.useActionState(async (prev: number) => { await bump(); return prev + 1; }, 0);
+  const ctx = React.use(Ctx);
+  return (
+    <div>
+      <button id="go" onClick={() => React.startTransition(async () => { addOpt(1); await bump(); })}>go</button>
+      <p id="opt">opt {opt}</p>
+      <p id="named">named {named} {typeof use}</p>
+      <p id="ctx">{ctx}</p>
+      <form action={formAction}><Submit /></form>
+      <p id="state">state {state}</p>
+    </div>
+  );
+}`,
+		"src/pages/index.tsx": `import Panel from "../components/Panel";
+export default async function Home() {
+  const count = await Promise.resolve(5);
+  return <main><Panel count={count} /></main>;
+}`,
+	})
+	withPreact(t, root)
+	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	base, err := startKrateServer(t, root, b.Cfg)
+	if err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+	resp, err := http.Get(base + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	html, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	for _, want := range []string{"opt 5", "named 5 function", "ctx-default", "state 0", ">save<"} {
+		if !strings.Contains(string(html), want) {
+			t.Errorf("server HTML missing %q:\n%s", want, html)
+		}
+	}
+	script, err := filepath.Abs(filepath.Join("testdata", "client_react19_hooks.mjs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("node", script, base+"/", browser).CombinedOutput()
+	if err != nil {
+		if strings.Contains(string(out), "Executable doesn't exist") {
+			requireE2E(t, "%s browser is not installed: %s", browser, out)
+		}
+		t.Fatalf("browser script failed: %v\n%s", err, out)
+	}
+	var res struct {
+		Before, During, Settled, Status, State string
+		Errors                                 []string
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &res); err != nil {
+		t.Fatalf("parsing browser output: %v\n%s", err, out)
+	}
+	if res.Before != "opt 5" || res.During != "opt 6" || res.Settled != "opt 5" || res.Status != "saving" || res.State != "state 1" || len(res.Errors) > 0 {
+		t.Fatalf("unexpected browser result: %+v", res)
 	}
 }

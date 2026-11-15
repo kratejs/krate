@@ -237,6 +237,17 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Added
 
+- `@krate/auth`: `auth.signIn(provider, { redirectTo })` and `auth.signOut({ redirectTo })` for server
+  actions and route handlers (same flow and cookies as the CSRF-protected endpoints, then a redirect;
+  `redirect: false` returns the URL), and `auth.auth()` with no argument reads the session of the current
+  server component, action or route handler. API route handlers now run in the request scope that
+  `headers()`, `cookies()` and `redirect()` read, on the Node and the embedded runtime, and a server action
+  may redirect to an absolute URL with a thrown `redirect()` signal. `defineAuth` accepts a function that
+  returns the options, and a provider factory listed without being called.
+- `krate migrate nextjs` ports next-auth v5 to `@krate/auth`: `NextAuth(...)` becomes `defineAuth(...)`,
+  `next-auth/providers/*` and `next-auth/react` imports are rewritten, `cookies.prefix: "authjs"` keeps the
+  Auth.js cookie names (and database sessions) working, and `@auth/drizzle-adapter` is kept. Whatever has no
+  equivalent is a manual item that says what to do, so next-auth is never left to fail at run time.
 - Cloudflare: `deploy.cloudflare.cache: true` stores cacheable SSR responses (200 GET with a public
   `Cache-Control`, no `Set-Cookie`, no credentials) in `caches.default` and marks them with
   `X-Krate-Edge-Cache: HIT|MISS`. A `fetch(request, env, ctx, next)` on the default export of
@@ -401,6 +412,183 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- Client components inside server components no longer ship their server children again inside their props. The
+  children (and JSX-valued props such as `userMenu={<UserMenu />}`) were rendered into the page and also sent as an HTML
+  string in the island's `data-props`, nested once per enclosing client component, so a page under a root
+  `<Providers>{children}</Providers>` carried its whole body two or three times (2-7x the HTML of the same page on
+  Next.js). The browser now adopts the server-rendered nodes in place, a slot is sent as HTML only when the component
+  did not render it on the server (closed dialog content, real-React islands), and props travel in a
+  `<script type="application/json">` before each `<krate-island>` instead of an entity-escaped attribute. Each island's
+  props are in the document once at any depth; nested islands keep the provider's context, and server children hidden
+  and shown again by their client parent keep their nodes and state.
+- react-dom resource hints (`preload`, `preinit`, `preconnect`, `prefetchDNS`, `preloadModule`, `preinitModule`) called
+  while a client component renders reach the `<head>` of the server HTML, once per URL, for Preact islands on static
+  and force-dynamic pages (before, the build-time render dropped them) and for real-React islands and client
+  boundaries, which the server does not render: the build renders each once with react-dom/server only to record its
+  hints (with the island's build-time props, a boundary without props, npm packages other than React stubbed out;
+  errors are ignored). In the browser a hint whose `<link>` is already in the document adds nothing, so a file the
+  page also `fetch`es is requested once instead of twice (with Chrome's "preloaded but not used" warning).
+  `crossOrigin` is written as React writes it (`crossorigin=""` or `"use-credentials"`). `KRATE_NO_REAL_HINTS=1`
+  turns the build-time render off.
+- A `ref` on a function component without `forwardRef` reaches its element in Preact islands, as in React 19: the ref
+  is passed as an ordinary prop instead of binding to the Preact component instance. Radix `asChild` triggers
+  (`TooltipTrigger`, `DropdownMenuTrigger`, `DialogTrigger`, `PopoverTrigger`) around shadcn-style components no longer
+  throw `getBoundingClientRect is not a function` or `addEventListener is not a function`, on Preact 10 and 11.
+- `krate migrate nextjs` gives `lazy()` the `{ default }` module it needs when a `next/dynamic` loader resolves
+  to a named export or straight to a component, which Next allows: `.then((m) => m.Pane)` becomes
+  `.then((m) => ({ default: m.Pane }))`, `.then(() => Pane)` becomes `.then(() => ({ default: Pane }))`, and
+  other `.then(...)` loaders go through an `asLazyModule` helper added to the file. Before, such loaders failed
+  with `Minified React error #306` in real-React islands.
+- An unset `process.env.X` in browser code (Preact and real-React islands, client boundaries, lazy chunks, workers and
+  library code such as polygon-clipping) reads as `undefined` instead of throwing `ReferenceError: process is not
+  defined`; a bare `process.env` and `process.env[name]` work too. Set `KRATE_PUBLIC_*` values and `NODE_ENV` are still
+  inlined.
+- A module that both Preact islands and real-React islands import, and that does not depend on React (for example a
+  cache with `let attempt: Promise<boolean> | null` that dedupes a fetch), is bundled once into a shared `isn_*` chunk that
+  both import, instead of once per island bundle, so its module-level state is shared and the fetch runs once. The chunk
+  re-exports only what the islands use, so a library both reach stays tree shaken. A duplicated module that keeps state
+  because its imports reach React (a zustand `create` store) is reported with `KR8017`, which names the import chain
+  (`src/lib/store.ts -> zustand/esm/index.mjs -> "react"`). On a page with client boundaries every module was first
+  treated as reaching React, because the Preact bundle injects a file the real-React bundle does not; a module whose
+  imports never reach React is now shared there too, and is never reported.
+- A shared island chunk no longer evaluates a module in an import cycle before the module it reads at its top level
+  (`TypeError: he is not iterable` on every page with islands). Code splitting orders the files of a chunk by their distance
+  from an entry, so a chunk shared by Preact and real-React islands could enter a cycle such as
+  `fx-kinds -> template -> fx-stack -> fx-kinds` at another module than each island bundle did. Modules in an import cycle
+  now stay in each island bundle, as before the shared chunks; `KR8017` names the cycle when such a module keeps state.
+  Type-only imports were never part of it: esbuild drops them before it orders modules.
+- A dynamic `import()` in a module that runs only in an island no longer also gets a standalone chunk. The island
+  bundles already split it into their own chunks, which import the modules the island loaded (one instance of each).
+  But the page build wrote a second, self-contained copy with every dependency inlined (1.6 MB for a three.js
+  module) that nothing ever requested. A dynamic-import chunk is now written only when the page's own script loads it.
+- A module that mentions `Link` (or another compiler-provided tag) only in a comment, a string, an object key, a member
+  name or a type is shared between Preact and real-React islands again. Only a free reference to the name, which the
+  injected tag would resolve, keeps a module in each bundle.
+- A CSS `@import` of a local stylesheet that does not exist (for example `@import './missing.css'`) now fails
+  the build with the file, line and column (KR7145) instead of being shipped as written and 404ing in the
+  browser. Remote `@import url(https://...)` is unchanged.
+- `krate migrate nextjs` reports a manual item for every file elsewhere in the workspace (a sibling
+  package's stylesheet or module) that points into the `src/app` tree it moves aside, naming the file, line
+  and new path, instead of silently breaking that package.
+- `asChild` on a client component now works when its child comes from server JSX, as in Next.js: a shadcn account menu
+  (`<DropdownMenuTrigger asChild><Button><Avatar />...</Button></DropdownMenuTrigger>` with a directive-less `Button`) opens on
+  click and the button gets `aria-haspopup`, `aria-expanded` and the trigger's handlers. The child travels as an element tree with
+  the server component at its top rendered to its element, so Radix's `Slot` can clone it, and a client component inside it (the
+  `Avatar`) renders in the same island instead of as a separate island. A child that can only be sent as HTML logs a warning.
+- Client components inside the server children of a `"use client"` provider now see its context, as in Next.js: a root layout
+  that renders `<Providers>{children}</Providers>` with Radix's `TooltipProvider` no longer makes a page's `Tooltip` throw
+  `` `Tooltip` must be used within `TooltipProvider` ``. Nested Preact islands mount under the provider's instances, real-React islands
+  get their own copy of each context with the provider's value (and its updates), and the server renders nested components inside
+  the context instead of failing the request.
+- Passive effects in Preact islands run in React's order: the effects of a commit run before the next render starts, also when a
+  layout effect schedules it. Radix `Tooltip` (1.2 and later) in a Preact island no longer closes the moment it opens.
+- A real-React client component (one that reaches a reconciler library) that receives server-rendered children no longer fails
+  with React error #62: the children's wrapper element now gets its `display: contents` style as an object.
+- The HTML minifier keeps white space inside a `<pre>` after a stray end tag the parser ignores (`<p>a<pre>b</p>  `):
+  `<pre>` closes the open `<p>`, so the `</p>` closes nothing and the text after it is still preformatted.
+- The build plugins that give client code React 19 hooks and value-returning router hooks no longer race when
+  esbuild resolves modules in parallel (a data race under `go test -race`).
+- `<Link>`, `<Image>` and the other compiler-provided tags no longer throw `ReferenceError: Link is not defined` in real-React
+  islands (anything that reaches a reconciler library such as `@react-three/fiber`). The island bundle now gets React versions
+  of the tags for the ones a module uses without importing them, as Preact islands already did. `Link` emits the attributes of
+  Krate's compiled `<Link>` (base path, `data-krate-link`, `data-prefetch`, `replace`, `scroll`, external links), navigates on the
+  client through the router and starts the router on a page whose only client code is islands.
+- A server-rendered shadcn `<Button asChild>` no longer emits `<[object Object] ...>`. The server renderer now runs element types
+  that are React objects (`forwardRef`, `memo`, `lazy`, context Provider and Consumer) as components, whether they are used directly,
+  through a variable tag or as `Slot.Root`, and Radix's `Slot` merges its props onto the child. Any other object or symbol type is a
+  render error instead of a bogus tag. `<Link>` on the server now forwards `data-*`, `aria-*`, `style` and other attributes to the
+  anchor, and a build-time `Slot` around forwarded children keeps all of its attributes, not only the class.
+- Props sent from a server component to a client component can be a `Date`, `Map`, `Set`, `bigint`, `undefined`,
+  `NaN`, `Infinity`, `-0`, a typed array, `ArrayBuffer`, `DataView` or a `Symbol.for` symbol, as with React
+  Flight. The client component (and its server render) receives the same type, so Drizzle rows no longer fail
+  with "is an instance of Date". Class instances and functions are still rejected.
+- Client components and islands that call `React.useOptimistic`, `React.useActionState`, `React.use` or
+  `useFormStatus` from `react-dom` no longer fail with `useOptimistic is not a function` (HTTP 500 on SSR):
+  the `react` that Preact-based code receives now provides the React 19 hooks `preact/compat` lacks, and
+  async `startTransition`/`useTransition` keep optimistic updates applied until the action settles.
+- `krate migrate nextjs`: `NextResponse` in a migrated middleware is now a `Response` subclass, so
+  `new NextResponse(html, { status: 404 })` works, and `NextResponse.next({ request: { headers } })`,
+  `next({ headers })` and `rewrite(url)` are mapped instead of dropped. Middleware can continue with changed
+  request headers (`x-middleware-override-headers` and `x-middleware-request-<name>`, as in Next.js) in the
+  embedded, Node and serverless runtimes, and layouts see them through `headers()`. A middleware rewrite no
+  longer triggers the `trailingSlash: "never"` redirect.
+- Builds of large apps with many client components are about twice as fast: the client-boundary pass resolved
+  the real path of every module once per client module. Real paths are now cached for the duration of a build.
+- `krate migrate nextjs`: a route segment named like a Krate special file (`app/auth/error/page.tsx`,
+  `loading`, `not-found`, `404`, `500`, `template` and the others) now migrates to `<segment>/index.tsx`
+  instead of `error.tsx`, which Krate treated as a segment error boundary and failed the build.
+- `krate migrate nextjs`: a `loadEnvConfig(path)` call in `next.config` with a static path (a literal,
+  `path.resolve(__dirname, '../..')`, `join(process.cwd(), '..', '..')`, `fileURLToPath(new URL(...))`)
+  now writes the matching `envDir`, so a monorepo-root `.env` is read; only a path that cannot be
+  resolved statically stays a manual item.
+
+- `usePathname()`, `useSearchParams()`, `useParams()` and `useRouter()` return plain values (a string,
+  a `URLSearchParams`, an object, a router) in every React-model client component: a `"use client"`
+  module under a server component, an island that uses an npm React package, and real-React islands.
+  They returned signal getters there, so `pathname.startsWith(...)` and `searchParams.get(...)` threw
+  `is not a function` and the active nav item and filters stayed broken. These components now re-render
+  on client navigation.
+- Server bundles (`krate start`, SSR and ISR pages) apply the project's tsconfig `paths`, including
+  ones inherited through `extends`, so `@/components/x` imports no longer stay as bare package imports
+  that fail with `ERR_MODULE_NOT_FOUND` and answer 500.
+- A package that only a workspace package depends on (pnpm installs `@aws-sdk/client-s3` under
+  `packages/storage/node_modules`) now loads in server bundles, server actions and Node API routes: when
+  Node could not find the package from the output directory, the bundle imports the file that was resolved.
+  An import that does not resolve at all is reported by the build instead of being left for run time.
+- A bundled CommonJS dependency of a client component (such as Next's `next/script`) that calls
+  `require("react/jsx-runtime")` no longer crashes server rendering with `Dynamic require of
+  "preact/jsx-runtime" is not supported`; React and Preact requires share the one Preact instance.
+- A middleware that imports Node built-ins or a database driver no longer makes `krate start` serve with no
+  middleware: the build compiles it for the Node sidecar (QuickJS rejected the bundle's `import` lines as
+  `SyntaxError: expecting '('`), a middleware that still fails to load stops startup instead of being skipped,
+  `krate migrate nextjs` sets `ssr.middlewareRuntime: "node"` for it, and every KR7160 middleware hint names
+  that setting.
+
+- A lazy `import()` in a module that only server code reaches (an API route, an async server page, a
+  server component) no longer becomes a browser chunk, so a `await import('@/server/queues')` that pulls
+  in Node modules no longer stops the build with "dynamic import chunk error".
+- KR8013 is no longer reported for a module without a directive that is imported only through
+  `"use client"` modules; as in Next.js it is client code. Only a hook call the server tree reaches
+  without crossing a client module is an error.
+- KR7116 is no longer reported for one file that the build reaches under two paths (a workspace package
+  linked through `node_modules` and also read by its real path); it listed every export of such a file
+  as clashing with itself, 205 warnings for one migrated monorepo.
+- Build-time evaluation of `metadata`, `generateStaticParams` and endpoint modules resolves npm packages with
+  the Node conditions, so a package with a `browser` entry that throws without a window (such as
+  `node-abort-controller`) no longer fails the layout's metadata with KR7122.
+- A build with many pages could hang for good while planning private-name renames: bundles took the read
+  locks of the shared module programs in different orders and deadlocked against a queued transform. The
+  locks are taken in path order now.
+- React 19 `react-dom` resource hints (`preload`, `preinit`, `preconnect`, `prefetchDNS`, `preloadModule`,
+  `preinitModule`) work in server bundles and in client components rendered by the server: the tags go into the
+  `<head>` of the response once each, and in the browser they are added to the document head if missing. A
+  server module that imported `react-dom` used to fail with `ERR_MODULE_NOT_FOUND` and a client component with
+  `'preact/compat' does not provide an export named 'preload'`, which made every page that called them return 500.
+- A server component can pass JSX in any prop of a client component (`userMenu={<UserMenu />}`, an array of
+  elements, a client component inside the slot), not only as `children`. The slot is rendered on the server,
+  appears in the server HTML and hydrates with the island.
+- An `error.tsx` under an async layout is prerendered without that layout, as every error page is, instead of
+  being rendered per request with no `error` prop (`Cannot read properties of undefined (reading 'digest')`). The
+  error page also receives `retry` next to `reset`.
+- `krate migrate nextjs` converts `next/script`: `afterInteractive` becomes a deferred `<Script>`, `lazyOnload` an
+  async one, `beforeInteractive` a `<script>` in `<Head>` (inline children, `id`, `src` and `data-*` kept);
+  `strategy="worker"`, a computed strategy and `onLoad`/`onReady`/`onError` handlers become manual items, and Next's
+  client `script.js` no longer reaches the bundle.
+- `krate migrate nextjs` also rewrites `after` (and `unstable_after`) from `next/server` in page, layout and module
+  files, whether imported alone, combined with other `next/server` names or aliased, to `@krate/runtime/server`.
+- `krate migrate nextjs` converts `dynamic<Props>(() => import(...), { ssr: false, loading })`, including the type
+  argument: the result is a lazy component behind a client-mount gate, so the server markup is the `loading`
+  fallback and the browser mounts the component from its own chunk (no more `dynamic is not defined`).
+- The middleware matcher that `krate migrate nextjs` generates only rewrites path-to-regexp parameters (`/:name`,
+  `(regex)`, `*`, `+`, `?`) and leaves regex groups such as `(?!...)` and `(?:png|jpe?g)` alone, so Next's default
+  matcher no longer throws `Invalid regular expression` (every request answered 503).
+- `krate migrate nextjs` writes `trailingSlash: "never"` (Next's URL form; `"always"` when `next.config` sets
+  `trailingSlash: true`) and `tailwind: { enabled: true }` when `postcss.config` runs Tailwind. KR7140 now carries the
+  file, line and column of the Tailwind directive instead of `0:0`.
+- `@krate/auth` Discord with `issuer: "https://discord.com"` stays plain OAuth and checks the RFC 9207 `iss`
+  callback parameter against the issuer (a missing `iss` is accepted); a provider option such as
+  `authorization: { params: { scope } }` keeps the provider's own URL and scope override instead of
+  dropping the endpoint or being overwritten by the default scope.
 - A client component or real-React island in a project under a symlinked path (macOS `/var` is
   `/private/var`) gets action references for its `"use server"` imports instead of their server code.
 - Real-React islands (react-three-fiber and other reconciler libraries) no longer bundle server-only code. A

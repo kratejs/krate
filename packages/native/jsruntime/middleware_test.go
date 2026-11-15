@@ -3,6 +3,7 @@ package jsruntime
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -121,5 +122,27 @@ export {
 	}
 	if !m.HasMatcher() {
 		t.Fatal("renamed config export must supply the matcher")
+	}
+}
+
+func TestMiddlewareStaticImportsFailWithAHint(t *testing.T) {
+	// esbuild keeps Node built-ins as ESM imports; QuickJS rejects them as
+	// "SyntaxError: expecting '('", which used to read as a parser bug.
+	p := filepath.Join(t.TempDir(), "middleware.js")
+	code := "import { randomUUID } from \"node:crypto\";\nimport net from \"net\";\nimport \"side-effect\";\nfunction middleware() { return randomUUID(); }\nexport {\n  middleware\n};\n"
+	if err := os.WriteFile(p, []byte(code), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := NewMiddlewareRuntime(p)
+	if err == nil {
+		t.Fatal("a middleware with static imports must not load")
+	}
+	for _, want := range []string{`"node:crypto"`, `"net"`, `"side-effect"`, "ssr.middlewareRuntime"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q lacks %q", err, want)
+		}
+	}
+	if rt, err := LoadMiddlewareRuntime(filepath.Dir(p)); rt != nil || err != nil {
+		t.Fatalf("no .krate/middleware.js under that root: %v %v", rt, err)
 	}
 }

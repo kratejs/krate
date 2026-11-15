@@ -22,6 +22,13 @@ func externalsProject(t *testing.T, files map[string]string, mutate func(*config
 // sub of the written tree (a workspace app inside a monorepo).
 func externalsProjectAt(t *testing.T, files map[string]string, sub string, mutate func(*config.Config)) (string, *config.Config) {
 	t.Helper()
+	return externalsProjectPrep(t, files, sub, mutate, nil)
+}
+
+// externalsProjectPrep is externalsProjectAt that calls prep with the project
+// root before the build, and reads the project's tsconfig paths.
+func externalsProjectPrep(t *testing.T, files map[string]string, sub string, mutate func(*config.Config), prep func(root string)) (string, *config.Config) {
+	t.Helper()
 	if _, err := exec.LookPath("node"); err != nil {
 		requireE2E(t, "node is not installed")
 		t.Skip("node is not installed")
@@ -66,8 +73,12 @@ func externalsProjectAt(t *testing.T, files map[string]string, sub string, mutat
 	cfg := config.Default()
 	cfg.PagesDir = filepath.Join(root, "src", "pages")
 	cfg.OutDir = filepath.Join(root, "dist")
+	cfg.LoadTSConfigPaths(root)
 	if mutate != nil {
 		mutate(cfg)
+	}
+	if prep != nil {
+		prep(root)
 	}
 	if err := New(root, cfg).BuildAll(); err != nil {
 		t.Fatalf("BuildAll: %v", err)

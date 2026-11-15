@@ -95,6 +95,17 @@ func redirectToCanonicalSlash(mode string, w http.ResponseWriter, r *http.Reques
 	return true
 }
 
+type requestedPathKey struct{}
+
+// requestedPath is the path the client asked for: a middleware rewrite
+// changes r.URL.Path but the slash rule judges the original URL.
+func requestedPath(r *http.Request) string {
+	if p, ok := r.Context().Value(requestedPathKey{}).(string); ok {
+		return p
+	}
+	return r.URL.Path
+}
+
 // redirectToSlashless is the trailingSlash "never" counterpart: a GET/HEAD for
 // a page URL ending in a slash gets a 301 to the slashless URL (query kept).
 // It reports whether it wrote the response.
@@ -102,7 +113,7 @@ func redirectToSlashless(mode string, w http.ResponseWriter, r *http.Request) bo
 	if mode != "never" {
 		return false
 	}
-	p := r.URL.Path
+	p := requestedPath(r)
 	if len(p) < 2 || !strings.HasSuffix(p, "/") || notFoundPageURL(p) {
 		return false
 	}

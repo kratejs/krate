@@ -218,7 +218,7 @@ process.stdout.write(JSON.stringify({ status: res.status, body: body.toString('b
 func (b *Builder) runEndpointBundle(abs, route string, bnd *bundler.Bundler) ([]byte, error) {
 	resolve := func(importer, spec string) (string, bool) {
 		if bnd != nil {
-			if p := bnd.Resolve(importer, spec); p != "" {
+			if p := bnd.ResolveForNode(importer, spec); p != "" {
 				return p, true
 			}
 		}

@@ -314,6 +314,9 @@ type Builder struct {
 	shippedWarned sync.Map
 	// gspMemo caches one resolveStaticParamsPage result per page per build.
 	gspMemo sync.Map
+	// realHintsMemo holds the resource hints of each real-React component the
+	// build rendered for them, by hints entry source (see realhints.go).
+	realHintsMemo sync.Map
 	// progIconDiags holds the unresolved <Icon> diagnostics of each program.
 	progIconDiags sync.Map
 	// progImageDiags holds the <Image> diagnostics of each transformed program.
@@ -742,6 +745,7 @@ func (b *Builder) printReactiveDiags(diags []reactive.Diagnostic) {
 // BuildPages rebuilds only the specified pages (by source path).
 // Unlike BuildAll, it does NOT clean the output directory.
 func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
+	resetCanonicalCache()
 	if len(pages) == 0 {
 		return nil, nil
 	}
@@ -936,6 +940,7 @@ func (b *Builder) guardOutDir() error {
 
 func (b *Builder) BuildAll() error {
 	defer b.phase("build:total")()
+	resetCanonicalCache()
 	if err := b.contextErr(); err != nil {
 		return err
 	}
@@ -2422,7 +2427,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 	if cutErr != nil {
 		return nil, "", cutErr
 	}
-	if len(reactIslands) > 0 && !entryIsAsync(entryModule.Program) && layoutCut == nil {
+	if len(reactIslands) > 0 && !entryIsAsync(entryModule.Program) && (layoutCut == nil || layoutCut.Dropped) {
 		bundle.Modules = krateSideModules(bundle.Modules, entryModule, reactIslands, bnd.Resolve)
 	}
 
@@ -2584,6 +2589,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 		if layoutCut != nil {
 			clientBoundaries = mergeBoundaries(clientBoundaries, layoutCut.Boundaries)
 		}
+		keepClientDynImports(bundle, clientBoundaries, entryModule.Path, serverPage)
 	}
 	pageWarnings = append(pageWarnings, b.releaseEnvWarnings(envPending, bundle, clientBoundaries, serverPage)...)
 	var (
@@ -3027,7 +3033,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 		return nil, "", fmt.Errorf("writing assets for %s: %w", page, err)
 	}
 	b.registerWorkers(bundle.WorkerFiles, bundle.WorkerEsm)
-	b.registerDynamicChunks(bundle.DynImportFiles)
+	b.registerDynamicChunks(referencedDynamicChunks(bundle.DynImportFiles, hydrationJS))
 
 	printResult(outName, jsFile, pageBase)
 
@@ -3127,7 +3133,7 @@ func (b *Builder) tryDiskReplay(page string) (*PageResult, string, bool) {
 		}
 	}
 	b.registerWorkers(e.WorkerFiles, trueSet(e.WorkerEsm))
-	b.registerDynamicChunks(e.DynImports)
+	b.registerDynamicChunks(referencedDynamicChunks(e.DynImports, string(e.JSBytes)))
 	b.setIslandEntries(page, e.IslandEntries)
 	b.recordDeps(page, e.Deps)
 	c.markHit()
@@ -3370,6 +3376,7 @@ func (b *Builder) resetBuildCaches() {
 	b.collectionSites = sync.Map{}
 	b.templateCovered = sync.Map{}
 	b.gspMemo = sync.Map{}
+	b.realHintsMemo = sync.Map{}
 	b.paramBindings = sync.Map{}
 	b.shippedWarned = sync.Map{}
 	// Go component parses are per-build.
@@ -4320,6 +4327,18 @@ func (b *Builder) BuildMiddleware() error {
 	}
 	result := esbuildBuild(mwOpts)
 
+	// A bundle that still imports Node built-ins or packages cannot load in
+	// the embedded engine, so it is built for the Node sidecar instead.
+	nodeOnly := false
+	if len(result.Errors) == 0 && embeddedRuntime(b.Cfg.SSR.MiddlewareRuntime) {
+		if ext := externalImports(result.Metafile); len(ext) > 0 {
+			nodeOnly = true
+			printf("  %s> Middleware%s imports %s, so it runs in the Node sidecar (set ssr.middlewareRuntime to \"node\" to silence this)\n", cYellow, cReset, strings.Join(ext, ", "))
+			jseval.ApplyNodeESM(&mwOpts)
+			result = esbuildBuild(mwOpts)
+		}
+	}
+
 	if len(result.Errors) > 0 {
 		for _, e := range result.Errors {
 			fmt.Fprintf(os.Stderr, "  %sMiddleware error:%s %s\n", cRed, cReset, nativeAddonHint(e.Text))
@@ -4340,13 +4359,17 @@ func (b *Builder) BuildMiddleware() error {
 	if err := fsutil.WriteFileAtomic(outPath, result.OutputFiles[0].Contents, 0644); err != nil {
 		return fmt.Errorf("writing middleware: %w", err)
 	}
+	if nodeOnly {
+		b.setRuntimeCompatWarnings("middleware", nil)
+		return writeMiddlewareMeta(b.Root, nil, true)
+	}
 	if !embeddedRuntime(b.Cfg.SSR.MiddlewareRuntime) {
 		b.setRuntimeCompatWarnings("middleware", nil)
 		_ = os.Remove(middlewareMetaPath(b.Root))
 		return nil
 	}
 	features := b.scanRuntimeCompat("middleware", result.Metafile, jscompat.CompatMiddlewareRuntime)
-	if err := writeMiddlewareMeta(b.Root, features); err != nil {
+	if err := writeMiddlewareMeta(b.Root, features, false); err != nil {
 		return fmt.Errorf("writing middleware metadata: %w", err)
 	}
 	return nil
@@ -4563,6 +4586,7 @@ func (b *Builder) writeWorkerBundles() error {
 			Loader:           map[string]api.Loader{ext: loader},
 			MinifyWhitespace: b.Cfg.ShouldMinifyJS(),
 			Sourcemap:        sourceMapMode(b.Cfg.Sourcemap),
+			Define:           b.clientEnvDefines(),
 			LogLevel:         api.LogLevelSilent,
 		})
 		if len(result.Errors) > 0 {
@@ -4591,6 +4615,24 @@ func sourceMapMode(enabled bool) api.SourceMap {
 		return api.SourceMapLinked
 	}
 	return api.SourceMapNone
+}
+
+// referencedDynamicChunks keeps the dynamic-import chunks the page script js
+// loads. The page bundler also sees an import() inside a module that runs only
+// in an island; the island bundles code-split that import() themselves, so a
+// standalone chunk for it (with its own copy of every dependency and of their
+// module state) would be written but never requested.
+func referencedDynamicChunks(files map[string]string, js string) map[string]string {
+	if len(files) == 0 {
+		return files
+	}
+	out := make(map[string]string, len(files))
+	for src, url := range files {
+		if js != "" && strings.Contains(js, url[strings.LastIndex(url, "/")+1:]) {
+			out[src] = url
+		}
+	}
+	return out
 }
 
 // registerDynamicChunks collects dynamic-import chunk registrations from a page
@@ -4663,6 +4705,7 @@ func (b *Builder) writeDynamicChunkBundles() error {
 			Loader:           map[string]api.Loader{ext: loader},
 			MinifyWhitespace: b.Cfg.ShouldMinifyJS(),
 			Sourcemap:        sourceMapMode(b.Cfg.Sourcemap),
+			Define:           b.clientEnvDefines(),
 			LogLevel:         api.LogLevelSilent,
 		})
 		if len(result.Errors) > 0 {
@@ -5242,7 +5285,7 @@ func (b *Builder) compileSingleRoute(file string, apiSrcDir string) (apiRouteMet
 		Bundle:      true,
 		Platform:    api.PlatformNode,
 		Format:      api.FormatESModule,
-		Plugins:     []api.Plugin{jseval.MarkerPackagesPlugin(), externalNodeModulesPlugin()},
+		Plugins:     []api.Plugin{jseval.MarkerPackagesPlugin(), externalNodeModulesPlugin(nodePath)},
 		Outfile:     nodePath,
 		Write:       true,
 		Sourcemap:   sourceMapMode(b.Cfg.Sourcemap),

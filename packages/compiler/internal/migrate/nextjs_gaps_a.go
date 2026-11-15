@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/internal/bundler"
+	"github.com/kratejs/krate/packages/compiler/internal/jsruntime"
 	"github.com/kratejs/krate/packages/compiler/internal/lexer"
 	"github.com/kratejs/krate/packages/compiler/internal/parser"
 )
@@ -37,6 +38,7 @@ func planMiddleware(abs string, rep *Report) {
 		return
 	}
 	rep.Files = append(rep.Files, plannedMiddleware(abs, found[0], rep))
+	rep.middlewareNode = jsruntime.MiddlewareNeedsNode(abs, filepath.Join(abs, filepath.FromSlash(found[0])))
 	for _, other := range found[1:] {
 		rep.Manual = append(rep.Manual, ManualItem{
 			Source: other,
@@ -328,6 +330,7 @@ func planMoveAside(abs string, trees []string, rep *Report) {
 			continue
 		}
 		rep.MoveAside = append(rep.MoveAside, tree)
+		warnOutsideReferences(abs, tree, rep)
 		var left []string
 		_ = filepath.WalkDir(filepath.Join(abs, filepath.FromSlash(tree)), func(p string, d fs.DirEntry, err error) error {
 			if err != nil {

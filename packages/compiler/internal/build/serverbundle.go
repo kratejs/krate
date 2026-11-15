@@ -155,7 +155,7 @@ func compileServerBundles(res *bundler.ImportResolver, results []*PageResult, ro
 					"@krate/runtime",
 					"@krate/runtime/*",
 				},
-				Plugins: serverBundlePlugins(page, absSource, append(composed, reactServerShimPlugin(), serverCSSPlugin(root), cbPlugin, unusedClientModulePlugin(), serverExportPlugin(page.ServerExports, absSource), goServerBundlePlugin(page.GoBaked, root), actionServerBundlePlugin(res, actionModules, actionBasePath), inlineActionPlugin(root, actionBasePath), serverRuntimeTagsPlugin(), serverGlobalsPlugin(root), externalNodeModulesPlugin())...),
+				Plugins: serverBundlePlugins(page, absSource, append(composed, reactServerShimPlugin(), serverCSSPlugin(root), cbPlugin, unusedClientModulePlugin(), serverExportPlugin(page.ServerExports, absSource), goServerBundlePlugin(page.GoBaked, root), actionServerBundlePlugin(res, actionModules, actionBasePath), inlineActionPlugin(root, actionBasePath), serverRuntimeTagsPlugin(), serverGlobalsPlugin(root), pathAliasPlugin(res), externalNodeModulesPlugin(outPath))...),
 				Stdin: &api.StdinOptions{
 					Loader:     api.LoaderTSX,
 					Contents:   stdinContents,

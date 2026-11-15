@@ -348,6 +348,16 @@ func (m *minifier) closeElement(name string) {
 		if m.open[i].name != name {
 			continue
 		}
+		// The stack does not model the parser's implied end tags: <pre> closes
+		// an open <p>, so in "<p><pre>x</p>  " the </p> closes nothing and the
+		// text after it is still inside the <pre>. An end tag that would pop an
+		// element preserving white space opened after it is ignored, which can
+		// only keep white space the parser would also keep.
+		for _, el := range m.open[i+1:] {
+			if el.preserve {
+				return
+			}
+		}
 		for _, el := range m.open[i:] {
 			if el.preserve {
 				m.preserve--

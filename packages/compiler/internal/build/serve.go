@@ -328,7 +328,7 @@ const server = http.createServer(async (req, res) => {
         res.once('finish', () => { krateRunAfter(revalidateScope); });
         // revalidatePath/revalidateTag calls are applied before responding.
         const response = await krateWithBudget(krateRouteBudgetMs(API_DIR, targetFile), ac, async () => {
-          const out = await REVALIDATE_STORE.run(revalidateScope, () => methodHandler(request, { params: routeParamsValue }));
+          const out = await REVALIDATE_STORE.run(revalidateScope, () => krateRunRoute(request, () => methodHandler(request, { params: routeParamsValue })));
           await flushRevalidate(revalidateScope);
           return out;
         });
@@ -722,7 +722,7 @@ Bun.serve({
       const request = (fn.length >= 2 && !namedHandler) ? krateAttach(req) : krateAttach(new Request(req, { signal: AbortSignal.any([req.signal, ac.signal]) }));
       // revalidatePath/revalidateTag calls are applied before responding.
       const out = await krateWithBudget(krateRouteBudgetMs(API_DIR, file), ac, async () => {
-        const r = await REVALIDATE_STORE.run(revalidateScope, async () => ((fn.length >= 2 && !namedHandler) ? legacyInvoke(fn, req, url) : toResponse(await fn(request, { params: routeParamsValue }))));
+        const r = await REVALIDATE_STORE.run(revalidateScope, async () => ((fn.length >= 2 && !namedHandler) ? legacyInvoke(fn, req, url) : krateRunRoute(request, async () => toResponse(await fn(request, { params: routeParamsValue })))));
         await flushRevalidate(revalidateScope);
         return r;
       });
@@ -1427,13 +1427,22 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	// Load embedded middleware runtime if configured (default: quickjs)
 	var middlewareRT *jsruntime.MiddlewareRuntime
 	middlewareRTOption := strings.ToLower(cfg.SSR.MiddlewareRuntime)
+	if embeddedRuntime(middlewareRTOption) && readMiddlewareNodeOnly(root) {
+		// The build found imports the embedded engine cannot load; the Node
+		// sidecar runs the middleware.
+		middlewareRTOption = "node"
+	}
 	if embeddedRuntime(middlewareRTOption) {
 		if hub != nil {
 			// Dev reloads the module whenever .krate/middleware.js changes (and
 			// picks it up if it is added after startup).
 			middlewareRT = jsruntime.NewLazyMiddlewareRuntime(filepath.Join(root, ".krate", "middleware.js"))
 		} else {
-			middlewareRT = jsruntime.LoadMiddlewareRuntime(root)
+			// A middleware that cannot load must stop startup: serving
+			// without it would skip auth and maintenance gates.
+			if middlewareRT, err = jsruntime.LoadMiddlewareRuntime(root); err != nil {
+				return fmt.Errorf("middleware failed to load: %w\n  hint: set ssr.middlewareRuntime to \"node\" in krate.config.ts if it imports Node built-ins or a database driver", err)
+			}
 		}
 		if middlewareRT != nil {
 			middlewareRT.SetEnv(serverEnv)

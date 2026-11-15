@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -226,5 +227,54 @@ func TestComponentLocalConstShipsNoRuntime(t *testing.T) {
 	html = readDistPage(t, root, "jsx/index.html")
 	if !strings.Contains(html, "<p>Hello <b>there</b></p>") || strings.Contains(html, "<script") {
 		t.Errorf("a component-local JSX constant must leave the page static:\n%s", html)
+	}
+}
+
+// TestSegmentErrorPageUnderAsyncLayout: an error page inside an async root
+// layout is prerendered without that layout, so a failing layout still gets the
+// 500 page, filled with the error and its digest (never a render with no error).
+func TestSegmentErrorPageUnderAsyncLayout(t *testing.T) {
+	e2eEnv(t)
+	b, root := scProject(t, map[string]string{
+		"src/pages/_layout.tsx": `import { headers } from "@krate/runtime/server";
+export default async function L({ children }: any) {
+  const h = await headers();
+  if (h.get("x-fail")) throw new Error("layout boom");
+  return <div id="root-layout">{children}</div>;
+}`,
+		"src/pages/index.tsx": `export default function Home() { return <h1>home</h1>; }`,
+		"src/components/route-error.tsx": `"use client";
+export function RouteError({ error, retry }: { error: Error & { digest?: string }; retry: () => void }) {
+  return <div><p id="m">{error.message}</p><p id="d">{error.digest}</p><button onClick={retry}>Try again</button></div>;
+}`,
+		"src/pages/error.tsx": `"use client";
+import { RouteError } from "../components/route-error";
+export default function Error({ error, retry }: { error: Error & { digest?: string }; retry: () => void }) {
+  return <main><RouteError error={error} retry={retry} /></main>;
+}`,
+	})
+	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
+		t.Fatal(err)
+	}
+	withPreact(t, root)
+	logs := captureStderrFile(t)
+	if err := b.BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	for _, e := range readManifest(t, root).Segments {
+		if len(e.Dynamic) != 0 {
+			t.Errorf("an error page must not render per request: %+v", e)
+		}
+	}
+	base, err := startKrateServer(t, root, b.Cfg)
+	if err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+	status, _, html := getWith(t, base+"/", map[string]string{"x-fail": "1"})
+	if status != 500 || !regexp.MustCompile(`id="__krate_error">[^<]*"digest":"[0-9a-f]{10}"`).MatchString(html) || !strings.Contains(html, "Try again") {
+		t.Errorf("status %d, want the 500 page with the error digest:\n%s", status, html)
+	}
+	if strings.Contains(logs(), "Segment page render error") {
+		t.Errorf("the error page was rendered per request:\n%.1500s", logs())
 	}
 }

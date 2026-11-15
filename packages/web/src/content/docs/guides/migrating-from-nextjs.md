@@ -111,8 +111,10 @@ The first pass:
   Every other `next.config` key gets its own item with a hint instead of one
   generic warning: `transpilePackages`, `output: 'standalone'`, computed
   `images.remotePatterns` or `env`, `experimental` flags, and a
-  `loadEnvConfig(...)` call (point `envDir` at the directory that holds the
-  `.env*` files). A static `serverExternalPackages` list and static
+  `loadEnvConfig(...)` call whose path is not static. When the path is static
+  (a literal, `path.resolve(__dirname, '../..')`, `join(process.cwd(), '..', '..')`,
+  `fileURLToPath(new URL('../..', import.meta.url))`), the migration writes the
+  matching `envDir` and there is no item. A static `serverExternalPackages` list and static
   `outputFileTracingIncludes` globs are carried over to the Krate keys of the
   same name (see [Self-hosting](/docs/guides/self-hosting/)); computed ones get an item.
   An `async` page keeps `async` and its wrapper is `async` too, so the
@@ -121,8 +123,10 @@ The first pass:
   Krate honors, and notes in the plan what each does (ISR, SSR, 404 for unlisted
   params); the same exports in a layout are manual work;
 - rewrites `middleware.ts` to the standard `Request`/`Response` API, including a
-  small `NextResponse` shim, static/local matcher checks, and cookie/IP/geo
-  helpers; computed `config.matcher` arrays are checked at runtime. The Next.js 16
+  `NextResponse` class (a `Response` subclass: `new NextResponse(body, init)`,
+  `redirect`, `json`, `next`, `rewrite`, `cookies`; `next({ request: { headers } })`
+  reaches layouts through `headers()`), static/local matcher checks, and
+  cookie/IP/geo helpers; computed `config.matcher` arrays are checked at runtime. The Next.js 16
   `proxy.ts` (root or `src/`, a `proxy` function or a default export) is migrated
   the same way and written to `middleware.ts`, the name Krate loads (`--apply`
   moves the original `proxy.ts` into the backup); when both files exist only
@@ -162,7 +166,10 @@ The first pass:
   `<html>` and `<body>` it renders; Krate's root layout provides them), or a
   manual item when a root `error.tsx` exists too. A directory that has a layout,
   template, loading, error or not-found file keeps its page in that directory
-  (`dashboard/index.tsx`) so those files wrap it;
+  (`dashboard/index.tsx`) so those files wrap it. A route segment named like a
+  Krate special file (`error`, `loading`, `not-found`, `layout`, `template`,
+  `404`, `500`, `403`, `401`, `forbidden`, `unauthorized`, `index`) also keeps its
+  page in the directory (`auth/error/index.tsx`), so `/auth/error` stays a page;
 - maps `next/navigation` onto the runtime: `usePathname`, `useParams`,
   `useSearchParams`, `useRouter` and `useSelectedLayoutSegment(s)` come from
   `@krate/runtime` (see [Router hooks](/docs/reference/runtime-api/#router-hooks)),
@@ -172,7 +179,33 @@ The first pass:
   `unstable_rethrow`, `useServerInsertedHTML`) stay on `next/navigation` and are
   listed as manual work. `next/headers` and `next/cache` map to
   `@krate/runtime/server`, rewrites common `next/server` API helpers, and maps
-  simple `next/dynamic` loaders to React `lazy()`;
+  `next/dynamic` loaders to React `lazy()`. Next accepts a loader that resolves
+  to a module or straight to a component, but `lazy()` needs `{ default }`, so
+  `.then((m) => m.Pane)` becomes `.then((m) => ({ default: m.Pane }))`,
+  `.then(() => Pane)` becomes `.then(() => ({ default: Pane }))`, and any other
+  loader that post-processes the import is wrapped in a small `asLazyModule`
+  helper added to the file. A `dynamic(() => import('./x'),
+  { ssr: false, loading })` call (with or without a type argument,
+  `dynamic<Props>(...)`) becomes a module-level `lazy()` plus a component that
+  renders the `loading` fallback until it has mounted in the browser, then the
+  lazy component: the page HTML holds the fallback, the component lives in its
+  own `lazy-*.js` chunk and the build still renders it once, hidden, so a viewer
+  that touches `window` while rendering needs a real-React island (see
+  [React compatibility](/docs/guides/react-compatibility/#libraries-built-on-a-react-reconciler-real-react-islands))
+  or a guard. A `loading` that is not an arrow function returning JSX or a
+  component name, and `ssr: false` outside a top-level `const`, are manual items;
+- converts `next/script`: `<Script strategy="afterInteractive">` (the default)
+  becomes a Krate `<Script defer>`, `lazyOnload` an `async` one and
+  `beforeInteractive` a `<script>` inside `<Head>`; `src`, `id`, `data-*`
+  attributes and inline children are kept. `strategy="worker"` and computed
+  strategies are loaded deferred on the main thread and listed as manual items,
+  as are `onLoad`, `onReady` and `onError` handlers, which a static `<script>`
+  cannot run. `after()` from `next/server` becomes `after` from
+  `@krate/runtime/server` in pages and layouts as well as route handlers;
+- writes `trailingSlash: "never"` into `krate.config.ts` (Next's URL form: `/store`
+  answers 200, `/store/` redirects), or `"always"` when `next.config` sets
+  `trailingSlash: true`, and `tailwind: { enabled: true }` when `postcss.config.*`
+  uses `@tailwindcss/postcss` or `tailwindcss`;
 - keeps `NextRequest` features in route handlers: the `Request` has
   `request.cookies` (`get`, `getAll`, `has`, read-only) and `request.nextUrl`
   (a `URL` with `searchParams`, `pathname`, `basePath` and `clone()`; the
@@ -183,7 +216,7 @@ The first pass:
   `after` from `@krate/runtime/server` and runs once the response is sent (see
   [API routes](/docs/features/api-routes/#after-the-response)). Only what is
   left is manual work: `request.cookies.set/delete`, `request.ip`,
-  `request.geo`, `NextResponse.rewrite/next`, and other `next/server` helpers
+  `request.geo`, `NextResponse.rewrite/next` in route handlers, and other `next/server` helpers
   such as `userAgent`;
 - maps `next/font/google` to a generated helper and Google Fonts CSS, and
   `next/font/local` plus `geist/font/sans` and `geist/font/mono` to self-hosted
@@ -225,6 +258,17 @@ The first pass:
   `__tests__`) are kept in `src/migrated/` next to their modules, and their
   relative imports of migrated routes (`./page`) are re-pointed at
   `src/pages/`; with the originals moved aside each test runs once;
+- ports next-auth v5 to [`@krate/auth`](/docs/features/authentication/#coming-from-nextauth)
+  when it finds a `NextAuth({...})` config (an object, or a function returning one): the
+  import becomes `defineAuth` from `@krate/auth`, `next-auth/providers/*` imports become the
+  matching `@krate/auth` providers, `next-auth/react` becomes `@krate/auth/client`, and
+  `cookies: { prefix: "authjs" }` is added so the existing `authjs.*` cookies and database
+  sessions keep working. `handlers`, `auth`, `signIn` and `signOut` keep their names, so
+  the `[...nextauth]` route, server actions and server components need no edits, and
+  `@auth/drizzle-adapter` is kept as is. `--update-package` adds `@krate/auth`. A provider,
+  option, callback, cookie override, `getToken`, `useSession` or `auth(handler)` wrapper
+  with no `@krate/auth` equivalent is listed as manual work with what to do instead, and
+  next-auth is never left to fail at run time as an unresolved import;
 - warns about script files at the project root and directly under `src/` that
   the plan neither copies nor rewrites (`auth.ts`, a stray `proxy.mjs`, ...), skipping
   `*.config.*`, `*.d.ts` and test files, so nothing is dropped without a trace;

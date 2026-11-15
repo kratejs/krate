@@ -27,7 +27,7 @@ type islandEntry struct {
 	// Virtual holds the generated modules the source imports by name
 	// (layout providers), keyed by their specifier.
 	Virtual map[string]islandVirtualModule
-	// Real marks a real-React entry, bundled by writeRealIslandBundles.
+	// Real marks a real-React entry, bundled by realIslandFlavour.
 	Real bool
 	// Boundary marks the hydration chunk of a client boundary.
 	Boundary bool
@@ -175,16 +175,51 @@ func (b *Builder) writeIslandBundles() error {
 			entries = append(entries, e)
 		}
 	}
-	if err := b.writeRealIslandBundles(realEntries, chunksDir, keep); err != nil {
-		return err
+	var flavours []*islandFlavour
+	if len(realEntries) > 0 {
+		f, err := b.realIslandFlavour(realEntries, chunksDir)
+		if err != nil {
+			return err
+		}
+		flavours = append(flavours, f)
 	}
-	if len(entries) == 0 {
+	if len(entries) > 0 {
+		if _, err := b.ensurePreactShared(); err != nil {
+			return fmt.Errorf("island runtime could not be built: %w", err)
+		}
+		f, err := b.preactIslandFlavour(entries, chunksDir)
+		if err != nil {
+			return err
+		}
+		flavours = append(flavours, f)
+	}
+	if len(flavours) == 0 {
 		pruneIslandFiles(chunksDir, keep)
 		return nil
 	}
-	if _, err := b.ensurePreactShared(); err != nil {
-		return fmt.Errorf("island runtime could not be built: %w", err)
+	shared := b.buildIslandFlavours(flavours, chunksDir)
+	for _, f := range flavours {
+		if err := b.checkIslandFlavour(f); err != nil {
+			return err
+		}
 	}
+	if err := os.MkdirAll(chunksDir, 0755); err != nil {
+		return fmt.Errorf("creating chunks dir: %w", err)
+	}
+	for _, f := range flavours {
+		if err := writeIslandChunkFiles(f.result.OutputFiles, chunksDir, f.stem, keep); err != nil {
+			return err
+		}
+	}
+	if err := writeIslandChunkFiles(shared, chunksDir, islandNeutralStem, keep); err != nil {
+		return err
+	}
+	pruneIslandFiles(chunksDir, keep)
+	return nil
+}
+
+// preactIslandFlavour returns the build of the Preact island entries.
+func (b *Builder) preactIslandFlavour(entries []islandEntry, chunksDir string) (*islandFlavour, error) {
 	virtual := map[string]islandVirtualModule{}
 	points := make([]api.EntryPoint, 0, len(entries))
 	for _, e := range entries {
@@ -196,7 +231,7 @@ func (b *Builder) writeIslandBundles() error {
 	sink := &islandCSSSink{root: b.Root}
 	minify := b.shouldMinifyJS()
 	guard := b.newUnavailableGuard()
-	plugins := []api.Plugin{purePrunePlugin(b.Root), guard.plugin(), islandEntryPlugin(entries, virtual), islandCSSPlugin(sink), islandJSXPlugin(), islandTagsPlugin(b.Root, false), islandRequirePlugin(), reconcilerGuardPlugin()}
+	plugins := []api.Plugin{purePrunePlugin(b.Root), guard.plugin(), islandEntryPlugin(entries, virtual), islandCSSPlugin(sink), islandJSXPlugin(), islandTagsPlugin(b.Root, false), islandRequirePlugin(), reconcilerGuardPlugin(), reactDOMHintsPlugin(b.Root), reactCompatPlugin(b.Root), routerHooksPlugin(b.Root)}
 	var injects []string
 	for _, e := range entries {
 		if !e.Boundary {
@@ -204,13 +239,13 @@ func (b *Builder) writeIslandBundles() error {
 		}
 		shim, err := boundaryShims(filepath.Join(b.Cfg.OutDir, ".krate"))
 		if err != nil {
-			return err
+			return nil, err
 		}
 		injects = []string{shim}
 		plugins = append(plugins, clientOnlyMarkersPlugin(false), actionServerBundlePlugin(b.importResolver(), b.actionModules(), b.Cfg.BaseURLPath()))
 		break
 	}
-	result := esbuildBuild(api.BuildOptions{
+	opts := api.BuildOptions{
 		AbsWorkingDir:       b.Root,
 		EntryPointsAdvanced: points,
 		Outdir:              chunksDir,
@@ -232,41 +267,60 @@ func (b *Builder) writeIslandBundles() error {
 		External:            []string{"preact", "preact/compat", "preact/hooks", "preact/jsx-runtime"},
 		Inject:              injects,
 		Plugins:             plugins,
-	})
-	outputs := result.OutputFiles
+		Define:              b.clientEnvDefines(),
+	}
+	if err := withContextKeys(&opts, b.Root, filepath.Join(b.Cfg.OutDir, ".krate")); err != nil {
+		return nil, err
+	}
+	names := make([]string, len(points))
+	for i, p := range points {
+		names[i] = p.OutputPath
+	}
+	return &islandFlavour{opts: opts, names: names, guard: guard, stem: islandSharedStem}, nil
+}
+
+// checkIslandFlavour drops the chunks nothing loads from a flavour's result
+// and returns its errors.
+func (b *Builder) checkIslandFlavour(f *islandFlavour) error {
+	result := f.result
 	if len(result.Errors) == 0 {
-		names := make([]string, len(points))
-		for i, p := range points {
-			names[i] = p.OutputPath
-		}
-		outputs = liveOutputs(outputs, names)
+		result.OutputFiles = liveOutputs(result.OutputFiles, f.names)
 	}
-	result.Errors = append(result.Errors, guard.errors(outputs)...)
-	if len(result.Errors) > 0 {
-		var msgs []string
-		for _, e := range result.Errors {
-			if e.Location != nil {
-				msgs = append(msgs, fmt.Sprintf("%s:%d:%d: %s", b.esbuildFile(e.Location.File), e.Location.Line, e.Location.Column+1, e.Text))
-			} else {
-				msgs = append(msgs, e.Text)
-			}
-		}
-		return fmt.Errorf("bundling island chunks:\n%s", strings.Join(msgs, "\n"))
+	result.Errors = append(result.Errors, f.guard.errors(result.OutputFiles)...)
+	f.result = result
+	if len(result.Errors) == 0 {
+		return nil
 	}
-	result.OutputFiles = outputs
-	// Shared chunk names are upper-case; the cache policy recognizes
-	// content-hashed names by their lower-case hash.
+	var msgs []string
+	for _, e := range result.Errors {
+		if e.Location != nil {
+			msgs = append(msgs, fmt.Sprintf("%s:%d:%d: %s", b.esbuildFile(e.Location.File), e.Location.Line, e.Location.Column+1, e.Text))
+		} else {
+			msgs = append(msgs, e.Text)
+		}
+	}
+	joined := strings.Join(msgs, "\n")
+	if !f.real {
+		return fmt.Errorf("bundling island chunks:\n%s", joined)
+	}
+	if be := b.realReactMissing(joined); be != nil {
+		return be
+	}
+	return fmt.Errorf("bundling real-React island chunks:\n%s", joined)
+}
+
+// writeIslandChunkFiles writes a build's chunks to /chunks and records their
+// names in keep. Shared chunk names (stem + hash) are lower-cased; the cache
+// policy recognizes content-hashed names by their lower-case hash.
+func writeIslandChunkFiles(files []api.OutputFile, chunksDir, stem string, keep map[string]bool) error {
 	rename := map[string]string{}
-	for _, f := range result.OutputFiles {
+	for _, f := range files {
 		base := filepath.Base(f.Path)
-		if strings.HasPrefix(base, islandSharedStem) {
+		if strings.HasPrefix(base, stem) {
 			rename[base] = strings.ToLower(base)
 		}
 	}
-	if err := os.MkdirAll(chunksDir, 0755); err != nil {
-		return fmt.Errorf("creating chunks dir: %w", err)
-	}
-	for _, f := range result.OutputFiles {
+	for _, f := range files {
 		base := filepath.Base(f.Path)
 		if strings.HasSuffix(base, ".map") {
 			continue
@@ -285,7 +339,6 @@ func (b *Builder) writeIslandBundles() error {
 			return fmt.Errorf("writing island chunk: %w", err)
 		}
 	}
-	pruneIslandFiles(chunksDir, keep)
 	return nil
 }
 
@@ -301,7 +354,7 @@ func pruneIslandFiles(chunksDir string, keep map[string]bool) {
 		if f.IsDir() || keep[name] {
 			continue
 		}
-		if strings.HasPrefix(name, islandEntryPrefix) || strings.HasPrefix(name, islandSharedStem) || strings.HasPrefix(name, islandRealSharedStem) {
+		if strings.HasPrefix(name, islandEntryPrefix) || strings.HasPrefix(name, islandSharedStem) || strings.HasPrefix(name, islandRealSharedStem) || strings.HasPrefix(name, islandNeutralStem) || strings.HasPrefix(name, islandNeutralEntryPrefix) {
 			_ = os.Remove(filepath.Join(chunksDir, name))
 		}
 	}

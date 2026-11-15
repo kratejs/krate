@@ -19,6 +19,8 @@
  * there the data cache is backed by the Go host (`_go_cache_get/_go_cache_set`).
  */
 
+import { HEAD_CLOSE, HEAD_OPEN } from './head-tags.js';
+
 /** What one render read through the cache. */
 export interface CacheScope {
   /** Route being rendered (diagnostics only). */
@@ -31,6 +33,8 @@ export interface CacheScope {
   noStore: boolean;
   /** True when an error boundary caught a render error (the response is a 500 and uncacheable). */
   errorCaught?: boolean;
+  /** Head tags the render asked for (react-dom preload, preconnect, ...), deduplicated. */
+  hints?: Set<string>;
 }
 
 /** Minimal AsyncLocalStorage shape (the Node class satisfies it). */
@@ -218,7 +222,11 @@ export async function withCacheScope<T>(
   const scope: CacheScope = { route, tags: new Set(), revalidate: 0, noStore: false };
   const epoch = rt.epoch;
   const store = rt.renderStore;
-  const result = store ? await store.run(scope, () => Promise.resolve().then(fn)) : await fn();
+  let result = store ? await store.run(scope, () => Promise.resolve().then(fn)) : await fn();
+  if (scope.hints && scope.hints.size && typeof result === 'string') {
+    // react-dom resource hints go to the head of the response like <Head> tags.
+    result = (HEAD_OPEN + [...scope.hints].join('') + HEAD_CLOSE + result) as typeof result;
+  }
   return { result, scope, invalidated: rt.epoch !== epoch };
 }
 

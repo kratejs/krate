@@ -867,9 +867,23 @@ func provideRuntime(t *testing.T, work string) {
 // server (static pages, server actions through the Node sidecar) and returns
 // its base URL. The server is stopped when the test binary signals itself at
 // cleanup; see stopInProcessServers.
+//
+// freePort only probes its ports, so another process (or an outgoing
+// connection given an ephemeral port, as macOS does from the same range) can
+// take one before Serve binds it. A server that exits because its port is in
+// use is retried on a fresh port block.
 func startKrateServer(t *testing.T, root string, cfg *config.Config) (string, error) {
 	t.Helper()
-	return startKrateServerOn(t, root, cfg, freePort(t))
+	var err error
+	for attempt := 0; attempt < 5; attempt++ {
+		var base string
+		base, err = startKrateServerOn(t, root, cfg, freePort(t))
+		if err == nil || !strings.Contains(err.Error(), "already in use") {
+			return base, err
+		}
+		t.Logf("retrying on another port: %v", err)
+	}
+	return "", err
 }
 
 func startKrateServerOn(t *testing.T, root string, cfg *config.Config, port int) (string, error) {

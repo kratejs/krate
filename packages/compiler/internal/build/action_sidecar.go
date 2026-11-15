@@ -187,6 +187,17 @@ function safeActionRedirect(value) {
   return to;
 }
 
+// safeExternalRedirect keeps an absolute http(s) URL from a redirect() signal
+// that marked itself external (the OAuth redirect of @krate/auth signIn()).
+// A redirect returned in an action's result is never external.
+function safeExternalRedirect(value) {
+  if (typeof value !== 'string' || /[\u0000-\u001f\u007f\\]/.test(value)) return '';
+  try {
+    const u = new URL(value.trim());
+    return u.protocol === 'https:' || u.protocol === 'http:' ? u.href : '';
+  } catch { return ''; }
+}
+
 function parseActionCookies(header) {
   const jar = new Map();
   for (const part of String(header || '').split(';')) {
@@ -403,12 +414,13 @@ async function krateRunAction(req, urlPath, search) {
   const revalidateScope = newRevalidateScope('action');
   let result;
   let redirect = '';
+  let external = false;
   let failure = null;
   let fallback = 0;
   try {
     result = await REVALIDATE_STORE.run(revalidateScope, () => ACTION_STORE.run(ctx, () => fn(...args)));
   } catch (e) {
-    if (e && typeof e.__krateRedirect === 'string') redirect = e.__krateRedirect;
+    if (e && typeof e.__krateRedirect === 'string') { redirect = e.__krateRedirect; external = e.__krateRedirectExternal === true; }
     else if ((fallback = krateHTTPFallback(e))) failure = null;
     else failure = e === undefined ? new Error('undefined') : e;
   }
@@ -421,7 +433,7 @@ async function krateRunAction(req, urlPath, search) {
     if (!failure) failure = e;
   }
   if (!redirect && result && typeof result === 'object' && typeof result.redirect === 'string') redirect = result.redirect;
-  redirect = safeActionRedirect(redirect);
+  redirect = external ? safeExternalRedirect(redirect) : safeActionRedirect(redirect);
   if (fallback && !failure) {
     // notFound(), forbidden() or unauthorized() in an action: JSON for the fetch
     // client; a native form post gets the status and the host swaps in the
@@ -436,6 +448,7 @@ async function krateRunAction(req, urlPath, search) {
   if (!failure && fetchMode) {
     const envelope = { ok: true, result: result === undefined ? null : result };
     if (redirect) envelope.redirect = redirect;
+    if (redirect && external) envelope.external = true;
     if (revalidation) {
       envelope.revalidated = true;
       envelope.revalidation = revalidation;

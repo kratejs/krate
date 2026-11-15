@@ -3,6 +3,7 @@ package build
 import (
 	"os"
 	"path/filepath"
+	"sync"
 )
 
 // canonicalPath resolves symlinks when the path exists. esbuild canonicalizes
@@ -14,11 +15,25 @@ func canonicalPath(path string) string {
 	if path == "" {
 		return ""
 	}
-	if resolved, err := filepath.EvalSymlinks(path); err == nil {
-		path = resolved
+	if v, ok := canonicalCache.Load(path); ok {
+		return v.(string)
 	}
-	return canonicalOSPath(filepath.Clean(path))
+	out := path
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		out = resolved
+	}
+	out = canonicalOSPath(filepath.Clean(out))
+	canonicalCache.Store(path, out)
+	return out
 }
+
+// canonicalCache memoizes canonicalPath within one build: EvalSymlinks costs a
+// syscall per path segment, and the client-boundary and action passes ask for
+// the same module paths once per page. resetCanonicalCache runs when a build
+// (or dev rebuild) starts, so a symlink changed between builds is seen.
+var canonicalCache sync.Map
+
+func resetCanonicalCache() { canonicalCache.Clear() }
 
 // samePath reports whether two module paths name the same file, tolerating a
 // symlinked project root on one side.

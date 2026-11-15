@@ -84,8 +84,9 @@ synchronous `renderToString` throws if it meets a Promise.
 
 A module that starts with `"use client"` is a client boundary. When a server
 component renders one of its exports, the server renders its initial HTML
-into a `<krate-island>` element with the serialized props, and a small
-per-module chunk hydrates it in the browser:
+into a `<krate-island>` element, with the serialized props in a
+`<script type="application/json">` just before it, and a small per-module
+chunk hydrates it in the browser:
 
 ```tsx
 // src/components/Counter.tsx
@@ -111,13 +112,49 @@ export default async function Home() {
 - Client components run with React semantics through Preact (the same engine
   as [external React islands](/docs/guides/react-compatibility/)), so the
   project needs `preact` installed (`pnpm add preact`).
-- Props must be JSON-serializable: strings, numbers, booleans, `null`, plain
-  objects and arrays. Server actions may be passed and stay callable. A
-  function, class instance (including `Date`), symbol or JSX prop fails the
-  build when it is written inline (`[KR7111]`) and fails the request with the
-  prop name otherwise.
-- `children` passed from a server component are rendered on the server and
-  inserted as HTML inside the client component.
+- Props must be serializable, as in React Server Components: strings, numbers
+  (including `NaN`, `Infinity` and `-0`), booleans, `null`, `undefined`,
+  `bigint`, `Date`, `Map`, `Set`, typed arrays, `ArrayBuffer`, `DataView`,
+  `Symbol.for` symbols, plain objects and arrays. They arrive in the client
+  component as the same types, so a database row can be passed as it is.
+  Server actions may be passed and stay callable. A function, class instance
+  or unregistered symbol fails the build when it is written inline (`[KR7111]`)
+  and fails the request with the prop name otherwise.
+- `children` passed from a server component are rendered on the server, in
+  place, inside the client component's HTML. So is any other prop that holds
+  JSX, such as `userMenu={<UserMenu user={user} />}` or an array of elements
+  (a slot), and a client component inside a slot becomes its own island. The
+  props carry only a reference to each slot: when the client component
+  hydrates it adopts the server-rendered nodes where it renders the slot, so
+  the children are in the page once, re-renders leave them in place, and a
+  slot the component hides and shows again gets the same nodes back (with
+  any islands inside them still running). A slot the server did not render,
+  such as the content of a closed dialog, is sent as HTML in the props, and
+  so are the server parts of a real-React island's children, since nothing
+  renders them on the server. Each island's props are in the document once,
+  however deep it is nested. JSX nested inside a plain object cannot be sent.
+- The child of a client component with `asChild` (a Radix `Slot`, as in a
+  shadcn `<DropdownMenuTrigger asChild><Button>...</Button></DropdownMenuTrigger>`)
+  arrives as an element it can clone, as in Next.js, so the trigger's
+  handlers, ref and ARIA props land on the button. A server component at the
+  top of that child (a directive-less `Button`) is run on the server to the
+  element it renders, and client components in its output (an `Avatar`)
+  render inside the same island instead of as islands of their own. Server
+  components deeper inside it are still sent as HTML. A child that can only
+  be sent as HTML (raw HTML) cannot receive props; the server logs a warning
+  naming the component.
+- Context from a client component reaches the client components inside its
+  server children, as in Next.js. A root layout that renders
+  `<Providers>{children}</Providers>` (a `"use client"` module with a theme,
+  a Radix `TooltipProvider` or a query client) gives every client component
+  of the page that context, also across server components in between, and a
+  provider whose value is state updates them when it changes. The server
+  renders them inside the same context. Each nested component is still its
+  own island: one on Preact shares the provider's instances, and a real-React
+  island (one that reaches a reconciler library such as `@react-three/fiber`)
+  gets its own copy of each context with the provider's current value. Not
+  carried: context from a provider that is itself a real-React island, and,
+  into real-React islands, contexts created while rendering.
 - Only what a client component imports and uses goes to the browser, as in
   Next.js. A server helper (database client, `node:crypto`, a native
   package) that sits in the same barrel as the component, or in a module the
@@ -169,8 +206,8 @@ export default async function Settings() {
   `Dialog.Content` written inside `Dialog.Root` render in the same Preact tree
   as the root, so they hydrate and talk to each other. Server components
   placed between the parts are rendered to HTML, so the parts on either side
-  of one no longer share a tree.
-- Props follow the `"use client"` rules: JSON-serializable values and server
+  of one become separate islands, which still see the root's context.
+- Props follow the `"use client"` rules: serializable values (see above) and server
   actions, no inline functions (`[KR7111]`). Put handlers in a `"use client"`
   wrapper, as in Next.js.
 - A local module that renders such components needs no directive unless it

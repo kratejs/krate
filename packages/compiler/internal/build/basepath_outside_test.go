@@ -67,3 +67,22 @@ func TestBasePathOutsideLinks(t *testing.T) {
 		t.Errorf("KR7144 hint should point at data-krate-no-base:\n%s", out)
 	}
 }
+
+// An @import of a missing local stylesheet fails the build with its position;
+// a remote @import still passes through.
+func TestMissingCSSImportFailsBuild(t *testing.T) {
+	b, _ := scProject(t, map[string]string{
+		"src/pages/index.tsx": `import "../styles.css";
+export default function Home() { return <main>x</main>; }`,
+		"src/styles.css": "@import url(https://fonts.example.com/a.css);\nbody { margin: 0 }\n@import './missing.css';\n",
+	})
+	err := b.BuildAll()
+	if err == nil {
+		t.Fatal("build should fail on the unresolvable @import")
+	}
+	for _, want := range []string{"styles.css:3:", "missing.css", "KR7145"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error missing %q: %v", want, err)
+		}
+	}
+}

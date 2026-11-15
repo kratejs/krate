@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/evanw/esbuild/pkg/api"
 	"github.com/kratejs/krate/packages/compiler/ast"
@@ -17,6 +19,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/fsutil"
 	"github.com/kratejs/krate/packages/compiler/internal/irtree"
+	"github.com/kratejs/krate/packages/compiler/internal/resolver"
 	"github.com/kratejs/krate/packages/compiler/internal/tsstrip"
 	"github.com/kratejs/krate/packages/native/jsruntime"
 )
@@ -250,7 +253,8 @@ func (b *Builder) buildIslands(owner string, exts []irtree.ExternalComponent, im
 		if e.RealReact {
 			// Client-rendered on real React; the server emits the fallback.
 			realGroup = append(realGroup, e)
-			if fb := realFallbackHTML(e); fb != "" {
+			fb := realFallbackHTML(e) + realHintsHead(b.realIslandHints(e, islandImportsFor(e.Subtree, allImports), resolveDir))
+			if fb != "" {
 				ssrHTML[e.ID] = fb
 			}
 			continue
@@ -508,11 +512,17 @@ func (b *Builder) islandSSRSource(e irtree.ExternalComponent, imports []irtree.E
 		props = "{}"
 	}
 	fmt.Fprintf(&src, "\nconst props = %s;\n", props)
-	src.WriteString("globalThis.__krate_island_html = \"\";\nglobalThis.__krate_island_ssr_error = \"\";\ntry { globalThis.__krate_island_html = renderToString(")
+	src.WriteString("globalThis.__krate_island_html = \"\";\nglobalThis.__krate_island_ssr_error = \"\";\nglobalThis.__krate_island_hints = new Set();\ntry { globalThis.__krate_island_html = renderToString(")
 	src.WriteString(prov.wrapExprJS(e.Subtree))
 	src.WriteString("); } catch (e) { globalThis.__krate_island_ssr_error = String((e && (e.name ? e.name + \": \" : \"\") + (e.message || e)) || e) + \"\\n\" + String((e && e.stack) || \"\"); }\n")
+	src.WriteString(islandHintsHeadJS)
 	return src.String()
 }
+
+// islandHintsHeadJS appends the resource hints (react-dom preload, preinit,
+// ...) the server render recorded, each in its own <krate-head> wrapper, so
+// they reach the page head like a <Head> tag and repeat only once per page.
+const islandHintsHeadJS = "for (const t of globalThis.__krate_island_hints) globalThis.__krate_island_html += \"<krate-head>\" + t + \"</krate-head>\";\n"
 
 // islandAlias maps React to the project's single Preact installation. Server
 // rendering uses absolute module paths so packages inside node_modules and the
@@ -666,8 +676,9 @@ func (b *Builder) buildIslandBundle(src, resolveDir string, ssr bool, plugin *ap
 		JSX:             api.JSXAutomatic,
 		JSXImportSource: "preact",
 		LogLevel:        api.LogLevelSilent,
+		Define:          b.clientEnvDefines(),
 		Alias:           islandAlias(b.Root, ssr),
-		Plugins:         []api.Plugin{purePrunePlugin(b.Root), guard.plugin(), islandCSSPlugin(sink), islandJSXPlugin(), islandTagsPlugin(b.Root, ssr), reconcilerGuardPlugin()},
+		Plugins:         []api.Plugin{purePrunePlugin(b.Root), guard.plugin(), islandCSSPlugin(sink), islandJSXPlugin(), islandTagsPlugin(b.Root, ssr), reconcilerGuardPlugin(), reactDOMHintsPlugin(b.Root), reactCompatPlugin(b.Root), routerHooksPlugin(b.Root)},
 	}
 	if prov != nil {
 		opts.Plugins = append(opts.Plugins, islandEntryPlugin(nil, prov.virtualModules()))
@@ -738,6 +749,8 @@ func islandJSXPluginFor(importSource string) api.Plugin {
 				source := string(data)
 				if importSource == "preact" {
 					source = injectIslandTags(source)
+				} else if importSource == "react" {
+					source = injectIslandTagsFrom(source, reactIslandTagsSpec)
 				}
 				res := api.Transform(tsstrip.BlankTierDecorators(args.Path, source), api.TransformOptions{
 					Loader:          loader,
@@ -753,6 +766,157 @@ func islandJSXPluginFor(importSource string) api.Plugin {
 				}
 				code := string(res.Code)
 				return api.OnLoadResult{Contents: &code, Loader: api.LoaderJS, ResolveDir: filepath.Dir(args.Path), Warnings: res.Warnings}, nil
+			})
+		},
+	}
+}
+
+// reactDOMHintsPlugin gives `react-dom` imports of Preact builds the React 19
+// resource hints (preload, preinit, preconnect, prefetchDNS, preloadModule,
+// preinitModule) next to everything preact/compat provides. In the browser they
+// add the tag to the head; while the server renders they record it for the
+// head of the response. require() calls are left to islandRequirePlugin.
+func reactDOMHintsPlugin(root string) api.Plugin {
+	return api.Plugin{
+		Name: "krate-react-dom-hints",
+		Setup: func(pb api.PluginBuild) {
+			pb.OnResolve(api.OnResolveOptions{Filter: `^react-dom$`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+				if args.Kind == api.ResolveJSRequireCall {
+					return api.OnResolveResult{}, nil
+				}
+				return api.OnResolveResult{Path: "react-dom", Namespace: "krate-react-dom", PluginData: mentions(args.Importer, reactDOMExtraRe)}, nil
+			})
+			pb.OnLoad(api.OnLoadOptions{Filter: `.*`, Namespace: "krate-react-dom"}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
+				names := []string{"preload", "preinit", "preconnect", "prefetchDNS", "preloadModule", "preinitModule"}
+				list := strings.Join(names, ", ")
+				contents := "export * from \"preact/compat\";\nimport __compat from \"preact/compat\";\n"
+				if hints := resolver.NodeModule(root, "@krate/runtime/hints"); hints != "" {
+					contents += "import { " + list + " } from " + strconv.Quote(filepath.ToSlash(hints)) + ";\nexport { " + list + " };\n"
+				} else {
+					for _, n := range names {
+						contents += "export function " + n + "() {}\n"
+					}
+				}
+				extra := ""
+				if withExtras, _ := args.PluginData.(bool); withExtras {
+					extra = reactCompatDOMExtras(root, &contents)
+				}
+				contents += "export default { ...__compat, " + list + extra + " };\n"
+				return api.OnLoadResult{Contents: &contents, Loader: api.LoaderJS, ResolveDir: root}, nil
+			})
+		},
+	}
+}
+
+var (
+	reactExtraRe    = regexp.MustCompile(`\b(useOptimistic|useActionState|useFormState|useEffectEvent|startTransition|useTransition)\b|\b(use|cache)\s*[(,}]|\.(use|cache)\b`)
+	reactDOMExtraRe = regexp.MustCompile(`\b(useFormStatus|useFormState|requestFormReset)\b`)
+)
+
+// mentions reports whether the source file at path matches re. Paths that are
+// not files (virtual modules, stdin) never match.
+func mentions(path string, re *regexp.Regexp) bool {
+	if !filepath.IsAbs(path) {
+		return false
+	}
+	src, err := os.ReadFile(path)
+	return err == nil && re.Match(src)
+}
+
+// reactCompatExtraNames are the React 19 APIs preact/compat lacks, plus the
+// ones whose compat versions cannot join an async action.
+var reactCompatExtraNames = []string{"useOptimistic", "useActionState", "use", "cache", "useEffectEvent", "startTransition", "useTransition"}
+
+// reactCompatDOMExtras appends the react-dom additions (useFormStatus,
+// useFormState, requestFormReset) to the virtual react-dom module source and
+// returns the extra default-export members. It returns "" when the runtime
+// package does not ship the compat additions.
+func reactCompatDOMExtras(root string, contents *string) string {
+	mod := resolver.NodeModule(root, "@krate/runtime/react-compat")
+	if mod == "" {
+		return ""
+	}
+	const names = "useFormStatus, useFormState, requestFormReset"
+	*contents += "import * as __cns from \"preact/compat\";\nimport { options as __opts } from \"preact\";\n" +
+		"import { createReactCompatExtras as __mk } from " + strconv.Quote(filepath.ToSlash(mod)) + ";\n" +
+		"const __x = /* @__PURE__ */ __mk(__cns, __opts);\n" +
+		"export const useFormStatus = __x.useFormStatus, useFormState = __x.useFormState, requestFormReset = __x.requestFormReset;\n"
+	return ", " + names
+}
+
+// reactCompatPlugin gives `react` imports of Preact builds the React 19 APIs
+// preact/compat lacks (useOptimistic, useActionState, use, cache, ...) next to
+// everything it provides, on the same Preact instance. require() calls are
+// left to the require plugins.
+func reactCompatPlugin(root string) api.Plugin {
+	const ns = "krate-react-compat"
+	return api.Plugin{
+		Name: ns,
+		Setup: func(pb api.PluginBuild) {
+			// esbuild runs OnResolve callbacks concurrently: resolve once.
+			modOnce := sync.OnceValue(func() string { return resolver.NodeModule(root, "@krate/runtime/react-compat") })
+			pb.OnResolve(api.OnResolveOptions{Filter: `^react$`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+				if args.Kind == api.ResolveJSRequireCall {
+					return api.OnResolveResult{}, nil
+				}
+				mod := modOnce()
+				// Only modules that name one of the additions take them: the
+				// factory would otherwise ship, and look stateful, in every chunk.
+				if mod == "" || !mentions(args.Importer, reactExtraRe) {
+					return api.OnResolveResult{}, nil
+				}
+				return api.OnResolveResult{Path: "react", Namespace: ns}, nil
+			})
+			pb.OnLoad(api.OnLoadOptions{Filter: `.*`, Namespace: ns}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
+				mod := modOnce()
+				list := strings.Join(reactCompatExtraNames, ", ")
+				contents := "export * from \"preact/compat\";\nimport * as __cns from \"preact/compat\";\nimport __compat from \"preact/compat\";\n" +
+					"import { options as __opts } from \"preact\";\n" +
+					"import { createReactCompatExtras as __mk } from " + strconv.Quote(filepath.ToSlash(mod)) + ";\n" +
+					"const __x = /* @__PURE__ */ __mk(__cns, __opts);\n"
+				for _, n := range reactCompatExtraNames {
+					contents += "export const " + n + " = __x." + n + ";\n"
+				}
+				contents += "export default { ...__compat, " + list + " };\n"
+				return api.OnLoadResult{Contents: &contents, Loader: api.LoaderJS, ResolveDir: root}, nil
+			})
+		},
+	}
+}
+
+// routerHooksPlugin gives React-model bundles (Preact compat islands, client
+// boundaries, real-React islands) value-returning router hooks. The hooks of
+// @krate/runtime return getters for Krate-compiled components; a React-model
+// component reads usePathname() as a string and useSearchParams() as a
+// URLSearchParams, and must re-render when the URL changes. The bundle's own
+// React supplies useSyncExternalStore.
+func routerHooksPlugin(root string) api.Plugin {
+	const ns = "krate-router-hooks"
+	return api.Plugin{
+		Name: ns,
+		Setup: func(pb api.PluginBuild) {
+			// esbuild runs OnResolve callbacks concurrently: resolve once.
+			factoryOnce := sync.OnceValue(func() string { return resolver.NodeModule(root, "@krate/runtime/navigation-react") })
+			pb.OnResolve(api.OnResolveOptions{Filter: `^@krate/runtime$`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+				// The virtual module re-exports the real entry.
+				if args.Namespace == ns || args.Kind == api.ResolveJSRequireCall {
+					return api.OnResolveResult{}, nil
+				}
+				if factoryOnce() == "" {
+					return api.OnResolveResult{}, nil
+				}
+				return api.OnResolveResult{Path: "@krate/runtime", Namespace: ns}, nil
+			})
+			pb.OnLoad(api.OnLoadOptions{Filter: `.*`, Namespace: ns}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
+				names := []string{"usePathname", "useSearchParams", "useParams", "useRouter", "useSelectedLayoutSegment", "useSelectedLayoutSegments"}
+				contents := "export * from \"@krate/runtime\";\n" +
+					"import { useSyncExternalStore as __uses } from \"react\";\n" +
+					"import { createValueNavigationHooks as __mk } from " + strconv.Quote(filepath.ToSlash(factoryOnce())) + ";\n" +
+					"const __h = __mk(__uses);\n"
+				for _, n := range names {
+					contents += "export const " + n + " = __h." + n + ";\n"
+				}
+				return api.OnLoadResult{Contents: &contents, Loader: api.LoaderJS, ResolveDir: root}, nil
 			})
 		},
 	}
@@ -839,6 +1003,8 @@ func islandRenderToStringPlugin(resolveDir string) *api.Plugin {
 // injectIslandSSR adds the server-rendered subtree to each island placeholder.
 // It returns the page HTML and the <Head> content the islands rendered, which
 // belongs in the document head.
+// Head content repeated across islands (the same resource hint, the same
+// <Head> tags) is kept once.
 func injectIslandSSR(html string, rendered map[string]string) (string, string) {
 	ids := make([]string, 0, len(rendered))
 	for id := range rendered {
@@ -846,13 +1012,23 @@ func injectIslandSSR(html string, rendered map[string]string) (string, string) {
 	}
 	sort.Strings(ids)
 	var head strings.Builder
+	seen := map[string]bool{}
 	for _, id := range ids {
 		inner := rendered[id]
 		if inner == "" {
 			continue
 		}
-		inner, h := liftIslandHead(inner)
-		head.WriteString(h)
+		inner, blocks := liftIslandHeadBlocks(inner)
+		for _, h := range blocks {
+			if !seen[h] {
+				seen[h] = true
+				head.WriteString(h)
+			}
+		}
+		if inner == "" {
+			// Only head content: the island has no server markup.
+			continue
+		}
 		placeholder := `<div data-krate-island="` + id + `" style="display:contents"></div>`
 		replacement := `<div data-krate-island="` + id + `" data-krate-island-ssr style="display:contents">` + inner + `</div>`
 		html = strings.ReplaceAll(html, placeholder, replacement)
@@ -869,8 +1045,15 @@ const (
 // from its server markup and returns them separately. Wrappers nest; the
 // content of the outermost one is kept, inner wrappers are dropped.
 func liftIslandHead(html string) (body, head string) {
+	body, blocks := liftIslandHeadBlocks(html)
+	return body, strings.Join(blocks, "")
+}
+
+// liftIslandHeadBlocks is liftIslandHead returning the content of each
+// outermost wrapper separately.
+func liftIslandHeadBlocks(html string) (body string, blocks []string) {
 	if !strings.Contains(html, islandHeadOpen) {
-		return html, ""
+		return html, nil
 	}
 	var out, hb strings.Builder
 	i := 0
@@ -900,10 +1083,14 @@ func liftIslandHead(html string) (body, head string) {
 			j += nextClose + len(islandHeadClose)
 			depth--
 		}
+		if hb.Len() > 0 {
+			blocks = append(blocks, hb.String())
+			hb.Reset()
+		}
 		i = j
 	}
 	out.WriteString(html[min(i, len(html)):])
-	return out.String(), hb.String()
+	return out.String(), blocks
 }
 
 // islandTagNames are the compiler-provided tags an island module may use as
@@ -911,7 +1098,10 @@ func liftIslandHead(html string) (body, head string) {
 var islandTagNames = []string{"Head", "Suspense", "Script", "Style", "Link", "Image", "Icon", "SyntaxHighlight"}
 
 // injectIslandTags imports the tags a module uses and does not bind itself.
-func injectIslandTags(src string) string {
+func injectIslandTags(src string) string { return injectIslandTagsFrom(src, "krate-island-tags") }
+
+// injectIslandTagsFrom is injectIslandTags importing from another module.
+func injectIslandTagsFrom(src, spec string) string {
 	var names []string
 	for _, tag := range islandTagNames {
 		if !strings.Contains(src, "<"+tag) && !strings.Contains(src, tag+">") {
@@ -925,7 +1115,7 @@ func injectIslandTags(src string) string {
 	if len(names) == 0 {
 		return src
 	}
-	return "import { " + strings.Join(names, ", ") + " } from \"krate-island-tags\"; " + src
+	return "import { " + strings.Join(names, ", ") + " } from \"" + spec + "\"; " + src
 }
 
 // islandTagsPlugin serves the module injectIslandTags imports. In the client
@@ -959,6 +1149,45 @@ export const Image = (p) => h("img", p);
 		},
 	}
 }
+
+// preactEffectOrderJS makes the browser's Preact run passive effects in
+// React's order. React flushes the useEffect callbacks of earlier commits
+// before it renders again; Preact runs them after the next frame, and early
+// only for a component that re-renders itself. A re-render that a layout
+// effect starts (in the same pass) then runs a child's effects before a
+// parent's from the commit before: Radix's Tooltip content subscribes to
+// "tooltip.open" before the Tooltip announces its own opening, and closes at
+// once. After each commit, the next component render first flushes the queue
+// (Preact hands it to options.requestAnimationFrame). __c and __r are Preact's
+// commit and render hooks, which preact/hooks itself uses.
+const preactEffectOrderJS = `
+import { options as __o } from "preact";
+var __pending = null, __committed = false;
+var __raf = __o.requestAnimationFrame, __commit = __o.__c, __render = __o.__r;
+function __afterFrame(cb) {
+  if (__raf) return __raf(cb);
+  var t, r;
+  var done = function () { clearTimeout(t); if (r) cancelAnimationFrame(r); setTimeout(cb); };
+  t = setTimeout(done, 35);
+  if (typeof requestAnimationFrame == "function") r = requestAnimationFrame(done);
+}
+__o.requestAnimationFrame = function (flush) {
+  __pending = flush;
+  __afterFrame(function () { if (__pending === flush) __pending = null; flush(); });
+};
+__o.__c = function (vnode, queue) {
+  if (__commit) __commit(vnode, queue);
+  __committed = true;
+};
+__o.__r = function (vnode) {
+  if (__committed) {
+    __committed = false;
+    var flush = __pending;
+    __pending = null;
+    if (flush) flush();
+  }
+  if (__render) __render(vnode);
+};`
 
 // ensurePreactShared builds the shared Preact chunks once per build and records
 // the import map. Each specifier is a standalone ESM module; cross-specifier
@@ -1001,6 +1230,9 @@ func (b *Builder) ensurePreactShared() (map[string]string, error) {
 			})
 		}
 		contents := fmt.Sprintf("export * from %q;", s.name)
+		if s.name == "preact/hooks" {
+			contents += preactEffectOrderJS
+		}
 		if s.name == "preact/compat" {
 			// preact/compat re-exports preact/hooks, which is externalized here.
 			// esbuild cannot enumerate an external module's exports, so the
@@ -1030,6 +1262,7 @@ export default __compat;`
 			Platform:          api.PlatformBrowser,
 			Target:            api.ES2020,
 			Plugins:           plugins,
+			Define:            b.clientEnvDefines(),
 			LogLevel:          api.LogLevelSilent,
 		})
 		if len(result.Errors) > 0 || len(result.OutputFiles) == 0 {

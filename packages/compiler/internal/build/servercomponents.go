@@ -47,14 +47,14 @@ func serverComponentNames(ann *irtree.Annotations) []string {
 // and reports whether the page component itself is async (a server page).
 func (b *Builder) applyServerComponentMode(page string, entry *bundler.Module, ann *irtree.Annotations, staticMode bool, cut *layoutCut, mode *RenderMode, revalidate *int) (bool, error) {
 	entryFn := ann.Functions[ann.EntryPoint]
-	serverPage := (entryFn != nil && entryFn.Async) || cut != nil
+	serverPage := (entryFn != nil && entryFn.Async) || (cut != nil && !cut.Dropped)
 	children := serverComponentNames(ann)
 	if !serverPage && len(children) == 0 {
 		return false, nil
 	}
 	if staticMode {
 		name, fn := ann.EntryPoint, entryFn
-		if cut != nil {
+		if cut != nil && !cut.Dropped {
 			layout := filepath.Base(cut.Layouts[len(cut.Layouts)-1])
 			return false, serverDiag(ann, name, fn, entry.SourceCode,
 				"the async layout "+layout+" needs request-time rendering, but output is \"static\"",
@@ -77,7 +77,7 @@ func (b *Builder) applyServerComponentMode(page string, entry *bundler.Module, a
 			*mode = RenderSSR
 			*revalidate = 0
 		}
-		if cut != nil && !(entryFn != nil && entryFn.Async) {
+		if cut != nil && !cut.Dropped && !(entryFn != nil && entryFn.Async) {
 			printf("  %s*%s %s renders inside the async layout %s -> %s\n", cCyan, cReset, filepath.Base(page), filepath.Base(cut.Layouts[len(cut.Layouts)-1]), mode.String())
 		} else {
 			printf("  %s*%s %s is an async server component -> %s\n", cCyan, cReset, filepath.Base(page), mode.String())

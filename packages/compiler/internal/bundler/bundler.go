@@ -5,6 +5,7 @@ import (
 	"hash/fnv"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -80,6 +81,8 @@ type Bundle struct {
 	WorkerFiles    map[string]string // worker source path -> hashed site URL (/workers/...)
 	WorkerEsm      map[string]bool   // worker source path -> true when built with `type: 'module'`
 	DynImportFiles map[string]string // dynamic-import source path -> hashed site URL (/chunks/...)
+	// DynImportSites lists the modules that import each DynImportFiles source.
+	DynImportSites map[string][]string
 	Frontmatter    map[string]any    // .mdx frontmatter, if any
 	ActionImports  map[string]string // local binding -> server-action URL
 	// syncActionErrs are inline actions that capture values in a component
@@ -112,7 +115,8 @@ type Bundler struct {
 	workers           map[string]string // worker source path -> hashed site URL (/workers/...)
 	workerEsm         map[string]bool   // worker source path -> built as ES module
 	dynImports        map[string]string // dynamic-import source path -> hashed site URL (/chunks/...)
-	frontmatter       map[string]any    // from .mdx frontmatter
+	dynSites          map[string][]string
+	frontmatter       map[string]any // from .mdx frontmatter
 	actionModules     map[string]map[string]string
 	actionBasePath    string
 	actionImports     map[string]string
@@ -251,6 +255,7 @@ func New(root string) *Bundler {
 		workers:        make(map[string]string),
 		workerEsm:      make(map[string]bool),
 		dynImports:     make(map[string]string),
+		dynSites:       make(map[string][]string),
 		virtualModules: make(map[string]string),
 		cache:          NewModuleCache(),
 	}
@@ -345,6 +350,24 @@ func (b *Bundler) resolveImportForModule(importer, imp string) string {
 // (e.g. generateStaticParams) shares the bundler's resolution rules.
 func (b *Bundler) Resolve(importer, spec string) string {
 	return b.resolveImportForModule(importer, spec)
+}
+
+// ResolveForNode is Resolve for code that runs under Node, Bun or Deno: a
+// package found in node_modules resolves with the server conditions, so a
+// package with a `browser` entry (node-abort-controller's browser.js throws
+// without a window) loads its Node entry, as it would when the server runs it.
+func (b *Bundler) ResolveForNode(importer, spec string) string {
+	p := b.Resolve(importer, spec)
+	if p == "" || !inNodeModules(p) || !isBareSpecifier(spec) || reactCompatSpecifier(spec) != "" {
+		return p
+	}
+	if len(b.pathAliases) > 0 && b.tsBaseDir != "" && resolvePathAlias(spec, b.pathAliases, b.tsBaseDir, b.fileExists) != "" {
+		return p
+	}
+	if q := resolver.NodeModuleWith(filepath.Dir(importer), spec, resolver.ServerConditions(b.dev)); q != "" {
+		return q
+	}
+	return p
 }
 
 func (b *Bundler) resolveImportForModuleUncached(importer, imp string) string {
@@ -535,6 +558,7 @@ func (b *Bundler) Bundle(entry string) (*Bundle, error) {
 		WorkerFiles:    b.workers,
 		WorkerEsm:      b.workerEsm,
 		DynImportFiles: b.dynImports,
+		DynImportSites: b.dynSites,
 		Frontmatter:    b.frontmatter,
 		ActionImports:  b.actionImports,
 		syncActionErrs: b.syncActionErrs,
@@ -1005,6 +1029,19 @@ func (b *Bundler) ImportResolver() *ImportResolver {
 // (the shape SetPathAliases takes) and the aliases' base directory.
 func NewImportResolver(prefixes []string, targets [][]string, tsBaseDir string) *ImportResolver {
 	return &ImportResolver{aliases: buildPathAliases(prefixes, targets), baseDir: tsBaseDir}
+}
+
+// ResolveAlias resolves imp through the tsconfig path aliases only, or returns
+// "" when no alias matches or its target does not exist.
+func (r *ImportResolver) ResolveAlias(imp string) string {
+	if r == nil || len(r.aliases) == 0 || r.baseDir == "" || strings.HasPrefix(imp, ".") {
+		return ""
+	}
+	exists := resolver.Exists
+	if resolverCacheEnabled {
+		exists = memoizedExists
+	}
+	return resolvePathAlias(imp, r.aliases, r.baseDir, exists)
 }
 
 // Resolve resolves imp as imported from importer, or returns "".
@@ -2407,6 +2444,9 @@ func rewriteDynamicImportCallee(arg *ast.Expr, b *Bundler, importer string) {
 		url = existing
 	} else {
 		b.dynImports[abs] = url
+	}
+	if !slices.Contains(b.dynSites[abs], importer) {
+		b.dynSites[abs] = append(b.dynSites[abs], importer)
 	}
 	// Keep the argument literal for single-expression imports so
 	// `import(...)` still reads as a module specifier; a plain string literal
