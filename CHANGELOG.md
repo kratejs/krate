@@ -412,6 +412,8 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- Passive effects in Preact islands run in React's order: the effects of a commit run before the next render starts, also when a
+  layout effect schedules it. Radix `Tooltip` (1.2 and later) in a Preact island no longer closes the moment it opens.
 - The HTML minifier keeps white space inside a `<pre>` after a stray end tag the parser ignores (`<p>a<pre>b</p>  `):
   `<pre>` closes the open `<p>`, so the `</p>` closes nothing and the text after it is still preformatted.
 - The build plugins that give client code React 19 hooks and value-returning router hooks no longer race when
