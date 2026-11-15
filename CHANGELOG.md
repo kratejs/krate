@@ -412,6 +412,10 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- A `ref` on a function component without `forwardRef` reaches its element in Preact islands, as in React 19: the ref
+  is passed as an ordinary prop instead of binding to the Preact component instance. Radix `asChild` triggers
+  (`TooltipTrigger`, `DropdownMenuTrigger`, `DialogTrigger`, `PopoverTrigger`) around shadcn-style components no longer
+  throw `getBoundingClientRect is not a function` or `addEventListener is not a function`, on Preact 10 and 11.
 - An unset `process.env.X` in browser code (Preact and real-React islands, client boundaries, lazy chunks, workers and
   library code such as polygon-clipping) reads as `undefined` instead of throwing `ReferenceError: process is not
   defined`; a bare `process.env` and `process.env[name]` work too. Set `KRATE_PUBLIC_*` values and `NODE_ENV` are still

@@ -184,6 +184,12 @@ function build(c: any, options: any): ReactCompatExtras {
     const prev = options.vnode;
     options.vnode = (vnode: any) => {
       const p = vnode.props;
+      const t = vnode.type;
+      if (p && vnode.ref != null && typeof t === 'function' && !t._forwarded && !(t.prototype && t.prototype.render) && t !== c.Fragment) {
+        // React 19: a function component receives ref as an ordinary prop.
+        p.ref = vnode.ref;
+        vnode.ref = null;
+      }
       if (p && typeof vnode.type === 'string') {
         if (vnode.type === 'form' && isPlainAction(p.action)) {
           const box: FormBox = { fn: p.action };

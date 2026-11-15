@@ -369,3 +369,95 @@ export default async function Page() {
 		t.Fatalf("browser checks failed: %v\n%s", err, out)
 	}
 }
+
+// TestBrowserIslandFunctionComponentRef: React 19 hands ref to a function
+// component as a prop. A Preact island wraps a no-forwardRef Button in real
+// Radix asChild triggers (tooltip, dropdown menu, dialog); each must open
+// without errors, and a useRef on the Button must be the button element.
+func TestBrowserIslandFunctionComponentRef(t *testing.T) {
+	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
+	if browser == "" {
+		t.Skip("set KRATE_BROWSER=chromium|firefox|webkit to run browser checks")
+	}
+	if err := exec.Command("node", "-e", "require.resolve('playwright')").Run(); err != nil {
+		requireE2E(t, "playwright is not installed (run pnpm install)")
+	}
+	script, err := filepath.Abs(filepath.Join("testdata", "browser_island_refs.mjs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	radix, err := filepath.Abs(filepath.Join("..", "..", "..", "..", "examples", "node_modules", "radix-ui"))
+	if err == nil {
+		radix, err = filepath.EvalSymlinks(radix)
+	}
+	if err != nil {
+		requireE2E(t, "radix-ui is not installed for the examples (run pnpm install): %v", err)
+	}
+	b, root := scProject(t, map[string]string{
+		"src/components/Kit.tsx": `'use client';
+import { useEffect, useRef, useState } from 'react';
+import { Tooltip, DropdownMenu, Dialog } from 'radix-ui';
+function Button(props: any) {
+  return <button {...props} />;
+}
+export function Kit() {
+  const ref = useRef<HTMLButtonElement | null>(null);
+  const [kind, setKind] = useState('pending');
+  useEffect(() => {
+    setKind(ref.current instanceof HTMLButtonElement ? 'button' : 'not-a-button');
+  }, []);
+  return (
+    <div>
+      <span id="ref-kind">{kind}</span>
+      <Button ref={ref} id="plain">plain</Button>
+      <Tooltip.Provider delayDuration={50}>
+        <Tooltip.Root>
+          <Tooltip.Trigger asChild><Button id="tip-trigger">tip</Button></Tooltip.Trigger>
+          <Tooltip.Portal><Tooltip.Content>tip text</Tooltip.Content></Tooltip.Portal>
+        </Tooltip.Root>
+      </Tooltip.Provider>
+      <DropdownMenu.Root>
+        <DropdownMenu.Trigger asChild><Button id="menu-trigger">menu</Button></DropdownMenu.Trigger>
+        <DropdownMenu.Portal><DropdownMenu.Content><DropdownMenu.Item>one</DropdownMenu.Item></DropdownMenu.Content></DropdownMenu.Portal>
+      </DropdownMenu.Root>
+      <Dialog.Root>
+        <Dialog.Trigger asChild><Button id="dialog-trigger">dialog</Button></Dialog.Trigger>
+        <Dialog.Portal>
+          <Dialog.Overlay />
+          <Dialog.Content><Dialog.Title>Title</Dialog.Title><Dialog.Description>Body</Dialog.Description><Dialog.Close>close</Dialog.Close></Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+    </div>
+  );
+}
+`,
+		"src/pages/index.tsx": `import { Kit } from '../components/Kit';
+export default function Page() {
+  return <main><Kit /></main>;
+}
+`,
+	})
+	withPreact(t, root)
+	realReactFixture(t, root)
+	if err := os.Symlink(radix, filepath.Join(root, "node_modules", "radix-ui")); err != nil {
+		t.Skipf("cannot link radix-ui: %v", err)
+	}
+	e2eEnv(t)
+	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := captureOutput(func() error { return b.BuildAll() }); err != nil {
+		t.Fatalf("BuildAll: %v\n%s", err, out)
+	}
+	base, err := startKrateServer(t, root, b.Cfg)
+	if err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+	out, err := exec.Command("node", script, browser, base).CombinedOutput()
+	if err != nil {
+		if strings.Contains(string(out), "Executable doesn't exist") || strings.Contains(string(out), "browserType.launch") {
+			requireE2E(t, "%s browser is not installed: %s", browser, out)
+		}
+		t.Fatalf("browser checks failed: %v\n%s", err, out)
+	}
+}

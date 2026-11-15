@@ -887,10 +887,11 @@ only writes files into `src/components/ui` and installs packages.
    pnpm add class-variance-authority clsx tailwind-merge lucide-react radix-ui preact
    ```
 
-   `preact` is required as soon as one component is built on Radix (see below),
-   and it must be Preact 11 or newer: current shadcn components pass `ref` as an
-   ordinary prop, as React 19 does, and Preact 10 does not deliver it to function
-   components (a Dialog fails when it opens). You do not need
+   `preact` is required as soon as one component is built on Radix (see below).
+   Current shadcn components pass `ref` as an ordinary prop, as React 19 does;
+   Krate delivers `ref` to function components as a prop on Preact 10 as well
+   (a ref on a function component without `forwardRef` reaches its element, not
+   a component instance). You do not need
    `preact-render-to-string`; Krate bundles its own.
 
 2. **Write `components.json`** in the project root (the `new-york` style, no RSC,
@@ -1053,8 +1054,7 @@ a `Dialog` (with the controlled wrapper) work.
 
 Tested and working: Dialog, Sheet, DropdownMenu, ContextMenu, Menubar,
 NavigationMenu, Popover, HoverCard, Select, Tabs, Accordion, Collapsible,
-Checkbox and Switch. In a project on Preact 10, shadcn's own components fail
-because they pass `ref` as a prop, which is why Preact 11 is required.
+Checkbox and Switch, on Preact 10 and 11.
 
 ## Compiled React packages (islands)
 
