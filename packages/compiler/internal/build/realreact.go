@@ -423,7 +423,7 @@ export async function mount(el) {
   delete raw["client:fallback"];
   var loaded = {};
   loaded[el.getAttribute("data-module") + "#" + name] = C;
-  await Promise.all(__krateClientRefs(raw.__krateTree, []).map(function (r) {
+  await Promise.all(__krateRootRefs(raw).map(function (r) {
     return import(r.s).then(function (m) { loaded[r.m + "#" + r.e] = m.component(r.e); });
   }));
   var props = __krateRevive(raw, React.createElement, __krateCallAction, function (m, e) { return loaded[m + "#" + e]; });

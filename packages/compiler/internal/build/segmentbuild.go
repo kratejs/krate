@@ -81,7 +81,7 @@ func errorBoundarySource(spec, id string) string {
 		"  componentDidCatch(error: any) { console.error(error); }\n" +
 		"  reset = () => this.setState({ error: null });\n" +
 		"  render() {\n" +
-		"    if (this.state.error) return <ErrorPage error={this.state.error} reset={this.reset} />;\n" +
+		"    if (this.state.error) return <ErrorPage error={this.state.error} reset={this.reset} retry={this.reset} />;\n" +
 		"    return this.props.children;\n" +
 		"  }\n" +
 		"}\n\n" +
@@ -97,7 +97,7 @@ func errorFallbackSource(spec string) string {
 	return "'use client';\n" +
 		"import ErrorPage from " + fmt.Sprintf("%q", spec) + ";\n\n" +
 		"export default function KrateBoundaryFallback(props: any) {\n" +
-		"  return <ErrorPage error={props.error} reset={() => location.reload()} />;\n" +
+		"  return <ErrorPage error={props.error} reset={() => location.reload()} retry={() => location.reload()} />;\n" +
 		"}\n"
 }
 
@@ -148,14 +148,14 @@ func errorPageSource(spec, variant string) string {
 			"}\n\n" +
 			"export default function KrateServerError() {\n" +
 			"  const [error] = useState(readServerError);\n" +
-			"  return <ErrorPage error={error} reset={() => location.reload()} />;\n" +
+			"  return <ErrorPage error={error} reset={() => location.reload()} retry={() => location.reload()} />;\n" +
 			"}\n"
 	}
 	errExpr := "{ name: \"" + errSentinelName + "\", message: \"" + errSentinelMessage + "\", digest: \"" + errSentinelDigest + "\", stack: \"" + errSentinelStack + "\" }"
 	return "import ErrorPage from " + fmt.Sprintf("%q", spec) + ";\n\n" +
 		"const krateServerError: any = " + errExpr + ";\n\n" +
 		"export default function KrateServerError() {\n" +
-		"  return <ErrorPage error={krateServerError} reset={() => location.reload()} />;\n" +
+		"  return <ErrorPage error={krateServerError} reset={() => location.reload()} retry={() => location.reload()} />;\n" +
 		"}\n"
 }
 

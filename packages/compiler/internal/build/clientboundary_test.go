@@ -466,3 +466,149 @@ export async function saveDraft(text: string) {
 		t.Errorf("every page must reference the action, only %d files do", withAction)
 	}
 }
+
+// TestJSXPropsReachClientComponent: a server component passes JSX in props
+// other than children (a slot, an array of elements, a client component in a
+// slot) to a client component. The slots render on the server, are in the SSR
+// HTML, and survive hydration in a browser (KRATE_BROWSER).
+func TestJSXPropsReachClientComponent(t *testing.T) {
+	e2eEnv(t)
+	b, root := scProject(t, map[string]string{
+		"src/components/Shell.tsx": `"use client";
+import { useState } from "react";
+export default function Shell({ userMenu, tools, children }: any) {
+  const [open, setOpen] = useState(false);
+  return <div id="shell"><button id="toggle" onClick={() => setOpen(!open)}>{open ? "open" : "closed"}</button><div id="menu">{userMenu}</div><ul id="tools">{tools}</ul><div id="body">{children}</div></div>;
+}`,
+		"src/components/Like.tsx": `"use client";
+import { useState } from "react";
+export default function Like() {
+  const [n, setN] = useState(0);
+  return <li><button id="like" onClick={() => setN(n + 1)}>likes {n}</button></li>;
+}`,
+		"src/pages/index.tsx": `import Shell from "../components/Shell";
+import Like from "../components/Like";
+async function UserMenu({ name }: { name: string }) { await Promise.resolve(); return <span id="who">{name}</span>; }
+export default async function Home() {
+  const name = await Promise.resolve("Ada");
+  return <Shell userMenu={<UserMenu name={name} />} tools={[<li key="a">tool a</li>, <Like key="b" />]}><p>page body</p></Shell>;
+}`,
+	})
+	withPreact(t, root)
+	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	base, err := startKrateServer(t, root, b.Cfg)
+	if err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+	resp, err := http.Get(base + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	html := string(data)
+	if resp.StatusCode != 200 || !strings.Contains(html, `<span id="who">Ada</span>`) || !strings.Contains(html, "tool a") || !strings.Contains(html, "likes 0") || !strings.Contains(html, "page body") {
+		t.Fatalf("status %d, the slots must be in the server HTML:\n%s", resp.StatusCode, html)
+	}
+	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
+	if browser == "" {
+		return
+	}
+	if !canStopInProcessServer {
+		t.Skip("in-process server needs a unix host")
+	}
+	if err := exec.Command("node", "-e", "require.resolve('playwright')").Run(); err != nil {
+		requireE2E(t, "playwright is not installed (run pnpm install)")
+	}
+	script, err := filepath.Abs(filepath.Join("testdata", "client_island_slots.mjs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("node", script, base+"/", browser).CombinedOutput()
+	if err != nil {
+		if strings.Contains(string(out), "Executable doesn't exist") {
+			requireE2E(t, "%s browser is not installed: %s", browser, out)
+		}
+		t.Fatalf("browser script failed: %v\n%s", err, out)
+	}
+	var res struct {
+		Who, Tools, Body string
+		Errors           []string
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &res); err != nil {
+		t.Fatalf("parsing browser output: %v\n%s", err, out)
+	}
+	if res.Who != "Ada" || !strings.Contains(res.Tools, "tool a") || res.Body != "page body" || len(res.Errors) > 0 {
+		t.Fatalf("unexpected browser result: %+v", res)
+	}
+}
+
+// TestReactDOMResourceHints: react-dom's preload, preconnect, preinit and
+// preloadModule work in a server component and in a client component that the
+// server renders, and put their tags (once each) in the head of the response.
+func TestReactDOMResourceHints(t *testing.T) {
+	e2eEnv(t)
+	b, root := scProject(t, map[string]string{
+		"src/server/hints.ts": `import "server-only";
+import { preload, preconnect, preinit, preloadModule, prefetchDNS } from "react-dom";
+export function hintModel(url: string) {
+  preload(url, { as: "fetch", crossOrigin: "anonymous", fetchPriority: "high" });
+  preload(url, { as: "fetch", crossOrigin: "anonymous", fetchPriority: "high" });
+  preconnect("https://cdn.example.com", { crossOrigin: "anonymous" });
+  prefetchDNS("https://dns.example.com");
+  preinit("/app.css", { as: "style" });
+  preloadModule("/mod.js");
+}`,
+		"src/components/wasm-hint.ts": `import { preload } from "react-dom";
+export function hintWasm() { preload("/m.wasm", { as: "fetch", crossOrigin: "anonymous", type: "application/wasm" }); }`,
+		"src/components/Grid.tsx": `"use client";
+import { useState } from "react";
+import { hintWasm } from "./wasm-hint";
+export default function Grid() {
+  hintWasm();
+  const [n, setN] = useState(0);
+  return <button id="g" onClick={() => setN(n + 1)}>grid {n}</button>;
+}`,
+		"src/pages/index.tsx": `import Grid from "../components/Grid";
+import { hintModel } from "../server/hints";
+export default async function Home() {
+  await Promise.resolve();
+  hintModel("/model.glb");
+  return <main><Grid /></main>;
+}`,
+	})
+	withPreact(t, root)
+	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	base, err := startKrateServer(t, root, b.Cfg)
+	if err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+	status, _, html := getWith(t, base+"/", nil)
+	if status != 200 {
+		t.Fatalf("status %d:\n%.800s", status, html)
+	}
+	head := html[:strings.Index(html, "</head>")]
+	for _, want := range []string{
+		`<link rel="preload" href="/model.glb" as="fetch" crossorigin="anonymous" fetchpriority="high">`,
+		`<link rel="preconnect" href="https://cdn.example.com" crossorigin="anonymous">`,
+		`<link rel="dns-prefetch" href="https://dns.example.com">`,
+		`<link rel="stylesheet" href="/app.css">`,
+		`<link rel="modulepreload" href="/mod.js">`,
+		`<link rel="preload" href="/m.wasm" as="fetch" crossorigin="anonymous" type="application/wasm">`,
+	} {
+		if strings.Count(head, want) != 1 {
+			t.Errorf("head must hold %s once:\n%s", want, head)
+		}
+	}
+}

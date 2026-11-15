@@ -38,6 +38,10 @@
       "types": "./dist/highlight.d.ts",
       "default": "./dist/highlight.js"
     },
+    "./hints": {
+      "types": "./dist/hints.d.ts",
+      "default": "./dist/hints.js"
+    },
     "./cache": {
       "types": "./dist/cache.d.ts",
       "default": "./dist/cache.js"
