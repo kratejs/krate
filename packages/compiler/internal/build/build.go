@@ -5354,9 +5354,9 @@ func (b *Builder) CompileAPIRoutes(routes []string) error {
 
 	var metaMu sync.Mutex
 	metas := make(map[string]apiRouteMeta, len(routes))
-	// The routes share their options, so a package import resolves once for
-	// all of them.
-	memo := &resolveMemo{}
+	// The routes share their options, so a package import resolves (and is
+	// probed) once for all of them.
+	fam := &apiRouteFamily{}
 
 	for _, route := range routes {
 		wg.Add(1)
@@ -5368,7 +5368,7 @@ func (b *Builder) CompileAPIRoutes(routes []string) error {
 			meta, err := func() (m apiRouteMeta, err error) {
 				err = safe.Run(func() error {
 					var e error
-					m, e = b.compileSingleRoute(r, apiSrcDir, memo)
+					m, e = b.compileSingleRoute(r, apiSrcDir, fam)
 					return e
 				})
 				return
@@ -5449,9 +5449,12 @@ func (b *Builder) apiRouteOptions() (quickjsOpts, nodeOpts api.BuildOptions) {
 	return quickjsOpts, nodeOpts
 }
 
-// compileSingleRoute builds one route's two artifacts. Routes built together
-// share memo (nil for none) for the package resolutions of their options.
-func (b *Builder) compileSingleRoute(file string, apiSrcDir string, memo *resolveMemo) (apiRouteMeta, error) {
+// compileSingleRoute builds one route's artifacts. Routes built together
+// share fam (nil for none).
+func (b *Builder) compileSingleRoute(file string, apiSrcDir string, fam *apiRouteFamily) (apiRouteMeta, error) {
+	if fam == nil {
+		fam = &apiRouteFamily{}
+	}
 	relPath, err := filepath.Rel(apiSrcDir, file)
 	if err != nil {
 		return apiRouteMeta{}, err
@@ -5462,8 +5465,9 @@ func (b *Builder) compileSingleRoute(file string, apiSrcDir string, memo *resolv
 	//   dist/.krate/api/<name>.js       IIFE + bundled  -> embedded QuickJS
 	//   dist/.krate/api-node/<name>.js  ESM  + externals -> Node sidecar
 	// A route gets only the artifacts of the runtime that serves it: with the
-	// embedded runtime (the default) the QuickJS one, plus the Node one when
-	// the route is Node-only; with apiRuntime node, bun or deno the Node one.
+	// embedded runtime (the default) the QuickJS one, or for a Node-only route
+	// the Node one plus a QuickJS stub that keeps its URL resolvable; with
+	// apiRuntime node, bun or deno the Node one.
 	quickjsPath := filepath.Join(apiBundleDir(b.Cfg.OutDir), outName)
 	nodePath := filepath.Join(apiNodeBundleDir(b.Cfg.OutDir), outName)
 	embedded := embeddedRuntime(b.Cfg.SSR.APIRuntime)
@@ -5473,7 +5477,7 @@ func (b *Builder) compileSingleRoute(file string, apiSrcDir string, memo *resolv
 	quickjsOpts.Outfile = quickjsPath
 	nodeOpts.EntryPoints = []string{file}
 	nodeOpts.Outfile = nodePath
-	nodeOpts.Plugins = append(nodeOpts.Plugins, externalNodeModulesPluginMemo(nodePath, memo))
+	nodeOpts.Plugins = append(nodeOpts.Plugins, externalNodeModulesPluginMemo(nodePath, &fam.node))
 	buildNode := func() (api.BuildResult, error) {
 		if err := os.MkdirAll(filepath.Dir(nodePath), 0755); err != nil {
 			return api.BuildResult{}, err
@@ -5501,6 +5505,14 @@ func (b *Builder) compileSingleRoute(file string, apiSrcDir string, memo *resolv
 		return meta, nil
 	}
 
+	// A route that provably keeps an external import is Node-only: it gets
+	// its Node bundle and a QuickJS stub, without bundling its packages for
+	// QuickJS. Otherwise the full QuickJS bundle decides.
+	if !legacyNodeOnlyDetection && provablyNodeOnly(quickjsOpts, b.Cfg.ServerExternalPackages, fam) {
+		meta.NodeOnly = true
+		return meta, b.finishNodeOnlyRoute(file, quickjsPath, meta.File, buildNode)
+	}
+
 	if err := os.MkdirAll(filepath.Dir(quickjsPath), 0755); err != nil {
 		return apiRouteMeta{}, err
 	}
@@ -5514,47 +5526,36 @@ func (b *Builder) compileSingleRoute(file string, apiSrcDir string, memo *resolv
 	// Node-only = imports still external after bundling (node builtins / native
 	// deps the embedded runtime cannot provide). Package deps that bundle cleanly
 	// stay embedded, so dep-using routes still run in QuickJS.
-	if quickjsResult.Metafile != "" {
-		type esbuildMeta struct {
-			Inputs  map[string]interface{} `json:"inputs"`
-			Outputs map[string]struct {
-				Imports []struct {
-					External bool `json:"external"`
-				} `json:"imports"`
-			} `json:"outputs"`
-		}
-		var m esbuildMeta
-		if err := json.Unmarshal([]byte(quickjsResult.Metafile), &m); err == nil {
-			var deps []string
-			for inputPath := range m.Inputs {
-				// Convert to pristine workspace absolute paths for the file watcher
-				deps = append(deps, filepath.Clean(filepath.Join(b.Root, inputPath)))
-			}
-			// Re-inject back into your framework's reactive watch graph
-			b.recordDeps(file, deps)
-
-			for _, out := range m.Outputs {
-				for _, imp := range out.Imports {
-					if imp.External {
-						meta.NodeOnly = true
-					}
-				}
-			}
-		}
-	}
+	meta.NodeOnly = hasExternalImport(quickjsResult.Metafile)
 	// Node-only routes are served by the sidecar, so only embedded-runtime
 	// routes are checked against the embedded runtime's API surface.
 	if meta.NodeOnly {
-		if _, err := buildNode(); err != nil {
-			return apiRouteMeta{}, err
+		if legacyNodeOnlyDetection {
+			b.recordDeps(file, metafileDeps(b.Root, quickjsResult.Metafile))
+			if _, err := buildNode(); err != nil {
+				return apiRouteMeta{}, err
+			}
+			b.setRuntimeCompatWarnings(file, nil)
+			return meta, nil
 		}
-		b.setRuntimeCompatWarnings(file, nil)
-	} else {
-		removeStaleArtifact(nodePath)
-		meta.Features = b.scanRuntimeCompat(file, quickjsResult.Metafile, jscompat.CompatAPIRuntime)
+		return meta, b.finishNodeOnlyRoute(file, quickjsPath, meta.File, buildNode)
 	}
-
+	b.recordDeps(file, metafileDeps(b.Root, quickjsResult.Metafile))
+	removeStaleArtifact(nodePath)
+	meta.Features = b.scanRuntimeCompat(file, quickjsResult.Metafile, jscompat.CompatAPIRuntime)
 	return meta, nil
+}
+
+// finishNodeOnlyRoute writes a Node-only route's Node bundle and QuickJS
+// stub. Its dev dependencies come from the Node bundle.
+func (b *Builder) finishNodeOnlyRoute(file, quickjsPath, route string, buildNode func() (api.BuildResult, error)) error {
+	res, err := buildNode()
+	if err != nil {
+		return err
+	}
+	b.recordDeps(file, metafileDeps(b.Root, res.Metafile))
+	b.setRuntimeCompatWarnings(file, nil)
+	return writeNodeOnlyStub(quickjsPath, route)
 }
 
 // removeStaleArtifact removes a route artifact an earlier build wrote for a

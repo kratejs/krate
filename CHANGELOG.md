@@ -436,8 +436,11 @@ host code runs in the native process. Names and options may change between relea
   quadratic pass over clashing export names is linear. The server render modules of client components
   (`.krate/server-bundles/client/`) are now one code-split build: modules they share are emitted once in
   `client/chunks/` and loaded once per server process, instead of being copied into every module. An API route is
-  bundled only for the runtime that serves it: the embedded runtime's bundle (plus the Node one for a Node-only route)
-  by default, the Node one alone with `ssr.apiRuntime` `node`, `bun` or `deno`. Rebuild after changing `apiRuntime`;
+  bundled only for the runtime that serves it: the embedded runtime's bundle by default, the Node one alone with
+  `ssr.apiRuntime` `node`, `bun` or `deno`. A route that provably imports something only Node can load (a Node
+  built-in, a native addon, a `serverExternalPackages` entry, also through a package it imports) gets its Node bundle
+  and a small stub for the embedded runtime, without bundling its packages for QuickJS first; each package is checked
+  once per build. Rebuild after changing `apiRuntime`;
   `krate serve` warns when the build is for another runtime. `--profile` now breaks the whole build down: build phases
   that add up to the total, each page step summed over pages, work beside the pages and every esbuild call by caller.
 - Client components inside server components no longer ship their server children again inside their props. The
