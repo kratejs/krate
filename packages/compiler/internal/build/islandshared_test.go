@@ -505,3 +505,57 @@ func TestIslandShareCheckCycle(t *testing.T) {
 		t.Errorf("a workspace package next to the app displays as %q, want ../shared/src/index.ts", got)
 	}
 }
+
+// TestWriteIslandChunkFilesRenames: shared chunk names are lower-cased in the
+// file names and in every file that names them, as replacing each name in
+// turn does, source map names included.
+func TestWriteIslandChunkFilesRenames(t *testing.T) {
+	dir := t.TempDir()
+	files := []api.OutputFile{
+		{Path: "/out/island_one.js", Contents: []byte(`import{a}from"./isl-AB2CD3EF.js";import"./isl-ZZ7Y6X5W.js";import"./isl-abc23456.js";a("isl-AB2CD3EF.js");`)},
+		{Path: "/out/isl-AB2CD3EF.js", Contents: []byte("import\"./isl-ZZ7Y6X5W.js\";export const a=x=>x;\n//# sourceMappingURL=isl-AB2CD3EF.js.map\n")},
+		{Path: "/out/isl-AB2CD3EF.js.map", Contents: []byte(`{"file":"isl-AB2CD3EF.js"}`)},
+		{Path: "/out/isl-ZZ7Y6X5W.js", Contents: []byte("export{};")},
+		{Path: "/out/isl-abc23456.js", Contents: []byte("export const s=\"isl-ZZ7Y6X5WQ.js\";")},
+	}
+	// What replacing each name in turn gives.
+	want := map[string]string{}
+	for _, f := range files {
+		base := filepath.Base(f.Path)
+		if strings.HasSuffix(base, ".map") {
+			continue
+		}
+		data := string(f.Contents)
+		for _, g := range files {
+			from := filepath.Base(g.Path)
+			if strings.HasPrefix(from, islandSharedStem) {
+				data = strings.ReplaceAll(data, from, strings.ToLower(from))
+			}
+		}
+		want[strings.ToLower(base)] = data
+	}
+	keep := map[string]bool{}
+	if err := writeIslandChunkFiles(files, dir, islandSharedStem, keep); err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != len(want) {
+		t.Errorf("wrote %d files, want %d", len(entries), len(want))
+	}
+	for name, data := range want {
+		if !keep[name] {
+			t.Errorf("%s is not kept", name)
+		}
+		got, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			t.Errorf("%s: %v", name, err)
+			continue
+		}
+		if string(got) != data {
+			t.Errorf("%s:\n got %s\nwant %s", name, got, data)
+		}
+	}
+	if !strings.Contains(want["island_one.js"], `"./isl-ab2cd3ef.js"`) || !strings.Contains(want["isl-ab2cd3ef.js"], "isl-ab2cd3ef.js.map") {
+		t.Errorf("the reference does not rename, so the test checks nothing: %v", want)
+	}
+}

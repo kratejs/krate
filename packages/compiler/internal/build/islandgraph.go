@@ -317,22 +317,28 @@ func (b *Builder) checkIslandFlavour(f *islandFlavour) error {
 // policy recognizes content-hashed names by their lower-case hash.
 func writeIslandChunkFiles(files []api.OutputFile, chunksDir, stem string, keep map[string]bool) error {
 	rename := map[string]string{}
+	var pairs []string
 	for _, f := range files {
 		base := filepath.Base(f.Path)
 		if strings.HasPrefix(base, stem) {
-			rename[base] = strings.ToLower(base)
+			to := strings.ToLower(base)
+			rename[base] = to
+			if to != base {
+				pairs = append(pairs, base, to)
+			}
 		}
 	}
+	// Each name differs from its new one only in case, so one pass over a
+	// file renames what replacing the names one at a time would.
+	lower := strings.NewReplacer(pairs...)
 	for _, f := range files {
 		base := filepath.Base(f.Path)
 		if strings.HasSuffix(base, ".map") {
 			continue
 		}
 		data := string(f.Contents)
-		for from, to := range rename {
-			if from != to {
-				data = strings.ReplaceAll(data, from, to)
-			}
+		if len(pairs) > 0 {
+			data = lower.Replace(data)
 		}
 		if to, ok := rename[base]; ok {
 			base = to
