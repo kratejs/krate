@@ -67,6 +67,9 @@ export type { LoaderResult, Extensions } from './hooks.js';
 export { createThree, createFrame, createLoader, createGraph } from './primitives.js';
 export type { Accessor, MaybeAccessor, LoaderAccessor } from './primitives.js';
 export { mountCanvas } from './canvas.js';
+export { SceneNode, SCENE_NS, createSceneRoot, createPortalRoot, commitSceneProps } from './host.js';
+export { createPortalState } from './reconciler.js';
+export { setRef } from './runtime.js';
 export type { CanvasProps, CanvasElements, ResizeOptions } from './canvas.js';
 
 /** The root store of the scene being rendered, for code that reads it like React context. */

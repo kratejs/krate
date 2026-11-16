@@ -270,6 +270,7 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 	linkRelativeImports(rep)
 	migrateNextFonts(rep, abs)
 	rewriteNextModuleImports(rep, abs)
+	migrateReactThree(rep, abs)
 	migrateNextAuth(rep, abs)
 	warnClientBoundaryRuntime(rep)
 	rewritePublicEnv(rep, readPublicEnv(abs), nextCfg.Env)

@@ -231,7 +231,7 @@ func (b *Builder) preactIslandFlavour(entries []islandEntry, chunksDir string) (
 	sink := &islandCSSSink{root: b.Root}
 	minify := b.shouldMinifyJS()
 	guard := b.newUnavailableGuard()
-	plugins := []api.Plugin{purePrunePlugin(b.Root), guard.plugin(), islandEntryPlugin(entries, virtual), islandCSSPlugin(sink), islandJSXPlugin(), islandTagsPlugin(b.Root, false), islandRequirePlugin(), reconcilerGuardPlugin(), reactDOMHintsPlugin(b.Root), reactCompatPlugin(b.Root), routerHooksPlugin(b.Root)}
+	plugins := []api.Plugin{purePrunePlugin(b.Root), guard.plugin(), islandEntryPlugin(entries, virtual), islandCSSPlugin(sink), islandJSXPlugin(), islandTagsPlugin(b.Root, false), islandRequirePlugin(), reconcilerGuardPlugin(), reactDOMHintsPlugin(b.Root), reactCompatPlugin(b.Root), routerHooksPlugin(b.Root), threeIslandPlugin()}
 	var injects []string
 	for _, e := range entries {
 		if !e.Boundary {

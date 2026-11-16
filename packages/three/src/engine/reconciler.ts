@@ -175,11 +175,11 @@ function withOwner<T>(owner: unknown, fn: () => T): T {
 
 // Instance creation
 
-function resolveType(type: string): string {
+export function resolveType(type: string): string {
   return hasConstructor(toPascalCase(type)) ? type : type.replace(PREFIX_REGEX, '');
 }
 
-function validateInstance(type: string, props: Record<string, unknown>): void {
+export function validateInstance(type: string, props: Record<string, unknown>): void {
   const name = toPascalCase(type);
   const target = resolveConstructor(name);
   if (type !== 'primitive' && !target) {
@@ -191,7 +191,7 @@ function validateInstance(type: string, props: Record<string, unknown>): void {
   if (props.args !== undefined && !Array.isArray(props.args)) throw new Error('@krate/three: The args prop must be an array!');
 }
 
-function createObject(inst: Instance): unknown {
+export function createObject(inst: Instance): unknown {
   if (inst.props.object) return inst.props.object;
   const target = resolveConstructor(toPascalCase(inst.type))!;
   return new target(...((inst.props.args as unknown[] | undefined) ?? []));
@@ -203,7 +203,7 @@ function indexOfObject(parent: Instance, before: Instance | null): number {
 }
 
 // Adds the child's object to its parent: through `attach`, or as an Object3D child.
-function link(parent: Instance, child: Instance, before: Instance | null): void {
+export function link(parent: Instance, child: Instance, before: Instance | null): void {
   if (child.props.attach) {
     attach(parent, child);
   } else if (isObject3D(child.object) && isObject3D(parent.object)) {
@@ -225,14 +225,15 @@ function link(parent: Instance, child: Instance, before: Instance | null): void 
   }
 }
 
-function unlinkObject(parent: Instance, child: Instance): void {
+export function unlinkObject(parent: Instance, child: Instance): void {
   if (child.props.attach) detach(parent, child);
   else if (isObject3D(child.object) && isObject3D(parent.object)) parent.object.remove(child.object);
 }
 
-function disposeOnIdle(object: { dispose?: () => void }): void {
+export function disposeOnIdle(object: { dispose?: () => void }, keep?: () => boolean): void {
   if (typeof object.dispose !== 'function') return;
   const run = (): void => {
+    if (keep?.()) return;
     try {
       object.dispose!();
     } catch {
@@ -246,9 +247,9 @@ function disposeOnIdle(object: { dispose?: () => void }): void {
   else setTimeout(run, 0);
 }
 
-const RECONSTRUCT_PROPS = ['args', 'object', 'attach'];
+export const RECONSTRUCT_PROPS = ['args', 'object', 'attach'];
 
-function needsReconstruct(inst: Instance, key: string, value: unknown): boolean {
+export function needsReconstruct(inst: Instance, key: string, value: unknown): boolean {
   if (key === 'args') return !is.equ(value, inst.props.args);
   if (key === 'object') return value !== inst.props.object;
   if (key === 'attach') return value !== inst.props.attach && !(typeof value === 'function' && typeof inst.props.attach === 'function');
@@ -908,12 +909,21 @@ export function setPortalStoreFactory(factory: (init: (set: any, get: any) => an
   createPortalStore = factory;
 }
 
-function mountPortal(node: PortalNode, parent: Instance, slot: Slot, ctx: Ctx): void {
-  const parentStore = ctx.store;
-  const { events, size, ...rest } = (node.state ?? {}) as Record<string, any>;
+/**
+ * Creates the store of a portal: the parent's state with the portal's own
+ * container (as `scene`), raycaster, pointer and the `state` overrides
+ * layered over it, kept in sync with the parent. Returns the store and the
+ * function that stops following the parent.
+ */
+export function createPortalState(
+  parentStore: RootStore,
+  container: THREE.Object3D,
+  state?: Record<string, unknown>,
+): { store: RootStore; unsubscribe: () => void } {
+  const { events, size, ...rest } = (state ?? {}) as Record<string, any>;
   const options: PortalOptions = {
     parentStore,
-    container: node.container,
+    container,
     raycaster: new THREE.Raycaster(),
     pointer: new THREE.Vector2(),
     events,
@@ -923,12 +933,17 @@ function mountPortal(node: PortalNode, parent: Instance, slot: Slot, ctx: Ctx): 
     ...rest,
     set,
     get,
-    setEvents: (e: Record<string, unknown>) => set((state: RootState) => ({ ...state, events: { ...state.events, ...e } })),
+    setEvents: (e: Record<string, unknown>) => set((s: RootState) => ({ ...s, events: { ...s.events, ...e } })),
   }));
   portalStore.setState((portalState) => inject(parentStore.getState(), portalState, options));
   const unsubscribe = parentStore.subscribe((parentState) => {
     portalStore.setState((portalState) => inject(parentState, portalState, options));
   });
+  return { store: portalStore, unsubscribe };
+}
+
+function mountPortal(node: PortalNode, parent: Instance, slot: Slot, ctx: Ctx): void {
+  const { store: portalStore, unsubscribe } = createPortalState(ctx.store, node.container, node.state);
 
   // Children attach to the container through a stand-in instance, so a
   // container that is itself in the scene keeps its own descriptor.

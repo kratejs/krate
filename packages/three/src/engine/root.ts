@@ -124,11 +124,18 @@ export function createRoot<TCanvas extends HTMLCanvasElement | OffscreenCanvasLi
         }
         root.unrender?.();
         const scene = store.getState().scene as THREE.Scene & { __r3f: Instance };
-        tree = mountTree(children, scene.__r3f, store);
-        root.unrender = () => {
-          tree?.unmount();
-          tree = null;
-        };
+        const mount = (children as { __k3mount?: (scene: Instance, store: RootStore) => () => void } | null)?.__k3mount;
+        if (typeof mount === 'function') {
+          // Another renderer (the Preact island host) builds the scene.
+          const unmount = mount(scene.__r3f, store);
+          root.unrender = () => unmount();
+        } else {
+          tree = mountTree(children, scene.__r3f, store);
+          root.unrender = () => {
+            tree?.unmount();
+            tree = null;
+          };
+        }
         if (!store.getState().internal.active) {
           const state = store.getState();
           state.set((s) => ({ internal: { ...s.internal, active: true } }));

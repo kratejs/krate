@@ -678,7 +678,7 @@ func (b *Builder) buildIslandBundle(src, resolveDir string, ssr bool, plugin *ap
 		LogLevel:        api.LogLevelSilent,
 		Define:          b.clientEnvDefines(),
 		Alias:           islandAlias(b.Root, ssr),
-		Plugins:         []api.Plugin{purePrunePlugin(b.Root), guard.plugin(), islandCSSPlugin(sink), islandJSXPlugin(), islandTagsPlugin(b.Root, ssr), reconcilerGuardPlugin(), reactDOMHintsPlugin(b.Root), reactCompatPlugin(b.Root), routerHooksPlugin(b.Root)},
+		Plugins:         []api.Plugin{purePrunePlugin(b.Root), guard.plugin(), islandCSSPlugin(sink), islandJSXPlugin(), islandTagsPlugin(b.Root, ssr), reconcilerGuardPlugin(), reactDOMHintsPlugin(b.Root), reactCompatPlugin(b.Root), routerHooksPlugin(b.Root), threeIslandPlugin()},
 	}
 	if prov != nil {
 		opts.Plugins = append(opts.Plugins, islandEntryPlugin(nil, prov.virtualModules()))
@@ -686,6 +686,8 @@ func (b *Builder) buildIslandBundle(src, resolveDir string, ssr bool, plugin *ap
 	if ssr {
 		opts.Format = api.FormatIIFE
 		opts.Platform = api.PlatformBrowser
+		opts.Define = vendorImportMetaDefines(opts.Define)
+		opts.Banner = map[string]string{"js": vendorImportMetaBanner}
 		opts.Stdin.Sourcefile = "krate-island-ssr.tsx"
 		if plugin != nil {
 			opts.Plugins = append(opts.Plugins, *plugin)
