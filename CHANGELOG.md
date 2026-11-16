@@ -429,14 +429,17 @@ host code runs in the native process. Names and options may change between relea
 - `krate build` of a large server-component app is about 3.7x faster: a 98-route Next.js 16 app migrated with
   `krate migrate nextjs` (470 islands, three.js, workspace packages) builds in about 122 s instead of 455 s on 12
   cores, with the same HTML, chunks and CSS. Every page re-bundled its async layouts and checked each "use client"
-  module under one build-wide lock, and the server render modules of client components built one at a time; the
-  check builds now run batched with the other pages' while the pages go on, layouts are prepared once per build,
-  API routes build in parallel beside the pages, the resource-hint renders of a batch share one engine run, a
-  shared module is parsed once per build (it was parsed once per worker, and re-hashed on every lookup under the
-  cache lock), and a quadratic pass over clashing export names is linear. The server render modules of client
-  components (`.krate/server-bundles/client/`) are now one code-split build: modules they share are emitted once
-  in `client/chunks/` and loaded once per server process, instead of being copied into every module. `--profile` now breaks the whole build down: build phases that add
-  up to the total, each page step summed over pages, work beside the pages and every esbuild call by caller.
+  module under one build-wide lock, and the server render modules of client components built one at a time; the check
+  builds now run batched with the other pages' while the pages go on, layouts are prepared once per build, API routes
+  build in parallel beside the pages, the resource-hint renders of a batch share one engine run, a shared module is
+  parsed once per build (it was parsed once per worker, and re-hashed on every lookup under the cache lock), and a
+  quadratic pass over clashing export names is linear. The server render modules of client components
+  (`.krate/server-bundles/client/`) are now one code-split build: modules they share are emitted once in
+  `client/chunks/` and loaded once per server process, instead of being copied into every module. An API route is
+  bundled only for the runtime that serves it: the embedded runtime's bundle (plus the Node one for a Node-only route)
+  by default, the Node one alone with `ssr.apiRuntime` `node`, `bun` or `deno`. Rebuild after changing `apiRuntime`;
+  `krate serve` warns when the build is for another runtime. `--profile` now breaks the whole build down: build phases
+  that add up to the total, each page step summed over pages, work beside the pages and every esbuild call by caller.
 - Client components inside server components no longer ship their server children again inside their props. The
   children (and JSX-valued props such as `userMenu={<UserMenu />}`) were rendered into the page and also sent as an HTML
   string in the island's `data-props`, nested once per enclosing client component, so a page under a root

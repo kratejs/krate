@@ -5458,16 +5458,15 @@ func (b *Builder) compileSingleRoute(file string, apiSrcDir string, memo *resolv
 	}
 	outName := strings.TrimSuffix(relPath, filepath.Ext(relPath)) + ".js"
 
-	// Two artifacts so each runtime gets the shape it wants:
+	// Each runtime gets the artifact shape it wants:
 	//   dist/.krate/api/<name>.js       IIFE + bundled  -> embedded QuickJS
 	//   dist/.krate/api-node/<name>.js  ESM  + externals -> Node sidecar
+	// A route gets only the artifacts of the runtime that serves it: with the
+	// embedded runtime (the default) the QuickJS one, plus the Node one when
+	// the route is Node-only; with apiRuntime node, bun or deno the Node one.
 	quickjsPath := filepath.Join(apiBundleDir(b.Cfg.OutDir), outName)
 	nodePath := filepath.Join(apiNodeBundleDir(b.Cfg.OutDir), outName)
-	for _, p := range []string{quickjsPath, nodePath} {
-		if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
-			return apiRouteMeta{}, err
-		}
-	}
+	embedded := embeddedRuntime(b.Cfg.SSR.APIRuntime)
 
 	quickjsOpts, nodeOpts := b.apiRouteOptions()
 	quickjsOpts.EntryPoints = []string{file}
@@ -5475,21 +5474,42 @@ func (b *Builder) compileSingleRoute(file string, apiSrcDir string, memo *resolv
 	nodeOpts.EntryPoints = []string{file}
 	nodeOpts.Outfile = nodePath
 	nodeOpts.Plugins = append(nodeOpts.Plugins, externalNodeModulesPluginMemo(nodePath, memo))
-	// Packages with native addons (and serverExternalPackages) stay external
-	// here, which marks the route Node-only below.
-	quickjsResult, _ := buildExternalizingNative(quickjsOpts, b.Cfg.ServerExternalPackages)
-	if len(quickjsResult.Errors) > 0 {
-		return apiRouteMeta{}, fmt.Errorf("esbuild compilation failed:\n%s", formatEsbuildErrors(quickjsResult.Errors))
-	}
-	nodeResult := esbuildBuild(nodeOpts)
-	if len(nodeResult.Errors) > 0 {
-		return apiRouteMeta{}, fmt.Errorf("esbuild compilation failed:\n%s", formatEsbuildErrors(nodeResult.Errors))
+	buildNode := func() (api.BuildResult, error) {
+		if err := os.MkdirAll(filepath.Dir(nodePath), 0755); err != nil {
+			return api.BuildResult{}, err
+		}
+		res := esbuildBuild(nodeOpts)
+		if len(res.Errors) > 0 {
+			return res, fmt.Errorf("esbuild compilation failed:\n%s", formatEsbuildErrors(res.Errors))
+		}
+		return res, nil
 	}
 
 	meta := apiRouteMeta{File: filepath.ToSlash(outName)}
 	var durWarnings []diag.Diagnostic
 	meta.MaxDuration, durWarnings = readAPIMaxDuration(file)
 	printWarningsOnce(os.Stderr, durWarnings)
+
+	if !embedded {
+		removeStaleArtifact(quickjsPath)
+		nodeResult, err := buildNode()
+		if err != nil {
+			return apiRouteMeta{}, err
+		}
+		b.recordDeps(file, metafileDeps(b.Root, nodeResult.Metafile))
+		b.setRuntimeCompatWarnings(file, nil)
+		return meta, nil
+	}
+
+	if err := os.MkdirAll(filepath.Dir(quickjsPath), 0755); err != nil {
+		return apiRouteMeta{}, err
+	}
+	// Packages with native addons (and serverExternalPackages) stay external
+	// here, which marks the route Node-only below.
+	quickjsResult, _ := buildExternalizingNative(quickjsOpts, b.Cfg.ServerExternalPackages)
+	if len(quickjsResult.Errors) > 0 {
+		return apiRouteMeta{}, fmt.Errorf("esbuild compilation failed:\n%s", formatEsbuildErrors(quickjsResult.Errors))
+	}
 
 	// Node-only = imports still external after bundling (node builtins / native
 	// deps the embedded runtime cannot provide). Package deps that bundle cleanly
@@ -5524,13 +5544,39 @@ func (b *Builder) compileSingleRoute(file string, apiSrcDir string, memo *resolv
 	}
 	// Node-only routes are served by the sidecar, so only embedded-runtime
 	// routes are checked against the embedded runtime's API surface.
-	if !meta.NodeOnly && embeddedRuntime(b.Cfg.SSR.APIRuntime) {
-		meta.Features = b.scanRuntimeCompat(file, quickjsResult.Metafile, jscompat.CompatAPIRuntime)
-	} else {
+	if meta.NodeOnly {
+		if _, err := buildNode(); err != nil {
+			return apiRouteMeta{}, err
+		}
 		b.setRuntimeCompatWarnings(file, nil)
+	} else {
+		removeStaleArtifact(nodePath)
+		meta.Features = b.scanRuntimeCompat(file, quickjsResult.Metafile, jscompat.CompatAPIRuntime)
 	}
 
 	return meta, nil
+}
+
+// removeStaleArtifact removes a route artifact an earlier build wrote for a
+// runtime that no longer serves the route.
+func removeStaleArtifact(path string) {
+	_ = os.Remove(path)
+	_ = os.Remove(path + ".map")
+}
+
+// metafileDeps returns the absolute paths of a metafile's inputs.
+func metafileDeps(root, metafile string) []string {
+	var m struct {
+		Inputs map[string]json.RawMessage `json:"inputs"`
+	}
+	if metafile == "" || json.Unmarshal([]byte(metafile), &m) != nil {
+		return nil
+	}
+	deps := make([]string, 0, len(m.Inputs))
+	for in := range m.Inputs {
+		deps = append(deps, filepath.Clean(filepath.Join(root, in)))
+	}
+	return deps
 }
 
 // formatEsbuildErrors renders esbuild messages into a single styled string.
