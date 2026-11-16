@@ -1240,6 +1240,23 @@ __o.__r = function (vnode) {
   if (__render) __render(vnode);
 };`
 
+// preactExternalsPlugin marks exactly the given specifiers external.
+func preactExternalsPlugin(exts []string) api.Plugin {
+	return api.Plugin{
+		Name: "krate-preact-externals",
+		Setup: func(pb api.PluginBuild) {
+			pb.OnResolve(api.OnResolveOptions{Filter: exactSpecFilter(exts)}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+				for _, ext := range exts {
+					if args.Path == ext {
+						return api.OnResolveResult{Path: args.Path, External: true}, nil
+					}
+				}
+				return api.OnResolveResult{}, nil
+			})
+		},
+	}
+}
+
 // ensurePreactShared builds the shared Preact chunks once per build and records
 // the import map. Each specifier is a standalone ESM module; cross-specifier
 // imports stay bare and are resolved by the import map.
@@ -1265,20 +1282,7 @@ func (b *Builder) ensurePreactShared() (map[string]string, error) {
 		// self-referential re-export). Resolve exact specifiers only.
 		var plugins []api.Plugin
 		if len(s.externals) > 0 {
-			exts := s.externals
-			plugins = append(plugins, api.Plugin{
-				Name: "krate-preact-externals",
-				Setup: func(pb api.PluginBuild) {
-					pb.OnResolve(api.OnResolveOptions{Filter: `.*`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
-						for _, ext := range exts {
-							if args.Path == ext {
-								return api.OnResolveResult{Path: args.Path, External: true}, nil
-							}
-						}
-						return api.OnResolveResult{}, nil
-					})
-				},
-			})
+			plugins = append(plugins, preactExternalsPlugin(s.externals))
 		}
 		contents := fmt.Sprintf("export * from %q;", s.name)
 		if s.name == "preact/hooks" {

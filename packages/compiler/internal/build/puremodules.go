@@ -35,7 +35,8 @@ func purePrunePluginMemo(projectRoot string, memo *resolveMemo) api.Plugin {
 	return api.Plugin{
 		Name: "krate-pure-modules",
 		Setup: func(pb api.PluginBuild) {
-			pb.OnResolve(api.OnResolveOptions{Filter: `.*`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+			// Only imports made by a file-namespace module are acted on.
+			pb.OnResolve(api.OnResolveOptions{Filter: `.*`, Namespace: "file"}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
 				return pureResolve(pb, root, args, memo)
 			})
 		},

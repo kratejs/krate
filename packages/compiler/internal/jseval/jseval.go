@@ -266,14 +266,14 @@ func importMetaPreserver(nodeShims bool, virtual map[string]string, transform fu
 		Setup: func(pb api.PluginBuild) {
 			// Style and asset imports carry no data for build-time evaluation;
 			// load them empty instead of parsing them as JavaScript.
-			pb.OnLoad(api.OnLoadOptions{Filter: assetFilter}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
+			pb.OnLoad(api.OnLoadOptions{Filter: assetFilter, Namespace: "file"}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
 				if args.Namespace != "file" {
 					return api.OnLoadResult{}, nil
 				}
 				empty := ""
 				return api.OnLoadResult{Contents: &empty, Loader: api.LoaderJS}, nil
 			})
-			pb.OnLoad(api.OnLoadOptions{Filter: `\.(?:[cm]?[jt]sx?|json)$`}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
+			pb.OnLoad(api.OnLoadOptions{Filter: `\.(?:[cm]?[jt]sx?|json)$`, Namespace: "file"}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
 				if args.Namespace != "file" {
 					return api.OnLoadResult{}, nil
 				}
@@ -308,7 +308,7 @@ func virtualFilesPlugin(virtual map[string]string) api.Plugin {
 	return api.Plugin{
 		Name: "krate-virtual-files",
 		Setup: func(pb api.PluginBuild) {
-			pb.OnResolve(api.OnResolveOptions{Filter: `.*`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+			pb.OnResolve(api.OnResolveOptions{Filter: absPathFilter}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
 				if !filepath.IsAbs(args.Path) {
 					return api.OnResolveResult{}, nil
 				}
@@ -349,6 +349,10 @@ func injectDirnameVars(path, src string) string {
 	}
 	return decl + src
 }
+
+// absPathFilter matches every specifier filepath.IsAbs accepts on any OS: a
+// rooted path, a drive path with either separator, and a UNC path.
+const absPathFilter = `^(?:/|[A-Za-z]:[\\/]|\\[\\/])`
 
 // assetFilter matches imports of styles, images, fonts and other non-code
 // assets.

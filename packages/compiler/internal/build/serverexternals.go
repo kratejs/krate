@@ -105,7 +105,7 @@ func pathAliasPlugin(res *bundler.ImportResolver) api.Plugin {
 	return api.Plugin{
 		Name: "krate-path-alias",
 		Setup: func(b api.PluginBuild) {
-			b.OnResolve(api.OnResolveOptions{Filter: `^[^./]`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+			b.OnResolve(api.OnResolveOptions{Filter: res.AliasFilter()}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
 				if strings.Contains(filepath.ToSlash(args.Importer), "/node_modules/") {
 					return api.OnResolveResult{}, nil
 				}
@@ -236,7 +236,8 @@ func externalNodeModulesPluginMemo(outFile string, memo *resolveMemo) api.Plugin
 				}
 				return api.OnResolveResult{Path: "@krate/runtime/hints", External: true}, nil
 			})
-			b.OnResolve(api.OnResolveOptions{Filter: `^[^./]`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+			// A specifier with a colon (node:, https:, data:) is never handled.
+			b.OnResolve(api.OnResolveOptions{Filter: externalPackageFilter}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
 				if args.PluginData == marker || strings.Contains(args.Path, ":") {
 					return api.OnResolveResult{}, nil
 				}
