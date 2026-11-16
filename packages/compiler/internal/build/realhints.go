@@ -159,7 +159,7 @@ func (b *Builder) realHintsSetup() (opts api.BuildOptions, prelude, server strin
 		return api.BuildOptions{}, "", "", false
 	}
 	sink := &islandCSSSink{root: b.Root}
-	opts, err := b.realReactOptions(sink, b.newUnavailableGuard())
+	opts, err := b.realReactOptions(sink, b.newUnavailableGuard(), nil)
 	if err != nil {
 		return api.BuildOptions{}, "", "", false
 	}

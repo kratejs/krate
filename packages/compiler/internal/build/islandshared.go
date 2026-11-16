@@ -763,6 +763,14 @@ func parseIslandMetafile(s string) (*islandMetafile, error) {
 // buildIslandFlavours runs the island builds. With both flavours present it
 // builds each once to learn its module graph, bundles the modules both can
 // share into isn-* chunks (returned), and rebuilds both importing them.
+//
+// The pure-module plugin of a flavour asks esbuild for each project import
+// again, which reads every directory on the way from disk, so its answers are
+// kept in one memo for all the builds made from the flavour's options: both
+// passes here, and for Preact the export listing and the shared chunks. They
+// resolve alike, because the plugins those builds add ahead of it answer an
+// import by its importer and path alone: an import one of them claims never
+// reaches the plugin, and any other resolves as in the first pass.
 func (b *Builder) buildIslandFlavours(flavours []*islandFlavour, chunksDir string) []api.OutputFile {
 	if len(flavours) < 2 {
 		for _, f := range flavours {
