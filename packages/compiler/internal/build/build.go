@@ -172,6 +172,10 @@ type Builder struct {
 	Cfg     *config.Config
 	DevMode bool
 	Verbose bool
+	// OneShot tells BuildAll that no build follows on this Builder (no dev or
+	// watch rebuilds), so it frees the caches only a later build would reuse
+	// as soon as the pages are built.
+	OneShot bool
 	// DevReload is called by the dev watcher when a config or env file
 	// changed. It reports whether the new settings load cleanly, in which case
 	// the watcher asks the dev server to restart; otherwise it has already
@@ -515,6 +519,21 @@ func (b *Builder) readProgram(prog *ast.Program) func() {
 	lock := b.progLock(prog)
 	lock.RLock()
 	return lock.RUnlock
+}
+
+// forgetPrograms drops what the builder keeps per program for progs, so a
+// program no cache holds any more can be freed.
+func (b *Builder) forgetPrograms(progs []*ast.Program) {
+	for _, p := range progs {
+		b.transformOnce.Delete(p)
+		b.progLocks.Delete(p)
+		b.collectionSites.Delete(p)
+		b.deferInline.Delete(p)
+		b.templateCovered.Delete(p)
+		b.paramBindings.Delete(p)
+		b.progIconDiags.Delete(p)
+		b.progImageDiags.Delete(p)
+	}
 }
 
 // ensureTransformed applies the universal AST transforms (icons, images, spread
@@ -1314,6 +1333,11 @@ func (b *Builder) BuildAll() error {
 	}
 
 	bl.Lap("static-params")
+	// The pages are built: the parsed modules are kept only for the few
+	// bundles left, which parse again.
+	if b.OneShot {
+		b.forgetPrograms(b.moduleCache.DropPrograms())
+	}
 	// The server render modules the pages' server bundles need build in one
 	// code-split build, then the page server bundles, which need only the
 	// pages and these modules: both while the island chunks and HTML are

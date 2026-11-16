@@ -90,3 +90,31 @@ func TestPrivateRenamesEditImports(t *testing.T) {
 		t.Fatal("the shared program was edited")
 	}
 }
+
+func TestDropPrograms(t *testing.T) {
+	b, mod := sharedModule(t)
+	orig := mod.Program
+	b.applyPrivateRenames(mod, map[string]string{"up": "up$a"}, nil, nil, moduleRewrites{})
+	dropped := b.cache.DropPrograms()
+	has := func(p any) bool {
+		for _, d := range dropped {
+			if any(d) == p {
+				return true
+			}
+		}
+		return false
+	}
+	if !has(orig) || !has(mod.Program) {
+		t.Fatalf("dropped %d programs, without lib.tsx or its renamed copy", len(dropped))
+	}
+	if len(b.cache.programs) != 0 || b.cache.renamed != nil {
+		t.Fatal("the cache still holds programs")
+	}
+	// A later bundle parses again.
+	if _, err := b.Bundle(filepath.Join(filepath.Dir(mod.Path), "page.tsx")); err != nil {
+		t.Fatal(err)
+	}
+	if len(b.cache.programs) == 0 {
+		t.Fatal("the next bundle did not repopulate the cache")
+	}
+}

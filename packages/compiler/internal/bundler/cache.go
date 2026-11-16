@@ -250,6 +250,29 @@ func (m *resolverMemo) reset() {
 	m.imports.Clear()
 }
 
+// DropPrograms forgets every parsed program and renamed copy (see
+// applyPrivateRenames) and returns them. A build that bundles few or no more
+// modules calls it to free them; a later bundle parses again.
+func (c *ModuleCache) DropPrograms() []*ast.Program {
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var out []*ast.Program
+	for _, e := range c.programs {
+		out = append(out, e.program)
+	}
+	for _, e := range c.renamed {
+		for _, p := range e.copies {
+			out = append(out, p)
+		}
+	}
+	c.programs = map[string]*programEntry{}
+	c.renamed = nil
+	return out
+}
+
 // ResetResolver clears the filesystem-existence and import-resolution memo so a
 // new build re-probes the filesystem. Call once per build.
 func (c *ModuleCache) ResetResolver() {

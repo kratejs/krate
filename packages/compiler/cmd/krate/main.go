@@ -747,6 +747,7 @@ func runBuild(flags cliFlags, args []string) {
 	builder := build.New(root, cfg)
 	builder.Verbose = flags.Verbose
 	builder.Env = env
+	builder.OneShot = !flags.Watch
 	if flags.Profile {
 		builder.Prof = build.NewProfiler(true)
 	}
