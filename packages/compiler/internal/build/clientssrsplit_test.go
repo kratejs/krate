@@ -1,6 +1,7 @@
 package build
 
 import (
+	"bytes"
 	"io"
 	"net/http"
 	"os"
@@ -103,6 +104,9 @@ func TestClientSSRModulesShareChunks(t *testing.T) {
 		entry, err := os.ReadFile(filepath.Join(clientDir, id+".ssr.mjs"))
 		if err != nil {
 			t.Fatalf("entry of %s: %v", name, err)
+		}
+		if bytes.Contains(entry, []byte(".krate-batch-")) {
+			t.Errorf("%s names its batch entry path; it must name its own module as a separate build does:\n%s", name, entry)
 		}
 		if !regexp.MustCompile(`from "\./chunks/[^"]+-[A-Z0-9]+\.mjs"`).Match(entry) {
 			t.Errorf("entry of %s should import a hashed shared chunk:\n%s", name, entry)

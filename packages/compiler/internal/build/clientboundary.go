@@ -1,6 +1,7 @@
 package build
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -1442,14 +1443,18 @@ func (c *clientSSRImpls) buildCombined(claimed []claimedImpl) error {
 		return err
 	}
 	outdir := filepath.Join(c.bundleDir, "client")
+	// A fixed order keeps the output the same from build to build.
+	claimed = append([]claimedImpl(nil), claimed...)
+	sort.Slice(claimed, func(i, j int) bool { return claimed[i].cb.ModuleID < claimed[j].cb.ModuleID })
 	entries := make([]batchEntry, len(claimed))
 	want := make(map[string]bool, len(claimed))
 	for i, ci := range claimed {
 		entries[i] = batchEntry{Source: clientSSRSource(ci.cb), ResolveDir: ci.cb.resolveDir(), Sourcefile: "krate-client-ssr.js", Loader: api.LoaderJS, OutputPath: ci.cb.ModuleID + ".ssr"}
 		want[ci.cb.ModuleID+".ssr.mjs"] = true
 	}
-	withBatchEntries(&opts, entries)
+	entries = withBatchEntries(&opts, entries)
 	opts.Outdir = outdir
+	opts.Metafile = true
 	opts.Splitting = true
 	opts.ChunkNames = ssrChunkNames
 	opts.OutExtension = map[string]string{".js": ".mjs"}
@@ -1460,6 +1465,20 @@ func (c *clientSSRImpls) buildCombined(claimed []claimedImpl) error {
 	}
 	if hits := guard.errors(res.OutputFiles); len(hits) > 0 {
 		return fmt.Errorf("combined server render build: %s", hits[0].Text)
+	}
+	if !opts.MinifyWhitespace {
+		// Name each entry module in the output comments as its own Stdin
+		// build does, not by its batch path.
+		cwd := esbuildCwd(opts, res.Metafile, batchModulePath(0, entries[0]))
+		for i := range entries {
+			from := []byte("// " + relSlash(cwd, batchModulePath(i, entries[i])) + "\n")
+			to := []byte("// " + stdinPrettyPath(cwd, entries[i]) + "\n")
+			for k, f := range res.OutputFiles {
+				if bytes.Contains(f.Contents, from) {
+					res.OutputFiles[k].Contents = bytes.ReplaceAll(f.Contents, from, to)
+				}
+			}
+		}
 	}
 	if err := os.MkdirAll(outdir, 0755); err != nil {
 		return err
