@@ -819,7 +819,10 @@ func (b *Bundler) resolveTSXModule(path, abs string, mtime time.Time, size int64
 	// hot cost and are cached.
 	overlay, overlaid := b.overlays[abs]
 	cacheable := statOK && !isEntry && !overlaid
-	if cacheable {
+	// endParse ends this bundle's claim on parsing abs, so pages building at
+	// once parse a shared module once instead of once each.
+	endParse := func() {}
+	for cacheable {
 		if e, ok := b.cache.getProgram(abs, mtime, size); ok {
 			mod := &Module{Path: path, Program: e.program, IsEntry: isEntry, SourceCode: e.source, ComponentClass: e.compClass, Diagnostics: e.diags}
 			mod.Imports = append([]string(nil), e.imports...)
@@ -829,7 +832,12 @@ func (b *Bundler) resolveTSXModule(path, abs string, mtime time.Time, size int64
 			}
 			return nil
 		}
+		if end := b.cache.beginParse(abs); end != nil {
+			endParse = end
+			break
+		}
 	}
+	defer func() { endParse() }()
 
 	var src string
 	if overlaid {
@@ -886,6 +894,8 @@ func (b *Bundler) resolveTSXModule(path, abs string, mtime time.Time, size int64
 			diags: reactDiags,
 		})
 	}
+	// The imports may lead back here: release the claim before them.
+	endParse()
 	return b.resolveModuleImports(mod)
 }
 
@@ -993,7 +1003,10 @@ var resolveMemo = newResolverMemo()
 
 // ResetResolveCache clears the process-wide resolution memo. Call once per
 // build, before bundling.
-func ResetResolveCache() { resolveMemo.reset() }
+func ResetResolveCache() {
+	resolveMemo.reset()
+	realPaths.Clear()
+}
 
 func memoizedExists(path string) bool {
 	if v, ok := resolveMemo.existsResult(path); ok {
