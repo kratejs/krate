@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"net/url"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/evanw/esbuild/pkg/api"
 	"github.com/kratejs/krate/packages/compiler/internal/bundler"
@@ -221,8 +223,21 @@ func (m *resolveMemo) resolve(args api.OnResolveArgs, resolve func() api.Resolve
 // externalNodeModulesPluginMemo is externalNodeModulesPlugin for a family of
 // builds with the same options, which share their resolutions through memo.
 func externalNodeModulesPluginMemo(outFile string, memo *resolveMemo) api.Plugin {
+	var dirs []string
+	if outFile != "" {
+		dirs = []string{filepath.Dir(outFile)}
+	}
+	return externalNodeModulesPluginDirs(dirs, memo, nil)
+}
+
+// externalNodeModulesPluginDirs is externalNodeModulesPluginMemo for a build
+// with an output file in each of outDirs (none for no output file). A package
+// that some of them see in node_modules and others do not sets mixed: the
+// build cannot import it the way each separate build would, and its output
+// must not be used.
+func externalNodeModulesPluginDirs(outDirs []string, memo *resolveMemo, mixed *atomic.Bool) api.Plugin {
 	const marker = "krate-external-check"
-	outDir := filepath.Dir(outFile)
+	outDirs = slices.Compact(slices.Sorted(slices.Values(outDirs)))
 	var visible sync.Map // package root -> bool
 	return api.Plugin{
 		Name: "krate-external-node-modules",
@@ -257,10 +272,16 @@ func externalNodeModulesPluginMemo(outFile string, memo *resolveMemo) api.Plugin
 					return api.OnResolveResult{}, nil
 				}
 				if strings.Contains(filepath.ToSlash(r.path), "/node_modules/") {
-					if root := packageRootOf(r.path); root != "" && outFile != "" {
+					if root := packageRootOf(r.path); root != "" && len(outDirs) > 0 {
 						v, ok := visible.Load(root)
 						if !ok {
-							v, _ = visible.LoadOrStore(root, visibleFrom(outDir, root))
+							vis := visibleFrom(outDirs[0], root)
+							for _, d := range outDirs[1:] {
+								if mixed != nil && visibleFrom(d, root) != vis {
+									mixed.Store(true)
+								}
+							}
+							v, _ = visible.LoadOrStore(root, vis)
 						}
 						if !v.(bool) {
 							return api.OnResolveResult{Path: fileURL(r.path), External: true}, nil
@@ -302,15 +323,7 @@ func buildExternalizingNative(opts api.BuildOptions, extra []string) (api.BuildR
 	var res api.BuildResult
 	for attempt := 0; attempt < 5; attempt++ {
 		found := &nativeAddons{}
-		o := opts
-		o.External = append(append([]string(nil), opts.External...), externalPatterns(externals)...)
-		o.Plugins = append(append([]api.Plugin(nil), opts.Plugins...), nativeAddonPlugin(found, func(pkg, file string) string {
-			if pkg == "" {
-				return fmt.Sprintf("%s is a native addon in your own sources and cannot be bundled; load it with createRequire(import.meta.url) from a package listed in serverExternalPackages", file)
-			}
-			return fmt.Sprintf("package %q contains a native addon (%s) and cannot be bundled; add it to serverExternalPackages in krate.config", pkg, filepath.Base(file))
-		}))
-		res = esbuildBuild(o)
+		res = esbuildBuild(externalizingNativeOptions(opts, externals, found))
 		pkgs := found.list()
 		if len(res.Errors) == 0 || len(pkgs) == 0 {
 			return res, detected
@@ -321,6 +334,21 @@ func buildExternalizingNative(opts api.BuildOptions, extra []string) (api.BuildR
 		}
 	}
 	return res, detected
+}
+
+// externalizingNativeOptions are the options of a buildExternalizingNative
+// attempt with externals left external; found collects the native addons the
+// attempt meets.
+func externalizingNativeOptions(opts api.BuildOptions, externals []string, found *nativeAddons) api.BuildOptions {
+	o := opts
+	o.External = append(append([]string(nil), opts.External...), externalPatterns(externals)...)
+	o.Plugins = append(append([]api.Plugin(nil), opts.Plugins...), nativeAddonPlugin(found, func(pkg, file string) string {
+		if pkg == "" {
+			return fmt.Sprintf("%s is a native addon in your own sources and cannot be bundled; load it with createRequire(import.meta.url) from a package listed in serverExternalPackages", file)
+		}
+		return fmt.Sprintf("package %q contains a native addon (%s) and cannot be bundled; add it to serverExternalPackages in krate.config", pkg, filepath.Base(file))
+	}))
+	return o
 }
 
 // externalPackagesFromMetafile lists the packages a bundle still imports at run

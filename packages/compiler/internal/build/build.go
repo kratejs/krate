@@ -5382,6 +5382,10 @@ func (b *Builder) CompileAPIRoutes(routes []string) error {
 	// The routes share their options, so a package import resolves (and is
 	// probed) once for all of them.
 	fam := &apiRouteFamily{}
+	var plans map[string]*apiRoutePlan
+	if len(routes) > 1 {
+		plans = b.planAPIRoutes(routes, apiSrcDir, fam, pool)
+	}
 
 	for _, route := range routes {
 		wg.Add(1)
@@ -5393,7 +5397,7 @@ func (b *Builder) CompileAPIRoutes(routes []string) error {
 			meta, err := func() (m apiRouteMeta, err error) {
 				err = safe.Run(func() error {
 					var e error
-					m, e = b.compileSingleRoute(r, apiSrcDir, fam)
+					m, e = b.compileSingleRoute(r, apiSrcDir, fam, plans[r])
 					return e
 				})
 				return
@@ -5475,8 +5479,12 @@ func (b *Builder) apiRouteOptions() (quickjsOpts, nodeOpts api.BuildOptions) {
 }
 
 // compileSingleRoute builds one route's artifacts. Routes built together
-// share fam (nil for none).
-func (b *Builder) compileSingleRoute(file string, apiSrcDir string, fam *apiRouteFamily) (apiRouteMeta, error) {
+// share fam (nil for none); plan holds what their batched builds settled for
+// the route (nil for nothing).
+func (b *Builder) compileSingleRoute(file string, apiSrcDir string, fam *apiRouteFamily, plan *apiRoutePlan) (apiRouteMeta, error) {
+	if plan == nil {
+		plan = &apiRoutePlan{}
+	}
 	if fam == nil {
 		fam = &apiRouteFamily{}
 	}
@@ -5507,6 +5515,10 @@ func (b *Builder) compileSingleRoute(file string, apiSrcDir string, fam *apiRout
 		if err := os.MkdirAll(filepath.Dir(nodePath), 0755); err != nil {
 			return api.BuildResult{}, err
 		}
+		if out := plan.node; out != nil {
+			plan.node = nil
+			return api.BuildResult{Metafile: out.Metafile}, writeOutputFiles(out.Files)
+		}
 		res := esbuildBuild(nodeOpts)
 		if len(res.Errors) > 0 {
 			return res, fmt.Errorf("esbuild compilation failed:\n%s", formatEsbuildErrors(res.Errors))
@@ -5533,7 +5545,11 @@ func (b *Builder) compileSingleRoute(file string, apiSrcDir string, fam *apiRout
 	// A route that provably keeps an external import is Node-only: it gets
 	// its Node bundle and a QuickJS stub, without bundling its packages for
 	// QuickJS. Otherwise the full QuickJS bundle decides.
-	if !legacyNodeOnlyDetection && provablyNodeOnly(quickjsOpts, b.Cfg.ServerExternalPackages, fam) {
+	proven := plan.nodeOnly
+	if !plan.detected && !legacyNodeOnlyDetection {
+		proven = provablyNodeOnly(quickjsOpts, b.Cfg.ServerExternalPackages, fam)
+	}
+	if proven {
 		meta.NodeOnly = true
 		return meta, b.finishNodeOnlyRoute(file, quickjsPath, meta.File, buildNode)
 	}
@@ -5543,7 +5559,16 @@ func (b *Builder) compileSingleRoute(file string, apiSrcDir string, fam *apiRout
 	}
 	// Packages with native addons (and serverExternalPackages) stay external
 	// here, which marks the route Node-only below.
-	quickjsResult, _ := buildExternalizingNative(quickjsOpts, b.Cfg.ServerExternalPackages)
+	var quickjsResult api.BuildResult
+	if out := plan.quickjs; out != nil {
+		plan.quickjs = nil
+		if err := writeOutputFiles(out.Files); err != nil {
+			return apiRouteMeta{}, err
+		}
+		quickjsResult.Metafile = out.Metafile
+	} else {
+		quickjsResult, _ = buildExternalizingNative(quickjsOpts, b.Cfg.ServerExternalPackages)
+	}
 	if len(quickjsResult.Errors) > 0 {
 		return apiRouteMeta{}, fmt.Errorf("esbuild compilation failed:\n%s", formatEsbuildErrors(quickjsResult.Errors))
 	}

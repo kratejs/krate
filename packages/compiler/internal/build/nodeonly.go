@@ -51,18 +51,46 @@ const probePkgPrefix = "krate-probe-pkg:"
 // finds a native addon in the imported package itself, the full bundle finds
 // it too and leaves the import external.
 func provablyNodeOnly(opts api.BuildOptions, extra []string, fam *apiRouteFamily) bool {
+	res := esbuildBuild(detectionOptions(opts, extra, fam))
+	if len(res.Errors) > 0 {
+		return false
+	}
+	return provenByDetection(res.Metafile, opts, extra, fam)
+}
+
+// provablyNodeOnlyBatch runs the detection builds of provablyNodeOnly for
+// entries, routes that share opts, in one call. A route's kept imports come
+// from its own output, which matches its separate detection build. proven is
+// nil when the batch fails; the caller then runs provablyNodeOnly per route.
+func provablyNodeOnlyBatch(opts api.BuildOptions, extra []string, fam *apiRouteFamily, outdir string, entries []fileBatchEntry) (proven []bool) {
+	outs, _ := esbuildBatchFiles(detectionOptions(opts, extra, fam), outdir, entries)
+	if outs == nil {
+		return nil
+	}
+	proven = make([]bool, len(entries))
+	for i, out := range outs {
+		proven[i] = provenByDetection(out.Metafile, opts, extra, fam)
+	}
+	return proven
+}
+
+// detectionOptions are the options of provablyNodeOnly's build for a route
+// whose QuickJS options are opts.
+func detectionOptions(opts api.BuildOptions, extra []string, fam *apiRouteFamily) api.BuildOptions {
 	o := opts
 	o.Write = false
 	o.Sourcemap = api.SourceMapNone
 	o.Metafile = true
 	o.External = append(append([]string(nil), opts.External...), externalPatterns(extra)...)
 	o.Plugins = append(append([]api.Plugin(nil), opts.Plugins...), packageImportsExternalPlugin(&fam.shallow))
-	res := esbuildBuild(o)
-	if len(res.Errors) > 0 {
-		return false
-	}
+	return o
+}
+
+// provenByDetection decides provablyNodeOnly from the metafile of a route's
+// detection build.
+func provenByDetection(meta string, opts api.BuildOptions, extra []string, fam *apiRouteFamily) bool {
 	var pkgImports []string
-	for _, imp := range outputImports(res.Metafile) {
+	for _, imp := range outputImports(meta) {
 		if !imp.External {
 			continue
 		}
@@ -95,7 +123,9 @@ func (f *apiRouteFamily) probe(entry string, opts api.BuildOptions, extra []stri
 	p.once.Do(func() {
 		o := opts
 		o.EntryPoints = nil
+		o.EntryPointsAdvanced = nil
 		o.Outfile = ""
+		o.Outdir = ""
 		o.Write = false
 		o.Sourcemap = api.SourceMapNone
 		o.Metafile = true
