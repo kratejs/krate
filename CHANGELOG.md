@@ -426,21 +426,25 @@ host code runs in the native process. Names and options may change between relea
   built on it were bundled twice on every page with both kinds of island. Each cycle is now bundled into its own
   chunk that imports the cycle's first module first, the one the islands reach first, so it runs in the islands'
   order; other modules import its members through small re-exporting chunks. `KR8017` no longer reports cycles.
-- `krate build` of a large server-component app is about 3.7x faster: a 98-route Next.js 16 app migrated with
-  `krate migrate nextjs` (470 islands, three.js, workspace packages) builds in about 122 s instead of 455 s on 12
-  cores, with the same HTML, chunks and CSS. Every page re-bundled its async layouts and checked each "use client"
-  module under one build-wide lock, and the server render modules of client components built one at a time; the check
-  builds now run batched with the other pages' while the pages go on, layouts are prepared once per build, API routes
-  build in parallel beside the pages, the resource-hint renders of a batch share one engine run, a shared module is
-  parsed once per build (it was parsed once per worker, and re-hashed on every lookup under the cache lock), and a
-  quadratic pass over clashing export names is linear. The server render modules of client components
-  (`.krate/server-bundles/client/`) are now one code-split build: modules they share are emitted once in
-  `client/chunks/` and loaded once per server process, instead of being copied into every module. An API route is
-  bundled only for the runtime that serves it: the embedded runtime's bundle by default, the Node one alone with
-  `ssr.apiRuntime` `node`, `bun` or `deno`. A route that provably imports something only Node can load (a Node
-  built-in, a native addon, a `serverExternalPackages` entry, also through a package it imports) gets its Node bundle
-  and a small stub for the embedded runtime, without bundling its packages for QuickJS first; each package is checked
-  once per build. Rebuild after changing `apiRuntime`;
+- `krate build` of a large server-component app is about 4.7x faster: a 98-route Next.js 16 app migrated with
+  `krate migrate nextjs` (470 islands, three.js, workspace packages) builds in about 96 s instead of 455 s on 12 cores
+  (`next build`: 99 s), with the same HTML, chunks and CSS. Every page re-bundled its async layouts and checked each
+  "use client" module under one build-wide lock, and the server render modules of client components built one at a
+  time; the check builds now run batched with the other pages' while the pages go on, code-split so the dependencies
+  the checked modules share are printed once, layouts are prepared once per build, API routes build in parallel beside
+  the pages, a shared module is parsed once per build (it was parsed once per worker, and re-hashed on every lookup
+  under the cache lock), and quadratic passes over clashing export names and over the exports of shared island modules
+  are linear. Build-time JavaScript (metadata, `generateStaticParams`, resource-hint renders, island server renders)
+  runs on Node or Bun when one is installed, in a few long-lived workers with a fresh context per evaluation, instead
+  of the embedded engine; `KRATE_BUILD_JS=quickjs` keeps the embedded engine. A layout's static `metadata` is
+  evaluated once per build, and a page whose own metadata is a literal (also through `const` literals it imports) no
+  longer runs its module for it. The server render modules of client components (`.krate/server-bundles/client/`) are
+  now one code-split build: modules they share are emitted once in `client/chunks/` and loaded once per server
+  process, instead of being copied into every module. An API route is bundled only for the runtime that serves it: the
+  embedded runtime's bundle by default, the Node one alone with `ssr.apiRuntime` `node`, `bun` or `deno`. A route that
+  provably imports something only Node can load (a Node built-in, a native addon, a `serverExternalPackages` entry,
+  also through a package it imports) gets its Node bundle and a small stub for the embedded runtime, without bundling
+  its packages for QuickJS first; each package is checked once per build. Rebuild after changing `apiRuntime`;
   `krate serve` warns when the build is for another runtime. `--profile` now breaks the whole build down: build phases
   that add up to the total, each page step summed over pages, work beside the pages and every esbuild call by caller.
 - Client components inside server components no longer ship their server children again inside their props. The
