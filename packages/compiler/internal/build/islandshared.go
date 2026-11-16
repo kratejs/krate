@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/evanw/esbuild/pkg/api"
 	"github.com/kratejs/krate/packages/compiler/ast"
@@ -791,6 +792,7 @@ func (b *Builder) buildIslandFlavours(flavours []*islandFlavour, chunksDir strin
 		opts.Metafile = true
 		opts.Plugins = append([]api.Plugin{states[i].plugin()}, opts.Plugins...)
 		tsstrip.HandleTierDecorators(&opts)
+		withLoadCounter(&opts)
 		ctx, cerr := api.Context(opts)
 		if cerr != nil {
 			f.result = api.BuildResult{Errors: cerr.Errors}
@@ -799,8 +801,8 @@ func (b *Builder) buildIslandFlavours(flavours []*islandFlavour, chunksDir strin
 		ctxs[i] = ctx
 	}
 	metas := make([]*islandMetafile, len(flavours))
+	rebuildAll(flavours, ctxs)
 	for i, f := range flavours {
-		f.result = ctxs[i].Rebuild()
 		if len(f.result.Errors) > 0 {
 			return nil
 		}
@@ -836,8 +838,8 @@ func (b *Builder) buildIslandFlavours(flavours []*islandFlavour, chunksDir strin
 		states[i].exports = exports
 	}
 	rebuild := func() bool {
+		rebuildAll(flavours, ctxs)
 		for i, f := range flavours {
-			f.result = ctxs[i].Rebuild()
 			if len(f.result.Errors) > 0 {
 				return false
 			}
@@ -874,6 +876,20 @@ func (b *Builder) buildIslandFlavours(flavours []*islandFlavour, chunksDir strin
 	}
 	b.warnDuplicatedIslandModules(metas, globals)
 	return nres.OutputFiles
+}
+
+// rebuildAll rebuilds every flavour's context at once: the flavours share no
+// build state, and each context keeps its own parse cache.
+func rebuildAll(flavours []*islandFlavour, ctxs []api.BuildContext) {
+	var wg sync.WaitGroup
+	for i, f := range flavours {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			f.result = ctxs[i].Rebuild()
+		}()
+	}
+	wg.Wait()
 }
 
 const islandNeutralEntryPrefix = "isn_"

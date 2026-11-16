@@ -2,6 +2,7 @@ package build
 
 import (
 	"fmt"
+	"github.com/kratejs/krate/packages/compiler/internal/bundler"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -119,41 +120,15 @@ func (b *Builder) prepareLayoutCut(page string) (*layoutCut, error) {
 	}
 	seen := map[string]bool{}
 	for _, layoutPath := range cut.Layouts {
-		bnd := b.newBundler()
-		bundle, err := bnd.Bundle(layoutPath)
+		part, err := b.layoutCutPartFor(layoutPath)
 		if err != nil {
 			return nil, err
 		}
-		cut.Deps = append(cut.Deps, layoutDepPaths(layoutPath, bundle)...)
-		cut.Actions = cut.Actions || bundleHasActions(bundle)
-		cut.CSS = bundle.CSS + cut.CSS
-		b.modCSS.store(layoutPath, bundle.CSSModules)
-		mod := findEntryModule(bundle.Modules)
-		if mod == nil || mod.Program == nil || !hasDefaultExportStmt(mod.Program) {
-			return nil, diag.Diagnostic{
-				File: layoutPath, Line: 1, Col: 1,
-				Message: "no default export: a layout must default-export a component",
-				Hint:    "add `export default async function Layout({ children }) { return <>{children}</> }`",
-			}
-		}
-		if err := b.ensureTransformedModules(bundle.Modules); err != nil {
-			return nil, err
-		}
-		ann := annotator.Annotate(mod.Program, b.Cfg, layoutPath, mod.SourceCode)
-		extra := moduleSources(bundle, mod)
-		annotator.MergeModuleFunctions(ann, extra)
-		annotator.MergeImportAliases(ann, extra, annotator.ModuleSource{Program: mod.Program, Path: mod.Path, RawSource: mod.SourceCode, Resolver: bundle.Resolver})
-		annotator.ReclassifyTiers(ann, b.Cfg)
-		boundaries, err := b.prepareClientBoundaries(bundle, ann, true)
-		if err != nil {
-			return nil, err
-		}
-		islands := b.detectReactIslandModules(bundle.Modules, bnd.Resolve)
-		pkgs, err := b.serverTreeBoundaries(bundle, islands, bnd.Resolve, true)
-		if err != nil {
-			return nil, err
-		}
-		for _, cb := range append(boundaries, pkgs...) {
+		cut.Deps = append(cut.Deps, part.deps...)
+		cut.Actions = cut.Actions || part.actions
+		cut.CSS = part.css + cut.CSS
+		b.modCSS.store(layoutPath, part.cssModules)
+		for _, cb := range part.boundaries {
 			if !seen[cb.ModuleID] {
 				seen[cb.ModuleID] = true
 				cut.Boundaries = append(cut.Boundaries, cb)
@@ -161,6 +136,121 @@ func (b *Builder) prepareLayoutCut(page string) (*layoutCut, error) {
 		}
 	}
 	return cut, nil
+}
+
+// layoutCutPart is what one request-time layout adds to the layout cut of
+// every page under it.
+type layoutCutPart struct {
+	deps       []string
+	actions    bool
+	css        string
+	cssModules map[string]*bundler.CSSModuleInfo
+	boundaries []ClientBoundary
+}
+
+type layoutCutMemo struct {
+	part *layoutCutPart
+	err  error
+}
+
+// prefetchLayoutCuts starts preparing the part of every async layout above
+// pages, each on a worker slot of its own: every page under a layout needs
+// its part, so the pages would otherwise wait for it one after another.
+func (b *Builder) prefetchLayoutCuts(pages []string, pool *workerPool) {
+	seen := map[string]bool{}
+	for _, page := range pages {
+		if kind, ok := segmentKindOfFile(page); ok && kind == SegmentError {
+			continue
+		}
+		cut, err := b.asyncLayoutCut(page)
+		if err != nil || cut == nil {
+			continue
+		}
+		for _, l := range cut.Layouts {
+			if seen[l] {
+				continue
+			}
+			seen[l] = true
+			go func() {
+				pool.acquire()
+				defer pool.release()
+				defer func() { _ = recover() }() // the page that needs it reports the failure
+				_, _ = b.layoutCutPartFor(l)
+			}()
+		}
+	}
+}
+
+// layoutCutPartFor returns the part of an async layout, computed once per
+// build and shared by the pages under it. The pages waiting for it count as
+// waiting for a round (see buildRounds), so the round the computing page
+// waits on still starts.
+func (b *Builder) layoutCutPartFor(layoutPath string) (*layoutCutPart, error) {
+	j, owner := b.roundJobs.own("layout-cut", layoutPath)
+	if owner {
+		rounds := b.rounds
+		func() {
+			defer rounds.finish(j)
+			part, err := b.layoutCutPart(layoutPath)
+			j.output = &layoutCutMemo{part: part, err: err}
+		}()
+	} else {
+		b.rounds.wait(j)
+	}
+	m, _ := j.output.(*layoutCutMemo)
+	if m == nil {
+		return nil, fmt.Errorf("layout %s could not be prepared", layoutPath)
+	}
+	return m.part, m.err
+}
+
+// layoutCutPart bundles one request-time layout: its CSS, its module graph,
+// and the client boundaries and package boundaries of the components it
+// renders.
+func (b *Builder) layoutCutPart(layoutPath string) (*layoutCutPart, error) {
+	bnd := b.newBundler()
+	bundle, err := bnd.Bundle(layoutPath)
+	if err != nil {
+		return nil, err
+	}
+	part := &layoutCutPart{
+		deps:       layoutDepPaths(layoutPath, bundle),
+		actions:    bundleHasActions(bundle),
+		css:        bundle.CSS,
+		cssModules: bundle.CSSModules,
+	}
+	mod := findEntryModule(bundle.Modules)
+	if mod == nil || mod.Program == nil || !hasDefaultExportStmt(mod.Program) {
+		return nil, diag.Diagnostic{
+			File: layoutPath, Line: 1, Col: 1,
+			Message: "no default export: a layout must default-export a component",
+			Hint:    "add `export default async function Layout({ children }) { return <>{children}</> }`",
+		}
+	}
+	if err := b.ensureTransformedModules(bundle.Modules); err != nil {
+		return nil, err
+	}
+	ann := annotator.Annotate(mod.Program, b.Cfg, layoutPath, mod.SourceCode)
+	extra := moduleSources(bundle, mod)
+	annotator.MergeModuleFunctions(ann, extra)
+	annotator.MergeImportAliases(ann, extra, annotator.ModuleSource{Program: mod.Program, Path: mod.Path, RawSource: mod.SourceCode, Resolver: bundle.Resolver})
+	annotator.ReclassifyTiers(ann, b.Cfg)
+	// The chunk checks stay queued: each page under the layout waits for
+	// them with its own (see awaitBoundaries).
+	boundaries, err := b.prepareClientBoundariesDeferred(bundle, ann, true)
+	if err != nil {
+		return nil, err
+	}
+	islands := b.detectReactIslandModules(bundle.Modules, bnd.Resolve)
+	pkgs, err := b.serverTreeBoundariesDeferred(bundle, islands, bnd.Resolve, true)
+	if err != nil {
+		if aerr := b.awaitBoundaries(boundaries); aerr != nil {
+			return nil, aerr
+		}
+		return nil, err
+	}
+	part.boundaries = append(boundaries, pkgs...)
+	return part, nil
 }
 
 // mergeBoundaries adds the boundaries of the request-time layouts to a page's

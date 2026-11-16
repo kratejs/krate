@@ -288,11 +288,7 @@ func contextKeysPlugin(root string) api.Plugin {
 				if skipContextKeys(args.Path) || !mentionsCreateContext(args.Path) {
 					return api.OnLoadResult{}, nil
 				}
-				data, err := os.ReadFile(args.Path)
-				if err != nil {
-					return api.OnLoadResult{}, nil
-				}
-				out, ok := keyContextCalls(contextSite(root, args.Path), string(data))
+				out, ok := keyedFile(root, args.Path)
 				if !ok {
 					return api.OnLoadResult{}, nil
 				}
@@ -305,6 +301,36 @@ func contextKeysPlugin(root string) api.Plugin {
 type mentionEntry struct {
 	mtimeNS, size int64
 	hit           bool
+}
+
+type keyedEntry struct {
+	mtimeNS, size int64
+	out           string
+	ok            bool
+}
+
+// keyedFiles holds each file's keyed source (keyContextCalls), by root and
+// path, while the file keeps its modification time and size.
+var keyedFiles sync.Map
+
+func keyedFile(root, path string) (string, bool) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", false
+	}
+	key := root + "\x00" + path
+	if v, hit := keyedFiles.Load(key); hit {
+		if e := v.(keyedEntry); e.mtimeNS == info.ModTime().UnixNano() && e.size == info.Size() {
+			return e.out, e.ok
+		}
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", false
+	}
+	out, ok := keyContextCalls(contextSite(root, path), string(data))
+	keyedFiles.Store(key, keyedEntry{mtimeNS: info.ModTime().UnixNano(), size: info.Size(), out: out, ok: ok})
+	return out, ok
 }
 
 var createContextMentions sync.Map // mentionEntry by path

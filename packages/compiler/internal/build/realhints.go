@@ -3,6 +3,7 @@ package build
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -42,9 +43,9 @@ var realHintNames = []string{"preload", "preinit", "preconnect", "prefetchDNS", 
 // that share a real-React component render it once.
 var realHintsCache sync.Map
 
-// realIslandHints returns the resource hints of a static page's real-React
-// island, rendered with its build-time props.
-func (b *Builder) realIslandHints(e irtree.ExternalComponent, imports []irtree.ExternalImport, resolveDir string) []string {
+// realIslandHintsJob returns the job rendering the resource hints of a static
+// page's real-React island with its build-time props.
+func (b *Builder) realIslandHintsJob(e irtree.ExternalComponent, imports []irtree.ExternalImport, resolveDir string) *roundJob {
 	var src strings.Builder
 	writeIslandImportLines(&src, imports)
 	props := "{}"
@@ -52,45 +53,64 @@ func (b *Builder) realIslandHints(e irtree.ExternalComponent, imports []irtree.E
 		props = e.SSRPropsJS
 	}
 	fmt.Fprintf(&src, "\nconst props = %s;\n__krate_hints_render(() => (%s));\n", props, e.Subtree)
-	return b.realHints(src.String(), resolveDir)
+	return b.realHintsJob(src.String(), resolveDir)
 }
 
-// realBoundaryHints returns the resource hints of each export of a real-React
-// client boundary, rendered without props.
-func (b *Builder) realBoundaryHints(cb ClientBoundary) map[string][]string {
-	out := map[string][]string{}
+// realBoundaryHintsJobs returns the hints job of each export of cb.
+func (b *Builder) realBoundaryHintsJobs(cb ClientBoundary) map[string]*roundJob {
+	out := map[string]*roundJob{}
 	for _, name := range cb.Exports {
 		src := cb.entrySource() + "__krate_hints_render(() => { const C = __m[" + strconv.Quote(name) + "]; return typeof C === \"function\" || (C && typeof C === \"object\" && C.$$typeof) ? React.createElement(C, {}) : null; });\n"
-		if tags := b.realHints(src, cb.resolveDir()); len(tags) > 0 {
+		if j := b.realHintsJob(src, cb.resolveDir()); j != nil {
+			out[name] = j
+		}
+	}
+	return out
+}
+
+// realBoundaryHintsOf collects the tags of finished hints jobs by export.
+func realBoundaryHintsOf(jobs map[string]*roundJob) map[string][]string {
+	out := map[string][]string{}
+	for name, j := range jobs {
+		if tags := realHintsOutput(j); len(tags) > 0 {
 			out[name] = tags
 		}
 	}
 	return out
 }
 
-// realHints bundles body (which calls __krate_hints_render with a function
-// returning the element) against the project's React and returns the tags
-// its render recorded. Any failure yields no tags.
-func (b *Builder) realHints(body, resolveDir string) []string {
+// realHintsReq is the input of a real-hints job.
+type realHintsReq struct{ body, resolveDir string }
+
+// realHintsJob returns the build's job rendering the hints of body, or nil
+// when hints are off.
+func (b *Builder) realHintsJob(body, resolveDir string) *roundJob {
 	if os.Getenv("KRATE_NO_REAL_HINTS") != "" {
 		return nil
 	}
-	v, _ := b.realHintsMemo.LoadOrStore(resolveDir+"\x00"+body, &realHintsEntry{})
-	e := v.(*realHintsEntry)
-	e.once.Do(func() { e.tags = b.renderRealHints(body, resolveDir) })
-	return e.tags
+	j := b.roundJobs.job("real-hints", resolveDir+"\x00"+body, realHintsReq{body, resolveDir}, b.runRealHintsJobs)
+	// A render can run long after its bundle (react-dom/server over a whole
+	// three.js scene): start it as soon as a page asks for it.
+	b.rounds.eager(j)
+	return j
 }
 
-type realHintsEntry struct {
-	once sync.Once
-	tags []string
+func realHintsOutput(j *roundJob) []string {
+	if j == nil {
+		return nil
+	}
+	tags, _ := j.output.([]string)
+	return tags
 }
 
-func (b *Builder) renderRealHints(body, resolveDir string) []string {
+// realHintsSetup returns the shared esbuild options of hints renders and the
+// module preamble every render starts with; ok is false when the project
+// lacks what a render needs.
+func (b *Builder) realHintsSetup() (api.BuildOptions, string, bool) {
 	hints := resolver.NodeModule(b.Root, "@krate/runtime/hints")
 	dom := findNodePackage(b.Root, "react-dom")
 	if hints == "" || dom == "" {
-		return nil
+		return api.BuildOptions{}, "", false
 	}
 	server := ""
 	for _, name := range []string{"react-dom-server-legacy.browser.production.js", "react-dom-server-legacy.browser.production.min.js"} {
@@ -100,26 +120,104 @@ func (b *Builder) renderRealHints(body, resolveDir string) []string {
 		}
 	}
 	if server == "" {
-		return nil
+		return api.BuildOptions{}, "", false
 	}
 	sink := &islandCSSSink{root: b.Root}
 	opts, err := b.realReactOptions(sink, b.newUnavailableGuard())
 	if err != nil {
-		return nil
+		return api.BuildOptions{}, "", false
 	}
-	src := "import * as React from \"react\";\nimport { renderToString as __krate_rts } from " + strconv.Quote(filepath.ToSlash(server)) + ";\n" +
+	prelude := "import * as React from \"react\";\nimport { renderToString as __krate_rts } from " + strconv.Quote(filepath.ToSlash(server)) + ";\n" +
 		"function __krate_hints_render(el) {\n  globalThis.__krate_island_hints = new Set();\n  try { __krate_rts(el()); } catch (e) {}\n" +
-		"  globalThis." + realHintsResultGlobal + " = JSON.stringify([...globalThis.__krate_island_hints]);\n}\n" + body
-	opts.Stdin = &api.StdinOptions{Contents: src, ResolveDir: resolveDir, Sourcefile: "krate-real-hints.tsx", Loader: api.LoaderTSX}
+		"  globalThis." + realHintsResultGlobal + " = JSON.stringify([...globalThis.__krate_island_hints]);\n}\n"
 	opts.Format = api.FormatIIFE
 	opts.MinifyWhitespace, opts.MinifyIdentifiers, opts.MinifySyntax = false, false, false
 	opts.Define["process.env.NODE_ENV"] = `"production"`
 	opts.Plugins = append([]api.Plugin{realHintsDOMPlugin(dom, hints), realHintsStubPlugin()}, opts.Plugins...)
-	result := esbuildBuild(opts)
-	if len(result.Errors) > 0 || len(result.OutputFiles) == 0 {
-		return nil
+	return opts, prelude, true
+}
+
+// runRealHintsJobs bundles the hints renders of jobs in one esbuild call and
+// runs each. When that build fails, each render is bundled on its own, so one
+// broken component costs only its own hints.
+func (b *Builder) runRealHintsJobs(jobs []*roundJob) {
+	stop := b.phase("batch:real-hints")
+	defer stop()
+	opts, prelude, ok := b.realHintsSetup()
+	if !ok {
+		return
 	}
-	code := string(result.OutputFiles[0].Contents)
+	// Each render bundles react-dom/server and the component's graph: keep the
+	// outputs one esbuild call holds small.
+	runSubBatches(jobs, realHintsBatchSize, 2, func(part []*roundJob) {
+		o := opts
+		o.Plugins = append([]api.Plugin(nil), opts.Plugins...)
+		o.Define = maps.Clone(opts.Define)
+		b.runRealHintsBatch(o, prelude, part)
+	})
+}
+
+// realHintsBatchSize is the most hints renders one esbuild call bundles.
+const realHintsBatchSize = 16
+
+func (b *Builder) runRealHintsBatch(opts api.BuildOptions, prelude string, jobs []*roundJob) {
+	codes := make([]string, len(jobs))
+	built := false
+	if len(jobs) > 1 {
+		entries := make([]batchEntry, len(jobs))
+		for i, j := range jobs {
+			r := j.input.(realHintsReq)
+			entries[i] = batchEntry{Source: prelude + r.body, ResolveDir: r.resolveDir, Sourcefile: "krate-real-hints.tsx", Loader: api.LoaderTSX}
+		}
+		outs, res := esbuildBatch(opts, entries)
+		if len(res.Errors) == 0 {
+			built = true
+			for i, j := range jobs {
+				if outs[i].Unsafe {
+					codes[i] = b.realHintsCode(opts, prelude, j.input.(realHintsReq))
+				} else if len(outs[i].Files) > 0 {
+					codes[i] = string(outs[i].Files[0].Contents)
+				}
+			}
+		}
+	}
+	if !built {
+		for i, j := range jobs {
+			codes[i] = b.realHintsCode(opts, prelude, j.input.(realHintsReq))
+		}
+	}
+	// Each render finishes on its own: a page waits only for its own renders,
+	// not for the slowest one of the round.
+	sem := make(chan struct{}, buildWorkerLimit())
+	for i, j := range jobs {
+		if codes[i] == "" {
+			continue
+		}
+		j.detach()
+		go func() {
+			defer j.complete()
+			defer func() { _ = recover() }() // a failed render has no hints
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			j.output = realHintsTags(codes[i])
+		}()
+	}
+}
+
+// realHintsCode bundles one hints render on its own ("" when it fails).
+func (b *Builder) realHintsCode(opts api.BuildOptions, prelude string, r realHintsReq) string {
+	o := opts
+	o.Plugins = append([]api.Plugin(nil), opts.Plugins...)
+	o.Stdin = &api.StdinOptions{Contents: prelude + r.body, ResolveDir: r.resolveDir, Sourcefile: "krate-real-hints.tsx", Loader: api.LoaderTSX}
+	result := esbuildBuild(o)
+	if len(result.Errors) == 0 && len(result.OutputFiles) > 0 {
+		return string(result.OutputFiles[0].Contents)
+	}
+	return ""
+}
+
+// realHintsTags runs a bundled hints render, once per distinct bundle.
+func realHintsTags(code string) []string {
 	key := hashContent([]byte(code))
 	if v, ok := realHintsCache.Load(key); ok {
 		return v.([]string)

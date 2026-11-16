@@ -754,6 +754,9 @@ func runBuild(flags cliFlags, args []string) {
 	if flags.CPUProfile != "" {
 		stopCPU = startCPUProfile(flags.CPUProfile)
 	}
+	if !flags.Watch {
+		tuneBuildGC()
+	}
 	buildErr := builder.BuildAll()
 	stopCPU()
 	if flags.MemProfile != "" {

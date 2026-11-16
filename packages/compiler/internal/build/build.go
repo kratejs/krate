@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime/pprof"
 	"sort"
 	"strconv"
 	"strings"
@@ -314,9 +315,13 @@ type Builder struct {
 	shippedWarned sync.Map
 	// gspMemo caches one resolveStaticParamsPage result per page per build.
 	gspMemo sync.Map
-	// realHintsMemo holds the resource hints of each real-React component the
-	// build rendered for them, by hints entry source (see realhints.go).
-	realHintsMemo sync.Map
+	// roundJobs holds the build's batched esbuild jobs, one per kind and key
+	// (see buildRounds); rounds batches them while the pages build.
+	roundJobs roundJobs
+	rounds    *buildRounds
+	// ssrPrebuild builds the server render modules of the boundaries the
+	// pages find, during a full build's page pass.
+	ssrPrebuild *ssrPrebuild
 	// progIconDiags holds the unresolved <Icon> diagnostics of each program.
 	progIconDiags sync.Map
 	// progImageDiags holds the <Image> diagnostics of each transformed program.
@@ -777,11 +782,14 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 	resultsCh := make(chan pageBuildResult, len(pages)+len(concrete))
 	var wg sync.WaitGroup
 	pool := newWorkerPool(buildWorkerLimit())
+	rounds := newBuildRounds(len(pages)+len(concrete), pool)
+	b.rounds = rounds
 
 	for _, page := range pages {
 		wg.Add(1)
 		go func(p string) {
 			defer wg.Done()
+			defer rounds.leave()
 			pool.acquire()
 			defer pool.release()
 			printf("  %s>%s %s\n", cCyan, cReset, p)
@@ -794,6 +802,7 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 		wg.Add(1)
 		go func(s staticParamsPage) {
 			defer wg.Done()
+			defer rounds.leave()
 			pool.acquire()
 			defer pool.release()
 			printf("  %s>%s %s\n", cCyan, cReset, s.OutPath)
@@ -804,6 +813,8 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 
 	go func() {
 		wg.Wait()
+		rounds.close()
+		b.rounds = nil
 		close(resultsCh)
 	}()
 
@@ -940,6 +951,8 @@ func (b *Builder) guardOutDir() error {
 
 func (b *Builder) BuildAll() error {
 	defer b.phase("build:total")()
+	bl := b.Prof.Laps("build:")
+	esbuild0 := esbuildStatsSnapshot()
 	resetCanonicalCache()
 	if err := b.contextErr(); err != nil {
 		return err
@@ -1008,7 +1021,7 @@ func (b *Builder) BuildAll() error {
 	}
 
 	// Run BeforeBuild hooks (docs plugin generates .krategen/ pages here)
-	stopPlugins := b.phase("build:plugins-before")
+	bl.Lap("setup")
 	genPages := make([]plugin.GeneratedPage, 0)
 	beforeBuildCtx := &plugin.BuildHookCtx{
 		Root:           b.Root,
@@ -1050,7 +1063,7 @@ func (b *Builder) BuildAll() error {
 		fmt.Fprintf(os.Stderr, "  %sCommunity plugin error (GenerateRoutes):%s %v\n", cYellow, cReset, err)
 		b.pluginFailed(err)
 	}
-	stopPlugins()
+	bl.Lap("plugins-before")
 
 	if usedEntryFallback && len(genPages) == 0 && len(routes) == 0 {
 		if _, statErr := os.Stat(b.Cfg.Entry); statErr != nil {
@@ -1091,9 +1104,8 @@ func (b *Builder) BuildAll() error {
 	// frontmatter, emits `.krate/types/content.d.ts`, and codegens the
 	// `krate/content` module pages can import. Schema violations are build
 	// errors (a content bug); IO problems are warnings.
-	stopContent := b.phase("build:content")
 	cres := b.prepareContent()
-	stopContent()
+	bl.Lap("content")
 	// Cached module ASTs have their getCollection calls inlined, so a content
 	// change must invalidate the parse cache; source-only changes keep it.
 	ch := b.contentHashOf()
@@ -1123,24 +1135,49 @@ func (b *Builder) BuildAll() error {
 	if err := b.BuildAllGoAPI(); err != nil {
 		return early.finish(err)
 	}
+	bl.Lap("go-api")
 
 	if err := b.contextErr(); err != nil {
 		return err
 	}
+	// JS API routes do not depend on the pages: compile them while the pages
+	// build. Every return below waits for them.
+	jsAPIDone := make(chan error, 1)
+	go pprof.Do(context.Background(), pprof.Labels("phase", "api-routes"), func(context.Context) {
+		defer b.phase("parallel:api-routes")()
+		var err error
+		if perr := safe.Run(func() error { err = b.buildJSAPI(); return nil }); perr != nil {
+			err = perr
+		}
+		jsAPIDone <- err
+	})
 	totalPages := len(pages) + len(routes)
-	stopPages := b.phase("build:pages")
 	resultsCh := make(chan pageBuildResult, totalPages)
 	var wg sync.WaitGroup
 	pool := newWorkerPool(buildWorkerLimit())
+	// Pages batch the esbuild work they share (see buildRounds).
+	rounds := newBuildRounds(totalPages, pool)
+	b.rounds = rounds
+	b.prefetchLayoutCuts(pages, pool)
+	// The server render modules of the client boundaries build in the
+	// background as the pages find the boundaries.
+	impls := newClientSSRImpls(b.importResolver(), nil, b.Root, b.Cfg.OutDir, b.actionModules(), b.Cfg.BaseURLPath())
+	b.ssrPrebuild = impls.startPrebuild(ssrPrebuildWorkers)
 
 	for _, page := range pages {
 		wg.Add(1)
 		go func(p string) {
 			defer wg.Done()
+			defer rounds.leave()
 			pool.acquire()
 			defer pool.release()
 			printf("  %s>%s %s\n", cCyan, cReset, p)
-			result, rawCSS, err := recoverPage(func() (*PageResult, string, error) { return b.buildPage(p) })
+			var result *PageResult
+			var rawCSS string
+			var err error
+			pprof.Do(context.Background(), pprof.Labels("phase", "pages"), func(context.Context) {
+				result, rawCSS, err = recoverPage(func() (*PageResult, string, error) { return b.buildPage(p) })
+			})
 			resultsCh <- pageBuildResult{result, rawCSS, err, p}
 		}(page)
 	}
@@ -1149,6 +1186,7 @@ func (b *Builder) BuildAll() error {
 		wg.Add(1)
 		go func(r plugin.Route) {
 			defer wg.Done()
+			defer rounds.leave()
 			pool.acquire()
 			defer pool.release()
 			printf("  %s>%s %s (route)%s\n", cGreen, cReset, r.Path, cReset)
@@ -1159,6 +1197,8 @@ func (b *Builder) BuildAll() error {
 
 	go func() {
 		wg.Wait()
+		rounds.close()
+		b.rounds = nil
 		close(resultsCh)
 	}()
 
@@ -1210,7 +1250,7 @@ func (b *Builder) BuildAll() error {
 		result.HTML = afterPageCtx.HTML
 		result.HeadHTML = afterPageCtx.HeadHTML
 	}
-	stopPages()
+	bl.Lap("pages")
 
 	staticParamPages, gspErr := b.resolveStaticParamsPages(pages)
 	if gspErr != nil {
@@ -1275,7 +1315,34 @@ func (b *Builder) BuildAll() error {
 		}
 	}
 
-	stopWrite := b.phase("build:write")
+	bl.Lap("static-params")
+	// The server render modules the pages' server bundles need: the ones the
+	// background prebuild has, then the rest, while the island chunks and
+	// HTML are written.
+	impls.boundaries = nil
+	for _, page := range ssrBundlePages(results) {
+		impls.boundaries = append(impls.boundaries, page.ClientBoundaries...)
+	}
+	prebuilt := b.ssrPrebuild
+	b.ssrPrebuild = nil
+	// The page server bundles need only the pages and these modules: they
+	// compile while the island chunks and HTML are written too.
+	var serverBundles map[string]string
+	var serverBundleErrs []error
+	actionMods, basePath := b.actionModules(), b.Cfg.BaseURLPath()
+	implsDone := make(chan struct{})
+	go pprof.Do(context.Background(), pprof.Labels("phase", "server-bundles"), func(context.Context) {
+		defer close(implsDone)
+		func() {
+			defer b.phase("parallel:ssr-modules")()
+			defer func() { _ = recover() }() // a module the prebuild misses builds on its own
+			prebuilt.finish()
+			impls.prebuild(impls.usePrebuilt(prebuilt))
+		}()
+		defer b.phase("parallel:server-bundles")()
+		serverBundles, serverBundleErrs = compileServerBundlesWith(impls, results, b.Root, b.Cfg.OutDir, b.Cfg.Sourcemap, actionMods, basePath)
+	})
+	wl := b.Prof.Laps("write:")
 	// Write shared runtime chunk only if at least one page needs client JS.
 	// Fully static sites (no signals/handlers anywhere) ship zero JavaScript.
 	anyPageHasJS := false
@@ -1300,12 +1367,14 @@ func (b *Builder) BuildAll() error {
 			failOutput(err)
 		}
 	}
+	wl.Lap("runtime")
 
 	// Per-page stylesheets: each page links only the CSS its own module graph
 	// imported (deduplicated across pages sharing identical CSS).
 	if _, err := b.writePageCSS(results); err != nil {
 		failOutput(err)
 	}
+	wl.Lap("page-css")
 
 	// Optional site-global stylesheet (Tailwind) linked on every page.
 	var globalCSS []string
@@ -1318,6 +1387,7 @@ func (b *Builder) BuildAll() error {
 			globalCSS = append(globalCSS, f)
 		}
 	}
+	wl.Lap("global-css")
 
 	// Bundle the island chunks of every page together so modules the pages
 	// share (stores, query clients) are shared files.
@@ -1326,10 +1396,12 @@ func (b *Builder) BuildAll() error {
 		failureMessages = append(failureMessages, "  islands: "+err.Error())
 		failureErrs = append(failureErrs, err)
 	}
+	wl.Lap("islands")
 
 	// In-memory HTML generation + string swap + single disk write per page
 	b.writeHTMLPages(results, globalCSS, runtimeJS)
-	stopWrite()
+	wl.Lap("html")
+	bl.Lap("write")
 
 	// Compiler-enforced quality gates (opt-in via `checks` in krate.config.ts).
 	// Runs against the final HTML so rules see exactly what ships.
@@ -1340,6 +1412,7 @@ func (b *Builder) BuildAll() error {
 			failureErrs = append(failureErrs, err)
 		}
 	}
+	bl.Lap("checks")
 
 	// Compile and emit any registered web workers to /workers/.
 	if err := b.writeWorkerBundles(); err != nil {
@@ -1347,6 +1420,7 @@ func (b *Builder) BuildAll() error {
 		failureMessages = append(failureMessages, "  workers: "+err.Error())
 		failureErrs = append(failureErrs, err)
 	}
+	bl.Lap("workers")
 
 	// Compile and emit any registered dynamic-import chunks to /chunks/.
 	if err := b.writeDynamicChunkBundles(); err != nil {
@@ -1354,6 +1428,7 @@ func (b *Builder) BuildAll() error {
 		failureMessages = append(failureMessages, "  chunks: "+err.Error())
 		failureErrs = append(failureErrs, err)
 	}
+	bl.Lap("dynamic-chunks")
 
 	// publicFiles are the user's own static files; the build did not hash them,
 	// so they must never be cached as immutable.
@@ -1376,8 +1451,9 @@ func (b *Builder) BuildAll() error {
 	if err := b.copyImageCacheToOut(); err != nil {
 		failOutput(fmt.Errorf("copying processed images to %s: %w", filepath.Join(b.Cfg.OutDir, "_krate", "images"), err))
 	}
+	bl.Lap("public")
 
-	stopTools := b.phase("build:tools")
+	tl := b.Prof.Laps("tools:")
 	strays := findPagesStrays(b.Cfg.PagesDir)
 	printWarningsOnce(os.Stderr, b.strayAPIWarnings(strays.apiFiles))
 	for _, err := range b.buildPagesEndpoints(strays.endpoints) {
@@ -1385,17 +1461,25 @@ func (b *Builder) BuildAll() error {
 		failureMessages = append(failureMessages, "  endpoint: "+err.Error())
 		failureErrs = append(failureErrs, err)
 	}
-	if err := b.BuildAllAPI(); err != nil {
+	tl.Lap("endpoints")
+	apiErr := <-jsAPIDone
+	tl.Lap("api-wait")
+	if apiErr == nil {
+		apiErr = b.BuildAllGoAPI()
+	}
+	if err := apiErr; err != nil {
 		fmt.Fprintf(os.Stderr, "  %sAPI Build error:%s %v\n", cRed, cReset, err)
 		failureMessages = append(failureMessages, "  API: "+err.Error())
 		failureErrs = append(failureErrs, err)
 	}
+	tl.Lap("api")
 
 	if err := b.BuildMiddleware(); err != nil {
 		fmt.Fprintf(os.Stderr, "  %sMiddleware error:%s %v\n", cRed, cReset, err)
 		failureMessages = append(failureMessages, "  middleware: "+err.Error())
 		failureErrs = append(failureErrs, err)
 	}
+	tl.Lap("middleware")
 
 	// Write page manifest with SSR/ISR metadata
 	manifestCSS := ""
@@ -1410,9 +1494,11 @@ func (b *Builder) BuildAll() error {
 
 	// revalidatePath("/x") calls whose target page is static cannot refresh it.
 	printWarningsOnce(os.Stderr, staticRevalidateTargetWarnings(filepath.Dir(b.Cfg.PagesDir), b.Root, manifest.Pages))
+	tl.Lap("manifest")
 
 	// Compile server bundles for SSR/ISR/streaming pages
-	serverBundles, serverBundleErrs := compileServerBundles(b.importResolver(), results, b.Root, b.Cfg.OutDir, b.Cfg.Sourcemap, b.actionModules(), b.Cfg.BaseURLPath())
+	<-implsDone
+	tl.Lap("server-bundles-wait")
 	if err := b.writeHighlightTables(serverBundles); err != nil {
 		failOutput(err)
 	}
@@ -1430,6 +1516,7 @@ func (b *Builder) BuildAll() error {
 			fmt.Fprintf(os.Stderr, "  %sWarning: SSR renderer driver not staged - server-renderer source not found under %s (ensure @krate/runtime is installed)%s\n", cYellow, b.Root, cReset)
 		}
 	}
+	tl.Lap("server-bundles")
 
 	// Compile runtime server components (*.runtime.tsx, // @runtime, runtimeDirs)
 	runtimeCompBundles := CompileRuntimeComponents(b.Root, b.Cfg.OutDir, b.Cfg.BaseURLPath(), b.Cfg.ServerComponents, b.Cfg.RuntimeComponents, b.Cfg.RuntimeDirs)
@@ -1437,7 +1524,8 @@ func (b *Builder) BuildAll() error {
 		printf("  %s*%s Compiled %d runtime components\n", cCyan, cReset, len(runtimeCompBundles))
 	}
 	manifest.SetRuntimeComponents(runtimeCompBundles)
-	stopTools()
+	tl.Lap("runtime-components")
+	bl.Lap("tools")
 
 	manifest.HashedAssets = collectHashedAssets(b.Cfg.OutDir, publicFiles)
 	if err := WriteManifest(manifest, b.Cfg.OutDir, serverBundles); err != nil {
@@ -1449,6 +1537,7 @@ func (b *Builder) BuildAll() error {
 	if err := b.writeRouteTypes(results); err != nil {
 		fmt.Fprintf(os.Stderr, "  %sWarning: failed to generate route types:%s %v\n", cYellow, cReset, err)
 	}
+	bl.Lap("manifest")
 
 	// Report SSR/ISR page count
 	ssrCount, isrCount, streamingCount := 0, 0, 0
@@ -1516,10 +1605,12 @@ func (b *Builder) BuildAll() error {
 		}
 	}
 
+	bl.Lap("after-build")
 	if b.diskCache != nil && b.diskCache.enabled && (b.Prof.Enabled() || b.Verbose) {
 		fmt.Fprintf(os.Stderr, "  build cache: %s\n", b.diskCache.string())
 	}
 	if b.Prof.Enabled() {
+		b.Prof.setEsbuild(esbuildStatsSince(esbuild0))
 		b.Prof.Report(os.Stderr)
 	}
 
@@ -2328,8 +2419,33 @@ func (b *Builder) buildErrorPage(page string) (*PageResult, string, error) {
 	return r2, css2, err2
 }
 
+// pendingBoundaries are the boundary groups a page queued check builds for,
+// in the order the page prepared them.
+type pendingBoundaries struct {
+	groups [][]ClientBoundary
+}
+
 func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
+	var pend pendingBoundaries
+	r, css, err := b.buildPageOnceWith(page, &pend)
+	if err != nil {
+		// A queued chunk check that fails happened, in build order, before
+		// anything that failed after it was queued.
+		if berr := b.awaitBoundaries(pend.groups...); berr != nil {
+			return nil, "", berr
+		}
+	}
+	return r, css, err
+}
+
+// buildPageOnceWith builds one page, recording in pend the client boundaries
+// whose chunk checks it queued. The page waits for them only where it needs
+// their results, so the checks of every page run batched (buildRounds) while
+// the pages go on.
+func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*PageResult, string, error) {
 	defer b.phase("page:total")()
+	pl := b.Prof.Laps("page:")
+	defer pl.Lap("output")
 	if err := b.contextErr(); err != nil {
 		return nil, "", err
 	}
@@ -2342,10 +2458,10 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 	if pr, css, ok := b.tryDiskReplay(page); ok {
 		return pr, css, nil
 	}
-	stopBundle := b.phase("page:bundle")
+	pl.Lap("entry")
 	bnd := b.newBundler()
 	bundle, err := bnd.Bundle(entryFile)
-	stopBundle()
+	pl.Lap("bundle")
 	if err != nil {
 		return nil, "", fmt.Errorf("bundling page %s: %w", page, err)
 	}
@@ -2423,10 +2539,15 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 	// The modules an island bundles for Preact are not Krate source from here
 	// on: the lowering, module-state and vendor passes would try to compile
 	// their hooks and initializers. Their files stay in deps above.
+	pl.Lap("react-detect")
 	layoutCut, cutErr := b.prepareLayoutCut(page)
 	if cutErr != nil {
 		return nil, "", cutErr
 	}
+	if layoutCut != nil {
+		pend.groups = append(pend.groups, layoutCut.Boundaries)
+	}
+	pl.Lap("layout-cut")
 	if len(reactIslands) > 0 && !entryIsAsync(entryModule.Program) && (layoutCut == nil || layoutCut.Dropped) {
 		bundle.Modules = krateSideModules(bundle.Modules, entryModule, reactIslands, bnd.Resolve)
 	}
@@ -2449,6 +2570,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 	if err := b.ensureTransformedModules(bundle.Modules); err != nil {
 		return nil, "", err
 	}
+	pl.Lap("transform")
 
 	// Detect rendering mode (SSR/ISR/Streaming) from AST exports + <Suspense>
 	// usage, falling back to the page's data-cache reads (tagged/timed fetch).
@@ -2540,7 +2662,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 	// arbitrary params. Only meaningful for dynamic routes.
 	staticOnly := isDynRoute && !allowDynamic && !isSegment
 
-	stopCompile := b.phase("page:compile")
+	pl.Lap("mode")
 
 	// New pipeline: Annotate -> Build IR -> Emit
 	ann := annotator.Annotate(entryModule.Program, b.Cfg, page, entryModule.SourceCode)
@@ -2576,22 +2698,34 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 		return nil, "", errs[0]
 	}
 	intercept := cachedInterceptForPage(page, b.Cfg.PagesDir)
-	clientBoundaries, cbErr := b.prepareClientBoundaries(bundle, ann, serverPage)
+	pl.Lap("annotate")
+	clientBoundaries, cbErr := b.prepareClientBoundariesDeferred(bundle, ann, serverPage)
 	if cbErr != nil {
 		return nil, "", cbErr
 	}
+	pend.groups = append(pend.groups, clientBoundaries)
+	b.ssrPrebuild.add(clientBoundaries)
+	pl.Lap("client-boundaries")
 	if serverPage || len(serverComponentNames(ann)) > 0 {
-		pkgBoundaries, pbErr := b.serverTreeBoundaries(bundle, reactIslands, bnd.Resolve, serverPage)
+		pkgBoundaries, pbErr := b.serverTreeBoundariesDeferred(bundle, reactIslands, bnd.Resolve, serverPage)
 		if pbErr != nil {
 			return nil, "", pbErr
 		}
-		clientBoundaries = append(clientBoundaries, pkgBoundaries...)
+		pend.groups = append(pend.groups, pkgBoundaries)
+		b.ssrPrebuild.add(pkgBoundaries)
+		if layoutCut != nil {
+			b.ssrPrebuild.add(layoutCut.Boundaries)
+		}
+		clientBoundaries = append(append([]ClientBoundary(nil), clientBoundaries...), pkgBoundaries...)
 		if layoutCut != nil {
 			clientBoundaries = mergeBoundaries(clientBoundaries, layoutCut.Boundaries)
 		}
 		keepClientDynImports(bundle, clientBoundaries, entryModule.Path, serverPage)
 	}
-	pageWarnings = append(pageWarnings, b.releaseEnvWarnings(envPending, bundle, clientBoundaries, serverPage)...)
+	// Environment warnings need the boundaries' checked chunks; they join the
+	// page's warnings here once those are in (finishBoundaries).
+	envAt := len(pageWarnings)
+	pl.Lap("server-boundaries")
 	var (
 		tree       *irtree.ComponentTree
 		emitResult *renderer.EmitResult
@@ -2707,13 +2841,38 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 			regions[i].Revalidate = regionRevalidate(b.Root, regions[i].SourcePath)
 		}
 	}
-	stopCompile()
-	if anyBoundaryHydrates(clientBoundaries) {
-		loader, lerr := b.islandLoaderHTML()
-		if lerr != nil {
-			return nil, "", lerr
+	pl.Lap("ir-emit")
+	// The island loader goes here when a boundary hydrates; whether a package
+	// boundary does is known once its chunk is checked (finishBoundaries).
+	// Until then ScriptHTML only grows at the end, so the offset holds.
+	loaderAt := len(emitResult.ScriptHTML)
+	finished := false
+	// finishBoundaries ends the profile step before it as before, and times
+	// the wait as a step of its own.
+	finishBoundaries := func(before string) error {
+		if finished {
+			return nil
 		}
-		emitResult.ScriptHTML += loader
+		finished = true
+		pl.Lap(before)
+		err := b.awaitBoundaries(pend.groups...)
+		if err == nil {
+			err = b.awaitBoundaries(clientBoundaries)
+		}
+		pl.Lap("await-boundaries")
+		if err != nil {
+			return err
+		}
+		env := b.releaseEnvWarnings(envPending, bundle, clientBoundaries, serverPage)
+		pageWarnings = append(pageWarnings[:envAt:envAt], append(env, pageWarnings[envAt:]...)...)
+		if anyBoundaryHydrates(clientBoundaries) {
+			loader, lerr := b.islandLoaderHTML()
+			if lerr != nil {
+				return lerr
+			}
+			emitResult.ScriptHTML = emitResult.ScriptHTML[:loaderAt] + loader + emitResult.ScriptHTML[loaderAt:]
+		}
+		return nil
 	}
 
 	if len(emitResult.Errors) > 0 {
@@ -2737,6 +2896,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 	emitResult.HTML = renderCtx.HTML
 	emitResult.HeadHTML = renderCtx.HeadHTML
 	bundle.CSS = renderCtx.RawCSS
+	pl.Lap("render-hooks")
 	metaSegs, metaPageFiles := b.metadataSegments(page)
 	{
 		var metaParams map[string]string
@@ -2746,6 +2906,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 		requestTime := renderMode == RenderSSR || renderMode == RenderISR
 		emitResult.HeadHTML += b.pageMetadataHeadFor(page, entryModule.SourceCode, requestTime, metaParams, bnd, metaSegs, metaPageFiles)
 	}
+	pl.Lap("metadata")
 
 	// Run AfterMarkdownParse hooks for markdown pages (plugins can modify the
 	// rendered HTML). Markdown pages flow through the normal bundler/emitter
@@ -2796,6 +2957,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 			return nil, "", layoutErr
 		}
 	}
+	pl.Lap("layouts")
 	// Layouts come first (outermost first) so page CSS wins ties.
 	bundle.CSS = b.dedupeModuleCSS(page, layoutCSS+bundle.CSS, bundle.CSSModules)
 	// Generated CSS signal rules land in the page's own hashed stylesheet, after
@@ -2837,6 +2999,9 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 	// output for the canonical `[param]` result. Concrete pages expanded from
 	// generateStaticParams are built separately and write normally.
 	if staticOnly {
+		if err := finishBoundaries("css"); err != nil {
+			return nil, "", err
+		}
 		b.recordDeps(page, deps)
 		pageCSS := b.pageCSSAfterDCE(renderMode, bundle.CSS, bundle.CSSModules, emitResult.HTML)
 		return &PageResult{
@@ -2893,6 +3058,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 	if len(pageIslands) > 0 {
 		pageProviders = b.pageProviders(page)
 	}
+	pl.Lap("css")
 	islandBoot, islandJS, islandSSR, islandStyles, islandErr := b.buildIslands(
 		page,
 		pageIslands,
@@ -2901,6 +3067,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 		filepath.Dir(entryModule.Path),
 		pageProviders,
 	)
+	pl.Lap("islands")
 	if islandErr != nil {
 		return nil, "", islandErr
 	}
@@ -2923,6 +3090,9 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 	// code itself; only static pages highlight in the browser.
 	browserHighlight := renderMode == RenderSSG && strings.Contains(emitResult.HTML, highlightMarkup)
 	needsHydrate := (len(emitResult.Signatures) > 0 && !requestTimeInert(renderMode, emitResult.Signatures)) || islandJS != "" || islandBoot != "" || strings.Contains(emitResult.HTML, "data-krate-portal") || browserHighlight
+	if err := finishBoundaries("island-html"); err != nil {
+		return nil, "", err
+	}
 	// Client-side JS scanned by CSS DCE for classes applied after hydration.
 	dceJS := append(lazyChunkSources(emitResult.LazyChunks), islandJS)
 	dceJS = append(dceJS, b.clientChunkSources(clientBoundaries)...)
@@ -3029,6 +3199,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 		}
 	}
 
+	pl.Lap("hydration")
 	if err := b.writeAssetFiles(bundle.AssetFiles); err != nil {
 		return nil, "", fmt.Errorf("writing assets for %s: %w", page, err)
 	}
@@ -3038,8 +3209,10 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 	printResult(outName, jsFile, pageBase)
 
 	loadingHTML := b.renderLoadingComponent(page)
+	pl.Lap("loading")
 
 	pageCSS := b.pageCSSAfterDCE(renderMode, bundle.CSS, bundle.CSSModules, emitResult.HTML, dceJS...)
+	pl.Lap("css-dce")
 
 	// Return data structures without triggering an intermediate disk write
 	result := &PageResult{
@@ -3376,7 +3549,12 @@ func (b *Builder) resetBuildCaches() {
 	b.collectionSites = sync.Map{}
 	b.templateCovered = sync.Map{}
 	b.gspMemo = sync.Map{}
-	b.realHintsMemo = sync.Map{}
+	b.roundJobs.reset()
+	// File scans the plugins memoize by modification time and size are
+	// per build too.
+	mentionsCache.Clear()
+	keyedFiles.Clear()
+	tsstrip.ResetBlankedCache()
 	b.paramBindings = sync.Map{}
 	b.shippedWarned = sync.Map{}
 	// Go component parses are per-build.
@@ -5141,6 +5319,16 @@ func (b *Builder) copyImageCacheToOut() error {
 }
 
 func (b *Builder) BuildAllAPI() error {
+	if err := b.buildJSAPI(); err != nil {
+		return err
+	}
+	// Always run Go API build: it no-ops when no .go routes exist and removes
+	// stale artifacts when routes were deleted.
+	return b.BuildAllGoAPI()
+}
+
+// buildJSAPI compiles the JS/TS API routes.
+func (b *Builder) buildJSAPI() error {
 	apiSrcDir := filepath.Join(b.Root, filepath.FromSlash(gohost.DefaultAPIDir))
 	if _, err := os.Stat(apiSrcDir); os.IsNotExist(err) {
 		return nil // No API directory present, skip silently
@@ -5168,14 +5356,7 @@ func (b *Builder) BuildAllAPI() error {
 	b.pruneRuntimeCompatWarnings(jsRoutes)
 
 	if len(jsRoutes) > 0 {
-		if err := b.CompileAPIRoutes(jsRoutes); err != nil {
-			return err
-		}
-	}
-	// Always run Go API build: it no-ops when no .go routes exist and removes
-	// stale artifacts when routes were deleted.
-	if err := b.BuildAllGoAPI(); err != nil {
-		return err
+		return b.CompileAPIRoutes(jsRoutes)
 	}
 	return nil
 }
@@ -5193,6 +5374,9 @@ func (b *Builder) CompileAPIRoutes(routes []string) error {
 
 	var metaMu sync.Mutex
 	metas := make(map[string]apiRouteMeta, len(routes))
+	// The routes share their options, so a package import resolves once for
+	// all of them.
+	memo := &resolveMemo{}
 
 	for _, route := range routes {
 		wg.Add(1)
@@ -5204,7 +5388,7 @@ func (b *Builder) CompileAPIRoutes(routes []string) error {
 			meta, err := func() (m apiRouteMeta, err error) {
 				err = safe.Run(func() error {
 					var e error
-					m, e = b.compileSingleRoute(r, apiSrcDir)
+					m, e = b.compileSingleRoute(r, apiSrcDir, memo)
 					return e
 				})
 				return
@@ -5245,7 +5429,49 @@ type apiRouteMeta struct {
 	MaxDuration int `json:"maxDuration,omitempty"`
 }
 
-func (b *Builder) compileSingleRoute(file string, apiSrcDir string) (apiRouteMeta, error) {
+// apiRouteOptions returns the esbuild options of a route's two artifacts,
+// without entry point or output file.
+func (b *Builder) apiRouteOptions() (quickjsOpts, nodeOpts api.BuildOptions) {
+	// QuickJS artifact: IIFE with a global name so the runtime loads it with a
+	// plain eval and reads exports off `__krate_route` (no runtime regex
+	// export-stripping); deps are bundled so the route is self-contained.
+	quickjsOpts = api.BuildOptions{
+		Bundle:     true,
+		Platform:   api.PlatformNode,
+		Format:     api.FormatIIFE,
+		GlobalName: "__krate_route",
+		Plugins:    []api.Plugin{jseval.MarkerPackagesPlugin()},
+		Write:      true,
+		Sourcemap:  sourceMapMode(b.Cfg.Sourcemap),
+		Metafile:   true,
+	}
+	// Node artifact: ESM with third-party packages external (Node resolves them
+	// from node_modules at runtime, including native addons).
+	nodeOpts = api.BuildOptions{
+		Bundle:    true,
+		Platform:  api.PlatformNode,
+		Format:    api.FormatESModule,
+		Plugins:   []api.Plugin{jseval.MarkerPackagesPlugin()},
+		Write:     true,
+		Sourcemap: sourceMapMode(b.Cfg.Sourcemap),
+		Metafile:  true,
+	}
+	if b.Cfg.ShouldMinifyJS() {
+		quickjsOpts.MinifyWhitespace = true
+		quickjsOpts.MinifyIdentifiers = true
+		quickjsOpts.MinifySyntax = true
+		nodeOpts.MinifyWhitespace = true
+		nodeOpts.MinifyIdentifiers = true
+		nodeOpts.MinifySyntax = true
+	}
+	withAuthConfig(&quickjsOpts, b.Cfg)
+	withAuthConfig(&nodeOpts, b.Cfg)
+	return quickjsOpts, nodeOpts
+}
+
+// compileSingleRoute builds one route's two artifacts. Routes built together
+// share memo (nil for none) for the package resolutions of their options.
+func (b *Builder) compileSingleRoute(file string, apiSrcDir string, memo *resolveMemo) (apiRouteMeta, error) {
 	relPath, err := filepath.Rel(apiSrcDir, file)
 	if err != nil {
 		return apiRouteMeta{}, err
@@ -5263,46 +5489,12 @@ func (b *Builder) compileSingleRoute(file string, apiSrcDir string) (apiRouteMet
 		}
 	}
 
-	// QuickJS artifact: IIFE with a global name so the runtime loads it with a
-	// plain eval and reads exports off `__krate_route` (no runtime regex
-	// export-stripping); deps are bundled so the route is self-contained.
-	quickjsOpts := api.BuildOptions{
-		EntryPoints: []string{file},
-		Bundle:      true,
-		Platform:    api.PlatformNode,
-		Format:      api.FormatIIFE,
-		GlobalName:  "__krate_route",
-		Plugins:     []api.Plugin{jseval.MarkerPackagesPlugin()},
-		Outfile:     quickjsPath,
-		Write:       true,
-		Sourcemap:   sourceMapMode(b.Cfg.Sourcemap),
-		Metafile:    true,
-	}
-	// Node artifact: ESM with third-party packages external (Node resolves them
-	// from node_modules at runtime, including native addons).
-	nodeOpts := api.BuildOptions{
-		EntryPoints: []string{file},
-		Bundle:      true,
-		Platform:    api.PlatformNode,
-		Format:      api.FormatESModule,
-		Plugins:     []api.Plugin{jseval.MarkerPackagesPlugin(), externalNodeModulesPlugin(nodePath)},
-		Outfile:     nodePath,
-		Write:       true,
-		Sourcemap:   sourceMapMode(b.Cfg.Sourcemap),
-		Metafile:    true,
-	}
-
-	if b.Cfg.ShouldMinifyJS() {
-		quickjsOpts.MinifyWhitespace = true
-		quickjsOpts.MinifyIdentifiers = true
-		quickjsOpts.MinifySyntax = true
-		nodeOpts.MinifyWhitespace = true
-		nodeOpts.MinifyIdentifiers = true
-		nodeOpts.MinifySyntax = true
-	}
-
-	withAuthConfig(&quickjsOpts, b.Cfg)
-	withAuthConfig(&nodeOpts, b.Cfg)
+	quickjsOpts, nodeOpts := b.apiRouteOptions()
+	quickjsOpts.EntryPoints = []string{file}
+	quickjsOpts.Outfile = quickjsPath
+	nodeOpts.EntryPoints = []string{file}
+	nodeOpts.Outfile = nodePath
+	nodeOpts.Plugins = append(nodeOpts.Plugins, externalNodeModulesPluginMemo(nodePath, memo))
 	// Packages with native addons (and serverExternalPackages) stay external
 	// here, which marks the route Node-only below.
 	quickjsResult, _ := buildExternalizingNative(quickjsOpts, b.Cfg.ServerExternalPackages)

@@ -201,7 +201,10 @@ func (b *Builder) buildIslands(owner string, exts []irtree.ExternalComponent, im
 	}
 
 	if anyPreactIsland(exts) {
-		if _, err := b.ensurePreactShared(); err != nil {
+		stop := b.phase("islands:preact-runtime")
+		_, err := b.ensurePreactShared()
+		stop()
+		if err != nil {
 			return "", "", nil, nil, diag.Diagnostic{
 				Message: "island runtime could not be built: " + err.Error(),
 				Hint:    "install Preact 10.20 or newer with `pnpm add preact`, then rebuild",
@@ -246,6 +249,20 @@ func (b *Builder) buildIslands(owner string, exts []irtree.ExternalComponent, im
 
 	chunkURL := map[string]string{}
 	var reactGroup, realGroup []irtree.ExternalComponent
+	// The hints renders of every real-React island are built in one batch.
+	hintJobs := map[string]*roundJob{}
+	var hintWait []*roundJob
+	for _, e := range exts {
+		if e.Subtree != "" && e.RealReact {
+			if j := b.realIslandHintsJob(e, islandImportsFor(e.Subtree, allImports), resolveDir); j != nil {
+				hintJobs[e.ID] = j
+				hintWait = append(hintWait, j)
+			}
+		}
+	}
+	stopHints := b.phase("islands:real-hints")
+	b.rounds.wait(hintWait...)
+	stopHints()
 	for _, e := range exts {
 		if e.Subtree == "" {
 			continue
@@ -253,7 +270,7 @@ func (b *Builder) buildIslands(owner string, exts []irtree.ExternalComponent, im
 		if e.RealReact {
 			// Client-rendered on real React; the server emits the fallback.
 			realGroup = append(realGroup, e)
-			fb := realFallbackHTML(e) + realHintsHead(b.realIslandHints(e, islandImportsFor(e.Subtree, allImports), resolveDir))
+			fb := realFallbackHTML(e) + realHintsHead(realHintsOutput(hintJobs[e.ID]))
 			if fb != "" {
 				ssrHTML[e.ID] = fb
 			}
@@ -265,7 +282,10 @@ func (b *Builder) buildIslands(owner string, exts []irtree.ExternalComponent, im
 			reactGroup = append(reactGroup, e)
 		} else {
 			clientSrc := b.islandClientSource(e, used, prov)
-			if _, err := b.buildIslandBundle(clientSrc, resolveDir, false, nil, sink, prov); err != nil {
+			stop := b.phase("islands:client-check")
+			_, err := b.buildIslandBundle(clientSrc, resolveDir, false, nil, sink, prov)
+			stop()
+			if err != nil {
 				return "", "", nil, nil, buildFailure(e, err)
 			}
 			chunkURL[e.ID] = register(clientSrc)
@@ -280,7 +300,9 @@ func (b *Builder) buildIslands(owner string, exts []irtree.ExternalComponent, im
 			continue
 		}
 		ssrSrc := b.islandSSRSource(e, used, prov)
+		stop := b.phase("islands:ssr")
 		html, err := b.buildIslandSSR(ssrSrc, resolveDir, sink, prov)
+		stop()
 		if err != nil {
 			hint := "fix the browser-only dependency or keep the island client-only intentionally"
 			if strings.Contains(strings.ToLower(err.Error()), "provider") {
@@ -295,7 +317,10 @@ func (b *Builder) buildIslands(owner string, exts []irtree.ExternalComponent, im
 	}
 	if len(reactGroup) > 0 {
 		groupSrc := b.islandGroupClientSource(reactGroup, allImports, prov)
-		if _, err := b.buildIslandBundle(groupSrc, resolveDir, false, nil, sink, prov); err != nil {
+		stop := b.phase("islands:client-check")
+		_, err := b.buildIslandBundle(groupSrc, resolveDir, false, nil, sink, prov)
+		stop()
+		if err != nil {
 			return "", "", nil, nil, buildFailure(reactGroup[0], err)
 		}
 		url := register(groupSrc)
@@ -305,7 +330,10 @@ func (b *Builder) buildIslands(owner string, exts []irtree.ExternalComponent, im
 	}
 	if len(realGroup) > 0 {
 		groupSrc := realIslandGroupSource(realGroup, allImports)
-		if err := b.buildRealIslandBundle(groupSrc, resolveDir, sink); err != nil {
+		stop := b.phase("islands:real-check")
+		err := b.buildRealIslandBundle(groupSrc, resolveDir, sink)
+		stop()
+		if err != nil {
 			return "", "", nil, nil, buildFailure(realGroup[0], err)
 		}
 		name := b.islandEntryName(groupSrc, resolveDir)
@@ -321,7 +349,9 @@ func (b *Builder) buildIslands(owner string, exts []irtree.ExternalComponent, im
 		}
 	}
 
+	stopStyles := b.phase("islands:styles")
 	styles, err := b.buildIslandStyles(sink)
+	stopStyles()
 	if err != nil {
 		return "", "", nil, nil, err
 	}
@@ -819,9 +849,30 @@ func mentions(path string, re *regexp.Regexp) bool {
 	if !filepath.IsAbs(path) {
 		return false
 	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	key := mentionKey{path, re}
+	if v, ok := mentionsCache.Load(key); ok {
+		if e := v.(mentionEntry); e.mtimeNS == info.ModTime().UnixNano() && e.size == info.Size() {
+			return e.hit
+		}
+	}
 	src, err := os.ReadFile(path)
-	return err == nil && re.Match(src)
+	hit := err == nil && re.Match(src)
+	mentionsCache.Store(key, mentionEntry{mtimeNS: info.ModTime().UnixNano(), size: info.Size(), hit: hit})
+	return hit
 }
+
+type mentionKey struct {
+	path string
+	re   *regexp.Regexp
+}
+
+// mentionsCache holds mentions results while a file keeps its modification
+// time and size: every bundle of a build asks about the same files.
+var mentionsCache sync.Map
 
 // reactCompatExtraNames are the React 19 APIs preact/compat lacks, plus the
 // ones whose compat versions cannot join an async action.

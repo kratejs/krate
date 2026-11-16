@@ -55,6 +55,17 @@ type ClientBoundary struct {
 	// Hints are the resource hint tags of each export of a real-React
 	// boundary, collected at build time (see realhints.go).
 	Hints map[string][]string
+
+	// pending holds the check builds of a boundary prepared without waiting
+	// for them (see awaitBoundaries); nil once they are applied.
+	pending *boundaryJobs
+}
+
+// boundaryJobs are the unfinished check builds of one boundary.
+type boundaryJobs struct {
+	req   clientChunkReq
+	chunk *roundJob
+	hints map[string]*roundJob
 }
 
 // hydrates reports whether the boundary's components become islands.
@@ -232,6 +243,20 @@ func clientModuleID(root, path string) string {
 // server components and builds the client chunk of every "use client" module
 // in its module graph. It returns nil for pages without server components.
 func (b *Builder) prepareClientBoundaries(bundle *bundler.Bundle, ann *irtree.Annotations, serverPage bool) ([]ClientBoundary, error) {
+	out, err := b.prepareClientBoundariesDeferred(bundle, ann, serverPage)
+	if err != nil {
+		return nil, err
+	}
+	if err := b.awaitBoundaries(out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// prepareClientBoundariesDeferred is prepareClientBoundaries that queues the
+// chunk and hints builds without waiting for them: the boundaries carry them
+// until awaitBoundaries, so the page goes on building while they run.
+func (b *Builder) prepareClientBoundariesDeferred(bundle *bundler.Bundle, ann *irtree.Annotations, serverPage bool) ([]ClientBoundary, error) {
 	roots := serverComponentNames(ann)
 	if serverPage {
 		roots = append([]string{ann.EntryPoint}, roots...)
@@ -297,31 +322,126 @@ func (b *Builder) prepareClientBoundaries(bundle *bundler.Bundle, ann *irtree.An
 		paths = append(paths, p)
 	}
 	sort.Strings(paths)
+	// Every boundary's exports are checked first and its chunk and hints
+	// builds are queued; the first error in path order wins, as if the
+	// boundaries were built one by one.
 	var out []ClientBoundary
+	var reqs []clientChunkReq
+	var reqAt []int
+	var firstErr error
 	target := starTargets(bundle)
 	for _, p := range paths {
 		mod := clientMods[p]
 		exports, err := clientModuleExports(mod, target)
 		if err != nil {
-			return nil, err
+			firstErr = err
+			break
 		}
 		if realMods[p] {
 			cb := ClientBoundary{ModuleID: clientModuleID(b.Root, mod.Path), SourcePath: mod.Path, Exports: exports, Real: true}
 			cb.ChunkURL = b.registerRealBoundary(cb)
-			cb.Hints = b.realBoundaryHints(cb)
+			if jobs := b.realBoundaryHintsJobs(cb); len(jobs) > 0 {
+				cb.pending = &boundaryJobs{hints: jobs}
+			}
 			out = append(out, cb)
 			continue
 		}
 		if err := asyncClientComponentError(mod); err != nil {
+			firstErr = err
+			break
+		}
+		reqs = append(reqs, clientChunkReq{key: mod.Path, resolveDir: filepath.Dir(mod.Path), entry: clientChunkEntry(mod.Path)})
+		reqAt = append(reqAt, len(out))
+		out = append(out, ClientBoundary{ModuleID: clientModuleID(b.Root, mod.Path), SourcePath: mod.Path, Exports: exports})
+	}
+	if err := b.queueClientChunks(out, reqs, reqAt); err != nil {
+		return nil, err
+	}
+	if firstErr != nil {
+		// A chunk before the failing module may fail first.
+		if err := b.awaitBoundaries(out); err != nil {
 			return nil, err
 		}
-		url, err := b.clientChunk(mod.Path)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, ClientBoundary{ModuleID: clientModuleID(b.Root, mod.Path), SourcePath: mod.Path, Exports: exports, ChunkURL: url})
+		return nil, firstErr
 	}
 	return out, nil
+}
+
+// queueClientChunks gives each boundary out[reqAt[i]] the chunk of reqs[i]:
+// its URL now, and the job checking it until awaitBoundaries.
+func (b *Builder) queueClientChunks(out []ClientBoundary, reqs []clientChunkReq, reqAt []int) error {
+	if len(reqs) == 0 {
+		return nil
+	}
+	infos, jobs, err := b.clientChunkJobs(reqs)
+	if err != nil {
+		return err
+	}
+	for i, at := range reqAt {
+		if jobs[i] == nil {
+			out[at].ChunkURL = infos[i].url
+			out[at].Hydrate = out[at].Spec != "" && infos[i].stateful
+			continue
+		}
+		out[at].ChunkURL = b.islandEntryURL(b.islandEntryName(clientChunkSource(reqs[i].entry), reqs[i].resolveDir))
+		out[at].pending = &boundaryJobs{req: reqs[i], chunk: jobs[i]}
+	}
+	return nil
+}
+
+// awaitBoundaries waits for the queued check builds of every boundary in the
+// groups and applies them (a package boundary's Hydrate, a real-React
+// boundary's Hints), in place. It returns the first failing chunk's error in
+// group order.
+func (b *Builder) awaitBoundaries(groups ...[]ClientBoundary) error {
+	var jobs []*roundJob
+	for _, g := range groups {
+		for _, cb := range g {
+			if cb.pending == nil {
+				continue
+			}
+			if cb.pending.chunk != nil {
+				jobs = append(jobs, cb.pending.chunk)
+			}
+			for _, j := range cb.pending.hints {
+				jobs = append(jobs, j)
+			}
+		}
+	}
+	if len(jobs) > 0 {
+		b.rounds.wait(jobs...)
+	}
+	for _, g := range groups {
+		for i := range g {
+			p := g[i].pending
+			if p == nil {
+				continue
+			}
+			if p.chunk != nil {
+				res, _ := p.chunk.output.(*clientChunkResult)
+				if res == nil {
+					// The batch that held it failed outright.
+					res = b.buildClientChunk(p.req)
+				}
+				if res.err != nil {
+					return res.err
+				}
+				if g[i].Spec != "" {
+					g[i].Hydrate = res.info.stateful
+				}
+			}
+			if p.hints != nil {
+				g[i].Hints = realBoundaryHintsOf(p.hints)
+			}
+			g[i].pending = nil
+		}
+	}
+	return nil
+}
+
+// clientChunkEntry is the chunk preamble of a "use client" module.
+func clientChunkEntry(path string) string {
+	return "import * as __m from " + strconv.Quote(path) + ";\n"
 }
 
 // starTargets returns a lookup from an `export *` source, as written in mod,
@@ -746,35 +866,55 @@ func boundaryShims(dotKrate string) (string, error) {
 	return path, nil
 }
 
-// clientChunk builds (once per build) the hydration chunk of a "use client"
-// module and returns its URL. The chunk exports mount(el), called by
-// clientIslandLoaderHTML for each <krate-island> of the module.
-func (b *Builder) clientChunk(path string) (string, error) {
-	url, _, err := b.clientChunkFor(path, filepath.Dir(path), "import * as __m from "+strconv.Quote(path)+";\n")
-	return url, err
+// clientChunkReq names the hydration chunk of one boundary: key identifies it
+// for the build, entry is the module preamble that binds `__m`, the exports
+// components are looked up in by name (dotted for members of a namespace
+// export such as Radix's Dialog.Root).
+type clientChunkReq struct {
+	key, resolveDir, entry string
 }
 
-// clientChunkFor builds the hydration chunk of a boundary. entry is the module
-// preamble that binds `__m`, the exports components are looked up in by name
-// (dotted for members of a namespace export such as Radix's Dialog.Root).
-func (b *Builder) clientChunkFor(key, resolveDir, entry string) (string, bool, error) {
+// clientChunkResult is the outcome of a client chunk's check build.
+type clientChunkResult struct {
+	info clientChunkInfo
+	err  error
+}
+
+// clientChunkJobs returns the chunks of reqs the build already has and a job
+// for each other one (nil where the chunk is known).
+func (b *Builder) clientChunkJobs(reqs []clientChunkReq) ([]clientChunkInfo, []*roundJob, error) {
+	infos := make([]clientChunkInfo, len(reqs))
+	jobs := make([]*roundJob, len(reqs))
+	first := -1
 	b.clientChunkMu.Lock()
-	defer b.clientChunkMu.Unlock()
-	if info, ok := b.clientChunks[key]; ok {
-		return info.url, info.stateful, nil
+	for i, r := range reqs {
+		if info, ok := b.clientChunks[r.key]; ok {
+			infos[i] = info
+			continue
+		}
+		jobs[i] = b.roundJobs.job("client-chunk", r.key, r, b.runClientChunkJobs)
+		b.rounds.enqueue(jobs[i])
+		if first < 0 {
+			first = i
+		}
+	}
+	b.clientChunkMu.Unlock()
+	if first < 0 {
+		return infos, jobs, nil
 	}
 	if _, err := b.ensurePreactShared(); err != nil {
-		return "", false, diag.Diagnostic{
-			File:    key,
+		return nil, nil, diag.Diagnostic{
+			File:    reqs[first].key,
 			Message: "client component runtime could not be built: " + err.Error(),
 			Hint:    "\"use client\" components inside server components hydrate with Preact; install it with `pnpm add preact`, then rebuild",
 		}.WithCode(diag.CodeIslandAsset)
 	}
-	shim, err := boundaryShims(filepath.Join(b.Cfg.OutDir, ".krate"))
-	if err != nil {
-		return "", false, err
-	}
-	src := "import { h, hydrate } from \"preact\";\n" + entry +
+	return infos, jobs, nil
+}
+
+// clientChunkSource is the entry module of a boundary's hydration chunk.
+func clientChunkSource(entry string) string {
+	return "import { h, hydrate } from \"preact\";\n" + entry +
 		clientReviveJS + clientActionCallJS + preactSlotJS + `
 function __resolve(name) {
   return name.split(".").reduce(function (o, k) { return o == null ? o : o[k]; }, __m);
@@ -801,14 +941,15 @@ export async function mount(el) {
   el.setAttribute("data-krate-island-hydrated", "");
 }
 `
-	guard := b.newUnavailableGuard()
+}
+
+// clientChunkOptions are the esbuild options of a client chunk's check build.
+func (b *Builder) clientChunkOptions(guard *unavailableGuard) (api.BuildOptions, error) {
+	shim, err := boundaryShims(filepath.Join(b.Cfg.OutDir, ".krate"))
+	if err != nil {
+		return api.BuildOptions{}, err
+	}
 	opts := api.BuildOptions{
-		Stdin: &api.StdinOptions{
-			Contents:   src,
-			ResolveDir: resolveDir,
-			Sourcefile: "krate-client-boundary.js",
-			Loader:     api.LoaderJS,
-		},
 		AbsWorkingDir:     b.Root,
 		Bundle:            true,
 		Write:             false,
@@ -830,22 +971,111 @@ export async function mount(el) {
 		LogLevel:          api.LogLevelSilent,
 	}
 	if err := withContextKeys(&opts, b.Root, filepath.Join(b.Cfg.OutDir, ".krate")); err != nil {
-		return "", false, err
+		return api.BuildOptions{}, err
+	}
+	return opts, nil
+}
+
+// runClientChunkJobs check-builds the client chunks of jobs in one esbuild
+// call. When that build fails, each chunk is built on its own so the error
+// names the boundary that has it.
+func (b *Builder) runClientChunkJobs(jobs []*roundJob) {
+	stop := b.phase("batch:client-chunks")
+	defer stop()
+	// esbuild holds every entry's linked output until the call returns, so a
+	// batch of hundreds would hold gigabytes: build at most a few dozen per
+	// call. A call resolves imports one at a time (esbuild's resolver takes a
+	// lock), so a few calls run at once.
+	runSubBatches(jobs, clientChunkBatchSize, 3, b.runClientChunkBatch)
+}
+
+// clientChunkBatchSize is the most client chunk checks one esbuild call runs.
+const clientChunkBatchSize = 64
+
+// runSubBatches runs run on consecutive slices of at most size jobs, up to
+// parallel of them at once.
+func runSubBatches(jobs []*roundJob, size, parallel int, run func([]*roundJob)) {
+	sem := make(chan struct{}, parallel)
+	var wg sync.WaitGroup
+	for len(jobs) > 0 {
+		n := min(size, len(jobs))
+		part := jobs[:n]
+		jobs = jobs[n:]
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			run(part)
+		}()
+	}
+	wg.Wait()
+}
+
+func (b *Builder) runClientChunkBatch(jobs []*roundJob) {
+	guard := b.newUnavailableGuard()
+	opts, err := b.clientChunkOptions(guard)
+	if err == nil && len(jobs) > 1 {
+		entries := make([]batchEntry, len(jobs))
+		for i, j := range jobs {
+			r := j.input.(clientChunkReq)
+			entries[i] = batchEntry{Source: clientChunkSource(r.entry), ResolveDir: r.resolveDir, Sourcefile: "krate-client-boundary.js", Loader: api.LoaderJS}
+		}
+		outs, res := esbuildBatch(opts, entries)
+		if len(res.Errors) == 0 {
+			for i, j := range jobs {
+				r := j.input.(clientChunkReq)
+				files := outs[i].Files
+				if outs[i].Unsafe {
+					b.Prof.Add("batch:client-chunks-rebuilt", 0)
+				}
+				if len(files) == 0 || outs[i].Unsafe || len(guard.errors(files)) > 0 {
+					j.output = b.buildClientChunk(r)
+					continue
+				}
+				j.output = b.recordClientChunk(r, entries[i].Source, files[0].Contents, outs[i].Metafile)
+			}
+			return
+		}
+	}
+	for _, j := range jobs {
+		j.output = b.buildClientChunk(j.input.(clientChunkReq))
+	}
+}
+
+// buildClientChunk check-builds one client chunk on its own.
+func (b *Builder) buildClientChunk(r clientChunkReq) *clientChunkResult {
+	src := clientChunkSource(r.entry)
+	guard := b.newUnavailableGuard()
+	opts, err := b.clientChunkOptions(guard)
+	if err != nil {
+		return &clientChunkResult{err: err}
+	}
+	opts.Stdin = &api.StdinOptions{
+		Contents:   src,
+		ResolveDir: r.resolveDir,
+		Sourcefile: "krate-client-boundary.js",
+		Loader:     api.LoaderJS,
 	}
 	withNamespaceImports(&opts)
 	result := esbuildBuild(opts)
 	result.Errors = append(result.Errors, guard.errors(result.OutputFiles)...)
 	if len(result.Errors) > 0 || len(result.OutputFiles) == 0 {
-		return "", false, clientBuildError(b.Root, key, result.Errors)
+		return &clientChunkResult{err: clientBuildError(b.Root, r.key, result.Errors)}
 	}
-	out := result.OutputFiles[0].Contents
+	return b.recordClientChunk(r, src, result.OutputFiles[0].Contents, result.Metafile)
+}
+
+// recordClientChunk registers a checked client chunk with the build.
+func (b *Builder) recordClientChunk(r clientChunkReq, src string, out []byte, metafile string) *clientChunkResult {
 	// This build checks the module and tells whether it holds state. The
 	// chunk the page loads is built with the island entries (writeIslandBundles),
 	// so a library used by a boundary, an island and a layout is one module in
 	// the browser: sonner's toast() reaches the Toaster of another chunk.
-	name := b.islandEntryName(src, resolveDir)
-	b.setIslandEntries("client-boundary\x00"+key, []islandEntry{{Name: name, Source: src, ResolveDir: resolveDir, Boundary: true}})
-	info := clientChunkInfo{url: b.islandEntryURL(name), stateful: statefulHookRe.Match(out), inputs: metafileInputs(b.Root, result.Metafile)}
+	name := b.islandEntryName(src, r.resolveDir)
+	b.setIslandEntries("client-boundary\x00"+r.key, []islandEntry{{Name: name, Source: src, ResolveDir: r.resolveDir, Boundary: true}})
+	info := clientChunkInfo{url: b.islandEntryURL(name), stateful: statefulHookRe.Match(out), inputs: metafileInputs(b.Root, metafile)}
+	b.clientChunkMu.Lock()
 	if b.clientChunkText == nil {
 		b.clientChunkText = map[string]string{}
 	}
@@ -853,8 +1083,9 @@ export async function mount(el) {
 	if b.clientChunks == nil {
 		b.clientChunks = map[string]clientChunkInfo{}
 	}
-	b.clientChunks[key] = info
-	return info.url, info.stateful, nil
+	b.clientChunks[r.key] = info
+	b.clientChunkMu.Unlock()
+	return &clientChunkResult{info: info}
 }
 
 const serverOnlyMarker = "krate: server-only module in client bundle"
@@ -925,24 +1156,213 @@ type clientSSRImpls struct {
 	res      *bundler.ImportResolver
 	basePath string
 	mu       sync.Mutex
-	done     map[string]error
+	done     map[string]*clientSSRImpl
+	// memo shares the resolutions of the prebuilt modules (see prebuild).
+	memo resolveMemo
+	// boundaries are the boundaries of the server bundles the impls are for.
+	boundaries []ClientBoundary
+}
+
+// clientSSRImpl is the build of one module's server render module.
+type clientSSRImpl struct {
+	once sync.Once
+	err  error
 }
 
 func (c *clientSSRImpls) implPath(cb ClientBoundary) string {
 	return filepath.Join(c.bundleDir, "client", cb.ModuleID+".ssr.mjs")
 }
 
-func (c *clientSSRImpls) build(cb ClientBoundary) error {
+// entry returns the build of cb's module, the first boundary of a module
+// standing for it.
+func (c *clientSSRImpls) entry(cb ClientBoundary) *clientSSRImpl {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if err, ok := c.done[cb.SourcePath]; ok {
-		return err
+	if c.done == nil {
+		c.done = map[string]*clientSSRImpl{}
 	}
-	shim, err := boundaryShims(filepath.Dir(c.bundleDir))
+	e, ok := c.done[cb.SourcePath]
+	if !ok {
+		e = &clientSSRImpl{}
+		c.done[cb.SourcePath] = e
+	}
+	return e
+}
+
+func (c *clientSSRImpls) build(cb ClientBoundary) error {
+	e := c.entry(cb)
+	e.once.Do(func() { e.err = c.buildOne(cb) })
+	return e.err
+}
+
+// prebuild builds the server render modules of boundaries, each on its own
+// as before, several at once. A module that fails is left to build when a
+// page bundle needs it, so its error is reported there as before.
+func (c *clientSSRImpls) prebuild(boundaries []ClientBoundary) {
+	var cbs []ClientBoundary
+	seen := map[string]bool{}
+	for _, cb := range boundaries {
+		if cb.Real || seen[cb.SourcePath] {
+			continue
+		}
+		seen[cb.SourcePath] = true
+		cbs = append(cbs, cb)
+	}
+	sem := make(chan struct{}, buildWorkerLimit())
+	var wg sync.WaitGroup
+	for _, cb := range cbs {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			e := c.entry(cb)
+			e.once.Do(func() { e.err = c.buildOne(cb) })
+		}()
+	}
+	wg.Wait()
+}
+
+// ssrPrebuild builds the server render modules of client boundaries in the
+// background while the pages build, as the pages find the boundaries, and
+// keeps them in memory: only the ones a server bundle needs are written
+// (usePrebuilt). Each module is built on its own, as compileServerBundles
+// would.
+type ssrPrebuild struct {
+	impls *clientSSRImpls
+	mu    sync.Mutex
+	more  *sync.Cond
+	queue []ClientBoundary
+	seen  map[string]bool
+	ended bool
+	built map[string][]byte // by SourcePath
+	wg    sync.WaitGroup
+}
+
+// startPrebuild starts building server render modules on workers reused
+// esbuild contexts (see esbuildPool).
+func (c *clientSSRImpls) startPrebuild(workers int) *ssrPrebuild {
+	p := &ssrPrebuild{impls: c, seen: map[string]bool{}, built: map[string][]byte{}}
+	p.more = sync.NewCond(&p.mu)
+	guard := &unavailableGuard{root: c.root, nodeRuntime: true, msgs: map[string]api.Message{}}
+	// The render-to-string module imports only preact, which stays external,
+	// so where it resolves from changes nothing.
+	opts, err := c.options(islandRenderToStringPlugin(c.root), guard)
 	if err != nil {
+		p.ended = true
+		return p
+	}
+	opts.Write = false
+	opts.Outfile = filepath.Join(c.bundleDir, "client", "krate-pool.ssr.mjs")
+	var mu sync.Mutex
+	var cbs []ClientBoundary
+	done := esbuildPoolStream("pool:ssr-modules", opts, "krate-client-ssr.js", workers, func() (poolEntry, int, bool) {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		for len(p.queue) == 0 && !p.ended {
+			p.more.Wait()
+		}
+		if len(p.queue) == 0 {
+			return poolEntry{}, 0, false
+		}
+		cb := p.queue[0]
+		p.queue = p.queue[1:]
+		mu.Lock()
+		cbs = append(cbs, cb)
+		id := len(cbs) - 1
+		mu.Unlock()
+		return poolEntry{Source: clientSSRSource(cb), ResolveDir: cb.resolveDir(), Sourcefile: "krate-client-ssr.js", Loader: api.LoaderJS}, id, true
+	}, func(id int, res api.BuildResult) {
+		if len(res.Errors) > 0 || len(res.OutputFiles) != 1 || len(guard.errors(res.OutputFiles)) > 0 {
+			return
+		}
+		mu.Lock()
+		cb := cbs[id]
+		mu.Unlock()
+		p.mu.Lock()
+		p.built[cb.SourcePath] = res.OutputFiles[0].Contents
+		p.mu.Unlock()
+	})
+	p.wg.Add(1)
+	go func() {
+		<-done
+		p.wg.Done()
+	}()
+	return p
+}
+
+// add queues the boundaries the prebuild has not seen (real-React boundaries
+// have no server render module).
+func (p *ssrPrebuild) add(cbs []ClientBoundary) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.ended {
+		return
+	}
+	for _, cb := range cbs {
+		if cb.Real || p.seen[cb.SourcePath] {
+			continue
+		}
+		p.seen[cb.SourcePath] = true
+		p.queue = append(p.queue, cb)
+	}
+	p.more.Broadcast()
+}
+
+// finish waits for every queued module.
+func (p *ssrPrebuild) finish() {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	p.ended = true
+	p.more.Broadcast()
+	p.mu.Unlock()
+	p.wg.Wait()
+}
+
+// usePrebuilt writes the prebuilt modules of the boundaries the server
+// bundles need and returns the boundaries it had none for.
+func (c *clientSSRImpls) usePrebuilt(p *ssrPrebuild) []ClientBoundary {
+	if p == nil {
+		return c.boundaries
+	}
+	var missing []ClientBoundary
+	seen := map[string]bool{}
+	for _, cb := range c.boundaries {
+		if cb.Real || seen[cb.SourcePath] {
+			continue
+		}
+		seen[cb.SourcePath] = true
+		out, ok := p.built[cb.SourcePath]
+		if !ok || writeBuilt(c.implPath(cb), out) != nil {
+			missing = append(missing, cb)
+			continue
+		}
+		e := c.entry(cb)
+		e.once.Do(func() {})
+	}
+	return missing
+}
+
+// writeBuilt writes a built file, creating its directory.
+func writeBuilt(path string, data []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
 	}
-	src := "import { h } from \"preact\";\nimport renderToString from \"preact-render-to-string\";\n" + cb.entrySource() +
+	return os.WriteFile(path, data, 0644)
+}
+
+// ssrPrebuildWorkers is how many server render modules build at once during
+// the page pass, beside the pages.
+const ssrPrebuildWorkers = 3
+
+// clientSSRSource is the entry module of a boundary's server render module.
+func clientSSRSource(cb ClientBoundary) string {
+	return "import { h } from \"preact\";\nimport renderToString from \"preact-render-to-string\";\n" + cb.entrySource() +
 		clientReviveJS + ssrSlotJS + `
 function __krateServerAction() { throw new Error("a server action passed to a client component cannot be called while the server renders it"); }
 function __krateComp(m, e) {
@@ -962,19 +1382,23 @@ export function __krate_render(C, props, _children, fwd, capture) {
   }
 }
 `
-	plugin := islandRenderToStringPlugin(cb.resolveDir())
-	guard := &unavailableGuard{root: c.root, nodeRuntime: true, msgs: map[string]api.Message{}}
+}
+
+// options are the esbuild options of a server render module; plugin is its
+// render-to-string plugin.
+func (c *clientSSRImpls) options(plugin *api.Plugin, guard *unavailableGuard) (api.BuildOptions, error) {
+	// The modules share their options, so the pure-module plugin shares its
+	// resolutions across them.
+	plugins := []api.Plugin{purePrunePluginMemo(c.root, &c.memo), guard.plugin(), serverCSSPlugin(c.root), *plugin}
+	plugins = append(plugins, clientOnlyMarkersPlugin(false), actionServerBundlePlugin(c.res, c.actions, c.basePath), pathAliasPlugin(c.res), reactDOMHintsPlugin(c.root), reactCompatPlugin(c.root), routerHooksPlugin(c.root), preactRequirePlugin())
+	shim, err := boundaryShims(filepath.Dir(c.bundleDir))
+	if err != nil {
+		return api.BuildOptions{}, err
+	}
 	opts := api.BuildOptions{
-		Stdin: &api.StdinOptions{
-			Contents:   src,
-			ResolveDir: cb.resolveDir(),
-			Sourcefile: "krate-client-ssr.js",
-			Loader:     api.LoaderJS,
-		},
 		AbsWorkingDir:   c.root,
 		Bundle:          true,
 		Write:           true,
-		Outfile:         c.implPath(cb),
 		Format:          api.FormatESModule,
 		Platform:        api.PlatformNode,
 		MainFields:      []string{"module", "main"},
@@ -985,28 +1409,51 @@ export function __krate_render(C, props, _children, fwd, capture) {
 		Alias:           islandAlias(c.root, false),
 		External:        []string{"preact", "preact/compat", "preact/hooks", "preact/jsx-runtime"},
 		Inject:          []string{shim},
-		Plugins:         []api.Plugin{purePrunePlugin(c.root), guard.plugin(), serverCSSPlugin(c.root), *plugin, clientOnlyMarkersPlugin(false), actionServerBundlePlugin(c.res, c.actions, c.basePath), pathAliasPlugin(c.res), reactDOMHintsPlugin(c.root), reactCompatPlugin(c.root), routerHooksPlugin(c.root), preactRequirePlugin()},
+		Plugins:         plugins,
 		LogLevel:        api.LogLevelSilent,
 	}
 	if err := withContextKeys(&opts, c.root, filepath.Dir(c.bundleDir)); err != nil {
-		return err
+		return api.BuildOptions{}, err
 	}
 	withNamespaceImports(&opts)
+	return opts, nil
+}
+
+func (c *clientSSRImpls) buildOne(cb ClientBoundary) error {
+	out, err := c.buildOneOutput(cb)
+	if err != nil {
+		return err
+	}
+	return writeBuilt(c.implPath(cb), out)
+}
+
+// buildOneOutput builds cb's server render module on its own and returns it.
+func (c *clientSSRImpls) buildOneOutput(cb ClientBoundary) ([]byte, error) {
+	plugin := islandRenderToStringPlugin(cb.resolveDir())
+	guard := &unavailableGuard{root: c.root, nodeRuntime: true, msgs: map[string]api.Message{}}
+	opts, err := c.options(plugin, guard)
+	if err != nil {
+		return nil, err
+	}
+	opts.Stdin = &api.StdinOptions{
+		Contents:   clientSSRSource(cb),
+		ResolveDir: cb.resolveDir(),
+		Sourcefile: "krate-client-ssr.js",
+		Loader:     api.LoaderJS,
+	}
+	opts.Outfile = c.implPath(cb)
+	opts.Write = false
 	result := esbuildBuild(opts)
+	if len(result.Errors) == 0 && len(result.OutputFiles) != 1 {
+		result.Errors = append(result.Errors, api.Message{Text: "the server render module has no single output"})
+	}
 	if len(result.Errors) == 0 {
-		// Write is on, so the output is on disk: check it there.
-		if data, rerr := os.ReadFile(c.implPath(cb)); rerr == nil {
-			result.Errors = append(result.Errors, guard.errors([]api.OutputFile{{Contents: data}})...)
-		}
+		result.Errors = append(result.Errors, guard.errors(result.OutputFiles)...)
 	}
 	if len(result.Errors) > 0 {
-		err = clientBuildError(c.root, cb.SourcePath, result.Errors)
+		return nil, clientBuildError(c.root, cb.SourcePath, result.Errors)
 	}
-	if c.done == nil {
-		c.done = map[string]error{}
-	}
-	c.done[cb.SourcePath] = err
-	return err
+	return result.OutputFiles[0].Contents, nil
 }
 
 // clientBoundaryStub is the page-bundle replacement of a "use client" module:

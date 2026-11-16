@@ -699,6 +699,9 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	}
 	pageDeps = append(pageDeps, bundle.CSSDeps...)
 	layoutCut, cutErr := b.prepareLayoutCut(spp.PagePath)
+	if cutErr == nil && layoutCut != nil {
+		cutErr = b.awaitBoundaries(layoutCut.Boundaries)
+	}
 	if cutErr != nil {
 		return nil, "", cutErr
 	}

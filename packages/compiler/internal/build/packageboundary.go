@@ -86,6 +86,9 @@ func (b *Builder) preparePackageBoundaries(mods []*bundler.Module, resolve func(
 	}
 	sort.Strings(names)
 	var out []ClientBoundary
+	var reqs []clientChunkReq
+	var reqAt []int // index into out of each request's boundary
+	var firstErr error
 	for _, name := range names {
 		sp := specs[name]
 		exports := make([]string, 0, len(sp.exports))
@@ -95,7 +98,8 @@ func (b *Builder) preparePackageBoundaries(mods []*bundler.Module, resolve func(
 		if sp.whole {
 			all, err := b.packageExportNames(sp.spec, sp.resolveDir)
 			if err != nil {
-				return nil, err
+				firstErr = err
+				break
 			}
 			seen := map[string]bool{}
 			for _, e := range exports {
@@ -116,14 +120,23 @@ func (b *Builder) preparePackageBoundaries(mods []*bundler.Module, resolve func(
 			out = append(out, cb)
 			continue
 		}
-		url, stateful, err := b.clientChunkFor(id, sp.resolveDir, entry)
-		if err != nil {
+		reqs = append(reqs, clientChunkReq{key: id, resolveDir: sp.resolveDir, entry: entry})
+		reqAt = append(reqAt, len(out))
+		out = append(out, ClientBoundary{
+			ModuleID: id, SourcePath: id, Spec: sp.spec, Exports: exports,
+			Entry: entry, ResolveDir: sp.resolveDir,
+		})
+	}
+	// The chunk checks are queued (see awaitBoundaries); the first error in
+	// name order wins, as if they were built one by one.
+	if err := b.queueClientChunks(out, reqs, reqAt); err != nil {
+		return nil, err
+	}
+	if firstErr != nil {
+		if err := b.awaitBoundaries(out); err != nil {
 			return nil, err
 		}
-		out = append(out, ClientBoundary{
-			ModuleID: id, SourcePath: id, Spec: sp.spec, Exports: exports, ChunkURL: url,
-			Entry: entry, ResolveDir: sp.resolveDir, Hydrate: stateful,
-		})
+		return nil, firstErr
 	}
 	return out, nil
 }
@@ -284,6 +297,19 @@ func (b *Builder) collectPackageComponents(m *bundler.Module, resolve func(impor
 // React-bound modules validated: a library hook outside a "use client" module
 // is KR8013.
 func (b *Builder) serverTreeBoundaries(bundle *bundler.Bundle, islands map[string]*reactIslandModule, resolve func(importer, spec string) string, serverPage bool) ([]ClientBoundary, error) {
+	out, err := b.serverTreeBoundariesDeferred(bundle, islands, resolve, serverPage)
+	if err != nil {
+		return nil, err
+	}
+	if err := b.awaitBoundaries(out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// serverTreeBoundariesDeferred is serverTreeBoundaries that leaves the chunk
+// checks queued (see awaitBoundaries).
+func (b *Builder) serverTreeBoundariesDeferred(bundle *bundler.Bundle, islands map[string]*reactIslandModule, resolve func(importer, spec string) string, serverPage bool) ([]ClientBoundary, error) {
 	if serverPage {
 		if err := serverPageIslandError(islands, bundle.Modules, resolve, "a server-rendered page"); err != nil {
 			return nil, err
