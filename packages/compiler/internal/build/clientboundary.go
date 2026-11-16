@@ -974,6 +974,7 @@ func (b *Builder) clientChunkOptions(guard *unavailableGuard) (api.BuildOptions,
 	if err := withContextKeys(&opts, b.Root, filepath.Join(b.Cfg.OutDir, ".krate")); err != nil {
 		return api.BuildOptions{}, err
 	}
+	withNamespaceImports(&opts)
 	return opts, nil
 }
 
@@ -1058,7 +1059,6 @@ func (b *Builder) buildClientChunk(r clientChunkReq) *clientChunkResult {
 		Sourcefile: "krate-client-boundary.js",
 		Loader:     api.LoaderJS,
 	}
-	withNamespaceImports(&opts)
 	result := esbuildBuild(opts)
 	result.Errors = append(result.Errors, guard.errors(result.OutputFiles)...)
 	if len(result.Errors) > 0 || len(result.OutputFiles) == 0 {
