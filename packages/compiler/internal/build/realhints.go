@@ -123,12 +123,22 @@ func realHintsPrelude(server string, slot int) string {
 	}
 	// An engine error (out of memory, stack overflow) may depend on what the
 	// renders before this one left in the runtime: the render then runs alone.
-	// QuickJS throws InternalError for both; V8 and JSC a RangeError for the
-	// stack.
+	// V8 and JSC throw a RangeError for the stack. QuickJS throws InternalError
+	// for both, and its host installs realHintsEngineErrorQuickJS: the bundle
+	// must not name that global itself, or the worker pool, which lacks it,
+	// would leave every merged run to QuickJS.
 	return head + "  let engine = false;\n" +
-		"  try { __krate_rts(el()); } catch (e) { engine = typeof InternalError !== \"undefined\" && e instanceof InternalError || e instanceof RangeError && /call stack/i.test(e.message); }\n" +
+		"  try { __krate_rts(el()); } catch (e) { engine = (globalThis." + realHintsEngineErrorGlobal + " || " + realHintsEngineErrorJS + ")(e); }\n" +
 		"  (globalThis." + realHintsMergedGlobal + " ||= {})[" + strconv.Itoa(slot) + "] = engine ? null : JSON.stringify([...globalThis.__krate_island_hints]);\n}\n"
 }
+
+// realHintsEngineErrorGlobal names the host's test for an engine error in a
+// merged hints run; realHintsEngineErrorJS is the one V8 and JSC need.
+const (
+	realHintsEngineErrorGlobal  = "__krate_engine_error"
+	realHintsEngineErrorJS      = "function (e) { return e instanceof RangeError && /call stack/i.test(e.message); }"
+	realHintsEngineErrorQuickJS = "globalThis." + realHintsEngineErrorGlobal + " = function (e) { return e instanceof InternalError || e instanceof RangeError && /call stack/i.test(e.message); };"
+)
 
 // realHintsSetup returns the shared esbuild options of hints renders and the
 // module preamble every render starts with; ok is false when the project
@@ -292,6 +302,9 @@ func (b *Builder) runRealHintsMergedCode(code string, n int) (out []*[]string) {
 		return out
 	}
 	defer rt.Close()
+	if _, err := rt.Execute(realHintsEngineErrorQuickJS); err != nil {
+		return out
+	}
 	_, _ = rt.Execute(code)
 	v, err := rt.Execute(realHintsMergedRead)
 	s, ok := v.(string)

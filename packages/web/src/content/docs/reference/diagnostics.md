@@ -494,6 +494,12 @@ The site is served under a base path, but a plain `<a href="/x">` or `<img src="
 
 A relative or package `@import` in a stylesheet could not be resolved, for example `@import './missing.css'` after the file was moved or deleted. Krate cannot inline it, and emitting it as written would make the browser request a URL that 404s, so the build fails with the file, line and column. Fix the path or restore the file. Remote `@import url(https://...)` statements are passed through unchanged, and imports outside the project root keep their separate warning (see `cssImportRoots`). This is an error.
 
+### KR7146
+
+**Build output references a chunk that was not written**
+
+After writing the output, Krate checks that every quoted `/chunks/...` URL in the page HTML, page and island scripts, server bundles and manifests names a file in the `chunks` directory. A missing chunk means the browser gets a 404 for it, so the island or page script that imports it never runs. This points at a bug in Krate, not in the app: the build fails instead of shipping the broken page. Files copied from the public directory are not checked. Report the error with the URLs it lists. This is an error.
+
 ### KR7150
 
 **Unknown code theme**

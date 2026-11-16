@@ -395,7 +395,11 @@ func (b *Builder) registerRealBoundary(cb ClientBoundary) string {
 		cb.entrySource() + clientReviveJS + clientActionCallJS + reactSlotJS + realBoundaryChunkJS
 	dir := cb.resolveDir()
 	name := b.islandEntryName(src, dir)
-	b.setIslandEntries("realboundary:"+cb.ModuleID, []islandEntry{{Name: name, Source: src, ResolveDir: dir, Real: true}})
+	// A package boundary's ModuleID leaves out the importer's directory, so
+	// two pages can register it with different chunk names; each name is
+	// kept, or the page that registered first would point at a chunk that is
+	// never written.
+	b.setIslandEntries("realboundary:"+cb.ModuleID+"\x00"+name, []islandEntry{{Name: name, Source: src, ResolveDir: dir, Real: true}})
 	return b.islandEntryURL(name)
 }
 

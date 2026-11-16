@@ -427,6 +427,15 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- `krate build` no longer writes server bundles that point at island chunks it never wrote. Since the
+  batched chunk checks, pages that used the same icons from a package such as lucide-react from different
+  directories could each record a chunk named after their own directory, while only the first was written:
+  the browser got a 404 and the island (an account menu, sidebar tooltips) never mounted. The build now
+  also checks every quoted `/chunks/` URL in its HTML, scripts, server bundles and manifests and fails with
+  KR7146 when one names a chunk that is missing.
+- Merged resource-hint renders run on the Node or Bun build worker again instead of the embedded engine
+  (their preamble named QuickJS's `InternalError`, which kept them off the worker): about 4 s off a cold
+  build of a 98-route migrated app.
 - A component rendered in a scene (or as a list row) that reads a value from an earlier hook result
   (`const store = useStore(); const get = store.getState;`) threw "Cannot access before initialization": the
   compiler re-declared the pure `const` at the top of the body, above the hook it reads. It now stays where it

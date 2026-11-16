@@ -279,6 +279,60 @@ func TestBuildJSParityHints(t *testing.T) {
 	if b, ok := builds["quickjs"]; ok && !strings.Contains(b.pages["p3/index.html"], "/models/m3.glb") {
 		t.Errorf("p3 lacks its hints:\n%s", b.pages["p3/index.html"])
 	}
+	// The merged runs go to the worker too: none falls back to QuickJS.
+	for e, b := range builds {
+		if e != "quickjs" && b.prof["js:quickjs-real-hints"] > 0 {
+			t.Errorf("%s build ran %d hints renders in QuickJS (profile %v)", e, b.prof["js:quickjs-real-hints"], b.prof)
+		}
+	}
+}
+
+// TestRealHintsMergedEngineError runs merged hints renders, one of which
+// overflows the stack, on each engine: that render alone reports an engine
+// error (and later runs on its own), and the bundle names no global only
+// QuickJS has, which would keep the merged run off the worker.
+func TestRealHintsMergedEngineError(t *testing.T) {
+	prelude := func(slot int) string {
+		p := realHintsPrelude("/react-dom-server.js", slot)
+		var kept []string
+		for _, l := range strings.Split(p, "\n") {
+			if !strings.HasPrefix(l, "import ") {
+				kept = append(kept, l)
+			}
+		}
+		return strings.Join(kept, "\n")
+	}
+	if strings.Contains(prelude(0), "InternalError") {
+		t.Fatalf("the merged hints prelude names InternalError:\n%s", prelude(0))
+	}
+	code := "function __krate_rts(el) { return el; }\n"
+	renders := []string{"() => 1", "function deep() { return deep() + 1; }", "() => 2"}
+	for i, r := range renders {
+		code += "(function () {\n" + prelude(i) + "\n__krate_hints_render(" + r + ");\n})();\n"
+	}
+	for _, e := range buildEngines(t) {
+		t.Run(e, func(t *testing.T) {
+			t.Setenv(jsworker.EnvVar, e)
+			b := New(t.TempDir(), config.Default())
+			b.Prof = NewProfiler(true)
+			defer b.closeJSWorker()
+			tags := b.runRealHintsMergedCode(code, len(renders))
+			for i, want := range []bool{true, false, true} {
+				if got := tags[i] != nil; got != want {
+					t.Errorf("render %d finished = %v, want %v", i, got, want)
+				}
+			}
+			if e == "quickjs" {
+				return
+			}
+			b.Prof.mu.Lock()
+			ran := b.Prof.counts["js:"+e+"-real-hints"]
+			b.Prof.mu.Unlock()
+			if ran == 0 {
+				t.Errorf("the merged run did not run on the %s worker", e)
+			}
+		})
+	}
 }
 
 // TestBuildJSParityIslands covers island server renders.
