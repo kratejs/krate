@@ -58,6 +58,9 @@ func filesFixture(files map[string]string) projectFixture {
 // different directories: chunk content hashes and the project directory.
 var volatileRe = regexp.MustCompile(`\.[0-9a-z]{6,8}\.(js|css)|-[0-9a-z]{6,8}\.mjs|island_[0-9a-f]{12}|isl-[0-9a-z]+`)
 
+// missingRuntimeRe matches the page a missing-runtime warning names.
+var missingRuntimeRe = regexp.MustCompile(`src/pages/[^\s:]+:0:0: the @krate/runtime hydration bundle`)
+
 func buildWithEngine(t *testing.T, fixture projectFixture, engine string, setup func(*Builder)) engineBuild {
 	t.Helper()
 	t.Setenv(jsworker.EnvVar, engine)
@@ -84,10 +87,19 @@ func buildWithEngine(t *testing.T, fixture projectFixture, engine string, setup 
 	}
 	normalize := func(s string) string {
 		// Node prints file URLs, which escape "~" (Windows short names)
-		// and spaces.
-		s = strings.ReplaceAll(s, strings.NewReplacer("~", "%7E", " ", "%20").Replace(filepath.ToSlash(root)), "<root>")
-		s = strings.ReplaceAll(s, filepath.ToSlash(root), "<root>")
-		s = strings.ReplaceAll(s, root, "<root>")
+		// and spaces, of real paths (macOS /var is /private/var).
+		roots := []string{root}
+		if real, err := filepath.EvalSymlinks(root); err == nil && real != root {
+			roots = append([]string{real}, roots...)
+		}
+		for _, r := range roots {
+			s = strings.ReplaceAll(s, strings.NewReplacer("~", "%7E", " ", "%20").Replace(filepath.ToSlash(r)), "<root>")
+			s = strings.ReplaceAll(s, filepath.ToSlash(r), "<root>")
+			s = strings.ReplaceAll(s, r, "<root>")
+		}
+		// A missing runtime build (CI jobs that skip it) is reported once,
+		// against whichever page gets there first.
+		s = missingRuntimeRe.ReplaceAllString(s, "<page>: the @krate/runtime hydration bundle")
 		return volatileRe.ReplaceAllString(s, "#")
 	}
 	out := engineBuild{pages: map[string]string{}, prof: map[string]int{}, profTime: map[string]time.Duration{}}
@@ -287,17 +299,19 @@ func TestBuildJSParityIslands(t *testing.T) {
 // evaluation, and gives another build a runtime that cannot start: both
 // builds finish in QuickJS with the pages a QuickJS build makes.
 func TestBuildJSWorkerFailureFallsBack(t *testing.T) {
-	if _, err := exec.LookPath("node"); err != nil {
+	nodePath, err := exec.LookPath("node")
+	if err != nil {
 		requireE2E(t, "node is not installed")
 	}
 	fixture := filesFixture(metadataParityFiles)
 	base := buildWithEngine(t, fixture, "quickjs", nil)
 	var killed sync.Once
 	crash := buildWithEngine(t, fixture, "node", func(b *Builder) {
-		p := b.jsWorker()
-		if p == nil {
-			t.Fatal("no worker pool")
-		}
+		// One worker, so the evaluation after the kill runs on the killed
+		// process (with more, a worker started later could run the rest).
+		b.js.once = true
+		b.js.pool = jsworker.New("node", nodePath, 1)
+		p := b.js.pool
 		p.Observe = func(string, time.Duration) {
 			killed.Do(func() { killWorkers(p) })
 		}
