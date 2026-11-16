@@ -3075,7 +3075,7 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 	}
 	// Client-side JS scanned by CSS DCE for classes applied after hydration.
 	dceJS := append(lazyChunkSources(emitResult.LazyChunks), islandJS)
-	dceJS = append(dceJS, b.clientChunkSources(clientBoundaries)...)
+	dceJS = append(dceJS, b.clientChunkSources(clientBoundaries, bundle.CSSModules)...)
 	if needsHydrate {
 		emitResult.TrackSources = b.Cfg.Sourcemap
 		rawJS := strings.TrimSpace(renderer.GenerateNewHydrationJS(emitResult))

@@ -381,7 +381,13 @@ func (b *Builder) queueClientChunks(out []ClientBoundary, reqs []clientChunkReq,
 	for i, at := range reqAt {
 		if jobs[i] == nil {
 			out[at].ChunkURL = infos[i].url
-			out[at].Hydrate = out[at].Spec != "" && infos[i].stateful
+			if out[at].Spec != "" {
+				stateful, err := b.chunkStateful(infos[i])
+				if err != nil {
+					return err
+				}
+				out[at].Hydrate = stateful
+			}
 			continue
 		}
 		out[at].ChunkURL = b.islandEntryURL(b.islandEntryName(clientChunkSource(reqs[i].entry), reqs[i].resolveDir))
@@ -428,7 +434,11 @@ func (b *Builder) awaitBoundaries(groups ...[]ClientBoundary) error {
 					return res.err
 				}
 				if g[i].Spec != "" {
-					g[i].Hydrate = res.info.stateful
+					stateful, err := b.chunkStateful(res.info)
+					if err != nil {
+						return err
+					}
+					g[i].Hydrate = stateful
 				}
 			}
 			if p.hints != nil {
@@ -809,6 +819,28 @@ type clientChunkInfo struct {
 	// inputs are the source files that ended up in the chunk (absolute,
 	// cleaned); tree shaking leaves out the rest of the import graph.
 	inputs map[string]bool
+	// split is set for a chunk checked in a code-split batch: stateful,
+	// inputs and the chunk text are then upper bounds of a separate build's.
+	split *splitChunkFacts
+}
+
+// splitChunkFacts are what a code-split check batch knows for certain about
+// one chunk (see esbuildBatchSplit). The entry's own output holds code a
+// separate build keeps; its other files hold that code and maybe code only
+// other boundaries use. A use whose answer depends on the difference asks
+// exactChunk, which checks the chunk on its own once.
+type splitChunkFacts struct {
+	req clientChunkReq
+	// statefulSure is set when stateful is exact: no file matches, or the
+	// entry's own output does.
+	statefulSure bool
+	ownInputs    map[string]bool
+	ownText      string
+
+	once  sync.Once
+	exact clientChunkInfo
+	text  string
+	err   error
 }
 
 var statefulHookRe = regexp.MustCompile(`\buse(State|Reducer|Effect|LayoutEffect|InsertionEffect|SyncExternalStore|ImperativeHandle|Transition|Optimistic|ActionState|DeferredValue)\b|\b(Pure)?Component\b`)
@@ -1023,7 +1055,13 @@ func (b *Builder) runClientChunkBatch(jobs []*roundJob) {
 			r := j.input.(clientChunkReq)
 			entries[i] = batchEntry{Source: clientChunkSource(r.entry), ResolveDir: r.resolveDir, Sourcefile: "krate-client-boundary.js", Loader: api.LoaderJS}
 		}
-		outs, res := esbuildBatch(opts, entries)
+		var outs []batchOutput
+		var res api.BuildResult
+		if clientChunkSplit {
+			outs, res = esbuildBatchSplit(opts, entries)
+		} else {
+			outs, res = esbuildBatch(opts, entries)
+		}
 		if len(res.Errors) == 0 {
 			for i, j := range jobs {
 				r := j.input.(clientChunkReq)
@@ -1035,7 +1073,11 @@ func (b *Builder) runClientChunkBatch(jobs []*roundJob) {
 					j.output = b.buildClientChunk(r)
 					continue
 				}
-				j.output = b.recordClientChunk(r, entries[i].Source, files[0].Contents, outs[i].Metafile)
+				if clientChunkSplit {
+					j.output = b.recordSplitClientChunk(r, entries[i].Source, outs[i])
+					continue
+				}
+				j.output = b.recordClientChunk(r, entries[i].Source, batchJS(files), outs[i].Metafile)
 			}
 			return
 		}
@@ -1043,6 +1085,31 @@ func (b *Builder) runClientChunkBatch(jobs []*roundJob) {
 	for _, j := range jobs {
 		j.output = b.buildClientChunk(j.input.(clientChunkReq))
 	}
+}
+
+// clientChunkSplit turns on code splitting for the batched client chunk
+// checks; tests turn it off to compare.
+var clientChunkSplit = true
+
+// batchJS is the code of an entry of a batched build: its entry output, then
+// the chunks it imports (split builds), newline separated. The checks read
+// only facts the text holds as a whole: hook names, class name strings,
+// unavailable-module markers.
+func batchJS(files []api.OutputFile) []byte {
+	if len(files) == 1 {
+		return files[0].Contents
+	}
+	var out []byte
+	for _, f := range files {
+		if !strings.HasSuffix(f.Path, ".js") {
+			continue
+		}
+		if len(out) > 0 {
+			out = append(out, '\n')
+		}
+		out = append(out, f.Contents...)
+	}
+	return out
 }
 
 // buildClientChunk check-builds one client chunk on its own.
@@ -1067,15 +1134,80 @@ func (b *Builder) buildClientChunk(r clientChunkReq) *clientChunkResult {
 	return b.recordClientChunk(r, src, result.OutputFiles[0].Contents, result.Metafile)
 }
 
+// recordSplitClientChunk registers a chunk checked in a code-split batch,
+// with upper-bound facts (see splitChunkFacts).
+func (b *Builder) recordSplitClientChunk(r clientChunkReq, src string, o batchOutput) *clientChunkResult {
+	own := batchJS(o.Files[:o.Own])
+	out := batchJS(o.Files)
+	f := &splitChunkFacts{req: r, ownInputs: metafileInputs(b.Root, o.OwnMetafile), ownText: string(own)}
+	f.statefulSure = !statefulHookRe.Match(out) || statefulHookRe.Match(own)
+	return b.recordClientChunkFacts(r, src, out, o.Metafile, f)
+}
+
+// exactChunk returns info and the chunk text as a separate build gives them.
+// A chunk of a split batch is checked on its own, as an unsplit batch of
+// one, once.
+func (b *Builder) exactChunk(info clientChunkInfo) (clientChunkInfo, string, error) {
+	f := info.split
+	if f == nil {
+		b.clientChunkMu.Lock()
+		text := b.clientChunkText[info.url]
+		b.clientChunkMu.Unlock()
+		return info, text, nil
+	}
+	f.once.Do(func() {
+		b.Prof.Add("batch:client-chunks-exact", 0)
+		res := b.checkClientChunkAlone(f.req)
+		if res.err != nil {
+			f.err = res.err
+			return
+		}
+		f.exact = res.info
+		b.clientChunkMu.Lock()
+		f.text = b.clientChunkText[res.info.url]
+		b.clientChunkMu.Unlock()
+	})
+	return f.exact, f.text, f.err
+}
+
+// checkClientChunkAlone checks one chunk as an unsplit batch does, falling
+// back to buildClientChunk for its errors.
+func (b *Builder) checkClientChunkAlone(r clientChunkReq) *clientChunkResult {
+	guard := b.newUnavailableGuard()
+	opts, err := b.clientChunkOptions(guard)
+	if err != nil {
+		return &clientChunkResult{err: err}
+	}
+	src := clientChunkSource(r.entry)
+	outs, res := esbuildBatch(opts, []batchEntry{{Source: src, ResolveDir: r.resolveDir, Sourcefile: "krate-client-boundary.js", Loader: api.LoaderJS}})
+	if len(res.Errors) > 0 || len(outs[0].Files) == 0 || len(guard.errors(outs[0].Files)) > 0 {
+		return b.buildClientChunk(r)
+	}
+	return b.recordClientChunk(r, src, batchJS(outs[0].Files), outs[0].Metafile)
+}
+
+// chunkStateful is info.stateful as a separate build gives it.
+func (b *Builder) chunkStateful(info clientChunkInfo) (bool, error) {
+	if info.split == nil || info.split.statefulSure {
+		return info.stateful, nil
+	}
+	exact, _, err := b.exactChunk(info)
+	return exact.stateful, err
+}
+
 // recordClientChunk registers a checked client chunk with the build.
 func (b *Builder) recordClientChunk(r clientChunkReq, src string, out []byte, metafile string) *clientChunkResult {
+	return b.recordClientChunkFacts(r, src, out, metafile, nil)
+}
+
+func (b *Builder) recordClientChunkFacts(r clientChunkReq, src string, out []byte, metafile string, split *splitChunkFacts) *clientChunkResult {
 	// This build checks the module and tells whether it holds state. The
 	// chunk the page loads is built with the island entries (writeIslandBundles),
 	// so a library used by a boundary, an island and a layout is one module in
 	// the browser: sonner's toast() reaches the Toaster of another chunk.
 	name := b.islandEntryName(src, r.resolveDir)
 	b.setIslandEntries("client-boundary\x00"+r.key, []islandEntry{{Name: name, Source: src, ResolveDir: r.resolveDir, Boundary: true}})
-	info := clientChunkInfo{url: b.islandEntryURL(name), stateful: statefulHookRe.Match(out), inputs: metafileInputs(b.Root, metafile)}
+	info := clientChunkInfo{url: b.islandEntryURL(name), stateful: statefulHookRe.Match(out), inputs: metafileInputs(b.Root, metafile), split: split}
 	b.clientChunkMu.Lock()
 	if b.clientChunkText == nil {
 		b.clientChunkText = map[string]string{}

@@ -100,7 +100,7 @@ func (b *Builder) releaseEnvWarnings(held []envPending, bundle *bundler.Bundle, 
 	}
 	var browser map[string]bool
 	if serverTree {
-		browser = b.clientCode(bundle, boundaries)
+		browser = b.clientCode(bundle, boundaries, held)
 	}
 	var mods []*bundler.Module
 	var out []diag.Diagnostic
@@ -117,10 +117,12 @@ func (b *Builder) releaseEnvWarnings(held []envPending, bundle *bundler.Bundle, 
 
 // clientCode returns the modules that go to the browser in a server tree: the
 // files in the chunks of the page's client boundaries. A boundary whose chunk
-// was not measured (real React) counts every module it imports.
-func (b *Builder) clientCode(bundle *bundler.Bundle, boundaries []ClientBoundary) map[string]bool {
+// was not measured (real React) counts every module it imports. The answer is
+// exact for the modules of held.
+func (b *Builder) clientCode(bundle *bundler.Bundle, boundaries []ClientBoundary, held []envPending) map[string]bool {
 	out := map[string]bool{}
 	var unmeasured []ClientBoundary
+	var infos []clientChunkInfo
 	b.clientChunkMu.Lock()
 	for _, cb := range boundaries {
 		if cb.Spec != "" {
@@ -131,11 +133,27 @@ func (b *Builder) clientCode(bundle *bundler.Bundle, boundaries []ClientBoundary
 			unmeasured = append(unmeasured, cb)
 			continue
 		}
+		infos = append(infos, info)
+	}
+	b.clientChunkMu.Unlock()
+	for _, info := range infos {
+		if f := info.split; f != nil {
+			// The split batch's inputs are an upper bound: a held module
+			// only its shared chunks hold needs the chunk's own check.
+			for _, h := range held {
+				p, c := filepath.Clean(h.path), canonicalPath(h.path)
+				if (info.inputs[p] || info.inputs[c]) && !f.ownInputs[p] && !f.ownInputs[c] {
+					if exact, _, err := b.exactChunk(info); err == nil {
+						info = exact
+					}
+					break
+				}
+			}
+		}
 		for p := range info.inputs {
 			out[p] = true
 		}
 	}
-	b.clientChunkMu.Unlock()
 	for p := range clientReachable(bundle, unmeasured) {
 		out[p] = true
 	}
