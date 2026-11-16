@@ -14,13 +14,19 @@ export type * from '@krate/three/engine';
 export type * as ReactThreeFiber from '@krate/three/engine';
 export type * as KrateThree from '@krate/three/engine';
 
-// Hooks
+// Hooks (react-three-fiber names)
 export const useThree = engine.useThree;
 export const useFrame = engine.useFrame;
 export const useLoader = engine.useLoader;
 export const useGraph = engine.useGraph;
 export const useStore = engine.useStore;
 export const useInstanceHandle = engine.useInstanceHandle;
+
+// Krate-style primitives: accessors instead of hook values
+export const createThree = engine.createThree;
+export const createFrame = engine.createFrame;
+export const createLoader = engine.createLoader;
+export const createGraph = engine.createGraph;
 
 // Rendering
 export const extend = engine.extend;

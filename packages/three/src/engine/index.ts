@@ -64,6 +64,8 @@ export type { TrackedPromise } from './promise.js';
 export { isRenderer, createRenderer, releaseRenderer } from './gl.js';
 export { useStore, useThree, useFrame, useGraph, useLoader, useInstanceHandle } from './hooks.js';
 export type { LoaderResult, Extensions } from './hooks.js';
+export { createThree, createFrame, createLoader, createGraph } from './primitives.js';
+export type { Accessor, MaybeAccessor, LoaderAccessor } from './primitives.js';
 export { mountCanvas } from './canvas.js';
 export type { CanvasProps, CanvasElements, ResizeOptions } from './canvas.js';
 

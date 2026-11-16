@@ -252,6 +252,8 @@ func rendererElement(el *ast.JSXElement) *ast.JSXElement {
 		cp := *attr
 		switch {
 		case attr.Spread:
+		case intrinsic && attr.Name == "ref" && isAssignableRef(attr.Value):
+			cp.Value = adaptiveRef(unparen(attr.Value))
 		case intrinsic && attr.Name != "ref" && attr.Name != "key" && !isOnEvent(attr.Name) && isFunctionExpr(attr.Value):
 			cp.Value = thunk(&ast.ParenExpr{Expr: unparen(attr.Value)})
 		default:
@@ -263,6 +265,53 @@ func rendererElement(el *ast.JSXElement) *ast.JSXElement {
 	out.Opening = &opening
 	out.Children = rendererJSXChildren(el.Children)
 	return &out
+}
+
+// isAssignableRef reports a ref written as a variable or member
+// (`ref={mesh}`), which may hold a callback, a {current} object, or be a plain
+// Krate-style variable that receives the object.
+func isAssignableRef(e ast.Expr) bool {
+	switch unparen(e).(type) {
+	case *ast.Identifier, *ast.MemberExpr:
+		return true
+	}
+	return false
+}
+
+// adaptiveRef lowers `ref={x}` for a renderer, which only knows callback and
+// {current} refs: a callback or {current} value passes through, anything else
+// (an unassigned `let x`) becomes a callback that assigns x, as DOM refs do.
+//
+//	((r) => typeof r === "function" || (r !== null && typeof r === "object" && "current" in r) ? r : (v) => { x = v; })(x)
+func adaptiveRef(target ast.Expr) ast.Expr {
+	r := func() ast.Expr { return &ast.Identifier{Name: "__r"} }
+	str := func(v string) ast.Expr { return &ast.Literal{Kind: ast.StringLit, Value: v} }
+	typeOf := func(want string) ast.Expr {
+		return &ast.BinaryExpr{Left: &ast.UnaryExpr{Op: "typeof", Arg: r()}, Op: "===", Right: str(want)}
+	}
+	isObject := &ast.BinaryExpr{
+		Left: &ast.BinaryExpr{
+			Left:  &ast.BinaryExpr{Left: r(), Op: "!==", Right: &ast.Literal{Kind: ast.NullLit, Value: "null"}},
+			Op:    "&&",
+			Right: typeOf("object"),
+		},
+		Op:    "&&",
+		Right: &ast.BinaryExpr{Left: str("current"), Op: "in", Right: r()},
+	}
+	assign := &ast.ArrowFn{
+		Params: []*ast.Param{{Name: "__v"}},
+		Body:   []ast.Stmt{&ast.ExprStmt{Expression: &ast.BinaryExpr{Left: target, Op: "=", Right: &ast.Identifier{Name: "__v"}}}},
+	}
+	pick := &ast.ArrowFn{
+		Params:     []*ast.Param{{Name: "__r"}},
+		Expression: true,
+		Body: []ast.Stmt{&ast.ReturnStmt{Value: &ast.ConditionalExpr{
+			Test:       &ast.BinaryExpr{Left: typeOf("function"), Op: "||", Right: isObject},
+			Consequent: r(),
+			Alternate:  assign,
+		}}},
+	}
+	return &ast.CallExpr{Callee: &ast.ParenExpr{Expr: pick}, Args: []ast.Expr{target}}
 }
 
 // RendererSuspenseTag is the intrinsic tag a <Suspense> boundary in renderer

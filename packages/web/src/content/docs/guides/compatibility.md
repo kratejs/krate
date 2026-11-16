@@ -473,7 +473,7 @@ Evidence: `TestRealReactIsland`, `TestBrowserRealReactIsland`, `TestRealReactCon
 
 **Source:** Supported - **Islands:** n/a - **SSR:** Partial
 
-@krate/three renders three.js scenes from JSX compiled with the page: Canvas (an @renderer component), every three class as an element with args, attach, pierced props and primitives, reactive props that update objects in place, conditionals and keyed lists, pointer events with raycasting, bubbling and capture, useFrame, useThree, useLoader with Suspense, portals, extend, createRoot and the frame loop exports. React-style and Krate-style scenes are checked in Chromium with WebGL by TestBrowserThree; the engine has Vitest coverage in packages/three.
+@krate/three renders three.js scenes from JSX compiled with the page: Canvas (an @renderer component), every three class as an element with args, attach, pierced props and primitives, reactive props that update objects in place, conditionals and keyed lists, pointer events with raycasting, bubbling and capture, useFrame, useThree, useLoader with Suspense, the Krate-style createFrame, createThree, createLoader and createGraph accessors, portals, extend, createRoot and the frame loop exports. React-style and Krate-style (createSignal) scenes are checked in Chromium with WebGL by TestBrowserThree; the engine has Vitest coverage in packages/three.
 
 Known limits:
 

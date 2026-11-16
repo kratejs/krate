@@ -10,8 +10,9 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/config"
 )
 
-// TestBrowserThree builds pages that render @krate/three scenes (a React-style
-// page and a Krate-style page) and drives them in a browser with WebGL: the
+// TestBrowserThree builds pages that render @krate/three scenes (React-style
+// pages, and Krate-style pages with signals and the create* primitives) and
+// drives them in a browser with WebGL: the
 // scene mounts from the compiled children of the @renderer Canvas, renders,
 // raycasts clicks and hovers, and follows state from outside the canvas.
 func TestBrowserThree(t *testing.T) {

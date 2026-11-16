@@ -5,7 +5,11 @@ import {
   advance,
   createPortal,
   createPointerEvents,
+  createFrame,
+  createGraph,
+  createLoader,
   createRoot,
+  createThree,
   extend,
   invalidate,
   useFrame,
@@ -525,5 +529,120 @@ describe('more instance semantics', () => {
     setItems(['y', 'x']);
     await flush();
     expect(names()).toBe('a,p1,p2,cond,row-y,row-x,z');
+  });
+});
+
+describe('Krate-style primitives', () => {
+  class TextLoader extends THREE.Loader<string> {
+    static resolvers: Array<() => void> = [];
+    load(url: string, onLoad: (data: string) => void, _p?: unknown, onError?: (e: unknown) => void): void {
+      TextLoader.resolvers.push(() => (url.includes('bad') ? onError?.({ message: 'nope' }) : onLoad(`text:${url}`)));
+    }
+  }
+
+  it('createThree returns accessors that follow the root state', async () => {
+    let state!: () => RootState;
+    let width!: () => number;
+    function Probe() {
+      state = createThree();
+      width = createThree((s) => s.size.width);
+      return h('group', { name: () => `w${width()}` });
+    }
+    const { store, scene } = await mount(() => [h(Probe, {})]);
+    expect(state().scene).toBe(store.getState().scene);
+    expect(scene.children[0].name).toBe('w100');
+    store.getState().setSize(300, 200);
+    await flush();
+    expect(width()).toBe(300);
+    expect(scene.children[0].name).toBe('w300');
+    expect(() => createThree()).toThrow(/within the Canvas/);
+  });
+
+  it('createFrame subscribes until unmount and returns a stop function', async () => {
+    const calls: string[] = [];
+    let stop!: () => void;
+    function A() {
+      createFrame(() => calls.push('a'));
+      stop = createFrame(() => calls.push('stopped'));
+      return null;
+    }
+    const [show, setShow] = g.createSignal(true);
+    const { store } = await mount(() => [() => show() && h(A, {})]);
+    advance(1, true, store.getState());
+    expect(calls).toEqual(['a', 'stopped']);
+    stop();
+    stop();
+    advance(2, true, store.getState());
+    expect(calls).toEqual(['a', 'stopped', 'a']);
+    setShow(false);
+    await flush();
+    expect(store.getState().internal.subscribers).toHaveLength(0);
+  });
+
+  it('createFrame follows an accessor priority', async () => {
+    const [priority, setPriority] = g.createSignal(0);
+    function A() {
+      createFrame(() => {}, priority);
+      return null;
+    }
+    const { store } = await mount(() => [h(A, {})]);
+    expect(store.getState().internal.priority).toBe(0);
+    setPriority(1);
+    g.krateFlushSync();
+    expect(store.getState().internal.subscribers).toHaveLength(1);
+    expect(store.getState().internal.priority).toBe(1);
+    setPriority(0);
+    g.krateFlushSync();
+    expect(store.getState().internal.priority).toBe(0);
+  });
+
+  it('createLoader suspends readers, reports progress and follows its input', async () => {
+    const [url, setUrl] = g.createSignal('/one');
+    let model!: ReturnType<typeof createLoader<string, typeof TextLoader>>;
+    function Model() {
+      model = createLoader(TextLoader, url);
+      return h('group', { name: () => model() });
+    }
+    const { scene } = await mount(() => [h(Model, {})]);
+    expect(scene.children).toHaveLength(0);
+    expect(model.loading).toBe(true);
+    expect(model.state).toBe('loading');
+    expect(model.latest).toBeUndefined();
+    TextLoader.resolvers.splice(0).forEach((r) => r());
+    await flush();
+    expect(model.state).toBe('ready');
+    expect(model.latest).toBe('text:/one');
+    expect(scene.children.map((c) => c.name)).toEqual(['text:/one']);
+    setUrl('/two');
+    await flush();
+    expect(model.loading).toBe(true);
+    TextLoader.resolvers.splice(0).forEach((r) => r());
+    await flush();
+    expect(scene.children.map((c) => c.name)).toEqual(['text:/two']);
+    setUrl('/bad');
+    await flush();
+    TextLoader.resolvers.splice(0).forEach((r) => r());
+    await flush();
+    expect(model.state).toBe('error');
+    expect(String(model.error)).toMatch(/Could not load \/bad: nope/);
+    createLoader.clear(TextLoader, '/bad');
+  });
+
+  it('createGraph maps an object tree and follows an accessor', async () => {
+    const a = new THREE.Group();
+    a.add(Object.assign(new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshBasicMaterial({ name: 'red' })), { name: 'box' }));
+    const b = new THREE.Group();
+    b.add(Object.assign(new THREE.Object3D(), { name: 'empty' }));
+    const [object, setObject] = g.createSignal<THREE.Object3D>(a);
+    let graph!: () => { nodes: Record<string, unknown>; materials: Record<string, unknown> };
+    function Probe() {
+      graph = createGraph(object);
+      return null;
+    }
+    await mount(() => [h(Probe, {})]);
+    expect(Object.keys(graph().nodes)).toEqual(['box']);
+    expect(Object.keys(graph().materials)).toEqual(['red']);
+    setObject(b);
+    expect(Object.keys(graph().nodes)).toEqual(['empty']);
   });
 });

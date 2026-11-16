@@ -69,8 +69,8 @@ export function useInstanceHandle<T>(ref: { current: T | null }): { readonly cur
 
 // Loading
 
-type InputLike = string | string[] | string[][] | Readonly<string | string[] | string[][]>;
-type LoaderLike = THREE.Loader<any, InputLike>;
+export type InputLike = string | string[] | string[][] | Readonly<string | string[] | string[][]>;
+export type LoaderLike = THREE.Loader<any, InputLike>;
 type GLTFLike = { scene: THREE.Object3D };
 type LoaderInstance<T extends LoaderLike | ConstructorRepresentation<LoaderLike>> =
   T extends ConstructorRepresentation<LoaderLike> ? InstanceType<T> : T;
@@ -119,7 +119,7 @@ function loadingFn(extensions?: (loader: any) => void, onProgress?: (event: Prog
   };
 }
 
-interface CacheEntry {
+export interface CacheEntry {
   keys: unknown[];
   promise: Promise<unknown>;
   value?: unknown;
@@ -128,6 +128,19 @@ interface CacheEntry {
 }
 
 const cache: CacheEntry[] = [];
+const settledListeners = new Set<(entry: CacheEntry) => void>();
+
+/** Calls `fn` with each cache entry whose load settles. Returns the unsubscribe function. */
+export function onLoadSettled(fn: (entry: CacheEntry) => void): () => void {
+  settledListeners.add(fn);
+  return () => {
+    settledListeners.delete(fn);
+  };
+}
+
+const notifySettled = (entry: CacheEntry): void => {
+  for (const fn of [...settledListeners]) fn(entry);
+};
 
 function findEntry(keys: unknown[]): CacheEntry | undefined {
   return cache.find((entry) => is.equ(keys, entry.keys));
@@ -144,10 +157,12 @@ function suspend<T>(fn: (...keys: any[]) => Promise<T>, keys: unknown[], preload
         (value) => {
           created.status = 'fulfilled';
           created.value = value;
+          notifySettled(created);
         },
         (error) => {
           created.status = 'rejected';
           created.error = error;
+          notifySettled(created);
         },
       ),
     };
@@ -158,6 +173,21 @@ function suspend<T>(fn: (...keys: any[]) => Promise<T>, keys: unknown[], preload
   if (entry.status === 'fulfilled') return entry.value as T;
   if (entry.status === 'rejected') throw entry.error;
   throw entry.promise;
+}
+
+/**
+ * Starts (or finds) the cached load of `input` and returns its cache entry
+ * without suspending.
+ */
+export function loadEntry(
+  loader: unknown,
+  input: InputLike,
+  extensions?: (loader: any) => void,
+  onProgress?: (event: ProgressEvent<EventTarget>) => void,
+): CacheEntry {
+  const keys = [loader, ...(Array.isArray(input) ? input : [input])];
+  suspend(loadingFn(extensions, onProgress), keys, true);
+  return findEntry(keys)!;
 }
 
 /**

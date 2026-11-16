@@ -42,7 +42,10 @@ async function run(name, url, fn) {
     if (out !== true) failures.push(`${name}: ${out}`);
     if (errors.length) failures.push(`${name}: page errors: ${errors.join(" | ")}`);
   } catch (e) {
-    failures.push(`${name}: ${String(e).slice(0, 400)} (page errors: ${errors.join(" | ") || "none"})`);
+    const scene = await page
+      .evaluate(() => window.__three?.scene?.children.map((c) => c.name).join() ?? "no scene")
+      .catch(() => "unavailable");
+    failures.push(`${name}: ${String(e).slice(0, 400)} (scene: ${scene}; page errors: ${errors.join(" | ") || "none"})`);
   }
   await page.close();
 }
@@ -108,6 +111,37 @@ try {
     await until(p, () => window.__three.scene.getObjectByName("mover").position.x === 1);
     const spinner = await p.evaluate(() => window.__three.scene.getObjectByName("spinner").geometry.type);
     if (spinner !== "TorusGeometry") return `spinner geometry ${spinner}`;
+    return true;
+  });
+  await run("krate signals and create primitives", "/signals/", async (p) => {
+    await until(p, () => !!window.__three.scene.getObjectByName("k-loaded:loaded-text"));
+    if (await p.evaluate(() => !!window.__three.scene.getObjectByName("k-loading"))) return "Suspense fallback still mounted";
+    if (!(await p.evaluate(() => !!window.__three.scene.getObjectByName("k-graph:body+wheel")))) return "createGraph nodes missing";
+    // createThree: the spinner scales with the canvas width (300px).
+    const scale = await p.evaluate(() => window.__three.scene.getObjectByName("k-spinner").scale.x);
+    if (scale !== 1) return `createThree width scale ${scale}`;
+    // createFrame runs every frame, and a signal it writes updates the material.
+    await until(p, () => window.__spins > 3);
+    await until(p, () => window.__three.scene.getObjectByName("k-spinner").material.color.getHexString() === "ffa500");
+    // Signals from outside the canvas drive a prop, a conditional and a list.
+    await p.click("#k-move");
+    await until(p, () => window.__three.scene.getObjectByName("k-mover").position.x === 1);
+    await p.click("#k-toggle");
+    await until(p, () => !window.__three.scene.getObjectByName("k-extra"));
+    await p.click("#k-add");
+    await until(p, () => !!window.__three.scene.getObjectByName("k-item-c"));
+    // createLoader follows an accessor input: a new URL loads the new file.
+    await p.click("#k-file");
+    await until(p, () => !!window.__three.scene.getObjectByName("k-loaded:other-text"));
+    // A prop read inside createFrame is current: speed x10 spins faster.
+    const before = await p.evaluate(() => window.__three.scene.getObjectByName("k-spinner").rotation.y);
+    await p.click("#k-fast");
+    await until(p, (b) => window.__three.scene.getObjectByName("k-spinner").rotation.y > b + 1, before);
+    // The stop function returned by createFrame unsubscribes the callback.
+    await p.evaluate(() => window.__stopSpinner());
+    const stopped = await p.evaluate(() => window.__spins);
+    await p.waitForTimeout(200);
+    if ((await p.evaluate(() => window.__spins)) !== stopped) return "createFrame kept running after stop()";
     return true;
   });
   await run("extras", "/extras/", async (p) => {

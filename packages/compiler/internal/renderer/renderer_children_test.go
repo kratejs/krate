@@ -201,3 +201,23 @@ export default function Page() {
 		t.Errorf("a provider in a renderer-mode component must keep a live value getter:\n%s", js)
 	}
 }
+
+func TestRendererVariableRef(t *testing.T) {
+	_, _, js := buildTreeDecorated(t, `import { createSignal } from "@krate/runtime";
+@renderer
+function Canvas(props) { return <canvas />; }
+function Spinner() {
+  let mesh;
+  const box = { current: null };
+  return <group ref={box}><mesh ref={mesh} name="m" /><mesh ref={(m) => m} /></group>;
+}
+export default function Scene() {
+  return <Canvas><Spinner /></Canvas>;
+}`)
+	// A variable ref becomes a callback that assigns it unless it already holds
+	// a callback or a {current} object; an arrow ref is passed as written.
+	mustContain(t, "js", js, "(m)=>m", "__r", "'current' in __r", "mesh = __v", ")(mesh)", ")(box)")
+	if strings.Contains(js, "ref:mesh") {
+		t.Errorf("variable ref passed through as a value:\n%s", js)
+	}
+}
