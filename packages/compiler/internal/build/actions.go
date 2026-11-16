@@ -109,9 +109,13 @@ func (b *Builder) prepareActions() error {
 	// The modules build at once; their errors keep the module order.
 	compileErrs := make([]error, len(reg.Order))
 	memo := &resolveMemo{}
+	batched := b.batchActionModules(dir, reg.Order, memo)
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, buildWorkerLimit())
 	for i, mod := range reg.Order {
+		if batched[i] {
+			continue
+		}
 		wg.Add(1)
 		sem <- struct{}{}
 		go func() {
@@ -221,6 +225,49 @@ func (b *Builder) compileActionModule(dir string, mod *actionModule, memo *resol
 		return fmt.Errorf("compiling server action %s:\n%s", mod.RelPath, formatEsbuildErrors(result.Errors))
 	}
 	return nil
+}
+
+// batchActionModules bundles mods in esbuild calls of at most fileBatchMax
+// modules, in parallel, and reports the modules it wrote. The others (all of
+// a batch that fails) build on their own with compileActionModule, which
+// reports their errors.
+func (b *Builder) batchActionModules(dir string, mods []*actionModule, memo *resolveMemo) []bool {
+	done := make([]bool, len(mods))
+	var idx []int
+	for i, mod := range mods {
+		if b.nameActionModule(mod) == nil {
+			idx = append(idx, i)
+		}
+	}
+	opts := b.actionModuleOptions()
+	// Every output is in dir, so one plugin imports packages as each
+	// separate build would.
+	opts.Plugins = append(opts.Plugins, externalNodeModulesPluginMemo(filepath.Join(dir, "x.mjs"), memo))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, buildWorkerLimit())
+	for _, part := range splitBatches(idx, fileBatchMax) {
+		if len(part) < 2 {
+			continue
+		}
+		wg.Go(func() {
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			entries := make([]fileBatchEntry, len(part))
+			for k, i := range part {
+				entries[k] = fileBatchEntry{In: mods[i].AbsPath, Out: filepath.Join(dir, mods[i].File)}
+			}
+			outs, _ := esbuildBatchFiles(opts, dir, entries)
+			for k, i := range part {
+				if outs != nil && writeOutputFiles(outs[k].Files) == nil {
+					done[i] = true
+				} else {
+					b.Prof.Add("batch:actions-unbatched", 0)
+				}
+			}
+		})
+	}
+	wg.Wait()
+	return done
 }
 
 // discoverActionSources walks the project for source files whose first
