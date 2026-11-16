@@ -412,6 +412,20 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- `import { z } from 'zod'` in an island no longer ships all of zod. zod's index re-exports its API as a namespace
+  (`import * as z from "./v4/classic/external.js"; export { z }`), and esbuild builds a namespace that reaches a file
+  through another module as an object holding every export, so the island got every schema type and every
+  `zod/v4/locales` file (454 kB, 93 kB gzipped, against 113 kB on Next.js). Client builds now import such a namespace
+  from its own module when the index only re-exports it, so `z.string()` keeps only what it uses (an island with
+  `z.string().min(2).parse()` ships 33 kB gzipped of zod and no locale). A shared island chunk is tree shaken the same
+  way: an island imports a shared module through a stub that names its exports, so esbuild turns `z.string()` into a
+  named import, and the chunk exports only the names some island reads.
+- Modules in an import cycle that both Preact and real-React islands reach are bundled once again, into one shared
+  chunk, instead of once per kind of island. Refusing to share them kept two copies, with separate module state, of
+  every module whose imports reach a cycle: zod (whose `core.js` and `util.js` import each other) and the app code
+  built on it were bundled twice on every page with both kinds of island. Each cycle is now bundled into its own
+  chunk that imports the cycle's first module first, the one the islands reach first, so it runs in the islands'
+  order; other modules import its members through small re-exporting chunks. `KR8017` no longer reports cycles.
 - Client components inside server components no longer ship their server children again inside their props. The
   children (and JSX-valued props such as `userMenu={<UserMenu />}`) were rendered into the page and also sent as an HTML
   string in the island's `data-props`, nested once per enclosing client component, so a page under a root
