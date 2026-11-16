@@ -319,9 +319,6 @@ type Builder struct {
 	// (see buildRounds); rounds batches them while the pages build.
 	roundJobs roundJobs
 	rounds    *buildRounds
-	// ssrPrebuild builds the server render modules of the boundaries the
-	// pages find, during a full build's page pass.
-	ssrPrebuild *ssrPrebuild
 	// progIconDiags holds the unresolved <Icon> diagnostics of each program.
 	progIconDiags sync.Map
 	// progImageDiags holds the <Image> diagnostics of each transformed program.
@@ -1159,10 +1156,6 @@ func (b *Builder) BuildAll() error {
 	rounds := newBuildRounds(totalPages, pool)
 	b.rounds = rounds
 	b.prefetchLayoutCuts(pages, pool)
-	// The server render modules of the client boundaries build in the
-	// background as the pages find the boundaries.
-	impls := newClientSSRImpls(b.importResolver(), nil, b.Root, b.Cfg.OutDir, b.actionModules(), b.Cfg.BaseURLPath())
-	b.ssrPrebuild = impls.startPrebuild(ssrPrebuildWorkers)
 
 	for _, page := range pages {
 		wg.Add(1)
@@ -1316,28 +1309,20 @@ func (b *Builder) BuildAll() error {
 	}
 
 	bl.Lap("static-params")
-	// The server render modules the pages' server bundles need: the ones the
-	// background prebuild has, then the rest, while the island chunks and
-	// HTML are written.
-	impls.boundaries = nil
-	for _, page := range ssrBundlePages(results) {
-		impls.boundaries = append(impls.boundaries, page.ClientBoundaries...)
-	}
-	prebuilt := b.ssrPrebuild
-	b.ssrPrebuild = nil
-	// The page server bundles need only the pages and these modules: they
-	// compile while the island chunks and HTML are written too.
+	// The server render modules the pages' server bundles need build in one
+	// code-split build, then the page server bundles, which need only the
+	// pages and these modules: both while the island chunks and HTML are
+	// written.
 	var serverBundles map[string]string
 	var serverBundleErrs []error
 	actionMods, basePath := b.actionModules(), b.Cfg.BaseURLPath()
+	impls := newClientSSRImpls(b.importResolver(), results, b.Root, b.Cfg.OutDir, actionMods, basePath)
 	implsDone := make(chan struct{})
 	go pprof.Do(context.Background(), pprof.Labels("phase", "server-bundles"), func(context.Context) {
 		defer close(implsDone)
 		func() {
 			defer b.phase("parallel:ssr-modules")()
-			defer func() { _ = recover() }() // a module the prebuild misses builds on its own
-			prebuilt.finish()
-			impls.prebuild(impls.usePrebuilt(prebuilt))
+			impls.buildAll(impls.boundaries)
 		}()
 		defer b.phase("parallel:server-bundles")()
 		serverBundles, serverBundleErrs = compileServerBundlesWith(impls, results, b.Root, b.Cfg.OutDir, b.Cfg.Sourcemap, actionMods, basePath)
@@ -2704,7 +2689,6 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 		return nil, "", cbErr
 	}
 	pend.groups = append(pend.groups, clientBoundaries)
-	b.ssrPrebuild.add(clientBoundaries)
 	pl.Lap("client-boundaries")
 	if serverPage || len(serverComponentNames(ann)) > 0 {
 		pkgBoundaries, pbErr := b.serverTreeBoundariesDeferred(bundle, reactIslands, bnd.Resolve, serverPage)
@@ -2712,10 +2696,6 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 			return nil, "", pbErr
 		}
 		pend.groups = append(pend.groups, pkgBoundaries)
-		b.ssrPrebuild.add(pkgBoundaries)
-		if layoutCut != nil {
-			b.ssrPrebuild.add(layoutCut.Boundaries)
-		}
 		clientBoundaries = append(append([]ClientBoundary(nil), clientBoundaries...), pkgBoundaries...)
 		if layoutCut != nil {
 			clientBoundaries = mergeBoundaries(clientBoundaries, layoutCut.Boundaries)

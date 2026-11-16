@@ -18,6 +18,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/fsutil"
 	irtree "github.com/kratejs/krate/packages/compiler/internal/irtree"
 	"github.com/kratejs/krate/packages/compiler/internal/resolver"
+	"github.com/kratejs/krate/packages/compiler/internal/safe"
 )
 
 // Client boundaries ("use client").
@@ -1157,16 +1158,25 @@ type clientSSRImpls struct {
 	basePath string
 	mu       sync.Mutex
 	done     map[string]*clientSSRImpl
-	// memo shares the resolutions of the prebuilt modules (see prebuild).
+	// memo shares the resolutions of the modules built with one set of
+	// options (see prebuild).
 	memo resolveMemo
 	// boundaries are the boundaries of the server bundles the impls are for.
 	boundaries []ClientBoundary
 }
 
-// clientSSRImpl is the build of one module's server render module.
+// clientSSRImpl is the build of one module's server render module. Its
+// builder closes ready once err is set.
 type clientSSRImpl struct {
-	once sync.Once
-	err  error
+	ready chan struct{}
+	err   error
+}
+
+// finish sets the result of the build and releases its waiters. A panic in
+// build becomes the error, so waiters are never left blocked.
+func (e *clientSSRImpl) finish(build func() error) {
+	defer close(e.ready)
+	e.err = safe.Run(build)
 }
 
 func (c *clientSSRImpls) implPath(cb ClientBoundary) string {
@@ -1174,8 +1184,8 @@ func (c *clientSSRImpls) implPath(cb ClientBoundary) string {
 }
 
 // entry returns the build of cb's module, the first boundary of a module
-// standing for it.
-func (c *clientSSRImpls) entry(cb ClientBoundary) *clientSSRImpl {
+// standing for it. owner is set for the one caller that must build it.
+func (c *clientSSRImpls) entry(cb ClientBoundary) (e *clientSSRImpl, owner bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.done == nil {
@@ -1183,169 +1193,155 @@ func (c *clientSSRImpls) entry(cb ClientBoundary) *clientSSRImpl {
 	}
 	e, ok := c.done[cb.SourcePath]
 	if !ok {
-		e = &clientSSRImpl{}
+		e = &clientSSRImpl{ready: make(chan struct{})}
 		c.done[cb.SourcePath] = e
 	}
-	return e
+	return e, !ok
 }
 
 func (c *clientSSRImpls) build(cb ClientBoundary) error {
-	e := c.entry(cb)
-	e.once.Do(func() { e.err = c.buildOne(cb) })
+	e, owner := c.entry(cb)
+	if owner {
+		e.finish(func() error { return c.buildOne(cb) })
+	}
+	<-e.ready
 	return e.err
 }
 
-// prebuild builds the server render modules of boundaries, each on its own
-// as before, several at once. A module that fails is left to build when a
-// page bundle needs it, so its error is reported there as before.
-func (c *clientSSRImpls) prebuild(boundaries []ClientBoundary) {
-	var cbs []ClientBoundary
-	seen := map[string]bool{}
+// claimedImpl is a module whose build a caller took over.
+type claimedImpl struct {
+	cb ClientBoundary
+	e  *clientSSRImpl
+}
+
+// claim takes over the builds of the modules of boundaries that no one has
+// started, one boundary per module (real-React boundaries have no server
+// render module).
+func (c *clientSSRImpls) claim(boundaries []ClientBoundary) []claimedImpl {
+	var out []claimedImpl
 	for _, cb := range boundaries {
-		if cb.Real || seen[cb.SourcePath] {
+		if cb.Real {
 			continue
 		}
-		seen[cb.SourcePath] = true
-		cbs = append(cbs, cb)
+		if e, owner := c.entry(cb); owner {
+			out = append(out, claimedImpl{cb, e})
+		}
 	}
+	return out
+}
+
+// prebuild builds the server render modules of boundaries, each on its own,
+// several at once. A module that fails keeps its error for the page bundle
+// that needs it, so it is reported there as before.
+func (c *clientSSRImpls) prebuild(boundaries []ClientBoundary) {
+	c.buildEach(c.claim(boundaries))
+}
+
+func (c *clientSSRImpls) buildEach(claimed []claimedImpl) {
 	sem := make(chan struct{}, buildWorkerLimit())
 	var wg sync.WaitGroup
-	for _, cb := range cbs {
+	for _, ci := range claimed {
 		wg.Add(1)
 		sem <- struct{}{}
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()
-			e := c.entry(cb)
-			e.once.Do(func() { e.err = c.buildOne(cb) })
+			ci.e.finish(func() error { return c.buildOne(ci.cb) })
 		}()
 	}
 	wg.Wait()
 }
 
-// ssrPrebuild builds the server render modules of client boundaries in the
-// background while the pages build, as the pages find the boundaries, and
-// keeps them in memory: only the ones a server bundle needs are written
-// (usePrebuilt). Each module is built on its own, as compileServerBundles
-// would.
-type ssrPrebuild struct {
-	impls *clientSSRImpls
-	mu    sync.Mutex
-	more  *sync.Cond
-	queue []ClientBoundary
-	seen  map[string]bool
-	ended bool
-	built map[string][]byte // by SourcePath
-	wg    sync.WaitGroup
-}
-
-// startPrebuild starts building server render modules on workers reused
-// esbuild contexts (see esbuildPool).
-func (c *clientSSRImpls) startPrebuild(workers int) *ssrPrebuild {
-	p := &ssrPrebuild{impls: c, seen: map[string]bool{}, built: map[string][]byte{}}
-	p.more = sync.NewCond(&p.mu)
-	guard := &unavailableGuard{root: c.root, nodeRuntime: true, msgs: map[string]api.Message{}}
-	// The render-to-string module imports only preact, which stays external,
-	// so where it resolves from changes nothing.
-	opts, err := c.options(islandRenderToStringPlugin(c.root), guard)
-	if err != nil {
-		p.ended = true
-		return p
-	}
-	opts.Write = false
-	opts.Outfile = filepath.Join(c.bundleDir, "client", "krate-pool.ssr.mjs")
-	var mu sync.Mutex
-	var cbs []ClientBoundary
-	done := esbuildPoolStream("pool:ssr-modules", opts, "krate-client-ssr.js", workers, func() (poolEntry, int, bool) {
-		p.mu.Lock()
-		defer p.mu.Unlock()
-		for len(p.queue) == 0 && !p.ended {
-			p.more.Wait()
-		}
-		if len(p.queue) == 0 {
-			return poolEntry{}, 0, false
-		}
-		cb := p.queue[0]
-		p.queue = p.queue[1:]
-		mu.Lock()
-		cbs = append(cbs, cb)
-		id := len(cbs) - 1
-		mu.Unlock()
-		return poolEntry{Source: clientSSRSource(cb), ResolveDir: cb.resolveDir(), Sourcefile: "krate-client-ssr.js", Loader: api.LoaderJS}, id, true
-	}, func(id int, res api.BuildResult) {
-		if len(res.Errors) > 0 || len(res.OutputFiles) != 1 || len(guard.errors(res.OutputFiles)) > 0 {
+// buildAll builds the server render modules of a full build's boundaries in
+// one code-split esbuild build (buildCombined). If that build fails in any
+// way, every module builds on its own instead (prebuild), so each error is
+// reported against the module that has it.
+func (c *clientSSRImpls) buildAll(boundaries []ClientBoundary) {
+	claimed := c.claim(boundaries)
+	if len(claimed) > 1 && combinedSSRModules {
+		if err := safe.Run(func() error { return c.buildCombined(claimed) }); err == nil {
+			for _, ci := range claimed {
+				ci.e.finish(func() error { return nil })
+			}
 			return
 		}
-		mu.Lock()
-		cb := cbs[id]
-		mu.Unlock()
-		p.mu.Lock()
-		p.built[cb.SourcePath] = res.OutputFiles[0].Contents
-		p.mu.Unlock()
-	})
-	p.wg.Add(1)
-	go func() {
-		<-done
-		p.wg.Done()
-	}()
-	return p
+	}
+	c.buildEach(claimed)
 }
 
-// add queues the boundaries the prebuild has not seen (real-React boundaries
-// have no server render module).
-func (p *ssrPrebuild) add(cbs []ClientBoundary) {
-	if p == nil {
-		return
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.ended {
-		return
-	}
-	for _, cb := range cbs {
-		if cb.Real || p.seen[cb.SourcePath] {
-			continue
-		}
-		p.seen[cb.SourcePath] = true
-		p.queue = append(p.queue, cb)
-	}
-	p.more.Broadcast()
-}
+// combinedSSRModules turns on buildCombined; tests turn it off to compare
+// with separate builds.
+var combinedSSRModules = true
 
-// finish waits for every queued module.
-func (p *ssrPrebuild) finish() {
-	if p == nil {
-		return
-	}
-	p.mu.Lock()
-	p.ended = true
-	p.more.Broadcast()
-	p.mu.Unlock()
-	p.wg.Wait()
-}
+// ssrChunkNames names the shared chunks of the combined build, under
+// server-bundles/client/chunks/. The hash follows the content, so the server,
+// which reloads a page bundle by a new query string, never keeps a stale
+// chunk of changed code.
+const ssrChunkNames = "chunks/[name]-[hash]"
 
-// usePrebuilt writes the prebuilt modules of the boundaries the server
-// bundles need and returns the boundaries it had none for.
-func (c *clientSSRImpls) usePrebuilt(p *ssrPrebuild) []ClientBoundary {
-	if p == nil {
-		return c.boundaries
+// buildCombined builds the modules of claimed as the entry points of one
+// esbuild build with code splitting: the modules they share are parsed and
+// linked once and emitted once, as chunks the entries import. Each entry keeps
+// the path of its separate build, which the page bundles import. It writes
+// nothing unless the whole build succeeds.
+func (c *clientSSRImpls) buildCombined(claimed []claimedImpl) error {
+	guard := &unavailableGuard{root: c.root, nodeRuntime: true, msgs: map[string]api.Message{}}
+	// The render-to-string module imports only preact, which stays external,
+	// so one plugin serves every entry.
+	opts, err := c.options(islandRenderToStringPlugin(c.root), guard)
+	if err != nil {
+		return err
 	}
-	var missing []ClientBoundary
-	seen := map[string]bool{}
-	for _, cb := range c.boundaries {
-		if cb.Real || seen[cb.SourcePath] {
-			continue
-		}
-		seen[cb.SourcePath] = true
-		out, ok := p.built[cb.SourcePath]
-		if !ok || writeBuilt(c.implPath(cb), out) != nil {
-			missing = append(missing, cb)
-			continue
-		}
-		e := c.entry(cb)
-		e.once.Do(func() {})
+	outdir := filepath.Join(c.bundleDir, "client")
+	entries := make([]batchEntry, len(claimed))
+	want := make(map[string]bool, len(claimed))
+	for i, ci := range claimed {
+		entries[i] = batchEntry{Source: clientSSRSource(ci.cb), ResolveDir: ci.cb.resolveDir(), Sourcefile: "krate-client-ssr.js", Loader: api.LoaderJS, OutputPath: ci.cb.ModuleID + ".ssr"}
+		want[ci.cb.ModuleID+".ssr.mjs"] = true
 	}
-	return missing
+	withBatchEntries(&opts, entries)
+	opts.Outdir = outdir
+	opts.Splitting = true
+	opts.ChunkNames = ssrChunkNames
+	opts.OutExtension = map[string]string{".js": ".mjs"}
+	opts.Write = false
+	res := esbuildBuildFrom(opts, 2, "")
+	if len(res.Errors) > 0 {
+		return fmt.Errorf("combined server render build: %s", res.Errors[0].Text)
+	}
+	if hits := guard.errors(res.OutputFiles); len(hits) > 0 {
+		return fmt.Errorf("combined server render build: %s", hits[0].Text)
+	}
+	if err := os.MkdirAll(outdir, 0755); err != nil {
+		return err
+	}
+	// esbuild may name the output directory by its real path.
+	dirs := []string{outdir}
+	if real, err := filepath.EvalSymlinks(outdir); err == nil && real != outdir {
+		dirs = append(dirs, real)
+	}
+	rels := make([]string, len(res.OutputFiles))
+	for i, f := range res.OutputFiles {
+		for _, dir := range dirs {
+			if rel, err := filepath.Rel(dir, f.Path); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+				rels[i] = rel
+				break
+			}
+		}
+		if rels[i] == "" {
+			return fmt.Errorf("combined server render build: output %s is outside %s", f.Path, outdir)
+		}
+		delete(want, filepath.ToSlash(rels[i]))
+	}
+	if len(want) > 0 {
+		return fmt.Errorf("combined server render build: %d entries have no output", len(want))
+	}
+	for i, f := range res.OutputFiles {
+		if err := writeBuilt(filepath.Join(outdir, rels[i]), f.Contents); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // writeBuilt writes a built file, creating its directory.
@@ -1355,10 +1351,6 @@ func writeBuilt(path string, data []byte) error {
 	}
 	return os.WriteFile(path, data, 0644)
 }
-
-// ssrPrebuildWorkers is how many server render modules build at once during
-// the page pass, beside the pages.
-const ssrPrebuildWorkers = 3
 
 // clientSSRSource is the entry module of a boundary's server render module.
 func clientSSRSource(cb ClientBoundary) string {

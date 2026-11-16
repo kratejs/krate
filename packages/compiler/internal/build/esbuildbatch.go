@@ -19,9 +19,11 @@ import (
 // splitting is off, but not byte for byte as a separate build would: it
 // numbers the symbols of non-minified output across the build, and wraps a
 // module for lazy evaluation for every entry when one entry loads it lazily
-// (wrappedByOthers flags the entries that affects). Batches therefore serve
-// only builds that are read, never shipped: the check builds of client
-// components and the resource-hint renders.
+// (wrappedByOthers flags the entries that affects). esbuildBatch therefore
+// serves only builds that are read, never shipped: the check builds of client
+// components and the resource-hint renders. The server render modules of a
+// full build use the same entries in a code-split build whose output may
+// differ from separate builds (see clientSSRImpls.buildCombined).
 //
 // Like Stdin, an entry is a module of the file namespace in its ResolveDir,
 // so plugins see its imports as they see a Stdin module's (some act only on
@@ -154,25 +156,7 @@ func esbuildBatch(opts api.BuildOptions, entries []batchEntry) ([]batchOutput, a
 	if len(entries) == 0 {
 		return nil, api.BuildResult{}
 	}
-	entries = append([]batchEntry(nil), entries...)
-	points := make([]api.EntryPoint, len(entries))
-	for i := range entries {
-		name := entries[i].Sourcefile
-		if name == "" {
-			name = "stdin.tsx"
-		}
-		// Stdin gets the tier decorators blanked by esbuildBuild; an entry
-		// module does not go through Stdin.
-		entries[i].Source = tsstrip.BlankTierDecorators(name, entries[i].Source)
-		out := entries[i].OutputPath
-		if out == "" {
-			out = "krate-batch-" + strconv.Itoa(i)
-		}
-		points[i] = api.EntryPoint{InputPath: "krate-batch-entry:" + strconv.Itoa(i), OutputPath: out}
-	}
-	opts.EntryPointsAdvanced = points
-	opts.Stdin = nil
-	opts.Outfile = ""
+	entries = withBatchEntries(&opts, entries)
 	if opts.Outdir == "" {
 		opts.Outdir = filepath.Join(opts.AbsWorkingDir, ".krate", "batch")
 		if opts.AbsWorkingDir == "" {
@@ -184,7 +168,6 @@ func esbuildBatch(opts api.BuildOptions, entries []batchEntry) ([]batchOutput, a
 	opts.EntryNames = ""
 	wantMeta := opts.Metafile
 	opts.Metafile = true
-	opts.Plugins = append([]api.Plugin{batchEntryPlugin(entries)}, opts.Plugins...)
 	res := esbuildBuildFrom(opts, 3, "batch:")
 	if len(res.Errors) > 0 {
 		return nil, res
@@ -222,6 +205,32 @@ func esbuildBatch(opts api.BuildOptions, entries []batchEntry) ([]batchOutput, a
 		}
 	}
 	return outs, res
+}
+
+// withBatchEntries makes entries the entry points of opts, served from memory
+// by batchEntryPlugin, and returns the entries as served (with the tier
+// decorators blanked, as esbuildBuild blanks them in Stdin).
+func withBatchEntries(opts *api.BuildOptions, entries []batchEntry) []batchEntry {
+	entries = append([]batchEntry(nil), entries...)
+	points := make([]api.EntryPoint, len(entries))
+	for i := range entries {
+		name := entries[i].Sourcefile
+		if name == "" {
+			name = "stdin.tsx"
+		}
+		entries[i].Source = tsstrip.BlankTierDecorators(name, entries[i].Source)
+		out := entries[i].OutputPath
+		if out == "" {
+			out = "krate-batch-" + strconv.Itoa(i)
+		}
+		points[i] = api.EntryPoint{InputPath: "krate-batch-entry:" + strconv.Itoa(i), OutputPath: out}
+	}
+	opts.EntryPointsAdvanced = points
+	opts.EntryPoints = nil
+	opts.Stdin = nil
+	opts.Outfile = ""
+	opts.Plugins = append([]api.Plugin{batchEntryPlugin(entries)}, opts.Plugins...)
+	return entries
 }
 
 // splitBatchOutputs assigns each output file of a batched build to its entry

@@ -169,10 +169,9 @@ func buildSharedGraph(t *testing.T, pages int) sharedGraphRun {
 
 // TestSharedGraphCompiledOncePerBuild builds the fixture at two sizes. The
 // compiler parses every shared module once per build; esbuild loads it a
-// number of times set by the client components (each one's server render
-// module is a bundle of its own, built on a reused context that parses it
-// once) and the batches, not by the pages; and doubling the pages less than
-// doubles the build time.
+// fixed number of times (the server render modules of the client components
+// share one code-split build), not once per page; and doubling the pages
+// less than doubles the build time.
 func TestSharedGraphCompiledOncePerBuild(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a 2000-module fixture")
@@ -213,15 +212,15 @@ func TestSharedGraphCompiledOncePerBuild(t *testing.T) {
 			t.Errorf("a shared module was parsed %d times in one build, want once", r.parses)
 		}
 	}
-	// The loads must not grow with the pages. A shared module is loaded by
-	// each client component's server render module (13 here), by a few
-	// batches of client chunk checks and hints renders, and by the island
-	// chunks.
+	// The loads must not grow with the pages. A shared module is loaded once
+	// by the combined build of the client components' server render modules,
+	// by a few batches of client chunk checks and hints renders, and by the
+	// island chunks.
 	if large.loads > small.loads+2 {
 		t.Errorf("esbuild loaded a shared module %d times with 60 pages but %d times with 30: work grows with the pages", large.loads, small.loads)
 	}
-	if limit := sharedGraphWidgets + 1 + 8; large.loads > limit {
-		t.Errorf("esbuild loaded a shared module %d times in one build, want at most %d (one per client component and a few batches)", large.loads, limit)
+	if limit := 1 + 8; large.loads > limit {
+		t.Errorf("esbuild loaded a shared module %d times in one build, want at most %d (one combined server render build and a few batches)", large.loads, limit)
 	}
 	if large.esbuild > small.esbuild+(60-30)*3 {
 		t.Errorf("esbuild ran %d times with 60 pages and %d with 30", large.esbuild, small.esbuild)

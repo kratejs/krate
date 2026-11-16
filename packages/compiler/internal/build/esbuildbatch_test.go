@@ -3,7 +3,6 @@ package build
 import (
 	"os"
 	"path/filepath"
-	"sync"
 	"testing"
 
 	"github.com/evanw/esbuild/pkg/api"
@@ -119,75 +118,5 @@ func TestEsbuildBatchFlagsEntriesWrappedByOthers(t *testing.T) {
 	}
 	if string(single.OutputFiles[0].Contents) == string(outs[1].Files[0].Contents) {
 		t.Log("esbuild printed the flagged entry the same way; the check stays conservative")
-	}
-}
-
-// A pool entry stands in for Stdin: its output matches a Stdin build byte for
-// byte, collisions of top-level names included, and plugins see its imports
-// from the same importer and namespace.
-func TestEsbuildPoolMatchesStdinBuilds(t *testing.T) {
-	root := t.TempDir()
-	write := func(rel, src string) {
-		p := filepath.Join(root, rel)
-		if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(p, []byte(src), 0644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for _, n := range []string{"a", "b", "c"} {
-		write("lib/"+n+".js", "import { useState } from 'ext';\nfunction helper() { return useState('"+n+"'); }\nexport const "+n+" = () => helper();\n")
-	}
-	entries := []poolEntry{
-		{Source: "import { a } from './a.js';\nimport { b } from './b.js';\nimport { useState } from 'ext';\nexport const m = [a, b, useState];\n", ResolveDir: filepath.Join(root, "lib"), Sourcefile: "krate-client-ssr.js", Loader: api.LoaderJS},
-		{Source: "import { c } from './c.js';\nexport const m = [c];\n", ResolveDir: filepath.Join(root, "lib"), Sourcefile: "krate-client-ssr.js", Loader: api.LoaderJS},
-	}
-	type seen struct{ importer, namespace string }
-	var mu sync.Mutex
-	recorded := map[string][]seen{}
-	recorder := func(tag string) api.Plugin {
-		return api.Plugin{Name: "rec", Setup: func(pb api.PluginBuild) {
-			pb.OnResolve(api.OnResolveOptions{Filter: `^\./`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
-				mu.Lock()
-				recorded[tag] = append(recorded[tag], seen{args.Importer, args.Namespace})
-				mu.Unlock()
-				return api.OnResolveResult{}, nil
-			})
-		}}
-	}
-	base := api.BuildOptions{
-		AbsWorkingDir: root, Bundle: true, Format: api.FormatESModule, Platform: api.PlatformNode,
-		External: []string{"ext"}, LogLevel: api.LogLevelSilent, Outfile: filepath.Join(root, "out", "x.mjs"),
-	}
-	for i, e := range entries {
-		one := base
-		one.Plugins = []api.Plugin{recorder("stdin")}
-		one.Stdin = &api.StdinOptions{Contents: e.Source, ResolveDir: e.ResolveDir, Sourcefile: e.Sourcefile, Loader: e.Loader}
-		want := esbuildBuild(one)
-		pool := base
-		pool.Plugins = []api.Plugin{recorder("pool")}
-		var got api.BuildResult
-		<-esbuildPoolStream("test", pool, e.Sourcefile, 1, func() (poolEntry, int, bool) {
-			if got.OutputFiles != nil || len(got.Errors) > 0 {
-				return poolEntry{}, 0, false
-			}
-			got.Errors = []api.Message{{}} // handed out
-			return e, 0, true
-		}, func(_ int, res api.BuildResult) { got = res })
-		if len(want.Errors) > 0 || len(got.Errors) > 0 {
-			t.Fatalf("entry %d: errors %v / %v", i, want.Errors, got.Errors)
-		}
-		if g, w := string(got.OutputFiles[0].Contents), string(want.OutputFiles[0].Contents); g != w {
-			t.Errorf("entry %d differs from its Stdin build:\n--- pool\n%s\n--- stdin\n%s", i, g, w)
-		}
-	}
-	if len(recorded["pool"]) != len(recorded["stdin"]) {
-		t.Fatalf("plugins saw %d imports in the pool and %d with Stdin", len(recorded["pool"]), len(recorded["stdin"]))
-	}
-	for i := range recorded["stdin"] {
-		if recorded["pool"][i] != recorded["stdin"][i] {
-			t.Errorf("import %d: pool importer %+v, Stdin importer %+v", i, recorded["pool"][i], recorded["stdin"][i])
-		}
 	}
 }
