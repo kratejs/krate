@@ -946,7 +946,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	emitResult.IslandBootJS = islandBoot
 	needsHydrate := len(emitResult.Signatures) > 0 || islandJS != "" || islandBoot != "" || strings.Contains(emitResult.HTML, "data-krate-portal")
 	dceJS := append(lazyChunkSources(emitResult.LazyChunks), islandJS)
-	dceJS = append(dceJS, b.clientChunkSources(clientBoundaries)...)
+	dceJS = append(dceJS, b.clientChunkSources(clientBoundaries, bundle.CSSModules)...)
 	if needsHydrate {
 		hydrationJS = renderer.GenerateNewHydrationJS(emitResult)
 		b.warnShippedCollections(spp.PagePath, entryModule.Program, hydrationJS, 2)
