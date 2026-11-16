@@ -3514,6 +3514,7 @@ func (b *Builder) resetBuildCaches() {
 	// One instant for this build: new Date() and Date.now() in static and
 	// server components read it (SOURCE_DATE_EPOCH when set).
 	jsvalue.StartBuildClock()
+	b.resetMetadataStatic()
 	layoutEmitCache.Clear()
 	b.modCSS.clear()
 	loadingEmitCache.Clear()

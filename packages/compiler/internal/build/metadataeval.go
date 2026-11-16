@@ -195,6 +195,7 @@ func (b *Builder) evalMetadata(page string, segs []metaSegment, pageFiles string
 }
 
 func (b *Builder) evalMetadataModules(abs string, segs []metaSegment, pageFiles string, sets []map[string]string, bnd *bundler.Bundler, imports, virtual map[string]string) ([]metadataResult, error) {
+	metadataRuns.Chain.Add(1)
 	resolve := func(importer, spec string) (string, bool) {
 		if bnd != nil {
 			if p := bnd.ResolveForNode(importer, spec); p != "" {
@@ -364,7 +365,7 @@ func (b *Builder) prefetchMetadata(page string, sets []map[string]string, bnd *b
 		return
 	}
 	segs, pageFiles := b.metadataSegments(page)
-	results, err := b.evalMetadata(page, segs, pageFiles, sets, bnd)
+	results, err := b.resolveMetadataChain(page, segs, pageFiles, sets, bnd)
 	for i, set := range sets {
 		r := metadataResult{}
 		if err != nil {
@@ -430,7 +431,7 @@ func (b *Builder) pageMetadataHeadFor(page, source string, requestTime bool, par
 	if ok {
 		r = res.(metadataResult)
 	} else {
-		results, err := b.evalMetadata(page, segs, pageFiles, []map[string]string{params}, bnd)
+		results, err := b.resolveMetadataChain(page, segs, pageFiles, []map[string]string{params}, bnd)
 		if err != nil {
 			r = metadataResult{Errors: []string{err.Error()}}
 		} else {
