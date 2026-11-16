@@ -467,6 +467,61 @@ const scene = new THREE.Scene(); // components run once
 return <>{createPortal(<mesh><boxGeometry /></mesh>, scene, { camera: virtualCamera })}</>;
 ```
 
+## drei helpers: @krate/three/drei
+
+`@krate/three/drei` has the [@react-three/drei](https://drei.docs.pmnd.rs)
+helpers most scenes use, with drei's props and behavior. Imports from
+`@react-three/drei` work with the module name changed:
+
+```tsx
+import { Environment, Lightformer, OrbitControls, useGLTF } from "@krate/three/drei";
+import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
+
+function Car(props: { url: string }) {
+  // useDraco and useMeshopt as in drei; the last argument configures the loader.
+  const gltf = useGLTF(props.url, false, false, (loader) => loader.setMeshoptDecoder(MeshoptDecoder));
+  return <primitive object={gltf.scene} />;
+}
+
+<Canvas frameloop="demand">
+  <Environment resolution={128}>
+    <Lightformer form="rect" intensity={2} position={[0, 5, 0]} scale={[10, 10, 1]} />
+    <Lightformer form="ring" intensity={0.8} position={[0, 1, -6]} scale={6} />
+  </Environment>
+  <Suspense fallback={null}>
+    <Car url="/car.glb" />
+  </Suspense>
+  <OrbitControls makeDefault enableDamping minDistance={2} maxDistance={20} />
+</Canvas>
+```
+
+| Export | Does |
+|--------|------|
+| `OrbitControls` | three's `OrbitControls` on the scene camera. `makeDefault` sets `controls` in the root state; `onChange`, `onStart`, `onEnd`, `regress`, `keyEvents`, `camera` and `domElement` work as in drei, and every other prop is set on the controls (`minDistance`, `enablePan`, ...) |
+| `Environment` | Renders its children (such as `Lightformer`s) into a cube map once (`frames`, default 1) and uses it as `scene.environment` (and the background with `background`); `map` uses a texture instead. `resolution`, `near`, `far`, `environmentIntensity`, `environmentRotation`, `backgroundBlurriness` (`blur`), `backgroundIntensity` and `backgroundRotation` as in drei |
+| `Lightformer` | A double-sided, unlit shape (`form`: `rect`, `circle`, `ring`, `box`) whose color is `color` times `intensity`; without a `rotation` it faces `target` (the origin) |
+| `useGLTF` | Loads a glTF with three's `GLTFLoader`, cached and suspending like `useLoader`, with the Draco (`useDraco`, from the gstatic CDN by default) and Meshopt (`useMeshopt`) decoders; `useGLTF.preload`, `useGLTF.clear` and `useGLTF.setDecoderPath` |
+
+The classes come from `three/examples`, so the page bundles one copy of them
+next to your `three`. `Environment`'s HDR `files`, `preset` and `ground` are not
+supported, nor is the rest of drei; a scene that needs them keeps
+`@react-three/fiber` and drei in a
+[real-React island](/docs/guides/react-compatibility/#libraries-built-on-a-react-reconciler-real-react-islands).
+`useGLTF` and its decoders are bundled only into pages that use it.
+
+## In "use client" components
+
+A `"use client"` component of a page that has server components (an async
+page, or one under an async layout) runs as a Preact island, like other
+React code there (see [React compatibility](/docs/guides/react-compatibility/)).
+In that island the build resolves `@krate/three` and `@krate/three/drei` to
+their island builds: the same API (React style), rendered by the island's
+Preact. The scene then shares the island runtime and the React libraries
+around it (a Radix menu next to the canvas is bundled once) instead of
+shipping React for it. A scene error thrown inside `<Canvas>` reaches the error
+boundary around it, as in R3F. The Krate-style `create*` primitives read Krate
+signals and are not available in an island; use the hooks there.
+
 ## Rendering on demand and by hand
 
 - `frameloop="demand"` renders only after a change: an updated prop, a mounted
@@ -509,10 +564,11 @@ under the `ReactThreeFiber` and `KrateThree` namespaces.
 ## Differences from react-three-fiber
 
 - **There is no React reconciler.** `reconciler` is not exported, and libraries
-  built on `@react-three/fiber` (such as `@react-three/drei`) cannot be used inside
-  a `@krate/three` canvas. Their building blocks are three classes you can
-  `extend`. To use those libraries as they are, run `@react-three/fiber` itself in
-  a [real-React island](/docs/guides/react-compatibility/#libraries-built-on-a-react-reconciler-real-react-islands),
+  built on `@react-three/fiber` cannot be used inside a `@krate/three` canvas,
+  except the drei helpers in [`@krate/three/drei`](#drei-helpers-krate-three-drei).
+  Their building blocks are three classes you can `extend`. To use those
+  libraries as they are, run `@react-three/fiber` itself in a
+  [real-React island](/docs/guides/react-compatibility/#libraries-built-on-a-react-reconciler-real-react-islands),
   which ships React with the page.
 - **Context crosses the canvas without a bridge.** The scene is compiled with
   the page, so providers around `<Canvas>` are visible inside it and stay live;

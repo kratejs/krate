@@ -78,6 +78,11 @@ function Box(props: { position: [number, number, number] }) {
 }
 ```
 
+`@krate/three/drei` has drei's `OrbitControls`, `Environment` with
+`Lightformer` children, and `useGLTF`. In a `"use client"` component of a
+server-rendered page (a Preact island) the same imports resolve to an island
+build rendered by Preact, so the page ships no React runtime for the scene.
+
 The scene is not part of the page's HTML: `<Canvas>` renders its wrapper and
 `<canvas>` element on the server, and the scene mounts in the browser.
 

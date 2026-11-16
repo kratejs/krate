@@ -1448,9 +1448,13 @@ one runs in a **real-React island** instead: an island bundled with `react`
 and `react-dom` themselves, with no Preact alias anywhere in its subtree.
 
 For three.js scenes there is also [`@krate/three`](/docs/features/three/), which
-has the `@react-three/fiber` API but compiles with the page: it ships no React
-runtime, and the scene reads page state directly. Use the real-React island
-when you need libraries built on `@react-three/fiber`, such as `@react-three/drei`.
+has the `@react-three/fiber` API but compiles with the page (or runs in the
+Preact island of a `"use client"` component): it ships no React runtime, and
+the scene reads page state directly. `@krate/three/drei` provides drei's
+`OrbitControls`, `Environment`, `Lightformer` and `useGLTF`, and
+`krate migrate nextjs` moves fiber and drei code onto them when that is all it
+uses. Use the real-React island when you need other libraries built on
+`@react-three/fiber`.
 
 ```tsx
 // src/components/Viewer.tsx

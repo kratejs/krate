@@ -473,14 +473,15 @@ Evidence: `TestRealReactIsland`, `TestBrowserRealReactIsland`, `TestRealReactCon
 
 **Source:** Supported - **Islands:** n/a - **SSR:** Partial
 
-@krate/three renders three.js scenes from JSX compiled with the page: Canvas (an @renderer component), every three class as an element with args, attach, pierced props and primitives, reactive props that update objects in place, conditionals and keyed lists, pointer events with raycasting, bubbling and capture, useFrame, useThree, useLoader with Suspense, the Krate-style createFrame, createThree, createLoader and createGraph accessors, portals, extend, createRoot and the frame loop exports. React-style and Krate-style (createSignal) scenes are checked in Chromium with WebGL by TestBrowserThree; the engine has Vitest coverage in packages/three.
+@krate/three renders three.js scenes from JSX compiled with the page: Canvas (an @renderer component), every three class as an element with args, attach, pierced props and primitives, reactive props that update objects in place, conditionals and keyed lists, pointer events with raycasting, bubbling and capture, useFrame, useThree, useLoader with Suspense, the Krate-style createFrame, createThree, createLoader and createGraph accessors, portals, extend, createRoot and the frame loop exports. @krate/three/drei provides drei's OrbitControls, Environment (Lightformer children or a map) and useGLTF. In a "use client" component of a server-rendered page (a Preact island) the build resolves @krate/three to its island build, the same React-style API rendered by Preact; TestBrowserThreeIsland checks it in Chromium (model, picking, orbit, zoom, pause, error boundary, no React chunk). React-style and Krate-style (createSignal) scenes are checked in Chromium with WebGL by TestBrowserThree; the engine has Vitest coverage in packages/three.
 
 Known limits:
 
 - Only the canvas wrapper is server-rendered; the scene mounts in the browser.
-- Libraries built on @react-three/fiber (drei) need the real-React island instead (row react-three-fiber).
+- Other libraries built on @react-three/fiber, and drei beyond OrbitControls, Environment (no HDR files, presets or ground), Lightformer and useGLTF, need the real-React island instead (row react-three-fiber).
+- In a Preact island the Krate-style create* primitives are not available (use the hooks), and a mounted subtree that suspends again is unmounted and remounted (preact/compat Suspense) rather than hidden.
 
-Evidence: `TestBrowserThree`, `fixture:packages/compiler/internal/build/testdata/three`
+Evidence: `TestBrowserThree`, `TestBrowserThreeIsland`, `TestMigrateReactThreeFiberToKrateThree`, `fixture:packages/compiler/internal/build/testdata/three`, `fixture:packages/compiler/internal/build/testdata/three-island`
 
 ### @react-three/fiber
 
@@ -499,14 +500,14 @@ Evidence: `TestRealReactIsland`, `TestBrowserRealReactIsland`
 
 **Source:** n/a - **Islands:** Partial - **SSR:** n/a
 
-drei peer-depends on @react-three/fiber, so a module importing it runs as a real-React island with no configuration. Verified by hand: OrbitControls inside a fiber Canvas under @react-three/drei 10.7.
+drei peer-depends on @react-three/fiber, so a module importing it runs as a real-React island with no configuration. Verified by hand: OrbitControls inside a fiber Canvas under @react-three/drei 10.7. `krate migrate nextjs` moves code that only uses OrbitControls, Environment (Lightformer children or a map), Lightformer and useGLTF to @krate/three/drei (row krate-three), which needs no React.
 
 Known limits:
 
 - The mechanism is tested in CI with a minimal react-reconciler renderer; the library itself was verified by hand in Chromium (@react-three/drei 10.7) and is not installed in CI.
 - Only OrbitControls was exercised; other helpers have not been tried.
 
-Evidence: `TestRealReactIsland`, `TestBrowserRealReactIsland`
+Evidence: `TestRealReactIsland`, `TestBrowserRealReactIsland`, `TestMigrateReactThreeKeepsFiberForUnsupportedAPIs`
 
 ### react-konva
 

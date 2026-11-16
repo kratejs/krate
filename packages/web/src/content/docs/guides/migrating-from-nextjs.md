@@ -194,6 +194,18 @@ The first pass:
   [React compatibility](/docs/guides/react-compatibility/#libraries-built-on-a-react-reconciler-real-react-islands))
   or a guard. A `loading` that is not an arrow function returning JSX or a
   component name, and `ssr: false` outside a top-level `const`, are manual items;
+- moves `@react-three/fiber` and `@react-three/drei` code to
+  [`@krate/three`](/docs/features/three/) when every fiber and drei API the
+  project's modules use is provided (drei's `OrbitControls`, `Environment` with
+  `Lightformer` children or a `map`, and `useGLTF` come from `@krate/three/drei`),
+  and adds `@krate/three` to `package.json` (a manual item without
+  `--update-package`). The scene then runs on Krate, or on the Preact island of a
+  `"use client"` component, instead of a real-React island that ships React,
+  react-dom and a second copy of the React libraries around the canvas. One
+  unsupported API (another drei helper, `<Environment preset>`, fiber's
+  `reconciler`, a package built on fiber such as `@react-spring/three`) keeps
+  every fiber module as it is, because they render each other's components in
+  one canvas, and each blocking use is listed as a manual item;
 - converts `next/script`: `<Script strategy="afterInteractive">` (the default)
   becomes a Krate `<Script defer>`, `lazyOnload` an `async` one and
   `beforeInteractive` a `<script>` inside `<Head>`; `src`, `id`, `data-*`
