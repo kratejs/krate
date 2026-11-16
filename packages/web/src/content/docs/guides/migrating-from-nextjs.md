@@ -188,7 +188,8 @@ The first pass:
   { ssr: false, loading })` call (with or without a type argument,
   `dynamic<Props>(...)`) becomes a module-level `lazy()` plus a component that
   renders the `loading` fallback until it has mounted in the browser, then the
-  lazy component: the page HTML holds the fallback, the component lives in its
+  lazy component inside a `<Suspense>` with the same fallback (shown while the
+  chunk loads, as in Next.js): the page HTML holds the fallback, the component lives in its
   own `lazy-*.js` chunk and the build still renders it once, hidden, so a viewer
   that touches `window` while rendering needs a real-React island (see
   [React compatibility](/docs/guides/react-compatibility/#libraries-built-on-a-react-reconciler-real-react-islands))
@@ -205,7 +206,10 @@ The first pass:
   unsupported API (another drei helper, `<Environment preset>`, fiber's
   `reconciler`, a package built on fiber such as `@react-spring/three`) keeps
   every fiber module as it is, because they render each other's components in
-  one canvas, and each blocking use is listed as a manual item;
+  one canvas, and each blocking use is listed as a manual item. Keep
+  `@react-three/fiber` and drei installed while a real-React island (for example
+  a react-konva editor) renders one of the 3D components: there the build runs
+  `@krate/three` as fiber;
 - converts `next/script`: `<Script strategy="afterInteractive">` (the default)
   becomes a Krate `<Script defer>`, `lazyOnload` an `async` one and
   `beforeInteractive` a `<script>` inside `<Head>`; `src`, `id`, `data-*`

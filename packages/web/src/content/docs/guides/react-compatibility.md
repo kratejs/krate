@@ -528,6 +528,12 @@ commit after it is revealed, and are cleaned up while the boundary shows its
 fallback again (like a hidden conditional branch, see [Effects](#effects)). Request-time (runtime and server)
 components inside a boundary keep using streaming regions.
 
+In a `"use client"` component of a server-rendered page (a Preact island), the
+island root is a boundary, as React's root is: a component that suspends with
+no `<Suspense>` of its own (a `lazy()` component rendered after mount) keeps
+the server HTML until it has loaded. A server render of such a component uses
+the `getServerSnapshot` argument of `useSyncExternalStore`.
+
 **`use(promise)`.** Write it as the initializer of a declaration in the
 component body:
 

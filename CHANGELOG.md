@@ -434,6 +434,17 @@ host code runs in the native process. Names and options may change between relea
   now the URL of the running script there, and in the build-time island render.
 - `@krate/three`: a scene component called without children received `children: []` instead of no `children`
   prop, so `props.children ? a : b` took the wrong branch (drei's `Lightformer` rendered no material).
+- A `"use client"` component of a server-rendered page that calls `useSyncExternalStore(subscribe, getSnapshot,
+  getServerSnapshot)` failed the server render when `getSnapshot` reads `window`: preact/compat ignores the third
+  argument. Server renders of Preact islands now use `getServerSnapshot`, as React does.
+- A `lazy()` (or `use()`) with no `<Suspense>` of its own inside a `"use client"` component threw its promise out
+  of the island ("Uncaught Promise") and the component never appeared. The root of a client island is now a
+  Suspense boundary, as React's root is: the server HTML stays until the code has loaded.
+- `krate migrate nextjs` turns `dynamic(() => import(...), { ssr: false, loading })` into a lazy component inside
+  `<Suspense fallback={loading}>`, so the loading fallback also shows while the chunk loads, as in Next.js.
+- A component migrated to `@krate/three` that a real-React island renders (a react-konva editor that also shows the
+  3D preview) runs as `@react-three/fiber` there instead of failing the build with "Decorators are not valid here";
+  without fiber installed the build names what to install.
 - `import { z } from 'zod'` in an island no longer ships all of zod. zod's index re-exports its API as a namespace
   (`import * as z from "./v4/classic/external.js"; export { z }`), and esbuild builds a namespace that reaches a file
   through another module as an object holding every export, so the island got every schema type and every
