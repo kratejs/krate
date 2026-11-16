@@ -404,6 +404,8 @@ func (rw *nsRewriter) barrel(pb api.PluginBuild, path string) map[string]string 
 	return ns
 }
 
+// hopHolds compares paths as strings: when the two resolvers spell a file
+// differently (a Windows short name), the import is just left alone.
 func (rw *nsRewriter) hopHolds(pb api.PluginBuild, h nsHop) bool {
 	rw.mu.Lock()
 	if rw.hops == nil {

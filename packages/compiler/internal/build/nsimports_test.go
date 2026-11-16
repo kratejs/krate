@@ -15,7 +15,12 @@ import (
 // imported from its module, so esbuild tree shakes its members; an index that
 // runs code of its own is left alone, and so is the text of a string.
 func TestNamespaceImportRewrite(t *testing.T) {
-	root := t.TempDir()
+	// The real path, as a build uses: Windows hands out temp dirs by their
+	// short (8.3) names, which esbuild keeps and Krate's resolver expands.
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	// nslib's index re-exports impl's namespace as n and as the default, the
 	// way zod's does.
 	writeProjectFile(t, root, "node_modules/nslib/package.json", `{"name":"nslib","version":"1.0.0","type":"module","main":"index.js","sideEffects":false}`)
