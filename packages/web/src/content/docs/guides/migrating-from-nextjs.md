@@ -221,7 +221,10 @@ The first pass:
 - writes `trailingSlash: "never"` into `krate.config.ts` (Next's URL form: `/store`
   answers 200, `/store/` redirects), or `"always"` when `next.config` sets
   `trailingSlash: true`, and `tailwind: { enabled: true }` when `postcss.config.*`
-  uses `@tailwindcss/postcss` or `tailwindcss`;
+  uses `@tailwindcss/postcss` or `tailwindcss`, and `compress: { brotli: true,
+  gzip: true }` (Next.js compresses responses unless `next.config` sets
+  `compress: false`): `krate build` writes `.br` and best-ratio `.gz` siblings
+  of the assets, which `krate start` sends, instead of gzipping on the fly;
 - keeps `NextRequest` features in route handlers: the `Request` has
   `request.cookies` (`get`, `getAll`, `has`, read-only) and `request.nextUrl`
   (a `URL` with `searchParams`, `pathname`, `basePath` and `clone()`; the

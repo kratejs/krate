@@ -442,6 +442,9 @@ host code runs in the native process. Names and options may change between relea
 - A `lazy()` (or `use()`) with no `<Suspense>` of its own inside a `"use client"` component threw its promise out
   of the island ("Uncaught Promise") and the component never appeared. The root of a client island is now a
   Suspense boundary, as React's root is: the server HTML stays until the code has loaded.
+- `krate migrate nextjs` maps Next.js' default response compression to build-time precompression
+  (`compress: { brotli: true, gzip: true }`, left out for `compress: false`). A migrated app was gzipped on the
+  fly at Go's default level, about 4% larger than Next.js' gzip on the same JavaScript.
 - `krate migrate nextjs` turns `dynamic(() => import(...), { ssr: false, loading })` into a lazy component inside
   `<Suspense fallback={loading}>`, so the loading fallback also shows while the chunk loads, as in Next.js.
 - A component migrated to `@krate/three` that a real-React island renders (a react-konva editor that also shows the

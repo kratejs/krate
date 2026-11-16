@@ -1,6 +1,7 @@
 package migrate
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -267,5 +268,39 @@ func TestNextConfigComputedBasePathAndEnvAreManual(t *testing.T) {
 	rep := scanConfig(t, map[string]string{"next.config.js": `module.exports = { basePath: process.env.BASE, env: { A: process.env.A } };`})
 	if !hasManual(rep, "next.config.js", "basePath is computed") || !hasManual(rep, "next.config.js", "env is not a static string map") {
 		t.Errorf("computed basePath/env not reported: %+v", rep.Manual)
+	}
+}
+
+// Next.js compresses responses unless compress: false; the migrated config
+// precompresses assets (brotli and best-ratio gzip) so they are not left to
+// the server's on-the-fly gzip.
+func TestMigrateNextCompressBecomesPrecompression(t *testing.T) {
+	config := func(nextConfig string) string {
+		t.Helper()
+		files := map[string]string{"src/app/page.tsx": "export default function P() { return <main/>; }\n"}
+		if nextConfig != "" {
+			files["next.config.mjs"] = nextConfig
+		}
+		rep, err := ScanNext(gapsProject(t, files))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, f := range rep.Files {
+			if f.Target == "krate.config.ts" {
+				return string(f.Content)
+			}
+		}
+		t.Fatalf("no krate.config.ts planned")
+		return ""
+	}
+	want := regexp.MustCompile(`"compress": \{\s*"brotli": true,\s*"gzip": true\s*\}`)
+	if got := config(""); !want.MatchString(got) {
+		t.Errorf("default config does not precompress:\n%s", got)
+	}
+	if got := config("export default { compress: true };\n"); !want.MatchString(got) {
+		t.Errorf("compress: true does not precompress:\n%s", got)
+	}
+	if got := config("export default { compress: false };\n"); strings.Contains(got, "compress") {
+		t.Errorf("compress: false still precompresses:\n%s", got)
 	}
 }

@@ -40,6 +40,9 @@ type nextConfigData struct {
 	EnvDir string `json:"-"`
 	// Tailwind is true when the project's PostCSS config runs Tailwind.
 	Tailwind bool `json:"-"`
+	// NoCompress is set by `compress: false`. Next.js compresses responses by
+	// default; the migrated config precompresses assets at build time instead.
+	NoCompress bool `json:"-"`
 }
 
 type nextRedirect struct {
@@ -122,6 +125,11 @@ func readNextConfig(path string) (data nextConfigData, notes nextConfigNotes, ok
 			}
 		} else {
 			notes.Manual = append(notes.Manual, ManualItem{Source: file, Reason: "trailingSlash is computed and was not translated", Hint: "set trailingSlash in krate.config.ts: \"always\" matches trailingSlash: true, \"never\" matches Next.js' default of false"})
+		}
+	}
+	if v := prop(obj, "compress"); v != nil {
+		if on, ok := boolValue(v); ok {
+			out.NoCompress = !on
 		}
 	}
 	if v := prop(obj, "redirects"); v != nil {
@@ -382,6 +390,9 @@ func configJSON(entry string, next nextConfigData) []byte {
 	if next.Tailwind {
 		opts["tailwind"] = map[string]any{"enabled": true}
 	}
+	if v := compressValue(next); v != nil {
+		opts["compress"] = v
+	}
 	if next.BasePath != "" {
 		opts["basePath"] = next.BasePath
 	}
@@ -456,4 +467,15 @@ func usesTailwindPostCSS(root string) bool {
 		}
 	}
 	return false
+}
+
+// compressValue is the compress setting to write. Next.js compresses
+// responses unless next.config sets compress: false; Krate's equivalent is
+// build-time precompression (brotli and best-ratio gzip siblings that the
+// server sends), so assets are not left to on-the-fly gzip.
+func compressValue(next nextConfigData) map[string]any {
+	if next.NoCompress {
+		return nil
+	}
+	return map[string]any{"brotli": true, "gzip": true}
 }
