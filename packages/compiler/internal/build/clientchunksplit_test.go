@@ -456,7 +456,7 @@ export default async function IconPage() {
 	calls := esbuildStatsSince(before)
 	unsplit, _ := build(false)
 	t.Logf("esbuild calls of the split build: %v", calls)
-	if calls["batch:(*Builder).runClientChunkBatch"].n == 0 {
+	if calls["batch:(*Builder).runClientChunkBatchWith"].n == 0 {
 		t.Error("no client chunk check batch ran")
 	}
 	t.Logf("package boundaries checked on their own: %d", calls["batch:(*Builder).checkClientChunkAlone"].n)
@@ -492,5 +492,60 @@ export default async function IconPage() {
 	}
 	if approx == 0 {
 		t.Error("no boundary kept its split batch facts")
+	}
+}
+
+// Boundaries that reach an import() are checked again together in an unsplit
+// batch, not each on its own, and get the results of separate builds.
+func TestClientChunkSplitRechecksLazyEntriesUnsplit(t *testing.T) {
+	files := clientChunkSplitFiles()
+	files["src/components/H.tsx"] = `"use client";
+import { widgetB } from "big-lib";
+export default function H() {
+  return <button onClick={() => import("../lib/lazy").then((m) => m.later())}>{widgetB()}</button>;
+}`
+	b, root := scProject(t, files)
+	withPreact(t, root)
+	if err := b.BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	set := []clientChunkReq{
+		chunkReq(root, "src/components/A.tsx"),
+		chunkReq(root, "src/components/C.tsx"),
+		chunkReq(root, "src/components/H.tsx"),
+	}
+	alone := New(root, b.Cfg)
+	if err := alone.BuildAll(); err != nil {
+		t.Fatal(err)
+	}
+	want := make([]*clientChunkResult, len(set))
+	for i, r := range set {
+		want[i] = alone.buildClientChunk(r)
+	}
+	b.clientChunks, b.clientChunkText = nil, nil
+	jobs := make([]*roundJob, len(set))
+	for i, r := range set {
+		jobs[i] = &roundJob{input: r}
+	}
+	before := esbuildStatsSnapshot()
+	b.runClientChunkBatch(jobs)
+	calls := esbuildStatsSince(before)
+	if n := calls["(*Builder).buildClientChunk"].n; n != 0 {
+		t.Errorf("%d boundaries were checked on their own, want the lazy ones rechecked in one unsplit batch: %v", n, calls)
+	}
+	if n := calls["batch:(*Builder).runClientChunkBatchWith"].n; n != 2 {
+		t.Errorf("want a split batch and one unsplit batch, got %d batches: %v", n, calls)
+	}
+	for i, j := range jobs {
+		g, w := j.output.(*clientChunkResult), want[i]
+		if g.err != nil || w.err != nil {
+			t.Fatalf("%s: error %v, alone %v", set[i].key, g.err, w.err)
+		}
+		if g.info.stateful != w.info.stateful {
+			t.Errorf("%s: stateful %v, alone %v", set[i].key, g.info.stateful, w.info.stateful)
+		}
+		if strings.Join(keysOf(g.info.inputs), ",") != strings.Join(keysOf(w.info.inputs), ",") {
+			t.Errorf("%s: inputs %v, alone %v", set[i].key, keysOf(g.info.inputs), keysOf(w.info.inputs))
+		}
 	}
 }

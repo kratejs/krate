@@ -1047,6 +1047,14 @@ func runSubBatches(jobs []*roundJob, size, parallel int, run func([]*roundJob)) 
 }
 
 func (b *Builder) runClientChunkBatch(jobs []*roundJob) {
+	b.runClientChunkBatchWith(jobs, clientChunkSplit)
+}
+
+// runClientChunkBatchWith checks jobs in one batch, with code splitting when
+// split is set. Entries a split batch cannot stand in for (one that reaches
+// an import(), or that wrapping for another entry changes) are checked again
+// together in an unsplit batch, and the ones that batch flags on their own.
+func (b *Builder) runClientChunkBatchWith(jobs []*roundJob, split bool) {
 	guard := b.newUnavailableGuard()
 	opts, err := b.clientChunkOptions(guard)
 	if err == nil && len(jobs) > 1 {
@@ -1057,15 +1065,20 @@ func (b *Builder) runClientChunkBatch(jobs []*roundJob) {
 		}
 		var outs []batchOutput
 		var res api.BuildResult
-		if clientChunkSplit {
+		if split {
 			outs, res = esbuildBatchSplit(opts, entries)
 		} else {
 			outs, res = esbuildBatch(opts, entries)
 		}
 		if len(res.Errors) == 0 {
+			var unsplit []*roundJob
 			for i, j := range jobs {
 				r := j.input.(clientChunkReq)
 				files := outs[i].Files
+				if split && outs[i].Unsafe && len(files) > 0 {
+					unsplit = append(unsplit, j)
+					continue
+				}
 				if outs[i].Unsafe {
 					b.Prof.Add("batch:client-chunks-rebuilt", 0)
 				}
@@ -1073,11 +1086,15 @@ func (b *Builder) runClientChunkBatch(jobs []*roundJob) {
 					j.output = b.buildClientChunk(r)
 					continue
 				}
-				if clientChunkSplit {
+				if split {
 					j.output = b.recordSplitClientChunk(r, entries[i].Source, outs[i])
 					continue
 				}
 				j.output = b.recordClientChunk(r, entries[i].Source, batchJS(files), outs[i].Metafile)
+			}
+			if len(unsplit) > 0 {
+				b.Prof.Add("batch:client-chunks-unsplit", 0)
+				b.runClientChunkBatchWith(unsplit, false)
 			}
 			return
 		}
