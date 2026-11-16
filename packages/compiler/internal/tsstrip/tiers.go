@@ -5,6 +5,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/evanw/esbuild/pkg/api"
 
@@ -473,16 +474,52 @@ var tierDecoratorPlugin = api.Plugin{
 			if strings.Contains(args.Path, "node_modules") {
 				return api.OnLoadResult{}, nil
 			}
-			data, err := os.ReadFile(args.Path)
-			if err != nil {
-				return api.OnLoadResult{}, nil
-			}
-			src := string(data)
-			blanked := BlankTierDecorators(args.Path, src)
-			if blanked == src {
+			blanked, changed, ok := blankedFile(args.Path)
+			if !ok || !changed {
 				return api.OnLoadResult{}, nil
 			}
 			return api.OnLoadResult{Contents: &blanked, Loader: api.LoaderDefault}, nil
 		})
 	},
 }
+
+// blankedCache holds each file's source with its tier decorators blanked, by
+// path, while the file keeps its modification time and size: every bundle of
+// a build loads the same project files.
+var blankedCache sync.Map
+
+type blankedEntry struct {
+	mtimeNS, size int64
+	blanked       string
+	changed       bool
+}
+
+// blankedFile returns the source of path with its tier decorators blanked and
+// whether that changed it; ok is false when the file cannot be read.
+func blankedFile(path string) (string, bool, bool) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", false, false
+	}
+	if v, hit := blankedCache.Load(path); hit {
+		if e := v.(blankedEntry); e.mtimeNS == info.ModTime().UnixNano() && e.size == info.Size() {
+			return e.blanked, e.changed, true
+		}
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", false, false
+	}
+	src := string(data)
+	blanked := BlankTierDecorators(path, src)
+	e := blankedEntry{mtimeNS: info.ModTime().UnixNano(), size: info.Size(), changed: blanked != src}
+	if e.changed {
+		e.blanked = blanked
+	}
+	blankedCache.Store(path, e)
+	return e.blanked, e.changed, true
+}
+
+// ResetBlankedCache forgets the blanked sources, for a new build: a file
+// edited without changing its size and modification time is read again.
+func ResetBlankedCache() { blankedCache.Clear() }

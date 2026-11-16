@@ -61,14 +61,33 @@ func (b *Builder) pageCSSAfterDCE(renderMode RenderMode, cssText string, modules
 }
 
 // clientChunkSources returns the contents of the "use client" chunks already
-// written under the output directory, for the CSS usage scan.
-func (b *Builder) clientChunkSources(boundaries []ClientBoundary) []string {
+// written under the output directory, for the CSS usage scan. The scan finds
+// the same scoped classes of modules in them as in separate builds.
+func (b *Builder) clientChunkSources(boundaries []ClientBoundary, modules map[string]*bundler.CSSModuleInfo) []string {
 	var out []string
+	var scoped map[string]bool
 	for _, cb := range boundaries {
 		b.clientChunkMu.Lock()
 		text, ok := b.clientChunkText[cb.ChunkURL]
+		info, measured := b.clientChunks[cb.SourcePath]
 		b.clientChunkMu.Unlock()
 		if ok {
+			if f := info.split; measured && f != nil && info.url == cb.ChunkURL && b.dceCSSEnabled() {
+				// The text of a split batch also holds code only other
+				// boundaries use: a class only that code names needs the
+				// chunk's own check.
+				if scoped == nil {
+					scoped = moduleClassSet(modules)
+				}
+				for cls := range scoped {
+					if strings.Contains(text, cls) && !strings.Contains(f.ownText, cls) {
+						if _, exact, err := b.exactChunk(info); err == nil {
+							text = exact
+						}
+						break
+					}
+				}
+			}
 			out = append(out, text)
 			continue
 		}

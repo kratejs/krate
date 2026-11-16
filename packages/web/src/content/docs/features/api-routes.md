@@ -53,7 +53,9 @@ one (call the addon from an API route).
   `Bun.serve` (no Node `http` stack, no cluster shim) - the fastest of the
   sidecar options. `ssr.apiRuntime: "node"` (or `"deno"`) uses the Node `http`
   sidecar instead. The top-level `runtime: "bun"` selects the same Bun server
-  when no explicit `apiRuntime` is set.
+  when no explicit `apiRuntime` is set. A route is bundled only for the
+  runtime that serves it (plus Node for a Node-only route under the embedded
+  runtime), so rebuild after changing `apiRuntime`.
 - Go API routes (`src/api/*.go`) remain the fastest option; the sidecar binary
   is a compiled Go server.
 

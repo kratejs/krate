@@ -314,6 +314,9 @@ Promise.resolve(fn()).then(function (r) { globalThis.%s = r; }, function () {});
 		VirtualFiles:  virtual,
 
 		SourceTransform: b.serverGlobalsTransform,
+		Worker:          b.jsWorker(),
+		WorkerLabel:     "static-params",
+		QuickJSDone:     b.quickJSDone("static-params"),
 	})
 }
 
@@ -699,6 +702,9 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	}
 	pageDeps = append(pageDeps, bundle.CSSDeps...)
 	layoutCut, cutErr := b.prepareLayoutCut(spp.PagePath)
+	if cutErr == nil && layoutCut != nil {
+		cutErr = b.awaitBoundaries(layoutCut.Boundaries)
+	}
 	if cutErr != nil {
 		return nil, "", cutErr
 	}
@@ -944,7 +950,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	emitResult.IslandBootJS = islandBoot
 	needsHydrate := len(emitResult.Signatures) > 0 || islandJS != "" || islandBoot != "" || strings.Contains(emitResult.HTML, "data-krate-portal")
 	dceJS := append(lazyChunkSources(emitResult.LazyChunks), islandJS)
-	dceJS = append(dceJS, b.clientChunkSources(clientBoundaries)...)
+	dceJS = append(dceJS, b.clientChunkSources(clientBoundaries, bundle.CSSModules)...)
 	if needsHydrate {
 		hydrationJS = renderer.GenerateNewHydrationJS(emitResult)
 		b.warnShippedCollections(spp.PagePath, entryModule.Program, hydrationJS, 2)

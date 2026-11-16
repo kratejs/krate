@@ -50,6 +50,94 @@ type ModuleCache struct {
 	res      *resolverMemo
 	renamed  map[string]*renamedEntry
 	warned   map[string]bool
+	// verified holds, per file, the content hash checked against the file
+	// during this build (reset by ResetResolver). Without it every page
+	// re-read and re-hashed every module it imports, under mu.
+	verified map[string]verifiedStamp
+	// parses counts the parses of each file over the cache's lifetime.
+	parses map[string]int
+	// parsing holds the files a bundle is parsing now: bundles that need one
+	// wait for that parse instead of parsing it too.
+	parsing map[string]chan struct{}
+}
+
+// beginParse claims the parse of abs. It returns a func that ends the claim,
+// or nil after waiting for a parse another bundle had claimed: the caller then
+// looks the file up again.
+func (c *ModuleCache) beginParse(abs string) func() {
+	if c == nil {
+		return func() {}
+	}
+	c.mu.Lock()
+	if ch, ok := c.parsing[abs]; ok {
+		c.mu.Unlock()
+		<-ch
+		return nil
+	}
+	if c.parsing == nil {
+		c.parsing = map[string]chan struct{}{}
+	}
+	ch := make(chan struct{})
+	c.parsing[abs] = ch
+	c.mu.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			c.mu.Lock()
+			delete(c.parsing, abs)
+			c.mu.Unlock()
+			close(ch)
+		})
+	}
+}
+
+type verifiedStamp struct {
+	mtime time.Time
+	size  int64
+	hash  string
+}
+
+// matches reports whether the cached entry stamped (mtime, size, hash) is
+// still the file at abs. The content of a small file is hashed once per
+// build, outside the lock.
+func (c *ModuleCache) matches(abs string, mtime time.Time, size int64, hash string) bool {
+	if size > contentVerifyLimit {
+		return true
+	}
+	if hash == "" {
+		return false
+	}
+	c.mu.Lock()
+	v, ok := c.verified[abs]
+	c.mu.Unlock()
+	if ok && v.mtime.Equal(mtime) && v.size == size {
+		return v.hash == hash
+	}
+	got := fileContentHash(abs, size)
+	if got == "" {
+		return false
+	}
+	c.mu.Lock()
+	if c.verified == nil {
+		c.verified = map[string]verifiedStamp{}
+	}
+	c.verified[abs] = verifiedStamp{mtime: mtime, size: size, hash: got}
+	c.mu.Unlock()
+	return got == hash
+}
+
+// ParseCounts returns how many times each file was parsed into the cache.
+func (c *ModuleCache) ParseCounts() map[string]int {
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make(map[string]int, len(c.parses))
+	for k, v := range c.parses {
+		out[k] = v
+	}
+	return out
 }
 
 // firstWarning reports whether key has not been seen before, and records it.
@@ -108,61 +196,58 @@ func (c *ModuleCache) putRenamed(path string, orig *ast.Program, names string, p
 // reset at the start of each build (file adds/removes between dev rebuilds must
 // not be served from a stale negative entry); the parse cache is unaffected.
 type resolverMemo struct {
-	mu      sync.Mutex
-	exists  map[string]bool
-	imports map[string]string
+	// sync.Maps: every page of a build reads these at once, and entries are
+	// written once and read many times.
+	exists  sync.Map // path -> bool
+	imports sync.Map // key -> resolved path
 }
 
 func newResolverMemo() *resolverMemo {
-	return &resolverMemo{exists: map[string]bool{}, imports: map[string]string{}}
+	return &resolverMemo{}
 }
 
 func (m *resolverMemo) existsResult(path string) (bool, bool) {
 	if m == nil {
 		return false, false
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	v, ok := m.exists[path]
-	return v, ok
+	v, ok := m.exists.Load(path)
+	if !ok {
+		return false, false
+	}
+	return v.(bool), true
 }
 
 func (m *resolverMemo) putExists(path string, v bool) {
 	if m == nil {
 		return
 	}
-	m.mu.Lock()
-	m.exists[path] = v
-	m.mu.Unlock()
+	m.exists.Store(path, v)
 }
 
 func (m *resolverMemo) importResult(key string) (string, bool) {
 	if m == nil {
 		return "", false
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	v, ok := m.imports[key]
-	return v, ok
+	v, ok := m.imports.Load(key)
+	if !ok {
+		return "", false
+	}
+	return v.(string), true
 }
 
 func (m *resolverMemo) putImport(key, v string) {
 	if m == nil {
 		return
 	}
-	m.mu.Lock()
-	m.imports[key] = v
-	m.mu.Unlock()
+	m.imports.Store(key, v)
 }
 
 func (m *resolverMemo) reset() {
 	if m == nil {
 		return
 	}
-	m.mu.Lock()
-	m.exists = map[string]bool{}
-	m.imports = map[string]string{}
-	m.mu.Unlock()
+	m.exists.Clear()
+	m.imports.Clear()
 }
 
 // ResetResolver clears the filesystem-existence and import-resolution memo so a
@@ -172,6 +257,9 @@ func (c *ModuleCache) ResetResolver() {
 		return
 	}
 	c.res.reset()
+	c.mu.Lock()
+	c.verified = nil
+	c.mu.Unlock()
 }
 
 type programEntry struct {
@@ -228,9 +316,9 @@ func (c *ModuleCache) getProgram(abs string, mtime time.Time, size int64) (*prog
 		return nil, false
 	}
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	e, ok := c.programs[abs]
-	if !ok || !e.mtime.Equal(mtime) || e.size != size || !stampMatches(abs, mtime, size, e.hash) {
+	c.mu.Unlock()
+	if !ok || !e.mtime.Equal(mtime) || e.size != size || !c.matches(abs, mtime, size, e.hash) {
 		return nil, false
 	}
 	return e, true
@@ -243,6 +331,10 @@ func (c *ModuleCache) putProgram(abs string, e *programEntry) {
 	e.hash = fileContentHash(abs, e.size)
 	c.mu.Lock()
 	c.programs[abs] = e
+	if c.parses == nil {
+		c.parses = map[string]int{}
+	}
+	c.parses[abs]++
 	c.mu.Unlock()
 }
 
@@ -251,9 +343,9 @@ func (c *ModuleCache) getCSS(abs string, mtime time.Time, size int64) (*cssEntry
 		return nil, false
 	}
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	e, ok := c.css[abs]
-	if !ok || !e.mtime.Equal(mtime) || e.size != size || !stampMatches(abs, mtime, size, e.hash) {
+	c.mu.Unlock()
+	if !ok || !e.mtime.Equal(mtime) || e.size != size || !c.matches(abs, mtime, size, e.hash) {
 		return nil, false
 	}
 	if !cssDepsCurrent(e.deps) {
@@ -277,9 +369,9 @@ func (c *ModuleCache) getAsset(abs string, mtime time.Time, size int64) (*assetE
 		return nil, false
 	}
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	e, ok := c.assets[abs]
-	if !ok || !e.mtime.Equal(mtime) || e.size != size || !stampMatches(abs, mtime, size, e.hash) {
+	c.mu.Unlock()
+	if !ok || !e.mtime.Equal(mtime) || e.size != size || !c.matches(abs, mtime, size, e.hash) {
 		return nil, false
 	}
 	return e, true

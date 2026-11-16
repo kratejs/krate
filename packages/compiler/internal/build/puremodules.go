@@ -25,34 +25,43 @@ type pureModuleMark struct{}
 // any top-level statement that may have an effect are never marked, and
 // packages keep their own `sideEffects` flag.
 func purePrunePlugin(projectRoot string) api.Plugin {
+	return purePrunePluginMemo(projectRoot, nil)
+}
+
+// purePrunePluginMemo is purePrunePlugin for a family of builds with the same
+// options, which share their resolutions through memo.
+func purePrunePluginMemo(projectRoot string, memo *resolveMemo) api.Plugin {
 	root := canonicalPath(projectRoot)
 	return api.Plugin{
 		Name: "krate-pure-modules",
 		Setup: func(pb api.PluginBuild) {
-			pb.OnResolve(api.OnResolveOptions{Filter: `.*`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
-				return pureResolve(pb, root, args)
+			// Only imports made by a file-namespace module are acted on.
+			pb.OnResolve(api.OnResolveOptions{Filter: `.*`, Namespace: "file"}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+				return pureResolve(pb, root, args, memo)
 			})
 		},
 	}
 }
 
-func pureResolve(pb api.PluginBuild, root string, args api.OnResolveArgs) (api.OnResolveResult, error) {
+func pureResolve(pb api.PluginBuild, root string, args api.OnResolveArgs, memo *resolveMemo) (api.OnResolveResult, error) {
 
 	if _, inner := args.PluginData.(pureModuleMark); inner || args.Kind == api.ResolveEntryPoint || args.Importer == "" ||
 		args.Namespace != "file" || strings.Contains(filepath.ToSlash(args.Importer), "/node_modules/") {
 		return api.OnResolveResult{}, nil
 	}
-	r := pb.Resolve(args.Path, api.ResolveOptions{
-		Importer: args.Importer, Namespace: args.Namespace, ResolveDir: args.ResolveDir,
-		Kind: args.Kind, PluginData: pureModuleMark{}, With: args.With,
+	r := memo.resolve(args, func() api.ResolveResult {
+		return pb.Resolve(args.Path, api.ResolveOptions{
+			Importer: args.Importer, Namespace: args.Namespace, ResolveDir: args.ResolveDir,
+			Kind: args.Kind, PluginData: pureModuleMark{}, With: args.With,
+		})
 	})
-	if len(r.Errors) > 0 || r.External || r.Namespace != "file" || r.Path == "" {
+	if r.failed || r.external || r.namespace != "file" || r.path == "" {
 		return api.OnResolveResult{}, nil
 	}
-	if !withinDir(root, canonicalPath(r.Path)) || strings.Contains(filepath.ToSlash(r.Path), "/node_modules/") || !isPureModule(r.Path) {
+	if !withinDir(root, canonicalPath(r.path)) || strings.Contains(filepath.ToSlash(r.path), "/node_modules/") || !isPureModule(r.path) {
 		return api.OnResolveResult{}, nil
 	}
-	return api.OnResolveResult{Path: r.Path, Namespace: r.Namespace, Suffix: r.Suffix, SideEffects: api.SideEffectsFalse}, nil
+	return api.OnResolveResult{Path: r.path, Namespace: r.namespace, Suffix: r.suffix, SideEffects: api.SideEffectsFalse}, nil
 }
 
 func withinDir(dir, path string) bool {

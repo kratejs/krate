@@ -1,20 +1,24 @@
-// Package jseval evaluates TypeScript/JavaScript in-process: it bundles an entry
-// module (resolving imports) with esbuild and runs it in the embedded QuickJS
-// runtime - no Node, no tsx, no subprocess. It backs build-time evaluation of
-// user TS such as krate.config.ts and tailwind.config.ts.
+// Package jseval evaluates TypeScript/JavaScript: it bundles an entry module
+// (resolving imports) with esbuild and runs it in the embedded QuickJS runtime,
+// or on a Node or Bun worker pool when the caller passes one. It backs
+// build-time evaluation of user TS such as krate.config.ts, tailwind.config.ts
+// and page metadata.
 package jseval
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"runtime/debug"
 	"strings"
+	"time"
 
 	"github.com/evanw/esbuild/pkg/api"
 
+	"github.com/kratejs/krate/packages/compiler/internal/jsworker"
 	"github.com/kratejs/krate/packages/compiler/internal/safe"
 	"github.com/kratejs/krate/packages/compiler/internal/tsstrip"
 	"github.com/kratejs/krate/packages/native/jsruntime"
@@ -64,6 +68,15 @@ type Options struct {
 	// SourceTransform, when set, rewrites the source of every JS/TS file the
 	// bundle loads from disk (path is absolute) before it is compiled.
 	SourceTransform func(path, src string) string
+	// Worker, when set, runs the bundle in a Node or Bun worker process
+	// instead of QuickJS. When the worker is unavailable, or the bundle only
+	// parses as a module there, the embedded engine runs it. Ignored with
+	// NodeShims.
+	Worker *jsworker.Pool
+	// WorkerLabel names the evaluation in the pool's profile.
+	WorkerLabel string
+	// QuickJSDone, when set, is called with the time a QuickJS run took.
+	QuickJSDone func(time.Duration)
 }
 
 // defaultMemoryLimit is the QuickJS heap limit of one evaluation. Bundled page
@@ -112,6 +125,14 @@ func guardFaults(fn func() error) (err error) {
 
 // run executes the bundled entry in a fresh runtime and returns its result.
 func run(opts Options, bundle string) (json.RawMessage, error) {
+	if opts.Worker != nil && !opts.NodeShims {
+		if out, ok, err := runWorker(opts, bundle); ok {
+			return out, err
+		}
+	}
+	if opts.QuickJSDone != nil {
+		defer func(t0 time.Time) { opts.QuickJSDone(time.Since(t0)) }(time.Now())
+	}
 	rtOpts := jsruntime.Options{}
 	if os.Getenv("KRATE_JS_MEMORY_MB") == "" {
 		rtOpts.MemoryLimit = defaultMemoryLimit
@@ -134,12 +155,12 @@ func run(opts Options, bundle string) (json.RawMessage, error) {
 	if opts.Await {
 		rt.DrainJobs()
 	}
-	if msg, _ := rt.Execute(`typeof globalThis.` + ErrorGlobal + ` === "string" ? globalThis.` + ErrorGlobal + ` : ""`); msg != nil {
+	if msg, _ := rt.Execute(errorExpr); msg != nil {
 		if text, _ := msg.(string); text != "" {
 			return nil, &ThrownError{Text: text}
 		}
 	}
-	res, err := rt.Execute(`JSON.stringify(globalThis.` + ResultGlobal + ` ?? null)`)
+	res, err := rt.Execute(resultExpr)
 	if err != nil {
 		return nil, err
 	}
@@ -148,6 +169,41 @@ func run(opts Options, bundle string) (json.RawMessage, error) {
 		return nil, fmt.Errorf("entry produced no %s (the module may have run out of memory; KRATE_JS_MEMORY_MB raises the limit)", ResultGlobal)
 	}
 	return json.RawMessage(s), nil
+}
+
+// Expressions the result is read with, in either engine.
+const (
+	errorExpr  = `typeof globalThis.` + ErrorGlobal + ` === "string" ? globalThis.` + ErrorGlobal + ` : ""`
+	resultExpr = `JSON.stringify(globalThis.` + ResultGlobal + ` ?? null)`
+	untilExpr  = `globalThis.` + ResultGlobal + ` !== undefined || typeof globalThis.` + ErrorGlobal + ` === "string"`
+)
+
+// runWorker is run on the worker pool; ok is false when QuickJS must run the
+// bundle instead.
+func runWorker(opts Options, bundle string) (json.RawMessage, bool, error) {
+	res, err := opts.Worker.Run(jsworker.Request{
+		Code:   bundle,
+		Module: true,
+		Env:    opts.Env,
+		Await:  opts.Await,
+		Until:  untilExpr,
+		Reads:  []string{errorExpr, resultExpr},
+		Label:  opts.WorkerLabel,
+	})
+	if err != nil || res.Unsupported || len(res.Reads) != 2 {
+		return nil, false, nil
+	}
+	if v := res.Reads[0]; v.IsString && v.S != "" {
+		return nil, true, &ThrownError{Text: v.S}
+	}
+	v := res.Reads[1]
+	if v.Err != "" {
+		return nil, true, errors.New(v.Err)
+	}
+	if !v.IsString || v.S == "" || v.S == "null" {
+		return nil, true, fmt.Errorf("entry produced no %s (the module may have run out of memory; KRATE_JS_MEMORY_MB raises the limit)", ResultGlobal)
+	}
+	return json.RawMessage(v.S), true, nil
 }
 
 // BundleMessage is one esbuild error. File is absolute and Col is 1-based; both
@@ -266,14 +322,14 @@ func importMetaPreserver(nodeShims bool, virtual map[string]string, transform fu
 		Setup: func(pb api.PluginBuild) {
 			// Style and asset imports carry no data for build-time evaluation;
 			// load them empty instead of parsing them as JavaScript.
-			pb.OnLoad(api.OnLoadOptions{Filter: assetFilter}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
+			pb.OnLoad(api.OnLoadOptions{Filter: assetFilter, Namespace: "file"}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
 				if args.Namespace != "file" {
 					return api.OnLoadResult{}, nil
 				}
 				empty := ""
 				return api.OnLoadResult{Contents: &empty, Loader: api.LoaderJS}, nil
 			})
-			pb.OnLoad(api.OnLoadOptions{Filter: `\.(?:[cm]?[jt]sx?|json)$`}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
+			pb.OnLoad(api.OnLoadOptions{Filter: `\.(?:[cm]?[jt]sx?|json)$`, Namespace: "file"}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
 				if args.Namespace != "file" {
 					return api.OnLoadResult{}, nil
 				}
@@ -308,7 +364,7 @@ func virtualFilesPlugin(virtual map[string]string) api.Plugin {
 	return api.Plugin{
 		Name: "krate-virtual-files",
 		Setup: func(pb api.PluginBuild) {
-			pb.OnResolve(api.OnResolveOptions{Filter: `.*`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+			pb.OnResolve(api.OnResolveOptions{Filter: absPathFilter}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
 				if !filepath.IsAbs(args.Path) {
 					return api.OnResolveResult{}, nil
 				}
@@ -349,6 +405,10 @@ func injectDirnameVars(path, src string) string {
 	}
 	return decl + src
 }
+
+// absPathFilter matches every specifier filepath.IsAbs accepts on any OS: a
+// rooted path, a drive path with either separator, and a UNC path.
+const absPathFilter = `^(?:/|[A-Za-z]:[\\/]|\\[\\/])`
 
 // assetFilter matches imports of styles, images, fonts and other non-code
 // assets.

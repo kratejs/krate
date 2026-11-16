@@ -223,7 +223,9 @@ export default function Home() { return <h1>{greet("page").text}</h1>; }`,
 		"apps/web/src/api/ws.ts": `import { greet } from "@acme/ui";
 export async function GET() { return Response.json(greet("route")); }`,
 	}
-	root, cfg := externalsProjectAt(t, files, "apps/web", nil)
+	// The Node sidecar serves the routes (and builds their artifacts) with
+	// apiRuntime node.
+	root, cfg := externalsProjectAt(t, files, "apps/web", func(c *config.Config) { c.SSR.APIRuntime = "node" })
 	html, err := os.ReadFile(filepath.Join(root, "dist", "index.html"))
 	if err != nil || !strings.Contains(string(html), "hello page") {
 		t.Fatalf("the page must render the workspace package: %v\n%s", err, html)
@@ -231,8 +233,8 @@ export async function GET() { return Response.json(greet("route")); }`,
 	if _, err := BuildServerBundle(root, cfg, "node"); err != nil {
 		t.Fatalf("BuildServerBundle: %v", err)
 	}
-	// The Node sidecar artifact (krate start, Docker) bundles the workspace
-	// source too: plain Node cannot load its .ts entry from node_modules.
+	// The Node sidecar artifact bundles the workspace source too: plain Node
+	// cannot load its .ts entry from node_modules.
 	nodeBundle, err := os.ReadFile(filepath.Join(root, "dist", ".krate", "api-node", "ws.js"))
 	if err != nil || strings.Contains(string(nodeBundle), "@acme/ui") || !strings.Contains(string(nodeBundle), "hello ") {
 		t.Errorf("the sidecar bundle must contain the workspace package source: %v\n%s", err, nodeBundle)

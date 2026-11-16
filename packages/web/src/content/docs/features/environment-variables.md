@@ -151,7 +151,9 @@ limits. All are optional.
 | `KRATE_INSTALL_TIMEOUT` | `30m` | Timeout for `krate plugin add` package installs. |
 | `KRATE_JS_MEMORY_MB` | `32` | Embedded QuickJS heap limit. |
 | `KRATE_JS_STACK_KB` | `16` | Embedded QuickJS stack limit, at most `32`. The default allows about 16,000 nested calls; past the limit a call throws a catchable error. |
-| `KRATE_JS_TIMEOUT` | `30s` | Embedded QuickJS eval timeout. |
+| `KRATE_JS_TIMEOUT` | `30s` | Embedded QuickJS eval timeout. Build-time evaluations on Node or Bun use the same limit. |
+| `KRATE_BUILD_JS` | auto | Engine for build-time JavaScript: `generateMetadata` and `metadata`, `generateStaticParams`, resource-hint renders and island server renders. `node` or `bun` runs it in a few long-lived worker processes, each evaluation in a fresh context; `quickjs` keeps it in the embedded engine. Unset, the build uses the project's `runtime`, `ssr.ssrRuntime` or `ssr.apiRuntime` when that is `node` or `bun`, else `node`, then `bun`, from `PATH`, and QuickJS when neither is installed. A worker that fails to start or dies hands the rest of the build to QuickJS. |
+| `KRATE_BUILD_JS_WORKERS` | `min(4, CPUs/3)` | Number of Node or Bun build workers. |
 | `KRATE_PLUGIN_MAX_FILES` | `10000` | Max files a single plugin hook may emit. |
 | `KRATE_PLUGIN_MAX_FILE_BYTES` | `67108864` | Max size of a single plugin-emitted file. |
 | `KRATE_ALLOW_UNSAFE_OUTDIR` | unset | Allow an `outDir` that is a filesystem root or the project root (normally refused). |

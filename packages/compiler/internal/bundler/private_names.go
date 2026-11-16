@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
@@ -377,6 +378,9 @@ func (p exportPlan) importerRewrites(b *Bundler, mods []*Module) map[string]modu
 func (b *Bundler) planExportRenames(mods []*Module, dynamic map[string]bool) exportPlan {
 	plan := exportPlan{renames: map[string]map[string]string{}}
 	owners := map[string]map[string]bool{}
+	// ownerMods lists each name's owners in mods order, so a clash group is
+	// read off directly instead of scanning every module per name.
+	ownerMods := map[string][]*Module{}
 	aliased := map[string]map[string]bool{} // name -> modules exporting it as an alias
 	for _, mod := range mods {
 		// npm code (and krate.vendor files) is bundled for the browser by
@@ -393,6 +397,9 @@ func (b *Bundler) planExportRenames(mods []*Module, dynamic map[string]bool) exp
 			add := func(name string) {
 				if owners[name] == nil {
 					owners[name] = map[string]bool{}
+				}
+				if !owners[name][mod.Path] {
+					ownerMods[name] = append(ownerMods[name], mod)
 				}
 				owners[name][mod.Path] = true
 			}
@@ -489,11 +496,15 @@ func (b *Bundler) planExportRenames(mods []*Module, dynamic map[string]bool) exp
 		}
 	}
 	sort.Strings(clashNames)
+	uniquePaths := len(byPath) == len(mods)
 	for _, name := range clashNames {
-		var group []*Module
-		for _, mod := range mods {
-			if owners[name][mod.Path] {
-				group = append(group, mod)
+		group := ownerMods[name]
+		if !uniquePaths {
+			group = nil
+			for _, mod := range mods {
+				if owners[name][mod.Path] {
+					group = append(group, mod)
+				}
 			}
 		}
 		// An alias export cannot move (its binding has another name), so it
@@ -549,13 +560,25 @@ func (b *Bundler) planExportRenames(mods []*Module, dynamic map[string]bool) exp
 func distinctFiles(mods []*Module) int {
 	files := map[string]bool{}
 	for _, mod := range mods {
-		p := mod.Path
-		if real, err := filepath.EvalSymlinks(p); err == nil {
-			p = real
-		}
-		files[p] = true
+		files[realPathOf(mod.Path)] = true
 	}
 	return len(files)
+}
+
+// realPaths memoizes realPathOf for a build (cleared by ResetResolveCache).
+var realPaths sync.Map
+
+// realPathOf is p with its symlinks resolved, or p when that fails.
+func realPathOf(p string) string {
+	if v, ok := realPaths.Load(p); ok {
+		return v.(string)
+	}
+	real := p
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		real = r
+	}
+	realPaths.Store(p, real)
+	return real
 }
 
 func inNodeModules(path string) bool {

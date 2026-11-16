@@ -44,6 +44,11 @@ var nodeGlobalsSource = `
 
 var nodeGlobalsBC sharedBytecode
 
+// NodeGlobalsSource returns the script that installs process and the minimal
+// require(); it reads files through a global _go_readFile(path, opts). The
+// build's Node worker runs it so its contexts match this runtime.
+func NodeGlobalsSource() string { return nodeGlobalsSource }
+
 // injectNodeGlobals installs process.env and the fs/path require() shim; the
 // fs shim reads files through the _go_readFile host function.
 func (r *Runtime) injectNodeGlobals() error {

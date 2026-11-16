@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"html"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -1627,6 +1628,10 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	// Parsed baked shells (per route) so the region hot path skips the disk read
 	// and marker parse. Reloads automatically when a dev rebuild rewrites a shell.
 	regionShells := newRegionShellCache()
+
+	if msg := apiArtifactMismatch(apiRTOption, apiDir, nodeAPIDir); msg != "" {
+		fmt.Fprintf(os.Stderr, "  %s! %s%s\n", cYellow, msg, cReset)
+	}
 
 	// Load embedded API route runtime if configured (default: quickjs)
 	var apiRT *jsruntime.APIRouteRuntime
@@ -3463,4 +3468,37 @@ func staticDirExists(absOut, urlPath string) bool {
 	}
 	fi, err := os.Stat(filepath.Join(absOut, filepath.FromSlash(path.Clean("/"+up))))
 	return err == nil && fi.IsDir()
+}
+
+// apiArtifactMismatch explains a build whose API route artifacts are for
+// another runtime than option selects: a build writes a route's artifact only
+// for the runtime that serves it, so changing ssr.apiRuntime needs a rebuild.
+func apiArtifactMismatch(option, apiDir, nodeAPIDir string) string {
+	embedded, quickjs, node := embeddedRuntime(option), hasRouteBundles(apiDir), hasRouteBundles(nodeAPIDir)
+	switch {
+	case embedded && !quickjs && node:
+		return "the API routes were built for ssr.apiRuntime node, bun or deno, but it is now the embedded runtime: run `krate build` again"
+	case !embedded && quickjs && !node:
+		return "the API routes were built for the embedded runtime, but ssr.apiRuntime is now " + option + ": run `krate build` again"
+	}
+	return ""
+}
+
+// hasRouteBundles reports whether dir holds an API route bundle (metadata
+// route bundles under __krate_meta do not count).
+func hasRouteBundles(dir string) bool {
+	found := false
+	_ = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || found {
+			return filepath.SkipDir
+		}
+		if d.IsDir() && d.Name() == metaAPIKeyDir {
+			return filepath.SkipDir
+		}
+		if !d.IsDir() && strings.HasSuffix(d.Name(), ".js") {
+			found = true
+		}
+		return nil
+	})
+	return found
 }
