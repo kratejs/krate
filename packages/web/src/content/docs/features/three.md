@@ -565,7 +565,7 @@ under the `ReactThreeFiber` and `KrateThree` namespaces.
 
 - **There is no React reconciler.** `reconciler` is not exported, and libraries
   built on `@react-three/fiber` cannot be used inside a `@krate/three` canvas,
-  except the drei helpers in [`@krate/three/drei`](#drei-helpers-krate-three-drei).
+  except the drei helpers in [`@krate/three/drei`](#drei-helpers-kratethreedrei).
   Their building blocks are three classes you can `extend`. To use those
   libraries as they are, run `@react-three/fiber` itself in a
   [real-React island](/docs/guides/react-compatibility/#libraries-built-on-a-react-reconciler-real-react-islands),
