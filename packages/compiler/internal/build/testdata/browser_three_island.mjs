@@ -90,12 +90,21 @@ try {
     await until(p, () => window.__three.get().controls.minDistance === 2);
     await p.click("#pause");
     await until(p, () => window.__three.get().frameloop === "never");
+    // A frame already scheduled may still land; then nothing renders.
+    await p.waitForTimeout(400);
     const frames = await p.evaluate(() => window.__frames);
     await p.mouse.move(cx + 10, cy + 10);
-    await p.waitForTimeout(200);
+    await p.mouse.wheel(0, -100);
+    await p.waitForTimeout(400);
     if ((await p.evaluate(() => window.__frames)) !== frames) return "frames rendered while paused";
     await p.click("#pause");
     await until(p, () => window.__three.get().frameloop === "demand");
+    return true;
+  });
+
+  await run("lazy viewer without a Suspense boundary", "/lazy/", async (p) => {
+    await until(p, () => !!window.__three && !!window.__gltf);
+    if (await p.locator("#viewer-loading").count()) return "the loading placeholder is still shown";
     return true;
   });
 

@@ -774,7 +774,7 @@ func (b *Builder) clientChunkFor(key, resolveDir, entry string) (string, bool, e
 	if err != nil {
 		return "", false, err
 	}
-	src := "import { h, hydrate } from \"preact\";\n" + entry +
+	src := "import { h, hydrate } from \"preact\";\nimport { Suspense as __KrateSuspense } from \"preact/compat\";\n" + entry +
 		clientReviveJS + clientActionCallJS + preactSlotJS + `
 function __resolve(name) {
   return name.split(".").reduce(function (o, k) { return o == null ? o : o[k]; }, __m);
@@ -797,7 +797,10 @@ export async function mount(el) {
   } finally {
     __krateSlotPool = null;
   }
-  hydrate(__krateInScope(el, h(C, props)), el);
+  // The root is a Suspense boundary, as in React: a lazy() or use() with no
+  // boundary of its own waits there (keeping the server HTML) instead of
+  // throwing its promise out of the island.
+  hydrate(__krateInScope(el, h(__KrateSuspense, { fallback: null }, h(C, props))), el);
   el.setAttribute("data-krate-island-hydrated", "");
 }
 `
