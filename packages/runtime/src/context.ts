@@ -138,6 +138,8 @@ export function createContext<T>(defaultValue: T): Context<T> {
   ctx.id = id;
   ctx.defaultValue = defaultValue;
   ctx.Provider = Provider;
+  // Lets a custom renderer map a provider element back to its context.
+  (Provider as { __kctxOf?: Context<T> }).__kctxOf = ctx;
   ctx.Consumer = Consumer;
   ctx.useContext = useContext;
   ctx.use = useContext;
@@ -156,18 +158,28 @@ export function krateContextRows<A extends unknown[], R>(
   entries: Array<[Context<any>, () => unknown]>,
   render: (...args: A) => R,
 ): (...args: A) => R {
-  return (...args: A): R => {
-    const pushed: unknown[][] = [];
-    for (const [ctx, get] of entries) {
-      const stack = contextStack.get(ctx.id);
-      if (!stack) continue;
-      stack.push(new LiveContext(get));
-      pushed.push(stack);
-    }
-    try {
-      return render(...args);
-    } finally {
-      for (const stack of pushed) stack.pop();
-    }
-  };
+  const wrapped = (...args: A): R => krateWithContexts(entries, () => render(...args));
+  // Renderers that evaluate the content later (a custom renderer's deferred
+  // components) read the entries to make the same providers visible again.
+  (wrapped as { __kctx?: Array<[Context<any>, () => unknown]> }).__kctx = entries;
+  return wrapped;
+}
+
+/**
+ * Runs fn with the given provider values (getters) on top of their context
+ * stacks, as if fn rendered inside those providers.
+ */
+export function krateWithContexts<R>(entries: Array<[Context<any>, () => unknown]>, fn: () => R): R {
+  const pushed: unknown[][] = [];
+  for (const [ctx, get] of entries) {
+    const stack = contextStack.get(ctx.id);
+    if (!stack) continue;
+    stack.push(new LiveContext(get));
+    pushed.push(stack);
+  }
+  try {
+    return fn();
+  } finally {
+    for (let i = pushed.length - 1; i >= 0; i--) pushed[i].pop();
+  }
 }

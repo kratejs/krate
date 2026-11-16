@@ -728,7 +728,7 @@ func (b *builder) finishClientComponent(node *ComponentNode, fn *ast.FnDecl, res
 				continue
 			}
 			emittedFns[fnDecl.Name] = true
-			if fnJS := renderFnDeclJS(fnDecl, b.sigMap()); fnJS != "" {
+			if fnJS := b.reactifier().renderFnDeclJS(fnDecl, b.sigMap()); fnJS != "" {
 				node.ExtraVars = append(node.ExtraVars, fnJS)
 			}
 		}

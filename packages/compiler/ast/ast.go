@@ -302,6 +302,9 @@ type Program struct {
 	Body     []Stmt
 	// Tier is the tier a decorator gives the whole file ("" for none).
 	Tier string `json:"tier,omitempty"`
+	// RendererDefault marks an `export default <expression>` component under
+	// an `@renderer` decorator.
+	RendererDefault bool `json:"rendererDefault,omitempty"`
 }
 
 func (p *Program) node()    {}
@@ -382,7 +385,8 @@ type VarDecl struct {
 	RestName        string
 	Init            Expr
 	// Tier comes from a tier decorator such as `@server` ("" for none).
-	Tier string `json:"tier,omitempty"`
+	Tier     string `json:"tier,omitempty"` // Renderer comes from an `@renderer` decorator.
+	Renderer bool   `json:"renderer,omitempty"`
 }
 
 type FnDecl struct {
@@ -395,7 +399,9 @@ type FnDecl struct {
 	Export    bool
 	Default   bool
 	// Tier comes from a tier decorator such as `@server` ("" for none).
-	Tier string `json:"tier,omitempty"`
+	Tier string `json:"tier,omitempty"` // Renderer comes from an `@renderer` decorator: the component hands its
+	// children to a non-DOM renderer in the browser.
+	Renderer bool `json:"renderer,omitempty"`
 }
 
 func (f *FnDecl) node()    {}

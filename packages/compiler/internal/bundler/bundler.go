@@ -589,6 +589,9 @@ func (b *Bundler) resolveModuleImports(mod *Module) error {
 			}
 			continue
 		}
+		if err := checkVendorField(mod, imp, resolved); err != nil {
+			return err
+		}
 		if err := b.resolveModule(resolved, false); err != nil {
 			return err
 		}

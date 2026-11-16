@@ -261,7 +261,7 @@ func pageDataCacheUsage(mods []*bundler.Module, entry *bundler.Module, resolve f
 	return u
 }
 
-// resolvePageRenderMode is detectRenderMode plus the build-time reporting of
+// resolvePageRenderMode is detectRenderModeWith plus the build-time reporting of
 // unsupported segment-export values and the data-cache inference: a page that
 // states no mode but reads tagged, timed or no-store data renders as ISR/SSR
 // instead of being frozen at build time.
@@ -274,7 +274,7 @@ func resolvePageRenderMode(page string, entry *bundler.Module, mods []*bundler.M
 	printWarningsOnce(os.Stderr, issues)
 
 	usage := pageDataCacheUsage(mods, entry, resolve)
-	mode, reval := detectRenderMode(entry.Program)
+	mode, reval := detectRenderModeWith(entry.Program, rendererComponentNames(entry, mods))
 	if _, _, explicit := explicitRenderMode(cfg); explicit || mode != RenderSSG {
 		return mode, reval, usage
 	}

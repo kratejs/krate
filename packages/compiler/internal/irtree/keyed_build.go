@@ -103,7 +103,7 @@ func (b *builder) buildKeyedSlot(el *ast.JSXElement, key ast.Expr, parentID stri
 		contents = []SlotNode{&StaticHTML{HTML: ""}}
 	}
 	keyJS := generateExprJS(key, nil)
-	render := renderArrowFn(&ast.ArrowFn{Expression: true, Body: []ast.Stmt{&ast.ReturnStmt{Value: reactifyElement(stripped, true)}}}, nil)
+	render := renderArrowFn(&ast.ArrowFn{Expression: true, Body: []ast.Stmt{&ast.ReturnStmt{Value: b.reactifier().reactifyElement(stripped, true)}}}, nil)
 	return []SlotNode{&ListSlot{
 		ID:         id,
 		ExprSource: "[" + keyJS + "].map(()=>" + generateExprJS(stripped, b.sigMap()) + ")",

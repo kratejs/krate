@@ -1,0 +1,1 @@
+{"name":"@krate/fakethree","version":"1.0.0","type":"module","krate":{"vendor":["src/engine/"]},"exports":{".":"./src/index.ts","./engine":"./src/engine/index.ts"}}

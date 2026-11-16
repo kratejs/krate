@@ -13,6 +13,8 @@ const (
 	// CodeTSConfigBaseURL: tsconfig baseUrl names a subdirectory that the
 	// paths targets repeat; the targets are read from the project root.
 	CodeTSConfigBaseURL Code = "KR7125"
+	// CodeVendorField: a package.json `krate.vendor` list is malformed.
+	CodeVendorField Code = "KR7127"
 )
 
 func init() {
@@ -46,6 +48,16 @@ func init() {
 				"`ns.default` of a namespace that is passed on whole, has no value in the browser script: " +
 				"it is a ReferenceError there, or renders as the bare name. Use the binding as a plain value " +
 				"in JSX or a component, or import the file with a `?url` suffix. This is a warning.",
+		},
+		CodeInfo{
+			Code:  CodeVendorField,
+			Title: "package.json krate.vendor is malformed",
+			Explanation: "A package can list browser code that Krate bundles with esbuild like an npm " +
+				"dependency, instead of compiling it as Krate source: `\"krate\": { \"vendor\": [\"src/engine/\"] }`. " +
+				"Each entry is a path prefix relative to the package directory; an entry ending in `/` matches " +
+				"every file under that directory. The list must be an array of strings that stay inside the " +
+				"package (no absolute paths or `..`). Fix the package.json of the package named in the message. " +
+				"This is an error.",
 		},
 		CodeInfo{
 			Code:  CodeTSConfigBaseURL,

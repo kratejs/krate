@@ -84,6 +84,10 @@ func (b *builder) referencedModuleConstVars(node *ComponentNode) []string {
 			if replay[i] || js == "" {
 				continue
 			}
+			if _, setup := b.clientStmtKeys[b.moduleStmts[i]]; setup {
+				// Package setup code runs once in the page's setup block.
+				continue
+			}
 			for ref := range jsIdentRefs(js) {
 				if used[ref] {
 					replay[i] = true

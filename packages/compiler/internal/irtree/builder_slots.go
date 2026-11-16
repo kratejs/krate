@@ -65,7 +65,13 @@ func (b *builder) collectReferencedFunctions(node *ComponentNode, body []ast.Stm
 		}
 		candidates[name] = fn
 	}
-	if len(candidates) == 0 {
+	var rendererRegs []string
+	for _, ev := range node.ExtraVars {
+		if b.rendererRegs[ev] {
+			rendererRegs = append(rendererRegs, ev)
+		}
+	}
+	if len(candidates) == 0 && len(rendererRegs) == 0 {
 		return nil
 	}
 
@@ -147,17 +153,25 @@ func (b *builder) collectReferencedFunctions(node *ComponentNode, body []ast.Stm
 	// of the list would throw ReferenceError. The ListSlot may be nested inside
 	// a signal-less child wrapper's call-site slots (e.g. <ToastViewport>{list}</ToastViewport>),
 	// so walk the built slot tree transitively.
-	scannedComponents := map[string]bool{}
-	var scanComponentBody func(name string)
-	scanComponentBody = func(name string) {
+	// A component reached only from renderer children is declared in its
+	// renderer form (see rendererModeFn); one a DOM list renders too keeps the
+	// DOM form.
+	const scannedRenderer, scannedDOM = 1, 2
+	scannedComponents := map[string]int{}
+	var scanComponentBodyAs func(name string, mode int)
+	scanComponentBodyAs = func(name string, mode int) {
 		fn := b.functions[name]
-		if fn == nil || scannedComponents[name] {
+		if fn == nil || scannedComponents[name] >= mode {
 			return
 		}
-		scannedComponents[name] = true
+		scannedComponents[name] = mode
 		// Declare the component in this scope (its body then resolves this
 		// scope's helpers); the queue below scans its body transitively.
-		candidates[name] = fn
+		if mode == scannedRenderer && !IsRendererFn(fn) {
+			candidates[name] = rendererModeFn(fn)
+		} else {
+			candidates[name] = fn
+		}
 		if !referenced[name] {
 			referenced[name] = true
 			queue = append(queue, name)
@@ -165,7 +179,16 @@ func (b *builder) collectReferencedFunctions(node *ComponentNode, body []ast.Stm
 		code := renderStmtJS(fn, nil)
 		scanJSIdents(code, func(id string) {
 			if id != name && isComponentName(id) && b.functions[id] != nil {
-				scanComponentBody(id)
+				scanComponentBodyAs(id, mode)
+			}
+		})
+	}
+	scanComponentBody := func(name string) { scanComponentBodyAs(name, scannedDOM) }
+	// Components rendered by renderer children registered in this scope.
+	for _, reg := range rendererRegs {
+		scanJSIdents(reg, func(id string) {
+			if isComponentName(id) && b.functions[id] != nil {
+				scanComponentBodyAs(id, scannedRenderer)
 			}
 		})
 	}
@@ -2245,7 +2268,7 @@ func (b *builder) buildListSlot(expr ast.Expr, parentID string) *ListSlot {
 		Components: collectListComponents(expr),
 	}
 	if call, ok := expr.(*ast.CallExpr); ok {
-		if plan := planMapCall(call); plan != nil {
+		if plan := b.reactifier().planMapCall(call); plan != nil {
 			slot.Keyed = plan.KeyJS != ""
 			slot.Bind = &ListBinding{Source: plan.SourceJS, Key: plan.KeyJS, Render: b.wrapRowContext(plan.RenderJS), Accessor: plan.Accessor}
 			b.checkListKeys(call, plan)

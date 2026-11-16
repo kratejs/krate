@@ -163,6 +163,35 @@ statement. A component rendered at build time (`@static`, `@server`) has no run
 time, so the build fails with [KR8322](/docs/reference/diagnostics/#kr8322).
 Make the top-level code plain, or compute the value in one expression.
 
+## Setup code in the browser
+
+A top-level call, `new` expression or property assignment of a client module
+that starts from a binding imported from a package (`dayjs.extend(...)`,
+`extend(...)` from `@krate/three`, `THREE.ColorManagement.enabled = ...`) is
+package setup code: it also runs in the browser, once per page load, before the
+page hydrates, as it would when the module loads.
+
+```tsx
+import dayjs from "dayjs";
+import relativeTime from "dayjs/plugin/relativeTime";
+import { extend } from "@krate/three";
+import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+
+dayjs.extend(relativeTime);
+extend({ OrbitControls });
+```
+
+Statements of imported modules run before those of the modules that import
+them, and a layout's before its page's. Statements that start from your own
+code (a local function or a binding imported from one of your modules, such as
+`Dialog.Trigger = Trigger`) are not setup code and are not run this way; nor
+are statements of server, static and runtime modules or `"use server"` modules.
+A setup statement that reads a binding the page script cannot include (one
+that only a side effect initializes) is left out with the warning
+[KR8302](/docs/reference/diagnostics/#kr8302); move it into `onMount` or a
+component. An error thrown by setup code is logged and does not stop the page
+from hydrating.
+
 ## Values the build cannot know
 
 A value that is not known at build time never renders as its own spelling. An

@@ -48,6 +48,11 @@ export function B() { return null; }
 export const C = () => null;
 @runtime
 export default class D {}
+@renderer
+export function Canvas() { return null; }
+@renderer
+@client
+export const View = () => null;
 `;
 
   it('removes them all', () => {

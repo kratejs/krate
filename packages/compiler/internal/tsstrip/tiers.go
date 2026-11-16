@@ -15,7 +15,9 @@ import (
 // Tier decorators (`@server`, `@static`, `@runtime`, `@client`) classify a
 // component where it is declared. `@host` marks native host code instead of a
 // tier (`@build` does too, for a host function evaluated during the native build): it is blanked and recorded on the declaration like a tier, but it never
-// sets the module tier and may sit on an async function. They are compile-time syntax: JS has no
+// sets the module tier and may sit on an async function. `@renderer` marks a
+// renderer boundary component: it is recorded on the declaration (Renderer),
+// never sets a tier, and cannot sit on an async function. They are compile-time syntax: JS has no
 // decorators on functions or consts, and `static` is a reserved word, so they
 // are blanked out before esbuild or the parser sees them. Blanking keeps every
 // offset, so positions need no mapping.
@@ -26,7 +28,7 @@ import (
 // a top-level expression statement.
 
 var (
-	tierRe              = regexp.MustCompile(`(?m)^(?:\x{FEFF})?[ \t]*(@(server|static|runtime|client|host|build))(?:[ \t]|\r?$)`)
+	tierRe              = regexp.MustCompile(`(?m)^(?:\x{FEFF})?[ \t]*(@(server|static|runtime|client|host|build|renderer))(?:[ \t]|\r?$)`)
 	classDeclRe         = regexp.MustCompile(`^(?:export\s+)?(?:default\s+)?(?:abstract\s+)?class\b`)
 	exportDefaultExprRe = regexp.MustCompile(`^export\s+default\b`)
 	declRe              = regexp.MustCompile(`^(export\s+)?(default\s+)?(async\s+)?(?:function\s*\*?\s*([A-Za-z_$][\w$]*)?|class\b\s*([A-Za-z_$][\w$]*)?|(?:const|let|var)\s+([A-Za-z_$][\w$]*))`)
@@ -53,6 +55,9 @@ type tierScan struct {
 func (s *tierScan) apply(prog *ast.Program) {
 	prog.Tier = s.moduleTier
 	for _, m := range s.marks {
+		if m.tier == "renderer" && m.name == "" && m.isDefault {
+			prog.RendererDefault = true
+		}
 		setDeclTier(prog.Body, m)
 	}
 }
@@ -70,16 +75,24 @@ func setDeclTier(body []ast.Stmt, m tierMark) {
 		switch s := stmt.(type) {
 		case *ast.FnDecl:
 			if declMatches(s.Name, exportDefault, m) {
-				s.Tier = m.tier
+				if m.tier == "renderer" {
+					s.Renderer = true
+				} else {
+					s.Tier = m.tier
+				}
 			}
 		case *ast.ClassDecl:
-			if declMatches(s.Name, exportDefault, m) {
+			if declMatches(s.Name, exportDefault, m) && m.tier != "renderer" {
 				s.Tier = m.tier
 			}
 		case *ast.VarStmt:
 			for _, d := range s.Decls {
 				if d != nil && d.Name == m.name {
-					d.Tier = m.tier
+					if m.tier == "renderer" {
+						d.Renderer = true
+					} else {
+						d.Tier = m.tier
+					}
 				}
 			}
 		}
@@ -136,7 +149,11 @@ func scanTiers(path, src string, opts Options) *tierScan {
 			continue
 		}
 		fail := func(msg, hint string) {
-			d := diag.New(path, m.line, m.col, msg, hint, idx.line(m.line)).WithCode(diag.CodeTierDecorator)
+			code := diag.CodeTierDecorator
+			if m.tier == "renderer" {
+				code = diag.CodeRendererTier
+			}
+			d := diag.New(path, m.line, m.col, msg, hint, idx.line(m.line)).WithCode(code)
 			s.errs = append(s.errs, d)
 		}
 		rest := skipDecoratorTrivia(src, end)
@@ -153,7 +170,11 @@ func scanTiers(path, src string, opts Options) *tierScan {
 					// `export default () => ...` / `export default memo(...)` /
 					// `export default withX(Inner)`: the file's default component.
 					// The bundler names it, so the mark is the file tier only.
-					if fn != nil && fn.Async && m.tier != "runtime" && m.tier != "host" && m.tier != "build" {
+					if fn != nil && fn.Async && m.tier == "renderer" {
+						fail(rendererAsyncMsg, rendererAsyncHint)
+						continue
+					}
+					if fn != nil && fn.Async && m.tier != "runtime" && m.tier != "host" && m.tier != "build" && m.tier != "renderer" {
 						fail("@"+m.tier+" cannot be used on an async component",
 							"an async component always renders per request; use @runtime or make it synchronous")
 						continue
@@ -175,13 +196,26 @@ func scanTiers(path, src string, opts Options) *tierScan {
 		if m.name == "extends" {
 			m.name = ""
 		}
+		if m.tier == "renderer" {
+			if classDeclRe.MatchString(src[rest:]) {
+				fail("@renderer must be placed on a function or const component, not a class",
+					"write the renderer component as a function, e.g. `@renderer` then `export function Canvas(props) { ... }`")
+				continue
+			}
+			if decl[3] != "" {
+				fail(rendererAsyncMsg, rendererAsyncHint)
+				continue
+			}
+			s.marks = append(s.marks, m)
+			continue
+		}
 		if decl[3] != "" && m.tier != "runtime" && m.tier != "host" && m.tier != "build" {
 			fail("@"+m.tier+" cannot be used on an async component",
 				"an async component always renders per request; use @runtime or make it synchronous")
 			continue
 		}
 		for _, prev := range s.marks {
-			if prev.name == m.name && prev.isDefault == m.isDefault {
+			if prev.tier != "renderer" && prev.name == m.name && prev.isDefault == m.isDefault {
 				fail("conflicting tier decorators @"+prev.tier+" and @"+m.tier+" on one declaration", "keep one of them")
 			}
 		}
@@ -195,7 +229,7 @@ func scanTiers(path, src string, opts Options) *tierScan {
 	var sole *tierMark
 	for i := range s.marks {
 		m := &s.marks[i]
-		if m.tier == "host" || m.tier == "build" {
+		if m.tier == "host" || m.tier == "build" || m.tier == "renderer" {
 			continue
 		}
 		isDefault := m.isDefault || (hasDefault && m.name != "" && m.name == defaultName)
@@ -222,6 +256,11 @@ func scanTiers(path, src string, opts Options) *tierScan {
 	s.src = string(blank)
 	return s
 }
+
+const (
+	rendererAsyncMsg  = "@renderer cannot be used on an async component"
+	rendererAsyncHint = "a renderer component runs in the browser, which async components never do; make it synchronous and load data in a parent or inside onMount"
+)
 
 // inlineDefaultComponent finds the `export default <component expression>`
 // statement starting on line and returns its function. A higher-order

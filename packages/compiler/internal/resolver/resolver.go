@@ -10,6 +10,7 @@ package resolver
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,6 +22,7 @@ import (
 // entry file. Exports is kept raw because it may be a string, a conditions
 // object, or a subpath map.
 type PkgJSON struct {
+	Name    string          `json:"name"`
 	Main    string          `json:"main"`
 	Module  string          `json:"module"`
 	Browser json.RawMessage `json:"browser"`
@@ -112,6 +114,9 @@ func NodeModuleWith(startDir, spec string, conds Conditions) string {
 	if pkg == "" {
 		return ""
 	}
+	if self := selfReference(startDir, pkg, sub, conds); self != "" {
+		return self
+	}
 	// Follow symlinks to the real package directory before walking up. pnpm
 	// links workspace/node_modules entries to a virtual store; a package's own
 	// dependencies (e.g. `@radix-ui/react-popover` from `radix-ui`) only exist
@@ -140,6 +145,97 @@ func NodeModuleWith(startDir, spec string, conds Conditions) string {
 		dir = parent
 	}
 	return ""
+}
+
+// VendorPrefixes returns the `vendor` list of a package.json `krate` field:
+// package-relative path prefixes of browser code bundled like an npm
+// dependency. It reports an error when the list is malformed.
+func VendorPrefixes(krate json.RawMessage) ([]string, error) {
+	if len(krate) == 0 || krate[0] != '{' {
+		return nil, nil
+	}
+	var obj struct {
+		Vendor json.RawMessage `json:"vendor"`
+	}
+	if json.Unmarshal(krate, &obj) != nil || len(obj.Vendor) == 0 {
+		return nil, nil
+	}
+	var list []string
+	if err := json.Unmarshal(obj.Vendor, &list); err != nil {
+		return nil, fmt.Errorf("\"krate.vendor\" must be an array of package-relative path prefixes, such as [\"src/engine/\"]")
+	}
+	out := make([]string, 0, len(list))
+	for _, p := range list {
+		clean := strings.TrimPrefix(filepath.ToSlash(strings.TrimSpace(p)), "./")
+		if clean == "" || strings.HasPrefix(clean, "/") || clean == ".." || strings.HasPrefix(clean, "../") || strings.Contains(clean, "/../") {
+			return nil, fmt.Errorf("\"krate.vendor\" entry %q must be a path inside the package, such as \"src/engine/\"", p)
+		}
+		out = append(out, clean)
+	}
+	return out, nil
+}
+
+// IsVendorPath reports whether a package-relative path falls under one of the
+// `krate.vendor` prefixes. A malformed list vendors nothing.
+func IsVendorPath(krate json.RawMessage, rel string) bool {
+	prefixes, err := VendorPrefixes(krate)
+	if err != nil {
+		return false
+	}
+	for _, p := range prefixes {
+		if strings.HasSuffix(p, "/") {
+			if strings.HasPrefix(rel, p) {
+				return true
+			}
+		} else if rel == p || strings.HasPrefix(rel, p+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// PackageDirOf returns the package directory of a file under node_modules,
+// or "" for a file outside node_modules.
+func PackageDirOf(path string) string {
+	norm := filepath.ToSlash(path)
+	i := strings.LastIndex(norm, "/node_modules/")
+	if i < 0 {
+		return ""
+	}
+	rest := norm[i+len("/node_modules/"):]
+	parts := strings.Split(rest, "/")
+	n := 1
+	if strings.HasPrefix(rest, "@") {
+		n = 2
+	}
+	if len(parts) < n {
+		return ""
+	}
+	return filepath.FromSlash(norm[:i+len("/node_modules/")] + strings.Join(parts[:n], "/"))
+}
+
+// ReadPkgJSON reads (memoized) the package.json of a package directory.
+func ReadPkgJSON(pkgDir string) PkgJSON { return readPkgJSON(pkgDir) }
+
+// selfReference resolves a package importing itself by name through its
+// `exports` map (Node's package self-reference), from the nearest package.json
+// above startDir. The path stays under the importer's own path, so a linked
+// workspace package keeps its node_modules location.
+func selfReference(startDir, pkg, sub string, conds Conditions) string {
+	for dir := startDir; ; {
+		if StatPath(filepath.Join(dir, "package.json")).Exists {
+			pj := readPkgJSON(dir)
+			if pj.Name != pkg || len(pj.Exports) == 0 {
+				return ""
+			}
+			return resolvePackage(dir, sub, conds)
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir || filepath.Base(dir) == "node_modules" {
+			return ""
+		}
+		dir = parent
+	}
 }
 
 // PackageImport resolves a package.json `imports` specifier ("#util") for a
@@ -568,19 +664,22 @@ func IsCompiledDependency(path string) bool {
 		return false
 	}
 	rest := norm[i+len("/node_modules/"):]
-	if strings.HasPrefix(rest, "@krate/") {
-		return false
-	}
 	parts := strings.Split(rest, "/")
 	n := 1
 	if strings.HasPrefix(rest, "@") {
 		n = 2
 	}
 	if len(parts) <= n {
-		return true
+		return !strings.HasPrefix(rest, "@krate/")
 	}
 	pkgDir := filepath.FromSlash(norm[:i+len("/node_modules/")] + strings.Join(parts[:n], "/"))
-	if len(readPkgJSON(pkgDir).Krate) > 0 {
+	krate := readPkgJSON(pkgDir).Krate
+	// `"krate": { "vendor": ["src/engine/"] }` marks browser code that is
+	// bundled by esbuild like an npm dependency, even in a Krate package.
+	if IsVendorPath(krate, strings.Join(parts[n:], "/")) {
+		return true
+	}
+	if strings.HasPrefix(rest, "@krate/") || len(krate) > 0 {
 		return false
 	}
 	switch strings.ToLower(filepath.Ext(norm)) {
