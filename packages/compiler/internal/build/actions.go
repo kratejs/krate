@@ -111,16 +111,16 @@ func (b *Builder) prepareActions() error {
 	memo := &resolveMemo{}
 	batched := b.batchActionModules(dir, reg.Order, memo)
 	var wg sync.WaitGroup
-	sem := make(chan struct{}, buildWorkerLimit())
+	pool := newWorkerPool(buildWorkerLimit())
 	for i, mod := range reg.Order {
 		if batched[i] {
 			continue
 		}
 		wg.Add(1)
-		sem <- struct{}{}
+		pool.acquire()
 		go func() {
 			defer wg.Done()
-			defer func() { <-sem }()
+			defer pool.release()
 			compileErrs[i] = b.compileActionModule(dir, mod, memo)
 		}()
 	}
@@ -244,14 +244,14 @@ func (b *Builder) batchActionModules(dir string, mods []*actionModule, memo *res
 	// separate build would.
 	opts.Plugins = append(opts.Plugins, externalNodeModulesPluginMemo(filepath.Join(dir, "x.mjs"), memo))
 	var wg sync.WaitGroup
-	sem := make(chan struct{}, buildWorkerLimit())
+	pool := newWorkerPool(buildWorkerLimit())
 	for _, part := range splitBatches(idx, fileBatchMax) {
 		if len(part) < 2 {
 			continue
 		}
 		wg.Go(func() {
-			sem <- struct{}{}
-			defer func() { <-sem }()
+			pool.acquire()
+			defer pool.release()
 			entries := make([]fileBatchEntry, len(part))
 			for k, i := range part {
 				entries[k] = fileBatchEntry{In: mods[i].AbsPath, Out: filepath.Join(dir, mods[i].File)}

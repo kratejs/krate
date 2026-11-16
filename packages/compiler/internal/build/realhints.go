@@ -369,7 +369,7 @@ func (b *Builder) runRealHintsBatch(opts api.BuildOptions, prelude string, jobs 
 	}
 	// Each render finishes on its own: a page waits only for its own renders,
 	// not for the slowest one of the round.
-	sem := make(chan struct{}, buildWorkerLimit())
+	pool := newWorkerPool(buildWorkerLimit())
 	for i, j := range jobs {
 		if codes[i] == "" {
 			continue
@@ -378,8 +378,8 @@ func (b *Builder) runRealHintsBatch(opts api.BuildOptions, prelude string, jobs 
 		go func() {
 			defer j.complete()
 			defer func() { _ = recover() }() // a failed render has no hints
-			sem <- struct{}{}
-			defer func() { <-sem }()
+			pool.acquire()
+			defer pool.release()
 			j.output = b.realHintsTags(codes[i])
 		}()
 	}

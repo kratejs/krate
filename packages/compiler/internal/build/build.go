@@ -1636,6 +1636,7 @@ func (b *Builder) BuildAll() error {
 	if b.Prof.Enabled() {
 		b.Prof.setEsbuild(esbuildStatsSince(esbuild0))
 		b.Prof.Report(os.Stderr)
+		reportMemory(os.Stderr)
 	}
 
 	if len(failureErrs) > 0 {

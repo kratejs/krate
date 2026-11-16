@@ -1042,17 +1042,17 @@ const clientChunkBatchSize = 64
 // runSubBatches runs run on consecutive slices of at most size jobs, up to
 // parallel of them at once.
 func runSubBatches(jobs []*roundJob, size, parallel int, run func([]*roundJob)) {
-	sem := make(chan struct{}, parallel)
+	pool := newWorkerPool(parallel)
 	var wg sync.WaitGroup
 	for len(jobs) > 0 {
 		n := min(size, len(jobs))
 		part := jobs[:n]
 		jobs = jobs[n:]
 		wg.Add(1)
-		sem <- struct{}{}
+		pool.acquire()
 		go func() {
 			defer wg.Done()
-			defer func() { <-sem }()
+			defer pool.release()
 			run(part)
 		}()
 	}
@@ -1400,14 +1400,14 @@ func (c *clientSSRImpls) prebuild(boundaries []ClientBoundary) {
 }
 
 func (c *clientSSRImpls) buildEach(claimed []claimedImpl) {
-	sem := make(chan struct{}, buildWorkerLimit())
+	pool := newWorkerPool(buildWorkerLimit())
 	var wg sync.WaitGroup
 	for _, ci := range claimed {
 		wg.Add(1)
-		sem <- struct{}{}
+		pool.acquire()
 		go func() {
 			defer wg.Done()
-			defer func() { <-sem }()
+			defer pool.release()
 			ci.e.finish(func() error { return c.buildOne(ci.cb) })
 		}()
 	}

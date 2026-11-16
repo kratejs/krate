@@ -440,3 +440,35 @@ func TestMissingGlobalTrappedOnRead(t *testing.T) {
 		}
 	})
 }
+
+func TestSizeForBudget(t *testing.T) {
+	const gib = int64(1) << 30
+	cases := []struct {
+		cpus   int
+		budget int64
+		want   int
+	}{
+		{12, 18 * gib, 4},
+		{12, 0, 4},
+		{2, 18 * gib, 1},
+		{12, 5 * gib, 2},
+		{12, gib, 1},
+	}
+	for _, c := range cases {
+		if got := sizeFor(c.cpus, c.budget); got != c.want {
+			t.Errorf("sizeFor(%d, %d) = %d; want %d", c.cpus, c.budget, got, c.want)
+		}
+	}
+}
+
+func TestHeapLimitMB(t *testing.T) {
+	const gib = int64(1) << 30
+	for _, c := range []struct {
+		budget int64
+		want   int
+	}{{18 * gib, 4096}, {8 * gib, 2048}, {2 * gib, 1024}, {256 << 20, 1024}} {
+		if got := heapLimitMB(c.budget); got != c.want {
+			t.Errorf("heapLimitMB(%d) = %d; want %d", c.budget, got, c.want)
+		}
+	}
+}

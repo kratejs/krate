@@ -1,13 +1,21 @@
 package build
 
-import "runtime"
+import (
+	"fmt"
+	"io"
+	"runtime"
+
+	"github.com/kratejs/krate/packages/compiler/internal/membudget"
+)
 
 // workerPool bounds the number of concurrently running esbuild invocations.
 // esbuild already parallelizes internally, so spawning one goroutine per page
 // without a limit causes CPU/memory thrashing on large sites. All fan-out loops
-// in the build pipeline route their work through a shared pool sized by CPU.
+// in the build pipeline route their work through a pool sized by CPU, which
+// also admits fewer jobs while memory is short (see membudget.Gate), down to
+// one at a time.
 type workerPool struct {
-	sem chan struct{}
+	gate *membudget.Gate
 }
 
 // buildWorkerLimit returns the concurrency cap for build workers. It is capped
@@ -25,18 +33,23 @@ func buildWorkerLimit() int {
 
 // newWorkerPool creates a pool that admits up to limit concurrent tasks.
 func newWorkerPool(limit int) *workerPool {
-	if limit < 1 {
-		limit = 1
-	}
-	return &workerPool{sem: make(chan struct{}, limit)}
+	return &workerPool{gate: membudget.NewGate(limit)}
 }
 
 // acquire blocks until a worker slot is available.
 func (p *workerPool) acquire() {
-	p.sem <- struct{}{}
+	p.gate.Acquire()
 }
 
 // release returns a worker slot to the pool.
 func (p *workerPool) release() {
-	<-p.sem
+	p.gate.Release()
+}
+
+// reportMemory prints the build's memory budget and how often the build
+// waited for memory (with --profile).
+func reportMemory(w io.Writer) {
+	b, _ := membudget.Current()
+	fmt.Fprintf(w, "    memory budget %s (%s); memory pressure held jobs back %d times\n",
+		membudget.Format(b.Bytes), b.Source, membudget.Throttled())
 }

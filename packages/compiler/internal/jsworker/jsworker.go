@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/kratejs/krate/packages/compiler/internal/execx"
+	"github.com/kratejs/krate/packages/compiler/internal/membudget"
 	"github.com/kratejs/krate/packages/native/jsruntime"
 )
 
@@ -118,12 +119,34 @@ func selectWith(look func(string) (string, error), env string, preferred ...stri
 	return "", ""
 }
 
-// DefaultSize is the number of worker processes a pool runs at most.
+// DefaultSize is the number of worker processes a pool runs at most: one per
+// three CPUs, at most 4, and one per 2 GiB of the build's memory budget.
 func DefaultSize() int {
 	if v, err := strconv.Atoi(os.Getenv("KRATE_BUILD_JS_WORKERS")); err == nil && v > 0 {
 		return v
 	}
-	return max(1, min(4, runtime.NumCPU()/3))
+	b, _ := membudget.Current()
+	return sizeFor(runtime.NumCPU(), b.Bytes)
+}
+
+func sizeFor(cpus int, budget int64) int {
+	n := max(1, min(4, cpus/3))
+	if budget > 0 {
+		n = min(n, max(1, int(budget/(2<<30))))
+	}
+	return n
+}
+
+// HeapLimitMB is the V8 heap limit of a Node worker: a quarter of the build's
+// memory budget, between 1 GiB and 4 GiB. A worker that exceeds it stops, and
+// the embedded engine runs the rest of the build.
+func HeapLimitMB() int {
+	b, _ := membudget.Current()
+	return heapLimitMB(b.Bytes)
+}
+
+func heapLimitMB(budget int64) int {
+	return int(min(max(budget/4, 1<<30), 4<<30) >> 20)
 }
 
 // Pool runs evaluations on up to Size worker processes, started on demand.
@@ -141,6 +164,8 @@ type Pool struct {
 	// Observe, when set, is called with the label and duration of every
 	// evaluation a worker ran.
 	Observe func(label string, d time.Duration)
+	// HeapMB caps the V8 heap of a Node worker (0: Node's default).
+	HeapMB int
 
 	mu      sync.Mutex
 	cond    *sync.Cond
@@ -158,7 +183,11 @@ func New(name, path string, size int) *Pool {
 	if size <= 0 {
 		size = DefaultSize()
 	}
-	return &Pool{Name: name, Path: path, Size: size}
+	p := &Pool{Name: name, Path: path, Size: size}
+	if name == "node" {
+		p.HeapMB = HeapLimitMB()
+	}
+	return p
 }
 
 // Broken returns why the pool stopped using workers, or nil.
@@ -235,7 +264,7 @@ func (p *Pool) acquire() (*worker, int, error) {
 			p.running++
 			gen := p.gen
 			p.mu.Unlock()
-			w, err := start(p.Name, p.Path)
+			w, err := start(p.Name, p.Path, p.HeapMB)
 			if err != nil {
 				p.mu.Lock()
 				p.running--
@@ -395,9 +424,12 @@ type worker struct {
 // startTimeout bounds how long a worker may take to report ready.
 const startTimeout = 15 * time.Second
 
-func start(name, path string) (*worker, error) {
+func start(name, path string, heapMB int) (*worker, error) {
 	driverOnce.Do(func() { driverSrc = Driver() })
 	args := []string{"-e", driverSrc}
+	if heapMB > 0 {
+		args = append([]string{"--max-old-space-size=" + strconv.Itoa(heapMB)}, args...)
+	}
 	cmd := exec.Command(path, args...)
 	execx.ConfigureTree(cmd)
 	cmd.Stderr = os.Stderr
