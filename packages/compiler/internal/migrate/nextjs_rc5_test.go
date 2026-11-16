@@ -147,9 +147,11 @@ export default function P() { return <main><VehicleViewer color="red" /></main>;
 		"const VehicleViewerLazy = lazy<VehicleViewerProps>(() => import('./viewer'));",
 		"export const VehicleViewer = (props: VehicleViewerProps) => {",
 		"useEffect(() => { setMounted(true); }, []);",
-		"return mounted ? <VehicleViewerLazy {...props} /> : (",
+		// The loading fallback also shows while the chunk loads, as in Next.
+		"return mounted ? <Suspense fallback={(",
+		"</div>\n  )}><VehicleViewerLazy {...props} /></Suspense> : (",
 		"<div className={cn('dd-late bg-card",
-		"import { lazy, useEffect, useState } from \"react\";",
+		"import { Suspense, lazy, useEffect, useState } from \"react\";",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("migrated viewer missing %q:\n%s", want, got)

@@ -306,40 +306,54 @@ func inlineConstLocals(prefix []ast.Stmt, ret ast.Expr) (ast.Expr, []ast.Stmt) {
 	type local struct {
 		name string
 		init ast.Expr
+		at   int // index in prefix
 	}
 	var locals []local
-	var kept []ast.Stmt
-	for _, stmt := range prefix {
+	var others []ast.Stmt
+	isLocal := make([]bool, len(prefix))
+	for i, stmt := range prefix {
 		vs, ok := stmt.(*ast.VarStmt)
 		if !ok || vs.Kind != ast.VarConst || len(vs.Decls) != 1 {
-			kept = append(kept, stmt)
+			others = append(others, stmt)
 			continue
 		}
 		d := vs.Decls[0]
 		if d == nil || d.IsDestructuring || d.Name == "" || d.Init == nil || !isPureInit(d.Init) {
-			kept = append(kept, stmt)
+			others = append(others, stmt)
 			continue
 		}
 		init := d.Init
 		for _, prev := range locals {
 			init = substituteListParam(init, prev.name, prev.init)
 		}
-		locals = append(locals, local{name: d.Name, init: init})
+		locals = append(locals, local{name: d.Name, init: init, at: i})
+		isLocal[i] = true
 	}
-	// A local still read by a kept statement must stay declared.
+	// A local still read by a kept statement must stay declared, where it was:
+	// its initializer may read a kept statement above it (`const store =
+	// useStore(); const get = store.getState;`).
+	declared := map[int]ast.Stmt{}
 	for i := len(locals) - 1; i >= 0; i-- {
 		used := false
-		for _, stmt := range kept {
+		for _, stmt := range others {
 			if stmtMentions(stmt, locals[i].name) {
 				used = true
 				break
 			}
 		}
 		if used {
-			kept = append([]ast.Stmt{&ast.VarStmt{Kind: ast.VarConst, Decls: []*ast.VarDecl{{Name: locals[i].name, Init: locals[i].init}}}}, kept...)
+			declared[locals[i].at] = &ast.VarStmt{Kind: ast.VarConst, Decls: []*ast.VarDecl{{Name: locals[i].name, Init: locals[i].init}}}
 			continue
 		}
 		ret = substituteListParam(ret, locals[i].name, &ast.ParenExpr{Expr: locals[i].init})
+	}
+	kept := make([]ast.Stmt, 0, len(others)+len(declared))
+	for i, stmt := range prefix {
+		if !isLocal[i] {
+			kept = append(kept, stmt)
+		} else if d, ok := declared[i]; ok {
+			kept = append(kept, d)
+		}
 	}
 	return ret, kept
 }

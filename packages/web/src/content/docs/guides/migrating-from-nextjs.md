@@ -188,12 +188,28 @@ The first pass:
   { ssr: false, loading })` call (with or without a type argument,
   `dynamic<Props>(...)`) becomes a module-level `lazy()` plus a component that
   renders the `loading` fallback until it has mounted in the browser, then the
-  lazy component: the page HTML holds the fallback, the component lives in its
+  lazy component inside a `<Suspense>` with the same fallback (shown while the
+  chunk loads, as in Next.js): the page HTML holds the fallback, the component lives in its
   own `lazy-*.js` chunk and the build still renders it once, hidden, so a viewer
   that touches `window` while rendering needs a real-React island (see
   [React compatibility](/docs/guides/react-compatibility/#libraries-built-on-a-react-reconciler-real-react-islands))
   or a guard. A `loading` that is not an arrow function returning JSX or a
   component name, and `ssr: false` outside a top-level `const`, are manual items;
+- moves `@react-three/fiber` and `@react-three/drei` code to
+  [`@krate/three`](/docs/features/three/) when every fiber and drei API the
+  project's modules use is provided (drei's `OrbitControls`, `Environment` with
+  `Lightformer` children or a `map`, and `useGLTF` come from `@krate/three/drei`),
+  and adds `@krate/three` to `package.json` (a manual item without
+  `--update-package`). The scene then runs on Krate, or on the Preact island of a
+  `"use client"` component, instead of a real-React island that ships React,
+  react-dom and a second copy of the React libraries around the canvas. One
+  unsupported API (another drei helper, `<Environment preset>`, fiber's
+  `reconciler`, a package built on fiber such as `@react-spring/three`) keeps
+  every fiber module as it is, because they render each other's components in
+  one canvas, and each blocking use is listed as a manual item. Keep
+  `@react-three/fiber` and drei installed while a real-React island (for example
+  a react-konva editor) renders one of the 3D components: there the build runs
+  `@krate/three` as fiber;
 - converts `next/script`: `<Script strategy="afterInteractive">` (the default)
   becomes a Krate `<Script defer>`, `lazyOnload` an `async` one and
   `beforeInteractive` a `<script>` inside `<Head>`; `src`, `id`, `data-*`
@@ -205,7 +221,10 @@ The first pass:
 - writes `trailingSlash: "never"` into `krate.config.ts` (Next's URL form: `/store`
   answers 200, `/store/` redirects), or `"always"` when `next.config` sets
   `trailingSlash: true`, and `tailwind: { enabled: true }` when `postcss.config.*`
-  uses `@tailwindcss/postcss` or `tailwindcss`;
+  uses `@tailwindcss/postcss` or `tailwindcss`, and `compress: { brotli: true,
+  gzip: true }` (Next.js compresses responses unless `next.config` sets
+  `compress: false`): `krate build` writes `.br` and best-ratio `.gz` siblings
+  of the assets, which `krate start` sends, instead of gzipping on the fly;
 - keeps `NextRequest` features in route handlers: the `Request` has
   `request.cookies` (`get`, `getAll`, `has`, read-only) and `request.nextUrl`
   (a `URL` with `searchParams`, `pathname`, `basePath` and `clone()`; the

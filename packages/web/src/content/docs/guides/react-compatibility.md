@@ -528,6 +528,12 @@ commit after it is revealed, and are cleaned up while the boundary shows its
 fallback again (like a hidden conditional branch, see [Effects](#effects)). Request-time (runtime and server)
 components inside a boundary keep using streaming regions.
 
+In a `"use client"` component of a server-rendered page (a Preact island), the
+island root is a boundary, as React's root is: a component that suspends with
+no `<Suspense>` of its own (a `lazy()` component rendered after mount) keeps
+the server HTML until it has loaded. A server render of such a component uses
+the `getServerSnapshot` argument of `useSyncExternalStore`.
+
 **`use(promise)`.** Write it as the initializer of a declaration in the
 component body:
 
@@ -1448,9 +1454,13 @@ one runs in a **real-React island** instead: an island bundled with `react`
 and `react-dom` themselves, with no Preact alias anywhere in its subtree.
 
 For three.js scenes there is also [`@krate/three`](/docs/features/three/), which
-has the `@react-three/fiber` API but compiles with the page: it ships no React
-runtime, and the scene reads page state directly. Use the real-React island
-when you need libraries built on `@react-three/fiber`, such as `@react-three/drei`.
+has the `@react-three/fiber` API but compiles with the page (or runs in the
+Preact island of a `"use client"` component): it ships no React runtime, and
+the scene reads page state directly. `@krate/three/drei` provides drei's
+`OrbitControls`, `Environment`, `Lightformer` and `useGLTF`, and
+`krate migrate nextjs` moves fiber and drei code onto them when that is all it
+uses. Use the real-React island when you need other libraries built on
+`@react-three/fiber`.
 
 ```tsx
 // src/components/Viewer.tsx

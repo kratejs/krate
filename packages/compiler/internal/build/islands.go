@@ -708,7 +708,7 @@ func (b *Builder) buildIslandBundle(src, resolveDir string, ssr bool, plugin *ap
 		LogLevel:        api.LogLevelSilent,
 		Define:          b.clientEnvDefines(),
 		Alias:           islandAlias(b.Root, ssr),
-		Plugins:         []api.Plugin{purePrunePlugin(b.Root), guard.plugin(), islandCSSPlugin(sink), islandJSXPlugin(), islandTagsPlugin(b.Root, ssr), reconcilerGuardPlugin(), reactDOMHintsPlugin(b.Root), reactCompatPlugin(b.Root), routerHooksPlugin(b.Root)},
+		Plugins:         []api.Plugin{purePrunePlugin(b.Root), guard.plugin(), islandCSSPlugin(sink), islandJSXPlugin(), islandTagsPlugin(b.Root, ssr), reconcilerGuardPlugin(), reactDOMHintsPlugin(b.Root), reactCompatPluginFor(b.Root, ssr), routerHooksPlugin(b.Root), threeIslandPlugin()},
 	}
 	if prov != nil {
 		opts.Plugins = append(opts.Plugins, islandEntryPlugin(nil, prov.virtualModules()))
@@ -716,6 +716,8 @@ func (b *Builder) buildIslandBundle(src, resolveDir string, ssr bool, plugin *ap
 	if ssr {
 		opts.Format = api.FormatIIFE
 		opts.Platform = api.PlatformBrowser
+		opts.Define = vendorImportMetaDefines(opts.Define)
+		opts.Banner = map[string]string{"js": vendorImportMetaBanner}
 		opts.Stdin.Sourcefile = "krate-island-ssr.tsx"
 		if plugin != nil {
 			opts.Plugins = append(opts.Plugins, *plugin)
@@ -900,7 +902,27 @@ func reactCompatDOMExtras(root string, contents *string) string {
 // everything it provides, on the same Preact instance. require() calls are
 // left to the require plugins.
 func reactCompatPlugin(root string) api.Plugin {
-	const ns = "krate-react-compat"
+	return reactCompatPluginFor(root, false)
+}
+
+// reactServerCompatPlugin is reactCompatPlugin for a bundle that renders on
+// the server. preact/compat's useSyncExternalStore ignores its third argument,
+// so `useSyncExternalStore(subscribe, () => "EyeDropper" in window, () =>
+// false)` threw "window is not defined" in a server render; React reads
+// getServerSnapshot there, and so does this bundle's `react`.
+func reactServerCompatPlugin(root string) api.Plugin {
+	return reactCompatPluginFor(root, true)
+}
+
+// serverSyncExternalStore is the useSyncExternalStore of server bundles.
+const serverSyncExternalStore = "import { useSyncExternalStore as __uses } from \"preact/compat\";\n" +
+	"export function useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot) { return __uses(subscribe, getServerSnapshot || getSnapshot); }\n"
+
+func reactCompatPluginFor(root string, server bool) api.Plugin {
+	ns := "krate-react-compat"
+	if server {
+		ns = "krate-react-compat-server"
+	}
 	return api.Plugin{
 		Name: ns,
 		Setup: func(pb api.PluginBuild) {
@@ -913,22 +935,34 @@ func reactCompatPlugin(root string) api.Plugin {
 				mod := modOnce()
 				// Only modules that name one of the additions take them: the
 				// factory would otherwise ship, and look stateful, in every chunk.
-				if mod == "" || !mentions(args.Importer, reactExtraRe) {
+				extras := mod != "" && mentions(args.Importer, reactExtraRe)
+				if !extras && !server {
 					return api.OnResolveResult{}, nil
 				}
-				return api.OnResolveResult{Path: "react", Namespace: ns}, nil
+				path := "react"
+				if extras {
+					path = "react+extras"
+				}
+				return api.OnResolveResult{Path: path, Namespace: ns}, nil
 			})
 			pb.OnLoad(api.OnLoadOptions{Filter: `.*`, Namespace: ns}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
-				mod := modOnce()
-				list := strings.Join(reactCompatExtraNames, ", ")
-				contents := "export * from \"preact/compat\";\nimport * as __cns from \"preact/compat\";\nimport __compat from \"preact/compat\";\n" +
-					"import { options as __opts } from \"preact\";\n" +
-					"import { createReactCompatExtras as __mk } from " + strconv.Quote(filepath.ToSlash(mod)) + ";\n" +
-					"const __x = /* @__PURE__ */ __mk(__cns, __opts);\n"
-				for _, n := range reactCompatExtraNames {
-					contents += "export const " + n + " = __x." + n + ";\n"
+				contents := "export * from \"preact/compat\";\nimport __compat from \"preact/compat\";\n"
+				var members []string
+				if args.Path == "react+extras" {
+					contents += "import * as __cns from \"preact/compat\";\n" +
+						"import { options as __opts } from \"preact\";\n" +
+						"import { createReactCompatExtras as __mk } from " + strconv.Quote(filepath.ToSlash(modOnce())) + ";\n" +
+						"const __x = /* @__PURE__ */ __mk(__cns, __opts);\n"
+					for _, n := range reactCompatExtraNames {
+						contents += "export const " + n + " = __x." + n + ";\n"
+					}
+					members = append(members, reactCompatExtraNames...)
 				}
-				contents += "export default { ...__compat, " + list + " };\n"
+				if server {
+					contents += serverSyncExternalStore
+					members = append(members, "useSyncExternalStore")
+				}
+				contents += "export default { ...__compat, " + strings.Join(members, ", ") + " };\n"
 				return api.OnLoadResult{Contents: &contents, Loader: api.LoaderJS, ResolveDir: root}, nil
 			})
 		},

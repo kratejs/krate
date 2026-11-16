@@ -215,7 +215,8 @@ func (b *Builder) vendorPreamble(used []vendorImport) (string, error) {
 		MinifyWhitespace:  minify,
 		MinifyIdentifiers: minify,
 		MinifySyntax:      minify,
-		Define:            b.vendorDefines(mode),
+		Define:            vendorImportMetaDefines(b.vendorDefines(mode)),
+		Banner:            map[string]string{"js": vendorImportMetaBanner},
 		LogLevel:          api.LogLevelSilent,
 		Charset:           api.CharsetUTF8,
 		Plugins: []api.Plugin{{
@@ -300,4 +301,21 @@ func sideEffects(se bool) api.SideEffects {
 		return api.SideEffectsTrue
 	}
 	return api.SideEffectsFalse
+}
+
+// vendorImportMetaBanner defines the value vendored code reads as
+// import.meta.url. The vendor bundle is a classic script, where esbuild turns
+// `import.meta` into an empty object, so `new URL("./x.wasm", import.meta.url)`
+// at module scope (three's DRACOLoader, for one) would throw while the page
+// loads. It is the URL of the running script, or the page URL.
+const vendorImportMetaBanner = `var __krateImportMetaURL=typeof document<"u"&&document.currentScript&&document.currentScript.src||(typeof location<"u"?location.href:"file:///");`
+
+// vendorImportMetaDefines maps import.meta.url to the banner's variable.
+func vendorImportMetaDefines(defs map[string]string) map[string]string {
+	out := make(map[string]string, len(defs)+1)
+	for k, v := range defs {
+		out[k] = v
+	}
+	out["import.meta.url"] = "__krateImportMetaURL"
+	return out
 }

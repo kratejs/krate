@@ -237,6 +237,21 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Added
 
+- `krate migrate nextjs` moves `@react-three/fiber` and `@react-three/drei` code to `@krate/three` when every
+  fiber and drei API the project's modules use is provided, and adds `@krate/three` to `package.json`. The 3D
+  pages then stop shipping React, react-dom and a second copy of the React libraries around the canvas (on
+  DigitalDesigns, Radix was bundled once per runtime). One unsupported API anywhere (another drei helper,
+  `<Environment preset>`, fiber's `reconciler`, a package built on fiber) keeps every fiber module on the
+  real-React island, and the report names each blocking use.
+- `@krate/three/drei`: drei's `OrbitControls`, `Environment` (rendered from `Lightformer` children, or a `map`),
+  `Lightformer` and `useGLTF` (with the Draco and Meshopt decoders), with drei's props and behavior. The loader
+  and its decoders are bundled only into pages that call `useGLTF`. `OrbitControls` are three's, set up to behave
+  like drei's three-stdlib ones: a fixed zoom step per wheel event, and no pointer capture on press (so a click's
+  pointerup still reaches listeners on the canvas, such as an app's own surface picking).
+- `@krate/three` runs in Preact islands: a `"use client"` component of a server-rendered page resolves
+  `@krate/three` and `@krate/three/drei` to island builds with the same React-style API, rendered by the
+  island's Preact through a DOM-like host in the engine. A scene error reaches the error boundary around the
+  `<Canvas>`, as in R3F.
 - `@krate/auth`: `auth.signIn(provider, { redirectTo })` and `auth.signOut({ redirectTo })` for server
   actions and route handlers (same flow and cookies as the CSRF-protected endpoints, then a redirect;
   `redirect: false` returns the URL), and `auth.auth()` with no argument reads the session of the current
@@ -412,6 +427,29 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- A component rendered in a scene (or as a list row) that reads a value from an earlier hook result
+  (`const store = useStore(); const get = store.getState;`) threw "Cannot access before initialization": the
+  compiler re-declared the pure `const` at the top of the body, above the hook it reads. It now stays where it
+  was declared.
+- Vendored npm code that computes `new URL("./x", import.meta.url)` at module scope (three's `DRACOLoader`)
+  threw while the page loaded, because the classic-script bundle left `import.meta` empty. `import.meta.url` is
+  now the URL of the running script there, and in the build-time island render.
+- `@krate/three`: a scene component called without children received `children: []` instead of no `children`
+  prop, so `props.children ? a : b` took the wrong branch (drei's `Lightformer` rendered no material).
+- A `"use client"` component of a server-rendered page that calls `useSyncExternalStore(subscribe, getSnapshot,
+  getServerSnapshot)` failed the server render when `getSnapshot` reads `window`: preact/compat ignores the third
+  argument. Server renders of Preact islands now use `getServerSnapshot`, as React does.
+- A `lazy()` (or `use()`) with no `<Suspense>` of its own inside a `"use client"` component threw its promise out
+  of the island ("Uncaught Promise") and the component never appeared. The root of a client island is now a
+  Suspense boundary, as React's root is: the server HTML stays until the code has loaded.
+- `krate migrate nextjs` maps Next.js' default response compression to build-time precompression
+  (`compress: { brotli: true, gzip: true }`, left out for `compress: false`). A migrated app was gzipped on the
+  fly at Go's default level, about 4% larger than Next.js' gzip on the same JavaScript.
+- `krate migrate nextjs` turns `dynamic(() => import(...), { ssr: false, loading })` into a lazy component inside
+  `<Suspense fallback={loading}>`, so the loading fallback also shows while the chunk loads, as in Next.js.
+- A component migrated to `@krate/three` that a real-React island renders (a react-konva editor that also shows the
+  3D preview) runs as `@react-three/fiber` there instead of failing the build with "Decorators are not valid here";
+  without fiber installed the build names what to install.
 - `import { z } from 'zod'` in an island no longer ships all of zod. zod's index re-exports its API as a namespace
   (`import * as z from "./v4/classic/external.js"; export { z }`), and esbuild builds a namespace that reaches a file
   through another module as an object holding every export, so the island got every schema type and every

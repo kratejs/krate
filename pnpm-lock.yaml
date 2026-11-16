@@ -379,6 +379,9 @@ importers:
       happy-dom:
         specifier: ^20.14.5
         version: 20.14.5
+      preact:
+        specifier: ^10.20.0
+        version: 10.29.8
       three:
         specifier: ^0.187.0
         version: 0.187.0

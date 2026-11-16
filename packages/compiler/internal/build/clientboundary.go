@@ -948,7 +948,7 @@ func (b *Builder) clientChunkJobs(reqs []clientChunkReq) ([]clientChunkInfo, []*
 
 // clientChunkSource is the entry module of a boundary's hydration chunk.
 func clientChunkSource(entry string) string {
-	return "import { h, hydrate } from \"preact\";\n" + entry +
+	return "import { h, hydrate } from \"preact\";\nimport { Suspense as __KrateSuspense } from \"preact/compat\";\n" + entry +
 		clientReviveJS + clientActionCallJS + preactSlotJS + `
 function __resolve(name) {
   return name.split(".").reduce(function (o, k) { return o == null ? o : o[k]; }, __m);
@@ -971,7 +971,10 @@ export async function mount(el) {
   } finally {
     __krateSlotPool = null;
   }
-  hydrate(__krateInScope(el, h(C, props)), el);
+  // The root is a Suspense boundary, as in React: a lazy() or use() with no
+  // boundary of its own waits there (keeping the server HTML) instead of
+  // throwing its promise out of the island.
+  hydrate(__krateInScope(el, h(__KrateSuspense, { fallback: null }, h(C, props))), el);
   el.setAttribute("data-krate-island-hydrated", "");
 }
 `
@@ -1001,7 +1004,7 @@ func (b *Builder) clientChunkOptions(guard *unavailableGuard) (api.BuildOptions,
 		External:          []string{"preact", "preact/compat", "preact/hooks", "preact/jsx-runtime"},
 		Inject:            []string{shim},
 		Metafile:          true,
-		Plugins:           []api.Plugin{purePrunePlugin(b.Root), guard.plugin(), clientOnlyMarkersPlugin(true), actionServerBundlePlugin(b.importResolver(), b.actionModules(), b.Cfg.BaseURLPath()), reactDOMHintsPlugin(b.Root), reactCompatPlugin(b.Root), routerHooksPlugin(b.Root)},
+		Plugins:           []api.Plugin{purePrunePlugin(b.Root), guard.plugin(), clientOnlyMarkersPlugin(true), actionServerBundlePlugin(b.importResolver(), b.actionModules(), b.Cfg.BaseURLPath()), reactDOMHintsPlugin(b.Root), reactCompatPlugin(b.Root), routerHooksPlugin(b.Root), threeIslandPlugin()},
 		LogLevel:          api.LogLevelSilent,
 	}
 	if err := withContextKeys(&opts, b.Root, filepath.Join(b.Cfg.OutDir, ".krate")); err != nil {
@@ -1550,7 +1553,7 @@ func (c *clientSSRImpls) options(plugin *api.Plugin, guard *unavailableGuard) (a
 	// The modules share their options, so the pure-module plugin shares its
 	// resolutions across them.
 	plugins := []api.Plugin{purePrunePluginMemo(c.root, &c.memo), guard.plugin(), serverCSSPlugin(c.root), *plugin}
-	plugins = append(plugins, clientOnlyMarkersPlugin(false), actionServerBundlePlugin(c.res, c.actions, c.basePath), pathAliasPlugin(c.res), reactDOMHintsPlugin(c.root), reactCompatPlugin(c.root), routerHooksPlugin(c.root), preactRequirePlugin())
+	plugins = append(plugins, clientOnlyMarkersPlugin(false), actionServerBundlePlugin(c.res, c.actions, c.basePath), pathAliasPlugin(c.res), reactDOMHintsPlugin(c.root), reactServerCompatPlugin(c.root), routerHooksPlugin(c.root), threeIslandPlugin(), preactRequirePlugin())
 	shim, err := boundaryShims(filepath.Dir(c.bundleDir))
 	if err != nil {
 		return api.BuildOptions{}, err

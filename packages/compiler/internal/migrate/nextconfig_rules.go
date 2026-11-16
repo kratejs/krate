@@ -421,7 +421,6 @@ var otherKeyNotes = map[string]keyNote{
 	"cacheComponents":             {true, "cacheComponents is not translated", "see Caching and Revalidation for the Krate equivalents; \"use cache\" has none"},
 	"reactStrictMode":             {false, "reactStrictMode has no effect in Krate", ""},
 	"poweredByHeader":             {false, "poweredByHeader is not translated", ""},
-	"compress":                    {false, "compress is not used; see Precompression in the config reference", ""},
 	"generateEtags":               {false, "generateEtags is not used", ""},
 	"eslint":                      {false, "eslint settings are not used; run your linter separately", ""},
 	"typescript":                  {false, "typescript settings are not translated", ""},
@@ -446,7 +445,7 @@ var otherKeyNotes = map[string]keyNote{
 // translateOtherKeys reports every top-level key the migrator does not
 // translate, with a key-specific hint.
 func translateOtherKeys(file string, obj *ast.ObjectExpr, notes *nextConfigNotes, skip map[string]bool) {
-	handled := map[string]bool{"trailingSlash": true, "basePath": true, "redirects": true, "rewrites": true, "headers": true, "images": true, "env": true}
+	handled := map[string]bool{"compress": true, "trailingSlash": true, "basePath": true, "redirects": true, "rewrites": true, "headers": true, "images": true, "env": true}
 	for k := range skip {
 		handled[k] = true
 	}

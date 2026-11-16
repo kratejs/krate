@@ -358,7 +358,7 @@ func rewriteNextDynamic(src string, ts bool) (out string, manual []string, ok bo
 		manual = append(manual, items...)
 		if gated {
 			n++
-			need["useState"], need["useEffect"] = true, true
+			need["useState"], need["useEffect"], need["Suspense"] = true, true, true
 			src = src[:hoistAt] + hoist + src[hoistAt:c.start] + repl + src[c.end:]
 			from = c.start + len(hoist) + len(repl)
 			continue
@@ -373,7 +373,7 @@ func rewriteNextDynamic(src string, ts bool) (out string, manual []string, ok bo
 			have[strings.TrimSpace(name)] = true
 		}
 	}
-	for _, name := range []string{"lazy", "useEffect", "useState"} {
+	for _, name := range []string{"Suspense", "lazy", "useEffect", "useState"} {
 		if need[name] && !have[name] {
 			names = append(names, name)
 		}
@@ -477,7 +477,7 @@ func buildDynamic(src string, c dynamicCall, n int) (repl, hoist string, hoistAt
 	repl = "(props: " + propsType + ") => {\n" +
 		"  const [mounted, setMounted] = useState(false);\n" +
 		"  useEffect(() => { setMounted(true); }, []);\n" +
-		"  return mounted ? <" + lazyName + " {...props} /> : " + fallback + ";\n}"
+		"  return mounted ? <Suspense fallback={" + fallback + "}><" + lazyName + " {...props} /></Suspense> : " + fallback + ";\n}"
 	return repl, hoist, stmt, manual, true
 }
 
