@@ -94,16 +94,22 @@ func batchModulePath(i int, e batchEntry) string {
 	return filepath.Join(e.ResolveDir, ".krate-batch-"+strconv.Itoa(i), name)
 }
 
-// esbuildCwd is the directory esbuild prints paths relative to: the working
-// directory with its symlinks resolved, as esbuild resolves it (on macOS the
-// temporary directory /var is /private/var; on Windows a short name expands).
-func esbuildCwd(opts api.BuildOptions) string {
+// esbuildCwd is the directory esbuild printed the paths of a build relative
+// to. esbuild resolves the symlinks of its working directory (on macOS the
+// temporary directory /var is /private/var) but, on Windows, keeps a short
+// name as given, so the directory is the candidate whose relative path to
+// probe is one the metafile names.
+func esbuildCwd(opts api.BuildOptions, metafile, probe string) string {
 	cwd := opts.AbsWorkingDir
 	if cwd == "" {
 		cwd, _ = os.Getwd()
 	}
-	if real, err := filepath.EvalSymlinks(cwd); err == nil {
-		cwd = real
+	real, err := filepath.EvalSymlinks(cwd)
+	if err != nil || real == cwd {
+		return cwd
+	}
+	if strings.Contains(metafile, strconv.Quote(relSlash(real, probe))) {
+		return real
 	}
 	return cwd
 }
@@ -183,12 +189,12 @@ func esbuildBatch(opts api.BuildOptions, entries []batchEntry) ([]batchOutput, a
 	if len(res.Errors) > 0 {
 		return nil, res
 	}
-	cwd := esbuildCwd(opts)
+	cwd := esbuildCwd(opts, res.Metafile, batchModulePath(0, entries[0]))
 	keys := make(map[string]int, len(entries))
 	for i := range entries {
 		keys[relSlash(cwd, batchModulePath(i, entries[i]))] = i
 	}
-	outs := splitBatchOutputs(opts, len(entries), func(ep string) (int, bool) {
+	outs := splitBatchOutputs(cwd, len(entries), func(ep string) (int, bool) {
 		i, ok := keys[ep]
 		return i, ok
 	}, res, wantMeta)
@@ -219,10 +225,10 @@ func esbuildBatch(opts api.BuildOptions, entries []batchEntry) ([]batchOutput, a
 }
 
 // splitBatchOutputs assigns each output file of a batched build to its entry
-// by the metafile, which names the entry point of every output. entryOf maps
-// a metafile entryPoint to the entry's index. Each entry's metafile holds
-// only its "outputs".
-func splitBatchOutputs(opts api.BuildOptions, n int, entryOf func(string) (int, bool), res api.BuildResult, wantMeta bool) []batchOutput {
+// by the metafile, which names the entry point of every output relative to
+// cwd (from esbuildCwd). entryOf maps a metafile entryPoint to the entry's
+// index. Each entry's metafile holds only its "outputs".
+func splitBatchOutputs(cwd string, n int, entryOf func(string) (int, bool), res api.BuildResult, wantMeta bool) []batchOutput {
 	var meta struct {
 		Outputs map[string]json.RawMessage `json:"outputs"`
 	}
@@ -231,7 +237,6 @@ func splitBatchOutputs(opts api.BuildOptions, n int, entryOf func(string) (int, 
 	metaOf := make([]map[string]json.RawMessage, n)
 	entryInput := make([]string, n)
 	ownerOf := map[string]int{}
-	cwd := esbuildCwd(opts)
 	type outInfo struct {
 		EntryPoint string `json:"entryPoint"`
 		CSSBundle  string `json:"cssBundle"`
