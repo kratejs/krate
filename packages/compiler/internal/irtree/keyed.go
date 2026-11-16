@@ -47,7 +47,7 @@ const (
 // planMapCall analyzes `recv.map(callback)`. It returns nil when the call is
 // not a list the runtime can bind (the caller keeps the whole-region
 // re-render fallback).
-func planMapCall(call *ast.CallExpr) *listPlan {
+func (r *reactifier) planMapCall(call *ast.CallExpr) *listPlan {
 	if call == nil || len(call.Args) != 1 {
 		return nil
 	}
@@ -79,7 +79,7 @@ func planMapCall(call *ast.CallExpr) *listPlan {
 	}
 	plan.KeyHoles = hasKeyHole(ret)
 	plan.Accessor = simpleCallbackParams(arrow)
-	plan.RenderJS = renderRowFn(arrow, plan.Accessor)
+	plan.RenderJS = r.renderRowFn(arrow, plan.Accessor)
 	return plan
 }
 
@@ -255,7 +255,7 @@ func renderKeyFn(arrow *ast.ArrowFn, prefix []ast.Stmt, key ast.Expr) string {
 
 // renderRowFn renders the row render function. In accessor mode every use of
 // the item/index parameters becomes a call of the row accessor.
-func renderRowFn(arrow *ast.ArrowFn, accessor bool) string {
+func (r *reactifier) renderRowFn(arrow *ast.ArrowFn, accessor bool) string {
 	fn := *arrow
 	body := arrow.Body
 	if accessor {
@@ -268,7 +268,7 @@ func renderRowFn(arrow *ast.ArrowFn, accessor bool) string {
 		if accessor && len(prefix) > 0 {
 			ret, prefix = inlineConstLocals(prefix, ret)
 		}
-		ret = reactifyRoot(ret)
+		ret = r.reactifyRoot(ret)
 		out := append([]ast.Stmt{}, prefix...)
 		fn.Body = append(out, &ast.ReturnStmt{Value: ret})
 		if fn.Expression && len(prefix) > 0 {
@@ -448,55 +448,55 @@ func thunk(e ast.Expr) ast.Expr {
 
 // reactifyRoot rewrites the value a row or component returns. The root's own
 // key belongs to the enclosing list and is dropped.
-func reactifyRoot(e ast.Expr) ast.Expr {
+func (r *reactifier) reactifyRoot(e ast.Expr) ast.Expr {
 	switch v := e.(type) {
 	case *ast.ParenExpr:
-		return &ast.ParenExpr{Position: v.Position, Expr: reactifyRoot(v.Expr)}
+		return &ast.ParenExpr{Position: v.Position, Expr: r.reactifyRoot(v.Expr)}
 	case *ast.JSXElement:
-		return reactifyElement(v, true)
+		return r.reactifyElement(v, true)
 	case *ast.JSXFragment:
-		return reactifyFragment(v)
+		return r.reactifyFragment(v)
 	case *ast.ConditionalExpr, *ast.BinaryExpr:
 		if containsJSX(e) {
 			// A branch between JSX values re-renders when its test changes.
-			return thunk(reactifyExpr(e))
+			return thunk(r.reactifyExpr(e))
 		}
 	}
 	if isStaticJSXValue(e) {
 		return e
 	}
 	// Text rows (`items.map(t => t.label)`) and other values stay live too.
-	return thunk(reactifyExpr(e))
+	return thunk(r.reactifyExpr(e))
 }
 
 // reactifyExpr rewrites JSX nested in an expression.
-func reactifyExpr(e ast.Expr) ast.Expr {
+func (r *reactifier) reactifyExpr(e ast.Expr) ast.Expr {
 	switch v := e.(type) {
 	case *ast.JSXElement:
-		return reactifyElement(v, false)
+		return r.reactifyElement(v, false)
 	case *ast.JSXFragment:
-		return reactifyFragment(v)
+		return r.reactifyFragment(v)
 	case *ast.ParenExpr:
-		return &ast.ParenExpr{Position: v.Position, Expr: reactifyExpr(v.Expr)}
+		return &ast.ParenExpr{Position: v.Position, Expr: r.reactifyExpr(v.Expr)}
 	case *ast.TypeAssertion:
-		return reactifyExpr(v.Expr)
+		return r.reactifyExpr(v.Expr)
 	case *ast.ConditionalExpr:
-		return &ast.ConditionalExpr{Position: v.Position, Test: v.Test, Consequent: reactifyExpr(v.Consequent), Alternate: reactifyExpr(v.Alternate)}
+		return &ast.ConditionalExpr{Position: v.Position, Test: v.Test, Consequent: r.reactifyExpr(v.Consequent), Alternate: r.reactifyExpr(v.Alternate)}
 	case *ast.BinaryExpr:
 		if v.Op == "&&" || v.Op == "||" || v.Op == "??" {
-			return &ast.BinaryExpr{Position: v.Position, Left: v.Left, Op: v.Op, Right: reactifyExpr(v.Right)}
+			return &ast.BinaryExpr{Position: v.Position, Left: v.Left, Op: v.Op, Right: r.reactifyExpr(v.Right)}
 		}
 	case *ast.ArrayExpr:
 		out := make([]ast.Expr, len(v.Elements))
 		for i, el := range v.Elements {
 			if el != nil {
-				out[i] = reactifyExpr(el)
+				out[i] = r.reactifyExpr(el)
 			}
 		}
 		return &ast.ArrayExpr{Position: v.Position, Elements: out}
 	case *ast.CallExpr:
 		if isMapCall(v) {
-			if list := nestedListCall(v); list != nil {
+			if list := r.nestedListCall(v); list != nil {
 				return list
 			}
 		}
@@ -505,8 +505,8 @@ func reactifyExpr(e ast.Expr) ast.Expr {
 }
 
 // nestedListCall lowers a `.map()` inside rendered JSX to krateList(...).
-func nestedListCall(call *ast.CallExpr) ast.Expr {
-	plan := planMapCall(call)
+func (r *reactifier) nestedListCall(call *ast.CallExpr) ast.Expr {
+	plan := r.planMapCall(call)
 	if plan == nil {
 		return nil
 	}
@@ -576,7 +576,7 @@ func isStaticJSXValue(e ast.Expr) bool {
 // linkLiteralAttrs are <Link> props the Link lowering inspects as literals.
 var linkLiteralAttrs = map[string]bool{"prefetch": true, "replace": true, "external": true, "scroll": true, "basePath": true}
 
-func reactifyElement(el *ast.JSXElement, root bool) ast.Expr {
+func (r *reactifier) reactifyElement(el *ast.JSXElement, root bool) ast.Expr {
 	if el == nil || el.Opening == nil {
 		return el
 	}
@@ -585,12 +585,12 @@ func reactifyElement(el *ast.JSXElement, root bool) ast.Expr {
 		if key := jsxKeyAttr(el); key != nil && !isStaticJSXValue(key) {
 			// <Profile key={id} />: a new key remounts the element (cleanups,
 			// then a fresh render with fresh state).
-			body := renderArrowFn(&ast.ArrowFn{Expression: true, Body: []ast.Stmt{&ast.ReturnStmt{Value: reactifyElement(el, true)}}}, nil)
+			body := renderArrowFn(&ast.ArrowFn{Expression: true, Body: []ast.Stmt{&ast.ReturnStmt{Value: r.reactifyElement(el, true)}}}, nil)
 			return listCallExpr("["+generateExprJS(key, nil)+"]", "(k)=>k", body, true)
 		}
 	}
 	if isComponentName(name) && name != "Link" {
-		return reactifyComponent(el)
+		return r.reactifyComponent(el)
 	}
 	opening := &ast.JSXOpening{Name: name, SelfClosing: el.Opening.SelfClosing}
 	for _, attr := range el.Opening.Attributes {
@@ -604,6 +604,9 @@ func reactifyElement(el *ast.JSXElement, root bool) ast.Expr {
 		switch {
 		case attr.Name == "key":
 			continue
+		case name == RendererSuspenseTag && attr.Name == "fallback" && containsJSX(attr.Value):
+			// A JSX fallback is passed as descriptors the renderer mounts.
+			opening.Attributes = append(opening.Attributes, &ast.JSXAttr{Position: attr.Position, Name: attr.Name, Value: r.reactifyExpr(attr.Value)})
 		case attr.Name == "ref", attr.Name == "dangerouslySetInnerHTML", isOnEvent(attr.Name),
 			name == "Link" && linkLiteralAttrs[attr.Name], isStaticJSXValue(attr.Value):
 			opening.Attributes = append(opening.Attributes, attr)
@@ -611,18 +614,18 @@ func reactifyElement(el *ast.JSXElement, root bool) ast.Expr {
 			opening.Attributes = append(opening.Attributes, &ast.JSXAttr{Position: attr.Position, Name: attr.Name, Value: thunk(attr.Value)})
 		}
 	}
-	return &ast.JSXElement{Position: el.Position, Opening: opening, Children: reactifyChildren(el.Children), Closing: el.Closing}
+	return &ast.JSXElement{Position: el.Position, Opening: opening, Children: r.reactifyChildren(el.Children), Closing: el.Closing}
 }
 
 func isComponentName(name string) bool {
 	return name != "" && name[0] >= 'A' && name[0] <= 'Z'
 }
 
-func reactifyFragment(f *ast.JSXFragment) ast.Expr {
-	return &ast.JSXFragment{Position: f.Position, Children: reactifyChildren(f.Children)}
+func (r *reactifier) reactifyFragment(f *ast.JSXFragment) ast.Expr {
+	return &ast.JSXFragment{Position: f.Position, Children: r.reactifyChildren(f.Children)}
 }
 
-func reactifyChildren(children []ast.JSXChild) []ast.JSXChild {
+func (r *reactifier) reactifyChildren(children []ast.JSXChild) []ast.JSXChild {
 	out := make([]ast.JSXChild, 0, len(children))
 	for _, child := range children {
 		switch c := child.(type) {
@@ -631,16 +634,17 @@ func reactifyChildren(children []ast.JSXChild) []ast.JSXChild {
 				out = append(out, c)
 				continue
 			}
-			out = append(out, &ast.JSXExprContainer{Expression: reactifyChildExpr(c.Expression)})
+			out = append(out, &ast.JSXExprContainer{Expression: r.reactifyChildExpr(c.Expression)})
 		case *ast.JSXElementChild:
-			if r, ok := reactifyElement(c.Element, false).(*ast.JSXElement); ok {
-				out = append(out, &ast.JSXElementChild{Element: r})
+			lowered := r.reactifyElement(c.Element, false)
+			if el, ok := lowered.(*ast.JSXElement); ok {
+				out = append(out, &ast.JSXElementChild{Element: el})
 			} else {
-				out = append(out, &ast.JSXExprContainer{Expression: reactifyElement(c.Element, false)})
+				out = append(out, &ast.JSXExprContainer{Expression: lowered})
 			}
 		case *ast.JSXFragmentChild:
-			if r, ok := reactifyFragment(c.Fragment).(*ast.JSXFragment); ok {
-				out = append(out, &ast.JSXFragmentChild{Fragment: r})
+			if f, ok := r.reactifyFragment(c.Fragment).(*ast.JSXFragment); ok {
+				out = append(out, &ast.JSXFragmentChild{Fragment: f})
 			}
 		default:
 			out = append(out, child)
@@ -651,25 +655,25 @@ func reactifyChildren(children []ast.JSXChild) []ast.JSXChild {
 
 // reactifyChildExpr rewrites a `{expr}` child: JSX and lists render directly,
 // anything else becomes a reactive region.
-func reactifyChildExpr(e ast.Expr) ast.Expr {
+func (r *reactifier) reactifyChildExpr(e ast.Expr) ast.Expr {
 	switch v := e.(type) {
 	case *ast.Literal:
 		return v
 	case *ast.JSXElement, *ast.JSXFragment:
-		return reactifyExpr(v)
+		return r.reactifyExpr(v)
 	case *ast.CallExpr:
 		if isMapCall(v) {
-			if list := nestedListCall(v); list != nil {
+			if list := r.nestedListCall(v); list != nil {
 				return list
 			}
 		}
 	}
-	return thunk(reactifyExpr(e))
+	return thunk(r.reactifyExpr(e))
 }
 
 // reactifyComponent lowers <C a={x}>children</C> to h(C, {get a(){return x}},
 // ...children) so the child reads live values through its props.
-func reactifyComponent(el *ast.JSXElement) ast.Expr {
+func (r *reactifier) reactifyComponent(el *ast.JSXElement) ast.Expr {
 	props := &ast.ObjectExpr{Position: el.Position}
 	for _, attr := range el.Opening.Attributes {
 		if attr == nil {
@@ -695,11 +699,18 @@ func reactifyComponent(el *ast.JSXElement) ast.Expr {
 			props.Properties = append(props.Properties, &ast.ObjectProp{Key: key, Value: value, KeyQuoted: !isJSIdentifier(key)})
 			continue
 		case *ast.JSXElement, *ast.JSXFragment:
-			props.Properties = append(props.Properties, &ast.ObjectProp{Key: key, Value: reactifyExpr(value), KeyQuoted: !isJSIdentifier(key)})
+			props.Properties = append(props.Properties, &ast.ObjectProp{Key: key, Value: r.reactifyExpr(value), KeyQuoted: !isJSIdentifier(key)})
 			continue
 		}
 		getter := &ast.ArrowFn{Function: true, Expression: true, Body: []ast.Stmt{&ast.ReturnStmt{Value: value}}}
 		props.Properties = append(props.Properties, &ast.ObjectProp{Key: key, Value: getter, Method: true, Getter: true, KeyQuoted: !isJSIdentifier(key)})
+	}
+	renderer := r.rendererComponent(el.Opening.Name)
+	if renderer {
+		// A renderer boundary takes its children as a thunk, never as DOM.
+		if kids := r.rendererChildren(el.Children); kids != nil {
+			props.Properties = append(props.Properties, &ast.ObjectProp{Key: "children", Value: kids})
+		}
 	}
 	args := []ast.Expr{&ast.Identifier{Name: el.Opening.Name}}
 	if len(props.Properties) > 0 {
@@ -707,7 +718,11 @@ func reactifyComponent(el *ast.JSXElement) ast.Expr {
 	} else {
 		args = append(args, &ast.Literal{Kind: ast.NullLit, Value: "null"})
 	}
-	for _, child := range reactifyChildren(el.Children) {
+	children := el.Children
+	if renderer {
+		children = nil
+	}
+	for _, child := range r.reactifyChildren(children) {
 		switch c := child.(type) {
 		case *ast.JSXText:
 			args = append(args, &ast.Literal{Kind: ast.StringLit, Value: c.Value})
@@ -737,22 +752,28 @@ const reactivePropsParam = "__kp"
 // returns "" when fn is not a component (an uppercase function that returns
 // JSX).
 func ReactiveComponentFnJS(fn *ast.FnDecl) string {
-	if r := reactiveComponentFn(fn); r != nil {
-		return renderStmtJS(r, nil)
+	if rf := plainReactifier.reactiveComponentFn(fn); rf != nil {
+		return renderStmtJS(rf, nil)
 	}
 	return ""
 }
 
+// renderFnDeclJS renders a hoisted function declaration without renderer
+// component knowledge.
+func renderFnDeclJS(fn *ast.FnDecl, signals map[string]ast.Expr) string {
+	return plainReactifier.renderFnDeclJS(fn, signals)
+}
+
 // renderFnDeclJS renders a hoisted function declaration, using the reactive
 // form for components.
-func renderFnDeclJS(fn *ast.FnDecl, signals map[string]ast.Expr) string {
-	if r := reactiveComponentFn(fn); r != nil {
-		return renderStmtJS(r, signals)
+func (r *reactifier) renderFnDeclJS(fn *ast.FnDecl, signals map[string]ast.Expr) string {
+	if rf := r.reactiveComponentFn(fn); rf != nil {
+		return renderStmtJS(rf, signals)
 	}
 	return renderStmtJS(fn, signals)
 }
 
-func reactiveComponentFn(fn *ast.FnDecl) *ast.FnDecl {
+func (r *reactifier) reactiveComponentFn(fn *ast.FnDecl) *ast.FnDecl {
 	if fn == nil || !isComponentName(fn.Name) || fn.Generator || fn.Async || !fnReturnsJSX(fn.Body) {
 		return nil
 	}
@@ -775,7 +796,7 @@ func reactiveComponentFn(fn *ast.FnDecl) *ast.FnDecl {
 			cp.Params = []*ast.Param{{Position: fn.Params[0].Position, Name: reactivePropsParam}}
 		}
 	}
-	cp.Body = reactifyReturns(inlineComponentLocals(liveContextReads(body)))
+	cp.Body = r.reactifyReturns(inlineComponentLocals(liveContextReads(body)))
 	return &cp
 }
 
@@ -894,23 +915,23 @@ func walkReturns(stmts []ast.Stmt, fn func(*ast.ReturnStmt)) {
 }
 
 // reactifyReturns rewrites the JSX returned at top level of a function body.
-func reactifyReturns(stmts []ast.Stmt) []ast.Stmt {
+func (r *reactifier) reactifyReturns(stmts []ast.Stmt) []ast.Stmt {
 	out := make([]ast.Stmt, len(stmts))
 	for i, stmt := range stmts {
 		switch s := stmt.(type) {
 		case *ast.ReturnStmt:
 			if s.Value != nil && containsJSX(s.Value) {
-				out[i] = &ast.ReturnStmt{Position: s.Position, Value: reactifyRoot(s.Value)}
+				out[i] = &ast.ReturnStmt{Position: s.Position, Value: r.reactifyRoot(s.Value)}
 				continue
 			}
 		case *ast.IfStmt:
 			cp := *s
-			cp.Consequent = reactifyReturns(s.Consequent)
-			cp.Alternate = reactifyReturns(s.Alternate)
+			cp.Consequent = r.reactifyReturns(s.Consequent)
+			cp.Alternate = r.reactifyReturns(s.Alternate)
 			out[i] = &cp
 			continue
 		case *ast.BlockStmt:
-			out[i] = &ast.BlockStmt{Position: s.Position, Body: reactifyReturns(s.Body)}
+			out[i] = &ast.BlockStmt{Position: s.Position, Body: r.reactifyReturns(s.Body)}
 			continue
 		case *ast.SwitchStmt:
 			cp := *s
@@ -918,7 +939,7 @@ func reactifyReturns(stmts []ast.Stmt) []ast.Stmt {
 			for j, c := range s.Cases {
 				if c != nil {
 					cc := *c
-					cc.Body = reactifyReturns(c.Body)
+					cc.Body = r.reactifyReturns(c.Body)
 					cp.Cases[j] = &cc
 				}
 			}

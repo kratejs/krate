@@ -531,6 +531,12 @@ type ComponentNode struct {
 	// are used to fill {props.children} slots in emitClient.
 	CallSiteChildren []ast.JSXChild
 
+	// RendererChildrenJS is the `() => [...]` children thunk of a renderer
+	// boundary component (see IsRendererFn), in the reactive h() form and
+	// evaluated in the caller's hydration scope. Its call-site children are
+	// not rendered or bound otherwise.
+	RendererChildrenJS string
+
 	// ChildCopyStarts is CallSiteCopyStarts for an SSREval component, whose
 	// call-site slots are Children.
 	ChildCopyStarts []int
@@ -583,6 +589,9 @@ type ComponentTree struct {
 	// `let`/`var` bindings used by client code. They are emitted once at the
 	// top of the page script so every component closes over the same variable.
 	SharedModuleVars []string
+	// ModuleInit runs the client modules' top-level setup code once per page
+	// load, ahead of the component scopes (see module_init.go).
+	ModuleInit []string
 
 	// ExternalComponents are unresolved JSX components imported from bare npm
 	// packages. Krate cannot statically evaluate arbitrary React libraries, so

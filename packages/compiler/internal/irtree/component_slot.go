@@ -29,6 +29,16 @@ func (b *builder) buildComponentSlot(el *ast.JSXElement, parentID string) []Slot
 	}
 	el = b.expandComponentSpreads(el)
 	childID := joinSlotID(parentID, childName)
+	// A renderer boundary's children belong to its renderer: they are never
+	// rendered, bound or checked as markup here.
+	renderer := IsRendererFn(childFn)
+	var rendererKids []ast.JSXChild
+	if renderer {
+		rendererKids = el.Children
+		bare := *el
+		bare.Children = nil
+		el = &bare
+	}
 
 	// Scope root: resolve its option universe from the call site (an explicit
 	// literal `options` array, or the descendant `value` literals) before it is
@@ -80,7 +90,7 @@ func (b *builder) buildComponentSlot(el *ast.JSXElement, parentID string) []Slot
 	// shortcut, which bypasses the interception and breaks the panels. The same
 	// applies to components using first-class scope-handle spreads, and to
 	// components handed a scope handle, which they may pass further down.
-	if len(childSignals) == 0 && !b.cssSignalsOK(childFn) && !hasScopeHelperSpread(childFn) && !b.passesScopeHandle(attrs) && !hasComponentChildren(el.Children) && !b.isLazyComponent(childName) {
+	if !renderer && len(childSignals) == 0 && !b.cssSignalsOK(childFn) && !hasScopeHelperSpread(childFn) && !b.passesScopeHandle(attrs) && !hasComponentChildren(el.Children) && !b.isLazyComponent(childName) {
 		if !b.componentNeedsClient(childFn, attrs) {
 			// A signal-less component that renders a parent's signal value
 			// (e.g. <Display value={display()}/>) must stay reactive, so its
@@ -98,6 +108,7 @@ func (b *builder) buildComponentSlot(el *ast.JSXElement, parentID string) []Slot
 			}
 		}
 	}
+	b.rendererKids = rendererKids
 	return b.buildClientComponentSlot(el, childFn, childID, attrs, provider)
 }
 
@@ -451,6 +462,8 @@ func (b *builder) discoverReturnSlots(childFn *ast.FnDecl, childID SlotID, attrs
 // the call-site inputs installed, then its call-site children in the caller's
 // scope, and registers its props for hydration.
 func (b *builder) buildClientComponentSlot(el *ast.JSXElement, childFn *ast.FnDecl, childID SlotID, attrs map[string]ast.Expr, provider scopeProvider) []SlotNode {
+	rendererKids := b.rendererKids
+	b.rendererKids = nil
 	b.warnSuspendOutsideBoundary(childFn, el.Position)
 	// An error boundary whose subtree threw at build time renders its fallback
 	// (boundary_build.go); the instance id is the one newComponentNode assigns.
@@ -505,6 +518,13 @@ func (b *builder) buildClientComponentSlot(el *ast.JSXElement, childFn *ast.FnDe
 		}
 	}
 	b.completeSSREvalBindings(childNode, childFn, attrs)
+	if IsRendererFn(childFn) {
+		if kids := b.reactifier().rendererChildren(rendererKids); kids != nil {
+			// Providers around the call site reach the children through the
+			// live provider getters, as for list rows.
+			childNode.RendererChildrenJS = b.wrapRowContext(generateExprJS(kids, b.sigMap()))
+		}
+	}
 	b.registerChildProps(childNode, childFn)
 	b.checkScopePropReads(el, childFn, childNode, attrs)
 
@@ -786,6 +806,11 @@ func (b *builder) completeSSREvalBindings(childNode *ComponentNode, childFn *ast
 // IIFE. Even with no call-site props an empty {} registration keeps `props`
 // defined for handlers like props.onOpenChange.
 func (b *builder) registerChildProps(childNode *ComponentNode, childFn *ast.FnDecl) {
+	if IsRendererFn(childFn) {
+		// A renderer boundary always gets its props, children included.
+		b.registerRendererProps(childNode, childFn)
+		return
+	}
 	if childNode.Tier != TierClient {
 		return
 	}
@@ -827,6 +852,31 @@ func (b *builder) registerChildProps(childNode *ComponentNode, childFn *ast.FnDe
 	if readsParam {
 		// Kept in the same fragment so the params are bound before signal
 		// initializers that may read them.
+		decl += ";" + paramJS
+	}
+	childNode.ExtraVars = append([]string{decl}, childNode.ExtraVars...)
+}
+
+// registerRendererProps registers a renderer component's props with its
+// `children` thunk, and binds them in its hydration scope.
+func (b *builder) registerRendererProps(childNode *ComponentNode, childFn *ast.FnDecl) {
+	reg := b.buildChildPropsRegDecl(string(childNode.ID), childNode.Props)
+	if childNode.RendererChildrenJS != "" {
+		sep := ","
+		if strings.HasSuffix(reg, "{}") {
+			sep = ""
+		}
+		reg = reg[:len(reg)-1] + sep + "children:" + childNode.RendererChildrenJS + "}"
+	}
+	b.pendingPropsRegs = append(b.pendingPropsRegs, reg)
+	if childNode.RendererChildrenJS != "" {
+		if b.rendererRegs == nil {
+			b.rendererRegs = make(map[string]bool)
+		}
+		b.rendererRegs[reg] = true
+	}
+	decl := "var props=__krate_props[" + strconv.Quote(string(childNode.ID)) + "]"
+	if paramJS, _ := propsParamBindingJS(childFn); paramJS != "" {
 		decl += ";" + paramJS
 	}
 	childNode.ExtraVars = append([]string{decl}, childNode.ExtraVars...)

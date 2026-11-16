@@ -12,6 +12,7 @@ import (
 
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
+	"github.com/kratejs/krate/packages/compiler/internal/resolver"
 )
 
 // Every module of a page ends up in one namespace: the component table, module
@@ -378,6 +379,12 @@ func (b *Bundler) planExportRenames(mods []*Module, dynamic map[string]bool) exp
 	owners := map[string]map[string]bool{}
 	aliased := map[string]map[string]bool{} // name -> modules exporting it as an alias
 	for _, mod := range mods {
+		// npm code (and krate.vendor files) is bundled for the browser by
+		// esbuild under its own export names, never into the page namespace,
+		// so its exports never move: an importer must keep asking for them.
+		if resolver.IsCompiledDependency(mod.Path) {
+			continue
+		}
 		for _, stmt := range mod.Program.Body {
 			exp, ok := stmt.(*ast.ExportStmt)
 			if !ok || exp.Default || exp.ReexportSource != "" {

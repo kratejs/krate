@@ -54,6 +54,7 @@ for usage.
 | CSS-in-JS (styled-components, emotion, MUI) | n/a | Partial | Partial | Client-only islands |
 | Island hydration control (client:visible, client:idle) | n/a | Supported | n/a | Astro-style directives |
 | Real-React islands (react-reconciler libraries) | n/a | Supported | n/a | Opt-in real React |
+| @krate/three (react-three-fiber API) | Supported | n/a | Partial | @react-three/fiber 9 API without React |
 | @react-three/fiber | n/a | Partial | n/a | Real-React island |
 | @react-three/drei | n/a | Partial | n/a | Real-React island |
 | react-konva | n/a | Partial | n/a | Real-React island |
@@ -467,6 +468,19 @@ Known limits:
 - Async pages and layouts host them as client-rendered boundaries (props and children must be serializable); synchronous layouts cannot (KR8013).
 
 Evidence: `TestRealReactIsland`, `TestBrowserRealReactIsland`, `TestRealReactConfigPackage`, `TestReconcilerLibraryOnPreactIsland`, `TestRealReactInAsyncPages`
+
+### @krate/three (react-three-fiber API)
+
+**Source:** Supported - **Islands:** n/a - **SSR:** Partial
+
+@krate/three renders three.js scenes from JSX compiled with the page: Canvas (an @renderer component), every three class as an element with args, attach, pierced props and primitives, reactive props that update objects in place, conditionals and keyed lists, pointer events with raycasting, bubbling and capture, useFrame, useThree, useLoader with Suspense, portals, extend, createRoot and the frame loop exports. React-style and Krate-style scenes are checked in Chromium with WebGL by TestBrowserThree; the engine has Vitest coverage in packages/three.
+
+Known limits:
+
+- Only the canvas wrapper is server-rendered; the scene mounts in the browser.
+- Libraries built on @react-three/fiber (drei) need the real-React island instead (row react-three-fiber).
+
+Evidence: `TestBrowserThree`, `fixture:packages/compiler/internal/build/testdata/three`
 
 ### @react-three/fiber
 

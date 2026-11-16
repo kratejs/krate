@@ -39,7 +39,8 @@ var layoutVendorImports sync.Map // layout path -> []vendorImport
 
 // collectVendorImports lists the npm bindings imported by the bundled modules.
 // Compat runtime specifiers, Krate packages, Node built-ins and packages that
-// are Krate source (workspace links) are not vendor code.
+// are Krate source (workspace links) are not vendor code, except the files a
+// package lists under `krate.vendor`.
 func collectVendorImports(bundle *bundler.Bundle) []vendorImport {
 	var out []vendorImport
 	for _, m := range bundle.Modules {
@@ -52,7 +53,10 @@ func collectVendorImports(bundle *bundler.Bundle) []vendorImport {
 				continue
 			}
 			src := strings.Trim(imp.Source, "\"'")
-			if !isBarePackageImport(src) || isCompatAliased(src) || isDataImportSpec(src) ||
+			// A Krate package's krate.vendor files are vendored too; the
+			// resolved-path check below keeps its Krate source out.
+			kratePkg := strings.HasPrefix(src, "@krate/") && src != "@krate/runtime" && !strings.HasPrefix(src, "@krate/runtime/")
+			if !(isBarePackageImport(src) || kratePkg) || isCompatAliased(src) || isDataImportSpec(src) ||
 				src == "server-only" || src == "client-only" {
 				continue
 			}
@@ -79,7 +83,9 @@ func collectVendorImports(bundle *bundler.Bundle) []vendorImport {
 					local = n.Remote
 				}
 				v := base
-				v.Kind, v.Imported, v.Local = "named", n.Remote, local
+				// The package is bundled by esbuild under its own export
+				// names; a page-namespace rename never applies to them.
+				v.Kind, v.Imported, v.Local = "named", bundler.OriginalName(n.Remote), local
 				out = append(out, v)
 			}
 		}
@@ -188,6 +194,14 @@ func (b *Builder) vendorPreamble(used []vendorImport) (string, error) {
 	if findPreactDir(b.Root) != "" {
 		alias = islandAlias(b.Root, true)
 	}
+	sharedDirs := map[string]string{}
+	for _, u := range used {
+		if name := vendorPackageName(u.Source); name != "" {
+			if _, ok := sharedDirs[name]; !ok {
+				sharedDirs[name] = u.Dir
+			}
+		}
+	}
 	res := esbuildBuild(api.BuildOptions{
 		Alias:             alias,
 		Stdin:             &api.StdinOptions{Contents: src.String(), ResolveDir: b.Root, Sourcefile: "krate-vendor.js", Loader: api.LoaderJS},
@@ -207,6 +221,24 @@ func (b *Builder) vendorPreamble(used []vendorImport) (string, error) {
 		Plugins: []api.Plugin{{
 			Name: "krate-vendor-resolve",
 			Setup: func(pb api.PluginBuild) {
+				// A package the page imports is one module instance in the
+				// bundle: an import of it from vendored code (a krate.vendor
+				// engine linked from a workspace) resolves where the page's
+				// own import does, not from the importer's real location.
+				pb.OnResolve(api.OnResolveOptions{Filter: `^[@\w]`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+					if args.PluginData == vendorDedupeMark || strings.HasPrefix(args.Path, "krate-vendor:") {
+						return api.OnResolveResult{}, nil
+					}
+					dir, ok := sharedDirs[vendorPackageName(args.Path)]
+					if !ok {
+						return api.OnResolveResult{}, nil
+					}
+					r := pb.Resolve(args.Path, api.ResolveOptions{ResolveDir: dir, Kind: args.Kind, Importer: args.Importer, PluginData: vendorDedupeMark})
+					if len(r.Errors) > 0 {
+						return api.OnResolveResult{}, nil
+					}
+					return api.OnResolveResult{Path: r.Path, Namespace: r.Namespace, External: r.External, SideEffects: sideEffects(r.SideEffects)}, nil
+				})
 				pb.OnResolve(api.OnResolveOptions{Filter: `^krate-vendor:`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
 					rest := strings.TrimPrefix(args.Path, "krate-vendor:")
 					colon := strings.IndexByte(rest, ':')
@@ -242,4 +274,30 @@ func (b *Builder) vendorPreamble(used []vendorImport) (string, error) {
 	out := strings.TrimSpace(string(res.OutputFiles[0].Contents))
 	vendorMemo.Store(key, out)
 	return out, nil
+}
+
+// vendorDedupeMark tags the nested resolve of a shared package.
+const vendorDedupeMark = "krate-vendor-dedupe"
+
+// vendorPackageName returns the package of a bare specifier
+// ("@scope/pkg/sub" -> "@scope/pkg"), or "" for a relative or node: path.
+func vendorPackageName(spec string) string {
+	if spec == "" || strings.HasPrefix(spec, ".") || strings.HasPrefix(spec, "/") || strings.Contains(spec, ":") {
+		return ""
+	}
+	parts := strings.SplitN(spec, "/", 3)
+	if strings.HasPrefix(spec, "@") {
+		if len(parts) < 2 {
+			return ""
+		}
+		return parts[0] + "/" + parts[1]
+	}
+	return parts[0]
+}
+
+func sideEffects(se bool) api.SideEffects {
+	if se {
+		return api.SideEffectsTrue
+	}
+	return api.SideEffectsFalse
 }

@@ -39,8 +39,8 @@ import {
 import { krateMuteEvents } from './events.js';
 import { krateWithIdScope } from './use-id.js';
 
-type KeyFn = ((item: unknown, index: number) => unknown) | null;
-type RenderFn = (item: unknown, index: unknown) => unknown;
+export type KeyFn = ((item: unknown, index: number) => unknown) | null;
+export type RenderFn = (item: unknown, index: unknown) => unknown;
 
 interface Row {
   key: string;
@@ -478,9 +478,25 @@ export function krateBindList(start: Comment, getItems: () => unknown, keyFn: Ke
  * mounts as a fragment with its own markers, or adopts a server-rendered list
  * at the hydration cursor.
  */
-export function krateList(getItems: () => unknown, keyFn: KeyFn, render: RenderFn, mode: number): KrateAdoptable {
+/**
+ * The value krateList returns. Besides mounting itself as DOM it carries its
+ * arguments, so a custom renderer (a renderer component's children) can
+ * reconcile the list itself.
+ */
+export interface KrateListValue extends KrateAdoptable {
+  items: () => unknown;
+  key: KeyFn;
+  render: RenderFn;
+  mode: number;
+}
+
+export function krateList(getItems: () => unknown, keyFn: KeyFn, render: RenderFn, mode: number): KrateListValue {
   return {
     __ka: 1,
+    items: getItems,
+    key: keyFn,
+    render,
+    mode,
     mount(): Node {
       const frag = document.createDocumentFragment();
       const start = document.createComment('');

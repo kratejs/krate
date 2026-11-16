@@ -64,7 +64,7 @@ func lowerDefaultExpressionExport(prog *ast.Program, path string) {
 		}
 		name := defaultExportName(prog, path)
 		decl := &ast.VarStmt{Position: exp.Position, Kind: ast.VarConst, Decls: []*ast.VarDecl{{
-			Name: name, Init: es.Expression, Tier: prog.Tier,
+			Name: name, Init: es.Expression, Tier: prog.Tier, Renderer: prog.RendererDefault,
 		}}}
 		body := make([]ast.Stmt, 0, len(prog.Body)+1)
 		body = append(body, prog.Body[:i]...)

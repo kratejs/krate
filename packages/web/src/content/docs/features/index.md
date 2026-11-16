@@ -27,6 +27,7 @@ A tour of the features that ship with Krate beyond the core compiler.
 | [Redirects & Rewrites](/docs/features/redirects-rewrites/) | URL manipulation from config |
 | [Middleware](/docs/features/middleware/) | Request interception before page rendering |
 | [Authentication](/docs/features/authentication/) | OAuth, credentials, magic links, Drizzle adapters, two-factor authentication and passkeys (`@krate/auth`) |
+| [3D with three.js](/docs/features/three/) | three.js scenes in JSX with the react-three-fiber API: `<Canvas>`, `useFrame`, `useThree`, `useLoader`, pointer events, portals (`@krate/three`) |
 | [Environment Variables](/docs/features/environment-variables/) | `.env` files, precedence, `process.env` in server contexts |
 | [Analytics](/docs/features/analytics/) | Snippets via `<Head>`/`<Script>` + the SPA route-change hook |
 | [HTTP Headers](/docs/features/http-headers/) | Middleware headers, automatic cache/security headers, ISR `Cache-Control` |

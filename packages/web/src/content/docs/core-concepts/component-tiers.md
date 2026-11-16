@@ -60,6 +60,8 @@ picking one; see [Tiers that disagree](#tiers-that-disagree).
 `@server`, `@static`, `@runtime` and `@client` can go directly on a component.
 They work on functions, classes and consts, which ordinary JavaScript decorators
 do not, because Krate removes them at compile time. Nothing runs at load time.
+`@renderer` uses the same syntax but is not a tier: see
+[Renderer components](#renderer-components).
 
 ```tsx
 import { Component } from "react";
@@ -176,6 +178,66 @@ export default function Stats() { ... }
 
 A `// @server` comment or a `*.server.tsx` file name needs neither, and classifies
 the whole file.
+
+## Renderer components
+
+`@renderer` marks a component that hands its children to a non-DOM renderer in
+the browser, such as a three.js scene graph (see [@krate/three](/docs/features/three/)).
+It goes on a function, const or default export like the tier decorators, and
+Krate removes it at compile time:
+
+```tsx
+import { onMount } from "@krate/runtime";
+import { createRoot } from "@krate/three/engine";
+
+@renderer
+export function Canvas(props: { children?: unknown }) {
+  let canvas: HTMLCanvasElement | undefined;
+  onMount(() => createRoot(canvas!).render(props.children as () => unknown[]));
+  return <div><canvas ref={canvas} /></div>;
+}
+```
+
+A `"use renderer"` (or `"@renderer"`) string at the top of the body does the
+same. A renderer component is a client component:
+
+- Its own body renders and hydrates as usual. Its call-site children are never
+  rendered to HTML and get no hydration bindings, so any lowercase tag, camelCase
+  or dash-case prop (`position-x`) and any value (`new Vector3()`, a function) is
+  accepted there. At build time `props.children` is undefined.
+- In the browser `props.children` is a function returning an array of the
+  children as `h()` descriptors, evaluated in the caller's scope: reactive props
+  are thunks (`position: () => [n(), 0, 0]`), `{cond && <x />}` is a thunk,
+  `.map()` is a `krateList(...)` value (its `items`, `key`, `render` and `mode`
+  fields let the renderer reconcile it), and components are called with getter
+  props. Event handlers (`on*`) and `ref` are passed as they are; every other
+  function-valued prop is a thunk returning the function (`attach: () => fn`).
+- Components used in the children are declared in the caller's hydration scope.
+- It cannot be `async` and cannot be static, server or runtime, whichever way
+  that tier is written (decorator, body directive, `// @tier` comment, file name
+  or config list); that fails with
+  [KR7117](/docs/reference/diagnostics/#kr7117). `@renderer` with `@client` is
+  fine. A project decorator named `renderer` on a class is left alone.
+
+### Browser code in a package: `krate.vendor`
+
+A Krate package is compiled as Krate source. Code that must run as plain browser
+JavaScript, such as a renderer's engine, is listed in its `package.json`:
+
+```json
+{
+  "name": "@krate/three",
+  "exports": { ".": "./src/index.ts", "./engine": "./src/engine/index.ts" },
+  "krate": { "vendor": ["src/engine/"] }
+}
+```
+
+Each entry is a path prefix relative to the package directory (a trailing `/`
+matches a whole directory). Imports of those files from client code, including
+the package importing itself (`@krate/three/engine`), are bundled by esbuild
+into the page script like an npm dependency, TypeScript included. A package that
+both the page and a vendored file import, such as `three`, is bundled once. A
+malformed list fails with [KR7127](/docs/reference/diagnostics/#kr7127).
 
 ## Composition rules
 

@@ -159,7 +159,109 @@ func checkTierConflicts(prog *ast.Program, path, source string, serverComponents
 			}
 		}
 	}
+	return checkRendererTiers(prog, fileSrc, path, lineOfSrc)
+}
+
+// rendererDecl is a component declaration marked as a renderer boundary.
+type rendererDecl struct {
+	name  string
+	pos   ast.Pos
+	tier  string // its own tier (decorator or body directive), "" for none
+	async bool
+}
+
+// checkRendererTiers rejects renderer components that are async or carry a
+// tier other than client, from their own markers or file-wide sources.
+func checkRendererTiers(prog *ast.Program, fileSrc []tierSource, path string, lineOfSrc func(int) string) error {
+	fail := func(d rendererDecl, msg string) error {
+		line := d.pos.Line
+		if line < 1 {
+			line = 1
+		}
+		return diag.New(path, line, 1, msg,
+			"a renderer component always hydrates in the browser: remove the other tier (or use @client), make it synchronous, or move it into its own client module",
+			lineOfSrc(line)).WithCode(diag.CodeRendererTier)
+	}
+	for _, d := range rendererDecls(prog) {
+		if d.async {
+			return fail(d, d.name+" is a renderer component and cannot be async")
+		}
+		if d.tier != "" {
+			if d.tier != "client" {
+				return fail(d, d.name+" is a renderer component, but it is also marked @"+d.tier)
+			}
+			continue
+		}
+		for _, fs := range fileSrc {
+			if fs.tier != ComponentClassClient {
+				return fail(d, d.name+" is a renderer component, but "+fs.what+" makes it "+fs.tier.String())
+			}
+		}
+	}
 	return nil
+}
+
+// rendererDecls lists the top-level renderer component declarations.
+func rendererDecls(prog *ast.Program) []rendererDecl {
+	var out []rendererDecl
+	for _, stmt := range prog.Body {
+		if exp, ok := stmt.(*ast.ExportStmt); ok {
+			if exp.Declaration == nil {
+				continue
+			}
+			stmt = exp.Declaration
+		}
+		switch s := stmt.(type) {
+		case *ast.FnDecl:
+			if s.Renderer || isRendererDirective(s.Body) {
+				out = append(out, rendererDecl{name: s.Name, pos: s.Position, tier: firstNonEmpty(s.Tier, bodyDirectiveTier(s.Body)), async: s.Async})
+			}
+		case *ast.VarStmt:
+			for _, d := range s.Decls {
+				if d == nil || d.Name == "" {
+					continue
+				}
+				fn, _ := d.Init.(*ast.ArrowFn)
+				var body []ast.Stmt
+				if fn != nil {
+					body = fn.Body
+				}
+				if d.Renderer || isRendererDirective(body) {
+					out = append(out, rendererDecl{name: d.Name, pos: s.Position, tier: firstNonEmpty(d.Tier, bodyDirectiveTier(body)), async: fn != nil && fn.Async})
+				}
+			}
+		}
+	}
+	return out
+}
+
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
+
+// isRendererDirective reports a `"use renderer"` or `"@renderer"` string in
+// the directive prologue of a function body (irtree.IsRendererFn reads the
+// same directives).
+func isRendererDirective(body []ast.Stmt) bool {
+	// Any string of the directive prologue counts.
+	for _, stmt := range body {
+		es, ok := stmt.(*ast.ExprStmt)
+		if !ok {
+			return false
+		}
+		lit, ok := es.Expression.(*ast.Literal)
+		if !ok || lit.Kind != ast.StringLit {
+			return false
+		}
+		val := strings.TrimSpace(strings.Trim(lit.Value, "\"'"))
+		if val == "use renderer" || val == "@renderer" {
+			return true
+		}
+	}
+	return false
 }
 
 // tierDecls lists the top-level component declarations that carry a tier.

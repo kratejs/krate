@@ -798,6 +798,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		opts.PageParams = spp.Params
 		opts.RoutePath = routePathFor(spp.PagePath, b.Cfg.PagesDir, spp.Params)
 		applyModuleBindings(&opts, entryModule.Path, entryModule.Program, extraPrograms)
+		b.applyClientModuleStmts(&opts, bundle, entryModule)
 		opts.ExternalImports = externalByLocal
 		opts.LocalComponentImports = localImports
 		opts.ActionURLs = bundle.ActionImports

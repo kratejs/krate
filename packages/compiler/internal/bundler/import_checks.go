@@ -43,6 +43,24 @@ func ownProjectCode(mod *Module) bool {
 	return !strings.Contains(filepath.ToSlash(mod.Path), "/node_modules/") && !resolver.IsCompiledDependency(mod.Path)
 }
 
+// checkVendorField reports a malformed `krate.vendor` list in the
+// package.json of the package an import resolves into.
+func checkVendorField(mod *Module, imp, resolved string) error {
+	if mod.Program == nil {
+		return nil
+	}
+	dir := resolver.PackageDirOf(resolved)
+	if dir == "" {
+		return nil
+	}
+	if _, err := resolver.VendorPrefixes(resolver.ReadPkgJSON(dir).Krate); err != nil {
+		return importDiag(mod, imp, filepath.Join(dir, "package.json")+": "+err.Error(),
+			"list package-relative directory prefixes of browser code that is bundled like an npm dependency, e.g. \"krate\": { \"vendor\": [\"src/engine/\"] }",
+			diag.CodeVendorField)
+	}
+	return nil
+}
+
 // unsupportedStyleExts are stylesheet languages the CSS pipeline cannot compile.
 var unsupportedStyleExts = map[string]string{
 	".scss": "Sass", ".sass": "Sass", ".less": "Less", ".styl": "Stylus", ".stylus": "Stylus",

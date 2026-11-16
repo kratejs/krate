@@ -92,6 +92,12 @@ type BuildOptions struct {
 	ModuleDeclOnly   map[string]bool
 	ModuleNamespaces map[string]map[string]string
 	ModuleStmts      []ast.Stmt
+	// ClientModuleStmts are the client modules' top-level setup statements in
+	// module dependency order, replayed in the page script (module_init.go).
+	// VendorLocals names the bindings the page script gets from the vendor
+	// bundle.
+	ClientModuleStmts []ClientModuleStmt
+	VendorLocals      map[string]bool
 	// ActionURLs maps an imported server-action binding to its POST endpoint.
 	// The binding is a client proxy at runtime, but SSR renders the URL so
 	// forms work without JavaScript.
@@ -162,6 +168,9 @@ func newBuilder(prog *ast.Program, ann *Annotations, opts BuildOptions) *builder
 		moduleLets:       collectModuleLets(prog),
 		moduleDeclOnly:   mergeDeclOnly(prog, opts),
 		moduleNS:         opts.ModuleNamespaces,
+		clientStmts:      opts.ClientModuleStmts,
+		clientStmtKeys:   clientStmtKeys(opts.ClientModuleStmts),
+		vendorLocals:     opts.VendorLocals,
 		entryProg:        prog,
 		cvaFactories:     mergeCVAFactories(ann.CVAFactories, prog),
 		contextDefaults:  mergeContextDefaults(ann.ContextDefaults, prog),
@@ -235,6 +244,7 @@ func (b *builder) finishTree(root *ComponentNode) *ComponentTree {
 	b.reportClassNotes()
 
 	cssSignals, noJSFallback := b.cssStylesheets()
+	moduleInit := b.moduleInitBlock()
 	return &ComponentTree{
 		Root:             root,
 		HasLinks:         b.hasLinks,
@@ -245,6 +255,7 @@ func (b *builder) finishTree(root *ComponentNode) *ComponentTree {
 		ModuleConstInits: b.moduleConstInits,
 		ModuleRun:        b.moduleRun,
 		SharedModuleVars: b.sharedModuleVars,
+		ModuleInit:       moduleInit,
 		CSSSignalsCSS:    cssSignals,
 		HasCSSSignals:    len(b.cssCollected) > 0 || len(b.cssConditions) > 0,
 		NoJSFallbackCSS:  noJSFallback,
@@ -418,8 +429,11 @@ type builder struct {
 	routeHooks       valueMap            // router hooks folded to the page's route (see routehooks.go)
 	moduleConstInits map[string]ast.Expr // module-level const initializers (name -> expr)
 	moduleStmts      []ast.Stmt          // entry module top-level statements that run code
-	moduleLets       map[string]bool     // module-level let/var bindings (mutable, so shared)
-	moduleDeclOnly   map[string]bool     // `var X;` bindings initialized by module statements
+	clientStmts      []ClientModuleStmt  // module setup code replayed in the page script
+	clientStmtKeys   map[ast.Stmt]string // replay key of each client module statement
+	vendorLocals     map[string]bool
+	moduleLets       map[string]bool // module-level let/var bindings (mutable, so shared)
+	moduleDeclOnly   map[string]bool // `var X;` bindings initialized by module statements
 	moduleNS         map[string]map[string]string
 	nsUse            map[string]map[string]bool
 	sharedModuleVars []string // hoisted declarations for moduleLets and their dependencies
@@ -434,14 +448,20 @@ type builder struct {
 	suspenseDepth    int                      // >0 while building <Suspense> content
 	pendingLazy      *LazyComponent           // lazy() instance being built (see finishClientComponent)
 	pendingLazyFn    *ast.FnDecl
-	compat           csssignals.StyleMode      // CSS-signal stylesheet mode (modern/legacy/hybrid)
-	goComponents     map[string]GoComponentRef // imported Go components (local name -> ref)
-	externalImports  map[string]ExternalImport // bare-package import bindings (local -> module)
-	localImports     map[string]bool           // relative-path import bindings
-	actionURLs       map[string]string         // server-action binding -> POST URL
-	evalJS           func(string) (string, error)
-	transformIcon    func(*ast.JSXElement) *ast.JSXElement
-	transformImage   func(*ast.JSXElement) (*ast.JSXElement, []HookDiag)
+	// rendererKids holds the call-site children of the renderer component
+	// buildComponentSlot hands to buildClientComponentSlot.
+	rendererKids []ast.JSXChild
+	// rendererRegs holds the props registrations that carry renderer
+	// children, whose components the registering scope declares.
+	rendererRegs    map[string]bool
+	compat          csssignals.StyleMode      // CSS-signal stylesheet mode (modern/legacy/hybrid)
+	goComponents    map[string]GoComponentRef // imported Go components (local name -> ref)
+	externalImports map[string]ExternalImport // bare-package import bindings (local -> module)
+	localImports    map[string]bool           // relative-path import bindings
+	actionURLs      map[string]string         // server-action binding -> POST URL
+	evalJS          func(string) (string, error)
+	transformIcon   func(*ast.JSXElement) *ast.JSXElement
+	transformImage  func(*ast.JSXElement) (*ast.JSXElement, []HookDiag)
 	// dynamicListRows is non-zero while building rows for a runtime-bound list.
 	// Maps nested in those rows must keep runtime list bindings.
 	dynamicListRows int

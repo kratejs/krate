@@ -638,11 +638,12 @@ func extractComponentFromVar(decl *ast.VarDecl) *ast.FnDecl {
 		return nil
 	}
 	return &ast.FnDecl{
-		Name:   decl.Name,
-		Params: innerFn.Params,
-		Body:   innerFn.Body,
-		Async:  innerFn.Async,
-		Tier:   decl.Tier,
+		Name:     decl.Name,
+		Params:   innerFn.Params,
+		Body:     innerFn.Body,
+		Async:    innerFn.Async,
+		Tier:     decl.Tier,
+		Renderer: decl.Renderer,
 	}
 }
 
@@ -1209,6 +1210,7 @@ func instantiateHOCComponents(ann *irtree.Annotations, body []ast.Stmt, factorie
 				continue
 			}
 			fn.Tier = d.Tier
+			fn.Renderer = fn.Renderer || d.Renderer
 			functions[d.Name] = fn
 			delete(ann.UnresolvedHOCs, d.Name)
 			if ann.ComponentSources != nil && sourcePath != "" {

@@ -576,6 +576,7 @@ func (b *Builder) renderSlots(page, layoutPath string, layoutRes *renderer.EmitR
 			sigs = append(sigs, sig)
 		}
 		layoutRes.ListComponents = append(layoutRes.ListComponents, slotEmit.ListComponents...)
+		layoutRes.ModuleInit = append(layoutRes.ModuleInit, slotEmit.ModuleInit...)
 		if slotEmit.HasLinks {
 			layoutRes.HasLinks = true
 		}

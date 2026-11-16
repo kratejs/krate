@@ -1447,6 +1447,11 @@ so these libraries cannot run on the Preact islands above. A module that uses
 one runs in a **real-React island** instead: an island bundled with `react`
 and `react-dom` themselves, with no Preact alias anywhere in its subtree.
 
+For three.js scenes there is also [`@krate/three`](/docs/features/three/), which
+has the `@react-three/fiber` API but compiles with the page: it ships no React
+runtime, and the scene reads page state directly. Use the real-React island
+when you need libraries built on `@react-three/fiber`, such as `@react-three/drei`.
+
 ```tsx
 // src/components/Viewer.tsx
 import { Canvas } from '@react-three/fiber';

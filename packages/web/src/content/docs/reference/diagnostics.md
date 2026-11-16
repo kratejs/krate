@@ -374,6 +374,12 @@ Krate wraps each export of a `"use client"` module in a client boundary, so it m
 
 Two modules export the same name and a page imports it from both, for example `import { Card as A } from "./a"` and `import { Card as B } from "./b"`. Modules on a page share one namespace, so Krate gives one of the exports a private name and rewrites the imports to match, and this is not reported. A named re-export (`export { Card } from`) is rewritten to follow the rename too. It is reported when neither module can be renamed because something reads export names from source: `export *` or `export * as`, an import followed by an export, the page's own module, an `import()`, a "use client" or "use server" module, or an alias export (`export { x as Card }`). Both imports then resolve to one declaration and the page shows the wrong output. Rename one of the exports. Private names and default exports do not have this problem. This is a warning.
 
+### KR7117
+
+**Renderer component must be a client component**
+
+A component marked `@renderer` (or with a `"use renderer"` or `"@renderer"` string at the top of its body) hands its children to a non-DOM renderer in the browser, so it always hydrates on the client. It cannot be async, and it cannot also be a static, server or runtime component, whichever way that tier is written (a decorator, a body directive, a leading `// @tier` comment, a `.server`/`.runtime`/`.static` file name or a config list). Remove the other tier, use `@client`, or move the renderer component into its own client module.
+
 ### KR7120
 
 **API route file in the pages directory**
@@ -415,6 +421,12 @@ A named import from `@krate/runtime` (or one of its subpaths) asks for something
 **Imported asset is used where its URL cannot be inlined**
 
 `import logo from "./logo.png"` binds the file's hashed URL. The compiler replaces reads of the binding with that URL, in the module that imports the file and in every module that imports it through `export { logo }`, `export default logo`, `export { default as logo } from "./logo.png"`, `export *` or `export * as ns` and `ns.logo`. A read it cannot reach, such as a computed property key (`{ [logo]: 1 }`) or `ns.default` of a namespace that is passed on whole, has no value in the browser script: it is a ReferenceError there, or renders as the bare name. Use the binding as a plain value in JSX or a component, or import the file with a `?url` suffix. This is a warning.
+
+### KR7127
+
+**package.json krate.vendor is malformed**
+
+A package can list browser code that Krate bundles with esbuild like an npm dependency, instead of compiling it as Krate source: `"krate": { "vendor": ["src/engine/"] }`. Each entry is a path prefix relative to the package directory; an entry ending in `/` matches every file under that directory. The list must be an array of strings that stay inside the package (no absolute paths or `..`). Fix the package.json of the package named in the message. This is an error.
 
 ### KR7130
 

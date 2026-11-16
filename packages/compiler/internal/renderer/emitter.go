@@ -70,6 +70,9 @@ type EmitResult struct {
 	// SharedModuleVars are declared once at the top of the page script, ahead
 	// of the per-component scopes, so module-level let/var state is shared.
 	SharedModuleVars []string
+	// ModuleInit is the client modules' top-level setup code, run ahead of
+	// the component scopes.
+	ModuleInit []string
 	// RuntimeChildren maps a runtime Go region id ("region-<id>") to the HTML
 	// of its build-rendered static children. Emit never mutates the shared IR,
 	// so the build attaches these to the region props itself.
@@ -310,6 +313,7 @@ func (e *Emitter) Emit(tree *irtree.ComponentTree) *EmitResult {
 		Signatures:       output.Signatures,
 		HasLinks:         tree.HasLinks,
 		SharedModuleVars: tree.SharedModuleVars,
+		ModuleInit:       tree.ModuleInit,
 		UsedFuncs:        make(map[string]bool),
 		UsedCSS:          make(map[string]bool),
 		ListComponents:   listComponents,

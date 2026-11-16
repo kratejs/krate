@@ -2631,6 +2631,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 			pageOpts.IDPrefix = b.layoutIDPrefix(page)
 		}
 		applyModuleBindings(&pageOpts, entryModule.Path, entryModule.Program, extraPrograms)
+		b.applyClientModuleStmts(&pageOpts, bundle, entryModule)
 		pageOpts.ExternalImports = externalByLocal
 		pageOpts.LocalComponentImports = localImports
 		pageOpts.GoComponents = pageGoComponents
@@ -3306,6 +3307,7 @@ type layoutEmitCacheEntry struct {
 	// interactive components hydrate (their JS is generated alongside the page's).
 	signatures     []irtree.ComponentSignature
 	listComponents []*ast.FnDecl
+	moduleInit     []string
 	hasLinks       bool
 	boundaryLink   *renderer.BoundaryLink
 	deps           []string
@@ -3446,6 +3448,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 				StyleHTML:      entry.styleHTML,
 				Signatures:     entry.signatures,
 				ListComponents: entry.listComponents,
+				ModuleInit:     entry.moduleInit,
 				HasLinks:       entry.hasLinks,
 				BoundaryLink:   entry.boundaryLink,
 			}, entry.css, entry.deps, entry.hasSignals, nil
@@ -3471,6 +3474,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 				StyleHTML:      entry.styleHTML,
 				Signatures:     entry.signatures,
 				ListComponents: entry.listComponents,
+				ModuleInit:     entry.moduleInit,
 				HasLinks:       entry.hasLinks,
 				BoundaryLink:   entry.boundaryLink,
 			}, entry.css, entry.deps, entry.hasSignals, nil
@@ -3585,6 +3589,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	opts := b.irBuildOptions()
 	opts.IDPrefix = b.layoutIDPrefix(layoutPath)
 	applyModuleBindings(&opts, layoutModule.Path, layoutModule.Program, extraLayoutPrograms)
+	b.applyClientModuleStmts(&opts, layoutBundle, layoutModule)
 	opts.GoComponents = b.collectGoComponents(layoutBundle, b.Root)
 	opts.ActionURLs = layoutBundle.ActionImports
 	if len(hostedImports) > 0 {
@@ -3653,6 +3658,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 		styleHTML:      emitResult.StyleHTML,
 		signatures:     emitResult.Signatures,
 		listComponents: emitResult.ListComponents,
+		moduleInit:     emitResult.ModuleInit,
 		hasLinks:       emitResult.HasLinks,
 		css:            css,
 		hasSignals:     tree.HasCSSSignals,
@@ -3670,6 +3676,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 		StyleHTML:      emitResult.StyleHTML,
 		Signatures:     emitResult.Signatures,
 		ListComponents: emitResult.ListComponents,
+		ModuleInit:     emitResult.ModuleInit,
 		HasLinks:       emitResult.HasLinks,
 		BoundaryLink:   boundaryLink,
 	}, css, layoutDeps, tree.HasCSSSignals, nil
@@ -4135,6 +4142,8 @@ func (b *Builder) applyLayoutStack(page string, emitResult *renderer.EmitResult,
 			emitResult.Signatures = append(emitResult.Signatures, layoutSigs...)
 		}
 		emitResult.ListComponents = append(emitResult.ListComponents, layoutRes.ListComponents...)
+		// A layout's module setup code runs before the page's.
+		emitResult.ModuleInit = append(append([]string(nil), layoutRes.ModuleInit...), emitResult.ModuleInit...)
 		if layoutRes.HasLinks {
 			emitResult.HasLinks = true
 		}

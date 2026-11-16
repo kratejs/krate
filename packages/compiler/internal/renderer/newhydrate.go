@@ -97,6 +97,15 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 		}
 	}
 	b.WriteString(listFns.String())
+	// Module setup code (`extend(...)`) runs before any component scope.
+	if len(result.ModuleInit) > 0 {
+		b.WriteString("(function(){\n")
+		for _, s := range result.ModuleInit {
+			b.WriteString(s)
+			b.WriteString("\n")
+		}
+		b.WriteString("})();\n")
+	}
 
 	// Per-component scoped IIFEs. Pages with class components register each
 	// scope with the owner tree instead (see owner_emit.go).

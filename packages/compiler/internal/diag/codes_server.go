@@ -25,6 +25,8 @@ const (
 	CodeClientBoundaryExports Code = "KR7114"
 	// CodeTierDecorator: a tier decorator cannot apply where it is placed.
 	CodeTierDecorator Code = "KR7115"
+	// CodeRendererTier: a renderer component is given a non-client tier or is async.
+	CodeRendererTier Code = "KR7117"
 	// CodeExportCollision: a page imports one name from two modules.
 	CodeExportCollision Code = "KR7116"
 	// CodeAPIRouteInPages: a .ts or .js file under src/pages/api is not served.
@@ -77,6 +79,16 @@ func init() {
 				"\"use server\" module, or an alias export (`export { x as Card }`). Both imports " +
 				"then resolve to one declaration and the page shows the wrong output. Rename one of the " +
 				"exports. Private names and default exports do not have this problem. This is a warning.",
+		},
+		CodeInfo{
+			Code:  CodeRendererTier,
+			Title: "Renderer component must be a client component",
+			Explanation: "A component marked `@renderer` (or with a `\"use renderer\"` or `\"@renderer\"` string " +
+				"at the top of its body) hands its children to a non-DOM renderer in the browser, so it always " +
+				"hydrates on the client. It cannot be async, and it cannot also be a static, server or runtime " +
+				"component, whichever way that tier is written (a decorator, a body directive, a leading " +
+				"`// @tier` comment, a `.server`/`.runtime`/`.static` file name or a config list). Remove the " +
+				"other tier, use `@client`, or move the renderer component into its own client module.",
 		},
 		CodeInfo{
 			Code:  CodeTierDecorator,

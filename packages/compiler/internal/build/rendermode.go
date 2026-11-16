@@ -5,6 +5,8 @@ import (
 	"strconv"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
+	"github.com/kratejs/krate/packages/compiler/internal/bundler"
+	"github.com/kratejs/krate/packages/compiler/internal/irtree"
 )
 
 // RenderMode defines how a page is rendered.
@@ -90,12 +92,13 @@ type pageConfigIssue struct {
 	hint    string
 }
 
-// detectRenderMode inspects a page's AST to determine its rendering mode.
-// Returns the mode and revalidation interval.
+// detectRenderModeWith inspects a page's AST to determine its rendering mode.
+// Returns the mode and revalidation interval. `renderers` names the page's
+// renderer components, whose children never render on the server.
 // Precedence: explicit `isr` > `ssr` > `streaming` (config or <Suspense>).
 // ISR/SSR were previously unreachable - nothing in the build ever produced
 // them - so wiring the config keys here is what makes them real.
-func detectRenderMode(prog *ast.Program) (RenderMode, int) {
+func detectRenderModeWith(prog *ast.Program, renderers map[string]bool) (RenderMode, int) {
 	cfg := parsePageConfig(prog)
 	if mode, reval, ok := explicitRenderMode(cfg); ok {
 		return mode, reval
@@ -103,7 +106,7 @@ func detectRenderMode(prog *ast.Program) (RenderMode, int) {
 
 	// Using <Suspense> implies a streaming boundary - resolved fallbacks are
 	// swapped in at request time, so such pages cannot be statically baked.
-	if usesSuspense(prog) {
+	if usesSuspense(prog, renderers) {
 		return RenderStreaming, 0
 	}
 
@@ -369,16 +372,76 @@ func dynamicParamsAllowed(prog *ast.Program, staticMode bool) bool {
 // anywhere (nested inside functions, conditionals, arrays, etc.). This is an
 // AST-based check - a prior string scan (`strings.Contains(source, "<Suspense")`)
 // could misfire on comments and string literals.
-func usesSuspense(prog *ast.Program) bool {
+func usesSuspense(prog *ast.Program, renderers map[string]bool) bool {
+	isSuspense := func(e ast.Expr) bool {
+		el, ok := e.(*ast.JSXElement)
+		return ok && el.Opening != nil && (el.Opening.Name == "Suspense" || el.Opening.Name == "suspense")
+	}
+	// A boundary inside a renderer component's children belongs to the
+	// renderer (it is never server-rendered), so it does not make the page
+	// stream.
+	inRenderer := map[*ast.JSXElement]bool{}
+	walkProgramExprs(prog, func(e ast.Expr) bool {
+		if el, ok := e.(*ast.JSXElement); ok && el.Opening != nil && renderers[el.Opening.Name] {
+			kids := &ast.Program{Body: []ast.Stmt{&ast.ExprStmt{Expression: &ast.JSXFragment{Children: el.Children}}}}
+			walkProgramExprs(kids, func(k ast.Expr) bool {
+				if isSuspense(k) {
+					inRenderer[k.(*ast.JSXElement)] = true
+				}
+				return true
+			})
+		}
+		return true
+	})
 	found := false
 	walkProgramExprs(prog, func(e ast.Expr) bool {
-		if el, ok := e.(*ast.JSXElement); ok && el.Opening != nil {
-			if el.Opening.Name == "Suspense" || el.Opening.Name == "suspense" {
-				found = true
-				return false
-			}
+		if isSuspense(e) && !inRenderer[e.(*ast.JSXElement)] {
+			found = true
+			return false
 		}
 		return true
 	})
 	return found
+}
+
+// rendererComponentNames lists the names the page's JSX uses for renderer
+// components: declarations marked @renderer (or "use renderer") in any module
+// of the bundle, and the local names entry imports them under.
+func rendererComponentNames(entry *bundler.Module, mods []*bundler.Module) map[string]bool {
+	names := map[string]bool{}
+	for _, m := range mods {
+		if m == nil || m.Program == nil {
+			continue
+		}
+		for _, stmt := range m.Program.Body {
+			if exp, ok := stmt.(*ast.ExportStmt); ok && exp.Declaration != nil {
+				stmt = exp.Declaration
+			}
+			switch s := stmt.(type) {
+			case *ast.FnDecl:
+				if irtree.IsRendererFn(s) && s.Name != "" {
+					names[s.Name] = true
+				}
+			case *ast.VarStmt:
+				for _, d := range s.Decls {
+					if irtree.IsRendererDecl(d) {
+						names[d.Name] = true
+					}
+				}
+			}
+		}
+	}
+	if len(names) == 0 || entry == nil || entry.Program == nil {
+		return names
+	}
+	for _, stmt := range entry.Program.Body {
+		if imp, ok := stmt.(*ast.ImportStmt); ok {
+			for _, n := range imp.Named {
+				if names[n.Remote] && n.Local != "" {
+					names[n.Local] = true
+				}
+			}
+		}
+	}
+	return names
 }
