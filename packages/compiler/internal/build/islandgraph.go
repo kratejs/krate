@@ -272,6 +272,7 @@ func (b *Builder) preactIslandFlavour(entries []islandEntry, chunksDir string) (
 	if err := withContextKeys(&opts, b.Root, filepath.Join(b.Cfg.OutDir, ".krate")); err != nil {
 		return nil, err
 	}
+	withNamespaceImports(&opts)
 	names := make([]string, len(points))
 	for i, p := range points {
 		names[i] = p.OutputPath

@@ -832,6 +832,7 @@ export async function mount(el) {
 	if err := withContextKeys(&opts, b.Root, filepath.Join(b.Cfg.OutDir, ".krate")); err != nil {
 		return "", false, err
 	}
+	withNamespaceImports(&opts)
 	result := esbuildBuild(opts)
 	result.Errors = append(result.Errors, guard.errors(result.OutputFiles)...)
 	if len(result.Errors) > 0 || len(result.OutputFiles) == 0 {
@@ -990,6 +991,7 @@ export function __krate_render(C, props, _children, fwd, capture) {
 	if err := withContextKeys(&opts, c.root, filepath.Dir(c.bundleDir)); err != nil {
 		return err
 	}
+	withNamespaceImports(&opts)
 	result := esbuildBuild(opts)
 	if len(result.Errors) == 0 {
 		// Write is on, so the output is on disk: check it there.
