@@ -127,12 +127,14 @@ func BuildManifest(results []*PageResult, cssFile string, runtimeJS string) *Man
 
 	// Pages are collected in concurrent-build completion order; sort by route so
 	// manifest.json is byte-identical across builds (stable output hashing).
-	sort.Slice(m.Pages, func(i, j int) bool {
-		if m.Pages[i].Route != m.Pages[j].Route {
-			return m.Pages[i].Route < m.Pages[j].Route
-		}
-		return m.Pages[i].Source < m.Pages[j].Source
-	})
+	for _, pages := range [][]PageMeta{m.Pages, m.SegmentPages} {
+		sort.Slice(pages, func(i, j int) bool {
+			if pages[i].Route != pages[j].Route {
+				return pages[i].Route < pages[j].Route
+			}
+			return pages[i].Source < pages[j].Source
+		})
+	}
 
 	return m
 }
