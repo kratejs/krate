@@ -314,6 +314,9 @@ Promise.resolve(fn()).then(function (r) { globalThis.%s = r; }, function () {});
 		VirtualFiles:  virtual,
 
 		SourceTransform: b.serverGlobalsTransform,
+		Worker:          b.jsWorker(),
+		WorkerLabel:     "static-params",
+		QuickJSDone:     b.quickJSDone("static-params"),
 	})
 }
 
