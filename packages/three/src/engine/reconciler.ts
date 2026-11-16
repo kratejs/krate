@@ -125,7 +125,8 @@ const EVENT_PROP = /^on[A-Z]/;
 function sceneH(tag: unknown, props: Record<string, unknown> | null, ...children: unknown[]): unknown {
   if (typeof tag === 'function') {
     const p = props || {};
-    if (children.length > 0 || !('children' in p)) p.children = children.length === 1 ? children[0] : children;
+    // As in React, a component called without children has no children prop.
+    if (children.length > 0) p.children = children.length === 1 ? children[0] : children;
     return { __k3: 2, type: tag as ComponentNode['type'], props: p } satisfies ComponentNode;
   }
   return { __k3: 1, type: String(tag), props: props || {}, children } satisfies ElementNode;

@@ -28,7 +28,10 @@
   "types": "src/index.ts",
   "exports": {
     ".": "./src/index.ts",
+    "./drei": "./src/drei.tsx",
     "./engine": "./src/engine/index.ts",
+    "./engine/drei": "./src/engine/drei.ts",
+    "./engine/gltf": "./src/engine/gltf.ts",
     "./package.json": "./package.json"
   },
   "files": [

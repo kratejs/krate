@@ -221,3 +221,36 @@ export default function Scene() {
 		t.Errorf("variable ref passed through as a value:\n%s", js)
 	}
 }
+
+// A scene component's pure locals that later statements still read stay where
+// they were declared: moving `const get = store.getState` above
+// `const store = useStore()` threw "Cannot access before initialization".
+func TestRendererComponentLocalsKeepOrder(t *testing.T) {
+	src := `import { onMount } from "@krate/runtime";
+import { useStore } from "@krate/three/engine";
+@renderer
+function Canvas(props) {
+  let el;
+  onMount(() => console.log(props.children, el));
+  return <div><canvas ref={el} /></div>;
+}
+function Rig(props) {
+  const store = useStore();
+  const get = store.getState;
+  const size = get().size;
+  onMount(() => get().invalidate());
+  return <group name={"rig" + props.n} scale={size.width} />;
+}
+export default function Scene() {
+  return <Canvas><Rig n={1} /></Canvas>;
+}`
+	_, _, js := buildTreeDecorated(t, src)
+	store := strings.Index(js, "store=useStore()")
+	get := strings.Index(js, "get=store.getState")
+	if store < 0 || get < 0 {
+		t.Fatalf("Rig locals missing from the reactive form:\n%s", js)
+	}
+	if get < store {
+		t.Fatalf("const get was moved above const store:\n%s", js)
+	}
+}

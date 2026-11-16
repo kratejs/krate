@@ -159,6 +159,50 @@ try {
     await until(p, () => !!window.__three.scene.getObjectByName("theme:blue"));
     return true;
   });
+  await run("drei", "/drei/", async (p) => {
+    // useGLTF loads the model (suspending), runs the extendLoader callback and
+    // maps the named nodes and materials.
+    await until(p, () => !!window.__gltf);
+    const gltf = await p.evaluate(() => [Object.keys(window.__gltf.nodes).join(), Object.keys(window.__gltf.materials).join(), window.__extended]);
+    if (gltf.join("|") !== "body|paint|function") return `useGLTF result ${gltf.join("|")}`;
+    if (!(await p.evaluate(() => !!window.__three.scene.getObjectByName("body")))) return "the glTF scene is not mounted";
+
+    // Environment: the Lightformers render into a cube map that lights the scene.
+    await until(p, () => window.__three.scene.environment?.isRenderTargetTexture === true);
+    const env = await p.evaluate(() => {
+      const s = window.__three.scene;
+      return [s.background === null, s.environmentIntensity, s.getObjectByName("top") === undefined];
+    });
+    if (env.join() !== "true,1,true") return `environment props ${env.join()}`;
+    // drei's Lightformer: color times intensity, scale [x, y] -> [x, y, 1], and
+    // without a rotation prop it faces the origin (the pierced rotation-x is replaced).
+    const lf = await p.evaluate(() => {
+      const top = window.__envTop;
+      return top ? [top.material.color.r, top.scale.toArray().join(":"), top.material.toneMapped, top.material.side] : null;
+    });
+    if (!lf || lf.join() !== "2,12:12:1,false,2") return `lightformer ${lf}`;
+
+    // OrbitControls: makeDefault puts it in the root state, drag orbits, wheel zooms,
+    // and a prop computed from state updates the controls.
+    await until(p, () => !!window.__controls && window.__controls === window.__three.get().controls);
+    if ((await p.evaluate(() => window.__controls.enableDamping)) !== true) return "enableDamping not set";
+    const box = await p.locator("#scene canvas").boundingBox();
+    const cx = box.x + box.width / 2, cy = box.y + box.height / 2;
+    const before = await p.evaluate(() => window.__three.camera.position.toArray());
+    await p.mouse.move(cx, cy);
+    await p.mouse.down();
+    await p.mouse.move(cx + 80, cy + 10, { steps: 5 });
+    await p.mouse.up();
+    await until(p, (b) => window.__three.camera.position.distanceTo(new window.__three.camera.position.constructor(...b)) > 0.5, before);
+    if (!((await p.evaluate(() => window.__started)) >= 1)) return "onStart did not run";
+    const dist = await p.evaluate(() => window.__three.camera.position.length());
+    await p.mouse.wheel(0, -300);
+    await until(p, (d) => window.__three.camera.position.length() < d - 0.1, dist);
+    if ((await p.evaluate(() => window.__controls.minDistance)) !== 1) return "minDistance";
+    await p.click("#near");
+    await until(p, () => window.__controls.minDistance === 2);
+    return true;
+  });
 } finally {
   await browser.close();
   server.close();
