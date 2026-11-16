@@ -985,7 +985,7 @@ export function __krate_render(C, props, _children, fwd, capture) {
 		Alias:           islandAlias(c.root, false),
 		External:        []string{"preact", "preact/compat", "preact/hooks", "preact/jsx-runtime"},
 		Inject:          []string{shim},
-		Plugins:         []api.Plugin{purePrunePlugin(c.root), guard.plugin(), serverCSSPlugin(c.root), *plugin, clientOnlyMarkersPlugin(false), actionServerBundlePlugin(c.res, c.actions, c.basePath), pathAliasPlugin(c.res), reactDOMHintsPlugin(c.root), reactCompatPlugin(c.root), routerHooksPlugin(c.root), threeIslandPlugin(), preactRequirePlugin()},
+		Plugins:         []api.Plugin{purePrunePlugin(c.root), guard.plugin(), serverCSSPlugin(c.root), *plugin, clientOnlyMarkersPlugin(false), actionServerBundlePlugin(c.res, c.actions, c.basePath), pathAliasPlugin(c.res), reactDOMHintsPlugin(c.root), reactServerCompatPlugin(c.root), routerHooksPlugin(c.root), threeIslandPlugin(), preactRequirePlugin()},
 		LogLevel:        api.LogLevelSilent,
 	}
 	if err := withContextKeys(&opts, c.root, filepath.Dir(c.bundleDir)); err != nil {
