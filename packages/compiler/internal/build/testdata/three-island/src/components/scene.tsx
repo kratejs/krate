@@ -17,6 +17,15 @@ export function Scene({ url, near, onPick }: { url: string; near: number; onPick
   const hasControls = useThree((s) => !!s.controls);
   const [hits, setHits] = React.useState(0);
   const box = React.useRef<THREE.Mesh>(null);
+  // DOM picking on the canvas, as an app can do next to OrbitControls: the
+  // controls must not capture the pointer, or the pointerup never comes here.
+  const gl = useThree((s) => s.gl);
+  React.useEffect(() => {
+    const el = gl.domElement;
+    const up = () => ((window as any).__canvasUps = ((window as any).__canvasUps ?? 0) + 1);
+    el.addEventListener("pointerup", up);
+    return () => el.removeEventListener("pointerup", up);
+  }, [gl]);
   React.useEffect(() => { (window as any).__aspect = aspect; (window as any).__hasControls = hasControls; (window as any).__box = box.current; }, [aspect, hasControls]);
   useFrame((state) => { (window as any).__frames = ((window as any).__frames ?? 0) + 1; state.gl.render(state.scene, state.camera); }, 1);
   return (

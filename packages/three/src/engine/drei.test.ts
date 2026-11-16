@@ -10,6 +10,19 @@ describe('@krate/three/drei engine helpers', () => {
     expect(controls._getZoomScale()).toBeCloseTo(0.9025);
   });
 
+  it('does not capture the pointer on press, so a click reaches the canvas', () => {
+    const el = document.createElement('div');
+    document.body.appendChild(el);
+    const captured: number[] = [];
+    el.setPointerCapture = (id: number) => void captured.push(id);
+    const controls = new DreiOrbitControls(new THREE.PerspectiveCamera(), el);
+    el.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 7, button: 0, pointerType: 'mouse', clientX: 1, clientY: 1 }));
+    expect(captured).toEqual([]);
+    expect(Object.prototype.hasOwnProperty.call(el, 'setPointerCapture')).toBe(true);
+    controls.dispose();
+    el.remove();
+  });
+
   it('forwards props as thunks, events and refs as they are', () => {
     const onClick = () => {};
     const ref = { current: null };

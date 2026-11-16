@@ -245,7 +245,9 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
   real-React island, and the report names each blocking use.
 - `@krate/three/drei`: drei's `OrbitControls`, `Environment` (rendered from `Lightformer` children, or a `map`),
   `Lightformer` and `useGLTF` (with the Draco and Meshopt decoders), with drei's props and behavior. The loader
-  and its decoders are bundled only into pages that call `useGLTF`.
+  and its decoders are bundled only into pages that call `useGLTF`. `OrbitControls` are three's, set up to behave
+  like drei's three-stdlib ones: a fixed zoom step per wheel event, and no pointer capture on press (so a click's
+  pointerup still reaches listeners on the canvas, such as an app's own surface picking).
 - `@krate/three` runs in Preact islands: a `"use client"` component of a server-rendered page resolves
   `@krate/three` and `@krate/three/drei` to island builds with the same React-style API, rendered by the
   island's Preact through a DOM-like host in the engine. A scene error reaches the error boundary around the

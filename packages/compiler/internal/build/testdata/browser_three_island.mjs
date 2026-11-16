@@ -67,6 +67,8 @@ try {
     const cx = box.x + box.width / 2, cy = box.y + box.height / 2;
     await p.mouse.click(cx, cy);
     await until(p, () => document.querySelector("#picked").textContent === "box");
+    // OrbitControls did not capture the pointer: the canvas saw the release.
+    await until(p, () => window.__canvasUps >= 1);
     await until(p, () => window.__three.get().scene.getObjectByName("box").scale.x === 1.5);
     if ((await state(p)).color !== "ff69b4") return "the clicked box did not recolor";
 

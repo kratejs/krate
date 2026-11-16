@@ -11,12 +11,38 @@ import { applyProps } from './utils.js';
 const EVENT_PROP = /^on[A-Z]/;
 
 /**
- * three's OrbitControls with drei's zoom step. drei uses three-stdlib's
- * controls, which zoom by 0.95^zoomSpeed per wheel event (or dolly move)
- * whatever its delta; three's scale the step by the delta, so a trackpad
- * (many small deltas) zoomed slower and a fast wheel faster than under drei.
+ * three's OrbitControls behaving like drei's, which are three-stdlib's:
+ * - the zoom step is 0.95^zoomSpeed per wheel event (or dolly move) whatever
+ *   its delta; three's scale it by the delta, so a trackpad (many small
+ *   deltas) zoomed slower and a fast wheel faster than under drei;
+ * - a press does not capture the pointer. three's controls call
+ *   setPointerCapture on their element, so the pointerup of a click went to
+ *   it instead of the element under the pointer, and listeners on the canvas
+ *   (an app's own click picking) never saw it. Moves and the release are
+ *   still followed on the document.
  */
 export class DreiOrbitControls extends ThreeOrbitControls {
+  constructor(object: THREE.Camera, domElement?: HTMLElement | null) {
+    super(object);
+    const self = this as unknown as { _onPointerDown?: (e: PointerEvent) => void; domElement: HTMLElement | null };
+    const down = self._onPointerDown;
+    if (typeof down === 'function') {
+      self._onPointerDown = (event: PointerEvent): void => {
+        const el = self.domElement as (HTMLElement & { setPointerCapture: unknown }) | null;
+        if (!el) return down(event);
+        const own = Object.getOwnPropertyDescriptor(el, 'setPointerCapture');
+        el.setPointerCapture = () => {};
+        try {
+          down(event);
+        } finally {
+          if (own) Object.defineProperty(el, 'setPointerCapture', own);
+          else delete (el as { setPointerCapture?: unknown }).setPointerCapture;
+        }
+      };
+    }
+    if (domElement) this.connect(domElement);
+  }
+
   _getZoomScale(): number {
     return Math.pow(0.95, this.zoomSpeed);
   }
