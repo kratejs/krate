@@ -240,7 +240,7 @@ func TestGlobalsMatchQuickJS(t *testing.T) {
 	eachRuntime(t, func(t *testing.T, p *Pool) {
 		res := mustRun(t, p, Request{Code: "", Reads: []string{probe}})
 		// A global this runtime version lacks (Node 22 has no Float16Array)
-		// is allowed when code naming it runs in the embedded engine.
+		// is allowed when code reading it runs in the embedded engine.
 		got, wantList := strings.Split(res.Reads[0].S, ","), strings.Split(want.(string), ",")
 		if len(got) != len(wantList) {
 			t.Fatalf("globals differ:\n got %s\nwant %s", res.Reads[0].S, want)
@@ -256,7 +256,7 @@ func TestGlobalsMatchQuickJS(t *testing.T) {
 			}
 			r, err := p.Run(Request{Code: "globalThis.__r = typeof " + name + ";", Reads: []string{"__r"}})
 			if err != nil || !r.Unsupported {
-				t.Errorf("code naming %s, which this runtime lacks, must run in the embedded engine: %+v %v", name, r, err)
+				t.Errorf("code reading %s, which this runtime lacks, must run in the embedded engine: %+v %v", name, r, err)
 			}
 		}
 		res = mustRun(t, p, Request{Code: probeModule, Reads: []string{"__r"}})
@@ -393,7 +393,7 @@ func TestIdleTimeout(t *testing.T) {
 	})
 }
 
-func TestUsesGlobal(t *testing.T) {
+func TestNamedGlobals(t *testing.T) {
 	for code, want := range map[string]bool{
 		"new Float16Array(2)":        true,
 		"x=Float16Array":             true,
@@ -402,8 +402,41 @@ func TestUsesGlobal(t *testing.T) {
 		"obj.Float16Array_x":         false,
 		"const a = 1; Float16Array;": true,
 	} {
-		if got := usesGlobal(code, []string{"Float16Array"}); got != want {
-			t.Errorf("usesGlobal(%q) = %v, want %v", code, got, want)
+		if got := len(namedGlobals(code, []string{"Float16Array"})) > 0; got != want {
+			t.Errorf("namedGlobals(%q) = %v, want %v", code, got, want)
 		}
 	}
+}
+
+// Code that only names a global the worker lacks runs on the worker; code
+// that reads it reports Unsupported without printing its console lines, so
+// the embedded engine's rerun prints them once.
+func TestMissingGlobalTrappedOnRead(t *testing.T) {
+	eachRuntime(t, func(t *testing.T, p *Pool) {
+		probe := mustRun(t, p, Request{Code: "", Reads: []string{"typeof globalThis['InternalError']"}})
+		if probe.Reads[0].S != "undefined" {
+			t.Skip("this runtime has InternalError")
+		}
+		res := mustRun(t, p, Request{Code: `console.log("named"); globalThis.__r = "InternalError".length + (1 ? 0 : InternalError);`, Reads: []string{"__r"}})
+		if res.Unsupported || res.Reads[0].S != "13" {
+			t.Fatalf("code naming InternalError without reading it must run on the worker: %+v", res)
+		}
+		for _, code := range []string{
+			`console.log("trapped"); globalThis.__r = typeof InternalError;`,
+			`console.log("trapped"); setTimeout(() => { globalThis.__r = e instanceof InternalError; }, 1); var e = 1;`,
+			`console.log("trapped"); try { new InternalError("x") } catch (e) { globalThis.__r = 1 }`,
+		} {
+			res := mustRun(t, p, Request{Code: code, Await: true, Reads: []string{"__r"}})
+			if !res.Unsupported {
+				t.Errorf("code reading InternalError must report Unsupported: %q: %+v", code, res)
+			}
+		}
+		if out := p.Stdout.(*bytes.Buffer).String(); strings.Contains(out, "trapped") || !strings.Contains(out, "named") {
+			t.Errorf("console lines: trapped runs must print nothing, the other must print: %q", out)
+		}
+		res = mustRun(t, p, Request{Code: `InternalError = function () {}; globalThis.__r = typeof InternalError;`, Reads: []string{"__r"}})
+		if res.Unsupported || res.Reads[0].S != "function" {
+			t.Errorf("code defining InternalError before reading it runs on the worker: %+v", res)
+		}
+	})
 }

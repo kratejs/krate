@@ -125,8 +125,8 @@ func realHintsPrelude(server string, slot int) string {
 	// renders before this one left in the runtime: the render then runs alone.
 	// V8 and JSC throw a RangeError for the stack. QuickJS throws InternalError
 	// for both, and its host installs realHintsEngineErrorQuickJS: the bundle
-	// must not name that global itself, or the worker pool, which lacks it,
-	// would leave every merged run to QuickJS.
+	// must not read that global itself, or the worker pool, which lacks it,
+	// would leave every merged run with a throwing render to QuickJS.
 	return head + "  let engine = false;\n" +
 		"  try { __krate_rts(el()); } catch (e) { engine = (globalThis." + realHintsEngineErrorGlobal + " || " + realHintsEngineErrorJS + ")(e); }\n" +
 		"  (globalThis." + realHintsMergedGlobal + " ||= {})[" + strconv.Itoa(slot) + "] = engine ? null : JSON.stringify([...globalThis.__krate_island_hints]);\n}\n"

@@ -181,14 +181,12 @@ func (p *Pool) Run(req Request) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	if usesGlobal(req.Code, w.missing) {
-		// The code may use a global only the embedded engine has (Node 22
-		// has no Float16Array): it runs there, as it did before workers.
-		p.release(w, gen)
-		return Result{Unsupported: true}, nil
-	}
+	// The globals only the embedded engine has (Node 22 has no Float16Array)
+	// that the code names are trapped: an evaluation that reads one reports
+	// Unsupported and runs there, as it did before workers.
+	trap := namedGlobals(req.Code, w.missing)
 	t0 := time.Now()
-	res, err := w.run(req, p.out(), p.errOut())
+	res, err := w.run(req, trap, p.out(), p.errOut())
 	if p.Observe != nil && req.Label != "" {
 		p.Observe(req.Label, time.Since(t0))
 	}
@@ -465,6 +463,8 @@ type header struct {
 	Until     string            `json:"until,omitempty"`
 	Reads     []string          `json:"reads"`
 	TimeoutMs int64             `json:"timeoutMs"`
+	// Trap lists the globals the worker lacks that the code names.
+	Trap []string `json:"trap,omitempty"`
 }
 
 type readValue struct {
@@ -501,13 +501,13 @@ func Timeout() time.Duration {
 	return 30 * time.Second
 }
 
-func (w *worker) run(req Request, stdout, stderr io.Writer) (Result, error) {
+func (w *worker) run(req Request, trap []string, stdout, stderr io.Writer) (Result, error) {
 	w.seq++
 	timeout := req.Timeout
 	if timeout <= 0 {
 		timeout = Timeout()
 	}
-	h := header{ID: w.seq, Module: req.Module, Await: req.Await, Until: req.Until, Reads: req.Reads, TimeoutMs: timeout.Milliseconds()}
+	h := header{ID: w.seq, Module: req.Module, Await: req.Await, Until: req.Until, Reads: req.Reads, TimeoutMs: timeout.Milliseconds(), Trap: trap}
 	if len(req.Env) > 0 {
 		h.Env = req.Env
 	}
@@ -632,8 +632,9 @@ func missingGlobals(have []string) []string {
 	return out
 }
 
-// usesGlobal reports whether code names one of globals as a whole word.
-func usesGlobal(code string, globals []string) bool {
+// namedGlobals returns the globals that code names as a whole word.
+func namedGlobals(code string, globals []string) []string {
+	var out []string
 	for _, g := range globals {
 		for i := 0; ; {
 			j := strings.Index(code[i:], g)
@@ -643,12 +644,13 @@ func usesGlobal(code string, globals []string) bool {
 			at := i + j
 			end := at + len(g)
 			if (at == 0 || !identByte(code[at-1])) && (end == len(code) || !identByte(code[end])) {
-				return true
+				out = append(out, g)
+				break
 			}
 			i = at + 1
 		}
 	}
-	return false
+	return out
 }
 
 func identByte(c byte) bool {
