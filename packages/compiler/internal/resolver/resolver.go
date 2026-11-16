@@ -558,6 +558,13 @@ func pickTarget(raw json.RawMessage, conds Conditions) (string, bool) {
 	return "", false
 }
 
+// File resolves a candidate path the way a relative import does: the path as
+// given, then with a source extension, then as a directory index. It returns
+// "" when none exists.
+func File(candidate string) string {
+	return resolveFile(candidate)
+}
+
 // resolveFile resolves a candidate path to an existing file, trying the path as
 // given, then with source extensions, then as a directory index.
 func resolveFile(candidate string) string {

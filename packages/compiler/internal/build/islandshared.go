@@ -1,6 +1,7 @@
 package build
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -99,6 +100,16 @@ type islandSharePlan struct {
 	shared   map[string]bool     // canonical key of every shared module
 	boundary []string            // shared modules a graph imports directly, sorted
 	edges    []map[string]string // per graph: importer key + "\x00" + specifier -> boundary key
+	// cycles are the import cycles among the shared modules; cycleOf maps a
+	// member to its cycle. Each cycle is bundled into its own entry chunk
+	// (unit), and each member imported from outside its cycle gets a facade
+	// chunk (facades, member -> file stem) re-exporting it from the unit.
+	cycles  []islandCycle
+	cycleOf map[string]int
+	facades map[string]string
+	// inner maps a shared module's import of a member of another cycle
+	// (importer key + "\x00" + specifier) to that member.
+	inner map[string]string
 }
 
 // islandShareCheck classifies the modules of two graphs. own holds, for each
@@ -258,44 +269,47 @@ func firstImportDifference(a, b []islandMetaImport) (string, bool) {
 }
 
 // settle removes every module whose imports reach one that cannot be shared,
-// and every module in an import cycle, until nothing changes.
+// until nothing changes. A module in an import cycle is shared with the rest
+// of its cycle (see sharedCycles).
 func (c *islandShareCheck) settle() {
-	for {
-		c.close()
-		if !c.pinCycles() {
-			return
-		}
-	}
+	c.close()
 }
 
-// pinCycles marks the shareable modules that are in an import cycle as not
-// shareable and reports whether it marked any. Code splitting orders the
-// files of a chunk by their distance from an entry point, so a shared chunk
-// can enter a cycle at another module than the island bundle did and
-// evaluate a module before one it reads at its top level (a spread of an
-// array that is still undefined). An acyclic graph runs in a valid order
-// whichever module comes first.
-func (c *islandShareCheck) pinCycles() bool {
-	succ := func(p string) []string {
-		var out []string
-		for _, imp := range c.graphs[0][p].imports {
-			if imp.Kind == "import-statement" && !syntheticImport(imp) && !imp.External && c.ok[imp.Path] {
-				out = append(out, imp.Path)
-			}
+// islandCycle is a strongly connected component of the shared modules: an
+// import cycle, shared as a whole. root is the member an island enters it
+// at, so the shared chunk evaluates the cycle in the order the islands did.
+type islandCycle struct {
+	members []string
+	root    string
+	unit    string // chunk file stem
+}
+
+// staticSuccessors lists the modules p imports with import statements that
+// are in set.
+func staticSuccessors(g map[string]metaNode, p string, set map[string]bool) []string {
+	var out []string
+	for _, imp := range g[p].imports {
+		if imp.Kind == "import-statement" && !syntheticImport(imp) && !imp.External && set[imp.Path] {
+			out = append(out, imp.Path)
 		}
-		return out
 	}
-	keys := make([]string, 0, len(c.ok))
-	for p := range c.ok {
+	return out
+}
+
+// sharedCycles returns the import cycles among the shared modules (Tarjan's
+// strongly connected components), in Tarjan's order: a cycle comes after
+// every cycle it imports.
+func sharedCycles(g map[string]metaNode, shared map[string]bool) []islandCycle {
+	keys := make([]string, 0, len(shared))
+	for p := range shared {
 		keys = append(keys, p)
 	}
 	sort.Strings(keys)
-	// Tarjan's strongly connected components.
 	index := map[string]int{}
 	low := map[string]int{}
 	onStack := map[string]bool{}
 	var stack []string
-	var sccs [][]string
+	var cycles []islandCycle
 	next := 0
 	var strong func(v string)
 	strong = func(v string) {
@@ -303,7 +317,7 @@ func (c *islandShareCheck) pinCycles() bool {
 		next++
 		stack = append(stack, v)
 		onStack[v] = true
-		for _, w := range succ(v) {
+		for _, w := range staticSuccessors(g, v, shared) {
 			if _, seen := index[w]; !seen {
 				strong(w)
 				low[v] = min(low[v], low[w])
@@ -311,76 +325,91 @@ func (c *islandShareCheck) pinCycles() bool {
 				low[v] = min(low[v], index[w])
 			}
 		}
-		if low[v] == index[v] {
-			var comp []string
-			for {
-				w := stack[len(stack)-1]
-				stack = stack[:len(stack)-1]
-				onStack[w] = false
-				comp = append(comp, w)
-				if w == v {
-					break
-				}
-			}
-			sccs = append(sccs, comp)
+		if low[v] != index[v] {
+			return
 		}
+		var comp []string
+		for {
+			w := stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+			onStack[w] = false
+			comp = append(comp, w)
+			if w == v {
+				break
+			}
+		}
+		if len(comp) == 1 {
+			self := false
+			for _, w := range staticSuccessors(g, v, shared) {
+				self = self || w == v
+			}
+			if !self {
+				return
+			}
+		}
+		sort.Strings(comp)
+		cycles = append(cycles, islandCycle{members: comp})
 	}
 	for _, k := range keys {
 		if _, seen := index[k]; !seen {
 			strong(k)
 		}
 	}
-	pinned := false
-	for _, comp := range sccs {
-		self := false
-		if len(comp) == 1 {
-			for _, w := range succ(comp[0]) {
-				self = self || w == comp[0]
-			}
-			if !self {
-				continue
-			}
-		}
-		in := map[string]bool{}
-		for _, m := range comp {
-			in[m] = true
-		}
-		for _, m := range comp {
-			reason := "in an import cycle (" + c.cycleThrough(m, in) + "), which a shared chunk may evaluate in another order"
-			c.own[m] = reason
-			delete(c.ok, m)
-			pinned = true
-		}
-	}
-	return pinned
+	return cycles
 }
 
-// cycleThrough spells the shortest import cycle from m back to m within the
-// component in.
-func (c *islandShareCheck) cycleThrough(m string, in map[string]bool) string {
-	parent := map[string]string{}
-	queue := []string{m}
-	for len(queue) > 0 {
-		p := queue[0]
-		queue = queue[1:]
-		for _, imp := range c.graphs[0][p].imports {
-			if imp.Kind != "import-statement" || syntheticImport(imp) || imp.External || !in[imp.Path] {
-				continue
-			}
-			if imp.Path == m {
-				parts := []string{c.display(m)}
-				for q := p; q != m; q = parent[q] {
-					parts = append([]string{c.display(q)}, parts...)
+// cycleRoots sets the root of each cycle: the member a depth-first walk of
+// the import statements from the island entries reaches first, which is
+// where ES module evaluation enters the cycle. A cycle only import() reaches
+// is entered at the member the walk over every import finds first.
+func cycleRoots(graphs []map[string]metaNode, entries [][]string, cycles []islandCycle) {
+	of := map[string]int{}
+	for i, cy := range cycles {
+		for _, m := range cy.members {
+			of[m] = i
+		}
+	}
+	for _, static := range []bool{true, false} {
+		for gi, g := range graphs {
+			seen := map[string]bool{}
+			var walk func(p string)
+			walk = func(p string) {
+				if seen[p] {
+					return
 				}
-				return c.display(m) + " -> " + strings.Join(parts, " -> ")
+				seen[p] = true
+				if i, ok := of[p]; ok && cycles[i].root == "" {
+					cycles[i].root = p
+				}
+				for _, imp := range g[p].imports {
+					if syntheticImport(imp) || imp.External || static && imp.Kind != "import-statement" {
+						continue
+					}
+					walk(imp.Path)
+				}
 			}
-			if _, seen := parent[imp.Path]; !seen && imp.Path != m {
-				parent[imp.Path] = p
-				queue = append(queue, imp.Path)
+			for _, e := range entries[gi] {
+				walk(e)
 			}
 		}
 	}
-	return c.display(m)
+	for i := range cycles {
+		if cycles[i].root == "" {
+			cycles[i].root = cycles[i].members[0]
+		}
+	}
+}
+
+// metaEntries lists the canonical keys of a metafile's entry points, sorted.
+func metaEntries(root string, m *islandMetafile) []string {
+	var out []string
+	for _, o := range m.Outputs {
+		if o.EntryPoint != "" {
+			out = append(out, canonicalMetaKey(root, o.EntryPoint))
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // close removes every module whose imports reach one that cannot be shared.
@@ -489,6 +518,24 @@ func planSharedIslandModules(root string, metas []*islandMetafile, globals []str
 			}
 		}
 		if !bad {
+			// A shared module imports a member of another cycle from the
+			// cycle's chunk too (see buildNeutralChunks), with the same needs.
+			cycles := sharedCycles(graphs[0], c.ok)
+			for p, to := range crossCycleImports(graphs[0], c.ok, cycles) {
+				for _, imp := range to {
+					if graphs[0][imp.Path].format != "esm" {
+						c.own[imp.Path] = "CommonJS in an import cycle, which cannot be loaded from a shared chunk"
+					} else if imp.Kind != "import-statement" && imp.Kind != "dynamic-import" {
+						c.own[imp.Path] = "in an import cycle and loaded with require() by " + c.display(p) + ", which cannot load a shared chunk"
+					} else {
+						continue
+					}
+					delete(c.ok, imp.Path)
+					bad = true
+				}
+			}
+		}
+		if !bad {
 			break
 		}
 	}
@@ -520,7 +567,71 @@ func planSharedIslandModules(root string, metas []*islandMetafile, globals []str
 		plan.boundary = append(plan.boundary, k)
 	}
 	sort.Strings(plan.boundary)
+	cycles := sharedCycles(graphs[0], ok)
+	if len(cycles) == 0 {
+		return plan
+	}
+	entries := make([][]string, len(metas))
+	for i, m := range metas {
+		entries[i] = metaEntries(root, m)
+	}
+	cycleRoots(graphs, entries, cycles)
+	plan.cycles = cycles
+	plan.cycleOf = map[string]int{}
+	for i, cy := range cycles {
+		plan.cycles[i].unit = cycleUnitName(root, cy.root)
+		for _, m := range cy.members {
+			plan.cycleOf[m] = i
+		}
+	}
+	plan.facades = map[string]string{}
+	for _, k := range plan.boundary {
+		if _, in := plan.cycleOf[k]; in {
+			plan.facades[k] = neutralEntryName(root, k)
+		}
+	}
+	plan.inner = map[string]string{}
+	for p, to := range crossCycleImports(graphs[0], ok, cycles) {
+		for _, imp := range to {
+			plan.inner[neutralEdgeKey(p, imp.Original)] = imp.Path
+			plan.facades[imp.Path] = neutralEntryName(root, imp.Path)
+		}
+	}
 	return plan
+}
+
+// crossCycleImports lists, per shared module, its imports of a member of an
+// import cycle it is not in itself.
+func crossCycleImports(g map[string]metaNode, shared map[string]bool, cycles []islandCycle) map[string][]islandMetaImport {
+	of := map[string]int{}
+	for i, cy := range cycles {
+		for _, m := range cy.members {
+			of[m] = i
+		}
+	}
+	out := map[string][]islandMetaImport{}
+	for p := range shared {
+		pc, pin := of[p]
+		for _, imp := range g[p].imports {
+			if syntheticImport(imp) || imp.External || !shared[imp.Path] {
+				continue
+			}
+			if ic, in := of[imp.Path]; in && (!pin || ic != pc) {
+				out[p] = append(out[p], imp)
+			}
+		}
+	}
+	return out
+}
+
+// cycleUnitName names the chunk that holds an import cycle, after its root.
+func cycleUnitName(root, cycleRoot string) string {
+	rel := cycleRoot
+	if r, err := filepath.Rel(canonicalPath(root), filepath.FromSlash(cycleRoot)); err == nil {
+		rel = filepath.ToSlash(r)
+	}
+	sum := sha256.Sum256([]byte("cycle\x00" + rel))
+	return islandNeutralEntryPrefix + hex.EncodeToString(sum[:6])
 }
 
 // metaNode is one module of a graph, keyed by its canonical path: the two
@@ -565,14 +676,59 @@ func syntheticImport(imp islandMetaImport) bool {
 // modules to their isn-* chunks. It is set between two rebuilds and only read
 // while esbuild runs.
 type neutralImports struct {
-	edges map[string]string // as in islandSharePlan.edges
-	files map[string]string // boundary key -> chunk file name
+	root    string
+	edges   map[string]string   // as in islandSharePlan.edges
+	files   map[string]string   // boundary key -> chunk file name
+	exports map[string][]string // boundary key -> its export names, for a stub
+}
+
+// sharedStubNamespace holds the stand-ins for shared modules: a stub
+// re-exports every export of the module from its chunk, by name. Importing
+// the stub instead of the chunk itself lets esbuild resolve a namespace
+// import's members (z.string()) to named imports from the chunk, so the
+// chunk is tree shaken to the names the islands use.
+const sharedStubNamespace = "krate-island-shared-stub"
+
+// virtualName is the path a module the build generates for a shared module is
+// known by in the output (comments of an unminified build): relative to the
+// project, as esbuild prints a file's path.
+func virtualName(root, key string) string {
+	if rel, err := filepath.Rel(canonicalPath(root), filepath.FromSlash(key)); err == nil {
+		return filepath.ToSlash(rel)
+	}
+	return key
+}
+
+func sharedStubSource(names []string, file string) string {
+	return "export { " + strings.Join(names, ", ") + " } from " + strconv.Quote("./"+file) + ";\n"
+}
+
+// sharedStubs resolves the chunk a stub imports as external and loads stubs.
+func sharedStubs(pb api.PluginBuild, source func(key string) (string, bool)) {
+	pb.OnResolve(api.OnResolveOptions{Filter: `.*`, Namespace: sharedStubNamespace}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+		return api.OnResolveResult{Path: args.Path, External: true}, nil
+	})
+	pb.OnLoad(api.OnLoadOptions{Filter: `.*`, Namespace: sharedStubNamespace}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
+		key, _ := args.PluginData.(string)
+		src, ok := source(key)
+		if !ok {
+			return api.OnLoadResult{}, fmt.Errorf("unknown shared island module %s", args.Path)
+		}
+		return api.OnLoadResult{Contents: &src, Loader: api.LoaderJS}, nil
+	})
 }
 
 func (n *neutralImports) plugin() api.Plugin {
 	return api.Plugin{
 		Name: "krate-island-shared",
 		Setup: func(pb api.PluginBuild) {
+			sharedStubs(pb, func(key string) (string, bool) {
+				names, ok := n.exports[key]
+				if !ok || n.files[key] == "" {
+					return "", false
+				}
+				return sharedStubSource(names, n.files[key]), true
+			})
 			pb.OnResolve(api.OnResolveOptions{Filter: `.*`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
 				// Only an import statement or import() can load an ES module
 				// chunk; a require of the same specifier stays bundled.
@@ -584,6 +740,9 @@ func (n *neutralImports) plugin() api.Plugin {
 					return api.OnResolveResult{}, nil
 				}
 				if file := n.files[target]; file != "" {
+					if _, ok := n.exports[target]; ok {
+						return api.OnResolveResult{Path: virtualName(n.root, target), Namespace: sharedStubNamespace, PluginData: target}, nil
+					}
 					return api.OnResolveResult{Path: "./" + file, External: true}, nil
 				}
 				return api.OnResolveResult{}, nil
@@ -627,7 +786,7 @@ func (b *Builder) buildIslandFlavours(flavours []*islandFlavour, chunksDir strin
 		}
 	}()
 	for i, f := range flavours {
-		states[i] = &neutralImports{}
+		states[i] = &neutralImports{root: b.Root}
 		opts := f.opts
 		opts.Metafile = true
 		opts.Plugins = append([]api.Plugin{states[i].plugin()}, opts.Plugins...)
@@ -661,9 +820,20 @@ func (b *Builder) buildIslandFlavours(flavours []*islandFlavour, chunksDir strin
 	for _, k := range plan.boundary {
 		files[k] = neutralEntryName(b.Root, k) + ".js"
 	}
+	// The export names of every module a graph or a shared module imports
+	// from a chunk, for its stub. One the build cannot list (it re-exports
+	// a CommonJS module) is imported from its chunk as a whole.
+	listKeys := append([]string(nil), plan.boundary...)
+	for m := range plan.facades {
+		if files[m] == "" {
+			listKeys = append(listKeys, m)
+		}
+	}
+	exports, _ := listModuleExports(neutralBase, listKeys, chunksDir)
 	for i := range flavours {
 		states[i].edges = plan.edges[i]
 		states[i].files = files
+		states[i].exports = exports
 	}
 	rebuild := func() bool {
 		for i, f := range flavours {
@@ -671,6 +841,7 @@ func (b *Builder) buildIslandFlavours(flavours []*islandFlavour, chunksDir strin
 			if len(f.result.Errors) > 0 {
 				return false
 			}
+			trimSharedImports(f.result.OutputFiles)
 			if m, err := parseIslandMetafile(f.result.Metafile); err == nil {
 				metas[i] = m
 			}
@@ -680,6 +851,7 @@ func (b *Builder) buildIslandFlavours(flavours []*islandFlavour, chunksDir strin
 	unshare := func() {
 		for i := range flavours {
 			states[i].edges = nil
+			states[i].exports = nil
 		}
 		rebuild()
 		b.warnDuplicatedIslandModules(metas, globals)
@@ -694,7 +866,7 @@ func (b *Builder) buildIslandFlavours(flavours []*islandFlavour, chunksDir strin
 		outputs = append(outputs, liveOutputs(f.result.OutputFiles, f.names))
 	}
 	used := sharedImportsUsed(outputs, files)
-	nres := b.buildNeutralChunks(neutralBase, sharedInjects(flavours), files, used, chunksDir)
+	nres := b.buildNeutralChunks(neutralBase, sharedInjects(flavours), files, used, exports, plan, chunksDir)
 	if len(nres.Errors) > 0 {
 		// Never ship graphs that import chunks that were not built.
 		unshare()
@@ -762,13 +934,17 @@ func sharedImportsUsed(outputs [][]api.OutputFile, files map[string]string) map[
 				continue
 			}
 			counted := map[string]int{}
+			// A stub imports every export of a module by name, and esbuild
+			// keeps the whole clause, so an imported name is used when its
+			// local is referenced outside the import statements.
+			refs := neutralRefs(neutralStaticRe.ReplaceAllStringFunc(text, func(m string) string { return strings.Repeat(" ", len(m)) }))
 			for _, m := range neutralStaticRe.FindAllStringSubmatch(text, -1) {
 				u := get(m[3])
 				if u == nil {
 					continue
 				}
 				counted[m[3]]++
-				addNeutralClause(u, m[1], m[2])
+				addNeutralClause(u, m[1], m[2], refs)
 			}
 			for _, m := range neutralBareRe.FindAllStringSubmatch(text, -1) {
 				if get(m[1]) != nil {
@@ -787,16 +963,21 @@ func sharedImportsUsed(outputs [][]api.OutputFile, files map[string]string) map[
 	return used
 }
 
-func addNeutralClause(u *neutralUse, kw, clause string) {
+func addNeutralClause(u *neutralUse, kw, clause string, refs map[string]bool) {
 	clause = strings.TrimSpace(clause)
 	if strings.Contains(clause, "*") {
 		u.all = true
 		return
 	}
+	// An export clause re-exports each name; an import clause needs the
+	// names whose local is referenced.
+	used := func(local string) bool { return kw != "import" || refs[local] }
 	open, close := strings.Index(clause, "{"), strings.LastIndex(clause, "}")
 	if open < 0 || close < open {
 		if kw == "import" && neutralDefaultRe.MatchString(clause) {
-			u.names["default"] = true
+			if used(clause) {
+				u.names["default"] = true
+			}
 			return
 		}
 		u.all = true
@@ -807,7 +988,9 @@ func addNeutralClause(u *neutralUse, kw, clause string) {
 			u.all = true
 			return
 		}
-		u.names["default"] = true
+		if used(strings.TrimSpace(head)) {
+			u.names["default"] = true
+		}
 	}
 	for _, spec := range strings.Split(clause[open+1:close], ",") {
 		if strings.TrimSpace(spec) == "" {
@@ -818,8 +1001,102 @@ func addNeutralClause(u *neutralUse, kw, clause string) {
 			u.all = true
 			return
 		}
-		u.names[m[1]] = true
+		local := m[1]
+		if i := strings.Index(spec, " as "); i >= 0 {
+			local = strings.TrimSpace(spec[i+len(" as "):])
+		}
+		if used(local) {
+			u.names[m[1]] = true
+		}
 	}
+}
+
+// trimSharedImports drops, from each import of a shared chunk in the built
+// files, the names whose local is never referenced: an import from a stub
+// lists every export of the module, and a chunk exports only the names some
+// file uses. The statement keeps its length (padded before "from"), so a
+// source map of the file stays right.
+func trimSharedImports(files []api.OutputFile) {
+	for i, f := range files {
+		if !strings.HasSuffix(f.Path, ".js") || !bytes.Contains(f.Contents, []byte(islandNeutralEntryPrefix)) {
+			continue
+		}
+		text := string(f.Contents)
+		refs := neutralRefs(neutralStaticRe.ReplaceAllStringFunc(text, func(m string) string { return strings.Repeat(" ", len(m)) }))
+		changed := false
+		out := neutralStaticRe.ReplaceAllStringFunc(text, func(stmt string) string {
+			m := neutralStaticRe.FindStringSubmatch(stmt)
+			if m[1] != "import" {
+				return stmt
+			}
+			clause := strings.TrimSpace(m[2])
+			open, close := strings.Index(clause, "{"), strings.LastIndex(clause, "}")
+			if strings.Contains(clause, "*") || open < 0 || close < open {
+				return stmt
+			}
+			var keep []string
+			for _, spec := range strings.Split(clause[open+1:close], ",") {
+				spec = strings.TrimSpace(spec)
+				if spec == "" {
+					continue
+				}
+				local := spec
+				if j := strings.Index(spec, " as "); j >= 0 {
+					local = strings.TrimSpace(spec[j+len(" as "):])
+				}
+				if refs[local] || !neutralDefaultRe.MatchString(local) {
+					keep = append(keep, spec)
+				}
+			}
+			head := strings.TrimSuffix(strings.TrimSpace(clause[:open]), ",")
+			if head != "" && !refs[strings.TrimSpace(head)] {
+				head = ""
+			}
+			lead := "import"
+			if head != "" {
+				lead += " " + head + ","
+			}
+			next := lead + "{" + strings.Join(keep, ",") + "}"
+			rest := stmt[strings.LastIndex(stmt, "from"):]
+			if len(next)+len(rest) > len(stmt) {
+				return stmt
+			}
+			changed = true
+			return next + strings.Repeat(" ", len(stmt)-len(next)-len(rest)) + rest
+		})
+		if changed {
+			files[i].Contents = []byte(out)
+		}
+	}
+}
+
+// neutralRefs returns the identifiers in JavaScript text that are not
+// property names (after a "."; a spread "..." is a reference). Strings and
+// comments are read as code, which can only add names.
+func neutralRefs(text string) map[string]bool {
+	refs := map[string]bool{}
+	isPart := func(c byte) bool {
+		return c == '_' || c == '$' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c >= 0x80
+	}
+	for i := 0; i < len(text); {
+		c := text[i]
+		if !isPart(c) {
+			i++
+			continue
+		}
+		j := i
+		for j < len(text) && isPart(text[j]) {
+			j++
+		}
+		if c < '0' || c > '9' {
+			property := i > 0 && text[i-1] == '.' && !(i >= 3 && text[i-3:i] == "...")
+			if !property {
+				refs[text[i:j]] = true
+			}
+		}
+		i = j
+	}
+	return refs
 }
 
 const neutralEntryNamespace = "krate-island-shared-entry"
@@ -827,16 +1104,92 @@ const neutralEntryNamespace = "krate-island-shared-entry"
 // buildNeutralChunks bundles the shared modules once. Each module the graphs
 // import gets an entry named for it that re-exports only the names they use,
 // so a large library both reach is still tree shaken.
-func (b *Builder) buildNeutralChunks(base api.BuildOptions, injects []string, files map[string]string, used map[string]*neutralUse, chunksDir string) api.BuildResult {
-	sources := map[string]string{}
+//
+// Code splitting orders the modules of a shared chunk by their distance from
+// the entry points, so a chunk several entries reach could run an import
+// cycle from another member than the islands did, and a member would read a
+// binding of one that has not run yet. So each cycle is bundled into an entry
+// chunk of its own (the unit), which imports the cycle's root first: esbuild
+// then runs the cycle from the root, as the islands do. Every other module,
+// an island or a shared module, imports a member through the member's facade
+// chunk, which re-exports it from the unit. The names a facade needs from
+// shared modules are read from the build's own output, so it is rebuilt until
+// they settle.
+func (b *Builder) buildNeutralChunks(base api.BuildOptions, injects []string, files map[string]string, used map[string]*neutralUse, exports map[string][]string, plan islandSharePlan, chunksDir string) api.BuildResult {
+	need := map[string]*neutralUse{}
+	for k, u := range used {
+		need[k] = u.clone()
+	}
+	facadeFiles := map[string]string{}
+	for m, stem := range plan.facades {
+		facadeFiles[m] = stem + ".js"
+	}
+	for pass := 0; ; pass++ {
+		result := b.buildNeutralOnce(base, injects, files, need, exports, plan, chunksDir)
+		if len(result.Errors) > 0 || len(plan.cycles) == 0 {
+			return result
+		}
+		inner := sharedImportsUsed([][]api.OutputFile{result.OutputFiles}, facadeFiles)
+		grew := false
+		for m, u := range inner {
+			if need[m] == nil {
+				need[m] = &neutralUse{names: map[string]bool{}}
+			}
+			grew = need[m].merge(u) || grew
+		}
+		if !grew {
+			return result
+		}
+		if pass == 8 {
+			return api.BuildResult{Errors: []api.Message{{Text: "the shared island chunks did not settle"}}}
+		}
+	}
+}
+
+func (u *neutralUse) clone() *neutralUse {
+	c := &neutralUse{all: u.all, names: make(map[string]bool, len(u.names))}
+	for n := range u.names {
+		c.names[n] = true
+	}
+	return c
+}
+
+// merge adds o to u and reports whether u grew.
+func (u *neutralUse) merge(o *neutralUse) bool {
+	grew := false
+	if o.all && !u.all {
+		u.all, grew = true, true
+	}
+	for n := range o.names {
+		if !u.names[n] {
+			u.names[n], grew = true, true
+		}
+	}
+	return grew
+}
+
+func (u *neutralUse) sortedNames() []string {
+	names := make([]string, 0, len(u.names))
+	for n := range u.names {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func (b *Builder) buildNeutralOnce(base api.BuildOptions, injects []string, files map[string]string, need map[string]*neutralUse, exports map[string][]string, plan islandSharePlan, chunksDir string) api.BuildResult {
+	sources := map[string]string{} // entry path -> source
+	dirs := map[string]string{}    // entry path -> the directory it resolves from
 	var points []api.EntryPoint
 	keys := make([]string, 0, len(files))
 	for k := range files {
-		keys = append(keys, k)
+		if _, in := plan.cycleOf[k]; !in {
+			keys = append(keys, k)
+		}
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		u := used[k]
+		u := need[k]
 		if u == nil {
 			continue
 		}
@@ -851,15 +1204,53 @@ func (b *Builder) buildNeutralChunks(base api.BuildOptions, injects []string, fi
 		case len(u.names) == 0:
 			src = "import " + spec + ";\n"
 		default:
-			names := make([]string, 0, len(u.names))
-			for n := range u.names {
-				names = append(names, n)
-			}
-			sort.Strings(names)
-			src = "export { " + strings.Join(names, ", ") + " } from " + spec + ";\n"
+			src = "export { " + strings.Join(u.sortedNames(), ", ") + " } from " + spec + ";\n"
 		}
-		sources[k] = src
-		points = append(points, api.EntryPoint{InputPath: neutralEntryNamespace + ":" + k, OutputPath: strings.TrimSuffix(files[k], ".js")})
+		id := neutralEntryNamespace + ":" + virtualName(b.Root, k)
+		sources[id], dirs[id] = src, k
+		points = append(points, api.EntryPoint{InputPath: id, OutputPath: strings.TrimSuffix(files[k], ".js")})
+	}
+	// The units and the facades of the members other modules import.
+	for ci, cy := range plan.cycles {
+		var unit strings.Builder
+		fmt.Fprintf(&unit, "import * as __krate_cycle_root from %s;\n", strconv.Quote(cy.root))
+		used := false
+		for mi, m := range cy.members {
+			stem, imported := plan.facades[m]
+			u := need[m]
+			if !imported || u == nil {
+				continue
+			}
+			used = true
+			names := u.sortedNames()
+			if u.all {
+				listed, ok := exports[m]
+				if !ok {
+					return api.BuildResult{Errors: []api.Message{{Text: "cannot list the exports of " + m + ", which a shared chunk re-exports"}}}
+				}
+				names = listed
+			}
+			id := neutralEntryNamespace + ":facade:" + virtualName(b.Root, m)
+			if len(names) == 0 {
+				sources[id] = "import \"./" + cy.unit + ".js\";\n"
+			} else {
+				var inner, outer []string
+				for ni, n := range names {
+					alias := fmt.Sprintf("__krate_c%d_%d_%d", ci, mi, ni)
+					inner = append(inner, n+" as "+alias)
+					outer = append(outer, alias+" as "+n)
+				}
+				fmt.Fprintf(&unit, "export { %s } from %s;\n", strings.Join(inner, ", "), strconv.Quote(m))
+				sources[id] = "export { " + strings.Join(outer, ", ") + " } from \"./" + cy.unit + ".js\";\n"
+			}
+			dirs[id] = m
+			points = append(points, api.EntryPoint{InputPath: id, OutputPath: stem})
+		}
+		if used {
+			id := neutralEntryNamespace + ":unit:" + virtualName(b.Root, cy.root)
+			sources[id], dirs[id] = unit.String(), cy.root
+			points = append(points, api.EntryPoint{InputPath: id, OutputPath: cy.unit})
+		}
 	}
 	if len(points) == 0 {
 		return api.BuildResult{}
@@ -880,15 +1271,47 @@ func (b *Builder) buildNeutralChunks(base api.BuildOptions, injects []string, fi
 				return api.OnResolveResult{Path: strings.TrimPrefix(args.Path, neutralEntryNamespace+":"), Namespace: neutralEntryNamespace}, nil
 			})
 			pb.OnLoad(api.OnLoadOptions{Filter: `.*`, Namespace: neutralEntryNamespace}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
-				src, ok := sources[args.Path]
+				src, ok := sources[neutralEntryNamespace+":"+args.Path]
 				if !ok {
 					return api.OnLoadResult{}, fmt.Errorf("unknown shared island module %s", args.Path)
 				}
-				return api.OnLoadResult{Contents: &src, Loader: api.LoaderJS, ResolveDir: filepath.Dir(filepath.FromSlash(args.Path))}, nil
+				return api.OnLoadResult{Contents: &src, Loader: api.LoaderJS, ResolveDir: filepath.Dir(filepath.FromSlash(dirs[neutralEntryNamespace+":"+args.Path]))}, nil
 			})
 		},
 	}
-	opts.Plugins = append([]api.Plugin{entry}, base.Plugins...)
+	plugins := []api.Plugin{entry}
+	if len(plan.cycles) > 0 {
+		// A facade's unit, and a shared module's import of a member of
+		// another cycle, load the other chunk at run time.
+		plugins = append(plugins, api.Plugin{
+			Name: "krate-island-shared-cycles",
+			Setup: func(pb api.PluginBuild) {
+				pb.OnResolve(api.OnResolveOptions{Filter: `.*`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+					if args.Namespace == neutralEntryNamespace && strings.HasPrefix(args.Path, "./"+islandNeutralEntryPrefix) {
+						return api.OnResolveResult{Path: args.Path, External: true}, nil
+					}
+					if args.Kind != api.ResolveJSImportStatement && args.Kind != api.ResolveJSDynamicImport {
+						return api.OnResolveResult{}, nil
+					}
+					if m, ok := plan.inner[neutralEdgeKey(neutralImporterKey(args), args.Path)]; ok {
+						if _, listed := exports[m]; listed {
+							return api.OnResolveResult{Path: virtualName(b.Root, m), Namespace: sharedStubNamespace, PluginData: m}, nil
+						}
+						return api.OnResolveResult{Path: "./" + plan.facades[m] + ".js", External: true}, nil
+					}
+					return api.OnResolveResult{}, nil
+				})
+				sharedStubs(pb, func(key string) (string, bool) {
+					names, ok := exports[key]
+					if !ok || plan.facades[key] == "" {
+						return "", false
+					}
+					return sharedStubSource(names, plan.facades[key]+".js"), true
+				})
+			},
+		})
+	}
+	opts.Plugins = append(plugins, base.Plugins...)
 	result := esbuildBuild(opts)
 	if len(result.Errors) == 0 {
 		names := make([]string, len(points))
@@ -896,8 +1319,107 @@ func (b *Builder) buildNeutralChunks(base api.BuildOptions, injects []string, fi
 			names[i] = p.OutputPath
 		}
 		result.OutputFiles = liveOutputs(result.OutputFiles, names)
+		trimSharedImports(result.OutputFiles)
 	}
 	return result
+}
+
+// listModuleExports lists the names each module exports at run time, from a
+// build of `export * from` each, for a facade that must re-export them all.
+func listModuleExports(base api.BuildOptions, keys []string, outdir string) (map[string][]string, []api.Message) {
+	sort.Strings(keys)
+	const ns = "krate-island-shared-exports"
+	var points []api.EntryPoint
+	for i, k := range keys {
+		points = append(points, api.EntryPoint{InputPath: ns + ":" + k, OutputPath: "x" + strconv.Itoa(i)})
+	}
+	opts := base
+	opts.EntryPoints = nil
+	opts.EntryPointsAdvanced = points
+	opts.Outdir = filepath.Join(outdir, "krate-exports")
+	opts.EntryNames = "[name]"
+	opts.Splitting = true
+	opts.Metafile = true
+	opts.Write = false
+	opts.MinifyIdentifiers, opts.MinifySyntax, opts.MinifyWhitespace = false, false, false
+	opts.Sourcemap = api.SourceMapNone
+	opts.Inject = nil
+	opts.Plugins = append([]api.Plugin{{
+		Name: ns,
+		Setup: func(pb api.PluginBuild) {
+			pb.OnResolve(api.OnResolveOptions{Filter: `^` + ns + `:`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+				return api.OnResolveResult{Path: strings.TrimPrefix(args.Path, ns+":"), Namespace: ns}, nil
+			})
+			pb.OnLoad(api.OnLoadOptions{Filter: `.*`, Namespace: ns}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
+				spec := strconv.Quote(args.Path)
+				src := "export * from " + spec + ";\n"
+				if moduleHasDefaultExport(args.Path) {
+					src += "export { default } from " + spec + ";\n"
+				}
+				return api.OnLoadResult{Contents: &src, Loader: api.LoaderJS, ResolveDir: filepath.Dir(filepath.FromSlash(args.Path))}, nil
+			})
+		},
+	}}, base.Plugins...)
+	res := esbuildBuild(opts)
+	if len(res.Errors) > 0 {
+		return nil, res.Errors
+	}
+	var meta struct {
+		Outputs map[string]struct {
+			EntryPoint string   `json:"entryPoint"`
+			Exports    []string `json:"exports"`
+		} `json:"outputs"`
+	}
+	if err := json.Unmarshal([]byte(res.Metafile), &meta); err != nil {
+		return nil, []api.Message{{Text: "reading the exports of shared island modules: " + err.Error()}}
+	}
+	// An export * of a CommonJS module is resolved at run time, so its names
+	// are not listed: an entry whose code (or a chunk it imports) does that is
+	// left out.
+	texts := map[string]string{}
+	for _, f := range res.OutputFiles {
+		texts[filepath.Base(f.Path)] = string(f.Contents)
+	}
+	dynamic := func(entry string) bool {
+		seen := map[string]bool{}
+		queue := []string{entry}
+		for len(queue) > 0 {
+			cur := queue[0]
+			queue = queue[1:]
+			if seen[cur] {
+				continue
+			}
+			seen[cur] = true
+			text := texts[cur]
+			if strings.Contains(text, "__reExport") {
+				return true
+			}
+			for base := range texts {
+				if !seen[base] && strings.Contains(text, "./"+base) {
+					queue = append(queue, base)
+				}
+			}
+		}
+		return false
+	}
+	out := map[string][]string{}
+	for path, o := range meta.Outputs {
+		if k := strings.TrimPrefix(o.EntryPoint, ns+":"); k != o.EntryPoint {
+			if dynamic(filepath.Base(path)) {
+				continue
+			}
+			names := make([]string, 0, len(o.Exports))
+			for _, n := range o.Exports {
+				if !neutralDefaultRe.MatchString(n) && n != "default" {
+					n = strconv.Quote(n)
+				}
+				names = append(names, n)
+			}
+			sort.Strings(names)
+			out[k] = names
+		}
+	}
+	return out, nil
 }
 
 // moduleHasDefaultExport reports whether a script module has an export

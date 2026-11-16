@@ -1578,9 +1578,13 @@ is preact/compat in one and the project's React in the other. A module both
 reach that does not depend on React, directly or through its imports, is
 bundled **once**, into a shared chunk both import, so there is one instance of
 it on the page: a cache, a promise that dedupes a fetch, an event emitter or a
-store made with `zustand/vanilla` holds one value for both kinds of island. The
-chunk exports only what the islands import from it, so a large library both
-reach is still tree shaken. A module an island loads with `import()` is split into the
+store made with `zustand/vanilla` holds one value for both kinds of island.
+Modules that import each other (an import cycle) are bundled once together and
+run in the order the islands would run them. The chunk exports only what the
+islands import from it, so a large library both reach is still tree shaken.
+That includes a namespace a library re-exports from its index:
+`import { z } from 'zod'` keeps only the parts of zod the islands call
+(`z.string()`), not every export and locale. A module an island loads with `import()` is split into the
 island bundle too and imports the modules the island already loaded, so it
 shares their instances (and the shared chunk when both kinds of island load
 it).

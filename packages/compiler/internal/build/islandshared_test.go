@@ -81,9 +81,9 @@ export const bump = () => ++wsCount;
 	}
 	// A real cycle (b-kinds -> template -> a-stack -> b-kinds) where a-stack
 	// spreads an array of b-kinds at its top level, as fx-stack and fx-kinds
-	// do in a real app. Each island bundle runs b-kinds first. A shared chunk
-	// of the cycle ran a-stack first (a TypeError: EXTRA is not iterable), so
-	// a module in a cycle is never shared.
+	// do in a real app. The islands enter it at a-stack, so b-kinds runs
+	// first. The cycle is shared as a whole and must run in that order too
+	// (run from b-kinds, a-stack throws: EXTRA is not iterable).
 	writeProjectFile(t, root, "src/lib/cyc/b-kinds.ts", `import { tpl } from './template';
 export const EXTRA = ['bevel'];
 export const viaTemplate = () => tpl();
@@ -243,14 +243,9 @@ func checkSharedChunks(t *testing.T, cfg *config.Config, out string) {
 			t.Errorf("shared chunk name is not lower-case: %s", marks[m][0])
 		}
 	}
-	// The cycle stays in each island bundle: never in a shared chunk.
-	for _, f := range marks["kind-shadow"] {
-		if strings.HasPrefix(f, "isn") {
-			t.Errorf("a module in an import cycle was put in shared chunk %s", f)
-		}
-	}
-	if len(marks["kind-shadow"]) < 2 {
-		t.Errorf("want the cycle bundled for each kind of island, found in %v", marks["kind-shadow"])
+	// The cycle ships once, in a shared chunk, like any other shared module.
+	if len(marks["kind-shadow"]) != 1 || !strings.HasPrefix(marks["kind-shadow"][0], "isn") {
+		t.Errorf("want the import cycle in exactly one shared isn chunk, found in %v", marks["kind-shadow"])
 	}
 	// One Preact and one real-React chunk at least.
 	if len(importers) < 2 {
@@ -270,7 +265,7 @@ func checkSharedChunks(t *testing.T, cfg *config.Config, out string) {
 			t.Errorf("want KR8017 output to contain %q, got:\n%s", want, out)
 		}
 	}
-	for _, bad := range []string{"counter.ts is bundled twice", "tally.ts is bundled twice", "tally-base.ts is bundled twice", "links.ts", "ws-shared", "ws-order", `("")`, `-> ""`} {
+	for _, bad := range []string{"counter.ts is bundled twice", "tally.ts is bundled twice", "tally-base.ts is bundled twice", "links.ts", "ws-shared", "ws-order", "cyc/", "import cycle", `("")`, `-> ""`} {
 		if strings.Contains(out, bad) {
 			t.Errorf("KR8017 output must not contain %q:\n%s", bad, out)
 		}
@@ -324,10 +319,13 @@ func TestBrowserIslandModuleSharedAcrossFlavours(t *testing.T) {
 }
 
 func TestSharedImportsUsed(t *testing.T) {
-	files := map[string]string{"/p/a.ts": "isn_aaaaaaaaaaaa.js", "/p/b.ts": "isn_bbbbbbbbbbbb.js", "/p/c.ts": "isn_cccccccccccc.js", "/p/d.ts": "isn_dddddddddddd.js", "/p/e.ts": "isn_eeeeeeeeeeee.js", "/p/f.ts": "isn_ffffffffffff.js"}
+	files := map[string]string{"/p/a.ts": "isn_aaaaaaaaaaaa.js", "/p/b.ts": "isn_bbbbbbbbbbbb.js", "/p/c.ts": "isn_cccccccccccc.js", "/p/d.ts": "isn_dddddddddddd.js", "/p/e.ts": "isn_eeeeeeeeeeee.js", "/p/f.ts": "isn_ffffffffffff.js", "/p/g.ts": "isn_999999999999.js"}
 	out := []api.OutputFile{{Path: "/out/island_1.js", Contents: []byte(
 		`import x,{next as o,prev}from"./isn_aaaaaaaaaaaa.js";import{"odd-name" as q}from"./isn_ffffffffffff.js";import*as N from"./isn_bbbbbbbbbbbb.js";` +
-			`import"./isn_cccccccccccc.js";export{y as z}from"./isn_aaaaaaaaaaaa.js";const l=()=>import("./isn_dddddddddddd.js");`)}}
+			`import"./isn_cccccccccccc.js";export{y as z}from"./isn_aaaaaaaaaaaa.js";const l=()=>import("./isn_dddddddddddd.js");` +
+			// A stub imports every name: only the referenced locals count, a
+			// spread is a reference and a property name is not.
+			`import{kept as k,spread as s,dropped as d,alsoDropped}from"./isn_999999999999.js";console.log(x,o(prev),k(),[...s],w.d,w.alsoDropped);`)}}
 	used := sharedImportsUsed([][]api.OutputFile{out}, files)
 	a := used["/p/a.ts"]
 	if a == nil || a.all || !a.names["default"] || !a.names["next"] || !a.names["prev"] || !a.names["y"] || len(a.names) != 4 {
@@ -344,6 +342,9 @@ func TestSharedImportsUsed(t *testing.T) {
 	}
 	if f := used["/p/f.ts"]; f == nil || !f.all {
 		t.Errorf("an import it cannot read keeps every export: %+v", f)
+	}
+	if g := used["/p/g.ts"]; g == nil || g.all || !g.names["kept"] || !g.names["spread"] || len(g.names) != 2 {
+		t.Errorf("g.ts should need kept and spread only: %+v", g)
 	}
 	if e := used["/p/e.ts"]; e != nil {
 		t.Errorf("a module no graph imports needs no chunk: %+v", e)
@@ -446,8 +447,9 @@ func TestFreeGlobalUse(t *testing.T) {
 	}
 }
 
-// TestIslandShareCheckCycle: modules in an import cycle are never shared,
-// and a module that imports one is reported with the cycle.
+// TestIslandShareCheckCycle: an import cycle is shared as a whole, entered at
+// the member the islands reach first, and a shared module that imports a
+// member does so through the member's facade.
 func TestIslandShareCheckCycle(t *testing.T) {
 	root := t.TempDir()
 	imp := func(path, spec string) islandMetaImport {
@@ -457,6 +459,9 @@ func TestIslandShareCheckCycle(t *testing.T) {
 		Format  string             `json:"format"`
 		Imports []islandMetaImport `json:"imports"`
 	}
+	type out = struct {
+		EntryPoint string `json:"entryPoint"`
+	}
 	graph := func() *islandMetafile {
 		return &islandMetafile{Inputs: map[string]in{
 			"src/kinds.ts":    {Format: "esm", Imports: []islandMetaImport{imp("src/template.ts", "./template")}},
@@ -464,29 +469,39 @@ func TestIslandShareCheckCycle(t *testing.T) {
 			"src/stack.ts":    {Format: "esm", Imports: []islandMetaImport{imp("src/kinds.ts", "./kinds")}},
 			"src/user.ts":     {Format: "esm", Imports: []islandMetaImport{imp("src/stack.ts", "./stack")}},
 			"src/plain.ts":    {Format: "esm"},
-			"src/island.tsx":  {Format: "esm", Imports: []islandMetaImport{imp("src/user.ts", "./user"), imp("src/plain.ts", "./plain")}},
-		}}
+			"src/island.tsx":  {Format: "esm", Imports: []islandMetaImport{imp("src/user.ts", "./user"), imp("src/kinds.ts", "./kinds"), imp("src/plain.ts", "./plain")}},
+		}, Outputs: map[string]out{"island.js": {EntryPoint: "src/island.tsx"}}}
 	}
 	metas := []*islandMetafile{graph(), graph()}
 	metas[1].Inputs["src/island.tsx"] = in{Format: "esm", Imports: append(metas[1].Inputs["src/island.tsx"].Imports, islandMetaImport{Path: "preact/compat", Kind: "import-statement", Original: "react", External: true})}
 	plan := planSharedIslandModules(root, metas, nil)
 	key := func(p string) string { return canonicalMetaKey(root, p) }
-	if !plan.shared[key("src/plain.ts")] {
-		t.Error("plain.ts is not in a cycle and should be shared")
-	}
-	for _, p := range []string{"src/kinds.ts", "src/template.ts", "src/stack.ts", "src/user.ts"} {
-		if plan.shared[key(p)] {
-			t.Errorf("%s is in or reaches an import cycle and must not be shared", p)
+	for _, p := range []string{"src/plain.ts", "src/kinds.ts", "src/template.ts", "src/stack.ts", "src/user.ts"} {
+		if !plan.shared[key(p)] {
+			t.Errorf("%s should be shared", p)
 		}
+	}
+	if len(plan.cycles) != 1 || len(plan.cycles[0].members) != 3 {
+		t.Fatalf("want one cycle of three modules, got %+v", plan.cycles)
+	}
+	// island.tsx -> user.ts -> stack.ts comes before island.tsx -> kinds.ts.
+	if got := plan.cycles[0].root; got != key("src/stack.ts") {
+		t.Errorf("cycle root = %s, want stack.ts, where the island enters it", got)
+	}
+	if got := plan.inner[neutralEdgeKey(key("src/user.ts"), "./stack")]; got != key("src/stack.ts") {
+		t.Errorf("user.ts should import stack.ts through its facade, inner = %v", plan.inner)
+	}
+	for _, p := range []string{"src/stack.ts", "src/kinds.ts"} {
+		if plan.facades[key(p)] == "" {
+			t.Errorf("%s is imported from outside the cycle and needs a facade: %v", p, plan.facades)
+		}
+	}
+	if plan.facades[key("src/template.ts")] != "" {
+		t.Errorf("template.ts is only imported inside the cycle and needs no facade")
 	}
 	c := newIslandShareCheck(root, metas, nil)
 	c.settle()
 	if got := c.display(filepath.ToSlash(filepath.Join(canonicalPath(filepath.Dir(root)), "shared", "src", "index.ts"))); got != "../shared/src/index.ts" {
 		t.Errorf("a workspace package next to the app displays as %q, want ../shared/src/index.ts", got)
-	}
-	got, _ := c.chain(key("src/user.ts"))
-	want := "src/user.ts -> src/stack.ts (in an import cycle (src/stack.ts -> src/kinds.ts -> src/template.ts -> src/stack.ts)"
-	if !strings.HasPrefix(got, want) {
-		t.Errorf("chain = %q, want prefix %q", got, want)
 	}
 }

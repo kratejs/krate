@@ -259,8 +259,11 @@ func (b *Builder) realReactOptions(sink *islandCSSSink, guard *unavailableGuard)
 	if len(alias) > 0 {
 		opts.Alias = alias
 	}
-	err := withContextKeys(&opts, b.Root, filepath.Join(b.Cfg.OutDir, ".krate"))
-	return opts, err
+	if err := withContextKeys(&opts, b.Root, filepath.Join(b.Cfg.OutDir, ".krate")); err != nil {
+		return opts, err
+	}
+	withNamespaceImports(&opts)
+	return opts, nil
 }
 
 // realReactMissing is the message for a project without react or react-dom.
