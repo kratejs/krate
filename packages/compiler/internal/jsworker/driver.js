@@ -409,4 +409,12 @@ process.stdin.on("data", (chunk) => {
 });
 process.stdin.on("end", () => process.exit(0));
 process.stdin.on("error", () => process.exit(0));
-send({ t: "ready", v: process.versions.bun ? "bun " + process.versions.bun : "node " + process.version });
+// The globals an evaluation sees: code naming one QuickJS has and this
+// runtime lacks runs in the embedded engine.
+let globalNames = [];
+try {
+  const st = newState();
+  globalNames = Object.getOwnPropertyNames(vm.runInContext("globalThis", makeContext(st, {})));
+  cleanup(st);
+} catch {}
+send({ t: "ready", v: process.versions.bun ? "bun " + process.versions.bun : "node " + process.version, g: globalNames });

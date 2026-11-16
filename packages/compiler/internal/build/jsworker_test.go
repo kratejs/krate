@@ -83,6 +83,9 @@ func buildWithEngine(t *testing.T, fixture projectFixture, engine string, setup 
 		t.Fatalf("%s build: %v\n%s", engine, err, logs())
 	}
 	normalize := func(s string) string {
+		// Node prints file URLs, which escape "~" (Windows short names)
+		// and spaces.
+		s = strings.ReplaceAll(s, strings.NewReplacer("~", "%7E", " ", "%20").Replace(filepath.ToSlash(root)), "<root>")
 		s = strings.ReplaceAll(s, filepath.ToSlash(root), "<root>")
 		s = strings.ReplaceAll(s, root, "<root>")
 		return volatileRe.ReplaceAllString(s, "#")

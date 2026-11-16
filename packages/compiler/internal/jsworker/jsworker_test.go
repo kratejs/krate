@@ -239,8 +239,25 @@ func TestGlobalsMatchQuickJS(t *testing.T) {
 	}
 	eachRuntime(t, func(t *testing.T, p *Pool) {
 		res := mustRun(t, p, Request{Code: "", Reads: []string{probe}})
-		if got := res.Reads[0].S; got != want.(string) {
-			t.Errorf("globals differ:\n got %s\nwant %s", got, want)
+		// A global this runtime version lacks (Node 22 has no Float16Array)
+		// is allowed when code naming it runs in the embedded engine.
+		got, wantList := strings.Split(res.Reads[0].S, ","), strings.Split(want.(string), ",")
+		if len(got) != len(wantList) {
+			t.Fatalf("globals differ:\n got %s\nwant %s", res.Reads[0].S, want)
+		}
+		for i := range got {
+			if got[i] == wantList[i] {
+				continue
+			}
+			name, _, _ := strings.Cut(wantList[i], ":")
+			if !strings.HasSuffix(got[i], ":undefined") {
+				t.Errorf("global %s: got %s, want %s", name, got[i], wantList[i])
+				continue
+			}
+			r, err := p.Run(Request{Code: "globalThis.__r = typeof " + name + ";", Reads: []string{"__r"}})
+			if err != nil || !r.Unsupported {
+				t.Errorf("code naming %s, which this runtime lacks, must run in the embedded engine: %+v %v", name, r, err)
+			}
 		}
 		res = mustRun(t, p, Request{Code: probeModule, Reads: []string{"__r"}})
 		if got := res.Reads[0].S; got != wantMod.(string) {
@@ -374,4 +391,19 @@ func TestIdleTimeout(t *testing.T) {
 		}
 		mustRun(t, p, Request{Code: "1"})
 	})
+}
+
+func TestUsesGlobal(t *testing.T) {
+	for code, want := range map[string]bool{
+		"new Float16Array(2)":        true,
+		"x=Float16Array":             true,
+		"myFloat16Array()":           false,
+		"Float16Arrays":              false,
+		"obj.Float16Array_x":         false,
+		"const a = 1; Float16Array;": true,
+	} {
+		if got := usesGlobal(code, []string{"Float16Array"}); got != want {
+			t.Errorf("usesGlobal(%q) = %v, want %v", code, got, want)
+		}
+	}
 }

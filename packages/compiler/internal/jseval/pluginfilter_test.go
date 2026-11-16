@@ -27,8 +27,10 @@ func setupStub() (*api.PluginBuild, *[]api.OnResolveOptions, *[]func(api.OnResol
 }
 
 func TestVirtualFilesFilterCoversAbsolutePaths(t *testing.T) {
+	// An absolute path on this OS (on Windows "/proj" has no drive).
+	virtualPath := filepath.Join(t.TempDir(), "virtual.ts")
 	virtual := map[string]string{
-		filepath.Clean("/proj/virtual.ts"): "export {}",
+		virtualPath: "export {}",
 	}
 	pb, ro, rc, _, _ := setupStub()
 	virtualFilesPlugin(virtual).Setup(*pb)
@@ -39,7 +41,7 @@ func TestVirtualFilesFilterCoversAbsolutePaths(t *testing.T) {
 	if (*ro)[0].Namespace != "" {
 		t.Errorf("namespace option %q would skip importers outside it", (*ro)[0].Namespace)
 	}
-	handled := []string{filepath.Clean("/proj/virtual.ts")}
+	handled := []string{virtualPath}
 	for _, s := range handled {
 		r, err := (*rc)[0](api.OnResolveArgs{Path: s})
 		if err != nil || r.Path == "" {

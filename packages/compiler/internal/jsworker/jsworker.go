@@ -181,6 +181,12 @@ func (p *Pool) Run(req Request) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	if usesGlobal(req.Code, w.missing) {
+		// The code may use a global only the embedded engine has (Node 22
+		// has no Float16Array): it runs there, as it did before workers.
+		p.release(w, gen)
+		return Result{Unsupported: true}, nil
+	}
 	t0 := time.Now()
 	res, err := w.run(req, p.out(), p.errOut())
 	if p.Observe != nil && req.Label != "" {
@@ -383,6 +389,9 @@ type worker struct {
 	stopped sync.Once
 	seq     int
 	version string
+	// missing lists the globals of the embedded engine an evaluation on this
+	// worker does not have.
+	missing []string
 }
 
 // startTimeout bounds how long a worker may take to report ready.
@@ -418,6 +427,7 @@ func start(name, path string) (*worker, error) {
 			err = fmt.Errorf("unexpected first message %q", msg.T)
 		}
 		w.version = msg.V
+		w.missing = missingGlobals(msg.G)
 		ready <- err
 	}()
 	select {
@@ -466,6 +476,7 @@ type readValue struct {
 type reply struct {
 	T           string       `json:"t"`
 	V           string       `json:"v"`
+	G           []string     `json:"g"`
 	ID          int          `json:"id"`
 	K           int          `json:"k"`
 	S           string       `json:"s"`
@@ -583,4 +594,63 @@ func readFrame(r *bufio.Reader, v any) error {
 		return err
 	}
 	return json.Unmarshal(buf, v)
+}
+
+var (
+	engineGlobalsOnce sync.Once
+	engineGlobals     []string
+)
+
+// missingGlobals returns the globals of the embedded engine that are not
+// among have, the globals of a worker's evaluation context. Krate's own
+// helpers are left out: the worker installs its own.
+func missingGlobals(have []string) []string {
+	engineGlobalsOnce.Do(func() {
+		rt, err := jsruntime.New()
+		if err != nil {
+			return
+		}
+		defer rt.Close()
+		v, err := rt.Execute(`Object.getOwnPropertyNames(globalThis).filter((n) => !/^__krate|^_go_|^__require/.test(n)).join(",")`)
+		if s, ok := v.(string); err == nil && ok && s != "" {
+			engineGlobals = strings.Split(s, ",")
+		}
+	})
+	if len(have) == 0 {
+		return nil
+	}
+	got := make(map[string]bool, len(have))
+	for _, n := range have {
+		got[n] = true
+	}
+	var out []string
+	for _, n := range engineGlobals {
+		if !got[n] {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// usesGlobal reports whether code names one of globals as a whole word.
+func usesGlobal(code string, globals []string) bool {
+	for _, g := range globals {
+		for i := 0; ; {
+			j := strings.Index(code[i:], g)
+			if j < 0 {
+				break
+			}
+			at := i + j
+			end := at + len(g)
+			if (at == 0 || !identByte(code[at-1])) && (end == len(code) || !identByte(code[end])) {
+				return true
+			}
+			i = at + 1
+		}
+	}
+	return false
+}
+
+func identByte(c byte) bool {
+	return c == '_' || c == '$' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= 0x80
 }
