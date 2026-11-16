@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/evanw/esbuild/pkg/api"
 	"github.com/kratejs/krate/packages/compiler/ast"
@@ -105,8 +106,23 @@ func (b *Builder) prepareActions() error {
 	reg.Order = append(reg.Order, inlineMods...)
 
 	sort.Slice(reg.Order, func(i, j int) bool { return reg.Order[i].RelPath < reg.Order[j].RelPath })
-	for _, mod := range reg.Order {
-		if err := b.compileActionModule(dir, mod); err != nil {
+	// The modules build at once; their errors keep the module order.
+	compileErrs := make([]error, len(reg.Order))
+	memo := &resolveMemo{}
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, buildWorkerLimit())
+	for i, mod := range reg.Order {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			compileErrs[i] = b.compileActionModule(dir, mod, memo)
+		}()
+	}
+	wg.Wait()
+	for i, mod := range reg.Order {
+		if err := compileErrs[i]; err != nil {
 			errs = append(errs, err)
 			continue
 		}
@@ -149,7 +165,8 @@ func (b *Builder) prepareActions() error {
 	return nil
 }
 
-func (b *Builder) compileActionModule(dir string, mod *actionModule) error {
+// nameActionModule sets the output file name of mod from its content.
+func (b *Builder) nameActionModule(mod *actionModule) error {
 	data, err := os.ReadFile(mod.AbsPath)
 	if err != nil {
 		return fmt.Errorf("reading action %s: %w", mod.RelPath, err)
@@ -162,16 +179,18 @@ func (b *Builder) compileActionModule(dir string, mod *actionModule) error {
 		return '-'
 	}, name)
 	mod.File = name + "-" + hashContent(data) + ".mjs"
-	outPath := filepath.Join(dir, mod.File)
+	return nil
+}
 
+// actionModuleOptions are the esbuild options of an action bundle, without
+// entry point or output.
+func (b *Builder) actionModuleOptions() api.BuildOptions {
 	opts := api.BuildOptions{
 		AbsWorkingDir: b.Root,
-		EntryPoints:   []string{mod.AbsPath},
 		Bundle:        true,
 		Format:        api.FormatESModule,
 		Platform:      api.PlatformNode,
-		Plugins:       []api.Plugin{jseval.MarkerPackagesPlugin(), externalNodeModulesPlugin(outPath)},
-		Outfile:       outPath,
+		Plugins:       []api.Plugin{jseval.MarkerPackagesPlugin()},
 		Write:         true,
 		Sourcemap:     sourceMapMode(b.Cfg.Sourcemap),
 		LogLevel:      api.LogLevelSilent,
@@ -183,6 +202,20 @@ func (b *Builder) compileActionModule(dir string, mod *actionModule) error {
 		opts.MinifySyntax = true
 	}
 	withAuthConfig(&opts, b.Cfg)
+	return opts
+}
+
+// compileActionModule bundles one action module. Modules built together
+// share memo, which holds the package resolutions of their options.
+func (b *Builder) compileActionModule(dir string, mod *actionModule, memo *resolveMemo) error {
+	if err := b.nameActionModule(mod); err != nil {
+		return err
+	}
+	outPath := filepath.Join(dir, mod.File)
+	opts := b.actionModuleOptions()
+	opts.EntryPoints = []string{mod.AbsPath}
+	opts.Outfile = outPath
+	opts.Plugins = append(opts.Plugins, externalNodeModulesPluginMemo(outPath, memo))
 	result := esbuildBuild(opts)
 	if len(result.Errors) > 0 {
 		return fmt.Errorf("compiling server action %s:\n%s", mod.RelPath, formatEsbuildErrors(result.Errors))

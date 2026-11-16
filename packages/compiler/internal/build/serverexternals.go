@@ -105,7 +105,7 @@ func pathAliasPlugin(res *bundler.ImportResolver) api.Plugin {
 	return api.Plugin{
 		Name: "krate-path-alias",
 		Setup: func(b api.PluginBuild) {
-			b.OnResolve(api.OnResolveOptions{Filter: `^[^./]`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+			b.OnResolve(api.OnResolveOptions{Filter: res.AliasFilter()}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
 				if strings.Contains(filepath.ToSlash(args.Importer), "/node_modules/") {
 					return api.OnResolveResult{}, nil
 				}
@@ -169,8 +169,61 @@ func visibleFrom(dir, pkgRoot string) bool {
 // esbuild resolved, so the bundle loads it from where it is installed. A bare
 // import that does not resolve is left to esbuild, which reports it.
 func externalNodeModulesPlugin(outFile string) api.Plugin {
+	return externalNodeModulesPluginMemo(outFile, nil)
+}
+
+// resolveMemo remembers the resolutions the plugins of a family of builds
+// (the same options, such as every page's server bundle) ask esbuild for, so
+// each import is resolved once for the family instead of once per build.
+type resolveMemo struct{ m sync.Map }
+
+type resolveMemoKey struct {
+	importer, namespace, dir, path, with string
+	kind                                 api.ResolveKind
+}
+
+type resolveMemoValue struct {
+	path, namespace, suffix string
+	external, failed        bool
+}
+
+func memoKey(args api.OnResolveArgs) resolveMemoKey {
+	var with string
+	if len(args.With) > 0 {
+		keys := make([]string, 0, len(args.With))
+		for k, v := range args.With {
+			keys = append(keys, k+"="+v)
+		}
+		sort.Strings(keys)
+		with = strings.Join(keys, "\x00")
+	}
+	return resolveMemoKey{importer: args.Importer, namespace: args.Namespace, dir: args.ResolveDir, path: args.Path, with: with, kind: args.Kind}
+}
+
+// resolve returns resolve(args), from the memo when the family resolved the
+// same import before. A nil memo always resolves.
+func (m *resolveMemo) resolve(args api.OnResolveArgs, resolve func() api.ResolveResult) resolveMemoValue {
+	var key resolveMemoKey
+	if m != nil {
+		key = memoKey(args)
+		if v, ok := m.m.Load(key); ok {
+			return v.(resolveMemoValue)
+		}
+	}
+	r := resolve()
+	v := resolveMemoValue{path: r.Path, namespace: r.Namespace, suffix: r.Suffix, external: r.External, failed: len(r.Errors) > 0}
+	if m != nil {
+		m.m.Store(key, v)
+	}
+	return v
+}
+
+// externalNodeModulesPluginMemo is externalNodeModulesPlugin for a family of
+// builds with the same options, which share their resolutions through memo.
+func externalNodeModulesPluginMemo(outFile string, memo *resolveMemo) api.Plugin {
 	const marker = "krate-external-check"
 	outDir := filepath.Dir(outFile)
+	var visible sync.Map // package root -> bool
 	return api.Plugin{
 		Name: "krate-external-node-modules",
 		Setup: func(b api.PluginBuild) {
@@ -183,30 +236,39 @@ func externalNodeModulesPlugin(outFile string) api.Plugin {
 				}
 				return api.OnResolveResult{Path: "@krate/runtime/hints", External: true}, nil
 			})
-			b.OnResolve(api.OnResolveOptions{Filter: `^[^./]`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+			// A specifier with a colon (node:, https:, data:) is never handled.
+			b.OnResolve(api.OnResolveOptions{Filter: externalPackageFilter}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
 				if args.PluginData == marker || strings.Contains(args.Path, ":") {
 					return api.OnResolveResult{}, nil
 				}
-				r := b.Resolve(args.Path, api.ResolveOptions{
-					Importer:   args.Importer,
-					Namespace:  args.Namespace,
-					ResolveDir: args.ResolveDir,
-					Kind:       args.Kind,
-					PluginData: marker,
+				r := memo.resolve(args, func() api.ResolveResult {
+					return b.Resolve(args.Path, api.ResolveOptions{
+						Importer:   args.Importer,
+						Namespace:  args.Namespace,
+						ResolveDir: args.ResolveDir,
+						Kind:       args.Kind,
+						PluginData: marker,
+					})
 				})
-				if r.External {
+				if r.external {
 					return api.OnResolveResult{Path: args.Path, External: true}, nil
 				}
-				if len(r.Errors) > 0 {
+				if r.failed {
 					return api.OnResolveResult{}, nil
 				}
-				if strings.Contains(filepath.ToSlash(r.Path), "/node_modules/") {
-					if root := packageRootOf(r.Path); root != "" && outFile != "" && !visibleFrom(outDir, root) {
-						return api.OnResolveResult{Path: fileURL(r.Path), External: true}, nil
+				if strings.Contains(filepath.ToSlash(r.path), "/node_modules/") {
+					if root := packageRootOf(r.path); root != "" && outFile != "" {
+						v, ok := visible.Load(root)
+						if !ok {
+							v, _ = visible.LoadOrStore(root, visibleFrom(outDir, root))
+						}
+						if !v.(bool) {
+							return api.OnResolveResult{Path: fileURL(r.path), External: true}, nil
+						}
 					}
 					return api.OnResolveResult{Path: args.Path, External: true}, nil
 				}
-				return api.OnResolveResult{Path: r.Path, Namespace: r.Namespace}, nil
+				return api.OnResolveResult{Path: r.path, Namespace: r.namespace}, nil
 			})
 		},
 	}

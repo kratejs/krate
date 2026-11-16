@@ -49,11 +49,19 @@ func TestAuthBannerKeepsExistingBanner(t *testing.T) {
 }
 
 func TestAuthConfigReachesBothAPIArtifacts(t *testing.T) {
-	b, root := compatProject(t, map[string]string{"src/api/probe.ts": authProbe}, activeAuth)
-	if err := b.CompileAPIRoutes([]string{filepath.Join(root, "src", "api", "probe.ts")}); err != nil {
-		t.Fatal(err)
-	}
-	for label, dir := range map[string]string{"quickjs": apiBundleDir(b.Cfg.OutDir), "node": apiNodeBundleDir(b.Cfg.OutDir)} {
+	// A build writes the artifact of the runtime that serves the route.
+	for label, runtime := range map[string]string{"quickjs": "", "node": "node"} {
+		b, root := compatProject(t, map[string]string{"src/api/probe.ts": authProbe}, func(c *config.Config) {
+			activeAuth(c)
+			c.SSR.APIRuntime = runtime
+		})
+		if err := b.CompileAPIRoutes([]string{filepath.Join(root, "src", "api", "probe.ts")}); err != nil {
+			t.Fatal(err)
+		}
+		dir := apiBundleDir(b.Cfg.OutDir)
+		if runtime != "" {
+			dir = apiNodeBundleDir(b.Cfg.OutDir)
+		}
 		data, err := os.ReadFile(filepath.Join(dir, "probe.js"))
 		if err != nil {
 			t.Fatalf("%s artifact: %v", label, err)

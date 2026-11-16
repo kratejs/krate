@@ -444,7 +444,9 @@ ssr: {
   `"quickjs"` (default) uses the embedded QuickJS runtime with no Node.js
   dependency; `"node"`/`"deno"` use the Node `http` sidecar; **`"bun"` uses a
   Bun-native sidecar built on `Bun.serve`** (no Node http stack, no cluster
-  shim) - the fastest JS/TS sidecar option.
+  shim) - the fastest JS/TS sidecar option. The build bundles each API route
+  only for the runtime that serves it, so run `krate build` again after
+  changing `apiRuntime`; `krate serve` warns when the build is for another one.
 - **`nodeWorkers`** forks that many Node worker processes (`cluster`) for the
   API sidecar when `apiRuntime` (or `middlewareRuntime`) is
   `node`/`bun`/`deno`. (Ignored by the Bun sidecar, which is single-process.)

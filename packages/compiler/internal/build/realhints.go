@@ -3,16 +3,21 @@ package build
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/evanw/esbuild/pkg/api"
 	"github.com/kratejs/krate/packages/compiler/internal/irtree"
 	"github.com/kratejs/krate/packages/compiler/internal/resolver"
+	"github.com/kratejs/krate/packages/compiler/internal/tsstrip"
 	"github.com/kratejs/krate/packages/native/jsruntime"
 )
 
@@ -20,8 +25,8 @@ import (
 // so the resource hints they call while rendering (react-dom preload,
 // preinit, preconnect, ...) would reach the document only after hydration, and
 // a file the page fetches before that is requested twice. The build therefore
-// renders each of them once with react-dom/server in a throwaway QuickJS
-// runtime, only to record the hints: npm packages other than React are
+// renders each of them once with react-dom/server in a throwaway JavaScript
+// context (a Node or Bun worker's, else QuickJS's), only to record the hints: npm packages other than React are
 // stubbed (see realHintsStubPlugin), the markup is discarded, a render error
 // is ignored (the hints called before it are kept), and the recorded tags go
 // into the head of the page (static and force-dynamic pages) or are added to
@@ -35,6 +40,10 @@ import (
 
 const realHintsResultGlobal = "__krate_real_hints"
 
+// realHintsMergedGlobal holds the tags of each render of a merged run, by
+// its index.
+const realHintsMergedGlobal = "__krate_real_hints_all"
+
 // realHintNames are the react-dom exports the hints render records.
 var realHintNames = []string{"preload", "preinit", "preconnect", "prefetchDNS", "preloadModule", "preinitModule"}
 
@@ -42,9 +51,9 @@ var realHintNames = []string{"preload", "preinit", "preconnect", "prefetchDNS", 
 // that share a real-React component render it once.
 var realHintsCache sync.Map
 
-// realIslandHints returns the resource hints of a static page's real-React
-// island, rendered with its build-time props.
-func (b *Builder) realIslandHints(e irtree.ExternalComponent, imports []irtree.ExternalImport, resolveDir string) []string {
+// realIslandHintsJob returns the job rendering the resource hints of a static
+// page's real-React island with its build-time props.
+func (b *Builder) realIslandHintsJob(e irtree.ExternalComponent, imports []irtree.ExternalImport, resolveDir string) *roundJob {
 	var src strings.Builder
 	writeIslandImportLines(&src, imports)
 	props := "{}"
@@ -52,47 +61,84 @@ func (b *Builder) realIslandHints(e irtree.ExternalComponent, imports []irtree.E
 		props = e.SSRPropsJS
 	}
 	fmt.Fprintf(&src, "\nconst props = %s;\n__krate_hints_render(() => (%s));\n", props, e.Subtree)
-	return b.realHints(src.String(), resolveDir)
+	return b.realHintsJob(src.String(), resolveDir)
 }
 
-// realBoundaryHints returns the resource hints of each export of a real-React
-// client boundary, rendered without props.
-func (b *Builder) realBoundaryHints(cb ClientBoundary) map[string][]string {
-	out := map[string][]string{}
+// realBoundaryHintsJobs returns the hints job of each export of cb.
+func (b *Builder) realBoundaryHintsJobs(cb ClientBoundary) map[string]*roundJob {
+	out := map[string]*roundJob{}
 	for _, name := range cb.Exports {
 		src := cb.entrySource() + "__krate_hints_render(() => { const C = __m[" + strconv.Quote(name) + "]; return typeof C === \"function\" || (C && typeof C === \"object\" && C.$$typeof) ? React.createElement(C, {}) : null; });\n"
-		if tags := b.realHints(src, cb.resolveDir()); len(tags) > 0 {
+		if j := b.realHintsJob(src, cb.resolveDir()); j != nil {
+			out[name] = j
+		}
+	}
+	return out
+}
+
+// realBoundaryHintsOf collects the tags of finished hints jobs by export.
+func realBoundaryHintsOf(jobs map[string]*roundJob) map[string][]string {
+	out := map[string][]string{}
+	for name, j := range jobs {
+		if tags := realHintsOutput(j); len(tags) > 0 {
 			out[name] = tags
 		}
 	}
 	return out
 }
 
-// realHints bundles body (which calls __krate_hints_render with a function
-// returning the element) against the project's React and returns the tags
-// its render recorded. Any failure yields no tags.
-func (b *Builder) realHints(body, resolveDir string) []string {
+// realHintsReq is the input of a real-hints job.
+type realHintsReq struct{ body, resolveDir string }
+
+// realHintsJob returns the build's job rendering the hints of body, or nil
+// when hints are off.
+func (b *Builder) realHintsJob(body, resolveDir string) *roundJob {
 	if os.Getenv("KRATE_NO_REAL_HINTS") != "" {
 		return nil
 	}
-	v, _ := b.realHintsMemo.LoadOrStore(resolveDir+"\x00"+body, &realHintsEntry{})
-	e := v.(*realHintsEntry)
-	e.once.Do(func() { e.tags = b.renderRealHints(body, resolveDir) })
-	return e.tags
+	j := b.roundJobs.job("real-hints", resolveDir+"\x00"+body, realHintsReq{body, resolveDir}, b.runRealHintsJobs)
+	// A render can run long after its bundle (react-dom/server over a whole
+	// three.js scene): start it as soon as a page asks for it.
+	b.rounds.eager(j)
+	return j
 }
 
-type realHintsEntry struct {
-	once sync.Once
-	tags []string
+func realHintsOutput(j *roundJob) []string {
+	if j == nil {
+		return nil
+	}
+	tags, _ := j.output.([]string)
+	return tags
 }
 
-func (b *Builder) renderRealHints(body, resolveDir string) []string {
+// realHintsPrelude is the module preamble of a hints render with
+// react-dom/server at server. slot is the render's index in a merged run, or
+// -1 for a render that runs alone.
+func realHintsPrelude(server string, slot int) string {
+	head := "import * as React from \"react\";\nimport { renderToString as __krate_rts } from " + strconv.Quote(filepath.ToSlash(server)) + ";\n" +
+		"function __krate_hints_render(el) {\n  globalThis.__krate_island_hints = new Set();\n"
+	if slot < 0 {
+		return head + "  try { __krate_rts(el()); } catch (e) {}\n" +
+			"  globalThis." + realHintsResultGlobal + " = JSON.stringify([...globalThis.__krate_island_hints]);\n}\n"
+	}
+	// An engine error (out of memory, stack overflow) may depend on what the
+	// renders before this one left in the runtime: the render then runs alone.
+	// QuickJS throws InternalError for both; V8 and JSC a RangeError for the
+	// stack.
+	return head + "  let engine = false;\n" +
+		"  try { __krate_rts(el()); } catch (e) { engine = typeof InternalError !== \"undefined\" && e instanceof InternalError || e instanceof RangeError && /call stack/i.test(e.message); }\n" +
+		"  (globalThis." + realHintsMergedGlobal + " ||= {})[" + strconv.Itoa(slot) + "] = engine ? null : JSON.stringify([...globalThis.__krate_island_hints]);\n}\n"
+}
+
+// realHintsSetup returns the shared esbuild options of hints renders and the
+// module preamble every render starts with; ok is false when the project
+// lacks what a render needs.
+func (b *Builder) realHintsSetup() (opts api.BuildOptions, prelude, server string, ok bool) {
 	hints := resolver.NodeModule(b.Root, "@krate/runtime/hints")
 	dom := findNodePackage(b.Root, "react-dom")
 	if hints == "" || dom == "" {
-		return nil
+		return api.BuildOptions{}, "", "", false
 	}
-	server := ""
 	for _, name := range []string{"react-dom-server-legacy.browser.production.js", "react-dom-server-legacy.browser.production.min.js"} {
 		if p := filepath.Join(dom, "cjs", name); statOK(p) {
 			server = p
@@ -100,31 +146,251 @@ func (b *Builder) renderRealHints(body, resolveDir string) []string {
 		}
 	}
 	if server == "" {
-		return nil
+		return api.BuildOptions{}, "", "", false
 	}
 	sink := &islandCSSSink{root: b.Root}
 	opts, err := b.realReactOptions(sink, b.newUnavailableGuard())
 	if err != nil {
-		return nil
+		return api.BuildOptions{}, "", "", false
 	}
-	src := "import * as React from \"react\";\nimport { renderToString as __krate_rts } from " + strconv.Quote(filepath.ToSlash(server)) + ";\n" +
-		"function __krate_hints_render(el) {\n  globalThis.__krate_island_hints = new Set();\n  try { __krate_rts(el()); } catch (e) {}\n" +
-		"  globalThis." + realHintsResultGlobal + " = JSON.stringify([...globalThis.__krate_island_hints]);\n}\n" + body
-	opts.Stdin = &api.StdinOptions{Contents: src, ResolveDir: resolveDir, Sourcefile: "krate-real-hints.tsx", Loader: api.LoaderTSX}
+	prelude = realHintsPrelude(server, -1)
 	opts.Format = api.FormatIIFE
 	opts.MinifyWhitespace, opts.MinifyIdentifiers, opts.MinifySyntax = false, false, false
 	opts.Define["process.env.NODE_ENV"] = `"production"`
 	opts.Plugins = append([]api.Plugin{realHintsDOMPlugin(dom, hints), realHintsStubPlugin()}, opts.Plugins...)
-	result := esbuildBuild(opts)
-	if len(result.Errors) > 0 || len(result.OutputFiles) == 0 {
-		return nil
+	return opts, prelude, server, true
+}
+
+// runRealHintsJobs bundles the hints renders of jobs in one esbuild call and
+// runs each. When that build fails, each render is bundled on its own, so one
+// broken component costs only its own hints.
+func (b *Builder) runRealHintsJobs(jobs []*roundJob) {
+	stop := b.phase("batch:real-hints")
+	defer stop()
+	opts, prelude, server, ok := b.realHintsSetup()
+	if !ok {
+		return
 	}
-	code := string(result.OutputFiles[0].Contents)
+	// Each render bundles react-dom/server and the component's graph: keep the
+	// outputs one esbuild call holds small.
+	runSubBatches(jobs, realHintsBatchSize, 2, func(part []*roundJob) {
+		o := opts
+		o.Plugins = append([]api.Plugin(nil), opts.Plugins...)
+		o.Define = maps.Clone(opts.Define)
+		if rest := b.runRealHintsMerged(o, server, part); len(rest) > 0 {
+			b.runRealHintsBatch(o, prelude, rest)
+		}
+	})
+}
+
+// realHintsBatchSize is the most hints renders one esbuild call bundles.
+const realHintsBatchSize = 16
+
+func realHintsMergeOff() bool { return os.Getenv("KRATE_NO_HINTS_MERGE") != "" }
+
+// runRealHintsMerged runs the renders of jobs in one runtime, from one
+// bundle that holds react-dom/server and the modules the renders share
+// once, in job order. It returns the jobs that must run alone: all of them
+// when the bundle fails, and those the run did not finish or that hit an
+// engine error.
+//
+// The renders share module instances, as the param sets of one page's
+// metadata do. The tags of a render depend on its props and the modules it
+// reads; a component that changes module state while it renders, in a way a
+// later render reads back, is the case this does not reproduce.
+func (b *Builder) runRealHintsMerged(opts api.BuildOptions, server string, jobs []*roundJob) []*roundJob {
+	if realHintsMergeOff() || len(jobs) < 2 {
+		return jobs
+	}
+	var entry strings.Builder
+	bodies := make([]batchEntry, len(jobs))
+	for i, j := range jobs {
+		r := j.input.(realHintsReq)
+		bodies[i] = batchEntry{Source: realHintsPrelude(server, i) + r.body, ResolveDir: r.resolveDir, Sourcefile: "krate-real-hints.tsx", Loader: api.LoaderTSX}
+		fmt.Fprintf(&entry, "import %s;\n", strconv.Quote(realHintsBodyPrefix+strconv.Itoa(i)))
+	}
+	o := opts
+	o.Plugins = append([]api.Plugin{realHintsBodiesPlugin(bodies)}, opts.Plugins...)
+	o.Stdin = &api.StdinOptions{Contents: entry.String(), ResolveDir: b.Root, Sourcefile: "krate-real-hints-merged.js", Loader: api.LoaderJS}
+	result := esbuildBuild(o)
+	if len(result.Errors) > 0 || len(result.OutputFiles) == 0 {
+		return jobs
+	}
+	tags := b.runRealHintsMergedCode(string(result.OutputFiles[0].Contents), len(jobs))
+	var rest []*roundJob
+	for i, j := range jobs {
+		if tags[i] == nil {
+			rest = append(rest, j)
+			continue
+		}
+		j.detach()
+		j.output = *tags[i]
+		j.complete()
+	}
+	return rest
+}
+
+// realHintsBodyPrefix names the render modules of a merged hints bundle.
+const realHintsBodyPrefix = "krate-real-hints-body:"
+
+// realHintsBodiesPlugin serves the render modules of a merged hints bundle
+// from memory, each in a directory of its own in its ResolveDir (see
+// batchModulePath), so its imports resolve as those of its own bundle do.
+func realHintsBodiesPlugin(bodies []batchEntry) api.Plugin {
+	path := func(i int) string {
+		return filepath.Join(bodies[i].ResolveDir, ".krate-hints-"+strconv.Itoa(i), bodies[i].Sourcefile)
+	}
+	return api.Plugin{
+		Name: "krate-real-hints-bodies",
+		Setup: func(pb api.PluginBuild) {
+			pb.OnResolve(api.OnResolveOptions{Filter: `^` + regexp.QuoteMeta(realHintsBodyPrefix)}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+				i, err := strconv.Atoi(strings.TrimPrefix(args.Path, realHintsBodyPrefix))
+				if err != nil || i < 0 || i >= len(bodies) {
+					return api.OnResolveResult{}, nil
+				}
+				return api.OnResolveResult{Path: path(i), Namespace: "file"}, nil
+			})
+			pb.OnLoad(api.OnLoadOptions{Filter: `[/\\]\.krate-hints-[0-9]+[/\\][^/\\]+$`, Namespace: "file"}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
+				for i, e := range bodies {
+					if args.Path == path(i) {
+						src := tsstrip.BlankTierDecorators(e.Sourcefile, e.Source)
+						return api.OnLoadResult{Contents: &src, ResolveDir: e.ResolveDir, Loader: e.Loader}, nil
+					}
+				}
+				return api.OnLoadResult{}, nil
+			})
+		},
+	}
+}
+
+// realHintsMergedRead reads the tags of a merged run by render index.
+const realHintsMergedRead = `JSON.stringify(globalThis.` + realHintsMergedGlobal + ` || {})`
+
+// runRealHintsMergedCode runs a merged hints bundle of n renders and returns
+// the tags of each render that finished (nil for the others).
+func (b *Builder) runRealHintsMergedCode(code string, n int) (out []*[]string) {
+	out = make([]*[]string, n)
+	defer timeRealHints(time.Now())
+	// A render that throws past its own catch stops the run: the renders
+	// after it have no result and run alone.
+	if res, ok := b.workerScript("real-hints", code, []string{realHintsMergedRead}); ok {
+		if v := res.Reads[0]; v.IsString {
+			return realHintsMergedTags(v.S, n)
+		}
+		return out
+	}
+	defer b.timeQuickJS("real-hints")()
+	defer func() {
+		// A crash of the engine (see jseval's guardFaults) loses the run.
+		if r := recover(); r != nil {
+			out = make([]*[]string, n)
+		}
+	}()
+	defer debug.SetPanicOnFault(debug.SetPanicOnFault(true))
+	rt, err := jsruntime.New()
+	if err != nil {
+		return out
+	}
+	defer rt.Close()
+	_, _ = rt.Execute(code)
+	v, err := rt.Execute(realHintsMergedRead)
+	s, ok := v.(string)
+	if err != nil || !ok {
+		return out
+	}
+	return realHintsMergedTags(s, n)
+}
+
+// realHintsMergedTags decodes the tags of a merged run's renders.
+func realHintsMergedTags(s string, n int) []*[]string {
+	out := make([]*[]string, n)
+	var byIndex map[string]*string
+	if json.Unmarshal([]byte(s), &byIndex) != nil {
+		return out
+	}
+	for i := range out {
+		raw := byIndex[strconv.Itoa(i)]
+		if raw == nil {
+			continue
+		}
+		var tags []string
+		if json.Unmarshal([]byte(*raw), &tags) != nil {
+			continue
+		}
+		kept := tags[:0]
+		for _, t := range tags {
+			if !bogusHintURL(t) {
+				kept = append(kept, t)
+			}
+		}
+		out[i] = &kept
+	}
+	return out
+}
+
+func (b *Builder) runRealHintsBatch(opts api.BuildOptions, prelude string, jobs []*roundJob) {
+	codes := make([]string, len(jobs))
+	built := false
+	if len(jobs) > 1 {
+		entries := make([]batchEntry, len(jobs))
+		for i, j := range jobs {
+			r := j.input.(realHintsReq)
+			entries[i] = batchEntry{Source: prelude + r.body, ResolveDir: r.resolveDir, Sourcefile: "krate-real-hints.tsx", Loader: api.LoaderTSX}
+		}
+		outs, res := esbuildBatch(opts, entries)
+		if len(res.Errors) == 0 {
+			built = true
+			for i, j := range jobs {
+				if outs[i].Unsafe {
+					codes[i] = b.realHintsCode(opts, prelude, j.input.(realHintsReq))
+				} else if len(outs[i].Files) > 0 {
+					codes[i] = string(outs[i].Files[0].Contents)
+				}
+			}
+		}
+	}
+	if !built {
+		for i, j := range jobs {
+			codes[i] = b.realHintsCode(opts, prelude, j.input.(realHintsReq))
+		}
+	}
+	// Each render finishes on its own: a page waits only for its own renders,
+	// not for the slowest one of the round.
+	sem := make(chan struct{}, buildWorkerLimit())
+	for i, j := range jobs {
+		if codes[i] == "" {
+			continue
+		}
+		j.detach()
+		go func() {
+			defer j.complete()
+			defer func() { _ = recover() }() // a failed render has no hints
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			j.output = b.realHintsTags(codes[i])
+		}()
+	}
+}
+
+// realHintsCode bundles one hints render on its own ("" when it fails).
+func (b *Builder) realHintsCode(opts api.BuildOptions, prelude string, r realHintsReq) string {
+	o := opts
+	o.Plugins = append([]api.Plugin(nil), opts.Plugins...)
+	o.Stdin = &api.StdinOptions{Contents: prelude + r.body, ResolveDir: r.resolveDir, Sourcefile: "krate-real-hints.tsx", Loader: api.LoaderTSX}
+	result := esbuildBuild(o)
+	if len(result.Errors) == 0 && len(result.OutputFiles) > 0 {
+		return string(result.OutputFiles[0].Contents)
+	}
+	return ""
+}
+
+// realHintsTags runs a bundled hints render, once per distinct bundle.
+func (b *Builder) realHintsTags(code string) []string {
 	key := hashContent([]byte(code))
 	if v, ok := realHintsCache.Load(key); ok {
 		return v.([]string)
 	}
-	tags := runRealHints(code)
+	tags := b.runRealHints(code)
 	realHintsCache.Store(key, tags)
 	return tags
 }
@@ -134,7 +400,27 @@ func statOK(p string) bool {
 	return err == nil
 }
 
-func runRealHints(code string) []string {
+// realHintsRuns counts the runtimes hints renders ran in and
+// realHintsNanos sums their time.
+var realHintsRuns, realHintsNanos atomic.Int64
+
+func timeRealHints(start time.Time) {
+	realHintsRuns.Add(1)
+	realHintsNanos.Add(int64(time.Since(start)))
+}
+
+// realHintsRead reads the tags of a render that ran alone.
+const realHintsRead = `typeof globalThis.` + realHintsResultGlobal + ` === "string" ? globalThis.` + realHintsResultGlobal + ` : null`
+
+func (b *Builder) runRealHints(code string) []string {
+	defer timeRealHints(time.Now())
+	if res, ok := b.workerScript("real-hints", code, []string{realHintsRead}); ok {
+		if res.Threw || !res.Reads[0].IsString {
+			return nil
+		}
+		return decodeRealHints(res.Reads[0].S)
+	}
+	defer b.timeQuickJS("real-hints")()
 	rt, err := jsruntime.New()
 	if err != nil {
 		return nil
@@ -151,6 +437,12 @@ func runRealHints(code string) []string {
 	if !ok {
 		return nil
 	}
+	return decodeRealHints(s)
+}
+
+// decodeRealHints decodes the tags a render recorded, without those whose URL
+// the render did not have.
+func decodeRealHints(s string) []string {
 	var tags []string
 	if json.Unmarshal([]byte(s), &tags) != nil {
 		return nil

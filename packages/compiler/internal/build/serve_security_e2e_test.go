@@ -66,7 +66,7 @@ func TestServerOnlyOutputStaysOutOfPublicRoot(t *testing.T) {
 			t.Errorf("dist/%s exists, want server-only output under dist/.krate", rel)
 		}
 	}
-	for _, rel := range []string{".krate/api-node/hello.js", ".krate/api/hello.js", ".krate/manifest.json", ".krate/server-manifest.json"} {
+	for _, rel := range []string{".krate/api/hello.js", ".krate/manifest.json", ".krate/server-manifest.json"} {
 		if _, err := os.Stat(filepath.Join(cfg.OutDir, filepath.FromSlash(rel))); err != nil {
 			t.Errorf("dist/%s missing: %v", rel, err)
 		}

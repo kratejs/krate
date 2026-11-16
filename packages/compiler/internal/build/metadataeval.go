@@ -29,9 +29,10 @@ import (
 // A static page's `metadata` and `generateMetadata` (and those of the layouts
 // above it) run once at build time, once per generateStaticParams entry, and
 // the tags land in the page's <head>. The chain is evaluated with the same
-// runtime code that serves a request (runtime/src/metadata.ts), first in the
-// embedded JavaScript engine and, when that cannot run the module (fetch, Node
-// built-ins), in Node. Pages that render per request resolve it per request
+// runtime code that serves a request (runtime/src/metadata.ts), first on the
+// build's JavaScript engine (a Node or Bun worker, else QuickJS; see
+// jsworker.go) and, when that cannot run the module (Node built-ins), in a
+// Node process of its own. Pages that render per request resolve it per request
 // instead (the server bundle carries the chain).
 
 // metadataResult is the outcome for one set of route params.
@@ -195,6 +196,7 @@ func (b *Builder) evalMetadata(page string, segs []metaSegment, pageFiles string
 }
 
 func (b *Builder) evalMetadataModules(abs string, segs []metaSegment, pageFiles string, sets []map[string]string, bnd *bundler.Bundler, imports, virtual map[string]string) ([]metadataResult, error) {
+	metadataRuns.Chain.Add(1)
 	resolve := func(importer, spec string) (string, bool) {
 		if bnd != nil {
 			if p := bnd.ResolveForNode(importer, spec); p != "" {
@@ -227,6 +229,9 @@ func (b *Builder) evalMetadataModules(abs string, segs []metaSegment, pageFiles 
 		JSXImportSource: "@krate/runtime/server",
 		VirtualFiles:    virtual,
 		SourceTransform: b.serverGlobalsTransform,
+		Worker:          b.jsWorker(),
+		WorkerLabel:     "metadata",
+		QuickJSDone:     b.quickJSDone("metadata"),
 	})
 	if eerr == nil {
 		if out, perr := parse(raw); perr == nil {
@@ -364,7 +369,7 @@ func (b *Builder) prefetchMetadata(page string, sets []map[string]string, bnd *b
 		return
 	}
 	segs, pageFiles := b.metadataSegments(page)
-	results, err := b.evalMetadata(page, segs, pageFiles, sets, bnd)
+	results, err := b.resolveMetadataChain(page, segs, pageFiles, sets, bnd)
 	for i, set := range sets {
 		r := metadataResult{}
 		if err != nil {
@@ -430,7 +435,7 @@ func (b *Builder) pageMetadataHeadFor(page, source string, requestTime bool, par
 	if ok {
 		r = res.(metadataResult)
 	} else {
-		results, err := b.evalMetadata(page, segs, pageFiles, []map[string]string{params}, bnd)
+		results, err := b.resolveMetadataChain(page, segs, pageFiles, []map[string]string{params}, bnd)
 		if err != nil {
 			r = metadataResult{Errors: []string{err.Error()}}
 		} else {

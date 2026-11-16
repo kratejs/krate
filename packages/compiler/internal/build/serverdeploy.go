@@ -1011,6 +1011,21 @@ func runtimePlugin(root string) (api.Plugin, error) {
 	}, nil
 }
 
+// builtinGuardFilter matches the Node built-in names builtinGuardPlugin acts
+// on, with or without the node: prefix. Names outside the shape of the
+// original catch-all filter (v8) stay unmatched, as before.
+func builtinGuardFilter() string {
+	shape := regexp.MustCompile(`^[a-z_]+(/[a-z_]+)?$`)
+	var names []string
+	for name := range nodeBuiltinNames {
+		if shape.MatchString(name) {
+			names = append(names, regexp.QuoteMeta(name))
+		}
+	}
+	sort.Strings(names)
+	return `^(?:node:)?(?:` + strings.Join(names, "|") + `)$`
+}
+
 // builtinGuardPlugin keeps Node built-ins out of non-Node targets. Node and
 // serverless-Node targets leave them external; Cloudflare allows the
 // nodejs_compat subset and fails at bundle time, naming the module, otherwise.
@@ -1018,7 +1033,7 @@ func builtinGuardPlugin(target string) api.Plugin {
 	return api.Plugin{
 		Name: "krate-node-builtins",
 		Setup: func(b api.PluginBuild) {
-			b.OnResolve(api.OnResolveOptions{Filter: `^(node:)?[a-z_]+(/[a-z_]+)?$`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+			b.OnResolve(api.OnResolveOptions{Filter: builtinGuardFilter()}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
 				name := strings.TrimPrefix(args.Path, "node:")
 				if !nodeBuiltinNames[name] {
 					return api.OnResolveResult{}, nil

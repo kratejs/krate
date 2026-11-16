@@ -228,6 +228,16 @@ jobs:
           KRATE_CONFORMANCE_MARKDOWN: ${{ runner.temp }}/conformance.md
           KRATE_CONFORMANCE_SUMMARY: ${{ runner.temp }}/conformance.json
 
+      # A 60-page site over one 2000-module graph with both kinds of island:
+      # each shared module must compile once per build and doubling the pages
+      # must not double the build. Timed without -race; the table goes to the
+      # job summary.
+      - name: Shared-graph build benchmark
+        run: go test -count=1 -run TestSharedGraphCompiledOncePerBuild -v ./internal/build
+        working-directory: packages/compiler
+        env:
+          KRATE_REQUIRE_E2E: "1"
+
       - name: Save the Go caches
         if: always()
         uses: ./.github/actions/go-cache-save

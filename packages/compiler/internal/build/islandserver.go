@@ -194,7 +194,11 @@ func islandServerStubPlugin(s *islandServerStubs, source string) api.Plugin {
 	return api.Plugin{
 		Name: "krate-island-server-stubs",
 		Setup: func(pb api.PluginBuild) {
-			pb.OnResolve(api.OnResolveOptions{Filter: `.*`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+			specs := make([]string, 0, len(s.Specs))
+			for spec := range s.Specs {
+				specs = append(specs, spec)
+			}
+			pb.OnResolve(api.OnResolveOptions{Filter: exactSpecFilter(specs)}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
 				if (args.Importer != source && args.Importer != sourcefile && args.Importer != "<stdin>") || args.ResolveDir != dir || args.Kind == api.ResolveEntryPoint {
 					return api.OnResolveResult{}, nil
 				}

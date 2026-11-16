@@ -81,11 +81,22 @@ krate build ./my-site
 | `--out-dir <path>` | Override the output directory |
 | `--watch` | Rebuild when files change |
 | `--verbose` | Print diagnostic detail during the build (e.g. reactive validation warnings) |
-| `--profile` | Print per-phase build timings and disk-cache hits/misses |
+| `--profile` | Print where the build spends its time (see below) and disk-cache hits/misses |
 | `--sourcemap` | Emit source maps for generated JS (also disables the build cache) |
 | `--no-dce` | Disable CSS/JS dead-code elimination |
 | `--precompress` | Write `.br` + `.gz` siblings for compressible assets (same as `compress: { brotli: true, gzip: true }`) |
 | `--no-summary` | Do not print the per-route size table |
+
+With `--profile`, the build prints its phases (`build:*`, which add up to the
+total), then each phase's steps under it with the time no step accounts for as
+`(untracked)`: the write and tools phases, every step of a page summed over the
+pages (`page:*`, which add up to `page:total`; pages build in parallel, so the
+sums exceed the wall time), and the island steps. Work that runs beside the
+pages is listed as `parallel:*` (API routes, server render modules, server
+bundles) and `batch:*` (the batched check builds of client components and the
+resource-hint renders), followed by every esbuild call, counted and timed by
+the function that made it. `--cpuprofile <path>` writes a Go CPU profile whose
+samples carry `phase` and `esbuild` labels (`go tool pprof -tags`).
 
 After a successful build, `krate build` prints a table with one row per built
 page: its mode, and the gzipped size of the HTML, of the scripts it loads and of

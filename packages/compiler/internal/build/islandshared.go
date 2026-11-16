@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/evanw/esbuild/pkg/api"
 	"github.com/kratejs/krate/packages/compiler/ast"
@@ -791,6 +792,7 @@ func (b *Builder) buildIslandFlavours(flavours []*islandFlavour, chunksDir strin
 		opts.Metafile = true
 		opts.Plugins = append([]api.Plugin{states[i].plugin()}, opts.Plugins...)
 		tsstrip.HandleTierDecorators(&opts)
+		withLoadCounter(&opts)
 		ctx, cerr := api.Context(opts)
 		if cerr != nil {
 			f.result = api.BuildResult{Errors: cerr.Errors}
@@ -799,8 +801,8 @@ func (b *Builder) buildIslandFlavours(flavours []*islandFlavour, chunksDir strin
 		ctxs[i] = ctx
 	}
 	metas := make([]*islandMetafile, len(flavours))
+	rebuildAll(flavours, ctxs)
 	for i, f := range flavours {
-		f.result = ctxs[i].Rebuild()
 		if len(f.result.Errors) > 0 {
 			return nil
 		}
@@ -836,8 +838,8 @@ func (b *Builder) buildIslandFlavours(flavours []*islandFlavour, chunksDir strin
 		states[i].exports = exports
 	}
 	rebuild := func() bool {
+		rebuildAll(flavours, ctxs)
 		for i, f := range flavours {
-			f.result = ctxs[i].Rebuild()
 			if len(f.result.Errors) > 0 {
 				return false
 			}
@@ -874,6 +876,20 @@ func (b *Builder) buildIslandFlavours(flavours []*islandFlavour, chunksDir strin
 	}
 	b.warnDuplicatedIslandModules(metas, globals)
 	return nres.OutputFiles
+}
+
+// rebuildAll rebuilds every flavour's context at once: the flavours share no
+// build state, and each context keeps its own parse cache.
+func rebuildAll(flavours []*islandFlavour, ctxs []api.BuildContext) {
+	var wg sync.WaitGroup
+	for i, f := range flavours {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			f.result = ctxs[i].Rebuild()
+		}()
+	}
+	wg.Wait()
 }
 
 const islandNeutralEntryPrefix = "isn_"
@@ -1380,28 +1396,8 @@ func listModuleExports(base api.BuildOptions, keys []string, outdir string) (map
 	for _, f := range res.OutputFiles {
 		texts[filepath.Base(f.Path)] = string(f.Contents)
 	}
-	dynamic := func(entry string) bool {
-		seen := map[string]bool{}
-		queue := []string{entry}
-		for len(queue) > 0 {
-			cur := queue[0]
-			queue = queue[1:]
-			if seen[cur] {
-				continue
-			}
-			seen[cur] = true
-			text := texts[cur]
-			if strings.Contains(text, "__reExport") {
-				return true
-			}
-			for base := range texts {
-				if !seen[base] && strings.Contains(text, "./"+base) {
-					queue = append(queue, base)
-				}
-			}
-		}
-		return false
-	}
+	dynamicOut := reachesReExport(texts)
+	dynamic := func(entry string) bool { return dynamicOut[entry] }
 	out := map[string][]string{}
 	for path, o := range meta.Outputs {
 		if k := strings.TrimPrefix(o.EntryPoint, ns+":"); k != o.EntryPoint {
@@ -1420,6 +1416,58 @@ func listModuleExports(base api.BuildOptions, keys []string, outdir string) (map
 		}
 	}
 	return out, nil
+}
+
+// reachesReExport reports, for each output file, whether it or a file it
+// names (an occurrence of "./" + the file's base name in its text) calls
+// __reExport, directly or through other files.
+func reachesReExport(texts map[string]string) map[string]bool {
+	lengths := map[int]bool{}
+	for base := range texts {
+		lengths[len(base)] = true
+	}
+	// importers[b] lists the files whose text names b.
+	importers := map[string][]string{}
+	for name, text := range texts {
+		named := map[string]bool{}
+		for i := 0; ; {
+			j := strings.Index(text[i:], "./")
+			if j < 0 {
+				break
+			}
+			at := i + j + 2
+			for l := range lengths {
+				if at+l <= len(text) {
+					if b := text[at : at+l]; b != name && !named[b] {
+						if _, ok := texts[b]; ok {
+							named[b] = true
+							importers[b] = append(importers[b], name)
+						}
+					}
+				}
+			}
+			i = i + j + 1
+		}
+	}
+	out := map[string]bool{}
+	var queue []string
+	for name, text := range texts {
+		if strings.Contains(text, "__reExport") {
+			out[name] = true
+			queue = append(queue, name)
+		}
+	}
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		for _, imp := range importers[cur] {
+			if !out[imp] {
+				out[imp] = true
+				queue = append(queue, imp)
+			}
+		}
+	}
+	return out
 }
 
 // moduleHasDefaultExport reports whether a script module has an export

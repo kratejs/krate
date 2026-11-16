@@ -29,16 +29,40 @@ func CompileServerBundles(res *bundler.ImportResolver, results []*PageResult, ro
 // failures of pages that render server components. Those pages have no baked
 // body to fall back to, so a missing bundle must fail the build.
 func compileServerBundles(res *bundler.ImportResolver, results []*PageResult, root, outDir string, sourcemap bool, actionModules map[string]map[string]string, actionBasePath string) (map[string]string, []error) {
-	// Collect non-SSG pages that actually need the Node renderer. A streaming
-	// page whose regions are all Go (or that has no dynamic regions at all) is
-	// rendered by the Go server + Go host alone, so its page bundle is never
-	// loaded - skip compiling it.
+	impls := newClientSSRImpls(res, results, root, outDir, actionModules, actionBasePath)
+	impls.prebuild(impls.boundaries)
+	return compileServerBundlesWith(impls, results, root, outDir, sourcemap, actionModules, actionBasePath)
+}
+
+// ssrBundlePages returns the non-SSG pages that need the Node renderer. A
+// streaming page whose regions are all Go (or that has no dynamic regions at
+// all) is rendered by the Go server + Go host alone, so its page bundle is
+// never loaded.
+func ssrBundlePages(results []*PageResult) []*PageResult {
 	var ssrPages []*PageResult
 	for _, r := range results {
 		if r.Mode != RenderSSG && r.SourcePath != "" && pageNeedsNodeServerBundle(r) {
 			ssrPages = append(ssrPages, r)
 		}
 	}
+	return ssrPages
+}
+
+// newClientSSRImpls returns the server render module builder of the client
+// boundaries of results' server bundles.
+func newClientSSRImpls(res *bundler.ImportResolver, results []*PageResult, root, outDir string, actionModules map[string]map[string]string, actionBasePath string) *clientSSRImpls {
+	impls := &clientSSRImpls{res: res, root: root, bundleDir: filepath.Join(outDir, ".krate", "server-bundles"), actions: actionModules, basePath: actionBasePath}
+	for _, page := range ssrBundlePages(results) {
+		impls.boundaries = append(impls.boundaries, page.ClientBoundaries...)
+	}
+	return impls
+}
+
+// compileServerBundlesWith is compileServerBundles with the server render
+// modules built by impls, which a caller may have prebuilt.
+func compileServerBundlesWith(impls *clientSSRImpls, results []*PageResult, root, outDir string, sourcemap bool, actionModules map[string]map[string]string, actionBasePath string) (map[string]string, []error) {
+	res := impls.res
+	ssrPages := ssrBundlePages(results)
 	if len(ssrPages) == 0 {
 		return nil, nil
 	}
@@ -47,7 +71,9 @@ func compileServerBundles(res *bundler.ImportResolver, results []*PageResult, ro
 	_ = os.MkdirAll(bundleDir, 0755)
 
 	bundles := make(map[string]string, len(ssrPages))
-	impls := &clientSSRImpls{res: res, root: root, bundleDir: bundleDir, actions: actionModules, basePath: actionBasePath}
+	// The page bundles share their options, so a package import resolves
+	// once for all of them.
+	serverMemo := &resolveMemo{}
 	var fatal []error
 	var mu sync.Mutex
 	fail := func(page *PageResult, err error) {
@@ -155,7 +181,7 @@ func compileServerBundles(res *bundler.ImportResolver, results []*PageResult, ro
 					"@krate/runtime",
 					"@krate/runtime/*",
 				},
-				Plugins: serverBundlePlugins(page, absSource, append(composed, reactServerShimPlugin(), serverCSSPlugin(root), cbPlugin, unusedClientModulePlugin(), serverExportPlugin(page.ServerExports, absSource), goServerBundlePlugin(page.GoBaked, root), actionServerBundlePlugin(res, actionModules, actionBasePath), inlineActionPlugin(root, actionBasePath), serverRuntimeTagsPlugin(), serverGlobalsPlugin(root), pathAliasPlugin(res), externalNodeModulesPlugin(outPath))...),
+				Plugins: serverBundlePlugins(page, absSource, append(composed, reactServerShimPlugin(), serverCSSPlugin(root), cbPlugin, unusedClientModulePlugin(), serverExportPlugin(page.ServerExports, absSource), goServerBundlePlugin(page.GoBaked, root), actionServerBundlePlugin(res, actionModules, actionBasePath), inlineActionPlugin(root, actionBasePath), serverRuntimeTagsPlugin(), serverGlobalsPlugin(root), pathAliasPlugin(res), externalNodeModulesPluginMemo(outPath, serverMemo))...),
 				Stdin: &api.StdinOptions{
 					Loader:     api.LoaderTSX,
 					Contents:   stdinContents,
