@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/evanw/esbuild/pkg/api"
 	"github.com/kratejs/krate/packages/compiler/ast"
@@ -935,6 +936,35 @@ func sharedImportsUsed(outputs [][]api.OutputFile, files map[string]string) map[
 	for k, f := range files {
 		byFile[strings.TrimSuffix(f, ".js")] = k
 	}
+	var texts []string
+	for _, files := range outputs {
+		for _, f := range files {
+			if !strings.HasSuffix(f.Path, ".js") {
+				continue
+			}
+			if text := string(f.Contents); strings.Contains(text, islandNeutralEntryPrefix) {
+				texts = append(texts, text)
+			}
+		}
+	}
+	// Each file's needs are read on their own; merging them is a union, so
+	// the order does not matter.
+	each := make([]map[string]*neutralUse, len(texts))
+	forEachIndex(len(texts), func(i int) { each[i] = fileImportsUsed(texts[i], byFile) })
+	used := map[string]*neutralUse{}
+	for _, m := range each {
+		for k, u := range m {
+			if used[k] == nil {
+				used[k] = &neutralUse{names: map[string]bool{}}
+			}
+			used[k].merge(u)
+		}
+	}
+	return used
+}
+
+// fileImportsUsed is sharedImportsUsed for the text of one built file.
+func fileImportsUsed(text string, byFile map[string]string) map[string]*neutralUse {
 	used := map[string]*neutralUse{}
 	get := func(stem string) *neutralUse {
 		k, ok := byFile[stem]
@@ -948,43 +978,95 @@ func sharedImportsUsed(outputs [][]api.OutputFile, files map[string]string) map[
 		}
 		return u
 	}
-	for _, files := range outputs {
-		for _, f := range files {
-			if !strings.HasSuffix(f.Path, ".js") {
-				continue
-			}
-			text := string(f.Contents)
-			if !strings.Contains(text, islandNeutralEntryPrefix) {
-				continue
-			}
-			counted := map[string]int{}
-			// A stub imports every export of a module by name, and esbuild
-			// keeps the whole clause, so an imported name is used when its
-			// local is referenced outside the import statements.
-			refs := neutralRefs(neutralStaticRe.ReplaceAllStringFunc(text, func(m string) string { return strings.Repeat(" ", len(m)) }))
-			for _, m := range neutralStaticRe.FindAllStringSubmatch(text, -1) {
-				u := get(m[3])
-				if u == nil {
-					continue
-				}
-				counted[m[3]]++
-				addNeutralClause(u, m[1], m[2], refs)
-			}
-			for _, m := range neutralBareRe.FindAllStringSubmatch(text, -1) {
-				if get(m[1]) != nil {
-					counted[m[1]]++
-				}
-			}
-			// A reference the patterns above did not account for (import())
-			// needs the whole module.
-			for stem := range byFile {
-				if n := strings.Count(text, "./"+stem+".js"); n > counted[stem] {
-					get(stem).all = true
-				}
-			}
+	counted := map[string]int{}
+	// A stub imports every export of a module by name, and esbuild
+	// keeps the whole clause, so an imported name is used when its
+	// local is referenced outside the import statements.
+	refs := neutralRefs(neutralStaticRe.ReplaceAllStringFunc(text, func(m string) string { return strings.Repeat(" ", len(m)) }))
+	for _, m := range neutralStaticRe.FindAllStringSubmatch(text, -1) {
+		u := get(m[3])
+		if u == nil {
+			continue
+		}
+		counted[m[3]]++
+		addNeutralClause(u, m[1], m[2], refs)
+	}
+	for _, m := range neutralBareRe.FindAllStringSubmatch(text, -1) {
+		if get(m[1]) != nil {
+			counted[m[1]]++
+		}
+	}
+	// A reference the patterns above did not account for (import())
+	// needs the whole module.
+	refsTo := neutralFileRefs(text)
+	for stem := range byFile {
+		n, ok := refsTo[stem]
+		if !ok && !isNeutralStem(stem) {
+			n = strings.Count(text, "./"+stem+".js")
+		}
+		if n > counted[stem] {
+			get(stem).all = true
 		}
 	}
 	return used
+}
+
+// neutralFileRefs counts each "./isn_<hash>.js" in text, by stem.
+func neutralFileRefs(text string) map[string]int {
+	const lead = "./" + islandNeutralEntryPrefix
+	counts := map[string]int{}
+	for i := 0; ; {
+		j := strings.Index(text[i:], lead)
+		if j < 0 {
+			return counts
+		}
+		at := i + j + len("./")
+		i = at
+		if end := at + neutralStemLen; end+len(".js") <= len(text) && isNeutralStem(text[at:end]) && text[end:end+len(".js")] == ".js" {
+			counts[text[at:end]]++
+		}
+	}
+}
+
+// neutralStemLen is the length of a name neutralEntryName returns.
+const neutralStemLen = len(islandNeutralEntryPrefix) + 12
+
+// isNeutralStem reports whether s has the shape of a neutralEntryName name.
+func isNeutralStem(s string) bool {
+	if len(s) != neutralStemLen || !strings.HasPrefix(s, islandNeutralEntryPrefix) {
+		return false
+	}
+	for _, c := range []byte(s[len(islandNeutralEntryPrefix):]) {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// forEachIndex calls fn for 0..n-1 from up to buildWorkerLimit goroutines.
+func forEachIndex(n int, fn func(i int)) {
+	workers := min(buildWorkerLimit(), n)
+	if workers <= 1 {
+		for i := range n {
+			fn(i)
+		}
+		return
+	}
+	var next atomic.Int64
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Go(func() {
+			for {
+				i := int(next.Add(1) - 1)
+				if i >= n {
+					return
+				}
+				fn(i)
+			}
+		})
+	}
+	wg.Wait()
 }
 
 func addNeutralClause(u *neutralUse, kw, clause string, refs map[string]bool) {
@@ -1041,9 +1123,10 @@ func addNeutralClause(u *neutralUse, kw, clause string, refs map[string]bool) {
 // file uses. The statement keeps its length (padded before "from"), so a
 // source map of the file stays right.
 func trimSharedImports(files []api.OutputFile) {
-	for i, f := range files {
+	forEachIndex(len(files), func(i int) {
+		f := files[i]
 		if !strings.HasSuffix(f.Path, ".js") || !bytes.Contains(f.Contents, []byte(islandNeutralEntryPrefix)) {
-			continue
+			return
 		}
 		text := string(f.Contents)
 		refs := neutralRefs(neutralStaticRe.ReplaceAllStringFunc(text, func(m string) string { return strings.Repeat(" ", len(m)) }))
@@ -1091,7 +1174,7 @@ func trimSharedImports(files []api.OutputFile) {
 		if changed {
 			files[i].Contents = []byte(out)
 		}
-	}
+	})
 }
 
 // neutralRefs returns the identifiers in JavaScript text that are not

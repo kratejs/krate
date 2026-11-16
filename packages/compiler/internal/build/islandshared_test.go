@@ -5,7 +5,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/evanw/esbuild/pkg/api"
@@ -557,5 +559,67 @@ func TestWriteIslandChunkFilesRenames(t *testing.T) {
 	}
 	if !strings.Contains(want["island_one.js"], `"./isl-ab2cd3ef.js"`) || !strings.Contains(want["isl-ab2cd3ef.js"], "isl-ab2cd3ef.js.map") {
 		t.Errorf("the reference does not rename, so the test checks nothing: %v", want)
+	}
+}
+
+// TestSharedImportsUsedAcrossFiles: the needs of every built file are merged,
+// whatever file reads them first.
+func TestSharedImportsUsedAcrossFiles(t *testing.T) {
+	files := map[string]string{"/p/a.ts": "isn_aaaaaaaaaaaa.js", "/p/b.ts": "isn_bbbbbbbbbbbb.js", "/p/c.ts": "isn_cccccccccccc.js", "/p/odd.ts": "isn_odd.js"}
+	var graph []api.OutputFile
+	for i := range 40 {
+		var text string
+		switch i % 4 {
+		case 0:
+			text = `import{one as o}from"./isn_aaaaaaaaaaaa.js";o();`
+		case 1:
+			text = `import{two as t,three}from"./isn_aaaaaaaaaaaa.js";t();import"./isn_bbbbbbbbbbbb.js";`
+		case 2:
+			// import() of a stem of another shape needs the whole module.
+			text = `const l=()=>import("./isn_odd.js");`
+		default:
+			text = `import{four as f}from"./isn_cccccccccccc.js";const m=()=>import("./isn_cccccccccccc.js");f(m);`
+		}
+		graph = append(graph, api.OutputFile{Path: "/out/island_" + strconv.Itoa(i) + ".js", Contents: []byte(text)})
+	}
+	graph = append(graph, api.OutputFile{Path: "/out/island_x.js.map", Contents: []byte(`import*as N from"./isn_bbbbbbbbbbbb.js"`)})
+	used := sharedImportsUsed([][]api.OutputFile{graph[:20], graph[20:]}, files)
+	if a := used["/p/a.ts"]; a == nil || a.all || !a.names["one"] || !a.names["two"] || len(a.names) != 2 {
+		t.Errorf("a.ts should need one and two: %+v", a)
+	}
+	if b := used["/p/b.ts"]; b == nil || b.all || len(b.names) != 0 {
+		t.Errorf("b.ts is only imported bare (a source map does not count): %+v", b)
+	}
+	if c := used["/p/c.ts"]; c == nil || !c.all {
+		t.Errorf("c.ts is loaded with import(): %+v", c)
+	}
+	if o := used["/p/odd.ts"]; o == nil || !o.all {
+		t.Errorf("odd.ts is loaded with import(): %+v", o)
+	}
+}
+
+func TestNeutralFileRefs(t *testing.T) {
+	text := `"./isn_0123456789ab.js" ./isn_0123456789ab.js ../isn_0123456789ab.js ./isn_0123456789AB.js ./isn_0123456789a.js ./isn_0123456789abc.js ./isn_ffffffffffff.mjs ./isn_ffffffffffff.js`
+	got := neutralFileRefs(text)
+	want := map[string]int{"isn_0123456789ab": 3, "isn_ffffffffffff": 1}
+	if len(got) != len(want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+	for stem, n := range want {
+		if got[stem] != n || strings.Count(text, "./"+stem+".js") != n {
+			t.Errorf("%s: got %d, strings.Count %d, want %d", stem, got[stem], strings.Count(text, "./"+stem+".js"), n)
+		}
+	}
+}
+
+func TestForEachIndex(t *testing.T) {
+	for _, n := range []int{0, 1, 3, 500} {
+		seen := make([]atomic.Int32, n)
+		forEachIndex(n, func(i int) { seen[i].Add(1) })
+		for i := range seen {
+			if c := seen[i].Load(); c != 1 {
+				t.Errorf("n=%d: index %d ran %d times", n, i, c)
+			}
+		}
 	}
 }
