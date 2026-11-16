@@ -1596,6 +1596,16 @@ func (b *Builder) BuildAll() error {
 	}
 
 	bl.Lap("after-build")
+	if !b.DevMode {
+		stopCR := b.phase("build:chunk-refs")
+		err := b.checkChunkRefs()
+		stopCR()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "  %sx Chunk error:%s %v\n", cRed, cReset, err)
+			failureMessages = append(failureMessages, "  chunks: "+err.Error())
+			failureErrs = append(failureErrs, err)
+		}
+	}
 	if b.diskCache != nil && b.diskCache.enabled && (b.Prof.Enabled() || b.Verbose) {
 		fmt.Fprintf(os.Stderr, "  build cache: %s\n", b.diskCache.string())
 	}

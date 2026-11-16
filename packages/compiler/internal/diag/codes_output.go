@@ -14,10 +14,22 @@ const (
 	CodeBasePathURL Code = "KR7144"
 	// CodeCSSImportMissing: an @import of a local stylesheet that does not exist.
 	CodeCSSImportMissing Code = "KR7145"
+	// CodeChunkMissing: the build output references a /chunks/ file it did not write.
+	CodeChunkMissing Code = "KR7146"
 )
 
 func init() {
 	Register(
+		CodeInfo{
+			Code:  CodeChunkMissing,
+			Title: "Build output references a chunk that was not written",
+			Explanation: "After writing the output, Krate checks that every quoted `/chunks/...` URL in the page HTML, " +
+				"page and island scripts, server bundles and manifests names a file in the `chunks` directory. A " +
+				"missing chunk means the browser gets a 404 for it, so the island or page script that imports it " +
+				"never runs. This points at a bug in Krate, not in the app: the build fails instead of shipping the " +
+				"broken page. Files copied from the public directory are not checked. Report the error with the URLs " +
+				"it lists. This is an error.",
+		},
 		CodeInfo{
 			Code:  CodeBasePathURL,
 			Title: "Root-relative URL on a plain tag ignores the base path",

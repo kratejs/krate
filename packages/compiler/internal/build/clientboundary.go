@@ -391,8 +391,17 @@ func (b *Builder) queueClientChunks(out []ClientBoundary, reqs []clientChunkReq,
 			}
 			continue
 		}
-		out[at].ChunkURL = b.islandEntryURL(b.islandEntryName(clientChunkSource(reqs[i].entry), reqs[i].resolveDir))
-		out[at].pending = &boundaryJobs{req: reqs[i], chunk: jobs[i]}
+		// The job is shared by every page that asks for the same key, and it
+		// registers the chunk under the request it was queued with. A package
+		// boundary's key leaves out the importer's directory, so another
+		// page's request may name a chunk that is never written: take the
+		// URL (and the fallback build) from the job's own request.
+		req := reqs[i]
+		if jr, ok := jobs[i].input.(clientChunkReq); ok {
+			req = jr
+		}
+		out[at].ChunkURL = b.islandEntryURL(b.islandEntryName(clientChunkSource(req.entry), req.resolveDir))
+		out[at].pending = &boundaryJobs{req: req, chunk: jobs[i]}
 	}
 	return nil
 }
