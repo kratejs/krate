@@ -94,6 +94,20 @@ func batchModulePath(i int, e batchEntry) string {
 	return filepath.Join(e.ResolveDir, ".krate-batch-"+strconv.Itoa(i), name)
 }
 
+// esbuildCwd is the directory esbuild prints paths relative to: the working
+// directory with its symlinks resolved, as esbuild resolves it (on macOS the
+// temporary directory /var is /private/var; on Windows a short name expands).
+func esbuildCwd(opts api.BuildOptions) string {
+	cwd := opts.AbsWorkingDir
+	if cwd == "" {
+		cwd, _ = os.Getwd()
+	}
+	if real, err := filepath.EvalSymlinks(cwd); err == nil {
+		cwd = real
+	}
+	return cwd
+}
+
 // relSlash is p relative to cwd with forward slashes, as esbuild prints it.
 func relSlash(cwd, p string) string {
 	if cwd != "" {
@@ -169,10 +183,7 @@ func esbuildBatch(opts api.BuildOptions, entries []batchEntry) ([]batchOutput, a
 	if len(res.Errors) > 0 {
 		return nil, res
 	}
-	cwd := opts.AbsWorkingDir
-	if cwd == "" {
-		cwd, _ = os.Getwd()
-	}
+	cwd := esbuildCwd(opts)
 	keys := make(map[string]int, len(entries))
 	for i := range entries {
 		keys[relSlash(cwd, batchModulePath(i, entries[i]))] = i
@@ -220,10 +231,7 @@ func splitBatchOutputs(opts api.BuildOptions, n int, entryOf func(string) (int, 
 	metaOf := make([]map[string]json.RawMessage, n)
 	entryInput := make([]string, n)
 	ownerOf := map[string]int{}
-	cwd := opts.AbsWorkingDir
-	if cwd == "" {
-		cwd, _ = os.Getwd()
-	}
+	cwd := esbuildCwd(opts)
 	type outInfo struct {
 		EntryPoint string `json:"entryPoint"`
 		CSSBundle  string `json:"cssBundle"`

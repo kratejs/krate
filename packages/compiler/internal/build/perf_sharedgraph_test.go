@@ -145,15 +145,24 @@ func buildSharedGraph(t *testing.T, pages int) sharedGraphRun {
 	if seen != sharedGraphModules {
 		t.Fatalf("the compiler parsed %d of the %d graph modules: the fixture does not reach its graph", seen, sharedGraphModules)
 	}
-	loaded := 0
+	// esbuild may reach one file under several spellings (on Windows its
+	// short and long names), so loads are summed per canonical path.
+	loads := map[string]int{}
+	spellings := 0
 	for p, n := range counter.counts() {
 		if inGraph(p) {
-			loaded++
-			run.loads = max(run.loads, n)
+			loads[canonicalPath(p)] += n
+			spellings++
 		}
 	}
-	if loaded != sharedGraphModules {
-		t.Fatalf("esbuild loaded %d of the %d graph modules", loaded, sharedGraphModules)
+	if len(loads) != sharedGraphModules {
+		t.Fatalf("esbuild loaded %d of the %d graph modules", len(loads), sharedGraphModules)
+	}
+	if spellings != len(loads) {
+		t.Logf("esbuild named the %d graph modules by %d paths", len(loads), spellings)
+	}
+	for _, n := range loads {
+		run.loads = max(run.loads, n)
 	}
 	return run
 }
