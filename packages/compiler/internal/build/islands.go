@@ -1014,6 +1014,19 @@ func (b *Builder) buildIslandSSR(src, resolveDir string, sink *islandCSSSink, pr
 	if err != nil {
 		return "", err
 	}
+	if res, ok := b.workerScript("islands-ssr", string(out), islandSSRReads); ok {
+		if res.Threw {
+			return "", errors.New(res.Err)
+		}
+		if v := res.Reads[0]; v.Set && v.S != "" {
+			return "", errors.New(v.S)
+		}
+		if v := res.Reads[1]; v.IsString {
+			return v.S, nil
+		}
+		return "", fmt.Errorf("island server render did not produce HTML")
+	}
+	defer b.timeQuickJS("islands-ssr")()
 	rt, err := jsruntime.New()
 	if err != nil {
 		return "", err
@@ -1035,6 +1048,9 @@ func (b *Builder) buildIslandSSR(src, resolveDir string, sink *islandCSSSink, pr
 	}
 	return html, nil
 }
+
+// islandSSRReads read an island server render's error and markup.
+var islandSSRReads = []string{"globalThis.__krate_island_ssr_error", "globalThis.__krate_island_html"}
 
 func islandRenderToStringPlugin(resolveDir string) *api.Plugin {
 	return &api.Plugin{

@@ -29,9 +29,10 @@ import (
 // A static page's `metadata` and `generateMetadata` (and those of the layouts
 // above it) run once at build time, once per generateStaticParams entry, and
 // the tags land in the page's <head>. The chain is evaluated with the same
-// runtime code that serves a request (runtime/src/metadata.ts), first in the
-// embedded JavaScript engine and, when that cannot run the module (fetch, Node
-// built-ins), in Node. Pages that render per request resolve it per request
+// runtime code that serves a request (runtime/src/metadata.ts), first on the
+// build's JavaScript engine (a Node or Bun worker, else QuickJS; see
+// jsworker.go) and, when that cannot run the module (Node built-ins), in a
+// Node process of its own. Pages that render per request resolve it per request
 // instead (the server bundle carries the chain).
 
 // metadataResult is the outcome for one set of route params.
@@ -228,6 +229,9 @@ func (b *Builder) evalMetadataModules(abs string, segs []metaSegment, pageFiles 
 		JSXImportSource: "@krate/runtime/server",
 		VirtualFiles:    virtual,
 		SourceTransform: b.serverGlobalsTransform,
+		Worker:          b.jsWorker(),
+		WorkerLabel:     "metadata",
+		QuickJSDone:     b.quickJSDone("metadata"),
 	})
 	if eerr == nil {
 		if out, perr := parse(raw); perr == nil {

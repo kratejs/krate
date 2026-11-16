@@ -15,3 +15,12 @@ func processCPU() time.Duration {
 	}
 	return time.Duration(ru.Utime.Nano() + ru.Stime.Nano())
 }
+
+// childCPU is the CPU time of the test process's children that have exited.
+func childCPU() time.Duration {
+	var ru syscall.Rusage
+	if syscall.Getrusage(syscall.RUSAGE_CHILDREN, &ru) != nil {
+		return 0
+	}
+	return time.Duration(ru.Utime.Nano() + ru.Stime.Nano())
+}

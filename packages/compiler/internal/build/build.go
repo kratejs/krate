@@ -159,6 +159,9 @@ type Builder struct {
 	runtimeCompatMu       sync.Mutex
 	runtimeCompatWarnings map[string][]diag.Diagnostic
 
+	// js is the Node or Bun worker pool build-time JavaScript runs on.
+	js buildJS
+
 	// metaImages indexes the images the opengraph-image and twitter-image
 	// convention files produced in this build.
 	metaImages *metaImages
@@ -748,6 +751,7 @@ func (b *Builder) printReactiveDiags(diags []reactive.Diagnostic) {
 // Unlike BuildAll, it does NOT clean the output directory.
 func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 	resetCanonicalCache()
+	defer b.closeJSWorker()
 	if len(pages) == 0 {
 		return nil, nil
 	}
@@ -970,6 +974,7 @@ func (b *Builder) BuildAll() error {
 		return fmt.Errorf("creating output dir: %w", err)
 	}
 	defer b.ClosePlugins()
+	defer b.closeJSWorker()
 
 	b.resetBuildCaches()
 	b.resetIslandEntries()

@@ -25,8 +25,8 @@ import (
 // so the resource hints they call while rendering (react-dom preload,
 // preinit, preconnect, ...) would reach the document only after hydration, and
 // a file the page fetches before that is requested twice. The build therefore
-// renders each of them once with react-dom/server in a throwaway QuickJS
-// runtime, only to record the hints: npm packages other than React are
+// renders each of them once with react-dom/server in a throwaway JavaScript
+// context (a Node or Bun worker's, else QuickJS's), only to record the hints: npm packages other than React are
 // stubbed (see realHintsStubPlugin), the markup is discarded, a render error
 // is ignored (the hints called before it are kept), and the recorded tags go
 // into the head of the page (static and force-dynamic pages) or are added to
@@ -123,8 +123,10 @@ func realHintsPrelude(server string, slot int) string {
 	}
 	// An engine error (out of memory, stack overflow) may depend on what the
 	// renders before this one left in the runtime: the render then runs alone.
+	// QuickJS throws InternalError for both; V8 and JSC a RangeError for the
+	// stack.
 	return head + "  let engine = false;\n" +
-		"  try { __krate_rts(el()); } catch (e) { engine = typeof InternalError !== \"undefined\" && e instanceof InternalError; }\n" +
+		"  try { __krate_rts(el()); } catch (e) { engine = typeof InternalError !== \"undefined\" && e instanceof InternalError || e instanceof RangeError && /call stack/i.test(e.message); }\n" +
 		"  (globalThis." + realHintsMergedGlobal + " ||= {})[" + strconv.Itoa(slot) + "] = engine ? null : JSON.stringify([...globalThis.__krate_island_hints]);\n}\n"
 }
 
@@ -214,7 +216,7 @@ func (b *Builder) runRealHintsMerged(opts api.BuildOptions, server string, jobs 
 	if len(result.Errors) > 0 || len(result.OutputFiles) == 0 {
 		return jobs
 	}
-	tags := runRealHintsMergedCode(string(result.OutputFiles[0].Contents), len(jobs))
+	tags := b.runRealHintsMergedCode(string(result.OutputFiles[0].Contents), len(jobs))
 	var rest []*roundJob
 	for i, j := range jobs {
 		if tags[i] == nil {
@@ -261,11 +263,23 @@ func realHintsBodiesPlugin(bodies []batchEntry) api.Plugin {
 	}
 }
 
+// realHintsMergedRead reads the tags of a merged run by render index.
+const realHintsMergedRead = `JSON.stringify(globalThis.` + realHintsMergedGlobal + ` || {})`
+
 // runRealHintsMergedCode runs a merged hints bundle of n renders and returns
 // the tags of each render that finished (nil for the others).
-func runRealHintsMergedCode(code string, n int) (out []*[]string) {
+func (b *Builder) runRealHintsMergedCode(code string, n int) (out []*[]string) {
 	out = make([]*[]string, n)
 	defer timeRealHints(time.Now())
+	// A render that throws past its own catch stops the run: the renders
+	// after it have no result and run alone.
+	if res, ok := b.workerScript("real-hints", code, []string{realHintsMergedRead}); ok {
+		if v := res.Reads[0]; v.IsString {
+			return realHintsMergedTags(v.S, n)
+		}
+		return out
+	}
+	defer b.timeQuickJS("real-hints")()
 	defer func() {
 		// A crash of the engine (see jseval's guardFaults) loses the run.
 		if r := recover(); r != nil {
@@ -278,14 +292,18 @@ func runRealHintsMergedCode(code string, n int) (out []*[]string) {
 		return out
 	}
 	defer rt.Close()
-	// A render that throws past its own catch stops the run: the renders
-	// after it have no result and run alone.
 	_, _ = rt.Execute(code)
-	v, err := rt.Execute(`JSON.stringify(globalThis.` + realHintsMergedGlobal + ` || {})`)
+	v, err := rt.Execute(realHintsMergedRead)
 	s, ok := v.(string)
 	if err != nil || !ok {
 		return out
 	}
+	return realHintsMergedTags(s, n)
+}
+
+// realHintsMergedTags decodes the tags of a merged run's renders.
+func realHintsMergedTags(s string, n int) []*[]string {
+	out := make([]*[]string, n)
 	var byIndex map[string]*string
 	if json.Unmarshal([]byte(s), &byIndex) != nil {
 		return out
@@ -349,7 +367,7 @@ func (b *Builder) runRealHintsBatch(opts api.BuildOptions, prelude string, jobs 
 			defer func() { _ = recover() }() // a failed render has no hints
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			j.output = realHintsTags(codes[i])
+			j.output = b.realHintsTags(codes[i])
 		}()
 	}
 }
@@ -367,12 +385,12 @@ func (b *Builder) realHintsCode(opts api.BuildOptions, prelude string, r realHin
 }
 
 // realHintsTags runs a bundled hints render, once per distinct bundle.
-func realHintsTags(code string) []string {
+func (b *Builder) realHintsTags(code string) []string {
 	key := hashContent([]byte(code))
 	if v, ok := realHintsCache.Load(key); ok {
 		return v.([]string)
 	}
-	tags := runRealHints(code)
+	tags := b.runRealHints(code)
 	realHintsCache.Store(key, tags)
 	return tags
 }
@@ -391,8 +409,18 @@ func timeRealHints(start time.Time) {
 	realHintsNanos.Add(int64(time.Since(start)))
 }
 
-func runRealHints(code string) []string {
+// realHintsRead reads the tags of a render that ran alone.
+const realHintsRead = `typeof globalThis.` + realHintsResultGlobal + ` === "string" ? globalThis.` + realHintsResultGlobal + ` : null`
+
+func (b *Builder) runRealHints(code string) []string {
 	defer timeRealHints(time.Now())
+	if res, ok := b.workerScript("real-hints", code, []string{realHintsRead}); ok {
+		if res.Threw || !res.Reads[0].IsString {
+			return nil
+		}
+		return decodeRealHints(res.Reads[0].S)
+	}
+	defer b.timeQuickJS("real-hints")()
 	rt, err := jsruntime.New()
 	if err != nil {
 		return nil
@@ -409,6 +437,12 @@ func runRealHints(code string) []string {
 	if !ok {
 		return nil
 	}
+	return decodeRealHints(s)
+}
+
+// decodeRealHints decodes the tags a render recorded, without those whose URL
+// the render did not have.
+func decodeRealHints(s string) []string {
 	var tags []string
 	if json.Unmarshal([]byte(s), &tags) != nil {
 		return nil
