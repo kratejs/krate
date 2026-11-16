@@ -9,6 +9,7 @@
 import { onCleanup, onMount } from '@krate/runtime';
 import { createPortal, useStore } from '@krate/three/engine';
 import {
+  DreiOrbitControls as OrbitControlsImpl,
   createEnvironmentCapture,
   forwardProps,
   lightformerColor,
@@ -18,7 +19,6 @@ import {
 } from '@krate/three/engine/drei';
 import * as gltf from '@krate/three/engine/gltf';
 import * as THREE from 'three';
-import { OrbitControls as OrbitControlsImpl } from 'three/examples/jsm/controls/OrbitControls.js';
 import type {} from './index.js';
 
 export type { GLTFResult } from '@krate/three/engine/gltf';

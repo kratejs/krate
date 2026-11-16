@@ -5,9 +5,22 @@
 // the page bundles one copy of each next to the app's own three.
 
 import * as THREE from 'three';
+import { OrbitControls as ThreeOrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { applyProps } from './utils.js';
 
 const EVENT_PROP = /^on[A-Z]/;
+
+/**
+ * three's OrbitControls with drei's zoom step. drei uses three-stdlib's
+ * controls, which zoom by 0.95^zoomSpeed per wheel event (or dolly move)
+ * whatever its delta; three's scale the step by the delta, so a trackpad
+ * (many small deltas) zoomed slower and a fast wheel faster than under drei.
+ */
+export class DreiOrbitControls extends ThreeOrbitControls {
+  _getZoomScale(): number {
+    return Math.pow(0.95, this.zoomSpeed);
+  }
+}
 
 /**
  * Returns the props of a component call, minus `exclude`, in the form an

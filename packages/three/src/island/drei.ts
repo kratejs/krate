@@ -6,8 +6,13 @@ import { createElement, Fragment, type ComponentChildren, type VNode } from 'pre
 import { forwardRef, useImperativeHandle } from 'preact/compat';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import * as THREE from 'three';
-import { OrbitControls as OrbitControlsImpl } from 'three/examples/jsm/controls/OrbitControls.js';
-import { lightformerColor, lightformerTarget, setEnvProps, type EnvironmentSceneProps } from '@krate/three/engine/drei';
+import {
+  DreiOrbitControls as OrbitControlsImpl,
+  lightformerColor,
+  lightformerTarget,
+  setEnvProps,
+  type EnvironmentSceneProps,
+} from '@krate/three/engine/drei';
 import * as gltf from '@krate/three/engine/gltf';
 import { createPortal, useFrame, useThree } from '@krate/three/island';
 
