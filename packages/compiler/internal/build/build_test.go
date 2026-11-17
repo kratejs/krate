@@ -2,6 +2,7 @@ package build
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -148,6 +149,21 @@ func TestBuildTestProject(t *testing.T) {
 		}
 		assertAriaControlsResolve(t, h)
 	}
+
+	// Generated ids (Select, Command) exist in the server HTML: none may be the
+	// bare "-list" / "-opt-0" suffix of an id that was empty until mount.
+	bareIDRe := regexp.MustCompile(`(?i)[\s"'](?:id|aria-controls|aria-activedescendant)=["']?-(?:list|opt-)`)
+	_ = filepath.WalkDir(outDir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(p, ".html") {
+			return nil
+		}
+		if data, rerr := os.ReadFile(p); rerr == nil {
+			if m := bareIDRe.Find(data); m != nil {
+				t.Errorf("%s: empty-prefix generated id %q in server HTML", p, m)
+			}
+		}
+		return nil
+	})
 
 	if data, err := os.ReadFile(filepath.Join(outDir, "lang-demo", "index.html")); err != nil {
 		t.Errorf("reading lang-demo page: %v", err)

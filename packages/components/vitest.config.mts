@@ -26,6 +26,7 @@ export default defineConfig({
   plugins: [krateTsx],
   resolve: {
     alias: [
+      { find: /^react$/, replacement: fileURLToPath(new URL('./test/react-stub.ts', import.meta.url)) },
       { find: '@krate/runtime/jsx-dev-runtime', replacement: runtimeSrc + '/jsx-dev-runtime.ts' },
       { find: '@krate/runtime/jsx-runtime', replacement: runtimeSrc + '/jsx-runtime.ts' },
       { find: '@krate/runtime', replacement: runtimeSrc + '/index.ts' },
