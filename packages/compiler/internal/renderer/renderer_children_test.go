@@ -222,6 +222,45 @@ export default function Scene() {
 	}
 }
 
+// A provider whose value is a build-time constant reaches the renderer
+// children too: their components read the context in the browser, so it is
+// passed like a dynamic provider.
+func TestRendererStaticContextProvider(t *testing.T) {
+	src := `import { createContext, useContext } from "react";
+@renderer
+function Stage(props) { return <div />; }
+const Theme = createContext("plain");
+function Themed() { const c = useContext(Theme); return <Text text={"theme:" + c} />; }
+const Text = "Text";
+export default function Page() {
+  return <Theme.Provider value="dark"><Stage><Themed /></Stage></Theme.Provider>;
+}`
+	_, _, js := buildTreeDecorated(t, src)
+	mustContain(t, "js", js, `children:krateContextRows([[Theme,()=>('dark')]],()=>[h(Themed, null)]`)
+}
+
+// Capitalized renderer elements (react-konva's <Rect>, constants naming the
+// node type) and the renderer component itself take Krate variable refs.
+func TestRendererVariableRefOnComponents(t *testing.T) {
+	_, _, js := buildTreeDecorated(t, `import { onMount } from "@krate/runtime";
+@renderer
+function Stage(props) { return <div />; }
+const Rect = "Rect";
+export default function Page() {
+  let stage;
+  let rect;
+  const obj = { current: null };
+  onMount(() => console.log(stage, rect, obj));
+  return <Stage ref={stage}><Rect ref={rect} x={1} /><Rect ref={obj} /><Rect ref={(r) => r} /></Stage>;
+}`)
+	mustContain(t, "js", js, "stage = __v", ")(stage)", "rect = __v", ")(rect)", ")(obj)", "(r)=>r")
+	for _, raw := range []string{"ref:stage", "return rect;"} {
+		if strings.Contains(js, raw) {
+			t.Errorf("variable ref passed through as a value (%s):\n%s", raw, js)
+		}
+	}
+}
+
 // A scene component's pure locals that later statements still read stay where
 // they were declared: moving `const get = store.getState` above
 // `const store = useStore()` threw "Cannot access before initialization".

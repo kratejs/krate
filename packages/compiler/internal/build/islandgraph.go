@@ -233,7 +233,7 @@ func (b *Builder) preactIslandFlavour(entries []islandEntry, chunksDir string) (
 	guard := b.newUnavailableGuard()
 	// One resolve memo for every build made from these options (see
 	// buildIslandFlavours).
-	plugins := []api.Plugin{purePrunePluginMemo(b.Root, &resolveMemo{}), guard.plugin(), islandEntryPlugin(entries, virtual), islandCSSPlugin(sink), islandJSXPlugin(), islandTagsPlugin(b.Root, false), islandRequirePlugin(), reconcilerGuardPlugin(), reactDOMHintsPlugin(b.Root), reactCompatPlugin(b.Root), routerHooksPlugin(b.Root), threeIslandPlugin()}
+	plugins := []api.Plugin{purePrunePluginMemo(b.Root, &resolveMemo{}), guard.plugin(), islandEntryPlugin(entries, virtual), islandCSSPlugin(sink), islandJSXPlugin(), islandTagsPlugin(b.Root, false), islandRequirePlugin(), reconcilerGuardPlugin(), reactDOMHintsPlugin(b.Root), reactCompatPlugin(b.Root), routerHooksPlugin(b.Root), threeIslandPlugin(), konvaIslandPlugin()}
 	var injects []string
 	for _, e := range entries {
 		if !e.Boundary {

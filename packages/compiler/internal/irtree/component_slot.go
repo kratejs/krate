@@ -519,10 +519,16 @@ func (b *builder) buildClientComponentSlot(el *ast.JSXElement, childFn *ast.FnDe
 	}
 	b.completeSSREvalBindings(childNode, childFn, attrs)
 	if IsRendererFn(childFn) {
+		// A renderer component hands its ref the object it renders (the
+		// Konva.Stage of a <Stage>), so a Krate variable ref becomes a
+		// callback that assigns it.
+		if ref, ok := attrs["ref"]; ok && isAssignableRef(ref) {
+			attrs["ref"] = adaptiveRef(unparen(ref))
+		}
 		if kids := b.reactifier().rendererChildren(rendererKids); kids != nil {
 			// Providers around the call site reach the children through the
 			// live provider getters, as for list rows.
-			childNode.RendererChildrenJS = b.wrapRowContext(generateExprJS(kids, b.sigMap()))
+			childNode.RendererChildrenJS = b.wrapRendererContext(generateExprJS(kids, b.sigMap()))
 		}
 	}
 	b.registerChildProps(childNode, childFn)

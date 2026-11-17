@@ -708,7 +708,7 @@ func (b *Builder) buildIslandBundle(src, resolveDir string, ssr bool, plugin *ap
 		LogLevel:        api.LogLevelSilent,
 		Define:          b.clientEnvDefines(),
 		Alias:           islandAlias(b.Root, ssr),
-		Plugins:         []api.Plugin{purePrunePlugin(b.Root), guard.plugin(), islandCSSPlugin(sink), islandJSXPlugin(), islandTagsPlugin(b.Root, ssr), reconcilerGuardPlugin(), reactDOMHintsPlugin(b.Root), reactCompatPluginFor(b.Root, ssr), routerHooksPlugin(b.Root), threeIslandPlugin()},
+		Plugins:         []api.Plugin{purePrunePlugin(b.Root), guard.plugin(), islandCSSPlugin(sink), islandJSXPlugin(), islandTagsPlugin(b.Root, ssr), reconcilerGuardPlugin(), reactDOMHintsPlugin(b.Root), reactCompatPluginFor(b.Root, ssr), routerHooksPlugin(b.Root), threeIslandPlugin(), konvaIslandPlugin()},
 	}
 	if prov != nil {
 		opts.Plugins = append(opts.Plugins, islandEntryPlugin(nil, prov.virtualModules()))

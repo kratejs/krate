@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
+	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
 )
 
 // Keyed lists and reactive client rendering.
@@ -887,6 +888,35 @@ func (b *builder) wrapRowContext(render string) string {
 		return render
 	}
 	return "krateContextRows(" + entries + "," + render + ")"
+}
+
+// wrapRendererContext makes every active provider visible to the children of
+// a renderer component. Unlike list rows, whose context reads are folded while
+// the rows are built, renderer children run their components in the browser
+// (useContext reads the live provider there), so the providers whose value is
+// a build-time constant are passed as well.
+func (b *builder) wrapRendererContext(render string) string {
+	var parts []string
+	if dyn := b.rowContextEntries(); dyn != "" {
+		parts = append(parts, strings.TrimSuffix(strings.TrimPrefix(dyn, "["), "]"))
+	}
+	markers := b.activeContextMarkers()
+	ctxs := make([]string, 0, len(markers))
+	for ctx := range markers {
+		if _, dyn := b.contextValues[ctx]; !dyn {
+			ctxs = append(ctxs, ctx)
+		}
+	}
+	sort.Strings(ctxs)
+	for _, ctx := range ctxs {
+		if js, ok := jsvalue.JSSource(markers[ctx]); ok {
+			parts = append(parts, "["+ctx+",()=>("+js+")]")
+		}
+	}
+	if len(parts) == 0 {
+		return render
+	}
+	return "krateContextRows([" + strings.Join(parts, ",") + "]," + render + ")"
 }
 
 // fnReturnsJSX reports whether a function body returns JSX at top level.
