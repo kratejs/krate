@@ -305,8 +305,9 @@ func composedEntrySource(pageModule string, layouts []string) string {
 
 // composedLayoutPlugin resolves the virtual page module of a composed entry to
 // the page's injected source, and gives the layouts the same global imports
-// (Head, Link, ...) the page gets.
-func composedLayoutPlugin(root string, pageModule, pageSource, pageDir string, layouts []string) api.Plugin {
+// (Head, Link, ...) the page gets. files keeps the layout sources for the
+// run's other bundles.
+func composedLayoutPlugin(root string, pageModule, pageSource, pageDir string, layouts []string, files *serverBundleFiles) api.Plugin {
 	isLayout := map[string]bool{}
 	for _, l := range layouts {
 		isLayout[filepath.Clean(l)] = true
@@ -325,7 +326,7 @@ func composedLayoutPlugin(root string, pageModule, pageSource, pageDir string, l
 				if !isLayout[filepath.Clean(args.Path)] {
 					return api.OnLoadResult{}, nil
 				}
-				data, err := readServerSource(root, args.Path)
+				data, err := files.serverSource(root, args.Path)
 				if err != nil {
 					return api.OnLoadResult{}, err
 				}

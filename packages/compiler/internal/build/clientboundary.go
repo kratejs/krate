@@ -1689,8 +1689,9 @@ func packageBoundaryStub(cbs []ClientBoundary, outPath string, impls *clientSSRI
 // clientBoundaryPlugin swaps "use client" modules for their boundary stubs in
 // a page server bundle, keeps the server render modules external (loaded from
 // server-bundles/client/ at run time), and resolves the server-only /
-// client-only markers to empty modules.
-func clientBoundaryPlugin(boundaries []ClientBoundary, impls *clientSSRImpls, outPath string) (api.Plugin, error) {
+// client-only markers to empty modules. files keeps the file identities for
+// the run's other bundles.
+func clientBoundaryPlugin(boundaries []ClientBoundary, impls *clientSSRImpls, outPath string, files *serverBundleFiles) (api.Plugin, error) {
 	byPath := map[string]ClientBoundary{}
 	var pkgs []ClientBoundary
 	for _, cb := range boundaries {
@@ -1729,7 +1730,7 @@ func clientBoundaryPlugin(boundaries []ClientBoundary, impls *clientSSRImpls, ou
 				cb, ok := byPath[filepath.Clean(args.Path)]
 				if !ok {
 					for _, candidate := range boundaries {
-						if sameFileIdentity(args.Path, candidate.SourcePath) {
+						if files.sameFile(args.Path, candidate.SourcePath) {
 							cb, ok = candidate, true
 							break
 						}
