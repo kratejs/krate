@@ -118,12 +118,19 @@ func InjectHeadingAnchors(html string) string {
 					content := html[contentStart:closeIdx]
 
 					escapedID := escape.HTMLAttr(idAttr)
-					// The link follows the heading text and is named after it;
-					// the "#" glyph is hidden from assistive technology. The
+					// The heading carries its text as aria-label so the link does not
+					// leak into its name. The link is named after the heading and the "#" glyph is hidden from assistive technology. The
 					// class and position are unchanged (the theme places it
 					// absolutely in the margin).
-					label := escape.HTMLAttr("Link to section: " + stripInlineHTML(content))
-					out.WriteString(html[start : tagEnd+1])
+					text := stripInlineHTML(content)
+					label := escape.HTMLAttr("Link to section: " + text)
+					// The heading is named by its own text, so the link inside
+					// it does not become part of the heading's accessible name.
+					openTag := html[start : tagEnd+1]
+					if extractAttr(openTag, "aria-label") == "" && extractAttr(openTag, "aria-labelledby") == "" {
+						openTag = openTag[:len(openTag)-1] + " aria-label=\"" + escape.HTMLAttr(text) + "\">"
+					}
+					out.WriteString(openTag)
 					out.WriteString(content)
 					out.WriteString("<a href=\"#")
 					out.WriteString(escapedID)

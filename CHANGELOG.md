@@ -440,8 +440,8 @@ host code runs in the native process. Names and options may change between relea
   `#go-components--api-routes` (runs of spaces and hyphens are no longer collapsed), so links written the
   GitHub way work. Four docs links to the old collapsed form were updated.
 - Heading anchors in docs follow the heading text, are named "Link to section: <heading>" and hide the `#`
-  glyph from assistive technology (the `#` used to be the first thing a screen reader read in every heading).
-  The `heading-anchor` class, position and target hash are unchanged.
+  glyph from assistive technology. The heading carries its text as `aria-label`, so its accessible name is
+  the text alone (the link used to be read as part of every heading). Class, position and hash are unchanged.
 - The generated CSP `<meta>` is the first element after `<meta charset>` (it was last in `<head>`, after the
   inline scripts it covers) and hashes the exact bytes of each inline script, style and `style` attribute, as
   browsers do. Pages with the mermaid or KaTeX loaders also allow `https://cdn.jsdelivr.net`.
