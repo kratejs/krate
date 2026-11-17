@@ -87,6 +87,8 @@ async function editorChecks(p) {
       box.fill(),
       box.shadowBlur(),
       box.draggable(),
+      box.strokeWidth(),
+      box.strokeScaleEnabled(),
       wire.dash().join(":"),
       wire.hitStrokeWidth(),
       s.findOne(".bg").listening(),
@@ -94,7 +96,7 @@ async function editorChecks(p) {
       s.findOne(".label").text(),
     ].join();
   });
-  if (shape !== "Stage,1,Rect,red,4,true,6:4,20,false,theme:dark,double-click me") return `initial tree ${shape}`;
+  if (shape !== "Stage,1,Rect,red,4,true,3,false,6:4,20,false,theme:dark,double-click me") return `initial tree ${shape}`;
   // Only the container div is rendered as HTML; the shapes are drawn.
   await until(p, () => document.querySelectorAll("#editor canvas").length === 1);
   await p.waitForTimeout(100);

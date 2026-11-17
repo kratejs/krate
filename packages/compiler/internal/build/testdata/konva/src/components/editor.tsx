@@ -71,6 +71,9 @@ export default function Editor() {
                 width={size.w}
                 height={size.h}
                 fill={fill}
+                stroke="black"
+                strokeWidth={3}
+                strokeScaleEnabled={false}
                 draggable
                 shadowColor="black"
                 shadowBlur={4}

@@ -52,12 +52,29 @@ if (typeof document !== 'undefined' && !g.__krateKonvaIsland) {
     }
     diffed?.(vnode);
   };
+  // preact/compat normalizes the props of every string-typed vnode for the
+  // DOM: `strokeWidth` becomes `stroke-width`, `fontSize` `font-size`,
+  // `onDoubleClick` `ondblclick`, ... Konva attributes keep their names (as
+  // react-konva passes them), so the props as written are put back for the
+  // Konva elements. Their types are Konva class names, capitalized, which no
+  // DOM element has. Installed after compat's hook, so it runs after it.
+  const vnodeHook = options.vnode;
+  options.vnode = (vnode: VNode) => {
+    const type = vnode.type;
+    const written = typeof type === 'string' && type.charCodeAt(0) >= 65 && type.charCodeAt(0) <= 90 && isKonvaType(type) ? vnode.props : null;
+    vnodeHook?.(vnode);
+    if (written) vnode.props = written;
+  };
   const unmount = options.unmount;
   options.unmount = (vnode: HostVNode) => {
     const dom = vnode.__e;
     if (dom instanceof KonvaHostNode && typeof vnode.type === 'string') unmountHost(dom);
     unmount?.(vnode);
   };
+}
+
+function isKonvaType(type: string): boolean {
+  return typeof (KonvaClasses as unknown as Record<string, unknown>)[type] === 'function';
 }
 
 // Passes the providers above the Stage (Preact's context object) to the tree

@@ -279,3 +279,34 @@ function Konva_stage(el: HTMLElement): Konva.Stage {
   const div = el.querySelector('div')!;
   return engine.Konva.stages.find((s) => s.container() === div)!;
 }
+
+describe('@krate/konva island props under preact/compat', () => {
+  it('keeps Konva attribute names that compat would rewrite for the DOM', () => {
+    const stage = { current: null as Konva.Stage | null };
+    const dbl = vi.fn();
+    mount(
+      E(
+        Stage,
+        { ref: stage, width: 200, height: 100 },
+        E(
+          KLayer,
+          null,
+          E(Rect, { name: 'r', width: 10, height: 10, stroke: 'black', strokeWidth: 3, strokeScaleEnabled: false, fillEnabled: false, onDoubleClick: dbl }),
+          E(Text, { name: 't', text: 'x', fontSize: 40, fontFamily: 'serif', letterSpacing: 2, textDecoration: 'underline' }),
+          E(Group, { name: 'g', clipX: 1, clipY: 2, clipWidth: 30, clipHeight: 40 }),
+        ),
+      ),
+    );
+    const s = stage.current!;
+    const rect = s.findOne('.r') as Konva.Rect;
+    expect([rect.strokeWidth(), rect.strokeScaleEnabled(), rect.fillEnabled()]).toEqual([3, false, false]);
+    expect(Object.keys(rect.attrs).filter((k) => k.includes('-'))).toEqual([]);
+    const text = s.findOne('.t') as Konva.Text;
+    expect([text.fontSize(), text.fontFamily(), text.letterSpacing(), text.textDecoration()]).toEqual([40, 'serif', 2, 'underline']);
+    const group = s.findOne('.g') as Konva.Group;
+    expect([group.clipX(), group.clipY(), group.clipWidth(), group.clipHeight()]).toEqual([1, 2, 30, 40]);
+    // As in react-konva, onDoubleClick names Konva's "doubleclick" event, not "dblclick".
+    rect.fire('dblclick');
+    expect(dbl).not.toHaveBeenCalled();
+  });
+});
