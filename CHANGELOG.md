@@ -237,6 +237,8 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Added
 
+- `site.icon` writes `<link rel="icon">` on every page that sets no icon of its own. Without it no favicon
+  link is emitted, as before.
 - `krate migrate nextjs` moves `@react-three/fiber` and `@react-three/drei` code to `@krate/three` when every
   fiber and drei API the project's modules use is provided, and adds `@krate/three` to `package.json`. The 3D
   pages then stop shipping React, react-dom and a second copy of the React libraries around the canvas (on
@@ -427,6 +429,8 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- Pages without a `<title>` get one from `site.name` (the fallback `og:title` already used), instead of
+  none, or a generic "Krate App" when the page had no head tags at all.
 - Head de-duplication keeps the light and the dark `theme-color` (keyed by `name` and `media`) and every
   `<link rel="icon">` or `apple-touch-icon` variant with a different `sizes`, `type` or `media`. A page-level
   tag still replaces a layout tag with the same key.

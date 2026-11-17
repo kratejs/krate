@@ -213,6 +213,8 @@ export interface SEOConfig {
   themeColor?: string;
   /** Default `<html lang>` / og:locale, e.g. "en" or "en-US". */
   locale?: string;
+  /** Favicon URL, written as `<link rel="icon">` on pages that set no icon. */
+  icon?: string;
 }
 
 /**
@@ -228,6 +230,12 @@ export interface SiteConfig {
   twitter?: string;
   themeColor?: string;
   locale?: string;
+  /**
+   * Favicon, written as `<link rel="icon">` on every page that sets no icon
+   * of its own, e.g. `"/favicon.svg"`. Without it no icon link is emitted; a
+   * `public/favicon.ico` is found by browsers without one.
+   */
+  icon?: string;
   /**
    * Attributes set on every page's `<html>` element, e.g. `{ class: "dark" }`.
    * A string or number writes `name="value"`, `true` a bare attribute; `false`

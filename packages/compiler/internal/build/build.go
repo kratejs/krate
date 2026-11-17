@@ -2308,6 +2308,14 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 				if r.IsErrorPage && !hasRobotsMeta(r.HeadHTML) {
 					h = strings.Replace(h, "</head>", `<meta name="robots" content="noindex">`+"</head>", 1)
 				}
+				// 2a'. Fallback <title> and the configured favicon.
+				if tags := fallbackHeadTags(r.HeadHTML, b.Cfg.SEO); tags != "" {
+					if r.HeadHTML == "" && strings.HasPrefix(tags, "<title>") {
+						// The generic default title gives way to the site name.
+						h = strings.Replace(h, defaultTitleTag, "", 1)
+					}
+					h = strings.Replace(h, "</head>", tags+"</head>", 1)
+				}
 				// 2b. SEO meta tag injection (canonical, OG, Twitter Card)
 				if b.Cfg.SEO.BaseURL != "" || b.Cfg.SEO.Description != "" {
 					seoTags := generateSEOTags(r.HeadHTML, routeFromOutName(r.OutName), b.Cfg.SEO, seoCtx{BasePath: b.Cfg.BaseURLPath(), ErrorPage: r.IsErrorPage})

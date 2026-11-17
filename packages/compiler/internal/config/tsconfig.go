@@ -676,6 +676,8 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 				cfg.SEO.ThemeColor = s
 			case "locale":
 				cfg.SEO.Locale = s
+			case "icon":
+				cfg.SEO.Icon = s
 			}
 		}
 	case "site":
@@ -716,6 +718,8 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 				cfg.Site.ThemeColor = s
 			case "locale":
 				cfg.Site.Locale = s
+			case "icon":
+				cfg.Site.Icon = s
 			}
 		}
 	case "robots":

@@ -392,6 +392,7 @@ type SEOConfig struct {
 	Twitter       string `json:"twitter,omitempty"`    // default twitter:site handle
 	ThemeColor    string `json:"themeColor,omitempty"` // browser theme-color
 	Locale        string `json:"locale,omitempty"`     // default <html lang> / og:locale
+	Icon          string `json:"icon,omitempty"`       // favicon URL, emitted as <link rel="icon">
 }
 
 // SiteConfig is the canonical site metadata block. It overlaps `seo` (which is
@@ -406,6 +407,10 @@ type SiteConfig struct {
 	Twitter       string `json:"twitter,omitempty"`
 	ThemeColor    string `json:"themeColor,omitempty"`
 	Locale        string `json:"locale,omitempty"`
+	// Icon is the favicon, written as <link rel="icon"> on every page that
+	// does not set its own icon. Without it no favicon link is emitted (a
+	// public/favicon.ico is found by browsers without one).
+	Icon string `json:"icon,omitempty"`
 	// HTMLAttributes and BodyAttributes are set on every page's <html> and
 	// <body> element. A page or layout refines them with <html> and <body>
 	// elements inside <Head>.
@@ -415,7 +420,7 @@ type SiteConfig struct {
 
 func (s SiteConfig) isZero() bool {
 	return s.URL == "" && s.Name == "" && s.Description == "" && s.Image == "" && s.TitleTemplate == "" &&
-		s.Twitter == "" && s.ThemeColor == "" && s.Locale == "" && len(s.HTMLAttributes) == 0 && len(s.BodyAttributes) == 0
+		s.Twitter == "" && s.ThemeColor == "" && s.Locale == "" && s.Icon == "" && len(s.HTMLAttributes) == 0 && len(s.BodyAttributes) == 0
 }
 
 // AttrMap is a set of HTML attributes. In the config a value is a string or a
@@ -501,6 +506,9 @@ func (c *Config) EffectiveSEO() SEOConfig {
 	}
 	if site.Locale != "" {
 		s.Locale = site.Locale
+	}
+	if site.Icon != "" {
+		s.Icon = site.Icon
 	}
 	return s
 }

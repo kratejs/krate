@@ -55,6 +55,10 @@ const devEarlyErrorsScript = `<script>(function(){var q=window.__KRATE_EARLY_ERR
 	`var e=[].filter.call(arguments,function(a){return a instanceof Error})[0];` +
 	`q.push({type:"console",message:m,stack:e&&e.stack})}}catch(_){}return o.apply(c,arguments)}})()</script>` + "\n"
 
+// defaultTitleTag is the document title of a page with no head content and no
+// configured site name.
+const defaultTitleTag = "<title>Krate App</title>\n"
+
 func generateHTML(bodyHTML, headHTML, scriptHTML, styleHTML string, cssFiles []string, jsFile, runtimeJSFile, route string, devMode bool, devBootstrap, runtimeHead, basePath string, modulePreloads ...string) string {
 	var b strings.Builder
 
@@ -79,7 +83,7 @@ func generateHTML(bodyHTML, headHTML, scriptHTML, styleHTML string, cssFiles []s
 		b.WriteString(headHTML)
 		b.WriteByte('\n')
 	} else {
-		b.WriteString("<title>Krate App</title>\n")
+		b.WriteString(defaultTitleTag)
 	}
 
 	if styleHTML != "" {
@@ -442,6 +446,26 @@ func generateSEOTags(headHTML, route string, seo config.SEOConfig, ctx ...seoCtx
 		return ""
 	}
 	return strings.Join(tags, "\n") + "\n"
+}
+
+var iconLinkRe = regexp.MustCompile(`(?i)<link\b[^>]*\brel\s*=\s*["']?[^"'>]*\bicon\b`)
+
+// fallbackHeadTags returns the document <title> for a page that sets none (the
+// same site-name fallback og:title uses) and the configured site.icon link
+// for a page that sets no icon of its own.
+func fallbackHeadTags(headHTML string, seo config.SEOConfig) string {
+	var b strings.Builder
+	if !strings.Contains(strings.ToLower(headHTML), "<title") && seo.SiteName != "" {
+		title := applyTitleTemplateText(seo.SiteName, seo.SiteName, seo.TitleTemplate)
+		b.WriteString("<title>" + escape.HTML(title) + "</title>\n")
+	}
+	if icon := strings.TrimSpace(seo.Icon); icon != "" && !iconLinkRe.MatchString(headHTML) {
+		if !strings.Contains(icon, "://") && !strings.HasPrefix(icon, "/") && !strings.HasPrefix(icon, "data:") {
+			icon = "/" + icon
+		}
+		b.WriteString(fmt.Sprintf("<link rel=\"icon\" href=\"%s\">\n", escape.HTMLAttr(icon)))
+	}
+	return b.String()
 }
 
 // seoCtx carries per-page context for generateSEOTags.
