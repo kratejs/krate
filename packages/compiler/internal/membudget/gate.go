@@ -204,12 +204,15 @@ func (g *Gate) dispatchLocked() {
 	})
 }
 
-// GoLimit is the Go heap's soft limit for a budget: a third of it, at least
+// GoLimit is the Go heap's soft limit for a budget: half of it, at least
 // heapTarget, and never more than the budget less reserve for the helper
-// processes (which takes at most half the budget).
+// processes (which takes at most half the budget). On a large site a tighter
+// limit costs more collector time than it saves memory: with about 4 GiB live,
+// 8 GiB keeps the CPU time of no limit, 6 GiB costs about a tenth more and
+// 5 GiB about a fifth.
 func GoLimit(budget, reserve int64) int64 {
 	ceiling := budget - min(reserve, budget/2)
-	return max(min(ceiling, max(heapTarget, budget/3)), minBudget)
+	return max(min(ceiling, max(heapTarget, budget/2)), minBudget)
 }
 
 // heapTarget is the smallest Go heap limit below the budget's ceiling: less

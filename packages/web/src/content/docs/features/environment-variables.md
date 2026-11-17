@@ -181,7 +181,7 @@ already uses, not from the host's memory.
 
 The budget limits memory by slowing the build down, not by failing it:
 
-- The Go heap gets a soft limit (unless `GOMEMLIMIT` is set): a third of the
+- The Go heap gets a soft limit (unless `GOMEMLIMIT` is set): half of the
   budget, at least 4 GiB, and never more than the budget. The garbage collector
   works harder as the heap nears it instead of growing into swap.
 - Pages, esbuild calls and build-time JavaScript renders start only while

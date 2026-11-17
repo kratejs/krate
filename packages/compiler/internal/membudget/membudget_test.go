@@ -364,10 +364,10 @@ func TestGateFIFO(t *testing.T) {
 
 func TestGoLimit(t *testing.T) {
 	cases := []struct{ budget, reserve, want int64 }{
-		// A third of a large budget.
-		{18 * gib, gib, 6 * gib},
+		// Half of a large budget.
+		{18 * gib, gib, 9 * gib},
 		// At least heapTarget when the budget allows it.
-		{8 * gib, gib, heapTarget},
+		{6 * gib, gib, heapTarget},
 		// Never above the budget less the reserve.
 		{3 * gib, gib / 4, 3*gib - gib/4},
 		// The reserve takes at most half the budget.
