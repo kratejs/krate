@@ -330,22 +330,19 @@ func (t *transformer) headingID(h *ast.Heading, src []byte) string {
 	return id
 }
 
-// Slugify turns heading text into an anchor id: Unicode letters and digits are
-// kept and lowercased, whitespace runs collapse to one hyphen.
+// Slugify turns heading text into an anchor id the way GitHub does: Unicode
+// letters, digits and marks are kept and lowercased, every space or hyphen
+// becomes one hyphen (runs are not collapsed, so "Go & API" is "go--api"), and
+// other punctuation is dropped.
 func Slugify(s string) string {
-	s = html.UnescapeString(s)
+	s = strings.TrimSpace(html.UnescapeString(s))
 	var b strings.Builder
-	pendingDash := false
 	for _, r := range strings.ToLower(s) {
 		switch {
 		case unicode.IsLetter(r) || unicode.IsNumber(r) || unicode.IsMark(r):
-			if pendingDash && b.Len() > 0 {
-				b.WriteByte('-')
-			}
-			pendingDash = false
 			b.WriteRune(r)
 		case unicode.IsSpace(r) || r == '-':
-			pendingDash = true
+			b.WriteByte('-')
 		}
 	}
 	return b.String()

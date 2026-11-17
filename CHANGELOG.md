@@ -429,6 +429,9 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- Heading ids follow GitHub's slug rules: a heading such as "Go (components & API routes)" is
+  `#go-components--api-routes` (runs of spaces and hyphens are no longer collapsed), so links written the
+  GitHub way work. Four docs links to the old collapsed form were updated.
 - Heading anchors in docs follow the heading text, are named "Link to section: <heading>" and hide the `#`
   glyph from assistive technology (the `#` used to be the first thing a screen reader read in every heading).
   The `heading-anchor` class, position and target hash are unchanged.
