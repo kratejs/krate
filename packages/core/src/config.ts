@@ -928,6 +928,12 @@ export interface KrateConfig {
    */
   viewTransitions?: boolean | "auto" | "off";
   /**
+   * Default link prefetch. `"intent"` (default) prefetches on hover, focus and
+   * touch; `"viewport"` also prefetches links scrolling into view (max 5 per
+   * page). `<Link prefetch>` overrides it. Skipped under Save-Data and 2g.
+   */
+  prefetch?: "intent" | "viewport";
+  /**
    * Page URL form, honoured by `krate serve`/`start` and the node, vercel,
    * netlify and cloudflare targets. `"always"` (default) redirects `/x` to
    * `/x/`, `"never"` redirects `/x/` to `/x`, `"ignore"` serves both without a

@@ -197,3 +197,23 @@ func TestTrailingSlashAndDeployWorkerConfig(t *testing.T) {
 		t.Errorf("unknown trailingSlash must be rejected, got %v", err)
 	}
 }
+
+func TestPrefetchConfig(t *testing.T) {
+	root := t.TempDir()
+	src := `export default { prefetch: "viewport" };`
+	if err := os.WriteFile(filepath.Join(root, "krate.config.ts"), []byte(src), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Prefetch != "viewport" {
+		t.Errorf("prefetch = %q, want viewport", cfg.Prefetch)
+	}
+	bad := Default()
+	bad.Prefetch = "always"
+	if _, err := bad.Validate(); err == nil || !strings.Contains(err.Error(), "prefetch") {
+		t.Errorf("unknown prefetch must be rejected, got %v", err)
+	}
+}

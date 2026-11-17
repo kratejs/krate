@@ -143,6 +143,11 @@ func (c *Config) Validate() (warnings []string, err error) {
 	default:
 		return nil, fmt.Errorf("trailingSlash must be \"always\", \"never\" or \"ignore\", got %q", c.TrailingSlash)
 	}
+	switch c.Prefetch {
+	case "", "intent", "viewport":
+	default:
+		return nil, fmt.Errorf("prefetch must be \"intent\" or \"viewport\", got %q", c.Prefetch)
+	}
 	switch c.Compat.ModeOrDefault() {
 	case "modern", "legacy", "hybrid":
 	default:

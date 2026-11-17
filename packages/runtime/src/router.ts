@@ -415,6 +415,25 @@ function shouldPrefetch(a: HTMLAnchorElement): boolean {
   return a.hasAttribute('data-prefetch') && v !== 'false' && v !== '0';
 }
 
+/** Most links per page that viewport prefetch will fetch. */
+const VIEWPORT_PREFETCH_MAX = 5;
+let viewportPrefetched = 0;
+
+/** Whether the connection asks for no speculative traffic (Save-Data, 2g). */
+function savingData(): boolean {
+  const c = (navigator as any).connection;
+  if (!c) return false;
+  return c.saveData === true || c.effectiveType === 'slow-2g' || c.effectiveType === '2g';
+}
+
+// Viewport prefetch is opt-in: prefetch="viewport" on the link, or the site-wide
+// `prefetch: "viewport"` default. Everything else prefetches on intent only.
+function wantsViewportPrefetch(a: HTMLAnchorElement): boolean {
+  if (!shouldPrefetch(a)) return false;
+  const v = a.getAttribute('data-prefetch');
+  return v === 'viewport' || (runtimeConfig().prefetch === 'viewport' && v !== 'intent');
+}
+
 // Above-the-fold/viewport prefetch is deferred to idle time so it never
 // competes with first paint; hover/focus keeps the 200ms intent debounce.
 function idle(fn: () => void): void {
@@ -427,7 +446,7 @@ function prefetchHoverHandler(e: Event): void {
   const t = e.target as Element | null;
   if (!t || typeof (t as Element).closest !== 'function') return;
   const a = t.closest('a[data-prefetch]') as HTMLAnchorElement | null;
-  if (!a || !shouldPrefetch(a) || !isLocalLink(a)) return;
+  if (!a || !shouldPrefetch(a) || !isLocalLink(a) || savingData()) return;
   const href = a.getAttribute('href');
   if (!href) return;
   const url = new URL(href, location.href).href;
@@ -442,9 +461,10 @@ function prefetchHoverHandler(e: Event): void {
 }
 
 function observePrefetchLinks(): void {
-  if (!prefetchObserver) return;
+  viewportPrefetched = 0;
+  if (!prefetchObserver || savingData()) return;
   document.querySelectorAll('a[data-prefetch]').forEach((a) => {
-    if (shouldPrefetch(a as HTMLAnchorElement)) prefetchObserver!.observe(a);
+    if (wantsViewportPrefetch(a as HTMLAnchorElement)) prefetchObserver!.observe(a);
   });
 }
 
@@ -458,9 +478,12 @@ function setupPrefetch(): void {
           if (!entry.isIntersecting) continue;
           const a = entry.target as HTMLAnchorElement;
           const href = a.getAttribute('href');
-          if (href && isLocalLink(a) && shouldPrefetch(a)) {
+          if (href && isLocalLink(a) && wantsViewportPrefetch(a) && viewportPrefetched < VIEWPORT_PREFETCH_MAX && !savingData()) {
             const url = new URL(href, location.href).href;
-            if (pathOf(url) !== renderedPath) idle(() => void prefetchPage(url));
+            if (pathOf(url) !== renderedPath) {
+              viewportPrefetched++;
+              idle(() => void prefetchPage(url));
+            }
           }
           prefetchObserver!.unobserve(entry.target);
         }
@@ -482,6 +505,7 @@ function setupSpeculationRules(): void {
   // honoured next to script hashes, so under a CSP meta the JS prefetch path
   // is used instead of emitting a blocked script.
   if (document.querySelector('meta[http-equiv="Content-Security-Policy" i]')) return;
+  if (savingData()) return;
   try {
     const script = document.createElement('script');
     script.type = 'speculationrules';

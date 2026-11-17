@@ -508,6 +508,18 @@ headers, or sessions**. Do not enable `ppr` for regions that render
 per-user/per-session content, or one user's output can be served to another.
 :::
 
+## Prefetch
+
+```typescript
+prefetch: "intent", // "intent" (default) | "viewport"
+```
+
+Links are prefetched on hover, focus and touch. `"viewport"` also prefetches links
+as they scroll near the viewport (at most 5 per page), which costs requests on
+link-heavy pages. A `<Link prefetch>` prop overrides the site default
+(`prefetch={false}` never prefetches). No prefetching happens when the browser
+reports Save-Data or a 2g connection.
+
 ## View Transitions
 
 ```typescript
@@ -522,7 +534,7 @@ instead of cross-fading. Reduced-motion preferences are respected.
 
 Pages carry the router's settings in a JSON data block in `<head>`
 (`<script type="application/json" id="__krate_cfg__">`), and only when a setting
-differs from the defaults: a `basePath`, `viewTransitions: "off"`, or `krate dev`.
+differs from the defaults: a `basePath`, `viewTransitions: "off"`, `prefetch: "viewport"`, or `krate dev`.
 A site on the defaults has no such block. The block is data, not code, so a strict
 `script-src 'self'` policy needs no allowance for it. With View Transitions on,
 the `@view-transition` rule is an inline `<style>` (a `style-src` policy needs

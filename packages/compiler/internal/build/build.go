@@ -394,7 +394,7 @@ var nativeCfgScriptRe = regexp.MustCompile(`<script type="application/json" id="
 // The config is a non-executing JSON data block, so a strict script-src
 // policy needs no allowance for it. It is written only when it carries
 // something the runtime cannot assume: a base path, View Transitions turned
-// off, or the dev flag. The defaults need no block at all.
+// off, a viewport prefetch default, or the dev flag. The defaults need no block at all.
 func (b *Builder) runtimeCommonHead() string {
 	var sb strings.Builder
 	cfg := map[string]interface{}{}
@@ -404,6 +404,9 @@ func (b *Builder) runtimeCommonHead() string {
 	if b.DevMode {
 		// Enables the SPA router's dev warnings (e.g. a layout it could not keep mounted).
 		cfg["dev"] = true
+	}
+	if b.Cfg.Prefetch == "viewport" {
+		cfg["prefetch"] = "viewport"
 	}
 	off := b.viewTransitionsOff()
 	if off {

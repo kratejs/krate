@@ -427,6 +427,10 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- `Link` prefetches on hover, focus and touch only; it no longer prefetches every link that scrolls
+  into view (about 40 requests and 200 kB gzip per docs page). `prefetch="viewport"` (or the new
+  `prefetch: "viewport"` config option) opts back in, capped at 5 links per page, and no automatic
+  prefetching happens under Save-Data or a 2g connection.
 - `markdown.mermaid` and `markdown.math` no longer load their CDN assets on every page. A small loader
   imports mermaid (now pinned to 11.17.2, was the floating `@11`) or KaTeX (0.16.11) only when the page has a
   diagram or math, including after client navigation; pages without them make no CDN request, and a site

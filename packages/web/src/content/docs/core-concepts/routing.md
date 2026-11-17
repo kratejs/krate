@@ -391,8 +391,9 @@ then starts the router if it needs one).
 
 The router handles:
 
-- **Prefetching** - `data-prefetch` on hover/focus and viewport entry, cached
-  for 30 seconds and used once.
+- **Prefetching** - `data-prefetch` on hover/focus/touch, plus viewport entry for
+  `prefetch="viewport"` links (max 5 per page); skipped under Save-Data or 2g.
+  Cached for 30 seconds and used once.
 - **Layout persistence** - shared layouts stay mounted (see above).
 - **Scroll restoration** - forward navigation scrolls to top; back/forward
   restores the saved position of that history entry. Hash links scroll to the
@@ -403,7 +404,7 @@ The router handles:
   and `download` anchors are left as plain links.
 - **GET forms** - submitted client-side (opt out with `data-krate-reload`).
 
-`<Link>` supports `prefetch={false}`, `replace`, `scroll={false}`, and
+`<Link>` supports `prefetch={false}` or `prefetch="viewport"`, `replace`, `scroll={false}`, and
 `target="_blank"` (which auto-adds `rel="noopener noreferrer"`), and
 `basePath={false}` for a URL served outside the site's base path (see
 [Base path](/docs/reference/config/#base-path)). After

@@ -847,7 +847,7 @@ func findSuspenseFallback(el *ast.JSXElement) (bool, ast.Expr) {
 // buildLinkSlots - <Link> -> <a> with SPA navigation
 // buildLinkSlots compiles <Link> into a real <a> element wired for client-side
 // navigation (data-krate-link) with Next.js-style props:
-// - prefetch (default true) -> data-prefetch (hover + viewport prefetch)
+// - prefetch (default true) -> data-prefetch (intent; "viewport" opts into viewport prefetch)
 // - replace (default false) -> data-krate-replace (history.replaceState)
 // - scroll (default true) -> data-krate-scroll="false" disables scroll-to-top
 //   - target/rel/className/title/aria-label/id forwarded as anchor attributes
@@ -859,6 +859,7 @@ func findSuspenseFallback(el *ast.JSXElement) (bool, ast.Expr) {
 func (b *builder) buildLinkSlots(el *ast.JSXElement, parentID string) []SlotNode {
 	href := ""
 	prefetch := true // prefetch local links by default, like Next.js
+	viewport := false
 	replace := false
 	scroll := true
 	className := ""
@@ -895,7 +896,8 @@ func (b *builder) buildLinkSlots(el *ast.JSXElement, parentID string) []SlotNode
 		case "href":
 			href = val
 		case "prefetch":
-			prefetch = val == "true" || val == "1"
+			prefetch = val == "true" || val == "1" || val == "viewport"
+			viewport = val == "viewport"
 		case "replace":
 			replace = val == "true"
 		case "scroll":
@@ -933,7 +935,11 @@ func (b *builder) buildLinkSlots(el *ast.JSXElement, parentID string) []SlotNode
 	if local {
 		aAttrs = append(aAttrs, &ast.JSXAttr{Name: "data-krate-link", Value: nil})
 		if prefetch {
-			aAttrs = append(aAttrs, &ast.JSXAttr{Name: "data-prefetch", Value: nil})
+			var pv ast.Expr
+			if viewport {
+				pv = &ast.Literal{Kind: ast.StringLit, Value: "viewport"}
+			}
+			aAttrs = append(aAttrs, &ast.JSXAttr{Name: "data-prefetch", Value: pv})
 		}
 		if replace {
 			aAttrs = append(aAttrs, &ast.JSXAttr{Name: "data-krate-replace", Value: nil})

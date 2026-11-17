@@ -815,6 +815,11 @@ type Config struct {
 	// serves both without redirecting. Read it through TrailingSlashMode.
 	TrailingSlash string `json:"trailingSlash,omitempty"`
 
+	// Prefetch is the default link prefetch mode: "" or "intent" prefetches
+	// on hover, focus and touch; "viewport" also prefetches links that scroll
+	// into view (capped per page). A Link's own prefetch prop wins.
+	Prefetch string `json:"prefetch,omitempty"`
+
 	// ViewTransitions controls the View Transitions API integration. "" or
 	// "auto" (default) enables it (same-document SPA morphs + a cross-document
 	// @view-transition rule); "off" disables it.
