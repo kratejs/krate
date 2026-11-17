@@ -2335,7 +2335,7 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 				if b.Cfg.CSP.Enabled {
 					cspMeta := generateCSPMeta(h, h, r.HydrationJS, b.Cfg.CSP.Directive)
 					if cspMeta != "" {
-						h = strings.Replace(h, "</head>", cspMeta+"</head>", 1)
+						h = insertCSPMeta(h, cspMeta)
 					}
 				}
 				return h

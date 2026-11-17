@@ -190,6 +190,23 @@ func pageScriptSrc(route, jsFile, basePath string) string {
 	return assetHref("", prefix+"/"+jsFile)
 }
 
+// cspCDNOrigin is the CDN the mermaid and KaTeX loaders import from.
+const cspCDNOrigin = "https://cdn.jsdelivr.net"
+
+var charsetMetaRe = regexp.MustCompile(`(?i)<meta\s+charset\b[^>]*>`)
+
+// insertCSPMeta puts the policy right after <meta charset>, so it applies to
+// every inline script and style that follows it in the head.
+func insertCSPMeta(doc, meta string) string {
+	if loc := charsetMetaRe.FindStringIndex(doc); loc != nil {
+		return doc[:loc[1]] + meta + doc[loc[1]:]
+	}
+	if i := strings.Index(strings.ToLower(doc), "<head>"); i >= 0 {
+		return doc[:i+len("<head>")] + meta + doc[i+len("<head>"):]
+	}
+	return strings.Replace(doc, "</head>", meta+"</head>", 1)
+}
+
 // generateCSPMeta generates a Content-Security-Policy <meta> tag by hashing
 // inline scripts and styles with SHA-256.
 func generateCSPMeta(scriptHTML, styleHTML, hydrationJS, directive string) string {
@@ -218,13 +235,25 @@ func generateCSPMeta(scriptHTML, styleHTML, hydrationJS, directive string) strin
 	// style="..." attributes need 'unsafe-hashes' plus a hash of each value.
 	attrStyles, specRules := inlineStyleAttrsAndSpecRules(styleHTML, scriptHTML)
 
+	scriptHashes = uniqueStrings(scriptHashes)
+	styleHashes = uniqueStrings(styleHashes)
+
 	// A base 'self' policy is meaningful even with no inline assets, so CSP is
 	// always enforced once enabled. Inline assets, when present, are allowlisted
 	// individually via their SHA-256 hashes.
 	var directives []string
 	directives = append(directives, "default-src 'self'")
 
-	scriptSrc := "script-src 'self'"
+	// The mermaid and KaTeX loaders fetch from the jsDelivr CDN at run time.
+	cdn := ""
+	for _, inline := range extractInlineContent(scriptHTML, "script") {
+		if strings.Contains(inline, cspCDNOrigin+"/") {
+			cdn = " " + cspCDNOrigin
+			break
+		}
+	}
+
+	scriptSrc := "script-src 'self'" + cdn
 	for _, h := range scriptHashes {
 		scriptSrc += " " + h
 	}
@@ -233,7 +262,7 @@ func generateCSPMeta(scriptHTML, styleHTML, hydrationJS, directive string) strin
 	}
 	directives = append(directives, scriptSrc)
 
-	styleSrc := "style-src 'self'"
+	styleSrc := "style-src 'self'" + cdn
 	for _, h := range styleHashes {
 		styleSrc += " " + h
 	}
@@ -244,6 +273,9 @@ func generateCSPMeta(scriptHTML, styleHTML, hydrationJS, directive string) strin
 		}
 	}
 	directives = append(directives, styleSrc)
+	if cdn != "" {
+		directives = append(directives, "font-src 'self'"+cdn)
+	}
 
 	return fmt.Sprintf("<meta http-equiv=\"Content-Security-Policy\" content=\"%s\">\n", strings.Join(directives, "; "))
 }
@@ -333,8 +365,10 @@ func referencesExternalAsset(openTag string) bool {
 	return strings.Contains(lower, "src=") || strings.Contains(lower, "href=")
 }
 
+// sha256Base64 hashes content byte for byte: a browser hashes the exact text
+// of an inline script or style, whitespace included.
 func sha256Base64(content string) string {
-	h := sha256.Sum256([]byte(strings.TrimSpace(content)))
+	h := sha256.Sum256([]byte(content))
 	return "'sha256-" + base64.StdEncoding.EncodeToString(h[:]) + "'"
 }
 

@@ -429,6 +429,9 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- The generated CSP `<meta>` is the first element after `<meta charset>` (it was last in `<head>`, after the
+  inline scripts it covers) and hashes the exact bytes of each inline script, style and `style` attribute, as
+  browsers do. Pages with the mermaid or KaTeX loaders also allow `https://cdn.jsdelivr.net`.
 - Pages without a `<title>` get one from `site.name` (the fallback `og:title` already used), instead of
   none, or a generic "Krate App" when the page had no head tags at all.
 - Head de-duplication keeps the light and the dark `theme-color` (keyed by `name` and `media`) and every
