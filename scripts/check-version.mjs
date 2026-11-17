@@ -6,32 +6,20 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { nativeTemplate, nativeTemplateKrateDep, releasePackages } from "./release-packages.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
-const manifests = [
-  "packages/core/package.json",
-  "packages/runtime/package.json",
-  "packages/components/package.json",
-  "packages/plugin/package.json",
-  "packages/ts-plugin/package.json",
-  "packages/base-docs-theme/package.json",
-  "packages/simple-docs-theme/package.json",
-  "packages/auth/package.json",
-  "packages/three/package.json",
-  "packages/konva/package.json",
-  "packages/create-krate-app/package.json",
-  "packages/create-krate-docs/package.json",
-];
 
 const failures = [];
-const packages = manifests.map((file) => {
+const packages = releasePackages.map((dir) => {
+  const file = `packages/${dir}/package.json`;
   const pkg = JSON.parse(readFileSync(join(root, file), "utf8"));
   return { file, pkg };
 });
 const version = packages[0].pkg.version;
 if (!version) failures.push(`${packages[0].file}: missing version`);
 
-for (const { file, pkg } of packages) {
+for (const { pkg } of packages) {
   if (pkg.version !== version) {
     failures.push(`${pkg.name}: ${pkg.version} != ${version}`);
   }
@@ -42,12 +30,20 @@ for (const { file, pkg } of packages) {
       }
     }
   }
-  if (pkg.name === "@krate/components") {
-    const range = pkg.peerDependencies?.["@krate/runtime"];
-    if (range !== `^${version}`) {
-      failures.push(`@krate/components peer @krate/runtime: ${range ?? "(missing)"} != ^${version}`);
+  // A peer range that does not accept this version makes npm refuse to install
+  // the package next to the matching @krate package (ERESOLVE).
+  for (const [dep, range] of Object.entries(pkg.peerDependencies ?? {})) {
+    if (dep.startsWith("@krate/") && range !== `^${version}`) {
+      failures.push(`${pkg.name} peer ${dep}: ${range} != ^${version}`);
     }
   }
+}
+
+const template = readFileSync(join(root, nativeTemplate), "utf8");
+const templateDeps = [...template.matchAll(nativeTemplateKrateDep)];
+if (templateDeps.length === 0) failures.push(`${nativeTemplate}: no @krate dependencies found`);
+for (const [, , name, range] of templateDeps) {
+  if (range !== version) failures.push(`${nativeTemplate} ${name}: ${range} != ${version}`);
 }
 
 // The docs site pins are updated manually and deliberately track the published

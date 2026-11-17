@@ -12,6 +12,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
 import { platformManifest, platforms } from "./platform-package.mjs";
+import { releasePackages } from "./release-packages.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (rel) => fs.readFileSync(path.join(root, rel), "utf8");
@@ -198,6 +199,33 @@ if (!/pnpm publish/.test(read("scripts/publish-packages.mjs"))) fail("scripts/pu
 if (/pnpm publish/.test(release)) fail("release workflow publishes with pnpm publish directly; use scripts/publish-packages.mjs so a re-run skips published versions");
 if ((release.match(/scripts\/publish-packages\.mjs/g) ?? []).length < 2) fail("release workflow must publish the platform and npm packages with scripts/publish-packages.mjs");
 if (!ci.includes("release-scripts.test.mjs")) fail("CI does not run the release script tests");
+
+// 9. Every package that is not private is released, by one list. A package left
+// out of it was never versioned or published (@krate/app), or shipped a peer
+// range its own release did not satisfy (@krate/three, @krate/konva).
+const listed = new Set(releasePackages);
+for (const entry of fs.readdirSync(path.join(root, "packages"), { withFileTypes: true })) {
+  const manifest = path.join(root, "packages", entry.name, "package.json");
+  if (!entry.isDirectory() || !fs.existsSync(manifest)) continue;
+  const pkg = JSON.parse(fs.readFileSync(manifest, "utf8"));
+  if (!pkg.private && !listed.has(entry.name)) fail(`packages/${entry.name} (${pkg.name}) is not private but is not in scripts/release-packages.mjs`);
+  if (pkg.private && listed.has(entry.name)) fail(`packages/${entry.name} (${pkg.name}) is private but is in scripts/release-packages.mjs`);
+}
+const publishStep = release.slice(release.indexOf("- name: Publish npm packages"));
+const published = [...publishStep.slice(0, publishStep.indexOf("env:")).matchAll(/packages\/([a-z0-9-]+)/g)].map((m) => m[1]);
+if (published.join(" ") !== releasePackages.join(" ")) {
+  fail(`release workflow publishes ${published.join(", ")}; scripts/release-packages.mjs lists ${releasePackages.join(", ")} (same packages, same order)`);
+}
+const noted = new Set([...release.matchAll(/printf -- '- `([^`@]*(?:@[^`@]+)?)@%s`/g)].map((m) => m[1]));
+for (const dir of releasePackages) {
+  const name = JSON.parse(read(`packages/${dir}/package.json`)).name;
+  if (!noted.has(name)) fail(`the release notes do not list ${name}`);
+}
+for (const name of noted) {
+  const known = releasePackages.some((dir) => JSON.parse(read(`packages/${dir}/package.json`)).name === name) || platforms.some((t) => name === `@krate/${t.pkg}`);
+  if (!known) fail(`the release notes list ${name}, which a release does not publish`);
+}
+if (!read("scripts/smoke-install.mjs").includes("releasePackages")) fail("the install smoke test does not install every released package");
 
 if (failures.length > 0) {
   console.error("check-release: the v1 release contract is not satisfied");

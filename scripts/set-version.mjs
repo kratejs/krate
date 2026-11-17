@@ -5,17 +5,17 @@
  * Usage:
  *   node scripts/set-version.mjs <version>
  *
- * Updates packages/core, packages/runtime, packages/components,
- * packages/plugin, packages/ts-plugin, packages/base-docs-theme, packages/simple-docs-theme, packages/auth, packages/three, packages/konva, and the
- * create-krate scaffolds,
- * and aligns @krate/core's
- * optionalDependencies (the platform packages) to the same version. Also keeps
- * @krate/components' peerDependency on @krate/runtime in lockstep.
+ * Sets the version of every package in scripts/release-packages.mjs, aligns
+ * @krate/core's optionalDependencies (the platform packages) and every
+ * peerDependency on a @krate package (`^<version>`) with it, and pins the
+ * @krate dependencies of the `krate native init` template to it. In the
+ * repository all of these stay at 0.1.0; a release sets them here.
  */
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { nativeTemplate, pinNativeTemplate, releasePackages } from './release-packages.mjs';
 
 const version = process.argv[2];
 if (!version) {
@@ -24,22 +24,9 @@ if (!version) {
 }
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
-const manifests = [
-  join(root, 'packages', 'core', 'package.json'),
-  join(root, 'packages', 'runtime', 'package.json'),
-  join(root, 'packages', 'components', 'package.json'),
-  join(root, 'packages', 'plugin', 'package.json'),
-  join(root, 'packages', 'ts-plugin', 'package.json'),
-  join(root, 'packages', 'base-docs-theme', 'package.json'),
-  join(root, 'packages', 'simple-docs-theme', 'package.json'),
-  join(root, 'packages', 'auth', 'package.json'),
-  join(root, 'packages', 'three', 'package.json'),
-  join(root, 'packages', 'konva', 'package.json'),
-  join(root, 'packages', 'create-krate-app', 'package.json'),
-  join(root, 'packages', 'create-krate-docs', 'package.json'),
-];
 
-for (const file of manifests) {
+for (const dir of releasePackages) {
+  const file = join(root, 'packages', dir, 'package.json');
   const pkg = JSON.parse(readFileSync(file, 'utf-8'));
   pkg.version = version;
   if (pkg.name === '@krate/core') {
@@ -47,14 +34,17 @@ for (const file of manifests) {
       if (dep.startsWith('@krate/core-')) pkg.optionalDependencies[dep] = version;
     }
   }
-  if (pkg.name === '@krate/components') {
-    if (pkg.peerDependencies?.['@krate/runtime']) {
-      pkg.peerDependencies['@krate/runtime'] = `^${version}`;
-    }
+  for (const dep of Object.keys(pkg.peerDependencies ?? {})) {
+    if (dep.startsWith('@krate/')) pkg.peerDependencies[dep] = `^${version}`;
   }
   writeFileSync(file, JSON.stringify(pkg, null, 2) + '\n');
   console.log(`${pkg.name} -> ${version}`);
 }
+
+const templatePath = join(root, nativeTemplate);
+const template = readFileSync(templatePath, 'utf-8');
+writeFileSync(templatePath, pinNativeTemplate(template, version));
+console.log(`krate native init template -> ${version}`);
 
 // packages/web is intentionally not bumped here. Its @krate pins are managed
 // manually so the docs site can track a published release independently of the
