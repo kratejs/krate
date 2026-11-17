@@ -84,9 +84,15 @@ func esbuildBatchFiles(opts api.BuildOptions, outdir string, entries []fileBatch
 		return nil, res
 	}
 	cwd := esbuildCwd(o, res.Metafile, entries[0].In)
+	var meta struct {
+		Inputs map[string]json.RawMessage `json:"inputs"`
+	}
+	if json.Unmarshal([]byte(res.Metafile), &meta) != nil {
+		return nil, res
+	}
 	keys := make(map[string]int, len(entries))
 	for i, e := range entries {
-		keys[relSlash(cwd, e.In)] = i
+		keys[batchInputKey(cwd, e.In, meta.Inputs)] = i
 	}
 	if len(keys) != len(entries) {
 		return nil, res
@@ -101,12 +107,13 @@ func esbuildBatchFiles(opts api.BuildOptions, outdir string, entries []fileBatch
 	files := 0
 	for i, e := range entries {
 		js := false
+		want := canonicalOutPath(e.Out)
 		for _, f := range outs[i].Files {
-			p := filepath.Clean(f.Path)
-			if p != filepath.Clean(e.Out) && p != filepath.Clean(e.Out)+".map" {
+			p := canonicalOutPath(f.Path)
+			if p != want && p != want+".map" {
 				return nil, res
 			}
-			js = js || p == filepath.Clean(e.Out)
+			js = js || p == want
 		}
 		if !js {
 			return nil, res
@@ -137,6 +144,30 @@ func esbuildBatchFiles(opts api.BuildOptions, outdir string, entries []fileBatch
 		got[i] = &out
 	}
 	return got, res
+}
+
+// batchInputKey is how the metafile names the input file in: relative to
+// cwd, and with its symlinks resolved when esbuild resolved them (on macOS the
+// temporary directory /var is /private/var).
+func batchInputKey(cwd, in string, inputs map[string]json.RawMessage) string {
+	key := relSlash(cwd, in)
+	if _, ok := inputs[key]; ok {
+		return key
+	}
+	if real := relSlash(cwd, canonicalPath(in)); real != key {
+		if _, ok := inputs[real]; ok {
+			return real
+		}
+	}
+	return key
+}
+
+// canonicalOutPath is p with the symlinks of its directory resolved, so an
+// output file esbuild names under a resolved outdir matches the path asked
+// for. The file itself need not exist.
+func canonicalOutPath(p string) string {
+	p = filepath.Clean(p)
+	return filepath.Join(canonicalPath(filepath.Dir(p)), filepath.Base(p))
 }
 
 // entryInputs returns, per entry, the metafile inputs its entry point reaches,
