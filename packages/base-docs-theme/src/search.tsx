@@ -37,12 +37,35 @@ interface Hit {
   category?: string;
 }
 
+/**
+ * Inject the search module the docs plugin advertises in
+ * `<meta name="krate-search-src">`. A no-op when the module is already loaded
+ * or loading, or when the site loads it eagerly (no meta tag).
+ */
+function loadSearchModule(): void {
+  const w = window as any;
+  if (w.__krateSearch || w.__krateSearchLoading) return;
+  const meta = document.querySelector('meta[name="krate-search-src"]');
+  const src = meta && meta.getAttribute("content");
+  if (!src) return;
+  w.__krateSearchLoading = true;
+  const el = document.createElement("script");
+  el.src = src;
+  el.async = true;
+  el.onerror = () => {
+    // Allow a retry on the next search intent.
+    w.__krateSearchLoading = false;
+  };
+  document.head.appendChild(el);
+}
+
 function searchAPI(): Promise<any> {
   const w = window as any;
   if (w.__krateSearch) return Promise.resolve(w.__krateSearch);
   return new Promise((resolve) => {
     const done = () => resolve((window as any).__krateSearch);
     w.addEventListener("krate:search-ready", done, { once: true });
+    loadSearchModule();
     // In case the module loaded between the check and the listener.
     if ((window as any).__krateSearch) {
       w.removeEventListener("krate:search-ready", done);
@@ -251,6 +274,7 @@ export function DocsSearch(props: DocsSearchProps) {
       const input = inputRef.current;
       if (input) {
         restoreFocus = document.activeElement as HTMLElement | null;
+        loadSearchModule();
         input.focus();
         input.select();
       }
@@ -285,7 +309,9 @@ export function DocsSearch(props: DocsSearchProps) {
         spellcheck="false"
         onInput={(e: any) => onInput(e.target.value)}
         onKeyDown={onKey}
+        onPointerEnter={loadSearchModule}
         onFocus={() => {
+          loadSearchModule();
           if (results().length > 0) setOpen(true);
         }}
         onBlur={() => {

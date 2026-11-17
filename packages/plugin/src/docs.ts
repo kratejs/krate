@@ -84,6 +84,13 @@ export interface DocsSearchOptions {
   placeholder?: string;
   /** Keyboard shortcut hint shown by the theme (e.g. "/" or "mod+k"). */
   hotkey?: string;
+  /**
+   * When pages fetch the search module (default `"lazy"`). Lazy leaves it to the
+   * theme's search box, which loads it on first focus, hover or hotkey press;
+   * `"eager"` adds a deferred script to every docs page, for custom themes that
+   * expect `window.__krateSearch` to exist on load.
+   */
+  load?: "lazy" | "eager";
   /** Pagefind options (only used when `engine` is `"pagefind"`). */
   pagefind?: PagefindOptions;
 }

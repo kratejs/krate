@@ -500,6 +500,12 @@ A relative or package `@import` in a stylesheet could not be resolved, for examp
 
 After writing the output, Krate checks that every quoted `/chunks/...` URL in the page HTML, page and island scripts, server bundles and manifests names a file in the `chunks` directory. A missing chunk means the browser gets a 404 for it, so the island or page script that imports it never runs. This points at a bug in Krate, not in the app: the build fails instead of shipping the broken page. Files copied from the public directory are not checked. Report the error with the URLs it lists. This is an error.
 
+### KR7147
+
+**Stylesheet linked from public/ is not minified or hashed**
+
+A page or layout links a `.css` file that lives in `public/` with `<link rel="stylesheet">`. Files in `public/` are copied as written, so the stylesheet is neither minified nor given a content hash, cannot be cached as immutable, and is a separate render-blocking request in front of the bundled styles. Move the file under `src/` and import it from the layout or page (`import "../styles/site.css"`) so it goes through the CSS pipeline. Import it before other stylesheets if it used to be linked before them, since the bundled order follows import order. This is a warning.
+
 ### KR7150
 
 **Unknown code theme**

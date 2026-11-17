@@ -48,6 +48,9 @@ type DocsPluginOptions struct {
 	// siteUse is what any page of the build needs from the CDN-backed markdown
 	// features; it decides whether the lazy loaders are emitted at all.
 	siteUse docsAssetUse
+	// searchScript is the URL of the hashed search module, set when search
+	// assets were written.
+	searchScript string
 }
 
 func (o *DocsPluginOptions) TOCEnabled() bool         { return o.TOC == nil || *o.TOC }
@@ -367,7 +370,9 @@ func (p *DocsPlugin) beforeBuild(ctx *BuildHookCtx) error {
 	// Search index (built across every locale/version).
 	searchEnabled, searchEngine, searchMaxResults := searchConfig(opts)
 	if searchEnabled {
-		if err := p.buildSearchAssets(ctx, allPages, searchEngine, searchMaxResults, pagefindOptions(opts)); err != nil {
+		url, err := p.buildSearchAssets(ctx, allPages, searchEngine, searchMaxResults, pagefindOptions(opts))
+		opts.searchScript = url
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "  Docs search warning: %v (falling back to JSON search)\n", err)
 		}
 	}
@@ -781,7 +786,6 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page doc
 	if len(page.CustomSidebar) > 0 {
 		sidebarItems = page.CustomSidebar
 	}
-	bp := cfg.BaseURLPath()
 	// The theme renders these through <Link>, which adds the base path.
 	enriched := docs.EnrichSidebarItemsURL(sidebarItems, page.URL)
 	sidebarJSON := marshalJSONArray(enriched)
@@ -1001,10 +1005,10 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page doc
 	// Krate merges multiple <Head> blocks (page + layout), so emitting ours
 	// alongside the layout's title composition works.
 	sb.WriteString("      <Head>\n")
-	// Load the headless search module (defines `window.__krateSearch`) so the
+	// Advertise the headless search module (defines `window.__krateSearch`) so the
 	// theme's search UI can query the index. The theme owns all markup/styles.
 	if searchEnabled {
-		sb.WriteString("        <script src=\"" + bp + "/docs/search/search.js\" defer={true}></script>\n")
+		sb.WriteString(searchHeadTag(opts))
 	}
 	// hreflang alternates for every configured locale (absolute when seo.baseUrl
 	// is set, so crawlers can match translations).
@@ -1260,4 +1264,18 @@ func componentImportPath(name string) string {
 		return "@krate/components/aside"
 	}
 	return "@krate/components"
+}
+
+// searchHeadTag returns the JSX head element that makes the search module
+// known to the page. By default the theme's search box loads the module on
+// first use and finds its URL in a meta tag; search.load "eager" keeps a
+// deferred script on every page instead.
+func searchHeadTag(opts *DocsPluginOptions) string {
+	if opts.searchScript == "" {
+		return ""
+	}
+	if opts.Search != nil && opts.Search.Load == "eager" {
+		return "        <script src=" + jsxAttrExpr(opts.searchScript) + " defer={true}></script>\n"
+	}
+	return "        <meta name=\"krate-search-src\" content=" + jsxAttrExpr(opts.searchScript) + " />\n"
 }

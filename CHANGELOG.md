@@ -427,6 +427,11 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- The docs search module is minified and content-hashed (`search.<hash>.js`, 13 kB to about 6 kB) and is
+  loaded when the search box is first used instead of on every page. `search.load: "eager"` keeps the
+  old deferred script. The build warns (KR7147) when a page links a `.css` file from `public/`, which
+  is neither minified nor hashed; the docs site's own `site.css` now goes through the CSS pipeline.
+- Docs search no longer throws on sites without i18n (the emitted `LOCALES` was `null`, not `[]`).
 - Markdown pages import `Code` and `Aside` from `@krate/components/code` and `/aside` instead of the
   package root, so they no longer ship the CSS of every component in the library (about 52 kB raw,
   7.6 kB gzip per docs page).

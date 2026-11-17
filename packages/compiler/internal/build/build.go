@@ -2319,6 +2319,7 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 						h = strings.Replace(h, "</head>", seoTags+"</head>", 1)
 					}
 				}
+				b.warnPublicStylesheets(h)
 				h = b.prefixHeadURLs(h)
 				// 3. Minify code in memory
 				if b.Cfg.ShouldMinifyHTML() {
