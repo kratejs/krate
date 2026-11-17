@@ -429,6 +429,8 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- The Pagefind step no longer skips itself on a fresh or wiped `dist` just because the docs content is
+  unchanged: it also needs the index in the output directory, and indexer option changes re-run it.
 - The CSS minifier drops the remaining optional spaces: between rules and before `{`, around the `>` `+` `~`
   combinators and after commas in selectors, in `@media`/`@supports`/`@container`/`@layer` preludes and in
   values, before `!important`, and the leading zero of `0.5` and `-0.5`. Custom property values, strings,
