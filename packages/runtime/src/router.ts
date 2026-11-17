@@ -358,6 +358,22 @@ function prefetchAsset(url: string): void {
   document.head.appendChild(link);
 }
 
+/**
+ * The scripts this document already has: its script tags, and every resource
+ * it fetched, which includes the island modules an earlier client-side
+ * navigation imported and that the current head no longer lists.
+ */
+function loadedAssetURLs(): Set<string> {
+  const loaded = new Set<string>();
+  document.querySelectorAll('script[src]').forEach((s) => loaded.add((s as HTMLScriptElement).src));
+  try {
+    for (const e of performance.getEntriesByType('resource')) loaded.add(e.name);
+  } catch {
+    // No resource timing: the script tags are all we know.
+  }
+  return loaded;
+}
+
 function prefetchPage(url: string): Promise<void> {
   const key = cacheKey(url);
   const cached = prefetchCache.get(key);
@@ -376,9 +392,7 @@ function prefetchPage(url: string): Promise<void> {
       // Invalidated while in flight: the response is stale.
       if (prefetchInflight.get(key) !== p) return;
       cachePut(key, { html, url: finalUrl, status: res.status, at: now() });
-      const loaded = new Set<string>();
-      document.querySelectorAll('script[src]').forEach((s) => loaded.add((s as HTMLScriptElement).src));
-      for (const asset of pageAssetURLs(html, finalUrl, loaded)) prefetchAsset(asset);
+      for (const asset of pageAssetURLs(html, finalUrl, loadedAssetURLs())) prefetchAsset(asset);
     })
     .catch(() => {
       // A failed prefetch is retried by the real navigation, which reports

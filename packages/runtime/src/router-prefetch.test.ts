@@ -123,6 +123,27 @@ describe('viewport prefetch', () => {
     expect(observed).toHaveLength(0);
   });
 
+  it('does not prefetch a module this document already fetched', async () => {
+    const page = '<!doctype html><html><head><link rel="modulepreload" href="/chunks/island_a.js"><link rel="modulepreload" href="/chunks/island_b.js"></head><body><div id="root"></div></body></html>';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string) => {
+        fetched.push(new URL(input, location.href).pathname);
+        return { ok: true, status: 200, url: new URL(input, location.href).href, redirected: false, headers: new Headers({ 'content-type': 'text/html' }), text: async () => page } as unknown as Response;
+      })
+    );
+    const seen = [{ name: new URL('/chunks/island_a.js', location.href).href }];
+    vi.spyOn(performance, 'getEntriesByType').mockImplementation(((type: string) => (type === 'resource' ? seen : [])) as any);
+    mount(link(3, 'data-prefetch'));
+    start();
+    document.querySelector('a[href="/p3"]')!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 400));
+    const hints = [...document.querySelectorAll('link[rel="prefetch"]')].map((l) => new URL((l as HTMLLinkElement).href).pathname);
+    expect(hints).toContain('/chunks/island_b.js');
+    expect(hints).not.toContain('/chunks/island_a.js');
+    vi.restoreAllMocks();
+  });
+
   it('still prefetches on hover intent', async () => {
     mount(link(2, 'data-prefetch'));
     start();

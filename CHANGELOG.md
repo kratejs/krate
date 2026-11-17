@@ -429,6 +429,10 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- Islands load without a waterfall: the islands a page mounts on load share one entry chunk, and the page
+  `modulepreload`s it with every module it imports (the Preact chunks through the import map), never what
+  only a `client:visible`/`client:idle` island or a lazy `import()` loads. `/react-demo` drops from 78 to 14
+  requests and 162 to 114 kB of script; its last island mounts at 2.5 s instead of 9.0 s (Fast 3G, 4x CPU).
 - Page CSS is split by source: a theme, each component stylesheet and the page's own CSS are separate
   hashed files that every page using them shares, linked in the same order, so the cascade is unchanged.
   A visit across four docs pages downloads 17.7 kB of CSS instead of 35.4 kB (`krate dev` keeps one sheet).

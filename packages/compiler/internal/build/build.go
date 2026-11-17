@@ -350,6 +350,11 @@ type Builder struct {
 	islandMu        sync.Mutex
 	islandImportMap string
 	preactChunks    map[string]string
+	// preactChunkDeps maps each preact* chunk URL (relative to the base
+	// path) to the bare specifiers it imports.
+	preactChunkDeps map[string][]string
+	// islandGraph is the static import graph of the island chunks.
+	islandGraph islandModuleGraph
 	// islandEntries are the island chunk entry modules of each page; they are
 	// bundled together after the pages (see islandgraph.go).
 	islandEntries map[string][]islandEntry
@@ -2134,7 +2139,7 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 			if !pageNeedsRuntime(r) {
 				runtimeJSFile = ""
 			}
-			chunkPreloads := dynamicChunkURLs(r.HydrationJS, b.Cfg.BaseURLPath())
+			chunkPreloads := b.islandPreloads(dynamicChunkURLs(r.HydrationJS, b.Cfg.BaseURLPath()))
 			chunkPreloads = append(chunkPreloads, lazyChunkPreloads(r.HydrationJS, b.Cfg.BaseURLPath())...)
 			if b.NativeTarget && !b.DevMode {
 				// Chunks are read from disk on demand: preloading would

@@ -1157,6 +1157,12 @@ not an island the directive does nothing, and the build says so (`KR8012`).
 Without `IntersectionObserver` the island mounts at load. A page that is itself a
 React-library island (below) always mounts at load.
 
+The islands of a page that mount at load are bundled into one chunk, and the
+page preloads it (`<link rel="modulepreload">`) together with every module it
+imports, so the browser fetches them all in parallel instead of discovering
+them one import at a time. Code that only a deferred island or a lazy
+`import()` uses stays out of that chunk and is not preloaded.
+
 ## Libraries built on React hooks (islands)
 
 State, forms and data-fetching libraries from the React ecosystem call React's
