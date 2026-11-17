@@ -429,6 +429,10 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- The CSS minifier drops the remaining optional spaces: between rules and before `{`, around the `>` `+` `~`
+  combinators and after commas in selectors, in `@media`/`@supports`/`@container`/`@layer` preludes and in
+  values, before `!important`, and the leading zero of `0.5` and `-0.5`. Custom property values, strings,
+  `url()`, `calc()` operators and `:nth-child()` arguments are untouched. About 1.2% smaller gzipped CSS.
 - `<Image>` variants are smaller: PNG variants use best compression, stay 8-bit paletted when the source is
   indexed or uses at most 256 colours, and a PNG source smaller than its re-encode is copied as is (the
   examples' 7.1 kB `hero.png` no longer becomes a 32.4 kB 1600w variant). The blur placeholder is PNG or JPEG,
