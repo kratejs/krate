@@ -24,5 +24,12 @@ implemented.
   caching by route + params + query.
 - `dist/.krate/manifest.json` records each page's mode, and `dist/.krate/server-manifest.json` lists the
   page bundles and each page's region registry for the sidecar.
+- A client component's hydration scope reads its call-site props from a
+  registration its parent's scope makes. The registration holds only the props
+  that scope reads (`props.x`, destructured keys, and props it forwards to a
+  child that reads them); props used only for the server-rendered HTML are left
+  out. Code that passes `props` whole, spreads it or indexes it with a computed
+  key gets every prop, and so do renderer boundaries
+  (`internal/renderer/propsreads.go`).
 
 See [Choosing an approach](/docs/core-concepts/rendering/) for what to use when.

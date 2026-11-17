@@ -1096,17 +1096,14 @@ func signalsReferenceProps(signals []SignalDecl) bool {
 // (a top-of-tree client component like a docs layout has no registry entry of its
 // own). Signal reads (checked={checked1()}) remain live expressions.
 func (b *builder) buildChildPropsRegDecl(id string, props map[string]ast.Expr) string {
-	var sb strings.Builder
-	sb.WriteString("__krate_props[")
-	sb.WriteString(strconv.Quote(id))
-	sb.WriteString("]={")
-	if len(props) == 0 {
-		sb.WriteByte('}')
-		return sb.String()
-	}
+	return b.childPropsReg(id, props).JS(nil)
+}
+
+// childPropsReg builds the registration entries buildChildPropsRegDecl emits.
+func (b *builder) childPropsReg(id string, props map[string]ast.Expr) PropsReg {
+	reg := PropsReg{ID: id}
 	// Keys are emitted in sorted order so the registration (and the hashed
 	// hydration bundle) is byte-identical across builds.
-	first := true
 	for _, name := range sortedKeysExpr(props) {
 		expr := props[name]
 		// A CSS scope handle exists only at build time; the child's helper
@@ -1114,10 +1111,6 @@ func (b *builder) buildChildPropsRegDecl(id string, props map[string]ast.Expr) s
 		if _, isScope := b.buildTimeScope(expr); isScope {
 			continue
 		}
-		if !first {
-			sb.WriteByte(',')
-		}
-		first = false
 		val := b.renderChildPropValue(expr)
 		if b.livePropsParam == "props" && b.readsLiveProp(expr) {
 			// Forwarding a live prop (`n={props.n}`) must stay a read of the
@@ -1128,23 +1121,12 @@ func (b *builder) buildChildPropsRegDecl(id string, props map[string]ast.Expr) s
 		if val == "" {
 			val = "undefined"
 		}
-		if b.isSignalDerivedProp(expr) {
-			// A getter keeps the prop live: each child read re-evaluates
-			// it, so effects and bindings that read props.X track the
-			// parent's signals instead of a hydration-time snapshot.
-			sb.WriteString("get ")
-			sb.WriteString(jsObjectKey(name))
-			sb.WriteString("(){return ")
-			sb.WriteString(val)
-			sb.WriteString("}")
-			continue
-		}
-		sb.WriteString(jsObjectKey(name))
-		sb.WriteByte(':')
-		sb.WriteString(val)
+		// A getter keeps a signal-derived prop live: each child read
+		// re-evaluates it, so effects and bindings that read props.X track
+		// the parent's signals instead of a hydration-time snapshot.
+		reg.Entries = append(reg.Entries, PropsRegEntry{Name: name, Value: val, Getter: b.isSignalDerivedProp(expr)})
 	}
-	sb.WriteByte('}')
-	return sb.String()
+	return reg
 }
 
 // isSignalDerivedProp reports whether a call-site prop value reads one of the

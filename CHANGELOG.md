@@ -429,6 +429,10 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- A client component's hydration props carry only what its client code reads. Props used only to render
+  the HTML (a docs sidebar tree, breadcrumbs, page metadata) are no longer copied into every page script: docs-site
+  page scripts drop from 962 kB to 709 kB gzip in total, and editing one page's sidebar entry no longer
+  changes the script hash of every other page.
 - Production runtime trimming reads client code as code: names in strings, comments and text no longer
   pull in optional runtime pieces, and `"use server"` in a code sample no longer marks a page as having
   server actions (which shipped every piece). The docs site ships only the list piece (runtime chunk

@@ -452,6 +452,11 @@ type ComponentNode struct {
 	Effects      []string
 	Memos        []string
 	ExtraVars    []string
+	// PropsRegs holds the structured form of the child props registrations
+	// in ExtraVars, so the renderer can emit only the props each child's
+	// client code reads (see renderer/propsreads.go). A registration missing
+	// here is emitted as-is.
+	PropsRegs []PropsReg
 	// FuncProps records the call-site props whose values are function
 	// references (a local function or arrow in the parent scope) rather than
 	// const-foldable values. Such props cannot be serialized to a literal: the
@@ -649,6 +654,7 @@ type ComponentSignature struct {
 	Effects         []string
 	Memos           []string
 	ExtraVars       []string
+	PropsRegs       []PropsReg
 	PreSignalVars   []string
 	FuncPropAliases []string
 	IslandBoot      []string

@@ -714,6 +714,11 @@ func (b *builder) finishClientComponent(node *ComponentNode, fn *ast.FnDecl, res
 	// (their values reference its signals), before child IIFEs read them.
 	if len(res.propsRegs) > 0 {
 		node.ExtraVars = append(node.ExtraVars, res.propsRegs...)
+		for _, js := range res.propsRegs {
+			if reg, ok := b.propsRegs[js]; ok {
+				node.PropsRegs = append(node.PropsRegs, reg)
+			}
+		}
 	}
 	// Local and module-level functions referenced by handlers, effects, memos
 	// and dynamic list slot expressions must be in hydration scope, and so

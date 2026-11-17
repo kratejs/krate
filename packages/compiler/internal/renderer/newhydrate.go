@@ -125,6 +125,7 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 	// rewritten afterwards (see suspense.go).
 	var spans []sigSpan
 	blockers := RouteScopeBlockers(result.Signatures)
+	plan := planPropsRegs(result)
 	for i := range result.Signatures {
 		sig := result.Signatures[i]
 		if sig.Tier != irtree.TierClient {
@@ -169,283 +170,7 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 		// One failing component must not stop the scopes after it, or the
 		// router. Suspense signals pass through to the boundary run.
 		b.WriteString("try{\n")
-
-		// The component's own props object declaration must precede signal
-		// initializers: signal RawInits like `createSignal(props.x || "")`
-		// evaluate props at hydration time (they can't be const-folded when the
-		// props are runtime values hoisted from the parent scope).
-		for _, ev := range sig.ExtraVars {
-			if strings.HasPrefix(ev, "var props=__krate_props[") {
-				b.WriteString(ev)
-				b.WriteString(";\n")
-			}
-		}
-
-		// Local values a signal initializer may evaluate at hydration time
-		// (e.g. createSignal(initial.value)) must be declared before the signal
-		// declarations. These never read signals themselves, so ordering them
-		// ahead is safe.
-		for _, ev := range sig.PreSignalVars {
-			b.WriteString(ev)
-			b.WriteString(";\n")
-		}
-
-		for _, s := range sig.Signals {
-			val := s.Initial
-			if s.RawInit != "" {
-				// Non-constant initializer (e.g. createSignal(Math.random())):
-				// emit the real expression so the client evaluates it instead of
-				// hydrating the signal to undefined.
-				val = s.RawInit
-			} else if s.IsString {
-				val = "'" + escapeJSString(val) + "'"
-			} else if !isJSNumberOrKeyword(val) {
-				// Any resolved value that is not a recognised JS number/keyword
-				// literal is string data whose type wasn't inferred (e.g.
-				// "Hello world", "1.2.3", "NaN"). Quote it, or the emitted
-				// createSignal(...) is invalid JS / references an undefined
-				// global.
-				val = "'" + escapeJSString(val) + "'"
-			}
-			factory := "createSignal(" + val + ")"
-			if s.OptionsJS != "" {
-				// Preserve the signal's options (e.g. `{ persist: 'key' }`) so
-				// the runtime can restore/persist the value across reloads.
-				factory = "createSignal(" + val + "," + s.OptionsJS + ")"
-			}
-			if s.FactoryJS != "" {
-				// Reactive primitives whose setter is not a plain write (e.g.
-				// createReducer) emit their full factory call instead.
-				factory = s.FactoryJS
-			}
-			b.WriteString("const [")
-			b.WriteString(s.Name)
-			b.WriteString(",")
-			b.WriteString(s.SetterName)
-			b.WriteString("]=")
-			b.WriteString(factory)
-			b.WriteString(";\n")
-		}
-
-		// Extra variables (must come before effects/memos that may reference them)
-		for _, ev := range sig.ExtraVars {
-			if strings.HasPrefix(ev, "var props=__krate_props[") {
-				continue
-			}
-			b.WriteString(ev)
-			b.WriteString(";\n")
-		}
-
-		// Function-prop aliases (`var onNavigate = props.onNavigate`): live reads
-		// of the registry object declared just above. These must precede the
-		// effects/handlers that invoke the aliased function.
-		for _, alias := range sig.FuncPropAliases {
-			b.WriteString("var ")
-			b.WriteString(alias)
-			b.WriteString(";\n")
-		}
-
-		// External island prop providers. These must run inside this component's
-		// IIFE: the props read its signal getters/setters directly.
-		for _, js := range sig.IslandBoot {
-			b.WriteString(js)
-			b.WriteByte('\n')
-		}
-
-		// Refs: attach the live DOM node to the ref (object, callback or plain
-		// variable) with React semantics. Runs after the extra vars are
-		// declared and before any effect, so layout effects see the node.
-		for _, rb := range sig.RefBindings {
-			writeRefBinding(&b, rb)
-		}
-
-		// Imperative handles are layout-phase effects registered next to the
-		// refs; children's layout effects (and handles) run before parents'.
-		for _, eff := range sig.Effects {
-			if isRefPhaseEffect(eff) {
-				b.WriteString(eff)
-				b.WriteString(";\n")
-			}
-		}
-
-		for i, memo := range sig.Memos {
-			b.WriteString("const _memo")
-			b.WriteString(itoa(i))
-			b.WriteString("=")
-			b.WriteString(memo)
-			b.WriteString(";\n")
-		}
-
-		// Effects register here; the runtime runs them in the commit that
-		// follows hydration (effects.ts), after every component has bound its
-		// refs and DOM, so an effect can read a ref forwarded to a child.
-		for _, eff := range sig.Effects {
-			if isRefPhaseEffect(eff) {
-				continue
-			}
-			b.WriteString(eff)
-			b.WriteString(";\n")
-		}
-
-		// Slot bindings: compact calls into the shared kbind* helpers.
-		for _, sb := range sig.SlotBindings {
-			if sb.ExprJS == "" {
-				continue
-			}
-			switch sb.Type {
-			case "text":
-				b.WriteString("kbindText(")
-				b.WriteString(strconv.Quote(string(sb.SlotID)))
-				b.WriteString(",()=>")
-				b.WriteString(sb.ExprJS)
-				b.WriteString(");\n")
-			case "list":
-				if sb.List != nil {
-					// Keyed list runtime: rows adopt the server-rendered DOM by
-					// key and are reconciled by key on every change.
-					b.WriteString("kbindList(")
-					b.WriteString(strconv.Quote(string(sb.SlotID)))
-					b.WriteString(",()=>(")
-					b.WriteString(sb.List.Source)
-					b.WriteString("),")
-					if sb.List.Key != "" {
-						b.WriteString(sb.List.Key)
-					} else {
-						b.WriteString("null")
-					}
-					b.WriteString(",")
-					b.WriteString(sb.List.Render)
-					if sb.List.Accessor {
-						b.WriteString(",1);\n")
-					} else {
-						b.WriteString(",0);\n")
-					}
-					continue
-				}
-				b.WriteString("kbindContent(")
-				b.WriteString(strconv.Quote(string(sb.SlotID)))
-				b.WriteString(",()=>")
-				b.WriteString(sb.ExprJS)
-				b.WriteString(");\n")
-			case "expr":
-				marked := result.TrackSources && sb.Pos.Line > 0 && sb.File != ""
-				if marked {
-					b.WriteString(SrcMarkPrefix + itoa(len(result.SrcMarks)) + "*/")
-					result.SrcMarks = append(result.SrcMarks, SrcMark{File: sb.File, Line: sb.Pos.Line, Col: sb.Pos.Col})
-				}
-				b.WriteString("kbindContent(")
-				b.WriteString(strconv.Quote(string(sb.SlotID)))
-				b.WriteString(",()=>")
-				b.WriteString(sb.ExprJS)
-				b.WriteString(");")
-				if marked {
-					b.WriteString(SrcMarkEnd)
-				}
-				b.WriteString("\n")
-			case "activity":
-				b.WriteString("kbindActivity(")
-				b.WriteString(strconv.Quote(string(sb.SlotID)))
-				b.WriteString(",()=>(")
-				b.WriteString(sb.ExprJS)
-				b.WriteString("));\n")
-			case "conditional":
-				b.WriteString("kbindCond(")
-				b.WriteString(strconv.Quote(string(sb.SlotID)))
-				b.WriteString(",()=>(")
-				b.WriteString(sb.ExprJS)
-				b.WriteString("));\n")
-			}
-		}
-
-		// Event handlers: the runtime maps the React prop (onClick,
-		// onChangeCapture, ...) to its native events, phase and delegation.
-		for _, h := range sig.Handlers {
-			prop := h.Prop
-			if prop == "" {
-				prop = "on" + h.Event
-				if h.Capture {
-					prop += "Capture"
-				}
-			}
-			marked := result.TrackSources && h.Pos.Line > 0 && h.File != ""
-			if marked {
-				b.WriteString(SrcMarkPrefix + itoa(len(result.SrcMarks)) + "*/")
-				result.SrcMarks = append(result.SrcMarks, SrcMark{File: h.File, Line: h.Pos.Line, Col: h.Pos.Col})
-			}
-			b.WriteString("kbindHandler(")
-			b.WriteString(strconv.Quote(string(h.ElementSlotID)))
-			b.WriteString(",")
-			b.WriteString(strconv.Quote(prop))
-			b.WriteString(",")
-			b.WriteString(h.Body)
-			b.WriteString(");")
-			if marked {
-				b.WriteString(SrcMarkEnd)
-			}
-			b.WriteString("\n")
-		}
-
-		// Attribute bindings: update the attribute on signal changes.
-		for _, a := range sig.AttrBindings {
-			exprJS := a.ExprSource
-			if exprJS == "" && a.SignalName != "" {
-				exprJS = a.SignalName + "()"
-			}
-			if exprJS == "" {
-				continue
-			}
-			if strings.HasPrefix(exprJS, "{") {
-				// An object literal (a style object) is an expression body.
-				exprJS = "(" + exprJS + ")"
-			}
-			if a.Guard != "" {
-				// The element sits in a hidden conditional branch: leave the
-				// expression unevaluated until the branch is shown.
-				exprJS = guardedIfRisky(a.Guard, exprJS, attrInactiveValue(a))
-			}
-			// value/checked/selected are DOM properties, not attributes: setting
-			// the attribute after interaction has no effect.
-			name := a.AttrName
-			if a.AttrName == irtree.TextContentAttr {
-				b.WriteString("kbindTextContent(")
-				b.WriteString(strconv.Quote(string(a.ElementSlotID)))
-				b.WriteString(",()=>")
-				b.WriteString(exprJS)
-				b.WriteString(");\n")
-				continue
-			}
-			if a.AttrName == irtree.SpreadAttr {
-				b.WriteString("kbindSpread(")
-				b.WriteString(strconv.Quote(string(a.ElementSlotID)))
-				b.WriteString(",()=>")
-				b.WriteString(exprJS)
-				b.WriteString(");\n")
-				continue
-			}
-			if a.AttrName == irtree.InnerHTMLAttr {
-				b.WriteString("kbindInnerHTML(")
-				b.WriteString(strconv.Quote(string(a.ElementSlotID)))
-				b.WriteString(",()=>")
-				b.WriteString(exprJS)
-				b.WriteString(");\n")
-				continue
-			}
-			if isFormPropertyAttr(a.AttrName) {
-				b.WriteString("kbindProp(")
-				if a.Prop != "" {
-					name = a.Prop
-				}
-			} else {
-				b.WriteString("kbindAttr(")
-			}
-			b.WriteString(strconv.Quote(string(a.ElementSlotID)))
-			b.WriteString(",")
-			b.WriteString(strconv.Quote(name))
-			b.WriteString(",()=>")
-			b.WriteString(exprJS)
-			b.WriteString(");\n")
-		}
-
+		writeScopeBody(&b, result, sig, plan.render(sig), true)
 		b.WriteString("}catch(e){__krateScopeErr(e);}\n")
 		if owned || remountable {
 			b.WriteString("});\n")
@@ -484,6 +209,292 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 	b.WriteString("})();\n")
 
 	return dropUnusedPureVars(finishSuspenseHydration(result, b.String(), spans, listFns.String()))
+}
+
+// writeScopeBody writes the statements of one component's hydration scope.
+// ev renders each ExtraVars entry ("" drops it). marks records source marks;
+// the props-read analysis renders scopes without them.
+func writeScopeBody(b *strings.Builder, result *EmitResult, sig irtree.ComponentSignature, render func(v string) string, marks bool) {
+	// The component's own props object declaration must precede signal
+	// initializers: signal RawInits like `createSignal(props.x || "")`
+	// evaluate props at hydration time (they can't be const-folded when the
+	// props are runtime values hoisted from the parent scope).
+	for _, ev := range sig.ExtraVars {
+		if strings.HasPrefix(ev, "var props=__krate_props[") {
+			if js := render(ev); js != "" {
+				b.WriteString(js)
+				b.WriteString(";\n")
+			}
+		}
+	}
+
+	// Local values a signal initializer may evaluate at hydration time
+	// (e.g. createSignal(initial.value)) must be declared before the signal
+	// declarations. These never read signals themselves, so ordering them
+	// ahead is safe.
+	for _, ev := range sig.PreSignalVars {
+		b.WriteString(ev)
+		b.WriteString(";\n")
+	}
+
+	for _, s := range sig.Signals {
+		val := s.Initial
+		if s.RawInit != "" {
+			// Non-constant initializer (e.g. createSignal(Math.random())):
+			// emit the real expression so the client evaluates it instead of
+			// hydrating the signal to undefined.
+			val = s.RawInit
+		} else if s.IsString {
+			val = "'" + escapeJSString(val) + "'"
+		} else if !isJSNumberOrKeyword(val) {
+			// Any resolved value that is not a recognised JS number/keyword
+			// literal is string data whose type wasn't inferred (e.g.
+			// "Hello world", "1.2.3", "NaN"). Quote it, or the emitted
+			// createSignal(...) is invalid JS / references an undefined
+			// global.
+			val = "'" + escapeJSString(val) + "'"
+		}
+		factory := "createSignal(" + val + ")"
+		if s.OptionsJS != "" {
+			// Preserve the signal's options (e.g. `{ persist: 'key' }`) so
+			// the runtime can restore/persist the value across reloads.
+			factory = "createSignal(" + val + "," + s.OptionsJS + ")"
+		}
+		if s.FactoryJS != "" {
+			// Reactive primitives whose setter is not a plain write (e.g.
+			// createReducer) emit their full factory call instead.
+			factory = s.FactoryJS
+		}
+		b.WriteString("const [")
+		b.WriteString(s.Name)
+		b.WriteString(",")
+		b.WriteString(s.SetterName)
+		b.WriteString("]=")
+		b.WriteString(factory)
+		b.WriteString(";\n")
+	}
+
+	// Extra variables (must come before effects/memos that may reference them)
+	for _, ev := range sig.ExtraVars {
+		if strings.HasPrefix(ev, "var props=__krate_props[") {
+			continue
+		}
+		if js := render(ev); js != "" {
+			b.WriteString(js)
+			b.WriteString(";\n")
+		}
+	}
+
+	// Function-prop aliases (`var onNavigate = props.onNavigate`): live reads
+	// of the registry object declared just above. These must precede the
+	// effects/handlers that invoke the aliased function.
+	for _, alias := range sig.FuncPropAliases {
+		b.WriteString("var ")
+		b.WriteString(alias)
+		b.WriteString(";\n")
+	}
+
+	// External island prop providers. These must run inside this component's
+	// IIFE: the props read its signal getters/setters directly.
+	for _, js := range sig.IslandBoot {
+		b.WriteString(js)
+		b.WriteByte('\n')
+	}
+
+	// Refs: attach the live DOM node to the ref (object, callback or plain
+	// variable) with React semantics. Runs after the extra vars are
+	// declared and before any effect, so layout effects see the node.
+	for _, rb := range sig.RefBindings {
+		writeRefBinding(b, rb)
+	}
+
+	// Imperative handles are layout-phase effects registered next to the
+	// refs; children's layout effects (and handles) run before parents'.
+	for _, eff := range sig.Effects {
+		if isRefPhaseEffect(eff) {
+			b.WriteString(eff)
+			b.WriteString(";\n")
+		}
+	}
+
+	for i, memo := range sig.Memos {
+		b.WriteString("const _memo")
+		b.WriteString(itoa(i))
+		b.WriteString("=")
+		b.WriteString(memo)
+		b.WriteString(";\n")
+	}
+
+	// Effects register here; the runtime runs them in the commit that
+	// follows hydration (effects.ts), after every component has bound its
+	// refs and DOM, so an effect can read a ref forwarded to a child.
+	for _, eff := range sig.Effects {
+		if isRefPhaseEffect(eff) {
+			continue
+		}
+		b.WriteString(eff)
+		b.WriteString(";\n")
+	}
+
+	// Slot bindings: compact calls into the shared kbind* helpers.
+	for _, sb := range sig.SlotBindings {
+		if sb.ExprJS == "" {
+			continue
+		}
+		switch sb.Type {
+		case "text":
+			b.WriteString("kbindText(")
+			b.WriteString(strconv.Quote(string(sb.SlotID)))
+			b.WriteString(",()=>")
+			b.WriteString(sb.ExprJS)
+			b.WriteString(");\n")
+		case "list":
+			if sb.List != nil {
+				// Keyed list runtime: rows adopt the server-rendered DOM by
+				// key and are reconciled by key on every change.
+				b.WriteString("kbindList(")
+				b.WriteString(strconv.Quote(string(sb.SlotID)))
+				b.WriteString(",()=>(")
+				b.WriteString(sb.List.Source)
+				b.WriteString("),")
+				if sb.List.Key != "" {
+					b.WriteString(sb.List.Key)
+				} else {
+					b.WriteString("null")
+				}
+				b.WriteString(",")
+				b.WriteString(sb.List.Render)
+				if sb.List.Accessor {
+					b.WriteString(",1);\n")
+				} else {
+					b.WriteString(",0);\n")
+				}
+				continue
+			}
+			b.WriteString("kbindContent(")
+			b.WriteString(strconv.Quote(string(sb.SlotID)))
+			b.WriteString(",()=>")
+			b.WriteString(sb.ExprJS)
+			b.WriteString(");\n")
+		case "expr":
+			marked := marks && result.TrackSources && sb.Pos.Line > 0 && sb.File != ""
+			if marked {
+				b.WriteString(SrcMarkPrefix + itoa(len(result.SrcMarks)) + "*/")
+				result.SrcMarks = append(result.SrcMarks, SrcMark{File: sb.File, Line: sb.Pos.Line, Col: sb.Pos.Col})
+			}
+			b.WriteString("kbindContent(")
+			b.WriteString(strconv.Quote(string(sb.SlotID)))
+			b.WriteString(",()=>")
+			b.WriteString(sb.ExprJS)
+			b.WriteString(");")
+			if marked {
+				b.WriteString(SrcMarkEnd)
+			}
+			b.WriteString("\n")
+		case "activity":
+			b.WriteString("kbindActivity(")
+			b.WriteString(strconv.Quote(string(sb.SlotID)))
+			b.WriteString(",()=>(")
+			b.WriteString(sb.ExprJS)
+			b.WriteString("));\n")
+		case "conditional":
+			b.WriteString("kbindCond(")
+			b.WriteString(strconv.Quote(string(sb.SlotID)))
+			b.WriteString(",()=>(")
+			b.WriteString(sb.ExprJS)
+			b.WriteString("));\n")
+		}
+	}
+
+	// Event handlers: the runtime maps the React prop (onClick,
+	// onChangeCapture, ...) to its native events, phase and delegation.
+	for _, h := range sig.Handlers {
+		prop := h.Prop
+		if prop == "" {
+			prop = "on" + h.Event
+			if h.Capture {
+				prop += "Capture"
+			}
+		}
+		marked := marks && result.TrackSources && h.Pos.Line > 0 && h.File != ""
+		if marked {
+			b.WriteString(SrcMarkPrefix + itoa(len(result.SrcMarks)) + "*/")
+			result.SrcMarks = append(result.SrcMarks, SrcMark{File: h.File, Line: h.Pos.Line, Col: h.Pos.Col})
+		}
+		b.WriteString("kbindHandler(")
+		b.WriteString(strconv.Quote(string(h.ElementSlotID)))
+		b.WriteString(",")
+		b.WriteString(strconv.Quote(prop))
+		b.WriteString(",")
+		b.WriteString(h.Body)
+		b.WriteString(");")
+		if marked {
+			b.WriteString(SrcMarkEnd)
+		}
+		b.WriteString("\n")
+	}
+
+	// Attribute bindings: update the attribute on signal changes.
+	for _, a := range sig.AttrBindings {
+		exprJS := a.ExprSource
+		if exprJS == "" && a.SignalName != "" {
+			exprJS = a.SignalName + "()"
+		}
+		if exprJS == "" {
+			continue
+		}
+		if strings.HasPrefix(exprJS, "{") {
+			// An object literal (a style object) is an expression body.
+			exprJS = "(" + exprJS + ")"
+		}
+		if a.Guard != "" {
+			// The element sits in a hidden conditional branch: leave the
+			// expression unevaluated until the branch is shown.
+			exprJS = guardedIfRisky(a.Guard, exprJS, attrInactiveValue(a))
+		}
+		// value/checked/selected are DOM properties, not attributes: setting
+		// the attribute after interaction has no effect.
+		name := a.AttrName
+		if a.AttrName == irtree.TextContentAttr {
+			b.WriteString("kbindTextContent(")
+			b.WriteString(strconv.Quote(string(a.ElementSlotID)))
+			b.WriteString(",()=>")
+			b.WriteString(exprJS)
+			b.WriteString(");\n")
+			continue
+		}
+		if a.AttrName == irtree.SpreadAttr {
+			b.WriteString("kbindSpread(")
+			b.WriteString(strconv.Quote(string(a.ElementSlotID)))
+			b.WriteString(",()=>")
+			b.WriteString(exprJS)
+			b.WriteString(");\n")
+			continue
+		}
+		if a.AttrName == irtree.InnerHTMLAttr {
+			b.WriteString("kbindInnerHTML(")
+			b.WriteString(strconv.Quote(string(a.ElementSlotID)))
+			b.WriteString(",()=>")
+			b.WriteString(exprJS)
+			b.WriteString(");\n")
+			continue
+		}
+		if isFormPropertyAttr(a.AttrName) {
+			b.WriteString("kbindProp(")
+			if a.Prop != "" {
+				name = a.Prop
+			}
+		} else {
+			b.WriteString("kbindAttr(")
+		}
+		b.WriteString(strconv.Quote(string(a.ElementSlotID)))
+		b.WriteString(",")
+		b.WriteString(strconv.Quote(name))
+		b.WriteString(",()=>")
+		b.WriteString(exprJS)
+		b.WriteString(");\n")
+	}
+
 }
 
 // pageNeedsOwners reports whether any client component registers effects,
