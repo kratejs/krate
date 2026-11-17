@@ -2964,7 +2964,12 @@ func (b *builder) buildHandlerDecl(attr *ast.JSXAttr, elementID string) *Handler
 	if body == "" {
 		return nil
 	}
+	inline := body
 	body = b.bindLoopVars(body)
+	local := ""
+	if body == inline {
+		local = b.localHandlerName(attr.Value)
+	}
 	signals := b.collectSignalReads(attr.Value)
 
 	pos := attr.Position
@@ -2981,7 +2986,29 @@ func (b *builder) buildHandlerDecl(attr *ast.JSXAttr, elementID string) *Handler
 		Direct:        direct,
 		File:          b.sourceLoc(),
 		Pos:           pos,
+		local:         local,
 	}
+}
+
+// localHandlerName returns the name of the component-body function a handler
+// expression names (`onClick={handleCopy}`, a function declaration or a
+// const arrow), or "" when the expression is anything else or the name is
+// rebound at this position (a list callback parameter).
+func (b *builder) localHandlerName(expr ast.Expr) string {
+	if ta, ok := expr.(*ast.TypeAssertion); ok {
+		return b.localHandlerName(ta.Expr)
+	}
+	id, ok := expr.(*ast.Identifier)
+	if !ok || b.localFnBody == nil || b.isShadowed(id.Name) {
+		return ""
+	}
+	if _, bound := b.loopBindings[id.Name]; bound {
+		return ""
+	}
+	if findLocalFunction(id.Name, b.localFnBody) == nil && findLocalConstFn(id.Name, b.localFnBody) == nil {
+		return ""
+	}
+	return id.Name
 }
 
 // buildAttrBinding - extract dynamic attribute

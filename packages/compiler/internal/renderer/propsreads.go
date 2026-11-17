@@ -28,19 +28,46 @@ import (
 // not model, or when the child's scope cannot be found. Renderer boundaries
 // hand their whole props object to the runtime and are never filtered (their
 // registrations have no structured form).
+//
+// A registration left with no entries is not emitted at all. Its reader then
+// binds nothing (`var props=` is dropped) or, when its scope still mentions
+// `props` (replayed body code such as an unused `var x=props.x`), an empty
+// object, so those reads stay undefined instead of throwing.
 type propsPlan struct {
 	// keep maps a registration id to the entry names to emit. An id that is
 	// absent keeps every entry.
 	keep map[string]map[string]bool
+	// usesProps holds the registration ids whose reader scope mentions
+	// `props` outside its own declaration.
+	usesProps map[string]bool
+}
+
+// dropped reports whether the registration id has no entries to emit.
+func (p *propsPlan) dropped(id string) bool {
+	names, ok := p.keep[id]
+	return ok && len(names) == 0
 }
 
 // render returns the ExtraVars renderer for sig's scope.
 func (p *propsPlan) render(sig irtree.ComponentSignature) func(string) string {
-	if p == nil || len(p.keep) == 0 || len(sig.PropsRegs) == 0 {
+	if p == nil || len(p.keep) == 0 {
 		return identityVar
 	}
 	regs := regsByJS(sig)
 	return func(v string) string {
+		if strings.HasPrefix(v, "var props=__krate_props[") {
+			id, binding, ok := parsePropsDecl(v)
+			if !ok || !p.dropped(id) {
+				return v
+			}
+			if binding != "" {
+				return "var props={};var " + binding + "=props"
+			}
+			if p.usesProps[id] {
+				return "var props={}"
+			}
+			return ""
+		}
 		reg, ok := regs[v]
 		if !ok {
 			return v
@@ -48,6 +75,9 @@ func (p *propsPlan) render(sig irtree.ComponentSignature) func(string) string {
 		names, ok := p.keep[reg.ID]
 		if !ok {
 			return v
+		}
+		if len(names) == 0 {
+			return ""
 		}
 		return reg.JS(func(name string) bool { return names[name] })
 	}
@@ -108,6 +138,9 @@ type scopeInfo struct {
 	sig   irtree.ComponentSignature
 	ownID string     // registry id the scope binds as `props` ("" when none)
 	base  propsReads // reads outside the registrations it makes
+	// mentions reports a `props` identifier outside the declaration and the
+	// registrations the scope makes.
+	mentions bool
 }
 
 // planPropsRegs analyses every client scope of the page and decides which
@@ -166,6 +199,7 @@ func planPropsRegs(result *EmitResult) *propsPlan {
 			return nil
 		}
 		sc.base.merge(reads)
+		sc.mentions = codeMentions(buf.String(), "props")
 		scopes = append(scopes, sc)
 		if sc.ownID != "" {
 			byID[sc.ownID] = append(byID[sc.ownID], sc)
@@ -236,7 +270,37 @@ func planPropsRegs(result *EmitResult) *propsPlan {
 			keepFor(reg.ID)
 		}
 	}
+	// A reader whose kept registrations forward props.x still needs props.
+	plan.usesProps = map[string]bool{}
+	for _, sc := range scopes {
+		if sc.ownID == "" {
+			continue
+		}
+		uses := sc.mentions
+		for _, reg := range sc.sig.PropsRegs {
+			names := plan.keep[reg.ID]
+			for _, e := range reg.Entries {
+				if (names == nil || names[e.Name]) && codeMentions(e.Value, "props") {
+					uses = true
+				}
+			}
+		}
+		if uses {
+			plan.usesProps[sc.ownID] = true
+		}
+	}
 	return plan
+}
+
+// codeMentions reports whether code references the identifier name.
+func codeMentions(code, name string) bool {
+	found := false
+	irtree.ScanJSIdentsAt(code, func(n string, _ int) {
+		if n == name {
+			found = true
+		}
+	})
+	return found
 }
 
 // parsePropsDecl splits `var props=__krate_props["<id>"]` (optionally

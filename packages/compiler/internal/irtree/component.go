@@ -495,7 +495,11 @@ func (b *builder) localDecls(fn *ast.FnDecl, node *ComponentNode, fold *localFol
 			continue
 		}
 		init := fold.inits[name]
-		frag := bodyJS{ord: order.ofName(name), js: b.localDeclJS(name, init, fold)}
+		js, pure := b.localDeclJS(name, init, fold)
+		if pure {
+			node.addPureDecl(js, name)
+		}
+		frag := bodyJS{ord: order.ofName(name), js: js}
 		// Signal-referencing locals must be declared after the signal
 		// declarations; everything else merges with the pre fragments.
 		if init != nil && b.referencesSignal(init) {
@@ -567,12 +571,14 @@ func (b *builder) leakedDestructDecls(fold *localFold, order *bodyOrder) (pre, p
 // AST, since a folded string cannot be told apart from a string constant. A
 // folded, non-reactive scalar (e.g. `const classes = cn(cva(...))`) is
 // emitted as its value.
-func (b *builder) localDeclJS(name string, init ast.Expr, fold *localFold) string {
+// pure reports a declaration without side effects: a build-time literal or
+// a plain `props.x` read.
+func (b *builder) localDeclJS(name string, init ast.Expr, fold *localFold) (js string, pure bool) {
 	locals := fold.locals
 	changed := fold.changed[name]
 	if derivedCallee(init) != "" {
 		// A derived getter is always re-created at hydration.
-		return "var " + name + "=" + generateExprJS(b.derivedDeclInit(init), b.sigMap())
+		return "var " + name + "=" + generateExprJS(b.derivedDeclInit(init), b.sigMap()), false
 	}
 	foldable := init != nil && !changed && !locals[name].IsUnknown() && !b.referencesSignal(init) && !isReferenceInit(init)
 	if foldable {
@@ -583,10 +589,28 @@ func (b *builder) localDeclJS(name string, init ast.Expr, fold *localFold) strin
 	}
 	if init != nil && !foldable && (changed || referencesProps(init) || referencesAnyLocal(init, b.sigMap(), locals) || isReferenceInit(init) || locals[name].IsUnknown()) {
 		if js := generateExprJS(init, b.sigMap()); js != "" {
-			return "var " + name + "=" + js
+			return "var " + name + "=" + js, isPlainPropsRead(init)
 		}
 	}
-	return "var " + name + "=" + valueJSLiteral(locals[name])
+	return "var " + name + "=" + valueJSLiteral(locals[name]), true
+}
+
+// isPlainPropsRead reports `props.x`: a read of a plain registry object.
+func isPlainPropsRead(e ast.Expr) bool {
+	m, ok := e.(*ast.MemberExpr)
+	if !ok || m.Computed || m.Optional {
+		return false
+	}
+	obj, ok := m.Object.(*ast.Identifier)
+	return ok && obj.Name == "props"
+}
+
+// addPureDecl records a side-effect-free declaration (see PureDecls).
+func (n *ComponentNode) addPureDecl(js, name string) {
+	if n.PureDecls == nil {
+		n.PureDecls = make(map[string]string)
+	}
+	n.PureDecls[js] = name
 }
 
 // buildComponentReturn lowers the render return (early-return guards become a
@@ -726,6 +750,7 @@ func (b *builder) finishClientComponent(node *ComponentNode, fn *ast.FnDecl, res
 	// which are declared before the signals and pre-signal vars. A constant's
 	// initializer can call an imported helper (`const store =
 	// createStore(0)`), so both are resolved until nothing new is found.
+	inlined := bindLocalHandlers(node, fn)
 	emittedFns := map[string]bool{}
 	addFunctions := func() {
 		for _, fnDecl := range b.collectReferencedFunctions(node, fn.Body) {
@@ -735,6 +760,7 @@ func (b *builder) finishClientComponent(node *ComponentNode, fn *ast.FnDecl, res
 			emittedFns[fnDecl.Name] = true
 			if fnJS := b.reactifier().renderFnDeclJS(fnDecl, b.sigMap()); fnJS != "" {
 				node.ExtraVars = append(node.ExtraVars, fnJS)
+				node.addPureDecl(fnJS, fnDecl.Name)
 			}
 		}
 	}
@@ -751,10 +777,78 @@ func (b *builder) finishClientComponent(node *ComponentNode, fn *ast.FnDecl, res
 		addFunctions()
 	}
 	dropShadowedFunctions(node, constDecls)
+	restoreUndeclaredHandlers(node, inlined)
 	b.checkUnbundledImports(node)
 	if needsNoClientJS(node, fn, b.localFuncProps) && !res.forceClient && !b.rendersLiveProps(node) && !node.Lazy {
 		node.Tier = TierStatic
 	}
+}
+
+// bindLocalHandlers makes each handler that names a function of the
+// component body (onClick={handleCopy}) bind that function by name, so its
+// body is emitted once, as the declaration, instead of again inline at every
+// element. The function runs in the same scope either way, so `this`,
+// `arguments` and its closures are unchanged. It returns the inline bodies by
+// handler index for restoreUndeclaredHandlers.
+func bindLocalHandlers(node *ComponentNode, fn *ast.FnDecl) map[int]string {
+	var inlined map[int]string
+	for i := range node.Handlers {
+		h := &node.Handlers[i]
+		if h.local == "" || isComponentName(h.local) {
+			continue
+		}
+		if findLocalFunction(h.local, fn.Body) == nil && findLocalConstFn(h.local, fn.Body) == nil {
+			continue
+		}
+		if inlined == nil {
+			inlined = make(map[int]string)
+		}
+		inlined[i] = h.Body
+		h.Body = h.local
+	}
+	return inlined
+}
+
+// restoreUndeclaredHandlers puts the inline body back on a handler whose
+// function the hydration scope does not declare after all (a const arrow
+// that reads props in a page root, a function dropped for a shadowing
+// module constant).
+func restoreUndeclaredHandlers(node *ComponentNode, inlined map[int]string) {
+	if len(inlined) == 0 {
+		return
+	}
+	declared := map[string]bool{}
+	for _, list := range [][]string{node.PreSignalVars, node.ExtraVars} {
+		for _, v := range list {
+			if name := hoistedDeclName(v); name != "" {
+				declared[name] = true
+			}
+		}
+	}
+	for i, body := range inlined {
+		if !declared[node.Handlers[i].Body] {
+			node.Handlers[i].Body = body
+		}
+	}
+}
+
+// hoistedDeclName returns the name a hydration-scope declaration binds:
+// `var x=...`, `function x(...`, `async function* x(...`.
+func hoistedDeclName(v string) string {
+	v = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(v), PureVarBegin))
+	if name := extraVarName(v); name != "" {
+		return name
+	}
+	v = strings.TrimPrefix(v, "async ")
+	rest, ok := strings.CutPrefix(v, "function")
+	if !ok {
+		return ""
+	}
+	rest = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(rest), "*"))
+	if i := strings.IndexAny(rest, "( "); i > 0 {
+		return rest[:i]
+	}
+	return ""
 }
 
 // dropShadowedFunctions removes a function declaration from the component's

@@ -126,9 +126,28 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 	var spans []sigSpan
 	blockers := RouteScopeBlockers(result.Signatures)
 	plan := planPropsRegs(result)
+	bodies := make([]string, len(result.Signatures))
+	for i, sig := range result.Signatures {
+		if sig.Tier == irtree.TierClient {
+			render := plan.render(sig)
+			if dead := deadDecls(result, sig, render); len(dead) > 0 {
+				live := render
+				render = func(v string) string {
+					if dead[v] {
+						return ""
+					}
+					return live(v)
+				}
+			}
+			var body strings.Builder
+			writeScopeBody(&body, result, sig, render, true)
+			bodies[i] = body.String()
+		}
+	}
+	skip := emptyScopes(result.Signatures, bodies, owned, owners)
 	for i := range result.Signatures {
 		sig := result.Signatures[i]
-		if sig.Tier != irtree.TierClient {
+		if sig.Tier != irtree.TierClient || skip[i] {
 			continue
 		}
 		scoped := routeScoped(sig, blockers)
@@ -170,7 +189,7 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 		// One failing component must not stop the scopes after it, or the
 		// router. Suspense signals pass through to the boundary run.
 		b.WriteString("try{\n")
-		writeScopeBody(&b, result, sig, plan.render(sig), true)
+		b.WriteString(bodies[i])
 		b.WriteString("}catch(e){__krateScopeErr(e);}\n")
 		if owned || remountable {
 			b.WriteString("});\n")
@@ -211,6 +230,102 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 	return dropUnusedPureVars(finishSuspenseHydration(result, b.String(), spans, listFns.String()))
 }
 
+// emptyScopes marks the client scopes the page script can leave out: scopes
+// with no statements. Without effect owners such a scope does nothing. With
+// them (pageNeedsOwners) it only declares an owner (krateOwner) holding no
+// effects or bindings; that owner matters only as the parent of other scopes'
+// owners, so it is kept when an emitted scope names it as parent, unless it
+// is a top-level owner with no conditional branch or list slot whose children
+// share its route scope (they behave the same as children of the root owner).
+// Nothing else looks owners up by id. Pages with the class/boundary owner
+// tree, lazy and boundary scopes keep every scope (their rewrites expect it).
+func emptyScopes(sigs []irtree.ComponentSignature, bodies []string, owned, owners bool) map[int]bool {
+	if owned {
+		return nil
+	}
+	skip := map[int]bool{}
+	for i, sig := range sigs {
+		if sig.Tier == irtree.TierClient && bodies[i] == "" && !sig.Lazy && sig.Boundary == "" {
+			skip[i] = true
+		}
+	}
+	if !owners {
+		return skip
+	}
+	// A parent of a kept scope is kept; repeat until nothing changes.
+	for changed := len(skip) > 0; changed; {
+		changed = false
+		for i := range skip {
+			parent := sigs[i]
+			transparent := parent.ParentID == "" && len(parent.Conds) == 0 && parent.ListSlot == ""
+			for j, child := range sigs {
+				if child.Tier != irtree.TierClient || skip[j] || child.ParentID != parent.ComponentID {
+					continue
+				}
+				if !transparent || child.RouteScope != parent.RouteScope {
+					delete(skip, i)
+					changed = true
+					break
+				}
+			}
+		}
+	}
+	return skip
+}
+
+// deadDecls returns the side-effect-free declarations of sig's scope
+// (sig.PureDecls, and an empty `var props={}` binding) that no other code in
+// the scope references, so leaving them out changes nothing. Dropping one
+// can leave another unreferenced (a helper only a dropped helper called), so
+// it repeats until nothing changes. A scope that calls eval keeps everything.
+func deadDecls(result *EmitResult, sig irtree.ComponentSignature, render func(string) string) map[string]bool {
+	pure := make(map[string]string, len(sig.PureDecls)+1)
+	for js, name := range sig.PureDecls {
+		pure[js] = name
+	}
+	for _, ev := range sig.ExtraVars {
+		if strings.HasPrefix(ev, "var props=__krate_props[") && render(ev) == "var props={}" {
+			pure[ev] = "props"
+		}
+	}
+	if len(pure) == 0 {
+		return nil
+	}
+	own := make(map[string]int, len(pure))
+	for js, name := range pure {
+		irtree.ScanJSIdentsAt(render(js), func(n string, _ int) {
+			if n == name {
+				own[js]++
+			}
+		})
+	}
+	dead := map[string]bool{}
+	for {
+		var body strings.Builder
+		writeScopeBody(&body, result, sig, func(v string) string {
+			if dead[v] {
+				return ""
+			}
+			return render(v)
+		}, false)
+		refs := map[string]int{}
+		irtree.ScanJSIdentsAt(body.String(), func(n string, _ int) { refs[n]++ })
+		if refs["eval"] > 0 {
+			return nil
+		}
+		changed := false
+		for js, name := range pure {
+			if !dead[js] && refs[name] <= own[js] {
+				dead[js] = true
+				changed = true
+			}
+		}
+		if !changed {
+			return dead
+		}
+	}
+}
+
 // writeScopeBody writes the statements of one component's hydration scope.
 // ev renders each ExtraVars entry ("" drops it). marks records source marks;
 // the props-read analysis renders scopes without them.
@@ -233,8 +348,10 @@ func writeScopeBody(b *strings.Builder, result *EmitResult, sig irtree.Component
 	// declarations. These never read signals themselves, so ordering them
 	// ahead is safe.
 	for _, ev := range sig.PreSignalVars {
-		b.WriteString(ev)
-		b.WriteString(";\n")
+		if js := render(ev); js != "" {
+			b.WriteString(js)
+			b.WriteString(";\n")
+		}
 	}
 
 	for _, s := range sig.Signals {

@@ -30,6 +30,13 @@ implemented.
   child that reads them); props used only for the server-rendered HTML are left
   out. Code that passes `props` whole, spreads it or indexes it with a computed
   key gets every prop, and so do renderer boundaries
-  (`internal/renderer/propsreads.go`).
+  (`internal/renderer/propsreads.go`). A registration left empty is not
+  emitted, and the child then binds no `props` at all.
+- A handler that names a function of the component body (`onClick={handleCopy}`)
+  binds that function, so its body appears once per scope however many elements
+  use it. Side-effect-free declarations nothing in the scope references (helper
+  functions, locals folded to a build-time value) are left out, and so are
+  scopes with no statements unless another scope's effects owner hangs off them
+  (`internal/renderer/newhydrate.go`).
 
 See [Choosing an approach](/docs/core-concepts/rendering/) for what to use when.

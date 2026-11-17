@@ -374,6 +374,10 @@ type HandlerDecl struct {
 	// hydration source maps.
 	File string
 	Pos  ast.Pos
+	// local names the component-body function the handler is (onClick=
+	// {handleCopy}); finishClientComponent binds that declaration instead of
+	// a second copy of its body when the scope declares it.
+	local string
 }
 
 // RefBinding - ref={someVar} on an element
@@ -457,6 +461,11 @@ type ComponentNode struct {
 	// client code reads (see renderer/propsreads.go). A registration missing
 	// here is emitted as-is.
 	PropsRegs []PropsReg
+	// PureDecls maps the ExtraVars and PreSignalVars entries that declare one
+	// name without side effects (function declarations, locals folded to a
+	// build-time literal) to that name. The renderer leaves out one that no
+	// other code in the scope references.
+	PureDecls map[string]string
 	// FuncProps records the call-site props whose values are function
 	// references (a local function or arrow in the parent scope) rather than
 	// const-foldable values. Such props cannot be serialized to a literal: the
@@ -655,6 +664,7 @@ type ComponentSignature struct {
 	Memos           []string
 	ExtraVars       []string
 	PropsRegs       []PropsReg
+	PureDecls       map[string]string
 	PreSignalVars   []string
 	FuncPropAliases []string
 	IslandBoot      []string

@@ -12,22 +12,22 @@
     "js": 0
   },
   "/docs": {
-    "html": 3462,
+    "html": 3461,
     "css": 10122,
-    "ownJs": 35536,
-    "js": 35536
+    "ownJs": 35198,
+    "js": 35198
   },
   "/docs/apis": {
-    "html": 4236,
+    "html": 4235,
     "css": 11364,
-    "ownJs": 37948,
-    "js": 37948
+    "ownJs": 37597,
+    "js": 37597
   },
   "/docs/guide": {
-    "html": 4196,
+    "html": 4198,
     "css": 11364,
-    "ownJs": 37877,
-    "js": 37877
+    "ownJs": 37525,
+    "js": 37525
   },
   "/react-island": {
     "html": 701,

@@ -429,6 +429,9 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- Smaller per-page hydration code: a handler named by its declaration (`onClick={handleCopy}`) is bound by
+  name instead of repeating its body, and empty props registrations, unused helpers and folded locals, and
+  empty component scopes are left out. Docs-site page scripts drop from 709 kB to 661 kB gzip in total.
 - A client component's hydration props carry only what its client code reads. Props used only to render
   the HTML (a docs sidebar tree, breadcrumbs, page metadata) are no longer copied into every page script: docs-site
   page scripts drop from 962 kB to 709 kB gzip in total, and editing one page's sidebar entry no longer

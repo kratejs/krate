@@ -814,6 +814,7 @@ func (e *Emitter) emitClient(node *irtree.ComponentNode) SlotOutput {
 		Memos:           node.Memos,
 		ExtraVars:       node.ExtraVars,
 		PropsRegs:       node.PropsRegs,
+		PureDecls:       node.PureDecls,
 		PreSignalVars:   node.PreSignalVars,
 		FuncPropAliases: node.FuncPropAliases,
 		IslandBoot:      node.IslandBoot,
