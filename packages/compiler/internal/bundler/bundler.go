@@ -516,6 +516,7 @@ func (b *Bundler) Bundle(entry string) (*Bundle, error) {
 		return nil, err
 	}
 	b.isolatePrivateNames()
+	b.pruneSideEffectFreeCSS()
 
 	// Rewrite CSS module member expressions (styles.card) to their hashed
 	// literal values now that all modules are resolved. Without this, both the

@@ -376,7 +376,17 @@ is used on nearly the same pages, and a page links at most five stylesheets
 besides the site-global Tailwind one. The files are linked in source order and
 rules are never reordered, so the cascade you wrote is the cascade that ships,
 and `@layer` blocks are preserved as authored. `krate dev` writes one stylesheet
-per page. See
+per page.
+
+A package that declares `"sideEffects"` in its `package.json` ships the CSS of a
+module only when that module is used. With `"sideEffects": false`, or a list of
+the files that do have side effects such as `["*.css"]`, a stylesheet that a
+component module imports is shipped only if the page imports that component (or
+names it), even through a barrel that re-exports every component: importing
+`Card` from `@krate/components` brings `card.css`, not the CSS of all 50
+components. A package without the field keeps every stylesheet its modules
+import. A component that renders another component's classes should import that
+stylesheet itself. See
 [Contributing -> Architecture](/docs/contributing/architecture/#css-pipeline) for
 the full processing steps.
 

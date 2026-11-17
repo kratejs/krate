@@ -57,7 +57,10 @@ between files would reorder the cascade. `krate dev` keeps one stylesheet per pa
 The processing steps are:
 
 1. **Collect** CSS per page from its module graph (module CSS, layout CSS,
-   CSS-signal rules), in source/import order.
+   CSS-signal rules), in source/import order. A stylesheet imported only by
+   modules of a package that declares `sideEffects` is dropped unless one of
+   those modules is reachable from the names the page imports or uses
+   (`internal/bundler/sideeffects.go`).
 2. **Inline `@import`** recursively with a comment- and string-aware scan,
    relative to each file's own directory (files anywhere under the project root
    and bare `node_modules` specifiers, including a package's `style` field).

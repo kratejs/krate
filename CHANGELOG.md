@@ -432,6 +432,9 @@ host code runs in the native process. Names and options may change between relea
 - Page CSS is split by source: a theme, each component stylesheet and the page's own CSS are separate
   hashed files that every page using them shares, linked in the same order, so the cascade is unchanged.
   A visit across four docs pages downloads 17.7 kB of CSS instead of 35.4 kB (`krate dev` keeps one sheet).
+- Component CSS ships only for the components a page uses: the bundler honours `"sideEffects"` in a
+  package's `package.json`, so importing one component from a barrel no longer pulls in every component's
+  stylesheet. `@krate/components` declares `["*.css"]`; the markdown guide's CSS drops from 17.9 to 11.9 kB gzip.
 - Smaller per-page hydration code: a handler named by its declaration (`onClick={handleCopy}`) is bound by
   name instead of repeating its body, and empty props registrations, unused helpers and folded locals, and
   empty component scopes are left out. Docs-site page scripts drop from 709 kB to 661 kB gzip in total.
