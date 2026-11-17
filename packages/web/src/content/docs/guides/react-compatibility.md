@@ -1462,6 +1462,11 @@ the scene reads page state directly. `@krate/three/drei` provides drei's
 uses. Use the real-React island when you need other libraries built on
 `@react-three/fiber`.
 
+For 2D canvases, [`@krate/konva`](/docs/features/konva/) has the `react-konva`
+API the same way: `<Stage>` compiles with the page (or runs in the Preact island
+of a `"use client"` component), and `krate migrate nextjs` moves `react-konva`
+code onto it when it only uses what `@krate/konva` provides.
+
 ```tsx
 // src/components/Viewer.tsx
 import { Canvas } from '@react-three/fiber';

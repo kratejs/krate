@@ -207,9 +207,17 @@ The first pass:
   `reconciler`, a package built on fiber such as `@react-spring/three`) keeps
   every fiber module as it is, because they render each other's components in
   one canvas, and each blocking use is listed as a manual item. Keep
-  `@react-three/fiber` and drei installed while a real-React island (for example
-  a react-konva editor) renders one of the 3D components: there the build runs
-  `@krate/three` as fiber;
+  `@react-three/fiber` and drei installed while a real-React island renders one
+  of the 3D components: there the build runs `@krate/three` as fiber;
+- moves `react-konva` code to [`@krate/konva`](/docs/features/konva/) when every
+  react-konva API the project's modules use is provided (Stage, the layers and
+  shapes, Transformer, `useStrictMode`, `useContextBridge`), and adds
+  `@krate/konva` to `package.json` (a manual item without `--update-package`).
+  Type imports from `konva` stay as they are. The canvas then runs on Krate, or
+  on the Preact island of a `"use client"` component, instead of a real-React
+  island. `KonvaRenderer`, an internal `react-konva/...` subpath or a package
+  built on react-konva (such as `react-konva-utils`) keeps every react-konva
+  module as it is, and each blocking use is listed as a manual item;
 - converts `next/script`: `<Script strategy="afterInteractive">` (the default)
   becomes a Krate `<Script defer>`, `lazyOnload` an `async` one and
   `beforeInteractive` a `<script>` inside `<Head>`; `src`, `id`, `data-*`

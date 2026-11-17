@@ -311,7 +311,7 @@ func migrateReactThree(rep *Report, root string) {
 	if len(dreiUsed) > 0 {
 		msg += " and " + strings.Join(dreiUsed, ", ") + " from @react-three/drei to @krate/three/drei"
 	}
-	rep.Warnings = append(rep.Warnings, msg+"; keep @react-three/fiber and @react-three/drei installed while a real-React island (react-konva, ...) renders a 3D module: the build runs @krate/three there as fiber")
+	rep.Warnings = append(rep.Warnings, msg+"; keep @react-three/fiber and @react-three/drei installed while a real-React island renders a 3D module: the build runs @krate/three there as fiber")
 	addKrateThreeDependency(rep, root)
 }
 
