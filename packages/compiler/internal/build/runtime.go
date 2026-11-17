@@ -50,33 +50,32 @@ type runtimeChunkOptions struct {
 	Compat bool
 	// Suspense appends the Suspense/use()/lazy/transition runtime.
 	Suspense bool
-	// Trim assembles only the runtime features Scan references (production
+	// Trim assembles only the runtime features Usage needs (production
 	// builds); otherwise the full hydration bundle is written.
 	Trim bool
-	// Scan is the client code checked for runtime feature references.
-	Scan string
+	// Usage is what the site's client code needs from the runtime.
+	Usage runtimeUsage
 	// Features, when set, receives the optional features the trimmed runtime
 	// includes (nil when the runtime is not trimmed).
 	Features *[]string
 }
 
-// runtimeNeedsCompat reports whether any page's hydration script references a
-// React compatibility API that lives in CompatBootstrapJS.
-func runtimeNeedsCompat(results []*PageResult) bool {
-	markers := []string{
-		"useImperativeHandle", "useDebugValue",
-		"isValidElement", "Children", "cloneElement", "createRef",
-		// Lazy chunks are separate files; their code may use compat APIs.
-		"__krateLazy(",
+// compatRefs are the React compatibility APIs that live in
+// CompatBootstrapJS.
+var compatRefs = []string{
+	"useImperativeHandle", "useDebugValue",
+	"isValidElement", "Children", "cloneElement", "createRef",
+}
+
+// runtimeNeedsCompat reports whether the site's client code references a
+// React compatibility API, or loads lazy chunks that were not scanned.
+func runtimeNeedsCompat(u runtimeUsage) bool {
+	if u.LazyUnscanned {
+		return true
 	}
-	for _, r := range results {
-		if r == nil || r.HydrationJS == "" {
-			continue
-		}
-		for _, marker := range markers {
-			if strings.Contains(r.HydrationJS, marker) {
-				return true
-			}
+	for _, name := range compatRefs {
+		if u.Refs[name] {
+			return true
 		}
 	}
 	return false
@@ -101,9 +100,8 @@ func pageNeedsRuntime(r *PageResult) bool {
 	if perRequestClientCode(r) {
 		return true
 	}
-	return strings.Contains(r.HTML, "<"+islandMarkup) ||
-		strings.Contains(r.HTML, actionsMarkup) ||
-		strings.Contains(r.HTML, "/__krate/action/")
+	_, island, actions := scanPageMarkup(r.HTML)
+	return island || actions
 }
 
 // perRequestClientCode reports whether the HTML a page produces per request
@@ -239,7 +237,7 @@ func writeRuntimeChunk(outDir string, shouldMinify bool, projectRoot string, opt
 	runtime := ""
 	if opts.Trim {
 		var included []string
-		runtime, included = loadRuntimeFeatures(projectRoot, opts.SPA, opts.Scan)
+		runtime, included = loadRuntimeFeatures(projectRoot, opts.SPA, opts.Usage)
 		if opts.Features != nil {
 			*opts.Features = included
 		}
@@ -331,12 +329,16 @@ func warnMissingRuntime(runtimeJS string, results []*PageResult) {
 // built pages. Dev builds always write the full runtime: a rebuild of a few
 // pages must not change what the others were built against.
 func (b *Builder) runtimeChunkOptions(results []*PageResult) runtimeChunkOptions {
+	if b.runtimeResultsHook != nil {
+		b.runtimeResultsHook(results)
+	}
+	usage := runtimeUsageOf(results)
 	return runtimeChunkOptions{
 		SPA:      b.Cfg.SPAEnabled(),
-		Compat:   runtimeNeedsCompat(results),
-		Suspense: runtimeNeedsSuspense(results),
+		Compat:   runtimeNeedsCompat(usage),
+		Suspense: runtimeNeedsSuspense(usage),
 		Trim:     !b.DevMode,
-		Scan:     runtimeScanText(results),
+		Usage:    usage,
 		Features: &b.runtimeFeatures,
 	}
 }

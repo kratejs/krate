@@ -429,6 +429,10 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- Production runtime trimming reads client code as code: names in strings, comments and text no longer
+  pull in optional runtime pieces, and `"use server"` in a code sample no longer marks a page as having
+  server actions (which shipped every piece). The docs site ships only the list piece (runtime chunk
+  46.6 kB to 31.4 kB gzip), and a heading no longer changes the runtime hash of the whole site.
 - The build's size table counts the chunks a page's scripts import (island chunks, shared modules,
   import-mapped packages) in its JS column, so a React-heavy page no longer reports less than half of
   what it loads. A footnote notes routes that load mermaid or KaTeX from the CDN, which are not counted.

@@ -30,6 +30,12 @@ counter page ships about 25 KB of gzipped runtime JS (about 17 KB with
 `spa: false`); each extra piece adds between 2 and 5 KB gzipped. `krate dev`
 always serves the full runtime.
 
+Only code and markup count as a reference: a call in client code, or a
+server action form in the HTML. A heading, a code sample or any other text
+that names an API (`requestFormReset`, `Children`, `"use server"`) does not, so
+the runtime chunk, and its hash, change only when client code does. A page
+with a client island or HTML rendered per request gets every piece.
+
 ## Site metadata
 
 `site` is the canonical site metadata; `seo` is a deprecated alias (a config

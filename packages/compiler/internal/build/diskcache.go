@@ -58,6 +58,9 @@ type diskPageEntry struct {
 	ScriptHTML  string
 	StyleHTML   string
 	HydrationJS string
+	// RuntimeRefs keeps a recorded empty set distinct from nil (not
+	// recorded), so a replay decides runtime features as the cold build did.
+	RuntimeRefs []string
 	JSFile      string
 	JSBytes     []byte
 	CSS         string

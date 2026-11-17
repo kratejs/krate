@@ -58,6 +58,8 @@ type auditSite struct {
 	cfg     *config.Config
 	builder *Builder
 	pages   map[string]string // route -> html file path
+	// results are the page results the runtime chunk was derived from.
+	results []*PageResult
 }
 
 var (
@@ -101,10 +103,12 @@ func buildAuditSite(t *testing.T) *auditSite {
 			return
 		}
 		b := New(root, cfg)
+		var results []*PageResult
+		captureRuntimeResults(b, &results)
 		if auditErr = b.BuildAll(); auditErr != nil {
 			return
 		}
-		st := &auditSite{root: root, cfg: cfg, builder: b, pages: map[string]string{}}
+		st := &auditSite{root: root, cfg: cfg, builder: b, pages: map[string]string{}, results: results}
 		routes, err := b.RouteList()
 		if err != nil {
 			auditErr = err
@@ -174,6 +178,10 @@ func TestOutputAudit(t *testing.T) {
 		if strings.Join(got, ",") != strings.Join(want, ",") {
 			t.Errorf("the fixture ships runtime features %v, expected %v.\nIf this change is intended, edit auditExpectedRuntimeFeatures in output_audit_test.go.", got, want)
 		}
+	})
+
+	t.Run("runtime features cover the old scan", func(t *testing.T) {
+		checkLegacyCoverage(t, site.results)
 	})
 
 	t.Run("third-party loads", func(t *testing.T) {
@@ -427,6 +435,9 @@ export default function Island() {
 	"src/pages/components.tsx": `import { Card, Aside } from '@krate/components';
 export default function C() { return <main><h1>Components</h1><Card title="A">body</Card><Aside type="note">hello</Aside></main>; }`,
 	"src/content/docs/index.md": "---\ntitle: Welcome\norder: 1\n---\n\n# Welcome\n\nPlain page with no code, math or diagrams.\n",
+	// Headings and code samples that name runtime APIs, server action markup
+	// and a "use server" directive: text, which must not add runtime features.
+	"src/content/docs/apis.md":  "---\ntitle: APIs\norder: 3\n---\n\n# APIs\n\n## requestFormReset\n\n## Children, keys, and refs\n\n## krateHighlight and useParams\n\n```tsx\nasync function save() {\n  \"use server\";\n}\nexport default () => <form action={save} data-krate-action />;\n```\n",
 	"src/content/docs/guide.md": "---\ntitle: Guide\norder: 2\n---\n\n# Guide\n\nWrite generics as `Array<appId>` or &lt;Profiler&gt; in prose.\n\n```ts\nconst a: Array<number> = [1];\n```\n\n```mermaid\ngraph TD; A-->B;\n```\n\nInline $x^2$ and\n\n$$\n\\int_0^1 x dx\n$$\n\n## Second\n\ntext\n",
 }
 

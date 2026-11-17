@@ -63,7 +63,7 @@ func TestRuntimeChunkKeepsReferencedFeatures(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := writeTrimmedChunk(t, runtimeChunkOptions{SPA: true, Scan: tt.scan})
+			got := writeTrimmedChunk(t, runtimeChunkOptions{SPA: true, Usage: runtimeUsage{Refs: jsRefs(tt.scan)}})
 			if !strings.Contains(got, tt.want) {
 				t.Errorf("runtime is missing %s for %q", tt.want, tt.scan)
 			}

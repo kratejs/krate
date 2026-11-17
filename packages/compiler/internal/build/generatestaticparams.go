@@ -911,6 +911,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 
 	jsFile := ""
 	hydrationJS := ""
+	runtimeRefs := []string{}
 	hasJS := false
 	var pageProviders *islandProviders
 	pageIslands := tree.ExternalComponents
@@ -977,9 +978,12 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		}
 		if strings.TrimSpace(hydrationJS) != "" {
 			hasJS = true
+			rawJS, minified := hydrationJS, ""
 			if b.shouldMinifyJS() {
 				hydrationJS = minifyJS(hydrationJS)
+				minified = hydrationJS
 			}
+			runtimeRefs = recordRuntimeRefs(rawJS, minified, emitResult.LazyChunks)
 			finalJS := strings.TrimSpace(hydrationJS)
 			jsHash := hashContent([]byte(finalJS))
 			jsFile = "index." + jsHash + ".js"
@@ -1009,6 +1013,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		ScriptHTML:  emitResult.ScriptHTML,
 		StyleHTML:   emitResult.StyleHTML,
 		HydrationJS: hydrationJS,
+		RuntimeRefs: runtimeRefs,
 		HasJS:       hasJS,
 		JSFile:      jsFile,
 		HasCSS:      pageCSS != "",

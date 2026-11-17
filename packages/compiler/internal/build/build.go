@@ -60,10 +60,15 @@ type PageResult struct {
 	HTML     string
 	HeadHTML string
 	// FontURLs are the fonts this page's own stylesheet asks to preload.
-	FontURLs      []fontFace
-	ScriptHTML    string
-	StyleHTML     string
-	HydrationJS   string
+	FontURLs    []fontFace
+	ScriptHTML  string
+	StyleHTML   string
+	HydrationJS string
+	// RuntimeRefs are the global names the page's client code (its hydration
+	// script and lazy chunks) references, recorded before minification
+	// renames locals; they decide which runtime features ship. nil when not
+	// recorded, in which case HydrationJS is scanned instead.
+	RuntimeRefs   []string
 	JSFile        string
 	CSSFile       string
 	CSSModernFile string // modern-only stylesheet for the UA sibling (hybrid+userAgent)
@@ -150,6 +155,9 @@ type Builder struct {
 	// runtimeFeatures are the optional runtime features the last runtime
 	// chunk included; the output audit test reads it.
 	runtimeFeatures []string
+	// runtimeResultsHook, when set by a test, receives the page results the
+	// runtime chunk is derived from.
+	runtimeResultsHook func([]*PageResult)
 	// DebugGo builds the native Go host for a debugger: no optimizations or
 	// inlining, and source paths as they are on disk (see compileGoHost).
 	DebugGo bool
@@ -3102,6 +3110,7 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 
 	jsFile := ""
 	hydrationJS := ""
+	runtimeRefs := []string{}
 	var jsBytes []byte
 	hasJS := false
 	var pageProviders *islandProviders
@@ -3211,6 +3220,11 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 					finalJS = minifyJS(rawJS)
 				}
 			}
+			minified := ""
+			if finalJS != rawJS {
+				minified = finalJS
+			}
+			runtimeRefs = recordRuntimeRefs(rawJS, minified, emitResult.LazyChunks)
 
 			// Write page-specific hydration code only (runtime is in a shared chunk)
 			finalJS = strings.TrimSpace(finalJS)
@@ -3279,6 +3293,7 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 		ScriptHTML:    emitResult.ScriptHTML,
 		StyleHTML:     emitResult.StyleHTML,
 		HydrationJS:   hydrationJS,
+		RuntimeRefs:   runtimeRefs,
 		HasJS:         hasJS,
 		JSFile:        jsFile,
 		HasCSS:        pageCSS != "",
@@ -3377,6 +3392,7 @@ func (b *Builder) tryDiskReplay(page string) (*PageResult, string, bool) {
 		ScriptHTML:    e.ScriptHTML,
 		StyleHTML:     e.StyleHTML,
 		HydrationJS:   e.HydrationJS,
+		RuntimeRefs:   e.RuntimeRefs,
 		HasJS:         e.HasJS,
 		JSFile:        e.JSFile,
 		HasCSS:        e.HasCSS,
@@ -3431,6 +3447,7 @@ func (b *Builder) maybeStoreDiskPage(page string, r *PageResult, deps []string, 
 		ScriptHTML:    r.ScriptHTML,
 		StyleHTML:     r.StyleHTML,
 		HydrationJS:   r.HydrationJS,
+		RuntimeRefs:   r.RuntimeRefs,
 		JSFile:        r.JSFile,
 		JSBytes:       jsBytes,
 		CSS:           r.CSS,
