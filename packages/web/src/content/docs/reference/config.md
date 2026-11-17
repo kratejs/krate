@@ -104,8 +104,9 @@ formatting is preserved when it is off.
 
 ## CSS
 
-Each page gets one stylesheet (identical sheets share one hashed file), `@import`s are inlined,
-and the merged stylesheet is minified when `minifyCSS` (or `minify`) is on.
+Page CSS is split by source into hashed files that pages share (a theme or a component's
+stylesheet is one file for every page that uses it), `@import`s are inlined, and each
+stylesheet is minified when `minifyCSS` (or `minify`) is on.
 Tailwind generates CSS only for classes detected in the scanned sources, so
 unused utility classes never ship. There are no per-feature CSS config toggles.
 

@@ -532,7 +532,7 @@ dist/
   index.html                 # pre-rendered pages (one per route)
   docs/...                   # plugin-generated pages (e.g. the docs site)
   index.<hash>.js            # per-page hydration bundles
-  styles.<hash>.css          # merged, deduplicated CSS
+  styles.<hash>.css          # page CSS, one file per shared source (theme, components, page)
   chunks/runtime.<hash>.js   # shared runtime chunk
   .krate/manifest.json       # page + SSR/ISR metadata (build metadata, not published)
   _krate/images/...          # processed <Image> variants

@@ -68,20 +68,21 @@ type PageResult struct {
 	// script and lazy chunks) references, recorded before minification
 	// renames locals; they decide which runtime features ship. nil when not
 	// recorded, in which case HydrationJS is scanned instead.
-	RuntimeRefs   []string
-	JSFile        string
-	CSSFile       string
-	CSSModernFile string // modern-only stylesheet for the UA sibling (hybrid+userAgent)
-	CSSLegacyFile string // legacy-only stylesheet for the UA sibling (hybrid+userAgent)
-	CSS           string // this page's own imported CSS (before minification/hashing)
-	RuntimeJSFile string // shared runtime chunk path (relative to outDir), e.g. "chunks/runtime.abc.js"
-	HasJS         bool
-	HasCSS        bool
-	HasCSSSignals bool // page emitted CSS-signal rules (drives the legacy sibling)
-	IsErrorPage   bool
-	UsedCSS       map[string]bool
-	UsedFuncs     map[string]bool
-	LoadingHTML   string // rendered loading.tsx fallback for SPA transitions
+	RuntimeRefs []string
+	JSFile      string
+	// CSSFiles are the page's stylesheets in cascade order (see writePageCSS).
+	CSSFiles       []string
+	CSSModernFiles []string // modern-only stylesheets for the UA sibling (hybrid+userAgent)
+	CSSLegacyFiles []string // legacy-only stylesheets for the UA sibling (hybrid+userAgent)
+	CSS            string   // this page's own imported CSS (before minification/hashing)
+	RuntimeJSFile  string   // shared runtime chunk path (relative to outDir), e.g. "chunks/runtime.abc.js"
+	HasJS          bool
+	HasCSS         bool
+	HasCSSSignals  bool // page emitted CSS-signal rules (drives the legacy sibling)
+	IsErrorPage    bool
+	UsedCSS        map[string]bool
+	UsedFuncs      map[string]bool
+	LoadingHTML    string // rendered loading.tsx fallback for SPA transitions
 
 	// FinalHTML is the fully assembled document written to disk (head + body,
 	// SEO injection, minification). Populated by writeHTMLPages; consumed by
@@ -1607,9 +1608,12 @@ func (b *Builder) BuildAll() error {
 
 			IsErrorPage: r.IsErrorPage,
 		}
-		if r.CSSFile != "" && !seenCSS[r.CSSFile] {
-			seenCSS[r.CSSFile] = true
-			if data, err := os.ReadFile(filepath.Join(b.Cfg.OutDir, r.CSSFile)); err == nil {
+		for _, f := range r.CSSFiles {
+			if seenCSS[f] {
+				continue
+			}
+			seenCSS[f] = true
+			if data, err := os.ReadFile(filepath.Join(b.Cfg.OutDir, f)); err == nil {
 				mergedPageCSS.Write(data)
 				mergedPageCSS.WriteString("\n")
 			}
@@ -1991,124 +1995,6 @@ func (b *Builder) writeGlobalCSS(mergedCSS string) (string, error) {
 	return cssFile, nil
 }
 
-// writePageCSS writes one hashed stylesheet per page from the page's own CSS.
-// Pages sharing identical CSS (e.g. every docs page under the same theme, or
-// every page wrapped by the same layout) collapse onto one shared file, so each
-// page only downloads the CSS its own module graph imported. Syntax-highlight
-// (chroma) CSS is prepended only when the page actually renders highlighted
-// code. Returns the set of stylesheet filenames written.
-func (b *Builder) writePageCSS(results []*PageResult) (map[string]bool, error) {
-	written := make(map[string]bool)
-	// Memoize the expensive inline+directive+minify pipeline: many pages share
-	// byte-identical CSS (the docs theme is linked on every page), so process
-	// each distinct input once.
-	type processed struct {
-		file       string
-		data       []byte
-		twInfo     twPageInfo
-		modernFile string
-		modernData []byte
-		legacyFile string
-		legacyData []byte
-		fonts      []fontFace
-	}
-	memo := make(map[string]processed)
-	var chromaCSS string
-	chromaLoaded := false
-	var codeTheme syntaxhighlight.Theme
-	if b.Cfg.Markdown.CodeHighlight {
-		// Resolve up front so an unknown theme name is reported even on a
-		// build that renders no code.
-		codeTheme = b.codeTheme()
-	}
-
-	// Per-variant stylesheets: in hybrid+userAgent mode the UA sibling should
-	// download only the legacy signal rules (and the default document only the
-	// modern rules), so split the hybrid stylesheet per variant.
-	variants := b.legacyDocEnabled()
-
-	var writeErrs []error
-	write := func(file string, data []byte) {
-		if file == "" || written[file] {
-			return
-		}
-		if err := writeOutput(filepath.Join(b.Cfg.OutDir, file), data); err != nil {
-			writeErrs = append(writeErrs, err)
-		}
-		written[file] = true
-	}
-	var lastFonts []fontFace
-	process := func(pageCss string) (string, []byte, twPageInfo) {
-		processedCSS := b.inlineImports(pageCss)
-		processedCSS, info := b.processCSSDirectives(processedCSS)
-		processedCSS = injectFontDisplay(processedCSS, b.Cfg.Fonts.DisplayValue())
-		processedCSS = b.prefixCSSURLs(processedCSS)
-		lastFonts = nil
-		if b.Cfg.Fonts.PreloadEnabled() {
-			lastFonts = collectFontFaces(processedCSS, b.Cfg.Fonts.PreloadLimit)
-		}
-		if b.Cfg.ShouldMinifyCSS() {
-			processedCSS = css.Minify(processedCSS)
-		} else {
-			processedCSS = css.RemoveDuplicateDeclarations(processedCSS)
-		}
-		bs := []byte(processedCSS)
-		if strings.TrimSpace(processedCSS) == "" {
-			return "", nil, info
-		}
-		return "styles." + hashContent(bs) + ".css", bs, info
-	}
-
-	for _, r := range results {
-		if r.CSS == "" && !pageRendersCode(r) {
-			b.setTailwindPage(r.Page, twPageInfo{})
-			continue
-		}
-		pageCss := r.CSS
-		if b.Cfg.Markdown.CodeHighlight && pageRendersCode(r) {
-			if !chromaLoaded {
-				chromaCSS = syntaxhighlight.ThemeCSS(codeTheme)
-				chromaLoaded = true
-			}
-			if chromaCSS != "" {
-				pageCss = chromaCSS + "\n" + pageCss
-			}
-		}
-
-		key := hashContent([]byte(pageCss))
-		p, ok := memo[key]
-		if !ok {
-			p.file, p.data, p.twInfo = process(pageCss)
-			p.fonts = lastFonts
-			if variants && r.HasCSSSignals {
-				modernRaw, legacyRaw := splitVariantCSS(pageCss)
-				p.modernFile, p.modernData, _ = process(modernRaw)
-				if p.modernFile != "" {
-					p.modernFile = strings.TrimSuffix(p.modernFile, ".css") + ".modern.css"
-				}
-				p.legacyFile, p.legacyData, _ = process(legacyRaw)
-				if p.legacyFile != "" {
-					p.legacyFile = strings.TrimSuffix(p.legacyFile, ".css") + ".legacy.css"
-				}
-			}
-			memo[key] = p
-		}
-		r.CSSFile = p.file
-		r.FontURLs = p.fonts
-		b.setTailwindPage(r.Page, p.twInfo)
-		write(p.file, p.data)
-		if p.modernFile != "" {
-			r.CSSModernFile = p.modernFile
-			write(p.modernFile, p.modernData)
-		}
-		if p.legacyFile != "" {
-			r.CSSLegacyFile = p.legacyFile
-			write(p.legacyFile, p.legacyData)
-		}
-	}
-	return written, errors.Join(writeErrs...)
-}
-
 // codeTheme resolves the configured light and dark code themes. An unknown
 // name is reported once (KR7150) and replaced by the default for its mode.
 func (b *Builder) codeTheme() syntaxhighlight.Theme {
@@ -2140,7 +2026,7 @@ func pageRendersCode(r *PageResult) bool {
 // writeHTMLPages builds the layout wrapper, applies placeholders, minifies,
 // and saves to disk in a single parallel step (Zero Disk-I/O Amplification Fix)
 // cssFiles are extra global stylesheets (e.g. Tailwind) linked on every page in
-// addition to each page's own stylesheet (r.CSSFile).
+// addition to each page's own stylesheets (r.CSSFiles).
 // durableStateScript returns the `<script>window.__KRATE_STATE__=...</script>`
 // tag for the project's durable state, read once from `krate.state.json` (or
 // `.krate/state.json`). Returns "" when neither exists or the JSON is invalid.
@@ -2211,22 +2097,20 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 
 			// 1. Construct structural HTML wrapper in memory.
 			// Site-global stylesheets (e.g. Tailwind) are linked first, then
-			// the page's own stylesheet (r.CSSFile). Tailwind output is
-			// layered, so page CSS wins over preflight and utilities by
-			// layer precedence, and page `@layer base` rules follow preflight.
-			pageCSS := append([]string{}, cssFiles...)
-			if r.CSSFile != "" {
-				pageCSS = append(pageCSS, r.CSSFile)
-			}
-			// UA siblings link a variant-only stylesheet when the build emitted
-			// one (hybrid+userAgent); otherwise they share the page sheet.
+			// the page's own stylesheets (r.CSSFiles, in cascade order).
+			// Tailwind output is layered, so page CSS wins over preflight and
+			// utilities by layer precedence, and page `@layer base` rules
+			// follow preflight.
+			pageCSS := append(append([]string{}, cssFiles...), r.CSSFiles...)
+			// UA siblings link variant-only stylesheets when the build emitted
+			// them (hybrid+userAgent); otherwise they share the page sheets.
 			legacyPageCSS := pageCSS
-			if r.CSSLegacyFile != "" {
-				legacyPageCSS = append(append([]string{}, cssFiles...), r.CSSLegacyFile)
+			if len(r.CSSLegacyFiles) > 0 {
+				legacyPageCSS = append(append([]string{}, cssFiles...), r.CSSLegacyFiles...)
 			}
 			modernPageCSS := pageCSS
-			if r.CSSModernFile != "" {
-				modernPageCSS = append(append([]string{}, cssFiles...), r.CSSModernFile)
+			if len(r.CSSModernFiles) > 0 {
+				modernPageCSS = append(append([]string{}, cssFiles...), r.CSSModernFiles...)
 			}
 			devBootstrap := ""
 			if b.DevMode {
@@ -3023,11 +2907,11 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 	}
 	pl.Lap("layouts")
 	// Layouts come first (outermost first) so page CSS wins ties.
-	bundle.CSS = b.dedupeModuleCSS(page, layoutCSS+bundle.CSS, bundle.CSSModules)
+	bundle.CSS = b.dedupeModuleCSS(page, joinCSSParts(layoutCSS, bundle.CSS), bundle.CSSModules)
 	// Generated CSS signal rules land in the page's own hashed stylesheet, after
 	// layout CSS so author styles can override the defaults.
 	if choiceCSS != "" {
-		bundle.CSS += choiceCSS
+		bundle.CSS += "\n" + css.PartMarker("") + choiceCSS
 		// Legacy/hybrid modes drive the class-based stylesheet with a scoped
 		// shim; modern mode stays zero-JS.
 		emitResult.ScriptHTML += b.compatShimHTML()
@@ -3139,7 +3023,7 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 	if islandStyles != nil {
 		// Stylesheets imported by compiled package islands join the page CSS and
 		// the page's dependencies like any other imported stylesheet.
-		bundle.CSS += islandStyles.CSS
+		bundle.CSS = joinCSSParts(bundle.CSS, islandStyles.CSS)
 		for src, url := range islandStyles.Assets {
 			bundle.AssetFiles[src] = url
 		}
@@ -4405,7 +4289,7 @@ func (b *Builder) applyLayoutStack(page string, emitResult *renderer.EmitResult,
 		}
 		// Boundaries are visited innermost first; prepend so the outermost
 		// layout ends up first and inner ones override it.
-		css = layoutCSS + slotCSS + css
+		css = joinCSSParts(joinCSSParts(layoutCSS, slotCSS), css)
 		used = append(used, layoutDeps...)
 		chain = append([]routeChainEntry{entry}, chain...)
 	}

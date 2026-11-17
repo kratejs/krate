@@ -895,7 +895,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	if layoutErr != nil {
 		return nil, "", layoutErr
 	}
-	bundle.CSS = b.dedupeModuleCSS(spp.PagePath, layoutCSS+bundle.CSS, bundle.CSSModules)
+	bundle.CSS = b.dedupeModuleCSS(spp.PagePath, joinCSSParts(layoutCSS, bundle.CSS), bundle.CSSModules)
 	deps = append(deps, layoutFiles...)
 	emitResult.ScriptHTML += routeInfoScript(routeChain, emitResult.Signatures) + pageRouteScript(spp.PagePath, b.Cfg.PagesDir)
 
@@ -936,7 +936,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		return nil, "", islandErr
 	}
 	if islandStyles != nil {
-		bundle.CSS += islandStyles.CSS
+		bundle.CSS = joinCSSParts(bundle.CSS, islandStyles.CSS)
 		for src, url := range islandStyles.Assets {
 			bundle.AssetFiles[src] = url
 		}

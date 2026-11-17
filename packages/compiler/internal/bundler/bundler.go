@@ -109,6 +109,7 @@ type Bundler struct {
 	seen              map[string]bool
 	order             []*Module
 	css               []string
+	cssSrc            []string // source file of each css entry
 	cssModules        map[string]*CSSModuleInfo
 	cssDeps           map[string]bool
 	assets            map[string]string // resolved source path -> hashed site URL
@@ -502,6 +503,7 @@ func (b *Bundler) Bundle(entry string) (*Bundle, error) {
 	b.seen = make(map[string]bool)
 	b.order = nil
 	b.css = nil
+	b.cssSrc = nil
 	b.cssModules = make(map[string]*CSSModuleInfo)
 	b.cssDeps = make(map[string]bool)
 	b.frontmatter = nil
@@ -551,7 +553,7 @@ func (b *Bundler) Bundle(entry string) (*Bundle, error) {
 	return &Bundle{
 		EntryPath:      entry,
 		Modules:        b.order,
-		CSS:            strings.Join(b.css, "\n"),
+		CSS:            b.pageCSS(),
 		CSSModules:     b.cssModules,
 		CSSDeps:        sortedKeys(b.cssDeps),
 		AssetFiles:     b.assets,
