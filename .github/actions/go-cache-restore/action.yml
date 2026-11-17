@@ -38,6 +38,23 @@ runs:
           ${{ env.GO_CACHE_KEY }}-${{ hashFiles('packages/*/go.sum') }}-
           ${{ env.GO_CACHE_KEY }}-
 
+    - name: Repair a damaged module cache
+      shell: bash
+      run: |
+        # A restored module cache can lack files: a partly extracted module
+        # (wazero) failed every Go build of the windows-11-arm native job.
+        # go mod verify finds such a module; the cache is then cleared and Go
+        # downloads the modules again.
+        for mod in packages/*/go.mod; do
+          dir=$(dirname "$mod")
+          if ! out=$(cd "$dir" && go mod verify 2>&1); then
+            echo "the module cache failed verification in $dir; clearing it"
+            echo "$out" | head -20
+            go clean -modcache
+            break
+          fi
+        done
+
     - name: Give tracked files content-derived mtimes
       if: inputs.test-cache == 'true'
       shell: bash
