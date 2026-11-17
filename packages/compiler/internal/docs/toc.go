@@ -85,7 +85,8 @@ func ExtractTOCLevels(html string, minLevel, maxLevel int) []TOCItem {
 }
 
 // InjectHeadingAnchors post-processes rendered HTML to add anchor link buttons
-// to headings that have id attributes.
+// to headings that have id attributes. The link comes after the heading text,
+// labelled "Link to section: <heading>", with the "#" glyph aria-hidden.
 func InjectHeadingAnchors(html string) string {
 	var out strings.Builder
 	pos := 0
@@ -117,11 +118,18 @@ func InjectHeadingAnchors(html string) string {
 					content := html[contentStart:closeIdx]
 
 					escapedID := escape.HTMLAttr(idAttr)
+					// The link follows the heading text and is named after it;
+					// the "#" glyph is hidden from assistive technology. The
+					// class and position are unchanged (the theme places it
+					// absolutely in the margin).
+					label := escape.HTMLAttr("Link to section: " + stripInlineHTML(content))
 					out.WriteString(html[start : tagEnd+1])
+					out.WriteString(content)
 					out.WriteString("<a href=\"#")
 					out.WriteString(escapedID)
-					out.WriteString("\" class=\"heading-anchor\" data-pagefind-ignore aria-label=\"Link to this section\">#</a>")
-					out.WriteString(content)
+					out.WriteString("\" class=\"heading-anchor\" data-pagefind-ignore aria-label=\"")
+					out.WriteString(label)
+					out.WriteString("\"><span aria-hidden=\"true\">#</span></a>")
 					out.WriteString(html[closeIdx : closeIdx+5])
 					pos = closeIdx + 5
 					continue
