@@ -1970,7 +1970,8 @@ body .chroma .w {
     display: none;
 }
 
-/* Bundled variable fonts (also preloaded by the site layout). */
+/* Bundled variable fonts. The build preloads the sans face on every page and
+   the mono face on pages with <pre> or <code>. */
 @font-face {
     font-family: 'Inter Variable';
     font-style: normal;

@@ -164,14 +164,15 @@
     }
 }
 
-/* Self-hosted fonts: drop subset woff2 files in the site's public/fonts/. The
-   local() sources let installed fonts win and the stack has system fallbacks. */
+/* Self-hosted fonts shipped with this package (./fonts). The relative url()s
+   are bundled and content-hashed by the build. The local() sources let
+   installed fonts win and the stacks have system fallbacks. */
 @font-face {
     font-family: 'Inter Variable';
     font-style: normal;
     font-weight: 100 900;
     font-display: swap;
-    src: local('Inter'), local('Inter Variable'), url('/fonts/inter.woff2') format('woff2');
+    src: local('Inter'), local('Inter Variable'), url('./fonts/inter.woff2') format('woff2');
 }
 
 @font-face {
@@ -179,7 +180,7 @@
     font-style: normal;
     font-weight: 100 800;
     font-display: swap;
-    src: local('JetBrains Mono'), local('JetBrainsMono'), url('/fonts/jetbrains-mono.woff2') format('woff2');
+    src: local('JetBrains Mono'), local('JetBrainsMono'), url('./fonts/jetbrains-mono.woff2') format('woff2');
 }
 
 /* Base */

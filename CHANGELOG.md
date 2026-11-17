@@ -427,6 +427,11 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- Font preloads are chosen per page: sans faces always, monospace faces only on pages whose HTML has `<pre>`
+  or `<code>` (the docs site no longer preloads JetBrains Mono, 40 kB, on pages without code). A preload whose
+  file the site does not serve is skipped with a warning. `@krate/base-docs-theme` now ships Inter and
+  JetBrains Mono (bundled and hashed), so apps using it no longer preload two 404s. Files that a layout's
+  stylesheet references by relative `url()` are now copied to `dist/assets/`.
 - The docs search module is minified and content-hashed (`search.<hash>.js`, 13 kB to about 6 kB) and is
   loaded when the search box is first used instead of on every page. `search.load: "eager"` keeps the
   old deferred script. The build warns (KR7147) when a page links a `.css` file from `public/`, which

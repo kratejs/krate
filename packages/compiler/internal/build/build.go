@@ -60,7 +60,7 @@ type PageResult struct {
 	HTML     string
 	HeadHTML string
 	// FontURLs are the fonts this page's own stylesheet asks to preload.
-	FontURLs      []string
+	FontURLs      []fontFace
 	ScriptHTML    string
 	StyleHTML     string
 	HydrationJS   string
@@ -243,11 +243,11 @@ type Builder struct {
 	// (a release build). It is set by BuildNativeApp from Derive.
 	nativeShake bool
 
-	// fontPreloadHTML holds the `<link rel="preload">` tags for fonts declared
-	// in the global stylesheet; injected into every page head.
-	fontPreloadHTML string
-	// globalFonts are the font URLs already preloaded by the global stylesheet.
-	globalFonts []string
+	// globalFonts are the preload candidates from the global stylesheet; each
+	// page keeps the ones it can use on first render.
+	globalFonts []fontFace
+	// fontWarned records font URLs already reported as missing.
+	fontWarned sync.Map
 
 	workerMu  sync.Mutex
 	workers   map[string]string // worker source path -> hashed site URL (/workers/...)
@@ -425,9 +425,6 @@ func (b *Builder) runtimeCommonHead() string {
 		sb.WriteString("@media (prefers-reduced-motion: reduce){")
 		sb.WriteString("::view-transition-group(*),::view-transition-old(*),::view-transition-new(*){animation:none!important}}")
 		sb.WriteString("</style>\n")
-	}
-	if b.fontPreloadHTML != "" {
-		sb.WriteString(b.fontPreloadHTML)
 	}
 	return sb.String()
 }
@@ -1963,8 +1960,7 @@ func (b *Builder) writeGlobalCSS(mergedCSS string) (string, error) {
 		processedCSS = injectFontDisplay(processedCSS, b.Cfg.Fonts.DisplayValue())
 		processedCSS = b.prefixCSSURLs(processedCSS)
 		if b.Cfg.Fonts.PreloadEnabled() {
-			b.globalFonts = collectFontPreloads(processedCSS, b.Cfg.Fonts.PreloadLimit)
-			b.fontPreloadHTML = fontPreloadHTML(b.globalFonts, b.Cfg.BaseURLPath())
+			b.globalFonts = collectFontFaces(processedCSS, b.Cfg.Fonts.PreloadLimit)
 		}
 		if b.Cfg.ShouldMinifyCSS() {
 			processedCSS = css.Minify(processedCSS)
@@ -2003,7 +1999,7 @@ func (b *Builder) writePageCSS(results []*PageResult) (map[string]bool, error) {
 		modernData []byte
 		legacyFile string
 		legacyData []byte
-		fonts      []string
+		fonts      []fontFace
 	}
 	memo := make(map[string]processed)
 	var chromaCSS string
@@ -2030,7 +2026,7 @@ func (b *Builder) writePageCSS(results []*PageResult) (map[string]bool, error) {
 		}
 		written[file] = true
 	}
-	var lastFonts []string
+	var lastFonts []fontFace
 	process := func(pageCss string) (string, []byte, twPageInfo) {
 		processedCSS := b.inlineImports(pageCss)
 		processedCSS, info := b.processCSSDirectives(processedCSS)
@@ -2038,7 +2034,7 @@ func (b *Builder) writePageCSS(results []*PageResult) (map[string]bool, error) {
 		processedCSS = b.prefixCSSURLs(processedCSS)
 		lastFonts = nil
 		if b.Cfg.Fonts.PreloadEnabled() {
-			lastFonts = collectFontPreloads(processedCSS, b.Cfg.Fonts.PreloadLimit)
+			lastFonts = collectFontFaces(processedCSS, b.Cfg.Fonts.PreloadLimit)
 		}
 		if b.Cfg.ShouldMinifyCSS() {
 			processedCSS = css.Minify(processedCSS)
@@ -2229,8 +2225,8 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 			if im := b.islandImportMapHTML(); im != "" {
 				runtimeHead = im + runtimeHead
 			}
-			// Fonts declared by the page's own CSS (not the global sheet).
-			if pf := b.pageFontPreloads(r.FontURLs); pf != "" {
+			// Fonts from the global sheet and the page's own CSS.
+			if pf := b.pageFontPreloads(r.HTML, r.FontURLs); pf != "" {
 				runtimeHead += pf
 			}
 			// Only pages that call into the runtime load it; a static page of
@@ -3863,6 +3859,11 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	b.printReactiveDiags(reactive.Build(emitResult.Signatures).Validate())
 
 	css = layoutBundle.CSS
+	// Files the layout's stylesheets reference by relative url() (fonts,
+	// images) are part of its output like a page's own.
+	if err := b.writeAssetFiles(layoutBundle.AssetFiles); err != nil {
+		return nil, "", nil, false, fmt.Errorf("writing assets for layout %s: %w", layoutPath, err)
+	}
 	// CSS signal rules for the layout and its components are generated during IR
 	// construction and appended to the layout's own module CSS.
 	if tree.CSSSignalsCSS != "" {
@@ -5731,23 +5732,48 @@ func (b *Builder) mergeAPIRouteMeta(updates map[string]apiRouteMeta) error {
 	return writeOutput(manifestPath, data)
 }
 
-// pageFontPreloads renders preload links for fonts the global stylesheet has
-// not already preloaded.
-func (b *Builder) pageFontPreloads(urls []string) string {
-	if len(urls) == 0 {
+// pageFontPreloads renders the preload links for one page: the global and
+// page-CSS fonts, minus monospace faces when the page HTML has no <pre> or
+// <code>, minus files this site does not serve (reported once per URL).
+func (b *Builder) pageFontPreloads(pageHTML string, pageFonts []fontFace) string {
+	all := append(append([]fontFace{}, b.globalFonts...), pageFonts...)
+	if len(all) == 0 {
 		return ""
 	}
-	have := map[string]bool{}
-	for _, u := range b.globalFonts {
-		have[u] = true
-	}
-	var rest []string
-	for _, u := range urls {
-		if !have[u] {
-			rest = append(rest, u)
+	code := pageUsesCode(pageHTML)
+	seen := map[string]bool{}
+	var urls []string
+	for _, f := range all {
+		if seen[f.URL] || (f.Mono && !code) {
+			continue
 		}
+		seen[f.URL] = true
+		if !b.fontServed(f.URL) {
+			continue
+		}
+		urls = append(urls, f.URL)
 	}
-	return fontPreloadHTML(rest, b.Cfg.BaseURLPath())
+	return fontPreloadHTML(urls, b.Cfg.BaseURLPath())
+}
+
+// fontServed reports whether a preload URL names a file this site serves.
+// External URLs are trusted. A miss warns once with the fix.
+func (b *Builder) fontServed(u string) bool {
+	if strings.Contains(u, "://") || strings.HasPrefix(u, "//") {
+		return true
+	}
+	ref := u
+	if base := b.Cfg.BaseURLPath(); base != "" && strings.HasPrefix(ref, base+"/") {
+		ref = strings.TrimPrefix(ref, base)
+	}
+	if b.isSiteFile(ref) {
+		return true
+	}
+	if _, dup := b.fontWarned.LoadOrStore(u, true); !dup {
+		b.warnOnce("font preload skipped: " + u + " is referenced by an @font-face but is not a file this site serves. Put the font in public/ at that path, " +
+			"reference it from CSS with a relative url() so it is bundled, or mark the @font-face with /* no-preload */")
+	}
+	return false
 }
 
 // importsRuntimeComponent reports whether any module is a runtime component.

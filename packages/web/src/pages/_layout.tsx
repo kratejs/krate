@@ -58,8 +58,6 @@ export default function SiteLayout(props: { children: any }) {
       <Head>
         <link rel="icon" href="/logo.svg" type="image/svg+xml" />
         <link rel="manifest" href="/site.webmanifest" />
-        <link rel="preload" href="/fonts/inter.woff2" as="font" type="font/woff2" crossOrigin="anonymous" />
-        <link rel="preload" href="/fonts/jetbrains-mono.woff2" as="font" type="font/woff2" crossOrigin="anonymous" />
       </Head>
       <a class="skip-link" href="#main">
         Skip to content

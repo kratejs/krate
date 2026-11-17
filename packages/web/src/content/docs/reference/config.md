@@ -889,6 +889,17 @@ stylesheet, not the page. Faces for non-Latin `unicode-range` subsets are
 skipped, and a `/* no-preload */` comment inside an `@font-face` block opts that
 face out.
 
+Each page preloads only the fonts it can use on first render. Sans (body) faces are
+preloaded on every page; a monospace face is preloaded only when the page's HTML
+contains a `<pre>` or `<code>` element. A face counts as monospace when its family
+name contains `mono`, `code`, `courier`, `consolas` or `menlo`, or when it is listed
+in a `font-family` stack or custom property (such as `--font-mono`) that includes
+the `monospace` keyword. Code that only appears after client rendering does not
+count, so such a page loads its monospace font on demand. A face whose file the
+site does not serve (for example `url('/fonts/x.woff2')` with no `public/fonts/x.woff2`)
+is not preloaded, and the build prints one warning per URL. Reference fonts with a
+relative `url()` to have the build copy and content-hash them.
+
 ## Go (components & API routes)
 
 ```typescript
