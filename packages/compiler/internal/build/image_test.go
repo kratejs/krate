@@ -52,3 +52,17 @@ func TestImageRemoteNotAllowedIsBuildError(t *testing.T) {
 		t.Fatalf("want KR8802 mentioning remotePatterns, got %v", err)
 	}
 }
+
+func TestImageDefaultSizesShrinkBelowRequestedWidth(t *testing.T) {
+	html, _, err := buildImagePage(t, `export default function P() {
+  return <Image src="/small.png" alt="x" width={200} />;
+}
+`, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(html, `(max-width: 200px) 100vw, 200px`) {
+		i := strings.Index(html, "sizes=")
+		t.Fatalf("default sizes should be viewport-aware, got %q", html[i:min(len(html), i+60)])
+	}
+}

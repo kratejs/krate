@@ -429,6 +429,10 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- `<Image>` variants are smaller: PNG variants use best compression, stay 8-bit paletted when the source is
+  indexed or uses at most 256 colours, and a PNG source smaller than its re-encode is copied as is (the
+  examples' 7.1 kB `hero.png` no longer becomes a 32.4 kB 1600w variant). The blur placeholder is PNG or JPEG,
+  whichever is smaller, and the default `sizes` for an `<Image width={W}>` is `(max-width: Wpx) 100vw, Wpx`.
 - Code blocks ship less markup: the copy button renders both icons and switches them with a `data-copied`
   attribute (no per-block checkmark `<template>`), and highlighted code drops chroma's per-line wrapper spans
   unless a line is marked with `highlight`. `docs/reference/config` goes from 4,161 to 3,639 DOM elements;
