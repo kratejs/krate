@@ -6,7 +6,11 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sync"
+	"sync/atomic"
 	"testing"
+
+	"github.com/evanw/esbuild/pkg/api"
 )
 
 // The page server bundles of a run share their package resolutions and the
@@ -105,6 +109,64 @@ export function Alt() { return <i>{util()}</i>; }`,
 				t.Errorf("%s: missing %q, so the fixture does not exercise what it should", name, want)
 			}
 		}
+	}
+}
+
+// A native memo resolves an import once for every importer in its directory,
+// also when the builds ask for it at the same time, and keeps imports from
+// different directories, kinds and attributes apart.
+func TestNativeResolveMemoSharesByDirectory(t *testing.T) {
+	memo := newNativeResolveMemo()
+	var calls atomic.Int64
+	resolve := func(args api.OnResolveArgs) resolveMemoValue {
+		return memo.resolve(args, func() api.ResolveResult {
+			calls.Add(1)
+			return api.ResolveResult{Path: args.ResolveDir + "/" + args.Path, Namespace: "file"}
+		})
+	}
+	base := api.OnResolveArgs{Path: "pkg", ResolveDir: "/p/src", Kind: api.ResolveJSImportStatement, Namespace: "file"}
+	var wg sync.WaitGroup
+	for i := range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			args := base
+			args.Importer = filepath.Join("/p/src", string(rune('a'+i%8))+".ts")
+			if v := resolve(args); v.path != "/p/src/pkg" {
+				t.Errorf("resolved to %q", v.path)
+			}
+		}()
+	}
+	wg.Wait()
+	if n := calls.Load(); n != 1 {
+		t.Fatalf("one directory resolved %d times, want once", n)
+	}
+	for _, change := range []func(*api.OnResolveArgs){
+		func(a *api.OnResolveArgs) { a.ResolveDir = "/p/lib" },
+		func(a *api.OnResolveArgs) { a.Kind = api.ResolveJSRequireCall },
+		func(a *api.OnResolveArgs) { a.With = map[string]string{"type": "json"} },
+		func(a *api.OnResolveArgs) { a.Namespace = "other" },
+		func(a *api.OnResolveArgs) { a.Path = "pkg/sub" },
+	} {
+		args := base
+		change(&args)
+		before := calls.Load()
+		resolve(args)
+		if calls.Load() != before+1 {
+			t.Errorf("%+v was answered from another import's resolution", args)
+		}
+	}
+
+	// A memo that is not native keeps importers apart.
+	plain := &resolveMemo{}
+	calls.Store(0)
+	for _, importer := range []string{"/p/src/a.ts", "/p/src/b.ts", "/p/src/a.ts"} {
+		args := base
+		args.Importer = importer
+		plain.resolve(args, func() api.ResolveResult { calls.Add(1); return api.ResolveResult{} })
+	}
+	if n := calls.Load(); n != 2 {
+		t.Errorf("a plain memo resolved %d times for two importers, want 2", n)
 	}
 }
 

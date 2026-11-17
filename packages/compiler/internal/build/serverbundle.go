@@ -77,8 +77,11 @@ func compileServerBundlesWith(impls *clientSSRImpls, results []*PageResult, root
 
 	bundles := make(map[string]string, len(ssrPages))
 	// The page bundles share their options, so a package import resolves
-	// once for all of them.
-	serverMemo := &resolveMemo{}
+	// once for all of them. The memo is native: the plugins ahead of the
+	// external-packages plugin answer an import from its importer, path and
+	// kind alone and none of them resolves again, so an import they leave to
+	// it is left to esbuild again in its resolve.
+	serverMemo := newNativeResolveMemo()
 	files := &serverBundleFiles{}
 	if !shareServerBundleWork {
 		serverMemo, files = nil, nil

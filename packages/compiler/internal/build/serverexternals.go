@@ -177,7 +177,19 @@ func externalNodeModulesPlugin(outFile string) api.Plugin {
 // resolveMemo remembers the resolutions the plugins of a family of builds
 // (the same options, such as every page's server bundle) ask esbuild for, so
 // each import is resolved once for the family instead of once per build.
-type resolveMemo struct{ m sync.Map }
+type resolveMemo struct {
+	m sync.Map // resolveMemoKey -> resolveMemoValue, or *resolveMemoEntry when native
+	// native marks a memo whose resolutions are esbuild's own: the resolve it
+	// wraps reaches no plugin that answers it, and none that enters the memo
+	// again. esbuild resolves a path from its directory, its kind and its
+	// import attributes, never from the importer, so such a memo keys by those
+	// alone, and a build that asks while another build of the family resolves
+	// the same key waits for that answer.
+	native bool
+}
+
+// newNativeResolveMemo is a native resolveMemo (see resolveMemo.native).
+func newNativeResolveMemo() *resolveMemo { return &resolveMemo{native: true} }
 
 type resolveMemoKey struct {
 	importer, namespace, dir, path, with string
@@ -187,6 +199,13 @@ type resolveMemoKey struct {
 type resolveMemoValue struct {
 	path, namespace, suffix string
 	external, failed        bool
+}
+
+// resolveMemoEntry is a resolution of a native memo, ready once done is
+// closed.
+type resolveMemoEntry struct {
+	done chan struct{}
+	v    resolveMemoValue
 }
 
 func memoKey(args api.OnResolveArgs) resolveMemoKey {
@@ -205,19 +224,45 @@ func memoKey(args api.OnResolveArgs) resolveMemoKey {
 // resolve returns resolve(args), from the memo when the family resolved the
 // same import before. A nil memo always resolves.
 func (m *resolveMemo) resolve(args api.OnResolveArgs, resolve func() api.ResolveResult) resolveMemoValue {
-	var key resolveMemoKey
-	if m != nil {
-		key = memoKey(args)
-		if v, ok := m.m.Load(key); ok {
-			return v.(resolveMemoValue)
-		}
+	if m == nil {
+		return memoValue(resolve())
 	}
-	r := resolve()
-	v := resolveMemoValue{path: r.Path, namespace: r.Namespace, suffix: r.Suffix, external: r.External, failed: len(r.Errors) > 0}
-	if m != nil {
-		m.m.Store(key, v)
+	key := memoKey(args)
+	if m.native {
+		return m.resolveNative(key, resolve)
 	}
+	if v, ok := m.m.Load(key); ok {
+		return v.(resolveMemoValue)
+	}
+	v := memoValue(resolve())
+	m.m.Store(key, v)
 	return v
+}
+
+// resolveNative is resolve for a native memo.
+func (m *resolveMemo) resolveNative(key resolveMemoKey, resolve func() api.ResolveResult) resolveMemoValue {
+	key.importer = ""
+	if e, ok := m.m.Load(key); ok {
+		e := e.(*resolveMemoEntry)
+		<-e.done
+		return e.v
+	}
+	e := &resolveMemoEntry{done: make(chan struct{})}
+	if prev, loaded := m.m.LoadOrStore(key, e); loaded {
+		prev := prev.(*resolveMemoEntry)
+		<-prev.done
+		return prev.v
+	}
+	// A resolve that panics leaves the waiters a failed resolution, which
+	// makes the plugin leave the import to esbuild.
+	e.v.failed = true
+	defer close(e.done)
+	e.v = memoValue(resolve())
+	return e.v
+}
+
+func memoValue(r api.ResolveResult) resolveMemoValue {
+	return resolveMemoValue{path: r.Path, namespace: r.Namespace, suffix: r.Suffix, external: r.External, failed: len(r.Errors) > 0}
 }
 
 // externalNodeModulesPluginMemo is externalNodeModulesPlugin for a family of
