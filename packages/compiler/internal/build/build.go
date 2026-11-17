@@ -147,6 +147,9 @@ type PageResult struct {
 }
 
 type Builder struct {
+	// runtimeFeatures are the optional runtime features the last runtime
+	// chunk included; the output audit test reads it.
+	runtimeFeatures []string
 	// DebugGo builds the native Go host for a debugger: no optimizations or
 	// inlining, and source paths as they are on disk (see compileGoHost).
 	DebugGo bool

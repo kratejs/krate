@@ -1,0 +1,32 @@
+{
+  "/": {
+    "html": 594,
+    "css": 1542,
+    "ownJs": 0,
+    "js": 0
+  },
+  "/components": {
+    "html": 763,
+    "css": 9189,
+    "ownJs": 0,
+    "js": 0
+  },
+  "/docs": {
+    "html": 3450,
+    "css": 10122,
+    "ownJs": 35801,
+    "js": 35801
+  },
+  "/docs/guide": {
+    "html": 4165,
+    "css": 11364,
+    "ownJs": 38161,
+    "js": 38161
+  },
+  "/react-island": {
+    "html": 701,
+    "css": 1542,
+    "ownJs": 31943,
+    "js": 31943
+  }
+}

@@ -55,6 +55,9 @@ type runtimeChunkOptions struct {
 	Trim bool
 	// Scan is the client code checked for runtime feature references.
 	Scan string
+	// Features, when set, receives the optional features the trimmed runtime
+	// includes (nil when the runtime is not trimmed).
+	Features *[]string
 }
 
 // runtimeNeedsCompat reports whether any page's hydration script references a
@@ -235,7 +238,11 @@ func probeNamedBundleFromDisk(projectRoot string, names []string) string {
 func writeRuntimeChunk(outDir string, shouldMinify bool, projectRoot string, opts runtimeChunkOptions) (string, error) {
 	runtime := ""
 	if opts.Trim {
-		runtime, _ = loadRuntimeFeatures(projectRoot, opts.SPA, opts.Scan)
+		var included []string
+		runtime, included = loadRuntimeFeatures(projectRoot, opts.SPA, opts.Scan)
+		if opts.Features != nil {
+			*opts.Features = included
+		}
 	}
 	if runtime == "" {
 		runtime = loadRuntimeFromDiskFor(projectRoot, opts.SPA)
@@ -330,5 +337,6 @@ func (b *Builder) runtimeChunkOptions(results []*PageResult) runtimeChunkOptions
 		Suspense: runtimeNeedsSuspense(results),
 		Trim:     !b.DevMode,
 		Scan:     runtimeScanText(results),
+		Features: &b.runtimeFeatures,
 	}
 }

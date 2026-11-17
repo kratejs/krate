@@ -71,6 +71,7 @@ pnpm check:version     # fail if publishable package versions drift
 go build ./...
 go test ./...                      # full suite (includes examples/ integration)
 go test -race ./internal/build ./internal/bundler   # concurrency-sensitive
+KRATE_BUDGETS_UPDATE=1 go test ./internal/build -run TestOutputBudgets   # refresh per-route size budgets on purpose
 go vet ./...
 gofmt -l .                         # must be empty
 go test ./internal/conformance     # parser conformance corpus (test262, Babel JSX)

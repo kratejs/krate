@@ -429,6 +429,11 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- The build's size table counts the chunks a page's scripts import (island chunks, shared modules,
+  import-mapped packages) in its JS column, so a React-heavy page no longer reports less than half of
+  what it loads. A footnote notes routes that load mermaid or KaTeX from the CDN, which are not counted.
+- Output audit and per-route size budgets run in `go test ./...` (`TestOutputAudit`, `TestOutputBudgets`);
+  the budgets snapshot is `internal/build/testdata/output_budgets.json`.
 - `Select` and `Command` generate their ids at render (through `useId`), so the server HTML has unique ids
   and a real `aria-controls` instead of an empty prefix (`-list`, `-opt-0` on every instance) until mount.
 - The docs search box sets `aria-controls` only while its result list is in the DOM. It named an id that

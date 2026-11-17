@@ -100,7 +100,10 @@ samples carry `phase` and `esbuild` labels (`go tool pprof -tags`).
 
 After a successful build, `krate build` prints a table with one row per built
 page: its mode, and the gzipped size of the HTML, of the scripts it loads and of
-the stylesheets it loads. A `vs last` column shows how each route's total changed
+the stylesheets it loads. The script column counts the whole load: the scripts the
+page names plus the chunks they import (shared modules, import-mapped packages and
+island chunks), not only the files in the HTML. Mermaid and KaTeX are fetched from a
+CDN on demand and are not counted; a footnote says how many routes can load them. A `vs last` column shows how each route's total changed
 since the previous build (`new` for a route that was not there), and a footer
 lists routes that disappeared and the change in everything shipped, with shared
 files counted once. The previous build's sizes are kept in

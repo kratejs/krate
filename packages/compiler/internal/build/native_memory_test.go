@@ -18,7 +18,9 @@ func TestMain(m *testing.M) {
 	if mode := os.Getenv("KRATE_FAKE_SHELL"); mode != "" {
 		os.Exit(fakeShell(mode))
 	}
-	os.Exit(m.Run())
+	code := m.Run()
+	cleanupAuditSite()
+	os.Exit(code)
 }
 
 // fakeShell speaks the dev control protocol. KRATE_FAKE_LOG names a file that
