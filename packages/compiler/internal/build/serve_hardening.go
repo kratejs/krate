@@ -558,7 +558,7 @@ func (g *gzipResponseWriter) decide(status int) {
 	if !compressibleType(g.Header().Get("Content-Type")) {
 		return
 	}
-	g.Header().Add("Vary", "Accept-Encoding")
+	addVary(g.Header(), "Accept-Encoding")
 	// Already encoded (a precompressed sibling) or a partial response: gzipping
 	// either would corrupt the body or its Content-Range.
 	if !g.wantsGzip || g.Header().Get("Content-Encoding") != "" || status == http.StatusPartialContent || g.Header().Get("Content-Range") != "" {
@@ -662,7 +662,7 @@ func precompressedMiddlewareIf(root string, skip func(*http.Request) bool, next 
 		if ct := precompressedContentType(base); ct != "" {
 			h.Set("Content-Type", ct)
 		}
-		h.Add("Vary", "Accept-Encoding")
+		addVary(h, "Accept-Encoding")
 		// The name drives ServeContent's Content-Type sniffing when unset, so
 		// pass the original asset name (not the `.br`/`.gz` sibling).
 		http.ServeContent(w, r, filepath.Base(base), fi.ModTime(), f)
@@ -947,4 +947,18 @@ func setStreamingDeadline(w http.ResponseWriter, d time.Duration) {
 // error on overflow instead of truncating silently.
 func readBodyLimited(r *http.Request) ([]byte, error) {
 	return io.ReadAll(r.Body)
+}
+
+// addVary adds a field to Vary unless a Vary header already names it: the
+// precompressed-file handler and the gzip writer both vary on Accept-Encoding,
+// and a response once carried the field twice.
+func addVary(h http.Header, field string) {
+	for _, v := range h.Values("Vary") {
+		for _, f := range strings.Split(v, ",") {
+			if strings.EqualFold(strings.TrimSpace(f), field) {
+				return
+			}
+		}
+	}
+	h.Add("Vary", field)
 }
