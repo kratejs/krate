@@ -67,3 +67,38 @@ func TestSitemapFiltersEscapesAndPrefixes(t *testing.T) {
 		}
 	}
 }
+
+func TestSitemapLastmodOfGeneratedDocsUsesSourceDate(t *testing.T) {
+	cfg := &config.Config{SEO: config.SEOConfig{BaseURL: "https://example.com"}}
+	root := t.TempDir()
+	gen := filepath.Join(root, ".krate", "gen", "docs")
+	if err := os.MkdirAll(gen, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	page := "export default function DocPage() {\n  const docsProps = {\n    pageTitle: \"A\",\n    lastUpdated: \"2025-03-04T10:00:00Z\",\n    authors: [],\n  };\n}\n"
+	if err := os.WriteFile(filepath.Join(gen, "a.tsx"), []byte(page), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	noDate := "export default function DocPage() {\n  const docsProps = { pageTitle: \"B\" };\n}\n"
+	if err := os.WriteFile(filepath.Join(gen, "b.tsx"), []byte(noDate), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx := &BuildResultHookCtx{Root: root, OutDir: root, Config: cfg, Pages: []PageResult{
+		{OutName: "docs/a", Page: ".krate/gen/docs/a.tsx"},
+		{OutName: "docs/b", Page: ".krate/gen/docs/b.tsx"},
+	}}
+	if err := generateSitemap(ctx); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(root, "sitemap.xml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	if !strings.Contains(got, "<loc>https://example.com/docs/a/</loc>\n    <lastmod>2025-03-04</lastmod>") {
+		t.Errorf("docs page must carry its source date:\n%s", got)
+	}
+	if strings.Count(got, "<lastmod>2025-03-04</lastmod>") != 1 {
+		t.Errorf("a page without a source date must not borrow one:\n%s", got)
+	}
+}

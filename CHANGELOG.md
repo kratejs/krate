@@ -429,6 +429,9 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- The sitemap's `lastmod` for generated docs pages is the markdown source's date (frontmatter `lastUpdated`,
+  else its git history), the date JSON-LD already used. It read the git history of the generated file, so
+  most docs URLs carried the build date.
 - Heading ids follow GitHub's slug rules: a heading such as "Go (components & API routes)" is
   `#go-components--api-routes` (runs of spaces and hyphens are no longer collapsed), so links written the
   GitHub way work. Four docs links to the old collapsed form were updated.

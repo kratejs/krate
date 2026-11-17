@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -112,7 +113,9 @@ func generateSitemap(ctx *BuildResultHookCtx) error {
 		// Prefer the source file's last git commit date, falling back to the
 		// build date when git metadata is unavailable.
 		lastmod := now
-		if p.Page != "" {
+		if d := generatedDocsLastmod(ctx.Root, p.Page); d != "" {
+			lastmod = d
+		} else if p.Page != "" {
 			if lc := gitinfo.LastCommit(ctx.Root, p.Page); lc != "" {
 				if t, err := time.Parse(time.RFC3339, lc); err == nil {
 					lastmod = t.UTC().Format("2006-01-02")
@@ -134,6 +137,40 @@ func generateSitemap(ctx *BuildResultHookCtx) error {
 		return fmt.Errorf("writing sitemap: %w", err)
 	}
 	return nil
+}
+
+var generatedLastUpdatedRe = regexp.MustCompile(`(?m)^\s+lastUpdated: ("[^"\n]*")`)
+
+// generatedDocsLastmod returns the last-modified day of a generated docs page
+// (a .tsx under .krate/gen) from the lastUpdated prop the docs plugin wrote
+// from the markdown source's frontmatter or git history, the same date the
+// JSON-LD dateModified carries. The generated file itself is rewritten on every
+// build, so its own git date is meaningless. It returns "" for other pages.
+func generatedDocsLastmod(root, page string) string {
+	if page == "" || !strings.Contains(filepath.ToSlash(page), ".krate/gen/") {
+		return ""
+	}
+	if !filepath.IsAbs(page) {
+		page = filepath.Join(root, page)
+	}
+	data, err := os.ReadFile(page)
+	if err != nil {
+		return ""
+	}
+	m := generatedLastUpdatedRe.FindSubmatch(data)
+	if m == nil {
+		return ""
+	}
+	var v string
+	if json.Unmarshal(m[1], &v) != nil {
+		return ""
+	}
+	v = toRFC3339(v)
+	t, err := time.Parse(time.RFC3339, v)
+	if err != nil {
+		return ""
+	}
+	return t.UTC().Format("2006-01-02")
 }
 
 // sitemapIncludes reports whether a page belongs in the sitemap: error pages,
