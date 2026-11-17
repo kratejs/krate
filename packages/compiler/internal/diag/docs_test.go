@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -24,6 +25,61 @@ var rangeTitles = map[byte]string{
 	'7': "KR7xxx: React 19 actions and server actions",
 	'8': "KR8xxx: islands, compiled packages and general React compatibility",
 	'9': "KR9xxx: routing, segment pages and rendering errors",
+}
+
+var entityRe = regexp.MustCompile(`^&(#[0-9]+|#[xX][0-9a-fA-F]+|[A-Za-z][A-Za-z0-9]*);`)
+
+// escapeProse escapes <, > and bare & outside backtick code spans so text such
+// as <Suspense> or this.<name> is not parsed as an HTML element.
+func escapeProse(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); {
+		c := s[i]
+		if c == '`' {
+			n := 1
+			for i+n < len(s) && s[i+n] == '`' {
+				n++
+			}
+			fence := s[i : i+n]
+			end := strings.Index(s[i+n:], fence)
+			if end >= 0 {
+				b.WriteString(s[i : i+n+end+n])
+				i += n + end + n
+				continue
+			}
+			b.WriteString(fence)
+			i += n
+			continue
+		}
+		switch {
+		case c == '<':
+			b.WriteString("&lt;")
+		case c == '>':
+			b.WriteString("&gt;")
+		case c == '&' && !entityRe.MatchString(s[i:]):
+			b.WriteString("&amp;")
+		default:
+			b.WriteByte(c)
+		}
+		i++
+	}
+	return b.String()
+}
+
+func TestEscapeProse(t *testing.T) {
+	cases := map[string]string{
+		"a <Suspense> b":        "a &lt;Suspense&gt; b",
+		"`<img>` and <img>":     "`<img>` and &lt;img&gt;",
+		"x && y &amp; z":        "x &amp;&amp; y &amp; z",
+		"``a ` <b>`` <c>":       "``a ` <b>`` &lt;c&gt;",
+		"this.<name> `unclosed": "this.&lt;name&gt; `unclosed",
+		"plain text":            "plain text",
+	}
+	for in, want := range cases {
+		if got := escapeProse(in); got != want {
+			t.Errorf("escapeProse(%q) = %q, want %q", in, got, want)
+		}
+	}
 }
 
 // renderDiagnosticsDoc returns the markdown for the diagnostics reference.
@@ -72,7 +128,7 @@ Codes are grouped by area:
 			if i > 0 {
 				b.WriteString("\n")
 			}
-			fmt.Fprintf(&b, "### %s\n\n**%s**\n\n%s\n", info.Code, info.Title, info.Explanation)
+			fmt.Fprintf(&b, "### %s\n\n**%s**\n\n%s\n", info.Code, escapeProse(info.Title), escapeProse(info.Explanation))
 		}
 	}
 	b.WriteString(`

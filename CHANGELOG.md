@@ -427,6 +427,8 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- The generated compatibility and diagnostics pages escape `<`, `>` and `&` outside code spans, so text like
+  `<Suspense>` and `this.<name>` is no longer parsed as an HTML element and dropped from the page.
 - Production builds write `.br` and `.gz` siblings by default (`compress` was opt-in), so `krate serve` and
   static hosts send brotli with no config; set `compress: { brotli: false }` or `{ gzip: false }` to turn one
   off. Brotli runs at level 10 for HTML and other text (was 6; 8% smaller) and 11 for scripts and CSS.

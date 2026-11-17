@@ -22,8 +22,38 @@ function status(value) {
   return labels[value] || value;
 }
 
+// Escapes <, > and bare & outside backtick code spans so text such as
+// <Suspense> or unix:<path> is not parsed as an HTML element.
+function escapeProse(value) {
+  const text = String(value);
+  let out = "";
+  for (let i = 0; i < text.length; ) {
+    const c = text[i];
+    if (c === "`") {
+      let n = 1;
+      while (text[i + n] === "`") n++;
+      const fence = text.slice(i, i + n);
+      const end = text.indexOf(fence, i + n);
+      if (end >= 0) {
+        out += text.slice(i, end + n);
+        i = end + n;
+        continue;
+      }
+      out += fence;
+      i += n;
+      continue;
+    }
+    if (c === "<") out += "&lt;";
+    else if (c === ">") out += "&gt;";
+    else if (c === "&" && !/^&(#[0-9]+|#[xX][0-9a-fA-F]+|[A-Za-z][A-Za-z0-9]*);/.test(text.slice(i))) out += "&amp;";
+    else out += c;
+    i++;
+  }
+  return out;
+}
+
 function cell(value) {
-  return String(value).replaceAll("|", "\\|");
+  return escapeProse(value).replaceAll("|", "\\|");
 }
 
 function evidence(tests) {
@@ -98,7 +128,7 @@ if (nativeRows.length > 0) {
 lines.push("", "## Details", "");
 
 for (const row of matrix.rows) {
-  lines.push(`### ${row.area}`, "");
+  lines.push(`### ${escapeProse(row.area)}`, "");
   if (row.native !== undefined) {
     lines.push(
       `**Linux:** ${status(row.native.linux)} - **macOS:** ${status(row.native.macos)} - **Windows:** ${status(row.native.windows)}`,
@@ -110,10 +140,10 @@ for (const row of matrix.rows) {
       "",
     );
   }
-  lines.push(row.summary, "");
+  lines.push(escapeProse(row.summary), "");
   if (Array.isArray(row.knownLimits) && row.knownLimits.length > 0) {
     lines.push("Known limits:", "");
-    for (const limit of row.knownLimits) lines.push(`- ${limit}`);
+    for (const limit of row.knownLimits) lines.push(`- ${escapeProse(limit)}`);
     lines.push("");
   }
   if (Array.isArray(row.diagnostics) && row.diagnostics.length > 0) {
@@ -145,6 +175,16 @@ lines.push(
 );
 
 const output = lines.join("\n");
+
+// Guard: no raw element-like text may survive outside code spans.
+{
+  const stripped = output.replace(/`+[^`]*`+/g, "").replace(/<!--[\s\S]*?-->/g, "");
+  const raw = stripped.match(/<[A-Za-z/][^\n]{0,30}/);
+  if (raw) {
+    console.error(`compat-matrix: unescaped HTML-like text in generated docs: ${raw[0]}`);
+    process.exit(1);
+  }
+}
 if (check) {
   const current = fs.existsSync(target) ? fs.readFileSync(target, "utf8") : "";
   if (current.replaceAll("\r\n", "\n") !== output) {

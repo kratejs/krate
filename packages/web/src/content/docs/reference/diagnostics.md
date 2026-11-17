@@ -88,7 +88,7 @@ A React class component must define render(). Without it Krate cannot lower the 
 
 **Unknown instance property on a class component**
 
-The class reads this.<name>, but <name> is not a field, method, accessor, props, state, context, setState or forceUpdate, and nothing assigns it. Lowered classes have no React base-class internals (this.refs, this.updater, this.isMounted). Declare the property as a field or method, or read it from props or state.
+The class reads this.&lt;name&gt;, but &lt;name&gt; is not a field, method, accessor, props, state, context, setState or forceUpdate, and nothing assigns it. Lowered classes have no React base-class internals (this.refs, this.updater, this.isMounted). Declare the property as a field or method, or read it from props or state.
 
 ### KR3003
 
@@ -172,9 +172,9 @@ The value of use(promise) is reactive and is read through its variable. Assign i
 
 ### KR4005
 
-**<Profiler onRender> is never called**
+**&lt;Profiler onRender&gt; is never called**
 
-Krate components do not re-render, so there are no commit timings to report. <Profiler> renders its children; measure with the browser performance tools instead.
+Krate components do not re-render, so there are no commit timings to report. &lt;Profiler&gt; renders its children; measure with the browser performance tools instead.
 
 ### KR4006
 
@@ -190,9 +190,9 @@ The module passed to lazy() must `export default` a function component, or the l
 
 ### KR4008
 
-**Component suspends outside a <Suspense> boundary**
+**Component suspends outside a &lt;Suspense&gt; boundary**
 
-A component reads use(promise) or a resource but no <Suspense> encloses it, so there is no fallback to show while it loads and its bindings stay empty until then. Wrap it in <Suspense fallback={...}>.
+A component reads use(promise) or a resource but no &lt;Suspense&gt; encloses it, so there is no fallback to show while it loads and its bindings stay empty until then. Wrap it in &lt;Suspense fallback={...}&gt;.
 
 ## KR5xxx: events, forms and refs
 
@@ -250,7 +250,7 @@ React shows the ref's value as of the latest render, so a later state update rev
 
 **Each child in a list should have a unique key prop**
 
-A list whose items can change at runtime (its array reads a signal, state or a runtime value) returns elements without a key, so rows are matched by index. When items are reordered, inserted or removed, row state (input values, focus, component state, effects) stays with the position instead of following the item, exactly as in React. Add a stable, unique key from the item, for example <li key={item.id}>. Lists over build-time constants are not reported.
+A list whose items can change at runtime (its array reads a signal, state or a runtime value) returns elements without a key, so rows are matched by index. When items are reordered, inserted or removed, row state (input values, focus, component state, effects) stays with the position instead of following the item, exactly as in React. Add a stable, unique key from the item, for example &lt;li key={item.id}&gt;. Lists over build-time constants are not reported.
 
 ### KR6002
 
@@ -276,7 +276,7 @@ A "use server" directive at the top of a function inside a component is hoisted 
 
 **useFormStatus() component does not render an element**
 
-Krate finds the form a useFormStatus() call belongs to from the DOM element the component returns. When the component returns another component, a string, or nothing, the status cannot be connected and always reads as idle. Return a DOM element (for example the submit <button>).
+Krate finds the form a useFormStatus() call belongs to from the DOM element the component returns. When the component returns another component, a string, or nothing, the status cannot be connected and always reads as idle. Return a DOM element (for example the submit &lt;button&gt;).
 
 ### KR7003
 
@@ -1082,7 +1082,7 @@ Preact islands and real-React islands (those that use a library built on react-r
 
 **Render value keeps its first value**
 
-React recomputes every value in a component body on each render. Krate compiles a body value that reads state, props, context or a custom hook result into a derived value that is recomputed when its inputs change. This value could not be compiled that way: it is reassigned inside a closure (an event handler or effect), or by a body statement that also writes another variable, or it is read between the statements that build it. It keeps the value it had when the component hydrated. Compute it in a single expression (const label = n > 1 ? "items" : "item"), or keep the changing value in state.
+React recomputes every value in a component body on each render. Krate compiles a body value that reads state, props, context or a custom hook result into a derived value that is recomputed when its inputs change. This value could not be compiled that way: it is reassigned inside a closure (an event handler or effect), or by a body statement that also writes another variable, or it is read between the statements that build it. It keeps the value it had when the component hydrated. Compute it in a single expression (const label = n &gt; 1 ? "items" : "item"), or keep the changing value in state.
 
 ### KR8302
 
