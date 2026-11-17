@@ -11,11 +11,6 @@ import (
 	"github.com/alecthomas/chroma/v2/styles"
 )
 
-var formatter = html.New(
-	html.WithClasses(true),
-	html.WithLineNumbers(false),
-)
-
 // bareFormatter emits only the token spans: no <pre>/<code> and no per-line
 // wrapper spans. It is used when no line is marked, because the wrappers only
 // exist to carry the highlight class and are otherwise unstyled.
