@@ -429,6 +429,8 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- The docs search box sets `aria-controls` only while its result list is in the DOM. It named an id that
+  existed only inside a `<template>`, so the reference was dangling in the server HTML.
 - The sitemap's `lastmod` for generated docs pages is the markdown source's date (frontmatter `lastUpdated`,
   else its git history), the date JSON-LD already used. It read the git history of the generated file, so
   most docs URLs carried the build date.

@@ -302,7 +302,7 @@ export function DocsSearch(props: DocsSearchProps) {
         aria-haspopup="listbox"
         aria-autocomplete="list"
         aria-expanded={open() ? "true" : "false"}
-        aria-controls={listId}
+        aria-controls={open() ? listId : undefined}
         aria-describedby={statusId}
         aria-activedescendant={open() && active() >= 0 ? optionId(active()) : undefined}
         autocomplete="off"
