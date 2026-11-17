@@ -382,7 +382,7 @@ func assembleTailwindSheet(theme *TailwindTheme, at *AtTheme, refs map[string]bo
 	if keyframes != "" && !strings.HasSuffix(keyframes, "\n") {
 		b.WriteByte('\n')
 	}
-	return b.String()
+	return WithPropertiesFallback(b.String())
 }
 
 // resolveScanDirs returns absolute scan roots: `content` wins over `scanDirs`,

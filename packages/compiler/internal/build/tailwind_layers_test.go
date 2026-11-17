@@ -89,7 +89,8 @@ func TestTailwindLayeringAndDirectivesBuild(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		"@layer theme, base, components, utilities;",
+		"@layer properties, theme, base, components, utilities;",
+		"@layer properties{@supports",
 		"--color-brand-500:#f00",
 		"@layer base{", "@layer utilities{",
 		".p-6", ".transition", ".underline", "padding-left",

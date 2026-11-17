@@ -372,9 +372,9 @@ func layoutExtraUtility(cls string, theme TailwindTheme) (string, bool) {
 	case "isolation-auto":
 		return "isolation: auto;", true
 	case "box-decoration-clone":
-		return "box-decoration-break: clone; -webkit-box-decoration-break: clone;", true
+		return "-webkit-box-decoration-break: clone; box-decoration-break: clone;", true
 	case "box-decoration-slice":
-		return "box-decoration-break: slice; -webkit-box-decoration-break: slice;", true
+		return "-webkit-box-decoration-break: slice; box-decoration-break: slice;", true
 	}
 	// Float / clear.
 	if rest, ok := strings.CutPrefix(cls, "float-"); ok {
@@ -573,14 +573,11 @@ func typographyExtraUtility(cls string, theme TailwindTheme) (string, bool) {
 	if v, ok := unwrapArbitrary(strings.TrimPrefix(cls, "font-feature-settings-")); ok && strings.HasPrefix(cls, "font-feature-settings-") {
 		return "font-feature-settings: " + v + ";", true
 	}
-	// Hyphens.
+	// Hyphens. Safari before 17 only reads the prefixed property.
 	switch cls {
-	case "hyphens-none":
-		return "hyphens: none;", true
-	case "hyphens-manual":
-		return "hyphens: manual;", true
-	case "hyphens-auto":
-		return "hyphens: auto;", true
+	case "hyphens-none", "hyphens-manual", "hyphens-auto":
+		v := strings.TrimPrefix(cls, "hyphens-")
+		return "-webkit-hyphens: " + v + "; hyphens: " + v + ";", true
 	}
 	// List image.
 	if v, ok := unwrapArbitrary(strings.TrimPrefix(cls, "list-image-")); ok && strings.HasPrefix(cls, "list-image-") {

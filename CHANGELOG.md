@@ -427,6 +427,19 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- Tailwind output matches Tailwind v4.3 in the places it still differed. `shadow-*/N`,
+  `inset-shadow-*/N`, `text-shadow-*/N` and `drop-shadow-*/N` set the default shadow colour's alpha to
+  N% (they multiplied it, so `shadow-lg/20` was ten times too faint), and accept arbitrary shadows and
+  `/(--alpha)`. Default breakpoints, `container` widths and `max-w-screen-*` are `40rem` to `96rem` instead
+  of px, so they follow the browser's font size. Gradient stops, positions and shadow alphas are registered
+  with typed `@property` syntaxes, so `transition-colors` animates gradient changes. The sheet gains
+  Tailwind's `@layer properties` reset for browsers without `@property`; `bg-linear-*` and the preflight
+  placeholder colour keep a plain fallback; `hyphens-*` adds `-webkit-hyphens`; `rounded-full` is
+  `calc(infinity * 1px)`; and `data-[...]`/`aria-[...]` values that would make an invalid selector
+  (`data-[foo_bar]`, `aria-[.x]`) produce no rule. A golden test now compares built-in utilities and
+  variants with real Tailwind output.
+- `@apply` with a variant (`md:flex`) in a rule whose last declaration has no semicolon no longer glues
+  the generated nested rule onto that declaration.
 - Releases publish every package that is not private, at one version. `@krate/app` was never versioned or
   published, so `npm install` in a `krate native init` project failed with E404; it is published now, and the
   template pins `@krate/app`, `@krate/core` and `@krate/runtime` to the release version instead of
