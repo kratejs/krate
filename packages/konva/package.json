@@ -1,0 +1,68 @@
+{
+  "name": "@krate/konva",
+  "version": "0.1.0",
+  "description": "A Konva 2D canvas renderer for Krate: build stages with JSX, with the react-konva API.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "homepage": "https://krate.js.org/docs/features/konva/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kratejs/krate.git"
+  },
+  "bugs": {
+    "url": "https://github.com/kratejs/krate/issues"
+  },
+  "keywords": [
+    "krate",
+    "konva",
+    "canvas",
+    "2d",
+    "react-konva",
+    "renderer"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./island": "./src/island/index.ts",
+    "./engine": "./src/engine/index.ts",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "!src/**/*.test.ts",
+    "!src/**/*.test.tsx",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "krate": {
+    "vendor": [
+      "src/engine/"
+    ]
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@krate/runtime": "^0.1.0",
+    "konva": ">=9",
+    "preact": ">=10.20.0"
+  },
+  "peerDependenciesMeta": {
+    "preact": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@krate/runtime": "workspace:*",
+    "happy-dom": "^20.14.5",
+    "konva": "^10.9.0",
+    "preact": "^10.20.0",
+    "typescript": "^5.5.0",
+    "vitest": "^5.0.3"
+  }
+}
