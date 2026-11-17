@@ -1467,6 +1467,19 @@ func (b *Builder) BuildAll() error {
 	}
 	bl.Lap("public")
 
+	// The static assets are written: precompress them while the server side
+	// is built. The pass at the end only encodes what changes after this.
+	var earlyPrecompress chan struct{}
+	if !b.DevMode && b.Cfg.ShouldPrecompress() {
+		earlyPrecompress = make(chan struct{})
+		go func() {
+			defer close(earlyPrecompress)
+			_, _ = PrecompressOutput(b.Cfg.OutDir, b.Cfg.Compress.Brotli, b.Cfg.Compress.Gzip)
+		}()
+		// Never return with the pass still writing into the output.
+		defer func() { <-earlyPrecompress }()
+	}
+
 	tl := b.Prof.Laps("tools:")
 	strays := findPagesStrays(b.Cfg.PagesDir)
 	printWarningsOnce(os.Stderr, b.strayAPIWarnings(strays.apiFiles))
@@ -1590,6 +1603,11 @@ func (b *Builder) BuildAll() error {
 				mergedPageCSS.WriteString("\n")
 			}
 		}
+	}
+	// AfterBuild plugins may rewrite output files: let the early pass finish
+	// first, so a file is never read while it is being rewritten.
+	if earlyPrecompress != nil {
+		<-earlyPrecompress
 	}
 	afterBuildCtx := &plugin.BuildResultHookCtx{
 		Root:    b.Root,

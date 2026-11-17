@@ -57,6 +57,7 @@ for usage.
 | @krate/three (react-three-fiber API) | Supported | n/a | Partial | @react-three/fiber 9 API without React |
 | @react-three/fiber | n/a | Partial | n/a | Real-React island |
 | @react-three/drei | n/a | Partial | n/a | Real-React island |
+| @krate/konva (react-konva API) | Supported | n/a | Partial | react-konva 19 API without React |
 | react-konva | n/a | Partial | n/a | Real-React island |
 | SSR island hydration | n/a | Supported | Supported | Hydration-safe |
 | Supported Preact versions | n/a | Supported | n/a | 10.20 through current |
@@ -509,18 +510,32 @@ Known limits:
 
 Evidence: `TestRealReactIsland`, `TestBrowserRealReactIsland`, `TestMigrateReactThreeKeepsFiberForUnsupportedAPIs`
 
+### @krate/konva (react-konva API)
+
+**Source:** Supported - **Islands:** n/a - **SSR:** Partial
+
+@krate/konva renders Konva stages from JSX with react-konva's API: Stage (an @renderer component compiled with the page), every Konva shape (Layer, Group, Rect, Line, Circle, Ellipse, Path, Text, Image, Arrow, Shape with sceneFunc/hitFunc, Transformer and the rest of react-konva's list), props applied in place with react-konva's rules (listening, dash, hitStrokeWidth, shadow*, dragBoundFunc, strict mode), on* event props bound as Konva events, draggable, refs to Konva nodes (Krate variables, useRef objects, callbacks), keyed lists, conditionals and context through the Stage. In a "use client" component of a server-rendered page (a Preact island) the build resolves @krate/konva to its island build, the same API rendered by Preact. TestBrowserKonva drives a react-konva-style editor as a Krate page and as a Preact island, and a Krate-style (createSignal) page, in Chromium: reactive props, click and hover hit-testing, drag with dragBoundFunc, the Transformer (nodes, keepRatio, boundBoxFunc), double-click, keyed reorders, refs, context, and no React chunk. `krate migrate nextjs` moves react-konva imports to it. The engine has Vitest coverage in packages/konva.
+
+Known limits:
+
+- Only the Stage's container div is server-rendered; the shapes are drawn in the browser.
+- KonvaRenderer (the React reconciler) is not provided; a module that uses it, an internal react-konva subpath or a package built on react-konva keeps react-konva in a real-React island (row react-konva).
+- In a Krate page a spread prop on a shape is read once.
+
+Evidence: `TestBrowserKonva`, `TestKonvaIslandKind`, `TestMigrateReactKonvaToKrateKonva`, `TestMigrateReactKonvaKeepsReactKonvaForUnsupportedAPIs`, `fixture:packages/compiler/internal/build/testdata/konva`
+
 ### react-konva
 
 **Source:** n/a - **Islands:** Partial - **SSR:** n/a
 
-react-konva depends on react-reconciler, so a module using Stage, Layer and the shape components runs as a real-React island with no configuration. Verified by hand: a Rect moves when island state changes under react-konva 19.3 and konva 9.3.
+react-konva depends on react-reconciler, so a module using Stage, Layer and the shape components runs as a real-React island with no configuration. Verified by hand: a Rect moves when island state changes under react-konva 19.3 and konva 9.3. `krate migrate nextjs` moves code that only uses the react-konva API @krate/konva provides to @krate/konva (row krate-konva), which needs no React.
 
 Known limits:
 
 - The mechanism is tested in CI with a minimal react-reconciler renderer; the library itself was verified by hand in Chromium (react-konva 19.3, konva 9.3) and is not installed in CI.
 - The canvas is client-only; there is no server rendering.
 
-Evidence: `TestRealReactIsland`, `TestBrowserRealReactIsland`
+Evidence: `TestRealReactIsland`, `TestBrowserRealReactIsland`, `TestKonvaIslandKind`
 
 ### SSR island hydration
 

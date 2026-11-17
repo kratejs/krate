@@ -252,7 +252,10 @@ func rendererElement(el *ast.JSXElement) *ast.JSXElement {
 		cp := *attr
 		switch {
 		case attr.Spread:
-		case intrinsic && attr.Name == "ref" && isAssignableRef(attr.Value):
+		case attr.Name == "ref" && isAssignableRef(attr.Value):
+			// Also on components: renderer elements such as react-konva's
+			// <Rect> are capitalized constants, and a component that takes a
+			// ref hands it the object it renders.
 			cp.Value = adaptiveRef(unparen(attr.Value))
 		case intrinsic && attr.Name != "ref" && attr.Name != "key" && !isOnEvent(attr.Name) && isFunctionExpr(attr.Value):
 			cp.Value = thunk(&ast.ParenExpr{Expr: unparen(attr.Value)})

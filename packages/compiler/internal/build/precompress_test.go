@@ -1,7 +1,9 @@
 package build
 
 import (
+	"bytes"
 	"compress/gzip"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -119,5 +121,69 @@ func TestPrecompressedLiveServer(t *testing.T) {
 	resp.Body.Close()
 	if string(body) != js {
 		t.Fatal("GET /app.js identity body mismatch")
+	}
+}
+
+// Scripts and stylesheets are compressed at brotli's maximum level unless the
+// default level does better, other assets at the default level.
+func TestPrecompressScriptsAtMaxBrotliLevel(t *testing.T) {
+	dir := t.TempDir()
+	var src strings.Builder
+	for i := 0; i < 4000; i++ {
+		fmt.Fprintf(&src, "function f%d(a,b){return a*%d+b.map(x=>x+%d).join(',')}\n", i, i%97, i%13)
+	}
+	data := []byte(src.String())
+	for _, name := range []string{"app.js", "page.html"} {
+		if err := os.WriteFile(filepath.Join(dir, name), data, 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := PrecompressOutput(dir, true, false); err != nil {
+		t.Fatal(err)
+	}
+	best, _ := brotliCompressLevel(data, brotliScriptLevel)
+	def, _ := brotliCompressLevel(data, brotliLevel)
+	smaller := best
+	if len(def) < len(best) {
+		smaller = def
+	}
+	for name, want := range map[string][]byte{"app.js": smaller, "page.html": def} {
+		got, err := os.ReadFile(filepath.Join(dir, name+".br"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(got, want) {
+			t.Errorf("%s.br has %d bytes, want %d", name, len(got), len(want))
+		}
+	}
+	// On real script code the maximum level wins.
+	code, err := os.ReadFile("precompress.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hi, _ := brotliCompressFor("x.js", code); len(hi) >= len(mustBrotli(t, code, brotliLevel)) {
+		t.Errorf("a script compressed to %d bytes, not smaller than the default level", len(hi))
+	}
+}
+
+func mustBrotli(t *testing.T, data []byte, level int) []byte {
+	t.Helper()
+	out, err := brotliCompressLevel(data, level)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// A precompressed asset served through the gzip writer names Accept-Encoding
+// in Vary once.
+func TestAddVaryOnce(t *testing.T) {
+	h := http.Header{}
+	addVary(h, "Accept-Encoding")
+	addVary(h, "accept-encoding")
+	h.Add("Vary", "Origin")
+	addVary(h, "Origin")
+	if got := h.Values("Vary"); len(got) != 2 || got[0] != "Accept-Encoding" || got[1] != "Origin" {
+		t.Errorf("Vary = %q", got)
 	}
 }

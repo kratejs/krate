@@ -1178,9 +1178,9 @@ jobs:
       # App-level browser tests: the SPA router (layouts, templates, parallel
       # and intercepting routes), client components inside server components,
       # the component library's accessibility, a server action redirect, and
-      # CSP with speculation rules.
+      # CSP with speculation rules, and @krate/konva canvases (page and island).
       - name: App browser tests
-        run: go test -run 'TestRouterBrowserE2E|TestUseClientIslandBrowser|TestComponentsA11yBrowser|TestServerActionRedirectInBrowser|TestCSPSpeculationRulesInBrowser' -count=1 -v ./internal/build
+        run: go test -run 'TestRouterBrowserE2E|TestUseClientIslandBrowser|TestComponentsA11yBrowser|TestServerActionRedirectInBrowser|TestCSPSpeculationRulesInBrowser|TestBrowserKonva' -count=1 -v ./internal/build
         working-directory: packages/compiler
         env:
           KRATE_BROWSER: ${{ matrix.browser }}

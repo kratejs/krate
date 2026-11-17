@@ -593,16 +593,39 @@
       ]
     },
     {
+      "id": "krate-konva",
+      "area": "@krate/konva (react-konva API)",
+      "source": "supported",
+      "islands": "n/a",
+      "ssr": "partial",
+      "target": "react-konva 19 API without React",
+      "summary": "@krate/konva renders Konva stages from JSX with react-konva's API: Stage (an @renderer component compiled with the page), every Konva shape (Layer, Group, Rect, Line, Circle, Ellipse, Path, Text, Image, Arrow, Shape with sceneFunc/hitFunc, Transformer and the rest of react-konva's list), props applied in place with react-konva's rules (listening, dash, hitStrokeWidth, shadow*, dragBoundFunc, strict mode), on* event props bound as Konva events, draggable, refs to Konva nodes (Krate variables, useRef objects, callbacks), keyed lists, conditionals and context through the Stage. In a \"use client\" component of a server-rendered page (a Preact island) the build resolves @krate/konva to its island build, the same API rendered by Preact. TestBrowserKonva drives a react-konva-style editor as a Krate page and as a Preact island, and a Krate-style (createSignal) page, in Chromium: reactive props, click and hover hit-testing, drag with dragBoundFunc, the Transformer (nodes, keepRatio, boundBoxFunc), double-click, keyed reorders, refs, context, and no React chunk. `krate migrate nextjs` moves react-konva imports to it. The engine has Vitest coverage in packages/konva.",
+      "tests": [
+        "TestBrowserKonva",
+        "TestKonvaIslandKind",
+        "TestMigrateReactKonvaToKrateKonva",
+        "TestMigrateReactKonvaKeepsReactKonvaForUnsupportedAPIs",
+        "fixture:packages/compiler/internal/build/testdata/konva"
+      ],
+      "roadmap": false,
+      "knownLimits": [
+        "Only the Stage's container div is server-rendered; the shapes are drawn in the browser.",
+        "KonvaRenderer (the React reconciler) is not provided; a module that uses it, an internal react-konva subpath or a package built on react-konva keeps react-konva in a real-React island (row react-konva).",
+        "In a Krate page a spread prop on a shape is read once."
+      ]
+    },
+    {
       "id": "react-konva",
       "area": "react-konva",
       "source": "n/a",
       "islands": "partial",
       "ssr": "n/a",
       "target": "Real-React island",
-      "summary": "react-konva depends on react-reconciler, so a module using Stage, Layer and the shape components runs as a real-React island with no configuration. Verified by hand: a Rect moves when island state changes under react-konva 19.3 and konva 9.3.",
+      "summary": "react-konva depends on react-reconciler, so a module using Stage, Layer and the shape components runs as a real-React island with no configuration. Verified by hand: a Rect moves when island state changes under react-konva 19.3 and konva 9.3. `krate migrate nextjs` moves code that only uses the react-konva API @krate/konva provides to @krate/konva (row krate-konva), which needs no React.",
       "tests": [
         "TestRealReactIsland",
-        "TestBrowserRealReactIsland"
+        "TestBrowserRealReactIsland",
+        "TestKonvaIslandKind"
       ],
       "roadmap": false,
       "knownLimits": [

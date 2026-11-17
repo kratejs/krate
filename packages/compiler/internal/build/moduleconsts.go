@@ -69,30 +69,44 @@ func mergeModuleConstants(entry *ast.Program, extra []annotator.ModuleSource) (m
 	}
 	run := irtree.MergeModuleRuns(runs...)
 
-	// Entry import aliases (`import { upper as shout }`) bind the local name to
-	// the exported constant's value.
-	if entry == nil {
-		return consts, inits, run
-	}
-	for _, stmt := range entry.Body {
-		imp, ok := stmt.(*ast.ImportStmt)
-		if !ok {
-			continue
+	// Import aliases (`import { upper as shout }`) bind the local name to the
+	// exported constant's value: the entry's first, then those of the imported
+	// modules (a component module that imports `{ Layer as KLayer }` uses
+	// KLayer in the markup it renders).
+	bindAliases := func(prog *ast.Program, overwrite bool) {
+		if prog == nil {
+			return
 		}
-		for _, n := range imp.Named {
-			local := n.Local
-			if local == "" {
-				local = n.Remote
-			}
-			if local == n.Remote {
+		for _, stmt := range prog.Body {
+			imp, ok := stmt.(*ast.ImportStmt)
+			if !ok {
 				continue
 			}
-			if v, ok := consts[n.Remote]; ok {
-				consts[local] = v
+			for _, n := range imp.Named {
+				local := n.Local
+				if local == "" {
+					local = n.Remote
+				}
+				if local == n.Remote {
+					continue
+				}
+				if v, ok := consts[n.Remote]; ok {
+					if _, taken := consts[local]; overwrite || !taken {
+						consts[local] = v
+					}
+				}
+				if e, ok := inits[n.Remote]; ok {
+					if _, taken := inits[local]; overwrite || !taken {
+						inits[local] = e
+					}
+				}
 			}
-			if e, ok := inits[n.Remote]; ok {
-				inits[local] = e
-			}
+		}
+	}
+	bindAliases(entry, true)
+	for _, m := range extra {
+		if !isExternalModulePath(m.Path) {
+			bindAliases(m.Program, false)
 		}
 	}
 	return consts, inits, run

@@ -313,6 +313,27 @@ importers:
         specifier: ^5.5.0
         version: 5.9.3
 
+  packages/konva:
+    devDependencies:
+      '@krate/runtime':
+        specifier: workspace:*
+        version: link:../runtime
+      happy-dom:
+        specifier: ^20.14.5
+        version: 20.14.5
+      konva:
+        specifier: ^10.9.0
+        version: 10.9.0
+      preact:
+        specifier: ^10.20.0
+        version: 10.29.8
+      typescript:
+        specifier: ^5.5.0
+        version: 5.9.3
+      vitest:
+        specifier: ^5.0.3
+        version: 5.0.3(@types/node@26.2.0)(happy-dom@20.14.5)(vite@8.3.2(@types/node@26.2.0)(esbuild@0.28.2)(tsx@4.23.13))
+
   packages/plugin:
     devDependencies:
       '@types/node':
@@ -1946,6 +1967,17 @@ packages:
 
   js-base64@3.9.6:
     resolution: {integrity: sha512-LjkzbLtU6Lx6fjXMYGEACEB7rdtqZtxkBe9aS1ZpDNUyWgUivw3yBEIhQ37OVygJYRt+C+9e9fVT8PpFzH2Hww==}
+
+  konva@10.9.0:
+    resolution: {integrity: sha512-3NOOlcbimFDp4+/DfXGTBkfn3cn3VP1BESPySQ6ayCzgMA9JSMGJNNxeIKw5jpHL6SAl6gHsrv10DUEjNRL0Qg==}
+    peerDependencies:
+      canvas: ^3.0.0
+      skia-canvas: ^3.0.0
+    peerDependenciesMeta:
+      canvas:
+        optional: true
+      skia-canvas:
+        optional: true
 
   libsql@0.5.29:
     resolution: {integrity: sha512-8lMP8iMgiBzzoNbAPQ59qdVcj6UaE/Vnm+fiwX4doX4Narook0a4GPKWBEv+CR8a1OwbfkgL18uBfBjWdF0Fzg==}
@@ -3613,6 +3645,8 @@ snapshots:
   is-fullwidth-code-point@3.0.0: {}
 
   js-base64@3.9.6: {}
+
+  konva@10.9.0: {}
 
   libsql@0.5.29:
     dependencies:

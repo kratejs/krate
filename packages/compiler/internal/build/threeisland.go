@@ -49,8 +49,8 @@ var threeRealReactEntries = map[string]string{
 // threeRealReactPlugin resolves @krate/three to @react-three/fiber (and
 // @krate/three/drei to @react-three/drei) in a real-React island. A scene
 // migrated to @krate/three can still be rendered by a component that is a
-// real-React island for another reason (a react-konva editor that also shows
-// the 3D preview); React already ships there, and fiber renders the scene with
+// real-React island for another reason (a canvas editor built on another
+// reconciler library that also shows the 3D preview); React already ships there, and fiber renders the scene with
 // the same API. Without fiber installed the build says what to do.
 func threeRealReactPlugin() api.Plugin {
 	return api.Plugin{
@@ -64,7 +64,7 @@ func threeRealReactPlugin() api.Plugin {
 				r := pb.Resolve(target, api.ResolveOptions{ResolveDir: args.ResolveDir, Kind: args.Kind, Importer: args.Importer})
 				if len(r.Errors) > 0 {
 					return api.OnResolveResult{Errors: []api.Message{{
-						Text:  args.Path + " is imported by a real-React island (a module that uses a React reconciler library such as react-konva renders it), where it runs as " + target + ", which is not installed",
+						Text:  args.Path + " is imported by a real-React island (a module that uses a React reconciler library renders it), where it runs as " + target + ", which is not installed",
 						Notes: []api.Note{{Text: "install " + target + " (keep it after `krate migrate nextjs`), or render the 3D component outside the real-React island"}},
 					}}}, nil
 				}
