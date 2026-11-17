@@ -1,4 +1,4 @@
-import { Code } from "@krate/components";
+import { Code } from "@krate/components/code";
 import { CounterDemo } from "../components/counter-demo";
 
 export default function Home() {

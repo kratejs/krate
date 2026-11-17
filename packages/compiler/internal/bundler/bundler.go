@@ -1294,10 +1294,10 @@ func generateMDXBundleTSX(path string, compiled *markdown.Result, mcfg markdown.
 		}
 	}
 	if markdown.HasCodeSegments(segments) {
-		sb.WriteString("import { Code } from \"@krate/components\";\n")
+		sb.WriteString("import { Code } from \"@krate/components/code\";\n")
 	}
 	if markdown.HasAsideSegments(segments) {
-		sb.WriteString("import { Aside } from \"@krate/components\";\n")
+		sb.WriteString("import { Aside } from \"@krate/components/aside\";\n")
 	}
 	sb.WriteString("\nexport default function MDXContent() {\n")
 	sb.WriteString("  return (\n")

@@ -759,7 +759,7 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page doc
 			return
 		}
 		imported[name] = true
-		sb.WriteString("import { " + name + " } from \"@krate/components\";\n")
+		sb.WriteString("import { " + name + " } from \"" + componentImportPath(name) + "\";\n")
 	}
 	if useCode {
 		addImport("Code")
@@ -1247,4 +1247,17 @@ func localeRoots(locales []string, version string, versionRoot map[string]string
 		}
 	}
 	return out
+}
+
+// componentImportPath returns the module specifier for a built-in component.
+// Code and Aside come from their own subpaths so a page does not pull in the
+// CSS of every component in the barrel.
+func componentImportPath(name string) string {
+	switch name {
+	case "Code":
+		return "@krate/components/code"
+	case "Aside":
+		return "@krate/components/aside"
+	}
+	return "@krate/components"
 }

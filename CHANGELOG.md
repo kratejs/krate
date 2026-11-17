@@ -427,6 +427,9 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- Markdown pages import `Code` and `Aside` from `@krate/components/code` and `/aside` instead of the
+  package root, so they no longer ship the CSS of every component in the library (about 52 kB raw,
+  7.6 kB gzip per docs page).
 - `Link` prefetches on hover, focus and touch only; it no longer prefetches every link that scrolls
   into view (about 40 requests and 200 kB gzip per docs page). `prefetch="viewport"` (or the new
   `prefetch: "viewport"` config option) opts back in, capped at 5 links per page, and no automatic
