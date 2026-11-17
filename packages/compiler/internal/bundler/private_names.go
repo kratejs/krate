@@ -294,10 +294,6 @@ func (r moduleRewrites) empty() bool {
 	return len(r.named) == 0 && len(r.via) == 0 && len(r.reexports) == 0
 }
 
-func (r moduleRewrites) key() string {
-	return namedKey(r.named) + "|" + namedKey(r.via) + "|" + namedKey(r.reexports)
-}
-
 // reexportOrigin follows named re-exports from path to the module that
 // declares name, and returns it with the name it has there.
 func (b *Bundler) reexportOrigin(byPath map[string]*Module, path, name string, depth int) (string, string) {
@@ -823,24 +819,6 @@ func (e *renameEdits) apply(prog *ast.Program) {
 		spec := &prog.Body[x.stmt].(*ast.ImportStmt).Named[x.spec]
 		spec.Local, spec.Remote = x.local, x.remote
 	}
-}
-
-func namedKey(named map[importKey]string) string {
-	keys := make([]string, 0, len(named))
-	for k := range named {
-		keys = append(keys, k.target+"#"+k.name)
-	}
-	sort.Strings(keys)
-	return strings.Join(keys, ",")
-}
-
-func renameKey(names map[string]string) string {
-	keys := make([]string, 0, len(names))
-	for k := range names {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return strings.Join(keys, ",")
 }
 
 // privateSuffix depends on the path within the project, so builds are
