@@ -301,7 +301,8 @@ func tagNameEnd(src string, p ast.Pos, name string) (int, bool) {
 // (irtree.GoCallID) mapped to build-time rendered HTML. root is the project
 // root, used to read a component file's `// krate:revalidate` directive (baked
 // into the shim so the marker needs no name-based lookup at serve time).
-func goServerBundlePlugin(baked map[string]string, root string) api.Plugin {
+// files keeps the annotated sources for the run's other bundles.
+func goServerBundlePlugin(baked map[string]string, root string, files *serverBundleFiles) api.Plugin {
 	return api.Plugin{
 		Name: "krate-go",
 		Setup: func(pb api.PluginBuild) {
@@ -330,11 +331,10 @@ func goServerBundlePlugin(baked map[string]string, root string) api.Plugin {
 			// Go component are annotated too, so their call sites can inline baked
 			// HTML. Project files are the only ones loaded (packages are external).
 			pb.OnLoad(api.OnLoadOptions{Filter: `\.[jt]sx?$`, Namespace: "file"}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
-				data, err := readServerSource(pb.InitialOptions.AbsWorkingDir, args.Path)
+				src, err := files.goModuleSource(pb.InitialOptions.AbsWorkingDir, args.Path)
 				if err != nil {
 					return api.OnLoadResult{}, err
 				}
-				src := annotateGoModuleSource(args.Path, string(data))
 				return api.OnLoadResult{Contents: &src, Loader: loaderForExt(args.Path)}, nil
 			})
 		},

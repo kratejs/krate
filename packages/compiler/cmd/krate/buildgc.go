@@ -1,49 +1,31 @@
 package main
 
 import (
-	"bufio"
+	"fmt"
 	"os"
 	"runtime/debug"
-	"strconv"
-	"strings"
+
+	"github.com/kratejs/krate/packages/compiler/internal/jsworker"
+	"github.com/kratejs/krate/packages/compiler/internal/membudget"
 )
 
-// tuneBuildGC gives a one-shot build more heap between collections (the
-// collector otherwise takes an eighth of the build's CPU) under a soft limit
-// of 60% of physical memory, so the heap never pushes the machine into swap.
-// GOGC and GOMEMLIMIT set by the user win; without a known memory size the
-// runtime defaults stay.
-func tuneBuildGC() {
-	total := physicalMemory()
-	if total <= 0 {
-		return
+// workerReserve is the memory set aside for each build-time JavaScript
+// worker below the Go heap limit.
+const workerReserve = 256 << 20
+
+// tuneBuildGC sets the Go soft memory limit from the build's memory budget
+// (KRATE_MAX_MEMORY, or three quarters of the memory available at start; see
+// membudget.GoLimit), so the collector works harder as the heap nears it
+// instead of the machine swapping. A one-shot build also gets more heap
+// between collections below that limit (the collector otherwise takes an
+// eighth of the build's CPU). GOGC and GOMEMLIMIT set by the user win.
+func tuneBuildGC(oneShot bool) {
+	b, err := membudget.Current()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%sWarning:%s %v; using a budget of %s\n", cYellow, cReset, err, membudget.Format(b.Bytes))
 	}
-	if os.Getenv("GOMEMLIMIT") == "" {
-		debug.SetMemoryLimit(total / 10 * 6)
-	}
-	if os.Getenv("GOGC") == "" {
+	membudget.ApplyGoLimit(int64(jsworker.DefaultSize()) * workerReserve)
+	if oneShot && os.Getenv("GOGC") == "" {
 		debug.SetGCPercent(200)
 	}
-}
-
-// physicalMemory returns the machine's memory in bytes from /proc/meminfo,
-// or 0 where that is not available.
-func physicalMemory() int64 {
-	f, err := os.Open("/proc/meminfo")
-	if err != nil {
-		return 0
-	}
-	defer f.Close()
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		fields := strings.Fields(sc.Text())
-		if len(fields) >= 2 && fields[0] == "MemTotal:" {
-			kb, err := strconv.ParseInt(fields[1], 10, 64)
-			if err != nil {
-				return 0
-			}
-			return kb * 1024
-		}
-	}
-	return 0
 }

@@ -76,7 +76,7 @@ func (r *buildRounds) runEager() {
 		wg.Wait()
 		close(r.eagerDone)
 	}()
-	sem := make(chan struct{}, eagerParallel)
+	pool := newWorkerPool(eagerParallel)
 	for j := range r.eagerCh {
 		batch := []*roundJob{j}
 		deadline := time.After(eagerWait)
@@ -92,11 +92,11 @@ func (r *buildRounds) runEager() {
 				break gather
 			}
 		}
-		sem <- struct{}{}
+		pool.acquire()
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			defer func() { <-sem }()
+			defer pool.release()
 			runRoundJobs(batch)
 			r.mu.Lock()
 			r.flushLocked()
@@ -182,7 +182,7 @@ type roundWaiter struct {
 func newBuildRounds(pages int, pool *workerPool) *buildRounds {
 	r := &buildRounds{pool: pool, live: pages, minRunnable: 1}
 	if pool != nil {
-		r.minRunnable = max(1, cap(pool.sem)/2)
+		r.minRunnable = max(1, pool.gate.Slots()/2)
 	}
 	return r
 }

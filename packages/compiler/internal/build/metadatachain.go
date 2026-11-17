@@ -11,8 +11,6 @@ import (
 	"github.com/evanw/esbuild/pkg/api"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
-	"github.com/kratejs/krate/packages/compiler/internal/bundler"
-	"github.com/kratejs/krate/packages/compiler/internal/tsstrip"
 )
 
 // The metadata chain of a page: every layout above it that exports `metadata`
@@ -143,24 +141,16 @@ func metadataEntrySuffix(segs []metaSegment, pageFiles, root string) string {
 // boundaries do not cover. A layout is imported into a page's server bundle only
 // to read its metadata, so the client components it imports never render there,
 // and their React hooks would not resolve. Boundaries are claimed by an earlier
-// plugin.
-func unusedClientModulePlugin() api.Plugin {
+// plugin. files keeps the stubs for the run's other bundles.
+func unusedClientModulePlugin(files *serverBundleFiles) api.Plugin {
 	return api.Plugin{
 		Name: "krate-unused-client-modules",
 		Setup: func(pb api.PluginBuild) {
 			pb.OnLoad(api.OnLoadOptions{Filter: `\.[cm]?[jt]sx?$`, Namespace: "file"}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
-				if strings.Contains(args.Path, "node_modules") {
+				stub := files.unusedClientStub(args.Path)
+				if stub == "" {
 					return api.OnLoadResult{}, nil
 				}
-				data, err := os.ReadFile(args.Path)
-				if err != nil || !bundler.HasUseClientDirective(string(data)) {
-					return api.OnLoadResult{}, nil
-				}
-				prog, errs := tsstrip.Parse(args.Path, string(data), tsstrip.Options{})
-				if prog == nil || len(errs) > 0 {
-					return api.OnLoadResult{}, nil
-				}
-				stub := clientModuleStub(prog)
 				return api.OnLoadResult{Contents: &stub, Loader: api.LoaderJS}, nil
 			})
 		},

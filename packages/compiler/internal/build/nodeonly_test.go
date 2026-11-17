@@ -196,7 +196,16 @@ func normalizeRoot(b []byte, root string) []byte {
 			b = bytes.ReplaceAll(b, []byte(filepath.ToSlash(rel)), []byte("ROOT"))
 		}
 	}
-	return bytes.ReplaceAll(b, []byte(filepath.ToSlash(root)), []byte("ROOT"))
+	b = bytes.ReplaceAll(b, []byte(filepath.ToSlash(root)), []byte("ROOT"))
+	// esbuild prints inputs with their symlinks resolved (on macOS the
+	// temporary directory /var is /private/var), so a source map path relative
+	// to an output under the unresolved root climbs into the resolved one and
+	// names the test's own temporary directories.
+	if real, err := filepath.EvalSymlinks(root); err == nil && real != root {
+		tail := filepath.Join(filepath.Base(filepath.Dir(real)), filepath.Base(real))
+		b = bytes.ReplaceAll(b, []byte(filepath.ToSlash(tail)), []byte("ROOT"))
+	}
+	return b
 }
 
 // A route that turns Node-only replaces its full QuickJS bundle with the stub,

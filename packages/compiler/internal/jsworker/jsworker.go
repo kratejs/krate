@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/kratejs/krate/packages/compiler/internal/execx"
+	"github.com/kratejs/krate/packages/compiler/internal/membudget"
 	"github.com/kratejs/krate/packages/native/jsruntime"
 )
 
@@ -118,12 +119,34 @@ func selectWith(look func(string) (string, error), env string, preferred ...stri
 	return "", ""
 }
 
-// DefaultSize is the number of worker processes a pool runs at most.
+// DefaultSize is the number of worker processes a pool runs at most: one per
+// three CPUs, at most 4, and one per 2 GiB of the build's memory budget.
 func DefaultSize() int {
 	if v, err := strconv.Atoi(os.Getenv("KRATE_BUILD_JS_WORKERS")); err == nil && v > 0 {
 		return v
 	}
-	return max(1, min(4, runtime.NumCPU()/3))
+	b, _ := membudget.Current()
+	return sizeFor(runtime.NumCPU(), b.Bytes)
+}
+
+func sizeFor(cpus int, budget int64) int {
+	n := max(1, min(4, cpus/3))
+	if budget > 0 {
+		n = min(n, max(1, int(budget/(2<<30))))
+	}
+	return n
+}
+
+// HeapLimitMB is the V8 heap limit of a Node worker: a quarter of the build's
+// memory budget, between 1 GiB and 4 GiB. A worker that exceeds it stops, and
+// the embedded engine runs the rest of the build.
+func HeapLimitMB() int {
+	b, _ := membudget.Current()
+	return heapLimitMB(b.Bytes)
+}
+
+func heapLimitMB(budget int64) int {
+	return int(min(max(budget/4, 1<<30), 4<<30) >> 20)
 }
 
 // Pool runs evaluations on up to Size worker processes, started on demand.
@@ -141,6 +164,8 @@ type Pool struct {
 	// Observe, when set, is called with the label and duration of every
 	// evaluation a worker ran.
 	Observe func(label string, d time.Duration)
+	// HeapMB caps the V8 heap of a Node worker (0: Node's default).
+	HeapMB int
 
 	mu      sync.Mutex
 	cond    *sync.Cond
@@ -158,7 +183,11 @@ func New(name, path string, size int) *Pool {
 	if size <= 0 {
 		size = DefaultSize()
 	}
-	return &Pool{Name: name, Path: path, Size: size}
+	p := &Pool{Name: name, Path: path, Size: size}
+	if name == "node" {
+		p.HeapMB = HeapLimitMB()
+	}
+	return p
 }
 
 // Broken returns why the pool stopped using workers, or nil.
@@ -181,14 +210,12 @@ func (p *Pool) Run(req Request) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	if usesGlobal(req.Code, w.missing) {
-		// The code may use a global only the embedded engine has (Node 22
-		// has no Float16Array): it runs there, as it did before workers.
-		p.release(w, gen)
-		return Result{Unsupported: true}, nil
-	}
+	// The globals only the embedded engine has (Node 22 has no Float16Array)
+	// that the code names are trapped: an evaluation that reads one reports
+	// Unsupported and runs there, as it did before workers.
+	trap := namedGlobals(req.Code, w.missing)
 	t0 := time.Now()
-	res, err := w.run(req, p.out(), p.errOut())
+	res, err := w.run(req, trap, p.out(), p.errOut())
 	if p.Observe != nil && req.Label != "" {
 		p.Observe(req.Label, time.Since(t0))
 	}
@@ -237,7 +264,7 @@ func (p *Pool) acquire() (*worker, int, error) {
 			p.running++
 			gen := p.gen
 			p.mu.Unlock()
-			w, err := start(p.Name, p.Path)
+			w, err := start(p.Name, p.Path, p.HeapMB)
 			if err != nil {
 				p.mu.Lock()
 				p.running--
@@ -397,9 +424,12 @@ type worker struct {
 // startTimeout bounds how long a worker may take to report ready.
 const startTimeout = 15 * time.Second
 
-func start(name, path string) (*worker, error) {
+func start(name, path string, heapMB int) (*worker, error) {
 	driverOnce.Do(func() { driverSrc = Driver() })
 	args := []string{"-e", driverSrc}
+	if heapMB > 0 {
+		args = append([]string{"--max-old-space-size=" + strconv.Itoa(heapMB)}, args...)
+	}
 	cmd := exec.Command(path, args...)
 	execx.ConfigureTree(cmd)
 	cmd.Stderr = os.Stderr
@@ -465,6 +495,8 @@ type header struct {
 	Until     string            `json:"until,omitempty"`
 	Reads     []string          `json:"reads"`
 	TimeoutMs int64             `json:"timeoutMs"`
+	// Trap lists the globals the worker lacks that the code names.
+	Trap []string `json:"trap,omitempty"`
 }
 
 type readValue struct {
@@ -501,13 +533,13 @@ func Timeout() time.Duration {
 	return 30 * time.Second
 }
 
-func (w *worker) run(req Request, stdout, stderr io.Writer) (Result, error) {
+func (w *worker) run(req Request, trap []string, stdout, stderr io.Writer) (Result, error) {
 	w.seq++
 	timeout := req.Timeout
 	if timeout <= 0 {
 		timeout = Timeout()
 	}
-	h := header{ID: w.seq, Module: req.Module, Await: req.Await, Until: req.Until, Reads: req.Reads, TimeoutMs: timeout.Milliseconds()}
+	h := header{ID: w.seq, Module: req.Module, Await: req.Await, Until: req.Until, Reads: req.Reads, TimeoutMs: timeout.Milliseconds(), Trap: trap}
 	if len(req.Env) > 0 {
 		h.Env = req.Env
 	}
@@ -632,8 +664,9 @@ func missingGlobals(have []string) []string {
 	return out
 }
 
-// usesGlobal reports whether code names one of globals as a whole word.
-func usesGlobal(code string, globals []string) bool {
+// namedGlobals returns the globals that code names as a whole word.
+func namedGlobals(code string, globals []string) []string {
+	var out []string
 	for _, g := range globals {
 		for i := 0; ; {
 			j := strings.Index(code[i:], g)
@@ -643,12 +676,13 @@ func usesGlobal(code string, globals []string) bool {
 			at := i + j
 			end := at + len(g)
 			if (at == 0 || !identByte(code[at-1])) && (end == len(code) || !identByte(code[end])) {
-				return true
+				out = append(out, g)
+				break
 			}
 			i = at + 1
 		}
 	}
-	return false
+	return out
 }
 
 func identByte(c byte) bool {

@@ -58,6 +58,11 @@ func newClientSSRImpls(res *bundler.ImportResolver, results []*PageResult, root,
 	return impls
 }
 
+// shareServerBundleWork lets the page server bundles of a run share their
+// package resolutions and the sources their plugins derive from project
+// files. Tests turn it off to build every page as if it were alone.
+var shareServerBundleWork = true
+
 // compileServerBundlesWith is compileServerBundles with the server render
 // modules built by impls, which a caller may have prebuilt.
 func compileServerBundlesWith(impls *clientSSRImpls, results []*PageResult, root, outDir string, sourcemap bool, actionModules map[string]map[string]string, actionBasePath string) (map[string]string, []error) {
@@ -72,8 +77,15 @@ func compileServerBundlesWith(impls *clientSSRImpls, results []*PageResult, root
 
 	bundles := make(map[string]string, len(ssrPages))
 	// The page bundles share their options, so a package import resolves
-	// once for all of them.
-	serverMemo := &resolveMemo{}
+	// once for all of them. The memo is native: the plugins ahead of the
+	// external-packages plugin answer an import from its importer, path and
+	// kind alone and none of them resolves again, so an import they leave to
+	// it is left to esbuild again in its resolve.
+	serverMemo := newNativeResolveMemo()
+	files := &serverBundleFiles{}
+	if !shareServerBundleWork {
+		serverMemo, files = nil, nil
+	}
 	var fatal []error
 	var mu sync.Mutex
 	fail := func(page *PageResult, err error) {
@@ -144,7 +156,7 @@ func compileServerBundlesWith(impls *clientSSRImpls, results []*PageResult, root
 			outName := strings.TrimPrefix(route, "/") + ".server.mjs"
 			outPath := filepath.Join(bundleDir, outName)
 
-			cbPlugin, cbErr := clientBoundaryPlugin(page.ClientBoundaries, impls, outPath)
+			cbPlugin, cbErr := clientBoundaryPlugin(page.ClientBoundaries, impls, outPath, files)
 			if cbErr != nil {
 				fmt.Fprintf(os.Stderr, "  %sServer bundle error (%s):%s %v\n", cRed, page.SourcePath, cReset, cbErr)
 				fail(page, cbErr)
@@ -161,7 +173,7 @@ func compileServerBundlesWith(impls *clientSSRImpls, results []*PageResult, root
 					// share its identity.
 					stdinFile = "krate-composed-entry.tsx"
 				}
-				composed = append(composed, composedLayoutPlugin(root, pageModule, injectedSource, filepath.Dir(absSource), page.ComposedLayouts))
+				composed = append(composed, composedLayoutPlugin(root, pageModule, injectedSource, filepath.Dir(absSource), page.ComposedLayouts, files))
 			}
 
 			result := esbuildBuild(api.BuildOptions{
@@ -181,7 +193,7 @@ func compileServerBundlesWith(impls *clientSSRImpls, results []*PageResult, root
 					"@krate/runtime",
 					"@krate/runtime/*",
 				},
-				Plugins: serverBundlePlugins(page, absSource, append(composed, reactServerShimPlugin(), serverCSSPlugin(root), cbPlugin, unusedClientModulePlugin(), serverExportPlugin(page.ServerExports, absSource), goServerBundlePlugin(page.GoBaked, root), actionServerBundlePlugin(res, actionModules, actionBasePath), inlineActionPlugin(root, actionBasePath), serverRuntimeTagsPlugin(), serverGlobalsPlugin(root), pathAliasPlugin(res), externalNodeModulesPluginMemo(outPath, serverMemo))...),
+				Plugins: serverBundlePlugins(page, absSource, append(composed, reactServerShimPlugin(), serverCSSPlugin(root), cbPlugin, unusedClientModulePlugin(files), serverExportPlugin(page.ServerExports, absSource, files), goServerBundlePlugin(page.GoBaked, root, files), actionServerBundlePlugin(res, actionModules, actionBasePath), inlineActionPlugin(root, actionBasePath), serverRuntimeTagsPlugin(), serverGlobalsPlugin(root), pathAliasPlugin(res), externalNodeModulesPluginMemo(outPath, serverMemo))...),
 				Stdin: &api.StdinOptions{
 					Loader:     api.LoaderTSX,
 					Contents:   stdinContents,

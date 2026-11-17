@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"net/url"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/evanw/esbuild/pkg/api"
 	"github.com/kratejs/krate/packages/compiler/internal/bundler"
@@ -175,7 +177,19 @@ func externalNodeModulesPlugin(outFile string) api.Plugin {
 // resolveMemo remembers the resolutions the plugins of a family of builds
 // (the same options, such as every page's server bundle) ask esbuild for, so
 // each import is resolved once for the family instead of once per build.
-type resolveMemo struct{ m sync.Map }
+type resolveMemo struct {
+	m sync.Map // resolveMemoKey -> resolveMemoValue, or *resolveMemoEntry when native
+	// native marks a memo whose resolutions are esbuild's own: the resolve it
+	// wraps reaches no plugin that answers it, and none that enters the memo
+	// again. esbuild resolves a path from its directory, its kind and its
+	// import attributes, never from the importer, so such a memo keys by those
+	// alone, and a build that asks while another build of the family resolves
+	// the same key waits for that answer.
+	native bool
+}
+
+// newNativeResolveMemo is a native resolveMemo (see resolveMemo.native).
+func newNativeResolveMemo() *resolveMemo { return &resolveMemo{native: true} }
 
 type resolveMemoKey struct {
 	importer, namespace, dir, path, with string
@@ -185,6 +199,13 @@ type resolveMemoKey struct {
 type resolveMemoValue struct {
 	path, namespace, suffix string
 	external, failed        bool
+}
+
+// resolveMemoEntry is a resolution of a native memo, ready once done is
+// closed.
+type resolveMemoEntry struct {
+	done chan struct{}
+	v    resolveMemoValue
 }
 
 func memoKey(args api.OnResolveArgs) resolveMemoKey {
@@ -203,26 +224,65 @@ func memoKey(args api.OnResolveArgs) resolveMemoKey {
 // resolve returns resolve(args), from the memo when the family resolved the
 // same import before. A nil memo always resolves.
 func (m *resolveMemo) resolve(args api.OnResolveArgs, resolve func() api.ResolveResult) resolveMemoValue {
-	var key resolveMemoKey
-	if m != nil {
-		key = memoKey(args)
-		if v, ok := m.m.Load(key); ok {
-			return v.(resolveMemoValue)
-		}
+	if m == nil {
+		return memoValue(resolve())
 	}
-	r := resolve()
-	v := resolveMemoValue{path: r.Path, namespace: r.Namespace, suffix: r.Suffix, external: r.External, failed: len(r.Errors) > 0}
-	if m != nil {
-		m.m.Store(key, v)
+	key := memoKey(args)
+	if m.native {
+		return m.resolveNative(key, resolve)
 	}
+	if v, ok := m.m.Load(key); ok {
+		return v.(resolveMemoValue)
+	}
+	v := memoValue(resolve())
+	m.m.Store(key, v)
 	return v
+}
+
+// resolveNative is resolve for a native memo.
+func (m *resolveMemo) resolveNative(key resolveMemoKey, resolve func() api.ResolveResult) resolveMemoValue {
+	key.importer = ""
+	if e, ok := m.m.Load(key); ok {
+		e := e.(*resolveMemoEntry)
+		<-e.done
+		return e.v
+	}
+	e := &resolveMemoEntry{done: make(chan struct{})}
+	if prev, loaded := m.m.LoadOrStore(key, e); loaded {
+		prev := prev.(*resolveMemoEntry)
+		<-prev.done
+		return prev.v
+	}
+	// A resolve that panics leaves the waiters a failed resolution, which
+	// makes the plugin leave the import to esbuild.
+	e.v.failed = true
+	defer close(e.done)
+	e.v = memoValue(resolve())
+	return e.v
+}
+
+func memoValue(r api.ResolveResult) resolveMemoValue {
+	return resolveMemoValue{path: r.Path, namespace: r.Namespace, suffix: r.Suffix, external: r.External, failed: len(r.Errors) > 0}
 }
 
 // externalNodeModulesPluginMemo is externalNodeModulesPlugin for a family of
 // builds with the same options, which share their resolutions through memo.
 func externalNodeModulesPluginMemo(outFile string, memo *resolveMemo) api.Plugin {
+	var dirs []string
+	if outFile != "" {
+		dirs = []string{filepath.Dir(outFile)}
+	}
+	return externalNodeModulesPluginDirs(dirs, memo, nil)
+}
+
+// externalNodeModulesPluginDirs is externalNodeModulesPluginMemo for a build
+// with an output file in each of outDirs (none for no output file). A package
+// that some of them see in node_modules and others do not sets mixed: the
+// build cannot import it the way each separate build would, and its output
+// must not be used.
+func externalNodeModulesPluginDirs(outDirs []string, memo *resolveMemo, mixed *atomic.Bool) api.Plugin {
 	const marker = "krate-external-check"
-	outDir := filepath.Dir(outFile)
+	outDirs = slices.Compact(slices.Sorted(slices.Values(outDirs)))
 	var visible sync.Map // package root -> bool
 	return api.Plugin{
 		Name: "krate-external-node-modules",
@@ -257,10 +317,16 @@ func externalNodeModulesPluginMemo(outFile string, memo *resolveMemo) api.Plugin
 					return api.OnResolveResult{}, nil
 				}
 				if strings.Contains(filepath.ToSlash(r.path), "/node_modules/") {
-					if root := packageRootOf(r.path); root != "" && outFile != "" {
+					if root := packageRootOf(r.path); root != "" && len(outDirs) > 0 {
 						v, ok := visible.Load(root)
 						if !ok {
-							v, _ = visible.LoadOrStore(root, visibleFrom(outDir, root))
+							vis := visibleFrom(outDirs[0], root)
+							for _, d := range outDirs[1:] {
+								if mixed != nil && visibleFrom(d, root) != vis {
+									mixed.Store(true)
+								}
+							}
+							v, _ = visible.LoadOrStore(root, vis)
 						}
 						if !v.(bool) {
 							return api.OnResolveResult{Path: fileURL(r.path), External: true}, nil
@@ -302,15 +368,7 @@ func buildExternalizingNative(opts api.BuildOptions, extra []string) (api.BuildR
 	var res api.BuildResult
 	for attempt := 0; attempt < 5; attempt++ {
 		found := &nativeAddons{}
-		o := opts
-		o.External = append(append([]string(nil), opts.External...), externalPatterns(externals)...)
-		o.Plugins = append(append([]api.Plugin(nil), opts.Plugins...), nativeAddonPlugin(found, func(pkg, file string) string {
-			if pkg == "" {
-				return fmt.Sprintf("%s is a native addon in your own sources and cannot be bundled; load it with createRequire(import.meta.url) from a package listed in serverExternalPackages", file)
-			}
-			return fmt.Sprintf("package %q contains a native addon (%s) and cannot be bundled; add it to serverExternalPackages in krate.config", pkg, filepath.Base(file))
-		}))
-		res = esbuildBuild(o)
+		res = esbuildBuild(externalizingNativeOptions(opts, externals, found))
 		pkgs := found.list()
 		if len(res.Errors) == 0 || len(pkgs) == 0 {
 			return res, detected
@@ -321,6 +379,21 @@ func buildExternalizingNative(opts api.BuildOptions, extra []string) (api.BuildR
 		}
 	}
 	return res, detected
+}
+
+// externalizingNativeOptions are the options of a buildExternalizingNative
+// attempt with externals left external; found collects the native addons the
+// attempt meets.
+func externalizingNativeOptions(opts api.BuildOptions, externals []string, found *nativeAddons) api.BuildOptions {
+	o := opts
+	o.External = append(append([]string(nil), opts.External...), externalPatterns(externals)...)
+	o.Plugins = append(append([]api.Plugin(nil), opts.Plugins...), nativeAddonPlugin(found, func(pkg, file string) string {
+		if pkg == "" {
+			return fmt.Sprintf("%s is a native addon in your own sources and cannot be bundled; load it with createRequire(import.meta.url) from a package listed in serverExternalPackages", file)
+		}
+		return fmt.Sprintf("package %q contains a native addon (%s) and cannot be bundled; add it to serverExternalPackages in krate.config", pkg, filepath.Base(file))
+	}))
+	return o
 }
 
 // externalPackagesFromMetafile lists the packages a bundle still imports at run

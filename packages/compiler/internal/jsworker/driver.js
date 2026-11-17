@@ -140,7 +140,10 @@ const BODY_METHODS = ["json", "text", "arrayBuffer", "blob", "formData", "bytes"
 // newState tracks what an evaluation left pending: timers, fetches and body
 // reads. The await loop waits while any is outstanding.
 function newState() {
-  const st = { pending: 0, timers: new Map(), aborts: new Set(), wake: null };
+  // trap is set while the evaluation may read a global the embedded engine
+  // has and this runtime lacks: its console lines wait in logs until the
+  // reply, and are dropped when trapped (it then runs in the embedded engine).
+  const st = { pending: 0, timers: new Map(), aborts: new Set(), wake: null, trap: false, trapped: false, logs: [] };
   st.poke = () => {
     const w = st.wake;
     st.wake = null;
@@ -153,7 +156,7 @@ function newState() {
   return st;
 }
 
-function makeContext(st, env) {
+function makeContext(st, env, trap) {
   const ctx = vm.createContext({});
   for (const k of SHARED) {
     if (globalThis[k] !== undefined) {
@@ -162,7 +165,11 @@ function makeContext(st, env) {
   }
   const host = {
     log(kind, text) {
-      send({ t: "log", k: kind, s: String(text) });
+      if (st.trap) {
+        st.logs.push({ t: "log", k: kind, s: String(text) });
+      } else {
+        send({ t: "log", k: kind, s: String(text) });
+      }
     },
     // st.timers maps each live timer to whether the wait counts it: an
     // unref'd timer does not keep a Node process alive, so it does not keep
@@ -178,7 +185,11 @@ function makeContext(st, env) {
         try {
           cb();
         } catch (e) {
-          writeErr("ERROR: " + describe(e));
+          if (st.trap) {
+            st.logs.push({ err: "ERROR: " + describe(e) });
+          } else {
+            writeErr("ERROR: " + describe(e));
+          }
         }
         st.poke();
       };
@@ -265,6 +276,22 @@ function makeContext(st, env) {
   if (env) {
     vm.runInContext("process.env = " + JSON.stringify(env) + ";", ctx);
   }
+  // Reading one of these globals (typeof included) marks the evaluation
+  // trapped; assigning it defines it, as code polyfilling it would.
+  for (const name of trap || []) {
+    if (Object.prototype.hasOwnProperty.call(ctx, name)) continue;
+    Object.defineProperty(ctx, name, {
+      configurable: true,
+      enumerable: false,
+      get() {
+        st.trapped = true;
+        return undefined;
+      },
+      set(v) {
+        Object.defineProperty(ctx, name, { value: v, writable: true, configurable: true, enumerable: false });
+      },
+    });
+  }
   return ctx;
 }
 
@@ -326,7 +353,8 @@ async function handle(req, code) {
   const deadline = Date.now() + timeout;
   let ctx;
   try {
-    ctx = makeContext(st, req.env);
+    st.trap = Array.isArray(req.trap) && req.trap.length > 0;
+    ctx = makeContext(st, req.env, req.trap);
     let script;
     try {
       // A module runs as a strict function so its top-level bindings stay
@@ -378,6 +406,14 @@ async function handle(req, code) {
   } finally {
     cleanup(st);
   }
+  if (st.trapped) {
+    send({ t: "r", id: req.id, threw: false, err: "", unsupported: true, reads: [] });
+    return;
+  }
+  for (const l of st.logs) {
+    if (l.err) writeErr(l.err);
+    else send(l);
+  }
   send(reply);
 }
 
@@ -409,7 +445,7 @@ process.stdin.on("data", (chunk) => {
 });
 process.stdin.on("end", () => process.exit(0));
 process.stdin.on("error", () => process.exit(0));
-// The globals an evaluation sees: code naming one QuickJS has and this
+// The globals an evaluation sees: code that reads one QuickJS has and this
 // runtime lacks runs in the embedded engine.
 let globalNames = [];
 try {

@@ -222,8 +222,9 @@ func serverExportEntrySuffix(exports []ServerExport, pagePath string) string {
 
 // serverExportPlugin appends `export { Name as Key }` to each module (other
 // than the page) that declares a server component a region renders, so the
-// page bundle can re-export it even when the module keeps it private.
-func serverExportPlugin(exports []ServerExport, pagePath string) api.Plugin {
+// page bundle can re-export it even when the module keeps it private. files
+// keeps the file identities and sources for the run's other bundles.
+func serverExportPlugin(exports []ServerExport, pagePath string, files *serverBundleFiles) api.Plugin {
 	byFile := map[string][]ServerExport{}
 	for _, e := range exports {
 		if samePath(e.SourcePath, pagePath) {
@@ -245,7 +246,7 @@ func serverExportPlugin(exports []ServerExport, pagePath string) api.Plugin {
 				list, ok := byFile[filepath.Clean(args.Path)]
 				if !ok {
 					for _, e := range exports {
-						if sameFileIdentity(args.Path, e.SourcePath) {
+						if files.sameFile(args.Path, e.SourcePath) {
 							list = append(list, e)
 						}
 					}
@@ -254,7 +255,7 @@ func serverExportPlugin(exports []ServerExport, pagePath string) api.Plugin {
 				if !ok {
 					return api.OnLoadResult{}, nil
 				}
-				data, err := readServerSource(pb.InitialOptions.AbsWorkingDir, args.Path)
+				data, err := files.serverSource(pb.InitialOptions.AbsWorkingDir, args.Path)
 				if err != nil {
 					return api.OnLoadResult{}, err
 				}

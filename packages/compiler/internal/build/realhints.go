@@ -125,8 +125,8 @@ func realHintsPrelude(server string, slot int) string {
 	// renders before this one left in the runtime: the render then runs alone.
 	// V8 and JSC throw a RangeError for the stack. QuickJS throws InternalError
 	// for both, and its host installs realHintsEngineErrorQuickJS: the bundle
-	// must not name that global itself, or the worker pool, which lacks it,
-	// would leave every merged run to QuickJS.
+	// must not read that global itself, or the worker pool, which lacks it,
+	// would leave every merged run with a throwing render to QuickJS.
 	return head + "  let engine = false;\n" +
 		"  try { __krate_rts(el()); } catch (e) { engine = (globalThis." + realHintsEngineErrorGlobal + " || " + realHintsEngineErrorJS + ")(e); }\n" +
 		"  (globalThis." + realHintsMergedGlobal + " ||= {})[" + strconv.Itoa(slot) + "] = engine ? null : JSON.stringify([...globalThis.__krate_island_hints]);\n}\n"
@@ -159,7 +159,7 @@ func (b *Builder) realHintsSetup() (opts api.BuildOptions, prelude, server strin
 		return api.BuildOptions{}, "", "", false
 	}
 	sink := &islandCSSSink{root: b.Root}
-	opts, err := b.realReactOptions(sink, b.newUnavailableGuard())
+	opts, err := b.realReactOptions(sink, b.newUnavailableGuard(), nil)
 	if err != nil {
 		return api.BuildOptions{}, "", "", false
 	}
@@ -369,7 +369,7 @@ func (b *Builder) runRealHintsBatch(opts api.BuildOptions, prelude string, jobs 
 	}
 	// Each render finishes on its own: a page waits only for its own renders,
 	// not for the slowest one of the round.
-	sem := make(chan struct{}, buildWorkerLimit())
+	pool := newWorkerPool(buildWorkerLimit())
 	for i, j := range jobs {
 		if codes[i] == "" {
 			continue
@@ -378,8 +378,8 @@ func (b *Builder) runRealHintsBatch(opts api.BuildOptions, prelude string, jobs 
 		go func() {
 			defer j.complete()
 			defer func() { _ = recover() }() // a failed render has no hints
-			sem <- struct{}{}
-			defer func() { <-sem }()
+			pool.acquire()
+			defer pool.release()
 			j.output = b.realHintsTags(codes[i])
 		}()
 	}

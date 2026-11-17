@@ -231,7 +231,9 @@ func (b *Builder) preactIslandFlavour(entries []islandEntry, chunksDir string) (
 	sink := &islandCSSSink{root: b.Root}
 	minify := b.shouldMinifyJS()
 	guard := b.newUnavailableGuard()
-	plugins := []api.Plugin{purePrunePlugin(b.Root), guard.plugin(), islandEntryPlugin(entries, virtual), islandCSSPlugin(sink), islandJSXPlugin(), islandTagsPlugin(b.Root, false), islandRequirePlugin(), reconcilerGuardPlugin(), reactDOMHintsPlugin(b.Root), reactCompatPlugin(b.Root), routerHooksPlugin(b.Root), threeIslandPlugin()}
+	// One resolve memo for every build made from these options (see
+	// buildIslandFlavours).
+	plugins := []api.Plugin{purePrunePluginMemo(b.Root, &resolveMemo{}), guard.plugin(), islandEntryPlugin(entries, virtual), islandCSSPlugin(sink), islandJSXPlugin(), islandTagsPlugin(b.Root, false), islandRequirePlugin(), reconcilerGuardPlugin(), reactDOMHintsPlugin(b.Root), reactCompatPlugin(b.Root), routerHooksPlugin(b.Root), threeIslandPlugin()}
 	var injects []string
 	for _, e := range entries {
 		if !e.Boundary {
@@ -315,22 +317,28 @@ func (b *Builder) checkIslandFlavour(f *islandFlavour) error {
 // policy recognizes content-hashed names by their lower-case hash.
 func writeIslandChunkFiles(files []api.OutputFile, chunksDir, stem string, keep map[string]bool) error {
 	rename := map[string]string{}
+	var pairs []string
 	for _, f := range files {
 		base := filepath.Base(f.Path)
 		if strings.HasPrefix(base, stem) {
-			rename[base] = strings.ToLower(base)
+			to := strings.ToLower(base)
+			rename[base] = to
+			if to != base {
+				pairs = append(pairs, base, to)
+			}
 		}
 	}
+	// Each name differs from its new one only in case, so one pass over a
+	// file renames what replacing the names one at a time would.
+	lower := strings.NewReplacer(pairs...)
 	for _, f := range files {
 		base := filepath.Base(f.Path)
 		if strings.HasSuffix(base, ".map") {
 			continue
 		}
 		data := string(f.Contents)
-		for from, to := range rename {
-			if from != to {
-				data = strings.ReplaceAll(data, from, to)
-			}
+		if len(pairs) > 0 {
+			data = lower.Replace(data)
 		}
 		if to, ok := rename[base]; ok {
 			base = to

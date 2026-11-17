@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/kratejs/krate/packages/compiler/internal/jsworker"
+	"github.com/kratejs/krate/packages/compiler/internal/membudget"
 )
 
 // Build-time JavaScript (metadata, generateStaticParams, resource-hint
@@ -38,6 +39,14 @@ func (b *Builder) jsWorker() *jsworker.Pool {
 			p.Observe = func(label string, d time.Duration) {
 				b.Prof.Add("js:"+name+"-"+label, d)
 			}
+			// The workers' memory counts against the build's budget.
+			membudget.SetExternal(func() int64 {
+				var n int64
+				for _, pid := range p.PIDs() {
+					n += membudget.ProcessRSS(pid)
+				}
+				return n
+			})
 			b.js.pool = p
 		}
 	}

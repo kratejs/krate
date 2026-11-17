@@ -153,7 +153,8 @@ limits. All are optional.
 | `KRATE_JS_STACK_KB` | `16` | Embedded QuickJS stack limit, at most `32`. The default allows about 16,000 nested calls; past the limit a call throws a catchable error. |
 | `KRATE_JS_TIMEOUT` | `30s` | Embedded QuickJS eval timeout. Build-time evaluations on Node or Bun use the same limit. |
 | `KRATE_BUILD_JS` | auto | Engine for build-time JavaScript: `generateMetadata` and `metadata`, `generateStaticParams`, resource-hint renders and island server renders. `node` or `bun` runs it in a few long-lived worker processes, each evaluation in a fresh context; `quickjs` keeps it in the embedded engine. Unset, the build uses the project's `runtime`, `ssr.ssrRuntime` or `ssr.apiRuntime` when that is `node` or `bun`, else `node`, then `bun`, from `PATH`, and QuickJS when neither is installed. A worker that fails to start or dies hands the rest of the build to QuickJS. |
-| `KRATE_BUILD_JS_WORKERS` | `min(4, CPUs/3)` | Number of Node or Bun build workers. |
+| `KRATE_BUILD_JS_WORKERS` | `min(4, CPUs/3)` | Number of Node or Bun build workers. Without it, the [memory budget](#build-memory) also allows at most one worker per 2 GiB. |
+| `KRATE_MAX_MEMORY` | 3/4 of available memory | The most memory `krate build` and `krate dev` use, Node or Bun workers included: a size (`6G`, `4096M`, `2.5GiB`) or a percentage of the machine's or container's memory (`50%`). See [Build memory](#build-memory). |
 | `KRATE_PLUGIN_MAX_FILES` | `10000` | Max files a single plugin hook may emit. |
 | `KRATE_PLUGIN_MAX_FILE_BYTES` | `67108864` | Max size of a single plugin-emitted file. |
 | `KRATE_ALLOW_UNSAFE_OUTDIR` | unset | Allow an `outDir` that is a filesystem root or the project root (normally refused). |
@@ -170,3 +171,27 @@ Browser and performance gates:
 | `KRATE_HYDRATION_BUDGET_MS` | `1500` | Maximum island hydration time from navigation start in the browser conformance gate. CI uses `2500`. |
 | `KRATE_REACT_EXIT` | unset | Fail the React differential on any P0/P1 divergence (CI sets this). |
 | `KRATE_REACTBROWSER_REPORT` | unset | Write the React differential report to this path. |
+
+## Build memory
+
+A build works within a memory budget: `KRATE_MAX_MEMORY` when set, otherwise
+three quarters of the memory available when the build starts. Inside a
+container (cgroup v2) the budget comes from the container's limit and what it
+already uses, not from the host's memory.
+
+The budget limits memory by slowing the build down, not by failing it:
+
+- The Go heap gets a soft limit (unless `GOMEMLIMIT` is set): half of the
+  budget, at least 4 GiB, and never more than the budget. The garbage collector
+  works harder as the heap nears it instead of growing into swap.
+- Pages, esbuild calls and build-time JavaScript renders start only while
+  memory allows. When the build's live data nears the budget, or the machine or
+  container runs short of memory, each kind of work runs one job at a time
+  until memory frees up. One job always runs, so the build always finishes.
+- Node build workers get a V8 heap limit of a quarter of the budget, between
+  1 GiB and 4 GiB. A worker that runs out of heap stops, and the embedded
+  engine runs the rest of the build, as for any worker failure.
+
+`krate build --profile` prints the budget and how often memory pressure held
+work back. To keep several builds on one machine within its memory, give each
+one a share, for example `KRATE_MAX_MEMORY=25% krate build`.

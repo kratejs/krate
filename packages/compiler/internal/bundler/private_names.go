@@ -3,6 +3,7 @@ package bundler
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"regexp"
@@ -291,10 +292,6 @@ type moduleRewrites struct {
 
 func (r moduleRewrites) empty() bool {
 	return len(r.named) == 0 && len(r.via) == 0 && len(r.reexports) == 0
-}
-
-func (r moduleRewrites) key() string {
-	return namedKey(r.named) + "|" + namedKey(r.via) + "|" + namedKey(r.reexports)
 }
 
 // reexportOrigin follows named re-exports from path to the module that
@@ -646,50 +643,114 @@ func (b *Bundler) warnExportCollisions(mods []*Module, clashes []exportClash) {
 // the module's own exported bindings that move (the export name follows), and
 // named are the named imports that ask for a renamed export. Cached programs are
 // shared between pages, so this happens on a copy, and the copy is kept for the
-// next page that needs the same renames.
+// next page that needs the same edits. A module the renames do not change keeps
+// its program.
 func (b *Bundler) applyPrivateRenames(mod *Module, bindings, imports, exports map[string]string, rw moduleRewrites) {
 	orig := mod.Program
 	shared := !mod.IsEntry && !mod.Rewritable
-	key := renameKey(bindings) + "|" + renameKey(imports) + "|" + renameKey(exports) + "|" + rw.key()
+	// Another page's build may be transforming the cached program in place
+	// (icons, images) while the edits are planned and the copy is taken.
+	unlock := func() {}
+	if shared && b.readLock != nil {
+		unlock = b.readLock(orig)
+	}
+	edits := b.planPrivateRenames(mod.Path, orig, bindings, imports, exports, rw)
+	if edits.empty() {
+		unlock()
+		return
+	}
+	var key string
 	if shared {
+		key = edits.key()
 		if prog := b.cache.getRenamed(mod.Path, orig, key); prog != nil {
+			unlock()
 			mod.Program = prog
 			return
 		}
-		// Another page's build may be transforming the cached program in
-		// place (icons, images) while this copy is taken.
-		if b.readLock != nil {
-			unlock := b.readLock(orig)
-			mod.Program = cloneProgram(orig)
-			unlock()
-		} else {
-			mod.Program = cloneProgram(orig)
+		mod.Program = cloneProgram(orig)
+	}
+	unlock()
+	edits.apply(mod.Program)
+	if shared {
+		b.cache.putRenamed(mod.Path, orig, key, mod.Program)
+	}
+}
+
+// renameEdits are the changes applyPrivateRenames makes to one program. The
+// statements and specifiers are named by index, so the edits apply to a copy.
+type renameEdits struct {
+	// all renames bindings and their references.
+	all map[string]string
+	// defaults are import statements whose default binding is renamed.
+	defaults []stmtEdit
+	// exports are `export { a as b }` specifiers whose names change.
+	exports []specEdit
+	// specs are named import specifiers that ask for a renamed export.
+	specs []specEdit
+}
+
+type stmtEdit struct {
+	stmt int
+	to   string
+}
+
+type specEdit struct {
+	stmt, spec    int
+	local, remote string
+}
+
+func (e *renameEdits) empty() bool {
+	return len(e.all) == 0 && len(e.defaults) == 0 && len(e.exports) == 0 && len(e.specs) == 0
+}
+
+// key names the edits: two pages that make the same edits share one copy.
+func (e *renameEdits) key() string {
+	var sb strings.Builder
+	keys := make([]string, 0, len(e.all))
+	for k := range e.all {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		sb.WriteString(k)
+		sb.WriteByte('=')
+		sb.WriteString(e.all[k])
+		sb.WriteByte(',')
+	}
+	sb.WriteByte('|')
+	for _, d := range e.defaults {
+		fmt.Fprintf(&sb, "%d=%s,", d.stmt, d.to)
+	}
+	for _, list := range [][]specEdit{e.exports, e.specs} {
+		sb.WriteByte('|')
+		for _, x := range list {
+			fmt.Fprintf(&sb, "%d.%d=%s/%s,", x.stmt, x.spec, x.local, x.remote)
 		}
 	}
+	return sb.String()
+}
+
+// planPrivateRenames works out the edits of applyPrivateRenames on prog
+// without changing it.
+func (b *Bundler) planPrivateRenames(path string, prog *ast.Program, bindings, imports, exports map[string]string, rw moduleRewrites) *renameEdits {
 	all := make(map[string]string, len(bindings)+len(imports)+len(exports))
-	for name := range renamableNames(mod.Program, func(n string) bool { _, ok := bindings[n]; return ok }) {
+	for name := range renamableNames(prog, func(n string) bool { _, ok := bindings[n]; return ok }) {
 		all[name] = bindings[name]
 	}
-	for name := range renamableNames(mod.Program, func(n string) bool { _, ok := exports[n]; return ok }) {
+	for name := range renamableNames(prog, func(n string) bool { _, ok := exports[n]; return ok }) {
 		all[name] = exports[name]
 	}
 	for from, to := range imports {
 		all[from] = to
 	}
+	e := &renameEdits{all: all}
 	// A named import whose local binding is the old name follows the new one.
-	type specRewrite struct {
-		spec      *ast.NamedImport
-		to        string
-		rebinds   bool
-		viaBarrel bool // the barrel keeps the public name, so only the local moves
-	}
-	var rewrites []specRewrite
-	for _, stmt := range mod.Program.Body {
+	for si, stmt := range prog.Body {
 		imp, ok := stmt.(*ast.ImportStmt)
 		if !ok || len(imp.Named) == 0 {
 			continue
 		}
-		target := b.resolveImportForModule(mod.Path, strings.Trim(imp.Source, "\"'`"))
+		target := b.resolveImportForModule(path, strings.Trim(imp.Source, "\"'`"))
 		for i := range imp.Named {
 			spec := &imp.Named[i]
 			to, ok := rw.named[importKey{target, spec.Remote}]
@@ -704,18 +765,25 @@ func (b *Bundler) applyPrivateRenames(mod *Module, bindings, imports, exports ma
 			if local == "" {
 				local = spec.Remote
 			}
-			rewrites = append(rewrites, specRewrite{spec: spec, to: to, rebinds: local == spec.Remote, viaBarrel: viaBarrel})
+			edit := specEdit{stmt: si, spec: i, local: spec.Local, remote: to}
+			switch {
+			case viaBarrel:
+				// The barrel keeps the public name, so only the local moves.
+				edit.local, edit.remote = to, spec.Remote
+			case local == spec.Remote:
+				edit.local = to
+			}
+			e.specs = append(e.specs, edit)
 			if local == spec.Remote {
 				all[local] = to
 			}
 		}
 	}
-	applyRenames(mod.Program, all)
-	for _, stmt := range mod.Program.Body {
+	for si, stmt := range prog.Body {
 		switch st := stmt.(type) {
 		case *ast.ImportStmt:
 			if to, ok := imports[st.Default]; ok {
-				st.Default = to
+				e.defaults = append(e.defaults, stmtEdit{stmt: si, to: to})
 			}
 		case *ast.ExportStmt:
 			if st.ReexportSource != "" {
@@ -725,45 +793,32 @@ func (b *Bundler) applyPrivateRenames(mod *Module, bindings, imports, exports ma
 			// the new binding and, like a declaration, the new export name.
 			for i, spec := range st.Named {
 				if to, ok := exports[spec.Local]; ok {
+					remote := spec.Remote
 					if spec.Remote == spec.Local {
-						st.Named[i].Remote = to
+						remote = to
 					}
-					st.Named[i].Local = to
+					e.exports = append(e.exports, specEdit{stmt: si, spec: i, local: to, remote: remote})
 				}
 			}
 		}
 	}
-	for _, r := range rewrites {
-		if r.viaBarrel {
-			r.spec.Local = r.to
-			continue
-		}
-		r.spec.Remote = r.to
-		if r.rebinds {
-			r.spec.Local = r.to
-		}
-	}
-	if shared {
-		b.cache.putRenamed(mod.Path, orig, key, mod.Program)
-	}
+	return e
 }
 
-func namedKey(named map[importKey]string) string {
-	keys := make([]string, 0, len(named))
-	for k := range named {
-		keys = append(keys, k.target+"#"+k.name)
+// apply makes the edits on prog, the program they were planned on or a copy.
+func (e *renameEdits) apply(prog *ast.Program) {
+	applyRenames(prog, e.all)
+	for _, d := range e.defaults {
+		prog.Body[d.stmt].(*ast.ImportStmt).Default = d.to
 	}
-	sort.Strings(keys)
-	return strings.Join(keys, ",")
-}
-
-func renameKey(names map[string]string) string {
-	keys := make([]string, 0, len(names))
-	for k := range names {
-		keys = append(keys, k)
+	for _, x := range e.exports {
+		spec := &prog.Body[x.stmt].(*ast.ExportStmt).Named[x.spec]
+		spec.Local, spec.Remote = x.local, x.remote
 	}
-	sort.Strings(keys)
-	return strings.Join(keys, ",")
+	for _, x := range e.specs {
+		spec := &prog.Body[x.stmt].(*ast.ImportStmt).Named[x.spec]
+		spec.Local, spec.Remote = x.local, x.remote
+	}
 }
 
 // privateSuffix depends on the path within the project, so builds are
