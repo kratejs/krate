@@ -29,11 +29,15 @@ var precompressibleExts = map[string]bool{
 	".txt": true, ".webmanifest": true, ".rss": true, ".atom": true,
 }
 
-// brotliLevel is the level of every compressible file. Level 11 is the slowest,
-// but a site compresses once per changed file (siblings are skipped by mtime)
-// and the result is served from every request: it is about 10% smaller than
-// level 6 on HTML and 7% on scripts.
-const brotliLevel = 11
+// brotliScriptLevel is the level of scripts and stylesheets: they are most of
+// what a page transfers and are cached immutably, so the slowest level pays
+// off (about 7% smaller than level 6).
+const brotliScriptLevel = 11
+
+// brotliLevel is the level of markup and data. Level 10 is 8% smaller than
+// level 6 on HTML at about a third of level 11's cost (which is 10.5%), so
+// sites with thousands of pages keep a reasonable build time.
+const brotliLevel = 10
 
 // brotliFallbackLevel is also tried for scripts and stylesheets, since the
 // maximum level loses on some highly repetitive input; the smaller output is
@@ -41,7 +45,13 @@ const brotliLevel = 11
 const brotliFallbackLevel = 6
 
 // brotliLevelFor returns the brotli level for a file.
-func brotliLevelFor(path string) int { return brotliLevel }
+func brotliLevelFor(path string) int {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".js", ".mjs", ".cjs", ".css":
+		return brotliScriptLevel
+	}
+	return brotliLevel
+}
 
 // PrecompressOutput writes `.br` and/or `.gz` siblings for compressible assets
 // under outDir. It is idempotent: a sibling at least as new as its source is

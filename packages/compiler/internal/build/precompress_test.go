@@ -126,12 +126,17 @@ func TestPrecompressedLiveServer(t *testing.T) {
 	}
 }
 
-// Every compressible text type is encoded at brotli's maximum level, unless the
-// fallback level does better.
-func TestPrecompressTextAtMaxBrotliLevel(t *testing.T) {
-	for _, name := range []string{"a.html", "a.json", "a.xml", "a.svg", "a.txt", "a.js", "a.css", "a.mjs", "A.HTML"} {
+// Scripts and stylesheets are encoded at brotli's maximum level, other text at
+// level 10, unless the fallback level does better.
+func TestPrecompressTextBrotliLevels(t *testing.T) {
+	for _, name := range []string{"a.js", "a.css", "a.mjs", "A.JS"} {
 		if got := brotliLevelFor(name); got != 11 {
 			t.Errorf("brotliLevelFor(%q) = %d, want 11", name, got)
+		}
+	}
+	for _, name := range []string{"a.html", "a.json", "a.xml", "a.svg", "a.txt", "A.HTML"} {
+		if got := brotliLevelFor(name); got != 10 {
+			t.Errorf("brotliLevelFor(%q) = %d, want 10", name, got)
 		}
 	}
 	dir := t.TempDir()
@@ -148,17 +153,17 @@ func TestPrecompressTextAtMaxBrotliLevel(t *testing.T) {
 	if _, err := PrecompressOutput(dir, true, false); err != nil {
 		t.Fatal(err)
 	}
-	best := mustBrotli(t, data, brotliLevel)
-	if def := mustBrotli(t, data, brotliFallbackLevel); len(def) < len(best) {
-		best = def
+	bestScript := mustBrotli(t, data, brotliScriptLevel)
+	if def := mustBrotli(t, data, brotliFallbackLevel); len(def) < len(bestScript) {
+		bestScript = def
 	}
-	for _, name := range []string{"app.js", "page.html"} {
+	for name, want := range map[string][]byte{"app.js": bestScript, "page.html": mustBrotli(t, data, brotliLevel)} {
 		got, err := os.ReadFile(filepath.Join(dir, name+".br"))
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !bytes.Equal(got, best) {
-			t.Errorf("%s.br has %d bytes, want %d", name, len(got), len(best))
+		if !bytes.Equal(got, want) {
+			t.Errorf("%s.br has %d bytes, want %d", name, len(got), len(want))
 		}
 	}
 	// On real markup-like text the maximum level wins.

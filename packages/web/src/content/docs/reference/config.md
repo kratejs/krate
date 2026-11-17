@@ -135,8 +135,8 @@ compress: {                   // on by default for production builds
 Precompression runs on every production build, so a project with no `compress`
 setting ships both encodings. Set `brotli: false` or `gzip: false` to skip one,
 or both to skip precompression. `krate dev` never precompresses, and Krate Native
-builds skip it. Brotli runs at level 11 for every file type (the slowest level,
-about 10% smaller than level 6 on HTML); a sibling that is newer than its
+builds skip it. Brotli runs at level 11 for scripts and stylesheets and level 10
+for HTML and other text (about 8% smaller than level 6); a sibling that is newer than its
 source is kept, so only changed files are compressed again.
 
 Build-time precompression writes `.br`/`.gz` siblings beside compressible assets
