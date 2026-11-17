@@ -429,6 +429,10 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- Code blocks ship less markup: the copy button renders both icons and switches them with a `data-copied`
+  attribute (no per-block checkmark `<template>`), and highlighted code drops chroma's per-line wrapper spans
+  unless a line is marked with `highlight`. `docs/reference/config` goes from 4,161 to 3,639 DOM elements;
+  colours and the copied text are unchanged.
 - Islands load without a waterfall: the islands a page mounts on load share one entry chunk, and the page
   `modulepreload`s it with every module it imports (the Preact chunks through the import map), never what
   only a `client:visible`/`client:idle` island or a lazy `import()` loads. `/react-demo` drops from 78 to 14
