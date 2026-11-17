@@ -41,16 +41,19 @@ runs:
     - name: Repair a damaged module cache
       shell: bash
       run: |
-        # A restored module cache can lack files: a partly extracted module
-        # (wazero) failed every Go build of the windows-11-arm native job.
-        # go mod verify finds such a module; the cache is then cleared and Go
-        # downloads the modules again.
+        # A restored module cache can lack files: a cancelled run saved a
+        # partly extracted module (wazero), which failed every Go build of the
+        # windows-11-arm native job. go mod verify finds such a module. Both
+        # caches are then cleared: the build cache holds Go's index of each
+        # module directory, which it trusts as immutable, so the stale index
+        # would still hide the packages once the module is downloaded again.
         for mod in packages/*/go.mod; do
           dir=$(dirname "$mod")
           if ! out=$(cd "$dir" && go mod verify 2>&1); then
-            echo "the module cache failed verification in $dir; clearing it"
+            echo "the module cache failed verification in $dir; clearing the module and build caches"
             echo "$out" | head -20
             go clean -modcache
+            go clean -cache
             break
           fi
         done
