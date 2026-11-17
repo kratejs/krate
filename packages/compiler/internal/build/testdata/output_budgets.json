@@ -1,38 +1,38 @@
 {
   "/": {
-    "html": 594,
-    "css": 1542,
+    "html": 597,
+    "css": 1520,
     "ownJs": 0,
     "js": 0
   },
   "/components": {
     "html": 763,
-    "css": 2945,
+    "css": 2918,
     "ownJs": 0,
     "js": 0
   },
   "/docs": {
-    "html": 3461,
-    "css": 10122,
-    "ownJs": 35198,
-    "js": 35198
+    "html": 3462,
+    "css": 9998,
+    "ownJs": 35228,
+    "js": 35228
   },
   "/docs/apis": {
-    "html": 4244,
-    "css": 11710,
-    "ownJs": 37597,
-    "js": 37597
+    "html": 4229,
+    "css": 11612,
+    "ownJs": 37631,
+    "js": 37631
   },
   "/docs/guide": {
-    "html": 4207,
-    "css": 11710,
-    "ownJs": 37525,
-    "js": 37525
+    "html": 4193,
+    "css": 11612,
+    "ownJs": 37559,
+    "js": 37559
   },
   "/react-island": {
     "html": 701,
-    "css": 1542,
-    "ownJs": 31943,
-    "js": 31943
+    "css": 1520,
+    "ownJs": 31973,
+    "js": 31973
   }
 }
