@@ -456,11 +456,11 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 			switch k {
 			case "brotli":
 				if b, ok := v.(bool); ok {
-					cfg.Compress.Brotli = b
+					cfg.Compress.Brotli = &b
 				}
 			case "gzip":
 				if b, ok := v.(bool); ok {
-					cfg.Compress.Gzip = b
+					cfg.Compress.Gzip = &b
 				}
 			}
 		}

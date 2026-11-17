@@ -722,10 +722,24 @@ func (c CompatConfig) ModeOrDefault() string {
 // CompressConfig controls build-time precompression: `krate build` writes `.br`
 // and/or `.gz` siblings beside compressible assets, which `krate serve` (and
 // static hosts like Cloudflare Pages/Netlify) can send when the client supports
-// them. Opt-in; also enabled by `krate build --precompress`.
+// them. On by default for production builds; set a field to false to turn that
+// encoding off. `krate build --precompress` forces both on.
 type CompressConfig struct {
-	Brotli bool `json:"brotli,omitempty"`
-	Gzip   bool `json:"gzip,omitempty"`
+	// Brotli and Gzip are nil when unset, which means on.
+	Brotli *bool `json:"brotli,omitempty"`
+	Gzip   *bool `json:"gzip,omitempty"`
+}
+
+// BrotliOn reports whether .br siblings are written (default true).
+func (c CompressConfig) BrotliOn() bool { return c.Brotli == nil || *c.Brotli }
+
+// GzipOn reports whether .gz siblings are written (default true).
+func (c CompressConfig) GzipOn() bool { return c.Gzip == nil || *c.Gzip }
+
+// CompressOff returns a config with both encodings disabled.
+func CompressOff() CompressConfig {
+	off := false
+	return CompressConfig{Brotli: &off, Gzip: &off}
 }
 
 type Config struct {
@@ -893,8 +907,9 @@ func (c *Config) ShouldMinifyHTML() bool { return c.MinifyHTML || c.Minify }
 func (c *Config) ShouldMinifyCSS() bool  { return c.MinifyCSS || c.Minify }
 func (c *Config) ShouldMinifyJS() bool   { return c.MinifyJS || c.Minify }
 
-// ShouldPrecompress reports whether build-time precompression is enabled.
-func (c *Config) ShouldPrecompress() bool { return c.Compress.Brotli || c.Compress.Gzip }
+// ShouldPrecompress reports whether build-time precompression is enabled. It is
+// on unless both encodings are turned off.
+func (c *Config) ShouldPrecompress() bool { return c.Compress.BrotliOn() || c.Compress.GzipOn() }
 
 // ServerPort returns the listen port for `krate serve`: server.port, else
 // devServer.port, else 3000.

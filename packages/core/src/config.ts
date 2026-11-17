@@ -735,9 +735,14 @@ export interface SitemapPluginOptions {
   priority?: string;
 }
 
-/** Build-time precompression (`.br`/`.gz` siblings). */
+/**
+ * Build-time precompression (`.br`/`.gz` siblings). Both encodings are on by
+ * default for production builds; set one to `false` to turn it off.
+ */
 export interface CompressConfig {
+  /** Write `.br` siblings (brotli level 11). Default `true`. */
   brotli?: boolean;
+  /** Write `.gz` siblings. Default `true`. */
   gzip?: boolean;
 }
 
@@ -1001,7 +1006,7 @@ export interface KrateConfig {
   /** Deploy adapter + options (`krate deploy`). */
   deploy?: DeployConfig;
   auth?: AuthConfig;
-  /** Build-time precompression. */
+  /** Build-time precompression (on by default for production builds). */
   compress?: CompressConfig;
   /** Browser compatibility output mode. */
   compat?: CompatConfig;

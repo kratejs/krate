@@ -708,8 +708,9 @@ func loadConfig(flags cliFlags, args []string) (string, *config.Config, error) {
 		cfg.Dce.JS = &off
 	}
 	if flags.Precompress {
-		cfg.Compress.Brotli = true
-		cfg.Compress.Gzip = true
+		on := true
+		cfg.Compress.Brotli = &on
+		cfg.Compress.Gzip = &on
 	}
 	if err := applyServerFlags(command, flags, cfg, os.Getenv); err != nil {
 		fmt.Fprintf(os.Stderr, "%sError:%s %v\n", cRed, cReset, err)

@@ -126,11 +126,18 @@ required.
 ## Precompression
 
 ```typescript
-compress: {                   // opt-in; also enabled by `krate build --precompress`
-  brotli: true,               // write .br siblings
-  gzip: true,                 // write .gz siblings
+compress: {                   // on by default for production builds
+  brotli: true,               // write .br siblings (default true; false turns them off)
+  gzip: true,                 // write .gz siblings (default true; false turns them off)
 }
 ```
+
+Precompression runs on every production build, so a project with no `compress`
+setting ships both encodings. Set `brotli: false` or `gzip: false` to skip one,
+or both to skip precompression. `krate dev` never precompresses, and Krate Native
+builds skip it. Brotli runs at level 11 for every file type (the slowest level,
+about 10% smaller than level 6 on HTML); a sibling that is newer than its
+source is kept, so only changed files are compressed again.
 
 Build-time precompression writes `.br`/`.gz` siblings beside compressible assets
 (HTML, CSS, JS, JSON, SVG, XML, ...). `krate serve` negotiates them per request

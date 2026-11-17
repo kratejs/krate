@@ -1474,7 +1474,7 @@ func (b *Builder) BuildAll() error {
 		earlyPrecompress = make(chan struct{})
 		go func() {
 			defer close(earlyPrecompress)
-			_, _ = PrecompressOutput(b.Cfg.OutDir, b.Cfg.Compress.Brotli, b.Cfg.Compress.Gzip)
+			_, _ = PrecompressOutput(b.Cfg.OutDir, b.Cfg.Compress.BrotliOn(), b.Cfg.Compress.GzipOn())
 		}()
 		// Never return with the pass still writing into the output.
 		defer func() { <-earlyPrecompress }()
@@ -1669,7 +1669,7 @@ func (b *Builder) BuildAll() error {
 	// them for production delivery.
 	if !b.DevMode && b.Cfg.ShouldPrecompress() {
 		stopPC := b.phase("build:precompress")
-		n, err := PrecompressOutput(b.Cfg.OutDir, b.Cfg.Compress.Brotli, b.Cfg.Compress.Gzip)
+		n, err := PrecompressOutput(b.Cfg.OutDir, b.Cfg.Compress.BrotliOn(), b.Cfg.Compress.GzipOn())
 		stopPC()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "  %sWarning: precompression failed:%s %v\n", cYellow, cReset, err)

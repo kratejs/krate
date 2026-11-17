@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"compress/gzip"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
@@ -25,6 +24,7 @@ import (
 	"time"
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
+	"github.com/kratejs/krate/packages/compiler/internal/deploy"
 	"github.com/kratejs/krate/packages/compiler/internal/sitepath"
 )
 
@@ -884,21 +884,12 @@ func collectHashedAssets(outDir string, userFiles map[string]bool) []string {
 	return out
 }
 
-// loadHashedAssets reads the manifest's hashedAssets set. A missing manifest
+// loadHashedAssets reads the manifest's hashedAssets set, the same list the
+// deploy adapters use for their immutable cache rules. A missing manifest
 // yields an empty set (nothing is immutable), never a guess from file names.
 func loadHashedAssets(outDir string) map[string]bool {
 	set := map[string]bool{}
-	data, err := os.ReadFile(ResolveManifestPath(outDir, "manifest.json"))
-	if err != nil {
-		return set
-	}
-	var m struct {
-		HashedAssets []string `json:"hashedAssets"`
-	}
-	if json.Unmarshal(data, &m) != nil {
-		return set
-	}
-	for _, p := range m.HashedAssets {
+	for _, p := range deploy.LoadHashedAssets(outDir) {
 		set[p] = true
 	}
 	return set

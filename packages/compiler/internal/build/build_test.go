@@ -87,7 +87,7 @@ func TestBuildTestProject(t *testing.T) {
 	if cfg.Deploy.Target != "netlify" {
 		t.Errorf("deploy.target = %q, want netlify", cfg.Deploy.Target)
 	}
-	if !cfg.Compress.Gzip {
+	if cfg.Compress.Gzip == nil || !*cfg.Compress.Gzip {
 		t.Error("compress.gzip not parsed")
 	}
 	if cfg.Images.Quality != 80 {

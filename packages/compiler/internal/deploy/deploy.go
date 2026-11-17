@@ -106,9 +106,14 @@ func Emit(target string, cfg *config.Config, root, outDir string, opts ...Option
 	if target == "docker" {
 		return emitDocker(cfg, root, outDir)
 	}
+	// Read the manifest before the server-only .krate directory is removed.
+	auto := immutableRules(cfg, outDir, LoadHashedAssets(outDir))
+	if target == "cloudflare" {
+		auto = auto.capped(outDir, len(cfg.Headers), cloudflareMaxHeaderRules)
+	}
 	features := ServerFeatures(root, outDir)
 	if WantsServer(target, features, opt.StaticOnly) {
-		return emitServer(target, cfg, root, outDir, opt.Server)
+		return emitServer(target, cfg, root, outDir, opt.Server, auto)
 	}
 	if len(features) > 0 && !opt.StaticOnly {
 		return nil, fmt.Errorf("this project uses server features (%s) that the %s target cannot run: the deployed site would be an empty shell for them. Deploy with `krate deploy --target docker`, `--target node`, vercel, netlify or cloudflare (they run the server), or pass --static-only to publish only the static pages", strings.Join(features, ", "), target)
@@ -133,13 +138,13 @@ func Emit(target string, cfg *config.Config, root, outDir string, opts ...Option
 		if err != nil {
 			return nil, err
 		}
-		hfiles, err := emitHeaders(cfg, outDir)
+		hfiles, err := emitHeaders(cfg, outDir, auto)
 		if err != nil {
 			return nil, err
 		}
 		return append(files, hfiles...), nil
 	case "vercel":
-		return emitVercel(cfg, root, outDir)
+		return emitVercel(cfg, root, outDir, auto)
 	case "gh-pages":
 		return emitGitHubPages(outDir)
 	default:
@@ -186,16 +191,21 @@ func emitRedirects(cfg *config.Config, outDir string) ([]string, error) {
 }
 
 // emitHeaders writes a `_headers` file (Netlify + Cloudflare Pages format) from
-// the config's `headers` rules. Only explicit rules are emitted; `security`
+// the config's `headers` rules, preceded by an immutable Cache-Control rule for
+// the build's content-hashed assets (auto, see immutableRules). `security`
 // defaults are left to `krate serve` so static-host behavior is not changed
 // implicitly.
-func emitHeaders(cfg *config.Config, outDir string) ([]string, error) {
-	if len(cfg.Headers) == 0 {
+func emitHeaders(cfg *config.Config, outDir string, auto autoHeaders) ([]string, error) {
+	rules := withImmutable(cfg, auto)
+	if len(rules) == 0 {
 		return nil, nil
 	}
 	base := cfg.BaseURLPath()
 	var b strings.Builder
-	for _, rule := range cfg.Headers {
+	if auto.omitted > 0 {
+		fmt.Fprintf(&b, "# %d hashed assets are not listed here: Cloudflare Pages reads at most %d rules.\n\n", auto.omitted, cloudflareMaxHeaderRules)
+	}
+	for _, rule := range rules {
 		if rule.Source == "" || len(rule.Headers) == 0 {
 			continue
 		}
@@ -262,7 +272,7 @@ const vercelSchema = "https://openapi.vercel.sh/vercel.json"
 // emitVercel writes `vercel.json` at the project root, where a Git-integrated
 // Vercel project reads it (a copy inside the output directory is ignored
 // there). `outputDirectory` points Vercel at the build output.
-func emitVercel(cfg *config.Config, root, outDir string) ([]string, error) {
+func emitVercel(cfg *config.Config, root, outDir string, auto autoHeaders) ([]string, error) {
 	type vRedirect struct {
 		Source      string `json:"source"`
 		Destination string `json:"destination"`
@@ -316,8 +326,8 @@ func emitVercel(cfg *config.Config, root, outDir string) ([]string, error) {
 	if v, ok := cfg.Deploy.Options["trailingSlash"]; ok {
 		doc["trailingSlash"] = strings.EqualFold(v, "true")
 	}
-	// Custom headers (config `headers`).
-	if len(cfg.Headers) > 0 {
+	// Immutable caching for hashed assets, then custom headers (config `headers`).
+	if hr := withImmutable(cfg, auto); len(hr) > 0 {
 		type vHeader struct {
 			Key   string `json:"key"`
 			Value string `json:"value"`
@@ -326,8 +336,8 @@ func emitVercel(cfg *config.Config, root, outDir string) ([]string, error) {
 			Source  string    `json:"source"`
 			Headers []vHeader `json:"headers"`
 		}
-		rules := make([]vHeaderRule, 0, len(cfg.Headers))
-		for _, r := range cfg.Headers {
+		rules := make([]vHeaderRule, 0, len(hr))
+		for _, r := range hr {
 			if r.Source == "" || len(r.Headers) == 0 {
 				continue
 			}
@@ -341,6 +351,9 @@ func emitVercel(cfg *config.Config, root, outDir string) ([]string, error) {
 				hh = append(hh, vHeader{Key: k, Value: r.Headers[k]})
 			}
 			src, _ := translateRule(r.Source, "", true)
+			if !strings.HasSuffix(r.Source, "*") {
+				src = escapeVercelPath(src)
+			}
 			rules = append(rules, vHeaderRule{Source: sitepath.Join(base, src), Headers: hh})
 		}
 		if len(rules) > 0 {
@@ -534,4 +547,17 @@ func emitDocker(cfg *config.Config, root, outDir string) ([]string, error) {
 func dirExists(p string) bool {
 	fi, err := os.Stat(p)
 	return err == nil && fi.IsDir()
+}
+
+// escapeVercelPath escapes the characters path-to-regexp reads as syntax, for
+// a source that names one file.
+func escapeVercelPath(p string) string {
+	var b strings.Builder
+	for _, r := range p {
+		if strings.ContainsRune("(){}+?:*", r) {
+			b.WriteByte('\\')
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }

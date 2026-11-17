@@ -427,6 +427,12 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- Production builds write `.br` and `.gz` siblings by default (`compress` was opt-in), so `krate serve` and
+  static hosts send brotli with no config; set `compress: { brotli: false }` or `{ gzip: false }` to turn one
+  off. Brotli now runs at level 11 for all text (HTML was level 6, 10% larger). `krate dev` is unchanged.
+- `krate deploy` adds `Cache-Control: public, max-age=31536000, immutable` for the build's content-hashed
+  assets to `_headers` (Netlify, Cloudflare) and `vercel.json`/Build Output routes. The list comes from the
+  build manifest, the same one `krate serve` uses; your own `headers` rules win, and HTML is never immutable.
 - Font preloads are chosen per page: sans faces always, monospace faces only on pages whose HTML has `<pre>`
   or `<code>` (the docs site no longer preloads JetBrains Mono, 40 kB, on pages without code). A preload whose
   file the site does not serve is skipped with a warning. `@krate/base-docs-theme` now ships Inter and

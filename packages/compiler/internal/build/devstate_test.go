@@ -10,12 +10,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kratejs/krate/packages/compiler/internal/config"
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
 )
 
 func TestDevServerPublishesStateAndDiscoveryRecord(t *testing.T) {
 	root, cfg := secProject(t)
-	cfg.Compress.Gzip = false
+	cfg.Compress = config.CompressOff()
 	cfg.Redirects = nil
 	if err := New(root, cfg).BuildAll(); err != nil {
 		t.Fatalf("BuildAll: %v", err)

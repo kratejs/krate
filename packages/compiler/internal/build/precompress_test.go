@@ -13,6 +13,8 @@ import (
 	"testing"
 
 	"github.com/andybalholm/brotli"
+
+	"github.com/kratejs/krate/packages/compiler/internal/config"
 )
 
 func writeAsset(t *testing.T, path, content string) {
@@ -124,13 +126,18 @@ func TestPrecompressedLiveServer(t *testing.T) {
 	}
 }
 
-// Scripts and stylesheets are compressed at brotli's maximum level unless the
-// default level does better, other assets at the default level.
-func TestPrecompressScriptsAtMaxBrotliLevel(t *testing.T) {
+// Every compressible text type is encoded at brotli's maximum level, unless the
+// fallback level does better.
+func TestPrecompressTextAtMaxBrotliLevel(t *testing.T) {
+	for _, name := range []string{"a.html", "a.json", "a.xml", "a.svg", "a.txt", "a.js", "a.css", "a.mjs", "A.HTML"} {
+		if got := brotliLevelFor(name); got != 11 {
+			t.Errorf("brotliLevelFor(%q) = %d, want 11", name, got)
+		}
+	}
 	dir := t.TempDir()
 	var src strings.Builder
 	for i := 0; i < 4000; i++ {
-		fmt.Fprintf(&src, "function f%d(a,b){return a*%d+b.map(x=>x+%d).join(',')}\n", i, i%97, i%13)
+		fmt.Fprintf(&src, "<li class=\"item-%d\"><a href=\"/p/%d\">Item %d</a></li>\n", i%97, i, i%13)
 	}
 	data := []byte(src.String())
 	for _, name := range []string{"app.js", "page.html"} {
@@ -141,28 +148,26 @@ func TestPrecompressScriptsAtMaxBrotliLevel(t *testing.T) {
 	if _, err := PrecompressOutput(dir, true, false); err != nil {
 		t.Fatal(err)
 	}
-	best, _ := brotliCompressLevel(data, brotliScriptLevel)
-	def, _ := brotliCompressLevel(data, brotliLevel)
-	smaller := best
-	if len(def) < len(best) {
-		smaller = def
+	best := mustBrotli(t, data, brotliLevel)
+	if def := mustBrotli(t, data, brotliFallbackLevel); len(def) < len(best) {
+		best = def
 	}
-	for name, want := range map[string][]byte{"app.js": smaller, "page.html": def} {
+	for _, name := range []string{"app.js", "page.html"} {
 		got, err := os.ReadFile(filepath.Join(dir, name+".br"))
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !bytes.Equal(got, want) {
-			t.Errorf("%s.br has %d bytes, want %d", name, len(got), len(want))
+		if !bytes.Equal(got, best) {
+			t.Errorf("%s.br has %d bytes, want %d", name, len(got), len(best))
 		}
 	}
-	// On real script code the maximum level wins.
-	code, err := os.ReadFile("precompress.go")
+	// On real markup-like text the maximum level wins.
+	doc, err := os.ReadFile("../../../../packages/web/src/content/docs/reference/config.md")
 	if err != nil {
-		t.Fatal(err)
+		t.Skip("docs not available")
 	}
-	if hi, _ := brotliCompressFor("x.js", code); len(hi) >= len(mustBrotli(t, code, brotliLevel)) {
-		t.Errorf("a script compressed to %d bytes, not smaller than the default level", len(hi))
+	if hi, _ := brotliCompressFor("x.html", doc); len(hi) >= len(mustBrotli(t, doc, brotliFallbackLevel)) {
+		t.Errorf("a document compressed to %d bytes, not smaller than level %d", len(hi), brotliFallbackLevel)
 	}
 }
 
@@ -185,5 +190,39 @@ func TestAddVaryOnce(t *testing.T) {
 	addVary(h, "Origin")
 	if got := h.Values("Vary"); len(got) != 2 || got[0] != "Accept-Encoding" || got[1] != "Origin" {
 		t.Errorf("Vary = %q", got)
+	}
+}
+
+// A production build with an unset compress config writes both siblings; an
+// explicit false is honoured; a dev build writes none.
+func TestBuildPrecompressesByDefault(t *testing.T) {
+	siblings := func(mut func(*config.Config), dev bool) (br, gz bool) {
+		root, cfg := secProject(t)
+		cfg.Redirects = nil
+		cfg.Compress = config.CompressConfig{}
+		if mut != nil {
+			mut(cfg)
+		}
+		b := New(root, cfg)
+		b.DevMode = dev
+		if err := b.BuildAll(); err != nil {
+			t.Fatalf("BuildAll: %v", err)
+		}
+		_, e1 := os.Stat(filepath.Join(cfg.OutDir, "index.html.br"))
+		_, e2 := os.Stat(filepath.Join(cfg.OutDir, "index.html.gz"))
+		return e1 == nil, e2 == nil
+	}
+	if br, gz := siblings(nil, false); !br || !gz {
+		t.Errorf("unset: br=%v gz=%v, want both", br, gz)
+	}
+	off := false
+	if br, gz := siblings(func(c *config.Config) { c.Compress.Gzip = &off }, false); !br || gz {
+		t.Errorf("gzip false: br=%v gz=%v, want br only", br, gz)
+	}
+	if br, gz := siblings(func(c *config.Config) { c.Compress = config.CompressOff() }, false); br || gz {
+		t.Errorf("both false: br=%v gz=%v, want none", br, gz)
+	}
+	if br, gz := siblings(nil, true); br || gz {
+		t.Errorf("dev build: br=%v gz=%v, want none", br, gz)
 	}
 }
