@@ -372,7 +372,7 @@ markdown: {
   admonitions: true,
   codeHighlight: true,
   codeTheme: { light: "github", dark: "krate-dark" }, // or one name for both modes
-  math: false,          // load KaTeX (CDN) and render $...$ / $$...$$
+  math: false,          // render $...$ / $$...$$ with KaTeX (CDN, loaded only on pages with math)
   plugins: ["./md/transform.ts"], // AfterMarkdownParse HTML transforms
 }
 ```

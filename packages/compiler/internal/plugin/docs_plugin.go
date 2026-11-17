@@ -44,6 +44,10 @@ type DocsPluginOptions struct {
 	// leading <h1> itself (props.titleHTML), so the plugin removes it from the
 	// content and passes it separately.
 	titleSlot bool
+
+	// siteUse is what any page of the build needs from the CDN-backed markdown
+	// features; it decides whether the lazy loaders are emitted at all.
+	siteUse docsAssetUse
 }
 
 func (o *DocsPluginOptions) TOCEnabled() bool         { return o.TOC == nil || *o.TOC }
@@ -353,6 +357,8 @@ func (p *DocsPlugin) beforeBuild(ctx *BuildHookCtx) error {
 	if len(allPages) == 0 {
 		return nil
 	}
+
+	opts.siteUse = docsSiteUse(allPages)
 
 	// Sidebar assets + the search index use the default locale/current version.
 	defaultBundle := bundles[0]
@@ -1024,7 +1030,7 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page doc
 		sb.WriteString(jsxAttrExpr(page.Description))
 		sb.WriteString(" />\n")
 	}
-	sb.WriteString(docsHeadExtras(cfg, page, opts.Title))
+	sb.WriteString(docsHeadExtras(cfg, page, opts.Title, opts.siteUse))
 	for _, ht := range page.Head {
 		sb.WriteString("        ")
 		sb.WriteString(headTagJSX(ht))

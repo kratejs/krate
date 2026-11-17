@@ -427,6 +427,10 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- `markdown.mermaid` and `markdown.math` no longer load their CDN assets on every page. A small loader
+  imports mermaid (now pinned to 11.17.2, was the floating `@11`) or KaTeX (0.16.11) only when the page has a
+  diagram or math, including after client navigation; pages without them make no CDN request, and a site
+  with none emits no loader. On the docs site that is about 200 kB gzip and 19 requests per page.
 - Tailwind output matches Tailwind v4.3 in the places it still differed. `shadow-*/N`,
   `inset-shadow-*/N`, `text-shadow-*/N` and `drop-shadow-*/N` set the default shadow colour's alpha to
   N% (they multiplied it, so `shadow-lg/20` was ten times too faint), and accept arbitrary shadows and
