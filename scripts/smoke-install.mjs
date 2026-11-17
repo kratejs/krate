@@ -4,7 +4,9 @@
  * would. Unit tests and manifest checks all passed for two releases whose
  * install failed with EACCES, so this checks the outcome instead of a cause:
  * tarballs made by the publishing pnpm, installed by npm in a clean folder, and
- * a scaffolded project built by the installed `krate`.
+ * a scaffolded project built by the installed `krate`. Every released package
+ * is then installed together into one more project, where its entry points,
+ * peer ranges and the versions the scaffolders write are checked.
  *
  * The version must not be on the registry yet, as at release time. npm would
  * otherwise install the published platform packages next to these tarballs, so
@@ -25,11 +27,13 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { platforms } from './platform-package.mjs';
+import { releasePackages } from './release-packages.mjs';
 import { platformFor, spawnPlan } from './smoke-helpers.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const isWindows = process.platform === 'win32';
-const packageDirs = ['plugin', 'runtime', 'components', 'ts-plugin', 'base-docs-theme', 'core'];
+// The packages the scaffolded projects build with.
+const templateDirs = ['plugin', 'runtime', 'components', 'ts-plugin', 'base-docs-theme', 'core'];
 const templates = [
   ['create-krate-app/templates/app', 'dist/index.html'],
   ['create-krate-docs/templates/docs', 'dist/index.html'],
@@ -59,6 +63,77 @@ function pack(dir, dest) {
   return join(dest, made);
 }
 
+/** The files a manifest points at: main, module, types, bin and exports. */
+function manifestTargets(manifest) {
+  const out = [];
+  const walk = (value, where) => {
+    if (typeof value === 'string') out.push([where, value]);
+    else if (value && typeof value === 'object') for (const [key, inner] of Object.entries(value)) walk(inner, `${where}[${key}]`);
+  };
+  for (const field of ['main', 'module', 'types', 'typings']) if (typeof manifest[field] === 'string') out.push([field, manifest[field]]);
+  walk(manifest.bin, 'bin');
+  walk(manifest.exports, 'exports');
+  return out;
+}
+
+function packageFiles(dir, prefix = '') {
+  const out = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name === 'node_modules') continue;
+    const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) out.push(...packageFiles(join(dir, entry.name), rel));
+    else out.push(rel);
+  }
+  return out;
+}
+
+function krateDeps(manifestPath, version, what) {
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  const deps = Object.entries({ ...manifest.dependencies, ...manifest.devDependencies }).filter(([name]) => name.startsWith('@krate/'));
+  if (deps.length === 0) fail(`${what} wrote no @krate dependencies`);
+  for (const [name, range] of deps) {
+    if (range !== version) fail(`${what} wrote ${name}@${range}, expected ${version}`);
+  }
+}
+
+// Every released package installed together, as a user adds them. npm stops
+// with ERESOLVE when a peer range does not accept this release, a manifest may
+// point at a file the tarball lacks, and the scaffolders must write this
+// release's version.
+function checkEveryPackage(work, tarballs, version) {
+  const app = join(work, 'all');
+  mkdirSync(app);
+  writeFileSync(join(app, 'package.json'), JSON.stringify({ name: 'krate-smoke-all', version: '0.0.0', private: true, type: 'module' }, null, 2));
+  run('npm', ['install', '--no-audit', '--no-fund', ...tarballs], app);
+
+  const importable = [];
+  for (const dir of releasePackages) {
+    const name = JSON.parse(readFileSync(join(root, 'packages', dir, 'package.json'), 'utf8')).name;
+    const pkgDir = join(app, 'node_modules', ...name.split('/'));
+    if (!existsSync(join(pkgDir, 'package.json'))) fail(`${name} was not installed`);
+    const manifest = JSON.parse(readFileSync(join(pkgDir, 'package.json'), 'utf8'));
+    if (manifest.version !== version) fail(`${name} installed as ${manifest.version}, expected ${version}`);
+    for (const [where, target] of manifestTargets(manifest)) {
+      if (!target.includes('*') && !existsSync(join(pkgDir, target))) fail(`${name}: ${where} is ${target}, which is not in the package`);
+    }
+    for (const file of packageFiles(pkgDir)) {
+      if (/\.test\.(?:d\.ts|[cm]?[jt]sx?)$/.test(file)) fail(`${name} ships the test file ${file}`);
+    }
+    // Packages built to JavaScript load in Node; the others ship TypeScript
+    // source that krate compiles, and scaffolders run their CLI on import.
+    if (name.startsWith('@krate/') && /\.js$/.test(manifest.main ?? '')) importable.push(name);
+  }
+  writeFileSync(join(app, 'import.mjs'), `for (const name of ${JSON.stringify(importable)}) await import(name);\n`);
+  run('node', ['import.mjs'], app);
+
+  run('npx', ['--no', '--', 'create-krate-app', 'scaffold-app', '--skip-install', '--no-git'], app);
+  krateDeps(join(app, 'scaffold-app', 'package.json'), version, 'create-krate-app');
+  run('npx', ['--no', '--', 'create-krate-docs', 'scaffold-docs', '--skip-install', '--no-git'], app);
+  krateDeps(join(app, 'scaffold-docs', 'package.json'), version, 'create-krate-docs');
+  run('npx', ['--no', 'krate', 'native', 'init', 'scaffold-native'], app);
+  krateDeps(join(app, 'scaffold-native', 'package.json'), version, 'krate native init');
+}
+
 function main() {
   const target = platformFor(platforms);
   if (!target) fail(`no platform package for ${process.platform}-${process.arch}`);
@@ -82,8 +157,9 @@ function main() {
   try {
     const tarballDir = join(work, 'tarballs');
     mkdirSync(tarballDir);
-    const tarballs = [pack(platformDir, tarballDir)];
-    for (const dir of packageDirs) tarballs.push(pack(join(root, 'packages', dir), tarballDir));
+    const platformTarball = pack(platformDir, tarballDir);
+    const packed = new Map(releasePackages.map((dir) => [dir, pack(join(root, 'packages', dir), tarballDir)]));
+    const tarballs = [platformTarball, ...templateDirs.map((dir) => packed.get(dir))];
 
     for (const [template, output] of templates) {
       const app = join(work, template.split('/').pop());
@@ -149,6 +225,8 @@ function main() {
       if (!existsSync(join(app, output))) fail(`${template}: krate build wrote no ${output}`);
       console.log(`smoke-install: ${template} ok (${target.pkg})`);
     }
+    checkEveryPackage(work, [platformTarball, ...packed.values()], version);
+    console.log(`smoke-install: ${releasePackages.length} packages ok`);
   } finally {
     // Windows can hold a just-run executable for a moment; a leftover temp
     // folder must not turn a passing run into a failure.

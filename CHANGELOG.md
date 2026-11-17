@@ -427,6 +427,16 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- Releases publish every package that is not private, at one version. `@krate/app` was never versioned or
+  published, so `npm install` in a `krate native init` project failed with E404; it is published now, and the
+  template pins `@krate/app`, `@krate/core` and `@krate/runtime` to the release version instead of
+  `^0.1.0`/`^0.5.0`. `@krate/three` and `@krate/konva` kept a `^0.1.0` peer range on `@krate/runtime`, so npm
+  refused to install them next to the matching runtime (ERESOLVE); every `@krate` peer range now follows the
+  release. `@krate/runtime` no longer ships its compiled tests, and the release notes name `create-krate-app`
+  and `create-krate-docs` as published. One list, `scripts/release-packages.mjs`, drives `set-version`,
+  `check-version` and the install smoke test, which now installs every package together, checks each
+  manifest's files and runs both scaffolders and `krate native init`; `check:release` fails when a package
+  is left out of it, the publish step or the release notes.
 - `krate build` no longer writes server bundles that point at island chunks it never wrote. Since the
   batched chunk checks, pages that used the same icons from a package such as lucide-react from different
   directories could each record a chunk named after their own directory, while only the first was written:
