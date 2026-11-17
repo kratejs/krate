@@ -152,8 +152,11 @@ func canonValue(v string, theme *TailwindTheme) string {
 	return v
 }
 
+// canonAtRule normalizes an at-rule prelude. Tailwind writes min-width media
+// queries in range syntax; Krate writes the equivalent min-width form.
 func canonAtRule(p string) string {
 	p = strings.Join(strings.Fields(p), " ")
-	p = strings.NewReplacer("(width >= 48rem)", "(min-width: 768px)", "(width >= 40rem)", "(min-width: 640px)", "(width < 48rem)", "(max-width: 767px)", "(hover: hover)", "(hover: hover)").Replace(p)
-	return p
+	return canonMinWidthRe.ReplaceAllString(p, "(min-width: $1)")
 }
+
+var canonMinWidthRe = regexp.MustCompile(`\(width >= ([^)]+)\)`)

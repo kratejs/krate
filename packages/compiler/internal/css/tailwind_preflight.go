@@ -33,7 +33,7 @@ func TailwindPreflight(theme TailwindTheme) string {
 	w(":where(select:is([multiple],[size])) optgroup option{padding-inline-start:20px}")
 	w("::file-selector-button{margin-inline-end:4px}")
 	w("::placeholder{opacity:1}")
-	w("@supports (not (-webkit-appearance:-apple-pay-button)) or (contain-intrinsic-size:1px){::placeholder{color:color-mix(in oklab,currentcolor 50%,transparent)}}")
+	w("@supports (not (-webkit-appearance:-apple-pay-button)) or (contain-intrinsic-size:1px){::placeholder{color:currentcolor}@supports (color:color-mix(in lab,red,red)){::placeholder{color:color-mix(in oklab,currentcolor 50%,transparent)}}}")
 	w("textarea{resize:vertical}")
 	w("::-webkit-search-decoration{-webkit-appearance:none}")
 	w("::-webkit-date-and-time-value{min-height:1lh;text-align:inherit}")

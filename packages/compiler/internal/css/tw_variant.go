@@ -476,7 +476,10 @@ func attrValue(e string) string {
 		return e
 	}
 	val = strings.TrimSpace(val)
-	if val == "" || val[0] == '\'' || val[0] == '"' {
+	if val == "" {
+		return k + `=""`
+	}
+	if val[0] == '\'' || val[0] == '"' {
 		return e
 	}
 	if len(val) > 1 {
@@ -486,6 +489,34 @@ func attrValue(e string) string {
 		}
 	}
 	return k + `="` + val + `"`
+}
+
+// validAttrSelector reports whether an aria-[...] / data-[...] value is an
+// attribute name, optionally followed by a matcher (`=`, `~=`, `|=`, `^=`,
+// `$=`, `*=`) and a value. Names hold letters, digits, `-` and `_`; a space
+// inside the name (an `_` in the class) or a `.` would make the selector
+// invalid.
+func validAttrSelector(e string) bool {
+	i := 0
+	for i < len(e) {
+		c := e[i]
+		if c == '-' || c == '_' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= 0x80 {
+			i++
+			continue
+		}
+		break
+	}
+	if i == 0 {
+		return false
+	}
+	rest := strings.TrimLeft(e[i:], " ")
+	if rest == "" {
+		return strings.TrimSpace(e[i:]) == ""
+	}
+	if strings.ContainsRune("~|^$*", rune(rest[0])) {
+		rest = rest[1:]
+	}
+	return strings.HasPrefix(rest, "=")
 }
 
 func valueSub(arbitrary bool, val string) string {
@@ -502,8 +533,14 @@ func functionalVariant(root, val string, hasVal bool, mod string, hasMod bool, t
 	if hasVal {
 		if strings.HasPrefix(val, "[") && strings.HasSuffix(val, "]") {
 			arbitrary = true
-			val = strings.TrimSpace(decodeArbitrary(val[1 : len(val)-1]))
+			raw := decodeArbitrary(val[1 : len(val)-1])
+			val = strings.TrimSpace(raw)
 			if val == "" {
+				return variant{}, false
+			}
+			// aria-[...] and data-[...] become attribute selectors; drop the
+			// class, as Tailwind does, when that selector would be invalid.
+			if (root == "aria" || root == "data") && !validAttrSelector(raw) {
 				return variant{}, false
 			}
 		} else if !validNamedValue(val) {

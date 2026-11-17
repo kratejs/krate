@@ -73,6 +73,10 @@ func (g *TailwindGenerator) ExpandApply(cssText string) (string, []string) {
 			pending = append(pending, nil)
 		case c == '}' && len(pending) > 0:
 			if rules := pending[len(pending)-1]; len(rules) > 0 {
+				// The block's last declaration may omit its semicolon.
+				if t := strings.TrimRight(out.String(), " \t\r\n"); t != "" && !strings.ContainsRune(";{}", rune(t[len(t)-1])) {
+					out.WriteByte(';')
+				}
 				out.WriteString(" " + strings.Join(rules, " ") + " ")
 			}
 			pending = pending[:len(pending)-1]
@@ -154,7 +158,7 @@ func (g *TailwindGenerator) applyRules(utils []string) (string, string, []string
 			continue
 		}
 		body := strings.TrimSpace(r.body)
-		if body == "" || strings.Contains(body, "{") {
+		if body == "" || !declarationsOnly(body) {
 			continue
 		}
 		got[util] = true
@@ -239,6 +243,23 @@ func nestGeneratedRules(text, classSel string, important bool) (string, bool) {
 		found = true
 	}
 	return b.String(), found
+}
+
+// declarationsOnly reports whether a generated rule body is declarations,
+// possibly with nested at-rules such as the @supports fallbacks some
+// utilities carry, so it can be inlined where @apply stands.
+func declarationsOnly(body string) bool {
+	for _, d := range splitDecls(body) {
+		d = strings.TrimSpace(d)
+		if !strings.Contains(d, "{") {
+			continue
+		}
+		_, inner, ok := nestedAtRule(d)
+		if !ok || strings.Contains(inner, "{") {
+			return false
+		}
+	}
+	return true
 }
 
 type simpleRule struct{ selector, body string }

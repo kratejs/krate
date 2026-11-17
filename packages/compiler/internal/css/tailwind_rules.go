@@ -112,7 +112,7 @@ func DefaultTailwindTheme() TailwindTheme {
 			"2xl":  "1rem",
 			"3xl":  "1.5rem",
 			"4xl":  "2rem",
-			"full": "9999px",
+			"full": "calc(infinity * 1px)",
 		},
 		Shadows: defaultShadows(),
 		BgColors: map[string]string{
@@ -125,10 +125,12 @@ func DefaultTailwindTheme() TailwindTheme {
 	}
 }
 
-// defaultScreens returns the standard responsive breakpoints (min-width).
+// defaultScreens returns the standard responsive breakpoints (min-width). They
+// are rem like Tailwind v4's --breakpoint-* defaults, so they follow the
+// browser's default font size.
 func defaultScreens() map[string]string {
 	return map[string]string{
-		"sm": "640px", "md": "768px", "lg": "1024px", "xl": "1280px", "2xl": "1536px",
+		"sm": "40rem", "md": "48rem", "lg": "64rem", "xl": "80rem", "2xl": "96rem",
 	}
 }
 
@@ -139,8 +141,8 @@ func defaultMaxWidth() map[string]string {
 		"lg": "32rem", "xl": "36rem", "2xl": "42rem", "3xl": "48rem", "4xl": "56rem",
 		"5xl": "64rem", "6xl": "72rem", "7xl": "80rem", "full": "100%",
 		"min": "min-content", "max": "max-content", "fit": "fit-content",
-		"prose": "65ch", "screen-sm": "640px", "screen-md": "768px",
-		"screen-lg": "1024px", "screen-xl": "1280px", "screen-2xl": "1536px",
+		"prose": "65ch", "screen-sm": "40rem", "screen-md": "48rem",
+		"screen-lg": "64rem", "screen-xl": "80rem", "screen-2xl": "96rem",
 	}
 }
 

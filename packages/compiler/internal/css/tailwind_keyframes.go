@@ -50,10 +50,18 @@ type twProperty struct {
 	name    string
 	initial string
 	hasInit bool
+	// syntax is the registered syntax; "" means "*". Typed colors and
+	// lengths interpolate, so transitions on gradient stops animate.
+	syntax string
 }
 
 func tp(name string) twProperty        { return twProperty{name: name} }
 func tpi(name, init string) twProperty { return twProperty{name: name, initial: init, hasInit: true} }
+
+// tps is tpi with a typed syntax, matching Tailwind's registration.
+func tps(name, syntax, init string) twProperty {
+	return twProperty{name: name, initial: init, hasInit: true, syntax: syntax}
+}
 
 var twProperties = append([]twProperty{
 	tp("--tw-backdrop-blur"), tp("--tw-backdrop-brightness"), tp("--tw-backdrop-contrast"),
@@ -62,32 +70,32 @@ var twProperties = append([]twProperty{
 	tp("--tw-blur"), tp("--tw-brightness"), tp("--tw-contrast"), tp("--tw-grayscale"),
 	tp("--tw-hue-rotate"), tp("--tw-invert"), tp("--tw-opacity"), tp("--tw-saturate"),
 	tp("--tw-sepia"), tp("--tw-drop-shadow"), tp("--tw-drop-shadow-color"),
-	tpi("--tw-drop-shadow-alpha", "100%"), tp("--tw-drop-shadow-size"),
+	tps("--tw-drop-shadow-alpha", "<percentage>", "100%"), tp("--tw-drop-shadow-size"),
 	tpi("--tw-border-style", "solid"),
-	tpi("--tw-border-spacing-x", "0"), tpi("--tw-border-spacing-y", "0"),
+	tps("--tw-border-spacing-x", "<length>", "0"), tps("--tw-border-spacing-y", "<length>", "0"),
 	tpi("--tw-content", `""`),
 	tpi("--tw-divide-x-reverse", "0"), tpi("--tw-divide-y-reverse", "0"),
 	tp("--tw-duration"), tp("--tw-ease"), tp("--tw-font-weight"), tp("--tw-leading"), tp("--tw-tracking"),
-	tp("--tw-gradient-position"), tpi("--tw-gradient-from", "#0000"),
-	tpi("--tw-gradient-via", "#0000"), tpi("--tw-gradient-to", "#0000"),
+	tp("--tw-gradient-position"), tps("--tw-gradient-from", "<color>", "#0000"),
+	tps("--tw-gradient-via", "<color>", "#0000"), tps("--tw-gradient-to", "<color>", "#0000"),
 	tp("--tw-gradient-stops"), tp("--tw-gradient-via-stops"),
-	tpi("--tw-gradient-from-position", "0%"), tpi("--tw-gradient-via-position", "50%"),
-	tpi("--tw-gradient-to-position", "100%"),
-	tpi("--tw-shadow", "0 0 #0000"), tp("--tw-shadow-color"), tpi("--tw-shadow-alpha", "100%"),
+	tps("--tw-gradient-from-position", "<length-percentage>", "0%"), tps("--tw-gradient-via-position", "<length-percentage>", "50%"),
+	tps("--tw-gradient-to-position", "<length-percentage>", "100%"),
+	tpi("--tw-shadow", "0 0 #0000"), tp("--tw-shadow-color"), tps("--tw-shadow-alpha", "<percentage>", "100%"),
 	tpi("--tw-inset-shadow", "0 0 #0000"), tp("--tw-inset-shadow-color"),
-	tpi("--tw-inset-shadow-alpha", "100%"),
+	tps("--tw-inset-shadow-alpha", "<percentage>", "100%"),
 	tp("--tw-ring-color"), tpi("--tw-ring-shadow", "0 0 #0000"),
 	tp("--tw-inset-ring-color"), tpi("--tw-inset-ring-shadow", "0 0 #0000"),
-	tp("--tw-ring-inset"), tpi("--tw-ring-offset-width", "0px"), tpi("--tw-ring-offset-color", "#fff"),
+	tp("--tw-ring-inset"), tps("--tw-ring-offset-width", "<length>", "0px"), tpi("--tw-ring-offset-color", "#fff"),
 	tpi("--tw-ring-offset-shadow", "0 0 #0000"),
-	tp("--tw-text-shadow-color"), tpi("--tw-text-shadow-alpha", "100%"),
+	tp("--tw-text-shadow-color"), tps("--tw-text-shadow-alpha", "<percentage>", "100%"),
 	tpi("--tw-outline-style", "solid"),
 	tp("--tw-rotate-x"), tp("--tw-rotate-y"), tp("--tw-rotate-z"), tp("--tw-skew-x"), tp("--tw-skew-y"),
 	tpi("--tw-scale-x", "1"), tpi("--tw-scale-y", "1"), tpi("--tw-scale-z", "1"),
 	tpi("--tw-translate-x", "0"), tpi("--tw-translate-y", "0"), tpi("--tw-translate-z", "0"),
 	tpi("--tw-scroll-snap-strictness", "proximity"),
 	tp("--tw-contain-size"), tp("--tw-contain-layout"), tp("--tw-contain-paint"), tp("--tw-contain-style"),
-	tpi("--tw-scrollbar-thumb", "#0000"), tpi("--tw-scrollbar-track", "#0000"),
+	tps("--tw-scrollbar-thumb", "<color>", "#0000"), tps("--tw-scrollbar-track", "<color>", "#0000"),
 	tpi("--tw-space-x-reverse", "0"), tpi("--tw-space-y-reverse", "0"),
 	tp("--tw-pan-x"), tp("--tw-pan-y"), tp("--tw-pinch-zoom"),
 	tp("--tw-ordinal"), tp("--tw-slashed-zero"), tp("--tw-numeric-figure"),
@@ -179,11 +187,68 @@ func (g *TailwindGenerator) KeyframesCSS() string {
 	sort.Strings(props)
 	for _, n := range props {
 		p := twPropertyByName[n]
-		b.WriteString("@property " + n + "{syntax:\"*\";inherits:false")
+		syntax := p.syntax
+		if syntax == "" {
+			syntax = "*"
+		}
+		b.WriteString("@property " + n + "{syntax:\"" + syntax + "\";inherits:false")
 		if p.hasInit {
 			b.WriteString(";initial-value:" + p.initial)
 		}
 		b.WriteString("}\n")
 	}
 	return b.String()
+}
+
+// propertiesFallbackSupports selects the browsers where @property is missing
+// or unreliable (older Safari and Firefox); the condition is Tailwind v4's.
+const propertiesFallbackSupports = "@supports ((-webkit-hyphens: none) and (not (margin-trim: block))) or ((-moz-orient: inline) and (not (color:rgb(from red r g b))))"
+
+const propertiesLayerHead = "@layer properties{" + propertiesFallbackSupports + "{"
+
+var registeredTwProperty = regexp.MustCompile(`@property\s+(--tw-[a-z0-9-]+)\s*\{([^}]*)\}`)
+var registeredInitial = regexp.MustCompile(`initial-value\s*:\s*([^;]*)`)
+
+// WithPropertiesFallback adds Tailwind v4's `properties` layer to a generated
+// sheet: in browsers without working @property, every registered --tw-*
+// variable is reset on each element so it does not inherit, the way
+// `inherits: false` behaves elsewhere. The layer is declared first, so it is
+// the weakest and never overrides a utility. Calling it again on its own
+// output rebuilds the block, so the caller can run it after appending blocks.
+func WithPropertiesFallback(sheet string) string {
+	if i := strings.Index(sheet, propertiesLayerHead); i >= 0 {
+		if end := matchCSSBlock(sheet, i+len("@layer properties")); end > 0 {
+			rest := sheet[end+1:]
+			sheet = sheet[:i] + strings.TrimPrefix(rest, "\n")
+		}
+	}
+	const order = "@layer theme, base, components, utilities;"
+	const withProps = "@layer properties, theme, base, components, utilities;"
+	var decls strings.Builder
+	seen := map[string]bool{}
+	for _, m := range registeredTwProperty.FindAllStringSubmatch(sheet, -1) {
+		if seen[m[1]] {
+			continue
+		}
+		seen[m[1]] = true
+		val := "initial"
+		if iv := registeredInitial.FindStringSubmatch(m[2]); iv != nil && strings.TrimSpace(iv[1]) != "" {
+			val = strings.TrimSpace(iv[1])
+		}
+		decls.WriteString(m[1] + ":" + val + ";")
+	}
+	if decls.Len() == 0 {
+		return strings.Replace(sheet, withProps, order, 1)
+	}
+	switch {
+	case strings.Contains(sheet, withProps):
+	case strings.Contains(sheet, order):
+		sheet = strings.Replace(sheet, order, withProps, 1)
+	default:
+		sheet = "@layer properties;\n" + sheet
+	}
+	if !strings.HasSuffix(sheet, "\n") {
+		sheet += "\n"
+	}
+	return sheet + propertiesLayerHead + "*,::before,::after,::backdrop{" + decls.String() + "}}}\n"
 }

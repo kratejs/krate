@@ -233,7 +233,8 @@ Supported features:
   `group-*`/`peer-*` (incl. named: `group-hover/item:`), `data-*`/`aria-*`/
   `has-*`/`in-*` (these match the element itself: `data-[state=open]:` is
   `.x[data-state="open"]`), responsive breakpoints from `theme.screens` (`sm:`,
-  `md:`, ..., plus `min-*`/`max-*` and `min-[900px]:`), `dark:`,
+  `md:`, ..., plus `min-*`/`max-*` and `min-[900px]:`; the defaults are v4's
+  `40rem` to `96rem`, so they follow the browser's default font size), `dark:`,
   `motion-safe:`/`motion-reduce:`, `print:`, capability queries
   (`pointer-coarse:`, `noscript:`, `forced-colors:`, ...), positional
   (`nth-*`, `first-line:`), `not-*`, child (`*:`, `**:`), `starting:`, container
@@ -276,7 +277,9 @@ Supported features:
 - **Filters** (`blur-*`, `brightness-*`, `grayscale`, `hue-rotate-*` including
   the negative form, `invert`, `saturate-*`, `sepia`, `drop-shadow-*`, and every
   `backdrop-*` filter; `shadow-*`, `inset-shadow-*`, `text-shadow-*` and
-  `drop-shadow-*` take an opacity such as `shadow-xl/20`), **animation** (`animate-*`), **blend modes**, plus
+  `drop-shadow-*` take an opacity such as `shadow-xl/20`, which like v4 sets
+  the default shadow colour's alpha to 20% and is applied to a shadow colour
+  utility on the same element), **animation** (`animate-*`), **blend modes**, plus
   layout, typography, interactivity, 3D-transform, border, and background
   families.
 - **Masks**: `mask-none`, `mask-[...]`, `mask-linear-*`, `mask-radial-*`,
@@ -326,8 +329,6 @@ Run against every class Tailwind v4.3 can generate, Krate produces a rule for
 all of them and the computed styles match in Chromium except for these
 deliberate differences:
 
-- `rounded-full` (and its side variants) is `9999px`, not
-  `calc(infinity * 1px)`. The rendering is identical for any real element.
 - Default theme values are inlined at build time, so the sheet carries no
   `:root` block of variables. A default goes live, through `var()`, once the
   project sets it in a scanned file: `.x { --color-blue-600: red }`,
@@ -335,11 +336,12 @@ deliberate differences:
   `[--spacing:2px]`. A default set only from CSS outside `scanDirs` (such as
   `public/`) or from a computed name is not detected; declare it in `@theme`
   and it stays live.
-- Opacity modifiers are emitted as `color-mix(in oklab, ...)` without a separate
-  `srgb` fallback and no `@supports` guard, so browsers without `color-mix()`
-  get no colour for those utilities.
-- Nothing is wrapped in `@layer properties`; the `--tw-*` composition
-  variables get plain `@property` registrations plus inline `var()` fallbacks.
+- Opacity modifiers on colour utilities (`bg-blue-500/50`) are emitted as
+  `color-mix(in oklab, ...)` without the precomputed `srgb` fallback the
+  Tailwind CLI adds, so browsers without `color-mix()` (older than Tailwind
+  v4's supported browsers) get no colour for those utilities.
+- The `--tw-*` composition variables keep inline `var()` fallbacks next to their
+  `@property` registrations and the `@layer properties` reset.
 
 ## Sass, Less and Stylus
 

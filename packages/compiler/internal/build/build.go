@@ -1921,7 +1921,13 @@ func (b *Builder) tailwindCSS() string {
 	if opts.Strict && len(res.Unknown) > 0 {
 		b.warnOnce("Tailwind strict: " + strconv.Itoa(len(res.Unknown)) + " class candidate(s) matched no utility: " + strings.Join(res.Unknown, ", "))
 	}
-	return appendMissingBlocks(res.CSS, extras)
+	sheet := appendMissingBlocks(res.CSS, extras)
+	if len(extras) > 0 {
+		// @apply may have registered more --tw-* variables; rebuild the
+		// properties fallback so it resets those too.
+		sheet = css.WithPropertiesFallback(sheet)
+	}
+	return sheet
 }
 
 // appendMissingBlocks appends the at-rule blocks whose header is not already

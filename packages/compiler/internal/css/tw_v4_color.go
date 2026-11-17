@@ -289,28 +289,37 @@ var dropShadowScale = map[string]string{
 // shadowFamily describes one of the shadow utility families.
 type shadowFamily struct {
 	root     string // utility root, e.g. "shadow"
-	shadowV  string // custom property holding the shadow
 	colorV   string // custom property holding the color override
+	alphaV   string // custom property holding the /alpha modifier
 	scale    map[string]string
 	themeMap func(TailwindTheme) map[string]string
-	emit     func(shadow string) string // declarations that apply the shadow
+	value    func(shadow string) string // declaration that sets the shadow value
+	apply    string                     // declarations that render the shadow
 	none     string
 }
 
-var shadowFamilies = []shadowFamily{
-	{"inset-shadow", "--tw-inset-shadow", "--tw-inset-shadow-color", insetShadowScale, nil,
-		func(v string) string { return "--tw-inset-shadow: " + v + "; " + shadowCompose }, "inset 0 0 #0000"},
-	{"text-shadow", "", "--tw-text-shadow-color", textShadowScale, nil,
-		func(v string) string { return "text-shadow: " + v + ";" }, "none"},
-	{"drop-shadow", "--tw-drop-shadow", "--tw-drop-shadow-color", dropShadowScale, nil,
-		func(v string) string { return "--tw-drop-shadow: " + v + "; filter: " + filterCompose + ";" }, ""},
-	{"shadow", "--tw-shadow", "--tw-shadow-color", boxShadowScale, func(t TailwindTheme) map[string]string { return t.Shadows },
-		func(v string) string { return "--tw-shadow: " + v + "; " + shadowCompose }, "0 0 #0000"},
+func (f shadowFamily) emit(shadow string) string {
+	return strings.TrimSpace(f.value(shadow) + " " + f.apply)
 }
 
-const filterCompose = "var(--tw-blur,) var(--tw-brightness,) var(--tw-contrast,) var(--tw-grayscale,) var(--tw-hue-rotate,) var(--tw-invert,) var(--tw-opacity,) var(--tw-saturate,) var(--tw-sepia,) var(--tw-drop-shadow,)"
+var shadowFamilies = []shadowFamily{
+	{"inset-shadow", "--tw-inset-shadow-color", "--tw-inset-shadow-alpha", insetShadowScale, nil,
+		func(v string) string { return "--tw-inset-shadow: " + v + ";" }, shadowCompose, "inset 0 0 #0000"},
+	{"text-shadow", "--tw-text-shadow-color", "--tw-text-shadow-alpha", textShadowScale, nil,
+		func(v string) string { return "text-shadow: " + v + ";" }, "", "none"},
+	{"drop-shadow", "--tw-drop-shadow-color", "--tw-drop-shadow-alpha", dropShadowScale, nil,
+		func(v string) string { return "--tw-drop-shadow-size: " + v + ";" },
+		"--tw-drop-shadow: var(--tw-drop-shadow-size); filter: " + filterCompose + ";", ""},
+	{"shadow", "--tw-shadow-color", "--tw-shadow-alpha", boxShadowScale, func(t TailwindTheme) map[string]string { return t.Shadows },
+		func(v string) string { return "--tw-shadow: " + v + ";" }, shadowCompose, "0 0 #0000"},
+}
+
+const filterCompose = "var(--tw-blur,) var(--tw-brightness,) var(--tw-contrast,) var(--tw-grayscale,) var(--tw-hue-rotate,) var(--tw-invert,) var(--tw-saturate,) var(--tw-sepia,) var(--tw-drop-shadow,)"
 
 // shadowUtility resolves shadow, inset-shadow, text-shadow and drop-shadow.
+// It follows Tailwind v4: a /alpha modifier on a size replaces the alpha of
+// the default shadow color and is stored in --tw-*-alpha, which a color
+// utility on the same element then applies to its own color.
 func shadowUtility(cls string, theme TailwindTheme) (string, bool) {
 	for _, f := range shadowFamilies {
 		var key string
@@ -321,35 +330,50 @@ func shadowUtility(cls string, theme TailwindTheme) (string, bool) {
 		} else {
 			continue
 		}
-		alpha := ""
-		if b, m := splitColorModifier(key); m != "" && b != key && f.hasSize(b, theme) {
-			if a, ok := shadowAlpha(m); ok {
-				alpha, key = a, b
+		alpha, alphaVar := "", false
+		if b, m := splitColorModifier(key); m != "" && b != key && (f.hasSize(b, theme) || f.isArbitraryShadow(b)) {
+			a, isVar, ok := shadowAlpha(m)
+			if !ok {
+				return "", false
 			}
+			alpha, alphaVar, key = a, isVar, b
 		}
-		colorize := func(v string) string {
-			out := colorizeShadow(v, f.colorV)
-			if alpha != "" {
-				out = applyShadowAlpha(out, f.colorV, alpha)
+		// sized renders a colorized shadow, applying the alpha modifier.
+		sized := func(v string) string {
+			if alpha == "" {
+				return f.emit(v)
 			}
-			return out
+			decl := f.alphaV + ": " + alpha + "; "
+			if alphaVar {
+				// Relative colors with a var() alpha need lab(from ...).
+				return decl + f.emit(v) + " @supports (color: lab(from red l a b)){" + f.value(applyShadowAlpha(v, f.colorV, alpha)) + "}"
+			}
+			return decl + f.emit(applyShadowAlpha(v, f.colorV, alpha))
 		}
 		if key == "none" {
 			if f.root == "drop-shadow" {
 				return "--tw-drop-shadow: initial; filter: " + filterCompose + ";", true
 			}
-			return f.emit(f.none), true
+			return f.value(f.none) + " " + f.apply, true
+		}
+		scaled := func(v string) string {
+			if f.root == "drop-shadow" && alpha == "" {
+				// The uncolored shadow is used until a color utility
+				// switches --tw-drop-shadow to the colorable size.
+				return f.value(colorizeShadow(v, f.colorV)) + " --tw-drop-shadow: " + v + "; filter: " + filterCompose + ";"
+			}
+			return sized(colorizeShadow(v, f.colorV))
 		}
 		if f.themeMap != nil {
 			if v, ok := f.themeMap(theme)[key]; ok {
 				if v == "none" {
-					return f.emit(f.none), true
+					return f.value(f.none) + " " + f.apply, true
 				}
-				return f.emit(colorize(v)), true
+				return scaled(v), true
 			}
 		}
 		if v, ok := f.scale[key]; ok {
-			return f.emit(colorize(v)), true
+			return scaled(v), true
 		}
 		if key == "" {
 			return "", false
@@ -357,25 +381,24 @@ func shadowUtility(cls string, theme TailwindTheme) (string, bool) {
 		if inner, hint, isArb := arbitraryValue(key); isArb {
 			switch {
 			case hint == "color":
-				return f.colorDecl(inner, "")
+				return f.colorDecl(inner)
 			case hint == "" && looksLikeColor(inner) && !isVarOnly(inner):
-				return f.colorDecl(inner, "")
+				return f.colorDecl(inner)
 			}
 			val := inner
 			if f.root == "inset-shadow" && !strings.HasPrefix(val, "inset") && !isVarOnly(val) {
 				val = "inset " + val
 			}
 			if f.root == "drop-shadow" {
-				val = "drop-shadow(" + colorizeShadow(val, f.colorV) + ")"
-				return f.emit(val), true
+				return sized("drop-shadow(" + colorizeShadow(val, f.colorV) + ")"), true
 			}
 			if isVarOnly(val) {
-				return f.emit(val), true
+				return sized(val), true
 			}
-			return f.emit(colorizeShadow(val, f.colorV)), true
+			return sized(colorizeShadow(val, f.colorV)), true
 		}
 		if c, ok := colorOf(key, theme); ok {
-			return f.colorDecl(c, "")
+			return f.colorDecl(c)
 		}
 		return "", false
 	}
@@ -393,34 +416,48 @@ func (f shadowFamily) hasSize(key string, theme TailwindTheme) bool {
 	return ok
 }
 
-// shadowAlpha converts a /modifier ("20", "[0.2]", "[20%]") into a percentage
-// such as "20%".
-func shadowAlpha(mod string) (string, bool) {
+// isArbitraryShadow reports whether key is an arbitrary shadow value (not a
+// color), which accepts a /alpha modifier like a named size.
+func (f shadowFamily) isArbitraryShadow(key string) bool {
+	inner, hint, isArb := arbitraryValue(key)
+	if !isArb || hint == "color" || isVarOnly(inner) {
+		return false
+	}
+	return hint != "" || !looksLikeColor(inner)
+}
+
+// shadowAlpha converts a /modifier ("20", "[0.2]", "[20%]", "[var(--a)]")
+// into an alpha such as "20%"; isVar reports a var() alpha.
+func shadowAlpha(mod string) (alpha string, isVar, ok bool) {
 	if strings.HasPrefix(mod, "[") && strings.HasSuffix(mod, "]") {
 		inner := mod[1 : len(mod)-1]
+		if isVarOnly(inner) {
+			return inner, true, true
+		}
 		if strings.HasSuffix(inner, "%") {
 			if _, err := strconv.ParseFloat(strings.TrimSuffix(inner, "%"), 64); err == nil {
-				return inner, true
+				return inner, false, true
 			}
-			return "", false
+			return "", false, false
 		}
 		f, err := strconv.ParseFloat(inner, 64)
 		if err != nil || f < 0 || f > 1 {
-			return "", false
+			return "", false, false
 		}
-		return strconv.FormatFloat(f*100, 'f', -1, 64) + "%", true
+		return strconv.FormatFloat(f*100, 'f', -1, 64) + "%", false, true
 	}
 	n, err := strconv.Atoi(mod)
 	if err != nil || n < 0 || n > 100 {
-		return "", false
+		return "", false, false
 	}
-	return strconv.Itoa(n) + "%", true
+	return strconv.Itoa(n) + "%", false, true
 }
 
-// applyShadowAlpha scales the opacity of every var(<colorVar>, color) in a
-// shadow value, so a shadow color override keeps the requested opacity too.
+// applyShadowAlpha rewrites every var(<colorVar>, color) in a shadow value so
+// its default color takes the given alpha, as oklab(from color l a b / alpha).
+// A color utility still overrides the whole var().
 func applyShadowAlpha(val, colorVar, alpha string) string {
-	marker := "var(" + colorVar
+	marker := "var(" + colorVar + ","
 	var b strings.Builder
 	for {
 		i := strings.Index(val, marker)
@@ -436,7 +473,7 @@ func applyShadowAlpha(val, colorVar, alpha string) string {
 			case ')':
 				depth--
 				if depth == 0 {
-					end = j + 1
+					end = j
 				}
 			}
 		}
@@ -444,14 +481,24 @@ func applyShadowAlpha(val, colorVar, alpha string) string {
 			b.WriteString(val)
 			return b.String()
 		}
+		fallback := strings.TrimSpace(val[i+len(marker) : end])
 		b.WriteString(val[:i])
-		b.WriteString("color-mix(in oklab, " + val[i:end] + " " + alpha + ", transparent)")
-		val = val[end:]
+		b.WriteString("var(" + colorVar + ", oklab(from " + fallback + " l a b / " + alpha + "))")
+		val = val[end+1:]
 	}
 }
 
-func (f shadowFamily) colorDecl(color, _ string) (string, bool) {
-	return f.colorV + ": " + color + ";", true
+// colorDecl sets the family's color. Like Tailwind it also folds in the
+// --tw-*-alpha a sized utility may set, where color-mix() is supported.
+func (f shadowFamily) colorDecl(color string) (string, bool) {
+	out := f.colorV + ": " + color + ";"
+	if f.root == "drop-shadow" {
+		out += " --tw-drop-shadow: var(--tw-drop-shadow-size);"
+	}
+	if color != "inherit" {
+		out += " @supports (color: color-mix(in lab, red, red)){" + f.colorV + ": color-mix(in oklab, " + color + " var(" + f.alphaV + "), transparent);}"
+	}
+	return out, true
 }
 
 // gradientInterp maps the /modifier of bg-linear-*, bg-radial and bg-conic.
@@ -469,6 +516,14 @@ func gradientInterp(mod string) (string, bool) {
 
 func gradientImage(fn, position, interp string) string {
 	return "--tw-gradient-position: " + position + " in " + interp + "; background-image: " + fn + "-gradient(var(--tw-gradient-stops));"
+}
+
+// linearGradientImage is gradientImage for bg-linear-*: like Tailwind it keeps
+// a plain position for browsers without gradient interpolation spaces and
+// adds the color space only where linear-gradient(in lab, ...) parses.
+func linearGradientImage(position, interp string) string {
+	return "--tw-gradient-position: " + position + "; background-image: linear-gradient(var(--tw-gradient-stops)); " +
+		"@supports (background-image: linear-gradient(in lab, red, red)){--tw-gradient-position: " + position + " in " + interp + ";}"
 }
 
 var linearDirections = map[string]string{
@@ -510,17 +565,23 @@ func backgroundGradientUtility(cls string, neg bool) (string, bool) {
 	if !ok {
 		return "", false
 	}
+	image := func(position string) string {
+		if strings.HasPrefix(key, "linear-") {
+			return linearGradientImage(position, interp)
+		}
+		return gradientImage("linear", position, interp)
+	}
 	switch kind {
 	case "linear":
 		if dir, ok := linearDirections[base]; ok && !neg {
-			return gradientImage("linear", dir, interp), true
+			return image(dir), true
 		}
 		if plainNumber(base) {
 			ang := base + "deg"
 			if neg {
 				ang = "-" + ang
 			}
-			return gradientImage("linear", ang, interp), true
+			return image(ang), true
 		}
 	case "radial":
 		if base == "" && !neg {

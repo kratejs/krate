@@ -14,7 +14,7 @@ func TestExpandApplyVariantsBecomeNestedRules(t *testing.T) {
 	for _, want := range []string{
 		"padding-inline: 1rem",
 		"@media (hover: hover){&:hover{background-color:",
-		"@media (min-width: 768px){&{display: flex;}}",
+		"@media (min-width: 48rem){&{display: flex;}}",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
@@ -31,5 +31,19 @@ func TestExpandApplyVariantsBecomeNestedRules(t *testing.T) {
 	}
 	if strings.Count(out, "{") != strings.Count(out, "}") {
 		t.Errorf("unbalanced braces:\n%s", out)
+	}
+}
+
+func TestExpandApplyKeepsSupportsFallbacksInline(t *testing.T) {
+	theme := NewTailwindGenerator().Theme
+	out, _ := ExpandApply(".card{@apply shadow-red-500 md:shadow-lg/20; color: red}", theme)
+	// shadow-red-500 carries a nested @supports; it stays where @apply stood
+	// instead of moving behind the declarations as a separate &{} rule.
+	if !strings.HasPrefix(out, ".card{--tw-shadow-color: oklch(63.7% 0.237 25.331); @supports (color: color-mix(in lab, red, red)){") {
+		t.Errorf("shadow-red-500 was not inlined:\n%s", out)
+	}
+	// The last declaration has no semicolon; the nested rule must not run into it.
+	if !strings.Contains(out, "color: red; @media (min-width: 48rem){&{") {
+		t.Errorf("nested rule glued onto the last declaration:\n%s", out)
 	}
 }
