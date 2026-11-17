@@ -27,3 +27,21 @@ describe("document attributes from <Head>", () => {
     expect(mergeHead(DOC, split.title, split.head)).toContain('<html class="dark" lang="en">');
   });
 });
+
+describe("media-qualified meta tags", () => {
+  const light = '<meta name="theme-color" content="#fff" media="(prefers-color-scheme: light)">';
+  const dark = '<meta name="theme-color" content="#000" media="(prefers-color-scheme: dark)">';
+  const doc = `<!DOCTYPE html><html><head>${light}</head><body></body></html>`;
+
+  it("keeps the light and dark theme-color apart", () => {
+    const out = mergeHead(doc, "", dark);
+    expect(out).toContain("#fff");
+    expect(out).toContain("#000");
+  });
+
+  it("still replaces a tag with the same name and media", () => {
+    const out = mergeHead(doc, "", light.replace("#fff", "#111"));
+    expect(out).toContain("#111");
+    expect(out).not.toContain("#fff");
+  });
+});

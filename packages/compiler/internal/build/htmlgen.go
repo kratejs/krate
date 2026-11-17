@@ -485,6 +485,11 @@ func headKey(tag string) string {
 		return "title"
 	case strings.HasPrefix(lower, "<meta"):
 		if n := attr("name"); n != "" {
+			// A media-qualified tag (the light and dark theme-color) is a
+			// different tag from the unqualified one.
+			if m := attr("media"); m != "" {
+				return "meta:name:" + n + "|" + m
+			}
 			return "meta:name:" + n
 		}
 		if p := attr("property"); p != "" {
@@ -492,8 +497,11 @@ func headKey(tag string) string {
 		}
 	case strings.HasPrefix(lower, "<link"):
 		switch rel := attr("rel"); rel {
-		case "canonical", "manifest", "icon", "shortcut icon", "apple-touch-icon":
+		case "canonical", "manifest":
 			return "link:" + rel
+		case "icon", "shortcut icon", "apple-touch-icon":
+			// Variants that differ in size, type or media are all kept.
+			return "link:" + rel + "|" + attr("sizes") + "|" + attr("type") + "|" + attr("media")
 		case "alternate":
 			if h := attr("hreflang"); h != "" {
 				return "link:alternate:" + h

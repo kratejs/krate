@@ -229,7 +229,11 @@ export function headKey(el: HeadElement): string {
   const a = el.attrs;
   if (el.name === "meta") {
     if (a.has("charset")) return "meta:charset";
-    if (a.has("name")) return "meta:name:" + (a.get("name") || "").toLowerCase();
+    if (a.has("name")) {
+      // A media-qualified tag (light and dark theme-color) is a different tag.
+      const media = (a.get("media") || "").toLowerCase();
+      return "meta:name:" + (a.get("name") || "").toLowerCase() + (media ? "|" + media : "");
+    }
     if (a.has("property")) return "meta:property:" + (a.get("property") || "").toLowerCase();
     if (a.has("http-equiv")) return "meta:http-equiv:" + (a.get("http-equiv") || "").toLowerCase();
     return "";

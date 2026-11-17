@@ -427,6 +427,9 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- Head de-duplication keeps the light and the dark `theme-color` (keyed by `name` and `media`) and every
+  `<link rel="icon">` or `apple-touch-icon` variant with a different `sizes`, `type` or `media`. A page-level
+  tag still replaces a layout tag with the same key.
 - The generated compatibility and diagnostics pages escape `<`, `>` and `&` outside code spans, so text like
   `<Suspense>` and `this.<name>` is no longer parsed as an HTML element and dropped from the page.
 - Production builds write `.br` and `.gz` siblings by default (`compress` was opt-in), so `krate serve` and
