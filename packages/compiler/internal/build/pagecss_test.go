@@ -161,3 +161,36 @@ func TestPageCSSDevModeOneSheet(t *testing.T) {
 		t.Fatalf("dev sheet lost the source order or kept a marker: %.200q", s)
 	}
 }
+
+// TestPageCSSApplyAcrossSources: `@apply` in one source of a page expands a
+// `@utility` that another source (here a package stylesheet) defines, now that
+// each source is processed on its own.
+func TestPageCSSApplyAcrossSources(t *testing.T) {
+	root := t.TempDir()
+	writeProjectFile(t, root, "node_modules/twlib/package.json", `{"name":"twlib","version":"1.0.0"}`)
+	writeProjectFile(t, root, "node_modules/twlib/lib.css", "@utility brandy { color: #123456; letter-spacing: 3px; }\n"+bigCSS("lib", 300))
+	writeProjectFile(t, root, "src/pages/a.module.css", ".box { @apply brandy; padding: 1px; }")
+	writePage(t, root, "a.tsx", "import 'twlib/lib.css';\nimport s from './a.module.css';\nexport default function A() { return <h1 class={s.box}>A</h1>; }")
+	cfg := config.Default()
+	cfg.Resolve(root)
+	cfg.Tailwind.Enabled = true
+	if err := New(root, cfg).BuildAll(); err != nil {
+		t.Fatal(err)
+	}
+	var own string
+	for _, f := range linkedSheets(t, filepath.Join(cfg.OutDir, "a", "index.html")) {
+		data, err := os.ReadFile(filepath.Join(cfg.OutDir, f))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(data), "padding:1px") {
+			own = string(data)
+		}
+	}
+	if own == "" {
+		t.Fatal("no stylesheet carries the page's module CSS")
+	}
+	if strings.Contains(own, "@apply") || !strings.Contains(own, "letter-spacing:3px") {
+		t.Fatalf("@apply brandy was not expanded from the package's @utility: %q", own)
+	}
+}

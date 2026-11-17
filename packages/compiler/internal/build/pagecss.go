@@ -156,6 +156,9 @@ type pageSheets struct {
 	legacy []string
 	fonts  []fontFace
 	tw     twPageInfo
+	// twCtx is the Tailwind directives of all of the page's sources, the
+	// context `@apply` expands in (nil when nothing needs it).
+	twCtx *css.TailwindDirectives
 }
 
 // writePageCSS writes the stylesheets of every page (grouped by
@@ -198,18 +201,35 @@ func (b *Builder) writePageCSS(results []*PageResult) (map[string]bool, error) {
 	// The inline+directive+minify pipeline is memoized per distinct source
 	// and per distinct page input: the docs theme alone is on every page.
 	parts := make(map[string]*cssPartOut)
-	processPart := func(text string) *cssPartOut {
-		if p, ok := parts[text]; ok {
+	byData := make(map[string]*cssPartOut)
+	// processPart processes one source. ctx holds the Tailwind directives of
+	// all of the page's sources, so `@apply` resolves a utility, variant or
+	// theme value another source defines. Only text that expands directives
+	// depends on it; a source whose output is the same on two pages is one
+	// part, so the pages share its file.
+	processPart := func(text string, ctx *css.TailwindDirectives, ctxKey string) *cssPartOut {
+		key := text
+		if ctx != nil && needsTailwindContext(text) {
+			key = text + "\x00" + ctxKey
+		} else {
+			ctx = nil
+		}
+		if p, ok := parts[key]; ok {
 			return p
 		}
 		p := &cssPartOut{raw: text}
 		var out string
-		p.pre, out, p.tw = b.processPageCSS(text)
+		p.pre, out, p.tw = b.processPageCSS(text, ctx)
 		if out != "" {
+			if q, ok := byData[out]; ok {
+				parts[key] = q
+				return q
+			}
 			p.data = []byte(out)
 			p.gz = int(gzipLen(p.data))
+			byData[out] = p
 		}
-		parts[text] = p
+		parts[key] = p
 		return p
 	}
 
@@ -239,13 +259,14 @@ func (b *Builder) writePageCSS(results []*PageResult) (map[string]bool, error) {
 		plan, ok := plans[key]
 		if !ok {
 			plan = &pageSheets{}
+			plan.twCtx = b.pageTailwindContext(pageCSS)
 			var srcs []*cssPartOut
 			if split {
 				for _, part := range css.SplitParts(pageCSS) {
-					srcs = append(srcs, processPart(part.CSS))
+					srcs = append(srcs, processPart(part.CSS, plan.twCtx, key))
 				}
 			} else {
-				srcs = append(srcs, processPart(css.StripPartMarkers(pageCSS)))
+				srcs = append(srcs, processPart(css.StripPartMarkers(pageCSS), plan.twCtx, key))
 			}
 			var pre []string
 			for _, p := range srcs {
@@ -304,7 +325,7 @@ func (b *Builder) writePageCSS(results []*PageResult) (map[string]bool, error) {
 					raw, suffix string
 					files       *[]string
 				}{{modernRaw, ".modern", &plan.modern}, {legacyRaw, ".legacy", &plan.legacy}} {
-					_, out, _ := b.processPageCSS(v.raw)
+					_, out, _ := b.processPageCSS(v.raw, plan.twCtx)
 					switch {
 					case out == "":
 					case out == string(data):
@@ -331,9 +352,9 @@ func (b *Builder) writePageCSS(results []*PageResult) (map[string]bool, error) {
 // prefixing, then minification. It returns the text before minification (for
 // the font scan), the output ("" when nothing is left), and the Tailwind
 // state the source contributes.
-func (b *Builder) processPageCSS(text string) (pre, out string, info twPageInfo) {
+func (b *Builder) processPageCSS(text string, ctx *css.TailwindDirectives) (pre, out string, info twPageInfo) {
 	pre = b.inlineImports(text)
-	pre, info = b.processCSSDirectives(pre)
+	pre, info = b.processCSSDirectives(pre, ctx)
 	pre = injectFontDisplay(pre, b.Cfg.Fonts.DisplayValue())
 	pre = b.prefixCSSURLs(pre)
 	if b.Cfg.ShouldMinifyCSS() {
@@ -345,6 +366,22 @@ func (b *Builder) processPageCSS(text string) (pre, out string, info twPageInfo)
 		out = ""
 	}
 	return pre, out, info
+}
+
+// needsTailwindContext reports whether processing text expands Tailwind
+// directives, which can name what another source defines.
+func needsTailwindContext(text string) bool {
+	return strings.Contains(text, "@apply") || strings.Contains(text, "@variant")
+}
+
+// pageTailwindContext parses the Tailwind directives of all of a page's CSS
+// sources once, for the `@apply` expansion of each source. It is nil when
+// Tailwind is off or no source expands directives.
+func (b *Builder) pageTailwindContext(pageCSS string) *css.TailwindDirectives {
+	if !b.Cfg.Tailwind.Enabled || !needsTailwindContext(pageCSS) {
+		return nil
+	}
+	return b.parseTailwindDirectives(b.inlineImports(css.StripPartMarkers(pageCSS)))
 }
 
 // mergeTwPageInfo combines the Tailwind state of two sources of one page.

@@ -1796,7 +1796,10 @@ type twPageInfo struct {
 // are collected for the generator and removed, and `@apply` is expanded;
 // anything that cannot be honoured is reported with a warning. The returned
 // info is what the caller records for the page via setTailwindPage.
-func (b *Builder) processCSSDirectives(cssText string) (string, twPageInfo) {
+//
+// ctx, when set, holds directives of the other CSS sources of the same page:
+// they join the expansion context only and are not part of the returned info.
+func (b *Builder) processCSSDirectives(cssText string, ctx *css.TailwindDirectives) (string, twPageInfo) {
 	var info twPageInfo
 	// `@layer` is left intact: it is valid CSS and unwrapping it would change
 	// the authored cascade.
@@ -1815,6 +1818,7 @@ func (b *Builder) processCSSDirectives(cssText string) (string, twPageInfo) {
 	gen := css.NewTailwindGenerator()
 	gen.MergeConfig(css.LoadTailwindConfigWithOptions(b.Root, opts))
 	dirs := css.ScanTailwindDirectives(b.Root, opts)
+	dirs.MergeFrom(ctx)
 	dirs.MergeFrom(info.dirs)
 	dirs.ApplyTo(&gen.Theme)
 	gen.Theme.LiveVars = dirs.LiveVars(&gen.Theme)
@@ -1971,7 +1975,7 @@ func (b *Builder) writeGlobalCSS(mergedCSS string) (string, error) {
 		processedCSS := mergedCSS
 		// Inline @import directives before minification
 		processedCSS = b.inlineImports(processedCSS)
-		processedCSS, _ = b.processCSSDirectives(processedCSS)
+		processedCSS, _ = b.processCSSDirectives(processedCSS, nil)
 		processedCSS = injectFontDisplay(processedCSS, b.Cfg.Fonts.DisplayValue())
 		processedCSS = b.prefixCSSURLs(processedCSS)
 		if b.Cfg.Fonts.PreloadEnabled() {
