@@ -128,7 +128,7 @@ func rewriteNextMiddleware(src string) (string, []string, []string) {
   };
 }
 function __krateIP(request: Request) {
-  return (request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || "").split(",")[0].trim();
+  return (request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || "").split(",")[0]?.trim() ?? "";
 }
 function __krateGeo(request: Request) {
   const h = request.headers;
@@ -334,6 +334,7 @@ const middlewareResponseShim = nextResponseCookieHelpers + `function __krateCont
 }
 
 class NextResponse extends Response {
+  declare readonly cookies: __KrateResponseCookies;
   constructor(body?: BodyInit | null, init?: ResponseInit) {
     super(body, init);
     __krateWithCookies(this);

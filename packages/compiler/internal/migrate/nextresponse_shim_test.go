@@ -24,6 +24,10 @@ res.cookies.set({ name: "theme", value: "dark", path: "/app" });
 res.cookies.delete("old");
 const json = NextResponse.json({ ok: true }, { status: 201 });
 json.cookies.set("x", "1");
+// new NextResponse(...) keeps cookies (it used to become a bare Response).
+const made = new NextResponse(null, { status: 303, headers: { Location: "/templates" } });
+made.cookies.set("dd_ref", "ABC", { httpOnly: true, sameSite: "lax", maxAge: 2592000 });
+made.headers.set("X-Robots-Tag", "noindex");
 console.log(JSON.stringify({
   status: res.status,
   location: res.headers.get("location"),
@@ -33,6 +37,9 @@ console.log(JSON.stringify({
   all: res.cookies.getAll().length,
   jsonStatus: json.status,
   jsonCookie: json.headers.getSetCookie(),
+  jsonType: json.headers.get("content-type"),
+  jsonBody: await json.text(),
+  made: [made.status, made.headers.get("location"), made.headers.get("x-robots-tag"), made instanceof Response, ...made.headers.getSetCookie()],
 }));
 `
 	out := api.Transform(src, api.TransformOptions{Loader: api.LoaderTS, Format: api.FormatESModule})
@@ -57,6 +64,9 @@ console.log(JSON.stringify({
 		`"has":true`,
 		`"all":3`,
 		`"jsonStatus":201`,
+		`"jsonType":"application/json"`,
+		`"jsonBody":"{\"ok\":true}"`,
+		`"made":[303,"/templates","noindex",true,"dd_ref=ABC; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax"]`,
 	} {
 		if !strings.Contains(string(got), want) {
 			t.Errorf("output missing %q:\n%s", want, got)
@@ -84,5 +94,29 @@ func TestMigratedImportsStayBelowDirectives(t *testing.T) {
 	if !ok || !strings.Contains(out, "const A = lazy(() => import('./A').then((m) => ({ default: m.A })));\n") ||
 		!strings.Contains(out, "const B = lazy(() => import('./B').then(m => ({ default: m.B })));\n") {
 		t.Errorf("named-export dynamic() loaders not normalized (ok=%v):\n%s", ok, out)
+	}
+}
+
+// TestNewNextResponseKeepsCookies: a route handler that constructs
+// NextResponse keeps it (with the class shim), so res.cookies works.
+func TestNewNextResponseKeepsCookies(t *testing.T) {
+	src := `import { NextResponse } from 'next/server';
+export async function GET(req: Request) {
+  const res = new NextResponse(null, { status: 303, headers: { Location: '/templates' } });
+  res.cookies.set('dd_ref', 'X', { httpOnly: true });
+  return res;
+}
+`
+	out, _, manual := rewriteAPIServerSource(src)
+	if len(manual) > 0 {
+		t.Fatalf("unexpected manual items: %v", manual)
+	}
+	for _, want := range []string{"class NextResponse extends Response", "new NextResponse(null, { status: 303"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "new Response(null, { status: 303") {
+		t.Errorf("new NextResponse was rewritten to a bare Response:\n%s", out)
 	}
 }
