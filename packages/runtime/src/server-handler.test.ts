@@ -464,6 +464,24 @@ describe("config route rules", () => {
     expect([r.status, r.headers.get("location")]).toEqual([307, "/api/hello?k=v"]);
   });
 
+  it("answers a rewrite onto an API route from the API handler", async () => {
+    const open = createKrateHandler({
+      target: "node",
+      data: data({
+        config: { ...rules, redirects: [], rewrites: [{ source: "/hi", destination: "/api/hello" }, { source: "/items-alias/:id", destination: "/api/items/:id" }] },
+        apiRoutes: ["hello", "items/[id]"],
+        hasMiddleware: false,
+        hashedAssets: [],
+      }),
+      modules,
+    });
+    const hi = await open(new Request("http://localhost/hi"));
+    expect([hi.status, await hi.json()]).toEqual([200, { ok: true }]);
+    const item = await open(new Request("http://localhost/items-alias/7"));
+    expect(item.status).toBe(200);
+    expect(await item.text()).toContain("7");
+  });
+
   it("applies header rules last so they beat a handler's Cache-Control, with has", async () => {
     const r = await get("/m", { headers: { "x-device": "ios" } });
     expect(r.headers.get("x-all")).toBe("1");

@@ -563,6 +563,9 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- The SSR server handler (`krate deploy --target node`, serverless targets) answers a `rewrites` entry whose
+  destination is an `/api` route from the API handler, as `krate serve` does. It handed the request to the
+  page handler, so `/discord-embed.json` rewritten to `/api/discord-embed.json` returned 404.
 - `krate deploy --target node`: a bundled CommonJS dependency that reads `__dirname` or `__filename` (the ncc build
   of `@next/env`, `ioredis`) threw `ReferenceError: __dirname is not defined` when the server loaded it, which for
   `@next/env` failed `instrumentation.ts` at start. Both now name the server bundle.

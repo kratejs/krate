@@ -1423,6 +1423,8 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
         break;
       }
     }
+    // A rewrite onto an API route is answered by the API handler (mux sent this request down the page chain).
+    if (rs.path === "/api" || rs.path.startsWith("/api/")) return apiHandler(rs);
     return pageHandler(rs);
   }
 
