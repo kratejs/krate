@@ -620,14 +620,23 @@ const nextResponseCookieHelpers = `function __krateCookieHeader(name: string, va
   return s;
 }
 
-function __krateWithCookies<T extends Response>(res: T): T {
-  const list = (): Array<{ name: string; value: string }> =>
+interface __KrateCookie { name: string; value: string }
+interface __KrateCookieJar {
+  get(name: string): __KrateCookie | undefined;
+  getAll(name?: string): __KrateCookie[];
+  has(name: string): boolean;
+  set(name: any, value?: string, opts?: any): __KrateCookieJar;
+  delete(name: any): __KrateCookieJar;
+}
+
+function __krateWithCookies<T extends Response>(res: T): T & { cookies: __KrateCookieJar } {
+  const list = (): __KrateCookie[] =>
     res.headers.getSetCookie().map((c) => {
-      const first = c.split(";")[0];
+      const first = c.split(";")[0] ?? "";
       const i = first.indexOf("=");
       return { name: decodeURIComponent(first.slice(0, i)), value: decodeURIComponent(first.slice(i + 1)) };
     });
-  const cookies = {
+  const cookies: __KrateCookieJar = {
     get: (name: string) => list().filter((c) => c.name === name).pop(),
     getAll: (name?: string) => list().filter((c) => name === undefined || c.name === name),
     has: (name: string) => list().some((c) => c.name === name),
@@ -643,7 +652,7 @@ function __krateWithCookies<T extends Response>(res: T): T {
     },
   };
   Object.defineProperty(res, "cookies", { value: cookies, enumerable: false });
-  return res;
+  return res as T & { cookies: __KrateCookieJar };
 }
 
 `

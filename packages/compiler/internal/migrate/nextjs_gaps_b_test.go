@@ -131,6 +131,10 @@ export async function GET() { return NextResponse.json({}); }`,
 	if !strings.Contains(body, "__krateWithCookies") || !strings.Contains(body, "set-cookie") {
 		t.Errorf("response cookies shim missing:\n%s", body)
 	}
+	// The shim has to typecheck under noUncheckedIndexedAccess: the response type carries cookies.
+	if !strings.Contains(body, "T & { cookies: __KrateCookieJar }") || !strings.Contains(body, `split(";")[0] ?? ""`) {
+		t.Errorf("response cookies shim is not typed:\n%s", body)
+	}
 	for _, m := range rep.Manual {
 		if m.Source == "app/api/cb/route.ts" {
 			t.Errorf("cb handler should need no manual work: %+v", m)

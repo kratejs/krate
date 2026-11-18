@@ -563,6 +563,12 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- `@krate/auth`: `defineAuth` accepts an Auth.js adapter (`@auth/drizzle-adapter` and the other `@auth/*-adapter`
+  packages), whose types mark `createUser`, `getUser` and the other user and account methods optional; it
+  failed to typecheck against the stricter `Adapter`. The methods are checked when the config resolves,
+  so a missing one is named in the error instead of failing on first use.
+- `krate migrate nextjs`: the generated `NextResponse` and middleware shims typecheck under
+  `noUncheckedIndexedAccess` and the response carries a typed `cookies` (`res.cookies.set(...)` was an error on `Response`).
 - `krate deploy --target node` in a pnpm workspace: a page, action or middleware bundle that reaches a
   dependency installed only under a workspace package (`packages/db/node_modules`) imports it by file
   URL, which the server bundling step could not resolve ("Could not resolve file:///...node_modules/.pnpm/...").
