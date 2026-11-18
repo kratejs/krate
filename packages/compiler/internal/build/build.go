@@ -4552,22 +4552,34 @@ func (b *Builder) BuildMiddleware() error {
 		Plugins:     []api.Plugin{jseval.MarkerPackagesPlugin()},
 	}
 	withAuthConfig(&mwOpts, b.Cfg)
+	// nodeOnly: the bundle imports Node built-ins or packages, so it is built
+	// for the Node sidecar even with the embedded middleware runtime.
+	nodeOnly := false
 	// The embedded engine has no node:module; a Node-family runtime needs the
 	// createRequire banner for CommonJS dependencies.
 	if !embeddedRuntime(b.Cfg.SSR.MiddlewareRuntime) {
 		jseval.ApplyNodeESM(&mwOpts)
 	}
-	result := esbuildBuild(mwOpts)
+	// On Node the middleware runs in the API sidecar, which can load packages
+	// from node_modules: serverExternalPackages and packages with a native
+	// addon stay external there, as they do for API routes.
+	buildMW := func() api.BuildResult {
+		if embeddedRuntime(b.Cfg.SSR.MiddlewareRuntime) && !nodeOnly {
+			return esbuildBuild(mwOpts)
+		}
+		res, _ := buildExternalizingNative(mwOpts, b.Cfg.ServerExternalPackages)
+		return res
+	}
+	result := buildMW()
 
 	// A bundle that still imports Node built-ins or packages cannot load in
 	// the embedded engine, so it is built for the Node sidecar instead.
-	nodeOnly := false
 	if len(result.Errors) == 0 && embeddedRuntime(b.Cfg.SSR.MiddlewareRuntime) {
 		if ext := externalImports(result.Metafile); len(ext) > 0 {
 			nodeOnly = true
 			printf("  %s> Middleware%s imports %s, so it runs in the Node sidecar (set ssr.middlewareRuntime to \"node\" to silence this)\n", cYellow, cReset, strings.Join(ext, ", "))
 			jseval.ApplyNodeESM(&mwOpts)
-			result = esbuildBuild(mwOpts)
+			result = buildMW()
 		}
 	}
 

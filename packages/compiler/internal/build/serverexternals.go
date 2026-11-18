@@ -439,7 +439,7 @@ func externalPackagesFromMetafile(meta string) []string {
 // runtime).
 func nativeAddonHint(text string) string {
 	if strings.Contains(text, `".node"`) && strings.Contains(text, "No loader") {
-		return text + " (middleware is bundled into one file and cannot load a native addon, and the embedded QuickJS runtime cannot run one at all; call the addon from an API route instead: routes that import a native package run on the Node sidecar automatically)"
+		return text + " (the embedded QuickJS runtime cannot run a native addon: set ssr.middlewareRuntime to \"node\", where packages with an addon stay external, or call the addon from an API route: routes that import a native package run on the Node sidecar automatically)"
 	}
 	return text
 }

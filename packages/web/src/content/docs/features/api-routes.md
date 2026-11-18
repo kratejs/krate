@@ -40,8 +40,10 @@ transparently forwarded to the sidecar. Packages with a native `.node` addon
 packages that must not be bundled in
 [`serverExternalPackages`](/docs/reference/config/#server-packages-traced-files-and-env-directory).
 The embedded runtime cannot load a native addon at all, so such a route always
-runs on the Node sidecar; middleware is bundled into one file and cannot import
-one (call the addon from an API route).
+runs on the Node sidecar. Middleware on the Node runtime
+(`ssr.middlewareRuntime: "node"`) keeps the same packages external, so it can
+import one too, for example to warm a cache when the server starts; on the
+embedded runtime it cannot (call the addon from an API route).
 
 ### Runtime model and performance
 

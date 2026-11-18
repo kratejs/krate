@@ -136,3 +136,40 @@ export function middleware() {
 		t.Error("middleware.json does not record nodeOnly")
 	}
 }
+
+// On the Node middleware runtime, serverExternalPackages and packages with a
+// native addon stay external, so a startup warm-up in the middleware module
+// can import them (they used to fail with "No loader is configured for .node").
+func TestNodeMiddlewareKeepsServerExternalPackagesExternal(t *testing.T) {
+	b, root := compatProject(t, map[string]string{
+		"middleware.ts": `import { tag } from "@fake/ext";
+import { addon } from "@fake/native";
+export function middleware() {
+  return new Response(tag + addon);
+}
+`,
+		"node_modules/@fake/ext/package.json":        `{"name":"@fake/ext","version":"1.0.0","main":"index.js"}`,
+		"node_modules/@fake/ext/index.js":            `exports.tag = "ext";`,
+		"node_modules/@fake/native/package.json":     `{"name":"@fake/native","version":"1.0.0","main":"index.js"}`,
+		"node_modules/@fake/native/index.js":         `exports.addon = require("./build/addon.node").name;`,
+		"node_modules/@fake/native/build/addon.node": "binary",
+	}, func(c *config.Config) {
+		c.SSR.MiddlewareRuntime = "node"
+		c.ServerExternalPackages = []string{"@fake/ext"}
+	})
+	if err := b.BuildMiddleware(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(root, ".krate", "middleware.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, pkg := range []string{`"@fake/ext"`, `"@fake/native"`} {
+		if !strings.Contains(string(data), pkg) {
+			t.Errorf("middleware bundle does not import %s at run time:\n%.600s", pkg, data)
+		}
+	}
+	if strings.Contains(string(data), `exports.tag = "ext"`) {
+		t.Errorf("a serverExternalPackages package was bundled")
+	}
+}
