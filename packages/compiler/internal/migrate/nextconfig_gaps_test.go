@@ -282,7 +282,7 @@ func TestNextConfigDuplicateRulesWarn(t *testing.T) {
 	}
 }
 
-func TestNextConfigHelperHeadersKeepStaticEntry(t *testing.T) {
+func TestNextConfigHelperHeadersAreCarriedAsCode(t *testing.T) {
 	rep := scanConfig(t, map[string]string{
 		"lib/security-headers.ts": `export function securityHeaders() {
   return [
@@ -304,33 +304,24 @@ export default {
 };`,
 	})
 	body := configBody(t, rep)
+	if !strings.Contains(body, "import { securityHeaders } from './lib/security-headers';") || !strings.Contains(body, "{ source: '/(.*)', headers: securityHeaders() },") {
+		t.Fatalf("helper rule not carried as code:\n%s", body)
+	}
 	if !strings.Contains(body, `"Cache-Control": "public, max-age=31536000, immutable"`) {
 		t.Fatalf("static header entry dropped:\n%s", body)
 	}
-	if strings.Contains(body, "X-Computed") {
-		t.Errorf("computed entry leaked:\n%s", body)
+	if strings.Contains(body, "\n    { key: 'X-Computed'") {
+		t.Errorf("failing computed entry still live:\n%s", body)
 	}
-	if !hasManual(rep, "next.config.ts", `source "/(.*)": the headers value is computed`) {
-		t.Errorf("helper rule not reported: %+v", rep.Manual)
+	// The helper runs: only the rule with the undefined compute() is reported.
+	if hasManual(rep, "krate.config.ts", "headers[0]") {
+		t.Errorf("working helper rule was reported: %+v", rep.Manual)
 	}
-	if !hasManual(rep, "next.config.ts", `source "/assets/:path*": 1 of 2 header entries are computed`) {
-		t.Errorf("partial rule not reported: %+v", rep.Manual)
+	if !hasManual(rep, "krate.config.ts", "headers[1] could not be carried") || !hasManual(rep, "krate.config.ts", "compute") {
+		t.Errorf("failing rule not reported with its error: %+v", rep.Manual)
 	}
-	var sec *ManualItem
-	for i := range rep.Manual {
-		if strings.Contains(rep.Manual[i].Reason, "security headers (CSP, HSTS, ...) were NOT migrated") {
-			sec = &rep.Manual[i]
-		}
-	}
-	if sec == nil {
-		t.Fatalf("security item missing: %+v", rep.Manual)
-	}
-	// The names live only in the imported helper, not in next.config.
-	if !strings.Contains(sec.Reason, "Content-Security-Policy") || !strings.Contains(sec.Reason, "Strict-Transport-Security") {
-		t.Errorf("security item should name headers found in the helper: %s", sec.Reason)
-	}
-	if h := manualForSource(rep, "/(.*)").Hint; !strings.Contains(h, "import a local module") {
-		t.Errorf("hint should say the helper can be imported: %q", h)
+	if hasManual(rep, "next.config.ts", "NOT migrated") {
+		t.Errorf("security item should not fire for carried headers: %+v", rep.Manual)
 	}
 }
 
@@ -367,21 +358,19 @@ export default {
     ],
   },
 };`})
-	if !strings.Contains(configBody(t, rep), `"static.example.com"`) {
-		t.Errorf("static pattern lost")
-	}
-	if !hasManual(rep, "next.config.ts", "hostname is computed") {
-		t.Fatalf("computed hostname not reported: %+v", rep.Manual)
+	body := configBody(t, rep)
+	if !strings.Contains(body, `"static.example.com"`) || !strings.Contains(body, "{ protocol: 'https', hostname: cdn.hostname }") || !strings.Contains(body, "const cdn = new URL(") {
+		t.Errorf("static pattern or carried code missing:\n%s", body)
 	}
 	for _, m := range rep.Manual {
-		if strings.Contains(m.Reason, "hostname is computed") && !strings.Contains(m.Hint, "images.remotePatterns") {
-			t.Errorf("hint should point at images.remotePatterns: %+v", m)
+		if strings.Contains(m.Reason, "remotePatterns") {
+			t.Errorf("carried patterns should not be manual: %+v", m)
 		}
 	}
 
 	rep = scanConfig(t, map[string]string{"next.config.ts": `export default { images: { remotePatterns: process.env.CDN ? [{ hostname: process.env.CDN }] : [] } };`})
-	if !hasManual(rep, "next.config.ts", "remotePatterns is not a static array") {
-		t.Errorf("computed remotePatterns array not reported: %+v", rep.Manual)
+	if body := configBody(t, rep); !strings.Contains(body, "...(process.env.CDN ? [{ hostname: process.env.CDN }] : [])") {
+		t.Errorf("computed remotePatterns array not carried:\n%s", body)
 	}
 }
 

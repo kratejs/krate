@@ -1,17 +1,19 @@
 package migrate
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
 )
 
-// imagesConfig maps the static parts of Next's images config onto Krate's
-// image pipeline. Custom loaders and unsupported formats are reported.
-func imagesConfig(e ast.Expr) (map[string]any, []string) {
+// images maps the static parts of Next's images config onto Krate's image
+// pipeline. Custom loaders and unsupported formats are reported. A
+// remotePatterns list built in code is carried over as code pieces.
+func (rc *ruleCtx) images(e ast.Expr) (map[string]any, []string, []*codePiece) {
 	obj, ok := e.(*ast.ObjectExpr)
 	if !ok {
-		return nil, []string{"next.config images is not a static object"}
+		return nil, []string{"next.config images is not a static object"}, nil
 	}
 	out := map[string]any{}
 	var warnings []string
@@ -58,28 +60,11 @@ func imagesConfig(e ast.Expr) (map[string]any, []string) {
 	}
 
 	var patterns []map[string]string
+	var pieces []*codePiece
 	if v := prop(obj, "remotePatterns"); v != nil {
-		if arr, ok := v.(*ast.ArrayExpr); ok {
-			for _, el := range arr.Elements {
-				p, ok := el.(*ast.ObjectExpr)
-				if !ok {
-					warnings = append(warnings, "next.config images.remotePatterns contains a non-static entry")
-					continue
-				}
-				host, _ := stringValue(prop(p, "hostname"))
-				if host == "" {
-					warnings = append(warnings, "next.config images.remotePatterns has an entry whose hostname is computed (for example from an environment variable) and was not translated")
-					continue
-				}
-				entry := map[string]string{"hostname": host}
-				if path, ok := stringValue(prop(p, "pathname")); ok && path != "" {
-					entry["pathname"] = path
-				}
-				patterns = append(patterns, entry)
-			}
-		} else {
-			warnings = append(warnings, "next.config images.remotePatterns is not a static array")
-		}
+		var w []string
+		patterns, pieces, w = rc.remotePatterns(obj, v)
+		warnings = append(warnings, w...)
 	}
 	if v := prop(obj, "domains"); v != nil {
 		if vals, ok := stringArray(v); ok {
@@ -93,7 +78,82 @@ func imagesConfig(e ast.Expr) (map[string]any, []string) {
 	if len(patterns) > 0 {
 		out["remotePatterns"] = patterns
 	}
-	return out, warnings
+	return out, warnings, pieces
+}
+
+// staticPattern reads one remotePatterns entry whose fields are all string
+// literals. hostname is required; pathname, protocol, port and search are
+// kept when present.
+func staticPattern(p *ast.ObjectExpr) (map[string]string, bool) {
+	for _, q := range p.Properties {
+		if q == nil || q.Spread || q.Computed {
+			return nil, false
+		}
+	}
+	host, ok := stringValue(prop(p, "hostname"))
+	if !ok || host == "" {
+		return nil, false
+	}
+	entry := map[string]string{"hostname": host}
+	for _, key := range []string{"pathname", "protocol", "port", "search"} {
+		v := prop(p, key)
+		if v == nil {
+			continue
+		}
+		s, ok := stringValue(v)
+		if !ok {
+			return nil, false
+		}
+		if s != "" || key == "port" || key == "search" {
+			entry[key] = s
+		}
+	}
+	return entry, true
+}
+
+// remotePatterns translates the value of images.remotePatterns: static
+// entries become config entries, computed entries (an env-built hostname, a
+// list another statement pushes to) become code pieces.
+func (rc *ruleCtx) remotePatterns(obj *ast.ObjectExpr, v ast.Expr) (patterns []map[string]string, pieces []*codePiece, warnings []string) {
+	switch val := v.(type) {
+	case *ast.ArrayExpr:
+		return rc.patternArray(val)
+	case *ast.Identifier:
+		if arr := rc.resolveArray(val); arr != nil && !rc.pre.mutatedElsewhere(val.Name) {
+			return rc.patternArray(arr)
+		}
+		if rc.pre.declares(val.Name) {
+			return nil, []*codePiece{{Label: "images.remotePatterns", Text: "..." + val.Name}}, nil
+		}
+	default:
+		if text, ok := rc.propText(obj, "remotePatterns"); ok && rc.pre != nil {
+			return nil, []*codePiece{{Label: "images.remotePatterns", Text: "...(" + text + ")"}}, nil
+		}
+	}
+	return nil, nil, []string{"next.config images.remotePatterns is not a static array"}
+}
+
+func (rc *ruleCtx) patternArray(arr *ast.ArrayExpr) (patterns []map[string]string, pieces []*codePiece, warnings []string) {
+	parts := rc.arrayParts(arr)
+	for i, el := range arr.Elements {
+		p, ok := el.(*ast.ObjectExpr)
+		if ok {
+			if entry, static := staticPattern(p); static {
+				patterns = append(patterns, entry)
+				continue
+			}
+		}
+		if parts != nil && rc.pre != nil {
+			pieces = append(pieces, &codePiece{Label: fmt.Sprintf("images.remotePatterns[%d]", i), Text: parts[i]})
+			continue
+		}
+		if !ok {
+			warnings = append(warnings, "next.config images.remotePatterns contains a non-static entry")
+		} else {
+			warnings = append(warnings, "next.config images.remotePatterns has an entry whose hostname is computed (for example from an environment variable) and was not translated")
+		}
+	}
+	return patterns, pieces, warnings
 }
 
 func intArray(e ast.Expr) ([]int, bool) {

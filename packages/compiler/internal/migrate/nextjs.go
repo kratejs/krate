@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kratejs/krate/packages/compiler/internal/config"
 	"github.com/kratejs/krate/packages/compiler/internal/fsutil"
 )
 
@@ -312,15 +313,46 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 	planMoveAside(abs, trees, rep)
 
 	hasKrateConfig := fileExists(filepath.Join(abs, "krate.config.ts")) || fileExists(filepath.Join(abs, "krate.config.js")) || fileExists(filepath.Join(abs, "krate.config.mjs")) || fileExists(filepath.Join(abs, "krate.config.json"))
-	if !hasKrateConfig {
-		// entry only matters when a site has no pages, so it is set for an
-		// index page and omitted otherwise (never a route-group page).
-		entry := ""
-		for _, f := range rep.Files {
-			if f.Kind == KindPage && f.Target == "src/pages/index.tsx" {
-				entry = f.Target
+	// entry only matters when a site has no pages, so it is set for an
+	// index page and omitted otherwise (never a route-group page).
+	entry := ""
+	for _, f := range rep.Files {
+		if f.Kind == KindPage && f.Target == "src/pages/index.tsx" {
+			entry = f.Target
+		}
+	}
+	var evaluated *config.Config
+	if pieces := nextCfg.codePieces(); len(pieces) > 0 {
+		render := func() ([]byte, error) {
+			if !hasKrateConfig {
+				return configJSON(entry, nextCfg), nil
+			}
+			// A merge error is reported by the real merge below, not blamed on a piece.
+			merged, _, _ := mergeKrateConfig(abs, nextCfg)
+			return merged.Content, nil
+		}
+		var items []ManualItem
+		items, evaluated = verifyCarried(abs, pieces, configVerifyEnv(abs, nextCfg.EnvDir), render)
+		rep.Manual = append(rep.Manual, items...)
+	}
+	if nextConfigStatic && len(nextCfg.Headers) > 0 {
+		var sets []map[string]string
+		if evaluated != nil {
+			for _, r := range evaluated.Headers {
+				sets = append(sets, r.Headers)
+			}
+		} else {
+			for _, r := range nextCfg.Headers {
+				if r.Code == nil {
+					sets = append(sets, r.Headers)
+				}
 			}
 		}
+		if missingHSTS(sets) {
+			rep.Info = append(rep.Info, hstsInfo)
+		}
+	}
+	if !hasKrateConfig {
 		rep.Files = append(rep.Files, PlannedFile{Kind: KindConfig, Target: "krate.config.ts", Content: configJSON(entry, nextCfg)})
 	} else if nextConfigStatic || len(nextCfg.EnvPrefix) > 0 || len(nextCfg.Site) > 0 || len(nextCfg.Rewrites) > 0 || len(nextCfg.Head) > 0 || nextCfg.MiddlewareRuntime != "" {
 		merged, notes, err := mergeKrateConfig(abs, nextCfg)

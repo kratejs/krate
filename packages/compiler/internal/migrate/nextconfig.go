@@ -50,6 +50,11 @@ type nextConfigData struct {
 	// NoCompress is set by `compress: false`. Next.js compresses responses by
 	// default; the migrated config precompresses assets at build time instead.
 	NoCompress bool `json:"-"`
+	// Preamble holds next.config's top-level statements; the ones the code
+	// pieces need are copied into krate.config.ts.
+	Preamble *preambleSource `json:"-"`
+	// ImageCode are images.remotePatterns entries carried as code.
+	ImageCode []*codePiece `json:"-"`
 }
 
 // nextRedirect is written with an explicit statusCode (308 for Next's
@@ -74,6 +79,9 @@ type nextHeaderRule struct {
 	Headers map[string]string       `json:"headers"`
 	Has     []routesource.Condition `json:"has,omitempty"`
 	Missing []routesource.Condition `json:"missing,omitempty"`
+	// Code is set instead of the fields above when the rule is computed: the
+	// element is copied into krate.config.ts verbatim.
+	Code *codePiece `json:"-"`
 }
 
 // middlewareRedirect is a redirect whose source or has/missing regex Go
@@ -125,6 +133,8 @@ func readNextConfig(path string) (data nextConfigData, notes nextConfigNotes, ok
 		return out, notes, false
 	}
 	rc := &ruleCtx{file: file, dir: filepath.Dir(path), src: string(src), prog: prog}
+	rc.pre = newPreambleSource(rc.src, prog, obj.Position.Offset)
+	out.Preamble = rc.pre
 
 	for _, p := range obj.Properties {
 		if p != nil && (p.Spread || p.Computed) {
@@ -188,10 +198,11 @@ func readNextConfig(path string) (data nextConfigData, notes nextConfigNotes, ok
 	notes.Warnings = append(notes.Warnings, duplicateRuleWarnings(out)...)
 
 	if v := prop(obj, "images"); v != nil {
-		images, imageWarnings := imagesConfig(v)
+		images, imageWarnings, imageCode := rc.images(v)
 		if len(images) > 0 {
 			out.Images = images
 		}
+		out.ImageCode = imageCode
 		for _, w := range imageWarnings {
 			if item, manual := imageManualItem(file, w); manual {
 				notes.Manual = append(notes.Manual, item)
@@ -433,10 +444,10 @@ func configJSON(entry string, next nextConfigData) []byte {
 		opts["rewrites"] = next.Rewrites
 	}
 	if len(next.Headers) > 0 {
-		opts["headers"] = next.Headers
+		opts["headers"] = next.headersValue()
 	}
-	if len(next.Images) > 0 {
-		opts["images"] = next.Images
+	if v := next.imagesValue(); v != nil {
+		opts["images"] = v
 	}
 	if len(next.Site) > 0 {
 		opts["site"] = next.Site
@@ -456,7 +467,16 @@ func configJSON(entry string, next nextConfigData) []byte {
 	enc.SetIndent("", "  ")
 	_ = enc.Encode(opts)
 	body := strings.TrimRight(buf.String(), "\n")
-	return []byte("import { defineConfig } from '@krate/core';\n\nexport default defineConfig(" + body + ");\n")
+	pieces := next.codePieces()
+	if len(pieces) == 0 {
+		return []byte("import { defineConfig } from '@krate/core';\n\nexport default defineConfig(" + body + ");\n")
+	}
+	body = expandCodeMarkers(body, pieces)
+	head := "import { defineConfig } from '@krate/core';\n\n"
+	if pre := next.Preamble.build(activeTexts(pieces)); pre != "" {
+		head = "import { defineConfig } from '@krate/core';\n" + pre + "\n\n"
+	}
+	return []byte(head + "export default defineConfig(" + body + ");\n")
 }
 
 func staticStringMap(e ast.Expr) (map[string]string, bool) {

@@ -224,9 +224,14 @@ file or a page. The one exception is the immutable `Cache-Control` Krate gives
 its own content-hashed assets. Several matching rules apply in order, and the
 last value for a header wins (`Vary` values are added instead).
 
+A rule's `headers` is an object, or Next.js' array of `{ key, value }` pairs, so
+a list built by a helper can be used as it is. In the array form the order is
+kept and, when a name repeats (in any case), the last value wins.
+
 ```typescript
 headers: [
   { source: "/assets/*", headers: { "Cache-Control": "public, max-age=31536000, immutable" } },
+  { source: "/:path*", headers: [{ key: "X-Frame-Options", value: "DENY" }] },
 ],
 security: {
   frameOptions: "SAMEORIGIN",
@@ -306,7 +311,10 @@ original image through.
 
 `remotePatterns` hostnames support `*.example.com` (one label) and
 `**.example.com` (any depth); `pathname` supports `*` (one segment) and `**`
-(any depth), e.g. `"/images/**"`. Output formats are WebP and the original
+(any depth), e.g. `"/images/**"`. A pattern may also set `protocol` (`"https"`
+or `"http"`), `port` (a string; `""` matches only a URL with no port) and
+`search` (the exact query string, with its `?`), checked as Next.js does: a field
+that is not set allows anything. Output formats are WebP and the original
 format; **AVIF is not supported** (it needs a separate encoder).
 
 ## Dev server

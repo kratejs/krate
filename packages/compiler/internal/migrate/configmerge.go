@@ -35,7 +35,11 @@ func mergeKrateConfig(root string, next nextConfigData) (PlannedFile, []string, 
 	if err != nil {
 		return PlannedFile{}, nil, err
 	}
+	pieces := next.codePieces()
 	if strings.HasSuffix(existing, ".json") {
+		if len(pieces) > 0 {
+			return PlannedFile{}, nil, fmt.Errorf("%s is JSON and cannot hold the computed headers/images values from next.config; convert it to krate.config.ts", rel)
+		}
 		out, notes, err := mergeJSONConfig(data, values)
 		if err != nil {
 			return PlannedFile{}, nil, err
@@ -50,6 +54,7 @@ func mergeKrateConfig(root string, next nextConfigData) (PlannedFile, []string, 
 	}
 	var additions []string
 	var notes []string
+	var needTexts []string
 	for _, key := range []string{"basePath", "redirects", "rewrites", "headers", "images", "site", "head", "serverExternalPackages", "outputFileTracingIncludes", "ssr", "trailingSlash", "tailwind", "envDir", "envPrefix", "compress"} {
 		value, ok := values[key]
 		if !ok {
@@ -63,7 +68,12 @@ func mergeKrateConfig(root string, next nextConfigData) (PlannedFile, []string, 
 		if err != nil {
 			return PlannedFile{}, nil, err
 		}
-		additions = append(additions, fmt.Sprintf("  %q: %s,", key, enc))
+		text := string(enc)
+		if len(pieces) > 0 && (key == "headers" || key == "images") {
+			text = expandCodeMarkers(text, pieces)
+			needTexts = append(needTexts, activeTexts(keyPieces(next, key))...)
+		}
+		additions = append(additions, fmt.Sprintf("  %q: %s,", key, text))
 	}
 	if len(additions) == 0 {
 		return PlannedFile{}, notes, nil
@@ -74,10 +84,27 @@ func mergeKrateConfig(root string, next nextConfigData) (PlannedFile, []string, 
 	}
 	insert := "\n" + strings.Join(additions, "\n") + "\n"
 	prefix := string(data[:end])
+	preamble := ""
+	if pre := next.Preamble.build(needTexts); pre != "" {
+		taken := identifiers(string(data))
+		for _, name := range next.Preamble.boundNames(needTexts) {
+			if taken[name] {
+				return PlannedFile{}, nil, fmt.Errorf("the next.config helper code needs the name %q, which the existing config already uses; add the headers/images by hand", name)
+			}
+		}
+		preamble = pre
+	}
 	if last := lastNonSpace(prefix); last != "" && last != "{" && last != "," {
 		insert = "," + insert
 	}
 	out := prefix + insert + string(data[end:])
+	if preamble != "" {
+		at := preambleInsertOffset(prog, string(data))
+		if at >= end {
+			at += len(insert)
+		}
+		out = out[:at] + preamble + "\n\n" + out[at:]
+	}
 	p := parser.New(lexer.New(out).Tokenize())
 	if prog := p.ParseProgram(); prog == nil || len(p.Errors()) > 0 {
 		return PlannedFile{}, nil, fmt.Errorf("merged config does not parse: %v", p.Errors())
@@ -109,10 +136,10 @@ func nextConfigValues(next nextConfigData) map[string]any {
 		values["rewrites"] = next.Rewrites
 	}
 	if len(next.Headers) > 0 {
-		values["headers"] = next.Headers
+		values["headers"] = next.headersValue()
 	}
-	if len(next.Images) > 0 {
-		values["images"] = next.Images
+	if v := next.imagesValue(); v != nil {
+		values["images"] = v
 	}
 	if len(next.Site) > 0 {
 		values["site"] = next.Site
@@ -265,4 +292,31 @@ func lastNonSpace(s string) string {
 		return ""
 	}
 	return s[len(s)-1:]
+}
+
+// keyPieces are the code pieces behind one config key.
+func keyPieces(next nextConfigData, key string) []*codePiece {
+	if key == "images" {
+		return next.ImageCode
+	}
+	var out []*codePiece
+	for _, r := range next.Headers {
+		if r.Code != nil {
+			out = append(out, r.Code)
+		}
+	}
+	return out
+}
+
+// preambleInsertOffset is where copied helper code goes in an existing
+// config: before its first statement that is not an import.
+func preambleInsertOffset(prog *ast.Program, src string) int {
+	for _, s := range prog.Body {
+		if _, ok := s.(*ast.ImportStmt); !ok {
+			if off := s.Pos().Offset; off >= 0 && off <= len(src) {
+				return off
+			}
+		}
+	}
+	return len(src)
 }

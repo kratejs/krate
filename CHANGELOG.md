@@ -255,6 +255,12 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
   lookahead inside a parameter (`/store/:slug((?!compare$)[^/]+)`). `/x/*` with `:splat` and the
   `path.Match` header globs still work. A regex RE2 cannot run (lookbehind, a backreference) is the
   new error KR8355 at config load instead of a rule that never matches.
+- `headers[].headers` also accepts Next.js' `[{ key, value }]` array (order kept, the last repeated
+  name wins), in the Go config and in the server handler of `krate deploy --target node`.
+- `images.remotePatterns` entries take `protocol`, `port` and `search`, enforced like Next.js (a field
+  that is not set allows anything). Before, only `hostname` and `pathname` were checked.
+- `import.meta.dirname` and `import.meta.filename` work in `krate.config.ts` and the modules it imports,
+  next to `import.meta.url`.
 - `envPrefix` config key (a string or a list, default `["KRATE_PUBLIC_"]`): the name prefixes of the
   environment variables inlined into client code and static output, like Vite's `envPrefix`. Each prefix
   must end in `_`; an empty one is a config error because it would expose every variable. Existing apps
@@ -469,6 +475,15 @@ host code runs in the native process. Names and options may change between relea
     rules (sources, `has`/`missing`, `statusCode`, query passthrough, order, header precedence).
   - `krate deploy` writes `statusCode` to `vercel.json` and `_redirects`; rules with `has`/`missing`
     go to Vercel and are skipped, with a note, in `_redirects` and `_headers`.
+- `krate migrate nextjs` carries computed `headers()` rules (`headers: securityHeaders`,
+  `...buildCacheRules()`) and an env-built `images.remotePatterns` list into `krate.config.ts` as code,
+  with the local imports, consts and statements they need, instead of dropping them with a manual item.
+  Type-only imports, `import ... from 'next'` and `loadEnvConfig` (mapped to `envDir`) are left out.
+  The new config is evaluated with the real loader and your environment: a rule that fails (a helper
+  importing `next/server`, say) is commented out with the error and reported. An info line notes that
+  Krate also sends HSTS when the headers set none; `images.remotePatterns` keeps `protocol`, `port`
+  and `search`. A config with only static keys is written exactly as before, except that a static
+  `remotePatterns` entry no longer loses its `protocol`, `port` and `search`.
 - `krate migrate nextjs` keeps `NEXT_PUBLIC_` names in source and writes
   `envPrefix: ["KRATE_PUBLIC_", "NEXT_PUBLIC_"]` when the app reads them, instead of renaming every read
   to `KRATE_PUBLIC_`. It finds the definitions in the `envDir` that `loadEnvConfig` points at and in

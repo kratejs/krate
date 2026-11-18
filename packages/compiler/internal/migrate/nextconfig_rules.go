@@ -20,6 +20,7 @@ type ruleCtx struct {
 	dir  string
 	src  string
 	prog *ast.Program
+	pre  *preambleSource
 	// headersLost is set when any header rule or entry was not translated.
 	headersLost bool
 	// fallbacks are redirects that move into the middleware.
@@ -264,14 +265,77 @@ func (rc *ruleCtx) resolveArray(e ast.Expr) *ast.ArrayExpr {
 	return nil
 }
 
-// headers reads a headers array (or a function returning one). Static entries
-// are kept even when a sibling entry or rule is computed.
+// arrayParts returns the source text of each element of arr, or nil when the
+// text cannot be matched to the elements.
+func (rc *ruleCtx) arrayParts(arr *ast.ArrayExpr) []string {
+	parts, ok := splitTop(rc.src, arr.Position.Offset)
+	if !ok || len(parts) != len(arr.Elements) {
+		return nil
+	}
+	return parts
+}
+
+// propText returns the source text of the value of obj's property key.
+func (rc *ruleCtx) propText(obj *ast.ObjectExpr, key string) (string, bool) {
+	parts, ok := splitTop(rc.src, obj.Position.Offset)
+	if !ok || len(parts) != len(obj.Properties) {
+		return "", false
+	}
+	for i, p := range obj.Properties {
+		if p == nil || p.Spread || p.Computed || p.Key != key {
+			continue
+		}
+		part := parts[i]
+		if part == key {
+			return key, true
+		}
+		for _, q := range []string{"", "'", `"`} {
+			if rest, found := strings.CutPrefix(part, q+key+q); found {
+				if rest = strings.TrimSpace(rest); strings.HasPrefix(rest, ":") {
+					return strings.TrimSpace(rest[1:]), true
+				}
+			}
+		}
+	}
+	return "", false
+}
+
+// hasComputedParts reports whether a rule object has a source that is not a
+// string literal, or spreads or computes keys.
+func hasComputedParts(item *ast.ObjectExpr) bool {
+	if _, ok := stringValue(prop(item, "source")); !ok {
+		return true
+	}
+	for _, p := range item.Properties {
+		if p != nil && (p.Spread || p.Computed) {
+			return true
+		}
+	}
+	return false
+}
+
+// headers reads a headers array (or a function returning one). A rule that
+// is computed (a helper call, a spread) is carried as code; static rules are
+// translated, even when a sibling is computed.
 func (rc *ruleCtx) headers(v ast.Expr) (rules []nextHeaderRule, items []ManualItem, reason string) {
 	arr := rc.resolveArray(returnedValue(v))
 	if arr == nil {
 		return nil, nil, "not a static array"
 	}
+	parts := rc.arrayParts(arr)
+	carry := func(i int) bool {
+		if parts == nil {
+			return false
+		}
+		rules = append(rules, nextHeaderRule{Code: &codePiece{Label: fmt.Sprintf("headers[%d]", i), Text: parts[i]}})
+		return true
+	}
 	for i, el := range arr.Elements {
+		if obj, ok := el.(*ast.ObjectExpr); !ok || hasComputedParts(obj) {
+			if carry(i) {
+				continue
+			}
+		}
 		obj, source, item := rc.element("headers", i, el, conditionHintHeader)
 		if item != nil {
 			rc.headersLost = true
@@ -280,6 +344,9 @@ func (rc *ruleCtx) headers(v ast.Expr) (rules []nextHeaderRule, items []ManualIt
 		}
 		harr := rc.resolveArray(prop(obj, "headers"))
 		if harr == nil {
+			if carry(i) {
+				continue
+			}
 			rc.headersLost = true
 			items = append(items, ManualItem{
 				Source: rc.file,
@@ -290,6 +357,9 @@ func (rc *ruleCtx) headers(v ast.Expr) (rules []nextHeaderRule, items []ManualIt
 		}
 		has, missing, citem := rc.conditions(fmt.Sprintf("headers[%d]", i), source, obj)
 		if citem != nil {
+			if carry(i) {
+				continue
+			}
 			rc.headersLost = true
 			items = append(items, *citem)
 			continue
@@ -314,6 +384,14 @@ func (rc *ruleCtx) headers(v ast.Expr) (rules []nextHeaderRule, items []ManualIt
 				continue
 			}
 			rule.Headers[k] = val
+		}
+		if dropped > 0 && carry(i) {
+			last := rules[len(rules)-1].Code
+			if len(rule.Headers) > 0 {
+				fb := rule
+				last.Fallback = &fb
+			}
+			continue
 		}
 		if dropped > 0 {
 			rc.headersLost = true
@@ -437,7 +515,9 @@ func duplicateRuleWarnings(d nextConfigData) []string {
 	count("rewrites", rs, src)
 	rs = nil
 	for _, r := range d.Headers {
-		rs = append(rs, r)
+		if r.Code == nil {
+			rs = append(rs, r)
+		}
 	}
 	count("headers", rs, src)
 	return out

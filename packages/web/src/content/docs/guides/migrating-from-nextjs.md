@@ -108,15 +108,31 @@ The first pass:
   function, creating `middleware.ts` when there is none, and an info line says
   so; a rewrite or header rule like that, or a middleware whose signature cannot
   be edited safely, is reported as manual work. Identical duplicate rules in
-  the output are warned about. When headers could not be translated and the
-  config (or a local module it imports) mentions `Content-Security-Policy`,
-  `Strict-Transport-Security`, `X-Frame-Options` or similar, a separate item says
-  the security headers were not migrated. `krate.config.ts` can import a local
-  module, so a helper that builds static headers can be imported there; values
-  that depend on the request, such as a CSP nonce, belong in `middleware.ts`.
-  Every other `next.config` key gets its own item with a hint instead of one
-  generic warning: `transpilePackages`, `output: 'standalone'`, computed
-  `images.remotePatterns` or `env`, `experimental` flags, and a
+  the output are warned about. Header rules and `images.remotePatterns`
+  entries that are built in code are carried over as code: a `headers()` that
+  returns `[{ source: '/:path*', headers: securityHeaders }, ...buildCacheRules()]`,
+  where `securityHeaders` is a top-level const computed by an imported helper,
+  and a `remotePatterns` list that an `if (process.env.X) { ...push(...) }`
+  extends. The migration copies next.config's top-level imports of local modules,
+  the consts the carried code depends on and the statements that change them into
+  `krate.config.ts`, and leaves out type-only imports, `import ... from 'next'`
+  and the `loadEnvConfig` call with its `@next/env` import (it is mapped to
+  `envDir`). The file stays plain JSON-shaped when every value is static. After
+  writing the plan the migration evaluates the new `krate.config.ts` with the real
+  config loader and your environment (the shell plus the `.env` files, as a
+  production build loads them). A rule that fails there, for example because a
+  helper imports `next/server`, is written as a comment with the error and a
+  manual item quotes it. The values are computed again each time Krate loads the
+  config, so `krate build`, `krate start` and `krate dev` each use their own
+  environment; `krate deploy --target node` bakes the build-time result, as Next
+  bakes `headers()` into its routes manifest. When the headers set security
+  headers but no `Strict-Transport-Security`, an info line notes that Krate also
+  sends HSTS for an https `baseUrl`; set `security.hsts: "off"` to match Next
+  exactly. `images.remotePatterns` keeps `protocol`, `port` and `search`.
+  Values that depend on the request, such as a CSP nonce, belong in
+  `middleware.ts`. Every other `next.config` key gets its own item with a hint
+  instead of one generic warning: `transpilePackages`, `output: 'standalone'`,
+  computed `env`, `experimental` flags, and a
   `loadEnvConfig(...)` call whose path is not static. When the path is static
   (a literal, `path.resolve(__dirname, '../..')`, `join(process.cwd(), '..', '..')`,
   `fileURLToPath(new URL('../..', import.meta.url))`), the migration writes the
