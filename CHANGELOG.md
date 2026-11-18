@@ -552,6 +552,16 @@ host code runs in the native process. Names and options may change between relea
   `calc(infinity * 1px)`; and `data-[...]`/`aria-[...]` values that would make an invalid selector
   (`data-[foo_bar]`, `aria-[.x]`) produce no rule. A golden test now compares built-in utilities and
   variants with real Tailwind output.
+- Tailwind arbitrary values follow Tailwind v4's type inference and are accepted where Tailwind accepts
+  them. `rounded-[calc(var(--radius-md)-2px)]` and other unhandled `prefix-[...]` values are normalized
+  (they kept `-` unspaced inside `calc()`, an invalid declaration); `blur-[calc(...)]` and
+  `backdrop-blur-[...]` wrap the value in `blur()`; `bg-[14px]`, `bg-[50%]` and `bg-[calc(...)]` set
+  `background-position` (not `background-size`; use `bg-[length:...]`), `text-[red]` and other values
+  that are not sizes set `color`, `font-[calc(...)]` sets the weight, unitless `ring-[2]` and
+  `from-[0]` are colors, and unknown values on borders, outline, rings, divide and scrollbar are colors.
+  `filter-[...]`, `backdrop-filter-[...]`, `flex-grow-[...]`, `flex-shrink-[...]`, `font-features-[...]`,
+  `mask-radial-at-[...]`, `@container-[...]`, `divide-x-[...]` and negative `-col-[...]`, `-row-[...]`,
+  `-mask-linear-[...]` and `-mask-conic-[...]` are new.
 - `@apply` with a variant (`md:flex`) in a rule whose last declaration has no semicolon no longer glues
   the generated nested rule onto that declaration.
 - Releases publish every package that is not private, at one version. `@krate/app` was never versioned or

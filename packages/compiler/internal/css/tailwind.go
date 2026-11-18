@@ -813,28 +813,14 @@ func generateCSS(cls string, theme TailwindTheme) string {
 	// image/size/position, selected by the arbitrary value's shape/hint.
 	if match := bgRe.FindStringSubmatch(cls); match != nil {
 		key := match[1]
-		if inner, hint, isArb := arbitraryValue(key); isArb {
-			switch hint {
+		if inner, typ, isArb := arbType(key, "image", "color", "percentage", "position", "bg-size", "length", "url"); isArb {
+			switch typ {
+			case "percentage", "position":
+				return "background-position: " + inner + ";"
+			case "bg-size", "length", "size":
+				return "background-size: " + inner + ";"
 			case "image", "url":
 				return "background-image: " + inner + ";"
-			case "length", "size":
-				return "background-size: " + inner + ";"
-			case "position":
-				return "background-position: " + inner + ";"
-			case "color":
-				return "background-color: " + inner + ";"
-			}
-			if strings.HasPrefix(strings.ToLower(inner), "url(") ||
-				strings.HasPrefix(strings.ToLower(inner), "linear-gradient(") ||
-				strings.HasPrefix(strings.ToLower(inner), "radial-gradient(") ||
-				strings.HasPrefix(strings.ToLower(inner), "conic-gradient(") {
-				return "background-image: " + inner + ";"
-			}
-			if looksLikeColor(inner) {
-				return "background-color: " + inner + ";"
-			}
-			if looksLikeLength(inner) {
-				return "background-size: " + inner + ";"
 			}
 			return "background-color: " + inner + ";"
 		}

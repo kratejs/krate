@@ -65,8 +65,9 @@ func miscUtility(cls string, theme TailwindTheme) (string, bool) {
 		case "current":
 			return "stroke: currentColor;", true
 		}
-		if inner, hint, isArb := arbitraryValue(rest); isArb {
-			if hint == "length" || hint == "number" || (hint == "" && looksLikeLength(inner) && !isVarOnly(inner)) {
+		if inner, typ, isArb := arbType(rest, "color", "number", "length", "percentage"); isArb {
+			switch typ {
+			case "number", "length", "percentage":
 				return "stroke-width: " + inner + ";", true
 			}
 			return "stroke: " + inner + ";", true
@@ -217,6 +218,12 @@ func filterUtility(cls string, theme TailwindTheme) (string, bool) {
 	if cls == "backdrop-filter-none" {
 		return "-webkit-backdrop-filter: none; backdrop-filter: none;", true
 	}
+	if v, _, ok := arbitraryValue(strings.TrimPrefix(cls, "backdrop-filter-")); ok && strings.HasPrefix(cls, "backdrop-filter-") {
+		return "-webkit-backdrop-filter: " + v + "; backdrop-filter: " + v + ";", true
+	}
+	if v, _, ok := arbitraryValue(strings.TrimPrefix(cls, "filter-")); ok && strings.HasPrefix(cls, "filter-") {
+		return "filter: " + v + ";", true
+	}
 	// Backdrop variants of the scale-based filters.
 	if rest, ok := strings.CutPrefix(cls, "backdrop-"); ok {
 		if css, ok := filterScaleValue(rest, theme, true); ok {
@@ -263,7 +270,7 @@ func filterScaleValue(cls string, theme TailwindTheme, backdrop bool) (string, b
 			rest = ""
 		}
 		if v, isArb := unwrapArbitrary(rest); isArb {
-			return applyFilter(name, filterArbValue(name, v), backdrop), true
+			return applyFilter(name, name+"("+v+")", backdrop), true
 		}
 		if v, ok := scale[rest]; ok {
 			if v == "" {
@@ -291,15 +298,6 @@ func filterNamedValue(name, v string) string {
 		return "blur(" + v + ")"
 	}
 	return v
-}
-
-// filterArbValue normalizes an arbitrary filter value (blur([...])) to a filter
-// function call, preserving a value that already contains the function.
-func filterArbValue(name, v string) string {
-	if strings.Contains(v, "(") && !isVarOnly(v) {
-		return v
-	}
-	return name + "(" + v + ")"
 }
 
 // ---------------------------------------------------------------------------
@@ -520,17 +518,18 @@ func typographyExtraUtility(cls string, theme TailwindTheme) (string, bool) {
 	}
 	// Decoration color / style / thickness.
 	if rest, ok := strings.CutPrefix(cls, "decoration-"); ok {
-		if inner, hint, isArb := arbitraryValue(rest); isArb {
-			switch hint {
-			case "color":
-				return "text-decoration-color: " + inner + ";", true
-			case "length":
-				return "text-decoration-thickness: " + inner + ";", true
+		if base, mod := splitColorModifier(rest); isArbitrary(base) {
+			v, typ, _ := arbType(base, "color", "length", "percentage")
+			if typ == "length" || typ == "percentage" {
+				if mod != "" {
+					return "", false
+				}
+				return "text-decoration-thickness: " + v + ";", true
 			}
-			if looksLikeColor(inner) {
-				return "text-decoration-color: " + inner + ";", true
+			if c, ok := arbColor(rest); ok {
+				return "text-decoration-color: " + c + ";", true
 			}
-			return "text-decoration-thickness: " + inner + ";", true
+			return "", false
 		}
 		switch rest {
 		case "solid", "double", "dotted", "dashed", "wavy":
@@ -569,9 +568,11 @@ func typographyExtraUtility(cls string, theme TailwindTheme) (string, bool) {
 	if pair, ok := fontVariantNumeric[cls]; ok {
 		return "--tw-" + pair[0] + ": " + pair[1] + "; font-variant-numeric: var(--tw-ordinal,) var(--tw-slashed-zero,) var(--tw-numeric-figure,) var(--tw-numeric-spacing,) var(--tw-numeric-fraction,);", true
 	}
-	// Font feature settings (arbitrary).
-	if v, ok := unwrapArbitrary(strings.TrimPrefix(cls, "font-feature-settings-")); ok && strings.HasPrefix(cls, "font-feature-settings-") {
-		return "font-feature-settings: " + v + ";", true
+	// Font feature settings (arbitrary). Tailwind spells it font-features-.
+	for _, root := range []string{"font-features-", "font-feature-settings-"} {
+		if v, _, ok := arbitraryValue(strings.TrimPrefix(cls, root)); ok && strings.HasPrefix(cls, root) {
+			return "font-feature-settings: " + v + ";", true
+		}
 	}
 	// Hyphens. Safari before 17 only reads the prefixed property.
 	switch cls {

@@ -99,6 +99,9 @@ func moreUtility(cls string, neg bool, theme TailwindTheme) (string, bool) {
 			continue
 		}
 		c, ok := colorOf(rest, theme)
+		if base, _ := splitColorModifier(rest); isArbitrary(base) {
+			c, ok = arbColor(rest)
+		}
 		if !ok {
 			return "", false
 		}
