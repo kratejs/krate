@@ -2434,12 +2434,6 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	var redirectRewriteHandler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 
-		// trailingSlash "never": /x/ goes to /x, judged on the requested URL
-		// before a rewrite maps it onto another internal path.
-		if redirectToSlashless(slashMode, w, r) {
-			return
-		}
-
 		// Check rewrites (internal path mapping, no redirect)
 		for _, rw := range rewriteRules {
 			vals, mods, ok := rw.match(r, path)
@@ -2609,7 +2603,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	proxyTrust.Store(cfg.Server.TrustProxy)
 	flashSecret.Store(flashSecretFor(revalHost.secret))
 	proxyHops.Store(int32(cfg.Server.TrustedProxies))
-	var rootHandler http.Handler = requestIDMiddleware(forwardedHeadersMiddleware(cfg.Server.TrustProxy, basePathMiddleware(cfg.BaseURLPath(), cfg.Redirects, securityHeadersMiddleware(cfg, customHeadersMiddleware(cfg.Headers, corsMiddleware(cfg, panicRecoveryMiddleware(Logger, configRedirectMiddleware(insideRedirects, devMux))))))))
+	var rootHandler http.Handler = requestIDMiddleware(forwardedHeadersMiddleware(cfg.Server.TrustProxy, basePathMiddleware(cfg.BaseURLPath(), cfg.Redirects, securityHeadersMiddleware(cfg, customHeadersMiddleware(cfg.Headers, corsMiddleware(cfg, panicRecoveryMiddleware(Logger, frontRedirects(slashMode, insideRedirects, devMux))))))))
 
 	listenerOwned = true
 	addr := listener.Addr().(*net.TCPAddr)

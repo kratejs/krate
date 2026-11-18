@@ -3,10 +3,13 @@ package build
 import (
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kratejs/krate/packages/compiler/internal/config"
 )
 
 // TestServeTrailingSlashModes drives krate serve with each trailingSlash mode:
@@ -21,7 +24,9 @@ func TestServeTrailingSlashModes(t *testing.T) {
 			"/about": {301, "about/"}, "/about/": {200, ""}, "/history": {301, "./history/"}, "/history/": {200, ""},
 		}},
 		{"never", map[string][2]interface{}{
-			"/about": {200, ""}, "/about/": {301, "../about"}, "/history": {200, ""}, "/history/": {301, "../history"},
+			"/about": {200, ""}, "/about/": {308, "/about"}, "/history": {200, ""}, "/history/": {308, "/history"},
+			"/history/?x=1": {308, "/history?x=1"}, "/nope/": {308, "/nope"}, "//evil.example/": {308, "/evil.example"},
+			"/hi": {200, ""}, "/hi/": {308, "/hi"},
 		}},
 		{"ignore", map[string][2]interface{}{
 			"/about": {200, ""}, "/about/": {200, ""}, "/history": {200, ""}, "/history/": {200, ""},
@@ -37,6 +42,8 @@ func TestServeTrailingSlashModes(t *testing.T) {
 				"src/pages/history.tsx": "export const config = { ssr: true };\nexport default function H() { return <h1>history-page</h1>; }",
 			})
 			b.Cfg.TrailingSlash = c.mode
+			// A literal rewrite still applies once the slash rule canonicalised the URL.
+			b.Cfg.Rewrites = []config.Rewrite{{Source: "/hi", Destination: "/about"}}
 			if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
 				t.Fatal(err)
 			}
@@ -65,7 +72,11 @@ func TestServeTrailingSlashModes(t *testing.T) {
 				if resp.StatusCode != w[0].(int) || resp.Header.Get("Location") != w[1].(string) {
 					t.Errorf("GET %s: %d %q, want %d %q", p, resp.StatusCode, resp.Header.Get("Location"), w[0], w[1])
 				}
-				if w[0].(int) == 200 && !strings.Contains(body, strings.TrimPrefix(strings.TrimSuffix(p, "/"), "/")+"-page") {
+				want := strings.TrimPrefix(strings.TrimSuffix(p, "/"), "/")
+				if want == "hi" {
+					want = "about"
+				}
+				if w[0].(int) == 200 && !strings.Contains(body, want+"-page") {
 					t.Errorf("GET %s: wrong body %.200s", p, body)
 				}
 			}
@@ -76,5 +87,30 @@ func TestServeTrailingSlashModes(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestSlashlessTarget(t *testing.T) {
+	cases := []struct {
+		method, url, want string
+	}{
+		{"GET", "/templates/", "/templates"},
+		{"POST", "/templates/", "/templates"},
+		{"GET", "/api/marker/", "/api/marker"},
+		{"GET", "/brand/a.svg/", "/brand/a.svg"},
+		{"GET", "/a%20b/?q=1", "/a%20b?q=1"},
+		{"GET", "/x//", "/x"},
+		{"GET", "//evil.example/", "/evil.example"},
+		{"GET", "//", ""},
+		{"GET", "/", ""},
+		{"GET", "/templates", ""},
+		{"GET", "/404/", ""},
+		{"GET", "/__krate/action/x/", ""},
+	}
+	for _, c := range cases {
+		r := httptest.NewRequest(c.method, "http://h"+c.url, nil)
+		if got := slashlessTarget(r); got != c.want {
+			t.Errorf("%s %s: %q, want %q", c.method, c.url, got, c.want)
+		}
 	}
 }

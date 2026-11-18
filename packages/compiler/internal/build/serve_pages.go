@@ -106,33 +106,47 @@ func requestedPath(r *http.Request) string {
 	return r.URL.Path
 }
 
-// redirectToSlashless is the trailingSlash "never" counterpart: a GET/HEAD for
-// a page URL ending in a slash gets a 301 to the slashless URL (query kept).
-// It reports whether it wrote the response.
-func redirectToSlashless(mode string, w http.ResponseWriter, r *http.Request) bool {
-	if mode != "never" {
-		return false
+// slashlessTarget returns where trailingSlash "never" sends a request, or ""
+// when the URL has no trailing slash. Like Next, the rule is judged on the URL
+// alone, before middleware, config redirects and routing: any path ending in
+// "/" (pages, files, API routes, any method) goes to the slashless path. The
+// not-found page's own URLs and Krate's internal routes are left alone. The
+// target is root-relative and keeps the escaped path and the query.
+func slashlessTarget(r *http.Request) string {
+	p := r.URL.Path
+	if len(p) < 2 || !strings.HasSuffix(p, "/") || isInternalRoutePath(p) || strings.HasPrefix(p, "/__krate") || notFoundPageURL(p) {
+		return ""
 	}
-	p := requestedPath(r)
-	if len(p) < 2 || !strings.HasSuffix(p, "/") || notFoundPageURL(p) {
-		return false
+	target := strings.TrimRight(r.URL.EscapedPath(), "/")
+	// Collapse leading slashes: "//evil.example/" must not become a
+	// scheme-relative Location.
+	target = "/" + strings.TrimLeft(target, "/\\")
+	if target == "/" {
+		return ""
 	}
-	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		return false
-	}
-	trimmed := strings.TrimRight(p, "/")
-	if trimmed == "" || isFileLikePath(trimmed) || trimmed == "/api" || strings.HasPrefix(trimmed, "/api/") || strings.HasPrefix(trimmed, "/__krate") {
-		return false
-	}
-	// "../" keeps a last segment like "ftp:3232235777" from parsing as an
-	// absolute URL, and stays correct under a base path.
-	target := "../" + path.Base(trimmed)
 	if r.URL.RawQuery != "" {
 		target += "?" + r.URL.RawQuery
 	}
-	w.Header().Set("Location", target)
-	w.WriteHeader(http.StatusMovedPermanently)
-	return true
+	return target
+}
+
+// frontRedirects answers the trailingSlash "never" redirect (308, like Next's)
+// and then the config redirects, in front of middleware and routing, so
+// middleware only sees canonical URLs. "always" keeps its slash redirect on
+// the page handlers, behind middleware and rewrites.
+func frontRedirects(mode string, redirects []config.Redirect, next http.Handler) http.Handler {
+	next = configRedirectMiddleware(redirects, next)
+	if mode != "never" {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if target := slashlessTarget(r); target != "" {
+			w.Header().Set("Location", target)
+			w.WriteHeader(http.StatusPermanentRedirect)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // serveIndexInPlace lets the file server answer a folder URL without its

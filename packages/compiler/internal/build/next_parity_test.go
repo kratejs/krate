@@ -84,9 +84,10 @@ func parityIgnored(name string) bool {
 // sends only Location: Krate applies header rules to redirects too (pinned by
 // TestCustomHeadersApplyToRedirectsAndErrors), and its redirect carries a small
 // HTML stub body. Both are inert for a redirect, so only extras are allowed;
-// a header Next sent must still match.
+// a header Next sent must still match. A Cache-Control header rule (such as
+// /brand/:path*) applies to a redirect inside its source as well.
 var parityRedirectExtras = map[string]bool{
-	"content-type": true, "x-content-type-options": true, "referrer-policy": true, "x-frame-options": true,
+	"content-type": true, "cache-control": true, "x-content-type-options": true, "referrer-policy": true, "x-frame-options": true,
 	"permissions-policy": true, "cross-origin-opener-policy": true,
 	"content-security-policy": true, "content-security-policy-report-only": true,
 }

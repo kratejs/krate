@@ -505,6 +505,14 @@ host code runs in the native process. Names and options may change between relea
 
 ### Changed
 
+- `trailingSlash: "never"` redirects like Next: `/x/` answers `308` (was `301`) with the root-relative
+  `Location` `/x`, before config redirects and middleware run, for every path ending in a slash
+  (`/api/*` and files included) and any method. It used to run behind the middleware, so with
+  `GET /store/compare/` the middleware could serve the page at the slash URL, and `/dashboard/`
+  reached a middleware redirect whose `callbackUrl` kept the slash. `krate serve`/`start` and the
+  portable handler of the `node`, `vercel`, `netlify` and `cloudflare` bundles behave the same;
+  `TestNextRoutingParity` pins it against Next 16.4.2. `"always"` (the default) is unchanged: `301`
+  from the page handlers, after middleware and rewrites.
 - `krate migrate nextjs` updates `package.json` by default (`--no-update-package` opts out;
   `--update-package` is accepted and does nothing): scripts, every `@krate/*` package the migrated
   code imports (including `@krate/auth`, `@krate/three` and `@krate/konva`), and the removal of `next`,

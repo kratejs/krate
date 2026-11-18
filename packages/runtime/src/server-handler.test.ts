@@ -217,6 +217,54 @@ describe("canonical slash redirect", () => {
   });
 });
 
+describe("trailingSlash redirect", () => {
+  const seen: string[] = [];
+  const mwModules = {
+    ...modules,
+    middleware: {
+      middleware: (req: Request) => {
+        seen.push(new URL(req.url).pathname);
+        return new Response("mw", { status: 200 });
+      },
+      config: { matcher: ["/mw/:path*"] },
+    },
+  };
+  const mk = (trailingSlash: "always" | "never", basePath = "") =>
+    createKrateHandler({ target: "node", data: data({ config: { ...config, trailingSlash, basePath } }), modules: mwModules });
+  const req = (h: ReturnType<typeof createKrateHandler>, path: string, method = "GET") =>
+    h(new Request("http://localhost" + path, { method, redirect: "manual" }));
+
+  it("never: answers 308 before middleware for pages, API routes and any method", async () => {
+    const h = mk("never");
+    seen.length = 0;
+    for (const [path, method, loc] of [
+      ["/mw/a/", "GET", "/mw/a"],
+      ["/live/?x=1", "GET", "/live?x=1"],
+      ["/api/hello/", "POST", "/api/hello"],
+      ["/a.svg/", "GET", "/a.svg"],
+      ["//evil.example/", "GET", "/evil.example"],
+    ]) {
+      const r = await req(h, path, method);
+      expect([r.status, r.headers.get("location")], path).toEqual([308, loc]);
+    }
+    expect(seen).toEqual([]);
+    expect((await req(h, "/mw/a")).status).toBe(200);
+    expect(seen).toEqual(["/mw/a"]);
+    expect((await req(h, "/404/")).status).toBe(404);
+  });
+
+  it("always: keeps its slash redirect behind middleware", async () => {
+    seen.length = 0;
+    expect((await req(mk("always"), "/mw/a")).status).toBe(200);
+    expect(seen).toEqual(["/mw/a"]);
+  });
+
+  it("keeps the base path in the Location", async () => {
+    const r = await req(mk("never", "/docs"), "/docs/live/");
+    expect([r.status, r.headers.get("location")]).toEqual([308, "/docs/live"]);
+  });
+});
+
 describe("signed flash cookies", () => {
   const shell =
     "<html><head><title>t</title></head><body><!--suspense:page-->baked<!--/suspense:page--></body></html>";
