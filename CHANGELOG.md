@@ -563,6 +563,9 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- Redirect and rewrite destinations: an optional parameter (`:rest*`, `:rest?`) that matched nothing now
+  takes its preceding `/` with it, as in Next (`/n/:a/:b*` to `/t/:a/:b*` sends `/n/x` to `/t/x`, not
+  `/t/x/`), in `krate serve` and in the SSR server handler.
 - `krate migrate nextjs`: a project file that stays in place but imports a file the migration moves
   aside (a test importing `./proxy`, a helper importing a route file) now has the import repointed at
   the new location (`proxy.ts` becomes `middleware.ts`, which also exports `proxy`); an import with no

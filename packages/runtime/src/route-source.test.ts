@@ -62,6 +62,12 @@ describe("destinations", () => {
     const q = compileMatcher("/u/:name", "redirect").match("/u/a&b=c", req("/"))!;
     expect(buildDestination("/go?n=:name", q)).toBe("/go?n=a%26b%3Dc");
   });
+  it("drops the slash before an optional parameter that matched nothing", () => {
+    const m = compileMatcher("/n/:a/:b*", "redirect");
+    expect(buildDestination("/t/:a/:b*", m.match("/n/x", req("/"))!)).toBe("/t/x");
+    expect(buildDestination("/t/:a/:b*", m.match("/n/x/y/z", req("/"))!)).toBe("/t/x/y/z");
+    expect(buildDestination("/t/:b*/more", compileMatcher("/n/:b*", "redirect").match("/n", req("/"))!)).toBe("/t/more");
+  });
   it("merges the request query, destination keys win", () => {
     expect(mergeRequestQuery("/t", "?vehicle=x")).toBe("/t?vehicle=x");
     expect(mergeRequestQuery("/t?a=9", "?a=1&b=2")).toBe("/t?a=9&b=2");

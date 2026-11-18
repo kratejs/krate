@@ -437,7 +437,10 @@ function replaceDestParams(destination: string, params: Record<string, string>, 
     let end = m.index + m[0].length;
     const mod = mods[name];
     if (mod && end < destination.length && destination[end] === mod) end++;
-    out += destination.slice(last, m.index) + (queryAt >= 0 && m.index > queryAt ? escapeQueryValue(params[name]) : escapeRedirectValue(params[name]));
+    let prefix = destination.slice(last, m.index);
+    // An optional parameter that matched nothing takes its "/" with it (path-to-regexp).
+    if (params[name] === "" && (queryAt < 0 || m.index < queryAt) && (mod === "*" || mod === "?") && prefix.endsWith("/") && out.length + prefix.length > 1) prefix = prefix.slice(0, -1);
+    out += prefix + (queryAt >= 0 && m.index > queryAt ? escapeQueryValue(params[name]) : escapeRedirectValue(params[name]));
     last = end;
     re.lastIndex = end;
   }

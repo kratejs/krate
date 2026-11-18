@@ -294,7 +294,13 @@ func replaceDestParams(destination string, params map[string]string, mods map[st
 		if mod := mods[name]; mod != 0 && end < len(destination) && destination[end] == mod {
 			end++
 		}
-		sb.WriteString(destination[last:m[0]])
+		prefix := destination[last:m[0]]
+		// An optional parameter that matched nothing takes its "/" with it,
+		// like path-to-regexp: /a/:rest* at /a gives /a, not /a/.
+		if val == "" && (queryAt < 0 || m[0] < queryAt) && (mods[name] == '*' || mods[name] == '?') && strings.HasSuffix(prefix, "/") && sb.Len()+len(prefix) > 1 {
+			prefix = prefix[:len(prefix)-1]
+		}
+		sb.WriteString(prefix)
 		if queryAt >= 0 && m[0] > queryAt {
 			sb.WriteString(escapeQueryValue(val))
 		} else {

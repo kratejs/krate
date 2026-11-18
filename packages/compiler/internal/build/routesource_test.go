@@ -40,6 +40,9 @@ func TestRewriteDestinationNextSyntax(t *testing.T) {
 		{"lookahead rejects", "/store/compare", "/store/:slug((?!compare$)[^/]+)", "/templates/:slug", "/templates/:slug"},
 		{"star keeps slashes", "/docs/a/b", "/docs/:path*", "/documentation/:path*", "/documentation/a/b"},
 		{"param in the query is query escaped", "/u/a&b=c", "/u/:name", "/x?n=:name", "/x?n=a%26b%3Dc"},
+		{"empty optional repeat drops its slash", "/n/x", "/n/:a/:b*", "/t/:a/:b*", "/t/x"},
+		{"empty optional repeat in the middle", "/n", "/n/:b*", "/t/:b*/more", "/t/more"},
+		{"filled optional repeat keeps slashes", "/n/x/y/z", "/n/:a/:b*", "/t/:a/:b*", "/t/x/y/z"},
 		{"explicit regex param", "/f/42", "/f/:id(\\d+)", "/files/:id", "/files/42"},
 	}
 	for _, tt := range tests {
