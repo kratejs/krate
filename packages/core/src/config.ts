@@ -334,7 +334,8 @@ export interface SecurityConfig {
 export interface HeaderRule {
   /** Exact path, prefix wildcard ("/assets/*"), path glob, or Next.js syntax ("/:path*"). */
   source: string;
-  headers: Record<string, string>;
+  /** Header name to value, or Next.js' `[{ key, value }]` array (order kept, the last repeated key wins). */
+  headers: Record<string, string> | Array<{ key: string; value: string }>;
   has?: RouteCondition[];
   missing?: RouteCondition[];
 }
@@ -343,6 +344,12 @@ export interface HeaderRule {
 export interface ImageRemotePattern {
   hostname: string;
   pathname?: string;
+  /** "https" or "http"; unset allows either. */
+  protocol?: "http" | "https";
+  /** Exact port ("" means no explicit port); unset allows any. */
+  port?: string;
+  /** Exact query string including the leading "?"; unset allows any. */
+  search?: string;
 }
 
 /** Responsive-image pipeline config used by <Image>. */

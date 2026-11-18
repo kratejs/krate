@@ -94,3 +94,36 @@ func TestValidateRouteRuleErrors(t *testing.T) {
 		t.Errorf("legacy forms must stay valid: %v", err)
 	}
 }
+
+func TestLoadHeadersNextArrayShape(t *testing.T) {
+	root := writeConfig(t, `const hs = [
+  { key: "X-A", value: "1" },
+  { key: "Cache-Control", value: "no-store" },
+  { key: "x-a", value: "2" },
+];
+export default {
+  headers: [
+    { source: "/:path*", headers: hs },
+    { source: "/obj", headers: { "X-B": "3" } },
+  ],
+};`)
+	Warnings = nil
+	cfg, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := cfg.Headers[0].Headers
+	if len(got) != 2 || got["x-a"] != "2" || got["Cache-Control"] != "no-store" {
+		t.Errorf("array headers = %v, want last x-a to win", got)
+	}
+	if cfg.Headers[1].Headers["X-B"] != "3" {
+		t.Errorf("object headers = %v", cfg.Headers[1].Headers)
+	}
+}
+
+func TestHeaderRuleRejectsBadHeadersShape(t *testing.T) {
+	var r HeaderRule
+	if err := r.UnmarshalJSON([]byte(`{"source":"/","headers":"x"}`)); err == nil {
+		t.Fatal("string headers accepted")
+	}
+}

@@ -14,15 +14,23 @@ import (
 // evaluateEmbeddedTSConfig evaluates a module-based config in-process via jseval
 // (esbuild bundle + embedded QuickJS) and returns its JSON. No Node subprocess.
 func evaluateEmbeddedTSConfig(configPath string, opts LoadOptions) ([]byte, error) {
+	return evalConfigModule(configPath, "./"+filepath.Base(configPath), nil, environ.ScriptEnv(), opts)
+}
+
+// evalConfigModule evaluates the config module spec (resolved from the config's
+// directory) and returns its JSON. virtual holds in-memory files by absolute
+// path; env is what process.env shows.
+func evalConfigModule(configPath, spec string, virtual map[string]string, env map[string]string, opts LoadOptions) ([]byte, error) {
 	root := filepath.Dir(configPath)
 
 	data, err := jseval.Eval(jseval.Options{
-		Source:     configEvalBootstrap("./"+filepath.Base(configPath), opts),
-		ResolveDir: root,
-		Sourcefile: "krate-config-bootstrap.ts",
-		Env:        environ.ScriptEnv(),
-		Await:      true,
-		NodeShims:  true,
+		Source:       configEvalBootstrap(spec, opts),
+		ResolveDir:   root,
+		Sourcefile:   "krate-config-bootstrap.ts",
+		Env:          env,
+		Await:        true,
+		NodeShims:    true,
+		VirtualFiles: virtual,
 	})
 	if err != nil {
 		var thrown *jseval.ThrownError
@@ -99,4 +107,33 @@ try {
   globalThis.%s = __krateDescribe(e);
 }
 `, string(commandJSON), string(modeJSON), isDev, isDev, string(specJSON), validatePrefix, jseval.ResultGlobal, jseval.ErrorGlobal)
+}
+
+// EvaluateSource evaluates src as the project's krate.config.ts, with env as
+// process.env, and returns the resulting config. It runs the same evaluator as
+// Load (a build-command, production-mode context) but never falls back to the
+// static parser, so any failure to run the module is returned. The file need
+// not exist on disk: the migrator uses this to check a config it has not
+// written yet.
+func EvaluateSource(root, src string, env map[string]string) (*Config, error) {
+	path, err := filepath.Abs(filepath.Join(root, "krate.config.ts"))
+	if err != nil {
+		return nil, err
+	}
+	opts := LoadOptions{Command: "build", Mode: "production"}
+	raw, err := evalConfigModule(path, path, map[string]string{filepath.Clean(path): src}, env, opts)
+	if err != nil {
+		return nil, err
+	}
+	cfg := Default()
+	if err := json.Unmarshal(raw, cfg); err != nil {
+		return nil, describeUnmarshalError("krate.config.ts", err)
+	}
+	if err := applyNormalizedKeys(raw, cfg); err != nil {
+		return nil, fmt.Errorf("config krate.config.ts: %w", err)
+	}
+	if err := cfg.ValidateConfig(); err != nil {
+		return nil, fmt.Errorf("invalid config: %w", err)
+	}
+	return cfg, nil
 }

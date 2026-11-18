@@ -1,6 +1,9 @@
 package config
 
-import "strings"
+import (
+	"net/url"
+	"strings"
+)
 
 // ImageRemotePattern allows a remote image host (and optional path pattern) to be
 // referenced from <Image src> without processing. Any other remote src is
@@ -12,6 +15,15 @@ type ImageRemotePattern struct {
 	// Pathname optionally restricts the path: `*` matches one segment, `**`
 	// matches any depth (e.g. "/images/**").
 	Pathname string `json:"pathname,omitempty"`
+	// Protocol optionally restricts the scheme ("https" or "http"); a trailing
+	// colon is ignored. Unset allows either.
+	Protocol string `json:"protocol,omitempty"`
+	// Port optionally restricts the port, compared with the URL's explicit port
+	// as Next does: "" matches only a URL with no port. Unset allows any port.
+	Port *string `json:"port,omitempty"`
+	// Search optionally requires the exact query string (including the leading
+	// "?"). Unset allows any query.
+	Search *string `json:"search,omitempty"`
 }
 
 // ImagesConfig configures the responsive-image pipeline used by <Image>.
@@ -36,17 +48,39 @@ type ImagesConfig struct {
 // PlaceholderEnabled reports whether the blur placeholder is on (default true).
 func (c ImagesConfig) PlaceholderEnabled() bool { return c.Placeholder == nil || *c.Placeholder }
 
-// RemoteAllowed reports whether a remote image URL is allowlisted.
-func (c ImagesConfig) RemoteAllowed(host, path string) bool {
+// RemoteAllowed reports whether a remote image URL is allowlisted. A pattern
+// matches when every field it sets matches, as in Next's remotePatterns.
+func (c ImagesConfig) RemoteAllowed(u *url.URL) bool {
+	if u == nil {
+		return false
+	}
 	for _, p := range c.RemotePatterns {
-		if p.Hostname == "" || !matchImageHost(p.Hostname, host) {
+		if p.Hostname == "" || !matchImageHost(p.Hostname, u.Hostname()) {
 			continue
 		}
-		if matchImagePath(p.Pathname, path) {
+		if p.Protocol != "" && !strings.EqualFold(strings.TrimSuffix(p.Protocol, ":"), u.Scheme) {
+			continue
+		}
+		if p.Port != nil && *p.Port != u.Port() {
+			continue
+		}
+		if p.Search != nil && *p.Search != searchOf(u) {
+			continue
+		}
+		if matchImagePath(p.Pathname, u.Path) {
 			return true
 		}
 	}
 	return false
+}
+
+// searchOf is the URL's query string with its leading "?" (empty when none),
+// like the WHATWG URL search property.
+func searchOf(u *url.URL) string {
+	if u.RawQuery == "" {
+		return ""
+	}
+	return "?" + u.RawQuery
 }
 
 func matchImageHost(pattern, host string) bool {

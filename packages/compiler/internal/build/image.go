@@ -473,7 +473,7 @@ func (l *imageLowerer) lower(orig *ast.JSXElement) *ast.JSXElement {
 	switch {
 	case remote:
 		u, perr := url.Parse(src)
-		if perr != nil || u.Hostname() == "" || !imgCfg.RemoteAllowed(u.Hostname(), u.Path) {
+		if perr != nil || u.Hostname() == "" || !imgCfg.RemoteAllowed(u) {
 			host := src
 			if perr == nil && u.Hostname() != "" {
 				host = u.Hostname()

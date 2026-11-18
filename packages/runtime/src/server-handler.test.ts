@@ -86,6 +86,17 @@ describe("createKrateHandler", () => {
     expect((await get("/new")).headers.get("x-rule")).toBe("yes");
   });
 
+  it("accepts Next's [{ key, value }] header rules, the last repeated key winning", async () => {
+    const arrayConfig: HandlerConfig = {
+      ...config,
+      headers: [{ source: "/new", headers: [{ key: "X-Rule", value: "first" }, { key: "X-Other", value: "o" }, { key: "x-rule", value: "last" }] }],
+    };
+    const h = createKrateHandler({ target: "node", data: data({ config: arrayConfig }), modules });
+    const r = await h(new Request("http://localhost/new"));
+    expect(r.headers.get("x-rule")).toBe("last");
+    expect(r.headers.get("x-other")).toBe("o");
+  });
+
   it("middleware request header overrides reach the route and stay off the response", async () => {
     const r = await get("/api/who", { headers: { "x-drop": "secret" } });
     expect(await r.json()).toEqual({ url: "/api/who?a=1", dropped: null });

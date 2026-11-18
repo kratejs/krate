@@ -95,7 +95,7 @@ export interface HandlerConfig {
   maxAPIBodyBytes: number;
   redirects: Array<{ source: string; destination: string; permanent?: boolean; statusCode?: number; has?: RouteCondition[]; missing?: RouteCondition[]; basePath?: boolean }>;
   rewrites: Array<{ source: string; destination: string; has?: RouteCondition[]; missing?: RouteCondition[] }>;
-  headers: Array<{ source: string; headers: Record<string, string>; has?: RouteCondition[]; missing?: RouteCondition[] }>;
+  headers: Array<{ source: string; headers: Record<string, string> | Array<{ key: string; value: string }>; has?: RouteCondition[]; missing?: RouteCondition[] }>;
   /** Resolved security headers; an empty string means "do not send". */
   security: { nosniff: boolean; frameOptions: string; referrerPolicy: string; permissionsPolicy: string; hsts: string; csp: string };
   cors: { enabled: boolean; origins: string[]; methods: string[]; headers: string[]; credentials: boolean; maxAge: number };
@@ -302,6 +302,21 @@ function safeDecode(p: string): string {
   } catch {
     return p;
   }
+}
+
+/**
+ * The name/value pairs of a headers rule: an object, or Next's array of
+ * { key, value } where a repeated name (any case) keeps its last value.
+ */
+export function ruleHeaderPairs(h: Record<string, string> | Array<{ key: string; value: string }>): Array<[string, string]> {
+  if (!Array.isArray(h)) return Object.entries(h);
+  const out: Array<[string, string]> = [];
+  for (const { key, value } of h) {
+    const at = out.findIndex(([k]) => k.toLowerCase() === String(key).toLowerCase());
+    if (at >= 0) out.splice(at, 1);
+    out.push([String(key), String(value)]);
+  }
+  return out;
 }
 
 /** The mutable per-request state: the request as the Go handlers see it, plus the response headers. */
@@ -2294,7 +2309,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
       if (!matcher.match(path, creq)) continue;
       headers ??= new Headers(res.headers);
       const keepCache = headers.get("cache-control") === IMMUTABLE_CACHE_CONTROL;
-      for (const [k, v] of Object.entries(rule.headers)) {
+      for (const [k, v] of ruleHeaderPairs(rule.headers)) {
         if (keepCache && k.toLowerCase() === "cache-control") continue;
         if (k.toLowerCase() === "vary") {
           if (!(headers.get("vary") || "").toLowerCase().includes(v.toLowerCase())) headers.append("Vary", v);
