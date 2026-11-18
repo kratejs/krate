@@ -144,7 +144,8 @@ async components are not allowed. The `tw` prop is not supported.
 numbers (px), `px`, `%`, `em`, `rem` or `auto`.
 
 **Painting.** `backgroundColor`, `background` and `backgroundImage` with
-`linear-gradient` (angles or `to` directions, colour stops) and `radial-gradient`,
+`linear-gradient` (angles or `to` directions, colour stops placed in `%`, `px`,
+`em` or `rem`, two positions per stop, and hard stops) and `radial-gradient`,
 `opacity`, `borderRadius` (and the four corner properties), `border`,
 `borderWidth`, `borderColor`, `borderStyle: solid`, per-side borders and
 `boxShadow` (outer shadows). Colours are hex, `rgb()`, `rgba()`, `hsl()`,

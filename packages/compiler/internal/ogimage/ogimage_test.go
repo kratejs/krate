@@ -96,3 +96,48 @@ func TestRenderCard(t *testing.T) {
 		}
 	}
 }
+
+// Length stop positions (px, a unitless 0) and hard stops, as in a 16px brand
+// stripe: linear-gradient(to right, #25757e 0, #3c7b9a 16px, #070b0c 16px).
+// They used to be rejected, so the og route answered 500.
+func TestGradientLengthAndHardStops(t *testing.T) {
+	spec := &Spec{Width: 200, Height: 40, Tree: el("div", map[string]any{
+		"width": "100%", "height": "100%",
+		"backgroundImage": "linear-gradient(to right, #25757e 0, #3c7b9a 16px, #070b0c 16px)",
+	})}
+	data, err := Render(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	img := decode(t, data)
+	if c := at(img, 0, 20); !near(c, color.NRGBA{0x25, 0x75, 0x7e, 255}, 8) {
+		t.Errorf("x=0: %v, want the first stop", c)
+	}
+	if c := at(img, 14, 20); !near(c, color.NRGBA{0x3c, 0x7b, 0x9a, 255}, 12) {
+		t.Errorf("x=14: %v, want near the second stop", c)
+	}
+	for _, x := range []int{17, 100, 199} {
+		if c := at(img, x, 20); !near(c, color.NRGBA{0x07, 0x0b, 0x0c, 255}, 2) {
+			t.Errorf("x=%d: %v, want the flat background after the hard stop", x, c)
+		}
+	}
+	// Two positions on one stop, and a later stop placed before an earlier one.
+	for _, g := range []string{"linear-gradient(red 0 50%, blue 50% 100%)", "linear-gradient(90deg, red 40px, blue 10px)", "linear-gradient(red 1em, blue 2rem)"} {
+		spec.Tree.Style["backgroundImage"] = g
+		if _, err := Render(spec); err != nil {
+			t.Errorf("%s: %v", g, err)
+		}
+	}
+	if c := at(decode(t, mustRender(t, &Spec{Width: 100, Height: 10, Tree: el("div", map[string]any{"width": "100%", "height": "100%", "backgroundImage": "linear-gradient(90deg, red 40px, blue 10px)"})})), 60, 5); !near(c, color.NRGBA{0, 0, 255, 255}, 2) {
+		t.Errorf("a stop before the previous one must clamp to it (hard edge at 40px): %v", c)
+	}
+}
+
+func mustRender(t *testing.T, s *Spec) []byte {
+	t.Helper()
+	data, err := Render(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
