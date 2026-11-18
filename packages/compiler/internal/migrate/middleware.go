@@ -318,7 +318,9 @@ export function middleware(request: Request) {
 // next() and rewrite() answer with the x-middleware-* headers Krate middleware
 // understands, including x-middleware-override-headers and
 // x-middleware-request-<name> for NextResponse.next({ request: { headers } }).
-const middlewareResponseShim = nextResponseCookieHelpers + `function __krateContinue(key: string, value: string, init?: any): NextResponse {
+const middlewareResponseShim = nextResponseCookieHelpers + `type __KrateContinueInit = ResponseInit & { request?: { headers?: HeadersInit } };
+
+function __krateContinue(key: string, value: string, init?: __KrateContinueInit): NextResponse {
   const headers = new Headers(init && init.headers);
   headers.set(key, value);
   const reqHeaders = init && init.request && init.request.headers;
@@ -345,15 +347,15 @@ class NextResponse extends Response {
     headers.set("location", String(url));
     return new NextResponse(null, { ...opts, status: opts.status || 307, headers });
   }
-  static json(body: any, init?: ResponseInit): NextResponse {
+  static json(body: unknown, init?: ResponseInit): NextResponse {
     const headers = new Headers(init && init.headers);
     if (!headers.has("content-type")) headers.set("content-type", "application/json");
     return new NextResponse(JSON.stringify(body), { ...init, headers });
   }
-  static next(init?: any): NextResponse {
+  static next(init?: __KrateContinueInit): NextResponse {
     return __krateContinue("x-middleware-next", "1", init);
   }
-  static rewrite(url: string | URL, init?: any): NextResponse {
+  static rewrite(url: string | URL, init?: __KrateContinueInit): NextResponse {
     return __krateContinue("x-middleware-rewrite", String(url), init);
   }
 }

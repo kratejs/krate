@@ -120,3 +120,43 @@ export async function GET(req: Request) {
 		t.Errorf("new NextResponse was rewritten to a bare Response:\n%s", out)
 	}
 }
+
+// TestNextResponseShimsTypecheckStrict: the shims the migrator inlines pass a
+// strict project's typecheck (strict, noUncheckedIndexedAccess), including
+// res.cookies on a constructed NextResponse.
+func TestNextResponseShimsTypecheckStrict(t *testing.T) {
+	tsc, _ := filepath.Abs(filepath.Join("..", "..", "..", "runtime", "node_modules", ".bin", "tsc"))
+	if _, err := os.Stat(tsc); err != nil {
+		t.Skip("typescript is not installed (run pnpm install)")
+	}
+	dir := t.TempDir()
+	files := map[string]string{
+		"route.ts": nextResponseShim + `
+export function GET(): Response {
+  const res = new NextResponse(null, { status: 303, headers: { Location: "/t" } });
+  res.cookies.set("a", "1", { httpOnly: true, sameSite: "lax", maxAge: 60 });
+  res.cookies.set({ name: "b", value: "2", path: "/x" });
+  res.cookies.delete("c");
+  const got: string | undefined = res.cookies.get("a")?.value;
+  return got ? NextResponse.json({ got }) : NextResponse.redirect("/x", 302);
+}
+`,
+		"middleware.ts": middlewareResponseShim + `
+export function middleware(): Response {
+  const res = NextResponse.next({ request: { headers: { "x-a": "1" } } });
+  res.cookies.set("m", "1");
+  return res;
+}
+`,
+		"tsconfig.json": `{"compilerOptions":{"strict":true,"noUncheckedIndexedAccess":true,"noEmit":true,"target":"ES2022","module":"ESNext","moduleResolution":"bundler","lib":["ES2022","DOM","DOM.Iterable"],"skipLibCheck":true,"types":[]},"files":["route.ts","middleware.ts"]}`,
+	}
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cmd := exec.Command(tsc, "-p", dir)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("tsc: %v\n%s", err, out)
+	}
+}

@@ -606,7 +606,19 @@ func relativeModulePath(fromTarget, toTarget string) string {
 // Set-Cookie headers, get/getAll/has read them back.
 const nextResponseShim = nextResponseCookieHelpers + nextResponseRouteClass
 
-const nextResponseCookieHelpers = `function __krateCookieHeader(name: string, value: string, o: any = {}): string {
+const nextResponseCookieHelpers = `type __KrateCookieOptions = {
+  path?: string;
+  domain?: string;
+  expires?: Date | string | number;
+  maxAge?: number;
+  httpOnly?: boolean;
+  secure?: boolean;
+  partitioned?: boolean;
+  priority?: string;
+  sameSite?: boolean | string;
+};
+
+function __krateCookieHeader(name: string, value: string, o: __KrateCookieOptions = {}): string {
   let s = encodeURIComponent(name) + "=" + encodeURIComponent(value);
   s += "; Path=" + (o.path === undefined ? "/" : o.path);
   if (o.domain) s += "; Domain=" + o.domain;
@@ -625,7 +637,7 @@ type __KrateResponseCookies = {
   get(name: string): __KrateCookie | undefined;
   getAll(name?: string): __KrateCookie[];
   has(name: string): boolean;
-  set(name: string | ({ name: string; value: string } & Record<string, unknown>), value?: string, opts?: Record<string, unknown>): __KrateResponseCookies;
+  set(name: string | ({ name: string; value: string } & __KrateCookieOptions), value?: string, opts?: __KrateCookieOptions): __KrateResponseCookies;
   delete(name: string | { name: string; path?: string; domain?: string }): __KrateResponseCookies;
 };
 
@@ -640,13 +652,13 @@ function __krateWithCookies<T extends Response>(res: T): T & { readonly cookies:
     get: (name: string) => list().filter((c) => c.name === name).pop(),
     getAll: (name?: string) => list().filter((c) => name === undefined || c.name === name),
     has: (name: string) => list().some((c) => c.name === name),
-    set(name: any, value?: string, opts?: any) {
+    set(name, value, opts) {
       if (typeof name === "object") res.headers.append("set-cookie", __krateCookieHeader(name.name, name.value, name));
-      else res.headers.append("set-cookie", __krateCookieHeader(name, value as string, opts));
+      else res.headers.append("set-cookie", __krateCookieHeader(name, value ?? "", opts));
       return cookies;
     },
-    delete(name: any) {
-      const o = typeof name === "object" ? name : { name };
+    delete(name) {
+      const o: { name: string; path?: string; domain?: string } = typeof name === "object" ? name : { name };
       res.headers.append("set-cookie", __krateCookieHeader(o.name, "", { path: o.path, domain: o.domain, expires: new Date(0), maxAge: 0 }));
       return cookies;
     },
