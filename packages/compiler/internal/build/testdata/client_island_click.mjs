@@ -19,7 +19,7 @@ try {
   await page.click("#inc");
   await page.waitForFunction(() => document.querySelector("#inc").textContent === "Count: 7");
   const after = await page.textContent("#inc");
-  const children = await page.textContent("krate-children");
+  const children = await page.textContent("div.counter > em");
   console.log(JSON.stringify({ before, after, children, errors }));
 } finally {
   await browser.close();

@@ -101,7 +101,7 @@ export function __krateProvide(h, node, fwd) {
   return node;
 }
 export function __krateScopeOf(el) {
-  for (var n = el && el.parentNode; n; n = n.parentNode) if (n.__krateScope) return n.__krateScope;
+  for (var n = el; n; n = n.parentNode) if (n.__krateScope) return n.__krateScope;
   return null;
 }
 export function __krateScopeSet(s, vals) {
@@ -127,57 +127,113 @@ export function __krateScopeSubscribe(s) {
 }
 `
 
-// preactSlotJS renders an HTML slot in a Preact island chunk: the slot element
-// plus a watcher per forwarded context, which keeps the slot's scope current
-// for real-React islands inside it. It also defines the root that nested
-// Preact islands mount under.
+// preactSlotJS renders an HTML slot in a Preact island chunk, with a watcher
+// per forwarded context, which keeps the slot's scope current for real-React
+// islands inside it. It also defines the root that nested Preact islands
+// mount under.
 //
-// A slot with an id (r) is already in the document: the server rendered it in
-// <krate-children data-krate-slot=id>. Hydration leaves those nodes in place
-// (Preact never diffs inside dangerouslySetInnerHTML, and an unchanged empty
-// __html is not re-applied on re-render). Before hydrating, mount collects the
-// nodes of each of the island's server slots (__krateServerSlots); a slot
-// element created later (a hide and show, or a hydration mismatch) takes
-// back those nodes, so nested islands keep their state. When every copy is
-// in use (the slot rendered once more than the server did), it gets a clone.
+// A slot puts its nodes straight into the parent the component renders it
+// in, with no element around them, so child combinators (:has(> svg),
+// space-y-*) match as they do in React. Preact cannot render foreign nodes,
+// so the slot renders an empty text vnode per node and, in a layout effect
+// (before paint), puts each node in place of its text node and points the
+// vnode at it (Preact's mangled _dom, __e, and the ancestors' first-node
+// pointers, as Preact's own updateParentDomPointers does). Preact then moves
+// and removes the nodes as its own and never diffs inside them. Each node
+// carries the slot's scope (__krateScope).
+//
+// A slot with an id (r) is already in the document: the server rendered its
+// nodes between <!--krate-slot:id--> and <!--/krate-slot:id-->. Before
+// hydrating, mount takes the nodes of each of the island's server slots out of
+// the document (__krateServerSlots) and leaves an empty text node for each,
+// which the slot's text vnodes hydrate, so hydration neither claims nor
+// removes the server nodes. The slot that renders them takes them back, and a
+// slot rendered again after a hide takes back the same nodes, so nested
+// islands keep their state. When every copy is in use (the slot rendered once
+// more than the server did), it gets a clone. A slot without an id parses
+// the HTML its props carry.
 const preactSlotJS = `
-import { useContext as __krateUseContext } from "preact/hooks";
+import { useContext as __krateUseContext, useLayoutEffect as __krateUseLayoutEffect } from "preact/hooks";
+import { Fragment as __KrateFragment } from "preact";
 var __krateSlotPool = null;
+var __krateSlotOpen = /^krate-slot:([0-9a-z]+)$/;
 function __krateServerSlots(el) {
-  var pool = {};
-  el.querySelectorAll("krate-children[data-krate-slot]").forEach(function (c) {
-    if (c.closest("krate-island") !== el) return;
-    var id = c.getAttribute("data-krate-slot");
-    (pool[id] = pool[id] || []).push(Array.prototype.slice.call(c.childNodes));
+  var pool = {}, opens = [];
+  var w = document.createTreeWalker(el, 128);
+  for (var c = w.nextNode(); c; c = w.nextNode()) {
+    if (__krateSlotOpen.test(c.data) && c.parentElement && c.parentElement.closest("krate-island") === el) opens.push(c);
+  }
+  opens.forEach(function (c) {
+    if (!el.contains(c)) return;
+    var id = __krateSlotOpen.exec(c.data)[1], close = "/krate-slot:" + id, nodes = [], n = c.nextSibling;
+    for (; n && !(n.nodeType === 8 && n.data === close); n = n.nextSibling) nodes.push(n);
+    if (!n) return;
+    var parent = c.parentNode;
+    nodes.forEach(function (x) { parent.replaceChild(document.createTextNode(""), x); });
+    parent.removeChild(c);
+    parent.removeChild(n);
+    (pool[id] = pool[id] || []).push(nodes);
   });
   return pool;
 }
-function __krateAdopt(el, sets) {
-  if (!sets || !sets.length || el.firstChild) return;
-  var free = null;
-  for (var i = 0; i < sets.length && !free; i++) {
-    var n = sets[i][0];
-    if (n && !(n.isConnected && n.parentNode !== el)) free = sets[i];
+function __krateSlotTake(p) {
+  if (p.r == null) {
+    var t = document.createElement("template");
+    t.innerHTML = p.html || "";
+    return Array.prototype.slice.call(t.content.childNodes);
   }
-  if (free) free.forEach(function (n) { el.appendChild(n); });
-  else sets[0].forEach(function (n) { el.appendChild(n.cloneNode(true)); });
+  var sets = p.pool || [];
+  for (var i = 0; i < sets.length; i++) {
+    if (!sets[i].used) {
+      sets[i].used = true;
+      return sets[i];
+    }
+  }
+  return sets.length ? sets[0].map(function (n) { return n.cloneNode(true); }) : [];
+}
+function __krateSlotRelease(c) {
+  if (c.__krateSet) c.__krateSet.used = false;
+  c.__krateSet = null;
+}
+function __krateSlotPlace(c) {
+  var set = c.__krateSet, v = c.__v, frag = v && v.__k && v.__k[0], kids = frag && frag.__k, moved = false;
+  if (!set || !kids) return;
+  for (var i = 0; i < set.length; i++) {
+    var t = kids[i], old = t && t.__e;
+    if (!old || old === set[i] || !old.parentNode) continue;
+    old.parentNode.replaceChild(set[i], old);
+    t.__e = set[i];
+    moved = true;
+  }
+  set.forEach(function (n) { n.__krateScope = c.__krateSlotScope; });
+  for (v = frag; moved && v && typeof v.type === "function"; v = v.__) {
+    var first = null;
+    for (i = 0; v.__k && i < v.__k.length && !first; i++) first = v.__k[i] && v.__k[i].__e;
+    v.__e = first || null;
+    if (v.__c) v.__c.base = v.__e;
+  }
 }
 function __krateSlot(h, html, r) {
-  return h(__KrateSlot, { html: html, r: r, pool: r != null && __krateSlotPool ? __krateSlotPool[r] : null, scope: { ctx: null, vals: [], subs: [] } });
+  return h(__KrateSlot, { html: html, r: r, pool: r != null && __krateSlotPool ? __krateSlotPool[r] || [] : null, scope: { ctx: null, vals: [], subs: [] } });
 }
 function __KrateSlot(p, map) {
-  var s = p.scope, f = __krateForwarded(map), keep = {};
+  var c = this, s = p.scope, f = __krateForwarded(map), keep = {};
   s.ctx = map;
   f.forEach(function (e) { keep[e.k] = 1; });
   var kept = s.vals.filter(function (e) { return keep[e.k]; });
   if (kept.length !== s.vals.length) __krateScopeSet(s, kept);
-  var attrs = { key: "", style: "display:contents", dangerouslySetInnerHTML: { __html: p.r != null ? "" : p.html }, ref: function (el) {
-    if (!el) return;
-    el.__krateScope = s;
-    if (p.r != null) __krateAdopt(el, p.pool);
-  } };
-  if (p.r != null) attrs["data-krate-slot"] = p.r;
-  return [h("krate-children", attrs)].concat(f.map(function (e) { return h(__KrateWatch, { key: e.k, k: e.k, c: e.c, s: s }); }));
+  var was = c.__krateFor;
+  if (!was || was.r !== p.r || was.html !== p.html || was.pool !== p.pool) {
+    __krateSlotRelease(c);
+    c.__krateSet = __krateSlotTake(p);
+    c.__krateFor = p;
+    c.__krateGen = (c.__krateGen || 0) + 1;
+  }
+  c.__krateSlotScope = s;
+  __krateUseLayoutEffect(function () { __krateSlotPlace(c); });
+  __krateUseLayoutEffect(function () { return function () { __krateSlotRelease(c); }; }, []);
+  var texts = c.__krateSet.map(function () { return ""; });
+  return [h(__KrateFragment, { key: "n" + c.__krateGen }, texts)].concat(f.map(function (e) { return h(__KrateWatch, { key: e.k, k: e.k, c: e.c, s: s }); }));
 }
 function __KrateWatch(p) {
   __krateScopePut(p.s, p.k, __krateUseContext(p.c));
@@ -211,19 +267,26 @@ function __krateInScope(el, node) {
 
 // ssrSlotJS is the HTML slot of a server render module: it records the
 // forwarded context values at the slot's token for the server children that
-// render into it, and marks the slot element with the token's id so the
-// browser can adopt what the server renders there.
+// render into it, and leaves the slot's HTML (the token) in place with no
+// element around it. Preact cannot render raw HTML without an element, so
+// the slot renders a placeholder element that __krate_render swaps for the
+// HTML (__krateRawHTML).
 const ssrSlotJS = `
 var __krateCapture = null;
+var __krateRaw = null;
 function __krateSlot(h, html) { return h(__KrateSlot, { html: html }); }
 function __KrateSlot(p, map) {
-  var attrs = { style: "display:contents", dangerouslySetInnerHTML: { __html: p.html } };
-  var m = /^<!--krate-slot:([0-9a-z]+)-->$/.exec(p.html);
-  if (m) {
-    attrs["data-krate-slot"] = m[1];
-    if (__krateCapture) __krateCapture[p.html] = __krateForwarded(map).map(function (e) { return { k: e.k, v: e.p.props.value }; });
+  if (__krateCapture && /^<!--krate-slot:[0-9a-z]+-->$/.test(p.html)) {
+    __krateCapture[p.html] = __krateForwarded(map).map(function (e) { return { k: e.k, v: e.p.props.value }; });
   }
-  return h("krate-children", attrs);
+  var r = __krateRaw || (__krateRaw = { id: Math.random().toString(36).slice(2), list: [] });
+  r.list.push(p.html || "");
+  return h("krate-raw", { "data-krate-raw": r.id + ":" + (r.list.length - 1) });
+}
+function __krateRawHTML(html) {
+  var r = __krateRaw;
+  if (!r) return html;
+  return html.replace(new RegExp('<krate-raw data-krate-raw="' + r.id + ':(\\d+)"></krate-raw>', "g"), function (_, i) { return r.list[+i]; });
 }
 `
 

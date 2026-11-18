@@ -126,6 +126,20 @@ describe('clientBoundary', () => {
     expect(html).toMatch(/^<script type="application\/json" data-krate-props>[^<]*<\/script><krate-island /);
   });
 
+  it('puts adopted server children straight into the component element between comment markers', async () => {
+    const Button = clientBoundary('m20', 'Button', '/c.js', function Button() { return null; }, (_c, props: any) => `<button class="has-[>svg]:px-4">${props.__krateChildren}</button>`) as any;
+    const html = await renderToStringAsync(jsx(Button, { children: [jsx('svg', { class: 'size-5' }), ' Sign in'] }));
+    const id = propsOf(html).__krateChildren.__krateSlotRef;
+    expect(html).toContain(`<button class="has-[>svg]:px-4"><!--krate-slot:${id}--><svg class="size-5"></svg> Sign in<!--/krate-slot:${id}--></button>`);
+    expect(html).not.toContain('krate-children');
+  });
+
+  it('leaves no slot markers in a component without an island', async () => {
+    const Icon = clientBoundary('m21', 'Icon', '/c.js', function Icon() { return null; }, (_c, props: any) => `<span>${props.__krateChildren}</span>`, false) as any;
+    const html = await renderToStringAsync(jsx(Icon, { children: jsx('b', { children: 'x' }) }));
+    expect(html).toBe('<span><b>x</b></span>');
+  });
+
   it('sends server children as HTML when the component did not render them', async () => {
     const Closed = clientBoundary('m13', 'Closed', '/c.js', function Closed() { return null; }, () => '<div></div>') as any;
     const html = await renderToStringAsync(jsx(Closed, { children: jsx('b', { children: 'later' }), menu: jsx('i', { children: 'm' }) }));

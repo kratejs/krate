@@ -727,11 +727,14 @@ const slotValues: ForeignContext = {};
 // children, a JSX prop, a server component in a children tree). It renders
 // after the component, inside the context the component provides there.
 //
-// The server render module puts a slot in a <krate-children data-krate-slot=id>
-// element. A slot the component rendered is then already in the document, so
-// its props carry only the id and the browser adopts the server-rendered
-// nodes in place (done gets null). A slot the server did not render (closed
-// dialog content, a real-React island's tree) travels as HTML (done gets it).
+// The server render module leaves a slot's token (an open comment marker) in
+// the component's HTML where the slot goes, with no element around it, so the
+// children sit directly in the component's own element as they do in React.
+// In an island the HTML follows the marker and ends at a close marker
+// (slotClose); the browser finds a slot the component rendered by those
+// markers and adopts its nodes in place, so its props carry only the id
+// (done gets null). A slot the server did not render (closed dialog content,
+// a real-React island's tree) travels as HTML (done gets it).
 type DeferredSlot = { token: string; id: string; node: unknown; done: (html: string | null) => void; vals?: ContextValues };
 
 let slotSeq = 0;
@@ -743,6 +746,9 @@ function deferSlot(ctx: FlightCtx, node: unknown, done: (html: string | null, id
   ctx.slots.push({ token, id, node, done: (html) => done(html, id), vals: ctx.vals });
   return token;
 }
+
+// slotClose is the marker that ends the HTML of the slot with this id.
+const slotClose = (id: string) => `<!--/krate-slot:${id}-->`;
 
 // mergeSlotValues layers the values a component provides at a slot over the
 // ones forwarded into the component.
@@ -1013,11 +1019,13 @@ export function clientBoundary(
       }),
     );
     // A slot whose token is in the render is in the document: the browser
-    // adopts those nodes, so they are not sent again inside the props.
+    // adopts those nodes, so they are not sent again inside the props. An
+    // island keeps the token as the slot's open marker and closes it after
+    // the HTML; a component without an island needs no markers.
     const placed = slots.map((s) => html.includes(s.token));
     slots.forEach((s, i) => {
       s.done(placed[i] ? null : rendered[i]);
-      html = html.split(s.token).join(rendered[i]);
+      html = html.split(s.token).join(hydrates ? s.token + rendered[i] + slotClose(s.id) : rendered[i]);
     });
     if (!hydrates) return raw(html);
     return raw(

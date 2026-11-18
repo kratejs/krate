@@ -125,10 +125,10 @@ func (b *Builder) islandLoaderHTML() (string, error) {
 }
 
 // clientReviveJS turns serialized island props back into component props:
-// server-rendered children become a display:contents element (made by the
-// chunk's own __krateSlot) that adopts the server-rendered nodes already in
-// the document ({__krateSlotRef}, {$: "h", r}) or holds the HTML the props
-// carry, and server action references become callable functions. Props are
+// server-rendered children become a slot (made by the chunk's own
+// __krateSlot) that adopts the server-rendered
+// nodes already in the document ({__krateSlotRef}, {$: "h", r}) or the HTML
+// the props carry, and server action references become callable functions. Props are
 // read from the JSON script before the island (data-props on older output).
 const clientReviveJS = `
 function __krateTree(n, h, call, comp) {
@@ -1547,10 +1547,12 @@ export const __krate_module = __m;
 // receives the values in scope at each of its own slots, by slot token.
 export function __krate_render(C, props, _children, fwd, capture) {
   __krateCapture = capture || null;
+  __krateRaw = null;
   try {
-    return renderToString(__krateProvide(h, h(C, __krateRevive(props, h, __krateServerAction, __krateComp)), fwd));
+    return __krateRawHTML(renderToString(__krateProvide(h, h(C, __krateRevive(props, h, __krateServerAction, __krateComp)), fwd)));
   } finally {
     __krateCapture = null;
+    __krateRaw = null;
   }
 }
 `

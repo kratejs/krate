@@ -5,7 +5,7 @@ import (
 )
 
 // minifyHTML shrinks rendered page HTML in a single tokenizing pass:
-//   - HTML comments are dropped except runtime markers (k:, kl:, ks:, suspense:, region:)
+//   - HTML comments are dropped except runtime markers (k:, kl:, ks:, suspense:, region:, krate-slot:)
 //   - whitespace runs in text (outside <pre>, raw-text elements and elements
 //     whose style preserves white space) collapse to one space
 //   - start/end tags are re-emitted with normalized attribute spacing, and
@@ -168,7 +168,7 @@ func commentEnd(s string, i int) int {
 }
 
 func keepComment(c string) bool {
-	for _, p := range []string{"<!--k:", "<!--/k:", "<!--kl:", "<!--/kl:", "<!--ks:", "<!--/ks:", "<!--suspense:", "<!--/suspense:", "<!--region:", "<!--/region:"} {
+	for _, p := range []string{"<!--k:", "<!--/k:", "<!--kl:", "<!--/kl:", "<!--ks:", "<!--/ks:", "<!--suspense:", "<!--/suspense:", "<!--region:", "<!--/region:", "<!--krate-slot:", "<!--/krate-slot:"} {
 		if strings.HasPrefix(c, p) {
 			return true
 		}
