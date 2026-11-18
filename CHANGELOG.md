@@ -563,6 +563,13 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- Server bundles that Node loads as ES modules (instrumentation, Node API routes, server actions, page
+  server bundles, Node middleware and the node deploy bundle) import an external CommonJS package through
+  its default export, so a named import works even when Node cannot detect the package's exports.
+  `import { loadEnvConfig } from '@next/env'` (an ncc bundle) in `instrumentation-node.ts` failed with
+  `Named export 'loadEnvConfig' not found` when the sidecar loaded the instrumentation module, and the
+  sidecar restarted in a loop. The package is still loaded from `node_modules`; ES module packages and
+  dynamic imports are unchanged.
 - `krate serve`, `krate start` and `krate dev` send the same `Content-Type` on every OS for common web
   files. On Windows the registry served `.js` without a charset and `.woff2` as `text/plain`; on Linux
   `.otf` was an OpenDocument type, `.ico` was `image/vnd.microsoft.icon` and `.webm` was `audio/webm`.
