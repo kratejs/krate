@@ -816,6 +816,79 @@ function applyScroll(url: string, req: NavRequest): void {
 
 let focusedRoot: HTMLElement | null = null;
 
+interface FocusMark {
+  id: string;
+  sig: string;
+  index: number;
+  start: number | null;
+  end: number | null;
+}
+
+// Attributes that tell a focused control apart from its siblings, in addition
+// to its tag, when it has no id.
+const FOCUS_SIG_ATTRS = ['name', 'type', 'role', 'aria-label', 'placeholder', 'data-testid', 'data-slot', 'href'];
+
+function focusSignature(el: Element): string {
+  let s = el.tagName;
+  for (const a of FOCUS_SIG_ATTRS) {
+    const v = el.getAttribute(a);
+    if (v !== null) s += '\u0000' + a + '=' + v;
+  }
+  return s;
+}
+
+function sameSignature(root: Element, sig: string, tag: string): Element[] {
+  return Array.from(root.getElementsByTagName(tag)).filter((e) => focusSignature(e) === sig);
+}
+
+/** Whether the swap of plan replaces el (it sits in the swapped region or a swapped slot). */
+function replacedBySwap(el: Node, root: Element, plan: SwapPlan): boolean {
+  if (!root.contains(el)) return false;
+  if (!plan.region) return true;
+  const within = (pair: [Node, Node]) =>
+    !!(pair[0].compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) &&
+    !!(pair[1].compareDocumentPosition(el) & Node.DOCUMENT_POSITION_PRECEDING);
+  return within(plan.region.live) || plan.slots.some((sl) => within(sl.live));
+}
+
+function captureFocus(root: Element, plan: SwapPlan): FocusMark | null {
+  const el = document.activeElement;
+  if (!el || el === document.body || el === root || !replacedBySwap(el, root, plan)) return null;
+  const sig = focusSignature(el);
+  const field = el as HTMLInputElement;
+  let start: number | null = null;
+  let end: number | null = null;
+  try {
+    start = typeof field.selectionStart === 'number' ? field.selectionStart : null;
+    end = typeof field.selectionEnd === 'number' ? field.selectionEnd : null;
+  } catch {
+    /* input types without a selection */
+  }
+  return { id: el.id, sig, index: sameSignature(root, sig, el.tagName).indexOf(el), start, end };
+}
+
+function hasFocusWithin(root: Element): boolean {
+  const a = document.activeElement;
+  return !!a && a !== document.body && a !== root && root.contains(a);
+}
+
+function restoreFocus(root: Element, mark: FocusMark): void {
+  const tag = mark.sig.split('\u0000')[0];
+  let el: Element | null = mark.id ? document.getElementById(mark.id) : null;
+  if (!el || !root.contains(el)) el = sameSignature(root, mark.sig, tag)[mark.index] ?? null;
+  if (!el || typeof (el as HTMLElement).focus !== 'function') return;
+  try {
+    (el as HTMLElement).focus({ preventScroll: true });
+    const field = el as HTMLInputElement;
+    if (mark.start !== null && mark.end !== null && document.activeElement === el && typeof field.setSelectionRange === 'function') {
+      const n = field.value.length;
+      field.setSelectionRange(Math.min(mark.start, n), Math.min(mark.end, n));
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
 /** Move focus to the content root after navigation (a11y). */
 function focusContent(): void {
   const active = document.activeElement as HTMLElement | null;
@@ -1034,7 +1107,14 @@ async function commitDocument(loaded: LoadedDoc, req: NavRequest, seq: number): 
     return;
   }
 
+  // A navigation that stays on the page (a query change, router.refresh())
+  // replaces the region's DOM, but React keeps a focused input where it is:
+  // move focus to the same element in the new DOM.
+  const samePage = normPath(new URL(url, location.href).pathname) === normPath(location.pathname);
+  let focusMark: FocusMark | null = null;
+
   const mutate = () => {
+    if (samePage) focusMark = captureFocus(oldRoot, plan);
     const title = doc.querySelector('title');
     if (title) document.title = title.textContent || '';
     const g = globalThis as any;
@@ -1063,6 +1143,7 @@ async function commitDocument(loaded: LoadedDoc, req: NavRequest, seq: number): 
     reconcileHeadMeta(doc);
     reconcileDocAttrs(doc);
     applyViewTransitionNames(document);
+    if (focusMark) restoreFocus(oldRoot, focusMark);
   };
 
   await runMutation(mutate);
@@ -1113,6 +1194,9 @@ async function commitDocument(loaded: LoadedDoc, req: NavRequest, seq: number): 
     return;
   }
   refreshPageBindings();
+  // An island that rendered its element anew while mounting took the focus
+  // with it; look the element up again.
+  if (focusMark && !hasFocusWithin(oldRoot)) restoreFocus(oldRoot, focusMark);
   dispatch('krate:navigate-end', { url: location.href, status: loaded.status });
 }
 
