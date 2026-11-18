@@ -63,8 +63,11 @@ restores them.
 Add `--update-package` to also add `krate` scripts and `@krate/*` dependencies
 (pinned to the version of the compiler you run) and `preact` to `package.json`;
 `package.json` already exists, so pair it with `--force`. The plan lists each
-script it replaces and each dependency it adds or keeps. Next.js dependencies are
-left in place until the migrated app builds cleanly.
+script it replaces and each dependency it adds or keeps (`next typegen` in any
+script becomes `krate types`). The key order of `package.json` and
+`tsconfig.json` is kept, and Next's TypeScript plugin is removed from
+`tsconfig.json`. Next.js dependencies are left in place until the migrated app
+builds cleanly.
 
 The first pass:
 

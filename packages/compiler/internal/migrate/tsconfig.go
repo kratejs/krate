@@ -30,13 +30,28 @@ func tsconfigPlan(root string, rep *Report) (PlannedFile, bool, string) {
 		opts["moduleResolution"] = "bundler"
 		opts["allowArbitraryExtensions"] = true
 		opts["resolveJsonModule"] = true
+		// Next's TypeScript plugin is gone with next.
+		if plugins, ok := opts["plugins"].([]any); ok {
+			kept := []any{}
+			for _, pl := range plugins {
+				if m, ok := pl.(map[string]any); ok && m["name"] == "next" {
+					continue
+				}
+				kept = append(kept, pl)
+			}
+			if len(kept) == 0 {
+				delete(opts, "plugins")
+			} else {
+				opts["plugins"] = kept
+			}
+		}
 		cfg["compilerOptions"] = opts
 		cfg["include"] = krateIncludes(cfg["include"])
-		out, err := json.MarshalIndent(cfg, "", "  ")
+		out, err := marshalKeepingOrder([]byte(clean), cfg)
 		if err != nil {
 			return PlannedFile{}, false, err.Error()
 		}
-		return PlannedFile{Kind: KindConfig, Source: "tsconfig.json", Target: "tsconfig.json", Content: append(out, '\n')}, true, ""
+		return PlannedFile{Kind: KindConfig, Source: "tsconfig.json", Target: "tsconfig.json", Content: out}, true, ""
 	}
 
 	// Only generate for projects that actually contain TypeScript.

@@ -976,15 +976,30 @@ func packagePlan(root, krateVersion string) (PlannedFile, bool) {
 		scripts["serve"] = "krate serve"
 		rewrites = append(rewrites, `scripts.serve: added "krate serve"`)
 	}
+	// Other scripts that call the next CLI: typegen has a Krate equivalent.
+	names := make([]string, 0, len(scripts))
+	for name := range scripts {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		old, ok := scripts[name].(string)
+		if !ok || !strings.Contains(old, "next typegen") {
+			continue
+		}
+		scripts[name] = strings.ReplaceAll(old, "next typegen", "krate types")
+		rewrites = append(rewrites, fmt.Sprintf("scripts.%s: %q -> %q", name, old, scripts[name]))
+	}
 	pkg["scripts"] = scripts
 
 	deps, _ := pkg["dependencies"].(map[string]any)
 	if deps == nil {
 		deps = map[string]any{}
 	}
+	// Pinned to the compiler that migrated the app.
 	spec := "latest"
 	if v := strings.TrimPrefix(krateVersion, "v"); v != "" && v != "dev" {
-		spec = "^" + v
+		spec = v
 	}
 	var added []string
 	wanted := []string{"@krate/core", "@krate/runtime", "@krate/components"}
@@ -1017,11 +1032,10 @@ func packagePlan(root, krateVersion string) (PlannedFile, bool) {
 	}
 	pkg["dependencies"] = deps
 
-	out, err := json.MarshalIndent(pkg, "", "  ")
+	out, err := marshalKeepingOrder(data, pkg)
 	if err != nil {
 		return PlannedFile{}, false
 	}
-	out = append(out, '\n')
 	return PlannedFile{Kind: KindPackage, Source: "package.json", Target: "package.json", Content: out, Rewrites: rewrites}, true
 }
 
