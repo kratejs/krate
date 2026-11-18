@@ -668,7 +668,9 @@ no declaration: `token` accepts any field.
 `declare module 'next-auth'` augmentation (it becomes the file above), see
 [Migrating from Next.js](/docs/guides/migrating-from-nextjs/). Keep
 `@auth/drizzle-adapter` when your tables already exist: it implements the
-`Adapter` interface `defineAuth` expects, and with `cookies.prefix: "authjs"`
+`Adapter` interface `defineAuth` expects (its types mark the user and account
+methods optional, so `adapter` accepts that shape and `defineAuth` names a
+missing method when the config resolves), and with `cookies.prefix: "authjs"`
 existing database sessions keep working.
 
 Differences to know: with the JWT strategy the session token is an encrypted
