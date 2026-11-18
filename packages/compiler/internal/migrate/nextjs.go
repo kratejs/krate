@@ -214,6 +214,9 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 		for _, w := range notes.Warnings {
 			rep.Warnings = append(rep.Warnings, filepath.Base(nextConfig)+": "+w)
 		}
+		for _, i := range notes.Info {
+			rep.Info = append(rep.Info, filepath.Base(nextConfig)+": "+i)
+		}
 		if ok {
 			data.Tailwind = nextCfg.Tailwind
 			nextCfg = data
@@ -236,7 +239,7 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 		}
 	}
 	if opts.UpdatePackage {
-		if pkg, ok := packagePlan(abs, opts.KrateVersion); ok {
+		if pkg, ok := packagePlan(abs, opts.KrateVersion, nodeDeploy{On: nextCfg.DeployTarget == "node", Rel: nextCfg.TracingRel}); ok {
 			rep.Files = append(rep.Files, pkg)
 			rep.Manual = append(rep.Manual, ManualItem{
 				Source: "package.json",
@@ -984,9 +987,35 @@ func fileExists(path string) bool {
 	return err == nil && !st.IsDir()
 }
 
+// nodeDeploy is the output: 'standalone' translation as the package scripts
+// see it: On when deploy.target is "node", Rel the project's path below the
+// outputFileTracingRoot ("" when there is none).
+type nodeDeploy struct {
+	On  bool
+	Rel string
+}
+
+// script is the Krate command for a package script. krate deploy builds the
+// site itself before it bundles the node server, so build is just deploy, and
+// start runs the bundle that deploy wrote (Next's standalone server.js).
+func (n nodeDeploy) script(name string) string {
+	if n.On {
+		switch name {
+		case "build":
+			return "krate deploy"
+		case "start":
+			if n.Rel != "" {
+				return "node dist/.krate/server/" + n.Rel + "/server.mjs"
+			}
+			return "node dist/.krate/server/server.mjs"
+		}
+	}
+	return "krate " + name
+}
+
 // packagePlan adds Krate scripts and dependencies without removing Next.js
 // dependencies. Removing Next itself is left to the user after verification.
-func packagePlan(root, krateVersion string) (PlannedFile, bool) {
+func packagePlan(root, krateVersion string, node nodeDeploy) (PlannedFile, bool) {
 	path := filepath.Join(root, "package.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -1003,11 +1032,12 @@ func packagePlan(root, krateVersion string) (PlannedFile, bool) {
 	}
 	for _, name := range []string{"dev", "build", "serve", "start"} {
 		if old, ok := scripts[name].(string); !ok || strings.Contains(old, "next") {
-			scripts[name] = "krate " + name
+			cmd := node.script(name)
+			scripts[name] = cmd
 			if ok {
-				rewrites = append(rewrites, fmt.Sprintf("scripts.%s: %q -> %q (the original is in the backup)", name, old, "krate "+name))
+				rewrites = append(rewrites, fmt.Sprintf("scripts.%s: %q -> %q (the original is in the backup)", name, old, cmd))
 			} else {
-				rewrites = append(rewrites, fmt.Sprintf("scripts.%s: added %q", name, "krate "+name))
+				rewrites = append(rewrites, fmt.Sprintf("scripts.%s: added %q", name, cmd))
 			}
 		}
 	}

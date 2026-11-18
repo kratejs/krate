@@ -102,7 +102,7 @@ project-relative path (`workers/image.js` becomes
 `dist/.krate/server/workers/image.js`), so resolve them from the bundle with
 `new URL("./workers/image.js", import.meta.url)`. A glob that matches nothing
 prints a warning. Globs must be relative to the project root and may not leave
-it. The route keys exist for compatibility with Next.js; Krate copies every
+it, unless you set [`outputFileTracingRoot`](#monorepo-layout-outputfiletracingroot). The route keys exist for compatibility with Next.js; Krate copies every
 file for every route.
 
 For `--target docker` the Dockerfile copies the leading directory of each glob
@@ -110,6 +110,58 @@ For `--target docker` the Dockerfile copies the leading directory of each glob
 at the same path. Globs under `node_modules` need no copy (the installed
 packages are in the image), and a glob with no leading directory, such as
 `**/*.wasm`, is flagged in the Dockerfile for you to handle.
+
+### Monorepo layout: outputFileTracingRoot
+
+Next's standalone output mirrors the repository: the server sits at
+`.next/standalone/packages/web/server.js`, and code that reads a sibling package
+by a relative path (`../render-service/dist/worker.mjs`) finds it because the
+files are copied to the same relative places. Set `outputFileTracingRoot` to get
+that layout from `krate deploy --target node`:
+
+```ts
+// packages/web/krate.config.ts
+export default defineConfig({
+  outputFileTracingRoot: "../..",                    // the repository root
+  outputFileTracingIncludes: {
+    "/api/preview": ["../render-service/dist/scramble-worker.mjs"],
+    // pnpm store entries are followed through their symlinks
+    "*": ["../../node_modules/.pnpm/@fastpkg+image@*/node_modules/@fastpkg/image-*/*"],
+  },
+});
+```
+
+```
+dist/.krate/server/
+  packages/web/server.mjs                    # <project below the root>/server.mjs
+  packages/render-service/dist/scramble-worker.mjs
+  node_modules/.pnpm/@fastpkg+image@1.2.0/node_modules/@fastpkg/image-linux-x64-gnu/...
+  node_modules/                              # traced external packages, at the root
+```
+
+```sh
+krate deploy --target node
+node dist/.krate/server/packages/web/server.mjs
+```
+
+- Included files land at their path below the root, so a path that is
+  relative to the app directory resolves the same way as in Next's standalone
+  output.
+- Traced packages (`serverExternalPackages`, native addons) go to
+  `dist/.krate/server/node_modules`. Node finds them from the nested
+  `server.mjs` by walking up, as it does in the Next layout.
+- The server changes its working directory to the directory of `server.mjs`
+  before it starts, like Next's `server.js`. Static files are still served from
+  `dist/`; keep the whole `dist` folder together.
+- A glob may leave the project but not the root: it is checked after symlinks
+  are resolved (inside `node_modules`, links into the package manager's store
+  are expected and allowed). The root must contain the project.
+- Without the key the layout is the flat one described above.
+- `outputFileTracingIncludes` route keys are not used to pick files: the output
+  is one server, so the union of all keys is copied.
+- `--target docker` builds from the project directory and does not copy files
+  outside it. For a monorepo image, build with the node target and copy `dist`
+  in your own Dockerfile (see below).
 
 ### Docker without the generated Dockerfile
 

@@ -1218,6 +1218,7 @@ outputFileTracingIncludes: {                           // extra files for the no
   "*": ["assets/fonts/**", "workers/image.js"],
   "/api/og": ["node_modules/@resvg/resvg-js-*/**"],
 },
+outputFileTracingRoot: "../..",                        // monorepo root: mirror it in the node deploy output
 envDir: "../..",                                       // where .env files are read from
 envPrefix: ["KRATE_PUBLIC_", "NEXT_PUBLIC_"],          // names inlined into client code (default ["KRATE_PUBLIC_"])
 ```
@@ -1235,10 +1236,20 @@ envPrefix: ["KRATE_PUBLIC_", "NEXT_PUBLIC_"],          // names inlined into cli
   Next.js, any key works) to globs of project files that `krate deploy --target
   node` copies next to `server.mjs` at their project-relative paths, and that
   `--target docker` carries into the image. Globs are relative to the project
-  root (`*`, `?`, `[a-z]` and `**` are supported), may not be absolute or contain
-  `..`, and are checked against the project root when files are copied. Use it
+  root (`*`, `?`, `[a-z]` and `**` are supported), may not be absolute, and may
+  contain `..` only when `outputFileTracingRoot` is set. Files are checked against
+  the project root (or the tracing root) when they are copied. Use it
   for files that import tracing cannot see: a worker entry loaded by path, a
   platform binary chosen by a computed `require`.
+- `outputFileTracingRoot` is the directory the `node` deploy output mirrors,
+  usually a monorepo root. A relative path resolves against the project root;
+  the directory must contain the project. With it, `server.mjs` is written to
+  `dist/.krate/server/<project below the root>/server.mjs`, included files go to
+  `dist/.krate/server/<path below the root>` (their globs may leave the project
+  but not the root), traced packages go to `dist/.krate/server/node_modules`,
+  and the server starts in its own directory, like Next's standalone output.
+  Unset (the default), the output is flat. See
+  [Self-hosting](/docs/guides/self-hosting/#monorepo-layout-outputfiletracingroot).
 - `envDir` is the directory the `.env`, `.env.<mode>`, `.env.local` and
   `.env.<mode>.local` files are read from. A relative path resolves against the
   project root and may point at a parent directory, such as a monorepo root; it

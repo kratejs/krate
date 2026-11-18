@@ -45,6 +45,15 @@ type nextConfigData struct {
 	// MiddlewareRedirects are redirects the config cannot express; the
 	// migrator injects them at the start of the middleware.
 	MiddlewareRedirects []middlewareRedirect `json:"-"`
+	// DeployTarget is "node" for output: 'standalone'; it becomes
+	// deploy.target.
+	DeployTarget string `json:"-"`
+	// OutputFileTracingRoot is outputFileTracingRoot as a path relative to the
+	// project (for example "../.."); TracingDepth is how many levels it is up
+	// and TracingRel the project's path below it ("packages/web").
+	OutputFileTracingRoot string `json:"-"`
+	TracingDepth          int    `json:"-"`
+	TracingRel            string `json:"-"`
 	// Tailwind is true when the project's PostCSS config runs Tailwind.
 	Tailwind bool `json:"-"`
 	// NoCompress is set by `compress: false`. Next.js compresses responses by
@@ -106,6 +115,8 @@ type nextConfigNotes struct {
 	Skipped []string
 	// Manual is one item per rule or key that needs a human.
 	Manual []ManualItem
+	// Info are notes that need no action.
+	Info []string
 }
 
 // readNextConfig extracts static redirects/rewrites/headers/basePath from a
@@ -234,7 +245,7 @@ func readNextConfig(path string) (data nextConfigData, notes nextConfigNotes, ok
 			})
 		}
 	}
-	translateOtherKeys(file, obj, &notes, serverFileKeys(obj, &out))
+	translateOtherKeys(file, obj, &notes, serverFileKeys(rc, obj, &out, &notes))
 	return out, notes, true
 }
 
@@ -457,6 +468,12 @@ func configJSON(entry string, next nextConfigData) []byte {
 	}
 	if len(next.OutputFileTracingIncludes) > 0 {
 		opts["outputFileTracingIncludes"] = next.OutputFileTracingIncludes
+	}
+	if next.OutputFileTracingRoot != "" {
+		opts["outputFileTracingRoot"] = next.OutputFileTracingRoot
+	}
+	if next.DeployTarget != "" {
+		opts["deploy"] = map[string]any{"target": next.DeployTarget}
 	}
 	if next.MiddlewareRuntime != "" {
 		opts["ssr"] = map[string]any{"middlewareRuntime": next.MiddlewareRuntime}

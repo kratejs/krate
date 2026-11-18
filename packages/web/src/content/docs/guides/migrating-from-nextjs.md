@@ -131,14 +131,33 @@ The first pass:
   exactly. `images.remotePatterns` keeps `protocol`, `port` and `search`.
   Values that depend on the request, such as a CSP nonce, belong in
   `middleware.ts`. Every other `next.config` key gets its own item with a hint
-  instead of one generic warning: `transpilePackages`, `output: 'standalone'`,
-  computed `env`, `experimental` flags, and a
+  instead of one generic warning: computed `env`, `experimental` flags, and a
   `loadEnvConfig(...)` call whose path is not static. When the path is static
   (a literal, `path.resolve(__dirname, '../..')`, `join(process.cwd(), '..', '..')`,
   `fileURLToPath(new URL('../..', import.meta.url))`), the migration writes the
   matching `envDir` and there is no item. A static `serverExternalPackages` list and static
   `outputFileTracingIncludes` globs are carried over to the Krate keys of the
   same name (see [Self-hosting](/docs/guides/self-hosting/)); computed ones get an item.
+  `output: 'standalone'` becomes `deploy: { target: "node" }`; with `--update-package`
+  the `build` script becomes `krate deploy` (it builds first, then bundles the
+  server) and `start` becomes `node dist/.krate/server/server.mjs`. A static
+  `outputFileTracingRoot` (`path.resolve(import.meta.dirname, '../..')` and the
+  `__dirname`, `process.cwd()` and `fileURLToPath` forms) becomes the
+  `outputFileTracingRoot` key, `start` points at
+  `dist/.krate/server/<project below the root>/server.mjs`, and
+  `outputFileTracingIncludes` globs that leave the project are carried over
+  verbatim when the root contains them (the route keys stay, but the node
+  output copies the union). A monorepo Docker image is an info line: build with
+  the node target and write the Dockerfile yourself.
+  `transpilePackages` is checked against the installed packages: when each one
+  resolves, to workspace source or a compiled package, the key is dropped with
+  an info line, because Krate needs no such setting. A package that does not
+  resolve gets a manual item that says whether it is not installed or its
+  `main`/`exports` point at a file that does not exist (build it first).
+  `turbopack.root` is dropped with an info line when it is the project, the
+  tracing root or the `envDir` root; `turbopack.resolveAlias` gets a hint to add
+  the aliases to tsconfig `paths`; `turbopack.rules` (webpack loaders) stays a
+  manual item.
   An `async` page keeps `async` and its wrapper is `async` too, so the
   page renders per request;
 - keeps `export const revalidate`, `dynamic` and `dynamicParams` on pages, which

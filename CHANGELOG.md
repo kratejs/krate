@@ -246,6 +246,27 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Added
 
+- `outputFileTracingRoot` config key (a path, relative to the project or absolute; the monorepo root).
+  With it, `krate deploy --target node` writes the same layout as Next's standalone output:
+  `dist/.krate/server/<project below the root>/server.mjs`, included files at
+  `dist/.krate/server/<path below the root>`, and the traced `node_modules` at
+  `dist/.krate/server/node_modules`, which Node finds from the nested `server.mjs`. The server starts in
+  its own directory, so `path.resolve(process.cwd(), '../sibling/dist/x.mjs')` works as it does in
+  `.next/standalone`. `outputFileTracingIncludes` globs may then leave the project (`../render/dist/w.mjs`,
+  `../../node_modules/.pnpm/pkg@*/node_modules/pkg-*/*`) as long as their real path stays inside the
+  root. Without the key the output is unchanged. The root must contain the project. Include globs no
+  longer walk pnpm store directories that no glob segment can reach.
+- `krate migrate nextjs` translates `output: 'standalone'` to `deploy: { target: "node" }` and, with
+  `--update-package`, rewrites the `build` script to `krate deploy` and `start` to
+  `node dist/.krate/server/<project below the root>/server.mjs`. A static `outputFileTracingRoot`
+  (`path.resolve(import.meta.dirname, '../..')`, `__dirname`, `process.cwd()` and `fileURLToPath`
+  variants) becomes `outputFileTracingRoot`, and `outputFileTracingIncludes` that leave the project are
+  carried over when the root contains them. `transpilePackages` is checked with the resolver: when every
+  package resolves (workspace source or a compiled package) the key is dropped with an info line, and a
+  package that does not resolve gets a manual item that says why (not installed, or its `main`/`exports`
+  point at a file that does not exist). `turbopack.root` that equals the project, tracing root or
+  `envDir` is dropped with an info line; `turbopack.resolveAlias` gets a tsconfig `paths` hint;
+  `turbopack.rules` stays a manual item.
 - First-class instrumentation. `instrumentation.ts` (or `.js`, `.mjs`) in the project root or `src/`
   exports `register()`, which runs once per server start: in the primary process of the Node API
   sidecar, awaited before that process forks its cluster workers or listens (never in a worker or the SSR

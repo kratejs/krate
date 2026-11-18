@@ -551,11 +551,11 @@ type keyNote struct {
 
 // otherKeyNotes covers next.config keys the migrator does not translate.
 var otherKeyNotes = map[string]keyNote{
-	"transpilePackages":           {true, "transpilePackages is not translated", "Krate has no transpilePackages key; run krate build and check that each listed package resolves, and report packages that do not"},
+	"transpilePackages":           {true, "transpilePackages is computed and was not checked", "Krate needs no transpilePackages key: workspace TypeScript source and compiled packages both build; run krate build and check that each package you listed resolves"},
 	"serverExternalPackages":      {true, "serverExternalPackages is not translated", "the value is computed; set serverExternalPackages in krate.config.ts to the same package names (see the Config Reference)"},
-	"outputFileTracingIncludes":   {true, "outputFileTracingIncludes is not translated", "the value is computed or leaves the project; set outputFileTracingIncludes in krate.config.ts with project-relative globs (see the Config Reference)"},
+	"outputFileTracingIncludes":   {true, "outputFileTracingIncludes is not translated", "the value is computed, or a glob leaves the project without a translatable outputFileTracingRoot; set outputFileTracingRoot and outputFileTracingIncludes in krate.config.ts (see the Config Reference)"},
 	"outputFileTracingExcludes":   {true, "outputFileTracingExcludes is not translated", "no Krate equivalent yet"},
-	"outputFileTracingRoot":       {true, "outputFileTracingRoot is not translated", "no Krate equivalent yet; a Krate project builds from its own root"},
+	"outputFileTracingRoot":       {true, "outputFileTracingRoot is not translated", "its value could not be resolved statically or does not contain the project; set outputFileTracingRoot in krate.config.ts to the repository root, relative to the project (for example \"../..\")"},
 	"i18n":                        {true, "i18n routing is not translated", "Krate's i18n key is docs-scoped; for app pages use a [locale] dynamic segment (see Internationalization)"},
 	"assetPrefix":                 {true, "assetPrefix is not translated", "no Krate equivalent yet; basePath serves the site under a sub-path"},
 	"distDir":                     {true, "distDir is not translated", "set outDir in krate.config.ts (default dist)"},
@@ -631,8 +631,6 @@ func translateOtherKeys(file string, obj *ast.ObjectExpr, notes *nextConfigNotes
 func outputNote(file string, v ast.Expr) ManualItem {
 	mode, _ := stringValue(v)
 	switch mode {
-	case "standalone":
-		return ManualItem{Source: file, Reason: "output: 'standalone' is not translated", Hint: "use krate deploy --target node (dist/.krate/server holds server.mjs plus a minimal node_modules for external packages) or --target docker for a self-hosted server (see the Self-hosting guide)"}
 	case "export":
 		return ManualItem{Source: file, Reason: "output: 'export' is not translated", Hint: "set output: \"static\" in krate.config.ts (see Output mode in the config reference)"}
 	}

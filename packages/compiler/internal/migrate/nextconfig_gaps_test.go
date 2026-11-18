@@ -386,10 +386,9 @@ export default {
   experimental: { authInterrupts: true, ppr: true, turbo: {} },
 };`})
 	for key, hint := range map[string]string{
-		"loadEnvConfig":        "project root only",
-		"output: 'standalone'": "--target node",
-		"transpilePackages":    "transpilePackages",
-		"experimental.ppr":     "ppr",
+		"loadEnvConfig":     "project root only",
+		"transpilePackages": "importable",
+		"experimental.ppr":  "ppr",
 	} {
 		var found *ManualItem
 		for i := range rep.Manual {
@@ -405,7 +404,16 @@ export default {
 			t.Errorf("hint for %s = %q, want it to contain %q", key, found.Hint, hint)
 		}
 	}
+	if hasManual(rep, "next.config.ts", "standalone") {
+		t.Errorf("output: 'standalone' is translated: %+v", rep.Manual)
+	}
 	body := configBody(t, rep)
+	if !strings.Contains(body, `"deploy"`) || !strings.Contains(body, `"target": "node"`) {
+		t.Errorf("output: 'standalone' must become deploy.target node:\n%s", body)
+	}
+	if !hasManual(rep, "next.config.ts", `"@acme/ui"`) {
+		t.Errorf("the unresolved package must be named: %+v", rep.Manual)
+	}
 	if !strings.Contains(body, `"serverExternalPackages"`) || !strings.Contains(body, `"sharp"`) ||
 		!strings.Contains(body, `"outputFileTracingIncludes"`) || !strings.Contains(body, `"data/**"`) {
 		t.Errorf("serverExternalPackages and outputFileTracingIncludes must be carried over:\n%s", body)
