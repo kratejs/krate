@@ -563,6 +563,11 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- `krate serve`, `krate start` and `krate dev` send the same `Content-Type` on every OS for common web
+  files. On Windows the registry served `.js` without a charset and `.woff2` as `text/plain`; on Linux
+  `.otf` was an OpenDocument type, `.ico` was `image/vnd.microsoft.icon` and `.webm` was `audio/webm`.
+  They are now `text/javascript; charset=utf-8`, `font/woff2`, `font/otf`, `image/x-icon` and `video/webm`,
+  and `.map`, `.cjs` and `.webmanifest` get a type instead of a sniffed one.
 - `krate serve`, `krate start` and `krate dev`: a request that reaches the Node API sidecar while it is
   still starting (the first start or a supervisor restart; slower now that `register()` of an
   instrumentation file runs before it listens) waits for it, up to 30 seconds, instead of answering `502`.

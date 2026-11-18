@@ -105,6 +105,11 @@ func findKrateCheckout(root string) string {
 			}
 			for d, i := abs, 0; i < 8 && filepath.Dir(d) != d; d, i = filepath.Dir(d), i+1 {
 				if fileExists(filepath.Join(d, "packages", "core", "package.json")) && fileExists(filepath.Join(d, "packages", "compiler", "go.mod")) {
+					// A start that does not exist yet (a KRATE_BINARY not built)
+					// is not resolved above, so resolve the checkout itself.
+					if real, err := filepath.EvalSymlinks(d); err == nil {
+						return real
+					}
 					return d
 				}
 			}

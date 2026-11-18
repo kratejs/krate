@@ -65,7 +65,17 @@ globalThis.__krateEvalResult = { here };`, nil)
 	if err := json.Unmarshal(out, &m); err != nil {
 		t.Fatalf("output %s: %v", out, err)
 	}
-	if m.Here.Dir != filepath.ToSlash(sub) || m.Here.File != filepath.ToSlash(filepath.Join(sub, "helper.ts")) || m.Here.Text != "import.meta.dirname stays" || m.Here.Tpl != filepath.ToSlash(filepath.Join(sub, "helper.ts"))+"!" {
+	// The bundler may report the directory as given or with its symlinks
+	// resolved (macOS temp dirs sit behind /var -> /private/var).
+	matches := func(dir string) bool {
+		file := filepath.ToSlash(filepath.Join(dir, "helper.ts"))
+		return m.Here.Dir == filepath.ToSlash(dir) && m.Here.File == file && m.Here.Tpl == file+"!"
+	}
+	real, err := filepath.EvalSymlinks(sub)
+	if err != nil {
+		real = sub
+	}
+	if !(matches(sub) || matches(real)) || m.Here.Text != "import.meta.dirname stays" {
 		t.Fatalf("helper meta wrong: %s", out)
 	}
 }
