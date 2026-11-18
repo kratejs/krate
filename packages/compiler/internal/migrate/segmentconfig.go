@@ -47,7 +47,7 @@ func segmentConfigReason(name, value string) string {
 		if strings.Trim(value, `"'`) == "edge" {
 			return "Krate runs the handler on its own API runtime, which implements the web Request/Response APIs the edge runtime offers"
 		}
-		return "Krate API routes already run on Node (or the runtime set in api.runtime)"
+		return "the API runtime is set for the whole app by ssr.apiRuntime, which the migration sets to \"node\" when route handlers declare runtime = 'nodejs'"
 	case "maxDuration":
 		return "only API routes have a request timeout in Krate, so a page's maxDuration has no effect"
 	}
@@ -73,6 +73,22 @@ func identifierUsedElsewhere(src, name, decl string) bool {
 
 const fetchCacheManual = "route segment config fetchCache has no Krate equivalent and was left in place"
 
+// routesDeclareNodeRuntime reports whether a migrated route handler declared
+// export const runtime = 'nodejs'.
+func routesDeclareNodeRuntime(rep *Report) bool {
+	for _, f := range rep.Files {
+		if f.Kind != KindAPI {
+			continue
+		}
+		for _, r := range f.Rewrites {
+			if strings.HasPrefix(r, droppedConfigPrefix+"runtime = ") && strings.Contains(strings.TrimPrefix(r, droppedConfigPrefix+"runtime = "), "nodejs") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // aggregateSegmentConfig turns the per-file segment config findings into one
 // warning per kind (instead of one manual item per file) and one manual item
 // for fetchCache, whose caching behavior a human has to decide.
@@ -96,7 +112,13 @@ func aggregateSegmentConfig(rep *Report) {
 	for _, n := range names {
 		switch n {
 		case "runtime":
-			rep.Warnings = append(rep.Warnings, fmt.Sprintf("dropped export const runtime from %d files: Krate API routes run on Node (or the configured api.runtime), so it has no effect", counts[n]))
+			msg := fmt.Sprintf("dropped export const runtime from %d files: Krate sets the API runtime for the whole app (ssr.apiRuntime)", counts[n])
+			if rep.apiNodeRuntime {
+				msg += "; route handlers declared runtime = 'nodejs', so krate.config sets ssr.apiRuntime to \"node\" (Next ran them on Node)"
+			} else {
+				msg += "; the default embedded runtime serves them, and a route that imports a Node built-in or native package runs on Node automatically"
+			}
+			rep.Warnings = append(rep.Warnings, msg)
 		case "maxDuration":
 			rep.Warnings = append(rep.Warnings, fmt.Sprintf("dropped export const maxDuration from %d non-API files: only API routes have a request timeout in Krate", counts[n]))
 		case "preferredRegion":

@@ -91,6 +91,8 @@ type Report struct {
 	headLinks   []string
 	// middlewareNode lists why the middleware needs ssr.middlewareRuntime "node".
 	middlewareNode []string
+	// apiNodeRuntime is set when route handlers declared runtime = 'nodejs'.
+	apiNodeRuntime bool
 }
 
 // Route is the route inventory the migration will produce.
@@ -283,6 +285,10 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 	pruneUnchangedModules(rep)
 	addAPIRewrites(&nextCfg, rep)
 	nextCfg.Head = append(nextCfg.Head, rep.headLinks...)
+	if routesDeclareNodeRuntime(rep) {
+		rep.apiNodeRuntime = true
+		nextCfg.APIRuntime = "node"
+	}
 	if len(rep.middlewareNode) > 0 {
 		nextCfg.MiddlewareRuntime = "node"
 		rep.Warnings = append(rep.Warnings, "the middleware "+strings.Join(rep.middlewareNode, ", ")+", which the embedded runtime cannot run: set ssr.middlewareRuntime to \"node\"")
@@ -313,7 +319,7 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 			}
 		}
 		rep.Files = append(rep.Files, PlannedFile{Kind: KindConfig, Target: "krate.config.ts", Content: configJSON(entry, nextCfg)})
-	} else if nextConfigStatic || len(nextCfg.Site) > 0 || len(nextCfg.Rewrites) > 0 || len(nextCfg.Head) > 0 || nextCfg.MiddlewareRuntime != "" {
+	} else if nextConfigStatic || len(nextCfg.Site) > 0 || len(nextCfg.Rewrites) > 0 || len(nextCfg.Head) > 0 || nextCfg.MiddlewareRuntime != "" || nextCfg.APIRuntime != "" {
 		merged, notes, err := mergeKrateConfig(abs, nextCfg)
 		if err != nil {
 			rep.Manual = append(rep.Manual, ManualItem{

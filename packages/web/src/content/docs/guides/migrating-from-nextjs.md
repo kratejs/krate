@@ -264,8 +264,12 @@ The first pass:
   literal number; a computed value is reported as manual work. On a page it has
   no meaning and is dropped;
 - drops the other route segment config that only steers Vercel (`runtime`,
-  `preferredRegion`) with an info note per file and one aggregated warning, since
-  Krate self-hosts on Node. `fetchCache` is kept and reported as one aggregated
+  `preferredRegion`) with an info note per file and one aggregated warning.
+  Krate sets the API runtime for the whole app: when a route handler declared
+  `runtime = 'nodejs'`, the generated config sets `ssr.apiRuntime: "node"` so
+  every handler keeps running on Node, as it did on Next; otherwise the embedded
+  runtime serves them (a route that imports a Node built-in or native package
+  runs on Node automatically). `fetchCache` is kept and reported as one aggregated
   manual item (set the cache option on the `fetch` calls that relied on it);
 - creates `krate.config.ts` when the project has none, or merges missing
   Next-derived keys into an existing config (existing keys win);

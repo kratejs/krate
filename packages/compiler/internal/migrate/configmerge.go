@@ -123,8 +123,8 @@ func nextConfigValues(next nextConfigData) map[string]any {
 	if len(next.OutputFileTracingIncludes) > 0 {
 		values["outputFileTracingIncludes"] = next.OutputFileTracingIncludes
 	}
-	if next.MiddlewareRuntime != "" {
-		values["ssr"] = map[string]any{"middlewareRuntime": next.MiddlewareRuntime}
+	if ssr := ssrRuntimes(next); ssr != nil {
+		values["ssr"] = ssr
 	}
 	return values
 }

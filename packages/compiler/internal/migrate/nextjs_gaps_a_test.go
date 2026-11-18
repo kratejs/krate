@@ -509,3 +509,35 @@ export async function proxy(request: Request) {
 		t.Errorf("no warning names the reason: %v", rep.Warnings)
 	}
 }
+
+// Route handlers that declared runtime = 'nodejs' keep Node: the migration
+// sets ssr.apiRuntime "node" instead of claiming routes already run on Node.
+func TestNodeRuntimeRoutesSelectTheNodeAPIRuntime(t *testing.T) {
+	for _, declared := range []bool{true, false} {
+		decl := ""
+		if declared {
+			decl = "export const runtime = 'nodejs';\n"
+		}
+		root := gapsProject(t, map[string]string{
+			"src/app/page.tsx":           `export default function P() { return <main/>; }`,
+			"src/app/api/embed/route.ts": decl + "export async function GET() { return new Response(Buffer.from('x')); }\n",
+			"src/app/api/edge/route.ts":  "export const runtime = 'edge';\nexport async function GET() { return new Response('e'); }\n",
+		})
+		rep, err := ScanNext(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg := findPlan(rep, "krate.config.ts")
+		hasNode := cfg != nil && strings.Contains(string(cfg.Content), `"apiRuntime": "node"`)
+		if hasNode != declared {
+			t.Errorf("declared=%v: apiRuntime node in config = %v: %+v", declared, hasNode, cfg)
+		}
+		warns := strings.Join(rep.Warnings, "\n")
+		if strings.Contains(warns, "Krate API routes run on Node") {
+			t.Errorf("misleading runtime warning: %s", warns)
+		}
+		if declared && !strings.Contains(warns, `sets ssr.apiRuntime to "node"`) {
+			t.Errorf("declared=%v: the warning does not say the API runtime is node: %s", declared, warns)
+		}
+	}
+}

@@ -32,6 +32,9 @@ type nextConfigData struct {
 	// MiddlewareRuntime is "node" when the middleware cannot run in the
 	// embedded runtime; it becomes ssr.middlewareRuntime.
 	MiddlewareRuntime string `json:"-"`
+	// APIRuntime is "node" when route handlers declared runtime = 'nodejs';
+	// it becomes ssr.apiRuntime.
+	APIRuntime string `json:"-"`
 	// TrailingSlash is "always" when next.config sets trailingSlash: true and
 	// "never" otherwise (Next's URL form).
 	TrailingSlash string `json:"trailingSlash,omitempty"`
@@ -417,8 +420,8 @@ func configJSON(entry string, next nextConfigData) []byte {
 	if len(next.OutputFileTracingIncludes) > 0 {
 		opts["outputFileTracingIncludes"] = next.OutputFileTracingIncludes
 	}
-	if next.MiddlewareRuntime != "" {
-		opts["ssr"] = map[string]any{"middlewareRuntime": next.MiddlewareRuntime}
+	if ssr := ssrRuntimes(next); ssr != nil {
+		opts["ssr"] = ssr
 	}
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
@@ -478,4 +481,20 @@ func compressValue(next nextConfigData) map[string]any {
 		return nil
 	}
 	return map[string]any{"brotli": true, "gzip": true}
+}
+
+// ssrRuntimes is the ssr block of the generated config: the middleware and
+// API runtimes the migration chose, or nil.
+func ssrRuntimes(next nextConfigData) map[string]any {
+	ssr := map[string]any{}
+	if next.MiddlewareRuntime != "" {
+		ssr["middlewareRuntime"] = next.MiddlewareRuntime
+	}
+	if next.APIRuntime != "" {
+		ssr["apiRuntime"] = next.APIRuntime
+	}
+	if len(ssr) == 0 {
+		return nil
+	}
+	return ssr
 }
