@@ -344,8 +344,12 @@ func importMetaPreserver(nodeShims bool, virtual map[string]string, transform fu
 						src = transform(args.Path, src)
 					}
 				}
-				if strings.Contains(src, importMetaURL) {
-					src = rewriteImportMetaURL(src, fmt.Sprintf("%q", fileURL(args.Path)))
+				if strings.Contains(src, "import.meta.") {
+					src = rewriteImportMeta(src, metaLiterals{
+						url:  fmt.Sprintf("%q", fileURL(args.Path)),
+						dir:  fmt.Sprintf("%q", filepath.ToSlash(filepath.Dir(args.Path))),
+						file: fmt.Sprintf("%q", filepath.ToSlash(args.Path)),
+					})
 				}
 				contents := src
 				contents = tsstrip.BlankTierDecorators(args.Path, contents)
@@ -414,25 +418,44 @@ const absPathFilter = `^(?:/|[A-Za-z]:[\\/]|\\[\\/])`
 // assets.
 const assetFilter = `\.(?:css|scss|sass|less|styl|pcss|svg|png|jpe?g|gif|webp|avif|ico|bmp|woff2?|ttf|otf|eot|mp4|webm|mp3|wav|ogg|pdf|wasm)$`
 
-// importMetaURL is the meta-property importMetaPreserver rewrites.
-const importMetaURL = "import.meta.url"
+// metaLiterals holds the quoted replacements for the import.meta properties
+// importMetaPreserver rewrites: url is the file:// URL, dir and file are the
+// module's directory and path.
+type metaLiterals struct {
+	url, dir, file string
+}
 
-// rewriteImportMetaURL returns src with every code-context occurrence of
-// import.meta.url replaced by lit (a quoted file:// URL). Occurrences inside
-// string literals, template-literal text, and comments are left untouched, so
-// source that merely mentions the text (for example a docs code sample held in
-// a string) is not corrupted.
-func rewriteImportMetaURL(src, lit string) string {
+// match returns the literal for the import.meta property at src[i:end] and its
+// length, or 0 when none starts there.
+func (m metaLiterals) match(src string, i, end int) (string, int) {
+	for _, t := range []struct{ name, lit string }{
+		{"import.meta.url", m.url},
+		{"import.meta.dirname", m.dir},
+		{"import.meta.filename", m.file},
+	} {
+		if end-i >= len(t.name) && src[i:i+len(t.name)] == t.name && identifierBoundary(src, i, i+len(t.name)) {
+			return t.lit, len(t.name)
+		}
+	}
+	return "", 0
+}
+
+// rewriteImportMeta returns src with every code-context occurrence of
+// import.meta.url, import.meta.dirname and import.meta.filename replaced by
+// its quoted literal. Occurrences inside string literals, template-literal
+// text, and comments are left untouched, so source that merely mentions the
+// text (for example a docs code sample held in a string) is not corrupted.
+func rewriteImportMeta(src string, lits metaLiterals) string {
 	var b strings.Builder
 	b.Grow(len(src))
-	writeCode(&b, src, 0, len(src), lit, false)
+	writeCode(&b, src, 0, len(src), lits, false)
 	return b.String()
 }
 
-// writeCode copies src[begin:end] in code context, replacing import.meta.url
-// with lit. When stopAtBrace is set it returns just past the '}' that closes the
+// writeCode copies src[begin:end] in code context, replacing import.meta properties
+// with lits. When stopAtBrace is set it returns just past the '}' that closes the
 // enclosing template expression; otherwise it consumes the whole range.
-func writeCode(b *strings.Builder, src string, begin, end int, lit string, stopAtBrace bool) int {
+func writeCode(b *strings.Builder, src string, begin, end int, lits metaLiterals, stopAtBrace bool) int {
 	depth := 0
 	i := begin
 	for i < end {
@@ -458,11 +481,15 @@ func writeCode(b *strings.Builder, src string, begin, end int, lit string, stopA
 		case c == '\'' || c == '"':
 			i = writeQuoted(b, src, i, end)
 		case c == '`':
-			i = writeTemplate(b, src, i, end, lit)
-		case c == 'i' && end-i >= len(importMetaURL) && src[i:i+len(importMetaURL)] == importMetaURL && identifierBoundary(src, i, i+len(importMetaURL)):
-			b.WriteString(lit)
-			i += len(importMetaURL)
+			i = writeTemplate(b, src, i, end, lits)
 		default:
+			if c == 'i' {
+				if lit, n := lits.match(src, i, end); n > 0 {
+					b.WriteString(lit)
+					i += n
+					continue
+				}
+			}
 			b.WriteByte(c)
 			i++
 		}
@@ -511,9 +538,9 @@ func writeQuoted(b *strings.Builder, src string, i, end int) int {
 }
 
 // writeTemplate copies a template literal starting at the backtick src[i],
-// rewriting import.meta.url inside each ${...} substitution and leaving the
+// rewriting import.meta properties inside each ${...} substitution and leaving the
 // literal text untouched.
-func writeTemplate(b *strings.Builder, src string, i, end int, lit string) int {
+func writeTemplate(b *strings.Builder, src string, i, end int, lits metaLiterals) int {
 	j := i + 1
 	for j < end {
 		switch src[j] {
@@ -527,7 +554,7 @@ func writeTemplate(b *strings.Builder, src string, i, end int, lit string) int {
 		case '$':
 			if j+1 < end && src[j+1] == '{' {
 				b.WriteString(src[i : j+2])
-				i = writeCode(b, src, j+2, end, lit, true)
+				i = writeCode(b, src, j+2, end, lits, true)
 				j = i
 				continue
 			}

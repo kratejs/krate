@@ -46,3 +46,26 @@ func write(t *testing.T, dir, name, body string) {
 		t.Fatal(err)
 	}
 }
+
+func TestEvalImportMetaDirnameAndFilename(t *testing.T) {
+	dir := t.TempDir()
+	sub := filepath.Join(dir, "sub")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write(t, sub, "helper.ts", "export const here = { dir: import.meta.dirname, file: import.meta.filename, text: 'import.meta.dirname stays', tpl: `${import.meta.filename}!` };\n")
+	out, err := eval(t, dir, `import { here } from './sub/helper';
+globalThis.__krateEvalResult = { here };`, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m struct {
+		Here struct{ Dir, File, Text, Tpl string }
+	}
+	if err := json.Unmarshal(out, &m); err != nil {
+		t.Fatalf("output %s: %v", out, err)
+	}
+	if m.Here.Dir != filepath.ToSlash(sub) || m.Here.File != filepath.ToSlash(filepath.Join(sub, "helper.ts")) || m.Here.Text != "import.meta.dirname stays" || m.Here.Tpl != filepath.ToSlash(filepath.Join(sub, "helper.ts"))+"!" {
+		t.Fatalf("helper meta wrong: %s", out)
+	}
+}
