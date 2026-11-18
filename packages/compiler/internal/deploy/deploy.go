@@ -528,7 +528,7 @@ func emitDocker(cfg *config.Config, root, outDir string) ([]string, error) {
 	if dirs, skipped := traceIncludeDirs(cfg.OutputFileTracingIncludes); len(dirs) > 0 || len(skipped) > 0 {
 		b.WriteString("# outputFileTracingIncludes: runtime-read project files (the leading directory of each glob).\n")
 		for _, g := range skipped {
-			fmt.Fprintf(&b, "# glob %q has no leading directory: copy what it matches into the runtime stage yourself.\n", g)
+			fmt.Fprintf(&b, "# glob %q has no leading directory inside the project (or leaves it): copy what it matches into the runtime stage yourself; the image is built from the project directory, so a monorepo build context needs a hand-written Dockerfile.\n", g)
 		}
 		if len(dirs) > 0 {
 			b.WriteString("RUN for p in " + strings.Join(dirs, " ") + "; do if [ -e \"$p\" ]; then cp -a --parents \"$p\" /tmp/runtime/; fi; done\n")

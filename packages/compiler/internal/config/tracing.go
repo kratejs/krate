@@ -7,8 +7,10 @@ import (
 )
 
 // checkTraceGlob rejects an include glob that is absolute or climbs out of the
-// project root. The build checks every matched file against the root again.
-func checkTraceGlob(g string) error {
+// project root, unless an outputFileTracingRoot is set (parentOK): then ".."
+// segments are allowed and the build checks the glob against that root. The
+// build checks every matched file against the root again.
+func checkTraceGlob(g string, parentOK bool) error {
 	if g == "" {
 		return fmt.Errorf("empty glob")
 	}
@@ -17,7 +19,7 @@ func checkTraceGlob(g string) error {
 		return fmt.Errorf("glob %q must be relative to the project root", g)
 	}
 	for _, seg := range strings.Split(slash, "/") {
-		if seg == ".." {
+		if seg == ".." && !parentOK {
 			return fmt.Errorf("glob %q must stay inside the project root (no .. segments)", g)
 		}
 	}

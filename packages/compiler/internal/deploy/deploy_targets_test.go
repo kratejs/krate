@@ -152,3 +152,13 @@ func TestEmitDockerfile(t *testing.T) {
 		t.Fatal("expected refusal to overwrite a hand-written Dockerfile")
 	}
 }
+
+func TestTraceIncludeDirsSkipsGlobsOutsideTheProject(t *testing.T) {
+	dirs, skipped := traceIncludeDirs(map[string][]string{"*": {"../render/dist/w.mjs", "../../node_modules/x/*", "data/**"}})
+	if strings.Join(dirs, ",") != "'data'" {
+		t.Errorf("dirs = %v", dirs)
+	}
+	if len(skipped) != 2 {
+		t.Errorf("skipped = %v", skipped)
+	}
+}

@@ -269,9 +269,12 @@ func (c *Config) Validate() (warnings []string, err error) {
 			return nil, fmt.Errorf("envPrefix entries must be non-empty names ending in \"_\" such as \"KRATE_PUBLIC_\", got %q (an empty prefix would expose every environment variable)", prefix)
 		}
 	}
+	if r := c.OutputFileTracingRoot; r != "" && strings.ContainsAny(r, "\x00\n") {
+		return nil, fmt.Errorf("outputFileTracingRoot must be a directory path, got %q", r)
+	}
 	for key, globs := range c.OutputFileTracingIncludes {
 		for _, g := range globs {
-			if err := checkTraceGlob(g); err != nil {
+			if err := checkTraceGlob(g, c.OutputFileTracingRoot != ""); err != nil {
 				return nil, fmt.Errorf("outputFileTracingIncludes[%q]: %w", key, err)
 			}
 		}

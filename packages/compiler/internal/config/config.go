@@ -841,8 +841,19 @@ type Config struct {
 	// project files copied into the node deploy output next to server.mjs, for
 	// files that import tracing cannot see (a worker entry loaded by path, a
 	// platform binary chosen by a computed require). Globs are relative to the
-	// project root and must stay inside it.
+	// project root and must stay inside it, unless outputFileTracingRoot is
+	// set: then they may climb out of the project but not out of that root.
 	OutputFileTracingIncludes map[string][]string `json:"outputFileTracingIncludes,omitempty"`
+
+	// OutputFileTracingRoot is the directory the node deploy output mirrors,
+	// like Next's outputFileTracingRoot: the monorepo root. When set, server.mjs
+	// is written to .krate/server/<project relative to the root>/server.mjs,
+	// outputFileTracingIncludes globs may point outside the project (as long as
+	// their real path stays inside the root) and land at their root-relative
+	// path, and the traced node_modules sits at .krate/server/node_modules.
+	// Relative paths resolve against the project root; the root must contain
+	// the project.
+	OutputFileTracingRoot string `json:"outputFileTracingRoot,omitempty"`
 
 	// EnvDir is the directory the .env files are read from (default: the
 	// project root). Relative paths resolve against the project root and may
@@ -1256,6 +1267,9 @@ func (c *Config) Resolve(root string) {
 	}
 	if c.EnvDir != "" && !filepath.IsAbs(c.EnvDir) {
 		c.EnvDir = filepath.Join(root, c.EnvDir)
+	}
+	if c.OutputFileTracingRoot != "" && !filepath.IsAbs(c.OutputFileTracingRoot) {
+		c.OutputFileTracingRoot = filepath.Join(root, c.OutputFileTracingRoot)
 	}
 	// Fold the legacy goApi block into the unified go config once, so the rest
 	// of the codebase reads a single normalized field (c.Go).

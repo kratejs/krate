@@ -171,11 +171,22 @@ func copyFileMode(src, dst string, mode os.FileMode) error {
 // paths. Every route key contributes: files are not tied to a route in the
 // self-contained output. It returns the number of files copied and the globs
 // that matched nothing.
-func copyTraceIncludes(root string, includes map[string][]string, destDir string) (int, []string, error) {
+//
+// With an outputFileTracingRoot, root is that root and prefix is the project's
+// path below it: each glob is joined to prefix, may climb out of the project,
+// and lands at its root-relative path. A glob that leaves the root is an error.
+func copyTraceIncludes(root, prefix string, includes map[string][]string, destDir string) (int, []string, error) {
 	globSet := map[string]bool{}
 	for _, globs := range includes {
 		for _, g := range globs {
-			globSet[filepath.ToSlash(path.Clean(filepath.ToSlash(g)))] = true
+			full := path.Clean(filepath.ToSlash(g))
+			if prefix != "" {
+				full = path.Join(prefix, full)
+				if full == ".." || strings.HasPrefix(full, "../") {
+					return 0, nil, fmt.Errorf("outputFileTracingIncludes glob %q leaves outputFileTracingRoot %s", g, root)
+				}
+			}
+			globSet[full] = true
 		}
 	}
 	globs := make([]string, 0, len(globSet))
@@ -272,6 +283,9 @@ func expandProjectGlob(root, glob string) ([]string, error) {
 				if name == ".git" || (name == "node_modules" && !nm) {
 					continue
 				}
+				if !literalDir && !canMatchPrefix(segs, strings.Split(rel, "/")) {
+					continue
+				}
 				if !nm && !checkRealInside(root, child, false) {
 					continue
 				}
@@ -299,6 +313,24 @@ func checkRealInside(root, p string, inNodeModules bool) bool {
 		return true
 	}
 	return pluginapi.WithinRootEval(root, p)
+}
+
+// canMatchPrefix reports whether some path below the directory name could
+// still match pat, so a walk can skip subtrees (a pnpm store holds thousands
+// of packages) that no glob segment reaches.
+func canMatchPrefix(pat, name []string) bool {
+	for i, n := range name {
+		if i >= len(pat) {
+			return false
+		}
+		if pat[i] == "**" {
+			return true
+		}
+		if ok, err := path.Match(pat[i], n); err != nil || !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func matchSegs(pat, name []string) bool {
