@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
 	"github.com/kratejs/krate/packages/compiler/internal/migrate"
@@ -206,6 +207,12 @@ func TestNextRoutingParity(t *testing.T) {
 				req.Header.Set("Cookie", strings.Join(cookies, "; "))
 			}
 			resp, err := client.Do(req)
+			// The Node API sidecar finishes starting after the server listens: a 502 from the proxy is retried.
+			for attempt := 0; err == nil && resp.StatusCode == http.StatusBadGateway && c.Response.Status != http.StatusBadGateway && attempt < 100; attempt++ {
+				_ = resp.Body.Close()
+				time.Sleep(100 * time.Millisecond)
+				resp, err = client.Do(req.Clone(req.Context()))
+			}
 			if err != nil {
 				t.Fatal(err)
 			}
