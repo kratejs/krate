@@ -260,7 +260,10 @@ export async function register() {
 Exactly once per server means:
 
 - `krate build` bundles the file for Node (`.krate/instrumentation.mjs`; npm packages
-  stay external and resolve from `node_modules`).
+  stay external and resolve from `node_modules`, as in Node API routes). A CommonJS
+  package is imported through its default export, so a named import such as
+  `import { loadEnvConfig } from "@next/env"` works even when Node cannot detect the
+  package's exports (ncc and webpack bundles).
 - `krate start`, `krate serve` and `krate dev` run it in the **primary process of the
   Node API sidecar**, and await it before that process forks its `ssr.nodeWorkers`
   cluster workers or listens. The workers and the SSR renderer never run it. With
@@ -269,9 +272,9 @@ Exactly once per server means:
 - The node deploy target (`server.mjs`) runs it once, before `startNodeServer`. The
   module is imported first, so its top-level code runs before the app's modules.
   Other deploy targets do not run it; the deploy prints a warning.
-- A supervisor restart of the sidecar is a new server start, so `register()` runs
-  again. Hot reloads of API modules in `krate dev` do not rerun it; restart `krate dev`
-  after editing the file.
+- A supervisor restart of the sidecar after an unrelated crash is a new server start,
+  so `register()` runs again. Hot reloads of API modules in `krate dev` do not rerun it;
+  restart `krate dev` after editing the file (or see Failure below).
 - The server is not ready until `register()` resolves: the API sidecar does not
   listen yet, and `GET /readyz` returns `503 instrumentation-pending`. `/healthz`
   stays `200`.
@@ -294,12 +297,32 @@ routes import instead. Setup that lives outside the process (a database migratio
 a warmup call, a shared-cache fill) is what `register()` is for. With
 `ssr.nodeWorkers: 1` the primary serves requests itself and sees its own state.
 
-**Failure.** As in Next.js, a `register()` that throws or rejects ends the process:
-Krate logs `An error occurred while loading instrumentation hook: <message>` with the
-stack and exits with status 1 (a failing import of the file is handled the same
-way). Under `krate start` the supervisor restarts the sidecar with a growing delay,
-so a permanent failure keeps the server unready; on the node target the process
-exits. Code `register()` starts without awaiting keeps its own error handling.
+**Failure.** A `register()` that throws or rejects, and an instrumentation module that
+fails to load (an error in its top-level code or in a module it imports), are startup
+failures. Krate logs `An error occurred while loading instrumentation hook: <message>`
+with the stack, the wording Next.js uses, and then:
+
+- `krate start` and `krate serve` do not restart the sidecar. They print the file and
+  the cause with a hint and exit with status 1, so a process manager or orchestrator
+  sees a failed start instead of a server that never becomes ready. Requests that
+  arrive meanwhile and need the sidecar get `503` at once, and `GET /readyz` returns
+  `503 sidecar-failed`.
+- `krate dev` keeps running. The error appears in the log and in the dev overlay, and
+  requests that need the sidecar get `503` with the cause at once. The sidecar starts
+  again (and runs `register()` again) when the instrumentation file is rebuilt, which
+  happens when you save it; after fixing something it imports, save the
+  instrumentation file too or restart with `r`.
+- The node deploy target (`server.mjs`) exits with status 1 before it listens.
+
+Next.js 16 behaves differently: `next start` keeps running and answers every request
+with `500`. Krate refuses to start because a server that cannot serve anything should
+fail where a supervisor can see it. Code `register()` starts without awaiting keeps
+its own error handling.
+
+A sidecar that exits for another reason before it listens is restarted with a growing
+delay; requests stop waiting for it as soon as it has exited and get `503` until a
+start succeeds. A sidecar that crashes after it was listening is waited for (up to 30
+seconds) while it restarts.
 
 `onRequestError` and `instrumentation-client` are not supported. `process.env.NEXT_RUNTIME`
 is not set; `krate migrate nextjs` folds `=== "nodejs"` to `true` and `=== "edge"` to

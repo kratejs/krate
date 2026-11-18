@@ -117,3 +117,57 @@ func TestSidecarNeverReadyAnswers503AndStaticDoesNotWait(t *testing.T) {
 		t.Errorf("logged %d times, want once", n)
 	}
 }
+
+// A sidecar that exited before it listened is known to have failed: waiting
+// requests are released at once and later ones do not wait, until a start
+// listens. A sidecar that crashes after it listened is waited for as before.
+func TestSidecarReadyKnownFailureFailsFast(t *testing.T) {
+	s := newSidecarReady(30 * time.Second)
+	s.begin()
+	done := make(chan bool, 1)
+	go func() { done <- s.wait(context.Background()) }()
+	time.Sleep(50 * time.Millisecond)
+	s.down()
+	select {
+	case ok := <-done:
+		if ok {
+			t.Fatal("wait succeeded for a failed sidecar")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("a waiting request was not released when the sidecar failed")
+	}
+	start := time.Now()
+	h := s.wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { t.Error("handler called") }))
+	s.fail("instrumentation failed: Error: secret detail")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/x", nil))
+	if rec.Code != 503 || time.Since(start) > time.Second {
+		t.Fatalf("got %d after %s", rec.Code, time.Since(start))
+	}
+	if strings.Contains(rec.Body.String(), "secret detail") {
+		t.Errorf("production answers must not carry the reason: %q", rec.Body.String())
+	}
+	s.showReason = true
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/x", nil))
+	if !strings.Contains(rec.Body.String(), "secret detail") {
+		t.Errorf("dev answers carry the reason: %q", rec.Body.String())
+	}
+
+	// A start that listens clears the failure.
+	gen := s.begin()
+	s.markUp(gen)
+	if s.failure() != "" || !s.wait(context.Background()) {
+		t.Fatal("the failure must clear once a start listens")
+	}
+	// A crash after listening is not a known failure: requests wait.
+	s.down()
+	if s.failure() != "" {
+		t.Fatalf("crash after listening marked failed: %q", s.failure())
+	}
+	s.timeout = 150 * time.Millisecond
+	start = time.Now()
+	if s.wait(context.Background()) || time.Since(start) < 100*time.Millisecond {
+		t.Fatal("requests must wait for a restart after a crash at run time")
+	}
+}

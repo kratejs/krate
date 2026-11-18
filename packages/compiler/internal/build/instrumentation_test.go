@@ -2,6 +2,7 @@ package build
 
 import (
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,6 +10,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/kratejs/krate/packages/compiler/internal/config"
 )
 
 // instFiles is a project with an SSR page, Node-served API routes and an
@@ -192,34 +195,181 @@ func TestInstrumentationNeverResolvingBlocksReadiness(t *testing.T) {
 	}
 }
 
-// A throwing register() is logged with Next's message and stack and ends the
-// process non-zero. The supervisor restarts the sidecar, which is a new server
-// start and runs register() again.
-func TestInstrumentationThrowExitsAndRestarts(t *testing.T) {
+// failingServe runs krate serve on a project whose instrumentation fails. It
+// returns once Serve returned, with its error, and the status and duration of
+// a request to a sidecar-bound route made as soon as the server answered.
+func failingServe(t *testing.T, root string, cfg *config.Config) (error, int, time.Duration) {
+	t.Helper()
+	port := freePort(t)
+	cfg.Server.Port = port
+	errCh := make(chan error, 1)
+	go func() { errCh <- Serve(root, cfg, time.Now()) }()
+	base := fmt.Sprintf("http://127.0.0.1:%d", port)
+	client := &http.Client{Timeout: 40 * time.Second}
+	code, took := 0, time.Duration(0)
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) && code == 0 {
+		select {
+		case err := <-errCh:
+			return err, 0, 0
+		default:
+		}
+		if resp, err := client.Get(base + "/healthz"); err == nil {
+			_ = resp.Body.Close()
+			start := time.Now()
+			if resp, err := client.Get(base + "/api/pid"); err == nil {
+				_ = resp.Body.Close()
+				code = resp.StatusCode
+			} else {
+				code = -1 // the server closed first
+			}
+			took = time.Since(start)
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	select {
+	case err := <-errCh:
+		return err, code, took
+	case <-time.After(20 * time.Second):
+		t.Fatal("krate serve kept running after instrumentation failed")
+	}
+	return nil, code, took
+}
+
+// checkStartupFailure asserts the shared outcome of failed instrumentation in
+// krate serve: Serve fails with the file and the cause, the sidecar is not
+// restarted, and the request made meanwhile did not wait for the 30s bound.
+func checkStartupFailure(t *testing.T, err error, code int, took time.Duration, logs, cause string) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("Serve must fail when instrumentation fails")
+	}
+	for _, want := range []string{"instrumentation failed", "src/instrumentation.ts", cause} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("Serve error lacks %q: %v", want, err)
+		}
+	}
+	// 0: the server had stopped before the request; -1: it closed meanwhile.
+	if code != 503 && code > 0 {
+		t.Errorf("a sidecar-bound request answered %d, want 503", code)
+	}
+	if took > 10*time.Second {
+		t.Errorf("a sidecar-bound request took %s; it must not wait for the start bound", took)
+	}
+	for _, want := range []string{instrumentationFailureMessage, cause, "hint:"} {
+		if !strings.Contains(logs, want) {
+			t.Errorf("log lacks %q:\n%s", want, logs)
+		}
+	}
+	if strings.Contains(logs, "restarting in") {
+		t.Errorf("failed instrumentation must not restart the sidecar:\n%s", logs)
+	}
+}
+
+// Like a failed Next start, a throwing register() is logged with Next's
+// message; krate serve does not restart the sidecar but stops with an error
+// that names the file and the cause, and requests that need the sidecar
+// answer 503 at once instead of waiting.
+func TestInstrumentationThrowStopsServer(t *testing.T) {
 	e2eEnv(t)
 	marker := filepath.Join(t.TempDir(), "marker.txt")
 	t.Setenv("INST_MARKER", marker)
 	b, root := buildInstProject(t, instFiles(`import { appendFileSync } from "node:fs";
 export async function register() {
   appendFileSync(process.env.INST_MARKER!, "attempt\n");
+  await new Promise((r) => setTimeout(r, 800));
   throw new Error("boom");
 }`))
 	logs := captureStderrFile(t)
-	base, err := startKrateServer(t, root, b.Cfg)
-	if err != nil {
-		t.Fatalf("serve: %v", err)
+	err, code, took := failingServe(t, root, b.Cfg)
+	checkStartupFailure(t, err, code, took, logs(), "Error: boom")
+	time.Sleep(500 * time.Millisecond)
+	if lines := markerLines(t, marker); len(lines) != 1 {
+		t.Errorf("register() must run once: %q", lines)
 	}
-	waitUntilTrue(t, 20*time.Second, "the supervisor to restart the sidecar", func() bool {
-		return len(markerLines(t, marker)) >= 2
-	})
-	out := logs()
-	for _, want := range []string{"An error occurred while loading instrumentation hook: ", "boom", "exited (exit status 1)"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("log lacks %q:\n%s", want, out)
+}
+
+func TestInstrumentationLoadFailureStopsServer(t *testing.T) {
+	e2eEnv(t)
+	b, root := buildInstProject(t, instFiles(`if (!process.env.KRATE_TEST_NEVER_SET) throw new Error("load boom");
+export function register() {}`))
+	logs := captureStderrFile(t)
+	err, code, took := failingServe(t, root, b.Cfg)
+	checkStartupFailure(t, err, code, took, logs(), "Error: load boom")
+}
+
+// krate dev stays up: the error is logged and shown in the overlay, requests
+// that need the sidecar answer 503 with the reason at once, nothing restarts
+// until the instrumentation is rebuilt, and then the sidecar starts again.
+func TestInstrumentationFailureInDevWaitsForRebuild(t *testing.T) {
+	e2eEnv(t)
+	marker := filepath.Join(t.TempDir(), "marker.txt")
+	t.Setenv("INST_MARKER", marker)
+	b, root := buildInstProject(t, instFiles(`import { appendFileSync } from "node:fs";
+export async function register() {
+  appendFileSync(process.env.INST_MARKER!, "attempt\n");
+  throw new Error("dev boom");
+}`))
+	logs := captureStderrFile(t)
+	cfg := b.Cfg
+	cfg.Server.Host = "127.0.0.1"
+	port := freePort(t)
+	cfg.DevServer.Port = port
+	hub := NewDevHub()
+	errc := make(chan error, 1)
+	go func() { errc <- ServeDev(root, cfg, hub, time.Now()) }()
+	t.Cleanup(func() {
+		hub.RequestRestart()
+		select {
+		case <-errc:
+		case <-time.After(15 * time.Second):
+			t.Log("dev server did not stop")
 		}
+	})
+	base := fmt.Sprintf("http://127.0.0.1:%d", port)
+	waitUntilTrue(t, 30*time.Second, "register() to fail", func() bool { return len(markerLines(t, marker)) >= 1 })
+	var body string
+	waitUntilTrue(t, 10*time.Second, "the failure to be known", func() bool {
+		start := time.Now()
+		code, b := getText(t, base+"/api/pid")
+		body = b
+		if took := time.Since(start); took > 5*time.Second {
+			t.Fatalf("a request took %s", took)
+		}
+		return code == 503 && strings.Contains(b, "dev boom")
+	})
+	if code, _ := getText(t, base+"/healthz"); code != 200 {
+		t.Errorf("the dev server must stay up: /healthz %d", code)
 	}
-	if code, _ := getText(t, base+"/readyz"); code != 503 {
-		t.Errorf("/readyz = %d while register() keeps failing", code)
+	waitUntilTrue(t, 5*time.Second, "the overlay entry", func() bool {
+		for _, e := range hub.ServerErrors() {
+			if strings.Contains(e.Message, "dev boom") {
+				return true
+			}
+		}
+		return false
+	})
+	time.Sleep(1500 * time.Millisecond)
+	if lines := markerLines(t, marker); len(lines) != 1 {
+		t.Fatalf("register() must not be retried before a rebuild: %q (body %q)", lines, body)
+	}
+	if strings.Contains(logs(), "restarting in") {
+		t.Errorf("no restart loop expected:\n%s", logs())
+	}
+
+	if err := os.WriteFile(filepath.Join(root, "src", "instrumentation.ts"), []byte(instRegisterMark), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.BuildInstrumentation(); err != nil {
+		t.Fatal(err)
+	}
+	waitUntilTrue(t, 30*time.Second, "the sidecar after the rebuild", func() bool {
+		code, _ := getText(t, base+"/api/pid")
+		return code == 200
+	})
+	if lines := markerLines(t, marker); len(lines) != 2 || lines[1] != "register worker=primary" {
+		t.Errorf("register() must run again once after the rebuild: %q", lines)
 	}
 }
 
@@ -289,40 +439,50 @@ func TestInstrumentationNodeDeployBundleRunsOnce(t *testing.T) {
 	}
 }
 
-func TestInstrumentationNodeDeployThrowExitsNonZero(t *testing.T) {
+// The node deploy bundle refuses to start, with Next's message, both when
+// register() throws and when the module fails to load.
+func TestInstrumentationNodeDeployFailureExitsNonZero(t *testing.T) {
 	if _, err := exec.LookPath("node"); err != nil {
 		requireE2E(t, "node is not installed")
 		t.Skip("node is not installed")
 	}
 	ensureHandlerDist(t)
-	b, root := scProject(t, instFiles(`export async function register() { throw new Error("boom"); }`))
-	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(root, "packages"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	repoRoot, _ := repoRootPath()
-	if err := os.Symlink(filepath.Join(repoRoot, "packages", "runtime"), filepath.Join(root, "packages", "runtime")); err != nil {
-		t.Skipf("cannot link the runtime: %v", err)
-	}
-	captureProgress(t)
-	if err := b.BuildAll(); err != nil {
-		t.Fatal(err)
-	}
-	plan, err := BuildServerBundle(root, b.Cfg, "node")
-	if err != nil {
-		t.Fatal(err)
-	}
-	cmd := exec.Command("node", plan.Bundle)
-	cmd.Dir = root
-	cmd.Env = append(os.Environ(), fmt.Sprintf("PORT=%d", freePort(t)), "HOST=127.0.0.1")
-	out, err := cmd.CombinedOutput()
-	if err == nil {
-		t.Fatalf("the server must exit non-zero:\n%s", out)
-	}
-	if !strings.Contains(string(out), "An error occurred while loading instrumentation hook: ") || !strings.Contains(string(out), "boom") {
-		t.Errorf("missing failure message:\n%s", out)
+	for name, src := range map[string]string{
+		"throw": `export async function register() { throw new Error("boom"); }`,
+		"load": `if (!process.env.KRATE_TEST_NEVER_SET) throw new Error("boom");
+export function register() {}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			b, root := scProject(t, instFiles(src))
+			if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(filepath.Join(root, "packages"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			repoRoot, _ := repoRootPath()
+			if err := os.Symlink(filepath.Join(repoRoot, "packages", "runtime"), filepath.Join(root, "packages", "runtime")); err != nil {
+				t.Skipf("cannot link the runtime: %v", err)
+			}
+			captureProgress(t)
+			if err := b.BuildAll(); err != nil {
+				t.Fatal(err)
+			}
+			plan, err := BuildServerBundle(root, b.Cfg, "node")
+			if err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command("node", plan.Bundle)
+			cmd.Dir = root
+			cmd.Env = append(os.Environ(), fmt.Sprintf("PORT=%d", freePort(t)), "HOST=127.0.0.1")
+			out, err := cmd.CombinedOutput()
+			if err == nil {
+				t.Fatalf("the server must exit non-zero:\n%s", out)
+			}
+			if !strings.Contains(string(out), "[krate] "+instrumentationFailureMessage) || !strings.Contains(string(out), "boom") {
+				t.Errorf("missing failure message:\n%s", out)
+			}
+		})
 	}
 }
 

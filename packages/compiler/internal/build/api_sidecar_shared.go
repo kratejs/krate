@@ -1,6 +1,10 @@
 package build
 
-import "github.com/kratejs/krate/packages/native/jsruntime"
+import (
+	"strconv"
+
+	"github.com/kratejs/krate/packages/native/jsruntime"
+)
 
 // apiSidecarSharedJS holds the API request semantics shared by the Node and
 // Bun sidecars: method dispatch (405/OPTIONS/HEAD), error bodies, the
@@ -185,12 +189,16 @@ async function krateLoadMiddleware() {
 // krateRunInstrumentation runs register() of the app's instrumentation module
 // exactly once per server start: in the primary process only, before the
 // sidecar forks cluster workers or listens, so a worker never runs it.
-// A cluster worker has cluster.isWorker set (the Bun script has no cluster). A rejection is logged with its
-// stack and ends the process (non-zero), as a failing register() ends next
-// start; the host restarts the sidecar with backoff.
+// A cluster worker has cluster.isWorker set (the Bun script has no cluster).
+// A module that fails to load, or a register() that throws or rejects, is
+// logged with its stack, written to KRATE_INSTRUMENTATION_REPORT for the host,
+// and ends the process with the dedicated exit status the host treats as a
+// startup failure instead of restarting the sidecar.
 const KRATE_INSTRUMENTATION_PATH = process.argv[6] ? path.resolve(process.argv[6]) : '';
 async function krateRunInstrumentation() {
   if (!KRATE_INSTRUMENTATION_PATH || (typeof cluster !== 'undefined' && cluster.isWorker)) return;
+  // Dev removes the bundle when the file is deleted.
+  if (!fs.existsSync(KRATE_INSTRUMENTATION_PATH)) return;
   // A register() that never settles must keep the process (and so the
   // not-ready state) alive instead of letting Node exit with code 13.
   const keepAlive = setInterval(() => {}, 1 << 30);
@@ -200,8 +208,13 @@ async function krateRunInstrumentation() {
       : (mod.default && typeof mod.default.register === 'function' ? mod.default.register : null);
     if (register) await register();
   } catch (e) {
-    console.error('[krate] ` + instrumentationFailureMessage + `' + ((e && e.stack) || e));
-    process.exit(1);
+    const detail = (e && e.stack) || String(e);
+    console.error('[krate] ` + instrumentationFailureMessage + `' + detail);
+    if (process.env.KRATE_INSTRUMENTATION_REPORT) {
+      const report = { name: (e && e.name) || '', message: (e && e.message !== undefined) ? String(e.message) : String(e), stack: detail };
+      try { fs.writeFileSync(process.env.KRATE_INSTRUMENTATION_REPORT, JSON.stringify(report)); } catch {}
+    }
+    process.exit(` + strconv.Itoa(instrumentationExitCode) + `);
   } finally {
     clearInterval(keepAlive);
   }

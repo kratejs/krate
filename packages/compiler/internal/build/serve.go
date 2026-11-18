@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
+	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/environ"
 	"github.com/kratejs/krate/packages/compiler/internal/execx"
 	"github.com/kratejs/krate/packages/compiler/internal/gohost"
@@ -1500,7 +1501,11 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	var nodeReady *sidecarReady
 	if needNodeSidecar {
 		nodeReady = newSidecarReady(sidecarStartTimeout)
+		nodeReady.showReason = hub != nil
 	}
+	// startupFailed carries the error that stops krate serve/start before it
+	// serves: failed instrumentation.
+	startupFailed := make(chan error, 1)
 	var nodeAPICmdMu sync.Mutex
 	var nodeAPICmd *exec.Cmd
 	var nodeAPIStopOnce sync.Once
@@ -1565,6 +1570,9 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 				if cacheRuntime != "" {
 					cmd.Env = append(cmd.Env, "KRATE_CACHE_RUNTIME="+cacheRuntime)
 				}
+				if instrumentationArg != "" {
+					cmd.Env = append(cmd.Env, "KRATE_INSTRUMENTATION_REPORT="+instrumentationReportPath(root))
+				}
 				cmd.Stdout = os.Stdout
 				cmd.Stderr = os.Stderr
 				return cmd
@@ -1578,6 +1586,9 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 				default:
 				}
 				cmd := makeCmd()
+				if instrumentationArg != "" {
+					_ = os.Remove(instrumentationReportPath(root))
+				}
 				started := time.Now()
 				// Start under the lock and publish only a started command:
 				// shutdown reads cmd.Process, and must either see this process
@@ -1596,6 +1607,9 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 				nodeAPICmdMu.Unlock()
 				if err == nil {
 					clearServerCrash("Node API sidecar")
+					if instrumentationArg != "" && hub != nil {
+						hub.ClearServerError("Instrumentation")
+					}
 					gen := nodeReady.begin()
 					exited := make(chan struct{})
 					go nodeReady.watch(gen, apiPort, exited)
@@ -1607,6 +1621,29 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 				case <-nodeAPIStop:
 					return
 				default:
+				}
+				// Failed instrumentation is not restarted: krate serve/start
+				// stops, dev waits for the file to be rebuilt.
+				if instrumentationArg != "" && exitStatus(err) == instrumentationExitCode {
+					d, stack := instrumentationFailure(root, hub != nil)
+					nodeReady.fail(d.Message)
+					fmt.Fprintf(os.Stderr, "  %sx%s %s\n", cRed, cReset, strings.ReplaceAll(diag.FormatDiagnostics([]error{d}), "\n", "\n    "))
+					if hub == nil {
+						select {
+						case startupFailed <- d:
+						default:
+						}
+						return
+					}
+					// The hub directly: this can happen before the dev server
+					// attached it for crash reports.
+					hub.PublishServerError("Instrumentation", buildCrashError("Instrumentation", d.Message, stack, RecentLogLines(crashLogLines)))
+					if !waitForFileChange(instrumentationBundlePath(root), nodeAPIStop) {
+						return
+					}
+					printf("  %s*%s instrumentation rebuilt; starting the Node API sidecar again\n", cCyan, cReset)
+					delay = 100 * time.Millisecond
+					continue
 				}
 				if time.Since(started) > 10*time.Second {
 					delay = 100 * time.Millisecond
@@ -2552,6 +2589,10 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		// The sidecar listens only after instrumentation's register() resolved.
 		if instrumentationArg != "" && nodeReady != nil && !nodeReady.up.Load() {
 			w.WriteHeader(http.StatusServiceUnavailable)
+			if nodeReady.failure() != "" {
+				_, _ = io.WriteString(w, "sidecar-failed\n")
+				return
+			}
 			_, _ = io.WriteString(w, "instrumentation-pending\n")
 			return
 		}
@@ -2707,6 +2748,16 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
 		}
+		return err
+	case err := <-startupFailed:
+		// Requests already answer 503 at once; close and report.
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		if httpServer.Shutdown(ctx) != nil {
+			_ = httpServer.Close()
+		}
+		cancel()
+		<-serveErr
+		stopSidecars()
 		return err
 	case <-restartCh:
 		// A config change restarts the dev server in place: close this server,

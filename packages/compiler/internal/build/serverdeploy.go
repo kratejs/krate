@@ -589,7 +589,9 @@ func BuildServerBundle(root string, cfg *config.Config, target string) (*deploy.
 	instImport, instExpr := "", "undefined"
 	if inst := findInstrumentationSource(root); inst != "" {
 		if target == "node" {
-			instImport = fmt.Sprintf("import * as instrumentation_mod from %s;\n", jsString(filepath.ToSlash(inst)))
+			// The guards around the import report a module that fails to
+			// load the way a failing register() is reported.
+			instImport = fmt.Sprintf("import %s;\nimport * as instrumentation_mod from %s;\nimport %s;\n", jsString(instGuardBegin), jsString(filepath.ToSlash(inst)), jsString(instGuardEnd))
 			instExpr = "instrumentation_mod"
 		} else {
 			plan.Warnings = append(plan.Warnings, fmt.Sprintf("%s is not run on the %s target: register() runs once per server start, which only the node target has", relOr(root, inst), target))
@@ -1065,6 +1067,33 @@ func builtinGuardFilter() string {
 	return `^(?:node:)?(?:` + strings.Join(names, "|") + `)$`
 }
 
+// instGuardBegin and instGuardEnd surround the instrumentation import of the
+// node deploy bundle: while its module (and what it imports) evaluates, an
+// exception is reported as failed instrumentation and ends the process.
+const (
+	instGuardBegin = "krate-instrumentation-guard:begin"
+	instGuardEnd   = "krate-instrumentation-guard:end"
+)
+
+func instrumentationGuardPlugin() api.Plugin {
+	const ns = "krate-instrumentation-guard"
+	return api.Plugin{
+		Name: ns,
+		Setup: func(b api.PluginBuild) {
+			b.OnResolve(api.OnResolveOptions{Filter: `^krate-instrumentation-guard:`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+				return api.OnResolveResult{Path: args.Path, Namespace: ns}, nil
+			})
+			b.OnLoad(api.OnLoadOptions{Filter: `.*`, Namespace: ns}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
+				src := "process.off('uncaughtException', globalThis.__krateInstGuard); delete globalThis.__krateInstGuard;\n"
+				if args.Path == instGuardBegin {
+					src = "globalThis.__krateInstGuard = (e) => { console.error('[krate] " + instrumentationFailureMessage + "' + ((e && e.stack) || e)); process.exit(1); };\nprocess.on('uncaughtException', globalThis.__krateInstGuard);\n"
+				}
+				return api.OnLoadResult{Contents: &src, Loader: api.LoaderJS}, nil
+			})
+		},
+	}
+}
+
 // builtinGuardPlugin keeps Node built-ins out of non-Node targets. Node and
 // serverless-Node targets leave them external; Cloudflare allows the
 // nodejs_compat subset and fails at bundle time, naming the module, otherwise.
@@ -1169,7 +1198,7 @@ func bundleServerEntry(root string, cfg *config.Config, target, entry, outFile s
 		Outfile:       outFile,
 		Write:         true,
 		LogLevel:      api.LogLevelSilent,
-		Plugins:       []api.Plugin{cloudflareModulesPlugin(root, target), rt, jseval.MarkerPackagesPlugin(), builtinGuardPlugin(target)},
+		Plugins:       []api.Plugin{instrumentationGuardPlugin(), cloudflareModulesPlugin(root, target), rt, jseval.MarkerPackagesPlugin(), builtinGuardPlugin(target)},
 		Stdin: &api.StdinOptions{
 			Loader:     api.LoaderJS,
 			Contents:   entry,

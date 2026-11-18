@@ -285,9 +285,10 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
   exports `register()`, which runs once per server start: in the primary process of the Node API
   sidecar, awaited before that process forks its cluster workers or listens (never in a worker or the SSR
   renderer), and once before `startNodeServer` in the node deploy bundle. The server is not ready until
-  it resolves (`/readyz` answers `503 instrumentation-pending`). Like Next.js, a `register()` that
-  throws is logged as `An error occurred while loading instrumentation hook: ...` and exits the
-  process with status 1 (the supervisor restarts the sidecar with a growing delay). The Node sidecar now
+  it resolves (`/readyz` answers `503 instrumentation-pending`). A `register()` that throws, or a
+  module that fails to load, is logged as `An error occurred while loading instrumentation hook: ...`
+  and is a startup failure: `krate start`/`serve` and the node deploy bundle exit with status 1,
+  `krate dev` stays up and retries after the file is rebuilt (see Fixed). The Node sidecar now
   starts even when every API route is embedded if the file exists. State `register()` puts on
   `globalThis` is not visible to cluster workers; see docs/guides/self-hosting. Other deploy targets
   warn that they do not run it.
@@ -570,6 +571,17 @@ host code runs in the native process. Names and options may change between relea
   `Named export 'loadEnvConfig' not found` when the sidecar loaded the instrumentation module, and the
   sidecar restarted in a loop. The package is still loaded from `node_modules`; ES module packages and
   dynamic imports are unchanged.
+- Failed instrumentation no longer takes a site down silently. The Node API sidecar restarted in a
+  loop when `register()` threw or the instrumentation module failed to load, and because requests wait
+  up to 30 seconds for the sidecar, every page behind middleware hung for 30 seconds and got `503`.
+  Now `krate start`/`krate serve` treat it as a startup failure: no restart, an error that names the
+  file and the cause with a hint, exit status 1, and `503` at once for requests made meanwhile
+  (`/readyz` answers `503 sidecar-failed`). `krate dev` stays up, shows the error in the log and the
+  overlay, answers `503` with the cause at once, and starts the sidecar again when the instrumentation
+  file is rebuilt. The node deploy bundle also reports a module that fails to load with Next's message
+  before it exits. A sidecar that exits before it listens for any other reason is still restarted,
+  but requests stop waiting for it as soon as it exits. Next.js 16 keeps serving `500` for every
+  request instead; see docs/guides/self-hosting#instrumentation.
 - `krate serve`, `krate start` and `krate dev` send the same `Content-Type` on every OS for common web
   files. On Windows the registry served `.js` without a charset and `.woff2` as `text/plain`; on Linux
   `.otf` was an OpenDocument type, `.ico` was `image/vnd.microsoft.icon` and `.webm` was `audio/webm`.

@@ -21,18 +21,27 @@ var sidecarStartTimeout = 30 * time.Second
 // sidecarReady tracks whether the supervised Node API sidecar accepts
 // connections. The fast path is one atomic load; only requests that arrive
 // while the sidecar is starting (first start or a restart) block.
+//
+// A sidecar that exited before it listened (a crash at startup, or failed
+// instrumentation) is known to have failed: requests stop waiting for it and
+// answer 503 at once until a later start listens.
 type sidecarReady struct {
 	timeout time.Duration
-	up      atomic.Bool
-	logged  atomic.Bool
+	// showReason puts the failure reason in the 503 body (dev); production
+	// answers keep it in the server log.
+	showReason bool
+	up         atomic.Bool
+	logged     atomic.Bool
 
-	mu  sync.Mutex
-	gen uint64
-	ch  chan struct{} // closed once the sidecar is up
+	mu      sync.Mutex
+	gen     uint64
+	ch      chan struct{} // closed once the sidecar is up
+	failCh  chan struct{} // closed once the sidecar is known to have failed
+	failMsg string        // why, while failCh is closed
 }
 
 func newSidecarReady(timeout time.Duration) *sidecarReady {
-	return &sidecarReady{timeout: timeout, ch: make(chan struct{})}
+	return &sidecarReady{timeout: timeout, ch: make(chan struct{}), failCh: make(chan struct{})}
 }
 
 // begin marks a new process start and returns its generation.
@@ -44,12 +53,45 @@ func (s *sidecarReady) begin() uint64 {
 	return s.gen
 }
 
-// down marks the sidecar as not accepting connections (process exited).
+// down marks the sidecar as not accepting connections (process exited). A
+// process that exited before it listened failed to start.
 func (s *sidecarReady) down() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.gen++
+	if !s.up.Load() {
+		s.failLocked("the Node API sidecar exited before it started listening; it is restarting")
+	}
 	s.resetLocked()
+}
+
+// fail marks the sidecar as failed with a reason requests are answered with.
+func (s *sidecarReady) fail(msg string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.failLocked(msg)
+}
+
+func (s *sidecarReady) failLocked(msg string) {
+	s.failMsg = msg
+	select {
+	case <-s.failCh:
+	default:
+		close(s.failCh)
+		s.logged.Store(false)
+	}
+}
+
+// failure is the reason the sidecar is known to have failed, or "".
+func (s *sidecarReady) failure() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	select {
+	case <-s.failCh:
+		return s.failMsg
+	default:
+		return ""
+	}
 }
 
 func (s *sidecarReady) resetLocked() {
@@ -68,6 +110,13 @@ func (s *sidecarReady) markUp(gen uint64) {
 	}
 	s.up.Store(true)
 	close(s.ch)
+	select {
+	case <-s.failCh:
+		s.failCh = make(chan struct{})
+		s.failMsg = ""
+		s.logged.Store(false)
+	default:
+	}
 }
 
 // watch polls the loopback port until it accepts, the process exits (done) or
@@ -94,19 +143,26 @@ func (s *sidecarReady) watch(gen uint64, port int, done <-chan struct{}) {
 }
 
 // wait returns true once the sidecar accepts connections. It returns false
-// when the bound elapsed or ctx ended.
+// when the bound elapsed, ctx ended or the sidecar is known to have failed.
 func (s *sidecarReady) wait(ctx context.Context) bool {
 	if s.up.Load() {
 		return true
 	}
 	s.mu.Lock()
-	ch := s.ch
+	ch, failCh := s.ch, s.failCh
 	s.mu.Unlock()
+	select {
+	case <-failCh:
+		return s.up.Load()
+	default:
+	}
 	t := time.NewTimer(s.timeout)
 	defer t.Stop()
 	select {
 	case <-ch:
 		return true
+	case <-failCh:
+		return s.up.Load()
 	case <-ctx.Done():
 		return false
 	case <-t.C:
@@ -115,16 +171,28 @@ func (s *sidecarReady) wait(ctx context.Context) bool {
 }
 
 // unavailable answers a request whose wait failed: 503 + Retry-After when the
-// bound elapsed, nothing when the client went away. It logs once.
+// bound elapsed or the sidecar failed, nothing when the client went away. It
+// logs once per failure.
 func (s *sidecarReady) unavailable(w http.ResponseWriter, r *http.Request) {
 	if r.Context().Err() != nil {
+		return
+	}
+	w.Header().Set("Retry-After", "1")
+	w.Header().Set("Cache-Control", "no-store")
+	if msg := s.failure(); msg != "" {
+		if s.logged.CompareAndSwap(false, true) {
+			fmt.Fprintf(os.Stderr, "  %s! answering 503 to requests that need the Node API sidecar: %s%s\n", cYellow, msg, cReset)
+		}
+		body := "server unavailable: the Node API sidecar failed to start (see the server log)"
+		if s.showReason {
+			body = "server unavailable: " + msg
+		}
+		http.Error(w, body, http.StatusServiceUnavailable)
 		return
 	}
 	if s.logged.CompareAndSwap(false, true) {
 		fmt.Fprintf(os.Stderr, "  %s! Node API sidecar did not start listening within %s; answering 503 until it does (instrumentation register() still pending, or the sidecar keeps crashing)%s\n", cYellow, s.timeout, cReset)
 	}
-	w.Header().Set("Retry-After", "1")
-	w.Header().Set("Cache-Control", "no-store")
 	http.Error(w, "server is starting", http.StatusServiceUnavailable)
 }
 

@@ -1,12 +1,19 @@
 package build
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/evanw/esbuild/pkg/api"
 
+	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/fsutil"
 )
 
@@ -75,3 +82,83 @@ func hasInstrumentation(root string) bool {
 
 // instrumentationFailureMessage prefixes a register() error the way Next does.
 const instrumentationFailureMessage = "An error occurred while loading instrumentation hook: "
+
+// instrumentationExitCode is the exit status of a Node API sidecar whose
+// instrumentation failed (EX_CONFIG): the host stops instead of restarting it.
+const instrumentationExitCode = 78
+
+// instrumentationReportPath is where the Node API sidecar writes the error of
+// a failed instrumentation (see krateRunInstrumentation).
+func instrumentationReportPath(root string) string {
+	return filepath.Join(root, ".krate", "instrumentation-error.json")
+}
+
+// instrumentationFailure describes a failed instrumentation of the Node API
+// sidecar: the error the sidecar reported, as a diagnostic on the source file,
+// and its stack.
+func instrumentationFailure(root string, dev bool) (diag.Diagnostic, string) {
+	var rep struct {
+		Name    string `json:"name"`
+		Message string `json:"message"`
+		Stack   string `json:"stack"`
+	}
+	if data, err := os.ReadFile(instrumentationReportPath(root)); err == nil {
+		_ = json.Unmarshal(data, &rep)
+	}
+	cause := strings.TrimSpace(rep.Message)
+	if rep.Name != "" && cause != "" && !strings.HasPrefix(cause, rep.Name) {
+		cause = rep.Name + ": " + cause
+	}
+	if cause == "" {
+		cause = "the Node API sidecar exited with status " + strconv.Itoa(instrumentationExitCode) + " (see the error above)"
+	}
+	file := "instrumentation"
+	if src := findInstrumentationSource(root); src != "" {
+		file = relOr(root, src)
+	}
+	hint := "fix the error in " + file + " or a module it imports and start the server again. The server does not start while instrumentation fails: register() must resolve before the first request"
+	if dev {
+		hint = "fix the error in " + file + " or a module it imports; the Node API sidecar starts again after the next rebuild of the instrumentation file. Until then requests that need it answer 503"
+	}
+	return diag.Diagnostic{
+		File:    file,
+		Line:    1,
+		Col:     1,
+		Message: "instrumentation failed: " + cause,
+		Hint:    hint,
+	}, rep.Stack
+}
+
+// exitStatus is the exit status in a process's Wait error, or -1.
+func exitStatus(err error) int {
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		return ee.ExitCode()
+	}
+	return -1
+}
+
+// waitForFileChange waits until the size or modification time of path changes
+// (or it appears or disappears). It returns false when stop closed first.
+func waitForFileChange(path string, stop <-chan struct{}) bool {
+	stamp := func() string {
+		st, err := os.Stat(path)
+		if err != nil {
+			return ""
+		}
+		return fmt.Sprint(st.Size(), st.ModTime().UnixNano())
+	}
+	was := stamp()
+	t := time.NewTicker(250 * time.Millisecond)
+	defer t.Stop()
+	for {
+		select {
+		case <-stop:
+			return false
+		case <-t.C:
+			if stamp() != was {
+				return true
+			}
+		}
+	}
+}
