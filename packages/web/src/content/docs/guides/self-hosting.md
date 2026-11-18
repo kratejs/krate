@@ -275,6 +275,13 @@ Exactly once per server means:
 - The server is not ready until `register()` resolves: the API sidecar does not
   listen yet, and `GET /readyz` returns `503 instrumentation-pending`. `/healthz`
   stays `200`.
+- Requests that need the sidecar (Node API routes, server actions, dynamic metadata routes,
+  middleware that runs on Node) wait for it to listen, up to 30 seconds, instead of failing
+  with `502`; this covers the first start and a supervisor restart. If it is still not
+  listening after that, they get `503` with `Retry-After: 1`, and Krate logs it once. Static
+  files and routes the embedded runtime or Go serves never wait. `server.mjs` of the Node
+  deploy target awaits `register()` before it listens, so a request then waits in the
+  platform's connection queue or is refused until the server is up.
 
 **Consequences of once per server.** `register()` does not run in every process that
 serves requests. State it sets on `globalThis` or in module variables

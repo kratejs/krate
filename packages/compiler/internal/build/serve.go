@@ -1481,6 +1481,10 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	}
 	apiBodyLimit := cfg.MaxAPIBodyBytes()
 
+	var nodeReady *sidecarReady
+	if needNodeSidecar {
+		nodeReady = newSidecarReady(sidecarStartTimeout)
+	}
 	var nodeAPICmdMu sync.Mutex
 	var nodeAPICmd *exec.Cmd
 	var nodeAPIStopOnce sync.Once
@@ -1576,7 +1580,12 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 				nodeAPICmdMu.Unlock()
 				if err == nil {
 					clearServerCrash("Node API sidecar")
+					gen := nodeReady.begin()
+					exited := make(chan struct{})
+					go nodeReady.watch(gen, apiPort, exited)
 					err = cmd.Wait()
+					close(exited)
+					nodeReady.down()
 				}
 				select {
 				case <-nodeAPIStop:
@@ -1678,6 +1687,11 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		apiHeaderWait = 10 * time.Minute
 	}
 	apiProxy.Transport = newSidecarTransportTimeout(apiHeaderWait)
+	// nodeAPIProxy waits for the sidecar to listen before forwarding.
+	var nodeAPIProxy http.Handler = apiProxy
+	if nodeReady != nil {
+		nodeAPIProxy = nodeReady.wrap(apiProxy)
+	}
 
 	// Optional user-provided API sidecar. Requests it owns are forwarded first;
 	// a 404 falls through to the built-in Go/TS/QuickJS routes below.
@@ -1718,12 +1732,13 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	// Middleware (matcher-scoped) runs in front of pages, API routes and
 	// server actions alike.
 	gate := &middlewareGate{
-		rt:         middlewareRT,
-		dev:        hub != nil,
-		sidecarURL: fmt.Sprintf("http://localhost:%d/__krate/middleware", apiPort),
-		file:       middlewarePath,
-		required:   middlewareRequired,
-		secret:     revalHost.secret,
+		rt:           middlewareRT,
+		dev:          hub != nil,
+		sidecarURL:   fmt.Sprintf("http://localhost:%d/__krate/middleware", apiPort),
+		file:         middlewarePath,
+		required:     middlewareRequired,
+		secret:       revalHost.secret,
+		sidecarReady: nodeReady,
 		staticExists: func(urlPath string) bool {
 			f, err := hardenedDir{http.Dir(absOut)}.Open(urlPath)
 			if err != nil {
@@ -1738,7 +1753,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	// Segment pages: the nearest 404/500 page for a request (see segments.go).
 	segs := newSegmentIndex(absOut)
 	if hasActions {
-		mux.Handle("/__krate/action/", loggingMiddleware(gate.wrap(http.HandlerFunc(actionHandlerSegments(apiProxy, apiBodyLimit, segs)))))
+		mux.Handle("/__krate/action/", loggingMiddleware(gate.wrap(http.HandlerFunc(actionHandlerSegments(nodeAPIProxy, apiBodyLimit, segs)))))
 	}
 
 	apiHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1778,7 +1793,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		// Routes that need Node (external imports the embedded runtime cannot
 		// run) are forwarded to the Node sidecar even when QuickJS is default.
 		if apiRT != nil && nodeOnlyRoutes[apiRT.ResolveFile(r.URL.Path)] {
-			apiProxy.ServeHTTP(newDeadlineWriter(w), r)
+			nodeAPIProxy.ServeHTTP(newDeadlineWriter(w), r)
 			return
 		}
 
@@ -1789,7 +1804,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		}
 
 		// Fallback: proxy to sidecar
-		apiProxy.ServeHTTP(newDeadlineWriter(w), r)
+		nodeAPIProxy.ServeHTTP(newDeadlineWriter(w), r)
 	})
 	mux.Handle("/api/", loggingMiddleware(gate.wrap(apiHandler)))
 
@@ -2404,7 +2419,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 			if key, ok := metaRoutes.get().match(r.URL.Path); ok {
 				r.URL.Path = "/api/" + key
 				r.URL.RawPath = ""
-				apiProxy.ServeHTTP(newDeadlineWriter(w), r)
+				nodeAPIProxy.ServeHTTP(newDeadlineWriter(w), r)
 				return
 			}
 		}
@@ -2515,7 +2530,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 			return
 		}
 		// The sidecar listens only after instrumentation's register() resolved.
-		if instrumentationArg != "" && !tcpReachable(apiPort) {
+		if instrumentationArg != "" && nodeReady != nil && !nodeReady.up.Load() {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			_, _ = io.WriteString(w, "instrumentation-pending\n")
 			return
@@ -3358,15 +3373,4 @@ func hasRouteBundles(dir string) bool {
 		return nil
 	})
 	return found
-}
-
-// tcpReachable reports whether something accepts connections on the loopback
-// port.
-func tcpReachable(port int) bool {
-	c, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), 500*time.Millisecond)
-	if err != nil {
-		return false
-	}
-	_ = c.Close()
-	return true
 }

@@ -563,6 +563,11 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- `krate serve`, `krate start` and `krate dev`: a request that reaches the Node API sidecar while it is
+  still starting (the first start or a supervisor restart; slower now that `register()` of an
+  instrumentation file runs before it listens) waits for it, up to 30 seconds, instead of answering `502`.
+  After that bound it answers `503` with `Retry-After` and logs once. Static files, embedded and Go routes
+  never wait, and middleware that runs on Node waits the same way.
 - The SSR server handler (`krate deploy --target node`, serverless targets) answers a `rewrites` entry whose
   destination is an `/api` route from the API handler, as `krate serve` does. It handed the request to the
   page handler, so `/discord-embed.json` rewritten to `/api/discord-embed.json` returned 404.
