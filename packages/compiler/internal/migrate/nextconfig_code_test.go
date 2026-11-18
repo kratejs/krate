@@ -198,6 +198,7 @@ func TestNextConfigAppShapedHeadersAndImagesAreCarried(t *testing.T) {
 	const want = `import { defineConfig } from '@krate/core';
 import { buildCacheRules } from './src/config/cache-headers';
 import { buildSecurityHeaders } from './src/config/security-headers';
+import type { KrateConfig as NextConfig } from '@krate/core';
 
 const remotePatterns: NonNullable<NonNullable<NextConfig['images']>['remotePatterns']> = [
   { protocol: 'https', hostname: 'cdn.discordapp.com' },

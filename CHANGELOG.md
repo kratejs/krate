@@ -564,6 +564,15 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- `KrateConfig` (@krate/core) types every key the config loader accepts. `deploy.target` takes
+  `"node"` and `"docker"`, so the config `krate migrate nextjs` writes for `output: 'standalone'`
+  typechecks; `ssr` gains `nodeWorkers`, `apiWorkers`, `apiIsolation` and `rendererWorkers`; the
+  top level gains `cache`, `react`, `serverExternalPackages`, `outputFileTracingIncludes`,
+  `outputFileTracingRoot`, `envDir` and `envPrefix`; `fonts.preloadLimit`, `i18n.localeLabels`,
+  `versions.labels` and the native `fileAssociations`, `workers`, `extensions` and `automation` are
+  typed too. A Go test now fails when a config key is missing from the types, and another typechecks
+  the krate.config.ts the migrator writes. The migrator also keeps a `NextConfig` annotation in code
+  it carries over typed, as `KrateConfig`, instead of leaving the name undefined.
 - Server bundles that Node loads as ES modules (instrumentation, Node API routes, server actions, page
   server bundles, Node middleware and the node deploy bundle) import an external CommonJS package through
   its default export, so a named import works even when Node cannot detect the package's exports.

@@ -710,7 +710,7 @@ rejected.
 
 ```typescript
 deploy: {
-  target: "vercel",                  // netlify | vercel | cloudflare | gh-pages
+  target: "vercel",                  // netlify | vercel | cloudflare | gh-pages | node | docker
   options: { cleanUrls: "true", trailingSlash: "false" },
   worker: "src/cloudflare.ts",       // cloudflare: module merged into the Worker (default src/cloudflare.ts)
 },
