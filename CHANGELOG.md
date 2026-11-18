@@ -563,6 +563,10 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- `krate deploy --target node` in a pnpm workspace: a page, action or middleware bundle that reaches a
+  dependency installed only under a workspace package (`packages/db/node_modules`) imports it by file
+  URL, which the server bundling step could not resolve ("Could not resolve file:///...node_modules/.pnpm/...").
+  The URL is now bundled, or kept as the bare package name when the package is external (native).
 - Redirect and rewrite destinations: an optional parameter (`:rest*`, `:rest?`) that matched nothing now
   takes its preceding `/` with it, as in Next (`/n/:a/:b*` to `/t/:a/:b*` sends `/n/x` to `/t/x`, not
   `/t/x/`), in `krate serve` and in the SSR server handler.

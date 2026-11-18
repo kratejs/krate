@@ -249,3 +249,45 @@ export async function GET() { return Response.json(greet("route")); }`,
 		t.Errorf("api/ws: %d %s", res.status, res.body)
 	}
 }
+
+// pnpm installs a workspace package's dependencies under that package only,
+// so the app's bundles import them by file URL. The node deploy bundle must
+// load such a dependency (bundled in, or kept external when it is native)
+// instead of failing to resolve the URL.
+func TestNodeTargetBundlesFileURLDependencyOfWorkspacePackage(t *testing.T) {
+	files := map[string]string{
+		"node_modules/.pnpm/tiny@1.0.0/node_modules/tiny/package.json": `{"name":"tiny","version":"1.0.0","main":"index.js"}`,
+		"node_modules/.pnpm/tiny@1.0.0/node_modules/tiny/index.js":     `module.exports = function tiny() { return "from tiny"; };`,
+		"packages/db/package.json":                                     `{"name":"@acme/db","version":"0.0.0","main":"src/index.ts","dependencies":{"tiny":"1.0.0"}}`,
+		"packages/db/src/index.ts": `import tiny from "tiny";
+export function dbName(): string { return tiny(); }`,
+		"packages/db/node_modules/tiny":  "symlink:node_modules/.pnpm/tiny@1.0.0/node_modules/tiny",
+		"apps/web/node_modules/@acme/db": "symlink:packages/db",
+		"apps/web/package.json":          `{"name":"web","dependencies":{"@acme/db":"workspace:*"}}`,
+		"apps/web/src/pages/index.tsx":   `export default function Home() { return <h1>home</h1>; }`,
+		"apps/web/src/pages/p/[id].tsx": `import { dbName } from "@acme/db";
+export default async function Page({ params }: any) {
+  const { id } = await params;
+  async function rename() { 'use server'; return dbName() + id; }
+  return <form action={rename}><h1>page {dbName()} {id}</h1><button>go</button></form>;
+}`,
+		"apps/web/src/api/dep.ts": `import { dbName } from "@acme/db";
+export async function GET() { return Response.json({ name: dbName() }); }`,
+	}
+	t.Setenv("KRATE_ACTION_SECRET", strings.Repeat("k", 48))
+	root, cfg := externalsProjectAt(t, files, "apps/web", func(c *config.Config) { c.SSR.APIRuntime = "node" })
+	if _, err := BuildServerBundle(root, cfg, "node"); err != nil {
+		t.Fatalf("BuildServerBundle: %v", err)
+	}
+	if err := os.RemoveAll(filepath.Join(filepath.Dir(filepath.Dir(root)), "node_modules")); err != nil {
+		t.Fatal(err)
+	}
+	base := startNodeBundle(t, root, cfg)
+	res := doMatrix(t, base, "GET", "/api/dep", nil, "")
+	if res.status != 200 || !strings.Contains(res.body, "from tiny") {
+		t.Errorf("api/dep: %d %s", res.status, res.body)
+	}
+	if res := doMatrix(t, base, "GET", "/p/7/", nil, ""); res.status != 200 || !strings.Contains(res.body, "from tiny") {
+		t.Errorf("ssr page: %d %s", res.status, res.body)
+	}
+}
