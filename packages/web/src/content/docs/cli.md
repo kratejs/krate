@@ -278,7 +278,7 @@ krate migrate rollback .krate/migrate/nextjs-20261027-190904
 | `--apply` | Write the plan atomically, then move the original Next route trees (`app/`, `src/app/`, `pages/`) into the backup; rollback moves them back |
 | `--verify` | After applying, build, run checks, and diff the route inventory. Stops before writing when `@krate/core` does not resolve from the project (install the dependencies first) |
 | `--force` | Allow overwriting existing target files |
-| `--update-package` | Add Krate scripts and dependencies to `package.json` |
+| `--no-update-package` | Leave `package.json` alone. By default the migration rewrites its scripts, adds the `@krate/*` dependencies and removes `next`, `next-auth` and `@next/env` once nothing imports them (`--update-package` is accepted and does nothing) |
 | `--report <path>` | Write the plan as JSON before applying |
 | `--json` | Print the plan (or apply result) as JSON |
 
@@ -304,10 +304,13 @@ helper/stylesheet. It generates
 config, merges/generates `tsconfig.json`, rewrites project modules reached from routes
 (including through tsconfig path aliases) in place, renames `NEXT_PUBLIC_*` reads
 to `KRATE_PUBLIC_*` without copying values, and
-reports everything it will not rewrite. With
-`--update-package` it also adds Krate scripts and dependencies while leaving the
-Next.js dependencies in place for verification. Existing targets, including
-`package.json` with `--update-package`, require `--force`. It never deletes the
+reports everything it will not rewrite. It also updates `package.json` (Krate
+scripts, the `@krate/*` dependencies the migrated code imports, and the removal of
+`next`, `next-auth` and `@next/env` when nothing imports them; the file is backed up
+and never needs `--force`) and prints the install command as the last manual step.
+Other existing targets require `--force`. A file in a moved route tree that a
+sibling workspace package references (a shared stylesheet, say) stays at its old path
+as a stub that imports or re-exports the moved file. It never deletes the
 original Next.js tree. See [Migrating from Next.js](/docs/guides/migrating-from-nextjs/).
 
 ## `krate inspect`

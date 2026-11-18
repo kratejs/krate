@@ -48,6 +48,10 @@ const (
 	// copied byte for byte into public/.
 	KindPublic     FileKind = "public"
 	KindMiddleware FileKind = "middleware"
+	// KindStub is a file left at an old path inside a moved route tree because
+	// something outside the project references it. Apply writes it after the
+	// tree moves, and rollback removes it before the tree comes back.
+	KindStub FileKind = "stub"
 )
 
 // ManualItem is a migration decision the CLI will not make automatically.
@@ -90,6 +94,7 @@ type Report struct {
 	// after every write succeeds. `krate migrate rollback` moves them back.
 	MoveAside []string `json:"moveAside,omitempty"`
 
+	specs       *krateSpecs
 	apiRewrites []nextRewrite
 	headLinks   []string
 	// middlewareNode lists why the middleware needs ssr.middlewareRuntime "node".
@@ -143,12 +148,18 @@ type manifestFile struct {
 
 // ScanOptions controls optional migration outputs.
 type ScanOptions struct {
-	// UpdatePackage adds a package.json plan with Krate scripts and dependencies.
-	UpdatePackage bool
-	// KrateVersion is the version of the running compiler. The @krate/*
-	// dependencies the package plan adds are pinned to it; empty or "dev"
-	// means "latest".
+	// NoUpdatePackage leaves package.json alone. By default the migration
+	// plans its update: Krate scripts, the @krate/* dependencies the migrated
+	// code imports, and the removal of next, next-auth and @next/env when
+	// nothing imports them any more.
+	NoUpdatePackage bool
+	// KrateVersion is the version of the running compiler. A release writes
+	// the published version of each @krate package; empty or "dev" is a
+	// development build (see krateSpecs).
 	KrateVersion string
+	// KrateRoot is the Krate checkout a development build links to. Empty
+	// means "find it from KRATE_BINARY or the project's @krate/core".
+	KrateRoot string
 }
 
 // ScanNext detects a Next.js project and returns a copy plan. It reads the
@@ -238,25 +249,22 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 			})
 		}
 	}
-	if opts.UpdatePackage {
-		if pkg, ok := packagePlan(abs, opts.KrateVersion, nodeDeploy{On: nextCfg.DeployTarget == "node", Rel: nextCfg.TracingRel}); ok {
+	specs := newKrateSpecs(abs, opts.KrateVersion, opts.KrateRoot)
+	rep.specs = specs
+	if !opts.NoUpdatePackage {
+		if pkg, ok := packagePlan(abs, specs, nodeDeploy{On: nextCfg.DeployTarget == "node", Rel: nextCfg.TracingRel}, rep); ok {
 			rep.Files = append(rep.Files, pkg)
-			rep.Manual = append(rep.Manual, ManualItem{
-				Source: "package.json",
-				Reason: "Krate scripts and dependencies were added, but Next.js dependencies remain",
-				Hint:   "remove next/react dependencies after the migrated app builds",
-			})
 		} else {
 			rep.Warnings = append(rep.Warnings, "package.json could not be read or parsed; not updated")
 		}
-	} else if pkg, err := os.ReadFile(filepath.Join(abs, "package.json")); err == nil && strings.Contains(string(pkg), `"next"`) {
-		rep.Manual = append(rep.Manual, ManualItem{
-			Source: "package.json",
-			Reason: "Next.js dependencies and scripts are still present",
-			Hint:   "re-run with --update-package, or install @krate/core and change dev/build/serve scripts manually",
-		})
-	}
-	if !opts.UpdatePackage {
+	} else {
+		if pkg, err := os.ReadFile(filepath.Join(abs, "package.json")); err == nil && strings.Contains(string(pkg), `"next"`) {
+			rep.Manual = append(rep.Manual, ManualItem{
+				Source: "package.json",
+				Reason: "Next.js dependencies and scripts are still present",
+				Hint:   "re-run without --no-update-package, or install @krate/core and change dev/build/serve scripts manually",
+			})
+		}
 		planPreactDependency(abs, rep)
 	}
 	if hasApp {
@@ -314,6 +322,7 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 		}
 	}
 	planMoveAside(abs, trees, rep)
+	finishPackage(rep, abs, specs)
 
 	hasKrateConfig := fileExists(filepath.Join(abs, "krate.config.ts")) || fileExists(filepath.Join(abs, "krate.config.js")) || fileExists(filepath.Join(abs, "krate.config.mjs")) || fileExists(filepath.Join(abs, "krate.config.json"))
 	// entry only matters when a site has no pages, so it is set for an
@@ -385,6 +394,9 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 	dedupeTargets(rep)
 	aggregateSegmentConfig(rep)
 	for i := range rep.Files {
+		if rep.Files[i].Kind == KindPackage || rep.Files[i].Kind == KindStub {
+			continue
+		}
 		if fileExists(filepath.Join(abs, filepath.FromSlash(rep.Files[i].Target))) {
 			rep.Files[i].Conflict = true
 			rep.Files[i].Overwrites = true
@@ -1013,9 +1025,10 @@ func (n nodeDeploy) script(name string) string {
 	return "krate " + name
 }
 
-// packagePlan adds Krate scripts and dependencies without removing Next.js
-// dependencies. Removing Next itself is left to the user after verification.
-func packagePlan(root, krateVersion string, node nodeDeploy) (PlannedFile, bool) {
+// packagePlan plans the Krate scripts and base dependencies. finishPackage
+// adds the rest once the other passes have run and removes what nothing
+// imports any more.
+func packagePlan(root string, specs *krateSpecs, node nodeDeploy, rep *Report) (PlannedFile, bool) {
 	path := filepath.Join(root, "package.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -1030,15 +1043,12 @@ func packagePlan(root, krateVersion string, node nodeDeploy) (PlannedFile, bool)
 	if scripts == nil {
 		scripts = map[string]any{}
 	}
-	for _, name := range []string{"dev", "build", "serve", "start"} {
-		if old, ok := scripts[name].(string); !ok || strings.Contains(old, "next") {
+	rewriteNextScripts(scripts, node, rep, &rewrites)
+	for _, name := range []string{"dev", "build", "start"} {
+		if _, ok := scripts[name].(string); !ok {
 			cmd := node.script(name)
 			scripts[name] = cmd
-			if ok {
-				rewrites = append(rewrites, fmt.Sprintf("scripts.%s: %q -> %q (the original is in the backup)", name, old, cmd))
-			} else {
-				rewrites = append(rewrites, fmt.Sprintf("scripts.%s: added %q", name, cmd))
-			}
+			rewrites = append(rewrites, fmt.Sprintf("scripts.%s: added %q", name, cmd))
 		}
 	}
 	if _, ok := scripts["serve"]; !ok {
@@ -1051,17 +1061,14 @@ func packagePlan(root, krateVersion string, node nodeDeploy) (PlannedFile, bool)
 	if deps == nil {
 		deps = map[string]any{}
 	}
-	spec := "latest"
-	if v := strings.TrimPrefix(krateVersion, "v"); v != "" && v != "dev" {
-		spec = "^" + v
-	}
 	var added []string
 	wanted := []string{"@krate/core", "@krate/runtime", "@krate/components"}
 	if hasDependency(pkg, "next-auth") {
 		wanted = append(wanted, "@krate/auth")
 	}
 	for _, dep := range wanted {
-		if _, ok := deps[dep]; !ok {
+		if !hasDependency(pkg, dep) {
+			spec := specs.spec(dep)
 			deps[dep] = spec
 			added = append(added, dep+"@"+spec)
 		}
@@ -1069,28 +1076,18 @@ func packagePlan(root, krateVersion string, node nodeDeploy) (PlannedFile, bool)
 	if !hasDependency(pkg, "preact") {
 		// Optional for apps without compiled islands, but required by the island
 		// runtime the migrator may copy in.
-		deps["preact"] = "^10.20.0"
-		added = append(added, "preact@^10.20.0 (runs islands and \"use client\" components)")
+		deps["preact"] = preactRange
+		added = append(added, "preact@"+preactRange+" (runs islands and \"use client\" components)")
 	}
 	if len(added) > 0 {
 		rewrites = append(rewrites, "dependencies added: "+strings.Join(added, ", "))
 	}
-	var kept []string
-	for _, dep := range []string{"next", "react", "react-dom"} {
-		if _, ok := deps[dep]; ok {
-			kept = append(kept, dep)
-		}
-	}
-	if len(kept) > 0 {
-		rewrites = append(rewrites, "dependencies kept: "+strings.Join(kept, ", ")+" (remove them once the app builds)")
-	}
 	pkg["dependencies"] = deps
 
-	out, err := json.MarshalIndent(pkg, "", "  ")
+	out, err := marshalPackageJSON(data, pkg)
 	if err != nil {
 		return PlannedFile{}, false
 	}
-	out = append(out, '\n')
 	return PlannedFile{Kind: KindPackage, Source: "package.json", Target: "package.json", Content: out, Rewrites: rewrites}, true
 }
 
@@ -1111,7 +1108,9 @@ func Apply(rep *Report, opts ApplyOptions) (*ApplyResult, error) {
 			return nil, fmt.Errorf("migration plan has duplicate target %s", f.Target)
 		}
 		seen[target] = true
-		if fileExists(target) && !opts.Force {
+		// package.json is always edited in place: it is backed up first and
+		// rollback restores it, so it never needs --force.
+		if fileExists(target) && !opts.Force && f.Kind != KindPackage && f.Kind != KindStub {
 			conflicts = append(conflicts, f.Target)
 		}
 	}
@@ -1151,7 +1150,9 @@ func Apply(rep *Report, opts ApplyOptions) (*ApplyResult, error) {
 			return nil, err
 		}
 		entry := manifestFile{Target: filepath.ToSlash(f.Target), Kind: string(f.Kind)}
-		if fileExists(target) {
+		// A stub sits where a moved file was; the original is in the backup
+		// with its tree, so rollback just removes the stub.
+		if fileExists(target) && f.Kind != KindStub {
 			entry.Existed = true
 			backupRel := filepath.ToSlash(filepath.Join("files", f.Target))
 			entry.Backup = backupRel
@@ -1179,6 +1180,9 @@ func Apply(rep *Report, opts ApplyOptions) (*ApplyResult, error) {
 
 	var written []string
 	for _, f := range rep.Files {
+		if f.Kind == KindStub {
+			continue
+		}
 		target, err := targetPath(rep.Root, f.Target)
 		if err != nil {
 			return nil, err
@@ -1202,6 +1206,21 @@ func Apply(rep *Report, opts ApplyOptions) (*ApplyResult, error) {
 			return nil, fmt.Errorf("moving %s into the backup: %w", tree, err)
 		}
 	}
+	for _, f := range rep.Files {
+		if f.Kind != KindStub {
+			continue
+		}
+		target, _ := targetPath(rep.Root, f.Target)
+		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+			_ = Rollback(backupDir)
+			return nil, err
+		}
+		if err := fsutil.WriteFileAtomic(target, f.Content, 0644); err != nil {
+			_ = Rollback(backupDir)
+			return nil, fmt.Errorf("writing %s: %w", f.Target, err)
+		}
+		written = append(written, filepath.ToSlash(f.Target))
+	}
 	return &ApplyResult{BackupDir: backupDir, Written: written, Moved: moves}, nil
 }
 
@@ -1217,6 +1236,24 @@ func Rollback(backupDir string) error {
 		return fmt.Errorf("parse migration manifest: %w", err)
 	}
 	root := man.Root
+	// Stubs sit inside the trees that move back, so they go first.
+	for _, f := range man.Files {
+		if f.Kind != string(KindStub) {
+			continue
+		}
+		target, err := targetPath(root, f.Target)
+		if err != nil {
+			return err
+		}
+		if err := os.Remove(target); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove %s: %w", f.Target, err)
+		}
+		for d := filepath.Dir(target); d != root && strings.HasPrefix(d, root); d = filepath.Dir(d) {
+			if os.Remove(d) != nil {
+				break
+			}
+		}
+	}
 	for _, tree := range man.Moved {
 		dest, err := targetPath(root, tree)
 		if err != nil {
@@ -1234,6 +1271,9 @@ func Rollback(backupDir string) error {
 		}
 	}
 	for _, f := range man.Files {
+		if f.Kind == string(KindStub) {
+			continue
+		}
 		target, err := targetPath(root, f.Target)
 		if err != nil {
 			return err
@@ -1484,7 +1524,7 @@ func warnClientBoundaryRuntime(rep *Report) {
 		}
 	}
 	if client && server {
-		rep.Warnings = append(rep.Warnings, `"use client" components inside async server components hydrate with Preact; install preact (krate migrate nextjs --update-package adds it)`)
+		rep.Warnings = append(rep.Warnings, `"use client" components inside async server components hydrate with Preact; install preact (the package.json update adds it)`)
 	}
 }
 
@@ -1526,7 +1566,7 @@ func hasDependency(pkg map[string]any, name string) bool {
 // planPreactDependency lists Preact as a manual item when the app runs on React
 // and does not depend on Preact. Krate runs React component packages and "use
 // client" components as Preact islands, and the build stops with KR8009 when
-// Preact is missing. --update-package adds it to package.json instead.
+// Preact is missing. The default package.json update adds it instead.
 func planPreactDependency(root string, rep *Report) {
 	data, err := os.ReadFile(filepath.Join(root, "package.json"))
 	if err != nil {
@@ -1548,6 +1588,6 @@ func planPreactDependency(root string, rep *Report) {
 	rep.Manual = append(rep.Manual, ManualItem{
 		Source: "package.json",
 		Reason: "React component packages and \"use client\" components run as Preact islands, and the build fails with KR8009 when preact is not installed",
-		Hint:   "run `" + install + "` (--update-package adds it to package.json)",
+		Hint:   "run `" + install + "` (the default package.json update adds it)",
 	})
 }

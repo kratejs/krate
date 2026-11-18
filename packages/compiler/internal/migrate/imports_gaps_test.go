@@ -256,13 +256,13 @@ func TestNextConfigEnvKeysRenamedWithoutValues(t *testing.T) {
 }
 
 // TestMigrateListsPreactForReactApps: an app on React without Preact gets a
-// manual item with the install command, and --update-package adds preact.
+// manual item with the install command, and the default package update adds preact.
 func TestMigrateListsPreactForReactApps(t *testing.T) {
 	root := t.TempDir()
 	writeNextFile(t, root, "package.json", `{"dependencies":{"next":"16.0.0","react":"19.0.0","@radix-ui/react-dialog":"1.1.0"}}`)
 	writeNextFile(t, root, "pnpm-lock.yaml", "lockfileVersion: '9.0'\n")
 	writeNextFile(t, root, "app/page.tsx", `export default function P() { return <p>hi</p>; }`)
-	rep, err := ScanNext(root)
+	rep, err := ScanNextWithOptions(root, ScanOptions{NoUpdatePackage: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -278,7 +278,7 @@ func TestMigrateListsPreactForReactApps(t *testing.T) {
 	if !strings.Contains(hint, "pnpm add preact@^10.20.0") {
 		t.Errorf("hint = %q", hint)
 	}
-	rep, err = ScanNextWithOptions(root, ScanOptions{UpdatePackage: true})
+	rep, err = ScanNextWithOptions(root, ScanOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

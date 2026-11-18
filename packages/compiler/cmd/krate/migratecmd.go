@@ -47,7 +47,7 @@ func runMigrateNext(flags cliFlags, args []string) {
 	if abs, err := filepath.Abs(root); err == nil {
 		requireConfigFlag(abs, flags)
 	}
-	rep, err := migrate.ScanNextWithOptions(root, migrate.ScanOptions{UpdatePackage: flags.UpdatePackage, KrateVersion: version})
+	rep, err := migrate.ScanNextWithOptions(root, migrate.ScanOptions{NoUpdatePackage: flags.NoUpdatePackage, KrateVersion: version})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%sMigration plan error:%s %v\n", cRed, cReset, err)
 		os.Exit(1)
@@ -81,7 +81,7 @@ func runMigrateNext(flags cliFlags, args []string) {
 	if flags.Verify {
 		if missing := unresolvedKratePackages(rep); len(missing) > 0 {
 			fmt.Fprintf(os.Stderr, "%sCannot verify:%s %s does not resolve from %s, so nothing was written.\n", cRed, cReset, strings.Join(missing, ", "), rep.Root)
-			fmt.Fprintln(os.Stderr, "  Install the dependencies first: run with --update-package and install (npm/pnpm/yarn/bun install), then re-run with --apply --verify.")
+			fmt.Fprintln(os.Stderr, "  Install the dependencies first (the plan adds them to package.json; npm/pnpm/yarn/bun install), then re-run with --apply --verify.")
 			fmt.Fprintln(os.Stderr, "  Or run --apply without --verify and run `krate build` once the packages are installed.")
 			os.Exit(1)
 		}

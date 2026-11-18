@@ -55,7 +55,7 @@ func TestMigrateVerifyStopsBeforeWritingWhenPackagesAreMissing(t *testing.T) {
 	if code == 0 {
 		t.Fatalf("want a non-zero exit, output:\n%s", out)
 	}
-	if !strings.Contains(out, "@krate/core") || !strings.Contains(out, "--update-package") || !strings.Contains(out, "nothing was written") {
+	if !strings.Contains(out, "@krate/core") || !strings.Contains(out, "Install the dependencies first") || !strings.Contains(out, "nothing was written") {
 		t.Errorf("message should name the package and the fix:\n%s", out)
 	}
 	if _, err := os.Stat(filepath.Join(root, "krate.config.ts")); !os.IsNotExist(err) {

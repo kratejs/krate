@@ -1,6 +1,7 @@
 package migrate
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path"
@@ -139,7 +140,11 @@ func resolveTranspile(dir, name string) pkgState {
 	}
 	for d := dir; ; {
 		pj := filepath.Join(d, "node_modules", filepath.FromSlash(name), "package.json")
-		if _, err := os.Stat(pj); err == nil {
+		if data, err := os.ReadFile(pj); err == nil {
+			if subpathOnlyExports(filepath.Dir(pj), data) {
+				st.kind = "source"
+				return st
+			}
 			st.reason = "it is installed but its package.json main/exports point at a file that does not exist (build the package, for example its dist/ folder, then migrate again)"
 			return st
 		}
@@ -151,6 +156,40 @@ func resolveTranspile(dir, name string) pkgState {
 	}
 	st.reason = "it is not installed (run the package manager's install at the workspace root, then migrate again)"
 	return st
+}
+
+// subpathOnlyExports reports whether a package.json exposes only subpaths
+// (`"exports": {"./*": "./src/*.ts"}`) whose targets exist. Such a package has
+// no bare entry point and is imported through its subpaths.
+func subpathOnlyExports(dir string, pkgJSON []byte) bool {
+	var pkg struct {
+		Main    string          `json:"main"`
+		Exports json.RawMessage `json:"exports"`
+	}
+	if json.Unmarshal(pkgJSON, &pkg) != nil || pkg.Main != "" || len(pkg.Exports) == 0 {
+		return false
+	}
+	var exports map[string]json.RawMessage
+	if json.Unmarshal(pkg.Exports, &exports) != nil || len(exports) == 0 {
+		return false
+	}
+	for key, raw := range exports {
+		if key == "." || !strings.HasPrefix(key, "./") {
+			return false
+		}
+		var target string
+		if json.Unmarshal(raw, &target) != nil {
+			continue
+		}
+		base := target
+		if i := strings.IndexByte(base, '*'); i >= 0 {
+			base = base[:i]
+		}
+		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(base))); err != nil {
+			return false
+		}
+	}
+	return true
 }
 
 // transpileKeys checks that every transpilePackages entry resolves. Krate

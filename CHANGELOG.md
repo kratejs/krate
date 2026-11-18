@@ -246,6 +246,20 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Added
 
+- `@krate/auth` types can be augmented: `SessionUserExtensions` (fields on `session.user`) and
+  `UserExtensions` replace the built-in field of the same name, so `role: Role` narrows `role`; the
+  interfaces are empty by default and the existing types are unchanged. `DefaultSession` is exported
+  under Auth.js' name. See docs features/authentication "Typing extra session fields". The package's
+  `pnpm typecheck` compiles type tests with and without an augmentation.
+
+- `krate migrate nextjs` converts a `declare module 'next-auth'` augmentation of `Session` or `User`
+  into `declare module '@krate/auth'` (`src/types/krate-auth.d.ts`, the original moves into the backup) and
+  maps `DefaultSession` imports; an unrecognised shape is a manual item that quotes the declaration.
+
+- `krate migrate nextjs` leaves a stub at the old path of a moved file that a sibling workspace package
+  references (a stylesheet `@import`s the moved copy, a module re-exports it; an image keeps a copy and a
+  manual item). The stubs are in the backup manifest and `krate migrate rollback` removes them.
+
 - `outputFileTracingRoot` config key (a path, relative to the project or absolute; the monorepo root).
   With it, `krate deploy --target node` writes the same layout as Next's standalone output:
   `dist/.krate/server/<project below the root>/server.mjs`, included files at
@@ -490,6 +504,16 @@ host code runs in the native process. Names and options may change between relea
 
 ### Changed
 
+- `krate migrate nextjs` updates `package.json` by default (`--no-update-package` opts out;
+  `--update-package` is accepted and does nothing): scripts, every `@krate/*` package the migrated
+  code imports (including `@krate/auth`, `@krate/three` and `@krate/konva`), and the removal of `next`,
+  `next-auth` and `@next/env` when no remaining file imports them (otherwise the importers are listed).
+  `package.json` is backed up and no longer needs `--force`, and its key order is kept. The only manual
+  item left for a typical app is the install command of the package manager, run in the pnpm workspace root.
+  A release writes `^<version>` from a generated table of the packages' versions
+  (`scripts/gen-krate-versions.mjs`, checked by `pnpm check:version`); a development build writes `link:`
+  ranges to the Krate checkout it runs from, or `latest` with an info line.
+
 - An API route whose bundled modules use a global the embedded runtime lacks without a feature check
   (`Buffer`, `__dirname`, `__filename`, `process.cwd()`, `process.nextTick`, parts of `Intl`, ...) is
   now served by the Node sidecar when `ssr.apiRuntime` is unset, in the route file or in any helper it
@@ -538,6 +562,10 @@ host code runs in the native process. Names and options may change between relea
   the JSON report has an `info` list.
 
 ### Fixed
+
+- `krate migrate nextjs`: `@krate/three` and `@krate/konva` were written with the runtime's version range
+  although they version independently, and a `transpilePackages` entry for a workspace package that
+  exposes only subpaths (`"exports": {"./*": "./src/*.ts"}`) was reported as unresolved.
 
 - KR7116 (two modules export the same name) no longer fires for one package reached from two checkouts,
   such as a project copy whose `node_modules` links lead back into the original: two files with the same

@@ -42,7 +42,7 @@ func TestNoEnvPrefixWhenNothingReadsNextPublic(t *testing.T) {
 	writeNextFile(t, root, "package.json", `{"dependencies":{"next":"16.0.0"}}`)
 	writeNextFile(t, root, ".env", "NEXT_PUBLIC_UNUSED=zzz\n")
 	writeNextFile(t, root, "app/page.tsx", `export default function P() { return <p>hi</p>; }`)
-	rep, err := ScanNext(root)
+	rep, err := ScanNextWithOptions(root, ScanOptions{KrateVersion: "1.0.0"})
 	if err != nil {
 		t.Fatal(err)
 	}

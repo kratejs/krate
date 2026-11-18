@@ -15,6 +15,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { krateVersionsFile, renderKrateVersions } from './gen-krate-versions.mjs';
 import { nativeTemplate, pinNativeTemplate, releasePackages } from './release-packages.mjs';
 
 const version = process.argv[2];
@@ -45,6 +46,9 @@ const templatePath = join(root, nativeTemplate);
 const template = readFileSync(templatePath, 'utf-8');
 writeFileSync(templatePath, pinNativeTemplate(template, version));
 console.log(`krate native init template -> ${version}`);
+
+writeFileSync(join(root, krateVersionsFile), renderKrateVersions(root));
+console.log('krate migrate version table ->', version);
 
 // packages/web is intentionally not bumped here. Its @krate pins are managed
 // manually so the docs site can track a published release independently of the

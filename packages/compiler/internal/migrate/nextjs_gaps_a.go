@@ -380,7 +380,7 @@ func planMoveAside(abs string, trees []string, rep *Report) {
 	for _, tree := range trees {
 		inside := false
 		for _, f := range rep.Files {
-			if strings.HasPrefix(f.Target, tree+"/") {
+			if f.Kind != KindStub && strings.HasPrefix(f.Target, tree+"/") {
 				inside = true
 				break
 			}

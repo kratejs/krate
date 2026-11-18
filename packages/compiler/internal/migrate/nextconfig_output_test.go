@@ -64,7 +64,7 @@ export default nextConfig;
 
 func TestMigrateStandaloneMonorepoBecomesNodeDeploy(t *testing.T) {
 	app := monorepoApp(t, monorepoConfig, nil)
-	rep := scanApp(t, app, ScanOptions{UpdatePackage: true})
+	rep := scanApp(t, app, ScanOptions{})
 	body := configBody(t, rep)
 	for _, want := range []string{
 		`"outputFileTracingRoot": "../.."`,
@@ -111,7 +111,7 @@ func TestMigrateStandaloneWithoutRootUsesFlatServerPath(t *testing.T) {
 		t.Errorf("deploy target missing:\n%s", configBody(t, rep))
 	}
 	root := rep.Root
-	rep2, err := ScanNextWithOptions(root, ScanOptions{UpdatePackage: true})
+	rep2, err := ScanNextWithOptions(root, ScanOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,5 +218,20 @@ export default { turbopack: { root: path.resolve(import.meta.dirname) } };`, nil
 		if strings.Contains(m.Reason, "turbopack") {
 			t.Errorf("unexpected: %+v", m)
 		}
+	}
+}
+
+// A workspace package that exposes only subpaths has no bare entry point; it is
+// not an unresolved transpilePackages entry.
+func TestTranspilePackagesAcceptsSubpathOnlyExports(t *testing.T) {
+	root := t.TempDir()
+	writeNextFile(t, root, "node_modules/@dd/core/package.json", `{"name":"@dd/core","exports":{"./*":"./src/*.ts"}}`)
+	writeNextFile(t, root, "node_modules/@dd/core/src/a.ts", "export const a = 1;\n")
+	writeNextFile(t, root, "node_modules/@dd/broken/package.json", `{"name":"@dd/broken","exports":{"./*":"./missing/*.ts"}}`)
+	if st := resolveTranspile(root, "@dd/core"); st.kind != "source" {
+		t.Errorf("subpath-only package: %+v", st)
+	}
+	if st := resolveTranspile(root, "@dd/broken"); st.kind != "" {
+		t.Errorf("exports pointing nowhere resolved: %+v", st)
 	}
 }

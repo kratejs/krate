@@ -56,15 +56,35 @@ krate migrate nextjs --report migration-report.json
 ```
 
 The dry run marks every file that already exists (`tsconfig.json`,
-`middleware.ts`, `package.json`, ...) and says so at the end: `--apply` then
-needs `--force`. The originals are backed up first and `krate migrate rollback`
-restores them.
+`middleware.ts`, ...) and says so at the end: `--apply` then needs `--force`.
+The originals are backed up first and `krate migrate rollback` restores them.
 
-Add `--update-package` to also add `krate` scripts and `@krate/*` dependencies
-(pinned to the version of the compiler you run) and `preact` to `package.json`;
-`package.json` already exists, so pair it with `--force`. The plan lists each
-script it replaces and each dependency it adds or keeps. Next.js dependencies are
-left in place until the migrated app builds cleanly.
+The migration also updates `package.json` (it is backed up like every other
+file, so it never needs `--force`; pass `--no-update-package` to leave it alone,
+and `--update-package` is still accepted). The plan lists each change:
+
+- `dev` becomes `krate dev`; `build` and `start` become the commands for the
+  deploy target (`krate build` and `krate start`, or `krate deploy` and
+  `node dist/.krate/server/.../server.mjs` for `output: 'standalone'`). Other
+  scripts keep their text with `next <command>` rewritten the same way:
+  `next typegen &&` is dropped, and a `next lint` or other command Krate has no
+  equivalent for stays, with an info line, and keeps `next` installed.
+- Every `@krate/*` package the migrated code imports is added (`@krate/core`,
+  `@krate/runtime`, `@krate/components`, and `@krate/auth`, `@krate/three` or
+  `@krate/konva` when the code now uses them), plus `preact`. A release of the
+  compiler writes `^<version>` of each package, taken from a table generated from
+  the packages (`@krate/three` and `@krate/konva` version on their own). A
+  development build of the compiler writes `link:` ranges to the packages of the
+  Krate checkout it runs from (found from `KRATE_BINARY` or the project's
+  `@krate/core`) and `latest`, with an info line, when there is none.
+- `next`, `next-auth` and `@next/env` are removed when no file left in the
+  project imports them. When one does (a test file, a script), the dependency
+  stays and the info line names the files. `react` and `react-dom` stay: the
+  Preact islands alias them.
+
+Installing is the one thing left to you: the migration prints the install
+command of your package manager (for pnpm, in the workspace root that holds
+`pnpm-workspace.yaml`). It never runs a network install or edits a lockfile.
 
 The first pass:
 
@@ -138,7 +158,7 @@ The first pass:
   matching `envDir` and there is no item. A static `serverExternalPackages` list and static
   `outputFileTracingIncludes` globs are carried over to the Krate keys of the
   same name (see [Self-hosting](/docs/guides/self-hosting/)); computed ones get an item.
-  `output: 'standalone'` becomes `deploy: { target: "node" }`; with `--update-package`
+  `output: 'standalone'` becomes `deploy: { target: "node" }`; in the package update
   the `build` script becomes `krate deploy` (it builds first, then bundles the
   server) and `start` becomes `node dist/.krate/server/server.mjs`. A static
   `outputFileTracingRoot` (`path.resolve(import.meta.dirname, '../..')` and the
@@ -240,8 +260,8 @@ The first pass:
   [`@krate/three`](/docs/features/three/) when every fiber and drei API the
   project's modules use is provided (drei's `OrbitControls`, `Environment` with
   `Lightformer` children or a `map`, and `useGLTF` come from `@krate/three/drei`),
-  and adds `@krate/three` to `package.json` (a manual item without
-  `--update-package`). The scene then runs on Krate, or on the Preact island of a
+  and adds `@krate/three` to `package.json` (a manual item with
+  `--no-update-package`). The scene then runs on Krate, or on the Preact island of a
   `"use client"` component, instead of a real-React island that ships React,
   react-dom and a second copy of the React libraries around the canvas. One
   unsupported API (another drei helper, `<Environment preset>`, fiber's
@@ -253,7 +273,7 @@ The first pass:
 - moves `react-konva` code to [`@krate/konva`](/docs/features/konva/) when every
   react-konva API the project's modules use is provided (Stage, the layers and
   shapes, Transformer, `useStrictMode`, `useContextBridge`), and adds
-  `@krate/konva` to `package.json` (a manual item without `--update-package`).
+  `@krate/konva` to `package.json` (a manual item with `--no-update-package`).
   Type imports from `konva` stay as they are. The canvas then runs on Krate, or
   on the Preact island of a `"use client"` component, instead of a real-React
   island. `KonvaRenderer`, an internal `react-konva/...` subpath or a package
@@ -337,10 +357,22 @@ The first pass:
   `cookies: { prefix: "authjs" }` is added so the existing `authjs.*` cookies and database
   sessions keep working. `handlers`, `auth`, `signIn` and `signOut` keep their names, so
   the `[...nextauth]` route, server actions and server components need no edits, and
-  `@auth/drizzle-adapter` is kept as is. `--update-package` adds `@krate/auth`. A provider,
+  `@auth/drizzle-adapter` is kept as is. The package update adds `@krate/auth` and removes `next-auth` once nothing imports it. A provider,
   option, callback, cookie override, `getToken`, `useSession` or `auth(handler)` wrapper
   with no `@krate/auth` equivalent is listed as manual work with what to do instead, and
   next-auth is never left to fail at run time as an unresolved import;
+- converts a `declare module 'next-auth'` augmentation of `Session` (`user: { ... } & DefaultSession['user']`)
+  or `User` into `declare module '@krate/auth'` with `SessionUserExtensions` or
+  `UserExtensions` (see [Typing extra session fields](/docs/features/authentication/#typing-extra-session-fields)).
+  The file is written as `krate-auth.d.ts` next to the original, which moves into the backup;
+  imports of your own types are kept and `DefaultSession` imports are dropped. Any other shape
+  (a `next-auth/jwt` module, a conditional type) is a manual item that quotes the declaration;
+- leaves a stub at the old path of a file that another workspace package references from outside the
+  project. A stylesheet that `packages/static-site/src/styles.css` imports as `../../web/src/app/tokens.css`
+  keeps its path as a file containing `@import` of the moved copy (Krate's CSS pipeline inlines nested
+  imports); a script or module becomes `export * from` the moved file (plus its default export). A file of
+  another type, such as an image, stays as a copy at the old path and is a manual item that names it. The
+  stubs are recorded in the backup manifest and `krate migrate rollback` removes them;
 - warns about script files at the project root and directly under `src/` that
   the plan neither copies nor rewrites (`auth.ts`, a stray `proxy.mjs`, ...), skipping
   `*.config.*`, `*.d.ts` and test files, so nothing is dropped without a trace;
@@ -365,8 +397,8 @@ route inventory against the migration report before you accept the migration.
 Verification evaluates `krate.config.ts`, which imports `@krate/core`, so the
 packages must be installed first. Before it writes anything, `--apply --verify`
 checks that `@krate/core` (and any other `@krate/*` package a generated file
-imports) resolves from the project, and stops with a message if not: run with
-`--update-package`, install the dependencies, then re-run.
+imports) resolves from the project, and stops with a message if not: install the dependencies
+the plan adds to `package.json`, then re-run.
 
 ```sh
 krate migrate nextjs --apply --verify
@@ -390,7 +422,7 @@ running `krate build`. `useSelectedLayoutSegment(s)` count from the layout whose
 file calls them; a hook called from a shared component counts from the root.
 
 Client components rendered inside async server components hydrate with Preact:
-`--update-package` adds it, otherwise install `preact`.
+the package update adds it (with `--no-update-package`, install `preact`).
 
 ## Steps
 

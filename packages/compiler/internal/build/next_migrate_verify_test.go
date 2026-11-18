@@ -113,8 +113,9 @@ export default function Post() { return <main><h1>Post</h1></main>; }`,
 				t.Fatalf("rollback: %v", err)
 			}
 
+			// package.json existed, so rollback restores it instead of removing it.
 			for _, f := range rep.Files {
-				if f.Kind == migrate.KindPage || f.Kind == migrate.KindConfig || f.Kind == migrate.KindPackage {
+				if f.Kind == migrate.KindPage || f.Kind == migrate.KindConfig {
 					if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(f.Target))); !os.IsNotExist(err) {
 						t.Fatalf("rollback left generated target %s (err=%v)", f.Target, err)
 					}
