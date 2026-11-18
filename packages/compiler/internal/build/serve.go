@@ -80,6 +80,7 @@ const moduleCache = new Map();
 ` + actionSidecarJS + actionSidecarNodeAdapter + apiSidecarClusterJS + apiSidecarSharedJS + `
 let middlewareModule = null;
 await krateLoadMiddleware();
+await krateRunInstrumentation();
 
 function routeParams(file, segments) {
   const rel = path.relative(API_DIR, file).replace(/\.[^.]+$/, '');
@@ -503,6 +504,7 @@ function json(body, status) { return Response.json(body, { status: status || 200
 
 ` + actionSidecarJS + apiSidecarSharedJS + `
 await krateLoadMiddleware();
+await krateRunInstrumentation();
 function sanitize(p) {
   let rel = p || '/';
   try { rel = decodeURIComponent(rel); } catch { return null; }
@@ -1467,6 +1469,16 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		nodeWorkers = jsruntime.DefaultAPIWorkers()
 	}
 	needNodeSidecar := sidecarNeedsNode(apiRTOption, middlewareRTOption, middlewareRT, middlewarePath, nodeOnlyRoutes) || hasActions
+	// instrumentation.ts runs once per server start, in the Node sidecar's
+	// primary process, so the sidecar has to exist even with only embedded routes.
+	instrumentationArg := ""
+	if hasInstrumentation(root) {
+		instrumentationArg = instrumentationBundlePath(root)
+		if !needNodeSidecar {
+			needNodeSidecar = true
+			printf("  %s*%s instrumentation runs in the Node API sidecar, which starts although every API route is embedded\n", cCyan, cReset)
+		}
+	}
 	apiBodyLimit := cfg.MaxAPIBodyBytes()
 
 	var nodeAPICmdMu sync.Mutex
@@ -1503,19 +1515,19 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 					bunPath := filepath.Join(root, ".krate", "api-server.bun.mjs")
 					_ = os.MkdirAll(filepath.Dir(bunPath), 0755)
 					_ = os.WriteFile(bunPath, []byte(apiServerBunScriptContent), 0644)
-					cmd = exec.Command("bun", "run", bunPath, nodeAPIDir, portStr, middlewarePath, actionDir)
+					cmd = exec.Command("bun", "run", bunPath, nodeAPIDir, portStr, middlewarePath, actionDir, instrumentationArg)
 
 				case "deno":
 					scriptPath := filepath.Join(root, ".krate", "api-server.mjs")
 					_ = os.MkdirAll(filepath.Dir(scriptPath), 0755)
 					_ = os.WriteFile(scriptPath, []byte(apiServerScriptContent), 0644)
-					cmd = exec.Command("deno", "run", "--allow-net", "--allow-read", "--allow-sys", "--allow-env", scriptPath, nodeAPIDir, portStr, middlewarePath, actionDir)
+					cmd = exec.Command("deno", "run", "--allow-net", "--allow-read", "--allow-sys", "--allow-env", scriptPath, nodeAPIDir, portStr, middlewarePath, actionDir, instrumentationArg)
 
 				default:
 					scriptPath := filepath.Join(root, ".krate", "api-server.mjs")
 					_ = os.MkdirAll(filepath.Dir(scriptPath), 0755)
 					_ = os.WriteFile(scriptPath, []byte(apiServerScriptContent), 0644)
-					cmd = exec.Command("node", scriptPath, nodeAPIDir, portStr, middlewarePath, actionDir)
+					cmd = exec.Command("node", scriptPath, nodeAPIDir, portStr, middlewarePath, actionDir, instrumentationArg)
 				}
 				execx.ConfigureTree(cmd)
 				cmd.Env = append(os.Environ(), environ.Overlay(environ.Current)...)
@@ -2502,6 +2514,12 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 			_, _ = io.WriteString(w, "ssr-unavailable\n")
 			return
 		}
+		// The sidecar listens only after instrumentation's register() resolved.
+		if instrumentationArg != "" && !tcpReachable(apiPort) {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = io.WriteString(w, "instrumentation-pending\n")
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = io.WriteString(w, "ready\n")
 	})
@@ -3340,4 +3358,15 @@ func hasRouteBundles(dir string) bool {
 		return nil
 	})
 	return found
+}
+
+// tcpReachable reports whether something accepts connections on the loopback
+// port.
+func tcpReachable(port int) bool {
+	c, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), 500*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	_ = c.Close()
+	return true
 }

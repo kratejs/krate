@@ -246,6 +246,16 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Added
 
+- First-class instrumentation. `instrumentation.ts` (or `.js`, `.mjs`) in the project root or `src/`
+  exports `register()`, which runs once per server start: in the primary process of the Node API
+  sidecar, awaited before that process forks its cluster workers or listens (never in a worker or the SSR
+  renderer), and once before `startNodeServer` in the node deploy bundle. The server is not ready until
+  it resolves (`/readyz` answers `503 instrumentation-pending`). Like Next.js, a `register()` that
+  throws is logged as `An error occurred while loading instrumentation hook: ...` and exits the
+  process with status 1 (the supervisor restarts the sidecar with a growing delay). The Node sidecar now
+  starts even when every API route is embedded if the file exists. State `register()` puts on
+  `globalThis` is not visible to cluster workers; see docs/guides/self-hosting. Other deploy targets
+  warn that they do not run it.
 - `export const runtime = "nodejs" | "edge"` in an API route is honored: `"nodejs"` serves the route
   from the Node sidecar, `"edge"` keeps it on the embedded runtime.
 - `has` and `missing` conditions on `redirects`, `rewrites` and `headers` rules, with Next.js semantics:
@@ -468,7 +478,9 @@ host code runs in the native process. Names and options may change between relea
   `export const runtime = "edge"` the same use is a KR7160 build error. Guarded uses
   (`typeof Buffer !== "undefined"`) keep the route embedded.
 - `krate migrate nextjs` keeps `export const runtime = "nodejs" | "edge"` in API routes (it still drops
-  it from pages) and no longer claims routes "already run on Node".
+  it from pages) and no longer claims routes "already run on Node". It keeps `instrumentation.ts` and
+  `instrumentation-*.ts` in place with `process.env.NEXT_RUNTIME` comparisons folded to constants; only
+  `onRequestError` and `instrumentation-client` are manual items.
 - `krate migrate nextjs` translates `has`/`missing` on redirects, rewrites and headers instead of
   refusing them, and writes `statusCode: 308` or `307` for Next's `permanent: true` or `false`. A
   redirect whose regex Go cannot run is written as a marked block at the start of the middleware

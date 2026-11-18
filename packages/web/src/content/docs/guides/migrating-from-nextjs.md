@@ -325,8 +325,14 @@ The first pass:
 - warns about script files at the project root and directly under `src/` that
   the plan neither copies nor rewrites (`auth.ts`, a stray `proxy.mjs`, ...), skipping
   `*.config.*`, `*.d.ts` and test files, so nothing is dropped without a trace;
-- lists `instrumentation.ts`, `instrumentation-*.ts` as manual work: Krate has no
-  server startup hook that calls `register()`.
+- keeps `instrumentation.ts` and `instrumentation-*.ts` where they are: Krate calls
+  `register()` once per server start (see
+  [Instrumentation](/docs/guides/self-hosting/#instrumentation)). The migrator folds
+  `process.env.NEXT_RUNTIME === "nodejs"` to `true` and `=== "edge"` to `false` in those
+  files, and lists only `onRequestError` (not called by Krate) and
+  `instrumentation-client` as manual work. A `loadEnvConfig(...)` call keeps working
+  and is harmless next to `envDir`. `register()` runs in the API sidecar's primary
+  process only, so state it puts on `globalThis` is not visible to cluster workers.
 
 Every apply writes a rollback manifest under
 `.krate/migrate/nextjs-<timestamp>/`. Undo with:

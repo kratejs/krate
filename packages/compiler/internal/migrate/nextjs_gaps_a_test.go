@@ -133,24 +133,77 @@ func TestUnmigratedRootSourcesAreListed(t *testing.T) {
 	}
 }
 
-func TestInstrumentationFilesAreManual(t *testing.T) {
+func TestInstrumentationFilesAreKeptAndFolded(t *testing.T) {
 	root := gapsProject(t, map[string]string{
-		"src/app/page.tsx":              `export default function P() { return <main/>; }`,
-		"src/instrumentation.ts":        `export async function register() { await import("./instrumentation-node"); }`,
-		"src/instrumentation-node.ts":   `export const x = 1;`,
+		"src/app/page.tsx": `export default function P() { return <main/>; }`,
+		"src/instrumentation.ts": `export async function register() {
+  if (process.env.NEXT_RUNTIME === 'nodejs') { await import("./instrumentation-node"); }
+  if (process.env.NEXT_RUNTIME === "edge") { await import("./instrumentation-edge"); }
+  if (process.env.NEXT_RUNTIME !== 'edge') { console.log("node side"); }
+  if ("nodejs" !== process.env.NEXT_RUNTIME) { console.log("not node"); }
+}`,
+		"src/instrumentation-node.ts":   `export const x = process.env.NEXT_RUNTIME === 'nodejs' ? 1 : 2;`,
 		"src/instrumentation-client.ts": `export const y = 1;`,
 	})
 	rep, err := ScanNext(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, src := range []string{"src/instrumentation.ts", "src/instrumentation-node.ts", "src/instrumentation-client.ts"} {
-		if !hasManual(rep, src, "instrumentation file") {
-			t.Errorf("%s not listed as manual: %+v", src, rep.Manual)
+	inst := findPlan(rep, "src/instrumentation.ts")
+	if inst == nil {
+		t.Fatalf("instrumentation.ts must be planned in place: %+v", rep.Files)
+	}
+	got := string(inst.Content)
+	for _, want := range []string{"if (true) { await import(\"./instrumentation-node\")", "if (false) { await import(\"./instrumentation-edge\")", "if (true) { console.log(\"node side\")", "if (false) { console.log(\"not node\")"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
 		}
 	}
-	if !hasManualHint(rep, "src/instrumentation.ts", "register()") {
-		t.Errorf("instrumentation hint should mention register(): %+v", rep.Manual)
+	if strings.Contains(got, "NEXT_RUNTIME") {
+		t.Errorf("NEXT_RUNTIME left in:\n%s", got)
+	}
+	if node := findPlan(rep, "src/instrumentation-node.ts"); node == nil || !strings.Contains(string(node.Content), "= true ? 1 : 2") {
+		t.Errorf("instrumentation-node.ts not folded: %+v", node)
+	}
+	for _, src := range []string{"src/instrumentation.ts", "src/instrumentation-node.ts"} {
+		if hasManual(rep, src, "") {
+			t.Errorf("%s must not be a manual item: %+v", src, rep.Manual)
+		}
+	}
+	if !hasManual(rep, "src/instrumentation-client.ts", "instrumentation-client") {
+		t.Errorf("instrumentation-client must stay manual: %+v", rep.Manual)
+	}
+}
+
+func TestInstrumentationOnRequestErrorIsManual(t *testing.T) {
+	for name, src := range map[string]string{
+		"function": `export async function register() {}
+export async function onRequestError(err: unknown) {}`,
+		"const":  "export const onRequestError = async () => {};",
+		"braces": "async function onRequestError() {}\nexport { onRequestError };",
+	} {
+		root := gapsProject(t, map[string]string{
+			"app/page.tsx":       `export default function P() { return <main/>; }`,
+			"instrumentation.ts": src,
+		})
+		rep, err := ScanNext(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !hasManual(rep, "instrumentation.ts", "onRequestError") {
+			t.Errorf("%s: onRequestError must be a manual item: %+v", name, rep.Manual)
+		}
+	}
+	root := gapsProject(t, map[string]string{
+		"app/page.tsx":       `export default function P() { return <main/>; }`,
+		"instrumentation.ts": `export function register() {}`,
+	})
+	rep, err := ScanNext(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasManual(rep, "instrumentation.ts", "") {
+		t.Errorf("plain register() needs no manual item: %+v", rep.Manual)
 	}
 }
 

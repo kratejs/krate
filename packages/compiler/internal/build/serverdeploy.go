@@ -582,6 +582,20 @@ func BuildServerBundle(root string, cfg *config.Config, target string) (*deploy.
 		mwExpr = "middleware_mod"
 	}
 
+	// instrumentation.ts: the node target runs register() once, before the
+	// server listens. It is imported first so its module-level code runs
+	// before the app's modules. The other targets have no long-lived server
+	// to run it in.
+	instImport, instExpr := "", "undefined"
+	if inst := findInstrumentationSource(root); inst != "" {
+		if target == "node" {
+			instImport = fmt.Sprintf("import * as instrumentation_mod from %s;\n", jsString(filepath.ToSlash(inst)))
+			instExpr = "instrumentation_mod"
+		} else {
+			plan.Warnings = append(plan.Warnings, fmt.Sprintf("%s is not run on the %s target: register() runs once per server start, which only the node target has", relOr(root, inst), target))
+		}
+	}
+
 	// Which URL paths must reach the function on platforms that serve static files first.
 	for _, p := range data.Pages {
 		plan.ServerPaths = append(plan.ServerPaths, routeToGlob(p.Route))
@@ -640,7 +654,7 @@ func BuildServerBundle(root string, cfg *config.Config, target string) (*deploy.
 	}
 	modules := fmt.Sprintf("const modules = {\n pages: {\n%s },\n runtime: {\n%s },\n api: {\n%s },\n actions: {\n%s },\n middleware: %s,\n};\n",
 		pageMods.String(), runtimeMods.String(), apiMods.String(), actionMods.String(), mwExpr)
-	fmt.Fprintf(body, "%s\nconst data = %s;\nconst __cache = %s;\n", modules, string(dataJSON), cacheExpr)
+	fmt.Fprintf(body, "%s\nconst data = %s;\nconst __cache = %s;\nconst __instrumentation = %s;\n", modules, string(dataJSON), cacheExpr, instExpr)
 
 	plan.TrailingSlash = cfg.TrailingSlashMode()
 	workerModule, err := workerModuleFor(root, cfg, target, plan)
@@ -648,7 +662,7 @@ func BuildServerBundle(root string, cfg *config.Config, target string) (*deploy.
 		return nil, err
 	}
 	plan.WorkerModule = workerModule
-	entry := serverEntry(target, imports.String(), body.String(), workerModule, cfg.Deploy.CloudflareCache())
+	entry := serverEntry(target, instImport+imports.String(), body.String(), workerModule, cfg.Deploy.CloudflareCache())
 	outFile := filepath.Join(outDir, ".krate", serverDeployDir, serverEntryName(target))
 	if err := os.MkdirAll(filepath.Dir(outFile), 0755); err != nil {
 		return nil, err
@@ -766,6 +780,16 @@ func serverEntry(target, imports, body, workerModule string, edgeCache bool) str
 		b.WriteString("import { createKrateHandler } from '@krate/runtime/server-handler';\nimport { startNodeServer, createNodeStaticLayer, defaultDistDir } from '@krate/runtime/node-server';\n")
 		b.WriteString(body)
 		b.WriteString(`const distDir = defaultDistDir(import.meta.url);
+if (__instrumentation) {
+  try {
+    const register = typeof __instrumentation.register === 'function' ? __instrumentation.register
+      : (__instrumentation.default && typeof __instrumentation.default.register === 'function' ? __instrumentation.default.register : null);
+    if (register) await register();
+  } catch (e) {
+    console.error('[krate] ` + instrumentationFailureMessage + `' + ((e && e.stack) || e));
+    process.exit(1);
+  }
+}
 export const handler = createKrateHandler({ target: 'node', data, modules, cache: __cache, static: createNodeStaticLayer(distDir) });
 await startNodeServer({ handler, distDir, trustProxy: data.config.trustProxy === true, shutdownTimeout: __SHUTDOWN__, port: __PORT__ });
 `)

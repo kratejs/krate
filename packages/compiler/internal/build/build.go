@@ -1543,6 +1543,11 @@ func (b *Builder) BuildAll() error {
 		failureErrs = append(failureErrs, err)
 	}
 	tl.Lap("middleware")
+	if err := b.BuildInstrumentation(); err != nil {
+		fmt.Fprintf(os.Stderr, "  %sInstrumentation error:%s %v\n", cRed, cReset, err)
+		failureMessages = append(failureMessages, "  instrumentation: "+err.Error())
+		failureErrs = append(failureErrs, err)
+	}
 
 	// Write page manifest with SSR/ISR metadata
 	manifestCSS := ""
