@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { cookies, headers, redirect } from "./server.js";
+import { cookies, headers, redirect, type KrateRequest } from "./server.js";
 import { callRoute, runAction } from "./testing.js";
 
 describe("callRoute", () => {
@@ -18,6 +18,15 @@ describe("callRoute", () => {
     const res = await callRoute(route, "GET", "/api/users/7?q=x", { params: { id: "7" } });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ id: "7", q: "x" });
+  });
+
+  it("gives the request nextUrl and read-only cookies, as the server does", async () => {
+    const typed = {
+      GET: (req: KrateRequest) =>
+        Response.json({ q: req.nextUrl.searchParams.get("q"), base: req.nextUrl.basePath, sid: req.cookies.get("sid")?.value ?? null }),
+    };
+    const res = await callRoute(typed, "GET", "/api/x?q=1", { headers: { cookie: "sid=a%20b" }, basePath: "/docs" });
+    expect(await res.json()).toEqual({ q: "1", base: "/docs", sid: "a b" });
   });
 
   it("sends a JSON body", async () => {
