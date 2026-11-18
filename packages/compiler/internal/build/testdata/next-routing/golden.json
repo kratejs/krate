@@ -1,0 +1,1044 @@
+{
+ "next": "16.4.2",
+ "registers": 1,
+ "cases": [
+  {
+   "name": "home",
+   "path": "/",
+   "response": {
+    "status": 200,
+    "location": null,
+    "headers": {
+     "x-content-type-options": "nosniff",
+     "referrer-policy": "strict-origin-when-cross-origin",
+     "x-frame-options": "DENY",
+     "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), browsing-topics=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), hid=(), interest-cohort=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), xr-spatial-tracking=()",
+     "cross-origin-opener-policy": "same-origin-allow-popups",
+     "content-security-policy": "base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'",
+     "content-security-policy-report-only": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://umami.example.test https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; media-src 'self' blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; font-src 'self' data: https://assets.example.test; connect-src 'self' blob: data: https://assets.example.test https://umami.example.test https://challenges.cloudflare.com; worker-src 'self' blob:; manifest-src 'self'; frame-src https://challenges.cloudflare.com; base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'; report-uri /api/csp-report",
+     "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch, Accept-Encoding",
+     "x-nextjs-cache": "HIT",
+     "x-nextjs-prerender": "1, 1",
+     "x-nextjs-stale-time": "300",
+     "x-powered-by": "Next.js",
+     "cache-control": "s-maxage=31536000",
+     "etag": "\"invq15ogiu30x\"",
+     "content-type": "text/html; charset=utf-8",
+     "content-length": "3921"
+    },
+    "body": "<!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"preload\" as=\"script\" fetchPriority=\"low\" href=\"/_next/static/chunks/webpack-70c336f9a46f13b1.js\"/><script src=\"/_next/static/chunks/01b56173-298657703493dec6.js"
+   }
+  },
+  {
+   "name": "not found",
+   "path": "/nope",
+   "response": {
+    "status": 404,
+    "location": null,
+    "headers": {
+     "x-content-type-options": "nosniff",
+     "referrer-policy": "strict-origin-when-cross-origin",
+     "x-frame-options": "DENY",
+     "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), browsing-topics=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), hid=(), interest-cohort=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), xr-spatial-tracking=()",
+     "cross-origin-opener-policy": "same-origin-allow-popups",
+     "content-security-policy": "base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'",
+     "content-security-policy-report-only": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://umami.example.test https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; media-src 'self' blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; font-src 'self' data: https://assets.example.test; connect-src 'self' blob: data: https://assets.example.test https://umami.example.test https://challenges.cloudflare.com; worker-src 'self' blob:; manifest-src 'self'; frame-src https://challenges.cloudflare.com; base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'; report-uri /api/csp-report",
+     "cache-control": "private, no-cache, no-store, max-age=0, must-revalidate",
+     "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch, Accept-Encoding",
+     "x-nextjs-cache": "HIT",
+     "x-nextjs-prerender": "1, 1",
+     "x-nextjs-stale-time": "300",
+     "x-powered-by": "Next.js",
+     "etag": "\"52vno8ydm043d\"",
+     "content-type": "text/html; charset=utf-8",
+     "content-length": "5305"
+    },
+    "body": "<!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"preload\" as=\"script\" fetchPriority=\"low\" href=\"/_next/static/chunks/webpack-70c336f9a46f13b1.js\"/><script src=\"/_next/static/chunks/01b56173-298657703493dec6.js"
+   }
+  },
+  {
+   "name": "store page",
+   "path": "/store",
+   "response": {
+    "status": 200,
+    "location": null,
+    "headers": {
+     "x-content-type-options": "nosniff",
+     "referrer-policy": "strict-origin-when-cross-origin",
+     "x-frame-options": "DENY",
+     "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), browsing-topics=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), hid=(), interest-cohort=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), xr-spatial-tracking=()",
+     "cross-origin-opener-policy": "same-origin-allow-popups",
+     "content-security-policy": "base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'",
+     "content-security-policy-report-only": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://umami.example.test https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; media-src 'self' blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; font-src 'self' data: https://assets.example.test; connect-src 'self' blob: data: https://assets.example.test https://umami.example.test https://challenges.cloudflare.com; worker-src 'self' blob:; manifest-src 'self'; frame-src https://challenges.cloudflare.com; base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'; report-uri /api/csp-report",
+     "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch, Accept-Encoding",
+     "x-nextjs-cache": "HIT",
+     "x-nextjs-prerender": "1, 1",
+     "x-nextjs-stale-time": "300",
+     "x-powered-by": "Next.js",
+     "cache-control": "s-maxage=31536000",
+     "etag": "\"5yl2lakpul3ex\"",
+     "content-type": "text/html; charset=utf-8",
+     "content-length": "4425"
+    },
+    "body": "<!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"preload\" as=\"script\" fetchPriority=\"low\" href=\"/_next/static/chunks/webpack-70c336f9a46f13b1.js\"/><script src=\"/_next/static/chunks/01b56173-298657703493dec6.js"
+   }
+  },
+  {
+   "name": "store page with a beta cookie",
+   "path": "/store",
+   "cookies": {
+    "beta": "1"
+   },
+   "response": {
+    "status": 200,
+    "location": null,
+    "headers": {
+     "x-content-type-options": "nosniff",
+     "referrer-policy": "strict-origin-when-cross-origin",
+     "x-frame-options": "DENY",
+     "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), browsing-topics=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), hid=(), interest-cohort=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), xr-spatial-tracking=()",
+     "cross-origin-opener-policy": "same-origin-allow-popups",
+     "content-security-policy": "base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'",
+     "content-security-policy-report-only": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://umami.example.test https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; media-src 'self' blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; font-src 'self' data: https://assets.example.test; connect-src 'self' blob: data: https://assets.example.test https://umami.example.test https://challenges.cloudflare.com; worker-src 'self' blob:; manifest-src 'self'; frame-src https://challenges.cloudflare.com; base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'; report-uri /api/csp-report",
+     "x-beta": "yes",
+     "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch, Accept-Encoding",
+     "x-nextjs-cache": "HIT",
+     "x-nextjs-prerender": "1, 1",
+     "x-nextjs-stale-time": "300",
+     "x-powered-by": "Next.js",
+     "cache-control": "s-maxage=31536000",
+     "etag": "\"5yl2lakpul3ex\"",
+     "content-type": "text/html; charset=utf-8",
+     "content-length": "4425"
+    },
+    "body": "<!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"preload\" as=\"script\" fetchPriority=\"low\" href=\"/_next/static/chunks/webpack-70c336f9a46f13b1.js\"/><script src=\"/_next/static/chunks/01b56173-298657703493dec6.js"
+   }
+  },
+  {
+   "name": "store vehicle filter",
+   "path": "/store",
+   "query": {
+    "vehicle": "x"
+   },
+   "response": {
+    "status": 308,
+    "location": "/templates?vehicle=x",
+    "headers": {
+     "location": "/templates?vehicle=x",
+     "refresh": "0;url=/templates?vehicle=x",
+     "transfer-encoding": "chunked"
+    },
+    "body": "/templates?vehicle=x"
+   }
+  },
+  {
+   "name": "store category and q",
+   "path": "/store",
+   "query": {
+    "category": "a",
+    "q": "b c"
+   },
+   "response": {
+    "status": 308,
+    "location": "/templates?category=a&q=b%20c",
+    "headers": {
+     "location": "/templates?category=a&q=b%20c",
+     "refresh": "0;url=/templates?category=a&q=b%20c",
+     "transfer-encoding": "chunked"
+    },
+    "body": "/templates?category=a&q=b%20c"
+   }
+  },
+  {
+   "name": "store slug",
+   "path": "/store/some-slug",
+   "response": {
+    "status": 308,
+    "location": "/templates/some-slug",
+    "headers": {
+     "location": "/templates/some-slug",
+     "refresh": "0;url=/templates/some-slug",
+     "transfer-encoding": "chunked"
+    },
+    "body": "/templates/some-slug"
+   }
+  },
+  {
+   "name": "store slug with query",
+   "path": "/store/some-slug",
+   "query": {
+    "page": "2"
+   },
+   "response": {
+    "status": 308,
+    "location": "/templates/some-slug?page=2",
+    "headers": {
+     "location": "/templates/some-slug?page=2",
+     "refresh": "0;url=/templates/some-slug?page=2",
+     "transfer-encoding": "chunked"
+    },
+    "body": "/templates/some-slug?page=2"
+   }
+  },
+  {
+   "name": "store compare",
+   "path": "/store/compare",
+   "response": {
+    "status": 200,
+    "location": null,
+    "headers": {
+     "x-content-type-options": "nosniff",
+     "referrer-policy": "strict-origin-when-cross-origin",
+     "x-frame-options": "DENY",
+     "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), browsing-topics=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), hid=(), interest-cohort=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), xr-spatial-tracking=()",
+     "cross-origin-opener-policy": "same-origin-allow-popups",
+     "content-security-policy": "base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'",
+     "content-security-policy-report-only": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://umami.example.test https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; media-src 'self' blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; font-src 'self' data: https://assets.example.test; connect-src 'self' blob: data: https://assets.example.test https://umami.example.test https://challenges.cloudflare.com; worker-src 'self' blob:; manifest-src 'self'; frame-src https://challenges.cloudflare.com; base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'; report-uri /api/csp-report",
+     "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch, Accept-Encoding",
+     "x-nextjs-cache": "HIT",
+     "x-nextjs-prerender": "1, 1",
+     "x-nextjs-stale-time": "300",
+     "x-powered-by": "Next.js",
+     "cache-control": "s-maxage=31536000",
+     "etag": "\"bjzfe63e8q3sy\"",
+     "content-type": "text/html; charset=utf-8",
+     "content-length": "4930"
+    },
+    "body": "<!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"preload\" as=\"script\" fetchPriority=\"low\" href=\"/_next/static/chunks/webpack-70c336f9a46f13b1.js\"/><script src=\"/_next/static/chunks/01b56173-298657703493dec6.js"
+   }
+  },
+  {
+   "name": "store plans",
+   "path": "/store/plans",
+   "query": {
+    "x": "1"
+   },
+   "response": {
+    "status": 308,
+    "location": "/store?x=1",
+    "headers": {
+     "location": "/store?x=1",
+     "refresh": "0;url=/store?x=1",
+     "transfer-encoding": "chunked"
+    },
+    "body": "/store?x=1"
+   }
+  },
+  {
+   "name": "store plans compare",
+   "path": "/store/plans/compare",
+   "response": {
+    "status": 308,
+    "location": "/store/compare",
+    "headers": {
+     "location": "/store/compare",
+     "refresh": "0;url=/store/compare",
+     "transfer-encoding": "chunked"
+    },
+    "body": "/store/compare"
+   }
+  },
+  {
+   "name": "templates",
+   "path": "/templates",
+   "response": {
+    "status": 200,
+    "location": null,
+    "headers": {
+     "x-content-type-options": "nosniff",
+     "referrer-policy": "strict-origin-when-cross-origin",
+     "x-frame-options": "DENY",
+     "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), browsing-topics=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), hid=(), interest-cohort=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), xr-spatial-tracking=()",
+     "cross-origin-opener-policy": "same-origin-allow-popups",
+     "content-security-policy": "base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'",
+     "content-security-policy-report-only": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://umami.example.test https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; media-src 'self' blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; font-src 'self' data: https://assets.example.test; connect-src 'self' blob: data: https://assets.example.test https://umami.example.test https://challenges.cloudflare.com; worker-src 'self' blob:; manifest-src 'self'; frame-src https://challenges.cloudflare.com; base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'; report-uri /api/csp-report",
+     "x-not-skipped": "1",
+     "cache-control": "public, max-age=60",
+     "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch, Accept-Encoding",
+     "x-nextjs-cache": "HIT",
+     "x-nextjs-prerender": "1, 1",
+     "x-nextjs-stale-time": "300",
+     "x-powered-by": "Next.js",
+     "etag": "\"jrqj2j8x3b3fd\"",
+     "content-type": "text/html; charset=utf-8",
+     "content-length": "4441"
+    },
+    "body": "<!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"preload\" as=\"script\" fetchPriority=\"low\" href=\"/_next/static/chunks/webpack-70c336f9a46f13b1.js\"/><script src=\"/_next/static/chunks/01b56173-298657703493dec6.js"
+   }
+  },
+  {
+   "name": "templates with x-skip",
+   "path": "/templates",
+   "headers": {
+    "x-skip": "1"
+   },
+   "response": {
+    "status": 200,
+    "location": null,
+    "headers": {
+     "x-content-type-options": "nosniff",
+     "referrer-policy": "strict-origin-when-cross-origin",
+     "x-frame-options": "DENY",
+     "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), browsing-topics=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), hid=(), interest-cohort=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), xr-spatial-tracking=()",
+     "cross-origin-opener-policy": "same-origin-allow-popups",
+     "content-security-policy": "base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'",
+     "content-security-policy-report-only": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://umami.example.test https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; media-src 'self' blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; font-src 'self' data: https://assets.example.test; connect-src 'self' blob: data: https://assets.example.test https://umami.example.test https://challenges.cloudflare.com; worker-src 'self' blob:; manifest-src 'self'; frame-src https://challenges.cloudflare.com; base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'; report-uri /api/csp-report",
+     "cache-control": "public, max-age=60",
+     "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch, Accept-Encoding",
+     "x-nextjs-cache": "HIT",
+     "x-nextjs-prerender": "1, 1",
+     "x-nextjs-stale-time": "300",
+     "x-powered-by": "Next.js",
+     "etag": "\"jrqj2j8x3b3fd\"",
+     "content-type": "text/html; charset=utf-8",
+     "content-length": "4441"
+    },
+    "body": "<!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"preload\" as=\"script\" fetchPriority=\"low\" href=\"/_next/static/chunks/webpack-70c336f9a46f13b1.js\"/><script src=\"/_next/static/chunks/01b56173-298657703493dec6.js"
+   }
+  },
+  {
+   "name": "template slug",
+   "path": "/templates/foo",
+   "response": {
+    "status": 200,
+    "location": null,
+    "headers": {
+     "x-content-type-options": "nosniff",
+     "referrer-policy": "strict-origin-when-cross-origin",
+     "x-frame-options": "DENY",
+     "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), browsing-topics=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), hid=(), interest-cohort=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), xr-spatial-tracking=()",
+     "cross-origin-opener-policy": "same-origin-allow-popups",
+     "content-security-policy": "base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'",
+     "content-security-policy-report-only": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://umami.example.test https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; media-src 'self' blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; font-src 'self' data: https://assets.example.test; connect-src 'self' blob: data: https://assets.example.test https://umami.example.test https://challenges.cloudflare.com; worker-src 'self' blob:; manifest-src 'self'; frame-src https://challenges.cloudflare.com; base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'; report-uri /api/csp-report",
+     "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch, Accept-Encoding",
+     "x-powered-by": "Next.js",
+     "cache-control": "private, no-cache, no-store, max-age=0, must-revalidate",
+     "content-type": "text/html; charset=utf-8",
+     "transfer-encoding": "chunked"
+    },
+    "body": "<!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"preload\" as=\"script\" fetchPriority=\"low\" href=\"/_next/static/chunks/webpack-70c336f9a46f13b1.js\"/><script src=\"/_next/static/chunks/01b56173-298657703493dec6.js"
+   }
+  },
+  {
+   "name": "api buffer route",
+   "path": "/api/node-buffer",
+   "response": {
+    "status": 200,
+    "location": null,
+    "headers": {
+     "x-content-type-options": "nosniff",
+     "referrer-policy": "strict-origin-when-cross-origin",
+     "x-frame-options": "DENY",
+     "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), browsing-topics=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), hid=(), interest-cohort=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), xr-spatial-tracking=()",
+     "cross-origin-opener-policy": "same-origin-allow-popups",
+     "content-security-policy": "base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'",
+     "content-security-policy-report-only": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://umami.example.test https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; media-src 'self' blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; font-src 'self' data: https://assets.example.test; connect-src 'self' blob: data: https://assets.example.test https://umami.example.test https://challenges.cloudflare.com; worker-src 'self' blob:; manifest-src 'self'; frame-src https://challenges.cloudflare.com; base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'; report-uri /api/csp-report",
+     "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch",
+     "content-type": "application/json",
+     "transfer-encoding": "chunked"
+    },
+    "body": "{\"route\":\"aGVsbG8=\",\"helper\":\"d29ybGQ=\"}"
+   }
+  },
+  {
+   "name": "api csp report",
+   "method": "POST",
+   "path": "/api/csp-report",
+   "headers": {
+    "content-type": "application/csp-report"
+   },
+   "response": {
+    "status": 204,
+    "location": null,
+    "headers": {
+     "x-content-type-options": "nosniff",
+     "referrer-policy": "strict-origin-when-cross-origin",
+     "x-frame-options": "DENY",
+     "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), browsing-topics=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), hid=(), interest-cohort=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), xr-spatial-tracking=()",
+     "cross-origin-opener-policy": "same-origin-allow-popups",
+     "content-security-policy": "base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'",
+     "content-security-policy-report-only": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://umami.example.test https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; media-src 'self' blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; font-src 'self' data: https://assets.example.test; connect-src 'self' blob: data: https://assets.example.test https://umami.example.test https://challenges.cloudflare.com; worker-src 'self' blob:; manifest-src 'self'; frame-src https://challenges.cloudflare.com; base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'; report-uri /api/csp-report",
+     "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch"
+    },
+    "body": ""
+   }
+  },
+  {
+   "name": "api marker",
+   "path": "/api/marker",
+   "response": {
+    "status": 200,
+    "location": null,
+    "headers": {
+     "x-content-type-options": "nosniff",
+     "referrer-policy": "strict-origin-when-cross-origin",
+     "x-frame-options": "DENY",
+     "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), browsing-topics=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), hid=(), interest-cohort=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), xr-spatial-tracking=()",
+     "cross-origin-opener-policy": "same-origin-allow-popups",
+     "content-security-policy": "base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'",
+     "content-security-policy-report-only": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://umami.example.test https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; media-src 'self' blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; font-src 'self' data: https://assets.example.test; connect-src 'self' blob: data: https://assets.example.test https://umami.example.test https://challenges.cloudflare.com; worker-src 'self' blob:; manifest-src 'self'; frame-src https://challenges.cloudflare.com; base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'; report-uri /api/csp-report",
+     "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch",
+     "content-type": "application/json",
+     "transfer-encoding": "chunked"
+    },
+    "body": "{\"registers\":1}"
+   }
+  },
+  {
+   "name": "brand svg",
+   "path": "/brand/a.svg",
+   "response": {
+    "status": 200,
+    "location": null,
+    "headers": {
+     "x-content-type-options": "nosniff",
+     "referrer-policy": "strict-origin-when-cross-origin",
+     "x-frame-options": "DENY",
+     "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), browsing-topics=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), hid=(), interest-cohort=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), xr-spatial-tracking=()",
+     "cross-origin-opener-policy": "same-origin-allow-popups",
+     "content-security-policy": "base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'",
+     "content-security-policy-report-only": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://umami.example.test https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; media-src 'self' blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; font-src 'self' data: https://assets.example.test; connect-src 'self' blob: data: https://assets.example.test https://umami.example.test https://challenges.cloudflare.com; worker-src 'self' blob:; manifest-src 'self'; frame-src https://challenges.cloudflare.com; base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'; report-uri /api/csp-report",
+     "cache-control": "public, max-age=86400",
+     "accept-ranges": "bytes",
+     "last-modified": "Wed, 18 Nov 2026 16:41:52 GMT",
+     "etag": "W/\"3f-1a1ef8941df\"",
+     "content-type": "image/svg+xml",
+     "content-length": "63",
+     "vary": "Accept-Encoding"
+    },
+    "body": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"1\" height=\"1\"/>\n"
+   }
+  },
+  {
+   "name": "brand not an image",
+   "path": "/brand/a.txt",
+   "response": {
+    "status": 404,
+    "location": null,
+    "headers": {
+     "x-content-type-options": "nosniff",
+     "referrer-policy": "strict-origin-when-cross-origin",
+     "x-frame-options": "DENY",
+     "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), browsing-topics=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), hid=(), interest-cohort=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), xr-spatial-tracking=()",
+     "cross-origin-opener-policy": "same-origin-allow-popups",
+     "content-security-policy": "base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'",
+     "content-security-policy-report-only": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://umami.example.test https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; media-src 'self' blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; font-src 'self' data: https://assets.example.test; connect-src 'self' blob: data: https://assets.example.test https://umami.example.test https://challenges.cloudflare.com; worker-src 'self' blob:; manifest-src 'self'; frame-src https://challenges.cloudflare.com; base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'; report-uri /api/csp-report",
+     "cache-control": "private, no-cache, no-store, max-age=0, must-revalidate",
+     "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch, Accept-Encoding",
+     "x-nextjs-cache": "HIT",
+     "x-nextjs-prerender": "1, 1",
+     "x-nextjs-stale-time": "300",
+     "x-powered-by": "Next.js",
+     "etag": "\"52vno8ydm043d\"",
+     "content-type": "text/html; charset=utf-8",
+     "content-length": "5305"
+    },
+    "body": "<!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"preload\" as=\"script\" fetchPriority=\"low\" href=\"/_next/static/chunks/webpack-70c336f9a46f13b1.js\"/><script src=\"/_next/static/chunks/01b56173-298657703493dec6.js"
+   }
+  },
+  {
+   "name": "preview hashed wasm",
+   "path": "/preview/0123456789abcdef.wasm",
+   "response": {
+    "status": 200,
+    "location": null,
+    "headers": {
+     "x-content-type-options": "nosniff",
+     "referrer-policy": "strict-origin-when-cross-origin",
+     "x-frame-options": "DENY",
+     "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), browsing-topics=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), hid=(), interest-cohort=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), xr-spatial-tracking=()",
+     "cross-origin-opener-policy": "same-origin-allow-popups",
+     "content-security-policy": "base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'",
+     "content-security-policy-report-only": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://umami.example.test https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; media-src 'self' blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; font-src 'self' data: https://assets.example.test; connect-src 'self' blob: data: https://assets.example.test https://umami.example.test https://challenges.cloudflare.com; worker-src 'self' blob:; manifest-src 'self'; frame-src https://challenges.cloudflare.com; base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'; report-uri /api/csp-report",
+     "cache-control": "public, max-age=31536000, immutable",
+     "accept-ranges": "bytes",
+     "last-modified": "Wed, 18 Nov 2026 16:41:52 GMT",
+     "etag": "W/\"4-1a1ef8941df\"",
+     "content-type": "application/wasm",
+     "content-length": "4",
+     "vary": "Accept-Encoding"
+    },
+    "body": "wasm"
+   }
+  },
+  {
+   "name": "preview other wasm",
+   "path": "/preview/other.wasm",
+   "response": {
+    "status": 200,
+    "location": null,
+    "headers": {
+     "x-content-type-options": "nosniff",
+     "referrer-policy": "strict-origin-when-cross-origin",
+     "x-frame-options": "DENY",
+     "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), browsing-topics=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), hid=(), interest-cohort=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), xr-spatial-tracking=()",
+     "cross-origin-opener-policy": "same-origin-allow-popups",
+     "content-security-policy": "base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'",
+     "content-security-policy-report-only": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://umami.example.test https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; media-src 'self' blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; font-src 'self' data: https://assets.example.test; connect-src 'self' blob: data: https://assets.example.test https://umami.example.test https://challenges.cloudflare.com; worker-src 'self' blob:; manifest-src 'self'; frame-src https://challenges.cloudflare.com; base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'; report-uri /api/csp-report",
+     "accept-ranges": "bytes",
+     "cache-control": "public, max-age=0",
+     "last-modified": "Wed, 18 Nov 2026 16:41:52 GMT",
+     "etag": "W/\"4-1a1ef8941df\"",
+     "content-type": "application/wasm",
+     "content-length": "4",
+     "vary": "Accept-Encoding"
+    },
+    "body": "wasm"
+   }
+  },
+  {
+   "name": "ort file",
+   "path": "/ort/model.bin",
+   "response": {
+    "status": 200,
+    "location": null,
+    "headers": {
+     "x-content-type-options": "nosniff",
+     "referrer-policy": "strict-origin-when-cross-origin",
+     "x-frame-options": "DENY",
+     "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), browsing-topics=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), hid=(), interest-cohort=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), xr-spatial-tracking=()",
+     "cross-origin-opener-policy": "same-origin-allow-popups",
+     "content-security-policy": "base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'",
+     "content-security-policy-report-only": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://umami.example.test https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; media-src 'self' blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; font-src 'self' data: https://assets.example.test; connect-src 'self' blob: data: https://assets.example.test https://umami.example.test https://challenges.cloudflare.com; worker-src 'self' blob:; manifest-src 'self'; frame-src https://challenges.cloudflare.com; base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'; report-uri /api/csp-report",
+     "cache-control": "public, max-age=86400, stale-while-revalidate=604800",
+     "accept-ranges": "bytes",
+     "last-modified": "Wed, 18 Nov 2026 16:41:52 GMT",
+     "etag": "W/\"5-1a1ef8941df\"",
+     "content-type": "application/octet-stream",
+     "content-length": "5"
+    },
+    "body": "model"
+   }
+  },
+  {
+   "name": "models file",
+   "path": "/models/m.bin",
+   "response": {
+    "status": 200,
+    "location": null,
+    "headers": {
+     "x-content-type-options": "nosniff",
+     "referrer-policy": "strict-origin-when-cross-origin",
+     "x-frame-options": "DENY",
+     "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), browsing-topics=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), hid=(), interest-cohort=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), xr-spatial-tracking=()",
+     "cross-origin-opener-policy": "same-origin-allow-popups",
+     "content-security-policy": "base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'",
+     "content-security-policy-report-only": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://umami.example.test https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; media-src 'self' blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; font-src 'self' data: https://assets.example.test; connect-src 'self' blob: data: https://assets.example.test https://umami.example.test https://challenges.cloudflare.com; worker-src 'self' blob:; manifest-src 'self'; frame-src https://challenges.cloudflare.com; base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'; report-uri /api/csp-report",
+     "cache-control": "public, max-age=86400, stale-while-revalidate=604800",
+     "accept-ranges": "bytes",
+     "last-modified": "Wed, 18 Nov 2026 16:41:52 GMT",
+     "etag": "W/\"5-1a1ef8941df\"",
+     "content-type": "application/octet-stream",
+     "content-length": "5"
+    },
+    "body": "model"
+   }
+  },
+  {
+   "name": "dd-pause",
+   "path": "/dd-pause.js",
+   "response": {
+    "status": 200,
+    "location": null,
+    "headers": {
+     "x-content-type-options": "nosniff",
+     "referrer-policy": "strict-origin-when-cross-origin",
+     "x-frame-options": "DENY",
+     "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), browsing-topics=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), hid=(), interest-cohort=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), xr-spatial-tracking=()",
+     "cross-origin-opener-policy": "same-origin-allow-popups",
+     "content-security-policy": "base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'",
+     "content-security-policy-report-only": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://umami.example.test https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; media-src 'self' blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; font-src 'self' data: https://assets.example.test; connect-src 'self' blob: data: https://assets.example.test https://umami.example.test https://challenges.cloudflare.com; worker-src 'self' blob:; manifest-src 'self'; frame-src https://challenges.cloudflare.com; base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'; report-uri /api/csp-report",
+     "cache-control": "public, max-age=3600",
+     "accept-ranges": "bytes",
+     "last-modified": "Wed, 18 Nov 2026 16:41:52 GMT",
+     "etag": "W/\"8-1a1ef8941df\"",
+     "content-type": "application/javascript; charset=UTF-8",
+     "content-length": "8",
+     "vary": "Accept-Encoding"
+    },
+    "body": "void 0;\n"
+   }
+  },
+  {
+   "name": "help file",
+   "path": "/help/guide.txt",
+   "response": {
+    "status": 200,
+    "location": null,
+    "headers": {
+     "x-content-type-options": "nosniff",
+     "referrer-policy": "strict-origin-when-cross-origin",
+     "x-frame-options": "DENY",
+     "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), browsing-topics=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), hid=(), interest-cohort=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), xr-spatial-tracking=()",
+     "cross-origin-opener-policy": "same-origin-allow-popups",
+     "content-security-policy": "base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'",
+     "content-security-policy-report-only": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://umami.example.test https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; media-src 'self' blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; font-src 'self' data: https://assets.example.test; connect-src 'self' blob: data: https://assets.example.test https://umami.example.test https://challenges.cloudflare.com; worker-src 'self' blob:; manifest-src 'self'; frame-src https://challenges.cloudflare.com; base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'; report-uri /api/csp-report",
+     "cache-control": "public, max-age=86400",
+     "accept-ranges": "bytes",
+     "last-modified": "Wed, 18 Nov 2026 16:41:52 GMT",
+     "etag": "W/\"5-1a1ef8941df\"",
+     "content-type": "text/plain; charset=UTF-8",
+     "content-length": "5",
+     "vary": "Accept-Encoding"
+    },
+    "body": "help\n"
+   }
+  },
+  {
+   "name": "k chunk",
+   "path": "/_k/chunks/app.js",
+   "response": {
+    "status": 200,
+    "location": null,
+    "headers": {
+     "x-content-type-options": "nosniff",
+     "referrer-policy": "strict-origin-when-cross-origin",
+     "x-frame-options": "DENY",
+     "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), browsing-topics=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), hid=(), interest-cohort=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), xr-spatial-tracking=()",
+     "cross-origin-opener-policy": "same-origin-allow-popups",
+     "content-security-policy": "base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'",
+     "content-security-policy-report-only": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://umami.example.test https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; media-src 'self' blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; font-src 'self' data: https://assets.example.test; connect-src 'self' blob: data: https://assets.example.test https://umami.example.test https://challenges.cloudflare.com; worker-src 'self' blob:; manifest-src 'self'; frame-src https://challenges.cloudflare.com; base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'; report-uri /api/csp-report",
+     "cache-control": "public, max-age=31536000, immutable",
+     "accept-ranges": "bytes",
+     "last-modified": "Wed, 18 Nov 2026 16:41:52 GMT",
+     "etag": "W/\"6-1a1ef8941df\"",
+     "content-type": "application/javascript; charset=UTF-8",
+     "content-length": "6",
+     "vary": "Accept-Encoding"
+    },
+    "body": "chunk\n"
+   }
+  },
+  {
+   "name": "k font",
+   "path": "/_k/fonts/f.woff2",
+   "response": {
+    "status": 200,
+    "location": null,
+    "headers": {
+     "x-content-type-options": "nosniff",
+     "referrer-policy": "strict-origin-when-cross-origin",
+     "x-frame-options": "DENY",
+     "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), browsing-topics=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), hid=(), interest-cohort=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), xr-spatial-tracking=()",
+     "cross-origin-opener-policy": "same-origin-allow-popups",
+     "content-security-policy": "base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'",
+     "content-security-policy-report-only": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://umami.example.test https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; media-src 'self' blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; font-src 'self' data: https://assets.example.test; connect-src 'self' blob: data: https://assets.example.test https://umami.example.test https://challenges.cloudflare.com; worker-src 'self' blob:; manifest-src 'self'; frame-src https://challenges.cloudflare.com; base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'; report-uri /api/csp-report",
+     "cache-control": "public, max-age=86400, stale-while-revalidate=604800",
+     "accept-ranges": "bytes",
+     "last-modified": "Wed, 18 Nov 2026 16:41:52 GMT",
+     "etag": "W/\"5-1a1ef8941df\"",
+     "content-type": "font/woff2",
+     "content-length": "5"
+    },
+    "body": "font\n"
+   }
+  },
+  {
+   "name": "k stylesheet",
+   "path": "/_k/styles.abc123.css",
+   "response": {
+    "status": 200,
+    "location": null,
+    "headers": {
+     "x-content-type-options": "nosniff",
+     "referrer-policy": "strict-origin-when-cross-origin",
+     "x-frame-options": "DENY",
+     "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), browsing-topics=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), hid=(), interest-cohort=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), xr-spatial-tracking=()",
+     "cross-origin-opener-policy": "same-origin-allow-popups",
+     "content-security-policy": "base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'",
+     "content-security-policy-report-only": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://umami.example.test https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; media-src 'self' blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; font-src 'self' data: https://assets.example.test; connect-src 'self' blob: data: https://assets.example.test https://umami.example.test https://challenges.cloudflare.com; worker-src 'self' blob:; manifest-src 'self'; frame-src https://challenges.cloudflare.com; base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'; report-uri /api/csp-report",
+     "cache-control": "public, max-age=31536000, immutable",
+     "accept-ranges": "bytes",
+     "last-modified": "Wed, 18 Nov 2026 16:41:52 GMT",
+     "etag": "W/\"7-1a1ef8941df\"",
+     "content-type": "text/css; charset=UTF-8",
+     "content-length": "7",
+     "vary": "Accept-Encoding"
+    },
+    "body": "body{}\n"
+   }
+  },
+  {
+   "name": "k page script",
+   "path": "/_k/x/index.abc123.js",
+   "response": {
+    "status": 200,
+    "location": null,
+    "headers": {
+     "x-content-type-options": "nosniff",
+     "referrer-policy": "strict-origin-when-cross-origin",
+     "x-frame-options": "DENY",
+     "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), browsing-topics=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), hid=(), interest-cohort=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), xr-spatial-tracking=()",
+     "cross-origin-opener-policy": "same-origin-allow-popups",
+     "content-security-policy": "base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'",
+     "content-security-policy-report-only": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://umami.example.test https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; media-src 'self' blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; font-src 'self' data: https://assets.example.test; connect-src 'self' blob: data: https://assets.example.test https://umami.example.test https://challenges.cloudflare.com; worker-src 'self' blob:; manifest-src 'self'; frame-src https://challenges.cloudflare.com; base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'; report-uri /api/csp-report",
+     "cache-control": "public, max-age=31536000, immutable",
+     "accept-ranges": "bytes",
+     "last-modified": "Wed, 18 Nov 2026 16:41:52 GMT",
+     "etag": "W/\"8-1a1ef8941db\"",
+     "content-type": "application/javascript; charset=UTF-8",
+     "content-length": "8",
+     "vary": "Accept-Encoding"
+    },
+    "body": "void 0;\n"
+   }
+  },
+  {
+   "name": "has header, present",
+   "path": "/x-header",
+   "headers": {
+    "x-beta": "on"
+   },
+   "response": {
+    "status": 307,
+    "location": "/templates",
+    "headers": {
+     "location": "/templates",
+     "transfer-encoding": "chunked"
+    },
+    "body": "/templates"
+   }
+  },
+  {
+   "name": "has header, wrong value",
+   "path": "/x-header",
+   "headers": {
+    "x-beta": "off"
+   },
+   "response": {
+    "status": 404,
+    "location": null,
+    "headers": {
+     "x-content-type-options": "nosniff",
+     "referrer-policy": "strict-origin-when-cross-origin",
+     "x-frame-options": "DENY",
+     "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), browsing-topics=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), hid=(), interest-cohort=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), xr-spatial-tracking=()",
+     "cross-origin-opener-policy": "same-origin-allow-popups",
+     "content-security-policy": "base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'",
+     "content-security-policy-report-only": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://umami.example.test https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; media-src 'self' blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; font-src 'self' data: https://assets.example.test; connect-src 'self' blob: data: https://assets.example.test https://umami.example.test https://challenges.cloudflare.com; worker-src 'self' blob:; manifest-src 'self'; frame-src https://challenges.cloudflare.com; base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'; report-uri /api/csp-report",
+     "cache-control": "private, no-cache, no-store, max-age=0, must-revalidate",
+     "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch, Accept-Encoding",
+     "x-nextjs-cache": "HIT",
+     "x-nextjs-prerender": "1, 1",
+     "x-nextjs-stale-time": "300",
+     "x-powered-by": "Next.js",
+     "etag": "\"52vno8ydm043d\"",
+     "content-type": "text/html; charset=utf-8",
+     "content-length": "5305"
+    },
+    "body": "<!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"preload\" as=\"script\" fetchPriority=\"low\" href=\"/_next/static/chunks/webpack-70c336f9a46f13b1.js\"/><script src=\"/_next/static/chunks/01b56173-298657703493dec6.js"
+   }
+  },
+  {
+   "name": "has header, absent",
+   "path": "/x-header",
+   "response": {
+    "status": 404,
+    "location": null,
+    "headers": {
+     "x-content-type-options": "nosniff",
+     "referrer-policy": "strict-origin-when-cross-origin",
+     "x-frame-options": "DENY",
+     "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), browsing-topics=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), hid=(), interest-cohort=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), xr-spatial-tracking=()",
+     "cross-origin-opener-policy": "same-origin-allow-popups",
+     "content-security-policy": "base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'",
+     "content-security-policy-report-only": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://umami.example.test https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; media-src 'self' blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; font-src 'self' data: https://assets.example.test; connect-src 'self' blob: data: https://assets.example.test https://umami.example.test https://challenges.cloudflare.com; worker-src 'self' blob:; manifest-src 'self'; frame-src https://challenges.cloudflare.com; base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'; report-uri /api/csp-report",
+     "cache-control": "private, no-cache, no-store, max-age=0, must-revalidate",
+     "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch, Accept-Encoding",
+     "x-nextjs-cache": "HIT",
+     "x-nextjs-prerender": "1, 1",
+     "x-nextjs-stale-time": "300",
+     "x-powered-by": "Next.js",
+     "etag": "\"52vno8ydm043d\"",
+     "content-type": "text/html; charset=utf-8",
+     "content-length": "5305"
+    },
+    "body": "<!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"preload\" as=\"script\" fetchPriority=\"low\" href=\"/_next/static/chunks/webpack-70c336f9a46f13b1.js\"/><script src=\"/_next/static/chunks/01b56173-298657703493dec6.js"
+   }
+  },
+  {
+   "name": "has cookie, present",
+   "path": "/x-cookie",
+   "cookies": {
+    "beta": "1"
+   },
+   "response": {
+    "status": 308,
+    "location": "/store",
+    "headers": {
+     "location": "/store",
+     "refresh": "0;url=/store",
+     "transfer-encoding": "chunked"
+    },
+    "body": "/store"
+   }
+  },
+  {
+   "name": "has cookie, wrong value",
+   "path": "/x-cookie",
+   "cookies": {
+    "beta": "2"
+   },
+   "response": {
+    "status": 404,
+    "location": null,
+    "headers": {
+     "x-content-type-options": "nosniff",
+     "referrer-policy": "strict-origin-when-cross-origin",
+     "x-frame-options": "DENY",
+     "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), browsing-topics=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), hid=(), interest-cohort=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), xr-spatial-tracking=()",
+     "cross-origin-opener-policy": "same-origin-allow-popups",
+     "content-security-policy": "base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'",
+     "content-security-policy-report-only": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://umami.example.test https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; media-src 'self' blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; font-src 'self' data: https://assets.example.test; connect-src 'self' blob: data: https://assets.example.test https://umami.example.test https://challenges.cloudflare.com; worker-src 'self' blob:; manifest-src 'self'; frame-src https://challenges.cloudflare.com; base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'; report-uri /api/csp-report",
+     "cache-control": "private, no-cache, no-store, max-age=0, must-revalidate",
+     "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch, Accept-Encoding",
+     "x-nextjs-cache": "HIT",
+     "x-nextjs-prerender": "1, 1",
+     "x-nextjs-stale-time": "300",
+     "x-powered-by": "Next.js",
+     "etag": "\"52vno8ydm043d\"",
+     "content-type": "text/html; charset=utf-8",
+     "content-length": "5305"
+    },
+    "body": "<!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"preload\" as=\"script\" fetchPriority=\"low\" href=\"/_next/static/chunks/webpack-70c336f9a46f13b1.js\"/><script src=\"/_next/static/chunks/01b56173-298657703493dec6.js"
+   }
+  },
+  {
+   "name": "has host, match",
+   "path": "/x-host",
+   "headers": {
+    "host": "old.example.test"
+   },
+   "response": {
+    "status": 308,
+    "location": "https://new.example.test/x-host",
+    "headers": {
+     "location": "https://new.example.test/x-host",
+     "refresh": "0;url=https://new.example.test/x-host",
+     "transfer-encoding": "chunked"
+    },
+    "body": "https://new.example.test/x-host"
+   }
+  },
+  {
+   "name": "has host, other host",
+   "path": "/x-host",
+   "headers": {
+    "host": "other.example.test"
+   },
+   "response": {
+    "status": 404,
+    "location": null,
+    "headers": {
+     "x-content-type-options": "nosniff",
+     "referrer-policy": "strict-origin-when-cross-origin",
+     "x-frame-options": "DENY",
+     "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), browsing-topics=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), hid=(), interest-cohort=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), xr-spatial-tracking=()",
+     "cross-origin-opener-policy": "same-origin-allow-popups",
+     "content-security-policy": "base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'",
+     "content-security-policy-report-only": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://umami.example.test https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; media-src 'self' blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; font-src 'self' data: https://assets.example.test; connect-src 'self' blob: data: https://assets.example.test https://umami.example.test https://challenges.cloudflare.com; worker-src 'self' blob:; manifest-src 'self'; frame-src https://challenges.cloudflare.com; base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'; report-uri /api/csp-report",
+     "cache-control": "private, no-cache, no-store, max-age=0, must-revalidate",
+     "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch, Accept-Encoding",
+     "x-nextjs-cache": "HIT",
+     "x-nextjs-prerender": "1, 1",
+     "x-nextjs-stale-time": "300",
+     "x-powered-by": "Next.js",
+     "etag": "\"52vno8ydm043d\"",
+     "content-type": "text/html; charset=utf-8",
+     "content-length": "5305"
+    },
+    "body": "<!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"preload\" as=\"script\" fetchPriority=\"low\" href=\"/_next/static/chunks/webpack-70c336f9a46f13b1.js\"/><script src=\"/_next/static/chunks/01b56173-298657703493dec6.js"
+   }
+  },
+  {
+   "name": "named capture from has into destination",
+   "path": "/x-named/abc",
+   "query": {
+    "ref": "spring"
+   },
+   "response": {
+    "status": 307,
+    "location": "/templates/abc?ref=spring&c=spring",
+    "headers": {
+     "location": "/templates/abc?ref=spring&c=spring",
+     "transfer-encoding": "chunked"
+    },
+    "body": "/templates/abc?ref=spring&c=spring"
+   }
+  },
+  {
+   "name": "named capture, value does not match",
+   "path": "/x-named/abc",
+   "query": {
+    "ref": "SPRING1"
+   },
+   "response": {
+    "status": 404,
+    "location": null,
+    "headers": {
+     "x-content-type-options": "nosniff",
+     "referrer-policy": "strict-origin-when-cross-origin",
+     "x-frame-options": "DENY",
+     "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), browsing-topics=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), hid=(), interest-cohort=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), xr-spatial-tracking=()",
+     "cross-origin-opener-policy": "same-origin-allow-popups",
+     "content-security-policy": "base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'",
+     "content-security-policy-report-only": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://umami.example.test https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; media-src 'self' blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; font-src 'self' data: https://assets.example.test; connect-src 'self' blob: data: https://assets.example.test https://umami.example.test https://challenges.cloudflare.com; worker-src 'self' blob:; manifest-src 'self'; frame-src https://challenges.cloudflare.com; base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'; report-uri /api/csp-report",
+     "cache-control": "private, no-cache, no-store, max-age=0, must-revalidate",
+     "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch, Accept-Encoding",
+     "x-nextjs-cache": "HIT",
+     "x-nextjs-prerender": "1, 1",
+     "x-nextjs-stale-time": "300",
+     "x-powered-by": "Next.js",
+     "etag": "\"52vno8ydm043d\"",
+     "content-type": "text/html; charset=utf-8",
+     "content-length": "5305"
+    },
+    "body": "<!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"preload\" as=\"script\" fetchPriority=\"low\" href=\"/_next/static/chunks/webpack-70c336f9a46f13b1.js\"/><script src=\"/_next/static/chunks/01b56173-298657703493dec6.js"
+   }
+  },
+  {
+   "name": "missing cookie, absent",
+   "path": "/x-missing",
+   "response": {
+    "status": 307,
+    "location": "/store",
+    "headers": {
+     "location": "/store",
+     "transfer-encoding": "chunked"
+    },
+    "body": "/store"
+   }
+  },
+  {
+   "name": "missing cookie, present",
+   "path": "/x-missing",
+   "cookies": {
+    "session": "s"
+   },
+   "response": {
+    "status": 404,
+    "location": null,
+    "headers": {
+     "x-content-type-options": "nosniff",
+     "referrer-policy": "strict-origin-when-cross-origin",
+     "x-frame-options": "DENY",
+     "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), browsing-topics=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), hid=(), interest-cohort=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), xr-spatial-tracking=()",
+     "cross-origin-opener-policy": "same-origin-allow-popups",
+     "content-security-policy": "base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'",
+     "content-security-policy-report-only": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://umami.example.test https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; media-src 'self' blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; font-src 'self' data: https://assets.example.test; connect-src 'self' blob: data: https://assets.example.test https://umami.example.test https://challenges.cloudflare.com; worker-src 'self' blob:; manifest-src 'self'; frame-src https://challenges.cloudflare.com; base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'; report-uri /api/csp-report",
+     "cache-control": "private, no-cache, no-store, max-age=0, must-revalidate",
+     "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch, Accept-Encoding",
+     "x-nextjs-cache": "HIT",
+     "x-nextjs-prerender": "1, 1",
+     "x-nextjs-stale-time": "300",
+     "x-powered-by": "Next.js",
+     "etag": "\"52vno8ydm043d\"",
+     "content-type": "text/html; charset=utf-8",
+     "content-length": "5305"
+    },
+    "body": "<!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"preload\" as=\"script\" fetchPriority=\"low\" href=\"/_next/static/chunks/webpack-70c336f9a46f13b1.js\"/><script src=\"/_next/static/chunks/01b56173-298657703493dec6.js"
+   }
+  },
+  {
+   "name": "presence-only key capture",
+   "path": "/x-present",
+   "query": {
+    "tok": "abc"
+   },
+   "response": {
+    "status": 308,
+    "location": "/templates/abc?tok=abc",
+    "headers": {
+     "location": "/templates/abc?tok=abc",
+     "refresh": "0;url=/templates/abc?tok=abc",
+     "transfer-encoding": "chunked"
+    },
+    "body": "/templates/abc?tok=abc"
+   }
+  },
+  {
+   "name": "presence-only key absent",
+   "path": "/x-present",
+   "response": {
+    "status": 404,
+    "location": null,
+    "headers": {
+     "x-content-type-options": "nosniff",
+     "referrer-policy": "strict-origin-when-cross-origin",
+     "x-frame-options": "DENY",
+     "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), browsing-topics=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), hid=(), interest-cohort=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), xr-spatial-tracking=()",
+     "cross-origin-opener-policy": "same-origin-allow-popups",
+     "content-security-policy": "base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'",
+     "content-security-policy-report-only": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://umami.example.test https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; media-src 'self' blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; font-src 'self' data: https://assets.example.test; connect-src 'self' blob: data: https://assets.example.test https://umami.example.test https://challenges.cloudflare.com; worker-src 'self' blob:; manifest-src 'self'; frame-src https://challenges.cloudflare.com; base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'; report-uri /api/csp-report",
+     "cache-control": "private, no-cache, no-store, max-age=0, must-revalidate",
+     "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch, Accept-Encoding",
+     "x-nextjs-cache": "HIT",
+     "x-nextjs-prerender": "1, 1",
+     "x-nextjs-stale-time": "300",
+     "x-powered-by": "Next.js",
+     "etag": "\"52vno8ydm043d\"",
+     "content-type": "text/html; charset=utf-8",
+     "content-length": "5305"
+    },
+    "body": "<!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"preload\" as=\"script\" fetchPriority=\"low\" href=\"/_next/static/chunks/webpack-70c336f9a46f13b1.js\"/><script src=\"/_next/static/chunks/01b56173-298657703493dec6.js"
+   }
+  },
+  {
+   "name": "statusCode 303",
+   "path": "/x-code",
+   "response": {
+    "status": 303,
+    "location": "/store",
+    "headers": {
+     "location": "/store",
+     "transfer-encoding": "chunked"
+    },
+    "body": "/store"
+   }
+  },
+  {
+   "name": "optional repeat param",
+   "path": "/x-nested/a/b",
+   "response": {
+    "status": 307,
+    "location": "/templates/a/b",
+    "headers": {
+     "location": "/templates/a/b",
+     "transfer-encoding": "chunked"
+    },
+    "body": "/templates/a/b"
+   }
+  },
+  {
+   "name": "optional repeat param, one segment",
+   "path": "/x-nested/a",
+   "response": {
+    "status": 307,
+    "location": "/templates/a",
+    "headers": {
+     "location": "/templates/a",
+     "transfer-encoding": "chunked"
+    },
+    "body": "/templates/a"
+   }
+  },
+  {
+   "name": "POST redirect keeps the query",
+   "method": "POST",
+   "path": "/store/plans",
+   "query": {
+    "x": "1"
+   },
+   "response": {
+    "status": 308,
+    "location": "/store?x=1",
+    "headers": {
+     "location": "/store?x=1",
+     "refresh": "0;url=/store?x=1",
+     "transfer-encoding": "chunked"
+    },
+    "body": "/store?x=1"
+   }
+  }
+ ]
+}
