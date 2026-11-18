@@ -179,6 +179,26 @@ describe('focus', () => {
   });
 });
 
+describe('a second copy of the router module', () => {
+  // Island bundles carry their own router.ts; its useRouter().replace() used to
+  // do a full document load because that copy is never initialized.
+  it('hands navigations to the initialized router', async () => {
+    const spec = './router?island-copy';
+    const copy = (await import(/* @vite-ignore */ spec)) as typeof import('./router');
+    expect(copy.krateRouter).not.toBe(krateRouter);
+    const seen: string[] = [];
+    const off = copy.subscribeNavigation((s) => seen.push(s.pathname + s.search));
+    routes['/store?q=cv'] = { body: page('Store', '<input aria-label="q">') };
+    await copy.krateRouter.replace('/store?q=cv', { scroll: false });
+    await settle();
+    expect(hardNavs).toEqual([]);
+    expect(location.pathname + location.search).toBe('/store?q=cv');
+    expect(copy.getNavigationState().search).toBe('?q=cv');
+    expect(seen).toContain('/store?q=cv');
+    off();
+  });
+});
+
 describe('races', () => {
   it('a slower superseded navigation never overwrites a newer one', async () => {
     let open!: () => void;

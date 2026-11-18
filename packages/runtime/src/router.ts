@@ -134,6 +134,17 @@ interface CachedDoc {
 
 // Router state (module scope, survives reinitRouter).
 let initialized = false;
+
+// Island bundles carry their own copy of this module, which is never
+// initialized: the page's router registers itself here, and an uninitialized
+// copy hands navigations to it instead of loading a new document.
+const LIVE_ROUTER = Symbol.for('krate.router');
+
+function liveRouter(): typeof krateRouter | null {
+  if (initialized) return null;
+  const r = (globalThis as any)[LIVE_ROUTER];
+  return r && r !== krateRouter ? r : null;
+}
 let navSeq = 0;
 let pendingAbort: AbortController | undefined;
 let keySeq = 0;
@@ -228,6 +239,8 @@ function snapshot(): NavigationState {
 
 /** Current router state (pathname without base path, search, hash, status). */
 export function getNavigationState(): NavigationState {
+  const live = liveRouter();
+  if (live) return live.getState();
   if (typeof location === 'undefined') {
     return { url: '', pathname: '/', search: '', hash: '', status: 'idle' };
   }
@@ -259,6 +272,8 @@ function setStatus(next: 'idle' | 'loading'): void {
  * with getNavigationState().
  */
 export function subscribeNavigation(fn: (s: NavigationState) => void): () => void {
+  const live = liveRouter();
+  if (live) return live.subscribe(fn);
   listeners.add(fn);
   return () => {
     listeners.delete(fn);
@@ -1886,6 +1901,8 @@ function refreshPageBindings(): void {
 // Public API
 
 function refresh(): Promise<void> {
+  const live = liveRouter();
+  if (live) return live.refresh();
   if (!initialized || typeof location === 'undefined') {
     if (typeof location !== 'undefined') location.reload();
     return Promise.resolve();
@@ -1902,6 +1919,8 @@ function refresh(): Promise<void> {
 
 function push(url: string, opts: NavigateOptions = {}): Promise<void> {
   if (!initialized) {
+    const live = liveRouter();
+    if (live) return live.push(url, opts);
     if (typeof location !== 'undefined') location.assign(withBase(url));
     return Promise.resolve();
   }
@@ -1910,6 +1929,8 @@ function push(url: string, opts: NavigateOptions = {}): Promise<void> {
 
 function replace(url: string, opts: NavigateOptions = {}): Promise<void> {
   if (!initialized) {
+    const live = liveRouter();
+    if (live) return live.replace(url, opts);
     if (typeof location !== 'undefined') location.replace(withBase(url));
     return Promise.resolve();
   }
@@ -1937,6 +1958,8 @@ export const krateRouter = {
   },
   refresh,
   prefetch(url: string): Promise<void> {
+    const live = liveRouter();
+    if (live) return live.prefetch(url);
     if (!initialized || typeof location === 'undefined') return Promise.resolve();
     let u: URL;
     try {
@@ -1958,7 +1981,7 @@ export const krateRouter = {
  * client-side, true when a full navigation was triggered.
  */
 export function navigate(url: string, opts: NavigateOptions = {}): boolean {
-  if (initialized) {
+  if (initialized || liveRouter()) {
     void (opts.replace ? replace(url, opts) : push(url, opts));
     return false;
   }
@@ -1976,6 +1999,7 @@ export function initRouter(): void {
     return;
   }
   initialized = true;
+  (globalThis as any)[LIVE_ROUTER] = krateRouter;
 
   // The first document ran its own boot scripts.
   document.querySelectorAll('script[data-krate-boot]').forEach((s) => bootRan.add(s.textContent || ''));
@@ -2020,6 +2044,7 @@ export function reinitRouter(): void {
 export function destroyRouter(): void {
   if (!initialized) return;
   initialized = false;
+  if ((globalThis as any)[LIVE_ROUTER] === krateRouter) delete (globalThis as any)[LIVE_ROUTER];
   document.removeEventListener('click', clickHandler);
   document.removeEventListener('submit', submitHandler as EventListener);
   window.removeEventListener('popstate', popstateHandler);
