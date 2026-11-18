@@ -562,3 +562,70 @@ export async function proxy(request: Request) {
 		t.Errorf("no warning names the reason: %v", rep.Warnings)
 	}
 }
+
+func TestStrandedTestImportsFollowProxyToMiddleware(t *testing.T) {
+	root := gapsProject(t, map[string]string{
+		"src/app/page.tsx": `export default function P() { return <main/>; }`,
+		"src/proxy.ts": `import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
+export async function proxy(request: NextRequest) { return NextResponse.next(); }
+export const config = { matcher: ["/((?!api).*)"] };
+`,
+		"src/proxy.test.ts": `import { describe, expect, it, vi } from 'vitest';
+import { proxy } from './proxy';
+import { config } from "@/proxy";
+vi.mock('./proxy', () => ({}));
+it('x', () => { expect(proxy).toBeTypeOf('function'); expect(config).toBeTruthy(); });
+`,
+		"src/lib/helper.ts":  `import { proxy } from '../proxy';\nexport const h = proxy;\n`,
+		"src/lib/orphan.ts":  `import page from '../app/page';\nexport default page;\n`,
+		"src/lib/fine.ts":    `import { h } from './helper';\nexport default h;\n`,
+		"src/app/unused.txt": "x",
+		"tsconfig.json":      `{"compilerOptions":{"baseUrl":".","paths":{"@/*":["src/*"]}}}`,
+	})
+	rep, err := ScanNext(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	test := findPlan(rep, "src/proxy.test.ts")
+	if test == nil || test.Kind != KindModule {
+		t.Fatalf("proxy.test.ts not rewritten in place: %+v", rep.Files)
+	}
+	body := string(test.Content)
+	if strings.Contains(body, "'./proxy'") || strings.Contains(body, `"@/proxy"`) || strings.Count(body, "./middleware") != 3 {
+		t.Errorf("proxy specifiers were not repointed:\n%s", body)
+	}
+	if h := findPlan(rep, "src/lib/helper.ts"); h == nil || !strings.Contains(string(h.Content), "../middleware") {
+		t.Errorf("helper import not repointed: %+v", h)
+	}
+	if findPlan(rep, "src/lib/fine.ts") != nil {
+		t.Errorf("an unaffected importer must not be rewritten")
+	}
+	mw := string(findPlan(rep, "src/middleware.ts").Content)
+	if !strings.Contains(mw, "export { middleware as proxy };") {
+		t.Errorf("middleware does not export the proxy alias:\n%s", mw)
+	}
+	if !hasManual(rep, "src/proxy.test.ts", "imports config") {
+		t.Errorf("config import not reported: %+v", rep.Manual)
+	}
+	// the page moves to src/pages/index.tsx: a direct replacement
+	orphan := findPlan(rep, "src/lib/orphan.ts")
+	if orphan == nil || !strings.Contains(string(orphan.Content), "../pages/index") {
+		t.Errorf("route import not repointed: %+v", orphan)
+	}
+}
+
+func TestStrandedImportOfUnmigratedFileIsManual(t *testing.T) {
+	root := gapsProject(t, map[string]string{
+		"src/app/page.tsx":  `export default function P() { return <main/>; }`,
+		"src/app/notes.txt": `hello`,
+		"src/lib/uses.ts":   "import notes from '../app/notes.txt?raw';\nimport raw from '../app/notes.txt';\nexport default [notes, raw];\n",
+	})
+	rep, err := ScanNext(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasManual(rep, "src/lib/uses.ts", "imports ../app/notes.txt, which is not migrated") {
+		t.Errorf("import of an unmigrated moved file not reported: manual=%+v", rep.Manual)
+	}
+}

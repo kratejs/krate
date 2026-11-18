@@ -563,6 +563,10 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- `krate migrate nextjs`: a project file that stays in place but imports a file the migration moves
+  aside (a test importing `./proxy`, a helper importing a route file) now has the import repointed at
+  the new location (`proxy.ts` becomes `middleware.ts`, which also exports `proxy`); an import with no
+  replacement is reported as a manual item naming the importer.
 - `krate migrate nextjs`: `@krate/three` and `@krate/konva` were written with the runtime's version range
   although they version independently, and a `transpilePackages` entry for a workspace package that
   exposes only subpaths (`"exports": {"./*": "./src/*.ts"}`) was reported as unresolved.
