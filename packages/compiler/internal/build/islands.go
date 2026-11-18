@@ -248,7 +248,7 @@ func (b *Builder) buildIslands(owner string, exts []irtree.ExternalComponent, im
 	}
 
 	chunkURL := map[string]string{}
-	var reactGroup, realGroup []irtree.ExternalComponent
+	var reactGroup, realGroup, eagerGroup []irtree.ExternalComponent
 	// The hints renders of every real-React island are built in one batch.
 	hintJobs := map[string]*roundJob{}
 	var hintWait []*roundJob
@@ -288,7 +288,11 @@ func (b *Builder) buildIslands(owner string, exts []irtree.ExternalComponent, im
 			if err != nil {
 				return "", "", nil, nil, buildFailure(e, err)
 			}
-			chunkURL[e.ID] = register(clientSrc)
+			if e.Hydrate == "" {
+				eagerGroup = append(eagerGroup, e)
+			} else {
+				chunkURL[e.ID] = register(clientSrc)
+			}
 		}
 
 		if e.ClientOnly || (!e.ReactIsland && isCSSInJSPackage(e.Source)) {
@@ -325,6 +329,28 @@ func (b *Builder) buildIslands(owner string, exts []irtree.ExternalComponent, im
 		}
 		url := register(groupSrc)
 		for _, e := range reactGroup {
+			chunkURL[e.ID] = url
+		}
+	}
+	// The islands a page mounts on load share one entry. Esbuild splits a
+	// code-split build by the set of entries that reach each module, so one
+	// entry per island cut the modules these islands share into a chunk for
+	// every combination of them (24 islands on one page made 45 shared
+	// chunks, 13 of them under 1 kB), all fetched together anyway. Grouped,
+	// a split only falls where pages (or deferred islands) differ. Folding
+	// small chunks into an importer after the build would not help: such a
+	// chunk exists only because several entries reach it, so a fold would
+	// copy its code (and module state) into each. An island
+	// with client:visible or client:idle keeps its own entry so its code
+	// still waits; a lone island keeps the entry other pages share.
+	switch len(eagerGroup) {
+	case 0:
+	case 1:
+		e := eagerGroup[0]
+		chunkURL[e.ID] = register(b.islandClientSource(e, islandImportsFor(e.Subtree, allImports), prov))
+	default:
+		url := register(b.islandGroupClientSource(eagerGroup, allImports, prov))
+		for _, e := range eagerGroup {
 			chunkURL[e.ID] = url
 		}
 	}
@@ -1343,6 +1369,7 @@ func (b *Builder) ensurePreactShared() (map[string]string, error) {
 		{"preact/compat", []string{"preact", "preact/hooks", "preact/jsx-runtime"}},
 	}
 	urls := make(map[string]string, len(specs))
+	deps := islandModuleGraph{}
 	for _, s := range specs {
 		// esbuild's `External` matches a package and all of its subpaths, so
 		// "preact" would also externalize "preact/compat" (leaving a
@@ -1386,6 +1413,7 @@ export default __compat;`
 			Plugins:           plugins,
 			Define:            b.clientEnvDefines(),
 			LogLevel:          api.LogLevelSilent,
+			Metafile:          true,
 		})
 		if len(result.Errors) > 0 || len(result.OutputFiles) == 0 {
 			var detail []string
@@ -1404,12 +1432,18 @@ export default __compat;`
 			return nil, err
 		}
 		urls[s.name] = assetHref(b.Cfg.BaseURLPath(), name)
+		// The stdin build has one output; its imports are the externals.
+		outs, _ := metafileImports(result.Metafile)
+		for _, d := range outs {
+			deps["/"+name] = d
+		}
 	}
 	data, err := json.Marshal(map[string]any{"imports": urls})
 	if err != nil {
 		return nil, err
 	}
 	b.preactChunks = urls
+	b.preactChunkDeps = deps
 	b.islandImportMap = string(data)
 	return urls, nil
 }

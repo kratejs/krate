@@ -102,7 +102,7 @@ project-relative path (`workers/image.js` becomes
 `dist/.krate/server/workers/image.js`), so resolve them from the bundle with
 `new URL("./workers/image.js", import.meta.url)`. A glob that matches nothing
 prints a warning. Globs must be relative to the project root and may not leave
-it. The route keys exist for compatibility with Next.js; Krate copies every
+it, unless you set [`outputFileTracingRoot`](#monorepo-layout-outputfiletracingroot). The route keys exist for compatibility with Next.js; Krate copies every
 file for every route.
 
 For `--target docker` the Dockerfile copies the leading directory of each glob
@@ -110,6 +110,58 @@ For `--target docker` the Dockerfile copies the leading directory of each glob
 at the same path. Globs under `node_modules` need no copy (the installed
 packages are in the image), and a glob with no leading directory, such as
 `**/*.wasm`, is flagged in the Dockerfile for you to handle.
+
+### Monorepo layout: outputFileTracingRoot
+
+Next's standalone output mirrors the repository: the server sits at
+`.next/standalone/packages/web/server.js`, and code that reads a sibling package
+by a relative path (`../render-service/dist/worker.mjs`) finds it because the
+files are copied to the same relative places. Set `outputFileTracingRoot` to get
+that layout from `krate deploy --target node`:
+
+```ts
+// packages/web/krate.config.ts
+export default defineConfig({
+  outputFileTracingRoot: "../..",                    // the repository root
+  outputFileTracingIncludes: {
+    "/api/preview": ["../render-service/dist/scramble-worker.mjs"],
+    // pnpm store entries are followed through their symlinks
+    "*": ["../../node_modules/.pnpm/@fastpkg+image@*/node_modules/@fastpkg/image-*/*"],
+  },
+});
+```
+
+```
+dist/.krate/server/
+  packages/web/server.mjs                    # <project below the root>/server.mjs
+  packages/render-service/dist/scramble-worker.mjs
+  node_modules/.pnpm/@fastpkg+image@1.2.0/node_modules/@fastpkg/image-linux-x64-gnu/...
+  node_modules/                              # traced external packages, at the root
+```
+
+```sh
+krate deploy --target node
+node dist/.krate/server/packages/web/server.mjs
+```
+
+- Included files land at their path below the root, so a path that is
+  relative to the app directory resolves the same way as in Next's standalone
+  output.
+- Traced packages (`serverExternalPackages`, native addons) go to
+  `dist/.krate/server/node_modules`. Node finds them from the nested
+  `server.mjs` by walking up, as it does in the Next layout.
+- The server changes its working directory to the directory of `server.mjs`
+  before it starts, like Next's `server.js`. Static files are still served from
+  `dist/`; keep the whole `dist` folder together.
+- A glob may leave the project but not the root: it is checked after symlinks
+  are resolved (inside `node_modules`, links into the package manager's store
+  are expected and allowed). The root must contain the project.
+- Without the key the layout is the flat one described above.
+- `outputFileTracingIncludes` route keys are not used to pick files: the output
+  is one server, so the union of all keys is copied.
+- `--target docker` builds from the project directory and does not copy files
+  outside it. For a monorepo image, build with the node target and copy `dist`
+  in your own Dockerfile (see below).
 
 ### Docker without the generated Dockerfile
 
@@ -174,7 +226,7 @@ repository root).
 |---|---|---|
 | Go host (HTTP server, static files, routing, embedded QuickJS API routes and middleware) | always | 1 |
 | Node SSR renderer | a page or region renders at request time with JS | 1, or `ssr.rendererWorkers` (node cluster) |
-| Node API/action sidecar | an API route is Node-only (imports a native addon or a built-in), `ssr.apiRuntime` is `node`/`bun`/`deno`, or the project has server actions | 1 supervisor with `ssr.nodeWorkers` workers (default `min(NumCPU, 8)`) |
+| Node API/action sidecar | an API route is Node-only (imports a native addon or a built-in, uses a global such as `Buffer` the embedded runtime lacks, or exports `runtime = "nodejs"`), `ssr.apiRuntime` is `node`/`bun`/`deno`, the project has server actions, or it has an [instrumentation](#instrumentation) file | 1 supervisor with `ssr.nodeWorkers` workers (default `min(NumCPU, 8)`) |
 | Go API sidecar | the project has Go API routes | 1, over a Unix socket |
 
 Only the host listens on a public port. The sidecars listen on `127.0.0.1` on
@@ -189,6 +241,70 @@ template unit or several containers) behind the proxy to use more cores, and set
 a [shared cache](/docs/reference/config/#shared-cache) and `KRATE_FLASH_SECRET`
 so instances agree.
 
+## Instrumentation
+
+A file named `instrumentation.ts` (or `.js`, `.mjs`) in the project root or `src/`
+exports an async `register()` that runs **once per server start**, before the server
+takes traffic. Use it for one-time setup: loading secrets, connecting a telemetry
+SDK, warming a cache, revoking stale sessions. It is the same file Next.js reads, so
+a migrated app keeps it.
+
+```ts
+// src/instrumentation.ts
+export async function register() {
+  const { warmCache } = await import("@/server/cache"); // tsconfig paths work
+  void warmCache(); // not awaited: the server does not wait for it
+}
+```
+
+Exactly once per server means:
+
+- `krate build` bundles the file for Node (`.krate/instrumentation.mjs`; npm packages
+  stay external and resolve from `node_modules`).
+- `krate start`, `krate serve` and `krate dev` run it in the **primary process of the
+  Node API sidecar**, and await it before that process forks its `ssr.nodeWorkers`
+  cluster workers or listens. The workers and the SSR renderer never run it. With
+  an instrumentation file the sidecar starts even when every API route runs on the
+  embedded runtime (the build prints a line saying so).
+- The node deploy target (`server.mjs`) runs it once, before `startNodeServer`. The
+  module is imported first, so its top-level code runs before the app's modules.
+  Other deploy targets do not run it; the deploy prints a warning.
+- A supervisor restart of the sidecar is a new server start, so `register()` runs
+  again. Hot reloads of API modules in `krate dev` do not rerun it; restart `krate dev`
+  after editing the file.
+- The server is not ready until `register()` resolves: the API sidecar does not
+  listen yet, and `GET /readyz` returns `503 instrumentation-pending`. `/healthz`
+  stays `200`.
+- Requests that need the sidecar (Node API routes, server actions, dynamic metadata routes,
+  middleware that runs on Node) wait for it to listen, up to 30 seconds, instead of failing
+  with `502`; this covers the first start and a supervisor restart. If it is still not
+  listening after that, they get `503` with `Retry-After: 1`, and Krate logs it once. Static
+  files and routes the embedded runtime or Go serves never wait. `server.mjs` of the Node
+  deploy target awaits `register()` before it listens, so a request then waits in the
+  platform's connection queue or is refused until the server is up.
+
+**Consequences of once per server.** `register()` does not run in every process that
+serves requests. State it sets on `globalThis` or in module variables
+exists only in the primary process; with `ssr.nodeWorkers` above 1 the workers that
+answer API requests do not see it, and neither does the SSR renderer. Environment
+variables set in `process.env` do reach the workers, which are forked after
+`register()` resolves, but not the SSR renderer.
+Put per-process setup (a connection pool, an SDK that patches `http`) in a module the
+routes import instead. Setup that lives outside the process (a database migration,
+a warmup call, a shared-cache fill) is what `register()` is for. With
+`ssr.nodeWorkers: 1` the primary serves requests itself and sees its own state.
+
+**Failure.** As in Next.js, a `register()` that throws or rejects ends the process:
+Krate logs `An error occurred while loading instrumentation hook: <message>` with the
+stack and exits with status 1 (a failing import of the file is handled the same
+way). Under `krate start` the supervisor restarts the sidecar with a growing delay,
+so a permanent failure keeps the server unready; on the node target the process
+exits. Code `register()` starts without awaiting keeps its own error handling.
+
+`onRequestError` and `instrumentation-client` are not supported. `process.env.NEXT_RUNTIME`
+is not set; `krate migrate nextjs` folds `=== "nodejs"` to `true` and `=== "edge"` to
+`false` in the instrumentation files.
+
 ## Signals, shutdown and health
 
 - **Shutdown.** `SIGTERM` and `SIGINT` stop accepting connections, let in-flight
@@ -197,7 +313,7 @@ so instances agree.
   immediately. This holds for `krate start` and for `server.mjs`.
 - **Health.** `GET /healthz` is liveness and returns `200 ok`. `GET /readyz` is
   readiness: on `krate start` it returns `503` while an expected SSR renderer is
-  down; on `server.mjs` it returns `200` whenever the process serves. Both stay
+  down or `register()` of an [instrumentation](#instrumentation) file has not resolved; on `server.mjs` it returns `200` whenever the process serves. Both stay
   at the root under a `basePath`.
 - **Port and host.** `PORT` sets the port (`krate start` also reads
   `KRATE_SERVE_PORT`), `HOST` the bind address of `server.mjs`.

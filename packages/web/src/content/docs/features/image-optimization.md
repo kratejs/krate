@@ -28,7 +28,11 @@ to `.krate/cache/images/` and copied to `<outDir>/_krate/images/` (served at
   site: `<Image sizes="(max-width: 768px) 100vw, 50vw" />`. With a `width` (or
   `height`) the image is shown at that size, so only 1x and 2x variants are made
   (`width={100}` gives 100w and 200w, never wider than the source) and `sizes`
-  defaults to `"100px"`. An explicit `sizes` always wins.
+  defaults to `"(max-width: 100px) 100vw, 100px"`, because `max-width:100%` lets the
+  image shrink on narrow screens. An explicit `sizes` always wins.
+- **PNG size** - PNG variants use best compression, stay paletted (8-bit) when the
+  source is indexed or uses at most 256 opaque colours, and a PNG source that is
+  already smaller than its re-encode is copied as is for the full-size variant.
 - **Orientation** - a JPEG with an EXIF orientation (most phone photos) is
   rotated before it is resized, so the variants and the reported dimensions match
   what the browser shows for the original. Other EXIF data is not copied.
@@ -42,7 +46,8 @@ to `.krate/cache/images/` and copied to `<outDir>/_krate/images/` (served at
   is merged into the same attribute (yours wins).
 - **Lazy by default** - `loading="lazy"` with `decoding="async"`; add
   `priority` for `eager` loading with `fetchpriority="high"`.
-- **Blur placeholder (LQIP)** - a 16px box-blurred, base64 data-URI rendered
+- **Blur placeholder (LQIP)** - a 16px box-blurred, base64 data-URI (PNG or JPEG,
+  whichever is smaller) rendered
   as the element's `background-image` until the real image loads
   (`placeholder="blur"`, the default). Use `placeholder="empty"` to disable.
 

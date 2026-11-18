@@ -10,6 +10,7 @@ import (
 
 	"github.com/kratejs/krate/packages/compiler/internal/astprint"
 	"github.com/kratejs/krate/packages/compiler/internal/check"
+	"github.com/kratejs/krate/packages/compiler/internal/css"
 )
 
 // checksConfig builds the check package config from the project's `checks` key.
@@ -102,7 +103,7 @@ func (b *Builder) checkPages(results []*PageResult, runtimeJSFile string) []chec
 			JSBytes:        jsBytes,
 			HydrationBytes: hydrationBytes,
 			IslandBytes:    islandBytesForJSText(b.Cfg.OutDir, r.HydrationJS),
-			CSSBytes:       len(r.CSS),
+			CSSBytes:       len(css.StripPartMarkers(r.CSS)),
 			Program:        r.Program,
 		})
 	}

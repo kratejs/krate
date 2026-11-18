@@ -253,17 +253,14 @@ func addKrateKonvaDependency(rep *Report, root string) {
 		if _, ok := deps[krateKonvaModule]; ok {
 			return
 		}
-		spec := "latest"
-		if v, ok := deps["@krate/runtime"].(string); ok && v != "" {
-			spec = v
-		}
+		spec := rep.specs.spec(krateKonvaModule)
 		deps[krateKonvaModule] = spec
 		pkg["dependencies"] = deps
-		data, err := json.MarshalIndent(pkg, "", "  ")
+		data, err := marshalPackageJSON(f.Content, pkg)
 		if err != nil {
 			break
 		}
-		f.Content = append(data, '\n')
+		f.Content = data
 		f.Rewrites = append(f.Rewrites, "dependencies added: "+krateKonvaModule+"@"+spec+" (replaces react-konva)")
 		return
 	}
@@ -273,6 +270,6 @@ func addKrateKonvaDependency(rep *Report, root string) {
 	rep.Manual = append(rep.Manual, ManualItem{
 		Source: "package.json",
 		Reason: "the canvas modules now import @krate/konva, which is not a dependency yet",
-		Hint:   "pnpm add @krate/konva (or re-run with --update-package)",
+		Hint:   "pnpm add @krate/konva (or re-run without --no-update-package)",
 	})
 }

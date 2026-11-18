@@ -329,7 +329,7 @@ func (b *Bundler) resolveCSSModule(path, abs string, mtime time.Time, size int64
 					return err
 				}
 			}
-			b.css = append(b.css, e.css)
+			b.addCSS(abs, e.css)
 			if e.isModule {
 				b.cssModules[abs] = &CSSModuleInfo{ResolvedPath: abs, ScopedCSS: e.css, Mappings: e.mapping}
 			}
@@ -404,12 +404,12 @@ func (b *Bundler) resolveCSSModule(path, abs string, mtime time.Time, size int64
 		for _, w := range res.Warnings {
 			cs.warn(w)
 		}
-		b.css = append(b.css, res.CSS)
+		b.addCSS(abs, res.CSS)
 		b.cssModules[abs] = &CSSModuleInfo{ResolvedPath: abs, ScopedCSS: res.CSS, Mappings: res.Mapping}
 		entry.css = res.CSS
 		entry.mapping = res.Mapping
 	} else {
-		b.css = append(b.css, text)
+		b.addCSS(abs, text)
 		entry.css = text
 	}
 	for p := range cs.deps {
@@ -422,6 +422,26 @@ func (b *Bundler) resolveCSSModule(path, abs string, mtime time.Time, size int64
 	}
 	b.order = append(b.order, &Module{Path: path, IsCSS: true, Diagnostics: cs.diags})
 	return nil
+}
+
+// addCSS appends the CSS of one source file to the bundle.
+func (b *Bundler) addCSS(src, text string) {
+	b.css = append(b.css, text)
+	b.cssSrc = append(b.cssSrc, src)
+}
+
+// pageCSS joins the bundle's CSS, each source preceded by its part marker so
+// the build can write one stylesheet per source.
+func (b *Bundler) pageCSS() string {
+	var sb strings.Builder
+	for i, text := range b.css {
+		if i > 0 {
+			sb.WriteString("\n")
+		}
+		sb.WriteString(css.PartMarker(b.cssSrc[i]))
+		sb.WriteString(text)
+	}
+	return sb.String()
 }
 
 // composedMapping loads the module named by `composes: x from "spec"` (adding

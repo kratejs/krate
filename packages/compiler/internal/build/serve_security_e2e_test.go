@@ -47,7 +47,7 @@ func secProject(t *testing.T) (root string, cfg *config.Config) {
 	cfg.PublicDir = filepath.Join(root, "public")
 	cfg.Sourcemap = true
 	cfg.Tailwind.Enabled = true
-	cfg.Compress.Gzip = true
+	cfg.Compress = config.CompressConfig{}
 	cfg.Redirects = []config.Redirect{
 		{Source: "/legacy/*", Destination: "/:splat"},
 		{Source: "/u/:name", Destination: "/:name"},
@@ -132,6 +132,7 @@ func gunzipBody(t *testing.T, b []byte) string {
 }
 
 func TestServeStaticHardeningEndToEnd(t *testing.T) {
+	defaultPrecompression(t)
 	root, cfg := secProject(t)
 	if err := New(root, cfg).BuildAll(); err != nil {
 		t.Fatalf("BuildAll: %v", err)
@@ -306,7 +307,7 @@ func TestServeStaticHardeningEndToEnd(t *testing.T) {
 
 func TestDevServerBindsLoopbackAndGuardsEndpoints(t *testing.T) {
 	root, cfg := secProject(t)
-	cfg.Compress.Gzip = false
+	cfg.Compress = config.CompressOff()
 	cfg.Redirects = nil
 	if err := New(root, cfg).BuildAll(); err != nil {
 		t.Fatalf("BuildAll: %v", err)

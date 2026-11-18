@@ -14,11 +14,11 @@ var (
 	twIsNumber     = regexp.MustCompile(`^` + twNumberRe + `$`)
 	twIsPercentage = regexp.MustCompile(`^` + twNumberRe + `%$`)
 	twIsFraction   = regexp.MustCompile(`^` + twNumberRe + `\s*/\s*` + twNumberRe + `$`)
-	twIsLength     = regexp.MustCompile(`^` + twNumberRe + `(?:cm|mm|Q|in|pc|pt|px|em|ex|ch|rem|lh|rlh|vw|vh|vmin|vmax|vb|vi|svw|svh|lvw|lvh|dvw|dvh|cqw|cqh|cqi|cqb|cqmin|cqmax)$`)
+	twIsLength     = regexp.MustCompile(`^` + twNumberRe + `(?:cm|mm|Q|in|pc|pt|px|em|ex|ch|cap|ic|rem|rex|rch|rcap|ric|lh|rlh|vw|vh|vmin|vmax|vb|vi|svw|svh|svi|svb|svmin|svmax|lvw|lvh|lvi|lvb|lvmin|lvmax|dvw|dvh|dvi|dvb|dvmin|dvmax|cqw|cqh|cqi|cqb|cqmin|cqmax)$`)
 	twIsAngle      = regexp.MustCompile(`^` + twNumberRe + `(?:deg|rad|grad|turn)$`)
-	twIsVector     = regexp.MustCompile(`^` + twNumberRe + `(?:\s+` + twNumberRe + `){2}$`)
-	twMathFn       = regexp.MustCompile(`^(?:calc|min|max|clamp|round|mod|rem|sin|cos|tan|asin|acos|atan|atan2|pow|sqrt|hypot|log|exp)\(.*\)`)
-	twColorFn      = regexp.MustCompile(`(?i)^(?:rgba?|hsla?|hwb|color|(?:ok)?(?:lab|lch)|light-dark|color-mix)\(`)
+	twIsVector     = regexp.MustCompile(`^` + twNumberRe + ` +` + twNumberRe + ` +` + twNumberRe + `$`)
+	twSpacingFn    = regexp.MustCompile(`(?i)^--spacing\(`)
+	twColorFn      = regexp.MustCompile(`(?i)^(?:rgba?|hsla?|hwb|color|(?:ok)?(?:lab|lch)|light-dark|color-mix|--alpha)\(`)
 	twURL          = regexp.MustCompile(`^url\(.*\)$`)
 	twGradient     = regexp.MustCompile(`^(?:repeating-)?(?:conic|linear|radial)-gradient\(`)
 	twImageFn      = regexp.MustCompile(`^(?:element|image|cross-fade|image-set)\(`)
@@ -34,12 +34,47 @@ var twDataTypes = map[string]bool{
 	"relative-size": true, "angle": true, "vector": true,
 }
 
+// twMathFns are the CSS math functions Tailwind recognizes in a value.
+var twMathFns = []string{"calc", "min", "max", "clamp", "mod", "rem", "sin", "cos", "tan", "asin",
+	"acos", "atan", "atan2", "pow", "sqrt", "hypot", "log", "exp", "round"}
+
+// twHasMathFn reports whether v calls a CSS math function anywhere.
+func twHasMathFn(v string) bool {
+	if !strings.Contains(v, "(") {
+		return false
+	}
+	for _, fn := range twMathFns {
+		if strings.Contains(v, fn+"(") {
+			return true
+		}
+	}
+	return false
+}
+
+// twInfer returns the first of types that the arbitrary value v can be read
+// as, or "" when none matches. A var() value has no knowable type, so it
+// matches nothing. This is Tailwind v4's inferDataType.
+func twInfer(v string, types ...string) string {
+	for _, typ := range types {
+		if inferDataType(v, typ) {
+			return typ
+		}
+	}
+	return ""
+}
+
 // inferDataType reports whether the arbitrary value v can be read as typ.
 // A var() value has no knowable type, so it matches nothing.
 func inferDataType(v, typ string) bool {
 	if strings.HasPrefix(v, "var(") {
 		return false
 	}
+	return twIsType(v, typ)
+}
+
+// twIsType is inferDataType without the var() guard, applied to the parts of
+// a compound value too.
+func twIsType(v, typ string) bool {
 	switch typ {
 	case "color":
 		if strings.HasPrefix(v, "#") {
@@ -47,23 +82,27 @@ func inferDataType(v, typ string) bool {
 		}
 		return twNamedColors[strings.ToLower(v)] || twColorFn.MatchString(v)
 	case "length":
-		return twIsLength.MatchString(v) || twMathFn.MatchString(v)
+		return twIsLength.MatchString(v) || twSpacingFn.MatchString(v) || twHasMathFn(v)
 	case "percentage":
-		return twIsPercentage.MatchString(v) || twMathFn.MatchString(v)
+		return twIsPercentage.MatchString(v) || twHasMathFn(v)
 	case "ratio":
-		return twIsFraction.MatchString(v) || twMathFn.MatchString(v)
+		return twIsFraction.MatchString(v) || twHasMathFn(v)
 	case "number":
-		return twIsNumber.MatchString(v) || twMathFn.MatchString(v)
+		return twIsNumber.MatchString(v) || twHasMathFn(v)
 	case "integer":
 		return twCanonInt.MatchString(v)
 	case "url":
 		return twURL.MatchString(v)
 	case "line-width":
-		return v == "thin" || v == "medium" || v == "thick" || twIsLength.MatchString(v) || twMathFn.MatchString(v)
+		for _, part := range topLevelSplit(v, ' ') {
+			if !twIsType(part, "length") && !twIsType(part, "number") && part != "thin" && part != "medium" && part != "thick" {
+				return false
+			}
+		}
+		return true
 	case "image":
 		n := 0
 		for _, part := range topLevelSplit(v, ',') {
-			part = strings.TrimSpace(part)
 			switch {
 			case strings.HasPrefix(part, "var("):
 			case twURL.MatchString(part), twGradient.MatchString(part), twImageFn.MatchString(part):
@@ -76,7 +115,6 @@ func inferDataType(v, typ string) bool {
 	case "family-name":
 		n := 0
 		for _, part := range topLevelSplit(v, ',') {
-			part = strings.TrimSpace(part)
 			if part != "" && part[0] >= '0' && part[0] <= '9' {
 				return false
 			}
@@ -109,7 +147,7 @@ func inferDataType(v, typ string) bool {
 			case part == "center" || part == "top" || part == "right" || part == "bottom" || part == "left":
 				n++
 			case strings.HasPrefix(part, "var("):
-			case inferDataType(part, "length") || inferDataType(part, "percentage"):
+			case twIsType(part, "length") || twIsType(part, "percentage"):
 				n++
 			default:
 				return false
@@ -119,7 +157,6 @@ func inferDataType(v, typ string) bool {
 	case "bg-size":
 		n := 0
 		for _, part := range topLevelSplit(v, ',') {
-			part = strings.TrimSpace(part)
 			if part == "cover" || part == "contain" {
 				n++
 				continue
@@ -130,7 +167,7 @@ func inferDataType(v, typ string) bool {
 			}
 			ok := true
 			for _, sz := range sizes {
-				if sz != "auto" && !inferDataType(sz, "length") && !inferDataType(sz, "percentage") {
+				if sz != "auto" && !twIsType(sz, "length") && !twIsType(sz, "percentage") {
 					ok = false
 				}
 			}
@@ -143,7 +180,8 @@ func inferDataType(v, typ string) bool {
 	return false
 }
 
-// twNamedColors are the CSS named and system colors, lower-cased.
+// twNamedColors are the CSS named and system colors Tailwind recognizes,
+// lower-cased.
 var twNamedColors = func() map[string]bool {
 	m := map[string]bool{}
 	for _, n := range strings.Fields(`transparent currentcolor aliceblue antiquewhite aqua aquamarine azure beige bisque
@@ -161,10 +199,7 @@ palevioletred papayawhip peachpuff peru pink plum powderblue purple rebeccapurpl
 saddlebrown salmon sandybrown seagreen seashell sienna silver skyblue slateblue slategray slategrey snow
 springgreen steelblue tan teal thistle tomato turquoise violet wheat white whitesmoke yellow yellowgreen
 canvas canvastext linktext visitedtext activetext buttonface buttontext buttonborder field fieldtext highlight
-highlighttext selecteditem selecteditemtext mark marktext graytext accentcolor accentcolortext activeborder
-activecaption appworkspace background buttonhighlight buttonshadow captiontext inactiveborder inactivecaption
-inactivecaptiontext infobackground infotext menu menutext scrollbar threeddarkshadow threedface threedhighlight
-threedlightshadow threedshadow window windowframe windowtext`) {
+highlighttext selecteditem selecteditemtext mark marktext graytext accentcolor accentcolortext`) {
 		m[n] = true
 	}
 	return m

@@ -94,6 +94,17 @@ describe("createKrateHandler", () => {
     expect([re.status, re.headers.get("location")]).toEqual([308, "/templates/some-template"]);
   });
 
+  it("accepts Next's [{ key, value }] header rules, the last repeated key winning", async () => {
+    const arrayConfig: HandlerConfig = {
+      ...config,
+      headers: [{ source: "/new", headers: [{ key: "X-Rule", value: "first" }, { key: "X-Other", value: "o" }, { key: "x-rule", value: "last" }] }],
+    };
+    const h = createKrateHandler({ target: "node", data: data({ config: arrayConfig }), modules });
+    const r = await h(new Request("http://localhost/new"));
+    expect(r.headers.get("x-rule")).toBe("last");
+    expect(r.headers.get("x-other")).toBe("o");
+  });
+
   it("middleware request header overrides reach the route and stay off the response", async () => {
     const r = await get("/api/who", { headers: { "x-drop": "secret" } });
     expect(await r.json()).toEqual({ url: "/api/who?a=1", dropped: null });
@@ -435,5 +446,77 @@ describe("error boundary under a request-time page", () => {
     const r = await cached(new Request("http://localhost/boom/"));
     expect(r.status).toBe(500);
     expect(r.headers.get("cache-control")).toBe("no-store");
+  });
+});
+
+describe("config route rules", () => {
+  const rules: HandlerConfig = {
+    ...config,
+    redirects: [
+      { source: "/store/plans", destination: "/store", statusCode: 308 },
+      { source: "/store", destination: "/templates", statusCode: 308, has: [{ type: "query", key: "vehicle" }] },
+      { source: "/store/:slug((?!compare$)[^/]+)", destination: "/templates/:slug", statusCode: 308 },
+      { source: "/api/old/:rest*", destination: "/api/:rest*", statusCode: 307 },
+      { source: "/legacy", destination: "/new", permanent: true },
+    ],
+    rewrites: [{ source: "/hi", destination: "/api/hello", has: [{ type: "header", key: "x-go" }] }],
+    headers: [
+      { source: "/:path*", headers: { "X-All": "1", "Cache-Control": "public, max-age=60" } },
+      { source: "/m", headers: { "X-Mobile": "1" }, has: [{ type: "header", key: "x-device", value: "ios" }] },
+    ],
+  };
+  const deny = {
+    ...modules,
+    middleware: { middleware: () => new Response("maintenance", { status: 503 }), config: { matcher: ["/:path*"] } },
+  };
+  const handler = createKrateHandler({ target: "node", data: data({ config: rules, apiRoutes: ["hello"], hashedAssets: [] }), modules: deny });
+  const get = (path: string, init?: RequestInit) => handler(new Request("http://localhost" + path, init));
+
+  it("redirects like Next: status, query passthrough, regex params", async () => {
+    const cases: Array<[string, number, string]> = [
+      ["/store?vehicle=x", 308, "/templates?vehicle=x"],
+      ["/store/some-slug", 308, "/templates/some-slug"],
+      ["/store/plans?x=1", 308, "/store?x=1"],
+      ["/legacy?a=1", 301, "/new?a=1"],
+    ];
+    for (const [path, status, loc] of cases) {
+      const r = await get(path);
+      expect([path, r.status, r.headers.get("location")]).toEqual([path, status, loc]);
+    }
+  });
+
+  it("leaves unmatched requests to middleware, and redirects run before it and on /api", async () => {
+    expect((await get("/store/compare")).status).toBe(503);
+    expect((await get("/store")).status).toBe(503);
+    const r = await get("/api/old/hello?k=v");
+    expect([r.status, r.headers.get("location")]).toEqual([307, "/api/hello?k=v"]);
+  });
+
+  it("answers a rewrite onto an API route from the API handler", async () => {
+    const open = createKrateHandler({
+      target: "node",
+      data: data({
+        config: { ...rules, redirects: [], rewrites: [{ source: "/hi", destination: "/api/hello" }, { source: "/items-alias/:id", destination: "/api/items/:id" }] },
+        apiRoutes: ["hello", "items/[id]"],
+        hasMiddleware: false,
+        hashedAssets: [],
+      }),
+      modules,
+    });
+    const hi = await open(new Request("http://localhost/hi"));
+    expect([hi.status, await hi.json()]).toEqual([200, { ok: true }]);
+    const item = await open(new Request("http://localhost/items-alias/7"));
+    expect(item.status).toBe(200);
+    expect(await item.text()).toContain("7");
+  });
+
+  it("applies header rules last so they beat a handler's Cache-Control, with has", async () => {
+    const r = await get("/m", { headers: { "x-device": "ios" } });
+    expect(r.headers.get("x-all")).toBe("1");
+    expect(r.headers.get("x-mobile")).toBe("1");
+    expect(r.headers.get("cache-control")).toBe("public, max-age=60");
+    expect((await get("/m")).headers.get("x-mobile")).toBeNull();
+    const redirect = await get("/store/x");
+    expect(redirect.headers.get("x-all")).toBe("1");
   });
 });

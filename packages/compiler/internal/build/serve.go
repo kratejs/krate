@@ -80,6 +80,7 @@ const moduleCache = new Map();
 ` + actionSidecarJS + actionSidecarNodeAdapter + apiSidecarClusterJS + apiSidecarSharedJS + `
 let middlewareModule = null;
 await krateLoadMiddleware();
+await krateRunInstrumentation();
 
 function routeParams(file, segments) {
   const rel = path.relative(API_DIR, file).replace(/\.[^.]+$/, '');
@@ -511,6 +512,7 @@ function json(body, status) { return Response.json(body, { status: status || 200
 
 ` + actionSidecarJS + apiSidecarSharedJS + `
 await krateLoadMiddleware();
+await krateRunInstrumentation();
 function sanitize(p) {
   let rel = p || '/';
   try { rel = decodeURIComponent(rel); } catch { return null; }
@@ -1483,8 +1485,22 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		nodeWorkers = jsruntime.DefaultAPIWorkers()
 	}
 	needNodeSidecar := sidecarNeedsNode(apiRTOption, middlewareRTOption, middlewareRT, middlewarePath, nodeOnlyRoutes) || hasActions
+	// instrumentation.ts runs once per server start, in the Node sidecar's
+	// primary process, so the sidecar has to exist even with only embedded routes.
+	instrumentationArg := ""
+	if hasInstrumentation(root) {
+		instrumentationArg = instrumentationBundlePath(root)
+		if !needNodeSidecar {
+			needNodeSidecar = true
+			printf("  %s*%s instrumentation runs in the Node API sidecar, which starts although every API route is embedded\n", cCyan, cReset)
+		}
+	}
 	apiBodyLimit := cfg.MaxAPIBodyBytes()
 
+	var nodeReady *sidecarReady
+	if needNodeSidecar {
+		nodeReady = newSidecarReady(sidecarStartTimeout)
+	}
 	var nodeAPICmdMu sync.Mutex
 	var nodeAPICmd *exec.Cmd
 	var nodeAPIStopOnce sync.Once
@@ -1519,19 +1535,19 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 					bunPath := filepath.Join(root, ".krate", "api-server.bun.mjs")
 					_ = os.MkdirAll(filepath.Dir(bunPath), 0755)
 					_ = os.WriteFile(bunPath, []byte(apiServerBunScriptContent), 0644)
-					cmd = exec.Command("bun", "run", bunPath, nodeAPIDir, portStr, middlewarePath, actionDir)
+					cmd = exec.Command("bun", "run", bunPath, nodeAPIDir, portStr, middlewarePath, actionDir, instrumentationArg)
 
 				case "deno":
 					scriptPath := filepath.Join(root, ".krate", "api-server.mjs")
 					_ = os.MkdirAll(filepath.Dir(scriptPath), 0755)
 					_ = os.WriteFile(scriptPath, []byte(apiServerScriptContent), 0644)
-					cmd = exec.Command("deno", "run", "--allow-net", "--allow-read", "--allow-sys", "--allow-env", scriptPath, nodeAPIDir, portStr, middlewarePath, actionDir)
+					cmd = exec.Command("deno", "run", "--allow-net", "--allow-read", "--allow-sys", "--allow-env", scriptPath, nodeAPIDir, portStr, middlewarePath, actionDir, instrumentationArg)
 
 				default:
 					scriptPath := filepath.Join(root, ".krate", "api-server.mjs")
 					_ = os.MkdirAll(filepath.Dir(scriptPath), 0755)
 					_ = os.WriteFile(scriptPath, []byte(apiServerScriptContent), 0644)
-					cmd = exec.Command("node", scriptPath, nodeAPIDir, portStr, middlewarePath, actionDir)
+					cmd = exec.Command("node", scriptPath, nodeAPIDir, portStr, middlewarePath, actionDir, instrumentationArg)
 				}
 				execx.ConfigureTree(cmd)
 				cmd.Env = append(os.Environ(), environ.Overlay(environ.Current)...)
@@ -1580,7 +1596,12 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 				nodeAPICmdMu.Unlock()
 				if err == nil {
 					clearServerCrash("Node API sidecar")
+					gen := nodeReady.begin()
+					exited := make(chan struct{})
+					go nodeReady.watch(gen, apiPort, exited)
 					err = cmd.Wait()
+					close(exited)
+					nodeReady.down()
 				}
 				select {
 				case <-nodeAPIStop:
@@ -1682,6 +1703,11 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		apiHeaderWait = 10 * time.Minute
 	}
 	apiProxy.Transport = newSidecarTransportTimeout(apiHeaderWait)
+	// nodeAPIProxy waits for the sidecar to listen before forwarding.
+	var nodeAPIProxy http.Handler = apiProxy
+	if nodeReady != nil {
+		nodeAPIProxy = nodeReady.wrap(apiProxy)
+	}
 
 	// Optional user-provided API sidecar. Requests it owns are forwarded first;
 	// a 404 falls through to the built-in Go/TS/QuickJS routes below.
@@ -1722,12 +1748,13 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	// Middleware (matcher-scoped) runs in front of pages, API routes and
 	// server actions alike.
 	gate := &middlewareGate{
-		rt:         middlewareRT,
-		dev:        hub != nil,
-		sidecarURL: fmt.Sprintf("http://localhost:%d/__krate/middleware", apiPort),
-		file:       middlewarePath,
-		required:   middlewareRequired,
-		secret:     revalHost.secret,
+		rt:           middlewareRT,
+		dev:          hub != nil,
+		sidecarURL:   fmt.Sprintf("http://localhost:%d/__krate/middleware", apiPort),
+		file:         middlewarePath,
+		required:     middlewareRequired,
+		secret:       revalHost.secret,
+		sidecarReady: nodeReady,
 		staticExists: func(urlPath string) bool {
 			f, err := hardenedDir{http.Dir(absOut)}.Open(urlPath)
 			if err != nil {
@@ -1742,7 +1769,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	// Segment pages: the nearest 404/500 page for a request (see segments.go).
 	segs := newSegmentIndex(absOut)
 	if hasActions {
-		mux.Handle("/__krate/action/", loggingMiddleware(gate.wrap(http.HandlerFunc(actionHandlerSegments(apiProxy, apiBodyLimit, segs)))))
+		mux.Handle("/__krate/action/", loggingMiddleware(gate.wrap(http.HandlerFunc(actionHandlerSegments(nodeAPIProxy, apiBodyLimit, segs)))))
 	}
 
 	apiHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1782,7 +1809,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		// Routes that need Node (external imports the embedded runtime cannot
 		// run) are forwarded to the Node sidecar even when QuickJS is default.
 		if apiRT != nil && nodeOnlyRoutes[apiRT.ResolveFile(r.URL.Path)] {
-			apiProxy.ServeHTTP(newDeadlineWriter(w), r)
+			nodeAPIProxy.ServeHTTP(newDeadlineWriter(w), r)
 			return
 		}
 
@@ -1793,7 +1820,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		}
 
 		// Fallback: proxy to sidecar
-		apiProxy.ServeHTTP(newDeadlineWriter(w), r)
+		nodeAPIProxy.ServeHTTP(newDeadlineWriter(w), r)
 	})
 	mux.Handle("/api/", loggingMiddleware(gate.wrap(apiHandler)))
 
@@ -2351,6 +2378,9 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		handlerWith404.ServeHTTP(w, r)
 	})
 
+	// Config redirects run in front of everything (see configRedirectMiddleware).
+	// Under a base path, basePath: false rules were matched against the full
+	// path by basePathMiddleware.
 	insideRedirects := cfg.Redirects
 	if cfg.BaseURLPath() != "" {
 		insideRedirects = nil
@@ -2360,17 +2390,12 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 			}
 		}
 	}
+	rewriteRules := compileRewrites(cfg.Rewrites)
 
-	// Redirect/rewrite middleware - applies config-based URL transformations
+	// Rewrite middleware - applies config-based URL transformations
 	metaRoutes := newMetaRouteLoader(absOut, hub != nil)
 	var redirectRewriteHandler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
-
-		// Check redirects first. Under a base path, basePath: false rules were
-		// already matched against the full path by basePathMiddleware.
-		if serveConfigRedirect(w, r, path, insideRedirects) {
-			return
-		}
 
 		// trailingSlash "never": /x/ goes to /x, judged on the requested URL
 		// before a rewrite maps it onto another internal path.
@@ -2379,24 +2404,33 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		}
 
 		// Check rewrites (internal path mapping, no redirect)
-		for _, rw := range cfg.Rewrites {
-			if matchRedirect(path, rw.Source) {
-				rewritten := rewriteDestination(path, rw.Source, rw.Destination)
-				// rewriteDestination percent-encodes substituted values; the
-				// request path holds the decoded form.
-				if dec, err := url.PathUnescape(rewritten); err == nil {
-					rewritten = dec
-				}
-				r.URL.Path = rewriteTargetPath(rewritten)
-				r.URL.RawPath = ""
-				// A rewrite onto an API route is served by the API handler;
-				// the mux already dispatched this request as a page.
-				if r.URL.Path == "/api" || strings.HasPrefix(r.URL.Path, "/api/") {
-					apiHandler.ServeHTTP(w, r)
-					return
-				}
-				break
+		for _, rw := range rewriteRules {
+			vals, mods, ok := rw.match(r, path)
+			if !ok {
+				continue
 			}
+			rewritten := buildDestination(rw.rule.Destination, vals, mods)
+			rewrittenQuery := ""
+			if i := strings.IndexByte(rewritten, '?'); i >= 0 {
+				rewritten, rewrittenQuery = rewritten[:i], rewritten[i+1:]
+			}
+			// buildDestination percent-encodes substituted values; the
+			// request path holds the decoded form.
+			if dec, err := url.PathUnescape(rewritten); err == nil {
+				rewritten = dec
+			}
+			r.URL.Path = rewriteTargetPath(rewritten)
+			r.URL.RawPath = ""
+			if rewrittenQuery != "" {
+				r.URL.RawQuery = strings.TrimPrefix(mergeRequestQuery("?"+rewrittenQuery, r.URL.RawQuery), "?")
+			}
+			// A rewrite onto an API route is served by the API handler;
+			// the mux already dispatched this request as a page.
+			if r.URL.Path == "/api" || strings.HasPrefix(r.URL.Path, "/api/") {
+				apiHandler.ServeHTTP(w, r)
+				return
+			}
+			break
 		}
 
 		// A dynamic metadata route (robots.ts, sitemap.ts) is an API route on
@@ -2405,7 +2439,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 			if key, ok := metaRoutes.get().match(r.URL.Path); ok {
 				r.URL.Path = "/api/" + key
 				r.URL.RawPath = ""
-				apiProxy.ServeHTTP(newDeadlineWriter(w), r)
+				nodeAPIProxy.ServeHTTP(newDeadlineWriter(w), r)
 				return
 			}
 		}
@@ -2515,6 +2549,12 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 			_, _ = io.WriteString(w, "ssr-unavailable\n")
 			return
 		}
+		// The sidecar listens only after instrumentation's register() resolved.
+		if instrumentationArg != "" && nodeReady != nil && !nodeReady.up.Load() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = io.WriteString(w, "instrumentation-pending\n")
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = io.WriteString(w, "ready\n")
 	})
@@ -2528,7 +2568,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	proxyTrust.Store(cfg.Server.TrustProxy)
 	flashSecret.Store(flashSecretFor(revalHost.secret))
 	proxyHops.Store(int32(cfg.Server.TrustedProxies))
-	var rootHandler http.Handler = requestIDMiddleware(forwardedHeadersMiddleware(cfg.Server.TrustProxy, basePathMiddleware(cfg.BaseURLPath(), cfg.Redirects, securityHeadersMiddleware(cfg, customHeadersMiddleware(cfg.Headers, corsMiddleware(cfg, panicRecoveryMiddleware(Logger, devMux)))))))
+	var rootHandler http.Handler = requestIDMiddleware(forwardedHeadersMiddleware(cfg.Server.TrustProxy, basePathMiddleware(cfg.BaseURLPath(), cfg.Redirects, securityHeadersMiddleware(cfg, customHeadersMiddleware(cfg.Headers, corsMiddleware(cfg, panicRecoveryMiddleware(Logger, configRedirectMiddleware(insideRedirects, devMux))))))))
 
 	listenerOwned = true
 	addr := listener.Addr().(*net.TCPAddr)
@@ -2843,177 +2883,6 @@ func openBrowser(url string) {
 	} else {
 		_ = proc.Release()
 	}
-}
-
-// matchRedirect checks if a request path matches a redirect/rewrite source
-// pattern. Supports exact match, a trailing wildcard ("/old/*"), and named
-// segment parameters ("/users/:id", "/files/:path*").
-func matchRedirect(path, source string) bool {
-	_, ok := matchRedirectParams(path, source)
-	return ok
-}
-
-func matchRedirectParams(path, source string) (map[string]string, bool) {
-	params, _, ok := matchRedirectParamsMods(path, source)
-	return params, ok
-}
-
-// matchRedirectParamsMods is matchRedirectParams that also returns the modifier
-// ('*', '+' or '?') each named parameter was declared with in the source.
-func matchRedirectParamsMods(path, source string) (map[string]string, map[string]byte, bool) {
-	params := map[string]string{}
-	mods := map[string]byte{}
-	// Literal sources match exactly; splitURLPath below intentionally ignores
-	// trailing slashes for route matching, which must not make /old match /old/.
-	if source == path {
-		return params, mods, true
-	}
-	if isRegexSource(source) {
-		return matchRegexSource(path, source)
-	}
-	if !strings.ContainsAny(source, "*:") {
-		return nil, nil, false
-	}
-	if strings.HasSuffix(source, "/*") {
-		prefix := strings.TrimSuffix(source, "/*")
-		if path == prefix {
-			params["splat"] = ""
-			return params, mods, true
-		}
-		if !strings.HasPrefix(path, prefix+"/") {
-			return nil, nil, false
-		}
-		params["splat"] = strings.TrimPrefix(strings.TrimPrefix(path, prefix), "/")
-		return params, mods, true
-	}
-
-	sourceParts := splitURLPath(source)
-	pathParts := splitURLPath(path)
-	pi := 0
-	for _, part := range sourceParts {
-		if strings.HasPrefix(part, ":") {
-			name, mod := splitParamModifier(part[1:])
-			mods[name] = mod
-			switch mod {
-			case '*':
-				params[name] = strings.Join(pathParts[pi:], "/")
-				return params, mods, true
-			case '+':
-				if pi >= len(pathParts) {
-					return nil, nil, false
-				}
-				params[name] = strings.Join(pathParts[pi:], "/")
-				return params, mods, true
-			case '?':
-				if pi < len(pathParts) {
-					params[name] = pathParts[pi]
-					pi++
-				} else {
-					params[name] = ""
-				}
-				continue
-			}
-			if pi >= len(pathParts) {
-				return nil, nil, false
-			}
-			params[name] = pathParts[pi]
-			pi++
-			continue
-		}
-		if pi >= len(pathParts) || part != pathParts[pi] {
-			return nil, nil, false
-		}
-		pi++
-	}
-	if pi != len(pathParts) {
-		return nil, nil, false
-	}
-	return params, mods, true
-}
-
-// splitParamModifier splits a trailing '*', '+' or '?' off a parameter name.
-func splitParamModifier(name string) (string, byte) {
-	if n := len(name); n > 0 {
-		switch name[n-1] {
-		case '*', '+', '?':
-			return name[:n-1], name[n-1]
-		}
-	}
-	return name, 0
-}
-
-func splitURLPath(p string) []string {
-	p = strings.Trim(p, "/")
-	if p == "" {
-		return nil
-	}
-	return strings.Split(p, "/")
-}
-
-var destParamRe = regexp.MustCompile(`:([A-Za-z_][A-Za-z0-9_]*)`)
-
-// escapeRedirectValue percent-encodes a matched (already decoded) path value
-// for use inside a destination: each segment is escaped on its own so a "\"
-// or an encoded "/" can never turn into a scheme-relative URL, while "/"
-// between segments of a multi-segment value is kept.
-func escapeRedirectValue(v string) string {
-	if v == "" {
-		return ""
-	}
-	segs := strings.Split(v, "/")
-	for i, seg := range segs {
-		segs[i] = url.PathEscape(seg)
-	}
-	return strings.Join(segs, "/")
-}
-
-// rewriteDestination fills ":splat" and ":name" (also ":name*", ":name+" and
-// ":name?") placeholders in destination from the matched request path. Matched
-// values are percent-encoded, and a path destination never starts with "//" or
-// "/\" (an open redirect), whatever the request contained.
-func rewriteDestination(path, source, destination string) string {
-	params, mods, ok := matchRedirectParamsMods(path, source)
-	if !ok {
-		return destination
-	}
-	var out string
-	if splat, ok := params["splat"]; ok {
-		switch {
-		case strings.Contains(destination, ":splat"):
-			out = strings.ReplaceAll(destination, ":splat", escapeRedirectValue(splat))
-		case splat != "":
-			out = strings.TrimRight(destination, "/") + "/" + escapeRedirectValue(splat)
-		default:
-			out = destination
-		}
-	} else {
-		out = replaceDestParams(destination, params, mods)
-	}
-	return sanitizeRedirectTarget(destination, out)
-}
-
-// replaceDestParams substitutes ":name" placeholders. A '*', '+' or '?' right
-// after the name is part of the placeholder only when the source declared the
-// parameter with that modifier, so "/x/:id?ref=1" keeps its query string.
-func replaceDestParams(destination string, params map[string]string, mods map[string]byte) string {
-	var sb strings.Builder
-	last := 0
-	for _, m := range destParamRe.FindAllStringSubmatchIndex(destination, -1) {
-		name := destination[m[2]:m[3]]
-		val, ok := params[name]
-		if !ok {
-			continue
-		}
-		end := m[1]
-		if mod := mods[name]; mod != 0 && end < len(destination) && destination[end] == mod {
-			end++
-		}
-		sb.WriteString(destination[last:m[0]])
-		sb.WriteString(escapeRedirectValue(val))
-		last = end
-	}
-	sb.WriteString(destination[last:])
-	return sb.String()
 }
 
 // sanitizeRedirectTarget keeps a substituted path destination on-site. When the

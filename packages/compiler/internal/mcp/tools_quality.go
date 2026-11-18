@@ -561,7 +561,7 @@ func firstLine(s string) string {
 // --- migrate_nextjs ---
 
 func (s *Service) toolMigrateNextjs(ctx context.Context, args map[string]any) (ToolResult, *rpcError) {
-	rep, err := migrate.ScanNextWithOptions(s.root, migrate.ScanOptions{UpdatePackage: argBool(args, "updatePackage", false), KrateVersion: krateversion.Value})
+	rep, err := migrate.ScanNextWithOptions(s.root, migrate.ScanOptions{NoUpdatePackage: !argBool(args, "updatePackage", true), KrateVersion: krateversion.Value})
 	if err != nil {
 		return ErrorResult("scanning for a Next.js project: " + err.Error()), nil
 	}
@@ -648,7 +648,7 @@ func (s *Service) registerQualityTools(srv *Server) {
 		Name:        "migrate_nextjs",
 		Description: "Plan a Next.js to Krate migration for this project without writing anything: detected app/pages routers, every file that would be copied or generated (with the rewrites each gets), the route inventory, conflicts and overwrites, and the manual decisions left to you (intercepting routes, unsupported APIs). Apply with `krate migrate nextjs --apply`.",
 		InputSchema: objSchema(map[string]any{
-			"updatePackage": boolSchema("Also plan a package.json update with Krate scripts and dependencies (default false)"),
+			"updatePackage": boolSchema("Plan the package.json update (Krate scripts, @krate/* dependencies, removal of unused next packages); default true, false leaves package.json alone"),
 			"limit":         numSchema("Files per page (default 60, max 400)"),
 			"cursor":        strSchema("Opaque cursor from a previous result"),
 		}),

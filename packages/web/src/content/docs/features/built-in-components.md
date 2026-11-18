@@ -131,6 +131,7 @@ Inline CSS is captured into `<head>`.
 ```tsx
 <Link href="/about">About</Link>
 <Link href="/faq" prefetch={false}>No prefetch</Link>
+<Link href="/pricing" prefetch="viewport">Prefetch when scrolled into view</Link>
 <Link href="/docs" replace>Replace history entry</Link>
 <Link href="/blog" scroll={false}>No scroll-to-top</Link>
 <Link href="https://example.com">External</Link>
@@ -138,9 +139,12 @@ Inline CSS is captured into `<head>`.
 <Link href="/pricing" basePath={false}>Outside the base path</Link>
 ```
 
-- **Prefetching** (default on) - `data-prefetch` triggers a prefetch on
-  hover/focus (debounced) and on viewport entry (`IntersectionObserver`,
-  `rootMargin: 200px`).
+- **Prefetching** - by default a link is prefetched on intent: hover, focus
+  or touch (debounced). `prefetch="viewport"` also prefetches it once it
+  scrolls within 200px of the viewport, for at most 5 links per page;
+  `prefetch={false}` never prefetches. Nothing is prefetched when the browser
+  reports Save-Data or a 2g connection. Set the top-level config option
+  `prefetch: "viewport"` to make viewport prefetch the default for every link.
 - **`replace`** - swaps the history entry instead of pushing.
 - **`scroll`** - scrolls to top on forward navigation by default.
 - **Hash links** - `href="/about#section"` fetches the page then scrolls to

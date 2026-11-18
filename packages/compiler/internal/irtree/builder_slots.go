@@ -847,7 +847,7 @@ func findSuspenseFallback(el *ast.JSXElement) (bool, ast.Expr) {
 // buildLinkSlots - <Link> -> <a> with SPA navigation
 // buildLinkSlots compiles <Link> into a real <a> element wired for client-side
 // navigation (data-krate-link) with Next.js-style props:
-// - prefetch (default true) -> data-prefetch (hover + viewport prefetch)
+// - prefetch (default true) -> data-prefetch (intent; "viewport" opts into viewport prefetch)
 // - replace (default false) -> data-krate-replace (history.replaceState)
 // - scroll (default true) -> data-krate-scroll="false" disables scroll-to-top
 //   - target/rel/className/title/aria-label/id forwarded as anchor attributes
@@ -859,6 +859,7 @@ func findSuspenseFallback(el *ast.JSXElement) (bool, ast.Expr) {
 func (b *builder) buildLinkSlots(el *ast.JSXElement, parentID string) []SlotNode {
 	href := ""
 	prefetch := true // prefetch local links by default, like Next.js
+	viewport := false
 	replace := false
 	scroll := true
 	className := ""
@@ -895,7 +896,8 @@ func (b *builder) buildLinkSlots(el *ast.JSXElement, parentID string) []SlotNode
 		case "href":
 			href = val
 		case "prefetch":
-			prefetch = val == "true" || val == "1"
+			prefetch = val == "true" || val == "1" || val == "viewport"
+			viewport = val == "viewport"
 		case "replace":
 			replace = val == "true"
 		case "scroll":
@@ -933,7 +935,11 @@ func (b *builder) buildLinkSlots(el *ast.JSXElement, parentID string) []SlotNode
 	if local {
 		aAttrs = append(aAttrs, &ast.JSXAttr{Name: "data-krate-link", Value: nil})
 		if prefetch {
-			aAttrs = append(aAttrs, &ast.JSXAttr{Name: "data-prefetch", Value: nil})
+			var pv ast.Expr
+			if viewport {
+				pv = &ast.Literal{Kind: ast.StringLit, Value: "viewport"}
+			}
+			aAttrs = append(aAttrs, &ast.JSXAttr{Name: "data-prefetch", Value: pv})
 		}
 		if replace {
 			aAttrs = append(aAttrs, &ast.JSXAttr{Name: "data-krate-replace", Value: nil})
@@ -2958,7 +2964,12 @@ func (b *builder) buildHandlerDecl(attr *ast.JSXAttr, elementID string) *Handler
 	if body == "" {
 		return nil
 	}
+	inline := body
 	body = b.bindLoopVars(body)
+	local := ""
+	if body == inline {
+		local = b.localHandlerName(attr.Value)
+	}
 	signals := b.collectSignalReads(attr.Value)
 
 	pos := attr.Position
@@ -2975,7 +2986,29 @@ func (b *builder) buildHandlerDecl(attr *ast.JSXAttr, elementID string) *Handler
 		Direct:        direct,
 		File:          b.sourceLoc(),
 		Pos:           pos,
+		local:         local,
 	}
+}
+
+// localHandlerName returns the name of the component-body function a handler
+// expression names (`onClick={handleCopy}`, a function declaration or a
+// const arrow), or "" when the expression is anything else or the name is
+// rebound at this position (a list callback parameter).
+func (b *builder) localHandlerName(expr ast.Expr) string {
+	if ta, ok := expr.(*ast.TypeAssertion); ok {
+		return b.localHandlerName(ta.Expr)
+	}
+	id, ok := expr.(*ast.Identifier)
+	if !ok || b.localFnBody == nil || b.isShadowed(id.Name) {
+		return ""
+	}
+	if _, bound := b.loopBindings[id.Name]; bound {
+		return ""
+	}
+	if findLocalFunction(id.Name, b.localFnBody) == nil && findLocalConstFn(id.Name, b.localFnBody) == nil {
+		return ""
+	}
+	return id.Name
 }
 
 // buildAttrBinding - extract dynamic attribute

@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-// --update-package pins the Krate packages, maps next typegen, keeps the
-// key order of package.json and tsconfig.json, and drops Next's TS plugin.
-func TestUpdatePackageKeepsOrderAndPins(t *testing.T) {
+// The package update maps next typegen, keeps the key order of package.json
+// and tsconfig.json, and drops Next's TS plugin.
+func TestUpdatePackageKeepsOrder(t *testing.T) {
 	root := gapsProject(t, map[string]string{
 		"src/app/page.tsx": `export default function P() { return <main/>; }`,
 		"package.json": `{
@@ -21,7 +21,7 @@ func TestUpdatePackageKeepsOrderAndPins(t *testing.T) {
   "include": ["src"]
 }`,
 	})
-	rep, err := ScanNextWithOptions(root, ScanOptions{UpdatePackage: true, KrateVersion: "v0.5.0-rc.7"})
+	rep, err := ScanNextWithOptions(root, ScanOptions{KrateVersion: "v0.5.0-rc.7"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,12 +30,12 @@ func TestUpdatePackageKeepsOrderAndPins(t *testing.T) {
 		t.Fatal("no package.json plan")
 	}
 	got := string(pkg.Content)
-	for _, want := range []string{`"@krate/core": "0.5.0-rc.7"`, `"typecheck": "krate types && tsc --noEmit"`, `"lint": "eslint ."`} {
+	for _, want := range []string{`"@krate/core": "`, `"typecheck": "krate types && tsc --noEmit"`, `"lint": "eslint ."`} {
 		if !strings.Contains(got, want) {
 			t.Errorf("package.json missing %s:\n%s", want, got)
 		}
 	}
-	order := []string{`"name"`, `"private"`, `"scripts"`, `"dev"`, `"typecheck"`, `"lint"`, `"dependencies"`, `"zod"`, `"next"`, `"react"`, `"@krate/components"`}
+	order := []string{`"name"`, `"private"`, `"scripts"`, `"dev"`, `"typecheck"`, `"lint"`, `"dependencies"`, `"zod"`, `"react"`, `"@krate/components"`}
 	last := -1
 	for _, k := range order {
 		i := strings.Index(got, k)

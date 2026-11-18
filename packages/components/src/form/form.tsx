@@ -1,3 +1,8 @@
+// Form renders the button, input and textarea classes itself, so it brings
+// their stylesheets: a page may use Form without those components.
+import '../button/button.css';
+import '../input/input.css';
+import '../textarea/textarea.css';
 import './form.css';
 import { createContext } from '@krate/runtime';
 

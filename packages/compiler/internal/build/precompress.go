@@ -29,15 +29,20 @@ var precompressibleExts = map[string]bool{
 	".txt": true, ".webmanifest": true, ".rss": true, ".atom": true,
 }
 
-// brotliLevel trades build time for ratio. 6 is a good default for a static
-// build (11 is much slower for a marginal gain).
-const brotliLevel = 6
-
-// brotliScriptLevel is the level of scripts and stylesheets. They are most of
-// what a page transfers and are cached immutably under hashed names, so the
-// slower maximum level pays off: about 7% smaller than level 6 on a large
-// app's island chunks, for a few seconds of build time across all cores.
+// brotliScriptLevel is the level of scripts and stylesheets: they are most of
+// what a page transfers and are cached immutably, so the slowest level pays
+// off (about 7% smaller than level 6).
 const brotliScriptLevel = 11
+
+// brotliLevel is the level of markup and data. Level 10 is 8% smaller than
+// level 6 on HTML at about a third of level 11's cost (which is 10.5%), so
+// sites with thousands of pages keep a reasonable build time.
+const brotliLevel = 10
+
+// brotliFallbackLevel is also tried for scripts and stylesheets, since the
+// maximum level loses on some highly repetitive input; the smaller output is
+// kept. Markup and data always compress best at the maximum, so they skip it.
+const brotliFallbackLevel = 6
 
 // brotliLevelFor returns the brotli level for a file.
 func brotliLevelFor(path string) int {
@@ -192,16 +197,20 @@ func isUnderKrateDir(outDir, p string) bool {
 	return false
 }
 
-// brotliCompressFor encodes a file at its level. A script is also encoded at
-// the default level, which is cheap, and the smaller result is kept: the
-// maximum level loses on some highly repetitive input.
+// brotliCompressFor encodes a file at its level. A script or stylesheet is also
+// encoded at the fallback level and the smaller result is kept.
 func brotliCompressFor(path string, data []byte) ([]byte, error) {
 	level := brotliLevelFor(path)
 	out, err := brotliCompressLevel(data, level)
-	if err != nil || level == brotliLevel {
+	if err != nil || level == brotliFallbackLevel {
 		return out, err
 	}
-	if base, err := brotliCompressLevel(data, brotliLevel); err == nil && len(base) < len(out) {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".js", ".mjs", ".cjs", ".css":
+	default:
+		return out, nil
+	}
+	if base, err := brotliCompressLevel(data, brotliFallbackLevel); err == nil && len(base) < len(out) {
 		return base, nil
 	}
 	return out, nil

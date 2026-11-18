@@ -36,17 +36,12 @@ var suspenseMarkers = []string{
 	"useSyncExternalStore", "createExternalStore", "runAsyncTransition",
 }
 
-// runtimeNeedsSuspense reports whether any page's hydration script uses the
+// runtimeNeedsSuspense reports whether the site's client code uses the
 // Suspense/transition runtime.
-func runtimeNeedsSuspense(results []*PageResult) bool {
-	for _, r := range results {
-		if r == nil || r.HydrationJS == "" {
-			continue
-		}
-		for _, marker := range suspenseMarkers {
-			if strings.Contains(r.HydrationJS, marker) {
-				return true
-			}
+func runtimeNeedsSuspense(u runtimeUsage) bool {
+	for _, marker := range suspenseMarkers {
+		if u.Refs[marker] {
+			return true
 		}
 	}
 	return false

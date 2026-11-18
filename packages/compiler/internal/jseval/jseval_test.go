@@ -46,3 +46,36 @@ func write(t *testing.T, dir, name, body string) {
 		t.Fatal(err)
 	}
 }
+
+func TestEvalImportMetaDirnameAndFilename(t *testing.T) {
+	dir := t.TempDir()
+	sub := filepath.Join(dir, "sub")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write(t, sub, "helper.ts", "export const here = { dir: import.meta.dirname, file: import.meta.filename, text: 'import.meta.dirname stays', tpl: `${import.meta.filename}!` };\n")
+	out, err := eval(t, dir, `import { here } from './sub/helper';
+globalThis.__krateEvalResult = { here };`, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m struct {
+		Here struct{ Dir, File, Text, Tpl string }
+	}
+	if err := json.Unmarshal(out, &m); err != nil {
+		t.Fatalf("output %s: %v", out, err)
+	}
+	// The bundler may report the directory as given or with its symlinks
+	// resolved (macOS temp dirs sit behind /var -> /private/var).
+	matches := func(dir string) bool {
+		file := filepath.ToSlash(filepath.Join(dir, "helper.ts"))
+		return m.Here.Dir == filepath.ToSlash(dir) && m.Here.File == file && m.Here.Tpl == file+"!"
+	}
+	real, err := filepath.EvalSymlinks(sub)
+	if err != nil {
+		real = sub
+	}
+	if !(matches(sub) || matches(real)) || m.Here.Text != "import.meta.dirname stays" {
+		t.Fatalf("helper meta wrong: %s", out)
+	}
+}

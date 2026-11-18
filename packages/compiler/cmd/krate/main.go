@@ -45,48 +45,48 @@ const (
 var version = "dev"
 
 type cliFlags struct {
-	ConfigPath    string
-	OutDir        string
-	Watch         bool
-	Verbose       bool
-	Profile       bool
-	Sourcemap     bool
-	NoDCE         bool
-	Precompress   bool
-	Mode          string
-	Schema        bool
-	Target        string
-	StaticOnly    bool
-	JSON          bool
-	HTTP          bool
-	Apply         bool
-	Verify        bool
-	Force         bool
-	UpdatePackage bool
-	Report        string
-	Port          int
-	PortSet       bool
-	NoBuild       bool
-	CleanDist     bool
-	CleanCache    bool
-	CleanAll      bool
-	Global        bool
-	DryRun        bool
-	Fix           bool
-	Open          bool
-	NoSummary     bool
-	QR            bool
-	REPL          bool
-	Host          string
-	Token         string
-	Roots         []string
-	CPUProfile    string
-	MemProfile    string
-	NativeOut     string
-	Shell         string
-	WantShell     bool
-	GoHost        bool
-	Browser       bool
+	ConfigPath      string
+	OutDir          string
+	Watch           bool
+	Verbose         bool
+	Profile         bool
+	Sourcemap       bool
+	NoDCE           bool
+	Precompress     bool
+	Mode            string
+	Schema          bool
+	Target          string
+	StaticOnly      bool
+	JSON            bool
+	HTTP            bool
+	Apply           bool
+	Verify          bool
+	Force           bool
+	NoUpdatePackage bool
+	Report          string
+	Port            int
+	PortSet         bool
+	NoBuild         bool
+	CleanDist       bool
+	CleanCache      bool
+	CleanAll        bool
+	Global          bool
+	DryRun          bool
+	Fix             bool
+	Open            bool
+	NoSummary       bool
+	QR              bool
+	REPL            bool
+	Host            string
+	Token           string
+	Roots           []string
+	CPUProfile      string
+	MemProfile      string
+	NativeOut       string
+	Shell           string
+	WantShell       bool
+	GoHost          bool
+	Browser         bool
 	// DebugGo runs the Go host under Delve in `krate native dev`; DebugAddr
 	// is the address it listens on, DebugConfig names an editor to write a
 	// launch config for ("vscode"), DebugHost inspects the JavaScript host
@@ -274,9 +274,9 @@ func printCommandUsage(w io.Writer, cmd string) {
 		fmt.Fprintf(w, "Usage: krate fix [dir] [--apply]\n\n")
 		fmt.Fprintf(w, "Apply conservative, parse-gated source fixes. Dry-run by default.\n")
 	case "migrate":
-		fmt.Fprintf(w, "Usage: krate migrate nextjs [dir] [--apply] [--verify] [--force] [--update-package] [--report <path>]\n")
+		fmt.Fprintf(w, "Usage: krate migrate nextjs [dir] [--apply] [--verify] [--force] [--no-update-package] [--report <path>]\n")
 		fmt.Fprintf(w, "       krate migrate rollback <backup-dir>\n\n")
-		fmt.Fprintf(w, "Plan or apply a framework migration. Dry-run by default.\n")
+		fmt.Fprintf(w, "Plan or apply a framework migration. Dry-run by default. package.json is updated unless --no-update-package.\n")
 	case "deploy":
 		writeHelp(w, "Usage: krate deploy [dir] [--target netlify|vercel|cloudflare|gh-pages|docker|node] [--static-only]\n\n")
 		writeHelp(w, "Build the site and write host adapter files (_redirects/_headers, vercel.json, Dockerfile).\n")
@@ -376,7 +376,7 @@ func printUsage(w io.Writer) {
 	writeHelp(w, "  --static-only     Deploy only the static pages of a project that also uses server features\n")
 	fmt.Fprintf(w, "  --json            Machine-readable output (krate inspect)\n")
 	writeHelp(w, "  --apply           Write changes (krate fix, krate migrate); dry-run otherwise\n")
-	writeHelp(w, "  --verify, --force, --update-package, --report <path>   krate migrate options\n")
+	writeHelp(w, "  --verify, --force, --no-update-package, --report <path>   krate migrate options\n")
 	writeHelp(w, "  --schema          Print a JSON Schema instead of the config (krate config)\n")
 	writeHelp(w, "  --port <n>        Listen port for dev/serve/start\n")
 	writeHelp(w, "  --host <addr>     Bind address for dev/serve/start\n")
@@ -527,8 +527,10 @@ func parseFlagsChecked(args []string) (cliFlags, []string, error) {
 			flags.Verify = true
 		case args[i] == "--force":
 			flags.Force = true
+		case args[i] == "--no-update-package":
+			flags.NoUpdatePackage = true
 		case args[i] == "--update-package":
-			flags.UpdatePackage = true
+			// The default since package.json is updated unless opted out.
 		case args[i] == "--no-build":
 			flags.NoBuild = true
 		case args[i] == "--dist":
@@ -708,8 +710,9 @@ func loadConfig(flags cliFlags, args []string) (string, *config.Config, error) {
 		cfg.Dce.JS = &off
 	}
 	if flags.Precompress {
-		cfg.Compress.Brotli = true
-		cfg.Compress.Gzip = true
+		on := true
+		cfg.Compress.Brotli = &on
+		cfg.Compress.Gzip = &on
 	}
 	if err := applyServerFlags(command, flags, cfg, os.Getenv); err != nil {
 		fmt.Fprintf(os.Stderr, "%sError:%s %v\n", cRed, cReset, err)

@@ -173,7 +173,7 @@ in that case.
 
 `krate migrate nextjs` points `react-konva` imports at `@krate/konva` when
 every react-konva API the project's modules use is provided, and adds
-`@krate/konva` to `package.json` (a manual item without `--update-package`).
+`@krate/konva` to `package.json` (a manual item with `--no-update-package`).
 Type imports from `konva` itself (`import type Konva from "konva"`,
 `KonvaEventObject` from `konva/lib/Node`) are left as they are, and `konva`
 stays a dependency. One unsupported API (`KonvaRenderer`, an internal

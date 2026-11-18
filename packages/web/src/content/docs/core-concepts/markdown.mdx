@@ -92,7 +92,7 @@ export default function Hello() {
 ```
 
 - **Math** - with `math: true`, `$inline$` and `$$display$$` spans are wrapped
-  in `.krate-math` elements. In the docs plugin, KaTeX is loaded from a CDN and
+  in `.krate-math` elements. In the docs plugin, KaTeX is loaded from a CDN, only on pages with math, and
   auto-renders them; elsewhere the spans are left for your own renderer/CSS.
   Code spans/blocks are never touched:
 
@@ -104,7 +104,9 @@ export default function Hello() {
 
 ## Diagrams
 
-With `mermaid: true`, fenced `mermaid` blocks render as diagrams:
+With `mermaid: true`, fenced `mermaid` blocks render as diagrams. The renderer
+(a pinned mermaid 11 release) is loaded from a CDN only on pages that contain a
+diagram, including after client-side navigation:
 
 ```mermaid
 graph TD

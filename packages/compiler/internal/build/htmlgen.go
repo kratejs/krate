@@ -55,7 +55,11 @@ const devEarlyErrorsScript = `<script>(function(){var q=window.__KRATE_EARLY_ERR
 	`var e=[].filter.call(arguments,function(a){return a instanceof Error})[0];` +
 	`q.push({type:"console",message:m,stack:e&&e.stack})}}catch(_){}return o.apply(c,arguments)}})()</script>` + "\n"
 
-func generateHTML(bodyHTML, headHTML, scriptHTML, styleHTML string, cssFiles []string, jsFile, runtimeJSFile, route string, devMode bool, devBootstrap, runtimeHead, basePath string, modulePreloads ...string) string {
+// defaultTitleTag is the document title of a page with no head content and no
+// configured site name.
+const defaultTitleTag = "<title>Krate App</title>\n"
+
+func generateHTML(bodyHTML, headHTML, scriptHTML, styleHTML string, cssFiles []string, jsFile, runtimeJSFile string, sharedJS []string, route string, devMode bool, devBootstrap, runtimeHead, basePath string, modulePreloads ...string) string {
 	var b strings.Builder
 
 	b.WriteString("<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n")
@@ -79,7 +83,7 @@ func generateHTML(bodyHTML, headHTML, scriptHTML, styleHTML string, cssFiles []s
 		b.WriteString(headHTML)
 		b.WriteByte('\n')
 	} else {
-		b.WriteString("<title>Krate App</title>\n")
+		b.WriteString(defaultTitleTag)
 	}
 
 	if styleHTML != "" {
@@ -99,6 +103,9 @@ func generateHTML(bodyHTML, headHTML, scriptHTML, styleHTML string, cssFiles []s
 	if !devMode {
 		if runtimeJSFile != "" {
 			b.WriteString(fmt.Sprintf("<link rel=\"preload\" as=\"script\" href=\"%s\">\n", assetHref(basePath, runtimeJSFile)))
+		}
+		for _, f := range sharedJS {
+			b.WriteString(fmt.Sprintf("<link rel=\"preload\" as=\"script\" href=\"%s\">\n", assetHref(basePath, f)))
 		}
 		if jsFile != "" {
 			b.WriteString(fmt.Sprintf("<link rel=\"preload\" as=\"script\" href=\"%s\">\n", pageScriptSrc(route, jsFile, basePath)))
@@ -123,6 +130,11 @@ func generateHTML(bodyHTML, headHTML, scriptHTML, styleHTML string, cssFiles []s
 	// Shared runtime chunk (loaded before page-specific hydration)
 	if runtimeJSFile != "" {
 		b.WriteString(fmt.Sprintf("<script src=\"%s\"></script>\n", assetHref(basePath, runtimeJSFile)))
+	}
+	// Shared component chunks: they register the templates the page script
+	// calls, so they run after the runtime and before the page script.
+	for _, f := range sharedJS {
+		b.WriteString(fmt.Sprintf("<script src=\"%s\"></script>\n", assetHref(basePath, f)))
 	}
 
 	// Page hydration script. The src must be an absolute site path (not
@@ -159,13 +171,13 @@ func assetHref(basePath, asset string) string {
 }
 
 // generateHTMLWithLoading is like generateHTML but includes a loading template for SPA transitions.
-func generateHTMLWithLoading(bodyHTML, headHTML, scriptHTML, styleHTML, loadingHTML string, cssFiles []string, jsFile, runtimeJSFile, route string, devMode bool, devBootstrap, runtimeHead, basePath string, modulePreloads ...string) string {
+func generateHTMLWithLoading(bodyHTML, headHTML, scriptHTML, styleHTML, loadingHTML string, cssFiles []string, jsFile, runtimeJSFile string, sharedJS []string, route string, devMode bool, devBootstrap, runtimeHead, basePath string, modulePreloads ...string) string {
 	// The template is the last child of #root (the router overlays it while a
 	// navigation is in flight).
 	if loadingHTML != "" {
 		bodyHTML += "<template data-krate-loading>" + loadingHTML + "</template>"
 	}
-	return generateHTML(bodyHTML, headHTML, scriptHTML, styleHTML, cssFiles, jsFile, runtimeJSFile, route, devMode, devBootstrap, runtimeHead, basePath, modulePreloads...)
+	return generateHTML(bodyHTML, headHTML, scriptHTML, styleHTML, cssFiles, jsFile, runtimeJSFile, sharedJS, route, devMode, devBootstrap, runtimeHead, basePath, modulePreloads...)
 }
 
 // pageScriptSrc returns the absolute site URL for a page's hydration script.
@@ -184,6 +196,23 @@ func pageScriptSrc(route, jsFile, basePath string) string {
 		prefix += "/" + route
 	}
 	return assetHref("", prefix+"/"+jsFile)
+}
+
+// cspCDNOrigin is the CDN the mermaid and KaTeX loaders import from.
+const cspCDNOrigin = "https://cdn.jsdelivr.net"
+
+var charsetMetaRe = regexp.MustCompile(`(?i)<meta\s+charset\b[^>]*>`)
+
+// insertCSPMeta puts the policy right after <meta charset>, so it applies to
+// every inline script and style that follows it in the head.
+func insertCSPMeta(doc, meta string) string {
+	if loc := charsetMetaRe.FindStringIndex(doc); loc != nil {
+		return doc[:loc[1]] + meta + doc[loc[1]:]
+	}
+	if i := strings.Index(strings.ToLower(doc), "<head>"); i >= 0 {
+		return doc[:i+len("<head>")] + meta + doc[i+len("<head>"):]
+	}
+	return strings.Replace(doc, "</head>", meta+"</head>", 1)
 }
 
 // generateCSPMeta generates a Content-Security-Policy <meta> tag by hashing
@@ -214,13 +243,25 @@ func generateCSPMeta(scriptHTML, styleHTML, hydrationJS, directive string) strin
 	// style="..." attributes need 'unsafe-hashes' plus a hash of each value.
 	attrStyles, specRules := inlineStyleAttrsAndSpecRules(styleHTML, scriptHTML)
 
+	scriptHashes = uniqueStrings(scriptHashes)
+	styleHashes = uniqueStrings(styleHashes)
+
 	// A base 'self' policy is meaningful even with no inline assets, so CSP is
 	// always enforced once enabled. Inline assets, when present, are allowlisted
 	// individually via their SHA-256 hashes.
 	var directives []string
 	directives = append(directives, "default-src 'self'")
 
-	scriptSrc := "script-src 'self'"
+	// The mermaid and KaTeX loaders fetch from the jsDelivr CDN at run time.
+	cdn := ""
+	for _, inline := range extractInlineContent(scriptHTML, "script") {
+		if strings.Contains(inline, cspCDNOrigin+"/") {
+			cdn = " " + cspCDNOrigin
+			break
+		}
+	}
+
+	scriptSrc := "script-src 'self'" + cdn
 	for _, h := range scriptHashes {
 		scriptSrc += " " + h
 	}
@@ -229,7 +270,7 @@ func generateCSPMeta(scriptHTML, styleHTML, hydrationJS, directive string) strin
 	}
 	directives = append(directives, scriptSrc)
 
-	styleSrc := "style-src 'self'"
+	styleSrc := "style-src 'self'" + cdn
 	for _, h := range styleHashes {
 		styleSrc += " " + h
 	}
@@ -240,6 +281,9 @@ func generateCSPMeta(scriptHTML, styleHTML, hydrationJS, directive string) strin
 		}
 	}
 	directives = append(directives, styleSrc)
+	if cdn != "" {
+		directives = append(directives, "font-src 'self'"+cdn)
+	}
 
 	return fmt.Sprintf("<meta http-equiv=\"Content-Security-Policy\" content=\"%s\">\n", strings.Join(directives, "; "))
 }
@@ -329,8 +373,10 @@ func referencesExternalAsset(openTag string) bool {
 	return strings.Contains(lower, "src=") || strings.Contains(lower, "href=")
 }
 
+// sha256Base64 hashes content byte for byte: a browser hashes the exact text
+// of an inline script or style, whitespace included.
 func sha256Base64(content string) string {
-	h := sha256.Sum256([]byte(strings.TrimSpace(content)))
+	h := sha256.Sum256([]byte(content))
 	return "'sha256-" + base64.StdEncoding.EncodeToString(h[:]) + "'"
 }
 
@@ -444,6 +490,26 @@ func generateSEOTags(headHTML, route string, seo config.SEOConfig, ctx ...seoCtx
 	return strings.Join(tags, "\n") + "\n"
 }
 
+var iconLinkRe = regexp.MustCompile(`(?i)<link\b[^>]*\brel\s*=\s*["']?[^"'>]*\bicon\b`)
+
+// fallbackHeadTags returns the document <title> for a page that sets none (the
+// same site-name fallback og:title uses) and the configured site.icon link
+// for a page that sets no icon of its own.
+func fallbackHeadTags(headHTML string, seo config.SEOConfig) string {
+	var b strings.Builder
+	if !strings.Contains(strings.ToLower(headHTML), "<title") && seo.SiteName != "" {
+		title := applyTitleTemplateText(seo.SiteName, seo.SiteName, seo.TitleTemplate)
+		b.WriteString("<title>" + escape.HTML(title) + "</title>\n")
+	}
+	if icon := strings.TrimSpace(seo.Icon); icon != "" && !iconLinkRe.MatchString(headHTML) {
+		if !strings.Contains(icon, "://") && !strings.HasPrefix(icon, "/") && !strings.HasPrefix(icon, "data:") {
+			icon = "/" + icon
+		}
+		b.WriteString(fmt.Sprintf("<link rel=\"icon\" href=\"%s\">\n", escape.HTMLAttr(icon)))
+	}
+	return b.String()
+}
+
 // seoCtx carries per-page context for generateSEOTags.
 type seoCtx struct {
 	BasePath  string
@@ -485,6 +551,11 @@ func headKey(tag string) string {
 		return "title"
 	case strings.HasPrefix(lower, "<meta"):
 		if n := attr("name"); n != "" {
+			// A media-qualified tag (the light and dark theme-color) is a
+			// different tag from the unqualified one.
+			if m := attr("media"); m != "" {
+				return "meta:name:" + n + "|" + m
+			}
 			return "meta:name:" + n
 		}
 		if p := attr("property"); p != "" {
@@ -492,8 +563,11 @@ func headKey(tag string) string {
 		}
 	case strings.HasPrefix(lower, "<link"):
 		switch rel := attr("rel"); rel {
-		case "canonical", "manifest", "icon", "shortcut icon", "apple-touch-icon":
+		case "canonical", "manifest":
 			return "link:" + rel
+		case "icon", "shortcut icon", "apple-touch-icon":
+			// Variants that differ in size, type or media are all kept.
+			return "link:" + rel + "|" + attr("sizes") + "|" + attr("type") + "|" + attr("media")
 		case "alternate":
 			if h := attr("hreflang"); h != "" {
 				return "link:alternate:" + h

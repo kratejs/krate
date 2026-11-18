@@ -424,6 +424,12 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 			return fmt.Errorf("expected boolean, got %T", val)
 		}
 		cfg.Sourcemap = b
+	case "sharedChunks":
+		b, ok := val.(bool)
+		if !ok {
+			return fmt.Errorf("expected boolean, got %T", val)
+		}
+		cfg.SharedChunks = &b
 	case "basePath":
 		s, ok := val.(string)
 		if !ok {
@@ -456,11 +462,11 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 			switch k {
 			case "brotli":
 				if b, ok := v.(bool); ok {
-					cfg.Compress.Brotli = b
+					cfg.Compress.Brotli = &b
 				}
 			case "gzip":
 				if b, ok := v.(bool); ok {
-					cfg.Compress.Gzip = b
+					cfg.Compress.Gzip = &b
 				}
 			}
 		}
@@ -676,6 +682,8 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 				cfg.SEO.ThemeColor = s
 			case "locale":
 				cfg.SEO.Locale = s
+			case "icon":
+				cfg.SEO.Icon = s
 			}
 		}
 	case "site":
@@ -716,6 +724,8 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 				cfg.Site.ThemeColor = s
 			case "locale":
 				cfg.Site.Locale = s
+			case "icon":
+				cfg.Site.Icon = s
 			}
 		}
 	case "robots":
@@ -737,6 +747,18 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 	case "runtime":
 		if s, ok := val.(string); ok {
 			cfg.Runtime = s
+		}
+	case "clientRuntime":
+		m, ok := val.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("expected object, got %T", val)
+		}
+		if v, ok := m["exports"]; ok {
+			s, ok := v.(string)
+			if !ok {
+				return fmt.Errorf("clientRuntime.exports: expected string, got %T", v)
+			}
+			cfg.ClientRuntime.Exports = s
 		}
 	case "tsBaseDir":
 		if s, ok := val.(string); ok {
@@ -1348,6 +1370,16 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 			if b, ok := m["basePath"].(bool); ok {
 				rd.BasePath = &b
 			}
+			if n, ok := m["statusCode"].(float64); ok {
+				rd.StatusCode = int(n)
+			}
+			var err error
+			if rd.Has, err = routeConditions(m["has"]); err != nil {
+				return fmt.Errorf("redirects[%d].has: %w", i, err)
+			}
+			if rd.Missing, err = routeConditions(m["missing"]); err != nil {
+				return fmt.Errorf("redirects[%d].missing: %w", i, err)
+			}
 			cfg.Redirects = append(cfg.Redirects, rd)
 		}
 	case "rewrites":
@@ -1366,6 +1398,13 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 			}
 			if s, ok := m["destination"].(string); ok {
 				rw.Destination = s
+			}
+			var err error
+			if rw.Has, err = routeConditions(m["has"]); err != nil {
+				return fmt.Errorf("rewrites[%d].has: %w", i, err)
+			}
+			if rw.Missing, err = routeConditions(m["missing"]); err != nil {
+				return fmt.Errorf("rewrites[%d].missing: %w", i, err)
 			}
 			cfg.Rewrites = append(cfg.Rewrites, rw)
 		}
@@ -1451,4 +1490,20 @@ func applyNormalizedKeys(data []byte, cfg *Config) error {
 		}
 	}
 	return nil
+}
+
+// routeConditions reads a has or missing array of { type, key, value }.
+func routeConditions(v interface{}) ([]RouteCondition, error) {
+	if v == nil {
+		return nil, nil
+	}
+	data, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	var out []RouteCondition
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil, fmt.Errorf("expected an array of { type, key, value } objects")
+	}
+	return out, nil
 }

@@ -374,6 +374,10 @@ type HandlerDecl struct {
 	// hydration source maps.
 	File string
 	Pos  ast.Pos
+	// local names the component-body function the handler is (onClick=
+	// {handleCopy}); finishClientComponent binds that declaration instead of
+	// a second copy of its body when the scope declares it.
+	local string
 }
 
 // RefBinding - ref={someVar} on an element
@@ -452,6 +456,16 @@ type ComponentNode struct {
 	Effects      []string
 	Memos        []string
 	ExtraVars    []string
+	// PropsRegs holds the structured form of the child props registrations
+	// in ExtraVars, so the renderer can emit only the props each child's
+	// client code reads (see renderer/propsreads.go). A registration missing
+	// here is emitted as-is.
+	PropsRegs []PropsReg
+	// PureDecls maps the ExtraVars and PreSignalVars entries that declare one
+	// name without side effects (function declarations, locals folded to a
+	// build-time literal) to that name. The renderer leaves out one that no
+	// other code in the scope references.
+	PureDecls map[string]string
 	// FuncProps records the call-site props whose values are function
 	// references (a local function or arrow in the parent scope) rather than
 	// const-foldable values. Such props cannot be serialized to a literal: the
@@ -483,7 +497,10 @@ type ComponentNode struct {
 
 	InstanceID string
 	SourceFile string
-	Line       int
+	// Module is the module that defines the component function ("" when
+	// unknown).
+	Module string
+	Line   int
 	// Class marks a lowered React class component (see Annotations.IsLoweredClass).
 	Class bool
 	// Boundary marks a lowered class that is an error boundary.
@@ -649,6 +666,8 @@ type ComponentSignature struct {
 	Effects         []string
 	Memos           []string
 	ExtraVars       []string
+	PropsRegs       []PropsReg
+	PureDecls       map[string]string
 	PreSignalVars   []string
 	FuncPropAliases []string
 	IslandBoot      []string
@@ -696,6 +715,9 @@ type ComponentSignature struct {
 	// ("" for page components). The SPA router skips the hydration of scopes
 	// whose layout stayed mounted across a soft navigation.
 	RouteScope string
+
+	// Source is the module that defines the component ("" when unknown).
+	Source string
 }
 
 // CondBranch names one branch ("c" consequent, "a" alternate) of a

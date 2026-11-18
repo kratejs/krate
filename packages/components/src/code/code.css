@@ -38,6 +38,13 @@
   font-size: 0.8rem;
   transition: background 0.15s, color 0.15s;
 }
+.krate-code-copy .krate-code-icon-done,
+.krate-code-copy[data-copied="true"] .krate-code-icon-copy {
+  display: none;
+}
+.krate-code-copy[data-copied="true"] .krate-code-icon-done {
+  display: inline;
+}
 .krate-code-copy:hover {
   background: color-mix(in srgb, var(--krate-code-block-fg) 12%, transparent);
   color: var(--krate-code-block-fg);

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/internal/bundler"
@@ -113,9 +114,41 @@ func warnUnmigratedSources(abs string, rep *Report) {
 	rep.Warnings = append(rep.Warnings, "script files at the project root or src/ were not migrated and stay where they are: "+strings.Join(shown, ", ")+more+"; check that none of them carries behavior the app needs (auth, request interception, startup code)")
 }
 
-// planInstrumentation lists Next instrumentation files as manual work: Krate
-// has no server startup hook that calls register().
+// nextRuntimeCheck matches a comparison of process.env.NEXT_RUNTIME with
+// "nodejs" or "edge", in either operand order.
+var nextRuntimeCheck = regexp.MustCompile(`(?:process\.env\.NEXT_RUNTIME\s*(===|!==|==|!=)\s*["'](nodejs|edge)["'])|(?:["'](nodejs|edge)["']\s*(===|!==|==|!=)\s*process\.env\.NEXT_RUNTIME)`)
+
+// onRequestErrorExport matches an exported onRequestError hook.
+var onRequestErrorExport = regexp.MustCompile(`(?m)^\s*export\s+(?:(?:async\s+)?function\s+onRequestError\b|(?:const|let|var)\s+onRequestError\b)|^\s*export\s*\{[^}]*\bonRequestError\b`)
+
+// foldNextRuntime replaces the NEXT_RUNTIME comparisons of an instrumentation
+// file with constants: Krate runs register() in Node only, so "nodejs" holds
+// and "edge" does not.
+func foldNextRuntime(src string) (string, bool) {
+	changed := false
+	out := nextRuntimeCheck.ReplaceAllStringFunc(src, func(m string) string {
+		sub := nextRuntimeCheck.FindStringSubmatch(m)
+		op, val := sub[1], sub[2]
+		if op == "" {
+			op, val = sub[4], sub[3]
+		}
+		changed = true
+		equal := op == "===" || op == "=="
+		isNode := val == "nodejs"
+		return strconv.FormatBool(equal == isNode)
+	})
+	return out, changed
+}
+
+// planInstrumentation handles Next instrumentation files. Krate runs
+// instrumentation.{ts,js,mjs} (register()) once per server start, so the files
+// stay where they are, with their NEXT_RUNTIME checks folded; onRequestError,
+// which Krate does not call, and instrumentation-client are manual items.
 func planInstrumentation(abs string, rep *Report) {
+	planned := map[string]bool{}
+	for _, f := range rep.Files {
+		planned[f.Target] = true
+	}
 	for _, dir := range []string{"", "src"} {
 		entries, err := os.ReadDir(filepath.Join(abs, dir))
 		if err != nil {
@@ -125,14 +158,41 @@ func planInstrumentation(abs string, rep *Report) {
 			name := e.Name()
 			ext := filepath.Ext(name)
 			stem := strings.TrimSuffix(name, ext)
-			if e.IsDir() || (ext != ".ts" && ext != ".js") || (stem != "instrumentation" && !strings.HasPrefix(stem, "instrumentation-")) {
+			if e.IsDir() || (ext != ".ts" && ext != ".js" && ext != ".mjs") || (stem != "instrumentation" && !strings.HasPrefix(stem, "instrumentation-")) {
 				continue
 			}
-			hint := "Krate has no instrumentation register() hook; run one-time setup (telemetry, Sentry init) at the top of an API route or middleware module, or from a plugin with serve hooks"
+			rel := path.Join(dir, name)
 			if strings.HasPrefix(stem, "instrumentation-client") {
-				hint = "import the client-side setup from a client component or layout script instead; Krate does not load instrumentation-client automatically"
+				rep.Manual = append(rep.Manual, ManualItem{Source: rel, Reason: "Next.js instrumentation-client file is not migrated", Hint: "import the client-side setup from a client component or layout script instead; Krate does not load instrumentation-client automatically"})
+				continue
 			}
-			rep.Manual = append(rep.Manual, ManualItem{Source: path.Join(dir, name), Reason: "Next.js instrumentation file is not migrated", Hint: hint})
+			data, err := os.ReadFile(filepath.Join(abs, filepath.FromSlash(rel)))
+			if err != nil {
+				continue
+			}
+			src := string(data)
+			if onRequestErrorExport.MatchString(src) {
+				rep.Manual = append(rep.Manual, ManualItem{Source: rel, Reason: "onRequestError is exported but Krate does not call it", Hint: "report errors from the places that catch them (try/catch in an API route, an error boundary), or send them to your error tracker from there"})
+			}
+			if planned[rel] {
+				for i := range rep.Files {
+					if rep.Files[i].Target == rel {
+						if out, changed := foldNextRuntime(string(rep.Files[i].Content)); changed {
+							rep.Files[i].Content = []byte(out)
+							rep.Files[i].Rewrites = append(rep.Files[i].Rewrites, "folded process.env.NEXT_RUNTIME checks: Krate runs instrumentation in Node only")
+						}
+					}
+				}
+				continue
+			}
+			out, changed := foldNextRuntime(src)
+			if !changed {
+				continue
+			}
+			rep.Files = append(rep.Files, PlannedFile{
+				Kind: KindModule, Source: rel, Target: rel, Content: []byte(out), orig: data,
+				Rewrites: []string{"folded process.env.NEXT_RUNTIME checks: Krate runs instrumentation in Node only"},
+			})
 		}
 	}
 }
@@ -320,7 +380,7 @@ func planMoveAside(abs string, trees []string, rep *Report) {
 	for _, tree := range trees {
 		inside := false
 		for _, f := range rep.Files {
-			if strings.HasPrefix(f.Target, tree+"/") {
+			if f.Kind != KindStub && strings.HasPrefix(f.Target, tree+"/") {
 				inside = true
 				break
 			}

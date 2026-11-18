@@ -195,6 +195,7 @@ func (b *Builder) writeIslandBundles() error {
 	}
 	if len(flavours) == 0 {
 		pruneIslandFiles(chunksDir, keep)
+		b.setIslandGraph(nil)
 		return nil
 	}
 	shared := b.buildIslandFlavours(flavours, chunksDir)
@@ -211,11 +212,28 @@ func (b *Builder) writeIslandBundles() error {
 			return err
 		}
 	}
-	if err := writeIslandChunkFiles(shared, chunksDir, islandNeutralStem, keep); err != nil {
+	if err := writeIslandChunkFiles(shared.OutputFiles, chunksDir, islandNeutralStem, keep); err != nil {
 		return err
 	}
 	pruneIslandFiles(chunksDir, keep)
+	graph := islandModuleGraph{}
+	for _, m := range append([]string{shared.Metafile}, flavourMetafiles(flavours)...) {
+		if err := graph.addMetafile(m); err != nil {
+			// Without the graph a page preloads only its island entries.
+			graph = nil
+			break
+		}
+	}
+	b.setIslandGraph(graph)
 	return nil
+}
+
+func flavourMetafiles(flavours []*islandFlavour) []string {
+	out := make([]string, 0, len(flavours))
+	for _, f := range flavours {
+		out = append(out, f.result.Metafile)
+	}
+	return out
 }
 
 // preactIslandFlavour returns the build of the Preact island entries.

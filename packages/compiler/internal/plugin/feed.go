@@ -286,37 +286,19 @@ func renderAtom(siteBase, title, description string, items []feedItem) string {
 
 // docsHeadExtras returns JSX head markup for the docs page: <link rel=alternate>
 // feed discovery (when the feed plugin is configured) and JSON-LD structured
-// data (when seo.baseUrl is set). Emitted inside the page's <Head> block.
-func docsHeadExtras(cfg *config.Config, page docs.Page, siteTitle string) string {
+// data (when seo.baseUrl is set), plus the mermaid and KaTeX loaders when the
+// site uses them. Emitted inside the page's <Head> block.
+func docsHeadExtras(cfg *config.Config, page docs.Page, siteTitle string, use docsAssetUse) string {
 	baseURL := strings.TrimRight(cfg.SEO.BaseURL, "/")
 
 	var sb strings.Builder
 
-	// Math: load KaTeX from a CDN and auto-render the `.krate-math` spans the
-	// markdown pipeline emits. Only emitted when markdown.math is enabled.
-	if cfg.Markdown.Math {
-		const katex = "https://cdn.jsdelivr.net/npm/katex@0.16.11/dist"
-		sb.WriteString("        <link rel=\"stylesheet\" href=\"" + katex + "/katex.min.css\" />\n")
-		sb.WriteString("        <script src=\"" + katex + "/katex.min.js\" defer={true}></script>\n")
-		sb.WriteString("        <script src=\"" + katex + "/contrib/auto-render.min.js\" defer={true}></script>\n")
-		sb.WriteString("        <script>{`document.addEventListener('DOMContentLoaded',function(){if(window.renderMathInElement){renderMathInElement(document.body,{delimiters:[{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false}],ignoredTags:['pre','code','script','style'],throwOnError:false});}});`}</script>\n")
+	if use.math && cfg.Markdown.Math {
+		sb.WriteString(mathHeadMarkup(page))
 	}
-
-	// Mermaid: load the renderer and (re)render diagrams on load + SPA nav.
-	if cfg.Markdown.Mermaid {
-		script := "import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';" +
-			"function __krateTheme(){return document.documentElement.getAttribute('data-theme')==='dark'?'dark':'neutral';}" +
-			"var __krateThemeSeen=__krateTheme();" +
-			"function __krateMermaidRun(){" +
-			"document.querySelectorAll('.mermaid').forEach(function(el){if(!el.getAttribute('data-src')){el.setAttribute('data-src',el.textContent);}});" +
-			"document.querySelectorAll('.mermaid').forEach(function(el){if(el.getAttribute('data-processed')){el.removeAttribute('data-processed');var s=el.getAttribute('data-src');if(s!=null){el.textContent=s;}}});" +
-			"mermaid.initialize({startOnLoad:false,theme:__krateTheme()});" +
-			"try{var __p=mermaid.run({querySelector:'.mermaid'});if(__p&&__p.catch){__p.catch(function(){});}}catch(e){}}" +
-			"if(document.readyState!=='loading'){__krateMermaidRun();}else{document.addEventListener('DOMContentLoaded',__krateMermaidRun);}" +
-			"window.addEventListener('krate:navigate',function(){setTimeout(__krateMermaidRun,60);});" +
-			"new MutationObserver(function(){var t=__krateTheme();if(t===__krateThemeSeen){return;}__krateThemeSeen=t;__krateMermaidRun();}).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});"
+	if use.mermaid && cfg.Markdown.Mermaid {
 		sb.WriteString("        <script type=\"module\">{`")
-		sb.WriteString(escapeTemplateLit(script))
+		sb.WriteString(escapeTemplateLit(mermaidLoaderScript))
 		sb.WriteString("`}</script>\n")
 	}
 
@@ -479,4 +461,84 @@ func feedPagePath(cfg *config.Config, prefix, pagePath string) string {
 		u = "/" + locale + u
 	}
 	return u
+}
+
+const (
+	// mermaidVersion and katexVersion are pinned so a CDN release cannot change
+	// rendering under a built site.
+	mermaidVersion = "11.17.2"
+	katexVersion   = "0.16.11"
+
+	mermaidModuleURL = "https://cdn.jsdelivr.net/npm/mermaid@" + mermaidVersion + "/dist/mermaid.esm.min.mjs"
+	katexBaseURL     = "https://cdn.jsdelivr.net/npm/katex@" + katexVersion + "/dist"
+)
+
+// docsAssetUse records which CDN-backed markdown features some page of the
+// site uses. The loaders are emitted on every page of a site that uses a
+// feature (client navigation does not re-run head scripts, so a page without
+// a diagram must still be able to render the next one) but they fetch nothing
+// until a matching element is on screen.
+type docsAssetUse struct {
+	mermaid, math bool
+}
+
+// docsPageUse reports what one rendered page needs.
+func docsPageUse(html string) docsAssetUse {
+	return docsAssetUse{
+		mermaid: strings.Contains(html, `class="mermaid"`),
+		math:    strings.Contains(html, "krate-math"),
+	}
+}
+
+// docsSiteUse reports what any of the pages needs.
+func docsSiteUse(pages []docs.Page) docsAssetUse {
+	var u docsAssetUse
+	for _, pg := range pages {
+		pu := docsPageUse(pg.Content)
+		u.mermaid = u.mermaid || pu.mermaid
+		u.math = u.math || pu.math
+	}
+	return u
+}
+
+// mermaidLoaderScript imports mermaid only when a .mermaid element exists, on
+// load, on client navigation and on theme change.
+const mermaidLoaderScript = "var __krateMermaidP;" +
+	"function __krateTheme(){return document.documentElement.getAttribute('data-theme')==='dark'?'dark':'neutral';}" +
+	"var __krateThemeSeen=__krateTheme();" +
+	"function __krateMermaidRun(){" +
+	"if(!document.querySelector('.mermaid')){return;}" +
+	"document.querySelectorAll('.mermaid').forEach(function(el){if(!el.getAttribute('data-src')){el.setAttribute('data-src',el.textContent);}});" +
+	"document.querySelectorAll('.mermaid').forEach(function(el){if(el.getAttribute('data-processed')){el.removeAttribute('data-processed');var s=el.getAttribute('data-src');if(s!=null){el.textContent=s;}}});" +
+	"if(!__krateMermaidP){__krateMermaidP=import('" + mermaidModuleURL + "').then(function(m){return m.default;});}" +
+	"__krateMermaidP.then(function(mermaid){" +
+	"mermaid.initialize({startOnLoad:false,theme:__krateTheme()});" +
+	"var __p=mermaid.run({querySelector:'.mermaid'});if(__p&&__p.catch){__p.catch(function(){});}" +
+	"}).catch(function(){__krateMermaidP=null;});}" +
+	"if(document.readyState!=='loading'){__krateMermaidRun();}else{document.addEventListener('DOMContentLoaded',__krateMermaidRun);}" +
+	"window.addEventListener('krate:navigate',function(){setTimeout(__krateMermaidRun,60);});" +
+	"new MutationObserver(function(){var t=__krateTheme();if(t===__krateThemeSeen){return;}__krateThemeSeen=t;__krateMermaidRun();}).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});"
+
+// katexLoaderScript loads KaTeX CSS and scripts only when a .krate-math span
+// exists, then renders on load and on client navigation.
+const katexLoaderScript = "var __krateKatexP;" +
+	"function __krateAdd(tag,attrs){return new Promise(function(res,rej){var e=document.createElement(tag);for(var k in attrs){e[k]=attrs[k];}e.onload=res;e.onerror=rej;document.head.appendChild(e);});}" +
+	"function __krateMathRun(){" +
+	"if(!document.querySelector('.krate-math')){return;}" +
+	"if(!__krateKatexP){var b='" + katexBaseURL + "';" +
+	"var css=document.querySelector('link[data-krate-katex]')?Promise.resolve():__krateAdd('link',{rel:'stylesheet',href:b+'/katex.min.css'});" +
+	"__krateKatexP=Promise.all([css,__krateAdd('script',{src:b+'/katex.min.js'})]).then(function(){return __krateAdd('script',{src:b+'/contrib/auto-render.min.js'});});}" +
+	"__krateKatexP.then(function(){if(window.renderMathInElement){renderMathInElement(document.body,{delimiters:[{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false}],ignoredTags:['pre','code','script','style'],throwOnError:false});}}).catch(function(){__krateKatexP=null;});}" +
+	"if(document.readyState!=='loading'){__krateMathRun();}else{document.addEventListener('DOMContentLoaded',__krateMathRun);}" +
+	"window.addEventListener('krate:navigate',function(){setTimeout(__krateMathRun,60);});"
+
+// mathHeadMarkup returns the KaTeX loader. A page that has math also links the
+// stylesheet directly so first paint is styled; other pages fetch nothing.
+func mathHeadMarkup(page docs.Page) string {
+	var sb strings.Builder
+	if docsPageUse(page.Content).math {
+		sb.WriteString("        <link rel=\"stylesheet\" href=\"" + katexBaseURL + "/katex.min.css\" data-krate-katex=\"\" />\n")
+	}
+	sb.WriteString("        <script>{`" + escapeTemplateLit(katexLoaderScript) + "`}</script>\n")
+	return sb.String()
 }

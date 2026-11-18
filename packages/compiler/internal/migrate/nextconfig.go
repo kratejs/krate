@@ -12,6 +12,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/lexer"
 	"github.com/kratejs/krate/packages/compiler/internal/parser"
+	"github.com/kratejs/krate/packages/compiler/internal/routesource"
 )
 
 // nextConfigData is the subset of next.config.* that maps cleanly onto Krate.
@@ -32,39 +33,75 @@ type nextConfigData struct {
 	// MiddlewareRuntime is "node" when the middleware cannot run in the
 	// embedded runtime; it becomes ssr.middlewareRuntime.
 	MiddlewareRuntime string `json:"-"`
-	// APIRuntime is "node" when route handlers declared runtime = 'nodejs';
-	// it becomes ssr.apiRuntime.
-	APIRuntime string `json:"-"`
 	// TrailingSlash is "always" when next.config sets trailingSlash: true and
 	// "never" otherwise (Next's URL form).
 	TrailingSlash string `json:"trailingSlash,omitempty"`
 	// EnvDir is the relative directory loadEnvConfig(...) reads .env files
 	// from; it becomes envDir. Empty when absent or the project root.
 	EnvDir string `json:"-"`
+	// EnvPrefix is set by the migrator when the app reads NEXT_PUBLIC_
+	// variables; it becomes envPrefix.
+	EnvPrefix []string `json:"-"`
+	// MiddlewareRedirects are redirects the config cannot express; the
+	// migrator injects them at the start of the middleware.
+	MiddlewareRedirects []middlewareRedirect `json:"-"`
+	// DeployTarget is "node" for output: 'standalone'; it becomes
+	// deploy.target.
+	DeployTarget string `json:"-"`
+	// OutputFileTracingRoot is outputFileTracingRoot as a path relative to the
+	// project (for example "../.."); TracingDepth is how many levels it is up
+	// and TracingRel the project's path below it ("packages/web").
+	OutputFileTracingRoot string `json:"-"`
+	TracingDepth          int    `json:"-"`
+	TracingRel            string `json:"-"`
 	// Tailwind is true when the project's PostCSS config runs Tailwind.
 	Tailwind bool `json:"-"`
 	// NoCompress is set by `compress: false`. Next.js compresses responses by
 	// default; the migrated config precompresses assets at build time instead.
 	NoCompress bool `json:"-"`
+	// Preamble holds next.config's top-level statements; the ones the code
+	// pieces need are copied into krate.config.ts.
+	Preamble *preambleSource `json:"-"`
+	// ImageCode are images.remotePatterns entries carried as code.
+	ImageCode []*codePiece `json:"-"`
 }
 
+// nextRedirect is written with an explicit statusCode (308 for Next's
+// permanent: true, 307 for false) so the migrated app answers like Next.
 type nextRedirect struct {
-	Source      string `json:"source"`
-	Destination string `json:"destination"`
-	Permanent   bool   `json:"permanent"`
-	// StatusCode keeps Next's status: 308 for permanent, 307 otherwise, or
-	// the rule's own statusCode.
-	StatusCode int `json:"statusCode,omitempty"`
+	Source      string                  `json:"source"`
+	Destination string                  `json:"destination"`
+	StatusCode  int                     `json:"statusCode,omitempty"`
+	Has         []routesource.Condition `json:"has,omitempty"`
+	Missing     []routesource.Condition `json:"missing,omitempty"`
 }
 
 type nextRewrite struct {
-	Source      string `json:"source"`
-	Destination string `json:"destination"`
+	Source      string                  `json:"source"`
+	Destination string                  `json:"destination"`
+	Has         []routesource.Condition `json:"has,omitempty"`
+	Missing     []routesource.Condition `json:"missing,omitempty"`
 }
 
 type nextHeaderRule struct {
-	Source  string            `json:"source"`
-	Headers map[string]string `json:"headers"`
+	Source  string                  `json:"source"`
+	Headers map[string]string       `json:"headers"`
+	Has     []routesource.Condition `json:"has,omitempty"`
+	Missing []routesource.Condition `json:"missing,omitempty"`
+	// Code is set instead of the fields above when the rule is computed: the
+	// element is copied into krate.config.ts verbatim.
+	Code *codePiece `json:"-"`
+}
+
+// middlewareRedirect is a redirect whose source or has/missing regex Go
+// cannot run. It is written into the middleware instead of the config.
+type middlewareRedirect struct {
+	Index       int
+	Source      string
+	Destination string
+	Status      int
+	Has         []routesource.Condition
+	Missing     []routesource.Condition
 }
 
 var nextConfigWrapper = regexp.MustCompile(`(?m)(?:export\s+default|module\.exports\s*=)\s*[A-Za-z_$][\w$]*(?:\.[\w$]+)*\s*\(`)
@@ -78,13 +115,15 @@ type nextConfigNotes struct {
 	Skipped []string
 	// Manual is one item per rule or key that needs a human.
 	Manual []ManualItem
+	// Info are notes that need no action.
+	Info []string
 }
 
 // readNextConfig extracts static redirects/rewrites/headers/basePath from a
 // next.config file. Each rule and key is translated on its own: anything it
-// cannot prove static is reported in notes and the rest still translates. A
-// rule guarded by has/missing is never emitted, because Krate matches on the
-// path only and an unconditional copy would be looser than the original. ok is
+// cannot prove static is reported in notes and the rest still translates.
+// has/missing conditions become config conditions; a redirect whose regex Go
+// cannot run is recorded in MiddlewareRedirects. ok is
 // false only when the config as a whole is not a static default export object
 // (function configs, plugin wrappers, computed values).
 func readNextConfig(path string) (data nextConfigData, notes nextConfigNotes, ok bool) {
@@ -105,6 +144,8 @@ func readNextConfig(path string) (data nextConfigData, notes nextConfigNotes, ok
 		return out, notes, false
 	}
 	rc := &ruleCtx{file: file, dir: filepath.Dir(path), src: string(src), prog: prog}
+	rc.pre = newPreambleSource(rc.src, prog, obj.Position.Offset)
+	out.Preamble = rc.pre
 
 	for _, p := range obj.Properties {
 		if p != nil && (p.Spread || p.Computed) {
@@ -144,6 +185,7 @@ func readNextConfig(path string) (data nextConfigData, notes nextConfigNotes, ok
 			notes.Skipped = append(notes.Skipped, "redirects ("+reason+")")
 		}
 		out.Redirects = rules
+		out.MiddlewareRedirects = rc.fallbacks
 		notes.Manual = append(notes.Manual, items...)
 	}
 	if v := prop(obj, "rewrites"); v != nil {
@@ -167,10 +209,11 @@ func readNextConfig(path string) (data nextConfigData, notes nextConfigNotes, ok
 	notes.Warnings = append(notes.Warnings, duplicateRuleWarnings(out)...)
 
 	if v := prop(obj, "images"); v != nil {
-		images, imageWarnings := imagesConfig(v)
+		images, imageWarnings, imageCode := rc.images(v)
 		if len(images) > 0 {
 			out.Images = images
 		}
+		out.ImageCode = imageCode
 		for _, w := range imageWarnings {
 			if item, manual := imageManualItem(file, w); manual {
 				notes.Manual = append(notes.Manual, item)
@@ -186,7 +229,7 @@ func readNextConfig(path string) (data nextConfigData, notes nextConfigNotes, ok
 			notes.Manual = append(notes.Manual, ManualItem{
 				Source: file,
 				Reason: "env is not a static string map and was not translated",
-				Hint:   "Krate inlines only KRATE_PUBLIC_* values from .env at build time; put the values there (see Environment Variables)",
+				Hint:   "Krate inlines only values whose names start with KRATE_PUBLIC_ (or a prefix in envPrefix) from .env at build time; put the values there (see Environment Variables)",
 			})
 		}
 	}
@@ -202,7 +245,7 @@ func readNextConfig(path string) (data nextConfigData, notes nextConfigNotes, ok
 			})
 		}
 	}
-	translateOtherKeys(file, obj, &notes, serverFileKeys(obj, &out))
+	translateOtherKeys(file, obj, &notes, serverFileKeys(rc, obj, &out, &notes))
 	return out, notes, true
 }
 
@@ -393,6 +436,9 @@ func configJSON(entry string, next nextConfigData) []byte {
 	if next.EnvDir != "" {
 		opts["envDir"] = next.EnvDir
 	}
+	if len(next.EnvPrefix) > 0 {
+		opts["envPrefix"] = next.EnvPrefix
+	}
 	if next.Tailwind {
 		opts["tailwind"] = map[string]any{"enabled": true}
 	}
@@ -409,10 +455,10 @@ func configJSON(entry string, next nextConfigData) []byte {
 		opts["rewrites"] = next.Rewrites
 	}
 	if len(next.Headers) > 0 {
-		opts["headers"] = next.Headers
+		opts["headers"] = next.headersValue()
 	}
-	if len(next.Images) > 0 {
-		opts["images"] = next.Images
+	if v := next.imagesValue(); v != nil {
+		opts["images"] = v
 	}
 	if len(next.Site) > 0 {
 		opts["site"] = next.Site
@@ -423,8 +469,14 @@ func configJSON(entry string, next nextConfigData) []byte {
 	if len(next.OutputFileTracingIncludes) > 0 {
 		opts["outputFileTracingIncludes"] = next.OutputFileTracingIncludes
 	}
-	if ssr := ssrRuntimes(next); ssr != nil {
-		opts["ssr"] = ssr
+	if next.OutputFileTracingRoot != "" {
+		opts["outputFileTracingRoot"] = next.OutputFileTracingRoot
+	}
+	if next.DeployTarget != "" {
+		opts["deploy"] = map[string]any{"target": next.DeployTarget}
+	}
+	if next.MiddlewareRuntime != "" {
+		opts["ssr"] = map[string]any{"middlewareRuntime": next.MiddlewareRuntime}
 	}
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
@@ -432,7 +484,16 @@ func configJSON(entry string, next nextConfigData) []byte {
 	enc.SetIndent("", "  ")
 	_ = enc.Encode(opts)
 	body := strings.TrimRight(buf.String(), "\n")
-	return []byte("import { defineConfig } from '@krate/core';\n\nexport default defineConfig(" + body + ");\n")
+	pieces := next.codePieces()
+	if len(pieces) == 0 {
+		return []byte("import { defineConfig } from '@krate/core';\n\nexport default defineConfig(" + body + ");\n")
+	}
+	body = expandCodeMarkers(body, pieces)
+	head := "import { defineConfig } from '@krate/core';\n\n"
+	if pre := next.Preamble.build(activeTexts(pieces)); pre != "" {
+		head = "import { defineConfig } from '@krate/core';\n" + pre + "\n\n"
+	}
+	return []byte(head + "export default defineConfig(" + body + ");\n")
 }
 
 func staticStringMap(e ast.Expr) (map[string]string, bool) {
@@ -484,20 +545,4 @@ func compressValue(next nextConfigData) map[string]any {
 		return nil
 	}
 	return map[string]any{"brotli": true, "gzip": true}
-}
-
-// ssrRuntimes is the ssr block of the generated config: the middleware and
-// API runtimes the migration chose, or nil.
-func ssrRuntimes(next nextConfigData) map[string]any {
-	ssr := map[string]any{}
-	if next.MiddlewareRuntime != "" {
-		ssr["middlewareRuntime"] = next.MiddlewareRuntime
-	}
-	if next.APIRuntime != "" {
-		ssr["apiRuntime"] = next.APIRuntime
-	}
-	if len(ssr) == 0 {
-		return nil
-	}
-	return ssr
 }

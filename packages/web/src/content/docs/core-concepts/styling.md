@@ -366,11 +366,27 @@ is shipped as written.
 ## Global CSS & code splitting
 
 Plain CSS imported or referenced in pages is collected per page, in source and
-import order, and written as **one stylesheet per page** to a content-hashed
-`styles.<hash>.css`. Pages whose stylesheets are byte-identical share a single
-file, so a layout-only site ships one stylesheet. Rules are never reordered or
-moved between files, so the cascade you wrote is the cascade that ships, and
-`@layer` blocks are preserved as authored. See
+import order, and **split by source**: the syntax-highlighting sheet, each
+layout, theme and component stylesheet, and the page's own CSS are written as
+content-hashed `styles.<hash>.css` files that every page using them shares. A
+docs theme is downloaded once and cached across all docs pages, instead of
+being repeated inside a different combined file per page. Sources that the same
+pages always use together are one file, a small source joins a neighbour that
+is used on nearly the same pages, and a page links at most five stylesheets
+besides the site-global Tailwind one. The files are linked in source order and
+rules are never reordered, so the cascade you wrote is the cascade that ships,
+and `@layer` blocks are preserved as authored. `krate dev` writes one stylesheet
+per page.
+
+A package that declares `"sideEffects"` in its `package.json` ships the CSS of a
+module only when that module is used. With `"sideEffects": false`, or a list of
+the files that do have side effects such as `["*.css"]`, a stylesheet that a
+component module imports is shipped only if the page imports that component (or
+names it), even through a barrel that re-exports every component: importing
+`Card` from `@krate/components` brings `card.css`, not the CSS of all 50
+components. A package without the field keeps every stylesheet its modules
+import. A component that renders another component's classes should import that
+stylesheet itself. See
 [Contributing -> Architecture](/docs/contributing/architecture/#css-pipeline) for
 the full processing steps.
 

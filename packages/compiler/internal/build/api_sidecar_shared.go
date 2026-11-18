@@ -182,6 +182,30 @@ async function krateLoadMiddleware() {
     console.error('[krate] middleware load error: ' + ((e && e.stack) || e));
   }
 }
+// krateRunInstrumentation runs register() of the app's instrumentation module
+// exactly once per server start: in the primary process only, before the
+// sidecar forks cluster workers or listens, so a worker never runs it.
+// A cluster worker has cluster.isWorker set (the Bun script has no cluster). A rejection is logged with its
+// stack and ends the process (non-zero), as a failing register() ends next
+// start; the host restarts the sidecar with backoff.
+const KRATE_INSTRUMENTATION_PATH = process.argv[6] ? path.resolve(process.argv[6]) : '';
+async function krateRunInstrumentation() {
+  if (!KRATE_INSTRUMENTATION_PATH || (typeof cluster !== 'undefined' && cluster.isWorker)) return;
+  // A register() that never settles must keep the process (and so the
+  // not-ready state) alive instead of letting Node exit with code 13.
+  const keepAlive = setInterval(() => {}, 1 << 30);
+  try {
+    const mod = await import(pathToFileURL(KRATE_INSTRUMENTATION_PATH).href);
+    const register = typeof mod.register === 'function' ? mod.register
+      : (mod.default && typeof mod.default.register === 'function' ? mod.default.register : null);
+    if (register) await register();
+  } catch (e) {
+    console.error('[krate] ` + instrumentationFailureMessage + `' + ((e && e.stack) || e));
+    process.exit(1);
+  } finally {
+    clearInterval(keepAlive);
+  }
+}
 // krateMiddlewareJSON converts a middleware return value into the envelope the
 // Go host understands: continue (passthrough / rewrite) or a response.
 async function krateMiddlewareJSON(result) {

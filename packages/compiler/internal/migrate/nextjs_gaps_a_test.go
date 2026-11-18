@@ -133,24 +133,77 @@ func TestUnmigratedRootSourcesAreListed(t *testing.T) {
 	}
 }
 
-func TestInstrumentationFilesAreManual(t *testing.T) {
+func TestInstrumentationFilesAreKeptAndFolded(t *testing.T) {
 	root := gapsProject(t, map[string]string{
-		"src/app/page.tsx":              `export default function P() { return <main/>; }`,
-		"src/instrumentation.ts":        `export async function register() { await import("./instrumentation-node"); }`,
-		"src/instrumentation-node.ts":   `export const x = 1;`,
+		"src/app/page.tsx": `export default function P() { return <main/>; }`,
+		"src/instrumentation.ts": `export async function register() {
+  if (process.env.NEXT_RUNTIME === 'nodejs') { await import("./instrumentation-node"); }
+  if (process.env.NEXT_RUNTIME === "edge") { await import("./instrumentation-edge"); }
+  if (process.env.NEXT_RUNTIME !== 'edge') { console.log("node side"); }
+  if ("nodejs" !== process.env.NEXT_RUNTIME) { console.log("not node"); }
+}`,
+		"src/instrumentation-node.ts":   `export const x = process.env.NEXT_RUNTIME === 'nodejs' ? 1 : 2;`,
 		"src/instrumentation-client.ts": `export const y = 1;`,
 	})
 	rep, err := ScanNext(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, src := range []string{"src/instrumentation.ts", "src/instrumentation-node.ts", "src/instrumentation-client.ts"} {
-		if !hasManual(rep, src, "instrumentation file") {
-			t.Errorf("%s not listed as manual: %+v", src, rep.Manual)
+	inst := findPlan(rep, "src/instrumentation.ts")
+	if inst == nil {
+		t.Fatalf("instrumentation.ts must be planned in place: %+v", rep.Files)
+	}
+	got := string(inst.Content)
+	for _, want := range []string{"if (true) { await import(\"./instrumentation-node\")", "if (false) { await import(\"./instrumentation-edge\")", "if (true) { console.log(\"node side\")", "if (false) { console.log(\"not node\")"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
 		}
 	}
-	if !hasManualHint(rep, "src/instrumentation.ts", "register()") {
-		t.Errorf("instrumentation hint should mention register(): %+v", rep.Manual)
+	if strings.Contains(got, "NEXT_RUNTIME") {
+		t.Errorf("NEXT_RUNTIME left in:\n%s", got)
+	}
+	if node := findPlan(rep, "src/instrumentation-node.ts"); node == nil || !strings.Contains(string(node.Content), "= true ? 1 : 2") {
+		t.Errorf("instrumentation-node.ts not folded: %+v", node)
+	}
+	for _, src := range []string{"src/instrumentation.ts", "src/instrumentation-node.ts"} {
+		if hasManual(rep, src, "") {
+			t.Errorf("%s must not be a manual item: %+v", src, rep.Manual)
+		}
+	}
+	if !hasManual(rep, "src/instrumentation-client.ts", "instrumentation-client") {
+		t.Errorf("instrumentation-client must stay manual: %+v", rep.Manual)
+	}
+}
+
+func TestInstrumentationOnRequestErrorIsManual(t *testing.T) {
+	for name, src := range map[string]string{
+		"function": `export async function register() {}
+export async function onRequestError(err: unknown) {}`,
+		"const":  "export const onRequestError = async () => {};",
+		"braces": "async function onRequestError() {}\nexport { onRequestError };",
+	} {
+		root := gapsProject(t, map[string]string{
+			"app/page.tsx":       `export default function P() { return <main/>; }`,
+			"instrumentation.ts": src,
+		})
+		rep, err := ScanNext(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !hasManual(rep, "instrumentation.ts", "onRequestError") {
+			t.Errorf("%s: onRequestError must be a manual item: %+v", name, rep.Manual)
+		}
+	}
+	root := gapsProject(t, map[string]string{
+		"app/page.tsx":       `export default function P() { return <main/>; }`,
+		"instrumentation.ts": `export function register() {}`,
+	})
+	rep, err := ScanNext(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasManual(rep, "instrumentation.ts", "") {
+		t.Errorf("plain register() needs no manual item: %+v", rep.Manual)
 	}
 }
 
@@ -510,34 +563,69 @@ export async function proxy(request: Request) {
 	}
 }
 
-// Route handlers that declared runtime = 'nodejs' keep Node: the migration
-// sets ssr.apiRuntime "node" instead of claiming routes already run on Node.
-func TestNodeRuntimeRoutesSelectTheNodeAPIRuntime(t *testing.T) {
-	for _, declared := range []bool{true, false} {
-		decl := ""
-		if declared {
-			decl = "export const runtime = 'nodejs';\n"
-		}
-		root := gapsProject(t, map[string]string{
-			"src/app/page.tsx":           `export default function P() { return <main/>; }`,
-			"src/app/api/embed/route.ts": decl + "export async function GET() { return new Response(Buffer.from('x')); }\n",
-			"src/app/api/edge/route.ts":  "export const runtime = 'edge';\nexport async function GET() { return new Response('e'); }\n",
-		})
-		rep, err := ScanNext(root)
-		if err != nil {
-			t.Fatal(err)
-		}
-		cfg := findPlan(rep, "krate.config.ts")
-		hasNode := cfg != nil && strings.Contains(string(cfg.Content), `"apiRuntime": "node"`)
-		if hasNode != declared {
-			t.Errorf("declared=%v: apiRuntime node in config = %v: %+v", declared, hasNode, cfg)
-		}
-		warns := strings.Join(rep.Warnings, "\n")
-		if strings.Contains(warns, "Krate API routes run on Node") {
-			t.Errorf("misleading runtime warning: %s", warns)
-		}
-		if declared && !strings.Contains(warns, `sets ssr.apiRuntime to "node"`) {
-			t.Errorf("declared=%v: the warning does not say the API runtime is node: %s", declared, warns)
-		}
+func TestStrandedTestImportsFollowProxyToMiddleware(t *testing.T) {
+	root := gapsProject(t, map[string]string{
+		"src/app/page.tsx": `export default function P() { return <main/>; }`,
+		"src/proxy.ts": `import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
+export async function proxy(request: NextRequest) { return NextResponse.next(); }
+export const config = { matcher: ["/((?!api).*)"] };
+`,
+		"src/proxy.test.ts": `import { describe, expect, it, vi } from 'vitest';
+import { proxy } from './proxy';
+import { config } from "@/proxy";
+vi.mock('./proxy', () => ({}));
+it('x', () => { expect(proxy).toBeTypeOf('function'); expect(config).toBeTruthy(); });
+`,
+		"src/lib/helper.ts":  `import { proxy } from '../proxy';\nexport const h = proxy;\n`,
+		"src/lib/orphan.ts":  `import page from '../app/page';\nexport default page;\n`,
+		"src/lib/fine.ts":    `import { h } from './helper';\nexport default h;\n`,
+		"src/app/unused.txt": "x",
+		"tsconfig.json":      `{"compilerOptions":{"baseUrl":".","paths":{"@/*":["src/*"]}}}`,
+	})
+	rep, err := ScanNext(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	test := findPlan(rep, "src/proxy.test.ts")
+	if test == nil || test.Kind != KindModule {
+		t.Fatalf("proxy.test.ts not rewritten in place: %+v", rep.Files)
+	}
+	body := string(test.Content)
+	if strings.Contains(body, "'./proxy'") || strings.Contains(body, `"@/proxy"`) || strings.Count(body, "./middleware") != 3 {
+		t.Errorf("proxy specifiers were not repointed:\n%s", body)
+	}
+	if h := findPlan(rep, "src/lib/helper.ts"); h == nil || !strings.Contains(string(h.Content), "../middleware") {
+		t.Errorf("helper import not repointed: %+v", h)
+	}
+	if findPlan(rep, "src/lib/fine.ts") != nil {
+		t.Errorf("an unaffected importer must not be rewritten")
+	}
+	mw := string(findPlan(rep, "src/middleware.ts").Content)
+	if !strings.Contains(mw, "export { middleware as proxy };") {
+		t.Errorf("middleware does not export the proxy alias:\n%s", mw)
+	}
+	if !hasManual(rep, "src/proxy.test.ts", "imports config") {
+		t.Errorf("config import not reported: %+v", rep.Manual)
+	}
+	// the page moves to src/pages/index.tsx: a direct replacement
+	orphan := findPlan(rep, "src/lib/orphan.ts")
+	if orphan == nil || !strings.Contains(string(orphan.Content), "../pages/index") {
+		t.Errorf("route import not repointed: %+v", orphan)
+	}
+}
+
+func TestStrandedImportOfUnmigratedFileIsManual(t *testing.T) {
+	root := gapsProject(t, map[string]string{
+		"src/app/page.tsx":  `export default function P() { return <main/>; }`,
+		"src/app/notes.txt": `hello`,
+		"src/lib/uses.ts":   "import notes from '../app/notes.txt?raw';\nimport raw from '../app/notes.txt';\nexport default [notes, raw];\n",
+	})
+	rep, err := ScanNext(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasManual(rep, "src/lib/uses.ts", "imports ../app/notes.txt, which is not migrated") {
+		t.Errorf("import of an unmigrated moved file not reported: manual=%+v", rep.Manual)
 	}
 }

@@ -265,14 +265,12 @@ func TestMovedAppFilesReferencedByWorkspaceSiblingAreReported(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	found := false
-	for _, m := range rep.Manual {
-		if strings.Contains(m.Reason, "packages/static-site/src/styles.css:2") && strings.Contains(m.Reason, "src/migrated/app/tokens.css") {
-			found = true
-		}
+	stub := findPlan(rep, "src/app/tokens.css")
+	if stub == nil || stub.Kind != KindStub || !strings.Contains(string(stub.Content), "@import '../migrated/app/tokens.css';") {
+		t.Fatalf("no stub for the sibling stylesheet's reference: %+v", rep.Files)
 	}
-	if !found {
-		t.Fatalf("sibling stylesheet reference not reported: %+v", rep.Manual)
+	if !hasInfo(rep, "because packages/static-site/src/styles.css:2 references it") {
+		t.Fatalf("sibling stylesheet reference not reported: %v", rep.Info)
 	}
 }
 

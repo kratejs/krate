@@ -47,20 +47,19 @@ import {
   compileMatcher,
   extName,
   goRedirect,
-  headerSourceMatches,
+  IMMUTABLE_CACHE_CONTROL,
   isDynamicPattern,
   isFileLikePath,
   isHTMLDocRequest,
   isInternalOutputPath,
-  matchRedirect,
   matchRoutePattern,
   normalizeRoutePattern,
   requestRoute,
-  rewriteDestination,
   rewriteTargetPath,
   staticCacheControl,
 } from "./handler-routing.js";
 import { attachCookies } from "./request-extras.js";
+import { buildDestination, compileMatcher as compileRuleMatcher, mergeRequestQuery, type RouteCondition, type RouteMatcher } from "./route-source.js";
 import {
   lookupSegmentPage,
   newServerError,
@@ -95,9 +94,9 @@ export interface HandlerConfig {
   maxBodyBytes: number;
   /** Request body cap for API routes and actions, bytes. */
   maxAPIBodyBytes: number;
-  redirects: Array<{ source: string; destination: string; permanent?: boolean; statusCode?: number; basePath?: boolean }>;
-  rewrites: Array<{ source: string; destination: string }>;
-  headers: Array<{ source: string; headers: Record<string, string> }>;
+  redirects: Array<{ source: string; destination: string; permanent?: boolean; statusCode?: number; has?: RouteCondition[]; missing?: RouteCondition[]; basePath?: boolean }>;
+  rewrites: Array<{ source: string; destination: string; has?: RouteCondition[]; missing?: RouteCondition[] }>;
+  headers: Array<{ source: string; headers: Record<string, string> | Array<{ key: string; value: string }>; has?: RouteCondition[]; missing?: RouteCondition[] }>;
   /** Resolved security headers; an empty string means "do not send". */
   security: { nosniff: boolean; frameOptions: string; referrerPolicy: string; permissionsPolicy: string; hsts: string; csp: string };
   cors: { enabled: boolean; origins: string[]; methods: string[]; headers: string[]; credentials: boolean; maxAge: number };
@@ -304,6 +303,21 @@ function safeDecode(p: string): string {
   } catch {
     return p;
   }
+}
+
+/**
+ * The name/value pairs of a headers rule: an object, or Next's array of
+ * { key, value } where a repeated name (any case) keeps its last value.
+ */
+export function ruleHeaderPairs(h: Record<string, string> | Array<{ key: string; value: string }>): Array<[string, string]> {
+  if (!Array.isArray(h)) return Object.entries(h);
+  const out: Array<[string, string]> = [];
+  for (const { key, value } of h) {
+    const at = out.findIndex(([k]) => k.toLowerCase() === String(key).toLowerCase());
+    if (at >= 0) out.splice(at, 1);
+    out.push([String(key), String(value)]);
+  }
+  return out;
 }
 
 /** The mutable per-request state: the request as the Go handlers see it, plus the response headers. */
@@ -1295,14 +1309,40 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
 
   // Under a base path, basePath: false rules match the full path before the
   // base is stripped (see handle) and stay out of this list.
-  const insideRedirects = basePath ? cfg.redirects.filter((rd) => rd.basePath !== false) : cfg.redirects;
-  const outsideRedirects = basePath ? cfg.redirects.filter((rd) => rd.basePath === false) : [];
+  interface CompiledRule<T> {
+    rule: T;
+    matcher: RouteMatcher;
+  }
+  function compileRules<T extends { source: string; has?: RouteCondition[]; missing?: RouteCondition[] }>(rules: T[], kind: "redirect" | "rewrite" | "header"): Array<CompiledRule<T>> {
+    const out: Array<CompiledRule<T>> = [];
+    for (const rule of rules) {
+      try {
+        out.push({ rule, matcher: compileRuleMatcher(rule.source, kind, rule.has, rule.missing) });
+      } catch (err) {
+        console.error(`[krate] skipped ${kind} rule ${JSON.stringify(rule.source)}: ${(err as Error).message}`);
+      }
+    }
+    return out;
+  }
+  const insideRedirects = compileRules(basePath ? cfg.redirects.filter((rd) => rd.basePath !== false) : cfg.redirects, "redirect");
+  const outsideRedirects = compileRules(basePath ? cfg.redirects.filter((rd) => rd.basePath === false) : [], "redirect");
+  const rewriteRules = compileRules(cfg.rewrites, "rewrite");
+  const headerRules = compileRules(cfg.headers, "header");
 
-  function configRedirect(rs: ReqState, p: string, rules: HandlerConfig["redirects"]): Response | null {
-    for (const rd of rules) {
-      if (matchRedirect(p, rd.source)) {
-        const dest = rewriteDestination(p, rd.source, rd.destination);
-        return goRedirect(dest, p, rs.method, rd.statusCode || (rd.permanent ? 301 : 302), rs.res);
+  function condRequest(rs: ReqState): { headers: Headers; url: URL } {
+    return { headers: rs.headers, url: new URL(rs.request.url) };
+  }
+
+  /** Answers the first redirect whose source and conditions match; the request query is carried over. */
+  function configRedirect(rs: ReqState, p: string, rules: Array<CompiledRule<HandlerConfig["redirects"][number]>>): Response | null {
+    if (!rules.length) return null;
+    const creq = condRequest(rs);
+    for (const { rule, matcher } of rules) {
+      const m = matcher.match(p, creq);
+      if (m) {
+        const dest = mergeRequestQuery(buildDestination(rule.destination, m), rs.search);
+        const status = rule.statusCode || (rule.permanent ? 301 : 302);
+        return goRedirect(dest, p, rs.method, status, rs.res);
       }
     }
     return null;
@@ -1319,15 +1359,28 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
 
   async function redirectRewriteHandler(rs: ReqState): Promise<Response> {
     const p = rs.path;
-    const redirected = configRedirect(rs, p, insideRedirects);
-    if (redirected) return redirected;
-    for (const rw of cfg.rewrites) {
-      if (matchRedirect(p, rw.source)) {
-        const rewritten = rewriteDestination(p, rw.source, rw.destination);
+    if (rewriteRules.length) {
+      const creq = condRequest(rs);
+      for (const { rule, matcher } of rewriteRules) {
+        const m = matcher.match(p, creq);
+        if (!m) continue;
+        let rewritten = buildDestination(rule.destination, m);
+        let rewrittenQuery = "";
+        const q = rewritten.indexOf("?");
+        if (q >= 0) {
+          rewrittenQuery = rewritten.slice(q);
+          rewritten = rewritten.slice(0, q);
+        }
         rs.path = rewriteTargetPath(safeDecode(rewritten));
+        if (rewrittenQuery) {
+          const merged = mergeRequestQuery(rewrittenQuery, rs.search);
+          rs.search = merged === "?" ? "" : merged;
+        }
         break;
       }
     }
+    // A rewrite onto an API route is answered by the API handler (mux sent this request down the page chain).
+    if (rs.path === "/api" || rs.path.startsWith("/api/")) return apiHandler(rs);
     return pageHandler(rs);
   }
 
@@ -2156,6 +2209,11 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
 
   async function mux(rs: ReqState): Promise<Response> {
     const p = rs.path;
+    // Config redirects answer first: before middleware, and for /api too.
+    if (!(p.startsWith("/__krate/") || p === "/healthz" || p === "/readyz")) {
+      const redirected = configRedirect(rs, p, insideRedirects);
+      if (redirected) return redirected;
+    }
     // net/http.ServeMux cleans the escaped path and redirects when it changed.
     const raw = rs.rawPath;
     const cleaned = cleanPath(raw) + (raw.endsWith("/") && raw !== "/" ? "/" : "");
@@ -2199,9 +2257,30 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     if (sec.permissionsPolicy) h.set("Permissions-Policy", sec.permissionsPolicy);
     if (sec.hsts) h.set("Strict-Transport-Security", sec.hsts);
     if (sec.csp) h.set("Content-Security-Policy", sec.csp);
-    for (const rule of cfg.headers) {
-      if (headerSourceMatches(rule.source, rs.path)) for (const [k, v] of Object.entries(rule.headers)) h.set(k, v);
+  }
+
+  /**
+   * Applies the matching headers rules to the finished response, so they win
+   * over a header a handler set (a file's Cache-Control) except the immutable
+   * Cache-Control of a content-hashed asset.
+   */
+  function withHeaderRules(rs: ReqState, path: string, res: Response): Response {
+    if (!headerRules.length) return res;
+    const creq = condRequest(rs);
+    let headers: Headers | null = null;
+    for (const { rule, matcher } of headerRules) {
+      if (!matcher.match(path, creq)) continue;
+      headers ??= new Headers(res.headers);
+      const keepCache = headers.get("cache-control") === IMMUTABLE_CACHE_CONTROL;
+      for (const [k, v] of ruleHeaderPairs(rule.headers)) {
+        if (keepCache && k.toLowerCase() === "cache-control") continue;
+        if (k.toLowerCase() === "vary") {
+          if (!(headers.get("vary") || "").toLowerCase().includes(v.toLowerCase())) headers.append("Vary", v);
+        } else headers.set(k, v);
+      }
     }
+    if (!headers) return res;
+    return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
   }
 
   /** corsMiddleware; returns a Response for a preflight. */
@@ -2252,6 +2331,8 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
       origin: requestOrigin(request, url),
       ctx,
     };
+    let headerPath = rs.path;
+    const finalize = (res: Response): Response => withHeaderRules(rs, headerPath, res);
     try {
       // Mount under the base path: requests outside it redirect (GET/HEAD) or 404.
       // The app then sees base-less paths, so a root-relative Location it
@@ -2277,18 +2358,19 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
         }
       }
       applySecurityAndHeaders(rs);
+      headerPath = rs.path;
       const preflight = applyCORS(rs);
-      if (preflight) return mounted ? withBaseLocation(preflight) : preflight;
+      if (preflight) return finalize(mounted ? withBaseLocation(preflight) : preflight);
       await sleepMicrotask();
       const res = await mux(rs);
-      return mounted ? withBaseLocation(res) : res;
+      return finalize(mounted ? withBaseLocation(res) : res);
     } catch (err) {
       console.error(`[krate] panic recovered: ${rs.method} ${rs.path}: ${(err && (err as any).stack) || err}`);
       if (rs.path.startsWith("/api/")) {
         rs.res.set("Content-Type", "application/json");
-        return finish(rs, 500, '{"error":"Internal Server Error"}');
+        return finalize(finish(rs, 500, '{"error":"Internal Server Error"}'));
       }
-      return httpError(rs, "Internal Server Error", 500);
+      return finalize(httpError(rs, "Internal Server Error", 500));
     }
   }
 }

@@ -86,7 +86,7 @@ func konvaProject(t *testing.T, handles string, extra map[string]string) string 
 }
 
 func TestMigrateReactKonvaToKrateKonva(t *testing.T) {
-	rep, err := ScanNextWithOptions(konvaProject(t, konvaHandles, nil), ScanOptions{UpdatePackage: true})
+	rep, err := ScanNextWithOptions(konvaProject(t, konvaHandles, nil), ScanOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +140,7 @@ func TestMigrateReactKonvaToKrateKonva(t *testing.T) {
 }
 
 func TestMigrateReactKonvaWithoutPackageUpdateAsksForDependency(t *testing.T) {
-	rep, err := ScanNext(konvaProject(t, konvaHandles, nil))
+	rep, err := ScanNextWithOptions(konvaProject(t, konvaHandles, nil), ScanOptions{NoUpdatePackage: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +151,7 @@ func TestMigrateReactKonvaWithoutPackageUpdateAsksForDependency(t *testing.T) {
 
 func TestMigrateReactKonvaCoreEntry(t *testing.T) {
 	handles := strings.Replace(konvaHandles, `from 'react-konva'`, `from 'react-konva/lib/ReactKonvaCore'`, 1)
-	rep, err := ScanNextWithOptions(konvaProject(t, handles, nil), ScanOptions{UpdatePackage: true})
+	rep, err := ScanNextWithOptions(konvaProject(t, handles, nil), ScanOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +194,7 @@ func TestMigrateReactKonvaKeepsReactKonvaForUnsupportedAPIs(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			rep, err := ScanNextWithOptions(konvaProject(t, tc.handles, tc.extra), ScanOptions{UpdatePackage: true})
+			rep, err := ScanNextWithOptions(konvaProject(t, tc.handles, tc.extra), ScanOptions{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -223,7 +223,7 @@ func TestMigrateReactKonvaLeavesProjectsWithoutReactKonvaAlone(t *testing.T) {
 	root := gapsProject(t, map[string]string{
 		"src/app/page.tsx": "import Konva from 'konva';\nexport default function P() { return <p>{Konva.version}</p>; }\n",
 	})
-	rep, err := ScanNextWithOptions(root, ScanOptions{UpdatePackage: true})
+	rep, err := ScanNextWithOptions(root, ScanOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

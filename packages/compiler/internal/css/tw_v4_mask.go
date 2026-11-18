@@ -68,6 +68,11 @@ func maskUtility(cls string, neg bool, theme TailwindTheme) (string, bool) {
 		return "", false
 	}
 	if neg {
+		for _, kind := range []string{"linear", "conic"} {
+			if v, isArb := unwrapArbitrary(strings.TrimPrefix(cls, "mask-"+kind+"-")); isArb && strings.HasPrefix(cls, "mask-"+kind+"-") {
+				return maskCompose + " --tw-mask-" + kind + ": " + kind + "-gradient(var(--tw-mask-" + kind + "-stops, var(--tw-mask-" + kind + "-position))); --tw-mask-" + kind + "-position: calc(" + v + " * -1);", true
+			}
+		}
 		return maskAngle(cls, true)
 	}
 	if css, ok := maskStatic[cls]; ok {
@@ -107,6 +112,9 @@ func maskUtility(cls string, neg bool, theme TailwindTheme) (string, bool) {
 				return "--tw-mask-radial-position: " + strings.ReplaceAll(p, "-", " ") + ";", true
 			}
 		}
+		if v, _, isArb := arbitraryValue(k); isArb {
+			return "--tw-mask-radial-position: " + v + ";", true
+		}
 		return "", false
 	}
 	if k, ok := strings.CutPrefix(rest, "radial-"); ok {
@@ -127,8 +135,14 @@ func maskUtility(cls string, neg bool, theme TailwindTheme) (string, bool) {
 	if css, ok := maskStopUtility(rest, theme); ok {
 		return css, true
 	}
-	// mask-[<image>] and mask-(--var)
-	if v, hint, isArb := arbitraryValue(rest); isArb && (hint == "" || hint == "image" || hint == "url") {
+	// mask-[<image>], mask-[<position>], mask-[<size>] and mask-(--var)
+	if v, typ, isArb := arbType(rest, "image", "percentage", "position", "bg-size", "length", "url"); isArb {
+		switch typ {
+		case "percentage", "position":
+			return "mask-position: " + v + ";", true
+		case "bg-size", "length", "size":
+			return "mask-size: " + v + ";", true
+		}
 		return "mask-image: " + v + ";", true
 	}
 	return "", false
@@ -212,8 +226,22 @@ func maskStopValue(key string, theme TailwindTheme) (maskStop, bool) {
 			return maskStop{"position", v}, true
 		}
 	}
-	if inner, hint, isArb := arbitraryValue(key); isArb && (hint == "length" || hint == "percentage" || (hint == "" && (looksLikeLength(inner) || isVarOnly(inner)))) {
-		return maskStop{"position", inner}, true
+	if base, mod := splitColorModifier(key); isArbitrary(base) {
+		v, typ, _ := arbType(base, "length", "percentage", "color")
+		switch typ {
+		case "color":
+			c, ok := arbColor(key)
+			return maskStop{"color", c}, ok
+		case "percentage":
+			// Tailwind takes only a whole-number percentage here.
+			if mod != "" || !isDigits(strings.TrimSuffix(v, "%")) {
+				return maskStop{}, false
+			}
+		}
+		if mod != "" {
+			return maskStop{}, false
+		}
+		return maskStop{"position", v}, true
 	}
 	if c, ok := colorOf(key, theme); ok {
 		return maskStop{"color", c}, true

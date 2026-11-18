@@ -109,6 +109,7 @@ type Bundler struct {
 	seen              map[string]bool
 	order             []*Module
 	css               []string
+	cssSrc            []string // source file of each css entry
 	cssModules        map[string]*CSSModuleInfo
 	cssDeps           map[string]bool
 	assets            map[string]string // resolved source path -> hashed site URL
@@ -502,6 +503,7 @@ func (b *Bundler) Bundle(entry string) (*Bundle, error) {
 	b.seen = make(map[string]bool)
 	b.order = nil
 	b.css = nil
+	b.cssSrc = nil
 	b.cssModules = make(map[string]*CSSModuleInfo)
 	b.cssDeps = make(map[string]bool)
 	b.frontmatter = nil
@@ -514,6 +516,7 @@ func (b *Bundler) Bundle(entry string) (*Bundle, error) {
 		return nil, err
 	}
 	b.isolatePrivateNames()
+	b.pruneSideEffectFreeCSS()
 
 	// Rewrite CSS module member expressions (styles.card) to their hashed
 	// literal values now that all modules are resolved. Without this, both the
@@ -551,7 +554,7 @@ func (b *Bundler) Bundle(entry string) (*Bundle, error) {
 	return &Bundle{
 		EntryPath:      entry,
 		Modules:        b.order,
-		CSS:            strings.Join(b.css, "\n"),
+		CSS:            b.pageCSS(),
 		CSSModules:     b.cssModules,
 		CSSDeps:        sortedKeys(b.cssDeps),
 		AssetFiles:     b.assets,
@@ -1294,10 +1297,10 @@ func generateMDXBundleTSX(path string, compiled *markdown.Result, mcfg markdown.
 		}
 	}
 	if markdown.HasCodeSegments(segments) {
-		sb.WriteString("import { Code } from \"@krate/components\";\n")
+		sb.WriteString("import { Code } from \"@krate/components/code\";\n")
 	}
 	if markdown.HasAsideSegments(segments) {
-		sb.WriteString("import { Aside } from \"@krate/components\";\n")
+		sb.WriteString("import { Aside } from \"@krate/components/aside\";\n")
 	}
 	sb.WriteString("\nexport default function MDXContent() {\n")
 	sb.WriteString("  return (\n")

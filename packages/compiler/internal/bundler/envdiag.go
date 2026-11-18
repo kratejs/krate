@@ -7,8 +7,8 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
 )
 
-// PublicEnvPrefix names the environment variables that are inlined into client
-// code and static output.
+// PublicEnvPrefix is the default prefix of the environment variables that are
+// inlined into client code and static output (config.envPrefix can add more).
 const PublicEnvPrefix = "KRATE_PUBLIC_"
 
 // envRoot reports whether e is `process.env` or `import.meta.env`, returning
@@ -50,8 +50,9 @@ func (b *Bundler) envReadDiags(path, src string, prog *ast.Program, class Compon
 	lines := strings.Split(src, "\n")
 	var out []diag.Diagnostic
 	handled := map[*ast.MemberExpr]bool{}
-	report := func(pos ast.Pos, what string) {
+	report := func(pos ast.Pos, what, root, name string) {
 		d := diag.Diagnostic{
+			EnvRoot: root, EnvName: name,
 			File: path, Line: pos.Line, Col: pos.Col,
 			Severity: diag.SeverityWarning,
 			Message:  what + " is not exposed to the browser or to statically rendered output; it reads as undefined",
@@ -68,7 +69,7 @@ func (b *Bundler) envReadDiags(path, src string, prog *ast.Program, class Compon
 			return true
 		}
 		if root, isEnv := envRoot(m); isEnv {
-			report(m.Position, root)
+			report(m.Position, root, root, "")
 			return true
 		}
 		if root, isEnv := envRoot(m.Object); isEnv {
@@ -80,9 +81,9 @@ func (b *Bundler) envReadDiags(path, src string, prog *ast.Program, class Compon
 				name = lit.Value
 			}
 			if name == "" {
-				report(m.Position, root)
+				report(m.Position, root, root, "")
 			} else {
-				report(m.Position, root+"."+name)
+				report(m.Position, root+"."+name, root, name)
 			}
 		}
 		return true

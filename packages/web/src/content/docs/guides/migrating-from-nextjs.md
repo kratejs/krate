@@ -56,18 +56,35 @@ krate migrate nextjs --report migration-report.json
 ```
 
 The dry run marks every file that already exists (`tsconfig.json`,
-`middleware.ts`, `package.json`, ...) and says so at the end: `--apply` then
-needs `--force`. The originals are backed up first and `krate migrate rollback`
-restores them.
+`middleware.ts`, ...) and says so at the end: `--apply` then needs `--force`.
+The originals are backed up first and `krate migrate rollback` restores them.
 
-Add `--update-package` to also add `krate` scripts and `@krate/*` dependencies
-(pinned to the version of the compiler you run) and `preact` to `package.json`;
-`package.json` already exists, so pair it with `--force`. The plan lists each
-script it replaces and each dependency it adds or keeps (`next typegen` in any
-script becomes `krate types`). The key order of `package.json` and
-`tsconfig.json` is kept, and Next's TypeScript plugin is removed from
-`tsconfig.json`. Next.js dependencies are left in place until the migrated app
-builds cleanly.
+The migration also updates `package.json` (it is backed up like every other
+file, so it never needs `--force`; pass `--no-update-package` to leave it alone,
+and `--update-package` is still accepted). The plan lists each change:
+
+- `dev` becomes `krate dev`; `build` and `start` become the commands for the
+  deploy target (`krate build` and `krate start`, or `krate deploy` and
+  `node dist/.krate/server/.../server.mjs` for `output: 'standalone'`). Other
+  scripts keep their text with `next <command>` rewritten the same way:
+  `next typegen` becomes `krate types`, and a `next lint` or other command Krate has no
+  equivalent for stays, with an info line, and keeps `next` installed.
+- Every `@krate/*` package the migrated code imports is added (`@krate/core`,
+  `@krate/runtime`, `@krate/components`, and `@krate/auth`, `@krate/three` or
+  `@krate/konva` when the code now uses them), plus `preact`. A release of the
+  compiler writes `^<version>` of each package, taken from a table generated from
+  the packages (`@krate/three` and `@krate/konva` version on their own). A
+  development build of the compiler writes `link:` ranges to the packages of the
+  Krate checkout it runs from (found from `KRATE_BINARY` or the project's
+  `@krate/core`) and `latest`, with an info line, when there is none.
+- `next`, `next-auth` and `@next/env` are removed when no file left in the
+  project imports them. When one does (a test file, a script), the dependency
+  stays and the info line names the files. `react` and `react-dom` stay: the
+  Preact islands alias them.
+
+Installing is the one thing left to you: the migration prints the install
+command of your package manager (for pnpm, in the workspace root that holds
+`pnpm-workspace.yaml`). It never runs a network install or edits a lockfile.
 
 The first pass:
 
@@ -100,26 +117,67 @@ The first pass:
   prove static is reported as manual work on its own; the other keys still
   translate, and so does each rule: in a `headers()` array, the static entries
   translate while a computed one (a helper call, `value: compute()`) is reported
-  with its source path. A redirect, rewrite or header rule with `has` or `missing`
-  is never translated, because Krate matches on the path only and an
-  unconditional copy would apply to every request (a guarded `/store` redirect
-  would send `/store` away for everyone); each is reported with its source and
-  condition, and the hint points at `middleware.ts`. Identical duplicate rules in
-  the output are warned about. When headers could not be translated and the
-  config (or a local module it imports) mentions `Content-Security-Policy`,
-  `Strict-Transport-Security`, `X-Frame-Options` or similar, a separate item says
-  the security headers were not migrated. `krate.config.ts` can import a local
-  module, so a helper that builds static headers can be imported there; values
-  that depend on the request, such as a CSP nonce, belong in `middleware.ts`.
-  Every other `next.config` key gets its own item with a hint instead of one
-  generic warning: `transpilePackages`, `output: 'standalone'`, computed
-  `images.remotePatterns` or `env`, `experimental` flags, and a
+  with its source path. `has` and `missing` conditions
+  (query, header, cookie, host) translate to the same conditions in the Krate
+  config, and a redirect is written with `statusCode: 308` for `permanent: true`
+  and `307` for `false`, the statuses Next sends. Next sources keep their syntax,
+  including a leading negative lookahead in a parameter such as
+  `/store/:slug((?!compare$)[^/]+)`. A redirect whose regex Go's RE2 engine
+  cannot run (lookbehind, a backreference) is written as a marked block
+  (`// krate migrate: next.config redirects[i]`) at the start of the middleware
+  function, creating `middleware.ts` when there is none, and an info line says
+  so; a rewrite or header rule like that, or a middleware whose signature cannot
+  be edited safely, is reported as manual work. Identical duplicate rules in
+  the output are warned about. Header rules and `images.remotePatterns`
+  entries that are built in code are carried over as code: a `headers()` that
+  returns `[{ source: '/:path*', headers: securityHeaders }, ...buildCacheRules()]`,
+  where `securityHeaders` is a top-level const computed by an imported helper,
+  and a `remotePatterns` list that an `if (process.env.X) { ...push(...) }`
+  extends. The migration copies next.config's top-level imports of local modules,
+  the consts the carried code depends on and the statements that change them into
+  `krate.config.ts`, and leaves out type-only imports, `import ... from 'next'`
+  and the `loadEnvConfig` call with its `@next/env` import (it is mapped to
+  `envDir`). The file stays plain JSON-shaped when every value is static. After
+  writing the plan the migration evaluates the new `krate.config.ts` with the real
+  config loader and your environment (the shell plus the `.env` files, as a
+  production build loads them). A rule that fails there, for example because a
+  helper imports `next/server`, is written as a comment with the error and a
+  manual item quotes it. The values are computed again each time Krate loads the
+  config, so `krate build`, `krate start` and `krate dev` each use their own
+  environment; `krate deploy --target node` bakes the build-time result, as Next
+  bakes `headers()` into its routes manifest. When the headers set security
+  headers but no `Strict-Transport-Security`, an info line notes that Krate also
+  sends HSTS for an https `baseUrl`; set `security.hsts: "off"` to match Next
+  exactly. `images.remotePatterns` keeps `protocol`, `port` and `search`.
+  Values that depend on the request, such as a CSP nonce, belong in
+  `middleware.ts`. Every other `next.config` key gets its own item with a hint
+  instead of one generic warning: computed `env`, `experimental` flags, and a
   `loadEnvConfig(...)` call whose path is not static. When the path is static
   (a literal, `path.resolve(__dirname, '../..')`, `join(process.cwd(), '..', '..')`,
   `fileURLToPath(new URL('../..', import.meta.url))`), the migration writes the
   matching `envDir` and there is no item. A static `serverExternalPackages` list and static
   `outputFileTracingIncludes` globs are carried over to the Krate keys of the
   same name (see [Self-hosting](/docs/guides/self-hosting/)); computed ones get an item.
+  `output: 'standalone'` becomes `deploy: { target: "node" }`; in the package update
+  the `build` script becomes `krate deploy` (it builds first, then bundles the
+  server) and `start` becomes `node dist/.krate/server/server.mjs`. A static
+  `outputFileTracingRoot` (`path.resolve(import.meta.dirname, '../..')` and the
+  `__dirname`, `process.cwd()` and `fileURLToPath` forms) becomes the
+  `outputFileTracingRoot` key, `start` points at
+  `dist/.krate/server/<project below the root>/server.mjs`, and
+  `outputFileTracingIncludes` globs that leave the project are carried over
+  verbatim when the root contains them (the route keys stay, but the node
+  output copies the union). A monorepo Docker image is an info line: build with
+  the node target and write the Dockerfile yourself.
+  `transpilePackages` is checked against the installed packages: when each one
+  resolves, to workspace source or a compiled package, the key is dropped with
+  an info line, because Krate needs no such setting. A package that does not
+  resolve gets a manual item that says whether it is not installed or its
+  `main`/`exports` point at a file that does not exist (build it first).
+  `turbopack.root` is dropped with an info line when it is the project, the
+  tracing root or the `envDir` root; `turbopack.resolveAlias` gets a hint to add
+  the aliases to tsconfig `paths`; `turbopack.rules` (webpack loaders) stays a
+  manual item.
   An `async` page keeps `async` and its wrapper is `async` too, so the
   page renders per request;
 - keeps `export const revalidate`, `dynamic` and `dynamicParams` on pages, which
@@ -202,8 +260,8 @@ The first pass:
   [`@krate/three`](/docs/features/three/) when every fiber and drei API the
   project's modules use is provided (drei's `OrbitControls`, `Environment` with
   `Lightformer` children or a `map`, and `useGLTF` come from `@krate/three/drei`),
-  and adds `@krate/three` to `package.json` (a manual item without
-  `--update-package`). The scene then runs on Krate, or on the Preact island of a
+  and adds `@krate/three` to `package.json` (a manual item with
+  `--no-update-package`). The scene then runs on Krate, or on the Preact island of a
   `"use client"` component, instead of a real-React island that ships React,
   react-dom and a second copy of the React libraries around the canvas. One
   unsupported API (another drei helper, `<Environment preset>`, fiber's
@@ -215,7 +273,7 @@ The first pass:
 - moves `react-konva` code to [`@krate/konva`](/docs/features/konva/) when every
   react-konva API the project's modules use is provided (Stage, the layers and
   shapes, Transformer, `useStrictMode`, `useContextBridge`), and adds
-  `@krate/konva` to `package.json` (a manual item without `--update-package`).
+  `@krate/konva` to `package.json` (a manual item with `--no-update-package`).
   Type imports from `konva` stay as they are. The canvas then runs on Krate, or
   on the Preact island of a `"use client"` component, instead of a real-React
   island. `KonvaRenderer`, an internal `react-konva/...` subpath or a package
@@ -266,23 +324,27 @@ The first pass:
   target (see [Timeouts](/docs/features/api-routes/#timeouts)). It must be a
   literal number; a computed value is reported as manual work. On a page it has
   no meaning and is dropped;
-- drops the other route segment config that only steers Vercel (`runtime`,
-  `preferredRegion`) with an info note per file and one aggregated warning.
-  Krate sets the API runtime for the whole app: when a route handler declared
-  `runtime = 'nodejs'`, the generated config sets `ssr.apiRuntime: "node"` so
-  every handler keeps running on Node, as it did on Next; otherwise the embedded
-  runtime serves them (a route that imports a Node built-in or native package
-  runs on Node automatically). `fetchCache` is kept and reported as one aggregated
+- keeps `export const runtime` in API routes: `'nodejs'` serves the route from
+  Node and `'edge'` keeps it on the embedded runtime. Without it, a route runs
+  on the embedded runtime unless its code (or a helper it imports) uses a Node
+  built-in, a native package or a Node-only global such as `Buffer`; then it
+  runs on Node automatically. `runtime` on a page and `preferredRegion` only
+  steer Vercel, so they are dropped with an info note per file and one
+  aggregated warning. `fetchCache` is kept and reported as one aggregated
   manual item (set the cache option on the `fetch` calls that relied on it);
 - creates `krate.config.ts` when the project has none, or merges missing
   Next-derived keys into an existing config (existing keys win);
 - merges/generates `tsconfig.json` for Krate JSX and route types;
-- renames reads of `process.env.NEXT_PUBLIC_NAME` (and the keys of static
-  `next.config` `env`) to `process.env.KRATE_PUBLIC_NAME`, the prefix Krate
-  inlines at build time. Values are never copied from `.env*` into the migrated
-  code, so development URLs and keys cannot ship by accident. One manual item
-  lists every variable to rename or set for the Krate build and which `.env`
-  files define it;
+- keeps reads of `process.env.NEXT_PUBLIC_NAME` as they are and writes
+  `envPrefix: ["KRATE_PUBLIC_", "NEXT_PUBLIC_"]` into `krate.config.ts`, so Krate
+  inlines them from the same `.env` files and build environment Next did. The
+  migration looks for their definitions next to the app, in the `envDir` that
+  `loadEnvConfig` points at and in `.env.example`, and prints one info line
+  (`defined in ../../.env.example: 4 of 4`); names it cannot find are listed there
+  and must come from the build environment. Variables that only a static
+  `next.config` `env` creates are renamed to `KRATE_PUBLIC_NAME`, and one manual
+  item lists them. Values are never copied from `.env*` into the migrated code, so
+  development URLs and keys cannot ship by accident;
 - moves the original Next.js route trees (`app/` or `src/app/`, and `pages/` when
   it was migrated) into the backup directory on `--apply`, after every file is
   written, so Krate does not compile them next to the migrated copies. The plan
@@ -300,15 +362,33 @@ The first pass:
   `cookies: { prefix: "authjs" }` is added so the existing `authjs.*` cookies and database
   sessions keep working. `handlers`, `auth`, `signIn` and `signOut` keep their names, so
   the `[...nextauth]` route, server actions and server components need no edits, and
-  `@auth/drizzle-adapter` is kept as is. `--update-package` adds `@krate/auth`. A provider,
+  `@auth/drizzle-adapter` is kept as is. The package update adds `@krate/auth` and removes `next-auth` once nothing imports it. A provider,
   option, callback, cookie override, `getToken`, `useSession` or `auth(handler)` wrapper
   with no `@krate/auth` equivalent is listed as manual work with what to do instead, and
   next-auth is never left to fail at run time as an unresolved import;
+- converts a `declare module 'next-auth'` augmentation of `Session` (`user: { ... } & DefaultSession['user']`)
+  or `User` into `declare module '@krate/auth'` with `SessionUserExtensions` or
+  `UserExtensions` (see [Typing extra session fields](/docs/features/authentication/#typing-extra-session-fields)).
+  The file is written as `krate-auth.d.ts` next to the original, which moves into the backup;
+  imports of your own types are kept and `DefaultSession` imports are dropped. Any other shape
+  (a `next-auth/jwt` module, a conditional type) is a manual item that quotes the declaration;
+- leaves a stub at the old path of a file that another workspace package references from outside the
+  project. A stylesheet that `packages/static-site/src/styles.css` imports as `../../web/src/app/tokens.css`
+  keeps its path as a file containing `@import` of the moved copy (Krate's CSS pipeline inlines nested
+  imports); a script or module becomes `export * from` the moved file (plus its default export). A file of
+  another type, such as an image, stays as a copy at the old path and is a manual item that names it. The
+  stubs are recorded in the backup manifest and `krate migrate rollback` removes them;
 - warns about script files at the project root and directly under `src/` that
   the plan neither copies nor rewrites (`auth.ts`, a stray `proxy.mjs`, ...), skipping
   `*.config.*`, `*.d.ts` and test files, so nothing is dropped without a trace;
-- lists `instrumentation.ts`, `instrumentation-*.ts` as manual work: Krate has no
-  server startup hook that calls `register()`.
+- keeps `instrumentation.ts` and `instrumentation-*.ts` where they are: Krate calls
+  `register()` once per server start (see
+  [Instrumentation](/docs/guides/self-hosting/#instrumentation)). The migrator folds
+  `process.env.NEXT_RUNTIME === "nodejs"` to `true` and `=== "edge"` to `false` in those
+  files, and lists only `onRequestError` (not called by Krate) and
+  `instrumentation-client` as manual work. A `loadEnvConfig(...)` call keeps working
+  and is harmless next to `envDir`. `register()` runs in the API sidecar's primary
+  process only, so state it puts on `globalThis` is not visible to cluster workers.
 
 Every apply writes a rollback manifest under
 `.krate/migrate/nextjs-<timestamp>/`. Undo with:
@@ -322,8 +402,8 @@ route inventory against the migration report before you accept the migration.
 Verification evaluates `krate.config.ts`, which imports `@krate/core`, so the
 packages must be installed first. Before it writes anything, `--apply --verify`
 checks that `@krate/core` (and any other `@krate/*` package a generated file
-imports) resolves from the project, and stops with a message if not: run with
-`--update-package`, install the dependencies, then re-run.
+imports) resolves from the project, and stops with a message if not: install the dependencies
+the plan adds to `package.json`, then re-run.
 
 ```sh
 krate migrate nextjs --apply --verify
@@ -347,7 +427,7 @@ running `krate build`. `useSelectedLayoutSegment(s)` count from the layout whose
 file calls them; a hook called from a shared component counts from the root.
 
 Client components rendered inside async server components hydrate with Preact:
-`--update-package` adds it, otherwise install `preact`.
+the package update adds it (with `--no-update-package`, install `preact`).
 
 ## Steps
 

@@ -11,6 +11,7 @@ import (
 
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/pluginapi"
+	"github.com/kratejs/krate/packages/compiler/internal/routesource"
 )
 
 // ruleCtx carries what the redirect/rewrite/header readers share.
@@ -19,19 +20,22 @@ type ruleCtx struct {
 	dir  string
 	src  string
 	prog *ast.Program
+	pre  *preambleSource
 	// headersLost is set when any header rule or entry was not translated.
 	headersLost bool
+	// fallbacks are redirects that move into the middleware.
+	fallbacks []middlewareRedirect
 }
 
 const (
-	conditionHintRedirect = "Krate redirects match the request path only. Handle this one in middleware.ts (project root or src/): check new URL(request.url).searchParams, headers or cookies and return Response.redirect(...)"
-	conditionHintRewrite  = "Krate rewrites match the request path only. Handle this one in middleware.ts (project root or src/): check the query, headers or cookies and return a Response with an x-middleware-rewrite header"
-	conditionHintHeader   = "Krate header rules match the request path only. Set this one from middleware.ts (project root or src/): check the query, headers or cookies and return a Response with an x-middleware-next: 1 header plus the headers to add"
+	conditionHintRedirect = "Go's RE2 engine cannot run this pattern. Handle it in middleware.ts (project root or src/): check new URL(request.url).searchParams, headers or cookies and return Response.redirect(...)"
+	conditionHintRewrite  = "Go's RE2 engine cannot run this pattern. Handle it in middleware.ts (project root or src/): check the query, headers or cookies and return a Response with an x-middleware-rewrite header"
+	conditionHintHeader   = "Go's RE2 engine cannot run this pattern. Set this one from middleware.ts (project root or src/): check the query, headers or cookies and return a Response with an x-middleware-next: 1 header plus the headers to add"
 )
 
 // element classifies one array element of redirects/rewrites/headers. It
 // returns the object and its static source, or a manual item saying why the
-// rule cannot be translated. A rule with has/missing is never returned.
+// rule cannot be translated.
 func (rc *ruleCtx) element(kind string, i int, el ast.Expr, conditionHint string) (*ast.ObjectExpr, string, *ManualItem) {
 	label := fmt.Sprintf("%s[%d]", kind, i)
 	item, ok := el.(*ast.ObjectExpr)
@@ -47,13 +51,6 @@ func (rc *ruleCtx) element(kind string, i int, el ast.Expr, conditionHint string
 			return nil, source, &ManualItem{Source: rc.file, Reason: fmt.Sprintf("%s source %q spreads or computes keys; it was not translated", label, source), Hint: "write the rule into krate.config.ts by hand"}
 		}
 	}
-	if cond := describeConditions(item); cond != "" {
-		return nil, source, &ManualItem{
-			Source: rc.file,
-			Reason: fmt.Sprintf("%s source %q is conditional (%s) and was NOT translated: Krate has no has/missing, so an unconditional copy would apply to every request", label, source, cond),
-			Hint:   conditionHint,
-		}
-	}
 	for _, key := range []string{"basePath", "locale"} {
 		if prop(item, key) != nil {
 			return nil, source, &ManualItem{Source: rc.file, Reason: fmt.Sprintf("%s source %q sets %s, which changes how the source matches; it was not translated", label, source, key), Hint: "write the rule into krate.config.ts by hand"}
@@ -62,38 +59,62 @@ func (rc *ruleCtx) element(kind string, i int, el ast.Expr, conditionHint string
 	return item, source, nil
 }
 
-// describeConditions renders the has/missing conditions of a rule, or "".
-func describeConditions(item *ast.ObjectExpr) string {
-	var parts []string
+// conditions reads the has and missing arrays of a rule. Every item must be
+// a static { type, key?, value? } object; anything else is a manual item.
+func (rc *ruleCtx) conditions(label, source string, item *ast.ObjectExpr) (has, missing []routesource.Condition, manual *ManualItem) {
 	for _, field := range []string{"has", "missing"} {
 		v := prop(item, field)
 		if v == nil {
 			continue
 		}
+		fail := func(why string) *ManualItem {
+			return &ManualItem{Source: rc.file, Reason: fmt.Sprintf("%s source %q has a %s list that is %s; the rule was not translated", label, source, field, why), Hint: "write the rule into krate.config.ts by hand"}
+		}
 		arr, ok := v.(*ast.ArrayExpr)
-		if !ok || len(arr.Elements) == 0 {
-			parts = append(parts, field+" (computed)")
-			continue
+		if !ok {
+			return nil, nil, fail("computed")
 		}
 		for _, el := range arr.Elements {
 			c, ok := el.(*ast.ObjectExpr)
 			if !ok {
-				parts = append(parts, field+" (computed)")
-				continue
+				return nil, nil, fail("not made of object literals")
 			}
-			typ, _ := stringValue(prop(c, "type"))
-			key, _ := stringValue(prop(c, "key"))
-			desc := field + " " + typ
-			if key != "" {
-				desc += " " + fmt.Sprintf("%q", key)
+			cond := routesource.Condition{}
+			for _, kv := range []struct {
+				name string
+				dst  *string
+			}{{"type", &cond.Type}, {"key", &cond.Key}, {"value", &cond.Value}} {
+				pv := prop(c, kv.name)
+				if pv == nil {
+					continue
+				}
+				str, ok := stringValue(pv)
+				if !ok {
+					return nil, nil, fail("not static (" + kv.name + " is computed)")
+				}
+				*kv.dst = str
 			}
-			if val, ok := stringValue(prop(c, "value")); ok {
-				desc += " = " + fmt.Sprintf("%q", val)
+			if field == "has" {
+				has = append(has, cond)
+			} else {
+				missing = append(missing, cond)
 			}
-			parts = append(parts, strings.TrimSpace(desc))
 		}
 	}
-	return strings.Join(parts, ", ")
+	return has, missing, nil
+}
+
+// routeCompileProblem reports why a rule's source or conditions cannot be
+// compiled for the Go matcher. unsupported is true when the cause is a regex
+// feature RE2 lacks (the rule can run in middleware instead).
+func routeCompileProblem(source string, kind routesource.Kind, has, missing []routesource.Condition) (unsupported bool, err error) {
+	if _, err := routesource.Compile(source, kind); err != nil {
+		return routesource.IsUnsupported(err), err
+	}
+	if _, err := routesource.CompileConditions(has, missing); err != nil {
+		return routesource.IsUnsupported(err), err
+	}
+	return false, nil
 }
 
 // redirects reads a static redirects array (or a function returning one).
@@ -114,19 +135,19 @@ func (rc *ruleCtx) redirects(v ast.Expr) (rules []nextRedirect, items []ManualIt
 			items = append(items, ManualItem{Source: rc.file, Reason: fmt.Sprintf("redirects[%d] source %q has a non-static destination; it was not translated", i, source), Hint: "write the rule into krate.config.ts by hand"})
 			continue
 		}
-		perm := false
-		status := 0
+		status := 307
 		computed := false
 		if p := prop(obj, "permanent"); p != nil {
 			if b, ok := boolValue(p); ok {
-				perm = b
+				if b {
+					status = 308
+				}
 			} else {
 				computed = true
 			}
 		}
 		if sc := prop(obj, "statusCode"); sc != nil {
 			if n, ok := intValue(sc); ok {
-				perm = n == 301 || n == 308
 				status = n
 			} else {
 				computed = true
@@ -136,14 +157,20 @@ func (rc *ruleCtx) redirects(v ast.Expr) (rules []nextRedirect, items []ManualIt
 			items = append(items, ManualItem{Source: rc.file, Reason: fmt.Sprintf("redirects[%d] source %q has a computed permanent/statusCode; it was not translated", i, source), Hint: "write the rule into krate.config.ts by hand"})
 			continue
 		}
-		if status == 0 {
-			// Next answers 308/307 (method and body kept), not 301/302.
-			status = 307
-			if perm {
-				status = 308
-			}
+		has, missing, item := rc.conditions(fmt.Sprintf("redirects[%d]", i), source, obj)
+		if item != nil {
+			items = append(items, *item)
+			continue
 		}
-		rules = append(rules, nextRedirect{Source: source, Destination: dest, Permanent: perm, StatusCode: status})
+		if unsupported, err := routeCompileProblem(source, routesource.KindRedirect, has, missing); err != nil {
+			if unsupported {
+				rc.fallbacks = append(rc.fallbacks, middlewareRedirect{Index: i, Source: source, Destination: dest, Status: status, Has: has, Missing: missing})
+				continue
+			}
+			items = append(items, ManualItem{Source: rc.file, Reason: fmt.Sprintf("redirects[%d] source %q is not valid: %v; it was not translated", i, source, err), Hint: "fix the rule or write it into krate.config.ts by hand"})
+			continue
+		}
+		rules = append(rules, nextRedirect{Source: source, Destination: dest, StatusCode: status, Has: has, Missing: missing})
 	}
 	return rules, items, ""
 }
@@ -176,6 +203,15 @@ func (rc *ruleCtx) rewrites(v ast.Expr) (rules []nextRewrite, items []ManualItem
 	return rules, items, ""
 }
 
+// invalidRule is the manual item for a rule whose source or condition does
+// not compile for the Go matcher.
+func (rc *ruleCtx) invalidRule(label, source string, err error, unsupported bool, hint string) ManualItem {
+	if unsupported {
+		return ManualItem{Source: rc.file, Reason: fmt.Sprintf("%s source %q uses a regex feature Go cannot run (%v); it was not translated", label, source, err), Hint: hint}
+	}
+	return ManualItem{Source: rc.file, Reason: fmt.Sprintf("%s source %q is not valid: %v; it was not translated", label, source, err), Hint: "fix the rule or write it into krate.config.ts by hand"}
+}
+
 func (rc *ruleCtx) rewriteArray(arr *ast.ArrayExpr) ([]nextRewrite, []ManualItem) {
 	var out []nextRewrite
 	var items []ManualItem
@@ -190,7 +226,16 @@ func (rc *ruleCtx) rewriteArray(arr *ast.ArrayExpr) ([]nextRewrite, []ManualItem
 			items = append(items, ManualItem{Source: rc.file, Reason: fmt.Sprintf("rewrites[%d] source %q has a non-static destination; it was not translated", i, source), Hint: "write the rule into krate.config.ts by hand"})
 			continue
 		}
-		out = append(out, nextRewrite{Source: source, Destination: dest})
+		has, missing, item := rc.conditions(fmt.Sprintf("rewrites[%d]", i), source, obj)
+		if item != nil {
+			items = append(items, *item)
+			continue
+		}
+		if unsupported, err := routeCompileProblem(source, routesource.KindRewrite, has, missing); err != nil {
+			items = append(items, rc.invalidRule(fmt.Sprintf("rewrites[%d]", i), source, err, unsupported, conditionHintRewrite))
+			continue
+		}
+		out = append(out, nextRewrite{Source: source, Destination: dest, Has: has, Missing: missing})
 	}
 	return out, items
 }
@@ -220,14 +265,77 @@ func (rc *ruleCtx) resolveArray(e ast.Expr) *ast.ArrayExpr {
 	return nil
 }
 
-// headers reads a headers array (or a function returning one). Static entries
-// are kept even when a sibling entry or rule is computed.
+// arrayParts returns the source text of each element of arr, or nil when the
+// text cannot be matched to the elements.
+func (rc *ruleCtx) arrayParts(arr *ast.ArrayExpr) []string {
+	parts, ok := splitTop(rc.src, arr.Position.Offset)
+	if !ok || len(parts) != len(arr.Elements) {
+		return nil
+	}
+	return parts
+}
+
+// propText returns the source text of the value of obj's property key.
+func (rc *ruleCtx) propText(obj *ast.ObjectExpr, key string) (string, bool) {
+	parts, ok := splitTop(rc.src, obj.Position.Offset)
+	if !ok || len(parts) != len(obj.Properties) {
+		return "", false
+	}
+	for i, p := range obj.Properties {
+		if p == nil || p.Spread || p.Computed || p.Key != key {
+			continue
+		}
+		part := parts[i]
+		if part == key {
+			return key, true
+		}
+		for _, q := range []string{"", "'", `"`} {
+			if rest, found := strings.CutPrefix(part, q+key+q); found {
+				if rest = strings.TrimSpace(rest); strings.HasPrefix(rest, ":") {
+					return strings.TrimSpace(rest[1:]), true
+				}
+			}
+		}
+	}
+	return "", false
+}
+
+// hasComputedParts reports whether a rule object has a source that is not a
+// string literal, or spreads or computes keys.
+func hasComputedParts(item *ast.ObjectExpr) bool {
+	if _, ok := stringValue(prop(item, "source")); !ok {
+		return true
+	}
+	for _, p := range item.Properties {
+		if p != nil && (p.Spread || p.Computed) {
+			return true
+		}
+	}
+	return false
+}
+
+// headers reads a headers array (or a function returning one). A rule that
+// is computed (a helper call, a spread) is carried as code; static rules are
+// translated, even when a sibling is computed.
 func (rc *ruleCtx) headers(v ast.Expr) (rules []nextHeaderRule, items []ManualItem, reason string) {
 	arr := rc.resolveArray(returnedValue(v))
 	if arr == nil {
 		return nil, nil, "not a static array"
 	}
+	parts := rc.arrayParts(arr)
+	carry := func(i int) bool {
+		if parts == nil {
+			return false
+		}
+		rules = append(rules, nextHeaderRule{Code: &codePiece{Label: fmt.Sprintf("headers[%d]", i), Text: parts[i]}})
+		return true
+	}
 	for i, el := range arr.Elements {
+		if obj, ok := el.(*ast.ObjectExpr); !ok || hasComputedParts(obj) {
+			if carry(i) {
+				continue
+			}
+		}
 		obj, source, item := rc.element("headers", i, el, conditionHintHeader)
 		if item != nil {
 			rc.headersLost = true
@@ -236,6 +344,9 @@ func (rc *ruleCtx) headers(v ast.Expr) (rules []nextHeaderRule, items []ManualIt
 		}
 		harr := rc.resolveArray(prop(obj, "headers"))
 		if harr == nil {
+			if carry(i) {
+				continue
+			}
 			rc.headersLost = true
 			items = append(items, ManualItem{
 				Source: rc.file,
@@ -244,7 +355,21 @@ func (rc *ruleCtx) headers(v ast.Expr) (rules []nextHeaderRule, items []ManualIt
 			})
 			continue
 		}
-		rule := nextHeaderRule{Source: source, Headers: map[string]string{}}
+		has, missing, citem := rc.conditions(fmt.Sprintf("headers[%d]", i), source, obj)
+		if citem != nil {
+			if carry(i) {
+				continue
+			}
+			rc.headersLost = true
+			items = append(items, *citem)
+			continue
+		}
+		if unsupported, err := routeCompileProblem(source, routesource.KindHeader, has, missing); err != nil {
+			rc.headersLost = true
+			items = append(items, rc.invalidRule(fmt.Sprintf("headers[%d]", i), source, err, unsupported, conditionHintHeader))
+			continue
+		}
+		rule := nextHeaderRule{Source: source, Headers: map[string]string{}, Has: has, Missing: missing}
 		dropped := 0
 		for _, hel := range harr.Elements {
 			hm, ok := hel.(*ast.ObjectExpr)
@@ -259,6 +384,14 @@ func (rc *ruleCtx) headers(v ast.Expr) (rules []nextHeaderRule, items []ManualIt
 				continue
 			}
 			rule.Headers[k] = val
+		}
+		if dropped > 0 && carry(i) {
+			last := rules[len(rules)-1].Code
+			if len(rule.Headers) > 0 {
+				fb := rule
+				last.Fallback = &fb
+			}
+			continue
 		}
 		if dropped > 0 {
 			rc.headersLost = true
@@ -382,7 +515,9 @@ func duplicateRuleWarnings(d nextConfigData) []string {
 	count("rewrites", rs, src)
 	rs = nil
 	for _, r := range d.Headers {
-		rs = append(rs, r)
+		if r.Code == nil {
+			rs = append(rs, r)
+		}
 	}
 	count("headers", rs, src)
 	return out
@@ -416,11 +551,11 @@ type keyNote struct {
 
 // otherKeyNotes covers next.config keys the migrator does not translate.
 var otherKeyNotes = map[string]keyNote{
-	"transpilePackages":           {true, "transpilePackages is not translated", "Krate has no transpilePackages key; run krate build and check that each listed package resolves, and report packages that do not"},
+	"transpilePackages":           {true, "transpilePackages is computed and was not checked", "Krate needs no transpilePackages key: workspace TypeScript source and compiled packages both build; run krate build and check that each package you listed resolves"},
 	"serverExternalPackages":      {true, "serverExternalPackages is not translated", "the value is computed; set serverExternalPackages in krate.config.ts to the same package names (see the Config Reference)"},
-	"outputFileTracingIncludes":   {true, "outputFileTracingIncludes is not translated", "the value is computed or leaves the project; set outputFileTracingIncludes in krate.config.ts with project-relative globs (see the Config Reference)"},
+	"outputFileTracingIncludes":   {true, "outputFileTracingIncludes is not translated", "the value is computed, or a glob leaves the project without a translatable outputFileTracingRoot; set outputFileTracingRoot and outputFileTracingIncludes in krate.config.ts (see the Config Reference)"},
 	"outputFileTracingExcludes":   {true, "outputFileTracingExcludes is not translated", "no Krate equivalent yet"},
-	"outputFileTracingRoot":       {true, "outputFileTracingRoot is not translated", "no Krate equivalent yet; a Krate project builds from its own root"},
+	"outputFileTracingRoot":       {true, "outputFileTracingRoot is not translated", "its value could not be resolved statically or does not contain the project; set outputFileTracingRoot in krate.config.ts to the repository root, relative to the project (for example \"../..\")"},
 	"i18n":                        {true, "i18n routing is not translated", "Krate's i18n key is docs-scoped; for app pages use a [locale] dynamic segment (see Internationalization)"},
 	"assetPrefix":                 {true, "assetPrefix is not translated", "no Krate equivalent yet; basePath serves the site under a sub-path"},
 	"distDir":                     {true, "distDir is not translated", "set outDir in krate.config.ts (default dist)"},
@@ -496,8 +631,6 @@ func translateOtherKeys(file string, obj *ast.ObjectExpr, notes *nextConfigNotes
 func outputNote(file string, v ast.Expr) ManualItem {
 	mode, _ := stringValue(v)
 	switch mode {
-	case "standalone":
-		return ManualItem{Source: file, Reason: "output: 'standalone' is not translated", Hint: "use krate deploy --target node (dist/.krate/server holds server.mjs plus a minimal node_modules for external packages) or --target docker for a self-hosted server (see the Self-hosting guide)"}
 	case "export":
 		return ManualItem{Source: file, Reason: "output: 'export' is not translated", Hint: "set output: \"static\" in krate.config.ts (see Output mode in the config reference)"}
 	}

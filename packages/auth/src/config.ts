@@ -107,7 +107,7 @@ export function resolveConfig(options: AuthOptions = {}, declarative: Declarativ
   }
   const providers = [...fromConfig, ...programmatic];
 
-  const adapter = options.adapter;
+  const adapter = options.adapter as Adapter | undefined;
   const strategy = options.session?.strategy ?? declarative.session?.strategy ?? (adapter ? "database" : "jwt");
   const maxAge = options.session?.maxAge ?? declarative.session?.maxAge ?? 30 * 24 * 60 * 60;
   const updateAge = options.session?.updateAge ?? declarative.session?.updateAge ?? 24 * 60 * 60;

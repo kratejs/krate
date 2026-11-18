@@ -3,11 +3,15 @@ package plugin
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/evanw/esbuild/pkg/api"
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
 	"github.com/kratejs/krate/packages/compiler/internal/docfind"
@@ -34,6 +38,11 @@ type DocsSearchOptions struct {
 	Hotkey string `json:"hotkey,omitempty"`
 	// Pagefind configures the "pagefind" engine. Ignored for other engines.
 	Pagefind *PagefindOptions `json:"pagefind"`
+	// Load controls when pages fetch the search module. "lazy" (default) leaves
+	// it to the theme's search box to load it on first use; "eager" adds a
+	// deferred script to every docs page, for themes that expect
+	// window.__krateSearch to exist on load.
+	Load string `json:"load,omitempty"`
 }
 
 // PagefindOptions configures the Pagefind indexer used when Engine is
@@ -132,8 +141,11 @@ func engineForBuild(engine string, dev bool) string {
 //
 // It returns an error only when the WASM index build fails; the caller should
 // treat that as a warning and let the client fall back to the JSON index.
-func (p *DocsPlugin) buildSearchAssets(ctx *BuildHookCtx, pages []docs.Page, engine string, maxResults int, pf PagefindOptions) error {
-	basePath, locales := "", []string(nil)
+//
+// The first return value is the site-relative URL of the content-hashed,
+// minified search module ("" when it was not written).
+func (p *DocsPlugin) buildSearchAssets(ctx *BuildHookCtx, pages []docs.Page, engine string, maxResults int, pf PagefindOptions) (string, error) {
+	basePath, locales := "", []string{} // never nil: it is emitted as a JS array
 	if cfg, ok := ctx.Config.(*config.Config); ok {
 		basePath = cfg.BaseURLPath()
 		if cfg.I18n.Enabled() {
@@ -147,7 +159,7 @@ func (p *DocsPlugin) buildSearchAssets(ctx *BuildHookCtx, pages []docs.Page, eng
 	}
 	outDir := filepath.Join(ctx.OutDir, searchDir)
 	if err := os.MkdirAll(outDir, 0755); err != nil {
-		return fmt.Errorf("creating search dir: %w", err)
+		return "", fmt.Errorf("creating search dir: %w", err)
 	}
 
 	// Dev builds always use docfind: Pagefind's post-build index is not
@@ -173,30 +185,63 @@ func (p *DocsPlugin) buildSearchAssets(ctx *BuildHookCtx, pages []docs.Page, eng
 	pagefindBase := basePath + "/" + filepath.ToSlash(pf.OutputSubdir) + "/"
 	searchJS = bytes.ReplaceAll(searchJS, []byte(`var PAGE_FIND_BASE = "/pagefind/";`),
 		[]byte(fmt.Sprintf("var PAGE_FIND_BASE = %q;", pagefindBase)))
-	if err := os.WriteFile(filepath.Join(outDir, "search.js"), searchJS, 0644); err != nil {
-		return err
+	if !ctx.DevMode {
+		searchJS = minifySearchJS(searchJS)
 	}
+	jsName := hashedSearchName(searchJS)
+	// Drop modules from earlier builds (dev rebuilds reuse the directory).
+	if old, _ := filepath.Glob(filepath.Join(outDir, "search.*.js")); len(old) > 0 {
+		for _, f := range old {
+			_ = os.Remove(f)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(outDir, jsName), searchJS, 0644); err != nil {
+		return "", err
+	}
+	jsURL := basePath + "/" + searchDir + "/" + jsName
 	if err := os.WriteFile(filepath.Join(outDir, "search.css"), searchassets.SearchCSS, 0644); err != nil {
-		return err
+		return jsURL, err
 	}
 
 	if engine != "docfind" {
-		return nil
+		return jsURL, nil
 	}
 
 	documents := docs.BuildSearchDocumentsBase(pages, basePath)
 	if len(documents) == 0 {
-		return nil
+		return jsURL, nil
 	}
 
 	wasmBytes, err := docfind.Build(context.Background(), documents)
 	if err != nil {
-		return fmt.Errorf("docfind: %w", err)
+		return jsURL, fmt.Errorf("docfind: %w", err)
 	}
 	if err := os.WriteFile(filepath.Join(outDir, docfind.WASMName), wasmBytes, 0644); err != nil {
-		return err
+		return jsURL, err
 	}
-	return os.WriteFile(filepath.Join(outDir, docfind.DocfindJSName), docfind.DocfindJS, 0644)
+	return jsURL, os.WriteFile(filepath.Join(outDir, docfind.DocfindJSName), docfind.DocfindJS, 0644)
+}
+
+// minifySearchJS minifies the search module, returning it unchanged when
+// esbuild reports an error.
+func minifySearchJS(js []byte) []byte {
+	res := api.Transform(string(js), api.TransformOptions{
+		MinifyWhitespace:  true,
+		MinifyIdentifiers: true,
+		MinifySyntax:      true,
+		Charset:           api.CharsetUTF8,
+	})
+	if len(res.Errors) > 0 {
+		return js
+	}
+	return res.Code
+}
+
+// hashedSearchName names the search module after its content, so it can be
+// cached as immutable and a changed engine or option yields a new URL.
+func hashedSearchName(js []byte) string {
+	sum := sha256.Sum256(js)
+	return "search." + hex.EncodeToString(sum[:4]) + ".js"
 }
 
 // Search UI lives in the theme, not the plugin. The plugin emits the index and

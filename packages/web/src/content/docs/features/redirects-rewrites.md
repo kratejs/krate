@@ -23,7 +23,8 @@ redirects: [
 | `source` | The path to match (supports `*` splats and `:param`, `:param*`, `:param+`, `:param?` segments) |
 | `destination` | Where to send the visitor |
 | `permanent` | `true` -> `301`, `false` (default) -> `302` |
-| `statusCode` | The exact status: `301`, `302`, `303`, `307` or `308`; overrides `permanent`. `krate migrate nextjs` writes `308`/`307`, the codes Next uses, which keep the method and body |
+| `statusCode` | `301`, `302`, `303`, `307` or `308`; wins over `permanent` |
+| `has`, `missing` | Conditions on the query, a header, a cookie or the host |
 | `basePath` | `false` matches `source` and sends `destination` exactly as written, outside the [base path](/docs/reference/config/#base-path). Default `true` |
 
 `:param*` matches zero or more segments, `:param+` one or more, `:param?` one
@@ -33,13 +34,12 @@ destination, and a path destination can never become an off-site URL: values
 like `/\evil.com` or an encoded `//evil.com` are escaped or collapsed so the
 `Location` always starts with a single `/`.
 
-A parameter can carry a regular expression in parentheses, as in `next.config`
-(path-to-regexp syntax): `:id(\\d+)` matches digits only, and
-`{ source: "/store/:slug((?!compare$)[^/]+)", destination: "/templates/:slug" }`
-matches every `/store/<slug>` except `/store/compare`. The expression uses
-JavaScript syntax (lookaheads included) and may span segments
-(`:path(a/.*)`); the `?`, `*` and `+` modifiers go after the closing
-parenthesis, and a bare `(en|de)` group constrains a segment without naming it.
+The request's query string is carried to the destination (the destination's own
+keys win), redirects run before middleware, and they also answer `/api/*`.
+`source` accepts Next.js syntax, including a regex in a parameter and a leading
+negative lookahead such as `/store/:slug((?!compare$)[^/]+)`. The
+[config reference](/docs/reference/config/#redirects--rewrites) lists the source
+forms, `has`/`missing`, and the request order.
 
 ### Under a base path
 

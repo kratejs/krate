@@ -1182,8 +1182,13 @@ declare global {
        */
       basePath?: false;
       children?: any;
-      /** Prefetch the target page on hover/focus/viewport entry (default: true). */
-      prefetch?: boolean;
+      /**
+       * Prefetch the target page. Default (`true`): on hover, focus or touch.
+       * `"viewport"` also prefetches once the link scrolls near the viewport
+       * (at most 5 per page). `false` never prefetches. Nothing is prefetched
+       * when Save-Data is on or the connection is 2g.
+       */
+      prefetch?: boolean | "viewport";
       /** Replace the current history entry instead of pushing a new one. */
       replace?: boolean;
       /** Scroll to the top on navigation (default: true). */

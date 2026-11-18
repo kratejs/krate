@@ -1,0 +1,12 @@
+{
+  "steps": [
+    { "op": "click", "sel": "#bump-a" },
+    { "op": "click", "sel": "#again-a" },
+    { "op": "click", "sel": "#bump-b" },
+    { "op": "click", "sel": "#reset-a" },
+    { "op": "click", "sel": "#bump-a" },
+    { "op": "click", "sel": "#pick-c" },
+    { "op": "click", "sel": "#direct-b" },
+    { "op": "press", "sel": "#field", "key": "x" }
+  ]
+}

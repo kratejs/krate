@@ -141,3 +141,22 @@ func TestHoistIgnoresActionModulesAndPlainFiles(t *testing.T) {
 		}
 	}
 }
+
+func TestHasDirectiveIgnoresText(t *testing.T) {
+	cases := []struct {
+		name, src string
+		want      bool
+	}{
+		{"inline action", "export default function P() { async function save() { 'use server'; } return <form action={save} />; }", true},
+		{"action module", "\"use server\";\nexport async function save() {}", true},
+		{"code sample string", "export default function P() { return <pre>{\"'use server';\"}</pre>; }", false},
+		{"jsx text", "export default function P() { return <p>Mark it with use server.</p>; }", false},
+		{"comment", "// use server\nexport default function P() { return <p />; }", false},
+		{"no mention", "export default function P() { return <p />; }", false},
+	}
+	for _, c := range cases {
+		if got := HasDirective("src/pages/p.tsx", c.src); got != c.want {
+			t.Errorf("%s: HasDirective = %v, want %v", c.name, got, c.want)
+		}
+	}
+}

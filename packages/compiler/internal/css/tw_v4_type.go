@@ -100,19 +100,12 @@ func textUtility(cls string, theme TailwindTheme) (string, bool) {
 		}
 		return sizeCSS(theme.themeRef("text-"+base, fs), lh, true)
 	}
-	if inner, hint, isArb := arbitraryValue(base); isArb {
-		switch hint {
-		case "length", "size", "percentage", "number":
+	if inner, typ, isArb := arbType(base, "color", "length", "percentage", "absolute-size", "relative-size"); isArb {
+		switch typ {
+		case "size", "length", "percentage", "absolute-size", "relative-size":
 			return sizeCSS(inner, "", false)
-		case "family":
-			return "font-family: " + inner + ";", true
-		case "color":
-			return colorDecl("color", inner, mod)
 		}
-		if isVarOnly(inner) || looksLikeColor(inner) {
-			return colorDecl("color", inner, mod)
-		}
-		return sizeCSS(inner, "", false)
+		return colorDecl("color", inner, mod)
 	}
 	if v, ok := colorValue(base, mod, theme); ok {
 		return "color: " + v + ";", true
@@ -207,17 +200,12 @@ func fontUtility(cls string, theme TailwindTheme) (string, bool) {
 	if v, ok := theme.FontFamily[key]; ok && v != "" {
 		return "font-family: " + theme.themeRef("font-"+key, v) + ";", true
 	}
-	if inner, hint, isArb := arbitraryValue(key); isArb {
-		switch hint {
-		case "family":
+	if inner, typ, isArb := arbType(key, "number", "generic-name", "family-name"); isArb {
+		switch typ {
+		case "generic-name", "family-name", "family":
 			return "font-family: " + inner + ";", true
-		case "number", "weight":
-			return weight(inner), true
 		}
-		if plainNumber(inner) || isVarOnly(inner) {
-			return weight(inner), true
-		}
-		return "font-family: " + inner + ";", true
+		return weight(inner), true
 	}
 	if v, ok := defaultFontFamily()[key]; ok {
 		return "font-family: " + v + ";", true

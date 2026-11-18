@@ -1,8 +1,17 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { matchRedirectParamsMods, rewriteDestination } from "./handler-routing.js";
+import { buildDestination, compileSource, type MatchResult } from "./route-source.js";
 
-// Same cases as TestRegexRedirectSources in packages/compiler/internal/build.
+function matchSource(path: string, source: string): MatchResult | null {
+  try {
+    return compileSource(source, "redirect").match(path);
+  } catch {
+    return null;
+  }
+}
+
+// Regex parameters in next.config style sources (route-source.ts, the port of
+// internal/routesource).
 describe("regex redirect sources", () => {
   const cases: Array<[string, string, Record<string, string> | null]> = [
     ["/store/:slug((?!compare$)[^/]+)", "/store/some-template", { slug: "some-template" }],
@@ -17,16 +26,18 @@ describe("regex redirect sources", () => {
     ["/docs/:path((?:a|b)/.*)", "/docs/a/x/y", { path: "a/x/y" }],
     ["/v/:n(\\d+)*", "/v/1/2/3", { n: "1/2/3" }],
     ["/v/:n(\\d+)+", "/v", null],
-    ["/(en|de)/about", "/de/about", { "0": "de" }],
+    ["/(en|de)/about", "/de/about", {}],
+    ["/(en|de)/about", "/fr/about", null],
     ["/bad/:x((unclosed)", "/bad/x", null],
   ];
   it.each(cases)("%s ~ %s", (source, path, want) => {
-    const m = matchRedirectParamsMods(path, source);
+    const m = matchSource(path, source);
     if (want === null) expect(m).toBeNull();
     else expect(m?.params).toMatchObject(want);
   });
 
   it("fills the destination", () => {
-    expect(rewriteDestination("/store/some-template", "/store/:slug((?!compare$)[^/]+)", "/templates/:slug")).toBe("/templates/some-template");
+    const m = matchSource("/store/some-template", "/store/:slug((?!compare$)[^/]+)");
+    expect(m && buildDestination("/templates/:slug", m)).toBe("/templates/some-template");
   });
 });

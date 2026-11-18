@@ -258,18 +258,39 @@ func builtinNorm(s string) string {
 	return strings.Join(out, "\n")
 }
 
+var selectorSpaceRe = regexp.MustCompile(`\s*([>+~,])\s*`)
+
+// lastClassCombinator returns the index of the last unescaped combinator
+// (space, ~, +, >) that is directly followed by a class selector, or -1.
+func lastClassCombinator(s string) int {
+	for k := len(s) - 2; k >= 0; k-- {
+		if strings.IndexByte(" ~+>", s[k]) >= 0 && s[k+1] == '.' && (k == 0 || s[k-1] != '\\') {
+			return k
+		}
+	}
+	return -1
+}
+
 // builtinSelector rewrites Tailwind's `:is(<ctx> .cls)` group/peer form to
 // Krate's equivalent `.cls:is(<ctx> *)` (same specificity), and drops the `*`
 // Krate puts before a descendant pseudo-element.
 func builtinSelector(sel string) string {
 	sel = strings.ReplaceAll(sel, " *::", " ::")
-	if !strings.HasPrefix(sel, ":is(") || !strings.HasSuffix(sel, ")") {
-		return sel
+	if strings.HasPrefix(sel, ":is(") {
+		// The leading :is(<context> <combinator> .cls) of a group/peer rule
+		// becomes .cls:is(<context> <combinator> *); what follows it stays.
+		if end := matchParen(sel, len(":is(")-1); end > 0 {
+			inner, rest := sel[len(":is("):end], sel[end+1:]
+			if k := lastClassCombinator(inner); k >= 0 {
+				ctx := strings.TrimRight(inner[:k+1], " ")
+				if inner[k] == ' ' {
+					ctx = strings.TrimSpace(ctx) + " "
+				}
+				sel = inner[k+1:] + ":is(" + ctx + "*)" + rest
+			}
+		}
 	}
-	inner := sel[len(":is(") : len(sel)-1]
-	sp := strings.LastIndexByte(inner, ' ')
-	if sp < 0 || !strings.HasPrefix(inner[sp+1:], ".") {
-		return sel
-	}
-	return inner[sp+1:] + ":is(" + inner[:sp] + " *)"
+	// Tailwind spaces combinators and list commas; Krate keeps them as the
+	// class wrote them.
+	return selectorSpaceRe.ReplaceAllString(sel, "$1")
 }

@@ -42,7 +42,7 @@ func TestRedirectStatusCodeOnHosts(t *testing.T) {
 		t.Fatal(err)
 	}
 	data, _ := os.ReadFile(filepath.Join(out, "_redirects"))
-	if !strings.Contains(string(data), "/moved\t/new\t308") || strings.Contains(string(data), "/store/") {
+	if !strings.Contains(string(data), "/moved\t/new\t308") || strings.Contains(string(data), "/store/:slug((?!compare$)[^/]+)\t") || !strings.Contains(string(data), "# skipped /store/") {
 		t.Errorf("_redirects:\n%s", data)
 	}
 	root := t.TempDir()

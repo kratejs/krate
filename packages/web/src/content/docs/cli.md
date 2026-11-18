@@ -84,7 +84,7 @@ krate build ./my-site
 | `--profile` | Print where the build spends its time (see below) and disk-cache hits/misses |
 | `--sourcemap` | Emit source maps for generated JS (also disables the build cache) |
 | `--no-dce` | Disable CSS/JS dead-code elimination |
-| `--precompress` | Write `.br` + `.gz` siblings for compressible assets (same as `compress: { brotli: true, gzip: true }`) |
+| `--precompress` | Write `.br` + `.gz` siblings for compressible assets even if `compress` turns them off (both are on by default) |
 | `--no-summary` | Do not print the per-route size table |
 
 With `--profile`, the build prints its phases (`build:*`, which add up to the
@@ -100,7 +100,10 @@ samples carry `phase` and `esbuild` labels (`go tool pprof -tags`).
 
 After a successful build, `krate build` prints a table with one row per built
 page: its mode, and the gzipped size of the HTML, of the scripts it loads and of
-the stylesheets it loads. A `vs last` column shows how each route's total changed
+the stylesheets it loads. The script column counts the whole load: the scripts the
+page names plus the chunks they import (shared modules, import-mapped packages and
+island chunks), not only the files in the HTML. Mermaid and KaTeX are fetched from a
+CDN on demand and are not counted; a footnote says how many routes can load them. A `vs last` column shows how each route's total changed
 since the previous build (`new` for a route that was not there), and a footer
 lists routes that disappeared and the change in everything shipped, with shared
 files counted once. The previous build's sizes are kept in
@@ -275,7 +278,7 @@ krate migrate rollback .krate/migrate/nextjs-20261027-190904
 | `--apply` | Write the plan atomically, then move the original Next route trees (`app/`, `src/app/`, `pages/`) into the backup; rollback moves them back |
 | `--verify` | After applying, build, run checks, and diff the route inventory. Stops before writing when `@krate/core` does not resolve from the project (install the dependencies first) |
 | `--force` | Allow overwriting existing target files |
-| `--update-package` | Add Krate scripts and dependencies to `package.json` |
+| `--no-update-package` | Leave `package.json` alone. By default the migration rewrites its scripts, adds the `@krate/*` dependencies and removes `next`, `next-auth` and `@next/env` once nothing imports them (`--update-package` is accepted and does nothing) |
 | `--report <path>` | Write the plan as JSON before applying |
 | `--json` | Print the plan (or apply result) as JSON |
 
@@ -301,10 +304,13 @@ helper/stylesheet. It generates
 config, merges/generates `tsconfig.json`, rewrites project modules reached from routes
 (including through tsconfig path aliases) in place, renames `NEXT_PUBLIC_*` reads
 to `KRATE_PUBLIC_*` without copying values, and
-reports everything it will not rewrite. With
-`--update-package` it also adds Krate scripts and dependencies while leaving the
-Next.js dependencies in place for verification. Existing targets, including
-`package.json` with `--update-package`, require `--force`. It never deletes the
+reports everything it will not rewrite. It also updates `package.json` (Krate
+scripts, the `@krate/*` dependencies the migrated code imports, and the removal of
+`next`, `next-auth` and `@next/env` when nothing imports them; the file is backed up
+and never needs `--force`) and prints the install command as the last manual step.
+Other existing targets require `--force`. A file in a moved route tree that a
+sibling workspace package references (a shared stylesheet, say) stays at its old path
+as a stub that imports or re-exports the moved file. It never deletes the
 original Next.js tree. See [Migrating from Next.js](/docs/guides/migrating-from-nextjs/).
 
 ## `krate inspect`
@@ -529,7 +535,7 @@ dist/
   index.html                 # pre-rendered pages (one per route)
   docs/...                   # plugin-generated pages (e.g. the docs site)
   index.<hash>.js            # per-page hydration bundles
-  styles.<hash>.css          # merged, deduplicated CSS
+  styles.<hash>.css          # page CSS, one file per shared source (theme, components, page)
   chunks/runtime.<hash>.js   # shared runtime chunk
   .krate/manifest.json       # page + SSR/ISR metadata (build metadata, not published)
   _krate/images/...          # processed <Image> variants

@@ -3,14 +3,24 @@ import type { Secret, TokenClaims } from "./crypto.js";
 
 export type Awaitable<T> = T | Promise<T>;
 
-export interface User {
+/** The built-in fields of a User, before any augmentation. */
+export interface BaseUser {
   id?: string;
   name?: string | null;
   email?: string | null;
   image?: string | null;
   role?: string | null;
-  [key: string]: unknown;
 }
+
+/**
+ * Extra fields every User carries. Empty by default; an app adds its own with
+ * `declare module "@krate/auth" { interface UserExtensions { role: Role } }`.
+ * A field declared here replaces the built-in field of the same name.
+ */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+export interface UserExtensions {}
+
+export type User = Omit<BaseUser, keyof UserExtensions> & UserExtensions & { [key: string]: unknown };
 
 export interface AdapterUser extends User {
   id: string;
@@ -97,19 +107,44 @@ export interface Adapter {
   deleteTwoFactor?(userId: string): Awaitable<void>;
 }
 
+/**
+ * An Auth.js adapter, such as the one `@auth/drizzle-adapter` returns. Its types
+ * mark the user and account methods optional and shape the records and some
+ * return values a little differently from the ones here, so every method is
+ * loosely typed.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type AuthJsAdapter = { [K in keyof Adapter]?: (...args: any[]) => any };
+
+/** The built-in fields of Session.user, before any augmentation. */
+export interface BaseSessionUser {
+  id: string;
+  name?: string | null;
+  email?: string | null;
+  image?: string | null;
+  role?: string | null;
+  twoFactorEnabled?: boolean;
+  twoFactorSetupRequired?: boolean;
+}
+
+/**
+ * Extra fields on Session.user. Empty by default; an app adds its own with
+ * `declare module "@krate/auth" { interface SessionUserExtensions { role: Role } }`.
+ * A field declared here replaces the built-in field of the same name.
+ */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+export interface SessionUserExtensions {}
+
 export interface Session {
-  user: {
-    id: string;
-    name?: string | null;
-    email?: string | null;
-    image?: string | null;
-    role?: string | null;
-    twoFactorEnabled?: boolean;
-    twoFactorSetupRequired?: boolean;
-    [key: string]: unknown;
-  };
+  user: Omit<BaseSessionUser, keyof SessionUserExtensions> & SessionUserExtensions & { [key: string]: unknown };
   expires: string;
   [key: string]: unknown;
+}
+
+/** The session shape before augmentation (Auth.js / next-auth compatible name). */
+export interface DefaultSession {
+  user?: BaseSessionUser;
+  expires: string;
 }
 
 export interface EndpointContext {
@@ -313,7 +348,7 @@ export interface RateLimitOptions {
 export interface AuthOptions {
   secret?: Secret;
   providers?: Array<Provider | (() => Provider)>;
-  adapter?: Adapter;
+  adapter?: Adapter | AuthJsAdapter;
   basePath?: string;
   trustHost?: boolean;
   debug?: boolean;

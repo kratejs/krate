@@ -125,3 +125,80 @@ export default function Home() { return <p>{X + Y + Object.keys(all).length}</p>
 		t.Errorf("one file under two paths reported as an export clash:\n%s", out)
 	}
 }
+
+// TestExportClashTwoCheckoutsOfOnePackage: a project copy whose package links
+// lead back into the original checkout reaches the same package at two real
+// paths (one inside the root, one outside). The two files are identical, so
+// whichever the page keeps behaves the same and nothing is reported (KR7116).
+func TestExportClashTwoCheckoutsOfOnePackage(t *testing.T) {
+	const lib = `export const SHARED_MAX = 10;
+export function twice(n: number) { return n * 2; }`
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "lib.ts"), []byte(lib), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	b, root := hooksProject(t, map[string]string{
+		"src/real/lib.ts": lib,
+		"src/barrel.ts": `export * from "./real/lib";
+export * from "./other/lib";`,
+		"src/pages/index.tsx": `import { SHARED_MAX } from "../real/lib";
+import { SHARED_MAX as OTHER } from "../other/lib";
+import * as all from "../barrel";
+export default function Home() { return <p>{SHARED_MAX + OTHER + Object.keys(all).length}</p>; }`,
+	})
+	if err := os.Symlink(outside, filepath.Join(root, "src", "other")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	logs := captureStderrFile(t)
+	if err := b.BuildAll(); err != nil {
+		t.Fatal(err)
+	}
+	if out := logs(); strings.Contains(out, "KR7116") {
+		t.Errorf("one package at two checkouts reported as an export clash:\n%s", out)
+	}
+}
+
+// TestExportClashNamesProjectRelativeFiles: two different files with the same
+// name that export the same name are reported with their project-relative
+// paths, so the warning says which two files clash.
+func TestExportClashNamesProjectRelativeFiles(t *testing.T) {
+	b, _ := hooksProject(t, map[string]string{
+		"src/a/settings.ts": `export const LIMIT = 1;`,
+		"src/b/settings.ts": `export const LIMIT = 2;`,
+		"src/barrel.ts": `export * from "./a/settings";
+export * from "./b/settings";`,
+		"src/pages/index.tsx": `import { LIMIT } from "../a/settings";
+import { LIMIT as OTHER } from "../b/settings";
+import * as all from "../barrel";
+export default function Home() { return <p>{LIMIT + OTHER + Object.keys(all).length}</p>; }`,
+	})
+	logs := captureStderrFile(t)
+	if err := b.BuildAll(); err != nil {
+		t.Fatal(err)
+	}
+	out := logs()
+	if !strings.Contains(out, "KR7116") || !strings.Contains(out, "src/a/settings.ts and src/b/settings.ts both export") {
+		t.Errorf("want a clash naming project-relative files, got:\n%s", out)
+	}
+}
+
+// TestExportClashIgnoresReexportedImport: `import { X } from "./m"; export { X }`
+// declares no X, so a module that re-exports m's X does not clash with m (KR7116).
+func TestExportClashIgnoresReexportedImport(t *testing.T) {
+	b, _ := hooksProject(t, map[string]string{
+		"src/maybe-link.tsx": `export function MaybeLink() { return <a>x</a>; }`,
+		"src/controls.tsx": `"use client";
+import { MaybeLink } from "./maybe-link";
+export function Controls() { return <MaybeLink />; }
+export { MaybeLink };`,
+		"src/pages/index.tsx": `import { Controls, MaybeLink } from "../controls";
+export default function Home() { return <p><MaybeLink /><Controls /></p>; }`,
+	})
+	logs := captureStderrFile(t)
+	if err := b.BuildAll(); err != nil {
+		t.Fatal(err)
+	}
+	if out := logs(); strings.Contains(out, "KR7116") {
+		t.Errorf("a re-exported import reported as an export clash:\n%s", out)
+	}
+}

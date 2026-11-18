@@ -886,7 +886,7 @@ export function Link(props) {
     if (props.basePath === false) out["data-krate-no-base"] = "";
   } else {
     out["data-krate-link"] = "";
-    if (props.prefetch !== false) out["data-prefetch"] = "";
+    if (props.prefetch !== false) out["data-prefetch"] = props.prefetch === "viewport" ? "viewport" : "";
     if (props.replace) out["data-krate-replace"] = "";
     if (props.scroll === false) out["data-krate-scroll"] = "false";
   }

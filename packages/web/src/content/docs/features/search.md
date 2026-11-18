@@ -159,5 +159,14 @@ or render your own search UI against the headless `window.__krateSearch` API.
 `search.hotkey` (for example `"/"`) to change the shortcut, or `"off"` to
 disable it.
 
+The search module (`docs/search/search.<hash>.js`) is minified and
+content-hashed, and by default it is not loaded with the page: `DocsSearch`
+fetches it the first time the box is focused, hovered or opened with the hotkey,
+and the first query waits for it. A custom search UI can do the same: the module
+URL is in `<meta name="krate-search-src">`; inject a script with it and wait for
+the `krate:search-ready` event. Set `search.load` to `"eager"` to keep a deferred
+script on every docs page instead, for themes that expect `window.__krateSearch`
+at load time.
+
 With [i18n](/docs/guides/internationalization/) enabled the index spans every
 locale and results are limited to the language of the page being viewed.

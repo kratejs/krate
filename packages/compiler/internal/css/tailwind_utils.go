@@ -28,11 +28,50 @@ func arbitraryValue(v string) (val, hint string, ok bool) {
 		switch h {
 		case "color", "length", "size", "image", "position", "url", "number",
 			"percentage", "family", "angle", "line-width", "shadow", "transform",
-			"string", "integer", "custom":
+			"string", "integer", "custom", "bg-size", "family-name", "generic-name",
+			"absolute-size", "relative-size", "ratio", "vector":
 			return strings.TrimSpace(inner[i+1:]), h, true
 		}
 	}
 	return inner, "", true
+}
+
+// isArbitrary reports whether key is a bracketed arbitrary value.
+func isArbitrary(key string) bool {
+	return len(key) >= 2 && key[0] == '[' && key[len(key)-1] == ']'
+}
+
+// arbType returns the value of an arbitrary key and its data type: the type
+// hint when one is given, else the first of types the value can be read as
+// (Tailwind's inferDataType), else "". ok is false when key is not bracketed.
+func arbType(key string, types ...string) (val, typ string, ok bool) {
+	val, hint, ok := arbitraryValue(key)
+	if !ok {
+		return "", "", false
+	}
+	if hint != "" {
+		return val, hint, true
+	}
+	return val, twInfer(val, types...), true
+}
+
+// arbColor resolves an arbitrary key with an optional /alpha modifier
+// ("[a_b]/50") as a color whatever its type, the way Tailwind's color
+// utilities and the color fallback of mixed utilities treat it.
+func arbColor(key string) (string, bool) {
+	base, mod := splitColorModifier(key)
+	inner, _, isArb := arbitraryValue(base)
+	if !isArb {
+		return "", false
+	}
+	if mod == "" {
+		return inner, true
+	}
+	a, ok := resolveAlpha(mod)
+	if !ok {
+		return "", false
+	}
+	return withAlpha(inner, a), true
 }
 
 // looksLikeColor reports whether a bare CSS value is most likely a color, used
@@ -57,44 +96,6 @@ func looksLikeColor(v string) bool {
 	}
 	if strings.HasPrefix(lv, "var(") {
 		return isVarOnly(lv)
-	}
-	return false
-}
-
-// looksLikeLength reports whether a bare CSS value is most likely a length or
-// number (as opposed to a color or keyword).
-func looksLikeLength(v string) bool {
-	lv := strings.ToLower(strings.TrimSpace(v))
-	if lv == "" {
-		return false
-	}
-	for _, p := range []string{"calc(", "min(", "max(", "clamp(", "length:"} {
-		if strings.HasPrefix(lv, p) {
-			return true
-		}
-	}
-	if strings.HasPrefix(lv, "var(") {
-		return !strings.Contains(lv, "color")
-	}
-	i := 0
-	for i < len(lv) && (lv[i] >= '0' && lv[i] <= '9' || lv[i] == '.' || lv[i] == '-' || lv[i] == '+') {
-		i++
-	}
-	if i == 0 {
-		return false
-	}
-	rest := lv[i:]
-	if rest == "" || rest == "%" {
-		return true
-	}
-	for _, u := range []string{
-		"px", "rem", "em", "ex", "ch", "vh", "vw", "vmin", "vmax", "svh", "lvh",
-		"dvh", "svw", "lvw", "dvw", "pt", "pc", "in", "cm", "mm", "fr", "cqw",
-		"cqh", "cqi", "cqb", "cqmin", "cqmax", "turn", "deg", "rad", "grad", "s", "ms",
-	} {
-		if rest == u {
-			return true
-		}
 	}
 	return false
 }

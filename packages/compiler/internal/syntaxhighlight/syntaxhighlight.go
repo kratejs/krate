@@ -11,9 +11,13 @@ import (
 	"github.com/alecthomas/chroma/v2/styles"
 )
 
-var formatter = html.New(
+// bareFormatter emits only the token spans: no <pre>/<code> and no per-line
+// wrapper spans. It is used when no line is marked, because the wrappers only
+// exist to carry the highlight class and are otherwise unstyled.
+var bareFormatter = html.New(
 	html.WithClasses(true),
 	html.WithLineNumbers(false),
+	html.PreventSurroundingPre(true),
 )
 
 // DefaultTheme is the chroma theme name used when a caller names none. The
@@ -80,8 +84,9 @@ func HighlightThemeLines(code, lang, theme, lines string) string {
 
 	style := styleFor(theme)
 
-	f := formatter
-	if ranges := ParseLineRanges(lines); len(ranges) > 0 {
+	ranges := ParseLineRanges(lines)
+	f := bareFormatter
+	if len(ranges) > 0 {
 		f = html.New(html.WithClasses(true), html.WithLineNumbers(false), html.HighlightLines(ranges))
 	}
 	var buf bytes.Buffer
@@ -90,6 +95,9 @@ func HighlightThemeLines(code, lang, theme, lines string) string {
 	}
 
 	raw := buf.String()
+	if len(ranges) == 0 {
+		return raw
+	}
 	// Strip the outer <pre class="chroma"><code>...</code></pre> wrapper that
 	// chroma's HTML formatter adds by default - callers provide their own.
 	raw = stripWrapper(raw)

@@ -340,7 +340,7 @@ full-page navigations (`refresh()` reloads, `prefetch()` resolves immediately).
   in place, keeping the SPA alive. Without an HTML body, `404`/`410` load
   `<basePath>/404.html` and `5xx` load `<basePath>/500.html`; other statuses
   (`401`, `403`, `429`) do a full navigation so the browser shows the real response.
-- **Prefetch cache**: documents prefetched by hover, viewport or `prefetch()` stay
+- **Prefetch cache**: documents prefetched by hover, opted-in viewport entry or `prefetch()` stay
   fresh for 30 seconds (`window.__KRATE_CFG__.prefetchTTL`), are used at most once,
   and are bounded (LRU). `refresh()` and `krate:revalidate` bypass it.
 - **Races**: a newer navigation aborts the older fetch; a superseded response never

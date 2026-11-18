@@ -54,7 +54,7 @@ func nextAuthProject(t *testing.T, config string) string {
 
 func TestNextAuthIsPortedToKrateAuth(t *testing.T) {
 	root := nextAuthProject(t, nextAuthFixtureConfig)
-	rep, err := ScanNextWithOptions(root, ScanOptions{UpdatePackage: true})
+	rep, err := ScanNextWithOptions(root, ScanOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 `)
 	writeNextFile(t, root, "src/middleware.ts", "import { auth } from '@/auth';\n\nexport default auth((req) => {});\n")
 	writeNextFile(t, root, "src/types/next-auth.d.ts", "import 'next-auth';\ndeclare module 'next-auth' { interface Session { x: string } }\n")
-	rep, err := ScanNext(root)
+	rep, err := ScanNextWithOptions(root, ScanOptions{NoUpdatePackage: true})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -174,9 +174,15 @@ func TestTrimmedRuntimeDefinesEmittedNames(t *testing.T) {
 		switch {
 		case strings.HasPrefix(d.Name(), "runtime.") && strings.HasSuffix(d.Name(), ".js"):
 			runtimeJS = string(data)
-		case strings.HasSuffix(d.Name(), ".js"), strings.HasSuffix(d.Name(), ".html"):
+		case strings.HasSuffix(d.Name(), ".js"):
 			pageJS.Write(data)
 			pageJS.WriteByte('\n')
+		case strings.HasSuffix(d.Name(), ".html"):
+			scripts, _, _ := scanPageMarkup(string(data))
+			for _, s := range scripts {
+				pageJS.WriteString(s)
+				pageJS.WriteByte('\n')
+			}
 		}
 		return nil
 	})
@@ -186,13 +192,15 @@ func TestTrimmedRuntimeDefinesEmittedNames(t *testing.T) {
 	if runtimeJS == "" {
 		t.Fatal("no runtime chunk was written")
 	}
-	if strings.Contains(runtimeJS, "longestIncreasingSubsequence") != strings.Contains(runtimeJS, "krateBindList:") {
+	if !strings.Contains(runtimeJS, "krateBindList:") {
 		t.Fatal("test cannot tell how the runtime chunk lists its exports")
 	}
 
-	// The bundles list their exports as `name:()=>binding` in an export table.
+	// The prebuilt bundles list their exports as `name:()=>binding` in an
+	// export table; a runtime bundled for the site assigns them with
+	// Object.assign(window,{name:binding,...}).
 	defined := func(name string) bool {
-		return regexp.MustCompile(`[{,]`+regexp.QuoteMeta(name)+`:\(\)=>`).MatchString(runtimeJS) ||
+		return regexp.MustCompile(`[{,]`+regexp.QuoteMeta(name)+`:(\(\)=>|[A-Za-z_$])`).MatchString(runtimeJS) ||
 			strings.Contains(runtimeJS, "window."+name+"=")
 	}
 	full := map[string]bool{}
@@ -201,10 +209,7 @@ func TestTrimmedRuntimeDefinesEmittedNames(t *testing.T) {
 	}
 	// Names the page code uses, directly or through the bootstrap helpers it
 	// calls (only helpers that the page names).
-	used := map[string]bool{}
-	for _, id := range identRe.FindAllString(pageJS.String(), -1) {
-		used[id] = true
-	}
+	used := jsRefs(pageJS.String())
 	for helper, src := range bootstrapHelperSources(renderer.HydrationBootstrapJS, renderer.CompatBootstrapJS) {
 		if used[helper] {
 			for _, id := range identRe.FindAllString(src, -1) {

@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"compress/gzip"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
@@ -25,6 +24,7 @@ import (
 	"time"
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
+	"github.com/kratejs/krate/packages/compiler/internal/deploy"
 	"github.com/kratejs/krate/packages/compiler/internal/sitepath"
 )
 
@@ -112,12 +112,13 @@ func basePathMiddleware(basePath string, redirects []config.Redirect, next http.
 	if basePath == "" {
 		return next
 	}
-	var outside []config.Redirect
+	var outsideRules []config.Redirect
 	for _, rd := range redirects {
 		if !rd.InBasePath() {
-			outside = append(outside, rd)
+			outsideRules = append(outsideRules, rd)
 		}
 	}
+	outside := compileRedirects(outsideRules)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := r.URL.Path
 		if strings.HasPrefix(p, "/__krate/") || p == "/healthz" || p == "/readyz" {
@@ -147,19 +148,6 @@ func basePathMiddleware(basePath string, redirects []config.Redirect, next http.
 		r.URL.RawPath = ""
 		next.ServeHTTP(&baseLocationWriter{ResponseWriter: w, base: basePath}, r)
 	})
-}
-
-// serveConfigRedirect answers the first rule whose source matches p and
-// reports whether it did.
-func serveConfigRedirect(w http.ResponseWriter, r *http.Request, p string, rules []config.Redirect) bool {
-	for _, rd := range rules {
-		if !matchRedirect(p, rd.Source) {
-			continue
-		}
-		http.Redirect(w, r, rewriteDestination(p, rd.Source, rd.Destination), rd.Status())
-		return true
-	}
-	return false
 }
 
 // baseLocationWriter adds the base path to a root-relative Location header
@@ -417,41 +405,93 @@ func setHeaderUnlessDisabled(h http.Header, name, value string) {
 }
 
 // customHeadersMiddleware applies user-configured response headers (config
-// `headers: [{ source, headers }]`) for requests whose path matches. Runs just
-// inside the security headers so a rule can override a default.
+// `headers: [{ source, headers }]`) for requests whose path and conditions
+// match. The rules are applied when the response header is written, so they
+// win over a header the handler set itself (a static file's Cache-Control, a
+// page's Content-Type), as in Next. The one exception is the immutable
+// Cache-Control Krate gives its own content-hashed assets.
 func customHeadersMiddleware(rules []config.HeaderRule, next http.Handler) http.Handler {
-	if len(rules) == 0 {
+	compiled := compileHeaderRules(rules)
+	if len(compiled) == 0 {
 		return next
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		h := w.Header()
-		for _, rule := range rules {
-			if headerSourceMatches(rule.Source, r.URL.Path) {
-				for k, v := range rule.Headers {
-					h.Set(k, v)
-				}
+		var matched []map[string]string
+		for _, rule := range compiled {
+			if _, _, ok := rule.match(r, r.URL.Path); ok {
+				matched = append(matched, rule.rule.Headers)
 			}
 		}
-		next.ServeHTTP(w, r)
+		if len(matched) == 0 {
+			next.ServeHTTP(w, r)
+			return
+		}
+		next.ServeHTTP(&customHeaderWriter{ResponseWriter: w, rules: matched}, r)
 	})
 }
 
-// headerSourceMatches reports whether a path matches a header rule's source: an
-// exact path, a trailing `*` prefix ("/assets/*"), or a path.Match glob.
-func headerSourceMatches(pattern, p string) bool {
-	pattern = strings.TrimSpace(pattern)
-	if pattern == "" {
-		return false
-	}
-	if !strings.Contains(pattern, "*") {
-		return p == pattern
-	}
-	if strings.HasSuffix(pattern, "*") {
-		return strings.HasPrefix(p, strings.TrimSuffix(pattern, "*"))
-	}
-	ok, _ := path.Match(pattern, p)
-	return ok
+// immutableCacheControl is the Cache-Control of a content-hashed asset.
+const immutableCacheControl = "public, max-age=31536000, immutable"
+
+// customHeaderWriter applies the matched header rules just before the status
+// line is written.
+type customHeaderWriter struct {
+	http.ResponseWriter
+	rules   []map[string]string
+	applied bool
 }
+
+func (cw *customHeaderWriter) apply() {
+	if cw.applied {
+		return
+	}
+	cw.applied = true
+	h := cw.ResponseWriter.Header()
+	keepCache := h.Get("Cache-Control") == immutableCacheControl
+	for _, rule := range cw.rules {
+		for k, v := range rule {
+			switch {
+			case keepCache && strings.EqualFold(k, "Cache-Control"):
+			case strings.EqualFold(k, "Vary"):
+				if !strings.Contains(strings.ToLower(strings.Join(h.Values("Vary"), ",")), strings.ToLower(v)) {
+					h.Add("Vary", v)
+				}
+			default:
+				h.Set(k, v)
+			}
+		}
+	}
+}
+
+func (cw *customHeaderWriter) WriteHeader(code int) {
+	// 1xx responses (103 Early Hints) are not final.
+	if code >= 200 {
+		cw.apply()
+	}
+	cw.ResponseWriter.WriteHeader(code)
+}
+
+func (cw *customHeaderWriter) Write(b []byte) (int, error) {
+	cw.apply()
+	return cw.ResponseWriter.Write(b)
+}
+
+func (cw *customHeaderWriter) Flush() {
+	cw.apply()
+	if f, ok := cw.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (cw *customHeaderWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if hj, ok := cw.ResponseWriter.(http.Hijacker); ok {
+		return hj.Hijack()
+	}
+	return nil, nil, http.ErrNotSupported
+}
+
+// Unwrap lets http.ResponseController reach the underlying writer.
+func (cw *customHeaderWriter) Unwrap() http.ResponseWriter { return cw.ResponseWriter }
 
 // buildCSPHeader returns the CSP directive for the HTTP header. A user-supplied
 // directive wins; otherwise, when enabled, a conservative default is emitted.
@@ -840,7 +880,7 @@ var hashedAssetRe = regexp.MustCompile(`\.[0-9a-z]{6,}\.[a-z0-9]+$|-[0-9a-z]{6,}
 // hash) because Last-Modified has one-second precision.
 func staticCacheControl(urlPath string, dev bool, hashed map[string]bool) string {
 	if hashed[urlPath] {
-		return "public, max-age=31536000, immutable"
+		return immutableCacheControl
 	}
 	if dev {
 		return "no-store"
@@ -880,21 +920,12 @@ func collectHashedAssets(outDir string, userFiles map[string]bool) []string {
 	return out
 }
 
-// loadHashedAssets reads the manifest's hashedAssets set. A missing manifest
+// loadHashedAssets reads the manifest's hashedAssets set, the same list the
+// deploy adapters use for their immutable cache rules. A missing manifest
 // yields an empty set (nothing is immutable), never a guess from file names.
 func loadHashedAssets(outDir string) map[string]bool {
 	set := map[string]bool{}
-	data, err := os.ReadFile(ResolveManifestPath(outDir, "manifest.json"))
-	if err != nil {
-		return set
-	}
-	var m struct {
-		HashedAssets []string `json:"hashedAssets"`
-	}
-	if json.Unmarshal(data, &m) != nil {
-		return set
-	}
-	for _, p := range m.HashedAssets {
+	for _, p := range deploy.LoadHashedAssets(outDir) {
 		set[p] = true
 	}
 	return set

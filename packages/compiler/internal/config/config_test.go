@@ -198,6 +198,49 @@ func TestTrailingSlashAndDeployWorkerConfig(t *testing.T) {
 	}
 }
 
+func TestPrefetchConfig(t *testing.T) {
+	root := t.TempDir()
+	src := `export default { prefetch: "viewport" };`
+	if err := os.WriteFile(filepath.Join(root, "krate.config.ts"), []byte(src), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Prefetch != "viewport" {
+		t.Errorf("prefetch = %q, want viewport", cfg.Prefetch)
+	}
+	bad := Default()
+	bad.Prefetch = "always"
+	if _, err := bad.Validate(); err == nil || !strings.Contains(err.Error(), "prefetch") {
+		t.Errorf("unknown prefetch must be rejected, got %v", err)
+	}
+}
+
+func TestClientRuntimeConfig(t *testing.T) {
+	root := t.TempDir()
+	src := `export default { clientRuntime: { exports: "all" } };`
+	if err := os.WriteFile(filepath.Join(root, "krate.config.ts"), []byte(src), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.AllRuntimeExports() || Default().AllRuntimeExports() {
+		t.Errorf("clientRuntime.exports must load and default to auto")
+	}
+	if w := UnknownKeyWarnings([]byte(`{"clientRuntime":{"exports":"all","export":"all"}}`)); len(w) != 1 || !strings.Contains(w[0], "clientRuntime.export") {
+		t.Errorf("unknown-key warnings = %v", w)
+	}
+	bad := Default()
+	bad.ClientRuntime.Exports = "some"
+	if _, err := bad.Validate(); err == nil || !strings.Contains(err.Error(), "clientRuntime.exports") {
+		t.Errorf("unknown clientRuntime.exports must be rejected, got %v", err)
+	}
+}
+
 func TestRedirectStatusCode(t *testing.T) {
 	for _, c := range []struct {
 		json string

@@ -98,7 +98,7 @@ func plannedBody(t *testing.T, rep *Report, source string) string {
 
 func TestMigrateReactThreeFiberToKrateThree(t *testing.T) {
 	root := threeProject(t, threeScene, nil)
-	rep, err := ScanNextWithOptions(root, ScanOptions{UpdatePackage: true})
+	rep, err := ScanNextWithOptions(root, ScanOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +145,7 @@ func TestMigrateReactThreeFiberToKrateThree(t *testing.T) {
 }
 
 func TestMigrateReactThreeWithoutPackageUpdateAsksForDependency(t *testing.T) {
-	rep, err := ScanNext(threeProject(t, threeScene, nil))
+	rep, err := ScanNextWithOptions(threeProject(t, threeScene, nil), ScanOptions{NoUpdatePackage: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +200,7 @@ func TestMigrateReactThreeKeepsFiberForUnsupportedAPIs(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			rep, err := ScanNextWithOptions(threeProject(t, tc.scene, tc.extra), ScanOptions{UpdatePackage: true})
+			rep, err := ScanNextWithOptions(threeProject(t, tc.scene, tc.extra), ScanOptions{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -224,7 +224,7 @@ func TestMigrateReactThreeLeavesProjectsWithoutFiberAlone(t *testing.T) {
 	root := gapsProject(t, map[string]string{
 		"src/app/page.tsx": "import * as THREE from 'three';\nexport default function P() { return <p>{String(new THREE.Vector3().x)}</p>; }\n",
 	})
-	rep, err := ScanNextWithOptions(root, ScanOptions{UpdatePackage: true})
+	rep, err := ScanNextWithOptions(root, ScanOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

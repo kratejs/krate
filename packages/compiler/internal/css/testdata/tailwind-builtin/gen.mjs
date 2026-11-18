@@ -4,7 +4,7 @@
 import { compile } from '@tailwindcss/node'
 import fs from 'node:fs'
 import path from 'node:path'
-import { fixes, sample, variants } from './cases.mjs'
+import { fixes, sample, variants, arbitrary } from './cases.mjs'
 
 const base = path.resolve('.')
 const themeCss = fs.readFileSync('node_modules/tailwindcss/theme.css', 'utf8')
@@ -32,7 +32,7 @@ const clean = (css) =>
     .trim()
 
 const input = '@import "tailwindcss/theme.css" layer(theme);\n@tailwind utilities;'
-const classes = [...new Set([...fixes, ...sample, ...variants])]
+const classes = [...new Set([...fixes, ...sample, ...variants, ...arbitrary])]
 const out = {
   tailwind: JSON.parse(fs.readFileSync('node_modules/tailwindcss/package.json', 'utf8')).version,
   properties: {},

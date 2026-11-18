@@ -88,7 +88,7 @@ A React class component must define render(). Without it Krate cannot lower the 
 
 **Unknown instance property on a class component**
 
-The class reads this.<name>, but <name> is not a field, method, accessor, props, state, context, setState or forceUpdate, and nothing assigns it. Lowered classes have no React base-class internals (this.refs, this.updater, this.isMounted). Declare the property as a field or method, or read it from props or state.
+The class reads this.&lt;name&gt;, but &lt;name&gt; is not a field, method, accessor, props, state, context, setState or forceUpdate, and nothing assigns it. Lowered classes have no React base-class internals (this.refs, this.updater, this.isMounted). Declare the property as a field or method, or read it from props or state.
 
 ### KR3003
 
@@ -172,9 +172,9 @@ The value of use(promise) is reactive and is read through its variable. Assign i
 
 ### KR4005
 
-**<Profiler onRender> is never called**
+**&lt;Profiler onRender&gt; is never called**
 
-Krate components do not re-render, so there are no commit timings to report. <Profiler> renders its children; measure with the browser performance tools instead.
+Krate components do not re-render, so there are no commit timings to report. &lt;Profiler&gt; renders its children; measure with the browser performance tools instead.
 
 ### KR4006
 
@@ -190,9 +190,9 @@ The module passed to lazy() must `export default` a function component, or the l
 
 ### KR4008
 
-**Component suspends outside a <Suspense> boundary**
+**Component suspends outside a &lt;Suspense&gt; boundary**
 
-A component reads use(promise) or a resource but no <Suspense> encloses it, so there is no fallback to show while it loads and its bindings stay empty until then. Wrap it in <Suspense fallback={...}>.
+A component reads use(promise) or a resource but no &lt;Suspense&gt; encloses it, so there is no fallback to show while it loads and its bindings stay empty until then. Wrap it in &lt;Suspense fallback={...}&gt;.
 
 ## KR5xxx: events, forms and refs
 
@@ -250,7 +250,7 @@ React shows the ref's value as of the latest render, so a later state update rev
 
 **Each child in a list should have a unique key prop**
 
-A list whose items can change at runtime (its array reads a signal, state or a runtime value) returns elements without a key, so rows are matched by index. When items are reordered, inserted or removed, row state (input values, focus, component state, effects) stays with the position instead of following the item, exactly as in React. Add a stable, unique key from the item, for example <li key={item.id}>. Lists over build-time constants are not reported.
+A list whose items can change at runtime (its array reads a signal, state or a runtime value) returns elements without a key, so rows are matched by index. When items are reordered, inserted or removed, row state (input values, focus, component state, effects) stays with the position instead of following the item, exactly as in React. Add a stable, unique key from the item, for example &lt;li key={item.id}&gt;. Lists over build-time constants are not reported.
 
 ### KR6002
 
@@ -276,7 +276,7 @@ A "use server" directive at the top of a function inside a component is hoisted 
 
 **useFormStatus() component does not render an element**
 
-Krate finds the form a useFormStatus() call belongs to from the DOM element the component returns. When the component returns another component, a string, or nothing, the status cannot be connected and always reads as idle. Return a DOM element (for example the submit <button>).
+Krate finds the form a useFormStatus() call belongs to from the DOM element the component returns. When the component returns another component, a string, or nothing, the status cannot be connected and always reads as idle. Return a DOM element (for example the submit &lt;button&gt;).
 
 ### KR7003
 
@@ -500,6 +500,12 @@ A relative or package `@import` in a stylesheet could not be resolved, for examp
 
 After writing the output, Krate checks that every quoted `/chunks/...` URL in the page HTML, page and island scripts, server bundles and manifests names a file in the `chunks` directory. A missing chunk means the browser gets a 404 for it, so the island or page script that imports it never runs. This points at a bug in Krate, not in the app: the build fails instead of shipping the broken page. Files copied from the public directory are not checked. Report the error with the URLs it lists. This is an error.
 
+### KR7147
+
+**Stylesheet linked from public/ is not minified or hashed**
+
+A page or layout links a `.css` file that lives in `public/` with `<link rel="stylesheet">`. Files in `public/` are copied as written, so the stylesheet is neither minified nor given a content hash, cannot be cached as immutable, and is a separate render-blocking request in front of the bundled styles. Move the file under `src/` and import it from the layout or page (`import "../styles/site.css"`) so it goes through the CSS pipeline. Import it before other stylesheets if it used to be linked before them, since the bundled order follows import order. This is a warning.
+
 ### KR7150
 
 **Unknown code theme**
@@ -516,7 +522,7 @@ Code that is highlighted in the browser (a `<Code>` whose text changes at run ti
 
 **API not supported by the embedded API runtime**
 
-API routes and middleware run in Krate's embedded QuickJS runtime unless `ssr.apiRuntime` (or `ssr.middlewareRuntime`) selects `"node"`, `"bun"` or `"deno"`. The build scans the modules each route or middleware bundles and reports globals that runtime lacks, such as `TransformStream`, `WebSocket`, `Buffer` or `crypto.subtle.encrypt`, with the location of the first use in each file. Calling one throws a `NotSupportedError` carrying the same code at run time. Only global references count: an import or local variable of the same name, a `typeof X` check and code guarded by one are not reported. In a dependency the warning is reported once per package and API, since libraries often detect features before using them. Follow the hint (most APIs have a portable alternative), or select the Node runtime. A route that imports a `node:` builtin is served by Node automatically and is not scanned. The full list is in the [API runtime compatibility](/docs/reference/api-runtime-compat/) reference. This is a warning.
+API routes and middleware run in Krate's embedded QuickJS runtime unless `ssr.apiRuntime` (or `ssr.middlewareRuntime`) selects `"node"`, `"bun"` or `"deno"`. The build scans the modules each route or middleware bundles and finds globals that runtime lacks, such as `Buffer`, `__dirname`, `process.cwd`, `TransformStream` or `WebSocket`. Only global references count: an import or local variable of the same name, a `typeof X` check and code guarded by one are not reported. When `ssr.apiRuntime` is unset, an API route whose bundled modules use such a global is served by the Node sidecar instead, and the build prints one line naming the first use. The diagnostic is therefore a warning for a use that the build cannot move (a route whose scan is incomplete, middleware) and an error when the embedded runtime was requested explicitly (`ssr.apiRuntime: "quickjs"`, or `export const runtime = "edge"` in the route), because the route would fail at run time with a `NotSupportedError` carrying the same code. Middleware has no automatic move: select `ssr.middlewareRuntime: "node"`. In a dependency of an explicitly embedded route the report stays a warning, once per package and API, since libraries often detect features before using them. A route that imports a `node:` builtin, or exports `runtime = "nodejs"`, is served by Node and is not scanned. The full list is in the [API runtime compatibility](/docs/reference/api-runtime-compat/) reference.
 
 ### KR7170
 
@@ -1076,7 +1082,7 @@ Preact islands and real-React islands (those that use a library built on react-r
 
 **Render value keeps its first value**
 
-React recomputes every value in a component body on each render. Krate compiles a body value that reads state, props, context or a custom hook result into a derived value that is recomputed when its inputs change. This value could not be compiled that way: it is reassigned inside a closure (an event handler or effect), or by a body statement that also writes another variable, or it is read between the statements that build it. It keeps the value it had when the component hydrated. Compute it in a single expression (const label = n > 1 ? "items" : "item"), or keep the changing value in state.
+React recomputes every value in a component body on each render. Krate compiles a body value that reads state, props, context or a custom hook result into a derived value that is recomputed when its inputs change. This value could not be compiled that way: it is reassigned inside a closure (an event handler or effect), or by a body statement that also writes another variable, or it is read between the statements that build it. It keeps the value it had when the component hydrated. Compute it in a single expression (const label = n &gt; 1 ? "items" : "item"), or keep the changing value in state.
 
 ### KR8302
 
@@ -1088,7 +1094,7 @@ Hydration code (an event handler, effect, derived value, text binding or a modul
 
 **Environment variable is not exposed to client code**
 
-Client code and statically rendered pages cannot read process.env or import.meta.env values: they are build and server-time only and are never written into HTML or JavaScript. The read yields undefined. Name the variable with the KRATE_PUBLIC_ prefix (KRATE_PUBLIC_API_URL) to inline its value at build time, or read it in a server component, API route or server action instead. import.meta.env.MODE, DEV, PROD, BASE_URL and SSR are always available.
+Client code and statically rendered pages cannot read process.env or import.meta.env values: they are build and server-time only and are never written into HTML or JavaScript. The read yields undefined. Name the variable with the KRATE_PUBLIC_ prefix (KRATE_PUBLIC_API_URL), or list its prefix in envPrefix in krate.config.ts, to inline its value at build time, and make sure the value is defined in the .env files or the build environment; or read it in a server component, API route or server action instead. import.meta.env.MODE, DEV, PROD, BASE_URL and SSR are always available.
 
 ### KR8320
 
@@ -1155,6 +1161,12 @@ Tags inside `<Head>` (and `<title>`, `<meta>` and `<link>` rendered on their own
 **Component with state in a prop is rendered twice**
 
 A prop that holds JSX with a component that has state (`slot={<Probe />}`, where Probe uses createSignal or useState) is one component instance. The receiving component reads the prop in more than one place, but the instance can only be mounted in one of them, so the other copy shows the server markup without ever hydrating. Render the prop in one place, or give each place its own element (a separate prop for each place).
+
+### KR8355
+
+**Route source uses a regex feature Go cannot run**
+
+The `source` of a redirect, rewrite or header rule, or the `value` of one of its `has` or `missing` conditions, uses a regular-expression feature that Go's RE2 engine does not have: lookbehind, a backreference, or a lookahead that is not the start of a parameter pattern. Krate refuses to load the config rather than keep a rule that never matches. A leading negative lookahead inside a parameter, such as `/store/:slug((?!compare$)[^/]+)`, is supported. Otherwise rewrite the pattern without the feature, or handle the request in `middleware.ts`. This is an error.
 
 ### KR8360
 

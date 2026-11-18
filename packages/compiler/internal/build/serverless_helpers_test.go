@@ -79,11 +79,25 @@ func serverlessProject(t *testing.T, fixture string) (string, *config.Config) {
 	return root, cfg
 }
 
+// nodeBundlePath is where the node target wrote server.mjs: directly in
+// .krate/server, or below the project's path in the outputFileTracingRoot.
+func nodeBundlePath(root string, cfg *config.Config) string {
+	dir := filepath.Join(cfg.OutDir, ".krate", "server")
+	if cfg.OutputFileTracingRoot != "" {
+		tr, err1 := filepath.EvalSymlinks(cfg.OutputFileTracingRoot)
+		pr, err2 := filepath.EvalSymlinks(root)
+		if rel, err3 := filepath.Rel(tr, pr); err1 == nil && err2 == nil && err3 == nil {
+			dir = filepath.Join(dir, rel)
+		}
+	}
+	return filepath.Join(dir, "server.mjs")
+}
+
 // startNodeBundle runs a node-target server.mjs on a free port.
 func startNodeBundle(t *testing.T, root string, cfg *config.Config, env ...string) string {
 	t.Helper()
 	port := freePort(t)
-	bundle := filepath.Join(cfg.OutDir, ".krate", "server", "server.mjs")
+	bundle := nodeBundlePath(root, cfg)
 	cmd := exec.Command("node", bundle)
 	cmd.Dir = root
 	cmd.Env = append(os.Environ(), fmt.Sprintf("PORT=%d", port), "HOST=127.0.0.1")

@@ -10,6 +10,7 @@ import (
 
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	irtree "github.com/kratejs/krate/packages/compiler/internal/irtree"
+	"github.com/kratejs/krate/packages/compiler/internal/pluginapi"
 	"github.com/kratejs/krate/packages/compiler/internal/renderer"
 )
 
@@ -27,6 +28,9 @@ func resetRuntimeBundleMemo() {
 	runtimeBundleMemo.mu.Lock()
 	defer runtimeBundleMemo.mu.Unlock()
 	runtimeBundleMemo.m = make(map[string]string)
+	shakenRuntimeMemo.mu.Lock()
+	shakenRuntimeMemo.m = make(map[string]string)
+	shakenRuntimeMemo.mu.Unlock()
 }
 
 func loadRuntimeFromDisk(projectRoot string) string {
@@ -50,30 +54,32 @@ type runtimeChunkOptions struct {
 	Compat bool
 	// Suspense appends the Suspense/use()/lazy/transition runtime.
 	Suspense bool
-	// Trim assembles only the runtime features Scan references (production
+	// Trim assembles only the runtime features Usage needs (production
 	// builds); otherwise the full hydration bundle is written.
 	Trim bool
-	// Scan is the client code checked for runtime feature references.
-	Scan string
+	// Usage is what the site's client code needs from the runtime.
+	Usage runtimeUsage
+	// Features, when set, receives the optional features the trimmed runtime
+	// includes (nil when the runtime is not trimmed).
+	Features *[]string
 }
 
-// runtimeNeedsCompat reports whether any page's hydration script references a
-// React compatibility API that lives in CompatBootstrapJS.
-func runtimeNeedsCompat(results []*PageResult) bool {
-	markers := []string{
-		"useImperativeHandle", "useDebugValue",
-		"isValidElement", "Children", "cloneElement", "createRef",
-		// Lazy chunks are separate files; their code may use compat APIs.
-		"__krateLazy(",
+// compatRefs are the React compatibility APIs that live in
+// CompatBootstrapJS.
+var compatRefs = []string{
+	"useImperativeHandle", "useDebugValue",
+	"isValidElement", "Children", "cloneElement", "createRef",
+}
+
+// runtimeNeedsCompat reports whether the site's client code references a
+// React compatibility API, or loads lazy chunks that were not scanned.
+func runtimeNeedsCompat(u runtimeUsage) bool {
+	if u.LazyUnscanned {
+		return true
 	}
-	for _, r := range results {
-		if r == nil || r.HydrationJS == "" {
-			continue
-		}
-		for _, marker := range markers {
-			if strings.Contains(r.HydrationJS, marker) {
-				return true
-			}
+	for _, name := range compatRefs {
+		if u.Refs[name] {
+			return true
 		}
 	}
 	return false
@@ -98,9 +104,8 @@ func pageNeedsRuntime(r *PageResult) bool {
 	if perRequestClientCode(r) {
 		return true
 	}
-	return strings.Contains(r.HTML, "<"+islandMarkup) ||
-		strings.Contains(r.HTML, actionsMarkup) ||
-		strings.Contains(r.HTML, "/__krate/action/")
+	_, island, actions := scanPageMarkup(r.HTML)
+	return island || actions
 }
 
 // perRequestClientCode reports whether the HTML a page produces per request
@@ -234,8 +239,13 @@ func probeNamedBundleFromDisk(projectRoot string, names []string) string {
 // Returns empty string if runtime is unavailable.
 func writeRuntimeChunk(outDir string, shouldMinify bool, projectRoot string, opts runtimeChunkOptions) (string, error) {
 	runtime := ""
+	suspenseIncluded := false
 	if opts.Trim {
-		runtime, _ = loadRuntimeFeatures(projectRoot, opts.SPA, opts.Scan)
+		var included []string
+		runtime, included, suspenseIncluded = loadRuntimeFeatures(projectRoot, opts)
+		if opts.Features != nil {
+			*opts.Features = included
+		}
 	}
 	if runtime == "" {
 		runtime = loadRuntimeFromDiskFor(projectRoot, opts.SPA)
@@ -251,7 +261,7 @@ func writeRuntimeChunk(outDir string, shouldMinify bool, projectRoot string, opt
 	if opts.Compat {
 		runtime += renderer.CompatBootstrapJS
 	}
-	if opts.Suspense {
+	if opts.Suspense && !suspenseIncluded {
 		suspense := loadNamedBundleFromDisk(projectRoot, "krate-suspense.js")
 		if suspense == "" {
 			fmt.Fprintf(os.Stderr, "  %sWarning:%s the Suspense runtime (krate-suspense.js) was not found next to the hydration runtime; Suspense, use(), lazy() and transitions will not work (rebuild @krate/runtime)\n", cYellow, cReset)
@@ -324,11 +334,43 @@ func warnMissingRuntime(runtimeJS string, results []*PageResult) {
 // built pages. Dev builds always write the full runtime: a rebuild of a few
 // pages must not change what the others were built against.
 func (b *Builder) runtimeChunkOptions(results []*PageResult) runtimeChunkOptions {
+	if b.runtimeResultsHook != nil {
+		b.runtimeResultsHook(results)
+	}
+	usage := runtimeUsageOf(results)
+	usage.addScriptFiles(b.publicScript)
+	if b.Cfg.AllRuntimeExports() {
+		usage.Unknown = true
+	}
 	return runtimeChunkOptions{
 		SPA:      b.Cfg.SPAEnabled(),
-		Compat:   runtimeNeedsCompat(results),
-		Suspense: runtimeNeedsSuspense(results),
+		Compat:   runtimeNeedsCompat(usage),
+		Suspense: runtimeNeedsSuspense(usage),
 		Trim:     !b.DevMode,
-		Scan:     runtimeScanText(results),
+		Usage:    usage,
+		Features: &b.runtimeFeatures,
 	}
+}
+
+// publicScript reads the file of the public directory a page script at
+// sitePath loads (the build copies it to dist as is).
+func (b *Builder) publicScript(sitePath string) (string, bool) {
+	pub := b.Cfg.PublicDir
+	if pub == "" {
+		return "", false
+	}
+	if base := b.Cfg.BaseURLPath(); base != "" {
+		if rest, ok := strings.CutPrefix(sitePath, base+"/"); ok {
+			sitePath = "/" + rest
+		}
+	}
+	file := filepath.Join(pub, filepath.FromSlash(strings.TrimPrefix(sitePath, "/")))
+	if !pluginapi.WithinRoot(pub, file) {
+		return "", false
+	}
+	data, err := os.ReadFile(file)
+	if err != nil {
+		return "", false
+	}
+	return string(data), true
 }

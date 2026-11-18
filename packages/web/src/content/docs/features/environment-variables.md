@@ -111,6 +111,15 @@ JavaScript, so a page can read them with either spelling:
 const base = process.env.KRATE_PUBLIC_API_URL;
 ```
 
+The prefix list is the `envPrefix` config key, `["KRATE_PUBLIC_"]` by default.
+A project that already names its public variables another way lists those
+prefixes too (each ends in `_`; an empty prefix is rejected because it would
+expose every variable):
+
+```ts
+export default defineConfig({ envPrefix: ["KRATE_PUBLIC_", "NEXT_PUBLIC_"] });
+```
+
 Values come from the `.env` files described above and from the shell
 environment (the shell wins). Changing one of them (or the mode) rebuilds the pages that
 were built with the old value; the build cache does not replay them. These build constants are always available, with
@@ -122,7 +131,10 @@ client and static code); `process.env.NODE_ENV` is `"development"` or
 Reading any other `process.env.X` or `import.meta.env.X` in a client component
 or a statically rendered page is not possible: the value is never written to
 output and the read is `undefined`. Krate reports it as warning
-[KR8310](/docs/reference/diagnostics/) with the file, line and column.
+[KR8310](/docs/reference/diagnostics/) with the file, line and column. Its hint
+says why: the variable is public but not set (and which `.env` files Krate
+reads), a variable with another public prefix is set under the same name, or the
+prefix is not in `envPrefix`.
 Server components, API routes, plugins and server actions keep full access to
 `process.env`.
 
@@ -130,7 +142,7 @@ Server components, API routes, plugins and server actions keep full access to
 
 Environment values are **build/serve-time only** and are **never emitted into
 client HTML, JavaScript, or hydration payloads**, except variables you opt in
-with the `KRATE_PUBLIC_` prefix. Do not put secrets in values
+with a public prefix (`KRATE_PUBLIC_` by default, see `envPrefix`). Do not put secrets in values
 you render into a page component tree; only server-only contexts (API routes,
 server components, plugins) may read them. Krate logs only that a given env
 file was found/loaded - never its values.

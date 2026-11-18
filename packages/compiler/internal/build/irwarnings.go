@@ -56,14 +56,17 @@ func printModuleWarnings(w io.Writer, mods []*bundler.Module) {
 	printTreeWarnings(w, out)
 }
 
-// envPending is a module's KR8310 warnings, held back until the build knows
-// whether the module is shipped to the browser.
+// envPending is a module's KR8310 and KR7116 warnings, held back until the
+// build knows whether the module is shipped to the browser. KR7116 sits on the
+// page's entry module: a server tree's entry is not browser code, and its
+// client boundaries and server bundle are bundled apart (esbuild renames what
+// clashes), so no shared namespace exists to clash in.
 type envPending struct {
 	path  string
 	diags []diag.Diagnostic
 }
 
-// holdEnvWarnings takes the KR8310 warnings off the bundle's modules (copies,
+// holdEnvWarnings takes the KR8310 and KR7116 warnings off the bundle's modules (copies;
 // the parse cache shares the originals) and returns them.
 func holdEnvWarnings(bundle *bundler.Bundle) []envPending {
 	var held []envPending
@@ -73,7 +76,7 @@ func holdEnvWarnings(bundle *bundler.Bundle) []envPending {
 		}
 		var keep, env []diag.Diagnostic
 		for _, d := range m.Diagnostics {
-			if d.Code == diag.CodeEnvNotExposed {
+			if d.Code == diag.CodeEnvNotExposed || d.Code == diag.CodeExportCollision {
 				env = append(env, d)
 			} else {
 				keep = append(keep, d)
@@ -108,8 +111,15 @@ func (b *Builder) releaseEnvWarnings(held []envPending, bundle *bundler.Bundle, 
 		if browser != nil && !browser[filepath.Clean(h.path)] && !browser[canonicalPath(h.path)] {
 			continue
 		}
-		mods = append(mods, &bundler.Module{Path: h.path, Diagnostics: h.diags})
-		out = append(out, h.diags...)
+		diags := make([]diag.Diagnostic, len(h.diags))
+		for i, d := range h.diags {
+			if d.Code == diag.CodeEnvNotExposed {
+				d.Hint = b.envNotExposedHint(d)
+			}
+			diags[i] = d
+		}
+		mods = append(mods, &bundler.Module{Path: h.path, Diagnostics: diags})
+		out = append(out, diags...)
 	}
 	printModuleWarnings(os.Stderr, mods)
 	return out

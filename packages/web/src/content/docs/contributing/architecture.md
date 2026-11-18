@@ -44,14 +44,23 @@ in the output as static HTML with no client runtime.
 
 ## CSS pipeline
 
-Plain CSS imported or referenced in pages is collected per page and written as
-one stylesheet per page. Output filenames are content-hashed
-(`styles.<hash>.css`), so pages with byte-identical stylesheets share one file
-and hashes are stable across builds. There is no rule-level splitting: moving or
-sorting rules between files would reorder the cascade. The processing steps are:
+Plain CSS imported or referenced in pages is collected per page, and each source
+(a stylesheet file, the generated CSS-signal rules, the syntax-highlighting
+sheet) is processed on its own. The sources are written as content-hashed files
+(`styles.<hash>.css`) shared by every page that uses them, and linked in source
+order. Adjacent sources are grouped by `planCSSSheets` (`internal/build/pagecss.go`)
+from the set of pages each one is used on: sources used by the same pages are one
+file, a small source joins a neighbour when the requests saved outweigh the bytes
+pages that use only one of the two would download twice, and a page links at most
+five page stylesheets. There is no rule-level splitting: moving or sorting rules
+between files would reorder the cascade. `krate dev` keeps one stylesheet per page.
+The processing steps are:
 
 1. **Collect** CSS per page from its module graph (module CSS, layout CSS,
-   CSS-signal rules), in source/import order.
+   CSS-signal rules), in source/import order. A stylesheet imported only by
+   modules of a package that declares `sideEffects` is dropped unless one of
+   those modules is reachable from the names the page imports or uses
+   (`internal/bundler/sideeffects.go`).
 2. **Inline `@import`** recursively with a comment- and string-aware scan,
    relative to each file's own directory (files anywhere under the project root
    and bare `node_modules` specifiers, including a package's `style` field).
@@ -80,7 +89,8 @@ sorting rules between files would reorder the cascade. The processing steps are:
    an intentional fallback. Strings, `url()`, `data:` URIs, `/*!` license
    comments, and `!important` are preserved. With minification off, only the
    duplicate-declaration fold runs and formatting is kept.
-6. **Hash** the result into `styles.<hash>.css`; identical sheets share a file.
+6. **Hash** each group of sources into `styles.<hash>.css`; pages share the
+   files of the sources they have in common.
 
 CSS Modules names are hashed as `className_<fnv32a_hash>`, where the hash is
 FNV-32a of the absolute file path (6-char base36). Scoping is tokenizer-based:
