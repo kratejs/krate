@@ -142,6 +142,63 @@ describe('SPA navigation', () => {
   });
 });
 
+describe('focus', () => {
+  const search = (q: string) =>
+    page('Store', `<div><input aria-label="Search templates" value="${q}"><input aria-label="Other"></div>${q ? '<button aria-label="Clear">x</button>' : ''}`);
+
+  // A query-only navigation (router.replace('?q=...')) or a refresh replaces
+  // the page DOM; the focused control keeps focus, as in React.
+  it('keeps focus on the same control across a same-page navigation', async () => {
+    routes['/store?q=cv'] = { body: search('cv') };
+    routes['/store'] = { body: search('') };
+    await krateRouter.push('/store?q=cv');
+    await settle();
+    const input = document.querySelector('input[aria-label="Search templates"]') as HTMLInputElement;
+    input.focus();
+    input.setSelectionRange(0, 0);
+    await krateRouter.replace('/store', { scroll: false });
+    await settle();
+    const now = document.querySelector('input[aria-label="Search templates"]') as HTMLInputElement;
+    expect(now).not.toBe(input);
+    expect(document.activeElement).toBe(now);
+
+    (document.querySelector('input[aria-label="Other"]') as HTMLInputElement).focus();
+    await krateRouter.refresh();
+    await settle();
+    expect(document.activeElement).toBe(document.querySelector('input[aria-label="Other"]'));
+  });
+
+  it('moves focus to the content on a navigation to another page', async () => {
+    routes['/store'] = { body: search('') };
+    await krateRouter.push('/store');
+    await settle();
+    (document.querySelector('input[aria-label="Search templates"]') as HTMLInputElement).focus();
+    await krateRouter.push('/about');
+    await settle();
+    expect(document.activeElement).toBe(document.getElementById('root'));
+  });
+});
+
+describe('a second copy of the router module', () => {
+  // Island bundles carry their own router.ts; its useRouter().replace() used to
+  // do a full document load because that copy is never initialized.
+  it('hands navigations to the initialized router', async () => {
+    const spec = './router?island-copy';
+    const copy = (await import(/* @vite-ignore */ spec)) as typeof import('./router');
+    expect(copy.krateRouter).not.toBe(krateRouter);
+    const seen: string[] = [];
+    const off = copy.subscribeNavigation((s) => seen.push(s.pathname + s.search));
+    routes['/store?q=cv'] = { body: page('Store', '<input aria-label="q">') };
+    await copy.krateRouter.replace('/store?q=cv', { scroll: false });
+    await settle();
+    expect(hardNavs).toEqual([]);
+    expect(location.pathname + location.search).toBe('/store?q=cv');
+    expect(copy.getNavigationState().search).toBe('?q=cv');
+    expect(seen).toContain('/store?q=cv');
+    off();
+  });
+});
+
 describe('races', () => {
   it('a slower superseded navigation never overwrites a newer one', async () => {
     let open!: () => void;

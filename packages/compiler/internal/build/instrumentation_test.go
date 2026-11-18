@@ -100,8 +100,13 @@ func TestInstrumentationRunsOncePerServerWithClusterWorkers(t *testing.T) {
 	// cluster spreads over its workers.
 	var mu sync.Mutex
 	pids := map[string]bool{}
-	// Workers come up one after the other, so keep sending until both answered.
-	for round := 0; round < 10 && len(pids) < 2; round++ {
+	// Workers come up one after the other (slowly on a loaded machine), so keep
+	// sending until both answered.
+	deadline := time.Now().Add(20 * time.Second)
+	for round := 0; len(pids) < 2 && time.Now().Before(deadline); round++ {
+		if round > 0 {
+			time.Sleep(200 * time.Millisecond)
+		}
 		var wg sync.WaitGroup
 		for i := 0; i < 24; i++ {
 			wg.Add(1)

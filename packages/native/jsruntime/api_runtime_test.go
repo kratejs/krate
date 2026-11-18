@@ -174,3 +174,27 @@ export async function GET(request) {
 		t.Errorf("Set-Cookie = %v", result.Headers)
 	}
 }
+
+// TestAPIRouteStaticLeafUnderDynamicDir: a static route file inside a dynamic
+// directory (orders/[id]/download.js) resolves, next to orders/[id].js.
+func TestAPIRouteStaticLeafUnderDynamicDir(t *testing.T) {
+	apiDir := filepath.Join(t.TempDir(), "api")
+	if err := os.MkdirAll(filepath.Join(apiDir, "orders", "[id]"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(filepath.Join(apiDir, "orders", "[id].js"), []byte("function GET() { return 'order'; }"), 0o644)
+	_ = os.WriteFile(filepath.Join(apiDir, "orders", "[id]", "download.js"), []byte("function GET() { return 'download'; }"), 0o644)
+	_ = os.WriteFile(filepath.Join(apiDir, "orders", "[id]", "[part].js"), []byte("function GET() { return 'part'; }"), 0o644)
+
+	rt := NewAPIRouteRuntime(apiDir)
+	for path, want := range map[string]string{
+		"/api/orders/7":          `"order"`,
+		"/api/orders/7/download": `"download"`,
+		"/api/orders/7/other":    `"part"`,
+	} {
+		res := rt.Execute(APIRequest{Method: "GET", Path: path})
+		if res.Status != 200 || string(res.Body) != want {
+			t.Errorf("%s: got %d %q, want 200 %q", path, res.Status, res.Body, want)
+		}
+	}
+}

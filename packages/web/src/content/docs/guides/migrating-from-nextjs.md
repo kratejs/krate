@@ -67,7 +67,7 @@ and `--update-package` is still accepted). The plan lists each change:
   deploy target (`krate build` and `krate start`, or `krate deploy` and
   `node dist/.krate/server/.../server.mjs` for `output: 'standalone'`). Other
   scripts keep their text with `next <command>` rewritten the same way:
-  `next typegen &&` is dropped, and a `next lint` or other command Krate has no
+  `next typegen` becomes `krate types`, and a `next lint` or other command Krate has no
   equivalent for stays, with an info line, and keeps `next` installed.
 - Every `@krate/*` package the migrated code imports is added (`@krate/core`,
   `@krate/runtime`, `@krate/components`, and `@krate/auth`, `@krate/three` or
@@ -298,8 +298,9 @@ The first pass:
   `request.cookies` (`get`, `getAll`, `has`, read-only) and `request.nextUrl`
   (a `URL` with `searchParams`, `pathname`, `basePath` and `clone()`; the
   pathname never includes the base path), and the handler is typed as
-  `KrateRequest` from `@krate/runtime/server`. `NextResponse.json` and
-  `NextResponse.redirect` come from a small generated shim whose responses carry
+  `KrateRequest` from `@krate/runtime/server`. `NextResponse` comes from a small
+  generated shim: a `Response` subclass (`new NextResponse(body, init)`,
+  `NextResponse.json`, `NextResponse.redirect`) whose responses carry
   `cookies.set/delete/get/getAll/has`. `after()` from `next/server` becomes
   `after` from `@krate/runtime/server` and runs once the response is sent (see
   [API routes](/docs/features/api-routes/#after-the-response)). Only what is
@@ -323,9 +324,13 @@ The first pass:
   target (see [Timeouts](/docs/features/api-routes/#timeouts)). It must be a
   literal number; a computed value is reported as manual work. On a page it has
   no meaning and is dropped;
-- drops the other route segment config that only steers Vercel (`runtime`,
-  `preferredRegion`) with an info note per file and one aggregated warning, since
-  Krate self-hosts on Node. `fetchCache` is kept and reported as one aggregated
+- keeps `export const runtime` in API routes: `'nodejs'` serves the route from
+  Node and `'edge'` keeps it on the embedded runtime. Without it, a route runs
+  on the embedded runtime unless its code (or a helper it imports) uses a Node
+  built-in, a native package or a Node-only global such as `Buffer`; then it
+  runs on Node automatically. `runtime` on a page and `preferredRegion` only
+  steer Vercel, so they are dropped with an info note per file and one
+  aggregated warning. `fetchCache` is kept and reported as one aggregated
   manual item (set the cache option on the `fetch` calls that relied on it);
 - creates `krate.config.ts` when the project has none, or merges missing
   Next-derived keys into an existing config (existing keys win);

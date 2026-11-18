@@ -52,7 +52,10 @@ func secProject(t *testing.T) (root string, cfg *config.Config) {
 		{Source: "/legacy/*", Destination: "/:splat"},
 		{Source: "/u/:name", Destination: "/:name"},
 		{Source: "/docs/:path*", Destination: "/documentation/:path*", Permanent: true},
+		{Source: "/store/:slug((?!compare$)[^/]+)", Destination: "/templates/:slug", Permanent: true},
+		{Source: "/moved", Destination: "/", Permanent: true, StatusCode: 308},
 	}
+	cfg.Headers = []config.HeaderRule{{Source: "/fonts/*", Headers: map[string]string{"Cache-Control": "public, max-age=86400"}}}
 	return root, cfg
 }
 
@@ -210,6 +213,17 @@ func TestServeStaticHardeningEndToEnd(t *testing.T) {
 		if loc := resp.Header.Get("Location"); resp.StatusCode != 301 || loc != "/documentation/a/b" {
 			t.Errorf("/docs/a/b: %d Location %q, want 301 /documentation/a/b", resp.StatusCode, loc)
 		}
+		if resp, _ := getRaw(t, base, "/moved", nil); resp.StatusCode != 308 {
+			t.Errorf("/moved: status %d, want the rule's statusCode 308", resp.StatusCode)
+		}
+		// A next.config style regex parameter.
+		resp, _ = getRaw(t, base, "/store/some-template", nil)
+		if loc := resp.Header.Get("Location"); resp.StatusCode != 301 || loc != "/templates/some-template" {
+			t.Errorf("/store/some-template: %d Location %q, want 301 /templates/some-template", resp.StatusCode, loc)
+		}
+		if resp, _ = getRaw(t, base, "/store/compare", nil); strings.Contains(resp.Header.Get("Location"), "templates") {
+			t.Errorf("/store/compare must not match the rule: %d %q", resp.StatusCode, resp.Header.Get("Location"))
+		}
 	})
 
 	t.Run("dotfiles directories and server files are not served", func(t *testing.T) {
@@ -235,6 +249,10 @@ func TestServeStaticHardeningEndToEnd(t *testing.T) {
 			if cc := resp.Header.Get("Cache-Control"); cc != "no-cache" {
 				t.Errorf("%s: Cache-Control = %q, want no-cache", p, cc)
 			}
+		}
+		// A headers rule sets their Cache-Control.
+		if resp, _ := getRaw(t, base, "/fonts/a.woff2", nil); resp.Header.Get("Cache-Control") != "public, max-age=86400" {
+			t.Errorf("/fonts/a.woff2: Cache-Control = %q, want the headers rule's", resp.Header.Get("Cache-Control"))
 		}
 		resp, body := getRaw(t, base, "/", map[string]string{"Accept-Encoding": "identity"})
 		_ = resp

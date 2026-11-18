@@ -4515,22 +4515,34 @@ func (b *Builder) BuildMiddleware() error {
 		Plugins:     []api.Plugin{jseval.MarkerPackagesPlugin()},
 	}
 	withAuthConfig(&mwOpts, b.Cfg)
+	// nodeOnly: the bundle imports Node built-ins or packages, so it is built
+	// for the Node sidecar even with the embedded middleware runtime.
+	nodeOnly := false
 	// The embedded engine has no node:module; a Node-family runtime needs the
 	// createRequire banner for CommonJS dependencies.
 	if !embeddedRuntime(b.Cfg.SSR.MiddlewareRuntime) {
 		jseval.ApplyNodeESM(&mwOpts)
 	}
-	result := esbuildBuild(mwOpts)
+	// On Node the middleware runs in the API sidecar, which can load packages
+	// from node_modules: serverExternalPackages and packages with a native
+	// addon stay external there, as they do for API routes.
+	buildMW := func() api.BuildResult {
+		if embeddedRuntime(b.Cfg.SSR.MiddlewareRuntime) && !nodeOnly {
+			return esbuildBuild(mwOpts)
+		}
+		res, _ := buildExternalizingNative(mwOpts, b.Cfg.ServerExternalPackages)
+		return res
+	}
+	result := buildMW()
 
 	// A bundle that still imports Node built-ins or packages cannot load in
 	// the embedded engine, so it is built for the Node sidecar instead.
-	nodeOnly := false
 	if len(result.Errors) == 0 && embeddedRuntime(b.Cfg.SSR.MiddlewareRuntime) {
 		if ext := externalImports(result.Metafile); len(ext) > 0 {
 			nodeOnly = true
 			printf("  %s> Middleware%s imports %s, so it runs in the Node sidecar (set ssr.middlewareRuntime to \"node\" to silence this)\n", cYellow, cReset, strings.Join(ext, ", "))
 			jseval.ApplyNodeESM(&mwOpts)
-			result = esbuildBuild(mwOpts)
+			result = buildMW()
 		}
 	}
 
@@ -5344,6 +5356,16 @@ func (b *Builder) BuildAllAPI() error {
 	return b.BuildAllGoAPI()
 }
 
+// isAPIRouteSource reports whether a file under src/api is a JS/TS route
+// module: .ts, .js, .tsx or .jsx.
+func isAPIRouteSource(path string) bool {
+	switch filepath.Ext(path) {
+	case ".ts", ".js", ".tsx", ".jsx":
+		return !strings.HasSuffix(path, ".d.ts")
+	}
+	return false
+}
+
 // buildJSAPI compiles the JS/TS API routes.
 func (b *Builder) buildJSAPI() error {
 	apiSrcDir := filepath.Join(b.Root, filepath.FromSlash(gohost.DefaultAPIDir))
@@ -5362,7 +5384,7 @@ func (b *Builder) buildJSAPI() error {
 		if strings.HasPrefix(filepath.Base(path), "_") {
 			return nil
 		}
-		if strings.HasSuffix(path, ".ts") || strings.HasSuffix(path, ".js") {
+		if isAPIRouteSource(path) {
 			jsRoutes = append(jsRoutes, path)
 		}
 		return nil
@@ -5476,6 +5498,12 @@ func (b *Builder) apiRouteOptions() (quickjsOpts, nodeOpts api.BuildOptions) {
 		Write:     true,
 		Sourcemap: sourceMapMode(b.Cfg.Sourcemap),
 		Metafile:  true,
+	}
+	// JSX in a route (an ImageResponse tree in og.tsx) builds the server
+	// element tree that @krate/runtime/og and renderToString take.
+	for _, o := range []*api.BuildOptions{&quickjsOpts, &nodeOpts} {
+		o.JSX = api.JSXAutomatic
+		o.JSXImportSource = "@krate/runtime/server"
 	}
 	if b.Cfg.ShouldMinifyJS() {
 		quickjsOpts.MinifyWhitespace = true

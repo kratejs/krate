@@ -90,4 +90,6 @@ Both support pattern matching with wildcard (`*`) and parameterized
 Vercel (see [Deployment](/docs/guides/deployment/)). Write the splat explicitly
 in the destination (`/docs/:splat`): that form is portable, while the dev
 server's implicit "append the rest of the path" when a wildcard source has a
-destination without `:splat` is not carried to hosts.
+destination without `:splat` is not carried to hosts. A regex parameter is passed to
+Vercel as written; the `_redirects` file of Netlify and Cloudflare Pages cannot
+express one, so `krate deploy` leaves such a rule out and warns.

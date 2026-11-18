@@ -604,9 +604,21 @@ func relativeModulePath(fromTarget, toTarget string) string {
 // nextResponseShim is the NextResponse subset prepended to a route handler that
 // uses it. cookies mirrors Next's ResponseCookies: set/delete append
 // Set-Cookie headers, get/getAll/has read them back.
-const nextResponseShim = nextResponseCookieHelpers + nextResponseRouteObject
+const nextResponseShim = nextResponseCookieHelpers + nextResponseRouteClass
 
-const nextResponseCookieHelpers = `function __krateCookieHeader(name: string, value: string, o: any = {}): string {
+const nextResponseCookieHelpers = `type __KrateCookieOptions = {
+  path?: string;
+  domain?: string;
+  expires?: Date | string | number;
+  maxAge?: number;
+  httpOnly?: boolean;
+  secure?: boolean;
+  partitioned?: boolean;
+  priority?: string;
+  sameSite?: boolean | string;
+};
+
+function __krateCookieHeader(name: string, value: string, o: __KrateCookieOptions = {}): string {
   let s = encodeURIComponent(name) + "=" + encodeURIComponent(value);
   s += "; Path=" + (o.path === undefined ? "/" : o.path);
   if (o.domain) s += "; Domain=" + o.domain;
@@ -620,52 +632,64 @@ const nextResponseCookieHelpers = `function __krateCookieHeader(name: string, va
   return s;
 }
 
-interface __KrateCookie { name: string; value: string }
-interface __KrateCookieJar {
+type __KrateCookie = { name: string; value: string };
+type __KrateResponseCookies = {
   get(name: string): __KrateCookie | undefined;
   getAll(name?: string): __KrateCookie[];
   has(name: string): boolean;
-  set(name: any, value?: string, opts?: any): __KrateCookieJar;
-  delete(name: any): __KrateCookieJar;
-}
+  set(name: string | ({ name: string; value: string } & __KrateCookieOptions), value?: string, opts?: __KrateCookieOptions): __KrateResponseCookies;
+  delete(name: string | { name: string; path?: string; domain?: string }): __KrateResponseCookies;
+};
 
-function __krateWithCookies<T extends Response>(res: T): T & { cookies: __KrateCookieJar } {
+function __krateWithCookies<T extends Response>(res: T): T & { readonly cookies: __KrateResponseCookies } {
   const list = (): __KrateCookie[] =>
     res.headers.getSetCookie().map((c) => {
       const first = c.split(";")[0] ?? "";
       const i = first.indexOf("=");
       return { name: decodeURIComponent(first.slice(0, i)), value: decodeURIComponent(first.slice(i + 1)) };
     });
-  const cookies: __KrateCookieJar = {
+  const cookies: __KrateResponseCookies = {
     get: (name: string) => list().filter((c) => c.name === name).pop(),
     getAll: (name?: string) => list().filter((c) => name === undefined || c.name === name),
     has: (name: string) => list().some((c) => c.name === name),
-    set(name: any, value?: string, opts?: any) {
+    set(name, value, opts) {
       if (typeof name === "object") res.headers.append("set-cookie", __krateCookieHeader(name.name, name.value, name));
-      else res.headers.append("set-cookie", __krateCookieHeader(name, value as string, opts));
+      else res.headers.append("set-cookie", __krateCookieHeader(name, value ?? "", opts));
       return cookies;
     },
-    delete(name: any) {
-      const o = typeof name === "object" ? name : { name };
+    delete(name) {
+      const o: { name: string; path?: string; domain?: string } = typeof name === "object" ? name : { name };
       res.headers.append("set-cookie", __krateCookieHeader(o.name, "", { path: o.path, domain: o.domain, expires: new Date(0), maxAge: 0 }));
       return cookies;
     },
   };
   Object.defineProperty(res, "cookies", { value: cookies, enumerable: false });
-  return res as T & { cookies: __KrateCookieJar };
+  return res as T & { readonly cookies: __KrateResponseCookies };
 }
 
 `
 
-const nextResponseRouteObject = `const NextResponse = {
-  redirect: (url: string | URL, init?: number | ResponseInit) => {
+// nextResponseRouteClass is NextResponse for route handlers: a Response
+// subclass, so new NextResponse(...) keeps res.cookies and NextResponse works
+// as a type, with the static helpers route handlers use.
+const nextResponseRouteClass = `class NextResponse extends Response {
+  declare readonly cookies: __KrateResponseCookies;
+  constructor(body?: BodyInit | null, init?: ResponseInit) {
+    super(body, init);
+    __krateWithCookies(this);
+  }
+  static redirect(url: string | URL, init?: number | ResponseInit): NextResponse {
     const opts: ResponseInit = typeof init === "number" ? { status: init } : init || {};
     const headers = new Headers(opts.headers);
     headers.set("location", String(url));
-    return __krateWithCookies(new Response(null, { ...opts, status: opts.status || 307, headers }));
-  },
-  json: (body: any, init?: ResponseInit) => __krateWithCookies(Response.json(body, init)),
-};
+    return new NextResponse(null, { ...opts, status: opts.status || 307, headers });
+  }
+  static json(body: unknown, init?: ResponseInit): NextResponse {
+    const headers = new Headers(init && init.headers);
+    if (!headers.has("content-type")) headers.set("content-type", "application/json");
+    return new NextResponse(JSON.stringify(body), { ...init, headers });
+  }
+}
 
 `
 
@@ -673,10 +697,6 @@ const nextResponseRouteObject = `const NextResponse = {
 // web Request/Response API used by Krate API routes.
 func rewriteAPIServerSource(src string) (string, []string, []string) {
 	var rewrites, manual []string
-	if strings.Contains(src, "new NextResponse(") {
-		src = strings.ReplaceAll(src, "new NextResponse(", "new Response(")
-		rewrites = append(rewrites, "rewrote new NextResponse(...) to new Response(...)")
-	}
 	if strings.Contains(src, "NextResponse.rewrite") {
 		manual = append(manual, "NextResponse.rewrite needs a manual API response")
 	}

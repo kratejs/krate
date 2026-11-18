@@ -240,3 +240,32 @@ func TestClientRuntimeConfig(t *testing.T) {
 		t.Errorf("unknown clientRuntime.exports must be rejected, got %v", err)
 	}
 }
+
+func TestRedirectStatusCode(t *testing.T) {
+	for _, c := range []struct {
+		json string
+		want int
+		err  bool
+	}{
+		{`{"redirects":[{"source":"/a","destination":"/b","permanent":true,"statusCode":308}]}`, 308, false},
+		{`{"redirects":[{"source":"/a","destination":"/b","permanent":true}]}`, 301, false},
+		{`{"redirects":[{"source":"/a","destination":"/b"}]}`, 302, false},
+		{`{"redirects":[{"source":"/a","destination":"/b","statusCode":200}]}`, 0, true},
+	} {
+		root := t.TempDir()
+		if err := os.WriteFile(filepath.Join(root, "krate.config.json"), []byte(c.json), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := LoadWith(root, LoadOptions{})
+		if err == nil {
+			_, err = cfg.Validate()
+		}
+		if (err != nil) != c.err {
+			t.Errorf("%s: err = %v, want error %v", c.json, err, c.err)
+			continue
+		}
+		if !c.err && cfg.Redirects[0].Status() != c.want {
+			t.Errorf("%s: status %d, want %d", c.json, cfg.Redirects[0].Status(), c.want)
+		}
+	}
+}

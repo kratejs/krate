@@ -6,11 +6,14 @@
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
+import type { KrateRequest } from "./after.js";
+import { attachCookies } from "./request-extras.js";
 
 export type RouteMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
 
 export type RouteHandler = (
-  request: Request,
+  // What the server passes: a Request with request.cookies and request.nextUrl.
+  request: KrateRequest,
   context: { params: Record<string, string> },
 ) => Response | Promise<Response>;
 
@@ -25,6 +28,8 @@ export interface CallRouteOptions {
   json?: unknown;
   /** A raw body (string, FormData, ...). Ignored when `json` is set. */
   body?: BodyInit | null;
+  /** The site base path, reported by request.nextUrl.basePath. */
+  basePath?: string;
 }
 
 const METHODS: RouteMethod[] = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
@@ -41,7 +46,8 @@ export async function callRoute(
   target: string | Request,
   options: CallRouteOptions = {},
 ): Promise<Response> {
-  const request = toRequest(method, target, options);
+  // The server hands routes a Request with request.cookies and request.nextUrl.
+  const request = attachCookies(toRequest(method, target, options), options.basePath ?? "") as KrateRequest;
   const context = { params: options.params ?? {} };
   const named = (m: RouteMethod): RouteHandler | undefined => (typeof mod[m] === "function" ? mod[m] : undefined);
   const fallback = typeof mod.default === "function" ? (mod.default as (...a: unknown[]) => unknown) : undefined;

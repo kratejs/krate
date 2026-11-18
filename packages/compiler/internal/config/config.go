@@ -398,6 +398,15 @@ func (r Redirect) Status() int {
 // InBasePath reports whether the base path applies to this rule.
 func (r Redirect) InBasePath() bool { return r.BasePath == nil || *r.BasePath }
 
+// IsRedirectStatus reports whether code is a status a redirect rule may use.
+func IsRedirectStatus(code int) bool {
+	switch code {
+	case 301, 302, 303, 307, 308:
+		return true
+	}
+	return false
+}
+
 type Rewrite struct {
 	Source      string           `json:"source"`      // e.g. "/legacy/*"
 	Destination string           `json:"destination"` // e.g. "/docs/:splat"

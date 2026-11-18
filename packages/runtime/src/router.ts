@@ -141,6 +141,17 @@ interface CachedDoc {
 
 // Router state (module scope, survives reinitRouter).
 let initialized = false;
+
+// Island bundles carry their own copy of this module, which is never
+// initialized: the page's router registers itself here, and an uninitialized
+// copy hands navigations to it instead of loading a new document.
+const LIVE_ROUTER = Symbol.for('krate.router');
+
+function liveRouter(): typeof krateRouter | null {
+  if (initialized) return null;
+  const r = (globalThis as any)[LIVE_ROUTER];
+  return r && r !== krateRouter ? r : null;
+}
 let navSeq = 0;
 let pendingAbort: AbortController | undefined;
 let keySeq = 0;
@@ -235,6 +246,8 @@ function snapshot(): NavigationState {
 
 /** Current router state (pathname without base path, search, hash, status). */
 export function getNavigationState(): NavigationState {
+  const live = liveRouter();
+  if (live) return live.getState();
   if (typeof location === 'undefined') {
     return { url: '', pathname: '/', search: '', hash: '', status: 'idle' };
   }
@@ -266,6 +279,8 @@ function setStatus(next: 'idle' | 'loading'): void {
  * with getNavigationState().
  */
 export function subscribeNavigation(fn: (s: NavigationState) => void): () => void {
+  const live = liveRouter();
+  if (live) return live.subscribe(fn);
   listeners.add(fn);
   return () => {
     listeners.delete(fn);
@@ -864,6 +879,79 @@ function applyScroll(url: string, req: NavRequest): void {
 
 let focusedRoot: HTMLElement | null = null;
 
+interface FocusMark {
+  id: string;
+  sig: string;
+  index: number;
+  start: number | null;
+  end: number | null;
+}
+
+// Attributes that tell a focused control apart from its siblings, in addition
+// to its tag, when it has no id.
+const FOCUS_SIG_ATTRS = ['name', 'type', 'role', 'aria-label', 'placeholder', 'data-testid', 'data-slot', 'href'];
+
+function focusSignature(el: Element): string {
+  let s = el.tagName;
+  for (const a of FOCUS_SIG_ATTRS) {
+    const v = el.getAttribute(a);
+    if (v !== null) s += '\u0000' + a + '=' + v;
+  }
+  return s;
+}
+
+function sameSignature(root: Element, sig: string, tag: string): Element[] {
+  return Array.from(root.getElementsByTagName(tag)).filter((e) => focusSignature(e) === sig);
+}
+
+/** Whether the swap of plan replaces el (it sits in the swapped region or a swapped slot). */
+function replacedBySwap(el: Node, root: Element, plan: SwapPlan): boolean {
+  if (!root.contains(el)) return false;
+  if (!plan.region) return true;
+  const within = (pair: [Node, Node]) =>
+    !!(pair[0].compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) &&
+    !!(pair[1].compareDocumentPosition(el) & Node.DOCUMENT_POSITION_PRECEDING);
+  return within(plan.region.live) || plan.slots.some((sl) => within(sl.live));
+}
+
+function captureFocus(root: Element, plan: SwapPlan): FocusMark | null {
+  const el = document.activeElement;
+  if (!el || el === document.body || el === root || !replacedBySwap(el, root, plan)) return null;
+  const sig = focusSignature(el);
+  const field = el as HTMLInputElement;
+  let start: number | null = null;
+  let end: number | null = null;
+  try {
+    start = typeof field.selectionStart === 'number' ? field.selectionStart : null;
+    end = typeof field.selectionEnd === 'number' ? field.selectionEnd : null;
+  } catch {
+    /* input types without a selection */
+  }
+  return { id: el.id, sig, index: sameSignature(root, sig, el.tagName).indexOf(el), start, end };
+}
+
+function hasFocusWithin(root: Element): boolean {
+  const a = document.activeElement;
+  return !!a && a !== document.body && a !== root && root.contains(a);
+}
+
+function restoreFocus(root: Element, mark: FocusMark): void {
+  const tag = mark.sig.split('\u0000')[0];
+  let el: Element | null = mark.id ? document.getElementById(mark.id) : null;
+  if (!el || !root.contains(el)) el = sameSignature(root, mark.sig, tag)[mark.index] ?? null;
+  if (!el || typeof (el as HTMLElement).focus !== 'function') return;
+  try {
+    (el as HTMLElement).focus({ preventScroll: true });
+    const field = el as HTMLInputElement;
+    if (mark.start !== null && mark.end !== null && document.activeElement === el && typeof field.setSelectionRange === 'function') {
+      const n = field.value.length;
+      field.setSelectionRange(Math.min(mark.start, n), Math.min(mark.end, n));
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
 /** Move focus to the content root after navigation (a11y). */
 function focusContent(): void {
   const active = document.activeElement as HTMLElement | null;
@@ -1082,7 +1170,14 @@ async function commitDocument(loaded: LoadedDoc, req: NavRequest, seq: number): 
     return;
   }
 
+  // A navigation that stays on the page (a query change, router.refresh())
+  // replaces the region's DOM, but React keeps a focused input where it is:
+  // move focus to the same element in the new DOM.
+  const samePage = normPath(new URL(url, location.href).pathname) === normPath(location.pathname);
+  let focusMark: FocusMark | null = null;
+
   const mutate = () => {
+    if (samePage) focusMark = captureFocus(oldRoot, plan);
     const title = doc.querySelector('title');
     if (title) document.title = title.textContent || '';
     const g = globalThis as any;
@@ -1111,6 +1206,7 @@ async function commitDocument(loaded: LoadedDoc, req: NavRequest, seq: number): 
     reconcileHeadMeta(doc);
     reconcileDocAttrs(doc);
     applyViewTransitionNames(document);
+    if (focusMark) restoreFocus(oldRoot, focusMark);
   };
 
   await runMutation(mutate);
@@ -1161,6 +1257,9 @@ async function commitDocument(loaded: LoadedDoc, req: NavRequest, seq: number): 
     return;
   }
   refreshPageBindings();
+  // An island that rendered its element anew while mounting took the focus
+  // with it; look the element up again.
+  if (focusMark && !hasFocusWithin(oldRoot)) restoreFocus(oldRoot, focusMark);
   dispatch('krate:navigate-end', { url: location.href, status: loaded.status });
 }
 
@@ -1850,6 +1949,8 @@ function refreshPageBindings(): void {
 // Public API
 
 function refresh(): Promise<void> {
+  const live = liveRouter();
+  if (live) return live.refresh();
   if (!initialized || typeof location === 'undefined') {
     if (typeof location !== 'undefined') location.reload();
     return Promise.resolve();
@@ -1866,6 +1967,8 @@ function refresh(): Promise<void> {
 
 function push(url: string, opts: NavigateOptions = {}): Promise<void> {
   if (!initialized) {
+    const live = liveRouter();
+    if (live) return live.push(url, opts);
     if (typeof location !== 'undefined') location.assign(withBase(url));
     return Promise.resolve();
   }
@@ -1874,6 +1977,8 @@ function push(url: string, opts: NavigateOptions = {}): Promise<void> {
 
 function replace(url: string, opts: NavigateOptions = {}): Promise<void> {
   if (!initialized) {
+    const live = liveRouter();
+    if (live) return live.replace(url, opts);
     if (typeof location !== 'undefined') location.replace(withBase(url));
     return Promise.resolve();
   }
@@ -1901,6 +2006,8 @@ export const krateRouter = {
   },
   refresh,
   prefetch(url: string): Promise<void> {
+    const live = liveRouter();
+    if (live) return live.prefetch(url);
     if (!initialized || typeof location === 'undefined') return Promise.resolve();
     let u: URL;
     try {
@@ -1922,7 +2029,7 @@ export const krateRouter = {
  * client-side, true when a full navigation was triggered.
  */
 export function navigate(url: string, opts: NavigateOptions = {}): boolean {
-  if (initialized) {
+  if (initialized || liveRouter()) {
     void (opts.replace ? replace(url, opts) : push(url, opts));
     return false;
   }
@@ -1940,6 +2047,7 @@ export function initRouter(): void {
     return;
   }
   initialized = true;
+  (globalThis as any)[LIVE_ROUTER] = krateRouter;
 
   // The first document ran its own boot scripts.
   document.querySelectorAll('script[data-krate-boot]').forEach((s) => bootRan.add(s.textContent || ''));
@@ -1984,6 +2092,7 @@ export function reinitRouter(): void {
 export function destroyRouter(): void {
   if (!initialized) return;
   initialized = false;
+  if ((globalThis as any)[LIVE_ROUTER] === krateRouter) delete (globalThis as any)[LIVE_ROUTER];
   document.removeEventListener('click', clickHandler);
   document.removeEventListener('submit', submitHandler as EventListener);
   window.removeEventListener('popstate', popstateHandler);

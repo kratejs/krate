@@ -482,7 +482,7 @@ func (b *Builder) processChanges(changed []string, hub *DevHub) {
 		if strings.Contains(filepath.ToSlash(p), "src/api/") {
 			// Only compile files that are direct endpoints (ignore private
 			// files starting with '_').
-			if !strings.HasPrefix(filepath.Base(p), "_") && (strings.HasSuffix(p, ".ts") || strings.HasSuffix(p, ".js")) {
+			if !strings.HasPrefix(filepath.Base(p), "_") && isAPIRouteSource(p) {
 				apiToBuild = append(apiToBuild, p)
 			}
 		}

@@ -32,7 +32,11 @@ func (l length) resolve(base float64) (float64, bool) {
 
 type gradientStop struct {
 	c   rgba
-	pos float64 // 0..1, -1 until resolved
+	pos float64 // 0..1 of the gradient line, -1 when unplaced
+	// px is set for a stop placed in pixels (pos is -1 then); it becomes a
+	// fraction once the gradient line's length is known (resolveStops).
+	px    float64
+	hasPx bool
 }
 
 type gradient struct {
@@ -682,43 +686,103 @@ func (p *parser) gradient(s string) (gradient, bool) {
 		if !ok {
 			return gradient{}, false
 		}
-		stop := gradientStop{c: c, pos: -1}
-		if len(parts) > 1 {
-			if !strings.HasSuffix(parts[1], "%") {
-				return gradient{}, false
-			}
-			f, err := strconv.ParseFloat(strings.TrimSuffix(parts[1], "%"), 64)
-			if err != nil {
-				return gradient{}, false
-			}
-			stop.pos = f / 100
+		// A stop takes zero, one or two positions ("red 10% 20%" is two stops).
+		if len(parts) > 3 {
+			return gradient{}, false
 		}
-		g.stops = append(g.stops, stop)
+		if len(parts) == 1 {
+			g.stops = append(g.stops, gradientStop{c: c, pos: -1})
+			continue
+		}
+		for _, pos := range parts[1:] {
+			stop, ok := p.stopPosition(pos, c)
+			if !ok {
+				return gradient{}, false
+			}
+			g.stops = append(g.stops, stop)
+		}
 	}
 	if len(g.stops) < 2 {
 		return gradient{}, false
 	}
-	// Unplaced stops spread evenly between their neighbours.
-	if g.stops[0].pos < 0 {
-		g.stops[0].pos = 0
+	return g, true
+}
+
+// stopPosition parses a color stop position: a percentage, or a length
+// (px, em, rem, or a unitless 0) resolved against the gradient line later.
+func (p *parser) stopPosition(s string, c rgba) (gradientStop, bool) {
+	s = strings.TrimSpace(s)
+	num := func(t string) (float64, bool) {
+		f, err := strconv.ParseFloat(t, 64)
+		return f, err == nil
 	}
-	if g.stops[len(g.stops)-1].pos < 0 {
-		g.stops[len(g.stops)-1].pos = 1
+	switch {
+	case strings.HasSuffix(s, "%"):
+		if f, ok := num(strings.TrimSuffix(s, "%")); ok {
+			return gradientStop{c: c, pos: f / 100}, true
+		}
+	case strings.HasSuffix(s, "px"):
+		if f, ok := num(strings.TrimSuffix(s, "px")); ok {
+			return gradientStop{c: c, pos: -1, px: f, hasPx: true}, true
+		}
+	case strings.HasSuffix(s, "rem"):
+		if f, ok := num(strings.TrimSuffix(s, "rem")); ok {
+			return gradientStop{c: c, pos: -1, px: f * 16, hasPx: true}, true
+		}
+	case strings.HasSuffix(s, "em"):
+		if f, ok := num(strings.TrimSuffix(s, "em")); ok {
+			return gradientStop{c: c, pos: -1, px: f * p.st.fontSize, hasPx: true}, true
+		}
+	case s == "0":
+		return gradientStop{c: c, pos: 0}, true
 	}
-	for i := 1; i < len(g.stops)-1; i++ {
-		if g.stops[i].pos >= 0 {
+	return gradientStop{}, false
+}
+
+// resolveStops places every stop on a gradient line of length px: pixel
+// positions become fractions, unplaced stops spread evenly between their
+// neighbours, and a stop placed before the previous one moves up to it (CSS),
+// which makes two stops at one position a hard edge.
+func resolveStops(in []gradientStop, length float64) []gradientStop {
+	stops := append([]gradientStop(nil), in...)
+	if length < 1 {
+		length = 1
+	}
+	for i := range stops {
+		if stops[i].hasPx {
+			stops[i].pos = stops[i].px / length
+		}
+	}
+	if stops[0].pos < 0 {
+		stops[0].pos = 0
+	}
+	if stops[len(stops)-1].pos < 0 {
+		stops[len(stops)-1].pos = 1
+	}
+	maxPos := stops[0].pos
+	for i := 1; i < len(stops); i++ {
+		if stops[i].pos < 0 {
+			continue
+		}
+		if stops[i].pos < maxPos {
+			stops[i].pos = maxPos
+		}
+		maxPos = stops[i].pos
+	}
+	for i := 1; i < len(stops)-1; i++ {
+		if stops[i].pos >= 0 {
 			continue
 		}
 		j := i
-		for g.stops[j].pos < 0 {
+		for stops[j].pos < 0 {
 			j++
 		}
-		lo, hi := g.stops[i-1].pos, g.stops[j].pos
+		lo, hi := stops[i-1].pos, stops[j].pos
 		for k := i; k < j; k++ {
-			g.stops[k].pos = lo + (hi-lo)*float64(k-i+1)/float64(j-i+1)
+			stops[k].pos = lo + (hi-lo)*float64(k-i+1)/float64(j-i+1)
 		}
 	}
-	return g, true
+	return stops
 }
 
 func (p *parser) boxShadow(v any) {

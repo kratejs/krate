@@ -93,7 +93,7 @@ func TestClientSSRModulesShareChunks(t *testing.T) {
 		t.Fatal(err)
 	}
 	html := renderSplitSSR(t, b, true)
-	for _, want := range []string{"SHARED_LABEL_MARK:pre:A 3", "SHARED_LABEL_MARK:pre:B 0", "SHARED_LABEL_MARK:pre:C 0", ">child</krate-children>"} {
+	for _, want := range []string{"SHARED_LABEL_MARK:pre:A 3", "SHARED_LABEL_MARK:pre:B 0", "SHARED_LABEL_MARK:pre:C 0", "-->child<!--/krate-slot:"} {
 		if !strings.Contains(html, want) {
 			t.Errorf("server HTML missing %q:\n%s", want, html)
 		}
@@ -144,7 +144,7 @@ func TestClientSSRModulesShareChunks(t *testing.T) {
 		t.Errorf("dist/%s is written only with combined server render modules", rel)
 	}
 	// Slot ids are random per request.
-	slotID := regexp.MustCompile(`(__krateSlotRef":"|data-krate-slot=")[0-9a-z]+`)
+	slotID := regexp.MustCompile(`(__krateSlotRef":"|krate-slot:)[0-9a-z]+`)
 	html, separate = slotID.ReplaceAllString(html, "${1}ID"), slotID.ReplaceAllString(separate, "${1}ID")
 	if html != separate {
 		t.Errorf("combined and separate server render modules render different HTML:\n--- combined\n%s\n--- separate\n%s", html, separate)

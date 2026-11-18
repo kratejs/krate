@@ -132,7 +132,7 @@ export async function GET() { return NextResponse.json({}); }`,
 		t.Errorf("response cookies shim missing:\n%s", body)
 	}
 	// The shim has to typecheck under noUncheckedIndexedAccess: the response type carries cookies.
-	if !strings.Contains(body, "T & { cookies: __KrateCookieJar }") || !strings.Contains(body, `split(";")[0] ?? ""`) {
+	if !strings.Contains(body, "T & { readonly cookies: __KrateResponseCookies }") || !strings.Contains(body, `split(";")[0] ?? ""`) {
 		t.Errorf("response cookies shim is not typed:\n%s", body)
 	}
 	for _, m := range rep.Manual {

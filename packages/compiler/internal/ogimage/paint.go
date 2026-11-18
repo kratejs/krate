@@ -77,7 +77,18 @@ func fill(img *image.RGBA, r rect, radii [4]float64, paint func(x, y float64) rg
 func solid(c rgba) func(x, y float64) rgba { return func(float64, float64) rgba { return c } }
 
 func gradientPaint(g gradient, r rect) func(x, y float64) rgba {
-	stops := g.stops
+	cx, cy := r.x+r.w/2, r.y+r.h/2
+	rad := g.angle * math.Pi / 180
+	dx, dy := math.Sin(rad), -math.Cos(rad)
+	length := math.Abs(r.w*dx) + math.Abs(r.h*dy)
+	rx, ry := math.Max(r.w/2*math.Sqrt2, 1), math.Max(r.h/2*math.Sqrt2, 1)
+	if g.radial {
+		length = (rx + ry) / 2
+	}
+	if length < 1 {
+		length = 1
+	}
+	stops := resolveStops(g.stops, length)
 	at := func(t float64) rgba {
 		t = clamp01(t)
 		if t <= stops[0].pos {
@@ -94,16 +105,8 @@ func gradientPaint(g gradient, r rect) func(x, y float64) rgba {
 		}
 		return stops[len(stops)-1].c
 	}
-	cx, cy := r.x+r.w/2, r.y+r.h/2
 	if g.radial {
-		rx, ry := math.Max(r.w/2*math.Sqrt2, 1), math.Max(r.h/2*math.Sqrt2, 1)
 		return func(x, y float64) rgba { return at(math.Hypot((x-cx)/rx, (y-cy)/ry)) }
-	}
-	rad := g.angle * math.Pi / 180
-	dx, dy := math.Sin(rad), -math.Cos(rad)
-	length := math.Abs(r.w*dx) + math.Abs(r.h*dy)
-	if length < 1 {
-		length = 1
 	}
 	return func(x, y float64) rgba { return at(((x-cx)*dx+(y-cy)*dy)/length + 0.5) }
 }

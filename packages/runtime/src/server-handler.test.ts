@@ -8,7 +8,11 @@ const config: HandlerConfig = {
   trustProxy: true,
   maxBodyBytes: 1 << 20,
   maxAPIBodyBytes: 1 << 20,
-  redirects: [{ source: "/old", destination: "/new", permanent: true }],
+  redirects: [
+    { source: "/old", destination: "/new", permanent: true },
+    { source: "/moved", destination: "/new", permanent: true, statusCode: 308 },
+    { source: "/store/:slug((?!compare$)[^/]+)", destination: "/templates/:slug", statusCode: 308 },
+  ],
   rewrites: [],
   headers: [{ source: "/new", headers: { "X-Rule": "yes" } }],
   security: { nosniff: true, frameOptions: "DENY", referrerPolicy: "no-referrer", permissionsPolicy: "", hsts: "", csp: "" },
@@ -29,7 +33,7 @@ function data(extra: Partial<KrateServerData> = {}): KrateServerData {
     hashedAssets: [],
     html404: "<h1>custom 404</h1>",
     html500: "",
-    apiRoutes: ["hello", "items/[id]", "scope", "who"],
+    apiRoutes: ["hello", "items/[id]", "items/[id]/download", "scope", "who"],
     actions: [{ id: "act1", export: "add", file: "acts" }, { id: "act2", export: "oauth", file: "acts" }],
     hasMiddleware: true,
     ...extra,
@@ -42,6 +46,7 @@ const modules = {
   api: {
     hello: { GET: () => Response.json({ ok: true }), POST: async (r: Request) => new Response(await r.text(), { status: 201 }) },
     "items/[id]": { GET: (_r: Request, ctx: any) => Response.json(ctx.params) },
+    "items/[id]/download": { GET: (_r: Request, ctx: any) => Response.json({ download: ctx.params.id }) },
     who: { GET: (r: Request) => Response.json({ url: r.headers.get("x-dd-url"), dropped: r.headers.get("x-drop") }) },
     scope: {
       GET: () => {
@@ -84,6 +89,9 @@ describe("createKrateHandler", () => {
     expect(r.headers.get("x-frame-options")).toBe("DENY");
     expect(r.headers.get("permissions-policy")).toBeNull();
     expect((await get("/new")).headers.get("x-rule")).toBe("yes");
+    expect((await get("/moved")).status).toBe(308);
+    const re = await get("/store/some-template");
+    expect([re.status, re.headers.get("location")]).toEqual([308, "/templates/some-template"]);
   });
 
   it("accepts Next's [{ key, value }] header rules, the last repeated key winning", async () => {
@@ -106,6 +114,9 @@ describe("createKrateHandler", () => {
 
   it("routes API requests with 404, 405 and params", async () => {
     expect(await (await get("/api/items/7")).json()).toEqual({ id: "7" });
+    // A static file inside a dynamic directory (issue: orders/[id]/download.ts 404ed).
+    expect(await (await get("/api/items/7/download")).json()).toEqual({ download: "7" });
+    expect((await get("/api/items/7/other")).status).toBe(404);
     expect((await get("/api/none")).status).toBe(404);
     const r = await get("/api/hello", { method: "DELETE" });
     expect(r.status).toBe(405);
@@ -129,6 +140,23 @@ describe("createKrateHandler", () => {
     expect(await ok.json()).toEqual({ ok: true, result: { sum: 5 } });
     const bad = await get("/__krate/action/act1", { method: "POST", headers: { ...headers, "sec-fetch-site": "cross-site" }, body: "{}" });
     expect(bad.status).toBe(403);
+  });
+});
+
+describe("static files", () => {
+  // A headers rule's Cache-Control used to be replaced with no-cache.
+  it("a headers rule sets Cache-Control on a public file", async () => {
+    const staticLayer = {
+      exists: (p: string) => p === "/brand/logo.png" || p === "/other.png",
+      isAsset: () => true,
+      serve: async () => new Response("png", { headers: { "content-type": "image/png" } }),
+    };
+    const cfg = { ...config, headers: [{ source: "/brand/*.png", headers: { "Cache-Control": "public, max-age=86400" } }] };
+    const h = createKrateHandler({ target: "node", data: data({ config: cfg, hasMiddleware: false }), modules, static: staticLayer });
+    const ruled = await h(new Request("http://localhost/brand/logo.png"));
+    expect(ruled.status).toBe(200);
+    expect(ruled.headers.get("cache-control")).toBe("public, max-age=86400");
+    expect((await h(new Request("http://localhost/other.png"))).headers.get("cache-control")).toBe("no-cache");
   });
 });
 

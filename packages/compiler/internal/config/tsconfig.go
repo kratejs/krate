@@ -1360,6 +1360,13 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 			if b, ok := m["permanent"].(bool); ok {
 				rd.Permanent = b
 			}
+			if v, ok := m["statusCode"]; ok && v != nil {
+				n, isNum := v.(float64)
+				if !isNum || !IsRedirectStatus(int(n)) || float64(int(n)) != n {
+					return fmt.Errorf("redirects[%d].statusCode: expected 301, 302, 303, 307 or 308, got %v", i, v)
+				}
+				rd.StatusCode = int(n)
+			}
 			if b, ok := m["basePath"].(bool); ok {
 				rd.BasePath = &b
 			}

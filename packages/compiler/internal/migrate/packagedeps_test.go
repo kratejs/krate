@@ -217,7 +217,7 @@ func TestOnlyTheInstallCommandIsLeftForAPnpmWorkspace(t *testing.T) {
 	scripts := pkgJSON(t, rep)["scripts"].(map[string]any)
 	for name, want := range map[string]string{
 		"dev": "krate dev --port 4000", "build": "krate build", "start": "krate start",
-		"typecheck": "tsc --noEmit", "lint": "next lint", "predev": "node prep.mjs",
+		"typecheck": "krate types && tsc --noEmit", "lint": "next lint", "predev": "node prep.mjs",
 	} {
 		if scripts[name] != want {
 			t.Errorf("scripts.%s = %v, want %q", name, scripts[name], want)
@@ -238,7 +238,7 @@ func TestNodeDeployScriptsAndNoRemainingNext(t *testing.T) {
 		"package.json":   `{"scripts":{"build":"next build","start":"node .next/standalone/server.js","typecheck":"next typegen && tsc"},"dependencies":{"next":"16.0.0"}}`,
 	})
 	scripts := pkgJSON(t, rep)["scripts"].(map[string]any)
-	if scripts["build"] != "krate deploy" || scripts["start"] != "node dist/.krate/server/server.mjs" || scripts["typecheck"] != "tsc" {
+	if scripts["build"] != "krate deploy" || scripts["start"] != "node dist/.krate/server/server.mjs" || scripts["typecheck"] != "krate types && tsc" {
 		t.Errorf("scripts = %v", scripts)
 	}
 	if _, ok := depOf(pkgJSON(t, rep), "next"); ok {

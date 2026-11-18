@@ -128,7 +128,12 @@ export default async function Home() {
   hydrates it adopts the server-rendered nodes where it renders the slot, so
   the children are in the page once, re-renders leave them in place, and a
   slot the component hides and shows again gets the same nodes back (with
-  any islands inside them still running). A slot the server did not render,
+  any islands inside them still running). The nodes sit directly inside the
+  element the component renders them in, with no wrapper element (comment
+  markers bound a slot in the server HTML), so child-combinator CSS such as
+  Tailwind's `has-[>svg]:`, `*:` or `space-y-*` matches them as in React. A
+  real-React island still puts the HTML parts of its children in a
+  `display: contents` element. A slot the server did not render,
   such as the content of a closed dialog, is sent as HTML in the props, and
   so are the server parts of a real-React island's children, since nothing
   renders them on the server. Each island's props are in the document once,

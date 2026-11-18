@@ -12,6 +12,7 @@ import (
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
 	"github.com/kratejs/krate/packages/compiler/internal/fsutil"
+	"github.com/kratejs/krate/packages/compiler/internal/rulepattern"
 	"github.com/kratejs/krate/packages/compiler/internal/sitepath"
 )
 
@@ -145,6 +146,27 @@ var paramRe = regexp.MustCompile(`:([A-Za-z_][A-Za-z0-9_]*)([*+?]?)`)
 // ruleRegex converts a Krate rule source ("/old/*", "/u/:id", "/f/:path*") to
 // an anchored regex with named groups and the destination with $name.
 func ruleRegex(source, dest string) (string, string) {
+	if rulepattern.IsRegex(source) {
+		re, names, mods, ok := rulepattern.ToRegex(source)
+		if !ok {
+			// An invalid pattern matches nothing, as in krate start.
+			return "^$.", dest
+		}
+		// Longer names first, so ":p" never eats the start of ":path".
+		order := make([]int, len(names))
+		for i := range order {
+			order[i] = i
+		}
+		sort.SliceStable(order, func(a, b int) bool { return len(names[order[a]]) > len(names[order[b]]) })
+		for _, i := range order {
+			name := names[i]
+			if mods[name] != 0 {
+				dest = strings.ReplaceAll(dest, ":"+name+string(mods[name]), "$"+rulepattern.Group(i))
+			}
+			dest = strings.ReplaceAll(dest, ":"+name, "$"+rulepattern.Group(i))
+		}
+		return re, dest
+	}
 	if strings.HasSuffix(source, "/*") {
 		base := regexp.QuoteMeta(strings.TrimSuffix(source, "/*"))
 		return "^" + base + "(?:/(?<splat>.*))?$", strings.ReplaceAll(dest, ":splat", "$splat")

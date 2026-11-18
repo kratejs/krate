@@ -120,6 +120,14 @@ function resolveDynamicFile(dir, segments, exts) {
     }
     return null;
   }
+  // A static leaf file wins over dynamic siblings at every depth, not only
+  // at the API root: orders/[id]/download.ts must match /orders/1/download.
+  if (segments.length === 1) {
+    for (const ext of exts) {
+      const leaf = path.join(dir, segments[0] + ext);
+      try { if (fs.statSync(leaf).isFile()) return leaf; } catch {}
+    }
+  }
   if (segments.length > 0) {
     const next = path.join(dir, segments[0]);
     try {
@@ -645,6 +653,14 @@ function resolveDynamicFile(dir, segments, exts) {
       if (fs.existsSync(index)) return index;
     }
     return null;
+  }
+  // A static leaf file wins over dynamic siblings at every depth, not only
+  // at the API root: orders/[id]/download.ts must match /orders/1/download.
+  if (segments.length === 1) {
+    for (const ext of exts) {
+      const leaf = path.join(dir, segments[0] + ext);
+      try { if (fs.statSync(leaf).isFile()) return leaf; } catch {}
+    }
   }
   if (segments.length > 0) {
     const next = path.join(dir, segments[0]);
@@ -1917,8 +1933,12 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		}
 		// Hashed assets (styles.<hash>.css, index.<hash>.js, chunks/*.<hash>.js,
 		// assets/<name>-<hash>.*) are content-addressed, so they can be cached
-		// immutably. HTML must never be, since it changes per build.
-		w.Header().Set("Cache-Control", staticCacheControl(r.URL.Path, hub != nil, hashedAssets))
+		// immutably. HTML must never be, since it changes per build. A
+		// Cache-Control from a headers rule wins outside dev, so public/ files
+		// can be cached longer.
+		if hub != nil || w.Header().Get("Cache-Control") == "" {
+			w.Header().Set("Cache-Control", staticCacheControl(r.URL.Path, hub != nil, hashedAssets))
+		}
 
 		// Opt-in UA variant: serve the modern or legacy sibling document to
 		// classified visitors (the default document stays the full hybrid).

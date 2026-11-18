@@ -176,6 +176,10 @@ func emitRedirects(cfg *config.Config, outDir string) ([]string, error) {
 			fmt.Fprintf(&b, "# skipped %s: has/missing conditions need a server (use --target node/docker or Vercel)\n", r.Source)
 			continue
 		}
+		if strings.Contains(r.Source, "(") {
+			fmt.Fprintf(&b, "# skipped %s: _redirects cannot express a regex parameter (krate start, --target node/docker and Vercel support it)\n", r.Source)
+			continue
+		}
 		status := strconv.Itoa(r.Status())
 		src, dst := translateRule(r.Source, r.Destination, false)
 		if rb := ruleBase(base, r); rb != "" {
@@ -186,6 +190,10 @@ func emitRedirects(cfg *config.Config, outDir string) ([]string, error) {
 	for _, r := range cfg.Rewrites {
 		if len(r.Has) > 0 || len(r.Missing) > 0 {
 			fmt.Fprintf(&b, "# skipped %s: has/missing conditions need a server (use --target node/docker or Vercel)\n", r.Source)
+			continue
+		}
+		if strings.Contains(r.Source, "(") {
+			fmt.Fprintf(&b, "# skipped %s: _redirects cannot express a regex parameter (krate start, --target node/docker and Vercel support it)\n", r.Source)
 			continue
 		}
 		src, dst := translateRule(r.Source, r.Destination, false)

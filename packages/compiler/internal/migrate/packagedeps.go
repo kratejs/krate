@@ -202,7 +202,7 @@ func remainingNextImporters(root string, rep *Report) map[string][]string {
 }
 
 // rewriteNextScripts maps `next <cmd>` in package scripts to Krate commands.
-// It drops `next typegen`, maps dev/build/start, and leaves every other next
+// It maps `next typegen` to `krate types` and dev/build/start, and leaves every other next
 // command alone with an info line. It reports whether a script still runs next.
 func rewriteNextScripts(scripts map[string]any, node nodeDeploy, rep *Report, rewrites *[]string) (nextStays bool) {
 	names := make([]string, 0, len(scripts))
@@ -245,6 +245,7 @@ func rewriteNextScripts(scripts map[string]any, node nodeDeploy, rep *Report, re
 			args = nextHostFlag.ReplaceAllString(args, "${1}--host")
 			switch m[2] {
 			case "typegen":
+				kept = append(kept, "krate types")
 				changed = true
 			case "dev", "build", "start":
 				cmd := node.script(m[2])
