@@ -1400,10 +1400,13 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
       if (!k.startsWith(prefix)) continue;
       const rest = k.slice(prefix.length);
       const i = rest.indexOf("/");
-      if (i < 0) out.set(rest, out.get(rest) || false);
-      else out.set(rest.slice(0, i), true);
+      // A name can be both a route file and a directory ([id].ts next to [id]/download.ts).
+      if (i < 0) out.set(rest + "\0f", false);
+      else out.set(rest.slice(0, i) + "\0d", true);
     }
-    return [...out].sort((a, b) => strCmp(a[0], b[0])).map(([name, isDir]) => ({ name, isDir }));
+    return [...out.keys()]
+      .sort(strCmp)
+      .map((k) => ({ name: k.slice(0, -2), isDir: out.get(k) as boolean }));
   }
 
   function strCmp(a: string, b: string): number {
@@ -1417,6 +1420,8 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
       const idx = join(dir, "index");
       return apiKeys.has(idx) ? idx : "";
     }
+    // A static leaf wins over dynamic siblings at every depth.
+    if (segs.length === 1 && apiKeys.has(join(dir, segs[0]))) return join(dir, segs[0]);
     const next = join(dir, segs[0]);
     if (apiDirs.has(next)) {
       const hit = resolveDynamicAPIDir(next, segs.slice(1));

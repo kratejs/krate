@@ -503,6 +503,15 @@ func (a *APIRouteRuntime) resolveDynamicAPIDir(dir string, segs, exts []string) 
 		}
 		return ""
 	}
+	// A static leaf file wins over dynamic siblings at every depth, so
+	// orders/[id]/download.js serves /orders/1/download.
+	if len(segs) == 1 {
+		for _, ext := range exts {
+			if fi, err := os.Stat(filepath.Join(dir, segs[0]+ext)); err == nil && !fi.IsDir() {
+				return filepath.Join(dir, segs[0]+ext)
+			}
+		}
+	}
 	if len(segs) > 0 {
 		next := filepath.Join(dir, segs[0])
 		if fi, err := os.Stat(next); err == nil && fi.IsDir() {

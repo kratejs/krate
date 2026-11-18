@@ -29,7 +29,7 @@ function data(extra: Partial<KrateServerData> = {}): KrateServerData {
     hashedAssets: [],
     html404: "<h1>custom 404</h1>",
     html500: "",
-    apiRoutes: ["hello", "items/[id]", "scope", "who"],
+    apiRoutes: ["hello", "items/[id]", "items/[id]/download", "scope", "who"],
     actions: [{ id: "act1", export: "add", file: "acts" }, { id: "act2", export: "oauth", file: "acts" }],
     hasMiddleware: true,
     ...extra,
@@ -42,6 +42,7 @@ const modules = {
   api: {
     hello: { GET: () => Response.json({ ok: true }), POST: async (r: Request) => new Response(await r.text(), { status: 201 }) },
     "items/[id]": { GET: (_r: Request, ctx: any) => Response.json(ctx.params) },
+    "items/[id]/download": { GET: (_r: Request, ctx: any) => Response.json({ download: ctx.params.id }) },
     who: { GET: (r: Request) => Response.json({ url: r.headers.get("x-dd-url"), dropped: r.headers.get("x-drop") }) },
     scope: {
       GET: () => {
@@ -95,6 +96,9 @@ describe("createKrateHandler", () => {
 
   it("routes API requests with 404, 405 and params", async () => {
     expect(await (await get("/api/items/7")).json()).toEqual({ id: "7" });
+    // A static file inside a dynamic directory (issue: orders/[id]/download.ts 404ed).
+    expect(await (await get("/api/items/7/download")).json()).toEqual({ download: "7" });
+    expect((await get("/api/items/7/other")).status).toBe(404);
     expect((await get("/api/none")).status).toBe(404);
     const r = await get("/api/hello", { method: "DELETE" });
     expect(r.status).toBe(405);

@@ -119,6 +119,14 @@ function resolveDynamicFile(dir, segments, exts) {
     }
     return null;
   }
+  // A static leaf file wins over dynamic siblings at every depth, not only
+  // at the API root: orders/[id]/download.ts must match /orders/1/download.
+  if (segments.length === 1) {
+    for (const ext of exts) {
+      const leaf = path.join(dir, segments[0] + ext);
+      try { if (fs.statSync(leaf).isFile()) return leaf; } catch {}
+    }
+  }
   if (segments.length > 0) {
     const next = path.join(dir, segments[0]);
     try {
@@ -643,6 +651,14 @@ function resolveDynamicFile(dir, segments, exts) {
       if (fs.existsSync(index)) return index;
     }
     return null;
+  }
+  // A static leaf file wins over dynamic siblings at every depth, not only
+  // at the API root: orders/[id]/download.ts must match /orders/1/download.
+  if (segments.length === 1) {
+    for (const ext of exts) {
+      const leaf = path.join(dir, segments[0] + ext);
+      try { if (fs.statSync(leaf).isFile()) return leaf; } catch {}
+    }
   }
   if (segments.length > 0) {
     const next = path.join(dir, segments[0]);
