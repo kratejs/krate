@@ -135,7 +135,7 @@ export function __krateScopeSubscribe(s) {
 // A slot puts its nodes straight into the parent the component renders it
 // in, with no element around them, so child combinators (:has(> svg),
 // space-y-*) match as they do in React. Preact cannot render foreign nodes,
-// so the slot renders an empty text vnode per node and, in a layout effect
+// so the slot renders an empty text vnode per node and, once it is diffed
 // (before paint), puts each node in place of its text node and points the
 // vnode at it (Preact's mangled _dom, __e, and the ancestors' first-node
 // pointers, as Preact's own updateParentDomPointers does). Preact then moves
@@ -153,8 +153,8 @@ export function __krateScopeSubscribe(s) {
 // more than the server did), it gets a clone. A slot without an id parses
 // the HTML its props carry.
 const preactSlotJS = `
-import { useContext as __krateUseContext, useLayoutEffect as __krateUseLayoutEffect } from "preact/hooks";
-import { Fragment as __KrateFragment } from "preact";
+import { useContext as __krateUseContext } from "preact/hooks";
+import { Fragment as __KrateFragment, options as __krateOptions } from "preact";
 var __krateSlotPool = null;
 var __krateSlotOpen = /^krate-slot:([0-9a-z]+)$/;
 function __krateServerSlots(el) {
@@ -213,7 +213,26 @@ function __krateSlotPlace(c) {
     if (v.__c) v.__c.base = v.__e;
   }
 }
+// Placement runs from Preact's diffed hook (after the slot's children are in
+// the DOM, before paint) and release from its unmount hook, not from a
+// layout effect: a hook import would make every island chunk look stateful
+// to the build (statefulHookRe).
+var __krateSlotHooked = false;
+function __krateSlotHooks() {
+  if (__krateSlotHooked) return;
+  __krateSlotHooked = true;
+  var diffed = __krateOptions.diffed, unmount = __krateOptions.unmount;
+  __krateOptions.diffed = function (v) {
+    if (v.type === __KrateSlot && v.__c) __krateSlotPlace(v.__c);
+    if (diffed) diffed(v);
+  };
+  __krateOptions.unmount = function (v) {
+    if (v.type === __KrateSlot && v.__c) __krateSlotRelease(v.__c);
+    if (unmount) unmount(v);
+  };
+}
 function __krateSlot(h, html, r) {
+  __krateSlotHooks();
   return h(__KrateSlot, { html: html, r: r, pool: r != null && __krateSlotPool ? __krateSlotPool[r] || [] : null, scope: { ctx: null, vals: [], subs: [] } });
 }
 function __KrateSlot(p, map) {
@@ -230,8 +249,6 @@ function __KrateSlot(p, map) {
     c.__krateGen = (c.__krateGen || 0) + 1;
   }
   c.__krateSlotScope = s;
-  __krateUseLayoutEffect(function () { __krateSlotPlace(c); });
-  __krateUseLayoutEffect(function () { return function () { __krateSlotRelease(c); }; }, []);
   var texts = c.__krateSet.map(function () { return ""; });
   return [h(__KrateFragment, { key: "n" + c.__krateGen }, texts)].concat(f.map(function (e) { return h(__KrateWatch, { key: e.k, k: e.k, c: e.c, s: s }); }));
 }
