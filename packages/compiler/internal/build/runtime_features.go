@@ -2,6 +2,8 @@ package build
 
 import (
 	"encoding/json"
+	"path"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -66,6 +68,9 @@ type runtimeUsage struct {
 	// LazyUnscanned is set when a page loads lazy chunks whose code was not
 	// recorded (a page result without RuntimeRefs).
 	LazyUnscanned bool
+	// ScriptSrcs are the same-origin script URLs (site paths, without the
+	// query) that pages load with <script src>.
+	ScriptSrcs map[string]bool
 }
 
 // recordRuntimeRefs returns the global names a page's generated client code
@@ -111,10 +116,55 @@ func runtimeUsageOf(results []*PageResult) runtimeUsage {
 	}
 	// A dynamic import() loads code the build did not scan, and a computed
 	// member of window can read any export.
+	u.checkDynamic()
+	return u
+}
+
+// checkDynamic marks the usage unknown when the scanned code can reach any
+// global: a dynamic import() loads code the build did not scan, and a
+// computed member of window can read any export.
+func (u *runtimeUsage) checkDynamic() {
 	if u.Refs[dynamicImportRef] || u.Refs[dynamicGlobalRef] {
 		u.Unknown = true
 	}
-	return u
+}
+
+// addScriptFiles adds the references of the same-origin scripts pages load
+// whose source read returns (files from the public directory). Scripts it
+// cannot read, such as external URLs, are left alone.
+func (u *runtimeUsage) addScriptFiles(read func(sitePath string) (string, bool)) {
+	srcs := make([]string, 0, len(u.ScriptSrcs))
+	for src := range u.ScriptSrcs {
+		srcs = append(srcs, src)
+	}
+	sort.Strings(srcs)
+	for _, src := range srcs {
+		if code, ok := read(src); ok {
+			for name := range jsRefs(code) {
+				u.Refs[name] = true
+			}
+		}
+	}
+	u.checkDynamic()
+}
+
+// scriptSitePath returns the site path a script src on the page at outName
+// loads, or "" for an external, data or other non-file URL.
+func scriptSitePath(outName, src string) string {
+	src = strings.TrimSpace(src)
+	if i := strings.IndexAny(src, "?#"); i >= 0 {
+		src = src[:i]
+	}
+	if src == "" || strings.HasPrefix(src, "//") {
+		return ""
+	}
+	if i := strings.IndexAny(src, ":/"); i >= 0 && src[i] == ':' {
+		return ""
+	}
+	if !strings.HasPrefix(src, "/") {
+		src = path.Join("/", path.Dir(filepath.ToSlash(outName)), src)
+	}
+	return path.Clean(src)
 }
 
 func (u *runtimeUsage) addPage(r *PageResult) {
@@ -134,18 +184,32 @@ func (u *runtimeUsage) addPage(r *PageResult) {
 			u.LazyUnscanned = true
 		}
 	}
-	scanScripts := func(page string, markup bool) {
-		scripts, island, actions := scanPageMarkup(page)
-		for name := range jsRefs(scripts...) {
-			u.Refs[name] = true
+	scanScripts := func(page string, inline, markup bool) {
+		m := scanMarkup(page)
+		scripts, island, actions := m.scripts, m.island, m.actions
+		if inline {
+			for name := range jsRefs(scripts...) {
+				u.Refs[name] = true
+			}
+		}
+		for _, src := range m.srcs {
+			if p := scriptSitePath(r.OutName, src); p != "" {
+				if u.ScriptSrcs == nil {
+					u.ScriptSrcs = map[string]bool{}
+				}
+				u.ScriptSrcs[p] = true
+			}
 		}
 		if markup {
 			u.Unknown = u.Unknown || island
 			u.ActionForms = u.ActionForms || actions
 		}
 	}
-	scanScripts(r.ScriptHTML, false)
-	scanScripts(r.HTML, true)
+	scanScripts(r.ScriptHTML, true, false)
+	// Head scripts are the framework's (theme, CDN loaders); only the files
+	// they load count.
+	scanScripts(r.HeadHTML, false, false)
+	scanScripts(r.HTML, true, true)
 	// HTML produced per request can render forms and client components
 	// the build never saw: such a page keeps the whole runtime.
 	if perRequestClientCode(r) {
@@ -160,8 +224,20 @@ func (u *runtimeUsage) addPage(r *PageResult) {
 // URL under /__krate/action/). Text, comments and attribute values that
 // merely mention the markup do not count.
 func scanPageMarkup(fragment string) (scripts []string, island, actions bool) {
+	m := scanMarkup(fragment)
+	return m.scripts, m.island, m.actions
+}
+
+// pageMarkup is what scanMarkup reads from an HTML fragment.
+type pageMarkup struct {
+	scripts         []string
+	srcs            []string // src of the JavaScript script elements
+	island, actions bool
+}
+
+func scanMarkup(fragment string) (m pageMarkup) {
 	if fragment == "" {
-		return nil, false, false
+		return m
 	}
 	z := html.NewTokenizer(strings.NewReader(fragment))
 	inScript := false
@@ -169,10 +245,10 @@ func scanPageMarkup(fragment string) (scripts []string, island, actions bool) {
 		tt := z.Next()
 		switch tt {
 		case html.ErrorToken:
-			return scripts, island, actions
+			return m
 		case html.TextToken:
 			if inScript {
-				scripts = append(scripts, string(z.Text()))
+				m.scripts = append(m.scripts, string(z.Text()))
 			}
 		case html.EndTagToken:
 			inScript = false
@@ -180,22 +256,28 @@ func scanPageMarkup(fragment string) (scripts []string, island, actions bool) {
 			name, hasAttr := z.TagName()
 			tag := string(name)
 			if tag == islandMarkup {
-				island = true
+				m.island = true
 			}
 			jsType := true
+			src := ""
 			for hasAttr {
 				var key, val []byte
 				key, val, hasAttr = z.TagAttr()
 				switch string(key) {
 				case actionsMarkup:
-					actions = true
+					m.actions = true
 				case "action", "formaction":
 					if strings.Contains(string(val), "/__krate/action/") {
-						actions = true
+						m.actions = true
 					}
 				case "type":
 					jsType = isJSScriptType(string(val))
+				case "src":
+					src = string(val)
 				}
+			}
+			if tag == "script" && jsType && src != "" {
+				m.srcs = append(m.srcs, src)
 			}
 			inScript = tag == "script" && tt == html.StartTagToken && jsType
 		}

@@ -748,6 +748,18 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 		if s, ok := val.(string); ok {
 			cfg.Runtime = s
 		}
+	case "clientRuntime":
+		m, ok := val.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("expected object, got %T", val)
+		}
+		if v, ok := m["exports"]; ok {
+			s, ok := v.(string)
+			if !ok {
+				return fmt.Errorf("clientRuntime.exports: expected string, got %T", v)
+			}
+			cfg.ClientRuntime.Exports = s
+		}
 	case "tsBaseDir":
 		if s, ok := val.(string); ok {
 			cfg.TSBaseDir = s

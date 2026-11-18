@@ -103,6 +103,9 @@ func buildKnownTopLevelKeys() map[string]bool {
 // returns a fatal error for values that would break a build, and a list of
 // warnings for suspicious-but-tolerable values.
 func (c *Config) Validate() (warnings []string, err error) {
+	if e := c.ClientRuntime.Exports; e != "" && e != "auto" && e != "all" {
+		return nil, fmt.Errorf("clientRuntime.exports must be \"auto\" or \"all\", got %q", e)
+	}
 	if c.Output != "" && c.Output != "static" {
 		return nil, fmt.Errorf("output must be \"\" or \"static\", got %q", c.Output)
 	}

@@ -941,6 +941,16 @@ export interface KrateConfig {
    * from the shared runtime.
    */
   spa?: boolean;
+  /** The shared browser runtime chunk. */
+  clientRuntime?: {
+    /**
+     * `"auto"` (default): production builds define on `window` only the
+     * runtime exports the site's code references. `"all"` defines every
+     * export, for scripts the build cannot see (injected at runtime, or
+     * third-party code calling Krate globals).
+     */
+    exports?: "auto" | "all";
+  };
   /**
    * View Transitions API integration. `true`/`"auto"` (default) enables
    * same-document SPA morphs and the cross-document `@view-transition` rule;

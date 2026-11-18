@@ -39,7 +39,18 @@ that names an API (`requestFormReset`, `Children`, `"use server"`) does not, so
 the runtime chunk, and its hash, change only when client code does. A page
 with a client island or HTML rendered per request, or client code that reads a
 computed global (`window[name]`) or calls `import()`, gets every piece with
-every export defined.
+every export defined. Same-origin scripts a page loads from `public/`
+(`<script src="/app.js">` or `<Script src="/app.js" />`) are read the same way;
+external URLs are not.
+
+Code the build cannot see at all, such as a script injected at run time or a
+third-party script that calls Krate globals, fails in production with
+`ReferenceError: krateX is not defined` (or `... is not a function`) while
+`krate dev` works. Ship the full runtime for such a site:
+
+```ts
+clientRuntime: { exports: "all" }   // default "auto"
+```
 
 ## Site metadata
 

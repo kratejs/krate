@@ -776,31 +776,33 @@ type Config struct {
 	Tailwind    TailwindCfg     `json:"tailwind,omitempty"`
 	CSP         CSPConfig       `json:"csp,omitempty"`
 	Runtime     string          `json:"runtime,omitempty"`
-	SSR         SSRConfig       `json:"ssr,omitempty"`
-	Cache       CacheConfig     `json:"cache,omitempty"`
-	PathAliases PathAliases     `json:"pathAliases,omitempty"` // from tsconfig.json paths or config object
-	TSBaseDir   string          `json:"tsBaseDir,omitempty"`   // baseUrl resolved to absolute path
-	TSBaseURL   string          `json:"-"`                     // tsconfig baseUrl, absolute; empty when tsconfig sets none
-	Redirects   []Redirect      `json:"redirects,omitempty"`   // config-based redirects
-	Rewrites    []Rewrite       `json:"rewrites,omitempty"`    // config-based rewrites
-	SEO         SEOConfig       `json:"seo,omitempty"`         // SEO metadata (baseUrl, siteName, description)
-	Site        SiteConfig      `json:"site,omitempty"`        // canonical site metadata (supersedes seo)
-	Robots      RobotsConfig    `json:"robots,omitempty"`      // robots.txt config
-	I18n        I18nConfig      `json:"i18n,omitempty"`        // multi-language docs
-	Versions    VersionsConfig  `json:"versions,omitempty"`    // versioned docs
-	Dce         DceCfg          `json:"dce,omitempty"`         // CSS/JS dead-code elimination
-	Fonts       FontsCfg        `json:"fonts,omitempty"`       // web-font preload + font-display
-	GoAPI       GoAPICfg        `json:"goApi,omitempty"`       // Go API sidecar module/deps (legacy; see Go)
-	Go          GoCfg           `json:"go,omitempty"`          // unified Go module: API routes + components
-	Compat      CompatConfig    `json:"compat,omitempty"`      // browser compatibility output mode
-	Compress    CompressConfig  `json:"compress,omitempty"`    // build-time precompression (.br/.gz)
-	Head        HeadConfig      `json:"head,omitempty"`        // site-wide <head> injection
-	Security    SecurityConfig  `json:"security,omitempty"`    // security header overrides
-	Headers     []HeaderRule    `json:"headers,omitempty"`     // custom response headers
-	Images      ImagesConfig    `json:"images,omitempty"`      // responsive-image pipeline
-	Deploy      DeployConfig    `json:"deploy,omitempty"`      // deploy adapter + options
-	Auth        AuthConfig      `json:"auth,omitempty"`        // authentication: providers, sessions, 2FA, passkeys
-	React       ReactConfig     `json:"react,omitempty"`       // real-React islands
+	// ClientRuntime tunes the browser runtime chunk.
+	ClientRuntime ClientRuntimeConfig `json:"clientRuntime,omitempty"`
+	SSR           SSRConfig           `json:"ssr,omitempty"`
+	Cache         CacheConfig         `json:"cache,omitempty"`
+	PathAliases   PathAliases         `json:"pathAliases,omitempty"` // from tsconfig.json paths or config object
+	TSBaseDir     string              `json:"tsBaseDir,omitempty"`   // baseUrl resolved to absolute path
+	TSBaseURL     string              `json:"-"`                     // tsconfig baseUrl, absolute; empty when tsconfig sets none
+	Redirects     []Redirect          `json:"redirects,omitempty"`   // config-based redirects
+	Rewrites      []Rewrite           `json:"rewrites,omitempty"`    // config-based rewrites
+	SEO           SEOConfig           `json:"seo,omitempty"`         // SEO metadata (baseUrl, siteName, description)
+	Site          SiteConfig          `json:"site,omitempty"`        // canonical site metadata (supersedes seo)
+	Robots        RobotsConfig        `json:"robots,omitempty"`      // robots.txt config
+	I18n          I18nConfig          `json:"i18n,omitempty"`        // multi-language docs
+	Versions      VersionsConfig      `json:"versions,omitempty"`    // versioned docs
+	Dce           DceCfg              `json:"dce,omitempty"`         // CSS/JS dead-code elimination
+	Fonts         FontsCfg            `json:"fonts,omitempty"`       // web-font preload + font-display
+	GoAPI         GoAPICfg            `json:"goApi,omitempty"`       // Go API sidecar module/deps (legacy; see Go)
+	Go            GoCfg               `json:"go,omitempty"`          // unified Go module: API routes + components
+	Compat        CompatConfig        `json:"compat,omitempty"`      // browser compatibility output mode
+	Compress      CompressConfig      `json:"compress,omitempty"`    // build-time precompression (.br/.gz)
+	Head          HeadConfig          `json:"head,omitempty"`        // site-wide <head> injection
+	Security      SecurityConfig      `json:"security,omitempty"`    // security header overrides
+	Headers       []HeaderRule        `json:"headers,omitempty"`     // custom response headers
+	Images        ImagesConfig        `json:"images,omitempty"`      // responsive-image pipeline
+	Deploy        DeployConfig        `json:"deploy,omitempty"`      // deploy adapter + options
+	Auth          AuthConfig          `json:"auth,omitempty"`        // authentication: providers, sessions, 2FA, passkeys
+	React         ReactConfig         `json:"react,omitempty"`       // real-React islands
 
 	// ServerExternalPackages lists npm packages that server bundles (API
 	// routes, the node deploy bundle) leave out of the bundle and load from
@@ -966,6 +968,19 @@ func (c *Config) MaxAPIBodyBytes() int64 {
 		return c.Server.MaxBodySize
 	}
 	return defaultMaxAPIBodyBytes
+}
+
+// ClientRuntimeConfig configures the shared browser runtime chunk.
+type ClientRuntimeConfig struct {
+	// Exports is "auto" (default): production builds define on window only
+	// the runtime exports the site's code references. "all" defines every
+	// export, for code the build cannot see.
+	Exports string `json:"exports,omitempty"`
+}
+
+// AllRuntimeExports reports whether clientRuntime.exports is "all".
+func (c *Config) AllRuntimeExports() bool {
+	return c.ClientRuntime.Exports == "all"
 }
 
 // SPAEnabled reports whether the client-side router is enabled (default true).

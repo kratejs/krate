@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kratejs/krate/packages/compiler/internal/config"
 	"github.com/kratejs/krate/packages/compiler/internal/renderer"
 )
 
@@ -270,5 +271,101 @@ func TestScriptRefsFollowsUsedHelpers(t *testing.T) {
 	}
 	if got["createMemo"] {
 		t.Error("an unused helper's references count")
+	}
+}
+
+// buildShakeProject builds pages and public files with the production
+// runtime and returns the runtime chunk.
+func buildShakeProject(t *testing.T, files map[string]string, edit func(*config.Config)) string {
+	t.Helper()
+	repoRoot, m := loadFeatureManifest(t)
+	if !runtimeModulesAvailable(&m) {
+		t.Skip("krate-features.json lists no runtime modules (rebuild @krate/runtime)")
+	}
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "packages"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(repoRoot, "packages", "runtime"), filepath.Join(root, "packages", "runtime")); err != nil {
+		t.Skipf("cannot link the runtime package: %v", err)
+	}
+	for name, src := range files {
+		writeProjectFile(t, root, name, src)
+	}
+	cfg := config.Default()
+	cfg.PagesDir = filepath.Join(root, "src", "pages")
+	cfg.PublicDir = filepath.Join(root, "public")
+	cfg.OutDir = filepath.Join(root, "dist")
+	if edit != nil {
+		edit(cfg)
+	}
+	if err := New(root, cfg).BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	matches, _ := filepath.Glob(filepath.Join(cfg.OutDir, "chunks", "runtime.*.js"))
+	if len(matches) != 1 {
+		t.Fatalf("runtime chunks: %v", matches)
+	}
+	data, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
+const shakeCounterPage = `import { useState } from "react";
+export default function Page() {
+	const [c, setC] = useState(0);
+	return <main><button onClick={() => setC(c + 1)}>{c}</button><script src="/app.js"></script><script src="https://cdn.example.com/x.js"></script></main>;
+}
+`
+
+// TestShakenRuntimeScansPublicScripts checks that a same-origin script from
+// public/ counts like page code: its references are defined, and a computed
+// global in it ships the full surface.
+func TestShakenRuntimeScansPublicScripts(t *testing.T) {
+	plain := buildShakeProject(t, map[string]string{
+		"src/pages/index.tsx": shakeCounterPage,
+		"public/app.js":       `createResource(() => 1); // createRoot in a comment does not count`,
+	}, nil)
+	if !strings.Contains(plain, "createResource:") {
+		t.Error("runtime does not define createResource, which public/app.js calls")
+	}
+	if strings.Contains(plain, "createRoot:") || strings.Contains(plain, "twMerge:") {
+		t.Error("runtime defines names nothing calls")
+	}
+	dynamic := buildShakeProject(t, map[string]string{
+		"src/pages/index.tsx": shakeCounterPage,
+		"public/app.js":       `const name = "create" + "Resource"; window[name](() => 1);`,
+	}, nil)
+	if !strings.Contains(dynamic, "twMerge:") || !strings.Contains(dynamic, "createRoot:") {
+		t.Error("a script with window[expr] did not get the full runtime")
+	}
+}
+
+// TestClientRuntimeExportsAll checks the clientRuntime.exports opt-out.
+func TestClientRuntimeExportsAll(t *testing.T) {
+	js := buildShakeProject(t, map[string]string{
+		"src/pages/index.tsx": strings.Replace(shakeCounterPage, `<script src="/app.js"></script>`, "", 1),
+	}, func(c *config.Config) { c.ClientRuntime.Exports = "all" })
+	for _, name := range []string{"twMerge", "createRoot", "createResource", "krateHighlight"} {
+		if !strings.Contains(js, name+":") {
+			t.Errorf("exports: all does not define %s", name)
+		}
+	}
+}
+
+func TestScriptSitePath(t *testing.T) {
+	for _, c := range [][3]string{
+		{"index.html", "/app.js?v=1", "/app.js"},
+		{"docs/a/index.html", "lib/x.js#h", "/docs/a/lib/x.js"},
+		{"docs/a/index.html", "../x.js", "/docs/x.js"},
+		{"index.html", "https://cdn.example.com/x.js", ""},
+		{"index.html", "//cdn.example.com/x.js", ""},
+		{"index.html", "data:text/javascript,1", ""},
+	} {
+		if got := scriptSitePath(c[0], c[1]); got != c[2] {
+			t.Errorf("scriptSitePath(%q, %q) = %q, want %q", c[0], c[1], got, c[2])
+		}
 	}
 }

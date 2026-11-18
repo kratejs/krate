@@ -434,6 +434,8 @@ host code runs in the native process. Names and options may change between relea
   one copy of esbuild's module helpers. A counter page's runtime drops from 29.3 kB to 19.3 kB gzip (10 kB
   with `spa: false`), the docs site's from 31.6 kB to 26.2 kB. Code that reads
   `window[name]` gets the full runtime; older `@krate/runtime` packages keep the prebuilt pieces.
+  Same-origin scripts from `public/` that pages load count as client code, and
+  `clientRuntime: { exports: "all" }` ships every export for code the build cannot see.
 - Imported client components (layouts, the docs theme, library components) hydrate from shared,
   content-hashed chunks under `chunks/c/` instead of being compiled into every page script; a page
   script keeps one call per instance with its ids and data. Docs page scripts drop from 3.5-7.4 kB to

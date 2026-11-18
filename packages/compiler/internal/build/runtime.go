@@ -10,6 +10,7 @@ import (
 
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	irtree "github.com/kratejs/krate/packages/compiler/internal/irtree"
+	"github.com/kratejs/krate/packages/compiler/internal/pluginapi"
 	"github.com/kratejs/krate/packages/compiler/internal/renderer"
 )
 
@@ -337,6 +338,10 @@ func (b *Builder) runtimeChunkOptions(results []*PageResult) runtimeChunkOptions
 		b.runtimeResultsHook(results)
 	}
 	usage := runtimeUsageOf(results)
+	usage.addScriptFiles(b.publicScript)
+	if b.Cfg.AllRuntimeExports() {
+		usage.Unknown = true
+	}
 	return runtimeChunkOptions{
 		SPA:      b.Cfg.SPAEnabled(),
 		Compat:   runtimeNeedsCompat(usage),
@@ -345,4 +350,27 @@ func (b *Builder) runtimeChunkOptions(results []*PageResult) runtimeChunkOptions
 		Usage:    usage,
 		Features: &b.runtimeFeatures,
 	}
+}
+
+// publicScript reads the file of the public directory a page script at
+// sitePath loads (the build copies it to dist as is).
+func (b *Builder) publicScript(sitePath string) (string, bool) {
+	pub := b.Cfg.PublicDir
+	if pub == "" {
+		return "", false
+	}
+	if base := b.Cfg.BaseURLPath(); base != "" {
+		if rest, ok := strings.CutPrefix(sitePath, base+"/"); ok {
+			sitePath = "/" + rest
+		}
+	}
+	file := filepath.Join(pub, filepath.FromSlash(strings.TrimPrefix(sitePath, "/")))
+	if !pluginapi.WithinRoot(pub, file) {
+		return "", false
+	}
+	data, err := os.ReadFile(file)
+	if err != nil {
+		return "", false
+	}
+	return string(data), true
 }
