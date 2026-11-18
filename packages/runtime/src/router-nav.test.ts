@@ -197,6 +197,48 @@ describe('a second copy of the router module', () => {
     expect(seen).toContain('/store?q=cv');
     off();
   });
+
+  // A page with islands only has no page script to start the router.
+  it('starts the page router when it has not started yet', async () => {
+    destroyRouter();
+    const g = globalThis as any;
+    g.initRouter = initRouter;
+    g.krateRouter = krateRouter;
+    try {
+      const spec = './router?island-copy-start';
+      const copy = (await import(/* @vite-ignore */ spec)) as typeof import('./router');
+      routes['/templates'] = { body: page('Templates', '<input aria-label="q">') };
+      await copy.krateRouter.replace('/templates', { scroll: false });
+      await settle();
+      expect(hardNavs).toEqual([]);
+      expect(location.pathname).toBe('/templates');
+      expect(g[Symbol.for('krate.router')]).toBe(krateRouter);
+    } finally {
+      delete g.initRouter;
+      delete g.krateRouter;
+    }
+  });
+
+  it('falls back to the page navigate when the page registered no router', async () => {
+    destroyRouter();
+    const g = globalThis as any;
+    const nav = vi.fn(() => false);
+    g.navigate = nav;
+    g.krateRouter = { push() {} };
+    try {
+      const spec = './router?island-copy-navigate';
+      const copy = (await import(/* @vite-ignore */ spec)) as typeof import('./router');
+      await copy.krateRouter.replace('/templates', { scroll: false });
+      await copy.krateRouter.push('/store');
+      expect(nav.mock.calls).toEqual([
+        ['/templates', { scroll: false, replace: true }],
+        ['/store', { replace: false }],
+      ]);
+    } finally {
+      delete g.navigate;
+      delete g.krateRouter;
+    }
+  });
 });
 
 describe('races', () => {

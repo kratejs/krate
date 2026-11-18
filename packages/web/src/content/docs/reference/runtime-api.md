@@ -279,8 +279,11 @@ class; unclassifiable expressions remain a build error.
 
 ## SPA router
 
-The router initializes itself from every page's hydration script
-(`initRouter()` / `reinitRouter()` are idempotent). It intercepts clicks on
+The router starts on every page that loads the shared runtime: from the
+page's hydration script, or, on a page with client components (islands) only,
+from the runtime itself once the document has loaded. It starts once
+(`initRouter()` / `reinitRouter()` are idempotent), and `useRouter()` in a
+client component navigates through it. It intercepts clicks on
 `<Link>` anchors (`data-krate-link`) and same-origin `GET` form submissions,
 fetches the target document and swaps it in place. Shared layouts stay
 mounted (see [Routing & Layouts](/docs/core-concepts/routing/#layout-persistence)).

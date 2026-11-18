@@ -149,8 +149,38 @@ const LIVE_ROUTER = Symbol.for('krate.router');
 
 function liveRouter(): typeof krateRouter | null {
   if (initialized) return null;
-  const r = (globalThis as any)[LIVE_ROUTER];
+  const g = globalThis as any;
+  let r = g[LIVE_ROUTER];
+  // The page runtime is loaded but its router has not started yet (a page
+  // with islands only, before the runtime starts it): start it here. The
+  // check compares krateRouter, not initRouter, so an island's copy does not
+  // keep its own (unused) router start code.
+  if (!r && typeof document !== 'undefined' && otherRuntime() && typeof g.initRouter === 'function') {
+    try {
+      g.initRouter();
+    } catch (err) {
+      console.error(err);
+    }
+    r = g[LIVE_ROUTER];
+  }
   return r && r !== krateRouter ? r : null;
+}
+
+/**
+ * The page runtime's navigate when this is an island's copy of the router
+ * and the page has no registered router (an older runtime): it still owns
+ * the history, so a navigation goes through it before falling back to a
+ * full load.
+ */
+function pageNavigate(): ((url: string, opts?: NavigateOptions) => boolean) | null {
+  const nav = (globalThis as any).navigate;
+  return otherRuntime() && typeof nav === 'function' ? nav : null;
+}
+
+/** True in a copy of this module other than the one the page runtime exposes. */
+function otherRuntime(): boolean {
+  const pageRouter = (globalThis as any).krateRouter;
+  return !!pageRouter && pageRouter !== krateRouter;
 }
 let navSeq = 0;
 let pendingAbort: AbortController | undefined;
@@ -1969,7 +1999,9 @@ function push(url: string, opts: NavigateOptions = {}): Promise<void> {
   if (!initialized) {
     const live = liveRouter();
     if (live) return live.push(url, opts);
-    if (typeof location !== 'undefined') location.assign(withBase(url));
+    const nav = pageNavigate();
+    if (nav) nav(url, { ...opts, replace: false });
+    else if (typeof location !== 'undefined') location.assign(withBase(url));
     return Promise.resolve();
   }
   return start({ url: withBase(url), kind: 'push', scroll: opts.scroll !== false, state: opts.state });
@@ -1979,7 +2011,9 @@ function replace(url: string, opts: NavigateOptions = {}): Promise<void> {
   if (!initialized) {
     const live = liveRouter();
     if (live) return live.replace(url, opts);
-    if (typeof location !== 'undefined') location.replace(withBase(url));
+    const nav = pageNavigate();
+    if (nav) nav(url, { ...opts, replace: true });
+    else if (typeof location !== 'undefined') location.replace(withBase(url));
     return Promise.resolve();
   }
   return start({ url: withBase(url), kind: 'replace', scroll: opts.scroll !== false, state: opts.state });

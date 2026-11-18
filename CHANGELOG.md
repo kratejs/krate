@@ -572,6 +572,14 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- `useRouter().push/replace` in a client component (island) is a client navigation on a page that has
+  islands only. Such a page has no page script, which was the only place the SPA router started, so
+  the island's navigation loaded a whole new document (focus and page state lost) and `<Link>`s on the
+  page were not intercepted. The runtime chunk now starts the router once the document has run (once:
+  a page script that already started it wins), and an island's router copy starts the page's router
+  itself if it finds it stopped, or hands the navigation to the page's `navigate`, before it falls
+  back to a full load. A site whose pages are all island-only ships no runtime chunk and still
+  navigates with full loads.
 - `KrateConfig` (@krate/core) types every key the config loader accepts. `deploy.target` takes
   `"node"` and `"docker"`, so the config `krate migrate nextjs` writes for `output: 'standalone'`
   typechecks; `ssr` gains `nodeWorkers`, `apiWorkers`, `apiIsolation` and `rendererWorkers`; the

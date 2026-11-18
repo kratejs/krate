@@ -343,6 +343,9 @@ func shakenRuntime(projectRoot string, m *runtimeFeatureManifest, routerName str
 	}
 	load := func(name string) string { return loadNamedBundleFromDisk(projectRoot, name) }
 	scripts := []string{renderer.HydrationBootstrapJS}
+	if opts.SPA {
+		scripts = append(scripts, routerStartJS)
+	}
 	if opts.Compat {
 		scripts = append(scripts, renderer.CompatBootstrapJS)
 	}
