@@ -49,12 +49,20 @@ func resolvePackageDir(name, from string) string {
 // AddPackages copies each named package, resolved from root, with its
 // dependencies and optionalDependencies. Optional packages that are not
 // installed (the other platforms' binaries) are skipped silently; a missing
-// dependency or top-level package is a warning.
-func (t *serverTrace) AddPackages(root string, names []string) {
+// dependency or top-level package is a warning. A package root cannot see
+// (a workspace package's dependency) is taken from sources, the directory
+// the bundle's file URL import named.
+func (t *serverTrace) AddPackages(root string, names []string, sources map[string]string) {
 	for _, n := range names {
-		if !t.add(n, root, t.destNM, "") {
-			t.Warnings = append(t.Warnings, fmt.Sprintf("package %q is external to the server bundle but is not installed under %s; install it before running the server", n, root))
+		if t.add(n, root, t.destNM, "") {
+			continue
 		}
+		if dir := sources[n]; dir != "" {
+			if from := strings.TrimSuffix(filepath.ToSlash(dir), "/"+n); from != filepath.ToSlash(dir) && t.add(n, filepath.FromSlash(from), t.destNM, "") {
+				continue
+			}
+		}
+		t.Warnings = append(t.Warnings, fmt.Sprintf("package %q is external to the server bundle but is not installed under %s; install it before running the server", n, root))
 	}
 }
 

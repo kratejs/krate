@@ -260,16 +260,22 @@ func TestNodeTargetBundlesFileURLDependencyOfWorkspacePackage(t *testing.T) {
 		"node_modules/.pnpm/tiny@1.0.0/node_modules/tiny/index.js":     `module.exports = function tiny() { return "from tiny"; };`,
 		"packages/db/package.json":                                     `{"name":"@acme/db","version":"0.0.0","main":"src/index.ts","dependencies":{"tiny":"1.0.0"}}`,
 		"packages/db/src/index.ts": `import tiny from "tiny";
-export function dbName(): string { return tiny(); }`,
-		"packages/db/node_modules/tiny":  "symlink:node_modules/.pnpm/tiny@1.0.0/node_modules/tiny",
-		"apps/web/node_modules/@acme/db": "symlink:packages/db",
-		"apps/web/package.json":          `{"name":"web","dependencies":{"@acme/db":"workspace:*"}}`,
-		"apps/web/src/pages/index.tsx":   `export default function Home() { return <h1>home</h1>; }`,
-		"apps/web/src/pages/p/[id].tsx": `import { dbName } from "@acme/db";
+export function dbName(): string { return tiny(); }
+export async function loadNative() { return (await import("nat")).default; }`,
+		"node_modules/.pnpm/nat@1.0.0/node_modules/nat/package.json": `{"name":"nat","version":"1.0.0","main":"index.js"}`,
+		"node_modules/.pnpm/nat@1.0.0/node_modules/nat/index.js":     `module.exports = require("./nat.node");`,
+		"node_modules/.pnpm/nat@1.0.0/node_modules/nat/nat.node":     "binary",
+		"packages/db/node_modules/nat":                               "symlink:node_modules/.pnpm/nat@1.0.0/node_modules/nat",
+		"packages/db/node_modules/tiny":                              "symlink:node_modules/.pnpm/tiny@1.0.0/node_modules/tiny",
+		"apps/web/node_modules/@acme/db":                             "symlink:packages/db",
+		"apps/web/package.json":                                      `{"name":"web","dependencies":{"@acme/db":"workspace:*"}}`,
+		"apps/web/src/pages/index.tsx":                               `export default function Home() { return <h1>home</h1>; }`,
+		"apps/web/src/pages/p/[id].tsx": `import { dbName, loadNative } from "@acme/db";
 export default async function Page({ params }: any) {
   const { id } = await params;
+  const native = await loadNative().catch(() => "none");
   async function rename() { 'use server'; return dbName() + id; }
-  return <form action={rename}><h1>page {dbName()} {id}</h1><button>go</button></form>;
+  return <form action={rename}><h1>page {dbName()} {id} {String(native)}</h1><button>go</button></form>;
 }`,
 		"apps/web/src/api/dep.ts": `import { dbName } from "@acme/db";
 export async function GET() { return Response.json({ name: dbName() }); }`,
@@ -278,6 +284,10 @@ export async function GET() { return Response.json({ name: dbName() }); }`,
 	root, cfg := externalsProjectAt(t, files, "apps/web", func(c *config.Config) { c.SSR.APIRuntime = "node" })
 	if _, err := BuildServerBundle(root, cfg, "node"); err != nil {
 		t.Fatalf("BuildServerBundle: %v", err)
+	}
+	// The native package is not visible from the project; the trace takes it from where the import found it.
+	if _, err := os.Stat(filepath.Join(cfg.OutDir, ".krate", "server", "node_modules", "nat", "nat.node")); err != nil {
+		t.Errorf("the native dependency of the workspace package must be in the server output: %v", err)
 	}
 	if err := os.RemoveAll(filepath.Join(filepath.Dir(filepath.Dir(root)), "node_modules")); err != nil {
 		t.Fatal(err)

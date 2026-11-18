@@ -682,12 +682,12 @@ func BuildServerBundle(root string, cfg *config.Config, target string) (*deploy.
 	if err := os.MkdirAll(filepath.Dir(outFile), 0755); err != nil {
 		return nil, err
 	}
-	externals, err := bundleServerEntry(root, cfg, target, entry, outFile)
+	externals, sources, err := bundleServerEntry(root, cfg, target, entry, outFile)
 	if err != nil {
 		return nil, err
 	}
 	if target == "node" {
-		if err := traceNodeServer(root, cfg, layout, externals, plan); err != nil {
+		if err := traceNodeServer(root, cfg, layout, externals, sources, plan); err != nil {
 			return nil, err
 		}
 	}
@@ -1155,10 +1155,10 @@ func pathWithin(dir, p string) bool {
 // bundleServerEntry bundles the generated entry. For the node target it also
 // returns the packages left external, which must be installed next to the
 // bundle (see serverTrace).
-func bundleServerEntry(root string, cfg *config.Config, target, entry, outFile string) ([]string, error) {
+func bundleServerEntry(root string, cfg *config.Config, target, entry, outFile string) ([]string, map[string]string, error) {
 	rt, err := runtimePlugin(root)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	entry = strings.NewReplacer("__SHUTDOWN__", fmt.Sprint(cfg.Server.ShutdownTimeout), "__PORT__", fmt.Sprint(cfg.ServerPort())).Replace(entry)
 	opts := api.BuildOptions{
@@ -1201,8 +1201,9 @@ func bundleServerEntry(root string, cfg *config.Config, target, entry, outFile s
 	opts.Metafile = true
 	var res api.BuildResult
 	var detected []string
+	var sources map[string]string
 	if target == "node" {
-		res, detected = buildExternalizingNative(opts, cfg.ServerExternalPackages)
+		res, detected, sources = buildExternalizingNativeSources(opts, cfg.ServerExternalPackages)
 	} else {
 		opts.Plugins = append(opts.Plugins, nativeAddonPlugin(&nativeAddons{}, func(pkg, file string) string {
 			if pkg == "" {
@@ -1221,10 +1222,10 @@ func bundleServerEntry(root string, cfg *config.Config, target, entry, outFile s
 			}
 			msgs = append(msgs, m)
 		}
-		return nil, fmt.Errorf("server bundle for %s failed:\n  %s", target, strings.Join(msgs, "\n  "))
+		return nil, nil, fmt.Errorf("server bundle for %s failed:\n  %s", target, strings.Join(msgs, "\n  "))
 	}
 	if target != "node" {
-		return nil, nil
+		return nil, nil, nil
 	}
 	pkgs := map[string]bool{}
 	for _, p := range externalPackagesFromMetafile(res.Metafile) {
@@ -1238,7 +1239,7 @@ func bundleServerEntry(root string, cfg *config.Config, target, entry, outFile s
 		out = append(out, p)
 	}
 	sort.Strings(out)
-	return out, nil
+	return out, sources, nil
 }
 
 // nodeLayout is where the node target's files go. Flat (no
@@ -1304,14 +1305,14 @@ func (l nodeLayout) chdirStmt() string {
 // traceNodeServer makes the node target's server directory self-contained: the
 // packages the bundle imports at run time go into node_modules at the server
 // root, and the outputFileTracingIncludes files are copied beside it.
-func traceNodeServer(root string, cfg *config.Config, layout nodeLayout, externals []string, plan *deploy.ServerPlan) error {
+func traceNodeServer(root string, cfg *config.Config, layout nodeLayout, externals []string, sources map[string]string, plan *deploy.ServerPlan) error {
 	nm := filepath.Join(layout.base, "node_modules")
 	if err := os.RemoveAll(nm); err != nil {
 		return err
 	}
 	if len(externals) > 0 {
 		tr := newServerTrace(nm)
-		tr.AddPackages(root, externals)
+		tr.AddPackages(root, externals, sources)
 		plan.Warnings = append(plan.Warnings, tr.Warnings...)
 	}
 	if len(cfg.OutputFileTracingIncludes) > 0 {
