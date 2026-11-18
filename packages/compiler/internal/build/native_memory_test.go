@@ -18,6 +18,9 @@ func TestMain(m *testing.M) {
 	if mode := os.Getenv("KRATE_FAKE_SHELL"); mode != "" {
 		os.Exit(fakeShell(mode))
 	}
+	// Builds with no compress setting skip precompression in this package's
+	// tests; tests of the default restore it with defaultPrecompression(t).
+	precompressByDefault = false
 	code := m.Run()
 	cleanupAuditSite()
 	os.Exit(code)
@@ -98,4 +101,12 @@ func bufioScanner(f *os.File) *bufio.Scanner {
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 64*1024), 16<<20)
 	return sc
+}
+
+// defaultPrecompression restores production's precompress-by-default for
+// one test.
+func defaultPrecompression(t *testing.T) {
+	t.Helper()
+	precompressByDefault = true
+	t.Cleanup(func() { precompressByDefault = false })
 }

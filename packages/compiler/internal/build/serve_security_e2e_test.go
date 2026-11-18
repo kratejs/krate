@@ -129,6 +129,7 @@ func gunzipBody(t *testing.T, b []byte) string {
 }
 
 func TestServeStaticHardeningEndToEnd(t *testing.T) {
+	defaultPrecompression(t)
 	root, cfg := secProject(t)
 	if err := New(root, cfg).BuildAll(); err != nil {
 		t.Fatalf("BuildAll: %v", err)

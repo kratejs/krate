@@ -201,6 +201,7 @@ func TestAddVaryOnce(t *testing.T) {
 // A production build with an unset compress config writes both siblings; an
 // explicit false is honoured; a dev build writes none.
 func TestBuildPrecompressesByDefault(t *testing.T) {
+	defaultPrecompression(t)
 	siblings := func(mut func(*config.Config), dev bool) (br, gz bool) {
 		root, cfg := secProject(t)
 		cfg.Redirects = nil

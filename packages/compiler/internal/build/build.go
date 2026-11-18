@@ -1506,7 +1506,7 @@ func (b *Builder) BuildAll() error {
 	// The static assets are written: precompress them while the server side
 	// is built. The pass at the end only encodes what changes after this.
 	var earlyPrecompress chan struct{}
-	if !b.DevMode && b.Cfg.ShouldPrecompress() {
+	if !b.DevMode && b.shouldPrecompress() {
 		earlyPrecompress = make(chan struct{})
 		go func() {
 			defer close(earlyPrecompress)
@@ -1706,7 +1706,7 @@ func (b *Builder) BuildAll() error {
 	// Build-time precompression: emit .br/.gz siblings for compressible assets.
 	// Skipped in dev (rebuilds must stay fast); the client/static host only uses
 	// them for production delivery.
-	if !b.DevMode && b.Cfg.ShouldPrecompress() {
+	if !b.DevMode && b.shouldPrecompress() {
 		stopPC := b.phase("build:precompress")
 		n, err := PrecompressOutput(b.Cfg.OutDir, b.Cfg.Compress.BrotliOn(), b.Cfg.Compress.GzipOn())
 		stopPC()
@@ -5737,4 +5737,19 @@ func importsRuntimeComponent(mods []*bundler.Module) bool {
 		}
 	}
 	return false
+}
+
+// precompressByDefault is whether a build with no `compress` setting writes
+// .br/.gz siblings. The package's tests turn it off (brotli at level 11 is
+// most of a small test build's CPU time); tests of precompression set
+// `compress` explicitly or restore the default.
+var precompressByDefault = true
+
+// shouldPrecompress reports whether this build writes compressed siblings.
+func (b *Builder) shouldPrecompress() bool {
+	c := b.Cfg.Compress
+	if c.Brotli == nil && c.Gzip == nil && !precompressByDefault {
+		return false
+	}
+	return b.Cfg.ShouldPrecompress()
 }
