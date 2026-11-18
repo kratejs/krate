@@ -1046,17 +1046,16 @@ export function Head(props: { children?: JSXNode }): JSXNode {
   return [raw(HEAD_OPEN), props.children ?? "", raw(HEAD_CLOSE)];
 }
 
-// Script - renders a <script> tag.
-export function Script(props: { src?: string; children?: string }): JSXNode {
-  if (props.src) {
-    return `<script src="${escapeHTML(props.src)}"></script>`;
-  }
-  return `<script>${props.children ?? ""}</script>`;
+// Script and Style render the element in place with every attribute (src,
+// defer, async, data-*, nonce, ...), as the static compiler does. Their
+// children are raw text. `strategy` is next/script's and has no HTML meaning.
+export function Script(props: Record<string, any>): JSXNode {
+  const { strategy: _strategy, ...rest } = props;
+  return jsx("script", rest);
 }
 
-// Style - renders a <style> tag.
-export function Style(props: { children?: string }): JSXNode {
-  return `<style>${props.children ?? ""}</style>`;
+export function Style(props: Record<string, any>): JSXNode {
+  return jsx("style", props);
 }
 
 // linkAttributes computes the attributes of a <Link> anchor. An empty string

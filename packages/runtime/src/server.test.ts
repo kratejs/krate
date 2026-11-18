@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { clientBoundary, jsx, lazy, renderToString, renderToStringAsync } from './server';
+import { clientBoundary, jsx, lazy, renderToString, renderToStringAsync, Script, Style } from './server';
 
 describe('renderToString', () => {
   it('renders nested elements and escapes text', () => {
@@ -17,6 +17,27 @@ describe('renderToString', () => {
     expect(html).toContain('href="javascript:throw new Error(');
     expect(html).not.toContain(' ref=');
     expect(html).not.toContain(' key=');
+  });
+});
+
+describe('Script and Style built-ins', () => {
+  // A <Script> in an async (SSR) layout came out as escaped text without its attributes.
+  it('render real elements with every attribute', async () => {
+    async function Layout() {
+      return jsx('body', {
+        children: [jsx(Script, { src: 'https://a.test/s.js?a=1&b=2', 'data-website-id': 'w1', 'data-do-not-track': 'true', defer: true, strategy: 'afterInteractive' })],
+      });
+    }
+    expect(await renderToStringAsync(jsx(Layout, {}))).toBe(
+      '<body><script src="https://a.test/s.js?a=1&amp;b=2" data-website-id="w1" data-do-not-track="true" defer></script></body>',
+    );
+  });
+
+  it('keep inline code as raw text', () => {
+    expect(renderToString(jsx(Script, { id: 'ld', type: 'application/ld+json', children: '{"a":"<b>"}' }))).toBe(
+      '<script id="ld" type="application/ld+json">{"a":"<b>"}</script>',
+    );
+    expect(renderToString(jsx(Style, { children: 'a > b { color: red }' }))).toBe('<style>a > b { color: red }</style>');
   });
 });
 
