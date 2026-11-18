@@ -3,6 +3,7 @@
 // client Avatar inside it hydrates in the same island. A top-level asChild
 // client component merges its click handler into a server Button.
 import { chromium, firefox, webkit } from "playwright";
+import { waitHydrated } from "./island_helpers.mjs";
 
 const browserType = { chromium, firefox, webkit }[process.argv[2] || "chromium"];
 const base = process.argv[3];
@@ -21,7 +22,7 @@ try {
   page.on("requestfailed", (r) => errors.push("request failed: " + r.url()));
   await page.goto(base + "/");
   try {
-    await page.waitForSelector("[data-krate-island-hydrated] #avatar[data-ready=yes]", { timeout: 15000 });
+    await waitHydrated(page, "#avatar[data-ready=yes]");
   } catch (e) {
     failures.push("the Avatar did not hydrate inside the menu island");
   }
@@ -32,14 +33,14 @@ try {
       popup: b?.getAttribute("aria-haspopup"),
       label: b?.getAttribute("aria-label"),
       slot: b?.getAttribute("data-slot"),
-      nested: b ? b.querySelectorAll("krate-island").length : -1,
+      nested: b ? b.querySelectorAll("krate-island").length + document.evaluate(".//comment()[starts-with(., 'krate-island:')]", b, null, 7, null).snapshotLength : -1,
       avatar: !!b?.querySelector("#avatar"),
     };
   });
   if (info.tag !== "BUTTON") failures.push("the trigger is not the Button: " + JSON.stringify(info));
   if (info.popup !== "menu") failures.push("the trigger props did not reach the Button: " + JSON.stringify(info));
   if (info.label !== "Account menu") failures.push("the Button lost its own props: " + JSON.stringify(info));
-  if (info.nested !== 0) failures.push("the trigger holds a nested krate-island: " + JSON.stringify(info));
+  if (info.nested !== 0) failures.push("the trigger holds a nested island: " + JSON.stringify(info));
   if (!info.avatar) failures.push("the Avatar is not inside the Button: " + JSON.stringify(info));
   await page.click("#account");
   try {

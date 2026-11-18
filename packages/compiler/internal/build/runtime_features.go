@@ -45,9 +45,10 @@ type runtimeFeat struct {
 // `spa` setting and always included.
 var optionalRuntimeFeatures = []string{"list", "navigation", "helpers", "actions", "classes", "highlight"}
 
-// islandMarkup is the tag of a client island. An island loads as a separate
-// module that may call any runtime API, so a page that has one keeps every
-// feature.
+// islandMarkup is the tag of a real-React client island and, followed by a
+// colon, the start of the comment that opens a Preact one. An island loads as
+// a separate module that may call any runtime API, so a page that has one
+// keeps every feature.
 const islandMarkup = "krate-island"
 
 // actionsMarkup is the attribute the compiler puts on a form that posts to a
@@ -252,6 +253,10 @@ func scanMarkup(fragment string) (m pageMarkup) {
 			}
 		case html.EndTagToken:
 			inScript = false
+		case html.CommentToken:
+			if strings.HasPrefix(string(z.Text()), islandMarkup+":") {
+				m.island = true
+			}
 		case html.StartTagToken, html.SelfClosingTagToken:
 			name, hasAttr := z.TagName()
 			tag := string(name)

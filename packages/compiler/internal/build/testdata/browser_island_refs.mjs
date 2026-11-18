@@ -2,6 +2,7 @@
 // function component without forwardRef must open, and a plain useRef on
 // that component must reach the DOM element.
 import { chromium, firefox, webkit } from "playwright";
+import { waitHydrated } from "./island_helpers.mjs";
 
 const browserType = { chromium, firefox, webkit }[process.argv[2] || "chromium"];
 const base = process.argv[3];
@@ -16,7 +17,7 @@ try {
   });
   await page.goto(base + "/");
   try {
-    await page.waitForSelector("[data-krate-island-hydrated] #ref-kind", { timeout: 15000 });
+    await waitHydrated(page, "#ref-kind");
   } catch (e) {
     failures.push("the island did not hydrate");
   }

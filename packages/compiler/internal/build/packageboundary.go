@@ -24,8 +24,8 @@ import (
 // Krate here, for any React-bound package: the components a server module
 // imports from it are replaced, in the page's server bundle, by boundary
 // stubs. The server renders them with Preact (React aliased to preact/compat)
-// into the response; a component that has state or effects also becomes a
-// <krate-island> that hydrates in the browser, while a stateless one (an
+// into the response; a component that has state or effects also becomes an
+// island that hydrates in the browser, while a stateless one (an
 // icon) stays plain HTML and ships no JavaScript. Radix compound components
 // keep their context because nested boundary elements travel with their
 // parent (see clientBoundary in @krate/runtime/server).

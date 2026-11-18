@@ -572,6 +572,16 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- A `"use client"` component in a server component tree renders no element of its own. The server used
+  to wrap it in `<krate-island style="display:contents">` (with a props `<script>` before it), so the
+  parent's child combinators and sibling selectors saw the wrapper instead of the component's root:
+  under `<div className="space-y-6">` the first card got no margin. Now the island is the nodes between
+  `<!--krate-island:{...}-->` (module, export and props) and `<!--/krate-island-->`, and its chunk
+  hydrates exactly those nodes in place, for element, fragment, text and empty roots, nested islands
+  included. `window.__krateIslands` lists the islands with their status, in place of the
+  `data-krate-island-hydrated`/`-error` attributes of the element. Real-React islands keep a
+  `<krate-island>` element, which `react-dom` needs as its root container, and so do the external
+  React islands of compiled (non-async) pages (`<div data-krate-island>`).
 - `useRouter().push/replace` in a client component (island) is a client navigation on a page that has
   islands only. Such a page has no page script, which was the only place the SPA router started, so
   the island's navigation loaded a whole new document (focus and page state lost) and `<Link>`s on the

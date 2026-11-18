@@ -2,6 +2,7 @@
 // frame) and checks that a react-colorful style controlled widget never calls
 // onChange for changes of its own color prop (see TestBrowserDiscreteEventEffects).
 import { chromium, firefox, webkit } from "playwright";
+import { waitHydrated } from "./island_helpers.mjs";
 
 const browserType = { chromium, firefox, webkit }[process.argv[2] || "chromium"];
 const base = process.argv[3];
@@ -12,7 +13,7 @@ try {
   const errors = [];
   page.on("pageerror", (e) => errors.push("pageerror: " + e.message));
   await page.goto(base + "/");
-  await page.waitForSelector("krate-island[data-krate-island-hydrated] #b1", { timeout: 15000 });
+  await waitHydrated(page, "#b1");
   const result = await page.evaluate(async () => {
     const tick = () => new Promise((r) => setTimeout(r, 0));
     const frames = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 50))));

@@ -58,8 +58,10 @@ describe('clientBoundary', () => {
   // The render callback stands in for the Preact render module: it echoes the
   // serialized props so the test sees exactly what travels to the client.
   const render = (_c: unknown, props: Record<string, unknown>) => `<i>${JSON.stringify(props)}</i>`;
-  // propsOf reads the props of the first island (its JSON script).
-  const propsOf = (html: string) => JSON.parse(html.match(/<script type="application\/json" data-krate-props>(.*?)<\/script>/s)![1]);
+  // islandOf reads the first island's opening comment: module, export, chunk
+  // and props.
+  const islandOf = (html: string) => JSON.parse(html.match(/<!--krate-island:(.*?)-->/s)![1]);
+  const propsOf = (html: string) => islandOf(html).p;
   // slotRender renders like the Preact module: each slot token (children, a
   // JSX prop) inside the component's own markup, where the slot element goes.
   const slotRender = (_c: unknown, props: Record<string, any>) => {
@@ -73,12 +75,21 @@ describe('clientBoundary', () => {
     expect(html).toBe('<i>{"size":4}</i>');
   });
 
-  it('wraps a stateful component in a krate-island with its props', async () => {
+  it('puts a stateful component between island comments with its props, with no element of its own', async () => {
     const Box = clientBoundary('m2', 'Box', '/c.js', function Box() { return null; }, render) as any;
     const html = await renderToStringAsync(jsx(Box, { id: 'x' }));
-    expect(html).toContain('<krate-island');
-    expect(html).toContain('data-module="m2"');
-    expect(html).toContain('data-export="Box"');
+    expect(islandOf(html)).toEqual({ m: 'm2', e: 'Box', s: '/c.js', p: { id: 'x' } });
+    expect(html).toBe(`<!--krate-island:${JSON.stringify(islandOf(html))}--><i>{"id":"x"}</i><!--/krate-island-->`);
+    expect(html).not.toContain('<krate-island');
+    expect(html).not.toContain('data-krate-props');
+  });
+
+  it('keeps an element and a props script for a real-React island', async () => {
+    const Box = clientBoundary('m22', 'Box', '/c.js', function Box() { return null; }, render, true, true) as any;
+    const html = await renderToStringAsync(jsx(Box, { id: 'x' }));
+    expect(html).toMatch(/^<script type="application\/json" data-krate-props>[^<]*<\/script><krate-island /);
+    expect(html).toContain('data-module="m22"');
+    expect(html).not.toContain('<!--krate-island');
   });
 
   it('sends children as a tree, not HTML, when asked to (real-React islands)', async () => {
@@ -93,7 +104,7 @@ describe('clientBoundary', () => {
     expect(typeof ns.Root).toBe('function');
     expect(ns.helper()).toBe(1);
     const html = await renderToStringAsync(jsx(ns.Root, {}));
-    expect(html).toContain('data-export="Dialog.Root"');
+    expect(islandOf(html).e).toBe('Dialog.Root');
   });
 
   it('keeps nested client components in the parent tree so they can share context', async () => {
@@ -112,7 +123,7 @@ describe('clientBoundary', () => {
     const Wrap = clientBoundary('m5', 'Wrap', '/c.js', function Wrap() { return null; }, render, false) as any;
     const Inner = clientBoundary('m5', 'Inner', '/c.js', function Inner() { return null; }, render, true) as any;
     const html = await renderToStringAsync(jsx(Wrap, { children: [jsx(Inner, {})] }));
-    expect(html).toContain('<krate-island');
+    expect(html).toContain('<!--krate-island:');
   });
 
   it('adopts server children it rendered instead of sending them again as HTML', async () => {
@@ -123,7 +134,7 @@ describe('clientBoundary', () => {
     expect(Object.keys(data)).toEqual(['__krateChildren']);
     expect(data.__krateChildren).toEqual({ __krateSlotRef: expect.stringMatching(/^[0-9a-z]+$/) });
     expect(html).not.toContain('data-props=');
-    expect(html).toMatch(/^<script type="application\/json" data-krate-props>[^<]*<\/script><krate-island /);
+    expect(html).toMatch(/^<!--krate-island:[^>]*--><div><!--krate-slot:[0-9a-z]+--><b>note<\/b><!--\/krate-slot:[0-9a-z]+--><\/div><!--\/krate-island-->$/);
   });
 
   it('puts adopted server children straight into the component element between comment markers', async () => {
@@ -165,19 +176,23 @@ describe('clientBoundary', () => {
       jsx(Providers, { children: jsx(AppShell, { children: jsx(Outer, { children: jsx(Inner, {}) }) }) }),
     );
     expect(html.split(big)).toHaveLength(2);
-    expect(html.match(/<krate-island/g)).toHaveLength(3);
-    expect(html.match(/data-krate-props/g)).toHaveLength(3);
+    expect(html.match(/<!--krate-island:/g)).toHaveLength(3);
+    expect(html.match(/<!--\/krate-island-->/g)).toHaveLength(3);
     expect(html.match(/>menu</g)).toHaveLength(1);
     expect(html.length).toBeLessThan(big.length + 2_000);
   });
 
-  it('escapes props so a value cannot end the props script', async () => {
+  it('escapes props so a value cannot end the island comment', async () => {
     const Box = clientBoundary('m18', 'Box', '/c.js', function Box() { return null; }, () => '<p></p>') as any;
-    const evil = '</script><script>alert(1)</script><!-- -->';
-    const html = await renderToStringAsync(jsx(Box, { s: evil }));
-    expect(html.match(/<\/script>/g)).toHaveLength(1);
-    expect(html).not.toContain('<!--');
-    expect(propsOf(html).s).toBe(evil);
+    const evil = '</script><script>alert(1)</script><!-- --> --!> ---> -';
+    const html = await renderToStringAsync(jsx(Box, { s: evil, n: -1 }));
+    expect(html).not.toContain('<script');
+    // One comment opens the island and one closes it; nothing in between ends it early.
+    expect(html.match(/-->/g)).toHaveLength(2);
+    expect(html.match(/<!--/g)).toHaveLength(2);
+    const open = html.slice(4, html.indexOf('-->'));
+    expect(open).not.toMatch(/--|>/);
+    expect(propsOf(html)).toEqual({ s: evil, n: -1 });
   });
 
   it('hands an asChild component its server-component child as an element it can clone', async () => {
@@ -198,7 +213,7 @@ describe('clientBoundary', () => {
         c: [{ $: 'c', m: 'm9', e: 'Avatar', s: '/a.js', p: { n: 1 }, c: [] }, 'Ada'],
       },
     ]);
-    expect(html.match(/<krate-island/g)).toHaveLength(1);
+    expect(html.match(/<!--krate-island:/g)).toHaveLength(1);
   });
 
   it('runs the server child of an asChild component nested in a client tree', async () => {

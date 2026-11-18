@@ -1117,8 +1117,8 @@ How it works:
 
 In an `async` page, layout or component the same packages render without a page
 island: stateless components (an icon) become plain HTML, stateful ones
-(a Radix checkbox) become `<krate-island>` boundaries rendered on the server
-and hydrated in place, and parts of a compound component such as
+(a Radix checkbox) become islands rendered on the server between two comments
+and hydrated in place, with no element of their own, and parts of a compound component such as
 `Dialog.Root` / `Dialog.Trigger` stay in one tree. See
 [Async Server Components](/docs/features/server-components/#compiled-react-packages-in-server-components).
 
@@ -1594,7 +1594,8 @@ render.
 - **In `async` pages and layouts** a real-React component also works, used
   directly (`<Canvas>` from the library) or through a wrapper module. It never
   goes through the Preact boundary path: the server sends a `<krate-island>`
-  with the `client:fallback` text, the serialized props and the children as an
+  element (react-dom needs a container to mount into) with the
+  `client:fallback` text, the serialized props and the children as an
   element tree, and the browser mounts it with `react-dom`. Props must be
   serializable (as for any client component); children may be host elements and
   other real-React components, with serializable props.

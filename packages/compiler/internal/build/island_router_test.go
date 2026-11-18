@@ -67,7 +67,7 @@ func TestIslandOnlyPageRuntimeStartsRouter(t *testing.T) {
 	html, _ := io.ReadAll(resp.Body)
 	_ = resp.Body.Close()
 	page := string(html)
-	if !strings.Contains(page, "<krate-island") || !strings.Contains(page, "island-loader.") {
+	if !strings.Contains(page, "<!--krate-island:") || !strings.Contains(page, "island-loader.") {
 		t.Fatalf("templates is not an island page:\n%s", page)
 	}
 	srcs := regexp.MustCompile(`<script[^>]*\ssrc="?([^"\s>]+)`).FindAllStringSubmatch(page, -1)

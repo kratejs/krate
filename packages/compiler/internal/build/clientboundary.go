@@ -28,12 +28,13 @@ import (
 // as inert server markup. In the page server bundle each of its exports is
 // wrapped by clientBoundary (@krate/runtime/server): the server renders the
 // component's initial HTML with Preact (React semantics, like external
-// islands) into <krate-island data-module data-export data-src>, preceded by
-// a JSON script with its serialized props, and the module's client chunk
-// hydrates that element in the browser with the same props. Children passed
-// from the server are rendered on the server inside the component's HTML; the
-// browser adopts those nodes in place rather than receiving them again. Pages without server components are untouched:
-// their "use client" modules compile through the normal Krate pipeline.
+// islands) between <!--krate-island:{m,e,s,p}--> (module, export, chunk and
+// serialized props) and <!--/krate-island-->, with no element of its own, and
+// the module's client chunk hydrates those nodes in the browser with the same
+// props. Children passed from the server are rendered on the server inside the
+// component's HTML; the browser adopts those nodes in place rather than
+// receiving them again. Pages without server components are untouched: their
+// "use client" modules compile through the normal Krate pipeline.
 
 // ClientBoundary is one "use client" module of a server-component page.
 type ClientBoundary struct {
@@ -100,15 +101,56 @@ func (cb ClientBoundary) resolveDir() string {
 	return filepath.Dir(cb.SourcePath)
 }
 
-// clientIslandLoaderJS mounts every <krate-island> that is not mounted yet
-// from its chunk. It is a classic script in a chunk file (not inline) so the
-// SPA router loads it when a soft navigation arrives on a page with islands,
-// and it is idempotent: it only touches islands it has not mounted.
+// clientIslandLoaderJS mounts every island that is not mounted yet from its
+// chunk. It is a classic script in a chunk file (not inline) so the SPA router
+// loads it when a soft navigation arrives on a page with islands, and it is
+// idempotent: it only touches islands it has not mounted.
+//
+// A Preact island is the nodes between <!--krate-island:{m,e,s,p}--> and its
+// <!--/krate-island--> (nested islands balance in between); its chunk's mount
+// gets the island record. A real-React island is a <krate-island data-src>
+// element; its chunk's mount gets the element. Every island is listed in
+// window.__krateIslands with its status (loading, hydrated, error) and a
+// contains(node) test, for tools and tests (there is no element to mark).
 //
 // An island inside another island's server children mounts after it, so it
 // finds the context the outer island provides there (see islandcontext.go).
 // The chunks still load in parallel.
-const clientIslandLoaderJS = `(function(){document.querySelectorAll("krate-island[data-src]:not([data-krate-island-mounted])").forEach(function(el){el.setAttribute("data-krate-island-mounted","");var up=el.parentElement&&el.parentElement.closest("krate-island[data-krate-island-mounted]");var ready=up&&up.__krateMount?up.__krateMount.catch(function(){}):null;el.__krateMount=Promise.all([import(el.getAttribute("data-src")),ready]).then(function(r){return r[0].mount(el)}).catch(function(e){console.error("krate client component:",e);el.setAttribute("data-krate-island-error","")})})})();`
+const clientIslandLoaderJS = `(function(){
+var W=window,reg=W.__krateIslands||(W.__krateIslands=[]),OPEN="krate-island:",CLOSE="/krate-island";
+for(var i=reg.length-1;i>=0;i--)if(!reg[i].connected())reg.splice(i,1);
+function isOpen(n){return n.nodeType===8&&n.data.indexOf(OPEN)===0}
+function isClose(n){return n.nodeType===8&&n.data===CLOSE}
+function endOf(start){for(var d=0,n=start.nextSibling;n;n=n.nextSibling){if(isOpen(n))d++;else if(isClose(n)){if(!d)return n;d--}}return null}
+function range(start){
+var end=endOf(start),p;if(!end)return null;
+try{p=JSON.parse(start.data.slice(OPEN.length))}catch(e){return null}
+var r={start:start,end:end,module:p.m,export:p.e,src:p.s,props:p.p||{},status:"loading",
+nodes:function(){for(var o=[],c=start.nextSibling;c&&c!==end;c=c.nextSibling)o.push(c);return o},
+contains:function(x){for(var c=start.nextSibling;c&&c!==end;c=c.nextSibling)if(c===x||(c.nodeType===1&&c.contains(x)))return true;return false},
+connected:function(){return start.isConnected}};
+return start.__krateIsland=r}
+function host(el){
+var r={el:el,module:el.getAttribute("data-module"),export:el.getAttribute("data-export"),src:el.getAttribute("data-src"),status:"loading",
+contains:function(x){return x!==el&&el.contains(x)},connected:function(){return el.isConnected}};
+el.setAttribute("data-krate-island-mounted","");return el.__krateIsland=r}
+function around(n,open){
+var h=n.parentElement&&n.parentElement.closest("krate-island[data-src]"),hr=h&&h.__krateIsland;
+if(!open)return hr||null;if(!hr)return open;return h.contains(open.start)?open:hr}
+var stack=[],found=[],w=document.createTreeWalker(document.body,129);
+for(var n=w.nextNode();n;n=w.nextNode()){
+var top=null;for(var k=stack.length-1;k>=0&&!top;k--)top=stack[k];
+if(isOpen(n)){var r=n.__krateIsland;if(!r&&(r=range(n))){r.parent=around(n,top);found.push(r)}stack.push(r||null)}
+else if(isClose(n))stack.pop();
+else if(n.nodeType===1&&n.localName==="krate-island"&&n.hasAttribute("data-src")&&!n.hasAttribute("data-krate-island-mounted")){var hr=host(n);hr.parent=around(n,top);found.push(hr)}}
+found.forEach(function(r){
+reg.push(r);
+var up=r.parent,ready=up&&up.mounted?up.mounted.catch(function(){}):null;
+r.mounted=Promise.all([import(r.src),ready]).then(function(m){return m[0].mount(r.el||r)}).then(function(){
+r.status="hydrated";try{W.dispatchEvent(new CustomEvent("krate:island",{detail:r}))}catch(e){}
+}).catch(function(e){console.error("krate client component:",e);r.status="error";if(r.el)r.el.setAttribute("data-krate-island-error","")});
+if(r.el)r.el.__krateMount=r.mounted})})();
+`
 
 // islandLoaderHTML writes the island loader chunk (once per content) and
 // returns the script tag that references it. The tag is deferred so a hard
@@ -963,17 +1005,20 @@ function __resolve(name) {
   return name.split(".").reduce(function (o, k) { return o == null ? o : o[k]; }, __m);
 }
 export function component(name) { return __resolve(name); }
-export async function mount(el) {
-  var name = el.getAttribute("data-export");
+// mount hydrates the island the loader found: the nodes between its two
+// comments (see clientIslandLoaderJS), under a stand-in parent that confines
+// Preact to them.
+export async function mount(island) {
+  var name = island.export;
   var C = __resolve(name);
-  if (typeof C !== "function") throw new Error("client module " + el.getAttribute("data-module") + " has no component export " + name);
-  var raw = __krateProps(el);
+  if (typeof C !== "function") throw new Error("client module " + island.module + " has no component export " + name);
+  var raw = island.props || {};
   var loaded = {};
-  loaded[el.getAttribute("data-module") + "#" + name] = C;
+  loaded[island.module + "#" + name] = C;
   await Promise.all(__krateRootRefs(raw).map(function (r) {
     return import(r.s).then(function (m) { loaded[r.m + "#" + r.e] = m.component(r.e); });
   }));
-  __krateSlotPool = __krateServerSlots(el);
+  __krateSlotPool = __krateServerSlots(island);
   var props;
   try {
     props = __krateRevive(raw, h, __krateCallAction, function (m, e) { return loaded[m + "#" + e]; });
@@ -983,8 +1028,7 @@ export async function mount(el) {
   // The root is a Suspense boundary, as in React: a lazy() or use() with no
   // boundary of its own waits there (keeping the server HTML) instead of
   // throwing its promise out of the island.
-  hydrate(__krateInScope(el, h(__KrateSuspense, { fallback: null }, h(C, props))), el);
-  el.setAttribute("data-krate-island-hydrated", "");
+  hydrate(__krateInScope(island.start, h(__KrateSuspense, { fallback: null }, h(C, props))), __krateRangeRoot(island));
 }
 `
 }

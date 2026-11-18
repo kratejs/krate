@@ -2,6 +2,7 @@
 // (useOptimistic, useActionState, useFormStatus, use) with a real server
 // action. Reports the observed texts as JSON.
 import { chromium, firefox, webkit } from "playwright";
+import { waitHydrated } from "./island_helpers.mjs";
 
 const [url, browserName = "chromium"] = process.argv.slice(2);
 const browser = await { chromium, firefox, webkit }[browserName].launch();
@@ -13,7 +14,7 @@ try {
     if (m.type() === "error") errors.push(m.text());
   });
   await page.goto(url);
-  await page.waitForSelector("krate-island[data-krate-island-hydrated]", { timeout: 15000 });
+  await waitHydrated(page);
   const text = (sel) => page.textContent(sel);
   const res = { before: await text("#opt"), namedBefore: await text("#named") };
   await page.click("#go");

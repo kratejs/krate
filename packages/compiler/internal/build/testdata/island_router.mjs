@@ -2,6 +2,7 @@
 // must be a soft navigation through the page's router, keeping the document
 // (a marker on window survives) and the focused input. Prints JSON last.
 import { chromium, firefox, webkit } from "playwright";
+import { waitHydrated } from "./island_helpers.mjs";
 
 const [base, browserName = "chromium"] = process.argv.slice(2);
 const browser = await { chromium, firefox, webkit }[browserName].launch();
@@ -17,7 +18,7 @@ try {
     if (r.resourceType() === "document") documents++;
   });
   await page.goto(base + "/templates/?q=cv");
-  await page.waitForSelector("krate-island[data-krate-island-hydrated]", { timeout: 15000 });
+  await waitHydrated(page);
   // The router starts after the document's scripts ran, with no page script.
   await page.waitForFunction(() => !!globalThis[Symbol.for("krate.router")], null, { timeout: 5000 }).catch(() => {});
   const started = await page.evaluate(() => !!globalThis[Symbol.for("krate.router")]);

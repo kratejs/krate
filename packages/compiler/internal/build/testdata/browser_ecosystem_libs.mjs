@@ -5,6 +5,7 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { chromium, firefox, webkit } from "playwright";
+import { waitHydrated } from "./island_helpers.mjs";
 
 const root = process.argv[2];
 const browserType = { chromium, firefox, webkit }[process.argv[3] || "chromium"];
@@ -32,8 +33,7 @@ async function run(name, fn, origin = base) {
   page.on("pageerror", (e) => errors.push(e.message));
   try {
     await page.goto(`${origin}/${name}/`, { waitUntil: "load" });
-    // Islands are display:contents, so they are attached but never "visible".
-    await page.waitForSelector("[data-krate-island-hydrated]", { state: "attached", timeout: 10000 });
+    await waitHydrated(page, null, { timeout: 10000 });
     const out = await fn(page);
     if (out !== true) failures.push(`${name}: ${out} (page errors: ${errors.join(" | ") || "none"})`);
   } catch (e) {
