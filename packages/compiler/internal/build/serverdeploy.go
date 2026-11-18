@@ -345,7 +345,7 @@ func apiRouteKeys(root string) (map[string]string, error) {
 			return nil
 		}
 		ext := filepath.Ext(p)
-		if ext != ".ts" && ext != ".js" {
+		if !isAPIRouteSource(p) {
 			return nil
 		}
 		rel, _ := filepath.Rel(dir, p)
@@ -1137,8 +1137,10 @@ func bundleServerEntry(root string, cfg *config.Config, target, entry, outFile s
 			ResolveDir: root,
 			Sourcefile: "krate-server-entry.js",
 		},
+		// The sources bundled here are API routes and middleware: JSX in them
+		// (an ImageResponse tree) is a server element tree, as in krate start.
 		JSX:              api.JSXAutomatic,
-		JSXImportSource:  "@krate/runtime",
+		JSXImportSource:  "@krate/runtime/server",
 		Sourcemap:        sourceMapMode(false),
 		MinifyWhitespace: cfg.ShouldMinifyJS(),
 		MinifySyntax:     cfg.ShouldMinifyJS(),

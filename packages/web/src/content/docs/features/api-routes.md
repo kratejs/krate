@@ -27,6 +27,11 @@ Route mapping follows the page convention:
 JS/TS routes are compiled and served by the **embedded QuickJS runtime** by
 default (no Node.js process) or by a Node/Bun/Deno sidecar when configured.
 
+A route file can be `.ts`, `.js`, `.tsx` or `.jsx`. JSX in a route builds the
+server element tree, the one `renderToString` from `@krate/runtime/server` and
+`ImageResponse` from `@krate/runtime/og` take, so an Open Graph image route can
+be written as `src/api/og.tsx`.
+
 Each route is compiled twice: a self-contained IIFE bundle for the embedded
 runtime and an ESM output for the Node sidecar. Routes that import a Node
 built-in or a native module that cannot be bundled are marked **Node-only** and

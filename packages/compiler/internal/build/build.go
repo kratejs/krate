@@ -5381,6 +5381,16 @@ func (b *Builder) BuildAllAPI() error {
 	return b.BuildAllGoAPI()
 }
 
+// isAPIRouteSource reports whether a file under src/api is a JS/TS route
+// module: .ts, .js, .tsx or .jsx.
+func isAPIRouteSource(path string) bool {
+	switch filepath.Ext(path) {
+	case ".ts", ".js", ".tsx", ".jsx":
+		return !strings.HasSuffix(path, ".d.ts")
+	}
+	return false
+}
+
 // buildJSAPI compiles the JS/TS API routes.
 func (b *Builder) buildJSAPI() error {
 	apiSrcDir := filepath.Join(b.Root, filepath.FromSlash(gohost.DefaultAPIDir))
@@ -5399,7 +5409,7 @@ func (b *Builder) buildJSAPI() error {
 		if strings.HasPrefix(filepath.Base(path), "_") {
 			return nil
 		}
-		if strings.HasSuffix(path, ".ts") || strings.HasSuffix(path, ".js") {
+		if isAPIRouteSource(path) {
 			jsRoutes = append(jsRoutes, path)
 		}
 		return nil
@@ -5513,6 +5523,12 @@ func (b *Builder) apiRouteOptions() (quickjsOpts, nodeOpts api.BuildOptions) {
 		Write:     true,
 		Sourcemap: sourceMapMode(b.Cfg.Sourcemap),
 		Metafile:  true,
+	}
+	// JSX in a route (an ImageResponse tree in og.tsx) builds the server
+	// element tree that @krate/runtime/og and renderToString take.
+	for _, o := range []*api.BuildOptions{&quickjsOpts, &nodeOpts} {
+		o.JSX = api.JSXAutomatic
+		o.JSXImportSource = "@krate/runtime/server"
 	}
 	if b.Cfg.ShouldMinifyJS() {
 		quickjsOpts.MinifyWhitespace = true
