@@ -20,7 +20,21 @@ var nccEnvPackage = map[string]string{
 `,
 }
 
+// esModuleFlagged is TypeScript-compiled CommonJS: Node's default import is
+// module.exports, not its .default, and the shim must keep that.
+var esModuleFlagged = map[string]string{
+	"node_modules/flagged-cjs/package.json": `{"name":"flagged-cjs","version":"1.0.0","main":"index.js"}`,
+	"node_modules/flagged-cjs/index.js": `"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.default = function d() { return "d"; };
+exports.named = "n";
+`,
+}
+
 func withNccEnv(files map[string]string) map[string]string {
+	for k, v := range esModuleFlagged {
+		files[k] = v
+	}
 	for k, v := range nccEnvPackage {
 		files[k] = v
 	}
@@ -100,6 +114,9 @@ func TestServeNamedImportFromUndetectableCommonJS(t *testing.T) {
 	files["src/api/env.ts"] = `import { loadEnvConfig } from "ncc-env";
 export const runtime = "nodejs";
 export function GET() { return Response.json({ dir: loadEnvConfig("/x").combinedEnv.NCC_ENV_DIR }); }`
+	files["src/api/flagged.ts"] = `import flagged, { named } from "flagged-cjs";
+export const runtime = "nodejs";
+export function GET() { return Response.json({ kind: typeof flagged, viaDefault: (flagged as any).default(), named }); }`
 	b, root := buildInstProject(t, files)
 	inst, err := os.ReadFile(instrumentationBundlePath(root))
 	if err != nil {
@@ -125,6 +142,9 @@ export function GET() { return Response.json({ dir: loadEnvConfig("/x").combined
 	}
 	if code, body := getText(t, base+"/api/env"); code != 200 || !strings.Contains(body, `"dir":"/x"`) {
 		t.Errorf("GET /api/env: %d %s", code, body)
+	}
+	if code, body := getText(t, base+"/api/flagged"); code != 200 || !strings.Contains(body, `{"kind":"object","viaDefault":"d","named":"n"}`) {
+		t.Errorf("GET /api/flagged: %d %s (the default import must stay module.exports)", code, body)
 	}
 	if lines := markerLines(t, marker); len(lines) != 1 || lines[0] != "register env=ok" {
 		t.Errorf("register() must run once: %q", lines)

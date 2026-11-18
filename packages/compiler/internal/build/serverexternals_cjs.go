@@ -22,7 +22,8 @@ import (
 // "Named export 'loadEnvConfig' not found". Server bundles therefore import an
 // external package that Node loads as CommonJS through a shim: its default
 // import (module.exports, which always works) wrapped in a CommonJS module, so
-// esbuild reads named imports off module.exports at run time.
+// esbuild reads named imports off module.exports at run time. The default
+// import keeps Node's meaning: module.exports.
 const (
 	cjsInteropNS    = "krate-cjs-interop"
 	cjsInteropESMNS = "krate-cjs-interop-esm"
@@ -46,7 +47,11 @@ func registerCJSInterop(b api.PluginBuild) {
 		return api.OnResolveResult{Path: args.Path, External: true}, nil
 	})
 	b.OnLoad(api.OnLoadOptions{Filter: `.*`, Namespace: cjsInteropNS}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
-		src := "module.exports = require(" + jsString(args.Path) + ").default;\n"
+		// Node's default import is module.exports even when it carries
+		// __esModule, which esbuild's interop would replace by its .default:
+		// such an object is wrapped so the default stays module.exports.
+		src := "var m = require(" + jsString(args.Path) + ").default;\n" +
+			"module.exports = m != null && (typeof m === 'object' || typeof m === 'function') && m.__esModule ? Object.create(m, { default: { value: m, enumerable: true } }) : m;\n"
 		return api.OnLoadResult{Contents: &src, Loader: api.LoaderJS}, nil
 	})
 	b.OnLoad(api.OnLoadOptions{Filter: `.*`, Namespace: cjsInteropESMNS}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
