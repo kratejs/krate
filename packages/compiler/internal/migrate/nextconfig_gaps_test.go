@@ -39,15 +39,6 @@ func configBody(t *testing.T, rep *Report) string {
 	return string(cfg.Content)
 }
 
-func manualForSource(rep *Report, source string) ManualItem {
-	for _, m := range rep.Manual {
-		if strings.Contains(m.Reason, `source "`+source+`"`) {
-			return m
-		}
-	}
-	return ManualItem{}
-}
-
 const ddNextConfig = `export default {
   async redirects() {
     return [
