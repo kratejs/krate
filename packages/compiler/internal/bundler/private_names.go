@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"regexp"
@@ -386,6 +387,26 @@ func (b *Bundler) planExportRenames(mods []*Module, dynamic map[string]bool) exp
 		if resolver.IsCompiledDependency(mod.Path) {
 			continue
 		}
+		// `import { X } from "./m"; export { X }` declares nothing: the
+		// binding is m's, so this module does not own the name.
+		importLocals := map[string]bool{}
+		for _, stmt := range mod.Program.Body {
+			if imp, ok := stmt.(*ast.ImportStmt); ok {
+				for _, spec := range imp.Named {
+					if spec.Local != "" {
+						importLocals[spec.Local] = true
+					} else {
+						importLocals[spec.Remote] = true
+					}
+				}
+				if imp.Default != "" {
+					importLocals[imp.Default] = true
+				}
+				if imp.Namespace != "" {
+					importLocals[imp.Namespace] = true
+				}
+			}
+		}
 		for _, stmt := range mod.Program.Body {
 			exp, ok := stmt.(*ast.ExportStmt)
 			if !ok || exp.Default || exp.ReexportSource != "" {
@@ -405,7 +426,9 @@ func (b *Bundler) planExportRenames(mods []*Module, dynamic map[string]bool) exp
 			}
 			for _, spec := range exp.Named {
 				if spec.Local == spec.Remote {
-					add(spec.Local)
+					if !importLocals[spec.Local] {
+						add(spec.Local)
+					}
 				} else if spec.Remote != "" && spec.Remote != "default" {
 					// `export { remoteOnEvent as onEvent }` declares no onEvent,
 					// but an importer's onEvent lands in the page scope, where it
@@ -422,7 +445,7 @@ func (b *Bundler) planExportRenames(mods []*Module, dynamic map[string]bool) exp
 	}
 
 	imported := map[string]map[string]bool{}
-	importers := map[string]map[string]bool{} // name -> base names of importing modules
+	importers := map[string]map[string]bool{} // name -> display paths of importing modules
 	pinned := map[string]bool{}               // modules whose consumers are not all rewritable
 	for _, mod := range mods {
 		locals := map[string]string{} // import local -> target module
@@ -442,7 +465,7 @@ func (b *Bundler) planExportRenames(mods []*Module, dynamic map[string]bool) exp
 						if importers[spec.Remote] == nil {
 							importers[spec.Remote] = map[string]bool{}
 						}
-						importers[spec.Remote][filepath.Base(mod.Path)] = true
+						importers[spec.Remote][b.displayPath(mod.Path)] = true
 					}
 					local := spec.Local
 					if local == "" {
@@ -529,9 +552,17 @@ func (b *Bundler) planExportRenames(mods []*Module, dynamic map[string]bool) exp
 			plan.renames[mod.Path][name] = name + b.privateSuffix(mod.Path)
 		}
 		if len(stuck) > 1 && len(imported[name]) > 1 && distinctFiles(stuck) > 1 {
+			if os.Getenv("KRATE_DEBUG") == "exportclash" {
+				for _, m := range stuck {
+					fmt.Fprintf(os.Stderr, "exportclash %s: stuck %q (real %q)\n", name, m.Path, realPathOf(m.Path))
+				}
+				for t := range imported[name] {
+					fmt.Fprintf(os.Stderr, "exportclash %s: imported %q\n", name, t)
+				}
+			}
 			var files []string
 			for _, mod := range stuck {
-				files = append(files, filepath.Base(mod.Path))
+				files = append(files, b.displayPath(mod.Path))
 			}
 			sort.Strings(files)
 			pkgOnly := false
@@ -553,13 +584,37 @@ func (b *Bundler) planExportRenames(mods []*Module, dynamic map[string]bool) exp
 
 // distinctFiles counts the files behind mods. A workspace package reached
 // through its real path and through a symlink is two modules but one file, so
-// its exports do not clash with themselves.
+// its exports do not clash with themselves. The same package reached from two
+// checkouts (a project copy whose node_modules links point back into the
+// original) is two files with one name and identical source: whichever one the
+// page keeps behaves the same, so they count once as well.
 func distinctFiles(mods []*Module) int {
+	byReal := map[string]string{} // real path -> content key of its first module
 	files := map[string]bool{}
 	for _, mod := range mods {
-		files[realPathOf(mod.Path)] = true
+		real := realPathOf(mod.Path)
+		key, ok := byReal[real]
+		if !ok {
+			key = filepath.Base(mod.Path) + "\x00" + hashSource(mod.SourceCode)
+			byReal[real] = key
+		}
+		files[key] = true
 	}
 	return len(files)
+}
+
+func hashSource(src string) string {
+	sum := sha256.Sum256([]byte(src))
+	return hex.EncodeToString(sum[:])
+}
+
+// displayPath is p relative to the project root, or p itself when it lies
+// outside it, so a clash names the files apart.
+func (b *Bundler) displayPath(p string) string {
+	if rel, err := filepath.Rel(b.root, p); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return filepath.ToSlash(rel)
+	}
+	return filepath.ToSlash(p)
 }
 
 // realPaths memoizes realPathOf for a build (cleared by ResetResolveCache).

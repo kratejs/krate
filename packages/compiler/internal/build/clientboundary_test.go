@@ -813,3 +813,36 @@ export default async function Home() {
 		t.Fatalf("unexpected browser result: %+v", res)
 	}
 }
+
+// TestServerTreeClientModulesSameExportNameNoClash: two client components of
+// a server page export the same name from different files. Each boundary is
+// bundled apart from the server tree, so there is no shared namespace to clash
+// in and KR7116 stays quiet (the same pair on a static page still warns, see
+// TestExportClashNamesProjectRelativeFiles).
+func TestServerTreeClientModulesSameExportNameNoClash(t *testing.T) {
+	b, root := scProject(t, map[string]string{
+		"src/components/a/Bar.tsx": `"use client";
+import { useState } from "react";
+export function Bar() { const [n] = useState(1); return <i id="a">{n}</i>; }`,
+		"src/components/b/Bar.tsx": `"use client";
+import { useState } from "react";
+export function Bar() { const [n] = useState(2); return <i id="b">{n}</i>; }`,
+		"src/pages/index.tsx": `import { Bar } from "../components/a/Bar";
+import { Bar as OtherBar } from "../components/b/Bar";
+export default async function Home() {
+  await Promise.resolve();
+  return <main><Bar /><OtherBar /></main>;
+}`,
+	})
+	withPreact(t, root)
+	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
+		t.Fatal(err)
+	}
+	out, err := captureOutput(b.BuildAll)
+	if err != nil {
+		t.Fatalf("BuildAll: %v\n%s", err, out)
+	}
+	if strings.Contains(out, "KR7116") {
+		t.Errorf("client boundaries of a server page reported as an export clash:\n%s", out)
+	}
+}
