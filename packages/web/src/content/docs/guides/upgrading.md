@@ -208,6 +208,22 @@ logic into a plugin.
   with an island or an action form do, as before.
 - A `<Image width={n}>` ships variants of that size (`width={100}` gives 100w and
   200w) instead of six fixed 640-2000w files.
+- Production builds write `.br` and `.gz` siblings by default and `krate deploy`
+  adds immutable `Cache-Control` rules for hashed assets. Set
+  `compress: { brotli: false, gzip: false }` to skip precompression.
+- Page CSS is split into shared files by source (theme, component stylesheets,
+  page CSS), and component code hydrates from shared chunks under `chunks/c/`.
+  Tests that expect one stylesheet or one script per page need new baselines;
+  `sharedChunks: false` keeps per-page scripts.
+- `<Link>` prefetches on hover, focus and touch only. Add `prefetch="viewport"`
+  to a link, or set `prefetch: "viewport"`, to prefetch links as they scroll into
+  view (at most 5 per page).
+- Heading ids keep doubled hyphens like GitHub (`#go-components--api-routes`).
+  Update links you wrote to the old collapsed form.
+- The client runtime defines on `window` only the exports your pages, shared
+  chunks and `public/` scripts use. A script the build cannot see (one injected
+  at run time, or third-party code calling Krate globals) that throws
+  `ReferenceError` needs `clientRuntime: { exports: "all" }`.
 
 ### New build errors
 
