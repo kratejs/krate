@@ -125,6 +125,23 @@ describe("createKrateHandler", () => {
   });
 });
 
+describe("static files", () => {
+  // A headers rule's Cache-Control used to be replaced with no-cache.
+  it("a headers rule sets Cache-Control on a public file", async () => {
+    const staticLayer = {
+      exists: (p: string) => p === "/brand/logo.png" || p === "/other.png",
+      isAsset: () => true,
+      serve: async () => new Response("png", { headers: { "content-type": "image/png" } }),
+    };
+    const cfg = { ...config, headers: [{ source: "/brand/*.png", headers: { "Cache-Control": "public, max-age=86400" } }] };
+    const h = createKrateHandler({ target: "node", data: data({ config: cfg, hasMiddleware: false }), modules, static: staticLayer });
+    const ruled = await h(new Request("http://localhost/brand/logo.png"));
+    expect(ruled.status).toBe(200);
+    expect(ruled.headers.get("cache-control")).toBe("public, max-age=86400");
+    expect((await h(new Request("http://localhost/other.png"))).headers.get("cache-control")).toBe("no-cache");
+  });
+});
+
 describe("API maxDuration", () => {
   const sleep = (ms: number, signal: AbortSignal) =>
     new Promise<boolean>((resolve) => {

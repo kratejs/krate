@@ -966,7 +966,8 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     if (isInternalOutputPath(p)) return notFoundText(rs);
     if (notFoundPageURL(p)) return answerNotFoundPageURL(rs);
     if (p.endsWith(".map")) rs.res.set("Content-Type", "application/json; charset=utf-8");
-    rs.res.set("Cache-Control", staticCacheControl(p, hashed));
+    // A Cache-Control from a headers rule wins (public/ files cached longer).
+    if (!rs.res.has("Cache-Control")) rs.res.set("Cache-Control", staticCacheControl(p, hashed));
 
     let closedPattern = "";
     if (!(await staticRouteExists(p))) {

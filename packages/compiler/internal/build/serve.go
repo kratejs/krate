@@ -1906,8 +1906,12 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		}
 		// Hashed assets (styles.<hash>.css, index.<hash>.js, chunks/*.<hash>.js,
 		// assets/<name>-<hash>.*) are content-addressed, so they can be cached
-		// immutably. HTML must never be, since it changes per build.
-		w.Header().Set("Cache-Control", staticCacheControl(r.URL.Path, hub != nil, hashedAssets))
+		// immutably. HTML must never be, since it changes per build. A
+		// Cache-Control from a headers rule wins outside dev, so public/ files
+		// can be cached longer.
+		if hub != nil || w.Header().Get("Cache-Control") == "" {
+			w.Header().Set("Cache-Control", staticCacheControl(r.URL.Path, hub != nil, hashedAssets))
+		}
 
 		// Opt-in UA variant: serve the modern or legacy sibling document to
 		// classified visitors (the default document stays the full hybrid).
