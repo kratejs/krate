@@ -1205,6 +1205,13 @@ rendered on the server with the same code, then hydrated. Props follow the
 island rules above: serializable values, signals bridged as live getters, and
 function references. A page whose own module calls the hook is one island.
 
+Effects follow React 18's timing. The passive effects (`useEffect`) of a render
+caused by a discrete event (a click, a key press, typing) run at the end of
+that render's commit, and the updates they make render in the same task, before
+the next event. Effects of other renders run after paint, as in Preact.
+Controlled widgets that tell their own prop changes from user input through
+effects, such as react-colorful's pickers, rely on this.
+
 What was checked in Chromium (Preact 10.29): each page loaded without console
 errors and rendered the expected markup, and where the library has an
 interaction it was clicked or typed into.

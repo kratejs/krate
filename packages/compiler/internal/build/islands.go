@@ -928,6 +928,16 @@ func reactCompatPluginFor(root string, server bool) api.Plugin {
 		Setup: func(pb api.PluginBuild) {
 			// esbuild runs OnResolve callbacks concurrently: resolve once.
 			modOnce := sync.OnceValue(func() string { return resolver.NodeModule(root, "@krate/runtime/react-compat") })
+			// discreteOnce reports whether the runtime has installDiscreteEffects
+			// (an older @krate/runtime does not).
+			discreteOnce := sync.OnceValue(func() bool {
+				mod := modOnce()
+				if mod == "" || server {
+					return false
+				}
+				data, err := os.ReadFile(mod)
+				return err == nil && strings.Contains(string(data), "installDiscreteEffects")
+			})
 			pb.OnResolve(api.OnResolveOptions{Filter: `^react$`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
 				if args.Kind == api.ResolveJSRequireCall {
 					return api.OnResolveResult{}, nil
@@ -936,7 +946,7 @@ func reactCompatPluginFor(root string, server bool) api.Plugin {
 				// Only modules that name one of the additions take them: the
 				// factory would otherwise ship, and look stateful, in every chunk.
 				extras := mod != "" && mentions(args.Importer, reactExtraRe)
-				if !extras && !server {
+				if !extras && !server && !discreteOnce() {
 					return api.OnResolveResult{}, nil
 				}
 				path := "react"
@@ -948,6 +958,13 @@ func reactCompatPluginFor(root string, server bool) api.Plugin {
 			pb.OnLoad(api.OnLoadOptions{Filter: `.*`, Namespace: ns}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
 				contents := "export * from \"preact/compat\";\nimport __compat from \"preact/compat\";\n"
 				var members []string
+				if discreteOnce() {
+					// React 18's effect timing for discrete events (see
+					// installDiscreteEffects in @krate/runtime/react-compat).
+					contents += "import { options as __dopts } from \"preact\";\n" +
+						"import { installDiscreteEffects as __ide } from " + strconv.Quote(filepath.ToSlash(modOnce())) + ";\n" +
+						"__ide(__dopts);\n"
+				}
 				if args.Path == "react+extras" {
 					contents += "import * as __cns from \"preact/compat\";\n" +
 						"import { options as __opts } from \"preact\";\n" +

@@ -317,3 +317,65 @@ function build(c: any, options: any): ReactCompatExtras {
     useTransition,
   };
 }
+
+// Events React treats as discrete: the effects of a render they cause are
+// flushed at the end of its commit, not after paint.
+const DISCRETE_EVENTS = [
+  'beforeinput', 'blur', 'change', 'click', 'compositionend', 'compositionstart', 'contextmenu', 'copy', 'cut',
+  'dblclick', 'dragend', 'dragstart', 'drop', 'focusin', 'focusout', 'input', 'keydown', 'keypress', 'keyup',
+  'mousedown', 'mouseup', 'paste', 'pointercancel', 'pointerdown', 'pointerup', 'reset', 'submit',
+  'touchcancel', 'touchend', 'touchstart',
+];
+
+/**
+ * React 18 flushes the passive effects of a render caused by a discrete event
+ * (a click, a key press, typing) synchronously at the end of its commit, and
+ * renders the updates those effects make in the same task. Preact runs them
+ * after the next frame, so a quick second event could render a component with
+ * a new prop and a state update from its previous effects at once: react-colorful
+ * then took its own color prop for user input and called onChange with a
+ * stale colour. While a discrete event's task runs, this flushes Preact's
+ * effect queue after every commit (Preact's render loop picks up the updates
+ * they make); otherwise effects keep running after paint. The compiler's
+ * client builds call it from their `react` module, once per Preact instance.
+ */
+export function installDiscreteEffects(options: any): void {
+  if (typeof window === 'undefined' || typeof document === 'undefined' || options.__krateDiscrete) return;
+  options.__krateDiscrete = true;
+  let discrete = false;
+  let clearing = false;
+  let flushEffects: (() => void) | null = null;
+  const onEvent = () => {
+    discrete = true;
+    if (clearing) return;
+    clearing = true;
+    setTimeout(() => {
+      discrete = false;
+      clearing = false;
+    }, 0);
+  };
+  for (const type of DISCRETE_EVENTS) window.addEventListener(type, onEvent, true);
+
+  // Preact's default afterNextFrame, used outside discrete events. The flush
+  // function preact/hooks hands over is always the same one, so it is kept.
+  const prevRaf = options.requestAnimationFrame;
+  options.requestAnimationFrame = (cb: () => void) => {
+    flushEffects = cb;
+    if (prevRaf) return prevRaf(cb);
+    let raf = 0;
+    const done = () => {
+      clearTimeout(timeout);
+      if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(raf);
+      setTimeout(cb);
+    };
+    const timeout = setTimeout(done, 100);
+    if (typeof requestAnimationFrame === 'function') raf = requestAnimationFrame(done);
+  };
+  // options._commit (mangled __c) runs after refs and, through preact/hooks'
+  // own wrapper, after layout effects.
+  const prevCommit = options.__c;
+  options.__c = (vnode: unknown, queue: unknown) => {
+    if (prevCommit) prevCommit(vnode, queue);
+    if (discrete && flushEffects) flushEffects();
+  };
+}
