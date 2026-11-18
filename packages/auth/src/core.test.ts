@@ -247,11 +247,3 @@ describe("declarative config", () => {
     expect(await c.auth.auth(new Request(`${ORIGIN}/dashboard`))).toBeNull();
   });
 });
-
-describe("Auth.js adapters", () => {
-  it("names the missing user methods instead of failing on first use", async () => {
-    const { resolveConfig } = await import("./config");
-    const partial = { getUser: async () => null };
-    expect(() => resolveConfig({ secret: "s".repeat(32), adapter: partial as never })).toThrow(/no createUser, getUserByEmail, getUserByAccount, updateUser, linkAccount/);
-  });
-});

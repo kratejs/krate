@@ -111,8 +111,7 @@ export interface Adapter {
  * An Auth.js adapter, such as the one `@auth/drizzle-adapter` returns. Its types
  * mark the user and account methods optional and shape the records and some
  * return values a little differently from the ones here, so every method is
- * loosely typed. `defineAuth` checks that the user and account methods are
- * present when it resolves the config.
+ * loosely typed.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type AuthJsAdapter = { [K in keyof Adapter]?: (...args: any[]) => any };

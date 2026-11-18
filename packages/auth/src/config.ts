@@ -90,15 +90,6 @@ function mergeObject<T extends object>(base: T | undefined, over: T | undefined)
   return { ...(base ?? {}), ...(over ?? {}) } as T;
 }
 
-const CORE_ADAPTER_METHODS = ["createUser", "getUser", "getUserByEmail", "getUserByAccount", "updateUser", "linkAccount"] as const;
-
-function checkedAdapter(adapter: AuthOptions["adapter"]): Adapter | undefined {
-  if (!adapter) return undefined;
-  const missing = CORE_ADAPTER_METHODS.filter((m) => typeof adapter[m] !== "function");
-  if (missing.length > 0) throw new Error(`@krate/auth: the adapter has no ${missing.join(", ")}; pass a complete adapter (an Auth.js adapter implements all of them)`);
-  return adapter as Adapter;
-}
-
 export function resolveConfig(options: AuthOptions = {}, declarative: DeclarativeConfig = readDeclarative()): ResolvedConfig {
   const secret: Secret | undefined = options.secret ?? readEnv("AUTH_SECRET", "NEXTAUTH_SECRET");
   const debug = options.debug ?? declarative.debug ?? readEnv("AUTH_DEBUG") === "true";
@@ -116,7 +107,7 @@ export function resolveConfig(options: AuthOptions = {}, declarative: Declarativ
   }
   const providers = [...fromConfig, ...programmatic];
 
-  const adapter = checkedAdapter(options.adapter);
+  const adapter = options.adapter as Adapter | undefined;
   const strategy = options.session?.strategy ?? declarative.session?.strategy ?? (adapter ? "database" : "jwt");
   const maxAge = options.session?.maxAge ?? declarative.session?.maxAge ?? 30 * 24 * 60 * 60;
   const updateAge = options.session?.updateAge ?? declarative.session?.updateAge ?? 24 * 60 * 60;

@@ -570,9 +570,8 @@ host code runs in the native process. Names and options may change between relea
   of `@next/env`, `ioredis`) threw `ReferenceError: __dirname is not defined` when the server loaded it, which for
   `@next/env` failed `instrumentation.ts` at start. Both now name the server bundle.
 - `@krate/auth`: `defineAuth` accepts an Auth.js adapter (`@auth/drizzle-adapter` and the other `@auth/*-adapter`
-  packages), whose types mark `createUser`, `getUser` and the other user and account methods optional; it
-  failed to typecheck against the stricter `Adapter`. The methods are checked when the config resolves,
-  so a missing one is named in the error instead of failing on first use.
+  packages) in its types: they mark `createUser`, `getUser` and the other user and account methods optional,
+  which failed to typecheck against the stricter `Adapter`.
 - `krate migrate nextjs`: the generated `NextResponse` and middleware shims typecheck under
   `noUncheckedIndexedAccess` and the response carries a typed `cookies` (`res.cookies.set(...)` was an error on `Response`).
 - `krate deploy --target node` in a pnpm workspace: a page, action or middleware bundle that reaches a
