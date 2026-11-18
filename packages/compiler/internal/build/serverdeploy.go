@@ -1196,7 +1196,15 @@ func bundleServerEntry(root string, cfg *config.Config, target, entry, outFile s
 		if target == "node" {
 			anchor = "import.meta.url"
 		}
-		opts.Banner = map[string]string{"js": "import { createRequire as __krateCreateRequire } from 'node:module'; const require = __krateCreateRequire(" + anchor + ");"}
+		banner := "import { createRequire as __krateCreateRequire } from 'node:module'; const require = __krateCreateRequire(" + anchor + ");"
+		if target == "node" {
+			// Bundled CommonJS dependencies (ncc builds such as @next/env, ioredis) read __dirname and
+			// __filename, which an ES module does not have. Both name the bundle; the define keeps a
+			// module that declares its own __dirname untouched.
+			banner += " import { fileURLToPath as __krateFileURLToPath } from 'node:url'; import { dirname as __krateDirname_ } from 'node:path'; const __krateFilename = __krateFileURLToPath(import.meta.url); const __krateDirname = __krateDirname_(__krateFilename);"
+			opts.Define = map[string]string{"__dirname": "__krateDirname", "__filename": "__krateFilename"}
+		}
+		opts.Banner = map[string]string{"js": banner}
 	}
 	opts.Metafile = true
 	var res api.BuildResult

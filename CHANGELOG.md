@@ -563,6 +563,9 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- `krate deploy --target node`: a bundled CommonJS dependency that reads `__dirname` or `__filename` (the ncc build
+  of `@next/env`, `ioredis`) threw `ReferenceError: __dirname is not defined` when the server loaded it, which for
+  `@next/env` failed `instrumentation.ts` at start. Both now name the server bundle.
 - `@krate/auth`: `defineAuth` accepts an Auth.js adapter (`@auth/drizzle-adapter` and the other `@auth/*-adapter`
   packages), whose types mark `createUser`, `getUser` and the other user and account methods optional; it
   failed to typecheck against the stricter `Adapter`. The methods are checked when the config resolves,

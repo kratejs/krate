@@ -257,10 +257,12 @@ export async function GET() { return Response.json(greet("route")); }`,
 func TestNodeTargetBundlesFileURLDependencyOfWorkspacePackage(t *testing.T) {
 	files := map[string]string{
 		"node_modules/.pnpm/tiny@1.0.0/node_modules/tiny/package.json": `{"name":"tiny","version":"1.0.0","main":"index.js"}`,
-		"node_modules/.pnpm/tiny@1.0.0/node_modules/tiny/index.js":     `module.exports = function tiny() { return "from tiny"; };`,
-		"packages/db/package.json":                                     `{"name":"@acme/db","version":"0.0.0","main":"src/index.ts","dependencies":{"tiny":"1.0.0"}}`,
+		"node_modules/.pnpm/tiny@1.0.0/node_modules/tiny/index.js": `module.exports = function tiny() { return "from tiny"; };
+module.exports.where = typeof __dirname + "/" + typeof __filename;`,
+		"packages/db/package.json": `{"name":"@acme/db","version":"0.0.0","main":"src/index.ts","dependencies":{"tiny":"1.0.0"}}`,
 		"packages/db/src/index.ts": `import tiny from "tiny";
 export function dbName(): string { return tiny(); }
+export const tinyWhere: string = (tiny as any).where;
 export async function loadNative() { return (await import("nat")).default; }`,
 		"node_modules/.pnpm/nat@1.0.0/node_modules/nat/package.json": `{"name":"nat","version":"1.0.0","main":"index.js"}`,
 		"node_modules/.pnpm/nat@1.0.0/node_modules/nat/index.js":     `module.exports = require("./nat.node");`,
@@ -270,12 +272,12 @@ export async function loadNative() { return (await import("nat")).default; }`,
 		"apps/web/node_modules/@acme/db":                             "symlink:packages/db",
 		"apps/web/package.json":                                      `{"name":"web","dependencies":{"@acme/db":"workspace:*"}}`,
 		"apps/web/src/pages/index.tsx":                               `export default function Home() { return <h1>home</h1>; }`,
-		"apps/web/src/pages/p/[id].tsx": `import { dbName, loadNative } from "@acme/db";
+		"apps/web/src/pages/p/[id].tsx": `import { dbName, loadNative, tinyWhere } from "@acme/db";
 export default async function Page({ params }: any) {
   const { id } = await params;
   const native = await loadNative().catch(() => "none");
   async function rename() { 'use server'; return dbName() + id; }
-  return <form action={rename}><h1>page {dbName()} {id} {String(native)}</h1><button>go</button></form>;
+  return <form action={rename}><h1>page {dbName()} {id} {String(native)} where={tinyWhere}</h1><button>go</button></form>;
 }`,
 		"apps/web/src/api/dep.ts": `import { dbName } from "@acme/db";
 export async function GET() { return Response.json({ name: dbName() }); }`,
@@ -299,5 +301,9 @@ export async function GET() { return Response.json({ name: dbName() }); }`,
 	}
 	if res := doMatrix(t, base, "GET", "/p/7/", nil, ""); res.status != 200 || !strings.Contains(res.body, "from tiny") {
 		t.Errorf("ssr page: %d %s", res.status, res.body)
+	}
+	// A bundled CommonJS dependency may read __dirname and __filename.
+	if res := doMatrix(t, base, "GET", "/p/7/", nil, ""); !strings.Contains(res.body, "where=string/string") {
+		t.Errorf("__dirname in a bundled dependency: %s", res.body)
 	}
 }
