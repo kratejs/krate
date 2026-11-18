@@ -164,6 +164,10 @@ func emitRedirects(cfg *config.Config, outDir string) ([]string, error) {
 	base := cfg.BaseURLPath()
 	var b strings.Builder
 	for _, r := range cfg.Redirects {
+		if strings.Contains(r.Source, "(") {
+			fmt.Fprintf(os.Stderr, "Warning: redirect %q uses a regex parameter, which _redirects cannot express; it was left out (krate start and Vercel support it)\n", r.Source)
+			continue
+		}
 		status := "302"
 		if r.Permanent {
 			status = "301"
@@ -175,6 +179,10 @@ func emitRedirects(cfg *config.Config, outDir string) ([]string, error) {
 		fmt.Fprintf(&b, "%s\t%s\t%s\n", src, dst, status)
 	}
 	for _, r := range cfg.Rewrites {
+		if strings.Contains(r.Source, "(") {
+			fmt.Fprintf(os.Stderr, "Warning: rewrite %q uses a regex parameter, which _redirects cannot express; it was left out (krate start and Vercel support it)\n", r.Source)
+			continue
+		}
 		src, dst := translateRule(r.Source, r.Destination, false)
 		fmt.Fprintf(&b, "%s\t%s\t200\n", sitepath.Join(base, src), sitepath.Join(base, dst))
 	}

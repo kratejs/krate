@@ -2864,6 +2864,9 @@ func matchRedirectParamsMods(path, source string) (map[string]string, map[string
 	if source == path {
 		return params, mods, true
 	}
+	if isRegexSource(source) {
+		return matchRegexSource(path, source)
+	}
 	if !strings.ContainsAny(source, "*:") {
 		return nil, nil, false
 	}

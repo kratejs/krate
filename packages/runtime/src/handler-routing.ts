@@ -206,6 +206,98 @@ export interface RuleMatch {
   mods: Record<string, string>;
 }
 
+// A source with a regex parameter ("/store/:slug((?!compare$)[^/]+)", next.config
+// style) compiles to one anchored regex; port of redirect_regex.go.
+interface SourceRegex {
+  re: RegExp;
+  names: string[];
+  mods: Record<string, string>;
+}
+const sourceRegexCache = new Map<string, SourceRegex | null>();
+
+function closingParen(s: string, open: number): number {
+  let depth = 0;
+  let inClass = false;
+  for (let i = open; i < s.length; i++) {
+    const c = s[i];
+    if (c === "\\") i++;
+    else if (inClass) {
+      if (c === "]") inClass = false;
+    } else if (c === "[") inClass = true;
+    else if (c === "(") depth++;
+    else if (c === ")" && --depth === 0) return i;
+  }
+  return -1;
+}
+
+function compileSourceRegex(source: string): SourceRegex | null {
+  if (sourceRegexCache.has(source)) return sourceRegexCache.get(source)!;
+  let out = "^";
+  const names: string[] = [];
+  const mods: Record<string, string> = {};
+  let unnamed = 0;
+  let ok = true;
+  let i = 0;
+  while (i < source.length) {
+    const c = source[i];
+    if (c !== ":" && c !== "(") {
+      out += c.replace(/[.*+?^${}()|[\]\\/-]/g, "\\$&");
+      i++;
+      continue;
+    }
+    let name: string;
+    if (c === ":") {
+      let j = i + 1;
+      while (j < source.length && /[A-Za-z0-9_]/.test(source[j])) j++;
+      if (j === i + 1) {
+        out += ":";
+        i++;
+        continue;
+      }
+      name = source.slice(i + 1, j);
+      i = j;
+    } else {
+      name = String(unnamed++);
+    }
+    let pat = "[^/]+?";
+    if (source[i] === "(") {
+      const end = closingParen(source, i);
+      if (end < 0) {
+        ok = false;
+        break;
+      }
+      pat = source.slice(i + 1, end);
+      if (/^\?(?![:=!<])/.test(pat)) {
+        ok = false;
+        break;
+      }
+      i = end + 1;
+    }
+    let mod = "";
+    if (source[i] === "?" || source[i] === "*" || source[i] === "+") mod = source[i++];
+    const prefixed = mod !== "" && out.endsWith("\\/");
+    if (prefixed) out = out.slice(0, -2);
+    const g = "p" + names.length;
+    const group = mod === "*" || mod === "+" ? `(?<${g}>(?:${pat})(?:\\/(?:${pat}))*)` : `(?<${g}>${pat})`;
+    if (prefixed && mod === "+") out += "\\/" + group;
+    else if (prefixed) out += "(?:\\/" + group + ")?";
+    else if (mod === "+" || mod === "") out += group;
+    else out += group + "?";
+    names.push(name);
+    mods[name] = mod;
+  }
+  let compiled: SourceRegex | null = null;
+  if (ok) {
+    try {
+      compiled = { re: new RegExp(out + "\\/?$"), names, mods };
+    } catch {
+      compiled = null;
+    }
+  }
+  sourceRegexCache.set(source, compiled);
+  return compiled;
+}
+
 /**
  * Matches a request path against a redirect/rewrite source: exact, a trailing
  * "/*" wildcard (param "splat"), or named segments with the "*", "+" and "?"
@@ -215,6 +307,13 @@ export function matchRedirectParamsMods(path: string, source: string): RuleMatch
   const params: Record<string, string> = {};
   const mods: Record<string, string> = {};
   if (source === path) return { params, mods };
+  if (source.includes("(")) {
+    const sr = compileSourceRegex(source);
+    const m = sr && sr.re.exec(path);
+    if (!sr || !m) return null;
+    sr.names.forEach((name, i) => (params[name] = m.groups?.["p" + i] ?? ""));
+    return { params, mods: { ...sr.mods } };
+  }
   if (!/[*:]/.test(source)) return null;
   if (source.endsWith("/*")) {
     const prefix = source.slice(0, -2);

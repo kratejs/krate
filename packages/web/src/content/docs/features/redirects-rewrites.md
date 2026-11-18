@@ -32,6 +32,14 @@ destination, and a path destination can never become an off-site URL: values
 like `/\evil.com` or an encoded `//evil.com` are escaped or collapsed so the
 `Location` always starts with a single `/`.
 
+A parameter can carry a regular expression in parentheses, as in `next.config`
+(path-to-regexp syntax): `:id(\\d+)` matches digits only, and
+`{ source: "/store/:slug((?!compare$)[^/]+)", destination: "/templates/:slug" }`
+matches every `/store/<slug>` except `/store/compare`. The expression uses
+JavaScript syntax (lookaheads included) and may span segments
+(`:path(a/.*)`); the `?`, `*` and `+` modifiers go after the closing
+parenthesis, and a bare `(en|de)` group constrains a segment without naming it.
+
 ### Under a base path
 
 With a base path such as `/docs`, write `source` and `destination` without it.
@@ -81,4 +89,6 @@ Both support pattern matching with wildcard (`*`) and parameterized
 Vercel (see [Deployment](/docs/guides/deployment/)). Write the splat explicitly
 in the destination (`/docs/:splat`): that form is portable, while the dev
 server's implicit "append the rest of the path" when a wildcard source has a
-destination without `:splat` is not carried to hosts.
+destination without `:splat` is not carried to hosts. A regex parameter is passed to
+Vercel as written; the `_redirects` file of Netlify and Cloudflare Pages cannot
+express one, so `krate deploy` leaves such a rule out and warns.
