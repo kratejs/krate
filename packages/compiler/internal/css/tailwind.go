@@ -13,7 +13,7 @@ import (
 // Hoisted matchers (compiled once, not per class). Kept as package vars for the
 // hot generator path.
 var (
-	roundedRe     = regexp.MustCompile(`^rounded-([a-zA-Z0-9]+)$`)
+	roundedRe     = regexp.MustCompile(`^rounded-([a-zA-Z0-9]+|\[.+\])$`)
 	roundedSideRe = regexp.MustCompile(`^rounded-(tl|tr|bl|br|ss|se|es|ee|t|r|b|l|s|e)-([a-zA-Z0-9]+|\[.+\])$`)
 )
 
@@ -1057,7 +1057,9 @@ func generateCSS(cls string, theme TailwindTheme) string {
 	// Arbitrary values with bracket syntax: w-[30px], top-[117px], text-[#bada55]
 	if match := arbitraryUtilityRe.FindStringSubmatch(cls); match != nil {
 		prop := match[1]
-		val := match[2]
+		// Same rules as every other arbitrary value: `_` is a space and math
+		// operators are spaced, or calc(a-b) is invalid and dropped.
+		val := normalizeArbitrary(match[2])
 		cssProp := arbitraryPropToCSS(prop, val)
 		if cssProp != "" {
 			return cssProp
