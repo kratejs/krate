@@ -93,3 +93,21 @@ func TestArbitraryValueTypeInference(t *testing.T) {
 		}
 	}
 }
+
+// Every selector of an arbitrary variant's list is scoped to the class: a part
+// without & is relative to it (CSS nesting), so `b` in [&>a,b] no longer
+// matched every b on the page.
+func TestArbitraryVariantSelectorListIsScoped(t *testing.T) {
+	for cls, want := range map[string]string{
+		"[&>a,b]:mt-px":      `.\[\&\>a\,b\]\:mt-px>a,.\[\&\>a\,b\]\:mt-px b{margin-top:1px}`,
+		"[a,&_b]:mt-px":      `.\[a\,\&_b\]\:mt-px a,.\[a\,\&_b\]\:mt-px b{margin-top:1px}`,
+		"[a,b]:mt-px":        `.\[a\,b\]\:mt-px:is(a,b){margin-top:1px}`,
+		"[&>a,b]:hover:pt-1": `:is(.\[\&\>a\,b\]\:hover\:pt-1>a,.\[\&\>a\,b\]\:hover\:pt-1 b):hover{padding-top:.25rem}`,
+		"has-[>[data-slot=x]]:[&>[role=checkbox],[role=radio]]:mt-px": `.has-\[\>\[data-slot\=x\]\]\:\[\&\>\[role\=checkbox\]\,\[role\=radio\]\]\:mt-px:has(>[data-slot=x])>[role=checkbox],.has-\[\>\[data-slot\=x\]\]\:\[\&\>\[role\=checkbox\]\,\[role\=radio\]\]\:mt-px:has(>[data-slot=x]) [role=radio]{margin-top:1px}`,
+	} {
+		got := Minify(NewTailwindGenerator().Generate(map[string]bool{cls: true}))
+		if !strings.Contains(got, want) {
+			t.Errorf("%s:\n got  %s\n want %s", cls, got, want)
+		}
+	}
+}

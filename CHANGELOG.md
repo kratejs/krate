@@ -438,6 +438,9 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- An arbitrary variant with a selector list scopes every selector to the class, as Tailwind v4 does:
+  `[&>a,b]:` is `.x > a, .x b` (a part without `&` is a descendant). The bare `b` matched every such
+  element on every page, e.g. shadcn's field `[&>[role=checkbox],[role=radio]]:mt-px` moved every radio.
 - The production runtime chunk is bundled per site from the runtime's ES modules: only the exports the
   site's code reaches ship and are defined on `window` (the router API always is), and the pieces share
   one copy of esbuild's module helpers. A counter page's runtime drops from 29.3 kB to 19.3 kB gzip (10 kB

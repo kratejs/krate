@@ -26,6 +26,11 @@ type variant struct {
 	hook bool
 	// rel marks a relative arbitrary selector such as [>img] (only valid in has-*).
 	rel bool
+	// scoped, when set, replaces sel where the variant applies to the class
+	// itself: an arbitrary selector list with every part scoped to "&". The
+	// compound variants (not-, has-, group-, peer-, in-) keep the list as
+	// written, as Tailwind v4 does.
+	scoped string
 }
 
 const (
@@ -465,7 +470,36 @@ func arbitraryVariant(raw string) (variant, bool) {
 	}
 	// Tailwind orders arbitrary variants by their final selector text.
 	rank = fmt.Sprintf("%02d:%s", arbitraryVariantOrder, sel)
-	return variant{sel: sel, rank: rank, comp: comp, rel: rel}, true
+	v := variant{sel: sel, rank: rank, comp: comp, rel: rel}
+	if !rel {
+		v.scoped = scopeSelectorList(sel)
+	}
+	return v, true
+}
+
+// scopeSelectorList applies CSS nesting to an arbitrary selector list that
+// uses "&": a part without "&" is relative to it, so `&>a,b` is `& > a, & b`
+// (a combinator such as `>b` attaches to "&"). Without the scoping the bare
+// part matched elements anywhere on the page. It returns "" when no part
+// needs it.
+func scopeSelectorList(sel string) string {
+	parts := topLevelSplit(sel, ',')
+	if len(parts) < 2 {
+		return ""
+	}
+	changed := false
+	for i, p := range parts {
+		p = strings.TrimSpace(p)
+		if !strings.Contains(p, "&") {
+			p = "& " + p
+			changed = true
+		}
+		parts[i] = p
+	}
+	if !changed {
+		return ""
+	}
+	return strings.Join(parts, ", ")
 }
 
 // attrValue quotes the value of an attribute selector the way Tailwind does:
@@ -855,12 +889,18 @@ func notVariant(inner variant, rank string) (variant, bool) {
 	return variant{}, false
 }
 
-// substSel substitutes the selector built so far into a variant template,
-// distributing over a comma-separated list.
+// substSel substitutes the selector built so far into a variant template. A
+// list so far stands for one element, as "&" does in CSS nesting, so it is
+// wrapped in :is() (`[&>a,b]:hover` is `:is(.x > a, .x b):hover`). A list with
+// a pseudo-element cannot go inside :is(), so the template is distributed over
+// it instead.
 func substSel(tpl, cur string) string {
 	parts := topLevelSplit(cur, ',')
 	if len(parts) == 1 {
 		return strings.ReplaceAll(tpl, "&", cur)
+	}
+	if !strings.Contains(cur, "::") {
+		return strings.ReplaceAll(tpl, "&", ":is("+cur+")")
 	}
 	out := make([]string, len(parts))
 	for i, p := range parts {
@@ -877,8 +917,12 @@ func applyVariants(baseSel string, vs []variant) (string, []string) {
 	cur := "&"
 	var ats []string
 	for _, v := range vs {
-		if v.sel != "" {
-			cur = substSel(v.sel, cur)
+		tpl := v.sel
+		if v.scoped != "" {
+			tpl = v.scoped
+		}
+		if tpl != "" {
+			cur = substSel(tpl, cur)
 		}
 		ats = append(ats, v.ats...)
 	}
