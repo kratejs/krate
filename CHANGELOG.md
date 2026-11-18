@@ -187,6 +187,15 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Breaking
 
+- Output-quality changes that can affect a site (details under Fixed):
+  - heading ids keep doubled hyphens like GitHub (`#go-components--api-routes`), so external links to
+    the old collapsed ids of such headings stop matching;
+  - `<Link>` no longer prefetches on scroll into view; use `prefetch="viewport"` or `prefetch: "viewport"`;
+  - production builds precompress by default; set `compress: { brotli: false, gzip: false }` to opt out;
+  - the docs search module moved from `/docs/search/search.js` to a hashed name and loads on first use
+    (`search.load: "eager"` restores the script tag);
+  - the client runtime defines only the exports the site's code uses on `window`; a script the build
+    cannot see that calls another export needs `clientRuntime: { exports: "all" }`.
 - `outDir` values that are or contain the project root, pages directory or public directory
   (such as `".."`) fail with `KR8350` before anything is deleted. `krate build` and
   `krate clean` share the check; with `outDir: "."`, `krate clean` used to delete the project.
