@@ -24,15 +24,18 @@ export async function GET() { return Response.json({}); }`,
 		t.Fatal(err)
 	}
 	a := string(findPlan(rep, "src/api/a.ts").Content)
-	if strings.Contains(a, "runtime") {
-		t.Errorf("runtime not dropped:\n%s", a)
+	if !strings.Contains(a, "export const runtime = 'nodejs';") {
+		t.Errorf("API route runtime must be kept:\n%s", a)
 	}
 	if !strings.Contains(a, "export const maxDuration = 60;") {
 		t.Errorf("API route maxDuration must be kept:\n%s", a)
 	}
 	b := string(findPlan(rep, "src/api/b.ts").Content)
-	if strings.Contains(b, "preferredRegion") || strings.Contains(b, "runtime") {
+	if strings.Contains(b, "preferredRegion") {
 		t.Errorf("segment config not dropped:\n%s", b)
+	}
+	if !strings.Contains(b, `export const runtime = "edge";`) {
+		t.Errorf("API route runtime must be kept:\n%s", b)
 	}
 	if !strings.Contains(b, "export const maxDuration = 300;") {
 		t.Errorf("API route maxDuration must be kept:\n%s", b)
@@ -50,19 +53,34 @@ export async function GET() { return Response.json({}); }`,
 		t.Errorf("want one aggregated fetchCache manual item, got %q", segment)
 	}
 	joined := strings.Join(rep.Warnings, "\n")
-	for _, want := range []string{"export const runtime from 2 files", "preferredRegion from 1 files"} {
-		if !strings.Contains(joined, want) {
-			t.Errorf("missing aggregated warning %q in:\n%s", want, joined)
-		}
+	if !strings.Contains(joined, "preferredRegion from 1 files") {
+		t.Errorf("missing aggregated warning in:\n%s", joined)
+	}
+	if strings.Contains(joined, "export const runtime") {
+		t.Errorf("a kept API runtime must not warn:\n%s", joined)
 	}
 	if strings.Contains(joined, "maxDuration") {
 		t.Errorf("a kept maxDuration must not warn:\n%s", joined)
 	}
 }
 
+func TestRuntimeKeptInAPIRoutesDroppedFromPages(t *testing.T) {
+	for _, v := range []string{"'nodejs'", `"edge"`} {
+		decl := "export const runtime = " + v + ";\n"
+		src, notes := dropSegmentConfig(decl, KindAPI)
+		if src != decl || len(notes) != 1 || !strings.HasPrefix(notes[0], "kept export const runtime") {
+			t.Errorf("API %s: want kept with a note, got %q %v", v, src, notes)
+		}
+		src, notes = dropSegmentConfig(decl, KindPage)
+		if src != "" || len(notes) != 1 || strings.Contains(notes[0], "already run on Node") || !strings.Contains(notes[0], "no per-page runtime") {
+			t.Errorf("page %s: want dropped, got %q %v", v, src, notes)
+		}
+	}
+}
+
 func TestSegmentConfigKeptWhenReferenced(t *testing.T) {
 	src, notes := dropSegmentConfig("export const runtime = 'nodejs';\nexport function GET() { return Response.json({ runtime }); }\n", KindAPI)
-	if len(notes) != 0 || !strings.Contains(src, "export const runtime") {
+	if !strings.Contains(src, "export const runtime") {
 		t.Errorf("a referenced export must stay: %q %v", src, notes)
 	}
 }

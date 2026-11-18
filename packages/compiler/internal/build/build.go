@@ -5552,6 +5552,11 @@ func (b *Builder) compileSingleRoute(file string, apiSrcDir string, fam *apiRout
 	// A route that provably keeps an external import is Node-only: it gets
 	// its Node bundle and a QuickJS stub, without bundling its packages for
 	// QuickJS. Otherwise the full QuickJS bundle decides.
+	rt := readAPIRouteRuntime(file)
+	if rt == apiRuntimeNodeJS {
+		meta.NodeOnly = true
+		return meta, b.finishNodeOnlyRoute(file, quickjsPath, meta.File, buildNode)
+	}
 	proven := plan.nodeOnly
 	if !plan.detected && !legacyNodeOnlyDetection {
 		proven = provablyNodeOnly(quickjsOpts, b.Cfg.ServerExternalPackages, fam)
@@ -5597,9 +5602,32 @@ func (b *Builder) compileSingleRoute(file string, apiSrcDir string, fam *apiRout
 		}
 		return meta, b.finishNodeOnlyRoute(file, quickjsPath, meta.File, buildNode)
 	}
+	dec := plan.decision
+	plan.decision = nil
+	if dec == nil {
+		d := b.routeRuntimeDecision(quickjsResult.Metafile, rt)
+		dec = &d
+	}
+	if dec.nodeOnly {
+		meta.NodeOnly = true
+		reportRouteMove(file, apiSrcDir, dec.reason)
+		return meta, b.finishNodeOnlyRoute(file, quickjsPath, meta.File, buildNode)
+	}
 	b.recordDeps(file, metafileDeps(b.Root, quickjsResult.Metafile))
+	if len(dec.errs) > 0 {
+		b.setRuntimeCompatWarnings(file, nil)
+		errs := make([]error, len(dec.errs))
+		for i, d := range dec.errs {
+			errs[i] = d
+		}
+		return apiRouteMeta{}, errors.Join(errs...)
+	}
 	removeStaleArtifact(nodePath)
-	meta.Features = b.scanRuntimeCompat(file, quickjsResult.Metafile, jscompat.CompatAPIRuntime)
+	b.setRuntimeCompatWarnings(file, dec.warnings)
+	if len(dec.warnings) > 0 {
+		printWarningsOnce(os.Stderr, dec.warnings)
+	}
+	meta.Features = dec.features
 	return meta, nil
 }
 

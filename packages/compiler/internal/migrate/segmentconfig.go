@@ -20,7 +20,9 @@ const droppedConfigPrefix = "dropped route segment config "
 // dropSegmentConfig removes runtime, maxDuration and preferredRegion exports
 // and reports each removal as an info note. A name that is also used elsewhere
 // in the file is kept, so a live reference is never broken. In an API route
-// maxDuration is kept too: Krate reads it as the route's request timeout.
+// maxDuration is kept too: Krate reads it as the route's request timeout. So
+// is runtime = 'nodejs' | 'edge': Krate serves a 'nodejs' route from Node and
+// keeps an 'edge' route on its embedded runtime.
 func dropSegmentConfig(src string, kind FileKind) (string, []string) {
 	var notes []string
 	out := dropRouteConfig.ReplaceAllStringFunc(src, func(line string) string {
@@ -31,6 +33,16 @@ func dropSegmentConfig(src string, kind FileKind) (string, []string) {
 				notes = append(notes, "kept export const maxDuration = "+value+": Krate reads it as this route's request timeout in seconds (default 30)")
 			}
 			return line
+		}
+		if name == "runtime" && kind == KindAPI {
+			switch strings.Trim(value, `"'`) {
+			case "nodejs":
+				notes = append(notes, "kept export const runtime = "+value+": Krate serves this route from the Node sidecar")
+				return line
+			case "edge", "experimental-edge":
+				notes = append(notes, "kept export const runtime = "+value+": Krate keeps this route on its embedded runtime and fails the build if it uses a global that runtime lacks (Buffer, __dirname, ...)")
+				return line
+			}
 		}
 		if identifierUsedElsewhere(src, name, line) {
 			return line
@@ -44,10 +56,7 @@ func dropSegmentConfig(src string, kind FileKind) (string, []string) {
 func segmentConfigReason(name, value string) string {
 	switch name {
 	case "runtime":
-		if strings.Trim(value, `"'`) == "edge" {
-			return "Krate runs the handler on its own API runtime, which implements the web Request/Response APIs the edge runtime offers"
-		}
-		return "Krate API routes already run on Node (or the runtime set in api.runtime)"
+		return "Krate pages have no per-page runtime; only API routes read it"
 	case "maxDuration":
 		return "only API routes have a request timeout in Krate, so a page's maxDuration has no effect"
 	}
@@ -96,7 +105,7 @@ func aggregateSegmentConfig(rep *Report) {
 	for _, n := range names {
 		switch n {
 		case "runtime":
-			rep.Warnings = append(rep.Warnings, fmt.Sprintf("dropped export const runtime from %d files: Krate API routes run on Node (or the configured api.runtime), so it has no effect", counts[n]))
+			rep.Warnings = append(rep.Warnings, fmt.Sprintf("dropped export const runtime from %d files: Krate pages have no per-page runtime", counts[n]))
 		case "maxDuration":
 			rep.Warnings = append(rep.Warnings, fmt.Sprintf("dropped export const maxDuration from %d non-API files: only API routes have a request timeout in Krate", counts[n]))
 		case "preferredRegion":

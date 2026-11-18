@@ -22,7 +22,27 @@ const (
 // relative to root. option is CompatAPIRuntime or CompatMiddlewareRuntime and
 // picks the runtime the message and hint name.
 func CompatDiagnostics(scan CompatScan, root, option string) []diag.Diagnostic {
+	return CompatDiagnosticsAt(scan, root, option, false)
+}
+
+// FirstUnsupportedRef returns the first unguarded not-supported reference of
+// scan, preferring the project's own files over dependencies, with its path
+// relative to root.
+func FirstUnsupportedRef(scan CompatScan, root string) (ref CompatRef, rel string, ok bool) {
 	refs := scan.Unsupported()
+	sortCompatRefs(refs)
+	for _, r := range refs {
+		if NodeModulesPackage(r.File) == "" {
+			return r, filepath.ToSlash(relToRoot(root, r.File)), true
+		}
+	}
+	if len(refs) > 0 {
+		return refs[0], filepath.ToSlash(relToRoot(root, refs[0].File)), true
+	}
+	return CompatRef{}, "", false
+}
+
+func sortCompatRefs(refs []CompatRef) {
 	sort.SliceStable(refs, func(i, j int) bool {
 		a, b := refs[i], refs[j]
 		if a.File != b.File {
@@ -33,6 +53,15 @@ func CompatDiagnostics(scan CompatScan, root, option string) []diag.Diagnostic {
 		}
 		return a.Col < b.Col
 	})
+}
+
+// CompatDiagnosticsAt is CompatDiagnostics with a choice of severity: with
+// strict set, references in the project's own files are errors (the runtime
+// was asked for explicitly, so the route would fail); references in
+// dependencies stay warnings, since libraries often feature-check first.
+func CompatDiagnosticsAt(scan CompatScan, root, option string, strict bool) []diag.Diagnostic {
+	refs := scan.Unsupported()
+	sortCompatRefs(refs)
 	kind := "API"
 	if option == CompatMiddlewareRuntime {
 		kind = "middleware"
@@ -76,6 +105,10 @@ func CompatDiagnostics(scan CompatScan, root, option string) []diag.Diagnostic {
 		if ls := lines[r.File]; r.Line >= 1 && r.Line <= len(ls) {
 			src = strings.TrimRight(ls[r.Line-1], "\r")
 		}
+		sev := diag.SeverityWarning
+		if strict && pkg == "" {
+			sev = diag.SeverityError
+		}
 		out = append(out, diag.Diagnostic{
 			File:     filepath.ToSlash(rel),
 			Line:     r.Line,
@@ -83,7 +116,7 @@ func CompatDiagnostics(scan CompatScan, root, option string) []diag.Diagnostic {
 			Message:  msg,
 			Hint:     hint,
 			Source:   src,
-			Severity: diag.SeverityWarning,
+			Severity: sev,
 			Code:     diag.CodeAPIRuntimeUnsupported,
 		})
 	}

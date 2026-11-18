@@ -502,8 +502,12 @@ ssr: {
   Explicit per-page `isr`/`ssr` config still wins.
 - **`middlewareRuntime`** and **`apiRuntime`** (`"quickjs"` | `"node"` |
   `"bun"` | `"deno"`) choose which runtime executes middleware and API routes.
-  `"quickjs"` (default) uses the embedded QuickJS runtime with no Node.js
-  dependency; `"node"`/`"deno"` use the Node `http` sidecar; **`"bun"` uses a
+  Unset (default) uses the embedded QuickJS runtime with no Node.js
+  dependency, and serves an API route from the Node sidecar when it imports a
+  Node built-in or uses a global the embedded runtime lacks (`Buffer`,
+  `__dirname`, `process.cwd()`, ...) without a feature check. `"quickjs"` pins
+  every route to the embedded runtime: such a use is then a `KR7160` build error
+  (a route can still opt into Node with `export const runtime = "nodejs"`); `"node"`/`"deno"` use the Node `http` sidecar; **`"bun"` uses a
   Bun-native sidecar built on `Bun.serve`** (no Node http stack, no cluster
   shim) - the fastest JS/TS sidecar option. The build bundles each API route
   only for the runtime that serves it, so run `krate build` again after

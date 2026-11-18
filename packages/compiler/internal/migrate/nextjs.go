@@ -666,6 +666,9 @@ func applyManual(src string, kind FileKind) []string {
 			out = append(out, "export const maxDuration must be a literal number of seconds for Krate to apply it as the route's request timeout; the default of 30s applies otherwise")
 			continue
 		}
+		if m[1] == "runtime" && kind == KindAPI && keptRuntime.MatchString(src) {
+			continue
+		}
 		out = append(out, "route segment config "+m[1]+" has no Krate equivalent and was left in place")
 	}
 	if useCacheDirective.MatchString(src) {
@@ -678,6 +681,7 @@ var (
 	asyncDefaultExport  = regexp.MustCompile(`export\s+default\s+async\b`)
 	segmentConfigExport = regexp.MustCompile(`(?m)^export\s+const\s+(fetchCache|runtime|preferredRegion|maxDuration)\b`)
 	keptMaxDuration     = regexp.MustCompile(`(?m)^export\s+const\s+maxDuration\s*=\s*\d+\s*(?:as\s+const\s*)?;?[ \t]*\r?$`)
+	keptRuntime         = regexp.MustCompile(`(?m)^export\s+const\s+runtime\s*=\s*(?:"(?:nodejs|edge|experimental-edge)"|'(?:nodejs|edge|experimental-edge)')\s*(?:as\s+const\s*)?;?[ \t]*\r?$`)
 	useCacheDirective   = regexp.MustCompile(`(?m)^\s*["']use cache(?::[a-z-]+)?["']`)
 )
 

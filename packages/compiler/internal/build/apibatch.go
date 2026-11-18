@@ -19,6 +19,9 @@ type apiRoutePlan struct {
 	// first attempt of buildExternalizingNative builds it; nil when the route
 	// builds its own.
 	node, quickjs *batchOutput
+	// decision is routeRuntimeDecision's verdict on the route's QuickJS
+	// bundle, when the batch already made it.
+	decision *routeDecision
 }
 
 // planAPIRoutes runs the esbuild work of routes in batched calls of at most
@@ -33,6 +36,7 @@ func (b *Builder) planAPIRoutes(routes []string, apiSrcDir string, fam *apiRoute
 	extra := b.Cfg.ServerExternalPackages
 
 	type item struct {
+		file          string
 		plan          *apiRoutePlan
 		quickjs, node fileBatchEntry
 	}
@@ -45,6 +49,7 @@ func (b *Builder) planAPIRoutes(routes []string, apiSrcDir string, fam *apiRoute
 		}
 		outName := strings.TrimSuffix(rel, filepath.Ext(rel)) + ".js"
 		it := &item{
+			file:    r,
 			plan:    &apiRoutePlan{},
 			quickjs: fileBatchEntry{In: r, Out: filepath.Join(qdir, outName)},
 			node:    fileBatchEntry{In: r, Out: filepath.Join(ndir, outName)},
@@ -108,6 +113,9 @@ func (b *Builder) planAPIRoutes(routes []string, apiSrcDir string, fam *apiRoute
 	})
 	var nodeOnly, embedded []*item
 	for _, it := range items {
+		if it.plan.detected && readAPIRouteRuntime(it.file) == apiRuntimeNodeJS {
+			it.plan.nodeOnly = true
+		}
 		switch {
 		case !it.plan.detected:
 		case it.plan.nodeOnly:
@@ -117,16 +125,30 @@ func (b *Builder) planAPIRoutes(routes []string, apiSrcDir string, fam *apiRoute
 		}
 	}
 	nodeBundles(nodeOnly)
+	var (
+		movedMu sync.Mutex
+		moved   []*item
+	)
 	batches(embedded, func(part []*item, entries []fileBatchEntry) {
 		outs := batchQuickJSBundles(quickjsOpts, extra, qdir, entries)
 		for i, it := range part {
 			if outs == nil {
 				b.Prof.Add("batch:api-quickjs-unbatched", 0)
-			} else {
-				it.plan.quickjs = outs[i]
+				continue
+			}
+			it.plan.quickjs = outs[i]
+			// The same decision compileSingleRoute makes; routes it moves
+			// to Node get their Node bundles in a batch too.
+			d := b.routeRuntimeDecision(outs[i].Metafile, readAPIRouteRuntime(it.file))
+			it.plan.decision = &d
+			if d.nodeOnly {
+				movedMu.Lock()
+				moved = append(moved, it)
+				movedMu.Unlock()
 			}
 		}
 	})
+	nodeBundles(moved)
 	return plans
 }
 

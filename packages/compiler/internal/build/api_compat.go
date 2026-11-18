@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
@@ -20,6 +21,68 @@ func embeddedRuntime(option string) bool {
 		return true
 	}
 	return false
+}
+
+// explicitQuickJS reports whether a runtime option asks for the embedded
+// runtime by name, as opposed to leaving it unset (auto).
+func explicitQuickJS(option string) bool {
+	return strings.EqualFold(option, "quickjs")
+}
+
+// routeDecision is what routeRuntimeDecision concludes for an API route that
+// was bundled for the embedded runtime.
+type routeDecision struct {
+	// nodeOnly moves the route to the Node sidecar; reason names the first
+	// reference that made it.
+	nodeOnly bool
+	reason   string
+	// warnings are the KR7160 diagnostics of a route that stays embedded and
+	// errs the ones that fail the build.
+	warnings []diag.Diagnostic
+	errs     []diag.Diagnostic
+	features *[]string
+}
+
+// routeRuntimeDecision decides, from the metafile of a route's QuickJS
+// bundle, where the route runs. Without a choice by the user, any unguarded
+// reference to an API the embedded runtime lacks (Buffer, __dirname,
+// process.cwd, ...) in the bundled graph moves the route to Node. A route that
+// asked for the embedded runtime (`export const runtime = 'edge'` or
+// `ssr.apiRuntime: "quickjs"`) fails the build for such a reference instead.
+// Both the single-route and the batched compile paths call it.
+func (b *Builder) routeRuntimeDecision(metafile string, rt apiRouteRuntime) routeDecision {
+	scan := jsruntime.ScanCompatFiles(esbuildBundledInputs(metafile))
+	strict := rt == apiRuntimeEdge || (rt != apiRuntimeNodeJS && explicitQuickJS(b.Cfg.SSR.APIRuntime))
+	var d routeDecision
+	if !strict && scan.Complete {
+		if ref, rel, ok := jsruntime.FirstUnsupportedRef(scan, b.Root); ok {
+			d.nodeOnly = true
+			d.reason = ref.API + " at " + rel + ":" + strconv.Itoa(ref.Line)
+			return d
+		}
+	}
+	for _, x := range jsruntime.CompatDiagnosticsAt(scan, b.Root, jsruntime.CompatAPIRuntime, strict) {
+		if x.Severity == diag.SeverityError {
+			d.errs = append(d.errs, x)
+		} else {
+			d.warnings = append(d.warnings, x)
+		}
+	}
+	if scan.Complete {
+		f := scan.Features()
+		d.features = &f
+	}
+	return d
+}
+
+// reportRouteMove prints the info line for a route routeRuntimeDecision moved
+// to Node.
+func reportRouteMove(file, apiSrcDir, reason string) {
+	rel, err := filepath.Rel(apiSrcDir, file)
+	if err != nil {
+		rel = filepath.Base(file)
+	}
+	printf("  %s*%s api/%s -> Node (%s)\n", cCyan, cReset, filepath.ToSlash(rel), reason)
 }
 
 // esbuildBundledInputs returns the absolute paths of the source files that

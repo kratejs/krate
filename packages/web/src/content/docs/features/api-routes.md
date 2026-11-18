@@ -38,6 +38,22 @@ The embedded runtime cannot load a native addon at all, so such a route always
 runs on the Node sidecar; middleware is bundled into one file and cannot import
 one (call the addon from an API route).
 
+A route is also Node-only when anything it bundles, its own file or a helper it
+imports, uses a global the embedded runtime lacks without a feature check:
+`Buffer`, `__dirname`, `__filename`, `process.cwd()`, `process.nextTick`, and the
+other [not-supported APIs](/docs/reference/api-runtime-compat/). With `ssr.apiRuntime`
+unset the build moves such a route to the Node sidecar by itself and prints one line
+naming the first use (`api/embed.ts -> Node (Buffer at src/server/embed.ts:2)`);
+a use guarded by `typeof Buffer !== "undefined"` keeps the route embedded. Two
+overrides:
+
+- `export const runtime = "nodejs"` in a route always serves it from Node;
+  `export const runtime = "edge"` keeps it on the embedded runtime, and then an
+  unguarded use of an unsupported global in its own files is a [`KR7160`](/docs/reference/diagnostics/#kr7160) build error.
+- `ssr.apiRuntime: "quickjs"` asks for the embedded runtime for every route that does
+  not export `runtime = "nodejs"`; such a use is a `KR7160` error there too, because
+  the route would fail at run time.
+
 ### Runtime model and performance
 
 - The embedded runtime keeps a **pool of long-lived VMs** (`ssr.apiWorkers`,
@@ -85,8 +101,9 @@ Anything the embedded runtime does not implement (for example `TransformStream`,
 `NotSupportedError` naming the API and suggesting `ssr.apiRuntime: "node"`, and
 the error is logged. The build reports the same APIs ahead of time: when a route
 is built for the embedded runtime, each unsupported global it (or a dependency
-it bundles) uses is a [`KR7160`](/docs/reference/diagnostics/#kr7160) warning
-with the file, line, column and an alternative. The full list, with what is
+it bundles) uses is reported with the file, line, column and an alternative: as a
+[`KR7160`](/docs/reference/diagnostics/#kr7160) warning for a use the build cannot move to Node, and as an error
+when the embedded runtime was requested explicitly (see above). The full list, with what is
 partial and the tests behind each entry, is in the
 [API runtime compatibility](/docs/reference/api-runtime-compat/) reference,
 generated from the ledger the compiler checks against.

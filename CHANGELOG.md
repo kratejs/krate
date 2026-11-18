@@ -246,6 +246,8 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Added
 
+- `export const runtime = "nodejs" | "edge"` in an API route is honored: `"nodejs"` serves the route
+  from the Node sidecar, `"edge"` keeps it on the embedded runtime.
 - `has` and `missing` conditions on `redirects`, `rewrites` and `headers` rules, with Next.js semantics:
   `{ type: "query" | "header" | "cookie" | "host", key?, value? }`, a `value` regex anchored as a whole,
   presence-only items captured under the key's name, named groups usable in `destination`. Redirects
@@ -457,6 +459,16 @@ host code runs in the native process. Names and options may change between relea
 
 ### Changed
 
+- An API route whose bundled modules use a global the embedded runtime lacks without a feature check
+  (`Buffer`, `__dirname`, `__filename`, `process.cwd()`, `process.nextTick`, parts of `Intl`, ...) is
+  now served by the Node sidecar when `ssr.apiRuntime` is unset, in the route file or in any helper it
+  imports. The build prints `api/x.ts -> Node (Buffer at src/server/y.ts:12)` for each moved route and
+  no longer warns KR7160 for it; before, such a route returned 500 at run time. `krate serve` starts the
+  Node API sidecar for an app that has such a route. With `ssr.apiRuntime: "quickjs"` or
+  `export const runtime = "edge"` the same use is a KR7160 build error. Guarded uses
+  (`typeof Buffer !== "undefined"`) keep the route embedded.
+- `krate migrate nextjs` keeps `export const runtime = "nodejs" | "edge"` in API routes (it still drops
+  it from pages) and no longer claims routes "already run on Node".
 - `krate migrate nextjs` translates `has`/`missing` on redirects, rewrites and headers instead of
   refusing them, and writes `statusCode: 308` or `307` for Next's `permanent: true` or `false`. A
   redirect whose regex Go cannot run is written as a marked block at the start of the middleware
