@@ -19,20 +19,23 @@ import (
 // (islands, dynamic imports, HTML rendered per request) gets every feature.
 
 type runtimeFeatureManifest struct {
-	Version int                `json:"version"`
-	Core    runtimeFeatureFile `json:"core"`
+	Version int         `json:"version"`
+	Core    runtimeFeat `json:"core"`
 	// Full lists every export of the full hydration bundle.
 	Full    []string               `json:"full"`
 	Feature map[string]runtimeFeat `json:"features"`
-}
-
-type runtimeFeatureFile struct {
-	File string `json:"file"`
+	// Suspense and ESM are absent from older runtime packages (see
+	// runtime_shake.go).
+	Suspense *runtimeFeat `json:"suspense"`
+	// ESM maps each runtime module to its exports.
+	ESM map[string][]string `json:"esm"`
 }
 
 type runtimeFeat struct {
 	File    string   `json:"file"`
 	Exports []string `json:"exports"`
+	// Modules are the ES modules the piece is built from.
+	Modules []string `json:"modules"`
 }
 
 // optionalRuntimeFeatures lists the features included only when referenced,
@@ -106,7 +109,9 @@ func runtimeUsageOf(results []*PageResult) runtimeUsage {
 		}
 		u.addPage(r)
 	}
-	if u.Refs[dynamicImportRef] {
+	// A dynamic import() loads code the build did not scan, and a computed
+	// member of window can read any export.
+	if u.Refs[dynamicImportRef] || u.Refs[dynamicGlobalRef] {
 		u.Unknown = true
 	}
 	return u
@@ -211,33 +216,29 @@ func isJSScriptType(t string) bool {
 	return false
 }
 
-// loadRuntimeFeatures returns the assembled trimmed hydration runtime and the
-// names of the optional features it includes, or "" when the split runtime is
-// unavailable (the caller then uses the full bundle).
-func loadRuntimeFeatures(projectRoot string, spa bool, usage runtimeUsage) (string, []string) {
+// loadRuntimeFeatures returns the trimmed hydration runtime, the names of
+// the optional features it includes, and whether it includes the Suspense
+// runtime, or "" when the split runtime is unavailable (the caller then uses
+// the full bundle). A runtime package that ships its ES modules gets a
+// runtime bundled for the site (see shakenRuntime); an older one the
+// concatenated core and feature bundles.
+func loadRuntimeFeatures(projectRoot string, opts runtimeChunkOptions) (string, []string, bool) {
+	usage := opts.Usage
 	raw := loadNamedBundleFromDisk(projectRoot, "krate-features.json")
 	if raw == "" {
-		return "", nil
+		return "", nil, false
 	}
 	var m runtimeFeatureManifest
 	if json.Unmarshal([]byte(raw), &m) != nil || m.Version != 1 || m.Core.File == "" {
-		return "", nil
-	}
-	core := loadNamedBundleFromDisk(projectRoot, m.Core.File)
-	if core == "" {
-		return "", nil
+		return "", nil, false
 	}
 	routerName := "router"
-	if !spa {
+	if !opts.SPA {
 		routerName = "router-lite"
 	}
 	router, ok := m.Feature[routerName]
 	if !ok {
-		return "", nil
-	}
-	routerJS := loadNamedBundleFromDisk(projectRoot, router.File)
-	if routerJS == "" {
-		return "", nil
+		return "", nil, false
 	}
 
 	// The bootstrap helpers, the compat layer and the Suspense bundle only
@@ -249,29 +250,36 @@ func loadRuntimeFeatures(projectRoot string, spa bool, usage runtimeUsage) (stri
 	}
 	addHelperRefs(refs, &m)
 
+	var included []string
+	for _, name := range optionalRuntimeFeatures {
+		f, ok := m.Feature[name]
+		if ok && runtimeFeatureNeeded(name, f, refs, usage) {
+			included = append(included, name)
+		}
+	}
+	if js := shakenRuntime(projectRoot, &m, routerName, included, opts, refs); js != "" {
+		return js, included, opts.Suspense
+	}
+
+	core := loadNamedBundleFromDisk(projectRoot, m.Core.File)
+	routerJS := loadNamedBundleFromDisk(projectRoot, router.File)
+	if core == "" || routerJS == "" {
+		return "", nil, false
+	}
 	var sb strings.Builder
 	sb.WriteString(core)
 	sb.WriteString("\n")
 	sb.WriteString(routerJS)
-	var included []string
-	for _, name := range optionalRuntimeFeatures {
-		f, ok := m.Feature[name]
-		if !ok {
-			continue
-		}
-		if !runtimeFeatureNeeded(name, f, refs, usage) {
-			continue
-		}
-		body := loadNamedBundleFromDisk(projectRoot, f.File)
+	for _, name := range included {
+		body := loadNamedBundleFromDisk(projectRoot, m.Feature[name].File)
 		if body == "" {
 			// A listed bundle is missing: do not ship a runtime without it.
-			return "", nil
+			return "", nil, false
 		}
 		sb.WriteString("\n")
 		sb.WriteString(body)
-		included = append(included, name)
 	}
-	return sb.String(), included
+	return sb.String(), included, false
 }
 
 // helperFeatures lists the optional runtime features a bootstrap helper needs.

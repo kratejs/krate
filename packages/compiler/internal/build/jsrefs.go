@@ -6,6 +6,10 @@ import "strings"
 // the imported module is code the build did not scan.
 const dynamicImportRef = "import("
 
+// dynamicGlobalRef is recorded for a computed member of the global object
+// (window[name]): the code can read any global.
+const dynamicGlobalRef = "window["
+
 // globalObjects are the names whose members are global bindings:
 // window.__krateOwn reads the same binding as __krateOwn.
 var globalObjects = map[string]bool{"window": true, "globalThis": true, "self": true}
@@ -203,6 +207,9 @@ func addJSRefs(refs map[string]bool, src string) bool {
 					break
 				}
 			}
+			if text == "[" && prev.kind == jsTokIdent && globalObjects[prev.text] && !staticMember(src, i+1) {
+				refs[dynamicGlobalRef] = true
+			}
 			i += len(text)
 			push(jsTok{kind: jsTokPunct, text: text})
 		}
@@ -226,6 +233,23 @@ func regexAllowed(prev jsTok) bool {
 		return false
 	}
 	return true
+}
+
+// staticMember reports whether src[i:] starts with a string literal
+// member name and the closing bracket: "name"].
+func staticMember(src string, i int) bool {
+	for i < len(src) && (src[i] == ' ' || src[i] == '\t' || src[i] == '\n' || src[i] == '\r') {
+		i++
+	}
+	if i >= len(src) || src[i] != '"' && src[i] != '\'' {
+		return false
+	}
+	q := src[i]
+	end := strings.IndexByte(src[i+1:], q)
+	if end < 0 {
+		return false
+	}
+	return isJSIdent(src[i+1:i+1+end]) && nextNonSpace(src, i+2+end) == ']'
 }
 
 func nextNonSpace(src string, i int) byte {

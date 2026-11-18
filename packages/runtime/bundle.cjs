@@ -19,7 +19,11 @@
  *   class helpers, server actions, error boundaries/class components). The
  *   compiler assembles only the features a site's hydration code references
  *   (see packages/compiler/internal/build/runtime_features.go); the full
- *   bundles above remain the fallback for dev mode and unknown code.
+ *   bundles above remain the fallback for dev mode and unknown code. The
+ *   manifest also lists the ES modules (tsc output in dist/) behind each
+ *   piece; a compiler that knows them bundles the runtime per site from
+ *   those modules instead (runtime_shake.go), and the prebuilt pieces are
+ *   the fallback for older compilers.
  *
  * esbuild minification here is complemented by the compiler, which re-minifies
  * the shared chunk with its embedded esbuild when writing dist/chunks/.
@@ -219,17 +223,26 @@ async function buildSplitRuntime() {
   // `full` lists every export of the full hydration bundle. The compiler's
   // tests compare it with the core and feature exports so a name the emitter
   // generates cannot go missing from the trimmed runtime.
+  // `modules` lists the ES modules (tsc output in dist/) behind each piece
+  // and `esm` the exports of each module. The compiler bundles a production
+  // runtime from them that defines only what a site's code references.
+  const js = (m) => `${m}.js`;
   const manifest = {
     version: 1,
-    core: { file: 'krate-core.js', exports: await exportNames(CORE_ENTRY) },
+    core: { file: 'krate-core.js', exports: await exportNames(CORE_ENTRY), modules: CORE_MODULES.map(js) },
     full: await exportNames(HYDRATE_ENTRY),
     features: {},
+    suspense: { file: 'krate-suspense.js', exports: await exportNames(SUSPENSE_ENTRY), modules: ['suspense.js'] },
+    esm: {},
   };
+  for (const m of CORE_MODULES) manifest.esm[js(m)] = coreExports[m];
   for (const [name, f] of Object.entries(FEATURES)) {
     const entry = f.modules.map((m) => `export * from './src/${m}';`).join('\n');
     await buildBundle(f.file, entry, true, [coreGlobalsPlugin(f.modules.includes('navigation') ? featureGlobals : coreExports)]);
-    manifest.features[name] = { file: f.file, exports: await exportNames(entry) };
+    manifest.features[name] = { file: f.file, exports: await exportNames(entry), modules: f.modules.map(js) };
+    for (const m of f.modules) manifest.esm[js(m)] = await exportNames(`export * from './src/${m}';`);
   }
+  manifest.esm['suspense.js'] = manifest.suspense.exports;
   fs.writeFileSync(path.join(__dirname, 'dist', 'krate-features.json'), JSON.stringify(manifest, null, 1) + '\n');
 }
 

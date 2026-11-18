@@ -12,27 +12,27 @@
     "js": 0
   },
   "/docs": {
-    "html": 3486,
+    "html": 3487,
     "css": 9998,
-    "ownJs": 35591,
-    "js": 35591
+    "ownJs": 30120,
+    "js": 30120
   },
   "/docs/apis": {
-    "html": 4292,
+    "html": 4293,
     "css": 11612,
-    "ownJs": 38425,
-    "js": 38425
+    "ownJs": 32954,
+    "js": 32954
   },
   "/docs/guide": {
     "html": 4257,
     "css": 11612,
-    "ownJs": 38349,
-    "js": 38349
+    "ownJs": 32878,
+    "js": 32878
   },
   "/react-island": {
     "html": 701,
     "css": 1520,
-    "ownJs": 32057,
-    "js": 32057
+    "ownJs": 26586,
+    "js": 26586
   }
 }

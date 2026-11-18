@@ -40,13 +40,13 @@ func gzipSize(s string) int {
 	return buf.Len()
 }
 
-// Markers that only exist in one optional feature bundle.
+// Names the runtime chunk defines on window only when their optional
+// feature ships.
 const (
-	markActions = "__krateBindFormAction"
-	markClasses = "__krateClassError"
-	markHelpers = "twMerge"
-	markList    = "longestIncreasingSubsequence"
-	markRouter  = "reinitRouter"
+	markActions = "__krateBindFormAction:"
+	markClasses = "__krateClass:"
+	markHelpers = "twMerge:"
+	markList    = "krateBindList:"
 )
 
 func TestRuntimeChunkKeepsReferencedFeatures(t *testing.T) {

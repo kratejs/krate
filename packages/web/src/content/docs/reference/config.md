@@ -22,19 +22,24 @@ Set `spa: false` to use normal full-page navigation and omit the SPA router,
 prefetch, and history code from the shared runtime. `navigate()` still works and
 performs a full navigation.
 
-The shared runtime chunk is assembled per site in production builds: the core
+The shared runtime chunk is built per site in production builds: the core
 (signals, DOM bindings, events) plus the router, and only those optional pieces
 (list rendering, class helpers such as `cn`/`twMerge`, server action forms,
-error boundaries and class components) that the site's pages reference. A
-counter page ships about 25 KB of gzipped runtime JS (about 17 KB with
-`spa: false`); each extra piece adds between 2 and 5 KB gzipped. `krate dev`
-always serves the full runtime.
+error boundaries and class components) that the site's pages reference. The
+chunk is bundled from the runtime's ES modules, so within those pieces only the
+functions the site's code calls (and what they use) ship, and only those are
+defined on `window`. The router API (`krateRouter`, `navigate()`) is always
+defined. A counter page ships about 19 KB of gzipped runtime JS (about
+10 KB with `spa: false`); each extra piece adds between 1 and 5 KB gzipped.
+`krate dev` always serves the full runtime.
 
 Only code and markup count as a reference: a call in client code, or a
 server action form in the HTML. A heading, a code sample or any other text
 that names an API (`requestFormReset`, `Children`, `"use server"`) does not, so
 the runtime chunk, and its hash, change only when client code does. A page
-with a client island or HTML rendered per request gets every piece.
+with a client island or HTML rendered per request, or client code that reads a
+computed global (`window[name]`) or calls `import()`, gets every piece with
+every export defined.
 
 ## Site metadata
 

@@ -27,6 +27,9 @@ func resetRuntimeBundleMemo() {
 	runtimeBundleMemo.mu.Lock()
 	defer runtimeBundleMemo.mu.Unlock()
 	runtimeBundleMemo.m = make(map[string]string)
+	shakenRuntimeMemo.mu.Lock()
+	shakenRuntimeMemo.m = make(map[string]string)
+	shakenRuntimeMemo.mu.Unlock()
 }
 
 func loadRuntimeFromDisk(projectRoot string) string {
@@ -235,9 +238,10 @@ func probeNamedBundleFromDisk(projectRoot string, names []string) string {
 // Returns empty string if runtime is unavailable.
 func writeRuntimeChunk(outDir string, shouldMinify bool, projectRoot string, opts runtimeChunkOptions) (string, error) {
 	runtime := ""
+	suspenseIncluded := false
 	if opts.Trim {
 		var included []string
-		runtime, included = loadRuntimeFeatures(projectRoot, opts.SPA, opts.Usage)
+		runtime, included, suspenseIncluded = loadRuntimeFeatures(projectRoot, opts)
 		if opts.Features != nil {
 			*opts.Features = included
 		}
@@ -256,7 +260,7 @@ func writeRuntimeChunk(outDir string, shouldMinify bool, projectRoot string, opt
 	if opts.Compat {
 		runtime += renderer.CompatBootstrapJS
 	}
-	if opts.Suspense {
+	if opts.Suspense && !suspenseIncluded {
 		suspense := loadNamedBundleFromDisk(projectRoot, "krate-suspense.js")
 		if suspense == "" {
 			fmt.Fprintf(os.Stderr, "  %sWarning:%s the Suspense runtime (krate-suspense.js) was not found next to the hydration runtime; Suspense, use(), lazy() and transitions will not work (rebuild @krate/runtime)\n", cYellow, cReset)
