@@ -268,6 +268,7 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 		}
 	}
 	planMiddleware(abs, rep)
+	injectMiddlewareRedirects(abs, rep, nextCfg.MiddlewareRedirects)
 	planInstrumentation(abs, rep)
 	linkRelativeImports(rep)
 	migrateNextFonts(rep, abs)

@@ -1,9 +1,13 @@
 package migrate
 
 import (
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/kratejs/krate/packages/compiler/internal/config"
 )
 
 func scanConfig(t *testing.T, files map[string]string) *Report {
@@ -18,6 +22,12 @@ func scanConfig(t *testing.T, files map[string]string) *Report {
 		t.Fatal(err)
 	}
 	return rep
+}
+
+// loadableConfig swaps the @krate/core import for a local defineConfig so a
+// test can evaluate the migrated config without the package installed.
+func loadableConfig(body string) string {
+	return regexp.MustCompile(`import \{ defineConfig \} from ["']@krate/core["'];?`).ReplaceAllString(body, "const defineConfig = (c: any) => c;")
 }
 
 func configBody(t *testing.T, rep *Report) string {
@@ -38,65 +48,226 @@ func manualForSource(rep *Report, source string) ManualItem {
 	return ManualItem{}
 }
 
-func TestNextConfigHasRedirectsNotEmittedUnconditionally(t *testing.T) {
-	rep := scanConfig(t, map[string]string{"next.config.ts": `export default {
+const ddNextConfig = `export default {
   async redirects() {
     return [
-      { source: '/store', destination: '/templates', permanent: true, has: [{ type: 'query', key: 'ref' }] },
-      { source: '/store', destination: '/templates', permanent: true, has: [{ type: 'query', key: 'utm_source' }] },
-      { source: '/store', destination: '/templates', permanent: true, missing: [{ type: 'cookie', key: 'seen', value: '1' }] },
-      { source: '/old', destination: '/new', permanent: true },
+      { source: '/store/plans/compare', destination: '/store/compare', permanent: true },
+      { source: '/store/plans', destination: '/store', permanent: true },
+      { source: '/store', has: [{ type: 'query', key: 'vehicle' }], destination: '/templates', permanent: true },
+      { source: '/store', has: [{ type: 'query', key: 'category' }], destination: '/templates', permanent: true },
+      { source: '/store', has: [{ type: 'query', key: 'q' }], destination: '/templates', permanent: true },
+      { source: '/store/:slug((?!compare$)[^/]+)', destination: '/templates/:slug', permanent: true },
     ];
   },
+};`
+
+// The redirects of the DigitalDesigns app translate with no manual item and
+// no middleware: has becomes a config condition, permanent becomes 308.
+func TestNextConfigDigitalDesignsRedirectsTranslate(t *testing.T) {
+	rep := scanConfig(t, map[string]string{"next.config.ts": ddNextConfig})
+	for _, m := range rep.Manual {
+		if m.Source == "next.config.ts" {
+			t.Errorf("unexpected manual item: %+v", m)
+		}
+	}
+	body := configBody(t, rep)
+	for _, want := range []string{
+		`"source": "/store"`, `"type": "query"`, `"key": "vehicle"`, `"key": "category"`, `"key": "q"`,
+		`"statusCode": 308`, `/store/:slug((?!compare$)[^/]+)`, `"destination": "/templates/:slug"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("config lacks %s:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, `"permanent"`) {
+		t.Errorf("config should carry statusCode, not permanent:\n%s", body)
+	}
+	if findPlan(rep, "middleware.ts") != nil || findPlan(rep, "src/middleware.ts") != nil {
+		t.Errorf("a middleware was created although every rule is expressible")
+	}
+	// The written config loads and keeps every rule.
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "krate.config.ts"), []byte(loadableConfig(body)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(root)
+	if err != nil {
+		t.Fatalf("migrated config does not load: %v", err)
+	}
+	if len(cfg.Redirects) != 6 || cfg.Redirects[2].Has[0].Key != "vehicle" || cfg.Redirects[5].Status() != 308 {
+		t.Errorf("redirects after load: %+v", cfg.Redirects)
+	}
+}
+
+func TestNextConfigRedirectStatusCodes(t *testing.T) {
+	rep := scanConfig(t, map[string]string{"next.config.js": `module.exports = {
+  redirects: async () => [
+    { source: '/a', destination: '/x', permanent: false },
+    { source: '/b', destination: '/x', permanent: true },
+    { source: '/c', destination: '/x', statusCode: 303 },
+    { source: '/d', destination: '/x', statusCode: 301 },
+  ],
 };`})
 	body := configBody(t, rep)
-	if strings.Contains(body, `"/store"`) {
-		t.Fatalf("conditional redirect emitted unconditionally:\n%s", body)
+	re := regexp.MustCompile(`(?s)"source": "/(\w)",\s*"destination": "/x",\s*"statusCode": (\d+)`)
+	got := map[string]string{}
+	for _, m := range re.FindAllStringSubmatch(body, -1) {
+		got[m[1]] = m[2]
 	}
-	if !strings.Contains(body, `"/old"`) {
-		t.Fatalf("unconditional redirect lost:\n%s", body)
-	}
-	for _, want := range []string{`has query "ref"`, `has query "utm_source"`, `missing cookie "seen" = "1"`} {
-		found := false
-		for _, m := range rep.Manual {
-			if strings.Contains(m.Reason, `"/store"`) && strings.Contains(m.Reason, want) && strings.Contains(m.Hint, "middleware.ts") {
-				found = true
-			}
-		}
-		if !found {
-			t.Errorf("no manual item for %s: %+v", want, rep.Manual)
+	want := map[string]string{"a": "307", "b": "308", "c": "303", "d": "301"}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("redirect /%s status = %q, want %s\n%s", k, got[k], v, body)
 		}
 	}
 }
 
-func TestNextConfigHasRewriteAndHeaderRuleNotEmitted(t *testing.T) {
+func TestNextConfigConditionsOnRewritesAndHeaders(t *testing.T) {
 	rep := scanConfig(t, map[string]string{"next.config.js": `module.exports = {
   rewrites: async () => [
     { source: '/a', destination: '/b', has: [{ type: 'header', key: 'x-beta' }] },
-    { source: '/c', destination: '/d' },
+    { source: '/c', destination: '/d', missing: [{ type: 'cookie', key: 'seen', value: '1' }] },
   ],
   headers: async () => [
     { source: '/p', has: [{ type: 'host', value: 'example.com' }], headers: [{ key: 'X-A', value: '1' }] },
     { source: '/q', headers: [{ key: 'X-B', value: '2' }] },
   ],
 };`})
+	for _, m := range rep.Manual {
+		if m.Source == "next.config.js" {
+			t.Errorf("unexpected manual item: %+v", m)
+		}
+	}
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "krate.config.ts"), []byte(loadableConfig(configBody(t, rep))), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Rewrites) != 2 || cfg.Rewrites[0].Has[0].Key != "x-beta" || cfg.Rewrites[1].Missing[0].Value != "1" {
+		t.Errorf("rewrites: %+v", cfg.Rewrites)
+	}
+	if len(cfg.Headers) != 2 || cfg.Headers[0].Has[0].Type != "host" || cfg.Headers[0].Has[0].Value != "example.com" || cfg.Headers[1].Has != nil {
+		t.Errorf("headers: %+v", cfg.Headers)
+	}
+}
+
+func TestNextConfigUnrunnableRegexRewriteAndHeaderAreManual(t *testing.T) {
+	rep := scanConfig(t, map[string]string{"next.config.js": `module.exports = {
+  rewrites: async () => [
+    { source: '/a', destination: '/b', has: [{ type: 'query', key: 'k', value: '(?<=x)y' }] },
+  ],
+  headers: async () => [
+    { source: '/h/:p((?<=a)b)', headers: [{ key: 'X-A', value: '1' }] },
+  ],
+};`})
+	if !hasManual(rep, "next.config.js", `rewrites[0] source "/a" uses a regex feature Go cannot run`) {
+		t.Errorf("rewrite not reported: %+v", rep.Manual)
+	}
+	if !hasManual(rep, "next.config.js", `headers[0] source "/h/:p((?<=a)b)" uses a regex feature Go cannot run`) {
+		t.Errorf("header not reported: %+v", rep.Manual)
+	}
 	body := configBody(t, rep)
-	for _, bad := range []string{`"/a"`, `"/p"`, `"X-A"`} {
-		if strings.Contains(body, bad) {
-			t.Errorf("conditional rule leaked (%s):\n%s", bad, body)
+	if strings.Contains(body, `"/a"`) || strings.Contains(body, `X-A`) {
+		t.Errorf("an untranslatable rule leaked into the config:\n%s", body)
+	}
+}
+
+// A value regex Go cannot run moves that one rule into the middleware, in a
+// marked block, without a manual item.
+func TestNextConfigLookbehindRedirectGoesToMiddleware(t *testing.T) {
+	rep := scanConfig(t, map[string]string{
+		"next.config.js": `module.exports = {
+  redirects: async () => [
+    { source: '/old', destination: '/new', permanent: true },
+    { source: '/store/:slug', has: [{ type: 'header', key: 'x-ref', value: '(?<=pre-)(?<id>\\d+)' }], destination: '/t/:slug/:id', permanent: false },
+  ],
+};`,
+		"middleware.ts": `import { NextResponse } from 'next/server';
+export function middleware(request: Request) {
+  return NextResponse.next();
+}`,
+	})
+	for _, m := range rep.Manual {
+		if m.Source == "next.config.js" || m.Source == "middleware.ts" {
+			t.Errorf("unexpected manual item: %+v", m)
 		}
 	}
-	for _, want := range []string{`"/c"`, `"/q"`, `"X-B"`} {
-		if !strings.Contains(body, want) {
-			t.Errorf("static rule lost (%s):\n%s", want, body)
+	body := configBody(t, rep)
+	if !strings.Contains(body, `"/old"`) || strings.Contains(body, `/store/:slug`) {
+		t.Errorf("config should keep /old only:\n%s", body)
+	}
+	mw := findPlan(rep, "middleware.ts")
+	if mw == nil {
+		t.Fatal("middleware.ts not planned")
+	}
+	src := string(mw.Content)
+	wants := []string{
+		"// krate migrate: next.config redirects[1] (a regex Go cannot run in krate.config.ts)",
+		"__krateNextRedirect(request, { pattern: \"^/store(?:/([^/#?]+?))/?$\", names: [\"slug\"], mods: {}, destination: \"/t/:slug/:id\", status: 307,",
+		`"value":"(?<=pre-)(?<id>\\d+)"`,
+		"if (__krateRedirect) return __krateRedirect;",
+		"// krate migrate: next.config redirect helper (begin)",
+	}
+	for _, w := range wants {
+		if !strings.Contains(src, w) {
+			t.Errorf("middleware lacks %q:\n%s", w, src)
 		}
 	}
-	if !hasManual(rep, "next.config.js", `"/a" is conditional (has header "x-beta")`) {
-		t.Errorf("rewrite condition not reported: %+v", rep.Manual)
+	// The block is the first statement of the function.
+	fn := src[strings.Index(src, "export function middleware"):]
+	if i, j := strings.Index(fn, "krate migrate: next.config redirects[1]"), strings.Index(fn, "NextResponse"); i < 0 || (j >= 0 && j < i) {
+		t.Errorf("the redirect block is not at the start of the function:\n%s", fn)
 	}
-	if !hasManual(rep, "next.config.js", `"/p" is conditional (has host = "example.com")`) {
-		t.Errorf("header condition not reported: %+v", rep.Manual)
+	if !hasInfo(rep, "redirects[1]") {
+		t.Errorf("no info line: %+v", rep.Info)
 	}
+}
+
+func TestNextConfigLookbehindRedirectCreatesMiddleware(t *testing.T) {
+	rep := scanConfig(t, map[string]string{"next.config.js": `module.exports = {
+  redirects: async () => [
+    { source: '/x', has: [{ type: 'cookie', key: 'c', value: '(?<=a)b' }], destination: '/y', permanent: true },
+  ],
+};`})
+	mw := findPlan(rep, "middleware.ts")
+	if mw == nil {
+		t.Fatal("middleware.ts not created")
+	}
+	src := string(mw.Content)
+	if !strings.Contains(src, "export function middleware(request: Request)") || !strings.Contains(src, "status: 308") || !strings.Contains(src, "pattern: \"^/x$\"") {
+		t.Errorf("unexpected middleware:\n%s", src)
+	}
+	for _, m := range rep.Manual {
+		if m.Source == "next.config.js" {
+			t.Errorf("unexpected manual item: %+v", m)
+		}
+	}
+}
+
+func TestNextConfigLookbehindRedirectManualWhenMiddlewareUneditable(t *testing.T) {
+	rep := scanConfig(t, map[string]string{
+		"next.config.js": `module.exports = {
+  redirects: async () => [
+    { source: '/x', has: [{ type: 'cookie', key: 'c', value: '(?<=a)b' }], destination: '/y', permanent: true },
+  ],
+};`,
+		"middleware.ts": `export const middleware = (request: Request) => undefined;`,
+	})
+	if !hasManual(rep, "next.config", `redirects[0] source "/x" uses a regex Go cannot run`) {
+		t.Errorf("want a manual item: %+v", rep.Manual)
+	}
+}
+
+func hasInfo(rep *Report, substring string) bool {
+	for _, i := range rep.Info {
+		if strings.Contains(i, substring) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestNextConfigDuplicateRulesWarn(t *testing.T) {

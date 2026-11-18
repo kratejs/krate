@@ -97,11 +97,17 @@ The first pass:
   prove static is reported as manual work on its own; the other keys still
   translate, and so does each rule: in a `headers()` array, the static entries
   translate while a computed one (a helper call, `value: compute()`) is reported
-  with its source path. A redirect, rewrite or header rule with `has` or `missing`
-  is never translated, because Krate matches on the path only and an
-  unconditional copy would apply to every request (a guarded `/store` redirect
-  would send `/store` away for everyone); each is reported with its source and
-  condition, and the hint points at `middleware.ts`. Identical duplicate rules in
+  with its source path. `has` and `missing` conditions
+  (query, header, cookie, host) translate to the same conditions in the Krate
+  config, and a redirect is written with `statusCode: 308` for `permanent: true`
+  and `307` for `false`, the statuses Next sends. Next sources keep their syntax,
+  including a leading negative lookahead in a parameter such as
+  `/store/:slug((?!compare$)[^/]+)`. A redirect whose regex Go's RE2 engine
+  cannot run (lookbehind, a backreference) is written as a marked block
+  (`// krate migrate: next.config redirects[i]`) at the start of the middleware
+  function, creating `middleware.ts` when there is none, and an info line says
+  so; a rewrite or header rule like that, or a middleware whose signature cannot
+  be edited safely, is reported as manual work. Identical duplicate rules in
   the output are warned about. When headers could not be translated and the
   config (or a local module it imports) mentions `Content-Security-Policy`,
   `Strict-Transport-Security`, `X-Frame-Options` or similar, a separate item says

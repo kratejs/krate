@@ -12,6 +12,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/lexer"
 	"github.com/kratejs/krate/packages/compiler/internal/parser"
+	"github.com/kratejs/krate/packages/compiler/internal/routesource"
 )
 
 // nextConfigData is the subset of next.config.* that maps cleanly onto Krate.
@@ -41,6 +42,9 @@ type nextConfigData struct {
 	// EnvPrefix is set by the migrator when the app reads NEXT_PUBLIC_
 	// variables; it becomes envPrefix.
 	EnvPrefix []string `json:"-"`
+	// MiddlewareRedirects are redirects the config cannot express; the
+	// migrator injects them at the start of the middleware.
+	MiddlewareRedirects []middlewareRedirect `json:"-"`
 	// Tailwind is true when the project's PostCSS config runs Tailwind.
 	Tailwind bool `json:"-"`
 	// NoCompress is set by `compress: false`. Next.js compresses responses by
@@ -48,20 +52,39 @@ type nextConfigData struct {
 	NoCompress bool `json:"-"`
 }
 
+// nextRedirect is written with an explicit statusCode (308 for Next's
+// permanent: true, 307 for false) so the migrated app answers like Next.
 type nextRedirect struct {
-	Source      string `json:"source"`
-	Destination string `json:"destination"`
-	Permanent   bool   `json:"permanent"`
+	Source      string                  `json:"source"`
+	Destination string                  `json:"destination"`
+	StatusCode  int                     `json:"statusCode,omitempty"`
+	Has         []routesource.Condition `json:"has,omitempty"`
+	Missing     []routesource.Condition `json:"missing,omitempty"`
 }
 
 type nextRewrite struct {
-	Source      string `json:"source"`
-	Destination string `json:"destination"`
+	Source      string                  `json:"source"`
+	Destination string                  `json:"destination"`
+	Has         []routesource.Condition `json:"has,omitempty"`
+	Missing     []routesource.Condition `json:"missing,omitempty"`
 }
 
 type nextHeaderRule struct {
-	Source  string            `json:"source"`
-	Headers map[string]string `json:"headers"`
+	Source  string                  `json:"source"`
+	Headers map[string]string       `json:"headers"`
+	Has     []routesource.Condition `json:"has,omitempty"`
+	Missing []routesource.Condition `json:"missing,omitempty"`
+}
+
+// middlewareRedirect is a redirect whose source or has/missing regex Go
+// cannot run. It is written into the middleware instead of the config.
+type middlewareRedirect struct {
+	Index       int
+	Source      string
+	Destination string
+	Status      int
+	Has         []routesource.Condition
+	Missing     []routesource.Condition
 }
 
 var nextConfigWrapper = regexp.MustCompile(`(?m)(?:export\s+default|module\.exports\s*=)\s*[A-Za-z_$][\w$]*(?:\.[\w$]+)*\s*\(`)
@@ -79,9 +102,9 @@ type nextConfigNotes struct {
 
 // readNextConfig extracts static redirects/rewrites/headers/basePath from a
 // next.config file. Each rule and key is translated on its own: anything it
-// cannot prove static is reported in notes and the rest still translates. A
-// rule guarded by has/missing is never emitted, because Krate matches on the
-// path only and an unconditional copy would be looser than the original. ok is
+// cannot prove static is reported in notes and the rest still translates.
+// has/missing conditions become config conditions; a redirect whose regex Go
+// cannot run is recorded in MiddlewareRedirects. ok is
 // false only when the config as a whole is not a static default export object
 // (function configs, plugin wrappers, computed values).
 func readNextConfig(path string) (data nextConfigData, notes nextConfigNotes, ok bool) {
@@ -141,6 +164,7 @@ func readNextConfig(path string) (data nextConfigData, notes nextConfigNotes, ok
 			notes.Skipped = append(notes.Skipped, "redirects ("+reason+")")
 		}
 		out.Redirects = rules
+		out.MiddlewareRedirects = rc.fallbacks
 		notes.Manual = append(notes.Manual, items...)
 	}
 	if v := prop(obj, "rewrites"); v != nil {
