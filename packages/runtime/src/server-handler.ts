@@ -95,7 +95,7 @@ export interface HandlerConfig {
   maxBodyBytes: number;
   /** Request body cap for API routes and actions, bytes. */
   maxAPIBodyBytes: number;
-  redirects: Array<{ source: string; destination: string; permanent?: boolean; basePath?: boolean }>;
+  redirects: Array<{ source: string; destination: string; permanent?: boolean; statusCode?: number; basePath?: boolean }>;
   rewrites: Array<{ source: string; destination: string }>;
   headers: Array<{ source: string; headers: Record<string, string> }>;
   /** Resolved security headers; an empty string means "do not send". */
@@ -1302,7 +1302,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     for (const rd of rules) {
       if (matchRedirect(p, rd.source)) {
         const dest = rewriteDestination(p, rd.source, rd.destination);
-        return goRedirect(dest, p, rs.method, rd.permanent ? 301 : 302, rs.res);
+        return goRedirect(dest, p, rs.method, rd.statusCode || (rd.permanent ? 301 : 302), rs.res);
       }
     }
     return null;

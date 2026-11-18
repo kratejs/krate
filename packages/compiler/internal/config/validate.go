@@ -121,6 +121,11 @@ func (c *Config) Validate() (warnings []string, err error) {
 	if c.Server.TrustedProxies < 0 {
 		return nil, fmt.Errorf("server.trustedProxies must be >= 0, got %d", c.Server.TrustedProxies)
 	}
+	for i, rd := range c.Redirects {
+		if rd.StatusCode != 0 && !IsRedirectStatus(rd.StatusCode) {
+			return nil, fmt.Errorf("redirects[%d].statusCode must be 301, 302, 303, 307 or 308, got %d", i, rd.StatusCode)
+		}
+	}
 	if !c.Site.isZero() && c.SEO != (SEOConfig{}) {
 		warnings = append(warnings, "both `site` and `seo` are set; `site` wins - migrate to `site` and remove `seo`")
 	}

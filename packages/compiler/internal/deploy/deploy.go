@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
@@ -168,10 +169,7 @@ func emitRedirects(cfg *config.Config, outDir string) ([]string, error) {
 			fmt.Fprintf(os.Stderr, "Warning: redirect %q uses a regex parameter, which _redirects cannot express; it was left out (krate start and Vercel support it)\n", r.Source)
 			continue
 		}
-		status := "302"
-		if r.Permanent {
-			status = "301"
-		}
+		status := strconv.Itoa(r.Status())
 		src, dst := translateRule(r.Source, r.Destination, false)
 		if rb := ruleBase(base, r); rb != "" {
 			src, dst = sitepath.Join(rb, src), sitepath.Join(rb, dst)
@@ -274,8 +272,10 @@ func emitVercel(cfg *config.Config, root, outDir string) ([]string, error) {
 	type vRedirect struct {
 		Source      string `json:"source"`
 		Destination string `json:"destination"`
-		// Always written: Vercel treats a missing "permanent" as true (308).
-		Permanent bool `json:"permanent"`
+		// Written unless statusCode is: Vercel treats a missing "permanent"
+		// as true (308).
+		Permanent  *bool `json:"permanent,omitempty"`
+		StatusCode int   `json:"statusCode,omitempty"`
 	}
 	type vRewrite struct {
 		Source      string `json:"source"`
@@ -291,7 +291,12 @@ func emitVercel(cfg *config.Config, root, outDir string) ([]string, error) {
 		for _, r := range cfg.Redirects {
 			src, dst := translateRule(r.Source, r.Destination, true)
 			rb := ruleBase(base, r)
-			rs = append(rs, vRedirect{Source: sitepath.Join(rb, src), Destination: sitepath.Join(rb, dst), Permanent: r.Permanent})
+			vr := vRedirect{Source: sitepath.Join(rb, src), Destination: sitepath.Join(rb, dst), StatusCode: r.StatusCode}
+			if r.StatusCode == 0 {
+				perm := r.Permanent
+				vr.Permanent = &perm
+			}
+			rs = append(rs, vr)
 		}
 		doc["redirects"] = rs
 	}

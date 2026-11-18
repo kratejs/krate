@@ -156,11 +156,7 @@ func serveConfigRedirect(w http.ResponseWriter, r *http.Request, p string, rules
 		if !matchRedirect(p, rd.Source) {
 			continue
 		}
-		status := http.StatusFound
-		if rd.Permanent {
-			status = http.StatusMovedPermanently
-		}
-		http.Redirect(w, r, rewriteDestination(p, rd.Source, rd.Destination), status)
+		http.Redirect(w, r, rewriteDestination(p, rd.Source, rd.Destination), rd.Status())
 		return true
 	}
 	return false

@@ -23,6 +23,7 @@ redirects: [
 | `source` | The path to match (supports `*` splats and `:param`, `:param*`, `:param+`, `:param?` segments) |
 | `destination` | Where to send the visitor |
 | `permanent` | `true` -> `301`, `false` (default) -> `302` |
+| `statusCode` | The exact status: `301`, `302`, `303`, `307` or `308`; overrides `permanent`. `krate migrate nextjs` writes `308`/`307`, the codes Next uses, which keep the method and body |
 | `basePath` | `false` matches `source` and sends `destination` exactly as written, outside the [base path](/docs/reference/config/#base-path). Default `true` |
 
 `:param*` matches zero or more segments, `:param+` one or more, `:param?` one

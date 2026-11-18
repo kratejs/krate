@@ -370,6 +370,9 @@ type Redirect struct {
 	Source      string `json:"source"`      // e.g. "/old-page"
 	Destination string `json:"destination"` // e.g. "/new-page"
 	Permanent   bool   `json:"permanent"`   // true = 301, false = 302
+	// StatusCode overrides Permanent: 301, 302, 303, 307 or 308 (Next's
+	// permanent redirects are 308).
+	StatusCode int `json:"statusCode,omitempty"`
 	// BasePath false matches Source and sends Destination as written, outside
 	// the base path. Unset or true puts both under the base path.
 	BasePath *bool `json:"basePath,omitempty"`
@@ -377,6 +380,27 @@ type Redirect struct {
 
 // InBasePath reports whether the base path applies to this rule.
 func (r Redirect) InBasePath() bool { return r.BasePath == nil || *r.BasePath }
+
+// Status is the HTTP status the rule answers with: StatusCode when set, else
+// 301 for a permanent rule and 302 otherwise.
+func (r Redirect) Status() int {
+	if r.StatusCode != 0 {
+		return r.StatusCode
+	}
+	if r.Permanent {
+		return 301
+	}
+	return 302
+}
+
+// IsRedirectStatus reports whether code is a status a redirect rule may use.
+func IsRedirectStatus(code int) bool {
+	switch code {
+	case 301, 302, 303, 307, 308:
+		return true
+	}
+	return false
+}
 
 type Rewrite struct {
 	Source      string `json:"source"`      // e.g. "/legacy/*"

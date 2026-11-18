@@ -188,6 +188,8 @@ export interface RedirectConfig {
   destination: string;
   /** true = 301, false = 302 (default). */
   permanent?: boolean;
+  /** The exact status, overriding `permanent` (Next's permanent redirects are 308). */
+  statusCode?: 301 | 302 | 303 | 307 | 308;
   /**
    * false matches `source` and sends `destination` exactly as written, outside
    * the base path. Default true: both live under the base path.

@@ -115,6 +115,7 @@ func (rc *ruleCtx) redirects(v ast.Expr) (rules []nextRedirect, items []ManualIt
 			continue
 		}
 		perm := false
+		status := 0
 		computed := false
 		if p := prop(obj, "permanent"); p != nil {
 			if b, ok := boolValue(p); ok {
@@ -126,6 +127,7 @@ func (rc *ruleCtx) redirects(v ast.Expr) (rules []nextRedirect, items []ManualIt
 		if sc := prop(obj, "statusCode"); sc != nil {
 			if n, ok := intValue(sc); ok {
 				perm = n == 301 || n == 308
+				status = n
 			} else {
 				computed = true
 			}
@@ -134,7 +136,14 @@ func (rc *ruleCtx) redirects(v ast.Expr) (rules []nextRedirect, items []ManualIt
 			items = append(items, ManualItem{Source: rc.file, Reason: fmt.Sprintf("redirects[%d] source %q has a computed permanent/statusCode; it was not translated", i, source), Hint: "write the rule into krate.config.ts by hand"})
 			continue
 		}
-		rules = append(rules, nextRedirect{Source: source, Destination: dest, Permanent: perm})
+		if status == 0 {
+			// Next answers 308/307 (method and body kept), not 301/302.
+			status = 307
+			if perm {
+				status = 308
+			}
+		}
+		rules = append(rules, nextRedirect{Source: source, Destination: dest, Permanent: perm, StatusCode: status})
 	}
 	return rules, items, ""
 }

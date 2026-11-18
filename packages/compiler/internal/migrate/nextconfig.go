@@ -52,6 +52,9 @@ type nextRedirect struct {
 	Source      string `json:"source"`
 	Destination string `json:"destination"`
 	Permanent   bool   `json:"permanent"`
+	// StatusCode keeps Next's status: 308 for permanent, 307 otherwise, or
+	// the rule's own statusCode.
+	StatusCode int `json:"statusCode,omitempty"`
 }
 
 type nextRewrite struct {

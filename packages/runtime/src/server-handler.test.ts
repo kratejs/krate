@@ -8,7 +8,11 @@ const config: HandlerConfig = {
   trustProxy: true,
   maxBodyBytes: 1 << 20,
   maxAPIBodyBytes: 1 << 20,
-  redirects: [{ source: "/old", destination: "/new", permanent: true }],
+  redirects: [
+    { source: "/old", destination: "/new", permanent: true },
+    { source: "/moved", destination: "/new", permanent: true, statusCode: 308 },
+    { source: "/store/:slug((?!compare$)[^/]+)", destination: "/templates/:slug", statusCode: 308 },
+  ],
   rewrites: [],
   headers: [{ source: "/new", headers: { "X-Rule": "yes" } }],
   security: { nosniff: true, frameOptions: "DENY", referrerPolicy: "no-referrer", permissionsPolicy: "", hsts: "", csp: "" },
@@ -85,6 +89,9 @@ describe("createKrateHandler", () => {
     expect(r.headers.get("x-frame-options")).toBe("DENY");
     expect(r.headers.get("permissions-policy")).toBeNull();
     expect((await get("/new")).headers.get("x-rule")).toBe("yes");
+    expect((await get("/moved")).status).toBe(308);
+    const re = await get("/store/some-template");
+    expect([re.status, re.headers.get("location")]).toEqual([308, "/templates/some-template"]);
   });
 
   it("middleware request header overrides reach the route and stay off the response", async () => {

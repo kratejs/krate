@@ -304,3 +304,30 @@ func TestMigrateNextCompressBecomesPrecompression(t *testing.T) {
 		t.Errorf("compress: false still precompresses:\n%s", got)
 	}
 }
+
+// Migrated redirects keep Next's status codes (308/307, or the rule's own
+// statusCode) and a regex parameter is copied as written.
+func TestNextConfigRedirectStatusAndRegexSource(t *testing.T) {
+	rep := scanConfig(t, map[string]string{"next.config.ts": `export default {
+  async redirects() {
+    return [
+      { source: '/store/plans', destination: '/store', permanent: true },
+      { source: '/tmp', destination: '/x', permanent: false },
+      { source: '/see', destination: '/other', statusCode: 303 },
+      { source: '/store/:slug((?!compare$)[^/]+)', destination: '/templates/:slug', permanent: true },
+    ];
+  },
+};`})
+	body := configBody(t, rep)
+	compact := strings.Join(strings.Fields(body), "")
+	for _, want := range []string{
+		`"source":"/store/plans","destination":"/store","permanent":true,"statusCode":308`,
+		`"source":"/tmp","destination":"/x","permanent":false,"statusCode":307`,
+		`"source":"/see","destination":"/other","permanent":false,"statusCode":303`,
+		`"source":"/store/:slug((?!compare$)[^/]+)","destination":"/templates/:slug"`,
+	} {
+		if !strings.Contains(compact, want) {
+			t.Errorf("config missing %s:\n%s", want, body)
+		}
+	}
+}

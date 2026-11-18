@@ -671,11 +671,15 @@ it with `export const lang = "fr"` (or `export const config = { lang: "fr" }`).
 ```typescript
 redirects: [
   { source: "/old-page", destination: "/new-page", permanent: true },
+  { source: "/store/:slug((?!compare$)[^/]+)", destination: "/templates/:slug", statusCode: 308 },
 ]
 rewrites: [
   { source: "/docs/:path*", destination: "/documentation/:path*" },
 ]
 ```
+
+`statusCode` (301, 302, 303, 307 or 308) overrides `permanent`, and a parameter
+can carry a regular expression; see [Redirects & Rewrites](/docs/features/redirects-rewrites/).
 
 ## SEO & robots
 
