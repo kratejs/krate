@@ -465,6 +465,8 @@ host code runs in the native process. Names and options may change between relea
     or a page. Krate's own immutable `Cache-Control` on content-hashed assets is kept.
   - A source containing `:`, `(` or `{` that never matched before now matches (`/:path*` in `headers`,
     `/store/:slug(regex)` in redirects).
+  - The server handler of `krate deploy --target node` and the other server targets follows the same
+    rules (sources, `has`/`missing`, `statusCode`, query passthrough, order, header precedence).
   - `krate deploy` writes `statusCode` to `vercel.json` and `_redirects`; rules with `has`/`missing`
     go to Vercel and are skipped, with a note, in `_redirects` and `_headers`.
 - `krate migrate nextjs` keeps `NEXT_PUBLIC_` names in source and writes

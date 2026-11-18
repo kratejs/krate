@@ -185,183 +185,7 @@ export function isHiddenPath(urlPath: string): boolean {
   return decoded.split(/[/\\]/).filter(Boolean).some(isHiddenName);
 }
 
-// Redirect and rewrite rules
-
-function splitURLPath(p: string): string[] {
-  const t = trimSlashes(p);
-  return t === "" ? [] : t.split("/");
-}
-
-function splitParamModifier(name: string): [string, string] {
-  const n = name.length;
-  if (n > 0) {
-    const c = name[n - 1];
-    if (c === "*" || c === "+" || c === "?") return [name.slice(0, n - 1), c];
-  }
-  return [name, ""];
-}
-
-export interface RuleMatch {
-  params: Record<string, string>;
-  mods: Record<string, string>;
-}
-
-/**
- * Matches a request path against a redirect/rewrite source: exact, a trailing
- * "/*" wildcard (param "splat"), or named segments with the "*", "+" and "?"
- * modifiers.
- */
-export function matchRedirectParamsMods(path: string, source: string): RuleMatch | null {
-  const params: Record<string, string> = {};
-  const mods: Record<string, string> = {};
-  if (source === path) return { params, mods };
-  if (!/[*:]/.test(source)) return null;
-  if (source.endsWith("/*")) {
-    const prefix = source.slice(0, -2);
-    if (path === prefix) {
-      params.splat = "";
-      return { params, mods };
-    }
-    if (!path.startsWith(prefix + "/")) return null;
-    params.splat = path.slice(prefix.length).replace(/^\//, "");
-    return { params, mods };
-  }
-  const sourceParts = splitURLPath(source);
-  const pathParts = splitURLPath(path);
-  let pi = 0;
-  for (const part of sourceParts) {
-    if (part.startsWith(":")) {
-      const [name, mod] = splitParamModifier(part.slice(1));
-      mods[name] = mod;
-      switch (mod) {
-        case "*":
-          params[name] = pathParts.slice(pi).join("/");
-          return { params, mods };
-        case "+":
-          if (pi >= pathParts.length) return null;
-          params[name] = pathParts.slice(pi).join("/");
-          return { params, mods };
-        case "?":
-          if (pi < pathParts.length) {
-            params[name] = pathParts[pi];
-            pi++;
-          } else {
-            params[name] = "";
-          }
-          continue;
-      }
-      if (pi >= pathParts.length) return null;
-      params[name] = pathParts[pi];
-      pi++;
-      continue;
-    }
-    if (pi >= pathParts.length || part !== pathParts[pi]) return null;
-    pi++;
-  }
-  if (pi !== pathParts.length) return null;
-  return { params, mods };
-}
-
-export function matchRedirect(path: string, source: string): boolean {
-  return matchRedirectParamsMods(path, source) !== null;
-}
-
-/** url.PathEscape of Go: segment-escapes everything but unreserved and $&+=:@. */
-export function pathEscape(s: string): string {
-  return encodeURIComponent(s)
-    .replace(/[!'()*]/g, (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase())
-    .replace(/%(24|26|2B|3D|3A|40)/g, (_m, h: string) => String.fromCharCode(parseInt(h, 16)));
-}
-
-/** Percent-encodes a matched (decoded) value segment by segment, keeping "/" between segments. */
-export function escapeRedirectValue(v: string): string {
-  if (v === "") return "";
-  return v.split("/").map(pathEscape).join("/");
-}
-
-function replaceDestParams(destination: string, params: Record<string, string>, mods: Record<string, string>): string {
-  const re = /:([A-Za-z_][A-Za-z0-9_]*)/g;
-  let out = "";
-  let last = 0;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(destination)) !== null) {
-    const name = m[1];
-    if (!Object.prototype.hasOwnProperty.call(params, name)) continue;
-    let end = m.index + m[0].length;
-    const mod = mods[name];
-    if (mod && end < destination.length && destination[end] === mod) end++;
-    out += destination.slice(last, m.index) + escapeRedirectValue(params[name]);
-    last = end;
-    re.lastIndex = end;
-  }
-  return out + destination.slice(last);
-}
-
-/** Keeps a substituted path destination on-site (no "//host" or "/\\host" results). */
-export function sanitizeRedirectTarget(configured: string, out: string): string {
-  if (!configured.startsWith("/") || configured.startsWith("//") || configured.startsWith("/\\")) return out;
-  out = out.replace(/[\u0000-\u001f\u007f]/g, (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0"));
-  const trimmed = out.replace(/^[/\\]+/, "");
-  return trimmed !== out ? "/" + trimmed : out;
-}
-
-/** Fills ":splat" and ":name" placeholders of a destination from the matched path. */
-export function rewriteDestination(path: string, source: string, destination: string): string {
-  const m = matchRedirectParamsMods(path, source);
-  if (!m) return destination;
-  let out: string;
-  if (Object.prototype.hasOwnProperty.call(m.params, "splat")) {
-    const splat = m.params.splat;
-    if (destination.includes(":splat")) out = destination.split(":splat").join(escapeRedirectValue(splat));
-    else if (splat !== "") out = destination.replace(/\/+$/, "") + "/" + escapeRedirectValue(splat);
-    else out = destination;
-  } else {
-    out = replaceDestParams(destination, m.params, m.mods);
-  }
-  return sanitizeRedirectTarget(destination, out);
-}
-
-// Header rules
-
-/** path.Match for slash paths: "*" and "?" do not cross "/", "[...]" classes. */
-export function pathMatch(pattern: string, name: string): boolean {
-  let re = "^";
-  for (let i = 0; i < pattern.length; i++) {
-    const c = pattern[i];
-    if (c === "*") re += "[^/]*";
-    else if (c === "?") re += "[^/]";
-    else if (c === "[") {
-      const end = pattern.indexOf("]", i + 1);
-      if (end < 0) return false;
-      let cls = pattern.slice(i + 1, end);
-      let neg = false;
-      if (cls.startsWith("^")) {
-        neg = true;
-        cls = cls.slice(1);
-      }
-      re += "[" + (neg ? "^" : "") + cls.replace(/\\/g, "\\\\") + "]";
-      i = end;
-    } else if (c === "\\" && i + 1 < pattern.length) {
-      re += pattern[++i].replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
-    } else {
-      re += c.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
-    }
-  }
-  try {
-    return new RegExp(re + "$").test(name);
-  } catch {
-    return false;
-  }
-}
-
-/** Exact path, trailing "*" prefix, or path.Match glob (config `headers[].source`). */
-export function headerSourceMatches(pattern: string, p: string): boolean {
-  pattern = pattern.trim();
-  if (pattern === "") return false;
-  if (!pattern.includes("*")) return p === pattern;
-  if (pattern.endsWith("*")) return p.startsWith(pattern.slice(0, -1));
-  return pathMatch(pattern, p);
-}
+// Redirect, rewrite and header rule matching lives in route-source.ts.
 
 // Dynamic SSG templates
 
@@ -412,8 +236,11 @@ export function goJSON(obj: Record<string, string>): string {
 
 // Hashed assets
 
+/** Cache-Control of a content-hashed asset; a user headers rule never replaces it. */
+export const IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, immutable";
+
 export function staticCacheControl(urlPath: string, hashed: ReadonlySet<string>): string {
-  if (hashed.has(urlPath)) return "public, max-age=31536000, immutable";
+  if (hashed.has(urlPath)) return IMMUTABLE_CACHE_CONTROL;
   return "no-cache";
 }
 
