@@ -70,6 +70,10 @@ type PageResult struct {
 	// recorded, in which case HydrationJS is scanned instead.
 	RuntimeRefs []string
 	JSFile      string
+	// SharedScopes are the component scope templates the page script calls;
+	// SharedJSFiles the shared chunks holding them (see sharedchunks.go).
+	SharedScopes  []renderer.SharedScope
+	SharedJSFiles []string
 	// CSSFiles are the page's stylesheets in cascade order (see writePageCSS).
 	CSSFiles       []string
 	CSSModernFiles []string // modern-only stylesheets for the UA sibling (hybrid+userAgent)
@@ -153,6 +157,9 @@ type PageResult struct {
 }
 
 type Builder struct {
+	// shareAllScopes makes page-local components hydrate from shared chunks
+	// too, so tests can run every scope through the shared path.
+	shareAllScopes bool
 	// runtimeFeatures are the optional runtime features the last runtime
 	// chunk included; the output audit test reads it.
 	runtimeFeatures []string
@@ -936,6 +943,12 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 		}
 	}
 
+	// Dev builds keep component scopes in the page script; a subset build
+	// with shared scopes still writes chunks for the pages it built.
+	if err := b.writeSharedChunks(results); err != nil {
+		return results, err
+	}
+
 	// In-memory HTML generation + string swap + single disk write per page
 	b.writeHTMLPages(results, globalCSS, runtimeJS)
 
@@ -1428,6 +1441,12 @@ func (b *Builder) BuildAll() error {
 		failureErrs = append(failureErrs, err)
 	}
 	wl.Lap("islands")
+
+	// Hydration code of the components several pages import.
+	if err := b.writeSharedChunks(results); err != nil {
+		failOutput(err)
+	}
+	wl.Lap("shared-chunks")
 
 	// In-memory HTML generation + string swap + single disk write per page
 	b.writeHTMLPages(results, globalCSS, runtimeJS)
@@ -2136,8 +2155,10 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 			// Only pages that call into the runtime load it; a static page of
 			// a site with islands elsewhere ships no JavaScript.
 			runtimeJSFile := runtimeJSFile
+			sharedJS := r.SharedJSFiles
 			if !pageNeedsRuntime(r) {
 				runtimeJSFile = ""
+				sharedJS = nil
 			}
 			chunkPreloads := b.islandPreloads(dynamicChunkURLs(r.HydrationJS, b.Cfg.BaseURLPath()))
 			chunkPreloads = append(chunkPreloads, lazyChunkPreloads(r.HydrationJS, b.Cfg.BaseURLPath())...)
@@ -2153,9 +2174,9 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 			}
 			var html string
 			if r.LoadingHTML != "" {
-				html = generateHTMLWithLoading(r.HTML, r.HeadHTML, r.ScriptHTML, r.StyleHTML, r.LoadingHTML, pageCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath(), chunkPreloads...)
+				html = generateHTMLWithLoading(r.HTML, r.HeadHTML, r.ScriptHTML, r.StyleHTML, r.LoadingHTML, pageCSS, r.JSFile, runtimeJSFile, sharedJS, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath(), chunkPreloads...)
 			} else {
-				html = generateHTML(r.HTML, r.HeadHTML, r.ScriptHTML, r.StyleHTML, pageCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath(), chunkPreloads...)
+				html = generateHTML(r.HTML, r.HeadHTML, r.ScriptHTML, r.StyleHTML, pageCSS, r.JSFile, runtimeJSFile, sharedJS, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath(), chunkPreloads...)
 			}
 
 			// Opt-in UA variants: sibling documents so `krate serve` can send a
@@ -2169,11 +2190,11 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 				baseScript := strings.ReplaceAll(r.ScriptHTML, hybridShimScriptTag(), "")
 				legacyScriptHTML := baseScript + legacyShimScriptTag()
 				if r.LoadingHTML != "" {
-					legacyHTML = generateHTMLWithLoading(r.HTML, r.HeadHTML, legacyScriptHTML, r.StyleHTML, r.LoadingHTML, legacyPageCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath(), chunkPreloads...)
-					modernHTML = generateHTMLWithLoading(r.HTML, r.HeadHTML, baseScript, r.StyleHTML, r.LoadingHTML, modernPageCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath(), chunkPreloads...)
+					legacyHTML = generateHTMLWithLoading(r.HTML, r.HeadHTML, legacyScriptHTML, r.StyleHTML, r.LoadingHTML, legacyPageCSS, r.JSFile, runtimeJSFile, sharedJS, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath(), chunkPreloads...)
+					modernHTML = generateHTMLWithLoading(r.HTML, r.HeadHTML, baseScript, r.StyleHTML, r.LoadingHTML, modernPageCSS, r.JSFile, runtimeJSFile, sharedJS, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath(), chunkPreloads...)
 				} else {
-					legacyHTML = generateHTML(r.HTML, r.HeadHTML, legacyScriptHTML, r.StyleHTML, legacyPageCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath(), chunkPreloads...)
-					modernHTML = generateHTML(r.HTML, r.HeadHTML, baseScript, r.StyleHTML, modernPageCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath(), chunkPreloads...)
+					legacyHTML = generateHTML(r.HTML, r.HeadHTML, legacyScriptHTML, r.StyleHTML, legacyPageCSS, r.JSFile, runtimeJSFile, sharedJS, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath(), chunkPreloads...)
+					modernHTML = generateHTML(r.HTML, r.HeadHTML, baseScript, r.StyleHTML, modernPageCSS, r.JSFile, runtimeJSFile, sharedJS, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath(), chunkPreloads...)
 				}
 			}
 
@@ -3054,17 +3075,32 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 	// Client-side JS scanned by CSS DCE for classes applied after hydration.
 	dceJS := append(lazyChunkSources(emitResult.LazyChunks), islandJS)
 	dceJS = append(dceJS, b.clientChunkSources(clientBoundaries, bundle.CSSModules)...)
+	var sharedScopes []renderer.SharedScope
 	if needsHydrate {
 		emitResult.TrackSources = b.Cfg.Sourcemap
+		// npm functions called by client code are bundled into the script.
+		vendor := collectVendorImports(bundle)
+		for _, rb := range b.routeStack(page) {
+			if lv, ok := layoutVendorImports.Load(rb.Path); ok {
+				vendor = append(vendor, lv.([]vendorImport)...)
+			}
+		}
+		emitResult.Share = b.shareOptions(entryModule.Path, renderMode, vendor, tree.ExternalComponents)
 		rawJS := strings.TrimSpace(renderer.GenerateNewHydrationJS(emitResult))
+		if !validSharedScopes(emitResult.SharedScopes) {
+			emitResult.Share = nil
+			rawJS = strings.TrimSpace(renderer.GenerateNewHydrationJS(emitResult))
+		}
+		sharedScopes = emitResult.SharedScopes
+		sharedJS := sharedScopesJS(sharedScopes)
 		if renderMode == RenderSSG {
 			var hlErr error
-			if rawJS, hlErr = b.attachHighlight(rawJS, emitResult.HTML); hlErr != nil {
+			if rawJS, hlErr = b.attachHighlight(rawJS, emitResult.HTML, sharedJS); hlErr != nil {
 				return nil, "", hlErr
 			}
 		}
-		b.warnShippedCollections(page, entryModule.Program, rawJS, 1)
-		dceJS = append(dceJS, rawJS)
+		b.warnShippedCollections(page, entryModule.Program, joinJS(rawJS, sharedJS), 1)
+		dceJS = append(dceJS, rawJS, sharedJS)
 		var lazyErr error
 		if rawJS, lazyErr = b.writeLazyChunks(rawJS, emitResult.LazyChunks, pageDir, outName); lazyErr != nil {
 			return nil, "", lazyErr
@@ -3074,13 +3110,6 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 		}
 		if rawJS != "" {
 			rawJS = neutralizeClientEnv(rawJS)
-			// npm functions called by client code are bundled into the script.
-			vendor := collectVendorImports(bundle)
-			for _, rb := range b.routeStack(page) {
-				if lv, ok := layoutVendorImports.Load(rb.Path); ok {
-					vendor = append(vendor, lv.([]vendorImport)...)
-				}
-			}
 			var verr error
 			if rawJS, verr = b.withVendorImports(rawJS, vendor, tree.ExternalComponents); verr != nil {
 				return nil, "", verr
@@ -3117,7 +3146,7 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 			if finalJS != rawJS {
 				minified = finalJS
 			}
-			runtimeRefs = recordRuntimeRefs(rawJS, minified, emitResult.LazyChunks)
+			runtimeRefs = withSharedRefs(recordRuntimeRefs(rawJS, minified, emitResult.LazyChunks), sharedJS)
 
 			// Write page-specific hydration code only (runtime is in a shared chunk)
 			finalJS = strings.TrimSpace(finalJS)
@@ -3189,6 +3218,7 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 		RuntimeRefs:   runtimeRefs,
 		HasJS:         hasJS,
 		JSFile:        jsFile,
+		SharedScopes:  sharedScopes,
 		HasCSS:        pageCSS != "",
 		HasCSSSignals: tree.HasCSSSignals || layoutHasSignals,
 		IsErrorPage:   isSegment,
@@ -3288,6 +3318,7 @@ func (b *Builder) tryDiskReplay(page string) (*PageResult, string, bool) {
 		RuntimeRefs:   e.RuntimeRefs,
 		HasJS:         e.HasJS,
 		JSFile:        e.JSFile,
+		SharedScopes:  e.SharedScopes,
 		HasCSS:        e.HasCSS,
 		HasCSSSignals: e.HasCSSSignals,
 		IsErrorPage:   e.IsErrorPage,
@@ -3343,6 +3374,7 @@ func (b *Builder) maybeStoreDiskPage(page string, r *PageResult, deps []string, 
 		RuntimeRefs:   r.RuntimeRefs,
 		JSFile:        r.JSFile,
 		JSBytes:       jsBytes,
+		SharedScopes:  r.SharedScopes,
 		CSS:           r.CSS,
 		HasJS:         r.HasJS,
 		HasCSS:        r.HasCSS,

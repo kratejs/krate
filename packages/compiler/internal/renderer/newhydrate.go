@@ -19,6 +19,8 @@ const HydrationBootstrapJS = `
 window.__krateErrs=[];
 window.__krateModule=function(k,f){var m=window.__krate_mod||(window.__krate_mod={});if(!Object.prototype.hasOwnProperty.call(m,k))m[k]=f();return m[k];};
 window.__krate_props={};
+window.__krate_c=window.__krate_c||{};
+window.__ku=function(k,a){var f=window.__krate_c[k];if(typeof f!=='function')throw new Error('krate: shared hydration code '+k+' is not loaded');return f(a);};
 window.$esc=function(v){var d=document.createElement('div');d.textContent=v;return d.innerHTML};
 window.__krateLog=function(e){try{window.__krateErrs.push(String((e&&e.stack)||(e&&e.message)||e));}catch(_){}try{console.error(e);}catch(_){}};
 window.__safe=function(fn,n){try{return fn();}catch(e){if(window.__krateOnError&&window.__krateOnError(e,n))return null;__krateLog(e);return null;}};
@@ -145,6 +147,10 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 		}
 	}
 	skip := emptyScopes(result.Signatures, bodies, owned, owners)
+	result.SharedScopes = nil
+	if result.Share != nil && !owned {
+		shareBodies(result, bodies, skip)
+	}
 	for i := range result.Signatures {
 		sig := result.Signatures[i]
 		if sig.Tier != irtree.TierClient || skip[i] {

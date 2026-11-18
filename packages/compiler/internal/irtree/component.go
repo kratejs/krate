@@ -64,6 +64,7 @@ func (b *builder) newComponentNode(fn *ast.FnDecl, parentID string) *ComponentNo
 		Tier:       tier,
 		Fn:         fn,
 		SourceFile: b.ann.SourceFile,
+		Module:     b.ann.ComponentSources[fn.Name],
 		Line:       fn.Position.Line,
 		Class:      b.ann.IsLoweredClass(fn.Name),
 		Boundary:   b.ann.IsLoweredClass(fn.Name) && b.ann.ClassBoundaries[fn.Name],

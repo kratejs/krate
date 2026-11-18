@@ -86,6 +86,11 @@ type EmitResult struct {
 	// BoundaryLink is set for a layout whose tree holds a lowered error boundary
 	// around {children}; see FindBoundaryLink.
 	BoundaryLink *BoundaryLink
+	// Share turns on shared component scopes (see sharedscope.go).
+	Share *ShareOptions
+	// SharedScopes are the templates the page script calls, filled by
+	// GenerateNewHydrationJS when Share is set.
+	SharedScopes []SharedScope
 }
 
 // SlotOutput is the result of emitting a single slot node. Beyond HTML and
@@ -825,6 +830,7 @@ func (e *Emitter) emitClient(node *irtree.ComponentNode) SlotOutput {
 		Name:            node.Name,
 		Class:           node.Class,
 		Lazy:            node.Lazy,
+		Source:          node.Module,
 	}
 	if node.Lazy && node.LazyLoader == "" {
 		sig.LazyName = node.Name

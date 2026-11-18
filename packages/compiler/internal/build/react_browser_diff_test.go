@@ -77,6 +77,8 @@ import (
 //	KRATE_REACTBROWSER_JOBS=<n>            parallel fixtures (default 6 on
 //	                                       Chromium, 3 on Firefox/WebKit)
 //	KRATE_REACTBROWSER_KEEP=<dir>          build into dir and keep it
+//	KRATE_REACTBROWSER_SHARED=1            hydrate every component from
+//	                                       shared chunks
 //	KRATE_REACTBROWSER_DRIVER=<command>    run run.mjs with this command
 //	                                       instead of node, e.g. a docker run
 //	                                       of the Playwright image (mount the
@@ -312,7 +314,9 @@ func buildKrateFixture(fx rbFixture, projDir, outDir, basePath string) (*config.
 	cfg.OutDir = outDir
 	cfg.Minify = false
 	cfg.BasePath = basePath
-	out, err := captureOutput(func() error { return New(projDir, cfg).BuildAll() })
+	b := New(projDir, cfg)
+	b.shareAllScopes = os.Getenv("KRATE_REACTBROWSER_SHARED") != ""
+	out, err := captureOutput(func() error { return b.BuildAll() })
 	return cfg, out, err
 }
 

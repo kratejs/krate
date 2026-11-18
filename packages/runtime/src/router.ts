@@ -17,6 +17,13 @@ import { siteConfig, type KrateRuntimeConfig } from './site-config.js';
  */
 const RUNTIME_CHUNK_RE = /\/chunks\/runtime\.[^/]+\.js$/;
 
+/**
+ * Scripts that stay loaded across navigations: the runtime and the shared
+ * component chunks (chunks/c/), which only register the hydration code page
+ * scripts call. Each runs once per document.
+ */
+const PERSISTENT_SCRIPT_RE = /\/chunks\/(?:runtime\.[^/]+|c\/[^/]+)\.js$/;
+
 function runtimeConfig(): KrateRuntimeConfig {
   return siteConfig();
 }
@@ -789,9 +796,12 @@ function loadScript(script: PendingScript): Promise<boolean> {
     const s = document.createElement('script');
     s.src = script.src;
     if (script.module) s.type = 'module';
+    // Classic scripts run in document order, as on a full load: a shared
+    // component chunk must register before the page script that calls it.
+    else s.async = false;
     // Only page scripts are disposable across navigations; the shared runtime
-    // chunk stays in place.
-    if (!RUNTIME_CHUNK_RE.test(script.src)) s.setAttribute('data-krate-spa', '');
+    // and component chunks stay in place.
+    if (!PERSISTENT_SCRIPT_RE.test(script.src)) s.setAttribute('data-krate-spa', '');
     s.onload = () => resolve(true);
     s.onerror = () => resolve(false);
     document.body.appendChild(s);
@@ -1833,7 +1843,7 @@ function refreshPageBindings(): void {
   // Mark the page scripts as disposable so they're removed and re-executed
   // against the fresh DOM on the next navigation.
   document.querySelectorAll('script[src]').forEach((s) => {
-    if (!RUNTIME_CHUNK_RE.test((s as HTMLScriptElement).src)) s.setAttribute('data-krate-spa', '');
+    if (!PERSISTENT_SCRIPT_RE.test((s as HTMLScriptElement).src)) s.setAttribute('data-krate-spa', '');
   });
 }
 

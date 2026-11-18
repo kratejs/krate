@@ -59,7 +59,7 @@ const devEarlyErrorsScript = `<script>(function(){var q=window.__KRATE_EARLY_ERR
 // configured site name.
 const defaultTitleTag = "<title>Krate App</title>\n"
 
-func generateHTML(bodyHTML, headHTML, scriptHTML, styleHTML string, cssFiles []string, jsFile, runtimeJSFile, route string, devMode bool, devBootstrap, runtimeHead, basePath string, modulePreloads ...string) string {
+func generateHTML(bodyHTML, headHTML, scriptHTML, styleHTML string, cssFiles []string, jsFile, runtimeJSFile string, sharedJS []string, route string, devMode bool, devBootstrap, runtimeHead, basePath string, modulePreloads ...string) string {
 	var b strings.Builder
 
 	b.WriteString("<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n")
@@ -104,6 +104,9 @@ func generateHTML(bodyHTML, headHTML, scriptHTML, styleHTML string, cssFiles []s
 		if runtimeJSFile != "" {
 			b.WriteString(fmt.Sprintf("<link rel=\"preload\" as=\"script\" href=\"%s\">\n", assetHref(basePath, runtimeJSFile)))
 		}
+		for _, f := range sharedJS {
+			b.WriteString(fmt.Sprintf("<link rel=\"preload\" as=\"script\" href=\"%s\">\n", assetHref(basePath, f)))
+		}
 		if jsFile != "" {
 			b.WriteString(fmt.Sprintf("<link rel=\"preload\" as=\"script\" href=\"%s\">\n", pageScriptSrc(route, jsFile, basePath)))
 		}
@@ -127,6 +130,11 @@ func generateHTML(bodyHTML, headHTML, scriptHTML, styleHTML string, cssFiles []s
 	// Shared runtime chunk (loaded before page-specific hydration)
 	if runtimeJSFile != "" {
 		b.WriteString(fmt.Sprintf("<script src=\"%s\"></script>\n", assetHref(basePath, runtimeJSFile)))
+	}
+	// Shared component chunks: they register the templates the page script
+	// calls, so they run after the runtime and before the page script.
+	for _, f := range sharedJS {
+		b.WriteString(fmt.Sprintf("<script src=\"%s\"></script>\n", assetHref(basePath, f)))
 	}
 
 	// Page hydration script. The src must be an absolute site path (not
@@ -163,13 +171,13 @@ func assetHref(basePath, asset string) string {
 }
 
 // generateHTMLWithLoading is like generateHTML but includes a loading template for SPA transitions.
-func generateHTMLWithLoading(bodyHTML, headHTML, scriptHTML, styleHTML, loadingHTML string, cssFiles []string, jsFile, runtimeJSFile, route string, devMode bool, devBootstrap, runtimeHead, basePath string, modulePreloads ...string) string {
+func generateHTMLWithLoading(bodyHTML, headHTML, scriptHTML, styleHTML, loadingHTML string, cssFiles []string, jsFile, runtimeJSFile string, sharedJS []string, route string, devMode bool, devBootstrap, runtimeHead, basePath string, modulePreloads ...string) string {
 	// The template is the last child of #root (the router overlays it while a
 	// navigation is in flight).
 	if loadingHTML != "" {
 		bodyHTML += "<template data-krate-loading>" + loadingHTML + "</template>"
 	}
-	return generateHTML(bodyHTML, headHTML, scriptHTML, styleHTML, cssFiles, jsFile, runtimeJSFile, route, devMode, devBootstrap, runtimeHead, basePath, modulePreloads...)
+	return generateHTML(bodyHTML, headHTML, scriptHTML, styleHTML, cssFiles, jsFile, runtimeJSFile, sharedJS, route, devMode, devBootstrap, runtimeHead, basePath, modulePreloads...)
 }
 
 // pageScriptSrc returns the absolute site URL for a page's hydration script.

@@ -821,6 +821,10 @@ type Config struct {
 	// point at a parent directory, such as a monorepo root.
 	EnvDir string `json:"envDir,omitempty"`
 
+	// SharedChunks writes the hydration code of imported client components to
+	// shared chunks instead of every page script. Nil means enabled.
+	SharedChunks *bool `json:"sharedChunks,omitempty"`
+
 	// BasePath is the URL path prefix the whole site is served under (e.g.
 	// "/docs"). Empty takes the path of site.url; "/" forces the root. Read it
 	// through BaseURLPath, which applies both rules.
@@ -914,6 +918,10 @@ type Config struct {
 func (c *Config) ShouldMinifyHTML() bool { return c.MinifyHTML || c.Minify }
 func (c *Config) ShouldMinifyCSS() bool  { return c.MinifyCSS || c.Minify }
 func (c *Config) ShouldMinifyJS() bool   { return c.MinifyJS || c.Minify }
+
+// SharedChunksOn reports whether imported client components hydrate from
+// shared chunks (sharedChunks, on unless set to false).
+func (c *Config) SharedChunksOn() bool { return c.SharedChunks == nil || *c.SharedChunks }
 
 // ShouldPrecompress reports whether build-time precompression is enabled. It is
 // on unless both encodings are turned off.

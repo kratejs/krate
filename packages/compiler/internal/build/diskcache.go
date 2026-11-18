@@ -14,6 +14,7 @@ import (
 
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
+	"github.com/kratejs/krate/packages/compiler/internal/renderer"
 	"github.com/kratejs/krate/packages/compiler/internal/resolver"
 	krateversion "github.com/kratejs/krate/packages/compiler/internal/version"
 )
@@ -63,9 +64,12 @@ type diskPageEntry struct {
 	RuntimeRefs []string
 	JSFile      string
 	JSBytes     []byte
-	CSS         string
-	HasJS       bool
-	HasCSS      bool
+	// SharedScopes are the component templates the page script calls; the
+	// shared chunks are rebuilt from them on every build.
+	SharedScopes []renderer.SharedScope
+	CSS          string
+	HasJS        bool
+	HasCSS       bool
 	// HasCSSSignals records whether the page emitted CSS-signal rules. It drives
 	// the per-variant stylesheet split and the UA sibling documents, so a cache
 	// replay without it would silently skip them.

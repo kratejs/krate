@@ -424,6 +424,12 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 			return fmt.Errorf("expected boolean, got %T", val)
 		}
 		cfg.Sourcemap = b
+	case "sharedChunks":
+		b, ok := val.(bool)
+		if !ok {
+			return fmt.Errorf("expected boolean, got %T", val)
+		}
+		cfg.SharedChunks = &b
 	case "basePath":
 		s, ok := val.(string)
 		if !ok {

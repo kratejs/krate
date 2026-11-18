@@ -190,9 +190,9 @@ func hlJSString(v string) string {
 // to its script: the language-to-chunk map and, when the page has dynamic
 // code, the call that starts it. It returns js unchanged for pages without
 // either.
-func (b *Builder) attachHighlight(js, html string) (string, error) {
+func (b *Builder) attachHighlight(js, html, shared string) (string, error) {
 	hasCode := strings.Contains(html, highlightMarkup)
-	if !hasCode && !strings.Contains(js, highlightAPI) {
+	if !hasCode && !strings.Contains(js, highlightAPI) && !strings.Contains(shared, highlightAPI) {
 		return js, nil
 	}
 	langs := map[string]bool{}

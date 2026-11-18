@@ -38,5 +38,25 @@ implemented.
   functions, locals folded to a build-time value) are left out, and so are
   scopes with no statements unless another scope's effects owner hangs off them
   (`internal/renderer/newhydrate.go`).
+- The scope of a client component imported from another module is compiled
+  into a template, `function(__ka){...}`, once for the site
+  (`internal/renderer/sharedscope.go`). The slot, component and registry ids
+  the compiler wrote (double-quoted strings), and array and object literals of
+  build data on the right of a top-level assignment (tags, a table of
+  contents), become arguments; everything else is the component's code, so
+  two instances share a template exactly when their code is the same. The page
+  script keeps the scope wrapper (effects owner, conditional mount, route
+  scope, `try`) and calls `__ku(id, [args])`. A scope that reads a name the
+  page script declares around it (module-level `let`, list components, npm
+  bindings), uses `this`, `arguments`, `eval`, `with` or a class, or is lazy,
+  inside a Suspense boundary or an island prop provider, stays inline, as do
+  pages with class components. After all pages are built,
+  `internal/build/sharedchunks.go` writes the templates to `chunks/c/`: per
+  package (the app's own modules are one), templates at least 80% of its pages
+  call go to one chunk and templates a smaller set of pages calls to a chunk
+  for that set; a template only one page calls is registered at the start of
+  that page's script. Chunks load after the runtime and before the page
+  script, and the router keeps them across navigations
+  (`PERSISTENT_SCRIPT_RE` in `router.ts`), loading new ones in document order.
 
 See [Choosing an approach](/docs/core-concepts/rendering/) for what to use when.

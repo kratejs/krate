@@ -130,7 +130,19 @@ that import them (the file's directory is watched, not its subdirectories).
 
 ```typescript
 sourcemap: false,             // Write per-page sourcemaps (index.<hash>.js.map)
+sharedChunks: true,           // Hydrate imported components from shared chunks (default: true)
 ```
+
+With `sharedChunks` on, the hydration code of a client component the page
+imports (a layout, a theme or library component, anything outside the page
+module) is compiled once into a content-hashed chunk under `chunks/c/` that
+every page using it loads, and the page script keeps only a call per instance
+with that instance's ids and data. Moving between pages then downloads only the
+new page's small script. Components defined in the page module stay in the
+page script, and so does the code of an imported component only one page uses
+(in sourcemap builds it gets a chunk of its own). Dev builds and pages rendered
+at request time keep every component in the page script. Set it to `false` to
+put every component's code in the page script.
 
 React syntax is always transpiled to Krate signals and effects; no config is
 required.

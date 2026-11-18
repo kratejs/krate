@@ -429,6 +429,11 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- Imported client components (layouts, the docs theme, library components) hydrate from shared,
+  content-hashed chunks under `chunks/c/` instead of being compiled into every page script; a page
+  script keeps one call per instance with its ids and data. Docs page scripts drop from 3.5-7.4 kB to
+  0.5-1.6 kB gzip and a 4-page client-side visit loads 3.8 kB of JS after the first page instead of 14.7 kB.
+  `sharedChunks: false` restores per-page code.
 - The Pagefind step no longer skips itself on a fresh or wiped `dist` just because the docs content is
   unchanged: it also needs the index in the output directory, and indexer option changes re-run it.
 - The CSS minifier drops the remaining optional spaces: between rules and before `{`, around the `>` `+` `~`

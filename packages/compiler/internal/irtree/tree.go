@@ -497,7 +497,10 @@ type ComponentNode struct {
 
 	InstanceID string
 	SourceFile string
-	Line       int
+	// Module is the module that defines the component function ("" when
+	// unknown).
+	Module string
+	Line   int
 	// Class marks a lowered React class component (see Annotations.IsLoweredClass).
 	Class bool
 	// Boundary marks a lowered class that is an error boundary.
@@ -712,6 +715,9 @@ type ComponentSignature struct {
 	// ("" for page components). The SPA router skips the hydration of scopes
 	// whose layout stayed mounted across a soft navigation.
 	RouteScope string
+
+	// Source is the module that defines the component ("" when unknown).
+	Source string
 }
 
 // CondBranch names one branch ("c" consequent, "a" alternate) of a

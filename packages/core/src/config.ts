@@ -921,6 +921,13 @@ export interface KrateConfig {
   minifyCSS?: boolean;
   minifyJS?: boolean;
   sourcemap?: boolean;
+  /**
+   * Write the hydration code of imported client components (layouts, theme
+   * and library components) to shared, content-hashed chunks that every page
+   * reuses, instead of into each page script. Default true; dev builds and
+   * sourcemap builds keep it per page.
+   */
+  sharedChunks?: boolean;
   /** @deprecated React-to-krate transpilation is always enabled; accepted but ignored. */
   emitReact?: boolean;
   /**
