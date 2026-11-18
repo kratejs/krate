@@ -246,6 +246,10 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Added
 
+- `envPrefix` config key (a string or a list, default `["KRATE_PUBLIC_"]`): the name prefixes of the
+  environment variables inlined into client code and static output, like Vite's `envPrefix`. Each prefix
+  must end in `_`; an empty one is a config error because it would expose every variable. Existing apps
+  are unchanged. The cache fingerprint includes the list.
 - `site.icon` writes `<link rel="icon">` on every page that sets no icon of its own. Without it no favicon
   link is emitted, as before.
 - `krate migrate nextjs` moves `@react-three/fiber` and `@react-three/drei` code to `@krate/three` when every
@@ -436,8 +440,29 @@ host code runs in the native process. Names and options may change between relea
   `@krate/app/updater`, the `updater` permission).
 - New diagnostics `KR7200` to `KR7245`. Documentation under `/docs/native/`.
 
+### Changed
+
+- `krate migrate nextjs` keeps `NEXT_PUBLIC_` names in source and writes
+  `envPrefix: ["KRATE_PUBLIC_", "NEXT_PUBLIC_"]` when the app reads them, instead of renaming every read
+  to `KRATE_PUBLIC_`. It finds the definitions in the `envDir` that `loadEnvConfig` points at and in
+  `.env.example`, and prints an info line (`defined in ../../.env.example: 4 of 4`) instead of the manual
+  item. Destructuring `process.env` no longer needs a manual item either. Variables that only
+  `next.config` `env` injects are still renamed to `KRATE_PUBLIC_`. The plan prints `info:` lines and
+  the JSON report has an `info` list.
+
 ### Fixed
 
+- KR7116 (two modules export the same name) no longer fires for one package reached from two checkouts,
+  such as a project copy whose `node_modules` links lead back into the original: two files with the same
+  name and identical source count as one. The warning names the files by project-relative path
+  (`packages/a/settings.ts and packages/b/settings.ts`), not by base name, and `KRATE_DEBUG=exportclash`
+  prints the full paths of the modules involved. Two more false positives are gone: a module that
+  re-exports an imported binding (`import { X } from "./m"; export { X }`) does not own `X`, and a
+  server page's client components are bundled apart from each other, so the same export name in two of
+  them cannot clash (the warning is held until the build knows the page has a shared namespace, like KR8310).
+- KR8310 words its hint for the cause: a prefixed variable that is not set says which `.env` files and
+  directory Krate reads, a twin under another public prefix (`NEXT_PUBLIC_X` set while the code reads
+  `KRATE_PUBLIC_X`) is named, and a prefix that is not in `envPrefix` says to add it.
 - An arbitrary variant with a selector list scopes every selector to the class, as Tailwind v4 does:
   `[&>a,b]:` is `.x > a, .x b` (a part without `&` is a descendant). The bare `b` matched every such
   element on every page, e.g. shadcn's field `[&>[role=checkbox],[role=radio]]:mt-px` moved every radio.

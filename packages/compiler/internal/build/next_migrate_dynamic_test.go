@@ -188,3 +188,40 @@ export default { reactStrictMode: true };
 		t.Errorf("the page must see the repo-root .env:\n%s", data)
 	}
 }
+
+// TestMigratedNextPublicVarFromRootEnv migrates a monorepo app that reads a
+// NEXT_PUBLIC_ variable defined only in the repo-root .env: the migrated app
+// keeps the name (envPrefix) and the built page contains the value.
+func TestMigratedNextPublicVarFromRootEnv(t *testing.T) {
+	top := t.TempDir()
+	root := filepath.Join(top, "packages", "web")
+	for rel, content := range map[string]string{
+		".env":                      "NEXT_PUBLIC_UMAMI_URL=https://umami.example.test\nSECRET_TOKEN=do-not-leak-1234\n",
+		"packages/web/package.json": `{"name":"web","private":true,"dependencies":{"next":"16.0.0","react":"19.0.0"}}`,
+		"packages/web/next.config.ts": `import { loadEnvConfig } from '@next/env';
+import path from 'node:path';
+
+loadEnvConfig(path.resolve(import.meta.dirname, '../..'), process.env.NODE_ENV !== 'production', undefined, true);
+
+export default { reactStrictMode: true };
+`,
+		"packages/web/src/app/layout.tsx": `export default function RootLayout({ children }) { return <html><body>{children}</body></html>; }`,
+		"packages/web/src/app/page.tsx":   `export default function Home() { return <main id="v" data-u={process.env.NEXT_PUBLIC_UMAMI_URL}>{process.env.NEXT_PUBLIC_UMAMI_URL}</main>; }`,
+	} {
+		writeFileRel(t, top, rel, content)
+	}
+	cfg := migrateAndBuild(t, root)
+	if len(cfg.EnvPrefix) != 2 || cfg.EnvPrefix[1] != "NEXT_PUBLIC_" {
+		t.Errorf("envPrefix = %v", cfg.EnvPrefix)
+	}
+	data, err := os.ReadFile(filepath.Join(cfg.OutDir, "index.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "https://umami.example.test") {
+		t.Errorf("the page must contain the NEXT_PUBLIC_ value from the repo-root .env:\n%s", data)
+	}
+	if strings.Contains(string(data), "do-not-leak-1234") {
+		t.Errorf("a secret reached the page")
+	}
+}

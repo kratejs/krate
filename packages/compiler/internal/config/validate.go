@@ -246,6 +246,11 @@ func (c *Config) Validate() (warnings []string, err error) {
 			return nil, fmt.Errorf("serverExternalPackages entries must be package names such as \"sharp\" or \"@napi-rs/canvas\", got %q", name)
 		}
 	}
+	for _, prefix := range c.EnvPrefix {
+		if prefix == "" || !strings.HasSuffix(prefix, "_") || strings.ContainsAny(prefix, " \t=") {
+			return nil, fmt.Errorf("envPrefix entries must be non-empty names ending in \"_\" such as \"KRATE_PUBLIC_\", got %q (an empty prefix would expose every environment variable)", prefix)
+		}
+	}
 	for key, globs := range c.OutputFileTracingIncludes {
 		for _, g := range globs {
 			if err := checkTraceGlob(g); err != nil {

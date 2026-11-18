@@ -823,6 +823,12 @@ type Config struct {
 	// point at a parent directory, such as a monorepo root.
 	EnvDir string `json:"envDir,omitempty"`
 
+	// EnvPrefix lists the name prefixes of the environment variables that are
+	// inlined into client code and static output (default ["KRATE_PUBLIC_"]).
+	// Each prefix must end in "_"; an empty prefix would expose every variable.
+	// A migrated Next.js app lists "NEXT_PUBLIC_" as well to keep its names.
+	EnvPrefix StringList `json:"envPrefix,omitempty"`
+
 	// SharedChunks writes the hydration code of imported client components to
 	// shared chunks instead of every page script. Nil means enabled.
 	SharedChunks *bool `json:"sharedChunks,omitempty"`
@@ -1265,4 +1271,16 @@ func (c *Config) Resolve(root string) {
 type TSCompilerOptions struct {
 	ExperimentalDecorators  bool
 	UseDefineForClassFields *bool
+}
+
+// DefaultEnvPrefix is the prefix of the environment variables Krate inlines
+// into client code unless envPrefix says otherwise.
+const DefaultEnvPrefix = "KRATE_PUBLIC_"
+
+// PublicEnvPrefixes returns the configured envPrefix list, or the default.
+func (c *Config) PublicEnvPrefixes() []string {
+	if c == nil || len(c.EnvPrefix) == 0 {
+		return []string{DefaultEnvPrefix}
+	}
+	return []string(c.EnvPrefix)
 }

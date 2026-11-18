@@ -38,6 +38,9 @@ type nextConfigData struct {
 	// EnvDir is the relative directory loadEnvConfig(...) reads .env files
 	// from; it becomes envDir. Empty when absent or the project root.
 	EnvDir string `json:"-"`
+	// EnvPrefix is set by the migrator when the app reads NEXT_PUBLIC_
+	// variables; it becomes envPrefix.
+	EnvPrefix []string `json:"-"`
 	// Tailwind is true when the project's PostCSS config runs Tailwind.
 	Tailwind bool `json:"-"`
 	// NoCompress is set by `compress: false`. Next.js compresses responses by
@@ -180,7 +183,7 @@ func readNextConfig(path string) (data nextConfigData, notes nextConfigNotes, ok
 			notes.Manual = append(notes.Manual, ManualItem{
 				Source: file,
 				Reason: "env is not a static string map and was not translated",
-				Hint:   "Krate inlines only KRATE_PUBLIC_* values from .env at build time; put the values there (see Environment Variables)",
+				Hint:   "Krate inlines only values whose names start with KRATE_PUBLIC_ (or a prefix in envPrefix) from .env at build time; put the values there (see Environment Variables)",
 			})
 		}
 	}
@@ -386,6 +389,9 @@ func configJSON(entry string, next nextConfigData) []byte {
 	}
 	if next.EnvDir != "" {
 		opts["envDir"] = next.EnvDir
+	}
+	if len(next.EnvPrefix) > 0 {
+		opts["envPrefix"] = next.EnvPrefix
 	}
 	if next.Tailwind {
 		opts["tailwind"] = map[string]any{"enabled": true}

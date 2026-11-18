@@ -269,12 +269,16 @@ The first pass:
 - creates `krate.config.ts` when the project has none, or merges missing
   Next-derived keys into an existing config (existing keys win);
 - merges/generates `tsconfig.json` for Krate JSX and route types;
-- renames reads of `process.env.NEXT_PUBLIC_NAME` (and the keys of static
-  `next.config` `env`) to `process.env.KRATE_PUBLIC_NAME`, the prefix Krate
-  inlines at build time. Values are never copied from `.env*` into the migrated
-  code, so development URLs and keys cannot ship by accident. One manual item
-  lists every variable to rename or set for the Krate build and which `.env`
-  files define it;
+- keeps reads of `process.env.NEXT_PUBLIC_NAME` as they are and writes
+  `envPrefix: ["KRATE_PUBLIC_", "NEXT_PUBLIC_"]` into `krate.config.ts`, so Krate
+  inlines them from the same `.env` files and build environment Next did. The
+  migration looks for their definitions next to the app, in the `envDir` that
+  `loadEnvConfig` points at and in `.env.example`, and prints one info line
+  (`defined in ../../.env.example: 4 of 4`); names it cannot find are listed there
+  and must come from the build environment. Variables that only a static
+  `next.config` `env` creates are renamed to `KRATE_PUBLIC_NAME`, and one manual
+  item lists them. Values are never copied from `.env*` into the migrated code, so
+  development URLs and keys cannot ship by accident;
 - moves the original Next.js route trees (`app/` or `src/app/`, and `pages/` when
   it was migrated) into the backup directory on `--apply`, after every file is
   written, so Krate does not compile them next to the migrated copies. The plan

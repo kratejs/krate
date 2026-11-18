@@ -1097,6 +1097,7 @@ outputFileTracingIncludes: {                           // extra files for the no
   "/api/og": ["node_modules/@resvg/resvg-js-*/**"],
 },
 envDir: "../..",                                       // where .env files are read from
+envPrefix: ["KRATE_PUBLIC_", "NEXT_PUBLIC_"],          // names inlined into client code (default ["KRATE_PUBLIC_"])
 ```
 
 - `serverExternalPackages` lists npm packages that server bundles do not
@@ -1122,9 +1123,16 @@ envDir: "../..",                                       // where .env files are r
   must exist. It applies to `krate dev`, `build`, `serve`, `start` and `deploy`,
   to `krate.config.ts` itself (the config is evaluated again with the variables
   from `envDir`) and to everything that reads `process.env` at build or serve
-  time. `KRATE_PUBLIC_*` values are still the only ones inlined into client code.
+  time. Only variables whose names start with a prefix in `envPrefix`
+  (`KRATE_PUBLIC_` by default) are inlined into client code.
   Changes to files in `envDir` outside the project are not watched by `krate
   dev`; restart it.
+- `envPrefix` is a string or a list of strings: the name prefixes of the
+  environment variables that are inlined into client code and statically
+  rendered output (default `["KRATE_PUBLIC_"]`). Each prefix must end in `_`;
+  an empty prefix is an error because it would expose every variable. List
+  `"NEXT_PUBLIC_"` next to the default to keep the names of a migrated Next.js
+  app. Only add prefixes whose variables are safe to ship to the browser.
 
 ## CORS
 

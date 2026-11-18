@@ -82,6 +82,8 @@ type Report struct {
 	Routes    []Route       `json:"routes,omitempty"`
 	Manual    []ManualItem  `json:"manual,omitempty"`
 	Warnings  []string      `json:"warnings,omitempty"`
+	// Info lists notes that need no action.
+	Info []string `json:"info,omitempty"`
 	// MoveAside lists the original Next route trees (app/, src/app/, pages/)
 	// and a Next 16 proxy file that --apply moves into the backup directory
 	// after every write succeeds. `krate migrate rollback` moves them back.
@@ -274,7 +276,13 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 	migrateReactThree(rep, abs)
 	migrateNextAuth(rep, abs)
 	warnClientBoundaryRuntime(rep)
-	rewritePublicEnv(rep, readPublicEnv(abs), nextCfg.Env)
+	var envDirs []string
+	if nextCfg.EnvDir != "" {
+		envDirs = append(envDirs, filepath.Join(abs, filepath.FromSlash(nextCfg.EnvDir)))
+	}
+	if rewritePublicEnv(rep, readPublicEnv(abs, envDirs...), nextCfg.Env) {
+		nextCfg.EnvPrefix = []string{"KRATE_PUBLIC_", "NEXT_PUBLIC_"}
+	}
 	rewriteMetadataTypes(rep)
 	rewriteTestImports(rep)
 	flagInlineUseServer(rep)
@@ -313,7 +321,7 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 			}
 		}
 		rep.Files = append(rep.Files, PlannedFile{Kind: KindConfig, Target: "krate.config.ts", Content: configJSON(entry, nextCfg)})
-	} else if nextConfigStatic || len(nextCfg.Site) > 0 || len(nextCfg.Rewrites) > 0 || len(nextCfg.Head) > 0 || nextCfg.MiddlewareRuntime != "" {
+	} else if nextConfigStatic || len(nextCfg.EnvPrefix) > 0 || len(nextCfg.Site) > 0 || len(nextCfg.Rewrites) > 0 || len(nextCfg.Head) > 0 || nextCfg.MiddlewareRuntime != "" {
 		merged, notes, err := mergeKrateConfig(abs, nextCfg)
 		if err != nil {
 			rep.Manual = append(rep.Manual, ManualItem{

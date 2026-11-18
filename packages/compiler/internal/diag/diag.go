@@ -24,6 +24,11 @@ type Diagnostic struct {
 	// Code is a stable identifier such as "KR2001" for diagnostics that have
 	// an entry in the registry (see codes.go). Empty for uncatalogued ones.
 	Code Code `json:"code,omitempty"`
+	// EnvName and EnvRoot name the variable and the object ("process.env" or
+	// "import.meta.env") of a KR8310 diagnostic, so a later pass can word the
+	// hint for the project's environment without parsing the message.
+	EnvName string `json:"-"`
+	EnvRoot string `json:"-"`
 }
 
 // Severity is the seriousness of a Diagnostic.

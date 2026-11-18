@@ -1094,7 +1094,7 @@ Hydration code (an event handler, effect, derived value, text binding or a modul
 
 **Environment variable is not exposed to client code**
 
-Client code and statically rendered pages cannot read process.env or import.meta.env values: they are build and server-time only and are never written into HTML or JavaScript. The read yields undefined. Name the variable with the KRATE_PUBLIC_ prefix (KRATE_PUBLIC_API_URL) to inline its value at build time, or read it in a server component, API route or server action instead. import.meta.env.MODE, DEV, PROD, BASE_URL and SSR are always available.
+Client code and statically rendered pages cannot read process.env or import.meta.env values: they are build and server-time only and are never written into HTML or JavaScript. The read yields undefined. Name the variable with the KRATE_PUBLIC_ prefix (KRATE_PUBLIC_API_URL), or list its prefix in envPrefix in krate.config.ts, to inline its value at build time, and make sure the value is defined in the .env files or the build environment; or read it in a server component, API route or server action instead. import.meta.env.MODE, DEV, PROD, BASE_URL and SSR are always available.
 
 ### KR8320
 

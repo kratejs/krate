@@ -172,7 +172,7 @@ export default function P() { return <Button/>; }`)
 	}
 }
 
-func TestPublicEnvReadsRenamedWithoutValues(t *testing.T) {
+func TestPublicEnvReadsKeepNamesWithoutValues(t *testing.T) {
 	root := t.TempDir()
 	writeNextFile(t, root, "package.json", `{"dependencies":{"next":"16.0.0"}}`)
 	writeNextFile(t, root, ".env", "NEXT_PUBLIC_API_URL=http://localhost:3001\nSECRET_TOKEN=hunter2\n")
@@ -188,7 +188,7 @@ export const s = process.env.SECRET_TOKEN;`)
 	}
 	for _, f := range rep.Files {
 		c := string(f.Content)
-		if f.Kind == KindConfig || f.Kind == KindPackage {
+		if f.Kind == KindPackage {
 			continue
 		}
 		for _, secret := range []string{"localhost:3001", "api.example.com", "hunter2", "zzz"} {
@@ -198,29 +198,31 @@ export const s = process.env.SECRET_TOKEN;`)
 		}
 	}
 	mod := findPlan(rep, "src/lib/client.ts")
-	if mod == nil || !strings.Contains(string(mod.Content), "process.env.KRATE_PUBLIC_API_URL") || !strings.Contains(string(mod.Content), "process.env.SECRET_TOKEN") {
-		t.Fatalf("client module env reads wrong: %+v", mod)
+	// An untouched module is not planned at all: nothing renames its reads.
+	if mod != nil && strings.Contains(string(mod.Content), "KRATE_PUBLIC_") {
+		t.Fatalf("client module env reads renamed: %s", mod.Content)
 	}
 	page := string(findPlan(rep, "src/pages/index.tsx").Content)
-	if !strings.Contains(page, "process.env.KRATE_PUBLIC_API_URL") || !strings.Contains(page, "process.env.KRATE_PUBLIC_MISSING") {
+	if !strings.Contains(page, "process.env.NEXT_PUBLIC_API_URL") || !strings.Contains(page, "process.env.NEXT_PUBLIC_MISSING") || strings.Contains(page, "KRATE_PUBLIC_") {
 		t.Errorf("page env reads wrong:\n%s", page)
 	}
-	var item *ManualItem
-	for i := range rep.Manual {
-		if strings.Contains(rep.Manual[i].Reason, "public environment variables") {
-			item = &rep.Manual[i]
+	cfg := findPlan(rep, "krate.config.ts")
+	if cfg == nil || !strings.Contains(string(cfg.Content), `"envPrefix"`) || !strings.Contains(string(cfg.Content), `"NEXT_PUBLIC_"`) || !strings.Contains(string(cfg.Content), `"KRATE_PUBLIC_"`) {
+		t.Fatalf("envPrefix not written: %+v", cfg)
+	}
+	for _, m := range rep.Manual {
+		if strings.Contains(m.Reason, "environment variables") {
+			t.Errorf("public env vars left a manual item: %+v", m)
 		}
 	}
-	if item == nil {
-		t.Fatalf("no env manual item: %+v", rep.Manual)
-	}
-	for _, want := range []string{"NEXT_PUBLIC_API_URL -> KRATE_PUBLIC_API_URL (defined in .env, .env.production)", "NEXT_PUBLIC_MISSING -> KRATE_PUBLIC_MISSING (no .env definition found)", "NEXT_PUBLIC_UNUSED"} {
-		if !strings.Contains(item.Reason, want) {
-			t.Errorf("manual item missing %q: %s", want, item.Reason)
+	info := strings.Join(rep.Info, "\n")
+	for _, want := range []string{"keep their NEXT_PUBLIC_ names (envPrefix)", "defined in .env, .env.production: 1 of 2", "NEXT_PUBLIC_MISSING"} {
+		if !strings.Contains(info, want) {
+			t.Errorf("info lacks %q: %s", want, info)
 		}
 	}
-	if strings.Contains(item.Reason+item.Hint, "hunter2") || strings.Contains(item.Reason, "localhost:3001") {
-		t.Errorf("manual item leaks a value: %+v", item)
+	if strings.Contains(info, "hunter2") || strings.Contains(info, "localhost:3001") {
+		t.Errorf("info leaks a value: %s", info)
 	}
 }
 

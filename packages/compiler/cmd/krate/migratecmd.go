@@ -193,6 +193,9 @@ func printMigrationPlan(rep *migrate.Report) {
 	for _, w := range rep.Warnings {
 		fmt.Printf("  warning: %s\n", w)
 	}
+	for _, n := range rep.Info {
+		fmt.Printf("  info: %s\n", n)
+	}
 	if len(rep.MoveAside) > 0 {
 		fmt.Printf("\n--apply moves the original Next route tree(s) into the backup so Krate does not build them twice: %s\n  `krate migrate rollback` moves them back.\n", strings.Join(rep.MoveAside, ", "))
 	}
