@@ -54,6 +54,12 @@ func TestRuntimeHeadConfigBlock(t *testing.T) {
 			t.Errorf("base path must travel in the JSON block:\n%s", head)
 		}
 	})
+	t.Run("viewport prefetch default", func(t *testing.T) {
+		head := newBuilder(func(c *config.Config) { c.Prefetch = "viewport" }).runtimeCommonHead()
+		if !strings.Contains(head, `id="__krate_cfg__">{"prefetch":"viewport"}</script>`) {
+			t.Errorf("prefetch default must travel in the JSON block:\n%s", head)
+		}
+	})
 	t.Run("dev flag", func(t *testing.T) {
 		b := newBuilder(func(*config.Config) {})
 		b.DevMode = true

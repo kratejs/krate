@@ -22,13 +22,35 @@ Set `spa: false` to use normal full-page navigation and omit the SPA router,
 prefetch, and history code from the shared runtime. `navigate()` still works and
 performs a full navigation.
 
-The shared runtime chunk is assembled per site in production builds: the core
+The shared runtime chunk is built per site in production builds: the core
 (signals, DOM bindings, events) plus the router, and only those optional pieces
 (list rendering, class helpers such as `cn`/`twMerge`, server action forms,
-error boundaries and class components) that the site's pages reference. A
-counter page ships about 25 KB of gzipped runtime JS (about 17 KB with
-`spa: false`); each extra piece adds between 2 and 5 KB gzipped. `krate dev`
-always serves the full runtime.
+error boundaries and class components) that the site's pages reference. The
+chunk is bundled from the runtime's ES modules, so within those pieces only the
+functions the site's code calls (and what they use) ship, and only those are
+defined on `window`. The router API (`krateRouter`, `navigate()`) is always
+defined. A counter page ships about 19 KB of gzipped runtime JS (about
+10 KB with `spa: false`); each extra piece adds between 1 and 5 KB gzipped.
+`krate dev` always serves the full runtime.
+
+Only code and markup count as a reference: a call in client code, or a
+server action form in the HTML. A heading, a code sample or any other text
+that names an API (`requestFormReset`, `Children`, `"use server"`) does not, so
+the runtime chunk, and its hash, change only when client code does. A page
+with a client island or HTML rendered per request, or client code that reads a
+computed global (`window[name]`) or calls `import()`, gets every piece with
+every export defined. Same-origin scripts a page loads from `public/`
+(`<script src="/app.js">` or `<Script src="/app.js" />`) are read the same way;
+external URLs are not.
+
+Code the build cannot see at all, such as a script injected at run time or a
+third-party script that calls Krate globals, fails in production with
+`ReferenceError: krateX is not defined` (or `... is not a function`) while
+`krate dev` works. Ship the full runtime for such a site:
+
+```ts
+clientRuntime: { exports: "all" }   // default "auto"
+```
 
 ## Site metadata
 
@@ -46,10 +68,15 @@ site: {
   twitter: "mysite",            // twitter:site handle (@ optional)
   themeColor: "#0b1020",
   locale: "en",                 // <html lang> + og:locale
+  icon: "/favicon.svg",         // <link rel="icon"> on pages that set no icon
   htmlAttributes: { class: "dark" },       // attributes of every page's <html>
   bodyAttributes: { class: "font-sans" },  // attributes of every page's <body>
 },
 ```
+
+A page without a `<title>` gets one from `name` (shaped by `titleTemplate`), the
+same fallback `og:title` uses. `icon` is optional: without it no icon link is
+emitted, and browsers find a `public/favicon.ico` on their own.
 
 `htmlAttributes` and `bodyAttributes` take strings, numbers and booleans (`true`
 writes a bare attribute, `false` and `null` drop it). Values are escaped. A page or
@@ -93,8 +120,9 @@ formatting is preserved when it is off.
 
 ## CSS
 
-Each page gets one stylesheet (identical sheets share one hashed file), `@import`s are inlined,
-and the merged stylesheet is minified when `minifyCSS` (or `minify`) is on.
+Page CSS is split by source into hashed files that pages share (a theme or a component's
+stylesheet is one file for every page that uses it), `@import`s are inlined, and each
+stylesheet is minified when `minifyCSS` (or `minify`) is on.
 Tailwind generates CSS only for classes detected in the scanned sources, so
 unused utility classes never ship. There are no per-feature CSS config toggles.
 
@@ -118,7 +146,19 @@ that import them (the file's directory is watched, not its subdirectories).
 
 ```typescript
 sourcemap: false,             // Write per-page sourcemaps (index.<hash>.js.map)
+sharedChunks: true,           // Hydrate imported components from shared chunks (default: true)
 ```
+
+With `sharedChunks` on, the hydration code of a client component the page
+imports (a layout, a theme or library component, anything outside the page
+module) is compiled once into a content-hashed chunk under `chunks/c/` that
+every page using it loads, and the page script keeps only a call per instance
+with that instance's ids and data. Moving between pages then downloads only the
+new page's small script. Components defined in the page module stay in the
+page script, and so does the code of an imported component only one page uses
+(in sourcemap builds it gets a chunk of its own). Dev builds and pages rendered
+at request time keep every component in the page script. Set it to `false` to
+put every component's code in the page script.
 
 React syntax is always transpiled to Krate signals and effects; no config is
 required.
@@ -126,11 +166,18 @@ required.
 ## Precompression
 
 ```typescript
-compress: {                   // opt-in; also enabled by `krate build --precompress`
-  brotli: true,               // write .br siblings
-  gzip: true,                 // write .gz siblings
+compress: {                   // on by default for production builds
+  brotli: true,               // write .br siblings (default true; false turns them off)
+  gzip: true,                 // write .gz siblings (default true; false turns them off)
 }
 ```
+
+Precompression runs on every production build, so a project with no `compress`
+setting ships both encodings. Set `brotli: false` or `gzip: false` to skip one,
+or both to skip precompression. `krate dev` never precompresses, and Krate Native
+builds skip it. Brotli runs at level 11 for scripts and stylesheets and level 10
+for HTML and other text (about 8% smaller than level 6); a sibling that is newer than its
+source is kept, so only changed files are compressed again.
 
 Build-time precompression writes `.br`/`.gz` siblings beside compressible assets
 (HTML, CSS, JS, JSON, SVG, XML, ...). `krate serve` negotiates them per request
@@ -169,11 +216,22 @@ analytics, fonts, and other site-wide tags.
 > Vercel) ignore them; configure headers there instead.
 
 `headers` applies custom response headers; `security` overrides the defaults
-(`"off"` disables a header).
+(`"off"` disables a header). A rule's `source` uses the
+[source syntax](#source-syntax) (`"/:path*"` matches every path) and takes
+`has` and `missing`. Rules are applied when the response is written, so they
+win over a header a handler set itself, such as the `Cache-Control` of a public
+file or a page. The one exception is the immutable `Cache-Control` Krate gives
+its own content-hashed assets. Several matching rules apply in order, and the
+last value for a header wins (`Vary` values are added instead).
+
+A rule's `headers` is an object, or Next.js' array of `{ key, value }` pairs, so
+a list built by a helper can be used as it is. In the array form the order is
+kept and, when a name repeats (in any case), the last value wins.
 
 ```typescript
 headers: [
   { source: "/assets/*", headers: { "Cache-Control": "public, max-age=31536000, immutable" } },
+  { source: "/:path*", headers: [{ key: "X-Frame-Options", value: "DENY" }] },
 ],
 security: {
   frameOptions: "SAMEORIGIN",
@@ -253,7 +311,10 @@ original image through.
 
 `remotePatterns` hostnames support `*.example.com` (one label) and
 `**.example.com` (any depth); `pathname` supports `*` (one segment) and `**`
-(any depth), e.g. `"/images/**"`. Output formats are WebP and the original
+(any depth), e.g. `"/images/**"`. A pattern may also set `protocol` (`"https"`
+or `"http"`), `port` (a string; `""` matches only a URL with no port) and
+`search` (the exact query string, with its `?`), checked as Next.js does: a field
+that is not set allows anything. Output formats are WebP and the original
 format; **AVIF is not supported** (it needs a separate encoder).
 
 ## Dev server
@@ -372,7 +433,7 @@ markdown: {
   admonitions: true,
   codeHighlight: true,
   codeTheme: { light: "github", dark: "krate-dark" }, // or one name for both modes
-  math: false,          // load KaTeX (CDN) and render $...$ / $$...$$
+  math: false,          // render $...$ / $$...$$ with KaTeX (CDN, loaded only on pages with math)
   plugins: ["./md/transform.ts"], // AfterMarkdownParse HTML transforms
 }
 ```
@@ -441,8 +502,12 @@ ssr: {
   Explicit per-page `isr`/`ssr` config still wins.
 - **`middlewareRuntime`** and **`apiRuntime`** (`"quickjs"` | `"node"` |
   `"bun"` | `"deno"`) choose which runtime executes middleware and API routes.
-  `"quickjs"` (default) uses the embedded QuickJS runtime with no Node.js
-  dependency; `"node"`/`"deno"` use the Node `http` sidecar; **`"bun"` uses a
+  Unset (default) uses the embedded QuickJS runtime with no Node.js
+  dependency, and serves an API route from the Node sidecar when it imports a
+  Node built-in or uses a global the embedded runtime lacks (`Buffer`,
+  `__dirname`, `process.cwd()`, ...) without a feature check. `"quickjs"` pins
+  every route to the embedded runtime: such a use is then a `KR7160` build error
+  (a route can still opt into Node with `export const runtime = "nodejs"`); `"node"`/`"deno"` use the Node `http` sidecar; **`"bun"` uses a
   Bun-native sidecar built on `Bun.serve`** (no Node http stack, no cluster
   shim) - the fastest JS/TS sidecar option. The build bundles each API route
   only for the runtime that serves it, so run `krate build` again after
@@ -508,6 +573,18 @@ headers, or sessions**. Do not enable `ppr` for regions that render
 per-user/per-session content, or one user's output can be served to another.
 :::
 
+## Prefetch
+
+```typescript
+prefetch: "intent", // "intent" (default) | "viewport"
+```
+
+Links are prefetched on hover, focus and touch. `"viewport"` also prefetches links
+as they scroll near the viewport (at most 5 per page), which costs requests on
+link-heavy pages. A `<Link prefetch>` prop overrides the site default
+(`prefetch={false}` never prefetches). No prefetching happens when the browser
+reports Save-Data or a 2g connection.
+
 ## View Transitions
 
 ```typescript
@@ -522,7 +599,7 @@ instead of cross-fading. Reduced-motion preferences are respected.
 
 Pages carry the router's settings in a JSON data block in `<head>`
 (`<script type="application/json" id="__krate_cfg__">`), and only when a setting
-differs from the defaults: a `basePath`, `viewTransitions: "off"`, or `krate dev`.
+differs from the defaults: a `basePath`, `viewTransitions: "off"`, `prefetch: "viewport"`, or `krate dev`.
 A site on the defaults has no such block. The block is data, not code, so a strict
 `script-src 'self'` policy needs no allowance for it. With View Transitions on,
 the `@view-transition` rule is an inline `<style>` (a `style-src` policy needs
@@ -671,11 +748,115 @@ it with `export const lang = "fr"` (or `export const config = { lang: "fr" }`).
 ```typescript
 redirects: [
   { source: "/old-page", destination: "/new-page", permanent: true },
-]
+  { source: "/moved", destination: "/new-home", statusCode: 308 },
+  {
+    source: "/store",
+    has: [{ type: "query", key: "vehicle" }],
+    destination: "/templates",
+    statusCode: 308,
+  },
+],
 rewrites: [
   { source: "/docs/:path*", destination: "/documentation/:path*" },
-]
+],
 ```
+
+A rule has these keys:
+
+| Key | Meaning |
+|-----|---------|
+| `source` | The path to match, see [Source syntax](#source-syntax). |
+| `destination` | Where to send the visitor, or the internal path a rewrite serves. `:name` placeholders are filled from the match. |
+| `permanent` | Redirects only. `true` answers 301, `false` (default) 302. |
+| `statusCode` | Redirects only. One of 301, 302, 303, 307 or 308. Wins over `permanent`. A config migrated from Next.js uses 308 and 307, the statuses Next sends. |
+| `has`, `missing` | Conditions on the request, see [has and missing](#has-and-missing). Redirects, rewrites and `headers` rules all take them. |
+| `basePath` | Redirects only. `false` matches and redirects outside the [base path](#base-path). |
+
+### Source syntax
+
+`source` is the path-to-regexp 6 syntax Next.js uses, so a `next.config` rule
+works unchanged:
+
+| Form | Matches |
+|------|---------|
+| `/about` | exactly `/about` |
+| `/blog/:slug` | one segment, bound to `:slug` |
+| `/docs/:path*` | zero or more segments (`/docs`, `/docs/a/b`) |
+| `/docs/:path+` | one or more segments |
+| `/p/:id?` | an optional segment |
+| `/files/:id(\d+)` | a segment that matches the regex |
+| `/x/(\d+)` | an unnamed regex segment (it captures nothing you can use) |
+| `/blog{/:slug}?` | an optional group |
+| `/store/:slug((?!compare$)[^/]+)` | any segment except `compare` |
+| `/legacy/*` | Krate's older form: the rest of the path is `:splat` |
+
+Matching is case sensitive and `/x` does not match `/x/` for a plain path.
+Patterns with parameters also match a trailing slash.
+
+Regexes run on Go's RE2 engine, which has no lookahead or lookbehind. One form
+is supported: a negative lookahead at the start of a parameter's regex, as in
+`:slug((?!compare$)[^/]+)`. Krate checks the parameter value against the
+lookahead's alternatives (`$` means the end of the value). Any other pattern RE2
+cannot run (lookbehind, a backreference, a lookahead elsewhere) is a config error
+([KR8355](/docs/reference/diagnostics/#kr8355)) when the config loads, never a
+rule that silently does nothing. Handle such a request in `middleware.ts`.
+
+`headers` rules take the same syntax. A header source with no `:`, `(` or `{`
+keeps its older meaning: an exact path, a trailing-`*` prefix (`/assets/*`) or a
+`path.Match` glob.
+
+### has and missing
+
+```typescript
+{
+  source: "/app",
+  has: [
+    { type: "host", value: "(?<org>[a-z]+)\\.example\\.com" },
+    { type: "header", key: "x-device", value: "ios|android" },
+  ],
+  missing: [{ type: "cookie", key: "session" }],
+  destination: "/orgs/:org",
+}
+```
+
+An item is `{ type, key?, value? }` with `type` one of `query`, `header`, `cookie`
+or `host` (`host` takes no `key`; it is the host name without the port, lower
+cased). The rule applies when every `has` item matches and no `missing` item
+does.
+
+- Without `value`, an item matches when the field is present and not empty, and
+  its value is captured under the key's name (letters only, header names lower
+  cased): `{ type: "query", key: "vehicle" }` makes `:vehicle` available in
+  `destination`.
+- With `value`, the field must match the regex as a whole (`^(?:value)$`).
+  Named groups are captured, and a `host` item without groups captures `host`.
+- A repeated query parameter is judged by its last value, and repeated headers
+  are joined with `, `.
+- `value` regexes run on RE2, with the limits above (KR8355).
+
+### Query strings
+
+A redirect carries the request's query string to the destination. Keys the
+destination sets itself win: `/store/plans?x=1` with a rule to `/store` goes to
+`/store?x=1`, and a destination `/search?src=old` keeps `src=old` whatever the
+request sent. Values filled into a destination's query string are escaped so
+they cannot add a parameter. A rewrite merges the destination's query into the
+request's the same way.
+
+### Order
+
+For each request, `krate serve` and `krate start` apply:
+
+1. `headers` rules, on every response (they also cover redirects and errors).
+2. `redirects`, before middleware. A redirect applies to `/api/*` too, and a
+   maintenance gate in middleware does not hide it.
+3. Middleware.
+4. `rewrites`, after middleware, so middleware sees the URL the visitor asked
+   for.
+5. Routes, pages and files.
+
+The first redirect that matches answers. The same holds for the first matching
+rewrite.
 
 ## SEO & robots
 
@@ -776,7 +957,7 @@ output: "static",   // default: request-time rendering allowed
 returned by `generateStaticParams` (unknown params 404), and SSR/ISR/streaming
 are disabled. Individual pages can re-enable dynamic params with
 `export const dynamicParams = true`. See
-[Static output & dynamic params](/docs/features/typed-routes/#static-output-dynamic-params).
+[Static output & dynamic params](/docs/features/typed-routes/#static-output--dynamic-params).
 
 ## Browser compatibility
 
@@ -876,6 +1057,17 @@ preloaded unless they are the only source); relative `url()`s resolve against th
 stylesheet, not the page. Faces for non-Latin `unicode-range` subsets are
 skipped, and a `/* no-preload */` comment inside an `@font-face` block opts that
 face out.
+
+Each page preloads only the fonts it can use on first render. Sans (body) faces are
+preloaded on every page; a monospace face is preloaded only when the page's HTML
+contains a `<pre>` or `<code>` element. A face counts as monospace when its family
+name contains `mono`, `code`, `courier`, `consolas` or `menlo`, or when it is listed
+in a `font-family` stack or custom property (such as `--font-mono`) that includes
+the `monospace` keyword. Code that only appears after client rendering does not
+count, so such a page loads its monospace font on demand. A face whose file the
+site does not serve (for example `url('/fonts/x.woff2')` with no `public/fonts/x.woff2`)
+is not preloaded, and the build prints one warning per URL. Reference fonts with a
+relative `url()` to have the build copy and content-hash them.
 
 ## Go (components & API routes)
 
@@ -1026,7 +1218,9 @@ outputFileTracingIncludes: {                           // extra files for the no
   "*": ["assets/fonts/**", "workers/image.js"],
   "/api/og": ["node_modules/@resvg/resvg-js-*/**"],
 },
+outputFileTracingRoot: "../..",                        // monorepo root: mirror it in the node deploy output
 envDir: "../..",                                       // where .env files are read from
+envPrefix: ["KRATE_PUBLIC_", "NEXT_PUBLIC_"],          // names inlined into client code (default ["KRATE_PUBLIC_"])
 ```
 
 - `serverExternalPackages` lists npm packages that server bundles do not
@@ -1042,19 +1236,36 @@ envDir: "../..",                                       // where .env files are r
   Next.js, any key works) to globs of project files that `krate deploy --target
   node` copies next to `server.mjs` at their project-relative paths, and that
   `--target docker` carries into the image. Globs are relative to the project
-  root (`*`, `?`, `[a-z]` and `**` are supported), may not be absolute or contain
-  `..`, and are checked against the project root when files are copied. Use it
+  root (`*`, `?`, `[a-z]` and `**` are supported), may not be absolute, and may
+  contain `..` only when `outputFileTracingRoot` is set. Files are checked against
+  the project root (or the tracing root) when they are copied. Use it
   for files that import tracing cannot see: a worker entry loaded by path, a
   platform binary chosen by a computed `require`.
+- `outputFileTracingRoot` is the directory the `node` deploy output mirrors,
+  usually a monorepo root. A relative path resolves against the project root;
+  the directory must contain the project. With it, `server.mjs` is written to
+  `dist/.krate/server/<project below the root>/server.mjs`, included files go to
+  `dist/.krate/server/<path below the root>` (their globs may leave the project
+  but not the root), traced packages go to `dist/.krate/server/node_modules`,
+  and the server starts in its own directory, like Next's standalone output.
+  Unset (the default), the output is flat. See
+  [Self-hosting](/docs/guides/self-hosting/#monorepo-layout-outputfiletracingroot).
 - `envDir` is the directory the `.env`, `.env.<mode>`, `.env.local` and
   `.env.<mode>.local` files are read from. A relative path resolves against the
   project root and may point at a parent directory, such as a monorepo root; it
   must exist. It applies to `krate dev`, `build`, `serve`, `start` and `deploy`,
   to `krate.config.ts` itself (the config is evaluated again with the variables
   from `envDir`) and to everything that reads `process.env` at build or serve
-  time. `KRATE_PUBLIC_*` values are still the only ones inlined into client code.
+  time. Only variables whose names start with a prefix in `envPrefix`
+  (`KRATE_PUBLIC_` by default) are inlined into client code.
   Changes to files in `envDir` outside the project are not watched by `krate
   dev`; restart it.
+- `envPrefix` is a string or a list of strings: the name prefixes of the
+  environment variables that are inlined into client code and statically
+  rendered output (default `["KRATE_PUBLIC_"]`). Each prefix must end in `_`;
+  an empty prefix is an error because it would expose every variable. List
+  `"NEXT_PUBLIC_"` next to the default to keep the names of a migrated Next.js
+  app. Only add prefixes whose variables are safe to ship to the browser.
 
 ## CORS
 

@@ -161,7 +161,11 @@ func headTagKey(el headElement) string {
 		case has("charset"):
 			return "meta:charset"
 		case has("name"):
-			return "meta:name:" + strings.ToLower(a["name"])
+			key := "meta:name:" + strings.ToLower(a["name"])
+			if m := strings.ToLower(a["media"]); m != "" {
+				key += "|" + m
+			}
+			return key
 		case has("property"):
 			return "meta:property:" + strings.ToLower(a["property"])
 		case has("http-equiv"):

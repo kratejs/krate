@@ -237,3 +237,43 @@ export default async function Home() {
 		t.Errorf("head markers leaked into the body:\n%s", html)
 	}
 }
+
+func TestDedupeHeadKeepsMediaAndIconVariants(t *testing.T) {
+	head := `<meta name="theme-color" content="#fff" media="(prefers-color-scheme: light)">` + "\n" +
+		`<meta name="theme-color" content="#000" media="(prefers-color-scheme: dark)">` + "\n" +
+		`<link rel="icon" href="/a.svg" type="image/svg+xml">` + "\n" +
+		`<link rel="icon" href="/a-32.png" sizes="32x32" type="image/png">` + "\n" +
+		`<link rel="icon" href="/a-16.png" sizes="16x16" type="image/png">` + "\n" +
+		`<link rel="apple-touch-icon" href="/t.png" sizes="180x180">` + "\n" +
+		`<link rel="icon" href="/dup.svg" type="image/svg+xml">` + "\n" +
+		`<meta name="theme-color" content="#eee" media="(prefers-color-scheme: light)">` + "\n"
+	got := dedupeHead(head)
+	for _, want := range []string{"#fff", "#000", "/a.svg", "/a-32.png", "/a-16.png", "/t.png"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("dedupeHead dropped %q:\n%s", want, got)
+		}
+	}
+	for _, gone := range []string{"/dup.svg", "#eee"} {
+		if strings.Contains(got, gone) {
+			t.Errorf("dedupeHead kept the duplicate %q:\n%s", gone, got)
+		}
+	}
+	// The page head comes first, so a page-level tag with the same key wins.
+	page := `<meta name="theme-color" content="#abc" media="(prefers-color-scheme: dark)">` + "\n"
+	merged := dedupeHead(page + head)
+	if !strings.Contains(merged, "#abc") || strings.Contains(merged, "#000") {
+		t.Errorf("page-level theme-color must override the layout's:\n%s", merged)
+	}
+}
+
+func TestHeadTagKeyIncludesMedia(t *testing.T) {
+	doc := `<head><meta name="theme-color" content="#fff" media="(prefers-color-scheme: light)"></head>`
+	got := mergeHeadSection(doc, "", `<meta name="theme-color" content="#000" media="(prefers-color-scheme: dark)">`)
+	if !strings.Contains(got, "#fff") || !strings.Contains(got, "#000") {
+		t.Errorf("both media variants must survive a merge: %s", got)
+	}
+	got = mergeHeadSection(doc, "", `<meta name="theme-color" content="#111" media="(prefers-color-scheme: light)">`)
+	if strings.Contains(got, "#fff") || !strings.Contains(got, "#111") {
+		t.Errorf("the same media variant must be replaced: %s", got)
+	}
+}

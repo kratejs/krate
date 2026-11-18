@@ -16,10 +16,23 @@ const (
 	CodeCSSImportMissing Code = "KR7145"
 	// CodeChunkMissing: the build output references a /chunks/ file it did not write.
 	CodeChunkMissing Code = "KR7146"
+	// CodePublicStylesheet: a page links a .css file from public/ with rel=stylesheet.
+	CodePublicStylesheet Code = "KR7147"
 )
 
 func init() {
 	Register(
+		CodeInfo{
+			Code:  CodePublicStylesheet,
+			Title: "Stylesheet linked from public/ is not minified or hashed",
+			Explanation: "A page or layout links a `.css` file that lives in `public/` with `<link rel=\"stylesheet\">`. " +
+				"Files in `public/` are copied as written, so the stylesheet is neither minified nor given a content " +
+				"hash, cannot be cached as immutable, and is a separate render-blocking request in front of the " +
+				"bundled styles. Move the file under `src/` and import it from the layout or page " +
+				"(`import \"../styles/site.css\"`) so it goes through the CSS pipeline. Import it before other " +
+				"stylesheets if it used to be linked before them, since the bundled order follows import order. " +
+				"This is a warning.",
+		},
 		CodeInfo{
 			Code:  CodeChunkMissing,
 			Title: "Build output references a chunk that was not written",

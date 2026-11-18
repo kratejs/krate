@@ -853,7 +853,13 @@ func (b *builder) registerChildProps(childNode *ComponentNode, childFn *ast.FnDe
 	if !readsProps && !readsParam {
 		return
 	}
-	b.pendingPropsRegs = append(b.pendingPropsRegs, b.buildChildPropsRegDecl(string(childNode.ID), childNode.Props))
+	reg := b.childPropsReg(string(childNode.ID), childNode.Props)
+	regJS := reg.JS(nil)
+	if b.propsRegs == nil {
+		b.propsRegs = make(map[string]PropsReg)
+	}
+	b.propsRegs[regJS] = reg
+	b.pendingPropsRegs = append(b.pendingPropsRegs, regJS)
 	decl := "var props=__krate_props[" + strconv.Quote(string(childNode.ID)) + "]"
 	if readsParam {
 		// Kept in the same fragment so the params are bound before signal

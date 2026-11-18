@@ -59,17 +59,60 @@ var (
 	defaultFontCap  = 4
 )
 
-// collectFontPreloads picks the fonts worth a `<link rel="preload">`: for each
+// fontFace is a preload candidate: the file to fetch and whether its family
+// is monospace, which decides if a page needs it on first render.
+type fontFace struct {
+	URL  string
+	Mono bool
+}
+
+var (
+	fontFamilyDeclRe = regexp.MustCompile(`(?i)font-family\s*:\s*([^;}]+)`)
+	// Any declaration (property or custom property) whose value is a font
+	// stack. Used to find stacks that end in the generic `monospace`.
+	fontStackDeclRe = regexp.MustCompile(`(?i)(?:^|[;{\s])(?:--[\w-]+|font-family|font)\s*:\s*([^;}]*\bmonospace\b[^;}]*)`)
+	monoNameRe      = regexp.MustCompile(`(?i)mono|code|courier|consolas|menlo`)
+	htmlCodeRe      = regexp.MustCompile(`(?i)<(?:pre|code)[\s>/]`)
+)
+
+// monoFamilies returns the lowercase family names that appear in a font stack
+// containing the generic `monospace`.
+func monoFamilies(cssText string) map[string]bool {
+	out := map[string]bool{}
+	for _, m := range fontStackDeclRe.FindAllStringSubmatch(cssText, -1) {
+		for _, fam := range strings.Split(m[1], ",") {
+			if n := cleanFamily(fam); n != "" {
+				out[n] = true
+			}
+		}
+	}
+	return out
+}
+
+func cleanFamily(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.Trim(s, `'"`)
+	return strings.ToLower(strings.TrimSpace(s))
+}
+
+// pageUsesCode reports whether rendered HTML contains a <pre> or <code>
+// element, the signal that a page shows monospace text on first render.
+func pageUsesCode(html string) bool {
+	return htmlCodeRe.MatchString(html)
+}
+
+// collectFontFaces picks the fonts worth a `<link rel="preload">`: for each
 // `@font-face` the first woff2 source (the file a modern browser will fetch;
 // woff/ttf fallbacks are never preloaded unless they are the only source),
 // skipping faces marked `/* no-preload */`, faces for non-Latin unicode-range
 // subsets, and anything past limit. Relative URLs resolve against the
 // stylesheet, which is served from the site root.
-func collectFontPreloads(cssText string, limit int) []string {
+func collectFontFaces(cssText string, limit int) []fontFace {
 	if limit <= 0 {
 		limit = defaultFontCap
 	}
-	var out []string
+	mono := monoFamilies(cssText)
+	var out []fontFace
 	seen := map[string]bool{}
 	for _, m := range fontFaceRe.FindAllStringSubmatch(cssText, -1) {
 		block := m[1]
@@ -114,7 +157,12 @@ func collectFontPreloads(cssText string, limit int) []string {
 			continue
 		}
 		seen[pick] = true
-		out = append(out, pick)
+		isMono := false
+		if fm := fontFamilyDeclRe.FindStringSubmatch(block); fm != nil {
+			fam := cleanFamily(fm[1])
+			isMono = mono[fam] || monoNameRe.MatchString(fam)
+		}
+		out = append(out, fontFace{URL: pick, Mono: isMono})
 		if len(out) >= limit {
 			break
 		}

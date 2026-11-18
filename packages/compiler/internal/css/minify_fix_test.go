@@ -72,7 +72,7 @@ func TestMinifyExact(t *testing.T) {
 		{"height fallback", `.a{height:100vh;height:-webkit-fill-available}`, `.a{height:100vh;height:-webkit-fill-available}`},
 		{"dvh fallback", `.a{height:100vh;height:100dvh}`, `.a{height:100vh;height:100dvh}`},
 		{"p3 fallback", `.a{color:red;color:color(display-p3 1 0 0)}`, `.a{color:red;color:color(display-p3 1 0 0)}`},
-		{"easing fallback", `.a{transition-timing-function:cubic-bezier(0.1,0.7,1,0.1);transition-timing-function:linear(0,1)}`, `.a{transition-timing-function:cubic-bezier(0.1,0.7,1,0.1);transition-timing-function:linear(0,1)}`},
+		{"easing fallback", `.a{transition-timing-function:cubic-bezier(0.1,0.7,1,0.1);transition-timing-function:linear(0,1)}`, `.a{transition-timing-function:cubic-bezier(.1,.7,1,.1);transition-timing-function:linear(0,1)}`},
 		{"display fallback", `.a{display:block;display:grid}`, `.a{display:block;display:grid}`},
 		{"var fallback", `.a{color:red;color:var(--c)}`, `.a{color:red;color:var(--c)}`},
 		{"plain colors fold", `.a{color:red;color:blue}`, `.a{color:blue}`},
@@ -91,7 +91,7 @@ func TestMinifyExact(t *testing.T) {
 		{"important in string", `.a{content:"!important";content:"x"}`, `.a{content:"x"}`},
 
 		// 10: comments.
-		{"comment star selector", `ul>*/* c */{color:red}`, `ul>* {color:red}`},
+		{"comment star selector", `ul>*/* c */{color:red}`, `ul>*{color:red}`},
 		{"comment between tokens", `.a{margin:1px/**/2px}`, `.a{margin:1px 2px}`},
 
 		// 11: escapes.

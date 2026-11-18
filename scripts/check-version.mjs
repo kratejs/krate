@@ -6,6 +6,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { krateVersionsFile, renderKrateVersions } from "./gen-krate-versions.mjs";
 import { nativeTemplate, nativeTemplateKrateDep, releasePackages } from "./release-packages.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -44,6 +45,15 @@ const templateDeps = [...template.matchAll(nativeTemplateKrateDep)];
 if (templateDeps.length === 0) failures.push(`${nativeTemplate}: no @krate dependencies found`);
 for (const [, , name, range] of templateDeps) {
   if (range !== version) failures.push(`${nativeTemplate} ${name}: ${range} != ${version}`);
+}
+
+// The migrator's table of package versions is generated from the manifests.
+let versionsTable = "";
+try {
+  versionsTable = readFileSync(join(root, krateVersionsFile), "utf8");
+} catch {}
+if (versionsTable !== renderKrateVersions(root)) {
+  failures.push(`${krateVersionsFile}: stale; run node scripts/gen-krate-versions.mjs`);
 }
 
 // The docs site pins are updated manually and deliberately track the published

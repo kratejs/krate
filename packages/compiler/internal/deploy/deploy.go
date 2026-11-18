@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
@@ -106,9 +107,14 @@ func Emit(target string, cfg *config.Config, root, outDir string, opts ...Option
 	if target == "docker" {
 		return emitDocker(cfg, root, outDir)
 	}
+	// Read the manifest before the server-only .krate directory is removed.
+	auto := immutableRules(cfg, outDir, LoadHashedAssets(outDir))
+	if target == "cloudflare" {
+		auto = auto.capped(outDir, len(cfg.Headers), cloudflareMaxHeaderRules)
+	}
 	features := ServerFeatures(root, outDir)
 	if WantsServer(target, features, opt.StaticOnly) {
-		return emitServer(target, cfg, root, outDir, opt.Server)
+		return emitServer(target, cfg, root, outDir, opt.Server, auto)
 	}
 	if len(features) > 0 && !opt.StaticOnly {
 		return nil, fmt.Errorf("this project uses server features (%s) that the %s target cannot run: the deployed site would be an empty shell for them. Deploy with `krate deploy --target docker`, `--target node`, vercel, netlify or cloudflare (they run the server), or pass --static-only to publish only the static pages", strings.Join(features, ", "), target)
@@ -133,13 +139,13 @@ func Emit(target string, cfg *config.Config, root, outDir string, opts ...Option
 		if err != nil {
 			return nil, err
 		}
-		hfiles, err := emitHeaders(cfg, outDir)
+		hfiles, err := emitHeaders(cfg, outDir, auto)
 		if err != nil {
 			return nil, err
 		}
 		return append(files, hfiles...), nil
 	case "vercel":
-		return emitVercel(cfg, root, outDir)
+		return emitVercel(cfg, root, outDir, auto)
 	case "gh-pages":
 		return emitGitHubPages(outDir)
 	default:
@@ -164,10 +170,13 @@ func emitRedirects(cfg *config.Config, outDir string) ([]string, error) {
 	base := cfg.BaseURLPath()
 	var b strings.Builder
 	for _, r := range cfg.Redirects {
-		status := "302"
-		if r.Permanent {
-			status = "301"
+		if len(r.Has) > 0 || len(r.Missing) > 0 {
+			// _redirects cannot test the query, headers or cookies; an
+			// unconditional copy would redirect every request.
+			fmt.Fprintf(&b, "# skipped %s: has/missing conditions need a server (use --target node/docker or Vercel)\n", r.Source)
+			continue
 		}
+		status := strconv.Itoa(r.Status())
 		src, dst := translateRule(r.Source, r.Destination, false)
 		if rb := ruleBase(base, r); rb != "" {
 			src, dst = sitepath.Join(rb, src), sitepath.Join(rb, dst)
@@ -175,6 +184,10 @@ func emitRedirects(cfg *config.Config, outDir string) ([]string, error) {
 		fmt.Fprintf(&b, "%s\t%s\t%s\n", src, dst, status)
 	}
 	for _, r := range cfg.Rewrites {
+		if len(r.Has) > 0 || len(r.Missing) > 0 {
+			fmt.Fprintf(&b, "# skipped %s: has/missing conditions need a server (use --target node/docker or Vercel)\n", r.Source)
+			continue
+		}
 		src, dst := translateRule(r.Source, r.Destination, false)
 		fmt.Fprintf(&b, "%s\t%s\t200\n", sitepath.Join(base, src), sitepath.Join(base, dst))
 	}
@@ -186,17 +199,26 @@ func emitRedirects(cfg *config.Config, outDir string) ([]string, error) {
 }
 
 // emitHeaders writes a `_headers` file (Netlify + Cloudflare Pages format) from
-// the config's `headers` rules. Only explicit rules are emitted; `security`
+// the config's `headers` rules, preceded by an immutable Cache-Control rule for
+// the build's content-hashed assets (auto, see immutableRules). `security`
 // defaults are left to `krate serve` so static-host behavior is not changed
 // implicitly.
-func emitHeaders(cfg *config.Config, outDir string) ([]string, error) {
-	if len(cfg.Headers) == 0 {
+func emitHeaders(cfg *config.Config, outDir string, auto autoHeaders) ([]string, error) {
+	rules := withImmutable(cfg, auto)
+	if len(rules) == 0 {
 		return nil, nil
 	}
 	base := cfg.BaseURLPath()
 	var b strings.Builder
-	for _, rule := range cfg.Headers {
+	if auto.omitted > 0 {
+		fmt.Fprintf(&b, "# %d hashed assets are not listed here: Cloudflare Pages reads at most %d rules.\n\n", auto.omitted, cloudflareMaxHeaderRules)
+	}
+	for _, rule := range rules {
 		if rule.Source == "" || len(rule.Headers) == 0 {
+			continue
+		}
+		if len(rule.Has) > 0 || len(rule.Missing) > 0 {
+			fmt.Fprintf(&b, "# skipped %s: has/missing conditions need a server (use --target node/docker or Vercel)\n\n", rule.Source)
 			continue
 		}
 		b.WriteString(sitepath.Join(base, rule.Source))
@@ -262,16 +284,22 @@ const vercelSchema = "https://openapi.vercel.sh/vercel.json"
 // emitVercel writes `vercel.json` at the project root, where a Git-integrated
 // Vercel project reads it (a copy inside the output directory is ignored
 // there). `outputDirectory` points Vercel at the build output.
-func emitVercel(cfg *config.Config, root, outDir string) ([]string, error) {
+func emitVercel(cfg *config.Config, root, outDir string, auto autoHeaders) ([]string, error) {
 	type vRedirect struct {
 		Source      string `json:"source"`
 		Destination string `json:"destination"`
-		// Always written: Vercel treats a missing "permanent" as true (308).
-		Permanent bool `json:"permanent"`
+		// Always written (unless statusCode is): Vercel treats a missing
+		// "permanent" as true (308).
+		Permanent  *bool                   `json:"permanent,omitempty"`
+		StatusCode int                     `json:"statusCode,omitempty"`
+		Has        []config.RouteCondition `json:"has,omitempty"`
+		Missing    []config.RouteCondition `json:"missing,omitempty"`
 	}
 	type vRewrite struct {
-		Source      string `json:"source"`
-		Destination string `json:"destination"`
+		Source      string                  `json:"source"`
+		Destination string                  `json:"destination"`
+		Has         []config.RouteCondition `json:"has,omitempty"`
+		Missing     []config.RouteCondition `json:"missing,omitempty"`
 	}
 	base := cfg.BaseURLPath()
 	doc := map[string]interface{}{"$schema": vercelSchema}
@@ -283,7 +311,14 @@ func emitVercel(cfg *config.Config, root, outDir string) ([]string, error) {
 		for _, r := range cfg.Redirects {
 			src, dst := translateRule(r.Source, r.Destination, true)
 			rb := ruleBase(base, r)
-			rs = append(rs, vRedirect{Source: sitepath.Join(rb, src), Destination: sitepath.Join(rb, dst), Permanent: r.Permanent})
+			v := vRedirect{Source: sitepath.Join(rb, src), Destination: sitepath.Join(rb, dst), Has: r.Has, Missing: r.Missing}
+			if r.StatusCode != 0 {
+				v.StatusCode = r.StatusCode
+			} else {
+				perm := r.Permanent
+				v.Permanent = &perm
+			}
+			rs = append(rs, v)
 		}
 		doc["redirects"] = rs
 	}
@@ -291,7 +326,7 @@ func emitVercel(cfg *config.Config, root, outDir string) ([]string, error) {
 		rw := make([]vRewrite, 0, len(cfg.Rewrites))
 		for _, r := range cfg.Rewrites {
 			src, dst := translateRule(r.Source, r.Destination, true)
-			rw = append(rw, vRewrite{Source: sitepath.Join(base, src), Destination: sitepath.Join(base, dst)})
+			rw = append(rw, vRewrite{Source: sitepath.Join(base, src), Destination: sitepath.Join(base, dst), Has: r.Has, Missing: r.Missing})
 		}
 		doc["rewrites"] = rw
 	}
@@ -316,8 +351,8 @@ func emitVercel(cfg *config.Config, root, outDir string) ([]string, error) {
 	if v, ok := cfg.Deploy.Options["trailingSlash"]; ok {
 		doc["trailingSlash"] = strings.EqualFold(v, "true")
 	}
-	// Custom headers (config `headers`).
-	if len(cfg.Headers) > 0 {
+	// Immutable caching for hashed assets, then custom headers (config `headers`).
+	if hr := withImmutable(cfg, auto); len(hr) > 0 {
 		type vHeader struct {
 			Key   string `json:"key"`
 			Value string `json:"value"`
@@ -326,8 +361,8 @@ func emitVercel(cfg *config.Config, root, outDir string) ([]string, error) {
 			Source  string    `json:"source"`
 			Headers []vHeader `json:"headers"`
 		}
-		rules := make([]vHeaderRule, 0, len(cfg.Headers))
-		for _, r := range cfg.Headers {
+		rules := make([]vHeaderRule, 0, len(hr))
+		for _, r := range hr {
 			if r.Source == "" || len(r.Headers) == 0 {
 				continue
 			}
@@ -341,6 +376,9 @@ func emitVercel(cfg *config.Config, root, outDir string) ([]string, error) {
 				hh = append(hh, vHeader{Key: k, Value: r.Headers[k]})
 			}
 			src, _ := translateRule(r.Source, "", true)
+			if !strings.HasSuffix(r.Source, "*") {
+				src = escapeVercelPath(src)
+			}
 			rules = append(rules, vHeaderRule{Source: sitepath.Join(base, src), Headers: hh})
 		}
 		if len(rules) > 0 {
@@ -490,7 +528,7 @@ func emitDocker(cfg *config.Config, root, outDir string) ([]string, error) {
 	if dirs, skipped := traceIncludeDirs(cfg.OutputFileTracingIncludes); len(dirs) > 0 || len(skipped) > 0 {
 		b.WriteString("# outputFileTracingIncludes: runtime-read project files (the leading directory of each glob).\n")
 		for _, g := range skipped {
-			fmt.Fprintf(&b, "# glob %q has no leading directory: copy what it matches into the runtime stage yourself.\n", g)
+			fmt.Fprintf(&b, "# glob %q has no leading directory inside the project (or leaves it): copy what it matches into the runtime stage yourself; the image is built from the project directory, so a monorepo build context needs a hand-written Dockerfile.\n", g)
 		}
 		if len(dirs) > 0 {
 			b.WriteString("RUN for p in " + strings.Join(dirs, " ") + "; do if [ -e \"$p\" ]; then cp -a --parents \"$p\" /tmp/runtime/; fi; done\n")
@@ -534,4 +572,17 @@ func emitDocker(cfg *config.Config, root, outDir string) ([]string, error) {
 func dirExists(p string) bool {
 	fi, err := os.Stat(p)
 	return err == nil && fi.IsDir()
+}
+
+// escapeVercelPath escapes the characters path-to-regexp reads as syntax, for
+// a source that names one file.
+func escapeVercelPath(p string) string {
+	var b strings.Builder
+	for _, r := range p {
+		if strings.ContainsRune("(){}+?:*", r) {
+			b.WriteByte('\\')
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }

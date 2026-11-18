@@ -895,7 +895,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	if layoutErr != nil {
 		return nil, "", layoutErr
 	}
-	bundle.CSS = b.dedupeModuleCSS(spp.PagePath, layoutCSS+bundle.CSS, bundle.CSSModules)
+	bundle.CSS = b.dedupeModuleCSS(spp.PagePath, joinCSSParts(layoutCSS, bundle.CSS), bundle.CSSModules)
 	deps = append(deps, layoutFiles...)
 	emitResult.ScriptHTML += routeInfoScript(routeChain, emitResult.Signatures) + pageRouteScript(spp.PagePath, b.Cfg.PagesDir)
 
@@ -911,6 +911,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 
 	jsFile := ""
 	hydrationJS := ""
+	runtimeRefs := []string{}
 	hasJS := false
 	var pageProviders *islandProviders
 	pageIslands := tree.ExternalComponents
@@ -935,7 +936,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		return nil, "", islandErr
 	}
 	if islandStyles != nil {
-		bundle.CSS += islandStyles.CSS
+		bundle.CSS = joinCSSParts(bundle.CSS, islandStyles.CSS)
 		for src, url := range islandStyles.Assets {
 			bundle.AssetFiles[src] = url
 		}
@@ -951,10 +952,24 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	needsHydrate := len(emitResult.Signatures) > 0 || islandJS != "" || islandBoot != "" || strings.Contains(emitResult.HTML, "data-krate-portal")
 	dceJS := append(lazyChunkSources(emitResult.LazyChunks), islandJS)
 	dceJS = append(dceJS, b.clientChunkSources(clientBoundaries, bundle.CSSModules)...)
+	var sharedScopes []renderer.SharedScope
 	if needsHydrate {
+		vendor := collectVendorImports(bundle)
+		for _, rb := range b.routeStack(spp.PagePath) {
+			if lv, ok := layoutVendorImports.Load(rb.Path); ok {
+				vendor = append(vendor, lv.([]vendorImport)...)
+			}
+		}
+		emitResult.Share = b.shareOptions(entryModule.Path, renderMode, vendor, tree.ExternalComponents)
 		hydrationJS = renderer.GenerateNewHydrationJS(emitResult)
-		b.warnShippedCollections(spp.PagePath, entryModule.Program, hydrationJS, 2)
-		dceJS = append(dceJS, hydrationJS)
+		if !validSharedScopes(emitResult.SharedScopes) {
+			emitResult.Share = nil
+			hydrationJS = renderer.GenerateNewHydrationJS(emitResult)
+		}
+		sharedScopes = emitResult.SharedScopes
+		sharedJS := sharedScopesJS(sharedScopes)
+		b.warnShippedCollections(spp.PagePath, entryModule.Program, joinJS(hydrationJS, sharedJS), 2)
+		dceJS = append(dceJS, hydrationJS, sharedJS)
 		var lazyErr error
 		if hydrationJS, lazyErr = b.writeLazyChunks(hydrationJS, emitResult.LazyChunks, pageDir, spp.OutPath); lazyErr != nil {
 			return nil, "", lazyErr
@@ -964,12 +979,6 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		}
 		if strings.TrimSpace(hydrationJS) != "" {
 			hydrationJS = neutralizeClientEnv(hydrationJS)
-			vendor := collectVendorImports(bundle)
-			for _, rb := range b.routeStack(spp.PagePath) {
-				if lv, ok := layoutVendorImports.Load(rb.Path); ok {
-					vendor = append(vendor, lv.([]vendorImport)...)
-				}
-			}
 			var verr error
 			if hydrationJS, verr = b.withVendorImports(hydrationJS, vendor, tree.ExternalComponents); verr != nil {
 				return nil, "", verr
@@ -977,9 +986,12 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		}
 		if strings.TrimSpace(hydrationJS) != "" {
 			hasJS = true
+			rawJS, minified := hydrationJS, ""
 			if b.shouldMinifyJS() {
 				hydrationJS = minifyJS(hydrationJS)
+				minified = hydrationJS
 			}
+			runtimeRefs = withSharedRefs(recordRuntimeRefs(rawJS, minified, emitResult.LazyChunks), sharedJS)
 			finalJS := strings.TrimSpace(hydrationJS)
 			jsHash := hashContent([]byte(finalJS))
 			jsFile = "index." + jsHash + ".js"
@@ -1002,26 +1014,28 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	b.registerDynamicChunks(bundle.DynImportFiles)
 	pageCSS := b.pageCSSAfterDCE(renderMode, bundle.CSS, bundle.CSSModules, emitResult.HTML, dceJS...)
 	result := &PageResult{
-		Page:        spp.PagePath,
-		OutName:     spp.OutPath,
-		HTML:        emitResult.HTML,
-		HeadHTML:    emitResult.HeadHTML,
-		ScriptHTML:  emitResult.ScriptHTML,
-		StyleHTML:   emitResult.StyleHTML,
-		HydrationJS: hydrationJS,
-		HasJS:       hasJS,
-		JSFile:      jsFile,
-		HasCSS:      pageCSS != "",
-		CSS:         pageCSS,
-		UsedCSS:     emitResult.UsedCSS,
-		UsedFuncs:   emitResult.UsedFuncs,
-		Mode:        renderMode,
-		Revalidate:  revalidate,
-		Lang:        pageLang,
-		SourcePath:  relSrc,
-		Program:     entryModule.Program,
-		Regions:     regions,
-		GoBaked:     goBaked,
+		Page:         spp.PagePath,
+		OutName:      spp.OutPath,
+		HTML:         emitResult.HTML,
+		HeadHTML:     emitResult.HeadHTML,
+		ScriptHTML:   emitResult.ScriptHTML,
+		StyleHTML:    emitResult.StyleHTML,
+		HydrationJS:  hydrationJS,
+		RuntimeRefs:  runtimeRefs,
+		HasJS:        hasJS,
+		JSFile:       jsFile,
+		SharedScopes: sharedScopes,
+		HasCSS:       pageCSS != "",
+		CSS:          pageCSS,
+		UsedCSS:      emitResult.UsedCSS,
+		UsedFuncs:    emitResult.UsedFuncs,
+		Mode:         renderMode,
+		Revalidate:   revalidate,
+		Lang:         pageLang,
+		SourcePath:   relSrc,
+		Program:      entryModule.Program,
+		Regions:      regions,
+		GoBaked:      goBaked,
 
 		ServerPage:        serverPage,
 		ServerExports:     serverExportsOf(regions),

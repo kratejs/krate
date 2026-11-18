@@ -473,7 +473,7 @@ func (l *imageLowerer) lower(orig *ast.JSXElement) *ast.JSXElement {
 	switch {
 	case remote:
 		u, perr := url.Parse(src)
-		if perr != nil || u.Hostname() == "" || !imgCfg.RemoteAllowed(u.Hostname(), u.Path) {
+		if perr != nil || u.Hostname() == "" || !imgCfg.RemoteAllowed(u) {
 			host := src
 			if perr == nil && u.Hostname() != "" {
 				host = u.Hostname()
@@ -513,7 +513,9 @@ func (l *imageLowerer) lower(orig *ast.JSXElement) *ast.JSXElement {
 	}
 
 	if autoSizes && result.Width > 0 {
-		sizes = fmt.Sprintf("%dpx", result.Width)
+		// max-width:100% shrinks the image below the viewport width, so on a
+		// narrower screen it is shown at about 100vw, not at its full width.
+		sizes = fmt.Sprintf("(max-width: %dpx) 100vw, %dpx", result.Width, result.Width)
 	} else if autoSizes {
 		sizes = imgCfg.Sizes
 		if sizes == "" {

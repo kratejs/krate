@@ -736,7 +736,7 @@ func bundleHasActions(bundle *bundler.Bundle) bool {
 		return true
 	}
 	for _, m := range bundle.Modules {
-		if m != nil && inlineaction.Has(m.SourceCode) {
+		if m != nil && inlineaction.HasDirective(m.Path, m.SourceCode) {
 			return true
 		}
 	}

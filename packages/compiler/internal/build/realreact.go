@@ -516,7 +516,7 @@ export const Link = React.forwardRef(function Link(p, ref) {
     if (outside) attrs["data-krate-no-base"] = "";
   } else {
     attrs["data-krate-link"] = "";
-    if (prefetch !== false) attrs["data-prefetch"] = "";
+    if (prefetch !== false) attrs["data-prefetch"] = prefetch === "viewport" ? "viewport" : "";
     if (replace) attrs["data-krate-replace"] = "";
     if (scroll === false) attrs["data-krate-scroll"] = "false";
   }

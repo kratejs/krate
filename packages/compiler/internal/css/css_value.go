@@ -27,9 +27,9 @@ func minifyValue(prop, val string, ctx minCtx) string {
 	switch stripVendorPrefix(strings.ToLower(prop)) {
 	case "flex", "flex-basis":
 		// 0px and 0 differ in the flex shorthand (0 is a flex-grow number).
-		return val
+		return tightenValueSpaces(val)
 	}
-	return removeZeroUnits(val)
+	return tightenValueSpaces(removeZeroUnits(val))
 }
 
 // shortenHexColors shortens #rrggbb to #rgb when possible, and #rrggbbaa to #rgba.
@@ -189,7 +189,8 @@ func removeZeroUnits(val string) string {
 			if keep == 0 && zeroStripUnits[unit] && isZeroNumber(num) {
 				b.WriteByte('0')
 			} else {
-				b.WriteString(val[i:k])
+				b.WriteString(dropLeadingZero(num))
+				b.WriteString(val[j:k])
 			}
 			i = k
 			pending = ""
@@ -214,6 +215,19 @@ func removeZeroUnits(val string) string {
 		}
 	}
 	return b.String()
+}
+
+// dropLeadingZero turns 0.5 into .5 and -0.5 into -.5.
+func dropLeadingZero(num string) string {
+	sign := ""
+	rest := num
+	if rest != "" && (rest[0] == '-' || rest[0] == '+') {
+		sign, rest = rest[:1], rest[1:]
+	}
+	if len(rest) > 2 && rest[0] == '0' && rest[1] == '.' {
+		return sign + rest[1:]
+	}
+	return num
 }
 
 func isDigit(c byte) bool { return c >= '0' && c <= '9' }

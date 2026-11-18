@@ -15,16 +15,21 @@ import (
 )
 
 // RouteSize is the weight of one built page: its document and the scripts and
-// stylesheets it loads, raw and gzipped.
+// stylesheets it loads, raw and gzipped. JS counts every script the page loads,
+// including the chunks those scripts import (see transitiveScripts); OwnJS is
+// only the scripts the HTML names directly.
 type RouteSize struct {
-	Route    string `json:"route"`
-	Mode     string `json:"mode"`
-	HTML     int64  `json:"html"`
-	JS       int64  `json:"js"`
-	CSS      int64  `json:"css"`
-	GzipHTML int64  `json:"gzipHtml"`
-	GzipJS   int64  `json:"gzipJs"`
-	GzipCSS  int64  `json:"gzipCss"`
+	Route      string `json:"route"`
+	Mode       string `json:"mode"`
+	HTML       int64  `json:"html"`
+	JS         int64  `json:"js"`
+	CSS        int64  `json:"css"`
+	GzipHTML   int64  `json:"gzipHtml"`
+	GzipJS     int64  `json:"gzipJs"`
+	GzipCSS    int64  `json:"gzipCss"`
+	OwnJS      int64  `json:"ownJs,omitempty"`
+	GzipOwnJS  int64  `json:"gzipOwnJs,omitempty"`
+	ThirdParty bool   `json:"thirdParty,omitempty"` // loads mermaid or KaTeX from the CDN on demand
 }
 
 // Gzip is the compressed size of everything the route loads.
@@ -82,6 +87,94 @@ func pageAssets(html string) (scripts, styles []string) {
 		seen[ref] = true
 	}
 	return scripts, styles
+}
+
+var importMapRe = regexp.MustCompile(`(?is)<script\b[^>]*type\s*=\s*["']?importmap["']?[^>]*>(.*?)</script>`)
+
+// pageImportMap returns the "imports" table of the page's import map.
+func pageImportMap(html string) map[string]string {
+	m := importMapRe.FindStringSubmatch(html)
+	if m == nil {
+		return nil
+	}
+	var doc struct {
+		Imports map[string]string `json:"imports"`
+	}
+	if json.Unmarshal([]byte(m[1]), &doc) != nil {
+		return nil
+	}
+	return doc.Imports
+}
+
+var (
+	staticImportRe  = regexp.MustCompile(`(?:\bfrom|\bimport)\s*["']([^"'\\\n]+)["']`)
+	dynamicImportRe = regexp.MustCompile(`\bimport\(\s*["']([^"'\\\n]+)["']\s*\)`)
+)
+
+// scriptImports lists the module specifiers a script names: static ones, which
+// always load with it, and dynamic import("...") ones.
+func scriptImports(src string) (static, dynamic []string) {
+	for _, m := range staticImportRe.FindAllStringSubmatch(src, -1) {
+		static = append(static, m[1])
+	}
+	for _, m := range dynamicImportRe.FindAllStringSubmatch(src, -1) {
+		dynamic = append(dynamic, m[1])
+	}
+	return static, dynamic
+}
+
+// isIslandEntry reports whether a script URL is an island entry chunk. Pages
+// import their islands as they hydrate, so a dynamic import of one is part of
+// the load; other dynamic imports (lazy components, route chunks) are not.
+func isIslandEntry(url string) bool {
+	return strings.HasPrefix(path.Base(url), islandEntryPrefix) && strings.HasSuffix(url, ".js")
+}
+
+// transitiveScripts returns the URLs of every script a page loads: the entry
+// scripts, the modules they import statically (relative, absolute or through
+// the page's import map) and the island chunks they import dynamically. read
+// returns a script's source by URL, or false when it is not a local file.
+func transitiveScripts(entries []string, imports map[string]string, read func(url string) (string, bool)) []string {
+	var order []string
+	seen := map[string]bool{}
+	queue := append([]string(nil), entries...)
+	for len(queue) > 0 {
+		url := queue[0]
+		queue = queue[1:]
+		if i := strings.IndexAny(url, "?#"); i >= 0 {
+			url = url[:i]
+		}
+		if seen[url] {
+			continue
+		}
+		src, ok := read(url)
+		if !ok {
+			continue
+		}
+		seen[url] = true
+		order = append(order, url)
+		resolve := func(spec string) string {
+			switch {
+			case strings.HasPrefix(spec, "./"), strings.HasPrefix(spec, "../"):
+				return path.Join(path.Dir(url), spec)
+			case strings.HasPrefix(spec, "/") && !strings.HasPrefix(spec, "//"):
+				return spec
+			}
+			return imports[spec]
+		}
+		static, dynamic := scriptImports(src)
+		for _, spec := range static {
+			if u := resolve(spec); u != "" {
+				queue = append(queue, u)
+			}
+		}
+		for _, spec := range dynamic {
+			if u := resolve(spec); u != "" && isIslandEntry(u) {
+				queue = append(queue, u)
+			}
+		}
+	}
+	return order
 }
 
 func gzipLen(data []byte) int64 {
@@ -155,7 +248,9 @@ func (b *Builder) Summarize() (*BuildSummary, error) {
 			}
 			rs.HTML, rs.GzipHTML = int64(len(htmlBytes)), gzipLen(htmlBytes)
 			unique[doc] = true
-			scripts, styles := pageAssets(string(htmlBytes))
+			page := string(htmlBytes)
+			scripts, styles := pageAssets(page)
+			rs.ThirdParty = strings.Contains(page, cspCDNOrigin+"/")
 			add := func(refs []string, raw, gz *int64) {
 				for _, ref := range refs {
 					abs := resolve(ref)
@@ -169,7 +264,16 @@ func (b *Builder) Summarize() (*BuildSummary, error) {
 					}
 				}
 			}
-			add(scripts, &rs.JS, &rs.GzipJS)
+			add(scripts, &rs.OwnJS, &rs.GzipOwnJS)
+			all := transitiveScripts(scripts, pageImportMap(page), func(url string) (string, bool) {
+				abs := resolve(url)
+				if abs == "" {
+					return "", false
+				}
+				data, err := os.ReadFile(abs)
+				return string(data), err == nil
+			})
+			add(all, &rs.JS, &rs.GzipJS)
 			add(styles, &rs.CSS, &rs.GzipCSS)
 		}
 		s.Routes = append(s.Routes, rs)
@@ -282,7 +386,16 @@ func FormatSummary(s *BuildSummary, prev *BuildSummary) string {
 	if hidden > 0 {
 		fmt.Fprintf(&b, "  %s... and %d more route(s); the %d heaviest are shown%s\n", cGray, hidden, summaryRowLimit, cReset)
 	}
-	fmt.Fprintf(&b, "  %sgzip sizes of the page and the scripts and styles it loads; %s shipped in total (shared files counted once)%s\n", cGray, FormatBytes(s.UniqueGzip), cReset)
+	fmt.Fprintf(&b, "  %sgzip sizes of the page and the scripts and styles it loads, including the chunks its scripts import; %s shipped in total (shared files counted once)%s\n", cGray, FormatBytes(s.UniqueGzip), cReset)
+	thirdParty := 0
+	for _, r := range s.Routes {
+		if r.ThirdParty {
+			thirdParty++
+		}
+	}
+	if thirdParty > 0 {
+		fmt.Fprintf(&b, "  %s%d route(s) load mermaid or KaTeX from a CDN when a diagram or formula is shown; those bytes are not counted%s\n", cGray, thirdParty, cReset)
+	}
 	if prev != nil {
 		now := map[string]bool{}
 		for _, r := range s.Routes {

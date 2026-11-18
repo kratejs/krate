@@ -13,7 +13,7 @@ import (
 // Hoisted matchers (compiled once, not per class). Kept as package vars for the
 // hot generator path.
 var (
-	roundedRe     = regexp.MustCompile(`^rounded-([a-zA-Z0-9]+)$`)
+	roundedRe     = regexp.MustCompile(`^rounded-([a-zA-Z0-9]+|\[.+\])$`)
 	roundedSideRe = regexp.MustCompile(`^rounded-(tl|tr|bl|br|ss|se|es|ee|t|r|b|l|s|e)-([a-zA-Z0-9]+|\[.+\])$`)
 )
 
@@ -813,28 +813,14 @@ func generateCSS(cls string, theme TailwindTheme) string {
 	// image/size/position, selected by the arbitrary value's shape/hint.
 	if match := bgRe.FindStringSubmatch(cls); match != nil {
 		key := match[1]
-		if inner, hint, isArb := arbitraryValue(key); isArb {
-			switch hint {
+		if inner, typ, isArb := arbType(key, "image", "color", "percentage", "position", "bg-size", "length", "url"); isArb {
+			switch typ {
+			case "percentage", "position":
+				return "background-position: " + inner + ";"
+			case "bg-size", "length", "size":
+				return "background-size: " + inner + ";"
 			case "image", "url":
 				return "background-image: " + inner + ";"
-			case "length", "size":
-				return "background-size: " + inner + ";"
-			case "position":
-				return "background-position: " + inner + ";"
-			case "color":
-				return "background-color: " + inner + ";"
-			}
-			if strings.HasPrefix(strings.ToLower(inner), "url(") ||
-				strings.HasPrefix(strings.ToLower(inner), "linear-gradient(") ||
-				strings.HasPrefix(strings.ToLower(inner), "radial-gradient(") ||
-				strings.HasPrefix(strings.ToLower(inner), "conic-gradient(") {
-				return "background-image: " + inner + ";"
-			}
-			if looksLikeColor(inner) {
-				return "background-color: " + inner + ";"
-			}
-			if looksLikeLength(inner) {
-				return "background-size: " + inner + ";"
 			}
 			return "background-color: " + inner + ";"
 		}
@@ -1057,7 +1043,9 @@ func generateCSS(cls string, theme TailwindTheme) string {
 	// Arbitrary values with bracket syntax: w-[30px], top-[117px], text-[#bada55]
 	if match := arbitraryUtilityRe.FindStringSubmatch(cls); match != nil {
 		prop := match[1]
-		val := match[2]
+		// Same rules as every other arbitrary value: `_` is a space and math
+		// operators are spaced, or calc(a-b) is invalid and dropped.
+		val := normalizeArbitrary(match[2])
 		cssProp := arbitraryPropToCSS(prop, val)
 		if cssProp != "" {
 			return cssProp

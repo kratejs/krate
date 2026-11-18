@@ -128,7 +128,7 @@ func rewriteNextMiddleware(src string) (string, []string, []string) {
   };
 }
 function __krateIP(request: Request) {
-  return (request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || "").split(",")[0].trim();
+  return (request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || "").split(",")[0]?.trim() ?? "";
 }
 function __krateGeo(request: Request) {
   const h = request.headers;

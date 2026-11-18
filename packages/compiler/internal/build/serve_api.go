@@ -373,6 +373,9 @@ type middlewareGate struct {
 	// secret is sent to the sidecar as X-Krate-Internal; the sidecar refuses
 	// requests without it.
 	secret string
+	// sidecarReady, when set, holds sidecar-run middleware back until the
+	// sidecar listens.
+	sidecarReady *sidecarReady
 }
 
 func (g *middlewareGate) wrap(next http.Handler) http.Handler {
@@ -545,6 +548,10 @@ func (g *middlewareGate) viaSidecar(w http.ResponseWriter, r *http.Request, next
 		"path":    r.URL.Path,
 		"headers": hdrs,
 	})
+	if g.sidecarReady != nil && !g.sidecarReady.up.Load() && !g.sidecarReady.wait(r.Context()) {
+		g.sidecarReady.unavailable(w, r)
+		return
+	}
 	resp, err := sidecarPost(r.Context(), g.sidecarURL, payload, g.secret)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "  %sMiddleware unavailable:%s %v\n", cRed, cReset, err)

@@ -453,7 +453,10 @@ type builder struct {
 	rendererKids []ast.JSXChild
 	// rendererRegs holds the props registrations that carry renderer
 	// children, whose components the registering scope declares.
-	rendererRegs    map[string]bool
+	rendererRegs map[string]bool
+	// propsRegs maps each filterable props registration (as emitted in
+	// ExtraVars) to its entries; see ComponentNode.PropsRegs.
+	propsRegs       map[string]PropsReg
 	compat          csssignals.StyleMode      // CSS-signal stylesheet mode (modern/legacy/hybrid)
 	goComponents    map[string]GoComponentRef // imported Go components (local name -> ref)
 	externalImports map[string]ExternalImport // bare-package import bindings (local -> module)

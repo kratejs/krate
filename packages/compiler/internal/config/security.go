@@ -1,6 +1,10 @@
 package config
 
-import "strings"
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+)
 
 // SecurityConfig overrides the security response headers `krate serve` sends.
 // Empty fields keep the framework default; the value "off"/"none"/"false"
@@ -19,10 +23,58 @@ type SecurityConfig struct {
 }
 
 // HeaderRule sets response headers for requests whose path matches Source.
-// Source is an exact path, a prefix wildcard ("/assets/*"), or a path.Match glob.
+// Source is an exact path, a prefix wildcard ("/assets/*"), a path.Match glob,
+// or a Next.js style pattern such as "/:path*" or "/:file(.*\\.js)".
 type HeaderRule struct {
 	Source  string            `json:"source"`
 	Headers map[string]string `json:"headers"`
+	// Has and Missing add conditions on the request, as on a redirect.
+	Has     []RouteCondition `json:"has,omitempty"`
+	Missing []RouteCondition `json:"missing,omitempty"`
+}
+
+// UnmarshalJSON accepts headers as an object ({ "X-A": "1" }) or as Next's
+// array of { key, value } pairs. In the array form the order is kept while
+// reading, and when a key repeats (compared case-insensitively, as HTTP header
+// names are) the last value wins.
+func (r *HeaderRule) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Source  string           `json:"source"`
+		Headers json.RawMessage  `json:"headers"`
+		Has     []RouteCondition `json:"has"`
+		Missing []RouteCondition `json:"missing"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	out := HeaderRule{Source: raw.Source, Has: raw.Has, Missing: raw.Missing}
+	trimmed := strings.TrimSpace(string(raw.Headers))
+	switch {
+	case trimmed == "" || trimmed == "null":
+	case strings.HasPrefix(trimmed, "["):
+		var pairs []struct {
+			Key   string `json:"key"`
+			Value string `json:"value"`
+		}
+		if err := json.Unmarshal(raw.Headers, &pairs); err != nil {
+			return fmt.Errorf("headers: expected an object or an array of { key, value } objects: %w", err)
+		}
+		out.Headers = map[string]string{}
+		for _, p := range pairs {
+			for existing := range out.Headers {
+				if strings.EqualFold(existing, p.Key) {
+					delete(out.Headers, existing)
+				}
+			}
+			out.Headers[p.Key] = p.Value
+		}
+	default:
+		if err := json.Unmarshal(raw.Headers, &out.Headers); err != nil {
+			return fmt.Errorf("headers: expected an object or an array of { key, value } objects: %w", err)
+		}
+	}
+	*r = out
+	return nil
 }
 
 // HeaderDisabled reports whether a configured header value means "do not send".

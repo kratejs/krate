@@ -57,7 +57,9 @@ func (b *Builder) pageCSSAfterDCE(renderMode RenderMode, cssText string, modules
 			}
 		}
 	}
-	return pruneModuleCSS(cssText, scoped, used)
+	// Prune each source on its own: a part marker must not hide the selector
+	// of the first rule after it.
+	return css.MapParts(cssText, func(text string) string { return pruneModuleCSS(text, scoped, used) })
 }
 
 // clientChunkSources returns the contents of the "use client" chunks already

@@ -22,6 +22,9 @@
     "node": ">=20"
   },
   "main": "src/index.ts",
+  "sideEffects": [
+    "*.css"
+  ],
   "exports": {
     ".": "./src/index.ts",
     "./accordion": "./src/accordion/accordion.tsx",

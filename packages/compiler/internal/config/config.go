@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/internal/markdown"
+	"github.com/kratejs/krate/packages/compiler/internal/routesource"
 )
 
 // Default request body caps (bytes). API requests may be larger than page
@@ -370,18 +371,43 @@ type Redirect struct {
 	Source      string `json:"source"`      // e.g. "/old-page"
 	Destination string `json:"destination"` // e.g. "/new-page"
 	Permanent   bool   `json:"permanent"`   // true = 301, false = 302
+	// StatusCode is 301, 302, 303, 307 or 308 and wins over Permanent.
+	StatusCode int `json:"statusCode,omitempty"`
+	// Has and Missing add conditions on the request (query, header, cookie,
+	// host). The rule applies only when every Has item matches and no
+	// Missing item does.
+	Has     []RouteCondition `json:"has,omitempty"`
+	Missing []RouteCondition `json:"missing,omitempty"`
 	// BasePath false matches Source and sends Destination as written, outside
 	// the base path. Unset or true puts both under the base path.
 	BasePath *bool `json:"basePath,omitempty"`
+}
+
+// Status returns the HTTP status the redirect answers with: StatusCode when
+// set, else 301 for a permanent redirect and 302 otherwise.
+func (r Redirect) Status() int {
+	switch {
+	case r.StatusCode != 0:
+		return r.StatusCode
+	case r.Permanent:
+		return 301
+	}
+	return 302
 }
 
 // InBasePath reports whether the base path applies to this rule.
 func (r Redirect) InBasePath() bool { return r.BasePath == nil || *r.BasePath }
 
 type Rewrite struct {
-	Source      string `json:"source"`      // e.g. "/legacy/*"
-	Destination string `json:"destination"` // e.g. "/docs/:splat"
+	Source      string           `json:"source"`      // e.g. "/legacy/*"
+	Destination string           `json:"destination"` // e.g. "/docs/:splat"
+	Has         []RouteCondition `json:"has,omitempty"`
+	Missing     []RouteCondition `json:"missing,omitempty"`
 }
+
+// RouteCondition is one has or missing item of a redirect, rewrite or header
+// rule. See the routesource package for the matching rules.
+type RouteCondition = routesource.Condition
 
 type SEOConfig struct {
 	BaseURL       string `json:"baseUrl,omitempty"`     // e.g. "https://example.com"
@@ -392,6 +418,7 @@ type SEOConfig struct {
 	Twitter       string `json:"twitter,omitempty"`    // default twitter:site handle
 	ThemeColor    string `json:"themeColor,omitempty"` // browser theme-color
 	Locale        string `json:"locale,omitempty"`     // default <html lang> / og:locale
+	Icon          string `json:"icon,omitempty"`       // favicon URL, emitted as <link rel="icon">
 }
 
 // SiteConfig is the canonical site metadata block. It overlaps `seo` (which is
@@ -406,6 +433,10 @@ type SiteConfig struct {
 	Twitter       string `json:"twitter,omitempty"`
 	ThemeColor    string `json:"themeColor,omitempty"`
 	Locale        string `json:"locale,omitempty"`
+	// Icon is the favicon, written as <link rel="icon"> on every page that
+	// does not set its own icon. Without it no favicon link is emitted (a
+	// public/favicon.ico is found by browsers without one).
+	Icon string `json:"icon,omitempty"`
 	// HTMLAttributes and BodyAttributes are set on every page's <html> and
 	// <body> element. A page or layout refines them with <html> and <body>
 	// elements inside <Head>.
@@ -415,7 +446,7 @@ type SiteConfig struct {
 
 func (s SiteConfig) isZero() bool {
 	return s.URL == "" && s.Name == "" && s.Description == "" && s.Image == "" && s.TitleTemplate == "" &&
-		s.Twitter == "" && s.ThemeColor == "" && s.Locale == "" && len(s.HTMLAttributes) == 0 && len(s.BodyAttributes) == 0
+		s.Twitter == "" && s.ThemeColor == "" && s.Locale == "" && s.Icon == "" && len(s.HTMLAttributes) == 0 && len(s.BodyAttributes) == 0
 }
 
 // AttrMap is a set of HTML attributes. In the config a value is a string or a
@@ -501,6 +532,9 @@ func (c *Config) EffectiveSEO() SEOConfig {
 	}
 	if site.Locale != "" {
 		s.Locale = site.Locale
+	}
+	if site.Icon != "" {
+		s.Icon = site.Icon
 	}
 	return s
 }
@@ -722,10 +756,24 @@ func (c CompatConfig) ModeOrDefault() string {
 // CompressConfig controls build-time precompression: `krate build` writes `.br`
 // and/or `.gz` siblings beside compressible assets, which `krate serve` (and
 // static hosts like Cloudflare Pages/Netlify) can send when the client supports
-// them. Opt-in; also enabled by `krate build --precompress`.
+// them. On by default for production builds; set a field to false to turn that
+// encoding off. `krate build --precompress` forces both on.
 type CompressConfig struct {
-	Brotli bool `json:"brotli,omitempty"`
-	Gzip   bool `json:"gzip,omitempty"`
+	// Brotli and Gzip are nil when unset, which means on.
+	Brotli *bool `json:"brotli,omitempty"`
+	Gzip   *bool `json:"gzip,omitempty"`
+}
+
+// BrotliOn reports whether .br siblings are written (default true).
+func (c CompressConfig) BrotliOn() bool { return c.Brotli == nil || *c.Brotli }
+
+// GzipOn reports whether .gz siblings are written (default true).
+func (c CompressConfig) GzipOn() bool { return c.Gzip == nil || *c.Gzip }
+
+// CompressOff returns a config with both encodings disabled.
+func CompressOff() CompressConfig {
+	off := false
+	return CompressConfig{Brotli: &off, Gzip: &off}
 }
 
 type Config struct {
@@ -754,31 +802,33 @@ type Config struct {
 	Tailwind    TailwindCfg     `json:"tailwind,omitempty"`
 	CSP         CSPConfig       `json:"csp,omitempty"`
 	Runtime     string          `json:"runtime,omitempty"`
-	SSR         SSRConfig       `json:"ssr,omitempty"`
-	Cache       CacheConfig     `json:"cache,omitempty"`
-	PathAliases PathAliases     `json:"pathAliases,omitempty"` // from tsconfig.json paths or config object
-	TSBaseDir   string          `json:"tsBaseDir,omitempty"`   // baseUrl resolved to absolute path
-	TSBaseURL   string          `json:"-"`                     // tsconfig baseUrl, absolute; empty when tsconfig sets none
-	Redirects   []Redirect      `json:"redirects,omitempty"`   // config-based redirects
-	Rewrites    []Rewrite       `json:"rewrites,omitempty"`    // config-based rewrites
-	SEO         SEOConfig       `json:"seo,omitempty"`         // SEO metadata (baseUrl, siteName, description)
-	Site        SiteConfig      `json:"site,omitempty"`        // canonical site metadata (supersedes seo)
-	Robots      RobotsConfig    `json:"robots,omitempty"`      // robots.txt config
-	I18n        I18nConfig      `json:"i18n,omitempty"`        // multi-language docs
-	Versions    VersionsConfig  `json:"versions,omitempty"`    // versioned docs
-	Dce         DceCfg          `json:"dce,omitempty"`         // CSS/JS dead-code elimination
-	Fonts       FontsCfg        `json:"fonts,omitempty"`       // web-font preload + font-display
-	GoAPI       GoAPICfg        `json:"goApi,omitempty"`       // Go API sidecar module/deps (legacy; see Go)
-	Go          GoCfg           `json:"go,omitempty"`          // unified Go module: API routes + components
-	Compat      CompatConfig    `json:"compat,omitempty"`      // browser compatibility output mode
-	Compress    CompressConfig  `json:"compress,omitempty"`    // build-time precompression (.br/.gz)
-	Head        HeadConfig      `json:"head,omitempty"`        // site-wide <head> injection
-	Security    SecurityConfig  `json:"security,omitempty"`    // security header overrides
-	Headers     []HeaderRule    `json:"headers,omitempty"`     // custom response headers
-	Images      ImagesConfig    `json:"images,omitempty"`      // responsive-image pipeline
-	Deploy      DeployConfig    `json:"deploy,omitempty"`      // deploy adapter + options
-	Auth        AuthConfig      `json:"auth,omitempty"`        // authentication: providers, sessions, 2FA, passkeys
-	React       ReactConfig     `json:"react,omitempty"`       // real-React islands
+	// ClientRuntime tunes the browser runtime chunk.
+	ClientRuntime ClientRuntimeConfig `json:"clientRuntime,omitempty"`
+	SSR           SSRConfig           `json:"ssr,omitempty"`
+	Cache         CacheConfig         `json:"cache,omitempty"`
+	PathAliases   PathAliases         `json:"pathAliases,omitempty"` // from tsconfig.json paths or config object
+	TSBaseDir     string              `json:"tsBaseDir,omitempty"`   // baseUrl resolved to absolute path
+	TSBaseURL     string              `json:"-"`                     // tsconfig baseUrl, absolute; empty when tsconfig sets none
+	Redirects     []Redirect          `json:"redirects,omitempty"`   // config-based redirects
+	Rewrites      []Rewrite           `json:"rewrites,omitempty"`    // config-based rewrites
+	SEO           SEOConfig           `json:"seo,omitempty"`         // SEO metadata (baseUrl, siteName, description)
+	Site          SiteConfig          `json:"site,omitempty"`        // canonical site metadata (supersedes seo)
+	Robots        RobotsConfig        `json:"robots,omitempty"`      // robots.txt config
+	I18n          I18nConfig          `json:"i18n,omitempty"`        // multi-language docs
+	Versions      VersionsConfig      `json:"versions,omitempty"`    // versioned docs
+	Dce           DceCfg              `json:"dce,omitempty"`         // CSS/JS dead-code elimination
+	Fonts         FontsCfg            `json:"fonts,omitempty"`       // web-font preload + font-display
+	GoAPI         GoAPICfg            `json:"goApi,omitempty"`       // Go API sidecar module/deps (legacy; see Go)
+	Go            GoCfg               `json:"go,omitempty"`          // unified Go module: API routes + components
+	Compat        CompatConfig        `json:"compat,omitempty"`      // browser compatibility output mode
+	Compress      CompressConfig      `json:"compress,omitempty"`    // build-time precompression (.br/.gz)
+	Head          HeadConfig          `json:"head,omitempty"`        // site-wide <head> injection
+	Security      SecurityConfig      `json:"security,omitempty"`    // security header overrides
+	Headers       []HeaderRule        `json:"headers,omitempty"`     // custom response headers
+	Images        ImagesConfig        `json:"images,omitempty"`      // responsive-image pipeline
+	Deploy        DeployConfig        `json:"deploy,omitempty"`      // deploy adapter + options
+	Auth          AuthConfig          `json:"auth,omitempty"`        // authentication: providers, sessions, 2FA, passkeys
+	React         ReactConfig         `json:"react,omitempty"`       // real-React islands
 
 	// ServerExternalPackages lists npm packages that server bundles (API
 	// routes, the node deploy bundle) leave out of the bundle and load from
@@ -791,13 +841,34 @@ type Config struct {
 	// project files copied into the node deploy output next to server.mjs, for
 	// files that import tracing cannot see (a worker entry loaded by path, a
 	// platform binary chosen by a computed require). Globs are relative to the
-	// project root and must stay inside it.
+	// project root and must stay inside it, unless outputFileTracingRoot is
+	// set: then they may climb out of the project but not out of that root.
 	OutputFileTracingIncludes map[string][]string `json:"outputFileTracingIncludes,omitempty"`
+
+	// OutputFileTracingRoot is the directory the node deploy output mirrors,
+	// like Next's outputFileTracingRoot: the monorepo root. When set, server.mjs
+	// is written to .krate/server/<project relative to the root>/server.mjs,
+	// outputFileTracingIncludes globs may point outside the project (as long as
+	// their real path stays inside the root) and land at their root-relative
+	// path, and the traced node_modules sits at .krate/server/node_modules.
+	// Relative paths resolve against the project root; the root must contain
+	// the project.
+	OutputFileTracingRoot string `json:"outputFileTracingRoot,omitempty"`
 
 	// EnvDir is the directory the .env files are read from (default: the
 	// project root). Relative paths resolve against the project root and may
 	// point at a parent directory, such as a monorepo root.
 	EnvDir string `json:"envDir,omitempty"`
+
+	// EnvPrefix lists the name prefixes of the environment variables that are
+	// inlined into client code and static output (default ["KRATE_PUBLIC_"]).
+	// Each prefix must end in "_"; an empty prefix would expose every variable.
+	// A migrated Next.js app lists "NEXT_PUBLIC_" as well to keep its names.
+	EnvPrefix StringList `json:"envPrefix,omitempty"`
+
+	// SharedChunks writes the hydration code of imported client components to
+	// shared chunks instead of every page script. Nil means enabled.
+	SharedChunks *bool `json:"sharedChunks,omitempty"`
 
 	// BasePath is the URL path prefix the whole site is served under (e.g.
 	// "/docs"). Empty takes the path of site.url; "/" forces the root. Read it
@@ -814,6 +885,11 @@ type Config struct {
 	// the same) redirects /x to /x/, "never" redirects /x/ to /x, "ignore"
 	// serves both without redirecting. Read it through TrailingSlashMode.
 	TrailingSlash string `json:"trailingSlash,omitempty"`
+
+	// Prefetch is the default link prefetch mode: "" or "intent" prefetches
+	// on hover, focus and touch; "viewport" also prefetches links that scroll
+	// into view (capped per page). A Link's own prefetch prop wins.
+	Prefetch string `json:"prefetch,omitempty"`
 
 	// ViewTransitions controls the View Transitions API integration. "" or
 	// "auto" (default) enables it (same-document SPA morphs + a cross-document
@@ -888,8 +964,13 @@ func (c *Config) ShouldMinifyHTML() bool { return c.MinifyHTML || c.Minify }
 func (c *Config) ShouldMinifyCSS() bool  { return c.MinifyCSS || c.Minify }
 func (c *Config) ShouldMinifyJS() bool   { return c.MinifyJS || c.Minify }
 
-// ShouldPrecompress reports whether build-time precompression is enabled.
-func (c *Config) ShouldPrecompress() bool { return c.Compress.Brotli || c.Compress.Gzip }
+// SharedChunksOn reports whether imported client components hydrate from
+// shared chunks (sharedChunks, on unless set to false).
+func (c *Config) SharedChunksOn() bool { return c.SharedChunks == nil || *c.SharedChunks }
+
+// ShouldPrecompress reports whether build-time precompression is enabled. It is
+// on unless both encodings are turned off.
+func (c *Config) ShouldPrecompress() bool { return c.Compress.BrotliOn() || c.Compress.GzipOn() }
 
 // ServerPort returns the listen port for `krate serve`: server.port, else
 // devServer.port, else 3000.
@@ -930,6 +1011,19 @@ func (c *Config) MaxAPIBodyBytes() int64 {
 		return c.Server.MaxBodySize
 	}
 	return defaultMaxAPIBodyBytes
+}
+
+// ClientRuntimeConfig configures the shared browser runtime chunk.
+type ClientRuntimeConfig struct {
+	// Exports is "auto" (default): production builds define on window only
+	// the runtime exports the site's code references. "all" defines every
+	// export, for code the build cannot see.
+	Exports string `json:"exports,omitempty"`
+}
+
+// AllRuntimeExports reports whether clientRuntime.exports is "all".
+func (c *Config) AllRuntimeExports() bool {
+	return c.ClientRuntime.Exports == "all"
 }
 
 // SPAEnabled reports whether the client-side router is enabled (default true).
@@ -1174,6 +1268,9 @@ func (c *Config) Resolve(root string) {
 	if c.EnvDir != "" && !filepath.IsAbs(c.EnvDir) {
 		c.EnvDir = filepath.Join(root, c.EnvDir)
 	}
+	if c.OutputFileTracingRoot != "" && !filepath.IsAbs(c.OutputFileTracingRoot) {
+		c.OutputFileTracingRoot = filepath.Join(root, c.OutputFileTracingRoot)
+	}
 	// Fold the legacy goApi block into the unified go config once, so the rest
 	// of the codebase reads a single normalized field (c.Go).
 	c.Go = c.EffectiveGo()
@@ -1214,4 +1311,16 @@ func (c *Config) Resolve(root string) {
 type TSCompilerOptions struct {
 	ExperimentalDecorators  bool
 	UseDefineForClassFields *bool
+}
+
+// DefaultEnvPrefix is the prefix of the environment variables Krate inlines
+// into client code unless envPrefix says otherwise.
+const DefaultEnvPrefix = "KRATE_PUBLIC_"
+
+// PublicEnvPrefixes returns the configured envPrefix list, or the default.
+func (c *Config) PublicEnvPrefixes() []string {
+	if c == nil || len(c.EnvPrefix) == 0 {
+		return []string{DefaultEnvPrefix}
+	}
+	return []string(c.EnvPrefix)
 }

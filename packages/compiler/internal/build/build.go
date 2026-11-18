@@ -60,23 +60,33 @@ type PageResult struct {
 	HTML     string
 	HeadHTML string
 	// FontURLs are the fonts this page's own stylesheet asks to preload.
-	FontURLs      []string
-	ScriptHTML    string
-	StyleHTML     string
-	HydrationJS   string
-	JSFile        string
-	CSSFile       string
-	CSSModernFile string // modern-only stylesheet for the UA sibling (hybrid+userAgent)
-	CSSLegacyFile string // legacy-only stylesheet for the UA sibling (hybrid+userAgent)
-	CSS           string // this page's own imported CSS (before minification/hashing)
-	RuntimeJSFile string // shared runtime chunk path (relative to outDir), e.g. "chunks/runtime.abc.js"
-	HasJS         bool
-	HasCSS        bool
-	HasCSSSignals bool // page emitted CSS-signal rules (drives the legacy sibling)
-	IsErrorPage   bool
-	UsedCSS       map[string]bool
-	UsedFuncs     map[string]bool
-	LoadingHTML   string // rendered loading.tsx fallback for SPA transitions
+	FontURLs    []fontFace
+	ScriptHTML  string
+	StyleHTML   string
+	HydrationJS string
+	// RuntimeRefs are the global names the page's client code (its hydration
+	// script and lazy chunks) references, recorded before minification
+	// renames locals; they decide which runtime features ship. nil when not
+	// recorded, in which case HydrationJS is scanned instead.
+	RuntimeRefs []string
+	JSFile      string
+	// SharedScopes are the component scope templates the page script calls;
+	// SharedJSFiles the shared chunks holding them (see sharedchunks.go).
+	SharedScopes  []renderer.SharedScope
+	SharedJSFiles []string
+	// CSSFiles are the page's stylesheets in cascade order (see writePageCSS).
+	CSSFiles       []string
+	CSSModernFiles []string // modern-only stylesheets for the UA sibling (hybrid+userAgent)
+	CSSLegacyFiles []string // legacy-only stylesheets for the UA sibling (hybrid+userAgent)
+	CSS            string   // this page's own imported CSS (before minification/hashing)
+	RuntimeJSFile  string   // shared runtime chunk path (relative to outDir), e.g. "chunks/runtime.abc.js"
+	HasJS          bool
+	HasCSS         bool
+	HasCSSSignals  bool // page emitted CSS-signal rules (drives the legacy sibling)
+	IsErrorPage    bool
+	UsedCSS        map[string]bool
+	UsedFuncs      map[string]bool
+	LoadingHTML    string // rendered loading.tsx fallback for SPA transitions
 
 	// FinalHTML is the fully assembled document written to disk (head + body,
 	// SEO injection, minification). Populated by writeHTMLPages; consumed by
@@ -147,6 +157,15 @@ type PageResult struct {
 }
 
 type Builder struct {
+	// shareAllScopes makes page-local components hydrate from shared chunks
+	// too, so tests can run every scope through the shared path.
+	shareAllScopes bool
+	// runtimeFeatures are the optional runtime features the last runtime
+	// chunk included; the output audit test reads it.
+	runtimeFeatures []string
+	// runtimeResultsHook, when set by a test, receives the page results the
+	// runtime chunk is derived from.
+	runtimeResultsHook func([]*PageResult)
 	// DebugGo builds the native Go host for a debugger: no optimizations or
 	// inlining, and source paths as they are on disk (see compileGoHost).
 	DebugGo bool
@@ -243,11 +262,11 @@ type Builder struct {
 	// (a release build). It is set by BuildNativeApp from Derive.
 	nativeShake bool
 
-	// fontPreloadHTML holds the `<link rel="preload">` tags for fonts declared
-	// in the global stylesheet; injected into every page head.
-	fontPreloadHTML string
-	// globalFonts are the font URLs already preloaded by the global stylesheet.
-	globalFonts []string
+	// globalFonts are the preload candidates from the global stylesheet; each
+	// page keeps the ones it can use on first render.
+	globalFonts []fontFace
+	// fontWarned records font URLs already reported as missing.
+	fontWarned sync.Map
 
 	workerMu  sync.Mutex
 	workers   map[string]string // worker source path -> hashed site URL (/workers/...)
@@ -338,6 +357,11 @@ type Builder struct {
 	islandMu        sync.Mutex
 	islandImportMap string
 	preactChunks    map[string]string
+	// preactChunkDeps maps each preact* chunk URL (relative to the base
+	// path) to the bare specifiers it imports.
+	preactChunkDeps map[string][]string
+	// islandGraph is the static import graph of the island chunks.
+	islandGraph islandModuleGraph
 	// islandEntries are the island chunk entry modules of each page; they are
 	// bundled together after the pages (see islandgraph.go).
 	islandEntries map[string][]islandEntry
@@ -394,7 +418,7 @@ var nativeCfgScriptRe = regexp.MustCompile(`<script type="application/json" id="
 // The config is a non-executing JSON data block, so a strict script-src
 // policy needs no allowance for it. It is written only when it carries
 // something the runtime cannot assume: a base path, View Transitions turned
-// off, or the dev flag. The defaults need no block at all.
+// off, a viewport prefetch default, or the dev flag. The defaults need no block at all.
 func (b *Builder) runtimeCommonHead() string {
 	var sb strings.Builder
 	cfg := map[string]interface{}{}
@@ -404,6 +428,9 @@ func (b *Builder) runtimeCommonHead() string {
 	if b.DevMode {
 		// Enables the SPA router's dev warnings (e.g. a layout it could not keep mounted).
 		cfg["dev"] = true
+	}
+	if b.Cfg.Prefetch == "viewport" {
+		cfg["prefetch"] = "viewport"
 	}
 	off := b.viewTransitionsOff()
 	if off {
@@ -422,9 +449,6 @@ func (b *Builder) runtimeCommonHead() string {
 		sb.WriteString("@media (prefers-reduced-motion: reduce){")
 		sb.WriteString("::view-transition-group(*),::view-transition-old(*),::view-transition-new(*){animation:none!important}}")
 		sb.WriteString("</style>\n")
-	}
-	if b.fontPreloadHTML != "" {
-		sb.WriteString(b.fontPreloadHTML)
 	}
 	return sb.String()
 }
@@ -917,6 +941,12 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 		if f != "" {
 			globalCSS = append(globalCSS, f)
 		}
+	}
+
+	// Dev builds keep component scopes in the page script; a subset build
+	// with shared scopes still writes chunks for the pages it built.
+	if err := b.writeSharedChunks(results); err != nil {
+		return results, err
 	}
 
 	// In-memory HTML generation + string swap + single disk write per page
@@ -1412,6 +1442,12 @@ func (b *Builder) BuildAll() error {
 	}
 	wl.Lap("islands")
 
+	// Hydration code of the components several pages import.
+	if err := b.writeSharedChunks(results); err != nil {
+		failOutput(err)
+	}
+	wl.Lap("shared-chunks")
+
 	// In-memory HTML generation + string swap + single disk write per page
 	b.writeHTMLPages(results, globalCSS, runtimeJS)
 	wl.Lap("html")
@@ -1470,11 +1506,11 @@ func (b *Builder) BuildAll() error {
 	// The static assets are written: precompress them while the server side
 	// is built. The pass at the end only encodes what changes after this.
 	var earlyPrecompress chan struct{}
-	if !b.DevMode && b.Cfg.ShouldPrecompress() {
+	if !b.DevMode && b.shouldPrecompress() {
 		earlyPrecompress = make(chan struct{})
 		go func() {
 			defer close(earlyPrecompress)
-			_, _ = PrecompressOutput(b.Cfg.OutDir, b.Cfg.Compress.Brotli, b.Cfg.Compress.Gzip)
+			_, _ = PrecompressOutput(b.Cfg.OutDir, b.Cfg.Compress.BrotliOn(), b.Cfg.Compress.GzipOn())
 		}()
 		// Never return with the pass still writing into the output.
 		defer func() { <-earlyPrecompress }()
@@ -1507,6 +1543,11 @@ func (b *Builder) BuildAll() error {
 		failureErrs = append(failureErrs, err)
 	}
 	tl.Lap("middleware")
+	if err := b.BuildInstrumentation(); err != nil {
+		fmt.Fprintf(os.Stderr, "  %sInstrumentation error:%s %v\n", cRed, cReset, err)
+		failureMessages = append(failureMessages, "  instrumentation: "+err.Error())
+		failureErrs = append(failureErrs, err)
+	}
 
 	// Write page manifest with SSR/ISR metadata
 	manifestCSS := ""
@@ -1596,9 +1637,12 @@ func (b *Builder) BuildAll() error {
 
 			IsErrorPage: r.IsErrorPage,
 		}
-		if r.CSSFile != "" && !seenCSS[r.CSSFile] {
-			seenCSS[r.CSSFile] = true
-			if data, err := os.ReadFile(filepath.Join(b.Cfg.OutDir, r.CSSFile)); err == nil {
+		for _, f := range r.CSSFiles {
+			if seenCSS[f] {
+				continue
+			}
+			seenCSS[f] = true
+			if data, err := os.ReadFile(filepath.Join(b.Cfg.OutDir, f)); err == nil {
 				mergedPageCSS.Write(data)
 				mergedPageCSS.WriteString("\n")
 			}
@@ -1667,9 +1711,9 @@ func (b *Builder) BuildAll() error {
 	// Build-time precompression: emit .br/.gz siblings for compressible assets.
 	// Skipped in dev (rebuilds must stay fast); the client/static host only uses
 	// them for production delivery.
-	if !b.DevMode && b.Cfg.ShouldPrecompress() {
+	if !b.DevMode && b.shouldPrecompress() {
 		stopPC := b.phase("build:precompress")
-		n, err := PrecompressOutput(b.Cfg.OutDir, b.Cfg.Compress.Brotli, b.Cfg.Compress.Gzip)
+		n, err := PrecompressOutput(b.Cfg.OutDir, b.Cfg.Compress.BrotliOn(), b.Cfg.Compress.GzipOn())
 		stopPC()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "  %sWarning: precompression failed:%s %v\n", cYellow, cReset, err)
@@ -1781,7 +1825,10 @@ type twPageInfo struct {
 // are collected for the generator and removed, and `@apply` is expanded;
 // anything that cannot be honoured is reported with a warning. The returned
 // info is what the caller records for the page via setTailwindPage.
-func (b *Builder) processCSSDirectives(cssText string) (string, twPageInfo) {
+//
+// ctx, when set, holds directives of the other CSS sources of the same page:
+// they join the expansion context only and are not part of the returned info.
+func (b *Builder) processCSSDirectives(cssText string, ctx *css.TailwindDirectives) (string, twPageInfo) {
 	var info twPageInfo
 	// `@layer` is left intact: it is valid CSS and unwrapping it would change
 	// the authored cascade.
@@ -1800,6 +1847,7 @@ func (b *Builder) processCSSDirectives(cssText string) (string, twPageInfo) {
 	gen := css.NewTailwindGenerator()
 	gen.MergeConfig(css.LoadTailwindConfigWithOptions(b.Root, opts))
 	dirs := css.ScanTailwindDirectives(b.Root, opts)
+	dirs.MergeFrom(ctx)
 	dirs.MergeFrom(info.dirs)
 	dirs.ApplyTo(&gen.Theme)
 	gen.Theme.LiveVars = dirs.LiveVars(&gen.Theme)
@@ -1956,12 +2004,11 @@ func (b *Builder) writeGlobalCSS(mergedCSS string) (string, error) {
 		processedCSS := mergedCSS
 		// Inline @import directives before minification
 		processedCSS = b.inlineImports(processedCSS)
-		processedCSS, _ = b.processCSSDirectives(processedCSS)
+		processedCSS, _ = b.processCSSDirectives(processedCSS, nil)
 		processedCSS = injectFontDisplay(processedCSS, b.Cfg.Fonts.DisplayValue())
 		processedCSS = b.prefixCSSURLs(processedCSS)
 		if b.Cfg.Fonts.PreloadEnabled() {
-			b.globalFonts = collectFontPreloads(processedCSS, b.Cfg.Fonts.PreloadLimit)
-			b.fontPreloadHTML = fontPreloadHTML(b.globalFonts, b.Cfg.BaseURLPath())
+			b.globalFonts = collectFontFaces(processedCSS, b.Cfg.Fonts.PreloadLimit)
 		}
 		if b.Cfg.ShouldMinifyCSS() {
 			processedCSS = css.Minify(processedCSS)
@@ -1979,124 +2026,6 @@ func (b *Builder) writeGlobalCSS(mergedCSS string) (string, error) {
 		}
 	}
 	return cssFile, nil
-}
-
-// writePageCSS writes one hashed stylesheet per page from the page's own CSS.
-// Pages sharing identical CSS (e.g. every docs page under the same theme, or
-// every page wrapped by the same layout) collapse onto one shared file, so each
-// page only downloads the CSS its own module graph imported. Syntax-highlight
-// (chroma) CSS is prepended only when the page actually renders highlighted
-// code. Returns the set of stylesheet filenames written.
-func (b *Builder) writePageCSS(results []*PageResult) (map[string]bool, error) {
-	written := make(map[string]bool)
-	// Memoize the expensive inline+directive+minify pipeline: many pages share
-	// byte-identical CSS (the docs theme is linked on every page), so process
-	// each distinct input once.
-	type processed struct {
-		file       string
-		data       []byte
-		twInfo     twPageInfo
-		modernFile string
-		modernData []byte
-		legacyFile string
-		legacyData []byte
-		fonts      []string
-	}
-	memo := make(map[string]processed)
-	var chromaCSS string
-	chromaLoaded := false
-	var codeTheme syntaxhighlight.Theme
-	if b.Cfg.Markdown.CodeHighlight {
-		// Resolve up front so an unknown theme name is reported even on a
-		// build that renders no code.
-		codeTheme = b.codeTheme()
-	}
-
-	// Per-variant stylesheets: in hybrid+userAgent mode the UA sibling should
-	// download only the legacy signal rules (and the default document only the
-	// modern rules), so split the hybrid stylesheet per variant.
-	variants := b.legacyDocEnabled()
-
-	var writeErrs []error
-	write := func(file string, data []byte) {
-		if file == "" || written[file] {
-			return
-		}
-		if err := writeOutput(filepath.Join(b.Cfg.OutDir, file), data); err != nil {
-			writeErrs = append(writeErrs, err)
-		}
-		written[file] = true
-	}
-	var lastFonts []string
-	process := func(pageCss string) (string, []byte, twPageInfo) {
-		processedCSS := b.inlineImports(pageCss)
-		processedCSS, info := b.processCSSDirectives(processedCSS)
-		processedCSS = injectFontDisplay(processedCSS, b.Cfg.Fonts.DisplayValue())
-		processedCSS = b.prefixCSSURLs(processedCSS)
-		lastFonts = nil
-		if b.Cfg.Fonts.PreloadEnabled() {
-			lastFonts = collectFontPreloads(processedCSS, b.Cfg.Fonts.PreloadLimit)
-		}
-		if b.Cfg.ShouldMinifyCSS() {
-			processedCSS = css.Minify(processedCSS)
-		} else {
-			processedCSS = css.RemoveDuplicateDeclarations(processedCSS)
-		}
-		bs := []byte(processedCSS)
-		if strings.TrimSpace(processedCSS) == "" {
-			return "", nil, info
-		}
-		return "styles." + hashContent(bs) + ".css", bs, info
-	}
-
-	for _, r := range results {
-		if r.CSS == "" && !pageRendersCode(r) {
-			b.setTailwindPage(r.Page, twPageInfo{})
-			continue
-		}
-		pageCss := r.CSS
-		if b.Cfg.Markdown.CodeHighlight && pageRendersCode(r) {
-			if !chromaLoaded {
-				chromaCSS = syntaxhighlight.ThemeCSS(codeTheme)
-				chromaLoaded = true
-			}
-			if chromaCSS != "" {
-				pageCss = chromaCSS + "\n" + pageCss
-			}
-		}
-
-		key := hashContent([]byte(pageCss))
-		p, ok := memo[key]
-		if !ok {
-			p.file, p.data, p.twInfo = process(pageCss)
-			p.fonts = lastFonts
-			if variants && r.HasCSSSignals {
-				modernRaw, legacyRaw := splitVariantCSS(pageCss)
-				p.modernFile, p.modernData, _ = process(modernRaw)
-				if p.modernFile != "" {
-					p.modernFile = strings.TrimSuffix(p.modernFile, ".css") + ".modern.css"
-				}
-				p.legacyFile, p.legacyData, _ = process(legacyRaw)
-				if p.legacyFile != "" {
-					p.legacyFile = strings.TrimSuffix(p.legacyFile, ".css") + ".legacy.css"
-				}
-			}
-			memo[key] = p
-		}
-		r.CSSFile = p.file
-		r.FontURLs = p.fonts
-		b.setTailwindPage(r.Page, p.twInfo)
-		write(p.file, p.data)
-		if p.modernFile != "" {
-			r.CSSModernFile = p.modernFile
-			write(p.modernFile, p.modernData)
-		}
-		if p.legacyFile != "" {
-			r.CSSLegacyFile = p.legacyFile
-			write(p.legacyFile, p.legacyData)
-		}
-	}
-	return written, errors.Join(writeErrs...)
 }
 
 // codeTheme resolves the configured light and dark code themes. An unknown
@@ -2130,7 +2059,7 @@ func pageRendersCode(r *PageResult) bool {
 // writeHTMLPages builds the layout wrapper, applies placeholders, minifies,
 // and saves to disk in a single parallel step (Zero Disk-I/O Amplification Fix)
 // cssFiles are extra global stylesheets (e.g. Tailwind) linked on every page in
-// addition to each page's own stylesheet (r.CSSFile).
+// addition to each page's own stylesheets (r.CSSFiles).
 // durableStateScript returns the `<script>window.__KRATE_STATE__=...</script>`
 // tag for the project's durable state, read once from `krate.state.json` (or
 // `.krate/state.json`). Returns "" when neither exists or the JSON is invalid.
@@ -2201,22 +2130,20 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 
 			// 1. Construct structural HTML wrapper in memory.
 			// Site-global stylesheets (e.g. Tailwind) are linked first, then
-			// the page's own stylesheet (r.CSSFile). Tailwind output is
-			// layered, so page CSS wins over preflight and utilities by
-			// layer precedence, and page `@layer base` rules follow preflight.
-			pageCSS := append([]string{}, cssFiles...)
-			if r.CSSFile != "" {
-				pageCSS = append(pageCSS, r.CSSFile)
-			}
-			// UA siblings link a variant-only stylesheet when the build emitted
-			// one (hybrid+userAgent); otherwise they share the page sheet.
+			// the page's own stylesheets (r.CSSFiles, in cascade order).
+			// Tailwind output is layered, so page CSS wins over preflight and
+			// utilities by layer precedence, and page `@layer base` rules
+			// follow preflight.
+			pageCSS := append(append([]string{}, cssFiles...), r.CSSFiles...)
+			// UA siblings link variant-only stylesheets when the build emitted
+			// them (hybrid+userAgent); otherwise they share the page sheets.
 			legacyPageCSS := pageCSS
-			if r.CSSLegacyFile != "" {
-				legacyPageCSS = append(append([]string{}, cssFiles...), r.CSSLegacyFile)
+			if len(r.CSSLegacyFiles) > 0 {
+				legacyPageCSS = append(append([]string{}, cssFiles...), r.CSSLegacyFiles...)
 			}
 			modernPageCSS := pageCSS
-			if r.CSSModernFile != "" {
-				modernPageCSS = append(append([]string{}, cssFiles...), r.CSSModernFile)
+			if len(r.CSSModernFiles) > 0 {
+				modernPageCSS = append(append([]string{}, cssFiles...), r.CSSModernFiles...)
 			}
 			devBootstrap := ""
 			if b.DevMode {
@@ -2226,17 +2153,19 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 			if im := b.islandImportMapHTML(); im != "" {
 				runtimeHead = im + runtimeHead
 			}
-			// Fonts declared by the page's own CSS (not the global sheet).
-			if pf := b.pageFontPreloads(r.FontURLs); pf != "" {
+			// Fonts from the global sheet and the page's own CSS.
+			if pf := b.pageFontPreloads(r.HTML, r.FontURLs); pf != "" {
 				runtimeHead += pf
 			}
 			// Only pages that call into the runtime load it; a static page of
 			// a site with islands elsewhere ships no JavaScript.
 			runtimeJSFile := runtimeJSFile
+			sharedJS := r.SharedJSFiles
 			if !pageNeedsRuntime(r) {
 				runtimeJSFile = ""
+				sharedJS = nil
 			}
-			chunkPreloads := dynamicChunkURLs(r.HydrationJS, b.Cfg.BaseURLPath())
+			chunkPreloads := b.islandPreloads(dynamicChunkURLs(r.HydrationJS, b.Cfg.BaseURLPath()))
 			chunkPreloads = append(chunkPreloads, lazyChunkPreloads(r.HydrationJS, b.Cfg.BaseURLPath())...)
 			if b.NativeTarget && !b.DevMode {
 				// Chunks are read from disk on demand: preloading would
@@ -2250,9 +2179,9 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 			}
 			var html string
 			if r.LoadingHTML != "" {
-				html = generateHTMLWithLoading(r.HTML, r.HeadHTML, r.ScriptHTML, r.StyleHTML, r.LoadingHTML, pageCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath(), chunkPreloads...)
+				html = generateHTMLWithLoading(r.HTML, r.HeadHTML, r.ScriptHTML, r.StyleHTML, r.LoadingHTML, pageCSS, r.JSFile, runtimeJSFile, sharedJS, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath(), chunkPreloads...)
 			} else {
-				html = generateHTML(r.HTML, r.HeadHTML, r.ScriptHTML, r.StyleHTML, pageCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath(), chunkPreloads...)
+				html = generateHTML(r.HTML, r.HeadHTML, r.ScriptHTML, r.StyleHTML, pageCSS, r.JSFile, runtimeJSFile, sharedJS, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath(), chunkPreloads...)
 			}
 
 			// Opt-in UA variants: sibling documents so `krate serve` can send a
@@ -2266,11 +2195,11 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 				baseScript := strings.ReplaceAll(r.ScriptHTML, hybridShimScriptTag(), "")
 				legacyScriptHTML := baseScript + legacyShimScriptTag()
 				if r.LoadingHTML != "" {
-					legacyHTML = generateHTMLWithLoading(r.HTML, r.HeadHTML, legacyScriptHTML, r.StyleHTML, r.LoadingHTML, legacyPageCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath(), chunkPreloads...)
-					modernHTML = generateHTMLWithLoading(r.HTML, r.HeadHTML, baseScript, r.StyleHTML, r.LoadingHTML, modernPageCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath(), chunkPreloads...)
+					legacyHTML = generateHTMLWithLoading(r.HTML, r.HeadHTML, legacyScriptHTML, r.StyleHTML, r.LoadingHTML, legacyPageCSS, r.JSFile, runtimeJSFile, sharedJS, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath(), chunkPreloads...)
+					modernHTML = generateHTMLWithLoading(r.HTML, r.HeadHTML, baseScript, r.StyleHTML, r.LoadingHTML, modernPageCSS, r.JSFile, runtimeJSFile, sharedJS, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath(), chunkPreloads...)
 				} else {
-					legacyHTML = generateHTML(r.HTML, r.HeadHTML, legacyScriptHTML, r.StyleHTML, legacyPageCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath(), chunkPreloads...)
-					modernHTML = generateHTML(r.HTML, r.HeadHTML, baseScript, r.StyleHTML, modernPageCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath(), chunkPreloads...)
+					legacyHTML = generateHTML(r.HTML, r.HeadHTML, legacyScriptHTML, r.StyleHTML, legacyPageCSS, r.JSFile, runtimeJSFile, sharedJS, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath(), chunkPreloads...)
+					modernHTML = generateHTML(r.HTML, r.HeadHTML, baseScript, r.StyleHTML, modernPageCSS, r.JSFile, runtimeJSFile, sharedJS, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath(), chunkPreloads...)
 				}
 			}
 
@@ -2309,6 +2238,14 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 				if r.IsErrorPage && !hasRobotsMeta(r.HeadHTML) {
 					h = strings.Replace(h, "</head>", `<meta name="robots" content="noindex">`+"</head>", 1)
 				}
+				// 2a'. Fallback <title> and the configured favicon.
+				if tags := fallbackHeadTags(r.HeadHTML, b.Cfg.SEO); tags != "" {
+					if r.HeadHTML == "" && strings.HasPrefix(tags, "<title>") {
+						// The generic default title gives way to the site name.
+						h = strings.Replace(h, defaultTitleTag, "", 1)
+					}
+					h = strings.Replace(h, "</head>", tags+"</head>", 1)
+				}
 				// 2b. SEO meta tag injection (canonical, OG, Twitter Card)
 				if b.Cfg.SEO.BaseURL != "" || b.Cfg.SEO.Description != "" {
 					seoTags := generateSEOTags(r.HeadHTML, routeFromOutName(r.OutName), b.Cfg.SEO, seoCtx{BasePath: b.Cfg.BaseURLPath(), ErrorPage: r.IsErrorPage})
@@ -2316,6 +2253,7 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 						h = strings.Replace(h, "</head>", seoTags+"</head>", 1)
 					}
 				}
+				b.warnPublicStylesheets(h)
 				h = b.prefixHeadURLs(h)
 				// 3. Minify code in memory
 				if b.Cfg.ShouldMinifyHTML() {
@@ -2327,7 +2265,7 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 				if b.Cfg.CSP.Enabled {
 					cspMeta := generateCSPMeta(h, h, r.HydrationJS, b.Cfg.CSP.Directive)
 					if cspMeta != "" {
-						h = strings.Replace(h, "</head>", cspMeta+"</head>", 1)
+						h = insertCSPMeta(h, cspMeta)
 					}
 				}
 				return h
@@ -3004,11 +2942,11 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 	}
 	pl.Lap("layouts")
 	// Layouts come first (outermost first) so page CSS wins ties.
-	bundle.CSS = b.dedupeModuleCSS(page, layoutCSS+bundle.CSS, bundle.CSSModules)
+	bundle.CSS = b.dedupeModuleCSS(page, joinCSSParts(layoutCSS, bundle.CSS), bundle.CSSModules)
 	// Generated CSS signal rules land in the page's own hashed stylesheet, after
 	// layout CSS so author styles can override the defaults.
 	if choiceCSS != "" {
-		bundle.CSS += choiceCSS
+		bundle.CSS += "\n" + css.PartMarker("") + choiceCSS
 		// Legacy/hybrid modes drive the class-based stylesheet with a scoped
 		// shim; modern mode stays zero-JS.
 		emitResult.ScriptHTML += b.compatShimHTML()
@@ -3091,6 +3029,7 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 
 	jsFile := ""
 	hydrationJS := ""
+	runtimeRefs := []string{}
 	var jsBytes []byte
 	hasJS := false
 	var pageProviders *islandProviders
@@ -3119,7 +3058,7 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 	if islandStyles != nil {
 		// Stylesheets imported by compiled package islands join the page CSS and
 		// the page's dependencies like any other imported stylesheet.
-		bundle.CSS += islandStyles.CSS
+		bundle.CSS = joinCSSParts(bundle.CSS, islandStyles.CSS)
 		for src, url := range islandStyles.Assets {
 			bundle.AssetFiles[src] = url
 		}
@@ -3141,17 +3080,32 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 	// Client-side JS scanned by CSS DCE for classes applied after hydration.
 	dceJS := append(lazyChunkSources(emitResult.LazyChunks), islandJS)
 	dceJS = append(dceJS, b.clientChunkSources(clientBoundaries, bundle.CSSModules)...)
+	var sharedScopes []renderer.SharedScope
 	if needsHydrate {
 		emitResult.TrackSources = b.Cfg.Sourcemap
+		// npm functions called by client code are bundled into the script.
+		vendor := collectVendorImports(bundle)
+		for _, rb := range b.routeStack(page) {
+			if lv, ok := layoutVendorImports.Load(rb.Path); ok {
+				vendor = append(vendor, lv.([]vendorImport)...)
+			}
+		}
+		emitResult.Share = b.shareOptions(entryModule.Path, renderMode, vendor, tree.ExternalComponents)
 		rawJS := strings.TrimSpace(renderer.GenerateNewHydrationJS(emitResult))
+		if !validSharedScopes(emitResult.SharedScopes) {
+			emitResult.Share = nil
+			rawJS = strings.TrimSpace(renderer.GenerateNewHydrationJS(emitResult))
+		}
+		sharedScopes = emitResult.SharedScopes
+		sharedJS := sharedScopesJS(sharedScopes)
 		if renderMode == RenderSSG {
 			var hlErr error
-			if rawJS, hlErr = b.attachHighlight(rawJS, emitResult.HTML); hlErr != nil {
+			if rawJS, hlErr = b.attachHighlight(rawJS, emitResult.HTML, sharedJS); hlErr != nil {
 				return nil, "", hlErr
 			}
 		}
-		b.warnShippedCollections(page, entryModule.Program, rawJS, 1)
-		dceJS = append(dceJS, rawJS)
+		b.warnShippedCollections(page, entryModule.Program, joinJS(rawJS, sharedJS), 1)
+		dceJS = append(dceJS, rawJS, sharedJS)
 		var lazyErr error
 		if rawJS, lazyErr = b.writeLazyChunks(rawJS, emitResult.LazyChunks, pageDir, outName); lazyErr != nil {
 			return nil, "", lazyErr
@@ -3161,13 +3115,6 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 		}
 		if rawJS != "" {
 			rawJS = neutralizeClientEnv(rawJS)
-			// npm functions called by client code are bundled into the script.
-			vendor := collectVendorImports(bundle)
-			for _, rb := range b.routeStack(page) {
-				if lv, ok := layoutVendorImports.Load(rb.Path); ok {
-					vendor = append(vendor, lv.([]vendorImport)...)
-				}
-			}
 			var verr error
 			if rawJS, verr = b.withVendorImports(rawJS, vendor, tree.ExternalComponents); verr != nil {
 				return nil, "", verr
@@ -3200,6 +3147,11 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 					finalJS = minifyJS(rawJS)
 				}
 			}
+			minified := ""
+			if finalJS != rawJS {
+				minified = finalJS
+			}
+			runtimeRefs = withSharedRefs(recordRuntimeRefs(rawJS, minified, emitResult.LazyChunks), sharedJS)
 
 			// Write page-specific hydration code only (runtime is in a shared chunk)
 			finalJS = strings.TrimSpace(finalJS)
@@ -3268,8 +3220,10 @@ func (b *Builder) buildPageOnceWith(page string, pend *pendingBoundaries) (*Page
 		ScriptHTML:    emitResult.ScriptHTML,
 		StyleHTML:     emitResult.StyleHTML,
 		HydrationJS:   hydrationJS,
+		RuntimeRefs:   runtimeRefs,
 		HasJS:         hasJS,
 		JSFile:        jsFile,
+		SharedScopes:  sharedScopes,
 		HasCSS:        pageCSS != "",
 		HasCSSSignals: tree.HasCSSSignals || layoutHasSignals,
 		IsErrorPage:   isSegment,
@@ -3366,8 +3320,10 @@ func (b *Builder) tryDiskReplay(page string) (*PageResult, string, bool) {
 		ScriptHTML:    e.ScriptHTML,
 		StyleHTML:     e.StyleHTML,
 		HydrationJS:   e.HydrationJS,
+		RuntimeRefs:   e.RuntimeRefs,
 		HasJS:         e.HasJS,
 		JSFile:        e.JSFile,
+		SharedScopes:  e.SharedScopes,
 		HasCSS:        e.HasCSS,
 		HasCSSSignals: e.HasCSSSignals,
 		IsErrorPage:   e.IsErrorPage,
@@ -3420,8 +3376,10 @@ func (b *Builder) maybeStoreDiskPage(page string, r *PageResult, deps []string, 
 		ScriptHTML:    r.ScriptHTML,
 		StyleHTML:     r.StyleHTML,
 		HydrationJS:   r.HydrationJS,
+		RuntimeRefs:   r.RuntimeRefs,
 		JSFile:        r.JSFile,
 		JSBytes:       jsBytes,
+		SharedScopes:  r.SharedScopes,
 		CSS:           r.CSS,
 		HasJS:         r.HasJS,
 		HasCSS:        r.HasCSS,
@@ -3859,6 +3817,11 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	b.printReactiveDiags(reactive.Build(emitResult.Signatures).Validate())
 
 	css = layoutBundle.CSS
+	// Files the layout's stylesheets reference by relative url() (fonts,
+	// images) are part of its output like a page's own.
+	if err := b.writeAssetFiles(layoutBundle.AssetFiles); err != nil {
+		return nil, "", nil, false, fmt.Errorf("writing assets for layout %s: %w", layoutPath, err)
+	}
 	// CSS signal rules for the layout and its components are generated during IR
 	// construction and appended to the layout's own module CSS.
 	if tree.CSSSignalsCSS != "" {
@@ -4372,7 +4335,7 @@ func (b *Builder) applyLayoutStack(page string, emitResult *renderer.EmitResult,
 		}
 		// Boundaries are visited innermost first; prepend so the outermost
 		// layout ends up first and inner ones override it.
-		css = layoutCSS + slotCSS + css
+		css = joinCSSParts(joinCSSParts(layoutCSS, slotCSS), css)
 		used = append(used, layoutDeps...)
 		chain = append([]routeChainEntry{entry}, chain...)
 	}
@@ -5594,6 +5557,11 @@ func (b *Builder) compileSingleRoute(file string, apiSrcDir string, fam *apiRout
 	// A route that provably keeps an external import is Node-only: it gets
 	// its Node bundle and a QuickJS stub, without bundling its packages for
 	// QuickJS. Otherwise the full QuickJS bundle decides.
+	rt := readAPIRouteRuntime(file)
+	if rt == apiRuntimeNodeJS {
+		meta.NodeOnly = true
+		return meta, b.finishNodeOnlyRoute(file, quickjsPath, meta.File, buildNode)
+	}
 	proven := plan.nodeOnly
 	if !plan.detected && !legacyNodeOnlyDetection {
 		proven = provablyNodeOnly(quickjsOpts, b.Cfg.ServerExternalPackages, fam)
@@ -5639,9 +5607,32 @@ func (b *Builder) compileSingleRoute(file string, apiSrcDir string, fam *apiRout
 		}
 		return meta, b.finishNodeOnlyRoute(file, quickjsPath, meta.File, buildNode)
 	}
+	dec := plan.decision
+	plan.decision = nil
+	if dec == nil {
+		d := b.routeRuntimeDecision(quickjsResult.Metafile, rt)
+		dec = &d
+	}
+	if dec.nodeOnly {
+		meta.NodeOnly = true
+		reportRouteMove(file, apiSrcDir, dec.reason)
+		return meta, b.finishNodeOnlyRoute(file, quickjsPath, meta.File, buildNode)
+	}
 	b.recordDeps(file, metafileDeps(b.Root, quickjsResult.Metafile))
+	if len(dec.errs) > 0 {
+		b.setRuntimeCompatWarnings(file, nil)
+		errs := make([]error, len(dec.errs))
+		for i, d := range dec.errs {
+			errs[i] = d
+		}
+		return apiRouteMeta{}, errors.Join(errs...)
+	}
 	removeStaleArtifact(nodePath)
-	meta.Features = b.scanRuntimeCompat(file, quickjsResult.Metafile, jscompat.CompatAPIRuntime)
+	b.setRuntimeCompatWarnings(file, dec.warnings)
+	if len(dec.warnings) > 0 {
+		printWarningsOnce(os.Stderr, dec.warnings)
+	}
+	meta.Features = dec.features
 	return meta, nil
 }
 
@@ -5727,23 +5718,48 @@ func (b *Builder) mergeAPIRouteMeta(updates map[string]apiRouteMeta) error {
 	return writeOutput(manifestPath, data)
 }
 
-// pageFontPreloads renders preload links for fonts the global stylesheet has
-// not already preloaded.
-func (b *Builder) pageFontPreloads(urls []string) string {
-	if len(urls) == 0 {
+// pageFontPreloads renders the preload links for one page: the global and
+// page-CSS fonts, minus monospace faces when the page HTML has no <pre> or
+// <code>, minus files this site does not serve (reported once per URL).
+func (b *Builder) pageFontPreloads(pageHTML string, pageFonts []fontFace) string {
+	all := append(append([]fontFace{}, b.globalFonts...), pageFonts...)
+	if len(all) == 0 {
 		return ""
 	}
-	have := map[string]bool{}
-	for _, u := range b.globalFonts {
-		have[u] = true
-	}
-	var rest []string
-	for _, u := range urls {
-		if !have[u] {
-			rest = append(rest, u)
+	code := pageUsesCode(pageHTML)
+	seen := map[string]bool{}
+	var urls []string
+	for _, f := range all {
+		if seen[f.URL] || (f.Mono && !code) {
+			continue
 		}
+		seen[f.URL] = true
+		if !b.fontServed(f.URL) {
+			continue
+		}
+		urls = append(urls, f.URL)
 	}
-	return fontPreloadHTML(rest, b.Cfg.BaseURLPath())
+	return fontPreloadHTML(urls, b.Cfg.BaseURLPath())
+}
+
+// fontServed reports whether a preload URL names a file this site serves.
+// External URLs are trusted. A miss warns once with the fix.
+func (b *Builder) fontServed(u string) bool {
+	if strings.Contains(u, "://") || strings.HasPrefix(u, "//") {
+		return true
+	}
+	ref := u
+	if base := b.Cfg.BaseURLPath(); base != "" && strings.HasPrefix(ref, base+"/") {
+		ref = strings.TrimPrefix(ref, base)
+	}
+	if b.isSiteFile(ref) {
+		return true
+	}
+	if _, dup := b.fontWarned.LoadOrStore(u, true); !dup {
+		b.warnOnce("font preload skipped: " + u + " is referenced by an @font-face but is not a file this site serves. Put the font in public/ at that path, " +
+			"reference it from CSS with a relative url() so it is bundled, or mark the @font-face with /* no-preload */")
+	}
+	return false
 }
 
 // importsRuntimeComponent reports whether any module is a runtime component.
@@ -5754,4 +5770,19 @@ func importsRuntimeComponent(mods []*bundler.Module) bool {
 		}
 	}
 	return false
+}
+
+// precompressByDefault is whether a build with no `compress` setting writes
+// .br/.gz siblings. The package's tests turn it off (brotli at level 11 is
+// most of a small test build's CPU time); tests of precompression set
+// `compress` explicitly or restore the default.
+var precompressByDefault = true
+
+// shouldPrecompress reports whether this build writes compressed siblings.
+func (b *Builder) shouldPrecompress() bool {
+	c := b.Cfg.Compress
+	if c.Brotli == nil && c.Gzip == nil && !precompressByDefault {
+		return false
+	}
+	return b.Cfg.ShouldPrecompress()
 }

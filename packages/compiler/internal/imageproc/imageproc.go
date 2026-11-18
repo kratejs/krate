@@ -103,10 +103,60 @@ func EncodeJPEG(img image.Image, quality int) ([]byte, error) {
 	return buf.Bytes(), err
 }
 
+var pngEncoder = png.Encoder{CompressionLevel: png.BestCompression}
+
+// EncodePNG encodes img with best compression. Images that use at most 256
+// opaque colours are written as 8-bit paletted PNGs, which is lossless and far
+// smaller than truecolour for flat graphics.
 func EncodePNG(img image.Image) ([]byte, error) {
+	if pal := toPaletted(img); pal != nil {
+		img = pal
+	}
 	var buf bytes.Buffer
-	err := png.Encode(&buf, img)
+	err := pngEncoder.Encode(&buf, img)
 	return buf.Bytes(), err
+}
+
+// toPaletted returns img as a paletted image when it is opaque and uses at
+// most 256 distinct colours, and nil otherwise. A paletted input is returned
+// as is.
+func toPaletted(img image.Image) *image.Paletted {
+	if p, ok := img.(*image.Paletted); ok {
+		return p
+	}
+	b := img.Bounds()
+	index := map[color.RGBA]uint8{}
+	var pal color.Palette
+	out := image.NewPaletted(b, nil)
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			r, g, bl, a := img.At(x, y).RGBA()
+			if a != 0xffff {
+				return nil
+			}
+			c := color.RGBA{R: uint8(r >> 8), G: uint8(g >> 8), B: uint8(bl >> 8), A: 255}
+			i, ok := index[c]
+			if !ok {
+				if len(pal) == 256 {
+					return nil
+				}
+				i = uint8(len(pal))
+				index[c] = i
+				pal = append(pal, c)
+			}
+			out.SetColorIndex(x, y, i)
+		}
+	}
+	out.Palette = pal
+	return out
+}
+
+// quantizeTo redraws img with the palette of a paletted source so a resized
+// variant of an indexed image stays indexed.
+func quantizeTo(img image.Image, pal color.Palette) *image.Paletted {
+	out := image.NewPaletted(img.Bounds(), pal)
+	xdraw.FloydSteinberg.Draw(out, out.Bounds(), img, img.Bounds().Min)
+	return out
 }
 
 // hasAlpha samples the image for transparent pixels. A stride of 8 keeps this
@@ -215,7 +265,8 @@ func boxBlur(img *image.RGBA, radius int) *image.RGBA {
 
 // GeneratePlaceholder produces a tiny, blurred, base64-encoded placeholder
 // image used as a low-quality-image placeholder (LQIP) until the real image
-// loads. PNG is used for sources with transparency, JPEG otherwise.
+// loads. PNG is used for sources with transparency, and otherwise whichever of
+// PNG and JPEG is smaller.
 func GeneratePlaceholder(img image.Image) string {
 	b := img.Bounds()
 	w, h := b.Dx(), b.Dy()
@@ -231,14 +282,14 @@ func GeneratePlaceholder(img image.Image) string {
 	tiny := resize(img, pw, ph)
 	blurred := boxBlur(tiny, 2)
 
-	var data []byte
-	var mime string
-	if hasAlpha(img) {
-		data, _ = EncodePNG(blurred)
-		mime = "image/png"
-	} else {
-		data, _ = EncodeJPEG(blurred, 50)
-		mime = "image/jpeg"
+	// A 16 px image is smaller as PNG when it is flat and as JPEG when it is a
+	// photo; keep whichever is shorter. Transparency needs PNG.
+	data, _ := EncodePNG(blurred)
+	mime := "image/png"
+	if !hasAlpha(img) {
+		if j, err := EncodeJPEG(blurred, 50); err == nil && len(j) < len(data) {
+			data, mime = j, "image/jpeg"
+		}
 	}
 	if len(data) == 0 {
 		return ""
@@ -286,8 +337,8 @@ func (o Options) formatEnabled(name string) bool {
 // is never served from a stale meta.
 func (o Options) optionsKey(reqW, reqH int) string {
 	h := fnv.New32a()
-	// v2: variants are EXIF-upright and sized to the requested display width.
-	fmt.Fprintf(h, "v2,%dx%d,", reqW, reqH)
+	// v3: PNG variants use best compression and palettes, and may be the source file.
+	fmt.Fprintf(h, "v3,%dx%d,", reqW, reqH)
 	for _, bp := range o.BreakpointList() {
 		fmt.Fprintf(h, "%d,", bp)
 	}
@@ -559,6 +610,11 @@ func ProcessImageWith(root, srcPath string, reqW, reqH int, opts Options) (*Imag
 		fallbackExt = ".png"
 	}
 
+	var srcPal color.Palette
+	if p, ok := img.(*image.Paletted); ok && !alpha {
+		srcPal = p.Palette
+	}
+
 	var srcsetWidths []int
 	if reqW > 0 || reqH > 0 {
 		dispW, _ := displayDims(origW, origH, reqW, reqH)
@@ -588,7 +644,13 @@ func ProcessImageWith(root, srcPath string, reqW, reqH int, opts Options) (*Imag
 			defer func() { <-sem }()
 
 			sh := ComputeHeight(origW, origH, sw)
-			resized := resize(img, sw, sh)
+			// The full-size variant is the decoded source itself; resampling
+			// it would only add noise.
+			var resized image.Image = img
+			full := sw == origW && sh == origH
+			if !full {
+				resized = resize(img, sw, sh)
+			}
 			q := widthQuality(quality, sw)
 
 			if wantWebP {
@@ -610,7 +672,16 @@ func ProcessImageWith(root, srcPath string, reqW, reqH int, opts Options) (*Imag
 				var fbBytes []byte
 				var ferr error
 				if fallbackExt == ".png" {
-					fbBytes, ferr = EncodePNG(resized)
+					fbImg := resized
+					if srcPal != nil && !full {
+						fbImg = quantizeTo(resized, srcPal)
+					}
+					fbBytes, ferr = EncodePNG(fbImg)
+					// A PNG source that is already smaller than its re-encode
+					// is served as is.
+					if ferr == nil && full && origFmt == "png" && len(data) < len(fbBytes) {
+						fbBytes = data
+					}
 				} else {
 					fbBytes, ferr = EncodeJPEG(resized, q)
 				}

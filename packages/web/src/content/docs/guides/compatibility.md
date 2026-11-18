@@ -180,7 +180,7 @@ Evidence: `TestEffectPhasesLowerToCreateEffectDeps`, `TestSameTypeBranchesBuildO
 
 **Source:** Supported - **Islands:** Supported - **SSR:** n/a
 
-Context resolves at the reader's position like React: Provider, React 19 <Ctx value>, Consumer render props, object defaults, nested and self-nesting providers, and providers around props.children; constant values fold at build time and state-driven values stay reactive. Object and callback refs (with React 19 cleanup functions), ref as a prop, forwardRef, createRef, useRef, and useImperativeHandle with deps attach before layout effects and detach on unmount.
+Context resolves at the reader's position like React: Provider, React 19 &lt;Ctx value&gt;, Consumer render props, object defaults, nested and self-nesting providers, and providers around props.children; constant values fold at build time and state-driven values stay reactive. Object and callback refs (with React 19 cleanup functions), ref as a prop, forwardRef, createRef, useRef, and useImperativeHandle with deps attach before layout effects and detach on unmount.
 
 Evidence: `TestUseContextTranspile`, `TestContextReact19ProviderAndConsumer`, `browser:/react-events/`
 
@@ -312,7 +312,7 @@ Evidence: `TestLowerUseActionState`, `TestReactBrowserDifferential`, `TestReactA
 
 **Source:** Supported - **Islands:** n/a - **SSR:** n/a
 
-useId gives every component instance (children, nested children, lists, repeated components, conditional branches, layouts, rows added at runtime) an id that is the same in the static HTML and the hydration code, so htmlFor and id pairs match. useEffectEvent lowers to a stable function that reads the latest props and state and does not subscribe the effect that calls it. <Activity mode> renders its children in a wrapper that hides them while keeping state, cleans their effects up while hidden and runs them again when visible. <ViewTransition> names its element child for the router's view transition support (name and default class). The experimental names (unstable_Activity, unstable_ViewTransition, unstable_useEffectEvent, SuspenseList) are accepted; props with no effect warn (KR8031).
+useId gives every component instance (children, nested children, lists, repeated components, conditional branches, layouts, rows added at runtime) an id that is the same in the static HTML and the hydration code, so htmlFor and id pairs match. useEffectEvent lowers to a stable function that reads the latest props and state and does not subscribe the effect that calls it. &lt;Activity mode&gt; renders its children in a wrapper that hides them while keeping state, cleans their effects up while hidden and runs them again when visible. &lt;ViewTransition&gt; names its element child for the router's view transition support (name and default class). The experimental names (unstable_Activity, unstable_ViewTransition, unstable_useEffectEvent, SuspenseList) are accepted; props with no effect warn (KR8031).
 
 Diagnostics: `KR8031`
 
@@ -687,7 +687,7 @@ TypeScript host code can run as a child process of the shell under Node, Bun or 
 Known limits:
 
 - Linux: Node children run end to end through the real krate-shell (TestHostChildNode, TestNativeHostChildNodeEndToEnd); Bun and Deno children are covered by the hostchild call tests. Node and Bun release builds are verified; the Deno release command line (deno compile with plain --allow-net for unix targets) is not tested, and the Bun and Node compile tests skip when the tool is missing.
-- Deno must be recent enough to take unix:<path> in --allow-net (verified with 2.9.8); older versions reject the entry, and the dev command line is not adapted to them.
+- Deno must be recent enough to take unix:&lt;path&gt; in --allow-net (verified with 2.9.8); older versions reject the entry, and the dev command line is not adapted to them.
 - macOS: Node children run in CI (TestHostChildNode, TestNativeHostChildNodeEndToEnd and the hostchild tests on macos-latest) over a Unix socket. Bun and Deno children are not run through the real shell there.
 - Windows: Node, Bun and Deno cannot use AF_UNIX there, so the shell uses loopback TCP with a random token. The transport tests (TestTCPHandshake, TestGuardEmptyTokenRejects) and the hostchild tests run on windows-latest, and TestHostChildNode starts a Node child there. Bun and Deno children are not run through the real shell there.
 - arm64: Bun and Deno publish no Windows on ARM builds, so the windows-11-arm CI job skips those two (KRATE_SKIP_RUNTIMES) and runs Node only; Linux arm64 and macOS run all three.
@@ -954,7 +954,7 @@ Desktop notifications with actions. On Linux they use org.freedesktop.Notificati
 Known limits:
 
 - Verified against a real dunst daemon on a private session bus (text, icon, urgency, replacement by id, close from the app and from the daemon with the NotificationClosed reason, default action and action buttons, expiry, daemon gone) and against a fake service for protocol edge cases. Other daemons (GNOME Shell, KDE Plasma) were not run. Without a service that owns org.freedesktop.Notifications the call returns ErrUnsupported.
-- macOS: no CI test sends a notification there; the bundle planning and the UNUserNotificationCenter path are covered by reading the code. That a notification banner appears and that clicking it or its actions reaches the app are manual checks. It needs an app bundle with a bundle identifier; krate native dev runs the shell from a generated <appId>.dev bundle under .krate/dev. The first notification asks for permission and a refusal is a permission_denied error. Icon and Timeout are ignored, and critical urgency is only time-sensitive (the critical level needs an Apple entitlement).
+- macOS: no CI test sends a notification there; the bundle planning and the UNUserNotificationCenter path are covered by reading the code. That a notification banner appears and that clicking it or its actions reaches the app are manual checks. It needs an app bundle with a bundle identifier; krate native dev runs the shell from a generated &lt;appId&gt;.dev bundle under .krate/dev. The first notification asks for permission and a refusal is a permission_denied error. Icon and Timeout are ignored, and critical urgency is only time-sensitive (the critical level needs an Apple entitlement).
 - Windows: no CI test shows a toast; the toast activation URI is tested (TestURIRoundTrip). Clicking a toast and seeing the banner are manual checks. An unpackaged app registers its AppUserModelID under HKCU; a packaged app uses its package identity.
 - Windows: a toast click uses protocol activation with a per-app URL scheme (HKCU registration for an unpackaged app, NSIS and MSIX registration too), not a COM activator. With the app running, the new process hands the click to it (WM_COPYDATA); with no instance, the click is kept and delivered when the page subscribes (the event that started the app). Unit tests cover the URL, the payload, the registry values and the manifest; the Windows CI job relaunches the test binary with the URL to prove both paths and checks the registration (first run pending), but a real click on a real toast, Action Center after a reboot and the packaged (MSIX) path are not confirmed. Windows has no per-toast timeout or urgency levels, and Show succeeding does not prove a banner was drawn (Focus assist and per-app settings can suppress it).
 
@@ -1020,7 +1020,7 @@ A tray icon with a menu (StatusNotifierItem and dbusmenu on Linux with a legacy 
 
 Known limits:
 
-- The tray uses the StatusNotifierItem protocol when a StatusNotifier host exists and falls back to the legacy XEmbed system tray (GtkStatusIcon) when only an XEmbed tray manager owns _NET_SYSTEM_TRAY_S<screen> (X11 only). Stock GNOME with neither returns ErrUnsupported with a hint to install the AppIndicator extension. Verified against stalonetray (XEmbed, with real clicks and menu selection through XTEST) and against the Ayatana application indicator service as a real StatusNotifierWatcher and host; KDE Plasma, GNOME Shell with the extension and other panels were not run.
+- The tray uses the StatusNotifierItem protocol when a StatusNotifier host exists and falls back to the legacy XEmbed system tray (GtkStatusIcon) when only an XEmbed tray manager owns _NET_SYSTEM_TRAY_S&lt;screen&gt; (X11 only). Stock GNOME with neither returns ErrUnsupported with a hint to install the AppIndicator extension. Verified against stalonetray (XEmbed, with real clicks and menu selection through XTEST) and against the Ayatana application indicator service as a real StatusNotifierWatcher and host; KDE Plasma, GNOME Shell with the extension and other panels were not run.
 - Linux shortcuts are verified on X11 (XGrabKey, TestGUIGlobalShortcut). On Wayland they need the org.freedesktop.portal.GlobalShortcuts portal, which no test exercises, and return ErrUnsupported without it. No portal backend that implements GlobalShortcuts can run headless here: the GNOME backend needs a running gnome-shell/mutter session, the KDE backend needs KGlobalAccel in a Plasma session, the Hyprland and COSMIC backends are not packaged for Debian or Ubuntu, and xdg-desktop-portal-wlr does not implement the interface.
 - macOS: TestTrayItemAndMenu runs in CI on macos-latest (a real NSStatusItem with its menu). Carbon hot keys have no test there. Clicking the real status item and pressing a real hot key are manual checks (platform/darwin/MANUAL_TEST.md). With a tray menu any click opens the menu and is reported as click; right-click and double-click are only reported without a menu. Radio items show a checkmark. Single-tone gray icons become template images.
 - macOS shortcuts use Carbon RegisterEventHotKey (no Accessibility permission). Keys are ANSI key positions, so other layouts differ, and macOS 15 ignores hot keys whose only modifiers are Option and/or Shift. A combination that is already registered is an error. Pressing a real hot key and clicking the real status item are manual checks (platform/darwin/MANUAL_TEST.md).
@@ -1101,14 +1101,14 @@ Evidence: `TestNativeReleaseDerivesPermissionsAndReport`, `TestNativeReleaseE2EG
 
 **Linux:** Supported - **macOS:** Partial - **Windows:** Partial
 
-The @krate/core-<platform> packages carry krate-shell next to krate. krate native build then writes a runnable dist-native/<os>-<arch>/<productName> with app/ beside it for a TypeScript-only app, with no Go toolchain, and krate native package turns that into tar.gz, deb and the other formats. The shell is found in order: --shell, $KRATE_SHELL, next to the krate executable, a build from a Krate checkout.
+The @krate/core-&lt;platform&gt; packages carry krate-shell next to krate. krate native build then writes a runnable dist-native/&lt;os&gt;-&lt;arch&gt;/&lt;productName&gt; with app/ beside it for a TypeScript-only app, with no Go toolchain, and krate native package turns that into tar.gz, deb and the other formats. The shell is found in order: --shell, $KRATE_SHELL, next to the krate executable, a build from a Krate checkout.
 
 Known limits:
 
 - The Linux test uses a stand-in shell executable placed next to a copy of the test krate binary and a PATH with no go command; it proves the layout and packaging, not a launch.
 - The packages for all seven platforms are built by scripts/build-platform-packages.mjs and checked by pnpm check:release; the npm install of them (scripts/smoke-install.mjs) runs in the release workflow.
 - Alpine (musl): the @krate/core-linux-x64-musl shell is linked with musl's loader (/lib/ld-musl-x86_64.so.1) instead of glibc's, so it starts and `krate-shell --doctor` runs; the install smoke test checks this on node:alpine in CI. A window needs WebKitGTK 4.1 from the distribution, which was not run on Alpine.
-- macOS and Windows: the lookup order, layout and packaging tests run in CI on both with a stand-in shell, and the install smoke test installs the @krate/core-<platform> package on macos-latest and windows-latest and runs its krate-shell --doctor. A dist-native build with the prebuilt shell is not launched there.
+- macOS and Windows: the lookup order, layout and packaging tests run in CI on both with a stand-in shell, and the install smoke test installs the @krate/core-&lt;platform&gt; package on macos-latest and windows-latest and runs its krate-shell --doctor. A dist-native build with the prebuilt shell is not launched there.
 
 Evidence: `TestLocateNativeShellOrder`, `TestNativePrebuiltShellWithoutGo`
 
@@ -1157,7 +1157,7 @@ Evidence: `fixture:examples/native-from-electron/tests/port.native.test.ts`
 
 **Linux:** Supported - **macOS:** Supported - **Windows:** Supported
 
-A plugin is a Go package plus a krate-plugin.json (name, Go import path, permissions with descriptions, ops, minimum Krate). native.plugins enables local directories, npm packages and Go modules; ops are callable as plugin/<name>.<op> (lowerCamel op names like the SDK ids, bound to Go names by capitalizing or an explicit go field) with generated codecs and a typed krate/plugin/<name> TypeScript module (calls, streams, signals). Plugins run inside the shell process with a context (lifecycle hooks, Dispatch, platform capabilities, data directory), cannot register ids outside their namespace, and their permissions (plugin:<name>.<permission>) are derived from the code, enforced per window, listed by krate native check and shaken per op in release builds. An app with plugins runs under a per-app shell built with go (cached by plugin set, sources and Krate version) in dev and in builds; krate native plugin init scaffolds one.
+A plugin is a Go package plus a krate-plugin.json (name, Go import path, permissions with descriptions, ops, minimum Krate). native.plugins enables local directories, npm packages and Go modules; ops are callable as plugin/&lt;name&gt;.&lt;op&gt; (lowerCamel op names like the SDK ids, bound to Go names by capitalizing or an explicit go field) with generated codecs and a typed krate/plugin/&lt;name&gt; TypeScript module (calls, streams, signals). Plugins run inside the shell process with a context (lifecycle hooks, Dispatch, platform capabilities, data directory), cannot register ids outside their namespace, and their permissions (plugin:&lt;name&gt;.&lt;permission&gt;) are derived from the code, enforced per window, listed by krate native check and shaken per op in release builds. An app with plugins runs under a per-app shell built with go (cached by plugin set, sources and Krate version) in dev and in builds; krate native plugin init scaffolds one.
 
 Known limits:
 
@@ -1500,7 +1500,7 @@ Evidence: `TestWindowIsNamedByItsTitle`, `TestGUIAccessibilityWindowIsNamedInEve
 
 **Source:** n/a - **Islands:** Supported - **SSR:** Supported
 
-A <Toaster /> in a static or an async layout and toast() called from a client component of an async or sync page show the toast, with one copy of sonner's store for the layout and the page, also after a client-side navigation (sonner 2.0.8). Checked in Chromium by TestBrowserEcosystemLibraries against the real package (the test needs KRATE_ECOSYSTEM_LIBS or KRATE_ECOSYSTEM_INSTALL=1 and is skipped otherwise).
+A &lt;Toaster /&gt; in a static or an async layout and toast() called from a client component of an async or sync page show the toast, with one copy of sonner's store for the layout and the page, also after a client-side navigation (sonner 2.0.8). Checked in Chromium by TestBrowserEcosystemLibraries against the real package (the test needs KRATE_ECOSYSTEM_LIBS or KRATE_ECOSYSTEM_INSTALL=1 and is skipped otherwise).
 
 Known limits:
 
@@ -1546,11 +1546,11 @@ Evidence: `TestBrowserEcosystemLibraries`, `fixture:packages/compiler/internal/b
 
 **Source:** n/a - **Islands:** Supported - **SSR:** Supported
 
-A ThemeProvider in a layout is lifted into the islands of its pages and useTheme in a client component switches the class on <html> and updates the theme state (next-themes 0.4.6). The provider's anti-flash script is part of each island's server markup. Checked in Chromium by TestBrowserEcosystemLibraries against the real package (the test needs KRATE_ECOSYSTEM_LIBS or KRATE_ECOSYSTEM_INSTALL=1 and is skipped otherwise).
+A ThemeProvider in a layout is lifted into the islands of its pages and useTheme in a client component switches the class on &lt;html&gt; and updates the theme state (next-themes 0.4.6). The provider's anti-flash script is part of each island's server markup. Checked in Chromium by TestBrowserEcosystemLibraries against the real package (the test needs KRATE_ECOSYSTEM_LIBS or KRATE_ECOSYSTEM_INSTALL=1 and is skipped otherwise).
 
 Known limits:
 
-- Each island renders its own ThemeProvider (the lifted chain wraps every island) and next-themes keeps its state in the provider, so the theme state is per island: setTheme in one island changes the class on <html> and the stored value but does not re-render useTheme in other islands (checked in Chromium with two islands).
+- Each island renders its own ThemeProvider (the lifted chain wraps every island) and next-themes keeps its state in the provider, so the theme state is per island: setTheme in one island changes the class on &lt;html&gt; and the stored value but does not re-render useTheme in other islands (checked in Chromium with two islands).
 - The server markup renders the theme as undefined until the island hydrates, as it does with React.
 
 Diagnostics: `KR8016`

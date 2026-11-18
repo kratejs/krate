@@ -263,6 +263,13 @@ func jsIdentRefs(code string) map[string]bool {
 // previous-token heuristic; a misclassification only ever causes a spurious
 // reference (safe: the caller includes an extra declaration).
 func scanJSIdents(code string, fn func(name string)) {
+	scanJSIdentsAt(code, func(name string, _ int) { fn(name) })
+}
+
+// ScanJSIdentsAt is scanJSIdents with each identifier's byte offset.
+func ScanJSIdentsAt(code string, fn func(name string, at int)) { scanJSIdentsAt(code, fn) }
+
+func scanJSIdentsAt(code string, fn func(name string, at int)) {
 	n := len(code)
 	// braceStack tracks template literal `${` nesting: true entries are
 	// template substitutions, false entries are ordinary braces.
@@ -360,7 +367,7 @@ func scanJSIdents(code string, fn func(name string)) {
 			}
 			word := code[start:i]
 			if !afterDot {
-				fn(word)
+				fn(word, start)
 			}
 			prev, prevWord, afterDot = 'a', word, false
 		case c >= '0' && c <= '9':

@@ -2,8 +2,10 @@ package build
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -87,7 +89,7 @@ func TestBuildTestProject(t *testing.T) {
 	if cfg.Deploy.Target != "netlify" {
 		t.Errorf("deploy.target = %q, want netlify", cfg.Deploy.Target)
 	}
-	if !cfg.Compress.Gzip {
+	if cfg.Compress.Gzip == nil || !*cfg.Compress.Gzip {
 		t.Error("compress.gzip not parsed")
 	}
 	if cfg.Images.Quality != 80 {
@@ -145,7 +147,23 @@ func TestBuildTestProject(t *testing.T) {
 		if !strings.Contains(h, "data-markdown-plugin") {
 			t.Error("markdown.plugins did not run on docs pages")
 		}
+		assertAriaControlsResolve(t, h)
 	}
+
+	// Generated ids (Select, Command) exist in the server HTML: none may be the
+	// bare "-list" / "-opt-0" suffix of an id that was empty until mount.
+	bareIDRe := regexp.MustCompile(`(?i)[\s"'](?:id|aria-controls|aria-activedescendant)=["']?-(?:list|opt-)`)
+	_ = filepath.WalkDir(outDir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(p, ".html") {
+			return nil
+		}
+		if data, rerr := os.ReadFile(p); rerr == nil {
+			if m := bareIDRe.Find(data); m != nil {
+				t.Errorf("%s: empty-prefix generated id %q in server HTML", p, m)
+			}
+		}
+		return nil
+	})
 
 	if data, err := os.ReadFile(filepath.Join(outDir, "lang-demo", "index.html")); err != nil {
 		t.Errorf("reading lang-demo page: %v", err)
@@ -341,4 +359,23 @@ func repoRootPath() (string, error) {
 		return "", fmt.Errorf("repo root not found at %s", root)
 	}
 	return root, nil
+}
+
+var (
+	templateBlockRe = regexp.MustCompile(`(?is)<template\b.*?</template>`)
+	ariaControlsRe  = regexp.MustCompile(`(?i)[\s"']aria-controls=["']?([^"'\s>]+)`)
+)
+
+// assertAriaControlsResolve fails when an aria-controls value names an id that
+// is not in the server-rendered DOM (ids inside <template> do not count).
+func assertAriaControlsResolve(t *testing.T, doc string) {
+	t.Helper()
+	live := templateBlockRe.ReplaceAllString(doc, "")
+	for _, m := range ariaControlsRe.FindAllStringSubmatch(live, -1) {
+		for _, id := range strings.Fields(m[1]) {
+			if !regexp.MustCompile(`(?i)\bid=["']?` + regexp.QuoteMeta(id) + `["'\s>]`).MatchString(live) {
+				t.Errorf("aria-controls=%q has no element with that id in the rendered DOM", id)
+			}
+		}
+	}
 }

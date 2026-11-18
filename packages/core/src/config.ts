@@ -183,11 +183,28 @@ export interface SSRConfig {
   streaming?: boolean;
 }
 
+/**
+ * A has or missing item: the rule applies when every `has` item matches and no
+ * `missing` item does. Without `value` the field only has to be present (and
+ * is captured under the key's name); with `value` it must match the regex as a
+ * whole. `host` takes no key.
+ */
+export interface RouteCondition {
+  type: "query" | "header" | "cookie" | "host";
+  key?: string;
+  value?: string;
+}
+
 export interface RedirectConfig {
+  /** Next.js path syntax (`/x/:slug`, `/x/:path*`, `/x/:id(\\d+)`) or `/x/*` with `:splat`. */
   source: string;
   destination: string;
   /** true = 301, false = 302 (default). */
   permanent?: boolean;
+  /** 301, 302, 303, 307 or 308; wins over `permanent`. */
+  statusCode?: 301 | 302 | 303 | 307 | 308;
+  has?: RouteCondition[];
+  missing?: RouteCondition[];
   /**
    * false matches `source` and sends `destination` exactly as written, outside
    * the base path. Default true: both live under the base path.
@@ -198,6 +215,8 @@ export interface RedirectConfig {
 export interface RewriteConfig {
   source: string;
   destination: string;
+  has?: RouteCondition[];
+  missing?: RouteCondition[];
 }
 
 export interface SEOConfig {
@@ -213,6 +232,8 @@ export interface SEOConfig {
   themeColor?: string;
   /** Default `<html lang>` / og:locale, e.g. "en" or "en-US". */
   locale?: string;
+  /** Favicon URL, written as `<link rel="icon">` on pages that set no icon. */
+  icon?: string;
 }
 
 /**
@@ -228,6 +249,12 @@ export interface SiteConfig {
   twitter?: string;
   themeColor?: string;
   locale?: string;
+  /**
+   * Favicon, written as `<link rel="icon">` on every page that sets no icon
+   * of its own, e.g. `"/favicon.svg"`. Without it no icon link is emitted; a
+   * `public/favicon.ico` is found by browsers without one.
+   */
+  icon?: string;
   /**
    * Attributes set on every page's `<html>` element, e.g. `{ class: "dark" }`.
    * A string or number writes `name="value"`, `true` a bare attribute; `false`
@@ -305,15 +332,24 @@ export interface SecurityConfig {
 
 /** Custom response headers for paths matching `source` (`krate serve` only). */
 export interface HeaderRule {
-  /** Exact path, prefix wildcard ("/assets/*"), or path glob. */
+  /** Exact path, prefix wildcard ("/assets/*"), path glob, or Next.js syntax ("/:path*"). */
   source: string;
-  headers: Record<string, string>;
+  /** Header name to value, or Next.js' `[{ key, value }]` array (order kept, the last repeated key wins). */
+  headers: Record<string, string> | Array<{ key: string; value: string }>;
+  has?: RouteCondition[];
+  missing?: RouteCondition[];
 }
 
 /** Allowlist entry for remote <Image> sources. */
 export interface ImageRemotePattern {
   hostname: string;
   pathname?: string;
+  /** "https" or "http"; unset allows either. */
+  protocol?: "http" | "https";
+  /** Exact port ("" means no explicit port); unset allows any. */
+  port?: string;
+  /** Exact query string including the leading "?"; unset allows any. */
+  search?: string;
 }
 
 /** Responsive-image pipeline config used by <Image>. */
@@ -735,9 +771,14 @@ export interface SitemapPluginOptions {
   priority?: string;
 }
 
-/** Build-time precompression (`.br`/`.gz` siblings). */
+/**
+ * Build-time precompression (`.br`/`.gz` siblings). Both encodings are on by
+ * default for production builds; set one to `false` to turn it off.
+ */
 export interface CompressConfig {
+  /** Write `.br` siblings (brotli level 11). Default `true`. */
   brotli?: boolean;
+  /** Write `.gz` siblings. Default `true`. */
   gzip?: boolean;
 }
 
@@ -908,6 +949,13 @@ export interface KrateConfig {
   minifyCSS?: boolean;
   minifyJS?: boolean;
   sourcemap?: boolean;
+  /**
+   * Write the hydration code of imported client components (layouts, theme
+   * and library components) to shared, content-hashed chunks that every page
+   * reuses, instead of into each page script. Default true; dev builds and
+   * sourcemap builds keep it per page.
+   */
+  sharedChunks?: boolean;
   /** @deprecated React-to-krate transpilation is always enabled; accepted but ignored. */
   emitReact?: boolean;
   /**
@@ -921,12 +969,28 @@ export interface KrateConfig {
    * from the shared runtime.
    */
   spa?: boolean;
+  /** The shared browser runtime chunk. */
+  clientRuntime?: {
+    /**
+     * `"auto"` (default): production builds define on `window` only the
+     * runtime exports the site's code references. `"all"` defines every
+     * export, for scripts the build cannot see (injected at runtime, or
+     * third-party code calling Krate globals).
+     */
+    exports?: "auto" | "all";
+  };
   /**
    * View Transitions API integration. `true`/`"auto"` (default) enables
    * same-document SPA morphs and the cross-document `@view-transition` rule;
    * `false`/`"off"` disables it.
    */
   viewTransitions?: boolean | "auto" | "off";
+  /**
+   * Default link prefetch. `"intent"` (default) prefetches on hover, focus and
+   * touch; `"viewport"` also prefetches links scrolling into view (max 5 per
+   * page). `<Link prefetch>` overrides it. Skipped under Save-Data and 2g.
+   */
+  prefetch?: "intent" | "viewport";
   /**
    * Page URL form, honoured by `krate serve`/`start` and the node, vercel,
    * netlify and cloudflare targets. `"always"` (default) redirects `/x` to
@@ -995,7 +1059,7 @@ export interface KrateConfig {
   /** Deploy adapter + options (`krate deploy`). */
   deploy?: DeployConfig;
   auth?: AuthConfig;
-  /** Build-time precompression. */
+  /** Build-time precompression (on by default for production builds). */
   compress?: CompressConfig;
   /** Browser compatibility output mode. */
   compat?: CompatConfig;

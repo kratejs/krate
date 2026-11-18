@@ -43,6 +43,7 @@ var authTypeExports = map[string]string{
 	"Session":        "Session",
 	"User":           "User",
 	"Account":        "Account",
+	"DefaultSession": "DefaultSession",
 }
 
 // authClientExports are the next-auth/react names @krate/auth/client has.
@@ -127,11 +128,7 @@ func migrateNextAuth(rep *Report, root string) {
 			}
 			found = true
 			if strings.HasSuffix(rel, ".d.ts") {
-				rep.Manual = append(rep.Manual, ManualItem{
-					Source: rel,
-					Reason: "type declarations that augment next-auth are not carried over",
-					Hint:   "delete the file, or declare the extra session fields on your own type; @krate/auth Session.user accepts extra fields (" + authDocs + ")",
-				})
+				planAuthDeclaration(rep, rel, data)
 				continue
 			}
 			src := string(data)
@@ -152,11 +149,11 @@ func migrateNextAuth(rep *Report, root string) {
 			Hint:   "move sign-in to @krate/auth (" + authDocs + ")",
 		})
 	}
-	if pkgHas {
+	if pkgHas && !hasPlannedPackage(rep) {
 		rep.Manual = append(rep.Manual, ManualItem{
 			Source: "package.json",
 			Reason: "next-auth is still listed as a dependency",
-			Hint:   "install @krate/auth (--update-package adds it) and remove next-auth once the app builds; @auth/drizzle-adapter keeps working with @krate/auth",
+			Hint:   "install @krate/auth and remove next-auth once the app builds; @auth/drizzle-adapter keeps working with @krate/auth",
 		})
 	}
 	// Anything that still imports next-auth would fail at run time.

@@ -38,18 +38,6 @@ func colorOf(key string, theme TailwindTheme) (string, bool) {
 	return colorValue(base, mod, theme)
 }
 
-// lengthOf resolves an arbitrary length value ([3px], [length:var(--w)]).
-func lengthOf(key string) (string, bool) {
-	inner, hint, isArb := arbitraryValue(key)
-	if !isArb {
-		return "", false
-	}
-	if hint == "length" || hint == "line-width" || (hint == "" && looksLikeLength(inner) && !isVarOnly(inner)) {
-		return inner, true
-	}
-	return "", false
-}
-
 var borderStyles = map[string]bool{"solid": true, "dashed": true, "dotted": true, "double": true, "hidden": true, "none": true}
 
 var borderSides = map[string][]string{
@@ -109,13 +97,21 @@ func borderUtility(cls string, theme TailwindTheme) (string, bool) {
 	if isDigits(rest) {
 		return width(rest + "px"), true
 	}
-	if w, ok := lengthOf(rest); ok {
-		return width(w), true
-	}
 	if side != "" && borderStyles[rest] {
 		return "", false
 	}
-	if c, ok := colorOf(rest, theme); ok {
+	c, ok := colorOf(rest, theme)
+	if base, mod := splitColorModifier(rest); isArbitrary(base) {
+		v, typ, _ := arbType(base, "color", "line-width", "length")
+		if typ == "line-width" || typ == "length" {
+			if mod != "" {
+				return "", false
+			}
+			return width(v), true
+		}
+		c, ok = arbColor(rest)
+	}
+	if ok {
 		var b strings.Builder
 		for _, p := range sideProps {
 			b.WriteString(prefix(p) + "-color: " + c + "; ")
@@ -162,8 +158,20 @@ func outlineUtility(cls string, neg bool, theme TailwindTheme) (string, bool) {
 	if isDigits(rest) {
 		return "outline-style: var(--tw-outline-style); outline-width: " + rest + "px;", true
 	}
-	if w, ok := lengthOf(rest); ok {
-		return "outline-style: var(--tw-outline-style); outline-width: " + w + ";", true
+	if base, mod := splitColorModifier(rest); isArbitrary(base) {
+		v, typ, _ := arbType(base, "color", "length", "number", "percentage")
+		switch typ {
+		case "length", "number", "percentage":
+			if mod != "" {
+				return "", false
+			}
+			return "outline-style: var(--tw-outline-style); outline-width: " + v + ";", true
+		}
+		c, ok := arbColor(rest)
+		if !ok {
+			return "", false
+		}
+		return "outline-color: " + c + ";", true
 	}
 	if c, ok := colorOf(rest, theme); ok {
 		return "outline-color: " + c + ";", true
@@ -187,14 +195,14 @@ func ringUtility(cls string, theme TailwindTheme) (string, bool) {
 		case isDigits(rest):
 			w = rest + "px"
 		default:
-			if lw, ok := lengthOf(rest); ok {
+			if lw, ok := ringArbWidth(rest); ok {
 				w = lw
 			}
 		}
 		if w != "" {
 			return "--tw-ring-shadow: var(--tw-ring-inset,) 0 0 0 calc(" + w + " + var(--tw-ring-offset-width)) var(--tw-ring-color, currentcolor); " + shadowCompose, true
 		}
-		if c, ok := colorOf(rest, theme); ok {
+		if c, ok := ringColor(rest, theme); ok {
 			return "--tw-ring-color: " + c + ";", true
 		}
 		return "", false
@@ -203,13 +211,13 @@ func ringUtility(cls string, theme TailwindTheme) (string, bool) {
 		w := ""
 		if isDigits(rest) {
 			w = rest + "px"
-		} else if lw, ok := lengthOf(rest); ok {
+		} else if lw, ok := ringArbWidth(rest); ok {
 			w = lw
 		}
 		if w != "" {
 			return "--tw-ring-offset-width: " + w + "; --tw-ring-offset-shadow: var(--tw-ring-inset,) 0 0 0 var(--tw-ring-offset-width) var(--tw-ring-offset-color);", true
 		}
-		if c, ok := colorOf(rest, theme); ok {
+		if c, ok := ringColor(rest, theme); ok {
 			return "--tw-ring-offset-color: " + c + ";", true
 		}
 		return "", false
@@ -223,18 +231,39 @@ func ringUtility(cls string, theme TailwindTheme) (string, bool) {
 		case isDigits(rest):
 			w = rest + "px"
 		default:
-			if lw, ok := lengthOf(rest); ok {
+			if lw, ok := ringArbWidth(rest); ok {
 				w = lw
 			}
 		}
 		if w != "" {
 			return ringShadow("--tw-inset-ring-shadow", "inset ", w, "--tw-inset-ring-color"), true
 		}
-		if c, ok := colorOf(rest, theme); ok {
+		if c, ok := ringColor(rest, theme); ok {
 			return "--tw-inset-ring-color: " + c + ";", true
 		}
 	}
 	return "", false
+}
+
+// ringArbWidth resolves an arbitrary ring, inset-ring or ring-offset key that
+// Tailwind reads as a width: a length, by hint or inferred from color|length.
+func ringArbWidth(key string) (string, bool) {
+	if v, typ, ok := arbType(key, "color", "length"); ok && typ == "length" {
+		return v, true
+	}
+	return "", false
+}
+
+// ringColor resolves a ring color; an arbitrary value that is not a width is
+// a color whatever its shape.
+func ringColor(key string, theme TailwindTheme) (string, bool) {
+	if base, _ := splitColorModifier(key); isArbitrary(base) {
+		if _, ok := ringArbWidth(base); ok {
+			return "", false
+		}
+		return arbColor(key)
+	}
+	return colorOf(key, theme)
 }
 
 // shadowTokenRe matches color components of a shadow so they can be wrapped in
@@ -556,7 +585,8 @@ func backgroundGradientUtility(cls string, neg bool) (string, bool) {
 		base, mod = "", base[1:]
 	}
 	if inner, isArb := unwrapArbitrary(base); isArb {
-		if neg {
+		// Tailwind accepts -bg-conic-[...] but leaves the value as is.
+		if neg && kind != "conic" {
 			return "", false
 		}
 		return "--tw-gradient-position: " + inner + "; background-image: " + kind + "-gradient(var(--tw-gradient-stops," + inner + "));", true
@@ -611,14 +641,16 @@ func gradientStopUtility(cls string, theme TailwindTheme) (string, bool) {
 		if strings.HasSuffix(key, "%") && plainNumber(strings.TrimSuffix(key, "%")) {
 			return "--tw-gradient-" + root + "-position: " + key + ";", true
 		}
-		if inner, hint, isArb := arbitraryValue(key); isArb && (hint == "length" || hint == "percentage" || (hint == "" && looksLikeLength(inner) && !isVarOnly(inner))) {
-			return "--tw-gradient-" + root + "-position: " + inner + ";", true
-		}
 		c, ok := colorOf(key, theme)
-		if !ok {
-			if inner, hint, isArb := arbitraryValue(key); isArb && hint == "" && !looksLikeLength(inner) {
-				c, ok = inner, true
+		if base, mod := splitColorModifier(key); isArbitrary(base) {
+			v, typ, _ := arbType(base, "color", "length", "percentage")
+			if typ == "length" || typ == "percentage" {
+				if mod != "" {
+					return "", false
+				}
+				return "--tw-gradient-" + root + "-position: " + v + ";", true
 			}
+			c, ok = arbColor(key)
 		}
 		if !ok {
 			return "", false
@@ -692,8 +724,8 @@ func divideUtility(cls string, theme TailwindTheme) (string, bool) {
 		case isDigits(val):
 			w = val + "px"
 		default:
-			lw, ok := lengthOf(val)
-			if !ok {
+			lw, _, isArb := arbitraryValue(val)
+			if !isArb {
 				return "", false
 			}
 			w = lw
@@ -703,7 +735,11 @@ func divideUtility(cls string, theme TailwindTheme) (string, bool) {
 		}
 		return rv + ": 0; border-bottom-style: var(--tw-border-style); border-top-style: var(--tw-border-style); border-top-width: calc(" + w + " * var(" + rv + ")); border-bottom-width: calc(" + w + " * calc(1 - var(" + rv + ")));", true
 	}
-	if c, ok := colorOf(rest, theme); ok {
+	c, ok := colorOf(rest, theme)
+	if base, _ := splitColorModifier(rest); isArbitrary(base) {
+		c, ok = arbColor(rest)
+	}
+	if ok {
 		return "border-color: " + c + ";", true
 	}
 	return "", false

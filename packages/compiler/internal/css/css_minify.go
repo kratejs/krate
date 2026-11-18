@@ -173,7 +173,7 @@ func minifyItems(s string, ctx minCtx, top bool) string {
 			if it.closed && strings.TrimSpace(body) == "" && canDropEmpty(it.head) {
 				continue
 			}
-			text := it.head + "{" + body
+			text := tightenHead(it.head) + "{" + body
 			if it.closed {
 				text += "}"
 			}
@@ -183,8 +183,11 @@ func minifyItems(s string, ctx minCtx, top bool) string {
 		text := it.head
 		if !top {
 			text = rewriteDecl(text, ctx)
+		} else {
+			text = tightenHead(text)
 		}
-		if strings.TrimSpace(text) == "" && it.closed {
+		if strings.TrimSpace(text) == "" {
+			// Bare whitespace between or after rules, or an empty statement.
 			continue
 		}
 		pieces = append(pieces, piece{text: text, semi: it.closed})
@@ -225,11 +228,8 @@ func rewriteDecl(head string, ctx minCtx) string {
 	if prop == "" {
 		return head
 	}
-	raw := head[colon+1:]
-	val := strings.TrimSpace(raw)
-	lead := raw[:len(raw)-len(strings.TrimLeft(raw, " \t\r\n\f"))]
-	trail := raw[len(strings.TrimRight(raw, " \t\r\n\f")):]
-	return head[:colon+1] + lead + minifyValue(prop, val, ctx) + trail
+	val := strings.TrimSpace(head[colon+1:])
+	return prop + ":" + minifyValue(prop, val, ctx)
 }
 
 func minifyLeaf(items []cssItem, ctx minCtx) string {

@@ -49,7 +49,7 @@ const PREFIX = "project:";
 export default async function Project({ params }: any) {
   const { id } = await params;
   const apiToken = process.env.KRATE_TEST_API_TOKEN;
-  const owner = { name: "ada", since: new Date(0), nick: undefined as string | undefined };
+  const owner = { name: "ada lovelace", since: new Date(0), nick: undefined as string | undefined };
   async function rename(formData: FormData) {
     'use server';
     return { key: PREFIX + id, apiToken, owner, nickKept: "nick" in owner, sinceIsDate: owner.since instanceof Date, name: String(formData.get("name")), hi: greet("x") };
@@ -85,7 +85,9 @@ export default async function Project({ params }: any) {
 		t.Fatalf("render frames: %+v", frames)
 	}
 	page := frames[0].HTML
-	for _, plain := range []string{secret, "ada", "1970-01-01"} {
+	// The sentinel contains a space, which the base64url action token cannot, so
+	// a random token can never contain it by chance.
+	for _, plain := range []string{secret, "ada lovelace", "1970-01-01"} {
 		if strings.Contains(page, plain) {
 			t.Fatalf("closed-over value %q leaked into the HTML:\n%s", plain, page)
 		}
@@ -112,7 +114,7 @@ export default async function Project({ params }: any) {
 		t.Fatalf("rename: %d %s", r.status, r.raw)
 	}
 	got, _ := json.Marshal(r.body["result"])
-	want := `{"apiToken":"` + secret + `","hi":"hello x","key":"project:p1","name":"New name","nickKept":true,"owner":{"name":"ada","since":"1970-01-01T00:00:00.000Z"},"sinceIsDate":true}`
+	want := `{"apiToken":"` + secret + `","hi":"hello x","key":"project:p1","name":"New name","nickKept":true,"owner":{"name":"ada lovelace","since":"1970-01-01T00:00:00.000Z"},"sinceIsDate":true}`
 	if string(got) != want {
 		t.Errorf("rename result:\n got %s\nwant %s", got, want)
 	}
@@ -143,7 +145,7 @@ export default async function Project({ params }: any) {
 		"missing token":    strings.SplitN(renameURL, "?", 2)[0],
 		"another action's": archivePath + "?__krate_args=" + url.QueryEscape(`["`+token+`"]`),
 	} {
-		if r := post(target, "name=x"); r.status != 400 || strings.Contains(r.raw, "ada") {
+		if r := post(target, "name=x"); r.status != 400 || strings.Contains(r.raw, "ada lovelace") {
 			t.Errorf("%s: want 400, got %d %s", name, r.status, r.raw)
 		}
 	}

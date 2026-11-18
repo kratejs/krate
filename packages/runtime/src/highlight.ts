@@ -4,8 +4,9 @@
  * (rule lists with JavaScript regular expressions); this file runs them. It
  * follows chroma's RegexLexer state machine and its HTML formatter, so for the
  * same code and language the markup is identical to what a build produces:
- * one `<span class="line"><span class="cl">` per line and one classed span per
- * token, coloured by the same stylesheet in light and dark.
+ * one classed span per token (wrapped in a `<span class="line hl">` only for
+ * lines marked for highlighting), coloured by the same stylesheet in light and
+ * dark.
  *
  * Nothing here touches the DOM or any global, so it runs unchanged on the
  * server (SSR sidecars) and in the browser.
@@ -338,18 +339,22 @@ function shouldHighlight(ranges: [number, number][], idx: number, line: number):
 /** Writes tokens as chroma's HTML formatter does (class mode, no line numbers). */
 function format(tokens: Tok[], ranges: [number, number][]): string {
   const lines = splitLines(tokens);
+  // Line wrappers only carry the highlight class, so unmarked code omits them.
+  const wrap = ranges.length > 0;
   let html = "";
   let idx = 0;
   for (let i = 0; i < lines.length; i++) {
-    const [hl, next] = shouldHighlight(ranges, idx, i + 1);
-    idx = next;
-    html += hl ? '<span class="line hl"><span class="cl">' : '<span class="line"><span class="cl">';
+    if (wrap) {
+      const [hl, next] = shouldHighlight(ranges, idx, i + 1);
+      idx = next;
+      html += hl ? '<span class="line hl"><span class="cl">' : '<span class="line"><span class="cl">';
+    }
     for (const [cls, value] of lines[i]) {
       if (cls === null) continue;
       const text = escapeHTML(value);
       html += cls === "" ? text : '<span class="' + cls + '">' + text + "</span>";
     }
-    html += "</span></span>";
+    if (wrap) html += "</span></span>";
   }
   return html;
 }

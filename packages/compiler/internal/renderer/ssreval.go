@@ -1377,6 +1377,7 @@ func (e *SSREval) evalPlainCodeBlock(el *ast.JSXElement) string {
 // attributes the client router consumes.
 func (e *SSREval) evalLink(el *ast.JSXElement) string {
 	prefetch := true
+	viewport := false
 	replace := false
 	external := false
 	noBase := false
@@ -1393,7 +1394,9 @@ func (e *SSREval) evalLink(el *ast.JSXElement) string {
 		switch a.Name {
 		case "prefetch":
 			if a.Value != nil {
-				prefetch = !isFalse(e.value(a.Value))
+				v := e.value(a.Value)
+				prefetch = !isFalse(v)
+				viewport = v.Kind() == jsvalue.KindString && v.StringValue() == "viewport"
 			}
 		case "replace":
 			if a.Value == nil {
@@ -1426,7 +1429,11 @@ func (e *SSREval) evalLink(el *ast.JSXElement) string {
 	} else {
 		out = append(out, &ast.JSXAttr{Name: "data-krate-link", Value: nil})
 		if prefetch {
-			out = append(out, &ast.JSXAttr{Name: "data-prefetch", Value: nil})
+			var val ast.Expr
+			if viewport {
+				val = &ast.Literal{Kind: ast.StringLit, Value: "viewport"}
+			}
+			out = append(out, &ast.JSXAttr{Name: "data-prefetch", Value: val})
 		}
 		if replace {
 			out = append(out, &ast.JSXAttr{Name: "data-krate-replace", Value: nil})

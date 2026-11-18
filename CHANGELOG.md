@@ -187,6 +187,15 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Breaking
 
+- Output-quality changes that can affect a site (details under Fixed):
+  - heading ids keep doubled hyphens like GitHub (`#go-components--api-routes`), so external links to
+    the old collapsed ids of such headings stop matching;
+  - `<Link>` no longer prefetches on scroll into view; use `prefetch="viewport"` or `prefetch: "viewport"`;
+  - production builds precompress by default; set `compress: { brotli: false, gzip: false }` to opt out;
+  - the docs search module moved from `/docs/search/search.js` to a hashed name and loads on first use
+    (`search.load: "eager"` restores the script tag);
+  - the client runtime defines only the exports the site's code uses on `window`; a script the build
+    cannot see that calls another export needs `clientRuntime: { exports: "all" }`.
 - `outDir` values that are or contain the project root, pages directory or public directory
   (such as `".."`) fail with `KR8350` before anything is deleted. `krate build` and
   `krate clean` share the check; with `outDir: "."`, `krate clean` used to delete the project.
@@ -237,6 +246,74 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Added
 
+- `@krate/auth` types can be augmented: `SessionUserExtensions` (fields on `session.user`) and
+  `UserExtensions` replace the built-in field of the same name, so `role: Role` narrows `role`; the
+  interfaces are empty by default and the existing types are unchanged. `DefaultSession` is exported
+  under Auth.js' name. See docs features/authentication "Typing extra session fields". The package's
+  `pnpm typecheck` compiles type tests with and without an augmentation.
+
+- `krate migrate nextjs` converts a `declare module 'next-auth'` augmentation of `Session` or `User`
+  into `declare module '@krate/auth'` (`src/types/krate-auth.d.ts`, the original moves into the backup) and
+  maps `DefaultSession` imports; an unrecognised shape is a manual item that quotes the declaration.
+
+- `krate migrate nextjs` leaves a stub at the old path of a moved file that a sibling workspace package
+  references (a stylesheet `@import`s the moved copy, a module re-exports it; an image keeps a copy and a
+  manual item). The stubs are in the backup manifest and `krate migrate rollback` removes them.
+
+- `outputFileTracingRoot` config key (a path, relative to the project or absolute; the monorepo root).
+  With it, `krate deploy --target node` writes the same layout as Next's standalone output:
+  `dist/.krate/server/<project below the root>/server.mjs`, included files at
+  `dist/.krate/server/<path below the root>`, and the traced `node_modules` at
+  `dist/.krate/server/node_modules`, which Node finds from the nested `server.mjs`. The server starts in
+  its own directory, so `path.resolve(process.cwd(), '../sibling/dist/x.mjs')` works as it does in
+  `.next/standalone`. `outputFileTracingIncludes` globs may then leave the project (`../render/dist/w.mjs`,
+  `../../node_modules/.pnpm/pkg@*/node_modules/pkg-*/*`) as long as their real path stays inside the
+  root. Without the key the output is unchanged. The root must contain the project. Include globs no
+  longer walk pnpm store directories that no glob segment can reach.
+- `krate migrate nextjs` translates `output: 'standalone'` to `deploy: { target: "node" }` and, with
+  `--update-package`, rewrites the `build` script to `krate deploy` and `start` to
+  `node dist/.krate/server/<project below the root>/server.mjs`. A static `outputFileTracingRoot`
+  (`path.resolve(import.meta.dirname, '../..')`, `__dirname`, `process.cwd()` and `fileURLToPath`
+  variants) becomes `outputFileTracingRoot`, and `outputFileTracingIncludes` that leave the project are
+  carried over when the root contains them. `transpilePackages` is checked with the resolver: when every
+  package resolves (workspace source or a compiled package) the key is dropped with an info line, and a
+  package that does not resolve gets a manual item that says why (not installed, or its `main`/`exports`
+  point at a file that does not exist). `turbopack.root` that equals the project, tracing root or
+  `envDir` is dropped with an info line; `turbopack.resolveAlias` gets a tsconfig `paths` hint;
+  `turbopack.rules` stays a manual item.
+- First-class instrumentation. `instrumentation.ts` (or `.js`, `.mjs`) in the project root or `src/`
+  exports `register()`, which runs once per server start: in the primary process of the Node API
+  sidecar, awaited before that process forks its cluster workers or listens (never in a worker or the SSR
+  renderer), and once before `startNodeServer` in the node deploy bundle. The server is not ready until
+  it resolves (`/readyz` answers `503 instrumentation-pending`). Like Next.js, a `register()` that
+  throws is logged as `An error occurred while loading instrumentation hook: ...` and exits the
+  process with status 1 (the supervisor restarts the sidecar with a growing delay). The Node sidecar now
+  starts even when every API route is embedded if the file exists. State `register()` puts on
+  `globalThis` is not visible to cluster workers; see docs/guides/self-hosting. Other deploy targets
+  warn that they do not run it.
+- `export const runtime = "nodejs" | "edge"` in an API route is honored: `"nodejs"` serves the route
+  from the Node sidecar, `"edge"` keeps it on the embedded runtime.
+- `has` and `missing` conditions on `redirects`, `rewrites` and `headers` rules, with Next.js semantics:
+  `{ type: "query" | "header" | "cookie" | "host", key?, value? }`, a `value` regex anchored as a whole,
+  presence-only items captured under the key's name, named groups usable in `destination`. Redirects
+  take `statusCode` (301, 302, 303, 307 or 308), which wins over `permanent`.
+- Redirect, rewrite and header sources use Next.js (path-to-regexp 6) syntax: `:name`, `:name*`,
+  `:name+`, `:name?`, `:name(regex)`, unnamed `(regex)` and `{...}` groups, plus a leading negative
+  lookahead inside a parameter (`/store/:slug((?!compare$)[^/]+)`). `/x/*` with `:splat` and the
+  `path.Match` header globs still work. A regex RE2 cannot run (lookbehind, a backreference) is the
+  new error KR8355 at config load instead of a rule that never matches.
+- `headers[].headers` also accepts Next.js' `[{ key, value }]` array (order kept, the last repeated
+  name wins), in the Go config and in the server handler of `krate deploy --target node`.
+- `images.remotePatterns` entries take `protocol`, `port` and `search`, enforced like Next.js (a field
+  that is not set allows anything). Before, only `hostname` and `pathname` were checked.
+- `import.meta.dirname` and `import.meta.filename` work in `krate.config.ts` and the modules it imports,
+  next to `import.meta.url`.
+- `envPrefix` config key (a string or a list, default `["KRATE_PUBLIC_"]`): the name prefixes of the
+  environment variables inlined into client code and static output, like Vite's `envPrefix`. Each prefix
+  must end in `_`; an empty one is a config error because it would expose every variable. Existing apps
+  are unchanged. The cache fingerprint includes the list.
+- `site.icon` writes `<link rel="icon">` on every page that sets no icon of its own. Without it no favicon
+  link is emitted, as before.
 - `krate migrate nextjs` moves `@react-three/fiber` and `@react-three/drei` code to `@krate/three` when every
   fiber and drei API the project's modules use is provided, and adds `@krate/three` to `package.json`. The 3D
   pages then stop shipping React, react-dom and a second copy of the React libraries around the canvas (on
@@ -425,8 +502,221 @@ host code runs in the native process. Names and options may change between relea
   `@krate/app/updater`, the `updater` permission).
 - New diagnostics `KR7200` to `KR7245`. Documentation under `/docs/native/`.
 
+### Changed
+
+- `krate migrate nextjs` updates `package.json` by default (`--no-update-package` opts out;
+  `--update-package` is accepted and does nothing): scripts, every `@krate/*` package the migrated
+  code imports (including `@krate/auth`, `@krate/three` and `@krate/konva`), and the removal of `next`,
+  `next-auth` and `@next/env` when no remaining file imports them (otherwise the importers are listed).
+  `package.json` is backed up and no longer needs `--force`, and its key order is kept. The only manual
+  item left for a typical app is the install command of the package manager, run in the pnpm workspace root.
+  A release writes `^<version>` from a generated table of the packages' versions
+  (`scripts/gen-krate-versions.mjs`, checked by `pnpm check:version`); a development build writes `link:`
+  ranges to the Krate checkout it runs from, or `latest` with an info line.
+
+- An API route whose bundled modules use a global the embedded runtime lacks without a feature check
+  (`Buffer`, `__dirname`, `__filename`, `process.cwd()`, `process.nextTick`, parts of `Intl`, ...) is
+  now served by the Node sidecar when `ssr.apiRuntime` is unset, in the route file or in any helper it
+  imports. The build prints `api/x.ts -> Node (Buffer at src/server/y.ts:12)` for each moved route and
+  no longer warns KR7160 for it; before, such a route returned 500 at run time. `krate serve` starts the
+  Node API sidecar for an app that has such a route. With `ssr.apiRuntime: "quickjs"` or
+  `export const runtime = "edge"` the same use is a KR7160 build error. Guarded uses
+  (`typeof Buffer !== "undefined"`) keep the route embedded.
+- `krate migrate nextjs` keeps `export const runtime = "nodejs" | "edge"` in API routes (it still drops
+  it from pages) and no longer claims routes "already run on Node". It keeps `instrumentation.ts` and
+  `instrumentation-*.ts` in place with `process.env.NEXT_RUNTIME` comparisons folded to constants; only
+  `onRequestError` and `instrumentation-client` are manual items.
+- `krate migrate nextjs` translates `has`/`missing` on redirects, rewrites and headers instead of
+  refusing them, and writes `statusCode: 308` or `307` for Next's `permanent: true` or `false`. A
+  redirect whose regex Go cannot run is written as a marked block at the start of the middleware
+  function (a middleware is created when there is none) with an info line. The redirects of an app
+  with `/store?vehicle=x`-style rules need no manual item.
+- Serve behaviour of config rules, which affects existing apps:
+  - Redirects keep the request's query string (`/old?a=1` goes to `/new?a=1`). A key the destination
+    sets itself wins.
+  - Redirects run before middleware and also answer `/api/*`; a middleware gate no longer hides them.
+    Rewrites still run after middleware.
+  - A `headers` rule wins over a header the handler set, such as the `Cache-Control` of a public file
+    or a page. Krate's own immutable `Cache-Control` on content-hashed assets is kept.
+  - A source containing `:`, `(` or `{` that never matched before now matches (`/:path*` in `headers`,
+    `/store/:slug(regex)` in redirects).
+  - The server handler of `krate deploy --target node` and the other server targets follows the same
+    rules (sources, `has`/`missing`, `statusCode`, query passthrough, order, header precedence).
+  - `krate deploy` writes `statusCode` to `vercel.json` and `_redirects`; rules with `has`/`missing`
+    go to Vercel and are skipped, with a note, in `_redirects` and `_headers`.
+- `krate migrate nextjs` carries computed `headers()` rules (`headers: securityHeaders`,
+  `...buildCacheRules()`) and an env-built `images.remotePatterns` list into `krate.config.ts` as code,
+  with the local imports, consts and statements they need, instead of dropping them with a manual item.
+  Type-only imports, `import ... from 'next'` and `loadEnvConfig` (mapped to `envDir`) are left out.
+  The new config is evaluated with the real loader and your environment: a rule that fails (a helper
+  importing `next/server`, say) is commented out with the error and reported. An info line notes that
+  Krate also sends HSTS when the headers set none; `images.remotePatterns` keeps `protocol`, `port`
+  and `search`. A config with only static keys is written exactly as before, except that a static
+  `remotePatterns` entry no longer loses its `protocol`, `port` and `search`.
+- `krate migrate nextjs` keeps `NEXT_PUBLIC_` names in source and writes
+  `envPrefix: ["KRATE_PUBLIC_", "NEXT_PUBLIC_"]` when the app reads them, instead of renaming every read
+  to `KRATE_PUBLIC_`. It finds the definitions in the `envDir` that `loadEnvConfig` points at and in
+  `.env.example`, and prints an info line (`defined in ../../.env.example: 4 of 4`) instead of the manual
+  item. Destructuring `process.env` no longer needs a manual item either. Variables that only
+  `next.config` `env` injects are still renamed to `KRATE_PUBLIC_`. The plan prints `info:` lines and
+  the JSON report has an `info` list.
+
 ### Fixed
 
+- `krate serve`, `krate start` and `krate dev` send the same `Content-Type` on every OS for common web
+  files. On Windows the registry served `.js` without a charset and `.woff2` as `text/plain`; on Linux
+  `.otf` was an OpenDocument type, `.ico` was `image/vnd.microsoft.icon` and `.webm` was `audio/webm`.
+  They are now `text/javascript; charset=utf-8`, `font/woff2`, `font/otf`, `image/x-icon` and `video/webm`,
+  and `.map`, `.cjs` and `.webmanifest` get a type instead of a sniffed one.
+- `krate serve`, `krate start` and `krate dev`: a request that reaches the Node API sidecar while it is
+  still starting (the first start or a supervisor restart; slower now that `register()` of an
+  instrumentation file runs before it listens) waits for it, up to 30 seconds, instead of answering `502`.
+  After that bound it answers `503` with `Retry-After` and logs once. Static files, embedded and Go routes
+  never wait, and middleware that runs on Node waits the same way.
+- The SSR server handler (`krate deploy --target node`, serverless targets) answers a `rewrites` entry whose
+  destination is an `/api` route from the API handler, as `krate serve` does. It handed the request to the
+  page handler, so `/discord-embed.json` rewritten to `/api/discord-embed.json` returned 404.
+- `krate deploy --target node`: a bundled CommonJS dependency that reads `__dirname` or `__filename` (the ncc build
+  of `@next/env`, `ioredis`) threw `ReferenceError: __dirname is not defined` when the server loaded it, which for
+  `@next/env` failed `instrumentation.ts` at start. Both now name the server bundle.
+- `@krate/auth`: `defineAuth` accepts an Auth.js adapter (`@auth/drizzle-adapter` and the other `@auth/*-adapter`
+  packages) in its types: they mark `createUser`, `getUser` and the other user and account methods optional,
+  which failed to typecheck against the stricter `Adapter`.
+- `krate migrate nextjs`: the generated `NextResponse` and middleware shims typecheck under
+  `noUncheckedIndexedAccess` and the response carries a typed `cookies` (`res.cookies.set(...)` was an error on `Response`).
+- `krate deploy --target node` in a pnpm workspace: a page, action or middleware bundle that reaches a
+  dependency installed only under a workspace package (`packages/db/node_modules`) imports it by file
+  URL, which the server bundling step could not resolve ("Could not resolve file:///...node_modules/.pnpm/...").
+  The URL is now bundled, or kept as the bare package name when the package is external (native), and
+  the node output copies that package from where the URL found it instead of warning that it is not installed.
+- Redirect and rewrite destinations: an optional parameter (`:rest*`, `:rest?`) that matched nothing now
+  takes its preceding `/` with it, as in Next (`/n/:a/:b*` to `/t/:a/:b*` sends `/n/x` to `/t/x`, not
+  `/t/x/`), in `krate serve` and in the SSR server handler.
+- `krate migrate nextjs`: a project file that stays in place but imports a file the migration moves
+  aside (a test importing `./proxy`, a helper importing a route file) now has the import repointed at
+  the new location (`proxy.ts` becomes `middleware.ts`, which also exports `proxy`); an import with no
+  replacement is reported as a manual item naming the importer.
+- `krate migrate nextjs`: `@krate/three` and `@krate/konva` were written with the runtime's version range
+  although they version independently, and a `transpilePackages` entry for a workspace package that
+  exposes only subpaths (`"exports": {"./*": "./src/*.ts"}`) was reported as unresolved.
+
+- KR7116 (two modules export the same name) no longer fires for one package reached from two checkouts,
+  such as a project copy whose `node_modules` links lead back into the original: two files with the same
+  name and identical source count as one. The warning names the files by project-relative path
+  (`packages/a/settings.ts and packages/b/settings.ts`), not by base name, and `KRATE_DEBUG=exportclash`
+  prints the full paths of the modules involved. Two more false positives are gone: a module that
+  re-exports an imported binding (`import { X } from "./m"; export { X }`) does not own `X`, and a
+  server page's client components are bundled apart from each other, so the same export name in two of
+  them cannot clash (the warning is held until the build knows the page has a shared namespace, like KR8310).
+- KR8310 words its hint for the cause: a prefixed variable that is not set says which `.env` files and
+  directory Krate reads, a twin under another public prefix (`NEXT_PUBLIC_X` set while the code reads
+  `KRATE_PUBLIC_X`) is named, and a prefix that is not in `envPrefix` says to add it.
+- An arbitrary variant with a selector list scopes every selector to the class, as Tailwind v4 does:
+  `[&>a,b]:` is `.x > a, .x b` (a part without `&` is a descendant). The bare `b` matched every such
+  element on every page, e.g. shadcn's field `[&>[role=checkbox],[role=radio]]:mt-px` moved every radio.
+- The production runtime chunk is bundled per site from the runtime's ES modules: only the exports the
+  site's code reaches ship and are defined on `window` (the router API always is), and the pieces share
+  one copy of esbuild's module helpers. A counter page's runtime drops from 29.3 kB to 19.3 kB gzip (10 kB
+  with `spa: false`), the docs site's from 31.6 kB to 26.2 kB. Code that reads
+  `window[name]` gets the full runtime; older `@krate/runtime` packages keep the prebuilt pieces.
+  Same-origin scripts from `public/` that pages load count as client code, and
+  `clientRuntime: { exports: "all" }` ships every export for code the build cannot see.
+- Imported client components (layouts, the docs theme, library components) hydrate from shared,
+  content-hashed chunks under `chunks/c/` instead of being compiled into every page script; a page
+  script keeps one call per instance with its ids and data. Docs page scripts drop from 3.5-7.4 kB to
+  0.5-1.6 kB gzip and a 4-page client-side visit loads 3.8 kB of JS after the first page instead of 14.7 kB.
+  `sharedChunks: false` restores per-page code.
+- The Pagefind step no longer skips itself on a fresh or wiped `dist` just because the docs content is
+  unchanged: it also needs the index in the output directory, and indexer option changes re-run it.
+- The CSS minifier drops the remaining optional spaces: between rules and before `{`, around the `>` `+` `~`
+  combinators and after commas in selectors, in `@media`/`@supports`/`@container`/`@layer` preludes and in
+  values, before `!important`, and the leading zero of `0.5` and `-0.5`. Custom property values, strings,
+  `url()`, `calc()` operators and `:nth-child()` arguments are untouched. About 1.2% smaller gzipped CSS.
+- `<Image>` variants are smaller: PNG variants use best compression, stay 8-bit paletted when the source is
+  indexed or uses at most 256 colours, and a PNG source smaller than its re-encode is copied as is (the
+  examples' 7.1 kB `hero.png` no longer becomes a 32.4 kB 1600w variant). The blur placeholder is PNG or JPEG,
+  whichever is smaller, and the default `sizes` for an `<Image width={W}>` is `(max-width: Wpx) 100vw, Wpx`.
+- Code blocks ship less markup: the copy button renders both icons and switches them with a `data-copied`
+  attribute (no per-block checkmark `<template>`), and highlighted code drops chroma's per-line wrapper spans
+  unless a line is marked with `highlight`. `docs/reference/config` goes from 4,161 to 3,639 DOM elements;
+  colours and the copied text are unchanged.
+- Islands load without a waterfall: the islands a page mounts on load share one entry chunk, and the page
+  `modulepreload`s it with every module it imports (the Preact chunks through the import map), never what
+  only a `client:visible`/`client:idle` island or a lazy `import()` loads. `/react-demo` drops from 78 to 14
+  requests and 162 to 114 kB of script; its last island mounts at 2.5 s instead of 9.0 s (Fast 3G, 4x CPU).
+- Page CSS is split by source: a theme, each component stylesheet and the page's own CSS are separate
+  hashed files that every page using them shares, linked in the same order, so the cascade is unchanged.
+  A visit across four docs pages downloads 17.7 kB of CSS instead of 35.4 kB (`krate dev` keeps one sheet).
+- Component CSS ships only for the components a page uses: the bundler honours `"sideEffects"` in a
+  package's `package.json`, so importing one component from a barrel no longer pulls in every component's
+  stylesheet. `@krate/components` declares `["*.css"]`; the markdown guide's CSS drops from 17.9 to 11.9 kB gzip.
+- Smaller per-page hydration code: a handler named by its declaration (`onClick={handleCopy}`) is bound by
+  name instead of repeating its body, and empty props registrations, unused helpers and folded locals, and
+  empty component scopes are left out. Docs-site page scripts drop from 709 kB to 661 kB gzip in total.
+- A client component's hydration props carry only what its client code reads. Props used only to render
+  the HTML (a docs sidebar tree, breadcrumbs, page metadata) are no longer copied into every page script: docs-site
+  page scripts drop from 962 kB to 709 kB gzip in total, and editing one page's sidebar entry no longer
+  changes the script hash of every other page.
+- Production runtime trimming reads client code as code: names in strings, comments and text no longer
+  pull in optional runtime pieces, and `"use server"` in a code sample no longer marks a page as having
+  server actions (which shipped every piece). The docs site ships only the list piece (runtime chunk
+  46.6 kB to 31.4 kB gzip), and a heading no longer changes the runtime hash of the whole site.
+- The build's size table counts the chunks a page's scripts import (island chunks, shared modules,
+  import-mapped packages) in its JS column, so a React-heavy page no longer reports less than half of
+  what it loads. A footnote notes routes that load mermaid or KaTeX from the CDN, which are not counted.
+- Output audit and per-route size budgets run in `go test ./...` (`TestOutputAudit`, `TestOutputBudgets`);
+  the budgets snapshot is `internal/build/testdata/output_budgets.json`.
+- `Select` and `Command` generate their ids at render (through `useId`), so the server HTML has unique ids
+  and a real `aria-controls` instead of an empty prefix (`-list`, `-opt-0` on every instance) until mount.
+- The docs search box sets `aria-controls` only while its result list is in the DOM. It named an id that
+  existed only inside a `<template>`, so the reference was dangling in the server HTML.
+- The sitemap's `lastmod` for generated docs pages is the markdown source's date (frontmatter `lastUpdated`,
+  else its git history), the date JSON-LD already used. It read the git history of the generated file, so
+  most docs URLs carried the build date.
+- Heading ids follow GitHub's slug rules: a heading such as "Go (components & API routes)" is
+  `#go-components--api-routes` (runs of spaces and hyphens are no longer collapsed), so links written the
+  GitHub way work. Four docs links to the old collapsed form were updated.
+- Heading anchors in docs follow the heading text, are named "Link to section: <heading>" and hide the `#`
+  glyph from assistive technology. The heading carries its text as `aria-label`, so its accessible name is
+  the text alone (the link used to be read as part of every heading). Class, position and hash are unchanged.
+- The generated CSP `<meta>` is the first element after `<meta charset>` (it was last in `<head>`, after the
+  inline scripts it covers) and hashes the exact bytes of each inline script, style and `style` attribute, as
+  browsers do. Pages with the mermaid or KaTeX loaders also allow `https://cdn.jsdelivr.net`.
+- Pages without a `<title>` get one from `site.name` (the fallback `og:title` already used), instead of
+  none, or a generic "Krate App" when the page had no head tags at all.
+- Head de-duplication keeps the light and the dark `theme-color` (keyed by `name` and `media`) and every
+  `<link rel="icon">` or `apple-touch-icon` variant with a different `sizes`, `type` or `media`. A page-level
+  tag still replaces a layout tag with the same key.
+- The generated compatibility and diagnostics pages escape `<`, `>` and `&` outside code spans, so text like
+  `<Suspense>` and `this.<name>` is no longer parsed as an HTML element and dropped from the page.
+- Production builds write `.br` and `.gz` siblings by default (`compress` was opt-in), so `krate serve` and
+  static hosts send brotli with no config; set `compress: { brotli: false }` or `{ gzip: false }` to turn one
+  off. Brotli runs at level 10 for HTML and other text (was 6; 8% smaller) and 11 for scripts and CSS.
+  `krate dev` is unchanged.
+- `krate deploy` adds `Cache-Control: public, max-age=31536000, immutable` for the build's content-hashed
+  assets to `_headers` (Netlify, Cloudflare) and `vercel.json`/Build Output routes. The list comes from the
+  build manifest, the same one `krate serve` uses; your own `headers` rules win, and HTML is never immutable.
+- Font preloads are chosen per page: sans faces always, monospace faces only on pages whose HTML has `<pre>`
+  or `<code>` (the docs site no longer preloads JetBrains Mono, 40 kB, on pages without code). A preload whose
+  file the site does not serve is skipped with a warning. `@krate/base-docs-theme` now ships Inter and
+  JetBrains Mono (bundled and hashed), so apps using it no longer preload two 404s. Files that a layout's
+  stylesheet references by relative `url()` are now copied to `dist/assets/`.
+- The docs search module is minified and content-hashed (`search.<hash>.js`, 13 kB to about 6 kB) and is
+  loaded when the search box is first used instead of on every page. `search.load: "eager"` keeps the
+  old deferred script. The build warns (KR7147) when a page links a `.css` file from `public/`, which
+  is neither minified nor hashed; the docs site's own `site.css` now goes through the CSS pipeline.
+- Docs search no longer throws on sites without i18n (the emitted `LOCALES` was `null`, not `[]`).
+- Markdown pages import `Code` and `Aside` from `@krate/components/code` and `/aside` instead of the
+  package root, so they no longer ship the CSS of every component in the library (about 52 kB raw,
+  7.6 kB gzip per docs page).
+- `Link` prefetches on hover, focus and touch only; it no longer prefetches every link that scrolls
+  into view (about 40 requests and 200 kB gzip per docs page). `prefetch="viewport"` (or the new
+  `prefetch: "viewport"` config option) opts back in, capped at 5 links per page, and no automatic
+  prefetching happens under Save-Data or a 2g connection.
+- `markdown.mermaid` and `markdown.math` no longer load their CDN assets on every page. A small loader
+  imports mermaid (now pinned to 11.17.2, was the floating `@11`) or KaTeX (0.16.11) only when the page has a
+  diagram or math, including after client navigation; pages without them make no CDN request, and a site
+  with none emits no loader. On the docs site that is about 200 kB gzip and 19 requests per page.
 - Tailwind output matches Tailwind v4.3 in the places it still differed. `shadow-*/N`,
   `inset-shadow-*/N`, `text-shadow-*/N` and `drop-shadow-*/N` set the default shadow colour's alpha to
   N% (they multiplied it, so `shadow-lg/20` was ten times too faint), and accept arbitrary shadows and
@@ -438,6 +728,16 @@ host code runs in the native process. Names and options may change between relea
   `calc(infinity * 1px)`; and `data-[...]`/`aria-[...]` values that would make an invalid selector
   (`data-[foo_bar]`, `aria-[.x]`) produce no rule. A golden test now compares built-in utilities and
   variants with real Tailwind output.
+- Tailwind arbitrary values follow Tailwind v4's type inference and are accepted where Tailwind accepts
+  them. `rounded-[calc(var(--radius-md)-2px)]` and other unhandled `prefix-[...]` values are normalized
+  (they kept `-` unspaced inside `calc()`, an invalid declaration); `blur-[calc(...)]` and
+  `backdrop-blur-[...]` wrap the value in `blur()`; `bg-[14px]`, `bg-[50%]` and `bg-[calc(...)]` set
+  `background-position` (not `background-size`; use `bg-[length:...]`), `text-[red]` and other values
+  that are not sizes set `color`, `font-[calc(...)]` sets the weight, unitless `ring-[2]` and
+  `from-[0]` are colors, and unknown values on borders, outline, rings, divide and scrollbar are colors.
+  `filter-[...]`, `backdrop-filter-[...]`, `flex-grow-[...]`, `flex-shrink-[...]`, `font-features-[...]`,
+  `mask-radial-at-[...]`, `@container-[...]`, `divide-x-[...]` and negative `-col-[...]`, `-row-[...]`,
+  `-mask-linear-[...]` and `-mask-conic-[...]` are new.
 - `@apply` with a variant (`md:flex`) in a rule whose last declaration has no semicolon no longer glues
   the generated nested rule onto that declaration.
 - Releases publish every package that is not private, at one version. `@krate/app` was never versioned or

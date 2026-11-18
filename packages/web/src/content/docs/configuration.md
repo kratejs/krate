@@ -83,12 +83,12 @@ every key and its default.
 |-------|--------|-----------|
 | Build | `entry`, `outDir`, `pagesDir`, `publicDir`, `minify`, `sourcemap` | [Build](/docs/reference/config/#build) |
 | Dev server | `devServer` | [Dev server](/docs/reference/config/#dev-server) |
-| Rendering | `viewTransitions`, `ppr`, `ssr`, `output` | [SSR / Streaming](/docs/reference/config/#ssr-streaming) |
+| Rendering | `viewTransitions`, `ppr`, `ssr`, `output` | [SSR / Streaming](/docs/reference/config/#ssr--streaming) |
 | CSS & Tailwind | `tailwind` | [Tailwind CSS](/docs/reference/config/#tailwind-css) |
 | Markdown | `markdown` | [Markdown](/docs/reference/config/#markdown) |
 | Content | `content`, `pathAliases`, `tsBaseDir` | [Content collections](/docs/reference/config/#content-collections) |
 | Server | `server`, `basePath`, `redirects`, `rewrites` | [Server](/docs/reference/config/#server) |
 | Security | `csp`, `cors` | [Content Security Policy](/docs/reference/config/#content-security-policy) |
-| SEO | `seo`, `robots` | [SEO & robots](/docs/reference/config/#seo-robots) |
+| SEO | `seo`, `robots` | [SEO & robots](/docs/reference/config/#seo--robots) |
 | Checks | `checks` | [Quality checks](/docs/reference/config/#quality-checks) |
 | Plugins | `plugins` | [Plugins](/docs/reference/config/#plugins) |

@@ -1,0 +1,38 @@
+{
+  "/": {
+    "html": 597,
+    "css": 1520,
+    "ownJs": 0,
+    "js": 0
+  },
+  "/components": {
+    "html": 763,
+    "css": 2918,
+    "ownJs": 0,
+    "js": 0
+  },
+  "/docs": {
+    "html": 3487,
+    "css": 9998,
+    "ownJs": 30120,
+    "js": 30120
+  },
+  "/docs/apis": {
+    "html": 4293,
+    "css": 11612,
+    "ownJs": 32954,
+    "js": 32954
+  },
+  "/docs/guide": {
+    "html": 4257,
+    "css": 11612,
+    "ownJs": 32878,
+    "js": 32878
+  },
+  "/react-island": {
+    "html": 701,
+    "css": 1520,
+    "ownJs": 26586,
+    "js": 26586
+  }
+}

@@ -11,6 +11,8 @@ import (
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/internal/check"
+	"github.com/kratejs/krate/packages/compiler/internal/diag"
+	"github.com/kratejs/krate/packages/compiler/internal/routesource"
 )
 
 // knownNestedKeys maps a known top-level object key to the nested keys we
@@ -103,6 +105,9 @@ func buildKnownTopLevelKeys() map[string]bool {
 // returns a fatal error for values that would break a build, and a list of
 // warnings for suspicious-but-tolerable values.
 func (c *Config) Validate() (warnings []string, err error) {
+	if e := c.ClientRuntime.Exports; e != "" && e != "auto" && e != "all" {
+		return nil, fmt.Errorf("clientRuntime.exports must be \"auto\" or \"all\", got %q", e)
+	}
 	if c.Output != "" && c.Output != "static" {
 		return nil, fmt.Errorf("output must be \"\" or \"static\", got %q", c.Output)
 	}
@@ -142,6 +147,11 @@ func (c *Config) Validate() (warnings []string, err error) {
 	case "", "always", "never", "ignore":
 	default:
 		return nil, fmt.Errorf("trailingSlash must be \"always\", \"never\" or \"ignore\", got %q", c.TrailingSlash)
+	}
+	switch c.Prefetch {
+	case "", "intent", "viewport":
+	default:
+		return nil, fmt.Errorf("prefetch must be \"intent\" or \"viewport\", got %q", c.Prefetch)
 	}
 	switch c.Compat.ModeOrDefault() {
 	case "modern", "legacy", "hybrid":
@@ -212,14 +222,30 @@ func (c *Config) Validate() (warnings []string, err error) {
 		warnings = append(warnings, "ssr.streaming is ignored when output is \"static\"")
 	}
 
-	for _, rd := range c.Redirects {
+	for i, rd := range c.Redirects {
 		if !strings.HasPrefix(rd.Source, "/") {
 			warnings = append(warnings, fmt.Sprintf("redirect source %q should start with /", rd.Source))
 		}
+		switch rd.StatusCode {
+		case 0, 301, 302, 303, 307, 308:
+		default:
+			return nil, fmt.Errorf("redirects[%d] (%q): statusCode must be 301, 302, 303, 307 or 308, got %d", i, rd.Source, rd.StatusCode)
+		}
+		if err := checkRouteRule("redirects", i, rd.Source, routesource.KindRedirect, rd.Has, rd.Missing); err != nil {
+			return nil, err
+		}
 	}
-	for _, rw := range c.Rewrites {
+	for i, rw := range c.Rewrites {
 		if !strings.HasPrefix(rw.Source, "/") {
 			warnings = append(warnings, fmt.Sprintf("rewrite source %q should start with /", rw.Source))
+		}
+		if err := checkRouteRule("rewrites", i, rw.Source, routesource.KindRewrite, rw.Has, rw.Missing); err != nil {
+			return nil, err
+		}
+	}
+	for i, hr := range c.Headers {
+		if err := checkRouteRule("headers", i, hr.Source, routesource.KindHeader, hr.Has, hr.Missing); err != nil {
+			return nil, err
 		}
 	}
 
@@ -238,9 +264,17 @@ func (c *Config) Validate() (warnings []string, err error) {
 			return nil, fmt.Errorf("serverExternalPackages entries must be package names such as \"sharp\" or \"@napi-rs/canvas\", got %q", name)
 		}
 	}
+	for _, prefix := range c.EnvPrefix {
+		if prefix == "" || !strings.HasSuffix(prefix, "_") || strings.ContainsAny(prefix, " \t=") {
+			return nil, fmt.Errorf("envPrefix entries must be non-empty names ending in \"_\" such as \"KRATE_PUBLIC_\", got %q (an empty prefix would expose every environment variable)", prefix)
+		}
+	}
+	if r := c.OutputFileTracingRoot; r != "" && strings.ContainsAny(r, "\x00\n") {
+		return nil, fmt.Errorf("outputFileTracingRoot must be a directory path, got %q", r)
+	}
 	for key, globs := range c.OutputFileTracingIncludes {
 		for _, g := range globs {
-			if err := checkTraceGlob(g); err != nil {
+			if err := checkTraceGlob(g, c.OutputFileTracingRoot != ""); err != nil {
 				return nil, fmt.Errorf("outputFileTracingIncludes[%q]: %w", key, err)
 			}
 		}
@@ -504,4 +538,23 @@ func redactURL(raw string) string {
 	}
 	u.User = url.User("***")
 	return u.String()
+}
+
+// checkRouteRule compiles a rule's source and conditions so a pattern Go
+// cannot run stops the load instead of leaving a rule that never matches.
+func checkRouteRule(kind string, i int, source string, k routesource.Kind, has, missing []RouteCondition) error {
+	if _, err := routesource.Compile(source, k); err != nil {
+		return routeRuleError(kind, i, err)
+	}
+	if _, err := routesource.CompileConditions(has, missing); err != nil {
+		return routeRuleError(kind, i, err)
+	}
+	return nil
+}
+
+func routeRuleError(kind string, i int, err error) error {
+	if routesource.IsUnsupported(err) {
+		return fmt.Errorf("[%s] %s[%d]: %v. Rewrite the pattern without that feature, or handle the rule in middleware", diag.CodeRouteSourceUnsupported, kind, i, err)
+	}
+	return fmt.Errorf("%s[%d]: %v", kind, i, err)
 }

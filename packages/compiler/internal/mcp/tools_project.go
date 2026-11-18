@@ -761,7 +761,7 @@ func (s *Service) toolEnvCheck(ctx context.Context, args map[string]any) (ToolRe
 		for _, m := range envDeclRe.FindAllStringSubmatch(string(data), -1) {
 			d := declared[m[1]]
 			if d == nil {
-				d = &decl{Name: m[1], Public: strings.HasPrefix(m[1], "KRATE_PUBLIC_"), SecretLike: secretEnvKey(m[1])}
+				d = &decl{Name: m[1], Public: s.publicEnvName(m[1]), SecretLike: secretEnvKey(m[1])}
 				declared[m[1]] = d
 			}
 			d.Files = append(d.Files, n)
@@ -853,7 +853,7 @@ func (s *Service) toolEnvCheck(ctx context.Context, args map[string]any) (ToolRe
 			u := uses[name]
 			if u == nil {
 				_, inShell := os.LookupEnv(name)
-				u = &use{Name: name, Declared: declared[name] != nil, SetInShell: inShell, Public: strings.HasPrefix(name, "KRATE_PUBLIC_")}
+				u = &use{Name: name, Declared: declared[name] != nil, SetInShell: inShell, Public: s.publicEnvName(name)}
 				uses[name] = u
 			}
 			if len(u.Locations) < 10 {
@@ -1247,4 +1247,15 @@ func (s *Service) registerProjectTools(srv *Server) {
 		Annotations: readOnlyAnnotations("Compat Check"),
 		Handler:     s.toolCompatCheck,
 	})
+}
+
+// publicEnvName reports whether name starts with one of the project's public
+// environment prefixes (config.envPrefix, default KRATE_PUBLIC_).
+func (s *Service) publicEnvName(name string) bool {
+	for _, p := range s.cfg.PublicEnvPrefixes() {
+		if strings.HasPrefix(name, p) {
+			return true
+		}
+	}
+	return false
 }

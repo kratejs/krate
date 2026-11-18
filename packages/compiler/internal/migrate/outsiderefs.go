@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -32,7 +33,7 @@ func workspaceRoot(dir string) string {
 // warnOutsideReferences reports files elsewhere in the workspace that point
 // into a route tree Apply moves aside (for example a sibling package's
 // stylesheet importing ../../web/src/app/tokens.css). Those references are
-// outside the project and cannot be rewritten.
+// outside the project and cannot be rewritten, so the old path keeps a stub.
 func warnOutsideReferences(abs, tree string, rep *Report) {
 	wsRoot := workspaceRoot(abs)
 	if wsRoot == "" {
@@ -55,7 +56,7 @@ func warnOutsideReferences(abs, tree string, rep *Report) {
 			newPath[filepath.Join(abs, filepath.FromSlash(f.Source))] = f.Target
 		}
 	}
-	var hits []string
+	refs := map[string][]string{} // moved file -> "file:line" of each outside reference
 	count := 0
 	_ = filepath.WalkDir(wsRoot, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -82,30 +83,83 @@ func warnOutsideReferences(abs, tree string, rep *Report) {
 			return nil
 		}
 		for _, m := range outsideRefSpec.FindAllSubmatchIndex(data, -1) {
-			spec := string(data[m[2]:m[3]])
-			hit := resolveInTree(filepath.Dir(p), spec, inTree)
+			hit := resolveInTree(filepath.Dir(p), string(data[m[2]:m[3]]), inTree)
 			if hit == "" {
 				continue
 			}
-			dest := "it moves to the backup with the tree"
-			if t, ok := newPath[hit]; ok {
-				dest = "it is now " + t
-			}
 			line := 1 + strings.Count(string(data[:m[2]]), "\n")
 			relFile, _ := filepath.Rel(wsRoot, p)
-			relHit, _ := filepath.Rel(abs, hit)
-			hits = append(hits, fmt.Sprintf("%s:%d references %s (%s)", filepath.ToSlash(relFile), line, filepath.ToSlash(relHit), dest))
+			refs[hit] = append(refs[hit], fmt.Sprintf("%s:%d", filepath.ToSlash(relFile), line))
 		}
 		return nil
 	})
-	sort.Strings(hits)
-	for _, h := range hits {
-		rep.Manual = append(rep.Manual, ManualItem{
-			Source: tree,
-			Reason: h + "; the file is outside this project and was not rewritten",
-			Hint:   "point the reference at the new path, or keep a copy of the file where the other package expects it",
-		})
+	hits := make([]string, 0, len(refs))
+	for hit := range refs {
+		hits = append(hits, hit)
 	}
+	sort.Strings(hits)
+	for _, hit := range hits {
+		sort.Strings(refs[hit])
+		planOutsideStub(abs, hit, refs[hit], newPath[hit], rep)
+	}
+}
+
+var defaultExport = regexp.MustCompile(`(?m)^\s*export\s+default\b|export\s*\{[^}]*\bas\s+default\b`)
+
+// planOutsideStub keeps a file that something outside the project references
+// at its old path. A stylesheet or script that was migrated gets a stub that
+// imports or re-exports the moved file, so there is one source of truth. Any
+// other file keeps a copy and a manual item. Apply writes the stub after the
+// route tree moves aside.
+func planOutsideStub(abs, hit string, refs []string, moved string, rep *Report) {
+	old, _ := filepath.Rel(abs, hit)
+	old = filepath.ToSlash(old)
+	ext := strings.ToLower(filepath.Ext(old))
+	why := refs[0]
+	if len(refs) > 1 {
+		why = fmt.Sprintf("%s (+%d more)", refs[0], len(refs)-1)
+	}
+	var movedContent []byte
+	if moved != "" {
+		for _, f := range rep.Files {
+			if f.Target == moved {
+				movedContent = f.Content
+			}
+		}
+	}
+	rel := ""
+	if moved != "" {
+		rel = relativeSpecifier(path.Dir(old), moved, old)
+	}
+	switch {
+	case moved != "" && ext == ".css":
+		rep.Files = append(rep.Files, PlannedFile{Kind: KindStub, Target: old, Content: []byte("/* Kept so " + refs[0] + " keeps working; the file moved to " + moved + ". */\n@import '" + rel + "';\n"), Rewrites: []string{"stub that imports " + moved}})
+		rep.Info = append(rep.Info, fmt.Sprintf("kept %s as a stub that imports the moved file, because %s references it", old, why))
+		return
+	case moved != "" && (ext == ".ts" || ext == ".tsx" || ext == ".js" || ext == ".jsx" || ext == ".mjs" || ext == ".mts"):
+		spec := rel
+		if ext == ".ts" || ext == ".tsx" || ext == ".jsx" {
+			spec = strings.TrimSuffix(spec, path.Ext(spec))
+		}
+		body := "// Kept so " + refs[0] + " keeps working; the module moved to " + moved + ".\nexport * from '" + spec + "';\n"
+		if defaultExport.Match(movedContent) {
+			body += "export { default } from '" + spec + "';\n"
+		}
+		rep.Files = append(rep.Files, PlannedFile{Kind: KindStub, Target: old, Content: []byte(body), Rewrites: []string{"stub that re-exports " + moved}})
+		rep.Info = append(rep.Info, fmt.Sprintf("kept %s as a stub that re-exports the moved file, because %s references it", old, why))
+		return
+	}
+	data, err := os.ReadFile(hit)
+	if err != nil {
+		rep.Manual = append(rep.Manual, ManualItem{Source: old, Reason: why + " references " + old + ", which is outside this project and moves to the backup", Hint: "copy the file to where the other package expects it"})
+		return
+	}
+	rep.Files = append(rep.Files, PlannedFile{Kind: KindStub, Target: old, Content: data, Rewrites: []string{"copy kept for " + refs[0]}})
+	rep.Manual = append(rep.Manual, ManualItem{
+		Source: old,
+		Reason: why + " references " + old + " from outside this project; a copy stays at the old path and the migrated app does not use it",
+		Hint:   "point the reference at a file the migrated app also uses, or keep the copy in sync by hand",
+	})
 }
 
 // resolveInTree resolves spec against dir and returns the file in inTree it

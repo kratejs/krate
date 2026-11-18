@@ -87,6 +87,18 @@ krate deploy --target node        # dist/.krate/server/server.mjs (plain Node, n
 Projects with server features also deploy to `vercel`, `netlify` and `cloudflare`
 as a function or worker; see [Serverless and Node targets](#serverless-and-node-targets).
 
+The `_headers` and `vercel.json` files also mark the build's content-hashed
+assets (`Cache-Control: public, max-age=31536000, immutable`): a directory whose
+files are all hashed, such as `chunks/`, becomes one `/chunks/*` rule, other
+hashed files are listed by path. The list comes from the build manifest, the same
+one `krate serve` uses, so a file from `public/` that merely looks hashed is not
+included, and HTML is never immutable. A `headers` rule of your own that sets
+`Cache-Control` for the same files replaces the immutable rule for them.
+Cloudflare Pages reads at most 100 rules from `_headers`, so on a site with more
+hashed files than that the largest are listed and a comment names how many were
+left out. Hosts
+that serve `dist/` without `krate deploy` need the same rule configured by hand.
+
 Redirects and rewrites come from your `redirects`/`rewrites` config, so the
 same rules drive `krate serve` and the deployed host. Krate patterns are
 translated to each host's syntax: `/legacy/*` with `/docs/:splat` stays as is

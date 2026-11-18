@@ -375,7 +375,10 @@ func gridLineUtility(cls string, neg bool) (string, bool) {
 			return prop + "-" + side + ": " + v + ";", true
 		}
 	default:
-		if v, isArb := unwrapArbitrary(rest); isArb && !neg {
+		if v, isArb := unwrapArbitrary(rest); isArb {
+			if neg {
+				v = "calc(" + v + " * -1)"
+			}
 			return prop + ": " + v + ";", true
 		}
 	}
@@ -397,7 +400,7 @@ func flexUtility(cls string) (string, bool) {
 			return "flex: calc(" + a + "/" + b + " * 100%);", true
 		}
 	}
-	for _, p := range []struct{ root, prop string }{{"grow", "flex-grow"}, {"shrink", "flex-shrink"}} {
+	for _, p := range []struct{ root, prop string }{{"grow", "flex-grow"}, {"shrink", "flex-shrink"}, {"flex-grow", "flex-grow"}, {"flex-shrink", "flex-shrink"}} {
 		if key, ok := strings.CutPrefix(cls, p.root+"-"); ok {
 			if isDigits(key) {
 				return p.prop + ": " + key + ";", true

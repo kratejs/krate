@@ -40,13 +40,13 @@ func gzipSize(s string) int {
 	return buf.Len()
 }
 
-// Markers that only exist in one optional feature bundle.
+// Names the runtime chunk defines on window only when their optional
+// feature ships.
 const (
-	markActions = "__krateBindFormAction"
-	markClasses = "__krateClassError"
-	markHelpers = "twMerge"
-	markList    = "longestIncreasingSubsequence"
-	markRouter  = "reinitRouter"
+	markActions = "__krateBindFormAction:"
+	markClasses = "__krateClass:"
+	markHelpers = "twMerge:"
+	markList    = "krateBindList:"
 )
 
 func TestRuntimeChunkKeepsReferencedFeatures(t *testing.T) {
@@ -63,7 +63,7 @@ func TestRuntimeChunkKeepsReferencedFeatures(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := writeTrimmedChunk(t, runtimeChunkOptions{SPA: true, Scan: tt.scan})
+			got := writeTrimmedChunk(t, runtimeChunkOptions{SPA: true, Usage: runtimeUsage{Refs: jsRefs(tt.scan)}})
 			if !strings.Contains(got, tt.want) {
 				t.Errorf("runtime is missing %s for %q", tt.want, tt.scan)
 			}

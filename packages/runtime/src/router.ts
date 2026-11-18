@@ -17,6 +17,13 @@ import { siteConfig, type KrateRuntimeConfig } from './site-config.js';
  */
 const RUNTIME_CHUNK_RE = /\/chunks\/runtime\.[^/]+\.js$/;
 
+/**
+ * Scripts that stay loaded across navigations: the runtime and the shared
+ * component chunks (chunks/c/), which only register the hydration code page
+ * scripts call. Each runs once per document.
+ */
+const PERSISTENT_SCRIPT_RE = /\/chunks\/(?:runtime\.[^/]+|c\/[^/]+)\.js$/;
+
 function runtimeConfig(): KrateRuntimeConfig {
   return siteConfig();
 }
@@ -358,6 +365,22 @@ function prefetchAsset(url: string): void {
   document.head.appendChild(link);
 }
 
+/**
+ * The scripts this document already has: its script tags, and every resource
+ * it fetched, which includes the island modules an earlier client-side
+ * navigation imported and that the current head no longer lists.
+ */
+function loadedAssetURLs(): Set<string> {
+  const loaded = new Set<string>();
+  document.querySelectorAll('script[src]').forEach((s) => loaded.add((s as HTMLScriptElement).src));
+  try {
+    for (const e of performance.getEntriesByType('resource')) loaded.add(e.name);
+  } catch {
+    // No resource timing: the script tags are all we know.
+  }
+  return loaded;
+}
+
 function prefetchPage(url: string): Promise<void> {
   const key = cacheKey(url);
   const cached = prefetchCache.get(key);
@@ -376,9 +399,7 @@ function prefetchPage(url: string): Promise<void> {
       // Invalidated while in flight: the response is stale.
       if (prefetchInflight.get(key) !== p) return;
       cachePut(key, { html, url: finalUrl, status: res.status, at: now() });
-      const loaded = new Set<string>();
-      document.querySelectorAll('script[src]').forEach((s) => loaded.add((s as HTMLScriptElement).src));
-      for (const asset of pageAssetURLs(html, finalUrl, loaded)) prefetchAsset(asset);
+      for (const asset of pageAssetURLs(html, finalUrl, loadedAssetURLs())) prefetchAsset(asset);
     })
     .catch(() => {
       // A failed prefetch is retried by the real navigation, which reports
@@ -415,6 +436,25 @@ function shouldPrefetch(a: HTMLAnchorElement): boolean {
   return a.hasAttribute('data-prefetch') && v !== 'false' && v !== '0';
 }
 
+/** Most links per page that viewport prefetch will fetch. */
+const VIEWPORT_PREFETCH_MAX = 5;
+let viewportPrefetched = 0;
+
+/** Whether the connection asks for no speculative traffic (Save-Data, 2g). */
+function savingData(): boolean {
+  const c = (navigator as any).connection;
+  if (!c) return false;
+  return c.saveData === true || c.effectiveType === 'slow-2g' || c.effectiveType === '2g';
+}
+
+// Viewport prefetch is opt-in: prefetch="viewport" on the link, or the site-wide
+// `prefetch: "viewport"` default. Everything else prefetches on intent only.
+function wantsViewportPrefetch(a: HTMLAnchorElement): boolean {
+  if (!shouldPrefetch(a)) return false;
+  const v = a.getAttribute('data-prefetch');
+  return v === 'viewport' || (runtimeConfig().prefetch === 'viewport' && v !== 'intent');
+}
+
 // Above-the-fold/viewport prefetch is deferred to idle time so it never
 // competes with first paint; hover/focus keeps the 200ms intent debounce.
 function idle(fn: () => void): void {
@@ -427,7 +467,7 @@ function prefetchHoverHandler(e: Event): void {
   const t = e.target as Element | null;
   if (!t || typeof (t as Element).closest !== 'function') return;
   const a = t.closest('a[data-prefetch]') as HTMLAnchorElement | null;
-  if (!a || !shouldPrefetch(a) || !isLocalLink(a)) return;
+  if (!a || !shouldPrefetch(a) || !isLocalLink(a) || savingData()) return;
   const href = a.getAttribute('href');
   if (!href) return;
   const url = new URL(href, location.href).href;
@@ -442,9 +482,10 @@ function prefetchHoverHandler(e: Event): void {
 }
 
 function observePrefetchLinks(): void {
-  if (!prefetchObserver) return;
+  viewportPrefetched = 0;
+  if (!prefetchObserver || savingData()) return;
   document.querySelectorAll('a[data-prefetch]').forEach((a) => {
-    if (shouldPrefetch(a as HTMLAnchorElement)) prefetchObserver!.observe(a);
+    if (wantsViewportPrefetch(a as HTMLAnchorElement)) prefetchObserver!.observe(a);
   });
 }
 
@@ -458,9 +499,12 @@ function setupPrefetch(): void {
           if (!entry.isIntersecting) continue;
           const a = entry.target as HTMLAnchorElement;
           const href = a.getAttribute('href');
-          if (href && isLocalLink(a) && shouldPrefetch(a)) {
+          if (href && isLocalLink(a) && wantsViewportPrefetch(a) && viewportPrefetched < VIEWPORT_PREFETCH_MAX && !savingData()) {
             const url = new URL(href, location.href).href;
-            if (pathOf(url) !== renderedPath) idle(() => void prefetchPage(url));
+            if (pathOf(url) !== renderedPath) {
+              viewportPrefetched++;
+              idle(() => void prefetchPage(url));
+            }
           }
           prefetchObserver!.unobserve(entry.target);
         }
@@ -482,6 +526,7 @@ function setupSpeculationRules(): void {
   // honoured next to script hashes, so under a CSP meta the JS prefetch path
   // is used instead of emitting a blocked script.
   if (document.querySelector('meta[http-equiv="Content-Security-Policy" i]')) return;
+  if (savingData()) return;
   try {
     const script = document.createElement('script');
     script.type = 'speculationrules';
@@ -751,9 +796,12 @@ function loadScript(script: PendingScript): Promise<boolean> {
     const s = document.createElement('script');
     s.src = script.src;
     if (script.module) s.type = 'module';
+    // Classic scripts run in document order, as on a full load: a shared
+    // component chunk must register before the page script that calls it.
+    else s.async = false;
     // Only page scripts are disposable across navigations; the shared runtime
-    // chunk stays in place.
-    if (!RUNTIME_CHUNK_RE.test(script.src)) s.setAttribute('data-krate-spa', '');
+    // and component chunks stay in place.
+    if (!PERSISTENT_SCRIPT_RE.test(script.src)) s.setAttribute('data-krate-spa', '');
     s.onload = () => resolve(true);
     s.onerror = () => resolve(false);
     document.body.appendChild(s);
@@ -1795,7 +1843,7 @@ function refreshPageBindings(): void {
   // Mark the page scripts as disposable so they're removed and re-executed
   // against the fresh DOM on the next navigation.
   document.querySelectorAll('script[src]').forEach((s) => {
-    if (!RUNTIME_CHUNK_RE.test((s as HTMLScriptElement).src)) s.setAttribute('data-krate-spa', '');
+    if (!PERSISTENT_SCRIPT_RE.test((s as HTMLScriptElement).src)) s.setAttribute('data-krate-spa', '');
   });
 }
 

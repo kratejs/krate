@@ -23,6 +23,8 @@ redirects: [
 | `source` | The path to match (supports `*` splats and `:param`, `:param*`, `:param+`, `:param?` segments) |
 | `destination` | Where to send the visitor |
 | `permanent` | `true` -> `301`, `false` (default) -> `302` |
+| `statusCode` | `301`, `302`, `303`, `307` or `308`; wins over `permanent` |
+| `has`, `missing` | Conditions on the query, a header, a cookie or the host |
 | `basePath` | `false` matches `source` and sends `destination` exactly as written, outside the [base path](/docs/reference/config/#base-path). Default `true` |
 
 `:param*` matches zero or more segments, `:param+` one or more, `:param?` one
@@ -31,6 +33,13 @@ destination. Matched values are percent-encoded when they are put in the
 destination, and a path destination can never become an off-site URL: values
 like `/\evil.com` or an encoded `//evil.com` are escaped or collapsed so the
 `Location` always starts with a single `/`.
+
+The request's query string is carried to the destination (the destination's own
+keys win), redirects run before middleware, and they also answer `/api/*`.
+`source` accepts Next.js syntax, including a regex in a parameter and a leading
+negative lookahead such as `/store/:slug((?!compare$)[^/]+)`. The
+[config reference](/docs/reference/config/#redirects--rewrites) lists the source
+forms, `has`/`missing`, and the request order.
 
 ### Under a base path
 

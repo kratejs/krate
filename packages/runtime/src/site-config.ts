@@ -10,6 +10,8 @@ export interface KrateRuntimeConfig {
   viewTransitions?: boolean | 'auto';
   /** Milliseconds a prefetched document stays fresh (default 30000). */
   prefetchTTL?: number;
+  /** Default link prefetch: "viewport" also prefetches links as they scroll into view. */
+  prefetch?: 'intent' | 'viewport';
   /** Set by `krate dev`: enables router dev warnings. */
   dev?: boolean;
 }

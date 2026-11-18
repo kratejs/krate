@@ -55,12 +55,13 @@ func (p *DocsPlugin) afterBuild(ctx *BuildResultHookCtx) error {
 		contentDir = "src/content/docs"
 	}
 	hashFile := filepath.Join(ctx.Root, ".krate", "cache", "pagefind.hash")
-	inHash := pagefindInputHash(ctx.Root, contentDir)
-	if data, err := os.ReadFile(hashFile); err == nil && strings.TrimSpace(string(data)) == inHash {
+	pfOpts := pagefindOptions(opts)
+	inHash := pagefindInputHash(ctx.Root, contentDir, pfOpts)
+	if pagefindUpToDate(hashFile, inHash, ctx.OutDir, pfOpts) {
 		return nil
 	}
 
-	if err := runPagefind(ctx.Root, ctx.OutDir, pagefindOptions(opts)); err != nil {
+	if err := runPagefind(ctx.Root, ctx.OutDir, pfOpts); err != nil {
 		fmt.Fprintf(os.Stderr, "  Docs search warning: pagefind: %v (falling back to JSON search)\n", err)
 		return nil
 	}
@@ -70,9 +71,31 @@ func (p *DocsPlugin) afterBuild(ctx *BuildResultHookCtx) error {
 	return nil
 }
 
+// pagefindUpToDate reports whether the last run still describes outDir: the
+// recorded input hash matches and the index it produced exists there. A wiped
+// or fresh output directory has no index, so the indexer must run again even
+// when the content did not change.
+func pagefindUpToDate(hashFile, inHash, outDir string, opts PagefindOptions) bool {
+	data, err := os.ReadFile(hashFile)
+	if err != nil || strings.TrimSpace(string(data)) != inHash {
+		return false
+	}
+	subdir := opts.OutputSubdir
+	if subdir == "" {
+		subdir = "pagefind"
+	}
+	for _, name := range []string{"pagefind.js", "pagefind-entry.json"} {
+		if _, err := os.Stat(filepath.Join(outDir, subdir, name)); err != nil {
+			return false
+		}
+	}
+	return true
+}
+
 // pagefindInputHash hashes the (path, size, mtime) of every file under the docs
-// content directory. Any content change alters the hash and re-runs the indexer.
-func pagefindInputHash(root, contentDir string) string {
+// content directory plus the indexer options. Any content or option change
+// alters the hash and re-runs the indexer.
+func pagefindInputHash(root, contentDir string, opts PagefindOptions) string {
 	dir := contentDir
 	if !filepath.IsAbs(dir) {
 		dir = filepath.Join(root, dir)
@@ -87,6 +110,7 @@ func pagefindInputHash(root, contentDir string) string {
 	})
 	sort.Strings(files)
 	h := fnv.New64a()
+	fmt.Fprintf(h, "%q\n", pagefindArgs("", opts))
 	for _, f := range files {
 		info, err := os.Stat(f)
 		if err != nil {

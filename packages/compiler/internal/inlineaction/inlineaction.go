@@ -111,6 +111,26 @@ func FirstPos(prog *ast.Program) (ast.Pos, bool) {
 // Has reports whether src can contain an inline server action.
 func Has(src string) bool { return strings.Contains(src, "use server") }
 
+// HasDirective reports whether the module at path uses a "use server"
+// directive: as its first statement or at the start of a function body.
+// Unlike Has, a "use server" that is only text (a string, a comment, a code
+// sample on a docs page) does not count. A source that does not parse
+// counts, since its directives cannot be ruled out.
+func HasDirective(path, src string) bool {
+	if !Has(src) {
+		return false
+	}
+	prog, errs := tsstrip.Parse(path, src, tsstrip.Options{})
+	if prog == nil || len(errs) > 0 {
+		return true
+	}
+	if _, ok := isUseServer(prog.Body); ok {
+		return true
+	}
+	_, ok := FirstPos(prog)
+	return ok
+}
+
 func isUseServer(stmts []ast.Stmt) (ast.Pos, bool) {
 	if len(stmts) == 0 {
 		return ast.Pos{}, false

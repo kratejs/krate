@@ -619,6 +619,34 @@ All paths are relative to `basePath`. Requests that send a JSON body, an
 - Session and state tokens are encrypted, bound to the cookie they belong to,
   and rejected after `maxAge`. List more than one secret in code to rotate.
 
+### Typing extra session fields
+
+`session.user` has the fields above plus anything else (an index signature), so
+extra fields type-check as `unknown`. To give them real types, augment
+`SessionUserExtensions` (and `UserExtensions` for the `User` your callbacks
+receive) in a `.d.ts` file your tsconfig includes:
+
+```typescript
+// src/types/krate-auth.d.ts
+import type { Role } from "./roles";
+
+declare module "@krate/auth" {
+  interface SessionUserExtensions {
+    role: Role;
+    credits: number;
+    comingSoonAccess?: boolean;
+  }
+}
+```
+
+A field declared there replaces the built-in field of the same name, so
+`role: Role` narrows the default `string | null | undefined`. Without an
+augmentation the interfaces are empty and the types are exactly the ones in the
+table above. `DefaultSession` is the session shape before augmentation
+(`{ user?: ...; expires: string }`), the name Auth.js uses, so code that imports
+it from `next-auth` keeps compiling after the port. Claims on the JWT token need
+no declaration: `token` accepts any field.
+
 ## Coming from NextAuth
 
 | NextAuth | Krate |
@@ -636,10 +664,12 @@ All paths are relative to `basePath`. Requests that send a JSON body, an
 | `cookies: { sessionToken: { name } }` per-cookie overrides, `theme`, `useSecureCookies` | Not supported. Use `cookies.prefix` and `cookies.secure` |
 | Discord `issuer: "https://discord.com"` | Supported: Discord stays plain OAuth and the RFC 9207 `iss` callback parameter is checked against the issuer when both are present |
 
-`krate migrate nextjs` does this port for you, see
+`krate migrate nextjs` does this port for you, including the
+`declare module 'next-auth'` augmentation (it becomes the file above), see
 [Migrating from Next.js](/docs/guides/migrating-from-nextjs/). Keep
 `@auth/drizzle-adapter` when your tables already exist: it implements the
-`Adapter` interface `defineAuth` expects, and with `cookies.prefix: "authjs"`
+`Adapter` interface `defineAuth` expects (its types mark the user and account
+methods optional, so `adapter` accepts that shape), and with `cookies.prefix: "authjs"`
 existing database sessions keep working.
 
 Differences to know: with the JWT strategy the session token is an encrypted

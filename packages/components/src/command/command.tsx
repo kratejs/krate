@@ -1,5 +1,6 @@
 import './command.css';
-import { createSignal, onMount } from '@krate/runtime';
+import { createSignal } from '@krate/runtime';
+import { useId } from 'react';
 
 export interface CommandItem {
   value: string;
@@ -23,13 +24,11 @@ export interface CommandProps {
 // Command is a searchable list (command palette / combobox list). Filtering is
 // client-side over the supplied items; selection is reported via onSelect.
 export function Command(props: CommandProps) {
-  // Unique per instance, so it is chosen on mount unless the author passes `id`.
-  var [listIdSig, setListId] = createSignal(props.id || "");
+  // Unique per instance and the same in the static HTML and after hydration.
+  var generatedId = useId();
+  var listId = props.id || "krate-command-" + generatedId;
   var [query, setQuery] = createSignal('');
   var [active, setActive] = createSignal(0);
-  onMount(function () {
-    if (!listIdSig()) setListId("krate-command-list-" + Math.random().toString(36).slice(2, 8));
-  });
   var className = "krate-command";
   if (props.class) className += " " + props.class;
   var items = props.items || [];
@@ -114,18 +113,18 @@ export function Command(props: CommandProps) {
         role="combobox"
         aria-expanded={matchItems(items, query()).length > 0 ? "true" : "false"}
         aria-autocomplete="list"
-        aria-controls={listIdSig()}
-        aria-activedescendant={matchItems(items, query()).length > 0 ? listIdSig() + "-opt-" + active() : undefined}
+        aria-controls={listId}
+        aria-activedescendant={matchItems(items, query()).length > 0 ? listId + "-opt-" + active() : undefined}
         aria-label={props.label || props.placeholder || "Search"}
         placeholder={props.placeholder || "Type to search..."}
         onInput={handleInput}
         onKeyDown={handleKeyDown}
       />
-      <ul class="krate-command-list" role="listbox" id={listIdSig()} aria-label={props.label || "Results"}>
+      <ul class="krate-command-list" role="listbox" id={listId} aria-label={props.label || "Results"}>
         {matchItems(items, query()).map((item, i) => (
           <li
             key={item.value}
-            id={listIdSig() + "-opt-" + i}
+            id={listId + "-opt-" + i}
             class={"krate-command-item" + (i === active() ? " krate-command-item-active" : "")}
             role="option"
             aria-selected={i === active() ? "true" : "false"}

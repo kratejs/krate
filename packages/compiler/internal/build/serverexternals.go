@@ -21,6 +21,18 @@ import (
 type nativeAddons struct {
 	mu   sync.Mutex
 	pkgs map[string]bool
+	// sources maps an external package to the directory a file URL import
+	// found it in (see fileURLImportPlugin).
+	sources map[string]string
+}
+
+func (n *nativeAddons) addSource(pkg, dir string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.sources == nil {
+		n.sources = map[string]string{}
+	}
+	n.sources[pkg] = dir
 }
 
 func (n *nativeAddons) add(pkg string) {
@@ -363,6 +375,13 @@ func externalPatterns(pkgs []string) []string {
 // because of a native addon are returned. A bundle that still fails (an addon
 // in the project's own files) reports the error from nativeAddonPlugin.
 func buildExternalizingNative(opts api.BuildOptions, extra []string) (api.BuildResult, []string) {
+	res, detected, _ := buildExternalizingNativeSources(opts, extra)
+	return res, detected
+}
+
+// buildExternalizingNativeSources is buildExternalizingNative that also
+// returns where file URL imports found the external packages.
+func buildExternalizingNativeSources(opts api.BuildOptions, extra []string) (api.BuildResult, []string, map[string]string) {
 	externals := append([]string(nil), extra...)
 	var detected []string
 	var res api.BuildResult
@@ -371,14 +390,14 @@ func buildExternalizingNative(opts api.BuildOptions, extra []string) (api.BuildR
 		res = esbuildBuild(externalizingNativeOptions(opts, externals, found))
 		pkgs := found.list()
 		if len(res.Errors) == 0 || len(pkgs) == 0 {
-			return res, detected
+			return res, detected, found.sources
 		}
 		for _, p := range pkgs {
 			externals = append(externals, p)
 			detected = append(detected, p)
 		}
 	}
-	return res, detected
+	return res, detected, nil
 }
 
 // externalizingNativeOptions are the options of a buildExternalizingNative
@@ -387,13 +406,44 @@ func buildExternalizingNative(opts api.BuildOptions, extra []string) (api.BuildR
 func externalizingNativeOptions(opts api.BuildOptions, externals []string, found *nativeAddons) api.BuildOptions {
 	o := opts
 	o.External = append(append([]string(nil), opts.External...), externalPatterns(externals)...)
-	o.Plugins = append(append([]api.Plugin(nil), opts.Plugins...), nativeAddonPlugin(found, func(pkg, file string) string {
+	o.Plugins = append(append([]api.Plugin(nil), opts.Plugins...), fileURLImportPlugin(externals, found), nativeAddonPlugin(found, func(pkg, file string) string {
 		if pkg == "" {
 			return fmt.Sprintf("%s is a native addon in your own sources and cannot be bundled; load it with createRequire(import.meta.url) from a package listed in serverExternalPackages", file)
 		}
 		return fmt.Sprintf("package %q contains a native addon (%s) and cannot be bundled; add it to serverExternalPackages in krate.config", pkg, filepath.Base(file))
 	}))
 	return o
+}
+
+// fileURLImportPlugin resolves the file: URLs that the page and action bundles
+// use for a dependency Node could not find from their output directory (see
+// externalNodeModulesPlugin). The deploy bundle bundles the file, except when
+// it belongs to one of the external packages: that stays an import of the bare
+// package name, which the traced node_modules supplies. The directory the URL
+// named is remembered for the trace, because the project may not see the
+// package (pnpm installs it under the workspace package that depends on it).
+func fileURLImportPlugin(externals []string, found *nativeAddons) api.Plugin {
+	return api.Plugin{
+		Name: "krate-file-url-imports",
+		Setup: func(b api.PluginBuild) {
+			b.OnResolve(api.OnResolveOptions{Filter: `^file:`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+				u, err := url.Parse(args.Path)
+				if err != nil || u.Scheme != "file" {
+					return api.OnResolveResult{}, nil
+				}
+				p := u.Path
+				if len(p) >= 3 && p[0] == '/' && p[2] == ':' {
+					p = p[1:]
+				}
+				p = filepath.FromSlash(p)
+				if pkg := ownerPackage(p); pkg != "" && slices.Contains(externals, pkg) {
+					found.addSource(pkg, packageRootOf(p))
+					return api.OnResolveResult{Path: pkg, External: true}, nil
+				}
+				return api.OnResolveResult{Path: p}, nil
+			})
+		},
+	}
 }
 
 // externalPackagesFromMetafile lists the packages a bundle still imports at run

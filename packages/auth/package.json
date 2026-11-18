@@ -69,7 +69,7 @@
   ],
   "scripts": {
     "build": "node scripts/build.mjs && tsc --emitDeclarationOnly",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p types-test/plain && tsc -p types-test/augmented",
     "test": "vitest run"
   },
   "dependencies": {

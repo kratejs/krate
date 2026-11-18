@@ -430,7 +430,7 @@ func (b *Builder) BuildNativeApp(opts NativeAppOptions) (*NativeAppResult, error
 	b.nativeShake = opts.Derive
 	// The shell serves the files from the app bundle: .br and .gz siblings
 	// would only add to its size.
-	b.Cfg.Compress = config.CompressConfig{}
+	b.Cfg.Compress = config.CompressOff()
 	if opts.Dev {
 		// Page errors reach the terminal through the dev overlay, which maps
 		// their stacks with these maps.

@@ -772,12 +772,15 @@ func parseIslandMetafile(s string) (*islandMetafile, error) {
 // resolve alike, because the plugins those builds add ahead of it answer an
 // import by its importer and path alone: an import one of them claims never
 // reaches the plugin, and any other resolves as in the first pass.
-func (b *Builder) buildIslandFlavours(flavours []*islandFlavour, chunksDir string) []api.OutputFile {
+func (b *Builder) buildIslandFlavours(flavours []*islandFlavour, chunksDir string) api.BuildResult {
 	if len(flavours) < 2 {
 		for _, f := range flavours {
-			f.result = esbuildBuild(f.opts)
+			// The metafile is the chunk graph the pages preload from.
+			opts := f.opts
+			opts.Metafile = true
+			f.result = esbuildBuild(opts)
 		}
-		return nil
+		return api.BuildResult{}
 	}
 	var preact *islandFlavour
 	for _, f := range flavours {
@@ -805,7 +808,7 @@ func (b *Builder) buildIslandFlavours(flavours []*islandFlavour, chunksDir strin
 		ctx, cerr := api.Context(opts)
 		if cerr != nil {
 			f.result = api.BuildResult{Errors: cerr.Errors}
-			return nil
+			return api.BuildResult{}
 		}
 		ctxs[i] = ctx
 	}
@@ -813,11 +816,11 @@ func (b *Builder) buildIslandFlavours(flavours []*islandFlavour, chunksDir strin
 	rebuildAll(flavours, ctxs)
 	for i, f := range flavours {
 		if len(f.result.Errors) > 0 {
-			return nil
+			return api.BuildResult{}
 		}
 		m, err := parseIslandMetafile(f.result.Metafile)
 		if err != nil {
-			return nil
+			return api.BuildResult{}
 		}
 		metas[i] = m
 	}
@@ -825,7 +828,7 @@ func (b *Builder) buildIslandFlavours(flavours []*islandFlavour, chunksDir strin
 	plan := planSharedIslandModules(b.Root, metas, globals)
 	if len(plan.boundary) == 0 {
 		b.warnDuplicatedIslandModules(metas, globals)
-		return nil
+		return api.BuildResult{}
 	}
 	files := make(map[string]string, len(plan.boundary))
 	for _, k := range plan.boundary {
@@ -870,7 +873,7 @@ func (b *Builder) buildIslandFlavours(flavours []*islandFlavour, chunksDir strin
 	if !rebuild() {
 		// Never fail a build for sharing: bundle a copy per graph instead.
 		unshare()
-		return nil
+		return api.BuildResult{}
 	}
 	var outputs [][]api.OutputFile
 	for _, f := range flavours {
@@ -881,10 +884,10 @@ func (b *Builder) buildIslandFlavours(flavours []*islandFlavour, chunksDir strin
 	if len(nres.Errors) > 0 {
 		// Never ship graphs that import chunks that were not built.
 		unshare()
-		return nil
+		return api.BuildResult{}
 	}
 	b.warnDuplicatedIslandModules(metas, globals)
-	return nres.OutputFiles
+	return nres
 }
 
 // rebuildAll rebuilds every flavour's context at once: the flavours share no
@@ -1369,7 +1372,7 @@ func (b *Builder) buildNeutralOnce(base api.BuildOptions, injects []string, file
 	opts.EntryNames = "[name]"
 	opts.ChunkNames = islandNeutralStem + "[hash]"
 	opts.Splitting = true
-	opts.Metafile = false
+	opts.Metafile = true
 	opts.Inject = injects
 	entry := api.Plugin{
 		Name: neutralEntryNamespace,

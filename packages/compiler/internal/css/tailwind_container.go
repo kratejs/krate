@@ -26,7 +26,11 @@ func containerUtilityCSS(base string) (string, bool) {
 		typ = "size"
 	case "-inline-size":
 	default:
-		return "", false
+		v, _, isArb := arbitraryValue(strings.TrimPrefix(rest, "-"))
+		if !isArb || rest[0] != '-' {
+			return "", false
+		}
+		typ = v
 	}
 	css := "container-type: " + typ + ";"
 	if hasName {

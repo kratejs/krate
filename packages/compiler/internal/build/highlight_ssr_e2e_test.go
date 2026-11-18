@@ -93,7 +93,7 @@ func TestSSRCodeHighlightingE2E(t *testing.T) {
 		t.Fatalf("no highlighted block in:\n%.600s", html)
 	}
 	for _, want := range []string{
-		`<span class="line"><span class="cl"><span class="kr">const</span>`,
+		`<span class="kr">const</span>`,
 		`<span class="s1">&#39;a&lt;b&#39;</span>`,
 		`<span class="line hl">`,
 		`data-highlight-lines="2"`,
@@ -102,9 +102,9 @@ func TestSSRCodeHighlightingE2E(t *testing.T) {
 			t.Errorf("missing %q in:\n%.1200s", want, html)
 		}
 	}
-	// One block is highlighted per ts element, none for the unknown language.
-	if got := strings.Count(html, `<span class="line`); got < 4 {
-		t.Errorf("expected line wrappers for two highlighted blocks, got %d", got)
+	// Only the block with a marked line gets wrappers; unmarked code has none.
+	if got := strings.Count(html, `<span class="line`); got != 2 {
+		t.Errorf("expected line wrappers only for the two lines of the marked block, got %d", got)
 	}
 	cobol := html[strings.Index(html, "language-cobol"):]
 	if strings.Contains(cobol, `class="line`) || strings.Contains(cobol[:min(len(cobol), 400)], "<span") {

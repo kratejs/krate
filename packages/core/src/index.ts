@@ -9,6 +9,7 @@ export type {
   SSRConfig,
   RedirectConfig,
   RewriteConfig,
+  RouteCondition,
   SEOConfig,
   SiteConfig,
   RobotsConfig,
