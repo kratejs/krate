@@ -246,6 +246,15 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Added
 
+- `has` and `missing` conditions on `redirects`, `rewrites` and `headers` rules, with Next.js semantics:
+  `{ type: "query" | "header" | "cookie" | "host", key?, value? }`, a `value` regex anchored as a whole,
+  presence-only items captured under the key's name, named groups usable in `destination`. Redirects
+  take `statusCode` (301, 302, 303, 307 or 308), which wins over `permanent`.
+- Redirect, rewrite and header sources use Next.js (path-to-regexp 6) syntax: `:name`, `:name*`,
+  `:name+`, `:name?`, `:name(regex)`, unnamed `(regex)` and `{...}` groups, plus a leading negative
+  lookahead inside a parameter (`/store/:slug((?!compare$)[^/]+)`). `/x/*` with `:splat` and the
+  `path.Match` header globs still work. A regex RE2 cannot run (lookbehind, a backreference) is the
+  new error KR8355 at config load instead of a rule that never matches.
 - `envPrefix` config key (a string or a list, default `["KRATE_PUBLIC_"]`): the name prefixes of the
   environment variables inlined into client code and static output, like Vite's `envPrefix`. Each prefix
   must end in `_`; an empty one is a config error because it would expose every variable. Existing apps
@@ -442,6 +451,22 @@ host code runs in the native process. Names and options may change between relea
 
 ### Changed
 
+- `krate migrate nextjs` translates `has`/`missing` on redirects, rewrites and headers instead of
+  refusing them, and writes `statusCode: 308` or `307` for Next's `permanent: true` or `false`. A
+  redirect whose regex Go cannot run is written as a marked block at the start of the middleware
+  function (a middleware is created when there is none) with an info line. The redirects of an app
+  with `/store?vehicle=x`-style rules need no manual item.
+- Serve behaviour of config rules, which affects existing apps:
+  - Redirects keep the request's query string (`/old?a=1` goes to `/new?a=1`). A key the destination
+    sets itself wins.
+  - Redirects run before middleware and also answer `/api/*`; a middleware gate no longer hides them.
+    Rewrites still run after middleware.
+  - A `headers` rule wins over a header the handler set, such as the `Cache-Control` of a public file
+    or a page. Krate's own immutable `Cache-Control` on content-hashed assets is kept.
+  - A source containing `:`, `(` or `{` that never matched before now matches (`/:path*` in `headers`,
+    `/store/:slug(regex)` in redirects).
+  - `krate deploy` writes `statusCode` to `vercel.json` and `_redirects`; rules with `has`/`missing`
+    go to Vercel and are skipped, with a note, in `_redirects` and `_headers`.
 - `krate migrate nextjs` keeps `NEXT_PUBLIC_` names in source and writes
   `envPrefix: ["KRATE_PUBLIC_", "NEXT_PUBLIC_"]` when the app reads them, instead of renaming every read
   to `KRATE_PUBLIC_`. It finds the definitions in the `envDir` that `loadEnvConfig` points at and in

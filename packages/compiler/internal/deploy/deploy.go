@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
@@ -169,10 +170,13 @@ func emitRedirects(cfg *config.Config, outDir string) ([]string, error) {
 	base := cfg.BaseURLPath()
 	var b strings.Builder
 	for _, r := range cfg.Redirects {
-		status := "302"
-		if r.Permanent {
-			status = "301"
+		if len(r.Has) > 0 || len(r.Missing) > 0 {
+			// _redirects cannot test the query, headers or cookies; an
+			// unconditional copy would redirect every request.
+			fmt.Fprintf(&b, "# skipped %s: has/missing conditions need a server (use --target node/docker or Vercel)\n", r.Source)
+			continue
 		}
+		status := strconv.Itoa(r.Status())
 		src, dst := translateRule(r.Source, r.Destination, false)
 		if rb := ruleBase(base, r); rb != "" {
 			src, dst = sitepath.Join(rb, src), sitepath.Join(rb, dst)
@@ -180,6 +184,10 @@ func emitRedirects(cfg *config.Config, outDir string) ([]string, error) {
 		fmt.Fprintf(&b, "%s\t%s\t%s\n", src, dst, status)
 	}
 	for _, r := range cfg.Rewrites {
+		if len(r.Has) > 0 || len(r.Missing) > 0 {
+			fmt.Fprintf(&b, "# skipped %s: has/missing conditions need a server (use --target node/docker or Vercel)\n", r.Source)
+			continue
+		}
 		src, dst := translateRule(r.Source, r.Destination, false)
 		fmt.Fprintf(&b, "%s\t%s\t200\n", sitepath.Join(base, src), sitepath.Join(base, dst))
 	}
@@ -207,6 +215,10 @@ func emitHeaders(cfg *config.Config, outDir string, auto autoHeaders) ([]string,
 	}
 	for _, rule := range rules {
 		if rule.Source == "" || len(rule.Headers) == 0 {
+			continue
+		}
+		if len(rule.Has) > 0 || len(rule.Missing) > 0 {
+			fmt.Fprintf(&b, "# skipped %s: has/missing conditions need a server (use --target node/docker or Vercel)\n\n", rule.Source)
 			continue
 		}
 		b.WriteString(sitepath.Join(base, rule.Source))
@@ -276,12 +288,18 @@ func emitVercel(cfg *config.Config, root, outDir string, auto autoHeaders) ([]st
 	type vRedirect struct {
 		Source      string `json:"source"`
 		Destination string `json:"destination"`
-		// Always written: Vercel treats a missing "permanent" as true (308).
-		Permanent bool `json:"permanent"`
+		// Always written (unless statusCode is): Vercel treats a missing
+		// "permanent" as true (308).
+		Permanent  *bool                   `json:"permanent,omitempty"`
+		StatusCode int                     `json:"statusCode,omitempty"`
+		Has        []config.RouteCondition `json:"has,omitempty"`
+		Missing    []config.RouteCondition `json:"missing,omitempty"`
 	}
 	type vRewrite struct {
-		Source      string `json:"source"`
-		Destination string `json:"destination"`
+		Source      string                  `json:"source"`
+		Destination string                  `json:"destination"`
+		Has         []config.RouteCondition `json:"has,omitempty"`
+		Missing     []config.RouteCondition `json:"missing,omitempty"`
 	}
 	base := cfg.BaseURLPath()
 	doc := map[string]interface{}{"$schema": vercelSchema}
@@ -293,7 +311,14 @@ func emitVercel(cfg *config.Config, root, outDir string, auto autoHeaders) ([]st
 		for _, r := range cfg.Redirects {
 			src, dst := translateRule(r.Source, r.Destination, true)
 			rb := ruleBase(base, r)
-			rs = append(rs, vRedirect{Source: sitepath.Join(rb, src), Destination: sitepath.Join(rb, dst), Permanent: r.Permanent})
+			v := vRedirect{Source: sitepath.Join(rb, src), Destination: sitepath.Join(rb, dst), Has: r.Has, Missing: r.Missing}
+			if r.StatusCode != 0 {
+				v.StatusCode = r.StatusCode
+			} else {
+				perm := r.Permanent
+				v.Permanent = &perm
+			}
+			rs = append(rs, v)
 		}
 		doc["redirects"] = rs
 	}
@@ -301,7 +326,7 @@ func emitVercel(cfg *config.Config, root, outDir string, auto autoHeaders) ([]st
 		rw := make([]vRewrite, 0, len(cfg.Rewrites))
 		for _, r := range cfg.Rewrites {
 			src, dst := translateRule(r.Source, r.Destination, true)
-			rw = append(rw, vRewrite{Source: sitepath.Join(base, src), Destination: sitepath.Join(base, dst)})
+			rw = append(rw, vRewrite{Source: sitepath.Join(base, src), Destination: sitepath.Join(base, dst), Has: r.Has, Missing: r.Missing})
 		}
 		doc["rewrites"] = rw
 	}

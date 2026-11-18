@@ -1162,6 +1162,12 @@ Tags inside `<Head>` (and `<title>`, `<meta>` and `<link>` rendered on their own
 
 A prop that holds JSX with a component that has state (`slot={<Probe />}`, where Probe uses createSignal or useState) is one component instance. The receiving component reads the prop in more than one place, but the instance can only be mounted in one of them, so the other copy shows the server markup without ever hydrating. Render the prop in one place, or give each place its own element (a separate prop for each place).
 
+### KR8355
+
+**Route source uses a regex feature Go cannot run**
+
+The `source` of a redirect, rewrite or header rule, or the `value` of one of its `has` or `missing` conditions, uses a regular-expression feature that Go's RE2 engine does not have: lookbehind, a backreference, or a lookahead that is not the start of a parameter pattern. Krate refuses to load the config rather than keep a rule that never matches. A leading negative lookahead inside a parameter, such as `/store/:slug((?!compare$)[^/]+)`, is supported. Otherwise rewrite the pattern without the feature, or handle the request in `middleware.ts`. This is an error.
+
 ### KR8360
 
 **Component state resets when the condition flips**

@@ -183,11 +183,28 @@ export interface SSRConfig {
   streaming?: boolean;
 }
 
+/**
+ * A has or missing item: the rule applies when every `has` item matches and no
+ * `missing` item does. Without `value` the field only has to be present (and
+ * is captured under the key's name); with `value` it must match the regex as a
+ * whole. `host` takes no key.
+ */
+export interface RouteCondition {
+  type: "query" | "header" | "cookie" | "host";
+  key?: string;
+  value?: string;
+}
+
 export interface RedirectConfig {
+  /** Next.js path syntax (`/x/:slug`, `/x/:path*`, `/x/:id(\\d+)`) or `/x/*` with `:splat`. */
   source: string;
   destination: string;
   /** true = 301, false = 302 (default). */
   permanent?: boolean;
+  /** 301, 302, 303, 307 or 308; wins over `permanent`. */
+  statusCode?: 301 | 302 | 303 | 307 | 308;
+  has?: RouteCondition[];
+  missing?: RouteCondition[];
   /**
    * false matches `source` and sends `destination` exactly as written, outside
    * the base path. Default true: both live under the base path.
@@ -198,6 +215,8 @@ export interface RedirectConfig {
 export interface RewriteConfig {
   source: string;
   destination: string;
+  has?: RouteCondition[];
+  missing?: RouteCondition[];
 }
 
 export interface SEOConfig {
@@ -313,9 +332,11 @@ export interface SecurityConfig {
 
 /** Custom response headers for paths matching `source` (`krate serve` only). */
 export interface HeaderRule {
-  /** Exact path, prefix wildcard ("/assets/*"), or path glob. */
+  /** Exact path, prefix wildcard ("/assets/*"), path glob, or Next.js syntax ("/:path*"). */
   source: string;
   headers: Record<string, string>;
+  has?: RouteCondition[];
+  missing?: RouteCondition[];
 }
 
 /** Allowlist entry for remote <Image> sources. */

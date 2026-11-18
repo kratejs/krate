@@ -19,10 +19,14 @@ type SecurityConfig struct {
 }
 
 // HeaderRule sets response headers for requests whose path matches Source.
-// Source is an exact path, a prefix wildcard ("/assets/*"), or a path.Match glob.
+// Source is an exact path, a prefix wildcard ("/assets/*"), a path.Match glob,
+// or a Next.js style pattern such as "/:path*" or "/:file(.*\\.js)".
 type HeaderRule struct {
 	Source  string            `json:"source"`
 	Headers map[string]string `json:"headers"`
+	// Has and Missing add conditions on the request, as on a redirect.
+	Has     []RouteCondition `json:"has,omitempty"`
+	Missing []RouteCondition `json:"missing,omitempty"`
 }
 
 // HeaderDisabled reports whether a configured header value means "do not send".

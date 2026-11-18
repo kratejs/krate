@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/internal/markdown"
+	"github.com/kratejs/krate/packages/compiler/internal/routesource"
 )
 
 // Default request body caps (bytes). API requests may be larger than page
@@ -370,18 +371,43 @@ type Redirect struct {
 	Source      string `json:"source"`      // e.g. "/old-page"
 	Destination string `json:"destination"` // e.g. "/new-page"
 	Permanent   bool   `json:"permanent"`   // true = 301, false = 302
+	// StatusCode is 301, 302, 303, 307 or 308 and wins over Permanent.
+	StatusCode int `json:"statusCode,omitempty"`
+	// Has and Missing add conditions on the request (query, header, cookie,
+	// host). The rule applies only when every Has item matches and no
+	// Missing item does.
+	Has     []RouteCondition `json:"has,omitempty"`
+	Missing []RouteCondition `json:"missing,omitempty"`
 	// BasePath false matches Source and sends Destination as written, outside
 	// the base path. Unset or true puts both under the base path.
 	BasePath *bool `json:"basePath,omitempty"`
+}
+
+// Status returns the HTTP status the redirect answers with: StatusCode when
+// set, else 301 for a permanent redirect and 302 otherwise.
+func (r Redirect) Status() int {
+	switch {
+	case r.StatusCode != 0:
+		return r.StatusCode
+	case r.Permanent:
+		return 301
+	}
+	return 302
 }
 
 // InBasePath reports whether the base path applies to this rule.
 func (r Redirect) InBasePath() bool { return r.BasePath == nil || *r.BasePath }
 
 type Rewrite struct {
-	Source      string `json:"source"`      // e.g. "/legacy/*"
-	Destination string `json:"destination"` // e.g. "/docs/:splat"
+	Source      string           `json:"source"`      // e.g. "/legacy/*"
+	Destination string           `json:"destination"` // e.g. "/docs/:splat"
+	Has         []RouteCondition `json:"has,omitempty"`
+	Missing     []RouteCondition `json:"missing,omitempty"`
 }
+
+// RouteCondition is one has or missing item of a redirect, rewrite or header
+// rule. See the routesource package for the matching rules.
+type RouteCondition = routesource.Condition
 
 type SEOConfig struct {
 	BaseURL       string `json:"baseUrl,omitempty"`     // e.g. "https://example.com"

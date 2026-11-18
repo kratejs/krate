@@ -216,7 +216,13 @@ analytics, fonts, and other site-wide tags.
 > Vercel) ignore them; configure headers there instead.
 
 `headers` applies custom response headers; `security` overrides the defaults
-(`"off"` disables a header).
+(`"off"` disables a header). A rule's `source` uses the
+[source syntax](#source-syntax) (`"/:path*"` matches every path) and takes
+`has` and `missing`. Rules are applied when the response is written, so they
+win over a header a handler set itself, such as the `Cache-Control` of a public
+file or a page. The one exception is the immutable `Cache-Control` Krate gives
+its own content-hashed assets. Several matching rules apply in order, and the
+last value for a header wins (`Vary` values are added instead).
 
 ```typescript
 headers: [
@@ -730,11 +736,115 @@ it with `export const lang = "fr"` (or `export const config = { lang: "fr" }`).
 ```typescript
 redirects: [
   { source: "/old-page", destination: "/new-page", permanent: true },
-]
+  { source: "/moved", destination: "/new-home", statusCode: 308 },
+  {
+    source: "/store",
+    has: [{ type: "query", key: "vehicle" }],
+    destination: "/templates",
+    statusCode: 308,
+  },
+],
 rewrites: [
   { source: "/docs/:path*", destination: "/documentation/:path*" },
-]
+],
 ```
+
+A rule has these keys:
+
+| Key | Meaning |
+|-----|---------|
+| `source` | The path to match, see [Source syntax](#source-syntax). |
+| `destination` | Where to send the visitor, or the internal path a rewrite serves. `:name` placeholders are filled from the match. |
+| `permanent` | Redirects only. `true` answers 301, `false` (default) 302. |
+| `statusCode` | Redirects only. One of 301, 302, 303, 307 or 308. Wins over `permanent`. A config migrated from Next.js uses 308 and 307, the statuses Next sends. |
+| `has`, `missing` | Conditions on the request, see [has and missing](#has-and-missing). Redirects, rewrites and `headers` rules all take them. |
+| `basePath` | Redirects only. `false` matches and redirects outside the [base path](#base-path). |
+
+### Source syntax
+
+`source` is the path-to-regexp 6 syntax Next.js uses, so a `next.config` rule
+works unchanged:
+
+| Form | Matches |
+|------|---------|
+| `/about` | exactly `/about` |
+| `/blog/:slug` | one segment, bound to `:slug` |
+| `/docs/:path*` | zero or more segments (`/docs`, `/docs/a/b`) |
+| `/docs/:path+` | one or more segments |
+| `/p/:id?` | an optional segment |
+| `/files/:id(\d+)` | a segment that matches the regex |
+| `/x/(\d+)` | an unnamed regex segment (it captures nothing you can use) |
+| `/blog{/:slug}?` | an optional group |
+| `/store/:slug((?!compare$)[^/]+)` | any segment except `compare` |
+| `/legacy/*` | Krate's older form: the rest of the path is `:splat` |
+
+Matching is case sensitive and `/x` does not match `/x/` for a plain path.
+Patterns with parameters also match a trailing slash.
+
+Regexes run on Go's RE2 engine, which has no lookahead or lookbehind. One form
+is supported: a negative lookahead at the start of a parameter's regex, as in
+`:slug((?!compare$)[^/]+)`. Krate checks the parameter value against the
+lookahead's alternatives (`$` means the end of the value). Any other pattern RE2
+cannot run (lookbehind, a backreference, a lookahead elsewhere) is a config error
+([KR8355](/docs/reference/diagnostics/#kr8355)) when the config loads, never a
+rule that silently does nothing. Handle such a request in `middleware.ts`.
+
+`headers` rules take the same syntax. A header source with no `:`, `(` or `{`
+keeps its older meaning: an exact path, a trailing-`*` prefix (`/assets/*`) or a
+`path.Match` glob.
+
+### has and missing
+
+```typescript
+{
+  source: "/app",
+  has: [
+    { type: "host", value: "(?<org>[a-z]+)\\.example\\.com" },
+    { type: "header", key: "x-device", value: "ios|android" },
+  ],
+  missing: [{ type: "cookie", key: "session" }],
+  destination: "/orgs/:org",
+}
+```
+
+An item is `{ type, key?, value? }` with `type` one of `query`, `header`, `cookie`
+or `host` (`host` takes no `key`; it is the host name without the port, lower
+cased). The rule applies when every `has` item matches and no `missing` item
+does.
+
+- Without `value`, an item matches when the field is present and not empty, and
+  its value is captured under the key's name (letters only, header names lower
+  cased): `{ type: "query", key: "vehicle" }` makes `:vehicle` available in
+  `destination`.
+- With `value`, the field must match the regex as a whole (`^(?:value)$`).
+  Named groups are captured, and a `host` item without groups captures `host`.
+- A repeated query parameter is judged by its last value, and repeated headers
+  are joined with `, `.
+- `value` regexes run on RE2, with the limits above (KR8355).
+
+### Query strings
+
+A redirect carries the request's query string to the destination. Keys the
+destination sets itself win: `/store/plans?x=1` with a rule to `/store` goes to
+`/store?x=1`, and a destination `/search?src=old` keeps `src=old` whatever the
+request sent. Values filled into a destination's query string are escaped so
+they cannot add a parameter. A rewrite merges the destination's query into the
+request's the same way.
+
+### Order
+
+For each request, `krate serve` and `krate start` apply:
+
+1. `headers` rules, on every response (they also cover redirects and errors).
+2. `redirects`, before middleware. A redirect applies to `/api/*` too, and a
+   maintenance gate in middleware does not hide it.
+3. Middleware.
+4. `rewrites`, after middleware, so middleware sees the URL the visitor asked
+   for.
+5. Routes, pages and files.
+
+The first redirect that matches answers. The same holds for the first matching
+rewrite.
 
 ## SEO & robots
 

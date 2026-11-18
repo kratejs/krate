@@ -2331,6 +2331,9 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		handlerWith404.ServeHTTP(w, r)
 	})
 
+	// Config redirects run in front of everything (see configRedirectMiddleware).
+	// Under a base path, basePath: false rules were matched against the full
+	// path by basePathMiddleware.
 	insideRedirects := cfg.Redirects
 	if cfg.BaseURLPath() != "" {
 		insideRedirects = nil
@@ -2340,17 +2343,12 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 			}
 		}
 	}
+	rewriteRules := compileRewrites(cfg.Rewrites)
 
-	// Redirect/rewrite middleware - applies config-based URL transformations
+	// Rewrite middleware - applies config-based URL transformations
 	metaRoutes := newMetaRouteLoader(absOut, hub != nil)
 	var redirectRewriteHandler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
-
-		// Check redirects first. Under a base path, basePath: false rules were
-		// already matched against the full path by basePathMiddleware.
-		if serveConfigRedirect(w, r, path, insideRedirects) {
-			return
-		}
 
 		// trailingSlash "never": /x/ goes to /x, judged on the requested URL
 		// before a rewrite maps it onto another internal path.
@@ -2359,24 +2357,33 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		}
 
 		// Check rewrites (internal path mapping, no redirect)
-		for _, rw := range cfg.Rewrites {
-			if matchRedirect(path, rw.Source) {
-				rewritten := rewriteDestination(path, rw.Source, rw.Destination)
-				// rewriteDestination percent-encodes substituted values; the
-				// request path holds the decoded form.
-				if dec, err := url.PathUnescape(rewritten); err == nil {
-					rewritten = dec
-				}
-				r.URL.Path = rewriteTargetPath(rewritten)
-				r.URL.RawPath = ""
-				// A rewrite onto an API route is served by the API handler;
-				// the mux already dispatched this request as a page.
-				if r.URL.Path == "/api" || strings.HasPrefix(r.URL.Path, "/api/") {
-					apiHandler.ServeHTTP(w, r)
-					return
-				}
-				break
+		for _, rw := range rewriteRules {
+			vals, mods, ok := rw.match(r, path)
+			if !ok {
+				continue
 			}
+			rewritten := buildDestination(rw.rule.Destination, vals, mods)
+			rewrittenQuery := ""
+			if i := strings.IndexByte(rewritten, '?'); i >= 0 {
+				rewritten, rewrittenQuery = rewritten[:i], rewritten[i+1:]
+			}
+			// buildDestination percent-encodes substituted values; the
+			// request path holds the decoded form.
+			if dec, err := url.PathUnescape(rewritten); err == nil {
+				rewritten = dec
+			}
+			r.URL.Path = rewriteTargetPath(rewritten)
+			r.URL.RawPath = ""
+			if rewrittenQuery != "" {
+				r.URL.RawQuery = strings.TrimPrefix(mergeRequestQuery("?"+rewrittenQuery, r.URL.RawQuery), "?")
+			}
+			// A rewrite onto an API route is served by the API handler;
+			// the mux already dispatched this request as a page.
+			if r.URL.Path == "/api" || strings.HasPrefix(r.URL.Path, "/api/") {
+				apiHandler.ServeHTTP(w, r)
+				return
+			}
+			break
 		}
 
 		// A dynamic metadata route (robots.ts, sitemap.ts) is an API route on
@@ -2508,7 +2515,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	proxyTrust.Store(cfg.Server.TrustProxy)
 	flashSecret.Store(flashSecretFor(revalHost.secret))
 	proxyHops.Store(int32(cfg.Server.TrustedProxies))
-	var rootHandler http.Handler = requestIDMiddleware(forwardedHeadersMiddleware(cfg.Server.TrustProxy, basePathMiddleware(cfg.BaseURLPath(), cfg.Redirects, securityHeadersMiddleware(cfg, customHeadersMiddleware(cfg.Headers, corsMiddleware(cfg, panicRecoveryMiddleware(Logger, devMux)))))))
+	var rootHandler http.Handler = requestIDMiddleware(forwardedHeadersMiddleware(cfg.Server.TrustProxy, basePathMiddleware(cfg.BaseURLPath(), cfg.Redirects, securityHeadersMiddleware(cfg, customHeadersMiddleware(cfg.Headers, corsMiddleware(cfg, panicRecoveryMiddleware(Logger, configRedirectMiddleware(insideRedirects, devMux))))))))
 
 	listenerOwned = true
 	addr := listener.Addr().(*net.TCPAddr)
@@ -2823,174 +2830,6 @@ func openBrowser(url string) {
 	} else {
 		_ = proc.Release()
 	}
-}
-
-// matchRedirect checks if a request path matches a redirect/rewrite source
-// pattern. Supports exact match, a trailing wildcard ("/old/*"), and named
-// segment parameters ("/users/:id", "/files/:path*").
-func matchRedirect(path, source string) bool {
-	_, ok := matchRedirectParams(path, source)
-	return ok
-}
-
-func matchRedirectParams(path, source string) (map[string]string, bool) {
-	params, _, ok := matchRedirectParamsMods(path, source)
-	return params, ok
-}
-
-// matchRedirectParamsMods is matchRedirectParams that also returns the modifier
-// ('*', '+' or '?') each named parameter was declared with in the source.
-func matchRedirectParamsMods(path, source string) (map[string]string, map[string]byte, bool) {
-	params := map[string]string{}
-	mods := map[string]byte{}
-	// Literal sources match exactly; splitURLPath below intentionally ignores
-	// trailing slashes for route matching, which must not make /old match /old/.
-	if source == path {
-		return params, mods, true
-	}
-	if !strings.ContainsAny(source, "*:") {
-		return nil, nil, false
-	}
-	if strings.HasSuffix(source, "/*") {
-		prefix := strings.TrimSuffix(source, "/*")
-		if path == prefix {
-			params["splat"] = ""
-			return params, mods, true
-		}
-		if !strings.HasPrefix(path, prefix+"/") {
-			return nil, nil, false
-		}
-		params["splat"] = strings.TrimPrefix(strings.TrimPrefix(path, prefix), "/")
-		return params, mods, true
-	}
-
-	sourceParts := splitURLPath(source)
-	pathParts := splitURLPath(path)
-	pi := 0
-	for _, part := range sourceParts {
-		if strings.HasPrefix(part, ":") {
-			name, mod := splitParamModifier(part[1:])
-			mods[name] = mod
-			switch mod {
-			case '*':
-				params[name] = strings.Join(pathParts[pi:], "/")
-				return params, mods, true
-			case '+':
-				if pi >= len(pathParts) {
-					return nil, nil, false
-				}
-				params[name] = strings.Join(pathParts[pi:], "/")
-				return params, mods, true
-			case '?':
-				if pi < len(pathParts) {
-					params[name] = pathParts[pi]
-					pi++
-				} else {
-					params[name] = ""
-				}
-				continue
-			}
-			if pi >= len(pathParts) {
-				return nil, nil, false
-			}
-			params[name] = pathParts[pi]
-			pi++
-			continue
-		}
-		if pi >= len(pathParts) || part != pathParts[pi] {
-			return nil, nil, false
-		}
-		pi++
-	}
-	if pi != len(pathParts) {
-		return nil, nil, false
-	}
-	return params, mods, true
-}
-
-// splitParamModifier splits a trailing '*', '+' or '?' off a parameter name.
-func splitParamModifier(name string) (string, byte) {
-	if n := len(name); n > 0 {
-		switch name[n-1] {
-		case '*', '+', '?':
-			return name[:n-1], name[n-1]
-		}
-	}
-	return name, 0
-}
-
-func splitURLPath(p string) []string {
-	p = strings.Trim(p, "/")
-	if p == "" {
-		return nil
-	}
-	return strings.Split(p, "/")
-}
-
-var destParamRe = regexp.MustCompile(`:([A-Za-z_][A-Za-z0-9_]*)`)
-
-// escapeRedirectValue percent-encodes a matched (already decoded) path value
-// for use inside a destination: each segment is escaped on its own so a "\"
-// or an encoded "/" can never turn into a scheme-relative URL, while "/"
-// between segments of a multi-segment value is kept.
-func escapeRedirectValue(v string) string {
-	if v == "" {
-		return ""
-	}
-	segs := strings.Split(v, "/")
-	for i, seg := range segs {
-		segs[i] = url.PathEscape(seg)
-	}
-	return strings.Join(segs, "/")
-}
-
-// rewriteDestination fills ":splat" and ":name" (also ":name*", ":name+" and
-// ":name?") placeholders in destination from the matched request path. Matched
-// values are percent-encoded, and a path destination never starts with "//" or
-// "/\" (an open redirect), whatever the request contained.
-func rewriteDestination(path, source, destination string) string {
-	params, mods, ok := matchRedirectParamsMods(path, source)
-	if !ok {
-		return destination
-	}
-	var out string
-	if splat, ok := params["splat"]; ok {
-		switch {
-		case strings.Contains(destination, ":splat"):
-			out = strings.ReplaceAll(destination, ":splat", escapeRedirectValue(splat))
-		case splat != "":
-			out = strings.TrimRight(destination, "/") + "/" + escapeRedirectValue(splat)
-		default:
-			out = destination
-		}
-	} else {
-		out = replaceDestParams(destination, params, mods)
-	}
-	return sanitizeRedirectTarget(destination, out)
-}
-
-// replaceDestParams substitutes ":name" placeholders. A '*', '+' or '?' right
-// after the name is part of the placeholder only when the source declared the
-// parameter with that modifier, so "/x/:id?ref=1" keeps its query string.
-func replaceDestParams(destination string, params map[string]string, mods map[string]byte) string {
-	var sb strings.Builder
-	last := 0
-	for _, m := range destParamRe.FindAllStringSubmatchIndex(destination, -1) {
-		name := destination[m[2]:m[3]]
-		val, ok := params[name]
-		if !ok {
-			continue
-		}
-		end := m[1]
-		if mod := mods[name]; mod != 0 && end < len(destination) && destination[end] == mod {
-			end++
-		}
-		sb.WriteString(destination[last:m[0]])
-		sb.WriteString(escapeRedirectValue(val))
-		last = end
-	}
-	sb.WriteString(destination[last:])
-	return sb.String()
 }
 
 // sanitizeRedirectTarget keeps a substituted path destination on-site. When the

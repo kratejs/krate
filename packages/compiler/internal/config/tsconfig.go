@@ -1363,6 +1363,16 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 			if b, ok := m["basePath"].(bool); ok {
 				rd.BasePath = &b
 			}
+			if n, ok := m["statusCode"].(float64); ok {
+				rd.StatusCode = int(n)
+			}
+			var err error
+			if rd.Has, err = routeConditions(m["has"]); err != nil {
+				return fmt.Errorf("redirects[%d].has: %w", i, err)
+			}
+			if rd.Missing, err = routeConditions(m["missing"]); err != nil {
+				return fmt.Errorf("redirects[%d].missing: %w", i, err)
+			}
 			cfg.Redirects = append(cfg.Redirects, rd)
 		}
 	case "rewrites":
@@ -1381,6 +1391,13 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 			}
 			if s, ok := m["destination"].(string); ok {
 				rw.Destination = s
+			}
+			var err error
+			if rw.Has, err = routeConditions(m["has"]); err != nil {
+				return fmt.Errorf("rewrites[%d].has: %w", i, err)
+			}
+			if rw.Missing, err = routeConditions(m["missing"]); err != nil {
+				return fmt.Errorf("rewrites[%d].missing: %w", i, err)
 			}
 			cfg.Rewrites = append(cfg.Rewrites, rw)
 		}
@@ -1466,4 +1483,20 @@ func applyNormalizedKeys(data []byte, cfg *Config) error {
 		}
 	}
 	return nil
+}
+
+// routeConditions reads a has or missing array of { type, key, value }.
+func routeConditions(v interface{}) ([]RouteCondition, error) {
+	if v == nil {
+		return nil, nil
+	}
+	data, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	var out []RouteCondition
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil, fmt.Errorf("expected an array of { type, key, value } objects")
+	}
+	return out, nil
 }

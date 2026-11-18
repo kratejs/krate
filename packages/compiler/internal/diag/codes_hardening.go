@@ -15,10 +15,23 @@ const (
 	// CodeJSXPropRenderedTwice: a JSX prop holding a component with state that
 	// the receiving component renders in more than one place.
 	CodeJSXPropRenderedTwice Code = "KR8354"
+	// CodeRouteSourceUnsupported: a redirect, rewrite or header source (or a
+	// has/missing value) that uses a regex feature Go cannot run.
+	CodeRouteSourceUnsupported Code = "KR8355"
 )
 
 func init() {
 	Register(
+		CodeInfo{
+			Code:  CodeRouteSourceUnsupported,
+			Title: "Route source uses a regex feature Go cannot run",
+			Explanation: "The `source` of a redirect, rewrite or header rule, or the `value` of one of its `has` or `missing` " +
+				"conditions, uses a regular-expression feature that Go's RE2 engine does not have: lookbehind, a " +
+				"backreference, or a lookahead that is not the start of a parameter pattern. Krate refuses to load the " +
+				"config rather than keep a rule that never matches. A leading negative lookahead inside a parameter, " +
+				"such as `/store/:slug((?!compare$)[^/]+)`, is supported. Otherwise rewrite the pattern without the " +
+				"feature, or handle the request in `middleware.ts`. This is an error.",
+		},
 		CodeInfo{
 			Code:  CodeUnsafeOutDir,
 			Title: "outDir would delete project sources",

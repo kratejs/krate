@@ -261,7 +261,14 @@ func emitVercelServer(cfg *config.Config, root, outDir string, plan *ServerPlan,
 		if r.Source == "" || len(r.Headers) == 0 {
 			continue
 		}
-		routes = append(routes, vcRoute{"src": scopeRegex(base, r.Source, headerSourceRegex(r.Source)), "headers": r.Headers, "continue": true})
+		route := vcRoute{"src": scopeRegex(base, r.Source, headerSourceRegex(r.Source)), "headers": r.Headers, "continue": true}
+		if len(r.Has) > 0 {
+			route["has"] = r.Has
+		}
+		if len(r.Missing) > 0 {
+			route["missing"] = r.Missing
+		}
+		routes = append(routes, route)
 	}
 	if plan.HasMiddleware {
 		// Page requests reach the function before the filesystem so the
@@ -274,16 +281,26 @@ func emitVercelServer(cfg *config.Config, root, outDir string, plan *ServerPlan,
 		src, dst := ruleRegex(r.Source, r.Destination)
 		rb := ruleBase(base, r)
 		src, dst = scopeRegex(rb, r.Source, src), sitepath.Join(rb, dst)
-		status := 302
-		if r.Permanent {
-			status = 301
+		route := vcRoute{"src": src, "headers": map[string]string{"Location": dst}, "status": r.Status()}
+		if len(r.Has) > 0 {
+			route["has"] = r.Has
 		}
-		routes = append(routes, vcRoute{"src": src, "headers": map[string]string{"Location": dst}, "status": status})
+		if len(r.Missing) > 0 {
+			route["missing"] = r.Missing
+		}
+		routes = append(routes, route)
 	}
 	for _, r := range cfg.Rewrites {
 		src, dst := ruleRegex(r.Source, r.Destination)
 		src, dst = scopeRegex(base, r.Source, src), sitepath.Join(base, dst)
-		routes = append(routes, vcRoute{"src": src, "dest": dst, "check": true})
+		route := vcRoute{"src": src, "dest": dst, "check": true}
+		if len(r.Has) > 0 {
+			route["has"] = r.Has
+		}
+		if len(r.Missing) > 0 {
+			route["missing"] = r.Missing
+		}
+		routes = append(routes, route)
 	}
 	// The not-found page's own URLs answer 404 from the function, not 200 from
 	// the CDN's copy of the file.
