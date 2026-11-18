@@ -237,8 +237,9 @@ The first pass:
   `request.cookies` (`get`, `getAll`, `has`, read-only) and `request.nextUrl`
   (a `URL` with `searchParams`, `pathname`, `basePath` and `clone()`; the
   pathname never includes the base path), and the handler is typed as
-  `KrateRequest` from `@krate/runtime/server`. `NextResponse.json` and
-  `NextResponse.redirect` come from a small generated shim whose responses carry
+  `KrateRequest` from `@krate/runtime/server`. `NextResponse` comes from a small
+  generated shim: a `Response` subclass (`new NextResponse(body, init)`,
+  `NextResponse.json`, `NextResponse.redirect`) whose responses carry
   `cookies.set/delete/get/getAll/has`. `after()` from `next/server` becomes
   `after` from `@krate/runtime/server` and runs once the response is sent (see
   [API routes](/docs/features/api-routes/#after-the-response)). Only what is
