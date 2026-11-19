@@ -3,130 +3,9 @@ package migrate
 import (
 	"regexp"
 	"strings"
+
+	"github.com/kratejs/krate/packages/compiler/internal/jsscan"
 )
-
-// codeMask marks, for each byte of a JavaScript/TypeScript source, whether it
-// is code: false inside comments, string literals, regex literals and the
-// text parts of template literals. The expressions of a `${...}` substitution
-// are code.
-func codeMask(src string) []bool {
-	mask := make([]bool, len(src))
-	type frame struct {
-		template bool
-		braces   int
-	}
-	stack := []frame{{}}
-	var prev byte // last significant byte seen in code
-	for i := 0; i < len(src); {
-		top := &stack[len(stack)-1]
-		c := src[i]
-		if top.template {
-			switch {
-			case c == '\\':
-				i += 2
-			case c == '`':
-				stack = stack[:len(stack)-1]
-				i++
-				prev = '`'
-			case c == '$' && i+1 < len(src) && src[i+1] == '{':
-				stack = append(stack, frame{})
-				i += 2
-			default:
-				i++
-			}
-			continue
-		}
-		switch {
-		case c == '/' && i+1 < len(src) && src[i+1] == '/':
-			for i < len(src) && src[i] != '\n' {
-				i++
-			}
-		case c == '/' && i+1 < len(src) && src[i+1] == '*':
-			end := strings.Index(src[i+2:], "*/")
-			if end < 0 {
-				i = len(src)
-			} else {
-				i += end + 4
-			}
-		case c == '\'' || c == '"':
-			i++
-			for i < len(src) && src[i] != c && src[i] != '\n' {
-				if src[i] == '\\' {
-					i++
-				}
-				i++
-			}
-			i++
-			prev = c
-		case c == '`':
-			stack = append(stack, frame{template: true})
-			i++
-		case c == '/' && regexAllowedAfter(prev):
-			i = skipRegex(src, i)
-			prev = '/'
-		case c == '}' && top.braces == 0 && len(stack) > 1:
-			stack = stack[:len(stack)-1]
-			i++
-		default:
-			if c == '{' {
-				top.braces++
-			} else if c == '}' && top.braces > 0 {
-				top.braces--
-			}
-			mask[i] = true
-			if c != ' ' && c != '\t' && c != '\n' && c != '\r' {
-				prev = c
-			}
-			i++
-		}
-	}
-	return mask
-}
-
-// regexAllowedAfter reports whether a `/` after the byte prev starts a regex
-// literal rather than a division.
-func regexAllowedAfter(prev byte) bool {
-	return prev == 0 || strings.IndexByte("(,=:[!&|?{};+-*%<>~^", prev) >= 0
-}
-
-func skipRegex(src string, i int) int {
-	i++
-	inClass := false
-	for i < len(src) && src[i] != '\n' {
-		switch {
-		case src[i] == '\\':
-			i++
-		case src[i] == '[':
-			inClass = true
-		case src[i] == ']':
-			inClass = false
-		case src[i] == '/' && !inClass:
-			i++
-			for i < len(src) && isIdentChar(src[i]) {
-				i++
-			}
-			return i
-		}
-		i++
-	}
-	return i
-}
-
-func isIdentChar(c byte) bool {
-	return c == '_' || c == '$' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
-}
-
-// codeOnly returns src with everything that is not code replaced by spaces.
-func codeOnly(src string) string {
-	mask := codeMask(src)
-	b := []byte(src)
-	for i := range b {
-		if !mask[i] && b[i] != '\n' {
-			b[i] = ' '
-		}
-	}
-	return string(b)
-}
 
 var jsIdentRe = regexp.MustCompile(`[A-Za-z_$][\w$]*`)
 
@@ -134,7 +13,7 @@ var jsIdentRe = regexp.MustCompile(`[A-Za-z_$][\w$]*`)
 // Property names are included; callers use it to over-approximate references.
 func identifiers(src string) map[string]bool {
 	out := map[string]bool{}
-	for _, m := range jsIdentRe.FindAllString(codeOnly(src), -1) {
+	for _, m := range jsIdentRe.FindAllString(jsscan.CodeOnly(src), -1) {
 		out[m] = true
 	}
 	return out
@@ -147,7 +26,7 @@ func splitTop(src string, open int) ([]string, bool) {
 	if open < 0 || open >= len(src) || strings.IndexByte("[{(", src[open]) < 0 {
 		return nil, false
 	}
-	mask := codeMask(src)
+	mask := jsscan.Mask(src)
 	depth := 0
 	start := open + 1
 	var parts []string

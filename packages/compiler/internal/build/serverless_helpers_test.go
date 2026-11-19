@@ -96,10 +96,15 @@ func nodeBundlePath(root string, cfg *config.Config) string {
 // startNodeBundle runs a node-target server.mjs on a free port.
 func startNodeBundle(t *testing.T, root string, cfg *config.Config, env ...string) string {
 	t.Helper()
+	return startNodeBundleAt(t, nodeBundlePath(root, cfg), root, env...)
+}
+
+// startNodeBundleAt runs the server.mjs at bundle, from the directory dir.
+func startNodeBundleAt(t *testing.T, bundle, dir string, env ...string) string {
+	t.Helper()
 	port := freePort(t)
-	bundle := nodeBundlePath(root, cfg)
 	cmd := exec.Command("node", bundle)
-	cmd.Dir = root
+	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), fmt.Sprintf("PORT=%d", port), "HOST=127.0.0.1")
 	cmd.Env = append(cmd.Env, env...)
 	var logs strings.Builder

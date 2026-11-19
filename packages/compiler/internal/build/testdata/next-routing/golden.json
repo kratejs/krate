@@ -385,6 +385,27 @@
    }
   },
   {
+   "name": "api reads a file next to its module",
+   "path": "/api/where",
+   "response": {
+    "status": 200,
+    "location": null,
+    "headers": {
+     "x-content-type-options": "nosniff",
+     "referrer-policy": "strict-origin-when-cross-origin",
+     "x-frame-options": "DENY",
+     "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), browsing-topics=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), hid=(), interest-cohort=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), xr-spatial-tracking=()",
+     "cross-origin-opener-policy": "same-origin-allow-popups",
+     "content-security-policy": "base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'",
+     "content-security-policy-report-only": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://umami.example.test https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; media-src 'self' blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; font-src 'self' data: https://assets.example.test; connect-src 'self' blob: data: https://assets.example.test https://umami.example.test https://challenges.cloudflare.com; worker-src 'self' blob:; manifest-src 'self'; frame-src https://challenges.cloudflare.com; base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'; report-uri /api/csp-report",
+     "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch",
+     "content-type": "application/json",
+     "transfer-encoding": "chunked"
+    },
+    "body": "{\"endsWith\":true,\"read\":\"next to the source\"}"
+   }
+  },
+  {
    "name": "brand svg",
    "path": "/brand/a.svg",
    "response": {

@@ -206,6 +206,7 @@ func (b *Builder) actionModuleOptions() api.BuildOptions {
 		opts.MinifySyntax = true
 	}
 	withAuthConfig(&opts, b.Cfg)
+	withSourceMeta(&opts, sourceRootFor(b.Root), "")
 	return opts
 }
 

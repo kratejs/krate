@@ -121,7 +121,8 @@ func compileServerBundlesWith(impls *clientSSRImpls, results []*PageResult, root
 
 			// Inject Head/Suspense/Script/Style imports at the top of the file
 			// so pages can use them as globals (matching krate compiler behavior)
-			pageSrc := string(sourceData)
+			meta := newSourceMeta(sourceRootFor(root), "")
+			pageSrc := meta.rewriteSource(absSource, string(sourceData))
 			if page.IslandStubs != nil {
 				pageSrc = page.IslandStubs.applyAttrs(pageSrc)
 			}
@@ -176,7 +177,7 @@ func compileServerBundlesWith(impls *clientSSRImpls, results []*PageResult, root
 				composed = append(composed, composedLayoutPlugin(root, pageModule, injectedSource, filepath.Dir(absSource), page.ComposedLayouts, files))
 			}
 
-			result := esbuildBuild(api.BuildOptions{
+			pageOpts := api.BuildOptions{
 				AbsWorkingDir:   root,
 				Bundle:          true,
 				Format:          api.FormatESModule,
@@ -200,7 +201,9 @@ func compileServerBundlesWith(impls *clientSSRImpls, results []*PageResult, root
 					ResolveDir: stdinDir,
 					Sourcefile: stdinFile,
 				},
-			})
+			}
+			meta.apply(&pageOpts)
+			result := esbuildBuild(pageOpts)
 
 			if len(result.Errors) > 0 {
 				for _, e := range result.Errors {

@@ -18,6 +18,7 @@ export const cases = [
   { name: 'api buffer route', path: '/api/node-buffer' },
   { name: 'api csp report', method: 'POST', path: '/api/csp-report', headers: { 'content-type': 'application/csp-report' } },
   { name: 'api marker', path: '/api/marker' },
+  { name: 'api reads a file next to its module', path: '/api/where' },
   { name: 'brand svg', path: '/brand/a.svg' },
   { name: 'brand not an image', path: '/brand/a.txt' },
   { name: 'preview hashed wasm', path: '/preview/0123456789abcdef.wasm' },
