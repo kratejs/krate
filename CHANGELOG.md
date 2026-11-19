@@ -579,6 +579,10 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- On Windows, `krate build` of a page with several islands could fail with `KR8009 ... Cannot read
+  file ".../.krate/context-keys.<hash>.mjs": The process cannot access the file because it is being
+  used by another process`. Concurrent island builds could both write that shared module, and the
+  second write's rename failed while esbuild had the file open. It is now written once.
 - A client navigation keeps mounted islands mounted, as Next.js keeps mounted client components. The
   refresh after a server action that revalidated (also a `revalidatePath` of another page, which
   refreshes the current route as in Next.js 16), `router.refresh()`, a same-page `router.replace` and a

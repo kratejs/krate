@@ -377,9 +377,17 @@ function __krateRawHTML(html) {
 }
 `
 
+// contextKeysMu serializes contextKeysFile. Island bundles build concurrently
+// and share the file: without it two builds can both find it missing and both
+// write it, and on Windows the second rename fails while esbuild has the first
+// open.
+var contextKeysMu sync.Mutex
+
 // contextKeysFile writes the injected registry module (once per content) and
 // returns its path.
 func contextKeysFile(dotKrate string) (string, error) {
+	contextKeysMu.Lock()
+	defer contextKeysMu.Unlock()
 	if err := os.MkdirAll(dotKrate, 0755); err != nil {
 		return "", err
 	}
