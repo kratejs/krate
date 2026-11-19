@@ -77,7 +77,7 @@ func BenchmarkGzipResponse(b *testing.B) {
 	body := gzipTestBody(50 << 10)
 	h := gzipMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write(body)
+		_, _ = w.Write(body)
 	}))
 	req := httptest.NewRequest("GET", "/", nil)
 	req.Header.Set("Accept-Encoding", "gzip")
