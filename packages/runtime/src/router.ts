@@ -75,8 +75,8 @@ function resolveSrc(src: string, baseUrl: string): string {
  * these warms the route's JS in addition to its HTML, so an SPA navigation does
  * not stall waiting on the chunk after the HTML swap.
  */
-export function pageAssetURLs(html: string, baseUrl: string, loaded: Set<string>): string[] {
-  const doc = new DOMParser().parseFromString(html, 'text/html');
+export function pageAssetURLs(html: string | Document, baseUrl: string, loaded: Set<string>): string[] {
+  const doc = typeof html === 'string' ? new DOMParser().parseFromString(html, 'text/html') : html;
   const out: string[] = [];
   const seen = new Set<string>();
   const consider = (src: string | null) => {
@@ -208,14 +208,29 @@ const PREFETCHED_ASSETS_MAX = 128;
 
 const errorPageCache = new Map<string, string | null>();
 
+/**
+ * Documents of visited history entries, keyed by history entry key (LRU), so
+ * back/forward renders without a request. Cleared by invalidatePrefetchCache().
+ */
+const historyDocs = new Map<string, LoadedDoc>();
+const HISTORY_CACHE_MAX = 10;
+/** Bumped by invalidatePrefetchCache(): a document fetched before it is stale. */
+let cacheGen = 0;
+/** History key of the hard-loaded first entry, until its document is stored. */
+let initialKey = '';
+
 let prefetchTimers = new Map<Element, ReturnType<typeof setTimeout>>();
 let prefetchObserver: IntersectionObserver | null = null;
 let loadingOverlay: Node[] = [];
+let loadingTimer: ReturnType<typeof setTimeout> | undefined;
 
 /** Output prefix of intercepting-route fragments (see the compiler's parallel.go). */
 const INTERCEPT_PREFIX = '_krate/i';
-const TRANSITION_MS = 150;
 const PREFETCH_DELAY = 200;
+/** How long a navigation must be pending before the loading.tsx UI shows. */
+const LOADING_DELAY_MS = 100;
+/** Attribute set on <html> while a navigation is loading. */
+const NAVIGATING_ATTR = 'data-krate-navigating';
 
 function now(): number {
   return typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
@@ -300,6 +315,13 @@ function emit(): void {
 function setStatus(next: 'idle' | 'loading'): void {
   if (status === next) return;
   status = next;
+  // Apps style the pending state with html[data-krate-navigating]; the old
+  // page stays visible and interactive until the new one is ready.
+  try {
+    document.documentElement.toggleAttribute(NAVIGATING_ATTR, next === 'loading');
+  } catch {
+    /* ignore */
+  }
   emit();
 }
 
@@ -383,14 +405,57 @@ function cacheTake(key: string): CachedDoc | undefined {
 export function invalidatePrefetchCache(url?: string): void {
   // A prefetch still in flight started before the data changed: forgetting it
   // keeps its (stale) response out of the cache.
+  cacheGen++;
   if (url === undefined) {
     prefetchCache.clear();
     prefetchInflight.clear();
+    historyDocs.clear();
     return;
   }
   const key = cacheKey(url);
   prefetchCache.delete(key);
   prefetchInflight.delete(key);
+  historyDocs.forEach((doc, k) => {
+    if (cacheKey(doc.url) === key) historyDocs.delete(k);
+  });
+}
+
+function historyPut(key: string, doc: LoadedDoc): void {
+  if (!key) return;
+  historyDocs.delete(key);
+  while (historyDocs.size >= HISTORY_CACHE_MAX) {
+    const oldest = historyDocs.keys().next().value;
+    if (oldest === undefined) break;
+    historyDocs.delete(oldest);
+  }
+  historyDocs.set(key, doc);
+}
+
+/**
+ * The hard-loaded first entry has no document string: fetch it in idle time
+ * once the user left it, so going back to it is instant too. A response the
+ * server marked no-store is not kept.
+ */
+function storeInitialDocument(key: string, url: string): void {
+  if (savingData()) return;
+  const gen = cacheGen;
+  idle(() => {
+    if (historyDocs.has(key) || gen !== cacheGen) return;
+    fetch(cacheKey(url), { headers: { Accept: 'text/html' }, credentials: 'same-origin' })
+      .then(async (res) => {
+        if (!res.ok || /no-store/i.test(res.headers.get('cache-control') || '')) return;
+        const finalUrl = res.url || cacheKey(url);
+        if (pathOf(finalUrl) !== pathOf(url)) return;
+        const ct = res.headers.get('content-type') || '';
+        const html = await res.text();
+        if (!(isHTMLType(ct) || (ct === '' && looksLikeHTML(html)))) return;
+        if (gen !== cacheGen || historyDocs.has(key) || !initialized) return;
+        historyPut(key, { html, url, status: res.status });
+      })
+      .catch(() => {
+        /* back falls back to a normal fetch */
+      });
+  });
 }
 
 function isHTMLType(ct: string): boolean {
@@ -401,14 +466,30 @@ function looksLikeHTML(body: string): boolean {
   return /^\s*(<!doctype html|<html|<head|<body)/i.test(body);
 }
 
-function prefetchAsset(url: string): void {
+function prefetchAsset(url: string, as = 'script'): void {
   if (prefetchedAssets.has(url) || prefetchedAssets.size >= PREFETCHED_ASSETS_MAX) return;
   prefetchedAssets.add(url);
   const link = document.createElement('link');
   link.rel = 'prefetch';
-  link.as = 'script';
+  link.as = as;
   link.href = url;
   document.head.appendChild(link);
+}
+
+/** Stylesheets of a prefetched document that this document does not have. */
+function newStylesheetURLs(doc: Document, baseUrl: string): string[] {
+  const have = new Set<string>();
+  document.querySelectorAll('link[rel="stylesheet"]').forEach((l) => have.add((l as HTMLLinkElement).href));
+  const out: string[] = [];
+  doc.querySelectorAll('link[rel="stylesheet"][href]').forEach((l) => {
+    try {
+      const abs = new URL(l.getAttribute('href')!, baseUrl).href;
+      if (!have.has(abs) && !out.includes(abs)) out.push(abs);
+    } catch {
+      /* ignore */
+    }
+  });
+  return out;
 }
 
 /**
@@ -445,7 +526,11 @@ function prefetchPage(url: string): Promise<void> {
       // Invalidated while in flight: the response is stale.
       if (prefetchInflight.get(key) !== p) return;
       cachePut(key, { html, url: finalUrl, status: res.status, at: now() });
-      for (const asset of pageAssetURLs(html, finalUrl, loadedAssetURLs())) prefetchAsset(asset);
+      // Warm the route's stylesheets and scripts too, so the navigation does
+      // not wait on them before the swap.
+      const doc = new DOMParser().parseFromString(html, 'text/html');
+      for (const sheet of newStylesheetURLs(doc, finalUrl)) prefetchAsset(sheet, 'style');
+      for (const asset of pageAssetURLs(doc, finalUrl, loadedAssetURLs())) prefetchAsset(asset);
     })
     .catch(() => {
       // A failed prefetch is retried by the real navigation, which reports
@@ -509,15 +594,23 @@ function idle(fn: () => void): void {
   else setTimeout(fn, 50);
 }
 
-function prefetchHoverHandler(e: Event): void {
+/** The prefetchable link an event targets and its absolute URL. */
+function prefetchTarget(e: Event): { a: HTMLAnchorElement; url: string } | null {
   const t = e.target as Element | null;
-  if (!t || typeof (t as Element).closest !== 'function') return;
+  if (!t || typeof (t as Element).closest !== 'function') return null;
   const a = t.closest('a[data-prefetch]') as HTMLAnchorElement | null;
-  if (!a || !shouldPrefetch(a) || !isLocalLink(a) || savingData()) return;
+  if (!a || !shouldPrefetch(a) || !isLocalLink(a) || savingData()) return null;
   const href = a.getAttribute('href');
-  if (!href) return;
+  if (!href) return null;
   const url = new URL(href, location.href).href;
-  if (pathOf(url) === renderedPath) return;
+  if (pathOf(url) === renderedPath) return null;
+  return { a, url };
+}
+
+function prefetchHoverHandler(e: Event): void {
+  const hit = prefetchTarget(e);
+  if (!hit) return;
+  const { a, url } = hit;
   const existing = prefetchTimers.get(a);
   if (existing) clearTimeout(existing);
   const timer = setTimeout(() => {
@@ -526,6 +619,22 @@ function prefetchHoverHandler(e: Event): void {
   }, PREFETCH_DELAY);
   prefetchTimers.set(a, timer);
 }
+
+// A press (touch, or a pointer about to click) is a stronger signal than a
+// hover: prefetch right away, so the click finds the document in flight.
+function prefetchPressHandler(e: Event): void {
+  if (typeof (e as MouseEvent).button === 'number' && (e as MouseEvent).button !== 0) return;
+  const hit = prefetchTarget(e);
+  if (!hit) return;
+  const existing = prefetchTimers.get(hit.a);
+  if (existing) {
+    clearTimeout(existing);
+    prefetchTimers.delete(hit.a);
+  }
+  void prefetchPage(hit.url);
+}
+
+const PRESS_EVENTS = ['touchstart', typeof PointerEvent === 'function' ? 'pointerdown' : 'mousedown'];
 
 function observePrefetchLinks(): void {
   viewportPrefetched = 0;
@@ -538,6 +647,7 @@ function observePrefetchLinks(): void {
 function setupPrefetch(): void {
   document.addEventListener('mouseover', prefetchHoverHandler);
   document.addEventListener('focusin', prefetchHoverHandler);
+  for (const name of PRESS_EVENTS) document.addEventListener(name, prefetchPressHandler, { passive: true });
   if (typeof IntersectionObserver !== 'undefined') {
     prefetchObserver = new IntersectionObserver(
       (entries) => {
@@ -631,32 +741,32 @@ function appRoot(doc: Document): HTMLElement {
   return (doc.getElementById('root') || doc.body) as HTMLElement;
 }
 
-// While a fetch is in flight: overlay the loading.tsx template (if the page
-// has one) and, without View Transitions, fade the content out.
+// While a fetch is in flight the old page stays as it is (visible and
+// interactive). A navigation still pending after LOADING_DELAY_MS overlays the
+// loading.tsx template, if the page has one, so a fast response never flashes it.
 function beginTransition(): void {
-  const tpl = document.querySelector('template[data-krate-loading]') as HTMLTemplateElement | null;
-  if (tpl && tpl.content && loadingOverlay.length === 0) {
+  if (loadingTimer !== undefined) clearTimeout(loadingTimer);
+  loadingTimer = setTimeout(() => {
+    loadingTimer = undefined;
+    const tpl = document.querySelector('template[data-krate-loading]') as HTMLTemplateElement | null;
+    if (status !== 'loading' || !tpl || !tpl.content || loadingOverlay.length > 0) return;
     // Non-destructive loading UI: overlay the template without wiping the
     // live DOM, so the swap still sees the old tree.
     const frag = tpl.content.cloneNode(true) as DocumentFragment;
     loadingOverlay = Array.from(frag.childNodes);
     document.body.appendChild(frag);
-  }
-  // Reduced motion: no fade at all (the overlay above is static).
-  if (!supportsViewTransitions() && !prefersReducedMotion()) {
-    const el = appRoot(document);
-    el.style.transition = `opacity ${TRANSITION_MS}ms ease`;
-    el.style.opacity = '0';
-  }
+  }, LOADING_DELAY_MS);
 }
 
 function endTransition(): void {
+  if (loadingTimer !== undefined) {
+    clearTimeout(loadingTimer);
+    loadingTimer = undefined;
+  }
   for (const n of loadingOverlay) {
     if (n.parentNode) n.parentNode.removeChild(n);
   }
   loadingOverlay = [];
-  const el = appRoot(document);
-  if (el.style.opacity === '0') el.style.opacity = '';
 }
 
 /**
@@ -677,8 +787,31 @@ function applyViewTransitionNames(root: ParentNode): void {
 
 // Document reconciliation
 
-/** How long a navigation waits for new stylesheets before swapping anyway. */
-const STYLESHEET_TIMEOUT_MS = 3000;
+/** How long a navigation waits for new stylesheets and scripts before swapping anyway. */
+const ASSET_TIMEOUT_MS = 3000;
+
+/** Resolves once link has loaded or failed (listen before inserting it). */
+function linkSettled(link: HTMLLinkElement): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const done = () => {
+      link.removeEventListener('load', done);
+      link.removeEventListener('error', done);
+      resolve();
+    };
+    link.addEventListener('load', done);
+    link.addEventListener('error', done);
+  });
+}
+
+/** Resolves once every promise settled, or after ASSET_TIMEOUT_MS. */
+function settledOrTimeout(pending: Promise<void>[]): Promise<void> {
+  if (pending.length === 0) return Promise.resolve();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, ASSET_TIMEOUT_MS);
+  });
+  return Promise.race([Promise.all(pending).then(() => undefined), timeout]).then(() => clearTimeout(timer));
+}
 
 interface StylesheetPlan {
   /** Resolves once every added stylesheet has loaded, failed or timed out. */
@@ -722,17 +855,7 @@ function prepareStylesheets(doc: Document, baseUrl: string): StylesheetPlan {
       link.rel = 'stylesheet';
       link.href = abs;
       // Listen before insertion so a synchronous settle is not missed.
-      pending.push(
-        new Promise<void>((resolve) => {
-          const done = () => {
-            link.removeEventListener('load', done);
-            link.removeEventListener('error', done);
-            resolve();
-          };
-          link.addEventListener('load', done);
-          link.addEventListener('error', done);
-        })
-      );
+      pending.push(linkSettled(link));
       added.push({ link, media: link.getAttribute('media') });
       link.media = 'not all';
       if (prev) {
@@ -746,16 +869,8 @@ function prepareStylesheets(doc: Document, baseUrl: string): StylesheetPlan {
     }
     prev = el;
   });
-  let ready: Promise<void> = Promise.resolve();
-  if (pending.length > 0) {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const timeout = new Promise<void>((resolve) => {
-      timer = setTimeout(resolve, STYLESHEET_TIMEOUT_MS);
-    });
-    ready = Promise.race([Promise.all(pending).then(() => undefined), timeout]).then(() => clearTimeout(timer));
-  }
   return {
-    ready,
+    ready: settledOrTimeout(pending),
     commit() {
       for (const { link, media } of added) {
         if (media === null) link.removeAttribute('media');
@@ -835,6 +950,56 @@ function scriptsToLoad(doc: Document, baseUrl: string): PendingScript[] {
     }
   });
   return out;
+}
+
+interface ScriptPreload {
+  /** Resolves once every preload has loaded, failed or timed out. */
+  ready: Promise<void>;
+  /** Drops the preload links (the scripts ran, or the navigation was superseded). */
+  remove(): void;
+}
+
+/**
+ * Preloads the incoming page's scripts (and its own modulepreload links) before
+ * the swap, so they run from cache right after it instead of leaving the new
+ * page un-hydrated while they download. The links request each script the way
+ * loadScript does (no crossorigin attribute: a module script fetches in cors
+ * mode with same-origin credentials, as modulepreload does; a classic one in
+ * no-cors mode, as preload as=script does), so the browser reuses the response.
+ */
+function preloadScripts(doc: Document, baseUrl: string, scripts: PendingScript[]): ScriptPreload {
+  const loaded = loadedAssetURLs();
+  const links: HTMLLinkElement[] = [];
+  const pending: Promise<void>[] = [];
+  const add = (href: string, module: boolean, crossOrigin: string | null) => {
+    if (loaded.has(href)) return;
+    loaded.add(href);
+    const link = document.createElement('link');
+    if (module) link.rel = 'modulepreload';
+    else {
+      link.rel = 'preload';
+      link.as = 'script';
+    }
+    if (crossOrigin !== null) link.setAttribute('crossorigin', crossOrigin);
+    link.href = href;
+    pending.push(linkSettled(link));
+    links.push(link);
+    document.head.appendChild(link);
+  };
+  for (const s of scripts) add(s.src, s.module, null);
+  doc.querySelectorAll('link[rel="modulepreload"][href]').forEach((l) => {
+    try {
+      add(resolveSrc(l.getAttribute('href')!, baseUrl), true, l.getAttribute('crossorigin'));
+    } catch {
+      /* ignore */
+    }
+  });
+  return {
+    ready: settledOrTimeout(pending),
+    remove() {
+      links.forEach((l) => l.remove());
+    },
+  };
 }
 
 function loadScript(script: PendingScript): Promise<boolean> {
@@ -1080,8 +1245,17 @@ function fetchErrorPage(path: string): Promise<string | null> {
     .catch(() => null);
 }
 
+/** The stored document of the history entry a back/forward step restores. */
+function historyHit(req: NavRequest): LoadedDoc | undefined {
+  if (req.kind !== 'pop' || !req.restoreKey || req.bypassCache) return undefined;
+  const doc = historyDocs.get(req.restoreKey);
+  return doc && pathOf(doc.url) === pathOf(req.url) ? doc : undefined;
+}
+
 async function loadDocument(req: NavRequest, signal: AbortSignal): Promise<LoadResult> {
   const key = cacheKey(req.url);
+  const stored = historyHit(req);
+  if (stored) return { ok: true, doc: { html: stored.html, url: req.url, status: stored.status } };
   if (!req.bypassCache) {
     const inflight = prefetchInflight.get(key);
     if (inflight) await inflight;
@@ -1095,6 +1269,10 @@ async function loadDocument(req: NavRequest, signal: AbortSignal): Promise<LoadR
       return { ok: true, doc: { html: hit.html, url: target, status: hit.status } };
     }
   }
+  // Only a document that has to come from the network can show the loading
+  // UI: a prefetched one (even one still in flight, awaited above) or a stored
+  // history entry is nearly there.
+  beginTransition();
   let res: Response;
   try {
     res = await fetch(key, {
@@ -1161,8 +1339,6 @@ async function runNavigation(req: NavRequest): Promise<void> {
   const ctrl = new AbortController();
   pendingAbort = ctrl;
   setStatus('loading');
-  const hasCached = !req.bypassCache && prefetchCache.has(cacheKey(req.url));
-  if (!hasCached) beginTransition();
 
   let result: LoadResult;
   try {
@@ -1186,26 +1362,34 @@ async function commitDocument(loaded: LoadedDoc, req: NavRequest, seq: number): 
   const newRoot = appRoot(doc);
   const oldRoot = appRoot(document);
 
+  // Load the incoming stylesheets before swapping so the new page (and kept
+  // layouts whose rules live in the per-page sheet) never renders unstyled,
+  // and its scripts so it hydrates as soon as it appears.
+  const sheets = prepareStylesheets(doc, url);
+  const preload = preloadScripts(doc, url, scriptsToLoad(doc, url));
+  await Promise.all([sheets.ready, preload.ready]);
+  if (seq !== navSeq) {
+    sheets.abort();
+    preload.remove();
+    return;
+  }
+
   // Save the position of the entry we are leaving (pop saves in the handler).
+  // The old page stayed scrollable while the new one loaded.
+  const leaving = currentKey;
+  const leavingUrl = location.href;
   if (req.kind === 'push') saveScroll(currentKey);
 
   const newChain = readRouteChain(doc);
   const plan = planSwap(currentChain, newChain, location.href, url, doc);
 
-  // Load the incoming stylesheets before swapping so the new page (and kept
-  // layouts whose rules live in the per-page sheet) never renders unstyled.
-  const sheets = prepareStylesheets(doc, url);
-  await sheets.ready;
-  if (seq !== navSeq) {
-    sheets.abort();
-    return;
-  }
-
   // A navigation that stays on the page (a query change, router.refresh())
   // keeps the page's islands mounted and their DOM in place; a control
   // focused in one of them keeps the focus. When the swap replaces the focused
   // element, focus moves to the same element in the new DOM.
-  const samePage = normPath(new URL(url, location.href).pathname) === normPath(location.pathname);
+  // Compared with the document on screen: on back/forward the location
+  // already shows the target URL.
+  const samePage = pathOf(url).split('?')[0] === docPath.split('?')[0];
   let focusMark: FocusMark | null = null;
   let focused: HTMLElement | null = null;
   let islandJobs: Promise<unknown>[] = [];
@@ -1258,8 +1442,13 @@ async function commitDocument(loaded: LoadedDoc, req: NavRequest, seq: number): 
     } else if (focusMark) restoreFocus(oldRoot, focusMark);
   };
 
-  await runMutation(mutate);
-  if (seq !== navSeq) return;
+  // A View Transition cross-fades a change of page; a refresh or a query
+  // change on the same page (a search box, a revalidation) swaps in place.
+  await runMutation(mutate, req.kind !== 'refresh' && !samePage);
+  if (seq !== navSeq) {
+    preload.remove();
+    return;
+  }
   endTransition();
 
   // History: the DOM now shows the new route, so the URL follows it before
@@ -1269,12 +1458,20 @@ async function commitDocument(loaded: LoadedDoc, req: NavRequest, seq: number): 
     history.pushState(historyEntry(currentKey, req.state), '', url);
   } else if (req.kind === 'replace') {
     scrollPositions.delete(currentKey);
+    historyDocs.delete(currentKey);
     currentKey = newKey();
     history.replaceState(historyEntry(currentKey, req.state), '', url);
   } else if (req.kind === 'refresh') {
     if (url !== location.href) history.replaceState(history.state, '', url);
   } else if (req.restoreKey) {
     currentKey = req.restoreKey;
+  }
+  if (loaded.status >= 200 && loaded.status < 300) historyPut(currentKey, { html: loaded.html, url: location.href, status: loaded.status });
+  if (req.kind === 'push' && leaving && leaving === initialKey) {
+    initialKey = '';
+    storeInitialDocument(leaving, leavingUrl);
+  } else if (req.kind === 'replace' && leaving === initialKey) {
+    initialKey = '';
   }
   renderedPath = pathOf(location.href);
   docPath = renderedPath;
@@ -1297,6 +1494,7 @@ async function commitDocument(loaded: LoadedDoc, req: NavRequest, seq: number): 
   keepScopes(plan.skip);
   const results = await Promise.all(srcs.map(loadScript));
   keepScopes([]);
+  preload.remove();
   if (seq !== navSeq) return;
   if (results.some((ok) => !ok)) {
     // A page chunk failed to load: the route would stay half-mounted, so do a
@@ -1379,8 +1577,8 @@ function refocus(el: HTMLElement, sel: [number, number] | null): void {
  * once the mutation has been applied (the transition's update callback has
  * run), so callers can touch the new DOM, history and focus afterwards.
  */
-function runMutation(mutate: () => void): Promise<void> {
-  if (!supportsViewTransitions()) {
+function runMutation(mutate: () => void, animate = true): Promise<void> {
+  if (!animate || !supportsViewTransitions()) {
     mutate();
     return Promise.resolve();
   }
@@ -1904,8 +2102,10 @@ function hashNavigate(url: string, req: NavRequest): void {
     if (req.kind === 'replace') {
       history.replaceState(historyEntry(currentKey || newKey(), req.state), '', url);
     } else {
+      const prev = historyDocs.get(currentKey);
       currentKey = newKey();
       history.pushState(historyEntry(currentKey, req.state), '', url);
+      if (prev) historyPut(currentKey, { ...prev, url });
     }
   }
   const hash = new URL(url).hash;
@@ -2172,6 +2372,7 @@ export function initRouter(): void {
   docAttrSnap = docAttrsOf(document);
   docPath = renderedPath;
   currentKey = entryKey(history.state) || newKey();
+  initialKey = currentKey;
   if (entryKey(history.state) === undefined) {
     try {
       history.replaceState(historyEntry(currentKey, history.state), '', location.href);
@@ -2217,6 +2418,7 @@ export function destroyRouter(): void {
   window.removeEventListener('pageshow', pageshowHandler);
   document.removeEventListener('mouseover', prefetchHoverHandler);
   document.removeEventListener('focusin', prefetchHoverHandler);
+  for (const name of PRESS_EVENTS) document.removeEventListener(name, prefetchPressHandler);
   for (const timer of prefetchTimers.values()) clearTimeout(timer);
   prefetchTimers = new Map();
   if (prefetchObserver) {
@@ -2228,12 +2430,16 @@ export function destroyRouter(): void {
   navSeq++;
   prefetchCache.clear();
   prefetchInflight.clear();
+  historyDocs.clear();
+  initialKey = '';
+  cacheGen++;
   scrollPositions.clear();
   errorPageCache.clear();
   bootRan.clear();
   listeners.clear();
   status = 'idle';
-  loadingOverlay = [];
+  document.documentElement.removeAttribute(NAVIGATING_ATTR);
+  endTransition();
   currentChain = [];
   interceptSnapshots.clear();
   docPath = '';

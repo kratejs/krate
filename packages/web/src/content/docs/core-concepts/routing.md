@@ -169,8 +169,22 @@ outside a slot are a build error.
 
 ## Loading states
 
-A `loading.tsx` next to (or above) a page is overlaid during SPA transitions
-while the next page is fetched. It is not a route of its own:
+During a client-side navigation the current page stays visible and
+interactive until the next one is ready (its document, stylesheets and scripts
+have loaded), then swaps in one step, already hydrated. While the navigation is
+pending the router sets `data-krate-navigating` on `<html>` (and
+`useNavigation()`/`subscribeNavigation` report `status: "loading"`), so a
+progress bar or a dimmed state is plain CSS:
+
+```css
+html[data-krate-navigating] main { opacity: 0.6; transition: opacity 0.2s 0.1s; }
+```
+
+A `loading.tsx` next to (or above) a page is overlaid while the next page is
+fetched from the network, once the navigation has been pending for 100ms, so a
+fast response never flashes it. Navigations served from the prefetch cache (or
+a prefetch still in flight) and back/forward to a visited page never show it.
+It is not a route of its own:
 
 ```tsx
 // src/pages/loading.tsx
@@ -391,9 +405,16 @@ then starts the router if it needs one).
 
 The router handles:
 
-- **Prefetching** - `data-prefetch` on hover/focus/touch, plus viewport entry for
+- **Prefetching** - `data-prefetch` on hover/focus (after a 200ms intent delay)
+  and immediately on touch or pointer press, plus viewport entry for
   `prefetch="viewport"` links (max 5 per page); skipped under Save-Data or 2g.
-  Cached for 30 seconds and used once.
+  Cached for 30 seconds and used once. A prefetch also warms the page's
+  stylesheets and scripts.
+- **Instant back/forward** - the documents of the last 10 visited history
+  entries are kept, so back and forward render without a request. The first, hard-loaded page is fetched once in idle
+  time after you leave it (unless the server sent `Cache-Control: no-store`).
+  A server action that revalidates, or `invalidatePrefetchCache()`, clears them;
+  `router.refresh()` always fetches.
 - **Layout persistence** - shared layouts stay mounted (see above).
 - **Scroll restoration** - forward navigation scrolls to top; back/forward
   restores the saved position of that history entry. Hash links scroll to the

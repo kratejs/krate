@@ -139,8 +139,8 @@ Inline CSS is captured into `<head>`.
 <Link href="/pricing" basePath={false}>Outside the base path</Link>
 ```
 
-- **Prefetching** - by default a link is prefetched on intent: hover, focus
-  or touch (debounced). `prefetch="viewport"` also prefetches it once it
+- **Prefetching** - by default a link is prefetched on intent: hover or focus
+  (debounced), or right away on touch or pointer press. `prefetch="viewport"` also prefetches it once it
   scrolls within 200px of the viewport, for at most 5 links per page;
   `prefetch={false}` never prefetches. Nothing is prefetched when the browser
   reports Save-Data or a 2g connection. Set the top-level config option

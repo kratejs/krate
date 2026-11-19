@@ -151,4 +151,26 @@ describe('viewport prefetch', () => {
     await new Promise((r) => setTimeout(r, 400));
     expect(fetched).toEqual(['/p2']);
   });
+
+  it('prefetches right away on touchstart and pointerdown', async () => {
+    mount(link(4, 'data-prefetch') + link(5, 'data-prefetch') + link(6, 'data-prefetch="false"'));
+    start();
+    document.querySelector('a[href="/p4"]')!.dispatchEvent(new Event('touchstart', { bubbles: true }));
+    document.querySelector('a[href="/p5"]')!.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }));
+    document.querySelector('a[href="/p6"]')!.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }));
+    // No intent debounce: the fetches start in the same task.
+    expect(fetched).toEqual(['/p4', '/p5']);
+  });
+
+  it('ignores a press with another button and does not fetch a hovered link twice', async () => {
+    mount(link(7, 'data-prefetch'));
+    start();
+    const a = document.querySelector('a[href="/p7"]')!;
+    a.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 2 }));
+    expect(fetched).toEqual([]);
+    a.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    a.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }));
+    await new Promise((r) => setTimeout(r, 400));
+    expect(fetched).toEqual(['/p7']);
+  });
 });
