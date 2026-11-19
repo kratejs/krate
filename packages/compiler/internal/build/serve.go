@@ -1426,10 +1426,6 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		}
 	}()
 	port = listener.Addr().(*net.TCPAddr).Port
-	apiPort := internalPort(port + 1)
-	sidecarPorts.Store(port, apiPort)
-	defer sidecarPorts.Delete(port)
-
 	// On-demand revalidation (revalidatePath/revalidateTag) reaches this
 	// process through a loopback-only internal endpoint authenticated by a
 	// per-process secret; every server-side runtime gets its URL + secret.
@@ -1445,6 +1441,13 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		return err
 	}
 	defer revalHost.Close()
+	// Chosen after the revalidation host listens on an OS-chosen port: the OS
+	// can hand out port+1 (macOS assigns ports in sequence), which the
+	// sidecar would then fail to bind.
+	apiPort := internalPort(port + 1)
+	sidecarPorts.Store(port, apiPort)
+	defer sidecarPorts.Delete(port)
+
 	if err := revalHost.SetCache(cfg.Cache, hub == nil); err != nil {
 		return err
 	}
