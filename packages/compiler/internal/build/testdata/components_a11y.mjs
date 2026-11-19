@@ -170,8 +170,15 @@ try {
   // Accordion: Enter toggles, aria-expanded follows, focus is kept.
   await focusTrigger("Is it zero-JS?");
   await page.keyboard.press("Enter");
-  const acc = await page.evaluate(() => ({ expanded: document.activeElement.getAttribute("aria-expanded"), text: document.activeElement.textContent.trim() }));
-  check(acc.expanded === "true" && acc.text.startsWith("Is it zero-JS?"), `accordion Enter keeps focus on the trigger: ${JSON.stringify(acc)}`);
+  // The enhancer hands focus back to the trigger in a timeout when the browser
+  // moved it to the hidden controller (WebKit does): poll like focusIs.
+  const accState = () => page.evaluate(() => ({ expanded: document.activeElement.getAttribute("aria-expanded"), text: document.activeElement.textContent.trim() }));
+  const accOK = (s) => s.expanded === "true" && s.text.startsWith("Is it zero-JS?");
+  let acc = await accState();
+  for (const deadline = Date.now() + 2000; !accOK(acc) && Date.now() < deadline; acc = await accState()) {
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  check(accOK(acc), `accordion Enter keeps focus on the trigger: ${JSON.stringify(acc)}`);
   await page.keyboard.press("Space");
   await focusIs((a) => a.includes("Is it zero-JS?"), "accordion Space closes and keeps focus");
 
