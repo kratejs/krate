@@ -505,6 +505,13 @@ host code runs in the native process. Names and options may change between relea
 
 ### Changed
 
+- `krate serve`/`start` match routes and gzip responses faster. Route patterns are parsed once
+  instead of on every request, the SSR page table is sorted by specificity once per manifest
+  instead of per request, and a lookup that misses allocates nothing. Looking up a page among
+  1,000 routes drops from about 1 ms to 7 us, and from 16 us to under 1 us with 20 routes.
+  On-the-fly gzip reuses pooled `klauspost/compress` writers instead of allocating a new stdlib
+  writer per response, so gzipping a 50 KB page takes about 89 us and 3 KB instead of 454 us
+  and 815 KB.
 - `trailingSlash: "never"` redirects like Next: `/x/` answers `308` (was `301`) with the root-relative
   `Location` `/x`, before config redirects and middleware run, for every path ending in a slash
   (`/api/*` and files included) and any method. It used to run behind the middleware, so with

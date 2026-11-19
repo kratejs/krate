@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/evanw/esbuild/pkg/api"
@@ -38,8 +39,9 @@ type SSRServer struct {
 	running         bool
 	closed          bool // set by Shutdown: Start refuses to launch again
 	manifest        *ServerManifest
-	timeout         int // per-render timeout (ms); 0 = sidecar default
-	maxCacheSize    int // ISR cache entries; 0 = sidecar default
+	pageIdx         atomic.Pointer[pageIndex] // lookup index for manifest
+	timeout         int                       // per-render timeout (ms); 0 = sidecar default
+	maxCacheSize    int                       // ISR cache entries; 0 = sidecar default
 	ppr             bool
 	pprRevalidate   int
 	rendererWorkers int
@@ -575,27 +577,70 @@ func (s *SSRServer) FindPageForRoute(urlPath string) (*ManifestPage, map[string]
 	if s.manifest == nil {
 		return nil, nil
 	}
-	// Most specific pattern first: static > [param] > [...catchAll] > [[...optional]].
-	order := make([]int, len(s.manifest.Pages))
-	for i := range order {
-		order[i] = i
-	}
-	sort.SliceStable(order, func(a, b int) bool {
-		return compareRouteSpecificity(s.manifest.Pages[order[a]].Route, s.manifest.Pages[order[b]].Route) < 0
-	})
-	for _, i := range order {
-		p := &s.manifest.Pages[i]
-		if p.Segment {
-			continue
-		}
-		if params, ok := matchRoute(urlPath, p.Route); ok {
+	idx := s.pageIndexFor(s.manifest)
+	var buf [16]string
+	parts := splitURLPath(urlPath, buf[:])
+	for _, e := range idx.order {
+		if params, ok := e.pattern.match(parts); ok {
+			p := &idx.manifest.Pages[e.page]
 			if len(params) == 0 {
-				params = s.patternParams(p, urlPath)
+				params = idx.patternParams(p, parts)
 			}
 			return p, params
 		}
 	}
 	return nil, nil
+}
+
+// pageIndex is the request-time lookup structure for one manifest: the
+// matchable pages in specificity order with their patterns compiled, and the
+// dynamic pages grouped by source for patternParams.
+type pageIndex struct {
+	manifest *ServerManifest
+	// order lists non-segment pages, most specific first: static > [param] >
+	// [...catchAll] > [[...optional]].
+	order    []pageIndexEntry
+	bySource map[string][]pageIndexEntry
+}
+
+type pageIndexEntry struct {
+	page    int
+	pattern *routePattern
+}
+
+func buildPageIndex(m *ServerManifest) *pageIndex {
+	idx := &pageIndex{manifest: m, bySource: map[string][]pageIndexEntry{}}
+	all := make([]pageIndexEntry, len(m.Pages))
+	for i := range m.Pages {
+		all[i] = pageIndexEntry{page: i, pattern: compileRoutePattern(m.Pages[i].Route)}
+	}
+	sorted := append([]pageIndexEntry(nil), all...)
+	sort.SliceStable(sorted, func(a, b int) bool {
+		return compareRouteSpecificity(m.Pages[sorted[a].page].Route, m.Pages[sorted[b].page].Route) < 0
+	})
+	for _, e := range sorted {
+		if !m.Pages[e.page].Segment {
+			idx.order = append(idx.order, e)
+		}
+	}
+	// Manifest order, matching the scan patternParams replaces.
+	for _, e := range all {
+		if q := &m.Pages[e.page]; strings.Contains(q.Route, "[") {
+			idx.bySource[q.Source] = append(idx.bySource[q.Source], e)
+		}
+	}
+	return idx
+}
+
+// pageIndexFor returns the index for m, rebuilding it when the manifest was
+// replaced (dev rebuilds reload it under s.mu).
+func (s *SSRServer) pageIndexFor(m *ServerManifest) *pageIndex {
+	if idx := s.pageIdx.Load(); idx != nil && idx.manifest == m {
+		return idx
+	}
+	idx := buildPageIndex(m)
+	s.pageIdx.Store(idx)
+	return idx
 }
 
 // pageByRoute returns the manifest page with exactly this route, segment pages
@@ -616,13 +661,12 @@ func (s *SSRServer) pageByRoute(route string) *ManifestPage {
 // generateStaticParams variant such as "/blog/hello", whose route is a plain
 // path) from the [param] route its source file also serves. Without them the
 // page would render with empty params at request time.
-func (s *SSRServer) patternParams(page *ManifestPage, urlPath string) map[string]string {
-	for i := range s.manifest.Pages {
-		q := &s.manifest.Pages[i]
-		if q.Source != page.Source || q.Route == page.Route || !strings.Contains(q.Route, "[") {
+func (idx *pageIndex) patternParams(page *ManifestPage, parts []string) map[string]string {
+	for _, e := range idx.bySource[page.Source] {
+		if idx.manifest.Pages[e.page].Route == page.Route {
 			continue
 		}
-		if params, ok := matchRoute(urlPath, q.Route); ok {
+		if params, ok := e.pattern.match(parts); ok {
 			return params
 		}
 	}

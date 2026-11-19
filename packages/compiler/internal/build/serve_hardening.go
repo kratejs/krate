@@ -2,7 +2,6 @@ package build
 
 import (
 	"bufio"
-	"compress/gzip"
 	"context"
 	"fmt"
 	"io"
@@ -20,9 +19,11 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/klauspost/compress/gzip"
 	"github.com/kratejs/krate/packages/compiler/internal/config"
 	"github.com/kratejs/krate/packages/compiler/internal/deploy"
 	"github.com/kratejs/krate/packages/compiler/internal/sitepath"
@@ -577,9 +578,13 @@ func gzipMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// gzipWriterPool reuses gzip writers across responses; each one carries a
+// large flate state that is costly to allocate per request.
+var gzipWriterPool = sync.Pool{New: func() any { return gzip.NewWriter(io.Discard) }}
+
 type gzipResponseWriter struct {
 	http.ResponseWriter
-	zw          *gzip.Writer
+	zw          *gzip.Writer // nil until gzip is chosen and again after close
 	decided     bool
 	wantsGzip   bool
 	useGzip     bool
@@ -603,7 +608,8 @@ func (g *gzipResponseWriter) decide(status int) {
 	g.useGzip = true
 	g.Header().Del("Content-Length")
 	g.Header().Set("Content-Encoding", "gzip")
-	g.zw = gzip.NewWriter(g.ResponseWriter)
+	g.zw = gzipWriterPool.Get().(*gzip.Writer)
+	g.zw.Reset(g.ResponseWriter)
 }
 
 func (g *gzipResponseWriter) WriteHeader(code int) {
@@ -620,6 +626,9 @@ func (g *gzipResponseWriter) Write(b []byte) (int, error) {
 		g.WriteHeader(http.StatusOK)
 	}
 	if g.useGzip {
+		if g.zw == nil {
+			return 0, io.ErrClosedPipe
+		}
 		return g.zw.Write(b)
 	}
 	return g.ResponseWriter.Write(b)
@@ -641,10 +650,17 @@ func (g *gzipResponseWriter) Flush() {
 
 func (g *gzipResponseWriter) Unwrap() http.ResponseWriter { return g.ResponseWriter }
 
+// close finishes the stream and returns the writer to the pool. It is safe to
+// call twice; the writer is never used after it is returned.
 func (g *gzipResponseWriter) close() {
-	if g.useGzip && g.zw != nil {
-		g.zw.Close()
+	zw := g.zw
+	if zw == nil {
+		return
 	}
+	g.zw = nil
+	zw.Close()
+	zw.Reset(io.Discard)
+	gzipWriterPool.Put(zw)
 }
 
 // precompressedMiddleware serves a build-time precompressed sibling (`.br` or
