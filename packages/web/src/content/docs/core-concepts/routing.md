@@ -411,8 +411,7 @@ The router handles:
   Cached for 30 seconds and used once. A prefetch also warms the page's
   stylesheets and scripts.
 - **Instant back/forward** - the documents of the last 10 visited history
-  entries are kept, so back and forward render without a request (like
-  Next.js's router cache). The first, hard-loaded page is fetched once in idle
+  entries are kept, so back and forward render without a request. The first, hard-loaded page is fetched once in idle
   time after you leave it (unless the server sent `Cache-Control: no-store`).
   A server action that revalidates, or `invalidatePrefetchCache()`, clears them;
   `router.refresh()` always fetches.

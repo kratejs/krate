@@ -75,8 +75,8 @@ function resolveSrc(src: string, baseUrl: string): string {
  * these warms the route's JS in addition to its HTML, so an SPA navigation does
  * not stall waiting on the chunk after the HTML swap.
  */
-export function pageAssetURLs(html: string, baseUrl: string, loaded: Set<string>): string[] {
-  const doc = new DOMParser().parseFromString(html, 'text/html');
+export function pageAssetURLs(html: string | Document, baseUrl: string, loaded: Set<string>): string[] {
+  const doc = typeof html === 'string' ? new DOMParser().parseFromString(html, 'text/html') : html;
   const out: string[] = [];
   const seen = new Set<string>();
   const consider = (src: string | null) => {
@@ -477,21 +477,18 @@ function prefetchAsset(url: string, as = 'script'): void {
 }
 
 /** Stylesheets of a prefetched document that this document does not have. */
-function newStylesheetURLs(html: string, baseUrl: string): string[] {
+function newStylesheetURLs(doc: Document, baseUrl: string): string[] {
   const have = new Set<string>();
   document.querySelectorAll('link[rel="stylesheet"]').forEach((l) => have.add((l as HTMLLinkElement).href));
   const out: string[] = [];
-  new DOMParser()
-    .parseFromString(html, 'text/html')
-    .querySelectorAll('link[rel="stylesheet"][href]')
-    .forEach((l) => {
-      try {
-        const abs = new URL(l.getAttribute('href')!, baseUrl).href;
-        if (!have.has(abs) && !out.includes(abs)) out.push(abs);
-      } catch {
-        /* ignore */
-      }
-    });
+  doc.querySelectorAll('link[rel="stylesheet"][href]').forEach((l) => {
+    try {
+      const abs = new URL(l.getAttribute('href')!, baseUrl).href;
+      if (!have.has(abs) && !out.includes(abs)) out.push(abs);
+    } catch {
+      /* ignore */
+    }
+  });
   return out;
 }
 
@@ -531,8 +528,9 @@ function prefetchPage(url: string): Promise<void> {
       cachePut(key, { html, url: finalUrl, status: res.status, at: now() });
       // Warm the route's stylesheets and scripts too, so the navigation does
       // not wait on them before the swap.
-      for (const sheet of newStylesheetURLs(html, finalUrl)) prefetchAsset(sheet, 'style');
-      for (const asset of pageAssetURLs(html, finalUrl, loadedAssetURLs())) prefetchAsset(asset);
+      const doc = new DOMParser().parseFromString(html, 'text/html');
+      for (const sheet of newStylesheetURLs(doc, finalUrl)) prefetchAsset(sheet, 'style');
+      for (const asset of pageAssetURLs(doc, finalUrl, loadedAssetURLs())) prefetchAsset(asset);
     })
     .catch(() => {
       // A failed prefetch is retried by the real navigation, which reports
