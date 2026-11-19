@@ -75,6 +75,19 @@ func fileURLOf(p string) string {
 	return (&url.URL{Scheme: "file", Path: p}).String()
 }
 
+// fileURLPath is the file system path of a file: URL.
+func fileURLPath(u string) string {
+	parsed, err := url.Parse(u)
+	if err != nil {
+		return u
+	}
+	p := parsed.Path
+	if len(p) > 2 && p[0] == '/' && p[2] == ':' {
+		p = p[1:] // /C:/x on Windows
+	}
+	return filepath.FromSlash(p)
+}
+
 // checkMeta verifies what the fixture's modules reported for a package
 // directory lib.
 func checkMeta(t *testing.T, what, body, lib string) {
@@ -87,18 +100,21 @@ func checkMeta(t *testing.T, what, body, lib string) {
 	if m.A != "hello-lib" || m.B != "hello-lib" || m.C != "y.txt" {
 		t.Errorf("%s: files not read: %s", what, body)
 	}
-	if want := fileURLOf(filepath.Join(lib, "src", "meta.ts")); m.URL != want {
-		t.Errorf("%s: import.meta.url = %s, want %s", what, m.URL, want)
+	// The running output reports the path it was started from, which may be
+	// another spelling of the same directory (8.3 names, /var on macOS).
+	same := func(got, want string) bool { return canonicalLoose(got) == canonicalLoose(want) }
+	if want := filepath.Join(lib, "src", "meta.ts"); !strings.HasPrefix(m.URL, "file:") || !same(fileURLPath(m.URL), want) {
+		t.Errorf("%s: import.meta.url = %s, want %s", what, m.URL, fileURLOf(want))
 	}
-	if want := filepath.Join(lib, "src"); filepath.Clean(m.Dirname) != want {
+	if want := filepath.Join(lib, "src"); !same(m.Dirname, want) {
 		t.Errorf("%s: import.meta.dirname = %s, want %s", what, m.Dirname, want)
 	}
-	if want := filepath.Join(lib, "src", "meta.ts"); filepath.Clean(m.Filename) != want {
+	if want := filepath.Join(lib, "src", "meta.ts"); !same(m.Filename, want) {
 		t.Errorf("%s: import.meta.filename = %s, want %s", what, m.Filename, want)
 	}
 	for name, got := range map[string]struct{ Dir, File string }{"one": m.One, "two": m.Two} {
 		wantDir := filepath.Join(lib, "cjs", name)
-		if filepath.Clean(got.Dir) != wantDir || filepath.Clean(got.File) != filepath.Join(wantDir, "where.cjs") {
+		if !same(got.Dir, wantDir) || !same(got.File, filepath.Join(wantDir, "where.cjs")) {
 			t.Errorf("%s: CommonJS %s reports %s, %s; want %s", what, name, got.Dir, got.File, wantDir)
 		}
 	}

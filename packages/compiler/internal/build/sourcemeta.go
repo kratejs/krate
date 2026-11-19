@@ -345,7 +345,9 @@ func metaURLPath(p string) string {
 // relPath is file relative to the source root, escaped for a URL, and false
 // when no relative path exists (another drive).
 func (sm *sourceMeta) relPath(file string) (string, bool) {
-	file = filepath.Clean(file)
+	// esbuild keeps paths as it was given them (8.3 short names on Windows,
+	// /var on macOS); srcRoot is canonical.
+	file = canonicalLoose(file)
 	rel, err := filepath.Rel(sm.srcRoot, file)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		if alt, aerr := filepath.Rel(sm.srcRaw, file); aerr == nil && alt != ".." && !strings.HasPrefix(alt, ".."+string(filepath.Separator)) {
