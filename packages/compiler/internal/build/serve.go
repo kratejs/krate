@@ -163,6 +163,11 @@ function resolveDynamicFile(dir, segments, exts) {
 
 const server = http.createServer(async (req, res) => {
   try {
+    // The host's readiness probe: which start of the sidecar is listening.
+    if (req.url === '` + sidecarReadyPath + `') {
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      return res.end(process.env.KRATE_SIDECAR_START || '');
+    }
     // Only the Krate host (which adds the per-process secret after running
     // middleware and the action checks) may call the sidecar.
     if (!sidecarAuthorized(req.headers['x-krate-internal'])) {
@@ -699,6 +704,9 @@ Bun.serve({
   port: PORT,
   hostname: '127.0.0.1',
   async fetch(req) {
+    if (new URL(req.url).pathname === '` + sidecarReadyPath + `') {
+      return new Response(process.env.KRATE_SIDECAR_START || '', { headers: { 'content-type': 'text/plain; charset=utf-8' } });
+    }
     if (!sidecarAuthorized(req.headers.get('x-krate-internal'))) {
       return new Response('forbidden', { status: 403, headers: { 'content-type': 'text/plain; charset=utf-8' } });
     }
@@ -1586,6 +1594,8 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 				default:
 				}
 				cmd := makeCmd()
+				startToken := newSidecarStartToken()
+				cmd.Env = append(cmd.Env, "KRATE_SIDECAR_START="+startToken)
 				if instrumentationArg != "" {
 					_ = os.Remove(instrumentationReportPath(root))
 				}
@@ -1612,7 +1622,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 					}
 					gen := nodeReady.begin()
 					exited := make(chan struct{})
-					go nodeReady.watch(gen, apiPort, exited)
+					go nodeReady.watch(gen, apiPort, startToken, exited)
 					err = cmd.Wait()
 					close(exited)
 					nodeReady.down()

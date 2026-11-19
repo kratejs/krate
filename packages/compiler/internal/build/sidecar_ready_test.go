@@ -2,9 +2,12 @@ package build
 
 import (
 	"context"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -169,5 +172,46 @@ func TestSidecarReadyKnownFailureFailsFast(t *testing.T) {
 	start = time.Now()
 	if s.wait(context.Background()) || time.Since(start) < 100*time.Millisecond {
 		t.Fatal("requests must wait for a restart after a crash at run time")
+	}
+}
+
+// A server that took the port while the sidecar was not listening yet (an
+// instrumentation register() still running or failed) must not count as the
+// sidecar: only a listener answering this start's token does.
+func TestSidecarReadyWatchIgnoresAnotherListener(t *testing.T) {
+	var answer atomic.Value
+	answer.Store("someone else")
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != sidecarReadyPath {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = io.WriteString(w, answer.Load().(string))
+	})}
+	go func() { _ = srv.Serve(ln) }()
+	t.Cleanup(func() { _ = srv.Close() })
+	port := ln.Addr().(*net.TCPAddr).Port
+
+	s := newSidecarReady(5 * time.Second)
+	gen := s.begin()
+	token := newSidecarStartToken()
+	done := make(chan struct{})
+	defer close(done)
+	go s.watch(gen, port, token, done)
+	time.Sleep(300 * time.Millisecond)
+	if s.up.Load() {
+		t.Fatal("a listener without this start's token marked the sidecar up")
+	}
+	answer.Store(token)
+	deadline := time.Now().Add(5 * time.Second)
+	for !s.up.Load() {
+		if time.Now().After(deadline) {
+			t.Fatal("the sidecar answering its token was not marked up")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }

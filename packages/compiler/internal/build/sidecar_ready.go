@@ -2,7 +2,10 @@ package build
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -119,18 +122,49 @@ func (s *sidecarReady) markUp(gen uint64) {
 	}
 }
 
-// watch polls the loopback port until it accepts, the process exits (done) or
-// the generation changes.
-func (s *sidecarReady) watch(gen uint64, port int, done <-chan struct{}) {
+// sidecarReadyPath answers the start token of the sidecar process
+// (KRATE_SIDECAR_START), so the host knows the listener on the port is the
+// process it started and not another server that took the port while this one
+// was not yet listening.
+const sidecarReadyPath = "/__krate/internal/ready"
+
+// newSidecarStartToken is a random token identifying one sidecar start.
+func newSidecarStartToken() string {
+	buf := make([]byte, 16)
+	_, _ = rand.Read(buf)
+	return hex.EncodeToString(buf)
+}
+
+// watch polls the loopback port until the sidecar started with token answers
+// on it, the process exits (done) or a newer generation began. An empty token
+// only waits for the port to accept connections.
+func (s *sidecarReady) watch(gen uint64, port int, token string, done <-chan struct{}) {
 	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+	client := &http.Client{Timeout: 500 * time.Millisecond}
+	ours := func() bool {
+		if token == "" {
+			c, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
+			if err != nil {
+				return false
+			}
+			_ = c.Close()
+			return true
+		}
+		resp, err := client.Get("http://" + addr + sidecarReadyPath)
+		if err != nil {
+			return false
+		}
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
+		return resp.StatusCode == http.StatusOK && string(body) == token
+	}
 	for {
 		select {
 		case <-done:
 			return
 		default:
 		}
-		if c, err := net.DialTimeout("tcp", addr, 200*time.Millisecond); err == nil {
-			_ = c.Close()
+		if ours() {
 			s.markUp(gen)
 			return
 		}
