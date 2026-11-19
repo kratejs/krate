@@ -19,6 +19,8 @@ interface Route {
   fail?: Error;
   /** Resolves only when the gate is opened. */
   gate?: Promise<void>;
+  /** Extra response headers. */
+  headers?: Record<string, string>;
 }
 
 function page(title: string, body: string, head = ''): string {
@@ -55,7 +57,7 @@ function mockResponse(r: Route, url: string): Response {
     status,
     url,
     redirected: !!r.redirect,
-    headers: new Headers({ 'content-type': r.type ?? 'text/html; charset=utf-8' }),
+    headers: new Headers({ 'content-type': r.type ?? 'text/html; charset=utf-8', ...r.headers }),
     text: async () => r.body ?? '',
     json: async () => JSON.parse(r.body ?? 'null'),
   } as unknown as Response;
@@ -428,5 +430,200 @@ describe('races', () => {
     await settle();
     expect(document.title).toBe('About');
     expect(location.pathname).toBe('/about');
+  });
+});
+
+describe('pending navigation', () => {
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const withLoading = () => {
+    document.getElementById('root')!.insertAdjacentHTML('beforeend', '<template data-krate-loading><p id="loading-ui">Loading</p></template>');
+  };
+
+  it('keeps the old page visible and marks <html> while the document loads', async () => {
+    let open!: () => void;
+    routes['/slow'] = { body: page('Slow', '<h1>Slow</h1>'), gate: new Promise<void>((r) => (open = r)) };
+    const seen: string[] = [];
+    krateRouter.subscribe((s) => seen.push(s.status));
+    const nav = krateRouter.push('/slow');
+    await wait(200);
+    const root = document.getElementById('root')!;
+    expect(root.style.opacity).toBe('');
+    expect(root.style.transition).toBe('');
+    expect(document.querySelector('#root h1')!.textContent).toBe('Home');
+    expect(document.documentElement.hasAttribute('data-krate-navigating')).toBe(true);
+    open();
+    await nav;
+    expect(document.querySelector('#root h1')!.textContent).toBe('Slow');
+    expect(document.documentElement.hasAttribute('data-krate-navigating')).toBe(false);
+    expect(root.style.opacity).toBe('');
+    expect(seen).toEqual(['loading', 'idle']);
+  });
+
+  it('shows the loading UI only once the navigation has been pending a while', async () => {
+    withLoading();
+    let open!: () => void;
+    routes['/slow'] = { body: page('Slow', '<h1>Slow</h1>'), gate: new Promise<void>((r) => (open = r)) };
+    const nav = krateRouter.push('/slow');
+    await wait(40);
+    expect(document.getElementById('loading-ui')).toBeNull();
+    await wait(120);
+    expect(document.getElementById('loading-ui')).not.toBeNull();
+    // The overlay does not replace the page.
+    expect(document.querySelector('#root h1')!.textContent).toBe('Home');
+    open();
+    await nav;
+    expect(document.getElementById('loading-ui')).toBeNull();
+  });
+
+  it('never flashes the loading UI for a fast response', async () => {
+    withLoading();
+    let open!: () => void;
+    routes['/quick'] = { body: page('Quick', '<h1>Quick</h1>'), gate: new Promise<void>((r) => (open = r)) };
+    const appended = vi.fn();
+    const obs = new MutationObserver((recs) => recs.forEach((r) => r.addedNodes.forEach((n) => (n as Element).id === 'loading-ui' && appended())));
+    obs.observe(document.body, { childList: true, subtree: true });
+    const nav = krateRouter.push('/quick');
+    await wait(30);
+    open();
+    await nav;
+    await wait(150);
+    obs.disconnect();
+    expect(appended).not.toHaveBeenCalled();
+    expect(document.querySelector('#root h1')!.textContent).toBe('Quick');
+  });
+
+  it('treats a prefetch in flight like a cached document', async () => {
+    withLoading();
+    let open!: () => void;
+    routes['/about'] = { ...routes['/about'], gate: new Promise<void>((r) => (open = r)) };
+    void krateRouter.prefetch('/about');
+    const nav = krateRouter.push('/about');
+    await wait(160);
+    expect(document.getElementById('loading-ui')).toBeNull();
+    open();
+    await nav;
+    expect(document.querySelector('#root h1')!.textContent).toBe('About');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('warms the stylesheets of a prefetched document', async () => {
+    document.head.insertAdjacentHTML('beforeend', '<link rel="stylesheet" href="/base.css" media="not all">');
+    routes['/styled'] = { body: page('Styled', '<h1>Styled</h1>', '<link rel="stylesheet" href="/base.css"><link rel="stylesheet" href="/styled.css">') };
+    await krateRouter.prefetch('/styled');
+    const hints = Array.from(document.querySelectorAll('link[rel="prefetch"]')).map((l) => [new URL((l as HTMLLinkElement).href).pathname, l.getAttribute('as')]);
+    expect(hints).toEqual([['/styled.css', 'style']]);
+  });
+});
+
+describe('back/forward cache', () => {
+  const docFetches = () => fetchMock.mock.calls.map((c) => new URL(c[0], location.href).pathname);
+  const back = async () => {
+    history.back();
+    await new Promise((r) => setTimeout(r, 20));
+    await settle();
+  };
+  const forward = async () => {
+    history.forward();
+    await new Promise((r) => setTimeout(r, 20));
+    await settle();
+  };
+
+  it('renders a visited entry without fetching it again', async () => {
+    await krateRouter.push('/about');
+    await krateRouter.push('/docs');
+    // Let the idle fetch of the first entry run.
+    await new Promise((r) => setTimeout(r, 120));
+    fetchMock.mockClear();
+    await back();
+    expect(location.pathname).toBe('/about');
+    expect(document.querySelector('#root h1')!.textContent).toBe('About');
+    await forward();
+    expect(document.querySelector('#root h1')!.textContent).toBe('Docs');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('restores the saved scroll position of a cached entry', async () => {
+    await krateRouter.push('/about');
+    window.scrollTo(0, 420);
+    await krateRouter.push('/docs');
+    const scrolls: number[] = [];
+    const spy = vi.spyOn(window, 'scrollTo').mockImplementation(((x: number, y: number) => scrolls.push(y)) as any);
+    await back();
+    expect(scrolls).toContain(420);
+    spy.mockRestore();
+  });
+
+  it('fetches the first, hard-loaded entry in idle time and serves back from it', async () => {
+    routes['/'] = { body: page('Home', `<h1>Home again</h1>${link('/about', 'About')}`) };
+    await krateRouter.push('/about');
+    await new Promise((r) => setTimeout(r, 120));
+    expect(docFetches()).toEqual(['/about', '/']);
+    fetchMock.mockClear();
+    await back();
+    expect(location.pathname).toBe('/');
+    expect(document.querySelector('#root h1')!.textContent).toBe('Home again');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('does not keep a first entry the server marked no-store', async () => {
+    routes['/'] = { body: page('Home', '<h1>Home again</h1>'), headers: { 'cache-control': 'private, no-store' } };
+    await krateRouter.push('/about');
+    await new Promise((r) => setTimeout(r, 120));
+    fetchMock.mockClear();
+    await back();
+    expect(docFetches()).toEqual(['/']);
+  });
+
+  it('drops the stored documents when the data is invalidated', async () => {
+    await krateRouter.push('/about');
+    await krateRouter.push('/docs');
+    routes['/about'] = { body: page('About', '<h1>About v2</h1>') };
+    krateRouter.invalidate();
+    fetchMock.mockClear();
+    await back();
+    expect(docFetches()).toEqual(['/about']);
+    expect(document.querySelector('#root h1')!.textContent).toBe('About v2');
+  });
+
+  it('router.refresh() always fetches the current route', async () => {
+    await krateRouter.push('/about');
+    routes['/about'] = { body: page('About', '<h1>About v2</h1>') };
+    fetchMock.mockClear();
+    await krateRouter.refresh();
+    expect(docFetches()).toEqual(['/about']);
+    expect(document.querySelector('#root h1')!.textContent).toBe('About v2');
+    // The refreshed document is the one back/forward restores.
+    await krateRouter.push('/docs');
+    fetchMock.mockClear();
+    await back();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(document.querySelector('#root h1')!.textContent).toBe('About v2');
+  });
+});
+
+describe('view transitions', () => {
+  it('cross-fades a change of page but not a refresh or a query change', async () => {
+    (globalThis as any).__KRATE_CFG__ = { viewTransitions: true };
+    const start = vi.fn((cb: () => void) => {
+      cb();
+      return { finished: Promise.resolve(), ready: Promise.resolve(), updateCallbackDone: Promise.resolve() };
+    });
+    (document as any).startViewTransition = start;
+    routes['/about?q=1'] = { body: page('About', '<h1>About q</h1>') };
+    await krateRouter.push('/about');
+    expect(start).toHaveBeenCalledTimes(1);
+    await krateRouter.replace('/about?q=1');
+    expect(document.querySelector('#root h1')!.textContent).toBe('About q');
+    await krateRouter.refresh();
+    expect(start).toHaveBeenCalledTimes(1);
+    await krateRouter.push('/docs');
+    expect(start).toHaveBeenCalledTimes(2);
+    // Back to another page is a change of page too (the location already
+    // shows the target when popstate fires).
+    history.back();
+    await new Promise((r) => setTimeout(r, 20));
+    await settle();
+    expect(document.querySelector('#root h1')!.textContent).toBe('About q');
+    expect(start).toHaveBeenCalledTimes(3);
   });
 });
