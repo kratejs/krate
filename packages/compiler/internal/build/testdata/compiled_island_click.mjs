@@ -2,6 +2,7 @@
 // Radix checkbox and a Radix dialog (compound components that share context)
 // hydrate as islands, and the lucide icon next to them stays plain HTML.
 import { chromium, firefox, webkit } from "playwright";
+import { waitHydrated } from "./island_helpers.mjs";
 
 const [url, browserName = "chromium"] = process.argv.slice(2);
 const browser = await { chromium, firefox, webkit }[browserName].launch();
@@ -13,9 +14,9 @@ try {
     if (m.type() === "error") errors.push(m.text());
   });
   await page.goto(url);
-  await page.waitForSelector("krate-island[data-krate-island-hydrated] #cb", { timeout: 15000 });
-  await page.waitForSelector("krate-island[data-krate-island-hydrated] #open", { timeout: 15000 });
-  const iconInIsland = await page.evaluate(() => !!document.querySelector("krate-island svg.lucide"));
+  await waitHydrated(page, "#cb");
+  await waitHydrated(page, "#open");
+  const iconInIsland = await page.evaluate(() => { const svg = document.querySelector("svg.lucide"); return !!svg && (window.__krateIslands || []).some((i) => i.contains(svg)); });
   const iconCount = await page.evaluate(() => document.querySelectorAll("svg.lucide").length);
   const before = await page.getAttribute("#cb", "aria-checked");
   await page.click("#cb");

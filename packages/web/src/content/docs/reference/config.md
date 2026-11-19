@@ -615,7 +615,7 @@ The URL form of pages, honoured the same way by `krate serve`/`krate start` and 
 `node`, `vercel`, `netlify` and `cloudflare` targets:
 
 - `"always"`: `/history` answers `301` to `/history/`.
-- `"never"`: `/history/` answers `301` to `/history` (the site root stays `/`).
+- `"never"`: `/history/` answers `308` to `/history` (the site root stays `/`).
 - `"ignore"`: no redirect in either direction; both URLs serve the page. Set it when
   the platform or another layer owns canonicalization, or when you want to link
   both forms.
@@ -624,8 +624,14 @@ A URL that matches no page follows the same slash rule as pages (`/nope` goes to
 `/nope/` with `"always"`, `/nope/` to `/nope` with `"never"`) and then answers `404`
 with the site's 404 page, whatever the `Accept` header says.
 
-Files with an extension (`/feed.xml`), `/api/*` and the internal `/__krate/*` paths
-are never redirected. The setting changes what the servers answer, not what the
+With `"never"` the redirect works like Next's default: it is a `308` (method and
+body are kept) to the root-relative slashless path with the query kept, it applies
+to every path that ends in a slash (`/api/*` and files included, any method), and
+it is answered before config `redirects` and middleware, so middleware only sees
+the canonical URL. With `"always"` the `301` comes from the page handlers, after
+middleware and rewrites, for `GET` and `HEAD`; files with an extension
+(`/feed.xml`) and `/api/*` are not redirected. The not-found page's own URLs and
+the internal `/__krate/*` paths are never redirected. The setting changes what the servers answer, not what the
 build writes: canonical URLs, sitemap entries and generated links still use the
 slash form, so with `"never"` they point at URLs that redirect (write your own
 links and `seo` URLs without the slash). On the `cloudflare` target the generated
@@ -710,7 +716,7 @@ rejected.
 
 ```typescript
 deploy: {
-  target: "vercel",                  // netlify | vercel | cloudflare | gh-pages
+  target: "vercel",                  // netlify | vercel | cloudflare | gh-pages | node | docker
   options: { cleanUrls: "true", trailingSlash: "false" },
   worker: "src/cloudflare.ts",       // cloudflare: module merged into the Worker (default src/cloudflare.ts)
 },
@@ -790,8 +796,8 @@ works unchanged:
 | `/store/:slug((?!compare$)[^/]+)` | any segment except `compare` |
 | `/legacy/*` | Krate's older form: the rest of the path is `:splat` |
 
-Matching is case sensitive and `/x` does not match `/x/` for a plain path.
-Patterns with parameters also match a trailing slash.
+Matching is case sensitive and, in `redirects`, `/x` does not match `/x/` for a plain
+path. Rewrite sources and patterns with parameters also match a trailing slash.
 
 Regexes run on Go's RE2 engine, which has no lookahead or lookbehind. One form
 is supported: a negative lookahead at the start of a parameter's regex, as in

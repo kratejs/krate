@@ -3,6 +3,7 @@
 // Preact and a real-React island both open a Radix Tooltip under the layout's
 // TooltipProvider and follow a counter context the provider owns.
 import { chromium, firefox, webkit } from "playwright";
+import { waitHydrated } from "./island_helpers.mjs";
 
 const browserType = { chromium, firefox, webkit }[process.argv[2] || "chromium"];
 const base = process.argv[3];
@@ -22,7 +23,7 @@ try {
   await page.goto(base + "/");
   for (const id of ["#preact-n", "#real-n"]) {
     try {
-      await page.waitForSelector("[data-krate-island-hydrated] " + id, { timeout: 15000 });
+      await waitHydrated(page, id);
     } catch (e) {
       failures.push(id + " did not hydrate");
     }

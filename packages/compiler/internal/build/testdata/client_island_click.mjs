@@ -1,6 +1,7 @@
 // Drives a client component rendered inside an async server page: waits for
 // the island to hydrate, clicks it twice and reports the result as JSON.
 import { chromium, firefox, webkit } from "playwright";
+import { waitHydrated } from "./island_helpers.mjs";
 
 const [url, browserName = "chromium"] = process.argv.slice(2);
 const browser = await { chromium, firefox, webkit }[browserName].launch();
@@ -12,7 +13,7 @@ try {
     if (m.type() === "error") errors.push(m.text());
   });
   await page.goto(url);
-  await page.waitForSelector("krate-island[data-krate-island-hydrated]", { timeout: 15000 });
+  await waitHydrated(page);
   const before = await page.textContent("#inc");
   await page.click("#inc");
   await page.waitForFunction(() => document.querySelector("#inc").textContent === "Count: 6");

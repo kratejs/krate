@@ -152,19 +152,61 @@ export function __krateScopeSubscribe(s) {
 // islands keep their state. When every copy is in use (the slot rendered once
 // more than the server did), it gets a clone. A slot without an id parses
 // the HTML its props carry.
+//
+// An island has no element of its own: it is the nodes between its
+// <!--krate-island:...--> and <!--/krate-island--> comments. __krateRangeRoot
+// is the parent Preact renders it into: it reads and inserts between the two
+// comments of the real parent, so Preact never touches the parent's other
+// children. A nested island among a slot's nodes can add or drop nodes of its
+// own between its comments, so a slot refreshes those runs from the document
+// when it lets go of its nodes (__krateSlotRefresh).
 const preactSlotJS = `
 import { useContext as __krateUseContext } from "preact/hooks";
 import { Fragment as __KrateFragment, options as __krateOptions } from "preact";
 var __krateSlotPool = null;
 var __krateSlotOpen = /^krate-slot:([0-9a-z]+)$/;
-function __krateServerSlots(el) {
-  var pool = {}, opens = [];
-  var w = document.createTreeWalker(el, 128);
-  for (var c = w.nextNode(); c; c = w.nextNode()) {
-    if (__krateSlotOpen.test(c.data) && c.parentElement && c.parentElement.closest("krate-island") === el) opens.push(c);
+function __krateIslandOpen(n) { return n.nodeType === 8 && n.data.indexOf("krate-island:") === 0; }
+function __krateIslandClose(n) { return n.nodeType === 8 && n.data === "/krate-island"; }
+function __krateRangeRoot(island) {
+  var start = island.start, end = island.end;
+  function parent() { return start.parentNode; }
+  var root = {
+    nodeType: 1,
+    get parentNode() { return parent(); },
+    get ownerDocument() { return parent().ownerDocument; },
+    get namespaceURI() { return parent().namespaceURI; },
+    get ownerSVGElement() { return parent().ownerSVGElement; },
+    get firstChild() { var n = start.nextSibling; return n === end ? null : n; },
+    get childNodes() { return island.nodes(); },
+    contains: function (n) { return island.contains(n); },
+    insertBefore: function (n, ref) {
+      // Preact walks on past the last node it knows (over comments): a node
+      // outside the island means the end of it.
+      parent().insertBefore(n, ref && ref.parentNode === parent() && island.contains(ref) ? ref : end);
+      return n;
+    },
+    appendChild: function (n) { parent().insertBefore(n, end); return n; },
+    removeChild: function (n) { if (n.parentNode) n.parentNode.removeChild(n); return n; },
+  };
+  return root;
+}
+function __krateServerSlots(island) {
+  var pool = {}, opens = [], depth = 0;
+  function see(c) {
+    if (__krateIslandOpen(c)) return void depth++;
+    if (__krateIslandClose(c)) return void depth--;
+    if (depth || !__krateSlotOpen.test(c.data)) return;
+    var host = c.parentElement && c.parentElement.closest("krate-island");
+    if (!host || !island.contains(host)) opens.push(c);
   }
+  island.nodes().forEach(function (n) {
+    if (n.nodeType === 8) return see(n);
+    if (n.nodeType !== 1) return;
+    var w = document.createTreeWalker(n, 128);
+    for (var c = w.nextNode(); c; c = w.nextNode()) see(c);
+  });
   opens.forEach(function (c) {
-    if (!el.contains(c)) return;
+    if (!island.contains(c)) return;
     var id = __krateSlotOpen.exec(c.data)[1], close = "/krate-slot:" + id, nodes = [], n = c.nextSibling;
     for (; n && !(n.nodeType === 8 && n.data === close); n = n.nextSibling) nodes.push(n);
     if (!n) return;
@@ -191,8 +233,30 @@ function __krateSlotTake(p) {
   }
   return sets.length ? sets[0].map(function (n) { return n.cloneNode(true); }) : [];
 }
+function __krateSlotRefresh(set) {
+  for (var i = 0; i < set.length; i++) {
+    var s = set[i];
+    if (!__krateIslandOpen(s) || !s.parentNode) continue;
+    var cur = [], d = 0, n = s.nextSibling;
+    for (; n; n = n.nextSibling) {
+      if (__krateIslandOpen(n)) d++;
+      else if (__krateIslandClose(n)) { if (!d) break; d--; }
+      cur.push(n);
+    }
+    var j = n ? set.indexOf(n, i + 1) : -1;
+    if (j < 0) continue;
+    var old = set.slice(i + 1, j);
+    // Preact removes the nodes it placed; the island's own additions go too.
+    cur.forEach(function (x) { if (old.indexOf(x) < 0) x.parentNode.removeChild(x); });
+    set.splice.apply(set, [i + 1, j - i - 1].concat(cur));
+    i += cur.length + 1;
+  }
+}
 function __krateSlotRelease(c) {
-  if (c.__krateSet) c.__krateSet.used = false;
+  if (c.__krateSet) {
+    __krateSlotRefresh(c.__krateSet);
+    c.__krateSet.used = false;
+  }
   c.__krateSet = null;
 }
 function __krateSlotPlace(c) {

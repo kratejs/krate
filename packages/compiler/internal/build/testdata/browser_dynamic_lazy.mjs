@@ -1,6 +1,7 @@
 // next/dynamic loaders that resolve to a named export or a bare component, in
 // a Preact island and a real-React island (see TestBrowserMigratedDynamicLoaders).
 import { chromium, firefox, webkit } from "playwright";
+import { waitHydrated } from "./island_helpers.mjs";
 
 const browserType = { chromium, firefox, webkit }[process.argv[2] || "chromium"];
 const base = process.argv[3];
@@ -14,8 +15,8 @@ try {
     if (m.type() === "error") errors.push(m.text());
   });
   await page.goto(base + "/");
-  await page.waitForSelector("[data-krate-island-hydrated] #cv", { timeout: 15000 });
-  await page.waitForSelector("[data-krate-island-hydrated] #plain", { timeout: 15000 });
+  await waitHydrated(page, "#cv");
+  await waitHydrated(page, "#plain");
   for (const kind of ["real", "preact"]) {
     for (const [id, text] of [["named", "NAMED"], ["bare", "BARE"], ["default", "DEFAULT"]]) {
       const sel = `#${id}-${kind}`;

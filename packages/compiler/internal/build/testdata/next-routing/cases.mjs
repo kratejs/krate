@@ -47,4 +47,15 @@ export const cases = [
   { name: 'optional repeat param', path: '/x-nested/a/b' },
   { name: 'optional repeat param, one segment', path: '/x-nested/a' },
   { name: 'POST redirect keeps the query', method: 'POST', path: '/store/plans', query: { x: '1' } },
+  // trailingSlash is Next's default (false): /x/ is redirected to /x before middleware runs.
+  { name: 'trailing slash: page', path: '/templates/' },
+  { name: 'trailing slash: page with query', path: '/store/compare/', query: { a: '1' } },
+  { name: 'trailing slash: dynamic page', path: '/templates/foo/' },
+  { name: 'trailing slash: unknown path', path: '/nope/' },
+  { name: 'trailing slash: api route', path: '/api/marker/' },
+  { name: 'trailing slash: POST', method: 'POST', path: '/templates/' },
+  { name: 'trailing slash: file', path: '/brand/a.svg/' },
+  { name: 'trailing slash: before a config redirect', path: '/store/plans/' },
+  { name: 'middleware answers', path: '/mw/a' },
+  { name: 'trailing slash: before middleware', path: '/mw/a/' },
 ]

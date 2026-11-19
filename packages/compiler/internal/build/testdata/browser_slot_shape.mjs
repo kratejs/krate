@@ -3,6 +3,7 @@
 // matches after hydration, after the component renders nodes around the
 // slot, and after a hide and show, and a nested island keeps its state.
 import { chromium, firefox, webkit } from "playwright";
+import { waitHydrated } from "./island_helpers.mjs";
 
 const browserType = { chromium, firefox, webkit }[process.argv[2] || "chromium"];
 const base = process.argv[3];
@@ -16,8 +17,8 @@ try {
     if (m.type() === "error") errors.push("console: " + m.text());
   });
   await page.goto(base + "/");
-  await page.waitForSelector("[data-krate-island-hydrated] #count", { timeout: 15000 });
-  await page.waitForFunction(() => document.querySelectorAll("krate-island[data-krate-island-hydrated]").length === 4, null, { timeout: 15000 });
+  await waitHydrated(page, "#count");
+  await page.waitForFunction(() => (window.__krateIslands || []).filter((i) => i.status === "hydrated").length === 4, null, { timeout: 15000 });
   const state = () => page.evaluate(() => {
     const btn = document.querySelector("#btn");
     const lis = [...document.querySelectorAll("#list > li")];

@@ -285,9 +285,10 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
   exports `register()`, which runs once per server start: in the primary process of the Node API
   sidecar, awaited before that process forks its cluster workers or listens (never in a worker or the SSR
   renderer), and once before `startNodeServer` in the node deploy bundle. The server is not ready until
-  it resolves (`/readyz` answers `503 instrumentation-pending`). Like Next.js, a `register()` that
-  throws is logged as `An error occurred while loading instrumentation hook: ...` and exits the
-  process with status 1 (the supervisor restarts the sidecar with a growing delay). The Node sidecar now
+  it resolves (`/readyz` answers `503 instrumentation-pending`). A `register()` that throws, or a
+  module that fails to load, is logged as `An error occurred while loading instrumentation hook: ...`
+  and is a startup failure: `krate start`/`serve` and the node deploy bundle exit with status 1,
+  `krate dev` stays up and retries after the file is rebuilt (see Fixed). The Node sidecar now
   starts even when every API route is embedded if the file exists. State `register()` puts on
   `globalThis` is not visible to cluster workers; see docs/guides/self-hosting. Other deploy targets
   warn that they do not run it.
@@ -504,6 +505,14 @@ host code runs in the native process. Names and options may change between relea
 
 ### Changed
 
+- `trailingSlash: "never"` redirects like Next: `/x/` answers `308` (was `301`) with the root-relative
+  `Location` `/x`, before config redirects and middleware run, for every path ending in a slash
+  (`/api/*` and files included) and any method. It used to run behind the middleware, so with
+  `GET /store/compare/` the middleware could serve the page at the slash URL, and `/dashboard/`
+  reached a middleware redirect whose `callbackUrl` kept the slash. `krate serve`/`start` and the
+  portable handler of the `node`, `vercel`, `netlify` and `cloudflare` bundles behave the same;
+  `TestNextRoutingParity` pins it against Next 16.4.2. `"always"` (the default) is unchanged: `301`
+  from the page handlers, after middleware and rewrites.
 - `krate migrate nextjs` updates `package.json` by default (`--no-update-package` opts out;
   `--update-package` is accepted and does nothing): scripts, every `@krate/*` package the migrated
   code imports (including `@krate/auth`, `@krate/three` and `@krate/konva`), and the removal of `next`,
@@ -563,6 +572,51 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- A `"use client"` component in a server component tree renders no element of its own. The server used
+  to wrap it in `<krate-island style="display:contents">` (with a props `<script>` before it), so the
+  parent's child combinators and sibling selectors saw the wrapper instead of the component's root:
+  under `<div className="space-y-6">` the first card got no margin. Now the island is the nodes between
+  `<!--krate-island:{...}-->` (module, export and props) and `<!--/krate-island-->`, and its chunk
+  hydrates exactly those nodes in place, for element, fragment, text and empty roots, nested islands
+  included. `window.__krateIslands` lists the islands with their status, in place of the
+  `data-krate-island-hydrated`/`-error` attributes of the element. Real-React islands keep a
+  `<krate-island>` element, which `react-dom` needs as its root container, and so do the external
+  React islands of compiled (non-async) pages (`<div data-krate-island>`).
+- `useRouter().push/replace` in a client component (island) is a client navigation on a page that has
+  islands only. Such a page has no page script, which was the only place the SPA router started, so
+  the island's navigation loaded a whole new document (focus and page state lost) and `<Link>`s on the
+  page were not intercepted. The runtime chunk now starts the router once the document has run (once:
+  a page script that already started it wins), and an island's router copy starts the page's router
+  itself if it finds it stopped, or hands the navigation to the page's `navigate`, before it falls
+  back to a full load. A site whose pages are all island-only ships no runtime chunk and still
+  navigates with full loads.
+- `KrateConfig` (@krate/core) types every key the config loader accepts. `deploy.target` takes
+  `"node"` and `"docker"`, so the config `krate migrate nextjs` writes for `output: 'standalone'`
+  typechecks; `ssr` gains `nodeWorkers`, `apiWorkers`, `apiIsolation` and `rendererWorkers`; the
+  top level gains `cache`, `react`, `serverExternalPackages`, `outputFileTracingIncludes`,
+  `outputFileTracingRoot`, `envDir` and `envPrefix`; `fonts.preloadLimit`, `i18n.localeLabels`,
+  `versions.labels` and the native `fileAssociations`, `workers`, `extensions` and `automation` are
+  typed too. A Go test now fails when a config key is missing from the types, and another typechecks
+  the krate.config.ts the migrator writes. The migrator also keeps a `NextConfig` annotation in code
+  it carries over typed, as `KrateConfig`, instead of leaving the name undefined.
+- Server bundles that Node loads as ES modules (instrumentation, Node API routes, server actions, page
+  server bundles, Node middleware and the node deploy bundle) import an external CommonJS package through
+  its default export, so a named import works even when Node cannot detect the package's exports.
+  `import { loadEnvConfig } from '@next/env'` (an ncc bundle) in `instrumentation-node.ts` failed with
+  `Named export 'loadEnvConfig' not found` when the sidecar loaded the instrumentation module, and the
+  sidecar restarted in a loop. The package is still loaded from `node_modules`; ES module packages and
+  dynamic imports are unchanged.
+- Failed instrumentation no longer takes a site down silently. The Node API sidecar restarted in a
+  loop when `register()` threw or the instrumentation module failed to load, and because requests wait
+  up to 30 seconds for the sidecar, every page behind middleware hung for 30 seconds and got `503`.
+  Now `krate start`/`krate serve` treat it as a startup failure: no restart, an error that names the
+  file and the cause with a hint, exit status 1, and `503` at once for requests made meanwhile
+  (`/readyz` answers `503 sidecar-failed`). `krate dev` stays up, shows the error in the log and the
+  overlay, answers `503` with the cause at once, and starts the sidecar again when the instrumentation
+  file is rebuilt. The node deploy bundle also reports a module that fails to load with Next's message
+  before it exits. A sidecar that exits before it listens for any other reason is still restarted,
+  but requests stop waiting for it as soon as it exits. Next.js 16 keeps serving `500` for every
+  request instead; see docs/guides/self-hosting#instrumentation.
 - `krate serve`, `krate start` and `krate dev` send the same `Content-Type` on every OS for common web
   files. On Windows the registry served `.js` without a charset and `.woff2` as `text/plain`; on Linux
   `.otf` was an OpenDocument type, `.ico` was `image/vnd.microsoft.icon` and `.webm` was `audio/webm`.

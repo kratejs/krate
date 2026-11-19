@@ -22,11 +22,11 @@
      "x-nextjs-stale-time": "300",
      "x-powered-by": "Next.js",
      "cache-control": "s-maxage=31536000",
-     "etag": "\"invq15ogiu30x\"",
+     "etag": "\"gjg8jjchss30x\"",
      "content-type": "text/html; charset=utf-8",
      "content-length": "3921"
     },
-    "body": "<!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"preload\" as=\"script\" fetchPriority=\"low\" href=\"/_next/static/chunks/webpack-70c336f9a46f13b1.js\"/><script src=\"/_next/static/chunks/01b56173-298657703493dec6.js"
+    "body": "<!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"preload\" as=\"script\" fetchPriority=\"low\" href=\"/_next/static/chunks/webpack-70c336f9a46f13b1.js\"/><script src=\"/_next/static/chunks/18ab9288-87a2c3e680e88229.js"
    }
   },
   {
@@ -49,11 +49,11 @@
      "x-nextjs-prerender": "1, 1",
      "x-nextjs-stale-time": "300",
      "x-powered-by": "Next.js",
-     "etag": "\"52vno8ydm043d\"",
+     "etag": "\"cig8k5dv643d\"",
      "content-type": "text/html; charset=utf-8",
      "content-length": "5305"
     },
-    "body": "<!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"preload\" as=\"script\" fetchPriority=\"low\" href=\"/_next/static/chunks/webpack-70c336f9a46f13b1.js\"/><script src=\"/_next/static/chunks/01b56173-298657703493dec6.js"
+    "body": "<!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"preload\" as=\"script\" fetchPriority=\"low\" href=\"/_next/static/chunks/webpack-70c336f9a46f13b1.js\"/><script src=\"/_next/static/chunks/18ab9288-87a2c3e680e88229.js"
    }
   },
   {
@@ -76,11 +76,11 @@
      "x-nextjs-stale-time": "300",
      "x-powered-by": "Next.js",
      "cache-control": "s-maxage=31536000",
-     "etag": "\"5yl2lakpul3ex\"",
+     "etag": "\"oiu8hi5owg3ex\"",
      "content-type": "text/html; charset=utf-8",
      "content-length": "4425"
     },
-    "body": "<!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"preload\" as=\"script\" fetchPriority=\"low\" href=\"/_next/static/chunks/webpack-70c336f9a46f13b1.js\"/><script src=\"/_next/static/chunks/01b56173-298657703493dec6.js"
+    "body": "<!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"preload\" as=\"script\" fetchPriority=\"low\" href=\"/_next/static/chunks/webpack-70c336f9a46f13b1.js\"/><script src=\"/_next/static/chunks/18ab9288-87a2c3e680e88229.js"
    }
   },
   {
@@ -107,11 +107,11 @@
      "x-nextjs-stale-time": "300",
      "x-powered-by": "Next.js",
      "cache-control": "s-maxage=31536000",
-     "etag": "\"5yl2lakpul3ex\"",
+     "etag": "\"oiu8hi5owg3ex\"",
      "content-type": "text/html; charset=utf-8",
      "content-length": "4425"
     },
-    "body": "<!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"preload\" as=\"script\" fetchPriority=\"low\" href=\"/_next/static/chunks/webpack-70c336f9a46f13b1.js\"/><script src=\"/_next/static/chunks/01b56173-298657703493dec6.js"
+    "body": "<!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"preload\" as=\"script\" fetchPriority=\"low\" href=\"/_next/static/chunks/webpack-70c336f9a46f13b1.js\"/><script src=\"/_next/static/chunks/18ab9288-87a2c3e680e88229.js"
    }
   },
   {
@@ -200,11 +200,11 @@
      "x-nextjs-stale-time": "300",
      "x-powered-by": "Next.js",
      "cache-control": "s-maxage=31536000",
-     "etag": "\"bjzfe63e8q3sy\"",
+     "etag": "\"y9xobxf39d3sy\"",
      "content-type": "text/html; charset=utf-8",
      "content-length": "4930"
     },
-    "body": "<!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"preload\" as=\"script\" fetchPriority=\"low\" href=\"/_next/static/chunks/webpack-70c336f9a46f13b1.js\"/><script src=\"/_next/static/chunks/01b56173-298657703493dec6.js"
+    "body": "<!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"preload\" as=\"script\" fetchPriority=\"low\" href=\"/_next/static/chunks/webpack-70c336f9a46f13b1.js\"/><script src=\"/_next/static/chunks/18ab9288-87a2c3e680e88229.js"
    }
   },
   {
@@ -259,11 +259,11 @@
      "x-nextjs-prerender": "1, 1",
      "x-nextjs-stale-time": "300",
      "x-powered-by": "Next.js",
-     "etag": "\"jrqj2j8x3b3fd\"",
+     "etag": "\"bc3iyl64th3fd\"",
      "content-type": "text/html; charset=utf-8",
      "content-length": "4441"
     },
-    "body": "<!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"preload\" as=\"script\" fetchPriority=\"low\" href=\"/_next/static/chunks/webpack-70c336f9a46f13b1.js\"/><script src=\"/_next/static/chunks/01b56173-298657703493dec6.js"
+    "body": "<!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"preload\" as=\"script\" fetchPriority=\"low\" href=\"/_next/static/chunks/webpack-70c336f9a46f13b1.js\"/><script src=\"/_next/static/chunks/18ab9288-87a2c3e680e88229.js"
    }
   },
   {
@@ -289,11 +289,11 @@
      "x-nextjs-prerender": "1, 1",
      "x-nextjs-stale-time": "300",
      "x-powered-by": "Next.js",
-     "etag": "\"jrqj2j8x3b3fd\"",
+     "etag": "\"bc3iyl64th3fd\"",
      "content-type": "text/html; charset=utf-8",
      "content-length": "4441"
     },
-    "body": "<!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"preload\" as=\"script\" fetchPriority=\"low\" href=\"/_next/static/chunks/webpack-70c336f9a46f13b1.js\"/><script src=\"/_next/static/chunks/01b56173-298657703493dec6.js"
+    "body": "<!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"preload\" as=\"script\" fetchPriority=\"low\" href=\"/_next/static/chunks/webpack-70c336f9a46f13b1.js\"/><script src=\"/_next/static/chunks/18ab9288-87a2c3e680e88229.js"
    }
   },
   {
@@ -316,7 +316,7 @@
      "content-type": "text/html; charset=utf-8",
      "transfer-encoding": "chunked"
     },
-    "body": "<!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"preload\" as=\"script\" fetchPriority=\"low\" href=\"/_next/static/chunks/webpack-70c336f9a46f13b1.js\"/><script src=\"/_next/static/chunks/01b56173-298657703493dec6.js"
+    "body": "<!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"preload\" as=\"script\" fetchPriority=\"low\" href=\"/_next/static/chunks/webpack-70c336f9a46f13b1.js\"/><script src=\"/_next/static/chunks/18ab9288-87a2c3e680e88229.js"
    }
   },
   {
@@ -400,8 +400,8 @@
      "content-security-policy-report-only": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://umami.example.test https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; media-src 'self' blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; font-src 'self' data: https://assets.example.test; connect-src 'self' blob: data: https://assets.example.test https://umami.example.test https://challenges.cloudflare.com; worker-src 'self' blob:; manifest-src 'self'; frame-src https://challenges.cloudflare.com; base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'; report-uri /api/csp-report",
      "cache-control": "public, max-age=86400",
      "accept-ranges": "bytes",
-     "last-modified": "Wed, 18 Nov 2026 16:41:52 GMT",
-     "etag": "W/\"3f-1a1ef8941df\"",
+     "last-modified": "Wed, 18 Nov 2026 22:56:36 GMT",
+     "etag": "W/\"3f-1a1f0e05870\"",
      "content-type": "image/svg+xml",
      "content-length": "63",
      "vary": "Accept-Encoding"
@@ -429,11 +429,11 @@
      "x-nextjs-prerender": "1, 1",
      "x-nextjs-stale-time": "300",
      "x-powered-by": "Next.js",
-     "etag": "\"52vno8ydm043d\"",
+     "etag": "\"cig8k5dv643d\"",
      "content-type": "text/html; charset=utf-8",
      "content-length": "5305"
     },
-    "body": "<!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"preload\" as=\"script\" fetchPriority=\"low\" href=\"/_next/static/chunks/webpack-70c336f9a46f13b1.js\"/><script src=\"/_next/static/chunks/01b56173-298657703493dec6.js"
+    "body": "<!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"preload\" as=\"script\" fetchPriority=\"low\" href=\"/_next/static/chunks/webpack-70c336f9a46f13b1.js\"/><script src=\"/_next/static/chunks/18ab9288-87a2c3e680e88229.js"
    }
   },
   {
@@ -452,8 +452,8 @@
      "content-security-policy-report-only": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://umami.example.test https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; media-src 'self' blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; font-src 'self' data: https://assets.example.test; connect-src 'self' blob: data: https://assets.example.test https://umami.example.test https://challenges.cloudflare.com; worker-src 'self' blob:; manifest-src 'self'; frame-src https://challenges.cloudflare.com; base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'; report-uri /api/csp-report",
      "cache-control": "public, max-age=31536000, immutable",
      "accept-ranges": "bytes",
-     "last-modified": "Wed, 18 Nov 2026 16:41:52 GMT",
-     "etag": "W/\"4-1a1ef8941df\"",
+     "last-modified": "Wed, 18 Nov 2026 22:56:36 GMT",
+     "etag": "W/\"4-1a1f0e05870\"",
      "content-type": "application/wasm",
      "content-length": "4",
      "vary": "Accept-Encoding"
@@ -477,8 +477,8 @@
      "content-security-policy-report-only": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://umami.example.test https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; media-src 'self' blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; font-src 'self' data: https://assets.example.test; connect-src 'self' blob: data: https://assets.example.test https://umami.example.test https://challenges.cloudflare.com; worker-src 'self' blob:; manifest-src 'self'; frame-src https://challenges.cloudflare.com; base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'; report-uri /api/csp-report",
      "accept-ranges": "bytes",
      "cache-control": "public, max-age=0",
-     "last-modified": "Wed, 18 Nov 2026 16:41:52 GMT",
-     "etag": "W/\"4-1a1ef8941df\"",
+     "last-modified": "Wed, 18 Nov 2026 22:56:36 GMT",
+     "etag": "W/\"4-1a1f0e05870\"",
      "content-type": "application/wasm",
      "content-length": "4",
      "vary": "Accept-Encoding"
@@ -502,8 +502,8 @@
      "content-security-policy-report-only": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://umami.example.test https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; media-src 'self' blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; font-src 'self' data: https://assets.example.test; connect-src 'self' blob: data: https://assets.example.test https://umami.example.test https://challenges.cloudflare.com; worker-src 'self' blob:; manifest-src 'self'; frame-src https://challenges.cloudflare.com; base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'; report-uri /api/csp-report",
      "cache-control": "public, max-age=86400, stale-while-revalidate=604800",
      "accept-ranges": "bytes",
-     "last-modified": "Wed, 18 Nov 2026 16:41:52 GMT",
-     "etag": "W/\"5-1a1ef8941df\"",
+     "last-modified": "Wed, 18 Nov 2026 22:56:36 GMT",
+     "etag": "W/\"5-1a1f0e05870\"",
      "content-type": "application/octet-stream",
      "content-length": "5"
     },
@@ -526,8 +526,8 @@
      "content-security-policy-report-only": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://umami.example.test https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; media-src 'self' blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; font-src 'self' data: https://assets.example.test; connect-src 'self' blob: data: https://assets.example.test https://umami.example.test https://challenges.cloudflare.com; worker-src 'self' blob:; manifest-src 'self'; frame-src https://challenges.cloudflare.com; base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'; report-uri /api/csp-report",
      "cache-control": "public, max-age=86400, stale-while-revalidate=604800",
      "accept-ranges": "bytes",
-     "last-modified": "Wed, 18 Nov 2026 16:41:52 GMT",
-     "etag": "W/\"5-1a1ef8941df\"",
+     "last-modified": "Wed, 18 Nov 2026 22:56:36 GMT",
+     "etag": "W/\"5-1a1f0e05870\"",
      "content-type": "application/octet-stream",
      "content-length": "5"
     },
@@ -550,8 +550,8 @@
      "content-security-policy-report-only": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://umami.example.test https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; media-src 'self' blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; font-src 'self' data: https://assets.example.test; connect-src 'self' blob: data: https://assets.example.test https://umami.example.test https://challenges.cloudflare.com; worker-src 'self' blob:; manifest-src 'self'; frame-src https://challenges.cloudflare.com; base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'; report-uri /api/csp-report",
      "cache-control": "public, max-age=3600",
      "accept-ranges": "bytes",
-     "last-modified": "Wed, 18 Nov 2026 16:41:52 GMT",
-     "etag": "W/\"8-1a1ef8941df\"",
+     "last-modified": "Wed, 18 Nov 2026 22:56:36 GMT",
+     "etag": "W/\"8-1a1f0e05870\"",
      "content-type": "application/javascript; charset=UTF-8",
      "content-length": "8",
      "vary": "Accept-Encoding"
@@ -575,8 +575,8 @@
      "content-security-policy-report-only": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://umami.example.test https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; media-src 'self' blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; font-src 'self' data: https://assets.example.test; connect-src 'self' blob: data: https://assets.example.test https://umami.example.test https://challenges.cloudflare.com; worker-src 'self' blob:; manifest-src 'self'; frame-src https://challenges.cloudflare.com; base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'; report-uri /api/csp-report",
      "cache-control": "public, max-age=86400",
      "accept-ranges": "bytes",
-     "last-modified": "Wed, 18 Nov 2026 16:41:52 GMT",
-     "etag": "W/\"5-1a1ef8941df\"",
+     "last-modified": "Wed, 18 Nov 2026 22:56:36 GMT",
+     "etag": "W/\"5-1a1f0e05870\"",
      "content-type": "text/plain; charset=UTF-8",
      "content-length": "5",
      "vary": "Accept-Encoding"
@@ -600,8 +600,8 @@
      "content-security-policy-report-only": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://umami.example.test https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; media-src 'self' blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; font-src 'self' data: https://assets.example.test; connect-src 'self' blob: data: https://assets.example.test https://umami.example.test https://challenges.cloudflare.com; worker-src 'self' blob:; manifest-src 'self'; frame-src https://challenges.cloudflare.com; base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'; report-uri /api/csp-report",
      "cache-control": "public, max-age=31536000, immutable",
      "accept-ranges": "bytes",
-     "last-modified": "Wed, 18 Nov 2026 16:41:52 GMT",
-     "etag": "W/\"6-1a1ef8941df\"",
+     "last-modified": "Wed, 18 Nov 2026 22:56:36 GMT",
+     "etag": "W/\"6-1a1f0e05870\"",
      "content-type": "application/javascript; charset=UTF-8",
      "content-length": "6",
      "vary": "Accept-Encoding"
@@ -625,8 +625,8 @@
      "content-security-policy-report-only": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://umami.example.test https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; media-src 'self' blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; font-src 'self' data: https://assets.example.test; connect-src 'self' blob: data: https://assets.example.test https://umami.example.test https://challenges.cloudflare.com; worker-src 'self' blob:; manifest-src 'self'; frame-src https://challenges.cloudflare.com; base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'; report-uri /api/csp-report",
      "cache-control": "public, max-age=86400, stale-while-revalidate=604800",
      "accept-ranges": "bytes",
-     "last-modified": "Wed, 18 Nov 2026 16:41:52 GMT",
-     "etag": "W/\"5-1a1ef8941df\"",
+     "last-modified": "Wed, 18 Nov 2026 22:56:36 GMT",
+     "etag": "W/\"5-1a1f0e05870\"",
      "content-type": "font/woff2",
      "content-length": "5"
     },
@@ -649,8 +649,8 @@
      "content-security-policy-report-only": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://umami.example.test https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; media-src 'self' blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; font-src 'self' data: https://assets.example.test; connect-src 'self' blob: data: https://assets.example.test https://umami.example.test https://challenges.cloudflare.com; worker-src 'self' blob:; manifest-src 'self'; frame-src https://challenges.cloudflare.com; base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'; report-uri /api/csp-report",
      "cache-control": "public, max-age=31536000, immutable",
      "accept-ranges": "bytes",
-     "last-modified": "Wed, 18 Nov 2026 16:41:52 GMT",
-     "etag": "W/\"7-1a1ef8941df\"",
+     "last-modified": "Wed, 18 Nov 2026 22:56:36 GMT",
+     "etag": "W/\"7-1a1f0e05870\"",
      "content-type": "text/css; charset=UTF-8",
      "content-length": "7",
      "vary": "Accept-Encoding"
@@ -674,8 +674,8 @@
      "content-security-policy-report-only": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://umami.example.test https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; media-src 'self' blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; font-src 'self' data: https://assets.example.test; connect-src 'self' blob: data: https://assets.example.test https://umami.example.test https://challenges.cloudflare.com; worker-src 'self' blob:; manifest-src 'self'; frame-src https://challenges.cloudflare.com; base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'; report-uri /api/csp-report",
      "cache-control": "public, max-age=31536000, immutable",
      "accept-ranges": "bytes",
-     "last-modified": "Wed, 18 Nov 2026 16:41:52 GMT",
-     "etag": "W/\"8-1a1ef8941db\"",
+     "last-modified": "Wed, 18 Nov 2026 22:56:36 GMT",
+     "etag": "W/\"8-1a1f0e05870\"",
      "content-type": "application/javascript; charset=UTF-8",
      "content-length": "8",
      "vary": "Accept-Encoding"
@@ -722,11 +722,11 @@
      "x-nextjs-prerender": "1, 1",
      "x-nextjs-stale-time": "300",
      "x-powered-by": "Next.js",
-     "etag": "\"52vno8ydm043d\"",
+     "etag": "\"cig8k5dv643d\"",
      "content-type": "text/html; charset=utf-8",
      "content-length": "5305"
     },
-    "body": "<!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"preload\" as=\"script\" fetchPriority=\"low\" href=\"/_next/static/chunks/webpack-70c336f9a46f13b1.js\"/><script src=\"/_next/static/chunks/01b56173-298657703493dec6.js"
+    "body": "<!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"preload\" as=\"script\" fetchPriority=\"low\" href=\"/_next/static/chunks/webpack-70c336f9a46f13b1.js\"/><script src=\"/_next/static/chunks/18ab9288-87a2c3e680e88229.js"
    }
   },
   {
@@ -749,11 +749,11 @@
      "x-nextjs-prerender": "1, 1",
      "x-nextjs-stale-time": "300",
      "x-powered-by": "Next.js",
-     "etag": "\"52vno8ydm043d\"",
+     "etag": "\"cig8k5dv643d\"",
      "content-type": "text/html; charset=utf-8",
      "content-length": "5305"
     },
-    "body": "<!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"preload\" as=\"script\" fetchPriority=\"low\" href=\"/_next/static/chunks/webpack-70c336f9a46f13b1.js\"/><script src=\"/_next/static/chunks/01b56173-298657703493dec6.js"
+    "body": "<!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"preload\" as=\"script\" fetchPriority=\"low\" href=\"/_next/static/chunks/webpack-70c336f9a46f13b1.js\"/><script src=\"/_next/static/chunks/18ab9288-87a2c3e680e88229.js"
    }
   },
   {
@@ -796,11 +796,11 @@
      "x-nextjs-prerender": "1, 1",
      "x-nextjs-stale-time": "300",
      "x-powered-by": "Next.js",
-     "etag": "\"52vno8ydm043d\"",
+     "etag": "\"cig8k5dv643d\"",
      "content-type": "text/html; charset=utf-8",
      "content-length": "5305"
     },
-    "body": "<!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"preload\" as=\"script\" fetchPriority=\"low\" href=\"/_next/static/chunks/webpack-70c336f9a46f13b1.js\"/><script src=\"/_next/static/chunks/01b56173-298657703493dec6.js"
+    "body": "<!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"preload\" as=\"script\" fetchPriority=\"low\" href=\"/_next/static/chunks/webpack-70c336f9a46f13b1.js\"/><script src=\"/_next/static/chunks/18ab9288-87a2c3e680e88229.js"
    }
   },
   {
@@ -843,11 +843,11 @@
      "x-nextjs-prerender": "1, 1",
      "x-nextjs-stale-time": "300",
      "x-powered-by": "Next.js",
-     "etag": "\"52vno8ydm043d\"",
+     "etag": "\"cig8k5dv643d\"",
      "content-type": "text/html; charset=utf-8",
      "content-length": "5305"
     },
-    "body": "<!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"preload\" as=\"script\" fetchPriority=\"low\" href=\"/_next/static/chunks/webpack-70c336f9a46f13b1.js\"/><script src=\"/_next/static/chunks/01b56173-298657703493dec6.js"
+    "body": "<!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"preload\" as=\"script\" fetchPriority=\"low\" href=\"/_next/static/chunks/webpack-70c336f9a46f13b1.js\"/><script src=\"/_next/static/chunks/18ab9288-87a2c3e680e88229.js"
    }
   },
   {
@@ -889,11 +889,11 @@
      "x-nextjs-prerender": "1, 1",
      "x-nextjs-stale-time": "300",
      "x-powered-by": "Next.js",
-     "etag": "\"52vno8ydm043d\"",
+     "etag": "\"cig8k5dv643d\"",
      "content-type": "text/html; charset=utf-8",
      "content-length": "5305"
     },
-    "body": "<!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"preload\" as=\"script\" fetchPriority=\"low\" href=\"/_next/static/chunks/webpack-70c336f9a46f13b1.js\"/><script src=\"/_next/static/chunks/01b56173-298657703493dec6.js"
+    "body": "<!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"preload\" as=\"script\" fetchPriority=\"low\" href=\"/_next/static/chunks/webpack-70c336f9a46f13b1.js\"/><script src=\"/_next/static/chunks/18ab9288-87a2c3e680e88229.js"
    }
   },
   {
@@ -932,11 +932,11 @@
      "x-nextjs-prerender": "1, 1",
      "x-nextjs-stale-time": "300",
      "x-powered-by": "Next.js",
-     "etag": "\"52vno8ydm043d\"",
+     "etag": "\"cig8k5dv643d\"",
      "content-type": "text/html; charset=utf-8",
      "content-length": "5305"
     },
-    "body": "<!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"preload\" as=\"script\" fetchPriority=\"low\" href=\"/_next/static/chunks/webpack-70c336f9a46f13b1.js\"/><script src=\"/_next/static/chunks/01b56173-298657703493dec6.js"
+    "body": "<!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"preload\" as=\"script\" fetchPriority=\"low\" href=\"/_next/static/chunks/webpack-70c336f9a46f13b1.js\"/><script src=\"/_next/static/chunks/18ab9288-87a2c3e680e88229.js"
    }
   },
   {
@@ -976,11 +976,11 @@
      "x-nextjs-prerender": "1, 1",
      "x-nextjs-stale-time": "300",
      "x-powered-by": "Next.js",
-     "etag": "\"52vno8ydm043d\"",
+     "etag": "\"cig8k5dv643d\"",
      "content-type": "text/html; charset=utf-8",
      "content-length": "5305"
     },
-    "body": "<!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"preload\" as=\"script\" fetchPriority=\"low\" href=\"/_next/static/chunks/webpack-70c336f9a46f13b1.js\"/><script src=\"/_next/static/chunks/01b56173-298657703493dec6.js"
+    "body": "<!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"preload\" as=\"script\" fetchPriority=\"low\" href=\"/_next/static/chunks/webpack-70c336f9a46f13b1.js\"/><script src=\"/_next/static/chunks/18ab9288-87a2c3e680e88229.js"
    }
   },
   {
@@ -1038,6 +1038,158 @@
      "transfer-encoding": "chunked"
     },
     "body": "/store?x=1"
+   }
+  },
+  {
+   "name": "trailing slash: page",
+   "path": "/templates/",
+   "response": {
+    "status": 308,
+    "location": "/templates",
+    "headers": {
+     "location": "/templates",
+     "refresh": "0;url=/templates",
+     "transfer-encoding": "chunked"
+    },
+    "body": "/templates"
+   }
+  },
+  {
+   "name": "trailing slash: page with query",
+   "path": "/store/compare/",
+   "query": {
+    "a": "1"
+   },
+   "response": {
+    "status": 308,
+    "location": "/store/compare?a=1",
+    "headers": {
+     "location": "/store/compare?a=1",
+     "refresh": "0;url=/store/compare?a=1",
+     "transfer-encoding": "chunked"
+    },
+    "body": "/store/compare?a=1"
+   }
+  },
+  {
+   "name": "trailing slash: dynamic page",
+   "path": "/templates/foo/",
+   "response": {
+    "status": 308,
+    "location": "/templates/foo",
+    "headers": {
+     "location": "/templates/foo",
+     "refresh": "0;url=/templates/foo",
+     "transfer-encoding": "chunked"
+    },
+    "body": "/templates/foo"
+   }
+  },
+  {
+   "name": "trailing slash: unknown path",
+   "path": "/nope/",
+   "response": {
+    "status": 308,
+    "location": "/nope",
+    "headers": {
+     "location": "/nope",
+     "refresh": "0;url=/nope",
+     "transfer-encoding": "chunked"
+    },
+    "body": "/nope"
+   }
+  },
+  {
+   "name": "trailing slash: api route",
+   "path": "/api/marker/",
+   "response": {
+    "status": 308,
+    "location": "/api/marker",
+    "headers": {
+     "location": "/api/marker",
+     "refresh": "0;url=/api/marker",
+     "transfer-encoding": "chunked"
+    },
+    "body": "/api/marker"
+   }
+  },
+  {
+   "name": "trailing slash: POST",
+   "method": "POST",
+   "path": "/templates/",
+   "response": {
+    "status": 308,
+    "location": "/templates",
+    "headers": {
+     "location": "/templates",
+     "refresh": "0;url=/templates",
+     "transfer-encoding": "chunked"
+    },
+    "body": "/templates"
+   }
+  },
+  {
+   "name": "trailing slash: file",
+   "path": "/brand/a.svg/",
+   "response": {
+    "status": 308,
+    "location": "/brand/a.svg",
+    "headers": {
+     "location": "/brand/a.svg",
+     "refresh": "0;url=/brand/a.svg",
+     "transfer-encoding": "chunked"
+    },
+    "body": "/brand/a.svg"
+   }
+  },
+  {
+   "name": "trailing slash: before a config redirect",
+   "path": "/store/plans/",
+   "response": {
+    "status": 308,
+    "location": "/store/plans",
+    "headers": {
+     "location": "/store/plans",
+     "refresh": "0;url=/store/plans",
+     "transfer-encoding": "chunked"
+    },
+    "body": "/store/plans"
+   }
+  },
+  {
+   "name": "middleware answers",
+   "path": "/mw/a",
+   "response": {
+    "status": 200,
+    "location": null,
+    "headers": {
+     "x-content-type-options": "nosniff",
+     "referrer-policy": "strict-origin-when-cross-origin",
+     "x-frame-options": "DENY",
+     "permissions-policy": "accelerometer=(), autoplay=(), bluetooth=(), browsing-topics=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), hid=(), interest-cohort=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), xr-spatial-tracking=()",
+     "cross-origin-opener-policy": "same-origin-allow-popups",
+     "content-security-policy": "base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'",
+     "content-security-policy-report-only": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://umami.example.test https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; media-src 'self' blob: https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://assets.example.test; font-src 'self' data: https://assets.example.test; connect-src 'self' blob: data: https://assets.example.test https://umami.example.test https://challenges.cloudflare.com; worker-src 'self' blob:; manifest-src 'self'; frame-src https://challenges.cloudflare.com; base-uri 'self'; form-action 'self' https://app.example.test https://discord.com https://apis.roblox.com https://checkout.stripe.com https://billing.stripe.com; object-src 'none'; frame-ancestors 'none'; report-uri /api/csp-report",
+     "content-type": "text/plain",
+     "x-mw-path": "/mw/a",
+     "vary": "Accept-Encoding",
+     "transfer-encoding": "chunked"
+    },
+    "body": "middleware saw /mw/a"
+   }
+  },
+  {
+   "name": "trailing slash: before middleware",
+   "path": "/mw/a/",
+   "response": {
+    "status": 308,
+    "location": "/mw/a",
+    "headers": {
+     "location": "/mw/a",
+     "refresh": "0;url=/mw/a",
+     "transfer-encoding": "chunked"
+    },
+    "body": "/mw/a"
    }
   }
  ]

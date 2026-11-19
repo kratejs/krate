@@ -1,6 +1,7 @@
 // A real-React island uses <Link> and <Image> without imports (see
 // TestBrowserRealReactIslandTags).
 import { chromium, firefox, webkit } from "playwright";
+import { waitHydrated } from "./island_helpers.mjs";
 
 const browserType = { chromium, firefox, webkit }[process.argv[2] || "chromium"];
 const base = process.argv[3];
@@ -14,7 +15,7 @@ try {
     if (m.type() === "error") errors.push(m.text());
   });
   await page.goto(base + "/");
-  await page.waitForSelector("[data-krate-island-hydrated] #cv", { timeout: 15000 });
+  await waitHydrated(page, "#cv");
   const go = await page.getAttribute("#go", "data-krate-link");
   if (go === null) failures.push("the island Link has no data-krate-link");
   if ((await page.getAttribute("#go", "data-prefetch")) === null) failures.push("the island Link has no data-prefetch");

@@ -143,12 +143,12 @@ func TestAsyncPageRendersCompiledReactComponents(t *testing.T) {
 		}
 	}
 	// The icon is not inside an island: it needs no JavaScript.
-	if i := strings.Index(html, `id="spinner"`); i < 0 || strings.LastIndex(html[:i], "<krate-island") > strings.LastIndex(html[:i], "</krate-island>") {
+	if i := strings.Index(html, `id="spinner"`); i < 0 || strings.LastIndex(html[:i], "<!--krate-island:") > strings.LastIndex(html[:i], "<!--/krate-island-->") {
 		t.Errorf("the stateless icon must not be wrapped in an island:\n%s", html)
 	}
 	// The checkbox, the switch and the dialog are islands, and the dialog
 	// parts share one.
-	if n := strings.Count(html, "<krate-island"); n != 3 {
+	if n := strings.Count(html, "<!--krate-island:"); n != 3 {
 		t.Errorf("expected 3 islands (checkbox, switch, dialog), got %d:\n%s", n, html)
 	}
 }
@@ -342,7 +342,7 @@ export default function Error({ error, reset }: any) {
 	if strings.Contains(html, "db down") {
 		t.Errorf("the error message must not leak into the page:\n%s", html)
 	}
-	m := regexp.MustCompile(`data-src="([^"]+)"`).FindStringSubmatch(html)
+	m := regexp.MustCompile(`<!--krate-island:\{[^>]*?"s":"([^"]+)"`).FindStringSubmatch(html)
 	if m == nil || !strings.Contains(html, `"digest":`) {
 		t.Fatalf("the boundary must hydrate as an island with a sanitized error:\n%s", html)
 	}

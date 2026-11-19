@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
+	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/environ"
 	"github.com/kratejs/krate/packages/compiler/internal/execx"
 	"github.com/kratejs/krate/packages/compiler/internal/gohost"
@@ -162,6 +163,11 @@ function resolveDynamicFile(dir, segments, exts) {
 
 const server = http.createServer(async (req, res) => {
   try {
+    // The host's readiness probe: which start of the sidecar is listening.
+    if (req.url === '` + sidecarReadyPath + `') {
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      return res.end(process.env.KRATE_SIDECAR_START || '');
+    }
     // Only the Krate host (which adds the per-process secret after running
     // middleware and the action checks) may call the sidecar.
     if (!sidecarAuthorized(req.headers['x-krate-internal'])) {
@@ -698,6 +704,9 @@ Bun.serve({
   port: PORT,
   hostname: '127.0.0.1',
   async fetch(req) {
+    if (new URL(req.url).pathname === '` + sidecarReadyPath + `') {
+      return new Response(process.env.KRATE_SIDECAR_START || '', { headers: { 'content-type': 'text/plain; charset=utf-8' } });
+    }
     if (!sidecarAuthorized(req.headers.get('x-krate-internal'))) {
       return new Response('forbidden', { status: 403, headers: { 'content-type': 'text/plain; charset=utf-8' } });
     }
@@ -1417,10 +1426,6 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		}
 	}()
 	port = listener.Addr().(*net.TCPAddr).Port
-	apiPort := internalPort(port + 1)
-	sidecarPorts.Store(port, apiPort)
-	defer sidecarPorts.Delete(port)
-
 	// On-demand revalidation (revalidatePath/revalidateTag) reaches this
 	// process through a loopback-only internal endpoint authenticated by a
 	// per-process secret; every server-side runtime gets its URL + secret.
@@ -1436,6 +1441,13 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		return err
 	}
 	defer revalHost.Close()
+	// Chosen after the revalidation host listens on an OS-chosen port: the OS
+	// can hand out port+1 (macOS assigns ports in sequence), which the
+	// sidecar would then fail to bind.
+	apiPort := internalPort(port + 1)
+	sidecarPorts.Store(port, apiPort)
+	defer sidecarPorts.Delete(port)
+
 	if err := revalHost.SetCache(cfg.Cache, hub == nil); err != nil {
 		return err
 	}
@@ -1500,7 +1512,11 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	var nodeReady *sidecarReady
 	if needNodeSidecar {
 		nodeReady = newSidecarReady(sidecarStartTimeout)
+		nodeReady.showReason = hub != nil
 	}
+	// startupFailed carries the error that stops krate serve/start before it
+	// serves: failed instrumentation.
+	startupFailed := make(chan error, 1)
 	var nodeAPICmdMu sync.Mutex
 	var nodeAPICmd *exec.Cmd
 	var nodeAPIStopOnce sync.Once
@@ -1565,6 +1581,9 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 				if cacheRuntime != "" {
 					cmd.Env = append(cmd.Env, "KRATE_CACHE_RUNTIME="+cacheRuntime)
 				}
+				if instrumentationArg != "" {
+					cmd.Env = append(cmd.Env, "KRATE_INSTRUMENTATION_REPORT="+instrumentationReportPath(root))
+				}
 				cmd.Stdout = os.Stdout
 				cmd.Stderr = os.Stderr
 				return cmd
@@ -1578,6 +1597,11 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 				default:
 				}
 				cmd := makeCmd()
+				startToken := newSidecarStartToken()
+				cmd.Env = append(cmd.Env, "KRATE_SIDECAR_START="+startToken)
+				if instrumentationArg != "" {
+					_ = os.Remove(instrumentationReportPath(root))
+				}
 				started := time.Now()
 				// Start under the lock and publish only a started command:
 				// shutdown reads cmd.Process, and must either see this process
@@ -1596,9 +1620,12 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 				nodeAPICmdMu.Unlock()
 				if err == nil {
 					clearServerCrash("Node API sidecar")
+					if instrumentationArg != "" && hub != nil {
+						hub.ClearServerError("Instrumentation")
+					}
 					gen := nodeReady.begin()
 					exited := make(chan struct{})
-					go nodeReady.watch(gen, apiPort, exited)
+					go nodeReady.watch(gen, apiPort, startToken, exited)
 					err = cmd.Wait()
 					close(exited)
 					nodeReady.down()
@@ -1607,6 +1634,29 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 				case <-nodeAPIStop:
 					return
 				default:
+				}
+				// Failed instrumentation is not restarted: krate serve/start
+				// stops, dev waits for the file to be rebuilt.
+				if instrumentationArg != "" && exitStatus(err) == instrumentationExitCode {
+					d, stack := instrumentationFailure(root, hub != nil)
+					nodeReady.fail(d.Message)
+					fmt.Fprintf(os.Stderr, "  %sx%s %s\n", cRed, cReset, strings.ReplaceAll(diag.FormatDiagnostics([]error{d}), "\n", "\n    "))
+					if hub == nil {
+						select {
+						case startupFailed <- d:
+						default:
+						}
+						return
+					}
+					// The hub directly: this can happen before the dev server
+					// attached it for crash reports.
+					hub.PublishServerError("Instrumentation", buildCrashError("Instrumentation", d.Message, stack, RecentLogLines(crashLogLines)))
+					if !waitForFileChange(instrumentationBundlePath(root), nodeAPIStop) {
+						return
+					}
+					printf("  %s*%s instrumentation rebuilt; starting the Node API sidecar again\n", cCyan, cReset)
+					delay = 100 * time.Millisecond
+					continue
 				}
 				if time.Since(started) > 10*time.Second {
 					delay = 100 * time.Millisecond
@@ -2397,12 +2447,6 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	var redirectRewriteHandler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 
-		// trailingSlash "never": /x/ goes to /x, judged on the requested URL
-		// before a rewrite maps it onto another internal path.
-		if redirectToSlashless(slashMode, w, r) {
-			return
-		}
-
 		// Check rewrites (internal path mapping, no redirect)
 		for _, rw := range rewriteRules {
 			vals, mods, ok := rw.match(r, path)
@@ -2552,6 +2596,10 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		// The sidecar listens only after instrumentation's register() resolved.
 		if instrumentationArg != "" && nodeReady != nil && !nodeReady.up.Load() {
 			w.WriteHeader(http.StatusServiceUnavailable)
+			if nodeReady.failure() != "" {
+				_, _ = io.WriteString(w, "sidecar-failed\n")
+				return
+			}
 			_, _ = io.WriteString(w, "instrumentation-pending\n")
 			return
 		}
@@ -2568,7 +2616,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	proxyTrust.Store(cfg.Server.TrustProxy)
 	flashSecret.Store(flashSecretFor(revalHost.secret))
 	proxyHops.Store(int32(cfg.Server.TrustedProxies))
-	var rootHandler http.Handler = requestIDMiddleware(forwardedHeadersMiddleware(cfg.Server.TrustProxy, basePathMiddleware(cfg.BaseURLPath(), cfg.Redirects, securityHeadersMiddleware(cfg, customHeadersMiddleware(cfg.Headers, corsMiddleware(cfg, panicRecoveryMiddleware(Logger, configRedirectMiddleware(insideRedirects, devMux))))))))
+	var rootHandler http.Handler = requestIDMiddleware(forwardedHeadersMiddleware(cfg.Server.TrustProxy, basePathMiddleware(cfg.BaseURLPath(), cfg.Redirects, securityHeadersMiddleware(cfg, customHeadersMiddleware(cfg.Headers, corsMiddleware(cfg, panicRecoveryMiddleware(Logger, frontRedirects(slashMode, insideRedirects, devMux))))))))
 
 	listenerOwned = true
 	addr := listener.Addr().(*net.TCPAddr)
@@ -2707,6 +2755,16 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
 		}
+		return err
+	case err := <-startupFailed:
+		// Requests already answer 503 at once; close and report.
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		if httpServer.Shutdown(ctx) != nil {
+			_ = httpServer.Close()
+		}
+		cancel()
+		<-serveErr
+		stopSidecars()
 		return err
 	case <-restartCh:
 		// A config change restarts the dev server in place: close this server,

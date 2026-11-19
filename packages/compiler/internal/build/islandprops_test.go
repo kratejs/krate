@@ -9,9 +9,11 @@ import (
 	"testing"
 )
 
-// islandPropsPayloadRe matches the serialized props of an island: the JSON
-// script before a <krate-island>, or the older data-props attribute.
-var islandPropsPayloadRe = regexp.MustCompile(`(?s)<script type="application/json" data-krate-props>.*?</script>|data-props="[^"]*"`)
+// islandPropsPayloadRe matches the serialized props of an island: the
+// opening <!--krate-island:{...}--> comment of a Preact island, the JSON
+// script before a real-React <krate-island>, or the older data-props
+// attribute.
+var islandPropsPayloadRe = regexp.MustCompile(`(?s)<!--krate-island:.*?-->|<script type="application/json" data-krate-props>.*?</script>|data-props="[^"]*"`)
 
 // islandPropsProject is a layout that wraps the page in a "use client"
 // provider owning a context, and a page whose client island sits two server

@@ -206,7 +206,7 @@ console.log(JSON.stringify(results));
 			"/history": {301, "./history/"}, "/history/": {200, ""}, "/about": {307, "/about/"}, "/about/": {200, ""},
 		}},
 		{"never", "drop-trailing-slash", "drop-trailing-slash", map[string][2]interface{}{
-			"/history": {200, ""}, "/history/": {301, "../history"}, "/about": {200, ""}, "/about/": {301, "../about"},
+			"/history": {200, ""}, "/history/": {308, "/history"}, "/about": {200, ""}, "/about/": {308, "/about"},
 		}},
 		{"ignore", "none", "none", map[string][2]interface{}{
 			"/history": {200, ""}, "/history/": {200, ""}, "/about": {200, ""}, "/about/": {200, ""},
@@ -258,7 +258,7 @@ console.log(JSON.stringify(results));
 					r := got[p+kind]
 					redirect := (c.mode == "always" && !slashed) || (c.mode == "never" && slashed)
 					if redirect {
-						if r.Status != 301 || r.Loc == "" {
+						if want := map[string]int{"always": 301, "never": 308}[c.mode]; r.Status != want || r.Loc == "" {
 							t.Errorf("%s %s%s: got %d %q, want the slash redirect", c.mode, p, kind, r.Status, r.Loc)
 						}
 						continue

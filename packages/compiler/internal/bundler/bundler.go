@@ -818,6 +818,10 @@ func (b *Bundler) resolveAssetModule(path, abs string, mtime time.Time, size int
 	return nil
 }
 
+// testAfterProgramMiss, when set by a test, runs after a bundle missed abs in
+// the module cache and before it claims the parse.
+var testAfterProgramMiss func(abs string)
+
 func (b *Bundler) resolveTSXModule(path, abs string, mtime time.Time, size int64, statOK bool, isEntry bool) error {
 	// Entry modules are never cached: pages/layouts mutate their own entry AST
 	// (plugins may replace it; universal transforms run in place), so sharing an
@@ -838,7 +842,16 @@ func (b *Bundler) resolveTSXModule(path, abs string, mtime time.Time, size int64
 			}
 			return nil
 		}
+		if testAfterProgramMiss != nil {
+			testAfterProgramMiss(abs)
+		}
 		if end := b.cache.beginParse(abs); end != nil {
+			// Another bundle can have parsed abs and ended its claim between
+			// the lookup above and this claim: look again before parsing.
+			if _, ok := b.cache.getProgram(abs, mtime, size); ok {
+				end()
+				continue
+			}
 			endParse = end
 			break
 		}

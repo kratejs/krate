@@ -1,6 +1,7 @@
 // Unset process.env reads in Preact and real-React islands (see
 // TestBrowserClientProcessEnv).
 import { chromium, firefox, webkit } from "playwright";
+import { waitHydrated } from "./island_helpers.mjs";
 
 const browserType = { chromium, firefox, webkit }[process.argv[2] || "chromium"];
 const base = process.argv[3];
@@ -14,8 +15,8 @@ try {
     if (m.type() === "error") errors.push(m.text());
   });
   await page.goto(base + "/");
-  await page.waitForSelector("[data-krate-island-hydrated] #cv", { timeout: 15000 });
-  await page.waitForSelector("[data-krate-island-hydrated] #plain", { timeout: 15000 });
+  await waitHydrated(page, "#cv");
+  await waitHydrated(page, "#plain");
   const real = await page.textContent("#real");
   const plain = await page.textContent("#plain");
   if (real !== "x-fallback|foo-fallback|dyn-fallback|yval|lib-fallback|no-process") failures.push("real-React island read: " + real);

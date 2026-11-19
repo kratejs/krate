@@ -258,6 +258,9 @@ func writeRuntimeChunk(outDir string, shouldMinify bool, projectRoot string, opt
 	// kbind* helpers) so per-page hydration scripts only contain their own
 	// signals and binding calls instead of duplicating this boilerplate.
 	runtime += renderer.HydrationBootstrapJS
+	if opts.SPA {
+		runtime += routerStartJS
+	}
 	if opts.Compat {
 		runtime += renderer.CompatBootstrapJS
 	}
@@ -283,6 +286,16 @@ func writeRuntimeChunk(outDir string, shouldMinify bool, projectRoot string, opt
 
 	return filename, nil
 }
+
+// routerStartJS starts the SPA router on every page that loads the runtime,
+// once the document (and its page script, which starts it itself after
+// hydration) has run. A page with islands only has no page script, so without
+// it the router never started: links loaded full documents and an island's
+// router.push fell back to location. The registered router marks a started
+// one, so the router starts exactly once.
+const routerStartJS = `
+(function(){if(typeof document==="undefined"||typeof initRouter!=="function")return;var k=Symbol.for("krate.router");function s(){if(!globalThis[k])initRouter()}if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",s,{once:true});else s()})();
+`
 
 // devFallbackJS is written as chunks/krate-dev.js when the @krate/runtime dev
 // bundle is unavailable (e.g. a stripped install), so dev mode still gets

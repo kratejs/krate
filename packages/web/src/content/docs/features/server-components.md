@@ -84,9 +84,14 @@ synchronous `renderToString` throws if it meets a Promise.
 
 A module that starts with `"use client"` is a client boundary. When a server
 component renders one of its exports, the server renders its initial HTML
-into a `<krate-island>` element, with the serialized props in a
-`<script type="application/json">` just before it, and a small per-module
-chunk hydrates it in the browser:
+between two comments, `<!--krate-island:{...}-->` (the module, the export and
+the serialized props) and `<!--/krate-island-->`, and a small per-module chunk
+hydrates those nodes in place in the browser. The island adds no element of its
+own, so the component's root elements are children of the server element
+around it, as in React: child combinators and sibling selectors such as
+Tailwind's `space-y-*`, `divide-*` and `*:` style them as they would in Next.js.
+`window.__krateIslands` lists the islands of the page with their status
+(`loading`, `hydrated`, `error`):
 
 ```tsx
 // src/components/Counter.tsx
@@ -203,8 +208,8 @@ export default async function Settings() {
 
 - A component without state or effects (an icon) renders to plain HTML and
   ships no JavaScript, in any tier.
-- A component with state or effects (a checkbox, a dialog) becomes a
-  `<krate-island>` that hydrates in the browser, like a `"use client"`
+- A component with state or effects (a checkbox, a dialog) becomes an
+  island that hydrates in the browser, like a `"use client"`
   component. Its chunk is built from just the exports the page uses, so a
   barrel such as lucide-react does not pull in every icon.
 - Parts of one compound component keep their context: `Dialog.Trigger` and

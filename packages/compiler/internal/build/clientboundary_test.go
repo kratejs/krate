@@ -367,7 +367,7 @@ export default function Settings() {
 		t.Fatalf("serve: %v", err)
 	}
 	status, _, html := getBody(t, base+"/settings/")
-	if status != 200 || !strings.Contains(html, `<div id="shell">`) || !strings.Contains(html, "<krate-island") || !regexp.MustCompile(`Count: (<!--[^>]*-->)*5`).MatchString(html) {
+	if status != 200 || !strings.Contains(html, `<div id="shell">`) || !strings.Contains(html, "<!--krate-island:") || !regexp.MustCompile(`Count: (<!--[^>]*-->)*5`).MatchString(html) {
 		t.Fatalf("status %d, expected the layout around a server-rendered island with its initial state:\n%s", status, html)
 	}
 	chunks, _ := filepath.Glob(filepath.Join(b.Cfg.OutDir, "chunks", "*"))
@@ -498,7 +498,7 @@ export default async function Home() {
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
-	for _, want := range []string{`id="ds"`, "drawn-function", "<krate-island", "<b>Count: </b>5"} {
+	for _, want := range []string{`id="ds"`, "drawn-function", "<!--krate-island:", "<b>Count: </b>5"} {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("rendered page misses %q:\n%s", want, body)
 		}

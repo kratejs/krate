@@ -54,7 +54,14 @@ type preStmt struct {
 // piece needs can be copied into krate.config.ts.
 type preambleSource struct {
 	stmts []preStmt
+	// nextTypes maps a local name to the type it names in a dropped
+	// `import type` from next.
+	nextTypes map[string]string
 }
+
+// krateTypeFor maps a next type a carried statement may annotate with to the
+// @krate/core type of the same config.
+var krateTypeFor = map[string]string{"NextConfig": "KrateConfig"}
 
 // droppedImportSources are imports that krate.config.ts must not carry: Next
 // itself (types only) and @next/env (loadEnvConfig is mapped to envDir).
@@ -66,7 +73,17 @@ var (
 	typeImportRe  = regexp.MustCompile(`^\s*import\s+type\b`)
 	typeOnlyDecl  = regexp.MustCompile(`^\s*(?:export\s+)?(?:declare\s+|type\s+\w|interface\s+\w)`)
 	loadEnvCallRe = regexp.MustCompile(`\bloadEnvConfig\b`)
+	// nextTypeImportRe matches `import type { A, B as C } from '...'`; the
+	// parser drops type-only imports from the AST.
+	nextTypeImportRe = regexp.MustCompile(`(?m)^\s*import\s+type\s*\{([^}]*)\}\s*from\s*['"]([^'"]+)['"]`)
 )
+
+func (ps *preambleSource) addNextType(local, remote string) {
+	if ps.nextTypes == nil {
+		ps.nextTypes = map[string]string{}
+	}
+	ps.nextTypes[local] = remote
+}
 
 // newPreambleSource splits prog's top-level statements. A statement runs from
 // its start to the next statement's start; the comment lines just above a
@@ -86,6 +103,20 @@ func newPreambleSource(src string, prog *ast.Program, configOffset int) *preambl
 		}
 	}
 	ps := &preambleSource{}
+	for _, m := range nextTypeImportRe.FindAllStringSubmatch(src, -1) {
+		if !droppedImportSource(m[2]) {
+			continue
+		}
+		for _, spec := range strings.Split(m[1], ",") {
+			f := strings.Fields(strings.TrimPrefix(strings.TrimSpace(spec), "type "))
+			switch {
+			case len(f) == 1:
+				ps.addNextType(f[0], f[0])
+			case len(f) == 3 && f[1] == "as":
+				ps.addNextType(f[2], f[0])
+			}
+		}
+	}
 	carry := ""
 	prevRest := ""
 	for i, s := range body {
@@ -316,6 +347,7 @@ func (ps *preambleSource) build(texts []string) string {
 			rest.WriteString(st.text)
 		}
 	}
+	imports = append(imports, ps.krateTypeImports(include)...)
 	var parts []string
 	if len(imports) > 0 {
 		parts = append(parts, strings.Join(imports, "\n"))
@@ -324,6 +356,41 @@ func (ps *preambleSource) build(texts []string) string {
 		parts = append(parts, rest.String())
 	}
 	return strings.Join(parts, "\n\n")
+}
+
+// krateTypeImports returns `import type` lines for the next types the
+// included statements annotate with: NextConfig becomes KrateConfig, a type
+// with no Krate counterpart becomes any.
+func (ps *preambleSource) krateTypeImports(include []bool) []string {
+	used := map[string]bool{}
+	for i, st := range ps.stmts {
+		if !include[i] {
+			continue
+		}
+		for local := range ps.nextTypes {
+			if st.idents[local] {
+				used[local] = true
+			}
+		}
+	}
+	locals := make([]string, 0, len(used))
+	for local := range used {
+		locals = append(locals, local)
+	}
+	sort.Strings(locals)
+	var out []string
+	for _, local := range locals {
+		if krate, ok := krateTypeFor[ps.nextTypes[local]]; ok {
+			spec := krate
+			if krate != local {
+				spec = krate + " as " + local
+			}
+			out = append(out, "import type { "+spec+" } from '@krate/core';")
+			continue
+		}
+		out = append(out, "type "+local+" = any; // a next type with no Krate counterpart")
+	}
+	return out
 }
 
 // names returns every name the preamble build(texts) binds, for conflict

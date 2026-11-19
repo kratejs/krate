@@ -881,16 +881,20 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     return notFoundText(rs, true);
   }
 
-  /** trailingSlash "never": a page URL ending in a slash redirects to the slashless URL. */
-  function redirectToSlashless(rs: ReqState, requested: string = rs.path): Response | null {
-    const p = requested;
-    if (slashMode !== "never" || p.length < 2 || !p.endsWith("/") || notFoundPageURL(p)) return null;
-    if (rs.method !== "GET" && rs.method !== "HEAD") return null;
-    const trimmed = p.replace(/\/+$/, "");
-    if (trimmed === "" || isFileLikePath(trimmed) || trimmed === "/api" || trimmed.startsWith("/api/") || trimmed.startsWith("/__krate")) return null;
-    // "../" keeps a segment such as "ftp:3232235777" from parsing as an absolute URL.
-    rs.res.set("Location", "../" + baseName(trimmed) + (rs.search || ""));
-    return finish(rs, 301, null);
+  /**
+   * trailingSlash "never": a path ending in "/" (pages, files, API routes, any
+   * method) gets a 308 to the slashless path before config redirects and
+   * middleware, as in Next (mirrors slashlessTarget in serve_pages.go). The
+   * not-found page's URLs and internal routes are left alone.
+   */
+  function redirectToSlashless(rs: ReqState): Response | null {
+    const p = rs.path;
+    if (slashMode !== "never" || p.length < 2 || !p.endsWith("/") || p.startsWith("/__krate") || p === "/healthz" || p === "/readyz" || notFoundPageURL(p)) return null;
+    // "//evil.example/" must not become a scheme-relative Location.
+    const target = "/" + rs.rawPath.replace(/\/+$/, "").replace(/^[\/\\]+/, "");
+    if (target === "/") return null;
+    rs.res.set("Location", target + (rs.search || ""));
+    return finish(rs, 308, null);
   }
 
   function redirectToCanonicalSlash(rs: ReqState): Response | null {
@@ -2197,19 +2201,18 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
 
   async function pageChain(rs: ReqState): Promise<Response> {
     return flashNotice(rs, async (rs2) => {
-      const requested = rs2.path;
       const blocked = await runMiddleware(rs2);
       if (blocked) return blocked;
-      // Checked on the requested URL, before a rewrite changes the internal path.
-      const slashless = redirectToSlashless(rs2, requested);
-      if (slashless) return slashless;
       return redirectRewriteHandler(rs2);
     });
   }
 
   async function mux(rs: ReqState): Promise<Response> {
     const p = rs.path;
-    // Config redirects answer first: before middleware, and for /api too.
+    // trailingSlash "never", then config redirects, answer first: before
+    // middleware, and for /api too.
+    const slashless = redirectToSlashless(rs);
+    if (slashless) return slashless;
     if (!(p.startsWith("/__krate/") || p === "/healthz" || p === "/readyz")) {
       const redirected = configRedirect(rs, p, insideRedirects);
       if (redirected) return redirected;

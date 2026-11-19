@@ -915,11 +915,30 @@ function htmlSlot(ctx: FlightCtx, node: unknown): Record<string, string> {
   return slot;
 }
 
-// propsScript is the JSON script that carries an island's props, placed just
-// before its <krate-island>. Every "<" is escaped, so no "</script" or "<!--"
-// in a value can end the script or open a comment.
+// propsScript is the JSON script that carries a real-React island's props,
+// placed just before its <krate-island>. Every "<" is escaped, so no
+// "</script" or "<!--" in a value can end the script or open a comment.
 function propsScript(data: unknown): string {
   return `<script type="application/json" data-krate-props>${JSON.stringify(data).replace(/</g, "\\u003c")}</script>`;
+}
+
+// ISLAND_OPEN starts the comment that opens a Preact island; ISLAND_CLOSE is
+// the comment that ends it. The island's HTML sits between them with no
+// element of its own, so child combinators and sibling selectors of the
+// parent (space-y-*, divide-*, > :first-child) see the component's root
+// nodes, as in React.
+export const ISLAND_OPEN = "krate-island:";
+export const ISLAND_CLOSE = "<!--/krate-island-->";
+
+// islandOpen is the opening comment of a Preact island: its module, export,
+// chunk and props as JSON. "<", ">" and "--" are escaped (they occur only in
+// strings), so no value can end the comment or open another one.
+function islandOpen(moduleId: string, exportName: string, src: string, props: unknown): string {
+  const json = JSON.stringify({ m: moduleId, e: exportName, s: src, p: props })
+    .replace(/</g, "\\u003c")
+    .replace(/>/g, "\\u003e")
+    .replace(/--/g, "-\\u002d");
+  return `<!--${ISLAND_OPEN}${json}-->`;
 }
 
 const warnedUncloneable = new Set<string>();
@@ -964,9 +983,12 @@ function wrapClientNamespace(
  * clientBoundary wraps an export of a `"use client"` module, or a component
  * of a React package, for the server bundle of a page that renders server
  * components. The server renders the component's initial HTML (render) and,
- * when it hydrates, puts it in a <krate-island> marker preceded by a JSON
- * script with its serialized props; the per-module client chunk at src
- * hydrates it in the browser. A component without state or effects (hydrate
+ * when it hydrates, puts it between <!--krate-island:{...}--> (module,
+ * export, chunk and serialized props) and <!--/krate-island--> with no
+ * element around it; the per-module client chunk at src hydrates those nodes
+ * in the browser. A real-React island (flight) gets a <krate-island> element
+ * instead, preceded by a JSON script with its props, because createRoot needs
+ * a container. A component without state or effects (hydrate
  * false, an icon) is plain HTML. Children are rendered on the server into the
  * component's HTML and adopted there by the browser (see DeferredSlot), or,
  * when they hold client components of their own, sent as a tree that keeps
@@ -1028,6 +1050,10 @@ export function clientBoundary(
       html = html.split(s.token).join(hydrates ? s.token + rendered[i] + slotClose(s.id) : rendered[i]);
     });
     if (!hydrates) return raw(html);
+    // A real-React island (flight) mounts with createRoot, which needs an
+    // element of its own; a Preact island hydrates the nodes between its two
+    // comments in place.
+    if (!flight) return raw(islandOpen(moduleId, exportName, src, data) + html + ISLAND_CLOSE);
     return raw(
       propsScript(data) +
         `<krate-island style="display:contents" data-module="${escapeHTML(moduleId)}" data-export="${escapeHTML(exportName)}" ` +

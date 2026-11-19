@@ -300,6 +300,30 @@ func externalNodeModulesPluginDirs(outDirs []string, memo *resolveMemo, mixed *a
 		Name: "krate-external-node-modules",
 		Setup: func(b api.PluginBuild) {
 			jseval.RegisterCloudflareImports(b)
+			interop := cjsInteropApplies(b)
+			var det *cjsDetector
+			if interop {
+				registerCJSInterop(b)
+				det = &cjsDetector{}
+			}
+			// external keeps spec as an import of the output, through the
+			// CommonJS shim when Node would load file as CommonJS and the
+			// import is a static import statement (a dynamic import or a
+			// require stays as it is: the shim would load it eagerly).
+			external := func(args api.OnResolveArgs, spec, file string, byFile bool) api.OnResolveResult {
+				if interop && args.Kind == api.ResolveJSImportStatement {
+					cjs := false
+					if byFile {
+						cjs = det.fileIsCommonJS(file)
+					} else if root := packageRootOf(file); root != "" {
+						cjs = det.packageImportIsCommonJS(root, strings.TrimPrefix(spec, packageName(spec)))
+					}
+					if cjs {
+						return cjsInteropResult(spec)
+					}
+				}
+				return api.OnResolveResult{Path: spec, External: true}
+			}
 			// Krate renders without react-dom: the resource hints and flushSync
 			// of its server module stand in for it.
 			b.OnResolve(api.OnResolveOptions{Filter: `^react-dom$`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
@@ -341,10 +365,10 @@ func externalNodeModulesPluginDirs(outDirs []string, memo *resolveMemo, mixed *a
 							v, _ = visible.LoadOrStore(root, vis)
 						}
 						if !v.(bool) {
-							return api.OnResolveResult{Path: fileURL(r.path), External: true}, nil
+							return external(args, fileURL(r.path), r.path, true), nil
 						}
 					}
-					return api.OnResolveResult{Path: args.Path, External: true}, nil
+					return external(args, args.Path, r.path, false), nil
 				}
 				return api.OnResolveResult{Path: r.path, Namespace: r.namespace}, nil
 			})
@@ -406,7 +430,7 @@ func buildExternalizingNativeSources(opts api.BuildOptions, extra []string) (api
 func externalizingNativeOptions(opts api.BuildOptions, externals []string, found *nativeAddons) api.BuildOptions {
 	o := opts
 	o.External = append(append([]string(nil), opts.External...), externalPatterns(externals)...)
-	o.Plugins = append(append([]api.Plugin(nil), opts.Plugins...), fileURLImportPlugin(externals, found), nativeAddonPlugin(found, func(pkg, file string) string {
+	o.Plugins = append(append([]api.Plugin{cjsExternalInteropPlugin(externals)}, opts.Plugins...), fileURLImportPlugin(externals, found), nativeAddonPlugin(found, func(pkg, file string) string {
 		if pkg == "" {
 			return fmt.Sprintf("%s is a native addon in your own sources and cannot be bundled; load it with createRequire(import.meta.url) from a package listed in serverExternalPackages", file)
 		}

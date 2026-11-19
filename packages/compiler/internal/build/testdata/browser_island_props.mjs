@@ -3,6 +3,7 @@
 // keeps working when the provider re-renders and hides then shows its
 // server children: the provider adopts the server-rendered nodes in place.
 import { chromium, firefox, webkit } from "playwright";
+import { waitHydrated } from "./island_helpers.mjs";
 
 const browserType = { chromium, firefox, webkit }[process.argv[2] || "chromium"];
 const base = process.argv[3];
@@ -20,7 +21,7 @@ try {
   });
   await page.goto(base + "/");
   try {
-    await page.waitForSelector("[data-krate-island-hydrated] [data-krate-island-hydrated] #blob", { timeout: 15000 });
+    await waitHydrated(page, "#blob", { depth: 2 });
   } catch (e) {
     failures.push("the nested island did not hydrate");
   }

@@ -2,6 +2,7 @@
 // than children: waits for hydration, toggles state and clicks a client
 // component nested in a slot, and reports what is on the page as JSON.
 import { chromium, firefox, webkit } from "playwright";
+import { waitHydrated } from "./island_helpers.mjs";
 
 const [url, browserName = "chromium"] = process.argv.slice(2);
 const browser = await { chromium, firefox, webkit }[browserName].launch();
@@ -13,7 +14,7 @@ try {
     if (m.type() === "error") errors.push(m.text());
   });
   await page.goto(url);
-  await page.waitForSelector("krate-island[data-krate-island-hydrated]", { timeout: 15000 });
+  await waitHydrated(page);
   await page.click("#toggle");
   await page.waitForFunction(() => document.querySelector("#toggle").textContent === "open");
   await page.waitForSelector("#like[data-ready]", { timeout: 15000 }).catch(() => {});

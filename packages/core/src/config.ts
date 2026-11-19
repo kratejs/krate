@@ -172,6 +172,27 @@ export interface HighlightConfig {
 
 export type RuntimeName = "quickjs" | "node" | "bun" | "deno";
 
+/** Shared cache store (`cache`). */
+export interface CacheConfig {
+  /**
+   * "memory" (default), "redis", or the path or package of a module that
+   * default-exports a cache adapter factory.
+   */
+  adapter?: string;
+  /** Store address, e.g. `process.env.REDIS_URL`. */
+  url?: string;
+  /** Environment variable that holds the URL at run time. */
+  urlEnv?: string;
+  /** Key namespace. Default "krate:". */
+  prefix?: string;
+  /** Bound on one cache call in ms. Default 250. */
+  timeoutMs?: number;
+  /** How long ISR entries stay in the store. Default 7 days. */
+  ttlSeconds?: number;
+  /** Passed to a custom adapter factory. */
+  options?: Record<string, unknown>;
+}
+
 export interface SSRConfig {
   rendererPort?: number;
   timeout?: number;
@@ -179,6 +200,20 @@ export interface SSRConfig {
   middlewareRuntime?: RuntimeName;
   apiRuntime?: RuntimeName;
   ssrRuntime?: "quickjs" | "node" | "bun" | "deno";
+  /**
+   * Size of the embedded QuickJS API worker pool; module state persists
+   * across requests. Default min(CPUs, 8). Ignored with `apiIsolation`.
+   */
+  apiWorkers?: number;
+  /** Run every API request in a fresh VM (no shared module state). Default false. */
+  apiIsolation?: boolean;
+  /**
+   * Node worker processes the API sidecar (node/bun/deno runtimes) forks to
+   * use more than one CPU. Default min(CPUs, 8).
+   */
+  nodeWorkers?: number;
+  /** SSR renderer processes (node cluster). Default 1. Caches are per worker. */
+  rendererWorkers?: number;
   /** Force ALL pages to render in streaming SSR mode (Suspense-based). */
   streaming?: boolean;
 }
@@ -643,11 +678,68 @@ export interface NativeConfig {
    * otherwise. Open them with F12 or Ctrl+Shift+I (Cmd+Option+I on macOS).
    */
   debug?: boolean;
+  /** File types the app opens (document types, MSIX/NSIS associations, MimeType entries). */
+  fileAssociations?: NativeFileAssociation[];
+  /**
+   * Background worker processes by name, started from pages and host code
+   * with @krate/app/worker.
+   */
+  workers?: Record<string, NativeWorker>;
+  /** Unpacked browser extension directories packaged with the app. */
+  extensions?: string[];
+  /**
+   * Remote debugging endpoint (CDP on WebView2, the WebKit inspector
+   * elsewhere). Runs in `krate native dev` and in builds with `debug`.
+   */
+  automation?: { port?: number };
+}
+
+/** One file type a native app opens. */
+export interface NativeFileAssociation {
+  /** Extensions without the dot: ["md", "markdown"]. */
+  ext: string[];
+  /** Display name. Default "<EXT> file". */
+  name?: string;
+  /** Media type. Default application/x-<app>-<first extension>. */
+  mime?: string;
+  /** Default "editor". */
+  role?: "editor" | "viewer";
+  /** PNG icon for files of this type. Default: the app icon. */
+  icon?: string;
+}
+
+/** A native background worker: set one of `entry`, `go` or `exec`. */
+export interface NativeWorker {
+  /** TypeScript or JavaScript module run on `runtime`. */
+  entry?: string;
+  /** Go main package, such as "./cmd/indexer". */
+  go?: string;
+  /** Prebuilt executable that serves the host child protocol. */
+  exec?: string;
+  /** Runtime for `entry`. Default "node". */
+  runtime?: "node" | "bun" | "deno";
+  args?: string[];
+  /** A subset of the app's permissions. Empty means none. */
+  permissions?: NativePermission[];
+  /** Restart policy. Default: never restart. */
+  restart?: {
+    policy?: "never" | "onFailure" | "always";
+    /** Restarts in a row allowed. Default 5. */
+    max?: number;
+    /** Delay before the first restart in ms. Default 200. */
+    backoffMs?: number;
+  };
+  /** Start one instance when the app starts. */
+  autostart?: boolean;
 }
 
 /** Deploy adapter selection + options for `krate deploy`. */
 export interface DeployConfig {
-  target?: "netlify" | "vercel" | "cloudflare" | "gh-pages";
+  /**
+   * The adapter. `"node"` writes a standalone server (`.krate/server/server.mjs`),
+   * `"docker"` adds a Dockerfile around it.
+   */
+  target?: "netlify" | "vercel" | "cloudflare" | "gh-pages" | "docker" | "node";
   /** Adapter-specific options (e.g. vercel: cleanUrls, trailingSlash). */
   options?: Record<string, string>;
   /**
@@ -800,6 +892,8 @@ export interface DceConfig {
 export interface FontsConfig {
   preload?: boolean;
   display?: string;
+  /** Fonts preloaded per page. Default 4. */
+  preloadLimit?: number;
 }
 
 export interface GoDep {
@@ -1012,6 +1106,8 @@ export interface KrateConfig {
   i18n?: {
     defaultLocale?: string;
     locales?: string[];
+    /** Display label per locale, e.g. { fr: "Francais" }. */
+    localeLabels?: Record<string, string>;
     routing?: "prefix";
   };
   /**
@@ -1021,6 +1117,8 @@ export interface KrateConfig {
   versions?: {
     current?: string;
     versions?: string[];
+    /** Display label per version, e.g. { v2: "Latest" }. */
+    labels?: Record<string, string>;
     banner?: boolean;
   };
   devServer?: DevServerConfig;
@@ -1122,6 +1220,39 @@ export interface KrateConfig {
    * ```
    */
   content?: ContentConfig;
+
+  /**
+   * Shared cache store for ISR pages and `cache()` entries. Default: process
+   * memory.
+   */
+  cache?: CacheConfig;
+  /** Islands that run on real React instead of Preact. */
+  react?: {
+    /**
+     * npm packages that need real react and react-dom (React reconciler
+     * libraries such as @react-three/fiber or react-konva).
+     */
+    islands?: string[];
+  };
+  /**
+   * npm packages server bundles load from node_modules at run time instead of
+   * bundling (like Next's serverExternalPackages).
+   */
+  serverExternalPackages?: string[];
+  /**
+   * Route key (or "*") to globs of project files copied into the node deploy
+   * output next to server.mjs, for files import tracing cannot see.
+   */
+  outputFileTracingIncludes?: Record<string, string[]>;
+  /** Directory the node deploy output mirrors (the monorepo root). */
+  outputFileTracingRoot?: string;
+  /** Directory the .env files are read from. Default: the project root. */
+  envDir?: string;
+  /**
+   * Prefixes of environment variables inlined into client code. Default
+   * "KRATE_PUBLIC_". Each must end in "_".
+   */
+  envPrefix?: string | string[];
 
   /** Optional validation function called at build time with the loaded config. */
   validate?: (config: KrateConfig) => void | Promise<void>;

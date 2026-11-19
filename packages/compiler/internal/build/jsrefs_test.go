@@ -78,6 +78,8 @@ func TestScanPageMarkup(t *testing.T) {
 		{name: "formaction", html: `<button formaction="/base/__krate/action/a2">b</button>`, actions: true},
 		{name: "template form", html: `<template><form data-krate-action></form></template>`, actions: true},
 		{name: "island", html: `<krate-island data-id="x"></krate-island>`, island: true},
+		{name: "preact island", html: `<div><!--krate-island:{"m":"a","e":"default","s":"/chunks/a.js","p":{}}--><p>x</p><!--/krate-island--></div>`, island: true},
+		{name: "other comment", html: `<!-- krate-island: a note -->`},
 		{name: "scripts", html: `<script>cn()</script><script type="module">x()</script><script type="application/ld+json">{"a":"cn"}</script><script src="/a.js"></script><textarea><script>no()</script></textarea>`, scripts: 2},
 	}
 	for _, c := range cases {

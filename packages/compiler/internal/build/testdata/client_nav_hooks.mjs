@@ -2,6 +2,7 @@
 // marks the active link, follows client-side navigation, and the filters read
 // the query. Prints the result as JSON on the last line.
 import { chromium, firefox, webkit } from "playwright";
+import { waitHydrated } from "./island_helpers.mjs";
 
 const [base, browserName = "chromium"] = process.argv.slice(2);
 const browser = await { chromium, firefox, webkit }[browserName].launch();
@@ -15,7 +16,7 @@ try {
   const current = () =>
     page.evaluate(() => Array.from(document.querySelectorAll("#nav a[aria-current]")).map((a) => a.id).join(","));
   await page.goto(base + "/");
-  await page.waitForSelector("krate-island[data-krate-island-hydrated]", { timeout: 15000 });
+  await waitHydrated(page);
   const home = await current();
   await page.click("#nav-store");
   await page.waitForFunction(() => document.querySelector("#nav-store")?.hasAttribute("aria-current"));
@@ -27,7 +28,7 @@ try {
   const q1 = await page.textContent("#q");
   const router = await page.getAttribute("#filters", "data-router");
   await page.goto(base + "/templates/?q=direct");
-  await page.waitForSelector("krate-island[data-krate-island-hydrated]", { timeout: 15000 });
+  await waitHydrated(page);
   const q2 = await page.textContent("#q");
   console.log(JSON.stringify({ home, store, templates, q1, q2, router, errors }));
 } finally {
