@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { distTag } from './release-tag.mjs';
 import { missingPackages, publishAll } from './publish-packages.mjs';
-import { bootstrapVersion, placeholderManifest, planTrust, trustsWorkflow } from './npm-trust.mjs';
+import { bootstrapVersion, needsOTP, placeholderManifest, planTrust, trustsWorkflow } from './npm-trust.mjs';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { nativeTemplate, nativeTemplateKrateDep, npmPackageNames, pinNativeTemplate, releasePackages, trustedPublisher } from './release-packages.mjs';
@@ -118,4 +118,9 @@ test('the bootstrap placeholder names the repository provenance checks against',
   const m = placeholderManifest('@krate/new');
   assert.equal(m.version, bootstrapVersion);
   assert.match(m.repository.url, new RegExp(`github\\.com/${trustedPublisher.repository}\\.git$`));
+});
+
+test('needsOTP recognises npm asking for two-factor authentication', () => {
+  assert.ok(needsOTP('npm error code EOTP\nnpm error This operation requires a one-time password.'));
+  assert.ok(!needsOTP('npm error code E404\nnpm error 404 Not Found'));
 });
