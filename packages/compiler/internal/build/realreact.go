@@ -384,11 +384,28 @@ export async function mount(el) {
   await Promise.all(__krateRootRefs(raw).map(function (r) {
     return import(r.s).then(function (m) { loaded[r.m + "#" + r.e] = m.component(r.e); });
   }));
-  var props = __krateRevive(raw, React.createElement, __krateCallAction, function (m, e) { return loaded[m + "#" + e]; });
   var root = createRoot(el);
-  root.render(__krateInScope(el, React.createElement(C, props)));
-  (globalThis.__krate_island_cleanups ||= []).push(function () { root.unmount(); });
+  function show(raw) {
+    var props = __krateRevive(raw, React.createElement, __krateCallAction, function (m, e) { return loaded[m + "#" + e]; });
+    root.render(__krateInScope(el, React.createElement(C, props)));
+  }
+  show(raw);
   el.setAttribute("data-krate-island-hydrated", "");
+  // The island's handle (see clientIslandLoaderJS): the router re-renders the
+  // same root with new server props, or unmounts it when its swap removes it.
+  var current = raw;
+  return {
+    update: function (next) {
+      delete next["client:fallback"];
+      current = next;
+      var miss = __krateRootRefs(next).filter(function (r) { return !loaded[r.m + "#" + r.e]; });
+      if (!miss.length) return void show(next);
+      return Promise.all(miss.map(function (r) {
+        return import(r.s).then(function (m) { loaded[r.m + "#" + r.e] = m.component(r.e); });
+      })).then(function () { if (current === next) show(next); });
+    },
+    unmount: function () { root.unmount(); },
+  };
 }
 `
 

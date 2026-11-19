@@ -190,7 +190,12 @@ function __krateRangeRoot(island) {
   };
   return root;
 }
-function __krateServerSlots(island) {
+function __krateNodesHTML(nodes) {
+  // Must match nodesHTML in the runtime's island-swap.ts.
+  for (var s = "", i = 0; i < nodes.length; i++) { var n = nodes[i]; s += n.nodeType === 1 ? n.outerHTML : n.nodeType === 8 ? "<!--" + n.data + "-->" : n.textContent || ""; }
+  return s;
+}
+function __krateServerSlots(island, order) {
   var pool = {}, opens = [], depth = 0;
   function see(c) {
     if (__krateIslandOpen(c)) return void depth++;
@@ -210,6 +215,7 @@ function __krateServerSlots(island) {
     var id = __krateSlotOpen.exec(c.data)[1], close = "/krate-slot:" + id, nodes = [], n = c.nextSibling;
     for (; n && !(n.nodeType === 8 && n.data === close); n = n.nextSibling) nodes.push(n);
     if (!n) return;
+    if (order) order.push({ id: id, html: __krateNodesHTML(nodes) });
     var parent = c.parentNode;
     nodes.forEach(function (x) { parent.replaceChild(document.createTextNode(""), x); });
     parent.removeChild(c);

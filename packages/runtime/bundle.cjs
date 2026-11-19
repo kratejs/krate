@@ -189,6 +189,28 @@ const ROUTER_GLOBALS = ['getNavigationState', 'subscribeNavigation', 'krateRoute
 // Dev-only overlay + toolbar. Loaded by `krate dev` only, never in production.
 const DEV_ENTRY = `import './src/dev-overlay';`;
 
+// Island-preserving router swaps. The compiler appends this file to the island
+// loader chunk, so only pages with islands ship it; the router uses it through
+// window.__krateIslandSwap when it is there.
+const ISLAND_SWAP_ENTRY = `import { swapPreservingIslands, unmountIslandsIn } from './src/island-swap';
+window.__krateIslandSwap = { swap: swapPreservingIslands, unmount: unmountIslandsIn };`;
+
+async function buildIslandSwap() {
+  const result = await esbuild.build({
+    stdin: { contents: ISLAND_SWAP_ENTRY, resolveDir: __dirname, sourcefile: 'krate-island-swap.ts' },
+    bundle: true,
+    write: false,
+    format: 'iife',
+    minify: true,
+    target: 'es2020',
+    charset: 'utf8',
+    logLevel: 'silent',
+  });
+  const fs = require('fs');
+  fs.writeFileSync(require('path').join(__dirname, 'dist', 'krate-island-swap.js'), result.outputFiles[0].text);
+  console.log(`Built krate-island-swap.js (${(result.outputFiles[0].text.length / 1024).toFixed(1)} KB)`);
+}
+
 async function buildBundle(outFile, entry, minify = true, plugins = []) {
   const result = await esbuild.build({
     plugins,
@@ -256,6 +278,7 @@ async function main() {
   await buildBundle('krate-suspense.js', SUSPENSE_ENTRY, true, [sharedGlobalsPlugin]);
   await buildSplitRuntime();
   await buildBundle('krate-dev.js', DEV_ENTRY, false);
+  await buildIslandSwap();
   console.log('Runtime bundled! (krate-runtime.js + krate-hydrate.js + krate-hydrate-lite.js + krate-suspense.js + krate-dev.js)');
 }
 

@@ -572,6 +572,20 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- A client navigation keeps mounted islands mounted, as Next.js keeps mounted client components. The
+  refresh after a server action that revalidated (also a `revalidatePath` of another page, which
+  refreshes the current route as in Next.js 16), `router.refresh()`, a same-page `router.replace` and a
+  navigation swapped in the new server HTML including the islands' markup and hydrated the islands
+  again without unmounting the old roots: island state was lost, a focused input lost focus, and a
+  Radix dialog opened by the island stayed in `<body>` driven by the old root (it never closed, the
+  toast after the action never showed). Since the page router also runs on island-only pages
+  (d88f756b) this hit every revalidating action there. The swap now keeps an island that is in the new
+  HTML too (same component, in document order; on another pathname only with unchanged props): its
+  nodes, state and focus stay, it re-renders in place with new server props, its server children
+  follow the new HTML in place, and its router hooks follow the new URL. An island the swap removes is
+  unmounted first, so its effects and portals are cleaned up. The swap code ships in the island loader
+  chunk, so pages without islands do not load it; island chunks' `mount` returns a handle (`update`,
+  `unmount`), and an action passed to a client component as a prop announces a revalidation too.
 - A `"use client"` component in a server component tree renders no element of its own. The server used
   to wrap it in `<krate-island style="display:contents">` (with a props `<script>` before it), so the
   parent's child combinators and sibling selectors saw the wrapper instead of the component's root:

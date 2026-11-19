@@ -328,6 +328,8 @@ full-page navigations (`refresh()` reloads, `prefetch()` resolves immediately).
   that failed to load (`error: "script-load"`, followed by a full load).
 - `krate:revalidate`: dispatch it (server actions that call `revalidatePath` /
   `revalidateTag` do) to clear the prefetch cache and `refresh()` the current route.
+  As in Next.js, any revalidation refreshes the current route, also one of
+  another path; the refresh keeps mounted islands (see below).
 
 **Behavior details**
 
@@ -357,6 +359,12 @@ full-page navigations (`refresh()` reloads, `prefetch()` resolves immediately).
 - **Forms**: same-origin `GET` forms navigate client-side with the form fields as
   the query string. Add `data-krate-reload` to a form to opt out; forms with file
   inputs are left to the browser.
+- **Islands**: client components already mounted stay mounted across a swap
+  (refresh, same-page `replace`, navigation): matched by component in
+  document order, kept with their DOM and state and re-rendered in place with
+  new server props; on another pathname only when their props are unchanged.
+  An island the new page drops is unmounted before its markup goes. See
+  [islands across client navigations](/docs/features/server-components/#islands-across-client-navigations).
 - **View Transitions**: elements with `data-view-transition="name"` get a matching
   `view-transition-name`, and the swap runs inside `document.startViewTransition`
   when supported (honoring `prefers-reduced-motion`). History, scroll and focus

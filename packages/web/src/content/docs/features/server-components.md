@@ -178,6 +178,32 @@ export default async function Home() {
 - Pages without server components are unaffected: there, `"use client"`
   changes nothing and components compile through the normal Krate pipeline.
 
+### Islands across client navigations
+
+A client navigation (a `<Link>`, `router.push`/`replace`, `router.refresh()`,
+or the refresh after a server action that revalidated) swaps in the server
+HTML of the new route, but it does not tear down the client components that
+are already mounted, as in Next.js:
+
+- An island that is in the new HTML too stays mounted: its DOM nodes, state
+  and focus are kept, and it re-renders in place when its server props
+  changed. `useSearchParams`, `usePathname` and `useParams` inside it follow
+  the new URL. Server HTML outside islands is replaced.
+- Islands are matched by component (module and export), in document order:
+  the n-th island of a component in the old page is the n-th one in the new
+  page. On a navigation to another pathname an island is kept only when its
+  server props are unchanged too (an island of a shared layout), so a page's
+  own islands start fresh on another page, as React remounts a page.
+- Server children of a kept island follow the new server HTML in place (the
+  islands inside them are kept the same way). When their top-level shape
+  changed, they are rendered anew and the islands inside them remount.
+- An island the new HTML no longer has (or has with another component in its
+  place) is unmounted before its markup is removed, so its effects clean up
+  and its portals (dialogs, popovers, toasts) leave the page.
+- A focused control in a kept island keeps the focus. When the focused element
+  is replaced, focus moves to the matching element once the new islands
+  mounted.
+
 ## Compiled React packages in server components
 
 Components from npm packages built on React (lucide-react icons, Radix
