@@ -24,11 +24,11 @@ func TestGzipMiddlewareRoundTripsWithPooledWriters(t *testing.T) {
 	h := gzipMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Content-Length", "1")
-		w.Write(gzipTestBody(1000 + len(r.URL.Path)*500))
+		_, _ = w.Write(gzipTestBody(1000 + len(r.URL.Path)*500))
 		if f, ok := w.(http.Flusher); ok {
 			f.Flush()
 		}
-		w.Write([]byte("</tail>"))
+		_, _ = w.Write([]byte("</tail>"))
 	}))
 	for i := 0; i < 20; i++ {
 		req := httptest.NewRequest("GET", "/"+strings.Repeat("p", i), nil)
@@ -62,7 +62,7 @@ func TestGzipMiddlewareSkipsPartialContent(t *testing.T) {
 		w.Header().Set("Content-Type", "text/html")
 		w.Header().Set("Content-Range", "bytes 0-4/10")
 		w.WriteHeader(http.StatusPartialContent)
-		w.Write([]byte("hello"))
+		_, _ = w.Write([]byte("hello"))
 	}))
 	req := httptest.NewRequest("GET", "/", nil)
 	req.Header.Set("Accept-Encoding", "gzip")
