@@ -194,6 +194,10 @@ func TestSourceMetaServeInPlace(t *testing.T) {
 func TestSourceMetaBuildTreeMoves(t *testing.T) {
 	e2eEnv(t)
 	top, root, _ := metaProject(t, "apps/web", true)
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 	moved := filepath.Join(t.TempDir(), "elsewhere")
 	if err := copyTreeSkippingLinks(top, moved); err != nil {
 		t.Fatal(err)
@@ -201,7 +205,10 @@ func TestSourceMetaBuildTreeMoves(t *testing.T) {
 	if err := os.RemoveAll(top); err != nil {
 		t.Fatal(err)
 	}
-	rel, _ := filepath.Rel(top, root)
+	rel, err := filepath.Rel(top, realRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
 	bundle := filepath.Join(moved, rel, "dist", ".krate", "api-node", "meta.js")
 	script := `const m = await import(process.argv[1]); const r = await m.GET(new Request("http://x/")); console.log(await r.text());`
 	out, err := exec.Command("node", "--input-type=module", "-e", script, fileURLOf(bundle)).CombinedOutput()

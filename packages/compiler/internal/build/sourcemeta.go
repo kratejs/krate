@@ -309,7 +309,13 @@ func canonicalLoose(p string) string {
 	var tail []string
 	for cur := p; ; {
 		if _, err := os.Lstat(cur); err == nil {
-			out := canonicalPath(cur)
+			// Not canonicalPath: its cache can hold the unresolved form of a
+			// directory looked up before it was created (macOS /var).
+			out := cur
+			if r, err := filepath.EvalSymlinks(cur); err == nil {
+				out = r
+			}
+			out = canonicalOSPath(filepath.Clean(out))
 			for i := len(tail) - 1; i >= 0; i-- {
 				out = filepath.Join(out, tail[i])
 			}
