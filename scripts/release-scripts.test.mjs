@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { distTag } from './release-tag.mjs';
-import { publishAll } from './publish-packages.mjs';
+import { missingPackages, publishAll } from './publish-packages.mjs';
+import { bootstrapVersion, placeholderManifest, planTrust, trustsWorkflow } from './npm-trust.mjs';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { nativeTemplate, nativeTemplateKrateDep, pinNativeTemplate, releasePackages } from './release-packages.mjs';
+import { nativeTemplate, nativeTemplateKrateDep, npmPackageNames, pinNativeTemplate, releasePackages, trustedPublisher } from './release-packages.mjs';
 
 test('distTag rejects an identifier npm cannot use as a tag, before anything is published', () => {
   assert.throws(() => distTag('1.0.0-1'), /cannot be a dist-tag/);
@@ -29,6 +30,7 @@ test('publishAll skips versions an earlier run already published and finishes th
     tag: 'latest',
     read: (d) => manifests[d],
     view: (name) => name === '@k/a',
+    exists: () => true,
     publish: (d) => (calls.push(d), true),
     log: () => {},
   });
@@ -39,7 +41,7 @@ test('publishAll skips versions an earlier run already published and finishes th
 
 test('publishAll stops at a failed publish and does not publish later packages', () => {
   const calls = [];
-  const r = publishAll({ dirs: ['a', 'b', 'c'], tag: 'beta', read: (d) => manifests[d], view: () => false, publish: (d) => (calls.push(d), d !== 'b'), log: () => {} });
+  const r = publishAll({ dirs: ['a', 'b', 'c'], tag: 'beta', read: (d) => manifests[d], view: () => false, exists: () => true, publish: (d) => (calls.push(d), d !== 'b'), log: () => {} });
   assert.deepEqual(calls, ['a', 'b']);
   assert.match(r.failed, /@k\/b@1\.0\.0: pnpm publish failed/);
 });
@@ -63,4 +65,57 @@ test('pinNativeTemplate pins every @krate dependency of the native template and 
   for (const [, range] of deps) assert.equal(range, '1.2.3-rc.4');
   assert.match(pinned, /"version": "0\.1\.0"/, 'the app keeps its own version');
   assert.match(pinned, /"typescript": "\^5/, 'other dependencies are left alone');
+});
+
+test('publishAll publishes nothing while a package is not on npm, and says how to create it', () => {
+  const calls = [];
+  const r = publishAll({
+    dirs: ['a', 'b', 'c'],
+    tag: 'rc',
+    read: (d) => manifests[d],
+    view: () => false,
+    exists: (name) => name !== '@k/c',
+    publish: (d) => (calls.push(d), true),
+    log: () => {},
+  });
+  assert.deepEqual(calls, []);
+  assert.match(r.failed, /@k\/c is not on npm yet/);
+  assert.match(r.failed, /node scripts\/npm-trust\.mjs @k\/c/);
+});
+
+test('missingPackages stops at a registry error instead of calling the package new', () => {
+  const r = missingPackages(['@k/a', '@k/b'], (name) => (name === '@k/a' ? new Error('ETIMEDOUT') : false));
+  assert.ok(r instanceof Error);
+  assert.match(r.message, /@k\/a: cannot tell whether it is on npm: ETIMEDOUT/);
+});
+
+test('npmPackageNames lists the platform packages, then every released package, @krate/core last', () => {
+  const names = npmPackageNames();
+  assert.equal(names.length, 7 + releasePackages.length);
+  assert.ok(names.slice(0, 7).every((n) => n.startsWith('@krate/core-')));
+  assert.equal(names.at(-1), '@krate/core');
+  assert.ok(names.includes('create-krate-app') && names.includes('@krate/app'));
+});
+
+test('planTrust creates missing packages, trusts the rest once, and leaves another publisher alone', () => {
+  const ours = JSON.stringify([{ type: 'github', repository: trustedPublisher.repository, file: trustedPublisher.workflow }]);
+  const other = JSON.stringify([{ type: 'github', repository: 'someone/else', file: 'publish.yml' }]);
+  const plan = planTrust(['new', 'done', 'fresh', 'other', 'broken'], {
+    exists: (n) => (n === 'broken' ? new Error('E500') : n !== 'new'),
+    trustList: (n) => ({ done: ours, fresh: '[]', other }[n]),
+  });
+  assert.deepEqual(plan.slice(0, 3), [
+    { name: 'new', bootstrap: true, trust: true },
+    { name: 'done', bootstrap: false, trust: false },
+    { name: 'fresh', bootstrap: false, trust: true },
+  ]);
+  assert.match(plan[3].error, /trusts another publisher/);
+  assert.match(plan[4].error, /E500/);
+  assert.ok(trustsWorkflow(ours) && !trustsWorkflow(other));
+});
+
+test('the bootstrap placeholder names the repository provenance checks against', () => {
+  const m = placeholderManifest('@krate/new');
+  assert.equal(m.version, bootstrapVersion);
+  assert.match(m.repository.url, new RegExp(`github\\.com/${trustedPublisher.repository}\\.git$`));
 });

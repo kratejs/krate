@@ -1,3 +1,10 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { platforms } from './platform-package.mjs';
+
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
+
 /**
  * The npm packages a release publishes, by directory under packages/, in the
  * order they are published: a package comes after the @krate packages it
@@ -37,4 +44,19 @@ export const nativeTemplateKrateDep = /("(@krate\/[a-z0-9-]+)"\s*:\s*")([^"]*)("
 /** The native template text with every @krate dependency pinned to version. */
 export function pinNativeTemplate(text, version) {
   return text.replace(nativeTemplateKrateDep, (_, open, _name, _range, close) => `${open}${version}${close}`);
+}
+
+/**
+ * The workflow npm trusts to publish every package (trusted publishing). npm
+ * matches both fields exactly, so they must name this repository and the
+ * release workflow file.
+ */
+export const trustedPublisher = { repository: 'kratejs/krate', workflow: 'release.yml' };
+
+/** Every package name a release publishes: the platform packages, then releasePackages in order. */
+export function npmPackageNames(root = repoRoot) {
+  return [
+    ...platforms.map((p) => `@krate/${p.pkg}`),
+    ...releasePackages.map((dir) => JSON.parse(readFileSync(join(root, 'packages', dir, 'package.json'), 'utf8')).name),
+  ];
 }
