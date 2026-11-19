@@ -364,10 +364,18 @@ export async function register() {
 	if err := b.BuildInstrumentation(); err != nil {
 		t.Fatal(err)
 	}
-	waitUntilTrue(t, 30*time.Second, "the sidecar after the rebuild", func() bool {
-		code, _ := getText(t, base+"/api/pid")
-		return code == 200
-	})
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		code, b := getText(t, base+"/api/pid")
+		if code == 200 {
+			break
+		}
+		if time.Now().After(deadline) {
+			out, _ := exec.Command("lsof", "-nP", "-iTCP", "-sTCP:LISTEN").CombinedOutput()
+			t.Fatalf("timed out waiting for the sidecar after the rebuild: %d %q\ndev port %d\nlisteners:\n%s\nserver log:\n%s", code, b, port, out, logs())
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 	if lines := markerLines(t, marker); len(lines) != 2 || lines[1] != "register worker=primary" {
 		t.Errorf("register() must run again once after the rebuild: %q", lines)
 	}
