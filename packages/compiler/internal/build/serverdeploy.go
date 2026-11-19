@@ -684,7 +684,7 @@ func BuildServerBundle(root string, cfg *config.Config, target string) (*deploy.
 	if err := os.MkdirAll(filepath.Dir(outFile), 0755); err != nil {
 		return nil, err
 	}
-	externals, sources, err := bundleServerEntry(root, cfg, target, entry, outFile)
+	externals, sources, meta, err := bundleServerEntry(root, cfg, target, entry, outFile, layout)
 	if err != nil {
 		return nil, err
 	}
@@ -692,6 +692,7 @@ func BuildServerBundle(root string, cfg *config.Config, target string) (*deploy.
 		if err := traceNodeServer(root, cfg, layout, externals, sources, plan); err != nil {
 			return nil, err
 		}
+		copyMetaTargets(meta, layout, plan)
 	}
 	plan.Bundle = outFile
 	return plan, nil
@@ -1184,10 +1185,10 @@ func pathWithin(dir, p string) bool {
 // bundleServerEntry bundles the generated entry. For the node target it also
 // returns the packages left external, which must be installed next to the
 // bundle (see serverTrace).
-func bundleServerEntry(root string, cfg *config.Config, target, entry, outFile string) ([]string, map[string]string, error) {
+func bundleServerEntry(root string, cfg *config.Config, target, entry, outFile string, layout nodeLayout) ([]string, map[string]string, *sourceMeta, error) {
 	rt, err := runtimePlugin(root)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	entry = strings.NewReplacer("__SHUTDOWN__", fmt.Sprint(cfg.Server.ShutdownTimeout), "__PORT__", fmt.Sprint(cfg.ServerPort())).Replace(entry)
 	opts := api.BuildOptions{
@@ -1228,14 +1229,25 @@ func bundleServerEntry(root string, cfg *config.Config, target, entry, outFile s
 			anchor = "import.meta.url"
 		}
 		banner := "import { createRequire as __krateCreateRequire } from 'node:module'; const require = __krateCreateRequire(" + anchor + ");"
-		if target == "node" {
-			// Bundled CommonJS dependencies (ncc builds such as @next/env, ioredis) read __dirname and
-			// __filename, which an ES module does not have. Both name the bundle; the define keeps a
-			// module that declares its own __dirname untouched.
-			banner += " import { fileURLToPath as __krateFileURLToPath } from 'node:url'; import { dirname as __krateDirname_ } from 'node:path'; const __krateFilename = __krateFileURLToPath(import.meta.url); const __krateDirname = __krateDirname_(__krateFilename);"
-			opts.Define = map[string]string{"__dirname": "__krateDirname", "__filename": "__krateFilename"}
-		}
 		opts.Banner = map[string]string{"js": banner}
+	}
+	// Each module of the bundle names its own source file in import.meta.url,
+	// __dirname and friends, relative to the directory of the output that
+	// holds the source root (bundled CommonJS dependencies such as @next/env
+	// and ioredis read __dirname). The pages and actions built earlier carry
+	// the same calls; the other targets get helpers for those without a file
+	// system layout.
+	var meta *sourceMeta
+	srcRoot := root
+	if layout.traceRoot != "" {
+		srcRoot = layout.traceRoot
+	}
+	if target == "node" {
+		if meta = withSourceMeta(&opts, srcRoot, layout.base); meta != nil {
+			meta.collectTargets()
+		}
+	} else {
+		withSourceMetaStub(&opts, srcRoot)
 	}
 	opts.Metafile = true
 	var res api.BuildResult
@@ -1261,10 +1273,10 @@ func bundleServerEntry(root string, cfg *config.Config, target, entry, outFile s
 			}
 			msgs = append(msgs, m)
 		}
-		return nil, nil, fmt.Errorf("server bundle for %s failed:\n  %s", target, strings.Join(msgs, "\n  "))
+		return nil, nil, nil, fmt.Errorf("server bundle for %s failed:\n  %s", target, strings.Join(msgs, "\n  "))
 	}
 	if target != "node" {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 	pkgs := map[string]bool{}
 	for _, p := range externalPackagesFromMetafile(res.Metafile) {
@@ -1278,7 +1290,7 @@ func bundleServerEntry(root string, cfg *config.Config, target, entry, outFile s
 		out = append(out, p)
 	}
 	sort.Strings(out)
-	return out, sources, nil
+	return out, sources, meta, nil
 }
 
 // nodeLayout is where the node target's files go. Flat (no

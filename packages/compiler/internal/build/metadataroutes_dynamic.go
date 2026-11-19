@@ -310,6 +310,7 @@ func (b *Builder) buildDynamicDataRoute(f metaRouteFile, revalidate int) (metaRo
 		opts.MinifyWhitespace, opts.MinifyIdentifiers, opts.MinifySyntax = true, true, true
 	}
 	jseval.ApplyNodeESM(&opts)
+	withSourceMeta(&opts, sourceRootFor(b.Root), "")
 	res := esbuildBuild(opts)
 	if len(res.Errors) > 0 {
 		return metaRouteEntry{}, b.routeErr(f, "compiling "+filepath.Base(f.Path)+" failed:\n"+formatEsbuildErrors(res.Errors),

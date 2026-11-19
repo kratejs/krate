@@ -579,6 +579,19 @@ host code runs in the native process. Names and options may change between relea
 
 ### Fixed
 
+- `import.meta.url`, `import.meta.dirname`, `import.meta.filename`, `__dirname` and `__filename` in server
+  code now name the module's own source file instead of the output bundle. A workspace package that did
+  `path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..")` or
+  `new URL("../../../.env", import.meta.url)` found `<project>/dist/.krate` when bundled into an API
+  route, so the files next to its source were not found. Paths are relative to the
+  `outputFileTracingRoot` (else the project) and resolved at run time from the bundle's own location,
+  so a moved build tree or deploy output keeps working; each CommonJS module reports its own directory
+  (the node deploy bundle's global `__dirname` define is gone). `krate deploy --target node` copies the
+  files that literal `new URL(..., import.meta.url)` and `path.join(__dirname, "...")` arguments name.
+  Next.js with Turbopack gives `import.meta.url` the same root-relative form; Krate also fills in
+  `dirname`, `filename` and a real `__dirname`, which Next leaves undefined or fake. Code that relied on
+  `import.meta.url` naming the bundle (resolving `outputFileTracingIncludes` files next to it) must now
+  resolve from its source file.
 - On Windows, `krate build` of a page with several islands could fail with `KR8009 ... Cannot read
   file ".../.krate/context-keys.<hash>.mjs": The process cannot access the file because it is being
   used by another process`. Concurrent island builds could both write that shared module, and the

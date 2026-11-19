@@ -485,6 +485,7 @@ func New(root string, cfg *config.Config) *Builder {
 	// derive this lazily; doing it here keeps the config stable across builds so
 	// the disk-cache config hash (and any other consumer) doesn't churn.
 	cfg.Markdown.Root = root
+	registerSourceRoot(root, cfg.OutputFileTracingRoot)
 	cfgHash := ""
 	if data, err := json.Marshal(cfg); err == nil {
 		sum := sha256.Sum256(data)
@@ -4522,6 +4523,7 @@ func (b *Builder) BuildMiddleware() error {
 	// createRequire banner for CommonJS dependencies.
 	if !embeddedRuntime(b.Cfg.SSR.MiddlewareRuntime) {
 		jseval.ApplyNodeESM(&mwOpts)
+		withSourceMeta(&mwOpts, sourceRootFor(b.Root), "")
 	}
 	// On Node the middleware runs in the API sidecar, which can load packages
 	// from node_modules: serverExternalPackages and packages with a native
@@ -4542,6 +4544,7 @@ func (b *Builder) BuildMiddleware() error {
 			nodeOnly = true
 			printf("  %s> Middleware%s imports %s, so it runs in the Node sidecar (set ssr.middlewareRuntime to \"node\" to silence this)\n", cYellow, cReset, strings.Join(ext, ", "))
 			jseval.ApplyNodeESM(&mwOpts)
+			withSourceMeta(&mwOpts, sourceRootFor(b.Root), "")
 			result = buildMW()
 		}
 	}
@@ -5515,6 +5518,8 @@ func (b *Builder) apiRouteOptions() (quickjsOpts, nodeOpts api.BuildOptions) {
 	}
 	withAuthConfig(&quickjsOpts, b.Cfg)
 	withAuthConfig(&nodeOpts, b.Cfg)
+	// Only the Node artifact: the embedded engine has no import.meta.
+	withSourceMeta(&nodeOpts, sourceRootFor(b.Root), "")
 	return quickjsOpts, nodeOpts
 }
 

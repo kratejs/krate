@@ -99,8 +99,8 @@ export default defineConfig({
 
 Matched files are copied into `dist/.krate/server/` at the same
 project-relative path (`workers/image.js` becomes
-`dist/.krate/server/workers/image.js`), so resolve them from the bundle with
-`new URL("./workers/image.js", import.meta.url)`. A glob that matches nothing
+`dist/.krate/server/workers/image.js`), so resolve them relative to your source
+file, as in [Source locations](#source-locations-in-server-code) below. A glob that matches nothing
 prints a warning. Globs must be relative to the project root and may not leave
 it, unless you set [`outputFileTracingRoot`](#monorepo-layout-outputfiletracingroot). The route keys exist for compatibility with Next.js; Krate copies every
 file for every route.
@@ -110,6 +110,35 @@ For `--target docker` the Dockerfile copies the leading directory of each glob
 at the same path. Globs under `node_modules` need no copy (the installed
 packages are in the image), and a glob with no leading directory, such as
 `**/*.wasm`, is flagged in the Dockerfile for you to handle.
+
+### Source locations in server code
+
+`import.meta.url`, `import.meta.dirname`, `import.meta.filename` and, in
+CommonJS code, `__dirname` and `__filename` name the source file of the module
+that uses them, not the bundle. A workspace package that builds a path from its
+own location (`path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..")`)
+gets the same answer in `krate dev`, `krate serve` and the deployed server. This
+applies to API routes, middleware, instrumentation, server actions, server
+rendered pages and the `node` deploy bundle.
+
+- Paths are relative to the source root: `outputFileTracingRoot` when you set it,
+  else the project. At run time the bundle finds the directory that corresponds to
+  the source root from its own location, so a build tree or a deploy output
+  that moves (a Docker image copies the repository to `/app`) keeps working.
+  `import.meta.url` is a `file:` URL, as in Next.js with Turbopack; Next also
+  leaves `import.meta.dirname` and `import.meta.filename` undefined and gives
+  CommonJS a fake `__dirname`, where Krate gives the real per-module paths.
+- `krate deploy --target node` copies the files that these paths reach by
+  literal arguments into the deploy output at their place below the source root:
+  `new URL("../data/x.txt", import.meta.url)` and
+  `path.join(import.meta.dirname, "..", "data")` (or `__dirname`) with only string
+  literals. A directory over 64 MB is not copied and a warning says so; a file
+  outside the source root is reported. Anything built from a variable needs
+  `outputFileTracingIncludes`.
+- A module that declares its own `__dirname` or `__filename` keeps it, and
+  `import.meta.env`, `import.meta.resolve` and a bare `import.meta` are left as
+  written. The vercel, netlify and cloudflare targets bundle the output again
+  without a file layout: there the paths are relative to the working directory.
 
 ### Monorepo layout: outputFileTracingRoot
 
