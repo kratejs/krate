@@ -42,6 +42,43 @@ If a release fails part way, fix the cause and re-run the job for the same tag.
 publishes the rest. A skipped package is whatever the earlier run uploaded; if
 that upload was wrong, publish a new version instead.
 
+## Trusted publishing
+
+The release workflow publishes with npm trusted publishing: the job's GitHub
+OIDC token (`permissions: id-token: write`) is exchanged for a short-lived
+npm token, so no long-lived token has to be rotated, and every version gets a
+provenance statement. On npmjs.com, each package trusts the GitHub Actions
+workflow `release.yml` of `kratejs/krate` (`trustedPublisher` in
+`scripts/release-packages.mjs`). npm stops accepting direct publishes with a
+granular access token in January 2027; until a package trusts the workflow,
+`pnpm publish` falls back to the `NPM_TOKEN` secret.
+
+Trusted publishing cannot create a package. When a release adds one, publish
+it once by hand before tagging, from a machine logged in to npm with an
+account that can publish `@krate` packages and has 2FA on (npm 11.15.0 or
+later):
+
+```sh
+npm login
+node scripts/npm-trust.mjs --dry-run      # what it would do
+node scripts/npm-trust.mjs <new-package>  # or no names: every package
+```
+
+For a package that is not on npm, the script publishes a deprecated placeholder
+(`0.0.0-bootstrap.0`, no code), then runs `npm trust github` for every
+package that does not trust the workflow yet. Packages already set up are
+skipped, so it can be re-run. npm makes a package's first version `latest`, so
+the placeholder stays `latest` until the first stable release moves it.
+
+The workflow's first step after the dist-tag,
+`node scripts/publish-packages.mjs --check-registered`, fails before any build
+when a package is not on npm yet and prints the command above, and
+`publish-packages.mjs` itself refuses to publish anything while a package in
+its list is missing, so a release never stops half published.
+`check-release` fails when the workflow loses `id-token: write` or the check,
+or a package's `repository.url` stops naming `kratejs/krate` (provenance is
+rejected otherwise).
+
 Scaffolded projects (`create-krate-app`, `create-krate-docs`) pin every `@krate/*`
 dependency to the scaffolder's own version: `^x.y.z` for a stable release, the
 exact version for a prerelease. The templates carry a `__KRATE_VERSION__`

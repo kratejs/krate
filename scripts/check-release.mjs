@@ -12,7 +12,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
 import { platformManifest, platforms } from "./platform-package.mjs";
-import { releasePackages } from "./release-packages.mjs";
+import { releasePackages, trustedPublisher } from "./release-packages.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (rel) => fs.readFileSync(path.join(root, rel), "utf8");
@@ -226,6 +226,27 @@ for (const name of noted) {
   if (!known) fail(`the release notes list ${name}, which a release does not publish`);
 }
 if (!read("scripts/smoke-install.mjs").includes("releasePackages")) fail("the install smoke test does not install every released package");
+
+// 10. Trusted publishing: npm only accepts the OIDC token of the workflow each
+// package trusts, provenance requires repository.url to name the same
+// repository, and a package that is not on npm yet must stop the release
+// before it builds or publishes anything.
+if (!fs.existsSync(path.join(root, ".github", "workflows", trustedPublisher.workflow))) {
+  fail(`scripts/release-packages.mjs trusts .github/workflows/${trustedPublisher.workflow}, which does not exist`);
+}
+if (!/^\s*id-token:\s*write\s*$/m.test(release)) fail("release workflow does not grant id-token: write, so npm trusted publishing cannot authenticate");
+const registered = release.indexOf("publish-packages.mjs --check-registered");
+if (registered < 0) fail("release workflow does not check that every package is on npm (publish-packages.mjs --check-registered)");
+else if (registered > release.indexOf("- name: Install JS dependencies")) fail("release workflow checks that every package is on npm only after it starts building");
+const repoURL = (u) => (u ?? "").replace(/^git\+/, "").replace(/\.git$/, "").replace(/^https:\/\/github\.com\//, "");
+for (const dir of releasePackages) {
+  const pkg = JSON.parse(read(`packages/${dir}/package.json`));
+  if (repoURL(pkg.repository?.url) !== trustedPublisher.repository) fail(`${pkg.name}: repository.url ${pkg.repository?.url} does not name ${trustedPublisher.repository}, so provenance from trusted publishing is rejected`);
+}
+for (const target of platforms) {
+  const pkg = platformManifest(target, "0.0.0");
+  if (repoURL(pkg.repository?.url) !== trustedPublisher.repository) fail(`${pkg.name}: repository.url does not name ${trustedPublisher.repository}`);
+}
 
 if (failures.length > 0) {
   console.error("check-release: the v1 release contract is not satisfied");

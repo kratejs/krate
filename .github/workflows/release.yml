@@ -7,6 +7,10 @@ on:
 
 permissions:
   contents: write
+  # npm trusted publishing: publishing exchanges the job's OIDC token for a
+  # short-lived npm token. Each package trusts kratejs/krate release.yml on
+  # npmjs.com (scripts/npm-trust.mjs; RELEASE.md, "Trusted publishing").
+  id-token: write
 
 jobs:
   release:
@@ -48,6 +52,11 @@ jobs:
         id: tag
         shell: bash
         run: node scripts/release-tag.mjs "${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      # Trusted publishing cannot create a package, so a package that is not on
+      # npm yet fails here, before any build, with the command that creates it.
+      - name: Check every package is on npm
+        run: node scripts/publish-packages.mjs --check-registered
 
       - name: Sync package versions
         run: node scripts/set-version.mjs "${GITHUB_REF_NAME#v}"
@@ -144,7 +153,10 @@ jobs:
         run: node scripts/smoke-install.mjs
 
       # Both steps skip a version that is already on npm, so a failed release
-      # can be fixed and the job re-run instead of needing a new version.
+      # can be fixed and the job re-run instead of needing a new version. They
+      # publish through trusted publishing (OIDC, see permissions); pnpm falls
+      # back to NODE_AUTH_TOKEN only for a package that does not trust this
+      # workflow yet. npm stops accepting token publishes in January 2027.
       - name: Publish platform packages
         run: >-
           node scripts/publish-packages.mjs "${{ steps.tag.outputs.dist_tag }}"
