@@ -4,6 +4,8 @@ import {
   destroyRouter,
   krateRouter,
 } from './router';
+import { callServerAction } from './actions';
+import { swapPreservingIslands, unmountIslandsIn } from './island-swap';
 
 // A fetch mock serving documents by path. Each route is either a page body or
 // a full response description.
@@ -55,6 +57,7 @@ function mockResponse(r: Route, url: string): Response {
     redirected: !!r.redirect,
     headers: new Headers({ 'content-type': r.type ?? 'text/html; charset=utf-8' }),
     text: async () => r.body ?? '',
+    json: async () => JSON.parse(r.body ?? 'null'),
   } as unknown as Response;
 }
 
@@ -176,6 +179,178 @@ describe('focus', () => {
     await krateRouter.push('/about');
     await settle();
     expect(document.activeElement).toBe(document.getElementById('root'));
+  });
+});
+
+// Islands as the island loader lists them: a record with the handle its
+// chunk's mount returned, on the island's open comment.
+interface FakeIsland {
+  name: string;
+  status: string;
+  start: Comment;
+  handle: { update: ReturnType<typeof vi.fn>; unmount: ReturnType<typeof vi.fn>; slots: never[] };
+  connectedAtUnmount?: boolean;
+  gone?: boolean;
+}
+
+function islandHTML(e: string, props: unknown, html: string): string {
+  return `<!--krate-island:${JSON.stringify({ m: 'cm', e, s: '/chunks/' + e + '.js', p: props })}-->${html}<!--/krate-island-->`;
+}
+
+/** Mounts every island of the document not mounted yet (what the loader does after a swap). */
+function mountIslands(onUnmount?: (r: FakeIsland) => void): FakeIsland[] {
+  const out: FakeIsland[] = [];
+  const w = document.createTreeWalker(document.body, 128);
+  for (let n = w.nextNode() as Comment | null; n; n = w.nextNode() as Comment | null) {
+    if (!n.data.startsWith('krate-island:') || (n as any).__krateIsland) continue;
+    const rec: FakeIsland = {
+      name: JSON.parse(n.data.slice(13)).e,
+      status: 'hydrated',
+      start: n,
+      handle: {
+        update: vi.fn(),
+        unmount: vi.fn(() => {
+          rec.connectedAtUnmount = rec.start.isConnected;
+          if (onUnmount) onUnmount(rec);
+        }),
+        slots: [],
+      },
+    };
+    (n as any).__krateIsland = rec;
+    out.push(rec);
+  }
+  return out;
+}
+
+describe('islands across a swap', () => {
+  // The island loader chunk installs the island-preserving swap.
+  beforeEach(() => {
+    (globalThis as any).__krateIslandSwap = { swap: swapPreservingIslands, unmount: unmountIslandsIn };
+  });
+  afterEach(() => {
+    delete (globalThis as any).__krateIslandSwap;
+  });
+
+  const order = (shares: number) =>
+    page('Order', `<main><h1>Order 1</h1><p id="shares">${shares} shares</p><div class="actions">${islandHTML('ShareButton', { orderId: 1 }, '<button id="share">Share</button>')}</div></main>`);
+
+  it('a revalidating server action refreshes the page in place, keeping its islands mounted', async () => {
+    routes['/orders/1'] = { body: order(0) };
+    routes['/__krate/action/share'] = {
+      type: 'application/json',
+      body: JSON.stringify({ ok: true, result: { url: 'x' }, revalidated: true, revalidation: { paths: [{ path: '/dashboard/shares', type: 'page' }] } }),
+    };
+    await krateRouter.push('/orders/1');
+    await settle();
+    const [share] = mountIslands();
+    const button = document.getElementById('share');
+    // The island opened a dialog in a portal.
+    const dialog = document.createElement('div');
+    dialog.setAttribute('role', 'dialog');
+    document.body.appendChild(dialog);
+    routes['/orders/1'] = { body: order(1) };
+    fetchMock.mockClear();
+    await callServerAction('/__krate/action/share', [1]);
+    await settle();
+    // Like Next, a revalidation of another path still refreshes the current
+    // route (the server rendered it with fresh data)...
+    expect(fetchMock.mock.calls.map((c) => new URL(c[0], location.href).pathname)).toEqual(['/__krate/action/share', '/orders/1']);
+    expect(document.getElementById('shares')!.textContent).toBe('1 shares');
+    // ...in place: the island keeps its DOM and its root, its dialog stays
+    // driven by it.
+    expect(document.getElementById('share')).toBe(button);
+    expect(share.handle.unmount).not.toHaveBeenCalled();
+    expect(share.handle.update).not.toHaveBeenCalled();
+    expect(mountIslands()).toEqual([]);
+    expect(document.querySelectorAll('[role="dialog"]').length).toBe(1);
+  });
+
+  it('router.replace to the same page keeps a focused input of an island, re-rendering it with new props', async () => {
+    const store = (q: string) =>
+      page('Store', `<main><div class="filters">${islandHTML('StoreFilters', { q }, `<input aria-label="Search templates" value="${q}"><button>Clear</button>`)}</div><ul><li>${q || 'all'}</li></ul></main>`);
+    routes['/templates?q=cv'] = { body: store('cv') };
+    routes['/templates'] = { body: store('') };
+    await krateRouter.push('/templates?q=cv');
+    await settle();
+    const [filters] = mountIslands();
+    const input = document.querySelector('input[aria-label="Search templates"]') as HTMLInputElement;
+    input.focus();
+    const blurs = vi.fn();
+    input.addEventListener('blur', blurs);
+    await krateRouter.replace('/templates', { scroll: false });
+    await settle();
+    expect(document.querySelector('input[aria-label="Search templates"]')).toBe(input);
+    expect(document.activeElement).toBe(input);
+    expect(blurs).not.toHaveBeenCalled();
+    expect(filters.handle.update).toHaveBeenCalledWith({ q: '' });
+    expect(filters.handle.unmount).not.toHaveBeenCalled();
+    expect(document.querySelector('li')!.textContent).toBe('all');
+  });
+
+  it('keeps an island around the whole page and the island in its server children', async () => {
+    const wrapped = (q: string) =>
+      page(
+        'Store',
+        islandHTML(
+          'Providers',
+          { __krateChildren: { __krateSlotRef: 'p' + q } },
+          `<!--krate-slot:p${q}--><div class="shell">${islandHTML('Filters', { q }, `<input id="q" value="${q}">`)}<ul><li>${q || 'all'}</li></ul></div><!--/krate-slot:p${q}--><section id="toaster"></section>`,
+        ),
+      );
+    routes['/wrapped?q=cv'] = { body: wrapped('cv') };
+    routes['/wrapped'] = { body: wrapped('') };
+    await krateRouter.push('/wrapped?q=cv');
+    await settle();
+    const [providers, filters] = mountIslands();
+    // Providers adopted its server children (the slot markers go, the nodes stay).
+    const open = Array.from(document.getElementById('root')!.childNodes).find((n) => n.nodeType === 8 && (n as Comment).data === 'krate-slot:pcv')!;
+    const shell = document.querySelector('.shell')!;
+    open.parentNode!.removeChild(open.nextSibling!.nextSibling!);
+    open.parentNode!.removeChild(open);
+    (providers.handle as any).slots = [{ id: 'pcv', html: shell.outerHTML, set: [shell] }];
+    const input = document.getElementById('q') as HTMLInputElement;
+    input.focus();
+    await krateRouter.replace('/wrapped', { scroll: false });
+    await settle();
+    expect(document.querySelector('.shell')).toBe(shell);
+    expect(document.getElementById('q')).toBe(input);
+    expect(document.activeElement).toBe(input);
+    expect(document.querySelector('li')!.textContent).toBe('all');
+    expect(providers.handle.unmount).not.toHaveBeenCalled();
+    expect(providers.handle.update).not.toHaveBeenCalled();
+    expect(filters.handle.unmount).not.toHaveBeenCalled();
+    expect(filters.handle.update).toHaveBeenCalledWith({ q: '' });
+  });
+
+  it('a navigation that drops an island unmounts it before its markup goes', async () => {
+    routes['/orders/1'] = { body: order(0) };
+    await krateRouter.push('/orders/1');
+    await settle();
+    const dialog = document.createElement('div');
+    dialog.setAttribute('role', 'dialog');
+    document.body.appendChild(dialog);
+    const [share] = mountIslands(() => dialog.remove());
+    await krateRouter.push('/about');
+    await settle();
+    expect(share.handle.unmount).toHaveBeenCalledTimes(1);
+    expect(share.connectedAtUnmount).toBe(true);
+    expect(document.querySelectorAll('[role="dialog"]').length).toBe(0);
+    expect(document.querySelector('#root h1')!.textContent).toBe('About');
+  });
+
+  it('a navigation to another page remounts an island whose props differ', async () => {
+    const post = (id: number) => page('Post', `<main>${islandHTML('Like', { id }, `<button id="like">${id}</button>`)}</main>`);
+    routes['/posts/1'] = { body: post(1) };
+    routes['/posts/2'] = { body: post(2) };
+    await krateRouter.push('/posts/1');
+    await settle();
+    const [like] = mountIslands();
+    const button = document.getElementById('like');
+    await krateRouter.push('/posts/2');
+    await settle();
+    expect(like.handle.unmount).toHaveBeenCalled();
+    expect(document.getElementById('like')).not.toBe(button);
+    expect(document.getElementById('like')!.textContent).toBe('2');
   });
 });
 

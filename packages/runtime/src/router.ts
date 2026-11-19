@@ -8,6 +8,7 @@
 
 import { basePath, withBase } from './base-path.js';
 import { siteConfig, type KrateRuntimeConfig } from './site-config.js';
+import type { SwapOptions } from './island-swap.js';
 
 /**
  * The shared runtime chunk is loaded once and must persist across SPA
@@ -1201,42 +1202,60 @@ async function commitDocument(loaded: LoadedDoc, req: NavRequest, seq: number): 
   }
 
   // A navigation that stays on the page (a query change, router.refresh())
-  // replaces the region's DOM, but React keeps a focused input where it is:
-  // move focus to the same element in the new DOM.
+  // keeps the page's islands mounted and their DOM in place; a control
+  // focused in one of them keeps the focus. When the swap replaces the focused
+  // element, focus moves to the same element in the new DOM.
   const samePage = normPath(new URL(url, location.href).pathname) === normPath(location.pathname);
   let focusMark: FocusMark | null = null;
+  let focused: HTMLElement | null = null;
+  let islandJobs: Promise<unknown>[] = [];
 
   const mutate = () => {
     if (samePage) focusMark = captureFocus(oldRoot, plan);
+    const active = document.activeElement as HTMLElement | null;
+    focused = active && active !== document.body && oldRoot.contains(active) ? active : null;
+    const sel = focused ? selectionOf(focused) : null;
     const title = doc.querySelector('title');
     if (title) document.title = title.textContent || '';
     const g = globalThis as any;
     if (plan.keep.length > 0 && typeof g.krateDisposeExcept === 'function') g.krateDisposeExcept(plan.keep);
     else if (typeof g.disposeAll === 'function') g.disposeAll();
+    // Islands in the new markup that are mounted already stay mounted; a
+    // navigation to another page keeps only those with the same props.
+    const opts = { sameProps: !samePage };
+    // Imported into one fragment, so the nodes keep their siblings (an
+    // island's open and close comments find each other).
+    const imported = (nodes: Node[]) => {
+      const f = document.createDocumentFragment();
+      for (const n of nodes) f.appendChild(document.importNode(n, true));
+      return Array.from(f.childNodes);
+    };
     if (plan.region) {
       // Only the deepest boundary that differs is replaced; the kept layouts'
       // DOM (and its state, focus and scroll containers) stays in place.
       const { live, next } = plan.region;
-      clearBetween(live[0], live[1]);
-      const nodes = between(next[0], next[1]).map((n) => document.importNode(n, true));
-      for (const n of nodes) live[1].parentNode!.insertBefore(n, live[1]);
+      islandJobs = swapNodes(live[0].parentNode!, live[0], live[1], imported(between(next[0], next[1])), opts);
       for (const sl of plan.slots) {
-        clearBetween(sl.live[0], sl.live[1]);
-        for (const n of between(sl.next[0], sl.next[1])) sl.live[1].parentNode!.insertBefore(document.importNode(n, true), sl.live[1]);
+        islandJobs.push(...swapNodes(sl.live[0].parentNode!, sl.live[0], sl.live[1], imported(between(sl.next[0], sl.next[1])), opts));
       }
       syncLoadingTemplate(oldRoot, newRoot);
     } else {
-      const nodes = Array.from(newRoot.childNodes).map((n) => document.importNode(n, true));
-      oldRoot.replaceChildren(...nodes);
+      islandJobs = swapNodes(oldRoot, null, null, imported(Array.from(newRoot.childNodes)), opts);
     }
     currentChain = plan.chain;
     // Detached slot content of earlier intercepts belonged to the old page.
+    interceptSnapshots.forEach((snap) => unmountIslands(snap.nodes));
     interceptSnapshots.clear();
     sheets.commit();
     reconcileHeadMeta(doc);
     reconcileDocAttrs(doc);
     applyViewTransitionNames(document);
-    if (focusMark) restoreFocus(oldRoot, focusMark);
+    if (focused && focused.isConnected) {
+      // The focused element was kept: it keeps the focus (and its selection)
+      // even when it had to move.
+      if (document.activeElement !== focused) refocus(focused, sel);
+      focusMark = null;
+    } else if (focusMark) restoreFocus(oldRoot, focusMark);
   };
 
   await runMutation(mutate);
@@ -1287,10 +1306,72 @@ async function commitDocument(loaded: LoadedDoc, req: NavRequest, seq: number): 
     return;
   }
   refreshPageBindings();
-  // An island that rendered its element anew while mounting took the focus
-  // with it; look the element up again.
-  if (focusMark && !hasFocusWithin(oldRoot)) restoreFocus(oldRoot, focusMark);
   dispatch('krate:navigate-end', { url: location.href, status: loaded.status });
+  // An island that rendered its element anew while mounting took the focus
+  // with it; look the element up again once the islands mounted.
+  const mark = focusMark as FocusMark | null;
+  if (mark && !hasFocusWithin(oldRoot)) {
+    await islandsSettled(islandJobs);
+    if (seq === navSeq && !hasFocusWithin(oldRoot)) restoreFocus(oldRoot, mark);
+  }
+}
+
+interface IslandSwap {
+  swap(parent: Node, start: Node | null, end: Node | null, nodes: Node[], opts: SwapOptions): Promise<unknown>[];
+  unmount(nodes: ArrayLike<Node>): void;
+}
+
+/** The island-preserving swap (island-swap.ts), which the island loader chunk installs on pages with islands. */
+function islandSwap(): IslandSwap | null {
+  const s = (globalThis as any).__krateIslandSwap;
+  return s && typeof s.swap === 'function' && typeof s.unmount === 'function' ? s : null;
+}
+
+/**
+ * Replaces the children of parent between start and end (all of them when
+ * both are null) with nodes, keeping the page's mounted islands when the page
+ * has any.
+ */
+function swapNodes(parent: Node, start: Node | null, end: Node | null, nodes: Node[], opts: SwapOptions): Promise<unknown>[] {
+  const s = islandSwap();
+  if (s) return s.swap(parent, start, end, nodes, opts);
+  if (start && end) {
+    clearBetween(start, end);
+    for (const n of nodes) parent.insertBefore(n, end);
+  } else (parent as Element).replaceChildren(...nodes);
+  return [];
+}
+
+function unmountIslands(nodes: ArrayLike<Node>): void {
+  const s = islandSwap();
+  if (s) s.unmount(nodes);
+}
+
+/** Waits (at most a few seconds) for the islands the island loader is mounting and for island updates. */
+function islandsSettled(jobs: Promise<unknown>[]): Promise<unknown> {
+  const ready = (globalThis as any).__krateIslandsReady;
+  const all = Promise.all([...jobs, ready && typeof ready.then === 'function' ? ready : null]);
+  return Promise.race([all, new Promise((r) => setTimeout(r, 3000))]);
+}
+
+function selectionOf(el: Element): [number, number] | null {
+  const field = el as HTMLInputElement;
+  try {
+    return typeof field.selectionStart === 'number' && typeof field.selectionEnd === 'number' ? [field.selectionStart, field.selectionEnd] : null;
+  } catch {
+    return null;
+  }
+}
+
+function refocus(el: HTMLElement, sel: [number, number] | null): void {
+  try {
+    el.focus({ preventScroll: true });
+    if (sel && document.activeElement === el && typeof (el as HTMLInputElement).setSelectionRange === 'function') {
+      (el as HTMLInputElement).setSelectionRange(sel[0], sel[1]);
+    }
+  } catch {
+    /* ignore */
+  }
 }
 
 /**
@@ -1403,6 +1484,7 @@ function between(start: Node, end: Node): Node[] {
 
 function clearBetween(start: Node, end: Node): void {
   const dispose = (globalThis as any).disposeNode;
+  unmountIslands(between(start, end));
   for (const n of between(start, end)) {
     n.parentNode!.removeChild(n);
     if (typeof dispose === 'function') dispose(n);

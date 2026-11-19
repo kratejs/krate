@@ -116,6 +116,14 @@ func (cb ClientBoundary) resolveDir() string {
 // An island inside another island's server children mounts after it, so it
 // finds the context the outer island provides there (see islandcontext.go).
 // The chunks still load in parallel.
+//
+// A chunk's mount returns the island's handle (update, unmount, and for a
+// Preact island the server children it adopted), kept on the record as
+// handle: the SPA router re-renders a kept island in place through it and
+// unmounts an island its swap removes (see the runtime's island-swap.ts). An
+// island the router removed while its chunk loaded (gone) is unmounted as
+// soon as it mounted. __krateIslandsReady settles once the islands found by
+// this run mounted.
 const clientIslandLoaderJS = `(function(){
 var W=window,reg=W.__krateIslands||(W.__krateIslands=[]),OPEN="krate-island:",CLOSE="/krate-island";
 for(var i=reg.length-1;i>=0;i--)if(!reg[i].connected())reg.splice(i,1);
@@ -146,21 +154,30 @@ else if(n.nodeType===1&&n.localName==="krate-island"&&n.hasAttribute("data-src")
 found.forEach(function(r){
 reg.push(r);
 var up=r.parent,ready=up&&up.mounted?up.mounted.catch(function(){}):null;
-r.mounted=Promise.all([import(r.src),ready]).then(function(m){return m[0].mount(r.el||r)}).then(function(){
+r.mounted=Promise.all([import(r.src),ready]).then(function(m){return r.gone?null:m[0].mount(r.el||r)}).then(function(h){
+r.handle=h||null;if(r.gone){if(h&&h.unmount)h.unmount();return}
 r.status="hydrated";try{W.dispatchEvent(new CustomEvent("krate:island",{detail:r}))}catch(e){}
 }).catch(function(e){console.error("krate client component:",e);r.status="error";if(r.el)r.el.setAttribute("data-krate-island-error","")});
-if(r.el)r.el.__krateMount=r.mounted})})();
+if(r.el)r.el.__krateMount=r.mounted});
+W.__krateIslandsReady=Promise.all(found.map(function(r){return r.mounted}))})();
 `
 
 // islandLoaderHTML writes the island loader chunk (once per content) and
 // returns the script tag that references it. The tag is deferred so a hard
 // load runs it after the document, including spliced regions, is parsed.
+// The chunk also carries the runtime's island-preserving router swap
+// (krate-island-swap.js, window.__krateIslandSwap), so only pages with
+// islands ship it; without it the router replaces islands as plain markup.
 func (b *Builder) islandLoaderHTML() (string, error) {
-	name := "chunks/island-loader." + hashContent([]byte(clientIslandLoaderJS)) + ".js"
+	code := clientIslandLoaderJS
+	if swap := loadNamedBundleFromDisk(b.Root, "krate-island-swap.js"); swap != "" {
+		code += swap
+	}
+	name := "chunks/island-loader." + hashContent([]byte(code)) + ".js"
 	if err := os.MkdirAll(filepath.Join(b.Cfg.OutDir, "chunks"), 0755); err != nil {
 		return "", err
 	}
-	if err := fsutil.WriteFileIfChanged(filepath.Join(b.Cfg.OutDir, name), []byte(clientIslandLoaderJS), 0644); err != nil {
+	if err := fsutil.WriteFileIfChanged(filepath.Join(b.Cfg.OutDir, name), []byte(code), 0644); err != nil {
 		return "", err
 	}
 	return `<script defer src="` + assetHref(b.Cfg.BaseURLPath(), name) + `"></script>`, nil
@@ -256,7 +273,8 @@ function __krateRootRefs(raw) {
 `
 
 // clientActionCallJS posts a server action call from a client component,
-// using the same protocol as the Krate runtime (callServerAction).
+// using the same protocol as the Krate runtime (callServerAction), and
+// announces a revalidation the same way (the router refreshes the route).
 const clientActionCallJS = `
 async function __krateCallAction(url, args) {
   var headers = { accept: "application/json", "x-krate-action": "fetch", "content-type": "application/json" };
@@ -265,6 +283,10 @@ async function __krateCallAction(url, args) {
   var payload = null;
   try { payload = await res.json(); } catch (e) { payload = null; }
   if (!res.ok || !payload || payload.ok === false) throw new Error((payload && payload.error && (payload.error.message || payload.error)) || ("server action failed: " + res.status));
+  if (payload.revalidated && typeof window !== "undefined" && typeof CustomEvent === "function") {
+    var info = payload.revalidation || {};
+    window.dispatchEvent(new CustomEvent("krate:revalidate", { detail: { paths: Array.isArray(info.paths) ? info.paths : [], tags: Array.isArray(info.tags) ? info.tags : [] } }));
+  }
   if (typeof payload.redirect === "string" && payload.redirect) {
     var to = payload.redirect;
     if (to.charAt(0) === "/" && to.charAt(1) !== "/" && to.indexOf("\\\\") === -1 && !/[\\x00-\\x1f\\x7f]/.test(to)) location.assign(to);
@@ -999,7 +1021,7 @@ func (b *Builder) clientChunkJobs(reqs []clientChunkReq) ([]clientChunkInfo, []*
 
 // clientChunkSource is the entry module of a boundary's hydration chunk.
 func clientChunkSource(entry string) string {
-	return "import { h, hydrate } from \"preact\";\nimport { Suspense as __KrateSuspense } from \"preact/compat\";\n" + entry +
+	return "import { h, hydrate, render as __krateRender } from \"preact\";\nimport { Suspense as __KrateSuspense } from \"preact/compat\";\n" + entry +
 		clientReviveJS + clientActionCallJS + preactSlotJS + `
 function __resolve(name) {
   return name.split(".").reduce(function (o, k) { return o == null ? o : o[k]; }, __m);
@@ -1007,28 +1029,51 @@ function __resolve(name) {
 export function component(name) { return __resolve(name); }
 // mount hydrates the island the loader found: the nodes between its two
 // comments (see clientIslandLoaderJS), under a stand-in parent that confines
-// Preact to them.
+// Preact to them. It returns the island's handle: update re-renders the same
+// root with new server props (pool holds the nodes of server children the
+// props now refer to), unmount renders nothing into it, and slots lists the
+// server children adopted from the document, in document order.
 export async function mount(island) {
   var name = island.export;
   var C = __resolve(name);
   if (typeof C !== "function") throw new Error("client module " + island.module + " has no component export " + name);
-  var raw = island.props || {};
   var loaded = {};
   loaded[island.module + "#" + name] = C;
-  await Promise.all(__krateRootRefs(raw).map(function (r) {
-    return import(r.s).then(function (m) { loaded[r.m + "#" + r.e] = m.component(r.e); });
-  }));
-  __krateSlotPool = __krateServerSlots(island);
-  var props;
-  try {
-    props = __krateRevive(raw, h, __krateCallAction, function (m, e) { return loaded[m + "#" + e]; });
-  } finally {
-    __krateSlotPool = null;
+  function load(raw) {
+    var miss = __krateRootRefs(raw).filter(function (r) { return !loaded[r.m + "#" + r.e]; });
+    return miss.length ? Promise.all(miss.map(function (r) {
+      return import(r.s).then(function (m) { loaded[r.m + "#" + r.e] = m.component(r.e); });
+    })) : null;
   }
-  // The root is a Suspense boundary, as in React: a lazy() or use() with no
-  // boundary of its own waits there (keeping the server HTML) instead of
-  // throwing its promise out of the island.
-  hydrate(__krateInScope(island.start, h(__KrateSuspense, { fallback: null }, h(C, props))), __krateRangeRoot(island));
+  await load(island.props || {});
+  var slots = [];
+  var pool = __krateServerSlots(island, slots);
+  var root = __krateRangeRoot(island);
+  function show(raw, hydrating) {
+    __krateSlotPool = pool;
+    var props;
+    try {
+      props = __krateRevive(raw, h, __krateCallAction, function (m, e) { return loaded[m + "#" + e]; });
+    } finally {
+      __krateSlotPool = null;
+    }
+    // The root is a Suspense boundary, as in React: a lazy() or use() with no
+    // boundary of its own waits there (keeping the server HTML) instead of
+    // throwing its promise out of the island.
+    (hydrating ? hydrate : __krateRender)(__krateInScope(island.start, h(__KrateSuspense, { fallback: null }, h(C, props))), root);
+  }
+  show(island.props || {}, true);
+  return {
+    slots: slots.map(function (s) { return { id: s.id, html: s.html, set: (pool[s.id] || [])[0] || [] }; }),
+    update: function (raw, more) {
+      if (more) for (var k in more) pool[k] = more[k];
+      island.props = raw;
+      var wait = load(raw);
+      if (!wait) return void show(raw, false);
+      return wait.then(function () { if (island.props === raw) show(raw, false); });
+    },
+    unmount: function () { __krateRender(null, root); },
+  };
 }
 `
 }
