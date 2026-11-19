@@ -64,6 +64,12 @@ node scripts/npm-trust.mjs --dry-run      # what it would do
 node scripts/npm-trust.mjs <new-package>  # or no names: every package
 ```
 
+npm asks for two-factor authentication on the first call: the script gives
+that call the terminal, so open the URL it prints (or enter a code), and npm
+lets the following calls through for a few minutes. `--otp <code>` passes an
+authenticator code instead. `npm trust` does not accept an access token that
+bypasses 2FA; if your npm login is one, `npm logout` and `npm login` again.
+
 For a package that is not on npm, the script publishes a deprecated placeholder
 (`0.0.0-bootstrap.0`, no code), then runs `npm trust github` for every
 package that does not trust the workflow yet. Packages already set up are

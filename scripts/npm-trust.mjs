@@ -3,7 +3,7 @@
  * Makes npm trust the release workflow to publish every Krate package
  * (trusted publishing), creating any package that is not on npm yet.
  *
- *   node scripts/npm-trust.mjs [--dry-run] [name...]
+ *   node scripts/npm-trust.mjs [--dry-run] [--otp <code>] [name...]
  *
  * Run it from a machine logged in to npm (`npm login`) with an account that
  * can publish the packages and has 2FA on. It needs npm 11.15.0 or later for
@@ -17,6 +17,11 @@
  *
  * Packages that already trust the workflow are left alone, so the script can
  * be re-run, and is the step to run whenever a release adds a package.
+ *
+ * npm asks for two-factor authentication on the first trust call: the script
+ * hands that call the terminal so the browser approval (or a code prompt) can
+ * run, and npm lets the following calls through for a few minutes. --otp
+ * passes an authenticator code instead.
  */
 
 import { spawnSync } from 'node:child_process';
@@ -70,14 +75,50 @@ export function placeholderManifest(name) {
   };
 }
 
+/** An authenticator code passed with --otp, handed to every npm call that changes or reads trust. */
+let otp = '';
+
 function run(args, opts = {}) {
-  return spawnSync('npm', args, { encoding: 'utf8', shell, ...opts });
+  return spawnSync('npm', otp ? [...args, `--otp=${otp}`] : args, { encoding: 'utf8', shell, ...opts });
+}
+
+/** Whether npm refused because the call needs two-factor authentication. */
+export function needsOTP(output) {
+  return /\bEOTP\b|one-time password/i.test(output);
+}
+
+const output = (res) => `${res.stderr ?? ''}${res.stdout ?? ''}`;
+
+/**
+ * Runs npm with its output captured. npm can only ask for two-factor
+ * authentication (a browser approval or a code) on a terminal, so when it asks,
+ * the same command runs again attached to the terminal for the person to
+ * approve, then once more captured: npm lets the account's next calls through
+ * for a few minutes after an approval.
+ */
+function runAuthed(args) {
+  const first = run(args);
+  if (first.status === 0 || !needsOTP(output(first))) return first;
+  console.log(`\nnpm asks for two-factor authentication for \`npm ${args.slice(0, 2).join(' ')}\`. Approve it below (open the URL, or enter a code); one approval covers the next calls for a few minutes.\n`);
+  const live = run(args, { stdio: 'inherit' });
+  if (live.status !== 0) return { ...live, stdout: '', stderr: 'two-factor authentication failed or was cancelled' };
+  return run(args);
+}
+
+/** Why npm keeps asking for 2FA, and what to do. */
+function otpHint(text) {
+  const bypass = /bypass 2FA/i.test(text)
+    ? ' Your npm login looks like an access token that bypasses 2FA, which `npm trust` does not accept: run `npm logout`, then `npm login` (the browser login), and re-run.'
+    : '';
+  return `npm still asks for a one-time password after the approval.${bypass} Or re-run with --otp <code from your authenticator app>.`;
 }
 
 function trustList(name) {
-  const res = run(['trust', 'list', name, '--json']);
+  const res = runAuthed(['trust', 'list', name, '--json']);
   if (res.status === 0) return res.stdout;
-  return new Error((res.stderr || res.stdout || res.error?.message || 'failed').trim());
+  const text = output(res);
+  if (needsOTP(text)) return new Error(otpHint(text));
+  return new Error((text || res.error?.message || 'failed').trim());
 }
 
 function npmVersionOK() {
@@ -109,6 +150,15 @@ function trust(name) {
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const args = process.argv.slice(2);
   const dryRun = args.includes('--dry-run');
+  const otpAt = args.indexOf('--otp');
+  if (otpAt >= 0) {
+    otp = args[otpAt + 1] ?? '';
+    if (!/^\d{6,8}$/.test(otp)) {
+      console.error('npm-trust: --otp needs the code from your authenticator app');
+      process.exit(1);
+    }
+    args.splice(otpAt, 2);
+  }
   const names = args.filter((a) => !a.startsWith('--'));
   const all = npmPackageNames();
   for (const n of names) {
@@ -127,13 +177,16 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     console.error('npm-trust: not logged in to npm: run npm login first');
     process.exit(1);
   }
-  const plan = planTrust(names.length > 0 ? names : all, { exists: viewPackage, trustList });
+  const targets = names.length > 0 ? names : all;
   let failed = 0;
   let calls = 0;
-  for (const step of plan) {
+  // One package at a time, so a 2FA prompt or failure stops before the rest.
+  for (const name of targets) {
+    const [step] = planTrust([name], { exists: viewPackage, trustList });
     if (step.error) {
       console.error(`npm-trust: ${step.name}: ${step.error}`);
       failed++;
+      if (/one-time password/.test(step.error)) break; // every later call would ask again
       continue;
     }
     if (!step.bootstrap && !step.trust) {
@@ -162,5 +215,5 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     console.error(`npm-trust: ${failed} package(s) failed; fix them and re-run (packages already done are skipped)`);
     process.exit(1);
   }
-  console.log(`npm-trust: ${plan.length} package(s) ${dryRun ? 'checked' : 'trust the release workflow'}`);
+  console.log(`npm-trust: ${targets.length} package(s) ${dryRun ? 'checked' : 'trust the release workflow'}`);
 }
