@@ -11,6 +11,7 @@ require (
 	github.com/google/rpmpack v0.7.1
 	github.com/hashicorp/go-hclog v0.14.1
 	github.com/hashicorp/go-plugin v1.6.3
+	github.com/klauspost/compress v1.18.0
 	github.com/kratejs/krate/packages/native v0.0.0
 	github.com/mattn/go-isatty v0.0.20
 	github.com/skrashevich/go-webp v0.1.0
@@ -28,7 +29,6 @@ require (
 	github.com/golang/protobuf v1.5.3 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/hashicorp/yamux v0.1.1 // indirect
-	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/klauspost/pgzip v1.2.6 // indirect
 	github.com/mattn/go-colorable v0.1.4 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect

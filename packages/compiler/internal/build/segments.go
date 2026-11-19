@@ -311,23 +311,20 @@ func (e SegmentEntry) match(kind SegmentKind, params map[string]string) SegmentM
 // urlPath. The root pattern ("") matches every path. A catch-all as the last
 // segment consumes the rest of the path.
 func matchRoutePrefix(urlPath, pattern string) (map[string]string, bool) {
-	segs := parseRoutePattern(pattern)
-	if len(segs) == 0 {
+	rp := cachedRoutePattern(pattern)
+	if len(rp.segs) == 0 {
 		return map[string]string{}, true
 	}
-	trimmed := strings.Trim(urlPath, "/")
-	var parts []string
-	if trimmed != "" {
-		parts = strings.Split(trimmed, "/")
+	var buf [16]string
+	parts := splitURLPath(urlPath, buf[:])
+	last := rp.segs[len(rp.segs)-1]
+	if last.kind != segCatchAll && last.kind != segOptionalCatchAll {
+		if len(parts) < len(rp.segs) {
+			return nil, false
+		}
+		parts = parts[:len(rp.segs)]
 	}
-	last := segs[len(segs)-1]
-	if last.kind == segCatchAll || last.kind == segOptionalCatchAll {
-		return matchRoutePattern(urlPath, pattern)
-	}
-	if len(parts) < len(segs) {
-		return nil, false
-	}
-	return matchRoutePattern("/"+strings.Join(parts[:len(segs)], "/"), pattern)
+	return rp.match(parts)
 }
 
 // segmentFile is one discovered segment page source.
