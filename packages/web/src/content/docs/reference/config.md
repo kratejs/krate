@@ -579,9 +579,11 @@ per-user/per-session content, or one user's output can be served to another.
 prefetch: "intent", // "intent" (default) | "viewport"
 ```
 
-Links are prefetched on hover, focus and touch. `"viewport"` also prefetches links
-as they scroll near the viewport (at most 5 per page), which costs requests on
-link-heavy pages. A `<Link prefetch>` prop overrides the site default
+Links are prefetched on hover and focus (after a short intent delay) and right
+away on touch or pointer press, so a tap or a quick click finds the document
+already on its way. A prefetch also warms the page's stylesheets and scripts.
+`"viewport"` also prefetches links as they scroll near the viewport (at most 5
+per page), which costs requests on link-heavy pages. A `<Link prefetch>` prop overrides the site default
 (`prefetch={false}` never prefetches). No prefetching happens when the browser
 reports Save-Data or a 2g connection.
 
@@ -591,11 +593,20 @@ reports Save-Data or a 2g connection.
 viewTransitions: "auto", // "auto" (default) | "off" | true | false
 ```
 
-When enabled, the SPA router wraps each navigation in the native View
-Transitions API (`document.startViewTransition`), and every page emits the
-cross-document `@view-transition { navigation: auto }` rule so full-page loads
-morph too. Mark persistent chrome with `data-view-transition="name"` to morph it
-instead of cross-fading. Reduced-motion preferences are respected.
+When enabled, the SPA router wraps each navigation to another page in the
+native View Transitions API (`document.startViewTransition`), and every page
+emits the cross-document `@view-transition { navigation: auto }` rule so
+full-page loads morph too. A `router.refresh()` (including the refresh after a
+server action revalidates) and a navigation that only changes the query string
+of the current page swap in place without a transition, so a search box that
+updates the URL on each keystroke does not cross-fade. Mark persistent chrome
+with `data-view-transition="name"` to morph it instead of cross-fading.
+Reduced-motion preferences are respected.
+
+With View Transitions off (or unsupported), nothing animates: the current page
+stays fully visible and interactive until the next one is ready, then swaps in
+one frame. Style the pending state with `html[data-krate-navigating]` (see
+[Loading states](/docs/core-concepts/routing/#loading-states)).
 
 Pages carry the router's settings in a JSON data block in `<head>`
 (`<script type="application/json" id="__krate_cfg__">`), and only when a setting

@@ -309,12 +309,12 @@ full-page navigations (`refresh()` reloads, `prefetch()` resolves immediately).
 |-----|-------------|
 | `krateRouter.push/replace(url, opts)` | Client navigation. `opts`: `scroll` (default `true`), `state` (stored on the history entry). |
 | `krateRouter.back()/forward()` | History traversal. |
-| `krateRouter.refresh()` | Re-fetches the current route bypassing the prefetch cache; scroll position and history are kept. |
+| `krateRouter.refresh()` | Re-fetches the current route bypassing the prefetch and history caches; scroll position and history are kept. |
 | `krateRouter.prefetch(url)` | Fetches and caches a same-origin document. |
 | `subscribeNavigation(fn)` | Calls `fn({ url, pathname, search, hash, status })` on URL and loading-status changes; returns an unsubscribe function. `pathname` excludes the base path. |
 | `getNavigationState()` | The current value delivered to subscribers. |
 | `getHistoryState()` | The `state` passed to the navigation that created the current entry. |
-| `invalidatePrefetchCache(url?)` | Drops one prefetched document, or all of them. |
+| `invalidatePrefetchCache(url?)` | Drops one prefetched (and back/forward cached) document, or all of them. |
 
 **Events** (on `window`, `detail` in parentheses):
 
@@ -345,9 +345,20 @@ full-page navigations (`refresh()` reloads, `prefetch()` resolves immediately).
   in place, keeping the SPA alive. Without an HTML body, `404`/`410` load
   `<basePath>/404.html` and `5xx` load `<basePath>/500.html`; other statuses
   (`401`, `403`, `429`) do a full navigation so the browser shows the real response.
-- **Prefetch cache**: documents prefetched by hover, opted-in viewport entry or `prefetch()` stay
+- **Prefetch cache**: documents prefetched by hover, press, opted-in viewport entry or `prefetch()` stay
   fresh for 30 seconds (`window.__KRATE_CFG__.prefetchTTL`), are used at most once,
   and are bounded (LRU). `refresh()` and `krate:revalidate` bypass it.
+- **Back/forward cache**: the documents of the last 10 visited history entries
+  are kept, so back/forward renders them without a request (scroll position is
+  restored as usual). `krate:revalidate` and `invalidatePrefetchCache()` clear
+  it; `refresh()` bypasses it.
+- **Pending state**: while a navigation loads, the current page stays visible
+  and interactive and `<html>` carries `data-krate-navigating`. The new page
+  swaps in once its document, stylesheets and scripts have loaded (at most 3
+  seconds of waiting on assets), so it is hydrated as it appears. A
+  `loading.tsx` overlay shows only after 100ms of waiting on the network.
+- **View Transitions**: a change of page is wrapped in a View Transition; a
+  `refresh()` or a query-only change of the current page is not.
 - **Races**: a newer navigation aborts the older fetch; a superseded response never
   replaces newer content.
 - **Accessibility**: after a navigation focus moves to `#root` (its temporary
