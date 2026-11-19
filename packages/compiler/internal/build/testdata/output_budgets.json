@@ -14,25 +14,25 @@
   "/docs": {
     "html": 3486,
     "css": 9998,
-    "ownJs": 31259,
-    "js": 31259
+    "ownJs": 32095,
+    "js": 32095
   },
   "/docs/apis": {
-    "html": 4292,
+    "html": 4293,
     "css": 11612,
-    "ownJs": 34093,
-    "js": 34093
+    "ownJs": 34929,
+    "js": 34929
   },
   "/docs/guide": {
     "html": 4257,
     "css": 11612,
-    "ownJs": 34017,
-    "js": 34017
+    "ownJs": 34853,
+    "js": 34853
   },
   "/react-island": {
     "html": 701,
     "css": 1520,
-    "ownJs": 27725,
-    "js": 27725
+    "ownJs": 28561,
+    "js": 28561
   }
 }
