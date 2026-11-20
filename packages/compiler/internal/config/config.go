@@ -281,7 +281,14 @@ type SSRConfig struct {
 	MiddlewareRuntime string `json:"middlewareRuntime,omitempty"`
 	// APIRuntime controls which runtime executes API routes.
 	// "quickjs" (default) = embedded, "node"/"bun"/"deno" = sidecar.
+	// "scriptc" (experimental, production only) compiles the TypeScript routes
+	// that scriptc accepts into one native executable; the rest stay on the
+	// embedded runtime. krate dev always uses the embedded runtime.
 	APIRuntime string `json:"apiRuntime,omitempty"`
+	// ScriptcStrict makes a route that scriptc cannot compile (apiRuntime
+	// "scriptc") fail the build instead of falling back to the embedded
+	// runtime with a warning.
+	ScriptcStrict bool `json:"scriptcStrict,omitempty"`
 	// APIWorkers is the size of the embedded QuickJS API worker pool. The pool
 	// runs that many requests concurrently and reuses VMs, so module state
 	// persists across requests (Node/Next semantics). Default: 1, because the

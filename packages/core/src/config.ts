@@ -198,7 +198,13 @@ export interface SSRConfig {
   timeout?: number;
   maxCacheSize?: number;
   middlewareRuntime?: RuntimeName;
-  apiRuntime?: RuntimeName;
+  /**
+   * Runtime for API routes. "scriptc" is experimental and production only:
+   * routes scriptc accepts run in one native executable, the rest in QuickJS.
+   */
+  apiRuntime?: RuntimeName | "scriptc";
+  /** With `apiRuntime: "scriptc"`, fail the build when a route cannot be compiled. */
+  scriptcStrict?: boolean;
   ssrRuntime?: "quickjs" | "node" | "bun" | "deno";
   /**
    * Size of the embedded QuickJS API worker pool; module state persists

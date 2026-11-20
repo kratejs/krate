@@ -208,6 +208,17 @@ func (c *Config) Validate() (warnings []string, err error) {
 	if c.SSR.MaxCacheSize < 0 {
 		return nil, fmt.Errorf("ssr.maxCacheSize must be >= 0, got %d", c.SSR.MaxCacheSize)
 	}
+	switch strings.ToLower(c.SSR.APIRuntime) {
+	case "", "quickjs", "node", "bun", "deno", "scriptc":
+	default:
+		return nil, fmt.Errorf("ssr.apiRuntime must be \"quickjs\", \"node\", \"bun\", \"deno\" or \"scriptc\", got %q", c.SSR.APIRuntime)
+	}
+	if strings.EqualFold(c.SSR.MiddlewareRuntime, "scriptc") {
+		return nil, fmt.Errorf("ssr.middlewareRuntime \"scriptc\" is not supported; only ssr.apiRuntime can be \"scriptc\"")
+	}
+	if c.SSR.ScriptcStrict && !strings.EqualFold(c.SSR.APIRuntime, "scriptc") {
+		warnings = append(warnings, "ssr.scriptcStrict has no effect unless ssr.apiRuntime is \"scriptc\"")
+	}
 	if c.SSR.APIWorkers < 0 {
 		return nil, fmt.Errorf("ssr.apiWorkers must be >= 0, got %d", c.SSR.APIWorkers)
 	}

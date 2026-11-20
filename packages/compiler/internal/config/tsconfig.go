@@ -1264,6 +1264,10 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 				if s, ok := v.(string); ok {
 					cfg.SSR.APIRuntime = s
 				}
+			case "scriptcStrict":
+				if b, ok := v.(bool); ok {
+					cfg.SSR.ScriptcStrict = b
+				}
 			case "apiWorkers":
 				switch n := v.(type) {
 				case int64:
