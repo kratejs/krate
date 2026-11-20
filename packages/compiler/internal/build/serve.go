@@ -367,11 +367,22 @@ const server = http.createServer(async (req, res) => {
           // are produced instead of after the handler finishes.
           const reader = response.body.getReader();
           res.on('close', () => { reader.cancel().catch(() => {}); });
-          for (;;) {
-            const r = await reader.read();
-            if (r.done) break;
-            const chunk = typeof r.value === 'string' ? r.value : Buffer.from(r.value);
-            if (!res.write(chunk)) await new Promise((ok) => res.once('drain', ok));
+          const toChunk = (v) => (typeof v === 'string' ? v : Buffer.from(v));
+          let r = await reader.read();
+          if (!r.done && !res.hasHeader('content-length')) {
+            // A body that is already complete (Response.json, a string) ends in
+            // microtasks. Sending it with res.end gives it a Content-Length and
+            // one write; a body still being produced is flushed on the next
+            // macrotask, so streaming stays prompt.
+            const first = r;
+            const pending = reader.read();
+            const settled = await Promise.race([pending, new Promise((ok) => setImmediate(ok, null))]);
+            if (settled && settled.done) return res.end(toChunk(first.value));
+            if (!res.write(toChunk(first.value))) await new Promise((ok) => res.once('drain', ok));
+            r = settled || (await pending);
+          }
+          for (; !r.done; r = await reader.read()) {
+            if (!res.write(toChunk(r.value))) await new Promise((ok) => res.once('drain', ok));
           }
           res.end();
         } else if (response !== undefined && response !== null) {
@@ -1704,8 +1715,12 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	}
 
 	absOut := revalOut
+	if hub == nil {
+		// The output is fixed while serving in production: probe it once.
+		defer registerOutIndex(absOut)()
+	}
 
-	fileServer := http.FileServer(hardenedDir{http.Dir(absOut)})
+	fileServer := http.FileServer(newStaticFS(absOut))
 	mux := http.NewServeMux()
 
 	// Load the build manifest to learn which dynamic routes are closed
@@ -1797,6 +1812,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 
 	// Middleware (matcher-scoped) runs in front of pages, API routes and
 	// server actions alike.
+	staticFS := newStaticFS(absOut)
 	gate := &middlewareGate{
 		rt:           middlewareRT,
 		dev:          hub != nil,
@@ -1806,7 +1822,10 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		secret:       revalHost.secret,
 		sidecarReady: nodeReady,
 		staticExists: func(urlPath string) bool {
-			f, err := hardenedDir{http.Dir(absOut)}.Open(urlPath)
+			if d, ok := staticFS.(indexedDir); ok {
+				return d.isFile(urlPath)
+			}
+			f, err := staticFS.Open(urlPath)
 			if err != nil {
 				return false
 			}
@@ -3005,6 +3024,13 @@ func staticRouteExists(absOut, urlPath string) bool {
 	} else if strings.HasSuffix(rel, "/") {
 		rel = rel + "index.html"
 	}
+	if idx := lookupOutIndex(absOut); idx != nil {
+		rel = path.Clean(rel)
+		if rel == "." {
+			rel = ""
+		}
+		return idx.isFile(rel) || idx.isFile(relJoin(rel, "index.html"))
+	}
 	candidates := []string{
 		filepath.Join(absOut, filepath.FromSlash(rel)),               // literal file
 		filepath.Join(absOut, filepath.FromSlash(rel), "index.html"), // folder route
@@ -3049,6 +3075,9 @@ func isBakedAsset(absOut, urlPath string) bool {
 		return false
 	}
 	rel := strings.TrimPrefix(path.Clean("/"+up), "/")
+	if idx := lookupOutIndex(absOut); idx != nil {
+		return idx.isFile(rel)
+	}
 	fi, err := os.Stat(filepath.Join(absOut, filepath.FromSlash(rel)))
 	return err == nil && !fi.IsDir()
 }
@@ -3415,6 +3444,9 @@ func staticDirExists(absOut, urlPath string) bool {
 	up, err := url.PathUnescape(urlPath)
 	if err != nil {
 		up = urlPath
+	}
+	if idx := lookupOutIndex(absOut); idx != nil {
+		return idx.isDir(cleanRel(up))
 	}
 	fi, err := os.Stat(filepath.Join(absOut, filepath.FromSlash(path.Clean("/"+up))))
 	return err == nil && fi.IsDir()
