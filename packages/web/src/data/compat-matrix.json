@@ -1,5 +1,5 @@
 {
-  "updated": "2026-11-13",
+  "updated": "2026-11-20",
   "rows": [
     {
       "id": "hooks-state",
@@ -2178,6 +2178,33 @@
       "roadmap": false,
       "knownLimits": [
         "Building a page that imports motion/react logs the warning KR7116 (two motion-dom modules export scrapeMotionValuesFromProps); it does not affect the result."
+      ]
+    },
+    {
+      "id": "api-runtime-scriptc",
+      "area": "API routes on scriptc (ssr.apiRuntime \"scriptc\")",
+      "source": "partial",
+      "islands": "n/a",
+      "ssr": "n/a",
+      "target": "Experimental: compile TypeScript API routes to one native executable",
+      "summary": "With ssr.apiRuntime set to \"scriptc\", krate build compiles the TypeScript routes that scriptc accepts (checked with scriptc coverage per route) from their original sources into one native server, and krate serve runs it behind the same secret, middleware, body limits and route budgets as the Node sidecar. Routes scriptc rejects, default exports and Node-only routes keep running on the embedded runtime or Node with a KR7238 warning (an error with ssr.scriptcStrict). The Go tests run the whole build and serve path against a stand-in scriptc; TestScriptcBuildAndServeReal runs it with the real scriptc (0.4.x) when KRATE_SCRIPTC=1.",
+      "tests": [
+        "TestScriptcPartitionAndFallback",
+        "TestScriptcEntryUsesNamedImportsOnly",
+        "TestScriptcBuildAndServeWithStandIn",
+        "TestScriptcBuildAndServeReal",
+        "TestScriptcSidecarProxy",
+        "TestAPIRuntimeScriptcValidation"
+      ],
+      "roadmap": false,
+      "diagnostics": [
+        "KR7236",
+        "KR7238"
+      ],
+      "knownLimits": [
+        "Experimental and production only: krate dev runs every route on the embedded runtime, so a route can fall back only in krate build.",
+        "The compiled server has no request.cookies, request.nextUrl, request-store helpers (headers(), cookies(), redirect()), revalidatePath, after() or per-request AbortSignal; routes that need them stay on the default runtime.",
+        "Needs scriptc (Node 24 or later) and clang or zig at build time, and the executable is built for the build machine's platform; routes scriptc rejects fall back instead of failing unless ssr.scriptcStrict is set."
       ]
     }
   ]

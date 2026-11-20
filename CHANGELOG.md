@@ -246,6 +246,14 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Added
 
+- Experimental `ssr.apiRuntime: "scriptc"` (production only): `krate build` compiles the TypeScript API
+  routes that scriptc accepts, from their original sources, into one native executable
+  (`.krate/api-scriptc-server`), and `krate serve` runs it as a sidecar behind the same secret,
+  middleware, body limits and route budgets as the Node sidecar. Each route is checked with
+  `scriptc coverage`; one scriptc rejects, with a default export, or Node-only keeps its existing
+  runtime and is reported as KR7238 (an error with `ssr.scriptcStrict: true`). A missing scriptc or
+  linker is KR7236. `.krate/api-scriptc.json` records where each route runs. `krate dev` keeps the
+  embedded runtime and says so once. `ssr.apiRuntime` is now validated. See docs features/api-routes.
 - Benchmarks page (docs guides/benchmarks) with cold build time, client JS size, API route and
   runtime-component SSR throughput against Next.js, Vite, Astro, SvelteKit and Remix. Scores live in
   `packages/web/src/data/benchmarks.json`, written by `node packages/benchmark/src/run.mjs publish`;

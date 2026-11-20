@@ -84,6 +84,78 @@ overrides:
 - Go API routes (`src/api/*.go`) remain the fastest option; the sidecar binary
   is a compiled Go server.
 
+### Native TypeScript routes with scriptc (experimental)
+
+`ssr.apiRuntime: "scriptc"` compiles the TypeScript routes that
+[scriptc](https://scriptc.dev) accepts into one native executable at
+`krate build`. `krate serve` starts that executable next to the host and sends
+the compiled routes to it; every other route runs where it ran before. It is
+experimental and production only: scriptc compiles a subset of TypeScript, and
+the support is tied to the scriptc version you install.
+
+```typescript
+export default {
+  ssr: { apiRuntime: "scriptc" },
+};
+```
+
+What you need at build time: `scriptc` on `PATH` (`npm install -g scriptc`, which
+needs Node 24 or later to run) and the linker it uses, `clang` on macOS and glibc
+Linux (or `zig`; set `SCRIPTC_LINKER` to use another). Nothing is needed to run
+the build output beyond the executable the build wrote. A missing tool fails the
+build with [`KR7236`](/docs/reference/diagnostics/#kr7236) and says what to
+install, unless no route can be compiled.
+
+How routes are chosen:
+
+- The build compiles the **original route sources** (`src/api/**/*.ts`), not the
+  bundles, so scriptc sees your types and runs typed code on its fast path.
+  It generates `.krate/api-scriptc/main.ts` (named imports of each route's
+  `GET`, `POST`, ... exports and a small `node:http` server) and compiles it
+  to `.krate/api-scriptc-server`.
+- Each route is first checked with `scriptc coverage --fail-on=blockers`. A route
+  with a blocker is not compiled: it keeps its embedded-runtime bundle and runs
+  on QuickJS, and the build prints a [`KR7238`](/docs/reference/diagnostics/#kr7238)
+  warning at the line scriptc rejects, with its hint. Set `ssr.scriptcStrict: true` to make
+  each of those an error instead.
+- A route also stays off scriptc, with the reason in the warning, when it has a
+  default export or `export *` (scriptc rejects default exports), exports no
+  HTTP method by name, or is Node-only (it imports a native addon or a Node
+  built-in the embedded runtime cannot run). Node-only routes keep going to the
+  Node sidecar.
+- `.krate/api-scriptc.json`, next to `api-routes.json`, records the runtime of
+  every route (`scriptc`, `quickjs` or `node`) and the reason for each fallback.
+
+How the executable behaves: it answers only the Krate host (the per-process
+secret, as the Node sidecar does), so middleware, CSRF, body limits and route
+budgets (`maxDuration`, answered `504`) still apply in front of it. It returns
+`405` with `Allow`, an automatic `OPTIONS` answer, `HEAD` from `GET`, `500` with
+no error detail for a thrown error, a `Content-Length` for a complete body and
+streams other bodies as they are produced. `krate serve` restarts it if it exits
+and stops it on shutdown.
+
+Limits to know about:
+
+- `krate dev` never compiles: it runs every route on the embedded QuickJS runtime
+  (and says so once), so a route can pass in dev and fall back in the build. Run
+  `krate build` to see the warnings.
+- The server does not provide `request.cookies`, `request.nextUrl`,
+  `headers()`/`cookies()`/`redirect()` from the request store, `revalidatePath`,
+  `after()`, a per-request `AbortSignal` or middleware-style `NextResponse`
+  helpers. A route that uses them either fails coverage and falls back, or
+  does not get them: keep such routes on the default runtime.
+- Dynamic route params are passed as a plain object, as for the other runtimes.
+  There is no `eval`, `new Function`, `vm` or dynamic `import()`.
+- Routes are compiled together: one coverage-clean entry is built, so a scriptc
+  version that rejects the generated server (not your code) fails the build with
+  [`KR7237`](/docs/reference/diagnostics/#kr7237) rather than falling back.
+- The executable is built for the machine that runs `krate build`. Build on the
+  platform you deploy to.
+
+To check a route by hand, run scriptc on the entry the build generated:
+`scriptc coverage .krate/api-scriptc/main.ts --fail-on=blockers`, or compile
+one route's handlers into a scratch entry the same way.
+
 ### Web APIs in the embedded runtime
 
 Route handlers receive a standard Web `Request` and return a `Response`; the
