@@ -11,7 +11,6 @@ import { join } from 'node:path';
 import { BUILD_FRAMEWORKS, API_FRAMEWORKS, SSR_FRAMEWORKS, npxCmd, exeName } from './lib/frameworks.mjs';
 import {
   pkgRoot,
-  exists,
   run,
   timed,
   spawnProcess,
