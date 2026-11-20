@@ -289,7 +289,8 @@
   G.__krate_begin_req = function () {
     var rawJson = G.__krate_req;
     var raw = JSON.parse(rawJson);
-    return begin(raw.route, raw.method, rawJson, raw);
+    // Dispatch uses the upper-cased method; the Request keeps it as sent.
+    return begin(raw.route, String(raw.method).toUpperCase(), rawJson, raw);
   };
   function begin(routeId, method, rawJson, parsed) {
     G.__krate_timers_clear();

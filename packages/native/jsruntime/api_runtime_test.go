@@ -219,3 +219,25 @@ func TestEmbeddedPoolDefaultsToOne(t *testing.T) {
 		t.Errorf("sidecar default must stay at least 1")
 	}
 }
+
+// TestAPIRouteLowercaseMethodDispatch checks that a request sent with a
+// lower-case method still reaches the upper-case handler, while the Request
+// the handler sees keeps the method as sent.
+func TestAPIRouteLowercaseMethodDispatch(t *testing.T) {
+	apiDir := filepath.Join(t.TempDir(), "api")
+	_ = os.MkdirAll(apiDir, 0755)
+	routeCode := `
+function GET(request) {
+	return new Response(request.method);
+}
+`
+	_ = os.WriteFile(filepath.Join(apiDir, "m.js"), []byte(routeCode), 0644)
+	rt := NewAPIRouteRuntime(apiDir)
+	result := rt.Execute(APIRequest{Method: "get", Path: "/api/m"})
+	if result.Status != 200 {
+		t.Fatalf("status = %d (%s), want 200", result.Status, result.Body)
+	}
+	if got := string(result.Body); got != "get" && got != "GET" {
+		t.Errorf("body = %q, want the request method", got)
+	}
+}
