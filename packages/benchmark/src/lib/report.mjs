@@ -41,11 +41,11 @@ export function renderMarkdown(results) {
     lines.push('');
     lines.push('A single page with a reactive counter and a 100-item list.');
     lines.push('');
-    lines.push('| Framework | Version | Median | Best | Output size |');
-    lines.push('|-----------|---------|-------:|-----:|------------:|');
+    lines.push('| Framework | Version | Median | Best | Output size | Client JS (gzip) |');
+    lines.push('|-----------|---------|-------:|-----:|------------:|-----------------:|');
     for (const row of results.build) {
       lines.push(
-        `| ${row.name} | ${row.version ?? '-'} | ${formatMs(row.medianMs)} | ${formatMs(row.bestMs)} | ${formatBytes(row.outputBytes)} |`,
+        `| ${row.name} | ${row.version ?? '-'} | ${formatMs(row.medianMs)} | ${formatMs(row.bestMs)} | ${formatBytes(row.outputBytes)} | ${formatBytes(row.clientJsGzipBytes)} |`,
       );
     }
     lines.push('');
@@ -110,7 +110,9 @@ export function renderMarkdown(results) {
   lines.push(
     '- **Build**: dependencies are installed once, then a cold production build is run ' +
       `${results.buildMeta?.runs ?? 1} time(s); the median is reported. Output size is the ` +
-      'total size of the emitted directory.',
+      'total size of the emitted directory; client JS is the gzip (level 9) size of the JavaScript ' +
+        'the browser can load (for Krate, dist without dist/.krate; for Next.js, .next/static; for Remix, ' +
+        'build/client).',
   );
   lines.push(
     '- **API**: each server is built, warmed up, then load-tested with a fixed ' +

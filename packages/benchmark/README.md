@@ -2,7 +2,9 @@
 
 Benchmarks for Krate: build time, API throughput, and SSR page throughput
 versus other web frameworks. The results are rendered to `results/latest.md`
-(Markdown) and `results/latest.json` (machine-readable).
+(Markdown) and `results/latest.json` (machine-readable). The published scores
+live in `packages/web/src/data/benchmarks.json`, and the docs page
+[Benchmarks](https://krate.js.org/docs/guides/benchmarks/) is generated from it.
 
 ## What's measured
 
@@ -10,7 +12,9 @@ versus other web frameworks. The results are rendered to `results/latest.md`
    a 100-item list) across Krate, Next.js, Vite + React, Astro, SvelteKit, and
    Remix. Krate's fixture uses a TypeScript API route (mirroring Next.js's route
    handler). Dependencies are installed once; the median of N timed runs is
-   reported, along with the emitted output size.
+   reported, along with the emitted output size and the gzip size of the client
+   JavaScript (Krate: `dist` without `dist/.krate`; Next.js: `.next/static`;
+   Remix: `build/client`; the others: their whole output directory).
 
 2. **API throughput** - `GET /api/json` served by Krate's **Go API routes**
    (compiled to a native Go sidecar), Krate's **TypeScript API routes** (served
@@ -53,7 +57,19 @@ node src/run.mjs build            # build-time only
 node src/run.mjs api              # API throughput only
 node src/run.mjs ssr              # SSR page throughput only
 node src/run.mjs report           # print latest.md to stdout
+node src/run.mjs publish          # copy the latest full run into packages/web
 ```
+
+## Publishing scores
+
+After a full, unfiltered `node src/run.mjs all` on a quiet machine, run
+`node src/run.mjs publish`. It writes `packages/web/src/data/benchmarks.json`
+(the one source for every score the site shows: the landing page reads it, and
+`scripts/sync-benchmarks.mjs` turns it into
+`packages/web/src/content/docs/guides/benchmarks.md`). It refuses filtered or
+partial runs. CI fails when the docs page no longer matches the data file. The
+results meta records the commit and whether `packages/compiler`, `runtime` or
+`benchmark` had local changes (`-dirty`).
 
 ## Options
 

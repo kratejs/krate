@@ -2,7 +2,7 @@
   "name": "@krate/benchmark",
   "version": "0.1.0",
   "private": true,
-  "description": "Benchmarks for Krate: build time and API throughput versus other web frameworks.",
+  "description": "Benchmarks for Krate: build time, client JS, API and SSR throughput versus other web frameworks.",
   "license": "Apache-2.0",
   "type": "module",
   "homepage": "https://github.com/kratejs/krate",
@@ -18,7 +18,8 @@
     "bench:build": "node src/run.mjs build",
     "bench:api": "node src/run.mjs api",
     "bench:ssr": "node src/run.mjs ssr",
-    "report": "node src/run.mjs report"
+    "report": "node src/run.mjs report",
+    "publish": "node src/run.mjs publish"
   },
   "devDependencies": {
     "autocannon": "^8.0.0"
