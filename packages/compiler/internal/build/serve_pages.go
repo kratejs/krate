@@ -153,11 +153,19 @@ func frontRedirects(mode string, redirects []config.Redirect, next http.Handler)
 // trailing slash from the folder's index.html, instead of its own redirect to
 // the slash form. It is what trailingSlash "never" and "ignore" need.
 func serveIndexInPlace(absOut string, next http.Handler) http.Handler {
+	idx := lookupOutIndex(absOut)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := r.URL.Path
 		if (r.Method == http.MethodGet || r.Method == http.MethodHead) && p != "" && !strings.HasSuffix(p, "/") && !isFileLikePath(p) {
-			index := filepath.Join(absOut, filepath.FromSlash(path.Clean("/"+p)), "index.html")
-			if fi, err := os.Stat(index); err == nil && fi.Mode().IsRegular() {
+			ok := false
+			if idx != nil {
+				ok = idx.isFile(relJoin(cleanRel(p), "index.html"))
+			} else {
+				index := filepath.Join(absOut, filepath.FromSlash(path.Clean("/"+p)), "index.html")
+				fi, err := os.Stat(index)
+				ok = err == nil && fi.Mode().IsRegular()
+			}
+			if ok {
 				r2 := r.Clone(r.Context())
 				r2.URL.Path = p + "/"
 				if r2.URL.RawPath != "" {

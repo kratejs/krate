@@ -31,6 +31,14 @@ func apiNodeBundleDir(outDir string) string { return ServerOutPath(outDir, "api-
 // pre-.krate location (dist/<name>) left by an older build when only that exists.
 func ResolveManifestPath(outDir, name string) string {
 	cur := ServerOutPath(outDir, name)
+	if idx := lookupOutIndex(outDir); idx != nil {
+		if idx.isFile(serverOutDir + "/" + name) {
+			return cur
+		}
+		if idx.isFile(name) {
+			return filepath.Join(outDir, name)
+		}
+	}
 	if _, err := os.Stat(cur); err == nil {
 		return cur
 	}
