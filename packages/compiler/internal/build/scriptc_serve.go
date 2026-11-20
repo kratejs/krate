@@ -2,7 +2,6 @@ package build
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httputil"
@@ -79,7 +78,7 @@ func newScriptcSidecar(exe string, port int, secret string, env []string, budget
 	p.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
 		w.Header().Set("Content-Type", "application/json")
 		if c, ok := r.Context().Value(scriptcCallKey{}).(*scriptcCall); ok && c.timedOut.Load() {
-			fmt.Fprintf(os.Stderr, "  %s! API route exceeded its request budget: %s %s%s\n", cYellow, r.Method, r.URL.Path, cReset)
+			eprintf("  %s! API route exceeded its request budget: %s %s%s\n", cYellow, r.Method, r.URL.Path, cReset)
 			w.Header().Set("Cache-Control", "no-store")
 			w.WriteHeader(http.StatusGatewayTimeout)
 			_, _ = io.WriteString(w, `{"error":"Gateway Timeout"}`)
@@ -88,7 +87,7 @@ func newScriptcSidecar(exe string, port int, secret string, env []string, budget
 		if r.Context().Err() != nil {
 			return
 		}
-		fmt.Fprintf(os.Stderr, "  %sscriptc API proxy error%s %s %s: %v\n", cRed, cReset, r.Method, r.URL.Path, err)
+		eprintf("  %sscriptc API proxy error%s %s %s: %v\n", cRed, cReset, r.Method, r.URL.Path, err)
 		w.WriteHeader(http.StatusBadGateway)
 		_, _ = io.WriteString(w, `{"error":"Bad Gateway"}`)
 	}
@@ -132,7 +131,7 @@ func (s *scriptcSidecar) makeCmd(token string) *exec.Cmd {
 		"KRATE_PARENT_PID="+strconv.Itoa(os.Getpid()),
 	)
 	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stderr = childStderr()
 	return cmd
 }
 
@@ -181,7 +180,7 @@ func (s *scriptcSidecar) Run() {
 		if time.Since(started) > 10*time.Second {
 			delay = 100 * time.Millisecond
 		}
-		fmt.Fprintf(os.Stderr, "  %s! scriptc API server exited (%v); restarting in %s%s\n", cYellow, err, delay, cReset)
+		eprintf("  %s! scriptc API server exited (%v); restarting in %s%s\n", cYellow, err, delay, cReset)
 		select {
 		case <-s.stopCh:
 			return

@@ -297,7 +297,7 @@ func serveWithBrokenExecutable(t *testing.T, script string) (statuses map[string
 	t.Cleanup(func() { sidecarStartTimeout = old })
 
 	statuses = map[string]int{}
-	logs = captureStderr(t, func() {
+	logs = captureErrOutput(t, func() {
 		base, err := startKrateServer(t, root, b.Cfg)
 		if err != nil {
 			t.Errorf("serve: %v", err)

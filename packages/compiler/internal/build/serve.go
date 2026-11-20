@@ -1773,7 +1773,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		if hub != nil {
 			scriptcDevNotice()
 		} else if plan := loadScriptcServePlan(root); plan.warning != "" {
-			fmt.Fprintf(os.Stderr, "  %s! %s%s\n", cYellow, plan.warning, cReset)
+			eprintf("  %s! %s%s\n", cYellow, plan.warning, cReset)
 		} else if plan.exe != "" && apiRT != nil {
 			scriptcPort := internalPort(port + 3)
 			scriptc = newScriptcSidecar(plan.exe, scriptcPort, revalHost.secret, revalHost.EnvList(), apiBudgets)

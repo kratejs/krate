@@ -222,6 +222,18 @@ func captureStderr(t *testing.T, f func()) string {
 	return buf.String()
 }
 
+// captureErrOutput runs f and returns what serve's goroutines printed through
+// eprintf while it ran. Unlike captureStderr it never swaps os.Stderr, which
+// races with goroutines a running server leaves behind.
+func captureErrOutput(t *testing.T, f func()) string {
+	t.Helper()
+	var buf safeBuffer
+	SetErrOutput(&buf)
+	defer SetErrOutput(os.Stderr)
+	f()
+	return buf.String()
+}
+
 // Routes scriptc accepts are compiled together; each other route stays on
 // the runtime that served it before and is reported with a KR7238 warning.
 func TestScriptcPartitionAndFallback(t *testing.T) {

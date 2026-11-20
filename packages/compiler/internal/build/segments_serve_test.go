@@ -65,8 +65,11 @@ func captureStderrFile(t *testing.T) func() string {
 	}
 	old := os.Stderr
 	os.Stderr = f
+	// Warnings printed through eprintf land in the same file.
+	SetErrOutput(f)
 	// Closed before t.TempDir removes it: Windows cannot delete an open file.
 	t.Cleanup(func() {
+		SetErrOutput(old)
 		os.Stderr = old
 		_ = f.Close()
 	})

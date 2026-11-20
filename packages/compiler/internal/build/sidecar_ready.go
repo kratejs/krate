@@ -4,11 +4,9 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
-	"os"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -240,7 +238,7 @@ func (s *sidecarReady) unavailable(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	if msg := s.failure(); msg != "" {
 		if s.logged.CompareAndSwap(false, true) {
-			fmt.Fprintf(os.Stderr, "  %s! answering 503 to requests that need the %s: %s%s%s\n", cYellow, s.label(), msg, s.hintSuffix(), cReset)
+			eprintf("  %s! answering 503 to requests that need the %s: %s%s%s\n", cYellow, s.label(), msg, s.hintSuffix(), cReset)
 		}
 		body := "server unavailable: the " + s.label() + " failed to start (see the server log)"
 		if s.showReason {
@@ -250,7 +248,7 @@ func (s *sidecarReady) unavailable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.logged.CompareAndSwap(false, true) {
-		fmt.Fprintf(os.Stderr, "  %s! %s did not start listening within %s; answering 503 until it does (%s)%s%s\n", cYellow, s.label(), s.timeout, s.slowStartCause(), s.hintSuffix(), cReset)
+		eprintf("  %s! %s did not start listening within %s; answering 503 until it does (%s)%s%s\n", cYellow, s.label(), s.timeout, s.slowStartCause(), s.hintSuffix(), cReset)
 	}
 	http.Error(w, "server is starting", http.StatusServiceUnavailable)
 }
