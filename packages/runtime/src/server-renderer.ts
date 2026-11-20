@@ -17,6 +17,7 @@ import {
   type RenderRequest,
   type ServerManifest,
 } from "./ssr-core.js";
+import { encodeFrame, REGION_FRAMES_TYPE, wantsRegionFrames } from "./region-wire.js";
 import { installRenderStore, patchFetch, type CacheScope } from "./cache-scope.js";
 import { cacheSpecFromEnv } from "./cache-adapter.js";
 import { isrStoreFor } from "./shared-isr.js";
@@ -353,6 +354,12 @@ function writeJsonLine(res: http.ServerResponse, obj: unknown) {
   res.write(JSON.stringify(obj) + "\n");
 }
 
+// writeFrame writes one region frame in the format the client asked for.
+function writeFrame(res: http.ServerResponse, binary: boolean, frame: Record<string, any>) {
+  if (binary) res.write(encodeFrame(frame));
+  else writeJsonLine(res, frame);
+}
+
 
 // Cluster fan-out (worker side). broadcastInternalOp resolves with one result
 // per live worker once every worker applied the operation.
@@ -468,8 +475,9 @@ const server = http.createServer(async (req, res) => {
       res.end(JSON.stringify({ error: "forbidden" }));
       return;
     }
+    const binary = wantsRegionFrames(req.headers.accept);
     res.writeHead(200, {
-      "Content-Type": "application/x-ndjson; charset=utf-8",
+      "Content-Type": binary ? REGION_FRAMES_TYPE : "application/x-ndjson; charset=utf-8",
       "Cache-Control": "no-store",
       "X-Content-Type-Options": "nosniff",
     });
@@ -490,8 +498,8 @@ const server = http.createServer(async (req, res) => {
 
       const page = findPage(renderReq.route);
       if (!page) {
-        writeJsonLine(res, { type: "error", status: 404, error: "no such page" });
-        writeJsonLine(res, { type: "end", count: 0 });
+        writeFrame(res, binary, { type: "error", status: 404, error: "no such page" });
+        writeFrame(res, binary, { type: "end", count: 0 });
         res.end();
         return;
       }
@@ -514,11 +522,11 @@ const server = http.createServer(async (req, res) => {
       });
       // Write each frame as soon as it resolves. Async server components finish
       // out of document order, and the Go host inserts each chunk at its marker.
-      await Promise.all(pending.map(async (p) => writeJsonLine(res, await p)));
-      writeJsonLine(res, { type: "end", count: regions.length });
+      await Promise.all(pending.map(async (p) => writeFrame(res, binary, await p)));
+      writeFrame(res, binary, { type: "end", count: regions.length });
     } catch (err: any) {
       console.error("[krate-ssr] Error in /__krate/regions:", err.message);
-      writeJsonLine(res, { type: "error", status: 500, error: err.message });
+      writeFrame(res, binary, { type: "error", status: 500, error: err.message });
     }
     res.end();
     return;
