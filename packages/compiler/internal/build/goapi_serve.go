@@ -137,15 +137,6 @@ type regionVary struct {
 	headers, cookies, query, params map[string]bool
 }
 
-// goVaryFrame is the "vary" member of a gorender frame.
-type goVaryFrame struct {
-	Full    bool     `json:"full"`
-	Headers []string `json:"headers"`
-	Cookies []string `json:"cookies"`
-	Query   []string `json:"query"`
-	Params  []string `json:"params"`
-}
-
 func (v *regionVary) merge(f *goVaryFrame) {
 	if f == nil {
 		v.full = true // no record: assume it read everything
@@ -396,21 +387,19 @@ func (g *goAPISupervisor) RenderContext(ctx context.Context, regions []goRenderR
 	if len(miss) == 0 {
 		return out, nil
 	}
-	body, err := json.Marshal(map[string]any{"regions": miss})
-	if err != nil {
-		return nil, err
-	}
+	body := marshalGoRegionsRequest(miss)
 	req, err := http.NewRequestWithContext(ctx, "POST", g.renderURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	acceptsFrames(req)
 	resp, err := g.client.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	dec := json.NewDecoder(resp.Body)
+	next := goFrameReader(resp)
 	firstErr := ""
 	nameOf := make(map[string]string, len(miss))
 	for _, r := range miss {
@@ -418,14 +407,8 @@ func (g *goAPISupervisor) RenderContext(ctx context.Context, regions []goRenderR
 	}
 	varyOf := map[string]*goVaryFrame{}
 	for {
-		var frame struct {
-			Type  string       `json:"type"`
-			ID    string       `json:"id"`
-			HTML  string       `json:"html"`
-			Error string       `json:"error"`
-			Vary  *goVaryFrame `json:"vary"`
-		}
-		if err := dec.Decode(&frame); err != nil {
+		frame, err := next()
+		if err != nil {
 			break
 		}
 		if frame.ID != "" && frame.Error == "" {

@@ -1,7 +1,6 @@
 package build
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -236,21 +235,14 @@ collect:
 // streamNodeRegionEvents reads the sidecar's NDJSON stream and forwards each
 // frame as soon as it arrives (completion order, not document order).
 func streamNodeRegionEvents(ctx context.Context, ssrPort int, route string, params, query, headers map[string]string, regionList []map[string]string, internalSecret string, out chan<- regionFrameEvent) {
-	reqBody, _ := json.Marshal(map[string]interface{}{
-		"route":   route,
-		"url":     regionURL(ctx, route),
-		"method":  "GET",
-		"headers": headers,
-		"params":  params,
-		"query":   query,
-		"regions": regionList,
-	})
+	reqBody := nodeRegionsRequest{Route: route, URL: regionURL(ctx, route), Method: "GET", Headers: headers, Params: params, Query: query, Regions: regionList}.marshal()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("http://127.0.0.1:%d/__krate/regions", ssrPort), bytes.NewReader(reqBody))
 	if err != nil {
 		out <- regionFrameEvent{err: err}
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
+	acceptsFrames(req)
 	if internalSecret != "" {
 		req.Header.Set(internalSecretHeader, internalSecret)
 	}
@@ -264,14 +256,11 @@ func streamNodeRegionEvents(ctx context.Context, ssrPort int, route string, para
 		out <- regionFrameEvent{err: fmt.Errorf("ssr regions: unexpected status %d", resp.StatusCode)}
 		return
 	}
-	reader := bufio.NewReaderSize(resp.Body, 256)
+	stream := newFrameStream(resp)
 	for {
-		line, err := reader.ReadBytes('\n')
-		if len(line) > 0 {
-			var frame regionFrame
-			if json.Unmarshal(line, &frame) == nil {
-				out <- regionFrameEvent{frame: frame}
-			}
+		frame, ok, err := stream.next()
+		if ok {
+			out <- regionFrameEvent{frame: frame}
 		}
 		if err != nil {
 			return

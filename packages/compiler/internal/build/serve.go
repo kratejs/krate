@@ -1,7 +1,6 @@
 package build
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -801,39 +800,6 @@ const (
 // are matched separately.
 var regionOpenRe = regexp.MustCompile(`<!--(suspense|region):([^>]+?)-->`)
 
-// regionFrame is one NDJSON frame from the sidecar's /__krate/regions stream.
-type regionFrame struct {
-	Type        string `json:"type"`
-	ID          string `json:"id,omitempty"`
-	Kind        string `json:"kind,omitempty"`
-	Status      int    `json:"status,omitempty"`
-	HTML        string `json:"html,omitempty"`
-	Error       string `json:"error,omitempty"`
-	Count       int    `json:"count,omitempty"`
-	CacheStatus string `json:"cacheStatus,omitempty"`
-	NotFound    bool   `json:"notFound,omitempty"`
-	Redirect    string `json:"redirect,omitempty"`
-	// Denied is 401 or 403 when the render called unauthorized() or forbidden().
-	Denied int    `json:"denied,omitempty"`
-	Title  string `json:"title,omitempty"`
-	// Head is the <Head> tags (meta, link, script) the region rendered, to be
-	// merged into the document head (see headmerge.go).
-	Head string `json:"head,omitempty"`
-	// NoStore is set when the render read request state (headers/cookies) or
-	// otherwise opted out of caching. The page response must not be public.
-	NoStore bool `json:"noStore,omitempty"`
-	// ErrorCaught is set when an error boundary rendered its fallback in the
-	// region: the response is a 500 that must never be cached.
-	ErrorCaught bool `json:"errorCaught,omitempty"`
-	// Fatal marks a failed render that has no usable baked content (an async
-	// server component): the response must be an error, not the shell.
-	Fatal bool `json:"fatal,omitempty"`
-	// Digest and Stack describe a failed render: the renderer logs the full
-	// error with the digest, and the server shows visitors only the digest.
-	Digest string `json:"digest,omitempty"`
-	Stack  string `json:"stack,omitempty"`
-}
-
 // regionPageResult carries sidecar outcome back to the caller so it can apply
 // ISR cache headers, status, redirects, and title swaps that page-region
 // renders report.
@@ -1290,20 +1256,13 @@ func streamRegionPageModeSC(ctx context.Context, w http.ResponseWriter, flusher 
 // TCP handshake) and bounds the whole exchange so a stalled sidecar can't pin the
 // request goroutine forever.
 func fetchNodeRegions(ctx context.Context, ssrPort int, route string, params, query, headers map[string]string, regionList []map[string]string, regionHTML map[string]string, res *regionPageResult, internalSecret string) error {
-	reqBody, _ := json.Marshal(map[string]interface{}{
-		"route":   route,
-		"url":     regionURL(ctx, route),
-		"method":  "GET",
-		"headers": headers,
-		"params":  params,
-		"query":   query,
-		"regions": regionList,
-	})
+	reqBody := nodeRegionsRequest{Route: route, URL: regionURL(ctx, route), Method: "GET", Headers: headers, Params: params, Query: query, Regions: regionList}.marshal()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("http://127.0.0.1:%d/__krate/regions", ssrPort), bytes.NewReader(reqBody))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	acceptsFrames(req)
 	if internalSecret != "" {
 		req.Header.Set(internalSecretHeader, internalSecret)
 	}
@@ -1316,12 +1275,12 @@ func fetchNodeRegions(ctx context.Context, ssrPort int, route string, params, qu
 		return fmt.Errorf("ssr regions: unexpected status %d", resp.StatusCode)
 	}
 
-	tcpBuf := bufio.NewReaderSize(resp.Body, 256)
+	stream := newFrameStream(resp)
 
-	// Read one NDJSON line per region, collecting region HTML + page metadata.
+	// Read one frame per region, collecting region HTML + page metadata.
 	framesLeft := len(regionList)
 	for framesLeft > 0 {
-		line, err := tcpBuf.ReadBytes('\n')
+		frame, ok, err := stream.next()
 		if err != nil {
 			// The renderer died or the stream was cut mid-way: the regions that
 			// never arrived keep their baked content, which must not pass as a
@@ -1331,8 +1290,7 @@ func fetchNodeRegions(ctx context.Context, ssrPort int, route string, params, qu
 			}
 			break
 		}
-		var frame regionFrame
-		if err := json.Unmarshal(line, &frame); err != nil {
+		if !ok {
 			continue
 		}
 		switch frame.Type {
