@@ -526,11 +526,12 @@ func New(root string, cfg *config.Config) *Builder {
 	// The disk cache is only safe for pure builds: per-page plugin hooks can
 	// inject output the cache cannot replay, and sourcemap sidecars aren't
 	// captured.
-	enabled := diskCacheEnabled(cfg.Sourcemap, plugin.HasPerPageHooks(), hasCommunityPlugins(cfg))
+	plugins := plugin.DefaultRegistry
+	enabled := diskCacheEnabled(cfg.Sourcemap, plugins.HasPerPageHooks(), hasCommunityPlugins(cfg))
 	return &Builder{
 		Root:        root,
 		Cfg:         cfg,
-		plugins:     plugin.DefaultRegistry,
+		plugins:     plugins,
 		depGraph:    make(map[string][]string),
 		pageDeps:    make(map[string][]string),
 		Prof:        NewProfiler(false),
