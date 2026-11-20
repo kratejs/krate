@@ -53,7 +53,7 @@ describe("region frames", () => {
   it("carries very large HTML and multi-byte text byte for byte", () => {
     const html = "<td>é中\u{1F600}</td>".repeat(400_000);
     const [f] = decodeFrames(encodeFrame({ type: "region", id: "big", status: 200, html }));
-    expect(f.html.length).toBe(html.length);
+    expect(f.html).toHaveLength(html.length);
     expect(f.html === html).toBe(true);
   });
 

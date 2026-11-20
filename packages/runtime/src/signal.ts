@@ -131,7 +131,6 @@ export function krateTagOwner(owner: unknown, scope: string | null): void {
 // subscriber re-runs into a single flush so N writes in a loop (or one write
 // fanning out) produce one pass instead of N synchronous effect runs.
 const pending: Array<EffectState> = [];
-let flushScheduled = false;
 
 interface EffectState {
   fn: () => void;
@@ -625,7 +624,6 @@ export function disposeAll(): void {
   }
   pending.length = 0;
   afterQueue.length = 0;
-  flushScheduled = false;
   flushMode = 0;
   flushToken++;
   syncLane = false;
@@ -1088,7 +1086,6 @@ function scheduleFlush(reactWrite = false): void {
   const later = reactWrite || transitionWrites > 0;
   const micro = !later || discrete || committing > 0 || renderDepth > 0 || typeof setTimeout !== 'function';
   if (flushMode === 1 || (!micro && flushMode === 2)) return;
-  flushScheduled = true;
   const token = ++flushToken;
   const run = (): void => {
     if (token === flushToken) flushEffects();
@@ -1114,7 +1111,6 @@ function flushEffects(): void {
 }
 
 function flushEffectsInner(): void {
-  flushScheduled = false;
   flushMode = 0;
   flushToken++;
   // One effect throwing must not strand the effects queued behind it: their
@@ -1174,7 +1170,6 @@ function flushEffectsInner(): void {
   if (pending.length === 0) {
     // The cascade is done: a flush the passes scheduled has nothing to do.
     flushMode = 0;
-    flushScheduled = false;
     flushToken++;
   }
   if (pending.length === 0) {
@@ -1226,7 +1221,6 @@ let lastPassEffects: EffectState[] = [];
 function abortUpdateLoop(): void {
   const looping = pending.splice(0);
   for (const effect of looping) effect.queued = false;
-  flushScheduled = false;
   flushMode = 0;
   flushToken++;
   const culprits = looping.length > 0 ? looping : lastPassEffects;

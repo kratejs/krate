@@ -6,7 +6,7 @@ import { createCsrfToken, decodeToken, encodeToken, sealString, unsealString, ve
 describe("bytes", () => {
   it("round-trips base64url for every length", () => {
     for (let n = 0; n < 40; n++) {
-      const data = new Uint8Array(n).map((_, i) => (i * 37 + n) & 0xff);
+      const data = new Uint8Array(n).map((_, i) => (i * 37 + n) & 0xFF);
       const enc = b64urlEncode(data);
       expect(enc).not.toMatch(/[+/=]/);
       expect(Array.from(b64urlDecode(enc))).toEqual(Array.from(data));

@@ -14,8 +14,8 @@ const Counter = forwardRef((props: any, ref: any) => {
 export default function Page() {
   const [log, setLog] = useState('');
   const [upper, setUpper] = useState('');
-  const [locked, setLocked] = useState('locked');
-  const [agree, setAgree] = useState(false);
+  const [locked] = useState('locked');
+  const [agree] = useState(false);
   const [hover, setHover] = useState(0);
   const [focusLog, setFocusLog] = useState('');
   const [stop, setStop] = useState(false);

@@ -89,7 +89,6 @@ function absURL(href: string): string {
 function present(tag: 'link' | 'script', attrs: Attrs): boolean {
   const get = (name: string) => {
     for (const [k, v] of attrs) if (k === name) return v;
-    return undefined;
   };
   if (tag === 'script') {
     const src = absURL(get('src') || '');

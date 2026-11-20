@@ -70,7 +70,7 @@ export class RespParser {
 
   private line(at: number): { text: string; end: number } | null {
     const i = this.buf.indexOf('\r\n', at);
-    if (i < 0) return null;
+    if (i === -1) return null;
     return { text: this.buf.toString('utf8', at, i), end: i + 2 };
   }
 

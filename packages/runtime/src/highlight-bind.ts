@@ -144,7 +144,7 @@ function bindCode(code: Element): void {
     if (!node || node.nodeType !== 3) return;
     for (let n = node.nextSibling; n && n !== r.end; ) {
       const next = n.nextSibling;
-      n.parentNode && n.parentNode.removeChild(n);
+      n.parentNode?.removeChild(n);
       n = next;
     }
     const text = node.textContent || "";

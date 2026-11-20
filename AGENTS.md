@@ -62,6 +62,7 @@ pnpm build             # sync docs + build every JS package
 pnpm test              # sync docs + JS (Vitest) tests + go test ./...
 pnpm test:js           # JS tests only (Vitest, per package)
 pnpm typecheck         # tsc --noEmit across runtime/components/core/plugin/web
+pnpm lint              # oxlint over the repo (config: .oxlintrc.json)
 pnpm vet               # sync docs + go vet ./...
 pnpm sync:docs         # regenerate embedded framework docs
 pnpm check:docs        # fail if embedded docs are stale

@@ -1,8 +1,8 @@
-import { accessSync, chmodSync, constants, existsSync, statSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
-import { spawn, spawnSync } from 'child_process';
-import { createRequire } from 'module';
+import { accessSync, chmodSync, constants, existsSync, statSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { spawn, spawnSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -54,7 +54,7 @@ export function resolveBinary(binDir: string = BIN_DIR, resolvePackage: (id: str
     const pkgPath = dirname(resolvePackage(`${pkgName}/package.json`));
     const binary = join(pkgPath, 'bin', binaryName());
     if (existsSync(binary)) return binary;
-  } catch (e) {
+  } catch {
     // Ignore, try local path
   }
 

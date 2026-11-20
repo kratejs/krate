@@ -13,7 +13,7 @@ const names = readdirSync(dir)
   .map((f) => f.slice(0, -4))
   .sort();
 
-const ESCAPED = ["$b$", "$d$", "$m$", "$s$"];
+const ESCAPED = new Set(["$b$", "$d$", "$m$", "$s$"]);
 
 function setOwn(o: Record<string, unknown>, k: string, v: unknown): void {
   Object.defineProperty(o, k, { value: v, enumerable: true, writable: true, configurable: true });
@@ -32,7 +32,7 @@ function fromDescription(v: unknown): unknown {
     if (k === "$d") return new Date(x as string);
     if (k === "$m") return new Map((x as unknown[][]).map(([a, b]) => [fromDescription(a), fromDescription(b)]));
     if (k === "$s") return new Set((x as unknown[]).map(fromDescription));
-    if (ESCAPED.includes(k)) {
+    if (ESCAPED.has(k)) {
       const inner: Record<string, unknown> = {};
       for (const ik of Object.keys(x as object)) setOwn(inner, ik, fromDescription((x as Record<string, unknown>)[ik]));
       return inner;

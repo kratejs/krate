@@ -19,7 +19,7 @@ const encoder = typeof TextEncoder !== 'undefined' ? new TextEncoder() : null;
  */
 function idSafe(s: string): string {
   return s.replace(/[^A-Za-z0-9_.:$-]/gu, (c) => {
-    const bytes = encoder ? Array.from(encoder.encode(c)) : [c.charCodeAt(0) & 0xff];
+    const bytes = encoder ? Array.from(encoder.encode(c)) : [c.charCodeAt(0) & 0xFF];
     return bytes.map((b) => '%' + b.toString(16).toUpperCase().padStart(2, '0')).join('');
   });
 }

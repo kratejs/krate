@@ -8,12 +8,11 @@
 import os from 'node:os';
 import { existsSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import { BUILD_FRAMEWORKS, API_FRAMEWORKS, SSR_FRAMEWORKS, npxCmd, exeName } from './lib/frameworks.mjs';
+import { BUILD_FRAMEWORKS, API_FRAMEWORKS, SSR_FRAMEWORKS, exeName } from './lib/frameworks.mjs';
 import {
   pkgRoot,
   run,
   timed,
-  spawnProcess,
   freePort,
   waitForUrl,
   dirSize,
@@ -104,6 +103,7 @@ function parseArgs(argv) {
       case '--help':
         log(HELP);
         process.exit(0);
+        break;
       default:
         warn(`unknown option: ${a}`);
         process.exit(1);

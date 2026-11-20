@@ -30,8 +30,8 @@
     }
 
     function localeOf(href) {
-        var p = stripBase(String(href || "").replace(/^[a-z]+:\/\/[^\/]+/i, ""));
-        var m = /^\/([^\/]+)(\/|$)/.exec(p);
+        var p = stripBase(String(href || "").replace(/^[a-z]+:\/\/[^/]+/i, ""));
+        var m = /^\/([^/]+)(\/|$)/.exec(p);
         return m && LOCALES.indexOf(m[1]) !== -1 ? m[1] : "";
     }
 
@@ -295,7 +295,6 @@
         }
         if (t.closest(".krate-search-item")) {
             close();
-            return;
         }
     });
 

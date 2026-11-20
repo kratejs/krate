@@ -63,7 +63,7 @@ function npmLatest(name) {
   const res = spawnSync('npm', ['view', name, 'dist-tags.latest'], { encoding: 'utf8', shell: process.platform === 'win32' });
   const out = (res.stdout ?? '').trim();
   if (res.status === 0 && out) return out;
-  if (/E404|404/.test(`${res.stderr}${res.stdout}`)) return undefined; // never published
+  if (/E404|404/.test(`${res.stderr}${res.stdout}`)) return; // never published
   throw new Error(`could not read the latest dist-tag of ${name} from npm: ${(res.stderr || res.error?.message || 'unknown error').trim()}`);
 }
 

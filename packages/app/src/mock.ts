@@ -18,7 +18,7 @@ export function hasMocks(): boolean {
 
 function split(fn: string): [string, string] {
   const i = fn.lastIndexOf(".");
-  return i < 0 ? ["", fn] : [fn.slice(0, i), fn.slice(i + 1)];
+  return i === -1 ? ["", fn] : [fn.slice(0, i), fn.slice(i + 1)];
 }
 
 export function findMock(fn: string): { impl: Impl; name: string } | undefined {

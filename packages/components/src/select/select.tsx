@@ -103,7 +103,7 @@ export function Select(props: SelectProps) {
   function matches(o: SelectOption, q: string): boolean {
     if (!q) return true;
     q = q.toLowerCase();
-    return (o.label || o.value).toLowerCase().indexOf(q) >= 0 || o.value.toLowerCase().indexOf(q) >= 0;
+    return (o.label || o.value).toLowerCase().includes(q) || o.value.toLowerCase().includes(q);
   }
 
   // The options that match the search. Plain code can call this; the markup

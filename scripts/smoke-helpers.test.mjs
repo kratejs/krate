@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { platforms } from './platform-package.mjs';
-import { isMusl, platformFor, quoteCmdArg, spawnPlan } from './smoke-helpers.mjs';
+import { platformFor, quoteCmdArg } from './smoke-helpers.mjs';
 
 test('quoteCmdArg quotes paths with spaces and doubles a trailing backslash', () => {
   assert.equal(quoteCmdArg('--no-audit'), '--no-audit');

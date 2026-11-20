@@ -28,13 +28,13 @@ const pkg = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf-8'))
 };
 
 const c = {
-  reset: '\x1b[0m',
-  bold: '\x1b[1m',
-  dim: '\x1b[2m',
-  red: '\x1b[31m',
-  green: '\x1b[32m',
-  yellow: '\x1b[33m',
-  cyan: '\x1b[36m',
+  reset: '\x1B[0m',
+  bold: '\x1B[1m',
+  dim: '\x1B[2m',
+  red: '\x1B[31m',
+  green: '\x1B[32m',
+  yellow: '\x1B[33m',
+  cyan: '\x1B[36m',
 };
 
 type PackageManager = 'npm' | 'pnpm' | 'yarn' | 'bun';

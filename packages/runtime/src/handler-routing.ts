@@ -123,7 +123,7 @@ export function baseName(p: string): string {
   if (end === 0) return "/";
   const s = p.slice(0, end);
   const i = s.lastIndexOf("/");
-  return i >= 0 ? s.slice(i + 1) : s;
+  return i !== -1 ? s.slice(i + 1) : s;
 }
 
 export function isHTMLDocRequest(urlPath: string): boolean {
@@ -214,7 +214,7 @@ export function escapeHTML(s: string): string {
 export function applyDynamicRouteParams(templateHTML: string, params: Record<string, string>): string {
   const injectScript = "<script>window.__KRATE_PARAMS__=" + goJSON(params) + "</script>";
   const at = templateHTML.indexOf("</head>");
-  let out = at < 0 ? templateHTML : templateHTML.slice(0, at) + injectScript + templateHTML.slice(at);
+  let out = at === -1 ? templateHTML : templateHTML.slice(0, at) + injectScript + templateHTML.slice(at);
   for (const [name, value] of Object.entries(params)) {
     out = out.split(dynamicParamSentinel(name)).join(goHTMLEscape(value));
   }

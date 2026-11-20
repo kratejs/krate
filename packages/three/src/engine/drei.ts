@@ -44,7 +44,7 @@ export class DreiOrbitControls extends ThreeOrbitControls {
   }
 
   _getZoomScale(): number {
-    return Math.pow(0.95, this.zoomSpeed);
+    return 0.95 ** this.zoomSpeed;
   }
 }
 

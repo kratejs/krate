@@ -70,7 +70,7 @@ export function thenable<T extends object>(value: T, resolved: () => unknown): T
 
 /** thenableRecord wraps a plain record (route params, search params). */
 export function thenableRecord<T extends Record<string, any>>(rec: T | undefined): T & PromiseLike<T> {
-  const plain = { ...(rec || {}) } as T;
+  const plain = { ...rec } as T;
   return thenable({ ...plain }, () => ({ ...plain }));
 }
 

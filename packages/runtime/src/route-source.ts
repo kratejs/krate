@@ -255,7 +255,7 @@ function pathMatch(pattern: string, name: string): boolean {
     else if (c === "?") re += "[^/]";
     else if (c === "[") {
       const end = pattern.indexOf("]", i + 1);
-      if (end < 0) return false;
+      if (end === -1) return false;
       let cls = pattern.slice(i + 1, end);
       let neg = false;
       if (cls.startsWith("^")) {
@@ -439,8 +439,8 @@ function replaceDestParams(destination: string, params: Record<string, string>, 
     if (mod && end < destination.length && destination[end] === mod) end++;
     let prefix = destination.slice(last, m.index);
     // An optional parameter that matched nothing takes its "/" with it (path-to-regexp).
-    if (params[name] === "" && (queryAt < 0 || m.index < queryAt) && (mod === "*" || mod === "?") && prefix.endsWith("/") && out.length + prefix.length > 1) prefix = prefix.slice(0, -1);
-    out += prefix + (queryAt >= 0 && m.index > queryAt ? escapeQueryValue(params[name]) : escapeRedirectValue(params[name]));
+    if (params[name] === "" && (queryAt === -1 || m.index < queryAt) && (mod === "*" || mod === "?") && prefix.endsWith("/") && out.length + prefix.length > 1) prefix = prefix.slice(0, -1);
+    out += prefix + (queryAt !== -1 && m.index > queryAt ? escapeQueryValue(params[name]) : escapeRedirectValue(params[name]));
     last = end;
     re.lastIndex = end;
   }
@@ -450,7 +450,7 @@ function replaceDestParams(destination: string, params: Record<string, string>, 
 /** Keeps a substituted path destination on-site (no "//host" or "/\\host" results). */
 export function sanitizeRedirectTarget(configured: string, out: string): string {
   if (!configured.startsWith("/") || configured.startsWith("//") || configured.startsWith("/\\")) return out;
-  out = out.replace(/[\u0000-\u001f\u007f]/g, (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0"));
+  out = out.replace(/[\u0000-\u001F\u007F]/g, (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0"));
   const trimmed = out.replace(/^[/\\]+/, "");
   return trimmed !== out ? "/" + trimmed : out;
 }
@@ -480,8 +480,8 @@ function parseQuery(raw: string): Array<[string, string[]]> {
     let k: string;
     let v: string;
     try {
-      k = decodeURIComponent((eq < 0 ? part : part.slice(0, eq)).replace(/\+/g, " "));
-      v = decodeURIComponent((eq < 0 ? "" : part.slice(eq + 1)).replace(/\+/g, " "));
+      k = decodeURIComponent((eq === -1 ? part : part.slice(0, eq)).replace(/\+/g, " "));
+      v = decodeURIComponent((eq === -1 ? "" : part.slice(eq + 1)).replace(/\+/g, " "));
     } catch {
       continue;
     }
@@ -500,13 +500,13 @@ export function mergeRequestQuery(dest: string, rawQuery: string): string {
   if (!rawQuery) return dest;
   let frag = "";
   const h = dest.indexOf("#");
-  if (h >= 0) {
+  if (h !== -1) {
     frag = dest.slice(h);
     dest = dest.slice(0, h);
   }
   let destQuery = "";
   const q = dest.indexOf("?");
-  if (q >= 0) {
+  if (q !== -1) {
     destQuery = dest.slice(q + 1);
     dest = dest.slice(0, q);
   }

@@ -1,5 +1,5 @@
 import './popover.css';
-import { createScope, createScopeFlags, createCSSGroup, type CSSScope } from '@krate/runtime';
+import { createScope, createCSSGroup } from '@krate/runtime';
 import { OverlayBridge } from '../overlay/overlay-bridge';
 
 const PopoverCtx = createScope<string | null>();

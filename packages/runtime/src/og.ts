@@ -69,7 +69,7 @@ export function serializeElement(node: unknown, path = 'root'): ImageNode[] {
   if (typeof node !== 'object') throw new TypeError(`ImageResponse: ${path} is not an element`);
   const el = node as { type?: unknown; props?: Record<string, any>; children?: unknown[]; __raw?: string };
   if (typeof el.__raw === 'string') throw new TypeError(`ImageResponse: ${path} is raw HTML, which is not supported`);
-  const props = { ...(el.props || {}) };
+  const props = { ...el.props };
   const children = el.children || [];
   if (typeof el.type === 'function') {
     const out = (el.type as (p: Record<string, unknown>) => unknown)({ ...props, children: children.length === 1 ? children[0] : children });

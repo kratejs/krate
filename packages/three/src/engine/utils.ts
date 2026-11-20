@@ -288,7 +288,7 @@ export function diffProps<T = any>(instance: Instance<T>, newProps: Instance<T>[
 }
 
 // https://github.com/mrdoob/three.js/pull/27042
-const colorMaps = ['map', 'emissiveMap', 'sheenColorMap', 'specularColorMap', 'envMap'];
+const colorMaps = new Set(['map', 'emissiveMap', 'sheenColorMap', 'specularColorMap', 'envMap']);
 const EVENT_REGEX = /^on(Pointer|Click|DoubleClick|ContextMenu|Wheel)/;
 
 /** Applies props to a three object, with math, color and pierced-key semantics. */
@@ -298,7 +298,7 @@ export function applyProps<T = any>(object: Instance<T>['object'], props: Instan
   const prevHandlers = instance?.eventCount;
 
   for (const prop in props as Record<string, unknown>) {
-    let value = (props as Record<string, unknown>)[prop];
+    const value = (props as Record<string, unknown>)[prop];
     if (RESERVED_PROPS.includes(prop)) continue;
 
     if (instance && EVENT_REGEX.test(prop)) {
@@ -320,7 +320,7 @@ export function applyProps<T = any>(object: Instance<T>['object'], props: Instan
     const { root, key, target } = resolve(object, prop);
 
     if (target === undefined && (typeof root !== 'object' || root === null)) {
-      throw Error(`@krate/three: Cannot set "${prop}". Ensure it is an object before setting "${key}".`);
+      throw new Error(`@krate/three: Cannot set "${prop}". Ensure it is an object before setting "${key}".`);
     }
 
     if (target instanceof THREE.Layers && value instanceof THREE.Layers) {
@@ -360,7 +360,7 @@ export function applyProps<T = any>(object: Instance<T>['object'], props: Instan
       if (
         rootState &&
         !rootState.linear &&
-        colorMaps.includes(key) &&
+        colorMaps.has(key) &&
         root[key]?.isTexture &&
         root[key].format === THREE.RGBAFormat &&
         root[key].type === THREE.UnsignedByteType
@@ -374,7 +374,7 @@ export function applyProps<T = any>(object: Instance<T>['object'], props: Instan
   if (instance?.parent && rootState?.internal && (instance.object as any)?.isObject3D && prevHandlers !== instance.eventCount) {
     const obj = instance.object as unknown as THREE.Object3D;
     const index = rootState.internal.interaction.indexOf(obj);
-    if (index > -1) rootState.internal.interaction.splice(index, 1);
+    if (index !== -1) rootState.internal.interaction.splice(index, 1);
     if (instance.eventCount && (obj as any).raycast !== null) rootState.internal.interaction.push(obj);
   }
 

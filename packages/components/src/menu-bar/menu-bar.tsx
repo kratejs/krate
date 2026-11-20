@@ -1,5 +1,5 @@
 import './menu-bar.css';
-import { createScope, createScopeFlags, createCSSGroup, type CSSScope } from '@krate/runtime';
+import { createScope, createCSSGroup } from '@krate/runtime';
 
 const MenuBarCtx = createScope<string | null>();
 

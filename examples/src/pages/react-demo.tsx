@@ -41,7 +41,6 @@ import * as Portal from 'radix-ui/portal';
 import './react-demo.css';
 import Button from '../components/ui/button';
 import { Badge } from '../components/ui/shadcn-badge';
-import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { IslandLocalBadge } from '../components/island-local-badge';
 import { Exploding } from '../components/island-exploding';

@@ -60,7 +60,7 @@ export function FormField(props: FormFieldProps) {
   var errId = props.error ? base + "-error" : "";
   var describedBy = (descId && errId ? descId + " " + errId : descId + errId);
   return (
-    <FormFieldCtx.Provider value={{ describedBy: describedBy, invalid: !!props.error }}>
+    <FormFieldCtx.Provider value={{ describedBy, invalid: !!props.error }}>
       <div class={"krate-form-field" + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")}>
         <label class="krate-form-field-label">
           <span class="krate-form-field-text">

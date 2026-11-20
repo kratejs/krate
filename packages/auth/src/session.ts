@@ -24,7 +24,7 @@ function buildSession(ctx: RequestContext, expires: Date, base: { id: string; na
   if (base.role !== undefined && base.role !== null) user.role = base.role as string;
   if (base.twoFactorEnabled !== undefined) user.twoFactorEnabled = Boolean(base.twoFactorEnabled);
   if (ctx.config.twoFactor.enabled && ctx.config.twoFactor.required && !user.twoFactorEnabled) user.twoFactorSetupRequired = true;
-  return { user, expires: expires.toISOString(), ...(base.extra ?? {}) };
+  return { user, expires: expires.toISOString(), ...base.extra };
 }
 
 export async function readSession(ctx: RequestContext, jar?: ResponseCookies, trigger?: { update: unknown }): Promise<SessionState> {
@@ -142,7 +142,7 @@ export async function issueSession(ctx: RequestContext, jar: ResponseCookies, op
       picture: user.image ?? null,
       ...(user.role !== undefined && user.role !== null ? { role: user.role } : {}),
       ...(user.twoFactorEnabled !== undefined ? { tfe: user.twoFactorEnabled } : {}),
-      ...(options.claims ?? {}),
+      ...options.claims,
     };
     if (config.callbacks.jwt) {
       const next = await config.callbacks.jwt({
