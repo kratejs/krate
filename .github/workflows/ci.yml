@@ -24,9 +24,11 @@ on:
     - cron: "37 2 * * *"
   workflow_dispatch:
 
+# A new commit cancels a pull request's run in progress. Pushes to dev and main
+# are never cancelled, so every commit that lands gets its full run.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -75,7 +77,7 @@ jobs:
           cache: pnpm
 
       - name: Install JS dependencies
-        run: pnpm install --no-frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Sync framework docs
         run: node scripts/sync-krate-docs.mjs
@@ -164,7 +166,7 @@ jobs:
       # KRATE_REQUIRE_E2E a missing dlv is a failure.
       - name: Install Delve
         run: |
-          go install github.com/go-delve/delve/cmd/dlv@latest
+          go install github.com/go-delve/delve/cmd/dlv@v1.27.2
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
       - name: Enable pnpm
@@ -184,15 +186,15 @@ jobs:
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.4.5
 
       - name: Set up Deno
         uses: denoland/setup-deno@v1
         with:
-          deno-version: v2.x
+          deno-version: 2.9.8
 
       - name: Install JS dependencies
-        run: pnpm install --no-frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Sync framework docs
         run: node scripts/sync-krate-docs.mjs
@@ -290,6 +292,8 @@ jobs:
       - name: Sync package versions
         run: node scripts/set-version.mjs 0.0.0-smoke.0
 
+      # set-version.mjs above rewrites the workspace versions, so the lockfile
+      # no longer matches by design.
       - name: Install JS dependencies
         run: pnpm install --no-frozen-lockfile
 
@@ -336,6 +340,8 @@ jobs:
       - name: Sync package versions
         run: node scripts/set-version.mjs 0.0.0-smoke.0
 
+      # set-version.mjs above rewrites the workspace versions, so the lockfile
+      # no longer matches by design.
       - name: Install JS dependencies
         run: pnpm install --no-frozen-lockfile
 
@@ -383,7 +389,7 @@ jobs:
       # KRATE_REQUIRE_E2E a missing dlv is a failure.
       - name: Install Delve
         run: |
-          go install github.com/go-delve/delve/cmd/dlv@latest
+          go install github.com/go-delve/delve/cmd/dlv@v1.27.2
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
       - name: Enable pnpm
@@ -403,15 +409,15 @@ jobs:
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.4.5
 
       - name: Set up Deno
         uses: denoland/setup-deno@v1
         with:
-          deno-version: v2.x
+          deno-version: 2.9.8
 
       - name: Install JS dependencies
-        run: pnpm install --no-frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       # The examples config imports the workspace @krate/core package, whose
       # entry point is the built dist/, so build the JS packages first.
@@ -488,11 +494,10 @@ jobs:
   #
   # The GUI step runs the whole native module (./...) with KRATE_NATIVE_GUI=1,
   # so a GUI test added in any package is picked up without editing this file.
-  # node, bun and deno are installed on every OS (except Bun and Deno on
-  # Windows on ARM) so the host-child tests run; KRATE_REQUIRE_E2E=1 turns a
-  # missing tool into a failure. Tools with no arm64 build are named in the
-  # matrix entry's optional_runtimes / optional_tools; each is skipped with a
-  # ::notice:: line when it is really missing.
+  # node, bun and deno are installed on every OS, Windows on ARM included, so
+  # the host-child tests run; KRATE_REQUIRE_E2E=1 turns a missing tool into a
+  # failure. Packaging tools the Windows on ARM image lacks are named in its
+  # optional_tools; each is skipped with a ::notice:: line when really missing.
   native:
     name: Native (${{ matrix.os }})
     needs: changes
@@ -514,6 +519,9 @@ jobs:
       ROLE: ${{ matrix.role }}
       FULL: ${{ needs.changes.outputs.full }}
       NIGHTLY: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+      # The snaps the snap smoke test builds with, bases first. Changing the list
+      # changes the cache key, so the next full run downloads them again.
+      SNAPS: core22 core24 snapcraft gnome-46-2404 gnome-46-2404-sdk mesa-2404 gtk-common-themes
       # The GUI packages: the whole module, or on a thin pull-request run the
       # shell's GUI tests only.
       GUI_PKGS: ${{ (matrix.role == 'thin' && needs.changes.outputs.full != 'true') && './shell' || './...' }}
@@ -545,38 +553,30 @@ jobs:
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
-        continue-on-error: ${{ contains(matrix.optional_runtimes, 'bun') }}
         with:
-          bun-version: latest
+          bun-version: 1.4.5
 
       - name: Set up Deno
         uses: denoland/setup-deno@v1
-        continue-on-error: ${{ contains(matrix.optional_runtimes, 'deno') }}
         with:
-          deno-version: v2.x
+          deno-version: 2.9.8
 
-      # A host runtime that is missing and listed in optional_runtimes is
-      # skipped by the host child tests (KRATE_SKIP_RUNTIMES); a missing one
-      # that is not listed fails them under KRATE_REQUIRE_E2E.
+      # Every host runtime must be present: the host child tests need all three.
       - name: Check the host runtimes
-        env:
-          OPTIONAL_RUNTIMES: ${{ matrix.optional_runtimes }}
         run: |
-          skip=""
+          status=0
           for t in node bun deno; do
             if command -v "$t" >/dev/null 2>&1; then
               echo "$t: $("$t" --version | head -1)"
-            elif [[ ",$OPTIONAL_RUNTIMES," == *",$t,"* ]]; then
-              echo "::notice title=$t unavailable::$t has no build for this runner ($RUNNER_OS $RUNNER_ARCH); its host child tests are skipped"
-              skip="$skip,$t"
             else
               echo "::error title=$t missing::$t is not installed on this runner"
+              status=1
             fi
           done
-          echo "KRATE_SKIP_RUNTIMES=${skip#,}" >> "$GITHUB_ENV"
+          exit $status
 
       - name: Install JS dependencies
-        run: pnpm install --no-frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Sync framework docs
         run: node scripts/sync-krate-docs.mjs
@@ -992,26 +992,43 @@ jobs:
         env:
           KRATE_REQUIRE_E2E: "1"
 
-      # snapcraft, the core24 base and the GNOME content snaps only come from
-      # the snap store, which is sometimes unreachable from the runners for
-      # many minutes. A few retries; if the store stays down, the job warns
-      # and the snap smoke test skips itself (snapcraft becomes an optional
-      # tool) instead of failing a run whose code is fine.
+      # snapcraft, its bases and the GNOME content snaps only come from the snap
+      # store, which is sometimes unreachable from the runners. They are kept
+      # as .snap files in the Actions cache, so a run needs the store only when
+      # the key below changes. A failed download or install fails the run; it
+      # is never retried or skipped.
+      - name: Cache the snaps
+        id: snaps
+        if: matrix.role == 'primary' && env.FULL == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/snaps
+          key: snaps-v1-${{ runner.arch }}-${{ env.SNAPS }}
+
+      - name: Download the snaps
+        if: matrix.role == 'primary' && env.FULL == 'true' && steps.snaps.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/snaps
+          cd ~/snaps
+          for s in $SNAPS; do
+            snap download "$s" --basename="$s"
+          done
+
       - name: Install snapcraft
         if: matrix.role == 'primary' && env.FULL == 'true'
         run: |
-          install() {
-            sudo snap install snapcraft --classic &&
-              sudo snap install core24 gnome-46-2404 gnome-46-2404-sdk mesa-2404 gtk-common-themes
-          }
-          for i in 1 2 3; do
-            install && exit 0
-            echo "snap install failed (attempt $i); retrying in $((i * 20))s"
-            sleep $((i * 20))
+          cd ~/snaps
+          for s in $SNAPS; do
+            sudo snap ack "$s.assert"
           done
-          sudo snap remove snapcraft || true
-          echo "::warning title=snap store unreachable::snapcraft and its snaps could not be installed from the snap store; the snap smoke test is skipped in this run"
-          echo "KRATE_OPTIONAL_TOOLS=${KRATE_OPTIONAL_TOOLS:+$KRATE_OPTIONAL_TOOLS,}snapcraft" >> "$GITHUB_ENV"
+          for s in $SNAPS; do
+            if [ "$s" = snapcraft ]; then
+              sudo snap install ./snapcraft.snap --classic
+            else
+              sudo snap install "./$s.snap"
+            fi
+          done
+          snapcraft --version
 
       - name: Packaging smoke test, snap build, install, run (Linux)
         if: matrix.role == 'primary' && env.FULL == 'true'
@@ -1064,12 +1081,12 @@ jobs:
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.4.5
 
       - name: Set up Deno
         uses: denoland/setup-deno@v1
         with:
-          deno-version: v2.x
+          deno-version: 2.9.8
 
       - name: Bun action sidecar and Deno static params
         run: go test ./internal/build -run 'TestActionSidecarTransport/bun|TestExecuteGenerateStaticParamsRuntime' -count=1 -v
@@ -1145,7 +1162,7 @@ jobs:
           cache: pnpm
 
       - name: Install JS dependencies
-        run: pnpm install --no-frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Build JS packages
         run: pnpm -r --filter '!@krate/web' --filter '!@krate/benchmark' build
@@ -1226,7 +1243,7 @@ jobs:
           cache: pnpm
 
       - name: Install JS dependencies
-        run: pnpm install --no-frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Build JS packages
         run: pnpm -r --filter '!@krate/web' --filter '!@krate/benchmark' build

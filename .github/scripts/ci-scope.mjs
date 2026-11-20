@@ -22,12 +22,10 @@ const runners = {
   "ubuntu-24.04-arm": { os: "ubuntu-24.04-arm", role: "thin" },
   "macos-latest": { os: "macos-latest", role: "platform" },
   "windows-latest": { os: "windows-latest", role: "platform" },
-  // Bun and Deno publish no Windows on ARM builds; the runner image may also
-  // lack the Windows SDK tools and NSIS.
+  // The Windows on ARM image lacks the Windows SDK tools and NSIS.
   "windows-11-arm": {
     os: "windows-11-arm",
     role: "thin",
-    optional_runtimes: "bun,deno",
     optional_tools: "makensis,signtool,makeappx",
   },
 };
