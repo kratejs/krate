@@ -44,6 +44,8 @@ export interface IslandHandle {
   update(props: unknown, pool?: Record<string, Node[][]>): unknown;
   unmount(): void;
   slots?: IslandSlot[];
+  /** Re-reads the slots' sets from the document (nested islands changed their nodes). */
+  sync?(): void;
 }
 
 /** An island record of window.__krateIslands. */
@@ -235,21 +237,32 @@ export function maskIslands(html: string): string {
   }
 }
 
-/** Every island record in nodes (nested ones included), in document order. */
+/**
+ * Every island record in nodes (nested ones included), in document order. An
+ * island's open comment counts with the nodes now between its comments,
+ * whether nodes lists them or not: a slot's set lists a nested island as its
+ * two comments only.
+ */
 function recordsIn(nodes: ArrayLike<Node>): IslandRecord[] {
   const out: IslandRecord[] = [];
-  const see = (n: Node) => {
+  const seen = new Set<Node>();
+  const visit = (n: Node) => {
+    if (seen.has(n)) return;
+    seen.add(n);
     const r = (n as any).__krateIsland as IslandRecord | undefined;
     if (r && (isOpen(n) || isHost(n))) out.push(r);
+    if (isOpen(n)) {
+      const end = closeOf(n);
+      if (end) for (let x = n.nextSibling; x && x !== end; x = x.nextSibling) visit(x);
+      // A set out of the document keeps them on the open comment.
+      const inner = (n as any).__krateInner as Node[] | null | undefined;
+      if (inner) for (const x of inner) visit(x);
+      return;
+    }
+    if (n.nodeType !== 1) return;
+    for (let c = n.firstChild; c; c = c.nextSibling) visit(c);
   };
-  for (let i = 0; i < nodes.length; i++) {
-    const n = nodes[i];
-    see(n);
-    if (n.nodeType !== 1) continue;
-    const doc = n.ownerDocument || document;
-    const w = doc.createTreeWalker(n, 129 /* SHOW_ELEMENT | SHOW_COMMENT */);
-    for (let c = w.nextNode(); c; c = w.nextNode()) see(c);
-  }
+  for (let i = 0; i < nodes.length; i++) visit(nodes[i]);
   return out;
 }
 
@@ -617,6 +630,15 @@ function updateIsland(l: Isl, n: Isl, jobs: Promise<unknown>[]): void {
   const changed = retaken || JSON.stringify(props) !== JSON.stringify(old ? old.p || {} : null);
   raw.p = props;
   l.start!.data = OPEN + escapeComment(JSON.stringify(raw));
+  // Nested islands in its slots may have replaced their nodes: the sets
+  // follow the document before the island renders again.
+  if (typeof h.sync === 'function') {
+    try {
+      h.sync();
+    } catch (err) {
+      console.error(err);
+    }
+  }
   if (!changed) return;
   try {
     const r = retaken ? h.update(props, pool) : h.update(props);

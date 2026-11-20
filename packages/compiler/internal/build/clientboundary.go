@@ -1073,6 +1073,10 @@ export async function mount(island) {
       return wait.then(function () { if (island.props === raw) show(raw, false); });
     },
     unmount: function () { __krateRender(null, root); },
+    // sync brings the slots' sets up to date with nested islands that changed
+    // their nodes (the router calls it after a swap); the next render places
+    // them.
+    sync: function () { for (var k in pool) pool[k].forEach(function (set) { __krateSlotSync(set); }); },
   };
 }
 `

@@ -23,10 +23,15 @@ export default function Counter({ start, label, children }: any) {
 export const LIMIT = 10;
 `
 
-// withPreact copies the examples' Preact fixture into a test project.
+// withPreact copies the examples' Preact fixture into a test project, or the
+// Preact package directory in KRATE_TEST_PREACT_DIR (to run a test on another
+// Preact version without touching the lockfile).
 func withPreact(t *testing.T, root string) {
 	t.Helper()
 	src := filepath.Join("..", "..", "..", "..", "examples", "node_modules", "preact")
+	if dir := os.Getenv("KRATE_TEST_PREACT_DIR"); dir != "" {
+		src = dir
+	}
 	if _, err := os.Stat(src); err != nil {
 		requireE2E(t, "preact fixture not installed: %v", err)
 	}

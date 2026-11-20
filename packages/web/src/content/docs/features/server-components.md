@@ -196,7 +196,9 @@ are already mounted, as in Next.js:
   own islands start fresh on another page, as React remounts a page.
 - Server children of a kept island follow the new server HTML in place (the
   islands inside them are kept the same way). When their top-level shape
-  changed, they are rendered anew and the islands inside them remount.
+  changed (a provider in a layout around pages with other islands), they are
+  rendered anew inside the kept island: it keeps its state, the islands of
+  the old children unmount and those of the new ones mount inside it.
 - An island the new HTML no longer has (or has with another component in its
   place) is unmounted before its markup is removed, so its effects clean up
   and its portals (dialogs, popovers, toasts) leave the page.
