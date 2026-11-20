@@ -211,7 +211,7 @@ func (c *Config) Validate() (warnings []string, err error) {
 	switch strings.ToLower(c.SSR.APIRuntime) {
 	case "", "quickjs", "node", "bun", "deno", "scriptc":
 	default:
-		return nil, fmt.Errorf("ssr.apiRuntime must be \"quickjs\", \"node\", \"bun\", \"deno\" or \"scriptc\", got %q", c.SSR.APIRuntime)
+		return nil, fmt.Errorf("ssr.apiRuntime must be \"quickjs\", \"node\", \"bun\", \"deno\" or \"scriptc\", got %q\n  hint: use one of those values, or remove ssr.apiRuntime for the embedded QuickJS runtime (\"node\" runs routes on the Node API sidecar)", c.SSR.APIRuntime)
 	}
 	if strings.EqualFold(c.SSR.MiddlewareRuntime, "scriptc") {
 		return nil, fmt.Errorf("ssr.middlewareRuntime \"scriptc\" is not supported; only ssr.apiRuntime can be \"scriptc\"")

@@ -2,6 +2,7 @@ package build
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -72,6 +73,7 @@ func scriptcServeProject(t *testing.T, blockerLine string) (*Builder, string) {
 		"src/api/users/[id].ts":               "export function GET(request: Request, { params }: { params: { id: string } }) { return Response.json({ id: params.id }); }",
 		"src/api/blog/[...slug].ts":           "export function GET(request: Request, { params }: { params: { slug: string } }) { return Response.json({ slug: params.slug }); }",
 		"src/api/sse.ts":                      "export function GET() {\n  const enc = new TextEncoder();\n  const stream = new ReadableStream<Uint8Array>({\n    async start(c) {\n      for (let i = 0; i < 3; i++) { c.enqueue(enc.encode('data: ' + i + '\\n\\n')); await new Promise<void>((r) => setTimeout(r, 300)); }\n      c.close();\n    },\n  });\n  return new Response(stream, { headers: { 'content-type': 'text/event-stream' } });\n}",
+		"src/api/abort.ts":                    "let aborted = false;\nexport async function GET(request: Request) {\n  for (let i = 0; i < 100 && !request.signal.aborted; i++) await new Promise<void>((r) => setTimeout(r, 50));\n  if (request.signal.aborted) aborted = true;\n  return Response.json({ aborted });\n}\nexport function POST() { return Response.json({ aborted }); }",
 		"src/api/boom.ts":                     "export function GET(): Response { throw new Error('secret detail'); }",
 		"src/api/blocked.ts":                  "export function GET() {\n  " + blockerLine + "\n  return Response.json({ via: typeof process !== 'undefined' && process.env.KRATE_API_PORT !== undefined ? 'scriptc' : 'other' });\n}",
 		"src/api/ext.ts":                      "import { tag } from \"@fake/ext\";\nexport function GET() { return Response.json({ tag }); }",
@@ -100,7 +102,7 @@ func checkScriptcServe(t *testing.T, b *Builder, root string) {
 	m := readScriptcManifest(t, root)
 	for file, rt := range map[string]string{
 		"ok.js": scriptcRouteScriptc, "users/[id].js": scriptcRouteScriptc, "blog/[...slug].js": scriptcRouteScriptc, "sse.js": scriptcRouteScriptc,
-		"boom.js": scriptcRouteScriptc, "blocked.js": scriptcRouteQuickJS, "ext.js": scriptcRouteNode,
+		"boom.js": scriptcRouteScriptc, "abort.js": scriptcRouteScriptc, "blocked.js": scriptcRouteQuickJS, "ext.js": scriptcRouteNode,
 	} {
 		if m[file].Runtime != rt {
 			t.Fatalf("%s: manifest says %q, want %q", file, m[file].Runtime, rt)
@@ -110,7 +112,7 @@ func checkScriptcServe(t *testing.T, b *Builder, root string) {
 	if err != nil {
 		t.Fatalf("serve: %v\n%s", err, out.String())
 	}
-	if !strings.Contains(out.String(), "scriptc API server (5 routes)") {
+	if !strings.Contains(out.String(), "scriptc API server (6 routes)") {
 		t.Fatalf("serve did not start the scriptc server:\n%s", out.String())
 	}
 	client := &http.Client{Timeout: 30 * time.Second}
@@ -200,6 +202,25 @@ func checkScriptcServe(t *testing.T, b *Builder, root string) {
 		t.Errorf("rest of the stream = %q", rest)
 	}
 
+	// A client that goes away aborts request.signal in the handler.
+	actx, acancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	areq, _ := http.NewRequestWithContext(actx, "GET", base+"/api/abort", nil)
+	if r, err := client.Do(areq); err == nil {
+		r.Body.Close()
+	}
+	acancel()
+	aborted := false
+	for i := 0; i < 60 && !aborted; i++ {
+		_, data := get("POST", "/api/abort", "")
+		aborted = strings.Contains(string(data), `"aborted":true`)
+		if !aborted {
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+	if !aborted {
+		t.Error("request.signal did not abort when the client disconnected")
+	}
+
 	// The server answers only the host: a direct connection has no secret.
 	mm := regexp.MustCompile(`scriptc API server \(\d+ routes\) -> .*http://localhost:(\d+)`).FindStringSubmatch(out.String())
 	if mm == nil {
@@ -239,4 +260,117 @@ func TestScriptcBuildAndServeReal(t *testing.T) {
 	e2eEnv(t)
 	b, root := scriptcServeProject(t, "const f = new Function('return 1'); f();")
 	checkScriptcServe(t, b, root)
+}
+
+// serveWithBrokenExecutable builds with the stand-in scriptc, replaces the
+// compiled server with script (nothing when script is empty: it is removed),
+// serves, and returns what the requests got and what the server logged.
+func serveWithBrokenExecutable(t *testing.T, script string) (statuses map[string]int, took time.Duration, logs string) {
+	t.Helper()
+	e2eEnv(t)
+	if err := nodeStripsTypes(); err != nil {
+		requireE2E(t, "%v", err)
+	}
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("needs a POSIX shell")
+	}
+	fakeScriptcOnPath(t)
+	b, root := scriptcServeProject(t, "const x = 1; // scriptc-blocker")
+	var out safeBuffer
+	SetOutput(&out)
+	t.Cleanup(func() { SetOutput(os.Stdout) })
+	if err := b.BuildAll(); err != nil {
+		t.Fatal(err)
+	}
+	exe := scriptcServerPath(root)
+	// The executable is a hard link of the test binary: replace, never write.
+	if err := os.Remove(exe); err != nil {
+		t.Fatal(err)
+	}
+	if script != "" {
+		if err := os.WriteFile(exe, []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := sidecarStartTimeout
+	sidecarStartTimeout = 1500 * time.Millisecond
+	t.Cleanup(func() { sidecarStartTimeout = old })
+
+	statuses = map[string]int{}
+	logs = captureStderr(t, func() {
+		base, err := startKrateServer(t, root, b.Cfg)
+		if err != nil {
+			t.Errorf("serve: %v", err)
+			return
+		}
+		client := &http.Client{Timeout: 20 * time.Second}
+		start := time.Now()
+		for _, p := range []string{"/api/ok", "/api/users/1", "/api/blocked", "/api/ext", "/api/ok"} {
+			resp, err := client.Get(base + p)
+			if err != nil {
+				t.Errorf("GET %s: %v", p, err)
+				continue
+			}
+			io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+			statuses[p] = resp.StatusCode
+		}
+		took = time.Since(start)
+		time.Sleep(600 * time.Millisecond)
+	})
+	return statuses, took, logs
+}
+
+// The compiled server is gone: serve says so once with a hint, and every
+// route runs on the runtime that can run it.
+func TestScriptcServeMissingExecutableFallsBack(t *testing.T) {
+	statuses, _, logs := serveWithBrokenExecutable(t, "")
+	for p, code := range statuses {
+		if code != 200 {
+			t.Errorf("GET %s = %d, want 200 from the embedded runtime", p, code)
+		}
+	}
+	if !strings.Contains(logs, "is missing") || !strings.Contains(logs, "krate build") {
+		t.Errorf("no hint about the missing executable:\n%s", logs)
+	}
+}
+
+// The compiled server exits at startup: its routes answer 503 at once (never
+// hang), the failure is logged with a hint, the server is restarted, and the
+// other routes keep working.
+func TestScriptcServeCrashingExecutableAnswers503(t *testing.T) {
+	statuses, took, logs := serveWithBrokenExecutable(t, "#!/bin/sh\necho crashing >&2\nexit 3\n")
+	for _, p := range []string{"/api/ok", "/api/users/1"} {
+		if statuses[p] != http.StatusServiceUnavailable {
+			t.Errorf("GET %s = %d, want 503", p, statuses[p])
+		}
+	}
+	for _, p := range []string{"/api/blocked", "/api/ext"} {
+		if statuses[p] != 200 {
+			t.Errorf("GET %s = %d, want 200: other routes must keep working", p, statuses[p])
+		}
+	}
+	if took > 10*time.Second {
+		t.Errorf("the requests took %s", took)
+	}
+	for _, frag := range []string{"scriptc API server exited", "restarting", "answering 503", "hint:"} {
+		if !strings.Contains(logs, frag) {
+			t.Errorf("log lacks %q:\n%s", frag, logs)
+		}
+	}
+}
+
+// The compiled server starts but never listens: requests wait for the start
+// bound and then answer 503.
+func TestScriptcServeHangingExecutableAnswers503(t *testing.T) {
+	statuses, took, logs := serveWithBrokenExecutable(t, "#!/bin/sh\nexec sleep 30\n")
+	if statuses["/api/ok"] != http.StatusServiceUnavailable || statuses["/api/blocked"] != 200 {
+		t.Errorf("statuses = %v", statuses)
+	}
+	if took > 15*time.Second {
+		t.Errorf("the requests took %s", took)
+	}
+	if !strings.Contains(logs, "did not start listening") || !strings.Contains(logs, "hint:") {
+		t.Errorf("log:\n%s", logs)
+	}
 }

@@ -32,6 +32,8 @@ type sidecarReady struct {
 	timeout time.Duration
 	// name is how messages call the sidecar; default "Node API sidecar".
 	name string
+	// hint is added to the logged reason of a failure.
+	hint string
 	// showReason puts the failure reason in the 503 body (dev); production
 	// answers keep it in the server log.
 	showReason bool
@@ -57,6 +59,13 @@ func (s *sidecarReady) slowStartCause() string {
 		return "instrumentation register() still pending, or the sidecar keeps crashing"
 	}
 	return "the sidecar keeps crashing"
+}
+
+func (s *sidecarReady) hintSuffix() string {
+	if s.hint == "" {
+		return ""
+	}
+	return "\n    hint: " + s.hint
 }
 
 func newSidecarReady(timeout time.Duration) *sidecarReady {
@@ -231,7 +240,7 @@ func (s *sidecarReady) unavailable(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	if msg := s.failure(); msg != "" {
 		if s.logged.CompareAndSwap(false, true) {
-			fmt.Fprintf(os.Stderr, "  %s! answering 503 to requests that need the %s: %s%s\n", cYellow, s.label(), msg, cReset)
+			fmt.Fprintf(os.Stderr, "  %s! answering 503 to requests that need the %s: %s%s%s\n", cYellow, s.label(), msg, s.hintSuffix(), cReset)
 		}
 		body := "server unavailable: the " + s.label() + " failed to start (see the server log)"
 		if s.showReason {
@@ -241,7 +250,7 @@ func (s *sidecarReady) unavailable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.logged.CompareAndSwap(false, true) {
-		fmt.Fprintf(os.Stderr, "  %s! %s did not start listening within %s; answering 503 until it does (%s)%s\n", cYellow, s.label(), s.timeout, s.slowStartCause(), cReset)
+		fmt.Fprintf(os.Stderr, "  %s! %s did not start listening within %s; answering 503 until it does (%s)%s%s\n", cYellow, s.label(), s.timeout, s.slowStartCause(), s.hintSuffix(), cReset)
 	}
 	http.Error(w, "server is starting", http.StatusServiceUnavailable)
 }

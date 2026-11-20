@@ -89,7 +89,12 @@ async function handle(req: IncomingMessage, res: ServerResponse, body: Buffer): 
     const name = raw[i].toLowerCase();
     if (name !== 'x-krate-internal' && name !== 'x-krate-route') headers.append(raw[i], raw[i + 1]);
   }
-  const init: RequestInit = { method, headers };
+  // request.signal aborts when the client goes away before the response ends.
+  const ac = new AbortController();
+  res.on('close', () => {
+    if (!res.writableEnded) ac.abort();
+  });
+  const init: RequestInit = { method, headers, signal: ac.signal };
   if (body.length > 0 && method !== 'GET' && method !== 'HEAD') init.body = body;
   const response = await fn(new Request(url.href, init), { params: paramsFor(route.params, url.pathname) });
   res.statusCode = response.status;

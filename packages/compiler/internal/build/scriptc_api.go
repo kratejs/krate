@@ -364,6 +364,17 @@ func (b *Builder) buildScriptcAPI() error {
 			fallback(src, file, scriptcRouteQuickJS, reason, nil)
 			continue
 		}
+		if f := scriptcRouteFinding(b.Root, src); f != nil {
+			rel := b.relToRoot(f.file)
+			msg := "API route " + file + " runs on QuickJS, not scriptc: " + f.what
+			if f.file != src {
+				msg += " (in " + rel + ", imported by " + b.relToRoot(src) + ")"
+			}
+			d := diag.New(rel, f.line, f.col, msg,
+				"keep the route on the default runtime, or move that use out of it; the scriptc server gains these features over time", sourceLineAt(f.file, f.line)).WithCode(diag.CodeScriptcAPIRoute)
+			fallback(src, file, scriptcRouteQuickJS, f.what, &d)
+			continue
+		}
 		candidates = append(candidates, scriptcRoute{file: file, source: src, methods: methods})
 	}
 
@@ -522,4 +533,17 @@ func (b *Builder) relToRoot(p string) string {
 		return filepath.ToSlash(rel)
 	}
 	return filepath.ToSlash(p)
+}
+
+// sourceLineAt returns line (1-based) of file for a diagnostic's caret.
+func sourceLineAt(file string, line int) string {
+	data, err := os.ReadFile(file)
+	if err != nil || line < 1 {
+		return ""
+	}
+	lines := strings.Split(string(data), "\n")
+	if line > len(lines) {
+		return ""
+	}
+	return strings.TrimRight(lines[line-1], "\r")
 }

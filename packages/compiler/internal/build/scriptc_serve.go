@@ -62,6 +62,7 @@ func newScriptcSidecar(exe string, port int, secret string, env []string, budget
 		stopCh: make(chan struct{}),
 	}
 	s.ready.name = "scriptc API server"
+	s.ready.hint = "run `krate build` again, or run " + exe + " by hand to see why it fails; routes that are not compiled by scriptc are not affected"
 	p := httputil.NewSingleHostReverseProxy(target)
 	base := p.Director
 	p.Director = func(r *http.Request) {

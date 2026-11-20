@@ -16,7 +16,8 @@ func TestAPIRuntimeScriptcValidation(t *testing.T) {
 	c := Default()
 	c.SSR.APIRuntime = "scritpc"
 	_, err := c.Validate()
-	if err == nil || !strings.Contains(err.Error(), "scriptc") || !strings.Contains(err.Error(), "scritpc") {
+	if err == nil || !strings.Contains(err.Error(), "scriptc") || !strings.Contains(err.Error(), "scritpc") ||
+		!strings.Contains(err.Error(), "hint:") || !strings.Contains(err.Error(), `"quickjs", "node", "bun", "deno"`) {
 		t.Errorf("a misspelled runtime must name the choices and the value, got %v", err)
 	}
 }

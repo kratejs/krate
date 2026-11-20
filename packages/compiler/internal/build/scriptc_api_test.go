@@ -200,7 +200,9 @@ func readLines(t *testing.T, path string) []string {
 	return strings.Split(strings.TrimSpace(string(data)), "\n")
 }
 
-// captureStderr runs f and returns what it wrote to stderr.
+// captureStderr runs f and returns what it wrote to stderr. Child processes
+// the server starts inherit the pipe and keep it open, so it does not wait for
+// the end of the stream.
 func captureStderr(t *testing.T, f func()) string {
 	t.Helper()
 	old := os.Stderr
@@ -209,13 +211,15 @@ func captureStderr(t *testing.T, f func()) string {
 		t.Fatal(err)
 	}
 	os.Stderr = w
-	done := make(chan string)
-	go func() { b, _ := io.ReadAll(r); done <- string(b) }()
+	var buf safeBuffer
+	go func() { _, _ = io.Copy(&buf, r) }()
 	func() {
-		defer func() { os.Stderr = old; w.Close() }()
+		defer func() { os.Stderr = old }()
 		f()
 	}()
-	return <-done
+	time.Sleep(150 * time.Millisecond)
+	_ = w.Close()
+	return buf.String()
 }
 
 // Routes scriptc accepts are compiled together; each other route stays on
