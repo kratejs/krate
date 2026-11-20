@@ -2796,6 +2796,7 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 	if hub != nil {
 		restartCh = hub.RestartRequested()
 	}
+	signals := 0 // SIGINT/SIGTERM received
 	select {
 	case err := <-serveErr:
 		// The listener failed on its own (not a shutdown).
@@ -2827,17 +2828,24 @@ func serve(stopCtx context.Context, root string, cfg *config.Config, hub *DevHub
 		stopSidecars()
 		return ErrDevRestart
 	case <-sigCh:
+		signals = 1
 	case <-stopCtx.Done():
 	}
 
 	printf("\n%sShutting down...%s\n", cGray, cReset)
 	shutDown := make(chan struct{})
 	defer close(shutDown)
+	// The second signal forces an exit. A shutdown the context started has
+	// had none yet: its first signal is the one that starts a graceful
+	// shutdown, which is already under way.
 	go func() {
-		select {
-		case <-sigCh:
-		case <-shutDown:
-			return
+		for signals < 2 {
+			select {
+			case <-sigCh:
+				signals++
+			case <-shutDown:
+				return
+			}
 		}
 		fmt.Fprintf(os.Stderr, "  %s! second signal, exiting immediately%s\n", cYellow, cReset)
 		os.Exit(130)
