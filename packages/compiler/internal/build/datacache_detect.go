@@ -320,13 +320,16 @@ func warnAt(file, source string, pos ast.Pos, code diag.Code, msg, hint string) 
 	return d
 }
 
-// printWarningsOnce prints warnings not printed earlier in this build (pages
-// expanded per generateStaticParams entry would otherwise repeat them).
+// printWarningsOnce prints warnings, each once.
 func printWarningsOnce(w io.Writer, ds []diag.Diagnostic) {
-	printTreeWarnings(w, sharedWarnings.fresh(ds))
+	// A caller without a Builder has no build to dedupe across.
+	var once warningSet
+	printTreeWarnings(w, once.fresh(ds))
 }
 
-// printWarningsOnce is printWarningsOnce for the builds of b.
+// printWarningsOnce prints warnings not printed earlier in this build of b
+// (pages expanded per generateStaticParams entry would otherwise repeat
+// them).
 func (b *Builder) printWarningsOnce(ds []diag.Diagnostic) {
 	printTreeWarnings(b.stderr(), b.warned.fresh(ds))
 }

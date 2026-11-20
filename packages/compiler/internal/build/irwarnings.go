@@ -56,9 +56,6 @@ func (s *warningSet) reset() {
 	s.mu.Unlock()
 }
 
-// sharedWarnings dedupes the warnings of callers that have no Builder.
-var sharedWarnings warningSet
-
 // printModuleWarnings prints the coded warnings attached to bundled modules
 // (React rewrite diagnostics), each once per build.
 func (b *Builder) printModuleWarnings(mods []*bundler.Module) {
