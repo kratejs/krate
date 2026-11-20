@@ -246,18 +246,34 @@ func sourceLine(root, rel string, line int) string {
 // document on stdout; any other failure is an error. dir is the working
 // directory (the project root, so node_modules resolve).
 func ScriptcCoverage(dir, entry, failOn string, o Origin) ([]diag.Diagnostic, error) {
+	_, ds, err := ScriptcCoverageReport(dir, entry, failOn, o)
+	return ds, err
+}
+
+// ScriptcCoverageReport is ScriptcCoverage that also returns scriptc's report,
+// whose Success is false when the fail-on level was hit.
+func ScriptcCoverageReport(dir, entry, failOn string, o Origin) (*ScriptcReport, []diag.Diagnostic, error) {
 	if err := ScriptcToolchainForCoverage(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	out, runErr := run(dir, nil, "scriptc", ScriptcCoverageArgs(entry, failOn)...)
-	ds, err := ScriptcDiagnostics(jsonPart(out), o)
+	raw := jsonPart(out)
+	rep, err := ParseScriptcReport(raw)
 	if err != nil {
 		if runErr != nil {
-			return nil, releaseFailed("scriptc coverage", out, runErr)
+			return nil, nil, releaseFailed("scriptc coverage", out, runErr)
 		}
-		return nil, err
+		return nil, nil, err
 	}
-	return ds, nil
+	ds, err := ScriptcDiagnostics(raw, o)
+	return rep, ds, err
+}
+
+// ScriptcBuild compiles entry into the release executable exe for target.
+// The working directory is the entry's directory, where its package.json is.
+// A build scriptc rejects returns a *ScriptcError.
+func ScriptcBuild(target Target, entry, exe string) error {
+	return buildScriptc(target, ReleaseInput{Entry: entry}, exe)
 }
 
 // ScriptcToolchainForCoverage checks only that scriptc is installed: coverage
